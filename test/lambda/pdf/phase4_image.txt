@@ -1,0 +1,1 @@
+{ img_count: 1, img_xml: "<g transform="matrix(100 0 0 50 72 720)"><image href="img:42" x="0" y="0" width="1" height="1" preserveAspectRatio="none" transform="matrix(1 0 0 -1 0 1)"></image></g>", form_count: 1, form_xml: "<g transform="matrix(100 0 0 50 72 720)" data-pdf-form="img:99">form-xobject</g>", bad_count: 0, kinds: { im: "image", fm: "form", bad: true}}

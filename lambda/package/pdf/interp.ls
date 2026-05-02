@@ -22,6 +22,7 @@ import font:    .font
 import text:    .text
 import path:    .path
 import color:   .color
+import image:   .image
 
 // ============================================================
 // State
@@ -212,6 +213,20 @@ pub pn render_page(pdf, page, ops, page_h) {
         }
         else if (_is_color_op(opr)) {
             st = _apply_color(st, opr, args)
+        }
+        else if (opr == "Do") {
+            // Image / Form XObject placement. We pass the live ctm so
+            // the image element scales correctly. Emitted SVG sits inside
+            // the page-level y-flip group alongside vector paths.
+            let imgs = image.apply_do(pdf, page, st.ctm, args)
+            if (len(imgs) > 0) {
+                var k = 0
+                let me = len(imgs)
+                while (k < me) {
+                    paths = paths ++ [imgs[k]]
+                    k = k + 1
+                }
+            }
         }
         else if (path.handles(opr)) {
             // Path construction / painting / line-state operator.
