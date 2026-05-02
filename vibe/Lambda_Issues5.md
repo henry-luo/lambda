@@ -393,6 +393,12 @@ let xform = ("matrix(1 0 0 1 " ++ util.fmt_num(x)
 - Or at least raise a syntax error at the `++` with no LHS, instead of
   silently producing an error value that propagates as data.
 
+**Confirmed in Phase 3**: same bug applies to multi-line `or` chains.
+A `pub fn handles(opr) { (a == "x") or (a == "y")\n  or (a == "z") }`
+parses as two statements; the trailing `or (...)` becomes an
+"undefined variable 'or'" runtime error inside MIR. Wrapping the entire
+`or` chain in an outer `(...)` fixes it.
+
 ---
 
 ## 19. `pn` parameter with `: int` annotation breaks `string(p + 1)`

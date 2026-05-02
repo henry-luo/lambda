@@ -45,20 +45,30 @@ fn _label_layer(rect, page_index) {
 // Build label group as a (possibly empty) list. Done in `fn` because
 // `let x = if (c) [...] else [...]` returns null inside `pn`
 // (vibe/Lambda_Issues5.md #15).
-fn _label_group_list(rect, page_index, opts) {
+fn _label_children(rect, page_index, opts) {
     let suppress = (opts and (opts.show_label == false))
     if (suppress) { [] }
+    else { [_label_layer(rect, page_index)] }
+}
+
+// Build the y-flip wrapper holding all PDF-space content (paths + label).
+// Returns a (possibly empty) list of SVG elements (length 0 or 1).
+fn _flip_group_list(rect, page_index, opts, paths) {
+    let label = _label_children(rect, page_index, opts)
+    let kids = paths ++ label
+    if (len(kids) == 0) { [] }
     else {
         let flip_xform = coords.y_flip_transform(rect.y + rect.h)
-        [svg.group(flip_xform, [_label_layer(rect, page_index)])]
+        [svg.group(flip_xform, kids)]
     }
 }
 
-// Tokenize + interpret a page's content stream. Empty content yields [].
+// Tokenize + interpret a page's content stream. Empty content yields
+// { texts: [], paths: [] }.
 pn _content_elements(pdf, page, page_h) {
     let bytes = resolve.page_content_bytes(pdf, page)
     if (bytes == null) {
-        return []
+        return { texts: [], paths: [] }
     }
     let ops = stream.parse_content_stream(bytes)
     return interp.render_page(pdf, page, ops, page_h)
@@ -77,10 +87,10 @@ pn render_page(pdf, page, page_index, opts) {
     let view_box = coords.view_box_attr(page)
     let bg = _resolve_bg(opts)
 
-    let elements = _content_elements(pdf, page, rect.h)
-    let label_group = _label_group_list(rect, page_index, opts)
+    let r = _content_elements(pdf, page, rect.h)
+    let flip_group = _flip_group_list(rect, page_index, opts, r.paths)
 
-    let children = [svg.page_background(rect, bg)] ++ label_group ++ elements
+    let children = [svg.page_background(rect, bg)] ++ flip_group ++ r.texts
 
     return svg.svg_root(view_box, rect.w, rect.h, children)
 }

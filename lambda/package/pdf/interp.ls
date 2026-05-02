@@ -1,17 +1,15 @@
 // pdf/interp.ls — page-level content-stream interpreter
 //
-// Phase 2 scope:
-//   - Drive the operator stream from stream.parse_content_stream.
-//   - Pre-resolve fonts referenced by Tf via font.resolve_font so that
-//     text.set_font_info can be called with a ready descriptor.
-//   - Maintain a graphics-state stack for q/Q (pushes/restores the full
-//     interp state, including the embedded text state).
-//   - Track CTM via cm (kept for completeness; text emission still uses
-//     PDF-native baseline coords; multiplication into emitted points is
-//     a Phase 3 concern — most generated PDFs use identity CTM around
-//     simple BT/ET blocks).
-//   - Delegate every BT/ET/Tm/Td/TD/T*/TL/Tj/TJ/'/" to text.apply_op.
-//   - Stub all path/painting/color/line operators (Phase 3).
+// Phase 2: tokenize → text rendering with q/Q/cm graphics-state stack.
+// Phase 3: path construction (m/l/c/v/y/re/h), painting (S/s/f/F/f*/B/B*/b/b*/n),
+//          color state (rg/RG/g/G/k/K), line state (w/J/j/M/d).
+//
+// Output:
+//   render_page returns { texts: [...], paths: [...] }
+//   - paths are in PDF user space; the caller must wrap them in the page-
+//     level y-flip group so they read upright.
+//   - texts are pre-flipped into SVG space by text.ls and sit outside the
+//     y-flip group.
 //
 // We use `fn` for every helper and confine `var`/loop mutation to the
 // outermost driver `pn`. Only the driver maintains `var` state because
@@ -22,6 +20,8 @@ import util:    .util
 import resolve: .resolve
 import font:    .font
 import text:    .text
+import path:    .path
+import color:   .color
 
 // ============================================================
 // State
@@ -30,26 +30,29 @@ import text:    .text
 // State record:
 //   { ctm:    [a b c d e f]  current transformation matrix
 //     text:   <text.new_state record>
+//     path:   <path.new_state record>     // includes color + line state
 //     fonts:  list of {name, info} pairs (pre-resolved)
 //   }
-//
-// The graphics-state stack (q/Q) is a list of these records held by the
-// driver; every q pushes the current state, every Q pops the top.
 
 fn new_state(fonts_resolved) {
     {
         ctm:   util.IDENTITY,
-        text:  text.new_state(null),   // text.ls fonts param unused; we resolve here
+        text:  text.new_state(null),
+        path:  path.new_state(),
         fonts: fonts_resolved
     }
 }
 
 fn _with_text(st, t) {
-    { ctm: st.ctm, text: t, fonts: st.fonts }
+    { ctm: st.ctm, text: t, path: st.path, fonts: st.fonts }
+}
+
+fn _with_path(st, p) {
+    { ctm: st.ctm, text: st.text, path: p, fonts: st.fonts }
 }
 
 fn _with_ctm(st, m) {
-    { ctm: m, text: st.text, fonts: st.fonts }
+    { ctm: m, text: st.text, path: st.path, fonts: st.fonts }
 }
 
 // ============================================================
@@ -62,8 +65,7 @@ fn _lookup_resolved(fonts, name) {
 }
 
 // ============================================================
-// Operand helper (mirror of text._num — kept local to avoid coupling
-// to text.ls private helpers)
+// Operand helper
 // ============================================================
 
 fn _num(op) {
@@ -96,6 +98,32 @@ fn _op_Tf(st, ops) {
     let fsize = if (n >= 2) _num(ops[1]) else st.text.font_size
     let info  = _lookup_resolved(st.fonts, fname)
     _with_text(st, text.set_font_info(st.text, fname, fsize, info))
+}
+
+// ============================================================
+// Color operators — update the path-state color slots
+// ============================================================
+
+fn _op_rg(st, ops) { _with_path(st, path.set_fill_color(st.path,   color.from_rg_ops(ops))) }
+fn _op_RG(st, ops) { _with_path(st, path.set_stroke_color(st.path, color.from_rg_ops(ops))) }
+fn _op_g(st, ops)  { _with_path(st, path.set_fill_color(st.path,   color.from_g_ops(ops))) }
+fn _op_G(st, ops)  { _with_path(st, path.set_stroke_color(st.path, color.from_g_ops(ops))) }
+fn _op_k(st, ops)  { _with_path(st, path.set_fill_color(st.path,   color.from_k_ops(ops))) }
+fn _op_K(st, ops)  { _with_path(st, path.set_stroke_color(st.path, color.from_k_ops(ops))) }
+
+fn _is_color_op(opr) {
+    ((opr == "rg") or (opr == "RG") or (opr == "g") or (opr == "G")
+        or (opr == "k") or (opr == "K"))
+}
+
+fn _apply_color(st, opr, ops) {
+    if      (opr == "rg") { _op_rg(st, ops) }
+    else if (opr == "RG") { _op_RG(st, ops) }
+    else if (opr == "g")  { _op_g(st, ops) }
+    else if (opr == "G")  { _op_G(st, ops) }
+    else if (opr == "k")  { _op_k(st, ops) }
+    else if (opr == "K")  { _op_K(st, ops) }
+    else                  { st }
 }
 
 // ============================================================
@@ -150,14 +178,16 @@ pn _resolve_fonts(pdf, page, ops) {
 // Driver
 // ============================================================
 //
-// Walks the operator stream once. Returns the list of emitted SVG
-// elements in render order.
+// Walks the operator stream once. Returns:
+//   { texts: [...SVG-space text elements...],
+//     paths: [...PDF-space path elements...] }
 
 pub pn render_page(pdf, page, ops, page_h) {
     let fonts = _resolve_fonts(pdf, page, ops)
     var st = new_state(fonts)
     var stack = []
-    var out = []
+    var texts = []
+    var paths = []
     var i = 0
     let n = len(ops)
     while (i < n) {
@@ -171,7 +201,6 @@ pub pn render_page(pdf, page, ops, page_h) {
             let m = len(stack)
             if (m >= 1) {
                 st = stack[m - 1]
-                // pop the last element (no list slice; rebuild via comprehension)
                 stack = (for (k, v in stack where k < (m - 1)) v)
             }
         }
@@ -181,22 +210,37 @@ pub pn render_page(pdf, page, ops, page_h) {
         else if (opr == "Tf") {
             st = _op_Tf(st, args)
         }
+        else if (_is_color_op(opr)) {
+            st = _apply_color(st, opr, args)
+        }
+        else if (path.handles(opr)) {
+            // Path construction / painting / line-state operator.
+            let pr = path.apply_op(st.path, opr, args)
+            st = _with_path(st, pr.state)
+            if (len(pr.emit) > 0) {
+                var k = 0
+                let me = len(pr.emit)
+                while (k < me) {
+                    paths = paths ++ [pr.emit[k]]
+                    k = k + 1
+                }
+            }
+        }
         else {
-            // Delegate every remaining text operator to text.apply_op.
-            // Non-text operators (rg/RG/g/G/w/m/l/c/h/S/f/B/...) hit the
-            // catch-all in text.apply_op which returns { state: st, emit: null }.
+            // Delegate every remaining operator to text.apply_op.
+            // Unrecognized operators hit the catch-all there.
             let r = text.apply_op(st.text, opr, args, page_h)
             st = _with_text(st, r.state)
             if (r.emit != null) {
                 var k = 0
                 let me = len(r.emit)
                 while (k < me) {
-                    out = out ++ [r.emit[k]]
+                    texts = texts ++ [r.emit[k]]
                     k = k + 1
                 }
             }
         }
         i = i + 1
     }
-    return out
+    return { texts: texts, paths: paths }
 }
