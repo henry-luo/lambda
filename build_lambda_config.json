@@ -378,6 +378,7 @@
                 "lambda/input/source_tracker.cpp",
                 "lambda/input/input-context.cpp",
                 "lambda/input/html_entities.cpp",
+                "lambda/input/pdf_decompress.cpp",
                 "lambda/input/css/css_tokenizer.cpp",
                 "lambda/input/css/css_properties.cpp",
                 "lambda/input/css/css_value_parser.cpp",
@@ -2166,6 +2167,20 @@
                         ],
                         "binary": "test_input_rdb_gtest.exe",
                         "icon": "🗄️"
+                    },
+                    {
+                        "source": "test_input_pdf_gtest.cpp",
+                        "name": "Input PDF Parser Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_input_pdf_gtest.exe",
+                        "icon": "📕"
                     },
                     {
                         "source": "test_yaml_suite_gtest.cpp",

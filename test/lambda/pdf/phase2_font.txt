@@ -1,0 +1,1 @@
+{ helvetica: { family: "Helvetica, Arial, sans-serif", weight: "normal", style: "normal"}, times_bold: { family: "Times, 'Times New Roman', serif", weight: "bold", style: "normal"}, courier_bold: { family: "Courier, 'Courier New', monospace", weight: "bold", style: "italic"}, decode_hex: "Hello", decode_lit: "Hi (\051)"}

@@ -1,5 +1,6 @@
 // pdf parser implementation
 #include "input.hpp"
+#include "input-parsers.h"
 #include "../mark_builder.hpp"
 #include "input-context.hpp"
 #include "source_tracker.hpp"
@@ -1302,6 +1303,10 @@ void parse_pdf(Input* input, const char* pdf_string, size_t pdf_length) {
     }
 
     input->root = {.item = (uint64_t)pdf_info};
+
+    // Post-process: flatten page tree, parse ToUnicode CMaps per font.
+    // Best-effort — failures are logged and the parser's output is preserved.
+    pdf_postprocess(input);
 
     if (ctx.hasErrors()) {
         // errors occurred during parsing
