@@ -135,20 +135,65 @@ pub pn from_basefont(name: string) {
 // Public resolver
 // ============================================================
 
+// Helper: extract BaseFont string with `let x = if` lifted out of pn
+// (vibe/Lambda_Issues5.md #15 — let-bound `if` returns null in pn).
+fn _basefont_or(name: string, dict) {
+    if (dict.BaseFont) string(dict.BaseFont) else name
+}
+
+fn _to_unicode_or_null(dict) {
+    if (dict.to_unicode) dict.to_unicode else null
+}
+
+// Strip a leading "XXXXXX+" subset prefix from a BaseFont name. Done as
+// `fn` so it can be called from `resolve_font` (which avoids nested pn
+// dispatch — see the note above resolve_font).
+fn _strip_subset(name: string) {
+    if (len(name) > 7 and name[6] == "+") {
+        let parts = (for (k in 7 to (len(name) - 1)) name[k])
+        parts | join("")
+    }
+    else { name }
+}
+
+// Build the descriptor record. Done in `fn` so map-spread + field access
+// behave deterministically; calling pn helpers (from_basefont) from
+// inside `resolve_font` proved to silently lose the weight/style fields
+// when chained through let-bindings.
+fn _make_descriptor(name, info, to_uni) {
+    { name: name, family: info.family, weight: info.weight,
+      style: info.style, to_unicode: to_uni }
+}
+
+fn _unknown_descriptor(name) {
+    { name: name, family: _UNKNOWN.family, weight: _UNKNOWN.weight,
+      style: _UNKNOWN.style, to_unicode: null }
+}
+
 // Look up the font referenced by `name` on `page`'s resource dict and
 // produce a normalised descriptor. Returns _UNKNOWN with no to_unicode
 // when the font isn't declared.
+// Pick the descriptor: prefer Standard-14 (fn-only path); fall back to
+// the heuristic only when needed. Lifted to `fn` because `let x = if`
+// returns null inside `pn` (vibe/Lambda_Issues5.md #15).
+fn _pick_info(s14_info, fallback_info) {
+    if (s14_info != _UNKNOWN) s14_info else fallback_info
+}
+
 pub pn resolve_font(pdf, page, name: string) {
     let dict = resolve.page_font(pdf, page, name)
-    if (dict == null) {
-        return { name: name, family: _UNKNOWN.family, weight: _UNKNOWN.weight,
-                 style: _UNKNOWN.style, to_unicode: null }
-    }
-    let basefont = if (dict.BaseFont) string(dict.BaseFont) else name
-    let info = from_basefont(basefont)
-    let to_uni = if (dict.to_unicode) dict.to_unicode else null
-    return { name: name, family: info.family, weight: info.weight,
-             style: info.style, to_unicode: to_uni }
+    if (dict == null) { return _unknown_descriptor(name) }
+    let basefont = _basefont_or(name, dict)
+    // NOTE: calling from_basefont (pn) from within resolve_font (pn)
+    // returned a stale/default record (Lambda nested-pn corruption);
+    // workaround: try standard14 (fn) first, only fall back to the
+    // pn heuristic when needed.
+    let stripped = _strip_subset(basefont)
+    let s14 = standard14(stripped)
+    let fb = from_basefont(basefont)
+    let info = _pick_info(s14, fb)
+    let to_uni = _to_unicode_or_null(dict)
+    return _make_descriptor(name, info, to_uni)
 }
 
 // ============================================================

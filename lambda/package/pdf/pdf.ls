@@ -34,8 +34,11 @@ import interp:  .interp
 //     siblings of the flipped group, NOT inside it.
 
 fn _label_layer(rect, page_index) {
+    // Render the label directly in SVG space so it isn't affected by
+    // the page-level y-flip (which would otherwise render it upside
+    // down). x/y measured from the SVG origin (top-left).
     let label_x = rect.x + 12.0
-    let label_y = rect.y + rect.h - 18.0
+    let label_y = rect.y + 18.0
     let label_xform = ("matrix(1 0 0 1 " ++ util.fmt_num(label_x)
                        ++ " " ++ util.fmt_num(label_y) ++ ")")
     let txt = "Page " ++ string(page_index + 1)
@@ -51,15 +54,14 @@ fn _label_children(rect, page_index, opts) {
     else { [_label_layer(rect, page_index)] }
 }
 
-// Build the y-flip wrapper holding all PDF-space content (paths + label).
-// Returns a (possibly empty) list of SVG elements (length 0 or 1).
-fn _flip_group_list(rect, page_index, opts, paths) {
-    let label = _label_children(rect, page_index, opts)
-    let kids = paths ++ label
-    if (len(kids) == 0) { [] }
+// Build the y-flip wrapper holding only PDF-space content (paths).
+// The page label sits OUTSIDE the flip group (in SVG space) to avoid
+// being mirrored by the y-flip matrix.
+fn _flip_group_list(rect, paths) {
+    if (len(paths) == 0) { [] }
     else {
         let flip_xform = coords.y_flip_transform(rect.y + rect.h)
-        [svg.group(flip_xform, kids)]
+        [svg.group(flip_xform, paths)]
     }
 }
 
@@ -88,9 +90,10 @@ pn render_page(pdf, page, page_index, opts) {
     let bg = _resolve_bg(opts)
 
     let r = _content_elements(pdf, page, rect.h)
-    let flip_group = _flip_group_list(rect, page_index, opts, r.paths)
+    let flip_group = _flip_group_list(rect, r.paths)
+    let label_kids = _label_children(rect, page_index, opts)
 
-    let children = [svg.page_background(rect, bg)] ++ flip_group ++ r.texts
+    let children = [svg.page_background(rect, bg)] ++ flip_group ++ r.texts ++ label_kids
 
     return svg.svg_root(view_box, rect.w, rect.h, children)
 }

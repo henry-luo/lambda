@@ -105,11 +105,23 @@ fn _op_Tf(st, ops) {
 // Color operators — update the path-state color slots
 // ============================================================
 
-fn _op_rg(st, ops) { _with_path(st, path.set_fill_color(st.path,   color.from_rg_ops(ops))) }
+fn _op_rg(st, ops) {
+    let c = color.from_rg_ops(ops)
+    let st1 = _with_path(st, path.set_fill_color(st.path, c))
+    _with_text(st1, text.set_fill(st1.text, c))
+}
 fn _op_RG(st, ops) { _with_path(st, path.set_stroke_color(st.path, color.from_rg_ops(ops))) }
-fn _op_g(st, ops)  { _with_path(st, path.set_fill_color(st.path,   color.from_g_ops(ops))) }
+fn _op_g(st, ops)  {
+    let c = color.from_g_ops(ops)
+    let st1 = _with_path(st, path.set_fill_color(st.path, c))
+    _with_text(st1, text.set_fill(st1.text, c))
+}
 fn _op_G(st, ops)  { _with_path(st, path.set_stroke_color(st.path, color.from_g_ops(ops))) }
-fn _op_k(st, ops)  { _with_path(st, path.set_fill_color(st.path,   color.from_k_ops(ops))) }
+fn _op_k(st, ops)  {
+    let c = color.from_k_ops(ops)
+    let st1 = _with_path(st, path.set_fill_color(st.path, c))
+    _with_text(st1, text.set_fill(st1.text, c))
+}
 fn _op_K(st, ops)  { _with_path(st, path.set_stroke_color(st.path, color.from_k_ops(ops))) }
 
 fn _is_color_op(opr) {

@@ -71,8 +71,16 @@ pub fn new_state(fonts) {
         word_space: 0.0,
         hor_scale:  100.0,
         rise:       0.0,
+        fill:       "rgb(0,0,0)",
         fonts:      fonts
     }
+}
+
+// Public: update the text fill color. Called from interp on rg/g/k
+// (PDF non-stroking color ops apply to text rendering as well as
+// painting). Uses map spread to avoid touching every `_with` callsite.
+pub fn set_fill(st, color_str) {
+    { *: st, fill: color_str }
 }
 
 fn _with(st, tm, tlm, name, size, info, leading, in_text) {
@@ -88,6 +96,7 @@ fn _with(st, tm, tlm, name, size, info, leading, in_text) {
         word_space: st.word_space,
         hor_scale:  st.hor_scale,
         rise:       st.rise,
+        fill:       st.fill,
         fonts:      st.fonts
     }
 }
@@ -141,13 +150,15 @@ fn _emit_text(st, page_h, content) {
         let family = if (fi) fi.family else "sans-serif"
         let weight = if (fi) fi.weight else "normal"
         let style  = if (fi) fi.style  else "normal"
+        let fill   = if (st.fill) st.fill else "rgb(0,0,0)"
         let x = st.tm[4]
         let y = float(page_h) - st.tm[5]
         <text x: util.fmt_num(x), y: util.fmt_num(y),
               'font-family': family,
               'font-size':   util.fmt_num(st.font_size),
               'font-weight': weight,
-              'font-style':  style;
+              'font-style':  style,
+              fill:          fill;
             content
         >
     }

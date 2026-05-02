@@ -435,6 +435,109 @@ just a typed parameter and an arithmetic expression.
 
 ---
 
+## 20. `pn` calling `pn` returns a stale/default record (nested-pn corruption)
+
+**Severity: HIGH** — silent: returned record looks valid but every
+field is the type's default value.
+
+```lambda
+// font.ls
+pub pn from_basefont(basefont: string) {
+    let s14 = standard14(basefont)              // fn returning a record
+    if (s14 != _UNKNOWN) { return s14 }
+    // …heuristic path returning a record with weight/style filled in…
+}
+
+pub pn resolve_font(pdf, page, name: string) {
+    let dict     = resolve.page_font(pdf, page, name)
+    let basefont = _basefont_or(name, dict)
+    let info     = from_basefont(basefont)      // pn → pn call
+    return _make_descriptor(name, info, _to_unicode_or_null(dict))
+}
+```
+
+Standalone `from_basefont("Helvetica-Bold")` returns
+`{ family: "…", weight: "bold", style: "normal" }`. When invoked from
+within `resolve_font` (also `pn`), the `info` binding receives
+`{ family: "…", weight: "normal", style: "normal" }` — the bold/italic
+information is silently lost. The same call in a probe `pn main()` that
+does not nest two `pn` calls works correctly.
+
+Tested workarounds that did **not** help:
+- Returning the record through more `fn` helpers (`_make_descriptor`,
+  `_pick_info`).
+- Eagerly destructuring `let w = info.weight; …` before any further use.
+- Renaming the binding, splitting the call onto its own statement.
+
+**Workaround that worked**: avoid the `pn → pn` call. Call the `fn`
+variant (`standard14`) directly from `resolve_font` and only fall back
+to the `pn` heuristic when needed:
+
+```lambda
+pub pn resolve_font(pdf, page, name) {
+    …
+    let stripped = _strip_subset(basefont)     // fn
+    let s14      = standard14(stripped)        // fn
+    let fb       = from_basefont(basefont)     // pn (still called, but result
+                                               //      no longer the only path)
+    let info     = _pick_info(s14, fb)         // fn helper: if (s != _UNKNOWN) s else fb
+    …
+}
+```
+
+This is the same family of bug as #2 / #15 — `pn` value-flow is unsafe.
+Combined with #15 (`let x = if …` is null in `pn`) the safe pattern is:
+**push every value-producing branch into a `fn` and have `pn` only
+sequence side effects.**
+
+**Asks**:
+- Either fix `pn → pn` value return (this should be table stakes), or
+- Hard-fail at compile time on `let r = some_pn(…)` inside another `pn`
+  with a dedicated diagnostic ("pn return values are not safely
+  consumable from another pn; route through a fn").
+
+---
+
+## 21. Map "spread + override" constructors silently drop fields not listed
+
+**Severity: MEDIUM** — silent: constructed record is missing fields you
+forgot to copy.
+
+```lambda
+fn _with(st, tm, tlm, name, size, info, leading, in_text) {
+    {
+        in_text:    in_text,
+        tm:         tm,
+        font_name:  name,
+        font_size:  size,
+        // …only the fields explicitly listed survive…
+    }
+}
+```
+
+The PDF text state had a `fill` field added later (for the non-stroking
+colour). Every subsequent `Tf` (set-font) op called `_with` to build a
+new state record, and `_with` did not list `fill` — so the new record
+silently dropped the colour that `rg` had set just before. Result: text
+rendered black even when the surrounding code looked correct.
+
+This is "user error" in one sense, but the Lambda map syntax has a
+spread form `{*: st, key: value}` precisely for this case. It's easy to
+forget to use it, and there is no warning when a record-typed value
+loses a field across a constructor call.
+
+**Workarounds**:
+- Always prefer `{*: base, key: override, …}` over hand-listing fields.
+- Or define the record as a typed shape so the type system catches the
+  missing field.
+
+**Asks**:
+- A warning when a `fn`/`pn` returns a map literal that has a strictly
+  smaller field set than a same-named map flowing through the function
+  on its inputs would catch this whole class of bug.
+
+---
+
 ## Summary of recurring themes
 
 1. **Silent semantic differences between `pn` and `fn`** are the single
