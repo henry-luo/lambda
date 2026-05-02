@@ -1614,20 +1614,53 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             block->form->option_count = option_count;
             block->form->selected_index = (selected_idx >= 0) ? selected_idx : (option_count > 0 ? 0 : -1);
         }
+        // Read CSS `appearance` property — affects intrinsic width and UA-rendered chrome.
+        // `appearance: none` removes the native dropdown arrow so author CSS can supply its own.
+        {
+            CssDeclaration* ap_decl = dom_element_get_specified_value(block, CSS_PROPERTY_APPEARANCE);
+            if (ap_decl && ap_decl->value && ap_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
+                ap_decl->value->data.keyword == CSS_VALUE_NONE) {
+                block->form->appearance_none = 1;
+            } else {
+                block->form->appearance_none = 0;
+            }
+        }
         block->display.outer = CSS_VALUE_INLINE_BLOCK;
+        block->display.inner = RDT_DISPLAY_REPLACED;
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
         block->blk->box_sizing = CSS_VALUE_BORDER_BOX;
-        block->form->intrinsic_width = FormDefaults::SELECT_WIDTH;
-        block->form->intrinsic_height = FormDefaults::SELECT_HEIGHT;
-        // Don't set given_width — let CSS cascade or calc_select_size set it
-        // Set given_height so layout uses intrinsic height (border-box); will be updated by calc_select_size for listbox
-        lycon->block.given_height = block->form->intrinsic_height;
-        block->blk->given_height = block->form->intrinsic_height;
-        // Default border
+        // Set intrinsic_width to UA default only on first resolve. Later passes
+        // (e.g. intrinsic sizing in flex/grid) measure option text and write a
+        // larger value here; we must not clobber it.
+        if (block->form->intrinsic_width <= 0) {
+            block->form->intrinsic_width = FormDefaults::SELECT_WIDTH;
+        }
+        // Content-area height (border-box minus default border). User CSS
+        // padding/border get added by calc_select_size to produce the final
+        // border-box height. Don't set given_height here — let
+        // layout_form_control compute it after CSS cascade applies padding/border.
+        block->form->intrinsic_height = FormDefaults::SELECT_HEIGHT - 2.0f;
+        // Default border (UA): 1px solid #767676, 2px border-radius (Chrome-like)
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
         if (!block->bound->border) { block->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
         block->bound->border->width.top = block->bound->border->width.right =
             block->bound->border->width.bottom = block->bound->border->width.left = 1;
+        block->bound->border->top_style = block->bound->border->right_style =
+            block->bound->border->bottom_style = block->bound->border->left_style = CSS_VALUE_SOLID;
+        block->bound->border->top_color = block->bound->border->right_color =
+            block->bound->border->bottom_color = block->bound->border->left_color = (Color){ .r=118, .g=118, .b=118, .a=255 };
+        // Border-radius 2px on all four corners (Chrome UA)
+        block->bound->border->radius.top_left = block->bound->border->radius.top_right =
+            block->bound->border->radius.bottom_left = block->bound->border->radius.bottom_right = 2.0f;
+        block->bound->border->radius.top_left_y = block->bound->border->radius.top_right_y =
+            block->bound->border->radius.bottom_left_y = block->bound->border->radius.bottom_right_y = 2.0f;
+        // UA background: white normally, light grey when disabled (Chrome ~rgb(235,235,228))
+        if (!block->bound->background) { block->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp)); }
+        if (block->form->disabled) {
+            block->bound->background->color = (Color){ .r=235, .g=235, .b=228, .a=255 };
+        } else {
+            block->bound->background->color = (Color){ .r=255, .g=255, .b=255, .a=255 };
+        }
         break;
     }
     case HTM_TAG_TEXTAREA: {

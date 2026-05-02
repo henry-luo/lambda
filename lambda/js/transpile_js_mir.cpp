@@ -37,6 +37,8 @@
 #include <alloca.h>
 #endif
 
+extern "C" void log_mem_stage(const char* stage);  // defined in radiant/window.cpp; no-op when VIEW_MEM_STAGES unset
+
 // External reference to Lambda runtime context pointer (defined in mir.c)
 extern "C" Context* _lambda_rt;
 extern "C" {
@@ -28170,6 +28172,7 @@ static const JsPreambleState* g_jm_preamble_in = NULL;  // input: pre-seed from 
 
 static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, const char* filename) {
     log_debug("js-mir: starting direct MIR transpilation for '%s'", filename ? filename : "<string>");
+    log_mem_stage("js-core: enter");
 
     // Inject __filename and __dirname for Node.js CommonJS compatibility.
     // Only for file-based scripts (not eval/REPL), and only if the source
@@ -28241,6 +28244,7 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
         js_transpiler_destroy(tp);
         return (Item){.item = ITEM_ERROR};
     }
+    log_mem_stage("js-core: ts_parsed");
 
     TSNode root = ts_tree_root_node(tp->tree);
 
@@ -28251,6 +28255,7 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
         js_transpiler_destroy(tp);
         return (Item){.item = ITEM_ERROR};
     }
+    log_mem_stage("js-core: ast_built");
 
     // Run early error detection (static semantic validation)
     int early_errors = js_check_early_errors(tp, js_ast);
@@ -28307,6 +28312,7 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
     // After precompile, all modules with >=2 imports are already loaded — this handles
     // the fallback case (0-1 imports, Windows, or any modules missed by precompile).
     jm_load_imports(runtime, js_ast, filename);
+    log_mem_stage("js-core: imports_loaded");
 
     MIR_context_t ctx = jit_init(g_js_mir_optimize_level);
     if (!ctx) {
@@ -28359,6 +28365,7 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
 
     // Transpile AST to MIR
     transpile_js_mir_ast(mt, js_ast);
+    log_mem_stage("js-core: ast_to_mir");
 
 #ifndef NDEBUG
     if (getenv("JS_MIR_DUMP")) {
@@ -28451,6 +28458,7 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
         }
     }
     MIR_link(ctx, g_mir_interp_mode ? MIR_set_interp_interface : MIR_set_gen_interface, import_resolver);
+    log_mem_stage("js-core: mir_linked");
     // Restore opt level if we changed it
     if (effective_opt != g_js_mir_optimize_level) {
         MIR_gen_set_optimize_level(ctx, g_js_mir_optimize_level);
@@ -28535,6 +28543,7 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
         result = js_main((Context*)context);
     }
     log_debug("js-mir: JIT execution returned (type=%d)", get_type_id(result));
+    log_mem_stage("js-core: js_main_done");
 
     // v14: drain the event loop while JIT module is still alive
     // (MIR_finish below destroys compiled code, so timers must fire here)

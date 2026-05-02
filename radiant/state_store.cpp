@@ -2773,9 +2773,10 @@ void clipboard_copy_text(const char* text) {
     if (!text) return;
     clipboard_store_write_text(text);
     // Best-effort GLFW mirror so existing interactive flows keep working
-    // in builds where a GLFW window is present.
+    // in builds where a GLFW window is present. Skip in headless mode to
+    // avoid cross-process races on the shared OS pasteboard during tests.
     extern UiContext ui_context;
-    if (ui_context.window) {
+    if (ui_context.window && !ui_context.headless) {
         glfwSetClipboardString(ui_context.window, text);
     }
     log_info("Copied %zu bytes to clipboard", strlen(text));
@@ -2783,7 +2784,7 @@ void clipboard_copy_text(const char* text) {
 
 const char* clipboard_get_text() {
     extern UiContext ui_context;
-    if (ui_context.window) {
+    if (ui_context.window && !ui_context.headless) {
         const char* s = glfwGetClipboardString(ui_context.window);
         if (s) return s;
     }
@@ -2797,7 +2798,7 @@ void clipboard_copy_html(const char* html) {
     clipboard_store_write_mime("text/html", html);
     clipboard_store_write_mime("text/plain", html);
     extern UiContext ui_context;
-    if (ui_context.window) {
+    if (ui_context.window && !ui_context.headless) {
         glfwSetClipboardString(ui_context.window, html);
     }
     log_debug("clipboard_copy_html: wrote text/html (%zu bytes) + text/plain mirror", strlen(html));

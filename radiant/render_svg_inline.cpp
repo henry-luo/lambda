@@ -2601,6 +2601,26 @@ void render_svg_to_vec(RdtVector* vec, Element* svg_element, float viewport_widt
     if (!viewbox_attr) viewbox_attr = get_svg_attr(svg_element, "viewbox");
     SvgViewBox vb = parse_svg_viewbox(viewbox_attr);
 
+    // implicit viewBox: when an SVG has no viewBox but has explicit width/height
+    // attributes, browsers treat the intrinsic dims as an implicit viewBox so
+    // that content scales to fit the rendered viewport (this matches the way
+    // browsers paint <img src=svg> at its CSS box size, and avoids leaving the
+    // canvas mostly empty when SVG intrinsic size differs from the viewport).
+    if (!vb.has_viewbox && viewport_width > 0 && viewport_height > 0) {
+        const char* w_attr = get_svg_attr(svg_element, "width");
+        const char* h_attr = get_svg_attr(svg_element, "height");
+        if (w_attr && *w_attr && h_attr && *h_attr) {
+            float intrinsic_w = parse_svg_length(w_attr, 0.0f);
+            float intrinsic_h = parse_svg_length(h_attr, 0.0f);
+            if (intrinsic_w > 0 && intrinsic_h > 0 &&
+                (intrinsic_w != viewport_width || intrinsic_h != viewport_height)) {
+                vb.min_x = 0;  vb.min_y = 0;
+                vb.width = intrinsic_w;  vb.height = intrinsic_h;
+                vb.has_viewbox = true;
+            }
+        }
+    }
+
     // initial viewport in user-coordinate units. With a viewBox this is the
     // viewBox extents; without one, user coords == viewport pixels.
     ctx.current_viewport_w = (vb.has_viewbox && vb.width > 0) ? vb.width : viewport_width;

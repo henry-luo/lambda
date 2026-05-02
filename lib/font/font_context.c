@@ -10,6 +10,7 @@
 
 #include "font_internal.h"
 #include <time.h>
+#include <sys/mman.h>
 #include "../memtrack.h"
 
 // ============================================================================
@@ -558,7 +559,8 @@ void font_handle_release(FontHandle* handle) {
                     const FontFileDataEntry* removed = (const FontFileDataEntry*)hashmap_delete(
                         handle->ctx->file_data_cache, &search);
                     if (removed) {
-                        mem_free(removed->data);
+                        if (removed->is_mmap) { munmap(removed->data, removed->data_len); }
+                        else { mem_free(removed->data); }
                         mem_free(removed->path);
                     }
                 }

@@ -356,9 +356,9 @@ typedef enum {
 
 typedef struct ImageSurface {
     ImageFormat format;
-    int width;             // the intrinsic width of the surface/image
+    int width;             // the intrinsic width of the surface/image (used for layout/intrinsic sizing)
     int height;            // the intrinsic height of the surface/image
-    int pitch;             // no. of bytes for rows of pixels
+    int pitch;             // no. of bytes per row of the actual decoded pixel buffer
     // image pixels, 32-bits per pixel, RGBA format
     // pack order is [R] [G] [B] [A], high bit -> low bit
     void *pixels;          // A pointer to the pixels of the surface, the pixels are writeable if non-NULL
@@ -371,12 +371,17 @@ typedef struct ImageSurface {
     unsigned char* source_data;  // in-memory data for lazy decode of HTTP images (NULL if file-based)
     size_t source_data_len;      // length of source_data
     int tile_offset_y;   // tiled PNG rendering: physical-pixel Y start of this tile (0 = full-page surface)
+    // Decoded buffer dimensions (for raster images decoded at a smaller scale than intrinsic).
+    // If decoded_width > 0, these reflect the actual pixel buffer dims; pitch matches decoded_width*4.
+    // Otherwise the buffer matches width/height/pitch above.
+    int decoded_width;
+    int decoded_height;
 } ImageSurface;
 
 extern ImageSurface* image_surface_create(int pixel_width, int pixel_height);
 extern ImageSurface* image_surface_create_from(int pixel_width, int pixel_height, void* pixels);
 extern void image_surface_destroy(ImageSurface* img_surface);
-extern void image_surface_ensure_decoded(ImageSurface* img);
+extern void image_surface_ensure_decoded(ImageSurface* img, int target_w, int target_h);
 extern void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color, Bound* clip,
                               struct ClipShape** clip_shapes = nullptr, int clip_depth = 0);
 extern void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, Rect* dst_rect, Bound* clip, ScaleMode scale_mode,
@@ -494,6 +499,16 @@ typedef struct {
     float first_line_max = -1;  // width before first forced break (-1 = no forced break)
     float last_line_max = -1;   // width after last forced break (-1 = no forced break)
     bool has_forced_break = false;
+    // Replaced form controls populate min_content/max_content from
+    // FormControlProp::intrinsic_width which is already a border-box value.
+    // When this flag is set, the common pad/border addition pass at the bottom
+    // of measure_element_intrinsic_widths() must be skipped to avoid double counting.
+    bool replaced_includes_pad_border = false;
+    // Asymmetric variant: replaced element's min-content represents the natural
+    // (text-only) width — heavy author CSS padding should NOT be added to it for
+    // shrink-to-fit purposes (matches Chrome behavior for appearance:none <select>).
+    // max-content still gets pad+border added so it represents the full border-box.
+    bool replaced_min_excludes_pad_border = false;
 } IntrinsicSizes;
 
 // FlexItemProp definition (needed by flex.hpp)
@@ -1419,6 +1434,9 @@ typedef struct UiContext {
     MouseState mouse_state; // current mouse state
     struct BrowsingSession* browsing_session;  // web browsing session with history
     struct WebViewManager* webview_mgr;  // native web view manager (NULL until first <webview> element)
+    bool headless;          // true if running headless (no visible window). When true, clipboard
+                            // operations use the in-process ClipboardStore only and do NOT touch
+                            // the OS pasteboard via GLFW (avoids cross-process races in tests).
 } UiContext;
 
 extern void* load_styled_font(UiContext* uicon, const char* font_name, FontProp* font_style);

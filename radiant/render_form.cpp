@@ -230,12 +230,36 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
     float w = block->width * s;
     float h = block->height * s;
 
-    // Background (white)
-    Color bg = make_color(255, 255, 255);
-    fill_rect(rdcon, x, y, w, h, bg);
+    // Background (white) - only when CSS doesn't specify a background.
+    // When the author sets background-color (or background image), render_block_view
+    // has already painted it, so do not overdraw with white here.
+    // Also: clip the white fill to the inside of any CSS border, otherwise the
+    // fill stomps the border (which render_bound painted just before us).
+    bool has_css_background = block->bound && block->bound->background;
+    bool has_css_border = block->bound && block->bound->border &&
+        (block->bound->border->width.top > 0 || block->bound->border->width.right > 0 ||
+         block->bound->border->width.bottom > 0 || block->bound->border->width.left > 0);
+    if (!has_css_background) {
+        Color bg = make_color(255, 255, 255);
+        float bx = x, by = y, bw_w = w, bh_h = h;
+        if (has_css_border) {
+            float bl = block->bound->border->width.left * s;
+            float br = block->bound->border->width.right * s;
+            float bt = block->bound->border->width.top * s;
+            float bb = block->bound->border->width.bottom * s;
+            bx += bl; by += bt;
+            bw_w -= bl + br; bh_h -= bt + bb;
+        }
+        fill_rect(rdcon, bx, by, bw_w, bh_h, bg);
+    }
 
-    // 3D inset border (text inputs have inset appearance)
-    draw_3d_border(rdcon, x, y, w, h, true, 1 * s);
+    // 3D inset border (text inputs have inset appearance) - only when the author
+    // didn't specify a border. If a border is set in CSS, render_block_view has
+    // already drawn it (and respects border-color/border-radius); avoid stomping
+    // it with the default 3D chrome.
+    if (!has_css_border) {
+        draw_3d_border(rdcon, x, y, w, h, true, 1 * s);
+    }
 
     // Source value vs displayed value. F4: for password fields we substitute
     // every codepoint with U+25CF so the existing measurement and rendering
@@ -478,21 +502,26 @@ void render_button(RenderContext* rdcon, ViewBlock* block, FormControlProp* form
     float w = block->width * s;
     float h = block->height * s;
 
-    // Check if button has CSS-specified background (from author stylesheet).
+    // Check if button has CSS-specified background or border (from author stylesheet).
     // The background prop is only allocated when author CSS sets it, so its
     // existence alone means the author specified a background (including transparent).
     bool has_css_background = block->bound && block->bound->background;
+    bool has_css_border = block->bound && block->bound->border &&
+        (block->bound->border->width.top > 0 || block->bound->border->width.right > 0 ||
+         block->bound->border->width.bottom > 0 || block->bound->border->width.left > 0);
 
     if (!has_css_background) {
         // No CSS background - render default button appearance
         // Background (light gray)
         Color bg = form->disabled ? make_color(200, 200, 200) : make_color(224, 224, 224);
         fill_rect(rdcon, x, y, w, h, bg);
-
-        // 3D outset border (raised button appearance)
+    }
+    if (!has_css_background && !has_css_border) {
+        // 3D outset border (raised button appearance) - skip when author CSS
+        // already specifies a border (rendered by render_block_view).
         draw_3d_border(rdcon, x, y, w, h, false, 1 * s);
     }
-    // If CSS background is present, it's already rendered by render_block_view
+    // If CSS background/border is present, it's already rendered by render_block_view
 
     // For void elements like <input type="submit">, render value text directly
     // (child content rendering only works for <button>text</button> style elements)
@@ -568,51 +597,106 @@ void render_select(RenderContext* rdcon, ViewBlock* block, FormControlProp* form
     float w = block->width * s;
     float h = block->height * s;
 
-    // Background
-    Color bg = make_color(255, 255, 255);
-    fill_rect(rdcon, x, y, w, h, bg);
+    // Background and border are painted by render_block_view using the UA
+    // defaults set in resolve_htm_style.cpp (1px solid #767676, 2px radius,
+    // white/disabled-grey bg). Only fall back to manual drawing if those
+    // weren't set for some reason (e.g., author CSS removed them).
+    bool has_css_background = block->bound && block->bound->background;
+    bool has_css_border = block->bound && block->bound->border &&
+        (block->bound->border->width.top > 0 || block->bound->border->width.right > 0 ||
+         block->bound->border->width.bottom > 0 || block->bound->border->width.left > 0);
 
-    // Border
-    Color border_color = make_color(118, 118, 118);
     float bw = 1 * s;
-    fill_rect(rdcon, x, y, w, bw, border_color);
-    fill_rect(rdcon, x, y + h - bw, w, bw, border_color);
-    fill_rect(rdcon, x, y, bw, h, border_color);
-    fill_rect(rdcon, x + w - bw, y, bw, h, border_color);
+    if (!has_css_background) {
+        Color bg = form->disabled ? make_color(235, 235, 228) : make_color(255, 255, 255);
+        fill_rect(rdcon, x, y, w, h, bg);
+    }
+    if (!has_css_border) {
+        Color border_color = make_color(118, 118, 118);
+        fill_rect(rdcon, x, y, w, bw, border_color);
+        fill_rect(rdcon, x, y + h - bw, w, bw, border_color);
+        fill_rect(rdcon, x, y, bw, h, border_color);
+        fill_rect(rdcon, x + w - bw, y, bw, h, border_color);
+    } else {
+        // Use actual CSS border width for arrow area inset below
+        bw = block->bound->border->width.right * s;
+    }
 
     // Dropdown arrow area
-    float arrow_width = FormDefaults::SELECT_ARROW_WIDTH * s;
-    Color arrow_bg = make_color(240, 240, 240);
-    fill_rect(rdcon, x + w - arrow_width, y + bw, arrow_width - bw, h - 2 * bw, arrow_bg);
+    // CSS `appearance: none` suppresses the native dropdown chrome — skip
+    // the gray arrow well and triangle so author CSS (background, ::after,
+    // padding) controls the appearance.
+    if (!form->appearance_none) {
+        float arrow_width = FormDefaults::SELECT_ARROW_WIDTH * s;
+        Color arrow_bg = make_color(240, 240, 240);
+        fill_rect(rdcon, x + w - arrow_width, y + bw, arrow_width - bw, h - 2 * bw, arrow_bg);
 
-    // Arrow (simple triangle pointing down)
-    Color arrow_color = make_color(0, 0, 0);
-    float arrow_x = x + w - arrow_width / 2;
-    float arrow_y = y + h / 2;
-    float arrow_size = 4 * s;
-    // Approximate triangle with small rectangles
-    for (int i = 0; i < (int)arrow_size; i++) {
-        float line_width = (arrow_size - i) * 2;
-        fill_rect(rdcon, arrow_x - line_width / 2, arrow_y - arrow_size / 2 + i, line_width, 1 * s, arrow_color);
+        // Arrow (simple triangle pointing down)
+        Color arrow_color = make_color(0, 0, 0);
+        float arrow_x = x + w - arrow_width / 2;
+        float arrow_y = y + h / 2;
+        float arrow_size = 4 * s;
+        // Approximate triangle with small rectangles
+        for (int i = 0; i < (int)arrow_size; i++) {  // INT_CAST_OK: triangle row count
+            float line_width = (arrow_size - i) * 2;
+            fill_rect(rdcon, arrow_x - line_width / 2, arrow_y - arrow_size / 2 + i, line_width, 1 * s, arrow_color);
+        }
     }
 
     // Render selected option text
     if (block->font && form->selected_index >= 0) {
         const char* selected_text = get_option_text_at_index(block, form->selected_index);
         if (selected_text) {
-            // Calculate text position with padding
-            float text_padding = 6 * s;
-            float text_x = x + bw + text_padding;
+            // Use actual CSS padding so text starts after the author-specified
+            // left padding and is reserved on the right for any UA arrow well
+            // or author chevron (e.g. ::after sibling).
+            float pad_l, pad_r, bw_l, bw_r;
+            if (block->bound) {
+                pad_l = block->bound->padding.left * s;
+                pad_r = block->bound->padding.right * s;
+            } else {
+                pad_l = pad_r = FormDefaults::TEXT_PADDING_H * s;
+            }
+            if (block->bound && block->bound->border) {
+                bw_l = block->bound->border->width.left * s;
+                bw_r = block->bound->border->width.right * s;
+            } else {
+                bw_l = bw_r = bw;
+            }
+            float text_x = x + bw_l + pad_l;
+            float content_right = x + w - bw_r - pad_r;
+            float content_w = content_right - text_x;
 
             // Calculate text top position (vertically centered)
             float font_height_scaled = block->font->font_height * s;
             float text_top = y + (h - font_height_scaled) / 2;
 
-            // Text color (black)
-            Color text_color = make_color(0, 0, 0);
+            // Text color: prefer CSS-resolved color (from `color` property),
+            // fallback to dark grey when disabled, black otherwise. Matches
+            // Chrome UA default behavior.
+            Color text_color;
+            if (form->disabled) {
+                text_color = make_color(109, 109, 109);
+            } else if (block->in_line) {
+                text_color.r = block->in_line->color.r;
+                text_color.g = block->in_line->color.g;
+                text_color.b = block->in_line->color.b;
+                text_color.a = block->in_line->color.a;
+            } else {
+                text_color = make_color(0, 0, 0);
+            }
 
-            // Render the selected text
-            render_simple_string(rdcon, selected_text, text_x, text_top, block->font, text_color);
+            // Clip text to the select's content box so it doesn't overflow into
+            // the right-padding area where the author chevron / UA arrow lives.
+            if (content_w > 0) {
+                Bound saved_clip = rdcon->block.clip;
+                if (text_x > rdcon->block.clip.left) rdcon->block.clip.left = text_x;
+                if (content_right < rdcon->block.clip.right) rdcon->block.clip.right = content_right;
+                render_simple_string(rdcon, selected_text, text_x, text_top, block->font, text_color);
+                rdcon->block.clip = saved_clip;
+            } else {
+                render_simple_string(rdcon, selected_text, text_x, text_top, block->font, text_color);
+            }
         }
     }
 
@@ -882,12 +966,29 @@ void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
     float w = block->width * s;
     float h = block->height * s;
 
-    // Background
-    Color bg = make_color(255, 255, 255);
-    fill_rect(rdcon, x, y, w, h, bg);
-
-    // Border (inset style)
-    draw_3d_border(rdcon, x, y, w, h, true, 1 * s);
+    // Background and border are painted by render_bound when the author set them
+    // (respecting border-radius / border-color). Only fall back to the default
+    // white background + 3D inset border when the author didn't.
+    bool has_css_background = block->bound && block->bound->background;
+    bool has_css_border = block->bound && block->bound->border &&
+        (block->bound->border->width.top > 0 || block->bound->border->width.right > 0 ||
+         block->bound->border->width.bottom > 0 || block->bound->border->width.left > 0);
+    if (!has_css_background) {
+        Color bg = make_color(255, 255, 255);
+        float bx = x, by = y, bw_w = w, bh_h = h;
+        if (has_css_border) {
+            float bl = block->bound->border->width.left * s;
+            float br = block->bound->border->width.right * s;
+            float bt = block->bound->border->width.top * s;
+            float bb = block->bound->border->width.bottom * s;
+            bx += bl; by += bt;
+            bw_w -= bl + br; bh_h -= bt + bb;
+        }
+        fill_rect(rdcon, bx, by, bw_w, bh_h, bg);
+    }
+    if (!has_css_border) {
+        draw_3d_border(rdcon, x, y, w, h, true, 1 * s);
+    }
 
     // Determine text content or placeholder. Only enter placeholder mode
     // when an actual placeholder string is present — otherwise an empty

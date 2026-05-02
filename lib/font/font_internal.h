@@ -322,9 +322,10 @@ typedef struct FontCacheKey {
 
 typedef struct FontFileDataEntry {
     char*       path;           // malloc-allocated canonical path
-    uint8_t*    data;           // malloc-allocated raw font data (TTF/SFNT)
+    uint8_t*    data;           // raw font data (TTF/SFNT); mmap'd or mem_alloc'd
     size_t      data_len;
     int         ref_count;      // number of active FT_Faces using this data
+    bool        is_mmap;        // true if data was mmap()'d (must munmap), false if mem_alloc'd
 } FontFileDataEntry;
 
 // ============================================================================

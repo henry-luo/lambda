@@ -26,7 +26,7 @@
     {"type": "wait", "ms": 300},
 
     {"type": "log", "message": "--- Click + to add item ---"},
-    {"type": "click", "target": {"selector": ".add-icon"}},
+    {"type": "click", "target": {"selector": ".add-icon", "index": 1}, "comment": "Use todo-list add-icon (index 0 is the file-panel add-icon which would create a new file)"},
     {"type": "wait", "ms": 300},
 
     {"type": "log", "message": "--- Type new item text ---"},
@@ -47,12 +47,6 @@
 
     {"type": "log", "message": "--- Delete a todo item ---"},
     {"type": "click", "target": {"selector": ".delete-btn"}},
-    {"type": "wait", "ms": 300},
-
-    {"type": "log", "message": "--- Cleanup: delete the accidentally created file ---"},
-    {"type": "click", "target": {"selector": ".file-delete", "index": 0}},
-    {"type": "wait", "ms": 300},
-    {"type": "click", "target": {"selector": ".confirm-yes"}},
     {"type": "wait", "ms": 300},
 
     {"type": "log", "message": "=== Todo2 Basic Test Complete ==="}

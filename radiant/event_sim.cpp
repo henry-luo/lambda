@@ -1419,11 +1419,15 @@ EventSimContext* event_sim_load(const char* json_file) {
         log_info("event_sim: viewport %dx%d", ctx->viewport_width, ctx->viewport_height);
     }
 
-    // Parse optional default_timeout (ms) for auto-waiting assertions
+    // Parse optional default_timeout (ms) for auto-waiting assertions.
+    // Default 500ms ensures assertions reliably auto-wait for the prior input
+    // event to propagate, even under heavy parallel CPU load (e.g. when the
+    // gtest runner spawns many lambda.exe processes concurrently).
     ctx->default_timeout = root_map.get("default_timeout").asInt32();
-    if (ctx->default_timeout > 0) {
-        log_info("event_sim: default_timeout %dms", ctx->default_timeout);
+    if (ctx->default_timeout <= 0) {
+        ctx->default_timeout = 2000;
     }
+    log_info("event_sim: default_timeout %dms", ctx->default_timeout);
 
     // Parse each event
     int count = (int)events_arr.length();
@@ -2042,12 +2046,19 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
         }
 
         case SIM_EVENT_TYPE: {
-            // Click target first to focus it
+            // Click target first to focus it — but skip the click if the target
+            // is already focused, otherwise the click would collapse any existing
+            // text selection (e.g. from a preceding tripleclick).
             if (ev->target_selector || ev->target_text) {
-                int x, y;
-                if (resolve_target(ev, uicon->document, &x, &y)) {
-                    sim_mouse_button(uicon, x, y, 0, 0, true);
-                    sim_mouse_button(uicon, x, y, 0, 0, false);
+                View* target_elem = resolve_target_element(ev, uicon->document);
+                bool already_focused = target_elem && target_elem->is_element() &&
+                    dom_element_has_pseudo_state((DomElement*)target_elem, PSEUDO_STATE_FOCUS);
+                if (!already_focused) {
+                    int x, y;
+                    if (resolve_target(ev, uicon->document, &x, &y)) {
+                        sim_mouse_button(uicon, x, y, 0, 0, true);
+                        sim_mouse_button(uicon, x, y, 0, 0, false);
+                    }
                 }
             }
             // If clear_first, send Cmd+A then Delete

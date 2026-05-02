@@ -17,7 +17,10 @@
 
 #include <stdio.h>
 #include <limits.h>
-
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
 // ============================================================================
 // Fixed size selection (for bitmap/emoji fonts) — unified from 4 duplicates
 // ============================================================================
@@ -332,7 +335,11 @@ static int file_data_compare(const void* a, const void* b, void* udata) {
 static void file_data_free(void* item) {
     FontFileDataEntry* e = (FontFileDataEntry*)item;
     if (e) {
-        if (e->data) { mem_free(e->data); e->data = NULL; }
+        if (e->data) {
+            if (e->is_mmap) { munmap(e->data, e->data_len); }
+            else { mem_free(e->data); }
+            e->data = NULL;
+        }
         if (e->path) { mem_free(e->path); e->path = NULL; }
     }
 }
@@ -362,18 +369,22 @@ static bool file_data_cache_lookup(FontContext* ctx, const char* path,
     return false;
 }
 
-// store font file data in cache (data is malloc-allocated, takes ownership)
+// store font file data in cache (data is malloc-allocated or mmap'd, takes ownership)
 static void file_data_cache_insert(FontContext* ctx, const char* path,
-                                    uint8_t* data, size_t len) {
+                                    uint8_t* data, size_t len, bool is_mmap) {
     struct hashmap* cache = ensure_file_data_cache(ctx);
     if (!cache) return;
     char* dup_path = mem_strdup(path, MEM_CAT_FONT);  // raw strdup: freed by file_data_free/raw free
-    FontFileDataEntry entry = {.path = dup_path, .data = data, .data_len = len, .ref_count = 1};
+    FontFileDataEntry entry = {.path = dup_path, .data = data, .data_len = len,
+                                .ref_count = 1, .is_mmap = is_mmap};
     FontFileDataEntry* old = (FontFileDataEntry*)hashmap_set(cache, &entry);
     if (old) {
         // replaced an existing entry — free old data (but NOT our new entry's data).
         // hashmap_set returns a copy of the replaced entry.
-        if (old->data != data) { mem_free(old->data); }
+        if (old->data != data) {
+            if (old->is_mmap) { munmap(old->data, old->data_len); }
+            else { mem_free(old->data); }
+        }
         if (old->path != dup_path) { mem_free(old->path); }
     }
 }
@@ -484,7 +495,7 @@ FontHandle* font_load_face_internal(FontContext* ctx, const char* path,
         }
 
         // cache decompressed SFNT data for reuse at different sizes
-        file_data_cache_insert(ctx, path, (uint8_t*)sfnt_data, sfnt_len);
+        file_data_cache_insert(ctx, path, (uint8_t*)sfnt_data, sfnt_len, false);
 
         // use cached data directly — avoid a second copy
 #ifdef LAMBDA_HAS_FREETYPE
@@ -541,27 +552,48 @@ FontHandle* font_load_face_internal(FontContext* ctx, const char* path,
             return handle;
         }
 
-        fp = fopen(path, "rb");
-        if (!fp) {
-            log_error("font_loader: cannot reopen '%s'", path);
+        // mmap the font file (read-only, private) instead of fread'ing the whole
+        // thing into the heap. Many system fonts are huge (e.g. Apple Color
+        // Emoji.ttc = 188 MB) and we typically touch only a small fraction of
+        // pages — mmap lets the kernel demand-page and reclaim under pressure.
+        // Fall back to fread on mmap failure.
+        int fd = open(path, O_RDONLY | O_CLOEXEC);
+        if (fd < 0) {
+            log_error("font_loader: cannot open '%s'", path);
             return NULL;
         }
-        fseek(fp, 0, SEEK_END);
-        long ttf_size_long = ftell(fp);
-        fseek(fp, 0, SEEK_SET);
-        if (ttf_size_long <= 0) { fclose(fp); return NULL; }
-        size_t ttf_size = (size_t)ttf_size_long;
-        uint8_t* ttf_buf = (uint8_t*)mem_alloc(ttf_size, MEM_CAT_FONT);
-        if (!ttf_buf) { fclose(fp); return NULL; }
-        size_t ttf_read = fread(ttf_buf, 1, ttf_size, fp);
-        fclose(fp);
-        if (ttf_read != ttf_size) {
-            log_error("font_loader: failed to read '%s'", path);
+        struct stat st;
+        if (fstat(fd, &st) != 0 || st.st_size <= 0) {
+            close(fd);
+            log_error("font_loader: fstat failed for '%s'", path);
             return NULL;
+        }
+        size_t ttf_size = (size_t)st.st_size;
+        uint8_t* ttf_buf = (uint8_t*)mmap(NULL, ttf_size, PROT_READ, MAP_PRIVATE, fd, 0);
+        bool ttf_is_mmap = true;
+        if (ttf_buf == MAP_FAILED) {
+            // mmap failed — fall back to read into heap
+            ttf_buf = (uint8_t*)mem_alloc(ttf_size, MEM_CAT_FONT);
+            if (!ttf_buf) { close(fd); return NULL; }
+            ssize_t total = 0;
+            while ((size_t)total < ttf_size) {
+                ssize_t r = read(fd, ttf_buf + total, ttf_size - (size_t)total);
+                if (r <= 0) break;
+                total += r;
+            }
+            close(fd);
+            if ((size_t)total != ttf_size) {
+                mem_free(ttf_buf);
+                log_error("font_loader: failed to read '%s'", path);
+                return NULL;
+            }
+            ttf_is_mmap = false;
+        } else {
+            close(fd);  // safe to close after mmap
         }
 
         // cache the raw file data for reuse at different sizes
-        file_data_cache_insert(ctx, path, ttf_buf, ttf_size);
+        file_data_cache_insert(ctx, path, ttf_buf, ttf_size, ttf_is_mmap);
 
 #ifdef LAMBDA_HAS_FREETYPE
         FT_Face face = NULL;

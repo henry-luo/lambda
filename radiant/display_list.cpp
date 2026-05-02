@@ -427,6 +427,40 @@ void dl_shadow_clip_restore(DisplayList* dl, int exclude_type, const float* excl
     item->shadow_clip_restore.restore_inside = restore_inside;
 }
 
+void dl_outer_shadow(DisplayList* dl,
+                     float shadow_x, float shadow_y, float shadow_w, float shadow_h,
+                     float sr_tl, float sr_tr, float sr_br, float sr_bl,
+                     Color color, float blur_radius,
+                     int exclude_type, const float* exclude_params,
+                     int clip_type, const float* clip_params) {
+    DisplayItem* item = dl_alloc_item(dl);
+    item->op = DL_OUTER_SHADOW;
+    // bounds = blur region (used for tile culling)
+    float pad = blur_radius < 0 ? 0 : blur_radius;
+    item->bounds[0] = shadow_x - pad;
+    item->bounds[1] = shadow_y - pad;
+    item->bounds[2] = shadow_w + pad * 2;
+    item->bounds[3] = shadow_h + pad * 2;
+    DlOuterShadow* o = &item->outer_shadow;
+    o->shadow_x = shadow_x; o->shadow_y = shadow_y;
+    o->shadow_w = shadow_w; o->shadow_h = shadow_h;
+    o->sr_tl = sr_tl; o->sr_tr = sr_tr; o->sr_br = sr_br; o->sr_bl = sr_bl;
+    o->color = color;
+    o->blur_radius = blur_radius;
+    o->exclude_type = exclude_type;
+    if (exclude_type && exclude_params) {
+        memcpy(o->exclude_params, exclude_params, 8 * sizeof(float));
+    } else {
+        memset(o->exclude_params, 0, 8 * sizeof(float));
+    }
+    o->clip_type = clip_type;
+    if (clip_type && clip_params) {
+        memcpy(o->clip_params, clip_params, 8 * sizeof(float));
+    } else {
+        memset(o->clip_params, 0, 8 * sizeof(float));
+    }
+}
+
 void dl_video_placeholder(DisplayList* dl, void* video,
                           float dst_x, float dst_y, float dst_w, float dst_h,
                           int object_fit, const Bound* clip) {
@@ -977,6 +1011,18 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
                 }
             }
             shadow_clip_saved = nullptr;
+            break;
+        }
+
+        case DL_OUTER_SHADOW: {
+            DlOuterShadow* o = &item->outer_shadow;
+            render_outer_shadow_blur_composite(
+                scratch, surface,
+                o->shadow_x, o->shadow_y, o->shadow_w, o->shadow_h,
+                o->sr_tl, o->sr_tr, o->sr_br, o->sr_bl,
+                o->color, o->blur_radius,
+                o->exclude_type, o->exclude_params,
+                o->clip_type, o->clip_params);
             break;
         }
 

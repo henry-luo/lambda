@@ -1371,6 +1371,24 @@ void event_context_cleanup(EventContext* evcon) {
 // ============================================================================
 
 /**
+ * Recursively clear specified_style and styles_resolved flag on every element
+ * in the subtree rooted at `node`. Used before re-cascading the document so
+ * that declarations from previously matching pseudo-class rules (e.g. :hover)
+ * are removed when those rules no longer match.
+ */
+static void clear_cascaded_styles_recursive(DomNode* node) {
+    if (!node) return;
+    if (node->is_element()) {
+        DomElement* e = (DomElement*)node;
+        dom_element_clear(e);
+        e->styles_resolved = false;
+        for (DomNode* c = e->first_child; c; c = c->next_sibling) {
+            clear_cascaded_styles_recursive(c);
+        }
+    }
+}
+
+/**
  * Helper to update element's pseudo_state bitmask along with state store
  * Also schedules reflow if the pseudo-state change may affect layout
  */
@@ -1389,19 +1407,34 @@ static void sync_pseudo_state(View* view, uint32_t pseudo_flag, bool set) {
     // If state actually changed, schedule potential reflow
     if (element->pseudo_state != old_state && element->doc && element->doc->state) {
         RadiantState* state = (RadiantState*)element->doc->state;
+        DomDocument* doc = element->doc;
 
-        // Pseudo-states that can affect layout (need reflow, not just repaint)
-        // :hover and :active only trigger repaint to avoid expensive full relayout
-        // on every mouse move/click. These are typically paint-only effects
-        // (background-color, opacity, box-shadow, cursor, transform).
-        bool affects_layout = (pseudo_flag == PSEUDO_STATE_FOCUS ||
-                               pseudo_flag == PSEUDO_STATE_CHECKED ||
-                               pseudo_flag == PSEUDO_STATE_DISABLED);
+        // Pseudo-state changes affect which CSS rules match (e.g. `.btn:hover`).
+        // Re-apply the cascade so the element's `specified_style` AVL tree picks
+        // up the matching :hover/:active/:focus rules; otherwise resolve_css_styles
+        // replays the pre-state declarations and the visual never updates.
+        // We re-cascade the entire document because pseudo-class rules on an
+        // ancestor (e.g. `.parent:hover .child`) can affect descendants.
+        Pool* pool = doc->pool;
+        CssEngine* css_engine = (CssEngine*)doc->cached_css_engine;
+        if (pool && css_engine && doc->root) {
+            // Clear previously cascaded declarations on every element. Without this,
+            // declarations applied while :hover matched (with higher specificity)
+            // would remain in `specified_style` after the pointer leaves and the
+            // base styles would never be restored.
+            clear_cascaded_styles_recursive((DomNode*)doc->root);
 
-        if (affects_layout) {
-            // Schedule subtree reflow (element and descendants may change)
-            reflow_schedule(state, view, REFLOW_SUBTREE, CHANGE_PSEUDO_STATE);
+            SelectorMatcher* matcher = selector_matcher_create(pool);
+            for (int i = 0; i < doc->stylesheet_count; i++) {
+                if (doc->stylesheets[i]) {
+                    apply_stylesheet_to_dom_tree_fast(doc->root, doc->stylesheets[i],
+                                                      matcher, pool, css_engine);
+                }
+            }
+            apply_inline_styles_to_tree(doc->root, doc->html_root, pool);
         }
+
+        reflow_schedule(state, view, REFLOW_SUBTREE, CHANGE_PSEUDO_STATE);
 
         // Always mark for repaint
         dirty_mark_element(state, view);

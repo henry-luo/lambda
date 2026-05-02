@@ -849,7 +849,16 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         // - Replaced elements / overflow != visible with no content: bottom margin edge
         // - Non-replaced with overflow:visible and in-flow line boxes: last line baseline
         // - Form text controls (input, select): content text baseline
-        float item_baseline = item_height; // default: bottom margin edge
+        // For replaced inline-blocks (img, input checkbox/radio/etc), match
+        // browser behavior: baseline = bottom border edge (margin.top + height).
+        // For non-replaced empty inline-blocks: baseline = bottom margin edge.
+        float item_baseline;
+        if (block->display.inner == RDT_DISPLAY_REPLACED) {
+            item_baseline = block->height +
+                (block->bound ? block->bound->margin.top : 0);
+        } else {
+            item_baseline = item_height; // default: bottom margin edge
+        }
         if (block->blk && block->blk->last_line_max_ascender > 0) {
             bool is_replaced_elem = (block->tag() == HTM_TAG_IMG || block->tag() == HTM_TAG_IFRAME ||
                 block->tag() == HTM_TAG_VIDEO || block->tag() == HTM_TAG_EMBED ||

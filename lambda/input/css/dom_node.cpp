@@ -444,6 +444,7 @@ bool DomNode::insert_before(DomNode* new_node, DomNode* ref_node) {
 typedef struct {
     StrBuf* buf;
     bool* has_props;
+    Pool* temp_pool;  // shared pool reused across all property callbacks
 } StylePrintContext;
 
 /**
@@ -484,10 +485,10 @@ static bool print_style_property_callback(StyleNode* node, void* context) {
     // Format the value using the CSS formatter
     CssValue* val = (CssValue*)decl->value;
 
-    // Create a temporary pool and formatter for value formatting
-    Pool* temp_pool = pool_create();
-    if (temp_pool) {
-        CssFormatter* formatter = css_formatter_create(temp_pool, CSS_FORMAT_COMPACT);
+    // Reuse the shared temp pool from the context (avoids ~1MB rpmalloc heap
+    // acquire/release per property — see commit re cnn_lite memory profile).
+    if (ctx->temp_pool) {
+        CssFormatter* formatter = css_formatter_create(ctx->temp_pool, CSS_FORMAT_COMPACT);
         if (formatter) {
             // Format the value
             css_format_value(formatter, val);
@@ -500,7 +501,6 @@ static bool print_style_property_callback(StyleNode* node, void* context) {
 
             css_formatter_destroy(formatter);
         }
-        pool_destroy(temp_pool);
     }
 
     *ctx->has_props = true;
@@ -649,11 +649,14 @@ void DomNode::print(StrBuf* buf, int indent) const {
                 strbuf_append_str(buf, has_text ? ", styles:{" : "styles:{");
 
                 bool has_props = false;
-                StylePrintContext ctx = { buf, &has_props };
+                // Reuse one temp pool across all property formatting in this element.
+                Pool* fmt_pool = pool_create();
+                StylePrintContext ctx = { buf, &has_props, fmt_pool };
 
                 // Iterate through all properties in the style tree
                 style_tree_foreach(element->specified_style, print_style_property_callback, &ctx);
 
+                if (fmt_pool) pool_destroy(fmt_pool);
                 strbuf_append_str(buf, "}");
             }
 

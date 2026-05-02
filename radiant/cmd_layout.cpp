@@ -43,6 +43,7 @@ extern "C" {
 #include "../lib/hashmap.h"
 #include "../lib/arraylist.h"
 #include "../lib/font/font.h"
+void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 }
 
 #include "../lambda/input/css/css_engine.hpp"
@@ -1629,19 +1630,28 @@ CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, c
     // so subsequent serial loaders find them already cached on disk.
     prefetch_document_subresources(html_root, base_path);
 
-    // Step 1: Collect and parse <link rel="stylesheet"> references
-    log_debug("[CSS] Step 1: Collecting linked stylesheets...");
-    collect_linked_stylesheets(html_root, engine, base_path, pool, &stylesheets, stylesheet_count, 0);
-
-    int linked_count = *stylesheet_count;
-    if (linked_count_out) *linked_count_out = linked_count;
-
-    // Step 2: Collect and parse <style> inline CSS
-    log_debug("[CSS] Step 2: Collecting inline <style> elements...");
+    // Step 1: Collect and parse <style> inline CSS first.
+    // Per CSS cascade spec, document source order determines tie-breaking among
+    // declarations of equal specificity & origin. Inline <style> blocks typically
+    // appear in <head> *before* <link rel="stylesheet">, so the linked rules
+    // should be considered LATER in source order and thus win ties. Since the
+    // per-element style tree assigns source_order in the order rules are
+    // applied (later = higher = wins), we must apply <style> first, then linked.
+    log_debug("[CSS] Step 1: Collecting inline <style> elements...");
     collect_inline_styles_to_list(html_root, engine, pool, &stylesheets, stylesheet_count, 0);
 
+    int inline_count = *stylesheet_count;
+
+    // Step 2: Collect and parse <link rel="stylesheet"> references — applied last
+    // so their declarations get higher source_order and win against earlier <style>.
+    log_debug("[CSS] Step 2: Collecting linked stylesheets...");
+    collect_linked_stylesheets(html_root, engine, base_path, pool, &stylesheets, stylesheet_count, 0);
+
+    int linked_count = *stylesheet_count - inline_count;
+    if (linked_count_out) *linked_count_out = linked_count;
+
     log_debug("[CSS] Collected %d stylesheet(s) from HTML (%d linked, %d inline)",
-              *stylesheet_count, linked_count, *stylesheet_count - linked_count);
+              *stylesheet_count, linked_count, inline_count);
     return stylesheets;
 }
 
@@ -2625,6 +2635,8 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     using namespace std::chrono;
     auto t_start = high_resolution_clock::now();
 
+    log_mem_stage("load_html: enter");
+
     if (!html_url || !pool) {
         log_error("load_lambda_html_doc: invalid parameters");
         return nullptr;
@@ -2726,6 +2738,7 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
 
     auto t_parse = high_resolution_clock::now();
     log_info("[TIMING] load: parse HTML: %.1fms", duration<double, std::milli>(t_parse - t_read).count());
+    log_mem_stage("load_html: html_parsed");
 
     if (!input) {
         log_error("Failed to create input for file: %s", html_filepath);
@@ -2796,6 +2809,7 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
         dom_document_destroy(dom_doc);
         return nullptr;
     }
+    log_mem_stage("load_html: dom_built");
 
     auto t_dom = high_resolution_clock::now();
 
@@ -2805,6 +2819,8 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
         log_error("Failed to create CSS engine");
         return nullptr;
     }
+    // Cache for runtime re-cascade (e.g. on pseudo-state changes like :hover)
+    dom_doc->cached_css_engine = css_engine;
     css_engine_set_viewport(css_engine, viewport_width, viewport_height);
 
     // Load external CSS if provided
@@ -2849,13 +2865,18 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
 
     auto t_css_parse = high_resolution_clock::now();
     log_info("[TIMING] load: parse CSS: %.1fms", duration<double, std::milli>(t_css_parse - t_dom).count());
+    log_mem_stage("load_html: css_parsed");
 
     // print internal stylesheets for debugging
-    for (int i = 0; i < inline_stylesheet_count; i++) {
-        const char* formatted_css = css_stylesheet_to_string_styled(
-            inline_stylesheets[i], pool, CSS_FORMAT_EXPANDED);
-        if (formatted_css) {
-            log_debug("[Lambda CSS] Parsed inline stylesheet %d:\n%s", i, formatted_css);
+    // Skip the (expensive) formatting entirely when debug logs are disabled —
+    // for large pages (e.g. cnn_lite) this dump dominated peak memory.
+    if (log_level_enabled(NULL, LOG_LEVEL_DEBUG)) {
+        for (int i = 0; i < inline_stylesheet_count; i++) {
+            const char* formatted_css = css_stylesheet_to_string_styled(
+                inline_stylesheets[i], pool, CSS_FORMAT_EXPANDED);
+            if (formatted_css) {
+                log_debug("[Lambda CSS] Parsed inline stylesheet %d:\n%s", i, formatted_css);
+            }
         }
     }
 
@@ -2885,7 +2906,9 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     // via dom_element_apply_inline_style with a later source_order, so they
     // correctly override the original HTML inline styles in the cascade.
     // This also ensures the HTML→DOM tree mapping is pristine (no JS mutations yet).
+    log_mem_stage("load_html: before_inline_attrs");
     apply_inline_styles_to_tree(dom_root, html_root, pool);
+    log_mem_stage("load_html: after_inline_attrs");
 
     // Step 2d: Execute <script> elements (inline + external) and body onload handlers
     // Scripts run after inline style application so JS style changes override HTML attrs.
@@ -2893,7 +2916,9 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     // appendChild, removeChild, etc.) take effect before styles are resolved.
     // getComputedStyle can query parsed stylesheets via on-demand matching.
     dom_doc->root = dom_root;  // set root for JS DOM API access
+    log_mem_stage("load_html: before_scripts");
     execute_document_scripts(html_root, dom_doc, pool, html_url);
+    log_mem_stage("load_html: after_scripts");
 
     auto t_scripts = high_resolution_clock::now();
 
@@ -2999,12 +3024,17 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     log_cascade_timing_summary();  // log selector matching and property application stats
     log_dom_element_timing();  // log detailed cascade timing
     log_info("[TIMING] load: CSS cascade: %.1fms", duration<double, std::milli>(t_cascade - t_css_parse).count());
+    log_mem_stage("load_html: cascade_done");
 
-    // Dump CSS computed values for testing/comparison (includes inheritance, before layout)
-    StrBuf* str_buf = strbuf_new();
-    dom_root->print(str_buf, 0);
-    log_debug("Built DomElement tree with styles::\n%s", str_buf->str);
-    strbuf_free(str_buf);
+    // Dump CSS computed values for testing/comparison (includes inheritance, before layout).
+    // Skip the (potentially expensive) tree walk entirely when debug logs are disabled \u2014
+    // for large pages (e.g. cnn_lite) this dump dominated peak RSS.
+    if (log_level_enabled(NULL, LOG_LEVEL_DEBUG)) {
+        StrBuf* str_buf = strbuf_new();
+        dom_root->print(str_buf, 0);
+        log_debug("Built DomElement tree with styles::\n%s", str_buf->str);
+        strbuf_free(str_buf);
+    }
 
     // Step 8: Create DomDocument structure (already created by dom_document_create)
     // Just populate the additional fields

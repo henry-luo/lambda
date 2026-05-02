@@ -6899,6 +6899,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             // Border shorthand: <width> <style> <color> (any order)
             // Parse values from the list or single value
             float border_width = -1.0f;  CssEnum border_style = CSS_VALUE__UNDEF;  Color border_color = {0};
+            bool border_color_set = false;  // distinguish "transparent" (c==0) from "unspecified"
             if (value->type == CSS_VALUE_TYPE_LIST) {
                 // Multiple values
                 log_debug("[CSS] Border shorthand has multiple values: %d", value->data.list.count);
@@ -6929,17 +6930,20 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                         } else {
                             // Color keyword
                             border_color = color_name_to_rgb(keyword);
+                            border_color_set = true;
                         }
                     }
                     else if (val->type == CSS_VALUE_TYPE_COLOR) {
                         // Color
                         log_debug("[CSS] Border color value type: %d", val->data.color.type);
                         border_color = resolve_color_value(lycon, val);
+                        border_color_set = true;
                     }
                     else if (val->type == CSS_VALUE_TYPE_FUNCTION) {
                         // Color function like rgb(), rgba(), hsl(), hsla()
                         log_debug("[CSS] Border color from function");
                         border_color = resolve_color_value(lycon, val);
+                        border_color_set = true;
                     }
                     else {
                         log_debug("[CSS] Unrecognized border shorthand value type: %d", val->type);
@@ -6967,12 +6971,15 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                         border_style = keyword;
                     } else {
                         border_color = color_name_to_rgb(keyword);
+                        border_color_set = true;
                     }
                 } else if (value->type == CSS_VALUE_TYPE_COLOR) {
                     border_color = resolve_color_value(lycon, value);
+                    border_color_set = true;
                 } else if (value->type == CSS_VALUE_TYPE_FUNCTION) {
                     // Color function like rgb(), rgba(), hsl(), hsla()
                     border_color = resolve_color_value(lycon, value);
+                    border_color_set = true;
                 }
             }
 
@@ -6988,10 +6995,12 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (border_style == CSS_VALUE_NONE || border_style == CSS_VALUE_HIDDEN) {
                 border_width = 0;
             }
-            // CSS spec: when no color specified, default to currentColor (text color)
-            if (border_color.c == 0 && border_style >= 0 &&
+            // CSS spec: when no color specified, default to currentColor (text color).
+            // Use the explicit-set flag so 'transparent' (alpha 0) is honored.
+            if (!border_color_set && border_style >= 0 &&
                 border_style != CSS_VALUE_NONE && border_style != CSS_VALUE_HIDDEN) {
                 border_color = get_current_color(lycon);
+                border_color_set = true;
             }
             if (border_width >= 0) {
                 span->bound->border->width.top = border_width;
@@ -7011,7 +7020,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->bound->border->left_style = border_style;
                 log_debug("[CSS] Border style (all sides): %d", border_style);
             }
-            if (border_color.c != 0) {
+            if (border_color_set) {
                 span->bound->border->top_color = border_color;
                 span->bound->border->right_color = border_color;
                 span->bound->border->bottom_color = border_color;
@@ -11180,6 +11189,16 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                                 gradient_decl.value = layer;
                                 log_debug("[Lambda CSS Background] Processing conic gradient layer %d: %s", i, func_name);
                                 resolve_css_property(CSS_PROPERTY_BACKGROUND, &gradient_decl, lycon);
+                            }
+                        } else if (str_ieq_const(func_name, strlen(func_name), "url")) {
+                            // url() image layer — route to background-image handler.
+                            // Currently we only retain the topmost url() (single image slot).
+                            if (!bg->image) {
+                                CssDeclaration img_decl = *decl;
+                                img_decl.property_id = CSS_PROPERTY_BACKGROUND_IMAGE;
+                                img_decl.value = layer;
+                                log_debug("[Lambda CSS Background] Processing url image layer %d", i);
+                                resolve_css_property(CSS_PROPERTY_BACKGROUND_IMAGE, &img_decl, lycon);
                             }
                         }
                     }
