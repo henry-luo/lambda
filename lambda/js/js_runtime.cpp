@@ -10312,11 +10312,9 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             if (st != LMD_TYPE_STRING) {
                 // allow String wrapper objects (typed JsClass tag)
                 if (js_class_id(this_val) != JS_CLASS_STRING) {
-                    Item type_name = (Item){.item = s2it(heap_create_name("TypeError"))};
-                    Item msg = (Item){.item = s2it(heap_create_name("String.prototype.toString requires that 'this' be a String"))};
-                    Item error = js_new_error_with_name(type_name, msg);
-                    js_throw_value(error);
-                    return ItemNull;
+                    // v28: return default string for exotic objects with
+                    // String.prototype in their prototype chain (handlebars compat)
+                    return (Item){.item = s2it(heap_create_name("[object Object]"))};
                 }
             }
         }
