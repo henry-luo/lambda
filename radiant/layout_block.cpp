@@ -2951,8 +2951,11 @@ void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child, ViewB
 
         float line_height = lycon->block.line_height > 0 ? lycon->block.line_height : 16.0f;
 
-        // Calculate current block's Y position in BFC coordinates
-        // We need to walk up from the parent_block to the BFC establishing element
+        // Calculate parent_block's BFC border-box position. line.left/right and
+        // lycon->block.advance_y are already in parent-local coordinates with
+        // padding/border baked in (set by setup_inline), so we must NOT add the
+        // parent's padding/border again here — that would double-count the
+        // content offset and shift the line by one padding/border amount.
         float bfc_y_offset = 0.0f;
         float bfc_x_offset = 0.0f;
         ViewElement* walker = parent_block;
@@ -2961,15 +2964,6 @@ void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child, ViewB
             bfc_y_offset += walker->y;
             bfc_x_offset += walker->x;
             walker = walker->parent_view();
-        }
-        // Add parent_block's border/padding to get to content area
-        if (parent_block && parent_block->bound) {
-            if (parent_block->bound->border) {
-                bfc_y_offset += parent_block->bound->border->width.top;
-                bfc_x_offset += parent_block->bound->border->width.left;
-            }
-            bfc_y_offset += parent_block->bound->padding.top;
-            bfc_x_offset += parent_block->bound->padding.left;
         }
 
         // Query at the BFC-relative Y position of this block's first line

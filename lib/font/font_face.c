@@ -280,10 +280,21 @@ FontHandle* font_face_load(FontContext* ctx, const FontFaceDesc* desc,
         }
 
         if (handle) {
+            // reject sources whose font tables couldn't be parsed (e.g. EOT
+            // wrappers that FreeType opens but cannot decode). Without
+            // `tables` we can't look up cmap/glyphs, so the font would
+            // render as empty boxes. Try the next source instead.
+            if (!handle->tables) {
+                log_debug("font_face: source %d for '%s' has no parsable tables, trying next",
+                          i, desc->family);
+                font_handle_release(handle);
+                continue;
+            }
+
             // verify the font has basic Latin characters — subsetted fonts
             // (e.g. Google Fonts unicode-range subsets) may load successfully
             // but lack common characters
-            CmapTable* cmap = handle->tables ? font_tables_get_cmap(handle->tables) : NULL;
+            CmapTable* cmap = font_tables_get_cmap(handle->tables);
             if (cmap && (cmap_lookup(cmap, 'a') == 0 ||
                          cmap_lookup(cmap, 'A') == 0) &&
                         i + 1 < desc->source_count) {
