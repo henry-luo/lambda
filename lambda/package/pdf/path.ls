@@ -48,19 +48,21 @@ fn _num(op) {
 
 pub fn new_state() {
     {
-        segments:     [],
-        current_x:    0.0,
-        current_y:    0.0,
-        start_x:      0.0,
-        start_y:      0.0,
-        fill_color:   color.BLACK,
-        stroke_color: color.BLACK,
-        line_width:   1.0,
-        line_cap:     0,
-        line_join:    0,
-        miter_limit:  10.0,
-        dash_array:   [],
-        dash_phase:   0.0
+        segments:       [],
+        current_x:      0.0,
+        current_y:      0.0,
+        start_x:        0.0,
+        start_y:        0.0,
+        fill_color:     color.BLACK,
+        stroke_color:   color.BLACK,
+        fill_opacity:   1.0,
+        stroke_opacity: 1.0,
+        line_width:     1.0,
+        line_cap:       0,
+        line_join:      0,
+        miter_limit:    10.0,
+        dash_array:     [],
+        dash_phase:     0.0
     }
 }
 
@@ -73,145 +75,182 @@ pub fn new_state() {
 
 fn _set(st, segments, cx, cy, sx, sy) {
     {
-        segments:     segments,
-        current_x:    cx,
-        current_y:    cy,
-        start_x:      sx,
-        start_y:      sy,
-        fill_color:   st.fill_color,
-        stroke_color: st.stroke_color,
-        line_width:   st.line_width,
-        line_cap:     st.line_cap,
-        line_join:    st.line_join,
-        miter_limit:  st.miter_limit,
-        dash_array:   st.dash_array,
-        dash_phase:   st.dash_phase
+        segments:       segments,
+        current_x:      cx,
+        current_y:      cy,
+        start_x:        sx,
+        start_y:        sy,
+        fill_color:     st.fill_color,
+        stroke_color:   st.stroke_color,
+        fill_opacity:   st.fill_opacity,
+        stroke_opacity: st.stroke_opacity,
+        line_width:     st.line_width,
+        line_cap:       st.line_cap,
+        line_join:      st.line_join,
+        miter_limit:    st.miter_limit,
+        dash_array:     st.dash_array,
+        dash_phase:     st.dash_phase
     }
 }
 
 pub fn set_fill_color(st, c) {
     {
-        segments:     st.segments,
-        current_x:    st.current_x,
-        current_y:    st.current_y,
-        start_x:      st.start_x,
-        start_y:      st.start_y,
-        fill_color:   c,
-        stroke_color: st.stroke_color,
-        line_width:   st.line_width,
-        line_cap:     st.line_cap,
-        line_join:    st.line_join,
-        miter_limit:  st.miter_limit,
-        dash_array:   st.dash_array,
-        dash_phase:   st.dash_phase
+        segments:       st.segments,
+        current_x:      st.current_x,
+        current_y:      st.current_y,
+        start_x:        st.start_x,
+        start_y:        st.start_y,
+        fill_color:     c,
+        stroke_color:   st.stroke_color,
+        fill_opacity:   st.fill_opacity,
+        stroke_opacity: st.stroke_opacity,
+        line_width:     st.line_width,
+        line_cap:       st.line_cap,
+        line_join:      st.line_join,
+        miter_limit:    st.miter_limit,
+        dash_array:     st.dash_array,
+        dash_phase:     st.dash_phase
     }
 }
 
 pub fn set_stroke_color(st, c) {
     {
-        segments:     st.segments,
-        current_x:    st.current_x,
-        current_y:    st.current_y,
-        start_x:      st.start_x,
-        start_y:      st.start_y,
-        fill_color:   st.fill_color,
-        stroke_color: c,
-        line_width:   st.line_width,
-        line_cap:     st.line_cap,
-        line_join:    st.line_join,
-        miter_limit:  st.miter_limit,
-        dash_array:   st.dash_array,
-        dash_phase:   st.dash_phase
+        segments:       st.segments,
+        current_x:      st.current_x,
+        current_y:      st.current_y,
+        start_x:        st.start_x,
+        start_y:        st.start_y,
+        fill_color:     st.fill_color,
+        stroke_color:   c,
+        fill_opacity:   st.fill_opacity,
+        stroke_opacity: st.stroke_opacity,
+        line_width:     st.line_width,
+        line_cap:       st.line_cap,
+        line_join:      st.line_join,
+        miter_limit:    st.miter_limit,
+        dash_array:     st.dash_array,
+        dash_phase:     st.dash_phase
+    }
+}
+
+// Set fill / stroke alpha (from gs ExtGState ca/CA).
+pub fn set_opacity(st, fa, sa) {
+    {
+        segments:       st.segments,
+        current_x:      st.current_x,
+        current_y:      st.current_y,
+        start_x:        st.start_x,
+        start_y:        st.start_y,
+        fill_color:     st.fill_color,
+        stroke_color:   st.stroke_color,
+        fill_opacity:   fa,
+        stroke_opacity: sa,
+        line_width:     st.line_width,
+        line_cap:       st.line_cap,
+        line_join:      st.line_join,
+        miter_limit:    st.miter_limit,
+        dash_array:     st.dash_array,
+        dash_phase:     st.dash_phase
     }
 }
 
 fn _set_line_width(st, w) {
     {
-        segments:     st.segments,
-        current_x:    st.current_x,
-        current_y:    st.current_y,
-        start_x:      st.start_x,
-        start_y:      st.start_y,
-        fill_color:   st.fill_color,
-        stroke_color: st.stroke_color,
-        line_width:   w,
-        line_cap:     st.line_cap,
-        line_join:    st.line_join,
-        miter_limit:  st.miter_limit,
-        dash_array:   st.dash_array,
-        dash_phase:   st.dash_phase
+        segments:       st.segments,
+        current_x:      st.current_x,
+        current_y:      st.current_y,
+        start_x:        st.start_x,
+        start_y:        st.start_y,
+        fill_color:     st.fill_color,
+        stroke_color:   st.stroke_color,
+        fill_opacity:   st.fill_opacity,
+        stroke_opacity: st.stroke_opacity,
+        line_width:     w,
+        line_cap:       st.line_cap,
+        line_join:      st.line_join,
+        miter_limit:    st.miter_limit,
+        dash_array:     st.dash_array,
+        dash_phase:     st.dash_phase
     }
 }
 
 fn _set_line_cap(st, n) {
     {
-        segments:     st.segments,
-        current_x:    st.current_x,
-        current_y:    st.current_y,
-        start_x:      st.start_x,
-        start_y:      st.start_y,
-        fill_color:   st.fill_color,
-        stroke_color: st.stroke_color,
-        line_width:   st.line_width,
-        line_cap:     n,
-        line_join:    st.line_join,
-        miter_limit:  st.miter_limit,
-        dash_array:   st.dash_array,
-        dash_phase:   st.dash_phase
+        segments:       st.segments,
+        current_x:      st.current_x,
+        current_y:      st.current_y,
+        start_x:        st.start_x,
+        start_y:        st.start_y,
+        fill_color:     st.fill_color,
+        stroke_color:   st.stroke_color,
+        fill_opacity:   st.fill_opacity,
+        stroke_opacity: st.stroke_opacity,
+        line_width:     st.line_width,
+        line_cap:       n,
+        line_join:      st.line_join,
+        miter_limit:    st.miter_limit,
+        dash_array:     st.dash_array,
+        dash_phase:     st.dash_phase
     }
 }
 
 fn _set_line_join(st, n) {
     {
-        segments:     st.segments,
-        current_x:    st.current_x,
-        current_y:    st.current_y,
-        start_x:      st.start_x,
-        start_y:      st.start_y,
-        fill_color:   st.fill_color,
-        stroke_color: st.stroke_color,
-        line_width:   st.line_width,
-        line_cap:     st.line_cap,
-        line_join:    n,
-        miter_limit:  st.miter_limit,
-        dash_array:   st.dash_array,
-        dash_phase:   st.dash_phase
+        segments:       st.segments,
+        current_x:      st.current_x,
+        current_y:      st.current_y,
+        start_x:        st.start_x,
+        start_y:        st.start_y,
+        fill_color:     st.fill_color,
+        stroke_color:   st.stroke_color,
+        fill_opacity:   st.fill_opacity,
+        stroke_opacity: st.stroke_opacity,
+        line_width:     st.line_width,
+        line_cap:       st.line_cap,
+        line_join:      n,
+        miter_limit:    st.miter_limit,
+        dash_array:     st.dash_array,
+        dash_phase:     st.dash_phase
     }
 }
 
 fn _set_miter(st, m) {
     {
-        segments:     st.segments,
-        current_x:    st.current_x,
-        current_y:    st.current_y,
-        start_x:      st.start_x,
-        start_y:      st.start_y,
-        fill_color:   st.fill_color,
-        stroke_color: st.stroke_color,
-        line_width:   st.line_width,
-        line_cap:     st.line_cap,
-        line_join:    st.line_join,
-        miter_limit:  m,
-        dash_array:   st.dash_array,
-        dash_phase:   st.dash_phase
+        segments:       st.segments,
+        current_x:      st.current_x,
+        current_y:      st.current_y,
+        start_x:        st.start_x,
+        start_y:        st.start_y,
+        fill_color:     st.fill_color,
+        stroke_color:   st.stroke_color,
+        fill_opacity:   st.fill_opacity,
+        stroke_opacity: st.stroke_opacity,
+        line_width:     st.line_width,
+        line_cap:       st.line_cap,
+        line_join:      st.line_join,
+        miter_limit:    m,
+        dash_array:     st.dash_array,
+        dash_phase:     st.dash_phase
     }
 }
 
 fn _set_dash(st, arr, phase) {
     {
-        segments:     st.segments,
-        current_x:    st.current_x,
-        current_y:    st.current_y,
-        start_x:      st.start_x,
-        start_y:      st.start_y,
-        fill_color:   st.fill_color,
-        stroke_color: st.stroke_color,
-        line_width:   st.line_width,
-        line_cap:     st.line_cap,
-        line_join:    st.line_join,
-        miter_limit:  st.miter_limit,
-        dash_array:   arr,
-        dash_phase:   phase
+        segments:       st.segments,
+        current_x:      st.current_x,
+        current_y:      st.current_y,
+        start_x:        st.start_x,
+        start_y:        st.start_y,
+        fill_color:     st.fill_color,
+        stroke_color:   st.stroke_color,
+        fill_opacity:   st.fill_opacity,
+        stroke_opacity: st.stroke_opacity,
+        line_width:     st.line_width,
+        line_cap:       st.line_cap,
+        line_join:      st.line_join,
+        miter_limit:    st.miter_limit,
+        dash_array:     arr,
+        dash_phase:     phase
     }
 }
 
@@ -346,12 +385,48 @@ fn _close_last(st) {
     _set(st, segs, st.start_x, st.start_y, st.start_x, st.start_y)
 }
 
+// Format dash array as SVG `stroke-dasharray` value. Empty PDF array =
+// solid stroke ("none" in SVG).
+fn _format_dash(arr) {
+    if (arr == null) { "none" }
+    else if (len(arr) == 0) { "none" }
+    else {
+        let parts = (for (n in arr) util.fmt_num(n))
+        parts | join(",")
+    }
+}
+
 fn _emit_path(st, fill, stroke, fill_rule) {
     if (len(st.segments) == 0) { { state: _clear(st), emit: [] } }
     else {
         let d = _segments_to_d(st.segments)
         let lw = st.line_width
-        let elem = if (fill_rule == "evenodd") {
+        let dash = _format_dash(st.dash_array)
+        let has_extras = ((dash != "none")
+                          or (st.fill_opacity < 1.0)
+                          or (st.stroke_opacity < 1.0))
+        let elem = if (has_extras and (fill_rule == "evenodd")) {
+            <path d: d,
+                  fill: fill,
+                  'fill-rule': "evenodd",
+                  'fill-opacity':   util.fmt_num(st.fill_opacity),
+                  stroke: stroke,
+                  'stroke-opacity': util.fmt_num(st.stroke_opacity),
+                  'stroke-width':   util.fmt_num(lw),
+                  'stroke-dasharray': dash,
+                  'stroke-dashoffset': util.fmt_num(st.dash_phase)>
+        }
+        else if (has_extras) {
+            <path d: d,
+                  fill: fill,
+                  'fill-opacity':   util.fmt_num(st.fill_opacity),
+                  stroke: stroke,
+                  'stroke-opacity': util.fmt_num(st.stroke_opacity),
+                  'stroke-width':   util.fmt_num(lw),
+                  'stroke-dasharray': dash,
+                  'stroke-dashoffset': util.fmt_num(st.dash_phase)>
+        }
+        else if (fill_rule == "evenodd") {
             <path d: d,
                   fill: fill,
                   'fill-rule': "evenodd",

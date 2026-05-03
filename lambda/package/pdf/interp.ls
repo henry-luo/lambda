@@ -23,6 +23,7 @@ import text:    .text
 import path:    .path
 import color:   .color
 import image:   .image
+import svg:     .svg
 
 // ============================================================
 // State
@@ -54,6 +55,25 @@ fn _with_path(st, p) {
 
 fn _with_ctm(st, m) {
     { ctm: m, text: st.text, path: st.path, fonts: st.fonts }
+}
+
+// Wrap each emitted path in <g transform="matrix(ctm)"> so the outer
+// y-flip group can mirror them upright. Skip the wrap when the CTM is
+// the identity matrix — `matrix(1 0 0 1 0 0)` would just bloat output.
+// Wrap each emitted path in <g transform="matrix(ctm)"> so the outer
+// y-flip group can mirror them upright. Skip the wrap when the CTM is
+// the identity matrix — `matrix(1 0 0 1 0 0)` would just bloat output.
+//
+// `emit` is a singleton array (path painters return [elem] or []), so
+// we materialize the result as an array literal rather than a `for`
+// comprehension — Lambda's `++` rejects array/list mixes.
+fn _wrap_emit_with_ctm(emit, ctm) {
+    if (util.is_identity(ctm)) { emit }
+    else if (len(emit) == 0) { emit }
+    else {
+        let xform = util.fmt_matrix(ctm)
+        [svg.group(xform, [emit[0]])]
+    }
 }
 
 // ============================================================
@@ -137,6 +157,50 @@ fn _apply_color(st, opr, ops) {
     else if (opr == "k")  { _op_k(st, ops) }
     else if (opr == "K")  { _op_K(st, ops) }
     else                  { st }
+}
+
+// ============================================================
+// gs — apply named ExtGState dictionary
+// ============================================================
+//
+// Honors only the alpha entries today (`ca` for fill, `CA` for stroke).
+// Looks up `Resources/ExtGState/<name>` on the page; missing entries
+// or non-numeric values are ignored.
+
+fn _ext_gstate_dict(pdf, page, name) {
+    let res = resolve.page_resources(pdf, page)
+    let table = if (res and res.ExtGState) resolve.deref(pdf, res.ExtGState)
+                else null
+    if (table == null) { null }
+    else { resolve.deref(pdf, table[name]) }
+}
+
+fn _alpha_of(d, key, fallback) {
+    let v = if (d) d[key] else null
+    if (v is float) { v }
+    else if (v is int) { float(v) }
+    else { fallback }
+}
+
+fn _gs_name(ops) {
+    let n = len(ops)
+    let op0 = if (n >= 1) ops[0] else null
+    if (op0 is map and op0.kind == "name") { op0.value }
+    else { null }
+}
+
+fn _apply_gs(st, ops, pdf, page) {
+    let nm = _gs_name(ops)
+    if (nm == null) { st }
+    else {
+        let d = _ext_gstate_dict(pdf, page, nm)
+        if (d == null) { st }
+        else {
+            let fa = _alpha_of(d, "ca", st.path.fill_opacity)
+            let sa = _alpha_of(d, "CA", st.path.stroke_opacity)
+            _with_path(st, path.set_opacity(st.path, fa, sa))
+        }
+    }
 }
 
 // ============================================================
@@ -226,6 +290,9 @@ pub pn render_page(pdf, page, ops, page_h) {
         else if (_is_color_op(opr)) {
             st = _apply_color(st, opr, args)
         }
+        else if (opr == "gs") {
+            st = _apply_gs(st, args, pdf, page)
+        }
         else if (opr == "Do") {
             // Image / Form XObject placement. We pass the live ctm so
             // the image element scales correctly. Emitted SVG sits inside
@@ -245,12 +312,7 @@ pub pn render_page(pdf, page, ops, page_h) {
             let pr = path.apply_op(st.path, opr, args)
             st = _with_path(st, pr.state)
             if (len(pr.emit) > 0) {
-                var k = 0
-                let me = len(pr.emit)
-                while (k < me) {
-                    paths = paths ++ [pr.emit[k]]
-                    k = k + 1
-                }
+                paths = paths ++ _wrap_emit_with_ctm(pr.emit, st.ctm)
             }
         }
         else {

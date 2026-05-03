@@ -641,18 +641,18 @@ static void process_font_dict(Input* input, MarkBuilder& builder, Map* font,
     bool needs_free = false;
     const char* dbuf = get_decompressed_stream(stream_map, &dlen, &needs_free);
     if (!dbuf || dlen == 0) {
-        if (needs_free && dbuf) free((void*)dbuf);
+        if (needs_free && dbuf) mem_free((void*)dbuf);
         return;
     }
 
     Map* tu_map = map_pooled(input->pool);
     if (!tu_map) {
-        if (needs_free) free((void*)dbuf);
+        if (needs_free) mem_free((void*)dbuf);
         return;
     }
 
     int sections = parse_to_unicode_cmap(dbuf, dlen, input, builder, tu_map);
-    if (needs_free) free((void*)dbuf);
+    if (needs_free) mem_free((void*)dbuf);
 
     if (sections > 0) {
         builder.putToMap(font, builder.createString("to_unicode"),
@@ -701,6 +701,70 @@ static void walk_fonts(Input* input, MarkBuilder& builder,
              processed);
 }
 
+// Mutate an existing String slot in a Map in-place. Walks the Map's
+// ShapeEntry list, finds the slot named `field`, and overwrites the
+// String* there. Used by the stream-decompress pass to swap out the
+// raw `data` payload for its decoded form without invalidating any
+// other consumer of the Map.
+static void replace_string_field(Map* m, const char* field, String* new_val) {
+    if (!m || !m->type || !m->data || !field || !new_val) return;
+    TypeMap* mt = (TypeMap*)m->type;
+    size_t flen = strlen(field);
+    for (ShapeEntry* se = mt->shape; se; se = se->next) {
+        if (se->name && (size_t)se->name->length == flen
+            && memcmp(se->name->str, field, flen) == 0) {
+            *(String**)((char*)m->data + se->byte_offset) = new_val;
+            return;
+        }
+    }
+}
+
+// Pass 3: walk every indirect_object content; if it's a stream Map with
+// a Filter, decompress in place. After this pass, the `data` field of
+// every stream object holds the plain (post-filter) byte payload, so
+// callers (e.g. content-stream tokenizer) need not re-implement filter
+// chains.
+static void decompress_streams(Input* input, Array* objects) {
+    if (!objects) return;
+    int decoded_count = 0;
+    for (int i = 0; i < objects->length; i++) {
+        Map* iobj = item_as_map(objects->items[i]);
+        if (!iobj || !map_has_type(iobj, "indirect_object")) continue;
+        Item content = map_lookup(iobj, "content");
+        Map* sm = item_as_map(content);
+        if (!sm || !map_has_type(sm, "stream")) continue;
+        // Skip streams without a Filter — `data` is already plain.
+        Item dict_it = map_lookup(sm, "dictionary");
+        Map* dict = item_as_map(dict_it);
+        if (!dict) continue;
+        Item filter_it = map_lookup(dict, "Filter");
+        if (filter_it.item == ITEM_NULL) continue;
+
+        size_t out_len = 0;
+        bool needs_free = false;
+        const char* dec = get_decompressed_stream(sm, &out_len, &needs_free);
+        if (!dec) continue;
+
+        // Pool-allocate the new String so it survives with the input pool.
+        String* new_data = (String*)pool_calloc(input->pool, sizeof(String) + out_len + 1);
+        if (!new_data) {
+            if (needs_free) mem_free((void*)dec);
+            continue;
+        }
+        memcpy(new_data->chars, dec, out_len);
+        new_data->chars[out_len] = '\0';
+        new_data->len = (uint32_t)out_len;
+        new_data->is_ascii = 1;
+        // Buffers from pdf_decompress_stream are mem_alloc'd, not malloc'd —
+        // must use mem_free() to avoid corrupting the memtrack tinfo header.
+        if (needs_free) mem_free((void*)dec);
+
+        replace_string_field(sm, "data", new_data);
+        decoded_count++;
+    }
+    log_info("pdf_postprocess: decompressed %d stream(s)", decoded_count);
+}
+
 }  // anonymous namespace
 
 // ---------------------------------------------------------------------------
@@ -731,6 +795,9 @@ void pdf_postprocess(Input* input) {
 
     // Pass 2: ToUnicode CMap parsing
     walk_fonts(input, builder, objects, &table);
+
+    // Pass 3: stream decompression (FlateDecode, ASCII85Decode, etc.)
+    decompress_streams(input, objects);
 
     g_post_pool = nullptr;
 }
