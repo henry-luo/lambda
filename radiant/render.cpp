@@ -3393,7 +3393,8 @@ void render_children(RenderContext* rdcon, View* view) {
                 }
             }
             else if (block->tag_id == HTM_TAG_SVG) {
-                // Inline SVG element - render via ThorVG
+                // Inline SVG element - paint CSS background/border first, then SVG content
+                if (block->bound) { render_bound(rdcon, block); }
                 log_debug("[RENDER DISPATCH] calling render_inline_svg for inline SVG");
                 auto ts1 = std::chrono::high_resolution_clock::now();
                 render_inline_svg(rdcon, block);
