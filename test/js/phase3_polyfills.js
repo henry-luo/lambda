@@ -38,7 +38,8 @@ const match_single_val = match_single ? match_single[0] : null;
 
 // === 4. String.matchAll ===
 const matchall_input = "test1 test2 test3";
-const matchall_result = matchall_input.matchAll(/test(\d)/g);
+const matchall_iter = matchall_input.matchAll(/test(\d)/g);
+const matchall_result = [...matchall_iter];
 const matchall_count = matchall_result ? matchall_result.length : 0;
 const matchall_first = matchall_count > 0 ? matchall_result[0][0] : null;
 const matchall_first_group = matchall_count > 0 ? matchall_result[0][1] : null;

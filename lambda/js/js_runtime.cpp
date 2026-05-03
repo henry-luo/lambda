@@ -12887,7 +12887,17 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
         while ((pos = processed_pattern.find("[]", pos)) != std::string::npos) {
             // check it's not preceded by backslash (escaped bracket)
             if (pos > 0 && processed_pattern[pos - 1] == '\\') { pos++; continue; }
-            // replace [] with (?!.)  — wait, RE2 doesn't support lookahead
+            // check if [] is inside an existing character class — if so,
+            // this [] is a literal `[` followed by the closing `]`, not an empty class
+            {
+                int bd = 0;
+                for (size_t j = 0; j < pos; j++) {
+                    if (processed_pattern[j] == '\\' && j + 1 < pos) { j++; continue; }
+                    if (processed_pattern[j] == '[' && bd == 0) bd++;
+                    else if (processed_pattern[j] == ']' && bd > 0) bd--;
+                }
+                if (bd > 0) { pos++; continue; }  // inside existing class — skip
+            }
             // replace [] with \x{FFFE} (BOM internal — never in real text)
             processed_pattern.replace(pos, 2, "\\x{FFFE}");
             pos += 9;

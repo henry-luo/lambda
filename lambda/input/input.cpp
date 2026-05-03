@@ -80,12 +80,14 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
     int bsize = type_info[type_id].byte_size;
     int byte_offset = shape_entry->byte_offset + bsize;
     if (byte_offset > mp->data_cap) { // resize map data
-        assert(mp->data_cap > 0);
-        int byte_cap = mp->data_cap * 2;
+        // mp->data_cap could be 0 (e.g. zero-byte-size maps from map_with_data)
+        int byte_cap = MAX(mp->data_cap, byte_offset) * 2;
         void* new_data = pool_calloc(input->pool, byte_cap);
         if (!new_data) return;
-        memcpy(new_data, mp->data, byte_offset - bsize);
-        pool_free(input->pool, mp->data);
+        if (mp->data) {
+            memcpy(new_data, mp->data, byte_offset - bsize);
+            pool_free(input->pool, mp->data);
+        }
         mp->data = new_data;  mp->data_cap = byte_cap;
     }
     map_type->byte_size = byte_offset;
