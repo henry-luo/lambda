@@ -7003,32 +7003,62 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 border_color_set = true;
             }
             if (border_width >= 0) {
-                span->bound->border->width.top = border_width;
-                span->bound->border->width.right = border_width;
-                span->bound->border->width.bottom = border_width;
-                span->bound->border->width.left = border_width;
-                span->bound->border->width.top_specificity = specificity;
-                span->bound->border->width.right_specificity = specificity;
-                span->bound->border->width.bottom_specificity = specificity;
-                span->bound->border->width.left_specificity = specificity;
+                // per-side specificity guard: shorthand must not override a
+                // longhand/side-shorthand declared with higher specificity
+                if (specificity >= span->bound->border->width.top_specificity) {
+                    span->bound->border->width.top = border_width;
+                    span->bound->border->width.top_specificity = specificity;
+                }
+                if (specificity >= span->bound->border->width.right_specificity) {
+                    span->bound->border->width.right = border_width;
+                    span->bound->border->width.right_specificity = specificity;
+                }
+                if (specificity >= span->bound->border->width.bottom_specificity) {
+                    span->bound->border->width.bottom = border_width;
+                    span->bound->border->width.bottom_specificity = specificity;
+                }
+                if (specificity >= span->bound->border->width.left_specificity) {
+                    span->bound->border->width.left = border_width;
+                    span->bound->border->width.left_specificity = specificity;
+                }
                 log_debug("[CSS] Border width (all sides): %.2f px", border_width);
             }
             if (border_style >= 0) {
-                span->bound->border->top_style = border_style;
-                span->bound->border->right_style = border_style;
-                span->bound->border->bottom_style = border_style;
-                span->bound->border->left_style = border_style;
+                if (specificity >= span->bound->border->top_style_specificity) {
+                    span->bound->border->top_style = border_style;
+                    span->bound->border->top_style_specificity = specificity;
+                }
+                if (specificity >= span->bound->border->right_style_specificity) {
+                    span->bound->border->right_style = border_style;
+                    span->bound->border->right_style_specificity = specificity;
+                }
+                if (specificity >= span->bound->border->bottom_style_specificity) {
+                    span->bound->border->bottom_style = border_style;
+                    span->bound->border->bottom_style_specificity = specificity;
+                }
+                if (specificity >= span->bound->border->left_style_specificity) {
+                    span->bound->border->left_style = border_style;
+                    span->bound->border->left_style_specificity = specificity;
+                }
                 log_debug("[CSS] Border style (all sides): %d", border_style);
             }
             if (border_color_set) {
-                span->bound->border->top_color = border_color;
-                span->bound->border->right_color = border_color;
-                span->bound->border->bottom_color = border_color;
-                span->bound->border->left_color = border_color;
-                span->bound->border->top_color_specificity = specificity;
-                span->bound->border->right_color_specificity = specificity;
-                span->bound->border->bottom_color_specificity = specificity;
-                span->bound->border->left_color_specificity = specificity;
+                if (specificity >= span->bound->border->top_color_specificity) {
+                    span->bound->border->top_color = border_color;
+                    span->bound->border->top_color_specificity = specificity;
+                }
+                if (specificity >= span->bound->border->right_color_specificity) {
+                    span->bound->border->right_color = border_color;
+                    span->bound->border->right_color_specificity = specificity;
+                }
+                if (specificity >= span->bound->border->bottom_color_specificity) {
+                    span->bound->border->bottom_color = border_color;
+                    span->bound->border->bottom_color_specificity = specificity;
+                }
+                if (specificity >= span->bound->border->left_color_specificity) {
+                    span->bound->border->left_color = border_color;
+                    span->bound->border->left_color_specificity = specificity;
+                }
                 log_debug("[CSS] Border color (all sides): 0x%08X", border_color.c);
             }
             break;
@@ -7049,7 +7079,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             }
             MultiValue border = {0};
             set_multi_value( &border, value);
-            if (border.style) {
+            if (border.style && specificity >= span->bound->border->top_style_specificity) {
                 span->bound->border->top_style = border.style->data.keyword;
                 span->bound->border->top_style_specificity = specificity;
                 // CSS spec: when style is set (and visible) but width is not, default to 'medium' (3px)
@@ -7061,21 +7091,23 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     span->bound->border->width.top_specificity = specificity;
                 }
             }
-            if (border.length) {
+            if (border.length && specificity >= span->bound->border->width.top_specificity) {
                 span->bound->border->width.top = resolve_length_value(lycon, CSS_PROPERTY_BORDER_TOP_WIDTH, border.length);
                 span->bound->border->width.top_specificity = specificity;
             }
-            if (border.color) {
+            if (border.color && specificity >= span->bound->border->top_color_specificity) {
                 span->bound->border->top_color = resolve_color_value(lycon, border.color);
                 span->bound->border->top_color_specificity = specificity;
             } else if (border.style && border.style->data.keyword != CSS_VALUE_NONE &&
-                       border.style->data.keyword != CSS_VALUE_HIDDEN) {
+                       border.style->data.keyword != CSS_VALUE_HIDDEN &&
+                       specificity >= span->bound->border->top_color_specificity) {
                 span->bound->border->top_color = get_current_color(lycon);
                 span->bound->border->top_color_specificity = specificity;
             }
             // CSS Backgrounds 3 §4.4: style none/hidden → computed width is 0
             if (border.style && (border.style->data.keyword == CSS_VALUE_NONE ||
-                border.style->data.keyword == CSS_VALUE_HIDDEN)) {
+                border.style->data.keyword == CSS_VALUE_HIDDEN) &&
+                specificity >= span->bound->border->width.top_specificity) {
                 span->bound->border->width.top = 0;
                 span->bound->border->width.top_specificity = specificity;
             }
@@ -7096,7 +7128,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             }
             MultiValue border = {0};
             set_multi_value( &border, value);
-            if (border.style) {
+            if (border.style && specificity >= span->bound->border->right_style_specificity) {
                 span->bound->border->right_style = border.style->data.keyword;
                 span->bound->border->right_style_specificity = specificity;
                 // CSS spec: when style is set (and visible) but width is not, default to 'medium' (3px)
@@ -7108,21 +7140,23 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     span->bound->border->width.right_specificity = specificity;
                 }
             }
-            if (border.length) {
+            if (border.length && specificity >= span->bound->border->width.right_specificity) {
                 span->bound->border->width.right = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RIGHT_WIDTH, border.length);
                 span->bound->border->width.right_specificity = specificity;
             }
-            if (border.color) {
+            if (border.color && specificity >= span->bound->border->right_color_specificity) {
                 span->bound->border->right_color = resolve_color_value(lycon, border.color);
                 span->bound->border->right_color_specificity = specificity;
             } else if (border.style && border.style->data.keyword != CSS_VALUE_NONE &&
-                       border.style->data.keyword != CSS_VALUE_HIDDEN) {
+                       border.style->data.keyword != CSS_VALUE_HIDDEN &&
+                       specificity >= span->bound->border->right_color_specificity) {
                 span->bound->border->right_color = get_current_color(lycon);
                 span->bound->border->right_color_specificity = specificity;
             }
             // CSS Backgrounds 3 §4.4: style none/hidden → computed width is 0
             if (border.style && (border.style->data.keyword == CSS_VALUE_NONE ||
-                border.style->data.keyword == CSS_VALUE_HIDDEN)) {
+                border.style->data.keyword == CSS_VALUE_HIDDEN) &&
+                specificity >= span->bound->border->width.right_specificity) {
                 span->bound->border->width.right = 0;
                 span->bound->border->width.right_specificity = specificity;
             }
@@ -7143,7 +7177,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             }
             MultiValue border = {0};
             set_multi_value( &border, value);
-            if (border.style) {
+            if (border.style && specificity >= span->bound->border->bottom_style_specificity) {
                 span->bound->border->bottom_style = border.style->data.keyword;
                 span->bound->border->bottom_style_specificity = specificity;
                 // CSS spec: when style is set (and visible) but width is not, default to 'medium' (3px)
@@ -7155,21 +7189,23 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     span->bound->border->width.bottom_specificity = specificity;
                 }
             }
-            if (border.length) {
+            if (border.length && specificity >= span->bound->border->width.bottom_specificity) {
                 span->bound->border->width.bottom = resolve_length_value(lycon, CSS_PROPERTY_BORDER_BOTTOM_WIDTH, border.length);
                 span->bound->border->width.bottom_specificity = specificity;
             }
-            if (border.color) {
+            if (border.color && specificity >= span->bound->border->bottom_color_specificity) {
                 span->bound->border->bottom_color = resolve_color_value(lycon, border.color);
                 span->bound->border->bottom_color_specificity = specificity;
             } else if (border.style && border.style->data.keyword != CSS_VALUE_NONE &&
-                       border.style->data.keyword != CSS_VALUE_HIDDEN) {
+                       border.style->data.keyword != CSS_VALUE_HIDDEN &&
+                       specificity >= span->bound->border->bottom_color_specificity) {
                 span->bound->border->bottom_color = get_current_color(lycon);
                 span->bound->border->bottom_color_specificity = specificity;
             }
             // CSS Backgrounds 3 §4.4: style none/hidden → computed width is 0
             if (border.style && (border.style->data.keyword == CSS_VALUE_NONE ||
-                border.style->data.keyword == CSS_VALUE_HIDDEN)) {
+                border.style->data.keyword == CSS_VALUE_HIDDEN) &&
+                specificity >= span->bound->border->width.bottom_specificity) {
                 span->bound->border->width.bottom = 0;
                 span->bound->border->width.bottom_specificity = specificity;
             }
@@ -7190,7 +7226,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             }
             MultiValue border = {0};
             set_multi_value( &border, value);
-            if (border.style) {
+            if (border.style && specificity >= span->bound->border->left_style_specificity) {
                 span->bound->border->left_style = border.style->data.keyword;
                 span->bound->border->left_style_specificity = specificity;
                 // CSS spec: when style is set (and visible) but width is not, default to 'medium' (3px)
@@ -7202,21 +7238,23 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     span->bound->border->width.left_specificity = specificity;
                 }
             }
-            if (border.length) {
+            if (border.length && specificity >= span->bound->border->width.left_specificity) {
                 span->bound->border->width.left = resolve_length_value(lycon, CSS_PROPERTY_BORDER_LEFT_WIDTH, border.length);
                 span->bound->border->width.left_specificity = specificity;
             }
-            if (border.color) {
+            if (border.color && specificity >= span->bound->border->left_color_specificity) {
                 span->bound->border->left_color = resolve_color_value(lycon, border.color);
                 span->bound->border->left_color_specificity = specificity;
             } else if (border.style && border.style->data.keyword != CSS_VALUE_NONE &&
-                       border.style->data.keyword != CSS_VALUE_HIDDEN) {
+                       border.style->data.keyword != CSS_VALUE_HIDDEN &&
+                       specificity >= span->bound->border->left_color_specificity) {
                 span->bound->border->left_color = get_current_color(lycon);
                 span->bound->border->left_color_specificity = specificity;
             }
             // CSS Backgrounds 3 §4.4: style none/hidden → computed width is 0
             if (border.style && (border.style->data.keyword == CSS_VALUE_NONE ||
-                border.style->data.keyword == CSS_VALUE_HIDDEN)) {
+                border.style->data.keyword == CSS_VALUE_HIDDEN) &&
+                specificity >= span->bound->border->width.left_specificity) {
                 span->bound->border->width.left = 0;
                 span->bound->border->width.left_specificity = specificity;
             }
