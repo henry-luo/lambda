@@ -368,6 +368,19 @@ fn _segments_to_d(segments) {
     parts | join(" ")
 }
 
+// Public: render the *current* path's segments as an SVG `d` string.
+// Used by interp.ls to capture the clipping path on W / W* before the
+// next painting operator clears the segments.
+pub fn current_path_d(st) {
+    if (st == null or len(st.segments) == 0) { "" }
+    else { _segments_to_d(st.segments) }
+}
+
+// Public: true when the current state has any path segments queued.
+pub fn has_segments(st) {
+    (st != null) and (len(st.segments) > 0)
+}
+
 // ============================================================
 // Painting
 // ============================================================

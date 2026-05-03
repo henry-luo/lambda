@@ -1,0 +1,1 @@
+{ path_count: 0, text_count: 0}

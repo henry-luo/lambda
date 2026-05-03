@@ -46,6 +46,12 @@ pub fn is_identity(m) {
         and (m[3] == 1.0) and (m[4] == 0.0) and (m[5] == 0.0))
 }
 
+// Absolute value of a numeric (int/float).
+pub fn fabs(n) {
+    let f = float(n);
+    if (f < 0.0) { 0.0 - f } else { f }
+}
+
 // Compose two PDF affine matrices (6-element form):
 //   [a b c d e f]  ==  [[a b 0][c d 0][e f 1]]
 // Standard PDF convention: result = m1 * m2.

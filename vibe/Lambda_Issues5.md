@@ -1,5 +1,77 @@
 # Lambda Script Issues — Phase 2 PDF Package
 
+## Phase 7 Addendum — Lambda Script Gotchas (2026)
+
+### 24. Empty `else if`/`else` block in `pn` silently breaks the loop
+
+**Severity: HIGH** — Adding an empty branch body (even just a comment) in a `pn` loop causes the loop to break downstream, often with all output disappearing and no error.
+
+```lambda
+pn driver(op) {
+  if (op == "a") { ... }
+  else if (op == "b") { /* comment only */ }   // BAD: breaks loop
+  else { ... }
+}
+```
+
+**Workaround:** Always put a no-op statement in the body, e.g. `st = st`.
+
+**Discovered:** While adding marker-op branches (BMC/EMC/etc.) in PDF interp driver.
+
+---
+
+### 25. Sentinel string compare bug — `var s = " "` compares unequal to literal `" "`
+
+**Severity: HIGH** — Initializing a `var` with a string literal (e.g. `var s = " "`) and later comparing `s == " "` returns FALSE, even when both print as a single space. This breaks sentinel logic for state machines.
+
+**Workaround:** Use an explicit int flag (e.g. `has_pending_clip = 0/1`) to track state, not sentinel strings.
+
+---
+
+### 26. Multi-line `++`/`or`/`and` chains break — newline ends the expression
+
+**Severity: HIGH** — A line ending in `++`, `or`, `and` (or any binary op) does NOT continue to the next line. The trailing `++ x` / `or x` becomes a bare expression that errors. For `++`, function body silently becomes a 2-element list `[error, real_result]`.
+
+**Workaround:** Wrap the whole chain in parens:
+
+```lambda
+let s = ("a" ++
+     "b" ++
+     "c")
+```
+
+---
+
+### 27. List `+` is element-wise add, not concat (silent footgun)
+
+**Severity: HIGH** — `[1,2] + [3]` returns `[4,5]` (broadcast add), not `[1,2,3]`. Use `++` for concat. `ops = ops + [item]` in a loop never grows the list, causing infinite loops.
+
+---
+
+### 28. `pn` does not implicitly return an `if/else` expression value
+
+**Severity: HIGH** — `pn` must use explicit `return` in every branch. Otherwise, callers get `null`/stale value, causing non-terminating loops.
+
+---
+
+### 29. `var` declared with a "null-shaped" or empty-string initial value cannot be reassigned
+
+**Severity: HIGH** — `var s = ""` or `var x = null` locks the var as null-typed forever; subsequent assignments are dropped with no error. Use a non-null, non-empty sentinel (e.g. `" "` or `{}`) or an int flag.
+
+---
+
+### 30. `let x = if (cond) a else b` returns `null` in `pn`
+
+**Severity: HIGH** — In `pn`, `let x = if (cond) a else b` always returns `null`, even when `cond` is true. Use imperative `if`/`else` with explicit assignment instead.
+
+---
+
+### 31. `fn` cannot call `pn` (E224) — viral propagation up the call graph
+
+**Severity: HIGH** — Once any helper is `pn`, every caller must be `pn`. Prefer `fn` with comprehensions for pure logic.
+
+---
+
 Issues encountered while implementing `lambda/package/pdf/` (content-stream
 tokenizer, font handling, text rendering). Each entry shows a minimal repro
 and the workaround that unblocked the work.
@@ -535,6 +607,87 @@ loses a field across a constructor call.
 - A warning when a `fn`/`pn` returns a map literal that has a strictly
   smaller field set than a same-named map flowing through the function
   on its inputs would catch this whole class of bug.
+
+---
+
+## 22. `array ++ list-comprehension-result` errors at the *next* `format()`
+
+**Severity: HIGH** — silent: the `++` succeeds, but the resulting value
+poisons whatever consumes it, with the diagnostic pointing at an
+unrelated call site.
+
+```lambda
+fn _format_dash(arr) {
+    let parts = (for (n in arr) util.fmt_num(n))
+    parts | join(",")           // runtime error [201]:
+                                // fn_join: unsupported operand types: array and element
+}
+```
+
+The list-comprehension `(for (n in arr) ...)` produces a value whose
+runtime type is *not* `array`, even when `arr` is. Piping that into
+`join` (which only accepts `array of string`) raises the cryptic
+`unsupported operand types: array and element` error.
+
+Worse, the same mismatch happens at the higher level when the caller
+does:
+
+```lambda
+paths = paths ++ (for (e in emit) wrap(e))
+```
+
+`paths` is `array`, the comprehension result is `list`, and `++`
+silently produces a hybrid value that errors out at the *next* time
+something tries to format it (often many lines later, in a totally
+unrelated call), with no hint that the offending `++` was the culprit.
+
+**Workarounds**:
+- Materialise comprehension results as plain array literals via index
+  access: `if (len(emit) == 1) [wrap(emit[0])]`.
+- Or wrap the entire chain in a procedural `var out = []; while … {
+  out = out ++ [item] }`.
+
+**Asks**:
+- Either unify `array` and `list` types so `++` works across them, or
+- Raise the error at the `++` site, not at the eventual consumer.
+- Document `(for x in xs) f(x)` as returning `list`, not `array`.
+
+---
+
+## 23. Element literal attribute set is fully static — no spread / no conditional
+
+**Severity: MEDIUM** — workable but surprising; forces N-fold
+duplication of element literals when only one attribute varies.
+
+```lambda
+// What you'd want:
+<path d: d, fill: f, stroke: s,
+      'stroke-dasharray': if (has_dash) dash else "none">     // syntax error
+
+// What works: branch the entire element:
+if (has_extras) {
+    <path d: d, fill: f, stroke: s,
+          'stroke-dasharray': dash, 'fill-opacity': fo>
+}
+else {
+    <path d: d, fill: f, stroke: s>
+}
+```
+
+There is no spread operator (`{*: extras}`) for attributes, no
+conditional attribute (`attr?: value when cond`), and no way to build
+a dynamic attribute set programmatically and apply it to an element
+literal.
+
+For SVG/HTML emitters this means each element with N optional
+attributes needs `2^N` literal forms — or the emitter must always emit
+defaults like `stroke-dasharray="none"`, `fill-opacity="1"` (which
+bloats output and changes existing goldens).
+
+**Asks**:
+- Either add spread/conditional attribute syntax, or
+- Provide a `make_element(tag, attrs_map, children)` runtime constructor
+  that takes the attribute set as an ordinary `map`.
 
 ---
 

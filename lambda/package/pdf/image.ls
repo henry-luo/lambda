@@ -125,3 +125,19 @@ pub fn apply_do(pdf, page, ctm, ops) {
         else { [] }
     }
 }
+
+// Public: handle a synthetic `inline_image` op produced by stream.ls when
+// it skips a BI..EI segment. We don't decode inline image bytes yet;
+// emit a hatched placeholder rect (1x1 in the local CTM space \u2014 the
+// caller wraps in <g transform="matrix(ctm)">) so the missing image is
+// visible without breaking layout.
+pub fn apply_inline(ctm, ops) {
+    let elem =
+        <rect x: "0", y: "0", width: "1", height: "1",
+              fill: "rgba(200,200,200,0.4)",
+              stroke: "rgb(160,160,160)",
+              'stroke-width': "0.02",
+              'stroke-dasharray': "0.05,0.05",
+              transform: "matrix(1 0 0 -1 0 1)">
+    [elem]
+}

@@ -78,3 +78,22 @@ pub fn from_rg_ops(ops) {
 pub fn from_k_ops(ops) {
     if (len(ops) >= 4) { cmyk(ops[0], ops[1], ops[2], ops[3]) } else { BLACK }
 }
+
+// sc/SC/scn/SCN: "set color in current colorspace". The PDF could have
+// any colorspace active (DeviceGray/RGB/CMYK, ICCBased, Indexed,
+// Pattern, Separation, DeviceN). Without resolving the actual cs
+// dictionary, fall back to dispatching by operand count — matches what
+// every real-world PDF uses for the device-family colorspaces.
+//   1 numeric operand → DeviceGray
+//   3 numeric operands → DeviceRGB
+//   4 numeric operands → DeviceCMYK
+// scn/SCN may carry a trailing /PatternName operand; the leading
+// numeric operands still indicate the underlying tint values.
+pub fn from_sc_ops(ops) {
+    let nums = (for (op in ops where (op is float or op is int)) op)
+    let n = len(nums)
+    if      (n >= 4) { cmyk(nums[0], nums[1], nums[2], nums[3]) }
+    else if (n >= 3) { rgb(nums[0], nums[1], nums[2]) }
+    else if (n >= 1) { gray(nums[0]) }
+    else             { BLACK }
+}

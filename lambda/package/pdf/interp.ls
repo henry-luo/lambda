@@ -23,6 +23,8 @@ import text:    .text
 import path:    .path
 import color:   .color
 import image:   .image
+import shading: .shading
+import coords:  .coords
 import svg:     .svg
 
 // ============================================================
@@ -57,6 +59,10 @@ fn _with_ctm(st, m) {
     { ctm: m, text: st.text, path: st.path, fonts: st.fonts }
 }
 
+fn _with_clip(st, id) {
+    st
+}
+
 // Wrap each emitted path in <g transform="matrix(ctm)"> so the outer
 // y-flip group can mirror them upright. Skip the wrap when the CTM is
 // the identity matrix — `matrix(1 0 0 1 0 0)` would just bloat output.
@@ -67,12 +73,23 @@ fn _with_ctm(st, m) {
 // `emit` is a singleton array (path painters return [elem] or []), so
 // we materialize the result as an array literal rather than a `for`
 // comprehension — Lambda's `++` rejects array/list mixes.
-fn _wrap_emit_with_ctm(emit, ctm) {
-    if (util.is_identity(ctm)) { emit }
-    else if (len(emit) == 0) { emit }
+fn _wrap_emit_with_ctm(emit, ctm, clip_id, has_clip) {
+    if (len(emit) == 0) { emit }
     else {
-        let xform = util.fmt_matrix(ctm)
-        [svg.group(xform, [emit[0]])]
+        let needs_xform = not util.is_identity(ctm)
+        let needs_clip  = (has_clip == 1)
+        if (not needs_xform and not needs_clip) { emit }
+        else if (needs_xform and needs_clip) {
+            let xform = util.fmt_matrix(ctm)
+            [<g transform: xform, 'clip-path': "url(#" ++ clip_id ++ ")"; emit[0]>]
+        }
+        else if (needs_xform) {
+            let xform = util.fmt_matrix(ctm)
+            [svg.group(xform, [emit[0]])]
+        }
+        else {
+            [<g 'clip-path': "url(#" ++ clip_id ++ ")"; emit[0]>]
+        }
     }
 }
 
@@ -130,23 +147,51 @@ fn _op_rg(st, ops) {
     let st1 = _with_path(st, path.set_fill_color(st.path, c))
     _with_text(st1, text.set_fill(st1.text, c))
 }
-fn _op_RG(st, ops) { _with_path(st, path.set_stroke_color(st.path, color.from_rg_ops(ops))) }
+fn _op_RG(st, ops) {
+    let c = color.from_rg_ops(ops)
+    let st1 = _with_path(st, path.set_stroke_color(st.path, c))
+    _with_text(st1, text.set_stroke(st1.text, c))
+}
 fn _op_g(st, ops)  {
     let c = color.from_g_ops(ops)
     let st1 = _with_path(st, path.set_fill_color(st.path, c))
     _with_text(st1, text.set_fill(st1.text, c))
 }
-fn _op_G(st, ops)  { _with_path(st, path.set_stroke_color(st.path, color.from_g_ops(ops))) }
+fn _op_G(st, ops)  {
+    let c = color.from_g_ops(ops)
+    let st1 = _with_path(st, path.set_stroke_color(st.path, c))
+    _with_text(st1, text.set_stroke(st1.text, c))
+}
 fn _op_k(st, ops)  {
     let c = color.from_k_ops(ops)
     let st1 = _with_path(st, path.set_fill_color(st.path, c))
     _with_text(st1, text.set_fill(st1.text, c))
 }
-fn _op_K(st, ops)  { _with_path(st, path.set_stroke_color(st.path, color.from_k_ops(ops))) }
+fn _op_K(st, ops)  {
+    let c = color.from_k_ops(ops)
+    let st1 = _with_path(st, path.set_stroke_color(st.path, c))
+    _with_text(st1, text.set_stroke(st1.text, c))
+}
+
+// sc/scn — set fill color in current colorspace (treat as text fill too).
+fn _op_sc(st, ops) {
+    let c = color.from_sc_ops(ops)
+    let st1 = _with_path(st, path.set_fill_color(st.path, c))
+    _with_text(st1, text.set_fill(st1.text, c))
+}
+// SC/SCN — set stroke color in current colorspace.
+fn _op_SC(st, ops) {
+    let c = color.from_sc_ops(ops)
+    let st1 = _with_path(st, path.set_stroke_color(st.path, c))
+    _with_text(st1, text.set_stroke(st1.text, c))
+}
 
 fn _is_color_op(opr) {
     ((opr == "rg") or (opr == "RG") or (opr == "g") or (opr == "G")
-        or (opr == "k") or (opr == "K"))
+        or (opr == "k") or (opr == "K")
+        or (opr == "sc") or (opr == "SC")
+        or (opr == "scn") or (opr == "SCN")
+        or (opr == "cs") or (opr == "CS"))
 }
 
 fn _apply_color(st, opr, ops) {
@@ -156,6 +201,12 @@ fn _apply_color(st, opr, ops) {
     else if (opr == "G")  { _op_G(st, ops) }
     else if (opr == "k")  { _op_k(st, ops) }
     else if (opr == "K")  { _op_K(st, ops) }
+    else if (opr == "sc"  or opr == "scn") { _op_sc(st, ops) }
+    else if (opr == "SC"  or opr == "SCN") { _op_SC(st, ops) }
+    // cs/CS just select the active colorspace; sc/scn following will
+    // pick up the operand count. We currently ignore the actual space
+    // (no Indexed/ICCBased lookup), which matches "fall back to device
+    // family" rendering.
     else                  { st }
 }
 
@@ -202,6 +253,23 @@ fn _apply_gs(st, ops, pdf, page) {
         }
     }
 }
+
+// ============================================================
+// No-op operators (acknowledge to avoid falling through to text)
+// ============================================================
+//
+// PDF marker / metadata / Type-3-glyph operators we accept and ignore.
+// Listing them explicitly keeps log noise down and prevents the text
+// catch-all in text.apply_op from running for non-text operators.
+fn _is_noop_op(opr) {
+    ((opr == "MP") or (opr == "DP")
+        or (opr == "BMC") or (opr == "BDC") or (opr == "EMC")
+        or (opr == "BX") or (opr == "EX")
+        or (opr == "ri") or (opr == "i")
+        or (opr == "d0") or (opr == "d1"))
+}
+
+fn _media_box(page) { coords.media_box_rect(page) }
 
 // ============================================================
 // Pre-resolution: walk ops once and resolve every distinct Tf name.
@@ -265,6 +333,18 @@ pub pn render_page(pdf, page, ops, page_h) {
     var stack = []
     var texts = []
     var paths = []
+    // Pending clip captured from the current path on W / W*; consumed
+    // by the next path-painting operator. has_pending_clip flag avoids
+    // string-sentinel pitfalls when the var was never assigned a real d.
+    var pending_clip_d = " "
+    var pending_clip_rule = "nonzero"
+    var has_pending_clip = 0
+    // Active clip-path SVG id (" " sentinel = none); set after a
+    // W+paint cycle so subsequent emits get wrapped.
+    var active_clip_id = " "
+    var has_active_clip = 0
+    // Counter for unique <clipPath>/<gradient> ids on this page.
+    var def_ctr = 0
     var i = 0
     let n = len(ops)
     while (i < n) {
@@ -293,16 +373,73 @@ pub pn render_page(pdf, page, ops, page_h) {
         else if (opr == "gs") {
             st = _apply_gs(st, args, pdf, page)
         }
+        else if (opr == "W") {
+            // Mark current path as pending non-zero clip. The clip is
+            // established by the next painting op (which also clears
+            // the path). Capture the `d` string now.
+            let d = path.current_path_d(st.path)
+            if (d != "" and len(d) > 0) {
+                pending_clip_d = d
+                pending_clip_rule = "nonzero"
+                has_pending_clip = 1
+            }
+            else { st = st }
+        }
+        else if (opr == "W*") {
+            let d = path.current_path_d(st.path)
+            if (d != "" and len(d) > 0) {
+                pending_clip_d = d
+                pending_clip_rule = "evenodd"
+                has_pending_clip = 1
+            }
+            else { st = st }
+        }
+        else if (opr == "sh") {
+            // Shading fill — paint with the named gradient across the
+            // current clip region (we approximate via a covering rect).
+            let mb = _media_box(page)
+            let s = shading.from_sh_op(pdf, page, st.ctm, args, mb.w, mb.h, def_ctr)
+            def_ctr = def_ctr + 1
+            if (len(s.defs) > 0) {
+                var k = 0
+                let me = len(s.defs)
+                while (k < me) { paths = paths ++ [s.defs[k]]; k = k + 1 }
+            }
+            if (len(s.emit) > 0) {
+                paths = paths ++ _wrap_emit_with_ctm(s.emit, st.ctm, active_clip_id, has_active_clip)
+            }
+        }
+        else if (_is_noop_op(opr)) {
+            // PDF marker / metadata / Type-3 ops — accept silently.
+            // (non-empty body required; see Lambda gotcha.)
+            st = st
+        }
+        else if (opr == "BI" or opr == "ID" or opr == "EI") {
+            // BI/ID/EI handled at stream-tokenize time; ignore strays.
+            st = st
+        }
+        else if (opr == "inline_image") {
+            // Synthetic op from stream.ls when it skipped a BI..EI
+            // segment. Emit a placeholder rect in the local CTM.
+            let imgs = image.apply_inline(st.ctm, args)
+            if (len(imgs) > 0) {
+                paths = paths ++ _wrap_emit_with_ctm(imgs, st.ctm, active_clip_id, has_active_clip)
+            }
+        }
         else if (opr == "Do") {
-            // Image / Form XObject placement. We pass the live ctm so
-            // the image element scales correctly. Emitted SVG sits inside
-            // the page-level y-flip group alongside vector paths.
+            // Image / Form XObject placement. image.apply_do already
+            // builds its own CTM-aware transform, so we append directly.
             let imgs = image.apply_do(pdf, page, st.ctm, args)
             if (len(imgs) > 0) {
                 var k = 0
                 let me = len(imgs)
                 while (k < me) {
-                    paths = paths ++ [imgs[k]]
+                    if (has_active_clip == 1) {
+                        paths = paths ++ [<g 'clip-path': "url(#" ++ active_clip_id ++ ")"; imgs[k]>]
+                    }
+                    else {
+                        paths = paths ++ [imgs[k]]
+                    }
                     k = k + 1
                 }
             }
@@ -311,14 +448,35 @@ pub pn render_page(pdf, page, ops, page_h) {
             // Path construction / painting / line-state operator.
             let pr = path.apply_op(st.path, opr, args)
             st = _with_path(st, pr.state)
+            // If a W/W* was set immediately before this op AND this op
+            // paints (or no-ops via `n`), establish the clip now.
+            let did_paint = (len(pr.emit) > 0) or (opr == "n")
+            if (did_paint and has_pending_clip == 1) {
+                let cid = "clip" ++ string(def_ctr)
+                def_ctr = def_ctr + 1
+                let cp = if (pending_clip_rule == "evenodd") {
+                    <clipPath id: cid;
+                        <path d: pending_clip_d, 'clip-rule': "evenodd">
+                    >
+                }
+                else {
+                    <clipPath id: cid;
+                        <path d: pending_clip_d>
+                    >
+                }
+                paths = paths ++ [cp]
+                active_clip_id = cid
+                has_active_clip = 1
+                has_pending_clip = 0
+            }
             if (len(pr.emit) > 0) {
-                paths = paths ++ _wrap_emit_with_ctm(pr.emit, st.ctm)
+                paths = paths ++ _wrap_emit_with_ctm(pr.emit, st.ctm, active_clip_id, has_active_clip)
             }
         }
         else {
             // Delegate every remaining operator to text.apply_op.
             // Unrecognized operators hit the catch-all there.
-            let r = text.apply_op(st.text, opr, args, page_h)
+            let r = text.apply_op(st.text, st.ctm, opr, args, page_h)
             st = _with_text(st, r.state)
             if (r.emit != null) {
                 var k = 0
