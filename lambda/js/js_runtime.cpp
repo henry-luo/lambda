@@ -1518,6 +1518,15 @@ extern "C" Item js_to_string(Item value) {
                 // (whether callable or not), if no primitive obtained, throw TypeError.
                 // This covers {toString: undefined, valueOf: undefined} where both are
                 // own properties but neither is callable.
+                // v28: DOM elements (and other exotic objects) may have non-callable
+                // toString/valueOf placeholders — fall through to default string conversion
+                // instead of throwing.
+                if (value.map && (value.map->map_kind == MAP_KIND_DOM ||
+                                  value.map->map_kind == MAP_KIND_CSSOM ||
+                                  value.map->map_kind == MAP_KIND_DOC_PROXY ||
+                                  value.map->map_kind == MAP_KIND_FOREIGN_DOC)) {
+                    break;  // fall through to default "[object Object]"
+                }
                 js_throw_type_error("Cannot convert object to primitive value");
                 return (Item){.item = s2it(heap_create_name(""))};
             }
@@ -11100,6 +11109,16 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             if (rt != LMD_TYPE_MAP && rt != LMD_TYPE_ARRAY && rt != LMD_TYPE_ELEMENT && rt != LMD_TYPE_FUNC) {
                 return result;
             }
+        }
+        // v28: DOM/CSSOM elements have non-callable toString/valueOf placeholders.
+        // Fall through to default string conversion instead of throwing.
+        TypeId tv = get_type_id(this_val);
+        if (tv == LMD_TYPE_MAP && this_val.map &&
+            (this_val.map->map_kind == MAP_KIND_DOM ||
+             this_val.map->map_kind == MAP_KIND_CSSOM ||
+             this_val.map->map_kind == MAP_KIND_DOC_PROXY ||
+             this_val.map->map_kind == MAP_KIND_FOREIGN_DOC)) {
+            return (Item){.item = s2it(heap_create_name("[object Object]"))};
         }
         js_throw_type_error("Cannot convert object to primitive value");
         return ItemNull;
