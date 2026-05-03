@@ -15,7 +15,8 @@ pn main() {
     let rect = coords.media_box_rect(page)
     let bytes = resolve.page_content_bytes(doc, page)
     let ops = stream.parse_content_stream(bytes)
-    let elements = interp.render_page(doc, page, ops, rect.h)
+    let result = interp.render_page(doc, page, ops, rect.h)
+    let elements = result.texts
 
     var info = []
     var i = 0

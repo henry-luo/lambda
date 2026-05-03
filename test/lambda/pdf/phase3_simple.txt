@@ -1,0 +1,1 @@
+{ page_w: 612, page_h: 792, path_count: 2, text_count: 3, paths: ["<path d="M 100 600 L 200 600 L 200 650 L 100 650 Z" fill="rgb(255,0,0)" stroke="none" stroke-width="1"></path>", "<path d="M 100 500 L 200 500 L 200 550 L 100 550 Z" fill="none" stroke="rgb(0,0,255)" stroke-width="2"></path>"]}
