@@ -71,7 +71,13 @@ pub fn new_state(fonts) {
         word_space: 0.0,
         hor_scale:  100.0,
         rise:       0.0,
+        // Text-rendering mode (Tr). 0=fill (default), 1=stroke,
+        // 2=fill+stroke, 3=invisible. Modes 4–7 add glyph outlines
+        // to the clipping path; we render them like 0–3 today (clip
+        // accumulation is owned by the path module).
+        render_mode: 0,
         fill:       "rgb(0,0,0)",
+        stroke:     "rgb(0,0,0)",
         fonts:      fonts
     }
 }
@@ -82,6 +88,23 @@ pub fn new_state(fonts) {
 pub fn set_fill(st, color_str) {
     { *: st, fill: color_str }
 }
+
+// Public: update the text stroke color. Called from interp on RG/G/K
+// so that text drawn under render-mode 1/2 picks up the active stroke.
+pub fn set_stroke(st, color_str) {
+    { *: st, stroke: color_str }
+}
+
+// Public: Tc — character spacing in unscaled text-space units.
+pub fn set_char_space(st, v) { { *: st, char_space: v } }
+// Public: Tw — word spacing in unscaled text-space units.
+pub fn set_word_space(st, v) { { *: st, word_space: v } }
+// Public: Tz — horizontal scaling, expressed as a percentage (100 = 100%).
+pub fn set_hor_scale(st, v)  { { *: st, hor_scale: v } }
+// Public: Ts — text rise in unscaled text-space units (pos = up in PDF).
+pub fn set_rise(st, v)       { { *: st, rise: v } }
+// Public: Tr — text-rendering mode (0–7 per PDF 9.3.6).
+pub fn set_render_mode(st, n) { { *: st, render_mode: n } }
 
 fn _with(st, tm, tlm, name, size, info, leading, in_text) {
     {
@@ -96,7 +119,9 @@ fn _with(st, tm, tlm, name, size, info, leading, in_text) {
         word_space: st.word_space,
         hor_scale:  st.hor_scale,
         rise:       st.rise,
+        render_mode: st.render_mode,
         fill:       st.fill,
+        stroke:     st.stroke,
         fonts:      st.fonts
     }
 }
@@ -143,29 +168,109 @@ fn _move(st, tx, ty) {
 // Emission
 // ============================================================
 
-fn _emit_text(st, page_h, content) {
+fn _emit_text(st, ctm, page_h, content) {
     if (content == "" or content == null) { null }
+    else if (st.render_mode == 3) {
+        // mode 3: invisible text — do not emit a paint, but keep state.
+        null
+    }
     else {
         let fi = st.font_info
         let family = if (fi) fi.family else "sans-serif"
         let weight = if (fi) fi.weight else "normal"
         let style  = if (fi) fi.style  else "normal"
-        let fill   = if (st.fill) st.fill else "rgb(0,0,0)"
-        let x = st.tm[4]
-        let y = float(page_h) - st.tm[5]
-        <text x: util.fmt_num(x), y: util.fmt_num(y),
-              'font-family': family,
-              'font-size':   util.fmt_num(st.font_size),
-              'font-weight': weight,
-              'font-style':  style,
-              fill:          fill;
-            content
-        >
+        let fill_color   = if (st.fill) st.fill else "rgb(0,0,0)"
+        let stroke_color = if (st.stroke) st.stroke else "rgb(0,0,0)"
+        // PDF text-rendering matrix Trm = Tm × CTM. The text origin
+        // (Tm[4], Tm[5]) must therefore be transformed by the CTM
+        // before we convert to SVG coordinates. Most modern producers
+        // emit `1 0 0 -1 0 page_h cm` to flip y, then position with
+        // Tm — without applying the CTM here, every glyph lands at
+        // the bottom of the page (off-by-flip).
+        // Apply text rise (Ts): shifts the baseline up in PDF space
+        // by `rise` text-space units (so positive moves up).
+        let tx = st.tm[4]
+        let ty = st.tm[5] + st.rise
+        let px = ctm[0] * tx + ctm[2] * ty + ctm[4]
+        let py = ctm[1] * tx + ctm[3] * ty + ctm[5]
+        let x = px
+        let y = float(page_h) - py
+        // Effective font size = Tf_size * |Trm.d|. For axis-aligned
+        // CTM/Tm (the overwhelming common case) this reduces to
+        // |Tm.d * CTM.d|. Producers typically emit `... 0 0 -36 ... Tm`
+        // + `1 Tf`, so the visible size lives in Tm.d.
+        let tm_scale  = util.fabs(st.tm[3])
+        let ctm_scale = util.fabs(ctm[3])
+        let combo     = if (tm_scale > 0.0 and ctm_scale > 0.0) tm_scale * ctm_scale
+                        else if (tm_scale > 0.0) tm_scale
+                        else if (ctm_scale > 0.0) ctm_scale
+                        else 1.0
+        let eff_size = st.font_size * combo
+        // Resolve fill / stroke per Tr (text rendering mode).
+        //   0 fill          1 stroke         2 fill+stroke   3 invisible
+        //   4 fill+clip     5 stroke+clip    6 f+s+clip      7 add-to-clip
+        // Clipping variants (4–7) render the same as 0–3; clip
+        // accumulation is owned by path.ls's W/W* (text-as-clip is
+        // a Phase 8+ refinement).
+        let mode = st.render_mode
+        let svg_fill   = if (mode == 1 or mode == 5) "none" else fill_color
+        let svg_stroke = if (mode == 1 or mode == 2 or mode == 5 or mode == 6) stroke_color
+                         else "none"
+        let needs_stroke = (svg_stroke != "none")
+        // Tz — horizontal scale, percentage. 100 = no change. Apply via
+        // a transform on the <text> origin so glyph widths scale but
+        // the baseline stays fixed. Skip when ~100 to keep markup tidy.
+        let hs = st.hor_scale / 100.0
+        let scaled = (util.fabs(hs - 1.0) > 0.001)
+        if (scaled and needs_stroke) {
+            <text x: "0", y: "0",
+                  transform: "translate(" ++ util.fmt_num(x) ++ " " ++ util.fmt_num(y) ++ ") scale(" ++ util.fmt_num(hs) ++ " 1)",
+                  'font-family': family,
+                  'font-size':   util.fmt_num(eff_size),
+                  'font-weight': weight,
+                  'font-style':  style,
+                  fill:          svg_fill,
+                  stroke:        svg_stroke;
+                content
+            >
+        }
+        else if (scaled) {
+            <text x: "0", y: "0",
+                  transform: "translate(" ++ util.fmt_num(x) ++ " " ++ util.fmt_num(y) ++ ") scale(" ++ util.fmt_num(hs) ++ " 1)",
+                  'font-family': family,
+                  'font-size':   util.fmt_num(eff_size),
+                  'font-weight': weight,
+                  'font-style':  style,
+                  fill:          svg_fill;
+                content
+            >
+        }
+        else if (needs_stroke) {
+            <text x: util.fmt_num(x), y: util.fmt_num(y),
+                  'font-family': family,
+                  'font-size':   util.fmt_num(eff_size),
+                  'font-weight': weight,
+                  'font-style':  style,
+                  fill:          svg_fill,
+                  stroke:        svg_stroke;
+                content
+            >
+        }
+        else {
+            <text x: util.fmt_num(x), y: util.fmt_num(y),
+                  'font-family': family,
+                  'font-size':   util.fmt_num(eff_size),
+                  'font-weight': weight,
+                  'font-style':  style,
+                  fill:          svg_fill;
+                content
+            >
+        }
     }
 }
 
-fn _emit_one(st, page_h, txt) {
-    let el = _emit_text(st, page_h, txt)
+fn _emit_one(st, ctm, page_h, txt) {
+    let el = _emit_text(st, ctm, page_h, txt)
     if (el) { [el] } else { [] }
 }
 
@@ -214,37 +319,71 @@ fn _op_TL(st, ops) {
     else               { { state: st, emit: null } }
 }
 
-fn _op_Tj(st, ops, page_h) {
+// Tc <num>: character spacing (additional space inserted between glyphs).
+fn _op_Tc(st, ops) {
+    if (len(ops) >= 1) { { state: set_char_space(st, _num(ops[0])), emit: null } }
+    else               { { state: st, emit: null } }
+}
+
+// Tw <num>: word spacing (additional space inserted at each 0x20 byte).
+fn _op_Tw(st, ops) {
+    if (len(ops) >= 1) { { state: set_word_space(st, _num(ops[0])), emit: null } }
+    else               { { state: st, emit: null } }
+}
+
+// Tz <pct>: horizontal scaling (in percent, 100 = identity).
+fn _op_Tz(st, ops) {
+    if (len(ops) >= 1) { { state: set_hor_scale(st, _num(ops[0])), emit: null } }
+    else               { { state: st, emit: null } }
+}
+
+// Ts <num>: text rise (positive shifts baseline up in PDF user space).
+fn _op_Ts(st, ops) {
+    if (len(ops) >= 1) { { state: set_rise(st, _num(ops[0])), emit: null } }
+    else               { { state: st, emit: null } }
+}
+
+// Tr <int>: text-rendering mode 0..7.
+fn _op_Tr(st, ops) {
     if (len(ops) >= 1) {
-        let txt = _decode_operand(ops[0], st.font_info)
-        { state: st, emit: _emit_one(st, page_h, txt) }
+        let v = ops[0]
+        let m = if (v is int) v else if (v is float) int(v) else 0
+        { state: set_render_mode(st, m), emit: null }
     }
     else { { state: st, emit: null } }
 }
 
-fn _op_TJ(st, ops, page_h) {
+fn _op_Tj(st, ctm, ops, page_h) {
+    if (len(ops) >= 1) {
+        let txt = _decode_operand(ops[0], st.font_info)
+        { state: st, emit: _emit_one(st, ctm, page_h, txt) }
+    }
+    else { { state: st, emit: null } }
+}
+
+fn _op_TJ(st, ctm, ops, page_h) {
     let op0 = if (len(ops) >= 1) ops[0] else null
     if (op0 is map and op0.kind == "array") {
         let txt = _decode_tj_array(op0.value, st.font_info)
-        { state: st, emit: _emit_one(st, page_h, txt) }
+        { state: st, emit: _emit_one(st, ctm, page_h, txt) }
     }
     else { { state: st, emit: null } }
 }
 
-fn _op_quote(st, ops, page_h) {
+fn _op_quote(st, ctm, ops, page_h) {
     if (len(ops) >= 1) {
         let s1 = _move(st, 0.0, -st.leading)
         let txt = _decode_operand(ops[0], s1.font_info)
-        { state: s1, emit: _emit_one(s1, page_h, txt) }
+        { state: s1, emit: _emit_one(s1, ctm, page_h, txt) }
     }
     else { { state: st, emit: null } }
 }
 
-fn _op_dquote(st, ops, page_h) {
+fn _op_dquote(st, ctm, ops, page_h) {
     if (len(ops) >= 3) {
         let s1 = _move(st, 0.0, -st.leading)
         let txt = _decode_operand(ops[2], s1.font_info)
-        { state: s1, emit: _emit_one(s1, page_h, txt) }
+        { state: s1, emit: _emit_one(s1, ctm, page_h, txt) }
     }
     else { { state: st, emit: null } }
 }
@@ -253,7 +392,7 @@ fn _op_dquote(st, ops, page_h) {
 // Top dispatcher
 // ============================================================
 
-pub fn apply_op(st, opr, ops, page_h) {
+pub fn apply_op(st, ctm, opr, ops, page_h) {
     if      (opr == "BT") { _op_BT(st) }
     else if (opr == "ET") { _op_ET(st) }
     else if (opr == "Tf") { _op_Tf(st, ops) }
@@ -262,10 +401,15 @@ pub fn apply_op(st, opr, ops, page_h) {
     else if (opr == "TD") { _op_TD(st, ops) }
     else if (opr == "T*") { _op_Tstar(st) }
     else if (opr == "TL") { _op_TL(st, ops) }
-    else if (opr == "Tj") { _op_Tj(st, ops, page_h) }
-    else if (opr == "TJ") { _op_TJ(st, ops, page_h) }
-    else if (opr == "'")  { _op_quote(st, ops, page_h) }
-    else if (opr == "\"") { _op_dquote(st, ops, page_h) }
+    else if (opr == "Tc") { _op_Tc(st, ops) }
+    else if (opr == "Tw") { _op_Tw(st, ops) }
+    else if (opr == "Tz") { _op_Tz(st, ops) }
+    else if (opr == "Ts") { _op_Ts(st, ops) }
+    else if (opr == "Tr") { _op_Tr(st, ops) }
+    else if (opr == "Tj") { _op_Tj(st, ctm, ops, page_h) }
+    else if (opr == "TJ") { _op_TJ(st, ctm, ops, page_h) }
+    else if (opr == "'")  { _op_quote(st, ctm, ops, page_h) }
+    else if (opr == "\"") { _op_dquote(st, ctm, ops, page_h) }
     else                  { { state: st, emit: null } }
 }
 
@@ -279,7 +423,7 @@ pub pn render_text_ops(ops, fonts, page_h) {
     var i = 0
     let n = len(ops)
     while (i < n) {
-        let r = apply_op(st, ops[i].op, ops[i].operands, page_h)
+        let r = apply_op(st, util.IDENTITY, ops[i].op, ops[i].operands, page_h)
         st = r.state
         if (r.emit != null) {
             var k = 0

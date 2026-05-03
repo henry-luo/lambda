@@ -1046,8 +1046,11 @@ static void process_pdf_stream(Input* input, Arena* view_arena, ViewBlock* paren
                         content_len = decompressed_len;
                         log_info("Decompressed stream: %zu -> %zu bytes", stream_data->len, decompressed_len);
                     } else {
-                        log_error("Failed to decompress stream with multiple filters");
-                        return;
+                        // Re-decompression failed. The post-process pass
+                        // (decompress_streams in input-pdf-postprocess.cpp) already
+                        // decodes filtered streams in place; if Filter is still set
+                        // here it's a stale marker, so fall back to the raw bytes.
+                        log_debug("Stream multi-filter re-decode failed; assuming pre-decoded by postprocess");
                     }
                 } else {
                     if (filters) mem_free(filters);  // allocated with mem_alloc
@@ -1076,8 +1079,11 @@ static void process_pdf_stream(Input* input, Arena* view_arena, ViewBlock* paren
                     content_len = decompressed_len;
                     log_info("Decompressed stream: %zu -> %zu bytes", stream_data->len, decompressed_len);
                 } else {
-                    log_error("Failed to decompress stream with filter: %s", filter_name->chars);
-                    return;
+                    // Re-decompression failed. The post-process pass
+                    // (decompress_streams in input-pdf-postprocess.cpp) already
+                    // decodes filtered streams in place; if Filter is still set
+                    // here it's a stale marker, so fall back to the raw bytes.
+                    log_debug("Stream filter '%s' re-decode failed; assuming pre-decoded by postprocess", filter_name->chars);
                 }
             }
         }

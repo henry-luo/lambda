@@ -1339,13 +1339,15 @@ static void render_svg_path(SvgRenderContext* ctx, Element* elem) {
 // helper: try font database lookup for a given family name
 // returns mem_alloc'd path string (caller frees), or nullptr
 static char* resolve_font_via_database(FontContext* font_ctx, const char* family,
-                                       const char** out_font_name) {
+                                       const char** out_font_name,
+                                       int weight = 400,
+                                       FontSlant slant = FONT_SLANT_NORMAL) {
     if (!font_ctx || !font_ctx->database || !family) return nullptr;
 
     FontDatabaseCriteria criteria = {};
     strncpy(criteria.family_name, family, sizeof(criteria.family_name) - 1);
-    criteria.weight = 400;  // normal weight
-    criteria.style = FONT_SLANT_NORMAL;
+    criteria.weight = weight;
+    criteria.style = slant;
 
     FontDatabaseResult result = font_database_find_best_match_internal(font_ctx->database, &criteria);
     if (result.font && result.font->file_path) {
@@ -1365,7 +1367,8 @@ static char* resolve_font_via_database(FontContext* font_ctx, const char* family
 }
 
 static char* resolve_svg_font_path(const char* font_family, const char** out_font_name,
-                                    FontContext* font_ctx = nullptr, int weight = 400) {
+                                    FontContext* font_ctx = nullptr, int weight = 400,
+                                    FontSlant slant = FONT_SLANT_NORMAL) {
     // default font name
     const char* used_font_name = font_family;
 
@@ -1429,9 +1432,10 @@ static char* resolve_svg_font_path(const char* font_family, const char** out_fon
 
     // helper: try a single family with full resolution chain
     auto try_family = [&](const char* fam) -> char* {
-        // weight-aware best match (covers bold for any weight >= 600)
-        if (weight >= 600 && font_ctx) {
-            FontMatchResult match = font_find_best_match(font_ctx, fam, weight, FONT_SLANT_NORMAL);
+        // weight-aware / slant-aware best match. Use it whenever bold or
+        // italic/oblique is requested — the platform lookup ignores style.
+        if (font_ctx && (weight >= 600 || slant != FONT_SLANT_NORMAL)) {
+            FontMatchResult match = font_find_best_match(font_ctx, fam, weight, slant);
             if (match.found && match.file_path && !strstr(match.file_path, ".ttc")) {
                 char* path = mem_strdup(match.file_path, MEM_CAT_RENDER);
                 if (out_font_name) {
@@ -1446,8 +1450,8 @@ static char* resolve_svg_font_path(const char* font_family, const char** out_fon
                     bold_font_name[name_len] = '\0';
                     *out_font_name = bold_font_name;
                 }
-                log_debug("[SVG] font resolved via best-match (weight=%d): %s -> %s (name='%s')",
-                          weight, fam, path, out_font_name ? *out_font_name : "?");
+                log_debug("[SVG] font resolved via best-match (weight=%d slant=%d): %s -> %s (name='%s')",
+                          weight, (int)slant, fam, path, out_font_name ? *out_font_name : "?");
                 return path;
             }
         }
@@ -1477,7 +1481,7 @@ static char* resolve_svg_font_path(const char* font_family, const char** out_fon
         // database lookup
         if (font_ctx) {
             const char* dbname = nullptr;
-            p = resolve_font_via_database(font_ctx, fam, &dbname);
+            p = resolve_font_via_database(font_ctx, fam, &dbname, weight, slant);
             if (p) {
                 if (out_font_name) {
                     static char db_font_name[256];
@@ -1754,9 +1758,21 @@ static void render_svg_text(SvgRenderContext* ctx, Element* elem) {
         if (font_weight <= 0) font_weight = 400;
     }
 
+    // parse font-style: italic / oblique / normal. SVG attribute or
+    // inherited value from parent <g>. Required so the resolved font
+    // file actually carries the italic glyphs (otherwise SVG output
+    // marked italic renders upright because the platform lookup
+    // ignores style).
+    const char* font_style_str = get_svg_attr(elem, "font-style");
+    FontSlant font_slant = FONT_SLANT_NORMAL;
+    if (font_style_str) {
+        if      (strcmp(font_style_str, "italic") == 0)  font_slant = FONT_SLANT_ITALIC;
+        else if (strcmp(font_style_str, "oblique") == 0) font_slant = FONT_SLANT_OBLIQUE;
+    }
+
     // resolve font path and name
     const char* font_name = nullptr;
-    char* font_path = resolve_svg_font_path(font_family, &font_name, ctx->font_ctx, font_weight);
+    char* font_path = resolve_svg_font_path(font_family, &font_name, ctx->font_ctx, font_weight, font_slant);
     if (!font_path) {
         log_debug("[SVG] <text> no font available for: %s", font_family ? font_family : "default");
         return;
@@ -1803,7 +1819,7 @@ static void render_svg_text(SvgRenderContext* ctx, Element* elem) {
         style.family = metrics_family;
         style.size_px = font_size;
         style.weight = (FontWeight)font_weight;
-        style.slant = FONT_SLANT_NORMAL;
+        style.slant = font_slant;
         FontHandle* handle = font_resolve(ctx->font_ctx, &style);
         if (handle) {
             const FontMetrics* fm = font_get_metrics(handle);

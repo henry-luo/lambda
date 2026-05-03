@@ -405,8 +405,41 @@ PDF.js techniques **not** adopted:
 | **Phase 4: Images** | `image.ls`; embed raster images via data URI (decoding stays in C) | +400 |
 | **Phase 5: HTML shell + text-selection enhancement** | `html.ls` multi-page nav; line-clustering pass in `text.ls` for high-quality SVG text selection | +500 |
 | **Phase 6: Form XObjects, clipping, patterns** | Recursive XObject expansion, `<clipPath>`, basic gradients | +700 |
-| **Phase 7: Parity & retire C++ pipeline** | Replace `radiant/pdf/pdf_to_view.cpp`; remove C++ interpretation path once parity is reached | — |
-| **Phase 8+ (deferred):** Annotations (highlights, notes, links beyond basic), form fields, JavaScript actions, Tagged-PDF accessibility mapping | Out of scope for initial release | — |
+| **Phase 7: Outstanding content-stream operators** | Implement remaining PDF operators currently no-op'd by the interpreter (see §6.1) | +600 |
+| **Phase 8: Parity & retire C++ pipeline** | Replace `radiant/pdf/pdf_to_view.cpp`; remove C++ interpretation path once parity is reached | — |
+| **Phase 9+ (deferred):** Annotations (highlights, notes, links beyond basic), form fields, JavaScript actions, Tagged-PDF accessibility mapping | Out of scope for initial release | — |
+
+### 6.1 Phase 7 — Outstanding Operators
+
+Audit of the current dispatcher (`interp.ls`, `text.ls`, `path.ls`) against the PDF 1.7 / ISO 32000-1 operator set and PDF.js's interpreter shows the following operators are accepted but silently no-op'd through the catch-all in `text.ls`. Phase 7 implements them in priority order.
+
+| PDF op | pdf.js IR name | Module | Effect of absence today | Priority |
+|---|---|---|---|---|
+| `Tc` | setCharSpacing | `text.ls` | Inter-glyph spacing wrong; concatenated words | High |
+| `Tw` | setWordSpacing | `text.ls` | Word gaps wrong on space character | High |
+| `Tz` | setHScale | `text.ls` | Horizontally-stretched text rendered at 100% | High |
+| `Ts` | setTextRise | `text.ls` | Super/subscript on baseline | High |
+| `Tr` | setTextRenderingMode | `text.ls` | Stroked / clipped / invisible text rendered as fill | Medium |
+| `W`, `W*` | clip / eoClip | `path.ls` | Clipping regions ignored — content bleeds outside intended bounds | High |
+| `sh` | shadingFill | new `shading.ls` | Gradients & shadings invisible | Medium |
+| `BI` / `ID` / `EI` | beginInlineImage / endInlineImage | `image.ls` | Inline images dropped | Medium |
+| `MP`, `DP` | markPoint, markPointProps | `interp.ls` (no-op ack) | Marked-point metadata lost (cosmetic) | Low |
+| `BMC`, `BDC`, `EMC` | beginMarkedContent*, endMarkedContent | `interp.ls` (no-op ack) | Tagged-PDF / accessibility regions lost | Low |
+| `BX`, `EX` | beginCompat / endCompat | `interp.ls` (no-op ack) | Compatibility section unmarked | Low |
+| `ri`, `i` | setRenderingIntent / setFlatness | `interp.ls` (no-op ack) | Cosmetic only; ack to silence dispatcher | Low |
+| `d0`, `d1` | setCharWidth / setCharWidthAndBounds | `font.ls` | Type-3 font glyph procs not supported | Low (rare) |
+
+**Implementation notes:**
+
+- `Tc`/`Tw`/`Tz`/`Ts` extend `GState` (already declared in §3.4) and feed into the `text.ls` glyph-positioning math; `Tw` only applies to literal space-character (`0x20`) advances.
+- `Tr` maps to SVG paint mode: 0=fill, 1=stroke, 2=fill+stroke, 3=invisible (skip emit), 4–7=add-to-clip variants (combine with `<clipPath>`).
+- `W`/`W*` mark the *current path* as the next clip — applied at the next path-paint operator (`n`, `S`, `f`, …) by wrapping subsequent emits in `<clipPath id="...">` + `clip-path="url(#...)"`.
+- `sh` requires a small `shading.ls` translating PDF shading dicts (Types 2/3 axial/radial) into SVG `<linearGradient>` / `<radialGradient>`.
+- `BI…ID…EI` reuses `image.ls` decoding helpers; the inline image dict is already adjacent in the stream.
+- `BMC`/`BDC`/`EMC` should be tracked as a stack so Phase 9 accessibility work can hook in, but emit nothing for now.
+- Add an explicit `_op_noop_ack(opr)` in `interp.ls` so the dispatcher stops falling through to the text-module catch-all for non-text operators (cleaner debug logs).
+
+**Acceptance:** every operator above is dispatched explicitly (no silent fall-through), and dedicated `test/lambda/pdf/phase7_*.ls` cases cover at least `Tc`+`Tw`, `Ts`, `Tr` mode 1 (stroked text), `W` clipping, and one `sh` axial gradient with golden `.txt` outputs.
 
 Total Lambda Script: **~4,000 lines**.
 C++ retained: parser (~3,200) + low-level helpers (~600).

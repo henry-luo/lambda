@@ -419,17 +419,18 @@ static const char* mime_to_parser_type(const char* mime_type) {
     return "text";
 }
 
-extern "C" Input* input_from_source(const char* source, Url* abs_url, String* type, String* flavor) {
-    log_debug("input_from_source: ENTRY type='%s', flavor='%s'",
+extern "C" Input* input_from_source_n(const char* source, size_t source_len, Url* abs_url, String* type, String* flavor) {
+    log_debug("input_from_source_n: ENTRY type='%s', flavor='%s', len=%zu",
               type ? type->chars : "null",
-              flavor ? flavor->chars : "null");
+              flavor ? flavor->chars : "null",
+              source_len);
     const char* effective_type = NULL;
     // Determine the effective type to use
     if (!type || strcmp(type->chars, "auto") == 0) {
         // Auto-detect MIME type
         MimeDetector* detector = mime_detector_init();
         if (detector) {
-            const char* detected_mime = detect_mime_type(detector, abs_url->pathname ? abs_url->pathname->chars : "", source, strlen(source));
+            const char* detected_mime = detect_mime_type(detector, abs_url->pathname ? abs_url->pathname->chars : "", source, source_len);
             if (detected_mime) {
                 effective_type = mime_to_parser_type(detected_mime);
                 log_debug("Auto-detected MIME type: %s -> parser type: %s\n", detected_mime, effective_type);
@@ -540,9 +541,9 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
             parse_rtf(input, source);
         }
         else if (strcmp(effective_type, "pdf") == 0) {
-            // Note: PDF parsing with strlen may fail on binary content with null bytes
-            // For proper PDF handling, use read_binary_file and parse_pdf with explicit size
-            parse_pdf(input, source, strlen(source));
+            // PDF is binary; use the explicit length we received instead of strlen,
+            // which would truncate at the first null byte inside the binary stream.
+            parse_pdf(input, source, source_len);
         }
         else if (strcmp(effective_type, "wiki") == 0) {
             input->root = input_markup_with_format(input, source, MARKUP_WIKI);
@@ -614,6 +615,12 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
     return input;
 }
 
+extern "C" Input* input_from_source(const char* source, Url* abs_url, String* type, String* flavor) {
+    // Back-compat wrapper: assumes source is a null-terminated string (text only).
+    // Binary inputs (e.g. PDF) must call input_from_source_n with the actual byte count.
+    return input_from_source_n(source, source ? strlen(source) : 0, abs_url, type, flavor);
+}
+
 // Helper function to read text file from file:// URL
 static char* read_file_from_url(Url* url) {
     if (!url || url->scheme != URL_SCHEME_FILE) {
@@ -624,6 +631,35 @@ static char* read_file_from_url(Url* url) {
     if (!pathname) return NULL;
     log_debug("Reading file from path: %s", pathname);
     return read_text_file(pathname);
+}
+
+// Read a local file and parse it via input_from_source_n. Detects binary
+// formats (currently PDF) and reads them with read_binary_file so that null
+// bytes in the payload are preserved and the parser receives an accurate
+// byte length instead of strlen() which would truncate at the first null.
+static Input* input_from_local_path(const char* pathname, Url* abs_url, String* type, String* flavor) {
+    bool is_binary_pdf = false;
+    if (type && type->chars && strcmp(type->chars, "pdf") == 0) {
+        is_binary_pdf = true;
+    } else if (pathname) {
+        size_t plen = strlen(pathname);
+        if (plen >= 4 && strcasecmp(pathname + plen - 4, ".pdf") == 0) {
+            is_binary_pdf = true;
+        }
+    }
+
+    size_t src_len = 0;
+    char* source = is_binary_pdf ? read_binary_file(pathname, &src_len)
+                                 : read_text_file(pathname);
+    if (!source) {
+        log_debug("input_from_local_path: failed to read file at path: %s", pathname ? pathname : "null");
+        return NULL;
+    }
+    if (!is_binary_pdf) src_len = strlen(source);
+
+    Input* input = input_from_source_n(source, src_len, abs_url, type, flavor);
+    mem_free(source);
+    return input;
 }
 
 Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
@@ -676,15 +712,8 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
 
         // URL points to a file - read as normal
         log_debug("reading file from path: %s", pathname ? pathname : "null");
-        char* source = read_text_file(pathname);
-        if (!source) {
-            log_debug("Failed to read document at URL: %s", url ? url->chars : "null");
-            url_destroy(abs_url);
-            return NULL;
-        }
 
-        Input* input = input_from_source(source, abs_url, type, flavor);
-        mem_free(source);  // Free the source string after parsing
+        Input* input = input_from_local_path(pathname, abs_url, type, flavor);
         url_destroy(abs_url);
         return input;
     }
@@ -777,16 +806,9 @@ Input* input_from_target(Target* target, String* type, String* flavor) {
             }
 
             log_debug("input_from_target: reading file from path: %s", pathname ? pathname : "null");
-            char* source = read_text_file(pathname);
-            if (!source) {
-                log_debug("input_from_target: failed to read file at path: %s", pathname ? pathname : "null");
-                return NULL;
-            }
-
-            // Create a copy of the URL for the input (input_from_source doesn't own the URL)
+            // Create a copy of the URL for the input (input owns lifecycle of url_copy via Input)
             Url* url_copy = url_parse(url->href->chars);
-            Input* input = input_from_source(source, url_copy, type, flavor);
-            mem_free(source);
+            Input* input = input_from_local_path(pathname, url_copy, type, flavor);
             if (!input && url_copy) url_destroy(url_copy);
             return input;
         }
@@ -838,13 +860,6 @@ Input* input_from_target(Target* target, String* type, String* flavor) {
         // Directory case already handled by target_is_dir check above
 
         log_debug("input_from_target: reading file from path: %s", pathname);
-        char* source = read_text_file(pathname);
-        if (!source) {
-            log_debug("input_from_target: failed to read file at path: %s", pathname);
-            strbuf_free(path_buf);
-            return NULL;
-        }
-
         // Create URL from file path for the input
         StrBuf* url_buf = strbuf_new();
         strbuf_append_str(url_buf, "file://");
@@ -855,8 +870,7 @@ Input* input_from_target(Target* target, String* type, String* flavor) {
         Url* file_url = url_parse(url_buf->str);
         strbuf_free(url_buf);
 
-        Input* input = input_from_source(source, file_url, type, flavor);
-        mem_free(source);
+        Input* input = input_from_local_path(pathname, file_url, type, flavor);
         strbuf_free(path_buf);
         if (!input && file_url) url_destroy(file_url);
         return input;
