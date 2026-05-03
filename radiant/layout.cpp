@@ -1033,7 +1033,7 @@ void view_line_align(LayoutContext* lycon, float offset, View* view) {
 
 // Count justification opportunities in a text view for justify alignment.
 // CSS Text 3 §7.3: counts word spaces AND CJK inter-character gaps.
-static int count_spaces_in_view(View* view) {
+static int count_spaces_in_view(View* view, float line_y) {
     int count = 0;
     while (view) {
         if (view->view_type == RDT_VIEW_TEXT) {
@@ -1042,8 +1042,12 @@ static int count_spaces_in_view(View* view) {
             if (text_data) {
                 TextRect* rect = text->rect;
                 while (rect) {
-                    count += count_justify_opportunities(
-                        text_data + rect->start_index, rect->length);
+                    // only consider rects on the current line (multi-line
+                    // wrapped text views may have rects from prior lines)
+                    if (rect->y >= line_y - 1.0f) {
+                        count += count_justify_opportunities(
+                            text_data + rect->start_index, rect->length);
+                    }
                     rect = rect->next;
                 }
             }
@@ -1051,7 +1055,7 @@ static int count_spaces_in_view(View* view) {
         else if (view->view_type == RDT_VIEW_INLINE) {
             ViewSpan* sp = (ViewSpan*)view;
             if (sp->first_child) {
-                count += count_spaces_in_view(sp->first_child);
+                count += count_spaces_in_view(sp->first_child, line_y);
             }
         }
         view = view->next();
@@ -1061,54 +1065,71 @@ static int count_spaces_in_view(View* view) {
 
 // Apply justify alignment by distributing space between words and CJK inter-char gaps.
 // CSS Text 3 §7.3: For auto justification, expand word spaces and CJK inter-character gaps.
-static void view_line_justify(LayoutContext* lycon, float space_per_gap, View* view) {
-    float cumulative_offset = 0;
-    View* last_view = nullptr;
-    TextRect* last_rect = nullptr;
-
+// Returns the updated cumulative_offset after processing this subtree.
+static float view_line_justify_walk(LayoutContext* lycon, float space_per_gap, View* view,
+                                    float line_y, float cumulative_offset,
+                                    View** last_view, TextRect** last_rect) {
     while (view) {
-        view->x += cumulative_offset;
-        last_view = view;
-
         if (view->view_type == RDT_VIEW_TEXT) {
             ViewText* text = (ViewText*)view;
-            text->x += cumulative_offset;
-
             const char* text_data = (const char*)text->text_data();
             TextRect* rect = text->rect;
+            bool any_on_line = false;
             while (rect) {
-                rect->x += cumulative_offset;
-                last_rect = rect;
+                // only justify rects on the current line; rects from prior
+                // wrapped lines must not be shifted or counted again
+                if (rect->y >= line_y - 1.0f) {
+                    rect->x += cumulative_offset;
+                    *last_rect = rect;
+                    *last_view = view;
+                    any_on_line = true;
 
-                // Count justification opportunities (spaces + CJK inter-char gaps)
-                if (text_data) {
-                    int gap_count = count_justify_opportunities(
-                        text_data + rect->start_index, rect->length);
-                    // Expand this rect's width by the space added within it
-                    if (gap_count > 0) {
-                        float added_space = gap_count * space_per_gap;
-                        rect->width += added_space;
-                        cumulative_offset += added_space;
+                    // count justification opportunities (spaces + CJK inter-char gaps)
+                    if (text_data) {
+                        int gap_count = count_justify_opportunities(
+                            text_data + rect->start_index, rect->length);
+                        // expand this rect's width by the space added within it
+                        if (gap_count > 0) {
+                            float added_space = gap_count * space_per_gap;
+                            rect->width += added_space;
+                            cumulative_offset += added_space;
+                        }
                     }
                 }
-
                 rect = rect->next;
             }
-            // Sync text view bounds to reflect expanded rects
-            adjust_text_bounds(text);
+            // sync text view bounds to reflect expanded rects
+            if (any_on_line) adjust_text_bounds(text);
         }
         else if (view->view_type == RDT_VIEW_INLINE) {
+            // shift inline span's x by accumulated offset (it sits on the current line)
+            view->x += cumulative_offset;
+            *last_view = view;
             ViewSpan* sp = (ViewSpan*)view;
             if (sp->first_child) {
-                // Recursively justify inline children
-                // Note: This is simplified - a full implementation would need to track
-                // cumulative offset across the recursion
-                view_line_justify(lycon, space_per_gap, sp->first_child);
+                // recurse into inline children, propagating cumulative_offset so
+                // child rects get shifted along with the parent span
+                cumulative_offset = view_line_justify_walk(lycon, space_per_gap,
+                    sp->first_child, line_y, cumulative_offset, last_view, last_rect);
             }
+        }
+        else {
+            // other view types on the current line: shift by cumulative_offset
+            view->x += cumulative_offset;
+            *last_view = view;
         }
 
         view = view->next();
     }
+    return cumulative_offset;
+}
+
+static void view_line_justify(LayoutContext* lycon, float space_per_gap, View* view) {
+    View* last_view = nullptr;
+    TextRect* last_rect = nullptr;
+    float line_y = lycon->block.advance_y;
+    float cumulative_offset = view_line_justify_walk(lycon, space_per_gap, view,
+        line_y, 0.0f, &last_view, &last_rect);
 
     // Extend the last text rect to fill any remaining space due to rounding errors.
     // Only do this if justification actually distributed space (cumulative_offset > 0),
@@ -1402,7 +1423,8 @@ void line_align(LayoutContext* lycon) {
                 // Multi-view path: traverse all views on the line to find and
                 // distribute space across word gaps in sibling/nested views.
                 {
-                    int num_spaces = count_spaces_in_view(view);
+                    float line_y = lycon->block.advance_y;
+                    int num_spaces = count_spaces_in_view(view, line_y);
                     float extra_width = available_width - line_width;
                     if (num_spaces > 0 && extra_width > 0) {
                         float space_per_gap = extra_width / num_spaces;

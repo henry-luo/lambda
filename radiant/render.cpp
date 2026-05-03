@@ -1031,6 +1031,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
     // Get text-transform from parent elements
     CssEnum text_transform = CSS_VALUE_NONE;
     CssEnum text_align = CSS_VALUE_LEFT;  // default to left alignment
+    bool text_align_found = false;
     DomNode* parent = text_view->parent;
     while (parent) {
         if (parent->is_element()) {
@@ -1039,10 +1040,14 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
             if (transform != CSS_VALUE_NONE) {
                 text_transform = transform;
             }
-            // Get text-align property from block properties
-            if (elem->blk) {
+            // Get text-align from the nearest ancestor that has block properties.
+            // text-align is CSS-inherited, so the closest block already holds the
+            // resolved value; walking further would overwrite it with an outer
+            // (e.g. <html>) default and lose 'justify'.
+            if (!text_align_found && elem->blk) {
                 BlockProp* blk_prop = (BlockProp*)elem->blk;
                 text_align = blk_prop->text_align;
+                text_align_found = true;
             }
             if (transform != CSS_VALUE_NONE) {
                 break;
@@ -3388,7 +3393,8 @@ void render_children(RenderContext* rdcon, View* view) {
                 }
             }
             else if (block->tag_id == HTM_TAG_SVG) {
-                // Inline SVG element - render via ThorVG
+                // Inline SVG element - paint CSS background/border first, then SVG content
+                if (block->bound) { render_bound(rdcon, block); }
                 log_debug("[RENDER DISPATCH] calling render_inline_svg for inline SVG");
                 auto ts1 = std::chrono::high_resolution_clock::now();
                 render_inline_svg(rdcon, block);

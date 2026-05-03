@@ -158,15 +158,16 @@ void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
         text_content[len + 3] = '\0';
     }
 
-    // Calculate natural text width for justify rendering (excluding trailing spaces)
+    // Calculate natural text width and gap count for justify rendering.
+    // NOTE: includes trailing spaces. The layout's count_justify_opportunities
+    // (see layout_text.cpp) counts every space including trailing ones, so the
+    // text_rect->width has been expanded based on all spaces. Stripping trailing
+    // spaces here would cause the renderer to compute a smaller space_count and
+    // therefore a larger word-spacing per gap, visibly over-spacing the line.
     float natural_width = 0.0f;
     int space_count = 0;
     if (ctx->font.font_handle) {
-        // Find end of non-whitespace content
         size_t content_len = strlen(text_content);
-        while (content_len > 0 && text_content[content_len - 1] == ' ') {
-            content_len--;
-        }
 
         unsigned char* scan = (unsigned char*)text_content;
         unsigned char* content_end = scan + content_len;
