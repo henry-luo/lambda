@@ -1088,6 +1088,95 @@ static void encode_image_xobjects(Input* input, MarkBuilder& builder,
     log_info("pdf_postprocess: encoded %d Image XObject(s) to PNG data URI", encoded);
 }
 
+// Build a `data:font/<fmt>;base64,...` URI from a stream Map's `data`
+// field. Returns nullptr on failure. Caller must already have run Pass 3
+// so the stream `data` is the post-filter (raw) font program.
+static String* font_stream_to_data_uri(Input* input, Map* sm,
+                                       const char* mime, const char* /*fmt*/) {
+    if (!sm) return nullptr;
+    String* data = item_as_string(map_lookup(sm, "data"));
+    if (!data || data->len == 0) return nullptr;
+    char* b64 = base64_alloc((const uint8_t*)data->chars, data->len);
+    if (!b64) return nullptr;
+    size_t b64_len = strlen(b64);
+    size_t prefix_len = strlen("data:") + strlen(mime) + strlen(";base64,");
+    size_t total = prefix_len + b64_len;
+    String* out = (String*)pool_calloc(input->pool, sizeof(String) + total + 1);
+    if (!out) { free(b64); return nullptr; }
+    int n = snprintf(out->chars, total + 1, "data:%s;base64,%s", mime, b64);
+    if (n < 0 || (size_t)n != total) { free(b64); return nullptr; }
+    out->len = (uint32_t)total;
+    out->is_ascii = 1;
+    free(b64);
+    return out;
+}
+
+// Pass 5 entry: walk objects, encode embedded font programs.
+// Looks for FontDescriptor dicts and, if they reference a FontFile/
+// FontFile2/FontFile3 stream, attaches `font_data_uri` + `font_format`
+// to the descriptor. Lambda-side renderers can then emit @font-face.
+static void encode_embedded_fonts(Input* input, MarkBuilder& builder,
+                                  Array* objects, ObjTable* table) {
+    if (!objects) return;
+    int encoded = 0;
+    for (int i = 0; i < objects->length; i++) {
+        Map* iobj = item_as_map(objects->items[i]);
+        if (!iobj || !map_has_type(iobj, "indirect_object")) continue;
+        Item content = map_lookup(iobj, "content");
+        Map* fd = item_as_map(content);
+        if (!fd) continue;
+        String* ts = item_as_string(map_lookup(fd, "Type"));
+        if (!ts || !str_eq(ts, "FontDescriptor")) continue;
+
+        // try FontFile2 (TrueType) → "truetype"
+        // try FontFile3 (OpenType / CFF) → "opentype"
+        // try FontFile  (Type1)         → "embedded-opentype" fallback,
+        //                                  not directly usable in browsers
+        const char* mime = nullptr;
+        const char* fmt  = nullptr;
+        Item ff_it = map_lookup(fd, "FontFile2");
+        if (ff_it.item != ITEM_NULL) {
+            mime = "font/ttf"; fmt = "truetype";
+        } else {
+            ff_it = map_lookup(fd, "FontFile3");
+            if (ff_it.item != ITEM_NULL) {
+                // FontFile3 Subtype tells us OpenType vs CIDFontType0C
+                Map* sm_peek = item_as_map(resolve_ref_deep(ff_it, table));
+                if (sm_peek) {
+                    Map* d2 = item_as_map(map_lookup(sm_peek, "dictionary"));
+                    String* sub = d2 ? item_as_string(map_lookup(d2, "Subtype"))
+                                     : nullptr;
+                    if (sub && str_eq(sub, "OpenType")) {
+                        mime = "font/otf"; fmt = "opentype";
+                    } else {
+                        // CFF/Type1C — browsers can't load these directly
+                        continue;
+                    }
+                }
+            } else {
+                ff_it = map_lookup(fd, "FontFile");
+                if (ff_it.item == ITEM_NULL) continue;
+                // Type1 PFB — not directly usable; skip.
+                continue;
+            }
+        }
+        if (!mime) continue;
+
+        Map* sm = item_as_map(resolve_ref_deep(ff_it, table));
+        if (!sm || !map_has_type(sm, "stream")) continue;
+
+        String* uri = font_stream_to_data_uri(input, sm, mime, fmt);
+        if (!uri) continue;
+        builder.putToMap(fd, builder.createString("font_data_uri"),
+                         {.item = s2it(uri)});
+        builder.putToMap(fd, builder.createString("font_format"),
+                         {.item = s2it(builder.createString(fmt))});
+        encoded++;
+    }
+    log_info("pdf_postprocess: encoded %d embedded font(s) to data URI",
+             encoded);
+}
+
 }  // anonymous namespace
 
 // ---------------------------------------------------------------------------
@@ -1124,6 +1213,9 @@ void pdf_postprocess(Input* input) {
 
     // Pass 4: encode Image XObjects to PNG data URIs
     encode_image_xobjects(input, builder, objects, &table);
+
+    // Pass 5: encode embedded font programs to data URIs
+    encode_embedded_fonts(input, builder, objects, &table);
 
     g_post_pool = nullptr;
 }

@@ -160,7 +160,7 @@ static const char* html5_lookup_svg_attr(const char* attr_name) {
 }
 
 // Check if element is in SVG namespace (based on parent chain)
-static bool html5_is_in_svg_namespace(Html5Parser* parser) {
+bool html5_is_in_svg_namespace(Html5Parser* parser) {
     // Walk up the stack looking for an SVG element
     for (int i = (int)parser->open_elements->length - 1; i >= 0; i--) {
         Element* elem = (Element*)parser->open_elements->items[i].element;

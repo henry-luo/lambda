@@ -20,6 +20,7 @@
 #include "../lib/base64.h"
 #include <ctype.h>
 #include <math.h>
+#include <stdio.h>
 
 #ifndef LAMBDA_HEADLESS
 #include <thorvg_capi.h>  // needed for SVG text rendering (tvg_text_* API)
@@ -1366,6 +1367,173 @@ static char* resolve_font_via_database(FontContext* font_ctx, const char* family
     return nullptr;
 }
 
+// Materialize a registered @font-face entry to a usable file path for ThorVG.
+// Returns mem_alloc'd path string (caller mem_free's). For data URIs, decodes
+// to a temp file under ./temp/ keyed by the data URI hash so each unique font
+// is materialized at most once. For regular file paths, returns a copy of the
+// path. Returns nullptr if no @font-face entry matches `family` or no source
+// can be materialized.
+static bool font_file_has_unicode_cmap(const char* path);
+
+static char* resolve_font_via_fontface(FontContext* font_ctx, const char* family,
+                                        const char** out_font_name,
+                                        int weight, FontSlant slant) {
+    if (!font_ctx || !family || !*family) return nullptr;
+
+    FontWeight fw = (weight >= 100 && weight <= 900) ? (FontWeight)weight : FONT_WEIGHT_NORMAL;
+    const FontFaceEntry* entry = font_face_find_internal(font_ctx, family, fw, slant);
+    if (!entry || entry->source_count <= 0 || !entry->sources) return nullptr;
+
+    for (int i = 0; i < entry->source_count; i++) {
+        const char* src = entry->sources[i].path;
+        if (!src) continue;
+
+        if (strncmp(src, "data:", 5) != 0) {
+            // local file path — return copy, skip TTC
+            if (strstr(src, ".ttc")) continue;
+            char* p = mem_strdup(src, MEM_CAT_RENDER);
+            if (out_font_name) *out_font_name = entry->family;
+            log_debug("[SVG] @font-face resolved: %s -> %s", family, src);
+            return p;
+        }
+
+        // data URI — decode and write to ./temp/lambda_font_<hash>.<ext>
+        const char* comma = strchr(src, ',');
+        if (!comma) continue;
+
+        // pick extension from format (if known), else from MIME type, else ttf
+        const char* ext = "ttf";
+        const char* fmt = entry->sources[i].format;
+        if (fmt) {
+            if (strcasecmp(fmt, "opentype") == 0 || strcasecmp(fmt, "otf") == 0) ext = "otf";
+            else if (strcasecmp(fmt, "woff2") == 0) ext = "woff2";
+            else if (strcasecmp(fmt, "woff") == 0) ext = "woff";
+        } else {
+            // sniff from mime: data:font/ttf;... or data:font/otf;...
+            if (strncmp(src, "data:font/otf", 13) == 0 ||
+                strncmp(src, "data:application/font-otf", 25) == 0) ext = "otf";
+            else if (strstr(src, "woff2")) ext = "woff2";
+            else if (strstr(src, "woff")) ext = "woff";
+        }
+
+        // hash the data URI suffix (after comma) for a stable filename
+        // simple FNV-1a 64-bit
+        uint64_t h = 1469598103934665603ULL;
+        for (const char* p = comma + 1; *p; p++) {
+            h ^= (uint8_t)*p;
+            h *= 1099511628211ULL;
+        }
+
+        char temp_path[512];
+        snprintf(temp_path, sizeof(temp_path), "./temp/lambda_font_%016llx.%s",
+                 (unsigned long long)h, ext);
+
+        // if file already exists (cached), use it directly
+        FILE* fcheck = fopen(temp_path, "rb");
+        if (fcheck) {
+            fclose(fcheck);
+            // reject if no Unicode cmap (PDF Identity / Mac Roman subsets)
+            if (!font_file_has_unicode_cmap(temp_path)) {
+                log_debug("[SVG] @font-face %s has no Unicode cmap, falling back to system font", family);
+                return nullptr;
+            }
+            char* p = mem_strdup(temp_path, MEM_CAT_RENDER);
+            if (out_font_name) *out_font_name = entry->family;
+            log_debug("[SVG] @font-face cached file: %s -> %s", family, temp_path);
+            return p;
+        }
+
+        // base64 decode and write
+        size_t b64_len = strlen(comma + 1);
+        size_t decoded_len = 0;
+        uint8_t* decoded = base64_decode(comma + 1, b64_len, &decoded_len);
+        if (!decoded || decoded_len == 0) {
+            if (decoded) free(decoded);
+            log_debug("[SVG] @font-face base64 decode failed for %s", family);
+            continue;
+        }
+
+        FILE* fout = fopen(temp_path, "wb");
+        if (!fout) {
+            free(decoded);
+            log_debug("[SVG] @font-face cannot open temp file %s", temp_path);
+            continue;
+        }
+        size_t written = fwrite(decoded, 1, decoded_len, fout);
+        fclose(fout);
+        free(decoded);
+        if (written != decoded_len) {
+            log_debug("[SVG] @font-face write incomplete %zu/%zu", written, decoded_len);
+            continue;
+        }
+
+        log_info("[SVG] @font-face materialized: %s -> %s (%zu bytes)",
+                 family, temp_path, decoded_len);
+        // reject if no Unicode cmap (PDF Identity / Mac Roman subsets) — these
+        // font subsets are GID-keyed via the PDF's ToUnicode CMap and can't
+        // be used directly for Unicode-text SVG rendering.
+        if (!font_file_has_unicode_cmap(temp_path)) {
+            log_info("[SVG] @font-face %s has no Unicode cmap, falling back to system font", family);
+            return nullptr;
+        }
+        char* p = mem_strdup(temp_path, MEM_CAT_RENDER);
+        if (out_font_name) *out_font_name = entry->family;
+        return p;
+    }
+
+    return nullptr;
+}
+
+// Quickly check whether a TTF/OTF file has a Unicode cmap subtable
+// (platformID=0, or platformID=3 encodingID=1/10). PDFs embed font subsets
+// with Mac Roman / Identity cmaps that are GID-keyed, not Unicode-keyed —
+// ThorVG's Unicode-based glyph lookup returns nothing for those, so we must
+// reject them and fall back to a system font.
+static bool font_file_has_unicode_cmap(const char* path) {
+    if (!path) return false;
+    FILE* f = fopen(path, "rb");
+    if (!f) return false;
+
+    uint8_t hdr[12];
+    if (fread(hdr, 1, 12, f) != 12) { fclose(f); return false; }
+    uint16_t numTables = (uint16_t)((hdr[4] << 8) | hdr[5]);
+    if (numTables == 0 || numTables > 64) { fclose(f); return false; }
+
+    uint32_t cmap_off = 0, cmap_len = 0;
+    for (uint16_t i = 0; i < numTables; i++) {
+        uint8_t rec[16];
+        if (fread(rec, 1, 16, f) != 16) { fclose(f); return false; }
+        if (rec[0] == 'c' && rec[1] == 'm' && rec[2] == 'a' && rec[3] == 'p') {
+            cmap_off = ((uint32_t)rec[8] << 24) | ((uint32_t)rec[9] << 16) |
+                       ((uint32_t)rec[10] << 8) | (uint32_t)rec[11];
+            cmap_len = ((uint32_t)rec[12] << 24) | ((uint32_t)rec[13] << 16) |
+                       ((uint32_t)rec[14] << 8) | (uint32_t)rec[15];
+            break;
+        }
+    }
+    if (!cmap_off || cmap_len < 4) { fclose(f); return false; }
+
+    if (fseek(f, (long)cmap_off, SEEK_SET) != 0) { fclose(f); return false; }
+    uint8_t cmap_hdr[4];
+    if (fread(cmap_hdr, 1, 4, f) != 4) { fclose(f); return false; }
+    uint16_t numSub = (uint16_t)((cmap_hdr[2] << 8) | cmap_hdr[3]);
+    if (numSub == 0 || numSub > 64) { fclose(f); return false; }
+
+    bool has_unicode = false;
+    for (uint16_t i = 0; i < numSub; i++) {
+        uint8_t rec[8];
+        if (fread(rec, 1, 8, f) != 8) break;
+        uint16_t pid = (uint16_t)((rec[0] << 8) | rec[1]);
+        uint16_t eid = (uint16_t)((rec[2] << 8) | rec[3]);
+        // platformID 0 = Unicode (any encoding)
+        // platformID 3 (Microsoft) + encodingID 1 (BMP) or 10 (UCS-4) = Unicode
+        if (pid == 0) { has_unicode = true; break; }
+        if (pid == 3 && (eid == 1 || eid == 10)) { has_unicode = true; break; }
+    }
+    fclose(f);
+    return has_unicode;
+}
+
 static char* resolve_svg_font_path(const char* font_family, const char** out_font_name,
                                     FontContext* font_ctx = nullptr, int weight = 400,
                                     FontSlant slant = FONT_SLANT_NORMAL) {
@@ -1432,6 +1600,13 @@ static char* resolve_svg_font_path(const char* font_family, const char** out_fon
 
     // helper: try a single family with full resolution chain
     auto try_family = [&](const char* fam) -> char* {
+        // first, check the @font-face registry — embedded fonts (e.g. from
+        // PDFs with FontFile2/FontFile3 streams) live here and would otherwise
+        // be invisible to platform/database lookups.
+        if (font_ctx) {
+            char* p = resolve_font_via_fontface(font_ctx, fam, out_font_name, weight, slant);
+            if (p) return p;
+        }
         // weight-aware / slant-aware best match. Use it whenever bold or
         // italic/oblique is requested — the platform lookup ignores style.
         if (font_ctx && (weight >= 600 || slant != FONT_SLANT_NORMAL)) {

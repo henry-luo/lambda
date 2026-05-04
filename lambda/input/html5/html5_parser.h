@@ -262,6 +262,9 @@ bool html5_has_element_in_table_scope(Html5Parser* parser, const char* tag_name)
 bool html5_has_element_in_list_item_scope(Html5Parser* parser, const char* tag_name);
 bool html5_has_element_in_select_scope(Html5Parser* parser, const char* tag_name);
 
+// Foreign-content namespace check (defined in html5_parser.cpp)
+bool html5_is_in_svg_namespace(Html5Parser* parser);
+
 // Tree construction helpers
 void html5_generate_implied_end_tags(Html5Parser* parser);
 void html5_generate_implied_end_tags_except(Html5Parser* parser, const char* tag_name);

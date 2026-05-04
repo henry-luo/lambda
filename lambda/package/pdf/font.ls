@@ -178,12 +178,20 @@ fn _strip_subset(name: string) {
 // when chained through let-bindings.
 fn _make_descriptor(name, info, to_uni) {
     { name: name, family: info.family, weight: info.weight,
-      style: info.style, to_unicode: to_uni }
+      style: info.style, to_unicode: to_uni,
+      font_data_uri: null, font_format: null, embedded_family: null }
+}
+
+fn _make_descriptor_embedded(name, info, to_uni, uri, fmt, emb_family) {
+    { name: name, family: info.family, weight: info.weight,
+      style: info.style, to_unicode: to_uni,
+      font_data_uri: uri, font_format: fmt, embedded_family: emb_family }
 }
 
 fn _unknown_descriptor(name) {
     { name: name, family: _UNKNOWN.family, weight: _UNKNOWN.weight,
-      style: _UNKNOWN.style, to_unicode: null }
+      style: _UNKNOWN.style, to_unicode: null,
+      font_data_uri: null, font_format: null, embedded_family: null }
 }
 
 // Look up the font referenced by `name` on `page`'s resource dict and
@@ -250,6 +258,44 @@ fn _final_info(pdf, stripped, dict, s14, fb) {
     else info_pre
 }
 
+// Look up the embedded font program info attached by the C-side
+// post-processor (input-pdf-postprocess.cpp `encode_embedded_fonts`).
+// Returns { uri, fmt } or null.
+fn _embedded_font_info(pdf, dict) {
+    let fd = if (dict.FontDescriptor) resolve.deref(pdf, dict.FontDescriptor) else null
+    if (fd == null) { null }
+    else if (fd.font_data_uri == null) { null }
+    else { { uri: fd.font_data_uri, fmt: fd.font_format } }
+}
+
+// When the font program is embedded, ensure the (subset-stripped)
+// basefont name appears exactly once at the head of the CSS family
+// stack as a quoted family. This is the CSS family name we'll declare
+// in @font-face below, so the browser matches and uses our extracted
+// glyphs instead of OS fallback. `from_basefont` already prepends the
+// same quoted name on non-Standard-14 inputs, so we strip any leading
+// `'name', ` prefix before re-adding to avoid `'X', 'X', serif` dupes.
+fn _strip_quoted_prefix(family: string, name: string) {
+    let prefix = "'" ++ name ++ "', "
+    let plen = len(prefix)
+    let flen = len(family)
+    if (flen <= plen) { family }
+    else {
+        // build the leading slice as a string and compare
+        let head = (for (i in 0 to (plen - 1)) family[i]) | join("")
+        if (head == prefix) {
+            (for (i in plen to (flen - 1)) family[i]) | join("")
+        }
+        else { family }
+    }
+}
+
+fn _info_with_embedded(info, emb_family) {
+    let tail = _strip_quoted_prefix(info.family, emb_family)
+    { family: "'" ++ emb_family ++ "', " ++ tail,
+      weight: info.weight, style: info.style }
+}
+
 pub pn resolve_font(pdf, page, name: string) {
     let dict = resolve.page_font(pdf, page, name)
     if (dict == null) { return _unknown_descriptor(name) }
@@ -265,9 +311,18 @@ pub pn resolve_font(pdf, page, name: string) {
     // guess (bit 1 = FixedPitch, bit 2 = Serif). Only applied when the
     // basefont is non-Standard-14 (s14 hit means we already trust the
     // canonical metrics).
-    let info = _final_info(pdf, stripped, dict, s14, fb)
+    let info0 = _final_info(pdf, stripped, dict, s14, fb)
     let to_uni = _to_unicode_or_null(dict)
-    return _make_descriptor(name, info, to_uni)
+    // Embedded font program?  Pull the data URI off the FontDescriptor
+    // and weave the unsubsetted family name into the CSS stack so the
+    // browser matches our @font-face declaration.
+    let emb = _embedded_font_info(pdf, dict)
+    if (emb == null) {
+        return _make_descriptor(name, info0, to_uni)
+    }
+    let info1 = _info_with_embedded(info0, stripped)
+    return _make_descriptor_embedded(name, info1, to_uni,
+                                     emb.uri, emb.fmt, stripped)
 }
 
 // ============================================================

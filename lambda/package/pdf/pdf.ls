@@ -19,6 +19,7 @@ import html:    .html
 import resolve: .resolve
 import stream:  .stream
 import interp:  .interp
+import font:    .font
 
 // ============================================================
 // Phase 2 page rendering
@@ -143,7 +144,14 @@ pub pn pdf_to_html(pdf, opts) {
         svgs = svgs ++ [s]
         i = i + 1
     }
-    return html.html_shell(svgs, opts)
+    // Inject @font-face rules for embedded fonts so the browser uses
+    // the actual glyphs (not OS fallback). Done here — once per doc —
+    // rather than per page so the rule appears once.
+    let faces = _collect_font_face_rules(pdf)
+    let base_css = if (opts and opts.css) opts.css else html.DEFAULT_CSS
+    let css = _build_css(faces, base_css)
+    let opts2 = _opts_with_css(opts, css)
+    return html.html_shell(svgs, opts2)
 }
 
 // Number of pages in the document.
@@ -154,4 +162,80 @@ pub fn pdf_page_count(pdf) {
 // Document metadata from the trailer's /Info dict (best-effort).
 pub fn pdf_metadata(pdf) {
     resolve.metadata(pdf)
+}
+
+// ============================================================
+// Embedded font collection (@font-face)
+// ============================================================
+//
+// Walk every font referenced by every page; for those whose program
+// the C-side post-processor extracted (font_data_uri set), emit a
+// `@font-face` rule keyed on the unsubsetted family name. Browsers
+// then load the actual glyphs instead of falling back to an OS font
+// with different metrics.
+
+// Locate font names in a page's /Resources/Font sub-dict. Returns a
+// list of the keys (e.g. ["F1", "F2", "F3"]). Empty when the page has
+// no font resources.
+fn _page_font_names(pdf, page) {
+    let res = resolve.page_resources(pdf, page)
+    let fonts = if (res and res.Font) resolve.deref(pdf, res.Font) else null
+    if (fonts == null) { [] }
+    else {
+        let names = for (k, v in fonts) string(k);
+        names
+    }
+}
+
+// Build a single @font-face CSS rule.
+fn _font_face_rule(family: string, fmt: string, uri: string) {
+    "@font-face { font-family: '" ++ family ++ "'; " ++
+        "src: url(\"" ++ uri ++ "\") format('" ++ fmt ++ "'); " ++
+        "font-weight: normal; font-style: normal; " ++
+        "font-display: block; }\n"
+}
+
+pn _collect_one_page(pdf, page, seen_families, rules) {
+    var s = seen_families
+    var r = rules
+    let names = _page_font_names(pdf, page)
+    var i = 0
+    let n = len(names)
+    while (i < n) {
+        let info = font.resolve_font(pdf, page, names[i])
+        let fam = info.embedded_family
+        if (fam != null and not contains(s, fam)) {
+            s = s ++ [fam]
+            r = r ++ [_font_face_rule(fam, info.font_format,
+                                       info.font_data_uri)]
+        }
+        i = i + 1
+    }
+    return { seen: s, rules: r }
+}
+
+pn _collect_font_face_rules(pdf) {
+    let n = resolve.page_count(pdf)
+    var seen = []
+    var rules = []
+    var i = 0
+    while (i < n) {
+        let page = resolve.page_at(pdf, i)
+        let r = _collect_one_page(pdf, page, seen, rules)
+        seen = r.seen
+        rules = r.rules
+        i = i + 1
+    }
+    return rules | join("")
+}
+
+// Build the final stylesheet: @font-face block first, then base CSS.
+fn _build_css(face_rules: string, base_css: string) {
+    if (face_rules == "") { base_css }
+    else { face_rules ++ base_css }
+}
+
+fn _opts_with_css(opts, css: string) {
+    if (opts == null) { { css: css } }
+    else              { { *: opts, css: css } }
 }
