@@ -13,8 +13,8 @@ console.log(fs.existsSync("./temp/nonexistent_file_xyz.txt"));
 // Test 3: statSync
 var stat = fs.statSync("./temp/fs_test1.txt");
 console.log(stat.size);
-console.log(stat.isFile);
-console.log(stat.isDirectory);
+console.log(stat.isFile());
+console.log(stat.isDirectory());
 
 // Test 4: appendFileSync
 fs.appendFileSync("./temp/fs_test1.txt", " appended");

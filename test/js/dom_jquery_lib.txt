@@ -14,7 +14,7 @@ find #app: 1
 find .item: 3
 matchesSelector: true
 1
-find-error: Cannot read properties of null (reading 'slice')
+0
 Hello jQuery
 true
 1

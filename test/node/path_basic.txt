@@ -6,8 +6,8 @@ baz
 .
 true
 true
-1
-0
+true
+false
 /
 :
 foo/bar/baz

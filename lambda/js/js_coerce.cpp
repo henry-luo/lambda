@@ -120,6 +120,16 @@ extern "C" Item js_to_primitive(Item value, JsHint hint) {
     }
 
     // Step 4: every callable method returned an object → TypeError.
+    // v28: DOM/CSSOM elements have non-callable toString/valueOf placeholders
+    // (returning boolean ITEM_TRUE for feature detection). Fall through to
+    // default string conversion instead of throwing.
+    if (vt == LMD_TYPE_MAP && value.map &&
+        (value.map->map_kind == MAP_KIND_DOM ||
+         value.map->map_kind == MAP_KIND_CSSOM ||
+         value.map->map_kind == MAP_KIND_DOC_PROXY ||
+         value.map->map_kind == MAP_KIND_FOREIGN_DOC)) {
+        return (Item){.item = s2it(heap_create_name("[object Object]"))};
+    }
     js_throw_type_error("Cannot convert object to primitive value");
     return ItemNull;
 }

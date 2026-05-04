@@ -13,6 +13,8 @@ globalThis.self = globalThis;
 // === Library Reference ===
 var moment = module.exports;
 
+moment.suppressDeprecationWarnings = true;
+
 // === Test harness ===
 var errors = [];
 var pass = 0;

@@ -689,6 +689,15 @@ static bool validate_unicode_strict(const std::string& pat) {
                 if (class_prev_was_shorthand && (i > 0 && pat[i - 1] == '-')) {
                     return false; // [X-\d]
                 }
+                // \p{...} or \P{...} — unicode property escape
+                if (nx == 'p' || nx == 'P') {
+                    if (i + 2 >= n || pat[i + 2] != '{') return false;
+                    size_t j = i + 3;
+                    while (j < n && pat[j] != '}') j++;
+                    if (j >= n) return false;
+                    class_prev_was_shorthand = 0; class_after_first = true;
+                    i = j; continue;
+                }
                 // similar escape validation as outside class (subset)
                 if (nx == 'u') {
                     if (i + 2 >= n) return false;
