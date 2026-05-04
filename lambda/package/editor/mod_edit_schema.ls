@@ -1,0 +1,122 @@
+// mod_edit_schema.ls — Schema-based content validation over Mark trees
+// (Radiant Rich Text Editing, Phase R1)
+//
+// Pure functional validator: a doc is well-formed under a schema iff every
+// element's' tag is declared and its children sequence matches the declared
+// content expression. Strings are treated as the synthetic role 'text' and
+// satisfy any term whose role is 'inline'.
+
+// ---------------------------------------------------------------------------
+// Lookup helpers
+// ---------------------------------------------------------------------------
+
+// Schema entry for a tag, or null when the tag is not declared.
+pub fn schema_entry(schema, tag) => schema[tag]
+
+// Role of a child relative to a schema:
+//   bare strings           -> 'text'
+//   declared elements      -> entry.role
+//   undeclared elements    -> 'unknown'
+pub fn child_role(schema, child) {
+  if (type(child) == string) 'text'
+  else if (type(child) == element) {
+    let entry = schema[name(child)]
+    if (entry == null) 'unknown' else entry.role
+  }
+  else 'unknown'
+}
+
+// Does a single child satisfy a single term?
+//
+// Term variants:
+//   { tag:  S }   -> child must be an element whose name is S
+//   { role: R }   -> child's' role must be R, with two relaxations:
+//                       'inline' accepts 'text' and 'mark'
+//                       'block'  accepts only 'block'
+pub fn satisfies(schema, child, term) {
+  if (term.tag != null) {
+    type(child) == element and name(child) == term.tag
+  } else {
+    let r = child_role(schema, child)
+    if (r == term.role) true
+    else if (term.role == 'inline') (r == 'text' or r == 'mark')
+    else false
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Greedy content-expression matching
+// ---------------------------------------------------------------------------
+
+// Count consecutive children starting at `ci` that satisfy `term`, capped at `mx`.
+// Pure-functional tail recursion.
+fn count_sat(schema, children, ci, mx, term, acc) {
+  if (acc >= mx) acc
+  else if (ci + acc >= len(children)) acc
+  else if (not satisfies(schema, children[ci + acc], term)) acc
+  else count_sat(schema, children, ci, mx, term, acc + 1)
+}
+
+// Match `terms` against `children` starting at term index `ti`, child index `ci`.
+// Greedy left-to-right; returns true iff every child is consumed by some term.
+fn match_terms_at(schema, children, ti, ci, terms) {
+  if (ti >= len(terms)) ci == len(children)
+  else {
+    let term = terms[ti]
+    let qty = term.qty
+    let mn = if (qty == 'plus' or qty == 'one') 1 else 0
+    let mx = if (qty == 'one' or qty == 'opt') 1 else len(children) - ci
+    let n = count_sat(schema, children, ci, mx, term, 0)
+    if (n < mn) false
+    else match_terms_at(schema, children, ti + 1, ci + n, terms)
+  }
+}
+
+// Match an entire content expression against a child sequence.
+pub fn match_content(schema, children, terms) =>
+  match_terms_at(schema, children, 0, 0, terms)
+
+// ---------------------------------------------------------------------------
+// Violations & whole-tree validation
+// ---------------------------------------------------------------------------
+
+// Violation shape: { path: [int, ...], tag: <symbol|null>, message: string }
+
+fn mk_violation(path, tag, message) => {path: path, tag: tag, message: message}
+
+// Children at element node (extracted as plain array — needed for indexing
+// and len() inside recursive functional code).
+fn children_array(elem) => [for (c in elem) c]
+
+// Validate one element node and return [violations].
+fn validate_node(schema, node, path) {
+  let tag = name(node)
+  let entry = schema[tag]
+  if (entry == null) {
+    [mk_violation(path, tag, "unknown tag")]
+  } else {
+    let kids = children_array(node)
+    let local = if (entry.atomic == true and len(kids) > 0)
+        [mk_violation(path, tag, "atomic node has children")]
+      else if (not match_content(schema, kids, entry.content))
+        [mk_violation(path, tag, "content does not match schema")]
+      else []
+    let nested = for (i in 0 to len(kids) - 1)
+        if (type(kids[i]) == element)
+          validate_node(schema, kids[i], [*path, i])
+        else []
+    [*local, *(for (vs in nested) for (v in vs) v)]
+  }
+}
+
+// Validate a whole document tree.
+pub fn schema_validate(schema, doc) {
+  if (type(doc) != element) {
+    [mk_violation([], null, "root is not an element")]
+  } else {
+    validate_node(schema, doc, [])
+  }
+}
+
+// True when the doc passes validation with zero violations.
+pub fn is_valid(schema, doc) => len(schema_validate(schema, doc)) == 0

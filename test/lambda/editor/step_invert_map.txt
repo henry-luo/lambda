@@ -1,0 +1,78 @@
+"inv1 kind:"
+'replace_text'
+"inv1 from:"
+7
+"inv1 to:"
+13
+"inv1 text:"
+true
+"round-trip:"
+true
+"inv2 from:"
+0
+"inv2 to:"
+4
+"inv2 text:"
+true
+"insert undone:"
+true
+"inv3 from:"
+5
+"inv3 to:"
+5
+"inv3 text:"
+true
+"delete undone:"
+true
+"inv4 kind:"
+'replace'
+"inv4 slice len:"
+2
+"replace undone:"
+true
+"m_inv kind:"
+true
+"mark undone:"
+true
+"sa1 inv val null:"
+true
+"attr removed?"
+true
+"sa2 inv val:"
+true
+"attr restored:"
+true
+"st_inv tag:"
+true
+"tag restored:"
+true
+"map pre:"
+3
+"map mid:"
+13
+"map pst:"
+14
+"map other:"
+3
+"map other path:"
+true
+"replace map parent pre:"
+true
+"replace map parent at:"
+true
+"replace map parent post:"
+true
+"replace map child shift:"
+2
+"replace map offset preserved:"
+true
+"collapsed depth:"
+0
+"collapsed offset:"
+true
+"mark map identity:"
+true
+"attr map identity:"
+true
+"type map identity:"
+true

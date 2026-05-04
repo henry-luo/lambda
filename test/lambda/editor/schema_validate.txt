@@ -1,0 +1,36 @@
+"doc1 valid:"
+true
+"doc1 violations:"
+0
+"doc2 valid:"
+true
+"doc2 violations:"
+0
+"hr-with-kids violations:"
+1
+"hr violation msg ok:"
+true
+"hr violation tag:"
+'hr'
+"unknown violations:"
+2
+"unknown msg ok:"
+true
+"empty-doc valid:"
+false
+"empty-doc msg ok:"
+true
+"bad list_item valid:"
+false
+"nested list valid:"
+true
+"string root violations:"
+1
+"string root msg ok:"
+true
+"path_doc valid:"
+true
+"bad_deep at least one violation:"
+true
+"bad_deep first path nonempty:"
+true
