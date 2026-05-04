@@ -122,6 +122,9 @@ bool render_map_reverse_lookup_with_path(Item result_node,
                                          struct RenderMapLookup* out_lookup,
                                          SourcePathC* out_path);
 
+// Drop the path side-table (test/teardown helper).
+void source_pos_bridge_reset(void);
+
 #ifdef __cplusplus
 }
 #endif

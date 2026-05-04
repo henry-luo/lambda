@@ -1,8 +1,22 @@
-// source_pos_bridge.cpp — minimal C-side scaffolding for the editor
-// source-position bridge. The pure-Lambda half lives in
-// lambda/package/editor/mod_dom_bridge.ls; this file provides the
-// C struct lifecycle helpers and stubs the DOM glue functions that
-// require the upcoming render_map path-recording extension.
+// source_pos_bridge.cpp — C-side scaffolding for the editor source-position
+// bridge (Phase R7, Radiant integration step 1). The pure-Lambda half lives
+// in lambda/package/editor/mod_dom_bridge.ls.
+//
+// What this file provides:
+//   * SourcePathC / SourcePosC value lifecycle (init/free/clone/equal).
+//   * A side-table from `(Item source_item, const char* template_ref)` to
+//     a heap-owned SourcePathC. Populated by `render_map_record_path` from
+//     the apply() pipeline; consulted by `render_map_reverse_lookup_with_path`.
+//     Kept separate from the main render_map so we don't widen the
+//     RenderMapEntry struct or churn its hashing.
+//   * `source_pos_from_dom_boundary`: walks DOM ancestors from a boundary
+//     point, finds the first DomElement whose native_element is registered
+//     in render_map, retrieves its recorded source path, and (for text
+//     hits) converts the boundary's UTF-16 code-unit offset to a UTF-8
+//     byte offset matching the editor's internal storage.
+//   * `dom_boundary_from_source_pos` is left as a stub for now — turning a
+//     SourcePos into a DomBoundary additionally needs an Item→DomElement
+//     reverse map, which is the next sub-step.
 
 // Bring in the full Item definition before including the bridge header,
 // since Item is passed by value across the C ABI.
@@ -12,6 +26,12 @@
 
 #include <stdlib.h>
 #include <string.h>
+
+#include "../lib/hashmap.h"
+#include "../lambda/render_map.h"
+#include "../lambda/input/css/dom_node.hpp"
+#include "../lambda/input/css/dom_element.hpp"
+#include "dom_range.hpp"
 
 extern "C" {
 
@@ -61,39 +81,217 @@ void source_pos_free(SourcePosC* p) {
 }
 
 // ---------------------------------------------------------------------------
-// DOM ↔ source-pos — stubbed pending render_map path-recording extension.
-// Returning false here is intentional: callers MUST treat absence of a
-// translation as a soft failure (e.g., fall back to dom_range coordinates)
-// until the bridge is fully wired.
+// Path side-table: keyed on (source_item.item, template_ref) → SourcePathC.
+// Heap-owned indices; freed when the entry is overwritten or the table is
+// reset.
 // ---------------------------------------------------------------------------
 
-bool source_pos_from_dom_boundary(const DomBoundary* /*boundary*/,
-                                  SourcePosC* out) {
-    if (out) source_path_init(&out->path);
-    return false;
+typedef struct PathTableEntry {
+    uint64_t    source_item_bits;
+    const char* template_ref;
+    SourcePathC path;            // owned
+} PathTableEntry;
+
+static HashMap* s_path_table = NULL;
+
+static uint64_t path_hash(const void* item, uint64_t s0, uint64_t s1) {
+    const PathTableEntry* e = (const PathTableEntry*)item;
+    uint64_t h1 = hashmap_murmur(&e->source_item_bits, sizeof(uint64_t), s0, s1);
+    uint64_t h2 = hashmap_murmur(&e->template_ref, sizeof(void*), s0, s1);
+    return h1 ^ (h2 * 0x9e3779b97f4a7c15ULL);
 }
 
-bool source_pos_from_dom_range(const DomRange* /*range*/,
-                               SourcePosC* /*out_start*/,
-                               SourcePosC* /*out_end*/) {
-    return false;
+static int path_compare(const void* a, const void* b, void* /*udata*/) {
+    const PathTableEntry* ea = (const PathTableEntry*)a;
+    const PathTableEntry* eb = (const PathTableEntry*)b;
+    if (ea->source_item_bits != eb->source_item_bits) {
+        return ea->source_item_bits < eb->source_item_bits ? -1 : 1;
+    }
+    if (ea->template_ref != eb->template_ref) {
+        return ea->template_ref < eb->template_ref ? -1 : 1;
+    }
+    return 0;
 }
+
+// Called by hashmap when an entry is replaced or removed: free the owned
+// indices buffer so we don't leak.
+static void path_entry_free(void* item) {
+    PathTableEntry* e = (PathTableEntry*)item;
+    if (e) source_path_free(&e->path);
+}
+
+static HashMap* ensure_path_table(void) {
+    if (!s_path_table) {
+        s_path_table = hashmap_new(
+            sizeof(PathTableEntry), 64,
+            0xBEEF1234u, 0x5678CAFEu,
+            path_hash, path_compare,
+            path_entry_free, NULL);
+    }
+    return s_path_table;
+}
+
+void source_pos_bridge_reset(void) {
+    if (s_path_table) {
+        // hashmap_free invokes path_entry_free on each entry.
+        hashmap_free(s_path_table);
+        s_path_table = NULL;
+    }
+}
+
+void render_map_record_path(Item source_item, const char* template_ref,
+                            const int* path_indices, int depth) {
+    HashMap* m = ensure_path_table();
+    PathTableEntry e;
+    memset(&e, 0, sizeof(e));
+    e.source_item_bits = source_item.item;
+    e.template_ref = template_ref;
+    if (depth > 0 && path_indices) {
+        e.path.indices = (int*)malloc(sizeof(int) * (size_t)depth);
+        if (e.path.indices) {
+            memcpy(e.path.indices, path_indices, sizeof(int) * (size_t)depth);
+            e.path.depth = depth;
+        }
+    }
+    // hashmap_set returns the prior entry's storage; the registered
+    // free-callback releases its `path.indices` automatically.
+    hashmap_set(m, &e);
+}
+
+// Internal helper: lookup path by (source_item, template_ref). Returns a
+// pointer into the table on hit; caller must NOT free.
+static const SourcePathC* path_table_get(Item source_item,
+                                         const char* template_ref) {
+    if (!s_path_table) return NULL;
+    PathTableEntry q;
+    memset(&q, 0, sizeof(q));
+    q.source_item_bits = source_item.item;
+    q.template_ref = template_ref;
+    const PathTableEntry* hit = (const PathTableEntry*)hashmap_get(s_path_table, &q);
+    return hit ? &hit->path : NULL;
+}
+
+bool render_map_reverse_lookup_with_path(Item result_node,
+                                         RenderMapLookup* out_lookup,
+                                         SourcePathC* out_path) {
+    if (out_path) source_path_init(out_path);
+    RenderMapLookup local;
+    RenderMapLookup* lookup = out_lookup ? out_lookup : &local;
+    if (!render_map_reverse_lookup(result_node, lookup)) return false;
+    const SourcePathC* p = path_table_get(lookup->source_item, lookup->template_ref);
+    if (out_path && p) *out_path = source_path_clone(p);
+    // Reverse lookup hit even without a recorded path is still success:
+    // the caller may want the (item, template_ref) for handler dispatch.
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// DOM → source position
+// ---------------------------------------------------------------------------
+// Walk up DOM ancestry from `boundary->node` until a DomElement is found
+// whose native_element is registered in render_map. The recorded path
+// becomes the SourcePos path; the offset is:
+//   * for a text-node boundary: the UTF-8 byte offset within that text
+//     leaf, with the path extended by the text node's child index in its
+//     parent;
+//   * for an element-node boundary: the boundary's offset (already a
+//     child index) extended onto the path.
+
+bool source_pos_from_dom_boundary(const DomBoundary* boundary,
+                                  SourcePosC* out) {
+    if (!out) return false;
+    source_path_init(&out->path);
+    out->offset = 0;
+    out->kind = SOURCE_POS_TEXT;
+    if (!boundary || !boundary->node) return false;
+
+    DomNode* node = boundary->node;
+    int leaf_child_index = -1;     // index of `node` within first registered ancestor
+    bool is_text_leaf = (node->node_type == DOM_NODE_TEXT);
+    uint32_t leaf_u8_offset = 0;
+
+    if (is_text_leaf) {
+        DomText* tn = (DomText*)node;
+        leaf_u8_offset = dom_text_utf16_to_utf8(tn, boundary->offset);
+        leaf_child_index = (int)dom_node_child_index(node);
+        node = node->parent;
+        if (!node) return false;
+    }
+
+    // Walk upward until we find a DomElement with native_element.
+    Element* native = NULL;
+    while (node) {
+        if (node->node_type == DOM_NODE_ELEMENT) {
+            DomElement* de = (DomElement*)node;
+            if (de->native_element) { native = de->native_element; break; }
+        }
+        node = node->parent;
+    }
+    if (!native) return false;
+
+    Item result_item;
+    result_item.element = native;
+    RenderMapLookup lookup;
+    SourcePathC base;
+    if (!render_map_reverse_lookup_with_path(result_item, &lookup, &base)) {
+        return false;
+    }
+    // base is a clone of the recorded path; extend it.
+    int extra = 0;
+    int extra_indices[2];
+    if (is_text_leaf) {
+        if (leaf_child_index < 0) {
+            source_path_free(&base);
+            return false;
+        }
+        extra_indices[extra++] = leaf_child_index;
+    }
+
+    int total = base.depth + extra;
+    int* combined = (int*)malloc(sizeof(int) * (size_t)(total > 0 ? total : 1));
+    if (!combined) { source_path_free(&base); return false; }
+    if (base.depth) memcpy(combined, base.indices, sizeof(int) * (size_t)base.depth);
+    for (int i = 0; i < extra; i++) combined[base.depth + i] = extra_indices[i];
+    source_path_free(&base);
+
+    out->path.indices = combined;
+    out->path.depth = total;
+    if (is_text_leaf) {
+        out->offset = leaf_u8_offset;
+        out->kind = SOURCE_POS_TEXT;
+    } else {
+        out->offset = boundary->offset;  // child index — same in source tree
+        out->kind = SOURCE_POS_ELEMENT;
+    }
+    return true;
+}
+
+bool source_pos_from_dom_range(const DomRange* range,
+                               SourcePosC* out_start,
+                               SourcePosC* out_end) {
+    if (!range || !out_start || !out_end) return false;
+    DomBoundary s = range->start;
+    DomBoundary e = range->end;
+    bool ok1 = source_pos_from_dom_boundary(&s, out_start);
+    bool ok2 = source_pos_from_dom_boundary(&e, out_end);
+    if (!ok1 || !ok2) {
+        source_pos_free(out_start);
+        source_pos_free(out_end);
+        return false;
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Source position → DOM
+// ---------------------------------------------------------------------------
+// Stub. Resolving a SourcePos to a DomBoundary requires an Item → DomElement
+// reverse index, which is the next sub-step. Until that lands, callers
+// should treat false as a soft failure and skip caret repositioning.
 
 bool dom_boundary_from_source_pos(Item /*doc_root*/,
                                   const SourcePosC* /*pos*/,
                                   DomBoundary* /*out*/) {
-    return false;
-}
-
-void render_map_record_path(Item /*source_item*/, const char* /*template_ref*/,
-                            const int* /*path_indices*/, int /*depth*/) {
-    // No-op until render_map is extended with a path field.
-}
-
-bool render_map_reverse_lookup_with_path(Item /*result_node*/,
-                                         struct RenderMapLookup* /*out_lookup*/,
-                                         SourcePathC* out_path) {
-    if (out_path) source_path_init(out_path);
     return false;
 }
 

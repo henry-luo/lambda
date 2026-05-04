@@ -2314,11 +2314,23 @@
                     {
                         "source": "test_source_pos_bridge_gtest.cpp",
                         "name": "Editor Source-Position Bridge Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
                         "libraries": [
                             "gtest",
-                            "gtest_main"
+                            "gtest_main",
+                            "rpmalloc"
                         ],
                         "additional_sources": [
+                            "lambda/input/css/dom_node.cpp",
+                            "lambda/input/css/dom_element.cpp",
+                            "lambda/input/css/selector_matcher.cpp",
+                            "lambda/render_map.cpp",
+                            "radiant/symbol_resolver.cpp",
+                            "radiant/layout_counters.cpp",
+                            "radiant/dom_range.cpp",
+                            "radiant/dom_range_resolver.cpp",
                             "radiant/source_pos_bridge.cpp"
                         ],
                         "binary": "test_source_pos_bridge_gtest.exe",
