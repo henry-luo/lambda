@@ -7698,10 +7698,14 @@ static void jm_bind_destructure_var(JsMirTranspiler* mt, const char* vname, MIR_
             MIR_new_mem_op(mt->ctx, MIR_T_I64, var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1),
             MIR_new_reg_op(mt->ctx, reg)));
     }
-    // Module variable writeback: if this is a module-level var, sync to runtime
-    // Skip if the local binding is let/const (block-scoped, should not leak)
+    // Module variable writeback: if this is a module-level var, sync to runtime.
+    // Only write back when we are at module scope (js_main) or inside an IIFE
+    // body whose locals were promoted to module vars. In a nested function, a
+    // local declaration that shadows a module var name (e.g. `const {x: n} = e`
+    // where `n` is also a top-level const) must NOT clobber the module slot.
+    bool at_module_scope = mt->in_main || (mt->current_fc && mt->current_fc->is_iife_body);
     bool is_local_let_const = (var && var->is_let_const);
-    if (!is_local_let_const && mt->module_consts) {
+    if (at_module_scope && !is_local_let_const && mt->module_consts) {
         JsModuleConstEntry lookup;
         snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
         JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
