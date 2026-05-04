@@ -100,8 +100,23 @@ pn _contains(s: string, needle: string) {
 // Build a CSS font-family stack: actual font name first (so the OS
 // can use the real font when installed) + generic-family fallback.
 // `gen` is one of "serif", "sans-serif", "monospace".
+// When `condensed` is true, prepend platform condensed fallbacks so the
+// SVG renderer can pick a narrow face (PDFs often use *Condensed/Narrow
+// fonts whose embedded subset has no Unicode cmap; without narrow
+// fallbacks, glyphs render too wide and overlap their PDF-positioned x).
 fn _family_stack(name: string, gen: string) {
     "'" ++ name ++ "', " ++ gen
+}
+
+fn _family_stack_with_stretch(name: string, gen: string, condensed: bool) {
+    if (condensed and gen == "sans-serif") {
+        "'" ++ name ++ "', 'Arial Narrow', 'Helvetica Neue Condensed', " ++
+        "'Avenir Next Condensed', 'Roboto Condensed', sans-serif"
+    }
+    else if (condensed and gen == "serif") {
+        "'" ++ name ++ "', 'PT Serif Caption', 'Times New Roman', serif"
+    }
+    else { _family_stack(name, gen) }
 }
 
 // Infer family/weight/style from arbitrary BaseFont name (e.g.
@@ -144,7 +159,11 @@ pub pn from_basefont(name: string) {
              _contains(stripped, "Consolas") or _contains(stripped, "consolas")) {
         gen = "monospace"
     }
-    return { family: _family_stack(stripped, gen), weight: weight, style: style }
+    let is_condensed = _contains(stripped, "Condensed") or _contains(stripped, "condensed") or
+                       _contains(stripped, "Narrow")    or _contains(stripped, "narrow") or
+                       _contains(stripped, "Compressed")
+    return { family: _family_stack_with_stretch(stripped, gen, is_condensed),
+             weight: weight, style: style }
 }
 
 // ============================================================

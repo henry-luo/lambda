@@ -489,5 +489,6 @@ pub pn render_page(pdf, page, ops, page_h) {
         }
         i = i + 1
     }
-    return { texts: texts, paths: paths }
+    let deduped = text.dedupe_overprints(texts)
+    return { texts: deduped, paths: paths }
 }

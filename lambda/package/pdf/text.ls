@@ -437,3 +437,65 @@ pub pn render_text_ops(ops, fonts, page_h) {
     }
     return out
 }
+
+// ============================================================
+// Faux-bold / overprint deduplication
+// ============================================================
+//
+// Some PDFs implement faux-bold by emitting the same glyph twice with a
+// tiny x offset (~0.5–1.0 user-space units). When we render with the real
+// font (which has correct metrics) these end up as overlapping doubled
+// letters. Detect consecutive <text> elements with identical content and
+// styling whose x positions differ by < 1.5 units, and drop the duplicate.
+
+fn _attr_str(el, key) {
+    let v = el[key]
+    if (v == null) "" else string(v)
+}
+
+fn _content_str(el) {
+    if (len(el) == 0) ""
+    else string(el[0])
+}
+
+fn _is_overprint_dup(prev, cur) {
+    let pt = _attr_str(prev, "transform")
+    let ct = _attr_str(cur, "transform")
+    if (pt != "" or ct != "") { false }
+    else {
+        let px = _attr_str(prev, "x")
+        let cx = _attr_str(cur, "x")
+        if (px == "" or cx == "") { false }
+        else if (_attr_str(prev, "y") != _attr_str(cur, "y")) { false }
+        else if (_attr_str(prev, "font-family") != _attr_str(cur, "font-family")) { false }
+        else if (_attr_str(prev, "font-size")   != _attr_str(cur, "font-size"))   { false }
+        else if (_attr_str(prev, "font-weight") != _attr_str(cur, "font-weight")) { false }
+        else if (_attr_str(prev, "font-style")  != _attr_str(cur, "font-style"))  { false }
+        else if (_attr_str(prev, "fill")        != _attr_str(cur, "fill"))        { false }
+        else if (_attr_str(prev, "stroke")      != _attr_str(cur, "stroke"))      { false }
+        else if (_content_str(prev) != _content_str(cur))                         { false }
+        else {
+            let dx = float(cx) - float(px)
+            let adx = if (dx < 0.0) (0.0 - dx) else dx
+            (adx < 1.5)
+        }
+    }
+}
+
+pub pn dedupe_overprints(texts) {
+    var out = []
+    var i = 0
+    let n = len(texts)
+    while (i < n) {
+        let cur = texts[i]
+        var dup = false
+        let ol = len(out)
+        if (ol > 0) {
+            let prev = out[ol - 1]
+            dup = _is_overprint_dup(prev, cur)
+        }
+        if (not dup) { out = out ++ [cur] }
+        i = i + 1
+    }
+    return out
+}
