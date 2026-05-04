@@ -4147,7 +4147,19 @@ Item fn_replace(Item str_item, Item old_item, Item new_item) {
 
     String* result = (String *)heap_alloc(sizeof(String) + new_len + 1, LMD_TYPE_STRING);
     result->len = new_len;
-    result->is_ascii = 0;  // safe default for replace
+    // Preserve is_ascii when both source and replacement are ASCII —
+    // a non-ASCII flag forces every `bytes[i]` access onto the UTF-8
+    // codepoint path (see item_at), turning parser loops over the
+    // result into O(N^2) per-byte scans. The conservative `0` default
+    // was correct in general but disastrous when callers rewrite a
+    // pure-ASCII content stream.
+    {
+        bool src_ascii = (str_type == LMD_TYPE_STRING)
+            ? (str_item.get_string()->is_ascii != 0) : true;
+        bool repl_ascii = (new_is_null || new_type != LMD_TYPE_STRING)
+            ? true : (new_item.get_string()->is_ascii != 0);
+        result->is_ascii = (src_ascii && repl_ascii) ? 1 : 0;
+    }
 
     // build result
     char* dest = result->chars;

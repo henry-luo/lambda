@@ -77,8 +77,16 @@ pn _content_elements(pdf, page, page_h) {
     if (raw_bytes == null) {
         return { texts: [], paths: [] }
     }
-    let bytes = interp.expand_forms_in_bytes(pdf, page, raw_bytes)
-    let ops = stream.parse_content_stream(bytes)
+    // NOTE: byte-level Form XObject expansion is currently disabled
+    // because cross-module pn→fn map field marshalling regressed in
+    // the runtime, causing fn_join "(null)/(pointer) and array" crashes
+    // inside `image.form_content` / `_form_xobject_names`. Without
+    // expansion, pages with Form XObjects render as `<g data-pdf-form>`
+    // stubs (5 stubs in `invoicesample.pdf`). Re-enable once the runtime
+    // regression is fixed:
+    //   let bytes = interp.expand_forms_in_bytes(pdf, page, raw_bytes)
+    //   let ops = stream.parse_content_stream(bytes)
+    let ops = stream.parse_content_stream(raw_bytes)
     return interp.render_page(pdf, page, ops, page_h)
 }
 
