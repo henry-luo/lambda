@@ -42,12 +42,6 @@ let s = ("a" ++
 
 ---
 
-### 27. List `+` is element-wise add, not concat (silent footgun)
-
-**Severity: HIGH** — `[1,2] + [3]` returns `[4,5]` (broadcast add), not `[1,2,3]`. Use `++` for concat. `ops = ops + [item]` in a loop never grows the list, causing infinite loops.
-
----
-
 ### 28. `pn` does not implicitly return an `if/else` expression value
 
 **Severity: HIGH** — `pn` must use explicit `return` in every branch. Otherwise, callers get `null`/stale value, causing non-terminating loops.
@@ -63,18 +57,6 @@ let s = ("a" ++
 ### 30. `let x = if (cond) a else b` returns `null` in `pn`
 
 **Severity: HIGH** — In `pn`, `let x = if (cond) a else b` always returns `null`, even when `cond` is true. Use imperative `if`/`else` with explicit assignment instead.
-
----
-
-### 31. `fn` cannot call `pn` (E224) — viral propagation up the call graph
-
-**Severity: HIGH** — Once any helper is `pn`, every caller must be `pn`. Prefer `fn` with comprehensions for pure logic.
-
----
-
-Issues encountered while implementing `lambda/package/pdf/` (content-stream
-tokenizer, font handling, text rendering). Each entry shows a minimal repro
-and the workaround that unblocked the work.
 
 ---
 
@@ -305,7 +287,7 @@ runs of `pn main() { compute() }` produce zero output and look broken.
 
 ---
 
-
+```
 let s = ""
 print(s == null)         // -> true
 print(len(s))            // -> 0
@@ -321,7 +303,8 @@ that branches on `field == null` takes the wrong path.
 - Treat `""` as a real empty string distinct from null.
 - At minimum, document this prominently — it is a one-line cause of
   hours-long debugging.
-
+```
+```
 ---
 
 ## 14. `var` declared with a "null-shaped" initial value cannot be reassigned

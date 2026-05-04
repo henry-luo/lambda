@@ -136,7 +136,10 @@ pub pn from_basefont(name: string) {
     let s14 = standard14(stripped)
     if (s14 != _UNKNOWN) { return s14 }
 
-    let is_bold = _contains(stripped, "Bold") or _contains(stripped, "bold")
+    let is_bold = _contains(stripped, "Bold") or _contains(stripped, "bold") or
+                   _contains(stripped, "_700wght") or _contains(stripped, "_800wght") or
+                   _contains(stripped, "_900wght") or _contains(stripped, "Black") or
+                   _contains(stripped, "Heavy")
     let is_ital = _contains(stripped, "Italic") or _contains(stripped, "italic") or
                    _contains(stripped, "Oblique") or _contains(stripped, "oblique")
     let weight = if (is_bold) { "bold" } else { "normal" }

@@ -989,6 +989,11 @@ static float parse_number(const char** p) {
     skip_wsp_comma(p);
     char* end;
     float val = strtof(*p, &end);
+    if (end == *p) {
+        log_error("[SVG] path parse: expected number near '%.16s'", *p);
+        if (**p) (*p)++;
+        return 0.0f;
+    }
     *p = end;
     return val;
 }
@@ -1135,19 +1140,24 @@ static RdtPath* parse_svg_path_d(const char* d) {
         if (!*p) break;
 
         char cmd = *p;
-        bool is_cmd = isalpha(cmd);
+        bool is_cmd = isalpha((unsigned char)cmd);
 
         if (is_cmd) {
             p++;
             last_cmd = cmd;
         } else {
+            if (!last_cmd || !peek_number(p)) {
+                log_error("[SVG] path parse: invalid token near '%.16s'", p);
+                rdt_path_free(path);
+                return nullptr;
+            }
             cmd = last_cmd;
             if (cmd == 'M') cmd = 'L';
             if (cmd == 'm') cmd = 'l';
         }
 
-        bool relative = islower(cmd);
-        cmd = toupper(cmd);
+        bool relative = islower((unsigned char)cmd);
+        cmd = (char)toupper((unsigned char)cmd);
 
         switch (cmd) {
             case 'M': {  // moveto
@@ -1308,8 +1318,9 @@ static RdtPath* parse_svg_path_d(const char* d) {
                 break;
             }
             default:
-                // skip unknown command
-                break;
+                log_error("[SVG] path parse: unsupported command '%c'", cmd);
+                rdt_path_free(path);
+                return nullptr;
         }
     }
 
@@ -1448,20 +1459,20 @@ static char* resolve_font_via_fontface(FontContext* font_ctx, const char* family
         size_t decoded_len = 0;
         uint8_t* decoded = base64_decode(comma + 1, b64_len, &decoded_len);
         if (!decoded || decoded_len == 0) {
-            if (decoded) free(decoded);
+            if (decoded) mem_free(decoded);
             log_debug("[SVG] @font-face base64 decode failed for %s", family);
             continue;
         }
 
         FILE* fout = fopen(temp_path, "wb");
         if (!fout) {
-            free(decoded);
+            mem_free(decoded);
             log_debug("[SVG] @font-face cannot open temp file %s", temp_path);
             continue;
         }
         size_t written = fwrite(decoded, 1, decoded_len, fout);
         fclose(fout);
-        free(decoded);
+        mem_free(decoded);
         if (written != decoded_len) {
             log_debug("[SVG] @font-face write incomplete %zu/%zu", written, decoded_len);
             continue;

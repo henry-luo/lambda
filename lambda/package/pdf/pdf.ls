@@ -49,21 +49,25 @@ fn _label_layer(rect, page_index) {
 // Build label group as a (possibly empty) list. Done in `fn` because
 // `let x = if (c) [...] else [...]` returns null inside `pn`
 // (vibe/Lambda_Issues5.md #15).
-fn _label_children(rect, page_index, opts) {
+pn _label_children(rect, page_index, opts) {
     let suppress = (opts and (opts.show_label == false))
-    if (suppress) { [] }
-    else { [_label_layer(rect, page_index)] }
+    var out = []
+    if (suppress) { out = [] }
+    else { out = [_label_layer(rect, page_index)] }
+    return out
 }
 
 // Build the y-flip wrapper holding only PDF-space content (paths).
 // The page label sits OUTSIDE the flip group (in SVG space) to avoid
 // being mirrored by the y-flip matrix.
-fn _flip_group_list(rect, paths) {
-    if (len(paths) == 0) { [] }
+pn _flip_group_list(rect, paths) {
+    var out = []
+    if (len(paths) == 0) { out = [] }
     else {
         let flip_xform = coords.y_flip_transform(rect.y + rect.h)
-        [svg.group(flip_xform, paths)]
+        out = [svg.group(flip_xform, paths)]
     }
+    return out
 }
 
 // Tokenize + interpret a page's content stream. Empty content yields
@@ -91,10 +95,12 @@ pn render_page(pdf, page, page_index, opts) {
     let bg = _resolve_bg(opts)
 
     let r = _content_elements(pdf, page, rect.h)
-    let flip_group = _flip_group_list(rect, r.paths)
+    let paths = (for (p in r.paths) p)
+    let texts = (for (t in r.texts) t)
+    let flip_group = _flip_group_list(rect, paths)
     let label_kids = _label_children(rect, page_index, opts)
 
-    let children = [svg.page_background(rect, bg)] ++ flip_group ++ r.texts ++ label_kids
+    let children = [svg.page_background(rect, bg)] ++ flip_group ++ texts ++ label_kids
 
     return svg.svg_root(view_box, rect.w, rect.h, children)
 }

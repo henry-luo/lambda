@@ -11,10 +11,22 @@ void print_named_items(StringBuf *strbuf, TypeMap *map_type, void* map_data);
 static void format_item_reader(XmlContext& ctx, const ItemReader& item, const char* tag_name);
 
 static void format_xml_string(XmlContext& ctx, String* str) {
-    if (!str || str->len == 0) return;
+    if (!str) return;
+
+    if (((uintptr_t)str & 0x7) != 0) {
+        log_error("xml_string_guard: skipping misaligned XML string ptr=%p", (void*)str);
+        return;
+    }
+
+    if (str->len == 0) return;
 
     const char* s = str->chars;
     size_t len = str->len;
+    const size_t max_xml_string_len = 1024 * 1024;
+    if (!s || len > max_xml_string_len) {
+        log_error("xml_string_guard: skipping suspicious XML string len=%zu ptr=%p", len, (void*)s);
+        return;
+    }
 
     for (size_t i = 0; i < len; i++) {
         char c = s[i];
