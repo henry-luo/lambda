@@ -285,14 +285,134 @@ bool source_pos_from_dom_range(const DomRange* range,
 // ---------------------------------------------------------------------------
 // Source position → DOM
 // ---------------------------------------------------------------------------
-// Stub. Resolving a SourcePos to a DomBoundary requires an Item → DomElement
-// reverse index, which is the next sub-step. Until that lands, callers
-// should treat false as a soft failure and skip caret repositioning.
+// Walk the DOM subtree rooted at `dom_root`, looking for the DomElement
+// whose recorded source path (stored at apply() time via
+// render_map_record_path) matches the desired source path:
+//   * SOURCE_POS_ELEMENT: recorded path == pos->path; boundary points at
+//     that element with offset = pos->offset (a child index, identical
+//     between source and DOM child lists by editor convention).
+//   * SOURCE_POS_TEXT: recorded path == pos->path with the last index
+//     dropped; the dropped index is the text node's position among that
+//     element's children; offset is converted UTF-8 → UTF-16.
 
-bool dom_boundary_from_source_pos(Item /*doc_root*/,
-                                  const SourcePosC* /*pos*/,
-                                  DomBoundary* /*out*/) {
+static bool path_equals_prefix(const SourcePathC* path, int prefix_len,
+                               const SourcePathC* other) {
+    if (!path || !other) return false;
+    if (prefix_len < 0 || prefix_len > path->depth) return false;
+    if (other->depth != prefix_len) return false;
+    if (prefix_len == 0) return true;
+    return memcmp(path->indices, other->indices,
+                  sizeof(int) * (size_t)prefix_len) == 0;
+}
+
+// Resolve a SourcePos against a single DomElement candidate. Reads its
+// recorded source path; on a match, fills `*out` and returns true.
+static bool try_resolve_at_element(DomElement* de, const SourcePosC* pos,
+                                   DomBoundary* out) {
+    if (!de || !de->native_element) return false;
+    Item result_item;
+    result_item.element = de->native_element;
+    RenderMapLookup lookup;
+    SourcePathC recorded;
+    if (!render_map_reverse_lookup_with_path(result_item, &lookup, &recorded)) {
+        return false;
+    }
+    bool matched = false;
+    if (pos->kind == SOURCE_POS_ELEMENT) {
+        if (path_equals_prefix(&pos->path, pos->path.depth, &recorded)) {
+            out->node = (DomNode*)de;
+            out->offset = pos->offset;  // child index in source == DOM child index
+            matched = true;
+        }
+    } else { // SOURCE_POS_TEXT
+        if (pos->path.depth > 0 &&
+            path_equals_prefix(&pos->path, pos->path.depth - 1, &recorded)) {
+            // Locate the text child at the recorded index.
+            int target_idx = pos->path.indices[pos->path.depth - 1];
+            int idx = 0;
+            for (DomNode* c = de->first_child; c; c = c->next_sibling) {
+                if (idx == target_idx) {
+                    if (c->node_type == DOM_NODE_TEXT) {
+                        DomText* tn = (DomText*)c;
+                        out->node = (DomNode*)tn;
+                        out->offset = dom_text_utf8_to_utf16(tn, pos->offset);
+                        matched = true;
+                    }
+                    break;
+                }
+                idx++;
+            }
+        }
+    }
+    source_path_free(&recorded);
+    return matched;
+}
+
+// Recursive DFS through the DOM subtree.
+static bool resolve_walk(DomNode* node, const SourcePosC* pos,
+                         DomBoundary* out) {
+    if (!node) return false;
+    if (node->node_type == DOM_NODE_ELEMENT) {
+        DomElement* de = (DomElement*)node;
+        if (try_resolve_at_element(de, pos, out)) return true;
+        for (DomNode* c = de->first_child; c; c = c->next_sibling) {
+            if (resolve_walk(c, pos, out)) return true;
+        }
+    }
     return false;
 }
 
+bool dom_boundary_from_source_pos(DomNode* dom_root,
+                                  const SourcePosC* pos,
+                                  DomBoundary* out) {
+    if (!dom_root || !pos || !out) return false;
+    out->node = NULL;
+    out->offset = 0;
+    return resolve_walk(dom_root, pos, out);
+}
+
 } // extern "C"
+
+// ---------------------------------------------------------------------------
+// MarkBuilder helpers (C++ only). Build the Lambda `pos` and `selection`
+// shapes used by lambda/package/editor/mod_source_pos.ls:
+//   pos       = { path: [int, ...], offset: int }
+//   selection = { kind: 'text', anchor: pos, head: pos }   (text)
+//             | { kind: 'node', path: [int, ...] }         (node)
+// ---------------------------------------------------------------------------
+
+#include "../lambda/mark_builder.hpp"
+
+static Item path_to_item(MarkBuilder& mb, const SourcePathC* p) {
+    ArrayBuilder arr = mb.array();
+    if (p && p->indices) {
+        for (int i = 0; i < p->depth; i++) {
+            arr.append((int64_t)p->indices[i]);
+        }
+    }
+    return arr.final();
+}
+
+Item source_pos_to_item(MarkBuilder& mb, const SourcePosC* pos) {
+    MapBuilder m = mb.map();
+    m.put("path", path_to_item(mb, pos ? &pos->path : nullptr));
+    m.put("offset", (int64_t)(pos ? pos->offset : 0));
+    return m.final();
+}
+
+Item source_text_selection_to_item(MarkBuilder& mb,
+                                   const SourcePosC* anchor,
+                                   const SourcePosC* head) {
+    MapBuilder m = mb.map();
+    m.put("kind",   mb.createSymbolItem("text"));
+    m.put("anchor", source_pos_to_item(mb, anchor));
+    m.put("head",   source_pos_to_item(mb, head));
+    return m.final();
+}
+
+Item source_node_selection_to_item(MarkBuilder& mb, const SourcePathC* path) {
+    MapBuilder m = mb.map();
+    m.put("kind", mb.createSymbolItem("node"));
+    m.put("path", path_to_item(mb, path));
+    return m.final();
+}
