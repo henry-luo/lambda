@@ -1,0 +1,60 @@
+"take 0:"
+true
+"take 1:"
+true
+"take 3:"
+true
+"sp path:"
+true
+"sp offset:"
+true
+"sp_e path:"
+true
+"sp_e offset:"
+true
+"sp bad kind:"
+true
+"sel kind:"
+true
+"sel anchor path:"
+true
+"sel anchor off:"
+true
+"sel head path:"
+true
+"sel head off:"
+true
+"dl subtree text:"
+true
+"dl path:"
+true
+"dl offset:"
+true
+"dl kind:"
+true
+"dl2 subtree tag:"
+true
+"dl2 kind:"
+true
+"dl bad path:"
+true
+"dsel anchor kind:"
+true
+"dsel head off:"
+true
+"dsel head text:"
+true
+"anc len:"
+true
+"anc[0] path:"
+true
+"anc[0] tag:"
+true
+"anc[1] path:"
+true
+"anc[1] tag:"
+true
+"anc[2] path:"
+true
+"anc[2] text:"
+true

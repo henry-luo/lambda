@@ -2312,6 +2312,19 @@
                         "icon": "🎯"
                     },
                     {
+                        "source": "test_source_pos_bridge_gtest.cpp",
+                        "name": "Editor Source-Position Bridge Tests",
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "additional_sources": [
+                            "radiant/source_pos_bridge.cpp"
+                        ],
+                        "binary": "test_source_pos_bridge_gtest.exe",
+                        "icon": "🪢"
+                    },
+                    {
                         "source": "test_dir_gtest.cpp",
                         "name": "Directory Listing Tests",
                         "dependencies": [
