@@ -68,7 +68,8 @@ fn _classify(content, obj_num, raw) {
     let kind = if (sub == "Image") "image"
                else if (sub == "Form") "form"
                else "other"
-    { kind: kind, obj_num: obj_num, dict: dict, raw: raw }
+    let data_uri = if (content and content.data_uri) content.data_uri else null
+    { kind: kind, obj_num: obj_num, dict: dict, raw: raw, data_uri: data_uri }
 }
 
 // ============================================================
@@ -80,13 +81,18 @@ fn _img_url(obj_num) {
 }
 
 // Emit a single <g><image/></g> for an Image XObject. obj_num=0 is dropped.
-fn _emit_image(ctm, obj_num) {
-    if (obj_num == 0) { [] }
+// `href_url` is the URL to use for the SVG <image href="..."/>: a real
+// `data:image/png;base64,...` data URI when the C postprocess produced
+// one, otherwise the legacy `img:<num>` handle (which downstream
+// renderers may not resolve).
+fn _emit_image(ctm, obj_num, href_url) {
+    if (obj_num == 0 and href_url == null) { [] }
     else {
+        let url = if (href_url != null) href_url else _img_url(obj_num)
         let outer = util.fmt_matrix(ctm)
         let elem =
             <g transform: outer;
-                <image href: _img_url(obj_num),
+                <image href: url,
                        x: "0", y: "0", width: "1", height: "1",
                        preserveAspectRatio: "none",
                        transform: "matrix(1 0 0 -1 0 1)">
@@ -118,7 +124,7 @@ pub fn apply_do(pdf, page, ctm, ops) {
         if (op0 is map and op0.kind == "name") {
             let xo = lookup_xobject(pdf, page, op0.value)
             if (xo == null) { [] }
-            else if (xo.kind == "image") { _emit_image(ctm, xo.obj_num) }
+            else if (xo.kind == "image") { _emit_image(ctm, xo.obj_num, xo.data_uri) }
             else if (xo.kind == "form")  { _emit_form_stub(ctm, xo.obj_num) }
             else { [] }
         }

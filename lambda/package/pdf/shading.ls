@@ -74,7 +74,7 @@ fn _emit_axial(d, ctm, id, page_w, page_h) {
     let grad = <linearGradient id: id, gradientUnits: "userSpaceOnUse",
                                x1: util.fmt_num(x0), y1: util.fmt_num(y0),
                                x2: util.fmt_num(x1), y2: util.fmt_num(y1);
-                  <stop offset: "0%",   'stop-color': stops[0]>,
+                  <stop offset: "0%",   'stop-color': stops[0]>
                   <stop offset: "100%", 'stop-color': stops[1]>
               >
     let cover = <rect x: "0", y: "0",
@@ -95,7 +95,7 @@ fn _emit_radial(d, ctm, id, page_w, page_h) {
                                fx: util.fmt_num(cx0), fy: util.fmt_num(cy0),
                                cx: util.fmt_num(cx1), cy: util.fmt_num(cy1),
                                r:  util.fmt_num(r1);
-                  <stop offset: "0%",   'stop-color': stops[0]>,
+                  <stop offset: "0%",   'stop-color': stops[0]>
                   <stop offset: "100%", 'stop-color': stops[1]>
               >
     let cover = <rect x: "0", y: "0",

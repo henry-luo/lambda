@@ -97,6 +97,13 @@ pn _contains(s: string, needle: string) {
     return false
 }
 
+// Build a CSS font-family stack: actual font name first (so the OS
+// can use the real font when installed) + generic-family fallback.
+// `gen` is one of "serif", "sans-serif", "monospace".
+fn _family_stack(name: string, gen: string) {
+    "'" ++ name ++ "', " ++ gen
+}
+
 // Infer family/weight/style from arbitrary BaseFont name (e.g.
 // "ABCDEF+TimesNewRomanPSMT-Bold"). The leading "ABCDEF+" subset prefix
 // is ignored.
@@ -119,16 +126,25 @@ pub pn from_basefont(name: string) {
                    _contains(stripped, "Oblique") or _contains(stripped, "oblique")
     let weight = if (is_bold) { "bold" } else { "normal" }
     let style  = if (is_ital) { "italic" } else { "normal" }
-    var family = "Helvetica, Arial, sans-serif"
+    // Generic-family inference from common name fragments. Anything not
+    // matched falls back to sans-serif (PDF gives us no flag here).
+    var gen = "sans-serif"
     if (_contains(stripped, "Times") or _contains(stripped, "times") or
-        _contains(stripped, "Serif") or _contains(stripped, "serif")) {
-        family = "Times, 'Times New Roman', serif"
+        _contains(stripped, "Serif") or _contains(stripped, "serif") or
+        _contains(stripped, "Georgia") or _contains(stripped, "georgia") or
+        _contains(stripped, "Cambria") or _contains(stripped, "cambria") or
+        _contains(stripped, "Gelasio") or _contains(stripped, "gelasio") or
+        _contains(stripped, "Garamond") or _contains(stripped, "garamond") or
+        _contains(stripped, "Palatino") or _contains(stripped, "palatino") or
+        _contains(stripped, "Book") or _contains(stripped, "Minion")) {
+        gen = "serif"
     }
     else if (_contains(stripped, "Courier") or _contains(stripped, "courier") or
-             _contains(stripped, "Mono") or _contains(stripped, "mono")) {
-        family = "Courier, 'Courier New', monospace"
+             _contains(stripped, "Mono") or _contains(stripped, "mono") or
+             _contains(stripped, "Consolas") or _contains(stripped, "consolas")) {
+        gen = "monospace"
     }
-    return { family: family, weight: weight, style: style }
+    return { family: _family_stack(stripped, gen), weight: weight, style: style }
 }
 
 // ============================================================
@@ -180,6 +196,60 @@ fn _pick_info(s14_info, fallback_info) {
     if (s14_info != _UNKNOWN) s14_info else fallback_info
 }
 
+// Re-derive the CSS family stack using FontDescriptor.Flags when the
+// name-based heuristic was inconclusive. PDF Flags (Table 123):
+//   bit 1 (val 1)  = FixedPitch  → monospace
+//   bit 2 (val 2)  = Serif       → serif
+// We only override when the existing `info.family` ends in "sans-serif"
+// (the heuristic's catch-all default), so an explicit name-based serif
+// match is never downgraded.
+fn _has_flag(flags, mask) {
+    // Lambda has no bitwise ops in the path used here; integer
+    // arithmetic via mod/div is sufficient for single-bit checks.
+    let q = flags / mask
+    (q - ((q / 2) * 2)) == 1
+}
+
+fn _ends_with(s: string, suffix: string) {
+    let n = len(s); let m = len(suffix)
+    if (n < m) { false }
+    else {
+        // compare last m chars; AND-reduce equality across the range
+        let hits = (for (i in 0 to (m - 1)) (s[n - m + i] == suffix[i]))
+        let bad  = (for (b in hits where b == false) b)
+        len(bad) == 0
+    }
+}
+
+fn _override_family_from_flags(pdf, stripped: string, dict, info) {
+    let fd = if (dict.FontDescriptor) resolve.deref(pdf, dict.FontDescriptor) else null
+    if (fd == null or fd.Flags == null) { info }
+    else {
+        let flags = if (fd.Flags is int) fd.Flags else 0
+        let is_mono  = _has_flag(flags, 1)
+        let is_serif = _has_flag(flags, 2)
+        let tail_sans = _ends_with(info.family, "sans-serif")
+        if (is_mono and tail_sans) {
+            { family: _family_stack(stripped, "monospace"),
+              weight: info.weight, style: info.style }
+        }
+        else if (is_serif and tail_sans) {
+            { family: _family_stack(stripped, "serif"),
+              weight: info.weight, style: info.style }
+        }
+        else { info }
+    }
+}
+
+// Wraps the pick + flags-override into a single fn so it can be called
+// from `resolve_font` (pn) without hitting the `let x = if` → null
+// gotcha (vibe/Lambda_Issues5.md #15).
+fn _final_info(pdf, stripped, dict, s14, fb) {
+    let info_pre = _pick_info(s14, fb)
+    if (s14 == _UNKNOWN) _override_family_from_flags(pdf, stripped, dict, info_pre)
+    else info_pre
+}
+
 pub pn resolve_font(pdf, page, name: string) {
     let dict = resolve.page_font(pdf, page, name)
     if (dict == null) { return _unknown_descriptor(name) }
@@ -191,7 +261,11 @@ pub pn resolve_font(pdf, page, name: string) {
     let stripped = _strip_subset(basefont)
     let s14 = standard14(stripped)
     let fb = from_basefont(basefont)
-    let info = _pick_info(s14, fb)
+    // FontDescriptor.Flags can override the name-based generic-family
+    // guess (bit 1 = FixedPitch, bit 2 = Serif). Only applied when the
+    // basefont is non-Standard-14 (s14 hit means we already trust the
+    // canonical metrics).
+    let info = _final_info(pdf, stripped, dict, s14, fb)
     let to_uni = _to_unicode_or_null(dict)
     return _make_descriptor(name, info, to_uni)
 }
@@ -223,15 +297,19 @@ fn _hex_to_codes(hex: string) {
     }
 }
 
-// Decode a single byte code through a to_unicode CMap. The C side
-// produces a Map keyed by stringified hex code → unicode string (e.g.
-// `{ "0048": "H" }`). When the lookup misses we return the literal byte
-// as a 1-char string (best-effort fallback).
+// Decode a single byte code through a to_unicode CMap. The C-side
+// post-processor (input-pdf-postprocess.cpp `add_unicode_mapping`)
+// stores keys via `snprintf("%u", cid)` which Lambda surfaces as
+// STRING map keys ("1", "2", ...). The Lambda printer renders those
+// keys without quotes when the string parses as an integer, which
+// previously misled this code into using integer indexing — the
+// lookup always missed and bytes fell through to chr(), producing
+// gibberish text.
+//
+// When the lookup misses we return the literal byte as a 1-char
+// string (best-effort fallback).
 fn _decode_code(code, cmap) {
-    let hi = code / 16
-    let lo = code % 16
-    let hex_chars = "0123456789ABCDEF"
-    let key = hex_chars[hi] ++ hex_chars[lo]
+    let key = string(code)
     if (cmap and cmap[key]) { cmap[key] }
     else { chr(code) }
 }

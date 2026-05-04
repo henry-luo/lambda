@@ -26,7 +26,9 @@
 #include "lib/log.h"
 #include <ctype.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
+#include <zlib.h>
 
 extern "C" {
     #include "pdf_decompress.h"
@@ -724,8 +726,7 @@ static void replace_string_field(Map* m, const char* field, String* new_val) {
 // every stream object holds the plain (post-filter) byte payload, so
 // callers (e.g. content-stream tokenizer) need not re-implement filter
 // chains.
-static void decompress_streams(Input* input, Array* objects) {
-    if (!objects) return;
+static void decompress_streams(Input* input, Array* objects) {    if (!objects) return;
     int decoded_count = 0;
     for (int i = 0; i < objects->length; i++) {
         Map* iobj = item_as_map(objects->items[i]);
@@ -765,6 +766,328 @@ static void decompress_streams(Input* input, Array* objects) {
     log_info("pdf_postprocess: decompressed %d stream(s)", decoded_count);
 }
 
+// ---------------------------------------------------------------------------
+// Pass 4: Image XObject → data:image/png;base64,... URI
+// ---------------------------------------------------------------------------
+//
+// Walks every indirect_object content; if it's an Image XObject stream
+// (Type=XObject, Subtype=Image) with a supported colour space, encodes
+// the pixels (combined with the SMask alpha channel when present) as a
+// PNG and stores the resulting `data:image/png;base64,...` string under
+// a new `data_uri` field on the stream Map. The Lambda PDF package
+// reads this field and emits a regular SVG <image href="data:..."/>
+// element so downstream renderers (Radiant, browsers) can display the
+// image without needing to know about PDF's `img:N` handle convention.
+//
+// Supported in this pass:
+//   - /Filter /FlateDecode (already inflated by Pass 3)
+//   - /BitsPerComponent 8
+//   - /ColorSpace DeviceGray, DeviceRGB, or ["ICCBased", N-component]
+//     (3-component ICC treated as DeviceRGB, 1-component as DeviceGray)
+//   - Optional 8-bit /SMask alpha
+// JPEG-compressed images (/DCTDecode) get the original (pre-decompress)
+// bytes wrapped as data:image/jpeg;base64,... — but only when the
+// parser preserved the encoded bytes (currently no, so JPEG falls into
+// the generic raw-pixel path). Out-of-scope formats are skipped silently.
+
+// Determine the number of colour components for a PDF colour space Item.
+// Returns 1 (gray), 3 (RGB) or 0 (unsupported).
+static int color_space_ncomp(Item cs, ObjTable* table) {
+    String* s = item_as_string(cs);
+    if (s) {
+        if (str_eq(s, "DeviceGray") || str_eq(s, "G")) return 1;
+        if (str_eq(s, "DeviceRGB")  || str_eq(s, "RGB")) return 3;
+        return 0;  // DeviceCMYK and others not handled here
+    }
+    Array* arr = item_as_array(cs);
+    if (!arr || arr->length < 1) return 0;
+    String* head = item_as_string(arr->items[0]);
+    if (!head) return 0;
+    if (str_eq(head, "ICCBased") && arr->length >= 2) {
+        // ["ICCBased", indirect_ref-to-stream]. The stream's dictionary
+        // has /N (number of components).
+        Item stream_it = resolve_ref_deep(arr->items[1], table);
+        Map* sm = item_as_map(stream_it);
+        if (!sm) return 0;
+        Item dict_it = map_lookup(sm, "dictionary");
+        Map* dict = item_as_map(dict_it);
+        if (!dict) return 0;
+        int n = item_as_int(map_lookup(dict, "N"), 0);
+        if (n == 1 || n == 3) return n;
+        return 0;
+    }
+    if (str_eq(head, "DeviceGray") || str_eq(head, "G")) return 1;
+    if (str_eq(head, "DeviceRGB")  || str_eq(head, "RGB")) return 3;
+    // CalGray, CalRGB, Lab, Indexed, Pattern, Separation, DeviceN — skip.
+    return 0;
+}
+
+// Growable byte buffer for PNG assembly. Backed by malloc; explicit free.
+struct ByteBuf {
+    uint8_t* data;
+    size_t   len;
+    size_t   cap;
+};
+
+static bool bb_init(ByteBuf* b, size_t cap) {
+    b->data = (uint8_t*)malloc(cap > 0 ? cap : 1);
+    b->len = 0;
+    b->cap = b->data ? cap : 0;
+    return b->data != nullptr;
+}
+
+static void bb_free(ByteBuf* b) {
+    if (b->data) free(b->data);
+    b->data = nullptr; b->len = 0; b->cap = 0;
+}
+
+static bool bb_reserve(ByteBuf* b, size_t want) {
+    if (b->len + want <= b->cap) return true;
+    size_t newcap = b->cap ? b->cap : 64;
+    while (newcap < b->len + want) newcap *= 2;
+    uint8_t* p = (uint8_t*)realloc(b->data, newcap);
+    if (!p) return false;
+    b->data = p; b->cap = newcap;
+    return true;
+}
+
+static bool bb_append(ByteBuf* b, const void* src, size_t n) {
+    if (!bb_reserve(b, n)) return false;
+    memcpy(b->data + b->len, src, n);
+    b->len += n;
+    return true;
+}
+
+static void bb_u32be(uint8_t* p, uint32_t v) {
+    p[0] = (uint8_t)(v >> 24); p[1] = (uint8_t)(v >> 16);
+    p[2] = (uint8_t)(v >>  8); p[3] = (uint8_t) v;
+}
+
+// Append a PNG chunk (length, type, data, CRC32). type must be 4 ASCII bytes.
+static bool png_chunk(ByteBuf* out, const char type[4],
+                      const uint8_t* data, size_t dlen) {
+    uint8_t hdr[8];
+    bb_u32be(hdr, (uint32_t)dlen);
+    memcpy(hdr + 4, type, 4);
+    if (!bb_append(out, hdr, 8)) return false;
+    if (dlen && !bb_append(out, data, dlen)) return false;
+    // CRC covers type + data
+    uLong crc = crc32(0L, (const Bytef*)hdr + 4, 4);
+    if (dlen) crc = crc32(crc, (const Bytef*)data, (uInt)dlen);
+    uint8_t crcb[4];
+    bb_u32be(crcb, (uint32_t)crc);
+    return bb_append(out, crcb, 4);
+}
+
+// Encode RGBA pixels (width*height*4 bytes, top-down, 8-bit per channel)
+// to a PNG byte stream. Returns malloc'd buffer in *out_data and length
+// in *out_len. Caller must free(). Returns false on allocation/zlib errors.
+static bool encode_png_rgba(const uint8_t* pixels, int width, int height,
+                            uint8_t** out_data, size_t* out_len) {
+    if (!pixels || width <= 0 || height <= 0) return false;
+    ByteBuf png; bb_init(&png, 4096);
+
+    // PNG signature
+    static const uint8_t sig[8] = {137,80,78,71,13,10,26,10};
+    if (!bb_append(&png, sig, 8)) { bb_free(&png); return false; }
+
+    // IHDR
+    uint8_t ihdr[13];
+    bb_u32be(ihdr,     (uint32_t)width);
+    bb_u32be(ihdr + 4, (uint32_t)height);
+    ihdr[8]  = 8;   // bit depth
+    ihdr[9]  = 6;   // colour type: RGBA
+    ihdr[10] = 0;   // compression
+    ihdr[11] = 0;   // filter method
+    ihdr[12] = 0;   // interlace
+    if (!png_chunk(&png, "IHDR", ihdr, sizeof(ihdr))) { bb_free(&png); return false; }
+
+    // Build raw scanlines: one filter byte (None=0) per row, then 4*width
+    // bytes of pixel data.
+    size_t row_bytes = (size_t)width * 4;
+    size_t raw_len = (row_bytes + 1) * (size_t)height;
+    uint8_t* raw = (uint8_t*)malloc(raw_len);
+    if (!raw) { bb_free(&png); return false; }
+    for (int y = 0; y < height; y++) {
+        raw[y * (row_bytes + 1)] = 0;  // no filter
+        memcpy(raw + y * (row_bytes + 1) + 1,
+               pixels + (size_t)y * row_bytes, row_bytes);
+    }
+
+    // Deflate (zlib wrapper) into IDAT
+    uLongf zlen = compressBound((uLong)raw_len);
+    uint8_t* zbuf = (uint8_t*)malloc(zlen);
+    if (!zbuf) { free(raw); bb_free(&png); return false; }
+    int zr = compress2(zbuf, &zlen, raw, (uLong)raw_len, Z_DEFAULT_COMPRESSION);
+    free(raw);
+    if (zr != Z_OK) { free(zbuf); bb_free(&png); return false; }
+    bool ok = png_chunk(&png, "IDAT", zbuf, (size_t)zlen);
+    free(zbuf);
+    if (!ok) { bb_free(&png); return false; }
+
+    // IEND
+    if (!png_chunk(&png, "IEND", nullptr, 0)) { bb_free(&png); return false; }
+
+    *out_data = png.data;  // transfer ownership
+    *out_len = png.len;
+    return true;
+}
+
+// Base64 encoder (no line breaks) — RFC 4648. Returns malloc'd
+// nul-terminated string; caller frees().
+static char* base64_alloc(const uint8_t* src, size_t n) {
+    static const char tbl[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    size_t out_len = ((n + 2) / 3) * 4;
+    char* out = (char*)malloc(out_len + 1);
+    if (!out) return nullptr;
+    size_t i = 0, j = 0;
+    while (i + 2 < n) {
+        uint32_t v = ((uint32_t)src[i] << 16) | ((uint32_t)src[i+1] << 8) | src[i+2];
+        out[j++] = tbl[(v >> 18) & 0x3F];
+        out[j++] = tbl[(v >> 12) & 0x3F];
+        out[j++] = tbl[(v >>  6) & 0x3F];
+        out[j++] = tbl[ v        & 0x3F];
+        i += 3;
+    }
+    if (i < n) {
+        uint32_t v = (uint32_t)src[i] << 16;
+        if (i + 1 < n) v |= (uint32_t)src[i+1] << 8;
+        out[j++] = tbl[(v >> 18) & 0x3F];
+        out[j++] = tbl[(v >> 12) & 0x3F];
+        out[j++] = (i + 1 < n) ? tbl[(v >> 6) & 0x3F] : '=';
+        out[j++] = '=';
+    }
+    out[j] = '\0';
+    return out;
+}
+
+// Build the RGBA buffer for one image and convert it to a
+// data:image/png;base64,... String*. Returns nullptr on failure /
+// unsupported configurations.
+static String* image_to_data_uri(Input* input, Map* stream_map,
+                                 ObjTable* table) {
+    Item dict_it = map_lookup(stream_map, "dictionary");
+    Map* dict = item_as_map(dict_it);
+    if (!dict) return nullptr;
+
+    // Subtype must be Image
+    String* sub = item_as_string(map_lookup(dict, "Subtype"));
+    if (!sub || !str_eq(sub, "Image")) return nullptr;
+
+    int w   = item_as_int(map_lookup(dict, "Width"),  0);
+    int h   = item_as_int(map_lookup(dict, "Height"), 0);
+    int bpc = item_as_int(map_lookup(dict, "BitsPerComponent"), 8);
+    if (w <= 0 || h <= 0 || bpc != 8) return nullptr;
+
+    int ncomp = color_space_ncomp(map_lookup(dict, "ColorSpace"), table);
+    if (ncomp != 1 && ncomp != 3) return nullptr;
+
+    // Pixel data must be plain (Pass 3 should have decompressed it).
+    Item data_it = map_lookup(stream_map, "data");
+    String* pix = item_as_string(data_it);
+    if (!pix) return nullptr;
+    size_t expect = (size_t)w * (size_t)h * (size_t)ncomp;
+    if ((size_t)pix->len < expect) return nullptr;
+    const uint8_t* rgb = (const uint8_t*)pix->chars;
+
+    // Optional alpha from /SMask.
+    const uint8_t* alpha = nullptr;
+    Item smask_it = map_lookup(dict, "SMask");
+    if (smask_it.item != ITEM_NULL) {
+        Item smr = resolve_ref_deep(smask_it, table);
+        Map* sms = item_as_map(smr);
+        if (sms && map_has_type(sms, "stream")) {
+            Item sd_it = map_lookup(sms, "dictionary");
+            Map* sd = item_as_map(sd_it);
+            int sw  = sd ? item_as_int(map_lookup(sd, "Width"),  0) : 0;
+            int sh  = sd ? item_as_int(map_lookup(sd, "Height"), 0) : 0;
+            int sbpc = sd ? item_as_int(map_lookup(sd, "BitsPerComponent"), 8) : 0;
+            String* sp = item_as_string(map_lookup(sms, "data"));
+            if (sw == w && sh == h && sbpc == 8 && sp &&
+                (size_t)sp->len >= (size_t)w * (size_t)h) {
+                alpha = (const uint8_t*)sp->chars;
+            }
+        }
+    }
+
+    // Compose RGBA top-down (PDF image data is top-down, no y-flip needed
+    // in the pixel buffer — the SVG <image> sits inside the page-level
+    // y-flip group).
+    size_t rgba_len = (size_t)w * (size_t)h * 4;
+    uint8_t* rgba = (uint8_t*)malloc(rgba_len);
+    if (!rgba) return nullptr;
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            size_t pi = (size_t)y * w + x;
+            size_t di = pi * 4;
+            if (ncomp == 1) {
+                uint8_t g = rgb[pi];
+                rgba[di+0] = g; rgba[di+1] = g; rgba[di+2] = g;
+            } else {
+                rgba[di+0] = rgb[pi*3+0];
+                rgba[di+1] = rgb[pi*3+1];
+                rgba[di+2] = rgb[pi*3+2];
+            }
+            rgba[di+3] = alpha ? alpha[pi] : 255;
+        }
+    }
+
+    uint8_t* png_buf = nullptr; size_t png_len = 0;
+    bool ok = encode_png_rgba(rgba, w, h, &png_buf, &png_len);
+    free(rgba);
+    if (!ok) return nullptr;
+
+    char* b64 = base64_alloc(png_buf, png_len);
+    free(png_buf);
+    if (!b64) return nullptr;
+
+    static const char prefix[] = "data:image/png;base64,";
+    size_t plen = sizeof(prefix) - 1;
+    size_t blen = strlen(b64);
+    size_t total = plen + blen;
+    String* out = (String*)pool_calloc(input->pool, sizeof(String) + total + 1);
+    if (!out) { free(b64); return nullptr; }
+    memcpy(out->chars, prefix, plen);
+    memcpy(out->chars + plen, b64, blen);
+    out->chars[total] = '\0';
+    out->len = (uint32_t)total;
+    out->is_ascii = 1;
+    free(b64);
+    return out;
+}
+
+// Pass 4 entry: walk objects, encode images that look supported.
+static void encode_image_xobjects(Input* input, MarkBuilder& builder,
+                                  Array* objects, ObjTable* table) {
+    if (!objects) return;
+    int encoded = 0;
+    for (int i = 0; i < objects->length; i++) {
+        Map* iobj = item_as_map(objects->items[i]);
+        if (!iobj || !map_has_type(iobj, "indirect_object")) continue;
+        Item content = map_lookup(iobj, "content");
+        Map* sm = item_as_map(content);
+        if (!sm || !map_has_type(sm, "stream")) continue;
+
+        Item dict_it = map_lookup(sm, "dictionary");
+        Map* dict = item_as_map(dict_it);
+        if (!dict) continue;
+        // Only XObject Images
+        String* tystr  = item_as_string(map_lookup(dict, "Type"));
+        String* substr = item_as_string(map_lookup(dict, "Subtype"));
+        if (!tystr || !str_eq(tystr, "XObject")) continue;
+        if (!substr || !str_eq(substr, "Image")) continue;
+        // Skip SMask streams themselves — they're consumed alongside their owners.
+
+        String* uri = image_to_data_uri(input, sm, table);
+        if (!uri) continue;
+        builder.putToMap(sm, builder.createString("data_uri"),
+                         {.item = s2it(uri)});
+        encoded++;
+    }
+    log_info("pdf_postprocess: encoded %d Image XObject(s) to PNG data URI", encoded);
+}
+
 }  // anonymous namespace
 
 // ---------------------------------------------------------------------------
@@ -798,6 +1121,9 @@ void pdf_postprocess(Input* input) {
 
     // Pass 3: stream decompression (FlateDecode, ASCII85Decode, etc.)
     decompress_streams(input, objects);
+
+    // Pass 4: encode Image XObjects to PNG data URIs
+    encode_image_xobjects(input, builder, objects, &table);
 
     g_post_pool = nullptr;
 }
