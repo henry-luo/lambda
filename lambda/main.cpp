@@ -2634,10 +2634,9 @@ int main(int argc, char *argv[]) {
             bool ok = (script_result &&
                        get_type_id(script_result->root) == LMD_TYPE_ELEMENT);
             if (ok) {
-                // Use format_xml: format_html drops attributes on non-HTML
-                // elements (e.g. <svg><path d=...>) which kills the page
-                // graphics. XML serialization preserves everything verbatim.
-                String* html_str = format_xml(script_result->pool, script_result->root);
+                // format_html preserves SVG/foreign element attributes while
+                // producing HTML5-friendly output for the viewer shell.
+                String* html_str = format_html(script_result->pool, script_result->root);
                 if (html_str && html_str->chars) {
                     const char* temp_html = "./temp/lambda_view_pdf.html";
                     write_text_file(temp_html, html_str->chars);

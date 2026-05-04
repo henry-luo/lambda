@@ -24,6 +24,24 @@ static inline bool is_raw_text_element(const char* tag_name, size_t tag_len) {
     return html_is_raw_text_element(tag_name, tag_len);
 }
 
+static void format_html_attr_value(HtmlContext& ctx, const ItemReader& value) {
+    if (value.isString()) {
+        String* str = value.asString();
+        if (str) format_html_string_safe(ctx.output(), str, true);
+    } else if (value.isInt()) {
+        stringbuf_append_format(ctx.output(), "%lld", (long long)value.asInt());
+    } else if (value.isFloat()) {
+        stringbuf_append_format(ctx.output(), "%g", value.asFloat());
+    } else if (value.isBool()) {
+        ctx.emit("%b", value.asBool());
+    } else if (value.isSymbol()) {
+        Symbol* sym = value.asSymbol();
+        if (sym && sym->chars) {
+            stringbuf_append_format(ctx.output(), "%.*s", (int)sym->len, sym->chars);
+        }
+    }
+}
+
 // Helper function to check if a type is simple (can be output as HTML attribute)
 static bool is_simple_type(TypeId type) {
     return type == LMD_TYPE_STRING || type == LMD_TYPE_INT ||
@@ -275,7 +293,6 @@ static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, i
         const TypeElmt* elmt_type = (const TypeElmt*)elem.element()->type;
         const TypeMap* map_type = (const TypeMap*)elmt_type;
         const ShapeEntry* field = map_type->shape;
-        const void* attr_data = elem.element()->data;
 
         while (field) {
             if (field->name && field->type) {
@@ -288,32 +305,22 @@ static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, i
                     continue;
                 }
 
-                const void* data = ((const char*)attr_data) + field->byte_offset;
-                TypeId field_type = field->type->type_id;
+                ItemReader value = elem.get_attr(field_name);
+                bool is_bool_attr = is_boolean_attribute(field_name, field_name_len);
 
-                // add attribute based on type
-                if (field_type == LMD_TYPE_BOOL) {
-                    // boolean attribute - output name only if true
-                    bool bool_val = *(bool*)data;
-                    if (bool_val) {
+                if (value.isNull()) {
+                    if (!is_bool_attr) {
+                        stringbuf_append_format(ctx.output(), " %.*s=\"\"", field_name_len, field_name);
+                    }
+                } else if (value.isBool() && is_bool_attr) {
+                    if (value.asBool()) {
                         stringbuf_append_format(ctx.output(), " %.*s", field_name_len, field_name);
                     }
-                } else if (field_type == LMD_TYPE_STRING || field_type == LMD_TYPE_NULL) {
-                    // string attribute or NULL (empty string)
-                    String* str = *(String**)data;
-                    stringbuf_append_format(ctx.output(), " %.*s", field_name_len, field_name);
-                    // HTML5 boolean attributes can be output without ="value" if empty
-                    // Regular attributes should always have ="value" even if empty
-                    bool is_bool_attr = is_boolean_attribute(field_name, field_name_len);
-                    if (str && str->len > 0) {
-                        ctx.write_text("=\"");
-                        format_html_string_safe(ctx.output(), str, true);  // true = is_attribute
-                        ctx.write_char('"');
-                    } else if (!is_bool_attr) {
-                        // Non-boolean attribute with empty value: output =\"\"
-                        ctx.write_text("=\"\"");
-                    }
-                    // Boolean attribute with empty value: output just the name (no ="" part)
+                } else if (value.isString() || value.isInt() || value.isFloat() ||
+                           value.isBool() || value.isSymbol()) {
+                    stringbuf_append_format(ctx.output(), " %.*s=\"", field_name_len, field_name);
+                    format_html_attr_value(ctx, value);
+                    ctx.write_char('"');
                 }
             }
             field = field->next;
