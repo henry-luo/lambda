@@ -1,0 +1,16 @@
+{
+  "name": "Up arrow lands on text view (not marker) and clears selection",
+  "html": "test/layout/data/form/form_state.html",
+  "events": [
+    {"type": "wait", "ms": 50},
+    {"type": "log", "message": "Click in 3rd li to place caret"},
+    {"type": "mouse_down", "target": {"text": "extend selection"}, "button": 0},
+    {"type": "wait", "ms": 20},
+    {"type": "mouse_up", "target": {"text": "extend selection"}, "button": 0},
+    {"type": "wait", "ms": 20},
+    {"type": "key_press", "key": "Up"},
+    {"type": "wait", "ms": 20},
+    {"type": "assert_caret", "view_type": 1},
+    {"type": "assert_selection", "is_collapsed": true, "check_dom": true}
+  ]
+}

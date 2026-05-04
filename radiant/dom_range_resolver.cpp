@@ -22,6 +22,38 @@
 #include <stddef.h>
 #include <math.h>
 
+// Glyph-precise X resolver injected by event.cpp at static-init time. Kept
+// as a function pointer so this TU stays free of GLFW/event.hpp transitively
+// and unit-test binaries that don't link event.cpp (e.g.
+// test_dom_range_gtest) cleanly fall back to linear interpolation.
+typedef float (*GlyphXResolverFn)(UiContext* uicon, ViewText* text,
+    TextRect* rect, int byte_offset);
+static GlyphXResolverFn g_glyph_x_resolver = NULL;
+
+extern "C" void dom_range_set_glyph_x_resolver(GlyphXResolverFn fn) {
+    g_glyph_x_resolver = fn;
+}
+
+static ByteOffsetForXResolverFn g_byte_offset_for_x_resolver = NULL;
+
+extern "C" void dom_range_set_byte_offset_for_x_resolver(ByteOffsetForXResolverFn fn) {
+    g_byte_offset_for_x_resolver = fn;
+}
+
+extern "C" int dom_range_byte_offset_for_x(UiContext* uicon, ViewText* text,
+                                            TextRect* rect, float target_local_x) {
+    if (!rect) return 0;
+    if (g_byte_offset_for_x_resolver) {
+        return g_byte_offset_for_x_resolver(uicon, text, rect, target_local_x);
+    }
+    // Linear-interpolation fallback (approximate, used by unit-test binaries).
+    if (rect->length <= 0 || rect->width <= 0.0f) return rect->start_index;
+    float local = target_local_x - rect->x;
+    if (local <= 0) return rect->start_index;
+    if (local >= rect->width) return rect->start_index + rect->length;
+    return rect->start_index + (int)((local / rect->width) * (float)rect->length);
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers — view tree walks
 // ---------------------------------------------------------------------------
@@ -255,13 +287,25 @@ extern "C" DomBoundary dom_hit_test_to_boundary(View* root_view, float vx, float
 // Public — multi-rect rendering helper
 // ---------------------------------------------------------------------------
 
-extern "C" void dom_range_for_each_rect(DomRange* range, DomRangeRectCb cb, void* userdata) {
+extern "C" void dom_range_for_each_rect(DomRange* range, UiContext* uicon,
+    DomRangeRectCb cb, void* userdata) {
     if (!range || !cb) return;
     if (!range->layout_valid && !dom_range_resolve_layout(range)) return;
 
     View* sv = (View*)range->start_view;
     View* ev = (View*)range->end_view;
     if (!sv || !ev) return;
+
+    // Glyph-precise X for `bo` within `r` of text node `t`. Falls back to
+    // linear interpolation when no UiContext / font is available, or when
+    // the resolver function pointer hasn't been registered (unit-test
+    // binaries that don't link event.cpp).
+    auto glyph_x = [&](DomText* t, TextRect* r, int bo) -> float {
+        if (uicon && g_glyph_x_resolver) {
+            return g_glyph_x_resolver(uicon, (ViewText*)t, r, bo);
+        }
+        return interp_x_in_rect(r, bo);
+    };
 
     // Same-text-node, single TextRect (the common case): one rectangle.
     if (sv == ev && sv->is_text()) {
@@ -272,8 +316,8 @@ extern "C" void dom_range_for_each_rect(DomRange* range, DomRangeRectCb cb, void
 
         // Walk every TextRect in [sr .. er] inclusive.
         for (TextRect* r = sr; r; r = r->next) {
-            float lx0 = (r == sr) ? interp_x_in_rect(r, range->start_byte_offset) : r->x;
-            float lx1 = (r == er) ? interp_x_in_rect(r, range->end_byte_offset)   : r->x + r->width;
+            float lx0 = (r == sr) ? glyph_x(t, r, range->start_byte_offset) : r->x;
+            float lx1 = (r == er) ? glyph_x(t, r, range->end_byte_offset)   : r->x + r->width;
             float ax, ay;
             rel_to_abs((View*)t, lx0, r->y, &ax, &ay);
             cb(ax, ay, lx1 - lx0, r->height, userdata);
@@ -293,8 +337,8 @@ extern "C" void dom_range_for_each_rect(DomRange* range, DomRangeRectCb cb, void
             int lo = bo_lo > rs ? bo_lo : rs;
             int hi = bo_hi < re ? bo_hi : re;
             if (lo >= hi) continue;
-            float lx0 = interp_x_in_rect(r, lo);
-            float lx1 = interp_x_in_rect(r, hi);
+            float lx0 = glyph_x(t, r, lo);
+            float lx1 = glyph_x(t, r, hi);
             float ax, ay;
             rel_to_abs((View*)t, lx0, r->y, &ax, &ay);
             cb(ax, ay, lx1 - lx0, r->height, userdata);
@@ -337,5 +381,103 @@ extern "C" void dom_range_for_each_rect(DomRange* range, DomRangeRectCb cb, void
     if (ev->is_text()) {
         DomText* t = (DomText*)ev;
         emit_text_node(t, 0, range->end_byte_offset);
+    }
+}
+
+// Variant: emit selection rects only for the given text view (DomText).
+// Used by the inline text painter so the selection background can be drawn
+// just before the glyphs of each fragment, ensuring text appears on top of
+// the highlight (instead of underneath it as with the overlay approach).
+//
+// If `target_rect` is non-NULL, emission is further restricted to just that
+// single TextRect (one fragment), so the painter can interleave per-fragment
+// selection paint with per-fragment inline backgrounds (e.g. <code>) and
+// keep correct paint order.
+extern "C" void dom_range_for_each_rect_in_text(DomRange* range,
+    DomText* target_text, UiContext* uicon,
+    DomRangeRectCb cb, void* userdata);
+
+extern "C" void dom_range_for_each_rect_in_text_rect(DomRange* range,
+    DomText* target_text, TextRect* target_rect, UiContext* uicon,
+    DomRangeRectCb cb, void* userdata);
+
+extern "C" void dom_range_for_each_rect_in_text(DomRange* range,
+    DomText* target_text, UiContext* uicon,
+    DomRangeRectCb cb, void* userdata) {
+    dom_range_for_each_rect_in_text_rect(range, target_text, NULL, uicon,
+        cb, userdata);
+}
+
+extern "C" void dom_range_for_each_rect_in_text_rect(DomRange* range,
+    DomText* target_text, TextRect* target_rect, UiContext* uicon,
+    DomRangeRectCb cb, void* userdata) {
+
+    if (!range || !cb || !target_text) return;
+    if (!range->layout_valid && !dom_range_resolve_layout(range)) return;
+
+    View* sv = (View*)range->start_view;
+    View* ev = (View*)range->end_view;
+    if (!sv || !ev) return;
+
+    int bo_lo = 0;
+    int bo_hi = (target_text->length > 0) ? (int)target_text->length : 0;
+    bool include = false;
+    if ((View*)target_text == sv && (View*)target_text == ev) {
+        bo_lo = range->start_byte_offset;
+        bo_hi = range->end_byte_offset;
+        include = true;
+    } else if ((View*)target_text == sv) {
+        bo_lo = range->start_byte_offset;
+        include = true;
+    } else if ((View*)target_text == ev) {
+        bo_hi = range->end_byte_offset;
+        include = true;
+    } else if (sv == ev) {
+        return;
+    } else {
+        auto next_text = [](DomNode* n) -> DomText* {
+            if (!n) return NULL;
+            DomNode* cur = n;
+            while (cur) {
+                DomElement* el = cur->as_element();
+                if (el && el->first_child) cur = (DomNode*)el->first_child;
+                else if (cur->next_sibling) cur = cur->next_sibling;
+                else {
+                    while (cur && !cur->next_sibling) cur = cur->parent;
+                    if (cur) cur = cur->next_sibling;
+                }
+                if (cur && cur->is_text()) return (DomText*)cur;
+            }
+            return NULL;
+        };
+        DomText* cur = sv->is_text() ? next_text((DomNode*)sv) : NULL;
+        int safety = 100000;
+        while (cur && (View*)cur != ev && --safety > 0) {
+            if (cur == target_text) { include = true; break; }
+            cur = next_text((DomNode*)cur);
+        }
+    }
+    if (!include || bo_lo >= bo_hi) return;
+
+    auto glyph_x = [&](DomText* t, TextRect* r, int bo) -> float {
+        if (uicon && g_glyph_x_resolver) {
+            return g_glyph_x_resolver(uicon, (ViewText*)t, r, bo);
+        }
+        return interp_x_in_rect(r, bo);
+    };
+
+    for (TextRect* r = target_text->rect; r; r = r->next) {
+        if (target_rect && r != target_rect) continue;
+        int rs = r->start_index;
+        int re = r->start_index + r->length;
+        int lo = bo_lo > rs ? bo_lo : rs;
+        int hi = bo_hi < re ? bo_hi : re;
+        if (lo >= hi) continue;
+        float lx0 = glyph_x(target_text, r, lo);
+        float lx1 = glyph_x(target_text, r, hi);
+        float ax, ay;
+        rel_to_abs((View*)target_text, lx0, r->y, &ax, &ay);
+        cb(ax, ay, lx1 - lx0, r->height, userdata);
+        if (target_rect) break;
     }
 }

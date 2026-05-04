@@ -1,0 +1,1 @@
+{ op_count: 15, ops: ["BT", "Tf", "Td", "Tj", "Td", "Tj", "Td", "Tj", "Td", "Tj", "Td", "Tj", "Td", "Tj", "ET"]}

@@ -17,8 +17,8 @@ console.log('appendFileSync:', content2);
 
 // statSync
 var stat = fs.statSync('./temp/fs_basic_test.txt');
-console.log('stat isFile:', stat.isFile);
-console.log('stat isDirectory:', stat.isDirectory);
+console.log('stat isFile:', stat.isFile());
+console.log('stat isDirectory:', stat.isDirectory());
 console.log('stat size > 0:', stat.size > 0);
 
 // mkdirSync + readdirSync

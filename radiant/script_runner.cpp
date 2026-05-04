@@ -18,6 +18,7 @@
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/js/js_transpiler.hpp"
 #include "../lambda/js/js_dom.h"
+#include "../lambda/js/js_dom_events.h"
 #include "../lambda/transpiler.hpp"
 #include "../lib/gc/gc_heap.h"
 #include "../lambda/input/css/dom_element.hpp"
@@ -32,6 +33,8 @@
 #include "../lib/hashmap.h"
 #include "../lambda/js/js_event_loop.h"
 
+extern "C" void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
+
 #include <cstring>
 #include <cctype>
 #include <signal.h>
@@ -39,6 +42,7 @@
 #include <unistd.h>
 
 extern __thread EvalContext* context;
+extern __thread Context* input_context;
 
 // Crash guard for JS JIT execution (catches SIGSEGV/SIGBUS in compiled code)
 static sigjmp_buf js_exec_jmpbuf;
@@ -252,7 +256,7 @@ static char* load_script_content(const char* resolved_path, bool is_http) {
     char* content = nullptr;
     if (is_http) {
         size_t content_size = 0;
-        content = download_http_content(resolved_path, &content_size, nullptr);
+        content = download_http_content_cached(resolved_path, &content_size, "./temp/cache");
         if (content) {
             log_debug("script_runner: downloaded external script from URL: %s (%zu bytes)", resolved_path, content_size);
         } else {
@@ -537,7 +541,9 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
         // This keeps compiled JS functions alive so onclick/onmouseover etc.
         // can call them after page load without re-compilation.
         preamble = (JsPreambleState*)mem_calloc(1, sizeof(JsPreambleState), MEM_CAT_EVAL);
+        log_mem_stage("js: before transpile/exec");
         result = transpile_js_to_mir_preamble(&runtime, script_buf->str, "<document-scripts>", preamble);
+        log_mem_stage("js: after transpile/exec");
         js_exec_guarded = 0;
         alarm(0);  // cancel pending alarm
         sigaction(SIGSEGV, &js_exec_old_segv, NULL);
@@ -561,6 +567,7 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
         // Drain queued timers (setTimeout, setInterval, requestAnimationFrame).
         // This runs all pending callbacks with a 5s watchdog timeout.
         js_event_loop_drain();
+        log_mem_stage("js: after event loop drain");
         log_info("execute_document_scripts: timer queue drained");
     }
 

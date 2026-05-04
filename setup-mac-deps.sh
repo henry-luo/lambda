@@ -527,7 +527,7 @@ build_thorvg_v1_0_pre34_for_mac() {
             --buildtype=plain \
             --default-library=static \
             -Dengines=sw \
-            -Dloaders=svg,ttf \
+            -Dloaders=svg,ttf,png,jpg \
             -Dsavers= \
             -Dbindings=capi \
             -Dtools= \

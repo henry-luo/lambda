@@ -1,9 +1,11 @@
 #include "format-utils.h"
 #include "format-markup.h"
 #include "../../lib/str.h"
+#include "../../lib/log.h"
 #include <string.h>
 #include <stdio.h>
 #include <ctype.h>
+#include <stdint.h>
 
 
 
@@ -199,10 +201,22 @@ bool is_html_entity(const char* str, size_t len, size_t pos, size_t* entity_end)
 
 // format string with HTML entity escaping (prevents double-encoding)
 void format_html_string_safe(StringBuf* sb, String* str, bool is_attribute) {
-    if (!sb || !str || !str->chars) return;
+    if (!sb || !str) return;
+
+    if (((uintptr_t)str & 0x7) != 0) {
+        log_error("html_string_guard: skipping misaligned HTML string ptr=%p", (void*)str);
+        return;
+    }
+
+    if (!str->chars || str->len == 0) return;
 
     const char* s = str->chars;
     size_t len = str->len;
+    const size_t max_html_string_len = 1024 * 1024;
+    if (len > max_html_string_len) {
+        log_error("html_string_guard: skipping suspicious HTML string len=%zu ptr=%p", len, (void*)s);
+        return;
+    }
 
     for (size_t i = 0; i < len; i++) {
         char c = s[i];

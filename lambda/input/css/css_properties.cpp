@@ -742,6 +742,28 @@ const CssProperty* css_property_get_by_name(const char* name) {
         }
     }
 
+    // Vendor-prefix fallback: try the unprefixed name. Properties like
+    // `-webkit-appearance`, `-moz-user-select`, `-webkit-transform` etc.
+    // map to the standardized property of the same base name when no
+    // explicit vendor entry exists in our table.
+    if (name[0] == '-') {
+        const char* p = name + 1;
+        // Skip vendor identifier (letters), then a single '-'
+        while (*p && *p != '-') p++;
+        if (*p == '-' && *(p + 1) != '\0') {
+            const char* unprefixed = p + 1;
+            unsigned int h2 = hash_string(unprefixed);
+            for (int i = 0; i < PROPERTY_HASH_SIZE; i++) {
+                unsigned int index = (h2 + i) % PROPERTY_HASH_SIZE;
+                CssProperty* prop = g_property_hash[index];
+                if (!prop) break;
+                if (strcmp(prop->name, unprefixed) == 0) {
+                    return prop;
+                }
+            }
+        }
+    }
+
     return NULL;
 }
 

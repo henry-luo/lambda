@@ -1,0 +1,6 @@
+neg-one
+neg-one
+hasOwn -1: true
+after delete: undefined
+hasOwn -1: false
+OK

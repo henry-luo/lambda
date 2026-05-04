@@ -1,0 +1,51 @@
+{
+  "name": "Form input - IME commit replaces selected text and lands inside textarea (F7)",
+  "html": "test/ui/test_form_input.html",
+  "viewport": {"width": 600, "height": 600},
+  "events": [
+    {"type": "log", "message": "=== form_ime_commit_replaces_selection ==="},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Seed text input with 'abc', select all, then IME commit replaces it"},
+    {"type": "click", "target": {"selector": "#name"}},
+    {"type": "wait", "ms": 60},
+    {"type": "paste_text", "target": {"selector": "#name"}, "text": "abc"},
+    {"type": "wait", "ms": 60},
+    {"type": "assert_value", "target": {"selector": "#name"}, "equals": "abc"},
+
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "wait", "ms": 60},
+    {"type": "assert_selection", "is_collapsed": false},
+
+    {"type": "ime_compose", "phase": "begin"},
+    {"type": "ime_compose", "phase": "update", "preedit": "に", "caret": 1},
+    {"type": "ime_compose", "phase": "commit", "commit": "日本語"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_value", "target": {"selector": "#name"}, "equals": "日本語"},
+
+    {"type": "log", "message": "Sequential commits append (no preedit residue)"},
+    {"type": "ime_compose", "phase": "begin"},
+    {"type": "ime_compose", "phase": "update", "preedit": "き", "caret": 1},
+    {"type": "ime_compose", "phase": "commit", "commit": "テスト"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_value", "target": {"selector": "#name"}, "equals": "日本語テスト"},
+
+    {"type": "log", "message": "IME compose works inside <textarea> too"},
+    {"type": "click", "target": {"selector": "#bio"}},
+    {"type": "wait", "ms": 60},
+    {"type": "ime_compose", "phase": "begin"},
+    {"type": "ime_compose", "phase": "update", "preedit": "あ", "caret": 1},
+    {"type": "ime_compose", "phase": "commit", "commit": "こんにちは"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_value", "target": {"selector": "#bio"}, "equals": "こんにちは"},
+
+    {"type": "log", "message": "Read-only field rejects IME commits"},
+    {"type": "click", "target": {"selector": "#readonly-fld"}},
+    {"type": "wait", "ms": 60},
+    {"type": "ime_compose", "phase": "begin"},
+    {"type": "ime_compose", "phase": "update", "preedit": "ば", "caret": 1},
+    {"type": "ime_compose", "phase": "commit", "commit": "改ざん"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_value", "target": {"selector": "#readonly-fld"}, "equals": "locked"}
+  ]
+}

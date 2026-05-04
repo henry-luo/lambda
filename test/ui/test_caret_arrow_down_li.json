@@ -1,0 +1,14 @@
+{
+  "name": "Arrow Down across LIs lands on text view, not marker",
+  "html": "test/layout/data/form/form_state.html",
+  "events": [
+    {"type": "wait", "ms": 100},
+    {"type": "mouse_down", "target": {"text": "navigate between focusable"}, "button": 0},
+    {"type": "wait", "ms": 20},
+    {"type": "mouse_up", "target": {"text": "navigate between focusable"}, "button": 0},
+    {"type": "key_press", "key": "Down"},
+    {"type": "wait", "ms": 20},
+    {"type": "assert_caret", "expected_view_type": 1},
+    {"type": "render", "file": "./temp/caret_arrow_down.png"}
+  ]
+}

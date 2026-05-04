@@ -68,7 +68,29 @@ typedef void (*DomRangeRectCb)(float x, float y, float w, float h, void* userdat
 // range this fires once; for a multi-line range it fires once per line of
 // each crossed text node. Caller must have called
 // `dom_range_resolve_layout(range)` first.
-void dom_range_for_each_rect(DomRange* range, DomRangeRectCb cb, void* userdata);
+//
+// `uicon` is optional: when non-NULL the helper uses glyph-precise advance
+// widths (matching the caret painter) so the right edge of the selection
+// rectangle aligns exactly with the caret. When NULL the resolver falls
+// back to linear interpolation across the rect width.
+void dom_range_for_each_rect(DomRange* range, UiContext* uicon,
+    DomRangeRectCb cb, void* userdata);
+
+// Variant of dom_range_for_each_rect that emits rects only for the given
+// text node (`target_text`). Used by the inline text painter so the
+// selection background can be drawn per-fragment immediately before the
+// glyphs of that fragment, ensuring text renders on top of the highlight
+// rather than being obscured by an after-the-fact overlay.
+void dom_range_for_each_rect_in_text(struct DomRange* range,
+    struct DomText* target_text, struct UiContext* uicon,
+    DomRangeRectCb cb, void* userdata);
+
+// Further restricted variant: emit at most one rect, for the given
+// `target_rect` within `target_text`. Used by render_text_view to
+// interleave selection paint with per-fragment inline backgrounds.
+void dom_range_for_each_rect_in_text_rect(struct DomRange* range,
+    struct DomText* target_text, struct TextRect* target_rect,
+    struct UiContext* uicon, DomRangeRectCb cb, void* userdata);
 
 // ---------------------------------------------------------------------------
 // Legacy → DOM mirroring
@@ -94,6 +116,29 @@ void dom_selection_sync_from_legacy_caret    (struct RadiantState* state);
 // empty (clears legacy selection in that case). Re-entry guarded via
 // `state->dom_selection_sync_depth`.
 void legacy_sync_from_dom_selection(struct RadiantState* state);
+
+// Register a glyph-precise X resolver. When set, `dom_range_for_each_rect()`
+// uses it instead of linear interpolation so that the right edge of the
+// selection rectangle aligns pixel-exactly with the caret (which is painted
+// using the same glyph walker). The function must return rect-relative x
+// (i.e. the same coordinate space as `TextRect::x`).
+typedef float (*GlyphXResolverFn)(struct UiContext* uicon, struct ViewText* text,
+    struct TextRect* rect, int byte_offset);
+void dom_range_set_glyph_x_resolver(GlyphXResolverFn fn);
+
+// Inverse of GlyphXResolverFn: given a rect-relative X (in the same
+// coordinate space as `TextRect::x`), return the byte offset whose visual
+// position is closest to that X. Used by vertical caret navigation
+// (Up/Down arrows) so the caret lands at the same visual column on the
+// new line. Falls back to linear interpolation when not registered.
+typedef int (*ByteOffsetForXResolverFn)(struct UiContext* uicon, struct ViewText* text,
+    struct TextRect* rect, float target_local_x);
+void dom_range_set_byte_offset_for_x_resolver(ByteOffsetForXResolverFn fn);
+
+// Convenience wrapper around the registered resolver. Falls back to linear
+// interpolation across the rect's width when no resolver is registered.
+int dom_range_byte_offset_for_x(struct UiContext* uicon, struct ViewText* text,
+    struct TextRect* rect, float target_local_x);
 
 #ifdef __cplusplus
 }  // extern "C"

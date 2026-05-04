@@ -14,9 +14,35 @@
 
 #include <curl/curl.h>
 #include <cstring>
+#include <cstdio>
+#include <cstdlib>
+#include <sys/stat.h>
 #include "../../lib/mem.h"
 
 extern Input* js_input;
+
+// Base directory for resolving relative fetch() URLs to on-disk files.
+// Set by main.cpp when --document is supplied; NULL otherwise. Owned here.
+static char* g_fetch_base_dir = NULL;
+
+extern "C" void js_fetch_set_base_path(const char* dir_path) {
+    if (g_fetch_base_dir) {
+        free(g_fetch_base_dir);
+        g_fetch_base_dir = NULL;
+    }
+    if (!dir_path || !*dir_path) return;
+    // Find the directory portion of dir_path; if it's a file, drop the basename.
+    struct stat st;
+    char* dup = strdup(dir_path);
+    if (!dup) return;
+    if (stat(dup, &st) == 0 && S_ISREG(st.st_mode)) {
+        // strip basename
+        char* slash = strrchr(dup, '/');
+        if (slash) *slash = '\0';
+        else { free(dup); dup = strdup("."); }
+    }
+    g_fetch_base_dir = dup;
+}
 
 // =============================================================================
 // Helpers (shared with js_fs.cpp pattern)
@@ -150,6 +176,29 @@ static void fetch_work_cb(uv_work_t* req) {
 static char* response_bodies[MAX_FETCH_RESPONSES];
 static int   response_body_lens[MAX_FETCH_RESPONSES];
 static int   response_body_count = 0;
+// Per-response inferred Content-Type (used by .blob() to set Blob.type).
+static char* response_types[MAX_FETCH_RESPONSES];
+
+// Infer a Content-Type from a URL path's extension. Returns a static string
+// (not freed). Used for the local-file fast path so `await fetch(x).blob()`
+// produces a Blob with a meaningful `type` field.
+static const char* mime_from_url(const char* url) {
+    if (!url) return "application/octet-stream";
+    const char* dot = strrchr(url, '.');
+    if (!dot) return "application/octet-stream";
+    const char* ext = dot + 1;
+    if (!strcasecmp(ext, "png"))  return "image/png";
+    if (!strcasecmp(ext, "jpg") || !strcasecmp(ext, "jpeg")) return "image/jpeg";
+    if (!strcasecmp(ext, "gif"))  return "image/gif";
+    if (!strcasecmp(ext, "svg"))  return "image/svg+xml";
+    if (!strcasecmp(ext, "html") || !strcasecmp(ext, "htm")) return "text/html";
+    if (!strcasecmp(ext, "css"))  return "text/css";
+    if (!strcasecmp(ext, "js"))   return "application/javascript";
+    if (!strcasecmp(ext, "json")) return "application/json";
+    if (!strcasecmp(ext, "txt"))  return "text/plain";
+    if (!strcasecmp(ext, "xml"))  return "application/xml";
+    return "application/octet-stream";
+}
 
 static Item js_response_text() {
     Item this_resp = js_get_this();
@@ -178,6 +227,42 @@ static Item js_response_json() {
     Item body_str = make_string_item(response_bodies[idx], response_body_lens[idx]);
     Item parsed = js_json_parse(body_str);
     return js_promise_resolve(parsed);
+}
+
+// Synthesise a Blob-shaped JS object whose `text()` / `arrayBuffer()` / `slice()`
+// methods mirror the WPT shim's Blob polyfill closely enough for the clipboard
+// suite. Used by Response.blob().
+static Item js_response_blob_text() {
+    Item this_blob = js_get_this();
+    String* tk = heap_create_name("_text", 5);
+    Item t = js_property_get(this_blob, (Item){.item = s2it(tk)});
+    if (get_type_id(t) != LMD_TYPE_STRING) return js_promise_resolve(make_string_item(""));
+    return js_promise_resolve(t);
+}
+
+static Item make_blob_object(const char* bytes, int len, const char* type) {
+    Item blob = js_new_object();
+    js_property_set(blob, make_string_item("_text"), make_string_item(bytes ? bytes : "", len));
+    js_property_set(blob, make_string_item("size"), (Item){.item = i2it(len)});
+    js_property_set(blob, make_string_item("type"),
+        make_string_item(type ? type : "application/octet-stream"));
+    js_property_set(blob, make_string_item("text"),
+        js_new_function((void*)js_response_blob_text, 0));
+    return blob;
+}
+
+static Item js_response_blob() {
+    Item this_resp = js_get_this();
+    String* key = heap_create_name("__body_idx", 10);
+    Item idx_item = js_property_get(this_resp, (Item){.item = s2it(key)});
+    if (get_type_id(idx_item) != LMD_TYPE_INT) return js_promise_resolve(ItemNull);
+    int idx = (int)it2i(idx_item);
+    if (idx < 0 || idx >= response_body_count || !response_bodies[idx])
+        return js_promise_resolve(ItemNull);
+    const char* type = (idx < MAX_FETCH_RESPONSES && response_types[idx]) ?
+                       response_types[idx] : "application/octet-stream";
+    Item blob = make_blob_object(response_bodies[idx], response_body_lens[idx], type);
+    return js_promise_resolve(blob);
 }
 
 static Item build_response_object(JsFetchWork* fw) {
@@ -212,12 +297,15 @@ static Item build_response_object(JsFetchWork* fw) {
     Item url_key = make_string_item("url");
     js_property_set(resp, url_key, make_string_item(fw->url));
 
-    // store body for text()/json() methods
+    // store body for text()/json()/blob() methods
     int body_idx = -1;
     if (response_body_count < MAX_FETCH_RESPONSES) {
         body_idx = response_body_count++;
         response_bodies[body_idx] = fw->response_buf;
         response_body_lens[body_idx] = (int)fw->response_len;
+        // Cache an inferred MIME for blob().type. Owned: strdup.
+        if (response_types[body_idx]) { free(response_types[body_idx]); response_types[body_idx] = NULL; }
+        response_types[body_idx] = strdup(mime_from_url(fw->url));
         fw->response_buf = NULL; // ownership transferred
     }
 
@@ -233,6 +321,10 @@ static Item build_response_object(JsFetchWork* fw) {
     Item json_key = make_string_item("json");
     Item json_fn = js_new_function((void*)js_response_json, 0);
     js_property_set(resp, json_key, json_fn);
+
+    // blob() method — returns Promise<Blob-like object> with .type/.size/.text()
+    js_property_set(resp, make_string_item("blob"),
+        js_new_function((void*)js_response_blob, 0));
 
     return resp;
 }
@@ -349,6 +441,92 @@ extern "C" Item js_fetch(Item url_item, Item options_item) {
         return js_promise_reject(js_new_error_with_name(make_string_item("TypeError"), make_string_item("fetch: invalid URL")));
     }
 
+    // ---- Local-file fast path -------------------------------------------------
+    // For relative URLs (no scheme) or explicit `file://` URLs, resolve against
+    // the document base directory and read directly. This makes WPT tests that
+    // fetch sibling resources (e.g. `resources/greenbox.png`) work in headless
+    // mode without spinning up an HTTP server.
+    bool is_http = (strncmp(url, "http://", 7) == 0 || strncmp(url, "https://", 8) == 0);
+    bool is_file = (strncmp(url, "file://", 7) == 0);
+    bool has_scheme = false;
+    for (const char* p = url; *p; p++) {
+        if (*p == ':') { has_scheme = true; break; }
+        if (*p == '/' || *p == '?' || *p == '#') break;
+    }
+    if (is_file || (!is_http && !has_scheme)) {
+        // Build absolute path
+        char path_buf[2048];
+        const char* path = NULL;
+        if (is_file) {
+            path = url + 7;
+            // file:///abs/path -> "/abs/path"
+            if (path[0] == '/' && path[1] == '/' && path[2] == '/') path += 2;
+        } else if (url[0] == '/') {
+            // Document-root-relative: WPT uses paths like
+            // `/resources/testharness.js` and `/clipboard-apis/...`. Walk up
+            // the base directory looking for a parent whose join-with-url
+            // exists on disk. This makes the fetch root effectively the
+            // outermost ancestor of the document that still satisfies the
+            // requested resource.
+            if (g_fetch_base_dir) {
+                char ancestor[2048];
+                snprintf(ancestor, sizeof(ancestor), "%s", g_fetch_base_dir);
+                for (;;) {
+                    snprintf(path_buf, sizeof(path_buf), "%s%s", ancestor, url);
+                    struct stat st;
+                    if (stat(path_buf, &st) == 0) { path = path_buf; break; }
+                    char* slash = strrchr(ancestor, '/');
+                    if (!slash || slash == ancestor) break;
+                    *slash = '\0';
+                }
+            }
+            if (!path) path = url;  // fall through to absolute fs path
+        } else {
+            // Relative
+            if (g_fetch_base_dir) {
+                snprintf(path_buf, sizeof(path_buf), "%s/%s", g_fetch_base_dir, url);
+                path = path_buf;
+            } else {
+                path = url;
+            }
+        }
+
+        FILE* f = fopen(path, "rb");
+        if (!f) {
+            char msg[2200];
+            snprintf(msg, sizeof(msg), "fetch failed: cannot open '%s'", path);
+            return js_promise_reject(
+                js_new_error_with_name(make_string_item("TypeError"), make_string_item(msg)));
+        }
+        fseek(f, 0, SEEK_END);
+        long sz = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        if (sz < 0) sz = 0;
+        char* buf = (char*)mem_alloc((size_t)sz + 1, MEM_CAT_JS_RUNTIME);
+        size_t got = (sz > 0) ? fread(buf, 1, (size_t)sz, f) : 0;
+        buf[got] = '\0';
+        fclose(f);
+
+        // Build a synthetic JsFetchWork so build_response_object can be reused.
+        JsFetchWork* fw = (JsFetchWork*)mem_calloc(1, sizeof(JsFetchWork), MEM_CAT_JS_RUNTIME);
+        snprintf(fw->url, sizeof(fw->url), "%s", url);
+        fw->status_code = 200;
+        fw->response_buf = buf;
+        fw->response_len = got;
+        fw->response_cap = (size_t)sz + 1;
+
+        Item resp = build_response_object(fw);
+
+        // build_response_object transferred ownership of response_buf;
+        // free the fw struct (curl handle, headers etc. are NULL here).
+        if (fw->method) mem_free(fw->method);
+        if (fw->body) mem_free(fw->body);
+        mem_free(fw);
+
+        return js_promise_resolve(resp);
+    }
+    // ---------------------------------------------------------------------------
+
     uv_loop_t* loop = lambda_uv_loop();
     if (!loop) {
         return js_promise_reject(js_new_error(make_string_item("fetch: event loop not initialized")));
@@ -398,6 +576,10 @@ extern "C" void js_fetch_reset(void) {
         if (response_bodies[i]) {
             mem_free(response_bodies[i]);
             response_bodies[i] = NULL;
+        }
+        if (response_types[i]) {
+            free(response_types[i]);
+            response_types[i] = NULL;
         }
     }
     response_body_count = 0;

@@ -26,8 +26,8 @@ console.log('chmod ok');
 
 // fs.lstatSync
 var stat = fs.lstatSync('./temp/fs_test_src.txt');
-console.log(stat.isFile);
-console.log(stat.isDirectory);
+console.log(stat.isFile());
+console.log(stat.isDirectory());
 
 // fs.realpathSync
 var rp = fs.realpathSync('./temp/fs_test_src.txt');

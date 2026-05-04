@@ -1369,6 +1369,9 @@ int main(int argc, char *argv[]) {
 
             // If --document is provided, load HTML and set up DOM context
             if (html_file) {
+                // Make relative fetch() URLs resolve against the document's
+                // directory (so WPT tests can load sibling resources from disk).
+                js_fetch_set_base_path(html_file);
                 // Parse HTML into Lambda Element tree
                 char* html_content = read_text_file(html_file);
                 if (!html_content) {
@@ -2592,6 +2595,80 @@ int main(int argc, char *argv[]) {
             return exit_code;
         }
 
+        // ============================================================
+        // PDF → HTML pre-conversion via the Lambda PDF package
+        // ============================================================
+        // The legacy C++ pipeline (load_pdf_doc → ViewTree) is bypassed:
+        // we run lambda/package/pdf to convert the PDF into an HTML
+        // document containing one <svg> per page, then hand that HTML
+        // off to view_doc_in_window_with_events. This mirrors the
+        // .mmd/.d2/.dot graph pre-conversion above.
+        char* pdf_temp_html = nullptr;
+        if (ext && strcmp(ext, ".pdf") == 0) {
+            log_info("[view] PDF detected — using Lambda PDF package pipeline");
+
+            // Build a Lambda bridge script. pdf.pdf_to_html is `pn`, so
+            // we wrap it in main() and invoke run_script_mir with
+            // run_main=true. The script returns the <html> element,
+            // which we then serialize via format_html.
+            char script_buf[2048];
+            snprintf(script_buf, sizeof(script_buf),
+                "import pdf: .lambda.package.pdf.pdf\n"
+                "pn main() {\n"
+                "    let doc^err = input(\"%s\", 'pdf')\n"
+                "    return pdf.pdf_to_html(doc, null)\n"
+                "}\n",
+                filename);
+
+            const char* tmp_script_path = "temp/_view_pdf_bridge.ls";
+            write_text_file(tmp_script_path, script_buf);
+
+            Runtime pdf_runtime;
+            runtime_init(&pdf_runtime);
+            pdf_runtime.current_dir = const_cast<char*>("./");
+            pdf_runtime.import_base_dir = "./";  // resolve .lambda.* from project root
+
+            Input* script_result = run_script_mir(&pdf_runtime, nullptr,
+                                                   (char*)tmp_script_path, true);
+
+            bool ok = (script_result &&
+                       get_type_id(script_result->root) == LMD_TYPE_ELEMENT);
+            if (ok) {
+                // format_html preserves SVG/foreign element attributes while
+                // producing HTML5-friendly output for the viewer shell.
+                String* html_str = format_html(script_result->pool, script_result->root);
+                if (html_str && html_str->chars) {
+                    const char* temp_html = "./temp/lambda_view_pdf.html";
+                    write_text_file(temp_html, html_str->chars);
+                    pdf_temp_html = mem_strdup(temp_html, MEM_CAT_TEMP);
+                    log_info("[view] PDF rendered to %s (%u bytes)",
+                             temp_html, html_str->len);
+                } else {
+                    log_error("[view] PDF package: format_html returned null");
+                    ok = false;
+                }
+            } else {
+                log_error("[view] PDF package pipeline failed for %s", filename);
+                if (script_result &&
+                    get_type_id(script_result->root) == LMD_TYPE_ERROR) {
+                    LambdaError* le = get_persistent_last_error();
+                    if (le) { err_print(le); clear_persistent_last_error(); }
+                }
+            }
+            runtime_cleanup(&pdf_runtime);
+
+            if (!ok) {
+                printf("Error: Failed to convert PDF '%s' via Lambda PDF package\n", filename);
+                if (temp_file_path) { file_delete(temp_file_path); mem_free(temp_file_path); }
+                log_finish();
+                return 1;
+            }
+
+            // Swap filename/ext to the freshly produced HTML.
+            filename = pdf_temp_html;
+            ext = ".html";
+        }
+
         if (ext && (strcmp(ext, ".pdf") == 0 ||
                     strcmp(ext, ".html") == 0 || strcmp(ext, ".htm") == 0 ||
                     strcmp(ext, ".md") == 0 || strcmp(ext, ".markdown") == 0 ||
@@ -2622,9 +2699,54 @@ int main(int argc, char *argv[]) {
             file_delete(temp_file_path);
             mem_free(temp_file_path);
         }
+        // Cleanup temp HTML produced by PDF→HTML conversion
+        if (pdf_temp_html) {
+            file_delete(pdf_temp_html);
+            mem_free(pdf_temp_html);
+        }
 
         fprintf(stderr, "view command completed with result: %d\n", exit_code);
         log_debug("view command completed with result: %d", exit_code);
+
+        // Always print peak physical footprint on macOS so the parent test process
+        // can read true app memory usage (excludes shared OS framework pages).
+        // See: task_info(TASK_VM_INFO) — phys_footprint_peak is what Activity Monitor shows.
+#ifdef __APPLE__
+        {
+            task_vm_info_data_t vm_info;
+            mach_msg_type_number_t cnt = TASK_VM_INFO_COUNT;
+            if (task_info(mach_task_self(), TASK_VM_INFO,
+                          (task_info_t)&vm_info, &cnt) == KERN_SUCCESS) {
+                fprintf(stderr, "[PEAK_FOOTPRINT] %llu\n",
+                        (unsigned long long)vm_info.ledger_phys_footprint_peak);
+            }
+        }
+#endif
+        // optional memory dump: VIEW_MEM_STATS=1 prints memtrack categories before exit.
+        const char* mem_stats_env = getenv("VIEW_MEM_STATS");
+        if (mem_stats_env && *mem_stats_env && strcmp(mem_stats_env, "0") != 0) {
+            MemtrackStats stats;
+            memtrack_get_stats(&stats);
+            fprintf(stderr, "[MEMSTATS] total: current=%zu peak=%zu\n",
+                    stats.current_bytes, stats.peak_bytes);
+            for (int i = 0; i < MEM_CAT_COUNT; i++) {
+                MemtrackCategoryStats cs;
+                memtrack_get_category_stats((MemCategory)i, &cs);
+                if (cs.peak_bytes > 0) {
+                    fprintf(stderr, "[MEMSTATS] %-24s current=%10zu peak=%10zu allocs=%zu\n",
+                            memtrack_category_names[i], cs.current_bytes, cs.peak_bytes, cs.total_allocs);
+                }
+            }
+        }
+        // VIEW_PAUSE_BEFORE_EXIT=N -- sleep N seconds before exit so vmmap/leaks can attach.
+        const char* pause_env = getenv("VIEW_PAUSE_BEFORE_EXIT");
+        if (pause_env && *pause_env) {
+            int secs = atoi(pause_env);
+            if (secs > 0) {
+                fprintf(stderr, "[PAUSE] pid=%d sleeping %d seconds\n", (int)getpid(), secs);
+                sleep(secs);
+            }
+        }
         log_finish();
         return exit_code;
     }

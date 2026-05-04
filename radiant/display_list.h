@@ -54,6 +54,8 @@ typedef enum {
     // outer box-shadow clip: save pixels before shadow fill, restore inside element after blur
     DL_SHADOW_CLIP_SAVE,
     DL_SHADOW_CLIP_RESTORE,
+    // self-contained outer box-shadow op: rasterise + blur in temp buffer + composite
+    DL_OUTER_SHADOW,
     // element group markers (for retained sub-trees, Phase 2+)
     DL_BEGIN_ELEMENT,
     DL_END_ELEMENT,
@@ -231,6 +233,22 @@ typedef struct {
     int restore_inside;       // 1 = restore inside shape (outer shadow), 0 = restore outside (inset)
 } DlShadowClipRestore;
 
+// Self-contained outer box-shadow op: at replay, rasterise the shadow rounded
+// rect into a private temp buffer, apply 3-pass box blur to that buffer, then
+// composite the result over the surface (skipping pixels inside exclude shape).
+// Replaces the SAVE+FILL+BLUR_REGION+RESTORE sequence — avoids smearing
+// neighbouring sibling element pixels into surrounding areas.
+typedef struct {
+    float shadow_x, shadow_y, shadow_w, shadow_h;  // shadow rect in surface coords
+    float sr_tl, sr_tr, sr_br, sr_bl;              // per-corner radii
+    Color color;                                    // shadow colour (with alpha)
+    float blur_radius;                              // CSS blur radius (physical px)
+    int exclude_type;          // element border-box shape (skip composite inside)
+    float exclude_params[8];
+    int clip_type;             // optional CSS clip-path
+    float clip_params[8];
+} DlOuterShadow;
+
 // Video frame placeholder: records the layout rect and clip for post-composite blit.
 // The actual video frame pixels are blitted after tile compositing in the render loop.
 typedef struct {
@@ -278,6 +296,7 @@ typedef struct DisplayItem {
         DlBoxBlurInset       box_blur_inset;
         DlShadowClipSave     shadow_clip_save;
         DlShadowClipRestore  shadow_clip_restore;
+        DlOuterShadow        outer_shadow;
         DlVideoPlaceholder   video_placeholder;
         DlWebviewLayerPlaceholder webview_layer_placeholder;
     };
@@ -386,6 +405,14 @@ void dl_shadow_clip_save(DisplayList* dl, int rx, int ry, int rw, int rh);
 void dl_shadow_clip_restore(DisplayList* dl, int exclude_type, const float* exclude_params,
                             int save_rx, int save_ry, int save_rw, int save_rh,
                             int restore_inside);
+
+// Self-contained outer box-shadow (rasterise + blur in temp buffer + composite)
+void dl_outer_shadow(DisplayList* dl,
+                     float shadow_x, float shadow_y, float shadow_w, float shadow_h,
+                     float sr_tl, float sr_tr, float sr_br, float sr_bl,
+                     Color color, float blur_radius,
+                     int exclude_type, const float* exclude_params,
+                     int clip_type, const float* clip_params);
 
 // Video placeholder (rect + clip only; actual blit is post-composite)
 void dl_video_placeholder(DisplayList* dl, void* video,

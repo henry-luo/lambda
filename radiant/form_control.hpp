@@ -5,6 +5,10 @@
 
 struct DomElement;
 
+// Forward decl from text_edit.hpp (avoids circular include).
+struct EditHistory;
+void te_history_free(EditHistory* h);
+
 /**
  * Form Control Support for Radiant
  *
@@ -135,6 +139,7 @@ struct FormControlProp {
     uint8_t autofocus : 1;
     uint8_t multiple : 1;       // For select
     uint8_t dropdown_open : 1;  // For select: dropdown is currently open
+    uint8_t appearance_none : 1; // CSS appearance: none — suppress UA-rendered chrome (arrow, etc.)
 
     // Select dropdown properties
     int selected_index;         // Index of currently selected option (0-based, -1 if none)
@@ -179,6 +184,56 @@ struct FormControlProp {
     // list; nullptr otherwise.
     DomElement* tc_sc_next_pending;
 
+    // Constraint Validation API (§4.10.20)
+    // Custom validity error message set via setCustomValidity(msg).
+    // nullptr or "" means no custom error.
+    char* custom_validity_msg;
+
+    // ------------------------------------------------------------------
+    // F1 (Radiant_Design_Form_Input.md §3.1):
+    //   - value_at_focus: snapshot of current_value taken when this text
+    //     control receives focus. Used by te_blur_dispatch_change() to
+    //     decide whether to fire `change` on blur (HTML §4.10.5.5).
+    //   - history: undo/redo ring (lazy-allocated by text_edit.cpp).
+    //     Opaque here; defined in text_edit.hpp.
+    // ------------------------------------------------------------------
+    char*    value_at_focus;
+    uint32_t value_at_focus_len;
+    void*    history;   // EditHistory*; lazy
+
+    // ------------------------------------------------------------------
+    // F4 (Radiant_Design_Form_Input.md §3.1, §3.8):
+    //   - scroll_x / scroll_y: viewport offset for auto-scroll. The text
+    //     content is shifted left/up by these amounts so the caret stays
+    //     visible inside the content box. Updated by render_form before
+    //     drawing the caret.
+    //   - caret_blink_t: monotonic seconds since the last caret toggle.
+    //   - caret_on: visibility flag toggled by the blink timer (always
+    //     true in headless renders so snapshots stay deterministic).
+    //   - placeholder_shown / focus_visible: cached pseudo-state bits,
+    //     refreshed on focus/blur/value-change so CSS selector matching
+    //     can read them in O(1).
+    // ------------------------------------------------------------------
+    float    scroll_x;
+    float    scroll_y;
+    float    caret_blink_t;
+    uint8_t  caret_on : 1;
+    uint8_t  placeholder_shown : 1;
+    uint8_t  focus_visible : 1;
+
+    // ------------------------------------------------------------------
+    // F7 (Radiant_Design_Form_Input.md §3.7): IME / composition preedit.
+    // The preedit string is the partially-entered text shown by the OS
+    // input method between `compositionstart` and `compositionend`. It is
+    // NOT part of `current_value` until commit. The renderer overlays it
+    // at the caret with an underline so the user can see what they're
+    // composing. `preedit_caret` is the codepoint offset inside preedit
+    // (where the IME's own caret sits).
+    // ------------------------------------------------------------------
+    char*    preedit_utf8;
+    uint32_t preedit_len;
+    uint32_t preedit_caret;
+
     // Constructor
     FormControlProp() : control_type(FORM_CONTROL_NONE), input_type(nullptr),
         value(nullptr), placeholder(nullptr), name(nullptr),
@@ -186,16 +241,25 @@ struct FormControlProp {
         rows(FormDefaults::TEXTAREA_ROWS), maxlength(-1),
         range_min(0), range_max(100), range_step(1), range_value(0.5f),
         disabled(0), readonly(0), checked(0), required(0), autofocus(0), multiple(0),
-        dropdown_open(0), selected_index(-1), option_count(0), hover_index(-1), select_size(0),
+        dropdown_open(0), appearance_none(0), selected_index(-1), option_count(0), hover_index(-1), select_size(0),
         intrinsic_width(0), intrinsic_height(0),
         flex_grow(0), flex_shrink(1), flex_basis(-1), flex_basis_is_percent(0),
         current_value(nullptr), current_value_len(0), current_value_u16_len(0),
         selection_start(0), selection_end(0), selection_direction(0),
         tc_initialized(0), tc_sc_pending(0),
-        tc_sc_next_pending(nullptr) {}
+        tc_sc_next_pending(nullptr),
+        custom_validity_msg(nullptr),
+        value_at_focus(nullptr), value_at_focus_len(0), history(nullptr),
+        scroll_x(0.0f), scroll_y(0.0f), caret_blink_t(0.0f),
+        caret_on(1), placeholder_shown(0), focus_visible(0),
+        preedit_utf8(nullptr), preedit_len(0), preedit_caret(0) {}
 
     ~FormControlProp() {
         if (current_value) { free(current_value); current_value = nullptr; }
+        if (custom_validity_msg) { free(custom_validity_msg); custom_validity_msg = nullptr; }
+        if (value_at_focus) { free(value_at_focus); value_at_focus = nullptr; }
+        if (history) { te_history_free((EditHistory*)history); history = nullptr; }
+        if (preedit_utf8) { free(preedit_utf8); preedit_utf8 = nullptr; }
     }
 };
 

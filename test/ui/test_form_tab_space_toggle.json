@@ -1,0 +1,56 @@
+{
+  "name": "Form - Tab visits checkbox/radio and Space toggles them",
+  "html": "test/ui/test_form_assertions.html",
+  "viewport": {"width": 600, "height": 600},
+  "events": [
+    {"type": "log", "message": "=== form_tab_space_toggle ==="},
+    {"type": "wait", "ms": 200},
+
+    {"type": "click", "target": {"selector": "#email"}},
+    {"type": "wait", "ms": 60},
+    {"type": "assert_focus", "target": {"selector": "#email"}},
+
+    {"type": "key_press", "key": "tab"},
+    {"type": "wait", "ms": 60},
+    {"type": "assert_focus", "target": {"selector": "#name"}},
+
+    {"type": "key_press", "key": "tab"},
+    {"type": "wait", "ms": 60},
+    {"type": "assert_focus", "target": {"selector": "#empty"}},
+
+    {"type": "key_press", "key": "tab"},
+    {"type": "wait", "ms": 60},
+    {"type": "assert_focus", "target": {"selector": "#agree"}},
+
+    {"type": "log", "message": "--- space toggles checked checkbox off ---"},
+    {"type": "assert_checked", "target": {"selector": "#agree"}, "checked": true},
+    {"type": "key_press", "key": "space"},
+    {"type": "wait", "ms": 60},
+    {"type": "assert_checked", "target": {"selector": "#agree"}, "checked": false},
+    {"type": "key_press", "key": "space"},
+    {"type": "wait", "ms": 60},
+    {"type": "assert_checked", "target": {"selector": "#agree"}, "checked": true},
+
+    {"type": "key_press", "key": "tab"},
+    {"type": "wait", "ms": 60},
+    {"type": "assert_focus", "target": {"selector": "#newsletter"}},
+
+    {"type": "key_press", "key": "space"},
+    {"type": "wait", "ms": 60},
+    {"type": "assert_checked", "target": {"selector": "#newsletter"}, "checked": true},
+
+    {"type": "key_press", "key": "tab"},
+    {"type": "wait", "ms": 60},
+    {"type": "assert_focus", "target": {"selector": "#radio-a"}},
+
+    {"type": "key_press", "key": "tab"},
+    {"type": "wait", "ms": 60},
+    {"type": "assert_focus", "target": {"selector": "#radio-b"}},
+
+    {"type": "log", "message": "--- space selects radio (group exclusivity) ---"},
+    {"type": "key_press", "key": "space"},
+    {"type": "wait", "ms": 60},
+    {"type": "assert_checked", "target": {"selector": "#radio-b"}, "checked": true},
+    {"type": "assert_checked", "target": {"selector": "#radio-a"}, "checked": false}
+  ]
+}

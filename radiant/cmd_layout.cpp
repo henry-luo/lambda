@@ -43,6 +43,7 @@ extern "C" {
 #include "../lib/hashmap.h"
 #include "../lib/arraylist.h"
 #include "../lib/font/font.h"
+void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 }
 
 #include "../lambda/input/css/css_engine.hpp"
@@ -853,7 +854,7 @@ static void resolve_stylesheet_imports(CssStylesheet* stylesheet, const char* st
         bool is_http = (strncmp(import_path, "http://", 7) == 0 || strncmp(import_path, "https://", 8) == 0);
         if (is_http) {
             size_t content_size = 0;
-            css_content = download_http_content(import_path, &content_size, nullptr);
+            css_content = download_http_content_cached(import_path, &content_size, "./temp/cache");
         } else {
             css_content = read_text_file(import_path);
         }
@@ -1104,6 +1105,128 @@ static char* convert_css_to_utf8(const char* data, size_t len, const char* css_c
 }
 
 /**
+ * Resolve a possibly-relative href against a base URL/path. Returns mem_alloc'd
+ * absolute URL string (caller mem_free's), or nullptr if not HTTP/HTTPS.
+ */
+static char* resolve_http_href(const char* href, const char* base_path) {
+    if (!href || !*href) return nullptr;
+
+    // already absolute http(s) URL
+    if (strncmp(href, "http://", 7) == 0 || strncmp(href, "https://", 8) == 0) {
+        return mem_strdup(href, MEM_CAT_TEMP);
+    }
+    // protocol-relative //host/path
+    if (href[0] == '/' && href[1] == '/' && base_path) {
+        const char* scheme_end = strstr(base_path, "://");
+        if (scheme_end) {
+            size_t scheme_len = scheme_end - base_path;
+            size_t out_len = scheme_len + 1 /*':'*/ + strlen(href) + 1;
+            char* out = (char*)mem_alloc(out_len, MEM_CAT_TEMP);
+            snprintf(out, out_len, "%.*s:%s", (int)scheme_len, base_path, href);
+            return out;
+        }
+        return nullptr;
+    }
+    // relative — resolve against base_path if base is HTTP
+    if (!base_path) return nullptr;
+    if (strncmp(base_path, "http://", 7) != 0 && strncmp(base_path, "https://", 8) != 0) {
+        return nullptr;
+    }
+    Url* base_url = url_parse(base_path);
+    if (!base_url || !base_url->is_valid) {
+        if (base_url) url_destroy(base_url);
+        return nullptr;
+    }
+    Url* resolved = parse_url(base_url, href);
+    char* out = nullptr;
+    if (resolved && resolved->is_valid &&
+        (resolved->scheme == URL_SCHEME_HTTP || resolved->scheme == URL_SCHEME_HTTPS)) {
+        const char* s = url_get_href(resolved);
+        if (s) out = mem_strdup(s, MEM_CAT_TEMP);
+    }
+    if (resolved) url_destroy(resolved);
+    url_destroy(base_url);
+    return out;
+}
+
+/**
+ * Recursively collect HTTP(S) URLs from <link rel="stylesheet" href="...">
+ * and <script src="..."> elements. Appends absolute URL strings (mem_alloc'd)
+ * to *out_urls (realloc'd) and increments *out_count.
+ */
+static void collect_external_resource_urls(Element* elem, const char* base_path,
+                                            char*** out_urls, int* out_count, int* out_capacity,
+                                            int depth) {
+    if (!elem || depth > MAX_CSS_TREE_DEPTH) return;
+    TypeElmt* type = (TypeElmt*)elem->type;
+    if (!type || !type->name.str) goto recurse;
+
+    if (str_ieq_const(type->name.str, strlen(type->name.str), "link")) {
+        const char* rel = extract_element_attribute(elem, "rel", nullptr);
+        const char* href = extract_element_attribute(elem, "href", nullptr);
+        if (rel && href && str_ieq_const(rel, strlen(rel), "stylesheet")) {
+            char* abs = resolve_http_href(href, base_path);
+            if (abs) {
+                if (*out_count >= *out_capacity) {
+                    int new_cap = (*out_capacity > 0) ? (*out_capacity * 2) : 16;
+                    *out_urls = (char**)mem_realloc(*out_urls, new_cap * sizeof(char*), MEM_CAT_TEMP);
+                    *out_capacity = new_cap;
+                }
+                (*out_urls)[(*out_count)++] = abs;
+            }
+        }
+    } else if (str_ieq_const(type->name.str, strlen(type->name.str), "script")) {
+        const char* src = extract_element_attribute(elem, "src", nullptr);
+        if (src) {
+            char* abs = resolve_http_href(src, base_path);
+            if (abs) {
+                if (*out_count >= *out_capacity) {
+                    int new_cap = (*out_capacity > 0) ? (*out_capacity * 2) : 16;
+                    *out_urls = (char**)mem_realloc(*out_urls, new_cap * sizeof(char*), MEM_CAT_TEMP);
+                    *out_capacity = new_cap;
+                }
+                (*out_urls)[(*out_count)++] = abs;
+            }
+        }
+    }
+
+recurse:
+    for (int64_t i = 0; i < elem->length; i++) {
+        Item child_item = elem->items[i];
+        if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
+            collect_external_resource_urls(child_item.element, base_path,
+                                            out_urls, out_count, out_capacity, depth + 1);
+        }
+    }
+}
+
+/**
+ * Pre-fetch all external HTTP(S) sub-resources (CSS links, script sources)
+ * referenced by the document in parallel. Populates the on-disk cache so the
+ * subsequent serial loaders find them already cached. No-op for local docs.
+ */
+static void prefetch_document_subresources(Element* html_root, const char* base_path) {
+    if (!html_root || !base_path) return;
+    if (strncmp(base_path, "http://", 7) != 0 && strncmp(base_path, "https://", 8) != 0) return;
+
+    char** urls = nullptr;
+    int count = 0;
+    int capacity = 0;
+    collect_external_resource_urls(html_root, base_path, &urls, &count, &capacity, 0);
+
+    if (count > 0) {
+        log_info("[PREFETCH] downloading %d sub-resources in parallel", count);
+        double t0 = (double)clock() / CLOCKS_PER_SEC;
+        http_prefetch_urls_parallel((const char* const*)urls, count, "./temp/cache", 8);
+        double elapsed = (double)clock() / CLOCKS_PER_SEC - t0;
+        log_info("[PREFETCH] completed in %.3fs (cpu)", elapsed);
+    }
+
+    for (int i = 0; i < count; i++) mem_free(urls[i]);
+    if (urls) mem_free(urls);
+}
+
+/**
  * Recursively collect <link rel="stylesheet"> references from HTML
  * Loads and parses external CSS files
  */
@@ -1204,9 +1327,9 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
             char* css_content = nullptr;
             size_t css_file_size = 0;
             if (is_http_css) {
-                // Download CSS from HTTP URL
+                // Download CSS from HTTP URL (uses on-disk cache populated by prefetch)
                 size_t content_size = 0;
-                css_content = download_http_content(css_path, &content_size, nullptr);
+                css_content = download_http_content_cached(css_path, &content_size, "./temp/cache");
                 if (css_content) {
                     css_file_size = content_size;
                     log_debug("[CSS] Downloaded stylesheet from URL: %s (%zu bytes)", css_path, content_size);
@@ -1503,19 +1626,32 @@ CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, c
     *stylesheet_count = 0;
     CssStylesheet** stylesheets = nullptr;
 
-    // Step 1: Collect and parse <link rel="stylesheet"> references
-    log_debug("[CSS] Step 1: Collecting linked stylesheets...");
-    collect_linked_stylesheets(html_root, engine, base_path, pool, &stylesheets, stylesheet_count, 0);
+    // Step 0: Pre-fetch external HTTP sub-resources (CSS, scripts) in parallel
+    // so subsequent serial loaders find them already cached on disk.
+    prefetch_document_subresources(html_root, base_path);
 
-    int linked_count = *stylesheet_count;
-    if (linked_count_out) *linked_count_out = linked_count;
-
-    // Step 2: Collect and parse <style> inline CSS
-    log_debug("[CSS] Step 2: Collecting inline <style> elements...");
+    // Step 1: Collect and parse <style> inline CSS first.
+    // Per CSS cascade spec, document source order determines tie-breaking among
+    // declarations of equal specificity & origin. Inline <style> blocks typically
+    // appear in <head> *before* <link rel="stylesheet">, so the linked rules
+    // should be considered LATER in source order and thus win ties. Since the
+    // per-element style tree assigns source_order in the order rules are
+    // applied (later = higher = wins), we must apply <style> first, then linked.
+    log_debug("[CSS] Step 1: Collecting inline <style> elements...");
     collect_inline_styles_to_list(html_root, engine, pool, &stylesheets, stylesheet_count, 0);
 
+    int inline_count = *stylesheet_count;
+
+    // Step 2: Collect and parse <link rel="stylesheet"> references — applied last
+    // so their declarations get higher source_order and win against earlier <style>.
+    log_debug("[CSS] Step 2: Collecting linked stylesheets...");
+    collect_linked_stylesheets(html_root, engine, base_path, pool, &stylesheets, stylesheet_count, 0);
+
+    int linked_count = *stylesheet_count - inline_count;
+    if (linked_count_out) *linked_count_out = linked_count;
+
     log_debug("[CSS] Collected %d stylesheet(s) from HTML (%d linked, %d inline)",
-              *stylesheet_count, linked_count, *stylesheet_count - linked_count);
+              *stylesheet_count, linked_count, inline_count);
     return stylesheets;
 }
 
@@ -2499,6 +2635,8 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     using namespace std::chrono;
     auto t_start = high_resolution_clock::now();
 
+    log_mem_stage("load_html: enter");
+
     if (!html_url || !pool) {
         log_error("load_lambda_html_doc: invalid parameters");
         return nullptr;
@@ -2600,6 +2738,7 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
 
     auto t_parse = high_resolution_clock::now();
     log_info("[TIMING] load: parse HTML: %.1fms", duration<double, std::milli>(t_parse - t_read).count());
+    log_mem_stage("load_html: html_parsed");
 
     if (!input) {
         log_error("Failed to create input for file: %s", html_filepath);
@@ -2670,6 +2809,7 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
         dom_document_destroy(dom_doc);
         return nullptr;
     }
+    log_mem_stage("load_html: dom_built");
 
     auto t_dom = high_resolution_clock::now();
 
@@ -2679,6 +2819,8 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
         log_error("Failed to create CSS engine");
         return nullptr;
     }
+    // Cache for runtime re-cascade (e.g. on pseudo-state changes like :hover)
+    dom_doc->cached_css_engine = css_engine;
     css_engine_set_viewport(css_engine, viewport_width, viewport_height);
 
     // Load external CSS if provided
@@ -2723,13 +2865,18 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
 
     auto t_css_parse = high_resolution_clock::now();
     log_info("[TIMING] load: parse CSS: %.1fms", duration<double, std::milli>(t_css_parse - t_dom).count());
+    log_mem_stage("load_html: css_parsed");
 
     // print internal stylesheets for debugging
-    for (int i = 0; i < inline_stylesheet_count; i++) {
-        const char* formatted_css = css_stylesheet_to_string_styled(
-            inline_stylesheets[i], pool, CSS_FORMAT_EXPANDED);
-        if (formatted_css) {
-            log_debug("[Lambda CSS] Parsed inline stylesheet %d:\n%s", i, formatted_css);
+    // Skip the (expensive) formatting entirely when debug logs are disabled —
+    // for large pages (e.g. cnn_lite) this dump dominated peak memory.
+    if (log_level_enabled(NULL, LOG_LEVEL_DEBUG)) {
+        for (int i = 0; i < inline_stylesheet_count; i++) {
+            const char* formatted_css = css_stylesheet_to_string_styled(
+                inline_stylesheets[i], pool, CSS_FORMAT_EXPANDED);
+            if (formatted_css) {
+                log_debug("[Lambda CSS] Parsed inline stylesheet %d:\n%s", i, formatted_css);
+            }
         }
     }
 
@@ -2759,7 +2906,9 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     // via dom_element_apply_inline_style with a later source_order, so they
     // correctly override the original HTML inline styles in the cascade.
     // This also ensures the HTML→DOM tree mapping is pristine (no JS mutations yet).
+    log_mem_stage("load_html: before_inline_attrs");
     apply_inline_styles_to_tree(dom_root, html_root, pool);
+    log_mem_stage("load_html: after_inline_attrs");
 
     // Step 2d: Execute <script> elements (inline + external) and body onload handlers
     // Scripts run after inline style application so JS style changes override HTML attrs.
@@ -2767,7 +2916,9 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     // appendChild, removeChild, etc.) take effect before styles are resolved.
     // getComputedStyle can query parsed stylesheets via on-demand matching.
     dom_doc->root = dom_root;  // set root for JS DOM API access
+    log_mem_stage("load_html: before_scripts");
     execute_document_scripts(html_root, dom_doc, pool, html_url);
+    log_mem_stage("load_html: after_scripts");
 
     auto t_scripts = high_resolution_clock::now();
 
@@ -2873,12 +3024,17 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     log_cascade_timing_summary();  // log selector matching and property application stats
     log_dom_element_timing();  // log detailed cascade timing
     log_info("[TIMING] load: CSS cascade: %.1fms", duration<double, std::milli>(t_cascade - t_css_parse).count());
+    log_mem_stage("load_html: cascade_done");
 
-    // Dump CSS computed values for testing/comparison (includes inheritance, before layout)
-    StrBuf* str_buf = strbuf_new();
-    dom_root->print(str_buf, 0);
-    log_debug("Built DomElement tree with styles::\n%s", str_buf->str);
-    strbuf_free(str_buf);
+    // Dump CSS computed values for testing/comparison (includes inheritance, before layout).
+    // Skip the (potentially expensive) tree walk entirely when debug logs are disabled \u2014
+    // for large pages (e.g. cnn_lite) this dump dominated peak RSS.
+    if (log_level_enabled(NULL, LOG_LEVEL_DEBUG)) {
+        StrBuf* str_buf = strbuf_new();
+        dom_root->print(str_buf, 0);
+        log_debug("Built DomElement tree with styles::\n%s", str_buf->str);
+        strbuf_free(str_buf);
+    }
 
     // Step 8: Create DomDocument structure (already created by dom_document_create)
     // Just populate the additional fields

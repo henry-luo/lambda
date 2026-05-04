@@ -87,6 +87,11 @@ enum SimEventType {
     SIM_EVENT_SELECT_OPTION,   // select an option from a <select> dropdown
     SIM_EVENT_RESIZE,          // resize viewport and trigger relayout
     SIM_EVENT_DRAG_AND_DROP,   // HTML5 drag-and-drop from source to target
+    // F6: clipboard helpers
+    SIM_EVENT_PASTE_TEXT,      // seed clipboard, dispatch Cmd+V into focused
+    SIM_EVENT_ASSERT_CLIPBOARD, // assert current clipboard text matches
+    // F7: IME composition
+    SIM_EVENT_IME_COMPOSE,     // drive te_ime_begin/update/commit/cancel
     // Assertions
     SIM_EVENT_ASSERT_CARET,
     SIM_EVENT_ASSERT_SELECTION,
@@ -134,6 +139,7 @@ struct SimEvent {
     int expected_view_type;      // for assertions
     int expected_char_offset;    // for assertions
     bool expected_is_collapsed;  // for assertions
+    bool check_dom_selection;    // for assert_selection: also verify DomSelection (renderer source)
     bool negate_view_type;       // for assert_caret: assert view_type != expected_view_type
     float scroll_dx, scroll_dy;  // scroll offsets
     char* message;               // for log events
@@ -141,6 +147,9 @@ struct SimEvent {
     char* target_text;           // for mouse events: find text and click on it
     char* target_selector;       // CSS selector for targeting elements
     int target_index;            // 0-based index: which matching element (default 0 = first)
+    int target_offset_x;         // optional pixel offset from element top-left (CSS px)
+    int target_offset_y;         // optional pixel offset from element top-left (CSS px)
+    bool has_target_offset;      // true when offset_x/offset_y were specified
     char* to_target_selector;    // for mouse_drag: destination CSS selector
     char* to_target_text;        // for mouse_drag: destination text target
     char* input_text;            // for type action: text to type
@@ -203,6 +212,15 @@ struct SimEvent {
     bool negate_scroll;          // invert assertion (pass when NOT at expected position)
     // Webview fields
     char* js_code;               // for webview_eval_js: JavaScript code to execute
+    // F2 (Radiant_Design_Form_Input.md §4.1): click count for the
+    // tripleclick / dblclick path. 0 = default (dblclick uses 2,
+    // tripleclick sets 3). Used as MouseButtonEvent::clicks on the
+    // last synthesized down/up pair.
+    int click_count;
+    // F7 (Radiant_Design_Form_Input.md §4.1): IME composition phase
+    // for SIM_EVENT_IME_COMPOSE. One of "begin", "update", "commit",
+    // "cancel". Empty / unknown defaults to "update".
+    char* ime_phase;
 };
 
 // Event simulation context

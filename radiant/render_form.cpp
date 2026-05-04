@@ -85,8 +85,8 @@ static void draw_3d_border(RenderContext* rdcon, float x, float y, float w, floa
  * @param font Font properties to use
  * @param color Text color
  */
-static void render_simple_string(RenderContext* rdcon, const char* text, float x, float y,
-                                 FontProp* font, Color color) {
+void render_simple_string(RenderContext* rdcon, const char* text, float x, float y,
+                          FontProp* font, Color color) {
     if (!text || !*text || !font || !rdcon->ui_context) return;
 
     // Setup font for rendering
@@ -138,6 +138,89 @@ static void render_simple_string(RenderContext* rdcon, const char* text, float x
 }
 
 /**
+ * F4 helper: measure rendered width of a UTF-8 string up to `byte_count`
+ * bytes using the same per-glyph advance loop the caret math uses.
+ * Returns logical pixels (already divided by pixel_ratio); caller should
+ * multiply by `s` for physical pixels.
+ */
+static float measure_input_text_width(RenderContext* rdcon, FontProp* font,
+                                      const char* text, int byte_count) {
+    if (!text || byte_count <= 0 || !font || !rdcon->ui_context) return 0.0f;
+    FontBox fbox = {0};
+    setup_font(rdcon->ui_context, &fbox, font);
+    if (!fbox.font_handle) return 0.0f;
+    float pixel_ratio = (rdcon->ui_context->pixel_ratio > 0)
+        ? rdcon->ui_context->pixel_ratio : 1.0f;
+    FontStyleDesc sd = font_style_desc_from_prop(font);
+    const unsigned char* p = (const unsigned char*)text;
+    const unsigned char* p_end = p + byte_count;
+    float tw = 0.0f;
+    while (p < p_end) {
+        uint32_t codepoint;
+        int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
+        if (bytes <= 0) { p++; continue; }
+        p += bytes;
+        LoadedGlyph* glyph = font_load_glyph(fbox.font_handle, &sd, codepoint, false);
+        if (glyph) tw += glyph->advance_x / pixel_ratio;
+    }
+    return tw;
+}
+
+/**
+ * F4 helper: build a heap-allocated masked copy of `src` where every
+ * Unicode codepoint is replaced with U+25CF (BLACK CIRCLE, 3 UTF-8 bytes
+ * "\xE2\x97\x8F"). Caller owns the returned buffer (free()). Length is
+ * codepoint_count * 3; nul-terminated. Returns nullptr on OOM.
+ *
+ * Also writes the substituted byte count for an arbitrary input byte
+ * offset to *out_offset_map (one entry per source codepoint boundary)
+ * when out_offset_map is non-null — used for caret-X math so the caret
+ * lands on the correct masked-glyph boundary.
+ */
+static char* build_password_mask(const char* src, int src_len) {
+    if (!src) return nullptr;
+    int cp = 0;
+    const unsigned char* p = (const unsigned char*)src;
+    const unsigned char* p_end = p + src_len;
+    while (p < p_end) {
+        uint32_t codepoint;
+        int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
+        if (bytes <= 0) { p++; continue; }
+        p += bytes;
+        cp++;
+    }
+    char* out = (char*)malloc((size_t)cp * 3 + 1);
+    if (!out) return nullptr;
+    for (int i = 0; i < cp; i++) {
+        out[i*3 + 0] = (char)0xE2;
+        out[i*3 + 1] = (char)0x97;
+        out[i*3 + 2] = (char)0x8F;
+    }
+    out[cp * 3] = '\0';
+    return out;
+}
+
+/**
+ * F4 helper: convert a UTF-8 byte offset in the source value to the
+ * corresponding byte offset in the masked rendering (each source
+ * codepoint becomes 3 bytes in the mask).
+ */
+static int password_mask_byte_offset(const char* src, int src_byte_off) {
+    if (!src || src_byte_off <= 0) return 0;
+    int cp = 0;
+    const unsigned char* p = (const unsigned char*)src;
+    const unsigned char* p_end = p + src_byte_off;
+    while (p < p_end) {
+        uint32_t codepoint;
+        int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
+        if (bytes <= 0) { p++; continue; }
+        p += bytes;
+        cp++;
+    }
+    return cp * 3;
+}
+
+/**
  * Render a text input control (text, password, email, etc.)
  */
 void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
@@ -147,19 +230,54 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
     float w = block->width * s;
     float h = block->height * s;
 
-    // Background (white)
-    Color bg = make_color(255, 255, 255);
-    fill_rect(rdcon, x, y, w, h, bg);
+    // Background (white) - only when CSS doesn't specify a background.
+    // When the author sets background-color (or background image), render_block_view
+    // has already painted it, so do not overdraw with white here.
+    // Also: clip the white fill to the inside of any CSS border, otherwise the
+    // fill stomps the border (which render_bound painted just before us).
+    bool has_css_background = block->bound && block->bound->background;
+    bool has_css_border = block->bound && block->bound->border &&
+        (block->bound->border->width.top > 0 || block->bound->border->width.right > 0 ||
+         block->bound->border->width.bottom > 0 || block->bound->border->width.left > 0);
+    if (!has_css_background) {
+        Color bg = make_color(255, 255, 255);
+        float bx = x, by = y, bw_w = w, bh_h = h;
+        if (has_css_border) {
+            float bl = block->bound->border->width.left * s;
+            float br = block->bound->border->width.right * s;
+            float bt = block->bound->border->width.top * s;
+            float bb = block->bound->border->width.bottom * s;
+            bx += bl; by += bt;
+            bw_w -= bl + br; bh_h -= bt + bb;
+        }
+        fill_rect(rdcon, bx, by, bw_w, bh_h, bg);
+    }
 
-    // 3D inset border (text inputs have inset appearance)
-    draw_3d_border(rdcon, x, y, w, h, true, 1 * s);
+    // 3D inset border (text inputs have inset appearance) - only when the author
+    // didn't specify a border. If a border is set in CSS, render_block_view has
+    // already drawn it (and respects border-color/border-radius); avoid stomping
+    // it with the default 3D chrome.
+    if (!has_css_border) {
+        draw_3d_border(rdcon, x, y, w, h, true, 1 * s);
+    }
 
-    // Draw value or placeholder text
-    const char* text = form->value;
+    // Source value vs displayed value. F4: for password fields we substitute
+    // every codepoint with U+25CF so the existing measurement and rendering
+    // paths can treat it uniformly. The unmasked `src_text` is still used
+    // for caret-byte→codepoint mapping.
+    const char* src_text = form->value;
     bool is_placeholder = false;
-    if (!text || !*text) {
-        text = form->placeholder;
+    if (!src_text || !*src_text) {
+        src_text = form->placeholder;
         is_placeholder = true;
+    }
+    bool is_password = !is_placeholder && src_text
+        && form->input_type && strcmp(form->input_type, "password") == 0;
+    char* mask_buf = nullptr;
+    const char* text = src_text;
+    if (is_password) {
+        mask_buf = build_password_mask(src_text, (int)strlen(src_text));
+        if (mask_buf) text = mask_buf;
     }
 
     // Compute text area position (shared by text rendering and caret)
@@ -168,8 +286,68 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
     float text_x = x + border_w + padding;
     float font_size_scaled = block->font ? block->font->font_size * s : 16.0f * s;
     float text_y = y + border_w + (h - 2*border_w - font_size_scaled) / 2;
+    float content_right = x + w - border_w - padding;
+    float content_w     = content_right - text_x;
 
-    float text_end_x = text_x;  // tracks x position after rendering text
+    // F4: compute caret X (logical, before scroll) so we can clamp scroll_x
+    // to keep the caret inside the content box. Done up-front so the same
+    // scroll offset is applied to text, selection and caret rendering.
+    RadiantState* state = rdcon->ui_context && rdcon->ui_context->document
+        ? (RadiantState*)rdcon->ui_context->document->state : nullptr;
+    bool focused_here = state && focus_get(state) == (View*)block;
+    float caret_x_logical = 0.0f;
+    if (focused_here && state->caret && !is_placeholder && text && block->font) {
+        int caret_byte = state->caret->char_offset;
+        int src_len = src_text ? (int)strlen(src_text) : 0;
+        if (caret_byte > src_len) caret_byte = src_len;
+        int meas_byte = is_password
+            ? password_mask_byte_offset(src_text, caret_byte)
+            : caret_byte;
+        caret_x_logical = measure_input_text_width(rdcon, block->font, text, meas_byte) * s;
+    }
+
+    // F4: keep caret_x_logical within [margin, content_w - margin]. A small
+    // margin (3 px) avoids the caret kissing the right border.
+    if (focused_here && form && content_w > 0) {
+        const float margin = 3.0f * s;
+        float visible_caret = caret_x_logical - form->scroll_x * s;
+        if (visible_caret < margin) {
+            form->scroll_x = (caret_x_logical - margin) / s;
+        } else if (visible_caret > content_w - margin) {
+            form->scroll_x = (caret_x_logical - (content_w - margin)) / s;
+        }
+        if (form->scroll_x < 0) form->scroll_x = 0;
+    }
+    float scroll_px = (form ? form->scroll_x : 0.0f) * s;
+
+    // Draw selection highlight BEFORE the text so glyphs render on top
+    // of the highlight (matches native widgets and CSS ::selection).
+    if (focused_here && !is_placeholder && form->tc_initialized
+        && form->selection_start != form->selection_end
+        && text && *text) {
+        uint32_t a8_src = tc_utf16_to_utf8_offset(form->current_value
+                                                      ? form->current_value : src_text,
+                                                  form->current_value
+                                                      ? form->current_value_len
+                                                      : (uint32_t)strlen(src_text),
+                                                  form->selection_start);
+        uint32_t b8_src = tc_utf16_to_utf8_offset(form->current_value
+                                                      ? form->current_value : src_text,
+                                                  form->current_value
+                                                      ? form->current_value_len
+                                                      : (uint32_t)strlen(src_text),
+                                                  form->selection_end);
+        int a8 = is_password ? password_mask_byte_offset(src_text, (int)a8_src) : (int)a8_src;
+        int b8 = is_password ? password_mask_byte_offset(src_text, (int)b8_src) : (int)b8_src;
+        float ax = text_x + measure_input_text_width(rdcon, block->font, text, a8) * s
+                   - scroll_px;
+        float bx = text_x + measure_input_text_width(rdcon, block->font, text, b8) * s
+                   - scroll_px;
+        if (bx > ax) {
+            Color sel_color = make_color(0xB4, 0xD5, 0xFE, 0xFF); // CSS ::selection default
+            fill_rect(rdcon, ax, text_y, bx - ax, font_size_scaled, sel_color);
+        }
+    }
 
     if (text && *text && block->font) {
         // Set text color
@@ -184,145 +362,29 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
         } else {
             text_color = make_color(0, 0, 0);
         }
-
-        // Render text (using existing text rendering)
-        // For password fields, show dots instead
-        if (form->input_type && strcmp(form->input_type, "password") == 0) {
-            rdcon->color = text_color;
-            size_t len = strlen(text);
-            float dot_spacing = font_size_scaled * 0.6f;
-            for (size_t i = 0; i < len; i++) {
-                float cx = text_x + i * dot_spacing + dot_spacing / 2;
-                float cy = y + h / 2;
-                float radius = 3 * s;
-                fill_rect(rdcon, cx - radius, cy - radius, radius * 2, radius * 2, rdcon->color);
-            }
-            text_end_x = text_x + (float)len * dot_spacing;
-        } else {
-            render_simple_string(rdcon, text, text_x, text_y,
-                                 block->font, text_color);
-
-            // Measure rendered text width for caret positioning
-            FontBox fbox = {0};
-            setup_font(rdcon->ui_context, &fbox, block->font);
-            if (fbox.font_handle) {
-                float pixel_ratio = (rdcon->ui_context && rdcon->ui_context->pixel_ratio > 0)
-                    ? rdcon->ui_context->pixel_ratio : 1.0f;
-                const unsigned char* p = (const unsigned char*)text;
-                const unsigned char* p_end = p + strlen(text);
-                float tw = 0;
-                while (p < p_end) {
-                    uint32_t codepoint;
-                    int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
-                    if (bytes <= 0) { p++; continue; }
-                    p += bytes;
-                    FontStyleDesc sd = font_style_desc_from_prop(block->font);
-                    LoadedGlyph* glyph = font_load_glyph(fbox.font_handle, &sd, codepoint, false);
-                    if (glyph) {
-                        tw += glyph->advance_x / pixel_ratio;
-                    }
-                }
-                text_end_x = text_x + tw * s;
-            }
-        }
+        // F4: glyph-based render works for both regular and password text
+        // (mask_buf substitutes glyphs), with scroll_x applied uniformly.
+        render_simple_string(rdcon, text, text_x - scroll_px, text_y,
+                             block->font, text_color);
     }
 
     // Draw caret if this input has focus
-    RadiantState* state = (RadiantState*)rdcon->ui_context->document->state;
-    if (state) {
-        View* focused = focus_get(state);
-        if (focused == (View*)block) {
-            // Phase 6E: render selection highlight from form->selection_*
-            // (UTF-16) when non-collapsed. We measure to two byte offsets
-            // using the same per-glyph advance loop the caret uses.
-            auto measure_to_byte_off = [&](int byte_off) -> float {
-                if (!text || !*text || !block->font || byte_off <= 0) return 0.0f;
-                int val_len = (int)strlen(text);
-                if (byte_off > val_len) byte_off = val_len;
-                FontBox fbox = {0};
-                setup_font(rdcon->ui_context, &fbox, block->font);
-                if (!fbox.font_handle) return 0.0f;
-                float pixel_ratio = (rdcon->ui_context && rdcon->ui_context->pixel_ratio > 0)
-                    ? rdcon->ui_context->pixel_ratio : 1.0f;
-                const unsigned char* p = (const unsigned char*)text;
-                const unsigned char* p_end = p + byte_off;
-                float tw = 0;
-                while (p < p_end) {
-                    uint32_t codepoint;
-                    int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
-                    if (bytes <= 0) { p++; continue; }
-                    p += bytes;
-                    FontStyleDesc sd = font_style_desc_from_prop(block->font);
-                    LoadedGlyph* glyph = font_load_glyph(fbox.font_handle, &sd, codepoint, false);
-                    if (glyph) tw += glyph->advance_x / pixel_ratio;
-                }
-                return tw * s;
-            };
-
-            DomElement* tc_elem = (DomElement*)block;
-            if (!is_placeholder && form->tc_initialized
-                && form->selection_start != form->selection_end
-                && text && *text) {
-                uint32_t a8 = tc_utf16_to_utf8_offset(form->current_value
-                                                          ? form->current_value : text,
-                                                      form->current_value
-                                                          ? form->current_value_len
-                                                          : (uint32_t)strlen(text),
-                                                      form->selection_start);
-                uint32_t b8 = tc_utf16_to_utf8_offset(form->current_value
-                                                          ? form->current_value : text,
-                                                      form->current_value
-                                                          ? form->current_value_len
-                                                          : (uint32_t)strlen(text),
-                                                      form->selection_end);
-                float ax = text_x + measure_to_byte_off((int)a8);
-                float bx = text_x + measure_to_byte_off((int)b8);
-                if (bx > ax) {
-                    Color sel_color = make_color(0xB4, 0xD5, 0xFE, 0xFF); // CSS ::selection default
-                    fill_rect(rdcon, ax, text_y, bx - ax, font_size_scaled, sel_color);
-                }
-            }
-            (void)tc_elem;
-
-            // Position caret at char_offset within the value text
-            float caret_x = text_x;  // default: start of text area
-            if (!is_placeholder && text && *text && state->caret && block->font) {
-                int caret_off = state->caret->char_offset;
-                int val_len = (int)strlen(text);
-                if (caret_off > val_len) caret_off = val_len;  // clamp
-                if (caret_off > 0) {
-                    // Measure text width up to caret_off bytes
-                    FontBox fbox = {0};
-                    setup_font(rdcon->ui_context, &fbox, block->font);
-                    if (fbox.font_handle) {
-                        float pixel_ratio = (rdcon->ui_context && rdcon->ui_context->pixel_ratio > 0)
-                            ? rdcon->ui_context->pixel_ratio : 1.0f;
-                        const unsigned char* p = (const unsigned char*)text;
-                        const unsigned char* p_end = p + caret_off;
-                        float tw = 0;
-                        while (p < p_end) {
-                            uint32_t codepoint;
-                            int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
-                            if (bytes <= 0) { p++; continue; }
-                            p += bytes;
-                            FontStyleDesc sd = font_style_desc_from_prop(block->font);
-                            LoadedGlyph* glyph = font_load_glyph(fbox.font_handle, &sd, codepoint, false);
-                            if (glyph) tw += glyph->advance_x / pixel_ratio;
-                        }
-                        caret_x = text_x + tw * s;
-                    }
-                }
-            }
+    if (focused_here) {
+        // F4: respect global caret blink visibility (state->caret->visible).
+        // Headless / first-frame rendering keeps it true so screenshot tests
+        // see the caret.
+        bool caret_visible = state->caret && state->caret->visible;
+        if (caret_visible) {
+            float caret_x = text_x + caret_x_logical - scroll_px;
             float caret_y_pos = text_y;
             float caret_h = font_size_scaled;
             float caret_w = 2.0f * s;
-
-            // Draw caret via RdtVector
             Color caret_color = make_color(0x33, 0x33, 0x33, 0xCC);
             rc_fill_rect(rdcon, caret_x, caret_y_pos, caret_w, caret_h, caret_color);
         }
     }
 
+    if (mask_buf) free(mask_buf);
     log_debug("[FORM] render_text_input at (%.1f, %.1f) size %.1fx%.1f", x, y, w, h);
 }
 
@@ -363,6 +425,26 @@ void render_checkbox(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
         rdt_path_free(p);
     }
 
+    // Focus ring — a 2px outset blue rectangle (matches our text-input
+    // focus indicator and gives Tab navigation a visible target).
+    RadiantState* state = rdcon->ui_context && rdcon->ui_context->document
+        ? (RadiantState*)rdcon->ui_context->document->state : nullptr;
+    if (state && focus_get(state) == (View*)block) {
+        float ring = 2.0f * s;
+        Color ring_color = make_color(0x1A, 0x73, 0xE8, 0xFF);
+        float rx = x - ring, ry = y - ring;
+        float rw = size + 2 * ring, rh = size + 2 * ring;
+        RdtPath* p = rdt_path_new();
+        rdt_path_move_to(p, rx, ry);
+        rdt_path_line_to(p, rx + rw, ry);
+        rdt_path_line_to(p, rx + rw, ry + rh);
+        rdt_path_line_to(p, rx, ry + rh);
+        rdt_path_close(p);
+        rc_stroke_path(rdcon, p, ring_color, ring,
+                       RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, NULL);
+        rdt_path_free(p);
+    }
+
     log_debug("[FORM] render_checkbox at (%.1f, %.1f) checked=%d", x, y, form->checked);
 }
 
@@ -396,6 +478,15 @@ void render_radio(RenderContext* rdcon, ViewBlock* block, FormControlProp* form)
         fill_circle(rdcon, cx, cy, dot_radius, dot_color);
     }
 
+    // Focus ring (see render_checkbox).
+    RadiantState* state = rdcon->ui_context && rdcon->ui_context->document
+        ? (RadiantState*)rdcon->ui_context->document->state : nullptr;
+    if (state && focus_get(state) == (View*)block) {
+        float ring = 2.0f * s;
+        Color ring_color = make_color(0x1A, 0x73, 0xE8, 0xFF);
+        stroke_circle(rdcon, cx, cy, radius + ring, ring_color, ring);
+    }
+
     log_debug("[FORM] render_radio at (%.1f, %.1f) checked=%d", x, y, form->checked);
 }
 
@@ -411,21 +502,26 @@ void render_button(RenderContext* rdcon, ViewBlock* block, FormControlProp* form
     float w = block->width * s;
     float h = block->height * s;
 
-    // Check if button has CSS-specified background (from author stylesheet).
+    // Check if button has CSS-specified background or border (from author stylesheet).
     // The background prop is only allocated when author CSS sets it, so its
     // existence alone means the author specified a background (including transparent).
     bool has_css_background = block->bound && block->bound->background;
+    bool has_css_border = block->bound && block->bound->border &&
+        (block->bound->border->width.top > 0 || block->bound->border->width.right > 0 ||
+         block->bound->border->width.bottom > 0 || block->bound->border->width.left > 0);
 
     if (!has_css_background) {
         // No CSS background - render default button appearance
         // Background (light gray)
         Color bg = form->disabled ? make_color(200, 200, 200) : make_color(224, 224, 224);
         fill_rect(rdcon, x, y, w, h, bg);
-
-        // 3D outset border (raised button appearance)
+    }
+    if (!has_css_background && !has_css_border) {
+        // 3D outset border (raised button appearance) - skip when author CSS
+        // already specifies a border (rendered by render_block_view).
         draw_3d_border(rdcon, x, y, w, h, false, 1 * s);
     }
-    // If CSS background is present, it's already rendered by render_block_view
+    // If CSS background/border is present, it's already rendered by render_block_view
 
     // For void elements like <input type="submit">, render value text directly
     // (child content rendering only works for <button>text</button> style elements)
@@ -465,6 +561,25 @@ void render_button(RenderContext* rdcon, ViewBlock* block, FormControlProp* form
         render_simple_string(rdcon, form->value, text_x, text_y, block->font, text_color);
     }
 
+    // Focus ring (Tab navigation indicator).
+    RadiantState* state = rdcon->ui_context && rdcon->ui_context->document
+        ? (RadiantState*)rdcon->ui_context->document->state : nullptr;
+    if (state && focus_get(state) == (View*)block) {
+        float ring = 2.0f * s;
+        Color ring_color = make_color(0x1A, 0x73, 0xE8, 0xFF);
+        float rx = x - ring, ry = y - ring;
+        float rw = w + 2 * ring, rh = h + 2 * ring;
+        RdtPath* p = rdt_path_new();
+        rdt_path_move_to(p, rx, ry);
+        rdt_path_line_to(p, rx + rw, ry);
+        rdt_path_line_to(p, rx + rw, ry + rh);
+        rdt_path_line_to(p, rx, ry + rh);
+        rdt_path_close(p);
+        rc_stroke_path(rdcon, p, ring_color, ring,
+                       RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, NULL);
+        rdt_path_free(p);
+    }
+
     log_debug("[FORM] render_button at (%.1f, %.1f) size %.1fx%.1f, has_css_bg=%d",
               x, y, w, h, has_css_background);
 }
@@ -482,51 +597,106 @@ void render_select(RenderContext* rdcon, ViewBlock* block, FormControlProp* form
     float w = block->width * s;
     float h = block->height * s;
 
-    // Background
-    Color bg = make_color(255, 255, 255);
-    fill_rect(rdcon, x, y, w, h, bg);
+    // Background and border are painted by render_block_view using the UA
+    // defaults set in resolve_htm_style.cpp (1px solid #767676, 2px radius,
+    // white/disabled-grey bg). Only fall back to manual drawing if those
+    // weren't set for some reason (e.g., author CSS removed them).
+    bool has_css_background = block->bound && block->bound->background;
+    bool has_css_border = block->bound && block->bound->border &&
+        (block->bound->border->width.top > 0 || block->bound->border->width.right > 0 ||
+         block->bound->border->width.bottom > 0 || block->bound->border->width.left > 0);
 
-    // Border
-    Color border_color = make_color(118, 118, 118);
     float bw = 1 * s;
-    fill_rect(rdcon, x, y, w, bw, border_color);
-    fill_rect(rdcon, x, y + h - bw, w, bw, border_color);
-    fill_rect(rdcon, x, y, bw, h, border_color);
-    fill_rect(rdcon, x + w - bw, y, bw, h, border_color);
+    if (!has_css_background) {
+        Color bg = form->disabled ? make_color(235, 235, 228) : make_color(255, 255, 255);
+        fill_rect(rdcon, x, y, w, h, bg);
+    }
+    if (!has_css_border) {
+        Color border_color = make_color(118, 118, 118);
+        fill_rect(rdcon, x, y, w, bw, border_color);
+        fill_rect(rdcon, x, y + h - bw, w, bw, border_color);
+        fill_rect(rdcon, x, y, bw, h, border_color);
+        fill_rect(rdcon, x + w - bw, y, bw, h, border_color);
+    } else {
+        // Use actual CSS border width for arrow area inset below
+        bw = block->bound->border->width.right * s;
+    }
 
     // Dropdown arrow area
-    float arrow_width = FormDefaults::SELECT_ARROW_WIDTH * s;
-    Color arrow_bg = make_color(240, 240, 240);
-    fill_rect(rdcon, x + w - arrow_width, y + bw, arrow_width - bw, h - 2 * bw, arrow_bg);
+    // CSS `appearance: none` suppresses the native dropdown chrome — skip
+    // the gray arrow well and triangle so author CSS (background, ::after,
+    // padding) controls the appearance.
+    if (!form->appearance_none) {
+        float arrow_width = FormDefaults::SELECT_ARROW_WIDTH * s;
+        Color arrow_bg = make_color(240, 240, 240);
+        fill_rect(rdcon, x + w - arrow_width, y + bw, arrow_width - bw, h - 2 * bw, arrow_bg);
 
-    // Arrow (simple triangle pointing down)
-    Color arrow_color = make_color(0, 0, 0);
-    float arrow_x = x + w - arrow_width / 2;
-    float arrow_y = y + h / 2;
-    float arrow_size = 4 * s;
-    // Approximate triangle with small rectangles
-    for (int i = 0; i < (int)arrow_size; i++) {
-        float line_width = (arrow_size - i) * 2;
-        fill_rect(rdcon, arrow_x - line_width / 2, arrow_y - arrow_size / 2 + i, line_width, 1 * s, arrow_color);
+        // Arrow (simple triangle pointing down)
+        Color arrow_color = make_color(0, 0, 0);
+        float arrow_x = x + w - arrow_width / 2;
+        float arrow_y = y + h / 2;
+        float arrow_size = 4 * s;
+        // Approximate triangle with small rectangles
+        for (int i = 0; i < (int)arrow_size; i++) {  // INT_CAST_OK: triangle row count
+            float line_width = (arrow_size - i) * 2;
+            fill_rect(rdcon, arrow_x - line_width / 2, arrow_y - arrow_size / 2 + i, line_width, 1 * s, arrow_color);
+        }
     }
 
     // Render selected option text
     if (block->font && form->selected_index >= 0) {
         const char* selected_text = get_option_text_at_index(block, form->selected_index);
         if (selected_text) {
-            // Calculate text position with padding
-            float text_padding = 6 * s;
-            float text_x = x + bw + text_padding;
+            // Use actual CSS padding so text starts after the author-specified
+            // left padding and is reserved on the right for any UA arrow well
+            // or author chevron (e.g. ::after sibling).
+            float pad_l, pad_r, bw_l, bw_r;
+            if (block->bound) {
+                pad_l = block->bound->padding.left * s;
+                pad_r = block->bound->padding.right * s;
+            } else {
+                pad_l = pad_r = FormDefaults::TEXT_PADDING_H * s;
+            }
+            if (block->bound && block->bound->border) {
+                bw_l = block->bound->border->width.left * s;
+                bw_r = block->bound->border->width.right * s;
+            } else {
+                bw_l = bw_r = bw;
+            }
+            float text_x = x + bw_l + pad_l;
+            float content_right = x + w - bw_r - pad_r;
+            float content_w = content_right - text_x;
 
             // Calculate text top position (vertically centered)
             float font_height_scaled = block->font->font_height * s;
             float text_top = y + (h - font_height_scaled) / 2;
 
-            // Text color (black)
-            Color text_color = make_color(0, 0, 0);
+            // Text color: prefer CSS-resolved color (from `color` property),
+            // fallback to dark grey when disabled, black otherwise. Matches
+            // Chrome UA default behavior.
+            Color text_color;
+            if (form->disabled) {
+                text_color = make_color(109, 109, 109);
+            } else if (block->in_line) {
+                text_color.r = block->in_line->color.r;
+                text_color.g = block->in_line->color.g;
+                text_color.b = block->in_line->color.b;
+                text_color.a = block->in_line->color.a;
+            } else {
+                text_color = make_color(0, 0, 0);
+            }
 
-            // Render the selected text
-            render_simple_string(rdcon, selected_text, text_x, text_top, block->font, text_color);
+            // Clip text to the select's content box so it doesn't overflow into
+            // the right-padding area where the author chevron / UA arrow lives.
+            if (content_w > 0) {
+                Bound saved_clip = rdcon->block.clip;
+                if (text_x > rdcon->block.clip.left) rdcon->block.clip.left = text_x;
+                if (content_right < rdcon->block.clip.right) rdcon->block.clip.right = content_right;
+                render_simple_string(rdcon, selected_text, text_x, text_top, block->font, text_color);
+                rdcon->block.clip = saved_clip;
+            } else {
+                render_simple_string(rdcon, selected_text, text_x, text_top, block->font, text_color);
+            }
         }
     }
 
@@ -796,17 +966,37 @@ void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
     float w = block->width * s;
     float h = block->height * s;
 
-    // Background
-    Color bg = make_color(255, 255, 255);
-    fill_rect(rdcon, x, y, w, h, bg);
+    // Background and border are painted by render_bound when the author set them
+    // (respecting border-radius / border-color). Only fall back to the default
+    // white background + 3D inset border when the author didn't.
+    bool has_css_background = block->bound && block->bound->background;
+    bool has_css_border = block->bound && block->bound->border &&
+        (block->bound->border->width.top > 0 || block->bound->border->width.right > 0 ||
+         block->bound->border->width.bottom > 0 || block->bound->border->width.left > 0);
+    if (!has_css_background) {
+        Color bg = make_color(255, 255, 255);
+        float bx = x, by = y, bw_w = w, bh_h = h;
+        if (has_css_border) {
+            float bl = block->bound->border->width.left * s;
+            float br = block->bound->border->width.right * s;
+            float bt = block->bound->border->width.top * s;
+            float bb = block->bound->border->width.bottom * s;
+            bx += bl; by += bt;
+            bw_w -= bl + br; bh_h -= bt + bb;
+        }
+        fill_rect(rdcon, bx, by, bw_w, bh_h, bg);
+    }
+    if (!has_css_border) {
+        draw_3d_border(rdcon, x, y, w, h, true, 1 * s);
+    }
 
-    // Border (inset style)
-    draw_3d_border(rdcon, x, y, w, h, true, 1 * s);
-
-    // Determine text content or placeholder
+    // Determine text content or placeholder. Only enter placeholder mode
+    // when an actual placeholder string is present — otherwise an empty
+    // textarea would be flagged as a placeholder and the caret-render
+    // path (guarded by !is_placeholder) would skip drawing the caret.
     const char* text = form->value;
     bool is_placeholder = false;
-    if (!text || !*text) {
+    if ((!text || !*text) && form->placeholder && *form->placeholder) {
         text = form->placeholder;
         is_placeholder = true;
     }
@@ -956,10 +1146,14 @@ void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
         }
     }
 
-    // Draw caret if this textarea has focus
+    // Draw caret if this textarea has focus. Note: do NOT gate on
+    // !is_placeholder — when the value is empty and a placeholder is
+    // shown, the caret still belongs at offset 0 (matches native
+    // browser behavior).
     if (state) {
         View* focused = focus_get(state);
-        if (focused == (View*)block && state->caret && !is_placeholder) {
+        if (focused == (View*)block && state->caret
+            && state->caret->visible) {
             const char* value = form->value;
             int caret_off = state->caret->char_offset;
             int val_len = value ? (int)strlen(value) : 0;

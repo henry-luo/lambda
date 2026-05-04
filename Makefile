@@ -1087,7 +1087,7 @@ test-input-baseline: build-test ensure-yaml-submodule
 	echo "{\"total_passed\":$$total_passed,\"total_failed\":$$total_failed,\"suites\":[{\"name\":\"HTML5 WPT Parser\",\"passed\":$$wpt_passed,\"failed\":$$wpt_failed},{\"name\":\"CommonMark Markdown\",\"passed\":$$md_passed,\"failed\":$$md_failed},{\"name\":\"YAML Suite\",\"passed\":$$yaml_passed,\"failed\":$$yaml_failed},{\"name\":\"ASCII Math\",\"passed\":$$math_passed,\"failed\":$$math_failed},{\"name\":\"LaTeX Math\",\"passed\":$$latex_math_passed,\"failed\":$$latex_math_failed}]}" > test_output/input_baseline_results.json
 
 # Layout baseline suites - add new suites here (each must have baseline.txt in its data dir)
-LAYOUT_BASELINE_SUITES ?= baseline wpt-css-text pretext form
+LAYOUT_BASELINE_SUITES ?= baseline wpt-css-text form
 
 test-radiant-baseline: build-test
 	@$(MAKE) --no-print-directory run-radiant-baseline

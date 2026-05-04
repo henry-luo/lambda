@@ -487,8 +487,9 @@ void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color, Bound*
 
 // Bilinear interpolation helper function (for upscaling or 1:1)
 static uint32_t bilinear_interpolate_wrap(ImageSurface* src, float src_x, float src_y) {
-    int w = src->width;
-    int h = src->height;
+    // use the actual decoded buffer dims if a smaller-than-intrinsic decode was done
+    int w = (src->decoded_width > 0) ? src->decoded_width : src->width;
+    int h = (src->decoded_height > 0) ? src->decoded_height : src->height;
     int x1 = (int)floorf(src_x);
     int y1 = (int)floorf(src_y);
     int x2 = x1 + 1;
@@ -522,16 +523,18 @@ static uint32_t bilinear_interpolate_wrap(ImageSurface* src, float src_x, float 
 }
 
 static uint32_t bilinear_interpolate(ImageSurface* src, float src_x, float src_y) {
+    int src_w = (src->decoded_width > 0) ? src->decoded_width : src->width;
+    int src_h = (src->decoded_height > 0) ? src->decoded_height : src->height;
     int x1 = (int)floorf(src_x);
     int y1 = (int)floorf(src_y);
     int x2 = x1 + 1;
     int y2 = y1 + 1;
 
     // clamp coordinates to source bounds
-    x1 = std::max(0, std::min(x1, src->width - 1));
-    y1 = std::max(0, std::min(y1, src->height - 1));
-    x2 = std::max(0, std::min(x2, src->width - 1));
-    y2 = std::max(0, std::min(y2, src->height - 1));
+    x1 = std::max(0, std::min(x1, src_w - 1));
+    y1 = std::max(0, std::min(y1, src_h - 1));
+    x2 = std::max(0, std::min(x2, src_w - 1));
+    y2 = std::max(0, std::min(y2, src_h - 1));
 
     float fx = src_x - floorf(src_x);
     float fy = src_y - floorf(src_y);
@@ -560,11 +563,13 @@ static uint32_t bilinear_interpolate(ImageSurface* src, float src_x, float src_y
 // Area averaging helper for downscaling: averages all source pixels in the box [x0,x1) x [y0,y1)
 // This produces much better quality than bilinear when shrinking by >2x
 static uint32_t area_average(ImageSurface* src, float x0, float y0, float x1, float y1) {
+    int src_w = (src->decoded_width > 0) ? src->decoded_width : src->width;
+    int src_h = (src->decoded_height > 0) ? src->decoded_height : src->height;
     // clamp to source bounds
     int ix0 = std::max(0, (int)x0);
     int iy0 = std::max(0, (int)y0);
-    int ix1 = std::min(src->width, (int)(x1 + 1.0f));
-    int iy1 = std::min(src->height, (int)(y1 + 1.0f));
+    int ix1 = std::min(src_w, (int)(x1 + 1.0f));
+    int iy1 = std::min(src_h, (int)(y1 + 1.0f));
 
     if (ix0 >= ix1 || iy0 >= iy1) return 0;
 
@@ -621,7 +626,13 @@ void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, R
         return;
     }
     if (!src_rect) { // use the entire source image
-        rect = (Rect){0, 0, (float)src->width, (float)src->height};
+        // For images decoded at a smaller-than-intrinsic scale, use the actual
+        // decoded buffer dims so we read in-bounds. dst_rect already reflects
+        // the displayed (intrinsic-scaled) size, so the blit's src/dst ratio
+        // automatically maps from the smaller buffer to the displayed area.
+        int src_w = (src->decoded_width > 0) ? src->decoded_width : src->width;
+        int src_h = (src->decoded_height > 0) ? src->decoded_height : src->height;
+        rect = (Rect){0, 0, (float)src_w, (float)src_h};
         src_rect = &rect;
     }
     log_debug("blit surface: src(%f, %f, %f, %f) to dst(%f, %f, %f, %f), scale_mode=%d",
@@ -684,7 +695,10 @@ void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, R
                 int int_src_y = (int)(src_y + 0.5f);
 
                 // bounds check for source coordinates
-                if (int_src_x < 0 || int_src_x >= src->width || int_src_y < 0 || int_src_y >= src->height) {
+                // bounds check for source coordinates
+                int src_w = (src->decoded_width > 0) ? src->decoded_width : src->width;
+                int src_h = (src->decoded_height > 0) ? src->decoded_height : src->height;
+                if (int_src_x < 0 || int_src_x >= src_w || int_src_y < 0 || int_src_y >= src_h) {
                     continue; // skip pixels outside source bounds
                 }
 
@@ -734,17 +748,25 @@ void image_surface_destroy(ImageSurface* img_surface) {
     }
 }
 
-void image_surface_ensure_decoded(ImageSurface* img) {
+void image_surface_ensure_decoded(ImageSurface* img, int target_w, int target_h) {
     if (!img || img->pixels) return;  // already decoded or null
+
+    // Clamp targets to a sensible minimum to avoid degenerate 0-pixel decodes.
+    if (target_w < 0) target_w = 0;
+    if (target_h < 0) target_h = 0;
 
     if (img->source_path) {
         // decode from local file
         int width, height, channels;
-        unsigned char* data = image_load(img->source_path, &width, &height, &channels, 4);
+        unsigned char* data = image_load_scaled(img->source_path, target_w, target_h, &width, &height, &channels);
         if (data) {
             img->pixels = data;
+            // record actual decoded buffer dims; intrinsic width/height stay unchanged for layout.
+            img->decoded_width = width;
+            img->decoded_height = height;
             img->pitch = width * 4;
-            log_debug("[image] Decoded local image on demand: %dx%d from %s", width, height, img->source_path);
+            log_debug("[image] Decoded local image on demand: %dx%d (intrinsic %dx%d, target %dx%d) from %s",
+                      width, height, img->width, img->height, target_w, target_h, img->source_path);
         } else {
             log_error("[image] Failed to decode local image: %s", img->source_path);
         }
@@ -753,11 +775,15 @@ void image_surface_ensure_decoded(ImageSurface* img) {
     } else if (img->source_data) {
         // decode from memory buffer
         int width, height, channels;
-        unsigned char* data = image_load_from_memory(img->source_data, img->source_data_len, &width, &height, &channels);
+        unsigned char* data = image_load_from_memory_scaled(img->source_data, img->source_data_len,
+                                                            target_w, target_h, &width, &height, &channels);
         if (data) {
             img->pixels = data;
+            img->decoded_width = width;
+            img->decoded_height = height;
             img->pitch = width * 4;
-            log_debug("[image] Decoded HTTP image on demand: %dx%d", width, height);
+            log_debug("[image] Decoded HTTP image on demand: %dx%d (intrinsic %dx%d, target %dx%d)",
+                      width, height, img->width, img->height, target_w, target_h);
         } else {
             log_error("[image] Failed to decode HTTP image from memory");
         }

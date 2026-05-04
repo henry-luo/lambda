@@ -1,0 +1,19 @@
+{
+  "name": "Arrow key without shift collapses selection (legacy + DOM)",
+  "html": "test/layout/data/form/form_state.html",
+  "events": [
+    {"type": "wait", "ms": 50},
+    {"type": "log", "message": "Drag-select within first li to create non-collapsed selection"},
+    {"type": "mouse_down", "target": {"text": "navigate between focusable"}, "button": 0},
+    {"type": "wait", "ms": 20},
+    {"type": "mouse_move", "target": {"text": "focusable elements"}},
+    {"type": "wait", "ms": 20},
+    {"type": "mouse_up", "target": {"text": "focusable elements"}, "button": 0},
+    {"type": "wait", "ms": 20},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+    {"type": "log", "message": "Press Right arrow without shift; selection must collapse in BOTH legacy and DomSelection"},
+    {"type": "key_press", "key": "Right"},
+    {"type": "wait", "ms": 20},
+    {"type": "assert_selection", "is_collapsed": true, "check_dom": true}
+  ]
+}

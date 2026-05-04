@@ -378,6 +378,7 @@
                 "lambda/input/source_tracker.cpp",
                 "lambda/input/input-context.cpp",
                 "lambda/input/html_entities.cpp",
+                "lambda/input/pdf_decompress.cpp",
                 "lambda/input/css/css_tokenizer.cpp",
                 "lambda/input/css/css_properties.cpp",
                 "lambda/input/css/css_value_parser.cpp",
@@ -2168,6 +2169,20 @@
                         "icon": "🗄️"
                     },
                     {
+                        "source": "test_input_pdf_gtest.cpp",
+                        "name": "Input PDF Parser Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_input_pdf_gtest.exe",
+                        "icon": "📕"
+                    },
+                    {
                         "source": "test_yaml_suite_gtest.cpp",
                         "name": "YAML Test Suite Conformance",
                         "dependencies": [
@@ -3013,6 +3028,30 @@
                         "icon": "🟨"
                     },
                     {
+                        "source": "test/test_js_props_gtest.cpp",
+                        "name": "JS Property-Model Invariant Tests (Stage B)",
+                        "dependencies": [],
+                        "binary": "test_js_props_gtest.exe",
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "requires_lambda_exe": true,
+                        "icon": "🧩"
+                    },
+                    {
+                        "source": "test/test_js_coerce_gtest.cpp",
+                        "name": "JS Coercion Kernel Tests (J39-1 ToPrimitive)",
+                        "dependencies": [],
+                        "binary": "test_js_coerce_gtest.exe",
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "requires_lambda_exe": true,
+                        "icon": "🔁"
+                    },
+                    {
                         "source": "test/test_node_gtest.cpp",
                         "name": "Node.js Module Tests",
                         "dependencies": [],
@@ -3057,6 +3096,30 @@
                         ],
                         "requires_lambda_exe": true,
                         "icon": "📋"
+                    },
+                    {
+                        "source": "test/wpt/test_wpt_dom_events_gtest.cpp",
+                        "name": "WPT DOM Events Tests",
+                        "category": "extended",
+                        "dependencies": [],
+                        "binary": "test_wpt_dom_events_gtest.exe",
+                        "libraries": [
+                            "gtest"
+                        ],
+                        "requires_lambda_exe": true,
+                        "icon": "🪝"
+                    },
+                    {
+                        "source": "test/wpt/test_wpt_form_gtest.cpp",
+                        "name": "WPT Form & FormData Tests",
+                        "category": "extended",
+                        "dependencies": [],
+                        "binary": "test_wpt_form_gtest.exe",
+                        "libraries": [
+                            "gtest"
+                        ],
+                        "requires_lambda_exe": true,
+                        "icon": "📝"
                     },
                     {
                         "source": "test/test_lambda_std_gtest.cpp",

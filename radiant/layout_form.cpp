@@ -91,18 +91,32 @@ static void calc_text_input_size(LayoutContext* lycon, FormControlProp* form, Fo
         if (temp_font.font_handle) {
             GlyphInfo zero_glyph = font_get_glyph(temp_font.font_handle, '0');
             if (zero_glyph.advance_x > 0) {
-                // Scale the calibrated char width to the current font-size
-                float scaled_calibrated = calibrated_char_w * font->font_size / ua_font_size;
-                // If measured char width differs significantly from calibrated,
-                // the input has a custom font (e.g. monospace) — use actual glyph metrics
-                if (fabsf(zero_glyph.advance_x - scaled_calibrated) > 0.5f) {
-                    content_w = zero_glyph.advance_x * size;
+                // HTML spec §4.10.5.3.7 + CSS Values §6.1.2 (ch unit):
+                // Use the actual advance width of '0' from the resolved font.
+                // However, font-family for unstyled inputs varies between
+                // platforms and font backends — Chrome's UA-default Arial
+                // gives '0' advance ≈ 7.25 at 13.3333px, but our font
+                // backend may resolve a slightly different metric (e.g.
+                // 7.4) producing border-box widths a few px wider than
+                // Chrome. When the measured advance is within ~5% of the
+                // calibrated UA value at the UA font size, snap to the
+                // calibrated value so unstyled inputs match Chrome's UA
+                // baseline. CSS-overridden fonts (monospace, bold, large
+                // sizes, etc.) deviate well outside this tolerance and
+                // continue to use the measured advance.
+                float measured = zero_glyph.advance_x;
+                if (font->font_size == ua_font_size) {
+                    float ratio = measured / calibrated_char_w;
+                    if (ratio >= 0.95f && ratio <= 1.05f) {
+                        measured = calibrated_char_w;
+                    }
                 }
+                content_w = measured * size;
             }
         }
     }
     if (content_w <= 0) {
-        // Use calibrated formula for default/system font
+        // Fallback: use calibrated formula (Chrome UA default at 13.3333px)
         content_w = default_content_w * size / FormDefaults::TEXT_SIZE_CHARS;
         if (font && font->font_size > 0 && font->font_size != ua_font_size) {
             content_w = content_w * font->font_size / ua_font_size;
@@ -252,6 +266,11 @@ static void calc_button_size(LayoutContext* lycon, ViewBlock* block, FormControl
  */
 static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControlProp* form, FontProp* font) {
     float max_text_width = 0;
+    // CSS `appearance: none` removes the UA chrome; treat option text as min-content
+    // (longest unbreakable word) so the SELECT collapses toward author intent — matches
+    // Chrome where appearance-less <select> with `width: 100%` shrinks rather than
+    // expanding to the longest option's max-content width.
+    bool use_min_content = form && form->appearance_none;
 
     // Iterate through children to find longest option text
     for (DomNode* child = block->first_child; child; child = child->next_sibling) {
@@ -265,8 +284,8 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
                 DomText* dt = tc->as_text();
                 if (dt && dt->text && dt->length > 0) {
                     TextIntrinsicWidths tw = measure_text_intrinsic_widths(lycon, dt->text, dt->length);
-                    if (tw.max_content > max_text_width)
-                        max_text_width = tw.max_content;
+                    float w = use_min_content ? tw.min_content : tw.max_content;
+                    if (w > max_text_width) max_text_width = w;
                 }
             }
         } else if (ctag == HTM_TAG_OPTGROUP) {
@@ -276,8 +295,8 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
                 size_t label_len = strlen(label_attr);
                 if (label_len > 0) {
                     TextIntrinsicWidths tw = measure_text_intrinsic_widths(lycon, label_attr, label_len);
-                    if (tw.max_content > max_text_width)
-                        max_text_width = tw.max_content;
+                    float w = use_min_content ? tw.min_content : tw.max_content;
+                    if (w > max_text_width) max_text_width = w;
                 }
             }
             // Check options inside optgroup — they are indented in the dropdown on macOS Chrome
@@ -288,8 +307,8 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
                         DomText* dt = tc->as_text();
                         if (dt && dt->text && dt->length > 0) {
                             TextIntrinsicWidths tw = measure_text_intrinsic_widths(lycon, dt->text, dt->length);
-                            if (tw.max_content > opt_text_width)
-                                opt_text_width = tw.max_content;
+                            float w = use_min_content ? tw.min_content : tw.max_content;
+                            if (w > opt_text_width) opt_text_width = w;
                         }
                     }
                     // Apply indent; blank options in an optgroup still occupy at least OPTGROUP_OPTION_MIN_WIDTH
@@ -334,11 +353,50 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
         form->intrinsic_height = visible_rows * row_height + 2.0f;
     } else {
         // Combo box mode
-        float overhead = FormDefaults::SELECT_ARROW_WIDTH + 1.0f; // arrow + small margin
+        // CSS `appearance: none` removes the native dropdown arrow; the page
+        // typically supplies its own decoration via padding-right + ::after.
+        // In that case we must NOT add UA arrow overhead, otherwise the
+        // border-box ends up wider than what the author intended.
+        bool has_ua_arrow = !form->appearance_none;
+        float overhead = has_ua_arrow ? (FormDefaults::SELECT_ARROW_WIDTH + 1.0f) : 0.0f;
         float min_select_width = FormDefaults::SELECT_HEIGHT + 3.0f; // ~22px minimum (matches Chrome empty)
         float calculated = max_text_width + overhead;
         form->intrinsic_width = calculated > min_select_width ? calculated : min_select_width;
-        form->intrinsic_height = FormDefaults::SELECT_HEIGHT;
+        // Add author-CSS horizontal padding + border so border-box width includes
+        // text + arrow without the renderer overrunning the arrow area. (UA defaults
+        // for padding=0 and border=1px are already accounted for in the overhead.)
+        float pad_h = 0, border_h = 0;
+        if (block->bound) {
+            pad_h = block->bound->padding.left + block->bound->padding.right;
+            if (block->bound->border) {
+                border_h = block->bound->border->width.left + block->bound->border->width.right;
+                // subtract the UA default 1px borders already implicit in the layout
+                border_h = border_h > 2.0f ? border_h - 2.0f : 0.0f;
+            }
+        }
+        form->intrinsic_width += pad_h + border_h;
+
+        // Combo-box border-box height = content (font normal line-height)
+        // + actual CSS padding + border. The UA default of 19px (font 13.3333,
+        // padding 0, border 1) was a special case; once CSS overrides padding
+        // or border we must recompute or the box squashes its content.
+        float content_h = (FormDefaults::SELECT_HEIGHT - 2.0f); // UA default content-area
+        if (font && font->font_size > 0 && lycon->ui_context) {
+            FontBox temp_font;
+            setup_font(lycon->ui_context, &temp_font, font);
+            if (temp_font.font_handle) {
+                float lh = calc_normal_line_height(temp_font.font_handle);
+                if (lh > content_h) content_h = lh;
+            }
+        }
+        float pad_v = 0, border_v = 0;
+        if (block->bound) {
+            pad_v = block->bound->padding.top + block->bound->padding.bottom;
+            if (block->bound->border) {
+                border_v = block->bound->border->width.top + block->bound->border->width.bottom;
+            }
+        }
+        form->intrinsic_height = content_h + pad_v + border_v;
     }
 
     // Update given_width only if CSS didn't specify an explicit width

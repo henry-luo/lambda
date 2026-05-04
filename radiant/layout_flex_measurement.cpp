@@ -991,6 +991,69 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                     if (line_h > content_height) content_height = line_h;
                 }
             }
+
+            // SELECT (combo box): measure max option text + arrow overhead so
+            // selects sized via the flex measurement path get their proper
+            // intrinsic width (calc_select_size in layout_form.cpp is only
+            // reached via the layout_form_control dispatch, not flex/grid).
+            if (elem->form->control_type == FORM_CONTROL_SELECT &&
+                !elem->form->multiple && elem->form->select_size <= 1) {
+                FontBox saved_font = lycon->font;
+                if (elem->font && elem->font->font_size > 0 && lycon->ui_context) {
+                    setup_font(lycon->ui_context, &lycon->font, elem->font);
+                }
+                float max_text_width = 0;
+                for (DomNode* opt = elem->first_child; opt; opt = opt->next_sibling) {
+                    if (!opt->is_element()) continue;
+                    DomElement* oe = opt->as_element();
+                    uintptr_t otag = oe->tag();
+                    if (otag == HTM_TAG_OPTION) {
+                        for (DomNode* tc = oe->first_child; tc; tc = tc->next_sibling) {
+                            DomText* dt = tc->as_text();
+                            if (dt && dt->text && dt->length > 0) {
+                                TextIntrinsicWidths tw = measure_text_intrinsic_widths(lycon, dt->text, dt->length);
+                                if (tw.max_content > max_text_width) max_text_width = tw.max_content;
+                            }
+                        }
+                    } else if (otag == HTM_TAG_OPTGROUP) {
+                        const char* lbl = oe->get_attribute("label");
+                        if (lbl) {
+                            size_t ll = strlen(lbl);
+                            if (ll > 0) {
+                                TextIntrinsicWidths tw = measure_text_intrinsic_widths(lycon, lbl, ll);
+                                if (tw.max_content > max_text_width) max_text_width = tw.max_content;
+                            }
+                        }
+                        for (DomNode* gc = oe->first_child; gc; gc = gc->next_sibling) {
+                            if (gc->is_element() && gc->as_element()->tag() == HTM_TAG_OPTION) {
+                                float opt_text_width = 0;
+                                for (DomNode* tc = gc->as_element()->first_child; tc; tc = tc->next_sibling) {
+                                    DomText* dt = tc->as_text();
+                                    if (dt && dt->text && dt->length > 0) {
+                                        TextIntrinsicWidths tw = measure_text_intrinsic_widths(lycon, dt->text, dt->length);
+                                        if (tw.max_content > opt_text_width) opt_text_width = tw.max_content;
+                                    }
+                                }
+                                float effective = opt_text_width + FormDefaults::OPTGROUP_OPTION_INDENT;
+                                if (effective < FormDefaults::OPTGROUP_OPTION_MIN_WIDTH)
+                                    effective = FormDefaults::OPTGROUP_OPTION_MIN_WIDTH;
+                                if (effective > max_text_width) max_text_width = effective;
+                            }
+                        }
+                    }
+                }
+                lycon->font = saved_font;
+                float overhead = FormDefaults::SELECT_ARROW_WIDTH + 1.0f;
+                float min_select_width = FormDefaults::SELECT_HEIGHT + 3.0f;
+                float calculated = max_text_width + overhead;
+                float new_w = calculated > min_select_width ? calculated : min_select_width;
+                if (new_w > content_width) {
+                    content_width = new_w;
+                    elem->form->intrinsic_width = new_w;
+                    log_debug("SELECT measured intrinsic width: %.1f (max_text=%.1f)",
+                              new_w, max_text_width);
+                }
+            }
             measured_height = content_height;
             measured_width = content_width;
 

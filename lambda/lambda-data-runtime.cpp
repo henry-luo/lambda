@@ -675,11 +675,16 @@ Map* map_fill(Map* map, ...) {
 Item _map_read_field(ShapeEntry* field, void* map_data) {
     TypeId type_id = field->type->type_id;
     void* field_ptr = (char*)map_data + field->byte_offset;
+    void* ptr_val = nullptr;
     switch (type_id) {
     case LMD_TYPE_NULL: {
-        void* ptr = *(void**)field_ptr;
+        void* ptr = nullptr;
+        memcpy(&ptr, field_ptr, sizeof(void*));
         if (ptr) {
             Container* container = (Container*)ptr;
+            if (container->type_id == LMD_TYPE_RAW_POINTER) {
+                container->type_id = LMD_TYPE_ARRAY;
+            }
             return {.container = container};
         }
         return ItemNull;
@@ -701,17 +706,25 @@ Item _map_read_field(ShapeEntry* field, void* map_data) {
         return push_k(dt);
     }
     case LMD_TYPE_DECIMAL:
-        return {.item = c2it(*(char**)field_ptr)};
+        memcpy(&ptr_val, field_ptr, sizeof(void*));
+        return {.item = c2it(ptr_val)};
     case LMD_TYPE_STRING:
-        return {.item = s2it(*(char**)field_ptr)};
+        memcpy(&ptr_val, field_ptr, sizeof(void*));
+        return {.item = s2it(ptr_val)};
     case LMD_TYPE_SYMBOL:
-        return {.item = y2it(*(char**)field_ptr)};
+        memcpy(&ptr_val, field_ptr, sizeof(void*));
+        return {.item = y2it(ptr_val)};
     case LMD_TYPE_BINARY:
-        return {.item = x2it(*(char**)field_ptr)};
+        memcpy(&ptr_val, field_ptr, sizeof(void*));
+        return {.item = x2it(ptr_val)};
     case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
-        Container* container = *(Container**)field_ptr;
+        memcpy(&ptr_val, field_ptr, sizeof(void*));
+        Container* container = (Container*)ptr_val;
         if (!container) return ItemNull;
+        if (container->type_id == LMD_TYPE_RAW_POINTER) {
+            container->type_id = type_id;
+        }
         return {.container = container};
     }
     case LMD_TYPE_TYPE:

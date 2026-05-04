@@ -1,5 +1,6 @@
 // pdf parser implementation
 #include "input.hpp"
+#include "input-parsers.h"
 #include "../mark_builder.hpp"
 #include "input-context.hpp"
 #include "source_tracker.hpp"
@@ -1057,7 +1058,14 @@ void parse_pdf(Input* input, const char* pdf_string, size_t pdf_length) {
 
     if (objects) {
         int obj_count = 0;
-        int max_objects = 25; // Limit to prevent issues - advanced_test needs ~18 objects
+        // Real PDFs may have many thousands of indirect objects (fonts,
+        // patterns, font programs, image XObjects, etc.). The previous
+        // 25-object limit silently truncated parsing of typical real-world
+        // documents — fonts referenced from the page resource dict simply
+        // never showed up in `pdf.objects`, breaking font resolution and
+        // pattern fills downstream. 1,000,000 keeps a sanity ceiling
+        // against runaway loops on malformed input.
+        int max_objects = 1000000;
         int consecutive_errors = 0;
         const int max_consecutive_errors = 3;
 
@@ -1302,6 +1310,10 @@ void parse_pdf(Input* input, const char* pdf_string, size_t pdf_length) {
     }
 
     input->root = {.item = (uint64_t)pdf_info};
+
+    // Post-process: flatten page tree, parse ToUnicode CMaps per font.
+    // Best-effort — failures are logged and the parser's output is preserved.
+    pdf_postprocess(input);
 
     if (ctx.hasErrors()) {
         // errors occurred during parsing

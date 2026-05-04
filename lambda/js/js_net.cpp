@@ -6,6 +6,7 @@
  */
 #include "js_runtime.h"
 #include "js_event_loop.h"
+#include "js_class.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
@@ -192,7 +193,8 @@ static Item js_socket_address(void) {
 // create a JS socket object wrapping a JsSocket
 static Item make_socket_object(JsSocket* sock) {
     Item obj = js_new_object();
-    js_property_set(obj, make_string_item("__class_name__"), make_string_item("Socket"));
+    // T5b: legacy `__class_name__` string write retired.
+    js_class_stamp(obj, JS_CLASS_SOCKET);  // A3-T3b
     js_property_set(obj, make_string_item("__handle__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)sock)});
     js_property_set(obj, make_string_item("on"),
@@ -519,7 +521,8 @@ extern "C" Item js_net_createServer(Item handler) {
     srv->connection_handler = handler;
 
     Item obj = js_new_object();
-    js_property_set(obj, make_string_item("__class_name__"), make_string_item("Server"));
+    // T5b: legacy `__class_name__` string write retired.
+    js_class_stamp(obj, JS_CLASS_SERVER);  // A3-T3b
     js_property_set(obj, make_string_item("__server__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)srv)});
     js_property_set(obj, make_string_item("listen"),

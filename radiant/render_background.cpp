@@ -978,6 +978,200 @@ void box_blur_region_inset(ScratchArena* sa, ImageSurface* surface,
 }
 
 /**
+ * Software-rasterise a rounded rect into a uint32 buffer at a fixed pixel value.
+ * - buf is ew x eh, with origin (ox, oy) in surface coordinates.
+ * - Shadow rect (sx, sy, sw, sh) in surface coords, per-corner radii.
+ * - Inside pixels are written with `pixel`; outside pixels are left untouched.
+ * Coverage is binary (no anti-aliasing) — fine because the buffer is then
+ * box-blurred which produces the soft edge falloff naturally.
+ */
+static void rasterise_rounded_rect_into_buffer(
+    uint32_t* buf, int ew, int eh, int ox, int oy,
+    float sx, float sy, float sw, float sh,
+    float sr_tl, float sr_tr, float sr_br, float sr_bl,
+    uint32_t pixel)
+{
+    float x0 = sx, y0 = sy;
+    float x1 = sx + sw, y1 = sy + sh;
+    // clamp radii to half the side lengths (per CSS spec)
+    float maxr_x = sw * 0.5f, maxr_y = sh * 0.5f;
+    if (sr_tl > maxr_x) sr_tl = maxr_x;  if (sr_tl > maxr_y) sr_tl = maxr_y;
+    if (sr_tr > maxr_x) sr_tr = maxr_x;  if (sr_tr > maxr_y) sr_tr = maxr_y;
+    if (sr_br > maxr_x) sr_br = maxr_x;  if (sr_br > maxr_y) sr_br = maxr_y;
+    if (sr_bl > maxr_x) sr_bl = maxr_x;  if (sr_bl > maxr_y) sr_bl = maxr_y;
+    for (int row = 0; row < eh; row++) {
+        float py = (float)(oy + row) + 0.5f;
+        if (py < y0 || py >= y1) continue;
+        for (int col = 0; col < ew; col++) {
+            float px = (float)(ox + col) + 0.5f;
+            if (px < x0 || px >= x1) continue;
+            bool inside = true;
+            // corner-region tests
+            if (sr_tl > 0 && px < x0 + sr_tl && py < y0 + sr_tl) {
+                float dx = (x0 + sr_tl) - px;
+                float dy = (y0 + sr_tl) - py;
+                inside = (dx * dx + dy * dy) <= (sr_tl * sr_tl);
+            } else if (sr_tr > 0 && px > x1 - sr_tr && py < y0 + sr_tr) {
+                float dx = px - (x1 - sr_tr);
+                float dy = (y0 + sr_tr) - py;
+                inside = (dx * dx + dy * dy) <= (sr_tr * sr_tr);
+            } else if (sr_br > 0 && px > x1 - sr_br && py > y1 - sr_br) {
+                float dx = px - (x1 - sr_br);
+                float dy = py - (y1 - sr_br);
+                inside = (dx * dx + dy * dy) <= (sr_br * sr_br);
+            } else if (sr_bl > 0 && px < x0 + sr_bl && py > y1 - sr_bl) {
+                float dx = (x0 + sr_bl) - px;
+                float dy = py - (y1 - sr_bl);
+                inside = (dx * dx + dy * dy) <= (sr_bl * sr_bl);
+            }
+            if (inside) buf[row * ew + col] = pixel;
+        }
+    }
+}
+
+/**
+ * Outer box-shadow rendering with isolated blur buffer.
+ *
+ * Why this is needed:
+ *   The previous implementation filled the shadow path directly on the surface
+ *   then applied a 3-pass box blur in-place over the blur region.  That blur
+ *   reads ALL pixels in the region — including any neighbouring sibling
+ *   elements (e.g. a Box A sitting just above Box B's shadow).  The averaging
+ *   smears those sibling pixels and writes blurred values back, visibly
+ *   darkening / clipping the siblings.
+ *
+ * New algorithm (matches CSS Backgrounds Level 3 §7 model):
+ *   1. Allocate a private uint32 buffer the size of the blur region, cleared
+ *      to (0, 0, 0, 0) (transparent).
+ *   2. Rasterise the shadow rounded rect into that buffer at the shadow's
+ *      premultiplied colour.
+ *   3. Apply the 3-pass box blur INSIDE the temp buffer — the kernel only
+ *      averages shadow content with transparent surrounds, producing a clean
+ *      Gaussian falloff.
+ *   4. Composite the buffer over the surface with src-over (premultiplied src
+ *      on straight dst), skipping pixels inside the element border-box
+ *      (exclude shape) per CSS spec.
+ *
+ * The surface OUTSIDE the shadow path is never read by the blur kernel, so
+ * sibling element pixels remain untouched except for the legitimate shadow
+ * tint that they receive via composite.
+ */
+void render_outer_shadow_blur_composite(
+    ScratchArena* sa, ImageSurface* surface,
+    float shadow_x, float shadow_y, float shadow_w, float shadow_h,
+    float sr_tl, float sr_tr, float sr_br, float sr_bl,
+    Color shadow_color, float blur_radius,
+    int exclude_type, const float* exclude_params,
+    int clip_type, const float* clip_params)
+{
+    if (!surface || !surface->pixels) return;
+    if (shadow_color.a == 0) return;
+
+    // compute blur region (shadow rect + blur extent), clamped to surface
+    float pad = blur_radius < 0 ? 0 : blur_radius;
+    int br_x0 = (int)floorf(shadow_x - pad);
+    int br_y0 = (int)floorf(shadow_y - pad);
+    int br_x1 = (int)ceilf(shadow_x + shadow_w + pad);
+    int br_y1 = (int)ceilf(shadow_y + shadow_h + pad);
+    if (br_x0 < 0) br_x0 = 0;
+    if (br_y0 < 0) br_y0 = 0;
+    if (br_x1 > surface->width) br_x1 = surface->width;
+    if (br_y1 > surface->height) br_y1 = surface->height;
+    int br_w = br_x1 - br_x0;
+    int br_h = br_y1 - br_y0;
+    if (br_w <= 0 || br_h <= 0) return;
+
+    // allocate temp ARGB buffer (cleared to transparent)
+    size_t buf_n = (size_t)br_w * br_h;
+    uint32_t* shadow_buf = (uint32_t*)scratch_alloc(sa, buf_n * sizeof(uint32_t));
+    if (!shadow_buf) return;
+    memset(shadow_buf, 0, buf_n * sizeof(uint32_t));
+
+    // premultiplied shadow pixel value (ABGR layout, R in low byte)
+    uint32_t sa_b = shadow_color.a;
+    uint32_t sr_b = ((uint32_t)shadow_color.r * sa_b + 127) / 255;
+    uint32_t sg_b = ((uint32_t)shadow_color.g * sa_b + 127) / 255;
+    uint32_t sb_b = ((uint32_t)shadow_color.b * sa_b + 127) / 255;
+    uint32_t shadow_px = (sa_b << 24) | (sb_b << 16) | (sg_b << 8) | sr_b;
+
+    // rasterise shadow rounded rect into temp buffer
+    rasterise_rounded_rect_into_buffer(shadow_buf, br_w, br_h, br_x0, br_y0,
+                                        shadow_x, shadow_y, shadow_w, shadow_h,
+                                        sr_tl, sr_tr, sr_br, sr_bl, shadow_px);
+
+    // box-blur the temp buffer in-place (sub-pixel blur is a no-op per CSS)
+    if (blur_radius >= 1.0f) {
+        ImageSurface tmp = {};
+        tmp.pixels = (void*)shadow_buf;
+        tmp.width = br_w;
+        tmp.height = br_h;
+        tmp.pitch = br_w * 4;
+        box_blur_region(sa, &tmp, 0, 0, br_w, br_h, blur_radius);
+    }
+
+    // build clip / exclude shapes for the composite pass
+    bool has_exclude = (exclude_type != 0);
+    bool has_clip = (clip_type != 0);
+    ClipShape exclude_cs = has_exclude
+        ? clip_shape_from_params(exclude_type, exclude_params)
+        : ClipShape{};
+    ClipShape clip_cs = has_clip
+        ? clip_shape_from_params(clip_type, clip_params)
+        : ClipShape{};
+
+    // composite shadow_buf over surface (src-over, premultiplied src)
+    uint32_t* surf_px = (uint32_t*)surface->pixels;
+    int stride = surface->pitch / 4;
+    for (int row = 0; row < br_h; row++) {
+        int sy = br_y0 + row;
+        for (int col = 0; col < br_w; col++) {
+            uint32_t sp = shadow_buf[row * br_w + col];
+            uint32_t sap = (sp >> 24) & 0xFF;
+            if (sap == 0) continue;  // no shadow contribution
+
+            int sx = br_x0 + col;
+            float fx = (float)sx + 0.5f;
+            float fy = (float)sy + 0.5f;
+            if (has_exclude && clip_point_in_shape(&exclude_cs, fx, fy)) continue;
+            if (has_clip && !clip_point_in_shape(&clip_cs, fx, fy)) continue;
+
+            uint32_t dp = surf_px[sy * stride + sx];
+            uint32_t dr = (dp >>  0) & 0xFF;
+            uint32_t dg = (dp >>  8) & 0xFF;
+            uint32_t db = (dp >> 16) & 0xFF;
+            uint32_t da = (dp >> 24) & 0xFF;
+
+            uint32_t srp = (sp >>  0) & 0xFF;
+            uint32_t sgp = (sp >>  8) & 0xFF;
+            uint32_t sbp = (sp >> 16) & 0xFF;
+
+            uint32_t inv = 255u - sap;  // (1 - src_a) * 255
+            // src-over: result_premult = src_p + dst_premult * inv / 255
+            //           dst_premult.rgb = dst.rgb * dst.a / 255
+            //           result_a       = src_a + dst_a * inv / 255
+            uint32_t ra = sap + (da * inv + 127u) / 255u;
+            if (ra == 0) {
+                surf_px[sy * stride + sx] = 0;
+                continue;
+            }
+            uint32_t rrp = srp + (dr * da * inv + 32512u) / 65025u;
+            uint32_t rgp = sgp + (dg * da * inv + 32512u) / 65025u;
+            uint32_t rbp = sbp + (db * da * inv + 32512u) / 65025u;
+            // convert back to straight alpha
+            uint32_t rr = (rrp * 255u + ra / 2u) / ra;
+            uint32_t rg = (rgp * 255u + ra / 2u) / ra;
+            uint32_t rb = (rbp * 255u + ra / 2u) / ra;
+            if (rr > 255) rr = 255;
+            if (rg > 255) rg = 255;
+            if (rb > 255) rb = 255;
+            if (ra > 255) ra = 255;
+            surf_px[sy * stride + sx] =
+                (ra << 24) | (rb << 16) | (rg << 8) | rr;
+        }
+    }
+}
+
+/**
  * Render box-shadow effects for an element (CSS Backgrounds Level 3 §7)
  *
  * Multiple shadows are rendered in reverse order (last specified = bottommost).
@@ -1055,113 +1249,109 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
                   s_offset_x, s_offset_y, s_blur, s_spread, sc,
                   s->color.r, s->color.g, s->color.b, s->color.a);
 
-        // Build shadow path
-        RdtPath* shadow_path = rdt_path_new();
-
-        if (sr_tl > 0 || sr_tr > 0 || sr_br > 0 || sr_bl > 0) {
-            // Rounded shadow - build path with bezier corners
-            float x = shadow_x, y = shadow_y, w = shadow_w, h = shadow_h;
-
-            #define KAPPA_SHADOW 0.5522847498f
-            rdt_path_move_to(shadow_path, x + sr_tl, y);
-            rdt_path_line_to(shadow_path, x + w - sr_tr, y);
-            if (sr_tr > 0) {
-                rdt_path_cubic_to(shadow_path,
-                    x + w - sr_tr + sr_tr * KAPPA_SHADOW, y,
-                    x + w, y + sr_tr - sr_tr * KAPPA_SHADOW,
-                    x + w, y + sr_tr);
-            }
-            rdt_path_line_to(shadow_path, x + w, y + h - sr_br);
-            if (sr_br > 0) {
-                rdt_path_cubic_to(shadow_path,
-                    x + w, y + h - sr_br + sr_br * KAPPA_SHADOW,
-                    x + w - sr_br + sr_br * KAPPA_SHADOW, y + h,
-                    x + w - sr_br, y + h);
-            }
-            rdt_path_line_to(shadow_path, x + sr_bl, y + h);
-            if (sr_bl > 0) {
-                rdt_path_cubic_to(shadow_path,
-                    x + sr_bl - sr_bl * KAPPA_SHADOW, y + h,
-                    x, y + h - sr_bl + sr_bl * KAPPA_SHADOW,
-                    x, y + h - sr_bl);
-            }
-            rdt_path_line_to(shadow_path, x, y + sr_tl);
-            if (sr_tl > 0) {
-                rdt_path_cubic_to(shadow_path,
-                    x, y + sr_tl - sr_tl * KAPPA_SHADOW,
-                    x + sr_tl - sr_tl * KAPPA_SHADOW, y,
-                    x + sr_tl, y);
-            }
-            rdt_path_close(shadow_path);
-            #undef KAPPA_SHADOW
-        } else {
-            // Simple rectangle shadow
-            rdt_path_add_rect(shadow_path, shadow_x, shadow_y, shadow_w, shadow_h, 0, 0);
+        // Serialize CSS clip-path shape (if active) for masking the shadow
+        int clip_type = 0;
+        float clip_params[8] = {};
+        if (rdcon->clip_shape_depth > 0) {
+            clip_shape_to_params(rdcon->clip_shapes[rdcon->clip_shape_depth - 1],
+                                 &clip_type, clip_params);
         }
 
-        // For rounded elements, save pixels in the element border-box area BEFORE
-        // the shadow fill. After fill+blur, the saved pixels are restored inside
-        // the border-box so the shadow doesn't contaminate the element area at
-        // anti-aliased rounded corners. Per CSS spec, outer box-shadow is clipped
-        // to outside the border-box.
-        bool need_shadow_clip = (r_tl > 0 || r_tr > 0 || r_br > 0 || r_bl > 0);
-        int save_rx = 0, save_ry = 0, save_rw = 0, save_rh = 0;
-        int exclude_type = 0;
-        float exclude_params[8] = {};
-        if (need_shadow_clip) {
-            save_rx = (int)floorf(rect.x);
-            save_ry = (int)floorf(rect.y);
-            save_rw = (int)ceilf(rect.x + rect.width) - save_rx;
-            save_rh = (int)ceilf(rect.y + rect.height) - save_ry;
-            exclude_type = CLIP_SHAPE_ROUNDED_RECT;
-            exclude_params[0] = rect.x;  exclude_params[1] = rect.y;
-            exclude_params[2] = rect.width; exclude_params[3] = rect.height;
-            exclude_params[4] = r_tl; exclude_params[5] = r_tr;
-            exclude_params[6] = r_br; exclude_params[7] = r_bl;
+        // Element border-box (exclude shape: per CSS spec, outer shadow is not
+        // visible inside the element border-box).
+        int exclude_type = CLIP_SHAPE_ROUNDED_RECT;
+        float exclude_params[8];
+        exclude_params[0] = rect.x;     exclude_params[1] = rect.y;
+        exclude_params[2] = rect.width; exclude_params[3] = rect.height;
+        exclude_params[4] = r_tl;       exclude_params[5] = r_tr;
+        exclude_params[6] = r_br;       exclude_params[7] = r_bl;
+
+        if (s_blur >= 1.0f) {
+            // Blur > 0: use isolated temp-buffer pipeline (rasterise + blur +
+            // composite) so the blur kernel doesn't smear neighbouring pixels.
             if (rdcon->dl) {
-                dl_shadow_clip_save(rdcon->dl, save_rx, save_ry, save_rw, save_rh);
-            }
-        }
-
-        // Clip to block clip region and fill
-        RdtPath* clip_path = create_bg_clip_path(rdcon);
-        rc_push_clip(rdcon, clip_path, xform);
-        rc_fill_path(rdcon, shadow_path, s->color, RDT_FILL_WINDING, xform);
-        rc_pop_clip(rdcon);
-        rdt_path_free(shadow_path);
-        rdt_path_free(clip_path);
-
-        // Apply software box blur if blur radius > 0
-        if (s_blur > 0) {
-            float blur_px = s_blur;
-            // Blur region must cover the shadow plus the blur extent
-            int br_x = (int)floorf(shadow_x - blur_px);
-            int br_y = (int)floorf(shadow_y - blur_px);
-            int br_w = (int)ceilf(shadow_w + blur_px * 2);
-            int br_h = (int)ceilf(shadow_h + blur_px * 2);
-
-            // Serialize CSS clip-path shape (if active) for post-blur masking
-            int clip_type = 0;
-            float clip_params[8] = {};
-            if (rdcon->clip_shape_depth > 0) {
-                clip_shape_to_params(rdcon->clip_shapes[rdcon->clip_shape_depth - 1],
-                                     &clip_type, clip_params);
-            }
-
-            if (rdcon->dl) {
-                // display-list path: defer blur to replay (after the shadow fill is rasterised)
-                dl_box_blur_region(rdcon->dl, br_x, br_y, br_w, br_h, blur_px,
-                                   clip_type, clip_params);
+                dl_outer_shadow(rdcon->dl,
+                                shadow_x, shadow_y, shadow_w, shadow_h,
+                                sr_tl, sr_tr, sr_br, sr_bl,
+                                s->color, s_blur,
+                                exclude_type, exclude_params,
+                                clip_type, clip_params);
             } else if (rdcon->ui_context->surface) {
-                box_blur_region(&rdcon->scratch, rdcon->ui_context->surface, br_x, br_y, br_w, br_h, blur_px);
+                render_outer_shadow_blur_composite(
+                    &rdcon->scratch, rdcon->ui_context->surface,
+                    shadow_x, shadow_y, shadow_w, shadow_h,
+                    sr_tl, sr_tr, sr_br, sr_bl,
+                    s->color, s_blur,
+                    exclude_type, exclude_params,
+                    clip_type, clip_params);
             }
-            log_debug("[BOX-SHADOW] Applied 3-pass box blur radius=%.1f on region (%d,%d,%d,%d)",
-                      blur_px, br_x, br_y, br_w, br_h);
-        }
+            log_debug("[BOX-SHADOW] Applied isolated-buffer blur radius=%.1f on shadow rect (%.1f,%.1f,%.1f,%.1f)",
+                      s_blur, shadow_x, shadow_y, shadow_w, shadow_h);
+        } else {
+            // No blur (or sub-pixel blur, treated as 0 per CSS): paint the
+            // shadow path directly.  For rounded elements we still need to
+            // restore the inside of the border-box because the shadow path
+            // covers the same area as the element.
+            bool need_shadow_clip = (r_tl > 0 || r_tr > 0 || r_br > 0 || r_bl > 0);
+            int save_rx = 0, save_ry = 0, save_rw = 0, save_rh = 0;
+            if (need_shadow_clip) {
+                save_rx = (int)floorf(rect.x);
+                save_ry = (int)floorf(rect.y);
+                save_rw = (int)ceilf(rect.x + rect.width) - save_rx;
+                save_rh = (int)ceilf(rect.y + rect.height) - save_ry;
+                if (rdcon->dl) {
+                    dl_shadow_clip_save(rdcon->dl, save_rx, save_ry, save_rw, save_rh);
+                }
+            }
 
-        // Restore pixels inside element border-box from the pre-fill save
-        if (need_shadow_clip) {
-            if (rdcon->dl) {
+            // Build shadow path
+            RdtPath* shadow_path = rdt_path_new();
+            if (sr_tl > 0 || sr_tr > 0 || sr_br > 0 || sr_bl > 0) {
+                float x = shadow_x, y = shadow_y, w = shadow_w, h = shadow_h;
+                #define KAPPA_SHADOW 0.5522847498f
+                rdt_path_move_to(shadow_path, x + sr_tl, y);
+                rdt_path_line_to(shadow_path, x + w - sr_tr, y);
+                if (sr_tr > 0) {
+                    rdt_path_cubic_to(shadow_path,
+                        x + w - sr_tr + sr_tr * KAPPA_SHADOW, y,
+                        x + w, y + sr_tr - sr_tr * KAPPA_SHADOW,
+                        x + w, y + sr_tr);
+                }
+                rdt_path_line_to(shadow_path, x + w, y + h - sr_br);
+                if (sr_br > 0) {
+                    rdt_path_cubic_to(shadow_path,
+                        x + w, y + h - sr_br + sr_br * KAPPA_SHADOW,
+                        x + w - sr_br + sr_br * KAPPA_SHADOW, y + h,
+                        x + w - sr_br, y + h);
+                }
+                rdt_path_line_to(shadow_path, x + sr_bl, y + h);
+                if (sr_bl > 0) {
+                    rdt_path_cubic_to(shadow_path,
+                        x + sr_bl - sr_bl * KAPPA_SHADOW, y + h,
+                        x, y + h - sr_bl + sr_bl * KAPPA_SHADOW,
+                        x, y + h - sr_bl);
+                }
+                rdt_path_line_to(shadow_path, x, y + sr_tl);
+                if (sr_tl > 0) {
+                    rdt_path_cubic_to(shadow_path,
+                        x, y + sr_tl - sr_tl * KAPPA_SHADOW,
+                        x + sr_tl - sr_tl * KAPPA_SHADOW, y,
+                        x + sr_tl, y);
+                }
+                rdt_path_close(shadow_path);
+                #undef KAPPA_SHADOW
+            } else {
+                rdt_path_add_rect(shadow_path, shadow_x, shadow_y, shadow_w, shadow_h, 0, 0);
+            }
+
+            RdtPath* clip_path = create_bg_clip_path(rdcon);
+            rc_push_clip(rdcon, clip_path, xform);
+            rc_fill_path(rdcon, shadow_path, s->color, RDT_FILL_WINDING, xform);
+            rc_pop_clip(rdcon);
+            rdt_path_free(shadow_path);
+            rdt_path_free(clip_path);
+
+            if (need_shadow_clip && rdcon->dl) {
                 dl_shadow_clip_restore(rdcon->dl, exclude_type, exclude_params,
                                        save_rx, save_ry, save_rw, save_rh, 1);
             }
@@ -1642,8 +1832,8 @@ void render_background_image(RenderContext* rdcon, ViewBlock* view, BackgroundPr
     // Render tiles
     bool is_svg = (img->format == IMAGE_FORMAT_SVG);
     if (!is_svg) {
-        // ensure raster image pixels are decoded (lazy loading)
-        image_surface_ensure_decoded(img);
+        // ensure raster image pixels are decoded (lazy loading) at the tile size
+        image_surface_ensure_decoded(img, (int)tile_w, (int)tile_h);
     }
 
     // Use wrap-around bilinear for repeating raster backgrounds so that

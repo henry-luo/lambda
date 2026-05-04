@@ -2874,6 +2874,23 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
                     while (inner_pos < inner_end) {
                         inner_pos = css_skip_whitespace_tokens(tokens, inner_pos, inner_end);
                         if (inner_pos >= inner_end) break;
+
+                        // skip a nested-of-nested qualified rule's brace block to avoid
+                        // the declaration parser stalling on its tokens. proper recursive
+                        // nested-rule handling can be added later; for now drop the inner
+                        // block so we keep forward progress.
+                        if (tokens[inner_pos].type == CSS_TOKEN_LEFT_BRACE) {
+                            int depth = 1;
+                            inner_pos++;
+                            while (inner_pos < inner_end && depth > 0) {
+                                if (tokens[inner_pos].type == CSS_TOKEN_LEFT_BRACE) depth++;
+                                else if (tokens[inner_pos].type == CSS_TOKEN_RIGHT_BRACE) depth--;
+                                inner_pos++;
+                            }
+                            continue;
+                        }
+
+                        int before_pos = inner_pos;
                         CssDeclaration* idecl = css_parse_declaration_from_tokens(tokens, &inner_pos, inner_end, pool);
                         if (idecl) {
                             if (inner_count >= inner_cap) {
@@ -2885,6 +2902,10 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
                             inner_decls[inner_count++] = idecl;
                         }
                         if (inner_pos < inner_end && tokens[inner_pos].type == CSS_TOKEN_SEMICOLON) inner_pos++;
+                        // guarantee forward progress: if the declaration parser made no
+                        // progress (e.g., stuck on a RIGHT_BRACE inside a nested block),
+                        // skip one token to avoid an infinite loop.
+                        if (inner_pos == before_pos) inner_pos++;
                     }
                     nested->data.style_rule.declarations = inner_decls;
                     nested->data.style_rule.declaration_count = inner_count;

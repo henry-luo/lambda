@@ -597,6 +597,277 @@ void image_free(unsigned char* data) {
 }
 
 // ============================================================================
+// Scaled (downsampled) decode — saves memory for large images displayed small
+// ============================================================================
+
+// Pick an integer downsample factor for PNG row-by-row decode.
+// returns 1 if no downsampling beneficial, otherwise the chosen step.
+static int pick_png_downsample_step(int natural_w, int natural_h, int target_w, int target_h) {
+    if (target_w <= 0 && target_h <= 0) return 1;
+    int step_w = (target_w > 0) ? (natural_w / target_w) : 1;
+    int step_h = (target_h > 0) ? (natural_h / target_h) : 1;
+    int step = (step_w < step_h) ? step_w : step_h;
+    // require >= 2x reduction in EACH axis to be worth it (decoded buffer
+    // shrinks by step^2). single-axis savings are not enough to justify the
+    // box-average resampling cost.
+    if (step < 2) return 1;
+    // cap at a reasonable bound — beyond 16x quality artefacts dominate
+    if (step > 16) step = 16;
+    return step;
+}
+
+// Decode a PNG with row-by-row reads and box-average downsampling. Peak heap
+// is roughly: out_w*out_h*4 + natural_w*4 + out_w*16 (accumulator).
+static unsigned char* load_png_scaled(const char* filename,
+                                      int target_w, int target_h,
+                                      int* width, int* height, int* channels) {
+    FILE* fp = fopen(filename, "rb");
+    if (!fp) {
+        log_error("Failed to open PNG file: %s", filename);
+        return NULL;
+    }
+
+    unsigned char header[8];
+    if (fread(header, 1, 8, fp) != 8 || png_sig_cmp(header, 0, 8)) {
+        log_error("File is not a valid PNG: %s", filename);
+        fclose(fp);
+        return NULL;
+    }
+
+    png_structp png_ptr = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+    if (!png_ptr) { fclose(fp); return NULL; }
+    png_infop info_ptr = png_create_info_struct(png_ptr);
+    if (!info_ptr) { png_destroy_read_struct(&png_ptr, NULL, NULL); fclose(fp); return NULL; }
+
+    if (setjmp(png_jmpbuf(png_ptr))) {
+        log_error("Error during PNG reading (scaled): %s", filename);
+        png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+        fclose(fp);
+        return NULL;
+    }
+
+    png_init_io(png_ptr, fp);
+    png_set_sig_bytes(png_ptr, 8);
+    png_read_info(png_ptr, info_ptr);
+
+    int natural_w = png_get_image_width(png_ptr, info_ptr);
+    int natural_h = png_get_image_height(png_ptr, info_ptr);
+    png_byte color_type = png_get_color_type(png_ptr, info_ptr);
+    png_byte bit_depth = png_get_bit_depth(png_ptr, info_ptr);
+
+    if (bit_depth == 16) png_set_strip_16(png_ptr);
+    if (color_type == PNG_COLOR_TYPE_PALETTE) png_set_palette_to_rgb(png_ptr);
+    if (color_type == PNG_COLOR_TYPE_GRAY && bit_depth < 8) png_set_expand_gray_1_2_4_to_8(png_ptr);
+    if (png_get_valid(png_ptr, info_ptr, PNG_INFO_tRNS)) png_set_tRNS_to_alpha(png_ptr);
+    if (color_type == PNG_COLOR_TYPE_RGB || color_type == PNG_COLOR_TYPE_GRAY || color_type == PNG_COLOR_TYPE_PALETTE) {
+        png_set_filler(png_ptr, 0xFF, PNG_FILLER_AFTER);
+    }
+    if (color_type == PNG_COLOR_TYPE_GRAY || color_type == PNG_COLOR_TYPE_GRAY_ALPHA) {
+        png_set_gray_to_rgb(png_ptr);
+    }
+    png_read_update_info(png_ptr, info_ptr);
+
+    int step = pick_png_downsample_step(natural_w, natural_h, target_w, target_h);
+    int out_w = natural_w / step;
+    int out_h = natural_h / step;
+    if (out_w < 1) out_w = 1;
+    if (out_h < 1) out_h = 1;
+
+    *width = out_w;
+    *height = out_h;
+    *channels = 4;
+
+    unsigned char* image_data = (unsigned char*)mem_alloc((size_t)out_w * out_h * 4, MEM_CAT_IMAGE);
+    if (!image_data) {
+        log_error("Failed to allocate PNG output buffer");
+        png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+        fclose(fp);
+        return NULL;
+    }
+
+    if (step == 1) {
+        // No downsample requested — read all rows directly into output.
+        png_bytep* row_pointers = (png_bytep*)mem_alloc(sizeof(png_bytep) * natural_h, MEM_CAT_IMAGE);
+        for (int y = 0; y < natural_h; y++) {
+            row_pointers[y] = image_data + (size_t)y * natural_w * 4;
+        }
+        png_read_image(png_ptr, row_pointers);
+        png_read_end(png_ptr, NULL);
+        mem_free(row_pointers);
+    } else {
+        // Box-average downsample: read step rows at a time, accumulate, write one row.
+        unsigned char* row_buf = (unsigned char*)mem_alloc((size_t)natural_w * 4, MEM_CAT_IMAGE);
+        uint32_t* accum = (uint32_t*)mem_alloc((size_t)out_w * 4 * sizeof(uint32_t), MEM_CAT_IMAGE);
+        int divisor = step * step;
+        for (int oy = 0; oy < out_h; oy++) {
+            memset(accum, 0, (size_t)out_w * 4 * sizeof(uint32_t));
+            for (int dy = 0; dy < step; dy++) {
+                png_read_row(png_ptr, row_buf, NULL);
+                for (int ox = 0; ox < out_w; ox++) {
+                    int sx = ox * step;
+                    uint32_t r = 0, g = 0, b = 0, a = 0;
+                    for (int dx = 0; dx < step; dx++) {
+                        const unsigned char* p = row_buf + (size_t)(sx + dx) * 4;
+                        r += p[0]; g += p[1]; b += p[2]; a += p[3];
+                    }
+                    accum[ox * 4 + 0] += r;
+                    accum[ox * 4 + 1] += g;
+                    accum[ox * 4 + 2] += b;
+                    accum[ox * 4 + 3] += a;
+                }
+            }
+            unsigned char* out_row = image_data + (size_t)oy * out_w * 4;
+            for (int ox = 0; ox < out_w; ox++) {
+                out_row[ox * 4 + 0] = (unsigned char)(accum[ox * 4 + 0] / divisor);
+                out_row[ox * 4 + 1] = (unsigned char)(accum[ox * 4 + 1] / divisor);
+                out_row[ox * 4 + 2] = (unsigned char)(accum[ox * 4 + 2] / divisor);
+                out_row[ox * 4 + 3] = (unsigned char)(accum[ox * 4 + 3] / divisor);
+            }
+        }
+        // discard remaining rows libpng expects to read (so png_read_end works)
+        int consumed = out_h * step;
+        if (consumed < natural_h) {
+            for (int y = consumed; y < natural_h; y++) {
+                png_read_row(png_ptr, row_buf, NULL);
+            }
+        }
+        png_read_end(png_ptr, NULL);
+        mem_free(accum);
+        mem_free(row_buf);
+        log_debug("[image] PNG scaled decode: %dx%d -> %dx%d (step=%d) %s",
+                  natural_w, natural_h, out_w, out_h, step, filename);
+    }
+
+    png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+    fclose(fp);
+    return image_data;
+}
+
+// Decode a JPEG using libjpeg-turbo's native DCT scaling. Picks the smallest
+// available scaling factor whose output is still >= target dimensions.
+static unsigned char* load_jpeg_scaled_buffer(const unsigned char* jpeg_buffer, size_t buf_len,
+                                              int target_w, int target_h,
+                                              int* width, int* height, int* channels) {
+    tjhandle tj = tjInitDecompress();
+    if (!tj) {
+        log_error("Failed to initialize TurboJPEG decompressor: %s", tjGetErrorStr());
+        return NULL;
+    }
+
+    int natural_w = 0, natural_h = 0, subsamp = 0, colorspace = 0;
+    if (tjDecompressHeader3(tj, jpeg_buffer, (unsigned long)buf_len, &natural_w, &natural_h, &subsamp, &colorspace) < 0) {
+        log_error("Failed to read JPEG header: %s", tjGetErrorStr());
+        tjDestroy(tj);
+        return NULL;
+    }
+
+    int out_w = natural_w;
+    int out_h = natural_h;
+    if (target_w > 0 && target_h > 0 &&
+        natural_w > target_w * 2 && natural_h > target_h * 2) {
+        int n_factors = 0;
+        tjscalingfactor* factors = tjGetScalingFactors(&n_factors);
+        if (factors && n_factors > 0) {
+            // pick smallest factor where scaled output is still >= target on both axes
+            // factors are sorted from largest (1/1) to smallest (1/8) in libjpeg-turbo
+            for (int i = 0; i < n_factors; i++) {
+                int w = TJSCALED(natural_w, factors[i]);
+                int h = TJSCALED(natural_h, factors[i]);
+                if (w >= target_w && h >= target_h) {
+                    out_w = w;
+                    out_h = h;
+                } else {
+                    break;
+                }
+            }
+            if (out_w != natural_w) {
+                log_debug("[image] JPEG scaled decode: %dx%d -> %dx%d (target %dx%d)",
+                          natural_w, natural_h, out_w, out_h, target_w, target_h);
+            }
+        }
+    }
+
+    *width = out_w;
+    *height = out_h;
+    *channels = 4;
+
+    unsigned char* image_data = (unsigned char*)mem_alloc((size_t)out_w * out_h * 4, MEM_CAT_IMAGE);
+    if (!image_data) {
+        log_error("Failed to allocate JPEG output buffer (%dx%d)", out_w, out_h);
+        tjDestroy(tj);
+        return NULL;
+    }
+
+    if (tjDecompress2(tj, jpeg_buffer, (unsigned long)buf_len, image_data, out_w, 0, out_h, TJPF_RGBA, TJFLAG_FASTDCT) < 0) {
+        log_error("Failed to decompress JPEG (scaled): %s", tjGetErrorStr());
+        mem_free(image_data);
+        tjDestroy(tj);
+        return NULL;
+    }
+
+    tjDestroy(tj);
+    return image_data;
+}
+
+static unsigned char* load_jpeg_scaled(const char* filename,
+                                       int target_w, int target_h,
+                                       int* width, int* height, int* channels) {
+    FILE* fp = fopen(filename, "rb");
+    if (!fp) {
+        log_error("Failed to open JPEG file: %s", filename);
+        return NULL;
+    }
+    fseek(fp, 0, SEEK_END);
+    long file_size = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+    if (file_size <= 0) { fclose(fp); return NULL; }
+
+    unsigned char* jpeg_buffer = (unsigned char*)mem_alloc((size_t)file_size, MEM_CAT_IMAGE);
+    if (!jpeg_buffer) { fclose(fp); return NULL; }
+    if (fread(jpeg_buffer, 1, (size_t)file_size, fp) != (size_t)file_size) {
+        mem_free(jpeg_buffer);
+        fclose(fp);
+        return NULL;
+    }
+    fclose(fp);
+
+    unsigned char* result = load_jpeg_scaled_buffer(jpeg_buffer, (size_t)file_size,
+                                                    target_w, target_h, width, height, channels);
+    mem_free(jpeg_buffer);
+    return result;
+}
+
+unsigned char* image_load_scaled(const char* filename,
+                                 int target_w, int target_h,
+                                 int* width, int* height, int* channels) {
+    if (!filename || !width || !height || !channels) return NULL;
+
+    ImageType type = get_image_type_from_file(filename);
+    switch (type) {
+        case IMAGE_TYPE_JPEG:
+            return load_jpeg_scaled(filename, target_w, target_h, width, height, channels);
+        case IMAGE_TYPE_PNG:
+            return load_png_scaled(filename, target_w, target_h, width, height, channels);
+        default:
+            // GIF and unknown formats: fall back to full decode (animations and small images)
+            return image_load(filename, width, height, channels, 4);
+    }
+}
+
+unsigned char* image_load_from_memory_scaled(const unsigned char* data, size_t length,
+                                             int target_w, int target_h,
+                                             int* width, int* height, int* channels) {
+    if (!data || length == 0 || !width || !height || !channels) return NULL;
+
+    ImageType type = get_image_type_from_memory(data, length);
+    if (type == IMAGE_TYPE_JPEG) {
+        return load_jpeg_scaled_buffer(data, length, target_w, target_h, width, height, channels);
+    }
+    // PNG/GIF in-memory scaled decode is not yet implemented; fall back to full decode.
+    return image_load_from_memory(data, length, width, height, channels);
+}
+
+// ============================================================================
 // Header-only dimension reading (no pixel decode)
 // ============================================================================
 

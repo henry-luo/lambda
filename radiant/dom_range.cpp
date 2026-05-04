@@ -14,6 +14,7 @@
 #include "../lib/strbuf.h"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
+#include "view.hpp"  // For HTM_TAG_* constants
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/input/css/css_style.hpp"
 #include "../lambda/input/css/css_value.hpp"
@@ -2017,18 +2018,49 @@ static bool text_excluded_for_rendered_stringify(const DomText* t) {
     return false;
 }
 
+// True iff the HTML UA stylesheet implicitly sets `white-space: pre` on this
+// element by virtue of its tag (`<pre>`, `<listing>`, `<xmp>`, `<plaintext>`,
+// `<textarea>`). Mirrors the layout-time defaults applied in
+// resolve_htm_style.cpp HTM_TAG_PRE/LISTING/XMP and the textarea / plaintext
+// behavior baked into the parser.
+static bool tag_implies_white_space_pre(const DomElement* e) {
+    if (!e) return false;
+    switch ((int)e->tag_id) {
+        case HTM_TAG_PRE:
+        case HTM_TAG_LISTING:
+        case HTM_TAG_XMP:
+        case HTM_TAG_PLAINTEXT:
+        case HTM_TAG_TEXTAREA:
+            return true;
+        default:
+            return false;
+    }
+}
+
 // True iff `t`'s parent (or some ancestor) has a white-space value that
 // preserves whitespace (`pre`, `pre-wrap`, `pre-line`, or `break-spaces`).
 // This is the condition under which the rendered-stringify pass must NOT
 // collapse internal whitespace.
+//
+// Per CSS, `white-space` is inherited. We walk ancestors and stop at the
+// first element with an explicit declared value (consulting both inline
+// style via `specified_keyword` and author <style> rules via the on-demand
+// cascade in `effective_keyword`). When no explicit value is declared, we
+// also honor the HTML UA stylesheet defaults for `<pre>`, `<listing>`,
+// `<xmp>`, `<plaintext>`, and `<textarea>` — required for headless JS
+// `Selection.toString()` since layout (which normally applies these UA
+// defaults) has not run.
 static bool text_preserves_whitespace(const DomText* t) {
     const DomElement* e = (t && t->parent && t->parent->is_element())
                           ? t->parent->as_element() : nullptr;
     while (e) {
-        CssEnum kw = specified_keyword(e, CSS_PROPERTY_WHITE_SPACE);
+        CssEnum kw = effective_keyword(e, CSS_PROPERTY_WHITE_SPACE);
         if (kw == CSS_VALUE_PRE || kw == CSS_VALUE_PRE_WRAP ||
             kw == CSS_VALUE_PRE_LINE) return true;
-        if (kw != 0) return false; // non-pre value wins, stops cascade
+        if (kw != 0) return false; // non-pre explicit value wins, stops cascade
+        // No explicit declaration on this element — fall back to HTML UA
+        // defaults before continuing the inheritance walk.
+        if (tag_implies_white_space_pre(e)) return true;
         DomNode* parent = e->parent;
         e = (parent && parent->is_element()) ? parent->as_element() : nullptr;
     }

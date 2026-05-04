@@ -173,6 +173,10 @@ RadiantState* radiant_state_create(Pool* pool, StateUpdateMode mode) {
     // Initialize animation scheduler
     state->animation_scheduler = animation_scheduler_create(pool);
 
+    // F8: context-menu starts hidden; -1 indicates "no item highlighted".
+    state->context_menu_target = nullptr;
+    state->context_menu_hover = -1;
+
     log_debug("radiant_state_create: created state store with mode %d", mode);
     return state;
 }
@@ -281,6 +285,19 @@ extern "C" void dom_selection_sync_from_legacy_caret(RadiantState* state) {
     if (!state || !state->caret) return;
     DomSelection* ds = sync_ensure_selection(state);
     if (!ds) return;
+    // During an active drag-selection (or any non-collapsed legacy selection
+    // whose focus matches the caret), the legacy caret_set() call is just
+    // moving the focus end of the selection — NOT collapsing it. Mirroring
+    // it as `collapse(...)` here would wipe out the selection that
+    // `selection_extend()` just synced into DomSelection a moment ago.
+    // In that case skip the sync; the legacy SelectionState→DomSelection
+    // mirror in selection_extend already updated the focus boundary.
+    SelectionState* sel = state->selection;
+    if (sel && !sel->is_collapsed && sel->is_selecting &&
+        sel->focus_view == state->caret->view &&
+        sel->focus_offset == state->caret->char_offset) {
+        return;
+    }
     DomBoundary b = boundary_from_legacy(state->caret->view, state->caret->char_offset);
     if (!b.node) return;
     const char* exc = NULL;
@@ -1075,13 +1092,17 @@ void caret_set_position(RadiantState* state, View* view, int line, int column) {
 
 /**
  * Check if a view is navigable (can hold a caret position)
- * Text views and markers are navigable
+ * Only text views can hold the caret. Markers (list bullets, etc.) are
+ * decorative and not editable — browsers skip over them when arrow-keying
+ * the caret vertically. Including markers here would land the caret on a
+ * ViewMarker and `update_caret_visual_position` would then read its
+ * uninitialized `height` field as the caret height, painting a vertical
+ * bar across the entire window.
  */
 static bool is_view_navigable(View* view) {
     if (!view) return false;
     switch (view->view_type) {
         case RDT_VIEW_TEXT:
-        case RDT_VIEW_MARKER:
             return true;
         default:
             return false;
@@ -1793,6 +1814,19 @@ static float get_absolute_y(View* view) {
 }
 
 /**
+ * Get the absolute visual X position of a view
+ */
+static float get_absolute_x(View* view) {
+    float x = 0;
+    View* v = view;
+    while (v) {
+        x += v->x;
+        v = v->parent;
+    }
+    return x;
+}
+
+/**
  * Get the absolute visual Y position of a TextRect within a text view
  */
 static float get_rect_absolute_y(View* view, TextRect* rect) {
@@ -1803,6 +1837,17 @@ static float get_rect_absolute_y(View* view, TextRect* rect) {
         base_y = get_absolute_y(view->parent) + rect->y;
     }
     return base_y;
+}
+
+/**
+ * Get the absolute visual X position of a TextRect within a text view.
+ * TextRect coordinates are relative to the text view's parent block.
+ */
+static float get_rect_absolute_x(View* view, TextRect* rect) {
+    if (view && view->parent) {
+        return get_absolute_x(view->parent) + rect->x;
+    }
+    return get_absolute_x(view) + (rect ? rect->x : 0);
 }
 
 /**
@@ -1829,47 +1874,95 @@ static float get_caret_visual_y(View* view, int char_offset) {
 }
 
 /**
- * Find a navigable view/rect at a different visual Y position
- * For down: find next view/rect with Y > current_y
- * For up: find prev view/rect with Y < current_y
- * Returns the view and sets out_offset to the best char offset
+ * Find a navigable view/rect at a different visual Y position.
+ * For down: find the next view/rect with Y > current_y.
+ * For up: find the prev view/rect with Y < current_y.
+ *
+ * After locating the new line's Y, scans all rects on that same line and
+ * picks the one whose absolute X range best matches `current_abs_x`. This
+ * preserves the visual column when navigating across multiple inline text
+ * segments split by inline elements (e.g. <code>) on the new line.
+ *
+ * Returns the chosen view, sets *out_offset to a starting offset, and
+ * sets *out_rect to the chosen TextRect (NULL for non-text views).
  */
 static View* find_view_at_different_y(View* current_view, int current_offset,
-    int direction, float current_y, float current_x, int* out_offset) {
+    int direction, float current_y, float current_abs_x, int* out_offset,
+    TextRect** out_rect) {
 
     // Tolerance for "same line" detection (half line height)
     const float Y_TOLERANCE = 5.0f;
+    if (out_rect) *out_rect = nullptr;
+
+    // Result accumulators
+    View*     best_view = nullptr;
+    TextRect* best_rect = nullptr;
+    float     best_score = 0;       // distance from current_abs_x to rect center; smaller is better
+    bool      best_contains = false; // whether current_abs_x lies within rect's X range
+    float     line_y = 0;            // Y of the new line, set when first candidate found
+
+    auto consider_rect = [&](View* v, TextRect* r) {
+        float r_abs_x = get_rect_absolute_x(v, r);
+        bool contains = (current_abs_x >= r_abs_x &&
+                         current_abs_x <= r_abs_x + r->width);
+        float center = r_abs_x + r->width / 2.0f;
+        float score = fabsf(current_abs_x - center);
+        if (!best_view) {
+            best_view = v; best_rect = r;
+            best_score = score; best_contains = contains;
+            return;
+        }
+        // Prefer rects that contain the X; among containers, any works (pick first).
+        if (contains && !best_contains) {
+            best_view = v; best_rect = r;
+            best_score = score; best_contains = true;
+        } else if (contains == best_contains && score < best_score) {
+            best_view = v; best_rect = r;
+            best_score = score;
+        }
+    };
+
+    auto consider_non_text_view = [&](View* v) {
+        // Non-text views: treat as a single point at their absolute origin.
+        if (best_view) return; // prefer text candidates over non-text
+        best_view = v;
+        best_rect = nullptr;
+        best_contains = false;
+        best_score = fabsf(current_abs_x - get_absolute_x(v));
+    };
 
     if (direction > 0) {
-        // Moving down - search forward for view/rect with higher Y
+        // === Moving down ===
         View* view = current_view;
 
-        // First check remaining rects in current text view
+        // Phase 1: locate line_y by scanning forward.
+        // Phase 2: collect all rects on that line.
+        bool found_current_in_view = false;
+
         if (view->is_text()) {
             ViewText* text = (ViewText*)view;
             TextRect* rect = text->rect;
-            bool found_current = false;
-
             while (rect) {
                 int rect_end = rect->start_index + rect->length;
-                if (!found_current) {
+                if (!found_current_in_view) {
                     if (current_offset >= rect->start_index && current_offset <= rect_end) {
-                        found_current = true;
+                        found_current_in_view = true;
                     }
                 } else {
-                    // Check if this rect is on a lower line
                     float rect_y = get_rect_absolute_y(view, rect);
                     if (rect_y > current_y + Y_TOLERANCE) {
-                        // Found a rect on a lower line in same view
-                        *out_offset = rect->start_index;
-                        return view;
+                        if (!best_view) line_y = rect_y;
+                        if (fabsf(rect_y - line_y) <= Y_TOLERANCE) {
+                            consider_rect(view, rect);
+                        } else if (best_view) {
+                            break;
+                        }
                     }
                 }
                 rect = rect->next;
             }
         }
 
-        // Search subsequent views
         View* next = find_next_navigable_view(view);
         while (next) {
             if (next->is_text()) {
@@ -1878,110 +1971,169 @@ static View* find_view_at_different_y(View* current_view, int current_offset,
                 while (rect) {
                     float rect_y = get_rect_absolute_y(next, rect);
                     if (rect_y > current_y + Y_TOLERANCE) {
-                        // Found a rect on a lower line
-                        *out_offset = rect->start_index;
-                        return next;
+                        if (!best_view) line_y = rect_y;
+                        if (fabsf(rect_y - line_y) <= Y_TOLERANCE) {
+                            consider_rect(next, rect);
+                        } else if (best_view) {
+                            goto done_down;
+                        }
                     }
                     rect = rect->next;
                 }
             } else {
-                // Non-text view - check its Y
                 float view_y = get_absolute_y(next);
                 if (view_y > current_y + Y_TOLERANCE) {
-                    *out_offset = 0;
-                    return next;
+                    if (!best_view) {
+                        line_y = view_y;
+                        consider_non_text_view(next);
+                    } else if (fabsf(view_y - line_y) > Y_TOLERANCE) {
+                        goto done_down;
+                    }
                 }
             }
             next = find_next_navigable_view(next);
         }
+done_down: ;
 
     } else {
-        // Moving up - search backward for view/rect with lower Y
+        // === Moving up ===
         View* view = current_view;
 
-        // First check previous rects in current text view
         if (view->is_text()) {
             ViewText* text = (ViewText*)view;
             TextRect* rect = text->rect;
-            TextRect* prev_lower_rect = nullptr;
+            // Collect rects with Y < current_y; we want the highest such Y (closest to current).
+            // First pass: find max rect_y satisfying rect_y < current_y - tol, restricted to
+            //  rects before current_offset.
+            // Then second pass: collect rects on that line.
+            float line_y_local = -1e9f;
+            bool any = false;
+            TextRect* r = rect;
+            while (r) {
+                int rect_end = r->start_index + r->length;
+                if (current_offset >= r->start_index && current_offset <= rect_end) break;
+                float r_y = get_rect_absolute_y(view, r);
+                if (r_y < current_y - Y_TOLERANCE) {
+                    if (!any || r_y > line_y_local) { line_y_local = r_y; any = true; }
+                }
+                r = r->next;
+            }
+            if (any) {
+                line_y = line_y_local;
+                r = rect;
+                while (r) {
+                    int rect_end = r->start_index + r->length;
+                    if (current_offset >= r->start_index && current_offset <= rect_end) break;
+                    float r_y = get_rect_absolute_y(view, r);
+                    if (fabsf(r_y - line_y) <= Y_TOLERANCE) consider_rect(view, r);
+                    r = r->next;
+                }
+            }
+        }
 
-            while (rect) {
-                int rect_end = rect->start_index + rect->length;
-                if (current_offset >= rect->start_index && current_offset <= rect_end) {
-                    // Found current rect, use prev_lower_rect if any
-                    if (prev_lower_rect) {
-                        *out_offset = prev_lower_rect->start_index;
-                        return view;
+        if (!best_view) {
+            // Walk previous views; first establish line_y from the closest prior view's max Y < current.
+            View* prev = find_prev_navigable_view(view);
+            while (prev) {
+                float prev_max_y = -1e9f;
+                bool prev_any = false;
+                if (prev->is_text()) {
+                    ViewText* pt = (ViewText*)prev;
+                    for (TextRect* r = pt->rect; r; r = r->next) {
+                        float r_y = get_rect_absolute_y(prev, r);
+                        if (r_y < current_y - Y_TOLERANCE) {
+                            if (!prev_any || r_y > prev_max_y) { prev_max_y = r_y; prev_any = true; }
+                        }
+                    }
+                } else {
+                    float v_y = get_absolute_y(prev);
+                    if (v_y < current_y - Y_TOLERANCE) { prev_max_y = v_y; prev_any = true; }
+                }
+                if (prev_any) {
+                    if (!best_view) line_y = prev_max_y;
+                    // Collect rects on this line from prev.
+                    if (prev->is_text()) {
+                        ViewText* pt = (ViewText*)prev;
+                        for (TextRect* r = pt->rect; r; r = r->next) {
+                            float r_y = get_rect_absolute_y(prev, r);
+                            if (fabsf(r_y - line_y) <= Y_TOLERANCE) consider_rect(prev, r);
+                        }
+                    } else {
+                        consider_non_text_view(prev);
+                    }
+                    // Continue further back to pick up sibling segments on the same line.
+                    prev = find_prev_navigable_view(prev);
+                    while (prev) {
+                        bool any_on_line = false;
+                        if (prev->is_text()) {
+                            ViewText* pt = (ViewText*)prev;
+                            for (TextRect* r = pt->rect; r; r = r->next) {
+                                float r_y = get_rect_absolute_y(prev, r);
+                                if (fabsf(r_y - line_y) <= Y_TOLERANCE) {
+                                    consider_rect(prev, r);
+                                    any_on_line = true;
+                                }
+                            }
+                        } else {
+                            float v_y = get_absolute_y(prev);
+                            if (fabsf(v_y - line_y) <= Y_TOLERANCE) any_on_line = true;
+                        }
+                        if (!any_on_line) break;
+                        prev = find_prev_navigable_view(prev);
                     }
                     break;
                 }
-                float rect_y = get_rect_absolute_y(view, rect);
-                if (rect_y < current_y - Y_TOLERANCE) {
-                    prev_lower_rect = rect;
-                }
-                rect = rect->next;
+                prev = find_prev_navigable_view(prev);
             }
-        }
-
-        // Search previous views
-        View* prev = find_prev_navigable_view(view);
-        while (prev) {
-            if (prev->is_text()) {
-                ViewText* prev_text = (ViewText*)prev;
-                TextRect* rect = prev_text->rect;
-                TextRect* last_lower_rect = nullptr;
-
-                // Find the last (lowest/rightmost) rect with lower Y
-                while (rect) {
-                    float rect_y = get_rect_absolute_y(prev, rect);
-                    if (rect_y < current_y - Y_TOLERANCE) {
-                        last_lower_rect = rect;
-                    }
-                    rect = rect->next;
-                }
-
-                if (last_lower_rect) {
-                    *out_offset = last_lower_rect->start_index;
-                    return prev;
-                }
-            } else {
-                // Non-text view - check its Y
-                float view_y = get_absolute_y(prev);
-                if (view_y < current_y - Y_TOLERANCE) {
-                    *out_offset = 0;
-                    return prev;
-                }
-            }
-            prev = find_prev_navigable_view(prev);
         }
     }
 
-    return nullptr;
+    if (!best_view) return nullptr;
+    if (best_rect) {
+        *out_offset = best_rect->start_index;
+        if (out_rect) *out_rect = best_rect;
+    } else {
+        *out_offset = 0;
+        if (out_rect) *out_rect = nullptr;
+    }
+    return best_view;
 }
 
-void caret_move_line(RadiantState* state, int delta) {
+void caret_move_line(RadiantState* state, int delta, struct UiContext* uicon) {
     if (!state || !state->caret || !state->caret->view) return;
 
     CaretState* caret = state->caret;
     View* view = caret->view;
 
-    // Get current visual position
+    // Get current visual position. caret->x is rect-relative (same coord space
+    // as the parent block). Convert to absolute X so it can be compared across
+    // sibling text segments under different inline ancestors.
     float current_y = get_caret_visual_y(view, caret->char_offset);
-    float current_x = caret->x;  // Use stored visual X for column preservation
+    float current_abs_x = (view->parent ? get_absolute_x(view->parent) : 0) + caret->x;
 
-    // Find view/rect at different Y position
+    // Find view/rect at different Y position whose X best matches current_abs_x
     int new_offset = 0;
+    TextRect* new_rect = nullptr;
     View* new_view = find_view_at_different_y(view, caret->char_offset,
-        delta, current_y, current_x, &new_offset);
+        delta, current_y, current_abs_x, &new_offset, &new_rect);
 
     if (new_view) {
+        // For text targets, refine new_offset using the same visual column so
+        // the caret lands directly under its previous position rather than at
+        // the start of the new line.
+        if (new_view->is_text() && new_rect) {
+            float new_parent_abs_x = (new_view->parent ? get_absolute_x(new_view->parent) : 0);
+            float target_local_x = current_abs_x - new_parent_abs_x;
+            new_offset = dom_range_byte_offset_for_x(uicon,
+                (ViewText*)new_view, new_rect, target_local_x);
+        }
         caret->view = new_view;
         caret->char_offset = new_offset;
         caret->line = 0;
         caret->column = new_offset;
 
-        log_debug("caret_move_line: moved to view %p (type=%d) offset=%d, y: %.1f -> new_y",
-            new_view, new_view->view_type, new_offset, current_y);
+        log_debug("caret_move_line: moved to view %p (type=%d) offset=%d, y: %.1f -> new_y, abs_x=%.1f",
+            new_view, new_view->view_type, new_offset, current_y, current_abs_x);
     } else {
         log_debug("caret_move_line: no line found in direction %d from y=%.1f", delta, current_y);
     }
@@ -2171,6 +2323,13 @@ void selection_clear(RadiantState* state) {
         state->selection->is_selecting = false;
         state->selection->anchor_offset = 0;
         state->selection->focus_offset = 0;
+    }
+
+    // Mirror the clear into the canonical DomSelection so the renderer
+    // (which reads DomSelection) stops painting the highlight. Collapse to
+    // the current caret position rather than to the stale anchor view.
+    if (state->caret) {
+        dom_selection_sync_from_legacy_caret(state);
     }
 
     state->needs_repaint = true;
@@ -2614,9 +2773,10 @@ void clipboard_copy_text(const char* text) {
     if (!text) return;
     clipboard_store_write_text(text);
     // Best-effort GLFW mirror so existing interactive flows keep working
-    // in builds where a GLFW window is present.
+    // in builds where a GLFW window is present. Skip in headless mode to
+    // avoid cross-process races on the shared OS pasteboard during tests.
     extern UiContext ui_context;
-    if (ui_context.window) {
+    if (ui_context.window && !ui_context.headless) {
         glfwSetClipboardString(ui_context.window, text);
     }
     log_info("Copied %zu bytes to clipboard", strlen(text));
@@ -2624,7 +2784,7 @@ void clipboard_copy_text(const char* text) {
 
 const char* clipboard_get_text() {
     extern UiContext ui_context;
-    if (ui_context.window) {
+    if (ui_context.window && !ui_context.headless) {
         const char* s = glfwGetClipboardString(ui_context.window);
         if (s) return s;
     }
@@ -2638,7 +2798,7 @@ void clipboard_copy_html(const char* html) {
     clipboard_store_write_mime("text/html", html);
     clipboard_store_write_mime("text/plain", html);
     extern UiContext ui_context;
-    if (ui_context.window) {
+    if (ui_context.window && !ui_context.headless) {
         glfwSetClipboardString(ui_context.window, html);
     }
     log_debug("clipboard_copy_html: wrote text/html (%zu bytes) + text/plain mirror", strlen(html));

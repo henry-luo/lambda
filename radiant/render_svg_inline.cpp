@@ -20,6 +20,7 @@
 #include "../lib/base64.h"
 #include <ctype.h>
 #include <math.h>
+#include <stdio.h>
 
 #ifndef LAMBDA_HEADLESS
 #include <thorvg_capi.h>  // needed for SVG text rendering (tvg_text_* API)
@@ -988,6 +989,11 @@ static float parse_number(const char** p) {
     skip_wsp_comma(p);
     char* end;
     float val = strtof(*p, &end);
+    if (end == *p) {
+        log_error("[SVG] path parse: expected number near '%.16s'", *p);
+        if (**p) (*p)++;
+        return 0.0f;
+    }
     *p = end;
     return val;
 }
@@ -1134,19 +1140,24 @@ static RdtPath* parse_svg_path_d(const char* d) {
         if (!*p) break;
 
         char cmd = *p;
-        bool is_cmd = isalpha(cmd);
+        bool is_cmd = isalpha((unsigned char)cmd);
 
         if (is_cmd) {
             p++;
             last_cmd = cmd;
         } else {
+            if (!last_cmd || !peek_number(p)) {
+                log_error("[SVG] path parse: invalid token near '%.16s'", p);
+                rdt_path_free(path);
+                return nullptr;
+            }
             cmd = last_cmd;
             if (cmd == 'M') cmd = 'L';
             if (cmd == 'm') cmd = 'l';
         }
 
-        bool relative = islower(cmd);
-        cmd = toupper(cmd);
+        bool relative = islower((unsigned char)cmd);
+        cmd = (char)toupper((unsigned char)cmd);
 
         switch (cmd) {
             case 'M': {  // moveto
@@ -1307,8 +1318,9 @@ static RdtPath* parse_svg_path_d(const char* d) {
                 break;
             }
             default:
-                // skip unknown command
-                break;
+                log_error("[SVG] path parse: unsupported command '%c'", cmd);
+                rdt_path_free(path);
+                return nullptr;
         }
     }
 
@@ -1339,13 +1351,15 @@ static void render_svg_path(SvgRenderContext* ctx, Element* elem) {
 // helper: try font database lookup for a given family name
 // returns mem_alloc'd path string (caller frees), or nullptr
 static char* resolve_font_via_database(FontContext* font_ctx, const char* family,
-                                       const char** out_font_name) {
+                                       const char** out_font_name,
+                                       int weight = 400,
+                                       FontSlant slant = FONT_SLANT_NORMAL) {
     if (!font_ctx || !font_ctx->database || !family) return nullptr;
 
     FontDatabaseCriteria criteria = {};
     strncpy(criteria.family_name, family, sizeof(criteria.family_name) - 1);
-    criteria.weight = 400;  // normal weight
-    criteria.style = FONT_SLANT_NORMAL;
+    criteria.weight = weight;
+    criteria.style = slant;
 
     FontDatabaseResult result = font_database_find_best_match_internal(font_ctx->database, &criteria);
     if (result.font && result.font->file_path) {
@@ -1364,8 +1378,176 @@ static char* resolve_font_via_database(FontContext* font_ctx, const char* family
     return nullptr;
 }
 
+// Materialize a registered @font-face entry to a usable file path for ThorVG.
+// Returns mem_alloc'd path string (caller mem_free's). For data URIs, decodes
+// to a temp file under ./temp/ keyed by the data URI hash so each unique font
+// is materialized at most once. For regular file paths, returns a copy of the
+// path. Returns nullptr if no @font-face entry matches `family` or no source
+// can be materialized.
+static bool font_file_has_unicode_cmap(const char* path);
+
+static char* resolve_font_via_fontface(FontContext* font_ctx, const char* family,
+                                        const char** out_font_name,
+                                        int weight, FontSlant slant) {
+    if (!font_ctx || !family || !*family) return nullptr;
+
+    FontWeight fw = (weight >= 100 && weight <= 900) ? (FontWeight)weight : FONT_WEIGHT_NORMAL;
+    const FontFaceEntry* entry = font_face_find_internal(font_ctx, family, fw, slant);
+    if (!entry || entry->source_count <= 0 || !entry->sources) return nullptr;
+
+    for (int i = 0; i < entry->source_count; i++) {
+        const char* src = entry->sources[i].path;
+        if (!src) continue;
+
+        if (strncmp(src, "data:", 5) != 0) {
+            // local file path — return copy, skip TTC
+            if (strstr(src, ".ttc")) continue;
+            char* p = mem_strdup(src, MEM_CAT_RENDER);
+            if (out_font_name) *out_font_name = entry->family;
+            log_debug("[SVG] @font-face resolved: %s -> %s", family, src);
+            return p;
+        }
+
+        // data URI — decode and write to ./temp/lambda_font_<hash>.<ext>
+        const char* comma = strchr(src, ',');
+        if (!comma) continue;
+
+        // pick extension from format (if known), else from MIME type, else ttf
+        const char* ext = "ttf";
+        const char* fmt = entry->sources[i].format;
+        if (fmt) {
+            if (strcasecmp(fmt, "opentype") == 0 || strcasecmp(fmt, "otf") == 0) ext = "otf";
+            else if (strcasecmp(fmt, "woff2") == 0) ext = "woff2";
+            else if (strcasecmp(fmt, "woff") == 0) ext = "woff";
+        } else {
+            // sniff from mime: data:font/ttf;... or data:font/otf;...
+            if (strncmp(src, "data:font/otf", 13) == 0 ||
+                strncmp(src, "data:application/font-otf", 25) == 0) ext = "otf";
+            else if (strstr(src, "woff2")) ext = "woff2";
+            else if (strstr(src, "woff")) ext = "woff";
+        }
+
+        // hash the data URI suffix (after comma) for a stable filename
+        // simple FNV-1a 64-bit
+        uint64_t h = 1469598103934665603ULL;
+        for (const char* p = comma + 1; *p; p++) {
+            h ^= (uint8_t)*p;
+            h *= 1099511628211ULL;
+        }
+
+        char temp_path[512];
+        snprintf(temp_path, sizeof(temp_path), "./temp/lambda_font_%016llx.%s",
+                 (unsigned long long)h, ext);
+
+        // if file already exists (cached), use it directly
+        FILE* fcheck = fopen(temp_path, "rb");
+        if (fcheck) {
+            fclose(fcheck);
+            // reject if no Unicode cmap (PDF Identity / Mac Roman subsets)
+            if (!font_file_has_unicode_cmap(temp_path)) {
+                log_debug("[SVG] @font-face %s has no Unicode cmap, falling back to system font", family);
+                return nullptr;
+            }
+            char* p = mem_strdup(temp_path, MEM_CAT_RENDER);
+            if (out_font_name) *out_font_name = entry->family;
+            log_debug("[SVG] @font-face cached file: %s -> %s", family, temp_path);
+            return p;
+        }
+
+        // base64 decode and write
+        size_t b64_len = strlen(comma + 1);
+        size_t decoded_len = 0;
+        uint8_t* decoded = base64_decode(comma + 1, b64_len, &decoded_len);
+        if (!decoded || decoded_len == 0) {
+            if (decoded) mem_free(decoded);
+            log_debug("[SVG] @font-face base64 decode failed for %s", family);
+            continue;
+        }
+
+        FILE* fout = fopen(temp_path, "wb");
+        if (!fout) {
+            mem_free(decoded);
+            log_debug("[SVG] @font-face cannot open temp file %s", temp_path);
+            continue;
+        }
+        size_t written = fwrite(decoded, 1, decoded_len, fout);
+        fclose(fout);
+        mem_free(decoded);
+        if (written != decoded_len) {
+            log_debug("[SVG] @font-face write incomplete %zu/%zu", written, decoded_len);
+            continue;
+        }
+
+        log_info("[SVG] @font-face materialized: %s -> %s (%zu bytes)",
+                 family, temp_path, decoded_len);
+        // reject if no Unicode cmap (PDF Identity / Mac Roman subsets) — these
+        // font subsets are GID-keyed via the PDF's ToUnicode CMap and can't
+        // be used directly for Unicode-text SVG rendering.
+        if (!font_file_has_unicode_cmap(temp_path)) {
+            log_info("[SVG] @font-face %s has no Unicode cmap, falling back to system font", family);
+            return nullptr;
+        }
+        char* p = mem_strdup(temp_path, MEM_CAT_RENDER);
+        if (out_font_name) *out_font_name = entry->family;
+        return p;
+    }
+
+    return nullptr;
+}
+
+// Quickly check whether a TTF/OTF file has a Unicode cmap subtable
+// (platformID=0, or platformID=3 encodingID=1/10). PDFs embed font subsets
+// with Mac Roman / Identity cmaps that are GID-keyed, not Unicode-keyed —
+// ThorVG's Unicode-based glyph lookup returns nothing for those, so we must
+// reject them and fall back to a system font.
+static bool font_file_has_unicode_cmap(const char* path) {
+    if (!path) return false;
+    FILE* f = fopen(path, "rb");
+    if (!f) return false;
+
+    uint8_t hdr[12];
+    if (fread(hdr, 1, 12, f) != 12) { fclose(f); return false; }
+    uint16_t numTables = (uint16_t)((hdr[4] << 8) | hdr[5]);
+    if (numTables == 0 || numTables > 64) { fclose(f); return false; }
+
+    uint32_t cmap_off = 0, cmap_len = 0;
+    for (uint16_t i = 0; i < numTables; i++) {
+        uint8_t rec[16];
+        if (fread(rec, 1, 16, f) != 16) { fclose(f); return false; }
+        if (rec[0] == 'c' && rec[1] == 'm' && rec[2] == 'a' && rec[3] == 'p') {
+            cmap_off = ((uint32_t)rec[8] << 24) | ((uint32_t)rec[9] << 16) |
+                       ((uint32_t)rec[10] << 8) | (uint32_t)rec[11];
+            cmap_len = ((uint32_t)rec[12] << 24) | ((uint32_t)rec[13] << 16) |
+                       ((uint32_t)rec[14] << 8) | (uint32_t)rec[15];
+            break;
+        }
+    }
+    if (!cmap_off || cmap_len < 4) { fclose(f); return false; }
+
+    if (fseek(f, (long)cmap_off, SEEK_SET) != 0) { fclose(f); return false; }
+    uint8_t cmap_hdr[4];
+    if (fread(cmap_hdr, 1, 4, f) != 4) { fclose(f); return false; }
+    uint16_t numSub = (uint16_t)((cmap_hdr[2] << 8) | cmap_hdr[3]);
+    if (numSub == 0 || numSub > 64) { fclose(f); return false; }
+
+    bool has_unicode = false;
+    for (uint16_t i = 0; i < numSub; i++) {
+        uint8_t rec[8];
+        if (fread(rec, 1, 8, f) != 8) break;
+        uint16_t pid = (uint16_t)((rec[0] << 8) | rec[1]);
+        uint16_t eid = (uint16_t)((rec[2] << 8) | rec[3]);
+        // platformID 0 = Unicode (any encoding)
+        // platformID 3 (Microsoft) + encodingID 1 (BMP) or 10 (UCS-4) = Unicode
+        if (pid == 0) { has_unicode = true; break; }
+        if (pid == 3 && (eid == 1 || eid == 10)) { has_unicode = true; break; }
+    }
+    fclose(f);
+    return has_unicode;
+}
+
 static char* resolve_svg_font_path(const char* font_family, const char** out_font_name,
-                                    FontContext* font_ctx = nullptr, int weight = 400) {
+                                    FontContext* font_ctx = nullptr, int weight = 400,
+                                    FontSlant slant = FONT_SLANT_NORMAL) {
     // default font name
     const char* used_font_name = font_family;
 
@@ -1429,9 +1611,17 @@ static char* resolve_svg_font_path(const char* font_family, const char** out_fon
 
     // helper: try a single family with full resolution chain
     auto try_family = [&](const char* fam) -> char* {
-        // weight-aware best match (covers bold for any weight >= 600)
-        if (weight >= 600 && font_ctx) {
-            FontMatchResult match = font_find_best_match(font_ctx, fam, weight, FONT_SLANT_NORMAL);
+        // first, check the @font-face registry — embedded fonts (e.g. from
+        // PDFs with FontFile2/FontFile3 streams) live here and would otherwise
+        // be invisible to platform/database lookups.
+        if (font_ctx) {
+            char* p = resolve_font_via_fontface(font_ctx, fam, out_font_name, weight, slant);
+            if (p) return p;
+        }
+        // weight-aware / slant-aware best match. Use it whenever bold or
+        // italic/oblique is requested — the platform lookup ignores style.
+        if (font_ctx && (weight >= 600 || slant != FONT_SLANT_NORMAL)) {
+            FontMatchResult match = font_find_best_match(font_ctx, fam, weight, slant);
             if (match.found && match.file_path && !strstr(match.file_path, ".ttc")) {
                 char* path = mem_strdup(match.file_path, MEM_CAT_RENDER);
                 if (out_font_name) {
@@ -1446,8 +1636,8 @@ static char* resolve_svg_font_path(const char* font_family, const char** out_fon
                     bold_font_name[name_len] = '\0';
                     *out_font_name = bold_font_name;
                 }
-                log_debug("[SVG] font resolved via best-match (weight=%d): %s -> %s (name='%s')",
-                          weight, fam, path, out_font_name ? *out_font_name : "?");
+                log_debug("[SVG] font resolved via best-match (weight=%d slant=%d): %s -> %s (name='%s')",
+                          weight, (int)slant, fam, path, out_font_name ? *out_font_name : "?");
                 return path;
             }
         }
@@ -1477,7 +1667,7 @@ static char* resolve_svg_font_path(const char* font_family, const char** out_fon
         // database lookup
         if (font_ctx) {
             const char* dbname = nullptr;
-            p = resolve_font_via_database(font_ctx, fam, &dbname);
+            p = resolve_font_via_database(font_ctx, fam, &dbname, weight, slant);
             if (p) {
                 if (out_font_name) {
                     static char db_font_name[256];
@@ -1754,9 +1944,21 @@ static void render_svg_text(SvgRenderContext* ctx, Element* elem) {
         if (font_weight <= 0) font_weight = 400;
     }
 
+    // parse font-style: italic / oblique / normal. SVG attribute or
+    // inherited value from parent <g>. Required so the resolved font
+    // file actually carries the italic glyphs (otherwise SVG output
+    // marked italic renders upright because the platform lookup
+    // ignores style).
+    const char* font_style_str = get_svg_attr(elem, "font-style");
+    FontSlant font_slant = FONT_SLANT_NORMAL;
+    if (font_style_str) {
+        if      (strcmp(font_style_str, "italic") == 0)  font_slant = FONT_SLANT_ITALIC;
+        else if (strcmp(font_style_str, "oblique") == 0) font_slant = FONT_SLANT_OBLIQUE;
+    }
+
     // resolve font path and name
     const char* font_name = nullptr;
-    char* font_path = resolve_svg_font_path(font_family, &font_name, ctx->font_ctx, font_weight);
+    char* font_path = resolve_svg_font_path(font_family, &font_name, ctx->font_ctx, font_weight, font_slant);
     if (!font_path) {
         log_debug("[SVG] <text> no font available for: %s", font_family ? font_family : "default");
         return;
@@ -1803,7 +2005,7 @@ static void render_svg_text(SvgRenderContext* ctx, Element* elem) {
         style.family = metrics_family;
         style.size_px = font_size;
         style.weight = (FontWeight)font_weight;
-        style.slant = FONT_SLANT_NORMAL;
+        style.slant = font_slant;
         FontHandle* handle = font_resolve(ctx->font_ctx, &style);
         if (handle) {
             const FontMetrics* fm = font_get_metrics(handle);
@@ -2600,6 +2802,26 @@ void render_svg_to_vec(RdtVector* vec, Element* svg_element, float viewport_widt
     const char* viewbox_attr = get_svg_attr(svg_element, "viewBox");
     if (!viewbox_attr) viewbox_attr = get_svg_attr(svg_element, "viewbox");
     SvgViewBox vb = parse_svg_viewbox(viewbox_attr);
+
+    // implicit viewBox: when an SVG has no viewBox but has explicit width/height
+    // attributes, browsers treat the intrinsic dims as an implicit viewBox so
+    // that content scales to fit the rendered viewport (this matches the way
+    // browsers paint <img src=svg> at its CSS box size, and avoids leaving the
+    // canvas mostly empty when SVG intrinsic size differs from the viewport).
+    if (!vb.has_viewbox && viewport_width > 0 && viewport_height > 0) {
+        const char* w_attr = get_svg_attr(svg_element, "width");
+        const char* h_attr = get_svg_attr(svg_element, "height");
+        if (w_attr && *w_attr && h_attr && *h_attr) {
+            float intrinsic_w = parse_svg_length(w_attr, 0.0f);
+            float intrinsic_h = parse_svg_length(h_attr, 0.0f);
+            if (intrinsic_w > 0 && intrinsic_h > 0 &&
+                (intrinsic_w != viewport_width || intrinsic_h != viewport_height)) {
+                vb.min_x = 0;  vb.min_y = 0;
+                vb.width = intrinsic_w;  vb.height = intrinsic_h;
+                vb.has_viewbox = true;
+            }
+        }
+    }
 
     // initial viewport in user-coordinate units. With a viewBox this is the
     // viewBox extents; without one, user coords == viewport pixels.

@@ -25,6 +25,33 @@ extern "C" {
 #include "../lib/url.h"
 }
 
+#ifdef __APPLE__
+#include <mach/mach.h>
+// Sample current and peak phys_footprint, log under tag MEMSTAGE if VIEW_MEM_STAGES=1.
+extern "C" void log_mem_stage(const char* stage) {
+    static int env_checked = 0;
+    static int enabled = 0;
+    if (!env_checked) {
+        const char* e = getenv("VIEW_MEM_STAGES");
+        enabled = (e && *e && strcmp(e, "0") != 0) ? 1 : 0;
+        env_checked = 1;
+    }
+    if (!enabled) return;
+    task_vm_info_data_t info;
+    mach_msg_type_number_t cnt = TASK_VM_INFO_COUNT;
+    if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&info, &cnt) != KERN_SUCCESS) {
+        return;
+    }
+    fprintf(stderr, "[MEMSTAGE] %-28s footprint=%6lluMB peak=%6lluMB resident=%6lluMB\n",
+            stage,
+            (unsigned long long)(info.phys_footprint / (1024 * 1024)),
+            (unsigned long long)(info.ledger_phys_footprint_peak / (1024 * 1024)),
+            (unsigned long long)(info.resident_size / (1024 * 1024)));
+}
+#else
+extern "C" void log_mem_stage(const char*) {}
+#endif
+
 void render(GLFWwindow* window);
 void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file);
 void render_video_frames_cached(RadiantState* rstate, ImageSurface* surface, UiContext* uicon);
@@ -317,6 +344,10 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 
     // Handle key events
     handle_event(&ui_context, ui_context.document, &event);
+    // Always repaint after a key event so caret motion, character
+    // insertion/deletion, selection changes, and context-menu open/close
+    // become visible immediately.
+    do_redraw = 1;
 }
 
 void character_callback(GLFWwindow* window, unsigned int codepoint) {
@@ -333,6 +364,9 @@ void character_callback(GLFWwindow* window, unsigned int codepoint) {
     }
 
     handle_event(&ui_context, ui_context.document, &event);
+    // Repaint so the typed character appears without waiting for the
+    // next mouse move / animation tick.
+    do_redraw = 1;
 }
 
 static void cursor_position_callback(GLFWwindow* window, double xpos, double ypos) {
@@ -390,7 +424,12 @@ static void mouse_button_callback(GLFWwindow* window, int button, int action, in
     else if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_RELEASE)
         log_debug("Left mouse button released");
 
-    if (button == GLFW_MOUSE_BUTTON_LEFT) {
+    // Forward both LEFT and RIGHT mouse buttons. RIGHT is required for
+    // the native context menu (event.cpp opens it on RDT_EVENT_MOUSE_DOWN
+    // when btn_event->button == GLFW_MOUSE_BUTTON_RIGHT). MIDDLE is
+    // unused so we skip it.
+    if (button == GLFW_MOUSE_BUTTON_LEFT ||
+        button == GLFW_MOUSE_BUTTON_RIGHT) {
         handle_event(&ui_context, ui_context.document, (RdtEvent*)&event);
         do_redraw = 1;  // trigger repaint after mouse click
     }
@@ -798,6 +837,7 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
 
         // Load document based on file extension
         log_notice("view: loading document...");
+        log_mem_stage("before-load");
         DomDocument* doc = load_doc_by_format(file_to_load, cwd, css_width, css_height, pool);
         if (!doc) {
             log_error("Failed to load document: %s", file_to_load);
@@ -806,6 +846,7 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
             ui_context_cleanup(&ui_context);
             return -1;
         }
+        log_mem_stage("after-load");
         log_notice("view: document loaded, starting layout...");
 
         // Set scale for window display: given_scale = 1.0, scale = pixel_ratio
@@ -820,11 +861,13 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
         ui_context.document = doc;
 
         // Initialize network support for HTTP-loaded documents
-        // This enables async resource loading (CSS, images, fonts) during rendering
+        // This enables async resource loading (CSS, images, fonts) during rendering.
+        // Use 16 worker threads so a typical web page's many sub-resources
+        // (CSS, images, fonts, scripts) download in parallel rather than serially.
         if (doc->html_root && file_to_load &&
             (strncmp(file_to_load, "http://", 7) == 0 || strncmp(file_to_load, "https://", 8) == 0)) {
             network_downloader_init_shared();
-            thread_pool = thread_pool_create(4);
+            thread_pool = thread_pool_create(16);
             file_cache = enhanced_cache_create("./temp/cache", 100 * 1024 * 1024, 10000);
             if (thread_pool) {
                 radiant_init_network_support(doc, thread_pool, file_cache);
@@ -877,14 +920,18 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
         // Layout document (for HTML-based documents)
         // PDF documents have pre-built view trees and skip this
         if (doc->root) {
+            log_mem_stage("before-layout");
             layout_html_doc(&ui_context, doc, false);
+            log_mem_stage("after-layout");
         }
         log_notice("view: layout complete, rendering...");
         // PDF scaling now happens inside pdf_page_to_view_tree
 
         // Render document
         if (doc && doc->view_tree) {
+            log_mem_stage("before-render");
             render_html_doc(&ui_context, doc->view_tree, NULL);
+            log_mem_stage("after-render");
         }
         log_notice("view: render complete");
 
@@ -1021,6 +1068,14 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
         if (state && state->has_active_video) {
             // only force full render if nothing else triggered it;
             // otherwise the video-only blit path in render() handles it
+            do_redraw = 1;
+        }
+
+        // Pick up repaint requests from paths that don't go through a GLFW
+        // event callback (e.g. macOS IME setMarkedText / insertText, async
+        // resource loaders that flip needs_repaint directly). Combined with
+        // a glfwPostEmptyEvent these unblock the wait-for-event loop.
+        if (state && (state->needs_repaint || state->needs_reflow || state->is_dirty)) {
             do_redraw = 1;
         }
 

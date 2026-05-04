@@ -15,6 +15,15 @@ extern "C" {
 #include <png.h>
 #include <turbojpeg.h>
 #include <chrono>
+#include <sys/resource.h>
+#include <sys/time.h>
+
+// getrusage().ru_maxrss returns bytes on macOS/Darwin and kilobytes on Linux
+#if defined(__APPLE__)
+#define RUSAGE_MAXRSS_TO_BYTES(v) ((size_t)(v))
+#else
+#define RUSAGE_MAXRSS_TO_BYTES(v) ((size_t)(v) * 1024)
+#endif
 
 // Forward declarations for functions from other modules
 int ui_context_init(UiContext* uicon, bool headless);
@@ -635,6 +644,38 @@ int cmd_render_batch(int argc, char** argv) {
     int success_count = 0;
     int failure_count = 0;
 
+    // optional periodic memory report: set RENDER_BATCH_MEM_REPORT=N to log
+    // memtrack usage every N successful renders. helps detect per-render
+    // memory growth across batched renders.
+    int mem_report_every = 0;
+    const char* mem_report_env = getenv("RENDER_BATCH_MEM_REPORT");
+    if (mem_report_env && *mem_report_env) {
+        mem_report_every = atoi(mem_report_env);
+        if (mem_report_every < 0) mem_report_every = 0;
+    }
+    if (mem_report_every > 0) {
+        log_info("render-batch: initial memory state");
+        memtrack_log_usage();
+    }
+
+    // optional per-render peak RSS report: set RENDER_BATCH_RSS_REPORT=1 to
+    // log getrusage().ru_maxrss before/after each render. since ru_maxrss is
+    // monotonic (high-water mark), the delta tells us whether THIS render
+    // pushed peak RSS higher — useful for spotting individual heavy jobs.
+    bool rss_report = false;
+    const char* rss_report_env = getenv("RENDER_BATCH_RSS_REPORT");
+    if (rss_report_env && *rss_report_env && strcmp(rss_report_env, "0") != 0) {
+        rss_report = true;
+    }
+    size_t prev_peak_rss = 0;
+    if (rss_report) {
+        struct rusage ru0;
+        if (getrusage(RUSAGE_SELF, &ru0) == 0) {
+            prev_peak_rss = RUSAGE_MAXRSS_TO_BYTES(ru0.ru_maxrss);
+            fprintf(stderr, "RSS\tinitial\t%zu\n", prev_peak_rss);
+        }
+    }
+
     while (fgets(line, sizeof(line), stdin)) {
         // strip trailing newline
         size_t len = strlen(line);
@@ -691,6 +732,31 @@ int cmd_render_batch(int argc, char** argv) {
             failure_count++;
         }
         fflush(stdout);
+
+        if (rss_report) {
+            struct rusage ru1;
+            if (getrusage(RUSAGE_SELF, &ru1) == 0) {
+                size_t cur_peak = RUSAGE_MAXRSS_TO_BYTES(ru1.ru_maxrss);
+                long delta = (long)cur_peak - (long)prev_peak_rss;
+                // emit one line per render: name, peak_rss_after, delta_bytes
+                // delta > 0 means THIS render pushed the high-water mark up.
+                fprintf(stderr, "RSS\t%s\tpeak=%zu\tdelta=%+ld\n",
+                        html_file, cur_peak, delta);
+                prev_peak_rss = cur_peak;
+            }
+        }
+
+        if (mem_report_every > 0 &&
+            ((success_count + failure_count) % mem_report_every == 0)) {
+            log_info("render-batch: memory after %d renders (%d ok, %d fail)",
+                     success_count + failure_count, success_count, failure_count);
+            memtrack_log_usage();
+        }
+    }
+
+    if (mem_report_every > 0) {
+        log_info("render-batch: final memory state before cleanup");
+        memtrack_log_usage();
     }
 
     ui_context_cleanup(&ui_context);

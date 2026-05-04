@@ -41,6 +41,10 @@ Element* html5_parse_ex(Input* input, const char* html, Html5ParseOptions* opts)
 
 void parse_rtf(Input* input, const char* rtf_string);
 void parse_pdf(Input* input, const char* pdf_string, size_t pdf_length);
+// Post-processing pass run at the end of parse_pdf(): flattens the page tree
+// into a `pages: [Map]` array on the root and attaches a `to_unicode: Map`
+// field to each Font dict that carries a /ToUnicode CMap stream.
+void pdf_postprocess(Input* input);
 void parse_mark(Input* input, const char* mark_string);
 
 // ── Contact / calendar / email (C++ linkage) ───────────────────────

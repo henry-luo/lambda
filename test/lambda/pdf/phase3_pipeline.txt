@@ -1,0 +1,1 @@
+{ page_count: 1, has_red_path: true, has_blue_path: true, has_flip: true, text_count: 3, path_count: 2}

@@ -1549,8 +1549,10 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
             return;
         }
 
-        // <image> is converted to <img> per HTML5 spec
-        if (strcmp(tag, "image") == 0) {
+        // <image> is converted to <img> per HTML5 spec, but ONLY in HTML
+        // namespace. In SVG foreign content (e.g. <svg><image href=...>),
+        // <image> is the SVG raster-image element and must be preserved.
+        if (strcmp(tag, "image") == 0 && !html5_is_in_svg_namespace(parser)) {
             log_error("html5: converting <image> to <img>");
             // Create a new token with tag name "img" and same attributes
             MarkBuilder builder(parser->input);

@@ -5,7 +5,10 @@
 #include "event_sim.hpp"
 #include "event.hpp"
 #include "state_store.hpp"
+#include "dom_range.hpp"
 #include "form_control.hpp"
+#include "text_control.hpp"
+#include "text_edit.hpp"
 #include "view.hpp"
 #include "webview.h"
 #include "../lib/log.h"
@@ -774,6 +777,16 @@ static bool resolve_target(SimEvent* ev, DomDocument* doc, int* out_x, int* out_
     if (ev->target_selector && doc) {
         View* elem = find_element_by_selector(doc, ev->target_selector, ev->target_index);
         if (elem) {
+            if (ev->has_target_offset) {
+                float ex, ey, ew, eh;
+                get_element_rect_abs(elem, &ex, &ey, &ew, &eh);
+                *out_x = (int)(ex + (float)ev->target_offset_x);
+                *out_y = (int)(ey + (float)ev->target_offset_y);
+                log_info("event_sim: resolved selector '%s'[%d] + offset (%d,%d) to (%d, %d)",
+                         ev->target_selector, ev->target_index,
+                         ev->target_offset_x, ev->target_offset_y, *out_x, *out_y);
+                return true;
+            }
             float fx, fy;
             get_element_center_abs(elem, &fx, &fy);
             *out_x = (int)fx;
@@ -824,6 +837,14 @@ static void parse_target(MapReader& reader, SimEvent* ev) {
         // target can also carry x,y
         if (target_map.has("x")) ev->x = target_map.get("x").asInt32();
         if (target_map.has("y")) ev->y = target_map.get("y").asInt32();
+        // optional pixel offset from element top-left, applied when a
+        // selector resolves (so tests can target a specific spot inside
+        // a wide element such as <input type="text">).
+        if (target_map.has("offset_x") || target_map.has("offset_y")) {
+            ev->target_offset_x = target_map.get("offset_x").asInt32();
+            ev->target_offset_y = target_map.get("offset_y").asInt32();
+            ev->has_target_offset = true;
+        }
     }
     // Legacy target_text at top level
     if (!ev->target_text) {
@@ -872,6 +893,7 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         ev->y = reader.get("y").asInt32();
         ev->button = reader.get("button").asInt32();
         ev->mods = reader.get("mods").asInt32();
+        parse_target(reader, ev);
     }
     else if (strcmp(type_str, "mouse_drag") == 0) {
         ev->type = SIM_EVENT_MOUSE_DRAG;
@@ -965,6 +987,7 @@ static SimEvent* parse_sim_event(MapReader& reader) {
     else if (strcmp(type_str, "assert_selection") == 0) {
         ev->type = SIM_EVENT_ASSERT_SELECTION;
         ev->expected_is_collapsed = reader.get("is_collapsed").asBool();
+        ev->check_dom_selection = reader.get("check_dom").asBool();
     }
     else if (strcmp(type_str, "assert_target") == 0) {
         ev->type = SIM_EVENT_ASSERT_TARGET;
@@ -986,6 +1009,16 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         ev->x = reader.get("x").asInt32();
         ev->y = reader.get("y").asInt32();
         ev->button = reader.get("button").asInt32();
+        parse_target(reader, ev);
+    }
+    else if (strcmp(type_str, "tripleclick") == 0) {
+        // F2 (Radiant_Design_Form_Input.md §4.1): three rapid clicks at the
+        // same location. Reuses SIM_EVENT_DBLCLICK plumbing with click_count=3.
+        ev->type = SIM_EVENT_DBLCLICK;
+        ev->x = reader.get("x").asInt32();
+        ev->y = reader.get("y").asInt32();
+        ev->button = reader.get("button").asInt32();
+        ev->click_count = 3;
         parse_target(reader, ev);
     }
     else if (strcmp(type_str, "type") == 0) {
@@ -1021,6 +1054,39 @@ static SimEvent* parse_sim_event(MapReader& reader) {
             mem_free(ev);
             return NULL;
         }
+    }
+    // F6 (Radiant_Design_Form_Input.md §3.6): clipboard helpers.
+    else if (strcmp(type_str, "paste_text") == 0) {
+        ev->type = SIM_EVENT_PASTE_TEXT;
+        const char* text = reader.get("text").cstring();
+        if (text) ev->input_text = mem_strdup(text, MEM_CAT_LAYOUT);
+        parse_target(reader, ev);
+    }
+    else if (strcmp(type_str, "assert_clipboard") == 0) {
+        ev->type = SIM_EVENT_ASSERT_CLIPBOARD;
+        const char* equals = reader.get("equals").cstring();
+        if (equals) ev->assert_equals = mem_strdup(equals, MEM_CAT_LAYOUT);
+        const char* contains = reader.get("contains").cstring();
+        if (contains) ev->assert_contains = mem_strdup(contains, MEM_CAT_LAYOUT);
+    }
+    // F7 (Radiant_Design_Form_Input.md §4.1): IME composition driver.
+    //   {"type":"ime_compose","phase":"begin"}
+    //   {"type":"ime_compose","phase":"update","preedit":"か","caret":1}
+    //   {"type":"ime_compose","phase":"commit","commit":"日本"}
+    //   {"type":"ime_compose","phase":"cancel"}
+    // Optional `target` selects/focuses an input first.
+    else if (strcmp(type_str, "ime_compose") == 0) {
+        ev->type = SIM_EVENT_IME_COMPOSE;
+        const char* phase = reader.get("phase").cstring();
+        ev->ime_phase = mem_strdup(phase ? phase : "update", MEM_CAT_LAYOUT);
+        const char* preedit = reader.get("preedit").cstring();
+        if (preedit) ev->input_text = mem_strdup(preedit, MEM_CAT_LAYOUT);
+        const char* commit = reader.get("commit").cstring();
+        if (commit && !ev->input_text) {
+            ev->input_text = mem_strdup(commit, MEM_CAT_LAYOUT);
+        }
+        ev->expected_char_offset = reader.get("caret").asInt32();
+        parse_target(reader, ev);
     }
     else if (strcmp(type_str, "assert_text") == 0) {
         ev->type = SIM_EVENT_ASSERT_TEXT;
@@ -1353,11 +1419,15 @@ EventSimContext* event_sim_load(const char* json_file) {
         log_info("event_sim: viewport %dx%d", ctx->viewport_width, ctx->viewport_height);
     }
 
-    // Parse optional default_timeout (ms) for auto-waiting assertions
+    // Parse optional default_timeout (ms) for auto-waiting assertions.
+    // Default 500ms ensures assertions reliably auto-wait for the prior input
+    // event to propagate, even under heavy parallel CPU load (e.g. when the
+    // gtest runner spawns many lambda.exe processes concurrently).
     ctx->default_timeout = root_map.get("default_timeout").asInt32();
-    if (ctx->default_timeout > 0) {
-        log_info("event_sim: default_timeout %dms", ctx->default_timeout);
+    if (ctx->default_timeout <= 0) {
+        ctx->default_timeout = 2000;
     }
+    log_info("event_sim: default_timeout %dms", ctx->default_timeout);
 
     // Parse each event
     int count = (int)events_arr.length();
@@ -1523,7 +1593,11 @@ static bool assert_caret(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {
     return passed;
 }
 
-// Assert helper for selection state
+// Assert helper for selection state.
+// Checks both legacy SelectionState (used by event/caret code) and the
+// canonical DomSelection (used by the renderer to paint highlight rects).
+// They MUST agree — disagreement means the selection is set internally but
+// nothing visible is drawn (or vice-versa).
 static bool assert_selection(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {
     DomDocument* doc = uicon->document;
     if (!doc || !doc->state) {
@@ -1533,17 +1607,32 @@ static bool assert_selection(EventSimContext* ctx, UiContext* uicon, SimEvent* e
     }
 
     SelectionState* sel = doc->state->selection;
-    bool is_collapsed = sel ? sel->is_collapsed : true;
+    bool legacy_collapsed = sel ? sel->is_collapsed : true;
 
-    if (is_collapsed != ev->expected_is_collapsed) {
-        log_error("event_sim: assert_selection - is_collapsed mismatch: expected %s, got %s",
+    DomSelection* ds = doc->state->dom_selection;
+    bool dom_collapsed = (!ds || ds->range_count == 0) ? true : ds->is_collapsed;
+
+    if (legacy_collapsed != ev->expected_is_collapsed) {
+        log_error("event_sim: assert_selection - legacy is_collapsed mismatch: expected %s, got %s",
                  ev->expected_is_collapsed ? "true" : "false",
-                 is_collapsed ? "true" : "false");
+                 legacy_collapsed ? "true" : "false");
         ctx->fail_count++;
         return false;
     }
 
-    log_info("event_sim: assert_selection PASS");
+    if (ev->check_dom_selection && dom_collapsed != ev->expected_is_collapsed) {
+        log_error("event_sim: assert_selection - DomSelection is_collapsed mismatch: expected %s, got %s "
+                 "(range_count=%u). Highlight will not render.",
+                 ev->expected_is_collapsed ? "true" : "false",
+                 dom_collapsed ? "true" : "false",
+                 ds ? ds->range_count : 0u);
+        ctx->fail_count++;
+        return false;
+    }
+
+    log_info("event_sim: assert_selection PASS (legacy=%s%s)",
+             legacy_collapsed ? "collapsed" : "non-collapsed",
+             ev->check_dom_selection ? (dom_collapsed ? ", DOM=collapsed" : ", DOM=non-collapsed") : "");
     ctx->pass_count++;
     return true;
 }
@@ -1927,11 +2016,18 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
         case SIM_EVENT_DBLCLICK: {
             int x, y;
             if (!resolve_target(ev, uicon->document, &x, &y)) break;
-            log_info("event_sim: dblclick at (%d, %d)", x, y);
-            // First click
-            sim_mouse_button(uicon, x, y, ev->button, ev->mods, true);
-            sim_mouse_button(uicon, x, y, ev->button, ev->mods, false);
-            // Second click with clicks=2
+            // F2: click_count default = 2 (dblclick). 3 = tripleclick.
+            int total_clicks = ev->click_count > 0 ? ev->click_count : 2;
+            if (total_clicks < 2) total_clicks = 2;
+            log_info("event_sim: %sclick at (%d, %d) total_clicks=%d",
+                     total_clicks >= 3 ? "triple" : "dbl", x, y, total_clicks);
+            // First (total_clicks - 1) plain clicks via sim_mouse_button.
+            for (int c = 1; c < total_clicks; c++) {
+                sim_mouse_button(uicon, x, y, ev->button, ev->mods, true);
+                sim_mouse_button(uicon, x, y, ev->button, ev->mods, false);
+            }
+            // Final click carries clicks=total_clicks so handle_event can
+            // dispatch dblclick/tripleclick semantics.
             sim_mouse_move(uicon, x, y);
             {
                 RdtEvent event;
@@ -1940,7 +2036,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 event.mouse_button.x = x;
                 event.mouse_button.y = y;
                 event.mouse_button.button = ev->button;
-                event.mouse_button.clicks = 2;
+                event.mouse_button.clicks = (uint8_t)total_clicks;
                 event.mouse_button.mods = ev->mods;
                 handle_event(uicon, uicon->document, &event);
                 event.mouse_button.type = RDT_EVENT_MOUSE_UP;
@@ -1950,12 +2046,19 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
         }
 
         case SIM_EVENT_TYPE: {
-            // Click target first to focus it
+            // Click target first to focus it — but skip the click if the target
+            // is already focused, otherwise the click would collapse any existing
+            // text selection (e.g. from a preceding tripleclick).
             if (ev->target_selector || ev->target_text) {
-                int x, y;
-                if (resolve_target(ev, uicon->document, &x, &y)) {
-                    sim_mouse_button(uicon, x, y, 0, 0, true);
-                    sim_mouse_button(uicon, x, y, 0, 0, false);
+                View* target_elem = resolve_target_element(ev, uicon->document);
+                bool already_focused = target_elem && target_elem->is_element() &&
+                    dom_element_has_pseudo_state((DomElement*)target_elem, PSEUDO_STATE_FOCUS);
+                if (!already_focused) {
+                    int x, y;
+                    if (resolve_target(ev, uicon->document, &x, &y)) {
+                        sim_mouse_button(uicon, x, y, 0, 0, true);
+                        sim_mouse_button(uicon, x, y, 0, 0, false);
+                    }
                 }
             }
             // If clear_first, send Cmd+A then Delete
@@ -2155,6 +2258,108 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             break;
         }
 
+        // F6: paste sanitized text into the focused control. Mirrors a
+        // user pressing Cmd+V after the OS clipboard has the given text.
+        case SIM_EVENT_PASTE_TEXT: {
+            if (ev->target_selector || ev->target_text) {
+                int x, y;
+                if (resolve_target(ev, uicon->document, &x, &y)) {
+                    sim_mouse_button(uicon, x, y, 0, 0, true);
+                    sim_mouse_button(uicon, x, y, 0, 0, false);
+                }
+            }
+            const char* text = ev->input_text ? ev->input_text : "";
+            log_info("event_sim: paste_text len=%zu", strlen(text));
+            clipboard_copy_text(text);
+            #ifdef __APPLE__
+            sim_key(uicon, GLFW_KEY_V, RDT_MOD_SUPER, true);
+            sim_key(uicon, GLFW_KEY_V, RDT_MOD_SUPER, false);
+            #else
+            sim_key(uicon, GLFW_KEY_V, RDT_MOD_CTRL, true);
+            sim_key(uicon, GLFW_KEY_V, RDT_MOD_CTRL, false);
+            #endif
+            break;
+        }
+
+        case SIM_EVENT_ASSERT_CLIPBOARD: {
+            const char* clip = clipboard_get_text();
+            if (!clip) clip = "";
+            bool passed = true;
+            if (ev->assert_equals && strcmp(clip, ev->assert_equals) != 0) {
+                log_error("event_sim: assert_clipboard equals fail: expected '%s', got '%s'",
+                          ev->assert_equals, clip);
+                passed = false;
+            }
+            if (ev->assert_contains && !strstr(clip, ev->assert_contains)) {
+                log_error("event_sim: assert_clipboard contains fail: '%s' not in '%s'",
+                          ev->assert_contains, clip);
+                passed = false;
+            }
+            if (passed) {
+                log_info("event_sim: assert_clipboard PASS");
+                ctx->pass_count++;
+            } else {
+                ctx->fail_count++;
+            }
+            break;
+        }
+
+        // F7: drive te_ime_begin / update / commit / cancel against the
+        // focused (or specified) text control. Mirrors the OS shim path
+        // without requiring NSTextInputClient / IMM in the test runner.
+        case SIM_EVENT_IME_COMPOSE: {
+            DomDocument* doc = uicon->document;
+            if (!doc || !doc->state) {
+                log_error("event_sim: ime_compose - no document/state");
+                ctx->fail_count++;
+                break;
+            }
+            // Optional target focus: click to focus first.
+            if (ev->target_selector || ev->target_text) {
+                int x, y;
+                if (resolve_target(ev, doc, &x, &y)) {
+                    sim_mouse_button(uicon, x, y, 0, 0, true);
+                    sim_mouse_button(uicon, x, y, 0, 0, false);
+                }
+            }
+            RadiantState* state = (RadiantState*)doc->state;
+            View* focused = focus_get(state);
+            if (!focused || !focused->is_element()) {
+                log_error("event_sim: ime_compose - no focused element");
+                ctx->fail_count++;
+                break;
+            }
+            DomElement* elem = (DomElement*)focused;
+            if (!tc_is_text_control(elem)) {
+                log_error("event_sim: ime_compose - focused is not a text control");
+                ctx->fail_count++;
+                break;
+            }
+            const char* phase = ev->ime_phase ? ev->ime_phase : "update";
+            const char* data  = ev->input_text ? ev->input_text : "";
+            uint32_t dlen = (uint32_t)strlen(data);
+            if (strcmp(phase, "begin") == 0) {
+                te_ime_begin(elem);
+                log_info("event_sim: ime_compose begin");
+            } else if (strcmp(phase, "update") == 0) {
+                te_ime_update(elem, data, dlen,
+                              (uint32_t)ev->expected_char_offset);
+                log_info("event_sim: ime_compose update '%s'", data);
+            } else if (strcmp(phase, "commit") == 0) {
+                te_ime_commit(elem, state, focused, data, dlen);
+                log_info("event_sim: ime_compose commit '%s'", data);
+            } else if (strcmp(phase, "cancel") == 0) {
+                te_ime_cancel(elem);
+                log_info("event_sim: ime_compose cancel");
+            } else {
+                log_error("event_sim: ime_compose - unknown phase '%s'", phase);
+                ctx->fail_count++;
+                break;
+            }
+            state->needs_repaint = true;
+            break;
+        }
+
         // ===== Assertions =====
 
         case SIM_EVENT_ASSERT_CARET:
@@ -2236,8 +2441,19 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 break;
             }
             DomElement* dom_elem = (DomElement*)elem;
-            const char* val = dom_element_get_attribute(dom_elem, "value");
-            const char* actual = val ? val : "";
+            // Prefer live edit buffer (FormControlProp::current_value) when
+            // present — the "value" attribute only carries the initial default
+            // for HTML <input>/<textarea>. Falling back to the attribute keeps
+            // legacy non-FormControl widgets (e.g. todo.ls) working.
+            const char* actual = nullptr;
+            if (dom_elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
+                dom_elem->form && dom_elem->form->current_value) {
+                actual = dom_elem->form->current_value;
+            }
+            if (!actual) {
+                const char* val = dom_element_get_attribute(dom_elem, "value");
+                actual = val ? val : "";
+            }
             bool passed = true;
             if (ev->assert_equals) {
                 if (strcmp(actual, ev->assert_equals) != 0) {

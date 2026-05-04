@@ -144,3 +144,26 @@ TEST_F(CssEngineParserTest, ParseInvalidCSS) {
     // Should still create a stylesheet even with invalid CSS
     ASSERT_NE(stylesheet, nullptr) << "Stylesheet should not be NULL even with invalid CSS";
 }
+
+// Regression: a nested qualified rule that itself contains another nested
+// qualified rule used to cause `css_parse_declaration_from_tokens` to stall
+// on the inner '}' (token type CSS_TOKEN_RIGHT_BRACE), spinning forever in
+// the inner-decl loop of `css_parse_qualified_rule_from_tokens`. The parser
+// must terminate (and return a stylesheet) for such input. Encountered on
+// real-world stylesheets shipped by web.archive.org.
+TEST_F(CssEngineParserTest, ParseNestedOfNestedRuleTerminates) {
+    const char* css =
+        ".outer {"
+        "  color: red;"
+        "  .middle {"
+        "    background: blue;"
+        "    .inner { width: 10px; }"
+        "  }"
+        "}";
+    CssStylesheet* stylesheet = css_parse_stylesheet(engine, css, nullptr);
+
+    // The only thing this test asserts is that parsing terminates and yields
+    // a non-null stylesheet. Reaching this line proves the infinite-loop
+    // regression is fixed.
+    ASSERT_NE(stylesheet, nullptr) << "Stylesheet should parse without hanging";
+}

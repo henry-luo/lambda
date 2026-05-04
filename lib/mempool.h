@@ -104,6 +104,12 @@ void mempool_cleanup(void);
  */
 unsigned int pool_get_id(Pool* pool);
 
+/**
+ * Get diagnostic stats: cumulative bytes/count ever allocated from this pool.
+ * Note: rpmalloc-backed pools do not subtract frees, so this is an upper bound.
+ */
+void pool_get_stats(Pool* pool, size_t* alloc_bytes, size_t* alloc_count);
+
 #ifdef __cplusplus
 }
 #endif

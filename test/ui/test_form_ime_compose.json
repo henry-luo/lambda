@@ -1,0 +1,25 @@
+{
+  "name": "Form input - IME composition begin/update/commit (F7)",
+  "html": "test/ui/test_form_input.html",
+  "viewport": {"width": 600, "height": 600},
+  "events": [
+    {"type": "log", "message": "=== form_ime_compose ==="},
+    {"type": "wait", "ms": 200},
+
+    {"type": "click", "target": {"selector": "#name"}},
+    {"type": "wait", "ms": 80},
+
+    {"type": "ime_compose", "phase": "begin"},
+    {"type": "ime_compose", "phase": "update", "preedit": "か", "caret": 1},
+    {"type": "ime_compose", "phase": "commit", "commit": "日本"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_value", "target": {"selector": "#name"}, "equals": "日本"},
+
+    {"type": "log", "message": "Cancelled composition leaves committed text intact"},
+    {"type": "ime_compose", "phase": "begin"},
+    {"type": "ime_compose", "phase": "update", "preedit": "あ", "caret": 1},
+    {"type": "ime_compose", "phase": "cancel"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_value", "target": {"selector": "#name"}, "equals": "日本"}
+  ]
+}

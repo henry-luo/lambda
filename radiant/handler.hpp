@@ -22,6 +22,11 @@ typedef struct EventContext {
     char* new_target;
     bool need_repaint;
 
+    // §7 unification (U-2): set by JS bridge dispatch when a listener calls
+    // event.preventDefault(). Default-action sites (link nav, checkbox toggle,
+    // radio select, video play/pause) check this flag to skip the default.
+    bool default_prevented;
+
     // paste text (set before dispatching "paste" event)
     const char* paste_text;
 
@@ -53,6 +58,18 @@ void calculate_position_from_char_offset(EventContext* evcon, ViewText* text,
  * Returns the TextRect and updates the rect pointer, or NULL if not found
  */
 TextRect* find_text_rect_for_offset(ViewText* text, int char_offset);
+
+/**
+ * Glyph-precise X position (relative to the text rect's parent block) of
+ * `byte_offset` within `rect` of `text`. Sets up the proper font for `text`
+ * via `uicon` and walks UTF-8 advance widths the same way the caret does.
+ * Falls back to a linear interpolation across the rect width when `uicon`
+ * or the font cannot be resolved. Used by both caret positioning and
+ * selection-rect rendering so the two stay glyph-aligned (no visible gap
+ * between the end of a selection rectangle and the caret).
+ */
+float text_glyph_x_for_byte_offset(UiContext* uicon, ViewText* text,
+    TextRect* rect, int byte_offset);
 
 /**
  * Update caret visual position after movement operations

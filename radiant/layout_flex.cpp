@@ -3350,39 +3350,44 @@ float apply_flex_constraint(
     // CSS Flexbox §4.5: min-width:auto for replaced elements = intrinsic width.
     if (item->item_prop_type == DomElement::ITEM_PROP_FORM) {
         bool is_horizontal = is_main_axis_horizontal(flex_layout);
+        // Determine whether the resolved axis (main/cross of flex) is the
+        // horizontal (width) or vertical (height) box-axis. Both main-axis
+        // and cross-axis must apply CSS min-/max- constraints; previously the
+        // cross-axis branch was a no-op which let a column-flex stretch
+        // bypass max-width entirely.
+        bool axis_is_horizontal = is_main_axis ? is_horizontal : !is_horizontal;
         float min_size = 0;
         float max_size = FLT_MAX;
 
-        if (is_main_axis) {
-            if (is_horizontal) {
-                if (item->blk && item->blk->given_min_width >= 0) {
-                    min_size = item->blk->given_min_width;
-                } else if (item->form && item->form->intrinsic_width > 0) {
-                    // min-width: auto → intrinsic width for form controls (replaced elements)
-                    min_size = item->form->intrinsic_width;
-                    // add border+padding for border-box consistency
-                    if (item->bound) {
-                        min_size += item->bound->padding.left + item->bound->padding.right;
-                        if (item->bound->border)
-                            min_size += item->bound->border->width.left + item->bound->border->width.right;
-                    }
+        if (axis_is_horizontal) {
+            if (item->blk && item->blk->given_min_width >= 0) {
+                min_size = item->blk->given_min_width;
+            } else if (is_main_axis && item->form && item->form->intrinsic_width > 0) {
+                // min-width: auto → intrinsic width for form controls (replaced elements)
+                // Only apply on main axis per CSS Flexbox §4.5; cross-axis
+                // min defaults to 0 unless explicitly set.
+                min_size = item->form->intrinsic_width;
+                // add border+padding for border-box consistency
+                if (item->bound) {
+                    min_size += item->bound->padding.left + item->bound->padding.right;
+                    if (item->bound->border)
+                        min_size += item->bound->border->width.left + item->bound->border->width.right;
                 }
-                if (item->blk && item->blk->given_max_width > 0) max_size = item->blk->given_max_width;
-            } else {
-                if (item->blk && item->blk->given_min_height >= 0) {
-                    min_size = item->blk->given_min_height;
-                } else if (item->form && item->form->intrinsic_height > 0) {
-                    min_size = item->form->intrinsic_height;
-                    if (item->bound) {
-                        min_size += item->bound->padding.top + item->bound->padding.bottom;
-                        if (item->bound->border)
-                            min_size += item->bound->border->width.top + item->bound->border->width.bottom;
-                    }
-                }
-                if (item->blk && item->blk->given_max_height > 0) max_size = item->blk->given_max_height;
             }
+            if (item->blk && item->blk->given_max_width > 0) max_size = item->blk->given_max_width;
+        } else {
+            if (item->blk && item->blk->given_min_height >= 0) {
+                min_size = item->blk->given_min_height;
+            } else if (is_main_axis && item->form && item->form->intrinsic_height > 0) {
+                min_size = item->form->intrinsic_height;
+                if (item->bound) {
+                    min_size += item->bound->padding.top + item->bound->padding.bottom;
+                    if (item->bound->border)
+                        min_size += item->bound->border->width.top + item->bound->border->width.bottom;
+                }
+            }
+            if (item->blk && item->blk->given_max_height > 0) max_size = item->blk->given_max_height;
         }
-        // Cross axis: min-size auto = 0 (already 0)
 
         if (hit_min) *hit_min = false;
         if (hit_max) *hit_max = false;
@@ -3487,11 +3492,16 @@ float apply_stretch_constraint(
 ) {
     if (!item) return container_cross_size;
 
-    // Check for form control - they should use container_cross_size directly
+    // Form controls don't have FlexItemProp; route through apply_flex_constraint
+    // (which has a form-control branch) so cross-axis CSS min-/max- constraints
+    // are honored when stretching, instead of unconditionally taking the
+    // container's full cross size.
     bool is_form_control = (item->item_prop_type == DomElement::ITEM_PROP_FORM);
     if (is_form_control) {
-        log_debug("apply_stretch_constraint: form control, returning container_cross=%.1f", container_cross_size);
-        return container_cross_size;
+        float result = apply_flex_constraint(item, container_cross_size, false, flex_layout);
+        log_debug("apply_stretch_constraint: form control, container_cross=%.1f, constrained=%.1f",
+                  container_cross_size, result);
+        return result;
     }
 
     // Non-form-controls without fi should use container_cross_size directly

@@ -961,6 +961,8 @@ Map* map_arena(Arena* arena) {
 }
 
 Item typeditem_to_item(TypedItem *titem) {
+    void* ptr_val = nullptr;
+    uint64_t item_val = 0;
     switch (titem->type_id) {
     case LMD_TYPE_NULL:  return ItemNull;
     case LMD_TYPE_BOOL:
@@ -974,16 +976,27 @@ Item typeditem_to_item(TypedItem *titem) {
     case LMD_TYPE_DTIME:
         return {.item = k2it(&titem->item)};
     case LMD_TYPE_DECIMAL:
-        return {.item = c2it(titem->decimal)};
+        memcpy(&ptr_val, ((char*)titem) + 1, sizeof(void*));
+        return {.item = c2it((Decimal*)ptr_val)};
     case LMD_TYPE_STRING:
-        return {.item = s2it(titem->string)};
+        memcpy(&ptr_val, ((char*)titem) + 1, sizeof(void*));
+        return {.item = s2it((String*)ptr_val)};
     case LMD_TYPE_SYMBOL:
-        return {.item = y2it(titem->symbol)};
+        memcpy(&ptr_val, ((char*)titem) + 1, sizeof(void*));
+        return {.item = y2it((Symbol*)ptr_val)};
     case LMD_TYPE_BINARY:
-        return {.item = x2it(titem->string)};
+        memcpy(&ptr_val, ((char*)titem) + 1, sizeof(void*));
+        return {.item = x2it((String*)ptr_val)};
     case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_RANGE:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT:
-        return {.item = titem->item};
+        memcpy(&item_val, ((char*)titem) + 1, sizeof(uint64_t));
+        if (item_val) {
+            Container* container = (Container*)item_val;
+            if (container->type_id == LMD_TYPE_RAW_POINTER) {
+                container->type_id = titem->type_id;
+            }
+        }
+        return {.item = item_val};
     default:
         log_error("map_get ANY type is UNKNOWN: %d", titem->type_id);
         return ItemError;
@@ -992,13 +1005,17 @@ Item typeditem_to_item(TypedItem *titem) {
 
 Item _map_field_to_item(void* field_ptr, TypeId type_id) {
     Item result = (Item){._type_id = type_id};
+    void* ptr_val = nullptr;
     switch (type_id) {
     case LMD_TYPE_NULL: {
         // For dynamically-typed fields, a non-null value may have been stored as a raw
         // tagged Item by set_fields(). Read it back; return ItemNull if field is empty.
-        uint64_t raw = *(uint64_t*)field_ptr;
+        uint64_t raw = 0;
+        memcpy(&raw, field_ptr, sizeof(uint64_t));
         if (raw == 0) return ItemNull;
-        return *(Item*)field_ptr;
+        Item item_val;
+        memcpy(&item_val, field_ptr, sizeof(Item));
+        return item_val;
     }
     case LMD_TYPE_BOOL:
         result.bool_val = *(bool*)field_ptr;
@@ -1016,22 +1033,30 @@ Item _map_field_to_item(void* field_ptr, TypeId type_id) {
         result = {.item = k2it(field_ptr)};  // points to datetime directly
         break;
     case LMD_TYPE_DECIMAL:
-        result = {.item = c2it(*(Decimal**)field_ptr)};
+        memcpy(&ptr_val, field_ptr, sizeof(void*));
+        result = {.item = c2it((Decimal*)ptr_val)};
         break;
     case LMD_TYPE_STRING:
-        result = {.item = s2it(*(String**)field_ptr)};
+        memcpy(&ptr_val, field_ptr, sizeof(void*));
+        result = {.item = s2it((String*)ptr_val)};
         break;
     case LMD_TYPE_SYMBOL:
-        result = {.item = y2it(*(Symbol**)field_ptr)};
+        memcpy(&ptr_val, field_ptr, sizeof(void*));
+        result = {.item = y2it((Symbol*)ptr_val)};
         break;
     case LMD_TYPE_BINARY:
-        result = {.item = x2it(*(String**)field_ptr)};
+        memcpy(&ptr_val, field_ptr, sizeof(void*));
+        result = {.item = x2it((String*)ptr_val)};
         break;
 
     case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT:  case LMD_TYPE_TYPE:  case LMD_TYPE_FUNC:
     case LMD_TYPE_PATH:
-        result.container = *(Container**)field_ptr;
+        memcpy(&ptr_val, field_ptr, sizeof(void*));
+        result.container = (Container*)ptr_val;
+        if (result.container && result.container->type_id == LMD_TYPE_RAW_POINTER) {
+            result.container->type_id = type_id;
+        }
         break;
     case LMD_TYPE_ANY: {
         result = typeditem_to_item((TypedItem*)field_ptr);

@@ -317,7 +317,12 @@ void apply_css_filters(ScratchArena* sa, ImageSurface* surface, FilterProp* filt
     while (blur_func) {
         if (blur_func->type == FILTER_BLUR && blur_func->params.blur_radius > 0) {
             float br = blur_func->params.blur_radius;
-            int pad = (int)ceilf(br);
+            // CSS filter: blur(<length>) — per spec, the length IS the Gaussian
+            // standard deviation. box_blur_region targets σ = b/2 (the CSS
+            // box-shadow convention shared by that path), so we pass 2*br to
+            // produce the correct σ = br for filter:blur().
+            float kernel_b = br * 2.0f;
+            int pad = (int)ceilf(br * 2.0f);
             int blur_x = std::max(0, left - pad);
             int blur_y = std::max(0, top - pad);
             int blur_r = std::min((int)surface->width, right + pad);
@@ -325,7 +330,7 @@ void apply_css_filters(ScratchArena* sa, ImageSurface* surface, FilterProp* filt
             int blur_w = blur_r - blur_x;
             int blur_h = blur_b - blur_y;
             if (blur_w > 0 && blur_h > 0) {
-                box_blur_region(sa, surface, blur_x, blur_y, blur_w, blur_h, br);
+                box_blur_region(sa, surface, blur_x, blur_y, blur_w, blur_h, kernel_b);
                 log_debug("[FILTER] Applied blur(%.1fpx) via software box blur to region (%d,%d,%d,%d)",
                           br, blur_x, blur_y, blur_w, blur_h);
             }

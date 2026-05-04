@@ -2,6 +2,7 @@
     "name": "Webview Form Interaction",
     "html": "test/ui/test_webview_form.html",
     "description": "Tests webview embedding with lambda:// scheme: scrolls page, fills form inputs, toggles checkboxes/radios, selects dropdown options — all via JS injection into the native WKWebView.",
+    "skip_headless": true,
     "viewport": { "width": 900, "height": 1000 },
     "events": [
         {"type": "log", "message": "=== Webview Form Test Start ==="},

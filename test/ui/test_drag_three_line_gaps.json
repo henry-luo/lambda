@@ -1,0 +1,21 @@
+{
+  "name": "Drag through gap1-2 then gap2-3",
+  "html": "test/ui/test_drag_three_line_gaps.html",
+  "events": [
+    {"type": "wait", "ms": 50},
+    {"type": "mouse_down", "target": {"text": "Alpha"}, "button": 0},
+    {"type": "wait", "ms": 20},
+    {"type": "mouse_move", "target": {"text": "mike"}},
+    {"type": "wait", "ms": 20},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+    {"type": "log", "message": "Now drag into gap between line 1 and line 2"},
+    {"type": "mouse_move", "x": 50, "y": 50},
+    {"type": "wait", "ms": 20},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+    {"type": "log", "message": "Now drag into gap between line 2 and line 3"},
+    {"type": "mouse_move", "x": 50, "y": 75},
+    {"type": "wait", "ms": 20},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+    {"type": "mouse_up", "x": 50, "y": 75, "button": 0}
+  ]
+}

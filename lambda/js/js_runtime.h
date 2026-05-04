@@ -264,8 +264,8 @@ Item js_object_get_own_property_names(Item object);
 Item js_object_get_own_property_symbols(Item object);
 Item js_to_string_val(Item value);
 Item js_number_property(Item prop_name);
-Item js_make_getter_key(Item key);
-Item js_make_setter_key(Item key);
+// Phase-5C: js_make_getter_key/js_make_setter_key removed (no callers).
+
 
 // =============================================================================
 // v8: Object & Global extensions
@@ -298,8 +298,10 @@ Item js_map_method(Item obj, Item method_name, Item* args, int argc);
 Item js_method_call_apply(Item obj, Item method_name, Item args_array);
 Item js_alert(Item msg);
 void js_set_prototype(Item object, Item prototype);
+void js_object_proto_setter(Item object, Item value);
 void js_mark_non_enumerable(Item object, Item name);
 void js_mark_non_writable(Item object, Item name);
+void js_mark_non_configurable(Item object, Item name);
 void js_func_init_property(Item fn, Item key, Item value);
 void js_mark_all_non_enumerable(Item object);
 Item js_new_number_wrapper(Item arg);
@@ -315,7 +317,7 @@ Item js_reflect_define_property(Item obj, Item key, Item desc);
 Item js_reflect_delete_property(Item obj, Item key);
 Item js_reflect_own_keys(Item obj);
 Item js_reflect_prevent_extensions(Item obj);
-Item js_reflect_set(Item obj, Item key, Item value);
+Item js_reflect_set(Item obj, Item key, Item value, Item receiver);
 Item js_reflect_set_prototype_of(Item obj, Item proto);
 Item js_prototype_lookup(Item object, Item property);
 Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_found);
@@ -367,6 +369,10 @@ Item js_delete_property(Item obj, Item key);
 // v15: fetch() API
 Item js_fetch(Item url, Item options);
 void js_fetch_reset(void);
+// Set base directory for resolving relative fetch() URLs to local files
+// (used by `lambda.exe js --document <html>` so tests can fetch sibling
+// resources from disk without an HTTP server).
+void js_fetch_set_base_path(const char* dir_path);
 
 // =============================================================================
 // Exception Handling (try/catch/throw)

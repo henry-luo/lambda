@@ -198,6 +198,8 @@ typedef TypeArray TypeList;
 #define JSPD_NON_ENUMERABLE   0x02u  // 1 = property hidden from for-in / Object.keys
 #define JSPD_NON_CONFIGURABLE 0x04u  // 1 = property cannot be deleted/redefined
 #define JSPD_IS_ACCESSOR      0x08u  // 1 = slot holds JsAccessorPair*, not data value
+#define JSPD_DELETED          0x10u  // 1 = property logically deleted (tombstone bit;
+                                     //     A2-T8 successor to JS_DELETED_SENTINEL_VAL).
 
 // First-class accessor pair stored in the map data slot when ShapeEntry::flags has
 // JSPD_IS_ACCESSOR set. Replaces the legacy `__get_X`/`__set_X` magic-key scheme.
@@ -244,6 +246,18 @@ typedef struct TypeMap : Type {
     // Populated for constructor-shaped objects. slot_entries[i] points to the i-th ShapeEntry.
     ShapeEntry** slot_entries;  // NULL if not populated; else array of slot_count pointers
     int slot_count;             // number of slot_entries (0 = not populated)
+    // A2-T1 (JS): true once this TypeMap has been cloned for a single Map's
+    // private use (e.g. by an attribute mutation like defineProperty
+    // non-writable). Subsequent attribute mutations on the same Map skip
+    // re-cloning. The original blueprint TypeMap (referenced by call-site
+    // shape caches) keeps is_private_clone=false and stays immutable.
+    bool is_private_clone;
+    // A3-T1 (JS): typed class identity (JsClass enum, declared in js/js_class.h).
+    // Zero-init = JS_CLASS_NONE so existing TypeMaps stay opaque to the new
+    // dispatch path. Stamped via `js_class_set_for_map` (which clones the
+    // TypeMap first to avoid cross-instance contamination via the per-callsite
+    // shape cache). Read via `js_class_get(Item)`.
+    uint8_t js_class;
 } TypeMap;
 
 // A1: FNV-1a hash for property name lookup

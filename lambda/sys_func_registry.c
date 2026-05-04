@@ -42,6 +42,8 @@ extern Item js_super_property_set(Item receiver, Item key, Item value);
 
 // super() for class-expression superclasses: handles FUNC and MAP (class object) callee
 extern Item js_super_call_class(Item callee, Item this_val, Item* args, int argc);
+// super() for native parent constructors: merges returned object's own props onto `this`
+extern Item js_super_call_native(Item callee, Item this_val, Item* args, int argc);
 
 // Symbol key check for typed array P9 guard (js_runtime.cpp)
 extern int64_t js_key_is_symbol_c(Item key);
@@ -808,14 +810,21 @@ extern void js_set_formal_length(Item fn_item, int length);
 
 // v25: Reflect API wrappers (js_globals.cpp)
 extern Item js_reflect_own_keys(Item obj);
-extern Item js_reflect_set(Item obj, Item key, Item value);
+extern Item js_reflect_set(Item obj, Item key, Item value, Item receiver);
 extern Item js_reflect_define_property(Item obj, Item key, Item desc);
 extern Item js_reflect_delete_property(Item obj, Item key);
 extern Item js_reflect_set_prototype_of(Item obj, Item proto);
+extern Item js_object_set_prototype_of(Item obj, Item proto);
 extern Item js_reflect_prevent_extensions(Item obj);
 extern Item js_reflect_apply(Item target, Item this_arg, Item args_array);
+extern Item js_reflect_get(Item target, Item key);
+extern Item js_reflect_has(Item target, Item key);
+extern Item js_reflect_get_prototype_of(Item target);
+extern Item js_reflect_is_extensible(Item target);
+extern Item js_reflect_get_own_property_descriptor(Item target, Item key);
 extern Item js_get_reflect_object_value();
 extern Item js_get_atomics_object_value();
+extern Item js_install_user_accessor(Item obj, Item name, Item fn, int is_setter);
 
 // v23: Performance facade functions (js_runtime.cpp)
 extern int64_t js_typeof_is(Item value, const char* type_str);
@@ -1249,6 +1258,7 @@ JitImport jit_runtime_imports[] = {
     {"js_super_instance_method_get", FPTR(js_super_instance_method_get)},
     {"js_super_property_set", FPTR(js_super_property_set)},
     {"js_super_call_class", FPTR(js_super_call_class)},
+    {"js_super_call_native", FPTR(js_super_call_native)},
     {"js_property_get_str", FPTR(js_property_get_str)},
     {"js_array_new", FPTR(js_array_new)},
     {"js_array_new_from_item", FPTR(js_array_new_from_item)},
@@ -1423,10 +1433,16 @@ JitImport jit_runtime_imports[] = {
     {"js_reflect_define_property", FPTR(js_reflect_define_property)},
     {"js_reflect_delete_property", FPTR(js_reflect_delete_property)},
     {"js_reflect_set_prototype_of", FPTR(js_reflect_set_prototype_of)},
+    {"js_object_set_prototype_of", FPTR(js_object_set_prototype_of)},
     {"js_reflect_prevent_extensions", FPTR(js_reflect_prevent_extensions)},
     {"js_reflect_apply", FPTR(js_reflect_apply)},
-    {"js_make_getter_key", FPTR(js_make_getter_key)},
-    {"js_make_setter_key", FPTR(js_make_setter_key)},
+    {"js_reflect_get", FPTR(js_reflect_get)},
+    {"js_reflect_has", FPTR(js_reflect_has)},
+    {"js_reflect_get_prototype_of", FPTR(js_reflect_get_prototype_of)},
+    {"js_reflect_is_extensible", FPTR(js_reflect_is_extensible)},
+    {"js_reflect_get_own_property_descriptor", FPTR(js_reflect_get_own_property_descriptor)},
+
+    {"js_install_user_accessor", FPTR(js_install_user_accessor)},
     {"js_array_is_array", FPTR(js_array_is_array)},
     {"js_to_string_val", FPTR(js_to_string_val)},
     {"js_number_property", FPTR(js_number_property)},
@@ -1634,6 +1650,7 @@ JitImport jit_runtime_imports[] = {
     // prototype chain
     {"js_get_prototype", FPTR(js_get_prototype)},
     {"js_set_prototype", FPTR(js_set_prototype)},
+    {"js_object_proto_setter", FPTR(js_object_proto_setter)},
     {"js_link_base_prototype", FPTR(js_link_base_prototype)},
     {"js_prototype_lookup", FPTR(js_prototype_lookup)},
     {"js_mark_non_enumerable", FPTR(js_mark_non_enumerable)},

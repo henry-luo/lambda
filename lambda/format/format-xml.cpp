@@ -4,16 +4,29 @@
 #include "format-utils.hpp"
 #include "../mark_reader.hpp"
 #include "../../lib/log.h"
+#include "html-defs.h"  // html_is_raw_text_element
 
 void print_named_items(StringBuf *strbuf, TypeMap *map_type, void* map_data);
 
 static void format_item_reader(XmlContext& ctx, const ItemReader& item, const char* tag_name);
 
 static void format_xml_string(XmlContext& ctx, String* str) {
-    if (!str || str->len == 0) return;
+    if (!str) return;
+
+    if (((uintptr_t)str & 0x7) != 0) {
+        log_error("xml_string_guard: skipping misaligned XML string ptr=%p", (void*)str);
+        return;
+    }
+
+    if (str->len == 0) return;
 
     const char* s = str->chars;
     size_t len = str->len;
+    const size_t max_xml_string_len = 1024 * 1024;
+    if (!s || len > max_xml_string_len) {
+        log_error("xml_string_guard: skipping suspicious XML string len=%zu ptr=%p", len, (void*)s);
+        return;
+    }
 
     for (size_t i = 0; i < len; i++) {
         char c = s[i];
@@ -274,6 +287,13 @@ static void format_item_reader(XmlContext& ctx, const ItemReader& item, const ch
 
         ctx.write_char('>');
 
+        // Raw-text elements (<style>, <script>, etc.) carry plain CSS/JS;
+        // entity-escaping their content (especially " → &quot;, ' → &apos;)
+        // breaks downstream parsers — e.g. an injected
+        // `@font-face { src: url("data:font/ttf;base64,...") }` block
+        // becomes invalid CSS once quotes are entity-escaped.
+        bool is_raw_text = html_is_raw_text_element(elem_name, strlen(elem_name));
+
         // Handle element content (text/child elements)
         if (elem.childCount() > 0) {
             log_debug("format_item_reader: element has %lld children", (long long)elem.childCount());
@@ -284,7 +304,12 @@ static void format_item_reader(XmlContext& ctx, const ItemReader& item, const ch
                 if (child.isString()) {
                     String* str = child.asString();
                     if (str) {
-                        format_xml_string(ctx, str);
+                        if (is_raw_text) {
+                            stringbuf_append_format(ctx.output(), "%.*s",
+                                (int)str->len, str->chars);
+                        } else {
+                            format_xml_string(ctx, str);
+                        }
                     }
                 } else if (child.isSymbol()) {
                     // Symbol items (named entities) - output as &name;
