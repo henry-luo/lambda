@@ -73,10 +73,11 @@ pn _flip_group_list(rect, paths) {
 // Tokenize + interpret a page's content stream. Empty content yields
 // { texts: [], paths: [] }.
 pn _content_elements(pdf, page, page_h) {
-    let bytes = resolve.page_content_bytes(pdf, page)
-    if (bytes == null) {
+    let raw_bytes = resolve.page_content_bytes(pdf, page)
+    if (raw_bytes == null) {
         return { texts: [], paths: [] }
     }
+    let bytes = interp.expand_forms_in_bytes(pdf, page, raw_bytes)
     let ops = stream.parse_content_stream(bytes)
     return interp.render_page(pdf, page, ops, page_h)
 }

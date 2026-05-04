@@ -26,6 +26,7 @@ import image:   .image
 import shading: .shading
 import coords:  .coords
 import svg:     .svg
+import stream:  .stream
 
 // ============================================================
 // State
@@ -320,6 +321,67 @@ pn _resolve_fonts(pdf, page, ops) {
 }
 
 // ============================================================
+// Form XObject expansion (byte-level pre-pass)
+// ============================================================
+//
+// Lambda's `pn → pn` array marshaling has trouble with parsed-op
+// records (see vibe/Lambda_Issues5.md #22), so we expand Form XObject
+// references entirely at the byte level: every `/<name> Do` is rewritten
+// to a synthetic `q <matrix> cm <form-bytes> Q` block before the
+// content stream is tokenized. This way the interpreter sees one flat
+// op stream and the existing q/Q machinery handles state save/restore.
+
+fn _form_xobject_names(pdf, page) {
+    let res = resolve.page_resources(pdf, page)
+    let xo  = if (res and res.XObject) resolve.deref(pdf, res.XObject) else null
+    if (xo == null) { [] }
+    else {
+        let names = for (k, v in xo) string(k)
+        names
+    }
+}
+
+fn _matrix_str(m) {
+    util.fmt_num(m[0]) ++ " " ++ util.fmt_num(m[1]) ++ " " ++
+    util.fmt_num(m[2]) ++ " " ++ util.fmt_num(m[3]) ++ " " ++
+    util.fmt_num(m[4]) ++ " " ++ util.fmt_num(m[5])
+}
+
+pub pn expand_forms_in_bytes(pdf, page, bytes) {
+    let xo_names = _form_xobject_names(pdf, page)
+    var cur = bytes
+    var i = 0
+    let n = len(xo_names)
+    while (i < n) {
+        let nm = xo_names[i]
+        let fc = image.form_content(pdf, page, nm)
+        if (fc != null and fc.data != "") {
+            let mstr = _matrix_str(fc.matrix)
+            let needle = "/" ++ nm ++ " Do"
+            let replacement = "q " ++ mstr ++ " cm\n" ++ fc.data ++ "\nQ"
+            cur = replace(cur, needle, replacement)
+        }
+        i = i + 1
+    }
+    return cur
+}
+
+// ============================================================
+// Form XObject expansion helpers (used inline by _run_ops below)
+// ============================================================
+
+fn _is_form_do(op, pdf, page) {
+    if (op.op != "Do")                     { false }
+    else if (len(op.operands) < 1)         { false }
+    else if (not (op.operands[0] is map))  { false }
+    else if (op.operands[0].kind != "name") { false }
+    else {
+        let xo = image.lookup_xobject(pdf, page, op.operands[0].value)
+        (xo != null) and (xo.kind == "form")
+    }
+}
+
+// ============================================================
 // Driver
 // ============================================================
 //
@@ -329,7 +391,17 @@ pn _resolve_fonts(pdf, page, ops) {
 
 pub pn render_page(pdf, page, ops, page_h) {
     let fonts = _resolve_fonts(pdf, page, ops)
+    let r = _run_ops(pdf, page, ops, util.IDENTITY, fonts, page_h)
+    let texts = (for (t in r.texts) t)
+    let paths = (for (p in r.paths) p)
+    return { texts: texts, paths: paths }
+}
+// Operator-walk loop, factored out so Form XObject `Do` operators can
+// recursively interpret a sub-content-stream with its own CTM and font
+// pool. Returns { texts, paths } — caller decides whether to dedupe.
+pn _run_ops(pdf, page, ops, init_ctm, fonts, page_h) {
     var st = new_state(fonts)
+    st = _with_ctm(st, init_ctm)
     var stack = []
     var texts = []
     var paths = []

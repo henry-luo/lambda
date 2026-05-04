@@ -72,6 +72,49 @@ fn _classify(content, obj_num, raw) {
     { kind: kind, obj_num: obj_num, dict: dict, raw: raw, data_uri: data_uri }
 }
 
+fn _num(v) {
+    if (v == null)        { 0.0 }
+    else if (v is float)  { v }
+    else if (v is int)    { float(v) }
+    else                  { 0.0 }
+}
+
+fn _form_matrix(m) {
+    if (m is array and len(m) == 6) {
+        [_num(m[0]), _num(m[1]), _num(m[2]),
+         _num(m[3]), _num(m[4]), _num(m[5])]
+    }
+    else { util.IDENTITY }
+}
+
+// Look up a Form XObject by name and return enough information to
+// recursively interpret its content stream. Returns null when the name
+// does not resolve to a Form XObject or its data is missing.
+//
+//   { data:   string,          // raw content-stream bytes
+//     matrix: [a b c d e f],   // /Matrix or identity
+//     dict:   Map }            // the Form's full dictionary
+pub fn form_content(pdf, page, name) {
+    let res = resolve.page_resources(pdf, page)
+    let xo  = if (res and res.XObject) resolve.deref(pdf, res.XObject) else null
+    if (xo == null) { null }
+    else {
+        let raw = xo[name]
+        if (raw == null) { null }
+        else {
+            let content = resolve.deref(pdf, raw)
+            let dict = if (content and content.dictionary) content.dictionary else content
+            let sub  = if (dict and dict.Subtype) dict.Subtype else null
+            if (sub != "Form") { null }
+            else {
+                let data = if (content and content.data) content.data else ""
+                let m = if (dict and dict.Matrix) dict.Matrix else null
+                { data: data, matrix: _form_matrix(m), dict: dict }
+            }
+        }
+    }
+}
+
 // ============================================================
 // Emission
 // ============================================================
