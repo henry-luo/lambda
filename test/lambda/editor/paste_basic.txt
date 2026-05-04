@@ -1,0 +1,42 @@
+"drop unknown:"
+true
+"keep known marks:"
+2
+"strong kept:"
+true
+"em kept:"
+true
+"atomic content stripped:"
+true
+"atomic attrs preserved:"
+true
+"lift count:"
+3
+"first lifted tag:"
+true
+"first lifted text:"
+true
+"middle preserved:"
+true
+"middle text:"
+true
+"last lifted tag:"
+true
+"last lifted text:"
+true
+"group run count:"
+true
+"group run text:"
+true
+"inline unwrap count:"
+3
+"unwrap[0]:"
+true
+"unwrap[1]:"
+true
+"unwrap[2]:"
+true
+"nested marks count:"
+true
+"nested mark:"
+true

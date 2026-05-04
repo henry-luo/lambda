@@ -1,0 +1,32 @@
+"empty count:"
+0
+"after add count:"
+3
+"hits at offset 2:"
+2
+"hits at offset 8:"
+2
+"hits in nested path:"
+true
+"after remove count:"
+2
+"concat count:"
+5
+"mapped from:"
+3
+"mapped to:"
+8
+"find count:"
+4
+"find first:"
+0
+"find last:"
+8
+"find empty needle:"
+0
+"find decos count:"
+1
+"find first deco from:"
+6
+"find first deco to:"
+11
