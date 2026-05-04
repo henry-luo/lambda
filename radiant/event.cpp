@@ -21,6 +21,8 @@
 #include "../lambda/render_map.h"
 #include "../lambda/lambda.h"         // Context (input_context)
 #include "../lambda/lambda-data.hpp"  // EvalContext
+#include "source_pos_bridge.hpp"      // SourcePos / selection bridge for editor handlers
+#include "dom_range.hpp"              // DomSelection / DomBoundary
 #include "../lambda/transpiler.hpp"   // Runtime (heap, nursery, name_pool)
 #include "../lambda/mark_builder.hpp" // MarkBuilder for event object construction
 #include "../lambda/js/js_dom.h"      // js_dom_set_document for HTML event handlers
@@ -547,6 +549,38 @@ static Item build_lambda_event_map(DomDocument* doc, View* target,
     // for "paste" events: add clipboard text
     if (evcon && strcmp(event_name, "paste") == 0 && evcon->paste_text) {
         mb.put("text", evcon->paste_text);
+    }
+
+    // R7 step 3b — attach SourcePos / SourceSelection for editor handlers.
+    // The editor's `mod_source_pos` shapes are:
+    //   pos       = { path: [int...], offset: int }
+    //   selection = { kind:'text', anchor: pos, head: pos }   (text)
+    //             | { kind:'node', path: [int...] }           (node)
+    // Populated from `state->dom_selection` (kept in sync with the legacy
+    // caret/selection) whenever the DOM boundary resolves to a recorded
+    // source path via render_map. Form inputs already carry their own
+    // `caret_pos` / `selection_*` fields above and don't get a SourcePos
+    // (their typed value isn't a template-rendered source path).
+    {
+        RadiantState* st2 = doc->state ? (RadiantState*)doc->state : nullptr;
+        DomSelection* ds = st2 ? st2->dom_selection : nullptr;
+        if (ds && ds->anchor.node) {
+            SourcePosC anchor_pos;
+            if (source_pos_from_dom_boundary(&ds->anchor, &anchor_pos)) {
+                mb.put("source_pos",
+                       source_pos_to_item(builder, &anchor_pos));
+                if (!ds->is_collapsed && ds->focus.node) {
+                    SourcePosC head_pos;
+                    if (source_pos_from_dom_boundary(&ds->focus, &head_pos)) {
+                        mb.put("source_selection",
+                               source_text_selection_to_item(
+                                   builder, &anchor_pos, &head_pos));
+                        source_pos_free(&head_pos);
+                    }
+                }
+                source_pos_free(&anchor_pos);
+            }
+        }
     }
 
     // for drag-and-drop events: add drag_data field

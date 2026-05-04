@@ -204,11 +204,22 @@ Item fn_apply1(Item target) {
         return target;  // pass through if no template matches
     }
 
+    // R7 step 3c — auto-bootstrap the source doc root on first apply so the
+    // editor bridge can compute child-index paths for every recorded item.
+    // Only bootstrap when a path recorder is active (radiant runs); pure
+    // CLI/test runs without radiant skip this to avoid leaving a dangling
+    // root pointer across runtime teardowns.
+    if (render_map_has_path_recorder() &&
+        render_map_get_source_doc_root().item == 0) {
+        render_map_set_source_doc_root(target);
+    }
+
     Item result = invoke_template(tmpl, target);
 
     // record source→result mapping in the render map for observer-based reconciliation
     if (tmpl->template_ref) {
         render_map_record(target, tmpl->template_ref, result, ItemNull, -1);
+        render_map_record_source_path(target, tmpl->template_ref);
     }
 
     return result;
@@ -264,11 +275,18 @@ Item fn_apply2(Item target, Item options) {
         log_debug("apply: edit bridge initialized for edit-mode apply");
     }
 
+    // R7 step 3c — auto-bootstrap source doc root for path tracking (radiant only).
+    if (render_map_has_path_recorder() &&
+        render_map_get_source_doc_root().item == 0) {
+        render_map_set_source_doc_root(target);
+    }
+
     Item result = invoke_template(tmpl, target);
 
     // record source→result mapping in the render map for observer-based reconciliation
     if (tmpl->template_ref) {
         render_map_record(target, tmpl->template_ref, result, ItemNull, -1);
+        render_map_record_source_path(target, tmpl->template_ref);
     }
 
     return result;

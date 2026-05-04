@@ -2,6 +2,7 @@
 #include "animation.h"
 #include "dom_range.hpp"
 #include "dom_range_resolver.hpp"
+#include "source_pos_bridge.hpp"   // R7 step 3c — register path recorder
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 // str.h included via view.hpp
@@ -169,6 +170,10 @@ RadiantState* radiant_state_create(Pool* pool, StateUpdateMode mode) {
     // Initialize render map for observer-based reconciliation (Phase 3)
     render_map_init();
     state->render_map = render_map_get_map();
+
+    // R7 step 3c — register the source-path recorder so apply() persists
+    // child-index paths into the editor bridge's path side-table.
+    render_map_set_path_recorder(&render_map_record_path);
 
     // Initialize animation scheduler
     state->animation_scheduler = animation_scheduler_create(pool);

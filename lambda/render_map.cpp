@@ -18,6 +18,10 @@ static HashMap* s_render_map = NULL;
 static bool s_owns_map = false;
 static Item s_doc_root = {0};  // top-level element tree for parent fixup
 
+// R7 step 3c — source-document path tracking
+static Item s_source_doc_root = {0};
+static render_map_path_recorder_fn s_path_recorder = NULL;
+
 // forward declarations
 static Item find_parent_of(Item node, Item target, int* out_index, int depth = 0);
 
@@ -105,6 +109,10 @@ static HashMap* ensure_map(void) {
 
 void render_map_init(void) {
     ensure_map();
+    // R7 step 3c — clear stale source-doc-root from any prior runtime.
+    // The item's pointer would otherwise dangle after the previous
+    // runtime's heap was torn down, crashing the next apply()'s path walk.
+    s_source_doc_root = (Item){0};
     log_debug("render_map_init: render map initialized");
 }
 
@@ -118,6 +126,8 @@ void render_map_destroy(void) {
         hashmap_free(s_reverse_map);
         s_reverse_map = NULL;
     }
+    // R7 step 3c — drop dangling source-doc-root before next runtime.
+    s_source_doc_root = (Item){0};
 }
 
 void render_map_record(Item source_item, const char* template_ref,
@@ -494,4 +504,80 @@ static Item find_parent_of(Item node, Item target, int* out_index, int depth) {
         }
     }
     return ItemNull;
+}
+
+// ============================================================================
+// R7 step 3c — source-document path tracking
+// ============================================================================
+
+void render_map_set_source_doc_root(Item root) {
+    static bool registered = false;
+    if (!registered) {
+        heap_register_gc_root(&s_source_doc_root.item);
+        registered = true;
+    }
+    s_source_doc_root = root;
+}
+
+Item render_map_get_source_doc_root(void) {
+    return s_source_doc_root;
+}
+
+void render_map_set_path_recorder(render_map_path_recorder_fn fn) {
+    s_path_recorder = fn;
+}
+
+extern "C" bool render_map_has_path_recorder(void) {
+    return s_path_recorder != NULL;
+}
+
+// DFS walk of element/array containers from `node`, locating `target`.
+// On hit fills `out_indices` with the child-index path (root-relative,
+// in walk order) and returns its depth; returns -1 on miss.
+// `max_depth` bounds both recursion and output length.
+//
+// NOTE: Map descent (e.g., into a `content` field of `{kind, tag, attrs,
+// content}` mod_doc nodes) is intentionally omitted here to keep
+// render_map.cpp free of the heavyweight `item_attr` runtime dep. Most
+// editor doc trees that flow through `apply()` are element-based; if a
+// future doc-tree shape uses pure-map nesting we'll add a leaner Map
+// accessor here.
+static int find_path_to(Item node, Item target,
+                        int* out_indices, int max_depth, int depth) {
+    if (depth > max_depth || depth > 64) return -1;
+    if (node.item == target.item) return depth;
+    TypeId tid = get_type_id(node);
+    if (tid == LMD_TYPE_ELEMENT) {
+        Element* elmt = it2elmt(node);
+        if (!elmt) return -1;
+        for (unsigned i = 0; i < elmt->length; i++) {
+            if (depth < max_depth) out_indices[depth] = (int)i;
+            int found = find_path_to(elmt->items[i], target,
+                                     out_indices, max_depth, depth + 1);
+            if (found >= 0) return found;
+        }
+    } else if (tid == LMD_TYPE_ARRAY) {
+        Array* arr = it2arr(node);
+        if (!arr) return -1;
+        for (unsigned i = 0; i < arr->length; i++) {
+            if (depth < max_depth) out_indices[depth] = (int)i;
+            int found = find_path_to(arr->items[i], target,
+                                     out_indices, max_depth, depth + 1);
+            if (found >= 0) return found;
+        }
+    }
+    return -1;
+}
+
+void render_map_record_source_path(Item target, const char* template_ref) {
+    if (!s_path_recorder) return;
+    if (s_source_doc_root.item == 0) return;
+    int indices[64];
+    int depth = find_path_to(s_source_doc_root, target,
+                             indices, (int)(sizeof(indices) / sizeof(int)), 0);
+    if (depth < 0) {
+        log_debug("render_map_record_source_path: target not found under source root");
+        return;
+    }
+    s_path_recorder(target, template_ref, indices, depth);
 }
