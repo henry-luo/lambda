@@ -13,6 +13,13 @@
 
 #include <string.h>
 #include "../../lib/mem.h"
+#ifdef _WIN32
+#include <windows.h>
+static inline int setenv(const char* name, const char* value, int overwrite) {
+    if (!overwrite && GetEnvironmentVariableA(name, NULL, 0) > 0) return 0;
+    return SetEnvironmentVariableA(name, value) ? 0 : -1;
+}
+#endif
 
 // ============================================================================
 // Worker pool lifecycle

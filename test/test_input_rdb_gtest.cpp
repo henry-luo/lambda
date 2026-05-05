@@ -21,6 +21,10 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#ifdef _WIN32
+#include <direct.h>
+#define mkdir(path, mode) _mkdir(path)
+#endif
 
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/lambda-decimal.hpp"

@@ -1472,24 +1472,46 @@ class PremakeGenerator:
         # Add Windows DLL export flags for lambda-input-full projects as separate linkoptions
         if (self.use_windows_config and lib.get('link') == 'dynamic' and
             lib_name.startswith('lambda-input-full')):
+            # Curl's transitive static dependencies (not listed separately in dependencies[])
+            curl_static_deps = [
+                '/clang64/lib/libnghttp3.a',
+                '/clang64/lib/libngtcp2_crypto_ossl.a',
+                '/clang64/lib/libngtcp2.a',
+                '/clang64/lib/libssh2.a',
+                '/clang64/lib/libidn2.a',
+                '/clang64/lib/libpsl.a',
+                '/clang64/lib/libunistring.a',
+                '/clang64/lib/libiconv.a',
+                '/clang64/lib/libssl.a',
+                '/clang64/lib/libcrypto.a',
+                '/clang64/lib/libzstd.a',
+                '-lsecur32',
+                '-limm32',
+                '-ldbghelp',
+                '-luserenv',
+            ]
             if lib_name == 'lambda-input-full-cpp':
                 # Use .def file for C++ project for precise symbol export
-                self.premake_content.extend([
-                    '    linkoptions {',
+                link_opts = ['    linkoptions {']
+                link_opts.extend(f'        "{dep}",' for dep in curl_static_deps)
+                link_opts += [
                     '        "-Wl,--output-def,lambda-input-full-cpp.def",',
                     '        "../../lambda-input-full-cpp.def",',
                     '    }',
                     '    '
-                ])
+                ]
+                self.premake_content.extend(link_opts)
             else:
                 # Use export-all-symbols for C project
-                self.premake_content.extend([
-                    '    linkoptions {',
+                link_opts = ['    linkoptions {']
+                link_opts.extend(f'        "{dep}",' for dep in curl_static_deps)
+                link_opts += [
                     '        "-Wl,--export-all-symbols",',
                     '        "-Wl,--enable-auto-import",',
                     '    }',
                     '    '
-                ])
+                ]
+                self.premake_content.extend(link_opts)
 
 
         self.premake_content.append('')
@@ -1730,6 +1752,24 @@ class PremakeGenerator:
                         # Remove libraries not available on macOS
                         if 'exclude_libraries' in macos_overrides:
                             exclude_set = set(macos_overrides['exclude_libraries'])
+                            libraries = [lib for lib in libraries if lib not in exclude_set]
+
+                if self.use_windows_config:
+                    windows_overrides = test.get('windows', {})
+                    if windows_overrides:
+                        if 'libraries' in windows_overrides:
+                            libraries = libraries + [lib for lib in windows_overrides['libraries'] if lib not in libraries]
+                        if 'exclude_libraries' in windows_overrides:
+                            exclude_set = set(windows_overrides['exclude_libraries'])
+                            libraries = [lib for lib in libraries if lib not in exclude_set]
+
+                if self.use_linux_config:
+                    linux_overrides = test.get('linux', {})
+                    if linux_overrides:
+                        if 'libraries' in linux_overrides:
+                            libraries = libraries + [lib for lib in linux_overrides['libraries'] if lib not in libraries]
+                        if 'exclude_libraries' in linux_overrides:
+                            exclude_set = set(linux_overrides['exclude_libraries'])
                             libraries = [lib for lib in libraries if lib not in exclude_set]
 
                 if not source or not binary_name:
@@ -2075,6 +2115,19 @@ class PremakeGenerator:
                 self.premake_content.append('    linkoptions {')
                 for lib_path in external_static_libs:
                     self.premake_content.append(f'        "{lib_path}",')
+                # Windows: add system libs that static libraries depend on
+                if self.use_windows_config:
+                    self.premake_content.extend([
+                        '        "-lws2_32",',
+                        '        "-lwsock32",',
+                        '        "-lwinmm",',
+                        '        "-lcrypt32",',
+                        '        "-lbcrypt",',
+                        '        "-ladvapi32",',
+                        '        "-lsecur32",',
+                        '        "-lwldap32",',
+                        '        "-liphlpapi",',
+                    ])
                 self.premake_content.extend([
                     '    }',
                     '    '
@@ -2123,20 +2176,34 @@ class PremakeGenerator:
                     "../../win-native-deps/lib/libmir.a",
                     "/clang64/lib/libmpdec.a",
                     "../../win-native-deps/lib/libutf8proc.a",
+                    "../../win-native-deps/lib/libcurl.a",
+                    "/clang64/lib/libnghttp2.a",
+                    "/clang64/lib/libnghttp3.a",
+                    "/clang64/lib/libngtcp2_crypto_ossl.a",
+                    "/clang64/lib/libngtcp2.a",
+                    "/clang64/lib/libssh2.a",
+                    "/clang64/lib/libidn2.a",
+                    "/clang64/lib/libpsl.a",
+                    "/clang64/lib/libunistring.a",
+                    "/clang64/lib/libiconv.a",
+                    "/clang64/lib/libssl.a",
+                    "/clang64/lib/libcrypto.a",
+                    "/clang64/lib/libzstd.a",
                     "/clang64/lib/libmbedtls.a",
                     "/clang64/lib/libmbedx509.a",
                     "/clang64/lib/libmbedcrypto.a",
                 ]
                 for lib_path in windows_lib_paths:
                     self.premake_content.append(f'        "{lib_path}",')
-                # Add dynamic libraries
+                # Add dynamic system libraries
                 self.premake_content.extend([
-                    '        "-lcurl",',
-                    '        "-lnghttp2",',
                     '        "-lz",',
                     '        "-lbz2",',
                     '        "-lfreetype",',
                     '        "-lpng",',
+                    '        "-limm32",',
+                    '        "-ldbghelp",',
+                    '        "-luserenv",',
                 ])
                 # Non-Windows: use the original approach with external library definitions
                 # If lambda-input-full is a dependency, we need to include curl/ssl/crypto for proper linking
