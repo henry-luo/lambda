@@ -1125,6 +1125,18 @@ static int parse_flag(const char** p) {
     return flag;
 }
 
+static inline bool svg_same_point(float x1, float y1, float x2, float y2) {
+    return fabsf(x1 - x2) < 0.0001f && fabsf(y1 - y2) < 0.0001f;
+}
+
+static inline void svg_emit_pending_move(RdtPath* path, bool* pending_move,
+                                         float pending_x, float pending_y) {
+    if (*pending_move) {
+        rdt_path_move_to(path, pending_x, pending_y);
+        *pending_move = false;
+    }
+}
+
 // arc-to-bezier conversion: SVG endpoint parameterization → center parameterization → cubic beziers
 // follows the SVG spec F.6 "Conversion from endpoint to center parameterization"
 static void arc_to_beziers(RdtPath* path, float x1, float y1,
@@ -1247,8 +1259,12 @@ static RdtPath* parse_svg_path_d(const char* d) {
 
     float cur_x = 0, cur_y = 0;
     float start_x = 0, start_y = 0;
+    float pending_x = 0, pending_y = 0;
     float last_ctrl_x = 0, last_ctrl_y = 0;
     char last_cmd = 0;
+    bool pending_move = false;
+    bool subpath_has_draw = false;
+    bool any_draw = false;
 
     const char* p = d;
 
@@ -1281,9 +1297,12 @@ static RdtPath* parse_svg_path_d(const char* d) {
                 float x = parse_number(&p);
                 float y = parse_number(&p);
                 if (relative) { x += cur_x; y += cur_y; }
-                rdt_path_move_to(path, x, y);
                 cur_x = start_x = x;
                 cur_y = start_y = y;
+                pending_x = x;
+                pending_y = y;
+                pending_move = true;
+                subpath_has_draw = false;
                 last_ctrl_x = cur_x;
                 last_ctrl_y = cur_y;
                 // subsequent coords are implicit lineto
@@ -1291,7 +1310,12 @@ static RdtPath* parse_svg_path_d(const char* d) {
                     x = parse_number(&p);
                     y = parse_number(&p);
                     if (relative) { x += cur_x; y += cur_y; }
-                    rdt_path_line_to(path, x, y);
+                    if (!svg_same_point(cur_x, cur_y, x, y)) {
+                        svg_emit_pending_move(path, &pending_move, pending_x, pending_y);
+                        rdt_path_line_to(path, x, y);
+                        subpath_has_draw = true;
+                        any_draw = true;
+                    }
                     cur_x = x; cur_y = y;
                 }
                 break;
@@ -1301,7 +1325,12 @@ static RdtPath* parse_svg_path_d(const char* d) {
                     float x = parse_number(&p);
                     float y = parse_number(&p);
                     if (relative) { x += cur_x; y += cur_y; }
-                    rdt_path_line_to(path, x, y);
+                    if (!svg_same_point(cur_x, cur_y, x, y)) {
+                        svg_emit_pending_move(path, &pending_move, pending_x, pending_y);
+                        rdt_path_line_to(path, x, y);
+                        subpath_has_draw = true;
+                        any_draw = true;
+                    }
                     cur_x = x; cur_y = y;
                 }
                 last_ctrl_x = cur_x;
@@ -1312,7 +1341,12 @@ static RdtPath* parse_svg_path_d(const char* d) {
                 while (peek_number(p)) {
                     float x = parse_number(&p);
                     if (relative) { x += cur_x; }
-                    rdt_path_line_to(path, x, cur_y);
+                    if (!svg_same_point(cur_x, cur_y, x, cur_y)) {
+                        svg_emit_pending_move(path, &pending_move, pending_x, pending_y);
+                        rdt_path_line_to(path, x, cur_y);
+                        subpath_has_draw = true;
+                        any_draw = true;
+                    }
                     cur_x = x;
                 }
                 last_ctrl_x = cur_x;
@@ -1323,7 +1357,12 @@ static RdtPath* parse_svg_path_d(const char* d) {
                 while (peek_number(p)) {
                     float y = parse_number(&p);
                     if (relative) { y += cur_y; }
-                    rdt_path_line_to(path, cur_x, y);
+                    if (!svg_same_point(cur_x, cur_y, cur_x, y)) {
+                        svg_emit_pending_move(path, &pending_move, pending_x, pending_y);
+                        rdt_path_line_to(path, cur_x, y);
+                        subpath_has_draw = true;
+                        any_draw = true;
+                    }
                     cur_y = y;
                 }
                 last_ctrl_x = cur_x;
@@ -1343,7 +1382,15 @@ static RdtPath* parse_svg_path_d(const char* d) {
                         x2 += cur_x; y2 += cur_y;
                         x += cur_x; y += cur_y;
                     }
-                    rdt_path_cubic_to(path, x1, y1, x2, y2, x, y);
+                    bool degenerate = svg_same_point(cur_x, cur_y, x1, y1)
+                        && svg_same_point(cur_x, cur_y, x2, y2)
+                        && svg_same_point(cur_x, cur_y, x, y);
+                    if (!degenerate) {
+                        svg_emit_pending_move(path, &pending_move, pending_x, pending_y);
+                        rdt_path_cubic_to(path, x1, y1, x2, y2, x, y);
+                        subpath_has_draw = true;
+                        any_draw = true;
+                    }
                     last_ctrl_x = x2; last_ctrl_y = y2;
                     cur_x = x; cur_y = y;
                 }
@@ -1362,7 +1409,15 @@ static RdtPath* parse_svg_path_d(const char* d) {
                         x2 += cur_x; y2 += cur_y;
                         x += cur_x; y += cur_y;
                     }
-                    rdt_path_cubic_to(path, x1, y1, x2, y2, x, y);
+                    bool degenerate = svg_same_point(cur_x, cur_y, x1, y1)
+                        && svg_same_point(cur_x, cur_y, x2, y2)
+                        && svg_same_point(cur_x, cur_y, x, y);
+                    if (!degenerate) {
+                        svg_emit_pending_move(path, &pending_move, pending_x, pending_y);
+                        rdt_path_cubic_to(path, x1, y1, x2, y2, x, y);
+                        subpath_has_draw = true;
+                        any_draw = true;
+                    }
                     last_ctrl_x = x2; last_ctrl_y = y2;
                     cur_x = x; cur_y = y;
                 }
@@ -1383,7 +1438,15 @@ static RdtPath* parse_svg_path_d(const char* d) {
                     float cy1 = cur_y + 2.0f/3.0f * (qy - cur_y);
                     float cx2 = x + 2.0f/3.0f * (qx - x);
                     float cy2 = y + 2.0f/3.0f * (qy - y);
-                    rdt_path_cubic_to(path, cx1, cy1, cx2, cy2, x, y);
+                    bool degenerate = svg_same_point(cur_x, cur_y, cx1, cy1)
+                        && svg_same_point(cur_x, cur_y, cx2, cy2)
+                        && svg_same_point(cur_x, cur_y, x, y);
+                    if (!degenerate) {
+                        svg_emit_pending_move(path, &pending_move, pending_x, pending_y);
+                        rdt_path_cubic_to(path, cx1, cy1, cx2, cy2, x, y);
+                        subpath_has_draw = true;
+                        any_draw = true;
+                    }
                     last_ctrl_x = qx; last_ctrl_y = qy;
                     cur_x = x; cur_y = y;
                 }
@@ -1402,7 +1465,15 @@ static RdtPath* parse_svg_path_d(const char* d) {
                     float cy1 = cur_y + 2.0f/3.0f * (qy - cur_y);
                     float cx2 = x + 2.0f/3.0f * (qx - x);
                     float cy2 = y + 2.0f/3.0f * (qy - y);
-                    rdt_path_cubic_to(path, cx1, cy1, cx2, cy2, x, y);
+                    bool degenerate = svg_same_point(cur_x, cur_y, cx1, cy1)
+                        && svg_same_point(cur_x, cur_y, cx2, cy2)
+                        && svg_same_point(cur_x, cur_y, x, y);
+                    if (!degenerate) {
+                        svg_emit_pending_move(path, &pending_move, pending_x, pending_y);
+                        rdt_path_cubic_to(path, cx1, cy1, cx2, cy2, x, y);
+                        subpath_has_draw = true;
+                        any_draw = true;
+                    }
                     last_ctrl_x = qx; last_ctrl_y = qy;
                     cur_x = x; cur_y = y;
                 }
@@ -1419,7 +1490,12 @@ static RdtPath* parse_svg_path_d(const char* d) {
                     float y = parse_number(&p);
                     if (relative) { x += cur_x; y += cur_y; }
 
-                    arc_to_beziers(path, cur_x, cur_y, rx, ry, rotation, large_arc, sweep, x, y);
+                    if (!svg_same_point(cur_x, cur_y, x, y)) {
+                        svg_emit_pending_move(path, &pending_move, pending_x, pending_y);
+                        arc_to_beziers(path, cur_x, cur_y, rx, ry, rotation, large_arc, sweep, x, y);
+                        subpath_has_draw = true;
+                        any_draw = true;
+                    }
                     cur_x = x; cur_y = y;
                 }
                 last_ctrl_x = cur_x;
@@ -1427,7 +1503,10 @@ static RdtPath* parse_svg_path_d(const char* d) {
                 break;
             }
             case 'Z': {  // closepath
-                rdt_path_close(path);
+                if (subpath_has_draw) {
+                    svg_emit_pending_move(path, &pending_move, pending_x, pending_y);
+                    rdt_path_close(path);
+                }
                 cur_x = start_x;
                 cur_y = start_y;
                 last_ctrl_x = cur_x;
@@ -1439,6 +1518,11 @@ static RdtPath* parse_svg_path_d(const char* d) {
                 rdt_path_free(path);
                 return nullptr;
         }
+    }
+
+    if (!any_draw) {
+        rdt_path_free(path);
+        return nullptr;
     }
 
     return path;

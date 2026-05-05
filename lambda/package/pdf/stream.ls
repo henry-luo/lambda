@@ -268,12 +268,14 @@ pub pn parse_content_stream(bytes: string) {
             // interpreter can render a placeholder.
             if (r.value == "BI") {
                 let after_ei = skip_inline_image(bytes, r.end)
-                ops = ops ++ [{ op: "inline_image", operands: stack }]
+                let operands = (for (v in stack) v)
+                ops = ops ++ [{ op: "inline_image", operands: operands }]
                 stack = []
                 i = after_ei
                 continue
             }
-            ops = ops ++ [{ op: r.value, operands: stack }]
+            let operands = (for (v in stack) v)
+            ops = ops ++ [{ op: r.value, operands: operands }]
             stack = []
             i = r.end
             continue
