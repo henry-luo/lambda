@@ -38,6 +38,11 @@ fn _num(op) {
     else                   { 0.0 }
 }
 
+fn _num_int(op) {
+    if (op is int) { op }
+    else { int(_num(op)) }
+}
+
 // ============================================================
 // Initial state
 // ============================================================
@@ -515,11 +520,11 @@ fn _op_w(st, ops) {
 }
 
 fn _op_J(st, ops) {
-    if (len(ops) >= 1 and ops[0] is int) { _set_line_cap(st, ops[0]) } else { st }
+    if (len(ops) >= 1) { _set_line_cap(st, _num_int(ops[0])) } else { st }
 }
 
 fn _op_j(st, ops) {
-    if (len(ops) >= 1 and ops[0] is int) { _set_line_join(st, ops[0]) } else { st }
+    if (len(ops) >= 1) { _set_line_join(st, _num_int(ops[0])) } else { st }
 }
 
 fn _op_M(st, ops) {

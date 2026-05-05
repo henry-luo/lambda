@@ -11,8 +11,15 @@
 #include "str.h"
 #include <stdlib.h>
 
-/* Explicit strdup declaration for compatibility */
-extern char *strdup(const char *s);
+/* Use malloc+memcpy instead of strdup to avoid CRT heap mismatch on Windows.
+ * (strdup may resolve to a different CRT than malloc/free in statically-linked builds.) */
+static char* log_strdup(const char *s) {
+    if (!s) return NULL;
+    size_t len = strlen(s);
+    char *copy = (char*)malloc(len + 1);
+    if (copy) memcpy(copy, s, len + 1);
+    return copy;
+}
 #include <time.h>
 #include <unistd.h>
 #include <ctype.h>
@@ -1068,7 +1075,7 @@ int log_parse_config_string(const char *config) {
 static int log_parse_zlog_config(const char *config) {
     if (!config) return LOG_OK;
 
-    char *config_copy = strdup(config);
+    char *config_copy = log_strdup(config);
     if (!config_copy) return LOG_INIT_FAIL;
 
     char *line = strtok(config_copy, "\n");
@@ -1195,7 +1202,7 @@ static int log_parse_zlog_config(const char *config) {
 static int log_parse_simple_config(const char *config) {
     if (!config) return LOG_OK;
 
-    char *config_copy = strdup(config);
+    char *config_copy = log_strdup(config);
     if (!config_copy) return LOG_INIT_FAIL;
 
     char *line = strtok(config_copy, "\n;");

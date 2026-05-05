@@ -39,12 +39,15 @@ extern "C" void log_mem_stage(const char* stage);  // defined in radiant/window.
 #include <cctype>
 #include <signal.h>
 #include <setjmp.h>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 
 extern __thread EvalContext* context;
 extern __thread Context* input_context;
 
 // Crash guard for JS JIT execution (catches SIGSEGV/SIGBUS in compiled code)
+#ifndef _WIN32
 static sigjmp_buf js_exec_jmpbuf;
 static volatile sig_atomic_t js_exec_guarded = 0;
 static struct sigaction js_exec_old_segv, js_exec_old_bus;
@@ -90,6 +93,7 @@ static void js_exec_crash_handler(int sig, siginfo_t* info, void* ctx) {
         raise(sig);
     }
 }
+#endif  // !_WIN32
 
 // Pool from the most recent JS execution.
 // Destroyed by script_runner_cleanup_heap() in per-file cleanup (after layout).
@@ -517,6 +521,7 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
     // execute the combined JS source via JIT transpiler
     // Install crash guard around JIT execution (catches SIGSEGV/SIGBUS in compiled code)
     // and per-script timeout via SIGALRM
+#ifndef _WIN32
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
     sa.sa_sigaction = js_exec_crash_handler;
@@ -532,11 +537,17 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
     js_exec_timed_out = 0;
     js_exec_guarded = 1;
     alarm(JS_EXEC_TIMEOUT_SECONDS);
+#endif
 
     Item result;
     JsPreambleState* preamble = nullptr;
+#ifndef _WIN32
     int jmp_val = sigsetjmp(js_exec_jmpbuf, 1);
     if (jmp_val == 0) {
+#else
+    {
+        int jmp_val = 0; (void)jmp_val;
+#endif
         // Use preamble mode to retain MIR context for event handler invocation.
         // This keeps compiled JS functions alive so onclick/onmouseover etc.
         // can call them after page load without re-compilation.
@@ -544,6 +555,7 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
         log_mem_stage("js: before transpile/exec");
         result = transpile_js_to_mir_preamble(&runtime, script_buf->str, "<document-scripts>", preamble);
         log_mem_stage("js: after transpile/exec");
+#ifndef _WIN32
         js_exec_guarded = 0;
         alarm(0);  // cancel pending alarm
         sigaction(SIGSEGV, &js_exec_old_segv, NULL);
@@ -558,6 +570,9 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
         result = ItemError;
         if (preamble) { mem_free(preamble); preamble = nullptr; }
     }
+#else
+    }
+#endif
 
     TypeId result_type = get_type_id(result);
     if (result_type == LMD_TYPE_ERROR) {

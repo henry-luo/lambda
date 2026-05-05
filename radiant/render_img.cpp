@@ -15,8 +15,24 @@ extern "C" {
 #include <png.h>
 #include <turbojpeg.h>
 #include <chrono>
+#ifndef _WIN32
 #include <sys/resource.h>
 #include <sys/time.h>
+#else
+#include <windows.h>
+#include <psapi.h>
+// Stub for getrusage on Windows
+#define RUSAGE_SELF 0
+struct rusage { long ru_maxrss; };
+static inline int getrusage(int who, struct rusage* r) {
+    (void)who;
+    PROCESS_MEMORY_COUNTERS pmc = {};
+    if (GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc))) {
+        r->ru_maxrss = (long)(pmc.PeakWorkingSetSize / 1024); // report in KB like Linux
+    } else { r->ru_maxrss = 0; }
+    return 0;
+}
+#endif
 
 // getrusage().ru_maxrss returns bytes on macOS/Darwin and kilobytes on Linux
 #if defined(__APPLE__)

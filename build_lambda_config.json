@@ -731,8 +731,75 @@
                 },
                 {
                     "name": "nghttp2",
-                    "description": "HTTP/2 library (curl will use its own dynamically linked copy)",
-                    "link": "none"
+                    "description": "HTTP/2 library",
+                    "lib": "/clang64/lib/libnghttp2.a",
+                    "link": "static"
+                },
+                {
+                    "name": "unistring",
+                    "description": "GNU libunistring — idn2/curl dependency",
+                    "lib": "/clang64/lib/libunistring.a",
+                    "link": "static"
+                },
+                {
+                    "name": "iconv",
+                    "description": "libiconv — idn2/curl dependency",
+                    "lib": "/clang64/lib/libiconv.a",
+                    "link": "static"
+                },
+                {
+                    "name": "ngtcp2_crypto_ossl",
+                    "description": "QUIC crypto (OpenSSL backend) — curl dependency",
+                    "lib": "/clang64/lib/libngtcp2_crypto_ossl.a",
+                    "link": "static"
+                },
+                {
+                    "name": "ngtcp2",
+                    "description": "QUIC transport — curl dependency",
+                    "lib": "/clang64/lib/libngtcp2.a",
+                    "link": "static"
+                },
+                {
+                    "name": "nghttp3",
+                    "description": "HTTP/3 — curl dependency",
+                    "lib": "/clang64/lib/libnghttp3.a",
+                    "link": "static"
+                },
+                {
+                    "name": "zstd",
+                    "description": "Zstandard compression — curl dependency",
+                    "lib": "/clang64/lib/libzstd.a",
+                    "link": "static"
+                },
+                {
+                    "name": "ssh2",
+                    "description": "libssh2 — curl SSH dependency",
+                    "lib": "/clang64/lib/libssh2.a",
+                    "link": "static"
+                },
+                {
+                    "name": "idn2",
+                    "description": "libidn2 — curl IDN dependency",
+                    "lib": "/clang64/lib/libidn2.a",
+                    "link": "static"
+                },
+                {
+                    "name": "psl",
+                    "description": "libpsl — curl PSL dependency",
+                    "lib": "/clang64/lib/libpsl.a",
+                    "link": "static"
+                },
+                {
+                    "name": "ssl",
+                    "description": "OpenSSL libssl — curl TLS dependency",
+                    "lib": "/clang64/lib/libssl.a",
+                    "link": "static"
+                },
+                {
+                    "name": "crypto",
+                    "description": "OpenSSL libcrypto — curl TLS dependency",
+                    "lib": "/clang64/lib/libcrypto.a",
+                    "link": "static"
                 },
                 {
                     "name": "mingw32",
@@ -941,6 +1008,21 @@
                 {
                     "name": "rpcrt4",
                     "lib": "-lrpcrt4",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "imm32",
+                    "lib": "-limm32",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "dbghelp",
+                    "lib": "-ldbghelp",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "userenv",
+                    "lib": "-luserenv",
                     "link": "dynamic"
                 }
             ],

@@ -1,0 +1,1 @@
+{ count: 1, line_cap: 2, line_join: 1, xml: "<path d="M 0 0 L 20 0" fill="none" fill-opacity="1" stroke="rgb(0,0,0)" stroke-opacity="1" stroke-width="3" stroke-linecap="square" stroke-linejoin="round" stroke-miterlimit="4.5" stroke-dasharray="6,2" stroke-dashoffset="1"></path>"}

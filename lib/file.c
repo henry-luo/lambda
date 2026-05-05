@@ -25,6 +25,8 @@
   #include <windows.h>
   #include <io.h>
   #include <direct.h>
+  #include <process.h>
+  #define getpid _getpid
   #define mkdir_compat(p, m) _mkdir(p)
   #define S_ISREG(m) (((m) & _S_IFMT) == _S_IFREG)
   #define S_ISDIR(m) (((m) & _S_IFMT) == _S_IFDIR)

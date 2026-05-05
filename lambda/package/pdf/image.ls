@@ -203,6 +203,7 @@ fn _inline_ncomp(cs) {
     let n = _name(cs)
     if ((n == "G") or (n == "DeviceGray")) { 1 }
     else if ((n == "RGB") or (n == "DeviceRGB")) { 3 }
+    else if ((n == "CMYK") or (n == "DeviceCMYK")) { 4 }
     else { 0 }
 }
 
@@ -211,17 +212,48 @@ fn _byte_at(s, i) {
     else { ord(s[i]) }
 }
 
+fn _div_int(a, b) {
+    int(float(a) / float(b))
+}
+
+fn _row_bytes(w, ncomp, bpc) {
+    _div_int((w * ncomp * bpc) + 7, 8)
+}
+
 fn _rgb_int(r, g, b) {
     "rgb(" ++ string(r) ++ "," ++ string(g) ++ "," ++ string(b) ++ ")"
 }
 
-fn _inline_pixel_fill(data, ncomp, pixel_index) {
-    let off = pixel_index * ncomp
-    if (ncomp == 1) {
+fn _cmyk_pixel_fill(data, off) {
+    let c = float(_byte_at(data, off)) / 255.0
+    let m = float(_byte_at(data, off + 1)) / 255.0
+    let y = float(_byte_at(data, off + 2)) / 255.0
+    let k = float(_byte_at(data, off + 3)) / 255.0
+    let r = int((1.0 - c) * (1.0 - k) * 255.0)
+    let g = int((1.0 - m) * (1.0 - k) * 255.0)
+    let b = int((1.0 - y) * (1.0 - k) * 255.0)
+    _rgb_int(r, g, b)
+}
+
+fn _inline_pixel_fill(data, ncomp, bpc, w, pixel_index) {
+    if (bpc == 1) {
+        let y = _div_int(pixel_index, w)
+        let x = pixel_index - (y * w)
+        let byte_idx = (y * _row_bytes(w, ncomp, bpc)) + _div_int(x, 8)
+        let bit_off = 7 - (x - (_div_int(x, 8) * 8))
+        let val = band(shr(_byte_at(data, byte_idx), bit_off), 1)
+        if (val == 1) { _rgb_int(255, 255, 255) } else { _rgb_int(0, 0, 0) }
+    }
+    else if (ncomp == 1) {
+        let off = pixel_index * ncomp
         let g = _byte_at(data, off)
         _rgb_int(g, g, g)
     }
+    else if (ncomp == 4) {
+        _cmyk_pixel_fill(data, pixel_index * ncomp)
+    }
     else {
+        let off = pixel_index * ncomp
         _rgb_int(_byte_at(data, off), _byte_at(data, off + 1), _byte_at(data, off + 2))
     }
 }
@@ -245,9 +277,9 @@ pn _emit_inline_pixels(info) {
     }
     var data = ""
     if ((info != null) and (info.data != null)) { data = info.data }
-    let expected = w * h * ncomp
+    let expected = if (bpc == 1) { _row_bytes(w, ncomp, bpc) * h } else { w * h * ncomp }
     let bad_size = ((w <= 0) or (h <= 0))
-    let bad_format = ((bpc != 8) or (ncomp == 0))
+    let bad_format = (((bpc != 8) and (bpc != 1)) or (ncomp == 0) or ((bpc == 1) and (ncomp != 1)))
     let short_data = (len(data) < expected)
     let too_large = ((w * h) > 4096)
     if (bad_size or bad_format or short_data or too_large) {
@@ -267,7 +299,7 @@ pn _emit_inline_pixels(info) {
                           y: util.fmt_num(float(y) * rh),
                           width: util.fmt_num(rw),
                           height: util.fmt_num(rh),
-                          fill: _inline_pixel_fill(data, ncomp, pix),
+                          fill: _inline_pixel_fill(data, ncomp, bpc, w, pix),
                           stroke: "none">
                 rects = rects ++ [elem]
                 x = x + 1
@@ -279,7 +311,7 @@ pn _emit_inline_pixels(info) {
 }
 
 // Public: handle a synthetic `inline_image` op produced by stream.ls for a
-// BI..ID..EI segment. Supported unfiltered 8-bit DeviceRGB/DeviceGray images
+// BI..ID..EI segment. Supported unfiltered 8-bit DeviceRGB/DeviceGray/DeviceCMYK images
 // are rendered as SVG pixel rects in the local image unit square; unsupported
 // inline images keep the visible placeholder.
 pub pn apply_inline(ctm, ops) {

@@ -17,6 +17,26 @@
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <time.h>
+#ifdef _WIN32
+// strptime/timegm are not available on Windows — provide minimal implementations
+static char* strptime(const char* buf, const char* fmt, struct tm* tm) {
+    (void)fmt;
+    int day = 0, year = 0, hour = 0, min = 0, sec = 0;
+    char mon[4] = {0}; char wday[4] = {0};
+    static const char* months[] = {"Jan","Feb","Mar","Apr","May","Jun",
+                                    "Jul","Aug","Sep","Oct","Nov","Dec"};
+    if (sscanf(buf, "%3s, %d %3s %d %d:%d:%d GMT", wday, &day, mon, &year, &hour, &min, &sec) == 7) {
+        tm->tm_mday = day; tm->tm_hour = hour; tm->tm_min = min; tm->tm_sec = sec;
+        tm->tm_year = year - 1900; tm->tm_mon = -1; tm->tm_isdst = 0;
+        for (int i = 0; i < 12; i++) {
+            if (_strnicmp(mon, months[i], 3) == 0) { tm->tm_mon = i; break; }
+        }
+        return (tm->tm_mon >= 0) ? (char*)(buf + strlen(buf)) : NULL;
+    }
+    return NULL;
+}
+static time_t timegm(struct tm* tm) { return _mkgmtime(tm); }
+#endif
 
 // ============================================================================
 // Configuration defaults
