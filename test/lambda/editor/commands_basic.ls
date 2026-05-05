@@ -4,6 +4,7 @@ import lambda.package.editor.mod_step
 import lambda.package.editor.mod_transaction
 import lambda.package.editor.mod_source_pos
 import lambda.package.editor.mod_commands
+import lambda.package.editor.mod_md_schema
 
 let d0 = node('doc', [
   node('paragraph', [text("Hello, world.")]),
@@ -38,6 +39,12 @@ let tx_all_insert = cmd_insert_text(s_all, "All new")
 let tx_all_insert_marked = cmd_insert_text({doc: d0, selection: all_selection(), stored_marks: ['strong']}, "Bold")
 "insert all mark:"; has_mark(node_at(tx_all_insert_marked.doc_after, [0, 0]).marks, 'strong')
 
+let html_insert_doc = node('doc', [node('p', [text("Hello")])])
+let html_insert_state = {doc: html_insert_doc, schema: html5_subset_schema, selection: all_selection()}
+let tx_html_insert_all = cmd_insert_text(html_insert_state, "HTML")
+"insert html all tag:"; node_at(tx_html_insert_all.doc_after, [0]).tag == 'p'
+"insert html all caret:"; path_equal(tx_html_insert_all.sel_after.anchor.path, [0, 0])
+
 let atom_doc = node('doc', [
   node('paragraph', [text("A")]),
   node('image', []),
@@ -69,6 +76,13 @@ let tx_span_insert = cmd_insert_text(mark_span_state, "X")
 "insert span tail mark:"; has_mark(node_at(tx_span_insert.doc_after, [0, 2]).marks, 'em')
 "insert span caret:"; path_equal(tx_span_insert.sel_after.anchor.path, [0, 1]) and tx_span_insert.sel_after.anchor.offset == 1
 
+let cross_block_sel = text_selection(pos([0, 0], 7), pos([1, 0], 3))
+let cross_block_state = {doc: d0, selection: cross_block_sel}
+let tx_cross_insert = cmd_insert_text(cross_block_state, "X")
+"insert cross-block count:"; len(tx_cross_insert.doc_after.content) == 1
+"insert cross-block doc:"; doc_text(tx_cross_insert.doc_after) == "Hello, Xond."
+"insert cross-block caret:"; path_equal(tx_cross_insert.sel_after.anchor.path, [0, 1]) and tx_cross_insert.sel_after.anchor.offset == 1
+
 // ---------------------------------------------------------------------------
 // cmd_delete_backward
 // ---------------------------------------------------------------------------
@@ -96,6 +110,10 @@ let tx_db2 = cmd_delete_backward(s_sel)
 let tx_db_span = cmd_delete_backward(mark_span_state)
 "del-back span doc:"; doc_text(tx_db_span.doc_after) == "Held"
 "del-back span caret:"; path_equal(tx_db_span.sel_after.anchor.path, [0, 0]) and tx_db_span.sel_after.anchor.offset == 2
+let tx_db_cross = cmd_delete_backward(cross_block_state)
+"del-back cross-block count:"; len(tx_db_cross.doc_after.content) == 1
+"del-back cross-block doc:"; doc_text(tx_db_cross.doc_after) == "Hello, ond."
+"del-back cross-block caret:"; path_equal(tx_db_cross.sel_after.anchor.path, [0, 0]) and tx_db_cross.sel_after.anchor.offset == 7
 let full_span_state = {doc: mark_span_doc, selection: text_selection(pos([0, 0], 0), pos([0, 2], 5))}
 let tx_db_full_span = cmd_delete_backward(full_span_state)
 "del-back full span doc:"; doc_text(tx_db_full_span.doc_after) == ""
@@ -140,6 +158,9 @@ let tx_df_node = cmd_delete_forward(atom_state)
 let tx_df_span = cmd_delete_forward(mark_span_state)
 "del-fwd span doc:"; doc_text(tx_df_span.doc_after) == "Held"
 "del-fwd span caret:"; path_equal(tx_df_span.sel_after.anchor.path, [0, 0]) and tx_df_span.sel_after.anchor.offset == 2
+let tx_df_cross = cmd_delete_forward(cross_block_state)
+"del-fwd cross-block doc:"; doc_text(tx_df_cross.doc_after) == "Hello, ond."
+"del-fwd cross-block caret:"; path_equal(tx_df_cross.sel_after.anchor.path, [0, 0]) and tx_df_cross.sel_after.anchor.offset == 7
 
 // ---------------------------------------------------------------------------
 // cmd_delete_word_backward / cmd_insert_line_break
@@ -159,11 +180,19 @@ let tx_dw_node = cmd_delete_word_backward(atom_state)
 let tx_dw_span = cmd_delete_word_backward(mark_span_state)
 "del-word span doc:"; doc_text(tx_dw_span.doc_after) == "Held"
 "del-word span caret:"; path_equal(tx_dw_span.sel_after.anchor.path, [0, 0]) and tx_dw_span.sel_after.anchor.offset == 2
+let tx_dw_cross = cmd_delete_word_backward(cross_block_state)
+"del-word cross-block doc:"; doc_text(tx_dw_cross.doc_after) == "Hello, ond."
+"del-word cross-block caret:"; path_equal(tx_dw_cross.sel_after.anchor.path, [0, 0]) and tx_dw_cross.sel_after.anchor.offset == 7
 
 let line_state = {doc: d0, selection: text_selection(pos([0, 0], 5), pos([0, 0], 5))}
 let tx_lb = cmd_insert_line_break(line_state)
 "line-break children:"; len(node_at(tx_lb.doc_after, [0]).content) == 3
 "line-break tag:"; node_at(tx_lb.doc_after, [0, 1]).tag == 'hard_break'
+
+let html_line_state = {doc: html_insert_doc, schema: html5_subset_schema, selection: text_selection(pos([0, 0], 2), pos([0, 0], 2))}
+let tx_html_lb = cmd_insert_line_break(html_line_state)
+"line-break html tag:"; node_at(tx_html_lb.doc_after, [0, 1]).tag == 'br'
+"line-break html caret:"; path_equal(tx_html_lb.sel_after.anchor.path, [0, 2])
 "line-break left:"; node_at(tx_lb.doc_after, [0, 0]).text == "Hello"
 "line-break right:"; node_at(tx_lb.doc_after, [0, 2]).text == ", world."
 "line-break caret path:"; path_equal(tx_lb.sel_after.anchor.path, [0, 2])
@@ -173,6 +202,11 @@ let tx_lb_span = cmd_insert_line_break(mark_span_state)
 "line-break span children:"; len(node_at(tx_lb_span.doc_after, [0]).content) == 3
 "line-break span tag:"; node_at(tx_lb_span.doc_after, [0, 1]).tag == 'hard_break'
 "line-break span caret:"; path_equal(tx_lb_span.sel_after.anchor.path, [0, 2]) and tx_lb_span.sel_after.anchor.offset == 0
+let tx_lb_cross = cmd_insert_line_break(cross_block_state)
+"line-break cross-block count:"; len(tx_lb_cross.doc_after.content) == 1
+"line-break cross-block tag:"; node_at(tx_lb_cross.doc_after, [0, 1]).tag == 'hard_break'
+"line-break cross-block doc:"; doc_text(tx_lb_cross.doc_after) == "Hello, ond."
+"line-break cross-block caret:"; path_equal(tx_lb_cross.sel_after.anchor.path, [0, 2]) and tx_lb_cross.sel_after.anchor.offset == 0
 
 let list_doc = node('doc', [node_attrs('list', [{name: 'ordered', value: false}], [
   node('list_item', [node('paragraph', [text("A")])]),
@@ -307,6 +341,12 @@ let tx_heading_split = cmd_split_block(heading_state)
 "split heading right attrs:"; len(node_at(tx_heading_split.doc_after, [1]).attrs) == 0
 "split heading left tag:"; node_at(tx_heading_split.doc_after, [0]).tag == 'heading'
 
+let html_heading_doc = node('doc', [node('h1', [text("Title")])])
+let html_heading_state = {doc: html_heading_doc, schema: html5_subset_schema, selection: text_selection(pos([0, 0], 5), pos([0, 0], 5))}
+let tx_html_heading_split = cmd_split_block(html_heading_state)
+"split html heading right tag:"; node_at(tx_html_heading_split.doc_after, [1]).tag == 'p'
+"split html heading left tag:"; node_at(tx_html_heading_split.doc_after, [0]).tag == 'h1'
+
 // ---------------------------------------------------------------------------
 // chain — first non-null wins
 // ---------------------------------------------------------------------------
@@ -338,6 +378,14 @@ let drop_state = {doc: drop_doc, selection: node_selection([0])}
 let tx_insert_at = cmd_insert_at(drop_state, [], 1, [node('paragraph', [text("X")])])
 "insert-at order:"; [for (n in tx_insert_at.doc_after.content) doc_text(n)] == ["A", "X", "B", "C"]
 "insert-at selected:"; path_equal(tx_insert_at.sel_after.path, [1])
+
+let tx_cross_paste_text = cmd_paste_text(cross_block_state, "Y")
+"paste cross-block text doc:"; doc_text(tx_cross_paste_text.doc_after) == "Hello, Yond."
+"paste cross-block text caret:"; path_equal(tx_cross_paste_text.sel_after.anchor.path, [0, 1]) and tx_cross_paste_text.sel_after.anchor.offset == 1
+let tx_cross_paste_blocks = cmd_paste_html(cross_block_state, "<p>A</p><p>B</p>", "A\nB")
+"paste cross-block block count:"; len(tx_cross_paste_blocks.doc_after.content) == 2
+"paste cross-block block doc:"; [for (n in tx_cross_paste_blocks.doc_after.content) doc_text(n)] == ["Hello, A", "Bond."]
+"paste cross-block block caret:"; path_equal(tx_cross_paste_blocks.sel_after.anchor.path, [1, 1]) and tx_cross_paste_blocks.sel_after.anchor.offset == 4
 
 let tx_move_later = cmd_move_node(drop_state, [0], [], 3)
 "move later order:"; [for (n in tx_move_later.doc_after.content) doc_text(n)] == ["B", "C", "A"]

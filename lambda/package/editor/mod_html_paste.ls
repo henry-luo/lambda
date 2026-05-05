@@ -43,49 +43,77 @@ fn attr_value_at(attrs, key, i, n) {
 fn attr_value(n, key) =>
   if (is_node(n)) { attr_value_at(n.attrs, key, 0, len(n.attrs)) } else { null }
 
-fn convert_children_at(kids, i, n, acc) {
+fn html_schema_mode(schema) => schema.p != null and schema.paragraph == null
+
+fn paragraph_tag(schema) => if (html_schema_mode(schema)) { 'p' } else { 'paragraph' }
+fn image_tag(schema) => if (html_schema_mode(schema)) { 'img' } else { 'image' }
+fn list_tag(schema, ordered) =>
+  if (html_schema_mode(schema)) { if (ordered) { 'ol' } else { 'ul' } } else { 'list' }
+fn list_item_tag(schema) => if (html_schema_mode(schema)) { 'li' } else { 'list_item' }
+
+fn heading_node(schema, level, kids) =>
+  if (html_schema_mode(schema) and level == 1) { node('h1', kids) }
+  else if (html_schema_mode(schema) and level == 2) { node('h2', kids) }
+  else if (html_schema_mode(schema) and level == 3) { node('h3', kids) }
+  else { node_attrs('heading', [{name: 'level', value: level}], kids) }
+
+fn image_node(schema, n) =>
+  node_attrs(image_tag(schema), [{name: 'src', value: attr_value(n, 'src')}, {name: 'alt', value: attr_value(n, 'alt')}], [])
+
+fn convert_children_at_schema(schema, kids, i, n, acc) {
   if (i >= n) { acc }
-  else { convert_children_at(kids, i + 1, n, frag_concat(acc, html_to_editor_fragment(kids[i]))) }
+  else { convert_children_at_schema(schema, kids, i + 1, n, frag_concat(acc, html_to_editor_fragment_for_schema(schema, kids[i]))) }
 }
-fn convert_children(n) {
+fn convert_children_schema(schema, n) {
   let kids = html_children(n)
-  convert_children_at(kids, 0, len(kids), [])
+  convert_children_at_schema(schema, kids, 0, len(kids), [])
 }
 
-fn convert_inline(n) => coerce_children(md_schema, convert_children(n), 'inline')
+fn convert_children_at(kids, i, n, acc) => convert_children_at_schema(md_schema, kids, i, n, acc)
+fn convert_children(n) => convert_children_schema(md_schema, n)
 
-fn list_item_blocks(n) {
-  let blocks = coerce_children(md_schema, convert_children(n), 'block')
-  if (len(blocks) == 0) { [node('paragraph', [])] }
-  else if (blocks[0].tag == 'paragraph') { blocks }
-  else { list_concat([node('paragraph', [])], blocks) }
+fn convert_inline_schema(schema, n) => coerce_children(schema, convert_children_schema(schema, n), 'inline')
+fn convert_inline(n) => convert_inline_schema(md_schema, n)
+
+fn list_item_blocks_schema(schema, n) {
+  let blocks = coerce_children(schema, convert_children_schema(schema, n), 'block')
+  let para = paragraph_tag(schema)
+  if (len(blocks) == 0) { [node(para, [])] }
+  else if (blocks[0].tag == para) { blocks }
+  else { list_concat([node(para, [])], blocks) }
 }
+fn list_item_blocks(n) => list_item_blocks_schema(md_schema, n)
 
-pub fn html_to_editor_fragment(n) {
+pub fn html_to_editor_fragment_for_schema(schema, n) {
   if (type(n) == string) { if (len(n) == 0) { [] } else { [text(n)] } }
   else if (is_text(n)) { [n] }
-  else if (is_list(n)) { convert_children_at(n, 0, len(n), []) }
+  else if (is_list(n)) { convert_children_at_schema(schema, n, 0, len(n), []) }
   else {
     let tag = html_tag(n)
     if (tag == null) { [] }
     else if (tag == 'html' or tag == 'body' or tag == 'main' or tag == 'article' or tag == 'section') {
-      convert_children(n)
+      convert_children_schema(schema, n)
     }
-    else if (tag == 'p' or tag == 'div') { [node('paragraph', convert_inline(n))] }
-    else if (tag == 'h1') { [node_attrs('heading', [{name: 'level', value: 1}], convert_inline(n))] }
-    else if (tag == 'h2') { [node_attrs('heading', [{name: 'level', value: 2}], convert_inline(n))] }
-    else if (tag == 'h3') { [node_attrs('heading', [{name: 'level', value: 3}], convert_inline(n))] }
-    else if (tag == 'strong' or tag == 'b') { add_mark(convert_inline(n), 'strong') }
-    else if (tag == 'em' or tag == 'i') { add_mark(convert_inline(n), 'em') }
-    else if (tag == 'code') { add_mark(convert_inline(n), 'code') }
-    else if (tag == 'br') { [node('hard_break', [])] }
-    else if (tag == 'img') { [node_attrs('image', [{name: 'src', value: attr_value(n, 'src')}, {name: 'alt', value: attr_value(n, 'alt')}], [])] }
-    else if (tag == 'ul') { [node_attrs('list', [{name: 'ordered', value: false}], convert_children(n))] }
-    else if (tag == 'ol') { [node_attrs('list', [{name: 'ordered', value: true}], convert_children(n))] }
-    else if (tag == 'li') { [node('list_item', list_item_blocks(n))] }
-    else { convert_children(n) }
+    else if (tag == 'p' or tag == 'div') { [node(paragraph_tag(schema), convert_inline_schema(schema, n))] }
+    else if (tag == 'h1') { [heading_node(schema, 1, convert_inline_schema(schema, n))] }
+    else if (tag == 'h2') { [heading_node(schema, 2, convert_inline_schema(schema, n))] }
+    else if (tag == 'h3') { [heading_node(schema, 3, convert_inline_schema(schema, n))] }
+    else if (tag == 'strong' or tag == 'b') { add_mark(convert_inline_schema(schema, n), 'strong') }
+    else if (tag == 'em' or tag == 'i') { add_mark(convert_inline_schema(schema, n), 'em') }
+    else if (tag == 'code') { add_mark(convert_inline_schema(schema, n), 'code') }
+    else if (tag == 'br') { [node(schema_hard_break(schema), [])] }
+    else if (tag == 'img') { [image_node(schema, n)] }
+    else if (tag == 'ul') { [node_attrs(list_tag(schema, false), [{name: 'ordered', value: false}], convert_children_schema(schema, n))] }
+    else if (tag == 'ol') { [node_attrs(list_tag(schema, true), [{name: 'ordered', value: true}], convert_children_schema(schema, n))] }
+    else if (tag == 'li') { [node(list_item_tag(schema), list_item_blocks_schema(schema, n))] }
+    else { convert_children_schema(schema, n) }
   }
 }
 
+pub fn html_to_editor_fragment(n) => html_to_editor_fragment_for_schema(md_schema, n)
+
 pub fn html_fragment_to_md_blocks(fragment) =>
   coerce_for_md_block(html_to_editor_fragment(fragment))
+
+pub fn html_fragment_to_blocks_for_schema(schema, fragment) =>
+  coerce_children(schema, html_to_editor_fragment_for_schema(schema, fragment), 'block')

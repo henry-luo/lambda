@@ -43,8 +43,13 @@ fn sel_single_leaf(sel) =>
 fn sel_same_parent_leaves(sel) =>
   sel.kind == 'text' and path_equal(parent_path(sel.anchor.path), parent_path(sel.head.path))
 
+fn state_schema(state) =>
+  if (state.schema == null) { md_schema } else { state.schema }
+
 fn state_default_block(state) =>
-  if (state.default_block == null) md_default_block else state.default_block
+  if (state.default_block != null) { state.default_block } else { schema_default_block(state_schema(state)) }
+
+fn state_hard_break(state) => schema_hard_break(state_schema(state))
 
 fn replacement_marks(state) =>
   if (state.stored_marks == null) [] else state.stored_marks
@@ -213,10 +218,96 @@ fn insert_line_break_same_parent_selection(state) {
   let span = same_parent_text_span_parts(state)
   if (span == null or len(span.parent_path) < 1) { null }
   else {
-    let slice_nodes0 = list_concat(list_concat(span.before_edge, [node('hard_break', [])]), span.after_edge)
+    let slice_nodes0 = list_concat(list_concat(span.before_edge, [node(state_hard_break(state), [])]), span.after_edge)
     let tx0 = tx_begin(state.doc, state.selection)
     let tx1 = tx_step(tx0, step_replace(span.parent_path, span.lo_index, span.hi_index + 1, slice_nodes0))
     tx_set_selection(tx1, caret(pos([*span.parent_path, span.lo_index + len(span.before_edge) + 1], 0)))
+  }
+}
+
+fn sel_top_block_range(sel) =>
+  sel.kind == 'text' and not sel_single_leaf(sel) and len(sel_lo(sel).path) == 2 and len(sel_hi(sel).path) == 2 and sel_lo(sel).path[0] < sel_hi(sel).path[0]
+
+fn cross_block_text_span_parts(state) {
+  let sel = state.selection
+  if (sel == null or not sel_top_block_range(sel)) { null }
+  else {
+    let lo = sel_lo(sel)
+    let hi = sel_hi(sel)
+    let lo_block_index = lo.path[0]
+    let hi_block_index = hi.path[0]
+    let lo_leaf_index = lo.path[1]
+    let hi_leaf_index = hi.path[1]
+    let lo_block = node_at(state.doc, [lo_block_index])
+    let hi_block = node_at(state.doc, [hi_block_index])
+    let lo_leaf = text_leaf_or_null(state.doc, lo.path)
+    let hi_leaf = text_leaf_or_null(state.doc, hi.path)
+    if (lo_block == null or hi_block == null or lo_leaf == null or hi_leaf == null or not is_node(lo_block) or not is_node(hi_block)) { null }
+    else {
+      let before_leaf = nonempty_text_leaf(slice(lo_leaf.text, 0, lo.offset), lo_leaf.marks)
+      let after_leaf = nonempty_text_leaf(slice(hi_leaf.text, hi.offset, len(hi_leaf.text)), hi_leaf.marks)
+      let prefix = list_concat(list_slice(lo_block.content, 0, lo_leaf_index), before_leaf)
+      let suffix = list_concat(after_leaf, list_slice(hi_block.content, hi_leaf_index + 1, len(hi_block.content)))
+      {lo: lo, hi: hi, lo_block_index: lo_block_index, hi_block_index: hi_block_index,
+       lo_block: lo_block, hi_block: hi_block, lo_leaf: lo_leaf, hi_leaf: hi_leaf,
+       prefix: prefix, suffix: suffix}
+    }
+  }
+}
+
+fn replacement_nodes_or_empty(nodes, marks) =>
+  if (len(nodes) == 0) { [text_marked("", marks)] } else { nodes }
+
+fn replace_cross_block_text_selection_with_inline(state, inline_nodes, caret_kind) {
+  let span = cross_block_text_span_parts(state)
+  if (span == null) { null }
+  else {
+    let merged0 = list_concat(list_concat(span.prefix, inline_nodes), span.suffix)
+    let merged = replacement_nodes_or_empty(merged0, insert_marks_for_leaf(state, span.lo_leaf))
+    let new_block = node_attrs(span.lo_block.tag, span.lo_block.attrs, merged)
+    let tx0 = tx_begin(state.doc, state.selection)
+    let tx1 = tx_step(tx0, step_replace([], span.lo_block_index, span.hi_block_index + 1, [new_block]))
+    let caret_index = if (caret_kind == 'after_break' and len(span.suffix) > 0) { len(span.prefix) + len(inline_nodes) }
+      else if (caret_kind == 'after_insert') { len(span.prefix) + len(inline_nodes) - 1 }
+      else if (len(span.prefix) > 0) { len(span.prefix) - 1 }
+      else { 0 }
+    let caret_offset = if (caret_kind == 'after_break') { 0 }
+      else if (caret_kind == 'after_insert' and len(inline_nodes) > 0) { last_text_offset_in(inline_nodes[len(inline_nodes) - 1]) }
+      else if (len(span.prefix) > 0) { last_text_offset_in(span.prefix[len(span.prefix) - 1]) }
+      else { 0 }
+    tx_set_selection(tx1, caret(pos([span.lo_block_index, caret_index], caret_offset)))
+  }
+}
+
+fn prepend_content_to_block(block, prefix) =>
+  if (len(prefix) == 0 or not is_node(block)) { block }
+  else { node_attrs(block.tag, block.attrs, list_concat(prefix, block.content)) }
+
+fn append_content_to_block(block, suffix) =>
+  if (len(suffix) == 0 or not is_node(block)) { block }
+  else { node_attrs(block.tag, block.attrs, list_concat(block.content, suffix)) }
+
+fn apply_cross_block_edges(blocks, prefix, suffix) {
+  if (len(blocks) == 0) { [] }
+  else if (len(blocks) == 1) { [append_content_to_block(prepend_content_to_block(blocks[0], prefix), suffix)] }
+  else {
+    let first = prepend_content_to_block(blocks[0], prefix)
+    let last = append_content_to_block(blocks[len(blocks) - 1], suffix)
+    [first, *list_slice(blocks, 1, len(blocks) - 1), last]
+  }
+}
+
+fn replace_cross_block_text_selection_with_blocks(state, blocks) {
+  let span = cross_block_text_span_parts(state)
+  if (span == null or len(blocks) == 0) { null }
+  else if (len(blocks) == 1 and blocks[0].tag == state_default_block(state)) {
+    replace_cross_block_text_selection_with_inline(state, blocks[0].content, if (len(blocks[0].content) == 0) { 'at_boundary' } else { 'after_insert' })
+  }
+  else {
+    let slice_nodes = apply_cross_block_edges(blocks, span.prefix, span.suffix)
+    let tx0 = tx_begin(state.doc, state.selection)
+    let tx1 = tx_step(tx0, step_replace([], span.lo_block_index, span.hi_block_index + 1, slice_nodes))
+    tx_set_selection(tx1, selection_after_inserted_blocks(span.lo_block_index, slice_nodes))
   }
 }
 
@@ -234,6 +325,10 @@ pub fn cmd_insert_text(state, txt) {
   else if (sel.kind == 'all') { replace_all_with_text(state, txt) }
   else if (sel.kind == 'node') { replace_node_with_text(state, txt) }
   else if (not sel_single_leaf(sel) and sel_same_parent_leaves(sel)) { replace_same_parent_text_selection(state, txt) }
+  else if (sel_top_block_range(sel)) {
+    let inserted = if (len(txt) == 0) { [] } else { [text_marked(txt, insert_marks_for_leaf(state, text_leaf_or_null(state.doc, sel_lo(sel).path)))] }
+    replace_cross_block_text_selection_with_inline(state, inserted, if (len(inserted) == 0) { 'at_boundary' } else { 'after_insert' })
+  }
   else if (not sel_single_leaf(sel)) { null }
   else {
     let lo = sel_lo(sel)
@@ -277,9 +372,10 @@ fn last_text_offset_in(node) {
 pub fn cmd_paste_fragment(state, fragment) {
   let sel = state.selection
   if (sel == null) { null }
-  else if (sel.kind == 'all') { replace_all_with_blocks(state, coerce_for_md_block(fragment)) }
-  else if (sel.kind == 'node') { replace_node_with_blocks(state, coerce_for_md_block(fragment)) }
-  else if (not sel_single_leaf(sel) and sel_same_parent_leaves(sel)) { cmd_paste_text(state, doc_text(node('fragment', coerce_for_md_block(fragment)))) }
+  else if (sel.kind == 'all') { replace_all_with_blocks(state, coerce_children(state_schema(state), fragment, 'block')) }
+  else if (sel.kind == 'node') { replace_node_with_blocks(state, coerce_children(state_schema(state), fragment, 'block')) }
+  else if (not sel_single_leaf(sel) and sel_same_parent_leaves(sel)) { cmd_paste_text(state, doc_text(node('fragment', coerce_children(state_schema(state), fragment, 'block')))) }
+  else if (sel_top_block_range(sel)) { replace_cross_block_text_selection_with_blocks(state, coerce_children(state_schema(state), fragment, 'block')) }
   else if (not sel_single_leaf(sel)) { null }
   else {
     let lo = sel_lo(sel)
@@ -291,9 +387,9 @@ pub fn cmd_paste_fragment(state, fragment) {
       let block = node_at(state.doc, block_path)
       if (block == null or not is_node(block)) { null }
       else {
-        let blocks = coerce_for_md_block(fragment)
+        let blocks = coerce_children(state_schema(state), fragment, 'block')
         if (len(blocks) == 0) { null }
-        else if (len(blocks) == 1 and blocks[0].tag == 'paragraph') {
+        else if (len(blocks) == 1 and blocks[0].tag == state_default_block(state)) {
           let before = nonempty_text_leaf(slice(leaf.text, 0, lo.offset), leaf.marks)
           let after = nonempty_text_leaf(slice(leaf.text, hi.offset, len(leaf.text)), leaf.marks)
           let new_block = node_attrs(block.tag, block.attrs, list_concat(list_concat(before, blocks[0].content), after))
@@ -312,9 +408,9 @@ pub fn cmd_paste_html(state, html, fallback_text) =>
   if (type(html) == string) {
     let parsed = parse_html_fragment(html)
     if (parsed == null) { cmd_paste_text(state, fallback_text) }
-    else { cmd_paste_fragment(state, html_to_editor_fragment(parsed)) }
+    else { cmd_paste_fragment(state, html_to_editor_fragment_for_schema(state_schema(state), parsed)) }
   }
-  else { cmd_paste_fragment(state, html_to_editor_fragment(html)) }
+  else { cmd_paste_fragment(state, html_to_editor_fragment_for_schema(state_schema(state), html)) }
 
 // ---------------------------------------------------------------------------
 // cmd_insert_at / cmd_move_node — structural drop commands
@@ -392,6 +488,7 @@ fn delete_selection(state) {
   else if (sel.kind == 'node') { delete_node_selection(state) }
   else if (sel_single_leaf(sel)) { delete_range(state, sel_lo(sel), sel_hi(sel)) }
   else if (sel_same_parent_leaves(sel)) { replace_same_parent_text_selection(state, "") }
+  else if (sel_top_block_range(sel)) { replace_cross_block_text_selection_with_inline(state, [], 'at_boundary') }
   else { null }
 }
 
@@ -517,6 +614,7 @@ pub fn cmd_insert_line_break(state) {
   let sel = state.selection
   if (sel == null) { null }
   else if (not sel_collapsed(sel) and sel_same_parent_leaves(sel)) { insert_line_break_same_parent_selection(state) }
+  else if (not sel_collapsed(sel) and sel_top_block_range(sel)) { replace_cross_block_text_selection_with_inline(state, [node(state_hard_break(state), [])], 'after_break') }
   else if (not sel_single_leaf(sel)) { null }
   else {
     let lo = sel_lo(sel)
@@ -529,7 +627,7 @@ pub fn cmd_insert_line_break(state) {
       let leaf_index = last_index(leaf_path)
       let before = nonempty_text_leaf(slice(leaf.text, 0, lo.offset), leaf.marks)
       let after = text_marked(slice(leaf.text, hi.offset, len(leaf.text)), leaf.marks)
-      let slice_nodes = [*before, node('hard_break', []), after]
+      let slice_nodes = [*before, node(state_hard_break(state), []), after]
       let tx0 = tx_begin(state.doc, sel)
       let tx1 = tx_step(tx0, step_replace(block_path, leaf_index, leaf_index + 1, slice_nodes))
       tx_set_selection(tx1, caret(pos([*block_path, leaf_index + len(before) + 1], 0)))

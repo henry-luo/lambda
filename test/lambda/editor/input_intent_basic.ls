@@ -6,6 +6,7 @@ import lambda.package.editor.mod_transaction
 import lambda.package.editor.mod_input_intent
 import lambda.package.editor.mod_decorations
 import lambda.package.editor.mod_history
+import lambda.package.editor.mod_md_schema
 
 let d0 = node('doc', [
   node('paragraph', [text("Hello")])
@@ -86,6 +87,23 @@ let tx_span_delete = dispatch_intent(mark_span_state, {input_type: "deleteConten
 let tx_span_paste = dispatch_intent(mark_span_state, {input_type: "insertFromPaste", data: "Y"})
 "span paste doc:"; doc_text(tx_span_paste.doc_after) == "HeYld"
 "span paste caret:"; path_equal(tx_span_paste.sel_after.anchor.path, [0, 1]) and tx_span_paste.sel_after.anchor.offset == 1
+
+let cross_block_doc = node('doc', [node('paragraph', [text("Alpha")]), node('paragraph', [text("Omega")])])
+let cross_block_state = {doc: cross_block_doc, selection: text_selection(pos([0, 0], 2), pos([1, 0], 2))}
+let tx_cross_type = dispatch_intent(cross_block_state, {input_type: "insertText", data: "X"})
+"cross-block type doc:"; doc_text(tx_cross_type.doc_after) == "AlXega"
+"cross-block type caret:"; path_equal(tx_cross_type.sel_after.anchor.path, [0, 1]) and tx_cross_type.sel_after.anchor.offset == 1
+let tx_cross_delete = dispatch_intent(cross_block_state, {input_type: "deleteContentBackward", data: null})
+"cross-block delete doc:"; doc_text(tx_cross_delete.doc_after) == "Alega"
+"cross-block delete caret:"; path_equal(tx_cross_delete.sel_after.anchor.path, [0, 0]) and tx_cross_delete.sel_after.anchor.offset == 2
+let tx_cross_line = dispatch_intent(cross_block_state, {input_type: "insertLineBreak", data: null})
+"cross-block line tag:"; node_at(tx_cross_line.doc_after, [0, 1]).tag == 'hard_break'
+"cross-block line caret:"; path_equal(tx_cross_line.sel_after.anchor.path, [0, 2])
+let tx_cross_paste = dispatch_intent(cross_block_state, {
+  input_type: "insertFromPaste", mime: "text/html", html: "<p>One</p><p>Two</p>", data: "One\nTwo"})
+"cross-block paste count:"; len(tx_cross_paste.doc_after.content) == 2
+"cross-block paste doc:"; [for (n in tx_cross_paste.doc_after.content) doc_text(n)] == ["AlOne", "Twoega"]
+"cross-block paste caret:"; path_equal(tx_cross_paste.sel_after.anchor.path, [1, 1]) and tx_cross_paste.sel_after.anchor.offset == 3
 
 let tx_back = dispatch_intent(s0, {input_type: "deleteContentBackward", data: null})
 "delete-back intent doc:"; doc_text(tx_back.doc_after) == "Hell"
@@ -183,6 +201,16 @@ let tx_paste_all_html = dispatch_intent(s_all, {
 let tx_bold_all = dispatch_intent(s_all, {input_type: "formatBold", data: null})
 "bold-all mark:"; has_mark(node_at(tx_bold_all.doc_after, [0, 0]).marks, 'strong')
 "bold-all selection:"; tx_bold_all.sel_after.kind == 'all'
+
+let html_state = {doc: node('doc', [node('p', [text("Hello")])]), schema: html5_subset_schema,
+  selection: text_selection(pos([0, 0], 5), pos([0, 0], 5))}
+let tx_html_line = dispatch_intent(html_state, {input_type: "insertLineBreak", data: null})
+"html line-break intent tag:"; node_at(tx_html_line.doc_after, [0, 1]).tag == 'br'
+let tx_html_paste_schema = dispatch_intent(html_state, {
+  input_type: "insertFromPaste", mime: "text/html", html: "<p> world</p>", data: " world"})
+"html paste intent tag:"; node_at(tx_html_paste_schema.doc_after, [0]).tag == 'p'
+"html paste intent text:"; doc_text(tx_html_paste_schema.doc_after) == "Hello world"
+
 
 let tx_comp_start = dispatch_intent(s0, {input_type: "compositionStart", data: null})
 let s_comp0 = state_after_intent(s0, tx_comp_start)

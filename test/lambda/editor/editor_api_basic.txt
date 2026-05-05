@@ -38,6 +38,18 @@ true
 true
 "exec stored insert mark:"
 true
+"exec paste text:"
+true
+"exec delete backward:"
+true
+"exec cross insert doc:"
+true
+"exec cross delete doc:"
+true
+"exec cross paste count:"
+true
+"exec cross paste doc:"
+true
 "exec split default:"
 true
 "exec set type:"
@@ -53,4 +65,10 @@ true
 "exec set type all selection:"
 true
 "open html schema:"
+true
+"exec html line-break:"
+true
+"exec html paste tag:"
+true
+"exec html paste text:"
 true

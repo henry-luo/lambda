@@ -21,6 +21,17 @@ import .mod_md_schema
 
 fn entry_for(schema, tag) => schema[tag]
 
+pub fn schema_default_block(schema) =>
+  if (schema.default_block != null) { schema.default_block }
+  else if (schema.paragraph != null) { 'paragraph' }
+  else if (schema.p != null) { 'p' }
+  else { md_default_block }
+
+pub fn schema_hard_break(schema) =>
+  if (schema.hard_break != null) { 'hard_break' }
+  else if (schema.br != null) { 'br' }
+  else { 'hard_break' }
+
 fn role_of_node(schema, n) {
   if (is_text(n)) { 'inline' }
   else if (is_node(n)) {
@@ -122,14 +133,14 @@ fn coerce_one_at(schema, parent_entry, n) {
 
 fn coerce_one(schema, n) => coerce_one_at(schema, null, n)
 
-fn default_block_entry(schema) => entry_for(schema, md_default_block)
+fn default_block_entry(schema) => entry_for(schema, schema_default_block(schema))
 
 fn filtered_pending(schema, pending) =>
   coerce_list_at(schema, pending, 'inline', default_block_entry(schema), 0, len(pending), [], [])
 
 fn coerce_list_at(schema, kids, parent_role, parent_entry, i, n, acc, pending) {
   if (i >= n) {
-    if (len(pending) > 0) { [*acc, node(md_default_block, filtered_pending(schema, pending))] } else { acc }
+    if (len(pending) > 0) { [*acc, node(schema_default_block(schema), filtered_pending(schema, pending))] } else { acc }
   } else {
     let raw = kids[i]
     let c = coerce_one_at(schema, parent_entry, raw)
@@ -138,7 +149,7 @@ fn coerce_list_at(schema, kids, parent_role, parent_entry, i, n, acc, pending) {
       let r = role_of_node(schema, c)
       if (parent_role == 'block') {
         if (r == 'block') {
-          let acc2 = if (len(pending) > 0) { [*acc, node(md_default_block, filtered_pending(schema, pending))] } else { acc }
+          let acc2 = if (len(pending) > 0) { [*acc, node(schema_default_block(schema), filtered_pending(schema, pending))] } else { acc }
           coerce_list_at(schema, kids, parent_role, parent_entry, i + 1, n, [*acc2, c], [])
         } else {
           coerce_list_at(schema, kids, parent_role, parent_entry, i + 1, n, acc, [*pending, c])
