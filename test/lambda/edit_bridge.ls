@@ -40,3 +40,17 @@ on click() {
   label = "clicked"
 }
 apply(null, {mode: "edit"})
+0
+
+// Test 8: edit mode falls back to named view template when no edit template matches
+view fallback_named: float {
+  "view-float:" ++ string(~)
+}
+apply(2.5, {mode: "edit", template: "fallback_named"})
+0
+
+// Test 9: named view lookup does not accidentally select an edit template
+edit named_only: bool {
+  "edit-bool"
+}
+apply(true, {template: "named_only"})
