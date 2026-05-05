@@ -54,6 +54,24 @@ true
 true
 "span paste caret:"
 true
+"cross-block type doc:"
+true
+"cross-block type caret:"
+true
+"cross-block delete doc:"
+true
+"cross-block delete caret:"
+true
+"cross-block line tag:"
+true
+"cross-block line caret:"
+true
+"cross-block paste count:"
+true
+"cross-block paste doc:"
+true
+"cross-block paste caret:"
+true
 "delete-back intent doc:"
 true
 "delete-back intent caret:"

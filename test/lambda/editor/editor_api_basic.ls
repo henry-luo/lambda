@@ -46,6 +46,16 @@ let paste_editor = edit_exec(editor0, edit_cmd_paste_text(" world"))
 let delete_editor = edit_exec(paste_editor, edit_cmd_delete_backward())
 "exec delete backward:"; doc_text(delete_editor.doc) == "Hello worl"
 
+let cross_editor = edit_open(node('doc', [node('paragraph', [text("Alpha")]), node('paragraph', [text("Omega")])]),
+	editor_schemas.markdown, text_selection(pos([0, 0], 2), pos([1, 0], 2)))
+let cross_insert_editor = edit_exec(cross_editor, edit_cmd_insert_text("X"))
+"exec cross insert doc:"; doc_text(cross_insert_editor.doc) == "AlXega"
+let cross_delete_editor = edit_exec(cross_editor, edit_cmd_delete_backward())
+"exec cross delete doc:"; doc_text(cross_delete_editor.doc) == "Alega"
+let cross_paste_editor = edit_exec(cross_editor, edit_cmd_paste_html("<p>One</p><p>Two</p>", "One\nTwo"))
+"exec cross paste count:"; len(cross_paste_editor.doc.content) == 2
+"exec cross paste doc:"; [for (n in cross_paste_editor.doc.content) doc_text(n)] == ["AlOne", "Twoega"]
+
 let heading_doc = node('doc', [node_attrs('heading', [{name: 'level', value: 2}], [text("Title")])])
 let heading_editor = edit_open(heading_doc, editor_schemas.markdown, text_selection(pos([0, 0], 5), pos([0, 0], 5)))
 let split_editor = edit_exec(heading_editor, edit_cmd_split_block())

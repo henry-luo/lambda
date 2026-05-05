@@ -88,6 +88,23 @@ let tx_span_paste = dispatch_intent(mark_span_state, {input_type: "insertFromPas
 "span paste doc:"; doc_text(tx_span_paste.doc_after) == "HeYld"
 "span paste caret:"; path_equal(tx_span_paste.sel_after.anchor.path, [0, 1]) and tx_span_paste.sel_after.anchor.offset == 1
 
+let cross_block_doc = node('doc', [node('paragraph', [text("Alpha")]), node('paragraph', [text("Omega")])])
+let cross_block_state = {doc: cross_block_doc, selection: text_selection(pos([0, 0], 2), pos([1, 0], 2))}
+let tx_cross_type = dispatch_intent(cross_block_state, {input_type: "insertText", data: "X"})
+"cross-block type doc:"; doc_text(tx_cross_type.doc_after) == "AlXega"
+"cross-block type caret:"; path_equal(tx_cross_type.sel_after.anchor.path, [0, 1]) and tx_cross_type.sel_after.anchor.offset == 1
+let tx_cross_delete = dispatch_intent(cross_block_state, {input_type: "deleteContentBackward", data: null})
+"cross-block delete doc:"; doc_text(tx_cross_delete.doc_after) == "Alega"
+"cross-block delete caret:"; path_equal(tx_cross_delete.sel_after.anchor.path, [0, 0]) and tx_cross_delete.sel_after.anchor.offset == 2
+let tx_cross_line = dispatch_intent(cross_block_state, {input_type: "insertLineBreak", data: null})
+"cross-block line tag:"; node_at(tx_cross_line.doc_after, [0, 1]).tag == 'hard_break'
+"cross-block line caret:"; path_equal(tx_cross_line.sel_after.anchor.path, [0, 2])
+let tx_cross_paste = dispatch_intent(cross_block_state, {
+  input_type: "insertFromPaste", mime: "text/html", html: "<p>One</p><p>Two</p>", data: "One\nTwo"})
+"cross-block paste count:"; len(tx_cross_paste.doc_after.content) == 2
+"cross-block paste doc:"; [for (n in tx_cross_paste.doc_after.content) doc_text(n)] == ["AlOne", "Twoega"]
+"cross-block paste caret:"; path_equal(tx_cross_paste.sel_after.anchor.path, [1, 1]) and tx_cross_paste.sel_after.anchor.offset == 3
+
 let tx_back = dispatch_intent(s0, {input_type: "deleteContentBackward", data: null})
 "delete-back intent doc:"; doc_text(tx_back.doc_after) == "Hell"
 "delete-back intent caret:"; tx_back.sel_after.anchor.offset == 4

@@ -46,6 +46,12 @@ true
 true
 "insert span caret:"
 true
+"insert cross-block count:"
+true
+"insert cross-block doc:"
+true
+"insert cross-block caret:"
+true
 "del-back doc:"
 true
 "del-back caret:"
@@ -67,6 +73,12 @@ true
 "del-back span doc:"
 true
 "del-back span caret:"
+true
+"del-back cross-block count:"
+true
+"del-back cross-block doc:"
+true
+"del-back cross-block caret:"
 true
 "del-back full span doc:"
 true
@@ -114,6 +126,10 @@ true
 true
 "del-fwd span caret:"
 true
+"del-fwd cross-block doc:"
+true
+"del-fwd cross-block caret:"
+true
 "del-word doc:"
 true
 "del-word caret:"
@@ -131,6 +147,10 @@ true
 "del-word span doc:"
 true
 "del-word span caret:"
+true
+"del-word cross-block doc:"
+true
+"del-word cross-block caret:"
 true
 "line-break children:"
 true
@@ -155,6 +175,14 @@ true
 "line-break span tag:"
 true
 "line-break span caret:"
+true
+"line-break cross-block count:"
+true
+"line-break cross-block tag:"
+true
+"line-break cross-block doc:"
+true
+"line-break cross-block caret:"
 true
 "indent top count:"
 true
@@ -303,6 +331,16 @@ true
 "insert-at order:"
 true
 "insert-at selected:"
+true
+"paste cross-block text doc:"
+true
+"paste cross-block text caret:"
+true
+"paste cross-block block count:"
+true
+"paste cross-block block doc:"
+true
+"paste cross-block block caret:"
 true
 "move later order:"
 true
