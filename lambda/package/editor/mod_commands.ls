@@ -1043,9 +1043,9 @@ fn toggle_mark_top_block_range(state, mark) {
   if (sel == null or not sel_top_block_range(sel) or sel_collapsed(sel)) { null }
   else {
     let lo = sel_lo(sel)
-    let hi = sel_hi(sel)
-    let adding = block_range_any_unmarked_leaf(state.doc, mark, lo.path[0], hi.path[0])
-    let steps = collect_block_range_mark_steps(state.doc, mark, adding, lo.path[0], hi.path[0], [])
+    let end_block = selected_top_block_end(sel)
+    let adding = block_range_any_unmarked_leaf(state.doc, mark, lo.path[0], end_block)
+    let steps = collect_block_range_mark_steps(state.doc, mark, adding, lo.path[0], end_block, [])
     if (len(steps) == 0) { null }
     else { tx_apply_steps(tx_begin(state.doc, sel), steps, 0, len(steps)) }
   }

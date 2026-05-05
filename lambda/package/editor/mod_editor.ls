@@ -32,6 +32,12 @@ pub fn edit_mount(editor, window, preset) =>
    stored_marks: editor.stored_marks, events: [*editor.events, {kind: 'mount', window: window, preset: preset}],
    mounted: true, preset: preset}
 
+pub fn edit_set_selection(editor, selection) =>
+  {kind: 'editor', doc: editor.doc, schema: editor.schema, selection: selection,
+   history: editor.history, decorations: editor.decorations, composition: editor.composition,
+   stored_marks: null, events: [*editor.events, {kind: 'selection', selection: selection}],
+   mounted: editor.mounted, preset: editor.preset}
+
 pub fn edit_cmd_insert_text(text) => {name: 'insert_text', text: text}
 pub fn edit_cmd_paste_text(text) => {name: 'paste_text', text: text}
 pub fn edit_cmd_paste_html(html, fallback_text) => {name: 'paste_html', html: html, fallback_text: fallback_text}
@@ -99,3 +105,5 @@ fn editor_after_tx(editor, tx) {
 }
 
 pub fn edit_exec(editor, command) => editor_after_tx(editor, command_tx(editor, command))
+
+pub fn edit_apply(editor, tx) => editor_after_tx(editor, tx)

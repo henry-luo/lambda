@@ -166,12 +166,22 @@ let html_table_blocks = html_fragment_to_blocks_for_schema(html5_subset_schema, 
 "html schema table row:"; html_table_blocks[0].content[0].content[0].tag == 'tr'
 "html schema table cell:"; html_table_blocks[0].content[0].content[0].content[1].tag == 'td'
 "html schema table text:"; doc_text(html_table_blocks[0]) == "AB"
+let md_table_blocks = html_fragment_to_md_blocks(table_frag)
+"md schema table tag:"; md_table_blocks[0].tag == 'table'
+"md schema table row:"; md_table_blocks[0].content[0].tag == 'tr'
+"md schema table cell:"; md_table_blocks[0].content[0].content[1].tag == 'td'
+"md schema table text:"; doc_text(md_table_blocks[0]) == "AB"
 
 let html_table_state = {doc: node('doc', [node('p', [text("replace")])]), schema: html5_subset_schema, selection: all_selection()}
 let tx_html_table = cmd_paste_html(html_table_state, "<table><tr><td>A</td><td>B</td></tr></table>", "AB")
 "cmd html table paste tag:"; node_at(tx_html_table.doc_after, [0]).tag == 'table'
 "cmd html table paste body:"; node_at(tx_html_table.doc_after, [0, 0]).tag == 'tbody'
 "cmd html table paste text:"; doc_text(tx_html_table.doc_after) == "AB"
+let tx_md_table_paste = cmd_paste_html({doc: node('doc', [node('paragraph', [text("replace")])]), selection: all_selection()},
+  "<table><tr><td>A</td><td>B</td></tr></table>", "AB")
+"cmd md table paste tag:"; node_at(tx_md_table_paste.doc_after, [0]).tag == 'table'
+"cmd md table paste row:"; node_at(tx_md_table_paste.doc_after, [0, 0]).tag == 'tr'
+"cmd md table paste text:"; doc_text(tx_md_table_paste.doc_after) == "AB"
 
 let tx_md_quote = cmd_paste_html({doc: node('doc', [node('paragraph', [text("replace")])]), selection: all_selection()},
   "<blockquote><p>Quoted</p></blockquote><hr><pre><code>code</code></pre>", "Quotedcode")

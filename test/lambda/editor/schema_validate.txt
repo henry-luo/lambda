@@ -24,6 +24,10 @@ true
 false
 "nested list valid:"
 true
+"markdown table valid:"
+true
+"markdown table rejects loose cell:"
+true
 "string root violations:"
 1
 "string root msg ok:"

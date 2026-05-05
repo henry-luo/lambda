@@ -49,6 +49,11 @@ let nested = <doc <list
   <list_item; <paragraph; "outer"> <list <list_item; <paragraph; "inner">>>>
 >>
 "nested list valid:"; is_valid(sch, nested)
+let md_table = <doc <table; <tr; <th; "Name"> <th; "Value">> <tr; <td; "Lang"> <td; "Lambda">>>>
+"markdown table valid:"; is_valid(sch, md_table)
+let md_bad_table = <doc <table; <td; "loose">>>
+let vmdt = schema_validate(sch, md_bad_table)
+"markdown table rejects loose cell:"; vmdt[0].tag == 'table' and vmdt[0].message == "content does not match schema"
 
 // 8. Validation on a non-element root
 let v4 = schema_validate(sch, "just a string")

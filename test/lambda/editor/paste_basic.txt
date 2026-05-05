@@ -120,11 +120,25 @@ true
 true
 "html schema table text:"
 true
+"md schema table tag:"
+true
+"md schema table row:"
+true
+"md schema table cell:"
+true
+"md schema table text:"
+true
 "cmd html table paste tag:"
 true
 "cmd html table paste body:"
 true
 "cmd html table paste text:"
+true
+"cmd md table paste tag:"
+true
+"cmd md table paste row:"
+true
+"cmd md table paste text:"
 true
 "cmd md block paste quote:"
 true
