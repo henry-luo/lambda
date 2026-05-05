@@ -30,7 +30,6 @@
         "lambda/npm",
         "lambda/network",
         "radiant",
-        "radiant/pdf",
         "radiant/webdriver"
     ],
     "source_files": [
@@ -611,7 +610,6 @@
                 "lambda/network",
                 "lambda/npm",
                 "radiant",
-                "radiant/pdf",
                 "radiant/webdriver"
             ],
             "includes": [

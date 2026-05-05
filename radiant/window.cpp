@@ -917,16 +917,13 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
             }
         }
 
-        // Layout document (for HTML-based documents)
-        // PDF documents have pre-built view trees and skip this
+        // Layout document when it has an HTML/CSS DOM; pre-built view trees skip this
         if (doc->root) {
             log_mem_stage("before-layout");
             layout_html_doc(&ui_context, doc, false);
             log_mem_stage("after-layout");
         }
         log_notice("view: layout complete, rendering...");
-        // PDF scaling now happens inside pdf_page_to_view_tree
-
         // Render document
         if (doc && doc->view_tree) {
             log_mem_stage("before-render");

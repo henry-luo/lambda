@@ -343,8 +343,7 @@ TEST_F(InputPdfTest, ToUnicodeWalkRunsWithoutCrash) {
     Input* input = parse_pdf_file(PDF_FIXTURE_ADVANCED);
     ASSERT_NE(input, nullptr);
     // Reaching this point with no crash and a populated `pages` array is
-    // sufficient — the deeper coverage of CMap parsing lives in the unit
-    // tests for radiant/pdf/fonts.cpp.
+    // sufficient; package-level PDF tests cover text decoding behavior.
     MapReader root = MapReader::fromItem(input->root);
     EXPECT_TRUE(root.has("pages"));
 }
