@@ -1,0 +1,1 @@
+{ count: 1, icc_map_cmyk: true, not_rgb_fallback: true}

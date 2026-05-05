@@ -117,23 +117,26 @@ fn _resolve_space(pdf, page, cs) {
 
 fn _space_type(cs) {
     if (cs is array and len(cs) >= 1) { util.name_of(cs[0]) }
+    else if (cs is map and cs.N != null) { "ICCBased" }
     else { util.name_of(cs) }
 }
 
-fn _base_component_count(base) {
-    let b = _space_type(base)
+fn _base_component_count(pdf, page, base) {
+    let b0 = _resolve_space(pdf, page, base)
+    let b = _space_type(b0)
     if (b == "DeviceGray" or b == "G" or b == "CalGray") { 1 }
     else if (b == "DeviceCMYK" or b == "CMYK") { 4 }
+    else if (b == "ICCBased") { _icc_component_count(b0) }
     else { 3 }
 }
 
-fn _indexed_color(cs, idx_raw) {
+fn _indexed_color(pdf, page, cs, idx_raw) {
     if (not (cs is array) or len(cs) < 4) { BLACK }
     else {
-        let base = cs[1]
+        let base = _resolve_space(pdf, page, cs[1])
         let hival = if (cs[2] is int) cs[2] else if (cs[2] is float) int(cs[2]) else 0
         let lookup = cs[3]
-        let ncomp = _base_component_count(base)
+        let ncomp = _base_component_count(pdf, page, base)
         let idx0 = if (idx_raw is int) idx_raw else if (idx_raw is float) int(idx_raw) else 0
         let idx = if (idx0 < 0) 0 else if (idx0 > hival) hival else idx0
         let off = idx * ncomp
@@ -156,7 +159,10 @@ fn _indexed_color(cs, idx_raw) {
 }
 
 fn _icc_component_count(cs) {
-    if (cs is array and len(cs) >= 2 and cs[1] is map and cs[1].N != null) {
+    if (cs is map and cs.N != null) {
+        if (cs.N is int) cs.N else if (cs.N is float) int(cs.N) else 3
+    }
+    else if (cs is array and len(cs) >= 2 and cs[1] is map and cs[1].N != null) {
         if (cs[1].N is int) cs[1].N else if (cs[1].N is float) int(cs[1].N) else 3
     }
     else { 3 }
@@ -218,7 +224,7 @@ pub fn from_ops_in_space(pdf, page, active_space, ops) {
     let t = _space_type(cs)
     if (t == "Indexed" or t == "I") {
         let v = if (len(nums) >= 1) nums[0] else 0
-        _indexed_color(cs, v)
+        _indexed_color(pdf, page, cs, v)
     }
     else if (t == "CalGray") {
         _cal_gray_color(cs, nums)

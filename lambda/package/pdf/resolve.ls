@@ -67,6 +67,12 @@ pub fn deref(pdf, it) {
 // Page content streams
 // ============================================================
 
+fn _stream_bytes(s) {
+    if (s and s.data) { s.data }
+    else if (s and s.stream_data != null) { s.stream_data }
+    else { "" }
+}
+
 // Concatenated content-stream bytes for a page. PDF's /Contents may be:
 //   - a single indirect_ref to a stream
 //   - an array of indirect_refs to streams (concatenated with newlines)
@@ -79,13 +85,12 @@ pub fn page_content_bytes(pdf, page) {
         if cref is array {
             // array of refs → concat each stream's data with "\n"
             let parts = (for (r in cref)
-                (let s = deref(pdf, r),
-                 (if (s and s.data) s.data else "")));
+                (let s = deref(pdf, r), _stream_bytes(s)));
             parts | join("\n")
         }
         else {
             let s = deref(pdf, cref);
-            if (s and s.data) { s.data } else { "" }
+            _stream_bytes(s)
         }
     }
 }
