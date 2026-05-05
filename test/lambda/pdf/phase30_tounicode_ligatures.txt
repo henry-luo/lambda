@@ -1,0 +1,1 @@
+{ cid_pair: true, greedy: true, render_count: 2, render_pair: true, render_greedy: true}
