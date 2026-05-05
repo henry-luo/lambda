@@ -4,6 +4,7 @@ import lambda.package.editor.mod_step
 import lambda.package.editor.mod_transaction
 import lambda.package.editor.mod_source_pos
 import lambda.package.editor.mod_commands
+import lambda.package.editor.mod_md_schema
 
 let d0 = node('doc', [
   node('paragraph', [text("Hello, world.")]),
@@ -37,6 +38,12 @@ let tx_all_insert = cmd_insert_text(s_all, "All new")
 
 let tx_all_insert_marked = cmd_insert_text({doc: d0, selection: all_selection(), stored_marks: ['strong']}, "Bold")
 "insert all mark:"; has_mark(node_at(tx_all_insert_marked.doc_after, [0, 0]).marks, 'strong')
+
+let html_insert_doc = node('doc', [node('p', [text("Hello")])])
+let html_insert_state = {doc: html_insert_doc, schema: html5_subset_schema, selection: all_selection()}
+let tx_html_insert_all = cmd_insert_text(html_insert_state, "HTML")
+"insert html all tag:"; node_at(tx_html_insert_all.doc_after, [0]).tag == 'p'
+"insert html all caret:"; path_equal(tx_html_insert_all.sel_after.anchor.path, [0, 0])
 
 let atom_doc = node('doc', [
   node('paragraph', [text("A")]),
@@ -164,6 +171,11 @@ let line_state = {doc: d0, selection: text_selection(pos([0, 0], 5), pos([0, 0],
 let tx_lb = cmd_insert_line_break(line_state)
 "line-break children:"; len(node_at(tx_lb.doc_after, [0]).content) == 3
 "line-break tag:"; node_at(tx_lb.doc_after, [0, 1]).tag == 'hard_break'
+
+let html_line_state = {doc: html_insert_doc, schema: html5_subset_schema, selection: text_selection(pos([0, 0], 2), pos([0, 0], 2))}
+let tx_html_lb = cmd_insert_line_break(html_line_state)
+"line-break html tag:"; node_at(tx_html_lb.doc_after, [0, 1]).tag == 'br'
+"line-break html caret:"; path_equal(tx_html_lb.sel_after.anchor.path, [0, 2])
 "line-break left:"; node_at(tx_lb.doc_after, [0, 0]).text == "Hello"
 "line-break right:"; node_at(tx_lb.doc_after, [0, 2]).text == ", world."
 "line-break caret path:"; path_equal(tx_lb.sel_after.anchor.path, [0, 2])
@@ -306,6 +318,12 @@ let tx_heading_split = cmd_split_block(heading_state)
 "split heading right tag:"; node_at(tx_heading_split.doc_after, [1]).tag == 'paragraph'
 "split heading right attrs:"; len(node_at(tx_heading_split.doc_after, [1]).attrs) == 0
 "split heading left tag:"; node_at(tx_heading_split.doc_after, [0]).tag == 'heading'
+
+let html_heading_doc = node('doc', [node('h1', [text("Title")])])
+let html_heading_state = {doc: html_heading_doc, schema: html5_subset_schema, selection: text_selection(pos([0, 0], 5), pos([0, 0], 5))}
+let tx_html_heading_split = cmd_split_block(html_heading_state)
+"split html heading right tag:"; node_at(tx_html_heading_split.doc_after, [1]).tag == 'p'
+"split html heading left tag:"; node_at(tx_html_heading_split.doc_after, [0]).tag == 'h1'
 
 // ---------------------------------------------------------------------------
 // chain — first non-null wins

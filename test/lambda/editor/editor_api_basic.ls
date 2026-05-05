@@ -41,6 +41,11 @@ let editor5 = edit_exec(editor4, edit_cmd_insert_text("*"))
 "exec stored insert doc:"; doc_text(editor5.doc) == "Hello*"
 "exec stored insert mark:"; has_mark(node_at(editor5.doc, [0, 1]).marks, 'strong')
 
+let paste_editor = edit_exec(editor0, edit_cmd_paste_text(" world"))
+"exec paste text:"; doc_text(paste_editor.doc) == "Hello world"
+let delete_editor = edit_exec(paste_editor, edit_cmd_delete_backward())
+"exec delete backward:"; doc_text(delete_editor.doc) == "Hello worl"
+
 let heading_doc = node('doc', [node_attrs('heading', [{name: 'level', value: 2}], [text("Title")])])
 let heading_editor = edit_open(heading_doc, editor_schemas.markdown, text_selection(pos([0, 0], 5), pos([0, 0], 5)))
 let split_editor = edit_exec(heading_editor, edit_cmd_split_block())
@@ -72,3 +77,11 @@ let all_typed_editor = edit_exec(all_select_editor, edit_cmd_set_block_type('hea
 
 let html_editor = edit_open(<doc <html; <body; <p; "Hi">>>>, editor_schemas.html5_subset, null)
 "open html schema:"; html_editor.schema.html.role == 'block'
+
+let html_text_editor = edit_open(node('doc', [node('p', [text("Hi")])]), editor_schemas.html5_subset,
+	text_selection(pos([0, 0], 2), pos([0, 0], 2)))
+let html_break_editor = edit_exec(html_text_editor, edit_cmd_insert_line_break())
+"exec html line-break:"; node_at(html_break_editor.doc, [0, 1]).tag == 'br'
+let html_paste_editor = edit_exec(html_text_editor, edit_cmd_paste_html("<p> there</p>", " there"))
+"exec html paste tag:"; node_at(html_paste_editor.doc, [0]).tag == 'p'
+"exec html paste text:"; doc_text(html_paste_editor.doc) == "Hi there"

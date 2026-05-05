@@ -6,6 +6,7 @@ import lambda.package.editor.mod_transaction
 import lambda.package.editor.mod_input_intent
 import lambda.package.editor.mod_decorations
 import lambda.package.editor.mod_history
+import lambda.package.editor.mod_md_schema
 
 let d0 = node('doc', [
   node('paragraph', [text("Hello")])
@@ -183,6 +184,16 @@ let tx_paste_all_html = dispatch_intent(s_all, {
 let tx_bold_all = dispatch_intent(s_all, {input_type: "formatBold", data: null})
 "bold-all mark:"; has_mark(node_at(tx_bold_all.doc_after, [0, 0]).marks, 'strong')
 "bold-all selection:"; tx_bold_all.sel_after.kind == 'all'
+
+let html_state = {doc: node('doc', [node('p', [text("Hello")])]), schema: html5_subset_schema,
+  selection: text_selection(pos([0, 0], 5), pos([0, 0], 5))}
+let tx_html_line = dispatch_intent(html_state, {input_type: "insertLineBreak", data: null})
+"html line-break intent tag:"; node_at(tx_html_line.doc_after, [0, 1]).tag == 'br'
+let tx_html_paste_schema = dispatch_intent(html_state, {
+  input_type: "insertFromPaste", mime: "text/html", html: "<p> world</p>", data: " world"})
+"html paste intent tag:"; node_at(tx_html_paste_schema.doc_after, [0]).tag == 'p'
+"html paste intent text:"; doc_text(tx_html_paste_schema.doc_after) == "Hello world"
+
 
 let tx_comp_start = dispatch_intent(s0, {input_type: "compositionStart", data: null})
 let s_comp0 = state_after_intent(s0, tx_comp_start)

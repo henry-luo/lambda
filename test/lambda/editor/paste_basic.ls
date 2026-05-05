@@ -113,3 +113,21 @@ let tx_raw_html = cmd_paste_html(paste_state, "<p>Hello <strong>world</strong></
 let raw_pasted_para = node_at(tx_raw_html.doc_after, [0])
 "cmd raw html paste text:"; doc_text(raw_pasted_para) == "Say: Hello world"
 "cmd raw html paste mark:"; raw_pasted_para.content[2].marks[0] == 'strong'
+
+// ---------------------------------------------------------------------------
+// 9. Schema-targeted HTML conversion keeps HTML-shaped tags for HTML sessions
+// ---------------------------------------------------------------------------
+let html_blocks = html_fragment_to_blocks_for_schema(html5_subset_schema,
+  node('section', [node('h1', [text("Title")]), node('p', [text("Hi "), node('strong', [text("there")])])]))
+"html schema block count:"; len(html_blocks) == 2
+"html schema heading tag:"; html_blocks[0].tag == 'h1'
+"html schema para tag:"; html_blocks[1].tag == 'p'
+"html schema mark:"; html_blocks[1].content[1].marks[0] == 'strong'
+
+let html_paste_doc = node('doc', [node('p', [text("Say: ")])])
+let html_paste_state = {doc: html_paste_doc, schema: html5_subset_schema, selection: text_selection(pos([0, 0], 5), pos([0, 0], 5))}
+let tx_html_schema = cmd_paste_html(html_paste_state, "<p>Hello <strong>world</strong></p>", "Hello world")
+let html_schema_para = node_at(tx_html_schema.doc_after, [0])
+"cmd html schema paste tag:"; html_schema_para.tag == 'p'
+"cmd html schema paste text:"; doc_text(html_schema_para) == "Say: Hello world"
+"cmd html schema paste mark:"; html_schema_para.content[2].marks[0] == 'strong'

@@ -20,6 +20,10 @@ true
 true
 "insert all mark:"
 true
+"insert html all tag:"
+true
+"insert html all caret:"
+true
 "insert node doc:"
 true
 "insert node tag:"
@@ -131,6 +135,10 @@ true
 "line-break children:"
 true
 "line-break tag:"
+true
+"line-break html tag:"
+true
+"line-break html caret:"
 true
 "line-break left:"
 true
@@ -281,6 +289,10 @@ true
 "split heading right attrs:"
 true
 "split heading left tag:"
+true
+"split html heading right tag:"
+true
+"split html heading left tag:"
 true
 "chain doc:"
 true

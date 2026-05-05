@@ -43,8 +43,13 @@ fn sel_single_leaf(sel) =>
 fn sel_same_parent_leaves(sel) =>
   sel.kind == 'text' and path_equal(parent_path(sel.anchor.path), parent_path(sel.head.path))
 
+fn state_schema(state) =>
+  if (state.schema == null) { md_schema } else { state.schema }
+
 fn state_default_block(state) =>
-  if (state.default_block == null) md_default_block else state.default_block
+  if (state.default_block != null) { state.default_block } else { schema_default_block(state_schema(state)) }
+
+fn state_hard_break(state) => schema_hard_break(state_schema(state))
 
 fn replacement_marks(state) =>
   if (state.stored_marks == null) [] else state.stored_marks
@@ -213,7 +218,7 @@ fn insert_line_break_same_parent_selection(state) {
   let span = same_parent_text_span_parts(state)
   if (span == null or len(span.parent_path) < 1) { null }
   else {
-    let slice_nodes0 = list_concat(list_concat(span.before_edge, [node('hard_break', [])]), span.after_edge)
+    let slice_nodes0 = list_concat(list_concat(span.before_edge, [node(state_hard_break(state), [])]), span.after_edge)
     let tx0 = tx_begin(state.doc, state.selection)
     let tx1 = tx_step(tx0, step_replace(span.parent_path, span.lo_index, span.hi_index + 1, slice_nodes0))
     tx_set_selection(tx1, caret(pos([*span.parent_path, span.lo_index + len(span.before_edge) + 1], 0)))
@@ -277,9 +282,9 @@ fn last_text_offset_in(node) {
 pub fn cmd_paste_fragment(state, fragment) {
   let sel = state.selection
   if (sel == null) { null }
-  else if (sel.kind == 'all') { replace_all_with_blocks(state, coerce_for_md_block(fragment)) }
-  else if (sel.kind == 'node') { replace_node_with_blocks(state, coerce_for_md_block(fragment)) }
-  else if (not sel_single_leaf(sel) and sel_same_parent_leaves(sel)) { cmd_paste_text(state, doc_text(node('fragment', coerce_for_md_block(fragment)))) }
+  else if (sel.kind == 'all') { replace_all_with_blocks(state, coerce_children(state_schema(state), fragment, 'block')) }
+  else if (sel.kind == 'node') { replace_node_with_blocks(state, coerce_children(state_schema(state), fragment, 'block')) }
+  else if (not sel_single_leaf(sel) and sel_same_parent_leaves(sel)) { cmd_paste_text(state, doc_text(node('fragment', coerce_children(state_schema(state), fragment, 'block')))) }
   else if (not sel_single_leaf(sel)) { null }
   else {
     let lo = sel_lo(sel)
@@ -291,9 +296,9 @@ pub fn cmd_paste_fragment(state, fragment) {
       let block = node_at(state.doc, block_path)
       if (block == null or not is_node(block)) { null }
       else {
-        let blocks = coerce_for_md_block(fragment)
+        let blocks = coerce_children(state_schema(state), fragment, 'block')
         if (len(blocks) == 0) { null }
-        else if (len(blocks) == 1 and blocks[0].tag == 'paragraph') {
+        else if (len(blocks) == 1 and blocks[0].tag == state_default_block(state)) {
           let before = nonempty_text_leaf(slice(leaf.text, 0, lo.offset), leaf.marks)
           let after = nonempty_text_leaf(slice(leaf.text, hi.offset, len(leaf.text)), leaf.marks)
           let new_block = node_attrs(block.tag, block.attrs, list_concat(list_concat(before, blocks[0].content), after))
@@ -312,9 +317,9 @@ pub fn cmd_paste_html(state, html, fallback_text) =>
   if (type(html) == string) {
     let parsed = parse_html_fragment(html)
     if (parsed == null) { cmd_paste_text(state, fallback_text) }
-    else { cmd_paste_fragment(state, html_to_editor_fragment(parsed)) }
+    else { cmd_paste_fragment(state, html_to_editor_fragment_for_schema(state_schema(state), parsed)) }
   }
-  else { cmd_paste_fragment(state, html_to_editor_fragment(html)) }
+  else { cmd_paste_fragment(state, html_to_editor_fragment_for_schema(state_schema(state), html)) }
 
 // ---------------------------------------------------------------------------
 // cmd_insert_at / cmd_move_node — structural drop commands
@@ -529,7 +534,7 @@ pub fn cmd_insert_line_break(state) {
       let leaf_index = last_index(leaf_path)
       let before = nonempty_text_leaf(slice(leaf.text, 0, lo.offset), leaf.marks)
       let after = text_marked(slice(leaf.text, hi.offset, len(leaf.text)), leaf.marks)
-      let slice_nodes = [*before, node('hard_break', []), after]
+      let slice_nodes = [*before, node(state_hard_break(state), []), after]
       let tx0 = tx_begin(state.doc, sel)
       let tx1 = tx_step(tx0, step_replace(block_path, leaf_index, leaf_index + 1, slice_nodes))
       tx_set_selection(tx1, caret(pos([*block_path, leaf_index + len(before) + 1], 0)))
