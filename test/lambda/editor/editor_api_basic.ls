@@ -110,6 +110,19 @@ let html_link_editor = edit_exec(html_text_editor, edit_cmd_insert_link("https:/
 "exec html link tag:"; node_at(html_link_editor.doc, [0, 1]).tag == 'a'
 "exec html link text:"; doc_text(node_at(html_link_editor.doc, [0, 1])) == "site"
 
+let hr_editor = edit_exec(editor0, edit_cmd_insert_horizontal_rule())
+"exec hr tag:"; node_at(hr_editor.doc, [1]).tag == 'hr'
+"exec hr selected:"; hr_editor.selection.kind == 'node' and path_equal(hr_editor.selection.path, [1])
+let code_editor = edit_exec(editor0, edit_cmd_insert_code_block("let y = 2"))
+"exec code tag:"; node_at(code_editor.doc, [1]).tag == 'code_block'
+"exec code text:"; doc_text(node_at(code_editor.doc, [1])) == "let y = 2"
+let html_code_editor = edit_exec(html_text_editor, edit_cmd_insert_code_block("html"))
+"exec html code tag:"; node_at(html_code_editor.doc, [1]).tag == 'pre'
+let quote_editor = edit_exec(editor0, edit_cmd_wrap_blockquote())
+"exec quote tag:"; node_at(quote_editor.doc, [0]).tag == 'blockquote'
+let lifted_quote_editor = edit_exec(edit_open(quote_editor.doc, editor_schemas.markdown, node_selection([0])), edit_cmd_lift_blockquote())
+"exec lift quote tag:"; node_at(lifted_quote_editor.doc, [0]).tag == 'paragraph'
+
 let html_table_editor = edit_exec(html_text_editor, edit_cmd_insert_table(2, 2, true))
 "exec html table tag:"; node_at(html_table_editor.doc, [1]).tag == 'table'
 "exec html table header:"; node_at(html_table_editor.doc, [1, 0, 0]).tag == 'th'

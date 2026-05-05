@@ -240,6 +240,36 @@ true
 true
 "insert html link text:"
 true
+"insert hr tag:"
+true
+"insert hr selected:"
+true
+"insert code tag:"
+true
+"insert code text:"
+true
+"insert code caret:"
+true
+"insert html code tag:"
+true
+"insert html code caret:"
+true
+"wrap quote tag:"
+true
+"wrap quote text:"
+true
+"wrap quote selected:"
+true
+"lift quote first tag:"
+true
+"lift quote text:"
+true
+"lift quote selected:"
+true
+"wrap quote cross count:"
+true
+"wrap quote cross children:"
+true
 "insert table markdown null:"
 true
 "insert table tag:"

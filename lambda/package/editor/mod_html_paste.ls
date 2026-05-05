@@ -75,6 +75,11 @@ fn link_node(schema, n) =>
   node_attrs(link_tag(schema), [{name: 'href', value: attr_value(n, 'href')}, {name: 'title', value: attr_value(n, 'title')}],
     convert_inline_schema(schema, n))
 
+fn table_node(schema, n) => node('table', convert_children_schema(schema, n))
+fn table_section_node(schema, tag, n) => node(tag, convert_children_schema(schema, n))
+fn table_row_node(schema, n) => node('tr', convert_children_schema(schema, n))
+fn table_cell_node(schema, tag, n) => node(tag, convert_inline_schema(schema, n))
+
 fn convert_children_at_schema(schema, kids, i, n, acc) {
   if (i >= n) { acc }
   else { convert_children_at_schema(schema, kids, i + 1, n, frag_concat(acc, html_to_editor_fragment_for_schema(schema, kids[i]))) }
@@ -122,6 +127,10 @@ pub fn html_to_editor_fragment_for_schema(schema, n) {
     else if (tag == 'ul') { [node_attrs(list_tag(schema, false), [{name: 'ordered', value: false}], convert_children_schema(schema, n))] }
     else if (tag == 'ol') { [node_attrs(list_tag(schema, true), [{name: 'ordered', value: true}], convert_children_schema(schema, n))] }
     else if (tag == 'li') { [node(list_item_tag(schema), list_item_blocks_schema(schema, n))] }
+    else if (tag == 'table' and schema.table != null) { [table_node(schema, n)] }
+    else if ((tag == 'thead' or tag == 'tbody' or tag == 'tfoot') and schema[tag] != null) { [table_section_node(schema, tag, n)] }
+    else if (tag == 'tr' and schema.tr != null) { [table_row_node(schema, n)] }
+    else if ((tag == 'td' or tag == 'th') and schema[tag] != null) { [table_cell_node(schema, tag, n)] }
     else { convert_children_schema(schema, n) }
   }
 }

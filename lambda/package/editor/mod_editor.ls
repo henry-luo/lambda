@@ -37,6 +37,10 @@ pub fn edit_cmd_paste_text(text) => {name: 'paste_text', text: text}
 pub fn edit_cmd_paste_html(html, fallback_text) => {name: 'paste_html', html: html, fallback_text: fallback_text}
 pub fn edit_cmd_insert_image(src, alt) => {name: 'insert_image', src: src, alt: alt}
 pub fn edit_cmd_insert_link(href, title, label) => {name: 'insert_link', href: href, title: title, label: label}
+pub fn edit_cmd_insert_horizontal_rule() => {name: 'insert_horizontal_rule'}
+pub fn edit_cmd_insert_code_block(text) => {name: 'insert_code_block', text: text}
+pub fn edit_cmd_wrap_blockquote() => {name: 'wrap_blockquote'}
+pub fn edit_cmd_lift_blockquote() => {name: 'lift_blockquote'}
 pub fn edit_cmd_insert_table(rows, cols, header) => {name: 'insert_table', rows: rows, cols: cols, header: header}
 pub fn edit_cmd_add_table_row() => {name: 'add_table_row'}
 pub fn edit_cmd_delete_table_row() => {name: 'delete_table_row'}
@@ -59,6 +63,10 @@ fn command_tx(editor, command) {
   else if (command.name == 'paste_html') { cmd_paste_html(editor, command.html, command.fallback_text) }
   else if (command.name == 'insert_image') { cmd_insert_image(editor, command.src, command.alt) }
   else if (command.name == 'insert_link') { cmd_insert_link(editor, command.href, command.title, command.label) }
+  else if (command.name == 'insert_horizontal_rule') { cmd_insert_horizontal_rule(editor) }
+  else if (command.name == 'insert_code_block') { cmd_insert_code_block(editor, command.text) }
+  else if (command.name == 'wrap_blockquote') { cmd_wrap_blockquote(editor) }
+  else if (command.name == 'lift_blockquote') { cmd_lift_blockquote(editor) }
   else if (command.name == 'insert_table') { cmd_insert_table(editor, command.rows, command.cols, command.header) }
   else if (command.name == 'add_table_row') { cmd_add_table_row(editor) }
   else if (command.name == 'delete_table_row') { cmd_delete_table_row(editor) }
