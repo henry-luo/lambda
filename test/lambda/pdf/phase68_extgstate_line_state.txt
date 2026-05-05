@@ -1,0 +1,1 @@
+{ path_count: 1, width: true, cap: true, join: true, miter: true, dash: true, offset: true}

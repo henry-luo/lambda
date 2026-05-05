@@ -1,0 +1,1 @@
+{ path_count: 2, xobject_alpha: true, inline_alpha: true, xobject_pixel: true, inline_pixel: true}

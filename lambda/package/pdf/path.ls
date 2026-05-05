@@ -3,8 +3,7 @@
 // Phase 3 scope:
 //   - Path construction:    m, l, c, v, y, re, h
 //   - Path painting:        S, s, f, F, f*, B, B*, b, b*, n
-//   - Line state:           w, J, j, M, d (parsed; only `w` is honored
-//                                          by SVG output today)
+//   - Line state:           w, J, j, M, d (emitted as SVG stroke attrs)
 //
 // Path state lives inside the interp.ls graphics state. We do NOT mutate;
 // every helper returns a fresh path-state record. The driver (interp.ls)
@@ -167,6 +166,8 @@ fn _set_line_width(st, w) {
     }
 }
 
+pub fn set_line_width(st, w) { _set_line_width(st, w) }
+
 fn _set_line_cap(st, n) {
     {
         segments:       st.segments,
@@ -186,6 +187,8 @@ fn _set_line_cap(st, n) {
         dash_phase:     st.dash_phase
     }
 }
+
+pub fn set_line_cap(st, n) { _set_line_cap(st, n) }
 
 fn _set_line_join(st, n) {
     {
@@ -207,6 +210,8 @@ fn _set_line_join(st, n) {
     }
 }
 
+pub fn set_line_join(st, n) { _set_line_join(st, n) }
+
 fn _set_miter(st, m) {
     {
         segments:       st.segments,
@@ -227,6 +232,8 @@ fn _set_miter(st, m) {
     }
 }
 
+pub fn set_miter_limit(st, m) { _set_miter(st, m) }
+
 fn _set_dash(st, arr, phase) {
     {
         segments:       st.segments,
@@ -246,6 +253,8 @@ fn _set_dash(st, arr, phase) {
         dash_phase:     phase
     }
 }
+
+pub fn set_dash(st, arr, phase) { _set_dash(st, arr, phase) }
 
 // ============================================================
 // Path construction operators

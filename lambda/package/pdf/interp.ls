@@ -300,9 +300,10 @@ fn _apply_color(st, opr, ops, pdf, page) {
 // gs — apply named ExtGState dictionary
 // ============================================================
 //
-// Honors only the alpha entries today (`ca` for fill, `CA` for stroke).
-// Looks up `Resources/ExtGState/<name>` on the page; missing entries
-// or non-numeric values are ignored.
+// Honors alpha entries (`ca` for fill, `CA` for stroke) and the common
+// line-state entries (`LW`, `LC`, `LJ`, `ML`, `D`). Looks up
+// `Resources/ExtGState/<name>` on the page; missing or malformed values
+// are ignored.
 
 fn _ext_gstate_dict(pdf, page, name) {
     let res = resolve.page_resources(pdf, page)
@@ -317,6 +318,41 @@ fn _alpha_of(d, key, fallback) {
     if (v is float) { v }
     else if (v is int) { float(v) }
     else { fallback }
+}
+
+fn _num_of(d, key, fallback) {
+    let v = if (d) d[key] else null
+    if (v is float) { v }
+    else if (v is int) { float(v) }
+    else { fallback }
+}
+
+fn _int_of(d, key, fallback) {
+    let v = if (d) d[key] else null
+    if (v is int) { v }
+    else if (v is float) { int(v) }
+    else { fallback }
+}
+
+fn _dash_numbers(raw) {
+    if (raw is map and raw.kind == "array") {
+        for (n in raw.value where (n is int or n is float)) util.num(n)
+    }
+    else if (raw is array) {
+        for (n in raw where (n is int or n is float)) util.num(n)
+    }
+    else { [] }
+}
+
+fn _apply_gs_line_state(p, d) {
+    let p1 = if (d.LW != null) { path.set_line_width(p, _num_of(d, "LW", p.line_width)) } else { p }
+    let p2 = if (d.LC != null) { path.set_line_cap(p1, _int_of(d, "LC", p1.line_cap)) } else { p1 }
+    let p3 = if (d.LJ != null) { path.set_line_join(p2, _int_of(d, "LJ", p2.line_join)) } else { p2 }
+    let p4 = if (d.ML != null) { path.set_miter_limit(p3, _num_of(d, "ML", p3.miter_limit)) } else { p3 }
+    if (d.D != null and d.D is array and len(d.D) >= 2) {
+        path.set_dash(p4, _dash_numbers(d.D[0]), util.num(d.D[1]))
+    }
+    else { p4 }
 }
 
 fn _gs_name(ops) {
@@ -335,7 +371,9 @@ fn _apply_gs(st, ops, pdf, page) {
         else {
             let fa = _alpha_of(d, "ca", st.path.fill_opacity)
             let sa = _alpha_of(d, "CA", st.path.stroke_opacity)
-            let st1 = _with_path(st, path.set_opacity(st.path, fa, sa))
+            let p1 = path.set_opacity(st.path, fa, sa)
+            let p2 = _apply_gs_line_state(p1, d)
+            let st1 = _with_path(st, p2)
             _with_text(st1, text.set_opacity(st1.text, fa, sa))
         }
     }
@@ -584,6 +622,15 @@ fn _form_group(children, opacity_value, bounds_attr) {
     }
 }
 
+fn _image_opacity_group(children, opacity_value) {
+    if (opacity_value < 1.0) {
+        [<g opacity: util.fmt_num(opacity_value);
+            for (c in children) c
+        >]
+    }
+    else { children }
+}
+
 // ============================================================
 // Driver
 // ============================================================
@@ -785,7 +832,8 @@ pn _run_ops_with_state(pdf, page, ops, init_ctm, fonts, page_h, clip_prefix, inh
             // segment. Emit a placeholder rect in the local CTM.
             let imgs = image.apply_inline_with_page(pdf, page, st.ctm, operands)
             if (len(imgs) > 0) {
-                paths = paths ++ _wrap_emit_with_ctm(imgs, st.ctm, active_clip_ids)
+                let img_emit = _image_opacity_group(imgs, st.path.fill_opacity)
+                paths = paths ++ _wrap_emit_with_ctm(img_emit, st.ctm, active_clip_ids)
             }
         }
         else if (opr == "Do") {
@@ -834,7 +882,8 @@ pn _run_ops_with_state(pdf, page, ops, init_ctm, fonts, page_h, clip_prefix, inh
                     var k = 0
                     let me = len(imgs)
                     while (k < me) {
-                        paths = paths ++ _wrap_emit_with_ctm([imgs[k]], util.IDENTITY, active_clip_ids)
+                        let img_emit = _image_opacity_group([imgs[k]], st.path.fill_opacity)
+                        paths = paths ++ _wrap_emit_with_ctm(img_emit, util.IDENTITY, active_clip_ids)
                         k = k + 1
                     }
                 }
