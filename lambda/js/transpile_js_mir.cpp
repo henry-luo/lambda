@@ -33,8 +33,12 @@
 #include "../lambda-stack.h"
 #ifdef _WIN32
 #include <malloc.h>  // alloca on Windows
+#include <direct.h>  // _getcwd
+#define getcwd _getcwd
+#define realpath(p, r) (_fullpath((r), (p), _MAX_PATH))
 #else
 #include <alloca.h>
+#include <unistd.h>  // getcwd
 #endif
 
 extern "C" void log_mem_stage(const char* stage);  // defined in radiant/window.cpp; no-op when VIEW_MEM_STAGES unset
@@ -27041,6 +27045,11 @@ static int jm_precompile_js_imports(Runtime* runtime, const char* js_source, con
 }
 
 #endif // !_WIN32
+
+#ifdef _WIN32
+// jm_validate_mir_labels is a no-op on Windows (parallel import not supported)
+static bool jm_validate_mir_labels(MIR_context_t ctx) { (void)ctx; return true; }
+#endif
 
 // ============================================================================
 // ES Module loading: compile and execute a module, returning its namespace

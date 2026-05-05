@@ -67,7 +67,8 @@ typedef void (*gc_collect_callback_t)(void);
  * The callback should iterate all Item keys/values in the VMap data
  * and call gc_mark_item(gc, item) for each.
  */
-typedef void (*gc_vmap_trace_fn)(void* data, struct gc_heap* gc);
+typedef struct gc_heap gc_heap_t;  // forward declaration for function pointer types
+typedef void (*gc_vmap_trace_fn)(void* data, gc_heap_t* gc);
 
 /**
  * Callback type for destroying VMap backing data during GC sweep.

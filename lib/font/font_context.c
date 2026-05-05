@@ -10,7 +10,12 @@
 
 #include "font_internal.h"
 #include <time.h>
+#ifndef _WIN32
 #include <sys/mman.h>
+#else
+// mmap not available on Windows — font data always heap-allocated
+static inline int munmap(void* addr, size_t len) { (void)addr; (void)len; return 0; }
+#endif
 #include "../memtrack.h"
 
 // ============================================================================

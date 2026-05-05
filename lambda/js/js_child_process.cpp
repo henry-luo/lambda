@@ -17,6 +17,10 @@
 
 #ifndef _WIN32
 #include <sys/wait.h>
+#else
+// On Windows, pclose() returns the exit code directly
+#define WIFEXITED(s)  (1)
+#define WEXITSTATUS(s) (s)
 #endif
 
 extern Input* js_input;

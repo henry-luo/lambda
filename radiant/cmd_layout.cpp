@@ -24,11 +24,21 @@
 #include <limits.h>
 #include <signal.h>
 #include <setjmp.h>
+#ifdef _WIN32
+#include <io.h>
+#include <windows.h>
+#include <psapi.h>
+#undef ERROR  // windows.h defines ERROR as a macro; conflicts with ParseErrorSeverity::ERROR
+#define STDERR_FILENO 2
+static inline int backtrace(void** arr, int max) { (void)arr; (void)max; return 0; }
+static inline void backtrace_symbols_fd(void** arr, int n, int fd) { (void)arr; (void)n; (void)fd; }
+#else
 #include <execinfo.h>
 #include <unistd.h>
 #include <sys/resource.h>  // getrusage for memory diagnostics
 #ifdef __APPLE__
 #include <mach/mach.h>     // mach_task_basic_info for current RSS
+#endif
 #endif
 
 extern "C" {
@@ -5906,6 +5916,11 @@ static bool layout_single_file(
         mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
         task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t)&info, &count);
         long rss_kb = (long)(info.resident_size / 1024);
+#elif defined(_WIN32)
+        PROCESS_MEMORY_COUNTERS pmc;
+        long rss_kb = 0;
+        if (GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc)))
+            rss_kb = (long)(pmc.WorkingSetSize / 1024);
 #else
         struct rusage ru;
         getrusage(RUSAGE_SELF, &ru);
@@ -6001,6 +6016,7 @@ static char* generate_output_path(const char* input_file, const char* output_dir
 // Crash recovery for layout_single_file — catches SIGSEGV/SIGBUS from
 // Apple framework code (CoreText/CoreGraphics font rasterisation, vImage lazy load, etc.)
 // that cannot be fixed in our code.
+#ifndef _WIN32
 static sigjmp_buf layout_crash_jmpbuf;
 static volatile sig_atomic_t layout_crash_guarded = 0;
 
@@ -6026,21 +6042,27 @@ static void layout_crash_handler(int sig, siginfo_t* info, void* ctx) {
     fprintf(stderr, "=== END BACKTRACE ===\n");
     _exit(128 + sig);
 }
+#endif // !_WIN32
 
 // Legacy crash handler for SIGTRAP/SIGABRT (non-recoverable)
 static void crash_signal_handler(int sig) {
     fprintf(stderr, "\n=== CRASH: signal %d ===\n", sig);
+#ifndef _WIN32
     void* callstack[128];
     int frames = backtrace(callstack, 128);
     backtrace_symbols_fd(callstack, frames, STDERR_FILENO);
+#endif
     fprintf(stderr, "=== END BACKTRACE ===\n");
     _exit(128 + sig);
 }
 
 int cmd_layout(int argc, char** argv) {
     // Install crash signal handlers for diagnostics
+#ifndef _WIN32
     signal(SIGTRAP, crash_signal_handler);
+#endif
     signal(SIGABRT, crash_signal_handler);
+#ifndef _WIN32
     // SIGSEGV/SIGBUS use sigaction for crash recovery (siglongjmp) support
     {
         struct sigaction sa;
@@ -6050,6 +6072,7 @@ int cmd_layout(int argc, char** argv) {
         sigaction(SIGSEGV, &sa, NULL);
         sigaction(SIGBUS, &sa, NULL);
     }
+#endif
 
     // Initialize logging system (only write log.txt when log.conf exists, i.e. dev/debug mode)
     if (file_exists("log.conf")) {
@@ -6133,6 +6156,24 @@ int cmd_layout(int argc, char** argv) {
         }
 
         bool success = false;
+#ifdef _WIN32
+        // Windows: no sigsetjmp/siglongjmp crash recovery — run directly
+        try {
+            success = layout_single_file(
+                input_file,
+                output_path,
+                opts.css_file,
+                opts.viewport_width,
+                opts.viewport_height,
+                &ui_context,
+                cwd,
+                opts.debug
+            );
+        } catch (...) {
+            log_error("batch layout: uncaught exception processing %s", input_file);
+            success = false;
+        }
+#else
         // Guard layout with crash recovery (catches SIGSEGV/SIGBUS from Apple frameworks)
         layout_crash_guarded = 1;
         int crash_sig = sigsetjmp(layout_crash_jmpbuf, 1);
@@ -6162,6 +6203,7 @@ int cmd_layout(int argc, char** argv) {
                     crash_sig, input_file);
             _exit(1);
         }
+#endif
 
         if (success) {
             success_count++;

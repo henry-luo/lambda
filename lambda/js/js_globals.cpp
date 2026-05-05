@@ -36,7 +36,37 @@ extern "C" Item js_to_property_key(Item key);
 #include <windows.h>
 #include <psapi.h>
 #define getpid _getpid
+// strptime/timegm are not available on Windows — provide minimal implementations
+static char* strptime(const char* buf, const char* fmt, struct tm* tm) {
+    (void)fmt;
+    int day = 0, year = 0, hour = 0, min = 0, sec = 0;
+    char mon[4] = {0}; char wday[4] = {0};
+    static const char* months[] = {"Jan","Feb","Mar","Apr","May","Jun",
+                                    "Jul","Aug","Sep","Oct","Nov","Dec"};
+    if (sscanf(buf, "%3s, %d %3s %d %d:%d:%d", wday, &day, mon, &year, &hour, &min, &sec) == 7) {
+        tm->tm_mday = day; tm->tm_hour = hour; tm->tm_min = min; tm->tm_sec = sec;
+        tm->tm_year = year - 1900; tm->tm_mon = -1; tm->tm_isdst = 0;
+        for (int i = 0; i < 12; i++) {
+            if (_strnicmp(mon, months[i], 3) == 0) { tm->tm_mon = i; break; }
+        }
+        return (tm->tm_mon >= 0) ? (char*)(buf + strlen(buf)) : NULL;
+    }
+    return NULL;
+}
+static time_t timegm(struct tm* tm) { return _mkgmtime(tm); }
+#include <direct.h>
+#include <io.h>
+#define chdir _chdir
+#define isatty _isatty
+#define realpath(p, r) (_fullpath((r), (p), _MAX_PATH))
+static inline long get_tm_gmtoff(const struct tm* t) {
+    (void)t;
+    long bias = 0;
+    _get_timezone(&bias);  // seconds west of UTC
+    return -bias;          // tm_gmtoff is seconds east of UTC
+}
 #else
+static inline long get_tm_gmtoff(const struct tm* t) { return t->tm_gmtoff; }
 #include <unistd.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
@@ -1010,7 +1040,7 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
         if (method_id == 42) { // getTimezoneOffset
             struct tm local_tm; localtime_r(&secs, &local_tm);
             // tm_gmtoff is seconds east of UTC; getTimezoneOffset returns minutes west of UTC
-            int offset_min = -(int)(local_tm.tm_gmtoff / 60);
+            int offset_min = -(int)(get_tm_gmtoff(&local_tm) / 60);
             return (Item){.item = i2it(offset_min)};
         }
         if (method_id == 43) { // valueOf — same as getTime
@@ -1042,7 +1072,7 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
         }
         if (method_id == 47) { // toTimeString
             struct tm tm; localtime_r(&secs, &tm);
-            long gmtoff = tm.tm_gmtoff;
+            long gmtoff = get_tm_gmtoff(&tm);
             int h_off = (int)(gmtoff / 3600);
             int m_off = (int)((gmtoff % 3600) / 60);
             if (m_off < 0) m_off = -m_off;

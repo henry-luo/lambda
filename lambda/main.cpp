@@ -88,6 +88,32 @@ static const char* strcasestr(const char* haystack, const char* needle) {
     }
     return NULL;
 }
+
+// POSIX sleep() — Windows equivalent using Sleep()
+static inline unsigned int sleep(unsigned int seconds) {
+    Sleep(seconds * 1000);
+    return 0;
+}
+
+// POSIX gettimeofday() stub for Windows
+// (timeval may already be defined via winsock2.h/winsock.h — guard against redefinition)
+#ifndef _TIMEVAL_DEFINED
+#define _TIMEVAL_DEFINED
+struct timeval { long tv_sec; long tv_usec; };
+#endif
+static inline int gettimeofday(struct timeval* tv, void* tz) {
+    (void)tz;
+    LARGE_INTEGER freq, counter;
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&counter);
+    long long us = counter.QuadPart * 1000000LL / freq.QuadPart;
+    tv->tv_sec  = (long)(us / 1000000LL);
+    tv->tv_usec = (long)(us % 1000000LL);
+    return 0;
+}
+
+// RSS stub for Windows (returns 0 — not available in this context)
+static inline size_t get_rss_bytes() { return 0; }
 #endif
 
 // Forward declare additional transpiler functions

@@ -12,10 +12,36 @@
 #include <stdio.h>
 #include <stdlib.h>  // for standard malloc/free for pool structure
 #include <string.h>  // for memcpy, strlen
+#ifdef _WIN32
+#include <windows.h>
+#include <process.h>
+// pthread stubs for Windows using SRWLOCK (zero-initializable)
+typedef SRWLOCK pthread_mutex_t;
+#define PTHREAD_MUTEX_INITIALIZER SRWLOCK_INIT
+static inline int pthread_mutex_lock(pthread_mutex_t* m)   { AcquireSRWLockExclusive(m); return 0; }
+static inline int pthread_mutex_unlock(pthread_mutex_t* m) { ReleaseSRWLockExclusive(m); return 0; }
+// mmap stubs — use VirtualAlloc on Windows
+#define PROT_READ  0
+#define PROT_WRITE 0
+#define MAP_PRIVATE   0
+#define MAP_ANONYMOUS 0
+#define MAP_FAILED ((void*)-1)
+static inline void* mmap(void* addr, size_t len, int p, int f, int fd, long off) {
+    (void)addr; (void)p; (void)f; (void)fd; (void)off;
+    void* mem = VirtualAlloc(NULL, len, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    return mem ? mem : MAP_FAILED;
+}
+static inline int munmap(void* addr, size_t len) { (void)len; return VirtualFree(addr, 0, MEM_RELEASE) ? 0 : -1; }
+// execinfo stubs
+static inline int backtrace(void** arr, int max) { (void)arr; (void)max; return 0; }
+static inline char** backtrace_symbols(void** arr, int n) { (void)arr; (void)n; return NULL; }
+static inline void backtrace_symbols_fd(void** arr, int n, int fd) { (void)arr; (void)n; (void)fd; }
+#else
 #include <unistd.h>  // for _exit
 #include <pthread.h> // for thread-safe initialization
 #include <sys/mman.h> // for mmap/munmap
 #include <execinfo.h> // for backtrace
+#endif
 
 #ifndef MAP_ANONYMOUS
 #ifdef MAP_ANON

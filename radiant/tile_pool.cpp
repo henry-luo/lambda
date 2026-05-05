@@ -15,7 +15,15 @@
 #include <math.h>
 #include <algorithm>
 #include <chrono>
+#ifdef _WIN32
+#include <windows.h>
+static inline int get_cpu_count() {
+    SYSTEM_INFO si; GetSystemInfo(&si); return (int)si.dwNumberOfProcessors;
+}
+#else
 #include <unistd.h>
+static inline int get_cpu_count() { return (int)sysconf(_SC_NPROCESSORS_ONLN); }
+#endif
 
 // Global mutex to serialize ThorVG canvas operations across worker threads.
 // ThorVG's internal state (global mpool, loader sharing counts, etc.) is not
@@ -206,7 +214,7 @@ void render_pool_init(RenderPool* pool, int threads) {
 
     if (threads <= 0) {
         // auto-detect: hardware concurrency, cap at 8
-        threads = (int)sysconf(_SC_NPROCESSORS_ONLN);
+        threads = get_cpu_count();
         if (threads <= 0) threads = 4;
         if (threads > 8) threads = 8;
     }

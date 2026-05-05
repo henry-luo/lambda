@@ -161,3 +161,8 @@ extern "C" void radiant_ime_win_attach(struct UiContext* uicon) {
 extern "C" void radiant_ime_win_attach(void* uicon) { (void)uicon; }
 
 #endif // _WIN32
+
+// On Windows, provide a no-op stub for the Mac-only IME attachment.
+#ifdef _WIN32
+extern "C" void radiant_ime_mac_attach(void* uicon) { (void)uicon; }
+#endif
