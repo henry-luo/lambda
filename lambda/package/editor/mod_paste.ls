@@ -151,9 +151,12 @@ fn attr_validate_ok(value, spec) =>
 fn attr_has_default(spec) =>
   spec.default != null or type(spec.default) == string or type(spec.default) == int or type(spec.default) == bool
 
+fn attr_value_ok(value, spec) =>
+  value != null and attr_type_ok(value, spec) and attr_constraints_ok(value, spec) and attr_validate_ok(value, spec)
+
 fn attr_clean_value(value, spec) {
-  if (value != null and attr_type_ok(value, spec) and attr_constraints_ok(value, spec) and attr_validate_ok(value, spec)) { value }
-  else if (attr_has_default(spec)) { spec.default }
+  if (attr_value_ok(value, spec)) { value }
+  else if (attr_has_default(spec) and attr_value_ok(spec.default, spec)) { spec.default }
   else { null }
 }
 

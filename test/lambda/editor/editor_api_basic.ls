@@ -165,6 +165,12 @@ let intent_editor = edit_dispatch(editor0, {input_type: "insertText", data: "?"}
 "dispatch intent doc:"; doc_text(intent_editor.doc) == "Hello?"
 "dispatch intent history:"; len(intent_editor.history.undo) == 1
 "dispatch intent event:"; intent_editor.events[0].kind == 'change'
+"can exec insert:"; edit_can_exec(editor0, edit_cmd_insert_text("!"))
+"can exec blocked row:"; not edit_can_exec(editor0, edit_cmd_add_table_row())
+"can exec no mutation:"; doc_text(editor0.doc) == "Hello" and len(editor0.events) == 0
+"can dispatch insert:"; edit_can_dispatch(editor0, {input_type: "insertText", data: "!"})
+"can dispatch unknown:"; not edit_can_dispatch(editor0, {input_type: "formatStrikeThrough", data: null})
+"can dispatch no mutation:"; doc_text(editor0.doc) == "Hello" and len(editor0.events) == 0
 
 let comp_editor0 = edit_dispatch(editor0, {input_type: "compositionStart", data: null})
 "dispatch composition active:"; comp_editor0.composition.active

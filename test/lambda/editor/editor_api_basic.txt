@@ -140,6 +140,18 @@ true
 true
 "dispatch intent event:"
 true
+"can exec insert:"
+true
+"can exec blocked row:"
+true
+"can exec no mutation:"
+true
+"can dispatch insert:"
+true
+"can dispatch unknown:"
+true
+"can dispatch no mutation:"
+true
 "dispatch composition active:"
 true
 "dispatch composition update:"

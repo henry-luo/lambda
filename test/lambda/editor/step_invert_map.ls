@@ -112,6 +112,10 @@ let pst = pos([0, 0], 13)       // after the range (.)
 "map pre:";  step_map(s1, pre).offset
 "map mid:";  step_map(s1, mid).offset    // should snap to from + len(new_text) = 13
 "map pst:";  step_map(s1, pst).offset    // shifted by +1 -> 14
+"map text pre-bias:"; step_map_bias(s1, pos([0, 0], 7), -1).offset == 7
+"map text post-bias:"; step_map_bias(s1, pos([0, 0], 7), 1).offset == 13
+"map insert pre-bias:"; step_map_bias(s2, pos([0, 0], 0), -1).offset == 0
+"map insert post-bias:"; step_map_bias(s2, pos([0, 0], 0), 1).offset == 4
 let other = pos([1, 0], 3)
 "map other:"; step_map(s1, other).offset // unaffected
 "map other path:"; path_equal(step_map(s1, other).path, [1, 0])
@@ -127,6 +131,8 @@ let pp_pst  = pos([], 2)        // after the insertion site — shifts by +1
 "replace map parent pre:";  step_map(s_ins, pp_pre).offset == 0
 "replace map parent at:";   step_map(s_ins, pp_at).offset == 2
 "replace map parent post:"; step_map(s_ins, pp_pst).offset == 3
+"replace map pre-bias:"; step_map_bias(s_ins, pp_at, -1).offset == 1
+"replace map post-bias:"; step_map_bias(s_ins, pp_at, 1).offset == 2
 let inside  = pos([1, 0], 3)    // inside child #1, which gets shifted to #2
 let mapped_inside = step_map(s_ins, inside)
 "replace map child shift:"; mapped_inside.path[0]
@@ -138,6 +144,9 @@ let inside_deleted = pos([1, 0], 3)
 let collapsed = step_map(s_del, inside_deleted)
 "collapsed depth:";  len(collapsed.path)
 "collapsed offset:"; collapsed.offset == 1   // step.from + len(slice)
+let s_rep_two = step_replace([], 1, 2, [node('hr', []), node('paragraph', [text("New")])])
+"collapsed pre-bias:"; step_map_bias(s_rep_two, inside_deleted, -1).offset == 1
+"collapsed post-bias:"; step_map_bias(s_rep_two, inside_deleted, 1).offset == 3
 
 // replace_around preserves positions inside the gap and collapses deleted wrappers.
 let gap_mapped = step_map(around, pos([1, 0], 2))
@@ -146,6 +155,8 @@ let gap_mapped = step_map(around, pos([1, 0], 2))
 let around_deleted = step_map(around, pos([2, 0], 1))
 "around deleted depth:"; len(around_deleted.path) == 0
 "around deleted offset:"; around_deleted.offset == 1
+"around deleted pre-bias:"; step_map_bias(around, pos([2, 0], 1), -1).offset == 0
+"around deleted post-bias:"; step_map_bias(around, pos([2, 0], 1), 1).offset == 1
 let around_tail = step_map(around, pos([3, 0], 1))
 "around tail path:"; around_tail.path[0] == 2
 

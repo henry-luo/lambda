@@ -206,15 +206,17 @@ pub fn step_invert(step, doc_before) {
 // the boundary are pushed forward (post-bias, like ProseMirror's default).
 // ---------------------------------------------------------------------------
 
-fn map_replace_text(step, p) {
+fn map_replace_text_bias(step, p, bias) {
   if (not path_equal(p.path, step.path)) { p }
   else if (p.offset < step.from) { p }
-  else if (p.offset >= step.to) {
+  else if (p.offset > step.to) {
     pos(p.path, p.offset + len(step.text) - (step.to - step.from))
   } else {
-    pos(p.path, step.from + len(step.text))
+    pos(p.path, if (bias < 0) { step.from } else { step.from + len(step.text) })
   }
 }
+
+fn map_replace_text(step, p) => map_replace_text_bias(step, p, 1)
 
 // True iff p sits strictly inside the parent affected by `step` (one level deep).
 fn under_replace_parent(p, step) {
@@ -222,7 +224,7 @@ fn under_replace_parent(p, step) {
   else { path_is_prefix(step.parent, p.path) }
 }
 
-fn map_replace(step, p) {
+fn map_replace_bias(step, p, bias) {
   let pp = step.parent
   let depth = len(pp)
   let same_parent_pos = (len(p.path) == depth and path_equal(p.path, pp))
@@ -231,10 +233,10 @@ fn map_replace(step, p) {
   else if (same_parent_pos) {
     // p is on the parent itself; offset is a child index
     if (p.offset < step.from) { p }
-    else if (p.offset >= step.to) {
+    else if (p.offset > step.to) {
       pos(p.path, p.offset + len(step.slice) - (step.to - step.from))
     } else {
-      pos(p.path, step.from + len(step.slice))
+      pos(p.path, if (bias < 0) { step.from } else { step.from + len(step.slice) })
     }
   } else {
     // p is inside one of the parent's children; check which one
@@ -247,14 +249,16 @@ fn map_replace(step, p) {
       pos(new_path, p.offset)
     } else {
       // p was inside a deleted child — collapse to the boundary
-      pos(pp, step.from + len(step.slice))
+      pos(pp, if (bias < 0) { step.from } else { step.from + len(step.slice) })
     }
   }
 }
 
+fn map_replace(step, p) => map_replace_bias(step, p, 1)
+
 fn replace_around_new_size(step) => len(step.slice) + (step.gap_to - step.gap_from)
 
-fn map_replace_around(step, p) {
+fn map_replace_around_bias(step, p, bias) {
   let pp = step.parent
   let depth = len(pp)
   let same_parent_pos = (len(p.path) == depth and path_equal(p.path, pp))
@@ -268,7 +272,7 @@ fn map_replace_around(step, p) {
     else if (p.offset >= step.to) {
       pos(p.path, p.offset + replace_around_new_size(step) - (step.to - step.from))
     } else {
-      pos(p.path, step.from + step.insert)
+      pos(p.path, if (bias < 0) { step.from } else { step.from + step.insert })
     }
   } else {
     let ci = p.path[depth]
@@ -283,16 +287,22 @@ fn map_replace_around(step, p) {
       let new_path = [*list_take(p.path, depth), new_ci, *list_drop(p.path, depth + 1)]
       pos(new_path, p.offset)
     } else {
-      pos(pp, step.from + step.insert)
+      pos(pp, if (bias < 0) { step.from } else { step.from + step.insert })
     }
   }
 }
 
+fn map_replace_around(step, p) => map_replace_around_bias(step, p, 1)
+
+pub fn step_map_bias(step, p, bias) {
+  if (step.kind == 'replace_text') { map_replace_text_bias(step, p, bias) }
+  else if (step.kind == 'replace') { map_replace_bias(step, p, bias) }
+  else if (step.kind == 'replace_around') { map_replace_around_bias(step, p, bias) }
+  else { p }
+}
+
 pub fn step_map(step, p) {
-  if (step.kind == 'replace_text') { map_replace_text(step, p) }
-  else if (step.kind == 'replace') { map_replace(step, p) }
-  else if (step.kind == 'replace_around') { map_replace_around(step, p) }
-  else { p }  // mark / attr / node-type changes don't move positions
+  step_map_bias(step, p, 1)
 }
 
 // Map a list of positions through one step.

@@ -60,6 +60,14 @@ true
 13
 "map pst:"
 14
+"map text pre-bias:"
+true
+"map text post-bias:"
+true
+"map insert pre-bias:"
+true
+"map insert post-bias:"
+true
 "map other:"
 3
 "map other path:"
@@ -70,6 +78,10 @@ true
 true
 "replace map parent post:"
 true
+"replace map pre-bias:"
+true
+"replace map post-bias:"
+true
 "replace map child shift:"
 2
 "replace map offset preserved:"
@@ -78,6 +90,10 @@ true
 0
 "collapsed offset:"
 true
+"collapsed pre-bias:"
+true
+"collapsed post-bias:"
+true
 "around gap path:"
 true
 "around gap offset:"
@@ -85,6 +101,10 @@ true
 "around deleted depth:"
 true
 "around deleted offset:"
+true
+"around deleted pre-bias:"
+true
+"around deleted post-bias:"
 true
 "around tail path:"
 true
