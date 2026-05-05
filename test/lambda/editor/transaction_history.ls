@@ -77,6 +77,20 @@ let r2 = history_apply_step(r1.hist, r1.doc, s2, r1.sel, null)
 "r2 doc:";       doc_text(r2.doc) == "[!] Hello, Lambda.Second."
 "r2 undo depth:"; len(r2.hist.undo)
 
+// Adjacent transactions with the same historyGroup compress into one undo item.
+let tga0 = tx_set_meta(tx_step(tx_begin(d0, text_selection(pos([0, 0], 0), pos([0, 0], 0))),
+  step_replace_text([0, 0], 0, 0, "A")), "historyGroup", "typing")
+let hg1 = history_push(h0, tx_set_selection(tga0, text_selection(pos([0, 0], 1), pos([0, 0], 1))))
+let tgb0 = tx_set_meta(tx_step(tx_begin(tga0.doc_after, text_selection(pos([0, 0], 1), pos([0, 0], 1))),
+  step_replace_text([0, 0], 1, 1, "B")), "historyGroup", "typing")
+let hg2 = history_push(hg1, tx_set_selection(tgb0, text_selection(pos([0, 0], 2), pos([0, 0], 2))))
+"group undo depth:"; len(hg2.undo)
+let hgu = history_undo(hg2, tgb0.doc_after)
+"group undo doc:"; doc_text(hgu.doc) == doc_text(d0)
+"group redo depth:"; len(hgu.hist.redo)
+let hgr = history_redo(hgu.hist, hgu.doc)
+"group redo doc:"; doc_text(hgr.doc) == "ABHello, world.Second."
+
 // Undo once
 let u1 = history_undo(r2.hist, r2.doc)
 "u1 ok:";        u1.ok

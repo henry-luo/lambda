@@ -1,5 +1,7 @@
 "drop unknown:"
 true
+"drop unknown child:"
+true
 "keep known marks:"
 2
 "strong kept:"
@@ -39,6 +41,12 @@ true
 "nested marks count:"
 true
 "nested mark:"
+true
+"code block drops marks:"
+true
+"exclusive mark count:"
+true
+"exclusive mark kept:"
 true
 "html block count:"
 true

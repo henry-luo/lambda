@@ -13,7 +13,7 @@ import interp:  lambda.package.pdf.interp
 import coords:  lambda.package.pdf.coords
 
 pn main() {
-    let doc^err = input("test/pdf/data/basic/simple_test.pdf", 'pdf')
+    let doc^err = input("test/input/simple_test.pdf", 'pdf')
     let page = resolve.page_at(doc, 0)
     let rect = coords.media_box_rect(page)
     let bytes = resolve.page_content_bytes(doc, page)

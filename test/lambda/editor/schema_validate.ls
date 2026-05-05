@@ -64,3 +64,46 @@ let bad_deep = <doc <paragraph; "p"> <blockquote; <paragraph; <weird; "q">>>>
 let vd = schema_validate(sch, bad_deep)
 "bad_deep at least one violation:"; (len(vd) >= 1)
 "bad_deep first path nonempty:"; (len(vd[0].path) > 0)
+
+// 10. Declared attrs: required and primitive type checks
+let img_ok = <doc <paragraph; <image src: "photo.jpg", alt: "A photo">>>
+"image attrs valid:"; is_valid(sch, img_ok)
+let img_missing = <doc <paragraph; <image alt: "missing src">>>
+let vim = schema_validate(sch, img_missing)
+"image missing attr:"; vim[0].message == "required attribute missing"
+"image missing tag:"; vim[0].tag == 'image'
+let img_bad_type = <doc <paragraph; <image src: 42>>>
+let vib = schema_validate(sch, img_bad_type)
+"image attr type:"; vib[0].message == "attribute type mismatch"
+let link_missing = <doc <paragraph; <link; "no href">>>
+let vlm = schema_validate(sch, link_missing)
+"link missing href:"; vlm[0].tag == 'link' and vlm[0].message == "required attribute missing"
+
+// 11. Attr defaults participate in validation; custom validators reject bad values.
+let heading_default = <doc <heading; "Default level">>
+"heading default level valid:"; is_valid(sch, heading_default)
+let heading_bad = <doc <heading level: 7; "Too deep">>
+let vhb = schema_validate(sch, heading_bad)
+"heading level validator:"; vhb[0].tag == 'heading' and vhb[0].message == "attribute validation failed"
+let heading_bad_type = <doc <heading level: "1"; "Bad type">>
+let vhbt = schema_validate(sch, heading_bad_type)
+"heading level type first:"; vhbt[0].message == "attribute type mismatch"
+let list_default = <doc <list <list_item; <paragraph; "x">>>>
+"list ordered default valid:"; is_valid(sch, list_default)
+let list_bad_type = <doc <list ordered: "yes"; <list_item; <paragraph; "x">>>>
+let vlbt = schema_validate(sch, list_bad_type)
+"list ordered type:"; vlbt[0].tag == 'list' and vlbt[0].message == "attribute type mismatch"
+
+// 12. Mark policy: marks can be forbidden by parent entries or excluded by marks.
+let strict_para_schema = {
+  doc: sch.doc, paragraph: {role: 'block', content: [{role: 'inline', qty: 'star'}], marks: 'none'},
+  heading: sch.heading, blockquote: sch.blockquote, list: sch.list, list_item: sch.list_item,
+  code_block: sch.code_block, hr: sch.hr, image: sch.image, hard_break: sch.hard_break,
+  link: sch.link, strong: sch.strong, em: sch.em, code: sch.code
+}
+let bad_mark_parent = <doc <paragraph; "x" <strong; "y">>>
+let vmp = schema_validate(strict_para_schema, bad_mark_parent)
+"mark disallowed by parent:"; vmp[0].tag == 'strong' and vmp[0].message == "mark not allowed"
+let bad_nested_mark = <doc <paragraph; <code; <strong; "x">>>>
+let vnm = schema_validate(sch, bad_nested_mark)
+"mark excluded by code:"; vnm[0].tag == 'strong' and vnm[0].message == "mark excluded"

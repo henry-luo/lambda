@@ -413,12 +413,27 @@ fn _format_dash(arr) {
     }
 }
 
+fn _line_cap_name(n) {
+    if (n == 1) { "round" }
+    else if (n == 2) { "square" }
+    else { "butt" }
+}
+
+fn _line_join_name(n) {
+    if (n == 1) { "round" }
+    else if (n == 2) { "bevel" }
+    else { "miter" }
+}
+
 fn _emit_path(st, fill, stroke, fill_rule) {
     if (len(st.segments) == 0) { { state: _clear(st), emit: [] } }
     else {
         let d = _segments_to_d(st.segments)
         let lw = st.line_width
         let dash = _format_dash(st.dash_array)
+        let cap = _line_cap_name(st.line_cap)
+        let join = _line_join_name(st.line_join)
+        let miter = util.fmt_num(st.miter_limit)
         let has_extras = ((dash != "none")
                           or (st.fill_opacity < 1.0)
                           or (st.stroke_opacity < 1.0))
@@ -430,6 +445,9 @@ fn _emit_path(st, fill, stroke, fill_rule) {
                   stroke: stroke,
                   'stroke-opacity': util.fmt_num(st.stroke_opacity),
                   'stroke-width':   util.fmt_num(lw),
+                  'stroke-linecap': cap,
+                  'stroke-linejoin': join,
+                  'stroke-miterlimit': miter,
                   'stroke-dasharray': dash,
                   'stroke-dashoffset': util.fmt_num(st.dash_phase)>
         }
@@ -440,6 +458,9 @@ fn _emit_path(st, fill, stroke, fill_rule) {
                   stroke: stroke,
                   'stroke-opacity': util.fmt_num(st.stroke_opacity),
                   'stroke-width':   util.fmt_num(lw),
+                  'stroke-linecap': cap,
+                  'stroke-linejoin': join,
+                  'stroke-miterlimit': miter,
                   'stroke-dasharray': dash,
                   'stroke-dashoffset': util.fmt_num(st.dash_phase)>
         }
@@ -448,12 +469,18 @@ fn _emit_path(st, fill, stroke, fill_rule) {
                   fill: fill,
                   'fill-rule': "evenodd",
                   stroke: stroke,
+                  'stroke-linecap': cap,
+                  'stroke-linejoin': join,
+                  'stroke-miterlimit': miter,
                   'stroke-width': util.fmt_num(lw)>
         }
         else {
             <path d: d,
                   fill: fill,
                   stroke: stroke,
+                  'stroke-linecap': cap,
+                  'stroke-linejoin': join,
+                  'stroke-miterlimit': miter,
                   'stroke-width': util.fmt_num(lw)>
         }
         { state: _clear(st), emit: [elem] }

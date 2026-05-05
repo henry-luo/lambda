@@ -95,18 +95,53 @@ fn resolve_at(node, path, i) {
 //   parent       the immediate ancestor (null for root)
 //   parent_index the child index of `node` within `parent`
 //   depth        len(pos.path)
+//   ancestors    [{path, node, index}, ...] from root through node
 //   found        false if the path was invalid (other fields null)
+
+fn resolved_ancestors_at(doc, path, depth, max_depth, acc) {
+  if (depth > max_depth) { acc }
+  else {
+    let p = slice(path, 0, depth)
+    let n = resolve_at(doc, p, 0)
+    let idx = if (depth == 0) { -1 } else { p[depth - 1] }
+    resolved_ancestors_at(doc, path, depth + 1, max_depth, [*acc, {path: p, node: n, index: idx}])
+  }
+}
+
+fn resolved_ancestors(doc, path) => resolved_ancestors_at(doc, path, 0, len(path), [])
+
 pub fn resolve_pos(doc, p) {
   let node = resolve_at(doc, p.path, 0)
   if (node == null) {
-    {node: null, parent: null, parent_index: -1, depth: len(p.path), found: false}
+    {node: null, parent: null, parent_index: -1, depth: len(p.path), ancestors: [], found: false}
   } else if (len(p.path) == 0) {
-    {node: doc, parent: null, parent_index: -1, depth: 0, found: true}
+    {node: doc, parent: null, parent_index: -1, depth: 0, ancestors: resolved_ancestors(doc, p.path), found: true}
   } else {
     let parent_path = slice(p.path, 0, len(p.path) - 1)
     let parent = resolve_at(doc, parent_path, 0)
     let pi = p.path[len(p.path) - 1]
-    {node: node, parent: parent, parent_index: pi, depth: len(p.path), found: true}
+    {node: node, parent: parent, parent_index: pi, depth: len(p.path), ancestors: resolved_ancestors(doc, p.path), found: true}
+  }
+}
+
+fn child_count(node) =>
+  if (type(node) == element or type(node) == array) { len(node) } else { 0 }
+
+pub fn resolve_before(r, depth) {
+  if (not r.found or depth < 0 or depth > r.depth) { null }
+  else if (depth == 0) { pos([], 0) }
+  else {
+    let p = r.ancestors[depth].path
+    pos(slice(p, 0, len(p) - 1), p[len(p) - 1])
+  }
+}
+
+pub fn resolve_after(r, depth) {
+  if (not r.found or depth < 0 or depth > r.depth) { null }
+  else if (depth == 0) { pos([], child_count(r.ancestors[0].node)) }
+  else {
+    let p = r.ancestors[depth].path
+    pos(slice(p, 0, len(p) - 1), p[len(p) - 1] + 1)
   }
 }
 
@@ -135,10 +170,45 @@ pub fn node_text(node) {
   else { "" }
 }
 
-// Text extraction for a TextSelection over a doc whose anchor and head sit
-// inside the same text leaf. Returns the substring between min(offset) and
-// max(offset). For cross-leaf selections, returns null (multi-leaf extraction
-// requires DOM-side render_map walking and is deferred).
+// Enumerate string leaves in document order, preserving their source paths.
+fn text_leaves_at(node, path) {
+  if (type(node) == string) { [{path: path, text: node}] }
+  else if (type(node) == element or type(node) == array) {
+    [for (i in 0 to len(node) - 1) for (leaf in text_leaves_at(node[i], [*path, i])) leaf]
+  }
+  else { [] }
+}
+
+fn text_leaves(doc) => text_leaves_at(doc, [])
+
+fn selection_leaf_text(leaf, lo, hi) {
+  if (path_equal(leaf.path, lo.path)) { slice(leaf.text, lo.offset, len(leaf.text)) }
+  else if (path_equal(leaf.path, hi.path)) { slice(leaf.text, 0, hi.offset) }
+  else { leaf.text }
+}
+
+fn selection_parts_at(leaves, lo, hi, i, n, acc) {
+  if (i >= n) { acc }
+  else {
+    let leaf = leaves[i]
+    if (path_compare(leaf.path, lo.path) < 0) {
+      selection_parts_at(leaves, lo, hi, i + 1, n, acc)
+    } else if (path_compare(leaf.path, hi.path) > 0) {
+      acc
+    } else {
+      selection_parts_at(leaves, lo, hi, i + 1, n, [*acc, selection_leaf_text(leaf, lo, hi)])
+    }
+  }
+}
+
+fn selection_text_across_leaves(doc, lo, hi) {
+  let leaves = text_leaves(doc)
+  concat_strings(selection_parts_at(leaves, lo, hi, 0, len(leaves), []))
+}
+
+// Text extraction for a TextSelection. Same-leaf selections return the direct
+// substring; cross-leaf selections concatenate all string leaves in document
+// order between the endpoints.
 pub fn selection_to_string(doc, sel) {
   if (sel.kind == 'all') { node_text(doc) }
   else if (sel.kind == 'node') {
@@ -152,7 +222,7 @@ pub fn selection_to_string(doc, sel) {
       let r = resolve_pos(doc, lo)
       if (not r.found or type(r.node) != string) { "" }
       else { slice(r.node, lo.offset, hi.offset) }
-    } else { null }
+    } else { selection_text_across_leaves(doc, lo, hi) }
   }
   else { null }
 }

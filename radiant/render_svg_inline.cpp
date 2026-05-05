@@ -636,6 +636,79 @@ static Element* lookup_elem_def(SvgDefTable* table, const char* id) {
     return nullptr;
 }
 
+static SvgDefTable* ensure_svg_def_table(SvgRenderContext* ctx) {
+    if (!ctx->defs) {
+        SvgDefTable* table = (SvgDefTable*)mem_alloc(sizeof(SvgDefTable), MEM_CAT_RENDER);
+        memset(table, 0, sizeof(SvgDefTable));
+        ctx->defs = (HashMap*)table;
+    }
+    return (SvgDefTable*)ctx->defs;
+}
+
+static void register_svg_def_element(SvgRenderContext* ctx, Element* elem) {
+    if (!ctx || !elem) return;
+    const char* tag = get_element_tag_name(elem);
+    if (!tag) return;
+    const char* id = get_svg_attr(elem, "id");
+    SvgDefTable* table = ensure_svg_def_table(ctx);
+
+    if (strcmp(tag, "linearGradient") == 0 || strcmp(tag, "radialGradient") == 0) {
+        if (!id) return;
+        SvgGradDef* existing = lookup_grad_def(table, id);
+        SvgGradDef* def = existing;
+        if (!def) {
+            if (table->grad_count >= SVG_MAX_GRAD_DEFS) return;
+            def = &table->grads[table->grad_count++];
+        }
+        memset(def, 0, sizeof(SvgGradDef));
+        str_copy(def->id, sizeof(def->id), id, strlen(id));
+        def->is_radial = (strcmp(tag, "radialGradient") == 0);
+
+        const char* gu = get_svg_attr(elem, "gradientUnits");
+        def->user_space = (gu && strcmp(gu, "userSpaceOnUse") == 0);
+
+        def->x1 = parse_svg_pct_or_num(get_svg_attr(elem, "x1"), 0.0f);
+        def->y1 = parse_svg_pct_or_num(get_svg_attr(elem, "y1"), 0.0f);
+        def->x2 = parse_svg_pct_or_num(get_svg_attr(elem, "x2"), 1.0f);
+        def->y2 = parse_svg_pct_or_num(get_svg_attr(elem, "y2"), 0.0f);
+
+        def->cx = parse_svg_pct_or_num(get_svg_attr(elem, "cx"), 0.5f);
+        def->cy = parse_svg_pct_or_num(get_svg_attr(elem, "cy"), 0.5f);
+        def->r  = parse_svg_pct_or_num(get_svg_attr(elem, "r"),  0.5f);
+
+        for (int64_t s = 0; s < elem->length && def->stop_count < SVG_MAX_GRAD_STOPS; s++) {
+            Element* stop_elem = get_child_element_at(elem, s);
+            if (!stop_elem) continue;
+            const char* stag = get_element_tag_name(stop_elem);
+            if (!stag || strcmp(stag, "stop") != 0) continue;
+
+            SvgGradStop* gs = &def->stops[def->stop_count++];
+            gs->offset = parse_svg_pct_or_num(get_svg_attr(stop_elem, "offset"), 0.0f);
+            const char* sc = get_svg_attr(stop_elem, "stop-color");
+            if (sc) {
+                gs->color = parse_svg_color(sc);
+            } else {
+                gs->color.r = 0; gs->color.g = 0; gs->color.b = 0; gs->color.a = 255;
+            }
+            const char* so = get_svg_attr(stop_elem, "stop-opacity");
+            if (so) gs->color.a = (uint8_t)((float)gs->color.a * strtof(so, nullptr));
+        }
+        log_debug("[SVG] defs: %s id='%s' stops=%d", tag, id, def->stop_count);
+    } else if (id) {
+        SvgElemDef* existing = nullptr;
+        for (int i = 0; i < table->elem_count; i++) {
+            if (strcmp(table->elems[i].id, id) == 0) existing = &table->elems[i];
+        }
+        SvgElemDef* ed = existing;
+        if (!ed) {
+            if (table->elem_count >= SVG_MAX_ELEM_DEFS) return;
+            ed = &table->elems[table->elem_count++];
+        }
+        str_copy(ed->id, sizeof(ed->id), id, strlen(id));
+        ed->elem = elem;
+    }
+}
+
 // ============================================================================
 // Compose element transform with accumulated context transform
 // ============================================================================
@@ -653,6 +726,47 @@ static RdtMatrix compose_element_transform(SvgRenderContext* ctx, Element* elem)
         0, 0, 1
     };
     return rdt_matrix_multiply(&ctx->transform, &local);
+}
+
+static bool parse_pdf_bounds_attr(const char* value, float* x, float* y, float* w, float* h) {
+    if (!value || !x || !y || !w || !h) return false;
+    char* end = nullptr;
+    float vals[4];
+    const char* p = value;
+    for (int i = 0; i < 4; i++) {
+        while (*p && (isspace((unsigned char)*p) || *p == ',')) p++;
+        vals[i] = strtof(p, &end);
+        if (end == p) return false;
+        p = end;
+    }
+    if (vals[2] <= 0.0f || vals[3] <= 0.0f) return false;
+    *x = vals[0];
+    *y = vals[1];
+    *w = vals[2];
+    *h = vals[3];
+    return true;
+}
+
+static void opacity_bounds_from_rect(const RdtMatrix* transform, float x, float y, float w, float h,
+                                     int* out_x0, int* out_y0, int* out_w, int* out_h) {
+    float xs[4] = {x, x + w, x + w, x};
+    float ys[4] = {y, y, y + h, y + h};
+    float min_x = transform->e11 * xs[0] + transform->e12 * ys[0] + transform->e13;
+    float max_x = min_x;
+    float min_y = transform->e21 * xs[0] + transform->e22 * ys[0] + transform->e23;
+    float max_y = min_y;
+    for (int i = 1; i < 4; i++) {
+        float tx = transform->e11 * xs[i] + transform->e12 * ys[i] + transform->e13;
+        float ty = transform->e21 * xs[i] + transform->e22 * ys[i] + transform->e23;
+        if (tx < min_x) min_x = tx;
+        if (tx > max_x) max_x = tx;
+        if (ty < min_y) min_y = ty;
+        if (ty > max_y) max_y = ty;
+    }
+    *out_x0 = (int)floorf(min_x) - 2;
+    *out_y0 = (int)floorf(min_y) - 2;
+    *out_w = (int)ceilf(max_x) - *out_x0 + 2;
+    *out_h = (int)ceilf(max_y) - *out_y0 + 2;
 }
 
 // ============================================================================
@@ -1011,6 +1125,18 @@ static int parse_flag(const char** p) {
     return flag;
 }
 
+static inline bool svg_same_point(float x1, float y1, float x2, float y2) {
+    return fabsf(x1 - x2) < 0.0001f && fabsf(y1 - y2) < 0.0001f;
+}
+
+static inline void svg_emit_pending_move(RdtPath* path, bool* pending_move,
+                                         float pending_x, float pending_y) {
+    if (*pending_move) {
+        rdt_path_move_to(path, pending_x, pending_y);
+        *pending_move = false;
+    }
+}
+
 // arc-to-bezier conversion: SVG endpoint parameterization → center parameterization → cubic beziers
 // follows the SVG spec F.6 "Conversion from endpoint to center parameterization"
 static void arc_to_beziers(RdtPath* path, float x1, float y1,
@@ -1133,8 +1259,12 @@ static RdtPath* parse_svg_path_d(const char* d) {
 
     float cur_x = 0, cur_y = 0;
     float start_x = 0, start_y = 0;
+    float pending_x = 0, pending_y = 0;
     float last_ctrl_x = 0, last_ctrl_y = 0;
     char last_cmd = 0;
+    bool pending_move = false;
+    bool subpath_has_draw = false;
+    bool any_draw = false;
 
     const char* p = d;
 
@@ -1167,9 +1297,12 @@ static RdtPath* parse_svg_path_d(const char* d) {
                 float x = parse_number(&p);
                 float y = parse_number(&p);
                 if (relative) { x += cur_x; y += cur_y; }
-                rdt_path_move_to(path, x, y);
                 cur_x = start_x = x;
                 cur_y = start_y = y;
+                pending_x = x;
+                pending_y = y;
+                pending_move = true;
+                subpath_has_draw = false;
                 last_ctrl_x = cur_x;
                 last_ctrl_y = cur_y;
                 // subsequent coords are implicit lineto
@@ -1177,7 +1310,12 @@ static RdtPath* parse_svg_path_d(const char* d) {
                     x = parse_number(&p);
                     y = parse_number(&p);
                     if (relative) { x += cur_x; y += cur_y; }
-                    rdt_path_line_to(path, x, y);
+                    if (!svg_same_point(cur_x, cur_y, x, y)) {
+                        svg_emit_pending_move(path, &pending_move, pending_x, pending_y);
+                        rdt_path_line_to(path, x, y);
+                        subpath_has_draw = true;
+                        any_draw = true;
+                    }
                     cur_x = x; cur_y = y;
                 }
                 break;
@@ -1187,7 +1325,12 @@ static RdtPath* parse_svg_path_d(const char* d) {
                     float x = parse_number(&p);
                     float y = parse_number(&p);
                     if (relative) { x += cur_x; y += cur_y; }
-                    rdt_path_line_to(path, x, y);
+                    if (!svg_same_point(cur_x, cur_y, x, y)) {
+                        svg_emit_pending_move(path, &pending_move, pending_x, pending_y);
+                        rdt_path_line_to(path, x, y);
+                        subpath_has_draw = true;
+                        any_draw = true;
+                    }
                     cur_x = x; cur_y = y;
                 }
                 last_ctrl_x = cur_x;
@@ -1198,7 +1341,12 @@ static RdtPath* parse_svg_path_d(const char* d) {
                 while (peek_number(p)) {
                     float x = parse_number(&p);
                     if (relative) { x += cur_x; }
-                    rdt_path_line_to(path, x, cur_y);
+                    if (!svg_same_point(cur_x, cur_y, x, cur_y)) {
+                        svg_emit_pending_move(path, &pending_move, pending_x, pending_y);
+                        rdt_path_line_to(path, x, cur_y);
+                        subpath_has_draw = true;
+                        any_draw = true;
+                    }
                     cur_x = x;
                 }
                 last_ctrl_x = cur_x;
@@ -1209,7 +1357,12 @@ static RdtPath* parse_svg_path_d(const char* d) {
                 while (peek_number(p)) {
                     float y = parse_number(&p);
                     if (relative) { y += cur_y; }
-                    rdt_path_line_to(path, cur_x, y);
+                    if (!svg_same_point(cur_x, cur_y, cur_x, y)) {
+                        svg_emit_pending_move(path, &pending_move, pending_x, pending_y);
+                        rdt_path_line_to(path, cur_x, y);
+                        subpath_has_draw = true;
+                        any_draw = true;
+                    }
                     cur_y = y;
                 }
                 last_ctrl_x = cur_x;
@@ -1229,7 +1382,15 @@ static RdtPath* parse_svg_path_d(const char* d) {
                         x2 += cur_x; y2 += cur_y;
                         x += cur_x; y += cur_y;
                     }
-                    rdt_path_cubic_to(path, x1, y1, x2, y2, x, y);
+                    bool degenerate = svg_same_point(cur_x, cur_y, x1, y1)
+                        && svg_same_point(cur_x, cur_y, x2, y2)
+                        && svg_same_point(cur_x, cur_y, x, y);
+                    if (!degenerate) {
+                        svg_emit_pending_move(path, &pending_move, pending_x, pending_y);
+                        rdt_path_cubic_to(path, x1, y1, x2, y2, x, y);
+                        subpath_has_draw = true;
+                        any_draw = true;
+                    }
                     last_ctrl_x = x2; last_ctrl_y = y2;
                     cur_x = x; cur_y = y;
                 }
@@ -1248,7 +1409,15 @@ static RdtPath* parse_svg_path_d(const char* d) {
                         x2 += cur_x; y2 += cur_y;
                         x += cur_x; y += cur_y;
                     }
-                    rdt_path_cubic_to(path, x1, y1, x2, y2, x, y);
+                    bool degenerate = svg_same_point(cur_x, cur_y, x1, y1)
+                        && svg_same_point(cur_x, cur_y, x2, y2)
+                        && svg_same_point(cur_x, cur_y, x, y);
+                    if (!degenerate) {
+                        svg_emit_pending_move(path, &pending_move, pending_x, pending_y);
+                        rdt_path_cubic_to(path, x1, y1, x2, y2, x, y);
+                        subpath_has_draw = true;
+                        any_draw = true;
+                    }
                     last_ctrl_x = x2; last_ctrl_y = y2;
                     cur_x = x; cur_y = y;
                 }
@@ -1269,7 +1438,15 @@ static RdtPath* parse_svg_path_d(const char* d) {
                     float cy1 = cur_y + 2.0f/3.0f * (qy - cur_y);
                     float cx2 = x + 2.0f/3.0f * (qx - x);
                     float cy2 = y + 2.0f/3.0f * (qy - y);
-                    rdt_path_cubic_to(path, cx1, cy1, cx2, cy2, x, y);
+                    bool degenerate = svg_same_point(cur_x, cur_y, cx1, cy1)
+                        && svg_same_point(cur_x, cur_y, cx2, cy2)
+                        && svg_same_point(cur_x, cur_y, x, y);
+                    if (!degenerate) {
+                        svg_emit_pending_move(path, &pending_move, pending_x, pending_y);
+                        rdt_path_cubic_to(path, cx1, cy1, cx2, cy2, x, y);
+                        subpath_has_draw = true;
+                        any_draw = true;
+                    }
                     last_ctrl_x = qx; last_ctrl_y = qy;
                     cur_x = x; cur_y = y;
                 }
@@ -1288,7 +1465,15 @@ static RdtPath* parse_svg_path_d(const char* d) {
                     float cy1 = cur_y + 2.0f/3.0f * (qy - cur_y);
                     float cx2 = x + 2.0f/3.0f * (qx - x);
                     float cy2 = y + 2.0f/3.0f * (qy - y);
-                    rdt_path_cubic_to(path, cx1, cy1, cx2, cy2, x, y);
+                    bool degenerate = svg_same_point(cur_x, cur_y, cx1, cy1)
+                        && svg_same_point(cur_x, cur_y, cx2, cy2)
+                        && svg_same_point(cur_x, cur_y, x, y);
+                    if (!degenerate) {
+                        svg_emit_pending_move(path, &pending_move, pending_x, pending_y);
+                        rdt_path_cubic_to(path, cx1, cy1, cx2, cy2, x, y);
+                        subpath_has_draw = true;
+                        any_draw = true;
+                    }
                     last_ctrl_x = qx; last_ctrl_y = qy;
                     cur_x = x; cur_y = y;
                 }
@@ -1305,7 +1490,12 @@ static RdtPath* parse_svg_path_d(const char* d) {
                     float y = parse_number(&p);
                     if (relative) { x += cur_x; y += cur_y; }
 
-                    arc_to_beziers(path, cur_x, cur_y, rx, ry, rotation, large_arc, sweep, x, y);
+                    if (!svg_same_point(cur_x, cur_y, x, y)) {
+                        svg_emit_pending_move(path, &pending_move, pending_x, pending_y);
+                        arc_to_beziers(path, cur_x, cur_y, rx, ry, rotation, large_arc, sweep, x, y);
+                        subpath_has_draw = true;
+                        any_draw = true;
+                    }
                     cur_x = x; cur_y = y;
                 }
                 last_ctrl_x = cur_x;
@@ -1313,7 +1503,10 @@ static RdtPath* parse_svg_path_d(const char* d) {
                 break;
             }
             case 'Z': {  // closepath
-                rdt_path_close(path);
+                if (subpath_has_draw) {
+                    svg_emit_pending_move(path, &pending_move, pending_x, pending_y);
+                    rdt_path_close(path);
+                }
                 cur_x = start_x;
                 cur_y = start_y;
                 last_ctrl_x = cur_x;
@@ -1325,6 +1518,11 @@ static RdtPath* parse_svg_path_d(const char* d) {
                 rdt_path_free(path);
                 return nullptr;
         }
+    }
+
+    if (!any_draw) {
+        rdt_path_free(path);
+        return nullptr;
     }
 
     return path;
@@ -2396,15 +2594,18 @@ static void render_svg_group(SvgRenderContext* ctx, Element* elem) {
         if (group_op > 1.0f) group_op = 1.0f;
         if (group_op < 1.0f) {
             // use backdrop save/composite so overlapping children composite correctly
-            // compute viewport bounds in screen coords from the accumulated transform
-            float vx0 = ctx->transform.e13;
-            float vy0 = ctx->transform.e23;
-            float vx1 = ctx->transform.e11 * ctx->viewbox_width + ctx->transform.e12 * ctx->viewbox_height + ctx->transform.e13;
-            float vy1 = ctx->transform.e21 * ctx->viewbox_width + ctx->transform.e22 * ctx->viewbox_height + ctx->transform.e23;
-            op_x0 = (int)floorf(fminf(vx0, vx1));
-            op_y0 = (int)floorf(fminf(vy0, vy1));
-            op_w = (int)ceilf(fmaxf(vx0, vx1)) - op_x0;
-            op_h = (int)ceilf(fmaxf(vy0, vy1)) - op_y0;
+            // compute bounds in screen coords from either an explicit PDF Form
+            // bounds hint or, for general SVG, the whole viewport fallback.
+            float bx = 0.0f, by = 0.0f, bw = 0.0f, bh = 0.0f;
+            const char* pdf_bounds = get_svg_attr(elem, "data-pdf-bounds");
+            if (parse_pdf_bounds_attr(pdf_bounds, &bx, &by, &bw, &bh)) {
+                opacity_bounds_from_rect(&ctx->transform, bx, by, bw, bh, &op_x0, &op_y0, &op_w, &op_h);
+            }
+            else {
+                opacity_bounds_from_rect(&ctx->transform, 0.0f, 0.0f,
+                                         ctx->viewbox_width, ctx->viewbox_height,
+                                         &op_x0, &op_y0, &op_w, &op_h);
+            }
             if (op_w > 0 && op_h > 0) {
                 use_opacity_layer = true;
                 if (ctx->dl) {
@@ -2515,67 +2716,10 @@ static void render_svg_children(SvgRenderContext* ctx, Element* elem) {
 static void process_svg_defs(SvgRenderContext* ctx, Element* defs) {
     if (!defs) return;
 
-    if (!ctx->defs) {
-        SvgDefTable* table = (SvgDefTable*)mem_alloc(sizeof(SvgDefTable), MEM_CAT_RENDER);
-        memset(table, 0, sizeof(SvgDefTable));
-        ctx->defs = (HashMap*)table;
-    }
-    SvgDefTable* table = (SvgDefTable*)ctx->defs;
-
     for (int64_t i = 0; i < defs->length; i++) {
         Element* child = get_child_element_at(defs, i);
         if (!child) continue;
-
-        const char* tag = get_element_tag_name(child);
-        if (!tag) continue;
-        const char* id  = get_svg_attr(child, "id");
-
-        if (strcmp(tag, "linearGradient") == 0 || strcmp(tag, "radialGradient") == 0) {
-            if (table->grad_count >= SVG_MAX_GRAD_DEFS) continue;
-            SvgGradDef* def = &table->grads[table->grad_count++];
-            memset(def, 0, sizeof(SvgGradDef));
-            if (id) str_copy(def->id, sizeof(def->id), id, strlen(id));
-
-            def->is_radial = (strcmp(tag, "radialGradient") == 0);
-
-            const char* gu = get_svg_attr(child, "gradientUnits");
-            def->user_space = (gu && strcmp(gu, "userSpaceOnUse") == 0);
-
-            def->x1 = parse_svg_pct_or_num(get_svg_attr(child, "x1"), 0.0f);
-            def->y1 = parse_svg_pct_or_num(get_svg_attr(child, "y1"), 0.0f);
-            def->x2 = parse_svg_pct_or_num(get_svg_attr(child, "x2"), 1.0f);
-            def->y2 = parse_svg_pct_or_num(get_svg_attr(child, "y2"), 0.0f);
-
-            def->cx = parse_svg_pct_or_num(get_svg_attr(child, "cx"), 0.5f);
-            def->cy = parse_svg_pct_or_num(get_svg_attr(child, "cy"), 0.5f);
-            def->r  = parse_svg_pct_or_num(get_svg_attr(child, "r"),  0.5f);
-
-            for (int64_t s = 0; s < child->length && def->stop_count < SVG_MAX_GRAD_STOPS; s++) {
-                Element* stop_elem = get_child_element_at(child, s);
-                if (!stop_elem) continue;
-                const char* stag = get_element_tag_name(stop_elem);
-                if (!stag || strcmp(stag, "stop") != 0) continue;
-
-                SvgGradStop* gs = &def->stops[def->stop_count++];
-                gs->offset = parse_svg_pct_or_num(get_svg_attr(stop_elem, "offset"), 0.0f);
-                const char* sc = get_svg_attr(stop_elem, "stop-color");
-                if (sc) {
-                    gs->color = parse_svg_color(sc);
-                } else {
-                    gs->color.r = 0; gs->color.g = 0; gs->color.b = 0; gs->color.a = 255;
-                }
-                const char* so = get_svg_attr(stop_elem, "stop-opacity");
-                if (so) gs->color.a = (uint8_t)((float)gs->color.a * strtof(so, nullptr));
-            }
-            log_debug("[SVG] defs: %s id='%s' stops=%d", tag, id ? id : "", def->stop_count);
-
-        } else if (id) {
-            if (table->elem_count < SVG_MAX_ELEM_DEFS) {
-                SvgElemDef* ed = &table->elems[table->elem_count++];
-                str_copy(ed->id, sizeof(ed->id), id, strlen(id));
-                ed->elem = child;
-            }
-        }
+        register_svg_def_element(ctx, child);
     }
 }
 
@@ -2621,7 +2765,9 @@ static void render_svg_element(SvgRenderContext* ctx, Element* elem) {
                strcmp(tag, "mask") == 0 ||
                strcmp(tag, "symbol") == 0 ||
                strcmp(tag, "pattern") == 0) {
-        // these are definitions, don't render directly
+        // these are definitions, don't render directly; PDFs may emit them
+        // inline inside transformed groups immediately before their users.
+        register_svg_def_element(ctx, elem);
     } else if (strcmp(tag, "use") == 0) {
         const char* href = get_svg_attr(elem, "href");
         if (!href) href = get_svg_attr(elem, "xlink:href");
@@ -2890,55 +3036,7 @@ void render_svg_to_vec(RdtVector* vec, Element* svg_element, float viewport_widt
                    strcmp(child_tag, "mask") == 0 ||
                    strcmp(child_tag, "symbol") == 0 ||
                    strcmp(child_tag, "pattern") == 0) {
-            // Treat the root as if it were a <defs> container for this child.
-            // process_svg_defs iterates the *children* of its argument, so we
-            // wrap by passing a synthetic single-child view: easiest is to
-            // process inline here.
-            if (!ctx.defs) {
-                SvgDefTable* table = (SvgDefTable*)mem_alloc(sizeof(SvgDefTable), MEM_CAT_RENDER);
-                memset(table, 0, sizeof(SvgDefTable));
-                ctx.defs = (HashMap*)table;
-            }
-            // reuse the same logic by constructing a minimal pseudo-defs walk:
-            // call process_svg_defs on the parent, but with only this child.
-            // Simpler: directly handle the gradient/elem-def cases here.
-            SvgDefTable* table = (SvgDefTable*)ctx.defs;
-            const char* id = get_svg_attr(child, "id");
-            if (strcmp(child_tag, "linearGradient") == 0 || strcmp(child_tag, "radialGradient") == 0) {
-                if (table->grad_count < SVG_MAX_GRAD_DEFS) {
-                    SvgGradDef* def = &table->grads[table->grad_count++];
-                    memset(def, 0, sizeof(SvgGradDef));
-                    if (id) str_copy(def->id, sizeof(def->id), id, strlen(id));
-                    def->is_radial = (strcmp(child_tag, "radialGradient") == 0);
-                    const char* gu = get_svg_attr(child, "gradientUnits");
-                    def->user_space = (gu && strcmp(gu, "userSpaceOnUse") == 0);
-                    def->x1 = parse_svg_pct_or_num(get_svg_attr(child, "x1"), 0.0f);
-                    def->y1 = parse_svg_pct_or_num(get_svg_attr(child, "y1"), 0.0f);
-                    def->x2 = parse_svg_pct_or_num(get_svg_attr(child, "x2"), 1.0f);
-                    def->y2 = parse_svg_pct_or_num(get_svg_attr(child, "y2"), 0.0f);
-                    def->cx = parse_svg_pct_or_num(get_svg_attr(child, "cx"), 0.5f);
-                    def->cy = parse_svg_pct_or_num(get_svg_attr(child, "cy"), 0.5f);
-                    def->r  = parse_svg_pct_or_num(get_svg_attr(child, "r"),  0.5f);
-                    for (int64_t s = 0; s < child->length && def->stop_count < SVG_MAX_GRAD_STOPS; s++) {
-                        Element* stop_elem = get_child_element_at(child, s);
-                        if (!stop_elem) continue;
-                        const char* stag = get_element_tag_name(stop_elem);
-                        if (!stag || strcmp(stag, "stop") != 0) continue;
-                        SvgGradStop* gs = &def->stops[def->stop_count++];
-                        gs->offset = parse_svg_pct_or_num(get_svg_attr(stop_elem, "offset"), 0.0f);
-                        const char* sc = get_svg_attr(stop_elem, "stop-color");
-                        if (sc) gs->color = parse_svg_color(sc);
-                        else { gs->color.r = 0; gs->color.g = 0; gs->color.b = 0; gs->color.a = 255; }
-                        const char* so = get_svg_attr(stop_elem, "stop-opacity");
-                        if (so) gs->color.a = (uint8_t)((float)gs->color.a * strtof(so, nullptr));
-                    }
-                    log_debug("[SVG] root-level def: %s id='%s' stops=%d", child_tag, id ? id : "", def->stop_count);
-                }
-            } else if (id && table->elem_count < SVG_MAX_ELEM_DEFS) {
-                SvgElemDef* ed = &table->elems[table->elem_count++];
-                str_copy(ed->id, sizeof(ed->id), id, strlen(id));
-                ed->elem = child;
-            }
+            register_svg_def_element(&ctx, child);
         }
     }
 

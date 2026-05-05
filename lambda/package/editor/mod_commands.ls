@@ -19,6 +19,7 @@ import .mod_transaction
 import .mod_source_pos
 import .mod_html_paste
 import .mod_paste
+import .mod_md_schema
 
 // ---------------------------------------------------------------------------
 // Selection helpers
@@ -167,14 +168,70 @@ pub fn cmd_move_node(state, source_path, target_parent_path, target_index) {
 // ---------------------------------------------------------------------------
 //
 // If the selection is non-empty, delete it.  Otherwise delete one character
-// to the left/right of the caret within the same text leaf. At leaf boundaries
-// the command returns null (block-merge handled elsewhere).
+// to the left/right of the caret within the same text leaf. At block
+// boundaries, merge with the adjacent sibling block when the caret is in the
+// edge text child.
 
 fn delete_range(state, lo, hi) {
   let step = step_replace_text(lo.path, lo.offset, hi.offset, "")
   let tx0  = tx_begin(state.doc, state.selection)
   let tx1  = tx_step(tx0, step)
   tx_set_selection(tx1, caret(lo))
+}
+
+fn last_text_pos_at(n, path) {
+  if (is_text(n)) { pos(path, len(n.text)) }
+  else if (not is_node(n) or len(n.content) == 0) { null }
+  else { last_text_pos_at(n.content[len(n.content) - 1], [*path, len(n.content) - 1]) }
+}
+
+fn block_merge_allowed(a, b) =>
+  is_node(a) and is_node(b) and a.tag == b.tag
+
+fn merge_blocks_backward(state, p) {
+  if (len(p.path) < 2 or last_index(p.path) != 0) { null }
+  else {
+    let block_path = parent_path(p.path)
+    let block_index = last_index(block_path)
+    let parent = node_at(state.doc, parent_path(block_path))
+    let block = node_at(state.doc, block_path)
+    if (parent == null or block == null or not is_node(parent) or not is_node(block) or block_index <= 0) { null }
+    else {
+      let prev = parent.content[block_index - 1]
+      if (not block_merge_allowed(prev, block)) { null }
+      else {
+        let caret_pos = last_text_pos_at(prev, [*parent_path(block_path), block_index - 1])
+        if (caret_pos == null) { null }
+        else {
+          let merged = node_attrs(prev.tag, prev.attrs, list_concat(prev.content, block.content))
+          let tx0 = tx_begin(state.doc, state.selection)
+          let tx1 = tx_step(tx0, step_replace(parent_path(block_path), block_index - 1, block_index + 1, [merged]))
+          tx_set_selection(tx1, caret(caret_pos))
+        }
+      }
+    }
+  }
+}
+
+fn merge_blocks_forward(state, p) {
+  let block_path = parent_path(p.path)
+  let block = node_at(state.doc, block_path)
+  if (len(p.path) < 2 or block == null or not is_node(block) or last_index(p.path) != len(block.content) - 1) { null }
+  else {
+    let block_index = last_index(block_path)
+    let parent = node_at(state.doc, parent_path(block_path))
+    if (parent == null or block == null or not is_node(parent) or not is_node(block) or block_index + 1 >= len(parent.content)) { null }
+    else {
+      let next = parent.content[block_index + 1]
+      if (not block_merge_allowed(block, next)) { null }
+      else {
+        let merged = node_attrs(block.tag, block.attrs, list_concat(block.content, next.content))
+        let tx0 = tx_begin(state.doc, state.selection)
+        let tx1 = tx_step(tx0, step_replace(parent_path(block_path), block_index, block_index + 2, [merged]))
+        tx_set_selection(tx1, caret(p))
+      }
+    }
+  }
 }
 
 pub fn cmd_delete_backward(state) {
@@ -184,7 +241,7 @@ pub fn cmd_delete_backward(state) {
   else if (not sel_collapsed(sel)) { delete_range(state, sel_lo(sel), sel_hi(sel)) }
   else {
     let p = sel.anchor
-    if (p.offset <= 0) { null }
+    if (p.offset <= 0) { merge_blocks_backward(state, p) }
     else { delete_range(state, pos(p.path, p.offset - 1), p) }
   }
 }
@@ -198,7 +255,7 @@ pub fn cmd_delete_forward(state) {
     let p = sel.anchor
     let leaf = node_at(state.doc, p.path)
     if (leaf == null or not is_text(leaf)) { null }
-    else if (p.offset >= len(leaf.text)) { null }
+    else if (p.offset >= len(leaf.text)) { merge_blocks_forward(state, p) }
     else { delete_range(state, p, pos(p.path, p.offset + 1)) }
   }
 }
@@ -431,6 +488,17 @@ pub fn cmd_set_block_type(state, tag) {
 // command emits a single `replace` step on the grand-parent that swaps one
 // child for two, plus a caret pointing at offset 0 of the new block's leaf.
 
+fn state_default_block(state) =>
+  if (state.default_block == null) md_default_block else state.default_block
+
+fn split_right_tag(state, block, cut, text_len) {
+  let default_block = state_default_block(state)
+  if (cut == text_len and block.tag != default_block) { default_block } else { block.tag }
+}
+
+fn split_right_attrs(block, right_tag) =>
+  if (right_tag == block.tag) { block.attrs } else { [] }
+
 pub fn cmd_split_block(state) {
   let sel = state.selection
   if (sel == null or not sel_collapsed(sel)) { null }
@@ -449,8 +517,9 @@ pub fn cmd_split_block(state) {
           let cut = sel.anchor.offset
           let left_text  = slice(leaf.text, 0, cut)
           let right_text = slice(leaf.text, cut, len(leaf.text))
+          let right_tag = split_right_tag(state, block, cut, len(leaf.text))
           let left_block  = node_attrs(block.tag, block.attrs, [text_marked(left_text,  leaf.marks)])
-          let right_block = node_attrs(block.tag, block.attrs, [text_marked(right_text, leaf.marks)])
+          let right_block = node_attrs(right_tag, split_right_attrs(block, right_tag), [text_marked(right_text, leaf.marks)])
           let grand_path = parent_path(block_path)
           let block_idx  = last_index(block_path)
           let step = step_replace(grand_path, block_idx, block_idx + 1, [left_block, right_block])

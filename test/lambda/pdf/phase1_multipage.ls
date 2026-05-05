@@ -7,16 +7,32 @@
 import pdf: lambda.package.pdf.pdf
 
 pn main() {
-    let doc^err = input("test/pdf/data/basic/advanced_test.pdf", 'pdf')
+    let doc^err = input("test/input/advanced_test.pdf", 'pdf')
     let n = pdf.pdf_page_count(doc)
     var pages = []
     var i = 0
     while (i < n) {
-        pages = pages ++ [format(pdf.pdf_to_svg(doc, i, null), 'xml')]
+        let xml = format(pdf.pdf_to_svg(doc, i, null), 'xml')
+        pages = pages ++ [{
+            has_svg: contains(xml, "<svg "),
+            has_background: contains(xml, "<rect x=\"0\" y=\"0\""),
+            path_count: string_count(xml, "<path "),
+            text_count: string_count(xml, "<text ")
+        }]
         i = i + 1
     }
     print({
         page_count: n,
         pages: pages
     })
+}
+
+fn contains(s, sub) {
+    let parts = split(s, sub)
+    (len(parts) >= 2)
+}
+
+fn string_count(s, sub) {
+    let parts = split(s, sub)
+    len(parts) - 1
 }

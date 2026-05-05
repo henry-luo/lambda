@@ -61,6 +61,16 @@ let tx_fwd = dispatch_intent(
   {input_type: "deleteContentForward", data: null})
 "delete-fwd intent doc:"; doc_text(tx_fwd.doc_after) == "Hllo"
 
+let join_doc = node('doc', [node('paragraph', [text("A")]), node('paragraph', [text("B")])])
+let tx_back_join = dispatch_intent(
+  {doc: join_doc, selection: text_selection(pos([1, 0], 0), pos([1, 0], 0))},
+  {input_type: "deleteContentBackward", data: null})
+"delete-back join intent:"; doc_text(tx_back_join.doc_after) == "AB" and len(tx_back_join.doc_after.content) == 1
+let tx_fwd_join = dispatch_intent(
+  {doc: join_doc, selection: text_selection(pos([0, 0], 1), pos([0, 0], 1))},
+  {input_type: "deleteContentForward", data: null})
+"delete-fwd join intent:"; doc_text(tx_fwd_join.doc_after) == "AB" and len(tx_fwd_join.doc_after.content) == 1
+
 let tx_split = dispatch_intent(s0, {input_type: "insertParagraph", data: null})
 "split intent count:"; len(tx_split.doc_after.content)
 "split intent left:"; doc_text(node_at(tx_split.doc_after, [0])) == "Hello"
@@ -142,5 +152,15 @@ let h_tx_redo = dispatch_intent(h_state2, {input_type: "historyRedo", data: null
 let h_state3 = state_after_intent(h_state2, h_tx_redo)
 "history redo doc:"; doc_text(h_state3.doc) == "Hello!"
 "history redo undo:"; can_undo(h_state3.history)
+
+let hg_state0 = {doc: d0, selection: caret, history: history_new()}
+let hg_tx1 = dispatch_intent(hg_state0, {input_type: "insertText", data: "A"})
+let hg_state1 = state_after_intent(hg_state0, hg_tx1)
+let hg_tx2 = dispatch_intent(hg_state1, {input_type: "insertText", data: "B"})
+let hg_state2 = state_after_intent(hg_state1, hg_tx2)
+"history group depth:"; len(hg_state2.history.undo) == 1
+let hg_undo = dispatch_intent(hg_state2, {input_type: "historyUndo", data: null})
+let hg_state3 = state_after_intent(hg_state2, hg_undo)
+"history group undo doc:"; doc_text(hg_state3.doc) == "Hello"
 
 "unknown intent null:"; dispatch_intent(s0, {input_type: "formatStrikeThrough", data: null}) == null

@@ -164,36 +164,47 @@ pn skip_dict(s: string, i: int) {
     return j
 }
 
-// Skip a BI..ID..EI inline-image segment. `i` is positioned right after
-// the "BI" operator token. Returns { end: pos_after_EI } so the caller
-// can jump past the binary payload, which is otherwise unparseable as
-// PDF tokens. The dict between BI and ID is recorded as a `kind:"dict"`
-// operand on the synthesized op.
+// Parse and skip a BI..ID..EI inline-image segment. `i` is positioned right
+// after the "BI" operator token. Returns { end, info } so the caller can jump
+// past the binary payload, which is otherwise unparseable as PDF tokens.
+// The inline image dictionary is preserved as [{ key, value }, ...] pairs.
 pn skip_inline_image(s: string, i: int) {
     var j = i
-    let n = len(s)
-    // Scan for the "ID" token (whitespace-delimited).
+    let n = int(len(s))
+    var pairs = []
     while (j < n) {
-        // skip whitespace and then look for "ID" followed by ws/binary
+        while (j < n and is_ws(s[j])) { j = j + 1 }
         if (j + 2 <= n and s[j] == "I" and s[j + 1] == "D"
             and (j + 2 == n or is_ws(s[j + 2]))) {
             j = j + 3
-            // After "ID" + one whitespace byte, the binary stream begins.
-            // Scan ahead for "EI" preceded by whitespace.
-            while (j + 2 <= n) {
-                if (is_ws(s[j]) and j + 3 <= n
-                    and s[j + 1] == "E" and s[j + 2] == "I"
-                    and (j + 3 == n or is_ws(s[j + 3]) or s[j + 3] == "/"
-                         or s[j + 3] == "<" or s[j + 3] == "(")) {
-                    return j + 3
+            let data_start = j
+            var k = j
+            while (k + 2 <= n) {
+                if (is_ws(s[k]) and k + 3 <= n
+                    and s[k + 1] == "E" and s[k + 2] == "I"
+                    and (k + 3 == n or is_ws(s[k + 3]) or s[k + 3] == "/"
+                         or s[k + 3] == "<" or s[k + 3] == "(")) {
+                    return {
+                        end: k + 3,
+                        info: { kind: "inline_image", dict: pairs, data: slice_str(s, data_start, k) }
+                    }
                 }
-                j = j + 1
+                k = k + 1
             }
-            return n
+            return { end: n, info: { kind: "inline_image", dict: pairs, data: slice_str(s, data_start, n) } }
         }
-        j = j + 1
+
+        let key = read_operand(s, j)
+        if (key.value is map and key.value.kind == "name") {
+            j = key.end
+            while (j < n and is_ws(s[j])) { j = j + 1 }
+            let val = read_operand(s, j)
+            pairs = pairs ++ [{ key: key.value.value, value: val.value }]
+            j = val.end
+        }
+        else { j = j + 1 }
     }
-    return n
+    return { end: n, info: { kind: "inline_image", dict: pairs, data: "" } }
 }
 
 // ============================================================
@@ -267,13 +278,14 @@ pub pn parse_content_stream(bytes: string) {
             // matching EI, and emit a synthetic `inline_image` op so the
             // interpreter can render a placeholder.
             if (r.value == "BI") {
-                let after_ei = skip_inline_image(bytes, r.end)
-                ops = ops ++ [{ op: "inline_image", operands: stack }]
+                let inline = skip_inline_image(bytes, r.end)
+                ops = ops ++ [{ op: "inline_image", operands: [inline.info] }]
                 stack = []
-                i = after_ei
+                i = inline.end
                 continue
             }
-            ops = ops ++ [{ op: r.value, operands: stack }]
+            let operands = (for (v in stack) v)
+            ops = ops ++ [{ op: r.value, operands: operands }]
             stack = []
             i = r.end
             continue

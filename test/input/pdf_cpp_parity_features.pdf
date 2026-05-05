@@ -1,0 +1,88 @@
+%PDF-1.4
+1 0 obj
+<<
+/Type /Catalog
+/Pages 2 0 R
+>>
+endobj
+
+2 0 obj
+<<
+/Type /Pages
+/Kids [3 0 R]
+/Count 1
+>>
+endobj
+
+3 0 obj
+<<
+/Type /Page
+/Parent 2 0 R
+/Resources <<
+  /Font <<
+    /F1 <<
+      /Type /Font
+      /Subtype /Type1
+      /BaseFont /Helvetica
+    >>
+  >>
+  /ColorSpace <<
+    /CSIdx [/Indexed /DeviceRGB 1 <414243444546>]
+    /CSGray /DeviceGray
+  >>
+>>
+/MediaBox [0 0 400 800]
+/Contents 4 0 R
+>>
+endobj
+
+4 0 obj
+<<
+/Length 211
+>>
+stream
+q
+/CSIdx cs
+0 sc
+50 700 80 40 re
+f
+1 sc
+150 700 80 40 re
+f
+/CSGray cs
+0.5 sc
+250 700 80 40 re
+f
+2 J
+1 j
+3.5 M
+6 w
+[12 4] 2 d
+0 0 0 RG
+50 640 m
+330 640 l
+S
+BT
+/F1 14 Tf
+50 590 Td
+(CPP parity feature PDF) Tj
+ET
+Q
+endstream
+endobj
+
+xref
+0 5
+0000000000 65535 f
+0000000009 00000 n
+0000000059 00000 n
+0000000117 00000 n
+0000000419 00000 n
+trailer
+<<
+/Size 5
+/Root 1 0 R
+>>
+startxref
+681
+%%EOF

@@ -11,6 +11,9 @@ import lambda.package.editor.mod_html_paste
 // ---------------------------------------------------------------------------
 let unknown = node('blink', [text("danger")])
 "drop unknown:"; coerce_to_schema(md_schema, unknown) == null
+let para_with_unknown = node('paragraph', [text("ok"), node('blink', [text("no")])])
+let para_without_unknown = coerce_to_schema(md_schema, para_with_unknown)
+"drop unknown child:"; doc_text(para_without_unknown) == "ok"
 
 // ---------------------------------------------------------------------------
 // 2. Strip unknown marks from a text leaf
@@ -79,6 +82,15 @@ let para = node('paragraph', [text_marked("bold", ['strong', 'evil'])])
 let para2 = coerce_to_schema(md_schema, para)
 "nested marks count:"; len(para2.content[0].marks) == 1
 "nested mark:"; para2.content[0].marks[0] == 'strong'
+
+let code_block_marked = node('code_block', [text_marked("literal", ['strong'])])
+let code_block_clean = coerce_to_schema(md_schema, code_block_marked)
+"code block drops marks:"; len(code_block_clean.content[0].marks) == 0
+
+let code_and_strong = node('paragraph', [text_marked("literal", ['strong', 'code'])])
+let code_and_strong_clean = coerce_to_schema(md_schema, code_and_strong)
+"exclusive mark count:"; len(code_and_strong_clean.content[0].marks) == 1
+"exclusive mark kept:"; code_and_strong_clean.content[0].marks[0] == 'code'
 
 // ---------------------------------------------------------------------------
 // 8. Convert an HTML-like fragment and preserve common inline marks

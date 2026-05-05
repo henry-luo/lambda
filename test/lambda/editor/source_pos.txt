@@ -84,9 +84,39 @@ true
 true
 "r2 node len:"
 5
+"r2 ancestors len:"
+3
+"r2 ancestor root path:"
+0
+"r2 ancestor block tag:"
+'paragraph'
+"r2 before block path len:"
+0
+"r2 before block off:"
+1
+"r2 after block off:"
+2
+"r2 before leaf path:"
+true
+"r2 before leaf off:"
+true
+"r2 after root off:"
+true
+"r2 before bad null:"
+true
 "r3 found:"
 false
 "r3 depth:"
 1
 "r4 found:"
 false
+"select same leaf:"
+true
+"select reversed:"
+true
+"select cross leaf:"
+true
+"select all:"
+true
+"select node:"
+true

@@ -7,7 +7,7 @@ import resolve: lambda.package.pdf.resolve
 import stream:  lambda.package.pdf.stream
 
 pn main() {
-    let doc^err = input("test/pdf/data/basic/test.pdf", 'pdf')
+    let doc^err = input("test/input/test.pdf", 'pdf')
     let page = resolve.page_at(doc, 0)
     let bytes = resolve.page_content_bytes(doc, page)
     let ops = stream.parse_content_stream(bytes)

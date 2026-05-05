@@ -44,20 +44,35 @@ fn new_state(fonts_resolved) {
         ctm:   util.IDENTITY,
         text:  text.new_state(null),
         path:  path.new_state(),
-        fonts: fonts_resolved
+                fonts: fonts_resolved,
+                fill_cs: "DeviceRGB",
+                stroke_cs: "DeviceRGB"
     }
 }
 
 fn _with_text(st, t) {
-    { ctm: st.ctm, text: t, path: st.path, fonts: st.fonts }
+        { ctm: st.ctm, text: t, path: st.path, fonts: st.fonts,
+            fill_cs: st.fill_cs, stroke_cs: st.stroke_cs }
 }
 
 fn _with_path(st, p) {
-    { ctm: st.ctm, text: st.text, path: p, fonts: st.fonts }
+        { ctm: st.ctm, text: st.text, path: p, fonts: st.fonts,
+            fill_cs: st.fill_cs, stroke_cs: st.stroke_cs }
 }
 
 fn _with_ctm(st, m) {
-    { ctm: m, text: st.text, path: st.path, fonts: st.fonts }
+        { ctm: m, text: st.text, path: st.path, fonts: st.fonts,
+            fill_cs: st.fill_cs, stroke_cs: st.stroke_cs }
+}
+
+fn _with_fill_cs(st, cs) {
+        { ctm: st.ctm, text: st.text, path: st.path, fonts: st.fonts,
+            fill_cs: cs, stroke_cs: st.stroke_cs }
+}
+
+fn _with_stroke_cs(st, cs) {
+        { ctm: st.ctm, text: st.text, path: st.path, fonts: st.fonts,
+            fill_cs: st.fill_cs, stroke_cs: cs }
 }
 
 fn _with_clip(st, id) {
@@ -71,7 +86,9 @@ fn _initial_run_state(fonts, init_ctm, inherited_st) {
             ctm:   init_ctm,
             text:  inherited_st.text,
             path:  path.clear_current_path(inherited_st.path),
-            fonts: fonts
+            fonts: fonts,
+            fill_cs: inherited_st.fill_cs,
+            stroke_cs: inherited_st.stroke_cs
         }
     }
 }
@@ -86,7 +103,9 @@ fn _restore_state(saved) {
         ctm:   saved.ctm,
         text:  _safe_text_state(saved.text),
         path:  saved.path,
-        fonts: saved.fonts
+        fonts: saved.fonts,
+        fill_cs: saved.fill_cs,
+        stroke_cs: saved.stroke_cs
     }
 }
 
@@ -106,24 +125,18 @@ fn _font_resource_names(pdf, page) {
 // `emit` is a singleton array (path painters return [elem] or []), so
 // we materialize the result as an array literal rather than a `for`
 // comprehension — Lambda's `++` rejects array/list mixes.
-fn _wrap_emit_with_ctm(emit, ctm, clip_id, has_clip) {
-    if (len(emit) == 0) { emit }
-    else {
-        let needs_xform = not util.is_identity(ctm)
-        let needs_clip  = (has_clip == 1)
-        if (not needs_xform and not needs_clip) { emit }
-        else if (needs_xform and needs_clip) {
-            let xform = util.fmt_matrix(ctm)
-            [<g transform: xform, 'clip-path': "url(#" ++ clip_id ++ ")"; emit[0]>]
-        }
-        else if (needs_xform) {
-            let xform = util.fmt_matrix(ctm)
-            [svg.group(xform, [emit[0]])]
-        }
-        else {
-            [<g 'clip-path': "url(#" ++ clip_id ++ ")"; emit[0]>]
-        }
+pn _wrap_emit_with_ctm(emit, ctm, clip_ids) {
+    if (len(emit) == 0) { return emit }
+    var out = emit[0]
+    if (not util.is_identity(ctm)) {
+        out = svg.group(util.fmt_matrix(ctm), [out])
     }
+    var i = len(clip_ids) - 1
+    while (i >= 0) {
+        out = <g 'clip-path': "url(#" ++ clip_ids[i] ++ ")"; out>
+        i = i - 1
+    }
+    return [out]
 }
 
 // ============================================================
@@ -232,6 +245,38 @@ fn _op_SC(st, ops) {
     _with_text(st1, text.set_stroke(st1.text, c))
 }
 
+fn _op_cs(st, ops) {
+    let op0 = if (len(ops) >= 1) ops[0] else null
+    if (op0 != null) { _with_fill_cs(st, op0) } else { st }
+}
+
+fn _op_CS(st, ops) {
+    let op0 = if (len(ops) >= 1) ops[0] else null
+    if (op0 != null) { _with_stroke_cs(st, op0) } else { st }
+}
+
+fn _op_sc_with_space(st, ops, pdf, page) {
+    let c = color.from_ops_in_space(pdf, page, st.fill_cs, ops)
+    let st1 = _with_path(st, path.set_fill_color(st.path, c))
+    _with_text(st1, text.set_fill(st1.text, c))
+}
+
+fn _op_SC_with_space(st, ops, pdf, page) {
+    let c = color.from_ops_in_space(pdf, page, st.stroke_cs, ops)
+    let st1 = _with_path(st, path.set_stroke_color(st.path, c))
+    _with_text(st1, text.set_stroke(st1.text, c))
+}
+
+fn _set_pattern_fill(st, p) {
+    let st1 = _with_path(st, path.set_fill_color(st.path, p.fill))
+    _with_text(st1, text.set_fill(st1.text, p.fill))
+}
+
+fn _set_pattern_stroke(st, p) {
+    let st1 = _with_path(st, path.set_stroke_color(st.path, p.fill))
+    _with_text(st1, text.set_stroke(st1.text, p.fill))
+}
+
 fn _is_color_op(opr) {
     ((opr == "rg") or (opr == "RG") or (opr == "g") or (opr == "G")
         or (opr == "k") or (opr == "K")
@@ -240,19 +285,17 @@ fn _is_color_op(opr) {
         or (opr == "cs") or (opr == "CS"))
 }
 
-fn _apply_color(st, opr, ops) {
+fn _apply_color(st, opr, ops, pdf, page) {
     if      (opr == "rg") { _op_rg(st, ops) }
     else if (opr == "RG") { _op_RG(st, ops) }
     else if (opr == "g")  { _op_g(st, ops) }
     else if (opr == "G")  { _op_G(st, ops) }
     else if (opr == "k")  { _op_k(st, ops) }
     else if (opr == "K")  { _op_K(st, ops) }
-    else if (opr == "sc"  or opr == "scn") { _op_sc(st, ops) }
-    else if (opr == "SC"  or opr == "SCN") { _op_SC(st, ops) }
-    // cs/CS just select the active colorspace; sc/scn following will
-    // pick up the operand count. We currently ignore the actual space
-    // (no Indexed/ICCBased lookup), which matches "fall back to device
-    // family" rendering.
+    else if (opr == "cs") { _op_cs(st, ops) }
+    else if (opr == "CS") { _op_CS(st, ops) }
+    else if (opr == "sc"  or opr == "scn") { _op_sc_with_space(st, ops, pdf, page) }
+    else if (opr == "SC"  or opr == "SCN") { _op_SC_with_space(st, ops, pdf, page) }
     else                  { st }
 }
 
@@ -460,6 +503,58 @@ fn _clip_prefix_for_do(base, ops, index) {
     else { base ++ "_" ++ nm ++ "_" ++ string(index) ++ "_" }
 }
 
+fn _is_clip_def(el) {
+    if (not (el is element)) { false }
+    else { string(name(el)) == "clipPath" }
+}
+
+fn _is_transparency_group(fc) {
+    if (fc == null or fc.dict == null or fc.dict.Group == null) { false }
+    else { fc.dict.Group.S == "Transparency" }
+}
+
+fn _form_group_opacity(st, fc) {
+    if (not _is_transparency_group(fc)) { 1.0 }
+    else if (st.path.fill_opacity < 1.0) { st.path.fill_opacity }
+    else if (st.path.stroke_opacity < 1.0) { st.path.stroke_opacity }
+    else { 1.0 }
+}
+
+fn _form_bounds_attr(fc) {
+    if (fc == null or fc.dict == null or not (fc.dict.BBox is array) or len(fc.dict.BBox) < 4) { "" }
+    else {
+        let x0 = _num(fc.dict.BBox[0]); let y0 = _num(fc.dict.BBox[1])
+        let x1 = _num(fc.dict.BBox[2]); let y1 = _num(fc.dict.BBox[3])
+        (util.fmt_num(x0) ++ " " ++ util.fmt_num(y0) ++ " " ++
+         util.fmt_num(x1 - x0) ++ " " ++ util.fmt_num(y1 - y0))
+    }
+}
+
+fn _form_child_state(st, fc) {
+    if (_form_group_opacity(st, fc) < 1.0) {
+        _with_path(st, path.set_opacity(st.path, 1.0, 1.0))
+    }
+    else { st }
+}
+
+fn _form_group(children, opacity_value, bounds_attr) {
+    if (opacity_value < 1.0 and bounds_attr != "") {
+        <g opacity: util.fmt_num(opacity_value), 'data-pdf-bounds': bounds_attr;
+            for (c in children) c
+        >
+    }
+    else if (opacity_value < 1.0) {
+        <g opacity: util.fmt_num(opacity_value);
+            for (c in children) c
+        >
+    }
+    else {
+        <g;
+            for (c in children) c
+        >
+    }
+}
+
 // ============================================================
 // Driver
 // ============================================================
@@ -507,17 +602,21 @@ pn _run_ops_with_state(pdf, page, ops, init_ctm, fonts, page_h, clip_prefix, inh
     var pending_clip_d = " "
     var pending_clip_rule = "nonzero"
     var has_pending_clip = 0
-    // Active clip-path SVG id (" " sentinel = none); set after a
-    // W+paint cycle so subsequent emits get wrapped.
-    var active_clip_id = " "
-    var has_active_clip = 0
+    // Active clip-path SVG ids. PDF clips are cumulative intersections, so
+    // each W/W* appends a new clip until the graphics state is restored.
+    var active_clip_ids = []
+    var fill_pattern_name = " "
+    var fill_pattern_id = " "
+    var has_fill_pattern = 0
+    var fill_pattern_emitted = 0
     // Counter for unique <clipPath>/<gradient> ids on this page.
     var def_ctr = 0
+    var emitted_pattern_ids = []
     var i = 0
     let n = len(ops)
     while (i < n) {
         let opr  = ops[i].op
-        let args = ops[i].operands
+        let operands = ops[i].operands
 
         if (opr == "q") {
             stack = stack ++ [{
@@ -525,8 +624,13 @@ pn _run_ops_with_state(pdf, page, ops, init_ctm, fonts, page_h, clip_prefix, inh
                 pending_clip_d: pending_clip_d,
                 pending_clip_rule: pending_clip_rule,
                 has_pending_clip: has_pending_clip,
-                active_clip_id: active_clip_id,
-                has_active_clip: has_active_clip
+                active_clip_ids: active_clip_ids,
+                fill_pattern_name: fill_pattern_name,
+                fill_pattern_id: fill_pattern_id,
+                has_fill_pattern: has_fill_pattern,
+                fill_pattern_emitted: fill_pattern_emitted,
+                fill_cs: st.fill_cs,
+                stroke_cs: st.stroke_cs
             }]
         }
         else if (opr == "Q") {
@@ -537,22 +641,60 @@ pn _run_ops_with_state(pdf, page, ops, init_ctm, fonts, page_h, clip_prefix, inh
                 pending_clip_d = saved.pending_clip_d
                 pending_clip_rule = saved.pending_clip_rule
                 has_pending_clip = saved.has_pending_clip
-                active_clip_id = saved.active_clip_id
-                has_active_clip = saved.has_active_clip
+                active_clip_ids = saved.active_clip_ids
+                fill_pattern_name = saved.fill_pattern_name
+                fill_pattern_id = saved.fill_pattern_id
+                has_fill_pattern = saved.has_fill_pattern
+                fill_pattern_emitted = saved.fill_pattern_emitted
+                st = _with_fill_cs(st, saved.fill_cs)
+                st = _with_stroke_cs(st, saved.stroke_cs)
                 stack = (for (k, v in stack where k < (m - 1)) v)
             }
         }
         else if (opr == "cm") {
-            st = _op_cm(st, args)
+            st = _op_cm(st, operands)
         }
         else if (opr == "Tf") {
             st = st
         }
         else if (_is_color_op(opr)) {
-            st = _apply_color(st, opr, args)
+            var pname = "unused"
+            var has_pattern = 0
+            if (opr == "scn" or opr == "SCN") {
+                let ds = string(operands)
+                let dp = index_of(ds, "value")
+                if (dp >= 0) {
+                    let dr = slice(ds, dp + 8, len(ds))
+                    let name_parts = split(dr, "\"")
+                    if (len(name_parts) >= 1) {
+                        pname = name_parts[0]
+                        has_pattern = 1
+                    }
+                }
+            }
+            if (has_pattern == 1) {
+                let pid = clip_prefix ++ "pat" ++ string(def_ctr)
+                def_ctr = def_ctr + 1
+                let pat = { defs: [], fill: "url(#" ++ pid ++ ")" }
+                if (opr == "scn") {
+                    st = _set_pattern_fill(st, pat)
+                    fill_pattern_name = pname
+                    fill_pattern_id = pid
+                    has_fill_pattern = 1
+                    fill_pattern_emitted = 0
+                }
+                else { st = _set_pattern_stroke(st, pat) }
+            }
+            else {
+                st = _apply_color(st, opr, operands, pdf, page)
+                if (opr == "rg" or opr == "g" or opr == "k" or opr == "sc") {
+                    has_fill_pattern = 0
+                    fill_pattern_emitted = 0
+                }
+            }
         }
         else if (opr == "gs") {
-            st = _apply_gs(st, args, pdf, page)
+            st = _apply_gs(st, operands, pdf, page)
         }
         else if (opr == "W") {
             // Mark current path as pending non-zero clip. The clip is
@@ -579,7 +721,7 @@ pn _run_ops_with_state(pdf, page, ops, init_ctm, fonts, page_h, clip_prefix, inh
             // Shading fill — paint with the named gradient across the
             // current clip region (we approximate via a covering rect).
             let mb = _media_box(page)
-            let s = shading.from_sh_op(pdf, page, st.ctm, args, mb.w, mb.h, def_ctr)
+            let s = shading.from_sh_op(pdf, page, st.ctm, operands, mb.w, mb.h, def_ctr)
             def_ctr = def_ctr + 1
             if (len(s.defs) > 0) {
                 var k = 0
@@ -587,7 +729,7 @@ pn _run_ops_with_state(pdf, page, ops, init_ctm, fonts, page_h, clip_prefix, inh
                 while (k < me) { paths = paths ++ [s.defs[k]]; k = k + 1 }
             }
             if (len(s.emit) > 0) {
-                paths = paths ++ _wrap_emit_with_ctm(s.emit, st.ctm, active_clip_id, has_active_clip)
+                paths = paths ++ _wrap_emit_with_ctm(s.emit, st.ctm, active_clip_ids)
             }
         }
         else if (_is_noop_op(opr)) {
@@ -602,46 +744,50 @@ pn _run_ops_with_state(pdf, page, ops, init_ctm, fonts, page_h, clip_prefix, inh
         else if (opr == "inline_image") {
             // Synthetic op from stream.ls when it skipped a BI..EI
             // segment. Emit a placeholder rect in the local CTM.
-            let imgs = image.apply_inline(st.ctm, args)
+            let imgs = image.apply_inline(st.ctm, operands)
             if (len(imgs) > 0) {
-                paths = paths ++ _wrap_emit_with_ctm(imgs, st.ctm, active_clip_id, has_active_clip)
+                paths = paths ++ _wrap_emit_with_ctm(imgs, st.ctm, active_clip_ids)
             }
         }
         else if (opr == "Do") {
             // Image / Form XObject placement. Interpret Form streams in a
             // smaller recursive pass instead of flattening them into the page
             // stream; large flat op arrays can corrupt later operands.
-            let fc = _form_content_for_do(pdf, page, args)
+            let fc = _form_content_for_do(pdf, page, operands)
             let has_form = (fc != null and fc.data != "")
             if (has_form) {
                 let form_ops = stream.parse_content_stream(fc.data)
                 let form_ctm = util.matrix_mul(fc.matrix, st.ctm)
-                let sub_prefix = _clip_prefix_for_do(clip_prefix, args, i)
-                let sub = _run_ops_with_state(pdf, page, form_ops, form_ctm, fonts, page_h, sub_prefix, st)
+                let sub_prefix = _clip_prefix_for_do(clip_prefix, operands, i)
+                let group_opacity = _form_group_opacity(st, fc)
+                let child_st = _form_child_state(st, fc)
+                let sub = _run_ops_with_state(pdf, page, form_ops, form_ctm, fonts, page_h, sub_prefix, child_st)
+                var defs = []
+                var draws = []
                 var k = 0
                 let me = len(sub.paths)
                 while (k < me) {
-                    if (has_active_clip == 1) {
-                        paths = paths ++ [<g 'clip-path': "url(#" ++ active_clip_id ++ ")"; sub.paths[k]>]
+                    if (_is_clip_def(sub.paths[k])) {
+                        defs = defs ++ [sub.paths[k]]
                     }
                     else {
-                        paths = paths ++ [sub.paths[k]]
+                        draws = draws ++ [sub.paths[k]]
                     }
                     k = k + 1
                 }
+                paths = paths ++ defs
+                if (len(draws) > 0) {
+                    let grouped = _form_group(draws, group_opacity, _form_bounds_attr(fc))
+                    paths = paths ++ _wrap_emit_with_ctm([grouped], util.IDENTITY, active_clip_ids)
+                }
             }
             else {
-                let imgs = image.apply_do(pdf, page, st.ctm, args)
+                let imgs = image.apply_do(pdf, page, st.ctm, operands)
                 if (len(imgs) > 0) {
                     var k = 0
                     let me = len(imgs)
                     while (k < me) {
-                        if (has_active_clip == 1) {
-                            paths = paths ++ [<g 'clip-path': "url(#" ++ active_clip_id ++ ")"; imgs[k]>]
-                        }
-                        else {
-                            paths = paths ++ [imgs[k]]
-                        }
+                        paths = paths ++ _wrap_emit_with_ctm([imgs[k]], util.IDENTITY, active_clip_ids)
                         k = k + 1
                     }
                 }
@@ -649,7 +795,7 @@ pn _run_ops_with_state(pdf, page, ops, init_ctm, fonts, page_h, clip_prefix, inh
         }
         else if (path.handles(opr)) {
             // Path construction / painting / line-state operator.
-            let pr = path.apply_op(st.path, opr, args)
+            let pr = path.apply_op(st.path, opr, operands)
             st = _with_path(st, pr.state)
             // If a W/W* was set immediately before this op AND this op
             // paints (or no-ops via `n`), establish the clip now.
@@ -669,12 +815,19 @@ pn _run_ops_with_state(pdf, page, ops, init_ctm, fonts, page_h, clip_prefix, inh
                     >
                 }
                 paths = paths ++ [cp]
-                active_clip_id = cid
-                has_active_clip = 1
+                active_clip_ids = active_clip_ids ++ [cid]
                 has_pending_clip = 0
             }
             if (len(pr.emit) > 0) {
-                paths = paths ++ _wrap_emit_with_ctm(pr.emit, st.ctm, active_clip_id, has_active_clip)
+                if (has_fill_pattern == 1 and fill_pattern_emitted == 0 and not _list_contains(emitted_pattern_ids, fill_pattern_id)) {
+                    let pat = shading.from_pattern_fill(pdf, page, fill_pattern_name, fill_pattern_id, st.ctm)
+                    var pk = 0
+                    let pn = len(pat.defs)
+                    while (pk < pn) { paths = paths ++ [pat.defs[pk]]; pk = pk + 1 }
+                    emitted_pattern_ids = emitted_pattern_ids ++ [fill_pattern_id]
+                    fill_pattern_emitted = 1
+                }
+                paths = paths ++ _wrap_emit_with_ctm(pr.emit, st.ctm, active_clip_ids)
             }
         }
         else {

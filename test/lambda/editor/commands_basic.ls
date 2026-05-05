@@ -35,9 +35,17 @@ let tx_db = cmd_delete_backward(s0)
 "del-back doc:";  doc_text(tx_db.doc_after) == "Hell, world.Second."
 "del-back caret:"; tx_db.sel_after.anchor.offset == 4
 
-// at start of leaf: returns null
+// at start of first block: returns null
 let s_start = {doc: d0, selection: text_selection(pos([0, 0], 0), pos([0, 0], 0))}
 "del-back at start null:"; cmd_delete_backward(s_start) == null
+
+// at start of a sibling block: joins with previous sibling block
+let s_join_back = {doc: d0, selection: text_selection(pos([1, 0], 0), pos([1, 0], 0))}
+let tx_join_back = cmd_delete_backward(s_join_back)
+"del-back join count:"; len(tx_join_back.doc_after.content) == 1
+"del-back join doc:"; doc_text(tx_join_back.doc_after) == "Hello, world.Second."
+"del-back join caret path:"; path_equal(tx_join_back.sel_after.anchor.path, [0, 0])
+"del-back join caret off:"; tx_join_back.sel_after.anchor.offset == 13
 
 // non-collapsed: deletes the range
 let tx_db2 = cmd_delete_backward(s_sel)
@@ -51,9 +59,16 @@ let tx_df = cmd_delete_forward(s0)
 "del-fwd doc:";   doc_text(tx_df.doc_after) == "Hello world.Second."
 "del-fwd caret:"; tx_df.sel_after.anchor.offset == 5
 
-// at end of leaf: null
+// at end of last leaf: null
 let s_end = {doc: d0, selection: text_selection(pos([0, 0], 13), pos([0, 0], 13))}
-"del-fwd at end null:"; cmd_delete_forward(s_end) == null
+let tx_join_fwd = cmd_delete_forward(s_end)
+"del-fwd join count:"; len(tx_join_fwd.doc_after.content) == 1
+"del-fwd join doc:"; doc_text(tx_join_fwd.doc_after) == "Hello, world.Second."
+"del-fwd join caret path:"; path_equal(tx_join_fwd.sel_after.anchor.path, [0, 0])
+"del-fwd join caret off:"; tx_join_fwd.sel_after.anchor.offset == 13
+
+let s_doc_end = {doc: d0, selection: text_selection(pos([1, 0], 7), pos([1, 0], 7))}
+"del-fwd at doc end null:"; cmd_delete_forward(s_doc_end) == null
 
 // ---------------------------------------------------------------------------
 // cmd_delete_word_backward / cmd_insert_line_break
@@ -134,6 +149,14 @@ let s_at0 = {doc: d0, selection: text_selection(pos([0, 0], 0), pos([0, 0], 0))}
 let tx_sp0 = cmd_split_block(s_at0)
 "split-at-0 left:";  len(doc_text(node_at(tx_sp0.doc_after, [0]))) == 0
 "split-at-0 right:"; doc_text(node_at(tx_sp0.doc_after, [1])) == "Hello, world."
+
+// split at end of a non-default block creates the schema default block
+let heading_doc = node('doc', [node_attrs('heading', [{name: 'level', value: 2}], [text("Title")])])
+let heading_state = {doc: heading_doc, selection: text_selection(pos([0, 0], 5), pos([0, 0], 5))}
+let tx_heading_split = cmd_split_block(heading_state)
+"split heading right tag:"; node_at(tx_heading_split.doc_after, [1]).tag == 'paragraph'
+"split heading right attrs:"; len(node_at(tx_heading_split.doc_after, [1]).attrs) == 0
+"split heading left tag:"; node_at(tx_heading_split.doc_after, [0]).tag == 'heading'
 
 // ---------------------------------------------------------------------------
 // chain — first non-null wins

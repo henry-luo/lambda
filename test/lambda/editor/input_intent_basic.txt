@@ -32,6 +32,10 @@ true
 true
 "delete-fwd intent doc:"
 true
+"delete-back join intent:"
+true
+"delete-fwd join intent:"
+true
 "split intent count:"
 2
 "split intent left:"
@@ -93,6 +97,10 @@ true
 "history redo doc:"
 true
 "history redo undo:"
+true
+"history group depth:"
+true
+"history group undo doc:"
 true
 "unknown intent null:"
 true

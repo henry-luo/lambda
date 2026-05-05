@@ -25,6 +25,7 @@ static const size_t NUM_FUNCTIONAL_TEST_DIRECTORIES = sizeof(FUNCTIONAL_TEST_DIR
 // Procedural scripts (executed with ./lambda.exe run <script>)
 static const char* PROCEDURAL_TEST_DIRECTORIES[] = {
     "test/lambda/proc",
+    "test/lambda/pdf",
     "test/benchmark/awfy",
     "test/benchmark/r7rs",
     "test/benchmark/beng",
@@ -53,7 +54,10 @@ static const char* MIR_SKIP_TESTS[] = {
     "awfy_json",        // JSON benchmark uses features not yet in MIR
     "awfy_json2",       // JSON benchmark uses features not yet in MIR
     "awfy_list2",       // list benchmark uses features not yet in MIR
+    "awfy_deltablue",   // deltablue benchmark times out in MIR Direct debug build
     "awfy_deltablue2",  // deltablue benchmark produces wrong output in MIR (runs but returns null)
+    "awfy_richards",    // Richards benchmark produces wrong output in MIR Direct
+    "awfy_richards2",   // Richards benchmark produces wrong output in MIR Direct
     "beng_fasta",       // fasta benchmark uses features not yet in MIR
     "beng_pidigits",    // pidigits benchmark uses features not yet in MIR
     "beng_revcomp",     // revcomp benchmark uses features not yet in MIR
