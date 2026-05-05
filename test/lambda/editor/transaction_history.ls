@@ -58,6 +58,13 @@ let tx3 = tx_set_meta(tx_set_meta(tx1, 'addToHistory', true), 'scrollIntoView', 
 "meta addToHistory:";   tx_get_meta(tx3, 'addToHistory')
 "meta scrollIntoView:"; tx_get_meta(tx3, 'scrollIntoView')
 "meta missing:";        tx_get_meta(tx3, 'unknown') == null
+let tx3b = tx_set_meta(tx3, 'addToHistory', false)
+"meta override value:"; tx_get_meta(tx3b, 'addToHistory') == false
+"meta override count:"; len(tx3b.meta) == 2
+let tx3c = tx_set_meta({doc_before: d0, doc_after: d0, steps: [], sel_before: sel0, sel_after: sel0,
+  meta: [{name: 'mode', value: 'a'}, {name: 'mode', value: 'b'}]}, 'mode', 'c')
+"meta dedupe value:"; tx_get_meta(tx3c, 'mode') == 'c'
+"meta dedupe count:"; len(tx3c.meta) == 1
 
 // ---------------------------------------------------------------------------
 // History — push / undo / redo

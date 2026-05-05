@@ -44,11 +44,23 @@ pub fn tx_set_selection(tx, sel) =>
   {doc_before: tx.doc_before, doc_after: tx.doc_after, steps: tx.steps,
    sel_before: tx.sel_before, sel_after: sel, meta: tx.meta}
 
-// Attach a metadata entry (e.g. "scrollIntoView", "addToHistory").
+// Attach or replace a metadata entry (e.g. "scrollIntoView", "addToHistory").
+fn meta_set_at(meta, name, value, i, n, acc, replaced) {
+  if (i >= n) {
+    if (replaced) { acc } else { [*acc, {name: name, value: value}] }
+  } else if (meta[i].name == name and not replaced) {
+    meta_set_at(meta, name, value, i + 1, n, [*acc, {name: name, value: value}], true)
+  } else if (meta[i].name == name) {
+    meta_set_at(meta, name, value, i + 1, n, acc, replaced)
+  } else {
+    meta_set_at(meta, name, value, i + 1, n, [*acc, meta[i]], replaced)
+  }
+}
+
 pub fn tx_set_meta(tx, name, value) =>
   {doc_before: tx.doc_before, doc_after: tx.doc_after, steps: tx.steps,
    sel_before: tx.sel_before, sel_after: tx.sel_after,
-   meta: [*tx.meta, {name: name, value: value}]}
+   meta: meta_set_at(tx.meta, name, value, 0, len(tx.meta), [], false)}
 
 fn find_meta_at(meta, name, i, n) {
   if (i >= n) { null }

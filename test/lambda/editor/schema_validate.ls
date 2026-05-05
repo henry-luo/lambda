@@ -107,3 +107,32 @@ let vmp = schema_validate(strict_para_schema, bad_mark_parent)
 let bad_nested_mark = <doc <paragraph; <code; <strong; "x">>>>
 let vnm = schema_validate(sch, bad_nested_mark)
 "mark excluded by code:"; vnm[0].tag == 'strong' and vnm[0].message == "mark excluded"
+
+// 13. Shipped schema exports: markdown alias, CommonMark strict alias, HTML subset.
+"markdown alias valid:"; is_valid(markdown_schema, doc2)
+"commonmark strict valid:"; is_valid(commonmark_strict_schema, nested)
+
+let html_doc = <doc <html;
+  <head; <title; "Page">>
+  <body;
+    <main;
+      <h1; "Title">
+      <p; "Hello " <strong; "there"> <a href: "https://example.com"; "link"> <br> <img src: "photo.jpg", alt: "Photo">>
+      <ul; <li; "one"> <li; <p; "two">>>
+      <table; <tbody; <tr; <th; "Name"> <td; "Lambda">>>>
+    >
+  >
+>>
+"html subset valid:"; is_valid(html5_subset_schema, html_doc)
+
+let html_bad_img = <doc <p; <img alt: "missing">>>
+let vhimg = schema_validate(html5_subset_schema, html_bad_img)
+"html image required attr:"; vhimg[0].tag == 'img' and vhimg[0].message == "required attribute missing"
+
+let html_bad_table = <doc <table; <td; "loose">>>
+let vht = schema_validate(html5_subset_schema, html_bad_table)
+"html table rejects loose cell:"; vht[0].tag == 'table' and vht[0].message == "content does not match schema"
+"markdown image selectable:"; markdown_schema.image.selectable
+"markdown image draggable:"; markdown_schema.image.draggable
+"markdown paragraph editable:"; markdown_schema.paragraph.editable
+"html image selectable:"; html5_subset_schema.img.selectable

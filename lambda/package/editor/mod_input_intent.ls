@@ -26,6 +26,8 @@ fn state_decorations_after(state, tx) =>
 fn tx_adds_history(tx) => tx_get_meta(tx, "addToHistory") != false
 
 fn mark_typing_history(tx) => tx_set_meta(tx, "historyGroup", "typing")
+fn mark_scroll_into_view(tx) =>
+  if (tx == null) { null } else { tx_set_meta(tx, "scrollIntoView", true) }
 
 fn state_history_after(state, tx) {
   let hist_meta = tx_get_meta(tx, "history")
@@ -35,11 +37,16 @@ fn state_history_after(state, tx) {
   else { state.history }
 }
 
+fn state_stored_marks_after(state, tx) {
+  let stored = tx_get_meta(tx, "storedMarks")
+  if (stored != null) { stored } else { state.stored_marks }
+}
+
 pub fn state_after_intent(state, tx) =>
   if (tx == null) state
   else {doc: tx.doc_after, selection: tx.sel_after,
         composition: tx_get_meta(tx, "composition"), decorations: state_decorations_after(state, tx),
-        history: state_history_after(state, tx)}
+        history: state_history_after(state, tx), stored_marks: state_stored_marks_after(state, tx)}
 
 fn history_result_tx(state, r) {
   if (not r.ok) { null }
@@ -83,7 +90,7 @@ pub fn dispatch_composition_intent(state, ev) {
   } else { null }
 }
 
-pub fn dispatch_intent(state, ev) =>
+fn dispatch_intent_raw(state, ev) =>
   if (ev.input_type == "insertText") {
     let tx = cmd_insert_text(state, ev.data)
     if (tx == null) { null } else { mark_typing_history(tx) }
@@ -109,3 +116,5 @@ pub fn dispatch_intent(state, ev) =>
   else if (ev.input_type == "historyUndo") dispatch_history_intent(state, ev)
   else if (ev.input_type == "historyRedo") dispatch_history_intent(state, ev)
   else null
+
+pub fn dispatch_intent(state, ev) => mark_scroll_into_view(dispatch_intent_raw(state, ev))

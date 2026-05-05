@@ -2112,6 +2112,23 @@
                         "icon": "✏️"
                     },
                     {
+                        "source": "test_edit_bridge_gtest.cpp",
+                        "name": "Edit Bridge Session Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "lambda/edit_bridge.cpp"
+                        ],
+                        "binary": "test_edit_bridge_gtest.exe",
+                        "icon": "✏️"
+                    },
+                    {
                         "source": "test_name_pool_gtest.cpp",
                         "name": "NamePool Tests - Phase 5 Name/Symbol Management",
                         "dependencies": [

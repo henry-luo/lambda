@@ -34,6 +34,14 @@ true
 true
 "meta missing:"
 true
+"meta override value:"
+true
+"meta override count:"
+true
+"meta dedupe value:"
+true
+"meta dedupe count:"
+true
 "h0 can_undo:"
 false
 "h0 can_redo:"

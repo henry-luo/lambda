@@ -2,6 +2,7 @@
 import lambda.package.editor.mod_doc
 import lambda.package.editor.mod_source_pos
 import lambda.package.editor.mod_dom_bridge
+import lambda.package.editor.mod_md_schema
 
 let p1 = node('paragraph', [text("Hello, "), text("world.")])
 let p2 = node('paragraph', [text("Second line.")])
@@ -61,6 +62,19 @@ let dsel = dom_lookup_from_source_selection(d, text_selection(pos([0,0], 0), pos
 "dsel anchor kind:"; dsel.anchor.hit_kind == 'text'
 "dsel head off:";    dsel.head.dom_offset == 6
 "dsel head text:";   dsel.head.subtree.text == "Second line."
+
+// Schema-aware selection: atomic/selectable nodes become NodeSelection targets.
+let media_doc = node('doc', [node('paragraph', [text("A"), node_attrs('image', [{name: 'src', value: "x.png"}], []), text("B")])])
+let img_sel = source_selection_from_dom_with_schema(md_schema, media_doc,
+	dom_lookup([0, 1], 0, 'element'), dom_lookup([0, 1], 0, 'element'))
+"schema image node sel:"; img_sel.kind == 'node'
+"schema image sel path:"; path_equal(img_sel.path, [0, 1])
+let text_sel2 = source_selection_from_dom_with_schema(md_schema, media_doc,
+	dom_lookup([0, 0], 1, 'text'), dom_lookup([0, 2], 1, 'text'))
+"schema text remains text:"; text_sel2.kind == 'text'
+let node_dom = dom_lookup_from_source_selection(media_doc, node_selection([0, 1]))
+"node selection dom kind:"; node_dom.hit_kind == 'element'
+"node selection dom path:"; path_equal(node_dom.path, [0, 1])
 
 // ---------------------------------------------------------------------------
 // ancestors_along — root→leaf walk used by event bubbling

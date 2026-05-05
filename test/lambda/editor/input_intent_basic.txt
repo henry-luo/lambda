@@ -2,6 +2,8 @@
 true
 "insert intent caret:"
 true
+"insert intent scroll:"
+true
 "paste intent doc:"
 true
 "paste intent caret:"
@@ -54,13 +56,15 @@ true
 true
 "outdent intent top count:"
 true
-"bold intent mark:"
+"bold intent stored:"
+true
+"bold intent insert mark:"
 true
 "bold intent text:"
 true
-"italic intent mark:"
+"italic intent stored:"
 true
-"underline intent mark:"
+"underline intent stored:"
 true
 "composition start active:"
 true
@@ -93,6 +97,8 @@ true
 "history undo doc:"
 true
 "history undo redo:"
+true
+"history undo scroll:"
 true
 "history redo doc:"
 true

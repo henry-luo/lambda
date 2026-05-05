@@ -207,18 +207,11 @@ fn _emit_text(st, ctm, page_h, content) {
         let px = ctm[0] * tx + ctm[2] * ty + ctm[4]
         let py = ctm[1] * tx + ctm[3] * ty + ctm[5]
         let x = px
-        let y = float(page_h) - py
-        // Effective font size = Tf_size * |Trm.d|. For axis-aligned
-        // CTM/Tm (the overwhelming common case) this reduces to
-        // |Tm.d * CTM.d|. Producers typically emit `... 0 0 -36 ... Tm`
-        // + `1 Tf`, so the visible size lives in Tm.d.
-        let tm_scale  = util.fabs(st.tm[3])
-        let ctm_scale = util.fabs(ctm[3])
-        let combo     = if (tm_scale > 0.0 and ctm_scale > 0.0) tm_scale * ctm_scale
-                        else if (tm_scale > 0.0) tm_scale
-                        else if (ctm_scale > 0.0) ctm_scale
-                        else 1.0
-        let eff_size = st.font_size * combo
+        let y = _svg_text_y(st, ctm, page_h, py)
+        // Effective font size follows the native C++ PDF view path:
+        // Tf_size * sqrt(Trm.a^2 + Trm.b^2). This keeps scaled rotated
+        // text matrices from collapsing to the fallback size.
+        let eff_size = _effective_font_size(st, ctm)
         // Resolve fill / stroke per Tr (text rendering mode).
         //   0 fill          1 stroke         2 fill+stroke   3 invisible
         //   4 fill+clip     5 stroke+clip    6 f+s+clip      7 add-to-clip
@@ -287,17 +280,30 @@ fn _emit_one(st, ctm, page_h, txt) {
     if (el) { [el] } else { [] }
 }
 
+fn _effective_font_size(st, ctm) {
+    let a = st.tm[0] * ctm[0] + st.tm[1] * ctm[2]
+    let b = st.tm[0] * ctm[1] + st.tm[1] * ctm[3]
+    let scale = math.sqrt(a * a + b * b)
+    let size = st.font_size * scale
+    if (size < 1.0) { 12.0 } else { size }
+}
+
+fn _svg_text_y(st, ctm, page_h, py) {
+    if (st.tm[3] < 0.0 and ctm[3] >= 0.0) { py }
+    else { float(page_h) - py }
+}
+
 fn _advance_text(st, dx) {
     let m = [st.tm[0], st.tm[1], st.tm[2], st.tm[3], st.tm[4] + dx, st.tm[5]]
     _with(st, m, st.tlm, st.font_name, st.font_size, st.font_info, st.leading, st.in_text)
 }
 
-fn _text_advance(st, txt) {
-    float(len(txt)) * st.font_size * 0.5 * (st.hor_scale / 100.0)
+fn _text_advance(st, ctm, txt) {
+    float(len(txt)) * _effective_font_size(st, ctm) * 0.5 * (st.hor_scale / 100.0)
 }
 
-fn _tj_adjustment(st, v) {
-    (0.0 - _num(v)) / 1000.0 * st.font_size * (st.hor_scale / 100.0)
+fn _tj_adjustment(st, ctm, v) {
+    (0.0 - _num(v)) / 1000.0 * _effective_font_size(st, ctm) * (st.hor_scale / 100.0)
 }
 
 fn _tj_text(op, font_info) {
@@ -414,7 +420,7 @@ pn _op_TJ(st, ctm, ops, page_h) {
                         has_seg = true
                     }
                     seg_text = seg_text ++ txt
-                    cur = _advance_text(cur, _text_advance(cur, txt))
+                    cur = _advance_text(cur, _text_advance(cur, ctm, txt))
                 }
             }
             else if (it is int or it is float) {
@@ -430,7 +436,7 @@ pn _op_TJ(st, ctm, ops, page_h) {
                     seg_text = ""
                     has_seg = false
                 }
-                cur = _advance_text(cur, _tj_adjustment(cur, adj))
+                cur = _advance_text(cur, _tj_adjustment(cur, ctm, adj))
             }
             i = i + 1
         }
