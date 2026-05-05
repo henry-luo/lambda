@@ -55,6 +55,20 @@ let tx_inline_node_insert = cmd_insert_text({doc: inline_atom_doc, selection: no
 "insert inline node text:"; node_at(tx_inline_node_insert.doc_after, [0, 1]).text == "B"
 "insert inline node caret:"; path_equal(tx_inline_node_insert.sel_after.anchor.path, [0, 1]) and tx_inline_node_insert.sel_after.anchor.offset == 1
 
+let mark_span_doc = node('doc', [node('paragraph', [
+  text_marked("Hello", ['strong']),
+  text(" "),
+  text_marked("world", ['em'])
+])])
+let mark_span_sel = text_selection(pos([0, 0], 2), pos([0, 2], 3))
+let mark_span_state = {doc: mark_span_doc, selection: mark_span_sel}
+let tx_span_insert = cmd_insert_text(mark_span_state, "X")
+"insert span doc:"; doc_text(tx_span_insert.doc_after) == "HeXld"
+"insert span children:"; len(node_at(tx_span_insert.doc_after, [0]).content) == 3
+"insert span mark:"; has_mark(node_at(tx_span_insert.doc_after, [0, 1]).marks, 'strong')
+"insert span tail mark:"; has_mark(node_at(tx_span_insert.doc_after, [0, 2]).marks, 'em')
+"insert span caret:"; path_equal(tx_span_insert.sel_after.anchor.path, [0, 1]) and tx_span_insert.sel_after.anchor.offset == 1
+
 // ---------------------------------------------------------------------------
 // cmd_delete_backward
 // ---------------------------------------------------------------------------
@@ -79,6 +93,14 @@ let tx_join_back = cmd_delete_backward(s_join_back)
 let tx_db2 = cmd_delete_backward(s_sel)
 "del-back range doc:"; doc_text(tx_db2.doc_after) == "Hello, .Second."
 "del-back range caret:"; tx_db2.sel_after.anchor.offset == 7
+let tx_db_span = cmd_delete_backward(mark_span_state)
+"del-back span doc:"; doc_text(tx_db_span.doc_after) == "Held"
+"del-back span caret:"; path_equal(tx_db_span.sel_after.anchor.path, [0, 0]) and tx_db_span.sel_after.anchor.offset == 2
+let full_span_state = {doc: mark_span_doc, selection: text_selection(pos([0, 0], 0), pos([0, 2], 5))}
+let tx_db_full_span = cmd_delete_backward(full_span_state)
+"del-back full span doc:"; doc_text(tx_db_full_span.doc_after) == ""
+"del-back full span leaf:"; is_text(node_at(tx_db_full_span.doc_after, [0, 0]))
+"del-back full span caret:"; path_equal(tx_db_full_span.sel_after.anchor.path, [0, 0]) and tx_db_full_span.sel_after.anchor.offset == 0
 
 let tx_db_all = cmd_delete_backward(s_all)
 "del-back all doc:"; doc_text(tx_db_all.doc_after) == ""
@@ -115,6 +137,9 @@ let tx_df_all = cmd_delete_forward(s_all)
 let tx_df_node = cmd_delete_forward(atom_state)
 "del-fwd node order:"; [for (n in tx_df_node.doc_after.content) doc_text(n)] == ["A", "C"]
 "del-fwd node caret:"; path_equal(tx_df_node.sel_after.anchor.path, []) and tx_df_node.sel_after.anchor.offset == 1
+let tx_df_span = cmd_delete_forward(mark_span_state)
+"del-fwd span doc:"; doc_text(tx_df_span.doc_after) == "Held"
+"del-fwd span caret:"; path_equal(tx_df_span.sel_after.anchor.path, [0, 0]) and tx_df_span.sel_after.anchor.offset == 2
 
 // ---------------------------------------------------------------------------
 // cmd_delete_word_backward / cmd_insert_line_break
@@ -131,6 +156,9 @@ let tx_dw_all = cmd_delete_word_backward(s_all)
 let tx_dw_node = cmd_delete_word_backward(atom_state)
 "del-word node order:"; [for (n in tx_dw_node.doc_after.content) doc_text(n)] == ["A", "C"]
 "del-word node caret:"; path_equal(tx_dw_node.sel_after.anchor.path, []) and tx_dw_node.sel_after.anchor.offset == 1
+let tx_dw_span = cmd_delete_word_backward(mark_span_state)
+"del-word span doc:"; doc_text(tx_dw_span.doc_after) == "Held"
+"del-word span caret:"; path_equal(tx_dw_span.sel_after.anchor.path, [0, 0]) and tx_dw_span.sel_after.anchor.offset == 2
 
 let line_state = {doc: d0, selection: text_selection(pos([0, 0], 5), pos([0, 0], 5))}
 let tx_lb = cmd_insert_line_break(line_state)
@@ -140,6 +168,11 @@ let tx_lb = cmd_insert_line_break(line_state)
 "line-break right:"; node_at(tx_lb.doc_after, [0, 2]).text == ", world."
 "line-break caret path:"; path_equal(tx_lb.sel_after.anchor.path, [0, 2])
 "line-break caret offset:"; tx_lb.sel_after.anchor.offset == 0
+let tx_lb_span = cmd_insert_line_break(mark_span_state)
+"line-break span doc:"; doc_text(tx_lb_span.doc_after) == "Held"
+"line-break span children:"; len(node_at(tx_lb_span.doc_after, [0]).content) == 3
+"line-break span tag:"; node_at(tx_lb_span.doc_after, [0, 1]).tag == 'hard_break'
+"line-break span caret:"; path_equal(tx_lb_span.sel_after.anchor.path, [0, 2]) and tx_lb_span.sel_after.anchor.offset == 0
 
 let list_doc = node('doc', [node_attrs('list', [{name: 'ordered', value: false}], [
   node('list_item', [node('paragraph', [text("A")])]),
@@ -204,6 +237,16 @@ let tx_node_bold = cmd_toggle_mark({doc: d0, selection: node_selection([0])}, 's
 "toggle node second untouched:"; not has_mark(node_at(tx_node_bold.doc_after, [1, 0]).marks, 'strong')
 let tx_node_unbold = cmd_toggle_mark({doc: tx_node_bold.doc_after, selection: node_selection([0])}, 'strong')
 "toggle node remove:"; not has_mark(node_at(tx_node_unbold.doc_after, [0, 0]).marks, 'strong')
+let tx_span_bold = cmd_toggle_mark(mark_span_state, 'strong')
+"toggle span add steps:"; len(tx_span_bold.steps) == 2
+"toggle span first kept:"; has_mark(node_at(tx_span_bold.doc_after, [0, 0]).marks, 'strong')
+"toggle span middle added:"; has_mark(node_at(tx_span_bold.doc_after, [0, 1]).marks, 'strong')
+"toggle span last added:"; has_mark(node_at(tx_span_bold.doc_after, [0, 2]).marks, 'strong')
+let tx_span_unbold = cmd_toggle_mark({doc: tx_span_bold.doc_after, selection: mark_span_sel}, 'strong')
+"toggle span remove steps:"; len(tx_span_unbold.steps) == 3
+"toggle span remove first:"; not has_mark(node_at(tx_span_unbold.doc_after, [0, 0]).marks, 'strong')
+"toggle span remove middle:"; not has_mark(node_at(tx_span_unbold.doc_after, [0, 1]).marks, 'strong')
+"toggle span remove last:"; not has_mark(node_at(tx_span_unbold.doc_after, [0, 2]).marks, 'strong')
 
 // ---------------------------------------------------------------------------
 // cmd_set_block_type
@@ -212,6 +255,19 @@ let tx_h = cmd_set_block_type(s0, 'heading')
 let block_after = node_at(tx_h.doc_after, [0])
 "set-type tag:";   block_after.tag == 'heading'
 "set-type text preserved:"; doc_text(block_after) == "Hello, world."
+let tx_h_node = cmd_set_block_type({doc: d0, selection: node_selection([1])}, 'heading')
+"set-type node tag:"; node_at(tx_h_node.doc_after, [1]).tag == 'heading'
+"set-type node first untouched:"; node_at(tx_h_node.doc_after, [0]).tag == 'paragraph'
+let tx_h_span = cmd_set_block_type(mark_span_state, 'heading')
+"set-type span tag:"; node_at(tx_h_span.doc_after, [0]).tag == 'heading'
+"set-type span text:"; doc_text(node_at(tx_h_span.doc_after, [0])) == "Hello world"
+let tx_h_inline_node = cmd_set_block_type({doc: inline_atom_doc, selection: node_selection([0, 1])}, 'heading')
+"set-type inline node parent:"; node_at(tx_h_inline_node.doc_after, [0]).tag == 'heading'
+let tx_h_all = cmd_set_block_type({doc: d0, selection: all_selection()}, 'heading')
+"set-type all steps:"; len(tx_h_all.steps) == 2
+"set-type all first:"; node_at(tx_h_all.doc_after, [0]).tag == 'heading'
+"set-type all second:"; node_at(tx_h_all.doc_after, [1]).tag == 'heading'
+"set-type all selection:"; tx_h_all.sel_after.kind == 'all'
 
 // ---------------------------------------------------------------------------
 // cmd_split_block — split paragraph[0] at offset 5
@@ -228,6 +284,14 @@ let split_right = node_at(tx_sp.doc_after, [1])
 "split caret offset:"; tx_sp.sel_after.anchor.offset == 0
 // untouched second paragraph still present
 "split tail:"; doc_text(node_at(tx_sp.doc_after, [2])) == "Second."
+
+let tx_sp_span = cmd_split_block(mark_span_state)
+"split span count:"; len(tx_sp_span.doc_after.content) == 2
+"split span left:"; doc_text(node_at(tx_sp_span.doc_after, [0])) == "He"
+"split span right:"; doc_text(node_at(tx_sp_span.doc_after, [1])) == "ld"
+"split span left mark:"; has_mark(node_at(tx_sp_span.doc_after, [0, 0]).marks, 'strong')
+"split span right mark:"; has_mark(node_at(tx_sp_span.doc_after, [1, 0]).marks, 'em')
+"split span caret:"; path_equal(tx_sp_span.sel_after.anchor.path, [1, 0]) and tx_sp_span.sel_after.anchor.offset == 0
 
 // split with caret at offset 0 -> empty left
 let s_at0 = {doc: d0, selection: text_selection(pos([0, 0], 0), pos([0, 0], 0))}

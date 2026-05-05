@@ -49,5 +49,26 @@ let split_editor = edit_exec(heading_editor, edit_cmd_split_block())
 let typed_editor = edit_exec(editor0, edit_cmd_set_block_type('heading'))
 "exec set type:"; node_at(typed_editor.doc, [0]).tag == 'heading'
 
+let node_select_editor = edit_open(node('doc', [
+	node('paragraph', [text("A")]),
+	node('paragraph', [text("B")])
+]), editor_schemas.markdown, node_selection([1]))
+let node_typed_editor = edit_exec(node_select_editor, edit_cmd_set_block_type('heading'))
+"exec set type node:"; node_at(node_typed_editor.doc, [1]).tag == 'heading'
+
+let span_select_editor = edit_open(node('doc', [node('paragraph', [text("A"), text("B")])]),
+	editor_schemas.markdown, text_selection(pos([0, 0], 0), pos([0, 1], 1)))
+let span_typed_editor = edit_exec(span_select_editor, edit_cmd_set_block_type('heading'))
+"exec set type span:"; node_at(span_typed_editor.doc, [0]).tag == 'heading'
+
+let all_select_editor = edit_open(node('doc', [
+	node('paragraph', [text("A")]),
+	node('paragraph', [text("B")])
+]), editor_schemas.markdown, all_selection())
+let all_typed_editor = edit_exec(all_select_editor, edit_cmd_set_block_type('heading'))
+"exec set type all first:"; node_at(all_typed_editor.doc, [0]).tag == 'heading'
+"exec set type all second:"; node_at(all_typed_editor.doc, [1]).tag == 'heading'
+"exec set type all selection:"; all_typed_editor.selection.kind == 'all'
+
 let html_editor = edit_open(<doc <html; <body; <p; "Hi">>>>, editor_schemas.html5_subset, null)
 "open html schema:"; html_editor.schema.html.role == 'block'

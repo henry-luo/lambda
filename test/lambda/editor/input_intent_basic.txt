@@ -42,6 +42,18 @@ true
 true
 "node paste caret:"
 true
+"span type doc:"
+true
+"span type mark:"
+true
+"span delete doc:"
+true
+"span delete caret:"
+true
+"span paste doc:"
+true
+"span paste caret:"
+true
 "delete-back intent doc:"
 true
 "delete-back intent caret:"
@@ -58,9 +70,21 @@ true
 true
 "split intent right empty:"
 true
+"split span intent left:"
+true
+"split span intent right:"
+true
+"split span intent caret:"
+true
 "line-break intent tag:"
 true
 "line-break intent caret:"
+true
+"line-break span intent tag:"
+true
+"line-break span intent doc:"
+true
+"line-break span intent caret:"
 true
 "word-delete intent doc:"
 true
@@ -83,6 +107,12 @@ true
 "bold node mark:"
 true
 "bold node selection:"
+true
+"bold span steps:"
+true
+"bold span middle:"
+true
+"bold span last:"
 true
 "italic intent stored:"
 true

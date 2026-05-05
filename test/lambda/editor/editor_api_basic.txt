@@ -42,5 +42,15 @@ true
 true
 "exec set type:"
 true
+"exec set type node:"
+true
+"exec set type span:"
+true
+"exec set type all first:"
+true
+"exec set type all second:"
+true
+"exec set type all selection:"
+true
 "open html schema:"
 true

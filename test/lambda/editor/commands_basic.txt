@@ -32,6 +32,16 @@ true
 true
 "insert inline node caret:"
 true
+"insert span doc:"
+true
+"insert span children:"
+true
+"insert span mark:"
+true
+"insert span tail mark:"
+true
+"insert span caret:"
+true
 "del-back doc:"
 true
 "del-back caret:"
@@ -49,6 +59,16 @@ true
 "del-back range doc:"
 true
 "del-back range caret:"
+true
+"del-back span doc:"
+true
+"del-back span caret:"
+true
+"del-back full span doc:"
+true
+"del-back full span leaf:"
+true
+"del-back full span caret:"
 true
 "del-back all doc:"
 true
@@ -86,6 +106,10 @@ true
 true
 "del-fwd node caret:"
 true
+"del-fwd span doc:"
+true
+"del-fwd span caret:"
+true
 "del-word doc:"
 true
 "del-word caret:"
@@ -100,6 +124,10 @@ true
 true
 "del-word node caret:"
 true
+"del-word span doc:"
+true
+"del-word span caret:"
+true
 "line-break children:"
 true
 "line-break tag:"
@@ -111,6 +139,14 @@ true
 "line-break caret path:"
 true
 "line-break caret offset:"
+true
+"line-break span doc:"
+true
+"line-break span children:"
+true
+"line-break span tag:"
+true
+"line-break span caret:"
 true
 "indent top count:"
 true
@@ -170,9 +206,43 @@ true
 true
 "toggle node remove:"
 true
+"toggle span add steps:"
+true
+"toggle span first kept:"
+true
+"toggle span middle added:"
+true
+"toggle span last added:"
+true
+"toggle span remove steps:"
+true
+"toggle span remove first:"
+true
+"toggle span remove middle:"
+true
+"toggle span remove last:"
+true
 "set-type tag:"
 true
 "set-type text preserved:"
+true
+"set-type node tag:"
+true
+"set-type node first untouched:"
+true
+"set-type span tag:"
+true
+"set-type span text:"
+true
+"set-type inline node parent:"
+true
+"set-type all steps:"
+true
+"set-type all first:"
+true
+"set-type all second:"
+true
+"set-type all selection:"
 true
 "split block count:"
 3
@@ -189,6 +259,18 @@ true
 "split caret offset:"
 true
 "split tail:"
+true
+"split span count:"
+true
+"split span left:"
+true
+"split span right:"
+true
+"split span left mark:"
+true
+"split span right mark:"
+true
+"split span caret:"
 true
 "split-at-0 left:"
 true
