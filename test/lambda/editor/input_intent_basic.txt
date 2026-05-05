@@ -94,5 +94,9 @@ true
 true
 "history redo undo:"
 true
+"history group depth:"
+true
+"history group undo doc:"
+true
 "unknown intent null:"
 true

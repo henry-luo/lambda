@@ -44,3 +44,11 @@ true
 true
 "sequence rejects wrong head:"
 false
+"choice paragraph ok:"
+true
+"choice heading ok:"
+true
+"choice rejects hr:"
+false
+"backtrack star then paragraph:"
+true

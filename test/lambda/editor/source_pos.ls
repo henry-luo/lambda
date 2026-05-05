@@ -86,3 +86,12 @@ let r3 = resolve_pos(doc, pos([5], 0))
 
 let r4 = resolve_pos(doc, pos([0, 0, 0], 0))
 "r4 found:";       r4.found
+
+// ---------------------------------------------------------------------------
+// selection_to_string
+// ---------------------------------------------------------------------------
+"select same leaf:"; selection_to_string(doc, text_selection(pos([0, 0], 1), pos([0, 0], 4))) == "ell"
+"select reversed:"; selection_to_string(doc, text_selection(pos([0, 0], 4), pos([0, 0], 1))) == "ell"
+"select cross leaf:"; selection_to_string(doc, text_selection(pos([0, 0], 2), pos([1, 0], 3))) == "lloWor"
+"select all:"; selection_to_string(doc, all_selection()) == "HelloWorld"
+"select node:"; selection_to_string(doc, node_selection([1])) == "World"

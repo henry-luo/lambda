@@ -90,3 +90,13 @@ false
 1
 "r4 found:"
 false
+"select same leaf:"
+true
+"select reversed:"
+true
+"select cross leaf:"
+true
+"select all:"
+true
+"select node:"
+true
