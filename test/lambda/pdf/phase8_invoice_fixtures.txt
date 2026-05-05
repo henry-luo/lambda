@@ -1,0 +1,1 @@
+{ invoice: { pages: 1, has_svg: true, has_text: true, has_clip: false, has_gradient: false, has_pattern_fill: false, has_stroke_style: true}, invoice_sample: { pages: 1, has_svg: true, has_text: true, has_clip: true, has_gradient: true, has_pattern_fill: true, has_stroke_style: true}}

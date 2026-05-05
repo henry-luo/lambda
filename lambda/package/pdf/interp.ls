@@ -44,20 +44,35 @@ fn new_state(fonts_resolved) {
         ctm:   util.IDENTITY,
         text:  text.new_state(null),
         path:  path.new_state(),
-        fonts: fonts_resolved
+                fonts: fonts_resolved,
+                fill_cs: "DeviceRGB",
+                stroke_cs: "DeviceRGB"
     }
 }
 
 fn _with_text(st, t) {
-    { ctm: st.ctm, text: t, path: st.path, fonts: st.fonts }
+        { ctm: st.ctm, text: t, path: st.path, fonts: st.fonts,
+            fill_cs: st.fill_cs, stroke_cs: st.stroke_cs }
 }
 
 fn _with_path(st, p) {
-    { ctm: st.ctm, text: st.text, path: p, fonts: st.fonts }
+        { ctm: st.ctm, text: st.text, path: p, fonts: st.fonts,
+            fill_cs: st.fill_cs, stroke_cs: st.stroke_cs }
 }
 
 fn _with_ctm(st, m) {
-    { ctm: m, text: st.text, path: st.path, fonts: st.fonts }
+        { ctm: m, text: st.text, path: st.path, fonts: st.fonts,
+            fill_cs: st.fill_cs, stroke_cs: st.stroke_cs }
+}
+
+fn _with_fill_cs(st, cs) {
+        { ctm: st.ctm, text: st.text, path: st.path, fonts: st.fonts,
+            fill_cs: cs, stroke_cs: st.stroke_cs }
+}
+
+fn _with_stroke_cs(st, cs) {
+        { ctm: st.ctm, text: st.text, path: st.path, fonts: st.fonts,
+            fill_cs: st.fill_cs, stroke_cs: cs }
 }
 
 fn _with_clip(st, id) {
@@ -71,7 +86,9 @@ fn _initial_run_state(fonts, init_ctm, inherited_st) {
             ctm:   init_ctm,
             text:  inherited_st.text,
             path:  path.clear_current_path(inherited_st.path),
-            fonts: fonts
+            fonts: fonts,
+            fill_cs: inherited_st.fill_cs,
+            stroke_cs: inherited_st.stroke_cs
         }
     }
 }
@@ -86,7 +103,9 @@ fn _restore_state(saved) {
         ctm:   saved.ctm,
         text:  _safe_text_state(saved.text),
         path:  saved.path,
-        fonts: saved.fonts
+        fonts: saved.fonts,
+        fill_cs: saved.fill_cs,
+        stroke_cs: saved.stroke_cs
     }
 }
 
@@ -226,6 +245,28 @@ fn _op_SC(st, ops) {
     _with_text(st1, text.set_stroke(st1.text, c))
 }
 
+fn _op_cs(st, ops) {
+    let op0 = if (len(ops) >= 1) ops[0] else null
+    if (op0 != null) { _with_fill_cs(st, op0) } else { st }
+}
+
+fn _op_CS(st, ops) {
+    let op0 = if (len(ops) >= 1) ops[0] else null
+    if (op0 != null) { _with_stroke_cs(st, op0) } else { st }
+}
+
+fn _op_sc_with_space(st, ops, pdf, page) {
+    let c = color.from_ops_in_space(pdf, page, st.fill_cs, ops)
+    let st1 = _with_path(st, path.set_fill_color(st.path, c))
+    _with_text(st1, text.set_fill(st1.text, c))
+}
+
+fn _op_SC_with_space(st, ops, pdf, page) {
+    let c = color.from_ops_in_space(pdf, page, st.stroke_cs, ops)
+    let st1 = _with_path(st, path.set_stroke_color(st.path, c))
+    _with_text(st1, text.set_stroke(st1.text, c))
+}
+
 fn _set_pattern_fill(st, p) {
     let st1 = _with_path(st, path.set_fill_color(st.path, p.fill))
     _with_text(st1, text.set_fill(st1.text, p.fill))
@@ -244,19 +285,17 @@ fn _is_color_op(opr) {
         or (opr == "cs") or (opr == "CS"))
 }
 
-fn _apply_color(st, opr, ops) {
+fn _apply_color(st, opr, ops, pdf, page) {
     if      (opr == "rg") { _op_rg(st, ops) }
     else if (opr == "RG") { _op_RG(st, ops) }
     else if (opr == "g")  { _op_g(st, ops) }
     else if (opr == "G")  { _op_G(st, ops) }
     else if (opr == "k")  { _op_k(st, ops) }
     else if (opr == "K")  { _op_K(st, ops) }
-    else if (opr == "sc"  or opr == "scn") { _op_sc(st, ops) }
-    else if (opr == "SC"  or opr == "SCN") { _op_SC(st, ops) }
-    // cs/CS just select the active colorspace; sc/scn following will
-    // pick up the operand count. We currently ignore the actual space
-    // (no Indexed/ICCBased lookup), which matches "fall back to device
-    // family" rendering.
+    else if (opr == "cs") { _op_cs(st, ops) }
+    else if (opr == "CS") { _op_CS(st, ops) }
+    else if (opr == "sc"  or opr == "scn") { _op_sc_with_space(st, ops, pdf, page) }
+    else if (opr == "SC"  or opr == "SCN") { _op_SC_with_space(st, ops, pdf, page) }
     else                  { st }
 }
 
@@ -589,7 +628,9 @@ pn _run_ops_with_state(pdf, page, ops, init_ctm, fonts, page_h, clip_prefix, inh
                 fill_pattern_name: fill_pattern_name,
                 fill_pattern_id: fill_pattern_id,
                 has_fill_pattern: has_fill_pattern,
-                fill_pattern_emitted: fill_pattern_emitted
+                fill_pattern_emitted: fill_pattern_emitted,
+                fill_cs: st.fill_cs,
+                stroke_cs: st.stroke_cs
             }]
         }
         else if (opr == "Q") {
@@ -605,6 +646,8 @@ pn _run_ops_with_state(pdf, page, ops, init_ctm, fonts, page_h, clip_prefix, inh
                 fill_pattern_id = saved.fill_pattern_id
                 has_fill_pattern = saved.has_fill_pattern
                 fill_pattern_emitted = saved.fill_pattern_emitted
+                st = _with_fill_cs(st, saved.fill_cs)
+                st = _with_stroke_cs(st, saved.stroke_cs)
                 stack = (for (k, v in stack where k < (m - 1)) v)
             }
         }
@@ -643,7 +686,7 @@ pn _run_ops_with_state(pdf, page, ops, init_ctm, fonts, page_h, clip_prefix, inh
                 else { st = _set_pattern_stroke(st, pat) }
             }
             else {
-                st = _apply_color(st, opr, operands)
+                st = _apply_color(st, opr, operands, pdf, page)
                 if (opr == "rg" or opr == "g" or opr == "k" or opr == "sc") {
                     has_fill_pattern = 0
                     fill_pattern_emitted = 0

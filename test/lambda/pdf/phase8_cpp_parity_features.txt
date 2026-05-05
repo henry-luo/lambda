@@ -1,0 +1,1 @@
+{ pages: 1, indexed_first: true, indexed_second: true, device_gray: true, linecap_square: true, linejoin_round: true, miterlimit: true, dasharray: true, text: true}
