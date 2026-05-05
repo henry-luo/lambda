@@ -69,3 +69,14 @@ let tx1 = tx_step(tx0, step_replace_text([0, 0], 0, 0, "X"))
 let mapped_doc_hits = deco_map_tx(doc_hits, tx1)
 "tx mapped first from:"; mapped_doc_hits.items[0].from.offset
 "tx mapped first to:"; mapped_doc_hits.items[0].to.offset
+
+// decorations_project_doc — lower decoration attrs into a renderer-facing tree
+let visual_set = deco_add(doc_hits, deco_node([1], {class: "active-block"}))
+let visual_doc = decorations_project_doc(find_doc, visual_set)
+"visual first span tag:"; visual_doc.content[0].content[0].tag == 'span'
+"visual first span class:"; visual_doc.content[0].content[0].attrs[0].value == "find-hit"
+"visual first span text:"; visual_doc.content[0].content[0].content[0].text == "foo"
+"visual second node class:"; visual_doc.content[1].attrs[0].value == "active-block"
+"visual second prefix:"; visual_doc.content[1].content[0].text == "bar "
+"visual second hit class:"; visual_doc.content[1].content[1].attrs[0].value == "find-hit"
+"visual source unchanged:"; find_doc.content[0].content[0].kind == 'text'

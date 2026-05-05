@@ -42,3 +42,17 @@ true
 1
 "tx mapped first to:"
 4
+"visual first span tag:"
+true
+"visual first span class:"
+true
+"visual first span text:"
+true
+"visual second node class:"
+true
+"visual second prefix:"
+true
+"visual second hit class:"
+true
+"visual source unchanged:"
+true

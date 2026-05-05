@@ -112,6 +112,57 @@ pub fn cmd_paste_html(state, html, fallback_text) =>
   else { cmd_paste_fragment(state, html_to_editor_fragment(html)) }
 
 // ---------------------------------------------------------------------------
+// cmd_insert_at / cmd_move_node — structural drop commands
+// ---------------------------------------------------------------------------
+
+fn valid_insert_index(parent, index) =>
+  parent != null and is_node(parent) and index >= 0 and index <= len(parent.content)
+
+fn insert_selection(parent_path, index, count) =>
+  if (count == 1) { node_selection([*parent_path, index]) }
+  else { text_selection(pos(parent_path, index + count), pos(parent_path, index + count)) }
+
+pub fn cmd_insert_at(state, target_parent_path, target_index, slice) {
+  let parent = node_at(state.doc, target_parent_path)
+  if (not valid_insert_index(parent, target_index)) { null }
+  else if (len(slice) == 0) { null }
+  else {
+    let tx0 = tx_begin(state.doc, state.selection)
+    let tx1 = tx_step(tx0, step_replace(target_parent_path, target_index, target_index, slice))
+    tx_set_selection(tx1, insert_selection(target_parent_path, target_index, len(slice)))
+  }
+}
+
+fn same_parent_move_is_noop(source_index, target_index) =>
+  target_index == source_index or target_index == source_index + 1
+
+fn adjusted_drop_index(source_parent_path, source_index, target_parent_path, target_index) =>
+  if (path_equal(source_parent_path, target_parent_path) and source_index < target_index) { target_index - 1 }
+  else { target_index }
+
+pub fn cmd_move_node(state, source_path, target_parent_path, target_index) {
+  if (len(source_path) == 0) { null }
+  else if (path_is_prefix(source_path, target_parent_path)) { null }
+  else {
+    let source_parent_path = parent_path(source_path)
+    let source_index = last_index(source_path)
+    let source_parent = node_at(state.doc, source_parent_path)
+    let target_parent = node_at(state.doc, target_parent_path)
+    let moved = node_at(state.doc, source_path)
+    if (moved == null or not valid_insert_index(source_parent, source_index) or source_index >= len(source_parent.content)) { null }
+    else if (not valid_insert_index(target_parent, target_index)) { null }
+    else if (path_equal(source_parent_path, target_parent_path) and same_parent_move_is_noop(source_index, target_index)) { null }
+    else {
+      let insert_index = adjusted_drop_index(source_parent_path, source_index, target_parent_path, target_index)
+      let tx0 = tx_begin(state.doc, state.selection)
+      let tx1 = tx_step(tx0, step_replace(source_parent_path, source_index, source_index + 1, []))
+      let tx2 = tx_step(tx1, step_replace(target_parent_path, insert_index, insert_index, [moved]))
+      tx_set_selection(tx2, node_selection([*target_parent_path, insert_index]))
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // cmd_delete_backward / cmd_delete_forward
 // ---------------------------------------------------------------------------
 //
