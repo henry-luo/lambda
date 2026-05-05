@@ -24,6 +24,10 @@ true
 false
 "nested list valid:"
 true
+"markdown table valid:"
+true
+"markdown table rejects loose cell:"
+true
 "string root violations:"
 1
 "string root msg ok:"
@@ -75,4 +79,12 @@ true
 "markdown paragraph editable:"
 true
 "html image selectable:"
+true
+"attr constraints valid:"
+true
+"attr enum constraint:"
+true
+"attr min constraint:"
+true
+"attr max constraint:"
 true

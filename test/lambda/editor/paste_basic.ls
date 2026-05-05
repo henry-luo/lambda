@@ -166,12 +166,22 @@ let html_table_blocks = html_fragment_to_blocks_for_schema(html5_subset_schema, 
 "html schema table row:"; html_table_blocks[0].content[0].content[0].tag == 'tr'
 "html schema table cell:"; html_table_blocks[0].content[0].content[0].content[1].tag == 'td'
 "html schema table text:"; doc_text(html_table_blocks[0]) == "AB"
+let md_table_blocks = html_fragment_to_md_blocks(table_frag)
+"md schema table tag:"; md_table_blocks[0].tag == 'table'
+"md schema table row:"; md_table_blocks[0].content[0].tag == 'tr'
+"md schema table cell:"; md_table_blocks[0].content[0].content[1].tag == 'td'
+"md schema table text:"; doc_text(md_table_blocks[0]) == "AB"
 
 let html_table_state = {doc: node('doc', [node('p', [text("replace")])]), schema: html5_subset_schema, selection: all_selection()}
 let tx_html_table = cmd_paste_html(html_table_state, "<table><tr><td>A</td><td>B</td></tr></table>", "AB")
 "cmd html table paste tag:"; node_at(tx_html_table.doc_after, [0]).tag == 'table'
 "cmd html table paste body:"; node_at(tx_html_table.doc_after, [0, 0]).tag == 'tbody'
 "cmd html table paste text:"; doc_text(tx_html_table.doc_after) == "AB"
+let tx_md_table_paste = cmd_paste_html({doc: node('doc', [node('paragraph', [text("replace")])]), selection: all_selection()},
+  "<table><tr><td>A</td><td>B</td></tr></table>", "AB")
+"cmd md table paste tag:"; node_at(tx_md_table_paste.doc_after, [0]).tag == 'table'
+"cmd md table paste row:"; node_at(tx_md_table_paste.doc_after, [0, 0]).tag == 'tr'
+"cmd md table paste text:"; doc_text(tx_md_table_paste.doc_after) == "AB"
 
 let tx_md_quote = cmd_paste_html({doc: node('doc', [node('paragraph', [text("replace")])]), selection: all_selection()},
   "<blockquote><p>Quoted</p></blockquote><hr><pre><code>code</code></pre>", "Quotedcode")
@@ -194,3 +204,20 @@ let html_schema_para = node_at(tx_html_schema.doc_after, [0])
 "cmd html schema paste tag:"; html_schema_para.tag == 'p'
 "cmd html schema paste text:"; doc_text(html_schema_para) == "Say: Hello world"
 "cmd html schema paste mark:"; html_schema_para.content[2].marks[0] == 'strong'
+
+let loose_list_md = html_fragment_to_md_blocks(node('ul', [text("loose"), node('ul', [node('li', [text("nested")])])]))
+"html loose list outer tag:"; loose_list_md[0].tag == 'list'
+"html loose list item count:"; len(loose_list_md[0].content) == 2
+"html loose list text item:"; doc_text(loose_list_md[0].content[0]) == "loose"
+"html loose nested list tag:"; loose_list_md[0].content[1].content[1].tag == 'list'
+
+let loose_list_html = html_fragment_to_blocks_for_schema(html5_subset_schema, node('ul', [text("loose"), node('ul', [node('li', [text("nested")])])]))
+"html schema loose list tag:"; loose_list_html[0].tag == 'ul'
+"html schema loose list item count:"; len(loose_list_html[0].content) == 2
+"html schema loose nested tag:"; loose_list_html[0].content[1].content[1].tag == 'ul'
+
+let direct_row_table = html_fragment_to_blocks_for_schema(html5_subset_schema,
+  node('table', [node('tr', [node('td', [text("A")])]), node('tr', [node('td', [text("B")])])]))
+"html direct rows table tag:"; direct_row_table[0].tag == 'table'
+"html direct rows wrapped:"; direct_row_table[0].content[0].tag == 'tbody'
+"html direct rows count:"; len(direct_row_table[0].content[0].content) == 2

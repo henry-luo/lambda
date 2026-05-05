@@ -49,6 +49,11 @@ let nested = <doc <list
   <list_item; <paragraph; "outer"> <list <list_item; <paragraph; "inner">>>>
 >>
 "nested list valid:"; is_valid(sch, nested)
+let md_table = <doc <table; <tr; <th; "Name"> <th; "Value">> <tr; <td; "Lang"> <td; "Lambda">>>>
+"markdown table valid:"; is_valid(sch, md_table)
+let md_bad_table = <doc <table; <td; "loose">>>
+let vmdt = schema_validate(sch, md_bad_table)
+"markdown table rejects loose cell:"; vmdt[0].tag == 'table' and vmdt[0].message == "content does not match schema"
 
 // 8. Validation on a non-element root
 let v4 = schema_validate(sch, "just a string")
@@ -136,3 +141,19 @@ let vht = schema_validate(html5_subset_schema, html_bad_table)
 "markdown image draggable:"; markdown_schema.image.draggable
 "markdown paragraph editable:"; markdown_schema.paragraph.editable
 "html image selectable:"; html5_subset_schema.img.selectable
+
+// 14. Declarative attr constraints: enum and min/max checks without a custom validator.
+let constrained_schema = {
+  doc: {role: 'block', content: [{tag: 'box', qty: 'one'}], marks: 'none'},
+  box: {role: 'block', content: [], marks: 'none', attrs: [
+    {name: 'align', type: 'string', one_of: ["left", "center", "right"]},
+    {name: 'level', type: 'int', min: 1, max: 3}
+  ]}
+}
+"attr constraints valid:"; is_valid(constrained_schema, <doc <box align: "center", level: 2>>)
+let enum_bad = schema_validate(constrained_schema, <doc <box align: "sideways", level: 2>>)
+"attr enum constraint:"; enum_bad[0].message == "attribute constraint failed"
+let min_bad = schema_validate(constrained_schema, <doc <box align: "left", level: 0>>)
+"attr min constraint:"; min_bad[0].message == "attribute constraint failed"
+let max_bad = schema_validate(constrained_schema, <doc <box align: "right", level: 4>>)
+"attr max constraint:"; max_bad[0].message == "attribute constraint failed"

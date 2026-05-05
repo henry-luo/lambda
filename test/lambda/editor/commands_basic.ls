@@ -292,7 +292,9 @@ let tx_quote_cross = cmd_wrap_blockquote(cross_block_state)
 "wrap quote cross count:"; len(tx_quote_cross.doc_after.content) == 1
 "wrap quote cross children:"; len(node_at(tx_quote_cross.doc_after, [0]).content) == 2
 
-"insert table markdown null:"; cmd_insert_table(s0, 2, 2, false) == null
+let tx_table_md_plain = cmd_insert_table(s0, 2, 2, false)
+"insert table markdown tag:"; node_at(tx_table_md_plain.doc_after, [1]).tag == 'table'
+"insert table markdown body cell:"; node_at(tx_table_md_plain.doc_after, [1, 0, 0]).tag == 'td'
 let table_state = {doc: node('doc', [node('p', [text("Hi")])]), schema: html5_subset_schema,
   selection: text_selection(pos([0, 0], 2), pos([0, 0], 2))}
 let tx_table = cmd_insert_table(table_state, 2, 3, true)
@@ -334,13 +336,13 @@ let tx_stored_insert = cmd_insert_text({doc: d0, selection: caret0, stored_marks
 "stored insert text:"; node_at(tx_stored_insert.doc_after, [0, 1]).text == "! "
 
 let tx_range_bold = cmd_toggle_mark(s_sel, 'strong')
-let leaf_after = node_at(tx_range_bold.doc_after, [0, 0])
+let leaf_after = node_at(tx_range_bold.doc_after, [0, 1])
 "toggle add:";    has_mark(leaf_after.marks, 'strong')
-"toggle preserves text:"; leaf_after.text == "Hello, world."
+"toggle preserves text:"; doc_text(tx_range_bold.doc_after) == doc_text(d0)
 // toggling again removes
-let s_marked = {doc: tx_range_bold.doc_after, selection: sel_sel}
+let s_marked = {doc: tx_range_bold.doc_after, selection: tx_range_bold.sel_after}
 let tx_unbold = cmd_toggle_mark(s_marked, 'strong')
-let leaf_after2 = node_at(tx_unbold.doc_after, [0, 0])
+let leaf_after2 = node_at(tx_unbold.doc_after, [0, 1])
 "toggle remove:"; not has_mark(leaf_after2.marks, 'strong')
 
 let tx_all_bold = cmd_toggle_mark({doc: d0, selection: all_selection()}, 'strong')
@@ -366,13 +368,13 @@ let tx_node_bold = cmd_toggle_mark({doc: d0, selection: node_selection([0])}, 's
 let tx_node_unbold = cmd_toggle_mark({doc: tx_node_bold.doc_after, selection: node_selection([0])}, 'strong')
 "toggle node remove:"; not has_mark(node_at(tx_node_unbold.doc_after, [0, 0]).marks, 'strong')
 let tx_span_bold = cmd_toggle_mark(mark_span_state, 'strong')
-"toggle span add steps:"; len(tx_span_bold.steps) == 2
+"toggle span add steps:"; len(tx_span_bold.steps) == 1
 "toggle span first kept:"; has_mark(node_at(tx_span_bold.doc_after, [0, 0]).marks, 'strong')
 "toggle span middle added:"; has_mark(node_at(tx_span_bold.doc_after, [0, 1]).marks, 'strong')
 "toggle span last added:"; has_mark(node_at(tx_span_bold.doc_after, [0, 2]).marks, 'strong')
-let tx_span_unbold = cmd_toggle_mark({doc: tx_span_bold.doc_after, selection: mark_span_sel}, 'strong')
-"toggle span remove steps:"; len(tx_span_unbold.steps) == 3
-"toggle span remove first:"; not has_mark(node_at(tx_span_unbold.doc_after, [0, 0]).marks, 'strong')
+let tx_span_unbold = cmd_toggle_mark({doc: tx_span_bold.doc_after, selection: tx_span_bold.sel_after}, 'strong')
+"toggle span remove steps:"; len(tx_span_unbold.steps) == 1
+"toggle span remove first:"; has_mark(node_at(tx_span_unbold.doc_after, [0, 0]).marks, 'strong')
 "toggle span remove middle:"; not has_mark(node_at(tx_span_unbold.doc_after, [0, 1]).marks, 'strong')
 "toggle span remove last:"; not has_mark(node_at(tx_span_unbold.doc_after, [0, 2]).marks, 'strong')
 let tx_cross_bold = cmd_toggle_mark(cross_block_state, 'strong')
@@ -384,6 +386,25 @@ let tx_cross_unbold = cmd_toggle_mark({doc: tx_cross_bold.doc_after, selection: 
 "toggle cross-block remove steps:"; len(tx_cross_unbold.steps) == 2
 "toggle cross-block remove first:"; not has_mark(node_at(tx_cross_unbold.doc_after, [0, 0]).marks, 'strong')
 "toggle cross-block remove second:"; not has_mark(node_at(tx_cross_unbold.doc_after, [1, 0]).marks, 'strong')
+
+let partial_edge_doc = node('doc', [node('paragraph', [text("abcdef")])])
+let partial_edge_state = {doc: partial_edge_doc, selection: text_selection(pos([0, 0], 2), pos([0, 0], 4))}
+let tx_partial_mark = cmd_toggle_mark(partial_edge_state, 'strong')
+"toggle partial text:"; [for (n in node_at(tx_partial_mark.doc_after, [0]).content) n.text] == ["ab", "cd", "ef"]
+"toggle partial middle mark:"; has_mark(node_at(tx_partial_mark.doc_after, [0, 1]).marks, 'strong')
+"toggle partial edges plain:"; not has_mark(node_at(tx_partial_mark.doc_after, [0, 0]).marks, 'strong') and not has_mark(node_at(tx_partial_mark.doc_after, [0, 2]).marks, 'strong')
+"toggle partial selection:"; path_equal(tx_partial_mark.sel_after.anchor.path, [0, 1]) and tx_partial_mark.sel_after.head.offset == 2
+
+let partial_span_doc = node('doc', [node('paragraph', [text("abc"), text("def"), text("ghi")])])
+let partial_span_state = {doc: partial_span_doc, selection: text_selection(pos([0, 0], 1), pos([0, 2], 2))}
+let tx_partial_span = cmd_toggle_mark(partial_span_state, 'strong')
+"toggle partial span text:"; [for (n in node_at(tx_partial_span.doc_after, [0]).content) n.text] == ["a", "bc", "def", "gh", "i"]
+"toggle partial span marks:"; has_mark(node_at(tx_partial_span.doc_after, [0, 1]).marks, 'strong') and has_mark(node_at(tx_partial_span.doc_after, [0, 2]).marks, 'strong') and has_mark(node_at(tx_partial_span.doc_after, [0, 3]).marks, 'strong')
+"toggle partial span edges:"; not has_mark(node_at(tx_partial_span.doc_after, [0, 0]).marks, 'strong') and not has_mark(node_at(tx_partial_span.doc_after, [0, 4]).marks, 'strong')
+let boundary_mark_state = {doc: partial_span_doc, selection: text_selection(pos([0, 0], 1), pos([0, 1], 0))}
+let tx_boundary_mark = cmd_toggle_mark(boundary_mark_state, 'strong')
+"toggle partial boundary text:"; [for (n in node_at(tx_boundary_mark.doc_after, [0]).content) n.text] == ["a", "bc", "def", "ghi"]
+"toggle partial boundary selection:"; path_equal(tx_boundary_mark.sel_after.anchor.path, [0, 1]) and path_equal(tx_boundary_mark.sel_after.head.path, [0, 2]) and tx_boundary_mark.sel_after.head.offset == 0
 
 // ---------------------------------------------------------------------------
 // cmd_set_block_type
@@ -403,6 +424,14 @@ let tx_h_cross = cmd_set_block_type(cross_block_state, 'heading')
 "set-type cross first:"; node_at(tx_h_cross.doc_after, [0]).tag == 'heading'
 "set-type cross second:"; node_at(tx_h_cross.doc_after, [1]).tag == 'heading'
 "set-type cross selection:"; path_equal(tx_h_cross.sel_after.anchor.path, [0, 0]) and path_equal(tx_h_cross.sel_after.head.path, [1, 0])
+let boundary_block_state = {doc: d0, selection: text_selection(pos([0, 0], 2), pos([1, 0], 0))}
+let tx_boundary_bold = cmd_toggle_mark(boundary_block_state, 'strong')
+"toggle boundary first mark:"; has_mark(node_at(tx_boundary_bold.doc_after, [0, 0]).marks, 'strong')
+"toggle boundary second plain:"; not has_mark(node_at(tx_boundary_bold.doc_after, [1, 0]).marks, 'strong')
+let tx_h_boundary = cmd_set_block_type(boundary_block_state, 'heading')
+"set-type boundary steps:"; len(tx_h_boundary.steps) == 1
+"set-type boundary first:"; node_at(tx_h_boundary.doc_after, [0]).tag == 'heading'
+"set-type boundary second:"; node_at(tx_h_boundary.doc_after, [1]).tag == 'paragraph'
 let tx_h_inline_node = cmd_set_block_type({doc: inline_atom_doc, selection: node_selection([0, 1])}, 'heading')
 "set-type inline node parent:"; node_at(tx_h_inline_node.doc_after, [0]).tag == 'heading'
 let tx_h_all = cmd_set_block_type({doc: d0, selection: all_selection()}, 'heading')
@@ -494,6 +523,18 @@ let tx_cross_paste_blocks = cmd_paste_html(cross_block_state, "<p>A</p><p>B</p>"
 "paste cross-block block count:"; len(tx_cross_paste_blocks.doc_after.content) == 2
 "paste cross-block block doc:"; [for (n in tx_cross_paste_blocks.doc_after.content) doc_text(n)] == ["Hello, A", "Bond."]
 "paste cross-block block caret:"; path_equal(tx_cross_paste_blocks.sel_after.anchor.path, [1, 1]) and tx_cross_paste_blocks.sel_after.anchor.offset == 4
+
+let tx_boundary_quote = cmd_wrap_blockquote(boundary_block_state)
+"wrap boundary count:"; len(node_at(tx_boundary_quote.doc_after, [0]).content) == 1
+"wrap boundary second:"; node_at(tx_boundary_quote.doc_after, [1]).tag == 'paragraph'
+let tx_boundary_hr = cmd_insert_horizontal_rule(boundary_block_state)
+"insert boundary hr first:"; node_at(tx_boundary_hr.doc_after, [0]).tag == 'hr'
+"insert boundary hr second:"; node_at(tx_boundary_hr.doc_after, [1]).tag == 'paragraph'
+
+let tx_md_table = cmd_insert_table(s0, 2, 2, true)
+"insert md table tag:"; node_at(tx_md_table.doc_after, [1]).tag == 'table'
+"insert md table header:"; node_at(tx_md_table.doc_after, [1, 0, 0]).tag == 'th'
+"insert md table selected:"; path_equal(tx_md_table.sel_after.path, [1])
 
 let tx_move_later = cmd_move_node(drop_state, [0], [], 3)
 "move later order:"; [for (n in tx_move_later.doc_after.content) doc_text(n)] == ["B", "C", "A"]

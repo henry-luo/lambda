@@ -1,0 +1,1 @@
+{ count: 2, fill_black: true, stroke_black: true, not_gray_fill: true, not_gray_stroke: true}

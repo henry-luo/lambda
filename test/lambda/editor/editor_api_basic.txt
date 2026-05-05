@@ -38,6 +38,16 @@ true
 true
 "exec stored insert mark:"
 true
+"set selection clears stored:"
+true
+"set selection event:"
+true
+"apply tx doc:"
+true
+"apply tx history:"
+true
+"apply tx selection:"
+true
 "exec paste text:"
 true
 "exec delete backward:"
@@ -105,6 +115,10 @@ true
 "exec html table tag:"
 true
 "exec html table header:"
+true
+"exec md table tag:"
+true
+"exec md table header:"
 true
 "exec html add row:"
 true

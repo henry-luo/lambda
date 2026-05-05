@@ -78,10 +78,58 @@ fn link_node(schema, n) =>
 
 fn blockquote_node(schema, n) => node('blockquote', coerce_children(schema, convert_children_schema(schema, n), 'block'))
 fn code_block_node(schema, n) => node(code_block_tag(schema), [text(doc_text(node('fragment', convert_children_schema(schema, n))))])
-fn table_node(schema, n) => node('table', convert_children_schema(schema, n))
+fn table_node(schema, n) => node('table', normalize_table_children(schema, convert_children_schema(schema, n)))
 fn table_section_node(schema, tag, n) => node(tag, convert_children_schema(schema, n))
 fn table_row_node(schema, n) => node('tr', convert_children_schema(schema, n))
 fn table_cell_node(schema, tag, n) => node(tag, convert_inline_schema(schema, n))
+
+fn is_list_node(schema, n) {
+  if (not is_node(n)) { false }
+  else if (html_schema_mode(schema)) { n.tag == 'ul' or n.tag == 'ol' }
+  else { n.tag == 'list' }
+}
+
+fn is_list_item_node(schema, n) => is_node(n) and n.tag == list_item_tag(schema)
+
+fn list_item_from_loose(schema, n) {
+  if (is_list_node(schema, n)) { node(list_item_tag(schema), [node(paragraph_tag(schema), []), n]) }
+  else { node(list_item_tag(schema), list_item_blocks_schema(schema, node('fragment', [n]))) }
+}
+
+fn normalize_list_children_at(schema, kids, i, n, acc) {
+  if (i >= n) { acc }
+  else if (is_list_item_node(schema, kids[i])) { normalize_list_children_at(schema, kids, i + 1, n, [*acc, kids[i]]) }
+  else { normalize_list_children_at(schema, kids, i + 1, n, [*acc, list_item_from_loose(schema, kids[i])]) }
+}
+
+fn normalize_list_children(schema, kids) => normalize_list_children_at(schema, kids, 0, len(kids), [])
+
+fn has_table_section(kids, i, n) {
+  if (i >= n) { false }
+  else if (is_node(kids[i]) and (kids[i].tag == 'thead' or kids[i].tag == 'tbody' or kids[i].tag == 'tfoot')) { true }
+  else { has_table_section(kids, i + 1, n) }
+}
+
+fn table_direct_rows(kids, i, n, acc) {
+  if (i >= n) { acc }
+  else if (is_node(kids[i]) and kids[i].tag == 'tr') { table_direct_rows(kids, i + 1, n, [*acc, kids[i]]) }
+  else { table_direct_rows(kids, i + 1, n, acc) }
+}
+
+fn table_non_rows(kids, i, n, acc) {
+  if (i >= n) { acc }
+  else if (is_node(kids[i]) and kids[i].tag == 'tr') { table_non_rows(kids, i + 1, n, acc) }
+  else { table_non_rows(kids, i + 1, n, [*acc, kids[i]]) }
+}
+
+fn normalize_table_children(schema, kids) {
+  if (not html_schema_mode(schema) or has_table_section(kids, 0, len(kids))) { kids }
+  else {
+    let rows = table_direct_rows(kids, 0, len(kids), [])
+    let rest = table_non_rows(kids, 0, len(kids), [])
+    if (len(rows) == 0) { kids } else { [node('tbody', rows), *rest] }
+  }
+}
 
 fn convert_children_at_schema(schema, kids, i, n, acc) {
   if (i >= n) { acc }
@@ -130,8 +178,8 @@ pub fn html_to_editor_fragment_for_schema(schema, n) {
     else if (tag == 'a') { [link_node(schema, n)] }
     else if (tag == 'br') { [node(schema_hard_break(schema), [])] }
     else if (tag == 'img') { [image_node(schema, n)] }
-    else if (tag == 'ul') { [node_attrs(list_tag(schema, false), [{name: 'ordered', value: false}], convert_children_schema(schema, n))] }
-    else if (tag == 'ol') { [node_attrs(list_tag(schema, true), [{name: 'ordered', value: true}], convert_children_schema(schema, n))] }
+    else if (tag == 'ul') { [node_attrs(list_tag(schema, false), [{name: 'ordered', value: false}], normalize_list_children(schema, convert_children_schema(schema, n)))] }
+    else if (tag == 'ol') { [node_attrs(list_tag(schema, true), [{name: 'ordered', value: true}], normalize_list_children(schema, convert_children_schema(schema, n)))] }
     else if (tag == 'li') { [node(list_item_tag(schema), list_item_blocks_schema(schema, n))] }
     else if (tag == 'table' and schema.table != null) { [table_node(schema, n)] }
     else if ((tag == 'thead' or tag == 'tbody' or tag == 'tfoot') and schema[tag] != null) { [table_section_node(schema, tag, n)] }

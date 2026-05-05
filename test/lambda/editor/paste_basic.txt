@@ -120,11 +120,25 @@ true
 true
 "html schema table text:"
 true
+"md schema table tag:"
+true
+"md schema table row:"
+true
+"md schema table cell:"
+true
+"md schema table text:"
+true
 "cmd html table paste tag:"
 true
 "cmd html table paste body:"
 true
 "cmd html table paste text:"
+true
+"cmd md table paste tag:"
+true
+"cmd md table paste row:"
+true
+"cmd md table paste text:"
 true
 "cmd md block paste quote:"
 true
@@ -147,4 +161,24 @@ true
 "cmd html schema paste text:"
 true
 "cmd html schema paste mark:"
+true
+"html loose list outer tag:"
+true
+"html loose list item count:"
+true
+"html loose list text item:"
+true
+"html loose nested list tag:"
+true
+"html schema loose list tag:"
+true
+"html schema loose list item count:"
+true
+"html schema loose nested tag:"
+true
+"html direct rows table tag:"
+true
+"html direct rows wrapped:"
+true
+"html direct rows count:"
 true

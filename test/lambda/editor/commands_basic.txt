@@ -270,7 +270,9 @@ true
 true
 "wrap quote cross children:"
 true
-"insert table markdown null:"
+"insert table markdown tag:"
+true
+"insert table markdown body cell:"
 true
 "insert table tag:"
 true
@@ -374,6 +376,24 @@ true
 true
 "toggle cross-block remove second:"
 true
+"toggle partial text:"
+true
+"toggle partial middle mark:"
+true
+"toggle partial edges plain:"
+true
+"toggle partial selection:"
+true
+"toggle partial span text:"
+true
+"toggle partial span marks:"
+true
+"toggle partial span edges:"
+true
+"toggle partial boundary text:"
+true
+"toggle partial boundary selection:"
+true
 "set-type tag:"
 true
 "set-type text preserved:"
@@ -393,6 +413,16 @@ true
 "set-type cross second:"
 true
 "set-type cross selection:"
+true
+"toggle boundary first mark:"
+true
+"toggle boundary second plain:"
+true
+"set-type boundary steps:"
+true
+"set-type boundary first:"
+true
+"set-type boundary second:"
 true
 "set-type inline node parent:"
 true
@@ -465,6 +495,20 @@ true
 "paste cross-block block doc:"
 true
 "paste cross-block block caret:"
+true
+"wrap boundary count:"
+true
+"wrap boundary second:"
+true
+"insert boundary hr first:"
+true
+"insert boundary hr second:"
+true
+"insert md table tag:"
+true
+"insert md table header:"
+true
+"insert md table selected:"
 true
 "move later order:"
 true
