@@ -40,6 +40,97 @@ fn caret(p) => text_selection(p, p)
 fn sel_single_leaf(sel) =>
   sel.kind == 'text' and path_equal(sel.anchor.path, sel.head.path)
 
+fn state_default_block(state) =>
+  if (state.default_block == null) md_default_block else state.default_block
+
+fn replacement_marks(state) =>
+  if (state.stored_marks == null) [] else state.stored_marks
+
+fn replacement_block(state, txt) =>
+  node(state_default_block(state), [text_marked(txt, replacement_marks(state))])
+
+fn replace_all_with_text(state, txt) {
+  let tx0 = tx_begin(state.doc, state.selection)
+  let tx1 = tx_step(tx0, step_replace([], 0, len(state.doc.content), [replacement_block(state, txt)]))
+  tx_set_selection(tx1, caret(pos([0, 0], len(txt))))
+}
+
+fn last_caret_pos_in(n, path) {
+  if (is_text(n)) { pos(path, len(n.text)) }
+  else if (is_node(n) and len(n.content) > 0) { last_caret_pos_in(n.content[len(n.content) - 1], [*path, len(n.content) - 1]) }
+  else { pos(path, 0) }
+}
+
+fn selection_after_blocks(blocks) =>
+  if (len(blocks) == 0) { caret(pos([], 0)) }
+  else { caret(last_caret_pos_in(blocks[len(blocks) - 1], [len(blocks) - 1])) }
+
+fn selection_after_inserted_blocks(start_index, blocks) =>
+  if (len(blocks) == 0) { caret(pos([], start_index)) }
+  else { caret(last_caret_pos_in(blocks[len(blocks) - 1], [start_index + len(blocks) - 1])) }
+
+fn replace_all_with_blocks(state, blocks) {
+  if (len(blocks) == 0) { null }
+  else {
+    let tx0 = tx_begin(state.doc, state.selection)
+    let tx1 = tx_step(tx0, step_replace([], 0, len(state.doc.content), blocks))
+    tx_set_selection(tx1, selection_after_blocks(blocks))
+  }
+}
+
+fn valid_selected_node(state) {
+  let sel = state.selection
+  if (sel == null or sel.kind != 'node' or len(sel.path) == 0) { false }
+  else { node_at(state.doc, sel.path) != null }
+}
+
+fn replace_node_with_slice(state, slice_nodes, next_selection) {
+  let sel = state.selection
+  let selected_parent_path = parent_path(sel.path)
+  let selected_index = last_index(sel.path)
+  let tx0 = tx_begin(state.doc, sel)
+  let tx1 = tx_step(tx0, step_replace(selected_parent_path, selected_index, selected_index + 1, slice_nodes))
+  tx_set_selection(tx1, next_selection)
+}
+
+fn replace_node_with_text(state, txt) {
+  if (not valid_selected_node(state)) { null }
+  else {
+    let selected_parent_path = parent_path(state.selection.path)
+    let selected_index = last_index(state.selection.path)
+    if (len(selected_parent_path) == 0) {
+      replace_node_with_slice(state, [replacement_block(state, txt)], caret(pos([selected_index, 0], len(txt))))
+    } else {
+      replace_node_with_slice(state, [text_marked(txt, replacement_marks(state))], caret(pos([*selected_parent_path, selected_index], len(txt))))
+    }
+  }
+}
+
+fn delete_node_selection(state) {
+  if (not valid_selected_node(state)) { null }
+  else {
+    let selected_parent_path = parent_path(state.selection.path)
+    let selected_index = last_index(state.selection.path)
+    let parent = node_at(state.doc, selected_parent_path)
+    if (parent == null or not is_node(parent)) { null }
+    else if (len(selected_parent_path) == 0 and len(parent.content) == 1) {
+      replace_node_with_slice(state, [replacement_block(state, "")], caret(pos([0, 0], 0)))
+    } else {
+      replace_node_with_slice(state, [], caret(pos(selected_parent_path, selected_index)))
+    }
+  }
+}
+
+fn replace_node_with_blocks(state, blocks) {
+  if (not valid_selected_node(state) or len(blocks) == 0) { null }
+  else {
+    let selected_parent_path = parent_path(state.selection.path)
+    let selected_index = last_index(state.selection.path)
+    if (len(selected_parent_path) == 0) { replace_node_with_slice(state, blocks, selection_after_inserted_blocks(selected_index, blocks)) }
+    else { replace_node_with_text(state, doc_text(node('fragment', blocks))) }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // cmd_insert_text — replace the current selection with `txt`
 // ---------------------------------------------------------------------------
@@ -51,6 +142,8 @@ fn sel_single_leaf(sel) =>
 pub fn cmd_insert_text(state, txt) {
   let sel = state.selection
   if (sel == null) { null }
+  else if (sel.kind == 'all') { replace_all_with_text(state, txt) }
+  else if (sel.kind == 'node') { replace_node_with_text(state, txt) }
   else if (not sel_single_leaf(sel)) { null }
   else {
     let lo = sel_lo(sel)
@@ -79,6 +172,9 @@ pub fn cmd_insert_text(state, txt) {
 
 pub fn cmd_paste_text(state, txt) => cmd_insert_text(state, txt)
 
+pub fn cmd_select_all(state) =>
+  tx_set_meta(tx_set_selection(tx_begin(state.doc, state.selection), all_selection()), "addToHistory", false)
+
 fn nonempty_text_leaf(s, marks) =>
   if (len(s) == 0) { [] } else { [text_marked(s, marks)] }
 
@@ -90,7 +186,10 @@ fn last_text_offset_in(node) {
 
 pub fn cmd_paste_fragment(state, fragment) {
   let sel = state.selection
-  if (sel == null or not sel_single_leaf(sel)) { null }
+  if (sel == null) { null }
+  else if (sel.kind == 'all') { replace_all_with_blocks(state, coerce_for_md_block(fragment)) }
+  else if (sel.kind == 'node') { replace_node_with_blocks(state, coerce_for_md_block(fragment)) }
+  else if (not sel_single_leaf(sel)) { null }
   else {
     let lo = sel_lo(sel)
     let hi = sel_hi(sel)
@@ -193,6 +292,8 @@ fn delete_range(state, lo, hi) {
   tx_set_selection(tx1, caret(lo))
 }
 
+fn delete_all(state) => replace_all_with_text(state, "")
+
 fn last_text_pos_at(n, path) {
   if (is_text(n)) { pos(path, len(n.text)) }
   else if (not is_node(n) or len(n.content) == 0) { null }
@@ -251,6 +352,8 @@ fn merge_blocks_forward(state, p) {
 pub fn cmd_delete_backward(state) {
   let sel = state.selection
   if (sel == null) { null }
+  else if (sel.kind == 'all') { delete_all(state) }
+  else if (sel.kind == 'node') { delete_node_selection(state) }
   else if (not sel_single_leaf(sel)) { null }
   else if (not sel_collapsed(sel)) { delete_range(state, sel_lo(sel), sel_hi(sel)) }
   else {
@@ -263,6 +366,8 @@ pub fn cmd_delete_backward(state) {
 pub fn cmd_delete_forward(state) {
   let sel = state.selection
   if (sel == null) { null }
+  else if (sel.kind == 'all') { delete_all(state) }
+  else if (sel.kind == 'node') { delete_node_selection(state) }
   else if (not sel_single_leaf(sel)) { null }
   else if (not sel_collapsed(sel)) { delete_range(state, sel_lo(sel), sel_hi(sel)) }
   else {
@@ -297,6 +402,8 @@ fn word_start_left(text, i) => scan_word_left(text, skip_space_left(text, i))
 pub fn cmd_delete_word_backward(state) {
   let sel = state.selection
   if (sel == null) { null }
+  else if (sel.kind == 'all') { delete_all(state) }
+  else if (sel.kind == 'node') { delete_node_selection(state) }
   else if (not sel_single_leaf(sel)) { null }
   else if (not sel_collapsed(sel)) { delete_range(state, sel_lo(sel), sel_hi(sel)) }
   else {
@@ -445,6 +552,72 @@ fn state_marks_at(state, path) {
   }
 }
 
+fn has_text_leaf(n) {
+  if (is_text(n)) { true }
+  else if (is_node(n)) { has_text_leaf_children(n.content, 0, len(n.content)) }
+  else { false }
+}
+
+fn has_text_leaf_children(children, i, n) {
+  if (i >= n) { false }
+  else if (has_text_leaf(children[i])) { true }
+  else { has_text_leaf_children(children, i + 1, n) }
+}
+
+fn any_unmarked_text(n, mark) {
+  if (is_text(n)) { not has_mark(n.marks, mark) }
+  else if (is_node(n)) { any_unmarked_text_children(n.content, mark, 0, len(n.content)) }
+  else { false }
+}
+
+fn any_unmarked_text_children(children, mark, i, n) {
+  if (i >= n) { false }
+  else if (any_unmarked_text(children[i], mark)) { true }
+  else { any_unmarked_text_children(children, mark, i + 1, n) }
+}
+
+fn collect_mark_steps(n, path, mark, adding, acc) {
+  if (is_text(n)) {
+    if (adding and not has_mark(n.marks, mark)) { [*acc, step_add_mark(path, mark)] }
+    else if (not adding and has_mark(n.marks, mark)) { [*acc, step_remove_mark(path, mark)] }
+    else { acc }
+  }
+  else if (is_node(n)) { collect_mark_steps_children(n.content, path, mark, adding, 0, len(n.content), acc) }
+  else { acc }
+}
+
+fn collect_mark_steps_children(children, path, mark, adding, i, n, acc) {
+  if (i >= n) { acc }
+  else {
+    let next = collect_mark_steps(children[i], [*path, i], mark, adding, acc)
+    collect_mark_steps_children(children, path, mark, adding, i + 1, n, next)
+  }
+}
+
+fn toggle_mark_all(state, mark) {
+  if (not has_text_leaf(state.doc)) { null }
+  else {
+    let adding = any_unmarked_text(state.doc, mark)
+    let steps = collect_mark_steps(state.doc, [], mark, adding, [])
+    if (len(steps) == 0) { null }
+    else { tx_apply_steps(tx_begin(state.doc, state.selection), steps, 0, len(steps)) }
+  }
+}
+
+fn toggle_mark_node(state, mark) {
+  if (not valid_selected_node(state)) { null }
+  else {
+    let selected_node = node_at(state.doc, state.selection.path)
+    if (selected_node == null or not has_text_leaf(selected_node)) { null }
+    else {
+      let adding = any_unmarked_text(selected_node, mark)
+      let steps = collect_mark_steps(selected_node, state.selection.path, mark, adding, [])
+      if (len(steps) == 0) { null }
+      else { tx_apply_steps(tx_begin(state.doc, state.selection), steps, 0, len(steps)) }
+    }
+  }
+}
+
 pub fn cmd_toggle_stored_mark(state, mark) {
   let sel = state.selection
   if (sel == null or not sel_collapsed(sel)) { null }
@@ -458,6 +631,8 @@ pub fn cmd_toggle_stored_mark(state, mark) {
 pub fn cmd_toggle_mark(state, mark) {
   let sel = state.selection
   if (sel == null) { null }
+  else if (sel.kind == 'all') { toggle_mark_all(state, mark) }
+  else if (sel.kind == 'node') { toggle_mark_node(state, mark) }
   else if (not sel_single_leaf(sel)) { null }
   else if (sel_collapsed(sel)) { cmd_toggle_stored_mark(state, mark) }
   else {
@@ -578,9 +753,6 @@ pub fn cmd_set_block_type(state, tag) {
 // holds exactly that one leaf (the common Markdown paragraph case). The
 // command emits a single `replace` step on the grand-parent that swaps one
 // child for two, plus a caret pointing at offset 0 of the new block's leaf.
-
-fn state_default_block(state) =>
-  if (state.default_block == null) md_default_block else state.default_block
 
 fn split_right_tag(state, block, cut, text_len) {
   let default_block = state_default_block(state)

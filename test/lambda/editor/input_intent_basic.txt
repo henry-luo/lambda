@@ -28,6 +28,20 @@ true
 true
 "drop insert selected:"
 true
+"node type doc:"
+true
+"node type caret:"
+true
+"node delete doc:"
+true
+"node delete caret:"
+true
+"node paste count:"
+true
+"node paste doc:"
+true
+"node paste caret:"
+true
 "delete-back intent doc:"
 true
 "delete-back intent caret:"
@@ -52,6 +66,10 @@ true
 true
 "word-delete intent caret:"
 true
+"word-delete node doc:"
+true
+"word-delete node caret:"
+true
 "indent intent nested:"
 true
 "outdent intent top count:"
@@ -62,9 +80,37 @@ true
 true
 "bold intent text:"
 true
+"bold node mark:"
+true
+"bold node selection:"
+true
 "italic intent stored:"
 true
 "underline intent stored:"
+true
+"select-all kind:"
+true
+"select-all history:"
+true
+"select-all scroll:"
+true
+"type-all doc:"
+true
+"type-all caret:"
+true
+"delete-all doc:"
+true
+"delete-all caret:"
+true
+"paste-all html count:"
+true
+"paste-all html doc:"
+true
+"paste-all html caret:"
+true
+"bold-all mark:"
+true
+"bold-all selection:"
 true
 "composition start active:"
 true

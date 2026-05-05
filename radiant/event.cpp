@@ -455,6 +455,7 @@ typedef enum InputIntentType {
     INPUT_INTENT_FORMAT_UNDERLINE,
     INPUT_INTENT_FORMAT_INDENT,
     INPUT_INTENT_FORMAT_OUTDENT,
+    INPUT_INTENT_SELECT_ALL,
     INPUT_INTENT_HISTORY_UNDO,
     INPUT_INTENT_HISTORY_REDO,
 } InputIntentType;
@@ -488,6 +489,7 @@ static const char* input_intent_type_name(InputIntentType type) {
         case INPUT_INTENT_FORMAT_UNDERLINE:        return "formatUnderline";
         case INPUT_INTENT_FORMAT_INDENT:           return "formatIndent";
         case INPUT_INTENT_FORMAT_OUTDENT:          return "formatOutdent";
+        case INPUT_INTENT_SELECT_ALL:              return "selectAll";
         case INPUT_INTENT_HISTORY_UNDO:            return "historyUndo";
         case INPUT_INTENT_HISTORY_REDO:            return "historyRedo";
         default:                                   return "";
@@ -534,6 +536,10 @@ static bool input_intent_from_key_event(const KeyEvent* key_event, InputIntent* 
         out->data = clip ? clip : "";
         out->html_data = html;
         out->data_mime = (html && html[0]) ? "text/html" : "text/plain";
+        return true;
+    }
+    if (primary && key_event->key == RDT_KEY_A) {
+        out->type = INPUT_INTENT_SELECT_ALL;
         return true;
     }
     if (key_event->key == RDT_KEY_ENTER) {

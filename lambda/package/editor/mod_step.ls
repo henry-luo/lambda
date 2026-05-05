@@ -108,10 +108,11 @@ fn apply_remove_mark(step, doc) {
 
 fn replace_attr_at(attrs, name, value, i, n, found, acc) {
   if (i >= n) {
-    if (found) { acc } else { [*acc, {name: name, value: value}] }
+    if (found or value == null) { acc } else { [*acc, {name: name, value: value}] }
   }
   else if (attrs[i].name == name) {
-    replace_attr_at(attrs, name, value, i + 1, n, true, [*acc, {name: name, value: value}])
+    if (value == null) { replace_attr_at(attrs, name, value, i + 1, n, true, acc) }
+    else { replace_attr_at(attrs, name, value, i + 1, n, true, [*acc, {name: name, value: value}]) }
   }
   else {
     replace_attr_at(attrs, name, value, i + 1, n, found, [*acc, attrs[i]])
