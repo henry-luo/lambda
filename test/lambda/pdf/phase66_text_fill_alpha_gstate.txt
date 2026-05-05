@@ -1,0 +1,1 @@
+{ count: 1, text_alpha: true, no_stroke_alpha: true, kept_text: true}

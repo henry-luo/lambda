@@ -315,6 +315,11 @@ fn _is_icc_based(cs) {
     _space_type(cs) == "ICCBased"
 }
 
+fn _is_tint_space(cs) {
+    let t = _space_type(cs)
+    (t == "Separation") or (t == "DeviceN")
+}
+
 fn _icc_n_value(v) {
     let n = if (v is int) v else if (v is float) int(v) else 3
     if (n <= 0) { 3 } else { n }
@@ -345,6 +350,7 @@ fn _inline_ncomp(cs) {
     else if ((n == "CMYK") or (n == "DeviceCMYK")) { 4 }
     else if (_is_indexed(cs)) { 1 }
     else if (_is_icc_based(cs)) { _icc_ncomp(cs) }
+    else if (_is_tint_space(cs)) { 1 }
     else { 3 }
 }
 
@@ -384,6 +390,10 @@ fn _gamma_byte(data, off, gamma) {
     let raw = float(util.byte_at(data, off)) / 255.0
     let v = if (gamma != 1.0 and raw > 0.0) { math.pow(raw, gamma) } else { raw }
     int(v * 255.0)
+}
+
+fn _tint_byte(data, off) {
+    int((1.0 - (float(util.byte_at(data, off)) / 255.0)) * 255.0)
 }
 
 fn _cmyk_pixel_fill(data, off) {
@@ -468,7 +478,9 @@ fn _inline_pixel_fill(data, ncomp, bpc, w, pixel_index, cs) {
     }
     else if (ncomp == 1) {
         let off = pixel_index * ncomp
-        let g = if (t == "CalGray") { _gamma_byte(data, off, _cal_gray_gamma(cs)) } else { util.byte_at(data, off) }
+        let g = if (t == "CalGray") { _gamma_byte(data, off, _cal_gray_gamma(cs)) }
+                else if (_is_tint_space(cs)) { _tint_byte(data, off) }
+                else { util.byte_at(data, off) }
         _rgb_int(g, g, g)
     }
     else if (ncomp == 4) {
