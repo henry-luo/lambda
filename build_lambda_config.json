@@ -413,13 +413,29 @@
                 "utf8proc",
                 "nghttp2",
                 "curl",
+                "ngtcp2_crypto_ossl",
+                "ngtcp2",
+                "nghttp3",
+                "zstd",
+                "ssh2",
+                "idn2",
+                "psl",
+                "ssl",
+                "crypto",
+                "unistring",
+                "iconv",
+                "brotlidec",
+                "brotlicommon",
                 "mbedtls",
                 "mbedx509",
                 "mbedcrypto",
                 "zlib",
                 "rpmalloc",
                 "re2",
-                "pthread"
+                "pthread",
+                "secur32",
+                "wldap32",
+                "iphlpapi"
             ],
             "defines": [
                 "SIMPLE_SCHEMA_PARSER",
@@ -649,6 +665,12 @@
                 "lib/clock_compat.c"
             ],
             "libraries": [
+                {
+                    "name": "gomp",
+                    "description": "OpenMP (CLANG64 uses libomp instead of libgomp)",
+                    "lib": "/clang64/lib/libomp.a",
+                    "link": "static"
+                },
                 {
                     "name": "pthread",
                     "lib": "/clang64/lib/libpthread.a",
@@ -1569,6 +1591,12 @@
                             "CoreGraphics",
                             "CoreText"
                         ],
+                        "windows": {
+                            "exclude_libraries": ["CoreFoundation", "CoreGraphics", "CoreText"]
+                        },
+                        "linux": {
+                            "exclude_libraries": ["CoreFoundation", "CoreGraphics", "CoreText"]
+                        },
                         "additional_sources": [
                             "lib/font/font_config.c",
                             "lib/arraylist.c",
@@ -2006,6 +2034,7 @@
                             "ThorVG",
                             "png",
                             "turbojpeg",
+                            "webp",
                             "zlib",
                             "gomp"
                         ],

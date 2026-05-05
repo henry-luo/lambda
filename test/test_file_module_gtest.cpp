@@ -29,6 +29,15 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <climits>
+#ifdef _WIN32
+#include <windows.h>
+static inline char* realpath(const char* path, char* resolved) {
+    static char buf[MAX_PATH];
+    char* out = resolved ? resolved : buf;
+    if (GetFullPathNameA(path, MAX_PATH, out, NULL) == 0) return NULL;
+    return out;
+}
+#endif
 
 extern "C" {
 #include "../lib/file.h"
