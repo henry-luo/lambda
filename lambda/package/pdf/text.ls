@@ -35,12 +35,10 @@ fn _num(op) {
 fn _decode_operand(op, font_info) {
     if (op == null) { "" }
     else if (op is map and op.kind == "string") {
-        let cmap = if (font_info) font_info.to_unicode else null
-        font.decode_literal(op.value, cmap)
+        font.decode_literal_with_font(op.value, font_info)
     }
     else if (op is map and op.kind == "hex") {
-        let cmap = if (font_info) font_info.to_unicode else null
-        font.decode_hex(op.value, cmap)
+        font.decode_hex_with_font(op.value, font_info)
     }
     else { "" }
 }
@@ -298,8 +296,20 @@ fn _advance_text(st, dx) {
     _with(st, m, st.tlm, st.font_name, st.font_size, st.font_info, st.leading, st.in_text)
 }
 
+fn _space_count(txt) {
+    len(for (i in 0 to (len(txt) - 1) where txt[i] == " ") i)
+}
+
+fn _text_space_scale(st, ctm) {
+    let fs = if (st.font_size == 0.0) { 1.0 } else { st.font_size }
+    _effective_font_size(st, ctm) / fs
+}
+
 fn _text_advance(st, ctm, txt) {
-    float(len(txt)) * _effective_font_size(st, ctm) * 0.5 * (st.hor_scale / 100.0)
+    let n = len(txt)
+    let base = float(n) * _effective_font_size(st, ctm) * 0.5
+    let spacing = ((st.char_space * float(n)) + (st.word_space * float(_space_count(txt)))) * _text_space_scale(st, ctm)
+    (base + spacing) * (st.hor_scale / 100.0)
 }
 
 fn _tj_adjustment(st, ctm, v) {
@@ -393,7 +403,8 @@ fn _op_Tr(st, ops) {
 fn _op_Tj(st, ctm, ops, page_h) {
     if (len(ops) >= 1) {
         let txt = _decode_operand(ops[0], st.font_info)
-        { state: st, emit: _emit_one(st, ctm, page_h, txt) }
+        let s1 = if (txt == "") { st } else { _advance_text(st, _text_advance(st, ctm, txt)) }
+        { state: s1, emit: _emit_one(st, ctm, page_h, txt) }
     }
     else { { state: st, emit: null } }
 }
@@ -458,16 +469,19 @@ fn _op_quote(st, ctm, ops, page_h) {
     if (len(ops) >= 1) {
         let s1 = _move(st, 0.0, -st.leading)
         let txt = _decode_operand(ops[0], s1.font_info)
-        { state: s1, emit: _emit_one(s1, ctm, page_h, txt) }
+        let s2 = if (txt == "") { s1 } else { _advance_text(s1, _text_advance(s1, ctm, txt)) }
+        { state: s2, emit: _emit_one(s1, ctm, page_h, txt) }
     }
     else { { state: st, emit: null } }
 }
 
 fn _op_dquote(st, ctm, ops, page_h) {
     if (len(ops) >= 3) {
-        let s1 = _move(st, 0.0, -st.leading)
+        let s0 = set_char_space(set_word_space(st, _num(ops[0])), _num(ops[1]))
+        let s1 = _move(s0, 0.0, -s0.leading)
         let txt = _decode_operand(ops[2], s1.font_info)
-        { state: s1, emit: _emit_one(s1, ctm, page_h, txt) }
+        let s2 = if (txt == "") { s1 } else { _advance_text(s1, _text_advance(s1, ctm, txt)) }
+        { state: s2, emit: _emit_one(s1, ctm, page_h, txt) }
     }
     else { { state: st, emit: null } }
 }

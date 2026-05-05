@@ -44,6 +44,8 @@ true
 true
 "attr removed?"
 true
+"attr removed count:"
+true
 "sa2 inv val:"
 true
 "attr restored:"

@@ -143,29 +143,24 @@ static int template_compare(TemplateEntry* a, TemplateEntry* b) {
     return b->definition_order - a->definition_order;
 }
 
-TemplateEntry* template_registry_match(TemplateRegistry* registry,
-                                       Item target, bool edit_mode,
-                                       const char* template_name) {
+static TemplateEntry* template_registry_match_mode(TemplateRegistry* registry,
+                                                   Item target, bool edit_mode,
+                                                   const char* template_name) {
     if (!registry) return NULL;
 
-    // if a template name is given, find by name
     if (template_name) {
         for (TemplateEntry* e = registry->first; e; e = e->next) {
-            if (e->name && strcmp(e->name, template_name) == 0) {
-                if (e->is_edit == edit_mode || !edit_mode) {
-                    return e;
-                }
+            if (e->name && strcmp(e->name, template_name) == 0 &&
+                e->is_edit == edit_mode) {
+                return e;
             }
         }
         return NULL;
     }
 
-    // find best matching template by specificity
     TemplateEntry* best = NULL;
     for (TemplateEntry* e = registry->first; e; e = e->next) {
-        // filter by mode (view/edit)
-        if (edit_mode && !e->is_edit) continue;
-        if (!edit_mode && e->is_edit) continue;
+        if (e->is_edit != edit_mode) continue;
 
         if (!template_matches(e, target)) continue;
 
@@ -174,6 +169,23 @@ TemplateEntry* template_registry_match(TemplateRegistry* registry,
         }
     }
     return best;
+}
+
+TemplateEntry* template_registry_match(TemplateRegistry* registry,
+                                       Item target, bool edit_mode,
+                                       const char* template_name) {
+    if (!registry) return NULL;
+
+    TemplateEntry* tmpl = template_registry_match_mode(registry, target, edit_mode, template_name);
+    if (tmpl || !edit_mode) {
+        return tmpl;
+    }
+
+    // In edit mode, edit templates augment view templates rather than replacing
+    // the view layer entirely. If no edit template exists for the target, use
+    // the normal view template so editable documents can mix rich/atomic nodes
+    // with ordinary render-only nodes.
+    return template_registry_match_mode(registry, target, false, template_name);
 }
 
 // ============================================================================

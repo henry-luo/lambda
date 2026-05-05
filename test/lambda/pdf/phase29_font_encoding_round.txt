@@ -1,0 +1,1 @@
+{ mac_ligature: true, mac_upper: true, symbol_lit: true, symbol_hex: true, render_count: 2, render_mac: true, render_symbol: true}

@@ -41,6 +41,22 @@ fn is_num_start(c: string) {
     is_digit_code(ord(c)) or c == "+" or c == "-" or c == "."
 }
 
+fn is_hex_ws(c: string) {
+    c == " " or c == "\t" or c == "\n" or c == "\r" or c == "\f"
+}
+
+fn is_hex_digit_code(k) {
+    ((k >= 48) and (k <= 57)) or ((k >= 65) and (k <= 70)) or ((k >= 97) and (k <= 102))
+}
+
+fn is_octal_code(k) {
+    (k >= 48) and (k <= 55)
+}
+
+fn octal_digit_value(c: string) {
+    ord(c) - 48
+}
+
 // ============================================================
 // String slicing (Lambda strings are char-indexable)
 // ============================================================
@@ -84,10 +100,23 @@ pn read_name(s: string, i: int) {
     while (j < len(s)) {
         let c = s[j]
         if (is_ws(c) or c == "/" or c == "[" or c == "]" or
-            c == "(" or c == "<" or c == ">") { break }
+            c == "(" or c == ")" or c == "<" or c == ">") { break }
         j = j + 1
     }
     return { value: { kind: "name", value: slice_str(s, i + 1, j) }, end: j }
+}
+
+pn clean_hex_string(raw: string) {
+    var out = ""
+    var k = 0
+    while (k < len(raw)) {
+        let c = raw[k]
+        if ((not is_hex_ws(c)) and is_hex_digit_code(ord(c))) {
+            out = out ++ c
+        }
+        k = k + 1
+    }
+    return out
 }
 
 // Parse a literal string "(...)", balancing nested unescaped parens.
@@ -104,16 +133,29 @@ pn read_lit_string(s: string, i: int) {
             if (j >= len(s)) { break }
             let esc = s[j]
             var trans = esc
-            if (esc == "n")        { trans = "\n" }
-            else if (esc == "r")   { trans = "\r" }
-            else if (esc == "t")   { trans = "\t" }
-            else if (esc == "b")   { trans = "\b" }
-            else if (esc == "f")   { trans = "\f" }
-            else if (esc == "(")   { trans = "(" }
-            else if (esc == ")")   { trans = ")" }
-            else if (esc == "\\")  { trans = "\\" }
+            if (is_octal_code(ord(esc))) {
+                var oct = octal_digit_value(esc)
+                var count = 1
+                j = j + 1
+                while (count < 3 and j < len(s) and is_octal_code(ord(s[j]))) {
+                    oct = (oct * 8) + octal_digit_value(s[j])
+                    count = count + 1
+                    j = j + 1
+                }
+                trans = chr(oct)
+            }
+            else {
+                if (esc == "n")        { trans = "\n" }
+                else if (esc == "r")   { trans = "\r" }
+                else if (esc == "t")   { trans = "\t" }
+                else if (esc == "b")   { trans = "\b" }
+                else if (esc == "f")   { trans = "\f" }
+                else if (esc == "(")   { trans = "(" }
+                else if (esc == ")")   { trans = ")" }
+                else if (esc == "\\")  { trans = "\\" }
+                j = j + 1
+            }
             parts = parts ++ [trans]
-            j = j + 1
             part_start = j
         }
         else if (c == "(") {
@@ -143,7 +185,7 @@ pn read_hex_string(s: string, i: int) {
     let raw = slice_str(s, i + 1, j)
     var endp = j
     if (j < len(s)) { endp = j + 1 }
-    return { value: { kind: "hex", value: raw }, end: endp }
+    return { value: { kind: "hex", value: clean_hex_string(raw) }, end: endp }
 }
 
 // Parse an alphabetic operator token ("BT", "Tf", "Tj", "TJ", "T*", etc.).

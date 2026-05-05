@@ -57,6 +57,30 @@ protected:
         MapReader map_reader = reader.getRoot().asMap();
         return map_reader.get("counter").asInt32();
     }
+
+    int64_t array_value(Item item, int64_t index) {
+        MarkReader reader(item);
+        ArrayReader array_reader = reader.getRoot().asArray();
+        return array_reader.get(index).asInt();
+    }
+
+    int64_t array_length(Item item) {
+        MarkReader reader(item);
+        ArrayReader array_reader = reader.getRoot().asArray();
+        return array_reader.length();
+    }
+
+    int64_t element_child_count(Item item) {
+        MarkReader reader(item);
+        ElementReader element_reader = reader.getRoot().asElement();
+        return element_reader.childCount();
+    }
+
+    const char* element_attr(Item item, const char* key) {
+        MarkReader reader(item);
+        ElementReader element_reader = reader.getRoot().asElement();
+        return element_reader.get_attr_string(key);
+    }
 };
 
 TEST_F(EditBridgeSessionTest, SessionLifecycleAndHistoryCommands) {
@@ -124,6 +148,130 @@ TEST_F(EditBridgeSessionTest, SelectionIsSessionOwnedAndObservable) {
     EXPECT_EQ(stored_head.path.indices[1], 2u);
     EXPECT_EQ(stored_anchor.offset, 3u);
     EXPECT_EQ(stored_head.offset, 7u);
+
+    edit_session_destroy(session);
+}
+
+TEST_F(EditBridgeSessionTest, ExecAppliesRootMapAndArrayCommands) {
+    MarkBuilder builder(input);
+    Item doc0 = builder.map().put("counter", (int64_t)0).final();
+    EditSession* session = edit_session_new_with_input(input, doc0, nullptr);
+    ASSERT_NE(session, nullptr);
+
+    SessionCounters counters;
+    counters.change_count = 0;
+    counters.selection_count = 0;
+    counters.last_payload = ItemNull;
+    edit_session_subscribe(session, EDIT_EVENT_CHANGE, count_change, &counters);
+
+    Item update_args = builder.map()
+        .put("key", "counter")
+        .put("value", (int64_t)7)
+        .final();
+    EXPECT_TRUE(edit_session_exec(session, "map_update", update_args));
+    EXPECT_EQ(counter_value(edit_session_current(session)), 7);
+    EXPECT_EQ(counters.change_count, 1);
+
+    EXPECT_TRUE(edit_session_exec(session, "commit", ItemNull));
+
+    Item array0 = builder.array()
+        .append((int64_t)1)
+        .append((int64_t)2)
+        .final();
+    EXPECT_TRUE(edit_session_exec(session, "set_root", array0));
+
+    Item append_args = builder.map().put("value", (int64_t)3).final();
+    EXPECT_TRUE(edit_session_exec(session, "array_append", append_args));
+    EXPECT_EQ(array_length(edit_session_current(session)), 3);
+    EXPECT_EQ(array_value(edit_session_current(session), 2), 3);
+
+    Item set_args = builder.map()
+        .put("index", (int64_t)1)
+        .put("value", (int64_t)20)
+        .final();
+    EXPECT_TRUE(edit_session_exec(session, "array_set", set_args));
+    EXPECT_EQ(array_value(edit_session_current(session), 1), 20);
+
+    EXPECT_TRUE(edit_session_exec(session, "commit", ItemNull));
+    EXPECT_TRUE(edit_session_exec(session, "undo", ItemNull));
+    EXPECT_EQ(counter_value(edit_session_current(session)), 7);
+
+    edit_session_destroy(session);
+}
+
+TEST_F(EditBridgeSessionTest, ExecAppliesRootElementCommands) {
+    MarkBuilder builder(input);
+    Item doc0 = builder.element("div")
+        .attr("class", "box")
+        .text("Old")
+        .final();
+    EditSession* session = edit_session_new_with_input(input, doc0, nullptr);
+    ASSERT_NE(session, nullptr);
+
+    Item attr_args = builder.map()
+        .put("attr", "class")
+        .put("value", "container")
+        .final();
+    EXPECT_TRUE(edit_session_exec(session, "element_update_attr", attr_args));
+    EXPECT_STREQ(element_attr(edit_session_current(session), "class"), "container");
+
+    Item insert_args = builder.map()
+        .put("index", (int64_t)-1)
+        .put("child", builder.element("span").text("New").final())
+        .final();
+    EXPECT_TRUE(edit_session_exec(session, "element_insert_child", insert_args));
+    EXPECT_EQ(element_child_count(edit_session_current(session)), 2);
+
+    Item delete_args = builder.map().put("index", (int64_t)0).final();
+    EXPECT_TRUE(edit_session_exec(session, "element_delete_child", delete_args));
+    EXPECT_EQ(element_child_count(edit_session_current(session)), 1);
+
+    edit_session_destroy(session);
+}
+
+TEST_F(EditBridgeSessionTest, HistoryRestoresSelectionSnapshots) {
+    MarkBuilder builder(input);
+    Item doc0 = builder.map().put("counter", (int64_t)0).final();
+    Item doc1 = builder.map().put("counter", (int64_t)1).final();
+    EditSession* session = edit_session_new_with_input(input, doc0, nullptr);
+    ASSERT_NE(session, nullptr);
+
+    SessionCounters counters;
+    counters.change_count = 0;
+    counters.selection_count = 0;
+    counters.last_payload = ItemNull;
+    edit_session_subscribe(session, EDIT_EVENT_SELECTION, count_selection, &counters);
+
+    uint32_t anchor_a_indices[1] = {0};
+    uint32_t head_a_indices[1] = {0};
+    SourcePos anchor_a = {{1, anchor_a_indices}, 1};
+    SourcePos head_a = {{1, head_a_indices}, 1};
+    EXPECT_TRUE(edit_session_set_selection(session, anchor_a, head_a));
+    EXPECT_TRUE(edit_session_exec(session, "commit", ItemNull));
+
+    EXPECT_TRUE(edit_session_exec(session, "set_root", doc1));
+    uint32_t anchor_b_indices[2] = {0, 1};
+    uint32_t head_b_indices[2] = {0, 1};
+    SourcePos anchor_b = {{2, anchor_b_indices}, 5};
+    SourcePos head_b = {{2, head_b_indices}, 5};
+    EXPECT_TRUE(edit_session_set_selection(session, anchor_b, head_b));
+    EXPECT_TRUE(edit_session_exec(session, "commit", ItemNull));
+
+    EXPECT_TRUE(edit_session_exec(session, "undo", ItemNull));
+    EXPECT_EQ(counter_value(edit_session_current(session)), 0);
+    SourcePos undo_anchor = edit_session_selection_anchor(session);
+    EXPECT_EQ(undo_anchor.path.len, 1u);
+    EXPECT_EQ(undo_anchor.path.indices[0], 0u);
+    EXPECT_EQ(undo_anchor.offset, 1u);
+
+    EXPECT_TRUE(edit_session_exec(session, "redo", ItemNull));
+    EXPECT_EQ(counter_value(edit_session_current(session)), 1);
+    SourcePos redo_anchor = edit_session_selection_anchor(session);
+    EXPECT_EQ(redo_anchor.path.len, 2u);
+    EXPECT_EQ(redo_anchor.path.indices[0], 0u);
+    EXPECT_EQ(redo_anchor.path.indices[1], 1u);
+    EXPECT_EQ(redo_anchor.offset, 5u);
+    EXPECT_GE(counters.selection_count, 4);
 
     edit_session_destroy(session);
 }

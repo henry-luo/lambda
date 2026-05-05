@@ -64,3 +64,17 @@ true
 true
 "cmd raw html paste mark:"
 true
+"html schema block count:"
+true
+"html schema heading tag:"
+true
+"html schema para tag:"
+true
+"html schema mark:"
+true
+"cmd html schema paste tag:"
+true
+"cmd html schema paste text:"
+true
+"cmd html schema paste mark:"
+true

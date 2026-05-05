@@ -38,9 +38,45 @@ true
 true
 "exec stored insert mark:"
 true
+"exec paste text:"
+true
+"exec delete backward:"
+true
+"exec cross insert doc:"
+true
+"exec cross delete doc:"
+true
+"exec cross paste count:"
+true
+"exec cross paste doc:"
+true
+"exec cross bold first:"
+true
+"exec cross bold second:"
+true
 "exec split default:"
 true
 "exec set type:"
 true
+"exec set type node:"
+true
+"exec set type span:"
+true
+"exec set type cross first:"
+true
+"exec set type cross second:"
+true
+"exec set type all first:"
+true
+"exec set type all second:"
+true
+"exec set type all selection:"
+true
 "open html schema:"
+true
+"exec html line-break:"
+true
+"exec html paste tag:"
+true
+"exec html paste text:"
 true

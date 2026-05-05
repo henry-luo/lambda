@@ -4,6 +4,7 @@ import lambda.package.editor.mod_step
 import lambda.package.editor.mod_transaction
 import lambda.package.editor.mod_source_pos
 import lambda.package.editor.mod_commands
+import lambda.package.editor.mod_md_schema
 
 let d0 = node('doc', [
   node('paragraph', [text("Hello, world.")]),
@@ -26,6 +27,61 @@ let s_sel = {doc: d0, selection: sel_sel}
 let tx_rep = cmd_insert_text(s_sel, "Lambda")
 "replace doc:";  doc_text(tx_rep.doc_after) == "Hello, Lambda.Second."
 "replace caret:"; tx_rep.sel_after.anchor.offset == 13
+
+let s_all = {doc: d0, selection: all_selection()}
+let tx_all_insert = cmd_insert_text(s_all, "All new")
+"insert all doc:"; doc_text(tx_all_insert.doc_after) == "All new"
+"insert all count:"; len(tx_all_insert.doc_after.content) == 1
+"insert all tag:"; tx_all_insert.doc_after.content[0].tag == 'paragraph'
+"insert all caret path:"; path_equal(tx_all_insert.sel_after.anchor.path, [0, 0])
+"insert all caret off:"; tx_all_insert.sel_after.anchor.offset == 7
+
+let tx_all_insert_marked = cmd_insert_text({doc: d0, selection: all_selection(), stored_marks: ['strong']}, "Bold")
+"insert all mark:"; has_mark(node_at(tx_all_insert_marked.doc_after, [0, 0]).marks, 'strong')
+
+let html_insert_doc = node('doc', [node('p', [text("Hello")])])
+let html_insert_state = {doc: html_insert_doc, schema: html5_subset_schema, selection: all_selection()}
+let tx_html_insert_all = cmd_insert_text(html_insert_state, "HTML")
+"insert html all tag:"; node_at(tx_html_insert_all.doc_after, [0]).tag == 'p'
+"insert html all caret:"; path_equal(tx_html_insert_all.sel_after.anchor.path, [0, 0])
+
+let atom_doc = node('doc', [
+  node('paragraph', [text("A")]),
+  node('image', []),
+  node('paragraph', [text("C")])
+])
+let atom_state = {doc: atom_doc, selection: node_selection([1])}
+let tx_node_insert = cmd_insert_text(atom_state, "Inserted")
+"insert node doc:"; [for (n in tx_node_insert.doc_after.content) doc_text(n)] == ["A", "Inserted", "C"]
+"insert node tag:"; node_at(tx_node_insert.doc_after, [1]).tag == 'paragraph'
+"insert node caret:"; path_equal(tx_node_insert.sel_after.anchor.path, [1, 0]) and tx_node_insert.sel_after.anchor.offset == 8
+
+let inline_atom_doc = node('doc', [node('paragraph', [text("A"), node('image', []), text("C")])])
+let tx_inline_node_insert = cmd_insert_text({doc: inline_atom_doc, selection: node_selection([0, 1])}, "B")
+"insert inline node doc:"; doc_text(tx_inline_node_insert.doc_after) == "ABC"
+"insert inline node text:"; node_at(tx_inline_node_insert.doc_after, [0, 1]).text == "B"
+"insert inline node caret:"; path_equal(tx_inline_node_insert.sel_after.anchor.path, [0, 1]) and tx_inline_node_insert.sel_after.anchor.offset == 1
+
+let mark_span_doc = node('doc', [node('paragraph', [
+  text_marked("Hello", ['strong']),
+  text(" "),
+  text_marked("world", ['em'])
+])])
+let mark_span_sel = text_selection(pos([0, 0], 2), pos([0, 2], 3))
+let mark_span_state = {doc: mark_span_doc, selection: mark_span_sel}
+let tx_span_insert = cmd_insert_text(mark_span_state, "X")
+"insert span doc:"; doc_text(tx_span_insert.doc_after) == "HeXld"
+"insert span children:"; len(node_at(tx_span_insert.doc_after, [0]).content) == 3
+"insert span mark:"; has_mark(node_at(tx_span_insert.doc_after, [0, 1]).marks, 'strong')
+"insert span tail mark:"; has_mark(node_at(tx_span_insert.doc_after, [0, 2]).marks, 'em')
+"insert span caret:"; path_equal(tx_span_insert.sel_after.anchor.path, [0, 1]) and tx_span_insert.sel_after.anchor.offset == 1
+
+let cross_block_sel = text_selection(pos([0, 0], 7), pos([1, 0], 3))
+let cross_block_state = {doc: d0, selection: cross_block_sel}
+let tx_cross_insert = cmd_insert_text(cross_block_state, "X")
+"insert cross-block count:"; len(tx_cross_insert.doc_after.content) == 1
+"insert cross-block doc:"; doc_text(tx_cross_insert.doc_after) == "Hello, Xond."
+"insert cross-block caret:"; path_equal(tx_cross_insert.sel_after.anchor.path, [0, 1]) and tx_cross_insert.sel_after.anchor.offset == 1
 
 // ---------------------------------------------------------------------------
 // cmd_delete_backward
@@ -51,6 +107,30 @@ let tx_join_back = cmd_delete_backward(s_join_back)
 let tx_db2 = cmd_delete_backward(s_sel)
 "del-back range doc:"; doc_text(tx_db2.doc_after) == "Hello, .Second."
 "del-back range caret:"; tx_db2.sel_after.anchor.offset == 7
+let tx_db_span = cmd_delete_backward(mark_span_state)
+"del-back span doc:"; doc_text(tx_db_span.doc_after) == "Held"
+"del-back span caret:"; path_equal(tx_db_span.sel_after.anchor.path, [0, 0]) and tx_db_span.sel_after.anchor.offset == 2
+let tx_db_cross = cmd_delete_backward(cross_block_state)
+"del-back cross-block count:"; len(tx_db_cross.doc_after.content) == 1
+"del-back cross-block doc:"; doc_text(tx_db_cross.doc_after) == "Hello, ond."
+"del-back cross-block caret:"; path_equal(tx_db_cross.sel_after.anchor.path, [0, 0]) and tx_db_cross.sel_after.anchor.offset == 7
+let full_span_state = {doc: mark_span_doc, selection: text_selection(pos([0, 0], 0), pos([0, 2], 5))}
+let tx_db_full_span = cmd_delete_backward(full_span_state)
+"del-back full span doc:"; doc_text(tx_db_full_span.doc_after) == ""
+"del-back full span leaf:"; is_text(node_at(tx_db_full_span.doc_after, [0, 0]))
+"del-back full span caret:"; path_equal(tx_db_full_span.sel_after.anchor.path, [0, 0]) and tx_db_full_span.sel_after.anchor.offset == 0
+
+let tx_db_all = cmd_delete_backward(s_all)
+"del-back all doc:"; doc_text(tx_db_all.doc_after) == ""
+"del-back all block:"; tx_db_all.doc_after.content[0].tag == 'paragraph'
+"del-back all caret:"; path_equal(tx_db_all.sel_after.anchor.path, [0, 0]) and tx_db_all.sel_after.anchor.offset == 0
+
+let tx_db_node = cmd_delete_backward(atom_state)
+"del-back node order:"; [for (n in tx_db_node.doc_after.content) doc_text(n)] == ["A", "C"]
+"del-back node caret:"; path_equal(tx_db_node.sel_after.anchor.path, []) and tx_db_node.sel_after.anchor.offset == 1
+let tx_db_only_node = cmd_delete_backward({doc: node('doc', [node('image', [])]), selection: node_selection([0])})
+"del-back only node doc:"; doc_text(tx_db_only_node.doc_after) == ""
+"del-back only node caret:"; path_equal(tx_db_only_node.sel_after.anchor.path, [0, 0]) and tx_db_only_node.sel_after.anchor.offset == 0
 
 // ---------------------------------------------------------------------------
 // cmd_delete_forward
@@ -69,6 +149,18 @@ let tx_join_fwd = cmd_delete_forward(s_end)
 
 let s_doc_end = {doc: d0, selection: text_selection(pos([1, 0], 7), pos([1, 0], 7))}
 "del-fwd at doc end null:"; cmd_delete_forward(s_doc_end) == null
+let tx_df_all = cmd_delete_forward(s_all)
+"del-fwd all doc:"; doc_text(tx_df_all.doc_after) == ""
+"del-fwd all caret:"; path_equal(tx_df_all.sel_after.anchor.path, [0, 0]) and tx_df_all.sel_after.anchor.offset == 0
+let tx_df_node = cmd_delete_forward(atom_state)
+"del-fwd node order:"; [for (n in tx_df_node.doc_after.content) doc_text(n)] == ["A", "C"]
+"del-fwd node caret:"; path_equal(tx_df_node.sel_after.anchor.path, []) and tx_df_node.sel_after.anchor.offset == 1
+let tx_df_span = cmd_delete_forward(mark_span_state)
+"del-fwd span doc:"; doc_text(tx_df_span.doc_after) == "Held"
+"del-fwd span caret:"; path_equal(tx_df_span.sel_after.anchor.path, [0, 0]) and tx_df_span.sel_after.anchor.offset == 2
+let tx_df_cross = cmd_delete_forward(cross_block_state)
+"del-fwd cross-block doc:"; doc_text(tx_df_cross.doc_after) == "Hello, ond."
+"del-fwd cross-block caret:"; path_equal(tx_df_cross.sel_after.anchor.path, [0, 0]) and tx_df_cross.sel_after.anchor.offset == 7
 
 // ---------------------------------------------------------------------------
 // cmd_delete_word_backward / cmd_insert_line_break
@@ -79,15 +171,42 @@ let tx_dw = cmd_delete_word_backward(word_state)
 "del-word doc:"; doc_text(tx_dw.doc_after) == "one "
 "del-word caret:"; tx_dw.sel_after.anchor.offset == 4
 "del-word start null:"; cmd_delete_word_backward({doc: word_doc, selection: text_selection(pos([0, 0], 0), pos([0, 0], 0))}) == null
+let tx_dw_all = cmd_delete_word_backward(s_all)
+"del-word all doc:"; doc_text(tx_dw_all.doc_after) == ""
+"del-word all caret:"; path_equal(tx_dw_all.sel_after.anchor.path, [0, 0]) and tx_dw_all.sel_after.anchor.offset == 0
+let tx_dw_node = cmd_delete_word_backward(atom_state)
+"del-word node order:"; [for (n in tx_dw_node.doc_after.content) doc_text(n)] == ["A", "C"]
+"del-word node caret:"; path_equal(tx_dw_node.sel_after.anchor.path, []) and tx_dw_node.sel_after.anchor.offset == 1
+let tx_dw_span = cmd_delete_word_backward(mark_span_state)
+"del-word span doc:"; doc_text(tx_dw_span.doc_after) == "Held"
+"del-word span caret:"; path_equal(tx_dw_span.sel_after.anchor.path, [0, 0]) and tx_dw_span.sel_after.anchor.offset == 2
+let tx_dw_cross = cmd_delete_word_backward(cross_block_state)
+"del-word cross-block doc:"; doc_text(tx_dw_cross.doc_after) == "Hello, ond."
+"del-word cross-block caret:"; path_equal(tx_dw_cross.sel_after.anchor.path, [0, 0]) and tx_dw_cross.sel_after.anchor.offset == 7
 
 let line_state = {doc: d0, selection: text_selection(pos([0, 0], 5), pos([0, 0], 5))}
 let tx_lb = cmd_insert_line_break(line_state)
 "line-break children:"; len(node_at(tx_lb.doc_after, [0]).content) == 3
 "line-break tag:"; node_at(tx_lb.doc_after, [0, 1]).tag == 'hard_break'
+
+let html_line_state = {doc: html_insert_doc, schema: html5_subset_schema, selection: text_selection(pos([0, 0], 2), pos([0, 0], 2))}
+let tx_html_lb = cmd_insert_line_break(html_line_state)
+"line-break html tag:"; node_at(tx_html_lb.doc_after, [0, 1]).tag == 'br'
+"line-break html caret:"; path_equal(tx_html_lb.sel_after.anchor.path, [0, 2])
 "line-break left:"; node_at(tx_lb.doc_after, [0, 0]).text == "Hello"
 "line-break right:"; node_at(tx_lb.doc_after, [0, 2]).text == ", world."
 "line-break caret path:"; path_equal(tx_lb.sel_after.anchor.path, [0, 2])
 "line-break caret offset:"; tx_lb.sel_after.anchor.offset == 0
+let tx_lb_span = cmd_insert_line_break(mark_span_state)
+"line-break span doc:"; doc_text(tx_lb_span.doc_after) == "Held"
+"line-break span children:"; len(node_at(tx_lb_span.doc_after, [0]).content) == 3
+"line-break span tag:"; node_at(tx_lb_span.doc_after, [0, 1]).tag == 'hard_break'
+"line-break span caret:"; path_equal(tx_lb_span.sel_after.anchor.path, [0, 2]) and tx_lb_span.sel_after.anchor.offset == 0
+let tx_lb_cross = cmd_insert_line_break(cross_block_state)
+"line-break cross-block count:"; len(tx_lb_cross.doc_after.content) == 1
+"line-break cross-block tag:"; node_at(tx_lb_cross.doc_after, [0, 1]).tag == 'hard_break'
+"line-break cross-block doc:"; doc_text(tx_lb_cross.doc_after) == "Hello, ond."
+"line-break cross-block caret:"; path_equal(tx_lb_cross.sel_after.anchor.path, [0, 2]) and tx_lb_cross.sel_after.anchor.offset == 0
 
 let list_doc = node('doc', [node_attrs('list', [{name: 'ordered', value: false}], [
   node('list_item', [node('paragraph', [text("A")])]),
@@ -130,6 +249,48 @@ let tx_unbold = cmd_toggle_mark(s_marked, 'strong')
 let leaf_after2 = node_at(tx_unbold.doc_after, [0, 0])
 "toggle remove:"; not has_mark(leaf_after2.marks, 'strong')
 
+let tx_all_bold = cmd_toggle_mark({doc: d0, selection: all_selection()}, 'strong')
+"toggle all add steps:"; len(tx_all_bold.steps) == 2
+"toggle all add first:"; has_mark(node_at(tx_all_bold.doc_after, [0, 0]).marks, 'strong')
+"toggle all add second:"; has_mark(node_at(tx_all_bold.doc_after, [1, 0]).marks, 'strong')
+let tx_all_unbold = cmd_toggle_mark({doc: tx_all_bold.doc_after, selection: all_selection()}, 'strong')
+"toggle all remove steps:"; len(tx_all_unbold.steps) == 2
+"toggle all remove first:"; not has_mark(node_at(tx_all_unbold.doc_after, [0, 0]).marks, 'strong')
+"toggle all remove second:"; not has_mark(node_at(tx_all_unbold.doc_after, [1, 0]).marks, 'strong')
+let partial_mark_doc = node('doc', [
+  node('paragraph', [text_marked("Marked", ['strong'])]),
+  node('paragraph', [text("Plain")])
+])
+let tx_all_partial = cmd_toggle_mark({doc: partial_mark_doc, selection: all_selection()}, 'strong')
+"toggle all partial steps:"; len(tx_all_partial.steps) == 1
+"toggle all partial first kept:"; has_mark(node_at(tx_all_partial.doc_after, [0, 0]).marks, 'strong')
+"toggle all partial second added:"; has_mark(node_at(tx_all_partial.doc_after, [1, 0]).marks, 'strong')
+let tx_node_bold = cmd_toggle_mark({doc: d0, selection: node_selection([0])}, 'strong')
+"toggle node steps:"; len(tx_node_bold.steps) == 1
+"toggle node first:"; has_mark(node_at(tx_node_bold.doc_after, [0, 0]).marks, 'strong')
+"toggle node second untouched:"; not has_mark(node_at(tx_node_bold.doc_after, [1, 0]).marks, 'strong')
+let tx_node_unbold = cmd_toggle_mark({doc: tx_node_bold.doc_after, selection: node_selection([0])}, 'strong')
+"toggle node remove:"; not has_mark(node_at(tx_node_unbold.doc_after, [0, 0]).marks, 'strong')
+let tx_span_bold = cmd_toggle_mark(mark_span_state, 'strong')
+"toggle span add steps:"; len(tx_span_bold.steps) == 2
+"toggle span first kept:"; has_mark(node_at(tx_span_bold.doc_after, [0, 0]).marks, 'strong')
+"toggle span middle added:"; has_mark(node_at(tx_span_bold.doc_after, [0, 1]).marks, 'strong')
+"toggle span last added:"; has_mark(node_at(tx_span_bold.doc_after, [0, 2]).marks, 'strong')
+let tx_span_unbold = cmd_toggle_mark({doc: tx_span_bold.doc_after, selection: mark_span_sel}, 'strong')
+"toggle span remove steps:"; len(tx_span_unbold.steps) == 3
+"toggle span remove first:"; not has_mark(node_at(tx_span_unbold.doc_after, [0, 0]).marks, 'strong')
+"toggle span remove middle:"; not has_mark(node_at(tx_span_unbold.doc_after, [0, 1]).marks, 'strong')
+"toggle span remove last:"; not has_mark(node_at(tx_span_unbold.doc_after, [0, 2]).marks, 'strong')
+let tx_cross_bold = cmd_toggle_mark(cross_block_state, 'strong')
+"toggle cross-block steps:"; len(tx_cross_bold.steps) == 2
+"toggle cross-block first:"; has_mark(node_at(tx_cross_bold.doc_after, [0, 0]).marks, 'strong')
+"toggle cross-block second:"; has_mark(node_at(tx_cross_bold.doc_after, [1, 0]).marks, 'strong')
+"toggle cross-block selection:"; path_equal(tx_cross_bold.sel_after.anchor.path, [0, 0]) and path_equal(tx_cross_bold.sel_after.head.path, [1, 0])
+let tx_cross_unbold = cmd_toggle_mark({doc: tx_cross_bold.doc_after, selection: cross_block_sel}, 'strong')
+"toggle cross-block remove steps:"; len(tx_cross_unbold.steps) == 2
+"toggle cross-block remove first:"; not has_mark(node_at(tx_cross_unbold.doc_after, [0, 0]).marks, 'strong')
+"toggle cross-block remove second:"; not has_mark(node_at(tx_cross_unbold.doc_after, [1, 0]).marks, 'strong')
+
 // ---------------------------------------------------------------------------
 // cmd_set_block_type
 // ---------------------------------------------------------------------------
@@ -137,6 +298,24 @@ let tx_h = cmd_set_block_type(s0, 'heading')
 let block_after = node_at(tx_h.doc_after, [0])
 "set-type tag:";   block_after.tag == 'heading'
 "set-type text preserved:"; doc_text(block_after) == "Hello, world."
+let tx_h_node = cmd_set_block_type({doc: d0, selection: node_selection([1])}, 'heading')
+"set-type node tag:"; node_at(tx_h_node.doc_after, [1]).tag == 'heading'
+"set-type node first untouched:"; node_at(tx_h_node.doc_after, [0]).tag == 'paragraph'
+let tx_h_span = cmd_set_block_type(mark_span_state, 'heading')
+"set-type span tag:"; node_at(tx_h_span.doc_after, [0]).tag == 'heading'
+"set-type span text:"; doc_text(node_at(tx_h_span.doc_after, [0])) == "Hello world"
+let tx_h_cross = cmd_set_block_type(cross_block_state, 'heading')
+"set-type cross steps:"; len(tx_h_cross.steps) == 2
+"set-type cross first:"; node_at(tx_h_cross.doc_after, [0]).tag == 'heading'
+"set-type cross second:"; node_at(tx_h_cross.doc_after, [1]).tag == 'heading'
+"set-type cross selection:"; path_equal(tx_h_cross.sel_after.anchor.path, [0, 0]) and path_equal(tx_h_cross.sel_after.head.path, [1, 0])
+let tx_h_inline_node = cmd_set_block_type({doc: inline_atom_doc, selection: node_selection([0, 1])}, 'heading')
+"set-type inline node parent:"; node_at(tx_h_inline_node.doc_after, [0]).tag == 'heading'
+let tx_h_all = cmd_set_block_type({doc: d0, selection: all_selection()}, 'heading')
+"set-type all steps:"; len(tx_h_all.steps) == 2
+"set-type all first:"; node_at(tx_h_all.doc_after, [0]).tag == 'heading'
+"set-type all second:"; node_at(tx_h_all.doc_after, [1]).tag == 'heading'
+"set-type all selection:"; tx_h_all.sel_after.kind == 'all'
 
 // ---------------------------------------------------------------------------
 // cmd_split_block — split paragraph[0] at offset 5
@@ -154,6 +333,14 @@ let split_right = node_at(tx_sp.doc_after, [1])
 // untouched second paragraph still present
 "split tail:"; doc_text(node_at(tx_sp.doc_after, [2])) == "Second."
 
+let tx_sp_span = cmd_split_block(mark_span_state)
+"split span count:"; len(tx_sp_span.doc_after.content) == 2
+"split span left:"; doc_text(node_at(tx_sp_span.doc_after, [0])) == "He"
+"split span right:"; doc_text(node_at(tx_sp_span.doc_after, [1])) == "ld"
+"split span left mark:"; has_mark(node_at(tx_sp_span.doc_after, [0, 0]).marks, 'strong')
+"split span right mark:"; has_mark(node_at(tx_sp_span.doc_after, [1, 0]).marks, 'em')
+"split span caret:"; path_equal(tx_sp_span.sel_after.anchor.path, [1, 0]) and tx_sp_span.sel_after.anchor.offset == 0
+
 // split with caret at offset 0 -> empty left
 let s_at0 = {doc: d0, selection: text_selection(pos([0, 0], 0), pos([0, 0], 0))}
 let tx_sp0 = cmd_split_block(s_at0)
@@ -167,6 +354,12 @@ let tx_heading_split = cmd_split_block(heading_state)
 "split heading right tag:"; node_at(tx_heading_split.doc_after, [1]).tag == 'paragraph'
 "split heading right attrs:"; len(node_at(tx_heading_split.doc_after, [1]).attrs) == 0
 "split heading left tag:"; node_at(tx_heading_split.doc_after, [0]).tag == 'heading'
+
+let html_heading_doc = node('doc', [node('h1', [text("Title")])])
+let html_heading_state = {doc: html_heading_doc, schema: html5_subset_schema, selection: text_selection(pos([0, 0], 5), pos([0, 0], 5))}
+let tx_html_heading_split = cmd_split_block(html_heading_state)
+"split html heading right tag:"; node_at(tx_html_heading_split.doc_after, [1]).tag == 'p'
+"split html heading left tag:"; node_at(tx_html_heading_split.doc_after, [0]).tag == 'h1'
 
 // ---------------------------------------------------------------------------
 // chain — first non-null wins
@@ -199,6 +392,14 @@ let drop_state = {doc: drop_doc, selection: node_selection([0])}
 let tx_insert_at = cmd_insert_at(drop_state, [], 1, [node('paragraph', [text("X")])])
 "insert-at order:"; [for (n in tx_insert_at.doc_after.content) doc_text(n)] == ["A", "X", "B", "C"]
 "insert-at selected:"; path_equal(tx_insert_at.sel_after.path, [1])
+
+let tx_cross_paste_text = cmd_paste_text(cross_block_state, "Y")
+"paste cross-block text doc:"; doc_text(tx_cross_paste_text.doc_after) == "Hello, Yond."
+"paste cross-block text caret:"; path_equal(tx_cross_paste_text.sel_after.anchor.path, [0, 1]) and tx_cross_paste_text.sel_after.anchor.offset == 1
+let tx_cross_paste_blocks = cmd_paste_html(cross_block_state, "<p>A</p><p>B</p>", "A\nB")
+"paste cross-block block count:"; len(tx_cross_paste_blocks.doc_after.content) == 2
+"paste cross-block block doc:"; [for (n in tx_cross_paste_blocks.doc_after.content) doc_text(n)] == ["Hello, A", "Bond."]
+"paste cross-block block caret:"; path_equal(tx_cross_paste_blocks.sel_after.anchor.path, [1, 1]) and tx_cross_paste_blocks.sel_after.anchor.offset == 4
 
 let tx_move_later = cmd_move_node(drop_state, [0], [], 3)
 "move later order:"; [for (n in tx_move_later.doc_after.content) doc_text(n)] == ["B", "C", "A"]

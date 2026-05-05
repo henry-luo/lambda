@@ -28,6 +28,50 @@ true
 true
 "drop insert selected:"
 true
+"node type doc:"
+true
+"node type caret:"
+true
+"node delete doc:"
+true
+"node delete caret:"
+true
+"node paste count:"
+true
+"node paste doc:"
+true
+"node paste caret:"
+true
+"span type doc:"
+true
+"span type mark:"
+true
+"span delete doc:"
+true
+"span delete caret:"
+true
+"span paste doc:"
+true
+"span paste caret:"
+true
+"cross-block type doc:"
+true
+"cross-block type caret:"
+true
+"cross-block delete doc:"
+true
+"cross-block delete caret:"
+true
+"cross-block line tag:"
+true
+"cross-block line caret:"
+true
+"cross-block paste count:"
+true
+"cross-block paste doc:"
+true
+"cross-block paste caret:"
+true
 "delete-back intent doc:"
 true
 "delete-back intent caret:"
@@ -44,13 +88,29 @@ true
 true
 "split intent right empty:"
 true
+"split span intent left:"
+true
+"split span intent right:"
+true
+"split span intent caret:"
+true
 "line-break intent tag:"
 true
 "line-break intent caret:"
 true
+"line-break span intent tag:"
+true
+"line-break span intent doc:"
+true
+"line-break span intent caret:"
+true
 "word-delete intent doc:"
 true
 "word-delete intent caret:"
+true
+"word-delete node doc:"
+true
+"word-delete node caret:"
 true
 "indent intent nested:"
 true
@@ -62,9 +122,55 @@ true
 true
 "bold intent text:"
 true
+"bold node mark:"
+true
+"bold node selection:"
+true
+"bold span steps:"
+true
+"bold span middle:"
+true
+"bold span last:"
+true
+"bold cross-block steps:"
+true
+"bold cross-block first:"
+true
+"bold cross-block second:"
+true
 "italic intent stored:"
 true
 "underline intent stored:"
+true
+"select-all kind:"
+true
+"select-all history:"
+true
+"select-all scroll:"
+true
+"type-all doc:"
+true
+"type-all caret:"
+true
+"delete-all doc:"
+true
+"delete-all caret:"
+true
+"paste-all html count:"
+true
+"paste-all html doc:"
+true
+"paste-all html caret:"
+true
+"bold-all mark:"
+true
+"bold-all selection:"
+true
+"html line-break intent tag:"
+true
+"html paste intent tag:"
+true
+"html paste intent text:"
 true
 "composition start active:"
 true
