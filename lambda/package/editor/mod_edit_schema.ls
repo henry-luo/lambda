@@ -33,8 +33,11 @@ pub fn child_role(schema, child) {
 //   { role: R }   -> child's' role must be R, with two relaxations:
 //                       'inline' accepts 'text' and 'mark'
 //                       'block'  accepts only 'block'
+//   { any: [T...] } -> child may satisfy any nested term (content-expression alternation)
 pub fn satisfies(schema, child, term) {
-  if (term.tag != null) {
+  if (term.any != null) {
+    satisfies_any(schema, child, term.any, 0, len(term.any))
+  } else if (term.tag != null) {
     type(child) == element and name(child) == term.tag
   } else {
     let r = child_role(schema, child)
@@ -42,6 +45,12 @@ pub fn satisfies(schema, child, term) {
     else if (term.role == 'inline') (r == 'text' or r == 'mark')
     else false
   }
+}
+
+fn satisfies_any(schema, child, terms, i, n) {
+  if (i >= n) false
+  else if (satisfies(schema, child, terms[i])) true
+  else satisfies_any(schema, child, terms, i + 1, n)
 }
 
 // ---------------------------------------------------------------------------
@@ -57,8 +66,17 @@ fn count_sat(schema, children, ci, mx, term, acc) {
   else count_sat(schema, children, ci, mx, term, acc + 1)
 }
 
+// Try quantity counts from high to low, but backtrack if the suffix does not
+// match. This keeps the common greedy behavior while making sequences such as
+// `block* paragraph` decidable instead of over-consuming the paragraph.
+fn match_with_count(schema, children, ti, ci, terms, k, mn) {
+  if (k < mn) false
+  else if (match_terms_at(schema, children, ti + 1, ci + k, terms)) true
+  else match_with_count(schema, children, ti, ci, terms, k - 1, mn)
+}
+
 // Match `terms` against `children` starting at term index `ti`, child index `ci`.
-// Greedy left-to-right; returns true iff every child is consumed by some term.
+// Returns true iff every child is consumed by some term.
 fn match_terms_at(schema, children, ti, ci, terms) {
   if (ti >= len(terms)) ci == len(children)
   else {
@@ -68,7 +86,7 @@ fn match_terms_at(schema, children, ti, ci, terms) {
     let mx = if (qty == 'one' or qty == 'opt') 1 else len(children) - ci
     let n = count_sat(schema, children, ci, mx, term, 0)
     if (n < mn) false
-    else match_terms_at(schema, children, ti + 1, ci + n, terms)
+    else match_with_count(schema, children, ti, ci, terms, n, mn)
   }
 }
 

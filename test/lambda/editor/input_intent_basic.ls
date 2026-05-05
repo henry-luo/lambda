@@ -143,4 +143,14 @@ let h_state3 = state_after_intent(h_state2, h_tx_redo)
 "history redo doc:"; doc_text(h_state3.doc) == "Hello!"
 "history redo undo:"; can_undo(h_state3.history)
 
+let hg_state0 = {doc: d0, selection: caret, history: history_new()}
+let hg_tx1 = dispatch_intent(hg_state0, {input_type: "insertText", data: "A"})
+let hg_state1 = state_after_intent(hg_state0, hg_tx1)
+let hg_tx2 = dispatch_intent(hg_state1, {input_type: "insertText", data: "B"})
+let hg_state2 = state_after_intent(hg_state1, hg_tx2)
+"history group depth:"; len(hg_state2.history.undo) == 1
+let hg_undo = dispatch_intent(hg_state2, {input_type: "historyUndo", data: null})
+let hg_state3 = state_after_intent(hg_state2, hg_undo)
+"history group undo doc:"; doc_text(hg_state3.doc) == "Hello"
+
 "unknown intent null:"; dispatch_intent(s0, {input_type: "formatStrikeThrough", data: null}) == null

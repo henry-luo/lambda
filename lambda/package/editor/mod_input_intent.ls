@@ -25,6 +25,8 @@ fn state_decorations_after(state, tx) =>
 
 fn tx_adds_history(tx) => tx_get_meta(tx, "addToHistory") != false
 
+fn mark_typing_history(tx) => tx_set_meta(tx, "historyGroup", "typing")
+
 fn state_history_after(state, tx) {
   let hist_meta = tx_get_meta(tx, "history")
   if (hist_meta != null) { hist_meta }
@@ -82,7 +84,10 @@ pub fn dispatch_composition_intent(state, ev) {
 }
 
 pub fn dispatch_intent(state, ev) =>
-  if (ev.input_type == "insertText") cmd_insert_text(state, ev.data)
+  if (ev.input_type == "insertText") {
+    let tx = cmd_insert_text(state, ev.data)
+    if (tx == null) { null } else { mark_typing_history(tx) }
+  }
   else if (ev.input_type == "insertFromPaste" and ev.mime == "text/html") cmd_paste_html(state, ev.html, ev.data)
   else if (ev.input_type == "insertFromPaste") cmd_paste_text(state, ev.data)
   else if (ev.input_type == "insertFromDrop" and ev.source_path != null) cmd_move_node(state, ev.source_path, ev.target_parent_path, ev.target_index)

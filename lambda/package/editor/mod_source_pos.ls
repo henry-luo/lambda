@@ -135,10 +135,45 @@ pub fn node_text(node) {
   else { "" }
 }
 
-// Text extraction for a TextSelection over a doc whose anchor and head sit
-// inside the same text leaf. Returns the substring between min(offset) and
-// max(offset). For cross-leaf selections, returns null (multi-leaf extraction
-// requires DOM-side render_map walking and is deferred).
+// Enumerate string leaves in document order, preserving their source paths.
+fn text_leaves_at(node, path) {
+  if (type(node) == string) { [{path: path, text: node}] }
+  else if (type(node) == element or type(node) == array) {
+    [for (i in 0 to len(node) - 1) for (leaf in text_leaves_at(node[i], [*path, i])) leaf]
+  }
+  else { [] }
+}
+
+fn text_leaves(doc) => text_leaves_at(doc, [])
+
+fn selection_leaf_text(leaf, lo, hi) {
+  if (path_equal(leaf.path, lo.path)) { slice(leaf.text, lo.offset, len(leaf.text)) }
+  else if (path_equal(leaf.path, hi.path)) { slice(leaf.text, 0, hi.offset) }
+  else { leaf.text }
+}
+
+fn selection_parts_at(leaves, lo, hi, i, n, acc) {
+  if (i >= n) { acc }
+  else {
+    let leaf = leaves[i]
+    if (path_compare(leaf.path, lo.path) < 0) {
+      selection_parts_at(leaves, lo, hi, i + 1, n, acc)
+    } else if (path_compare(leaf.path, hi.path) > 0) {
+      acc
+    } else {
+      selection_parts_at(leaves, lo, hi, i + 1, n, [*acc, selection_leaf_text(leaf, lo, hi)])
+    }
+  }
+}
+
+fn selection_text_across_leaves(doc, lo, hi) {
+  let leaves = text_leaves(doc)
+  concat_strings(selection_parts_at(leaves, lo, hi, 0, len(leaves), []))
+}
+
+// Text extraction for a TextSelection. Same-leaf selections return the direct
+// substring; cross-leaf selections concatenate all string leaves in document
+// order between the endpoints.
 pub fn selection_to_string(doc, sel) {
   if (sel.kind == 'all') { node_text(doc) }
   else if (sel.kind == 'node') {
@@ -152,7 +187,7 @@ pub fn selection_to_string(doc, sel) {
       let r = resolve_pos(doc, lo)
       if (not r.found or type(r.node) != string) { "" }
       else { slice(r.node, lo.offset, hi.offset) }
-    } else { null }
+    } else { selection_text_across_leaves(doc, lo, hi) }
   }
   else { null }
 }

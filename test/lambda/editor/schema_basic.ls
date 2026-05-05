@@ -39,3 +39,15 @@ let sch = md_schema
 "sequence rejects wrong head:"; match_content(sch,
   [<heading; "x">],
   [{tag: 'paragraph', qty: 'one'}])
+"choice paragraph ok:"; match_content(sch,
+  [<paragraph; "x">],
+  [{any: [{tag: 'paragraph'}, {tag: 'heading'}], qty: 'one'}])
+"choice heading ok:"; match_content(sch,
+  [<heading; "x">],
+  [{any: [{tag: 'paragraph'}, {tag: 'heading'}], qty: 'one'}])
+"choice rejects hr:"; match_content(sch,
+  [<hr>],
+  [{any: [{tag: 'paragraph'}, {tag: 'heading'}], qty: 'one'}])
+"backtrack star then paragraph:"; match_content(sch,
+  [<blockquote; <paragraph; "q">>, <paragraph; "tail">],
+  [{role: 'block', qty: 'star'}, {tag: 'paragraph', qty: 'one'}])

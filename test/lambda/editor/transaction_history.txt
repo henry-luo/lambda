@@ -48,6 +48,14 @@ false
 true
 "r2 undo depth:"
 2
+"group undo depth:"
+1
+"group undo doc:"
+true
+"group redo depth:"
+1
+"group redo doc:"
+true
 "u1 ok:"
 true
 "u1 doc:"
