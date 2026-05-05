@@ -1,0 +1,46 @@
+"open kind:"
+true
+"open schema doc role:"
+true
+"open history empty:"
+true
+"mount flag:"
+true
+"mount event:"
+true
+"exec insert doc:"
+true
+"exec insert caret:"
+true
+"exec change event:"
+true
+"exec selection event:"
+true
+"exec scroll meta:"
+true
+"exec history depth:"
+true
+"exec undo doc:"
+true
+"exec undo selection:"
+true
+"exec undo redo depth:"
+true
+"exec redo doc:"
+true
+"exec redo selection:"
+true
+"exec stored mark:"
+true
+"exec stored history:"
+true
+"exec stored insert doc:"
+true
+"exec stored insert mark:"
+true
+"exec split default:"
+true
+"exec set type:"
+true
+"open html schema:"
+true

@@ -59,6 +59,38 @@ pub fn source_selection_from_dom(anchor_lookup, head_lookup) {
   else { text_selection(a, h) }
 }
 
+fn schema_entry_for_node(schema, node) =>
+  if (not is_node(node)) { null } else { schema[node.tag] }
+
+fn is_selectable_entry(entry) =>
+  entry != null and (entry.selectable == true or entry.atomic == true) and entry.editable != true
+
+fn nearest_selectable_at(schema, root, path, depth) {
+  if (depth < 0) { null }
+  else {
+    let p = path_take(path, depth)
+    let n = node_at(root, p)
+    let e = schema_entry_for_node(schema, n)
+    if (is_selectable_entry(e)) { p }
+    else { nearest_selectable_at(schema, root, path, depth - 1) }
+  }
+}
+
+pub fn nearest_selectable_path(schema, root, path) =>
+  nearest_selectable_at(schema, root, path, len(path))
+
+pub fn source_selection_from_dom_with_schema(schema, root, anchor_lookup, head_lookup) {
+  let a = source_pos_from_dom(anchor_lookup)
+  let h = source_pos_from_dom(head_lookup)
+  if (a == null or h == null) { null }
+  else {
+    let ap = nearest_selectable_path(schema, root, a.path)
+    let hp = nearest_selectable_path(schema, root, h.path)
+    if (ap != null and hp != null and path_equal(ap, hp)) { node_selection(ap) }
+    else { text_selection(a, h) }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // SourcePos → DOM lookup descriptor
 // ---------------------------------------------------------------------------
@@ -80,13 +112,14 @@ pub fn dom_lookup_from_source_pos(root, p) {
 }
 
 pub fn dom_lookup_from_source_selection(root, sel) {
-  if (sel.kind != 'text') { null }
-  else {
+  if (sel.kind == 'node') {
+    dom_lookup_from_source_pos(root, pos(sel.path, 0))
+  } else if (sel.kind == 'text') {
     let a = dom_lookup_from_source_pos(root, sel.anchor)
     let h = dom_lookup_from_source_pos(root, sel.head)
     if (a == null or h == null) { null }
     else { {anchor: a, head: h} }
-  }
+  } else { null }
 }
 
 // ---------------------------------------------------------------------------

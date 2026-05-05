@@ -16,6 +16,7 @@ let s0 = {doc: d0, selection: caret}
 let tx_ins = dispatch_intent(s0, {input_type: "insertText", data: "!"})
 "insert intent doc:"; doc_text(tx_ins.doc_after) == "Hello!"
 "insert intent caret:"; tx_ins.sel_after.anchor.offset == 6
+"insert intent scroll:"; tx_get_meta(tx_ins, "scrollIntoView")
 
 let tx_paste = dispatch_intent(s0, {input_type: "insertFromPaste", data: " world"})
 "paste intent doc:"; doc_text(tx_paste.doc_after) == "Hello world"
@@ -99,17 +100,17 @@ let tx_outdent_intent = dispatch_intent({doc: tx_indent_intent.doc_after, select
 "outdent intent top count:"; len(node_at(tx_outdent_intent.doc_after, [0]).content) == 2
 
 let tx_bold = dispatch_intent(s0, {input_type: "formatBold", data: null})
-let bold_leaf = node_at(tx_bold.doc_after, [0, 0])
-"bold intent mark:"; has_mark(bold_leaf.marks, 'strong')
-"bold intent text:"; bold_leaf.text == "Hello"
+"bold intent stored:"; has_mark(tx_get_meta(tx_bold, "storedMarks"), 'strong')
+let s_bold = state_after_intent(s0, tx_bold)
+let tx_bold_type = dispatch_intent(s_bold, {input_type: "insertText", data: "!"})
+"bold intent insert mark:"; has_mark(node_at(tx_bold_type.doc_after, [0, 1]).marks, 'strong')
+"bold intent text:"; doc_text(tx_bold_type.doc_after) == "Hello!"
 
 let tx_italic = dispatch_intent(s0, {input_type: "formatItalic", data: null})
-let italic_leaf = node_at(tx_italic.doc_after, [0, 0])
-"italic intent mark:"; has_mark(italic_leaf.marks, 'em')
+"italic intent stored:"; has_mark(tx_get_meta(tx_italic, "storedMarks"), 'em')
 
 let tx_under = dispatch_intent(s0, {input_type: "formatUnderline", data: null})
-let under_leaf = node_at(tx_under.doc_after, [0, 0])
-"underline intent mark:"; has_mark(under_leaf.marks, 'underline')
+"underline intent stored:"; has_mark(tx_get_meta(tx_under, "storedMarks"), 'underline')
 
 let tx_comp_start = dispatch_intent(s0, {input_type: "compositionStart", data: null})
 let s_comp0 = state_after_intent(s0, tx_comp_start)
@@ -148,6 +149,7 @@ let h_tx_undo = dispatch_intent(h_state1, {input_type: "historyUndo", data: null
 let h_state2 = state_after_intent(h_state1, h_tx_undo)
 "history undo doc:"; doc_text(h_state2.doc) == "Hello"
 "history undo redo:"; can_redo(h_state2.history)
+"history undo scroll:"; tx_get_meta(h_tx_undo, "scrollIntoView")
 let h_tx_redo = dispatch_intent(h_state2, {input_type: "historyRedo", data: null})
 let h_state3 = state_after_intent(h_state2, h_tx_redo)
 "history redo doc:"; doc_text(h_state3.doc) == "Hello!"

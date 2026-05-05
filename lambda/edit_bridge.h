@@ -6,6 +6,7 @@
 
 #include "lambda.h"
 #include <stdbool.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -18,6 +19,43 @@ void edit_bridge_destroy(void);
 
 // Check if the global editor is active
 bool edit_bridge_active(void);
+
+// ========================================================================
+// Edit session API for rich-text editing
+// ========================================================================
+
+#define EDIT_SOURCE_PATH_MAX 32
+
+typedef struct EditSession EditSession;
+typedef struct EditSchema EditSchema;
+
+typedef struct SourcePath {
+	uint32_t len;
+	uint32_t* indices;
+} SourcePath;
+
+typedef struct SourcePos {
+	SourcePath path;
+	uint32_t offset;
+} SourcePos;
+
+typedef enum EditEventKind {
+	EDIT_EVENT_CHANGE = 1,
+	EDIT_EVENT_SELECTION = 2
+} EditEventKind;
+
+typedef void (*EditCallback)(EditSession* session, EditEventKind kind, Item payload, void* user_data);
+
+EditSession* edit_session_new(Item root, EditSchema* schema);
+EditSession* edit_session_new_with_input(void* input_ptr, Item root, EditSchema* schema);
+void edit_session_destroy(EditSession* session);
+bool edit_session_exec(EditSession* session, const char* cmd_name, Item args);
+Item edit_session_current(EditSession* session);
+EditSchema* edit_session_schema(EditSession* session);
+bool edit_session_set_selection(EditSession* session, SourcePos anchor, SourcePos head);
+SourcePos edit_session_selection_anchor(EditSession* session);
+SourcePos edit_session_selection_head(EditSession* session);
+void edit_session_subscribe(EditSession* session, EditEventKind kind, EditCallback callback, void* user_data);
 
 // ========================================================================
 // Map operations

@@ -58,3 +58,21 @@ true
 true
 "mark excluded by code:"
 true
+"markdown alias valid:"
+true
+"commonmark strict valid:"
+true
+"html subset valid:"
+true
+"html image required attr:"
+true
+"html table rejects loose cell:"
+true
+"markdown image selectable:"
+true
+"markdown image draggable:"
+true
+"markdown paragraph editable:"
+true
+"html image selectable:"
+true
