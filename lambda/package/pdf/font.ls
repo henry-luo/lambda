@@ -6,7 +6,7 @@
 //     without embedding the original font program.
 //   - Provide a `resolve_font(pdf, page, name)` helper that returns a
 //     normalised record:
-//         { name, family, weight, style, size_default, to_unicode }
+//         { name, family, weight, style, size_default, to_unicode, encoding }
 //     where `to_unicode` is the per-glyph CMap already resolved by the C
 //     side (or null when not present).
 //   - Provide `decode_hex(hex_str, to_unicode)` for `<XX..>` strings used
@@ -183,6 +183,18 @@ fn _to_unicode_or_null(dict) {
     if (dict.to_unicode) dict.to_unicode else null
 }
 
+fn _encoding_or_null(dict) {
+    if (dict.Encoding is string) { dict.Encoding }
+    else { null }
+}
+
+fn _implicit_encoding(stripped: string, explicit) {
+    if (explicit != null) { explicit }
+    else if (stripped == "Symbol") { "SymbolEncoding" }
+    else if (stripped == "ZapfDingbats") { "ZapfDingbatsEncoding" }
+    else { null }
+}
+
 // Strip a leading "XXXXXX+" subset prefix from a BaseFont name. Done as
 // `fn` so it can be called from `resolve_font` (which avoids nested pn
 // dispatch — see the note above resolve_font).
@@ -198,21 +210,21 @@ fn _strip_subset(name: string) {
 // behave deterministically; calling pn helpers (from_basefont) from
 // inside `resolve_font` proved to silently lose the weight/style fields
 // when chained through let-bindings.
-fn _make_descriptor(name, info, to_uni) {
+fn _make_descriptor(name, info, to_uni, enc) {
     { name: name, family: info.family, weight: info.weight,
-      style: info.style, to_unicode: to_uni,
+        style: info.style, to_unicode: to_uni, encoding: enc,
       font_data_uri: null, font_format: null, embedded_family: null }
 }
 
-fn _make_descriptor_embedded(name, info, to_uni, uri, fmt, emb_family) {
+fn _make_descriptor_embedded(name, info, to_uni, enc, uri, fmt, emb_family) {
     { name: name, family: info.family, weight: info.weight,
-      style: info.style, to_unicode: to_uni,
+        style: info.style, to_unicode: to_uni, encoding: enc,
       font_data_uri: uri, font_format: fmt, embedded_family: emb_family }
 }
 
 fn _unknown_descriptor(name) {
     { name: name, family: _UNKNOWN.family, weight: _UNKNOWN.weight,
-      style: _UNKNOWN.style, to_unicode: null,
+        style: _UNKNOWN.style, to_unicode: null, encoding: null,
       font_data_uri: null, font_format: null, embedded_family: null }
 }
 
@@ -335,15 +347,16 @@ pub pn resolve_font(pdf, page, name: string) {
     // canonical metrics).
     let info0 = _final_info(pdf, stripped, dict, s14, fb)
     let to_uni = _to_unicode_or_null(dict)
+    let enc = _implicit_encoding(stripped, _encoding_or_null(dict))
     // Embedded font program?  Pull the data URI off the FontDescriptor
     // and weave the unsubsetted family name into the CSS stack so the
     // browser matches our @font-face declaration.
     let emb = _embedded_font_info(pdf, dict)
     if (emb == null) {
-        return _make_descriptor(name, info0, to_uni)
+        return _make_descriptor(name, info0, to_uni, enc)
     }
     let info1 = _info_with_embedded(info0, stripped)
-    return _make_descriptor_embedded(name, info1, to_uni,
+    return _make_descriptor_embedded(name, info1, to_uni, enc,
                                      emb.uri, emb.fmt, stripped)
 }
 
@@ -364,13 +377,41 @@ fn _hex_val(c: string) {
     else { 0 }
 }
 
+fn _is_hex_digit(c: string) {
+    let k = ord(c)
+    ((k >= 48) and (k <= 57)) or ((k >= 65) and (k <= 70)) or ((k >= 97) and (k <= 102))
+}
+
+fn _clean_hex(hex: string) {
+    if (len(hex) == 0) { "" }
+    else {
+        let parts = for (i in 0 to (len(hex) - 1) where _is_hex_digit(hex[i])) hex[i]
+        parts | join("")
+    }
+}
+
+fn _hex_value_range(hex: string, i: int, endp: int, acc: int) {
+    if (i >= endp or i >= len(hex)) { acc }
+    else { _hex_value_range(hex, i + 1, endp, (acc * 16) + _hex_val(hex[i])) }
+}
+
+fn _hex_code_at(hex: string, i: int, digits: int) {
+    _hex_value_range(hex, i, i + digits, 0)
+}
+
+fn _byte_code_at(hex: string, i: int) {
+    if (i + 1 < len(hex)) { _hex_code_at(hex, i, 2) }
+    else { _hex_val(hex[i]) * 16 }
+}
+
 // Convert a hex string (without delimiters) to a list of byte codes.
 fn _hex_to_codes(hex: string) {
-    let n = len(hex)
-    let pairs = (n / 2)
+    let clean = _clean_hex(hex)
+    let n = len(clean)
+    let pairs = (n + 1) / 2
     if (pairs == 0) { [] }
     else {
-        for (k in 0 to (pairs - 1)) (_hex_val(hex[k * 2]) * 16) + _hex_val(hex[k * 2 + 1])
+        for (k in 0 to (pairs - 1)) _byte_code_at(clean, k * 2)
     }
 }
 
@@ -385,17 +426,101 @@ fn _hex_to_codes(hex: string) {
 //
 // When the lookup misses we return the literal byte as a 1-char
 // string (best-effort fallback).
-fn _decode_code(code, cmap) {
+fn _winansi_special(code) {
+    if (code == 128) { chr(8364) }
+    else if (code == 130) { chr(8218) }
+    else if (code == 131) { chr(402) }
+    else if (code == 132) { chr(8222) }
+    else if (code == 133) { chr(8230) }
+    else if (code == 134) { chr(8224) }
+    else if (code == 135) { chr(8225) }
+    else if (code == 136) { chr(710) }
+    else if (code == 137) { chr(8240) }
+    else if (code == 138) { chr(352) }
+    else if (code == 139) { chr(8249) }
+    else if (code == 140) { chr(338) }
+    else if (code == 142) { chr(381) }
+    else if (code == 145) { chr(8216) }
+    else if (code == 146) { chr(8217) }
+    else if (code == 147) { chr(8220) }
+    else if (code == 148) { chr(8221) }
+    else if (code == 149) { chr(8226) }
+    else if (code == 150) { chr(8211) }
+    else if (code == 151) { chr(8212) }
+    else if (code == 152) { chr(732) }
+    else if (code == 153) { chr(8482) }
+    else if (code == 154) { chr(353) }
+    else if (code == 155) { chr(8250) }
+    else if (code == 156) { chr(339) }
+    else if (code == 158) { chr(382) }
+    else if (code == 159) { chr(376) }
+    else { null }
+}
+
+fn _decode_byte_with_encoding(code, encoding) {
+    if (encoding == "WinAnsiEncoding") {
+        let sp = _winansi_special(code)
+        if (sp != null) { sp }
+        else { chr(code) }
+    }
+    else { chr(code) }
+}
+
+fn _decode_code_with_encoding(code, cmap, encoding) {
     let key = string(code)
     if (cmap and cmap[key]) { cmap[key] }
-    else { chr(code) }
+    else { _decode_byte_with_encoding(code, encoding) }
+}
+
+fn _decode_code(code, cmap) {
+    _decode_code_with_encoding(code, cmap, null)
+}
+
+fn _decode_hex_cmap_at(hex: string, i: int, cmap, encoding) {
+    let n = len(hex)
+    if (i >= n) { "" }
+    else {
+        let c8 = if (i + 8 <= n) _hex_code_at(hex, i, 8) else -1
+        let h8 = if (c8 >= 0 and cmap and cmap[string(c8)]) cmap[string(c8)] else null
+        if (h8 != null) { h8 ++ _decode_hex_cmap_at(hex, i + 8, cmap, encoding) }
+        else {
+            let c6 = if (i + 6 <= n) _hex_code_at(hex, i, 6) else -1
+            let h6 = if (c6 >= 0 and cmap and cmap[string(c6)]) cmap[string(c6)] else null
+            if (h6 != null) { h6 ++ _decode_hex_cmap_at(hex, i + 6, cmap, encoding) }
+            else {
+                let c4 = if (i + 4 <= n) _hex_code_at(hex, i, 4) else -1
+                let h4 = if (c4 >= 0 and cmap and cmap[string(c4)]) cmap[string(c4)] else null
+                if (h4 != null) { h4 ++ _decode_hex_cmap_at(hex, i + 4, cmap, encoding) }
+                else {
+                    let c2 = _byte_code_at(hex, i)
+                    _decode_code_with_encoding(c2, cmap, encoding) ++ _decode_hex_cmap_at(hex, i + 2, cmap, encoding)
+                }
+            }
+        }
+    }
 }
 
 // Decode a Tj/TJ hex operand to a unicode string.
 pub fn decode_hex(hex: string, to_unicode) {
-    let codes = _hex_to_codes(hex)
-    let parts = (for (c in codes) _decode_code(c, to_unicode))
-    parts | join("")
+    let clean = _clean_hex(hex)
+    if (to_unicode != null) { _decode_hex_cmap_at(clean, 0, to_unicode, null) }
+    else {
+        let codes = _hex_to_codes(clean)
+        let parts = (for (c in codes) _decode_code(c, null))
+        parts | join("")
+    }
+}
+
+pub fn decode_hex_with_font(hex: string, font_info) {
+    let cmap = if (font_info) font_info.to_unicode else null
+    let enc = if (font_info) font_info.encoding else null
+    let clean = _clean_hex(hex)
+    if (cmap != null) { _decode_hex_cmap_at(clean, 0, cmap, enc) }
+    else {
+        let codes = _hex_to_codes(clean)
+        let parts = (for (c in codes) _decode_code_with_encoding(c, null, enc))
+        parts | join("")
+    }
 }
 
 // Decode a literal-string Tj operand. Without a CMap PDF literal strings
@@ -406,6 +531,17 @@ pub fn decode_literal(s: string, to_unicode) {
     else {
         let n = len(s)
         let parts = (for (i in 0 to (n - 1)) _decode_code(ord(s[i]), to_unicode))
+        parts | join("")
+    }
+}
+
+pub fn decode_literal_with_font(s: string, font_info) {
+    let cmap = if (font_info) font_info.to_unicode else null
+    let enc = if (font_info) font_info.encoding else null
+    let n = len(s)
+    if (n == 0) { "" }
+    else {
+        let parts = (for (i in 0 to (n - 1)) _decode_code_with_encoding(ord(s[i]), cmap, enc))
         parts | join("")
     }
 }
