@@ -33,7 +33,7 @@ http.api.**
 "Path type checking"
 path
 "File content (lazy loading)"
-0
+false
 "exists() function - directory exists"
 false
 "exists() function - file exists"

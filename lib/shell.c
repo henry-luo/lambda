@@ -165,6 +165,11 @@ static ShellResult shell_exec_win32(const char* program, const char** args,
     cmdline[0] = '\0';
     for (int i = 0; args && args[i]; i++) {
         if (i > 0) strcat(cmdline, " ");
+        if (i == 2 && args[0] && args[1] &&
+            strcmp(args[0], "cmd") == 0 && strcmp(args[1], "/c") == 0) {
+            strcat(cmdline, args[i]);
+            continue;
+        }
         // simple quoting — wrap each arg in double quotes
         strcat(cmdline, "\"");
         strcat(cmdline, args[i]);
