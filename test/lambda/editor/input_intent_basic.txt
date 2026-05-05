@@ -54,6 +54,18 @@ true
 true
 "drop insert selected:"
 true
+"drop block coerced doc:"
+true
+"drop block coerced tag:"
+true
+"drop block coerced selected:"
+true
+"drop inline coerced doc:"
+true
+"drop inline coerced count:"
+true
+"drop inline coerced caret:"
+true
 "node type doc:"
 true
 "node type caret:"

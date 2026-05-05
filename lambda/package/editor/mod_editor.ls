@@ -107,3 +107,15 @@ fn editor_after_tx(editor, tx) {
 pub fn edit_exec(editor, command) => editor_after_tx(editor, command_tx(editor, command))
 
 pub fn edit_apply(editor, tx) => editor_after_tx(editor, tx)
+
+pub fn edit_dispatch(editor, intent) => editor_after_tx(editor, dispatch_intent(editor, intent))
+
+pub fn edit_set_decorations(editor, decorations) =>
+  {kind: 'editor', doc: editor.doc, schema: editor.schema, selection: editor.selection,
+   history: editor.history, decorations: decorations, composition: editor.composition,
+   stored_marks: editor.stored_marks,
+   events: [*editor.events, {kind: 'decorations', decorations: decorations}],
+   mounted: editor.mounted, preset: editor.preset}
+
+pub fn edit_find(editor, needle, attrs) =>
+  edit_set_decorations(editor, find_decorations_in_doc(editor.doc, needle, attrs))

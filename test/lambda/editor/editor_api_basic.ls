@@ -160,3 +160,27 @@ let html_outdent_editor = edit_exec(edit_open(html_indent_editor.doc, editor_sch
 	text_selection(pos([0, 0, 1, 0, 0], 1), pos([0, 0, 1, 0, 0], 1))), edit_cmd_outdent_list_item())
 "exec html outdent count:"; len(node_at(html_outdent_editor.doc, [0]).content) == 2
 "exec html outdent selected:"; path_equal(html_outdent_editor.selection.path, [0, 1])
+
+let intent_editor = edit_dispatch(editor0, {input_type: "insertText", data: "?"})
+"dispatch intent doc:"; doc_text(intent_editor.doc) == "Hello?"
+"dispatch intent history:"; len(intent_editor.history.undo) == 1
+"dispatch intent event:"; intent_editor.events[0].kind == 'change'
+
+let comp_editor0 = edit_dispatch(editor0, {input_type: "compositionStart", data: null})
+"dispatch composition active:"; comp_editor0.composition.active
+let comp_editor1 = edit_dispatch(comp_editor0, {input_type: "insertCompositionText", data: "ai"})
+"dispatch composition update:"; doc_text(comp_editor1.doc) == "Helloai"
+let comp_editor2 = edit_dispatch(comp_editor1, {input_type: "insertFromComposition", data: "愛"})
+"dispatch composition final:"; doc_text(comp_editor2.doc) == "Hello愛"
+"dispatch composition cleared:"; comp_editor2.composition == null
+"dispatch composition history:"; len(comp_editor2.history.undo) == 1
+
+let find_editor = edit_find(editor0, "Hello", {class: "find-hit"})
+"edit find count:"; len(find_editor.decorations.items) == 1
+"edit find event:"; find_editor.events[0].kind == 'decorations'
+let manual_deco_editor = edit_set_decorations(editor0, find_editor.decorations)
+"set decorations count:"; len(manual_deco_editor.decorations.items) == 1
+let find_at_start = edit_set_selection(find_editor, text_selection(pos([0, 0], 0), pos([0, 0], 0)))
+let find_after_insert = edit_dispatch(find_at_start, {input_type: "insertText", data: "X"})
+"edit decoration mapped from:"; find_after_insert.decorations.items[0].from.offset == 1
+"edit decoration mapped to:"; find_after_insert.decorations.items[0].to.offset == 6
