@@ -1,0 +1,1 @@
+{ count: 1, has_placeholder: true, has_dash: true, not_raw_rgb: true}
