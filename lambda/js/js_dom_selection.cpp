@@ -24,6 +24,7 @@
 #include "../lambda.hpp"
 #include "../input/css/dom_node.hpp"
 #include "../input/css/dom_element.hpp"
+#include "../../lib/arraylist.h"
 #include "../../lib/log.h"
 
 #include "../../radiant/dom_range.hpp"
@@ -31,6 +32,8 @@
 #include "../../radiant/form_control.hpp"
 #include <cstring>
 #include <cstdlib>
+
+extern __thread EvalContext* context;
 
 // ============================================================================
 // Helpers
@@ -57,6 +60,45 @@ static inline Item make_key(const char* s) { return make_str(s); }
 
 static inline void prop_set(Item obj, const char* key, Item val) {
     js_property_set(obj, make_key(key), val);
+}
+
+struct JsDocRuntimeScope {
+    EvalContext runtime_ctx;
+    EvalContext* saved_context;
+    ArrayList* type_list;
+    bool active;
+};
+
+static bool js_doc_runtime_enter_if_needed(DomDocument* doc, JsDocRuntimeScope* scope) {
+    if (!scope) return false;
+    memset(scope, 0, sizeof(JsDocRuntimeScope));
+    if (!doc) return false;
+    if (context) {
+        js_dom_set_document(doc);
+        return true;
+    }
+    if (!doc->js_runtime_heap || !doc->js_runtime_nursery || !doc->js_runtime_name_pool) return false;
+    scope->runtime_ctx.heap = (Heap*)doc->js_runtime_heap;
+    scope->runtime_ctx.nursery = (gc_nursery_t*)doc->js_runtime_nursery;
+    scope->runtime_ctx.name_pool = (NamePool*)doc->js_runtime_name_pool;
+    scope->runtime_ctx.pool = (Pool*)doc->js_runtime_pool;
+    scope->type_list = arraylist_new(16);
+    scope->runtime_ctx.type_list = scope->type_list;
+    scope->saved_context = context;
+    context = &scope->runtime_ctx;
+    js_dom_set_document(doc);
+    scope->active = true;
+    return true;
+}
+
+static void js_doc_runtime_exit(JsDocRuntimeScope* scope) {
+    if (!scope || !scope->active) return;
+    context = scope->saved_context;
+    if (scope->type_list) {
+        arraylist_free(scope->type_list);
+        scope->type_list = nullptr;
+    }
+    scope->active = false;
 }
 
 static inline Item prop_get(Item obj, const char* key) {
@@ -1136,8 +1178,14 @@ extern "C" void js_dom_queue_selectionchange(DomSelection* sel) {
 // drains the whole pending list in a single setTimeout(0) callback.
 static Item _tc_selectionchange_drain(Item this_val, Item* args, int argc) {
     (void)this_val; (void)args; (void)argc;
+    DomDocument* doc = (DomDocument*)js_dom_get_document();
+    JsDocRuntimeScope scope;
+    if (!js_doc_runtime_enter_if_needed(doc, &scope)) return ItemNull;
     RadiantState* state = get_or_create_state();
-    if (!state) return ItemNull;
+    if (!state) {
+        js_doc_runtime_exit(&scope);
+        return ItemNull;
+    }
     DomElement* head = state->tc_selectionchange_head;
     state->tc_selectionchange_head = nullptr;
     state->tc_selectionchange_drain_scheduled = false;
@@ -1159,6 +1207,7 @@ static Item _tc_selectionchange_drain(Item this_val, Item* args, int argc) {
         js_dom_dispatch_event(js_dom_wrap_element(head), ev);
         head = next;
     }
+    js_doc_runtime_exit(&scope);
     return ItemNull;
 }
 
@@ -1166,16 +1215,29 @@ extern "C" void js_dom_queue_textcontrol_selectionchange(DomElement* elem) {
     if (!elem) return;
     FormControlProp* f = elem->form;
     if (!f) return;
+    DomDocument* doc = elem->doc;
+    JsDocRuntimeScope scope;
+    if (!js_doc_runtime_enter_if_needed(doc, &scope)) return;
     RadiantState* state = get_or_create_state();
-    if (!state) return;
-    if (f->tc_sc_pending) return;  // coalesce per-element
+    if (!state) {
+        js_doc_runtime_exit(&scope);
+        return;
+    }
+    if (f->tc_sc_pending) {
+        js_doc_runtime_exit(&scope);
+        return;
+    }
     f->tc_sc_pending = 1;
     f->tc_sc_next_pending = state->tc_selectionchange_head;
     state->tc_selectionchange_head = elem;
-    if (state->tc_selectionchange_drain_scheduled) return;
+    if (state->tc_selectionchange_drain_scheduled) {
+        js_doc_runtime_exit(&scope);
+        return;
+    }
     state->tc_selectionchange_drain_scheduled = true;
     Item cb = js_new_function((void*)_tc_selectionchange_drain, 0);
     js_setTimeout(cb, (Item){.item = i2it(0)});
+    js_doc_runtime_exit(&scope);
 }
 
 extern "C" void js_dom_selection_reset(void) {

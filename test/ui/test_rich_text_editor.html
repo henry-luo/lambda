@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Rich Text Editor UI Test</title>
+<style>
+  body {
+    margin: 20px;
+    font-family: Arial, sans-serif;
+    font-size: 16px;
+    color: #222;
+    background: #fff;
+  }
+  h1 {
+    font-size: 20px;
+    margin: 0 0 10px 0;
+  }
+  #toolbar {
+    display: flex;
+    gap: 6px;
+    padding: 8px;
+    border: 1px solid #888;
+    background: #f6f6f6;
+  }
+  #toolbar button {
+    min-width: 34px;
+    height: 30px;
+    border: 1px solid #777;
+    background: #fff;
+    font-size: 15px;
+  }
+  #toolbar button.active {
+    background: #dbeafe;
+    border-color: #2563eb;
+  }
+  #editor {
+    margin-top: 10px;
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 260px;
+    padding: 14px;
+    border: 1px solid #666;
+    background: #fff;
+    font: 15px Menlo, Consolas, monospace;
+    resize: vertical;
+  }
+  #editor:focus {
+    outline: 2px solid #2563eb;
+  }
+  #preview {
+    margin-top: 10px;
+    padding: 14px;
+    border: 1px solid #aaa;
+    background: #fcfcfc;
+  }
+  #preview h2 {
+    margin: 0 0 10px 0;
+    font-size: 18px;
+  }
+  #preview p {
+    margin: 8px 0;
+  }
+  #preview ul {
+    margin: 8px 0 8px 24px;
+  }
+  #status, #source-path, #markdown-output {
+    margin-top: 10px;
+    font-family: Menlo, Consolas, monospace;
+    font-size: 13px;
+    white-space: pre-wrap;
+  }
+  #status {
+    padding: 6px;
+    border: 1px solid #aaa;
+    background: #fafafa;
+  }
+  #markdown-output {
+    padding: 8px;
+    border: 1px solid #bbb;
+    background: #f8fafc;
+  }
+  .inserted-bold { font-weight: bold; }
+  .inserted-italic { font-style: italic; }
+  .inserted-underline { text-decoration: underline; }
+</style>
+<script>
+  var sourcePath = 'test/input/simple.md';
+  var docState = {
+    title: 'Simple Markdown Test',
+    paragraph: 'This is a simple markdown document for testing basic functionality.',
+    editorText: '# Simple Markdown Test\n\nThis is a simple markdown document for testing basic functionality.\n\nThis is a paragraph with bold text and italic text.\n\n- Item 1\n- Item 2\n- Item 3',
+    boldRanges: [],
+    bold: false,
+    italic: false,
+    underline: false,
+    list: false
+  };
+  var savedEditorSelection = {start: 0, end: 0};
+  var lastEditedRange = {start: 0, end: 0, active: false};
+
+  function rememberEditorSelection() {
+    var editor = document.getElementById('editor');
+    if (!editor) return;
+    if (editor.selectionStart == null || editor.selectionEnd == null) return;
+    savedEditorSelection = {start: editor.selectionStart, end: editor.selectionEnd};
+  }
+
+  function keepEditorSelection(event) {
+    rememberEditorSelection();
+    if (event && event.preventDefault) event.preventDefault();
+    return false;
+  }
+
+  function rememberEditedRange(oldValue, newValue) {
+    var prefix = 0;
+    while (prefix < oldValue.length && prefix < newValue.length && oldValue.charAt(prefix) == newValue.charAt(prefix)) {
+      prefix++;
+    }
+    var oldSuffix = oldValue.length - 1;
+    var newSuffix = newValue.length - 1;
+    while (oldSuffix >= prefix && newSuffix >= prefix && oldValue.charAt(oldSuffix) == newValue.charAt(newSuffix)) {
+      oldSuffix--;
+      newSuffix--;
+    }
+    var start = prefix;
+    var end = newSuffix + 1;
+    if (end <= start) return;
+    if (lastEditedRange.active && start == lastEditedRange.end) {
+      lastEditedRange.end = end;
+    } else {
+      lastEditedRange = {start: start, end: end, active: true};
+    }
+  }
+
+  function escapeHtml(text) {
+    return text.replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function normalizeRanges(ranges) {
+    if (ranges.length <= 1) return ranges;
+    ranges.sort(function(a, b) { return a.start - b.start; });
+    var merged = [ranges[0]];
+    for (var i = 1; i < ranges.length; i++) {
+      var last = merged[merged.length - 1];
+      var current = ranges[i];
+      if (current.start <= last.end) {
+        if (current.end > last.end) last.end = current.end;
+      } else {
+        merged.push(current);
+      }
+    }
+    return merged;
+  }
+
+  function renderMarkedText(text, ranges, mode) {
+    if (!text) return '';
+    var html = '';
+    var cursor = 0;
+    var cleanRanges = normalizeRanges(ranges.slice());
+    for (var i = 0; i < cleanRanges.length; i++) {
+      var start = Math.max(0, Math.min(text.length, cleanRanges[i].start));
+      var end = Math.max(start, Math.min(text.length, cleanRanges[i].end));
+      if (cursor < start) html += escapeHtml(text.slice(cursor, start));
+      var marked = escapeHtml(text.slice(start, end));
+      if (mode == 'html') {
+        html += '<strong class="selected-bold">' + marked + '</strong>';
+      } else {
+        html += '**' + marked + '**';
+      }
+      cursor = end;
+    }
+    if (cursor < text.length) html += escapeHtml(text.slice(cursor));
+    return html;
+  }
+
+  function renderPreview(updateEditorValue) {
+    var preview = document.getElementById('preview');
+    var html = '<h2 id="doc-title">' + docState.title + '</h2>';
+    html += '<p id="doc-paragraph">' + renderMarkedText(docState.paragraph, docState.boldRanges, 'html') + '</p>';
+    html += '<p id="format-line">';
+    html += docState.bold ? '<strong class="inserted-bold">bold text</strong>' : 'bold text';
+    html += ' / ';
+    html += docState.italic ? '<em class="inserted-italic">italic text</em>' : 'italic text';
+    html += ' / ';
+    html += docState.underline ? '<u class="inserted-underline">underlined text</u>' : 'underlined text';
+    html += '</p>';
+    if (docState.list) {
+      html += '<ul id="doc-list"><li>Toolbar list item</li><li>Second list item</li></ul>';
+    }
+    preview.innerHTML = html;
+    if (updateEditorValue) {
+      document.getElementById('editor').value = docState.editorText;
+    }
+    updateToolbar();
+    updateMarkdown();
+  }
+
+  function syncFromEditor(markTyped) {
+    var value = document.getElementById('editor').value;
+    rememberEditorSelection();
+    if (markTyped) {
+      rememberEditedRange(docState.editorText, value);
+    }
+    docState.editorText = value;
+    docState.paragraph = value;
+    docState.boldRanges = docState.boldRanges.filter(function(range) {
+      return range.start < value.length && range.end <= value.length;
+    });
+    updateMarkdown();
+    var paragraph = document.getElementById('doc-paragraph');
+    if (paragraph) {
+      paragraph.innerHTML = renderMarkedText(value, docState.boldRanges, 'html');
+    }
+    if (markTyped) {
+      updateStatus('typed');
+    }
+  }
+
+  function setActive(id, active) {
+    var button = document.getElementById(id);
+    button.className = active ? 'active' : '';
+  }
+
+  function updateToolbar() {
+    setActive('btn-bold', docState.bold);
+    setActive('btn-italic', docState.italic);
+    setActive('btn-underline', docState.underline);
+    setActive('btn-list', docState.list);
+  }
+
+  function updateMarkdown() {
+    var out = '# ' + docState.title + '\n\n' + renderMarkedText(docState.paragraph, docState.boldRanges, 'markdown') + '\n\n';
+    out += (docState.bold ? '**bold text**' : 'bold text') + ' / ';
+    out += (docState.italic ? '*italic text*' : 'italic text') + ' / ';
+    out += (docState.underline ? '<u>underlined text</u>' : 'underlined text') + '\n';
+    if (docState.list) {
+      out += '\n- Toolbar list item\n- Second list item\n';
+    }
+    document.getElementById('markdown-output').textContent = out;
+  }
+
+  function updateStatus(action) {
+    document.getElementById('status').textContent = action;
+  }
+
+  function toggleBold() {
+    var editor = document.getElementById('editor');
+    rememberEditedRange(docState.editorText, editor.value);
+    syncFromEditor(false);
+    var start = editor.selectionStart;
+    var end = editor.selectionEnd;
+    if (start == null || end == null || start == end) {
+      start = savedEditorSelection.start;
+      end = savedEditorSelection.end;
+    }
+    if ((start == null || end == null || start == end) && lastEditedRange.active) {
+      start = lastEditedRange.start;
+      end = lastEditedRange.end;
+    }
+    if (start != null && end != null && start != end) {
+      if (end < start) {
+        var temp = start;
+        start = end;
+        end = temp;
+      }
+      docState.boldRanges.push({start: start, end: end});
+      docState.boldRanges = normalizeRanges(docState.boldRanges);
+      docState.bold = true;
+    } else {
+      docState.bold = !docState.bold;
+    }
+    renderPreview(false);
+    updateStatus(docState.bold ? 'bold:on' : 'bold:off');
+  }
+
+  function toggleItalic() {
+    syncFromEditor(false);
+    docState.italic = !docState.italic;
+    renderPreview(false);
+    updateStatus(docState.italic ? 'italic:on' : 'italic:off');
+  }
+
+  function toggleUnderline() {
+    syncFromEditor(false);
+    docState.underline = !docState.underline;
+    renderPreview(false);
+    updateStatus(docState.underline ? 'underline:on' : 'underline:off');
+  }
+
+  function toggleList() {
+    syncFromEditor(false);
+    docState.list = !docState.list;
+    renderPreview(false);
+    updateStatus(docState.list ? 'list:on' : 'list:off');
+  }
+
+  function insertText() {
+    syncFromEditor(false);
+    docState.paragraph = docState.paragraph + ' Edited by UI automation.';
+    docState.editorText = docState.editorText + ' Edited by UI automation.';
+    renderPreview(true);
+    updateStatus('insert-text');
+  }
+
+  function openMarkdown() {
+    document.getElementById('source-path').textContent = 'Opened: ' + sourcePath;
+    renderPreview(true);
+    rememberEditorSelection();
+    updateStatus('opened:' + sourcePath);
+  }
+</script>
+</head>
+<body onload="openMarkdown()">
+  <h1>Rich Text Editor</h1>
+  <div id="source-path"></div>
+  <div id="toolbar" role="toolbar" aria-label="Formatting toolbar">
+    <button id="btn-bold" title="Bold" onmousedown="return keepEditorSelection(event)" onclick="toggleBold()">B</button>
+    <button id="btn-italic" title="Italic" onmousedown="return keepEditorSelection(event)" onclick="toggleItalic()"><i>I</i></button>
+    <button id="btn-underline" title="Underline" onmousedown="return keepEditorSelection(event)" onclick="toggleUnderline()"><u>U</u></button>
+    <button id="btn-list" title="List" onmousedown="return keepEditorSelection(event)" onclick="toggleList()">•</button>
+    <button id="btn-insert" title="Insert text" onmousedown="return keepEditorSelection(event)" onclick="insertText()">+</button>
+  </div>
+  <textarea id="editor" aria-label="Markdown document editor" oninput="syncFromEditor(true)" onselect="rememberEditorSelection()" onkeyup="rememberEditorSelection()" onmouseup="rememberEditorSelection()" onblur="rememberEditorSelection()" value="# Simple Markdown Test&#10;&#10;This is a simple markdown document for testing basic functionality.&#10;&#10;This is a paragraph with bold text and italic text.&#10;&#10;- Item 1&#10;- Item 2&#10;- Item 3"></textarea>
+  <div id="preview" aria-label="Rich text preview"></div>
+  <div id="status"></div>
+  <div id="markdown-output"></div>
+</body>
+</html>

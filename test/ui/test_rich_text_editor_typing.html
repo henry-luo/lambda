@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Rich Text Editor Typing Test</title>
+<style>
+  body { margin: 20px; font-family: Arial, sans-serif; font-size: 16px; color: #222; }
+  h1 { font-size: 20px; margin: 0 0 10px 0; }
+  #toolbar { display: flex; gap: 6px; padding: 8px; border: 1px solid #888; background: #f6f6f6; }
+  #toolbar button { min-width: 34px; height: 30px; border: 1px solid #777; background: #fff; font-size: 15px; }
+  #source-path { margin-top: 10px; font-family: Menlo, Consolas, monospace; font-size: 13px; }
+  #editor {
+    display: block;
+    margin-top: 10px;
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 220px;
+    padding: 14px;
+    border: 1px solid #666;
+    font: 15px Menlo, Consolas, monospace;
+  }
+</style>
+</head>
+<body>
+  <h1>Rich Text Editor</h1>
+  <div id="source-path">Opened: test/input/simple.md</div>
+  <div id="toolbar" role="toolbar" aria-label="Formatting toolbar">
+    <button id="btn-bold" title="Bold">B</button>
+    <button id="btn-italic" title="Italic"><i>I</i></button>
+    <button id="btn-underline" title="Underline"><u>U</u></button>
+    <button id="btn-list" title="List">-</button>
+  </div>
+  <textarea id="editor" aria-label="Markdown document editor" value="# Simple Markdown Test&#10;&#10;This is a simple markdown document for testing basic functionality.&#10;&#10;This is a paragraph with bold text and italic text.&#10;&#10;- Item 1&#10;- Item 2&#10;- Item 3"></textarea>
+</body>
+</html>
