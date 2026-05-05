@@ -19,6 +19,7 @@ import .mod_transaction
 import .mod_source_pos
 import .mod_html_paste
 import .mod_paste
+import .mod_md_schema
 
 // ---------------------------------------------------------------------------
 // Selection helpers
@@ -431,6 +432,17 @@ pub fn cmd_set_block_type(state, tag) {
 // command emits a single `replace` step on the grand-parent that swaps one
 // child for two, plus a caret pointing at offset 0 of the new block's leaf.
 
+fn state_default_block(state) =>
+  if (state.default_block == null) md_default_block else state.default_block
+
+fn split_right_tag(state, block, cut, text_len) {
+  let default_block = state_default_block(state)
+  if (cut == text_len and block.tag != default_block) { default_block } else { block.tag }
+}
+
+fn split_right_attrs(block, right_tag) =>
+  if (right_tag == block.tag) { block.attrs } else { [] }
+
 pub fn cmd_split_block(state) {
   let sel = state.selection
   if (sel == null or not sel_collapsed(sel)) { null }
@@ -449,8 +461,9 @@ pub fn cmd_split_block(state) {
           let cut = sel.anchor.offset
           let left_text  = slice(leaf.text, 0, cut)
           let right_text = slice(leaf.text, cut, len(leaf.text))
+          let right_tag = split_right_tag(state, block, cut, len(leaf.text))
           let left_block  = node_attrs(block.tag, block.attrs, [text_marked(left_text,  leaf.marks)])
-          let right_block = node_attrs(block.tag, block.attrs, [text_marked(right_text, leaf.marks)])
+          let right_block = node_attrs(right_tag, split_right_attrs(block, right_tag), [text_marked(right_text, leaf.marks)])
           let grand_path = parent_path(block_path)
           let block_idx  = last_index(block_path)
           let step = step_replace(grand_path, block_idx, block_idx + 1, [left_block, right_block])

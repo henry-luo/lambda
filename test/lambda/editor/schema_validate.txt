@@ -34,3 +34,23 @@ true
 true
 "bad_deep first path nonempty:"
 true
+"image attrs valid:"
+true
+"image missing attr:"
+true
+"image missing tag:"
+true
+"image attr type:"
+true
+"link missing href:"
+true
+"heading default level valid:"
+true
+"heading level validator:"
+true
+"heading level type first:"
+true
+"list ordered default valid:"
+true
+"list ordered type:"
+true

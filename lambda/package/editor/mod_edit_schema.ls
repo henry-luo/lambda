@@ -102,9 +102,48 @@ pub fn match_content(schema, children, terms) =>
 
 fn mk_violation(path, tag, message) => {path: path, tag: tag, message: message}
 
+fn node_attr(node, attr_name) => node[attr_name]
+
+fn attr_value(node, spec) {
+  let value = node_attr(node, spec.name)
+  if (value == null and spec.default != null) spec.default else value
+}
+
+fn attr_type_ok(value, spec) {
+  if (value == null) true
+  else if (spec.type == null) true
+  else if (spec.type == 'string') type(value) == string
+  else if (spec.type == 'int') type(value) == int
+  else if (spec.type == 'bool') type(value) == bool
+  else true
+}
+
+fn attr_validate_ok(value, spec) =>
+  if (value == null or spec.validate == null) true else spec.validate(value)
+
+fn validate_attrs_at(node, path, tag, specs, i, n, acc) {
+  if (i >= n) { acc }
+  else {
+    let spec = specs[i]
+    let value = attr_value(node, spec)
+    let next = if (spec.required == true and value == null) {
+        [*acc, mk_violation(path, tag, "required attribute missing")]
+      } else if (not attr_type_ok(value, spec)) {
+        [*acc, mk_violation(path, tag, "attribute type mismatch")]
+      } else if (not attr_validate_ok(value, spec)) {
+        [*acc, mk_violation(path, tag, "attribute validation failed")]
+      } else { acc }
+    validate_attrs_at(node, path, tag, specs, i + 1, n, next)
+  }
+}
+
+fn validate_attrs(node, path, tag, entry) =>
+  if (entry.attrs == null) [] else validate_attrs_at(node, path, tag, entry.attrs, 0, len(entry.attrs), [])
+
 // Children at element node (extracted as plain array — needed for indexing
-// and len() inside recursive functional code).
-fn children_array(elem) => [for (c in elem) c]
+// and len() inside recursive functional code). Element iteration includes
+// attribute values, but numeric indexing is child-only.
+fn children_array(elem) => [for (i in 0 to len(elem) - 1) elem[i]]
 
 // Validate one element node and return [violations].
 fn validate_node(schema, node, path) {
@@ -114,6 +153,7 @@ fn validate_node(schema, node, path) {
     [mk_violation(path, tag, "unknown tag")]
   } else {
     let kids = children_array(node)
+    let attr_violations = validate_attrs(node, path, tag, entry)
     let local = if (entry.atomic == true and len(kids) > 0)
         [mk_violation(path, tag, "atomic node has children")]
       else if (not match_content(schema, kids, entry.content))
@@ -123,7 +163,7 @@ fn validate_node(schema, node, path) {
         if (type(kids[i]) == element)
           validate_node(schema, kids[i], [*path, i])
         else []
-    [*local, *(for (vs in nested) for (v in vs) v)]
+    [*attr_violations, *local, *(for (vs in nested) for (v in vs) v)]
   }
 }
 

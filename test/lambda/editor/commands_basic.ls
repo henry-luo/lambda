@@ -135,6 +135,14 @@ let tx_sp0 = cmd_split_block(s_at0)
 "split-at-0 left:";  len(doc_text(node_at(tx_sp0.doc_after, [0]))) == 0
 "split-at-0 right:"; doc_text(node_at(tx_sp0.doc_after, [1])) == "Hello, world."
 
+// split at end of a non-default block creates the schema default block
+let heading_doc = node('doc', [node_attrs('heading', [{name: 'level', value: 2}], [text("Title")])])
+let heading_state = {doc: heading_doc, selection: text_selection(pos([0, 0], 5), pos([0, 0], 5))}
+let tx_heading_split = cmd_split_block(heading_state)
+"split heading right tag:"; node_at(tx_heading_split.doc_after, [1]).tag == 'paragraph'
+"split heading right attrs:"; len(node_at(tx_heading_split.doc_after, [1]).attrs) == 0
+"split heading left tag:"; node_at(tx_heading_split.doc_after, [0]).tag == 'heading'
+
 // ---------------------------------------------------------------------------
 // chain — first non-null wins
 // ---------------------------------------------------------------------------

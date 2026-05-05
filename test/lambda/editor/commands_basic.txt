@@ -86,6 +86,12 @@ true
 true
 "split-at-0 right:"
 true
+"split heading right tag:"
+true
+"split heading right attrs:"
+true
+"split heading left tag:"
+true
 "chain doc:"
 true
 "chain empty:"

@@ -59,11 +59,10 @@ let ts4 = text_selection(pos([1, 1, 0], 0), pos([1, 1, 0], 4))
 "text sel strong:"; selection_to_string(doc, ts4) == "this"
 
 // ---------------------------------------------------------------------------
-// Cross-leaf TextSelection currently returns null (deferred — needs DOM
-// render_map to walk the doc text in order).
+// Cross-leaf TextSelection walks text leaves in document order.
 // ---------------------------------------------------------------------------
 let ts_cross = text_selection(pos([0, 0], 0), pos([1, 0], 4))
-"cross-leaf null:";  selection_to_string(doc, ts_cross) == null
+"cross-leaf text:";  selection_to_string(doc, ts_cross) == "Hello world.See "
 
 // ---------------------------------------------------------------------------
 // Unknown selection kind returns null

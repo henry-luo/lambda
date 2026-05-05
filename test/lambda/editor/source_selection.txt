@@ -26,7 +26,7 @@ true
 true
 "text sel strong:"
 true
-"cross-leaf null:"
+"cross-leaf text:"
 true
 "bogus null:"
 true
