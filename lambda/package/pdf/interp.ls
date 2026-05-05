@@ -157,7 +157,10 @@ fn _runtime_font_info(info) {
             weight:     info.weight,
             style:      info.style,
             to_unicode: info.to_unicode,
-            encoding:   info.encoding
+            encoding:   info.encoding,
+            widths:     info.widths,
+            first_char: info.first_char,
+            last_char:  info.last_char
         }
     }
 }

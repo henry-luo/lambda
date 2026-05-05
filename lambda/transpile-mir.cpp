@@ -1781,8 +1781,7 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
                 // Get the function name (use boxed wrapper for typed params or inferred native params)
                 // Include module index prefix to prevent name collisions across modules
                 StrBuf* fn_import_name = strbuf_new_cap(64);
-                bool use_wrapper = (entry_node->node_type != AST_NODE_PROC &&
-                    (needs_fn_call_wrapper(fn_node) || has_inferred_native_params(fn_node)));
+                bool use_wrapper = needs_fn_call_wrapper(fn_node) || has_inferred_native_params(fn_node);
                 if (use_wrapper) {
                     write_fn_name_ex(fn_import_name, fn_node, ident->entry->import, "_b");
                 } else {
@@ -6502,8 +6501,7 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
             // Include module index prefix to disambiguate functions with same name+offset
             // across different modules (e.g. fraction.ls and style.ls both have _render_574).
             StrBuf* fn_import_name = strbuf_new_cap(64);
-            bool use_wrapper = (entry_node->node_type != AST_NODE_PROC &&
-                (needs_fn_call_wrapper(fn_node) || has_inferred_native_params(fn_node)));
+            bool use_wrapper = needs_fn_call_wrapper(fn_node) || has_inferred_native_params(fn_node);
             if (use_wrapper) {
                 write_fn_name_ex(fn_import_name, fn_node, ident->entry->import, "_b");
             } else {
@@ -12001,8 +11999,7 @@ static void register_module_pub_fns(AstImportNode* imp) {
                 // with the same name at the same byte offset (e.g. fraction.ls and
                 // style.ls both have pub fn render at byte 574 → _render_574).
                 StrBuf* fn_name = strbuf_new_cap(64);
-                if (mod_child->node_type != AST_NODE_PROC &&
-                    (needs_fn_call_wrapper(fn_node) || has_inferred_native_params(fn_node))) {
+                if (needs_fn_call_wrapper(fn_node) || has_inferred_native_params(fn_node)) {
                     // Find by local name (no module prefix)
                     write_fn_name_ex(fn_name, fn_node, NULL, "_b");
                     void* fn_ptr = find_func(imp->script->jit_context, fn_name->str);

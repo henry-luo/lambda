@@ -922,6 +922,10 @@ int main(int argc, char *argv[]) {
     // Set console to UTF-8 for proper Unicode display on Windows
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
+    // Use binary mode for stdout/stderr to prevent CRLF conversion
+    // (ensures lambda output uses LF line endings, matching expected test outputs)
+    _setmode(_fileno(stdout), _O_BINARY);
+    _setmode(_fileno(stderr), _O_BINARY);
 #endif
 
     // Store command line args for sys.proc.self.args access
