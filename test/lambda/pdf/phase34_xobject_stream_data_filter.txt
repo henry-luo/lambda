@@ -1,0 +1,1 @@
+{ count: 1, used_stream_data: true, ignored_stale_filter: true, kept_ctm: true}

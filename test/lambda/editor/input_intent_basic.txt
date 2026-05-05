@@ -8,6 +8,14 @@ true
 true
 "paste intent caret:"
 true
+"image intent tag:"
+true
+"image intent selected:"
+true
+"link intent tag:"
+true
+"link intent text:"
+true
 "decorations preserved:"
 true
 "decorations mapped from:"
@@ -115,6 +123,14 @@ true
 "indent intent nested:"
 true
 "outdent intent top count:"
+true
+"indent html intent nested:"
+true
+"indent html intent tag:"
+true
+"outdent html intent top count:"
+true
+"outdent html intent selected:"
 true
 "bold intent stored:"
 true

@@ -6,7 +6,8 @@
 //     without embedding the original font program.
 //   - Provide a `resolve_font(pdf, page, name)` helper that returns a
 //     normalised record:
-//         { name, family, weight, style, size_default, to_unicode, encoding }
+//         { name, family, weight, style, size_default, to_unicode, encoding,
+//           widths, first_char, last_char }
 //     where `to_unicode` is the per-glyph CMap already resolved by the C
 //     side (or null when not present).
 //   - Provide `decode_hex(hex_str, to_unicode)` for `<XX..>` strings used
@@ -182,6 +183,28 @@ fn _encoding_or_null(dict) {
     else { null }
 }
 
+fn _int_or(v, fallback) {
+    if (v is int) { v }
+    else if (v is float) { int(v) }
+    else { fallback }
+}
+
+fn _widths_or_null(pdf, dict) {
+    if (dict.Widths == null) { null }
+    else {
+        let w = resolve.deref(pdf, dict.Widths)
+        if (w is array) { w } else { null }
+    }
+}
+
+fn _first_char_or_zero(dict) {
+    _int_or(dict.FirstChar, 0)
+}
+
+fn _last_char_or_zero(dict) {
+    _int_or(dict.LastChar, 0)
+}
+
 fn _implicit_encoding(stripped: string, explicit) {
     if (explicit != null) { explicit }
     else if (stripped == "Symbol") { "SymbolEncoding" }
@@ -204,21 +227,24 @@ fn _strip_subset(name: string) {
 // behave deterministically; calling pn helpers (from_basefont) from
 // inside `resolve_font` proved to silently lose the weight/style fields
 // when chained through let-bindings.
-fn _make_descriptor(name, info, to_uni, enc) {
+fn _make_descriptor(name, info, to_uni, enc, widths, first_char, last_char) {
     { name: name, family: info.family, weight: info.weight,
         style: info.style, to_unicode: to_uni, encoding: enc,
+    widths: widths, first_char: first_char, last_char: last_char,
       font_data_uri: null, font_format: null, embedded_family: null }
 }
 
-fn _make_descriptor_embedded(name, info, to_uni, enc, uri, fmt, emb_family) {
+fn _make_descriptor_embedded(name, info, to_uni, enc, widths, first_char, last_char, uri, fmt, emb_family) {
     { name: name, family: info.family, weight: info.weight,
         style: info.style, to_unicode: to_uni, encoding: enc,
+    widths: widths, first_char: first_char, last_char: last_char,
       font_data_uri: uri, font_format: fmt, embedded_family: emb_family }
 }
 
 fn _unknown_descriptor(name) {
     { name: name, family: _UNKNOWN.family, weight: _UNKNOWN.weight,
         style: _UNKNOWN.style, to_unicode: null, encoding: null,
+    widths: null, first_char: 0, last_char: 0,
       font_data_uri: null, font_format: null, embedded_family: null }
 }
 
@@ -342,15 +368,18 @@ pub pn resolve_font(pdf, page, name: string) {
     let info0 = _final_info(pdf, stripped, dict, s14, fb)
     let to_uni = _to_unicode_or_null(dict)
     let enc = _implicit_encoding(stripped, _encoding_or_null(dict))
+    let widths = _widths_or_null(pdf, dict)
+    let first_char = _first_char_or_zero(dict)
+    let last_char = _last_char_or_zero(dict)
     // Embedded font program?  Pull the data URI off the FontDescriptor
     // and weave the unsubsetted family name into the CSS stack so the
     // browser matches our @font-face declaration.
     let emb = _embedded_font_info(pdf, dict)
     if (emb == null) {
-        return _make_descriptor(name, info0, to_uni, enc)
+        return _make_descriptor(name, info0, to_uni, enc, widths, first_char, last_char)
     }
     let info1 = _info_with_embedded(info0, stripped)
-    return _make_descriptor_embedded(name, info1, to_uni, enc,
+    return _make_descriptor_embedded(name, info1, to_uni, enc, widths, first_char, last_char,
                                      emb.uri, emb.fmt, stripped)
 }
 

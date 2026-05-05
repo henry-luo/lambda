@@ -80,3 +80,19 @@ true
 true
 "exec html paste text:"
 true
+"exec html image tag:"
+true
+"exec html image selected:"
+true
+"exec html link tag:"
+true
+"exec html link text:"
+true
+"exec html indent tag:"
+true
+"exec html indent text:"
+true
+"exec html outdent count:"
+true
+"exec html outdent selected:"
+true

@@ -157,7 +157,10 @@ fn _runtime_font_info(info) {
             weight:     info.weight,
             style:      info.style,
             to_unicode: info.to_unicode,
-            encoding:   info.encoding
+            encoding:   info.encoding,
+            widths:     info.widths,
+            first_char: info.first_char,
+            last_char:  info.last_char
         }
     }
 }
@@ -541,6 +544,27 @@ fn _form_bounds_attr(fc) {
     }
 }
 
+fn _page_media_box_value(page) {
+    if (page and page.dict and page.dict.MediaBox) { page.dict.MediaBox }
+    else if (page and page.MediaBox) { page.MediaBox }
+    else { null }
+}
+
+fn _form_resources(fc) {
+    if (fc != null and fc.dict != null and fc.dict.Resources != null) { fc.dict.Resources }
+    else { null }
+}
+
+fn _form_page(page, fc) {
+    let res = _form_resources(fc)
+    if (res == null) { page }
+    else {
+        { dict: { Resources: res, MediaBox: _page_media_box_value(page) },
+          MediaBox: _page_media_box_value(page),
+          resources: res }
+    }
+}
+
 fn _form_child_state(st, fc) {
     if (_form_group_opacity(st, fc) < 1.0) {
         _with_path(st, path.set_opacity(st.path, 1.0, 1.0))
@@ -779,10 +803,18 @@ pn _run_ops_with_state(pdf, page, ops, init_ctm, fonts, page_h, clip_prefix, inh
             if (has_form) {
                 let form_ops = stream.parse_content_stream(fc.data)
                 let form_ctm = util.matrix_mul(fc.matrix, st.ctm)
+                let form_page = _form_page(page, fc)
+                let form_fonts = _resolve_fonts(pdf, form_page, form_ops) ++ fonts
                 let sub_prefix = _clip_prefix_for_do(clip_prefix, operands, i)
                 let group_opacity = _form_group_opacity(st, fc)
                 let child_st = _form_child_state(st, fc)
-                let sub = _run_ops_with_state(pdf, page, form_ops, form_ctm, fonts, page_h, sub_prefix, child_st)
+                let sub = _run_ops_with_state(pdf, form_page, form_ops, form_ctm, form_fonts, page_h, sub_prefix, child_st)
+                var tj = 0
+                let tn = len(sub.texts)
+                while (tj < tn) {
+                    texts = texts ++ [sub.texts[tj]]
+                    tj = tj + 1
+                }
                 var defs = []
                 var draws = []
                 var k = 0

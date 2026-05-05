@@ -23,6 +23,13 @@ let tx_paste = dispatch_intent(s0, {input_type: "insertFromPaste", data: " world
 "paste intent doc:"; doc_text(tx_paste.doc_after) == "Hello world"
 "paste intent caret:"; tx_paste.sel_after.anchor.offset == 11
 
+let tx_image_intent = dispatch_intent(s0, {input_type: "insertImage", src: "photo.png", alt: "Photo"})
+"image intent tag:"; node_at(tx_image_intent.doc_after, [0, 1]).tag == 'image'
+"image intent selected:"; tx_image_intent.sel_after.kind == 'node' and path_equal(tx_image_intent.sel_after.path, [0, 1])
+let tx_link_intent = dispatch_intent(s0, {input_type: "insertLink", href: "https://example.com", title: "Example", label: "site"})
+"link intent tag:"; node_at(tx_link_intent.doc_after, [0, 1]).tag == 'link'
+"link intent text:"; doc_text(node_at(tx_link_intent.doc_after, [0, 1])) == "site"
+
 let s0_deco = {doc: d0, selection: text_selection(pos([0, 0], 0), pos([0, 0], 0)),
   decorations: find_decorations_in_doc(d0, "Hello", {class: "find-hit"})}
 let tx_deco_ins = dispatch_intent(s0_deco, {input_type: "insertText", data: "X"})
@@ -161,6 +168,18 @@ let tx_indent_intent = dispatch_intent({doc: list_doc, selection: text_selection
 let tx_outdent_intent = dispatch_intent({doc: tx_indent_intent.doc_after, selection: text_selection(pos([0, 0, 1, 0, 0, 0], 1), pos([0, 0, 1, 0, 0, 0], 1))},
   {input_type: "formatOutdent", data: null})
 "outdent intent top count:"; len(node_at(tx_outdent_intent.doc_after, [0]).content) == 2
+
+let html_list_doc = node('doc', [node('ul', [node('li', [text("A")]), node('li', [text("B")])])])
+let tx_html_indent_intent = dispatch_intent({doc: html_list_doc, schema: html5_subset_schema,
+  selection: text_selection(pos([0, 1, 0], 1), pos([0, 1, 0], 1))},
+  {input_type: "formatIndent", data: null})
+"indent html intent nested:"; doc_text(node_at(tx_html_indent_intent.doc_after, [0, 0, 1, 0])) == "B"
+"indent html intent tag:"; node_at(tx_html_indent_intent.doc_after, [0, 0, 1]).tag == 'ul'
+let tx_html_outdent_intent = dispatch_intent({doc: tx_html_indent_intent.doc_after, schema: html5_subset_schema,
+  selection: text_selection(pos([0, 0, 1, 0, 0], 1), pos([0, 0, 1, 0, 0], 1))},
+  {input_type: "formatOutdent", data: null})
+"outdent html intent top count:"; len(node_at(tx_html_outdent_intent.doc_after, [0]).content) == 2
+"outdent html intent selected:"; path_equal(tx_html_outdent_intent.sel_after.path, [0, 1])
 
 let tx_bold = dispatch_intent(s0, {input_type: "formatBold", data: null})
 "bold intent stored:"; has_mark(tx_get_meta(tx_bold, "storedMarks"), 'strong')

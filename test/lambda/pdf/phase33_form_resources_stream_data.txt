@@ -1,0 +1,1 @@
+{ text_count: 1, path_count: 0, used_stream_data: true, used_form_matrix: true, used_form_font: true}

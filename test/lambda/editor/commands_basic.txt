@@ -198,6 +198,48 @@ true
 true
 "indent first null:"
 true
+"indent html top count:"
+true
+"indent html nested tag:"
+true
+"indent html nested text:"
+true
+"indent html selected:"
+true
+"outdent html top count:"
+true
+"outdent html middle text:"
+true
+"outdent html selected:"
+true
+"insert image tag:"
+true
+"insert image src:"
+true
+"insert image selected:"
+true
+"insert html image tag:"
+true
+"insert html image selected:"
+true
+"insert link tag:"
+true
+"insert link href:"
+true
+"insert link text:"
+true
+"insert link caret:"
+true
+"wrap link text:"
+true
+"wrap link href:"
+true
+"wrap link doc:"
+true
+"insert html link tag:"
+true
+"insert html link text:"
+true
 "toggle stored mark:"
 true
 "toggle stored no doc change:"
