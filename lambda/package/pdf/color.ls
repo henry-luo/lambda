@@ -193,6 +193,17 @@ fn _from_component_count(nums, ncomp) {
     else { BLACK }
 }
 
+fn _lab_color(nums) {
+    if (len(nums) >= 3) {
+        // Native C++ uses this simple fallback: L* maps 0..100, a*/b*
+        // map approximately -128..127 into green/blue channels.
+        rgb(_num(nums[0]) / 100.0,
+            (_num(nums[1]) + 128.0) / 255.0,
+            (_num(nums[2]) + 128.0) / 255.0)
+    }
+    else { BLACK }
+}
+
 pub fn from_ops_in_space(pdf, page, active_space, ops) {
     let nums = _numeric_ops(ops)
     let cs = _resolve_space(pdf, page, active_space)
@@ -209,6 +220,9 @@ pub fn from_ops_in_space(pdf, page, active_space, ops) {
     }
     else if (t == "ICCBased") {
         _from_component_count(nums, _icc_component_count(cs))
+    }
+    else if (t == "Lab") {
+        _lab_color(nums)
     }
     else if (t == "Separation" or t == "DeviceN") {
         // Tint transforms are not interpreted yet; match the C++ view's
