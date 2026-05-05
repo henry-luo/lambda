@@ -57,6 +57,61 @@ fn content_role_at(content, i, n) {
 fn content_role(entry) => content_role_at(entry.content, 0, len(entry.content))
 
 // ---------------------------------------------------------------------------
+// Content-expression filtering
+// ---------------------------------------------------------------------------
+
+fn child_satisfies_any(schema, child, terms, i, n) {
+  if (i >= n) { false }
+  else if (child_satisfies_term(schema, child, terms[i])) { true }
+  else { child_satisfies_any(schema, child, terms, i + 1, n) }
+}
+
+fn child_satisfies_role(schema, child, role) {
+  let r = role_of_node(schema, child)
+  if (r == role) { true }
+  else if (role == 'inline') { r == 'inline' or r == 'mark' }
+  else if (role == 'text') { is_text(child) }
+  else { false }
+}
+
+fn child_satisfies_term(schema, child, term) {
+  if (term.any != null) { child_satisfies_any(schema, child, term.any, 0, len(term.any)) }
+  else if (term.tag != null) { is_node(child) and child.tag == term.tag }
+  else { child_satisfies_role(schema, child, term.role) }
+}
+
+fn term_min(term) => if (term.qty == 'plus' or term.qty == 'one') { 1 } else { 0 }
+fn term_max(term, remaining) => if (term.qty == 'one' or term.qty == 'opt') { 1 } else { remaining }
+
+fn skip_to_term(schema, kids, ci, n, term) {
+  if (ci >= n) { ci }
+  else if (child_satisfies_term(schema, kids[ci], term)) { ci }
+  else { skip_to_term(schema, kids, ci + 1, n, term) }
+}
+
+fn consume_term(schema, kids, ci, n, term, mx, count, acc) {
+  if (ci >= n or count >= mx) { {index: ci, count: count, items: acc} }
+  else if (not child_satisfies_term(schema, kids[ci], term)) { {index: ci, count: count, items: acc} }
+  else { consume_term(schema, kids, ci + 1, n, term, mx, count + 1, [*acc, kids[ci]]) }
+}
+
+fn filter_terms_at(schema, kids, terms, ti, ci, acc) {
+  if (ti >= len(terms) or ci >= len(kids)) { acc }
+  else {
+    let term = terms[ti]
+    let mn = term_min(term)
+    let start = if (mn > 0) { skip_to_term(schema, kids, ci, len(kids), term) } else { ci }
+    let res = consume_term(schema, kids, start, len(kids), term, term_max(term, len(kids) - start), 0, acc)
+    if (res.count < mn) { acc }
+    else { filter_terms_at(schema, kids, terms, ti + 1, res.index, res.items) }
+  }
+}
+
+fn filter_children_for_entry(schema, entry, kids) =>
+  if (entry == null or entry.content == null) { kids }
+  else { filter_terms_at(schema, kids, entry.content, 0, 0, []) }
+
+// ---------------------------------------------------------------------------
 // Mark filtering
 // ---------------------------------------------------------------------------
 
@@ -186,7 +241,7 @@ fn coerce_one_at(schema, parent_entry, n) {
     else if (e.atomic and len(e.content) == 0) { node_attrs(n.tag, normalize_attrs(e, n.attrs), []) }
     else {
       let cr = content_role(e)
-      let kids = coerce_list_at(schema, n.content, cr, e, 0, len(n.content), [], [])
+      let kids = filter_children_for_entry(schema, e, coerce_list_at(schema, n.content, cr, e, 0, len(n.content), [], []))
       node_attrs(n.tag, normalize_attrs(e, n.attrs), kids)
     }
   }
@@ -239,7 +294,8 @@ pub fn coerce_children(schema, children, parent_role) =>
 pub fn coerce_children_for_parent(schema, parent_tag, children) {
   let parent_entry = entry_for(schema, parent_tag)
   if (parent_entry == null) { [] }
-  else { coerce_list_at(schema, children, content_role(parent_entry), parent_entry, 0, len(children), [], []) }
+  else { filter_children_for_entry(schema, parent_entry,
+    coerce_list_at(schema, children, content_role(parent_entry), parent_entry, 0, len(children), [], [])) }
 }
 
 pub fn coerce_for_md_block(children) =>

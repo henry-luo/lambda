@@ -28,6 +28,18 @@ true
 true
 "attr valid default kept:"
 true
+"content filter list count:"
+true
+"content filter list text:"
+true
+"content filter list item first:"
+true
+"content filter list item nested:"
+true
+"content filter table count:"
+true
+"content filter table row:"
+true
 "lift count:"
 3
 "first lifted tag:"

@@ -71,6 +71,26 @@ let bad_default_box = coerce_to_schema(bad_default_schema, node_attrs('box', [
 "attr invalid defaults omitted:"; len(bad_default_box.attrs) == 1
 "attr valid default kept:"; bad_default_box.attrs[0].name == 'ok' and bad_default_box.attrs[0].value == "note"
 
+let list_struct = coerce_to_schema(md_schema, node('list', [
+  node('paragraph', [text("bad")]),
+  node('list_item', [node('paragraph', [text("ok")])])
+]))
+"content filter list count:"; len(list_struct.content) == 1
+"content filter list text:"; doc_text(list_struct) == "ok"
+let list_item_struct = coerce_to_schema(md_schema, node('list_item', [
+  node('heading', [text("skip")]),
+  node('paragraph', [text("first")]),
+  node('blockquote', [node('paragraph', [text("nested")])])
+]))
+"content filter list item first:"; list_item_struct.content[0].tag == 'paragraph'
+"content filter list item nested:"; list_item_struct.content[1].tag == 'blockquote'
+let table_struct = coerce_to_schema(md_schema, node('table', [
+  node('paragraph', [text("bad")]),
+  node('tr', [node('td', [text("ok")])])
+]))
+"content filter table count:"; len(table_struct.content) == 1
+"content filter table row:"; table_struct.content[0].tag == 'tr'
+
 // ---------------------------------------------------------------------------
 // 4. Lift inlines that landed in block context — wrap them in a paragraph
 // ---------------------------------------------------------------------------
