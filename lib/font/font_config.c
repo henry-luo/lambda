@@ -482,13 +482,13 @@ static void add_windows_font_directories(ArrayList *directories) {
 
     // System fonts directory
     if (SHGetFolderPathA(NULL, 0x0014, NULL, 0, windows_fonts) == 0) {  // CSIDL_FONTS, SHGFP_TYPE_CURRENT, S_OK
-        arraylist_append(directories, mem_strdup(windows_fonts, MEM_CAT_FONT);
+        arraylist_append(directories, mem_strdup(windows_fonts, MEM_CAT_FONT));
     }
 
     // User fonts directory
     if (SHGetFolderPathA(NULL, 0x001c, NULL, 0, user_fonts) == 0) {  // CSIDL_LOCAL_APPDATA, SHGFP_TYPE_CURRENT, S_OK
         str_cat(user_fonts, strlen(user_fonts), sizeof(user_fonts), "\\Microsoft\\Windows\\Fonts", 24);
-        arraylist_append(directories, mem_strdup(user_fonts, MEM_CAT_FONT);
+        arraylist_append(directories, mem_strdup(user_fonts, MEM_CAT_FONT));
     }
 }
 

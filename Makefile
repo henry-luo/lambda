@@ -314,12 +314,24 @@ $(TREE_SITTER_LATEX_MATH_LIB): $(LATEX_MATH_PARSER_C)
 	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-latex-math libtree-sitter-latex-math.a CC="$(CC)" CXX="$(CXX)" V=1 VERBOSE=1
 
 # Build re2 library (reconfigures cmake if CMakeCache is stale/wrong platform)
+# On Windows/CLANG64: must pass explicit compiler flags so cmake uses clang++
+# with -stdlib=libc++ (matching the rest of the build) instead of defaulting
+# to GCC/libstdc++, which would cause an ABI mismatch at link time.
 $(RE2_LIB):
 	@echo "Building re2 library from source..."
 	@mkdir -p build_temp/re2-noabsl/cmake_build
 	@cd build_temp/re2-noabsl/cmake_build && \
-		cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DBUILD_SHARED_LIBS=OFF -DRE2_BUILD_TESTING=OFF -Wno-dev 2>&1 | tail -3 && \
-		cmake --build . --target re2 -- -j$(JOBS)
+		cmake .. \
+			-DCMAKE_C_COMPILER="$(CC)$(if $(filter yes,$(IS_MSYS2)),.exe,)" \
+			-DCMAKE_CXX_COMPILER="$(CXX)$(if $(filter yes,$(IS_MSYS2)),.exe,)" \
+			-DCMAKE_CXX_FLAGS="$(if $(filter /clang64/bin/clang++,$(CXX)),-stdlib=libc++,) -O2" \
+			-DCMAKE_BUILD_TYPE=Release \
+			-DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+			-DBUILD_SHARED_LIBS=OFF \
+			-DRE2_BUILD_TESTING=OFF \
+			-Wno-dev \
+			-G Ninja 2>&1 | tail -3 && \
+		ninja -j$(JOBS)
 	@echo "re2 library built: $(RE2_LIB)"
 
 # Build MIR JIT library (clone, patch, compile)
@@ -2125,9 +2137,9 @@ build-lambda-input:
 	@mkdir -p build/premake
 	$(MAKE) generate-premake
 	@echo "Generating makefiles..."
-	cd build/premake && premake5 gmake --file=../../$(PREMAKE_FILE)
+	cd build/premake && PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=../../$(PREMAKE_FILE)
 	@echo "Building lambda-input DLLs with $(TEST_JOBS) parallel jobs..."
-	cd build/premake && $(MAKE) config=debug_native lambda-input-full-cpp -j$(TEST_JOBS)
+	cd build/premake && $(MAKE) config=debug_native lambda-input-full-cpp -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
 	@echo "✅ lambda-input DLLs built successfully!"
 
 build-test: build-lambda-input
@@ -2135,7 +2147,7 @@ build-test: build-lambda-input
 	@echo "Building configurations..."
 	@mkdir -p build/premake
 	$(MAKE) generate-premake
-	cd build/premake && premake5 gmake --file=../../$(PREMAKE_FILE)
+	cd build/premake && PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=../../$(PREMAKE_FILE)
 	@# If last build was release, rebuild lambda.exe incrementally in release mode
 	@if [ -f .lambda_release_build ]; then \
 		echo "Rebuilding lambda.exe in release mode (incremental)..."; \
@@ -2143,7 +2155,7 @@ build-test: build-lambda-input
 		cp -p lambda.exe .lambda_build_backup.exe; \
 	fi
 	@echo "Building all test executables (debug mode, $(TEST_JOBS) jobs)..."
-	$(MAKE) -C build/premake config=debug_native -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)"
+	PATH="/clang64/bin:$$PATH" $(MAKE) -C build/premake config=debug_native -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
 	@# Restore release lambda.exe over the debug one
 	@if [ -f .lambda_build_backup.exe ]; then \
 		echo "Restoring release lambda.exe..."; \

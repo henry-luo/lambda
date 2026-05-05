@@ -4,6 +4,7 @@
 #include "lambda-data.hpp"
 #include "edit_bridge.h"
 #include "mark_editor.hpp"
+#include "mark_reader.hpp"
 #include "../lib/log.h"
 #include <string.h>
 
@@ -87,6 +88,168 @@ static Input* edit_session_create_input(Item root) {
     return input;
 }
 
+static bool edit_session_is_error(Item item) {
+    return get_type_id(item) == LMD_TYPE_ERROR;
+}
+
+static bool edit_session_set_current(EditSession* session, Item next) {
+    if (edit_session_is_error(next)) {
+        log_error("edit_session_set_current: command returned error item");
+        return false;
+    }
+    session->input->root = next;
+    edit_session_notify(session, EDIT_EVENT_CHANGE, next);
+    return true;
+}
+
+static MapReader edit_session_args_map(Item args) {
+    if (get_type_id(args) != LMD_TYPE_MAP) {
+        return MapReader();
+    }
+    return MapReader::fromItem(args);
+}
+
+static const char* edit_session_arg_string(MapReader args, const char* key) {
+    ItemReader value = args.get(key);
+    if (value.isString()) {
+        return value.cstring();
+    }
+    return NULL;
+}
+
+static Item edit_session_arg_item(MapReader args, const char* key) {
+    return args.get(key).item();
+}
+
+static int64_t edit_session_arg_int(MapReader args, const char* key, int64_t fallback) {
+    ItemReader value = args.get(key);
+    if (value.isInt()) {
+        return value.asInt();
+    }
+    return fallback;
+}
+
+static bool edit_session_is_map_command(const char* cmd_name) {
+    return strcmp(cmd_name, "map_update") == 0 || strcmp(cmd_name, "update_map") == 0 ||
+           strcmp(cmd_name, "set_field") == 0 || strcmp(cmd_name, "map_delete") == 0 ||
+           strcmp(cmd_name, "delete_field") == 0;
+}
+
+static bool edit_session_is_array_command(const char* cmd_name) {
+    return strcmp(cmd_name, "array_append") == 0 || strcmp(cmd_name, "append") == 0 ||
+           strcmp(cmd_name, "array_insert") == 0 || strcmp(cmd_name, "insert") == 0 ||
+           strcmp(cmd_name, "array_set") == 0 || strcmp(cmd_name, "set") == 0 ||
+           strcmp(cmd_name, "array_delete") == 0 || strcmp(cmd_name, "delete") == 0;
+}
+
+static bool edit_session_is_element_command(const char* cmd_name) {
+    return strcmp(cmd_name, "element_update_attr") == 0 || strcmp(cmd_name, "update_attr") == 0 ||
+           strcmp(cmd_name, "element_delete_attr") == 0 || strcmp(cmd_name, "delete_attr") == 0 ||
+           strcmp(cmd_name, "element_insert_child") == 0 || strcmp(cmd_name, "insert_child") == 0 ||
+           strcmp(cmd_name, "element_replace_child") == 0 || strcmp(cmd_name, "replace_child") == 0 ||
+           strcmp(cmd_name, "element_delete_child") == 0 || strcmp(cmd_name, "delete_child") == 0;
+}
+
+static bool edit_session_exec_map_command(EditSession* session, const char* cmd_name, Item args_item) {
+    if (!edit_session_is_map_command(cmd_name)) { return false; }
+    MapReader args = edit_session_args_map(args_item);
+    if (!args.isValid()) {
+        log_error("edit_session_exec: '%s' requires map args", cmd_name);
+        return false;
+    }
+    const char* key = edit_session_arg_string(args, "key");
+    if (!key) {
+        log_error("edit_session_exec: '%s' requires string arg 'key'", cmd_name);
+        return false;
+    }
+
+    Item current = session->input->root;
+    if (strcmp(cmd_name, "map_update") == 0 || strcmp(cmd_name, "update_map") == 0 ||
+        strcmp(cmd_name, "set_field") == 0) {
+        Item value = edit_session_arg_item(args, "value");
+        return edit_session_set_current(session, session->editor->map_update(current, key, value));
+    }
+    if (strcmp(cmd_name, "map_delete") == 0 || strcmp(cmd_name, "delete_field") == 0) {
+        return edit_session_set_current(session, session->editor->map_delete(current, key));
+    }
+    return false;
+}
+
+static bool edit_session_exec_array_command(EditSession* session, const char* cmd_name, Item args_item) {
+    if (!edit_session_is_array_command(cmd_name)) { return false; }
+    MapReader args = edit_session_args_map(args_item);
+    if (!args.isValid()) {
+        log_error("edit_session_exec: '%s' requires map args", cmd_name);
+        return false;
+    }
+
+    Item current = session->input->root;
+    if (strcmp(cmd_name, "array_append") == 0 || strcmp(cmd_name, "append") == 0) {
+        Item value = edit_session_arg_item(args, "value");
+        return edit_session_set_current(session, session->editor->array_append(current, value));
+    }
+    if (strcmp(cmd_name, "array_insert") == 0 || strcmp(cmd_name, "insert") == 0) {
+        int64_t index = edit_session_arg_int(args, "index", -1);
+        Item value = edit_session_arg_item(args, "value");
+        return edit_session_set_current(session, session->editor->array_insert(current, index, value));
+    }
+    if (strcmp(cmd_name, "array_set") == 0 || strcmp(cmd_name, "set") == 0) {
+        int64_t index = edit_session_arg_int(args, "index", -1);
+        Item value = edit_session_arg_item(args, "value");
+        return edit_session_set_current(session, session->editor->array_set(current, index, value));
+    }
+    if (strcmp(cmd_name, "array_delete") == 0 || strcmp(cmd_name, "delete") == 0) {
+        int64_t index = edit_session_arg_int(args, "index", -1);
+        return edit_session_set_current(session, session->editor->array_delete(current, index));
+    }
+    return false;
+}
+
+static bool edit_session_exec_element_command(EditSession* session, const char* cmd_name, Item args_item) {
+    if (!edit_session_is_element_command(cmd_name)) { return false; }
+    MapReader args = edit_session_args_map(args_item);
+    if (!args.isValid()) {
+        log_error("edit_session_exec: '%s' requires map args", cmd_name);
+        return false;
+    }
+
+    Item current = session->input->root;
+    if (strcmp(cmd_name, "element_update_attr") == 0 || strcmp(cmd_name, "update_attr") == 0) {
+        const char* key = edit_session_arg_string(args, "key");
+        if (!key) { key = edit_session_arg_string(args, "attr"); }
+        if (!key) {
+            log_error("edit_session_exec: '%s' requires string arg 'key' or 'attr'", cmd_name);
+            return false;
+        }
+        Item value = edit_session_arg_item(args, "value");
+        return edit_session_set_current(session, session->editor->elmt_update_attr(current, key, value));
+    }
+    if (strcmp(cmd_name, "element_delete_attr") == 0 || strcmp(cmd_name, "delete_attr") == 0) {
+        const char* key = edit_session_arg_string(args, "key");
+        if (!key) { key = edit_session_arg_string(args, "attr"); }
+        if (!key) {
+            log_error("edit_session_exec: '%s' requires string arg 'key' or 'attr'", cmd_name);
+            return false;
+        }
+        return edit_session_set_current(session, session->editor->elmt_delete_attr(current, key));
+    }
+    if (strcmp(cmd_name, "element_insert_child") == 0 || strcmp(cmd_name, "insert_child") == 0) {
+        int64_t index = edit_session_arg_int(args, "index", -1);
+        Item child = edit_session_arg_item(args, "child");
+        return edit_session_set_current(session, session->editor->elmt_insert_child(current, (int)index, child));
+    }
+    if (strcmp(cmd_name, "element_replace_child") == 0 || strcmp(cmd_name, "replace_child") == 0) {
+        int64_t index = edit_session_arg_int(args, "index", -1);
+        Item child = edit_session_arg_item(args, "child");
+        return edit_session_set_current(session, session->editor->elmt_replace_child(current, (int)index, child));
+    }
+    if (strcmp(cmd_name, "element_delete_child") == 0 || strcmp(cmd_name, "delete_child") == 0) {
+        int64_t index = edit_session_arg_int(args, "index", -1);
+        return edit_session_set_current(session, session->editor->elmt_delete_child(current, (int)index));
+    }
+    return false;
+}
+
 // ============================================================================
 // Edit session API
 // ============================================================================
@@ -154,9 +317,16 @@ bool edit_session_exec(EditSession* session, const char* cmd_name, Item args) {
         return ok;
     }
     if (strcmp(cmd_name, "set_root") == 0 || strcmp(cmd_name, "set_doc") == 0 || strcmp(cmd_name, "replace_root") == 0) {
-        session->input->root = args;
-        edit_session_notify(session, EDIT_EVENT_CHANGE, args);
-        return true;
+        return edit_session_set_current(session, args);
+    }
+    if (edit_session_is_map_command(cmd_name)) {
+        return edit_session_exec_map_command(session, cmd_name, args);
+    }
+    if (edit_session_is_array_command(cmd_name)) {
+        return edit_session_exec_array_command(session, cmd_name, args);
+    }
+    if (edit_session_is_element_command(cmd_name)) {
+        return edit_session_exec_element_command(session, cmd_name, args);
     }
     log_error("edit_session_exec: unknown command '%s'", cmd_name);
     return false;
@@ -167,7 +337,7 @@ Item edit_session_current(EditSession* session) {
         log_error("edit_session_current: invalid session");
         return ItemNull;
     }
-    return session->editor->current();
+    return session->input->root;
 }
 
 EditSchema* edit_session_schema(EditSession* session) {

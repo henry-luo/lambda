@@ -14,6 +14,10 @@
 #include <vector>
 #include <algorithm>
 #include <thread>
+#ifdef _WIN32
+#include <process.h>
+#define getpid _getpid
+#endif
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN

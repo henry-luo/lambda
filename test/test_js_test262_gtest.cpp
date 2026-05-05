@@ -1235,6 +1235,125 @@ static constexpr int T262_HARD_TIMEOUT_MIN = 30;
 
 // Run a sub-batch of tests from a pre-written manifest file + stdout pipe
 // Run a sub-batch from a manifest file using posix_spawn (avoids fork's page table copy)
+#ifdef _WIN32
+static void run_t262_sub_batch(
+    const char* manifest_path,
+    std::unordered_map<std::string, BatchResult>& results,
+    size_t num_tests = T262_BATCH_CHUNK_SIZE)
+{
+    // Windows implementation using CreateProcess + anonymous pipes
+    HANDLE pipe_rd = NULL, pipe_wr = NULL;
+    SECURITY_ATTRIBUTES sa = { sizeof(sa), NULL, TRUE };
+    if (!CreatePipe(&pipe_rd, &pipe_wr, &sa, 0)) return;
+    SetHandleInformation(pipe_rd, HANDLE_FLAG_INHERIT, 0);
+
+    HANDLE manifest_h = CreateFileA(manifest_path, GENERIC_READ, FILE_SHARE_READ,
+                                     &sa, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (manifest_h == INVALID_HANDLE_VALUE) {
+        CloseHandle(pipe_rd); CloseHandle(pipe_wr);
+        return;
+    }
+
+    // Build command line
+    std::string cmd = "lambda.exe js-test-batch --timeout=10";
+    if (g_no_hot_reload) cmd += " --no-hot-reload";
+    if (g_opt_level >= 0) cmd += std::string(" ") + g_opt_level_arg;
+    if (g_mir_interp) cmd += " --mir-interp";
+
+    STARTUPINFOA si = {};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput  = manifest_h;
+    si.hStdOutput = pipe_wr;
+    si.hStdError  = pipe_wr;
+
+    PROCESS_INFORMATION pi = {};
+    std::string cmd_copy = cmd;
+    if (!CreateProcessA(NULL, &cmd_copy[0], NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi)) {
+        CloseHandle(manifest_h); CloseHandle(pipe_rd); CloseHandle(pipe_wr);
+        return;
+    }
+    CloseHandle(manifest_h);
+    CloseHandle(pipe_wr);
+
+    int hard_timeout_secs = std::max(T262_HARD_TIMEOUT_MIN, (int)(num_tests * T262_HARD_TIMEOUT_PER_TEST));
+    std::atomic<bool> worker_done{false};
+    std::thread watchdog([&pi, hard_timeout_secs, &worker_done]() {
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(hard_timeout_secs);
+        while (!worker_done.load(std::memory_order_relaxed)) {
+            if (std::chrono::steady_clock::now() >= deadline) {
+                fprintf(stderr, "\n[test262] WARNING: Worker PID %lu exceeded hard timeout (%ds) — terminating\n",
+                        pi.dwProcessId, hard_timeout_secs);
+                TerminateProcess(pi.hProcess, 1);
+                return;
+            }
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+    });
+
+    // Read output from pipe
+    char buffer[4096];
+    std::string current_script;
+    std::string current_output;
+    bool in_script = false;
+    DWORD bytes_read;
+    std::string partial;
+    while (ReadFile(pipe_rd, buffer, sizeof(buffer) - 1, &bytes_read, NULL) && bytes_read > 0) {
+        buffer[bytes_read] = '\0';
+        partial += buffer;
+        size_t pos;
+        while ((pos = partial.find('\n')) != std::string::npos) {
+            std::string line = partial.substr(0, pos + 1);
+            partial = partial.substr(pos + 1);
+            const char* buf = line.c_str();
+            if (buf[0] == '\x01') {
+                if (strncmp(buf + 1, "BATCH_START ", 12) == 0) {
+                    current_script = std::string(buf + 13);
+                    while (!current_script.empty() &&
+                           (current_script.back() == '\n' || current_script.back() == '\r'))
+                        current_script.pop_back();
+                    current_output.clear();
+                    in_script = true;
+                } else if (strncmp(buf + 1, "BATCH_END ", 10) == 0) {
+                    int status = atoi(buf + 11);
+                    long elapsed_us = 0;
+                    size_t rss_before = 0, rss_after = 0;
+                    const char* space2 = strchr(buf + 11, ' ');
+                    if (space2) {
+                        elapsed_us = atol(space2 + 1);
+                        const char* space3 = strchr(space2 + 1, ' ');
+                        if (space3) {
+                            rss_before = (size_t)atol(space3 + 1);
+                            const char* space4 = strchr(space3 + 1, ' ');
+                            if (space4) rss_after = (size_t)atol(space4 + 1);
+                        }
+                    }
+                    results[current_script] = {current_output, status, elapsed_us, rss_before, rss_after};
+                    in_script = false;
+                } else if (strncmp(buf + 1, "BATCH_EXIT ", 11) == 0 ||
+                           strncmp(buf + 1, "BATCH_DIAG ", 11) == 0) {
+                    fprintf(stderr, "[test262] Child diagnostic: %s", buf + 1);
+                }
+            } else if (in_script) {
+                current_output += buf;
+            }
+        }
+    }
+    CloseHandle(pipe_rd);
+
+    DWORD exit_code = 0;
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    GetExitCodeProcess(pi.hProcess, &exit_code);
+    if (exit_code != 0) {
+        fprintf(stderr, "[test262] Batch worker PID %lu exited with status %lu, collected %zu results\n",
+                pi.dwProcessId, exit_code, results.size());
+    }
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+    worker_done.store(true, std::memory_order_relaxed);
+    watchdog.join();
+}
+#else
 static void run_t262_sub_batch(
     const char* manifest_path,
     std::unordered_map<std::string, BatchResult>& results,
@@ -1372,6 +1491,7 @@ static void run_t262_sub_batch(
     worker_done.store(true, std::memory_order_relaxed);
     watchdog.join();
 }
+#endif // _WIN32
 
 // Phase 2: Execute all prepared tests through js-test-batch (reusable manifest files + stdout pipes)
 // chunk_size: number of tests per sub-batch process (default T262_BATCH_CHUNK_SIZE=50, use 1 for non-batch)

@@ -798,6 +798,10 @@ static Item build_lambda_event_map(DomDocument* doc, View* target,
                                    builder, &anchor_pos, &head_pos));
                         source_pos_free(&head_pos);
                     }
+                } else {
+                    mb.put("source_selection",
+                           source_text_selection_to_item(
+                               builder, &anchor_pos, &anchor_pos));
                 }
                 source_pos_free(&anchor_pos);
             }
