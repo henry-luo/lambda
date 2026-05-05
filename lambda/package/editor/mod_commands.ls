@@ -1177,6 +1177,160 @@ pub fn cmd_set_block_type(state, tag) {
 }
 
 // ---------------------------------------------------------------------------
+// Table commands — schema-gated block insertion and local row/column edits
+// ---------------------------------------------------------------------------
+
+fn table_supported(state) => state_schema(state).table != null
+
+fn make_table_cells(cols, cell_tag, i, acc) {
+  if (i >= cols) { acc }
+  else { make_table_cells(cols, cell_tag, i + 1, [*acc, node(cell_tag, [text("")])]) }
+}
+
+fn make_table_row(cols, header) =>
+  node('tr', make_table_cells(cols, if (header) { 'th' } else { 'td' }, 0, []))
+
+fn make_table_rows(rows, cols, header, i, acc) {
+  if (i >= rows) { acc }
+  else { make_table_rows(rows, cols, header, i + 1, [*acc, make_table_row(cols, header and i == 0)]) }
+}
+
+fn make_table_node(rows, cols, header) =>
+  node('table', make_table_rows(rows, cols, header, 0, []))
+
+fn insert_block_after_selection(state, block) {
+  let sel = state.selection
+  if (sel == null or state.doc == null or not is_node(state.doc)) { null }
+  else if (sel.kind == 'all') {
+    let tx0 = tx_begin(state.doc, sel)
+    let tx1 = tx_step(tx0, step_replace([], 0, len(state.doc.content), [block]))
+    tx_set_selection(tx1, node_selection([0]))
+  }
+  else if (sel.kind == 'node') {
+    if (len(sel.path) == 0 or len(parent_path(sel.path)) != 0) { null }
+    else {
+      let idx = last_index(sel.path)
+      let tx0 = tx_begin(state.doc, sel)
+      let tx1 = tx_step(tx0, step_replace([], idx, idx + 1, [block]))
+      tx_set_selection(tx1, node_selection([idx]))
+    }
+  }
+  else if (sel_top_block_range(sel)) {
+    let lo = sel_lo(sel)
+    let hi = sel_hi(sel)
+    let tx0 = tx_begin(state.doc, sel)
+    let tx1 = tx_step(tx0, step_replace([], lo.path[0], hi.path[0] + 1, [block]))
+    tx_set_selection(tx1, node_selection([lo.path[0]]))
+  }
+  else {
+    let lo = sel_lo(sel)
+    if (len(lo.path) == 0) { null }
+    else {
+      let insert_at = lo.path[0] + 1
+      let tx0 = tx_begin(state.doc, sel)
+      let tx1 = tx_step(tx0, step_replace([], insert_at, insert_at, [block]))
+      tx_set_selection(tx1, node_selection([insert_at]))
+    }
+  }
+}
+
+pub fn cmd_insert_table(state, rows, cols, header) {
+  if (not table_supported(state) or rows <= 0 or cols <= 0) { null }
+  else { insert_block_after_selection(state, make_table_node(rows, cols, header)) }
+}
+
+fn selected_table_cell_path(state) {
+  let sel = state.selection
+  if (sel == null or sel.kind == 'all') { null }
+  else {
+    let base_path = if (sel.kind == 'node') { sel.path } else { sel.anchor.path }
+    let td = ancestor_tag(state.doc, base_path, 'td')
+    if (td != null) { td } else { ancestor_tag(state.doc, base_path, 'th') }
+  }
+}
+
+fn selected_table_context(state) {
+  let cell_path = selected_table_cell_path(state)
+  if (cell_path == null) { null }
+  else {
+    let row_path = parent_path(cell_path)
+    let table_path = parent_path(row_path)
+    let table = node_at(state.doc, table_path)
+    let row = node_at(state.doc, row_path)
+    if (table == null or row == null or not is_node(table) or not is_node(row) or table.tag != 'table' or row.tag != 'tr') { null }
+    else { {cell_path: cell_path, row_path: row_path, table_path: table_path, table: table, row: row,
+            row_index: last_index(row_path), col_index: last_index(cell_path)} }
+  }
+}
+
+fn empty_cell_like(cell) =>
+  if (cell != null and is_node(cell) and cell.tag == 'th') { node('th', [text("")]) }
+  else { node('td', [text("")]) }
+
+pub fn cmd_add_table_row(state) {
+  let ctx = selected_table_context(state)
+  if (ctx == null) { null }
+  else {
+    let insert_at = ctx.row_index + 1
+    let cols = len(ctx.row.content)
+    let tx0 = tx_begin(state.doc, state.selection)
+    let tx1 = tx_step(tx0, step_replace(ctx.table_path, insert_at, insert_at, [make_table_row(cols, false)]))
+    tx_set_selection(tx1, node_selection([*ctx.table_path, insert_at]))
+  }
+}
+
+pub fn cmd_delete_table_row(state) {
+  let ctx = selected_table_context(state)
+  if (ctx == null or len(ctx.table.content) <= 1) { null }
+  else {
+    let tx0 = tx_begin(state.doc, state.selection)
+    let tx1 = tx_step(tx0, step_replace(ctx.table_path, ctx.row_index, ctx.row_index + 1, []))
+    let next_row = if (ctx.row_index >= len(ctx.table.content) - 1) { ctx.row_index - 1 } else { ctx.row_index }
+    tx_set_selection(tx1, node_selection([*ctx.table_path, next_row]))
+  }
+}
+
+fn collect_add_col_steps(table_path, table, col_index, row_i, row_count, acc) {
+  if (row_i >= row_count) { acc }
+  else {
+    let row = table.content[row_i]
+    let ref_cell = if (col_index < len(row.content)) { row.content[col_index] } else { null }
+    let step = step_replace([*table_path, row_i], col_index + 1, col_index + 1, [empty_cell_like(ref_cell)])
+    collect_add_col_steps(table_path, table, col_index, row_i + 1, row_count, [*acc, step])
+  }
+}
+
+pub fn cmd_add_table_column(state) {
+  let ctx = selected_table_context(state)
+  if (ctx == null) { null }
+  else {
+    let steps = collect_add_col_steps(ctx.table_path, ctx.table, ctx.col_index, 0, len(ctx.table.content), [])
+    let tx1 = tx_apply_steps(tx_begin(state.doc, state.selection), steps, 0, len(steps))
+    tx_set_selection(tx1, node_selection([*ctx.table_path, ctx.row_index, ctx.col_index + 1]))
+  }
+}
+
+fn collect_delete_col_steps(table_path, table, col_index, row_i, row_count, acc) {
+  if (row_i >= row_count) { acc }
+  else {
+    let row = table.content[row_i]
+    let next = if (col_index < len(row.content)) { [*acc, step_replace([*table_path, row_i], col_index, col_index + 1, [])] } else { acc }
+    collect_delete_col_steps(table_path, table, col_index, row_i + 1, row_count, next)
+  }
+}
+
+pub fn cmd_delete_table_column(state) {
+  let ctx = selected_table_context(state)
+  if (ctx == null or len(ctx.row.content) <= 1) { null }
+  else {
+    let steps = collect_delete_col_steps(ctx.table_path, ctx.table, ctx.col_index, 0, len(ctx.table.content), [])
+    let tx1 = tx_apply_steps(tx_begin(state.doc, state.selection), steps, 0, len(steps))
+    let next_col = if (ctx.col_index >= len(ctx.row.content) - 1) { ctx.col_index - 1 } else { ctx.col_index }
+    tx_set_selection(tx1, node_selection([*ctx.table_path, ctx.row_index, next_col]))
+  }
+}
+
+// ---------------------------------------------------------------------------
 // cmd_split_block — split the block containing the caret into two siblings
 // ---------------------------------------------------------------------------
 //

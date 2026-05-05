@@ -37,6 +37,11 @@ pub fn edit_cmd_paste_text(text) => {name: 'paste_text', text: text}
 pub fn edit_cmd_paste_html(html, fallback_text) => {name: 'paste_html', html: html, fallback_text: fallback_text}
 pub fn edit_cmd_insert_image(src, alt) => {name: 'insert_image', src: src, alt: alt}
 pub fn edit_cmd_insert_link(href, title, label) => {name: 'insert_link', href: href, title: title, label: label}
+pub fn edit_cmd_insert_table(rows, cols, header) => {name: 'insert_table', rows: rows, cols: cols, header: header}
+pub fn edit_cmd_add_table_row() => {name: 'add_table_row'}
+pub fn edit_cmd_delete_table_row() => {name: 'delete_table_row'}
+pub fn edit_cmd_add_table_column() => {name: 'add_table_column'}
+pub fn edit_cmd_delete_table_column() => {name: 'delete_table_column'}
 pub fn edit_cmd_delete_backward() => {name: 'delete_backward'}
 pub fn edit_cmd_delete_forward() => {name: 'delete_forward'}
 pub fn edit_cmd_insert_line_break() => {name: 'insert_line_break'}
@@ -54,6 +59,11 @@ fn command_tx(editor, command) {
   else if (command.name == 'paste_html') { cmd_paste_html(editor, command.html, command.fallback_text) }
   else if (command.name == 'insert_image') { cmd_insert_image(editor, command.src, command.alt) }
   else if (command.name == 'insert_link') { cmd_insert_link(editor, command.href, command.title, command.label) }
+  else if (command.name == 'insert_table') { cmd_insert_table(editor, command.rows, command.cols, command.header) }
+  else if (command.name == 'add_table_row') { cmd_add_table_row(editor) }
+  else if (command.name == 'delete_table_row') { cmd_delete_table_row(editor) }
+  else if (command.name == 'add_table_column') { cmd_add_table_column(editor) }
+  else if (command.name == 'delete_table_column') { cmd_delete_table_column(editor) }
   else if (command.name == 'delete_backward') { cmd_delete_backward(editor) }
   else if (command.name == 'delete_forward') { cmd_delete_forward(editor) }
   else if (command.name == 'insert_line_break') { cmd_insert_line_break(editor) }

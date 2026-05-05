@@ -29,6 +29,14 @@ let tx_image_intent = dispatch_intent(s0, {input_type: "insertImage", src: "phot
 let tx_link_intent = dispatch_intent(s0, {input_type: "insertLink", href: "https://example.com", title: "Example", label: "site"})
 "link intent tag:"; node_at(tx_link_intent.doc_after, [0, 1]).tag == 'link'
 "link intent text:"; doc_text(node_at(tx_link_intent.doc_after, [0, 1])) == "site"
+let table_intent_state = {doc: node('doc', [node('p', [text("Hi")])]), schema: html5_subset_schema,
+  selection: text_selection(pos([0, 0], 2), pos([0, 0], 2))}
+let tx_table_intent = dispatch_intent(table_intent_state, {input_type: "insertTable", rows: 2, cols: 2, header: true})
+"table intent tag:"; node_at(tx_table_intent.doc_after, [1]).tag == 'table'
+"table intent header:"; node_at(tx_table_intent.doc_after, [1, 0, 0]).tag == 'th'
+let tx_table_col_intent = dispatch_intent({doc: tx_table_intent.doc_after, schema: html5_subset_schema,
+  selection: text_selection(pos([1, 1, 0, 0], 0), pos([1, 1, 0, 0], 0))}, {input_type: "insertTableColumn"})
+"table col intent count:"; len(node_at(tx_table_col_intent.doc_after, [1, 1]).content) == 3
 
 let s0_deco = {doc: d0, selection: text_selection(pos([0, 0], 0), pos([0, 0], 0)),
   decorations: find_decorations_in_doc(d0, "Hello", {class: "find-hit"})}
