@@ -268,6 +268,30 @@ let tx_html_link = cmd_insert_link(html_link_state, "https://example.com", null,
 "insert html link tag:"; node_at(tx_html_link.doc_after, [0, 1]).tag == 'a'
 "insert html link text:"; doc_text(node_at(tx_html_link.doc_after, [0, 1])) == " link"
 
+let tx_hr = cmd_insert_horizontal_rule(s0)
+"insert hr tag:"; node_at(tx_hr.doc_after, [1]).tag == 'hr'
+"insert hr selected:"; tx_hr.sel_after.kind == 'node' and path_equal(tx_hr.sel_after.path, [1])
+let tx_code = cmd_insert_code_block(s0, "let x = 1")
+"insert code tag:"; node_at(tx_code.doc_after, [1]).tag == 'code_block'
+"insert code text:"; doc_text(node_at(tx_code.doc_after, [1])) == "let x = 1"
+"insert code caret:"; path_equal(tx_code.sel_after.anchor.path, [1, 0]) and tx_code.sel_after.anchor.offset == 9
+let html_code_state = {doc: node('doc', [node('p', [text("Hi")])]), schema: html5_subset_schema,
+  selection: text_selection(pos([0, 0], 2), pos([0, 0], 2))}
+let tx_html_code = cmd_insert_code_block(html_code_state, "html")
+"insert html code tag:"; node_at(tx_html_code.doc_after, [1]).tag == 'pre'
+"insert html code caret:"; path_equal(tx_html_code.sel_after.anchor.path, [1, 0]) and tx_html_code.sel_after.anchor.offset == 4
+let tx_quote = cmd_wrap_blockquote(s_sel)
+"wrap quote tag:"; node_at(tx_quote.doc_after, [0]).tag == 'blockquote'
+"wrap quote text:"; doc_text(node_at(tx_quote.doc_after, [0])) == "Hello, world."
+"wrap quote selected:"; tx_quote.sel_after.kind == 'node' and path_equal(tx_quote.sel_after.path, [0])
+let tx_lift_quote = cmd_lift_blockquote({doc: tx_quote.doc_after, selection: node_selection([0])})
+"lift quote first tag:"; node_at(tx_lift_quote.doc_after, [0]).tag == 'paragraph'
+"lift quote text:"; doc_text(node_at(tx_lift_quote.doc_after, [0])) == "Hello, world."
+"lift quote selected:"; path_equal(tx_lift_quote.sel_after.path, [0])
+let tx_quote_cross = cmd_wrap_blockquote(cross_block_state)
+"wrap quote cross count:"; len(tx_quote_cross.doc_after.content) == 1
+"wrap quote cross children:"; len(node_at(tx_quote_cross.doc_after, [0]).content) == 2
+
 "insert table markdown null:"; cmd_insert_table(s0, 2, 2, false) == null
 let table_state = {doc: node('doc', [node('p', [text("Hi")])]), schema: html5_subset_schema,
   selection: text_selection(pos([0, 0], 2), pos([0, 0], 2))}

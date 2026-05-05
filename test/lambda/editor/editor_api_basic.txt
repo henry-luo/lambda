@@ -88,6 +88,20 @@ true
 true
 "exec html link text:"
 true
+"exec hr tag:"
+true
+"exec hr selected:"
+true
+"exec code tag:"
+true
+"exec code text:"
+true
+"exec html code tag:"
+true
+"exec quote tag:"
+true
+"exec lift quote tag:"
+true
 "exec html table tag:"
 true
 "exec html table header:"

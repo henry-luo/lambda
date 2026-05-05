@@ -138,6 +138,20 @@ let html_link_blocks = html_fragment_to_blocks_for_schema(html5_subset_schema, l
 "html schema link tag:"; html_link_blocks[0].content[1].tag == 'a'
 "html schema link href:"; html_link_blocks[0].content[1].attrs[0].value == "https://example.com"
 
+let table_frag = node('table', [node('tbody', [node('tr', [node('td', [text("A")]), node('td', [text("B")])])])])
+let html_table_blocks = html_fragment_to_blocks_for_schema(html5_subset_schema, table_frag)
+"html schema table tag:"; html_table_blocks[0].tag == 'table'
+"html schema table body:"; html_table_blocks[0].content[0].tag == 'tbody'
+"html schema table row:"; html_table_blocks[0].content[0].content[0].tag == 'tr'
+"html schema table cell:"; html_table_blocks[0].content[0].content[0].content[1].tag == 'td'
+"html schema table text:"; doc_text(html_table_blocks[0]) == "AB"
+
+let html_table_state = {doc: node('doc', [node('p', [text("replace")])]), schema: html5_subset_schema, selection: all_selection()}
+let tx_html_table = cmd_paste_html(html_table_state, "<table><tr><td>A</td><td>B</td></tr></table>", "AB")
+"cmd html table paste tag:"; node_at(tx_html_table.doc_after, [0]).tag == 'table'
+"cmd html table paste body:"; node_at(tx_html_table.doc_after, [0, 0]).tag == 'tbody'
+"cmd html table paste text:"; doc_text(tx_html_table.doc_after) == "AB"
+
 let html_paste_doc = node('doc', [node('p', [text("Say: ")])])
 let html_paste_state = {doc: html_paste_doc, schema: html5_subset_schema, selection: text_selection(pos([0, 0], 5), pos([0, 0], 5))}
 let tx_html_schema = cmd_paste_html(html_paste_state, "<p>Hello <strong>world</strong></p>", "Hello world")

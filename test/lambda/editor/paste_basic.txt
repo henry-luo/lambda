@@ -86,6 +86,22 @@ true
 true
 "html schema link href:"
 true
+"html schema table tag:"
+true
+"html schema table body:"
+true
+"html schema table row:"
+true
+"html schema table cell:"
+true
+"html schema table text:"
+true
+"cmd html table paste tag:"
+true
+"cmd html table paste body:"
+true
+"cmd html table paste text:"
+true
 "cmd html schema paste tag:"
 true
 "cmd html schema paste text:"

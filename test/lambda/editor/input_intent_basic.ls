@@ -29,6 +29,16 @@ let tx_image_intent = dispatch_intent(s0, {input_type: "insertImage", src: "phot
 let tx_link_intent = dispatch_intent(s0, {input_type: "insertLink", href: "https://example.com", title: "Example", label: "site"})
 "link intent tag:"; node_at(tx_link_intent.doc_after, [0, 1]).tag == 'link'
 "link intent text:"; doc_text(node_at(tx_link_intent.doc_after, [0, 1])) == "site"
+let tx_hr_intent = dispatch_intent(s0, {input_type: "insertHorizontalRule"})
+"hr intent tag:"; node_at(tx_hr_intent.doc_after, [1]).tag == 'hr'
+"hr intent selected:"; tx_hr_intent.sel_after.kind == 'node' and path_equal(tx_hr_intent.sel_after.path, [1])
+let tx_code_intent = dispatch_intent(s0, {input_type: "insertCodeBlock", data: "print"})
+"code intent tag:"; node_at(tx_code_intent.doc_after, [1]).tag == 'code_block'
+"code intent text:"; doc_text(node_at(tx_code_intent.doc_after, [1])) == "print"
+let tx_quote_intent = dispatch_intent(s0, {input_type: "formatBlockquote"})
+"quote intent tag:"; node_at(tx_quote_intent.doc_after, [0]).tag == 'blockquote'
+let tx_lift_quote_intent = dispatch_intent({doc: tx_quote_intent.doc_after, selection: node_selection([0])}, {input_type: "formatLiftBlockquote"})
+"lift quote intent tag:"; node_at(tx_lift_quote_intent.doc_after, [0]).tag == 'paragraph'
 let table_intent_state = {doc: node('doc', [node('p', [text("Hi")])]), schema: html5_subset_schema,
   selection: text_selection(pos([0, 0], 2), pos([0, 0], 2))}
 let tx_table_intent = dispatch_intent(table_intent_state, {input_type: "insertTable", rows: 2, cols: 2, header: true})

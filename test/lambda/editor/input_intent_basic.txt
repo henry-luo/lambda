@@ -16,6 +16,18 @@ true
 true
 "link intent text:"
 true
+"hr intent tag:"
+true
+"hr intent selected:"
+true
+"code intent tag:"
+true
+"code intent text:"
+true
+"quote intent tag:"
+true
+"lift quote intent tag:"
+true
 "table intent tag:"
 true
 "table intent header:"

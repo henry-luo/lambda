@@ -57,6 +57,9 @@ fn state_image_tag(state) =>
 fn state_link_tag(state) =>
   if (state_schema(state).a != null and state_schema(state).link == null) { 'a' } else { 'link' }
 
+fn state_code_block_tag(state) =>
+  if (state_schema(state).pre != null and state_schema(state).code_block == null) { 'pre' } else { 'code_block' }
+
 fn replacement_marks(state) =>
   if (state.stored_marks == null) [] else state.stored_marks
 
@@ -1171,6 +1174,75 @@ pub fn cmd_set_block_type(state, tag) {
         let step = step_set_node_type(block_path, tag)
         let tx0  = tx_begin(state.doc, state.selection)
         tx_step(tx0, step)
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Block structure commands — atomic blocks, code blocks, and blockquotes
+// ---------------------------------------------------------------------------
+
+fn wrap_top_blocks(state, start_index, end_index) {
+  if (start_index < 0 or end_index < start_index) { null }
+  else {
+    let wrapped = list_slice(state.doc.content, start_index, end_index + 1)
+    let quote = node('blockquote', wrapped)
+    let tx0 = tx_begin(state.doc, state.selection)
+    let tx1 = tx_step(tx0, step_replace([], start_index, end_index + 1, [quote]))
+    tx_set_selection(tx1, node_selection([start_index]))
+  }
+}
+
+pub fn cmd_insert_horizontal_rule(state) {
+  if (state_schema(state).hr == null) { null }
+  else { insert_block_after_selection(state, node('hr', [])) }
+}
+
+pub fn cmd_insert_code_block(state, txt) {
+  let tag = state_code_block_tag(state)
+  if (state_schema(state)[tag] == null) { null }
+  else {
+    let text_value = if (txt == null) { "" } else { txt }
+    let tx = insert_block_after_selection(state, node(tag, [text(text_value)]))
+    if (tx == null or tx.sel_after.kind != 'node') { tx }
+    else { tx_set_selection(tx, caret(pos([*tx.sel_after.path, 0], len(text_value)))) }
+  }
+}
+
+pub fn cmd_wrap_blockquote(state) {
+  if (state_schema(state).blockquote == null) { null }
+  else {
+    let sel = state.selection
+    if (sel == null or state.doc == null or not is_node(state.doc) or len(state.doc.content) == 0) { null }
+    else if (sel.kind == 'all') { wrap_top_blocks(state, 0, len(state.doc.content) - 1) }
+    else if (sel.kind == 'node') {
+      if (len(sel.path) == 0) { null } else { wrap_top_blocks(state, sel.path[0], sel.path[0]) }
+    }
+    else if (sel_top_block_range(sel)) { wrap_top_blocks(state, sel_lo(sel).path[0], sel_hi(sel).path[0]) }
+    else {
+      let lo = sel_lo(sel)
+      if (len(lo.path) == 0) { null } else { wrap_top_blocks(state, lo.path[0], lo.path[0]) }
+    }
+  }
+}
+
+pub fn cmd_lift_blockquote(state) {
+  let sel = state.selection
+  if (sel == null) { null }
+  else {
+    let base_path = if (sel.kind == 'node') { sel.path } else if (sel.kind == 'all') { [] } else { sel.anchor.path }
+    let quote_path = ancestor_tag(state.doc, base_path, 'blockquote')
+    if (quote_path == null) { null }
+    else {
+      let quote = node_at(state.doc, quote_path)
+      if (quote == null or not is_node(quote) or len(quote_path) == 0) { null }
+      else {
+        let parent = parent_path(quote_path)
+        let idx = last_index(quote_path)
+        let tx0 = tx_begin(state.doc, state.selection)
+        let tx1 = tx_step(tx0, step_replace(parent, idx, idx + 1, quote.content))
+        tx_set_selection(tx1, node_selection([*parent, idx]))
       }
     }
   }
