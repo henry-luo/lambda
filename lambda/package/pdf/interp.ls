@@ -782,7 +782,7 @@ pn _run_ops_with_state(pdf, page, ops, init_ctm, fonts, page_h, clip_prefix, inh
         else if (opr == "inline_image") {
             // Synthetic op from stream.ls when it skipped a BI..EI
             // segment. Emit a placeholder rect in the local CTM.
-            let imgs = image.apply_inline(st.ctm, operands)
+            let imgs = image.apply_inline_with_page(pdf, page, st.ctm, operands)
             if (len(imgs) > 0) {
                 paths = paths ++ _wrap_emit_with_ctm(imgs, st.ctm, active_clip_ids)
             }

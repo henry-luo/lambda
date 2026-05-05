@@ -168,14 +168,47 @@ fn _is_passthrough_filter(f) {
     (nm == "DCTDecode") or (nm == "DCT") or (nm == "JPXDecode")
 }
 
-fn _is_raw_xobject(dict, data) {
+fn _resource_color_space(pdf, page, name) {
+    let res = resolve.page_resources(pdf, page)
+    let table = if (res and res.ColorSpace) resolve.deref(pdf, res.ColorSpace) else null
+    if (table == null) { null }
+    else { resolve.deref(pdf, table[name]) }
+}
+
+fn _is_device_space_name(nm) {
+    (nm == "DeviceRGB") or (nm == "RGB") or
+    (nm == "DeviceGray") or (nm == "G") or
+    (nm == "DeviceCMYK") or (nm == "CMYK")
+}
+
+fn _resolve_image_space_at(pdf, page, cs, depth) {
+    let nm = util.name_of(cs)
+    if (cs is array and len(cs) >= 4 and _is_indexed(cs)) {
+        let base = _resolve_image_space_at(pdf, page, cs[1], depth)
+        [cs[0], base, cs[2], cs[3]]
+    }
+    else if (nm == null) { cs }
+    else if (_is_device_space_name(nm)) { nm }
+    else if (depth <= 0) { cs }
+    else {
+        let found = _resource_color_space(pdf, page, nm)
+        if (found == null) { cs } else { _resolve_image_space_at(pdf, page, found, depth - 1) }
+    }
+}
+
+fn _resolve_image_space(pdf, page, cs) {
+    _resolve_image_space_at(pdf, page, cs, 8)
+}
+
+fn _is_raw_xobject(pdf, page, dict, data) {
     if (dict == null or data == null or data == "") { false }
     else if (_is_passthrough_filter(dict.Filter)) { false }
     else {
         let w = util.int_or(dict.Width, 0)
         let h = util.int_or(dict.Height, 0)
         let bpc = util.int_or(dict.BitsPerComponent, 8)
-        let cs = if (dict.ColorSpace != null) { dict.ColorSpace } else { "DeviceRGB" }
+        let raw_cs = if (dict.ColorSpace != null) { dict.ColorSpace } else { "DeviceRGB" }
+        let cs = _resolve_image_space(pdf, page, raw_cs)
         let ncomp = _inline_ncomp(cs)
         let packed = ((bpc == 1) or (bpc == 4) or _is_indexed(cs))
         let expected = if (packed) { _row_bytes(w, ncomp, bpc) * h } else { w * h * ncomp }
@@ -186,8 +219,9 @@ fn _is_raw_xobject(dict, data) {
     }
 }
 
-fn _xobject_inline_info(dict, data) {
-    let cs = if (dict.ColorSpace != null) { dict.ColorSpace } else { "DeviceRGB" }
+fn _xobject_inline_info(pdf, page, dict, data) {
+    let raw_cs = if (dict.ColorSpace != null) { dict.ColorSpace } else { "DeviceRGB" }
+    let cs = _resolve_image_space(pdf, page, raw_cs)
     {
         kind: "inline_image",
         dict: [
@@ -200,10 +234,10 @@ fn _xobject_inline_info(dict, data) {
     }
 }
 
-pn _emit_xobject_image(ctm, xo) {
+pn _emit_xobject_image(pdf, page, ctm, xo) {
     let data = _xobject_data(xo)
-    if (xo.data_uri == null and _is_raw_xobject(xo.dict, data)) {
-        return [svg.group(util.fmt_matrix(ctm), _emit_inline_pixels(_xobject_inline_info(xo.dict, data)))]
+    if (xo.data_uri == null and _is_raw_xobject(pdf, page, xo.dict, data)) {
+        return [svg.group(util.fmt_matrix(ctm), _emit_inline_pixels(_xobject_inline_info(pdf, page, xo.dict, data)))]
     }
     else { return _emit_image(ctm, xo.obj_num, xo.data_uri) }
 }
@@ -231,12 +265,28 @@ pub pn apply_do(pdf, page, ctm, ops) {
         if (op0 is map and op0.kind == "name") {
             let xo = lookup_xobject(pdf, page, op0.value)
             if (xo == null) { return [] }
-            else if (xo.kind == "image") { return _emit_xobject_image(ctm, xo) }
+            else if (xo.kind == "image") { return _emit_xobject_image(pdf, page, ctm, xo) }
             else if (xo.kind == "form")  { return _emit_form_stub(ctm, xo.obj_num) }
             else { return [] }
         }
         else { return [] }
     }
+}
+
+fn _resolve_inline_pair(pdf, page, p) {
+    if ((p.key == "CS") or (p.key == "ColorSpace")) {
+        { key: p.key, value: _resolve_image_space(pdf, page, p.value) }
+    }
+    else { p }
+}
+
+fn _inline_info_with_resources(pdf, page, info) {
+    if ((info is map) and (info.kind == "inline_image") and (info.dict is array)) {
+        { kind: "inline_image",
+          dict: (for (p in info.dict) _resolve_inline_pair(pdf, page, p)),
+          data: info.data }
+    }
+    else { info }
 }
 
 fn _placeholder_inline() {
@@ -252,6 +302,8 @@ fn _placeholder_inline() {
 
 fn _space_type(cs) {
     if (cs is array and len(cs) >= 1) { util.name_of(cs[0]) }
+    else if (cs is map and cs.N != null) { "ICCBased" }
+    else if (cs is map) { "DeviceRGB" }
     else { util.name_of(cs) }
 }
 
@@ -265,7 +317,10 @@ fn _is_icc_based(cs) {
 }
 
 fn _icc_ncomp(cs) {
-    if (cs is array and len(cs) >= 2 and cs[1] is map and cs[1].N != null) {
+    if (cs is map and cs.N != null) {
+        if (cs.N is int) cs.N else if (cs.N is float) int(cs.N) else 3
+    }
+    else if (cs is array and len(cs) >= 2 and cs[1] is map and cs[1].N != null) {
         if (cs[1].N is int) cs[1].N else if (cs[1].N is float) int(cs[1].N) else 3
     }
     else { 3 }
@@ -275,6 +330,7 @@ fn _base_ncomp(base) {
     let t = _space_type(base)
     if ((t == "G") or (t == "DeviceGray") or (t == "CalGray")) { 1 }
     else if ((t == "CMYK") or (t == "DeviceCMYK")) { 4 }
+    else if (t == "ICCBased") { _icc_ncomp(base) }
     else { 3 }
 }
 
@@ -285,7 +341,7 @@ fn _inline_ncomp(cs) {
     else if ((n == "CMYK") or (n == "DeviceCMYK")) { 4 }
     else if (_is_indexed(cs)) { 1 }
     else if (_is_icc_based(cs)) { _icc_ncomp(cs) }
-    else { 0 }
+    else { 3 }
 }
 
 fn _div_int(a, b) {
@@ -455,5 +511,13 @@ pub pn apply_inline(ctm, ops) {
     var info = null
     if (len(ops) > 0) { info = ops[0] }
     if ((info is map) and (info.kind == "inline_image")) { return _emit_inline_pixels(info) }
+    else { return _placeholder_inline() }
+}
+
+pub pn apply_inline_with_page(pdf, page, ctm, ops) {
+    var info = null
+    if (len(ops) > 0) { info = ops[0] }
+    let resolved = _inline_info_with_resources(pdf, page, info)
+    if ((resolved is map) and (resolved.kind == "inline_image")) { return _emit_inline_pixels(resolved) }
     else { return _placeholder_inline() }
 }

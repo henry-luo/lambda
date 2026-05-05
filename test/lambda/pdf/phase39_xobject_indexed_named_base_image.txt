@@ -1,0 +1,1 @@
+{ count: 1, indexed_named_base: true, no_img_handle: true, kept_ctm: true}

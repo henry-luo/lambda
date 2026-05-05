@@ -191,6 +191,18 @@ static int64_t edit_session_arg_int(MapReader args, const char* key, int64_t fal
     return fallback;
 }
 
+static int64_t edit_session_arg_int_if_map(Item args_item, const char* key, int64_t fallback) {
+    MapReader args = edit_session_args_map(args_item);
+    if (!args.isValid()) { return fallback; }
+    return edit_session_arg_int(args, key, fallback);
+}
+
+static const char* edit_session_arg_string_if_map(Item args_item, const char* key) {
+    MapReader args = edit_session_args_map(args_item);
+    if (!args.isValid()) { return NULL; }
+    return edit_session_arg_string(args, key);
+}
+
 static bool edit_session_is_map_command(const char* cmd_name) {
     return strcmp(cmd_name, "map_update") == 0 || strcmp(cmd_name, "update_map") == 0 ||
            strcmp(cmd_name, "set_field") == 0 || strcmp(cmd_name, "map_delete") == 0 ||
@@ -210,6 +222,58 @@ static bool edit_session_is_element_command(const char* cmd_name) {
            strcmp(cmd_name, "element_insert_child") == 0 || strcmp(cmd_name, "insert_child") == 0 ||
            strcmp(cmd_name, "element_replace_child") == 0 || strcmp(cmd_name, "replace_child") == 0 ||
            strcmp(cmd_name, "element_delete_child") == 0 || strcmp(cmd_name, "delete_child") == 0;
+}
+
+static bool edit_session_is_block_command(const char* cmd_name) {
+    return strcmp(cmd_name, "insert_horizontal_rule") == 0 || strcmp(cmd_name, "insertHorizontalRule") == 0 ||
+           strcmp(cmd_name, "insert_code_block") == 0 || strcmp(cmd_name, "insertCodeBlock") == 0 ||
+           strcmp(cmd_name, "wrap_blockquote") == 0 || strcmp(cmd_name, "formatBlockquote") == 0 ||
+           strcmp(cmd_name, "lift_blockquote") == 0 || strcmp(cmd_name, "formatLiftBlockquote") == 0;
+}
+
+static int edit_session_root_child_count(EditSession* session) {
+    MarkReader reader(session->input->root);
+    ItemReader root = reader.getRoot();
+    if (!root.isElement()) { return -1; }
+    ElementReader elem = root.asElement();
+    return (int)elem.childCount();
+}
+
+static int edit_session_insert_index(EditSession* session, Item args_item) {
+    int child_count = edit_session_root_child_count(session);
+    if (child_count < 0) { return -1; }
+    int64_t explicit_index = edit_session_arg_int_if_map(args_item, "index", -1);
+    if (explicit_index >= 0) {
+        if (explicit_index > child_count) { return child_count; }
+        return (int)explicit_index;
+    }
+    if (session->anchor.path.len > 0) {
+        uint32_t anchor_index = session->anchor.path.indices[0];
+        if (anchor_index >= (uint32_t)child_count) { return child_count; }
+        return (int)anchor_index + 1;
+    }
+    return child_count;
+}
+
+static bool edit_session_select_node(EditSession* session, int index) {
+    uint32_t path_indices[1];
+    path_indices[0] = (uint32_t)index;
+    SourcePos pos;
+    pos.path.len = 1;
+    pos.path.indices = path_indices;
+    pos.offset = 0;
+    return edit_session_set_selection(session, pos, pos);
+}
+
+static Item edit_session_make_text_block(EditSession* session, const char* tag, const char* text_value) {
+    MarkBuilder builder(session->input);
+    if (!text_value) { text_value = ""; }
+    return builder.element(tag).text(text_value).final();
+}
+
+static Item edit_session_make_empty_block(EditSession* session, const char* tag) {
+    MarkBuilder builder(session->input);
+    return builder.element(tag).final();
 }
 
 static bool edit_session_exec_map_command(EditSession* session, const char* cmd_name, Item args_item) {
@@ -312,6 +376,108 @@ static bool edit_session_exec_element_command(EditSession* session, const char* 
     return false;
 }
 
+static bool edit_session_exec_insert_block(EditSession* session, Item block, int index) {
+    if (index < 0) {
+        log_error("edit_session_exec_insert_block: invalid insertion index");
+        return false;
+    }
+    Item next = session->editor->elmt_insert_child(session->input->root, index, block);
+    if (!edit_session_set_current(session, next)) { return false; }
+    return edit_session_select_node(session, index);
+}
+
+static bool edit_session_exec_wrap_blockquote(EditSession* session, Item args_item) {
+    int child_count = edit_session_root_child_count(session);
+    if (child_count <= 0) { return false; }
+    int start = (int)edit_session_arg_int_if_map(args_item, "start", -1);
+    int end = (int)edit_session_arg_int_if_map(args_item, "end", -1);
+    if (start < 0) {
+        if (session->anchor.path.len == 0) { return false; }
+        start = (int)session->anchor.path.indices[0];
+    }
+    if (end < 0) {
+        if (session->head.path.len > 0) { end = (int)session->head.path.indices[0]; }
+        else { end = start; }
+    }
+    if (end < start) {
+        int tmp = start;
+        start = end;
+        end = tmp;
+    }
+    if (start < 0 || start >= child_count) { return false; }
+    if (end >= child_count) { end = child_count - 1; }
+
+    MarkReader reader(session->input->root);
+    ElementReader root = reader.getRoot().asElement();
+    MarkBuilder builder(session->input);
+    ElementBuilder quote = builder.element("blockquote");
+    for (int i = start; i <= end; i++) {
+        quote.child(root.childAt(i).item());
+    }
+    Item quote_item = quote.final();
+    Item root_without_range = session->editor->elmt_delete_children(session->input->root, start, end + 1);
+    Item next = session->editor->elmt_insert_child(root_without_range, start, quote_item);
+    if (!edit_session_set_current(session, next)) { return false; }
+    return edit_session_select_node(session, start);
+}
+
+static bool edit_session_exec_lift_blockquote(EditSession* session, Item args_item) {
+    int child_count = edit_session_root_child_count(session);
+    if (child_count <= 0) { return false; }
+    int index = (int)edit_session_arg_int_if_map(args_item, "index", -1);
+    if (index < 0) {
+        if (session->anchor.path.len == 0) { return false; }
+        index = (int)session->anchor.path.indices[0];
+    }
+    if (index < 0 || index >= child_count) { return false; }
+
+    MarkReader reader(session->input->root);
+    ElementReader root = reader.getRoot().asElement();
+    ItemReader selected_item = root.childAt(index);
+    if (!selected_item.isElement()) { return false; }
+    ElementReader quote = selected_item.asElement();
+    if (!quote.hasTag("blockquote")) { return false; }
+    int quote_child_count = (int)quote.childCount();
+    Item root_without_quote = session->editor->elmt_delete_child(session->input->root, index);
+    Item next = root_without_quote;
+    if (quote_child_count > 0) {
+        Item* children = (Item*)pool_calloc(session->input->pool, sizeof(Item) * quote_child_count);
+        if (!children) {
+            log_error("edit_session_exec_lift_blockquote: failed to allocate child slice");
+            return false;
+        }
+        for (int i = 0; i < quote_child_count; i++) {
+            children[i] = quote.childAt(i).item();
+        }
+        next = session->editor->elmt_insert_children(root_without_quote, index, quote_child_count, children);
+    }
+    if (!edit_session_set_current(session, next)) { return false; }
+    return edit_session_select_node(session, index);
+}
+
+static bool edit_session_exec_block_command(EditSession* session, const char* cmd_name, Item args_item) {
+    if (!edit_session_is_block_command(cmd_name)) { return false; }
+    if (strcmp(cmd_name, "insert_horizontal_rule") == 0 || strcmp(cmd_name, "insertHorizontalRule") == 0) {
+        int index = edit_session_insert_index(session, args_item);
+        return edit_session_exec_insert_block(session, edit_session_make_empty_block(session, "hr"), index);
+    }
+    if (strcmp(cmd_name, "insert_code_block") == 0 || strcmp(cmd_name, "insertCodeBlock") == 0) {
+        int index = edit_session_insert_index(session, args_item);
+        const char* tag = edit_session_arg_string_if_map(args_item, "tag");
+        if (!tag) { tag = "code_block"; }
+        const char* text_value = edit_session_arg_string_if_map(args_item, "text");
+        if (!text_value) { text_value = edit_session_arg_string_if_map(args_item, "data"); }
+        return edit_session_exec_insert_block(session, edit_session_make_text_block(session, tag, text_value), index);
+    }
+    if (strcmp(cmd_name, "wrap_blockquote") == 0 || strcmp(cmd_name, "formatBlockquote") == 0) {
+        return edit_session_exec_wrap_blockquote(session, args_item);
+    }
+    if (strcmp(cmd_name, "lift_blockquote") == 0 || strcmp(cmd_name, "formatLiftBlockquote") == 0) {
+        return edit_session_exec_lift_blockquote(session, args_item);
+    }
+    return false;
+}
+
 // ============================================================================
 // Edit session API
 // ============================================================================
@@ -402,6 +568,9 @@ bool edit_session_exec(EditSession* session, const char* cmd_name, Item args) {
     }
     if (edit_session_is_element_command(cmd_name)) {
         return edit_session_exec_element_command(session, cmd_name, args);
+    }
+    if (edit_session_is_block_command(cmd_name)) {
+        return edit_session_exec_block_command(session, cmd_name, args);
     }
     log_error("edit_session_exec: unknown command '%s'", cmd_name);
     return false;
