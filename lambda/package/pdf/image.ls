@@ -23,8 +23,9 @@
 //   `matrix(1 0 0 -1 0 1)` flips the unit square so the source pixels
 //   (top-row-first) come out right-side-up after the page-level y-flip.
 //
-// All helpers are `fn`. State is the interp graphics state — we only
-// read st.ctm here, never mutate.
+// Most helpers are `fn`; image emitters that reuse procedural inline-pixel
+// rendering are `pn`. State is the interp graphics state — we only read
+// st.ctm here, never mutate.
 
 import util:    .util
 import resolve: .resolve
@@ -70,7 +71,8 @@ fn _classify(content, obj_num, raw) {
                else if (sub == "Form") "form"
                else "other"
     let data_uri = if (content and content.data_uri) content.data_uri else null
-    { kind: kind, obj_num: obj_num, dict: dict, raw: raw, data_uri: data_uri }
+    let data = if (content and content.data != null) content.data else ""
+    { kind: kind, obj_num: obj_num, dict: dict, raw: raw, data_uri: data_uri, data: data, content: content }
 }
 
 fn _num(v) {
@@ -145,6 +147,52 @@ fn _emit_image(ctm, obj_num, href_url) {
     }
 }
 
+fn _xobject_data(xo) {
+    if (xo and xo.content and xo.content.data != null) { xo.content.data }
+    else if (xo and xo.data != null) { xo.data }
+    else { "" }
+}
+
+fn _is_raw_xobject(dict, data) {
+    if (dict == null or data == null or data == "") { false }
+    else if (dict.Filter != null) { false }
+    else {
+        let w = _int(dict.Width, 0)
+        let h = _int(dict.Height, 0)
+        let bpc = _int(dict.BitsPerComponent, 8)
+        let cs = if (dict.ColorSpace != null) { dict.ColorSpace } else { "DeviceRGB" }
+        let ncomp = _inline_ncomp(cs)
+        let packed = ((bpc == 1) or (bpc == 4) or _is_indexed(cs))
+        let expected = if (packed) { _row_bytes(w, ncomp, bpc) * h } else { w * h * ncomp }
+        let bad_size = ((w <= 0) or (h <= 0))
+        let bad_format = (((bpc != 8) and (bpc != 1) and (bpc != 4)) or (ncomp == 0) or (((bpc == 1) or (bpc == 4)) and (ncomp != 1)))
+        let too_large = ((w * h) > 4096)
+        not (bad_size or bad_format or too_large or (len(data) < expected))
+    }
+}
+
+fn _xobject_inline_info(dict, data) {
+    let cs = if (dict.ColorSpace != null) { dict.ColorSpace } else { "DeviceRGB" }
+    {
+        kind: "inline_image",
+        dict: [
+            { key: "W", value: dict.Width },
+            { key: "H", value: dict.Height },
+            { key: "CS", value: cs },
+            { key: "BPC", value: _int(dict.BitsPerComponent, 8) }
+        ],
+        data: data
+    }
+}
+
+pn _emit_xobject_image(ctm, xo) {
+    let data = _xobject_data(xo)
+    if (xo.data_uri == null and _is_raw_xobject(xo.dict, data)) {
+        return [svg.group(util.fmt_matrix(ctm), _emit_inline_pixels(_xobject_inline_info(xo.dict, data)))]
+    }
+    else { return _emit_image(ctm, xo.obj_num, xo.data_uri) }
+}
+
 // Emit a placeholder for a Form XObject (deferred to Phase 6).
 fn _emit_form_stub(ctm, obj_num) {
     if (obj_num == 0) { [] }
@@ -161,18 +209,18 @@ fn _emit_form_stub(ctm, obj_num) {
 // Public: handle a Do operator. Returns a (possibly empty) list of SVG
 // elements to append to the page's path layer (so they go inside the
 // outer y-flip group alongside vector paths).
-pub fn apply_do(pdf, page, ctm, ops) {
-    if (len(ops) == 0) { [] }
+pub pn apply_do(pdf, page, ctm, ops) {
+    if (len(ops) == 0) { return [] }
     else {
         let op0 = ops[0]
         if (op0 is map and op0.kind == "name") {
             let xo = lookup_xobject(pdf, page, op0.value)
-            if (xo == null) { [] }
-            else if (xo.kind == "image") { _emit_image(ctm, xo.obj_num, xo.data_uri) }
-            else if (xo.kind == "form")  { _emit_form_stub(ctm, xo.obj_num) }
-            else { [] }
+            if (xo == null) { return [] }
+            else if (xo.kind == "image") { return _emit_xobject_image(ctm, xo) }
+            else if (xo.kind == "form")  { return _emit_form_stub(ctm, xo.obj_num) }
+            else { return [] }
         }
-        else { [] }
+        else { return [] }
     }
 }
 
@@ -229,8 +277,8 @@ fn _base_ncomp(base) {
 
 fn _inline_ncomp(cs) {
     let n = _space_type(cs)
-    if ((n == "G") or (n == "DeviceGray")) { 1 }
-    else if ((n == "RGB") or (n == "DeviceRGB")) { 3 }
+    if ((n == "G") or (n == "DeviceGray") or (n == "CalGray")) { 1 }
+    else if ((n == "RGB") or (n == "DeviceRGB") or (n == "CalRGB")) { 3 }
     else if ((n == "CMYK") or (n == "DeviceCMYK")) { 4 }
     else if (_is_indexed(cs)) { 1 }
     else if (_is_icc_based(cs)) { _icc_ncomp(cs) }
