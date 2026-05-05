@@ -41,6 +41,14 @@ fn is_num_start(c: string) {
     is_digit_code(ord(c)) or c == "+" or c == "-" or c == "."
 }
 
+fn is_octal_code(k) {
+    (k >= 48) and (k <= 55)
+}
+
+fn octal_digit_value(c: string) {
+    ord(c) - 48
+}
+
 // ============================================================
 // String slicing (Lambda strings are char-indexable)
 // ============================================================
@@ -104,16 +112,29 @@ pn read_lit_string(s: string, i: int) {
             if (j >= len(s)) { break }
             let esc = s[j]
             var trans = esc
-            if (esc == "n")        { trans = "\n" }
-            else if (esc == "r")   { trans = "\r" }
-            else if (esc == "t")   { trans = "\t" }
-            else if (esc == "b")   { trans = "\b" }
-            else if (esc == "f")   { trans = "\f" }
-            else if (esc == "(")   { trans = "(" }
-            else if (esc == ")")   { trans = ")" }
-            else if (esc == "\\")  { trans = "\\" }
+            if (is_octal_code(ord(esc))) {
+                var oct = octal_digit_value(esc)
+                var count = 1
+                j = j + 1
+                while (count < 3 and j < len(s) and is_octal_code(ord(s[j]))) {
+                    oct = (oct * 8) + octal_digit_value(s[j])
+                    count = count + 1
+                    j = j + 1
+                }
+                trans = chr(oct)
+            }
+            else {
+                if (esc == "n")        { trans = "\n" }
+                else if (esc == "r")   { trans = "\r" }
+                else if (esc == "t")   { trans = "\t" }
+                else if (esc == "b")   { trans = "\b" }
+                else if (esc == "f")   { trans = "\f" }
+                else if (esc == "(")   { trans = "(" }
+                else if (esc == ")")   { trans = ")" }
+                else if (esc == "\\")  { trans = "\\" }
+                j = j + 1
+            }
             parts = parts ++ [trans]
-            j = j + 1
             part_start = j
         }
         else if (c == "(") {
