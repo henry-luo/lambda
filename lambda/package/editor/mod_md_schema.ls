@@ -5,6 +5,7 @@
 //     content: [term, ...]               // empty array = leaf node (no children)
 //     marks:   'all' | 'none',             // which marks may apply to inline content
 //     attrs:   [{name, required?, type?, default?, validate?}, ...]
+//     excludes:'all' | null,               // mark-only exclusion policy
 //     atomic:  bool }                    // optional; defaults to false
 //
 // A term has shape:
@@ -37,7 +38,7 @@ pub md_schema = {
                  {name: 'title', required: false, type: 'string', default: ""}]},
   strong:     {role: 'mark',   content: [{role: 'inline', qty: 'star'}],   marks: 'all'},
   em:         {role: 'mark',   content: [{role: 'inline', qty: 'star'}],   marks: 'all'},
-  code:       {role: 'mark',   content: [{role: 'inline', qty: 'star'}],   marks: 'none'}
+  code:       {role: 'mark',   content: [{role: 'inline', qty: 'star'}],   marks: 'none', excludes: 'all'}
 }
 
 // The block element to materialise when the user splits at a position whose

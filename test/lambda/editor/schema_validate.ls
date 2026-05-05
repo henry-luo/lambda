@@ -93,3 +93,17 @@ let list_default = <doc <list <list_item; <paragraph; "x">>>>
 let list_bad_type = <doc <list ordered: "yes"; <list_item; <paragraph; "x">>>>
 let vlbt = schema_validate(sch, list_bad_type)
 "list ordered type:"; vlbt[0].tag == 'list' and vlbt[0].message == "attribute type mismatch"
+
+// 12. Mark policy: marks can be forbidden by parent entries or excluded by marks.
+let strict_para_schema = {
+  doc: sch.doc, paragraph: {role: 'block', content: [{role: 'inline', qty: 'star'}], marks: 'none'},
+  heading: sch.heading, blockquote: sch.blockquote, list: sch.list, list_item: sch.list_item,
+  code_block: sch.code_block, hr: sch.hr, image: sch.image, hard_break: sch.hard_break,
+  link: sch.link, strong: sch.strong, em: sch.em, code: sch.code
+}
+let bad_mark_parent = <doc <paragraph; "x" <strong; "y">>>
+let vmp = schema_validate(strict_para_schema, bad_mark_parent)
+"mark disallowed by parent:"; vmp[0].tag == 'strong' and vmp[0].message == "mark not allowed"
+let bad_nested_mark = <doc <paragraph; <code; <strong; "x">>>>
+let vnm = schema_validate(sch, bad_nested_mark)
+"mark excluded by code:"; vnm[0].tag == 'strong' and vnm[0].message == "mark excluded"
