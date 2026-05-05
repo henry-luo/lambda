@@ -103,21 +103,27 @@ fn _resource_color_space(pdf, page, name) {
     else { resolve.deref(pdf, table[name]) }
 }
 
-fn _resolve_space(pdf, page, cs) {
+fn _resolve_space_at(pdf, page, cs, depth) {
     let nm = util.name_of(cs)
     if (nm == null) { cs }
     else if (nm == "DeviceRGB" or nm == "RGB" or
              nm == "DeviceGray" or nm == "G" or
              nm == "DeviceCMYK" or nm == "CMYK") { nm }
+    else if (depth <= 0) { nm }
     else {
         let found = _resource_color_space(pdf, page, nm)
-        if (found == null) { nm } else { found }
+        if (found == null) { nm } else { _resolve_space_at(pdf, page, found, depth - 1) }
     }
+}
+
+fn _resolve_space(pdf, page, cs) {
+    _resolve_space_at(pdf, page, cs, 8)
 }
 
 fn _space_type(cs) {
     if (cs is array and len(cs) >= 1) { util.name_of(cs[0]) }
     else if (cs is map and cs.N != null) { "ICCBased" }
+    else if (cs is map) { "DeviceGray" }
     else { util.name_of(cs) }
 }
 

@@ -1,0 +1,1 @@
+{ count: 1, map_defaults_gray: true, not_rgb_count: true}

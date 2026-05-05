@@ -181,18 +181,23 @@ fn _is_device_space_name(nm) {
     (nm == "DeviceCMYK") or (nm == "CMYK")
 }
 
-fn _resolve_image_space(pdf, page, cs) {
+fn _resolve_image_space_at(pdf, page, cs, depth) {
     let nm = util.name_of(cs)
     if (cs is array and len(cs) >= 4 and _is_indexed(cs)) {
-        let base = _resolve_image_space(pdf, page, cs[1])
+        let base = _resolve_image_space_at(pdf, page, cs[1], depth)
         [cs[0], base, cs[2], cs[3]]
     }
     else if (nm == null) { cs }
     else if (_is_device_space_name(nm)) { nm }
+    else if (depth <= 0) { cs }
     else {
         let found = _resource_color_space(pdf, page, nm)
-        if (found == null) { cs } else { found }
+        if (found == null) { cs } else { _resolve_image_space_at(pdf, page, found, depth - 1) }
     }
+}
+
+fn _resolve_image_space(pdf, page, cs) {
+    _resolve_image_space_at(pdf, page, cs, 8)
 }
 
 fn _is_raw_xobject(pdf, page, dict, data) {
