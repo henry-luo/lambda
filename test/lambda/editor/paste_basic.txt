@@ -12,6 +12,18 @@ true
 true
 "atomic attrs preserved:"
 true
+"atomic unknown attr stripped:"
+true
+"attr default string:"
+true
+"attr default int:"
+true
+"attr required missing omitted:"
+true
+"attr invalid defaulted int:"
+true
+"attr invalid defaulted:"
+true
 "lift count:"
 3
 "first lifted tag:"

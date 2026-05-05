@@ -322,6 +322,28 @@ let tx_delete_col = cmd_delete_table_column(delete_col_state)
 "delete table col count:"; len(node_at(tx_delete_col.doc_after, [1, 1]).content) == 3
 "delete table col selected:"; path_equal(tx_delete_col.sel_after.path, [1, 1, 2])
 
+let section_table_doc = node('doc', [node('table', [node('tbody', [
+  node('tr', [node('td', [text("A")]), node('td', [text("B")])]),
+  node('tr', [node('td', [text("C")]), node('td', [text("D")])])
+])])])
+let section_cell_state = {doc: section_table_doc, schema: html5_subset_schema,
+  selection: text_selection(pos([0, 0, 1, 1, 0], 1), pos([0, 0, 1, 1, 0], 1))}
+let tx_section_add_row = cmd_add_table_row(section_cell_state)
+"add section row count:"; len(node_at(tx_section_add_row.doc_after, [0, 0]).content) == 3
+"add section row selected:"; path_equal(tx_section_add_row.sel_after.path, [0, 0, 2])
+"add section row cell:"; node_at(tx_section_add_row.doc_after, [0, 0, 2, 1]).tag == 'td'
+let tx_section_add_col = cmd_add_table_column(section_cell_state)
+"add section col first row:"; len(node_at(tx_section_add_col.doc_after, [0, 0, 0]).content) == 3
+"add section col second row:"; len(node_at(tx_section_add_col.doc_after, [0, 0, 1]).content) == 3
+"add section col selected:"; path_equal(tx_section_add_col.sel_after.path, [0, 0, 1, 2])
+let tx_section_delete_col = cmd_delete_table_column({doc: tx_section_add_col.doc_after, schema: html5_subset_schema, selection: node_selection([0, 0, 1, 2])})
+"delete section col first row:"; len(node_at(tx_section_delete_col.doc_after, [0, 0, 0]).content) == 2
+"delete section col second row:"; len(node_at(tx_section_delete_col.doc_after, [0, 0, 1]).content) == 2
+"delete section col selected:"; path_equal(tx_section_delete_col.sel_after.path, [0, 0, 1, 1])
+let tx_section_delete_row = cmd_delete_table_row(section_cell_state)
+"delete section row count:"; len(node_at(tx_section_delete_row.doc_after, [0, 0]).content) == 1
+"delete section row selected:"; path_equal(tx_section_delete_row.sel_after.path, [0, 0, 0])
+
 // ---------------------------------------------------------------------------
 // cmd_toggle_mark
 // ---------------------------------------------------------------------------

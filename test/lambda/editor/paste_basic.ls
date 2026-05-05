@@ -28,11 +28,35 @@ let leaf2 = coerce_to_schema(md_schema, leaf)
 // 3. Atomic node — strip its content
 // ---------------------------------------------------------------------------
 let img_with_kids = node_attrs('image',
-  [{name: 'src', value: "x.png"}],
+  [{name: 'src', value: "x.png"}, {name: 'onclick', value: "evil()"}],
   [text("ignored caption")])
 let img2 = coerce_to_schema(md_schema, img_with_kids)
 "atomic content stripped:"; len(img2.content) == 0
 "atomic attrs preserved:";  img2.attrs[0].value == "x.png"
+"atomic unknown attr stripped:"; len(img2.attrs) == 1
+
+let attr_schema = {
+  box: {role: 'block', content: [], marks: 'none', attrs: [
+    {name: 'kind', type: 'string', default: "note", one_of: ["note", "tip"]},
+    {name: 'level', type: 'int', default: 2, min: 1, max: 3},
+    {name: 'required_id', type: 'string', required: true}
+  ]}
+}
+let normalized_box = coerce_to_schema(attr_schema, node_attrs('box', [
+  {name: 'kind', value: "sideways"}, {name: 'junk', value: true}
+], []))
+"attr default string:"; normalized_box.attrs[0].name == 'kind' and normalized_box.attrs[0].value == "note"
+"attr default int:"; normalized_box.attrs[1].name == 'level' and normalized_box.attrs[1].value == 2
+"attr required missing omitted:"; len(normalized_box.attrs) == 2
+
+let heading_attrs = coerce_to_schema(md_schema, node_attrs('heading', [
+  {name: 'level', value: 99}, {name: 'class', value: "huge"}
+], [text("Title")]))
+"attr invalid defaulted int:"; len(heading_attrs.attrs) == 1 and heading_attrs.attrs[0].value == 1
+let list_attrs = coerce_to_schema(md_schema, node_attrs('list', [{name: 'ordered', value: "yes"}], [
+  node('list_item', [node('paragraph', [text("x")])])
+]))
+"attr invalid defaulted:"; len(list_attrs.attrs) == 1 and list_attrs.attrs[0].value == false
 
 // ---------------------------------------------------------------------------
 // 4. Lift inlines that landed in block context — wrap them in a paragraph

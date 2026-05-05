@@ -113,6 +113,64 @@ pub fn keep_marks_for(schema, parent_entry, marks) {
 pub fn keep_marks(schema, marks) => keep_marks_for(schema, null, marks)
 
 // ---------------------------------------------------------------------------
+// Attribute filtering/defaulting
+// ---------------------------------------------------------------------------
+
+fn attr_value_at(attrs, name, i, n) {
+  if (i >= n) { null }
+  else if (attrs[i].name == name) { attrs[i].value }
+  else { attr_value_at(attrs, name, i + 1, n) }
+}
+
+fn attr_type_ok(value, spec) {
+  if (value == null) { true }
+  else if (spec.type == null) { true }
+  else if (spec.type == 'string') { type(value) == string }
+  else if (spec.type == 'int') { type(value) == int }
+  else if (spec.type == 'bool') { type(value) == bool }
+  else { true }
+}
+
+fn value_in_list(items, value, i, n) {
+  if (i >= n) { false }
+  else if (items[i] == value) { true }
+  else { value_in_list(items, value, i + 1, n) }
+}
+
+fn attr_constraints_ok(value, spec) {
+  if (value == null) { true }
+  else if (spec.one_of != null and not value_in_list(spec.one_of, value, 0, len(spec.one_of))) { false }
+  else if (spec.min != null and value < spec.min) { false }
+  else if (spec.max != null and value > spec.max) { false }
+  else { true }
+}
+
+fn attr_validate_ok(value, spec) =>
+  if (value == null or spec.validate == null) { true } else { spec.validate(value) }
+
+fn attr_has_default(spec) =>
+  spec.default != null or type(spec.default) == string or type(spec.default) == int or type(spec.default) == bool
+
+fn attr_clean_value(value, spec) {
+  if (value != null and attr_type_ok(value, spec) and attr_constraints_ok(value, spec) and attr_validate_ok(value, spec)) { value }
+  else if (attr_has_default(spec)) { spec.default }
+  else { null }
+}
+
+fn normalize_attrs_at(attrs, specs, i, n, acc) {
+  if (i >= n) { acc }
+  else {
+    let spec = specs[i]
+    let value = attr_clean_value(attr_value_at(attrs, spec.name, 0, len(attrs)), spec)
+    let next = if (value == null) { acc } else { [*acc, {name: spec.name, value: value}] }
+    normalize_attrs_at(attrs, specs, i + 1, n, next)
+  }
+}
+
+fn normalize_attrs(entry, attrs) =>
+  if (entry.attrs == null) { [] } else { normalize_attrs_at(attrs, entry.attrs, 0, len(entry.attrs), []) }
+
+// ---------------------------------------------------------------------------
 // Recursive coercion
 // ---------------------------------------------------------------------------
 
@@ -122,11 +180,11 @@ fn coerce_one_at(schema, parent_entry, n) {
   else {
     let e = entry_for(schema, n.tag)
     if (e == null) { null }
-    else if (e.atomic and len(e.content) == 0) { node_attrs(n.tag, n.attrs, []) }
+    else if (e.atomic and len(e.content) == 0) { node_attrs(n.tag, normalize_attrs(e, n.attrs), []) }
     else {
       let cr = content_role(e)
       let kids = coerce_list_at(schema, n.content, cr, e, 0, len(n.content), [], [])
-      node_attrs(n.tag, n.attrs, kids)
+      node_attrs(n.tag, normalize_attrs(e, n.attrs), kids)
     }
   }
 }
