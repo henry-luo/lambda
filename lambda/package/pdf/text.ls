@@ -307,9 +307,108 @@ fn _text_space_scale(st, ctm) {
 
 fn _text_advance(st, ctm, txt) {
     let n = len(txt)
-    let base = float(n) * _effective_font_size(st, ctm) * 0.5
+    let base = _text_width(st, ctm, txt)
     let spacing = ((st.char_space * float(n)) + (st.word_space * float(_space_count(txt)))) * _text_space_scale(st, ctm)
     (base + spacing) * (st.hor_scale / 100.0)
+}
+
+fn _text_advance_codes(st, ctm, codes) {
+    let n = len(codes)
+    let base = _codes_width_units(st.font_info, codes) / 1000.0 * _effective_font_size(st, ctm)
+    let words = len(for (c in codes where c == 32) c)
+    let spacing = ((st.char_space * float(n)) + (st.word_space * float(words))) * _text_space_scale(st, ctm)
+    (base + spacing) * (st.hor_scale / 100.0)
+}
+
+fn _num_width(v) {
+    if (v is int) { float(v) }
+    else if (v is float) { v }
+    else { 500.0 }
+}
+
+fn _glyph_width_units(fi, code) {
+    if (fi and fi.widths is array and code >= fi.first_char and code <= fi.last_char) {
+        let idx = code - fi.first_char
+        if (idx >= 0 and idx < len(fi.widths)) { _num_width(fi.widths[idx]) }
+        else { 500.0 }
+    }
+    else { 500.0 }
+}
+
+fn _text_width_units(fi, txt) {
+    let n = len(txt)
+    if (n == 0) { 0.0 }
+    else {
+        let parts = for (i in 0 to (n - 1)) _glyph_width_units(fi, ord(txt[i]))
+        parts | sum()
+    }
+}
+
+fn _codes_width_units(fi, codes) {
+    if (len(codes) == 0) { 0.0 }
+    else {
+        let parts = for (c in codes) _glyph_width_units(fi, c)
+        parts | sum()
+    }
+}
+
+fn _text_width(st, ctm, txt) {
+    _text_width_units(st.font_info, txt) / 1000.0 * _effective_font_size(st, ctm)
+}
+
+fn _hex_digit_value(c: string) {
+    let k = ord(c)
+    if ((k >= 48) and (k <= 57)) { k - 48 }
+    else if ((k >= 65) and (k <= 70)) { k - 55 }
+    else if ((k >= 97) and (k <= 102)) { k - 87 }
+    else { 0 }
+}
+
+fn _hex_code_range(hex: string, i: int, endp: int, acc: int) {
+    if (i >= endp or i >= len(hex)) { acc }
+    else { _hex_code_range(hex, i + 1, endp, (acc * 16) + _hex_digit_value(hex[i])) }
+}
+
+fn _hex_code_at(hex: string, i: int, digits: int) {
+    _hex_code_range(hex, i, i + digits, 0)
+}
+
+fn _hex_byte_at(hex: string, i: int) {
+    if (i + 1 < len(hex)) { _hex_code_at(hex, i, 2) }
+    else { _hex_digit_value(hex[i]) * 16 }
+}
+
+fn _hex_codes_at(hex: string, i: int, cmap) {
+    let n = len(hex)
+    if (i >= n) { [] }
+    else {
+        let c8 = if (i + 8 <= n) _hex_code_at(hex, i, 8) else -1
+        if (c8 >= 0 and cmap and cmap[string(c8)]) { [c8] ++ _hex_codes_at(hex, i + 8, cmap) }
+        else {
+            let c6 = if (i + 6 <= n) _hex_code_at(hex, i, 6) else -1
+            if (c6 >= 0 and cmap and cmap[string(c6)]) { [c6] ++ _hex_codes_at(hex, i + 6, cmap) }
+            else {
+                let c4 = if (i + 4 <= n) _hex_code_at(hex, i, 4) else -1
+                if (c4 >= 0 and cmap and cmap[string(c4)]) { [c4] ++ _hex_codes_at(hex, i + 4, cmap) }
+                else { [_hex_byte_at(hex, i)] ++ _hex_codes_at(hex, i + 2, cmap) }
+            }
+        }
+    }
+}
+
+fn _operand_codes(op, font_info) {
+    let cmap = if (font_info) font_info.to_unicode else null
+    if (op is map and op.kind == "string") {
+        let s = op.value
+        if (len(s) == 0) { [] }
+        else { for (i in 0 to (len(s) - 1)) ord(s[i]) }
+    }
+    else if (op is map and op.kind == "hex") { _hex_codes_at(op.value, 0, cmap) }
+    else { [] }
+}
+
+fn _text_advance_for_operand(st, ctm, op) {
+    _text_advance_codes(st, ctm, _operand_codes(op, st.font_info))
 }
 
 fn _tj_adjustment(st, ctm, v) {
@@ -403,7 +502,7 @@ fn _op_Tr(st, ops) {
 fn _op_Tj(st, ctm, ops, page_h) {
     if (len(ops) >= 1) {
         let txt = _decode_operand(ops[0], st.font_info)
-        let s1 = if (txt == "") { st } else { _advance_text(st, _text_advance(st, ctm, txt)) }
+        let s1 = if (txt == "") { st } else { _advance_text(st, _text_advance_for_operand(st, ctm, ops[0])) }
         { state: s1, emit: _emit_one(st, ctm, page_h, txt) }
     }
     else { { state: st, emit: null } }
@@ -431,7 +530,7 @@ pn _op_TJ(st, ctm, ops, page_h) {
                         has_seg = true
                     }
                     seg_text = seg_text ++ txt
-                    cur = _advance_text(cur, _text_advance(cur, ctm, txt))
+                    cur = _advance_text(cur, _text_advance_for_operand(cur, ctm, it))
                 }
             }
             else if (it is int or it is float) {
@@ -469,7 +568,7 @@ fn _op_quote(st, ctm, ops, page_h) {
     if (len(ops) >= 1) {
         let s1 = _move(st, 0.0, -st.leading)
         let txt = _decode_operand(ops[0], s1.font_info)
-        let s2 = if (txt == "") { s1 } else { _advance_text(s1, _text_advance(s1, ctm, txt)) }
+        let s2 = if (txt == "") { s1 } else { _advance_text(s1, _text_advance_for_operand(s1, ctm, ops[0])) }
         { state: s2, emit: _emit_one(s1, ctm, page_h, txt) }
     }
     else { { state: st, emit: null } }
@@ -480,7 +579,7 @@ fn _op_dquote(st, ctm, ops, page_h) {
         let s0 = set_char_space(set_word_space(st, _num(ops[0])), _num(ops[1]))
         let s1 = _move(s0, 0.0, -s0.leading)
         let txt = _decode_operand(ops[2], s1.font_info)
-        let s2 = if (txt == "") { s1 } else { _advance_text(s1, _text_advance(s1, ctm, txt)) }
+        let s2 = if (txt == "") { s1 } else { _advance_text(s1, _text_advance_for_operand(s1, ctm, ops[2])) }
         { state: s2, emit: _emit_one(s1, ctm, page_h, txt) }
     }
     else { { state: st, emit: null } }
