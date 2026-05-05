@@ -453,6 +453,8 @@ typedef enum InputIntentType {
     INPUT_INTENT_FORMAT_BOLD,
     INPUT_INTENT_FORMAT_ITALIC,
     INPUT_INTENT_FORMAT_UNDERLINE,
+    INPUT_INTENT_FORMAT_INDENT,
+    INPUT_INTENT_FORMAT_OUTDENT,
     INPUT_INTENT_HISTORY_UNDO,
     INPUT_INTENT_HISTORY_REDO,
 } InputIntentType;
@@ -484,6 +486,8 @@ static const char* input_intent_type_name(InputIntentType type) {
         case INPUT_INTENT_FORMAT_BOLD:             return "formatBold";
         case INPUT_INTENT_FORMAT_ITALIC:           return "formatItalic";
         case INPUT_INTENT_FORMAT_UNDERLINE:        return "formatUnderline";
+        case INPUT_INTENT_FORMAT_INDENT:           return "formatIndent";
+        case INPUT_INTENT_FORMAT_OUTDENT:          return "formatOutdent";
         case INPUT_INTENT_HISTORY_UNDO:            return "historyUndo";
         case INPUT_INTENT_HISTORY_REDO:            return "historyRedo";
         default:                                   return "";
@@ -534,6 +538,10 @@ static bool input_intent_from_key_event(const KeyEvent* key_event, InputIntent* 
     }
     if (key_event->key == RDT_KEY_ENTER) {
         out->type = shift ? INPUT_INTENT_INSERT_LINE_BREAK : INPUT_INTENT_INSERT_PARAGRAPH;
+        return true;
+    }
+    if (key_event->key == RDT_KEY_TAB) {
+        out->type = shift ? INPUT_INTENT_FORMAT_OUTDENT : INPUT_INTENT_FORMAT_INDENT;
         return true;
     }
     if (key_event->key == RDT_KEY_BACKSPACE) {
@@ -4630,6 +4638,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
         View* focused = focus_get(state);
         log_debug("Key down: key=%d, mods=0x%x, focused=%p", key_event->key, key_event->mods, focused);
+        View* intent_target = focused ? focused
+            : ((state->caret && state->caret->view) ? state->caret->view : nullptr);
 
         // Forward key events to layer-mode webview if it has focus
         if (focused && focused->is_element()) {
@@ -4645,7 +4655,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         }
 
         // Tab navigation
-        if (key_event->key == RDT_KEY_TAB) {
+        if (key_event->key == RDT_KEY_TAB && !rich_editable_from_target(intent_target)) {
             bool forward = !(key_event->mods & RDT_MOD_SHIFT);
             if (doc->view_tree && doc->view_tree->root) {
                 focus_move(state, doc->view_tree->root, forward);
@@ -4715,8 +4725,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         // text-control path.
         {
             InputIntent intent;
-            View* intent_target = focused ? focused
-                : ((state->caret && state->caret->view) ? state->caret->view : nullptr);
             if (intent_target && input_intent_from_key_event(key_event, &intent) &&
                 dispatch_rich_beforeinput(&evcon, intent_target, &intent)) {
                 evcon.need_repaint = true;

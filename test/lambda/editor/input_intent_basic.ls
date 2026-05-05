@@ -5,6 +5,7 @@ import lambda.package.editor.mod_source_pos
 import lambda.package.editor.mod_transaction
 import lambda.package.editor.mod_input_intent
 import lambda.package.editor.mod_decorations
+import lambda.package.editor.mod_history
 
 let d0 = node('doc', [
   node('paragraph', [text("Hello")])
@@ -65,6 +66,28 @@ let tx_split = dispatch_intent(s0, {input_type: "insertParagraph", data: null})
 "split intent left:"; doc_text(node_at(tx_split.doc_after, [0])) == "Hello"
 "split intent right empty:"; len(doc_text(node_at(tx_split.doc_after, [1]))) == 0
 
+let tx_line = dispatch_intent({doc: d0, selection: text_selection(pos([0, 0], 2), pos([0, 0], 2))},
+  {input_type: "insertLineBreak", data: null})
+"line-break intent tag:"; node_at(tx_line.doc_after, [0, 1]).tag == 'hard_break'
+"line-break intent caret:"; path_equal(tx_line.sel_after.anchor.path, [0, 2])
+
+let word_doc = node('doc', [node('paragraph', [text("one two")])])
+let tx_word = dispatch_intent({doc: word_doc, selection: text_selection(pos([0, 0], 7), pos([0, 0], 7))},
+  {input_type: "deleteWordBackward", data: null})
+"word-delete intent doc:"; doc_text(tx_word.doc_after) == "one "
+"word-delete intent caret:"; tx_word.sel_after.anchor.offset == 4
+
+let list_doc = node('doc', [node_attrs('list', [{name: 'ordered', value: false}], [
+  node('list_item', [node('paragraph', [text("A")])]),
+  node('list_item', [node('paragraph', [text("B")])])
+])])
+let tx_indent_intent = dispatch_intent({doc: list_doc, selection: text_selection(pos([0, 1, 0, 0], 1), pos([0, 1, 0, 0], 1))},
+  {input_type: "formatIndent", data: null})
+"indent intent nested:"; doc_text(node_at(tx_indent_intent.doc_after, [0, 0, 1, 0])) == "B"
+let tx_outdent_intent = dispatch_intent({doc: tx_indent_intent.doc_after, selection: text_selection(pos([0, 0, 1, 0, 0, 0], 1), pos([0, 0, 1, 0, 0, 0], 1))},
+  {input_type: "formatOutdent", data: null})
+"outdent intent top count:"; len(node_at(tx_outdent_intent.doc_after, [0]).content) == 2
+
 let tx_bold = dispatch_intent(s0, {input_type: "formatBold", data: null})
 let bold_leaf = node_at(tx_bold.doc_after, [0, 0])
 "bold intent mark:"; has_mark(bold_leaf.marks, 'strong')
@@ -106,5 +129,18 @@ let s_comp_cancel0 = state_after_intent(s_comp0, tx_comp_cancel0)
 let tx_comp_cancel = dispatch_intent(s_comp_cancel0, {input_type: "deleteCompositionText", data: null})
 "composition cancel doc:"; doc_text(tx_comp_cancel.doc_after) == "Hello"
 "composition cancel history:"; tx_get_meta(tx_comp_cancel, "addToHistory") == false
+
+let h_state0 = {doc: d0, selection: caret, history: history_new()}
+let h_tx_ins = dispatch_intent(h_state0, {input_type: "insertText", data: "!"})
+let h_state1 = state_after_intent(h_state0, h_tx_ins)
+"history push undo:"; can_undo(h_state1.history)
+let h_tx_undo = dispatch_intent(h_state1, {input_type: "historyUndo", data: null})
+let h_state2 = state_after_intent(h_state1, h_tx_undo)
+"history undo doc:"; doc_text(h_state2.doc) == "Hello"
+"history undo redo:"; can_redo(h_state2.history)
+let h_tx_redo = dispatch_intent(h_state2, {input_type: "historyRedo", data: null})
+let h_state3 = state_after_intent(h_state2, h_tx_redo)
+"history redo doc:"; doc_text(h_state3.doc) == "Hello!"
+"history redo undo:"; can_undo(h_state3.history)
 
 "unknown intent null:"; dispatch_intent(s0, {input_type: "formatStrikeThrough", data: null}) == null

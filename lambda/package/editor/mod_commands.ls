@@ -204,6 +204,157 @@ pub fn cmd_delete_forward(state) {
 }
 
 // ---------------------------------------------------------------------------
+// cmd_delete_word_backward / cmd_insert_line_break
+// ---------------------------------------------------------------------------
+
+fn is_space_char(ch) => ch == " " or ch == "\n" or ch == "\t" or ch == "\r"
+
+fn skip_space_left(text, i) {
+  if (i <= 0) { 0 }
+  else if (is_space_char(slice(text, i - 1, i))) { skip_space_left(text, i - 1) }
+  else { i }
+}
+
+fn scan_word_left(text, i) {
+  if (i <= 0) { 0 }
+  else if (is_space_char(slice(text, i - 1, i))) { i }
+  else { scan_word_left(text, i - 1) }
+}
+
+fn word_start_left(text, i) => scan_word_left(text, skip_space_left(text, i))
+
+pub fn cmd_delete_word_backward(state) {
+  let sel = state.selection
+  if (sel == null) { null }
+  else if (not sel_single_leaf(sel)) { null }
+  else if (not sel_collapsed(sel)) { delete_range(state, sel_lo(sel), sel_hi(sel)) }
+  else {
+    let p = sel.anchor
+    let leaf = node_at(state.doc, p.path)
+    if (leaf == null or not is_text(leaf) or p.offset <= 0) { null }
+    else {
+      let start = word_start_left(leaf.text, p.offset)
+      if (start == p.offset) { null }
+      else { delete_range(state, pos(p.path, start), p) }
+    }
+  }
+}
+
+pub fn cmd_insert_line_break(state) {
+  let sel = state.selection
+  if (sel == null or not sel_single_leaf(sel)) { null }
+  else {
+    let lo = sel_lo(sel)
+    let hi = sel_hi(sel)
+    let leaf_path = lo.path
+    let leaf = node_at(state.doc, leaf_path)
+    if (leaf == null or not is_text(leaf) or len(leaf_path) < 2) { null }
+    else {
+      let block_path = parent_path(leaf_path)
+      let leaf_index = last_index(leaf_path)
+      let before = nonempty_text_leaf(slice(leaf.text, 0, lo.offset), leaf.marks)
+      let after = text_marked(slice(leaf.text, hi.offset, len(leaf.text)), leaf.marks)
+      let slice_nodes = [*before, node('hard_break', []), after]
+      let tx0 = tx_begin(state.doc, sel)
+      let tx1 = tx_step(tx0, step_replace(block_path, leaf_index, leaf_index + 1, slice_nodes))
+      tx_set_selection(tx1, caret(pos([*block_path, leaf_index + len(before) + 1], 0)))
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// cmd_indent_list_item / cmd_outdent_list_item
+// ---------------------------------------------------------------------------
+
+fn ancestor_tag_at(doc, path, tag, depth) {
+  if (depth < 0) { null }
+  else {
+    let p = list_take(path, depth)
+    let n = node_at(doc, p)
+    if (n != null and is_node(n) and n.tag == tag) { p }
+    else { ancestor_tag_at(doc, path, tag, depth - 1) }
+  }
+}
+
+fn ancestor_tag(doc, path, tag) => ancestor_tag_at(doc, path, tag, len(path))
+
+fn same_list_kind(a, b) => is_node(a) and is_node(b) and a.tag == 'list' and b.tag == 'list'
+
+fn append_to_sublist(prev_item, list_node, item) {
+  let kids = prev_item.content
+  if (len(kids) > 0 and same_list_kind(kids[len(kids) - 1], list_node)) {
+    let sub = kids[len(kids) - 1]
+    let sub2 = with_content(sub, [*sub.content, item])
+    node_attrs(prev_item.tag, prev_item.attrs, list_set(kids, len(kids) - 1, sub2))
+  } else {
+    node_attrs(prev_item.tag, prev_item.attrs, [*kids, node_attrs('list', list_node.attrs, [item])])
+  }
+}
+
+pub fn cmd_indent_list_item(state) {
+  let sel = state.selection
+  if (sel == null) { null }
+  else {
+    let base_path = if (sel.kind == 'node') { sel.path } else { sel.anchor.path }
+    let item_path = ancestor_tag(state.doc, base_path, 'list_item')
+    if (item_path == null) { null }
+    else {
+      let list_path = parent_path(item_path)
+      let item_index = last_index(item_path)
+      let list_node = node_at(state.doc, list_path)
+      if (list_node == null or not is_node(list_node) or list_node.tag != 'list' or item_index <= 0) { null }
+      else {
+        let item = list_node.content[item_index]
+        let prev_item = list_node.content[item_index - 1]
+        let prev2 = append_to_sublist(prev_item, list_node, item)
+        let new_items = list_splice(list_set(list_node.content, item_index - 1, prev2), item_index, 1, [])
+        let list2 = node_attrs(list_node.tag, list_node.attrs, new_items)
+        let tx0 = tx_begin(state.doc, sel)
+        let tx1 = tx_step(tx0, step_replace(parent_path(list_path), last_index(list_path), last_index(list_path) + 1, [list2]))
+        tx_set_selection(tx1, node_selection([*list_path, item_index - 1]))
+      }
+    }
+  }
+}
+
+fn replace_or_remove_sublist(parent_item, sub_index, sublist) {
+  if (len(sublist.content) == 0) { list_splice(parent_item.content, sub_index, 1, []) }
+  else { list_set(parent_item.content, sub_index, sublist) }
+}
+
+pub fn cmd_outdent_list_item(state) {
+  let sel = state.selection
+  if (sel == null) { null }
+  else {
+    let base_path = if (sel.kind == 'node') { sel.path } else { sel.anchor.path }
+    let item_path = ancestor_tag(state.doc, base_path, 'list_item')
+    if (item_path == null) { null }
+    else {
+      let list_path = parent_path(item_path)
+      let item_index = last_index(item_path)
+      let parent_item_path = parent_path(list_path)
+      let grand_list_path = parent_path(parent_item_path)
+      let parent_item_index = last_index(parent_item_path)
+      let list_child_index = last_index(list_path)
+      let list_node = node_at(state.doc, list_path)
+      let parent_item = node_at(state.doc, parent_item_path)
+      let grand_list = node_at(state.doc, grand_list_path)
+      if (list_node == null or parent_item == null or grand_list == null or
+          not is_node(list_node) or not is_node(parent_item) or not is_node(grand_list) or
+          list_node.tag != 'list' or parent_item.tag != 'list_item' or grand_list.tag != 'list') { null }
+      else {
+        let item = list_node.content[item_index]
+        let list2 = with_content(list_node, list_splice(list_node.content, item_index, 1, []))
+        let parent2 = node_attrs(parent_item.tag, parent_item.attrs, replace_or_remove_sublist(parent_item, list_child_index, list2))
+        let tx0 = tx_begin(state.doc, sel)
+        let tx1 = tx_step(tx0, step_replace(grand_list_path, parent_item_index, parent_item_index + 1, [parent2, item]))
+        tx_set_selection(tx1, node_selection([*grand_list_path, parent_item_index + 1]))
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // cmd_toggle_mark — add or remove a mark across the (single-leaf) selection
 // ---------------------------------------------------------------------------
 //

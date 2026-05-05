@@ -56,6 +56,43 @@ let s_end = {doc: d0, selection: text_selection(pos([0, 0], 13), pos([0, 0], 13)
 "del-fwd at end null:"; cmd_delete_forward(s_end) == null
 
 // ---------------------------------------------------------------------------
+// cmd_delete_word_backward / cmd_insert_line_break
+// ---------------------------------------------------------------------------
+let word_doc = node('doc', [node('paragraph', [text("one two   ")])])
+let word_state = {doc: word_doc, selection: text_selection(pos([0, 0], 10), pos([0, 0], 10))}
+let tx_dw = cmd_delete_word_backward(word_state)
+"del-word doc:"; doc_text(tx_dw.doc_after) == "one "
+"del-word caret:"; tx_dw.sel_after.anchor.offset == 4
+"del-word start null:"; cmd_delete_word_backward({doc: word_doc, selection: text_selection(pos([0, 0], 0), pos([0, 0], 0))}) == null
+
+let line_state = {doc: d0, selection: text_selection(pos([0, 0], 5), pos([0, 0], 5))}
+let tx_lb = cmd_insert_line_break(line_state)
+"line-break children:"; len(node_at(tx_lb.doc_after, [0]).content) == 3
+"line-break tag:"; node_at(tx_lb.doc_after, [0, 1]).tag == 'hard_break'
+"line-break left:"; node_at(tx_lb.doc_after, [0, 0]).text == "Hello"
+"line-break right:"; node_at(tx_lb.doc_after, [0, 2]).text == ", world."
+"line-break caret path:"; path_equal(tx_lb.sel_after.anchor.path, [0, 2])
+"line-break caret offset:"; tx_lb.sel_after.anchor.offset == 0
+
+let list_doc = node('doc', [node_attrs('list', [{name: 'ordered', value: false}], [
+  node('list_item', [node('paragraph', [text("A")])]),
+  node('list_item', [node('paragraph', [text("B")])]),
+  node('list_item', [node('paragraph', [text("C")])])
+])])
+let list_state = {doc: list_doc, selection: text_selection(pos([0, 1, 0, 0], 1), pos([0, 1, 0, 0], 1))}
+let tx_indent = cmd_indent_list_item(list_state)
+"indent top count:"; len(node_at(tx_indent.doc_after, [0]).content) == 2
+"indent nested text:"; doc_text(node_at(tx_indent.doc_after, [0, 0, 1, 0])) == "B"
+"indent selected parent:"; path_equal(tx_indent.sel_after.path, [0, 0])
+
+let outdent_state = {doc: tx_indent.doc_after, selection: text_selection(pos([0, 0, 1, 0, 0, 0], 1), pos([0, 0, 1, 0, 0, 0], 1))}
+let tx_outdent = cmd_outdent_list_item(outdent_state)
+"outdent top count:"; len(node_at(tx_outdent.doc_after, [0]).content) == 3
+"outdent middle text:"; doc_text(node_at(tx_outdent.doc_after, [0, 1])) == "B"
+"outdent selected:"; path_equal(tx_outdent.sel_after.path, [0, 1])
+"indent first null:"; cmd_indent_list_item({doc: list_doc, selection: node_selection([0, 0])}) == null
+
+// ---------------------------------------------------------------------------
 // cmd_toggle_mark
 // ---------------------------------------------------------------------------
 let tx_bold = cmd_toggle_mark(s0, 'strong')
