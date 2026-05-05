@@ -169,21 +169,14 @@ fn _runtime_font_info(info) {
 // Operand helper
 // ============================================================
 
-fn _num(op) {
-    if (op == null)        { 0.0 }
-    else if (op is float)  { op }
-    else if (op is int)    { float(op) }
-    else                   { 0.0 }
-}
-
 // ============================================================
 // Operator handlers (graphics state)
 // ============================================================
 
 fn _op_cm(st, ops) {
     if (len(ops) >= 6) {
-        let m = [_num(ops[0]), _num(ops[1]), _num(ops[2]),
-                 _num(ops[3]), _num(ops[4]), _num(ops[5])]
+        let m = [util.num(ops[0]), util.num(ops[1]), util.num(ops[2]),
+                 util.num(ops[3]), util.num(ops[4]), util.num(ops[5])]
         _with_ctm(st, util.matrix_mul(m, st.ctm))
     }
     else { st }
@@ -196,7 +189,7 @@ fn _op_Tf(st, ops) {
     let n = len(ops)
     let op0 = if (n >= 1) ops[0] else null
     let fname = if (op0 is map and op0.kind == "name") op0.value else st.text.font_name
-    let fsize = if (n >= 2) _num(ops[1]) else st.text.font_size
+    let fsize = if (n >= 2) util.num(ops[1]) else st.text.font_size
     let info  = _lookup_resolved(st.fonts, fname)
     _with_text(st, text.set_font_info(st.text, fname, fsize, info))
 }
@@ -537,8 +530,8 @@ fn _form_group_opacity(st, fc) {
 fn _form_bounds_attr(fc) {
     if (fc == null or fc.dict == null or not (fc.dict.BBox is array) or len(fc.dict.BBox) < 4) { "" }
     else {
-        let x0 = _num(fc.dict.BBox[0]); let y0 = _num(fc.dict.BBox[1])
-        let x1 = _num(fc.dict.BBox[2]); let y1 = _num(fc.dict.BBox[3])
+        let x0 = util.num(fc.dict.BBox[0]); let y0 = util.num(fc.dict.BBox[1])
+        let x1 = util.num(fc.dict.BBox[2]); let y1 = util.num(fc.dict.BBox[3])
         (util.fmt_num(x0) ++ " " ++ util.fmt_num(y0) ++ " " ++
          util.fmt_num(x1 - x0) ++ " " ++ util.fmt_num(y1 - y0))
     }

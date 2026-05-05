@@ -31,18 +31,6 @@ import color: .color
 // Operand helper
 // ============================================================
 
-fn _num(op) {
-    if (op == null)        { 0.0 }
-    else if (op is float)  { op }
-    else if (op is int)    { float(op) }
-    else                   { 0.0 }
-}
-
-fn _num_int(op) {
-    if (op is int) { op }
-    else { int(_num(op)) }
-}
-
 // ============================================================
 // Initial state
 // ============================================================
@@ -265,8 +253,8 @@ fn _set_dash(st, arr, phase) {
 
 fn _op_m(st, ops) {
     if (len(ops) >= 2) {
-        let x = _num(ops[0])
-        let y = _num(ops[1])
+        let x = util.num(ops[0])
+        let y = util.num(ops[1])
         let segs = st.segments ++ [{ cmd: "M", x: x, y: y }]
         _set(st, segs, x, y, x, y)
     }
@@ -275,8 +263,8 @@ fn _op_m(st, ops) {
 
 fn _op_l(st, ops) {
     if (len(ops) >= 2) {
-        let x = _num(ops[0])
-        let y = _num(ops[1])
+        let x = util.num(ops[0])
+        let y = util.num(ops[1])
         let segs = st.segments ++ [{ cmd: "L", x: x, y: y }]
         _set(st, segs, x, y, st.start_x, st.start_y)
     }
@@ -285,9 +273,9 @@ fn _op_l(st, ops) {
 
 fn _op_c(st, ops) {
     if (len(ops) >= 6) {
-        let x1 = _num(ops[0]); let y1 = _num(ops[1])
-        let x2 = _num(ops[2]); let y2 = _num(ops[3])
-        let x3 = _num(ops[4]); let y3 = _num(ops[5])
+        let x1 = util.num(ops[0]); let y1 = util.num(ops[1])
+        let x2 = util.num(ops[2]); let y2 = util.num(ops[3])
+        let x3 = util.num(ops[4]); let y3 = util.num(ops[5])
         let segs = st.segments ++ [{ cmd: "C",
                                      x1: x1, y1: y1,
                                      x2: x2, y2: y2,
@@ -300,8 +288,8 @@ fn _op_c(st, ops) {
 // v: first control point = current point; produces a C with cur,cur,x2,y2,x3,y3
 fn _op_v(st, ops) {
     if (len(ops) >= 4) {
-        let x2 = _num(ops[0]); let y2 = _num(ops[1])
-        let x3 = _num(ops[2]); let y3 = _num(ops[3])
+        let x2 = util.num(ops[0]); let y2 = util.num(ops[1])
+        let x3 = util.num(ops[2]); let y3 = util.num(ops[3])
         let segs = st.segments ++ [{ cmd: "C",
                                      x1: st.current_x, y1: st.current_y,
                                      x2: x2, y2: y2,
@@ -314,8 +302,8 @@ fn _op_v(st, ops) {
 // y: second control point = endpoint; C with x1,y1,x3,y3,x3,y3
 fn _op_y(st, ops) {
     if (len(ops) >= 4) {
-        let x1 = _num(ops[0]); let y1 = _num(ops[1])
-        let x3 = _num(ops[2]); let y3 = _num(ops[3])
+        let x1 = util.num(ops[0]); let y1 = util.num(ops[1])
+        let x3 = util.num(ops[2]); let y3 = util.num(ops[3])
         let segs = st.segments ++ [{ cmd: "C",
                                      x1: x1, y1: y1,
                                      x2: x3, y2: y3,
@@ -328,10 +316,10 @@ fn _op_y(st, ops) {
 // re x y w h: append a closed rectangle subpath.
 fn _op_re(st, ops) {
     if (len(ops) >= 4) {
-        let x = _num(ops[0])
-        let y = _num(ops[1])
-        let w = _num(ops[2])
-        let h = _num(ops[3])
+        let x = util.num(ops[0])
+        let y = util.num(ops[1])
+        let w = util.num(ops[2])
+        let h = util.num(ops[3])
         let segs = (st.segments
                     ++ [{ cmd: "M", x: x,     y: y     }]
                     ++ [{ cmd: "L", x: x + w, y: y     }]
@@ -516,27 +504,27 @@ fn _op_n(st)  { { state: _clear(st), emit: [] } }
 // ============================================================
 
 fn _op_w(st, ops) {
-    if (len(ops) >= 1) { _set_line_width(st, _num(ops[0])) } else { st }
+    if (len(ops) >= 1) { _set_line_width(st, util.num(ops[0])) } else { st }
 }
 
 fn _op_J(st, ops) {
-    if (len(ops) >= 1) { _set_line_cap(st, _num_int(ops[0])) } else { st }
+    if (len(ops) >= 1) { _set_line_cap(st, util.int_or(ops[0], 0)) } else { st }
 }
 
 fn _op_j(st, ops) {
-    if (len(ops) >= 1) { _set_line_join(st, _num_int(ops[0])) } else { st }
+    if (len(ops) >= 1) { _set_line_join(st, util.int_or(ops[0], 0)) } else { st }
 }
 
 fn _op_M(st, ops) {
-    if (len(ops) >= 1) { _set_miter(st, _num(ops[0])) } else { st }
+    if (len(ops) >= 1) { _set_miter(st, util.num(ops[0])) } else { st }
 }
 
 // d [ array ] phase
 fn _op_d(st, ops) {
     if (len(ops) >= 2 and ops[0] is map and ops[0].kind == "array") {
         let raw = ops[0].value
-        let nums = (for (n in raw) _num(n))
-        _set_dash(st, nums, _num(ops[1]))
+        let nums = (for (n in raw) util.num(n))
+        _set_dash(st, nums, util.num(ops[1]))
     }
     else { st }
 }

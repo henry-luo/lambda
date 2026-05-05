@@ -19,10 +19,6 @@ import util:    .util
 import resolve: .resolve
 import color:   .color
 
-fn _name_of(op) {
-    if (op is map and op.kind == "name") { op.value } else { null }
-}
-
 fn _shading_dict(pdf, page, name) {
     let res = resolve.page_resources(pdf, page)
     let table = if (res and res.Shading) resolve.deref(pdf, res.Shading)
@@ -213,7 +209,7 @@ fn _emit_radial(pdf, d, ctm, id, page_w, page_h) {
 // SVG id; the caller must pass distinct values per page. Returns
 // { defs, emit } both possibly empty.
 pub fn from_sh_op(pdf, page, ctm, ops, page_w, page_h, ctr) {
-    let nm = if (len(ops) >= 1) _name_of(ops[0]) else null
+    let nm = if (len(ops) >= 1) util.name_of(ops[0]) else null
     if (nm == null) { { defs: [], emit: [] } }
     else {
         let d = _shading_dict(pdf, page, nm)

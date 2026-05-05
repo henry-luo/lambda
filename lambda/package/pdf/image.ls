@@ -83,17 +83,10 @@ fn _stream_data(content, dict) {
     else { "" }
 }
 
-fn _num(v) {
-    if (v == null)        { 0.0 }
-    else if (v is float)  { v }
-    else if (v is int)    { float(v) }
-    else                  { 0.0 }
-}
-
 fn _form_matrix(m) {
     if (m is array and len(m) == 6) {
-        [_num(m[0]), _num(m[1]), _num(m[2]),
-         _num(m[3]), _num(m[4]), _num(m[5])]
+        [util.num(m[0]), util.num(m[1]), util.num(m[2]),
+         util.num(m[3]), util.num(m[4]), util.num(m[5])]
     }
     else { util.IDENTITY }
 }
@@ -179,9 +172,9 @@ fn _is_raw_xobject(dict, data) {
     if (dict == null or data == null or data == "") { false }
     else if (_is_passthrough_filter(dict.Filter)) { false }
     else {
-        let w = _int(dict.Width, 0)
-        let h = _int(dict.Height, 0)
-        let bpc = _int(dict.BitsPerComponent, 8)
+        let w = util.int_or(dict.Width, 0)
+        let h = util.int_or(dict.Height, 0)
+        let bpc = util.int_or(dict.BitsPerComponent, 8)
         let cs = if (dict.ColorSpace != null) { dict.ColorSpace } else { "DeviceRGB" }
         let ncomp = _inline_ncomp(cs)
         let packed = ((bpc == 1) or (bpc == 4) or _is_indexed(cs))
@@ -201,7 +194,7 @@ fn _xobject_inline_info(dict, data) {
             { key: "W", value: dict.Width },
             { key: "H", value: dict.Height },
             { key: "CS", value: cs },
-            { key: "BPC", value: _int(dict.BitsPerComponent, 8) }
+            { key: "BPC", value: util.int_or(dict.BitsPerComponent, 8) }
         ],
         data: data
     }
@@ -257,21 +250,9 @@ fn _placeholder_inline() {
     [elem]
 }
 
-fn _int(v, fallback) {
-    if (v is int) { v }
-    else if (v is float) { int(v) }
-    else { fallback }
-}
-
-fn _name(v) {
-    if (v is map and v.kind == "name") { v.value }
-    else if (v is string) { v }
-    else { null }
-}
-
 fn _space_type(cs) {
-    if (cs is array and len(cs) >= 1) { _name(cs[0]) }
-    else { _name(cs) }
+    if (cs is array and len(cs) >= 1) { util.name_of(cs[0]) }
+    else { util.name_of(cs) }
 }
 
 fn _is_indexed(cs) {
@@ -307,11 +288,6 @@ fn _inline_ncomp(cs) {
     else { 0 }
 }
 
-fn _byte_at(s, i) {
-    if (s == null or i < 0 or i >= len(s)) { 0 }
-    else { ord(s[i]) }
-}
-
 fn _div_int(a, b) {
     int(float(a) / float(b))
 }
@@ -325,10 +301,10 @@ fn _rgb_int(r, g, b) {
 }
 
 fn _cmyk_pixel_fill(data, off) {
-    let c = float(_byte_at(data, off)) / 255.0
-    let m = float(_byte_at(data, off + 1)) / 255.0
-    let y = float(_byte_at(data, off + 2)) / 255.0
-    let k = float(_byte_at(data, off + 3)) / 255.0
+    let c = float(util.byte_at(data, off)) / 255.0
+    let m = float(util.byte_at(data, off + 1)) / 255.0
+    let y = float(util.byte_at(data, off + 2)) / 255.0
+    let k = float(util.byte_at(data, off + 3)) / 255.0
     let r = int((1.0 - c) * (1.0 - k) * 255.0)
     let g = int((1.0 - m) * (1.0 - k) * 255.0)
     let b = int((1.0 - y) * (1.0 - k) * 255.0)
@@ -340,24 +316,24 @@ fn _gray4_pixel_fill(data, w, pixel_index) {
     let x = pixel_index - (y * w)
     let byte_idx = (y * _row_bytes(w, 1, 4)) + _div_int(x, 2)
     let high = ((x - (_div_int(x, 2) * 2)) == 0)
-    let raw = _byte_at(data, byte_idx)
+    let raw = util.byte_at(data, byte_idx)
     let val = if (high) { shr(raw, 4) } else { band(raw, 15) }
     let g = val * 17
     _rgb_int(g, g, g)
 }
 
 fn _indexed_index(data, bpc, pixel_index) {
-    if (bpc == 8) { _byte_at(data, pixel_index) }
+    if (bpc == 8) { util.byte_at(data, pixel_index) }
     else if (bpc == 4) {
         let byte_idx = _div_int(pixel_index, 2)
         let high = ((pixel_index - (_div_int(pixel_index, 2) * 2)) == 0)
-        let raw = _byte_at(data, byte_idx)
+        let raw = util.byte_at(data, byte_idx)
         if (high) { shr(raw, 4) } else { band(raw, 15) }
     }
     else if (bpc == 1) {
         let byte_idx = _div_int(pixel_index, 8)
         let bit_off = 7 - (pixel_index - (_div_int(pixel_index, 8) * 8))
-        band(shr(_byte_at(data, byte_idx), bit_off), 1)
+        band(shr(util.byte_at(data, byte_idx), bit_off), 1)
     }
     else { 0 }
 }
@@ -373,14 +349,14 @@ fn _indexed_pixel_fill(data, bpc, pixel_index, cs) {
         let off = idx * ncomp
         let lookup = cs[3]
         if (ncomp == 1) {
-            let g = _byte_at(lookup, off)
+            let g = util.byte_at(lookup, off)
             _rgb_int(g, g, g)
         }
         else if (ncomp == 4) {
             _cmyk_pixel_fill(lookup, off)
         }
         else {
-            _rgb_int(_byte_at(lookup, off), _byte_at(lookup, off + 1), _byte_at(lookup, off + 2))
+            _rgb_int(util.byte_at(lookup, off), util.byte_at(lookup, off + 1), util.byte_at(lookup, off + 2))
         }
     }
 }
@@ -394,7 +370,7 @@ fn _inline_pixel_fill(data, ncomp, bpc, w, pixel_index, cs) {
         let x = pixel_index - (y * w)
         let byte_idx = (y * _row_bytes(w, ncomp, bpc)) + _div_int(x, 8)
         let bit_off = 7 - (x - (_div_int(x, 8) * 8))
-        let val = band(shr(_byte_at(data, byte_idx), bit_off), 1)
+        let val = band(shr(util.byte_at(data, byte_idx), bit_off), 1)
         if (val == 1) { _rgb_int(255, 255, 255) } else { _rgb_int(0, 0, 0) }
     }
     else if (bpc == 4) {
@@ -402,7 +378,7 @@ fn _inline_pixel_fill(data, ncomp, bpc, w, pixel_index, cs) {
     }
     else if (ncomp == 1) {
         let off = pixel_index * ncomp
-        let g = _byte_at(data, off)
+        let g = util.byte_at(data, off)
         _rgb_int(g, g, g)
     }
     else if (ncomp == 4) {
@@ -410,7 +386,7 @@ fn _inline_pixel_fill(data, ncomp, bpc, w, pixel_index, cs) {
     }
     else {
         let off = pixel_index * ncomp
-        _rgb_int(_byte_at(data, off), _byte_at(data, off + 1), _byte_at(data, off + 2))
+        _rgb_int(util.byte_at(data, off), util.byte_at(data, off + 1), util.byte_at(data, off + 2))
     }
 }
 
@@ -425,9 +401,9 @@ pn _emit_inline_pixels(info) {
         let dn = len(info.dict)
         while (di < dn) {
             let p = info.dict[di]
-            if ((p.key == "W") or (p.key == "Width")) { w = _int(p.value, 0) }
-            else if ((p.key == "H") or (p.key == "Height")) { h = _int(p.value, 0) }
-            else if ((p.key == "BPC") or (p.key == "BitsPerComponent")) { bpc = _int(p.value, 8) }
+            if ((p.key == "W") or (p.key == "Width")) { w = util.int_or(p.value, 0) }
+            else if ((p.key == "H") or (p.key == "Height")) { h = util.int_or(p.value, 0) }
+            else if ((p.key == "BPC") or (p.key == "BitsPerComponent")) { bpc = util.int_or(p.value, 8) }
             else if ((p.key == "CS") or (p.key == "ColorSpace")) {
                 cs = p.value
                 ncomp = _inline_ncomp(p.value)

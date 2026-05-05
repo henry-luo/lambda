@@ -25,13 +25,6 @@ import font:  .font
 // Operand helpers
 // ============================================================
 
-fn _num(op) {
-    if (op == null)        { 0.0 }
-    else if (op is float)  { op }
-    else if (op is int)    { float(op) }
-    else                   { 0.0 }
-}
-
 fn _decode_operand(op, font_info) {
     if (op == null) { "" }
     else if (op is map and op.kind == "string") {
@@ -356,41 +349,19 @@ fn _text_width(st, ctm, txt) {
     _text_width_units(st.font_info, txt) / 1000.0 * _effective_font_size(st, ctm)
 }
 
-fn _hex_digit_value(c: string) {
-    let k = ord(c)
-    if ((k >= 48) and (k <= 57)) { k - 48 }
-    else if ((k >= 65) and (k <= 70)) { k - 55 }
-    else if ((k >= 97) and (k <= 102)) { k - 87 }
-    else { 0 }
-}
-
-fn _hex_code_range(hex: string, i: int, endp: int, acc: int) {
-    if (i >= endp or i >= len(hex)) { acc }
-    else { _hex_code_range(hex, i + 1, endp, (acc * 16) + _hex_digit_value(hex[i])) }
-}
-
-fn _hex_code_at(hex: string, i: int, digits: int) {
-    _hex_code_range(hex, i, i + digits, 0)
-}
-
-fn _hex_byte_at(hex: string, i: int) {
-    if (i + 1 < len(hex)) { _hex_code_at(hex, i, 2) }
-    else { _hex_digit_value(hex[i]) * 16 }
-}
-
 fn _hex_codes_at(hex: string, i: int, cmap) {
     let n = len(hex)
     if (i >= n) { [] }
     else {
-        let c8 = if (i + 8 <= n) _hex_code_at(hex, i, 8) else -1
+        let c8 = if (i + 8 <= n) util.hex_code_at(hex, i, 8) else -1
         if (c8 >= 0 and cmap and cmap[string(c8)]) { [c8] ++ _hex_codes_at(hex, i + 8, cmap) }
         else {
-            let c6 = if (i + 6 <= n) _hex_code_at(hex, i, 6) else -1
+            let c6 = if (i + 6 <= n) util.hex_code_at(hex, i, 6) else -1
             if (c6 >= 0 and cmap and cmap[string(c6)]) { [c6] ++ _hex_codes_at(hex, i + 6, cmap) }
             else {
-                let c4 = if (i + 4 <= n) _hex_code_at(hex, i, 4) else -1
+                let c4 = if (i + 4 <= n) util.hex_code_at(hex, i, 4) else -1
                 if (c4 >= 0 and cmap and cmap[string(c4)]) { [c4] ++ _hex_codes_at(hex, i + 4, cmap) }
-                else { [_hex_byte_at(hex, i)] ++ _hex_codes_at(hex, i + 2, cmap) }
+                else { [util.hex_byte_at(hex, i)] ++ _hex_codes_at(hex, i + 2, cmap) }
             }
         }
     }
@@ -412,7 +383,7 @@ fn _text_advance_for_operand(st, ctm, op) {
 }
 
 fn _tj_adjustment(st, ctm, v) {
-    (0.0 - _num(v)) / 1000.0 * _effective_font_size(st, ctm) * (st.hor_scale / 100.0)
+    (0.0 - util.num(v)) / 1000.0 * _effective_font_size(st, ctm) * (st.hor_scale / 100.0)
 }
 
 fn _tj_text(op, font_info) {
@@ -431,28 +402,28 @@ fn _op_Tf(st, ops) {
     let n = len(ops)
     let op0 = if (n >= 1) ops[0] else null
     let fname = if (op0 is map and op0.kind == "name") op0.value else st.font_name
-    let fsize = if (n >= 2) _num(ops[1]) else st.font_size
+    let fsize = if (n >= 2) util.num(ops[1]) else st.font_size
     { state: _set_font(st, fname, fsize), emit: null }
 }
 
 fn _op_Tm(st, ops) {
     if (len(ops) >= 6) {
-        let m = [_num(ops[0]), _num(ops[1]), _num(ops[2]),
-                 _num(ops[3]), _num(ops[4]), _num(ops[5])]
+        let m = [util.num(ops[0]), util.num(ops[1]), util.num(ops[2]),
+             util.num(ops[3]), util.num(ops[4]), util.num(ops[5])]
         { state: _set_tm(st, m), emit: null }
     }
     else { { state: st, emit: null } }
 }
 
 fn _op_Td(st, ops) {
-    if (len(ops) >= 2) { { state: _move(st, _num(ops[0]), _num(ops[1])), emit: null } }
+    if (len(ops) >= 2) { { state: _move(st, util.num(ops[0]), util.num(ops[1])), emit: null } }
     else               { { state: st, emit: null } }
 }
 
 fn _op_TD(st, ops) {
     if (len(ops) >= 2) {
-        let tx = _num(ops[0])
-        let ty = _num(ops[1])
+        let tx = util.num(ops[0])
+        let ty = util.num(ops[1])
         { state: _move(_set_leading(st, -ty), tx, ty), emit: null }
     }
     else { { state: st, emit: null } }
@@ -461,31 +432,31 @@ fn _op_TD(st, ops) {
 fn _op_Tstar(st) { { state: _move(st, 0.0, -st.leading), emit: null } }
 
 fn _op_TL(st, ops) {
-    if (len(ops) >= 1) { { state: _set_leading(st, _num(ops[0])), emit: null } }
+    if (len(ops) >= 1) { { state: _set_leading(st, util.num(ops[0])), emit: null } }
     else               { { state: st, emit: null } }
 }
 
 // Tc <num>: character spacing (additional space inserted between glyphs).
 fn _op_Tc(st, ops) {
-    if (len(ops) >= 1) { { state: set_char_space(st, _num(ops[0])), emit: null } }
+    if (len(ops) >= 1) { { state: set_char_space(st, util.num(ops[0])), emit: null } }
     else               { { state: st, emit: null } }
 }
 
 // Tw <num>: word spacing (additional space inserted at each 0x20 byte).
 fn _op_Tw(st, ops) {
-    if (len(ops) >= 1) { { state: set_word_space(st, _num(ops[0])), emit: null } }
+    if (len(ops) >= 1) { { state: set_word_space(st, util.num(ops[0])), emit: null } }
     else               { { state: st, emit: null } }
 }
 
 // Tz <pct>: horizontal scaling (in percent, 100 = identity).
 fn _op_Tz(st, ops) {
-    if (len(ops) >= 1) { { state: set_hor_scale(st, _num(ops[0])), emit: null } }
+    if (len(ops) >= 1) { { state: set_hor_scale(st, util.num(ops[0])), emit: null } }
     else               { { state: st, emit: null } }
 }
 
 // Ts <num>: text rise (positive shifts baseline up in PDF user space).
 fn _op_Ts(st, ops) {
-    if (len(ops) >= 1) { { state: set_rise(st, _num(ops[0])), emit: null } }
+    if (len(ops) >= 1) { { state: set_rise(st, util.num(ops[0])), emit: null } }
     else               { { state: st, emit: null } }
 }
 
@@ -534,7 +505,7 @@ pn _op_TJ(st, ctm, ops, page_h) {
                 }
             }
             else if (it is int or it is float) {
-                let adj = _num(it)
+                let adj = util.num(it)
                 if (adj < -600.0 and has_seg) {
                     let part = _emit_one(seg_st, ctm, page_h, seg_text)
                     var k = 0
@@ -576,7 +547,7 @@ fn _op_quote(st, ctm, ops, page_h) {
 
 fn _op_dquote(st, ctm, ops, page_h) {
     if (len(ops) >= 3) {
-        let s0 = set_char_space(set_word_space(st, _num(ops[0])), _num(ops[1]))
+        let s0 = set_char_space(set_word_space(st, util.num(ops[0])), util.num(ops[1]))
         let s1 = _move(s0, 0.0, -s0.leading)
         let txt = _decode_operand(ops[2], s1.font_info)
         let s2 = if (txt == "") { s1 } else { _advance_text(s1, _text_advance_for_operand(s1, ctm, ops[2])) }

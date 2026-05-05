@@ -14,6 +14,7 @@
 //     by composite (CID) fonts.
 
 import resolve: lambda.package.pdf.resolve
+import util:    lambda.package.pdf.util
 
 // ============================================================
 // Standard 14 mapping
@@ -183,12 +184,6 @@ fn _encoding_or_null(dict) {
     else { null }
 }
 
-fn _int_or(v, fallback) {
-    if (v is int) { v }
-    else if (v is float) { int(v) }
-    else { fallback }
-}
-
 fn _widths_or_null(pdf, dict) {
     if (dict.Widths == null) { null }
     else {
@@ -198,11 +193,11 @@ fn _widths_or_null(pdf, dict) {
 }
 
 fn _first_char_or_zero(dict) {
-    _int_or(dict.FirstChar, 0)
+    util.int_or(dict.FirstChar, 0)
 }
 
 fn _last_char_or_zero(dict) {
-    _int_or(dict.LastChar, 0)
+    util.int_or(dict.LastChar, 0)
 }
 
 fn _implicit_encoding(stripped: string, explicit) {
@@ -392,61 +387,14 @@ pub pn resolve_font(pdf, page, name: string) {
 // support 2-hex-digit single-byte codes only — composite fonts with
 // 4-digit CIDs need multi-byte CMap traversal which we'll add later.
 
-fn _hex_val(c: string) {
-    let k = ord(c)
-    if ((k >= 48) and (k <= 57))     { k - 48 }
-    else if ((k >= 65) and (k <= 70)) { k - 55 }
-    else if ((k >= 97) and (k <= 102)) { k - 87 }
-    else { 0 }
-}
-
-fn _is_hex_digit(c: string) {
-    let k = ord(c)
-    ((k >= 48) and (k <= 57)) or ((k >= 65) and (k <= 70)) or ((k >= 97) and (k <= 102))
-}
-
-fn _clean_hex(hex: string) {
-    if (len(hex) == 0) { "" }
-    else {
-        let parts = for (i in 0 to (len(hex) - 1) where _is_hex_digit(hex[i])) hex[i]
-        parts | join("")
-    }
-}
-
-fn _hex_code_at(hex: string, i: int, digits: int) {
-    if (digits == 8) {
-        (_hex_val(hex[i]) * 268435456) + (_hex_val(hex[i + 1]) * 16777216) +
-        (_hex_val(hex[i + 2]) * 1048576) + (_hex_val(hex[i + 3]) * 65536) +
-        (_hex_val(hex[i + 4]) * 4096) + (_hex_val(hex[i + 5]) * 256) +
-        (_hex_val(hex[i + 6]) * 16) + _hex_val(hex[i + 7])
-    }
-    else if (digits == 6) {
-        (_hex_val(hex[i]) * 1048576) + (_hex_val(hex[i + 1]) * 65536) +
-        (_hex_val(hex[i + 2]) * 4096) + (_hex_val(hex[i + 3]) * 256) +
-        (_hex_val(hex[i + 4]) * 16) + _hex_val(hex[i + 5])
-    }
-    else if (digits == 4) {
-        (_hex_val(hex[i]) * 4096) + (_hex_val(hex[i + 1]) * 256) +
-        (_hex_val(hex[i + 2]) * 16) + _hex_val(hex[i + 3])
-    }
-    else {
-        (_hex_val(hex[i]) * 16) + _hex_val(hex[i + 1])
-    }
-}
-
-fn _byte_code_at(hex: string, i: int) {
-    if (i + 1 < len(hex)) { _hex_code_at(hex, i, 2) }
-    else { _hex_val(hex[i]) * 16 }
-}
-
 // Convert a hex string (without delimiters) to a list of byte codes.
 fn _hex_to_codes(hex: string) {
-    let clean = _clean_hex(hex)
+    let clean = util.clean_hex(hex)
     let n = len(clean)
     let pairs = (n + 1) / 2
     if (pairs == 0) { [] }
     else {
-        for (k in 0 to (pairs - 1)) _byte_code_at(clean, k * 2)
+        for (k in 0 to (pairs - 1)) util.hex_byte_at(clean, k * 2)
     }
 }
 
@@ -601,19 +549,19 @@ fn _decode_hex_cmap_at(hex: string, i: int, cmap, encoding) {
     let n = len(hex)
     if (i >= n) { "" }
     else {
-        let c8 = if (i + 8 <= n) _hex_code_at(hex, i, 8) else -1
+        let c8 = if (i + 8 <= n) util.hex_code_at(hex, i, 8) else -1
         let h8 = if (c8 >= 0 and cmap and cmap[string(c8)]) cmap[string(c8)] else null
         if (h8 != null) { _decode_unicode_string(h8) ++ _decode_hex_cmap_at(hex, i + 8, cmap, encoding) }
         else {
-            let c6 = if (i + 6 <= n) _hex_code_at(hex, i, 6) else -1
+            let c6 = if (i + 6 <= n) util.hex_code_at(hex, i, 6) else -1
             let h6 = if (c6 >= 0 and cmap and cmap[string(c6)]) cmap[string(c6)] else null
             if (h6 != null) { _decode_unicode_string(h6) ++ _decode_hex_cmap_at(hex, i + 6, cmap, encoding) }
             else {
-                let c4 = if (i + 4 <= n) _hex_code_at(hex, i, 4) else -1
+                let c4 = if (i + 4 <= n) util.hex_code_at(hex, i, 4) else -1
                 let h4 = if (c4 >= 0 and cmap and cmap[string(c4)]) cmap[string(c4)] else null
                 if (h4 != null) { _decode_unicode_string(h4) ++ _decode_hex_cmap_at(hex, i + 4, cmap, encoding) }
                 else {
-                    let c2 = _byte_code_at(hex, i)
+                    let c2 = util.hex_byte_at(hex, i)
                     _decode_code_with_encoding(c2, cmap, encoding) ++ _decode_hex_cmap_at(hex, i + 2, cmap, encoding)
                 }
             }
@@ -623,7 +571,7 @@ fn _decode_hex_cmap_at(hex: string, i: int, cmap, encoding) {
 
 // Decode a Tj/TJ hex operand to a unicode string.
 pub fn decode_hex(hex: string, to_unicode) {
-    let clean = _clean_hex(hex)
+    let clean = util.clean_hex(hex)
     if (to_unicode != null) { _decode_hex_cmap_at(clean, 0, to_unicode, null) }
     else {
         let codes = _hex_to_codes(clean)
@@ -635,7 +583,7 @@ pub fn decode_hex(hex: string, to_unicode) {
 pub fn decode_hex_with_font(hex: string, font_info) {
     let cmap = if (font_info) font_info.to_unicode else null
     let enc = if (font_info) font_info.encoding else null
-    let clean = _clean_hex(hex)
+    let clean = util.clean_hex(hex)
     if (cmap != null) { _decode_hex_cmap_at(clean, 0, cmap, enc) }
     else {
         let codes = _hex_to_codes(clean)
