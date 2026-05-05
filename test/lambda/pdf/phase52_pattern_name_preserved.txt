@@ -1,0 +1,1 @@
+{ count: 2, has_gradient: true, has_pattern_fill: true, no_black_rect: true}

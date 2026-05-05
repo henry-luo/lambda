@@ -280,6 +280,9 @@ pub fn from_ops_in_space(pdf, page, active_space, ops) {
         // simple grayscale tint fallback.
         if (len(nums) >= 1) { gray(1.0 - util.num(nums[0])) } else { BLACK }
     }
+    else if (t == "Pattern") {
+        if (len(nums) >= 3) { _from_component_count(nums, 3) } else { BLACK }
+    }
     else {
         _from_component_count(nums, 3)
     }
