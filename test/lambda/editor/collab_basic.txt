@@ -1,0 +1,36 @@
+"mapping size:"
+true
+"mapped offset:"
+true
+"mapped path:"
+true
+"boundary:"
+true
+"rebase kept:"
+true
+"rebase dropped:"
+true
+"rs from:"
+true
+"rs to:"
+true
+"rs text:"
+true
+"final text:"
+true
+"r2 kept:"
+true
+"r2 path[0]:"
+true
+"r2 path[1]:"
+true
+"r2 mark:"
+true
+"r3 total:"
+true
+"ser kind:"
+true
+"ser text:"
+true
+"ser apply:"
+true

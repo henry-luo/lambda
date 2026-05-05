@@ -5,6 +5,7 @@
 #include "text_control.hpp"
 #include "text_edit.hpp"
 #include "context_menu.hpp"
+#include "clipboard.hpp"
 #include "browsing_session.h"
 #include "rdt_video.h"
 #include "webview.h"
@@ -21,6 +22,8 @@
 #include "../lambda/render_map.h"
 #include "../lambda/lambda.h"         // Context (input_context)
 #include "../lambda/lambda-data.hpp"  // EvalContext
+#include "source_pos_bridge.hpp"      // SourcePos / selection bridge for editor handlers
+#include "dom_range.hpp"              // DomSelection / DomBoundary
 #include "../lambda/transpiler.hpp"   // Runtime (heap, nursery, name_pool)
 #include "../lambda/mark_builder.hpp" // MarkBuilder for event object construction
 #include "../lambda/js/js_dom.h"      // js_dom_set_document for HTML event handlers
@@ -62,6 +65,7 @@ void scrollpane_mouse_up(EventContext* evcon, ViewBlock* block);
 void scrollpane_mouse_down(EventContext* evcon, ViewBlock* block);
 void scrollpane_drag(EventContext* evcon, ViewBlock* block);
 void update_scroller(ViewBlock* block, float content_width, float content_height);
+void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event);
 
 void target_children(EventContext* evcon, View* view) {
     do {
@@ -433,6 +437,176 @@ static const char* key_code_to_name(int key) {
     }
 }
 
+typedef enum InputIntentType {
+    INPUT_INTENT_NONE = 0,
+    INPUT_INTENT_INSERT_TEXT,
+    INPUT_INTENT_INSERT_PARAGRAPH,
+    INPUT_INTENT_INSERT_LINE_BREAK,
+    INPUT_INTENT_DELETE_CONTENT_BACKWARD,
+    INPUT_INTENT_DELETE_CONTENT_FORWARD,
+    INPUT_INTENT_DELETE_WORD_BACKWARD,
+    INPUT_INTENT_INSERT_FROM_PASTE,
+    INPUT_INTENT_COMPOSITION_START,
+    INPUT_INTENT_INSERT_COMPOSITION_TEXT,
+    INPUT_INTENT_INSERT_FROM_COMPOSITION,
+    INPUT_INTENT_DELETE_COMPOSITION_TEXT,
+    INPUT_INTENT_FORMAT_BOLD,
+    INPUT_INTENT_FORMAT_ITALIC,
+    INPUT_INTENT_FORMAT_UNDERLINE,
+    INPUT_INTENT_HISTORY_UNDO,
+    INPUT_INTENT_HISTORY_REDO,
+} InputIntentType;
+
+typedef struct InputIntent {
+    InputIntentType type;
+    const char* data;
+    const char* html_data;
+    const char* data_mime;
+    int key;
+    int mods;
+    bool is_composing;
+    uint32_t composition_caret;
+} InputIntent;
+
+static const char* input_intent_type_name(InputIntentType type) {
+    switch (type) {
+        case INPUT_INTENT_INSERT_TEXT:             return "insertText";
+        case INPUT_INTENT_INSERT_PARAGRAPH:        return "insertParagraph";
+        case INPUT_INTENT_INSERT_LINE_BREAK:       return "insertLineBreak";
+        case INPUT_INTENT_DELETE_CONTENT_BACKWARD: return "deleteContentBackward";
+        case INPUT_INTENT_DELETE_CONTENT_FORWARD:  return "deleteContentForward";
+        case INPUT_INTENT_DELETE_WORD_BACKWARD:    return "deleteWordBackward";
+        case INPUT_INTENT_INSERT_FROM_PASTE:       return "insertFromPaste";
+        case INPUT_INTENT_COMPOSITION_START:       return "compositionStart";
+        case INPUT_INTENT_INSERT_COMPOSITION_TEXT: return "insertCompositionText";
+        case INPUT_INTENT_INSERT_FROM_COMPOSITION: return "insertFromComposition";
+        case INPUT_INTENT_DELETE_COMPOSITION_TEXT: return "deleteCompositionText";
+        case INPUT_INTENT_FORMAT_BOLD:             return "formatBold";
+        case INPUT_INTENT_FORMAT_ITALIC:           return "formatItalic";
+        case INPUT_INTENT_FORMAT_UNDERLINE:        return "formatUnderline";
+        case INPUT_INTENT_HISTORY_UNDO:            return "historyUndo";
+        case INPUT_INTENT_HISTORY_REDO:            return "historyRedo";
+        default:                                   return "";
+    }
+}
+
+static bool input_intent_from_key_event(const KeyEvent* key_event, InputIntent* out) {
+    if (!key_event || !out) return false;
+    memset(out, 0, sizeof(*out));
+    out->key = key_event->key;
+    out->mods = key_event->mods;
+
+    bool shift = (key_event->mods & RDT_MOD_SHIFT) != 0;
+    bool alt = (key_event->mods & RDT_MOD_ALT) != 0;
+    bool ctrl = (key_event->mods & RDT_MOD_CTRL) != 0;
+    bool cmd = (key_event->mods & RDT_MOD_SUPER) != 0;
+    bool primary = cmd || ctrl;
+
+    if (primary && key_event->key == RDT_KEY_Z) {
+        out->type = shift ? INPUT_INTENT_HISTORY_REDO : INPUT_INTENT_HISTORY_UNDO;
+        return true;
+    }
+    if (primary && key_event->key == RDT_KEY_Y) {
+        out->type = INPUT_INTENT_HISTORY_REDO;
+        return true;
+    }
+    if (primary && key_event->key == RDT_KEY_B) {
+        out->type = INPUT_INTENT_FORMAT_BOLD;
+        return true;
+    }
+    if (primary && key_event->key == RDT_KEY_I) {
+        out->type = INPUT_INTENT_FORMAT_ITALIC;
+        return true;
+    }
+    if (primary && key_event->key == RDT_KEY_U) {
+        out->type = INPUT_INTENT_FORMAT_UNDERLINE;
+        return true;
+    }
+    if (primary && key_event->key == RDT_KEY_V) {
+        const char* clip = clipboard_get_text();
+        const char* html = clipboard_store_read_mime("text/html");
+        if ((!clip || !clip[0]) && (!html || !html[0])) return false;
+        out->type = INPUT_INTENT_INSERT_FROM_PASTE;
+        out->data = clip ? clip : "";
+        out->html_data = html;
+        out->data_mime = (html && html[0]) ? "text/html" : "text/plain";
+        return true;
+    }
+    if (key_event->key == RDT_KEY_ENTER) {
+        out->type = shift ? INPUT_INTENT_INSERT_LINE_BREAK : INPUT_INTENT_INSERT_PARAGRAPH;
+        return true;
+    }
+    if (key_event->key == RDT_KEY_BACKSPACE) {
+        out->type = (alt || ctrl) ? INPUT_INTENT_DELETE_WORD_BACKWARD
+                                  : INPUT_INTENT_DELETE_CONTENT_BACKWARD;
+        return true;
+    }
+    if (key_event->key == RDT_KEY_DELETE) {
+        out->type = INPUT_INTENT_DELETE_CONTENT_FORWARD;
+        return true;
+    }
+
+    return false;
+}
+
+static bool input_intent_from_text_input(uint32_t codepoint, InputIntent* out,
+                                         char* utf8_buf, size_t utf8_buf_size) {
+    if (!out || !utf8_buf || utf8_buf_size < 5 || codepoint == 0) return false;
+    memset(out, 0, sizeof(*out));
+    size_t utf8_len = utf8_encode_z(codepoint, utf8_buf);
+    if (utf8_len == 0) return false;
+    out->type = INPUT_INTENT_INSERT_TEXT;
+    out->data = utf8_buf;
+    return true;
+}
+
+static bool input_intent_from_composition_event(const CompositionEvent* comp_event,
+                                                InputIntent* out) {
+    if (!comp_event || !out) return false;
+    memset(out, 0, sizeof(*out));
+    out->data = comp_event->text ? comp_event->text : "";
+    out->composition_caret = comp_event->preedit_caret;
+
+    if (comp_event->type == RDT_EVENT_COMPOSITION_START) {
+        out->type = INPUT_INTENT_COMPOSITION_START;
+        out->is_composing = true;
+        return true;
+    }
+    if (comp_event->type == RDT_EVENT_COMPOSITION_UPDATE) {
+        out->type = INPUT_INTENT_INSERT_COMPOSITION_TEXT;
+        out->is_composing = true;
+        return true;
+    }
+    if (comp_event->type == RDT_EVENT_COMPOSITION_END) {
+        out->type = comp_event->text && comp_event->text[0]
+            ? INPUT_INTENT_INSERT_FROM_COMPOSITION
+            : INPUT_INTENT_DELETE_COMPOSITION_TEXT;
+        out->is_composing = false;
+        return true;
+    }
+    return false;
+}
+
+static DomElement* rich_editable_from_target(View* target) {
+    if (!target) return nullptr;
+    DomNode* node = (DomNode*)target;
+    while (node && node->node_type != DOM_NODE_ELEMENT) node = node->parent;
+    if (node && node->node_type == DOM_NODE_ELEMENT) {
+        DomElement* first = (DomElement*)node;
+        if (tc_is_text_control(first)) return nullptr;
+    }
+    while (node) {
+        if (node->node_type == DOM_NODE_ELEMENT) {
+            DomElement* elem = (DomElement*)node;
+            if (elem->has_attribute("data-editable")) return elem;
+            const char* ce = elem->get_attribute("contenteditable");
+            if (ce && strcmp(ce, "false") != 0) return elem;
+        }
+        node = node->parent;
+    }
+    return nullptr;
+}
+
 /**
  * Build a Lambda map Item representing an event object.
  * Contains: {type, target_class, target_tag, x, y}
@@ -441,12 +615,53 @@ static const char* key_code_to_name(int key) {
  * Uses doc->input (created during load_lambda_script_doc) for allocation.
  */
 static Item build_lambda_event_map(DomDocument* doc, View* target,
-                                   const char* event_name, EventContext* evcon) {
+                                   const char* event_name, EventContext* evcon,
+                                   const InputIntent* intent = nullptr) {
     if (!doc || !doc->input) return ItemNull;
 
     MarkBuilder builder(doc->input);
     MapBuilder mb = builder.map();
     mb.put("type", event_name);
+
+    if (intent && intent->type != INPUT_INTENT_NONE) {
+        const char* input_type = input_intent_type_name(intent->type);
+        mb.put("input_type", input_type);
+        if (intent->data) mb.put("data", intent->data);
+        else mb.putNull("data");
+        if (intent->data_mime) mb.put("mime", intent->data_mime);
+        else mb.putNull("mime");
+        if (intent->html_data) {
+            char* sanitized = clipboard_store_sanitize(builder.arena(), "text/html", intent->html_data);
+            if (sanitized) mb.put("html", sanitized);
+            else mb.putNull("html");
+        } else {
+            mb.putNull("html");
+        }
+
+        MapBuilder im = builder.map();
+        im.put("input_type", input_type);
+        if (intent->data) im.put("data", intent->data);
+        else im.putNull("data");
+        if (intent->data_mime) im.put("mime", intent->data_mime);
+        else im.putNull("mime");
+        if (intent->html_data) {
+            char* sanitized = clipboard_store_sanitize(builder.arena(), "text/html", intent->html_data);
+            if (sanitized) im.put("html", sanitized);
+            else im.putNull("html");
+        } else {
+            im.putNull("html");
+        }
+        im.put("key", key_code_to_name(intent->key));
+        im.put("shift", (intent->mods & RDT_MOD_SHIFT) != 0);
+        im.put("ctrl",  (intent->mods & RDT_MOD_CTRL)  != 0);
+        im.put("alt",   (intent->mods & RDT_MOD_ALT)   != 0);
+        im.put("meta",  (intent->mods & RDT_MOD_SUPER) != 0);
+        im.put("is_composing", intent->is_composing);
+        im.put("composition_caret", (int64_t)intent->composition_caret);
+        mb.put("input_intent", im.final());
+        mb.put("is_composing", intent->is_composing);
+        mb.put("composition_caret", (int64_t)intent->composition_caret);
+    }
 
     // extract target element's class and tag from the innermost DomElement target
     DomNode* tgt_node = (DomNode*)target;
@@ -547,6 +762,38 @@ static Item build_lambda_event_map(DomDocument* doc, View* target,
     // for "paste" events: add clipboard text
     if (evcon && strcmp(event_name, "paste") == 0 && evcon->paste_text) {
         mb.put("text", evcon->paste_text);
+    }
+
+    // R7 step 3b — attach SourcePos / SourceSelection for editor handlers.
+    // The editor's `mod_source_pos` shapes are:
+    //   pos       = { path: [int...], offset: int }
+    //   selection = { kind:'text', anchor: pos, head: pos }   (text)
+    //             | { kind:'node', path: [int...] }           (node)
+    // Populated from `state->dom_selection` (kept in sync with the legacy
+    // caret/selection) whenever the DOM boundary resolves to a recorded
+    // source path via render_map. Form inputs already carry their own
+    // `caret_pos` / `selection_*` fields above and don't get a SourcePos
+    // (their typed value isn't a template-rendered source path).
+    {
+        RadiantState* st2 = doc->state ? (RadiantState*)doc->state : nullptr;
+        DomSelection* ds = st2 ? st2->dom_selection : nullptr;
+        if (ds && ds->anchor.node) {
+            SourcePosC anchor_pos;
+            if (source_pos_from_dom_boundary(&ds->anchor, &anchor_pos)) {
+                mb.put("source_pos",
+                       source_pos_to_item(builder, &anchor_pos));
+                if (!ds->is_collapsed && ds->focus.node) {
+                    SourcePosC head_pos;
+                    if (source_pos_from_dom_boundary(&ds->focus, &head_pos)) {
+                        mb.put("source_selection",
+                               source_text_selection_to_item(
+                                   builder, &anchor_pos, &head_pos));
+                        source_pos_free(&head_pos);
+                    }
+                }
+                source_pos_free(&anchor_pos);
+            }
+        }
     }
 
     // for drag-and-drop events: add drag_data field
@@ -697,6 +944,44 @@ extern "C" Item dispatch_emit(Item event_name_item, Item event_data) {
 }
 
 /**
+ * dispatch_set_selection — called from pn_set_selection() (lambda-proc.cpp).
+ * Push a Lambda SourceSelection back to the live DomSelection so the
+ * visual caret/highlight follows after a transaction. See
+ * Radiant_Rich_Text_Editing.md §7.4 (Source → DOM sync).
+ *
+ * Resolves the active document via the thread-local handler context, then
+ * delegates the parsing + boundary lookup to
+ * `dom_selection_apply_source_selection` (source_pos_bridge.cpp).
+ */
+extern "C" Item dispatch_set_selection(Item selection) {
+    if (!g_emit_handler_ctx || !g_emit_handler_ctx->doc) {
+        log_error("dispatch_set_selection: no handler context — set_selection() called outside handler");
+        return ItemNull;
+    }
+
+    DomDocument* doc = g_emit_handler_ctx->doc;
+    if (!doc->root) {
+        log_debug("dispatch_set_selection: doc has no root");
+        return ItemNull;
+    }
+    RadiantState* state = (RadiantState*)doc->state;
+    if (!state) {
+        log_debug("dispatch_set_selection: doc has no state");
+        return ItemNull;
+    }
+    DomSelection* ds = state->dom_selection;
+    if (!ds) {
+        log_debug("dispatch_set_selection: state has no dom_selection");
+        return ItemNull;
+    }
+
+    if (!dom_selection_apply_source_selection(ds, (DomNode*)doc->root, selection)) {
+        log_debug("dispatch_set_selection: could not resolve selection (malformed or unresolvable)");
+    }
+    return ItemNull;
+}
+
+/**
  * Dispatch a Lambda template event handler for a clicked element.
  * Walks up the DOM ancestry from `target` to find a DomElement whose
  * native_element was produced by a template with a matching handler.
@@ -706,7 +991,8 @@ extern "C" Item dispatch_emit(Item event_name_item, Item event_data) {
  * @param event_name The event name to dispatch (e.g., "click")
  * @return true if a handler was found and invoked
  */
-static bool dispatch_lambda_handler(EventContext* evcon, View* target, const char* event_name) {
+static bool dispatch_lambda_handler(EventContext* evcon, View* target, const char* event_name,
+                                    const InputIntent* intent = nullptr) {
     if (!g_template_registry || g_template_registry->count == 0) {
         return false;
     }
@@ -778,7 +1064,7 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
                                 }
 
                                 // build event object map: {type, target_class, target_tag, x, y}
-                                Item event_item = build_lambda_event_map(doc, target, event_name, evcon);
+                                Item event_item = build_lambda_event_map(doc, target, event_name, evcon, intent);
 
                                 // set up emit context so handlers can call emit()
                                 EmitHandlerContext emit_ctx;
@@ -860,6 +1146,46 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
 
     log_debug("dispatch_lambda_handler: no handler found after walking %d levels", depth);
     return false;
+}
+
+static bool dispatch_rich_beforeinput(EventContext* evcon, View* target,
+                                      const InputIntent* intent) {
+    if (!evcon || !target || !intent || intent->type == INPUT_INTENT_NONE) return false;
+    DomElement* editable = rich_editable_from_target(target);
+    if (!editable) return false;
+
+    bool handled = dispatch_lambda_handler(evcon, target, "beforeinput", intent);
+    if (!handled) {
+        log_debug("dispatch_rich_beforeinput: no beforeinput handler on data-editable/contenteditable subtree");
+    }
+    return true;
+}
+
+extern "C" bool radiant_dispatch_rich_composition_event(UiContext* uicon,
+                                                        EventType event_type,
+                                                        const char* text,
+                                                        uint32_t caret_cp) {
+    if (!uicon || !uicon->document || !uicon->document->state) return false;
+    if (event_type != RDT_EVENT_COMPOSITION_START &&
+        event_type != RDT_EVENT_COMPOSITION_UPDATE &&
+        event_type != RDT_EVENT_COMPOSITION_END) {
+        return false;
+    }
+
+    RadiantState* state = (RadiantState*)uicon->document->state;
+    View* focused = focus_get(state);
+    View* target = focused ? focused
+        : ((state->caret && state->caret->view) ? state->caret->view : nullptr);
+    if (!target || !rich_editable_from_target(target)) return false;
+
+    RdtEvent event;
+    memset(&event, 0, sizeof(event));
+    event.composition.type = event_type;
+    event.composition.timestamp = 0;
+    event.composition.text = text ? text : "";
+    event.composition.preedit_caret = caret_cp;
+    handle_event(uicon, uicon->document, &event);
+    return true;
 }
 
 // ============================================================================
@@ -4383,6 +4709,21 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             selection_get_range(state, &keydown_sel_start, &keydown_sel_end_capture);
         }
 
+        // Rich-text editing path (Phase R4): translate platform key events
+        // into browser-like beforeinput intents for data-editable/contenteditable
+        // template output. Native form controls continue down the existing
+        // text-control path.
+        {
+            InputIntent intent;
+            View* intent_target = focused ? focused
+                : ((state->caret && state->caret->view) ? state->caret->view : nullptr);
+            if (intent_target && input_intent_from_key_event(key_event, &intent) &&
+                dispatch_rich_beforeinput(&evcon, intent_target, &intent)) {
+                evcon.need_repaint = true;
+                break;
+            }
+        }
+
         // dispatch "keydown" event to Lambda handler for actionable keys
         bool had_lambda_keydown = false;
         if (focused && (key_event->key == RDT_KEY_BACKSPACE ||
@@ -5302,6 +5643,23 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         }
         break;
     }
+    case RDT_EVENT_COMPOSITION_START:
+    case RDT_EVENT_COMPOSITION_UPDATE:
+    case RDT_EVENT_COMPOSITION_END: {
+        CompositionEvent* comp_event = &event->composition;
+        RadiantState* state = (RadiantState*)evcon.ui_context->document->state;
+        if (!state) break;
+
+        View* focused = focus_get(state);
+        View* intent_target = focused ? focused
+            : ((state->caret && state->caret->view) ? state->caret->view : nullptr);
+        InputIntent intent;
+        if (intent_target && input_intent_from_composition_event(comp_event, &intent) &&
+            dispatch_rich_beforeinput(&evcon, intent_target, &intent)) {
+            evcon.need_repaint = true;
+        }
+        break;
+    }
     case RDT_EVENT_TEXT_INPUT: {
         TextInputEvent* text_event = &event->text_input;
         RadiantState* state = (RadiantState*)evcon.ui_context->document->state;
@@ -5329,6 +5687,22 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         if (state->selection && !state->selection->is_collapsed) {
             had_input_selection = true;
             selection_get_range(state, &input_sel_start, &input_sel_end);
+        }
+
+        // Rich-text text insertion is driven through beforeinput/insertText.
+        // This avoids the legacy contenteditable TODO path and lets Lambda
+        // commands own source-tree mutation.
+        {
+            InputIntent intent;
+            char utf8_buf[5];
+            View* intent_target = focused ? focused
+                : ((state->caret && state->caret->view) ? state->caret->view : nullptr);
+            if (intent_target && input_intent_from_text_input(text_event->codepoint,
+                    &intent, utf8_buf, sizeof(utf8_buf)) &&
+                dispatch_rich_beforeinput(&evcon, intent_target, &intent)) {
+                evcon.need_repaint = true;
+                break;
+            }
         }
 
         // dispatch "input" event to Lambda template handler if registered

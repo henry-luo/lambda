@@ -1,0 +1,62 @@
+"ins doc:"
+true
+"ins caret:"
+true
+"ins is collapsed:"
+true
+"replace doc:"
+true
+"replace caret:"
+true
+"del-back doc:"
+true
+"del-back caret:"
+true
+"del-back at start null:"
+true
+"del-back range doc:"
+true
+"del-back range caret:"
+true
+"del-fwd doc:"
+true
+"del-fwd caret:"
+true
+"del-fwd at end null:"
+true
+"toggle add:"
+true
+"toggle preserves text:"
+true
+"toggle remove:"
+true
+"set-type tag:"
+true
+"set-type text preserved:"
+true
+"split block count:"
+3
+"split left text:"
+true
+"split right text:"
+true
+"split right tag preserved:"
+true
+"split caret path[0]:"
+1
+"split caret path[1]:"
+0
+"split caret offset:"
+true
+"split tail:"
+true
+"split-at-0 left:"
+true
+"split-at-0 right:"
+true
+"chain doc:"
+true
+"chain empty:"
+true
+"undo insert:"
+true

@@ -94,6 +94,44 @@ bool render_map_reverse_lookup(Item result_node, RenderMapLookup* out);
 void render_map_set_doc_root(Item root);
 Item render_map_get_doc_root(void);
 
+// ============================================================================
+// R7 step 3c — source-document path tracking for the editor bridge.
+//
+// `apply()` records (source_item, template_ref) → result_node in the
+// forward map, but the editor's source-position bridge also needs to know
+// WHERE in the source document tree the source_item lives — i.e. its path
+// of child indices from the source root. We track that separately to keep
+// the lambda layer radiant-agnostic: callers (radiant) register a path
+// recorder via render_map_set_path_recorder; lambda's apply() invokes it
+// after each recorded result.
+// ============================================================================
+
+// Set the SOURCE document root so render_map_record_source_path can walk
+// it to compute child-index paths. Auto-bootstrapped on the first apply()
+// when not already set.
+void render_map_set_source_doc_root(Item root);
+Item render_map_get_source_doc_root(void);
+
+// Receiver that persists a computed path for (source_item, template_ref).
+// Implemented in radiant/source_pos_bridge.cpp; lambda layer holds only
+// the function pointer to avoid a build-time dep on radiant.
+typedef void (*render_map_path_recorder_fn)(
+    Item source_item, const char* template_ref,
+    const int* path_indices, int depth);
+
+void render_map_set_path_recorder(render_map_path_recorder_fn fn);
+
+// Returns true once a path recorder has been registered (radiant init).
+// Lambda's apply() uses this to gate auto-bootstrap of the source doc
+// root so pure CLI runs (no radiant) don't keep a stale root pointer
+// across runtime teardowns.
+bool render_map_has_path_recorder(void);
+
+// Walk s_source_doc_root, find `target`, and call the registered recorder
+// (if any) with the discovered child-index path. No-op when either the
+// source root is unset or no recorder is registered.
+void render_map_record_source_path(Item target, const char* template_ref);
+
 #ifdef __cplusplus
 }
 #endif

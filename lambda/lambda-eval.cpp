@@ -24,6 +24,8 @@
 #include <sys/wait.h>  // for WIFEXITED, WEXITSTATUS
 #endif
 #include "validator/validator.hpp"
+#include "input/input.hpp"
+#include "input/html5/html5_parser.h"
 
 extern __thread EvalContext* context;
 
@@ -2254,6 +2256,30 @@ RetItem fn_parse2(Item str_item, Item type) {
 
 RetItem fn_parse1(Item str_item) {
     return fn_parse2(str_item, ItemNull);
+}
+
+Item fn_parse_html_fragment1(Item str_item) {
+    GUARD_ERROR1(str_item);
+
+    TypeId str_type = get_type_id(str_item);
+    if (str_type != LMD_TYPE_STRING) {
+        log_error("parse_html_fragment: argument must be a string, got type: %s", get_type_name(str_type));
+        return ItemNull;
+    }
+
+    String* str = str_item.get_string();
+    if (!str || !str->chars) return ItemNull;
+
+    Url* dummy_url = url_parse("parse://html-fragment");
+    Input* input = InputManager::create_input(dummy_url);
+    if (!input) return ItemNull;
+
+    Html5Parser* parser = html5_fragment_parser_create(input->pool, input->arena, input);
+    if (!parser || !html5_fragment_parse(parser, str->chars)) return ItemNull;
+
+    Element* fragment = html5_fragment_get_body(parser);
+    input->root = fragment ? Item{.element = fragment} : ItemNull;
+    return input->root.item ? input->root : ItemNull;
 }
 
 // MIR JIT wrappers: RetItem-returning functions adapted to return Item only.

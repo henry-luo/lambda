@@ -568,6 +568,9 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_PARSE2, "parse", 2, &TYPE_ANY, false, true, true, LMD_TYPE_STRING, true,
      C_RET_RETITEM, C_ARG_ITEM, "fn_parse2", FPTR(fn_parse2), NULL, NULL, false, 0},
 
+    {SYSFUNC_PARSE_HTML_FRAGMENT, "parse_html_fragment", 1, &TYPE_ANY, false, true, true, LMD_TYPE_STRING, false,
+        C_RET_ITEM, C_ARG_ITEM, "fn_parse_html_fragment1", FPTR(fn_parse_html_fragment1), NULL, NULL, false, 0},
+
     // ========================================================================
     // Variadic parameter access — not method-eligible
     // ========================================================================
@@ -732,6 +735,10 @@ SysFuncInfo sys_func_defs[] = {
     // reactive UI: emit event to parent template handler
     {SYSPROC_EMIT, "emit", 2, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "pn_emit", FPTR(pn_emit), NULL, NULL, false, 0},
+
+    // editor: push SourceSelection back to live DomSelection (Phase R4 §7.4)
+    {SYSPROC_SET_SELECTION, "set_selection", 1, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "pn_set_selection", FPTR(pn_set_selection), NULL, NULL, false, 0},
 };
 
 // note: sizeof(sys_func_defs) may fail with incomplete type because the header

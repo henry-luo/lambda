@@ -1,0 +1,50 @@
+"s1 kind:"
+'replace_text'
+"s1 from:"
+7
+"s1 to:"
+12
+"d1 text:"
+true
+"d unchanged:"
+true
+"d2 text:"
+true
+"d3 text:"
+true
+"d4 child count:"
+3
+"d4 mid tag:"
+'hr'
+"d5 child count:"
+1
+"d5 text:"
+true
+"d6 child count:"
+1
+"d6 text:"
+true
+"marks before:"
+0
+"marks after:"
+1
+"mark[0]:"
+'strong'
+"marks idemp:"
+1
+"marks removed:"
+0
+"attr count:"
+1
+"attr name:"
+'align'
+"attr value:centerattr lookup:"
+true
+"attr count after replace:"
+1
+"attr value after replace:"
+true
+"new tag:"
+'heading'
+"text preserved:"
+true

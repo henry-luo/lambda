@@ -1,0 +1,92 @@
+"p1 path len:"
+2
+"p1 path[0]:"
+0
+"p1 path[1]:"
+1
+"p1 offset:"
+3
+"ts kind:"
+'text'
+"ts anchor off:"
+0
+"ts head off:"
+5
+"ns kind:"
+'node'
+"ns path len:"
+2
+"as kind:"
+'all'
+"cmp [0] [0]:"
+0
+"cmp [0] [1]:"
+-1
+"cmp [1] [0]:"
+1
+"cmp [0,1] [0,2]:"
+-1
+"cmp [0] [0,0]:"
+-1
+"cmp [0,0] [0]:"
+1
+"eq [0,1] [0,1]:"
+true
+"eq [0,1] [0,2]:"
+false
+"prefix [] of [0,1]:"
+true
+"prefix [0] of [0,1]:"
+true
+"prefix [0,1] of [0,1]:"
+true
+"prefix [0,2] of [0,1]:"
+false
+"prefix [0,1,2] of [0,1]:"
+false
+"pos cmp pa pa:"
+0
+"pos cmp pa pb:"
+-1
+"pos cmp pb pa:"
+1
+"pos cmp pa pc:"
+-1
+"pos eq pa pa:"
+true
+"pos eq pa pb:"
+false
+"min pa pb off:"
+0
+"max pa pb off:"
+5
+"min pb pa off:"
+0
+"r0 found:"
+true
+"r0 depth:"
+0
+"r1 found:"
+true
+"r1 depth:"
+1
+"r1 parent_idx:"
+0
+"r1 node tag:"
+'paragraph'
+"r2 found:"
+true
+"r2 depth:"
+2
+"r2 parent_idx:"
+0
+"r2 node is string:"
+true
+"r2 node len:"
+5
+"r3 found:"
+false
+"r3 depth:"
+1
+"r4 found:"
+false

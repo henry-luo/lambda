@@ -1,0 +1,92 @@
+"empty tx steps:"
+0
+"empty tx doc match:"
+true
+"tx1 steps:"
+1
+"tx1 doc text:"
+true
+"tx1 doc_before unchanged:"
+true
+"tx1 sel anchor:"
+0
+"tx1 sel head:"
+5
+"tx2 steps:"
+2
+"tx2 doc text:"
+true
+"tx2 sel anchor:"
+4
+"tx2 sel head:"
+9
+"inv steps:"
+2
+"inv full doc:"
+true
+"inv sel_before swapped:"
+true
+"inv sel_after swapped:"
+true
+"meta addToHistory:"
+true
+"meta scrollIntoView:"
+true
+"meta missing:"
+true
+"h0 can_undo:"
+false
+"h0 can_redo:"
+false
+"r1 doc:"
+true
+"r1 can_undo:"
+true
+"r1 can_redo:"
+false
+"r2 doc:"
+true
+"r2 undo depth:"
+2
+"u1 ok:"
+true
+"u1 doc:"
+true
+"u1 can_redo:"
+true
+"u1 undo depth:"
+1
+"u1 redo depth:"
+1
+"u2 ok:"
+true
+"u2 doc:"
+true
+"u2 can_undo:"
+false
+"u2 redo depth:"
+2
+"u3 ok:"
+false
+"u3 doc unchanged:"
+true
+"rr1 ok:"
+true
+"rr1 doc:"
+true
+"rr2 ok:"
+true
+"rr2 doc:"
+true
+"rr2 can_undo:"
+true
+"rr2 redo depth:"
+0
+"u_after redo:"
+1
+"r_new redo cleared:"
+true
+"r_new tag:"
+true
+"map pos final:"
+17

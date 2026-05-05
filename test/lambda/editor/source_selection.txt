@@ -1,0 +1,32 @@
+"doc node_text len:"
+29
+"para0 node_text:"
+true
+"para1 node_text:"
+true
+"strong node_text:"
+true
+"string leaf:"
+true
+"empty:"
+true
+"all sel str:"
+true
+"node sel para0:"
+true
+"node sel strong:"
+true
+"node sel missing:"
+true
+"text sel hello:"
+true
+"text sel world:"
+true
+"text sel reversed:"
+true
+"text sel strong:"
+true
+"cross-leaf null:"
+true
+"bogus null:"
+true

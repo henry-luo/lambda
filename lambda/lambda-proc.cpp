@@ -133,6 +133,15 @@ Item pn_emit(Item event_name, Item event_data) {
     return dispatch_emit(event_name, event_data);
 }
 
+/**
+ * set_selection(selection) — push a Lambda SourceSelection back to the
+ * live DomSelection so the visual caret/highlight follows after a
+ * transaction. See Radiant_Rich_Text_Editing.md §7.4.
+ */
+Item pn_set_selection(Item selection) {
+    return dispatch_set_selection(selection);
+}
+
 double pn_clock() {
     struct timespec ts;
 #ifdef __APPLE__

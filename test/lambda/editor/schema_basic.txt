@@ -1,0 +1,46 @@
+"paragraph role:"
+'block'
+"strong role:"
+'mark'
+"hr role:"
+'block'
+"image role:"
+'inline'
+"missing tag is null:"
+true
+"text role:"
+'text'
+"paragraph role:"
+'block'
+"strong role:"
+'mark'
+"unknown role:"
+'unknown'
+"int is unknown:"
+'unknown'
+"default block:"
+'paragraph'
+"text sat inline*:"
+true
+"strong sat inline*:"
+true
+"paragraph sat block+:"
+true
+"text NOT sat block:"
+false
+"tag-keyed match:"
+true
+"tag-keyed mismatch:"
+false
+"empty matches empty:"
+true
+"inline* matches strings:"
+true
+"block+ needs at least one:"
+false
+"block+ ok with one block:"
+true
+"sequence p then block*:"
+true
+"sequence rejects wrong head:"
+false

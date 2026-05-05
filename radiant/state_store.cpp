@@ -2,6 +2,7 @@
 #include "animation.h"
 #include "dom_range.hpp"
 #include "dom_range_resolver.hpp"
+#include "source_pos_bridge.hpp"   // R7 step 3c — register path recorder
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 // str.h included via view.hpp
@@ -169,6 +170,10 @@ RadiantState* radiant_state_create(Pool* pool, StateUpdateMode mode) {
     // Initialize render map for observer-based reconciliation (Phase 3)
     render_map_init();
     state->render_map = render_map_get_map();
+
+    // R7 step 3c — register the source-path recorder so apply() persists
+    // child-index paths into the editor bridge's path side-table.
+    render_map_set_path_recorder(&render_map_record_path);
 
     // Initialize animation scheduler
     state->animation_scheduler = animation_scheduler_create(pool);
@@ -2795,8 +2800,7 @@ void clipboard_copy_html(const char* html) {
     if (!html) return;
     // Write both representations so paste handlers that ask for text/html
     // get rich content and plain-text consumers still see something useful.
-    clipboard_store_write_mime("text/html", html);
-    clipboard_store_write_mime("text/plain", html);
+    clipboard_store_write_html(html, html);
     extern UiContext ui_context;
     if (ui_context.window && !ui_context.headless) {
         glfwSetClipboardString(ui_context.window, html);
