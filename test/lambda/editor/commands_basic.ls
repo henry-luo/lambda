@@ -226,6 +226,48 @@ let tx_outdent = cmd_outdent_list_item(outdent_state)
 "outdent selected:"; path_equal(tx_outdent.sel_after.path, [0, 1])
 "indent first null:"; cmd_indent_list_item({doc: list_doc, selection: node_selection([0, 0])}) == null
 
+let html_list_doc = node('doc', [node('ul', [
+  node('li', [text("A")]),
+  node('li', [text("B")]),
+  node('li', [text("C")])
+])])
+let html_list_state = {doc: html_list_doc, schema: html5_subset_schema, selection: text_selection(pos([0, 1, 0], 1), pos([0, 1, 0], 1))}
+let tx_html_indent = cmd_indent_list_item(html_list_state)
+"indent html top count:"; len(node_at(tx_html_indent.doc_after, [0]).content) == 2
+"indent html nested tag:"; node_at(tx_html_indent.doc_after, [0, 0, 1]).tag == 'ul'
+"indent html nested text:"; doc_text(node_at(tx_html_indent.doc_after, [0, 0, 1, 0])) == "B"
+"indent html selected:"; path_equal(tx_html_indent.sel_after.path, [0, 0])
+let html_outdent_state = {doc: tx_html_indent.doc_after, schema: html5_subset_schema, selection: text_selection(pos([0, 0, 1, 0, 0], 1), pos([0, 0, 1, 0, 0], 1))}
+let tx_html_outdent = cmd_outdent_list_item(html_outdent_state)
+"outdent html top count:"; len(node_at(tx_html_outdent.doc_after, [0]).content) == 3
+"outdent html middle text:"; doc_text(node_at(tx_html_outdent.doc_after, [0, 1])) == "B"
+"outdent html selected:"; path_equal(tx_html_outdent.sel_after.path, [0, 1])
+
+let tx_image = cmd_insert_image(s0, "photo.png", "Photo")
+"insert image tag:"; node_at(tx_image.doc_after, [0, 1]).tag == 'image'
+"insert image src:"; attrs_get(node_at(tx_image.doc_after, [0, 1]).attrs, 'src') == "photo.png"
+"insert image selected:"; tx_image.sel_after.kind == 'node' and path_equal(tx_image.sel_after.path, [0, 1])
+let html_image_state = {doc: node('doc', [node('p', [text("Hi")])]), schema: html5_subset_schema,
+  selection: text_selection(pos([0, 0], 2), pos([0, 0], 2))}
+let tx_html_image = cmd_insert_image(html_image_state, "photo.png", "Photo")
+"insert html image tag:"; node_at(tx_html_image.doc_after, [0, 1]).tag == 'img'
+"insert html image selected:"; path_equal(tx_html_image.sel_after.path, [0, 1])
+
+let tx_link_insert = cmd_insert_link(s0, "https://example.com", "Example", "site")
+"insert link tag:"; node_at(tx_link_insert.doc_after, [0, 1]).tag == 'link'
+"insert link href:"; attrs_get(node_at(tx_link_insert.doc_after, [0, 1]).attrs, 'href') == "https://example.com"
+"insert link text:"; doc_text(node_at(tx_link_insert.doc_after, [0, 1])) == "site"
+"insert link caret:"; path_equal(tx_link_insert.sel_after.anchor.path, [0, 1, 0]) and tx_link_insert.sel_after.anchor.offset == 4
+let tx_link_wrap = cmd_insert_link(s_sel, "https://lambda.dev", null, null)
+"wrap link text:"; doc_text(node_at(tx_link_wrap.doc_after, [0, 1])) == "world"
+"wrap link href:"; attrs_get(node_at(tx_link_wrap.doc_after, [0, 1]).attrs, 'href') == "https://lambda.dev"
+"wrap link doc:"; doc_text(tx_link_wrap.doc_after) == "Hello, world.Second."
+let html_link_state = {doc: node('doc', [node('p', [text("Hi")])]), schema: html5_subset_schema,
+  selection: text_selection(pos([0, 0], 2), pos([0, 0], 2))}
+let tx_html_link = cmd_insert_link(html_link_state, "https://example.com", null, " link")
+"insert html link tag:"; node_at(tx_html_link.doc_after, [0, 1]).tag == 'a'
+"insert html link text:"; doc_text(node_at(tx_html_link.doc_after, [0, 1])) == " link"
+
 // ---------------------------------------------------------------------------
 // cmd_toggle_mark
 // ---------------------------------------------------------------------------

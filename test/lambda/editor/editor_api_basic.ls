@@ -102,3 +102,22 @@ let html_break_editor = edit_exec(html_text_editor, edit_cmd_insert_line_break()
 let html_paste_editor = edit_exec(html_text_editor, edit_cmd_paste_html("<p> there</p>", " there"))
 "exec html paste tag:"; node_at(html_paste_editor.doc, [0]).tag == 'p'
 "exec html paste text:"; doc_text(html_paste_editor.doc) == "Hi there"
+
+let html_image_editor = edit_exec(html_text_editor, edit_cmd_insert_image("photo.png", "Photo"))
+"exec html image tag:"; node_at(html_image_editor.doc, [0, 1]).tag == 'img'
+"exec html image selected:"; path_equal(html_image_editor.selection.path, [0, 1])
+let html_link_editor = edit_exec(html_text_editor, edit_cmd_insert_link("https://example.com", "Example", "site"))
+"exec html link tag:"; node_at(html_link_editor.doc, [0, 1]).tag == 'a'
+"exec html link text:"; doc_text(node_at(html_link_editor.doc, [0, 1])) == "site"
+
+let html_list_editor = edit_open(node('doc', [node('ul', [
+	node('li', [text("A")]),
+	node('li', [text("B")])
+])]), editor_schemas.html5_subset, text_selection(pos([0, 1, 0], 1), pos([0, 1, 0], 1)))
+let html_indent_editor = edit_exec(html_list_editor, edit_cmd_indent_list_item())
+"exec html indent tag:"; node_at(html_indent_editor.doc, [0, 0, 1]).tag == 'ul'
+"exec html indent text:"; doc_text(node_at(html_indent_editor.doc, [0, 0, 1, 0])) == "B"
+let html_outdent_editor = edit_exec(edit_open(html_indent_editor.doc, editor_schemas.html5_subset,
+	text_selection(pos([0, 0, 1, 0, 0], 1), pos([0, 0, 1, 0, 0], 1))), edit_cmd_outdent_list_item())
+"exec html outdent count:"; len(node_at(html_outdent_editor.doc, [0]).content) == 2
+"exec html outdent selected:"; path_equal(html_outdent_editor.selection.path, [0, 1])

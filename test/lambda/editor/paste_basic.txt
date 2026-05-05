@@ -64,6 +64,16 @@ true
 true
 "cmd raw html paste mark:"
 true
+"html link tag:"
+true
+"html link href:"
+true
+"html link text:"
+true
+"cmd raw html link tag:"
+true
+"cmd raw html link href:"
+true
 "html schema block count:"
 true
 "html schema heading tag:"
@@ -71,6 +81,10 @@ true
 "html schema para tag:"
 true
 "html schema mark:"
+true
+"html schema link tag:"
+true
+"html schema link href:"
 true
 "cmd html schema paste tag:"
 true
