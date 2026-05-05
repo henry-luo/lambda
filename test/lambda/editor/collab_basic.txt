@@ -28,6 +28,14 @@ true
 true
 "r3 total:"
 true
+"r4 kept:"
+true
+"r4 from:"
+true
+"r4 gap:"
+true
+"r4 final text:"
+true
 "ser kind:"
 true
 "ser text:"

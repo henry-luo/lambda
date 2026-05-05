@@ -38,6 +38,18 @@ true
 true
 "split intent right empty:"
 true
+"line-break intent tag:"
+true
+"line-break intent caret:"
+true
+"word-delete intent doc:"
+true
+"word-delete intent caret:"
+true
+"indent intent nested:"
+true
+"outdent intent top count:"
+true
 "bold intent mark:"
 true
 "bold intent text:"
@@ -71,6 +83,16 @@ true
 "composition cancel doc:"
 true
 "composition cancel history:"
+true
+"history push undo:"
+true
+"history undo doc:"
+true
+"history undo redo:"
+true
+"history redo doc:"
+true
+"history redo undo:"
 true
 "unknown intent null:"
 true

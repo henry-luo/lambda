@@ -1,5 +1,6 @@
 import .mod_commands
 import .mod_decorations
+import .mod_history
 import .mod_source_pos
 import .mod_transaction
 
@@ -22,10 +23,37 @@ fn mark_composition_tx(tx, comp, add_history) =>
 fn state_decorations_after(state, tx) =>
   if (state.decorations == null) { null } else { deco_map_tx(state.decorations, tx) }
 
+fn tx_adds_history(tx) => tx_get_meta(tx, "addToHistory") != false
+
+fn state_history_after(state, tx) {
+  let hist_meta = tx_get_meta(tx, "history")
+  if (hist_meta != null) { hist_meta }
+  else if (state.history == null) { null }
+  else if (tx_adds_history(tx)) { history_push(state.history, tx) }
+  else { state.history }
+}
+
 pub fn state_after_intent(state, tx) =>
   if (tx == null) state
   else {doc: tx.doc_after, selection: tx.sel_after,
-        composition: tx_get_meta(tx, "composition"), decorations: state_decorations_after(state, tx)}
+        composition: tx_get_meta(tx, "composition"), decorations: state_decorations_after(state, tx),
+        history: state_history_after(state, tx)}
+
+fn history_result_tx(state, r) {
+  if (not r.ok) { null }
+  else {
+    {doc_before: state.doc, doc_after: r.doc, steps: [],
+     sel_before: state.selection, sel_after: r.sel,
+     meta: [{name: "history", value: r.hist}, {name: "addToHistory", value: false}]}
+  }
+}
+
+fn dispatch_history_intent(state, ev) {
+  if (state.history == null) { null }
+  else if (ev.input_type == "historyUndo") { history_result_tx(state, history_undo(state.history, state.doc)) }
+  else if (ev.input_type == "historyRedo") { history_result_tx(state, history_redo(state.history, state.doc)) }
+  else { null }
+}
 
 pub fn dispatch_composition_intent(state, ev) {
   if (ev.input_type == "compositionStart") {
@@ -64,9 +92,15 @@ pub fn dispatch_intent(state, ev) =>
   else if (ev.input_type == "insertFromComposition") dispatch_composition_intent(state, ev)
   else if (ev.input_type == "deleteCompositionText") dispatch_composition_intent(state, ev)
   else if (ev.input_type == "insertParagraph") cmd_split_block(state)
+  else if (ev.input_type == "insertLineBreak") cmd_insert_line_break(state)
   else if (ev.input_type == "deleteContentBackward") cmd_delete_backward(state)
   else if (ev.input_type == "deleteContentForward") cmd_delete_forward(state)
+  else if (ev.input_type == "deleteWordBackward") cmd_delete_word_backward(state)
   else if (ev.input_type == "formatBold") cmd_format_bold(state)
   else if (ev.input_type == "formatItalic") cmd_format_italic(state)
   else if (ev.input_type == "formatUnderline") cmd_format_underline(state)
+  else if (ev.input_type == "formatIndent") cmd_indent_list_item(state)
+  else if (ev.input_type == "formatOutdent") cmd_outdent_list_item(state)
+  else if (ev.input_type == "historyUndo") dispatch_history_intent(state, ev)
+  else if (ev.input_type == "historyRedo") dispatch_history_intent(state, ev)
   else null

@@ -30,6 +30,12 @@ true
 2
 "replace undone:"
 true
+"around inv kind:"
+true
+"around inv to:"
+true
+"around undone:"
+true
 "m_inv kind:"
 true
 "mark undone:"
@@ -69,6 +75,16 @@ true
 "collapsed depth:"
 0
 "collapsed offset:"
+true
+"around gap path:"
+true
+"around gap offset:"
+true
+"around deleted depth:"
+true
+"around deleted offset:"
+true
+"around tail path:"
 true
 "mark map identity:"
 true

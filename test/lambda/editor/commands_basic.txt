@@ -24,6 +24,38 @@ true
 true
 "del-fwd at end null:"
 true
+"del-word doc:"
+true
+"del-word caret:"
+true
+"del-word start null:"
+true
+"line-break children:"
+true
+"line-break tag:"
+true
+"line-break left:"
+true
+"line-break right:"
+true
+"line-break caret path:"
+true
+"line-break caret offset:"
+true
+"indent top count:"
+true
+"indent nested text:"
+true
+"indent selected parent:"
+true
+"outdent top count:"
+true
+"outdent middle text:"
+true
+"outdent selected:"
+true
+"indent first null:"
+true
 "toggle add:"
 true
 "toggle preserves text:"
