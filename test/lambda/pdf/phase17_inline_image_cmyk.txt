@@ -1,0 +1,1 @@
+{ count: 1, has_red: true, has_green: true, has_placeholder: false, xml: "<g transform="matrix(1 0 0 -1 0 1)"><rect x="0" y="0" width="0.5" height="1" fill="rgb(255,0,0)" stroke="none"></rect><rect x="0.5" y="0" width="0.5" height="1" fill="rgb(0,255,0)" stroke="none"></rect></g>"}
