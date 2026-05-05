@@ -1,0 +1,1 @@
+{ count: 1, black_pixel: true, not_rgb: true, no_img_handle: true, kept_ctm: true}
