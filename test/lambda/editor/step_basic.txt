@@ -24,6 +24,12 @@ true
 1
 "d6 text:"
 true
+"around child count:"
+2
+"around first tag:"
+'blockquote'
+"around kept text:"
+true
 "marks before:"
 0
 "marks after:"

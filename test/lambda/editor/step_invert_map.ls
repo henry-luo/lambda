@@ -52,6 +52,20 @@ let inv4 = step_invert(s4, d)
 let d4b = step_apply(inv4, d4)
 "replace undone:";  doc_text(d4b) == doc_text(d)
 
+let around_doc = node('doc', [
+  node('paragraph', [text("before")]),
+  node('paragraph', [text("keep")]),
+  node('paragraph', [text("after")]),
+  node('paragraph', [text("tail")])
+])
+let around = step_replace_around([], 0, 3, 1, 2, [node('blockquote', [])], 1)
+let around_after = step_apply(around, around_doc)
+let around_inv = step_invert(around, around_doc)
+"around inv kind:"; around_inv.kind == 'replace'
+"around inv to:"; around_inv.to == 2
+let around_back = step_apply(around_inv, around_after)
+"around undone:"; doc_text(around_back) == doc_text(around_doc)
+
 // ---------------------------------------------------------------------------
 // invert(add_mark) / invert(remove_mark)
 // ---------------------------------------------------------------------------
@@ -125,6 +139,16 @@ let inside_deleted = pos([1, 0], 3)
 let collapsed = step_map(s_del, inside_deleted)
 "collapsed depth:";  len(collapsed.path)
 "collapsed offset:"; collapsed.offset == 1   // step.from + len(slice)
+
+// replace_around preserves positions inside the gap and collapses deleted wrappers.
+let gap_mapped = step_map(around, pos([1, 0], 2))
+"around gap path:"; gap_mapped.path[0] == 1
+"around gap offset:"; gap_mapped.offset == 2
+let around_deleted = step_map(around, pos([2, 0], 1))
+"around deleted depth:"; len(around_deleted.path) == 0
+"around deleted offset:"; around_deleted.offset == 1
+let around_tail = step_map(around, pos([3, 0], 1))
+"around tail path:"; around_tail.path[0] == 2
 
 // Marks/attr/node-type don't move positions
 "mark map identity:"; pos_equal(step_map(m, pre), pre)

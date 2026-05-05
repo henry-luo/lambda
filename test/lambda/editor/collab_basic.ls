@@ -76,6 +76,23 @@ let r3 = rebase_steps(local3, remote3)
 // Either way, dropped + kept == 1.
 "r3 total:";       (r3.dropped + len(r3.kept)) == 1
 
+// Rebase replace_around over a sibling insert that shifts all outer/gap indexes.
+let around_doc = node('doc', [
+  node('paragraph', [text("before")]),
+  node('paragraph', [text("keep")]),
+  node('paragraph', [text("after")])
+])
+let remote4 = [step_replace([], 0, 0, [node('paragraph', [text("top")])])]
+let local4 = [step_replace_around([], 0, 3, 1, 2, [node('blockquote', [])], 1)]
+let r4 = rebase_steps(local4, remote4)
+"r4 kept:";        len(r4.kept) == 1
+let around_s = r4.kept[0]
+"r4 from:";        around_s.from == 1
+"r4 gap:";         around_s.gap_from == 2 and around_s.gap_to == 3
+let around_remote = step_apply(remote4[0], around_doc)
+let around_final = step_apply(around_s, around_remote)
+"r4 final text:";  doc_text(around_final) == "topkeep"
+
 // ---------------------------------------------------------------------------
 // Serialisation round-trip is structural identity for plain-data steps.
 // ---------------------------------------------------------------------------

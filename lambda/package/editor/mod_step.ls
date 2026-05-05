@@ -12,6 +12,8 @@
 //
 //   'replace_text'   {path, from, to, text}      replace a slice of one text leaf
 //   'replace'        {parent, from, to, slice}   replace children[from..to] of a node
+//   'replace_around' {parent, from, to, gap_from, gap_to, slice, insert}
+//                                                   replace outer range while preserving an inner gap
 //   'add_mark'       {path, mark}                add `mark` to a text leaf
 //   'remove_mark'    {path, mark}                remove `mark` from a text leaf
 //   'set_attr'       {path, name, value}         set one attribute
@@ -29,6 +31,10 @@ pub fn step_replace_text(path, from, to, text) =>
 
 pub fn step_replace(parent, from, to, slice) =>
   {kind: 'replace', parent: parent, from: from, to: to, slice: slice}
+
+pub fn step_replace_around(parent, from, to, gap_from, gap_to, slice, insert) =>
+  {kind: 'replace_around', parent: parent, from: from, to: to,
+   gap_from: gap_from, gap_to: gap_to, slice: slice, insert: insert}
 
 pub fn step_add_mark(path, mark) =>
   {kind: 'add_mark', path: path, mark: mark}
@@ -81,6 +87,13 @@ fn apply_replace_text(step, doc) {
 fn apply_replace(step, doc) =>
   splice_children_at(doc, step.parent, step.from, step.to - step.from, step.slice)
 
+fn apply_replace_around(step, doc) {
+  let parent = node_at(doc, step.parent)
+  let gap = list_take(list_drop(parent.content, step.gap_from), step.gap_to - step.gap_from)
+  let slice2 = list_splice(step.slice, step.insert, 0, gap)
+  splice_children_at(doc, step.parent, step.from, step.to - step.from, slice2)
+}
+
 fn apply_add_mark(step, doc) {
   let leaf = node_at(doc, step.path)
   let new_leaf = {kind: 'text', text: leaf.text, marks: with_mark(leaf.marks, step.mark)}
@@ -130,6 +143,7 @@ fn apply_set_node_type(step, doc) {
 pub fn step_apply(step, doc) {
   if (step.kind == 'replace_text')      { apply_replace_text(step, doc) }
   else if (step.kind == 'replace')      { apply_replace(step, doc) }
+  else if (step.kind == 'replace_around'){ apply_replace_around(step, doc) }
   else if (step.kind == 'add_mark')     { apply_add_mark(step, doc) }
   else if (step.kind == 'remove_mark')  { apply_remove_mark(step, doc) }
   else if (step.kind == 'set_attr')     { apply_set_attr(step, doc) }
@@ -156,6 +170,13 @@ fn invert_replace(step, doc_before) {
   step_replace(step.parent, step.from, new_to, old_slice)
 }
 
+fn invert_replace_around(step, doc_before) {
+  let parent = node_at(doc_before, step.parent)
+  let old_slice = list_take(list_drop(parent.content, step.from), step.to - step.from)
+  let new_to = step.from + len(step.slice) + (step.gap_to - step.gap_from)
+  step_replace(step.parent, step.from, new_to, old_slice)
+}
+
 fn invert_set_attr(step, doc_before) {
   let n = node_at(doc_before, step.path)
   step_set_attr(step.path, step.name, attrs_get(n.attrs, step.name))
@@ -169,6 +190,7 @@ fn invert_set_node_type(step, doc_before) {
 pub fn step_invert(step, doc_before) {
   if (step.kind == 'replace_text')      { invert_replace_text(step, doc_before) }
   else if (step.kind == 'replace')      { invert_replace(step, doc_before) }
+  else if (step.kind == 'replace_around'){ invert_replace_around(step, doc_before) }
   else if (step.kind == 'add_mark')     { step_remove_mark(step.path, step.mark) }
   else if (step.kind == 'remove_mark')  { step_add_mark(step.path, step.mark) }
   else if (step.kind == 'set_attr')     { invert_set_attr(step, doc_before) }
@@ -229,9 +251,46 @@ fn map_replace(step, p) {
   }
 }
 
+fn replace_around_new_size(step) => len(step.slice) + (step.gap_to - step.gap_from)
+
+fn map_replace_around(step, p) {
+  let pp = step.parent
+  let depth = len(pp)
+  let same_parent_pos = (len(p.path) == depth and path_equal(p.path, pp))
+  let inside = under_replace_parent(p, step)
+  if (not same_parent_pos and not inside) { p }
+  else if (same_parent_pos) {
+    if (p.offset < step.from) { p }
+    else if (p.offset >= step.gap_from and p.offset <= step.gap_to) {
+      pos(p.path, step.from + step.insert + (p.offset - step.gap_from))
+    }
+    else if (p.offset >= step.to) {
+      pos(p.path, p.offset + replace_around_new_size(step) - (step.to - step.from))
+    } else {
+      pos(p.path, step.from + step.insert)
+    }
+  } else {
+    let ci = p.path[depth]
+    if (ci < step.from) { p }
+    else if (ci >= step.to) {
+      let new_ci = ci + replace_around_new_size(step) - (step.to - step.from)
+      let new_path = [*list_take(p.path, depth), new_ci, *list_drop(p.path, depth + 1)]
+      pos(new_path, p.offset)
+    }
+    else if (ci >= step.gap_from and ci < step.gap_to) {
+      let new_ci = step.from + step.insert + (ci - step.gap_from)
+      let new_path = [*list_take(p.path, depth), new_ci, *list_drop(p.path, depth + 1)]
+      pos(new_path, p.offset)
+    } else {
+      pos(pp, step.from + step.insert)
+    }
+  }
+}
+
 pub fn step_map(step, p) {
   if (step.kind == 'replace_text') { map_replace_text(step, p) }
   else if (step.kind == 'replace') { map_replace(step, p) }
+  else if (step.kind == 'replace_around') { map_replace_around(step, p) }
   else { p }  // mark / attr / node-type changes don't move positions
 }
 

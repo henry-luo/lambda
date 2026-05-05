@@ -49,6 +49,18 @@ let d6 = step_apply(s6, d)
 "d6 child count:"; len(d6.content)
 "d6 text:";        doc_text(d6) == "Replaced"
 
+// Replace an outer range while preserving the inner gap.
+let wrap_doc = node('doc', [
+  node('paragraph', [text("before")]),
+  node('paragraph', [text("keep")]),
+  node('paragraph', [text("after")])
+])
+let s6b = step_replace_around([], 0, 3, 1, 2, [node('blockquote', [])], 1)
+let d6b = step_apply(s6b, wrap_doc)
+"around child count:"; len(d6b.content)
+"around first tag:"; d6b.content[0].tag
+"around kept text:"; doc_text(d6b.content[1]) == "keep"
+
 // ---------------------------------------------------------------------------
 // step_add_mark / step_remove_mark
 // ---------------------------------------------------------------------------

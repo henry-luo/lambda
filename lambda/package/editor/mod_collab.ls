@@ -82,6 +82,19 @@ pub fn step_rebase(step, mapping) {
       step_replace(p_from.path, p_from.offset, p_to.offset, step.slice)
     } else { null }
   }
+  else if (step.kind == 'replace_around') {
+    let p_from = mapping_map(mapping, pos(step.parent, step.from))
+    let p_to   = mapping_map(mapping, pos(step.parent, step.to))
+    let p_gap_from = mapping_map(mapping, pos(step.parent, step.gap_from))
+    let p_gap_to   = mapping_map(mapping, pos(step.parent, step.gap_to))
+    if (path_equal(p_from.path, p_to.path) and path_equal(p_from.path, p_gap_from.path) and
+        path_equal(p_from.path, p_gap_to.path) and len(p_from.path) == len(step.parent) and
+        (p_from.offset <= p_gap_from.offset) and (p_gap_from.offset <= p_gap_to.offset) and
+        (p_gap_to.offset <= p_to.offset)) {
+      step_replace_around(p_from.path, p_from.offset, p_to.offset,
+        p_gap_from.offset, p_gap_to.offset, step.slice, step.insert)
+    } else { null }
+  }
   else if (step.kind == 'add_mark') {
     step_add_mark(rebase_path(mapping, step.path), step.mark)
   }
