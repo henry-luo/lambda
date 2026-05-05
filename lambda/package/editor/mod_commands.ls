@@ -237,6 +237,13 @@ fn insert_line_break_same_parent_selection(state) {
 fn sel_top_block_range(sel) =>
   sel.kind == 'text' and not sel_single_leaf(sel) and len(sel_lo(sel).path) == 2 and len(sel_hi(sel).path) == 2 and sel_lo(sel).path[0] < sel_hi(sel).path[0]
 
+fn selected_top_block_end(sel) {
+  let lo = sel_lo(sel)
+  let hi = sel_hi(sel)
+  if (len(hi.path) == 2 and hi.offset == 0 and hi.path[0] > lo.path[0]) { hi.path[0] - 1 }
+  else { hi.path[0] }
+}
+
 fn cross_block_text_span_parts(state) {
   let sel = state.selection
   if (sel == null or not sel_top_block_range(sel)) { null }
@@ -924,19 +931,92 @@ fn collect_range_mark_steps(doc, parent_path0, mark, adding, i, end_i, acc) {
   }
 }
 
+fn mark_list_for(marks, mark, adding) =>
+  if (adding) { with_mark(marks, mark) } else { without_mark(marks, mark) }
+
+fn mark_text_leaf_node(leaf, mark, adding) =>
+  text_marked(leaf.text, mark_list_for(leaf.marks, mark, adding))
+
+fn mark_text_leaf_range(leaf, from, to, mark, adding) {
+  let before = nonempty_text_leaf(slice(leaf.text, 0, from), leaf.marks)
+  let middle_text = slice(leaf.text, from, to)
+  let middle = if (len(middle_text) == 0) { [] } else { [text_marked(middle_text, mark_list_for(leaf.marks, mark, adding))] }
+  let after = nonempty_text_leaf(slice(leaf.text, to, len(leaf.text)), leaf.marks)
+  list_concat(list_concat(before, middle), after)
+}
+
+fn mark_node_tree(n, mark, adding) {
+  if (is_text(n)) { mark_text_leaf_node(n, mark, adding) }
+  else if (is_node(n)) { node_attrs(n.tag, n.attrs, mark_node_children(n.content, mark, adding, 0, len(n.content), [])) }
+  else { n }
+}
+
+fn mark_node_children(children, mark, adding, i, n, acc) {
+  if (i >= n) { acc }
+  else { mark_node_children(children, mark, adding, i + 1, n, [*acc, mark_node_tree(children[i], mark, adding)]) }
+}
+
+fn selected_leaf_range_any_unmarked(leaf, from, to, mark) =>
+  leaf != null and is_text(leaf) and to > from and not has_mark(leaf.marks, mark)
+
+fn selected_node_any_unmarked(n, mark) => any_unmarked_text(n, mark)
+
+fn selected_children_any_unmarked(children, mark, i, end_i) {
+  if (i > end_i) { false }
+  else if (selected_node_any_unmarked(children[i], mark)) { true }
+  else { selected_children_any_unmarked(children, mark, i + 1, end_i) }
+}
+
+fn same_parent_selection_any_unmarked(span, mark) {
+  if (span.lo_index == span.hi_index) { selected_leaf_range_any_unmarked(span.lo_leaf, span.lo.offset, span.hi.offset, mark) }
+  else if (selected_leaf_range_any_unmarked(span.lo_leaf, span.lo.offset, len(span.lo_leaf.text), mark)) { true }
+  else if (selected_children_any_unmarked(span.parent.content, mark, span.lo_index + 1, span.hi_index - 1)) { true }
+  else { selected_leaf_range_any_unmarked(span.hi_leaf, 0, span.hi.offset, mark) }
+}
+
+fn mark_selected_children(children, mark, adding, i, end_i, acc) {
+  if (i > end_i) { acc }
+  else { mark_selected_children(children, mark, adding, i + 1, end_i, [*acc, mark_node_tree(children[i], mark, adding)]) }
+}
+
+fn marked_same_parent_slice(span, mark, adding) {
+  if (span.lo_index == span.hi_index) { mark_text_leaf_range(span.lo_leaf, span.lo.offset, span.hi.offset, mark, adding) }
+  else {
+    let first = mark_text_leaf_range(span.lo_leaf, span.lo.offset, len(span.lo_leaf.text), mark, adding)
+    let middle = mark_selected_children(span.parent.content, mark, adding, span.lo_index + 1, span.hi_index - 1, [])
+    let last = mark_text_leaf_range(span.hi_leaf, 0, span.hi.offset, mark, adding)
+    list_concat(list_concat(first, middle), last)
+  }
+}
+
+fn marked_same_parent_selection(span, slice_nodes) {
+  let before_count = len(nonempty_text_leaf(slice(span.lo_leaf.text, 0, span.lo.offset), span.lo_leaf.marks))
+  if (span.lo_index == span.hi_index) {
+    let selected_text = slice(span.lo_leaf.text, span.lo.offset, span.hi.offset)
+    text_selection(pos([*span.parent_path, span.lo_index + before_count], 0),
+      pos([*span.parent_path, span.lo_index + before_count], len(selected_text)))
+  } else {
+    let after_count = len(nonempty_text_leaf(slice(span.hi_leaf.text, span.hi.offset, len(span.hi_leaf.text)), span.hi_leaf.marks))
+    let last_selected_index = span.lo_index + len(slice_nodes) - after_count - 1
+    let head_index = if (span.hi.offset == 0 and after_count > 0) { last_selected_index + 1 } else { last_selected_index }
+    text_selection(pos([*span.parent_path, span.lo_index + before_count], 0),
+      pos([*span.parent_path, head_index], span.hi.offset))
+  }
+}
+
 fn toggle_mark_same_parent_range(state, mark) {
   let sel = state.selection
   if (sel == null or not sel_same_parent_leaves(sel) or sel_collapsed(sel)) { null }
   else {
-    let lo = sel_lo(sel)
-    let hi = sel_hi(sel)
-    let parent_path0 = parent_path(lo.path)
-    let lo_index = last_index(lo.path)
-    let hi_index = last_index(hi.path)
-    let adding = range_any_unmarked_leaf(state.doc, parent_path0, mark, lo_index, hi_index)
-    let steps = collect_range_mark_steps(state.doc, parent_path0, mark, adding, lo_index, hi_index, [])
-    if (len(steps) == 0) { null }
-    else { tx_apply_steps(tx_begin(state.doc, sel), steps, 0, len(steps)) }
+    let span = same_parent_text_span_parts(state)
+    if (span == null) { null }
+    else {
+      let adding = same_parent_selection_any_unmarked(span, mark)
+      let slice_nodes = marked_same_parent_slice(span, mark, adding)
+      let tx0 = tx_begin(state.doc, sel)
+      let tx1 = tx_step(tx0, step_replace(span.parent_path, span.lo_index, span.hi_index + 1, slice_nodes))
+      tx_set_selection(tx1, marked_same_parent_selection(span, slice_nodes))
+    }
   }
 }
 
@@ -1010,7 +1090,7 @@ pub fn cmd_toggle_mark(state, mark) {
   if (sel == null) { null }
   else if (sel.kind == 'all') { toggle_mark_all(state, mark) }
   else if (sel.kind == 'node') { toggle_mark_node(state, mark) }
-  else if (not sel_single_leaf(sel) and sel_same_parent_leaves(sel)) { toggle_mark_same_parent_range(state, mark) }
+  else if (not sel_collapsed(sel) and sel_same_parent_leaves(sel)) { toggle_mark_same_parent_range(state, mark) }
   else if (sel_top_block_range(sel)) { toggle_mark_top_block_range(state, mark) }
   else if (not sel_single_leaf(sel)) { null }
   else if (sel_collapsed(sel)) { cmd_toggle_stored_mark(state, mark) }
@@ -1154,7 +1234,7 @@ fn set_top_block_range_type(state, tag) {
   else {
     let lo = sel_lo(sel)
     let hi = sel_hi(sel)
-    let steps = collect_top_block_type_steps_between(state.doc, tag, lo.path[0], hi.path[0], [])
+    let steps = collect_top_block_type_steps_between(state.doc, tag, lo.path[0], selected_top_block_end(sel), [])
     if (len(steps) == 0) { null }
     else { tx_apply_steps(tx_begin(state.doc, sel), steps, 0, len(steps)) }
   }
@@ -1219,7 +1299,7 @@ pub fn cmd_wrap_blockquote(state) {
     else if (sel.kind == 'node') {
       if (len(sel.path) == 0) { null } else { wrap_top_blocks(state, sel.path[0], sel.path[0]) }
     }
-    else if (sel_top_block_range(sel)) { wrap_top_blocks(state, sel_lo(sel).path[0], sel_hi(sel).path[0]) }
+    else if (sel_top_block_range(sel)) { wrap_top_blocks(state, sel_lo(sel).path[0], selected_top_block_end(sel)) }
     else {
       let lo = sel_lo(sel)
       if (len(lo.path) == 0) { null } else { wrap_top_blocks(state, lo.path[0], lo.path[0]) }
@@ -1289,9 +1369,8 @@ fn insert_block_after_selection(state, block) {
   }
   else if (sel_top_block_range(sel)) {
     let lo = sel_lo(sel)
-    let hi = sel_hi(sel)
     let tx0 = tx_begin(state.doc, sel)
-    let tx1 = tx_step(tx0, step_replace([], lo.path[0], hi.path[0] + 1, [block]))
+    let tx1 = tx_step(tx0, step_replace([], lo.path[0], selected_top_block_end(sel) + 1, [block]))
     tx_set_selection(tx1, node_selection([lo.path[0]]))
   }
   else {

@@ -148,3 +148,23 @@ true
 true
 "cmd html schema paste mark:"
 true
+"html loose list outer tag:"
+true
+"html loose list item count:"
+true
+"html loose list text item:"
+true
+"html loose nested list tag:"
+true
+"html schema loose list tag:"
+true
+"html schema loose list item count:"
+true
+"html schema loose nested tag:"
+true
+"html direct rows table tag:"
+true
+"html direct rows wrapped:"
+true
+"html direct rows count:"
+true

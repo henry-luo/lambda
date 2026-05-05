@@ -136,3 +136,19 @@ let vht = schema_validate(html5_subset_schema, html_bad_table)
 "markdown image draggable:"; markdown_schema.image.draggable
 "markdown paragraph editable:"; markdown_schema.paragraph.editable
 "html image selectable:"; html5_subset_schema.img.selectable
+
+// 14. Declarative attr constraints: enum and min/max checks without a custom validator.
+let constrained_schema = {
+  doc: {role: 'block', content: [{tag: 'box', qty: 'one'}], marks: 'none'},
+  box: {role: 'block', content: [], marks: 'none', attrs: [
+    {name: 'align', type: 'string', one_of: ["left", "center", "right"]},
+    {name: 'level', type: 'int', min: 1, max: 3}
+  ]}
+}
+"attr constraints valid:"; is_valid(constrained_schema, <doc <box align: "center", level: 2>>)
+let enum_bad = schema_validate(constrained_schema, <doc <box align: "sideways", level: 2>>)
+"attr enum constraint:"; enum_bad[0].message == "attribute constraint failed"
+let min_bad = schema_validate(constrained_schema, <doc <box align: "left", level: 0>>)
+"attr min constraint:"; min_bad[0].message == "attribute constraint failed"
+let max_bad = schema_validate(constrained_schema, <doc <box align: "right", level: 4>>)
+"attr max constraint:"; max_bad[0].message == "attribute constraint failed"

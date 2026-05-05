@@ -147,3 +147,11 @@ let r_new = history_apply_step(u_after.hist, u_after.doc, s_new, null, null)
 let p_orig = pos([0, 0], 12)
 let p_final = tx_map_pos(tx2, p_orig)
 "map pos final:"; p_final.offset
+
+let node_sel = node_selection([1])
+let delete_first_tx = tx_step(tx_begin(d0, node_sel), step_replace([], 0, 1, []))
+"node selection shift kind:"; delete_first_tx.sel_after.kind == 'node'
+"node selection shift path:"; path_equal(delete_first_tx.sel_after.path, [0])
+let delete_selected_tx = tx_step(tx_begin(d0, node_sel), step_replace([], 1, 2, []))
+"node selection deleted kind:"; delete_selected_tx.sel_after.kind == 'text'
+"node selection deleted offset:"; delete_selected_tx.sel_after.anchor.offset == 1

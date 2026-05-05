@@ -76,3 +76,11 @@ true
 true
 "html image selectable:"
 true
+"attr constraints valid:"
+true
+"attr enum constraint:"
+true
+"attr min constraint:"
+true
+"attr max constraint:"
+true

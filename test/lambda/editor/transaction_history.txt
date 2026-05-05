@@ -106,3 +106,11 @@ true
 true
 "map pos final:"
 17
+"node selection shift kind:"
+true
+"node selection shift path:"
+true
+"node selection deleted kind:"
+true
+"node selection deleted offset:"
+true
