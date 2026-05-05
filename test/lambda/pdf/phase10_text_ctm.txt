@@ -1,0 +1,1 @@
+{ text_count: 2, inside_ctm: true, outside_restored: true, no_paths: true}

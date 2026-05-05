@@ -358,6 +358,16 @@ fn _is_noop_op(opr) {
         or (opr == "d0") or (opr == "d1"))
 }
 
+fn _is_text_op(opr) {
+    ((opr == "BT") or (opr == "ET") or (opr == "Tf")
+        or (opr == "Tm") or (opr == "Td") or (opr == "TD")
+        or (opr == "T*") or (opr == "TL")
+        or (opr == "Tc") or (opr == "Tw") or (opr == "Tz")
+        or (opr == "Ts") or (opr == "Tr")
+        or (opr == "Tj") or (opr == "TJ")
+        or (opr == "'") or (opr == "\""))
+}
+
 fn _media_box(page) { coords.media_box_rect(page) }
 
 // ============================================================
@@ -565,17 +575,15 @@ fn _form_group(children, opacity_value, bounds_attr) {
 
 pub pn render_page(pdf, page, ops, page_h) {
     let fonts = _resolve_fonts(pdf, page, ops)
-    let tr = text.render_text_ops(ops, fonts, page_h)
     let r = _run_ops(pdf, page, ops, util.IDENTITY, fonts, page_h)
-    let texts = [for (t in tr) t]
+    let texts = [for (t in r.texts) t]
     let paths = [for (p in r.paths) p]
     return { texts: texts, paths: paths }
 }
 
 pub pn render_page_with_fonts(pdf, page, ops, page_h, fonts) {
-    let tr = text.render_text_ops(ops, fonts, page_h)
     let r = _run_ops(pdf, page, ops, util.IDENTITY, fonts, page_h)
-    let texts = [for (t in tr) t]
+    let texts = [for (t in r.texts) t]
     let paths = [for (p in r.paths) p]
     return { texts: texts, paths: paths }
 }
@@ -655,7 +663,19 @@ pn _run_ops_with_state(pdf, page, ops, init_ctm, fonts, page_h, clip_prefix, inh
             st = _op_cm(st, operands)
         }
         else if (opr == "Tf") {
-            st = st
+            st = _op_Tf(st, operands)
+        }
+        else if (_is_text_op(opr)) {
+            let tr = text.apply_op(st.text, st.ctm, opr, operands, page_h)
+            st = _with_text(st, tr.state)
+            if (tr.emit != null) {
+                var tk = 0
+                let tn = len(tr.emit)
+                while (tk < tn) {
+                    texts = texts ++ [tr.emit[tk]]
+                    tk = tk + 1
+                }
+            }
         }
         else if (_is_color_op(opr)) {
             var pname = "unused"
