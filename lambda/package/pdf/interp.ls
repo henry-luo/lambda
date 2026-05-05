@@ -232,6 +232,16 @@ fn _op_SC(st, ops) {
     _with_text(st1, text.set_stroke(st1.text, c))
 }
 
+fn _set_pattern_fill(st, p) {
+    let st1 = _with_path(st, path.set_fill_color(st.path, p.fill))
+    _with_text(st1, text.set_fill(st1.text, p.fill))
+}
+
+fn _set_pattern_stroke(st, p) {
+    let st1 = _with_path(st, path.set_stroke_color(st.path, p.fill))
+    _with_text(st1, text.set_stroke(st1.text, p.fill))
+}
+
 fn _is_color_op(opr) {
     ((opr == "rg") or (opr == "RG") or (opr == "g") or (opr == "G")
         or (opr == "k") or (opr == "K")
@@ -460,6 +470,58 @@ fn _clip_prefix_for_do(base, ops, index) {
     else { base ++ "_" ++ nm ++ "_" ++ string(index) ++ "_" }
 }
 
+fn _is_clip_def(el) {
+    if (not (el is element)) { false }
+    else { string(name(el)) == "clipPath" }
+}
+
+fn _is_transparency_group(fc) {
+    if (fc == null or fc.dict == null or fc.dict.Group == null) { false }
+    else { fc.dict.Group.S == "Transparency" }
+}
+
+fn _form_group_opacity(st, fc) {
+    if (not _is_transparency_group(fc)) { 1.0 }
+    else if (st.path.fill_opacity < 1.0) { st.path.fill_opacity }
+    else if (st.path.stroke_opacity < 1.0) { st.path.stroke_opacity }
+    else { 1.0 }
+}
+
+fn _form_bounds_attr(fc) {
+    if (fc == null or fc.dict == null or not (fc.dict.BBox is array) or len(fc.dict.BBox) < 4) { "" }
+    else {
+        let x0 = _num(fc.dict.BBox[0]); let y0 = _num(fc.dict.BBox[1])
+        let x1 = _num(fc.dict.BBox[2]); let y1 = _num(fc.dict.BBox[3])
+        (util.fmt_num(x0) ++ " " ++ util.fmt_num(y0) ++ " " ++
+         util.fmt_num(x1 - x0) ++ " " ++ util.fmt_num(y1 - y0))
+    }
+}
+
+fn _form_child_state(st, fc) {
+    if (_form_group_opacity(st, fc) < 1.0) {
+        _with_path(st, path.set_opacity(st.path, 1.0, 1.0))
+    }
+    else { st }
+}
+
+fn _form_group(children, opacity_value, bounds_attr) {
+    if (opacity_value < 1.0 and bounds_attr != "") {
+        <g opacity: util.fmt_num(opacity_value), 'data-pdf-bounds': bounds_attr;
+            for (c in children) c
+        >
+    }
+    else if (opacity_value < 1.0) {
+        <g opacity: util.fmt_num(opacity_value);
+            for (c in children) c
+        >
+    }
+    else {
+        <g;
+            for (c in children) c
+        >
+    }
+}
+
 // ============================================================
 // Driver
 // ============================================================
@@ -517,7 +579,7 @@ pn _run_ops_with_state(pdf, page, ops, init_ctm, fonts, page_h, clip_prefix, inh
     let n = len(ops)
     while (i < n) {
         let opr  = ops[i].op
-        let args = ops[i].operands
+        let operands = ops[i].operands
 
         if (opr == "q") {
             stack = stack ++ [{
@@ -543,16 +605,42 @@ pn _run_ops_with_state(pdf, page, ops, init_ctm, fonts, page_h, clip_prefix, inh
             }
         }
         else if (opr == "cm") {
-            st = _op_cm(st, args)
+            st = _op_cm(st, operands)
         }
         else if (opr == "Tf") {
             st = st
         }
         else if (_is_color_op(opr)) {
-            st = _apply_color(st, opr, args)
+            var pname = "unused"
+            var has_pattern = 0
+            if (opr == "scn" or opr == "SCN") {
+                let ds = string(operands)
+                let dp = index_of(ds, "value")
+                if (dp >= 0) {
+                    let dr = slice(ds, dp + 8, len(ds))
+                    let name_parts = split(dr, "\"")
+                    if (len(name_parts) >= 1) {
+                        pname = name_parts[0]
+                        has_pattern = 1
+                    }
+                }
+            }
+            if (has_pattern == 1) {
+                let pid = "pat" ++ string(def_ctr)
+                let pat = shading.from_pattern_fill(pdf, page, pname, pid)
+                def_ctr = def_ctr + 1
+                var pk = 0
+                let pn = len(pat.defs)
+                while (pk < pn) { paths = paths ++ [pat.defs[pk]]; pk = pk + 1 }
+                if (opr == "scn") { st = _set_pattern_fill(st, pat) }
+                else { st = _set_pattern_stroke(st, pat) }
+            }
+            else {
+                st = _apply_color(st, opr, operands)
+            }
         }
         else if (opr == "gs") {
-            st = _apply_gs(st, args, pdf, page)
+            st = _apply_gs(st, operands, pdf, page)
         }
         else if (opr == "W") {
             // Mark current path as pending non-zero clip. The clip is
@@ -579,7 +667,7 @@ pn _run_ops_with_state(pdf, page, ops, init_ctm, fonts, page_h, clip_prefix, inh
             // Shading fill — paint with the named gradient across the
             // current clip region (we approximate via a covering rect).
             let mb = _media_box(page)
-            let s = shading.from_sh_op(pdf, page, st.ctm, args, mb.w, mb.h, def_ctr)
+            let s = shading.from_sh_op(pdf, page, st.ctm, operands, mb.w, mb.h, def_ctr)
             def_ctr = def_ctr + 1
             if (len(s.defs) > 0) {
                 var k = 0
@@ -602,7 +690,7 @@ pn _run_ops_with_state(pdf, page, ops, init_ctm, fonts, page_h, clip_prefix, inh
         else if (opr == "inline_image") {
             // Synthetic op from stream.ls when it skipped a BI..EI
             // segment. Emit a placeholder rect in the local CTM.
-            let imgs = image.apply_inline(st.ctm, args)
+            let imgs = image.apply_inline(st.ctm, operands)
             if (len(imgs) > 0) {
                 paths = paths ++ _wrap_emit_with_ctm(imgs, st.ctm, active_clip_id, has_active_clip)
             }
@@ -611,27 +699,41 @@ pn _run_ops_with_state(pdf, page, ops, init_ctm, fonts, page_h, clip_prefix, inh
             // Image / Form XObject placement. Interpret Form streams in a
             // smaller recursive pass instead of flattening them into the page
             // stream; large flat op arrays can corrupt later operands.
-            let fc = _form_content_for_do(pdf, page, args)
+            let fc = _form_content_for_do(pdf, page, operands)
             let has_form = (fc != null and fc.data != "")
             if (has_form) {
                 let form_ops = stream.parse_content_stream(fc.data)
                 let form_ctm = util.matrix_mul(fc.matrix, st.ctm)
-                let sub_prefix = _clip_prefix_for_do(clip_prefix, args, i)
-                let sub = _run_ops_with_state(pdf, page, form_ops, form_ctm, fonts, page_h, sub_prefix, st)
+                let sub_prefix = _clip_prefix_for_do(clip_prefix, operands, i)
+                let group_opacity = _form_group_opacity(st, fc)
+                let child_st = _form_child_state(st, fc)
+                let sub = _run_ops_with_state(pdf, page, form_ops, form_ctm, fonts, page_h, sub_prefix, child_st)
+                var defs = []
+                var draws = []
                 var k = 0
                 let me = len(sub.paths)
                 while (k < me) {
-                    if (has_active_clip == 1) {
-                        paths = paths ++ [<g 'clip-path': "url(#" ++ active_clip_id ++ ")"; sub.paths[k]>]
+                    if (_is_clip_def(sub.paths[k])) {
+                        defs = defs ++ [sub.paths[k]]
                     }
                     else {
-                        paths = paths ++ [sub.paths[k]]
+                        draws = draws ++ [sub.paths[k]]
                     }
                     k = k + 1
                 }
+                paths = paths ++ defs
+                if (len(draws) > 0) {
+                    let grouped = _form_group(draws, group_opacity, _form_bounds_attr(fc))
+                    if (has_active_clip == 1) {
+                        paths = paths ++ [<g 'clip-path': "url(#" ++ active_clip_id ++ ")"; grouped>]
+                    }
+                    else {
+                        paths = paths ++ [grouped]
+                    }
+                }
             }
             else {
-                let imgs = image.apply_do(pdf, page, st.ctm, args)
+                let imgs = image.apply_do(pdf, page, st.ctm, operands)
                 if (len(imgs) > 0) {
                     var k = 0
                     let me = len(imgs)
@@ -649,7 +751,7 @@ pn _run_ops_with_state(pdf, page, ops, init_ctm, fonts, page_h, clip_prefix, inh
         }
         else if (path.handles(opr)) {
             // Path construction / painting / line-state operator.
-            let pr = path.apply_op(st.path, opr, args)
+            let pr = path.apply_op(st.path, opr, operands)
             st = _with_path(st, pr.state)
             // If a W/W* was set immediately before this op AND this op
             // paints (or no-ops via `n`), establish the clip now.
