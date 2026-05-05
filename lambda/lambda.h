@@ -438,6 +438,7 @@ typedef enum SysFunc {
     SYSFUNC_EDIT_COMMIT1,    // commit(description) - commit with description
     // reactive UI event dispatch
     SYSPROC_EMIT,            // emit(event_name, data) - dispatch event to parent template handler
+    SYSPROC_SET_SELECTION,   // set_selection(sel) - push editor selection back to DomSelection (Phase R4 §7.4)
 } SysFunc;
 
 typedef struct Type {
@@ -1495,6 +1496,10 @@ extern "C" {
     Item pn_emit(Item event_name, Item event_data);
     // called from Radiant side — dispatches emitted event up the DOM ancestry
     Item dispatch_emit(Item event_name, Item event_data);
+
+    // editor: push a SourceSelection back to the live DomSelection (Phase R4 §7.4)
+    Item pn_set_selection(Item selection);
+    Item dispatch_set_selection(Item selection);
 
 #ifdef __cplusplus
 } // extern "C"

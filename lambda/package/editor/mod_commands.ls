@@ -130,6 +130,21 @@ pub fn cmd_toggle_mark(state, mark) {
   }
 }
 
+pub fn cmd_format_bold(state) {
+  let mark = 'strong'
+  cmd_toggle_mark(state, mark)
+}
+
+pub fn cmd_format_italic(state) {
+  let mark = 'em'
+  cmd_toggle_mark(state, mark)
+}
+
+pub fn cmd_format_underline(state) {
+  let mark = 'underline'
+  cmd_toggle_mark(state, mark)
+}
+
 // ---------------------------------------------------------------------------
 // cmd_set_block_type — re-tag the immediate block ancestor of the caret
 // ---------------------------------------------------------------------------

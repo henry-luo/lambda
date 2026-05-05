@@ -496,3 +496,41 @@ TEST(SourcePosBridgeMarkBuilder, NodeSelectionShape) {
 
     source_path_free(&path);
 }
+
+// ---------------------------------------------------------------------------
+// dom_selection_apply_source_selection parsing layer (Phase R4 §7.4)
+// ---------------------------------------------------------------------------
+// We only cover the early-out / shape-validation paths here; integration with
+// a live DomSelection + render_map is exercised at the editor lambda-test
+// layer (test/lambda/editor/source_selection.ls and friends).
+
+TEST(SourcePosBridgeR4, ApplyRejectsNullArgs) {
+    Item bogus = {0};
+    EXPECT_FALSE(dom_selection_apply_source_selection(nullptr, nullptr, bogus));
+    EXPECT_FALSE(dom_selection_apply_source_selection(nullptr,
+        (struct DomNode*)0xdead, bogus));
+}
+
+TEST(SourcePosBridgeR4, ApplyRejectsMalformedItem) {
+    // ds + root passed as opaque non-null sentinels — the function must
+    // bail out at MapReader/shape validation before dereferencing them.
+    auto ds_sentinel = (struct DomSelection*)0xdead;
+    auto root_sentinel = (struct DomNode*)0xbeef;
+    Item not_a_map = {0};  // ITEM_NULL — not a map
+    EXPECT_FALSE(dom_selection_apply_source_selection(ds_sentinel,
+        root_sentinel, not_a_map));
+}
+
+TEST(SourcePosBridgeR4, ApplyRejectsUnknownKind) {
+    Input* input = InputManager::create_input(nullptr);
+    ASSERT_NE(input, nullptr);
+    MarkBuilder mb(input);
+    MapBuilder m = mb.map();
+    m.put("kind", mb.createSymbolItem("frobnicate"));
+    Item bogus_sel = m.final();
+
+    auto ds_sentinel = (struct DomSelection*)0xdead;
+    auto root_sentinel = (struct DomNode*)0xbeef;
+    EXPECT_FALSE(dom_selection_apply_source_selection(ds_sentinel,
+        root_sentinel, bogus_sel));
+}

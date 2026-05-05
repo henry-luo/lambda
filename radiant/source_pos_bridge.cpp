@@ -416,3 +416,128 @@ Item source_node_selection_to_item(MarkBuilder& mb, const SourcePathC* path) {
     m.put("path", path_to_item(mb, path));
     return m.final();
 }
+
+// ---------------------------------------------------------------------------
+// Phase R4 §7.4 — Source → DOM selection sync.
+//
+// Parse a Lambda `selection` Item and apply it to the given DomSelection by
+// resolving each endpoint through `dom_boundary_from_source_pos`.
+// ---------------------------------------------------------------------------
+
+#include "../lambda/mark_reader.hpp"
+
+namespace {
+
+// Pull `{ path: [int...], offset: int }` out of an Item; treat it as a
+// SOURCE_POS_TEXT position (the only kind editor selections produce).
+// Caller must source_pos_free() the result.
+bool source_pos_from_item(Item pos_item, SourcePosC* out) {
+    if (!out) return false;
+    out->kind = SOURCE_POS_TEXT;
+    out->offset = 0;
+    source_path_init(&out->path);
+
+    MapReader m = MapReader::fromItem(pos_item);
+    if (!m.isValid()) return false;
+
+    ItemReader off = m.get("offset");
+    if (off.isInt()) out->offset = (uint32_t)off.asInt();
+
+    ItemReader path = m.get("path");
+    if (!path.isArray()) return true;  // empty path — root
+    ArrayReader arr = path.asArray();
+    int depth = (int)arr.length();
+    if (depth <= 0) return true;
+    out->path.indices = (int*)malloc(sizeof(int) * (size_t)depth);
+    if (!out->path.indices) return false;
+    out->path.depth = depth;
+    for (int i = 0; i < depth; i++) {
+        ItemReader idx = arr.get(i);
+        out->path.indices[i] = idx.isInt() ? (int)idx.asInt() : 0;
+    }
+    return true;
+}
+
+bool source_path_from_item(Item path_item, SourcePathC* out) {
+    if (!out) return false;
+    source_path_init(out);
+    ArrayReader arr = ArrayReader::fromItem(path_item);
+    if (!arr.isValid()) return false;
+    int depth = (int)arr.length();
+    if (depth <= 0) return true;
+    out->indices = (int*)malloc(sizeof(int) * (size_t)depth);
+    if (!out->indices) return false;
+    out->depth = depth;
+    for (int i = 0; i < depth; i++) {
+        ItemReader idx = arr.get(i);
+        out->indices[i] = idx.isInt() ? (int)idx.asInt() : 0;
+    }
+    return true;
+}
+
+// Resolve a SOURCE_POS_ELEMENT path to the DomElement it refers to, by
+// walking the DOM (via dom_boundary_from_source_pos with offset 0 and
+// kind=ELEMENT). Returns NULL on failure.
+DomNode* dom_node_from_source_path(DomNode* dom_root, const SourcePathC* path) {
+    if (!dom_root || !path) return NULL;
+    SourcePosC p;
+    p.path = *path;          // borrow indices — caller still owns
+    p.offset = 0;
+    p.kind = SOURCE_POS_ELEMENT;
+    DomBoundary b = {0};
+    if (!dom_boundary_from_source_pos(dom_root, &p, &b)) return NULL;
+    return b.node;
+}
+
+} // namespace
+
+extern "C" bool dom_selection_apply_source_selection(DomSelection* ds,
+                                                     DomNode* dom_root,
+                                                     Item selection) {
+    if (!ds || !dom_root) return false;
+
+    MapReader m = MapReader::fromItem(selection);
+    if (!m.isValid()) return false;
+
+    ItemReader kind = m.get("kind");
+    if (!kind.isSymbol()) return false;
+    const char* kind_str = kind.asSymbol() ? kind.asSymbol()->chars : NULL;
+    if (!kind_str) return false;
+
+    const char* exc = NULL;
+
+    if (strcmp(kind_str, "text") == 0) {
+        SourcePosC anchor_pos;
+        SourcePosC head_pos;
+        if (!source_pos_from_item(m.get("anchor").item(), &anchor_pos)) return false;
+        if (!source_pos_from_item(m.get("head").item(),   &head_pos)) {
+            source_pos_free(&anchor_pos);
+            return false;
+        }
+        DomBoundary anchor_b = {0};
+        DomBoundary head_b = {0};
+        bool ok = dom_boundary_from_source_pos(dom_root, &anchor_pos, &anchor_b)
+               && dom_boundary_from_source_pos(dom_root, &head_pos,   &head_b);
+        source_pos_free(&anchor_pos);
+        source_pos_free(&head_pos);
+        if (!ok || !anchor_b.node || !head_b.node) return false;
+        return dom_selection_set_base_and_extent(ds,
+            anchor_b.node, anchor_b.offset,
+            head_b.node,   head_b.offset, &exc);
+    }
+
+    if (strcmp(kind_str, "node") == 0) {
+        SourcePathC path;
+        if (!source_path_from_item(m.get("path").item(), &path)) return false;
+        DomNode* node = dom_node_from_source_path(dom_root, &path);
+        source_path_free(&path);
+        if (!node) return false;
+        return dom_selection_select_all_children(ds, node, &exc);
+    }
+
+    if (strcmp(kind_str, "all") == 0) {
+        return dom_selection_select_all_children(ds, dom_root, &exc);
+    }
+
+    return false;
+}

@@ -732,6 +732,10 @@ SysFuncInfo sys_func_defs[] = {
     // reactive UI: emit event to parent template handler
     {SYSPROC_EMIT, "emit", 2, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "pn_emit", FPTR(pn_emit), NULL, NULL, false, 0},
+
+    // editor: push SourceSelection back to live DomSelection (Phase R4 §7.4)
+    {SYSPROC_SET_SELECTION, "set_selection", 1, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "pn_set_selection", FPTR(pn_set_selection), NULL, NULL, false, 0},
 };
 
 // note: sizeof(sys_func_defs) may fail with incomplete type because the header

@@ -159,6 +159,27 @@ Item source_node_selection_to_item(MarkBuilder& mb, const SourcePathC* path);
 extern "C" {
 #endif
 
+// ---------------------------------------------------------------------------
+// Apply a Lambda `selection` Item back to a DomSelection (Phase R4 §7.4
+// — Source → DOM caret/selection sync).
+//
+// `selection` must match one of the shapes produced by
+// `source_text_selection_to_item` / `source_node_selection_to_item`:
+//   { kind:'text', anchor:pos, head:pos }
+//   { kind:'node', path:[int,...] }
+//   { kind:'all' }                       — selects every child of dom_root
+//
+// Each `pos` endpoint is resolved against `dom_root` via
+// `dom_boundary_from_source_pos`. On success the selection is updated
+// in-place and true is returned. The function is best-effort: malformed
+// input or unresolvable positions cause it to return false without
+// touching `ds`.
+
+struct DomSelection;
+bool dom_selection_apply_source_selection(struct DomSelection* ds,
+                                          struct DomNode* dom_root,
+                                          Item selection);
+
 #ifdef __cplusplus
 }
 #endif
