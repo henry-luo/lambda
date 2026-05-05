@@ -229,3 +229,50 @@ TEST_F(EditBridgeSessionTest, ExecAppliesRootElementCommands) {
     edit_session_destroy(session);
 }
 
+TEST_F(EditBridgeSessionTest, HistoryRestoresSelectionSnapshots) {
+    MarkBuilder builder(input);
+    Item doc0 = builder.map().put("counter", (int64_t)0).final();
+    Item doc1 = builder.map().put("counter", (int64_t)1).final();
+    EditSession* session = edit_session_new_with_input(input, doc0, nullptr);
+    ASSERT_NE(session, nullptr);
+
+    SessionCounters counters;
+    counters.change_count = 0;
+    counters.selection_count = 0;
+    counters.last_payload = ItemNull;
+    edit_session_subscribe(session, EDIT_EVENT_SELECTION, count_selection, &counters);
+
+    uint32_t anchor_a_indices[1] = {0};
+    uint32_t head_a_indices[1] = {0};
+    SourcePos anchor_a = {{1, anchor_a_indices}, 1};
+    SourcePos head_a = {{1, head_a_indices}, 1};
+    EXPECT_TRUE(edit_session_set_selection(session, anchor_a, head_a));
+    EXPECT_TRUE(edit_session_exec(session, "commit", ItemNull));
+
+    EXPECT_TRUE(edit_session_exec(session, "set_root", doc1));
+    uint32_t anchor_b_indices[2] = {0, 1};
+    uint32_t head_b_indices[2] = {0, 1};
+    SourcePos anchor_b = {{2, anchor_b_indices}, 5};
+    SourcePos head_b = {{2, head_b_indices}, 5};
+    EXPECT_TRUE(edit_session_set_selection(session, anchor_b, head_b));
+    EXPECT_TRUE(edit_session_exec(session, "commit", ItemNull));
+
+    EXPECT_TRUE(edit_session_exec(session, "undo", ItemNull));
+    EXPECT_EQ(counter_value(edit_session_current(session)), 0);
+    SourcePos undo_anchor = edit_session_selection_anchor(session);
+    EXPECT_EQ(undo_anchor.path.len, 1u);
+    EXPECT_EQ(undo_anchor.path.indices[0], 0u);
+    EXPECT_EQ(undo_anchor.offset, 1u);
+
+    EXPECT_TRUE(edit_session_exec(session, "redo", ItemNull));
+    EXPECT_EQ(counter_value(edit_session_current(session)), 1);
+    SourcePos redo_anchor = edit_session_selection_anchor(session);
+    EXPECT_EQ(redo_anchor.path.len, 2u);
+    EXPECT_EQ(redo_anchor.path.indices[0], 0u);
+    EXPECT_EQ(redo_anchor.path.indices[1], 1u);
+    EXPECT_EQ(redo_anchor.offset, 5u);
+    EXPECT_GE(counters.selection_count, 4);
+
+    edit_session_destroy(session);
+}
+

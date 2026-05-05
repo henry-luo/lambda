@@ -8,6 +8,30 @@ true
 true
 "replace caret:"
 true
+"insert all doc:"
+true
+"insert all count:"
+true
+"insert all tag:"
+true
+"insert all caret path:"
+true
+"insert all caret off:"
+true
+"insert all mark:"
+true
+"insert node doc:"
+true
+"insert node tag:"
+true
+"insert node caret:"
+true
+"insert inline node doc:"
+true
+"insert inline node text:"
+true
+"insert inline node caret:"
+true
 "del-back doc:"
 true
 "del-back caret:"
@@ -26,6 +50,20 @@ true
 true
 "del-back range caret:"
 true
+"del-back all doc:"
+true
+"del-back all block:"
+true
+"del-back all caret:"
+true
+"del-back node order:"
+true
+"del-back node caret:"
+true
+"del-back only node doc:"
+true
+"del-back only node caret:"
+true
 "del-fwd doc:"
 true
 "del-fwd caret:"
@@ -40,11 +78,27 @@ true
 true
 "del-fwd at doc end null:"
 true
+"del-fwd all doc:"
+true
+"del-fwd all caret:"
+true
+"del-fwd node order:"
+true
+"del-fwd node caret:"
+true
 "del-word doc:"
 true
 "del-word caret:"
 true
 "del-word start null:"
+true
+"del-word all doc:"
+true
+"del-word all caret:"
+true
+"del-word node order:"
+true
+"del-word node caret:"
 true
 "line-break children:"
 true
@@ -89,6 +143,32 @@ true
 "toggle preserves text:"
 true
 "toggle remove:"
+true
+"toggle all add steps:"
+true
+"toggle all add first:"
+true
+"toggle all add second:"
+true
+"toggle all remove steps:"
+true
+"toggle all remove first:"
+true
+"toggle all remove second:"
+true
+"toggle all partial steps:"
+true
+"toggle all partial first kept:"
+true
+"toggle all partial second added:"
+true
+"toggle node steps:"
+true
+"toggle node first:"
+true
+"toggle node second untouched:"
+true
+"toggle node remove:"
 true
 "set-type tag:"
 true

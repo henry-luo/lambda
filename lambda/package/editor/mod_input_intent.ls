@@ -113,6 +113,7 @@ fn dispatch_intent_raw(state, ev) =>
   else if (ev.input_type == "formatUnderline") cmd_format_underline(state)
   else if (ev.input_type == "formatIndent") cmd_indent_list_item(state)
   else if (ev.input_type == "formatOutdent") cmd_outdent_list_item(state)
+  else if (ev.input_type == "selectAll") cmd_select_all(state)
   else if (ev.input_type == "historyUndo") dispatch_history_intent(state, ev)
   else if (ev.input_type == "historyRedo") dispatch_history_intent(state, ev)
   else null

@@ -85,8 +85,7 @@ let sa1_inv = step_invert(sa1, d)
 "sa1 inv val null:"; sa1_inv.value == null
 let da1b = step_apply(sa1_inv, da1)
 "attr removed?";  attrs_get(da1b.content[0].attrs, 'align') == null
-// Note: invert sets the attribute back to null (preserving the slot), which
-// is acceptable for round-trip because attrs_get treats missing == null.
+"attr removed count:"; len(da1b.content[0].attrs) == 0
 
 let sa2 = step_set_attr([0], 'align', "right")
 let da2 = step_apply(sa2, da1)  // start from "center"

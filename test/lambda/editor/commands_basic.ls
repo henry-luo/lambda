@@ -27,6 +27,34 @@ let tx_rep = cmd_insert_text(s_sel, "Lambda")
 "replace doc:";  doc_text(tx_rep.doc_after) == "Hello, Lambda.Second."
 "replace caret:"; tx_rep.sel_after.anchor.offset == 13
 
+let s_all = {doc: d0, selection: all_selection()}
+let tx_all_insert = cmd_insert_text(s_all, "All new")
+"insert all doc:"; doc_text(tx_all_insert.doc_after) == "All new"
+"insert all count:"; len(tx_all_insert.doc_after.content) == 1
+"insert all tag:"; tx_all_insert.doc_after.content[0].tag == 'paragraph'
+"insert all caret path:"; path_equal(tx_all_insert.sel_after.anchor.path, [0, 0])
+"insert all caret off:"; tx_all_insert.sel_after.anchor.offset == 7
+
+let tx_all_insert_marked = cmd_insert_text({doc: d0, selection: all_selection(), stored_marks: ['strong']}, "Bold")
+"insert all mark:"; has_mark(node_at(tx_all_insert_marked.doc_after, [0, 0]).marks, 'strong')
+
+let atom_doc = node('doc', [
+  node('paragraph', [text("A")]),
+  node('image', []),
+  node('paragraph', [text("C")])
+])
+let atom_state = {doc: atom_doc, selection: node_selection([1])}
+let tx_node_insert = cmd_insert_text(atom_state, "Inserted")
+"insert node doc:"; [for (n in tx_node_insert.doc_after.content) doc_text(n)] == ["A", "Inserted", "C"]
+"insert node tag:"; node_at(tx_node_insert.doc_after, [1]).tag == 'paragraph'
+"insert node caret:"; path_equal(tx_node_insert.sel_after.anchor.path, [1, 0]) and tx_node_insert.sel_after.anchor.offset == 8
+
+let inline_atom_doc = node('doc', [node('paragraph', [text("A"), node('image', []), text("C")])])
+let tx_inline_node_insert = cmd_insert_text({doc: inline_atom_doc, selection: node_selection([0, 1])}, "B")
+"insert inline node doc:"; doc_text(tx_inline_node_insert.doc_after) == "ABC"
+"insert inline node text:"; node_at(tx_inline_node_insert.doc_after, [0, 1]).text == "B"
+"insert inline node caret:"; path_equal(tx_inline_node_insert.sel_after.anchor.path, [0, 1]) and tx_inline_node_insert.sel_after.anchor.offset == 1
+
 // ---------------------------------------------------------------------------
 // cmd_delete_backward
 // ---------------------------------------------------------------------------
@@ -52,6 +80,18 @@ let tx_db2 = cmd_delete_backward(s_sel)
 "del-back range doc:"; doc_text(tx_db2.doc_after) == "Hello, .Second."
 "del-back range caret:"; tx_db2.sel_after.anchor.offset == 7
 
+let tx_db_all = cmd_delete_backward(s_all)
+"del-back all doc:"; doc_text(tx_db_all.doc_after) == ""
+"del-back all block:"; tx_db_all.doc_after.content[0].tag == 'paragraph'
+"del-back all caret:"; path_equal(tx_db_all.sel_after.anchor.path, [0, 0]) and tx_db_all.sel_after.anchor.offset == 0
+
+let tx_db_node = cmd_delete_backward(atom_state)
+"del-back node order:"; [for (n in tx_db_node.doc_after.content) doc_text(n)] == ["A", "C"]
+"del-back node caret:"; path_equal(tx_db_node.sel_after.anchor.path, []) and tx_db_node.sel_after.anchor.offset == 1
+let tx_db_only_node = cmd_delete_backward({doc: node('doc', [node('image', [])]), selection: node_selection([0])})
+"del-back only node doc:"; doc_text(tx_db_only_node.doc_after) == ""
+"del-back only node caret:"; path_equal(tx_db_only_node.sel_after.anchor.path, [0, 0]) and tx_db_only_node.sel_after.anchor.offset == 0
+
 // ---------------------------------------------------------------------------
 // cmd_delete_forward
 // ---------------------------------------------------------------------------
@@ -69,6 +109,12 @@ let tx_join_fwd = cmd_delete_forward(s_end)
 
 let s_doc_end = {doc: d0, selection: text_selection(pos([1, 0], 7), pos([1, 0], 7))}
 "del-fwd at doc end null:"; cmd_delete_forward(s_doc_end) == null
+let tx_df_all = cmd_delete_forward(s_all)
+"del-fwd all doc:"; doc_text(tx_df_all.doc_after) == ""
+"del-fwd all caret:"; path_equal(tx_df_all.sel_after.anchor.path, [0, 0]) and tx_df_all.sel_after.anchor.offset == 0
+let tx_df_node = cmd_delete_forward(atom_state)
+"del-fwd node order:"; [for (n in tx_df_node.doc_after.content) doc_text(n)] == ["A", "C"]
+"del-fwd node caret:"; path_equal(tx_df_node.sel_after.anchor.path, []) and tx_df_node.sel_after.anchor.offset == 1
 
 // ---------------------------------------------------------------------------
 // cmd_delete_word_backward / cmd_insert_line_break
@@ -79,6 +125,12 @@ let tx_dw = cmd_delete_word_backward(word_state)
 "del-word doc:"; doc_text(tx_dw.doc_after) == "one "
 "del-word caret:"; tx_dw.sel_after.anchor.offset == 4
 "del-word start null:"; cmd_delete_word_backward({doc: word_doc, selection: text_selection(pos([0, 0], 0), pos([0, 0], 0))}) == null
+let tx_dw_all = cmd_delete_word_backward(s_all)
+"del-word all doc:"; doc_text(tx_dw_all.doc_after) == ""
+"del-word all caret:"; path_equal(tx_dw_all.sel_after.anchor.path, [0, 0]) and tx_dw_all.sel_after.anchor.offset == 0
+let tx_dw_node = cmd_delete_word_backward(atom_state)
+"del-word node order:"; [for (n in tx_dw_node.doc_after.content) doc_text(n)] == ["A", "C"]
+"del-word node caret:"; path_equal(tx_dw_node.sel_after.anchor.path, []) and tx_dw_node.sel_after.anchor.offset == 1
 
 let line_state = {doc: d0, selection: text_selection(pos([0, 0], 5), pos([0, 0], 5))}
 let tx_lb = cmd_insert_line_break(line_state)
@@ -129,6 +181,29 @@ let s_marked = {doc: tx_range_bold.doc_after, selection: sel_sel}
 let tx_unbold = cmd_toggle_mark(s_marked, 'strong')
 let leaf_after2 = node_at(tx_unbold.doc_after, [0, 0])
 "toggle remove:"; not has_mark(leaf_after2.marks, 'strong')
+
+let tx_all_bold = cmd_toggle_mark({doc: d0, selection: all_selection()}, 'strong')
+"toggle all add steps:"; len(tx_all_bold.steps) == 2
+"toggle all add first:"; has_mark(node_at(tx_all_bold.doc_after, [0, 0]).marks, 'strong')
+"toggle all add second:"; has_mark(node_at(tx_all_bold.doc_after, [1, 0]).marks, 'strong')
+let tx_all_unbold = cmd_toggle_mark({doc: tx_all_bold.doc_after, selection: all_selection()}, 'strong')
+"toggle all remove steps:"; len(tx_all_unbold.steps) == 2
+"toggle all remove first:"; not has_mark(node_at(tx_all_unbold.doc_after, [0, 0]).marks, 'strong')
+"toggle all remove second:"; not has_mark(node_at(tx_all_unbold.doc_after, [1, 0]).marks, 'strong')
+let partial_mark_doc = node('doc', [
+  node('paragraph', [text_marked("Marked", ['strong'])]),
+  node('paragraph', [text("Plain")])
+])
+let tx_all_partial = cmd_toggle_mark({doc: partial_mark_doc, selection: all_selection()}, 'strong')
+"toggle all partial steps:"; len(tx_all_partial.steps) == 1
+"toggle all partial first kept:"; has_mark(node_at(tx_all_partial.doc_after, [0, 0]).marks, 'strong')
+"toggle all partial second added:"; has_mark(node_at(tx_all_partial.doc_after, [1, 0]).marks, 'strong')
+let tx_node_bold = cmd_toggle_mark({doc: d0, selection: node_selection([0])}, 'strong')
+"toggle node steps:"; len(tx_node_bold.steps) == 1
+"toggle node first:"; has_mark(node_at(tx_node_bold.doc_after, [0, 0]).marks, 'strong')
+"toggle node second untouched:"; not has_mark(node_at(tx_node_bold.doc_after, [1, 0]).marks, 'strong')
+let tx_node_unbold = cmd_toggle_mark({doc: tx_node_bold.doc_after, selection: node_selection([0])}, 'strong')
+"toggle node remove:"; not has_mark(node_at(tx_node_unbold.doc_after, [0, 0]).marks, 'strong')
 
 // ---------------------------------------------------------------------------
 // cmd_set_block_type

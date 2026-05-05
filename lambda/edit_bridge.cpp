@@ -25,6 +25,16 @@ typedef struct EditSubscription {
     struct EditSubscription* next;
 } EditSubscription;
 
+typedef struct EditSelectionVersion {
+    int version_number;
+    uint32_t anchor_indices[EDIT_SOURCE_PATH_MAX];
+    uint32_t head_indices[EDIT_SOURCE_PATH_MAX];
+    SourcePos anchor;
+    SourcePos head;
+    struct EditSelectionVersion* prev;
+    struct EditSelectionVersion* next;
+} EditSelectionVersion;
+
 struct EditSession {
     Input* input;
     MarkEditor* editor;
@@ -34,6 +44,8 @@ struct EditSession {
     SourcePos anchor;
     SourcePos head;
     EditSubscription* subscriptions;
+    EditSelectionVersion* selection_head;
+    EditSelectionVersion* current_selection_version;
 };
 
 static void edit_session_init_pos(EditSession* session) {
@@ -69,6 +81,56 @@ static void edit_session_notify(EditSession* session, EditEventKind kind, Item p
         }
         sub = sub->next;
     }
+}
+
+static void edit_selection_version_init(EditSelectionVersion* version) {
+    version->anchor.path.indices = version->anchor_indices;
+    version->head.path.indices = version->head_indices;
+}
+
+static EditSelectionVersion* edit_session_create_selection_version(EditSession* session,
+                                                                  int version_number) {
+    EditSelectionVersion* version = (EditSelectionVersion*)pool_calloc(
+        session->input->pool, sizeof(EditSelectionVersion));
+    if (!version) {
+        log_error("edit_session_create_selection_version: failed to allocate selection snapshot");
+        return NULL;
+    }
+    edit_selection_version_init(version);
+    version->version_number = version_number;
+    if (!edit_session_copy_pos(&version->anchor, version->anchor_indices, session->anchor)) {
+        return NULL;
+    }
+    if (!edit_session_copy_pos(&version->head, version->head_indices, session->head)) {
+        return NULL;
+    }
+    return version;
+}
+
+static bool edit_session_restore_selection_version(EditSession* session,
+                                                  EditSelectionVersion* version) {
+    if (!version) { return false; }
+    if (!edit_session_copy_pos(&session->anchor, session->anchor_indices, version->anchor)) {
+        return false;
+    }
+    if (!edit_session_copy_pos(&session->head, session->head_indices, version->head)) {
+        return false;
+    }
+    edit_session_notify(session, EDIT_EVENT_SELECTION, ItemNull);
+    return true;
+}
+
+static bool edit_session_commit_selection(EditSession* session, int version_number) {
+    EditSelectionVersion* version = edit_session_create_selection_version(session, version_number);
+    if (!version) { return false; }
+    if (session->current_selection_version) {
+        session->current_selection_version->next = version;
+        version->prev = session->current_selection_version;
+    } else {
+        session->selection_head = version;
+    }
+    session->current_selection_version = version;
+    return true;
 }
 
 static Input* edit_session_create_input(Item root) {
@@ -302,18 +364,31 @@ bool edit_session_exec(EditSession* session, const char* cmd_name, Item args) {
         return false;
     }
     if (strcmp(cmd_name, "commit") == 0) {
-        bool ok = session->editor->commit(NULL) >= 0;
-        if (ok) { edit_session_notify(session, EDIT_EVENT_CHANGE, session->editor->current()); }
+        int version = session->editor->commit(NULL);
+        bool ok = version >= 0 && edit_session_commit_selection(session, version);
+        if (ok) { edit_session_notify(session, EDIT_EVENT_CHANGE, session->input->root); }
         return ok;
     }
     if (strcmp(cmd_name, "undo") == 0 || strcmp(cmd_name, "historyUndo") == 0) {
         bool ok = session->editor->undo();
-        if (ok) { edit_session_notify(session, EDIT_EVENT_CHANGE, session->editor->current()); }
+        if (ok) {
+            if (session->current_selection_version && session->current_selection_version->prev) {
+                session->current_selection_version = session->current_selection_version->prev;
+                edit_session_restore_selection_version(session, session->current_selection_version);
+            }
+            edit_session_notify(session, EDIT_EVENT_CHANGE, session->input->root);
+        }
         return ok;
     }
     if (strcmp(cmd_name, "redo") == 0 || strcmp(cmd_name, "historyRedo") == 0) {
         bool ok = session->editor->redo();
-        if (ok) { edit_session_notify(session, EDIT_EVENT_CHANGE, session->editor->current()); }
+        if (ok) {
+            if (session->current_selection_version && session->current_selection_version->next) {
+                session->current_selection_version = session->current_selection_version->next;
+                edit_session_restore_selection_version(session, session->current_selection_version);
+            }
+            edit_session_notify(session, EDIT_EVENT_CHANGE, session->input->root);
+        }
         return ok;
     }
     if (strcmp(cmd_name, "set_root") == 0 || strcmp(cmd_name, "set_doc") == 0 || strcmp(cmd_name, "replace_root") == 0) {
