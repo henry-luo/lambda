@@ -6,7 +6,15 @@
 #include "../../lib/log.h"
 #include "../../lib/uv_loop.h"
 #include "../../lib/mem.h"
+#ifdef _WIN32
+#include <windows.h>
+static inline int setenv(const char* name, const char* value, int overwrite) {
+    if (!overwrite && getenv(name)) return 0;
+    return _putenv_s(name, value) == 0 ? 0 : -1;
+}
+#else
 #include <unistd.h>
+#endif
 #include <time.h>
 #include <uv.h>
 

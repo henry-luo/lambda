@@ -29,6 +29,11 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#undef ERROR
+#endif
 
 // Portable monotonic time (works without GLFW initialization)
 static double get_monotonic_time() {

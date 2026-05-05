@@ -33,7 +33,31 @@
 #include <unordered_map>
 #include <map>
 #include <re2/re2.h>
+#ifndef _WIN32
 #include <execinfo.h>
+#else
+// Windows stubs for POSIX functions
+#include <direct.h>
+#include <io.h>
+#include <stdlib.h>
+static inline int setenv(const char* name, const char* value, int overwrite) {
+    if (!overwrite && getenv(name)) return 0;
+    return _putenv_s(name, value) == 0 ? 0 : -1;
+}
+static inline int unsetenv(const char* name) {
+    return _putenv_s(name, "") == 0 ? 0 : -1;
+}
+static inline void* memmem(const void* haystack, size_t hlen, const void* needle, size_t nlen) {
+    if (nlen == 0) return (void*)haystack;
+    if (nlen > hlen) return NULL;
+    const char* h = (const char*)haystack;
+    const char* n = (const char*)needle;
+    for (size_t i = 0; i <= hlen - nlen; i++) {
+        if (memcmp(h + i, n, nlen) == 0) return (void*)(h + i);
+    }
+    return NULL;
+}
+#endif
 
 // v22: Maximum gap allowed for dense array expansion; beyond this, skip to avoid OOM
 #define SPARSE_GAP_MAX 1000000

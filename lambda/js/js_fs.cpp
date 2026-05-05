@@ -16,6 +16,12 @@
 #include <cstring>
 #include "../../lib/mem.h"
 #include "../../lib/file.h"
+#ifdef _WIN32
+// S_IFSOCK is not defined on Windows
+#ifndef S_IFSOCK
+#define S_IFSOCK 0xC000
+#endif
+#endif
 
 extern Input* js_input;
 

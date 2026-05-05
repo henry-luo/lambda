@@ -140,6 +140,46 @@ fn validate_attrs_at(node, path, tag, specs, i, n, acc) {
 fn validate_attrs(node, path, tag, entry) =>
   if (entry.attrs == null) [] else validate_attrs_at(node, path, tag, entry.attrs, 0, len(entry.attrs), [])
 
+fn symbol_in_list(items, value, i, n) {
+  if (i >= n) { false }
+  else if (items[i] == value) { true }
+  else { symbol_in_list(items, value, i + 1, n) }
+}
+
+fn child_is_mark(schema, child) {
+  if (type(child) != element) { false }
+  else {
+    let entry = schema[name(child)]
+    entry != null and entry.role == 'mark'
+  }
+}
+
+fn mark_allowed(parent_entry, mark_tag) {
+  if (parent_entry.marks == null or parent_entry.marks == 'all') { true }
+  else if (parent_entry.marks == 'none') { false }
+  else { symbol_in_list(parent_entry.marks, mark_tag, 0, len(parent_entry.marks)) }
+}
+
+fn validate_mark_policy_child(schema, parent_entry, child, child_path) {
+  if (not child_is_mark(schema, child)) { [] }
+  else if (parent_entry.role == 'mark' and parent_entry.excludes == 'all') {
+    [mk_violation(child_path, name(child), "mark excluded")]
+  } else if (not mark_allowed(parent_entry, name(child))) {
+    [mk_violation(child_path, name(child), "mark not allowed")]
+  } else { [] }
+}
+
+fn validate_mark_policy_at(schema, parent_entry, kids, path, i, n, acc) {
+  if (i >= n) { acc }
+  else {
+    let violations = validate_mark_policy_child(schema, parent_entry, kids[i], [*path, i])
+    validate_mark_policy_at(schema, parent_entry, kids, path, i + 1, n, [*acc, *violations])
+  }
+}
+
+fn validate_mark_policy(schema, entry, kids, path) =>
+  validate_mark_policy_at(schema, entry, kids, path, 0, len(kids), [])
+
 // Children at element node (extracted as plain array — needed for indexing
 // and len() inside recursive functional code). Element iteration includes
 // attribute values, but numeric indexing is child-only.
@@ -154,6 +194,7 @@ fn validate_node(schema, node, path) {
   } else {
     let kids = children_array(node)
     let attr_violations = validate_attrs(node, path, tag, entry)
+    let mark_violations = validate_mark_policy(schema, entry, kids, path)
     let local = if (entry.atomic == true and len(kids) > 0)
         [mk_violation(path, tag, "atomic node has children")]
       else if (not match_content(schema, kids, entry.content))
@@ -163,7 +204,7 @@ fn validate_node(schema, node, path) {
         if (type(kids[i]) == element)
           validate_node(schema, kids[i], [*path, i])
         else []
-    [*attr_violations, *local, *(for (vs in nested) for (v in vs) v)]
+    [*attr_violations, *mark_violations, *local, *(for (vs in nested) for (v in vs) v)]
   }
 }
 

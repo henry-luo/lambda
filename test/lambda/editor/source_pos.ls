@@ -79,6 +79,21 @@ let r2 = resolve_pos(doc, pos([1, 0], 0))
 "r2 parent_idx:";  r2.parent_index
 "r2 node is string:"; type(r2.node) == string
 "r2 node len:";    len(r2.node)
+"r2 ancestors len:"; len(r2.ancestors)
+"r2 ancestor root path:"; len(r2.ancestors[0].path)
+"r2 ancestor block tag:"; name(r2.ancestors[1].node)
+let r2_before_block = resolve_before(r2, 1)
+let r2_after_block = resolve_after(r2, 1)
+let r2_before_leaf = resolve_before(r2, 2)
+let r2_after_root = resolve_after(r2, 0)
+"r2 before block path len:"; len(r2_before_block.path)
+"r2 before block off:"; r2_before_block.offset
+"r2 after block off:"; r2_after_block.offset
+"r2 before leaf path:"; path_equal(r2_before_leaf.path, [1])
+"r2 before leaf off:"; r2_before_leaf.offset == 0
+"r2 after root off:"; r2_after_root.offset == 2
+
+"r2 before bad null:"; resolve_before(r2, 3) == null
 
 let r3 = resolve_pos(doc, pos([5], 0))
 "r3 found:";       r3.found

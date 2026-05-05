@@ -18,8 +18,21 @@
 #include <stdio.h>
 #include <limits.h>
 #include <fcntl.h>
+#ifdef _WIN32
+#include <io.h>
+// mmap not available on Windows — define stubs; mmap always "fails" so the
+// heap-fallback path is used instead.
+#define PROT_READ  0
+#define MAP_PRIVATE 0
+#define MAP_FAILED ((void*)-1)
+#define O_CLOEXEC  0
+static inline void* mmap(void* a, size_t b, int c, int d, int e, long f)
+    { (void)a;(void)b;(void)c;(void)d;(void)e;(void)f; return MAP_FAILED; }
+static inline int munmap(void* a, size_t b) { (void)a;(void)b; return 0; }
+#else
 #include <unistd.h>
 #include <sys/mman.h>
+#endif
 #include <sys/stat.h>
 // ============================================================================
 // Fixed size selection (for bitmap/emoji fonts) — unified from 4 duplicates

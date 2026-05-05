@@ -95,18 +95,53 @@ fn resolve_at(node, path, i) {
 //   parent       the immediate ancestor (null for root)
 //   parent_index the child index of `node` within `parent`
 //   depth        len(pos.path)
+//   ancestors    [{path, node, index}, ...] from root through node
 //   found        false if the path was invalid (other fields null)
+
+fn resolved_ancestors_at(doc, path, depth, max_depth, acc) {
+  if (depth > max_depth) { acc }
+  else {
+    let p = slice(path, 0, depth)
+    let n = resolve_at(doc, p, 0)
+    let idx = if (depth == 0) { -1 } else { p[depth - 1] }
+    resolved_ancestors_at(doc, path, depth + 1, max_depth, [*acc, {path: p, node: n, index: idx}])
+  }
+}
+
+fn resolved_ancestors(doc, path) => resolved_ancestors_at(doc, path, 0, len(path), [])
+
 pub fn resolve_pos(doc, p) {
   let node = resolve_at(doc, p.path, 0)
   if (node == null) {
-    {node: null, parent: null, parent_index: -1, depth: len(p.path), found: false}
+    {node: null, parent: null, parent_index: -1, depth: len(p.path), ancestors: [], found: false}
   } else if (len(p.path) == 0) {
-    {node: doc, parent: null, parent_index: -1, depth: 0, found: true}
+    {node: doc, parent: null, parent_index: -1, depth: 0, ancestors: resolved_ancestors(doc, p.path), found: true}
   } else {
     let parent_path = slice(p.path, 0, len(p.path) - 1)
     let parent = resolve_at(doc, parent_path, 0)
     let pi = p.path[len(p.path) - 1]
-    {node: node, parent: parent, parent_index: pi, depth: len(p.path), found: true}
+    {node: node, parent: parent, parent_index: pi, depth: len(p.path), ancestors: resolved_ancestors(doc, p.path), found: true}
+  }
+}
+
+fn child_count(node) =>
+  if (type(node) == element or type(node) == array) { len(node) } else { 0 }
+
+pub fn resolve_before(r, depth) {
+  if (not r.found or depth < 0 or depth > r.depth) { null }
+  else if (depth == 0) { pos([], 0) }
+  else {
+    let p = r.ancestors[depth].path
+    pos(slice(p, 0, len(p) - 1), p[len(p) - 1])
+  }
+}
+
+pub fn resolve_after(r, depth) {
+  if (not r.found or depth < 0 or depth > r.depth) { null }
+  else if (depth == 0) { pos([], child_count(r.ancestors[0].node)) }
+  else {
+    let p = r.ancestors[depth].path
+    pos(slice(p, 0, len(p) - 1), p[len(p) - 1] + 1)
   }
 }
 

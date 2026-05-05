@@ -22,6 +22,11 @@
   #include <io.h>
   #include <process.h>
   #include <direct.h>
+  #include <sys/stat.h>
+  #include <sys/types.h>
+  #ifndef S_IXUSR
+  #define S_IXUSR 0100
+  #endif
 #else
   #include <unistd.h>
   #include <sys/types.h>

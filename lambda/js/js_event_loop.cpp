@@ -705,6 +705,7 @@ extern "C" void js_event_loop_init(void) {
 // Heap corruption in timer callbacks (pre-existing bug) can crash the process
 // after tests have completed. We catch the signal and abort the event loop
 // gracefully instead of terminating.
+#ifndef _WIN32
 static jmp_buf event_loop_jmpbuf;
 static volatile sig_atomic_t event_loop_guarded = 0;
 static struct sigaction event_loop_old_sa;
@@ -728,6 +729,7 @@ static void event_loop_sigsegv_handler(int sig, siginfo_t* info, void* ctx) {
         raise(SIGSEGV);
     }
 }
+#endif  // !_WIN32
 
 // Maximum time (ms) the event loop drain is allowed to run before being
 // forcefully stopped.  Prevents infinite blocking from setInterval() or
@@ -758,6 +760,7 @@ extern "C" int js_event_loop_drain(void) {
     uv_loop_t* loop = lambda_uv_loop();
     if (!loop) return 0;
 
+#ifndef _WIN32
     // install crash guard for event loop drain
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
@@ -768,6 +771,10 @@ extern "C" int js_event_loop_drain(void) {
 
     int result = 0;
     if (setjmp(event_loop_jmpbuf) == 0) {
+#else
+    int result = 0;
+    {
+#endif
         // install watchdog timer to prevent infinite blocking from setInterval
         uv_timer_t watchdog;
         uv_timer_init(loop, &watchdog);
@@ -790,7 +797,9 @@ extern "C" int js_event_loop_drain(void) {
 
         // final microtask flush after loop exits
         js_microtask_flush();
-    } else {
+    }
+#ifndef _WIN32
+    else {
         log_error("event_loop: recovered from crash during drain");
         result = -1;
     }
@@ -798,6 +807,7 @@ extern "C" int js_event_loop_drain(void) {
     // restore previous signal handler
     event_loop_guarded = 0;
     sigaction(SIGSEGV, &event_loop_old_sa, NULL);
+#endif
 
     return result;
 }
