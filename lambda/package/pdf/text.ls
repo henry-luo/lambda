@@ -69,6 +69,8 @@ pub fn new_state(fonts) {
         render_mode: 0,
         fill:       "rgb(0,0,0)",
         stroke:     "rgb(0,0,0)",
+        fill_opacity:   1.0,
+        stroke_opacity: 1.0,
         fonts:      fonts
     }
 }
@@ -92,6 +94,10 @@ pub fn set_fill(st, color_str) {
 // so that text drawn under render-mode 1/2 picks up the active stroke.
 pub fn set_stroke(st, color_str) {
     { *: _base_state(st), stroke: color_str }
+}
+
+pub fn set_opacity(st, fa, sa) {
+    { *: _base_state(st), fill_opacity: fa, stroke_opacity: sa }
 }
 
 // Public: Tc — character spacing in unscaled text-space units.
@@ -121,6 +127,8 @@ fn _with(st, tm, tlm, name, size, info, leading, in_text) {
         render_mode: st.render_mode,
         fill:       st.fill,
         stroke:     st.stroke,
+        fill_opacity:   st.fill_opacity,
+        stroke_opacity: st.stroke_opacity,
         fonts:      st.fonts
     }
 }
@@ -214,12 +222,29 @@ fn _emit_text(st, ctm, page_h, content) {
         let svg_stroke = if (mode == 1 or mode == 2 or mode == 5 or mode == 6) stroke_color
                          else "none"
         let needs_stroke = (svg_stroke != "none")
+        let fill_alpha = if (st.fill_opacity < 1.0) st.fill_opacity else 1.0
+        let stroke_alpha = if (st.stroke_opacity < 1.0) st.stroke_opacity else 1.0
+        let needs_text_alpha = ((svg_fill != "none" and fill_alpha < 1.0) or (needs_stroke and stroke_alpha < 1.0))
         // Tz — horizontal scale, percentage. 100 = no change. Apply via
         // a transform on the <text> origin so glyph widths scale but
         // the baseline stays fixed. Skip when ~100 to keep markup tidy.
         let hs = st.hor_scale / 100.0
         let scaled = (util.fabs(hs - 1.0) > 0.001)
-        if (scaled and needs_stroke) {
+        if (scaled and needs_stroke and needs_text_alpha) {
+            <text x: "0", y: "0",
+                  transform: "translate(" ++ util.fmt_num(x) ++ " " ++ util.fmt_num(y) ++ ") scale(" ++ util.fmt_num(hs) ++ " 1)",
+                  'font-family': family,
+                  'font-size':   util.fmt_num(eff_size),
+                  'font-weight': weight,
+                  'font-style':  style,
+                  fill:          svg_fill,
+                  stroke:        svg_stroke,
+                  'fill-opacity': util.fmt_num(fill_alpha),
+                  'stroke-opacity': util.fmt_num(stroke_alpha);
+                content
+            >
+        }
+        else if (scaled and needs_stroke) {
             <text x: "0", y: "0",
                   transform: "translate(" ++ util.fmt_num(x) ++ " " ++ util.fmt_num(y) ++ ") scale(" ++ util.fmt_num(hs) ++ " 1)",
                   'font-family': family,
@@ -228,6 +253,18 @@ fn _emit_text(st, ctm, page_h, content) {
                   'font-style':  style,
                   fill:          svg_fill,
                   stroke:        svg_stroke;
+                content
+            >
+        }
+        else if (scaled and needs_text_alpha) {
+            <text x: "0", y: "0",
+                  transform: "translate(" ++ util.fmt_num(x) ++ " " ++ util.fmt_num(y) ++ ") scale(" ++ util.fmt_num(hs) ++ " 1)",
+                  'font-family': family,
+                  'font-size':   util.fmt_num(eff_size),
+                  'font-weight': weight,
+                  'font-style':  style,
+                  fill:          svg_fill,
+                  'fill-opacity': util.fmt_num(fill_alpha);
                 content
             >
         }
@@ -242,6 +279,19 @@ fn _emit_text(st, ctm, page_h, content) {
                 content
             >
         }
+        else if (needs_stroke and needs_text_alpha) {
+            <text x: util.fmt_num(x), y: util.fmt_num(y),
+                  'font-family': family,
+                  'font-size':   util.fmt_num(eff_size),
+                  'font-weight': weight,
+                  'font-style':  style,
+                  fill:          svg_fill,
+                  stroke:        svg_stroke,
+                  'fill-opacity': util.fmt_num(fill_alpha),
+                  'stroke-opacity': util.fmt_num(stroke_alpha);
+                content
+            >
+        }
         else if (needs_stroke) {
             <text x: util.fmt_num(x), y: util.fmt_num(y),
                   'font-family': family,
@@ -250,6 +300,17 @@ fn _emit_text(st, ctm, page_h, content) {
                   'font-style':  style,
                   fill:          svg_fill,
                   stroke:        svg_stroke;
+                content
+            >
+        }
+        else if (needs_text_alpha) {
+            <text x: util.fmt_num(x), y: util.fmt_num(y),
+                  'font-family': family,
+                  'font-size':   util.fmt_num(eff_size),
+                  'font-weight': weight,
+                  'font-style':  style,
+                  fill:          svg_fill,
+                  'fill-opacity': util.fmt_num(fill_alpha);
                 content
             >
         }

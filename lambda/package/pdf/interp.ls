@@ -335,7 +335,8 @@ fn _apply_gs(st, ops, pdf, page) {
         else {
             let fa = _alpha_of(d, "ca", st.path.fill_opacity)
             let sa = _alpha_of(d, "CA", st.path.stroke_opacity)
-            _with_path(st, path.set_opacity(st.path, fa, sa))
+            let st1 = _with_path(st, path.set_opacity(st.path, fa, sa))
+            _with_text(st1, text.set_opacity(st1.text, fa, sa))
         }
     }
 }
