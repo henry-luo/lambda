@@ -1,0 +1,1 @@
+{ count: 3, numeric_gamma_applied: true, array_gamma_ignored: true, bad_gamma_ignored: true, not_array_gamma_applied: true}

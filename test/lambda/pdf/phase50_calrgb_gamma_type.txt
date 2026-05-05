@@ -1,0 +1,1 @@
+{ count: 2, scalar_gamma_ignored: true, mixed_gamma_applied: true, not_scalar_red_gamma: true, not_bad_entry_gamma: true}

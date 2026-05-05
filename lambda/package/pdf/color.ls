@@ -132,7 +132,10 @@ fn _base_component_count(pdf, page, base) {
     let b = _space_type(b0)
     if (b == "DeviceGray" or b == "G" or b == "CalGray") { 1 }
     else if (b == "DeviceCMYK" or b == "CMYK") { 4 }
-    else if (b == "ICCBased") { _icc_component_count(b0) }
+    else if (b == "ICCBased") {
+        let n = _icc_component_count(b0)
+        if ((n == 1) or (n == 4)) { n } else { 3 }
+    }
     else { 3 }
 }
 
@@ -168,10 +171,13 @@ fn _icc_component_count(cs) {
     if (cs is map and cs.N != null) {
         if (cs.N is int) cs.N else if (cs.N is float) int(cs.N) else 3
     }
-    else if (cs is array and len(cs) >= 2 and cs[1] is map and cs[1].N != null) {
-        if (cs[1].N is int) cs[1].N else if (cs[1].N is float) int(cs[1].N) else 3
+    else if (cs is array and len(cs) >= 2 and cs[1] is map) {
+        if (cs[1].N == null) { 3 }
+        else if (cs[1].N is int) { cs[1].N }
+        else if (cs[1].N is float) { int(cs[1].N) }
+        else { 0 }
     }
-    else { 3 }
+    else { 0 }
 }
 
 fn _from_component_count(nums, ncomp) {
@@ -194,11 +200,22 @@ fn _lab_color(nums) {
     else { BLACK }
 }
 
-fn _gamma_value(cs, index) {
+fn _gamma_num(v, fallback) {
+    if (v is int or v is float) { util.num(v) } else { fallback }
+}
+
+fn _cal_gray_gamma(cs) {
     if (cs is array and len(cs) >= 2 and cs[1] is map and cs[1].Gamma != null) {
         let g = cs[1].Gamma
-        if (g is array and len(g) > index) { util.num(g[index]) }
-        else if (index == 0) { util.num(g) }
+        _gamma_num(g, 1.0)
+    }
+    else { 1.0 }
+}
+
+fn _cal_rgb_gamma(cs, index) {
+    if (cs is array and len(cs) >= 2 and cs[1] is map and cs[1].Gamma != null) {
+        let g = cs[1].Gamma
+        if (g is array and len(g) > index) { _gamma_num(g[index], 1.0) }
         else { 1.0 }
     }
     else { 1.0 }
@@ -211,15 +228,23 @@ fn _apply_gamma(v, gamma) {
 }
 
 fn _cal_gray_color(cs, nums) {
-    if (len(nums) >= 1) { gray(_apply_gamma(nums[0], _gamma_value(cs, 0))) }
+    if (len(nums) >= 1) { gray(_apply_gamma(nums[0], _cal_gray_gamma(cs))) }
     else { BLACK }
 }
 
 fn _cal_rgb_color(cs, nums) {
     if (len(nums) >= 3) {
-        rgb(_apply_gamma(nums[0], _gamma_value(cs, 0)),
-            _apply_gamma(nums[1], _gamma_value(cs, 1)),
-            _apply_gamma(nums[2], _gamma_value(cs, 2)))
+        rgb(_apply_gamma(nums[0], _cal_rgb_gamma(cs, 0)),
+            _apply_gamma(nums[1], _cal_rgb_gamma(cs, 1)),
+            _apply_gamma(nums[2], _cal_rgb_gamma(cs, 2)))
+    }
+    else { BLACK }
+}
+
+fn _icc_color(cs, nums) {
+    let ncomp = _icc_component_count(cs)
+    if ((ncomp == 1) or (ncomp == 3) or (ncomp == 4)) {
+        _from_component_count(nums, ncomp)
     }
     else { BLACK }
 }
@@ -245,7 +270,7 @@ pub fn from_ops_in_space(pdf, page, active_space, ops) {
         _from_component_count(nums, 4)
     }
     else if (t == "ICCBased") {
-        _from_component_count(nums, _icc_component_count(cs))
+        _icc_color(cs, nums)
     }
     else if (t == "Lab") {
         _lab_color(nums)

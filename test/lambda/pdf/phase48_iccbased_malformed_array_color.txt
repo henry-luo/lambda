@@ -1,0 +1,1 @@
+{ count: 3, missing_stream_black: true, non_map_black: true, invalid_n_black: true, not_missing_rgb: true, not_non_map_rgb: true, not_invalid_gray: true}
