@@ -159,6 +159,7 @@ fn _xobject_data(xo) {
 fn _filter_name(f) {
     if (f is string) { f }
     else if (f is map and f.kind == "name") { f.value }
+    else if (f is map and f.kind == "array" and len(f.value) >= 1) { _filter_name(f.value[0]) }
     else if (f is array and len(f) >= 1) { _filter_name(f[0]) }
     else { null }
 }
@@ -359,6 +360,32 @@ fn _rgb_int(r, g, b) {
     "rgb(" ++ string(r) ++ "," ++ string(g) ++ "," ++ string(b) ++ ")"
 }
 
+fn _gamma_num(v, fallback) {
+    if (v is int or v is float) { util.num(v) } else { fallback }
+}
+
+fn _cal_gray_gamma(cs) {
+    if (cs is array and len(cs) >= 2 and cs[1] is map and cs[1].Gamma != null) {
+        _gamma_num(cs[1].Gamma, 1.0)
+    }
+    else { 1.0 }
+}
+
+fn _cal_rgb_gamma(cs, index) {
+    if (cs is array and len(cs) >= 2 and cs[1] is map and cs[1].Gamma != null) {
+        let g = cs[1].Gamma
+        if (g is array and len(g) > index) { _gamma_num(g[index], 1.0) }
+        else { 1.0 }
+    }
+    else { 1.0 }
+}
+
+fn _gamma_byte(data, off, gamma) {
+    let raw = float(util.byte_at(data, off)) / 255.0
+    let v = if (gamma != 1.0 and raw > 0.0) { math.pow(raw, gamma) } else { raw }
+    int(v * 255.0)
+}
+
 fn _cmyk_pixel_fill(data, off) {
     let c = float(util.byte_at(data, off)) / 255.0
     let m = float(util.byte_at(data, off + 1)) / 255.0
@@ -421,6 +448,7 @@ fn _indexed_pixel_fill(data, bpc, pixel_index, cs) {
 }
 
 fn _inline_pixel_fill(data, ncomp, bpc, w, pixel_index, cs) {
+    let t = _space_type(cs)
     if (_is_indexed(cs)) {
         _indexed_pixel_fill(data, bpc, pixel_index, cs)
     }
@@ -440,7 +468,7 @@ fn _inline_pixel_fill(data, ncomp, bpc, w, pixel_index, cs) {
     }
     else if (ncomp == 1) {
         let off = pixel_index * ncomp
-        let g = util.byte_at(data, off)
+        let g = if (t == "CalGray") { _gamma_byte(data, off, _cal_gray_gamma(cs)) } else { util.byte_at(data, off) }
         _rgb_int(g, g, g)
     }
     else if (ncomp == 4) {
@@ -448,7 +476,14 @@ fn _inline_pixel_fill(data, ncomp, bpc, w, pixel_index, cs) {
     }
     else {
         let off = pixel_index * ncomp
-        _rgb_int(util.byte_at(data, off), util.byte_at(data, off + 1), util.byte_at(data, off + 2))
+        if (t == "CalRGB") {
+            _rgb_int(_gamma_byte(data, off, _cal_rgb_gamma(cs, 0)),
+                     _gamma_byte(data, off + 1, _cal_rgb_gamma(cs, 1)),
+                     _gamma_byte(data, off + 2, _cal_rgb_gamma(cs, 2)))
+        }
+        else {
+            _rgb_int(util.byte_at(data, off), util.byte_at(data, off + 1), util.byte_at(data, off + 2))
+        }
     }
 }
 
@@ -458,6 +493,7 @@ pn _emit_inline_pixels(info) {
     var bpc = 8
     var ncomp = 3
     var cs = "DeviceRGB"
+    var has_filter = 0
     if ((info != null) and (info.dict is array)) {
         var di = 0
         let dn = len(info.dict)
@@ -470,6 +506,7 @@ pn _emit_inline_pixels(info) {
                 cs = p.value
                 ncomp = _inline_ncomp(p.value)
             }
+            else if (((p.key == "F") or (p.key == "Filter")) and _filter_name(p.value) != null) { has_filter = 1 }
             di = di + 1
         }
     }
@@ -478,7 +515,7 @@ pn _emit_inline_pixels(info) {
     let bad_size = ((w <= 0) or (h <= 0))
     let bad_format = (((bpc != 8) and (bpc != 1) and (bpc != 4)) or (ncomp == 0) or (((bpc == 1) or (bpc == 4)) and (ncomp != 1)))
     let too_large = ((w * h) > 4096)
-    if (bad_size or bad_format or too_large) {
+    if (bad_size or bad_format or too_large or has_filter == 1) {
         return _placeholder_inline()
     }
     else {
