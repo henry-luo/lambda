@@ -413,13 +413,25 @@ fn _clean_hex(hex: string) {
     }
 }
 
-fn _hex_value_range(hex: string, i: int, endp: int, acc: int) {
-    if (i >= endp or i >= len(hex)) { acc }
-    else { _hex_value_range(hex, i + 1, endp, (acc * 16) + _hex_val(hex[i])) }
-}
-
 fn _hex_code_at(hex: string, i: int, digits: int) {
-    _hex_value_range(hex, i, i + digits, 0)
+    if (digits == 8) {
+        (_hex_val(hex[i]) * 268435456) + (_hex_val(hex[i + 1]) * 16777216) +
+        (_hex_val(hex[i + 2]) * 1048576) + (_hex_val(hex[i + 3]) * 65536) +
+        (_hex_val(hex[i + 4]) * 4096) + (_hex_val(hex[i + 5]) * 256) +
+        (_hex_val(hex[i + 6]) * 16) + _hex_val(hex[i + 7])
+    }
+    else if (digits == 6) {
+        (_hex_val(hex[i]) * 1048576) + (_hex_val(hex[i + 1]) * 65536) +
+        (_hex_val(hex[i + 2]) * 4096) + (_hex_val(hex[i + 3]) * 256) +
+        (_hex_val(hex[i + 4]) * 16) + _hex_val(hex[i + 5])
+    }
+    else if (digits == 4) {
+        (_hex_val(hex[i]) * 4096) + (_hex_val(hex[i + 1]) * 256) +
+        (_hex_val(hex[i + 2]) * 16) + _hex_val(hex[i + 3])
+    }
+    else {
+        (_hex_val(hex[i]) * 16) + _hex_val(hex[i + 1])
+    }
 }
 
 fn _byte_code_at(hex: string, i: int) {
