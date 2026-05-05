@@ -16,6 +16,12 @@ true
 true
 "link intent text:"
 true
+"table intent tag:"
+true
+"table intent header:"
+true
+"table col intent count:"
+true
 "decorations preserved:"
 true
 "decorations mapped from:"

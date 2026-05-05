@@ -110,6 +110,19 @@ let html_link_editor = edit_exec(html_text_editor, edit_cmd_insert_link("https:/
 "exec html link tag:"; node_at(html_link_editor.doc, [0, 1]).tag == 'a'
 "exec html link text:"; doc_text(node_at(html_link_editor.doc, [0, 1])) == "site"
 
+let html_table_editor = edit_exec(html_text_editor, edit_cmd_insert_table(2, 2, true))
+"exec html table tag:"; node_at(html_table_editor.doc, [1]).tag == 'table'
+"exec html table header:"; node_at(html_table_editor.doc, [1, 0, 0]).tag == 'th'
+let html_table_row_editor = edit_exec(edit_open(html_table_editor.doc, editor_schemas.html5_subset,
+	text_selection(pos([1, 1, 0, 0], 0), pos([1, 1, 0, 0], 0))), edit_cmd_add_table_row())
+"exec html add row:"; len(node_at(html_table_row_editor.doc, [1]).content) == 3
+let html_table_col_editor = edit_exec(edit_open(html_table_editor.doc, editor_schemas.html5_subset,
+	text_selection(pos([1, 1, 0, 0], 0), pos([1, 1, 0, 0], 0))), edit_cmd_add_table_column())
+"exec html add col:"; len(node_at(html_table_col_editor.doc, [1, 1]).content) == 3
+let html_table_del_col_editor = edit_exec(edit_open(html_table_col_editor.doc, editor_schemas.html5_subset,
+	node_selection([1, 1, 1])), edit_cmd_delete_table_column())
+"exec html delete col:"; len(node_at(html_table_del_col_editor.doc, [1, 1]).content) == 2
+
 let html_list_editor = edit_open(node('doc', [node('ul', [
 	node('li', [text("A")]),
 	node('li', [text("B")])

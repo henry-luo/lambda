@@ -88,6 +88,16 @@ true
 true
 "exec html link text:"
 true
+"exec html table tag:"
+true
+"exec html table header:"
+true
+"exec html add row:"
+true
+"exec html add col:"
+true
+"exec html delete col:"
+true
 "exec html indent tag:"
 true
 "exec html indent text:"

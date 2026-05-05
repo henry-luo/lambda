@@ -268,6 +268,34 @@ let tx_html_link = cmd_insert_link(html_link_state, "https://example.com", null,
 "insert html link tag:"; node_at(tx_html_link.doc_after, [0, 1]).tag == 'a'
 "insert html link text:"; doc_text(node_at(tx_html_link.doc_after, [0, 1])) == " link"
 
+"insert table markdown null:"; cmd_insert_table(s0, 2, 2, false) == null
+let table_state = {doc: node('doc', [node('p', [text("Hi")])]), schema: html5_subset_schema,
+  selection: text_selection(pos([0, 0], 2), pos([0, 0], 2))}
+let tx_table = cmd_insert_table(table_state, 2, 3, true)
+"insert table tag:"; node_at(tx_table.doc_after, [1]).tag == 'table'
+"insert table rows:"; len(node_at(tx_table.doc_after, [1]).content) == 2
+"insert table header cell:"; node_at(tx_table.doc_after, [1, 0, 0]).tag == 'th'
+"insert table body cell:"; node_at(tx_table.doc_after, [1, 1, 0]).tag == 'td'
+"insert table selected:"; tx_table.sel_after.kind == 'node' and path_equal(tx_table.sel_after.path, [1])
+let table_cell_state = {doc: tx_table.doc_after, schema: html5_subset_schema,
+  selection: text_selection(pos([1, 1, 1, 0], 0), pos([1, 1, 1, 0], 0))}
+let tx_add_row = cmd_add_table_row(table_cell_state)
+"add table row count:"; len(node_at(tx_add_row.doc_after, [1]).content) == 3
+"add table row selected:"; path_equal(tx_add_row.sel_after.path, [1, 2])
+"add table row cell:"; node_at(tx_add_row.doc_after, [1, 2, 1]).tag == 'td'
+let delete_row_state = {doc: tx_add_row.doc_after, schema: html5_subset_schema,
+  selection: text_selection(pos([1, 2, 1, 0], 0), pos([1, 2, 1, 0], 0))}
+let tx_delete_row = cmd_delete_table_row(delete_row_state)
+"delete table row count:"; len(node_at(tx_delete_row.doc_after, [1]).content) == 2
+"delete table row selected:"; path_equal(tx_delete_row.sel_after.path, [1, 1])
+let tx_add_col = cmd_add_table_column(table_cell_state)
+"add table col count:"; len(node_at(tx_add_col.doc_after, [1, 1]).content) == 4
+"add table col selected:"; path_equal(tx_add_col.sel_after.path, [1, 1, 2])
+let delete_col_state = {doc: tx_add_col.doc_after, schema: html5_subset_schema, selection: node_selection([1, 1, 2])}
+let tx_delete_col = cmd_delete_table_column(delete_col_state)
+"delete table col count:"; len(node_at(tx_delete_col.doc_after, [1, 1]).content) == 3
+"delete table col selected:"; path_equal(tx_delete_col.sel_after.path, [1, 1, 2])
+
 // ---------------------------------------------------------------------------
 // cmd_toggle_mark
 // ---------------------------------------------------------------------------

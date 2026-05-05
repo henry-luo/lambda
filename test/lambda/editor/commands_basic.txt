@@ -240,6 +240,36 @@ true
 true
 "insert html link text:"
 true
+"insert table markdown null:"
+true
+"insert table tag:"
+true
+"insert table rows:"
+true
+"insert table header cell:"
+true
+"insert table body cell:"
+true
+"insert table selected:"
+true
+"add table row count:"
+true
+"add table row selected:"
+true
+"add table row cell:"
+true
+"delete table row count:"
+true
+"delete table row selected:"
+true
+"add table col count:"
+true
+"add table col selected:"
+true
+"delete table col count:"
+true
+"delete table col selected:"
+true
 "toggle stored mark:"
 true
 "toggle stored no doc change:"
