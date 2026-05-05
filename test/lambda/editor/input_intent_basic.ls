@@ -209,7 +209,7 @@ let tx_node_bold = dispatch_intent({doc: d0, selection: node_selection([0])}, {i
 "bold node mark:"; has_mark(node_at(tx_node_bold.doc_after, [0, 0]).marks, 'strong')
 "bold node selection:"; tx_node_bold.sel_after.kind == 'node' and path_equal(tx_node_bold.sel_after.path, [0])
 let tx_span_bold = dispatch_intent(mark_span_state, {input_type: "formatBold", data: null})
-"bold span steps:"; len(tx_span_bold.steps) == 2
+"bold span steps:"; len(tx_span_bold.steps) == 1
 "bold span middle:"; has_mark(node_at(tx_span_bold.doc_after, [0, 1]).marks, 'strong')
 "bold span last:"; has_mark(node_at(tx_span_bold.doc_after, [0, 2]).marks, 'strong')
 let tx_cross_bold = dispatch_intent(cross_block_state, {input_type: "formatBold", data: null})
@@ -295,6 +295,18 @@ let h_tx_redo = dispatch_intent(h_state2, {input_type: "historyRedo", data: null
 let h_state3 = state_after_intent(h_state2, h_tx_redo)
 "history redo doc:"; doc_text(h_state3.doc) == "Hello!"
 "history redo undo:"; can_undo(h_state3.history)
+
+let hc_state0 = {doc: d0, selection: caret, history: history_new()}
+let hc_tx0 = dispatch_intent(hc_state0, {input_type: "compositionStart", data: null})
+let hc_state1 = state_after_intent(hc_state0, hc_tx0)
+let hc_tx1 = dispatch_intent(hc_state1, {input_type: "insertCompositionText", data: "ai"})
+let hc_state2 = state_after_intent(hc_state1, hc_tx1)
+let hc_tx2 = dispatch_intent(hc_state2, {input_type: "insertFromComposition", data: "愛"})
+let hc_state3 = state_after_intent(hc_state2, hc_tx2)
+let hc_undo = dispatch_intent(hc_state3, {input_type: "historyUndo", data: null})
+let hc_state4 = state_after_intent(hc_state3, hc_undo)
+"composition undo doc:"; doc_text(hc_state4.doc) == "Hello"
+"composition undo redo:"; can_redo(hc_state4.history)
 
 let hg_state0 = {doc: d0, selection: caret, history: history_new()}
 let hg_tx1 = dispatch_intent(hg_state0, {input_type: "insertText", data: "A"})

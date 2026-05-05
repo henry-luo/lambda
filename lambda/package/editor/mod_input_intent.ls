@@ -11,6 +11,9 @@ fn composition_selection(state) =>
 fn composition_base_selection(state) =>
   if (composition_active(state)) state.composition.base_selection else state.selection
 
+fn composition_base_doc(state) =>
+  if (composition_active(state) and state.composition.base_doc != null) state.composition.base_doc else state.doc
+
 fn composition_state(state) =>
   {doc: state.doc, selection: composition_selection(state)}
 
@@ -67,18 +70,20 @@ fn dispatch_history_intent(state, ev) {
 pub fn dispatch_composition_intent(state, ev) {
   if (ev.input_type == "compositionStart") {
     mark_composition_tx(tx_begin(state.doc, state.selection),
-      {active: true, base_selection: state.selection, range: state.selection}, false)
+      {active: true, base_doc: state.doc, base_selection: state.selection, range: state.selection}, false)
   } else if (ev.input_type == "insertCompositionText") {
     let edit_state = composition_state(state)
     let tx = cmd_insert_text(edit_state, ev.data)
     if (tx == null) { null }
     else {
       let comp = {active: true, base_selection: composition_base_selection(state),
+                  base_doc: composition_base_doc(state),
                   range: composition_range(edit_state.selection, tx)}
       mark_composition_tx(tx, comp, false)
     }
   } else if (ev.input_type == "insertFromComposition") {
-    let edit_state = composition_state(state)
+    let edit_state = {doc: composition_base_doc(state), selection: composition_base_selection(state),
+                      stored_marks: state.stored_marks, schema: state.schema}
     let tx = cmd_insert_text(edit_state, ev.data)
     if (tx == null) { null } else { mark_composition_tx(tx, null, true) }
   } else if (ev.input_type == "deleteCompositionText") {

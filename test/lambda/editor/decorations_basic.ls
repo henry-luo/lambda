@@ -80,3 +80,12 @@ let visual_doc = decorations_project_doc(find_doc, visual_set)
 "visual second prefix:"; visual_doc.content[1].content[0].text == "bar "
 "visual second hit class:"; visual_doc.content[1].content[1].attrs[0].value == "find-hit"
 "visual source unchanged:"; find_doc.content[0].content[0].kind == 'text'
+
+let delete_hit_tx = tx_step(tx_begin(find_doc, null), step_replace_text([0, 0], 0, 3, ""))
+let pruned_inline = deco_map_tx(doc_hits, delete_hit_tx)
+"tx pruned inline count:"; len(pruned_inline.items) == 1
+
+let node_deco_set = deco_set([deco_node([1], {class: "active-block"})])
+let delete_node_tx = tx_step(tx_begin(find_doc, null), step_replace([], 1, 2, []))
+let pruned_node = deco_map_tx(node_deco_set, delete_node_tx)
+"tx pruned node count:"; len(pruned_node.items) == 0

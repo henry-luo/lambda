@@ -106,19 +106,27 @@ fn map_path_through_steps(steps, path) =>
 
 fn map_one_deco_tx(d, tx) {
   if (d.kind == 'inline') {
-    deco_inline(map_pos_through_steps(tx.steps, d.from, 0, len(tx.steps)),
-                map_pos_through_steps(tx.steps, d.to, 0, len(tx.steps)), d.attrs)
+    let from = map_pos_through_steps(tx.steps, d.from, 0, len(tx.steps))
+    let to = map_pos_through_steps(tx.steps, d.to, 0, len(tx.steps))
+    if (pos_compare(from, to) >= 0) { null } else { deco_inline(from, to, d.attrs) }
   }
   else if (d.kind == 'widget') {
     deco_widget(map_pos_through_steps(tx.steps, d.at, 0, len(tx.steps)), d.render, d.attrs)
   }
-  else if (d.kind == 'node') { deco_node(map_path_through_steps(tx.steps, d.path), d.attrs) }
+  else if (d.kind == 'node') {
+    let path = map_path_through_steps(tx.steps, d.path)
+    if (len(path) == len(d.path)) { deco_node(path, d.attrs) } else { null }
+  }
   else { d }
 }
 
 fn map_items_tx_at(items, tx, i, n, acc) {
   if (i >= n) { acc }
-  else { map_items_tx_at(items, tx, i + 1, n, [*acc, map_one_deco_tx(items[i], tx)]) }
+  else {
+    let d = map_one_deco_tx(items[i], tx)
+    if (d == null) { map_items_tx_at(items, tx, i + 1, n, acc) }
+    else { map_items_tx_at(items, tx, i + 1, n, [*acc, d]) }
+  }
 }
 
 pub fn deco_map_tx(set, tx) =>

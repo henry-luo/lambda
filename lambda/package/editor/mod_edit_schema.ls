@@ -121,6 +121,20 @@ fn attr_type_ok(value, spec) {
 fn attr_validate_ok(value, spec) =>
   if (value == null or spec.validate == null) true else spec.validate(value)
 
+fn value_in_list(items, value, i, n) {
+  if (i >= n) { false }
+  else if (items[i] == value) { true }
+  else { value_in_list(items, value, i + 1, n) }
+}
+
+fn attr_constraints_ok(value, spec) {
+  if (value == null) { true }
+  else if (spec.one_of != null and not value_in_list(spec.one_of, value, 0, len(spec.one_of))) { false }
+  else if (spec.min != null and value < spec.min) { false }
+  else if (spec.max != null and value > spec.max) { false }
+  else { true }
+}
+
 fn validate_attrs_at(node, path, tag, specs, i, n, acc) {
   if (i >= n) { acc }
   else {
@@ -130,6 +144,8 @@ fn validate_attrs_at(node, path, tag, specs, i, n, acc) {
         [*acc, mk_violation(path, tag, "required attribute missing")]
       } else if (not attr_type_ok(value, spec)) {
         [*acc, mk_violation(path, tag, "attribute type mismatch")]
+      } else if (not attr_constraints_ok(value, spec)) {
+        [*acc, mk_violation(path, tag, "attribute constraint failed")]
       } else if (not attr_validate_ok(value, spec)) {
         [*acc, mk_violation(path, tag, "attribute validation failed")]
       } else { acc }

@@ -75,11 +75,17 @@ pub fn tx_get_meta(tx, name) => find_meta_at(tx.meta, name, 0, len(tx.meta))
 
 pub fn sel_map(step, sel) {
   if (sel.kind == 'all') { sel }
-  else if (sel.kind == 'node') { sel }   // node selections survive identically; refinement deferred
+  else if (sel.kind == 'node') { sel_map_node(step, sel) }
   else if (sel.kind == 'text') {
     text_selection(step_map(step, sel.anchor), step_map(step, sel.head))
   }
   else { sel }
+}
+
+fn sel_map_node(step, sel) {
+  let mapped = step_map(step, pos(sel.path, 0))
+  if (len(mapped.path) == len(sel.path)) { node_selection(mapped.path) }
+  else { text_selection(mapped, mapped) }
 }
 
 // ---------------------------------------------------------------------------

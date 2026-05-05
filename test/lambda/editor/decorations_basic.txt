@@ -56,3 +56,7 @@ true
 true
 "visual source unchanged:"
 true
+"tx pruned inline count:"
+true
+"tx pruned node count:"
+true

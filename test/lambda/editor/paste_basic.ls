@@ -194,3 +194,20 @@ let html_schema_para = node_at(tx_html_schema.doc_after, [0])
 "cmd html schema paste tag:"; html_schema_para.tag == 'p'
 "cmd html schema paste text:"; doc_text(html_schema_para) == "Say: Hello world"
 "cmd html schema paste mark:"; html_schema_para.content[2].marks[0] == 'strong'
+
+let loose_list_md = html_fragment_to_md_blocks(node('ul', [text("loose"), node('ul', [node('li', [text("nested")])])]))
+"html loose list outer tag:"; loose_list_md[0].tag == 'list'
+"html loose list item count:"; len(loose_list_md[0].content) == 2
+"html loose list text item:"; doc_text(loose_list_md[0].content[0]) == "loose"
+"html loose nested list tag:"; loose_list_md[0].content[1].content[1].tag == 'list'
+
+let loose_list_html = html_fragment_to_blocks_for_schema(html5_subset_schema, node('ul', [text("loose"), node('ul', [node('li', [text("nested")])])]))
+"html schema loose list tag:"; loose_list_html[0].tag == 'ul'
+"html schema loose list item count:"; len(loose_list_html[0].content) == 2
+"html schema loose nested tag:"; loose_list_html[0].content[1].content[1].tag == 'ul'
+
+let direct_row_table = html_fragment_to_blocks_for_schema(html5_subset_schema,
+  node('table', [node('tr', [node('td', [text("A")])]), node('tr', [node('td', [text("B")])])]))
+"html direct rows table tag:"; direct_row_table[0].tag == 'table'
+"html direct rows wrapped:"; direct_row_table[0].content[0].tag == 'tbody'
+"html direct rows count:"; len(direct_row_table[0].content[0].content) == 2
