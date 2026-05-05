@@ -78,6 +78,17 @@ let tx_drop_insert = dispatch_intent(drop_state, {
   input_type: "insertFromDrop", slice: [node('paragraph', [text("X")])], target_parent_path: [], target_index: 1})
 "drop insert doc:"; [for (n in tx_drop_insert.doc_after.content) doc_text(n)] == ["A", "X", "B", "C"]
 "drop insert selected:"; path_equal(tx_drop_insert.sel_after.path, [1])
+let tx_drop_block_coerce = dispatch_intent(drop_state, {
+  input_type: "insertFromDrop", slice: [text("Loose"), node('blink', [text("bad")])], target_parent_path: [], target_index: 1})
+"drop block coerced doc:"; [for (n in tx_drop_block_coerce.doc_after.content) doc_text(n)] == ["A", "Loose", "B", "C"]
+"drop block coerced tag:"; node_at(tx_drop_block_coerce.doc_after, [1]).tag == 'paragraph'
+"drop block coerced selected:"; path_equal(tx_drop_block_coerce.sel_after.path, [1])
+let inline_drop_doc = node('doc', [node('paragraph', [text("A"), text("Z")])])
+let tx_drop_inline_coerce = dispatch_intent({doc: inline_drop_doc, selection: text_selection(pos([0, 0], 1), pos([0, 0], 1))}, {
+  input_type: "insertFromDrop", slice: [node('paragraph', [text("B")]), node('blink', [text("bad")]), text("C")], target_parent_path: [0], target_index: 1})
+"drop inline coerced doc:"; doc_text(tx_drop_inline_coerce.doc_after) == "ABCZ"
+"drop inline coerced count:"; len(node_at(tx_drop_inline_coerce.doc_after, [0]).content) == 4
+"drop inline coerced caret:"; tx_drop_inline_coerce.sel_after.kind == 'text' and path_equal(tx_drop_inline_coerce.sel_after.anchor.path, [0]) and tx_drop_inline_coerce.sel_after.anchor.offset == 3
 
 let atom_doc = node('doc', [
   node('paragraph', [text("A")]),

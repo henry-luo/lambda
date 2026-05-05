@@ -134,3 +134,29 @@ true
 true
 "exec html outdent selected:"
 true
+"dispatch intent doc:"
+true
+"dispatch intent history:"
+true
+"dispatch intent event:"
+true
+"dispatch composition active:"
+true
+"dispatch composition update:"
+true
+"dispatch composition final:"
+true
+"dispatch composition cleared:"
+true
+"dispatch composition history:"
+true
+"edit find count:"
+true
+"edit find event:"
+true
+"set decorations count:"
+true
+"edit decoration mapped from:"
+true
+"edit decoration mapped to:"
+true

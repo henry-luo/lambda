@@ -233,5 +233,11 @@ pub fn coerce_to_schema(schema, fragment) => coerce_one(schema, fragment)
 pub fn coerce_children(schema, children, parent_role) =>
   coerce_list_at(schema, children, parent_role, null, 0, len(children), [], [])
 
+pub fn coerce_children_for_parent(schema, parent_tag, children) {
+  let parent_entry = entry_for(schema, parent_tag)
+  if (parent_entry == null) { [] }
+  else { coerce_list_at(schema, children, content_role(parent_entry), parent_entry, 0, len(children), [], []) }
+}
+
 pub fn coerce_for_md_block(children) =>
   coerce_list_at(md_schema, children, 'block', null, 0, len(children), [], [])

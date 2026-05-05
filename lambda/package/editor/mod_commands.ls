@@ -541,9 +541,13 @@ pub fn cmd_insert_at(state, target_parent_path, target_index, slice) {
   if (not valid_insert_index(parent, target_index)) { null }
   else if (len(slice) == 0) { null }
   else {
-    let tx0 = tx_begin(state.doc, state.selection)
-    let tx1 = tx_step(tx0, step_replace(target_parent_path, target_index, target_index, slice))
-    tx_set_selection(tx1, insert_selection(target_parent_path, target_index, len(slice)))
+    let coerced = coerce_children_for_parent(state_schema(state), parent.tag, slice)
+    if (len(coerced) == 0) { null }
+    else {
+      let tx0 = tx_begin(state.doc, state.selection)
+      let tx1 = tx_step(tx0, step_replace(target_parent_path, target_index, target_index, coerced))
+      tx_set_selection(tx1, insert_selection(target_parent_path, target_index, len(coerced)))
+    }
   }
 }
 
