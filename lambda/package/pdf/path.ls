@@ -393,6 +393,10 @@ fn _clear(st) {
     _set(st, [], st.current_x, st.current_y, st.start_x, st.start_y)
 }
 
+pub fn clear_current_path(st) {
+    _set(st, [], st.current_x, st.current_y, st.start_x, st.start_y)
+}
+
 fn _close_last(st) {
     let segs = st.segments ++ [{ cmd: "Z" }]
     _set(st, segs, st.start_x, st.start_y, st.start_x, st.start_y)
