@@ -14,6 +14,14 @@ true
 true
 "del-back at start null:"
 true
+"del-back join count:"
+true
+"del-back join doc:"
+true
+"del-back join caret path:"
+true
+"del-back join caret off:"
+true
 "del-back range doc:"
 true
 "del-back range caret:"
@@ -22,7 +30,15 @@ true
 true
 "del-fwd caret:"
 true
-"del-fwd at end null:"
+"del-fwd join count:"
+true
+"del-fwd join doc:"
+true
+"del-fwd join caret path:"
+true
+"del-fwd join caret off:"
+true
+"del-fwd at doc end null:"
 true
 "del-word doc:"
 true

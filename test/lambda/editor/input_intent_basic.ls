@@ -61,6 +61,16 @@ let tx_fwd = dispatch_intent(
   {input_type: "deleteContentForward", data: null})
 "delete-fwd intent doc:"; doc_text(tx_fwd.doc_after) == "Hllo"
 
+let join_doc = node('doc', [node('paragraph', [text("A")]), node('paragraph', [text("B")])])
+let tx_back_join = dispatch_intent(
+  {doc: join_doc, selection: text_selection(pos([1, 0], 0), pos([1, 0], 0))},
+  {input_type: "deleteContentBackward", data: null})
+"delete-back join intent:"; doc_text(tx_back_join.doc_after) == "AB" and len(tx_back_join.doc_after.content) == 1
+let tx_fwd_join = dispatch_intent(
+  {doc: join_doc, selection: text_selection(pos([0, 0], 1), pos([0, 0], 1))},
+  {input_type: "deleteContentForward", data: null})
+"delete-fwd join intent:"; doc_text(tx_fwd_join.doc_after) == "AB" and len(tx_fwd_join.doc_after.content) == 1
+
 let tx_split = dispatch_intent(s0, {input_type: "insertParagraph", data: null})
 "split intent count:"; len(tx_split.doc_after.content)
 "split intent left:"; doc_text(node_at(tx_split.doc_after, [0])) == "Hello"
