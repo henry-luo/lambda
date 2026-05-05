@@ -757,14 +757,11 @@ static bool scan_ts_type(TSLexer *lexer) {
             break;
         }
 
-        // * (existential type) or other misc single chars
-        if (ch == '*') {
-            advance(lexer);
-            lexer->mark_end(lexer);
-            has_content = true;
-            after_close_paren = false;
-            brace_starts_type = false;
-            continue;
+        // expression-only operators at depth 0 end a type expression. TypeScript
+        // has no standalone '*' type, and accepting it here steals multiplication
+        // from ordinary expressions when TS_TYPE is valid in a parallel parse path.
+        if (ch == '*' || ch == '/' || ch == '%') {
+            break;
         }
 
         // anything else we don't recognize — stop
