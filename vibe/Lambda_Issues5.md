@@ -1,5 +1,42 @@
 # Lambda Script Issues — Phase 2 PDF Package
 
+## Current Verification Status (2026-05-05)
+
+Quick probes against the current `./lambda.exe` show that several items in
+this document have changed since they were first recorded. This was a
+spot-check, not a full audit of every issue below.
+
+### Confirmed fixed or improved
+
+- **#9 single-quote symbol vs double-quote string comparison**: improved.
+  Comparing `'name' == "name"` now fails at compile time with a useful
+  diagnostic instead of silently evaluating false:
+  `comparing 'symbol' with 'string' will always be false`.
+- **#14 / #29 `var` initialized with `""` or `null` cannot be reassigned**:
+  appears fixed in the checked cases. `var s = ""; s = "hello"` returned
+  `"hello"`, and `var x = null; x = { a: 1 }` returned `{ a: 1 }`.
+- **#2 / #28 simple `pn` implicit `if/else` return**: partially improved.
+  A simple `pn` whose body is only an `if/else` expression returned the
+  selected branch value in the checked case.
+
+### Confirmed still present
+
+- **#13 empty string/null conflation**: still present. `"" == null` returned
+  `true`, and `{ name: "" }.name` read back as `null`.
+- **#15 / #30 `let x = if (...) ... else ...` inside `pn`**: still present.
+  The checked `pn` returned `null` for the binding even when the condition was
+  true, while the equivalent `fn` returned the expected value.
+- **#3 multi-argument `print()`**: still present. `print("x=", 1)` compiled
+  but failed at runtime with `fn_call2: cannot call non-function value`.
+- **#5 chained comparisons without parentheses**: still present.
+  `fn is_digit(k) { k >= 48 and k <= 57 }` failed to parse.
+
+### Not rechecked in this pass
+
+The remaining parser, formatter, operator, element-literal, and nested-`pn`
+issues below were not rechecked during this quick status update and should be
+treated as unverified unless separately tested.
+
 ## Phase 7 Addendum — Lambda Script Gotchas (2026)
 
 ### 24. Empty `else if`/`else` block in `pn` silently breaks the loop
