@@ -40,6 +40,16 @@ let editor4 = edit_exec(editor0, edit_cmd_toggle_mark('strong'))
 let editor5 = edit_exec(editor4, edit_cmd_insert_text("*"))
 "exec stored insert doc:"; doc_text(editor5.doc) == "Hello*"
 "exec stored insert mark:"; has_mark(node_at(editor5.doc, [0, 1]).marks, 'strong')
+let editor4_moved = edit_set_selection(editor4, text_selection(pos([0, 0], 0), pos([0, 0], 0)))
+"set selection clears stored:"; editor4_moved.stored_marks == null
+"set selection event:"; editor4_moved.events[len(editor4_moved.events) - 1].kind == 'selection'
+
+let raw_tx = tx_set_selection(tx_step(tx_begin(editor0.doc, editor0.selection), step_replace_text([0, 0], 0, 5, "Bye")),
+	text_selection(pos([0, 0], 3), pos([0, 0], 3)))
+let applied_editor = edit_apply(editor0, raw_tx)
+"apply tx doc:"; doc_text(applied_editor.doc) == "Bye"
+"apply tx history:"; len(applied_editor.history.undo) == 1
+"apply tx selection:"; applied_editor.selection.anchor.offset == 3
 
 let paste_editor = edit_exec(editor0, edit_cmd_paste_text(" world"))
 "exec paste text:"; doc_text(paste_editor.doc) == "Hello world"
@@ -126,6 +136,9 @@ let lifted_quote_editor = edit_exec(edit_open(quote_editor.doc, editor_schemas.m
 let html_table_editor = edit_exec(html_text_editor, edit_cmd_insert_table(2, 2, true))
 "exec html table tag:"; node_at(html_table_editor.doc, [1]).tag == 'table'
 "exec html table header:"; node_at(html_table_editor.doc, [1, 0, 0]).tag == 'th'
+let md_table_editor = edit_exec(editor0, edit_cmd_insert_table(2, 2, true))
+"exec md table tag:"; node_at(md_table_editor.doc, [1]).tag == 'table'
+"exec md table header:"; node_at(md_table_editor.doc, [1, 0, 0]).tag == 'th'
 let html_table_row_editor = edit_exec(edit_open(html_table_editor.doc, editor_schemas.html5_subset,
 	text_selection(pos([1, 1, 0, 0], 0), pos([1, 1, 0, 0], 0))), edit_cmd_add_table_row())
 "exec html add row:"; len(node_at(html_table_row_editor.doc, [1]).content) == 3

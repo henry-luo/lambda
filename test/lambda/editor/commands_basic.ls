@@ -292,7 +292,9 @@ let tx_quote_cross = cmd_wrap_blockquote(cross_block_state)
 "wrap quote cross count:"; len(tx_quote_cross.doc_after.content) == 1
 "wrap quote cross children:"; len(node_at(tx_quote_cross.doc_after, [0]).content) == 2
 
-"insert table markdown null:"; cmd_insert_table(s0, 2, 2, false) == null
+let tx_table_md_plain = cmd_insert_table(s0, 2, 2, false)
+"insert table markdown tag:"; node_at(tx_table_md_plain.doc_after, [1]).tag == 'table'
+"insert table markdown body cell:"; node_at(tx_table_md_plain.doc_after, [1, 0, 0]).tag == 'td'
 let table_state = {doc: node('doc', [node('p', [text("Hi")])]), schema: html5_subset_schema,
   selection: text_selection(pos([0, 0], 2), pos([0, 0], 2))}
 let tx_table = cmd_insert_table(table_state, 2, 3, true)
@@ -423,6 +425,9 @@ let tx_h_cross = cmd_set_block_type(cross_block_state, 'heading')
 "set-type cross second:"; node_at(tx_h_cross.doc_after, [1]).tag == 'heading'
 "set-type cross selection:"; path_equal(tx_h_cross.sel_after.anchor.path, [0, 0]) and path_equal(tx_h_cross.sel_after.head.path, [1, 0])
 let boundary_block_state = {doc: d0, selection: text_selection(pos([0, 0], 2), pos([1, 0], 0))}
+let tx_boundary_bold = cmd_toggle_mark(boundary_block_state, 'strong')
+"toggle boundary first mark:"; has_mark(node_at(tx_boundary_bold.doc_after, [0, 0]).marks, 'strong')
+"toggle boundary second plain:"; not has_mark(node_at(tx_boundary_bold.doc_after, [1, 0]).marks, 'strong')
 let tx_h_boundary = cmd_set_block_type(boundary_block_state, 'heading')
 "set-type boundary steps:"; len(tx_h_boundary.steps) == 1
 "set-type boundary first:"; node_at(tx_h_boundary.doc_after, [0]).tag == 'heading'
@@ -525,6 +530,11 @@ let tx_boundary_quote = cmd_wrap_blockquote(boundary_block_state)
 let tx_boundary_hr = cmd_insert_horizontal_rule(boundary_block_state)
 "insert boundary hr first:"; node_at(tx_boundary_hr.doc_after, [0]).tag == 'hr'
 "insert boundary hr second:"; node_at(tx_boundary_hr.doc_after, [1]).tag == 'paragraph'
+
+let tx_md_table = cmd_insert_table(s0, 2, 2, true)
+"insert md table tag:"; node_at(tx_md_table.doc_after, [1]).tag == 'table'
+"insert md table header:"; node_at(tx_md_table.doc_after, [1, 0, 0]).tag == 'th'
+"insert md table selected:"; path_equal(tx_md_table.sel_after.path, [1])
 
 let tx_move_later = cmd_move_node(drop_state, [0], [], 3)
 "move later order:"; [for (n in tx_move_later.doc_after.content) doc_text(n)] == ["B", "C", "A"]

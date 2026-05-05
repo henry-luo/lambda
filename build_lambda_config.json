@@ -253,6 +253,26 @@
             "include": "build_temp/re2-noabsl",
             "lib": "build_temp/re2-noabsl/cmake_build/libre2.a",
             "link": "static"
+        },
+        {
+            "name": "psl",
+            "description": "Public Suffix List — curl cookie dependency (Windows only; no-op on other platforms)",
+            "link": "none"
+        },
+        {
+            "name": "wldap32",
+            "description": "Windows LDAP library (curl LDAP dependency; no-op on non-Windows)",
+            "link": "none"
+        },
+        {
+            "name": "secur32",
+            "description": "Windows Security library (curl SSPI/NTLM dependency; no-op on non-Windows)",
+            "link": "none"
+        },
+        {
+            "name": "iphlpapi",
+            "description": "Windows IP Helper API (curl IPv6 scope ID dependency; no-op on non-Windows)",
+            "link": "none"
         }
     ],
     "dev_libraries": [
@@ -431,7 +451,11 @@
                 "zlib",
                 "rpmalloc",
                 "re2",
-                "pthread"
+                "pthread",
+                "psl",
+                "wldap32",
+                "secur32",
+                "iphlpapi"
             ],
             "defines": [
                 "SIMPLE_SCHEMA_PARSER",
@@ -799,6 +823,12 @@
                     "name": "idn2",
                     "description": "libidn2 — curl IDN dependency",
                     "lib": "/clang64/lib/libidn2.a",
+                    "link": "static"
+                },
+                {
+                    "name": "psl",
+                    "description": "Public Suffix List — curl cookie dependency",
+                    "lib": "/clang64/lib/libpsl.a",
                     "link": "static"
                 },
                 {
