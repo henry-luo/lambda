@@ -1074,7 +1074,7 @@
                 "DTVG_STATIC"
             ],
             "linker_flags": [
-                "Wl,--stack,8388608",
+                "Wl,--stack,67108864",
                 "Wl,--subsystem,console",
                 "static-libgcc",
                 "static-libstdc++",
@@ -3138,12 +3138,17 @@
                         "source": "test/test_lambda_errors_gtest.cpp",
                         "name": "Lambda Error System Tests",
                         "dependencies": [
-                            "lambda-input-full"
+                            "lambda-lib"
+                        ],
+                        "additional_sources": [
+                            "lambda/lambda-error.cpp"
                         ],
                         "binary": "test_lambda_errors_gtest.exe",
                         "libraries": [
                             "gtest",
-                            "gtest_main"
+                            "gtest_main",
+                            "tree-sitter",
+                            "rpmalloc"
                         ],
                         "icon": "⚠️"
                     },
