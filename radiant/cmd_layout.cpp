@@ -73,7 +73,6 @@ void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 #include "../radiant/font_face.h"
 #include "../radiant/state_store.hpp"
 #include "../radiant/form_control.hpp"
-#include "../radiant/pdf/pdf_to_view.hpp"
 #include "../radiant/script_runner.h"
 #include "../lambda/render_map.h"
 #include "../lambda/template_state.h"
@@ -118,12 +117,10 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
 
 DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height, Pool* pool);
-DomDocument* load_pdf_doc(Url* pdf_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio = 1.0f);
 DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio = 1.0f);
 DomDocument* load_image_doc(Url* img_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio = 1.0f);
 DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_height, Pool* pool);
 void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file);
-void parse_pdf(Input* input, const char* pdf_data, size_t pdf_length);  // From input-pdf.cpp
 const char* extract_element_attribute(Element* elem, const char* attr_name, Arena* arena);
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
 
@@ -3114,9 +3111,8 @@ DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int vie
         log_info("[load_html_doc] Detected XML file, using XML→DOM pipeline");
         doc = load_xml_doc(full_url, viewport_width, viewport_height, pool);
     } else if (ext && strcmp(ext, ".pdf") == 0) {
-        // Load PDF document: parse PDF → convert to ViewTree directly (no CSS layout needed)
-        log_info("[load_html_doc] Detected PDF file, using PDF→ViewTree pipeline");
-        doc = load_pdf_doc(full_url, viewport_width, viewport_height, pool, pixel_ratio);
+        log_error("[load_html_doc] Direct PDF ViewTree loading was retired; use lambda view PDF conversion");
+        doc = nullptr;
     } else if (ext && strcmp(ext, ".svg") == 0) {
         // Load SVG document: render SVG → convert to ViewTree directly (no CSS layout needed)
         log_info("[load_html_doc] Detected SVG file, using SVG→ViewTree pipeline");
@@ -3140,120 +3136,6 @@ DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int vie
     }
 
     return doc;
-}
-
-/**
- * Load PDF document with direct ViewTree conversion
- * Parses PDF, converts to ViewTree directly (no CSS layout needed as PDF has absolute positions)
- *
- * @param pdf_url URL to PDF file
- * @param viewport_width Viewport width for scaling (currently unused, PDF uses original dimensions)
- * @param viewport_height Viewport height for scaling (currently unused)
- * @param pool Memory pool for allocations
- * @param pixel_ratio Display pixel ratio for high-DPI scaling (e.g., 2.0 for Retina)
- * @return DomDocument structure with view_tree pre-set, ready for rendering
- */
-DomDocument* load_pdf_doc(Url* pdf_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio) {
-    auto total_start = std::chrono::high_resolution_clock::now();
-
-    if (!pdf_url || !pool) {
-        log_error("load_pdf_doc: invalid parameters");
-        return nullptr;
-    }
-
-    char* pdf_filepath = url_to_local_path(pdf_url);
-    log_info("[TIMING] Loading PDF document: %s", pdf_filepath);
-
-    // Step 1: Read PDF file content (binary mode for proper handling)
-    auto step1_start = std::chrono::high_resolution_clock::now();
-    size_t pdf_size = 0;
-    char* pdf_content = read_binary_file(pdf_filepath, &pdf_size);
-    if (!pdf_content) {
-        log_error("Failed to read PDF file: %s", pdf_filepath);
-        return nullptr;
-    }
-
-    auto step1_end = std::chrono::high_resolution_clock::now();
-    log_info("[TIMING] Step 1 - Read PDF file: %.1fms (%zu bytes)",
-        std::chrono::duration<double, std::milli>(step1_end - step1_start).count(), pdf_size);
-
-    // Step 2: Create Input structure and parse PDF
-    auto step2_start = std::chrono::high_resolution_clock::now();
-    Input* input = InputManager::create_input(pdf_url);
-    if (!input) {
-        log_error("Failed to create Input structure");
-        mem_free(pdf_content);
-        return nullptr;
-    }
-
-    // Parse PDF content with explicit size
-    parse_pdf(input, pdf_content, pdf_size);
-    mem_free(pdf_content);  // Done with raw content
-
-    // Check if parsing succeeded
-    if (input->root.item == ITEM_ERROR || input->root.item == ITEM_NULL) {
-        log_error("Failed to parse PDF file: %s", pdf_filepath);
-        return nullptr;
-    }
-
-    auto step2_end = std::chrono::high_resolution_clock::now();
-    log_info("[TIMING] Step 2 - Parse PDF: %.1fms",
-        std::chrono::duration<double, std::milli>(step2_end - step2_start).count());
-
-    // Step 3: Get page count and convert first page to ViewTree
-    auto step3_start = std::chrono::high_resolution_clock::now();
-    int total_pages = pdf_get_page_count(input->root);
-    if (total_pages <= 0) {
-        log_error("PDF has no pages or page count failed");
-        return nullptr;
-    }
-
-    log_info("PDF has %d page(s)", total_pages);
-
-    // Convert first page to view tree (page 0)
-    // Pass pixel_ratio for high-DPI display scaling
-    ViewTree* view_tree = pdf_page_to_view_tree(input, input->root, 0, pixel_ratio);
-    if (!view_tree || !view_tree->root) {
-        log_error("Failed to convert PDF page to view tree");
-        return nullptr;
-    }
-
-    auto step3_end = std::chrono::high_resolution_clock::now();
-    log_info("[TIMING] Step 3 - Convert to ViewTree: %.1fms",
-        std::chrono::duration<double, std::milli>(step3_end - step3_start).count());
-
-    // Step 4: Create DomDocument and populate it
-    // Note: We set html_root to nullptr since PDF doesn't use HTML/CSS layout
-    // The view_tree is pre-created with absolute positions from PDF
-    DomDocument* dom_doc = dom_document_create(input);
-    if (!dom_doc) {
-        log_error("Failed to create DomDocument");
-        return nullptr;
-    }
-
-    dom_doc->root = nullptr;           // No DomElement tree for PDF
-    dom_doc->html_root = nullptr;      // No HTML tree for PDF (skips layout_html_doc)
-    dom_doc->html_version = HTML5;     // Treat as HTML5 for compatibility
-    dom_doc->url = pdf_url;
-    dom_doc->view_tree = view_tree;    // Pre-created ViewTree from PDF
-    dom_doc->state = nullptr;
-
-    // Set scale fields for rendering
-    // PDF view tree is pre-scaled by pixel_ratio, so given_scale = 1.0 and scale = pixel_ratio
-    dom_doc->given_scale = 1.0f;
-    dom_doc->scale = pixel_ratio;
-
-    // Set content dimensions from ViewTree root
-    if (view_tree->root) {
-        ViewBlock* root = (ViewBlock*)view_tree->root;
-        log_info("PDF view tree root dimensions: %.0fx%.0f", root->width, root->height);
-    }
-
-    auto total_end = std::chrono::high_resolution_clock::now();
-    log_info("[TIMING] load_pdf_doc total: %.1fms",
-        std::chrono::duration<double, std::milli>(total_end - total_start).count());
-
-    return dom_doc;
 }
 
 /**
@@ -5814,8 +5696,8 @@ static bool layout_single_file(
         log_info("[Layout] Detected XML file, using XML→DOM pipeline");
         doc = load_xml_doc(input_url, viewport_width, viewport_height, pool);
     } else if (ext && strcmp(ext, ".pdf") == 0) {
-        log_info("[Layout] Detected PDF file, using PDF→ViewTree pipeline");
-        doc = load_pdf_doc(input_url, viewport_width, viewport_height, pool, 1.0f);
+        log_error("[Layout] Direct PDF layout was retired; use lambda view PDF conversion");
+        doc = nullptr;
     } else if (ext && strcmp(ext, ".svg") == 0) {
         log_info("[Layout] Detected SVG file, using SVG→ViewTree pipeline");
         doc = load_svg_doc(input_url, viewport_width, viewport_height, pool, 1.0f);

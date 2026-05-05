@@ -4497,8 +4497,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                                 evcon.ui_context->viewport_width = saved_viewport_width;
                                 evcon.ui_context->viewport_height = saved_viewport_height;
                             }
-                            // PDF scaling now happens inside pdf_page_to_view_tree via load_html_doc
-                            // For PDF and other pre-laid-out documents, view_tree is already set
+                            // For pre-laid-out documents, view_tree is already set
                             if (new_doc->view_tree && new_doc->view_tree->root) {
                                 ViewBlock* root = (ViewBlock*)new_doc->view_tree->root;
                                 // Disable inner doc's viewport scroller — iframe container handles scrolling

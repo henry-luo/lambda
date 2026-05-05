@@ -2380,7 +2380,7 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
                     log_debug("IFRAME TRACE: finished layout iframe document");
                 }
                 iframe_depth--;
-                // PDF scaling now happens inside pdf_page_to_view_tree via load_html_doc
+                // embedded documents may already provide a pre-laid-out view tree
             }
         } else {
             log_debug("iframe has no src attribute");
