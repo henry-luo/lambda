@@ -57,6 +57,19 @@ let list_attrs = coerce_to_schema(md_schema, node_attrs('list', [{name: 'ordered
   node('list_item', [node('paragraph', [text("x")])])
 ]))
 "attr invalid defaulted:"; len(list_attrs.attrs) == 1 and list_attrs.attrs[0].value == false
+let bad_default_schema = {
+  box: {role: 'block', content: [], marks: 'none', attrs: [
+    {name: 'kind', type: 'string', default: "bad", one_of: ["note", "tip"]},
+    {name: 'level', type: 'int', default: 9, min: 1, max: 3},
+    {name: 'even', type: 'int', default: 3, validate: (v) => v == 2 or v == 4},
+    {name: 'ok', type: 'string', default: "note", one_of: ["note"]}
+  ]}
+}
+let bad_default_box = coerce_to_schema(bad_default_schema, node_attrs('box', [
+  {name: 'kind', value: "wrong"}, {name: 'level', value: 0}, {name: 'even', value: 5}
+], []))
+"attr invalid defaults omitted:"; len(bad_default_box.attrs) == 1
+"attr valid default kept:"; bad_default_box.attrs[0].name == 'ok' and bad_default_box.attrs[0].value == "note"
 
 // ---------------------------------------------------------------------------
 // 4. Lift inlines that landed in block context — wrap them in a paragraph

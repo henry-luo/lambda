@@ -106,9 +106,13 @@ fn editor_after_tx(editor, tx) {
 
 pub fn edit_exec(editor, command) => editor_after_tx(editor, command_tx(editor, command))
 
+pub fn edit_can_exec(editor, command) => command_tx(editor, command) != null
+
 pub fn edit_apply(editor, tx) => editor_after_tx(editor, tx)
 
 pub fn edit_dispatch(editor, intent) => editor_after_tx(editor, dispatch_intent(editor, intent))
+
+pub fn edit_can_dispatch(editor, intent) => dispatch_intent(editor, intent) != null
 
 pub fn edit_set_decorations(editor, decorations) =>
   {kind: 'editor', doc: editor.doc, schema: editor.schema, selection: editor.selection,

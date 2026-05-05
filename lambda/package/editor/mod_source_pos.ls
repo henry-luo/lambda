@@ -81,13 +81,33 @@ pub fn pos_max(a, b) => if (pos_compare(a, b) >= 0) a else b
 // Resolution — walk a path against a document tree
 // ---------------------------------------------------------------------------
 
+fn is_editor_text(node) => type(node) == map and node.kind == 'text'
+fn is_editor_node(node) => type(node) == map and node.kind == 'node'
+
+fn tree_child_count(node) =>
+  if (type(node) == element or type(node) == array) { len(node) }
+  else if (is_editor_node(node)) { len(node.content) }
+  else { 0 }
+
+fn tree_child(node, index) =>
+  if (type(node) == element or type(node) == array) { node[index] }
+  else if (is_editor_node(node)) { node.content[index] }
+  else { null }
+
+fn tree_text(node) =>
+  if (type(node) == string) { node }
+  else if (is_editor_text(node)) { node.text }
+  else { null }
+
+fn tree_has_children(node) => tree_child_count(node) > 0
+
 // Walk `path` from `node`; return the descendant node, or null if the path
 // runs off the tree or hits a non-container.
 fn resolve_at(node, path, i) {
   if (i >= len(path)) { node }
-  else if (type(node) != element and type(node) != array) { null }
-  else if (path[i] >= len(node)) { null }
-  else { resolve_at(node[path[i]], path, i + 1) }
+  else if (not tree_has_children(node)) { null }
+  else if (path[i] >= tree_child_count(node)) { null }
+  else { resolve_at(tree_child(node, path[i]), path, i + 1) }
 }
 
 // resolve_pos(doc, pos) -> { node, parent, parent_index, depth, found }
@@ -124,9 +144,6 @@ pub fn resolve_pos(doc, p) {
   }
 }
 
-fn child_count(node) =>
-  if (type(node) == element or type(node) == array) { len(node) } else { 0 }
-
 pub fn resolve_before(r, depth) {
   if (not r.found or depth < 0 or depth > r.depth) { null }
   else if (depth == 0) { pos([], 0) }
@@ -138,7 +155,7 @@ pub fn resolve_before(r, depth) {
 
 pub fn resolve_after(r, depth) {
   if (not r.found or depth < 0 or depth > r.depth) { null }
-  else if (depth == 0) { pos([], child_count(r.ancestors[0].node)) }
+  else if (depth == 0) { pos([], tree_child_count(r.ancestors[0].node)) }
   else {
     let p = r.ancestors[depth].path
     pos(slice(p, 0, len(p) - 1), p[len(p) - 1] + 1)
@@ -162,9 +179,14 @@ pub fn concat_strings(arr) => concat_at(arr, 0, len(arr), "")
 // document order. Used as the building block for selection_to_string when
 // the selection spans multiple nodes.
 pub fn node_text(node) {
-  if (type(node) == string) { node }
-  else if (type(node) == element) {
+  let txt = tree_text(node)
+  if (txt != null) { txt }
+  else if (type(node) == element or type(node) == array) {
     let parts = [for (c in node) node_text(c)]
+    concat_strings(parts)
+  }
+  else if (is_editor_node(node)) {
+    let parts = [for (c in node.content) node_text(c)]
     concat_strings(parts)
   }
   else { "" }
@@ -172,9 +194,13 @@ pub fn node_text(node) {
 
 // Enumerate string leaves in document order, preserving their source paths.
 fn text_leaves_at(node, path) {
-  if (type(node) == string) { [{path: path, text: node}] }
+  let txt = tree_text(node)
+  if (txt != null) { [{path: path, text: txt}] }
   else if (type(node) == element or type(node) == array) {
     [for (i in 0 to len(node) - 1) for (leaf in text_leaves_at(node[i], [*path, i])) leaf]
+  }
+  else if (is_editor_node(node)) {
+    [for (i in 0 to len(node.content) - 1) for (leaf in text_leaves_at(node.content[i], [*path, i])) leaf]
   }
   else { [] }
 }
@@ -220,8 +246,9 @@ pub fn selection_to_string(doc, sel) {
     let hi = pos_max(sel.anchor, sel.head)
     if (path_equal(lo.path, hi.path)) {
       let r = resolve_pos(doc, lo)
-      if (not r.found or type(r.node) != string) { "" }
-      else { slice(r.node, lo.offset, hi.offset) }
+      let txt = if (r.found) { tree_text(r.node) } else { null }
+      if (txt == null) { "" }
+      else { slice(txt, lo.offset, hi.offset) }
     } else { selection_text_across_leaves(doc, lo, hi) }
   }
   else { null }

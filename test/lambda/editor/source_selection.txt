@@ -30,3 +30,29 @@ true
 true
 "bogus null:"
 true
+"editor doc text:"
+true
+"editor node sel:"
+true
+"editor same leaf:"
+true
+"editor cross leaf:"
+true
+"editor resolve found:"
+true
+"editor resolve node text:"
+true
+"editor resolve parent tag:"
+true
+"editor resolve depth:"
+true
+"editor resolve ancestors:"
+true
+"editor before strong path:"
+true
+"editor after strong path:"
+true
+"editor after root:"
+true
+"editor resolve missing:"
+true

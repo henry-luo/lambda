@@ -24,6 +24,10 @@ true
 true
 "attr invalid defaulted:"
 true
+"attr invalid defaults omitted:"
+true
+"attr valid default kept:"
+true
 "lift count:"
 3
 "first lifted tag:"
