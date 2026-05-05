@@ -302,6 +302,28 @@ true
 true
 "delete table col selected:"
 true
+"add section row count:"
+true
+"add section row selected:"
+true
+"add section row cell:"
+true
+"add section col first row:"
+true
+"add section col second row:"
+true
+"add section col selected:"
+true
+"delete section col first row:"
+true
+"delete section col second row:"
+true
+"delete section col selected:"
+true
+"delete section row count:"
+true
+"delete section row selected:"
+true
 "toggle stored mark:"
 true
 "toggle stored no doc change:"

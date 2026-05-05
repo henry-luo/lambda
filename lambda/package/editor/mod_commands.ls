@@ -1405,11 +1405,16 @@ fn selected_table_context(state) {
   if (cell_path == null) { null }
   else {
     let row_path = parent_path(cell_path)
-    let table_path = parent_path(row_path)
-    let table = node_at(state.doc, table_path)
+    let row_container_path = parent_path(row_path)
+    let row_container = node_at(state.doc, row_container_path)
+    let table_path = if (row_container != null and is_node(row_container) and row_container.tag == 'tr') { null }
+      else if (row_container != null and is_node(row_container) and row_container.tag == 'table') { row_container_path }
+      else { parent_path(row_container_path) }
+    let table = if (table_path == null) { null } else { node_at(state.doc, table_path) }
     let row = node_at(state.doc, row_path)
-    if (table == null or row == null or not is_node(table) or not is_node(row) or table.tag != 'table' or row.tag != 'tr') { null }
+    if (table == null or row_container == null or row == null or not is_node(table) or not is_node(row_container) or not is_node(row) or table.tag != 'table' or row.tag != 'tr') { null }
     else { {cell_path: cell_path, row_path: row_path, table_path: table_path, table: table, row: row,
+            row_container_path: row_container_path, row_container: row_container,
             row_index: last_index(row_path), col_index: last_index(cell_path)} }
   }
 }
@@ -1425,29 +1430,45 @@ pub fn cmd_add_table_row(state) {
     let insert_at = ctx.row_index + 1
     let cols = len(ctx.row.content)
     let tx0 = tx_begin(state.doc, state.selection)
-    let tx1 = tx_step(tx0, step_replace(ctx.table_path, insert_at, insert_at, [make_table_row(cols, false)]))
-    tx_set_selection(tx1, node_selection([*ctx.table_path, insert_at]))
+    let tx1 = tx_step(tx0, step_replace(ctx.row_container_path, insert_at, insert_at, [make_table_row(cols, false)]))
+    tx_set_selection(tx1, node_selection([*ctx.row_container_path, insert_at]))
   }
 }
 
 pub fn cmd_delete_table_row(state) {
   let ctx = selected_table_context(state)
-  if (ctx == null or len(ctx.table.content) <= 1) { null }
+  if (ctx == null or len(ctx.row_container.content) <= 1) { null }
   else {
     let tx0 = tx_begin(state.doc, state.selection)
-    let tx1 = tx_step(tx0, step_replace(ctx.table_path, ctx.row_index, ctx.row_index + 1, []))
-    let next_row = if (ctx.row_index >= len(ctx.table.content) - 1) { ctx.row_index - 1 } else { ctx.row_index }
-    tx_set_selection(tx1, node_selection([*ctx.table_path, next_row]))
+    let tx1 = tx_step(tx0, step_replace(ctx.row_container_path, ctx.row_index, ctx.row_index + 1, []))
+    let next_row = if (ctx.row_index >= len(ctx.row_container.content) - 1) { ctx.row_index - 1 } else { ctx.row_index }
+    tx_set_selection(tx1, node_selection([*ctx.row_container_path, next_row]))
   }
 }
 
-fn collect_add_col_steps(table_path, table, col_index, row_i, row_count, acc) {
+fn collect_add_col_steps_rows(rows_path, rows, col_index, row_i, row_count, acc) {
   if (row_i >= row_count) { acc }
   else {
-    let row = table.content[row_i]
-    let ref_cell = if (col_index < len(row.content)) { row.content[col_index] } else { null }
-    let step = step_replace([*table_path, row_i], col_index + 1, col_index + 1, [empty_cell_like(ref_cell)])
-    collect_add_col_steps(table_path, table, col_index, row_i + 1, row_count, [*acc, step])
+    let row = rows.content[row_i]
+    let next = if (row != null and is_node(row) and row.tag == 'tr') {
+      let ref_cell = if (col_index < len(row.content)) { row.content[col_index] } else { null }
+      [*acc, step_replace([*rows_path, row_i], col_index + 1, col_index + 1, [empty_cell_like(ref_cell)])]
+    } else { acc }
+    collect_add_col_steps_rows(rows_path, rows, col_index, row_i + 1, row_count, next)
+  }
+}
+
+fn collect_add_col_steps_table(table_path, table, col_index, i, n, acc) {
+  if (i >= n) { acc }
+  else {
+    let child = table.content[i]
+    let next = if (child != null and is_node(child) and child.tag == 'tr') {
+      let ref_cell = if (col_index < len(child.content)) { child.content[col_index] } else { null }
+      [*acc, step_replace([*table_path, i], col_index + 1, col_index + 1, [empty_cell_like(ref_cell)])]
+    } else if (child != null and is_node(child) and (child.tag == 'thead' or child.tag == 'tbody' or child.tag == 'tfoot')) {
+      collect_add_col_steps_rows([*table_path, i], child, col_index, 0, len(child.content), acc)
+    } else { acc }
+    collect_add_col_steps_table(table_path, table, col_index, i + 1, n, next)
   }
 }
 
@@ -1455,18 +1476,33 @@ pub fn cmd_add_table_column(state) {
   let ctx = selected_table_context(state)
   if (ctx == null) { null }
   else {
-    let steps = collect_add_col_steps(ctx.table_path, ctx.table, ctx.col_index, 0, len(ctx.table.content), [])
+    let steps = collect_add_col_steps_table(ctx.table_path, ctx.table, ctx.col_index, 0, len(ctx.table.content), [])
     let tx1 = tx_apply_steps(tx_begin(state.doc, state.selection), steps, 0, len(steps))
-    tx_set_selection(tx1, node_selection([*ctx.table_path, ctx.row_index, ctx.col_index + 1]))
+    tx_set_selection(tx1, node_selection([*ctx.row_path, ctx.col_index + 1]))
   }
 }
 
-fn collect_delete_col_steps(table_path, table, col_index, row_i, row_count, acc) {
+fn collect_delete_col_steps_rows(rows_path, rows, col_index, row_i, row_count, acc) {
   if (row_i >= row_count) { acc }
   else {
-    let row = table.content[row_i]
-    let next = if (col_index < len(row.content)) { [*acc, step_replace([*table_path, row_i], col_index, col_index + 1, [])] } else { acc }
-    collect_delete_col_steps(table_path, table, col_index, row_i + 1, row_count, next)
+    let row = rows.content[row_i]
+    let next = if (row != null and is_node(row) and row.tag == 'tr' and col_index < len(row.content)) {
+      [*acc, step_replace([*rows_path, row_i], col_index, col_index + 1, [])]
+    } else { acc }
+    collect_delete_col_steps_rows(rows_path, rows, col_index, row_i + 1, row_count, next)
+  }
+}
+
+fn collect_delete_col_steps_table(table_path, table, col_index, i, n, acc) {
+  if (i >= n) { acc }
+  else {
+    let child = table.content[i]
+    let next = if (child != null and is_node(child) and child.tag == 'tr' and col_index < len(child.content)) {
+      [*acc, step_replace([*table_path, i], col_index, col_index + 1, [])]
+    } else if (child != null and is_node(child) and (child.tag == 'thead' or child.tag == 'tbody' or child.tag == 'tfoot')) {
+      collect_delete_col_steps_rows([*table_path, i], child, col_index, 0, len(child.content), acc)
+    } else { acc }
+    collect_delete_col_steps_table(table_path, table, col_index, i + 1, n, next)
   }
 }
 
@@ -1474,10 +1510,10 @@ pub fn cmd_delete_table_column(state) {
   let ctx = selected_table_context(state)
   if (ctx == null or len(ctx.row.content) <= 1) { null }
   else {
-    let steps = collect_delete_col_steps(ctx.table_path, ctx.table, ctx.col_index, 0, len(ctx.table.content), [])
+    let steps = collect_delete_col_steps_table(ctx.table_path, ctx.table, ctx.col_index, 0, len(ctx.table.content), [])
     let tx1 = tx_apply_steps(tx_begin(state.doc, state.selection), steps, 0, len(steps))
     let next_col = if (ctx.col_index >= len(ctx.row.content) - 1) { ctx.col_index - 1 } else { ctx.col_index }
-    tx_set_selection(tx1, node_selection([*ctx.table_path, ctx.row_index, next_col]))
+    tx_set_selection(tx1, node_selection([*ctx.row_path, next_col]))
   }
 }
 
