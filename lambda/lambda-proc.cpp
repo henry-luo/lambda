@@ -716,7 +716,11 @@ RetItem pn_fetch(Item url, Item options) {
 // Helper function to escape shell arguments for safety
 String* escape_shell_arg(String* arg) {
     if (!arg || arg->len == 0) {
+#ifdef _WIN32
+        return heap_strcpy("\"\"", 2);
+#else
         return heap_strcpy("''", 2);  // Empty string as quoted empty
+#endif
     }
 
     // Check if argument needs escaping (contains spaces, special chars, etc.)
@@ -737,6 +741,38 @@ String* escape_shell_arg(String* arg) {
         return arg;
     }
 
+#ifdef _WIN32
+    // Use caret escaping for cmd.exe so shell builtins like echo do not print quotes.
+    size_t escaped_len = arg->len;
+    for (int i = 0; i < arg->len; i++) {
+        char c = arg->chars[i];
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '"' || c == '\'' ||
+            c == '|' || c == '&' || c == ';' || c == '(' || c == ')' ||
+            c == '<' || c == '>' || c == '^' || c == '*' || c == '?' ||
+            c == '[' || c == ']' || c == '{' || c == '}') {
+            escaped_len++;
+        }
+    }
+
+    String* escaped = (String*)heap_alloc(sizeof(String) + escaped_len + 1, LMD_TYPE_STRING);
+    escaped->len = escaped_len;
+    escaped->is_ascii = 1;
+
+    char* dst = escaped->chars;
+    for (int i = 0; i < arg->len; i++) {
+        char c = arg->chars[i];
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '"' || c == '\'' ||
+            c == '|' || c == '&' || c == ';' || c == '(' || c == ')' ||
+            c == '<' || c == '>' || c == '^' || c == '*' || c == '?' ||
+            c == '[' || c == ']' || c == '{' || c == '}') {
+            *dst++ = '^';
+        }
+        *dst++ = c;
+    }
+    *dst = '\0';
+
+    return escaped;
+#else
     // Use single quotes for safety and escape any single quotes in the string
     size_t escaped_len = arg->len + 2; // Start with quotes
     for (int i = 0; i < arg->len; i++) {
@@ -768,6 +804,7 @@ String* escape_shell_arg(String* arg) {
     *dst = '\0';
 
     return escaped;
+#endif
 }
 
 // Helper function to format arguments into command line string
@@ -1049,22 +1086,8 @@ RetItem pn_io_copy(Item src_item, Item dst_item) {
 
     log_debug("io.copy: %s -> %s", src_path, dst_path);
 
-    // Use platform command for simplicity (handles directories too)
-#ifdef _WIN32
-    char win_src[4096], win_dst[4096];
-    win_path_buf(win_src, sizeof(win_src), src_path);
-    win_path_buf(win_dst, sizeof(win_dst), dst_path);
-    char cmd[4096];
-    snprintf(cmd, sizeof(cmd), "copy /Y \"%s\" \"%s\" >nul 2>&1 || xcopy /E /I /Y \"%s\" \"%s\" >nul 2>&1",
-             win_src, win_dst, win_src, win_dst);
-#else
-    char cmd[4096];
-    snprintf(cmd, sizeof(cmd), "cp -r '%s' '%s'", src_path, dst_path);
-#endif
-
-    ShellResult sr = shell_exec_line(cmd, NULL);
-    int result = sr.exit_code;
-    shell_result_free(&sr);
+    FileCopyOptions opts = {true, true};
+    int result = file_copy(src_path, dst_path, &opts);
 
     if (result != 0) {
         log_error("io.copy: failed to copy %s to %s", src_path, dst_path);

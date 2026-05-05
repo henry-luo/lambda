@@ -175,6 +175,10 @@ let tx_span_bold = dispatch_intent(mark_span_state, {input_type: "formatBold", d
 "bold span steps:"; len(tx_span_bold.steps) == 2
 "bold span middle:"; has_mark(node_at(tx_span_bold.doc_after, [0, 1]).marks, 'strong')
 "bold span last:"; has_mark(node_at(tx_span_bold.doc_after, [0, 2]).marks, 'strong')
+let tx_cross_bold = dispatch_intent(cross_block_state, {input_type: "formatBold", data: null})
+"bold cross-block steps:"; len(tx_cross_bold.steps) == 2
+"bold cross-block first:"; has_mark(node_at(tx_cross_bold.doc_after, [0, 0]).marks, 'strong')
+"bold cross-block second:"; has_mark(node_at(tx_cross_bold.doc_after, [1, 0]).marks, 'strong')
 
 let tx_italic = dispatch_intent(s0, {input_type: "formatItalic", data: null})
 "italic intent stored:"; has_mark(tx_get_meta(tx_italic, "storedMarks"), 'em')

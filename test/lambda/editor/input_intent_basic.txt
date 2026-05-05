@@ -132,6 +132,12 @@ true
 true
 "bold span last:"
 true
+"bold cross-block steps:"
+true
+"bold cross-block first:"
+true
+"bold cross-block second:"
+true
 "italic intent stored:"
 true
 "underline intent stored:"

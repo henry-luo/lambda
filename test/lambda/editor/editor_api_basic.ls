@@ -55,6 +55,9 @@ let cross_delete_editor = edit_exec(cross_editor, edit_cmd_delete_backward())
 let cross_paste_editor = edit_exec(cross_editor, edit_cmd_paste_html("<p>One</p><p>Two</p>", "One\nTwo"))
 "exec cross paste count:"; len(cross_paste_editor.doc.content) == 2
 "exec cross paste doc:"; [for (n in cross_paste_editor.doc.content) doc_text(n)] == ["AlOne", "Twoega"]
+let cross_bold_editor = edit_exec(cross_editor, edit_cmd_toggle_mark('strong'))
+"exec cross bold first:"; has_mark(node_at(cross_bold_editor.doc, [0, 0]).marks, 'strong')
+"exec cross bold second:"; has_mark(node_at(cross_bold_editor.doc, [1, 0]).marks, 'strong')
 
 let heading_doc = node('doc', [node_attrs('heading', [{name: 'level', value: 2}], [text("Title")])])
 let heading_editor = edit_open(heading_doc, editor_schemas.markdown, text_selection(pos([0, 0], 5), pos([0, 0], 5)))
@@ -75,6 +78,10 @@ let span_select_editor = edit_open(node('doc', [node('paragraph', [text("A"), te
 	editor_schemas.markdown, text_selection(pos([0, 0], 0), pos([0, 1], 1)))
 let span_typed_editor = edit_exec(span_select_editor, edit_cmd_set_block_type('heading'))
 "exec set type span:"; node_at(span_typed_editor.doc, [0]).tag == 'heading'
+
+let cross_typed_editor = edit_exec(cross_editor, edit_cmd_set_block_type('heading'))
+"exec set type cross first:"; node_at(cross_typed_editor.doc, [0]).tag == 'heading'
+"exec set type cross second:"; node_at(cross_typed_editor.doc, [1]).tag == 'heading'
 
 let all_select_editor = edit_open(node('doc', [
 	node('paragraph', [text("A")]),

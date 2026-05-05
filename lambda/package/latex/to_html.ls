@@ -19,9 +19,9 @@ fn serialize(node) {
     if (node == null) { "" }
     else if (node is string) { escape_html(node) }
     else if (node is int or node is float) { string(node) }
+    else if (node is element) { serialize_element(node) }
     else if (node is array) { serialize_array(node) }
     else if (node is list) { serialize_list(node) }
-    else if (node is element) { serialize_element(node) }
     else { string(node) }
 }
 

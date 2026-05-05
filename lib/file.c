@@ -556,12 +556,19 @@ int file_rename(const char* old_path, const char* new_path) {
         log_error("file_rename: NULL argument");
         return -1;
     }
+#ifdef _WIN32
+    if (MoveFileExA(old_path, new_path, MOVEFILE_REPLACE_EXISTING)) return 0;
+    log_error("file_rename: rename '%s' -> '%s' failed: Windows error %lu",
+              old_path, new_path, GetLastError());
+    return -1;
+#else
     if (rename(old_path, new_path) != 0) {
         log_error("file_rename: rename '%s' -> '%s' failed: %s",
                   old_path, new_path, strerror(errno));
         return -1;
     }
     return 0;
+#endif
 }
 
 // ---------------------------------------------------------------------------

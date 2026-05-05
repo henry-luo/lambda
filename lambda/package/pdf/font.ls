@@ -125,17 +125,11 @@ fn _family_stack_with_stretch(name: string, gen: string, condensed: bool) {
 // is ignored.
 pub pn from_basefont(name: string) {
     // strip subset prefix "XXXXXX+"
-    var stripped = name
-    if (len(name) > 7 and name[6] == "+") {
-        var t = ""
-        var k = 7
-        while (k < len(name)) { t = t ++ name[k]; k = k + 1 }
-        stripped = t
-    }
+    let stripped = _strip_subset(name)
 
     // exact Standard-14 hit?
     let s14 = standard14(stripped)
-    if (s14 != _UNKNOWN) { return s14 }
+    if (s14.family != _UNKNOWN.family) { return s14 }
 
     let is_bold = _contains(stripped, "Bold") or _contains(stripped, "bold") or
                    _contains(stripped, "_700wght") or _contains(stripped, "_800wght") or
