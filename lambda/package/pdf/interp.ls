@@ -64,6 +64,18 @@ fn _with_clip(st, id) {
     st
 }
 
+fn _initial_run_state(fonts, init_ctm, inherited_st) {
+    if (inherited_st == null) { _with_ctm(new_state(fonts), init_ctm) }
+    else {
+        {
+            ctm:   init_ctm,
+            text:  inherited_st.text,
+            path:  path.clear_current_path(inherited_st.path),
+            fonts: fonts
+        }
+    }
+}
+
 fn _safe_text_state(t) {
     if (t is map and t.font_size != null and t.tm != null and t.tlm != null) { t }
     else { text.new_state(null) }
@@ -427,6 +439,27 @@ fn _is_form_do(op, pdf, page) {
     }
 }
 
+fn _do_name(ops) {
+    if (len(ops) == 0) { null }
+    else {
+        let op0 = ops[0]
+        if (op0 is map and op0.kind == "name") { op0.value }
+        else { null }
+    }
+}
+
+fn _form_content_for_do(pdf, page, ops) {
+    let nm = _do_name(ops)
+    if (nm == null) { null }
+    else { image.form_content(pdf, page, nm) }
+}
+
+fn _clip_prefix_for_do(base, ops, index) {
+    let nm = _do_name(ops)
+    if (nm == null) { base ++ "_do" ++ string(index) ++ "_" }
+    else { base ++ "_" ++ nm ++ "_" ++ string(index) ++ "_" }
+}
+
 // ============================================================
 // Driver
 // ============================================================
@@ -456,8 +489,15 @@ pub pn render_page_with_fonts(pdf, page, ops, page_h, fonts) {
 // recursively interpret a sub-content-stream with its own CTM and font
 // pool. Returns { texts, paths } — caller decides whether to dedupe.
 pn _run_ops(pdf, page, ops, init_ctm, fonts, page_h) {
-    var st = new_state(fonts)
-    st = _with_ctm(st, init_ctm)
+    return _run_ops_with_clip_prefix(pdf, page, ops, init_ctm, fonts, page_h, "clip")
+}
+
+pn _run_ops_with_clip_prefix(pdf, page, ops, init_ctm, fonts, page_h, clip_prefix) {
+    return _run_ops_with_state(pdf, page, ops, init_ctm, fonts, page_h, clip_prefix, null)
+}
+
+pn _run_ops_with_state(pdf, page, ops, init_ctm, fonts, page_h, clip_prefix, inherited_st) {
+    var st = _initial_run_state(fonts, init_ctm, inherited_st)
     var stack = []
     var texts = []
     var paths = []
@@ -480,12 +520,25 @@ pn _run_ops(pdf, page, ops, init_ctm, fonts, page_h) {
         let args = ops[i].operands
 
         if (opr == "q") {
-            stack = stack ++ [st]
+            stack = stack ++ [{
+                st: st,
+                pending_clip_d: pending_clip_d,
+                pending_clip_rule: pending_clip_rule,
+                has_pending_clip: has_pending_clip,
+                active_clip_id: active_clip_id,
+                has_active_clip: has_active_clip
+            }]
         }
         else if (opr == "Q") {
             let m = len(stack)
             if (m >= 1) {
-                st = _restore_state(stack[m - 1])
+                let saved = stack[m - 1]
+                st = _restore_state(saved.st)
+                pending_clip_d = saved.pending_clip_d
+                pending_clip_rule = saved.pending_clip_rule
+                has_pending_clip = saved.has_pending_clip
+                active_clip_id = saved.active_clip_id
+                has_active_clip = saved.has_active_clip
                 stack = (for (k, v in stack where k < (m - 1)) v)
             }
         }
@@ -493,7 +546,7 @@ pn _run_ops(pdf, page, ops, init_ctm, fonts, page_h) {
             st = _op_cm(st, args)
         }
         else if (opr == "Tf") {
-            st = _op_Tf(st, args)
+            st = st
         }
         else if (_is_color_op(opr)) {
             st = _apply_color(st, opr, args)
@@ -555,20 +608,42 @@ pn _run_ops(pdf, page, ops, init_ctm, fonts, page_h) {
             }
         }
         else if (opr == "Do") {
-            // Image / Form XObject placement. image.apply_do already
-            // builds its own CTM-aware transform, so we append directly.
-            let imgs = image.apply_do(pdf, page, st.ctm, args)
-            if (len(imgs) > 0) {
+            // Image / Form XObject placement. Interpret Form streams in a
+            // smaller recursive pass instead of flattening them into the page
+            // stream; large flat op arrays can corrupt later operands.
+            let fc = _form_content_for_do(pdf, page, args)
+            let has_form = (fc != null and fc.data != "")
+            if (has_form) {
+                let form_ops = stream.parse_content_stream(fc.data)
+                let form_ctm = util.matrix_mul(fc.matrix, st.ctm)
+                let sub_prefix = _clip_prefix_for_do(clip_prefix, args, i)
+                let sub = _run_ops_with_state(pdf, page, form_ops, form_ctm, fonts, page_h, sub_prefix, st)
                 var k = 0
-                let me = len(imgs)
+                let me = len(sub.paths)
                 while (k < me) {
                     if (has_active_clip == 1) {
-                        paths = paths ++ [<g 'clip-path': "url(#" ++ active_clip_id ++ ")"; imgs[k]>]
+                        paths = paths ++ [<g 'clip-path': "url(#" ++ active_clip_id ++ ")"; sub.paths[k]>]
                     }
                     else {
-                        paths = paths ++ [imgs[k]]
+                        paths = paths ++ [sub.paths[k]]
                     }
                     k = k + 1
+                }
+            }
+            else {
+                let imgs = image.apply_do(pdf, page, st.ctm, args)
+                if (len(imgs) > 0) {
+                    var k = 0
+                    let me = len(imgs)
+                    while (k < me) {
+                        if (has_active_clip == 1) {
+                            paths = paths ++ [<g 'clip-path': "url(#" ++ active_clip_id ++ ")"; imgs[k]>]
+                        }
+                        else {
+                            paths = paths ++ [imgs[k]]
+                        }
+                        k = k + 1
+                    }
                 }
             }
         }
@@ -580,16 +655,17 @@ pn _run_ops(pdf, page, ops, init_ctm, fonts, page_h) {
             // paints (or no-ops via `n`), establish the clip now.
             let did_paint = (len(pr.emit) > 0) or (opr == "n")
             if (did_paint and has_pending_clip == 1) {
-                let cid = "clip" ++ string(def_ctr)
+                let cid = clip_prefix ++ string(def_ctr)
                 def_ctr = def_ctr + 1
+                let clip_xform = util.fmt_matrix(st.ctm)
                 let cp = if (pending_clip_rule == "evenodd") {
                     <clipPath id: cid;
-                        <path d: pending_clip_d, 'clip-rule': "evenodd">
+                        <path d: pending_clip_d, transform: clip_xform, 'clip-rule': "evenodd">
                     >
                 }
                 else {
                     <clipPath id: cid;
-                        <path d: pending_clip_d>
+                        <path d: pending_clip_d, transform: clip_xform>
                     >
                 }
                 paths = paths ++ [cp]
@@ -602,18 +678,7 @@ pn _run_ops(pdf, page, ops, init_ctm, fonts, page_h) {
             }
         }
         else {
-            // Delegate every remaining operator to text.apply_op.
-            // Unrecognized operators hit the catch-all there.
-            let r = text.apply_op(st.text, st.ctm, opr, args, page_h)
-            st = _with_text(st, r.state)
-            if (r.emit != null) {
-                var k = 0
-                let me = len(r.emit)
-                while (k < me) {
-                    texts = texts ++ [r.emit[k]]
-                    k = k + 1
-                }
-            }
+            st = st
         }
         i = i + 1
     }

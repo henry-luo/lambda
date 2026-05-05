@@ -661,7 +661,7 @@ static RdtMatrix compose_element_transform(SvgRenderContext* ctx, Element* elem)
 
 static void draw_gradient_fill(SvgRenderContext* ctx, RdtPath* path, SvgGradDef* def,
                                float bx, float by, float bw, float bh,
-                               const RdtMatrix* transform) {
+                               const RdtMatrix* transform, RdtFillRule fill_rule) {
     if (!path || !def || def->stop_count < 2) return;
 
     RdtGradientStop stops[SVG_MAX_GRAD_STOPS];
@@ -683,7 +683,7 @@ static void draw_gradient_fill(SvgRenderContext* ctx, RdtPath* path, SvgGradDef*
             r  = def->r * (bw < bh ? bw : bh);
         }
         svg_fill_radial_gradient(ctx, path, cx, cy, r,
-                                 stops, def->stop_count, RDT_FILL_WINDING, transform);
+                                 stops, def->stop_count, fill_rule, transform);
     } else {
         float x1, y1, x2, y2;
         if (def->user_space) {
@@ -693,7 +693,7 @@ static void draw_gradient_fill(SvgRenderContext* ctx, RdtPath* path, SvgGradDef*
             x2 = bx + def->x2 * bw; y2 = by + def->y2 * bh;
         }
         svg_fill_linear_gradient(ctx, path, x1, y1, x2, y2,
-                                 stops, def->stop_count, RDT_FILL_WINDING, transform);
+                                 stops, def->stop_count, fill_rule, transform);
     }
 }
 
@@ -711,6 +711,9 @@ static void draw_svg_fill_stroke(SvgRenderContext* ctx, RdtPath* path, Element* 
     Color fc;
     bool has_fill = true;
     bool gradient_applied = false;
+    const char* fill_rule_attr = get_svg_attr(elem, "fill-rule");
+    RdtFillRule fill_rule = (fill_rule_attr && strcmp(fill_rule_attr, "evenodd") == 0)
+        ? RDT_FILL_EVEN_ODD : RDT_FILL_WINDING;
 
     if (fill) {
         if (strcmp(fill, "none") == 0) {
@@ -726,7 +729,7 @@ static void draw_svg_fill_stroke(SvgRenderContext* ctx, RdtPath* path, Element* 
                     memcpy(id_buf, id_start, id_len);
                     SvgGradDef* def = lookup_grad_def((SvgDefTable*)ctx->defs, id_buf);
                     if (def && def->stop_count >= 2) {
-                        draw_gradient_fill(ctx, path, def, bx, by, bw, bh, transform);
+                        draw_gradient_fill(ctx, path, def, bx, by, bw, bh, transform, fill_rule);
                         gradient_applied = true;
                         has_fill = false;
                     }
@@ -764,7 +767,7 @@ static void draw_svg_fill_stroke(SvgRenderContext* ctx, RdtPath* path, Element* 
         if (ctx->opacity < 1.0f) {
             fc.a = (uint8_t)(fc.a * ctx->opacity);
         }
-        svg_fill_path(ctx, path, fc, RDT_FILL_WINDING, transform);
+        svg_fill_path(ctx, path, fc, fill_rule, transform);
     }
 
     // --- STROKE ---

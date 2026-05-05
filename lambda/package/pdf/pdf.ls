@@ -78,8 +78,7 @@ pn _content_elements(pdf, page, page_h) {
         return { texts: [], paths: [] }
     }
     let fonts = interp.resolve_page_fonts(pdf, page)
-    let bytes = interp.expand_forms_in_bytes(pdf, page, raw_bytes)
-    let ops = stream.parse_content_stream(bytes)
+    let ops = stream.parse_content_stream(raw_bytes)
     return interp.render_page_with_fonts(pdf, page, ops, page_h, fonts)
 }
 
