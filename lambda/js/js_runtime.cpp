@@ -2204,13 +2204,18 @@ extern "C" Item js_equal(Item left, Item right) {
         return js_equal(left, prim);
     }
 
-    // Array ToPrimitive: convert to string then compare
-    if (left_type == LMD_TYPE_ARRAY) {
+    // Array ToPrimitive: arrays are objects; only coerce for object-vs-primitive
+    // abstract equality cases, not for null/undefined comparisons.
+    if (left_type == LMD_TYPE_ARRAY &&
+        (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_FLOAT || right_type == LMD_TYPE_STRING ||
+         js_is_bigint(right) || js_is_symbol(right))) {
         Item prim = js_op_to_primitive(left, 0);
         if (js_exception_pending) return (Item){.item = b2it(false)};
         return js_equal(prim, right);
     }
-    if (right_type == LMD_TYPE_ARRAY) {
+    if (right_type == LMD_TYPE_ARRAY &&
+        (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_FLOAT || left_type == LMD_TYPE_STRING ||
+         js_is_bigint(left) || js_is_symbol(left))) {
         Item prim = js_op_to_primitive(right, 0);
         if (js_exception_pending) return (Item){.item = b2it(false)};
         return js_equal(left, prim);
@@ -18132,18 +18137,30 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         if (arr_type != LMD_TYPE_ARRAY) return arr;
         Array* src = arr.array;
         // ES §23.1.3.28: undefined start/end → defaults (0 / length).
-        int start = 0;
+        double d_start = 0.0;
         if (argc > 0 && args[0].item != ITEM_JS_UNDEFINED && get_type_id(args[0]) != LMD_TYPE_UNDEFINED) {
-            start = (int)js_get_number(args[0]);
+            d_start = js_get_number(args[0]);
+            if (js_exception_pending) return ItemNull;
         }
-        int end = src->length;
+        double d_end = (double)src->length;
         if (argc > 1 && args[1].item != ITEM_JS_UNDEFINED && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) {
-            end = (int)js_get_number(args[1]);
+            d_end = js_get_number(args[1]);
+            if (js_exception_pending) return ItemNull;
         }
-        if (start < 0) start = src->length + start;
-        if (end < 0) end = src->length + end;
-        if (start < 0) start = 0;
-        if (end > src->length) end = src->length;
+        if (d_start != d_start) d_start = 0.0;
+        if (d_end != d_end) d_end = 0.0;
+        d_start = d_start >= 0 ? floor(d_start) : ceil(d_start);
+        d_end = d_end >= 0 ? floor(d_end) : ceil(d_end);
+        int start;
+        if (d_start == INFINITY) start = src->length;
+        else if (d_start == -INFINITY) start = 0;
+        else if (d_start < 0) start = (int)fmax((double)src->length + d_start, 0.0);
+        else start = (int)fmin(d_start, (double)src->length);
+        int end;
+        if (d_end == INFINITY) end = src->length;
+        else if (d_end == -INFINITY) end = 0;
+        else if (d_end < 0) end = (int)fmax((double)src->length + d_end, 0.0);
+        else end = (int)fmin(d_end, (double)src->length);
         if (start >= end) return js_array_species_create(arr, 0);
         int count = end - start;
         Item result = js_array_species_create(arr, count);

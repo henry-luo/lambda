@@ -1,0 +1,1 @@
+{ count: 2, map_icc_black: true, array_icc_black: true, not_gray_fallback: true, not_rgb_fallback: true}

@@ -34,11 +34,29 @@ extern "C" Item js_to_property_key(Item key);
 #ifdef _WIN32
 #include <process.h>
 #include <windows.h>
+#include <tlhelp32.h>
 #include <psapi.h>
 #define getpid _getpid
 // strptime/timegm are not available on Windows — provide minimal implementations
 static char* strptime(const char* buf, const char* fmt, struct tm* tm) {
-    (void)fmt;
+    if (strcmp(fmt, "%Y-%m-%dT%H:%M:%S") == 0) {
+        int year = 0, mon = 0, day = 0, hour = 0, min = 0, sec = 0;
+        if (sscanf(buf, "%d-%d-%dT%d:%d:%d", &year, &mon, &day, &hour, &min, &sec) == 6) {
+            tm->tm_year = year - 1900; tm->tm_mon = mon - 1; tm->tm_mday = day;
+            tm->tm_hour = hour; tm->tm_min = min; tm->tm_sec = sec; tm->tm_isdst = 0;
+            return (mon >= 1 && mon <= 12 && day >= 1 && day <= 31) ? (char*)(buf + strlen(buf)) : NULL;
+        }
+        return NULL;
+    }
+    if (strcmp(fmt, "%Y-%m-%d") == 0) {
+        int year = 0, mon = 0, day = 0;
+        if (sscanf(buf, "%d-%d-%d", &year, &mon, &day) == 3) {
+            tm->tm_year = year - 1900; tm->tm_mon = mon - 1; tm->tm_mday = day;
+            tm->tm_hour = 0; tm->tm_min = 0; tm->tm_sec = 0; tm->tm_isdst = 0;
+            return (mon >= 1 && mon <= 12 && day >= 1 && day <= 31) ? (char*)(buf + strlen(buf)) : NULL;
+        }
+        return NULL;
+    }
     int day = 0, year = 0, hour = 0, min = 0, sec = 0;
     char mon[4] = {0}; char wday[4] = {0};
     static const char* months[] = {"Jan","Feb","Mar","Apr","May","Jun",
@@ -70,6 +88,28 @@ static inline long get_tm_gmtoff(const struct tm* t) { return t->tm_gmtoff; }
 #include <unistd.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
+#endif
+
+#ifdef _WIN32
+static int js_get_parent_pid_win32(void) {
+    DWORD current_pid = GetCurrentProcessId();
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE) return 0;
+    PROCESSENTRY32 entry;
+    memset(&entry, 0, sizeof(entry));
+    entry.dwSize = sizeof(entry);
+    int parent_pid = 0;
+    if (Process32First(snapshot, &entry)) {
+        do {
+            if (entry.th32ProcessID == current_pid) {
+                parent_pid = (int)entry.th32ParentProcessID;
+                break;
+            }
+        } while (Process32Next(snapshot, &entry));
+    }
+    CloseHandle(snapshot);
+    return parent_pid;
+}
 #endif
 
 // forward declaration for JSON parser
@@ -2088,9 +2128,11 @@ extern "C" Item js_get_process_object_value(void) {
         js_property_set(js_process_object,
             (Item){.item = s2it(heap_create_name("pid", 3))},
             (Item){.item = i2it((int64_t)getpid())});
-#ifndef _WIN32
         js_property_set(js_process_object,
             (Item){.item = s2it(heap_create_name("ppid", 4))},
+#ifdef _WIN32
+            (Item){.item = i2it((int64_t)js_get_parent_pid_win32())});
+#else
             (Item){.item = i2it((int64_t)getppid())});
 #endif
 

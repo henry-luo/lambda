@@ -18,6 +18,7 @@
 #ifndef _WIN32
 #include <sys/wait.h>
 #else
+#include <process.h>
 // On Windows, pclose() returns the exit code directly
 #define WIFEXITED(s)  (1)
 #define WEXITSTATUS(s) (s)
@@ -53,6 +54,26 @@ static const char* item_to_cstr(Item value, char* buf, int buf_size) {
     buf[len] = '\0';
     return buf;
 }
+
+#ifdef _WIN32
+static bool build_windows_shell_script_command(const char* cmd, char* script_path, int script_path_size,
+                                               char* out, int out_size) {
+    static int script_counter = 0;
+    int id = ++script_counter;
+    snprintf(script_path, script_path_size, "./temp/lambda_child_%ld_%d.sh", (long)_getpid(), id);
+    FILE* script = fopen(script_path, "wb");
+    if (!script) {
+        out[0] = '\0';
+        return false;
+    }
+    fputs("#!/usr/bin/env sh\n", script);
+    fputs(cmd, script);
+    fputc('\n', script);
+    fclose(script);
+    snprintf(out, out_size, "sh \"%s\"", script_path);
+    return true;
+}
+#endif
 
 // =============================================================================
 // JsChildProcess — per-exec context
@@ -250,8 +271,13 @@ extern "C" Item js_cp_exec(Item command_item, Item callback_item) {
     // spawn process
     uv_process_options_t opts;
     memset(&opts, 0, sizeof(opts));
+#ifdef _WIN32
+    opts.file = "sh";
+    char* args[] = {(char*)"sh", (char*)"-c", (char*)cmd, NULL};
+#else
     opts.file = "/bin/sh";
     char* args[] = {(char*)"/bin/sh", (char*)"-c", (char*)cmd, NULL};
+#endif
     opts.args = args;
     opts.stdio = stdio;
     opts.stdio_count = 3;
@@ -294,8 +320,17 @@ extern "C" Item js_cp_execSync(Item command_item, Item options_item) {
 
     (void)options_item; // options not currently used
 
-    // Use popen for simplicity — synchronous and blocking
+#ifdef _WIN32
+    char shell_cmd[8192];
+    char script_path[256];
+    if (!build_windows_shell_script_command(cmd, script_path, sizeof(script_path), shell_cmd, sizeof(shell_cmd))) {
+        log_error("child_process: execSync: failed to create shell script");
+        return ItemNull;
+    }
+    FILE* fp = popen(shell_cmd, "r");
+#else
     FILE* fp = popen(cmd, "r");
+#endif
     if (!fp) {
         log_error("child_process: execSync: popen failed for '%s'", cmd);
         return ItemNull;
@@ -321,6 +356,9 @@ extern "C" Item js_cp_execSync(Item command_item, Item options_item) {
     }
 
     int status = pclose(fp);
+#ifdef _WIN32
+    remove(script_path);
+#endif
     (void)status; // ignore exit code for execSync
 
     if (result_buf) {
