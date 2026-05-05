@@ -39,7 +39,7 @@ import svg:     .svg
 // Returns the deref'd entry (a Map with `dict` + `data`) or null.
 pub fn lookup_xobject(pdf, page, name) {
     let res = resolve.page_resources(pdf, page)
-    let xo  = if (res and res.XObject) res.XObject else null
+    let xo  = if (res and res.XObject) resolve.deref(pdf, res.XObject) else null
     if (xo == null) { null }
     else {
         let raw = xo[name]
@@ -71,8 +71,16 @@ fn _classify(content, obj_num, raw) {
                else if (sub == "Form") "form"
                else "other"
     let data_uri = if (content and content.data_uri) content.data_uri else null
-    let data = if (content and content.data != null) content.data else ""
+    let data = _stream_data(content, dict)
     { kind: kind, obj_num: obj_num, dict: dict, raw: raw, data_uri: data_uri, data: data, content: content }
+}
+
+fn _stream_data(content, dict) {
+    if (content and content.data != null) { content.data }
+    else if (content and content.stream_data != null) { content.stream_data }
+    else if (dict and dict.data != null) { dict.data }
+    else if (dict and dict.stream_data != null) { dict.stream_data }
+    else { "" }
 }
 
 fn _num(v) {
@@ -99,7 +107,7 @@ fn _form_matrix(m) {
 //     dict:   Map }            // the Form's full dictionary
 pub fn form_content(pdf, page, name) {
     let res = resolve.page_resources(pdf, page)
-    let xo  = if (res and res.XObject) res.XObject else null
+    let xo  = if (res and res.XObject) resolve.deref(pdf, res.XObject) else null
     if (xo == null) { null }
     else {
         let raw = xo[name]
@@ -110,7 +118,7 @@ pub fn form_content(pdf, page, name) {
             let sub  = if (dict and dict.Subtype) dict.Subtype else null
             if (sub != "Form") { null }
             else {
-                let data = if (content and content.data) content.data else ""
+                let data = _stream_data(content, dict)
                 let m = if (dict and dict.Matrix) dict.Matrix else null
                 { data: data, matrix: _form_matrix(m), dict: dict }
             }
@@ -149,13 +157,27 @@ fn _emit_image(ctm, obj_num, href_url) {
 
 fn _xobject_data(xo) {
     if (xo and xo.content and xo.content.data != null) { xo.content.data }
+    else if (xo and xo.content and xo.content.stream_data != null) { xo.content.stream_data }
     else if (xo and xo.data != null) { xo.data }
+    else if (xo and xo.dict and xo.dict.stream_data != null) { xo.dict.stream_data }
     else { "" }
+}
+
+fn _filter_name(f) {
+    if (f is string) { f }
+    else if (f is map and f.kind == "name") { f.value }
+    else if (f is array and len(f) >= 1) { _filter_name(f[0]) }
+    else { null }
+}
+
+fn _is_passthrough_filter(f) {
+    let nm = _filter_name(f)
+    (nm == "DCTDecode") or (nm == "DCT") or (nm == "JPXDecode")
 }
 
 fn _is_raw_xobject(dict, data) {
     if (dict == null or data == null or data == "") { false }
-    else if (dict.Filter != null) { false }
+    else if (_is_passthrough_filter(dict.Filter)) { false }
     else {
         let w = _int(dict.Width, 0)
         let h = _int(dict.Height, 0)
