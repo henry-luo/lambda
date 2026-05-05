@@ -51,3 +51,21 @@ let fd = find_decorations([0, 0], "Hello hello", "hello", {class: "find-hit"})
 "find decos count:"; len(fd.items)
 "find first deco from:"; fd.items[0].from.offset
 "find first deco to:";   fd.items[0].to.offset
+
+// find_decorations_in_doc — build a set across all text leaves
+let find_doc = node('doc', [
+	node('paragraph', [text("foo")]),
+	node('paragraph', [text("bar foo")])
+])
+let doc_hits = find_decorations_in_doc(find_doc, "foo", {class: "find-hit"})
+"doc find count:"; len(doc_hits.items)
+"doc find first path:"; doc_hits.items[0].from.path
+"doc find second path:"; doc_hits.items[1].from.path
+"doc find second from:"; doc_hits.items[1].from.offset
+
+// deco_map_tx — preserve overlay positions through a full transaction
+let tx0 = tx_begin(find_doc, text_selection(pos([0, 0], 0), pos([0, 0], 0)))
+let tx1 = tx_step(tx0, step_replace_text([0, 0], 0, 0, "X"))
+let mapped_doc_hits = deco_map_tx(doc_hits, tx1)
+"tx mapped first from:"; mapped_doc_hits.items[0].from.offset
+"tx mapped first to:"; mapped_doc_hits.items[0].to.offset

@@ -71,6 +71,9 @@ const char* clipboard_store_read_text(void);
 // Copy text under a specific MIME type ("text/plain", "text/html"...).
 void   clipboard_store_write_mime(const char* mime, const char* text);
 
+// Copy HTML plus a plain-text fallback as one multi-MIME clipboard item.
+void   clipboard_store_write_html(const char* html, const char* plain_text);
+
 // Read a specific MIME representation. NULL if not present.
 const char* clipboard_store_read_mime(const char* mime);
 

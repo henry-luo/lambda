@@ -17,6 +17,8 @@ import .mod_doc
 import .mod_step
 import .mod_transaction
 import .mod_source_pos
+import .mod_html_paste
+import .mod_paste
 
 // ---------------------------------------------------------------------------
 // Selection helpers
@@ -59,6 +61,55 @@ pub fn cmd_insert_text(state, txt) {
     tx_set_selection(tx1, new_caret)
   }
 }
+
+pub fn cmd_paste_text(state, txt) => cmd_insert_text(state, txt)
+
+fn nonempty_text_leaf(s, marks) =>
+  if (len(s) == 0) { [] } else { [text_marked(s, marks)] }
+
+fn last_text_offset_in(node) {
+  if (is_text(node)) { len(node.text) }
+  else if (not is_node(node) or len(node.content) == 0) { 0 }
+  else { last_text_offset_in(node.content[len(node.content) - 1]) }
+}
+
+pub fn cmd_paste_fragment(state, fragment) {
+  let sel = state.selection
+  if (sel == null or not sel_single_leaf(sel)) { null }
+  else {
+    let lo = sel_lo(sel)
+    let hi = sel_hi(sel)
+    let leaf = node_at(state.doc, lo.path)
+    if (leaf == null or not is_text(leaf) or len(lo.path) < 2) { null }
+    else {
+      let block_path = parent_path(lo.path)
+      let block = node_at(state.doc, block_path)
+      if (block == null or not is_node(block)) { null }
+      else {
+        let blocks = coerce_for_md_block(fragment)
+        if (len(blocks) == 0) { null }
+        else if (len(blocks) == 1 and blocks[0].tag == 'paragraph') {
+          let before = nonempty_text_leaf(slice(leaf.text, 0, lo.offset), leaf.marks)
+          let after = nonempty_text_leaf(slice(leaf.text, hi.offset, len(leaf.text)), leaf.marks)
+          let new_block = node_attrs(block.tag, block.attrs, list_concat(list_concat(before, blocks[0].content), after))
+          let tx0 = tx_begin(state.doc, sel)
+          let tx1 = tx_step(tx0, step_replace(parent_path(block_path), last_index(block_path), last_index(block_path) + 1, [new_block]))
+          let caret_path = [*block_path, len(before) + len(blocks[0].content) - 1]
+          let caret_off = if (len(blocks[0].content) == 0) { 0 } else { last_text_offset_in(blocks[0].content[len(blocks[0].content) - 1]) }
+          tx_set_selection(tx1, caret(pos(caret_path, caret_off)))
+        } else { cmd_paste_text(state, doc_text(node('fragment', blocks))) }
+      }
+    }
+  }
+}
+
+pub fn cmd_paste_html(state, html, fallback_text) =>
+  if (type(html) == string) {
+    let parsed = parse_html_fragment(html)
+    if (parsed == null) { cmd_paste_text(state, fallback_text) }
+    else { cmd_paste_fragment(state, html_to_editor_fragment(parsed)) }
+  }
+  else { cmd_paste_fragment(state, html_to_editor_fragment(html)) }
 
 // ---------------------------------------------------------------------------
 // cmd_delete_backward / cmd_delete_forward

@@ -2800,8 +2800,7 @@ void clipboard_copy_html(const char* html) {
     if (!html) return;
     // Write both representations so paste handlers that ask for text/html
     // get rich content and plain-text consumers still see something useful.
-    clipboard_store_write_mime("text/html", html);
-    clipboard_store_write_mime("text/plain", html);
+    clipboard_store_write_html(html, html);
     extern UiContext ui_context;
     if (ui_context.window && !ui_context.headless) {
         glfwSetClipboardString(ui_context.window, html);

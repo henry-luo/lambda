@@ -40,3 +40,19 @@ true
 true
 "nested mark:"
 true
+"html block count:"
+true
+"html block tag:"
+true
+"html text:"
+true
+"html strong mark:"
+true
+"cmd html paste text:"
+true
+"cmd html paste mark:"
+true
+"cmd raw html paste text:"
+true
+"cmd raw html paste mark:"
+true

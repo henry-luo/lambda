@@ -5,6 +5,7 @@
 #include "text_control.hpp"
 #include "text_edit.hpp"
 #include "context_menu.hpp"
+#include "clipboard.hpp"
 #include "browsing_session.h"
 #include "rdt_video.h"
 #include "webview.h"
@@ -64,6 +65,7 @@ void scrollpane_mouse_up(EventContext* evcon, ViewBlock* block);
 void scrollpane_mouse_down(EventContext* evcon, ViewBlock* block);
 void scrollpane_drag(EventContext* evcon, ViewBlock* block);
 void update_scroller(ViewBlock* block, float content_width, float content_height);
+void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event);
 
 void target_children(EventContext* evcon, View* view) {
     do {
@@ -443,6 +445,11 @@ typedef enum InputIntentType {
     INPUT_INTENT_DELETE_CONTENT_BACKWARD,
     INPUT_INTENT_DELETE_CONTENT_FORWARD,
     INPUT_INTENT_DELETE_WORD_BACKWARD,
+    INPUT_INTENT_INSERT_FROM_PASTE,
+    INPUT_INTENT_COMPOSITION_START,
+    INPUT_INTENT_INSERT_COMPOSITION_TEXT,
+    INPUT_INTENT_INSERT_FROM_COMPOSITION,
+    INPUT_INTENT_DELETE_COMPOSITION_TEXT,
     INPUT_INTENT_FORMAT_BOLD,
     INPUT_INTENT_FORMAT_ITALIC,
     INPUT_INTENT_FORMAT_UNDERLINE,
@@ -453,8 +460,12 @@ typedef enum InputIntentType {
 typedef struct InputIntent {
     InputIntentType type;
     const char* data;
+    const char* html_data;
+    const char* data_mime;
     int key;
     int mods;
+    bool is_composing;
+    uint32_t composition_caret;
 } InputIntent;
 
 static const char* input_intent_type_name(InputIntentType type) {
@@ -465,6 +476,11 @@ static const char* input_intent_type_name(InputIntentType type) {
         case INPUT_INTENT_DELETE_CONTENT_BACKWARD: return "deleteContentBackward";
         case INPUT_INTENT_DELETE_CONTENT_FORWARD:  return "deleteContentForward";
         case INPUT_INTENT_DELETE_WORD_BACKWARD:    return "deleteWordBackward";
+        case INPUT_INTENT_INSERT_FROM_PASTE:       return "insertFromPaste";
+        case INPUT_INTENT_COMPOSITION_START:       return "compositionStart";
+        case INPUT_INTENT_INSERT_COMPOSITION_TEXT: return "insertCompositionText";
+        case INPUT_INTENT_INSERT_FROM_COMPOSITION: return "insertFromComposition";
+        case INPUT_INTENT_DELETE_COMPOSITION_TEXT: return "deleteCompositionText";
         case INPUT_INTENT_FORMAT_BOLD:             return "formatBold";
         case INPUT_INTENT_FORMAT_ITALIC:           return "formatItalic";
         case INPUT_INTENT_FORMAT_UNDERLINE:        return "formatUnderline";
@@ -506,6 +522,16 @@ static bool input_intent_from_key_event(const KeyEvent* key_event, InputIntent* 
         out->type = INPUT_INTENT_FORMAT_UNDERLINE;
         return true;
     }
+    if (primary && key_event->key == RDT_KEY_V) {
+        const char* clip = clipboard_get_text();
+        const char* html = clipboard_store_read_mime("text/html");
+        if ((!clip || !clip[0]) && (!html || !html[0])) return false;
+        out->type = INPUT_INTENT_INSERT_FROM_PASTE;
+        out->data = clip ? clip : "";
+        out->html_data = html;
+        out->data_mime = (html && html[0]) ? "text/html" : "text/plain";
+        return true;
+    }
     if (key_event->key == RDT_KEY_ENTER) {
         out->type = shift ? INPUT_INTENT_INSERT_LINE_BREAK : INPUT_INTENT_INSERT_PARAGRAPH;
         return true;
@@ -532,6 +558,33 @@ static bool input_intent_from_text_input(uint32_t codepoint, InputIntent* out,
     out->type = INPUT_INTENT_INSERT_TEXT;
     out->data = utf8_buf;
     return true;
+}
+
+static bool input_intent_from_composition_event(const CompositionEvent* comp_event,
+                                                InputIntent* out) {
+    if (!comp_event || !out) return false;
+    memset(out, 0, sizeof(*out));
+    out->data = comp_event->text ? comp_event->text : "";
+    out->composition_caret = comp_event->preedit_caret;
+
+    if (comp_event->type == RDT_EVENT_COMPOSITION_START) {
+        out->type = INPUT_INTENT_COMPOSITION_START;
+        out->is_composing = true;
+        return true;
+    }
+    if (comp_event->type == RDT_EVENT_COMPOSITION_UPDATE) {
+        out->type = INPUT_INTENT_INSERT_COMPOSITION_TEXT;
+        out->is_composing = true;
+        return true;
+    }
+    if (comp_event->type == RDT_EVENT_COMPOSITION_END) {
+        out->type = comp_event->text && comp_event->text[0]
+            ? INPUT_INTENT_INSERT_FROM_COMPOSITION
+            : INPUT_INTENT_DELETE_COMPOSITION_TEXT;
+        out->is_composing = false;
+        return true;
+    }
+    return false;
 }
 
 static DomElement* rich_editable_from_target(View* target) {
@@ -575,17 +628,39 @@ static Item build_lambda_event_map(DomDocument* doc, View* target,
         mb.put("input_type", input_type);
         if (intent->data) mb.put("data", intent->data);
         else mb.putNull("data");
+        if (intent->data_mime) mb.put("mime", intent->data_mime);
+        else mb.putNull("mime");
+        if (intent->html_data) {
+            char* sanitized = clipboard_store_sanitize(builder.arena(), "text/html", intent->html_data);
+            if (sanitized) mb.put("html", sanitized);
+            else mb.putNull("html");
+        } else {
+            mb.putNull("html");
+        }
 
         MapBuilder im = builder.map();
         im.put("input_type", input_type);
         if (intent->data) im.put("data", intent->data);
         else im.putNull("data");
+        if (intent->data_mime) im.put("mime", intent->data_mime);
+        else im.putNull("mime");
+        if (intent->html_data) {
+            char* sanitized = clipboard_store_sanitize(builder.arena(), "text/html", intent->html_data);
+            if (sanitized) im.put("html", sanitized);
+            else im.putNull("html");
+        } else {
+            im.putNull("html");
+        }
         im.put("key", key_code_to_name(intent->key));
         im.put("shift", (intent->mods & RDT_MOD_SHIFT) != 0);
         im.put("ctrl",  (intent->mods & RDT_MOD_CTRL)  != 0);
         im.put("alt",   (intent->mods & RDT_MOD_ALT)   != 0);
         im.put("meta",  (intent->mods & RDT_MOD_SUPER) != 0);
+        im.put("is_composing", intent->is_composing);
+        im.put("composition_caret", (int64_t)intent->composition_caret);
         mb.put("input_intent", im.final());
+        mb.put("is_composing", intent->is_composing);
+        mb.put("composition_caret", (int64_t)intent->composition_caret);
     }
 
     // extract target element's class and tag from the innermost DomElement target
@@ -1083,6 +1158,33 @@ static bool dispatch_rich_beforeinput(EventContext* evcon, View* target,
     if (!handled) {
         log_debug("dispatch_rich_beforeinput: no beforeinput handler on data-editable/contenteditable subtree");
     }
+    return true;
+}
+
+extern "C" bool radiant_dispatch_rich_composition_event(UiContext* uicon,
+                                                        EventType event_type,
+                                                        const char* text,
+                                                        uint32_t caret_cp) {
+    if (!uicon || !uicon->document || !uicon->document->state) return false;
+    if (event_type != RDT_EVENT_COMPOSITION_START &&
+        event_type != RDT_EVENT_COMPOSITION_UPDATE &&
+        event_type != RDT_EVENT_COMPOSITION_END) {
+        return false;
+    }
+
+    RadiantState* state = (RadiantState*)uicon->document->state;
+    View* focused = focus_get(state);
+    View* target = focused ? focused
+        : ((state->caret && state->caret->view) ? state->caret->view : nullptr);
+    if (!target || !rich_editable_from_target(target)) return false;
+
+    RdtEvent event;
+    memset(&event, 0, sizeof(event));
+    event.composition.type = event_type;
+    event.composition.timestamp = 0;
+    event.composition.text = text ? text : "";
+    event.composition.preedit_caret = caret_cp;
+    handle_event(uicon, uicon->document, &event);
     return true;
 }
 
@@ -5538,6 +5640,23 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         "keyup", event->key.key, event->key.mods, false);
                 }
             }
+        }
+        break;
+    }
+    case RDT_EVENT_COMPOSITION_START:
+    case RDT_EVENT_COMPOSITION_UPDATE:
+    case RDT_EVENT_COMPOSITION_END: {
+        CompositionEvent* comp_event = &event->composition;
+        RadiantState* state = (RadiantState*)evcon.ui_context->document->state;
+        if (!state) break;
+
+        View* focused = focus_get(state);
+        View* intent_target = focused ? focused
+            : ((state->caret && state->caret->view) ? state->caret->view : nullptr);
+        InputIntent intent;
+        if (intent_target && input_intent_from_composition_event(comp_event, &intent) &&
+            dispatch_rich_beforeinput(&evcon, intent_target, &intent)) {
+            evcon.need_repaint = true;
         }
         break;
     }

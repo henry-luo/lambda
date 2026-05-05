@@ -27,6 +27,7 @@
 #include <string.h>
 
 #include "../lib/log.h"
+#include "event.hpp"
 
 // Opaque types provided elsewhere. We never deref any of them in this
 // file; everything is passed by pointer.
@@ -38,6 +39,8 @@ class View;
 extern "C" GLFWwindow*    radiant_ui_get_glfw_window(struct UiContext*);
 extern "C" RadiantState*  radiant_ui_get_state(struct UiContext*);
 extern "C" void           radiant_state_request_repaint(struct RadiantState*);
+extern "C" bool           radiant_dispatch_rich_composition_event(struct UiContext*, EventType,
+                                                                  const char*, uint32_t);
 
 View* focus_get(RadiantState* state);
 bool  tc_is_text_control(DomElement* elem);
@@ -54,6 +57,7 @@ extern "C" void radiant_ime_mac_attach(struct UiContext* uicon);
 namespace {
 
 UiContext* g_ime_uicon = nullptr;
+bool g_rich_composing = false;
 
 DomElement* ime_focused_text_control() {
     if (!g_ime_uicon) return nullptr;
@@ -70,6 +74,16 @@ RadiantState* ime_state() {
     return radiant_ui_get_state(g_ime_uicon);
 }
 
+bool ime_dispatch_rich(EventType event_type, const char* text, uint32_t caret) {
+    if (!g_ime_uicon) return false;
+    bool handled = radiant_dispatch_rich_composition_event(g_ime_uicon, event_type, text, caret);
+    if (handled) {
+        radiant_state_request_repaint(ime_state());
+        glfwPostEmptyEvent();
+    }
+    return handled;
+}
+
 const char* ns_to_utf8(id obj) {
     NSString* s = nil;
     if ([obj isKindOfClass:[NSAttributedString class]]) {
@@ -82,7 +96,7 @@ const char* ns_to_utf8(id obj) {
 
 } // namespace
 
-@interface RadiantIMEContentView : NSView <NSTextInputClient>
+@interface RadiantIMEContentView : NSView
 @end
 
 @implementation RadiantIMEContentView
@@ -92,6 +106,28 @@ const char* ns_to_utf8(id obj) {
      replacementRange:(NSRange)replacementRange {
     DomElement* e = ime_focused_text_control();
     if (!e) {
+        const char* utf8 = ns_to_utf8(string);
+        if (!g_rich_composing) {
+            if (!ime_dispatch_rich(RDT_EVENT_COMPOSITION_START, "", 0)) {
+                struct objc_super sup = { self, [self superclass] };
+                ((void (*)(struct objc_super*, SEL, id, NSRange, NSRange))objc_msgSendSuper)(
+                    &sup, _cmd, string, selectedRange, replacementRange);
+                return;
+            }
+            g_rich_composing = true;
+        }
+        if (!ime_dispatch_rich(RDT_EVENT_COMPOSITION_UPDATE, utf8, (uint32_t)selectedRange.location)) {
+            g_rich_composing = false;
+            struct objc_super sup = { self, [self superclass] };
+            ((void (*)(struct objc_super*, SEL, id, NSRange, NSRange))objc_msgSendSuper)(
+                &sup, _cmd, string, selectedRange, replacementRange);
+            return;
+        }
+        log_debug("[IME mac] rich setMarkedText '%s' caret=%lu",
+                  utf8, (unsigned long)selectedRange.location);
+        return;
+    }
+    {
         struct objc_super sup = { self, [self superclass] };
         ((void (*)(struct objc_super*, SEL, id, NSRange, NSRange))objc_msgSendSuper)(
             &sup, _cmd, string, selectedRange, replacementRange);
@@ -118,6 +154,12 @@ const char* ns_to_utf8(id obj) {
         log_debug("[IME mac] unmarkText -> cancel");
         return;
     }
+    if (g_rich_composing && ime_dispatch_rich(RDT_EVENT_COMPOSITION_END, "", 0)) {
+        g_rich_composing = false;
+        log_debug("[IME mac] rich unmarkText -> cancel");
+        return;
+    }
+    if (g_rich_composing) g_rich_composing = false;
     struct objc_super sup = { self, [self superclass] };
     ((void (*)(struct objc_super*, SEL))objc_msgSendSuper)(&sup, _cmd);
 }
@@ -126,6 +168,15 @@ const char* ns_to_utf8(id obj) {
     DomElement* e = ime_focused_text_control();
     RadiantState* state = ime_state();
     if (!e || !state || !te_ime_is_composing(e)) {
+        if (g_rich_composing) {
+            const char* utf8 = ns_to_utf8(string);
+            if (ime_dispatch_rich(RDT_EVENT_COMPOSITION_END, utf8, 0)) {
+                g_rich_composing = false;
+                log_debug("[IME mac] rich insertText commit '%s'", utf8);
+                return;
+            }
+            g_rich_composing = false;
+        }
         // Plain typing — fall through to GLFW so its char callback path
         // (which already inserts text and dispatches keypress events) runs.
         struct objc_super sup = { self, [self superclass] };

@@ -30,3 +30,15 @@ true
 6
 "find first deco to:"
 11
+"doc find count:"
+2
+"doc find first path:"
+[0, 0]
+"doc find second path:"
+[1, 0]
+"doc find second from:"
+4
+"tx mapped first from:"
+1
+"tx mapped first to:"
+4

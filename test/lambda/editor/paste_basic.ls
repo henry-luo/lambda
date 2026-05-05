@@ -2,6 +2,9 @@
 import lambda.package.editor.mod_doc
 import lambda.package.editor.mod_md_schema
 import lambda.package.editor.mod_paste
+import lambda.package.editor.mod_commands
+import lambda.package.editor.mod_source_pos
+import lambda.package.editor.mod_html_paste
 
 // ---------------------------------------------------------------------------
 // 1. Drop unknown tag entirely
@@ -76,3 +79,25 @@ let para = node('paragraph', [text_marked("bold", ['strong', 'evil'])])
 let para2 = coerce_to_schema(md_schema, para)
 "nested marks count:"; len(para2.content[0].marks) == 1
 "nested mark:"; para2.content[0].marks[0] == 'strong'
+
+// ---------------------------------------------------------------------------
+// 8. Convert an HTML-like fragment and preserve common inline marks
+// ---------------------------------------------------------------------------
+let html_frag = node('p', [text("Hello "), node('strong', [text("world")])])
+let md_blocks = html_fragment_to_md_blocks(html_frag)
+"html block count:"; len(md_blocks) == 1
+"html block tag:"; md_blocks[0].tag == 'paragraph'
+"html text:"; doc_text(md_blocks[0]) == "Hello world"
+"html strong mark:"; md_blocks[0].content[1].marks[0] == 'strong'
+
+let paste_doc = node('doc', [node('paragraph', [text("Say: ")])])
+let paste_state = {doc: paste_doc, selection: text_selection(pos([0, 0], 5), pos([0, 0], 5))}
+let tx_html = cmd_paste_html(paste_state, html_frag, "Hello world")
+let pasted_para = node_at(tx_html.doc_after, [0])
+"cmd html paste text:"; doc_text(pasted_para) == "Say: Hello world"
+"cmd html paste mark:"; pasted_para.content[2].marks[0] == 'strong'
+
+let tx_raw_html = cmd_paste_html(paste_state, "<p>Hello <strong>world</strong></p>", "Hello world")
+let raw_pasted_para = node_at(tx_raw_html.doc_after, [0])
+"cmd raw html paste text:"; doc_text(raw_pasted_para) == "Say: Hello world"
+"cmd raw html paste mark:"; raw_pasted_para.content[2].marks[0] == 'strong'

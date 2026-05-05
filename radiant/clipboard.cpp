@@ -268,6 +268,25 @@ void clipboard_store_write_text(const char* text) {
     clipboard_store_write_mime("text/plain", text ? text : "");
 }
 
+void clipboard_store_write_html(const char* html, const char* plain_text) {
+    if (!html) return;
+    if (!g_store.items) clipboard_store_init();
+    clipboard_store_clear();
+
+    ClipboardItem* it = item_new();
+    if (!it) return;
+    arraylist_append(it->entries, entry_new("text/html", html, strlen(html)));
+    const char* text = plain_text ? plain_text : html;
+    arraylist_append(it->entries, entry_new("text/plain", text, strlen(text)));
+    arraylist_append(g_store.items, it);
+
+    if (g_store.backend && g_store.backend->write_items) {
+        g_store.backend->write_items(g_store.backend, g_store.items);
+    }
+    log_debug("clipboard_store: wrote html=%zu bytes plain=%zu bytes",
+              strlen(html), strlen(text));
+}
+
 const char* clipboard_store_read_mime(const char* mime) {
     if (!g_store.items) clipboard_store_init();
     // pull from backend (if it has data not yet mirrored)

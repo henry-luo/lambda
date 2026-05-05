@@ -2,6 +2,22 @@
 true
 "insert intent caret:"
 true
+"paste intent doc:"
+true
+"paste intent caret:"
+true
+"decorations preserved:"
+true
+"decorations mapped from:"
+true
+"decorations mapped to:"
+true
+"html paste doc:"
+true
+"html paste caret:"
+true
+"html paste mark:"
+true
 "delete-back intent doc:"
 true
 "delete-back intent caret:"
@@ -21,6 +37,32 @@ true
 "italic intent mark:"
 true
 "underline intent mark:"
+true
+"composition start active:"
+true
+"composition start history:"
+true
+"composition update doc:"
+true
+"composition update active:"
+true
+"composition update range:"
+true
+"composition update history:"
+true
+"composition replace doc:"
+true
+"composition replace range:"
+true
+"composition end doc:"
+true
+"composition end cleared:"
+true
+"composition end history:"
+true
+"composition cancel doc:"
+true
+"composition cancel history:"
 true
 "unknown intent null:"
 true

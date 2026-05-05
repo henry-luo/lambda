@@ -15,6 +15,9 @@ typedef enum  {
     RDT_EVENT_KEY_DOWN,
     RDT_EVENT_KEY_UP,
     RDT_EVENT_TEXT_INPUT,
+    RDT_EVENT_COMPOSITION_START,
+    RDT_EVENT_COMPOSITION_UPDATE,
+    RDT_EVENT_COMPOSITION_END,
     RDT_EVENT_FOCUS_IN,
     RDT_EVENT_FOCUS_OUT,
     RDT_EVENT_CLICK,
@@ -94,6 +97,13 @@ typedef struct TextInputEvent : Event {
     uint32_t codepoint;   // Unicode codepoint (UTF-32)
 } TextInputEvent;
 
+// IME composition event. `text` is borrowed from the platform/event sender and
+// only needs to live for the duration of handle_event().
+typedef struct CompositionEvent : Event {
+    const char* text;          // null-terminated UTF-8 preedit/commit text; may be null
+    uint32_t preedit_caret;    // codepoint offset inside preedit text
+} CompositionEvent;
+
 // Focus change event
 typedef struct FocusEvent : Event {
     void* target;         // element gaining/losing focus (View*)
@@ -110,6 +120,7 @@ typedef union RdtEvent {
     ScrollEvent scroll;
     KeyEvent key;
     TextInputEvent text_input;
+    CompositionEvent composition;
     FocusEvent focus;
 } RdtEvent;
 

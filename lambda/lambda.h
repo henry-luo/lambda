@@ -385,6 +385,7 @@ typedef enum SysFunc {
     // parse string functions
     SYSFUNC_PARSE1,         // parse(str) - parse string, auto-detect format
     SYSFUNC_PARSE2,         // parse(str, format) - parse string with format
+    SYSFUNC_PARSE_HTML_FRAGMENT,
     // variadic parameter access
     SYSFUNC_VARG0,          // varg() - get all variadic args as list
     SYSFUNC_VARG1,          // varg(n) - get nth variadic arg
@@ -1418,6 +1419,7 @@ extern "C" {
     RetItem fn_input2(Item url, Item options);
     RetItem fn_parse1(Item str);
     RetItem fn_parse2(Item str, Item options);
+    Item fn_parse_html_fragment1(Item str);
     String* fn_format1(Item item);
     String* fn_format2(Item item, Item options);
     Item fn_error(Item message);  // raise a user-defined error
