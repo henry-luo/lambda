@@ -16,17 +16,6 @@ import resolve: .resolve
 
 pub BLACK = "rgb(0,0,0)"
 
-// ============================================================
-// Operand helpers (mirror text._num)
-// ============================================================
-
-fn _num(op) {
-    if (op == null)        { 0.0 }
-    else if (op is float)  { op }
-    else if (op is int)    { float(op) }
-    else                   { 0.0 }
-}
-
 // Clamp a 0..1 component (PDFs occasionally produce slight overshoot).
 fn _clamp01(v) {
     if (v < 0.0) { 0.0 }
@@ -39,21 +28,21 @@ fn _clamp01(v) {
 // ============================================================
 
 pub fn gray(v) {
-    let g = _clamp01(_num(v))
+    let g = _clamp01(util.num(v))
     util.fmt_rgb(g, g, g)
 }
 
 pub fn rgb(r, g, b) {
-    util.fmt_rgb(_clamp01(_num(r)), _clamp01(_num(g)), _clamp01(_num(b)))
+    util.fmt_rgb(_clamp01(util.num(r)), _clamp01(util.num(g)), _clamp01(util.num(b)))
 }
 
 // Naive CMYK→sRGB used by every reasonable PDF viewer when no ICC profile
 // is present:  R = (1 - C)(1 - K)  etc.  Good enough for non-press output.
 pub fn cmyk(c, m, y, k) {
-    let cc = _clamp01(_num(c))
-    let mm = _clamp01(_num(m))
-    let yy = _clamp01(_num(y))
-    let kk = _clamp01(_num(k))
+    let cc = _clamp01(util.num(c))
+    let mm = _clamp01(util.num(m))
+    let yy = _clamp01(util.num(y))
+    let kk = _clamp01(util.num(k))
     let rr = (1.0 - cc) * (1.0 - kk)
     let gg = (1.0 - mm) * (1.0 - kk)
     let bb = (1.0 - yy) * (1.0 - kk)
@@ -103,12 +92,6 @@ pub fn from_sc_ops(ops) {
 // Color-space aware conversion for cs/CS + sc/SC/scn/SCN
 // ============================================================
 
-fn _name_of(v) {
-    if (v is map and v.kind == "name") { v.value }
-    else if (v is string) { v }
-    else { null }
-}
-
 fn _numeric_ops(ops) {
     for (op in ops where (op is float or op is int)) op
 }
@@ -120,22 +103,28 @@ fn _resource_color_space(pdf, page, name) {
     else { resolve.deref(pdf, table[name]) }
 }
 
-fn _resolve_space(pdf, page, cs) {
-    let nm = _name_of(cs)
+fn _resolve_space_at(pdf, page, cs, depth) {
+    let nm = util.name_of(cs)
     if (nm == null) { cs }
     else if (nm == "DeviceRGB" or nm == "RGB" or
              nm == "DeviceGray" or nm == "G" or
              nm == "DeviceCMYK" or nm == "CMYK") { nm }
+    else if (depth <= 0) { nm }
     else {
         let found = _resource_color_space(pdf, page, nm)
-        if (found == null) { nm } else { found }
+        if (found == null) { nm } else { _resolve_space_at(pdf, page, found, depth - 1) }
     }
 }
 
+fn _resolve_space(pdf, page, cs) {
+    _resolve_space_at(pdf, page, cs, 8)
+}
+
 fn _space_type(cs) {
-    if (cs is array and len(cs) >= 1) { _name_of(cs[0]) }
+    if (cs is array and len(cs) >= 1) { util.name_of(cs[0]) }
     else if (cs is map and cs.N != null) { "ICCBased" }
-    else { _name_of(cs) }
+    else if (cs is map) { "DeviceGray" }
+    else { util.name_of(cs) }
 }
 
 fn _base_component_count(pdf, page, base) {
@@ -145,11 +134,6 @@ fn _base_component_count(pdf, page, base) {
     else if (b == "DeviceCMYK" or b == "CMYK") { 4 }
     else if (b == "ICCBased") { _icc_component_count(b0) }
     else { 3 }
-}
-
-fn _byte_at(s, i) {
-    if (s == null or i < 0 or i >= len(s)) { 0 }
-    else { ord(s[i]) }
 }
 
 fn _indexed_color(pdf, page, cs, idx_raw) {
@@ -164,18 +148,18 @@ fn _indexed_color(pdf, page, cs, idx_raw) {
         let off = idx * ncomp
         let t = _space_type(base)
         if (t == "DeviceGray" or t == "G" or t == "CalGray") {
-            gray(float(_byte_at(lookup, off)) / 255.0)
+            gray(float(util.byte_at(lookup, off)) / 255.0)
         }
         else if (t == "DeviceCMYK" or t == "CMYK") {
-            cmyk(float(_byte_at(lookup, off)) / 255.0,
-                 float(_byte_at(lookup, off + 1)) / 255.0,
-                 float(_byte_at(lookup, off + 2)) / 255.0,
-                 float(_byte_at(lookup, off + 3)) / 255.0)
+            cmyk(float(util.byte_at(lookup, off)) / 255.0,
+                 float(util.byte_at(lookup, off + 1)) / 255.0,
+                 float(util.byte_at(lookup, off + 2)) / 255.0,
+                 float(util.byte_at(lookup, off + 3)) / 255.0)
         }
         else {
-            rgb(float(_byte_at(lookup, off)) / 255.0,
-                float(_byte_at(lookup, off + 1)) / 255.0,
-                float(_byte_at(lookup, off + 2)) / 255.0)
+            rgb(float(util.byte_at(lookup, off)) / 255.0,
+                float(util.byte_at(lookup, off + 1)) / 255.0,
+                float(util.byte_at(lookup, off + 2)) / 255.0)
         }
     }
 }
@@ -203,9 +187,9 @@ fn _lab_color(nums) {
     if (len(nums) >= 3) {
         // Native C++ uses this simple fallback: L* maps 0..100, a*/b*
         // map approximately -128..127 into green/blue channels.
-        rgb(_num(nums[0]) / 100.0,
-            (_num(nums[1]) + 128.0) / 255.0,
-            (_num(nums[2]) + 128.0) / 255.0)
+        rgb(util.num(nums[0]) / 100.0,
+            (util.num(nums[1]) + 128.0) / 255.0,
+            (util.num(nums[2]) + 128.0) / 255.0)
     }
     else { BLACK }
 }
@@ -213,15 +197,15 @@ fn _lab_color(nums) {
 fn _gamma_value(cs, index) {
     if (cs is array and len(cs) >= 2 and cs[1] is map and cs[1].Gamma != null) {
         let g = cs[1].Gamma
-        if (g is array and len(g) > index) { _num(g[index]) }
-        else if (index == 0) { _num(g) }
+        if (g is array and len(g) > index) { util.num(g[index]) }
+        else if (index == 0) { util.num(g) }
         else { 1.0 }
     }
     else { 1.0 }
 }
 
 fn _apply_gamma(v, gamma) {
-    let x = _num(v)
+    let x = util.num(v)
     if (gamma != 1.0 and x > 0.0) { math.pow(x, gamma) }
     else { x }
 }
@@ -269,7 +253,7 @@ pub fn from_ops_in_space(pdf, page, active_space, ops) {
     else if (t == "Separation" or t == "DeviceN") {
         // Tint transforms are not interpreted yet; match the C++ view's
         // simple grayscale tint fallback.
-        if (len(nums) >= 1) { gray(1.0 - _num(nums[0])) } else { BLACK }
+        if (len(nums) >= 1) { gray(1.0 - util.num(nums[0])) } else { BLACK }
     }
     else {
         _from_component_count(nums, 3)

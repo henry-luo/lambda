@@ -83,17 +83,10 @@ fn _stream_data(content, dict) {
     else { "" }
 }
 
-fn _num(v) {
-    if (v == null)        { 0.0 }
-    else if (v is float)  { v }
-    else if (v is int)    { float(v) }
-    else                  { 0.0 }
-}
-
 fn _form_matrix(m) {
     if (m is array and len(m) == 6) {
-        [_num(m[0]), _num(m[1]), _num(m[2]),
-         _num(m[3]), _num(m[4]), _num(m[5])]
+        [util.num(m[0]), util.num(m[1]), util.num(m[2]),
+         util.num(m[3]), util.num(m[4]), util.num(m[5])]
     }
     else { util.IDENTITY }
 }
@@ -175,14 +168,47 @@ fn _is_passthrough_filter(f) {
     (nm == "DCTDecode") or (nm == "DCT") or (nm == "JPXDecode")
 }
 
-fn _is_raw_xobject(dict, data) {
+fn _resource_color_space(pdf, page, name) {
+    let res = resolve.page_resources(pdf, page)
+    let table = if (res and res.ColorSpace) resolve.deref(pdf, res.ColorSpace) else null
+    if (table == null) { null }
+    else { resolve.deref(pdf, table[name]) }
+}
+
+fn _is_device_space_name(nm) {
+    (nm == "DeviceRGB") or (nm == "RGB") or
+    (nm == "DeviceGray") or (nm == "G") or
+    (nm == "DeviceCMYK") or (nm == "CMYK")
+}
+
+fn _resolve_image_space_at(pdf, page, cs, depth) {
+    let nm = util.name_of(cs)
+    if (cs is array and len(cs) >= 4 and _is_indexed(cs)) {
+        let base = _resolve_image_space_at(pdf, page, cs[1], depth)
+        [cs[0], base, cs[2], cs[3]]
+    }
+    else if (nm == null) { cs }
+    else if (_is_device_space_name(nm)) { nm }
+    else if (depth <= 0) { cs }
+    else {
+        let found = _resource_color_space(pdf, page, nm)
+        if (found == null) { cs } else { _resolve_image_space_at(pdf, page, found, depth - 1) }
+    }
+}
+
+fn _resolve_image_space(pdf, page, cs) {
+    _resolve_image_space_at(pdf, page, cs, 8)
+}
+
+fn _is_raw_xobject(pdf, page, dict, data) {
     if (dict == null or data == null or data == "") { false }
     else if (_is_passthrough_filter(dict.Filter)) { false }
     else {
-        let w = _int(dict.Width, 0)
-        let h = _int(dict.Height, 0)
-        let bpc = _int(dict.BitsPerComponent, 8)
-        let cs = if (dict.ColorSpace != null) { dict.ColorSpace } else { "DeviceRGB" }
+        let w = util.int_or(dict.Width, 0)
+        let h = util.int_or(dict.Height, 0)
+        let bpc = util.int_or(dict.BitsPerComponent, 8)
+        let raw_cs = if (dict.ColorSpace != null) { dict.ColorSpace } else { "DeviceRGB" }
+        let cs = _resolve_image_space(pdf, page, raw_cs)
         let ncomp = _inline_ncomp(cs)
         let packed = ((bpc == 1) or (bpc == 4) or _is_indexed(cs))
         let expected = if (packed) { _row_bytes(w, ncomp, bpc) * h } else { w * h * ncomp }
@@ -193,24 +219,25 @@ fn _is_raw_xobject(dict, data) {
     }
 }
 
-fn _xobject_inline_info(dict, data) {
-    let cs = if (dict.ColorSpace != null) { dict.ColorSpace } else { "DeviceRGB" }
+fn _xobject_inline_info(pdf, page, dict, data) {
+    let raw_cs = if (dict.ColorSpace != null) { dict.ColorSpace } else { "DeviceRGB" }
+    let cs = _resolve_image_space(pdf, page, raw_cs)
     {
         kind: "inline_image",
         dict: [
             { key: "W", value: dict.Width },
             { key: "H", value: dict.Height },
             { key: "CS", value: cs },
-            { key: "BPC", value: _int(dict.BitsPerComponent, 8) }
+            { key: "BPC", value: util.int_or(dict.BitsPerComponent, 8) }
         ],
         data: data
     }
 }
 
-pn _emit_xobject_image(ctm, xo) {
+pn _emit_xobject_image(pdf, page, ctm, xo) {
     let data = _xobject_data(xo)
-    if (xo.data_uri == null and _is_raw_xobject(xo.dict, data)) {
-        return [svg.group(util.fmt_matrix(ctm), _emit_inline_pixels(_xobject_inline_info(xo.dict, data)))]
+    if (xo.data_uri == null and _is_raw_xobject(pdf, page, xo.dict, data)) {
+        return [svg.group(util.fmt_matrix(ctm), _emit_inline_pixels(_xobject_inline_info(pdf, page, xo.dict, data)))]
     }
     else { return _emit_image(ctm, xo.obj_num, xo.data_uri) }
 }
@@ -238,12 +265,28 @@ pub pn apply_do(pdf, page, ctm, ops) {
         if (op0 is map and op0.kind == "name") {
             let xo = lookup_xobject(pdf, page, op0.value)
             if (xo == null) { return [] }
-            else if (xo.kind == "image") { return _emit_xobject_image(ctm, xo) }
+            else if (xo.kind == "image") { return _emit_xobject_image(pdf, page, ctm, xo) }
             else if (xo.kind == "form")  { return _emit_form_stub(ctm, xo.obj_num) }
             else { return [] }
         }
         else { return [] }
     }
+}
+
+fn _resolve_inline_pair(pdf, page, p) {
+    if ((p.key == "CS") or (p.key == "ColorSpace")) {
+        { key: p.key, value: _resolve_image_space(pdf, page, p.value) }
+    }
+    else { p }
+}
+
+fn _inline_info_with_resources(pdf, page, info) {
+    if ((info is map) and (info.kind == "inline_image") and (info.dict is array)) {
+        { kind: "inline_image",
+          dict: (for (p in info.dict) _resolve_inline_pair(pdf, page, p)),
+          data: info.data }
+    }
+    else { info }
 }
 
 fn _placeholder_inline() {
@@ -257,21 +300,11 @@ fn _placeholder_inline() {
     [elem]
 }
 
-fn _int(v, fallback) {
-    if (v is int) { v }
-    else if (v is float) { int(v) }
-    else { fallback }
-}
-
-fn _name(v) {
-    if (v is map and v.kind == "name") { v.value }
-    else if (v is string) { v }
-    else { null }
-}
-
 fn _space_type(cs) {
-    if (cs is array and len(cs) >= 1) { _name(cs[0]) }
-    else { _name(cs) }
+    if (cs is array and len(cs) >= 1) { util.name_of(cs[0]) }
+    else if (cs is map and cs.N != null) { "ICCBased" }
+    else if (cs is map) { "DeviceRGB" }
+    else { util.name_of(cs) }
 }
 
 fn _is_indexed(cs) {
@@ -284,7 +317,10 @@ fn _is_icc_based(cs) {
 }
 
 fn _icc_ncomp(cs) {
-    if (cs is array and len(cs) >= 2 and cs[1] is map and cs[1].N != null) {
+    if (cs is map and cs.N != null) {
+        if (cs.N is int) cs.N else if (cs.N is float) int(cs.N) else 3
+    }
+    else if (cs is array and len(cs) >= 2 and cs[1] is map and cs[1].N != null) {
         if (cs[1].N is int) cs[1].N else if (cs[1].N is float) int(cs[1].N) else 3
     }
     else { 3 }
@@ -294,6 +330,7 @@ fn _base_ncomp(base) {
     let t = _space_type(base)
     if ((t == "G") or (t == "DeviceGray") or (t == "CalGray")) { 1 }
     else if ((t == "CMYK") or (t == "DeviceCMYK")) { 4 }
+    else if (t == "ICCBased") { _icc_ncomp(base) }
     else { 3 }
 }
 
@@ -304,12 +341,7 @@ fn _inline_ncomp(cs) {
     else if ((n == "CMYK") or (n == "DeviceCMYK")) { 4 }
     else if (_is_indexed(cs)) { 1 }
     else if (_is_icc_based(cs)) { _icc_ncomp(cs) }
-    else { 0 }
-}
-
-fn _byte_at(s, i) {
-    if (s == null or i < 0 or i >= len(s)) { 0 }
-    else { ord(s[i]) }
+    else { 3 }
 }
 
 fn _div_int(a, b) {
@@ -325,10 +357,10 @@ fn _rgb_int(r, g, b) {
 }
 
 fn _cmyk_pixel_fill(data, off) {
-    let c = float(_byte_at(data, off)) / 255.0
-    let m = float(_byte_at(data, off + 1)) / 255.0
-    let y = float(_byte_at(data, off + 2)) / 255.0
-    let k = float(_byte_at(data, off + 3)) / 255.0
+    let c = float(util.byte_at(data, off)) / 255.0
+    let m = float(util.byte_at(data, off + 1)) / 255.0
+    let y = float(util.byte_at(data, off + 2)) / 255.0
+    let k = float(util.byte_at(data, off + 3)) / 255.0
     let r = int((1.0 - c) * (1.0 - k) * 255.0)
     let g = int((1.0 - m) * (1.0 - k) * 255.0)
     let b = int((1.0 - y) * (1.0 - k) * 255.0)
@@ -340,24 +372,24 @@ fn _gray4_pixel_fill(data, w, pixel_index) {
     let x = pixel_index - (y * w)
     let byte_idx = (y * _row_bytes(w, 1, 4)) + _div_int(x, 2)
     let high = ((x - (_div_int(x, 2) * 2)) == 0)
-    let raw = _byte_at(data, byte_idx)
+    let raw = util.byte_at(data, byte_idx)
     let val = if (high) { shr(raw, 4) } else { band(raw, 15) }
     let g = val * 17
     _rgb_int(g, g, g)
 }
 
 fn _indexed_index(data, bpc, pixel_index) {
-    if (bpc == 8) { _byte_at(data, pixel_index) }
+    if (bpc == 8) { util.byte_at(data, pixel_index) }
     else if (bpc == 4) {
         let byte_idx = _div_int(pixel_index, 2)
         let high = ((pixel_index - (_div_int(pixel_index, 2) * 2)) == 0)
-        let raw = _byte_at(data, byte_idx)
+        let raw = util.byte_at(data, byte_idx)
         if (high) { shr(raw, 4) } else { band(raw, 15) }
     }
     else if (bpc == 1) {
         let byte_idx = _div_int(pixel_index, 8)
         let bit_off = 7 - (pixel_index - (_div_int(pixel_index, 8) * 8))
-        band(shr(_byte_at(data, byte_idx), bit_off), 1)
+        band(shr(util.byte_at(data, byte_idx), bit_off), 1)
     }
     else { 0 }
 }
@@ -373,14 +405,14 @@ fn _indexed_pixel_fill(data, bpc, pixel_index, cs) {
         let off = idx * ncomp
         let lookup = cs[3]
         if (ncomp == 1) {
-            let g = _byte_at(lookup, off)
+            let g = util.byte_at(lookup, off)
             _rgb_int(g, g, g)
         }
         else if (ncomp == 4) {
             _cmyk_pixel_fill(lookup, off)
         }
         else {
-            _rgb_int(_byte_at(lookup, off), _byte_at(lookup, off + 1), _byte_at(lookup, off + 2))
+            _rgb_int(util.byte_at(lookup, off), util.byte_at(lookup, off + 1), util.byte_at(lookup, off + 2))
         }
     }
 }
@@ -394,7 +426,7 @@ fn _inline_pixel_fill(data, ncomp, bpc, w, pixel_index, cs) {
         let x = pixel_index - (y * w)
         let byte_idx = (y * _row_bytes(w, ncomp, bpc)) + _div_int(x, 8)
         let bit_off = 7 - (x - (_div_int(x, 8) * 8))
-        let val = band(shr(_byte_at(data, byte_idx), bit_off), 1)
+        let val = band(shr(util.byte_at(data, byte_idx), bit_off), 1)
         if (val == 1) { _rgb_int(255, 255, 255) } else { _rgb_int(0, 0, 0) }
     }
     else if (bpc == 4) {
@@ -402,7 +434,7 @@ fn _inline_pixel_fill(data, ncomp, bpc, w, pixel_index, cs) {
     }
     else if (ncomp == 1) {
         let off = pixel_index * ncomp
-        let g = _byte_at(data, off)
+        let g = util.byte_at(data, off)
         _rgb_int(g, g, g)
     }
     else if (ncomp == 4) {
@@ -410,7 +442,7 @@ fn _inline_pixel_fill(data, ncomp, bpc, w, pixel_index, cs) {
     }
     else {
         let off = pixel_index * ncomp
-        _rgb_int(_byte_at(data, off), _byte_at(data, off + 1), _byte_at(data, off + 2))
+        _rgb_int(util.byte_at(data, off), util.byte_at(data, off + 1), util.byte_at(data, off + 2))
     }
 }
 
@@ -425,9 +457,9 @@ pn _emit_inline_pixels(info) {
         let dn = len(info.dict)
         while (di < dn) {
             let p = info.dict[di]
-            if ((p.key == "W") or (p.key == "Width")) { w = _int(p.value, 0) }
-            else if ((p.key == "H") or (p.key == "Height")) { h = _int(p.value, 0) }
-            else if ((p.key == "BPC") or (p.key == "BitsPerComponent")) { bpc = _int(p.value, 8) }
+            if ((p.key == "W") or (p.key == "Width")) { w = util.int_or(p.value, 0) }
+            else if ((p.key == "H") or (p.key == "Height")) { h = util.int_or(p.value, 0) }
+            else if ((p.key == "BPC") or (p.key == "BitsPerComponent")) { bpc = util.int_or(p.value, 8) }
             else if ((p.key == "CS") or (p.key == "ColorSpace")) {
                 cs = p.value
                 ncomp = _inline_ncomp(p.value)
@@ -479,5 +511,13 @@ pub pn apply_inline(ctm, ops) {
     var info = null
     if (len(ops) > 0) { info = ops[0] }
     if ((info is map) and (info.kind == "inline_image")) { return _emit_inline_pixels(info) }
+    else { return _placeholder_inline() }
+}
+
+pub pn apply_inline_with_page(pdf, page, ctm, ops) {
+    var info = null
+    if (len(ops) > 0) { info = ops[0] }
+    let resolved = _inline_info_with_resources(pdf, page, info)
+    if ((resolved is map) and (resolved.kind == "inline_image")) { return _emit_inline_pixels(resolved) }
     else { return _placeholder_inline() }
 }
