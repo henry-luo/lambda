@@ -28179,6 +28179,13 @@ static bool g_jm_preamble_mode = false;               // compile as preamble (fu
 static JsPreambleState* g_jm_preamble_out = NULL;      // output: preamble snapshot (preamble mode)
 static const JsPreambleState* g_jm_preamble_in = NULL;  // input: pre-seed from preamble (test mode)
 
+static void js_normalize_path_separators(char* path) {
+    if (!path) return;
+    for (char* p = path; *p; p++) {
+        if (*p == '\\') *p = '/';
+    }
+}
+
 // ============================================================================
 // Public entry point for JS transpilation via direct MIR generation
 // ============================================================================
@@ -28212,6 +28219,7 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
                 snprintf(abs_path, sizeof(abs_path), "%s", resolved);
             }
         }
+        js_normalize_path_separators(abs_path);
         const char* last_slash = strrchr(abs_path, '/');
         int dir_len = last_slash ? (int)(last_slash - abs_path) : 1;
         const char* dir_str = last_slash ? abs_path : ".";
@@ -28781,10 +28789,14 @@ static bool js_is_cjs_file(const char* path) {
 }
 
 static char* js_wrap_cjs_source(const char* source, const char* filename) {
+    char filename_buf[2048];
+    snprintf(filename_buf, sizeof(filename_buf), "%s", filename);
+    js_normalize_path_separators(filename_buf);
+
     // Extract __dirname from filename
-    const char* last_slash = strrchr(filename, '/');
-    int dir_len = last_slash ? (int)(last_slash - filename) : 1;
-    const char* dir_str = last_slash ? filename : ".";
+    const char* last_slash = strrchr(filename_buf, '/');
+    int dir_len = last_slash ? (int)(last_slash - filename_buf) : 1;
+    const char* dir_str = last_slash ? filename_buf : ".";
 
     // Wrap:  var __cjs_module__ = {exports: {}};
     //        var exports = __cjs_module__.exports;
@@ -28801,11 +28813,11 @@ static char* js_wrap_cjs_source(const char* source, const char* filename) {
     const char* suffix = "\nexport default __cjs_module__.exports;\n";
 
     size_t src_len = strlen(source);
-    size_t prefix_size = strlen(prefix_fmt) + strlen(filename) + dir_len + 64;
+    size_t prefix_size = strlen(prefix_fmt) + strlen(filename_buf) + dir_len + 64;
     size_t total = prefix_size + src_len + strlen(suffix) + 1;
 
     char* wrapped = (char*)mem_alloc(total, MEM_CAT_JS_RUNTIME);
-    int offset = snprintf(wrapped, total, prefix_fmt, filename, dir_len, dir_str);
+    int offset = snprintf(wrapped, total, prefix_fmt, filename_buf, dir_len, dir_str);
     memcpy(wrapped + offset, source, src_len);
     offset += (int)src_len;
     strcpy(wrapped + offset, suffix);

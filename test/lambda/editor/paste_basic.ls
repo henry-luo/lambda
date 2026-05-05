@@ -138,6 +138,27 @@ let html_link_blocks = html_fragment_to_blocks_for_schema(html5_subset_schema, l
 "html schema link tag:"; html_link_blocks[0].content[1].tag == 'a'
 "html schema link href:"; html_link_blocks[0].content[1].attrs[0].value == "https://example.com"
 
+let quote_frag = node('blockquote', [node('p', [text("Quoted")])])
+let md_quote_blocks = html_fragment_to_md_blocks(quote_frag)
+"html quote md tag:"; md_quote_blocks[0].tag == 'blockquote'
+"html quote md child:"; md_quote_blocks[0].content[0].tag == 'paragraph'
+"html quote md text:"; doc_text(md_quote_blocks[0]) == "Quoted"
+let md_pre_blocks = html_fragment_to_md_blocks(node('pre', [node('code', [text("let x = 1")])]))
+"html pre md tag:"; md_pre_blocks[0].tag == 'code_block'
+"html pre md text:"; doc_text(md_pre_blocks[0]) == "let x = 1"
+"html pre md marks:"; len(md_pre_blocks[0].content[0].marks) == 0
+let md_hr_blocks = html_fragment_to_md_blocks(node('hr', []))
+"html hr md tag:"; md_hr_blocks[0].tag == 'hr'
+
+let html_quote_blocks = html_fragment_to_blocks_for_schema(html5_subset_schema, quote_frag)
+"html schema quote tag:"; html_quote_blocks[0].tag == 'blockquote'
+"html schema quote child:"; html_quote_blocks[0].content[0].tag == 'p'
+let html_pre_blocks = html_fragment_to_blocks_for_schema(html5_subset_schema, node('pre', [text("html")]))
+"html schema pre tag:"; html_pre_blocks[0].tag == 'pre'
+"html schema pre text:"; doc_text(html_pre_blocks[0]) == "html"
+let html_hr_blocks = html_fragment_to_blocks_for_schema(html5_subset_schema, node('hr', []))
+"html schema hr tag:"; html_hr_blocks[0].tag == 'hr'
+
 let table_frag = node('table', [node('tbody', [node('tr', [node('td', [text("A")]), node('td', [text("B")])])])])
 let html_table_blocks = html_fragment_to_blocks_for_schema(html5_subset_schema, table_frag)
 "html schema table tag:"; html_table_blocks[0].tag == 'table'
@@ -151,6 +172,20 @@ let tx_html_table = cmd_paste_html(html_table_state, "<table><tr><td>A</td><td>B
 "cmd html table paste tag:"; node_at(tx_html_table.doc_after, [0]).tag == 'table'
 "cmd html table paste body:"; node_at(tx_html_table.doc_after, [0, 0]).tag == 'tbody'
 "cmd html table paste text:"; doc_text(tx_html_table.doc_after) == "AB"
+
+let tx_md_quote = cmd_paste_html({doc: node('doc', [node('paragraph', [text("replace")])]), selection: all_selection()},
+  "<blockquote><p>Quoted</p></blockquote><hr><pre><code>code</code></pre>", "Quotedcode")
+"cmd md block paste quote:"; node_at(tx_md_quote.doc_after, [0]).tag == 'blockquote'
+"cmd md block paste hr:"; node_at(tx_md_quote.doc_after, [1]).tag == 'hr'
+"cmd md block paste code:"; node_at(tx_md_quote.doc_after, [2]).tag == 'code_block'
+"cmd md block paste text:"; doc_text(tx_md_quote.doc_after) == "Quotedcode"
+
+let tx_html_blocks = cmd_paste_html(html_table_state,
+  "<blockquote><p>Quoted</p></blockquote><hr><pre>html</pre>", "Quotedhtml")
+"cmd html block paste quote:"; node_at(tx_html_blocks.doc_after, [0]).tag == 'blockquote'
+"cmd html block paste quote child:"; node_at(tx_html_blocks.doc_after, [0, 0]).tag == 'p'
+"cmd html block paste hr:"; node_at(tx_html_blocks.doc_after, [1]).tag == 'hr'
+"cmd html block paste pre:"; node_at(tx_html_blocks.doc_after, [2]).tag == 'pre'
 
 let html_paste_doc = node('doc', [node('p', [text("Say: ")])])
 let html_paste_state = {doc: html_paste_doc, schema: html5_subset_schema, selection: text_selection(pos([0, 0], 5), pos([0, 0], 5))}

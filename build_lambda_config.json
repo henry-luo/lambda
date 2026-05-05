@@ -419,7 +419,6 @@
                 "zstd",
                 "ssh2",
                 "idn2",
-                "psl",
                 "ssl",
                 "crypto",
                 "unistring",
@@ -432,10 +431,7 @@
                 "zlib",
                 "rpmalloc",
                 "re2",
-                "pthread",
-                "secur32",
-                "wldap32",
-                "iphlpapi"
+                "pthread"
             ],
             "defines": [
                 "SIMPLE_SCHEMA_PARSER",
@@ -806,12 +802,6 @@
                     "link": "static"
                 },
                 {
-                    "name": "psl",
-                    "description": "libpsl — curl PSL dependency",
-                    "lib": "/clang64/lib/libpsl.a",
-                    "link": "static"
-                },
-                {
                     "name": "ssl",
                     "description": "OpenSSL libssl — curl TLS dependency",
                     "lib": "/clang64/lib/libssl.a",
@@ -1074,7 +1064,7 @@
                 "DTVG_STATIC"
             ],
             "linker_flags": [
-                "Wl,--stack,8388608",
+                "Wl,--stack,67108864",
                 "Wl,--subsystem,console",
                 "static-libgcc",
                 "static-libstdc++",
@@ -3138,12 +3128,17 @@
                         "source": "test/test_lambda_errors_gtest.cpp",
                         "name": "Lambda Error System Tests",
                         "dependencies": [
-                            "lambda-input-full"
+                            "lambda-lib"
+                        ],
+                        "additional_sources": [
+                            "lambda/lambda-error.cpp"
                         ],
                         "binary": "test_lambda_errors_gtest.exe",
                         "libraries": [
                             "gtest",
-                            "gtest_main"
+                            "gtest_main",
+                            "tree-sitter",
+                            "rpmalloc"
                         ],
                         "icon": "⚠️"
                     },

@@ -197,6 +197,34 @@ static FontHandle* parse_css_font_shorthand(const char* font_str, int len) {
     return font_resolve(ctx, &style);
 }
 
+static float canvas_font_size_px(Item ctx_obj) {
+    Item font_key = (Item){.item = s2it(heap_create_name("font"))};
+    Item font_str = js_property_get(ctx_obj, font_key);
+    if (get_type_id(font_str) != LMD_TYPE_STRING) return 16.0f;
+    String* s = it2s(font_str);
+    if (!s || s->len <= 0) return 16.0f;
+    char buf[512];
+    int len = s->len >= (int)sizeof(buf) ? (int)sizeof(buf) - 1 : (int)s->len;
+    memcpy(buf, s->chars, len);
+    buf[len] = '\0';
+    char* p = buf;
+    while (*p) {
+        if (isdigit((unsigned char)*p) || *p == '.') {
+            char* end;
+            float size_px = strtof(p, &end);
+            if (end > p && strncmp(end, "px", 2) == 0) return size_px;
+        }
+        p++;
+    }
+    return 16.0f;
+}
+
+static float canvas_fallback_text_width(Item ctx_obj, String* s) {
+    if (!s || s->len <= 0) return 0.0f;
+    float size_px = canvas_font_size_px(ctx_obj);
+    return (float)s->len * size_px * 0.5f;
+}
+
 // ============================================================================
 // OffscreenCanvas constructor
 // ============================================================================
@@ -306,10 +334,11 @@ extern "C" Item js_canvas_measure_text(Item ctx_obj, Item text_arg) {
         if (s && s->len > 0) {
             TextExtents ext = font_measure_text(handle, s->chars, s->len);
             width = ext.width;
+            if (width <= 0.0f) width = canvas_fallback_text_width(ctx_obj, s);
         }
     } else if (get_type_id(text_arg) == LMD_TYPE_STRING) {
-        // fallback: no font loaded, return 0
-        width = 0.0f;
+        String* s = it2s(text_arg);
+        width = canvas_fallback_text_width(ctx_obj, s);
     }
 
     // return TextMetrics object: { width }

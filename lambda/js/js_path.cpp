@@ -145,20 +145,12 @@ extern "C" Item js_path_basename(Item path_item, Item ext_item) {
 
     // strip trailing separators (POSIX: only '/')
     int end = path_len - 1;
-#ifdef _WIN32
-    while (end >= 0 && (path[end] == '/' || path[end] == '\\')) end--;
-#else
     while (end >= 0 && path[end] == '/') end--;
-#endif
     if (end < 0) return make_string_item("/");
 
     // find start of basename (after last separator)
     int start = end;
-#ifdef _WIN32
-    while (start > 0 && path[start - 1] != '/' && path[start - 1] != '\\') start--;
-#else
     while (start > 0 && path[start - 1] != '/') start--;
-#endif
 
     int base_len = end - start + 1;
     const char* base = path + start;
@@ -347,15 +339,16 @@ extern "C" Item js_path_join(Item args_item) {
             memcpy(result, seg, seg_len);
             result_len = seg_len;
         } else {
-            char* joined = file_path_join(result, seg);
-            if (joined) {
-                int jlen = (int)strlen(joined);
-                if (jlen >= (int)sizeof(result)) jlen = (int)sizeof(result) - 1;
-                memcpy(result, joined, jlen);
-                result[jlen] = '\0';
-                result_len = jlen;
-                mem_free(joined);
+            if (result_len < (int)sizeof(result) - 1 && result[result_len - 1] != '/') {
+                result[result_len++] = '/';
             }
+            int seg_len = (int)strlen(seg);
+            if (result_len + seg_len >= (int)sizeof(result)) {
+                seg_len = (int)sizeof(result) - 1 - result_len;
+            }
+            memcpy(result + result_len, seg, seg_len);
+            result_len += seg_len;
+            result[result_len] = '\0';
         }
     }
 
@@ -459,15 +452,6 @@ extern "C" Item js_path_normalize(Item path_item) {
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
     if (!path) return make_string_item(".");
 
-    // use realpath to normalize if the path exists
-    char* real = file_realpath(path);
-    if (real) {
-        Item result = make_string_item(real);
-        mem_free(real);
-        return result;
-    }
-
-    // fallback: basic normalization for non-existent paths
     char result[4096];
     int rlen = normalize_path_buf(path, result, sizeof(result));
     return make_string_item(result, rlen);
@@ -581,17 +565,7 @@ extern "C" Item js_path_parse(Item path_item) {
 
     // root
     const char* root = "";
-#ifdef _WIN32
-    char root_buf[4] = {0};
-    if (stripped[0] >= 'A' && stripped[0] <= 'z' && stripped[1] == ':') {
-        root_buf[0] = stripped[0]; root_buf[1] = ':'; root_buf[2] = '\\';
-        root = root_buf;
-    } else if (stripped[0] == '\\' || stripped[0] == '/') {
-        root = "/";
-    }
-#else
     if (stripped[0] == '/') root = "/";
-#endif
 
     // dir — use original path for dirname (preserves internal slashes)
     char* dir = file_path_dirname(stripped);
@@ -709,20 +683,12 @@ extern "C" Item js_path_format(Item obj_item) {
 
 // path.sep — the platform-specific path separator
 static Item js_path_get_sep(void) {
-#ifdef _WIN32
-    return make_string_item("\\");
-#else
     return make_string_item("/");
-#endif
 }
 
 // path.delimiter — the platform-specific path delimiter
 static Item js_path_get_delimiter(void) {
-#ifdef _WIN32
-    return make_string_item(";");
-#else
     return make_string_item(":");
-#endif
 }
 
 // =============================================================================

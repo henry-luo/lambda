@@ -86,6 +86,30 @@ true
 true
 "html schema link href:"
 true
+"html quote md tag:"
+true
+"html quote md child:"
+true
+"html quote md text:"
+true
+"html pre md tag:"
+true
+"html pre md text:"
+true
+"html pre md marks:"
+true
+"html hr md tag:"
+true
+"html schema quote tag:"
+true
+"html schema quote child:"
+true
+"html schema pre tag:"
+true
+"html schema pre text:"
+true
+"html schema hr tag:"
+true
 "html schema table tag:"
 true
 "html schema table body:"
@@ -101,6 +125,22 @@ true
 "cmd html table paste body:"
 true
 "cmd html table paste text:"
+true
+"cmd md block paste quote:"
+true
+"cmd md block paste hr:"
+true
+"cmd md block paste code:"
+true
+"cmd md block paste text:"
+true
+"cmd html block paste quote:"
+true
+"cmd html block paste quote child:"
+true
+"cmd html block paste hr:"
+true
+"cmd html block paste pre:"
 true
 "cmd html schema paste tag:"
 true

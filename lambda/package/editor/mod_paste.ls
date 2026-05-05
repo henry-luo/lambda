@@ -122,7 +122,7 @@ fn coerce_one_at(schema, parent_entry, n) {
   else {
     let e = entry_for(schema, n.tag)
     if (e == null) { null }
-    else if (e.atomic) { node_attrs(n.tag, n.attrs, []) }
+    else if (e.atomic and len(e.content) == 0) { node_attrs(n.tag, n.attrs, []) }
     else {
       let cr = content_role(e)
       let kids = coerce_list_at(schema, n.content, cr, e, 0, len(n.content), [], [])
