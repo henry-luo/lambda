@@ -303,6 +303,7 @@ fn _placeholder_inline() {
 fn _space_type(cs) {
     if (cs is array and len(cs) >= 1) { util.name_of(cs[0]) }
     else if (cs is map and cs.N != null) { "ICCBased" }
+    else if (cs is map) { "DeviceRGB" }
     else { util.name_of(cs) }
 }
 
@@ -340,7 +341,7 @@ fn _inline_ncomp(cs) {
     else if ((n == "CMYK") or (n == "DeviceCMYK")) { 4 }
     else if (_is_indexed(cs)) { 1 }
     else if (_is_icc_based(cs)) { _icc_ncomp(cs) }
-    else { 0 }
+    else { 3 }
 }
 
 fn _div_int(a, b) {
