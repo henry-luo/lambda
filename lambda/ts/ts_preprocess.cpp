@@ -12,6 +12,7 @@
 #include "../../lib/strbuf.h"
 #include <cstring>
 #include "../../lib/mem.h"
+#include <ctype.h>
 
 // ============================================================================
 // Character helpers
@@ -53,6 +54,11 @@ static void blank(TsPreprocessor* pp, size_t start, size_t end) {
 // skip whitespace (not newlines), return new position
 static size_t skip_ws(const char* src, size_t pos, size_t len) {
     while (pos < len && is_whitespace(src[pos])) pos++;
+    return pos;
+}
+
+static size_t skip_any_ws(const char* src, size_t pos, size_t len) {
+    while (pos < len && isspace((unsigned char)src[pos])) pos++;
     return pos;
 }
 
@@ -165,7 +171,6 @@ static size_t skip_type_expr(const char* src, size_t pos, size_t len) {
         // at top level of type expression
         if (c == '=') {
             if (pos + 1 < len && src[pos + 1] == '>') {
-                // '=>' at top level: function type arrow is inside parens, so at top level this ends the type
                 return pos;
             }
             return pos; // assignment
@@ -213,9 +218,20 @@ static size_t skip_brace_block(const char* src, size_t pos, size_t len) {
 }
 
 // after a ':' that is a type annotation colon, blank the colon and type
+static size_t skip_type_annotation_end(const char* src, size_t colon_pos, size_t len) {
+    size_t type_start = skip_ws(src, colon_pos + 1, len);
+    size_t type_end = skip_type_expr(src, type_start, len);
+    if (type_start < len && src[type_start] == '(' &&
+        type_end + 1 < len && src[type_end] == '=' && src[type_end + 1] == '>') {
+        size_t ret_start = skip_ws(src, type_end + 2, len);
+        type_end = skip_type_expr(src, ret_start, len);
+    }
+    return type_end;
+}
+
 static void blank_type_annotation(TsPreprocessor* pp, size_t colon_pos) {
     size_t after_colon = skip_ws(pp->src, colon_pos + 1, pp->len);
-    size_t type_end = skip_type_expr(pp->src, after_colon, pp->len);
+    size_t type_end = skip_type_annotation_end(pp->src, colon_pos, pp->len);
     blank(pp, colon_pos, type_end);
 }
 
@@ -299,6 +315,298 @@ static size_t process_params(TsPreprocessor* pp, size_t pos) {
     return pos;
 }
 
+static bool is_word_at(const char* src, size_t pos, size_t len, const char* word) {
+    return match_keyword(src, pos, len, word);
+}
+
+static size_t skip_balanced_char(const char* src, size_t pos, size_t len, char open_ch, char close_ch) {
+    if (pos >= len || src[pos] != open_ch) return pos;
+    int depth = 1;
+    pos++;
+    while (pos < len && depth > 0) {
+        char c = src[pos];
+        if (c == open_ch) depth++;
+        else if (c == close_ch) depth--;
+        else if (c == '\'' || c == '"') { pos = skip_string(src, pos, len); continue; }
+        else if (c == '`') { pos = skip_template(src, pos, len); continue; }
+        pos++;
+    }
+    return pos;
+}
+
+static bool is_param_modifier(const char* src, size_t pos, size_t len, size_t* word_len) {
+    if (is_word_at(src, pos, len, "public")) { *word_len = 6; return true; }
+    if (is_word_at(src, pos, len, "private")) { *word_len = 7; return true; }
+    if (is_word_at(src, pos, len, "protected")) { *word_len = 9; return true; }
+    if (is_word_at(src, pos, len, "readonly")) { *word_len = 8; return true; }
+    return false;
+}
+
+static bool append_constructor_param(StrBuf* params, StrBuf* assigns, const char* src, size_t start, size_t end) {
+    size_t pos = start;
+    while (pos < end && is_whitespace(src[pos])) {
+        strbuf_append_char(params, src[pos]);
+        pos++;
+    }
+
+    bool has_property = false;
+    for (;;) {
+        size_t word_len = 0;
+        if (!is_param_modifier(src, pos, end, &word_len)) break;
+        has_property = true;
+        pos = skip_ws(src, pos + word_len, end);
+    }
+
+    size_t name_start = pos;
+    size_t name_end = skip_ident(src, name_start, end);
+    if (has_property && name_end > name_start) {
+        strbuf_append_str(assigns, "\nthis.");
+        strbuf_append_str_n(assigns, src + name_start, name_end - name_start);
+        strbuf_append_str(assigns, " = ");
+        strbuf_append_str_n(assigns, src + name_start, name_end - name_start);
+        strbuf_append_char(assigns, ';');
+    }
+
+    strbuf_append_str_n(params, src + pos, end - pos);
+    return has_property;
+}
+
+static char* lower_constructor_parameter_properties(const char* src, size_t len, size_t* out_len) {
+    StrBuf* out = strbuf_new_cap(len + 128);
+    bool changed = false;
+    size_t pos = 0;
+
+    while (pos < len) {
+        if (!is_word_at(src, pos, len, "constructor")) {
+            strbuf_append_char(out, src[pos++]);
+            continue;
+        }
+
+        size_t after_kw = skip_ws(src, pos + 11, len);
+        if (after_kw >= len || src[after_kw] != '(') {
+            strbuf_append_char(out, src[pos++]);
+            continue;
+        }
+
+        size_t params_start = after_kw + 1;
+        size_t params_end_with_close = skip_balanced_char(src, after_kw, len, '(', ')');
+        if (params_end_with_close <= after_kw || params_end_with_close > len) {
+            strbuf_append_char(out, src[pos++]);
+            continue;
+        }
+        size_t params_end = params_end_with_close - 1;
+
+        StrBuf* params = strbuf_new();
+        StrBuf* assigns = strbuf_new();
+        bool has_property = false;
+        size_t part_start = params_start;
+        int depth = 0;
+        for (size_t scan = params_start; scan <= params_end; scan++) {
+            bool at_end = (scan == params_end);
+            char c = at_end ? ',' : src[scan];
+            if (!at_end) {
+                if (c == '(' || c == '[' || c == '{' || c == '<') depth++;
+                else if ((c == ')' || c == ']' || c == '}' || c == '>') && depth > 0) depth--;
+                else if (c == '\'' || c == '"') { scan = skip_string(src, scan, len) - 1; continue; }
+                else if (c == '`') { scan = skip_template(src, scan, len) - 1; continue; }
+            }
+            if (c == ',' && depth == 0) {
+                if (append_constructor_param(params, assigns, src, part_start, scan)) has_property = true;
+                if (!at_end) strbuf_append_char(params, ',');
+                part_start = scan + 1;
+            }
+        }
+
+        if (!has_property) {
+            strbuf_append_str_n(out, src + pos, params_end_with_close - pos);
+            pos = params_end_with_close;
+        } else {
+            changed = true;
+            strbuf_append_str_n(out, src + pos, after_kw - pos + 1);
+            strbuf_append_str_n(out, params->str, params->length);
+            strbuf_append_char(out, ')');
+            pos = params_end_with_close;
+            while (pos < len && src[pos] != '{') {
+                strbuf_append_char(out, src[pos++]);
+            }
+            if (pos < len && src[pos] == '{') {
+                strbuf_append_char(out, src[pos++]);
+                strbuf_append_str_n(out, assigns->str, assigns->length);
+            }
+        }
+        strbuf_free(params);
+        strbuf_free(assigns);
+    }
+
+    if (!changed) {
+        strbuf_free(out);
+        *out_len = len;
+        return NULL;
+    }
+
+    char* result = (char*)mem_alloc(out->length + 1, MEM_CAT_TEMP);
+    memcpy(result, out->str, out->length + 1);
+    *out_len = out->length;
+    strbuf_free(out);
+    return result;
+}
+
+static void append_enum_object(StrBuf* out, const char* enum_name, int enum_name_len,
+                               const char* body, size_t body_len) {
+    strbuf_append_str(out, "const ");
+    strbuf_append_str_n(out, enum_name, enum_name_len);
+    strbuf_append_str(out, " = {");
+    int next_value = 0;
+    bool first = true;
+    size_t pos = 0;
+    while (pos < body_len) {
+        pos = skip_ws(body, pos, body_len);
+        if (pos >= body_len) break;
+        size_t name_start = pos;
+        size_t name_end = skip_ident(body, pos, body_len);
+        if (name_end <= name_start) { pos++; continue; }
+        pos = skip_ws(body, name_end, body_len);
+        int value = next_value;
+        if (pos < body_len && body[pos] == '=') {
+            pos = skip_ws(body, pos + 1, body_len);
+            value = atoi(body + pos);
+            while (pos < body_len && (body[pos] == '-' || body[pos] == '+' || isdigit((unsigned char)body[pos]))) pos++;
+        }
+        if (!first) strbuf_append_char(out, ',');
+        strbuf_append_str_n(out, body + name_start, name_end - name_start);
+        strbuf_append_str(out, ": ");
+        strbuf_append_int(out, value);
+        first = false;
+        next_value = value + 1;
+        while (pos < body_len && body[pos] != ',') pos++;
+        if (pos < body_len && body[pos] == ',') pos++;
+    }
+    strbuf_append_str(out, "};\n");
+}
+
+static void append_namespace_body(StrBuf* out, const char* ns_name, int ns_name_len,
+                                  const char* body, size_t body_len) {
+    size_t pos = 0;
+    while (pos < body_len) {
+        if (is_word_at(body, pos, body_len, "export")) {
+            size_t after_export = skip_ws(body, pos + 6, body_len);
+            if (is_word_at(body, after_export, body_len, "function")) {
+                size_t name_start = skip_ws(body, after_export + 8, body_len);
+                size_t name_end = skip_ident(body, name_start, body_len);
+                strbuf_append_str_n(out, ns_name, ns_name_len);
+                strbuf_append_char(out, '.');
+                strbuf_append_str_n(out, body + name_start, name_end - name_start);
+                strbuf_append_str(out, " = function");
+                pos = name_end;
+                continue;
+            }
+            if (is_word_at(body, after_export, body_len, "const") ||
+                is_word_at(body, after_export, body_len, "let") ||
+                is_word_at(body, after_export, body_len, "var")) {
+                size_t kw_len = body[after_export] == 'c' ? 5 : 3;
+                size_t name_start = skip_ws(body, after_export + kw_len, body_len);
+                size_t name_end = skip_ident(body, name_start, body_len);
+                size_t after_name = skip_ws(body, name_end, body_len);
+                if (after_name < body_len && body[after_name] == '=') {
+                    strbuf_append_str_n(out, ns_name, ns_name_len);
+                    strbuf_append_char(out, '.');
+                    strbuf_append_str_n(out, body + name_start, name_end - name_start);
+                    pos = after_name;
+                    continue;
+                }
+            }
+            pos = after_export;
+            continue;
+        }
+        strbuf_append_char(out, body[pos++]);
+    }
+}
+
+static char* lower_runtime_ts_constructs(const char* src, size_t len, size_t* out_len) {
+    StrBuf* out = strbuf_new_cap(len + 256);
+    bool changed = false;
+    size_t pos = 0;
+
+    while (pos < len) {
+        if (is_word_at(src, pos, len, "enum")) {
+            size_t name_start = skip_ws(src, pos + 4, len);
+            size_t name_end = skip_ident(src, name_start, len);
+            size_t brace = skip_ws(src, name_end, len);
+            if (name_end > name_start && brace < len && src[brace] == '{') {
+                size_t body_end = skip_balanced_char(src, brace, len, '{', '}');
+                if (body_end > brace) {
+                    append_enum_object(out, src + name_start, (int)(name_end - name_start),
+                                       src + brace + 1, body_end - brace - 2);
+                    pos = body_end;
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+
+        if (is_word_at(src, pos, len, "namespace")) {
+            size_t name_start = skip_ws(src, pos + 9, len);
+            size_t name_end = skip_ident(src, name_start, len);
+            size_t brace = skip_ws(src, name_end, len);
+            if (name_end > name_start && brace < len && src[brace] == '{') {
+                size_t body_end = skip_balanced_char(src, brace, len, '{', '}');
+                if (body_end > brace) {
+                    strbuf_append_str(out, "const ");
+                    strbuf_append_str_n(out, src + name_start, name_end - name_start);
+                    strbuf_append_str(out, " = {};\n");
+                    append_namespace_body(out, src + name_start, (int)(name_end - name_start),
+                                          src + brace + 1, body_end - brace - 2);
+                    strbuf_append_char(out, '\n');
+                    pos = body_end;
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+
+        if (src[pos] == '@') {
+            size_t deco_start = pos + 1;
+            size_t deco_end = skip_ident(src, deco_start, len);
+            size_t after_deco = skip_any_ws(src, deco_end, len);
+            if (deco_end > deco_start && is_word_at(src, after_deco, len, "class")) {
+                size_t name_start = skip_ws(src, after_deco + 5, len);
+                size_t name_end = skip_ident(src, name_start, len);
+                size_t brace = name_end;
+                while (brace < len && src[brace] != '{') brace++;
+                size_t class_end = skip_balanced_char(src, brace, len, '{', '}');
+                if (name_end > name_start && class_end > brace) {
+                    strbuf_append_str_n(out, src + after_deco, class_end - after_deco);
+                    strbuf_append_char(out, '\n');
+                    strbuf_append_str_n(out, src + name_start, name_end - name_start);
+                    strbuf_append_str(out, " = ");
+                    strbuf_append_str_n(out, src + deco_start, deco_end - deco_start);
+                    strbuf_append_char(out, '(');
+                    strbuf_append_str_n(out, src + name_start, name_end - name_start);
+                    strbuf_append_str(out, ") || ");
+                    strbuf_append_str_n(out, src + name_start, name_end - name_start);
+                    strbuf_append_str(out, ";\n");
+                    pos = class_end;
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+
+        strbuf_append_char(out, src[pos++]);
+    }
+
+    if (!changed) {
+        strbuf_free(out);
+        *out_len = len;
+        return NULL;
+    }
+    char* result = (char*)mem_alloc(out->length + 1, MEM_CAT_TEMP);
+    memcpy(result, out->str, out->length + 1);
+    *out_len = out->length;
+    strbuf_free(out);
+    return result;
+}
+
 // ============================================================================
 // Main preprocessing pass
 // ============================================================================
@@ -309,18 +617,27 @@ char* ts_preprocess_source(const char* src, size_t len, size_t* out_len) {
         return NULL;
     }
 
+    size_t ctor_len = len;
+    char* ctor_lowered = lower_constructor_parameter_properties(src, len, &ctor_len);
+    const char* pass_src = ctor_lowered ? ctor_lowered : src;
+
     TsPreprocessor pp;
-    pp.src = src;
-    pp.len = len;
+    pp.src = pass_src;
+    pp.len = ctor_len;
     pp.out = (char*)mem_alloc(len + 1, MEM_CAT_TEMP);
     if (!pp.out) {
         *out_len = 0;
         return NULL;
     }
-    memcpy(pp.out, src, len);
-    pp.out[len] = '\0';
+    if (ctor_len != len) {
+        mem_free(pp.out);
+        pp.out = (char*)mem_alloc(ctor_len + 1, MEM_CAT_TEMP);
+    }
+    memcpy(pp.out, pass_src, ctor_len);
+    pp.out[ctor_len] = '\0';
     pp.pos = 0;
 
+    len = ctor_len;
     while (pp.pos < len) {
         char c = pp.src[pp.pos];
 
@@ -503,9 +820,7 @@ char* ts_preprocess_source(const char* src, size_t len, size_t* out_len) {
             size_t after_params = skip_ws(pp.src, pp.pos, len);
             if (after_params < len && pp.src[after_params] == ':') {
                 blank_type_annotation(&pp, after_params);
-                size_t type_end = skip_ws(pp.src, after_params + 1, len);
-                type_end = skip_type_expr(pp.src, type_end, len);
-                pp.pos = type_end;
+                pp.pos = skip_type_annotation_end(pp.src, after_params, len);
             }
             continue;
         }
@@ -584,7 +899,8 @@ char* ts_preprocess_source(const char* src, size_t len, size_t* out_len) {
                 size_t type_start = skip_ws(pp.src, colon_pos + 1, len);
                 size_t type_end = skip_type_expr(pp.src, type_start, len);
                 size_t after_type = skip_ws(pp.src, type_end, len);
-                if (after_type + 1 < len && pp.src[after_type] == '=' && pp.src[after_type + 1] == '>') {
+                if ((after_type + 1 < len && pp.src[after_type] == '=' && pp.src[after_type + 1] == '>') ||
+                    (after_type < len && pp.src[after_type] == '{')) {
                     blank(&pp, colon_pos, type_end);
                     pp.pos = type_end;
                 }
@@ -692,6 +1008,15 @@ char* ts_preprocess_source(const char* src, size_t len, size_t* out_len) {
 
         pp.pos++;
     }
+
+    size_t lowered_len = len;
+    char* lowered = lower_runtime_ts_constructs(pp.out, len, &lowered_len);
+    if (lowered) {
+        mem_free(pp.out);
+        pp.out = lowered;
+        len = lowered_len;
+    }
+    if (ctor_lowered) mem_free(ctor_lowered);
 
     *out_len = len;
     return pp.out;

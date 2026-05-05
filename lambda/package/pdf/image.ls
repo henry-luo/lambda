@@ -210,12 +210,10 @@ fn _is_raw_xobject(pdf, page, dict, data) {
         let raw_cs = if (dict.ColorSpace != null) { dict.ColorSpace } else { "DeviceRGB" }
         let cs = _resolve_image_space(pdf, page, raw_cs)
         let ncomp = _inline_ncomp(cs)
-        let packed = ((bpc == 1) or (bpc == 4) or _is_indexed(cs))
-        let expected = if (packed) { _row_bytes(w, ncomp, bpc) * h } else { w * h * ncomp }
         let bad_size = ((w <= 0) or (h <= 0))
         let bad_format = (((bpc != 8) and (bpc != 1) and (bpc != 4)) or (ncomp == 0) or (((bpc == 1) or (bpc == 4)) and (ncomp != 1)))
         let too_large = ((w * h) > 4096)
-        not (bad_size or bad_format or too_large or (len(data) < expected))
+        not (bad_size or bad_format or too_large)
     }
 }
 
@@ -316,12 +314,17 @@ fn _is_icc_based(cs) {
     _space_type(cs) == "ICCBased"
 }
 
+fn _icc_n_value(v) {
+    let n = if (v is int) v else if (v is float) int(v) else 3
+    if (n <= 0) { 3 } else { n }
+}
+
 fn _icc_ncomp(cs) {
     if (cs is map and cs.N != null) {
-        if (cs.N is int) cs.N else if (cs.N is float) int(cs.N) else 3
+        _icc_n_value(cs.N)
     }
     else if (cs is array and len(cs) >= 2 and cs[1] is map and cs[1].N != null) {
-        if (cs[1].N is int) cs[1].N else if (cs[1].N is float) int(cs[1].N) else 3
+        _icc_n_value(cs[1].N)
     }
     else { 3 }
 }
@@ -421,6 +424,9 @@ fn _inline_pixel_fill(data, ncomp, bpc, w, pixel_index, cs) {
     if (_is_indexed(cs)) {
         _indexed_pixel_fill(data, bpc, pixel_index, cs)
     }
+    else if (_is_icc_based(cs) and ncomp != 1 and ncomp != 3 and ncomp != 4) {
+        _rgb_int(0, 0, 0)
+    }
     else if (bpc == 1) {
         let y = _div_int(pixel_index, w)
         let x = pixel_index - (y * w)
@@ -450,8 +456,8 @@ pn _emit_inline_pixels(info) {
     var w = 0
     var h = 0
     var bpc = 8
-    var ncomp = 0
-    var cs = null
+    var ncomp = 3
+    var cs = "DeviceRGB"
     if ((info != null) and (info.dict is array)) {
         var di = 0
         let dn = len(info.dict)
@@ -469,13 +475,10 @@ pn _emit_inline_pixels(info) {
     }
     var data = ""
     if ((info != null) and (info.data != null)) { data = info.data }
-    let packed = ((bpc == 1) or (bpc == 4) or _is_indexed(cs))
-    let expected = if (packed) { _row_bytes(w, ncomp, bpc) * h } else { w * h * ncomp }
     let bad_size = ((w <= 0) or (h <= 0))
     let bad_format = (((bpc != 8) and (bpc != 1) and (bpc != 4)) or (ncomp == 0) or (((bpc == 1) or (bpc == 4)) and (ncomp != 1)))
-    let short_data = (len(data) < expected)
     let too_large = ((w * h) > 4096)
-    if (bad_size or bad_format or short_data or too_large) {
+    if (bad_size or bad_format or too_large) {
         return _placeholder_inline()
     }
     else {
