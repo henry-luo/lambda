@@ -34,3 +34,85 @@ true
 true
 "ser apply:"
 true
+"cs1 doc:"
+true
+"cs1 pending:"
+true
+"cs2 doc:"
+true
+"cs2 base:"
+true
+"cs2 pending:"
+true
+"cs2 rebased from:"
+true
+"cs2 version:"
+true
+"cs2 dropped:"
+true
+"cs2 selection:"
+true
+"cs3 pending:"
+true
+"cs3 base:"
+true
+"cs3 doc:"
+true
+"cs3 version:"
+true
+"cs4 pending:"
+true
+"cs4 version:"
+true
+"cs drop doc:"
+true
+"cs drop pending:"
+true
+"cs drop count:"
+true
+"cs drop selection path:"
+true
+"pkt local kind:"
+true
+"pkt local client:"
+true
+"pkt local base:"
+true
+"pkt local steps:"
+true
+"pkt remote doc:"
+true
+"pkt remote pending:"
+true
+"pkt remote version:"
+true
+"pkt ack pending:"
+true
+"pkt ack version:"
+true
+"pkt unknown same:"
+true
+"presence caret count:"
+true
+"presence caret kind:"
+true
+"presence caret class:"
+true
+"presence caret render:"
+true
+"presence range kind:"
+true
+"presence range from:"
+true
+"presence range to:"
+true
+"presence range class:"
+true
+"presence set count:"
+true
+"presence node kind:"
+true
+"presence node path:"
+true
+"presence all path:"
+true

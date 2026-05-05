@@ -18,6 +18,14 @@ true
 true
 "html paste mark:"
 true
+"drop move doc:"
+true
+"drop move selected:"
+true
+"drop insert doc:"
+true
+"drop insert selected:"
+true
 "delete-back intent doc:"
 true
 "delete-back intent caret:"

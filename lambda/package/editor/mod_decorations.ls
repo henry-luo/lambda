@@ -169,3 +169,106 @@ fn find_decorations_in_node(n, path, needle, attrs) {
 
 pub fn find_decorations_in_doc(doc, needle, attrs) =>
   find_decorations_in_node(doc, [], needle, attrs)
+
+// ---------------------------------------------------------------------------
+// Render projection — lower decorations into a derived editor tree.
+// ---------------------------------------------------------------------------
+// This does not mutate the source document. Inline decorations become `span`
+// nodes around text segments, and node decorations merge their attrs onto the
+// rendered node. Templates/Radiant can consume this projected tree as the first
+// visual decoration path before a lower-level overlay/display-list pass exists.
+
+fn merge_attr_value(attrs, name, value) {
+  let prev = attrs_get(attrs, name)
+  if (name == 'class' and prev != null and value != null and len(prev) > 0) {
+    attrs_set(attrs, name, prev ++ " " ++ value)
+  }
+  else { attrs_set(attrs, name, value) }
+}
+
+fn merge_attrs_map(attrs, m) {
+  let pairs = [for (k, v in m) {name: k, value: v}]
+  merge_attrs_list(attrs, pairs, 0, len(pairs))
+}
+
+fn merge_attrs_list(attrs, pairs, i, n) {
+  if (i >= n) { attrs }
+  else { merge_attrs_list(merge_attr_value(attrs, pairs[i].name, pairs[i].value), pairs, i + 1, n) }
+}
+
+fn inline_covers_offset(d, path, offset) =>
+  d.kind == 'inline' and path_equal(d.from.path, path) and path_equal(d.to.path, path) and
+  d.from.offset <= offset and offset < d.to.offset
+
+fn inline_attrs_at(items, path, offset, i, n, acc) {
+  if (i >= n) { acc }
+  else if (inline_covers_offset(items[i], path, offset)) {
+    inline_attrs_at(items, path, offset, i + 1, n, merge_attrs_map(acc, items[i].attrs))
+  }
+  else { inline_attrs_at(items, path, offset, i + 1, n, acc) }
+}
+
+fn active_inline_attrs(set, path, offset) =>
+  inline_attrs_at(set.items, path, offset, 0, len(set.items), [])
+
+fn better_boundary(best, candidate, start) =>
+  if (candidate > start and candidate < best) { candidate } else { best }
+
+fn segment_boundary_at(items, path, start, i, n, best) {
+  if (i >= n) { best }
+  else if (items[i].kind == 'inline' and path_equal(items[i].from.path, path) and path_equal(items[i].to.path, path)) {
+    let best1 = better_boundary(best, items[i].from.offset, start)
+    let best2 = better_boundary(best1, items[i].to.offset, start)
+    segment_boundary_at(items, path, start, i + 1, n, best2)
+  }
+  else { segment_boundary_at(items, path, start, i + 1, n, best) }
+}
+
+fn segment_end(set, path, start, limit) =>
+  segment_boundary_at(set.items, path, start, 0, len(set.items), limit)
+
+fn decorated_text_at(leaf, path, set, start, n, acc) {
+  if (start >= n) { acc }
+  else {
+    let attrs = active_inline_attrs(set, path, start)
+    let end = segment_end(set, path, start, n)
+    let piece = text_marked(slice(leaf.text, start, end), leaf.marks)
+    let child = if (len(attrs) == 0) { piece } else { node_attrs('span', attrs, [piece]) }
+    decorated_text_at(leaf, path, set, end, n, [*acc, child])
+  }
+}
+
+fn node_deco_attrs_at(items, path, i, n, acc) {
+  if (i >= n) { acc }
+  else if (items[i].kind == 'node' and path_equal(items[i].path, path)) {
+    node_deco_attrs_at(items, path, i + 1, n, merge_attrs_map(acc, items[i].attrs))
+  }
+  else { node_deco_attrs_at(items, path, i + 1, n, acc) }
+}
+
+fn decorated_children_at(children, path, set, i, n, acc) {
+  if (i >= n) { acc }
+  else {
+    let child = decorations_project_node(children[i], child_path(path, i), set)
+    let acc2 = if (is_node(child) and child.tag == 'fragment' and len(child.attrs) == 0) {
+      list_concat(acc, child.content)
+    } else { [*acc, child] }
+    decorated_children_at(children, path, set, i + 1, n, acc2)
+  }
+}
+
+fn decorations_project_node(n, path, set) {
+  if (is_text(n)) {
+    let parts = decorated_text_at(n, path, set, 0, len(n.text), [])
+    if (len(parts) == 1) { parts[0] } else { node_attrs('fragment', [], parts) }
+  }
+  else if (is_node(n)) {
+    let deco_attrs = node_deco_attrs_at(set.items, path, 0, len(set.items), [])
+    let attrs = merge_attrs_list(n.attrs, deco_attrs, 0, len(deco_attrs))
+    node_attrs(n.tag, attrs, decorated_children_at(n.content, path, set, 0, len(n.content), []))
+  }
+  else { n }
+}
+
+pub fn decorations_project_doc(doc, set) =>
+  decorations_project_node(doc, [], set)

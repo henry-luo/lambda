@@ -60,3 +60,21 @@ true
 true
 "undo insert:"
 true
+"insert-at order:"
+true
+"insert-at selected:"
+true
+"move later order:"
+true
+"move later selected:"
+true
+"move earlier order:"
+true
+"move earlier selected:"
+true
+"move same-position null:"
+true
+"move root null:"
+true
+"move into descendant null:"
+true

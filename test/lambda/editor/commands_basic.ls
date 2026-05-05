@@ -115,3 +115,34 @@ let tx_chain = chain(s0, [never, always, never])
 let inv = tx_invert(tx_ins)
 let restored = step_apply(inv.steps[0], tx_ins.doc_after)
 "undo insert:"; doc_text(restored) == doc_text(d0)
+
+// ---------------------------------------------------------------------------
+// Structural drag/drop helpers — insert and move source-tree subtrees
+// ---------------------------------------------------------------------------
+let drop_doc = node('doc', [
+  node('paragraph', [text("A")]),
+  node('paragraph', [text("B")]),
+  node('paragraph', [text("C")])
+])
+let drop_state = {doc: drop_doc, selection: node_selection([0])}
+
+let tx_insert_at = cmd_insert_at(drop_state, [], 1, [node('paragraph', [text("X")])])
+"insert-at order:"; [for (n in tx_insert_at.doc_after.content) doc_text(n)] == ["A", "X", "B", "C"]
+"insert-at selected:"; path_equal(tx_insert_at.sel_after.path, [1])
+
+let tx_move_later = cmd_move_node(drop_state, [0], [], 3)
+"move later order:"; [for (n in tx_move_later.doc_after.content) doc_text(n)] == ["B", "C", "A"]
+"move later selected:"; path_equal(tx_move_later.sel_after.path, [2])
+
+let tx_move_earlier = cmd_move_node(drop_state, [2], [], 0)
+"move earlier order:"; [for (n in tx_move_earlier.doc_after.content) doc_text(n)] == ["C", "A", "B"]
+"move earlier selected:"; path_equal(tx_move_earlier.sel_after.path, [0])
+
+"move same-position null:"; cmd_move_node(drop_state, [1], [], 1) == null
+"move root null:"; cmd_move_node(drop_state, [], [], 0) == null
+
+let nested_doc = node('doc', [node('list', [
+  node('list_item', [node('paragraph', [text("child")])])
+])])
+let nested_state = {doc: nested_doc, selection: node_selection([0])}
+"move into descendant null:"; cmd_move_node(nested_state, [0], [0, 0], 0) == null

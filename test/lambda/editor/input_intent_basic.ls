@@ -36,6 +36,21 @@ let html_leaf = node_at(tx_html_paste.doc_after, [0, 1])
 "html paste caret:"; tx_html_paste.sel_after.anchor.offset == 5
 "html paste mark:"; node_at(tx_html_paste.doc_after, [0, 2]).marks[0] == 'strong'
 
+let drop_doc = node('doc', [
+  node('paragraph', [text("A")]),
+  node('paragraph', [text("B")]),
+  node('paragraph', [text("C")])
+])
+let drop_state = {doc: drop_doc, selection: node_selection([0])}
+let tx_drop_move = dispatch_intent(drop_state, {
+  input_type: "insertFromDrop", source_path: [0], target_parent_path: [], target_index: 3})
+"drop move doc:"; [for (n in tx_drop_move.doc_after.content) doc_text(n)] == ["B", "C", "A"]
+"drop move selected:"; path_equal(tx_drop_move.sel_after.path, [2])
+let tx_drop_insert = dispatch_intent(drop_state, {
+  input_type: "insertFromDrop", slice: [node('paragraph', [text("X")])], target_parent_path: [], target_index: 1})
+"drop insert doc:"; [for (n in tx_drop_insert.doc_after.content) doc_text(n)] == ["A", "X", "B", "C"]
+"drop insert selected:"; path_equal(tx_drop_insert.sel_after.path, [1])
+
 let tx_back = dispatch_intent(s0, {input_type: "deleteContentBackward", data: null})
 "delete-back intent doc:"; doc_text(tx_back.doc_after) == "Hell"
 "delete-back intent caret:"; tx_back.sel_after.anchor.offset == 4

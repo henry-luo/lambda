@@ -57,6 +57,8 @@ pub fn dispatch_intent(state, ev) =>
   if (ev.input_type == "insertText") cmd_insert_text(state, ev.data)
   else if (ev.input_type == "insertFromPaste" and ev.mime == "text/html") cmd_paste_html(state, ev.html, ev.data)
   else if (ev.input_type == "insertFromPaste") cmd_paste_text(state, ev.data)
+  else if (ev.input_type == "insertFromDrop" and ev.source_path != null) cmd_move_node(state, ev.source_path, ev.target_parent_path, ev.target_index)
+  else if (ev.input_type == "insertFromDrop" and ev.slice != null) cmd_insert_at(state, ev.target_parent_path, ev.target_index, ev.slice)
   else if (ev.input_type == "compositionStart") dispatch_composition_intent(state, ev)
   else if (ev.input_type == "insertCompositionText") dispatch_composition_intent(state, ev)
   else if (ev.input_type == "insertFromComposition") dispatch_composition_intent(state, ev)
