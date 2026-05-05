@@ -11,7 +11,7 @@
 import pdf: lambda.package.pdf.pdf
 
 pn main() {
-    let doc^err = input("test/pdf/data/basic/simple_test.pdf", 'pdf')
+    let doc^err = input("test/input/simple_test.pdf", 'pdf')
     let svg_el = pdf.pdf_to_svg(doc, 0, { show_label: false })
     let xml = format(svg_el, 'xml')
     print({

@@ -9,7 +9,7 @@
 import pdf: lambda.package.pdf.pdf
 
 pn main() {
-    let doc^err = input("test/pdf/data/basic/test.pdf", 'pdf')
+    let doc^err = input("test/input/test.pdf", 'pdf')
     let svg_el = pdf.pdf_to_svg(doc, 0, null)
     print({
         page_count: pdf.pdf_page_count(doc),
