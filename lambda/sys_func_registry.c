@@ -99,6 +99,24 @@ extern int edit_commit(const char* description);
 extern bool edit_undo(void);
 extern bool edit_redo(void);
 extern Item edit_current(void);
+extern void* edit_session_new(Item root, void* schema);
+extern void* edit_session_new_with_input(void* input_ptr, Item root, void* schema);
+extern void edit_session_destroy(void* session);
+extern bool edit_session_exec(void* session, const char* cmd_name, Item args);
+extern Item edit_session_current(void* session);
+typedef struct RuntimeSourcePath {
+    uint32_t len;
+    uint32_t* indices;
+} RuntimeSourcePath;
+typedef struct RuntimeSourcePos {
+    RuntimeSourcePath path;
+    uint32_t offset;
+} RuntimeSourcePos;
+extern void* edit_session_schema(void* session);
+extern bool edit_session_set_selection(void* session, RuntimeSourcePos anchor, RuntimeSourcePos head);
+extern RuntimeSourcePos edit_session_selection_anchor(void* session);
+extern RuntimeSourcePos edit_session_selection_head(void* session);
+extern void edit_session_subscribe(void* session, int kind, void* callback, void* user_data);
 
 // edit bridge sys func wrappers
 extern Item fn_undo(void);
@@ -2325,6 +2343,16 @@ JitImport jit_runtime_imports[] = {
     {"edit_undo", FPTR(edit_undo)},
     {"edit_redo", FPTR(edit_redo)},
     {"edit_current", FPTR(edit_current)},
+    {"edit_session_new", FPTR(edit_session_new)},
+    {"edit_session_new_with_input", FPTR(edit_session_new_with_input)},
+    {"edit_session_destroy", FPTR(edit_session_destroy)},
+    {"edit_session_exec", FPTR(edit_session_exec)},
+    {"edit_session_current", FPTR(edit_session_current)},
+    {"edit_session_schema", FPTR(edit_session_schema)},
+    {"edit_session_set_selection", FPTR(edit_session_set_selection)},
+    {"edit_session_selection_anchor", FPTR(edit_session_selection_anchor)},
+    {"edit_session_selection_head", FPTR(edit_session_selection_head)},
+    {"edit_session_subscribe", FPTR(edit_session_subscribe)},
 
     // ========================================================================
     // TS runtime

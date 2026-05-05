@@ -44,6 +44,16 @@ true
 true
 "dsel head text:"
 true
+"schema image node sel:"
+true
+"schema image sel path:"
+true
+"schema text remains text:"
+true
+"node selection dom kind:"
+true
+"node selection dom path:"
+true
 "anc len:"
 true
 "anc[0] path:"

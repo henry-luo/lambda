@@ -111,11 +111,21 @@ let tx_outdent = cmd_outdent_list_item(outdent_state)
 // cmd_toggle_mark
 // ---------------------------------------------------------------------------
 let tx_bold = cmd_toggle_mark(s0, 'strong')
-let leaf_after = node_at(tx_bold.doc_after, [0, 0])
+"toggle stored mark:"; has_mark(tx_get_meta(tx_bold, "storedMarks"), 'strong')
+"toggle stored no doc change:"; doc_text(tx_bold.doc_after) == doc_text(d0)
+let tx_bold_off = cmd_toggle_mark({doc: d0, selection: caret0, stored_marks: ['strong']}, 'strong')
+"toggle stored off:"; len(tx_get_meta(tx_bold_off, "storedMarks")) == 0
+let tx_stored_insert = cmd_insert_text({doc: d0, selection: caret0, stored_marks: tx_get_meta(tx_bold, "storedMarks")}, "! ")
+"stored insert children:"; len(node_at(tx_stored_insert.doc_after, [0]).content) == 3
+"stored insert mark:"; has_mark(node_at(tx_stored_insert.doc_after, [0, 1]).marks, 'strong')
+"stored insert text:"; node_at(tx_stored_insert.doc_after, [0, 1]).text == "! "
+
+let tx_range_bold = cmd_toggle_mark(s_sel, 'strong')
+let leaf_after = node_at(tx_range_bold.doc_after, [0, 0])
 "toggle add:";    has_mark(leaf_after.marks, 'strong')
 "toggle preserves text:"; leaf_after.text == "Hello, world."
 // toggling again removes
-let s_marked = {doc: tx_bold.doc_after, selection: caret0}
+let s_marked = {doc: tx_range_bold.doc_after, selection: sel_sel}
 let tx_unbold = cmd_toggle_mark(s_marked, 'strong')
 let leaf_after2 = node_at(tx_unbold.doc_after, [0, 0])
 "toggle remove:"; not has_mark(leaf_after2.marks, 'strong')
@@ -206,3 +216,21 @@ let nested_doc = node('doc', [node('list', [
 ])])
 let nested_state = {doc: nested_doc, selection: node_selection([0])}
 "move into descendant null:"; cmd_move_node(nested_state, [0], [0, 0], 0) == null
+
+// ---------------------------------------------------------------------------
+// Find/replace command — source-tree transaction over all text leaves
+// ---------------------------------------------------------------------------
+let replace_doc = node('doc', [
+  node('paragraph', [text("foo foo")]),
+  node('paragraph', [text("bar foo")])
+])
+let replace_state = {doc: replace_doc, selection: text_selection(pos([0, 0], 4), pos([0, 0], 7))}
+let tx_replace_all = cmd_replace_all(replace_state, "foo", "qux")
+"replace-all text:"; doc_text(tx_replace_all.doc_after) == "qux quxbar qux"
+"replace-all steps:"; len(tx_replace_all.steps) == 2
+"replace-all leaf1:"; node_at(tx_replace_all.doc_after, [0, 0]).text == "qux qux"
+"replace-all leaf2:"; node_at(tx_replace_all.doc_after, [1, 0]).text == "bar qux"
+"replace-all selection mapped:"; tx_replace_all.sel_after.anchor.offset == 7 and tx_replace_all.sel_after.head.offset == 7
+let tx_replace_none = cmd_replace_all(replace_state, "zzz", "qux")
+"replace-all none:"; tx_replace_none == null
+"replace-all empty needle:"; cmd_replace_all(replace_state, "", "x") == null

@@ -55,11 +55,25 @@ pub fn cmd_insert_text(state, txt) {
   else {
     let lo = sel_lo(sel)
     let hi = sel_hi(sel)
-    let step = step_replace_text(lo.path, lo.offset, hi.offset, txt)
-    let tx0  = tx_begin(state.doc, sel)
-    let tx1  = tx_step(tx0, step)
-    let new_caret = caret(pos(lo.path, lo.offset + len(txt)))
-    tx_set_selection(tx1, new_caret)
+    let stored_marks = state.stored_marks
+    let leaf = node_at(state.doc, lo.path)
+    if (stored_marks != null and len(txt) > 0 and leaf != null and is_text(leaf) and len(lo.path) > 0) {
+      let leaf_parent = parent_path(lo.path)
+      let leaf_index = last_index(lo.path)
+      let before = nonempty_text_leaf(slice(leaf.text, 0, lo.offset), leaf.marks)
+      let inserted = text_marked(txt, stored_marks)
+      let after = nonempty_text_leaf(slice(leaf.text, hi.offset, len(leaf.text)), leaf.marks)
+      let slice_nodes = list_concat(list_concat(before, [inserted]), after)
+      let tx0 = tx_begin(state.doc, sel)
+      let tx1 = tx_step(tx0, step_replace(leaf_parent, leaf_index, leaf_index + 1, slice_nodes))
+      tx_set_selection(tx1, caret(pos([*leaf_parent, leaf_index + len(before)], len(txt))))
+    } else {
+      let step = step_replace_text(lo.path, lo.offset, hi.offset, txt)
+      let tx0  = tx_begin(state.doc, sel)
+      let tx1  = tx_step(tx0, step)
+      let new_caret = caret(pos(lo.path, lo.offset + len(txt)))
+      tx_set_selection(tx1, new_caret)
+    }
   }
 }
 
@@ -412,19 +426,40 @@ pub fn cmd_outdent_list_item(state) {
 }
 
 // ---------------------------------------------------------------------------
-// cmd_toggle_mark — add or remove a mark across the (single-leaf) selection
+// cmd_toggle_mark — add/remove a mark or toggle a stored mark at a caret
 // ---------------------------------------------------------------------------
 //
-// If the addressed leaf already has the mark, the command removes it; otherwise
-// it adds it. Selection is preserved.
+// If the text selection is collapsed, update stored marks so the next inserted
+// text carries the mark without rewriting existing content. Otherwise, if the
+// addressed leaf already has the mark, remove it; if not, add it. Selection is
+// preserved.
 //
 // (Multi-leaf selections will gain a true range-based add/remove pair once
 // SourcePos resolution across leaves is wired through; this scaffolding holds.)
+
+fn state_marks_at(state, path) {
+  if (state.stored_marks != null) { state.stored_marks }
+  else {
+    let leaf = node_at(state.doc, path)
+    if (leaf == null or not is_text(leaf)) { [] } else { leaf.marks }
+  }
+}
+
+pub fn cmd_toggle_stored_mark(state, mark) {
+  let sel = state.selection
+  if (sel == null or not sel_collapsed(sel)) { null }
+  else {
+    let base = state_marks_at(state, sel.anchor.path)
+    let next = if (has_mark(base, mark)) { without_mark(base, mark) } else { with_mark(base, mark) }
+    tx_set_meta(tx_set_meta(tx_begin(state.doc, sel), "storedMarks", next), "addToHistory", false)
+  }
+}
 
 pub fn cmd_toggle_mark(state, mark) {
   let sel = state.selection
   if (sel == null) { null }
   else if (not sel_single_leaf(sel)) { null }
+  else if (sel_collapsed(sel)) { cmd_toggle_stored_mark(state, mark) }
   else {
     let leaf = node_at(state.doc, sel.anchor.path)
     if (leaf == null or not is_text(leaf)) { null }
@@ -437,6 +472,62 @@ pub fn cmd_toggle_mark(state, mark) {
       let tx0 = tx_begin(state.doc, sel)
       tx_step(tx0, step)
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// cmd_replace_all — find/replace as source-tree transactions
+// ---------------------------------------------------------------------------
+//
+// Replaces every non-overlapping occurrence of `needle` in text leaves with
+// `replacement`. Each changed leaf becomes one replace_text step, keeping the
+// edit invertible and mappable through the normal transaction machinery.
+
+fn replace_all_text_at(txt, needle, replacement, i, n, acc) {
+  if (len(needle) == 0) { txt }
+  else if (i > n - len(needle)) { acc ++ slice(txt, i, n) }
+  else {
+    let chunk = slice(txt, i, i + len(needle))
+    if (chunk == needle) {
+      replace_all_text_at(txt, needle, replacement, i + len(needle), n, acc ++ replacement)
+    } else {
+      replace_all_text_at(txt, needle, replacement, i + 1, n, acc ++ slice(txt, i, i + 1))
+    }
+  }
+}
+
+fn replace_all_text(txt, needle, replacement) =>
+  replace_all_text_at(txt, needle, replacement, 0, len(txt), "")
+
+fn collect_replace_steps_children(children, path, needle, replacement, i, n, acc) {
+  if (i >= n) { acc }
+  else {
+    let child_steps = collect_replace_steps(children[i], [*path, i], needle, replacement, acc)
+    collect_replace_steps_children(children, path, needle, replacement, i + 1, n, child_steps)
+  }
+}
+
+fn collect_replace_steps(n, path, needle, replacement, acc) {
+  if (is_text(n)) {
+    let next = replace_all_text(n.text, needle, replacement)
+    if (next == n.text) { acc }
+    else { [*acc, step_replace_text(path, 0, len(n.text), next)] }
+  }
+  else if (is_node(n)) { collect_replace_steps_children(n.content, path, needle, replacement, 0, len(n.content), acc) }
+  else { acc }
+}
+
+fn tx_apply_steps(tx, steps, i, n) {
+  if (i >= n) { tx }
+  else { tx_apply_steps(tx_step(tx, steps[i]), steps, i + 1, n) }
+}
+
+pub fn cmd_replace_all(state, needle, replacement) {
+  if (needle == null or len(needle) == 0) { null }
+  else {
+    let steps = collect_replace_steps(state.doc, [], needle, replacement, [])
+    if (len(steps) == 0) { null }
+    else { tx_apply_steps(tx_begin(state.doc, state.selection), steps, 0, len(steps)) }
   }
 }
 

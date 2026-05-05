@@ -17,6 +17,203 @@ extern "C" Context* _lambda_rt;
 static MarkEditor* s_editor = NULL;
 static Input* s_editor_input = NULL;  // owned Input when created from runtime pool
 
+typedef struct EditSubscription {
+    EditEventKind kind;
+    EditCallback callback;
+    void* user_data;
+    struct EditSubscription* next;
+} EditSubscription;
+
+struct EditSession {
+    Input* input;
+    MarkEditor* editor;
+    EditSchema* schema;
+    uint32_t anchor_indices[EDIT_SOURCE_PATH_MAX];
+    uint32_t head_indices[EDIT_SOURCE_PATH_MAX];
+    SourcePos anchor;
+    SourcePos head;
+    EditSubscription* subscriptions;
+};
+
+static void edit_session_init_pos(EditSession* session) {
+    session->anchor_indices[0] = 0;
+    session->head_indices[0] = 0;
+    session->anchor.path.len = 0;
+    session->anchor.path.indices = session->anchor_indices;
+    session->anchor.offset = 0;
+    session->head.path.len = 0;
+    session->head.path.indices = session->head_indices;
+    session->head.offset = 0;
+}
+
+static bool edit_session_copy_pos(SourcePos* dst, uint32_t* dst_indices, SourcePos src) {
+    if (src.path.len > EDIT_SOURCE_PATH_MAX) {
+        log_error("edit_session_copy_pos: source path too deep: %u", src.path.len);
+        return false;
+    }
+    dst->path.len = src.path.len;
+    dst->path.indices = dst_indices;
+    dst->offset = src.offset;
+    for (uint32_t i = 0; i < src.path.len; i++) {
+        dst_indices[i] = src.path.indices[i];
+    }
+    return true;
+}
+
+static void edit_session_notify(EditSession* session, EditEventKind kind, Item payload) {
+    EditSubscription* sub = session->subscriptions;
+    while (sub) {
+        if (sub->kind == kind && sub->callback) {
+            sub->callback(session, kind, payload, sub->user_data);
+        }
+        sub = sub->next;
+    }
+}
+
+static Input* edit_session_create_input(Item root) {
+    if (!_lambda_rt || !_lambda_rt->pool) {
+        log_error("edit_session_new: no runtime pool available");
+        return NULL;
+    }
+    Input* input = Input::create(_lambda_rt->pool);
+    if (!input) {
+        log_error("edit_session_new: failed to create Input from runtime pool");
+        return NULL;
+    }
+    if (_lambda_rt->ui_mode) {
+        input->ui_mode = true;
+    }
+    input->root = root;
+    return input;
+}
+
+// ============================================================================
+// Edit session API
+// ============================================================================
+
+EditSession* edit_session_new(Item root, EditSchema* schema) {
+    Input* input = edit_session_create_input(root);
+    if (!input) { return NULL; }
+    return edit_session_new_with_input(input, root, schema);
+}
+
+EditSession* edit_session_new_with_input(void* input_ptr, Item root, EditSchema* schema) {
+    Input* input = (Input*)input_ptr;
+    if (!input) {
+        log_error("edit_session_new_with_input: input is null");
+        return NULL;
+    }
+    input->root = root;
+    EditSession* session = new EditSession;
+    if (!session) {
+        log_error("edit_session_new_with_input: failed to allocate session");
+        return NULL;
+    }
+    memset(session, 0, sizeof(EditSession));
+    session->input = input;
+    session->schema = schema;
+    session->editor = new MarkEditor(input, EDIT_MODE_IMMUTABLE);
+    if (!session->editor) {
+        log_error("edit_session_new_with_input: failed to allocate MarkEditor");
+        delete session;
+        return NULL;
+    }
+    edit_session_init_pos(session);
+    log_debug("edit_session_new_with_input: rich-text session created");
+    return session;
+}
+
+void edit_session_destroy(EditSession* session) {
+    if (!session) { return; }
+    if (session->editor) {
+        delete session->editor;
+        session->editor = NULL;
+    }
+    delete session;
+    log_debug("edit_session_destroy: rich-text session destroyed");
+}
+
+bool edit_session_exec(EditSession* session, const char* cmd_name, Item args) {
+    if (!session || !session->editor || !cmd_name) {
+        log_error("edit_session_exec: invalid session or command");
+        return false;
+    }
+    if (strcmp(cmd_name, "commit") == 0) {
+        bool ok = session->editor->commit(NULL) >= 0;
+        if (ok) { edit_session_notify(session, EDIT_EVENT_CHANGE, session->editor->current()); }
+        return ok;
+    }
+    if (strcmp(cmd_name, "undo") == 0 || strcmp(cmd_name, "historyUndo") == 0) {
+        bool ok = session->editor->undo();
+        if (ok) { edit_session_notify(session, EDIT_EVENT_CHANGE, session->editor->current()); }
+        return ok;
+    }
+    if (strcmp(cmd_name, "redo") == 0 || strcmp(cmd_name, "historyRedo") == 0) {
+        bool ok = session->editor->redo();
+        if (ok) { edit_session_notify(session, EDIT_EVENT_CHANGE, session->editor->current()); }
+        return ok;
+    }
+    if (strcmp(cmd_name, "set_root") == 0 || strcmp(cmd_name, "set_doc") == 0 || strcmp(cmd_name, "replace_root") == 0) {
+        session->input->root = args;
+        edit_session_notify(session, EDIT_EVENT_CHANGE, args);
+        return true;
+    }
+    log_error("edit_session_exec: unknown command '%s'", cmd_name);
+    return false;
+}
+
+Item edit_session_current(EditSession* session) {
+    if (!session || !session->editor) {
+        log_error("edit_session_current: invalid session");
+        return ItemNull;
+    }
+    return session->editor->current();
+}
+
+EditSchema* edit_session_schema(EditSession* session) {
+    if (!session) { return NULL; }
+    return session->schema;
+}
+
+bool edit_session_set_selection(EditSession* session, SourcePos anchor, SourcePos head) {
+    if (!session) {
+        log_error("edit_session_set_selection: invalid session");
+        return false;
+    }
+    if (!edit_session_copy_pos(&session->anchor, session->anchor_indices, anchor)) { return false; }
+    if (!edit_session_copy_pos(&session->head, session->head_indices, head)) { return false; }
+    edit_session_notify(session, EDIT_EVENT_SELECTION, ItemNull);
+    return true;
+}
+
+SourcePos edit_session_selection_anchor(EditSession* session) {
+    SourcePos empty;
+    memset(&empty, 0, sizeof(SourcePos));
+    if (!session) { return empty; }
+    return session->anchor;
+}
+
+SourcePos edit_session_selection_head(EditSession* session) {
+    SourcePos empty;
+    memset(&empty, 0, sizeof(SourcePos));
+    if (!session) { return empty; }
+    return session->head;
+}
+
+void edit_session_subscribe(EditSession* session, EditEventKind kind, EditCallback callback, void* user_data) {
+    if (!session || !callback) { return; }
+    EditSubscription* sub = (EditSubscription*)pool_calloc(session->input->pool, sizeof(EditSubscription));
+    if (!sub) {
+        log_error("edit_session_subscribe: failed to allocate subscription");
+        return;
+    }
+    sub->kind = kind;
+    sub->callback = callback;
+    sub->user_data = user_data;
+    sub->next = session->subscriptions;
+    session->subscriptions = sub;
+}
+
 // ============================================================================
 // Lifecycle
 // ============================================================================

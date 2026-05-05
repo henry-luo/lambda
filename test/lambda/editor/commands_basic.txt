@@ -72,6 +72,18 @@ true
 true
 "indent first null:"
 true
+"toggle stored mark:"
+true
+"toggle stored no doc change:"
+true
+"toggle stored off:"
+true
+"stored insert children:"
+true
+"stored insert mark:"
+true
+"stored insert text:"
+true
 "toggle add:"
 true
 "toggle preserves text:"
@@ -131,4 +143,18 @@ true
 "move root null:"
 true
 "move into descendant null:"
+true
+"replace-all text:"
+true
+"replace-all steps:"
+true
+"replace-all leaf1:"
+true
+"replace-all leaf2:"
+true
+"replace-all selection mapped:"
+true
+"replace-all none:"
+true
+"replace-all empty needle:"
 true
