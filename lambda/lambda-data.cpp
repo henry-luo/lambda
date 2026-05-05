@@ -847,13 +847,13 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 break;
             }
             case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
-            case LMD_TYPE_RANGE:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
-                // item.container on ITEM_NULL gives bogus (Container*)0x0100000000000000
-                // instead of NULL — must check value type to store raw NULL for null items
-                if (get_type_id(item) == LMD_TYPE_NULL) {
-                    *(Container**)field_ptr = nullptr;
-                } else {
+            case LMD_TYPE_RANGE:  case LMD_TYPE_MAP:  case LMD_TYPE_VMAP:
+            case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
+                TypeId item_type = get_type_id(item);
+                if (item_type >= LMD_TYPE_RANGE && item_type <= LMD_TYPE_OBJECT) {
                     *(Container**)field_ptr = item.container;
+                } else {
+                    *(Container**)field_ptr = nullptr;
                 }
                 break;
             }
@@ -908,7 +908,8 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                     break;
                 }
                 case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
-                case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
+                case LMD_TYPE_MAP:  case LMD_TYPE_VMAP:
+                case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
                     Container *container = item.container;
                     titem.container = container;
                     break;
@@ -923,6 +924,11 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 }
                 case LMD_TYPE_PATH:
                     titem.path = item.path;
+                    break;
+                case LMD_TYPE_ERROR:
+                case LMD_TYPE_UNDEFINED:
+                    // store sentinel — the type_id alone is enough to round-trip
+                    // through typeditem_to_item. No payload to copy.
                     break;
                 default:
                     log_error("unknown type %s in set_fields", get_type_name(type_id));
@@ -988,7 +994,8 @@ Item typeditem_to_item(TypedItem *titem) {
         memcpy(&ptr_val, ((char*)titem) + 1, sizeof(void*));
         return {.item = x2it((String*)ptr_val)};
     case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
-    case LMD_TYPE_RANGE:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT:
+    case LMD_TYPE_RANGE:  case LMD_TYPE_MAP:  case LMD_TYPE_VMAP:
+    case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT:
         memcpy(&item_val, ((char*)titem) + 1, sizeof(uint64_t));
         if (item_val) {
             Container* container = (Container*)item_val;
@@ -997,6 +1004,12 @@ Item typeditem_to_item(TypedItem *titem) {
             }
         }
         return {.item = item_val};
+    case LMD_TYPE_ERROR:
+        // a typed slot may legitimately hold a stored error value; surface it
+        // as an Error Item rather than logging an "unknown type" warning.
+        return {.item = ITEM_ERROR};
+    case LMD_TYPE_UNDEFINED:
+        return {.item = ITEM_JS_UNDEFINED};
     default:
         log_error("map_get ANY type is UNKNOWN: %d", titem->type_id);
         return ItemError;

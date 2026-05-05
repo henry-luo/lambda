@@ -94,10 +94,12 @@ pn read_name(s: string, i: int) {
 pn read_lit_string(s: string, i: int) {
     var j = i + 1
     var depth = 1
-    var out = ""
+    var part_start = j
+    var parts = []
     while (j < len(s) and depth > 0) {
         let c = s[j]
         if (c == "\\") {
+            if (j > part_start) { parts = parts ++ [slice(s, part_start, j)] }
             j = j + 1
             if (j >= len(s)) { break }
             let esc = s[j]
@@ -110,24 +112,27 @@ pn read_lit_string(s: string, i: int) {
             else if (esc == "(")   { trans = "(" }
             else if (esc == ")")   { trans = ")" }
             else if (esc == "\\")  { trans = "\\" }
-            out = out ++ trans
+            parts = parts ++ [trans]
             j = j + 1
+            part_start = j
         }
         else if (c == "(") {
             depth = depth + 1
-            out = out ++ c
             j = j + 1
         }
         else if (c == ")") {
             depth = depth - 1
-            if (depth > 0) { out = out ++ c }
+            if (depth == 0) {
+                if (j > part_start) { parts = parts ++ [slice(s, part_start, j)] }
+            }
             j = j + 1
         }
         else {
-            out = out ++ c
             j = j + 1
         }
     }
+    if (depth > 0 and j > part_start) { parts = parts ++ [slice(s, part_start, j)] }
+    let out = parts | join("")
     return { value: { kind: "string", value: out }, end: j }
 }
 

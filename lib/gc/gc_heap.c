@@ -16,6 +16,68 @@
 // Initial mark stack capacity (grows if needed)
 #define GC_MARK_STACK_INITIAL 4096
 
+static void* gc_header_user_ptr(gc_header_t* header) {
+    return header ? (void*)(header + 1) : NULL;
+}
+
+static int gc_large_object_find(gc_heap_t* gc, void* ptr) {
+    if (!gc || !ptr || gc->large_object_count <= 0) return -1;
+    uintptr_t target = (uintptr_t)ptr;
+    int lo = 0, hi = gc->large_object_count;
+    while (lo < hi) {
+        int mid = lo + (hi - lo) / 2;
+        uintptr_t mid_ptr = (uintptr_t)gc_header_user_ptr(gc->large_objects[mid]);
+        if (mid_ptr < target) lo = mid + 1;
+        else hi = mid;
+    }
+    if (lo < gc->large_object_count && gc_header_user_ptr(gc->large_objects[lo]) == ptr) {
+        return lo;
+    }
+    return -1;
+}
+
+static int gc_large_object_add(gc_heap_t* gc, gc_header_t* header) {
+    if (!gc || !header) return 0;
+    void* ptr = gc_header_user_ptr(header);
+    if (gc_large_object_find(gc, ptr) >= 0) return 1;
+    if (gc->large_object_count >= gc->large_object_capacity) {
+        int new_cap = gc->large_object_capacity ? gc->large_object_capacity * 2 : 256;
+        gc_header_t** new_objects = (gc_header_t**)realloc(gc->large_objects,
+            (size_t)new_cap * sizeof(gc_header_t*));
+        if (!new_objects) {
+            log_error("gc_large_object_add: realloc failed for %d objects", new_cap);
+            return 0;
+        }
+        gc->large_objects = new_objects;
+        gc->large_object_capacity = new_cap;
+    }
+
+    uintptr_t target = (uintptr_t)ptr;
+    int pos = 0;
+    while (pos < gc->large_object_count &&
+           (uintptr_t)gc_header_user_ptr(gc->large_objects[pos]) < target) {
+        pos++;
+    }
+    if (pos < gc->large_object_count) {
+        memmove(&gc->large_objects[pos + 1], &gc->large_objects[pos],
+            (size_t)(gc->large_object_count - pos) * sizeof(gc_header_t*));
+    }
+    gc->large_objects[pos] = header;
+    gc->large_object_count++;
+    return 1;
+}
+
+static void gc_large_object_remove(gc_heap_t* gc, gc_header_t* header) {
+    if (!gc || !header || gc->large_object_count <= 0) return;
+    int idx = gc_large_object_find(gc, gc_header_user_ptr(header));
+    if (idx < 0) return;
+    if (idx < gc->large_object_count - 1) {
+        memmove(&gc->large_objects[idx], &gc->large_objects[idx + 1],
+            (size_t)(gc->large_object_count - idx - 1) * sizeof(gc_header_t*));
+    }
+    gc->large_object_count--;
+}
+
 // ============================================================================
 // Bump-Pointer Block Management
 // ============================================================================
@@ -187,7 +249,12 @@ gc_heap_t* gc_heap_create_with_pool(Pool* pool) {
 
     // initialize root slot registry
     gc->root_slot_count = 0;
-    memset(gc->root_slots, 0, sizeof(gc->root_slots));
+    gc->root_slot_capacity = GC_ROOT_SLOTS_INITIAL;
+    gc->root_slots = (uint64_t**)calloc((size_t)gc->root_slot_capacity, sizeof(uint64_t*));
+    if (!gc->root_slots) {
+        log_error("gc_heap_create: failed to allocate root slots");
+        gc->root_slot_capacity = 0;
+    }
 
     // initialize root range registry (for JS closure env arrays)
     gc->root_ranges = NULL;
@@ -233,6 +300,17 @@ void gc_heap_destroy(gc_heap_t* gc) {
     if (gc->root_ranges) {
         free(gc->root_ranges);
         gc->root_ranges = NULL;
+    }
+
+    // free root slot table (C heap allocated)
+    if (gc->root_slots) {
+        free(gc->root_slots);
+        gc->root_slots = NULL;
+    }
+
+    if (gc->large_objects) {
+        free(gc->large_objects);
+        gc->large_objects = NULL;
     }
 
     // free bump block metadata (block memory is pool-allocated)
@@ -304,6 +382,11 @@ void* gc_heap_alloc(gc_heap_t* gc, size_t size, uint16_t type_tag) {
 
     // link to all_objects list
     gc->all_objects = header;
+    if (!gc_large_object_add(gc, header)) {
+        gc->all_objects = header->next;
+        free(header);
+        return NULL;
+    }
     gc->total_allocated += total;
     gc->object_count++;
 
@@ -452,13 +535,22 @@ int gc_is_nursery_data(gc_heap_t* gc, void* ptr) {
 
 void gc_register_root(gc_heap_t* gc, uint64_t* slot) {
     if (!gc || !slot) return;
-    if (gc->root_slot_count >= GC_MAX_ROOT_SLOTS) {
-        log_error("gc_register_root: root slot table full (%d slots)", GC_MAX_ROOT_SLOTS);
-        return;
-    }
     // check for duplicate
     for (int i = 0; i < gc->root_slot_count; i++) {
         if (gc->root_slots[i] == slot) return;
+    }
+    if (gc->root_slot_count >= gc->root_slot_capacity) {
+        int new_cap = gc->root_slot_capacity ? gc->root_slot_capacity * 2 : GC_ROOT_SLOTS_INITIAL;
+        uint64_t** new_slots = (uint64_t**)realloc(gc->root_slots,
+            (size_t)new_cap * sizeof(uint64_t*));
+        if (!new_slots) {
+            log_error("gc_register_root: realloc failed for %d slots", new_cap);
+            return;
+        }
+        memset(new_slots + gc->root_slot_capacity, 0,
+            (size_t)(new_cap - gc->root_slot_capacity) * sizeof(uint64_t*));
+        gc->root_slots = new_slots;
+        gc->root_slot_capacity = new_cap;
     }
     gc->root_slots[gc->root_slot_count++] = slot;
     log_debug("gc_register_root: registered slot %p (total: %d)", (void*)slot, gc->root_slot_count);
@@ -481,6 +573,12 @@ void gc_unregister_root(gc_heap_t* gc, uint64_t* slot) {
 
 void gc_register_root_range(gc_heap_t* gc, uint64_t* base, int count) {
     if (!gc || !base || count <= 0) return;
+    for (int i = 0; i < gc->root_range_count; i++) {
+        if (gc->root_ranges[i].base == base) {
+            gc->root_ranges[i].count = count;
+            return;
+        }
+    }
     if (gc->root_range_count >= gc->root_range_capacity) {
         int new_cap = gc->root_range_capacity ? gc->root_range_capacity * 2 : 256;
         gc_root_range_t* new_arr = (gc_root_range_t*)realloc(gc->root_ranges,
@@ -495,6 +593,19 @@ void gc_register_root_range(gc_heap_t* gc, uint64_t* base, int count) {
     gc->root_ranges[gc->root_range_count].base = base;
     gc->root_ranges[gc->root_range_count].count = count;
     gc->root_range_count++;
+}
+
+void gc_unregister_root_range(gc_heap_t* gc, uint64_t* base) {
+    if (!gc || !base) return;
+    for (int i = 0; i < gc->root_range_count; i++) {
+        if (gc->root_ranges[i].base == base) {
+            for (int j = i; j < gc->root_range_count - 1; j++) {
+                gc->root_ranges[j] = gc->root_ranges[j + 1];
+            }
+            gc->root_range_count--;
+            return;
+        }
+    }
 }
 
 // ============================================================================
@@ -581,8 +692,38 @@ static void* item_to_ptr(uint64_t item) {
 }
 
 // check if a pointer is to a GC-managed OBJECT (has GCHeader)
+static int gc_bump_block_owns(gc_heap_t* gc, void* ptr) {
+    if (!gc || !ptr) return 0;
+    uint8_t* p = (uint8_t*)ptr;
+    gc_bump_block_t* block = gc->bump_blocks;
+    while (block) {
+        if (p >= block->base && p < block->base + block->size) return 1;
+        block = block->next;
+    }
+    return 0;
+}
+
 static int is_gc_object(gc_heap_t* gc, void* ptr) {
-    return gc_object_zone_owns(gc->object_zone, ptr);
+    if (!gc || !ptr) return 0;
+    if (gc_object_zone_owns(gc->object_zone, ptr)) return 1;
+    if (gc_large_object_find(gc, ptr) >= 0) return 1;
+
+    uint8_t* p = (uint8_t*)ptr;
+    gc_bump_block_t* block = gc->bump_blocks;
+    while (block) {
+        uint8_t* base = block->base;
+        uint8_t* end = block->base + block->size;
+        if (p >= base + sizeof(gc_header_t) && p < end) {
+            gc_header_t* header = ((gc_header_t*)ptr) - 1;
+            if ((uint8_t*)header >= base && (uint8_t*)header + sizeof(gc_header_t) <= end &&
+                header->type_tag > 0 && header->alloc_size > 0 &&
+                header->alloc_size <= block->size) {
+                return 1;
+            }
+        }
+        block = block->next;
+    }
+    return 0;
 }
 
 void gc_mark_item(gc_heap_t* gc, uint64_t item) {
@@ -599,6 +740,27 @@ void gc_mark_item(gc_heap_t* gc, uint64_t item) {
 
     header->marked = 1;
     mark_stack_push(gc, header);
+}
+
+static void gc_mark_possible_item(gc_heap_t* gc, uint64_t value) {
+    void* ptr = item_to_ptr(value);
+    if (!ptr || !is_gc_object(gc, ptr)) return;
+
+    gc_header_t* header = gc_get_header(ptr);
+    if (!header) return;
+    if (header->marked) return;
+    if (header->gc_flags & GC_FLAG_FREED) return;
+
+    header->marked = 1;
+    mark_stack_push(gc, header);
+}
+
+static void gc_trace_data_words(gc_heap_t* gc, void* data_ptr, int64_t byte_size) {
+    if (!data_ptr || byte_size < (int64_t)sizeof(uint64_t)) return;
+    for (int64_t offset = 0; offset + (int64_t)sizeof(uint64_t) <= byte_size; offset += (int64_t)sizeof(void*)) {
+        uint64_t value = *(uint64_t*)((uint8_t*)data_ptr + offset);
+        gc_mark_possible_item(gc, value);
+    }
 }
 
 // trace outgoing Item pointers from a type-aware object
@@ -733,6 +895,7 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
             field_idx++;
             shape = (uint8_t*)next_shape;
         }
+        gc_trace_data_words(gc, data_ptr, byte_size);
         break;
     }
 
@@ -810,6 +973,7 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
                 }
                 shape = (uint8_t*)next_shape;
             }
+            gc_trace_data_words(gc, data_ptr, byte_size);
         }
         break;
     }
@@ -1056,9 +1220,12 @@ static void gc_sweep(gc_heap_t* gc) {
             if (prev) prev->next = next_obj;
             else gc->all_objects = next_obj;
             // return to object zone free list for reuse
-            if (gc_object_zone_owns(gc->object_zone, (void*)(current + 1))) {
+            if (gc_bump_block_owns(gc, (void*)(current + 1))) {
+                // bump-block objects are reclaimed only by unlinking; block memory is pool-owned
+            } else if (gc_object_zone_owns(gc->object_zone, (void*)(current + 1))) {
                 gc_object_zone_free(gc->object_zone, current);
             } else if (current->gc_flags & GC_FLAG_LARGE) {
+                gc_large_object_remove(gc, current);
                 free(current);
             }
             current = next_obj;
@@ -1081,10 +1248,13 @@ static void gc_sweep(gc_heap_t* gc) {
             freed_count++;
 
             // return to object zone free list
-            if (gc_object_zone_owns(gc->object_zone, (void*)(current + 1))) {
+            if (gc_bump_block_owns(gc, (void*)(current + 1))) {
+                // bump-block objects are reclaimed only by unlinking; block memory is pool-owned
+            } else if (gc_object_zone_owns(gc->object_zone, (void*)(current + 1))) {
                 gc_object_zone_free(gc->object_zone, current);
             } else if (current->gc_flags & GC_FLAG_LARGE) {
                 // large objects allocated with malloc — free directly
+                gc_large_object_remove(gc, current);
                 free(current);
             }
             // pool-allocated objects (bump blocks): freed in bulk on pool_destroy

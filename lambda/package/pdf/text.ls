@@ -82,29 +82,37 @@ pub fn new_state(fonts) {
     }
 }
 
+fn _valid_state(st) {
+    st is map and st.tm != null and st.tlm != null and st.font_size != null
+}
+
+fn _base_state(st) {
+    if (_valid_state(st)) { st } else { new_state(null) }
+}
+
 // Public: update the text fill color. Called from interp on rg/g/k
 // (PDF non-stroking color ops apply to text rendering as well as
 // painting). Uses map spread to avoid touching every `_with` callsite.
 pub fn set_fill(st, color_str) {
-    { *: st, fill: color_str }
+    { *: _base_state(st), fill: color_str }
 }
 
 // Public: update the text stroke color. Called from interp on RG/G/K
 // so that text drawn under render-mode 1/2 picks up the active stroke.
 pub fn set_stroke(st, color_str) {
-    { *: st, stroke: color_str }
+    { *: _base_state(st), stroke: color_str }
 }
 
 // Public: Tc — character spacing in unscaled text-space units.
-pub fn set_char_space(st, v) { { *: st, char_space: v } }
+pub fn set_char_space(st, v) { { *: _base_state(st), char_space: v } }
 // Public: Tw — word spacing in unscaled text-space units.
-pub fn set_word_space(st, v) { { *: st, word_space: v } }
+pub fn set_word_space(st, v) { { *: _base_state(st), word_space: v } }
 // Public: Tz — horizontal scaling, expressed as a percentage (100 = 100%).
-pub fn set_hor_scale(st, v)  { { *: st, hor_scale: v } }
+pub fn set_hor_scale(st, v)  { { *: _base_state(st), hor_scale: v } }
 // Public: Ts — text rise in unscaled text-space units (pos = up in PDF).
-pub fn set_rise(st, v)       { { *: st, rise: v } }
+pub fn set_rise(st, v)       { { *: _base_state(st), rise: v } }
 // Public: Tr — text-rendering mode (0–7 per PDF 9.3.6).
-pub fn set_render_mode(st, n) { { *: st, render_mode: n } }
+pub fn set_render_mode(st, n) { { *: _base_state(st), render_mode: n } }
 
 fn _with(st, tm, tlm, name, size, info, leading, in_text) {
     {
@@ -138,7 +146,11 @@ fn _lookup_font(fonts, name) {
     if (fonts == null) { null }
     else {
         let v = fonts[name]
-        if (v is map) { v } else { null }
+        if (v is map) { v }
+        else {
+            let hits = (for (p in fonts where p.name == name) p.info)
+            if (len(hits) >= 1) { hits[0] } else { null }
+        }
     }
 }
 
@@ -150,7 +162,8 @@ fn _set_font(st, name, size) {
 // Public: set font with a pre-resolved info record (caller resolves
 // via font.resolve_font). Lets interp.ls own all font resolution.
 pub fn set_font_info(st, name, size, info) {
-    _with(st, st.tm, st.tlm, name, size, info, st.leading, st.in_text)
+    let base = _base_state(st)
+    _with(base, base.tm, base.tlm, name, size, info, base.leading, base.in_text)
 }
 
 fn _set_leading(st, l) {
@@ -393,24 +406,25 @@ fn _op_dquote(st, ctm, ops, page_h) {
 // ============================================================
 
 pub fn apply_op(st, ctm, opr, ops, page_h) {
-    if      (opr == "BT") { _op_BT(st) }
-    else if (opr == "ET") { _op_ET(st) }
-    else if (opr == "Tf") { _op_Tf(st, ops) }
-    else if (opr == "Tm") { _op_Tm(st, ops) }
-    else if (opr == "Td") { _op_Td(st, ops) }
-    else if (opr == "TD") { _op_TD(st, ops) }
-    else if (opr == "T*") { _op_Tstar(st) }
-    else if (opr == "TL") { _op_TL(st, ops) }
-    else if (opr == "Tc") { _op_Tc(st, ops) }
-    else if (opr == "Tw") { _op_Tw(st, ops) }
-    else if (opr == "Tz") { _op_Tz(st, ops) }
-    else if (opr == "Ts") { _op_Ts(st, ops) }
-    else if (opr == "Tr") { _op_Tr(st, ops) }
-    else if (opr == "Tj") { _op_Tj(st, ctm, ops, page_h) }
-    else if (opr == "TJ") { _op_TJ(st, ctm, ops, page_h) }
-    else if (opr == "'")  { _op_quote(st, ctm, ops, page_h) }
-    else if (opr == "\"") { _op_dquote(st, ctm, ops, page_h) }
-    else                  { { state: st, emit: null } }
+    let base = _base_state(st)
+    if      (opr == "BT") { _op_BT(base) }
+    else if (opr == "ET") { _op_ET(base) }
+    else if (opr == "Tf") { _op_Tf(base, ops) }
+    else if (opr == "Tm") { _op_Tm(base, ops) }
+    else if (opr == "Td") { _op_Td(base, ops) }
+    else if (opr == "TD") { _op_TD(base, ops) }
+    else if (opr == "T*") { _op_Tstar(base) }
+    else if (opr == "TL") { _op_TL(base, ops) }
+    else if (opr == "Tc") { _op_Tc(base, ops) }
+    else if (opr == "Tw") { _op_Tw(base, ops) }
+    else if (opr == "Tz") { _op_Tz(base, ops) }
+    else if (opr == "Ts") { _op_Ts(base, ops) }
+    else if (opr == "Tr") { _op_Tr(base, ops) }
+    else if (opr == "Tj") { _op_Tj(base, ctm, ops, page_h) }
+    else if (opr == "TJ") { _op_TJ(base, ctm, ops, page_h) }
+    else if (opr == "'")  { _op_quote(base, ctm, ops, page_h) }
+    else if (opr == "\"") { _op_dquote(base, ctm, ops, page_h) }
+    else                  { { state: base, emit: null } }
 }
 
 // ============================================================

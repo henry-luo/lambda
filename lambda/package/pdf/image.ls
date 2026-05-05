@@ -37,7 +37,7 @@ import resolve: .resolve
 // Returns the deref'd entry (a Map with `dict` + `data`) or null.
 pub fn lookup_xobject(pdf, page, name) {
     let res = resolve.page_resources(pdf, page)
-    let xo  = if (res and res.XObject) resolve.deref(pdf, res.XObject) else null
+    let xo  = if (res and res.XObject) res.XObject else null
     if (xo == null) { null }
     else {
         let raw = xo[name]
@@ -96,7 +96,7 @@ fn _form_matrix(m) {
 //     dict:   Map }            // the Form's full dictionary
 pub fn form_content(pdf, page, name) {
     let res = resolve.page_resources(pdf, page)
-    let xo  = if (res and res.XObject) resolve.deref(pdf, res.XObject) else null
+    let xo  = if (res and res.XObject) res.XObject else null
     if (xo == null) { null }
     else {
         let raw = xo[name]

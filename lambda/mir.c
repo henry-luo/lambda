@@ -381,8 +381,8 @@ void register_bss_gc_roots(void* mir_ctx) {
         for (MIR_item_t item = DLIST_HEAD(MIR_item_t, module->items);
              item != NULL;
              item = DLIST_NEXT(MIR_item_t, item)) {
-            if (item->item_type == MIR_bss_item && item->u.bss->name &&
-                strncmp(item->u.bss->name, "_gvar_", 6) == 0 && item->addr) {
+            if (item->item_type == MIR_bss_item && item->u.bss->name && item->addr &&
+                strncmp(item->u.bss->name, "_gvar_", 6) == 0) {
                 heap_register_gc_root((uint64_t*)item->addr);
                 count++;
             }
