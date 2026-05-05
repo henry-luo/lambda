@@ -28,6 +28,7 @@
 
 import util:    .util
 import resolve: .resolve
+import svg:     .svg
 
 // ============================================================
 // XObject lookup
@@ -175,12 +176,7 @@ pub fn apply_do(pdf, page, ctm, ops) {
     }
 }
 
-// Public: handle a synthetic `inline_image` op produced by stream.ls when
-// it skips a BI..EI segment. We don't decode inline image bytes yet;
-// emit a hatched placeholder rect (1x1 in the local CTM space \u2014 the
-// caller wraps in <g transform="matrix(ctm)">) so the missing image is
-// visible without breaking layout.
-pub fn apply_inline(ctm, ops) {
+fn _placeholder_inline() {
     let elem =
         <rect x: "0", y: "0", width: "1", height: "1",
               fill: "rgba(200,200,200,0.4)",
@@ -189,4 +185,106 @@ pub fn apply_inline(ctm, ops) {
               'stroke-dasharray': "0.05,0.05",
               transform: "matrix(1 0 0 -1 0 1)">
     [elem]
+}
+
+fn _int(v, fallback) {
+    if (v is int) { v }
+    else if (v is float) { int(v) }
+    else { fallback }
+}
+
+fn _name(v) {
+    if (v is map and v.kind == "name") { v.value }
+    else if (v is string) { v }
+    else { null }
+}
+
+fn _inline_ncomp(cs) {
+    let n = _name(cs)
+    if ((n == "G") or (n == "DeviceGray")) { 1 }
+    else if ((n == "RGB") or (n == "DeviceRGB")) { 3 }
+    else { 0 }
+}
+
+fn _byte_at(s, i) {
+    if (s == null or i < 0 or i >= len(s)) { 0 }
+    else { ord(s[i]) }
+}
+
+fn _rgb_int(r, g, b) {
+    "rgb(" ++ string(r) ++ "," ++ string(g) ++ "," ++ string(b) ++ ")"
+}
+
+fn _inline_pixel_fill(data, ncomp, pixel_index) {
+    let off = pixel_index * ncomp
+    if (ncomp == 1) {
+        let g = _byte_at(data, off)
+        _rgb_int(g, g, g)
+    }
+    else {
+        _rgb_int(_byte_at(data, off), _byte_at(data, off + 1), _byte_at(data, off + 2))
+    }
+}
+
+pn _emit_inline_pixels(info) {
+    var w = 0
+    var h = 0
+    var bpc = 8
+    var ncomp = 0
+    if ((info != null) and (info.dict is array)) {
+        var di = 0
+        let dn = len(info.dict)
+        while (di < dn) {
+            let p = info.dict[di]
+            if ((p.key == "W") or (p.key == "Width")) { w = _int(p.value, 0) }
+            else if ((p.key == "H") or (p.key == "Height")) { h = _int(p.value, 0) }
+            else if ((p.key == "BPC") or (p.key == "BitsPerComponent")) { bpc = _int(p.value, 8) }
+            else if ((p.key == "CS") or (p.key == "ColorSpace")) { ncomp = _inline_ncomp(p.value) }
+            di = di + 1
+        }
+    }
+    var data = ""
+    if ((info != null) and (info.data != null)) { data = info.data }
+    let expected = w * h * ncomp
+    let bad_size = ((w <= 0) or (h <= 0))
+    let bad_format = ((bpc != 8) or (ncomp == 0))
+    let short_data = (len(data) < expected)
+    let too_large = ((w * h) > 4096)
+    if (bad_size or bad_format or short_data or too_large) {
+        return _placeholder_inline()
+    }
+    else {
+        var rects = []
+        let rw = 1.0 / float(w)
+        let rh = 1.0 / float(h)
+        var y = 0
+        while (y < h) {
+            var x = 0
+            while (x < w) {
+                let pix = y * w + x
+                let elem =
+                    <rect x: util.fmt_num(float(x) * rw),
+                          y: util.fmt_num(float(y) * rh),
+                          width: util.fmt_num(rw),
+                          height: util.fmt_num(rh),
+                          fill: _inline_pixel_fill(data, ncomp, pix),
+                          stroke: "none">
+                rects = rects ++ [elem]
+                x = x + 1
+            }
+            y = y + 1
+        }
+        return [svg.group("matrix(1 0 0 -1 0 1)", rects)]
+    }
+}
+
+// Public: handle a synthetic `inline_image` op produced by stream.ls for a
+// BI..ID..EI segment. Supported unfiltered 8-bit DeviceRGB/DeviceGray images
+// are rendered as SVG pixel rects in the local image unit square; unsupported
+// inline images keep the visible placeholder.
+pub pn apply_inline(ctm, ops) {
+    var info = null
+    if (len(ops) > 0) { info = ops[0] }
+    if ((info is map) and (info.kind == "inline_image")) { return _emit_inline_pixels(info) }
+    else { return _placeholder_inline() }
 }
