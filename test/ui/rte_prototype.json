@@ -1,0 +1,37 @@
+{
+  "name": "Rich text editor prototype — initial render + toolbar dispatch",
+  "html": "test/ui/rte_prototype.ls",
+  "viewport": {"width": 1000, "height": 720},
+  "events": [
+    {"type": "wait", "ms": 250},
+
+    {"type": "log", "message": "--- initial render of simple.md ---"},
+    {"type": "assert_text",  "target": {"selector": "#status"},  "contains": "opened:"},
+    {"type": "assert_count", "target": {"selector": "#doc h1"},  "count": 1},
+    {"type": "assert_count", "target": {"selector": "#doc h2"},  "count": 5},
+    {"type": "assert_count", "target": {"selector": "#doc ul li"}, "count": 3},
+    {"type": "assert_count", "target": {"selector": "#doc blockquote"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": "#doc a[href]"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": "#doc strong"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": "#doc em"}, "count": 1},
+
+    {"type": "log", "message": "--- toolbar buttons render ---"},
+    {"type": "assert_count", "target": {"selector": "#toolbar .toolbar-btn"}, "count": 13},
+
+    {"type": "log", "message": "--- bold button dispatches ---"},
+    {"type": "click", "target": {"selector": "#toolbar .btn-bold"}},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_text", "target": {"selector": "#status"}, "contains": "btn-bold"},
+
+    {"type": "log", "message": "--- table button dispatches ---"},
+    {"type": "click", "target": {"selector": "#toolbar .btn-table"}},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_text", "target": {"selector": "#status"}, "contains": "btn-table"},
+
+    {"type": "log", "message": "--- save populates #markdown-output ---"},
+    {"type": "click", "target": {"selector": "#toolbar .btn-save"}},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_text", "target": {"selector": "#status"}, "contains": "saved"},
+    {"type": "assert_text", "target": {"selector": "#markdown-output"}, "contains": "Simple Markdown Test"}
+  ]
+}
