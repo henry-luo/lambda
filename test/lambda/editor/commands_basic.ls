@@ -281,6 +281,15 @@ let tx_span_unbold = cmd_toggle_mark({doc: tx_span_bold.doc_after, selection: ma
 "toggle span remove first:"; not has_mark(node_at(tx_span_unbold.doc_after, [0, 0]).marks, 'strong')
 "toggle span remove middle:"; not has_mark(node_at(tx_span_unbold.doc_after, [0, 1]).marks, 'strong')
 "toggle span remove last:"; not has_mark(node_at(tx_span_unbold.doc_after, [0, 2]).marks, 'strong')
+let tx_cross_bold = cmd_toggle_mark(cross_block_state, 'strong')
+"toggle cross-block steps:"; len(tx_cross_bold.steps) == 2
+"toggle cross-block first:"; has_mark(node_at(tx_cross_bold.doc_after, [0, 0]).marks, 'strong')
+"toggle cross-block second:"; has_mark(node_at(tx_cross_bold.doc_after, [1, 0]).marks, 'strong')
+"toggle cross-block selection:"; path_equal(tx_cross_bold.sel_after.anchor.path, [0, 0]) and path_equal(tx_cross_bold.sel_after.head.path, [1, 0])
+let tx_cross_unbold = cmd_toggle_mark({doc: tx_cross_bold.doc_after, selection: cross_block_sel}, 'strong')
+"toggle cross-block remove steps:"; len(tx_cross_unbold.steps) == 2
+"toggle cross-block remove first:"; not has_mark(node_at(tx_cross_unbold.doc_after, [0, 0]).marks, 'strong')
+"toggle cross-block remove second:"; not has_mark(node_at(tx_cross_unbold.doc_after, [1, 0]).marks, 'strong')
 
 // ---------------------------------------------------------------------------
 // cmd_set_block_type
@@ -295,6 +304,11 @@ let tx_h_node = cmd_set_block_type({doc: d0, selection: node_selection([1])}, 'h
 let tx_h_span = cmd_set_block_type(mark_span_state, 'heading')
 "set-type span tag:"; node_at(tx_h_span.doc_after, [0]).tag == 'heading'
 "set-type span text:"; doc_text(node_at(tx_h_span.doc_after, [0])) == "Hello world"
+let tx_h_cross = cmd_set_block_type(cross_block_state, 'heading')
+"set-type cross steps:"; len(tx_h_cross.steps) == 2
+"set-type cross first:"; node_at(tx_h_cross.doc_after, [0]).tag == 'heading'
+"set-type cross second:"; node_at(tx_h_cross.doc_after, [1]).tag == 'heading'
+"set-type cross selection:"; path_equal(tx_h_cross.sel_after.anchor.path, [0, 0]) and path_equal(tx_h_cross.sel_after.head.path, [1, 0])
 let tx_h_inline_node = cmd_set_block_type({doc: inline_atom_doc, selection: node_selection([0, 1])}, 'heading')
 "set-type inline node parent:"; node_at(tx_h_inline_node.doc_after, [0]).tag == 'heading'
 let tx_h_all = cmd_set_block_type({doc: d0, selection: all_selection()}, 'heading')

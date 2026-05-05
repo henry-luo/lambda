@@ -258,6 +258,20 @@ true
 true
 "toggle span remove last:"
 true
+"toggle cross-block steps:"
+true
+"toggle cross-block first:"
+true
+"toggle cross-block second:"
+true
+"toggle cross-block selection:"
+true
+"toggle cross-block remove steps:"
+true
+"toggle cross-block remove first:"
+true
+"toggle cross-block remove second:"
+true
 "set-type tag:"
 true
 "set-type text preserved:"
@@ -269,6 +283,14 @@ true
 "set-type span tag:"
 true
 "set-type span text:"
+true
+"set-type cross steps:"
+true
+"set-type cross first:"
+true
+"set-type cross second:"
+true
+"set-type cross selection:"
 true
 "set-type inline node parent:"
 true

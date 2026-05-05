@@ -827,6 +827,37 @@ fn toggle_mark_same_parent_range(state, mark) {
   }
 }
 
+fn block_range_any_unmarked_leaf(doc, mark, block_i, end_block_i) {
+  if (block_i > end_block_i) { false }
+  else {
+    let block = node_at(doc, [block_i])
+    if (block != null and any_unmarked_text(block, mark)) { true }
+    else { block_range_any_unmarked_leaf(doc, mark, block_i + 1, end_block_i) }
+  }
+}
+
+fn collect_block_range_mark_steps(doc, mark, adding, block_i, end_block_i, acc) {
+  if (block_i > end_block_i) { acc }
+  else {
+    let block = node_at(doc, [block_i])
+    let next = if (block == null) { acc } else { collect_mark_steps(block, [block_i], mark, adding, acc) }
+    collect_block_range_mark_steps(doc, mark, adding, block_i + 1, end_block_i, next)
+  }
+}
+
+fn toggle_mark_top_block_range(state, mark) {
+  let sel = state.selection
+  if (sel == null or not sel_top_block_range(sel) or sel_collapsed(sel)) { null }
+  else {
+    let lo = sel_lo(sel)
+    let hi = sel_hi(sel)
+    let adding = block_range_any_unmarked_leaf(state.doc, mark, lo.path[0], hi.path[0])
+    let steps = collect_block_range_mark_steps(state.doc, mark, adding, lo.path[0], hi.path[0], [])
+    if (len(steps) == 0) { null }
+    else { tx_apply_steps(tx_begin(state.doc, sel), steps, 0, len(steps)) }
+  }
+}
+
 fn toggle_mark_all(state, mark) {
   if (not has_text_leaf(state.doc)) { null }
   else {
@@ -867,6 +898,7 @@ pub fn cmd_toggle_mark(state, mark) {
   else if (sel.kind == 'all') { toggle_mark_all(state, mark) }
   else if (sel.kind == 'node') { toggle_mark_node(state, mark) }
   else if (not sel_single_leaf(sel) and sel_same_parent_leaves(sel)) { toggle_mark_same_parent_range(state, mark) }
+  else if (sel_top_block_range(sel)) { toggle_mark_top_block_range(state, mark) }
   else if (not sel_single_leaf(sel)) { null }
   else if (sel_collapsed(sel)) { cmd_toggle_stored_mark(state, mark) }
   else {
@@ -994,9 +1026,31 @@ fn set_all_block_type(state, tag) {
   }
 }
 
+fn collect_top_block_type_steps_between(doc, tag, i, end_i, acc) {
+  if (i > end_i) { acc }
+  else {
+    let n = node_at(doc, [i])
+    let next = if (n != null and is_node(n)) { [*acc, step_set_node_type([i], tag)] } else { acc }
+    collect_top_block_type_steps_between(doc, tag, i + 1, end_i, next)
+  }
+}
+
+fn set_top_block_range_type(state, tag) {
+  let sel = state.selection
+  if (sel == null or not sel_top_block_range(sel)) { null }
+  else {
+    let lo = sel_lo(sel)
+    let hi = sel_hi(sel)
+    let steps = collect_top_block_type_steps_between(state.doc, tag, lo.path[0], hi.path[0], [])
+    if (len(steps) == 0) { null }
+    else { tx_apply_steps(tx_begin(state.doc, sel), steps, 0, len(steps)) }
+  }
+}
+
 pub fn cmd_set_block_type(state, tag) {
   let sel = state.selection
   if (sel != null and sel.kind == 'all') { set_all_block_type(state, tag) }
+  else if (sel != null and sel_top_block_range(sel)) { set_top_block_range_type(state, tag) }
   else {
     let block_path = block_path_from_selection(state)
     if (block_path == null) { null }
