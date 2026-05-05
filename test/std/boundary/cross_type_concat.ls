@@ -56,6 +56,8 @@ type(false ++ "no")
 true ++ [1]
 [1, 2] ++ 3
 [1, 2] ++ true
+
+// ===== Array ++ Null (identity) =====
 [1, 2] ++ null
 
 // ===== Verify string concatenation values =====
