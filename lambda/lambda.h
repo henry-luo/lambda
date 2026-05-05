@@ -700,6 +700,11 @@ extern "C" {
 void* heap_calloc(size_t size, TypeId type_id);
 void* heap_calloc_class(size_t size, TypeId type_id, int cls);  // allocate with pre-computed size class
 void* heap_data_calloc(size_t size);  // allocate GC-managed data buffer (for map/object data)
+uint64_t* heap_gc_root_slot_new(uint64_t value);
+void heap_jit_gc_root_frame_enter();
+void heap_jit_gc_root_frame_set(int64_t index, uint64_t value);
+uint64_t heap_jit_gc_root_frame_get(int64_t index);
+void heap_jit_gc_root_frame_exit();
 // String creation for name pooling
 String* heap_create_name(const char* name);
 // String creation for runtime strings

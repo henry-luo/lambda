@@ -7,10 +7,71 @@
 #include "lambda-stack.h"
 #include <mpdecimal.h>
 #include <setjmp.h>
+#include <stdlib.h>
 
 extern __thread EvalContext* context;
 
+#define JIT_GC_ROOT_BLOCK_SLOTS 64
+
+typedef struct JitGcRootBlock {
+    int64_t block_index;
+    uint64_t slots[JIT_GC_ROOT_BLOCK_SLOTS];
+    struct JitGcRootBlock* next;
+} JitGcRootBlock;
+
+typedef struct JitGcRootFrame {
+    struct JitGcRootFrame* prev;
+    JitGcRootBlock* blocks;
+} JitGcRootFrame;
+
+static __thread JitGcRootFrame* jit_gc_root_frame_top = NULL;
+
 static void gc_finalize_all_objects(gc_heap_t *gc);
+
+static void jit_gc_root_register_active_ranges(gc_heap_t* gc) {
+    if (!gc) return;
+    JitGcRootFrame* frame = jit_gc_root_frame_top;
+    while (frame) {
+        JitGcRootBlock* block = frame->blocks;
+        while (block) {
+            gc_register_root_range(gc, block->slots, JIT_GC_ROOT_BLOCK_SLOTS);
+            block = block->next;
+        }
+        frame = frame->prev;
+    }
+}
+
+static uint64_t* jit_gc_root_snapshot_active(int* out_count) {
+    if (out_count) *out_count = 0;
+    int count = 0;
+    JitGcRootFrame* frame = jit_gc_root_frame_top;
+    while (frame) {
+        JitGcRootBlock* block = frame->blocks;
+        while (block) {
+            count += JIT_GC_ROOT_BLOCK_SLOTS;
+            block = block->next;
+        }
+        frame = frame->prev;
+    }
+    if (count <= 0) return NULL;
+
+    uint64_t* roots = (uint64_t*)malloc((size_t)count * sizeof(uint64_t));
+    if (!roots) return NULL;
+    int idx = 0;
+    frame = jit_gc_root_frame_top;
+    while (frame) {
+        JitGcRootBlock* block = frame->blocks;
+        while (block) {
+            for (int slot = 0; slot < JIT_GC_ROOT_BLOCK_SLOTS; slot++) {
+                roots[idx++] = block->slots[slot];
+            }
+            block = block->next;
+        }
+        frame = frame->prev;
+    }
+    if (out_count) *out_count = idx;
+    return roots;
+}
 
 // VMap GC bridge functions (defined in vmap.cpp)
 extern "C" void vmap_gc_trace(void* data, gc_heap_t* gc);
@@ -110,7 +171,11 @@ extern "C" void heap_gc_collect(void) {
     log_debug("heap_gc_collect: stack_base=%p stack_current=%p",
               (void*)stack_base, (void*)stack_current);
 
-    gc_collect(gc, NULL, 0, stack_base, stack_current);
+    jit_gc_root_register_active_ranges(gc);
+    int jit_root_count = 0;
+    uint64_t* jit_roots = jit_gc_root_snapshot_active(&jit_root_count);
+    gc_collect(gc, jit_roots, jit_root_count, stack_base, stack_current);
+    free(jit_roots);
 }
 
 // register an external root slot (e.g., BSS global address)
@@ -119,10 +184,84 @@ extern "C" void heap_register_gc_root(uint64_t* slot) {
     gc_register_root(context->heap->gc, slot);
 }
 
+extern "C" uint64_t* heap_gc_root_slot_new(uint64_t value) {
+    uint64_t* slot = (uint64_t*)malloc(sizeof(uint64_t));
+    if (!slot) return NULL;
+    *slot = value;
+    heap_register_gc_root(slot);
+    return slot;
+}
+
 // register a contiguous range of Items as GC roots (e.g., JS closure env arrays)
 extern "C" void heap_register_gc_root_range(uint64_t* base, int count) {
     if (!context || !context->heap || !context->heap->gc || !base || count <= 0) return;
     gc_register_root_range(context->heap->gc, base, count);
+}
+
+static JitGcRootBlock* jit_gc_root_frame_get_block(JitGcRootFrame* frame, int64_t index, bool create) {
+    if (!frame || index < 0) return NULL;
+    int64_t block_index = index / JIT_GC_ROOT_BLOCK_SLOTS;
+    JitGcRootBlock* block = frame->blocks;
+    while (block) {
+        if (block->block_index == block_index) return block;
+        block = block->next;
+    }
+    if (!create) return NULL;
+
+    block = (JitGcRootBlock*)calloc(1, sizeof(JitGcRootBlock));
+    if (!block) {
+        log_error("jit_gc_root_frame: failed to allocate block for index %lld", (long long)index);
+        return NULL;
+    }
+    block->block_index = block_index;
+    block->next = frame->blocks;
+    frame->blocks = block;
+    if (context && context->heap && context->heap->gc) {
+        gc_register_root_range(context->heap->gc, block->slots, JIT_GC_ROOT_BLOCK_SLOTS);
+    }
+    return block;
+}
+
+extern "C" void heap_jit_gc_root_frame_enter() {
+    JitGcRootFrame* frame = (JitGcRootFrame*)calloc(1, sizeof(JitGcRootFrame));
+    if (!frame) {
+        log_error("jit_gc_root_frame_enter: failed to allocate frame");
+        return;
+    }
+    frame->prev = jit_gc_root_frame_top;
+    jit_gc_root_frame_top = frame;
+}
+
+extern "C" void heap_jit_gc_root_frame_set(int64_t index, uint64_t value) {
+    JitGcRootFrame* frame = jit_gc_root_frame_top;
+    JitGcRootBlock* block = jit_gc_root_frame_get_block(frame, index, true);
+    if (!block) return;
+    int64_t offset = index % JIT_GC_ROOT_BLOCK_SLOTS;
+    block->slots[offset] = value;
+}
+
+extern "C" uint64_t heap_jit_gc_root_frame_get(int64_t index) {
+    JitGcRootFrame* frame = jit_gc_root_frame_top;
+    JitGcRootBlock* block = jit_gc_root_frame_get_block(frame, index, false);
+    if (!block) return 0;
+    int64_t offset = index % JIT_GC_ROOT_BLOCK_SLOTS;
+    return block->slots[offset];
+}
+
+extern "C" void heap_jit_gc_root_frame_exit() {
+    JitGcRootFrame* frame = jit_gc_root_frame_top;
+    if (!frame) return;
+    jit_gc_root_frame_top = frame->prev;
+    JitGcRootBlock* block = frame->blocks;
+    while (block) {
+        JitGcRootBlock* next = block->next;
+        if (context && context->heap && context->heap->gc) {
+            gc_unregister_root_range(context->heap->gc, block->slots);
+        }
+        free(block);
+        block = next;
+    }
+    free(frame);
 }
 
 // unregister an external root slot

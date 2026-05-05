@@ -77,17 +77,10 @@ pn _content_elements(pdf, page, page_h) {
     if (raw_bytes == null) {
         return { texts: [], paths: [] }
     }
-    // NOTE: byte-level Form XObject expansion is currently disabled
-    // because cross-module pn→fn map field marshalling regressed in
-    // the runtime, causing fn_join "(null)/(pointer) and array" crashes
-    // inside `image.form_content` / `_form_xobject_names`. Without
-    // expansion, pages with Form XObjects render as `<g data-pdf-form>`
-    // stubs (5 stubs in `invoicesample.pdf`). Re-enable once the runtime
-    // regression is fixed:
-    //   let bytes = interp.expand_forms_in_bytes(pdf, page, raw_bytes)
-    //   let ops = stream.parse_content_stream(bytes)
-    let ops = stream.parse_content_stream(raw_bytes)
-    return interp.render_page(pdf, page, ops, page_h)
+    let fonts = interp.resolve_page_fonts(pdf, page)
+    let bytes = interp.expand_forms_in_bytes(pdf, page, raw_bytes)
+    let ops = stream.parse_content_stream(bytes)
+    return interp.render_page_with_fonts(pdf, page, ops, page_h, fonts)
 }
 
 // Resolve the page background color from opts; pulled into `fn`
@@ -104,12 +97,15 @@ pn render_page(pdf, page, page_index, opts) {
     let bg = _resolve_bg(opts)
 
     let r = _content_elements(pdf, page, rect.h)
-    let paths = (for (p in r.paths) p)
-    let texts = (for (t in r.texts) t)
+    let paths = [for (p in r.paths) p]
+    let texts = [for (t in r.texts) t]
     let flip_group = _flip_group_list(rect, paths)
     let label_kids = _label_children(rect, page_index, opts)
 
-    let children = [svg.page_background(rect, bg)] ++ flip_group ++ texts ++ label_kids
+    let children = [svg.page_background(rect, bg),
+                    for (p in flip_group) p,
+                    for (t in texts) t,
+                    for (l in label_kids) l]
 
     return svg.svg_root(view_box, rect.w, rect.h, children)
 }

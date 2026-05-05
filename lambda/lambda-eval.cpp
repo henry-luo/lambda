@@ -182,10 +182,22 @@ String *fn_strcat(String *left, String *right) {
     return result;
 }
 
+extern "C" void heap_register_gc_root(uint64_t* slot);
+extern "C" void heap_unregister_gc_root(uint64_t* slot);
+
 Item fn_join(Item left, Item right) {
     GUARD_ERROR2(left, right);
     // concat two scalars, or join two lists/arrays/maps, or join scalar with list/array, or join two binaries, else error
     TypeId left_type = get_type_id(left), right_type = get_type_id(right);
+
+    if (left_type == LMD_TYPE_NULL &&
+        (right_type == LMD_TYPE_ARRAY_NUM || right_type == LMD_TYPE_ARRAY || right_type == LMD_TYPE_RANGE)) {
+        return right;
+    }
+    if (right_type == LMD_TYPE_NULL &&
+        (left_type == LMD_TYPE_ARRAY_NUM || left_type == LMD_TYPE_ARRAY || left_type == LMD_TYPE_RANGE)) {
+        return left;
+    }
 
     // Handle path concatenation first (path must be on the left)
     if (left_type == LMD_TYPE_PATH) {
@@ -256,8 +268,12 @@ Item fn_join(Item left, Item right) {
                 result->type_id = LMD_TYPE_ARRAY_NUM;
                 result->flags = la->get_elem_type();
                 result->length = total;  result->capacity = total;
+                uint64_t result_root = (uint64_t)(uintptr_t)result;
+                heap_register_gc_root(&result_root);
                 size_t elem_size = ELEM_TYPE_SIZE[la->get_elem_type() >> 4];
                 result->data = heap_data_alloc(total * elem_size);
+                result = (ArrayNum*)(uintptr_t)result_root;
+                heap_unregister_gc_root(&result_root);
                 memcpy(result->data, la->data, elem_size*la->length);
                 memcpy((char*)result->data + elem_size*la->length, ra->data, elem_size*ra->length);
                 return {.array_num = result};

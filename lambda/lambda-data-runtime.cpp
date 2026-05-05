@@ -678,15 +678,6 @@ Item _map_read_field(ShapeEntry* field, void* map_data) {
     void* ptr_val = nullptr;
     switch (type_id) {
     case LMD_TYPE_NULL: {
-        void* ptr = nullptr;
-        memcpy(&ptr, field_ptr, sizeof(void*));
-        if (ptr) {
-            Container* container = (Container*)ptr;
-            if (container->type_id == LMD_TYPE_RAW_POINTER) {
-                container->type_id = LMD_TYPE_ARRAY;
-            }
-            return {.container = container};
-        }
         return ItemNull;
     }
     case LMD_TYPE_BOOL:
@@ -718,8 +709,10 @@ Item _map_read_field(ShapeEntry* field, void* map_data) {
         memcpy(&ptr_val, field_ptr, sizeof(void*));
         return {.item = x2it(ptr_val)};
     case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
-    case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
+    case LMD_TYPE_MAP:  case LMD_TYPE_VMAP:
+    case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
         memcpy(&ptr_val, field_ptr, sizeof(void*));
+        if (((uintptr_t)ptr_val >> 56) != 0) return ItemNull;
         Container* container = (Container*)ptr_val;
         if (!container) return ItemNull;
         if (container->type_id == LMD_TYPE_RAW_POINTER) {

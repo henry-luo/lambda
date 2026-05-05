@@ -78,8 +78,8 @@ typedef void (*gc_vmap_destroy_fn)(void* data);
 // Default data zone usage threshold (75% of block size) to trigger GC
 #define GC_DATA_ZONE_THRESHOLD (GC_DATA_ZONE_BLOCK_SIZE * 3 / 4)
 
-// Maximum number of registered root slots
-#define GC_MAX_ROOT_SLOTS 256
+// Initial registered root slot capacity; grows dynamically as needed.
+#define GC_ROOT_SLOTS_INITIAL 256
 
 // Root range: contiguous array of Items to scan as GC roots.
 // Used for JS closure environment arrays (pool-allocated, invisible to GC).
@@ -116,6 +116,9 @@ typedef struct gc_bump_block {
 typedef struct gc_heap {
     Pool* pool;                     // underlying rpmalloc memory pool
     gc_header_t* all_objects;       // linked list head (most recent allocation first)
+    gc_header_t** large_objects;    // sorted malloc-backed objects for exact pointer lookup
+    int large_object_count;
+    int large_object_capacity;
     uint8_t* bump_cursor;           // bump-pointer allocation cursor (hot path)
     uint8_t* bump_end;              // end of current bump block
     gc_object_zone_t* object_zone;  // non-moving object struct allocator
@@ -132,8 +135,9 @@ typedef struct gc_heap {
     // Registered root slots: external pointers to locations holding Items.
     // Each slot is a uint64_t* that points to a memory location containing
     // a boxed Item value (e.g., BSS globals, context->result).
-    uint64_t* root_slots[GC_MAX_ROOT_SLOTS];
+    uint64_t** root_slots;
     int root_slot_count;
+    int root_slot_capacity;
 
     // Collection trigger
     size_t gc_threshold;            // data zone bytes that trigger auto-collection
@@ -285,6 +289,13 @@ void gc_unregister_root(gc_heap_t* gc, uint64_t* slot);
  * @param count number of Items in the range
  */
 void gc_register_root_range(gc_heap_t* gc, uint64_t* base, int count);
+
+/**
+ * Unregister a contiguous array of Items previously registered as GC roots.
+ * @param gc    heap to unregister from
+ * @param base  base pointer previously registered with gc_register_root_range
+ */
+void gc_unregister_root_range(gc_heap_t* gc, uint64_t* base);
 
 /**
  * Run a full garbage collection cycle:

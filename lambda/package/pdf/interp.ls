@@ -64,6 +64,26 @@ fn _with_clip(st, id) {
     st
 }
 
+fn _safe_text_state(t) {
+    if (t is map and t.font_size != null and t.tm != null and t.tlm != null) { t }
+    else { text.new_state(null) }
+}
+
+fn _restore_state(saved) {
+    {
+        ctm:   saved.ctm,
+        text:  _safe_text_state(saved.text),
+        path:  saved.path,
+        fonts: saved.fonts
+    }
+}
+
+fn _font_resource_names(pdf, page) {
+    let res = resolve.page_resources(pdf, page)
+    let table = if (res and res.Font) resolve.deref(pdf, res.Font) else null
+    if (table) { for (k, v in table) string(k) } else { [] }
+}
+
 // Wrap each emitted path in <g transform="matrix(ctm)"> so the outer
 // y-flip group can mirror them upright. Skip the wrap when the CTM is
 // the identity matrix — `matrix(1 0 0 1 0 0)` would just bloat output.
@@ -101,6 +121,19 @@ fn _wrap_emit_with_ctm(emit, ctm, clip_id, has_clip) {
 fn _lookup_resolved(fonts, name) {
     let hits = (for (p in fonts where p.name == name) p.info)
     if (len(hits) >= 1) { hits[0] } else { null }
+}
+
+fn _runtime_font_info(info) {
+    if (info == null) { null }
+    else {
+        {
+            name:       info.name,
+            family:     info.family,
+            weight:     info.weight,
+            style:      info.style,
+            to_unicode: info.to_unicode
+        }
+    }
 }
 
 // ============================================================
@@ -314,7 +347,21 @@ pn _resolve_fonts(pdf, page, ops) {
     while (i < n) {
         let nm = names[i]
         let info = font.resolve_font(pdf, page, nm)
-        out = out ++ [{ name: nm, info: info }]
+        out = out ++ [{ name: nm, info: _runtime_font_info(info) }]
+        i = i + 1
+    }
+    return out
+}
+
+pub pn resolve_page_fonts(pdf, page) {
+    let names = _font_resource_names(pdf, page)
+    var out = []
+    var i = 0
+    let n = len(names)
+    while (i < n) {
+        let nm = names[i]
+        let info = font.resolve_font(pdf, page, nm)
+        out = out ++ [{ name: nm, info: _runtime_font_info(info) }]
         i = i + 1
     }
     return out
@@ -331,35 +378,34 @@ pn _resolve_fonts(pdf, page, ops) {
 // content stream is tokenized. This way the interpreter sees one flat
 // op stream and the existing q/Q machinery handles state save/restore.
 
-fn _form_xobject_names(pdf, page) {
-    let res = resolve.page_resources(pdf, page)
-    let xo  = if (res and res.XObject) resolve.deref(pdf, res.XObject) else null
-    if (xo == null) { [] }
-    else {
-        let names = for (k, v in xo) string(k)
-        names
-    }
-}
-
 fn _matrix_str(m) {
     util.fmt_num(m[0]) ++ " " ++ util.fmt_num(m[1]) ++ " " ++
     util.fmt_num(m[2]) ++ " " ++ util.fmt_num(m[3]) ++ " " ++
     util.fmt_num(m[4]) ++ " " ++ util.fmt_num(m[5])
 }
 
+fn _do_replace(cur, nm, mstr, data) {
+    let needle = "/" ++ nm ++ " Do"
+    let replacement = "q " ++ mstr ++ " cm\n" ++ data ++ "\nQ"
+    replace(cur, needle, replacement)
+}
+
 pub pn expand_forms_in_bytes(pdf, page, bytes) {
-    let xo_names = _form_xobject_names(pdf, page)
+    let res = resolve.page_resources(pdf, page)
+    if (res == null) { return bytes }
+    let xo = res.XObject
+    if (xo == null) { return bytes }
+    let xo_names = for (k, v in xo) string(k)
     var cur = bytes
     var i = 0
     let n = len(xo_names)
     while (i < n) {
         let nm = xo_names[i]
         let fc = image.form_content(pdf, page, nm)
-        if (fc != null and fc.data != "") {
+        let has_data = (fc != null and fc.data != "")
+        if (has_data) {
             let mstr = _matrix_str(fc.matrix)
-            let needle = "/" ++ nm ++ " Do"
-            let replacement = "q " ++ mstr ++ " cm\n" ++ fc.data ++ "\nQ"
-            cur = replace(cur, needle, replacement)
+            cur = _do_replace(cur, nm, mstr, fc.data)
         }
         i = i + 1
     }
@@ -391,11 +437,21 @@ fn _is_form_do(op, pdf, page) {
 
 pub pn render_page(pdf, page, ops, page_h) {
     let fonts = _resolve_fonts(pdf, page, ops)
+    let tr = text.render_text_ops(ops, fonts, page_h)
     let r = _run_ops(pdf, page, ops, util.IDENTITY, fonts, page_h)
-    let texts = (for (t in r.texts) t)
-    let paths = (for (p in r.paths) p)
+    let texts = [for (t in tr) t]
+    let paths = [for (p in r.paths) p]
     return { texts: texts, paths: paths }
 }
+
+pub pn render_page_with_fonts(pdf, page, ops, page_h, fonts) {
+    let tr = text.render_text_ops(ops, fonts, page_h)
+    let r = _run_ops(pdf, page, ops, util.IDENTITY, fonts, page_h)
+    let texts = [for (t in tr) t]
+    let paths = [for (p in r.paths) p]
+    return { texts: texts, paths: paths }
+}
+
 // Operator-walk loop, factored out so Form XObject `Do` operators can
 // recursively interpret a sub-content-stream with its own CTM and font
 // pool. Returns { texts, paths } — caller decides whether to dedupe.
@@ -429,7 +485,7 @@ pn _run_ops(pdf, page, ops, init_ctm, fonts, page_h) {
         else if (opr == "Q") {
             let m = len(stack)
             if (m >= 1) {
-                st = stack[m - 1]
+                st = _restore_state(stack[m - 1])
                 stack = (for (k, v in stack where k < (m - 1)) v)
             }
         }

@@ -1070,6 +1070,11 @@ JitImport jit_runtime_imports[] = {
     // ========================================================================
     {"heap_calloc", FPTR(heap_calloc)},
     {"heap_calloc_class", FPTR(heap_calloc_class)},
+    {"heap_gc_root_slot_new", FPTR(heap_gc_root_slot_new)},
+    {"heap_jit_gc_root_frame_enter", FPTR(heap_jit_gc_root_frame_enter)},
+    {"heap_jit_gc_root_frame_set", FPTR(heap_jit_gc_root_frame_set)},
+    {"heap_jit_gc_root_frame_get", FPTR(heap_jit_gc_root_frame_get)},
+    {"heap_jit_gc_root_frame_exit", FPTR(heap_jit_gc_root_frame_exit)},
     {"heap_data_calloc", FPTR(heap_data_calloc)},
     {"heap_create_name", FPTR(heap_create_name)},
     {"heap_create_symbol", FPTR(heap_create_symbol)},
