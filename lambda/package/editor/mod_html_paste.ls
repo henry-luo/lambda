@@ -28,9 +28,14 @@ fn html_tag(n) {
   else { null }
 }
 
+fn element_children_at(n, i, total, acc) {
+  if (i >= total) { acc }
+  else { element_children_at(n, i + 1, total, [*acc, n[i]]) }
+}
+
 fn html_children(n) {
   if (is_node(n)) { n.content }
-  else if (type(n) == element) { [for (c in n) c] }
+  else if (type(n) == element) { element_children_at(n, 0, len(n), []) }
   else if (is_list(n)) { n }
   else { [] }
 }
@@ -41,12 +46,18 @@ fn attr_value_at(attrs, key, i, n) {
   else { attr_value_at(attrs, key, i + 1, n) }
 }
 fn attr_value(n, key) =>
-  if (is_node(n)) { attr_value_at(n.attrs, key, 0, len(n.attrs)) } else { null }
+  if (is_node(n)) { attr_value_at(n.attrs, key, 0, len(n.attrs)) }
+  else if (type(n) == element and key == 'href') { n.href }
+  else if (type(n) == element and key == 'title') { n.title }
+  else if (type(n) == element and key == 'src') { n.src }
+  else if (type(n) == element and key == 'alt') { n.alt }
+  else { null }
 
 fn html_schema_mode(schema) => schema.p != null and schema.paragraph == null
 
 fn paragraph_tag(schema) => if (html_schema_mode(schema)) { 'p' } else { 'paragraph' }
 fn image_tag(schema) => if (html_schema_mode(schema)) { 'img' } else { 'image' }
+fn link_tag(schema) => if (html_schema_mode(schema)) { 'a' } else { 'link' }
 fn list_tag(schema, ordered) =>
   if (html_schema_mode(schema)) { if (ordered) { 'ol' } else { 'ul' } } else { 'list' }
 fn list_item_tag(schema) => if (html_schema_mode(schema)) { 'li' } else { 'list_item' }
@@ -59,6 +70,10 @@ fn heading_node(schema, level, kids) =>
 
 fn image_node(schema, n) =>
   node_attrs(image_tag(schema), [{name: 'src', value: attr_value(n, 'src')}, {name: 'alt', value: attr_value(n, 'alt')}], [])
+
+fn link_node(schema, n) =>
+  node_attrs(link_tag(schema), [{name: 'href', value: attr_value(n, 'href')}, {name: 'title', value: attr_value(n, 'title')}],
+    convert_inline_schema(schema, n))
 
 fn convert_children_at_schema(schema, kids, i, n, acc) {
   if (i >= n) { acc }
@@ -101,6 +116,7 @@ pub fn html_to_editor_fragment_for_schema(schema, n) {
     else if (tag == 'strong' or tag == 'b') { add_mark(convert_inline_schema(schema, n), 'strong') }
     else if (tag == 'em' or tag == 'i') { add_mark(convert_inline_schema(schema, n), 'em') }
     else if (tag == 'code') { add_mark(convert_inline_schema(schema, n), 'code') }
+    else if (tag == 'a') { [link_node(schema, n)] }
     else if (tag == 'br') { [node(schema_hard_break(schema), [])] }
     else if (tag == 'img') { [image_node(schema, n)] }
     else if (tag == 'ul') { [node_attrs(list_tag(schema, false), [{name: 'ordered', value: false}], convert_children_schema(schema, n))] }

@@ -51,6 +51,12 @@ fn state_default_block(state) =>
 
 fn state_hard_break(state) => schema_hard_break(state_schema(state))
 
+fn state_image_tag(state) =>
+  if (state_schema(state).img != null and state_schema(state).image == null) { 'img' } else { 'image' }
+
+fn state_link_tag(state) =>
+  if (state_schema(state).a != null and state_schema(state).link == null) { 'a' } else { 'link' }
+
 fn replacement_marks(state) =>
   if (state.stored_marks == null) [] else state.stored_marks
 
@@ -208,7 +214,7 @@ fn same_parent_text_span_parts(state) {
     else {
       let before_edge = nonempty_text_leaf(slice(lo_leaf.text, 0, lo.offset), lo_leaf.marks)
       let after_edge = nonempty_text_leaf(slice(hi_leaf.text, hi.offset, len(hi_leaf.text)), hi_leaf.marks)
-      {parent_path: parent_path0, parent: parent, lo_index: lo_index, hi_index: hi_index,
+      {parent_path: parent_path0, parent: parent, lo: lo, hi: hi, lo_index: lo_index, hi_index: hi_index,
        lo_leaf: lo_leaf, hi_leaf: hi_leaf, before_edge: before_edge, after_edge: after_edge}
     }
   }
@@ -367,6 +373,103 @@ fn last_text_offset_in(node) {
   if (is_text(node)) { len(node.text) }
   else if (not is_node(node) or len(node.content) == 0) { 0 }
   else { last_text_offset_in(node.content[len(node.content) - 1]) }
+}
+
+fn insert_inline_nodes_select_first(state, inline_nodes) {
+  let sel = state.selection
+  if (sel == null or len(inline_nodes) == 0) { null }
+  else if (sel.kind == 'all') {
+    let block = node(state_default_block(state), inline_nodes)
+    let tx0 = tx_begin(state.doc, sel)
+    let tx1 = tx_step(tx0, step_replace([], 0, len(state.doc.content), [block]))
+    tx_set_selection(tx1, node_selection([0, 0]))
+  }
+  else if (sel.kind == 'node') {
+    if (not valid_selected_node(state)) { null }
+    else {
+      let selected_parent_path = parent_path(sel.path)
+      let selected_index = last_index(sel.path)
+      if (len(selected_parent_path) == 0) {
+        let block = node(state_default_block(state), inline_nodes)
+        replace_node_with_slice(state, [block], node_selection([selected_index, 0]))
+      } else {
+        replace_node_with_slice(state, inline_nodes, node_selection([*selected_parent_path, selected_index]))
+      }
+    }
+  }
+  else if (sel_top_block_range(sel)) {
+    let span = cross_block_text_span_parts(state)
+    if (span == null) { null }
+    else {
+      let merged0 = list_concat(list_concat(span.prefix, inline_nodes), span.suffix)
+      let merged = replacement_nodes_or_empty(merged0, insert_marks_for_leaf(state, span.lo_leaf))
+      let new_block = node_attrs(span.lo_block.tag, span.lo_block.attrs, merged)
+      let tx0 = tx_begin(state.doc, sel)
+      let tx1 = tx_step(tx0, step_replace([], span.lo_block_index, span.hi_block_index + 1, [new_block]))
+      tx_set_selection(tx1, node_selection([span.lo_block_index, len(span.prefix)]))
+    }
+  }
+  else if (sel_same_parent_leaves(sel)) {
+    let span = same_parent_text_span_parts(state)
+    if (span == null) { null }
+    else {
+      let slice_nodes = list_concat(list_concat(span.before_edge, inline_nodes), span.after_edge)
+      let tx0 = tx_begin(state.doc, sel)
+      let tx1 = tx_step(tx0, step_replace(span.parent_path, span.lo_index, span.hi_index + 1, slice_nodes))
+      tx_set_selection(tx1, node_selection([*span.parent_path, span.lo_index + len(span.before_edge)]))
+    }
+  }
+  else { null }
+}
+
+fn text_leaf_with_marks(s, marks) => text_marked(s, marks)
+
+fn selected_inline_content(span, label, fallback_marks) {
+  if (span.lo_index == span.hi_index) {
+    let selected_text = slice(span.lo_leaf.text, span.lo.offset, span.hi.offset)
+    if (len(selected_text) == 0) { [text_leaf_with_marks(label, fallback_marks)] }
+    else { [text_leaf_with_marks(selected_text, span.lo_leaf.marks)] }
+  } else {
+    let first = nonempty_text_leaf(slice(span.lo_leaf.text, span.lo.offset, len(span.lo_leaf.text)), span.lo_leaf.marks)
+    let middle = list_slice(span.parent.content, span.lo_index + 1, span.hi_index)
+    let last = nonempty_text_leaf(slice(span.hi_leaf.text, 0, span.hi.offset), span.hi_leaf.marks)
+    let selected = list_concat(list_concat(first, middle), last)
+    if (len(selected) == 0) { [text_leaf_with_marks(label, fallback_marks)] } else { selected }
+  }
+}
+
+fn link_label(label, href) => if (label == null or len(label) == 0) { href } else { label }
+
+fn link_attrs(href, title) =>
+  [{name: 'href', value: href}, {name: 'title', value: if (title == null) { "" } else { title }}]
+
+fn image_attrs(src, alt) =>
+  [{name: 'src', value: src}, {name: 'alt', value: if (alt == null) { "" } else { alt }}]
+
+pub fn cmd_insert_image(state, src, alt) =>
+  insert_inline_nodes_select_first(state, [node_attrs(state_image_tag(state), image_attrs(src, alt), [])])
+
+pub fn cmd_insert_link(state, href, title, label) {
+  let sel = state.selection
+  let label2 = link_label(label, href)
+  if (sel == null) { null }
+  else if (sel.kind == 'all' or sel.kind == 'node' or sel_top_block_range(sel)) {
+    insert_inline_nodes_select_first(state, [node_attrs(state_link_tag(state), link_attrs(href, title), [text_marked(label2, replacement_marks(state))])])
+  }
+  else if (sel_same_parent_leaves(sel)) {
+    let span = same_parent_text_span_parts(state)
+    if (span == null) { null }
+    else {
+      let kids = selected_inline_content(span, label2, insert_marks_for_leaf(state, span.lo_leaf))
+      let link = node_attrs(state_link_tag(state), link_attrs(href, title), kids)
+      let slice_nodes = list_concat(list_concat(span.before_edge, [link]), span.after_edge)
+      let tx0 = tx_begin(state.doc, sel)
+      let tx1 = tx_step(tx0, step_replace(span.parent_path, span.lo_index, span.hi_index + 1, slice_nodes))
+      let link_path = [*span.parent_path, span.lo_index + len(span.before_edge)]
+      tx_set_selection(tx1, caret(last_caret_pos_in(link, link_path)))
+    }
+  }
+  else { null }
 }
 
 pub fn cmd_paste_fragment(state, fragment) {
@@ -651,7 +754,13 @@ fn ancestor_tag_at(doc, path, tag, depth) {
 
 fn ancestor_tag(doc, path, tag) => ancestor_tag_at(doc, path, tag, len(path))
 
-fn same_list_kind(a, b) => is_node(a) and is_node(b) and a.tag == 'list' and b.tag == 'list'
+fn state_list_item_tag(state) =>
+  if (state_schema(state).li != null and state_schema(state).list_item == null) { 'li' } else { 'list_item' }
+
+fn is_list_tag(tag) => tag == 'list' or tag == 'ul' or tag == 'ol'
+fn is_list_node(n) => is_node(n) and is_list_tag(n.tag)
+
+fn same_list_kind(a, b) => is_list_node(a) and is_list_node(b) and a.tag == b.tag
 
 fn append_to_sublist(prev_item, list_node, item) {
   let kids = prev_item.content
@@ -660,7 +769,7 @@ fn append_to_sublist(prev_item, list_node, item) {
     let sub2 = with_content(sub, [*sub.content, item])
     node_attrs(prev_item.tag, prev_item.attrs, list_set(kids, len(kids) - 1, sub2))
   } else {
-    node_attrs(prev_item.tag, prev_item.attrs, [*kids, node_attrs('list', list_node.attrs, [item])])
+    node_attrs(prev_item.tag, prev_item.attrs, [*kids, node_attrs(list_node.tag, list_node.attrs, [item])])
   }
 }
 
@@ -669,13 +778,13 @@ pub fn cmd_indent_list_item(state) {
   if (sel == null) { null }
   else {
     let base_path = if (sel.kind == 'node') { sel.path } else { sel.anchor.path }
-    let item_path = ancestor_tag(state.doc, base_path, 'list_item')
+    let item_path = ancestor_tag(state.doc, base_path, state_list_item_tag(state))
     if (item_path == null) { null }
     else {
       let list_path = parent_path(item_path)
       let item_index = last_index(item_path)
       let list_node = node_at(state.doc, list_path)
-      if (list_node == null or not is_node(list_node) or list_node.tag != 'list' or item_index <= 0) { null }
+      if (list_node == null or not is_list_node(list_node) or item_index <= 0) { null }
       else {
         let item = list_node.content[item_index]
         let prev_item = list_node.content[item_index - 1]
@@ -700,7 +809,7 @@ pub fn cmd_outdent_list_item(state) {
   if (sel == null) { null }
   else {
     let base_path = if (sel.kind == 'node') { sel.path } else { sel.anchor.path }
-    let item_path = ancestor_tag(state.doc, base_path, 'list_item')
+    let item_path = ancestor_tag(state.doc, base_path, state_list_item_tag(state))
     if (item_path == null) { null }
     else {
       let list_path = parent_path(item_path)
@@ -712,9 +821,10 @@ pub fn cmd_outdent_list_item(state) {
       let list_node = node_at(state.doc, list_path)
       let parent_item = node_at(state.doc, parent_item_path)
       let grand_list = node_at(state.doc, grand_list_path)
+        let item_tag = state_list_item_tag(state)
       if (list_node == null or parent_item == null or grand_list == null or
           not is_node(list_node) or not is_node(parent_item) or not is_node(grand_list) or
-          list_node.tag != 'list' or parent_item.tag != 'list_item' or grand_list.tag != 'list') { null }
+          not is_list_node(list_node) or parent_item.tag != item_tag or not is_list_node(grand_list)) { null }
       else {
         let item = list_node.content[item_index]
         let list2 = with_content(list_node, list_splice(list_node.content, item_index, 1, []))

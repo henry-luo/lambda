@@ -114,6 +114,16 @@ let raw_pasted_para = node_at(tx_raw_html.doc_after, [0])
 "cmd raw html paste text:"; doc_text(raw_pasted_para) == "Say: Hello world"
 "cmd raw html paste mark:"; raw_pasted_para.content[2].marks[0] == 'strong'
 
+let link_frag = node('p', [text("Read "), node_attrs('a', [{name: 'href', value: "https://example.com"}], [text("more")])])
+let md_link_blocks = html_fragment_to_md_blocks(link_frag)
+"html link tag:"; md_link_blocks[0].content[1].tag == 'link'
+"html link href:"; md_link_blocks[0].content[1].attrs[0].value == "https://example.com"
+"html link text:"; doc_text(md_link_blocks[0].content[1]) == "more"
+let tx_link_html = cmd_paste_html(paste_state, "<p>Read <a href='https://example.com'>more</a></p>", "Read more")
+let link_pasted_para = node_at(tx_link_html.doc_after, [0])
+"cmd raw html link tag:"; link_pasted_para.content[2].tag == 'link'
+"cmd raw html link href:"; link_pasted_para.content[2].attrs[0].value == "https://example.com"
+
 // ---------------------------------------------------------------------------
 // 9. Schema-targeted HTML conversion keeps HTML-shaped tags for HTML sessions
 // ---------------------------------------------------------------------------
@@ -123,6 +133,10 @@ let html_blocks = html_fragment_to_blocks_for_schema(html5_subset_schema,
 "html schema heading tag:"; html_blocks[0].tag == 'h1'
 "html schema para tag:"; html_blocks[1].tag == 'p'
 "html schema mark:"; html_blocks[1].content[1].marks[0] == 'strong'
+
+let html_link_blocks = html_fragment_to_blocks_for_schema(html5_subset_schema, link_frag)
+"html schema link tag:"; html_link_blocks[0].content[1].tag == 'a'
+"html schema link href:"; html_link_blocks[0].content[1].attrs[0].value == "https://example.com"
 
 let html_paste_doc = node('doc', [node('p', [text("Say: ")])])
 let html_paste_state = {doc: html_paste_doc, schema: html5_subset_schema, selection: text_selection(pos([0, 0], 5), pos([0, 0], 5))}
