@@ -76,6 +76,32 @@ protected:
         return element_reader.childCount();
     }
 
+    const char* element_child_tag(Item item, int64_t index) {
+        MarkReader reader(item);
+        ElementReader element_reader = reader.getRoot().asElement();
+        ItemReader child = element_reader.childAt(index);
+        if (!child.isElement()) { return nullptr; }
+        return child.asElement().tagName();
+    }
+
+    const char* nested_element_child_tag(Item item, int64_t block_index, int64_t child_index) {
+        MarkReader reader(item);
+        ElementReader root_reader = reader.getRoot().asElement();
+        ItemReader block = root_reader.childAt(block_index);
+        if (!block.isElement()) { return nullptr; }
+        ItemReader child = block.asElement().childAt(child_index);
+        if (!child.isElement()) { return nullptr; }
+        return child.asElement().tagName();
+    }
+
+    const char* nested_text(Item item, int64_t block_index, int64_t text_index) {
+        MarkReader reader(item);
+        ElementReader root_reader = reader.getRoot().asElement();
+        ItemReader block = root_reader.childAt(block_index);
+        if (!block.isElement()) { return nullptr; }
+        return block.asElement().childAt(text_index).cstring();
+    }
+
     const char* element_attr(Item item, const char* key) {
         MarkReader reader(item);
         ElementReader element_reader = reader.getRoot().asElement();
@@ -272,6 +298,60 @@ TEST_F(EditBridgeSessionTest, HistoryRestoresSelectionSnapshots) {
     EXPECT_EQ(redo_anchor.path.indices[1], 1u);
     EXPECT_EQ(redo_anchor.offset, 5u);
     EXPECT_GE(counters.selection_count, 4);
+
+    edit_session_destroy(session);
+}
+
+TEST_F(EditBridgeSessionTest, ExecAppliesRichTextBlockCommands) {
+    MarkBuilder builder(input);
+    Item doc0 = builder.element("doc")
+        .child(builder.element("paragraph").text("A").final())
+        .child(builder.element("paragraph").text("B").final())
+        .final();
+    EditSession* session = edit_session_new_with_input(input, doc0, nullptr);
+    ASSERT_NE(session, nullptr);
+
+    uint32_t caret_indices[2] = {0, 0};
+    SourcePos caret = {{2, caret_indices}, 1};
+    EXPECT_TRUE(edit_session_set_selection(session, caret, caret));
+
+    EXPECT_TRUE(edit_session_exec(session, "insert_horizontal_rule", ItemNull));
+    EXPECT_EQ(element_child_count(edit_session_current(session)), 3);
+    EXPECT_STREQ(element_child_tag(edit_session_current(session), 1), "hr");
+    SourcePos hr_selection = edit_session_selection_anchor(session);
+    ASSERT_EQ(hr_selection.path.len, 1u);
+    EXPECT_EQ(hr_selection.path.indices[0], 1u);
+
+    Item code_args = builder.map()
+        .put("index", (int64_t)2)
+        .put("text", "let x = 1")
+        .final();
+    EXPECT_TRUE(edit_session_exec(session, "insert_code_block", code_args));
+    EXPECT_EQ(element_child_count(edit_session_current(session)), 4);
+    EXPECT_STREQ(element_child_tag(edit_session_current(session), 2), "code_block");
+    EXPECT_STREQ(nested_text(edit_session_current(session), 2, 0), "let x = 1");
+
+    Item pre_args = builder.map()
+        .put("index", (int64_t)3)
+        .put("tag", "pre")
+        .put("text", "html")
+        .final();
+    EXPECT_TRUE(edit_session_exec(session, "insertCodeBlock", pre_args));
+    EXPECT_STREQ(element_child_tag(edit_session_current(session), 3), "pre");
+    EXPECT_STREQ(nested_text(edit_session_current(session), 3, 0), "html");
+
+    Item wrap_args = builder.map()
+        .put("start", (int64_t)0)
+        .put("end", (int64_t)1)
+        .final();
+    EXPECT_TRUE(edit_session_exec(session, "wrap_blockquote", wrap_args));
+    EXPECT_STREQ(element_child_tag(edit_session_current(session), 0), "blockquote");
+    EXPECT_STREQ(nested_element_child_tag(edit_session_current(session), 0, 0), "paragraph");
+    EXPECT_STREQ(nested_element_child_tag(edit_session_current(session), 0, 1), "hr");
+
+    EXPECT_TRUE(edit_session_exec(session, "lift_blockquote", builder.map().put("index", (int64_t)0).final()));
+    EXPECT_STREQ(element_child_tag(edit_session_current(session), 0), "paragraph");
+    EXPECT_STREQ(element_child_tag(edit_session_current(session), 1), "hr");
 
     edit_session_destroy(session);
 }

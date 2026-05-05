@@ -10,7 +10,6 @@ SYSTEM_PREFIX="/usr/local"
 
 # List of libraries and dev_libraries from build_lambda_config.json
 ALL_LIBS=(
-    "libcurl4-openssl-dev"   # curl
     "libmpdec-dev"           # mpdecimal
     "libutf8proc-dev"        # utf8proc
     "libssl-dev"             # ssl
@@ -156,6 +155,7 @@ check_and_install_tool "make" "build-essential" || exit 1
 check_and_install_tool "gcc" "build-essential" || exit 1
 check_and_install_tool "g++" "build-essential" || exit 1
 check_and_install_tool "git" "git" || exit 1
+check_and_install_tool "curl" "curl" || exit 1
 
 # xxd is now a separate package in Ubuntu 24.04+
 if ! command -v xxd >/dev/null 2>&1; then
@@ -376,6 +376,70 @@ build_mpdecimal_for_linux() {
     return 1
 }
 
+
+# Function to build libcurl for Linux without libpsl
+build_curl_without_libpsl_for_linux() {
+    echo "Building libcurl for Linux without libpsl..."
+
+    if [ -f "$SYSTEM_PREFIX/include/curl/curl.h" ] && [ -f "$SYSTEM_PREFIX/lib/libcurl.so" ]; then
+        if "$SYSTEM_PREFIX/bin/curl-config" --features 2>/dev/null | grep -qw PSL; then
+            echo "Existing libcurl has PSL support; rebuilding without libpsl"
+        else
+            echo "libcurl without PSL already installed in system location"
+            return 0
+        fi
+    fi
+
+    mkdir -p "build_temp"
+
+    if [ ! -d "build_temp/curl-8.10.1" ]; then
+        cd build_temp
+        echo "Downloading curl 8.10.1..."
+        curl -L "https://curl.se/download/curl-8.10.1.tar.gz" -o "curl-8.10.1.tar.gz"
+        tar -xzf "curl-8.10.1.tar.gz"
+        rm "curl-8.10.1.tar.gz"
+        cd - > /dev/null
+    fi
+
+    cd "build_temp/curl-8.10.1"
+
+    export CPPFLAGS="-I$SYSTEM_PREFIX/include $CPPFLAGS"
+    export LDFLAGS="-L$SYSTEM_PREFIX/lib $LDFLAGS"
+    export PKG_CONFIG_PATH="$SYSTEM_PREFIX/lib/pkgconfig:/usr/lib/pkgconfig:$PKG_CONFIG_PATH"
+
+    echo "Configuring libcurl without libpsl..."
+    if ./configure --prefix="$SYSTEM_PREFIX" \
+        --enable-shared --enable-static \
+        --with-openssl \
+        --with-nghttp2 \
+        --without-libpsl \
+        --without-libidn2 \
+        --without-libssh2 \
+        --without-brotli \
+        --without-zstd; then
+
+        echo "Building libcurl..."
+        if make -j$(nproc); then
+            echo "Installing libcurl to system location (requires sudo)..."
+            sudo make install
+            sudo ldconfig
+
+            if "$SYSTEM_PREFIX/bin/curl-config" --features 2>/dev/null | grep -qw PSL; then
+                echo "❌ libcurl still reports PSL support"
+                cd - > /dev/null
+                return 1
+            fi
+
+            echo "✅ libcurl built and installed without libpsl"
+            cd - > /dev/null
+            return 0
+        fi
+    fi
+
+    echo "❌ libcurl build failed"
+    cd - > /dev/null
+    return 1
+}
 # Install all libraries and dev_libraries from config
 
 # Install all libraries and dev_libraries from config
@@ -389,6 +453,10 @@ for lib in "${ALL_LIBS[@]}"; do
         install_if_missing "$lib" "$lib"
     fi
 done
+
+if ! build_curl_without_libpsl_for_linux; then
+    echo "Warning: libcurl without libpsl build failed"
+fi
 
 # Install Radiant project dependencies
 echo "Installing Radiant project dependencies..."
@@ -1433,7 +1501,12 @@ fi
 
 # Check system locations and apt packages
 echo "- MIR: $([ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && [ -f "$SYSTEM_PREFIX/include/mir.h" ] && echo "✓ Built" || echo "✗ Missing")"
-echo "- curl: $([ -f "$LIB_ARCH_PATH/libcurl.so" ] || dpkg -l | grep -q libcurl && echo "✓ Available" || echo "✗ Missing")"
+if [ -f "$SYSTEM_PREFIX/lib/libcurl.so" ] && [ -x "$SYSTEM_PREFIX/bin/curl-config" ] && ! "$SYSTEM_PREFIX/bin/curl-config" --features 2>/dev/null | grep -qw PSL; then
+    CURL_STATUS="✓ Built without PSL"
+else
+    CURL_STATUS="✗ Missing or PSL-enabled"
+fi
+echo "- curl: $CURL_STATUS"
 echo "- mpdecimal: $([ -f "$LIB_ARCH_PATH/libmpdec.so" ] || [ -f "$SYSTEM_PREFIX/lib/libmpdec.so" ] || dpkg -l | grep -q libmpdec-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- utf8proc: $([ -f "$LIB_ARCH_PATH/libutf8proc.so" ] || [ -f "$LIB_ARCH_PATH/libutf8proc.a" ] || [ -f "$SYSTEM_PREFIX/lib/libutf8proc.a" ] || [ -f "$SYSTEM_PREFIX/lib/libutf8proc.so" ] || dpkg -l | grep -q libutf8proc-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- mbedtls: $([ -f "/usr/local/lib/libmbedtls.a" ] && grep -o '"[^"]*"' /usr/local/include/mbedtls/build_info.h 2>/dev/null | head -1 | tr -d '"' | xargs -I{} echo "✓ {} (3.x)" || echo "✗ Missing")"

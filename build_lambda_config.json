@@ -419,7 +419,6 @@
                 "zstd",
                 "ssh2",
                 "idn2",
-                "psl",
                 "ssl",
                 "crypto",
                 "unistring",
@@ -432,10 +431,7 @@
                 "zlib",
                 "rpmalloc",
                 "re2",
-                "pthread",
-                "secur32",
-                "wldap32",
-                "iphlpapi"
+                "pthread"
             ],
             "defines": [
                 "SIMPLE_SCHEMA_PARSER",
@@ -803,12 +799,6 @@
                     "name": "idn2",
                     "description": "libidn2 — curl IDN dependency",
                     "lib": "/clang64/lib/libidn2.a",
-                    "link": "static"
-                },
-                {
-                    "name": "psl",
-                    "description": "libpsl — curl PSL dependency",
-                    "lib": "/clang64/lib/libpsl.a",
                     "link": "static"
                 },
                 {

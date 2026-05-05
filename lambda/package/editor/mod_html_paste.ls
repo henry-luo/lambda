@@ -58,6 +58,7 @@ fn html_schema_mode(schema) => schema.p != null and schema.paragraph == null
 fn paragraph_tag(schema) => if (html_schema_mode(schema)) { 'p' } else { 'paragraph' }
 fn image_tag(schema) => if (html_schema_mode(schema)) { 'img' } else { 'image' }
 fn link_tag(schema) => if (html_schema_mode(schema)) { 'a' } else { 'link' }
+fn code_block_tag(schema) => if (html_schema_mode(schema)) { 'pre' } else { 'code_block' }
 fn list_tag(schema, ordered) =>
   if (html_schema_mode(schema)) { if (ordered) { 'ol' } else { 'ul' } } else { 'list' }
 fn list_item_tag(schema) => if (html_schema_mode(schema)) { 'li' } else { 'list_item' }
@@ -75,6 +76,8 @@ fn link_node(schema, n) =>
   node_attrs(link_tag(schema), [{name: 'href', value: attr_value(n, 'href')}, {name: 'title', value: attr_value(n, 'title')}],
     convert_inline_schema(schema, n))
 
+fn blockquote_node(schema, n) => node('blockquote', coerce_children(schema, convert_children_schema(schema, n), 'block'))
+fn code_block_node(schema, n) => node(code_block_tag(schema), [text(doc_text(node('fragment', convert_children_schema(schema, n))))])
 fn table_node(schema, n) => node('table', convert_children_schema(schema, n))
 fn table_section_node(schema, tag, n) => node(tag, convert_children_schema(schema, n))
 fn table_row_node(schema, n) => node('tr', convert_children_schema(schema, n))
@@ -121,6 +124,9 @@ pub fn html_to_editor_fragment_for_schema(schema, n) {
     else if (tag == 'strong' or tag == 'b') { add_mark(convert_inline_schema(schema, n), 'strong') }
     else if (tag == 'em' or tag == 'i') { add_mark(convert_inline_schema(schema, n), 'em') }
     else if (tag == 'code') { add_mark(convert_inline_schema(schema, n), 'code') }
+    else if (tag == 'blockquote') { [blockquote_node(schema, n)] }
+    else if (tag == 'pre') { [code_block_node(schema, n)] }
+    else if (tag == 'hr') { [node('hr', [])] }
     else if (tag == 'a') { [link_node(schema, n)] }
     else if (tag == 'br') { [node(schema_hard_break(schema), [])] }
     else if (tag == 'img') { [image_node(schema, n)] }
