@@ -156,7 +156,8 @@ fn _runtime_font_info(info) {
             family:     info.family,
             weight:     info.weight,
             style:      info.style,
-            to_unicode: info.to_unicode
+            to_unicode: info.to_unicode,
+            encoding:   info.encoding
         }
     }
 }

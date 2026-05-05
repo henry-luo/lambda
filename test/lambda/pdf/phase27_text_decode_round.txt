@@ -1,0 +1,1 @@
+{ spaced_hex: "ABC", odd_hex: "A ", cid_hex: "AB", greedy_hex: "Z", name_ok: true, hex_ok: true, rendered: true, xml: "<text x="10" y="80" font-family="Helvetica, Arial, sans-serif" font-size="10" font-weight="normal" font-style="normal" fill="rgb(0,0,0)">AB</text>"}

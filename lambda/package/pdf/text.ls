@@ -35,12 +35,10 @@ fn _num(op) {
 fn _decode_operand(op, font_info) {
     if (op == null) { "" }
     else if (op is map and op.kind == "string") {
-        let cmap = if (font_info) font_info.to_unicode else null
-        font.decode_literal(op.value, cmap)
+        font.decode_literal_with_font(op.value, font_info)
     }
     else if (op is map and op.kind == "hex") {
-        let cmap = if (font_info) font_info.to_unicode else null
-        font.decode_hex(op.value, cmap)
+        font.decode_hex_with_font(op.value, font_info)
     }
     else { "" }
 }
