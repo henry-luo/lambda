@@ -24,7 +24,40 @@ static render_map_path_recorder_fn s_path_recorder = NULL;
 
 // forward declarations
 static Item find_parent_of(Item node, Item target, int* out_index, int depth = 0);
-extern Item _map_get(TypeMap* map_type, void* map_data, char* key, bool* is_found);
+extern Item _map_field_to_item(void* field_ptr, TypeId type_id);
+
+static Item render_map_read_field(ShapeEntry* field, void* map_data) {
+    if (!field || !field->type || !map_data) return ItemNull;
+    void* field_ptr = (char*)map_data + field->byte_offset;
+    return _map_field_to_item(field_ptr, field->type->type_id);
+}
+
+static Item render_map_get_field_from_type(TypeMap* map_type, void* map_data, const char* key, bool* is_found) {
+    Item result = ItemNull;
+    *is_found = false;
+    if (!map_type || !map_data || !key) return result;
+    ShapeEntry* field = map_type->shape;
+    while (field) {
+        if (!field->name) {
+            Map* nested_map = *(Map**)((char*)map_data + field->byte_offset);
+            if (nested_map && nested_map->type_id == LMD_TYPE_MAP) {
+                bool nested_found = false;
+                Item nested_result = render_map_get_field_from_type(
+                    (TypeMap*)nested_map->type, nested_map->data, key, &nested_found);
+                if (nested_found) {
+                    *is_found = true;
+                    result = nested_result;
+                }
+            }
+        } else if (field->name->str && field->name->length == strlen(key) &&
+                   memcmp(field->name->str, key, field->name->length) == 0) {
+            *is_found = true;
+            result = render_map_read_field(field, map_data);
+        }
+        field = field->next;
+    }
+    return result;
+}
 
 // ============================================================================
 // Reverse map: result_node.item → RenderMapKey (source_item, template_ref)
@@ -529,7 +562,7 @@ static Item render_map_get_map_field(Item node, const char* key) {
     Map* map = it2map(node);
     if (!map || !map->type || !map->data) return ItemNull;
     bool found = false;
-    return _map_get((TypeMap*)map->type, map->data, (char*)key, &found);
+    return render_map_get_field_from_type((TypeMap*)map->type, map->data, key, &found);
 }
 
 static bool item_chars_equal(Item item, const char* value) {

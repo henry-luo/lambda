@@ -232,7 +232,7 @@ let tx_italic = dispatch_intent(s0, {input_type: "formatItalic", data: null})
 "italic intent stored:"; has_mark(tx_get_meta(tx_italic, "storedMarks"), 'em')
 
 let tx_under = dispatch_intent(s0, {input_type: "formatUnderline", data: null})
-"underline intent stored:"; has_mark(tx_get_meta(tx_under, "storedMarks"), 'underline')
+"underline intent stored:"; has_mark(tx_get_meta(tx_under, "storedMarks"), 'u')
 
 let tx_select_all = dispatch_intent(s0, {input_type: "selectAll", data: null})
 "select-all kind:"; tx_select_all.sel_after.kind == 'all'
