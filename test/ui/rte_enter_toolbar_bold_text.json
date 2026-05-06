@@ -1,0 +1,22 @@
+{
+  "name": "RTE Enter splits toolbar-created bold text",
+  "html": "test/ui/rte_prototype.ls",
+  "viewport": {"width": 1200, "height": 800},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "mouse_drag", "target": {"text": "simple markdown"}, "to_target": {"text": "testing basic"}, "button": 0},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+    {"type": "click", "target": {"selector": "#toolbar .btn-bold"}},
+    {"type": "wait", "ms": 140},
+    {"type": "assert_text", "target": {"selector": "#doc strong"}, "contains": "mple markdown document fo"},
+    {"type": "click", "target": {"text": "markdown document"}},
+    {"type": "key_press", "key": "enter"},
+    {"type": "wait", "ms": 140},
+    {"type": "assert_count", "target": {"selector": "#doc p"}, "min_count": 8},
+    {"type": "assert_text", "target": {"selector": "#doc"}, "contains": "mple markdown"},
+    {"type": "assert_text", "target": {"selector": "#doc"}, "contains": "document fo"},
+    {"type": "assert_count", "target": {"selector": "#doc strong"}, "min_count": 2},
+    {"type": "assert_selection", "is_collapsed": true, "check_dom": true}
+  ]
+}

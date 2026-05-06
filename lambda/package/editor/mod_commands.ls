@@ -1559,40 +1559,75 @@ fn split_block_text_selection(state) {
   }
 }
 
+fn split_inline_wrapper_tag(tag) =>
+  tag == 'strong' or tag == 'em' or tag == 'u' or tag == 'code' or tag == 'a' or tag == 'span'
+
+fn split_block_path_for_leaf_at(doc, path) {
+  let parent = parent_path(path)
+  let n = node_at(doc, parent)
+  if (n != null and is_node(n) and split_inline_wrapper_tag(n.tag)) { split_block_path_for_leaf_at(doc, parent) }
+  else { parent }
+}
+
+fn split_nonempty_node(n, content) =>
+  if (len(content) == 0) { [] } else { [with_content(n, content)] }
+
+fn split_inline_at(node, rel_path, offset) {
+  if (is_text(node)) {
+    {left: nonempty_text_leaf(slice(node.text, 0, offset), node.marks),
+     right: nonempty_text_leaf(slice(node.text, offset, len(node.text)), node.marks)}
+  } else if (not is_node(node) or len(rel_path) == 0) {
+    {left: [], right: []}
+  } else {
+    let child_index = rel_path[0]
+    if (child_index < 0 or child_index >= len(node.content)) { {left: [], right: []} }
+    else {
+      let split = split_inline_at(node.content[child_index], list_drop(rel_path, 1), offset)
+      let left_content = list_concat(list_slice(node.content, 0, child_index), split.left)
+      let right_content = list_concat(split.right, list_slice(node.content, child_index + 1, len(node.content)))
+      {left: split_nonempty_node(node, left_content), right: split_nonempty_node(node, right_content)}
+    }
+  }
+}
+
+fn split_block_collapsed_selection(state) {
+  let sel = state.selection
+  let leaf_path = sel.anchor.path
+  if (len(leaf_path) < 2) { null }
+  else {
+    let block_path = split_block_path_for_leaf_at(state.doc, leaf_path)
+    let block = node_at(state.doc, block_path)
+    let leaf = node_at(state.doc, leaf_path)
+    if (block == null or not is_node(block) or leaf == null or not is_text(leaf) or len(leaf_path) <= len(block_path)) { null }
+    else {
+      let rel_path = list_drop(leaf_path, len(block_path))
+      let top_index = rel_path[0]
+      let top_child = block.content[top_index]
+      let split = split_inline_at(top_child, list_drop(rel_path, 1), sel.anchor.offset)
+      let cut = sel.anchor.offset
+      let grand_path = parent_path(block_path)
+      let block_idx = last_index(block_path)
+      let left_prefix = list_slice(block.content, 0, top_index)
+      let right_suffix = list_slice(block.content, top_index + 1, len(block.content))
+      let left_content = nonempty_or_empty_text(list_concat(left_prefix, split.left), leaf.marks)
+      let right_content = nonempty_or_empty_text(list_concat(split.right, right_suffix), leaf.marks)
+      let right_tag = split_right_tag(state, block, if (len(split.right) == 0 and len(right_suffix) == 0) { len(leaf.text) } else { 0 }, len(leaf.text))
+      let left_block = node_attrs(block.tag, block.attrs, left_content)
+      let right_block = node_attrs(right_tag, split_right_attrs(block, right_tag), right_content)
+      let tx0 = tx_begin(state.doc, sel)
+      let tx1 = tx_step(tx0, step_replace(grand_path, block_idx, block_idx + 1, [left_block, right_block]))
+      tx_set_selection(tx1, caret(pos([*grand_path, block_idx + 1, 0], 0)))
+    }
+  }
+}
+
 pub fn cmd_split_block(state) {
   let sel = state.selection
   if (sel == null) { null }
   else if (sel.kind == 'text' and not sel_collapsed(sel) and sel_same_parent_leaves(sel)) { split_block_text_selection(state) }
   else if (not sel_collapsed(sel)) { null }
   else if (not sel_single_leaf(sel)) { null }
-  else {
-    let leaf_path = sel.anchor.path
-    if (len(leaf_path) < 2) { null }
-    else {
-      let block_path = parent_path(leaf_path)
-      let block = node_at(state.doc, block_path)
-      if (block == null or not is_node(block) or len(block.content) != 1) { null }
-      else {
-        let leaf = block.content[0]
-        if (not is_text(leaf)) { null }
-        else {
-          let cut = sel.anchor.offset
-          let left_text  = slice(leaf.text, 0, cut)
-          let right_text = slice(leaf.text, cut, len(leaf.text))
-          let right_tag = split_right_tag(state, block, cut, len(leaf.text))
-          let left_block  = node_attrs(block.tag, block.attrs, [text_marked(left_text,  leaf.marks)])
-          let right_block = node_attrs(right_tag, split_right_attrs(block, right_tag), [text_marked(right_text, leaf.marks)])
-          let grand_path = parent_path(block_path)
-          let block_idx  = last_index(block_path)
-          let step = step_replace(grand_path, block_idx, block_idx + 1, [left_block, right_block])
-          let tx0 = tx_begin(state.doc, sel)
-          let tx1 = tx_step(tx0, step)
-          let new_caret_path = [*grand_path, block_idx + 1, 0]
-          tx_set_selection(tx1, caret(pos(new_caret_path, 0)))
-        }
-      }
-    }
-  }
+  else { split_block_collapsed_selection(state) }
 }
 
 fn code_block_path_for_selection(state) {

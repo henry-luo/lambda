@@ -1,0 +1,14 @@
+{
+  "name": "RTE Enter splits italic text",
+  "html": "test/ui/rte_prototype.ls",
+  "viewport": {"width": 1200, "height": 800},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "click", "target": {"text": "italic text"}},
+    {"type": "key_press", "key": "enter"},
+    {"type": "wait", "ms": 140},
+    {"type": "assert_count", "target": {"selector": "#doc p"}, "min_count": 8},
+    {"type": "assert_count", "target": {"selector": "#doc em"}, "min_count": 1},
+    {"type": "assert_selection", "is_collapsed": true, "check_dom": true}
+  ]
+}

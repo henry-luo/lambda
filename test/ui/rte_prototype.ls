@@ -73,13 +73,64 @@ let initial_title_len = len(doc_text(node_at(initial_editor_doc, [0])))
 let initial_selection = text_selection(pos([0, 0], initial_title_len), pos([0, 0], initial_title_len))
 let initial_editor = edit_open(initial_editor_doc, null, initial_selection)
 
-fn event_selection(evt, fallback) {
-  if (evt.source_selection != null) { evt.source_selection }
-  else if (evt.source_pos != null) { text_selection(evt.source_pos, evt.source_pos) }
-  else { fallback }
+fn valid_source_pos(doc, p) {
+  if (p == null) { false }
+  else {
+    let n = node_at(doc, p.path)
+    if (n == null) { false }
+    else {
+      let max_offset = if (is_text(n)) { len(n.text) } else if (is_node(n)) { len(n.content) } else { -1 }
+      if (max_offset < 0) { false }
+      else if (p.offset < 0) { false }
+      else if (max_offset < p.offset) { false }
+      else { true }
+    }
+  }
 }
 
-fn editor_with_event_selection(ed, evt) => edit_set_selection(ed, event_selection(evt, ed.selection))
+fn normalize_source_pos(doc, p) {
+  if (p == null) { null }
+  else if (valid_source_pos(doc, p)) { p }
+  else if (len(p.path) == 0) { null }
+  else { normalize_source_pos(doc, pos(parent_path(p.path), p.offset)) }
+}
+
+fn valid_source_selection(doc, sel) {
+  if (sel == null) { false }
+  else if (sel.kind == 'text') { valid_source_pos(doc, sel.anchor) and valid_source_pos(doc, sel.head) }
+  else if (sel.kind == 'node') { node_at(doc, sel.path) != null }
+  else if (sel.kind == 'all') { true }
+  else { false }
+}
+
+fn normalize_source_selection(doc, sel) {
+  if (sel == null) { null }
+  else if (sel.kind == 'text') {
+    let anchor = normalize_source_pos(doc, sel.anchor)
+    let head = normalize_source_pos(doc, sel.head)
+    if (anchor != null and head != null) { text_selection(anchor, head) } else { null }
+  }
+  else if (valid_source_selection(doc, sel)) { sel }
+  else { null }
+}
+
+fn event_selection_for_doc(doc, evt, fallback) {
+  let sel = normalize_source_selection(doc, evt.source_selection)
+  if (sel != null) { sel }
+  else {
+    let p = normalize_source_pos(doc, evt.source_pos)
+    if (p != null) { text_selection(p, p) } else { fallback }
+  }
+}
+
+fn click_selection_for_doc(doc, evt, fallback) {
+  let p = normalize_source_pos(doc, evt.source_pos)
+  if (p != null) { text_selection(p, p) }
+  else { event_selection_for_doc(doc, evt, fallback) }
+}
+
+fn editor_with_event_selection(ed, evt) => edit_set_selection(ed, event_selection_for_doc(ed.doc, evt, ed.selection))
+fn editor_with_click_selection(ed, evt) => edit_set_selection(ed, click_selection_for_doc(ed.doc, evt, ed.selection))
 
 // ============================================================================
 // Per-tag render templates — markdown Mark tree -> HTML
@@ -187,7 +238,7 @@ edit <rte_app> state editor: initial_editor, status: ("opened:" ++ SOURCE_PATH),
 }
 on beforeinput(evt) {
   if (evt.input_intent != null) {
-    editor = edit_dispatch(editor, evt.input_intent)
+    editor = edit_dispatch(editor_with_event_selection(editor, evt), evt.input_intent)
     set_selection(editor.selection)
     status = evt.input_type
   } else {
@@ -196,7 +247,7 @@ on beforeinput(evt) {
 }
 on click(evt) {
   if (evt.target_tag != "button" and (evt.source_selection != null or evt.source_pos != null)) {
-    editor = editor_with_event_selection(editor, evt)
+    editor = editor_with_click_selection(editor, evt)
     status = "selected"
   }
 }
