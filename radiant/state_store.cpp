@@ -2643,6 +2643,181 @@ char* extract_text_from_view(View* view, Arena* arena) {
     return result;
 }
 
+static char* arena_copy_cstr(Arena* arena, const char* text) {
+    if (!arena || !text) return NULL;
+    size_t len = strlen(text);
+    char* result = (char*)arena_alloc(arena, len + 1);
+    if (!result) return NULL;
+    memcpy(result, text, len);
+    result[len] = '\0';
+    return result;
+}
+
+static void append_html_escaped(StrBuf* sb, const char* text, size_t len) {
+    if (!sb || !text) return;
+    const char* p = text;
+    const char* end = text + len;
+    while (p < end) {
+        char c = *p++;
+        switch (c) {
+            case '<': strbuf_append_str(sb, "&lt;"); break;
+            case '>': strbuf_append_str(sb, "&gt;"); break;
+            case '&': strbuf_append_str(sb, "&amp;"); break;
+            case '"': strbuf_append_str(sb, "&quot;"); break;
+            default: strbuf_append_char(sb, c); break;
+        }
+    }
+}
+
+static void append_html_attr_escaped(StrBuf* sb, const char* text) {
+    if (!text) return;
+    append_html_escaped(sb, text, strlen(text));
+}
+
+static bool clipboard_inline_tag(const char* tag) {
+    if (!tag) return false;
+    return strcmp(tag, "strong") == 0 || strcmp(tag, "b") == 0 ||
+           strcmp(tag, "em") == 0 || strcmp(tag, "i") == 0 ||
+           strcmp(tag, "u") == 0 || strcmp(tag, "code") == 0 ||
+           strcmp(tag, "a") == 0;
+}
+
+static void append_open_tag_for_clipboard(StrBuf* sb, DomElement* element) {
+    if (!sb || !element || !element->tag_name) return;
+    strbuf_append_char(sb, '<');
+    strbuf_append_str(sb, element->tag_name);
+    if (strcmp(element->tag_name, "a") == 0) {
+        const char* href = ((DomNode*)element)->get_attribute("href");
+        const char* title = ((DomNode*)element)->get_attribute("title");
+        if (href) {
+            strbuf_append_str(sb, " href=\"");
+            append_html_attr_escaped(sb, href);
+            strbuf_append_char(sb, '"');
+        }
+        if (title) {
+            strbuf_append_str(sb, " title=\"");
+            append_html_attr_escaped(sb, title);
+            strbuf_append_char(sb, '"');
+        }
+    }
+    strbuf_append_char(sb, '>');
+}
+
+static void append_close_tag_for_clipboard(StrBuf* sb, DomElement* element) {
+    if (!sb || !element || !element->tag_name) return;
+    strbuf_append_str(sb, "</");
+    strbuf_append_str(sb, element->tag_name);
+    strbuf_append_char(sb, '>');
+}
+
+static DomText* first_text_descendant_for_clipboard(DomNode* node) {
+    if (!node) return NULL;
+    if (node->is_text()) return node->as_text();
+    if (node->is_element()) {
+        for (DomNode* child = node->as_element()->first_child; child; child = child->next_sibling) {
+            DomText* hit = first_text_descendant_for_clipboard(child);
+            if (hit) return hit;
+        }
+    }
+    return NULL;
+}
+
+static DomText* next_text_after_for_clipboard(DomNode* node) {
+    for (DomNode* n = node; n; n = n->parent) {
+        for (DomNode* sibling = n->next_sibling; sibling; sibling = sibling->next_sibling) {
+            DomText* hit = first_text_descendant_for_clipboard(sibling);
+            if (hit) return hit;
+        }
+    }
+    return NULL;
+}
+
+static DomNode* child_at_dom_offset(DomElement* element, uint32_t offset) {
+    if (!element) return NULL;
+    DomNode* child = element->first_child;
+    for (uint32_t i = 0; child && i < offset; i++) child = child->next_sibling;
+    return child;
+}
+
+static DomText* first_text_in_range_for_clipboard(const DomRange* range) {
+    if (!range || !range->start.node) return NULL;
+    DomNode* start = range->start.node;
+    if (start->is_text()) return start->as_text();
+    if (start->is_element()) {
+        DomNode* child = child_at_dom_offset(start->as_element(), range->start.offset);
+        if (child) {
+            DomText* hit = first_text_descendant_for_clipboard(child);
+            if (hit) return hit;
+            return next_text_after_for_clipboard(child);
+        }
+    }
+    return next_text_after_for_clipboard(start);
+}
+
+static bool boundary_before_or_equal(const DomBoundary* a, const DomBoundary* b) {
+    DomBoundaryOrder order = dom_boundary_compare(a, b);
+    return order == DOM_BOUNDARY_BEFORE || order == DOM_BOUNDARY_EQUAL;
+}
+
+static void append_selected_text_html(StrBuf* sb, DomText* text,
+                                      uint32_t start_u16, uint32_t end_u16) {
+    if (!sb || !text || start_u16 >= end_u16) return;
+    enum { MAX_INLINE_ANCESTORS = 32 };
+    DomElement* wrappers[MAX_INLINE_ANCESTORS];
+    int wrapper_count = 0;
+    for (DomNode* n = text->parent; n && wrapper_count < MAX_INLINE_ANCESTORS; n = n->parent) {
+        if (n->is_element()) {
+            DomElement* element = n->as_element();
+            if (clipboard_inline_tag(element->tag_name)) wrappers[wrapper_count++] = element;
+        }
+    }
+    for (int i = wrapper_count - 1; i >= 0; i--) append_open_tag_for_clipboard(sb, wrappers[i]);
+
+    uint32_t start_u8 = dom_text_utf16_to_utf8(text, start_u16);
+    uint32_t end_u8 = dom_text_utf16_to_utf8(text, end_u16);
+    if (end_u8 > start_u8 && end_u8 <= text->length) {
+        append_html_escaped(sb, text->text + start_u8, end_u8 - start_u8);
+    }
+
+    for (int i = 0; i < wrapper_count; i++) append_close_tag_for_clipboard(sb, wrappers[i]);
+}
+
+static void append_selected_text_plain(StrBuf* sb, DomText* text,
+                                       uint32_t start_u16, uint32_t end_u16) {
+    if (!sb || !text || start_u16 >= end_u16) return;
+    uint32_t start_u8 = dom_text_utf16_to_utf8(text, start_u16);
+    uint32_t end_u8 = dom_text_utf16_to_utf8(text, end_u16);
+    if (end_u8 > start_u8 && end_u8 <= text->length) {
+        strbuf_append_str_n(sb, text->text + start_u8, end_u8 - start_u8);
+    }
+}
+
+static char* extract_dom_range_text_to_arena(DomRange* range, Arena* arena) {
+    if (!range || !arena) return NULL;
+    StrBuf* sb = strbuf_new_cap(256);
+    if (!sb) return NULL;
+    DomText* text = first_text_in_range_for_clipboard(range);
+    while (text) {
+        DomBoundary text_start{ (DomNode*)text, 0 };
+        DomBoundary text_end{ (DomNode*)text, dom_text_utf16_length(text) };
+        if (!boundary_before_or_equal(&text_start, &range->end)) break;
+
+        DomBoundary slice_start = text_start;
+        DomBoundary slice_end = text_end;
+        if (dom_boundary_compare(&slice_start, &range->start) == DOM_BOUNDARY_BEFORE) slice_start = range->start;
+        if (dom_boundary_compare(&slice_end, &range->end) == DOM_BOUNDARY_AFTER) slice_end = range->end;
+        if (slice_start.node == (DomNode*)text && slice_end.node == (DomNode*)text &&
+            slice_start.offset < slice_end.offset) {
+            append_selected_text_plain(sb, text, slice_start.offset, slice_end.offset);
+        }
+        if (!boundary_before_or_equal(&text_end, &range->end) || text_end.node == range->end.node) break;
+        text = next_text_after_for_clipboard((DomNode*)text);
+    }
+    char* result = sb->length > 0 ? arena_copy_cstr(arena, sb->str) : NULL;
+    strbuf_free(sb);
+    return result;
+}
+
 /**
  * Helper: recursively extract HTML from view tree
  */
@@ -2730,6 +2905,11 @@ char* extract_selected_text(RadiantState* state, Arena* arena) {
         return NULL;
     }
 
+    if (state->dom_selection && state->dom_selection->range_count > 0 &&
+        !state->dom_selection->is_collapsed && state->dom_selection->ranges[0]) {
+        return extract_dom_range_text_to_arena(state->dom_selection->ranges[0], arena);
+    }
+
     SelectionState* sel = state->selection;
     View* view = sel->view;
 
@@ -2760,6 +2940,33 @@ char* extract_selected_text(RadiantState* state, Arena* arena) {
 char* extract_selected_html(RadiantState* state, Arena* arena) {
     if (!state || !state->selection || state->selection->is_collapsed || !arena) {
         return NULL;
+    }
+
+    if (state->dom_selection && state->dom_selection->range_count > 0 &&
+        !state->dom_selection->is_collapsed && state->dom_selection->ranges[0]) {
+        DomRange* range = state->dom_selection->ranges[0];
+        StrBuf* sb = strbuf_new_cap(256);
+        if (!sb) return NULL;
+        DomText* text = first_text_in_range_for_clipboard(range);
+        while (text) {
+            DomBoundary text_start{ (DomNode*)text, 0 };
+            DomBoundary text_end{ (DomNode*)text, dom_text_utf16_length(text) };
+            if (!boundary_before_or_equal(&text_start, &range->end)) break;
+
+            DomBoundary slice_start = text_start;
+            DomBoundary slice_end = text_end;
+            if (dom_boundary_compare(&slice_start, &range->start) == DOM_BOUNDARY_BEFORE) slice_start = range->start;
+            if (dom_boundary_compare(&slice_end, &range->end) == DOM_BOUNDARY_AFTER) slice_end = range->end;
+            if (slice_start.node == (DomNode*)text && slice_end.node == (DomNode*)text &&
+                slice_start.offset < slice_end.offset) {
+                append_selected_text_html(sb, text, slice_start.offset, slice_end.offset);
+            }
+            if (!boundary_before_or_equal(&text_end, &range->end) || text_end.node == range->end.node) break;
+            text = next_text_after_for_clipboard((DomNode*)text);
+        }
+        char* result = sb->length > 0 ? arena_copy_cstr(arena, sb->str) : NULL;
+        strbuf_free(sb);
+        return result;
     }
 
     // For now, just return HTML-escaped text

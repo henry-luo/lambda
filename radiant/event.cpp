@@ -643,6 +643,27 @@ static DomElement* rich_editable_from_target(View* target) {
     return nullptr;
 }
 
+static bool copy_current_selection_to_clipboard(RadiantState* state, const char* prefix) {
+    if (!state || !selection_has(state)) return false;
+    Pool* temp_pool = pool_create();
+    Arena* temp_arena = arena_create_default(temp_pool);
+    char* text = extract_selected_text(state, temp_arena);
+    char* html = extract_selected_html(state, temp_arena);
+    bool copied = false;
+    if (html && html[0] && text) {
+        clipboard_store_write_html(html, text);
+        log_debug("%s: copied rich selection html=%zu text=%zu", prefix ? prefix : "copy selection", strlen(html), strlen(text));
+        copied = true;
+    } else if (text) {
+        clipboard_copy_text(text);
+        log_debug("%s: copied plain selection text=%zu", prefix ? prefix : "copy selection", strlen(text));
+        copied = true;
+    }
+    arena_destroy(temp_arena);
+    pool_destroy(temp_pool);
+    return copied;
+}
+
 /**
  * Build a Lambda map Item representing an event object.
  * Contains: {type, target_class, target_tag, x, y}
@@ -1210,15 +1231,7 @@ static bool dispatch_rich_beforeinput(EventContext* evcon, View* target,
     if (intent->type == INPUT_INTENT_DELETE_BY_CUT) {
         RadiantState* state = (RadiantState*)evcon->ui_context->document->state;
         if (!state || !selection_has(state)) return false;
-        Pool* temp_pool = pool_create();
-        Arena* temp_arena = arena_create_default(temp_pool);
-        char* text = extract_selected_text(state, temp_arena);
-        if (text) {
-            clipboard_copy_text(text);
-            log_debug("rich cut: copied %zu chars", strlen(text));
-        }
-        arena_destroy(temp_arena);
-        pool_destroy(temp_pool);
+        copy_current_selection_to_clipboard(state, "rich cut");
     }
 
     bool handled = dispatch_lambda_handler(evcon, target, "beforeinput", intent);
@@ -5643,17 +5656,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 case RDT_KEY_C:
                     // Copy selection (Ctrl+C / Cmd+C)
                     if (ctrl || cmd) {
-                        if (selection_has(state)) {
-                            Pool* temp_pool = pool_create();
-                            Arena* temp_arena = arena_create_default(temp_pool);
-                            char* text = extract_selected_text(state, temp_arena);
-                            if (text) {
-                                clipboard_copy_text(text);
-                                log_debug("Copied text to clipboard: %zu chars", strlen(text));
-                            }
-                            arena_destroy(temp_arena);
-                            pool_destroy(temp_pool);
-                        }
+                        copy_current_selection_to_clipboard(state, "legacy copy");
                     }
                     break;
 
@@ -5661,16 +5664,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     // Cut selection (Ctrl+X / Cmd+X)
                     if (ctrl || cmd) {
                         if (selection_has(state)) {
-                            // Copy to clipboard
-                            Pool* temp_pool = pool_create();
-                            Arena* temp_arena = arena_create_default(temp_pool);
-                            char* text = extract_selected_text(state, temp_arena);
-                            if (text) {
-                                clipboard_copy_text(text);
-                                log_debug("Cut text to clipboard: %zu chars", strlen(text));
-                            }
-                            arena_destroy(temp_arena);
-                            pool_destroy(temp_pool);
+                            copy_current_selection_to_clipboard(state, "legacy cut");
 
                             // TODO: delete selected text
                             selection_clear(state);
