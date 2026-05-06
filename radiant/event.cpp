@@ -1067,6 +1067,7 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
                                     handler_ctx.nursery = rt->nursery;
                                     handler_ctx.name_pool = rt->name_pool;
                                     handler_ctx.pool = rt->heap->pool;
+                                    handler_ctx.type_info = type_info;
                                     context = &handler_ctx;
                                 }
                                 // Phase 5: Set ui_mode + arena so retransformed body functions

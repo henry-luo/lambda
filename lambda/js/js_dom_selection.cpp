@@ -34,6 +34,7 @@
 #include <cstdlib>
 
 extern __thread EvalContext* context;
+extern Input* js_input;
 
 // ============================================================================
 // Helpers
@@ -1158,6 +1159,7 @@ static Item _wpt_selectionchange_fire(Item this_val, Item* args, int argc) {
 
 extern "C" void js_dom_queue_selectionchange(DomSelection* sel) {
     if (!sel || !sel->state) return;
+    if (!js_input || !js_input->pool) return;
     RadiantState* state = sel->state;
     // Suppress while the legacy↔DOM mirror is running so a single user
     // mutation doesn't ping-pong into multiple events.

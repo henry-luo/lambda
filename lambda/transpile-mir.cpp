@@ -12241,92 +12241,100 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
         }
         int view_idx = 0;
         while (tmpl_child) {
-            if (tmpl_child->node_type == AST_NODE_VIEW) {
-                AstViewNode* view = (AstViewNode*)tmpl_child;
+            AstNode* view_child = tmpl_child;
+            AstNode* next_tmpl_child = tmpl_child->next;
+            if (tmpl_child->node_type == AST_NODE_CONTENT) {
+                view_child = ((AstListNode*)tmpl_child)->item;
+            }
+            while (view_child) {
+                if (view_child->node_type == AST_NODE_VIEW) {
+                    AstViewNode* view = (AstViewNode*)view_child;
 
-                // build the function name used during transpilation
-                char func_name[64];
-                snprintf(func_name, sizeof(func_name), "_view_%d", view_idx++);
+                    // build the function name used during transpilation
+                    char func_name[64];
+                    snprintf(func_name, sizeof(func_name), "_view_%d", view_idx++);
 
-                void* func_ptr = find_func(ctx, func_name);
-                if (func_ptr) {
-                    // determine specificity from the pattern
-                    TemplateSpecificity spec = TMPL_SPEC_CATCHALL;
-                    TypeId match_type = LMD_TYPE_ANY;
-                    const char* match_tag = NULL;
-                    int match_tag_len = 0;
+                    void* func_ptr = find_func(ctx, func_name);
+                    if (func_ptr) {
+                        // determine specificity from the pattern
+                        TemplateSpecificity spec = TMPL_SPEC_CATCHALL;
+                        TypeId match_type = LMD_TYPE_ANY;
+                        const char* match_tag = NULL;
+                        int match_tag_len = 0;
 
-                    if (view->pattern) {
-                        AstNode* pat = view->pattern;
-                        if (pat->type) {
-                            TypeId tid = pat->type->type_id;
-                            if (tid == LMD_TYPE_TYPE) {
-                                // unwrap TypeType to get the actual matched type
-                                TypeType* tt = (TypeType*)pat->type;
-                                if (tt->type && tt->type->type_id != LMD_TYPE_ANY) {
-                                    match_type = tt->type->type_id;
-                                    spec = TMPL_SPEC_SIMPLE_TYPE;
-                                    // extract element tag for element patterns
-                                    if (match_type == LMD_TYPE_ELEMENT) {
-                                        TypeElmt* elmt_type = (TypeElmt*)tt->type;
-                                        if (elmt_type->name.str && elmt_type->name.length > 0) {
-                                            match_tag = elmt_type->name.str;
-                                            match_tag_len = (int)elmt_type->name.length;
-                                            spec = elmt_type->length > 0
-                                                ? TMPL_SPEC_ELMT_ATTR : TMPL_SPEC_ELMT_TAG;
+                        if (view->pattern) {
+                            AstNode* pat = view->pattern;
+                            if (pat->type) {
+                                TypeId tid = pat->type->type_id;
+                                if (tid == LMD_TYPE_TYPE) {
+                                    // unwrap TypeType to get the actual matched type
+                                    TypeType* tt = (TypeType*)pat->type;
+                                    if (tt->type && tt->type->type_id != LMD_TYPE_ANY) {
+                                        match_type = tt->type->type_id;
+                                        spec = TMPL_SPEC_SIMPLE_TYPE;
+                                        // extract element tag for element patterns
+                                        if (match_type == LMD_TYPE_ELEMENT) {
+                                            TypeElmt* elmt_type = (TypeElmt*)tt->type;
+                                            if (elmt_type->name.str && elmt_type->name.length > 0) {
+                                                match_tag = elmt_type->name.str;
+                                                match_tag_len = (int)elmt_type->name.length;
+                                                spec = elmt_type->length > 0
+                                                    ? TMPL_SPEC_ELMT_ATTR : TMPL_SPEC_ELMT_TAG;
+                                            }
                                         }
                                     }
+                                } else if (tid != LMD_TYPE_ANY) {
+                                    match_type = tid;
+                                    spec = TMPL_SPEC_SIMPLE_TYPE;
                                 }
-                            } else if (tid != LMD_TYPE_ANY) {
-                                match_type = tid;
-                                spec = TMPL_SPEC_SIMPLE_TYPE;
                             }
                         }
-                    }
 
-                    // named templates have highest specificity
-                    if (view->name) spec = TMPL_SPEC_NAMED;
+                        // named templates have highest specificity
+                        if (view->name) spec = TMPL_SPEC_NAMED;
 
-                    const char* tmpl_name = view->name ? view->name->chars : NULL;
-                    template_registry_add(g_template_registry,
-                        tmpl_name, view->is_edit,
-                        (fn_ptr)func_ptr, spec,
-                        match_type, match_tag, match_tag_len,
-                        0, 0);
+                        const char* tmpl_name = view->name ? view->name->chars : NULL;
+                        template_registry_add(g_template_registry,
+                            tmpl_name, view->is_edit,
+                            (fn_ptr)func_ptr, spec,
+                            match_type, match_tag, match_tag_len,
+                            0, 0);
 
-                    // get the just-added entry (it's the last one)
-                    TemplateEntry* tmpl_entry = g_template_registry->last;
+                        // get the just-added entry (it's the last one)
+                        TemplateEntry* tmpl_entry = g_template_registry->last;
 
-                    // set template_ref for state store keying
-                    // func_name is stack-local, so we need a persistent copy
-                    if (tmpl_name) {
-                        tmpl_entry->template_ref = tmpl_name;
-                    } else {
-                        tmpl_entry->template_ref = name_pool_create_len(tp->name_pool, func_name, strlen(func_name))->chars;
-                    }
-
-                    // register event handlers on the template entry
-                    int hidx = 0;
-                    for (AstEventHandler* h = view->handler; h; h = h->next_handler) {
-                        char hname[64];
-                        snprintf(hname, sizeof(hname), "%s_h%d", func_name, hidx++);
-                        void* hptr = find_func(ctx, hname);
-                        if (hptr) {
-                            const char* ename = h->event ? h->event->chars : "unknown";
-                            template_entry_add_handler(tmpl_entry, ename, (fn_ptr)hptr);
+                        // set template_ref for state store keying
+                        // func_name is stack-local, so we need a persistent copy
+                        if (tmpl_name) {
+                            tmpl_entry->template_ref = tmpl_name;
                         } else {
-                            log_error("MIR Direct: handler function '%s' not found", hname);
+                            tmpl_entry->template_ref = name_pool_create_len(tp->name_pool, func_name, strlen(func_name))->chars;
                         }
-                    }
 
-                    log_debug("registered template '%s' func=%s spec=%d type=%d handlers=%d",
-                        tmpl_name ? tmpl_name : "(anonymous)", func_name,
-                        (int)spec, (int)match_type, hidx);
-                } else {
-                    log_error("MIR Direct: view function '%s' not found after JIT", func_name);
+                        // register event handlers on the template entry
+                        int hidx = 0;
+                        for (AstEventHandler* h = view->handler; h; h = h->next_handler) {
+                            char hname[64];
+                            snprintf(hname, sizeof(hname), "%s_h%d", func_name, hidx++);
+                            void* hptr = find_func(ctx, hname);
+                            if (hptr) {
+                                const char* ename = h->event ? h->event->chars : "unknown";
+                                template_entry_add_handler(tmpl_entry, ename, (fn_ptr)hptr);
+                            } else {
+                                log_error("MIR Direct: handler function '%s' not found", hname);
+                            }
+                        }
+
+                        log_debug("registered template '%s' func=%s spec=%d type=%d handlers=%d",
+                            tmpl_name ? tmpl_name : "(anonymous)", func_name,
+                            (int)spec, (int)match_type, hidx);
+                    } else {
+                        log_error("MIR Direct: view function '%s' not found after JIT", func_name);
+                    }
                 }
+                view_child = (tmpl_child->node_type == AST_NODE_CONTENT) ? view_child->next : NULL;
             }
-            tmpl_child = tmpl_child->next;
+            tmpl_child = next_tmpl_child;
         }
     }
 

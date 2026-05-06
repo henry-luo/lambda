@@ -824,10 +824,14 @@ Item ui_copy_string_to_arena(Arena* arena, Item str_item) {
     size_t total = sizeof(DomText) + sizeof(String) + src->len + 1;
     DomText* dt = (DomText*)arena_calloc(arena, total);
     dt->node_type = DOM_NODE_TEXT;
+    dt->content_type = DOM_TEXT_STRING;
     String* dst = dom_text_to_string(dt);
     dst->len = src->len;
     dst->is_ascii = src->is_ascii;
     memcpy(dst->chars, src->chars, src->len + 1);
+    dt->native_string = dst;
+    dt->text = dst->chars;
+    dt->length = dst->len;
     return {.item = s2it(dst)};
 }
 
@@ -838,11 +842,16 @@ Item ui_merge_strings_to_arena(Arena* arena, String* prev, String* next) {
     size_t total = sizeof(DomText) + sizeof(String) + new_len + 1;
     DomText* dt = (DomText*)arena_calloc(arena, total);
     dt->node_type = DOM_NODE_TEXT;
+    dt->content_type = DOM_TEXT_STRING;
     String* merged = dom_text_to_string(dt);
     merged->len = new_len;
+    merged->is_ascii = prev->is_ascii && next->is_ascii;
     memcpy(merged->chars, prev->chars, prev->len);
     memcpy(merged->chars + prev->len, next->chars, next->len);
     merged->chars[new_len] = '\0';
+    dt->native_string = merged;
+    dt->text = merged->chars;
+    dt->length = merged->len;
     return {.item = s2it(merged)};
 }
 

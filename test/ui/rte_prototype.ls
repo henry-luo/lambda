@@ -18,8 +18,32 @@
 // templates and the full `edit_open` -> `edit_exec` wiring through
 // `lambda.package.editor.mod_editor` land in S2.2.
 
+import lambda.package.editor.mod_doc
+import lambda.package.editor.mod_editor
+import lambda.package.editor.mod_source_pos
+
 let SOURCE_PATH = './test/input/simple.md'
 let initial_doc^err = input(SOURCE_PATH, 'markdown')
+let initial_body = initial_doc[0]
+
+fn mark_to_editor(item) {
+  if (type(item) == string) { text(item) }
+  else if (type(item) == element) { node(name(item), [for (i in 0 to len(item) - 1) mark_to_editor(item[i])]) }
+  else { text(string(item)) }
+}
+
+let initial_editor_doc = node('doc', [for (child in initial_body) mark_to_editor(child)])
+let initial_title_len = len(doc_text(node_at(initial_editor_doc, [0])))
+let initial_selection = text_selection(pos([0, 0], initial_title_len), pos([0, 0], initial_title_len))
+let initial_editor = edit_open(initial_editor_doc, null, initial_selection)
+
+fn event_selection(evt, fallback) {
+  if (evt.source_selection != null) { evt.source_selection }
+  else if (evt.source_pos != null) { text_selection(evt.source_pos, evt.source_pos) }
+  else { fallback }
+}
+
+fn editor_with_event_selection(ed, evt) => edit_set_selection(ed, event_selection(evt, ed.selection))
 
 // ============================================================================
 // Per-tag render templates — markdown Mark tree -> HTML
@@ -36,6 +60,30 @@ let initial_doc^err = input(SOURCE_PATH, 'markdown')
 // values that Radiant's DOM builder otherwise rejects).
 
 view any { ~ }
+
+view map {
+  if (~.kind == 'text') { ~.text }
+  else if (~.kind == 'node' and ~.tag == 'doc') { <div class:"doc-body"; *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'h1') { <h1; *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'h2') { <h2; *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'h3') { <h3; *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'h4') { <h4; *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'h5') { <h5; *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'h6') { <h6; *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and (~.tag == 'p' or ~.tag == 'paragraph')) { <p; *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'span') { <span; *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'strong') { <strong; *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'em') { <em; *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'u') { <u; *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and (~.tag == 'code' or ~.tag == 'code_block')) { <code; *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and (~.tag == 'ul' or ~.tag == 'list')) { <ul; *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'ol') { <ol; *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'li') { <li; *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'blockquote') { <blockquote; *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'hr') { <hr> }
+  else if (~.kind == 'node') { <div; *[for (c in ~.content) apply(c)]> }
+  else { "" }
+}
 
 view <h1> { <h1; apply;> }
 view <h2> { <h2; apply;> }
@@ -74,7 +122,7 @@ on click() {
 // Top-level reactive editor application
 // ============================================================================
 
-edit <rte_app> state status: ("opened:" ++ SOURCE_PATH), markdown_output: "" {
+edit <rte_app> state editor: initial_editor, status: ("opened:" ++ SOURCE_PATH), markdown_output: "" {
   <div class:"rte-app"
     <div id:"toolbar", class:"toolbar"
       apply(<toolbar_button cmd:"btn-bold",      label:"B">)
@@ -91,15 +139,26 @@ edit <rte_app> state status: ("opened:" ++ SOURCE_PATH), markdown_output: "" {
       apply(<toolbar_button cmd:"btn-redo",      label:"Redo">)
       apply(<toolbar_button cmd:"btn-save",      label:"Save">)
     >
-    <div id:"doc", contenteditable:"true", class:"doc-host"
-      // S2.1: splat the parsed markdown body through the per-tag templates.
-      // S2.2 swaps `initial_doc[0]` for `editor.doc` once mod_editor.ls
-      // integration lands.
-      apply(initial_doc[0])
+    <div id:"doc", contenteditable:"true", tabindex:"0", class:"doc-host"
+      apply(editor.doc)
     >
     <pre id:"markdown-output"; markdown_output>
     <div id:"status"; status>
   >
+}
+on beforeinput(evt) {
+  if (evt.input_intent != null) {
+    editor = edit_dispatch(editor, evt.input_intent)
+    status = evt.input_type
+  } else {
+    status = evt.input_type
+  }
+}
+on click(evt) {
+  if (evt.source_selection != null or evt.source_pos != null) {
+    editor = editor_with_event_selection(editor, evt)
+    status = "selected"
+  }
 }
 on rte_cmd(evt) {
   // S2.1 dispatch stub — proves toolbar -> state path. S2.2 replaces these
@@ -107,8 +166,23 @@ on rte_cmd(evt) {
   // imported `mod_editor` module.
   let cmd = evt
   if (cmd == "btn-save") {
-    markdown_output = format(initial_doc, 'markdown')
+    markdown_output = doc_text(editor.doc)
     status = "saved"
+  } else if (cmd == "btn-bold") {
+    editor = edit_exec(editor, edit_cmd_toggle_mark('strong'))
+    status = cmd
+  } else if (cmd == "btn-italic") {
+    editor = edit_exec(editor, edit_cmd_toggle_mark('em'))
+    status = cmd
+  } else if (cmd == "btn-underline") {
+    editor = edit_exec(editor, edit_cmd_toggle_mark('u'))
+    status = cmd
+  } else if (cmd == "btn-undo") {
+    editor = edit_exec(editor, edit_cmd_history_undo())
+    status = cmd
+  } else if (cmd == "btn-redo") {
+    editor = edit_exec(editor, edit_cmd_history_redo())
+    status = cmd
   } else {
     status = cmd
   }

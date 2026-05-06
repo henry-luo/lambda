@@ -61,6 +61,17 @@ static void dom_append_to_sibling_chain(DomElement* parent, DomNode* child) {
     }
 }
 
+static DomText* dom_text_from_fat_string(DomDocument* doc, String* string_value) {
+    if (!doc || !doc->arena || !string_value) return nullptr;
+    if (!arena_owns(doc->arena, string_value)) return nullptr;
+
+    DomText* candidate = string_to_dom_text(string_value);
+    if (!arena_owns(doc->arena, candidate)) return nullptr;
+    if (candidate->node_type != DOM_NODE_TEXT) return nullptr;
+    if (candidate->native_string != string_value) return nullptr;
+    return candidate;
+}
+
 // helper: extract a name string from a CssValue (works for counter names, attr names, etc.)
 static const char* css_value_extract_name(const CssValue* value) {
     if (!value) return nullptr;
@@ -2138,8 +2149,9 @@ bool dom_text_set_content(DomText* text_node, const char* new_content) {
 
     if (parent->doc->input->ui_mode) {
         // Copy DOM properties from old text_node to new embedded DomText
-        DomText* new_dt = string_to_dom_text(new_string_item.get_string());
-        if (new_dt->node_type == DOM_NODE_TEXT) {
+        String* new_string = new_string_item.get_string();
+        DomText* new_dt = dom_text_from_fat_string(parent->doc, new_string);
+        if (new_dt) {
             new_dt->content_type = text_node->content_type;
             new_dt->rect = text_node->rect;
             new_dt->font = text_node->font;
@@ -2295,11 +2307,12 @@ DomText* dom_element_append_text(DomElement* parent, const char* text_content) {
     DomText* text_node;
     if (parent->doc->input->ui_mode) {
         // Check if DomText is embedded before the String (arena-allocated)
-        DomText* candidate = string_to_dom_text(string_item.get_string());
-        if (candidate->node_type == DOM_NODE_TEXT) {
+        String* string_value = string_item.get_string();
+        DomText* candidate = dom_text_from_fat_string(parent->doc, string_value);
+        if (candidate) {
             text_node = candidate;
         } else {
-            text_node = dom_text_create(string_item.get_string(), parent);
+            text_node = dom_text_create(string_value, parent);
             if (text_node) dom_append_to_sibling_chain(parent, text_node);
         }
     } else {
@@ -3024,8 +3037,8 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
                     // (done by ui_copy_string_to_arena / MarkBuilder). Non-arena strings
                     // (GC heap, const pool) do NOT have this prefix — using string_to_dom_text
                     // on them would produce a bogus pointer that corrupts adjacent memory.
-                    DomText* candidate = string_to_dom_text(text_str);
-                    if (candidate->node_type == DOM_NODE_TEXT) {
+                    DomText* candidate = dom_text_from_fat_string(doc, text_str);
+                    if (candidate) {
                         text_node = candidate;
                         text_node->parent = dom_elem;
                     } else {
@@ -3073,8 +3086,8 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
                         if (text_str && text_str->len > 0) {
                             DomText* text_node;
                             if (ui_mode) {
-                                DomText* candidate = string_to_dom_text(text_str);
-                                if (candidate->node_type == DOM_NODE_TEXT) {
+                                DomText* candidate = dom_text_from_fat_string(doc, text_str);
+                                if (candidate) {
                                     text_node = candidate;
                                     text_node->parent = dom_elem;
                                 } else {
@@ -3109,8 +3122,8 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
                                     if (s && s->len > 0) {
                                         DomText* tn;
                                         if (ui_mode) {
-                                            DomText* candidate = string_to_dom_text(s);
-                                            if (candidate->node_type == DOM_NODE_TEXT) {
+                                            DomText* candidate = dom_text_from_fat_string(doc, s);
+                                            if (candidate) {
                                                 tn = candidate;
                                                 tn->parent = dom_elem;
                                             } else {
