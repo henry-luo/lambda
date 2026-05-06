@@ -206,22 +206,81 @@ static std::vector<UiTestInfo> discover_ui_tests() {
 
 static std::vector<UiTestInfo> g_ui_tests = discover_ui_tests();
 
+static std::string sanitize_gtest_param_name(const std::string& test_name) {
+    std::string name = test_name;
+    for (char& c : name) {
+        if (c == '-' || c == '.' || c == ' ') c = '_';
+    }
+    return name;
+}
+
+static bool gtest_wildcard_match(const char* pattern, const char* text) {
+    const char* star = nullptr;
+    const char* retry_text = nullptr;
+    while (*text) {
+        if (*pattern == '?' || *pattern == *text) {
+            pattern++;
+            text++;
+        } else if (*pattern == '*') {
+            star = pattern++;
+            retry_text = text;
+        } else if (star) {
+            pattern = star + 1;
+            text = ++retry_text;
+        } else {
+            return false;
+        }
+    }
+    while (*pattern == '*') pattern++;
+    return *pattern == '\0';
+}
+
+static bool gtest_pattern_list_matches(const std::string& patterns, const std::string& name) {
+    size_t start = 0;
+    while (start <= patterns.size()) {
+        size_t end = patterns.find(':', start);
+        if (end == std::string::npos) end = patterns.size();
+        if (end > start) {
+            std::string pattern = patterns.substr(start, end - start);
+            if (gtest_wildcard_match(pattern.c_str(), name.c_str())) return true;
+        }
+        if (end == patterns.size()) break;
+        start = end + 1;
+    }
+    return false;
+}
+
+static bool gtest_filter_matches_ui_test(const UiTestInfo& info, const std::string& filter) {
+    std::string positive = filter.empty() ? "*" : filter;
+    std::string negative;
+    size_t dash = positive.find('-');
+    if (dash != std::string::npos) {
+        negative = positive.substr(dash + 1);
+        positive = positive.substr(0, dash);
+        if (positive.empty()) positive = "*";
+    }
+
+    std::string full_name = "UIAutomation/UIAutomationTest.RunTest/" + sanitize_gtest_param_name(info.test_name);
+    if (!gtest_pattern_list_matches(positive, full_name)) return false;
+    if (!negative.empty() && gtest_pattern_list_matches(negative, full_name)) return false;
+    return true;
+}
+
 // ============================================================================
 // Run a single UI test via lambda.exe view
 // ============================================================================
 
 struct UiTestResult {
-    int exit_code;
-    int assertions_passed;
-    int assertions_failed;
+    bool executed = false;
+    int exit_code = -1;
+    int assertions_passed = 0;
+    int assertions_failed = 0;
     std::string output;    // combined stdout + stderr
 };
 
 static UiTestResult run_ui_test(const UiTestInfo& info) {
     UiTestResult result;
-    result.exit_code = -1;
-    result.assertions_passed = 0;
-    result.assertions_failed = 0;
+    result.executed = true;
 
     // Build command: ./lambda.exe view <html> --event-file <json>
     // The window auto-closes when simulation completes (auto_close=true in EventSimContext).
@@ -268,19 +327,20 @@ static UiTestResult run_ui_test(const UiTestInfo& info) {
 
 static std::vector<UiTestResult> g_ui_results;
 
-static void run_ui_tests_parallel(int jobs) {
+static void run_ui_tests_parallel(const std::vector<size_t>& indices, int jobs) {
     size_t n = g_ui_tests.size();
     g_ui_results.resize(n);
-    if (n == 0) return;
+    if (indices.empty()) return;
 
-    int num_threads = std::min(jobs, (int)n);
+    int num_threads = std::min(jobs, (int)indices.size());
     std::atomic<size_t> next_idx{0};
 
     auto worker = [&]() {
         while (true) {
             size_t idx = next_idx.fetch_add(1);
-            if (idx >= n) break;
-            g_ui_results[idx] = run_ui_test(g_ui_tests[idx]);
+            if (idx >= indices.size()) break;
+            size_t test_idx = indices[idx];
+            g_ui_results[test_idx] = run_ui_test(g_ui_tests[test_idx]);
         }
     };
 
@@ -327,6 +387,10 @@ TEST_P(UIAutomationTest, RunTest) {
         GTEST_SKIP() << info.test_name << " requires native GUI window (skip_headless=true)";
     }
 
+    if (idx >= g_ui_results.size() || !g_ui_results[idx].executed) {
+        if (g_ui_results.size() < g_ui_tests.size()) g_ui_results.resize(g_ui_tests.size());
+        g_ui_results[idx] = run_ui_test(info);
+    }
     const UiTestResult& result = g_ui_results[idx];
 
     // Always print assertion summary so we can verify tests actually assert
@@ -368,12 +432,7 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Range(size_t(0), g_ui_tests.size()),
     [](const ::testing::TestParamInfo<size_t>& info) {
         if (info.param < g_ui_tests.size()) {
-            std::string name = g_ui_tests[info.param].test_name;
-            // Replace characters invalid in GTest param names
-            for (char& c : name) {
-                if (c == '-' || c == '.' || c == ' ') c = '_';
-            }
-            return name;
+            return sanitize_gtest_param_name(g_ui_tests[info.param].test_name);
         }
         return std::string("test_") + std::to_string(info.param);
     }
@@ -416,19 +475,31 @@ int main(int argc, char** argv) {
         std::cerr << "WARNING: No UI test pairs found in " UI_TESTS_DIR "\n";
         std::cerr << "         Create test_*.html + test_*.json pairs to add tests.\n\n";
     } else {
-        std::cout << "Found " << g_ui_tests.size() << " UI test(s), running with "
-                  << jobs << " parallel job(s):\n";
-        for (const auto& t : g_ui_tests) {
-            std::cout << "  • " << t.test_name << "\n";
+        std::string gtest_filter = ::testing::GTEST_FLAG(filter);
+        std::vector<size_t> selected_indices;
+        for (size_t idx = 0; idx < g_ui_tests.size(); idx++) {
+            const UiTestInfo& info = g_ui_tests[idx];
+            if (!info.skip_headless && gtest_filter_matches_ui_test(info, gtest_filter)) {
+                selected_indices.push_back(idx);
+            }
+        }
+
+        std::cout << "Found " << g_ui_tests.size() << " UI test(s), selected "
+                  << selected_indices.size() << " for pre-run with "
+                  << jobs << " parallel job(s)";
+        if (gtest_filter != "*") std::cout << " using filter: " << gtest_filter;
+        std::cout << ":\n";
+        for (size_t idx : selected_indices) {
+            std::cout << "  • " << g_ui_tests[idx].test_name << "\n";
         }
         std::cout << "\n";
 
-        // Run all tests in parallel before GTest checks results
+        // Run selected tests in parallel before GTest checks results.
         auto t0 = std::chrono::steady_clock::now();
-        run_ui_tests_parallel(jobs);
+        run_ui_tests_parallel(selected_indices, jobs);
         auto t1 = std::chrono::steady_clock::now();
         auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
-        std::cout << "All " << g_ui_tests.size() << " tests executed in "
+        std::cout << selected_indices.size() << " selected test(s) executed in "
                   << ms << " ms (" << jobs << " parallel jobs)\n\n";
     }
 
