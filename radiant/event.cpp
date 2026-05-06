@@ -445,6 +445,7 @@ typedef enum InputIntentType {
     INPUT_INTENT_DELETE_CONTENT_BACKWARD,
     INPUT_INTENT_DELETE_CONTENT_FORWARD,
     INPUT_INTENT_DELETE_WORD_BACKWARD,
+    INPUT_INTENT_DELETE_BY_CUT,
     INPUT_INTENT_INSERT_FROM_PASTE,
     INPUT_INTENT_COMPOSITION_START,
     INPUT_INTENT_INSERT_COMPOSITION_TEXT,
@@ -465,11 +466,23 @@ typedef struct InputIntent {
     const char* data;
     const char* html_data;
     const char* data_mime;
+    char* owned_data;
+    char* owned_html_data;
     int key;
     int mods;
     bool is_composing;
     uint32_t composition_caret;
 } InputIntent;
+
+static void input_intent_dispose(InputIntent* intent) {
+    if (!intent) return;
+    free(intent->owned_data);
+    free(intent->owned_html_data);
+    intent->owned_data = nullptr;
+    intent->owned_html_data = nullptr;
+    intent->data = nullptr;
+    intent->html_data = nullptr;
+}
 
 static const char* input_intent_type_name(InputIntentType type) {
     switch (type) {
@@ -479,6 +492,7 @@ static const char* input_intent_type_name(InputIntentType type) {
         case INPUT_INTENT_DELETE_CONTENT_BACKWARD: return "deleteContentBackward";
         case INPUT_INTENT_DELETE_CONTENT_FORWARD:  return "deleteContentForward";
         case INPUT_INTENT_DELETE_WORD_BACKWARD:    return "deleteWordBackward";
+        case INPUT_INTENT_DELETE_BY_CUT:           return "deleteByCut";
         case INPUT_INTENT_INSERT_FROM_PASTE:       return "insertFromPaste";
         case INPUT_INTENT_COMPOSITION_START:       return "compositionStart";
         case INPUT_INTENT_INSERT_COMPOSITION_TEXT: return "insertCompositionText";
@@ -529,13 +543,21 @@ static bool input_intent_from_key_event(const KeyEvent* key_event, InputIntent* 
         return true;
     }
     if (primary && key_event->key == RDT_KEY_V) {
-        const char* clip = clipboard_get_text();
         const char* html = clipboard_store_read_mime("text/html");
+        if (html && html[0]) {
+            out->owned_html_data = strdup(html);
+            out->html_data = out->owned_html_data;
+        }
+        const char* clip = clipboard_get_text();
         if ((!clip || !clip[0]) && (!html || !html[0])) return false;
         out->type = INPUT_INTENT_INSERT_FROM_PASTE;
-        out->data = clip ? clip : "";
-        out->html_data = html;
-        out->data_mime = (html && html[0]) ? "text/html" : "text/plain";
+        out->owned_data = strdup(clip ? clip : "");
+        out->data = out->owned_data;
+        out->data_mime = (out->html_data && out->html_data[0]) ? "text/html" : "text/plain";
+        return true;
+    }
+    if (primary && key_event->key == RDT_KEY_X) {
+        out->type = INPUT_INTENT_DELETE_BY_CUT;
         return true;
     }
     if (primary && key_event->key == RDT_KEY_A) {
@@ -1184,6 +1206,20 @@ static bool dispatch_rich_beforeinput(EventContext* evcon, View* target,
     if (!evcon || !target || !intent || intent->type == INPUT_INTENT_NONE) return false;
     DomElement* editable = rich_editable_from_target(target);
     if (!editable) return false;
+
+    if (intent->type == INPUT_INTENT_DELETE_BY_CUT) {
+        RadiantState* state = (RadiantState*)evcon->ui_context->document->state;
+        if (!state || !selection_has(state)) return false;
+        Pool* temp_pool = pool_create();
+        Arena* temp_arena = arena_create_default(temp_pool);
+        char* text = extract_selected_text(state, temp_arena);
+        if (text) {
+            clipboard_copy_text(text);
+            log_debug("rich cut: copied %zu chars", strlen(text));
+        }
+        arena_destroy(temp_arena);
+        pool_destroy(temp_pool);
+    }
 
     bool handled = dispatch_lambda_handler(evcon, target, "beforeinput", intent);
     if (!handled) {
@@ -4770,10 +4806,13 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         // text-control path.
         {
             InputIntent intent;
-            if (intent_target && input_intent_from_key_event(key_event, &intent) &&
-                dispatch_rich_beforeinput(&evcon, intent_target, &intent)) {
-                evcon.need_repaint = true;
-                break;
+            if (intent_target && input_intent_from_key_event(key_event, &intent)) {
+                bool handled = dispatch_rich_beforeinput(&evcon, intent_target, &intent);
+                input_intent_dispose(&intent);
+                if (handled) {
+                    evcon.need_repaint = true;
+                    break;
+                }
             }
         }
 

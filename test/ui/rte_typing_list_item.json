@@ -1,0 +1,14 @@
+{
+  "name": "RTE typing in list item advances caret",
+  "html": "test/ui/rte_prototype.ls",
+  "viewport": {"width": 1200, "height": 800},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "click", "target": {"text": "Item 1"}},
+    {"type": "type", "text": "ABC"},
+    {"type": "wait", "ms": 120},
+    {"type": "assert_text", "target": {"selector": "#doc li"}, "contains": "ABC"},
+    {"type": "assert_caret", "view_type": 1, "char_offset": 4},
+    {"type": "assert_selection", "is_collapsed": true, "check_dom": true}
+  ]
+}

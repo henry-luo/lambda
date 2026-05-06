@@ -38,7 +38,11 @@ fn editor_attrs(item) {
 
 fn mark_to_editor(item) {
   if (type(item) == string) { text(item) }
-  else if (type(item) == element) { node_attrs(name(item), editor_attrs(item), [for (i in 0 to len(item) - 1) mark_to_editor(item[i])]) }
+  else if (type(item) == element) {
+    let kids = [for (i in 0 to len(item) - 1) mark_to_editor(item[i])]
+    let tag = if (name(item) == 'code' and len(kids) == 1 and is_text(kids[0]) and kids[0].text.contains("\n")) { 'code_block' } else { name(item) }
+    node_attrs(tag, editor_attrs(item), kids)
+  }
   else { text(string(item)) }
 }
 
@@ -107,7 +111,8 @@ view map {
   else if (~.kind == 'node' and ~.tag == 'strong') { <strong; *[for (c in ~.content) apply(c)]> }
   else if (~.kind == 'node' and ~.tag == 'em') { <em; *[for (c in ~.content) apply(c)]> }
   else if (~.kind == 'node' and ~.tag == 'u') { <u; *[for (c in ~.content) apply(c)]> }
-  else if (~.kind == 'node' and (~.tag == 'code' or ~.tag == 'code_block')) { <code; *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and (~.tag == 'code_block' or ~.tag == 'pre')) { <pre; *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'code') { <code; *[for (c in ~.content) apply(c)]> }
   else if (~.kind == 'node' and (~.tag == 'ul' or ~.tag == 'list')) { <ul; *[for (c in ~.content) apply(c)]> }
   else if (~.kind == 'node' and ~.tag == 'ol') { <ol; *[for (c in ~.content) apply(c)]> }
   else if (~.kind == 'node' and ~.tag == 'li') { <li; *[for (c in ~.content) apply(c)]> }
@@ -269,6 +274,9 @@ on rte_cmd(evt) {
                              color: #475569; }
       .doc-host code { background: #f1f3f5; padding: 1px 5px; border-radius: 3px;
                        font-family: 'SF Mono', Menlo, monospace; font-size: 0.92em; }
+      .doc-host pre { background: #f1f3f5; padding: 8px 10px; border-radius: 4px;
+              font-family: 'SF Mono', Menlo, monospace; font-size: 0.92em;
+              line-height: 1.45; white-space: pre-wrap; margin: 0.7em 0; }
       .doc-host a { color: #1d4ed8; text-decoration: underline; }
       #markdown-output { display: none; }
       #status { padding: 8px 14px; background: #f1f3f5; color: #555;

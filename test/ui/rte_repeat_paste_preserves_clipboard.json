@@ -1,0 +1,16 @@
+{
+  "name": "RTE repeated paste preserves clipboard text",
+  "html": "test/ui/rte_prototype.ls",
+  "viewport": {"width": 1200, "height": 800},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "click", "target": {"text": "basic functionality"}},
+    {"type": "paste_text", "text": "ZZ"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_clipboard", "equals": "ZZ"},
+    {"type": "key_combo", "key": "v", "mods_str": "ctrl"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_clipboard", "equals": "ZZ"},
+    {"type": "assert_text", "target": {"selector": "#doc p"}, "contains": "testingZZZZ basic functionality"}
+  ]
+}

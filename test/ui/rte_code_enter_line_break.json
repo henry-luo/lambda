@@ -1,0 +1,16 @@
+{
+  "name": "RTE Enter in code block inserts a visible line break",
+  "html": "test/ui/rte_prototype.ls",
+  "viewport": {"width": 1200, "height": 800},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "assert_count", "target": {"selector": "#doc pre"}, "count": 1},
+    {"type": "click", "target": {"text": "hello"}},
+    {"type": "key_press", "key": "enter"},
+    {"type": "wait", "ms": 120},
+    {"type": "assert_count", "target": {"selector": "#doc pre"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": "#doc pre"}, "contains": "function \nhello()"},
+    {"type": "assert_text", "target": {"selector": "#doc pre"}, "contains": "console.log"},
+    {"type": "assert_selection", "is_collapsed": true, "check_dom": true}
+  ]
+}

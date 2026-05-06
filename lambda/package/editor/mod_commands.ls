@@ -1595,6 +1595,25 @@ pub fn cmd_split_block(state) {
   }
 }
 
+fn code_block_path_for_selection(state) {
+  let sel = state.selection
+  if (sel == null or sel.kind != 'text' or not sel_single_leaf(sel)) { null }
+  else {
+    let block_path = parent_path(sel.anchor.path)
+    let block = node_at(state.doc, block_path)
+    let parent = node_at(state.doc, parent_path(block_path))
+    if (block == null or not is_node(block)) { null }
+    else if (block.tag == state_code_block_tag(state) or block.tag == 'pre') { block_path }
+    else if (block.tag == 'code' and parent != null and is_node(parent) and parent.tag == 'doc') { block_path }
+    else { null }
+  }
+}
+
+pub fn cmd_insert_paragraph(state) {
+  if (code_block_path_for_selection(state) != null) { cmd_insert_text(state, "\n") }
+  else { cmd_split_block(state) }
+}
+
 // ---------------------------------------------------------------------------
 // chain — try each command in turn; return the first non-null transaction
 // ---------------------------------------------------------------------------

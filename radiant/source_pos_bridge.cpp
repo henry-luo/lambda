@@ -171,6 +171,30 @@ static const SourcePathC* path_table_get(Item source_item,
     return hit ? &hit->path : NULL;
 }
 
+static bool is_generated_marker_node(DomNode* node) {
+    return node && node->node_type == DOM_NODE_ELEMENT && node->view_type == RDT_VIEW_MARKER;
+}
+
+static int source_child_index(DomNode* node) {
+    if (!node) return -1;
+    int index = 0;
+    for (DomNode* sib = node->prev_sibling; sib; sib = sib->prev_sibling) {
+        if (!is_generated_marker_node(sib)) index++;
+    }
+    return index;
+}
+
+static DomNode* source_child_at(DomElement* de, int target_idx) {
+    if (!de || target_idx < 0) return NULL;
+    int idx = 0;
+    for (DomNode* c = de->first_child; c; c = c->next_sibling) {
+        if (is_generated_marker_node(c)) continue;
+        if (idx == target_idx) return c;
+        idx++;
+    }
+    return NULL;
+}
+
 bool render_map_reverse_lookup_with_path(Item result_node,
                                          RenderMapLookup* out_lookup,
                                          SourcePathC* out_path) {
@@ -213,7 +237,7 @@ bool source_pos_from_dom_boundary(const DomBoundary* boundary,
     if (is_text_leaf) {
         DomText* tn = (DomText*)node;
         leaf_u8_offset = dom_text_utf16_to_utf8(tn, boundary->offset);
-        leaf_child_index = (int)dom_node_child_index(node);
+        leaf_child_index = source_child_index(node);
         node = node->parent;
         if (!node) return false;
     }
@@ -348,18 +372,14 @@ static bool try_resolve_at_element(DomElement* de, const SourcePosC* pos,
             path_equals_prefix(&pos->path, pos->path.depth - 1, &recorded)) {
             // Locate the text child at the recorded index.
             int target_idx = pos->path.indices[pos->path.depth - 1];
-            int idx = 0;
-            for (DomNode* c = de->first_child; c; c = c->next_sibling) {
-                if (idx == target_idx) {
-                    DomText* tn = first_text_descendant(c);
-                    if (tn) {
-                        out->node = (DomNode*)tn;
-                        out->offset = dom_text_utf8_to_utf16(tn, pos->offset);
-                        matched = true;
-                    }
-                    break;
+            DomNode* child = source_child_at(de, target_idx);
+            if (child) {
+                DomText* tn = first_text_descendant(child);
+                if (tn) {
+                    out->node = (DomNode*)tn;
+                    out->offset = dom_text_utf8_to_utf16(tn, pos->offset);
+                    matched = true;
                 }
-                idx++;
             }
         }
     }

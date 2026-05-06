@@ -1,0 +1,16 @@
+{
+  "name": "RTE Ctrl+X cuts the active selection",
+  "html": "test/ui/rte_prototype.ls",
+  "viewport": {"width": 1200, "height": 800},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "mouse_drag", "target": {"text": "simple markdown"}, "to_target": {"text": "testing basic"}, "button": 0},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+    {"type": "key_combo", "key": "x", "mods_str": "ctrl"},
+    {"type": "wait", "ms": 120},
+    {"type": "assert_clipboard", "contains": "mple markdown document fo"},
+    {"type": "assert_text", "target": {"selector": "#doc p"}, "contains": "This is a sir testing basic functionality."},
+    {"type": "assert_selection", "is_collapsed": true, "check_dom": true}
+  ]
+}
