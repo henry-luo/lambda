@@ -1180,7 +1180,7 @@ pub fn cmd_format_italic(state) {
 }
 
 pub fn cmd_format_underline(state) {
-  let mark = 'underline'
+  let mark = 'u'
   cmd_toggle_mark(state, mark)
 }
 
