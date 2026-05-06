@@ -755,6 +755,7 @@ static std::unordered_map<std::string, std::string> g_harness_cache;
 // These are expensive to MIR-compile due to large regex/code; adding them to the
 // preamble avoids recompilation for every test that uses them.
 static std::unordered_set<std::string> g_preamble_includes;
+static std::mutex g_preamble_includes_mutex;
 static const char* PREAMBLE_INCLUDE_FILES[] = {
     "nativeFunctionMatcher.js",
     NULL
@@ -799,6 +800,7 @@ static std::string assemble_harness_source() {
         if (!src.empty()) {
             harness += src;
             harness += '\n';
+            std::lock_guard<std::mutex> lock(g_preamble_includes_mutex);
             g_preamble_includes.insert(*f);
         }
     }
@@ -836,7 +838,10 @@ static std::string assemble_test_source(const Test262Prepared& p) {
 
     for (auto& inc : p.includes) {
         // Skip includes already compiled into the preamble
-        if (g_preamble_includes.count(inc)) continue;
+        {
+            std::lock_guard<std::mutex> lock(g_preamble_includes_mutex);
+            if (g_preamble_includes.count(inc)) continue;
+        }
         const std::string& harness_src = get_harness_file(inc);
         if (!harness_src.empty()) {
             combined += harness_src;

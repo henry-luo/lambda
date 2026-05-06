@@ -100,7 +100,7 @@ extern "C" Item js_arraybuffer_new(int byte_length) {
     Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     m->type_id = LMD_TYPE_MAP;
     m->map_kind = MAP_KIND_ARRAYBUFFER;
-    m->type = (void*)&js_arraybuffer_type_marker;
+    m->type = ab->is_shared ? (void*)&js_sharedarraybuffer_type_marker : (void*)&js_arraybuffer_type_marker;
     m->data = ab;
     m->data_cap = 0;
 
@@ -882,13 +882,18 @@ extern "C" bool js_is_dataview(Item val) {
 }
 
 // Get JsDataView* from a Map, handling both original and upgraded layouts.
-static JsDataView* js_get_dataview_ptr(Map* m) {
+static JsDataView* js_get_dataview_ptr_from_map(Map* m) {
     if (m->type == (void*)&js_dataview_type_marker)
         return (JsDataView*)m->data;
     bool found = false;
     Item dv_val = js_map_get_fast_ext(m, "__dv__", 6, &found);
     if (found) return (JsDataView*)(uintptr_t)it2i(dv_val);
     return NULL;
+}
+
+extern "C" JsDataView* js_get_dataview_ptr(Item val) {
+    if (!js_is_dataview(val)) return NULL;
+    return js_get_dataview_ptr_from_map(val.map);
 }
 
 extern "C" Item js_dataview_new(Item buffer, Item offset_item, Item length_item) {
@@ -938,6 +943,7 @@ extern "C" Item js_dataview_new(Item buffer, Item offset_item, Item length_item)
     dv->buffer = ab;
     dv->byte_offset = byte_offset;
     dv->byte_length = byte_length;
+    dv->buffer_item = buffer.item;
 
     Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     m->type_id = LMD_TYPE_MAP;
@@ -975,7 +981,7 @@ static bool is_little_endian_system() {
 // DataView method dispatch
 extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, int argc) {
     if (!js_is_dataview(dv_item)) return (Item){.item = ITEM_NULL};
-    JsDataView* dv = js_get_dataview_ptr(dv_item.map);
+    JsDataView* dv = js_get_dataview_ptr_from_map(dv_item.map);
     if (!dv) return (Item){.item = ITEM_NULL};
 
     String* mname = it2s(method_name);
