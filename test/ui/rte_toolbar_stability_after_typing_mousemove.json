@@ -1,0 +1,15 @@
+{
+  "name": "RTE toolbar remains styled after typing and mouse move",
+  "html": "test/ui/rte_prototype.ls",
+  "viewport": {"width": 1200, "height": 800},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "assert_rect", "target": {"selector": "#toolbar .btn-bold"}, "height": 32, "tolerance": 6},
+    {"type": "click", "target": {"text": "basic functionality"}},
+    {"type": "type", "text": "fasdfsa sdf asdfsdf sadf asdf asdfasdfsadf sadf"},
+    {"type": "mouse_move", "x": 360, "y": 145},
+    {"type": "wait", "ms": 120},
+    {"type": "assert_rect", "target": {"selector": "#toolbar .btn-bold"}, "height": 32, "tolerance": 6},
+    {"type": "assert_rect", "target": {"selector": "#toolbar .btn-bold"}, "width": 32, "tolerance": 12}
+  ]
+}

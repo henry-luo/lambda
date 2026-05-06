@@ -1,0 +1,11 @@
+{
+  "name": "RTE double-click selects word",
+  "html": "test/ui/rte_prototype.ls",
+  "viewport": {"width": 1200, "height": 800},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "dblclick", "target": {"text": "simple markdown"}},
+    {"type": "wait", "ms": 120},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true}
+  ]
+}

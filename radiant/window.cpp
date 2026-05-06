@@ -401,6 +401,31 @@ static void mouse_button_callback(GLFWwindow* window, int button, int action, in
     event.mouse_button.x = xpos;
     event.mouse_button.y = ypos;
 
+    static double last_click_time = -1.0;
+    static double last_click_x = 0.0;
+    static double last_click_y = 0.0;
+    static int last_click_button = -1;
+    static uint8_t click_count = 1;
+    static uint8_t active_click_count = 1;
+    if (action == GLFW_PRESS) {
+        double dx = xpos - last_click_x;
+        double dy = ypos - last_click_y;
+        bool same_click_series = last_click_time >= 0.0 &&
+            button == last_click_button &&
+            event.mouse_button.timestamp - last_click_time <= 0.5 &&
+            dx * dx + dy * dy <= 16.0;
+        click_count = same_click_series ? (uint8_t)(click_count + 1) : 1;
+        if (click_count > 3) click_count = 3;
+        last_click_time = event.mouse_button.timestamp;
+        last_click_x = xpos;
+        last_click_y = ypos;
+        last_click_button = button;
+        active_click_count = click_count;
+    } else {
+        click_count = active_click_count;
+    }
+    event.mouse_button.clicks = click_count;
+
     // Map GLFW modifiers to RDT modifiers
     event.mouse_button.mods = 0;
     if (mods & GLFW_MOD_SHIFT) event.mouse_button.mods |= RDT_MOD_SHIFT;

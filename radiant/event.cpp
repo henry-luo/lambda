@@ -3919,6 +3919,24 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     }
                 }
 
+                if (!(event->mouse_button.mods & RDT_MOD_SHIFT)) {
+                    const char* text_buf = (const char*)text->text_data();
+                    uint32_t text_len = text_buf ? (uint32_t)strlen(text_buf) : 0;
+                    uint32_t click_off = char_offset < 0 ? 0 : (uint32_t)char_offset;
+                    if (click_off > text_len) click_off = text_len;
+                    if (event->mouse_button.clicks >= 3) {
+                        uint32_t start = te_line_start(text_buf, text_len, click_off);
+                        uint32_t end = te_line_end(text_buf, text_len, click_off);
+                        te_apply_byte_range(state, evcon.target, start, end);
+                    } else if (event->mouse_button.clicks == 2) {
+                        uint32_t start = te_word_start(text_buf, text_len, click_off);
+                        uint32_t end = te_word_end(text_buf, text_len, click_off);
+                        if (start != end) {
+                            te_apply_byte_range(state, evcon.target, start, end);
+                        }
+                    }
+                }
+
                 // Restore font
                 evcon.font = saved_font;
                 evcon.need_repaint = true;

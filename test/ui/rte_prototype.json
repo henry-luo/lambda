@@ -12,6 +12,7 @@
     {"type": "assert_count", "target": {"selector": "#doc ul li"}, "count": 3},
     {"type": "assert_count", "target": {"selector": "#doc blockquote"}, "count": 1},
     {"type": "assert_count", "target": {"selector": "#doc a[href]"}, "count": 1},
+    {"type": "assert_attribute", "target": {"selector": "#doc a"}, "attribute": "href", "equals": "https://example.com"},
     {"type": "assert_count", "target": {"selector": "#doc strong"}, "count": 1},
     {"type": "assert_count", "target": {"selector": "#doc em"}, "count": 1},
 

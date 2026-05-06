@@ -1,0 +1,15 @@
+{
+  "name": "RTE inserts typed text at clicked caret and advances caret",
+  "html": "test/ui/rte_prototype.ls",
+  "viewport": {"width": 1000, "height": 720},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "click", "target": {"text": "basic functionality"}},
+    {"type": "type", "text": "XYZ"},
+    {"type": "wait", "ms": 120},
+    {"type": "assert_text", "target": {"selector": "#doc p"}, "contains": "testingXYZ basic functionality"},
+    {"type": "assert_text", "target": {"selector": "#doc h1"}, "equals": "Simple Markdown Test"},
+    {"type": "assert_caret", "view_type": 1, "char_offset": 49},
+    {"type": "assert_selection", "is_collapsed": true, "check_dom": true}
+  ]
+}
