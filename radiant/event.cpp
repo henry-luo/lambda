@@ -861,11 +861,15 @@ typedef struct EmitHandlerContext {
 
 static __thread EmitHandlerContext* g_emit_handler_ctx = nullptr;
 
-static bool apply_source_selection_to_doc(DomDocument* doc, Item selection) {
+static bool apply_source_selection_to_doc(UiContext* uicon, DomDocument* doc, Item selection) {
     if (!doc || !doc->root) return false;
     RadiantState* state = (RadiantState*)doc->state;
     if (!state || !state->dom_selection) return false;
-    return dom_selection_apply_source_selection(state->dom_selection, (DomNode*)doc->root, selection);
+    if (!dom_selection_apply_source_selection(state->dom_selection, (DomNode*)doc->root, selection)) {
+        return false;
+    }
+    update_caret_visual_position(uicon, state);
+    return true;
 }
 
 /**
@@ -989,7 +993,8 @@ extern "C" Item dispatch_set_selection(Item selection) {
     g_emit_handler_ctx->pending_selection = selection;
     g_emit_handler_ctx->has_pending_selection = true;
 
-    if (!apply_source_selection_to_doc(g_emit_handler_ctx->doc, selection)) {
+    UiContext* uicon = g_emit_handler_ctx->evcon ? g_emit_handler_ctx->evcon->ui_context : NULL;
+    if (!apply_source_selection_to_doc(uicon, g_emit_handler_ctx->doc, selection)) {
         log_debug("dispatch_set_selection: deferred selection until after rebuild");
     }
     return ItemNull;
@@ -1146,7 +1151,7 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
                                 }
 
                                 if (emit_ctx.has_pending_selection) {
-                                    if (apply_source_selection_to_doc(doc, emit_ctx.pending_selection)) {
+                                    if (apply_source_selection_to_doc(evcon->ui_context, doc, emit_ctx.pending_selection)) {
                                         log_debug("dispatch_lambda_handler: applied pending source selection");
                                         evcon->need_repaint = true;
                                     } else {
