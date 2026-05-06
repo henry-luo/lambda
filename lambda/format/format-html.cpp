@@ -309,7 +309,9 @@ static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, i
                 bool is_bool_attr = is_boolean_attribute(field_name, field_name_len);
 
                 if (value.isNull()) {
-                    if (!is_bool_attr) {
+                    if (is_bool_attr) {
+                        stringbuf_append_format(ctx.output(), " %.*s", field_name_len, field_name);
+                    } else {
                         stringbuf_append_format(ctx.output(), " %.*s=\"\"", field_name_len, field_name);
                     }
                 } else if (value.isBool() && is_bool_attr) {
