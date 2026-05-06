@@ -1,0 +1,15 @@
+{
+  "name": "RTE inter-block margin targets previous block",
+  "html": "test/ui/rte_prototype.ls",
+  "viewport": {"width": 980, "height": 720},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "assert_text", "target": {"selector": "#status"}, "contains": "opened:./test/input/simple.md"},
+    {"type": "click", "target": {"selector": "#doc p", "offset_x": 700, "offset_y": 40}},
+    {"type": "assert_caret", "view_type": 1},
+    {"type": "assert_selection", "is_collapsed": true, "check_dom": true},
+    {"type": "type", "text": "X"},
+    {"type": "assert_text", "target": {"selector": "#doc h1"}, "equals": "Simple Markdown Test"},
+    {"type": "assert_text", "target": {"selector": "#doc p"}, "contains": "functionality.X"}
+  ]
+}

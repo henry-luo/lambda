@@ -21,6 +21,7 @@
 
 #include <stddef.h>
 #include <math.h>
+#include <string.h>
 
 // Glyph-precise X resolver injected by event.cpp at static-init time. Kept
 // as a function pointer so this TU stays free of GLFW/event.hpp transitively
@@ -258,6 +259,80 @@ static DomText* hit_test_text_at(View* node, float vx, float vy,
     return found;
 }
 
+typedef struct EditableBoundaryHit {
+    DomText* text;
+    TextRect* rect;
+    float local_x;
+    float score;
+} EditableBoundaryHit;
+
+static bool is_rich_editable_host(View* view) {
+    if (!view || !view->is_element()) return false;
+    DomElement* elem = (DomElement*)view;
+    if (elem->has_attribute("data-editable")) return true;
+    const char* ce = elem->get_attribute("contenteditable");
+    return ce && strcmp(ce, "false") != 0;
+}
+
+static void find_editable_boundary_hit(View* node, float vx, float vy,
+                                       float abs_x, float abs_y,
+                                       bool inside_editable,
+                                       EditableBoundaryHit* hit) {
+    if (!node || !hit) return;
+
+    if (node->is_text()) {
+        if (!inside_editable) return;
+        DomText* text = (DomText*)node;
+        for (TextRect* rect = text->rect; rect; rect = rect->next) {
+            if (rect->height <= 0) continue;
+            float rect_x = abs_x + rect->x;
+            float rect_y = abs_y + rect->y;
+            float rect_right = rect_x + rect->width;
+            float rect_bottom = rect_y + rect->height;
+
+            float score = -1.0f;
+            float local_x = 0.0f;
+            if (rect_y <= vy && vy < rect_bottom && vx >= rect_right) {
+                score = vx - rect_right;
+                local_x = rect->width;
+            } else if (vy >= rect_bottom) {
+                score = (vy - rect_bottom) + 10000.0f;
+                local_x = rect->width;
+            } else if (vy < rect_y) {
+                score = (rect_y - vy) + 20000.0f;
+                local_x = 0.0f;
+            }
+
+            if (score >= 0.0f && (!hit->text || score < hit->score)) {
+                hit->text = text;
+                hit->rect = rect;
+                hit->local_x = local_x;
+                hit->score = score;
+            }
+        }
+        return;
+    }
+
+    if (!node->is_element()) return;
+
+    bool child_inside_editable = inside_editable || is_rich_editable_host(node);
+    float cx = abs_x, cy = abs_y;
+    if (node->view_type == RDT_VIEW_BLOCK ||
+        node->view_type == RDT_VIEW_INLINE_BLOCK ||
+        node->view_type == RDT_VIEW_LIST_ITEM) {
+        cx += node->x;
+        cy += node->y;
+    }
+
+    DomElement* el = (DomElement*)node;
+    for (DomNode* c = el->first_child; c; c = c->next_sibling) {
+        View* child_view = (View*)c;
+        if (!child_view->view_type) continue;
+        find_editable_boundary_hit(child_view, vx, vy, cx, cy,
+                                   child_inside_editable, hit);
+    }
+}
+
 // Linear-search byte offset within a TextRect for a local x position.
 static int byte_offset_for_x(const TextRect* r, float local_x) {
     if (!r || r->length <= 0) return r ? r->start_index : 0;
@@ -276,6 +351,13 @@ extern "C" DomBoundary dom_hit_test_to_boundary(View* root_view, float vx, float
     TextRect* rect = NULL;
     float local_x = 0;
     DomText* t = hit_test_text_at(root_view, vx, vy, 0, 0, &rect, &local_x);
+    if (!t || !rect) {
+        EditableBoundaryHit hit = { NULL, NULL, 0.0f, -1.0f };
+        find_editable_boundary_hit(root_view, vx, vy, 0, 0, false, &hit);
+        t = hit.text;
+        rect = hit.rect;
+        local_x = hit.local_x;
+    }
     if (!t || !rect) return b;
     int bo = byte_offset_for_x(rect, local_x);
     b.node = (DomNode*)t;

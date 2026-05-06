@@ -118,6 +118,106 @@ void target_text_view(EventContext* evcon, ViewText* text) {
     if (text_rect) { goto NEXT_RECT; }
 }
 
+typedef struct EditableMarginTextHit {
+    ViewText* text;
+    TextRect* rect;
+    int offset;
+    float block_x;
+    float block_y;
+    float score;
+} EditableMarginTextHit;
+
+static bool is_in_rich_editable_subtree(View* view) {
+    DomNode* node = (DomNode*)view;
+    while (node) {
+        if (node->node_type == DOM_NODE_ELEMENT) {
+            DomElement* elem = (DomElement*)node;
+            if (elem->has_attribute("data-editable")) return true;
+            const char* ce = elem->get_attribute("contenteditable");
+            if (ce && strcmp(ce, "false") != 0) return true;
+        }
+        node = node->parent;
+    }
+    return false;
+}
+
+static bool is_rich_editable_host(View* view) {
+    if (!view || !view->is_element()) return false;
+    DomElement* elem = (DomElement*)view;
+    if (elem->has_attribute("data-editable")) return true;
+    const char* ce = elem->get_attribute("contenteditable");
+    return ce && strcmp(ce, "false") != 0;
+}
+
+static bool event_inside_block(EventContext* evcon, ViewBlock* block) {
+    if (!evcon || !block) return false;
+    MousePositionEvent* event = &evcon->event.mouse_position;
+    return evcon->block.x <= event->x && event->x < evcon->block.x + block->width &&
+           evcon->block.y <= event->y && event->y < evcon->block.y + block->height;
+}
+
+static void find_editable_margin_text_hit(EventContext* evcon, View* view,
+                                          float block_x, float block_y,
+                                          EditableMarginTextHit* hit,
+                                          bool include_vertical_gap) {
+    if (!evcon || !view || !hit) return;
+
+    MousePositionEvent* event = &evcon->event.mouse_position;
+
+    if (view->view_type == RDT_VIEW_TEXT) {
+        ViewText* text = (ViewText*)view;
+        for (TextRect* rect = text->rect; rect; rect = rect->next) {
+            if (rect->height <= 0) continue;
+            float rect_x = block_x + rect->x;
+            float rect_y = block_y + rect->y;
+            float rect_right = rect_x + rect->width;
+            float rect_bottom = rect_y + rect->height;
+
+            float score = -1.0f;
+            int offset = rect->start_index;
+            if (rect_y <= event->y && event->y < rect_bottom && event->x >= rect_right) {
+                score = event->x - rect_right;
+                offset = rect->start_index + max(rect->length, 0);
+            } else if (include_vertical_gap && event->y >= rect_bottom) {
+                score = (event->y - rect_bottom) + 10000.0f;
+                offset = rect->start_index + max(rect->length, 0);
+            } else if (include_vertical_gap && event->y < rect_y) {
+                score = (rect_y - event->y) + 20000.0f;
+                offset = rect->start_index;
+            }
+
+            if (score >= 0.0f && (!hit->text || score < hit->score)) {
+                hit->text = text;
+                hit->rect = rect;
+                hit->offset = offset;
+                hit->block_x = block_x;
+                hit->block_y = block_y;
+                hit->score = score;
+            }
+        }
+        return;
+    }
+
+    if (!view->is_element()) return;
+
+    float child_block_x = block_x;
+    float child_block_y = block_y;
+    if (view->view_type == RDT_VIEW_BLOCK ||
+        view->view_type == RDT_VIEW_INLINE_BLOCK ||
+        view->view_type == RDT_VIEW_LIST_ITEM) {
+        child_block_x += view->x;
+        child_block_y += view->y;
+    }
+
+    DomElement* elem = (DomElement*)view;
+    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+        View* child_view = (View*)child;
+        if (!child_view->view_type) continue;
+        find_editable_margin_text_hit(evcon, child_view, child_block_x, child_block_y, hit,
+                          include_vertical_gap);
+    }
+}
+
 void target_inline_view(EventContext* evcon, ViewSpan* view_span) {
     log_enter();
     FontBox pa_font = evcon->font;
@@ -270,6 +370,28 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
             setup_font(evcon->ui_context, &evcon->font, block->font);
         }
         target_children(evcon, view);
+        if (!evcon->target && is_in_rich_editable_subtree((View*)block) &&
+            (is_rich_editable_host((View*)block) || event_inside_block(evcon, block))) {
+            EditableMarginTextHit margin_hit = { NULL, NULL, 0, 0.0f, 0.0f, -1.0f };
+            bool include_vertical_gap = is_rich_editable_host((View*)block);
+            for (View* child = view; child; child = child->next()) {
+                if (!child->view_type) continue;
+                find_editable_margin_text_hit(evcon, child, evcon->block.x, evcon->block.y,
+                                              &margin_hit, include_vertical_gap);
+            }
+            if (margin_hit.text && margin_hit.rect) {
+                evcon->target = (View*)margin_hit.text;
+                evcon->target_text_rect = margin_hit.rect;
+                evcon->target_text_offset_valid = true;
+                evcon->target_text_offset = margin_hit.offset;
+                evcon->block.x = margin_hit.block_x;
+                evcon->block.y = margin_hit.block_y;
+                log_debug("editable margin text hit: text=%p start=%d len=%d offset=%d block=(%.1f,%.1f) score=%.1f",
+                          margin_hit.text, margin_hit.rect->start_index,
+                          margin_hit.rect->length, margin_hit.offset,
+                          margin_hit.block_x, margin_hit.block_y, margin_hit.score);
+            }
+        }
     }
 
     RETURN:
@@ -280,7 +402,8 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     }
     evcon->font = pa_font;
 
-    if (!evcon->target) { // check the block itself
+    if (!evcon->target &&
+        !(is_in_rich_editable_subtree((View*)block) && !is_rich_editable_host((View*)block))) { // check the block itself
         // use the block's own accumulated position (parent + block offset),
         // not the restored parent position
         float x = evcon->block.x + block->x, y = evcon->block.y + block->y;
@@ -881,7 +1004,14 @@ static Item build_lambda_event_map(DomDocument* doc, View* target,
             has_mouse_pos = true;
         }
         if (has_mouse_pos) {
-            DomBoundary hit = dom_hit_test_to_boundary((View*)doc->view_tree->root, (float)event_x, (float)event_y);
+            DomBoundary hit = { NULL, 0 };
+            if (evcon->target_text_offset_valid && evcon->target && evcon->target->view_type == RDT_VIEW_TEXT) {
+                DomText* hit_text = (DomText*)evcon->target;
+                hit.node = (DomNode*)hit_text;
+                hit.offset = dom_text_utf8_to_utf16(hit_text, (uint32_t)evcon->target_text_offset);
+            } else {
+                hit = dom_hit_test_to_boundary((View*)doc->view_tree->root, (float)event_x, (float)event_y);
+            }
             SourcePosC hit_pos;
             if (hit.node && source_pos_from_dom_boundary(&hit, &hit_pos)) {
                 mb.put("source_pos", source_pos_to_item(builder, &hit_pos));
@@ -3776,9 +3906,17 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 }
                 rect = picked;
 
+                bool use_margin_offset = evcon.target_text_offset_valid &&
+                    evcon.target == drag_target_view && evcon.target_text_rect;
+                if (use_margin_offset) {
+                    rect = evcon.target_text_rect;
+                }
+
                 // Calculate character offset from mouse position using target text rect
                 int char_offset;
-                if (in_gap && gap_offset >= 0) {
+                if (use_margin_offset) {
+                    char_offset = evcon.target_text_offset;
+                } else if (in_gap && gap_offset >= 0) {
                     char_offset = gap_offset;
                 } else {
                     char_offset = calculate_char_offset_from_position(
@@ -3786,9 +3924,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         motion->x, motion->y);
                 }
 
-                log_debug("[SELECTION DRAG] target_view=%p (same as anchor: %d), char_offset=%d, anchor=%d, picked_rect=(%.1f,%.1f,%.1fx%.1f start=%d len=%d) rel_y=%.1f in_gap=%d",
+                log_debug("[SELECTION DRAG] target_view=%p (same as anchor: %d), char_offset=%d, anchor=%d, picked_rect=(%.1f,%.1f,%.1fx%.1f start=%d len=%d) rel_y=%.1f in_gap=%d margin=%d",
                     drag_target_view, drag_target_view == anchor_view, char_offset, state->selection->anchor_offset,
-                    rect->x, rect->y, rect->width, rect->height, rect->start_index, rect->length, rel_y, in_gap);
+                    rect->x, rect->y, rect->width, rect->height, rect->start_index, rect->length, rel_y, in_gap,
+                    use_margin_offset);
 
                 // Always use selection_extend_to_view so that focus_view is
                 // refreshed to the current drag target. Using the same-view
@@ -3974,8 +4113,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 }
 
                 // Calculate character offset from click position
-                int char_offset = calculate_char_offset_from_position(
-                    &evcon, text, rect, btn_event->x, btn_event->y);
+                int char_offset = evcon.target_text_offset_valid
+                    ? evcon.target_text_offset
+                    : calculate_char_offset_from_position(
+                        &evcon, text, rect, btn_event->x, btn_event->y);
 
                 log_debug("CLICK IN TEXT at offset %d (target=%p)", char_offset, evcon.target);
 
@@ -4031,6 +4172,22 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     log_debug("CARET VISUAL: x=%.1f y=%.1f height=%.1f iframe_offset=(%.1f,%.1f)",
                         caret_x, caret_y, caret_height,
                         state->caret->iframe_offset_x, state->caret->iframe_offset_y);
+                    float render_x = caret_x;
+                    float render_y = caret_y;
+                    for (View* render_parent = text->parent; render_parent; render_parent = render_parent->parent) {
+                        if (render_parent->view_type == RDT_VIEW_BLOCK ||
+                            render_parent->view_type == RDT_VIEW_INLINE_BLOCK ||
+                            render_parent->view_type == RDT_VIEW_LIST_ITEM) {
+                            render_x += render_parent->x;
+                            render_y += render_parent->y;
+                        }
+                    }
+                    render_x += state->caret->iframe_offset_x;
+                    render_y += state->caret->iframe_offset_y;
+                    log_info("[CARET FINAL] mouse=(%d,%d) local=(%.1f,%.1f) render=(%.1f,%.1f) offset=%d block=(%.1f,%.1f) rect=(%.1f,%.1f %.1fx%.1f)",
+                        btn_event->x, btn_event->y, caret_x, caret_y,
+                        render_x, render_y, char_offset, evcon.block.x, evcon.block.y,
+                        rect->x, rect->y, rect->width, rect->height);
                 }
 
                 // Start new selection if shift not pressed, otherwise extend
@@ -4409,8 +4566,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         setup_font(evcon.ui_context, &evcon.font, text->font);
                     }
                     collapse_view = evcon.target;
-                    collapse_offset = calculate_char_offset_from_position(
-                        &evcon, text, evcon.target_text_rect, btn_event->x, btn_event->y);
+                    collapse_offset = evcon.target_text_offset_valid
+                        ? evcon.target_text_offset
+                        : calculate_char_offset_from_position(
+                            &evcon, text, evcon.target_text_rect, btn_event->x, btn_event->y);
                     evcon.font = saved_font;
                 }
                 selection_start(state, collapse_view, collapse_offset);
