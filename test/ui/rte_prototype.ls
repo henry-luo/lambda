@@ -24,14 +24,39 @@ let initial_doc^err = input(SOURCE_PATH, 'markdown')
 // ============================================================================
 // Per-tag render templates — markdown Mark tree -> HTML
 // ============================================================================
-// The markdown parser already emits HTML-compatible tags
-// (<h1>, <p>, <ul>, <li>, <strong>, <em>, <a>, <code>, <blockquote>, ...)
-// so for S2.1 we render `initial_doc.body` directly inside #doc; the parsed
-// element subtree is already valid HTML for Radiant's DOM builder.
+// The markdown parser emits HTML-compatible tags (<h1>, <p>, <ul>, <li>,
+// <strong>, <em>, <a>, <code>, <blockquote>, ...). For each tag we declare a
+// thin `view` template of the form `<tag ; apply; >`. `apply;` is the bare
+// statement form (per Reactive_UI.md §8.3) which re-dispatches each child of
+// `~` through the template registry, splatting them as element children.
+// (`apply(target)` is the function-call form and requires an explicit target.)
 //
-// S2.2 will replace the bulk render with per-tag `view <h1>` / `view <p>` /
-// `view <strong>` templates that inject selection state and dispatch
-// `edit_dispatch` calls — this is where we plug in `mod_editor`.
+// A catch-all `view any { ~ }` lets unknown inline scalar variants fall
+// through unchanged (the markdown parser produces some compound string-like
+// values that Radiant's DOM builder otherwise rejects).
+
+view any { ~ }
+
+view <h1> { <h1; apply;> }
+view <h2> { <h2; apply;> }
+view <h3> { <h3; apply;> }
+view <h4> { <h4; apply;> }
+view <h5> { <h5; apply;> }
+view <h6> { <h6; apply;> }
+view <p> { <p; apply;> }
+view <span> { <span; apply;> }
+view <strong> { <strong; apply;> }
+view <em> { <em; apply;> }
+view <u> { <u; apply;> }
+view <code> { <code; apply;> }
+view <a> { <a href:~.href; apply;> }
+view <ul> { <ul; apply;> }
+view <ol> { <ol; apply;> }
+view <li> { <li; apply;> }
+view <blockquote> { <blockquote; apply;> }
+view <hr> { <hr> }
+view <img> { <img src:~.src, alt:~.alt> }
+view <body> { <div class:"doc-body"; apply;> }
 
 // ============================================================================
 // Toolbar — every button is one `view <toolbar_button>` instance whose
@@ -55,23 +80,22 @@ edit <rte_app> state status: ("opened:" ++ SOURCE_PATH), markdown_output: "" {
       apply(<toolbar_button cmd:"btn-bold",      label:"B">)
       apply(<toolbar_button cmd:"btn-italic",    label:"I">)
       apply(<toolbar_button cmd:"btn-underline", label:"U">)
-      apply(<toolbar_button cmd:"btn-ul",        label:"•">)
-      apply(<toolbar_button cmd:"btn-ol",        label:"1.">)
-      apply(<toolbar_button cmd:"btn-quote",     label:"❝">)
-      apply(<toolbar_button cmd:"btn-code",      label:"</>">)
-      apply(<toolbar_button cmd:"btn-link",      label:"🔗">)
-      apply(<toolbar_button cmd:"btn-image",     label:"🖼">)
-      apply(<toolbar_button cmd:"btn-table",     label:"⊞">)
-      apply(<toolbar_button cmd:"btn-undo",      label:"↶">)
-      apply(<toolbar_button cmd:"btn-redo",      label:"↷">)
-      apply(<toolbar_button cmd:"btn-save",      label:"💾">)
+      apply(<toolbar_button cmd:"btn-ul",        label:"UL">)
+      apply(<toolbar_button cmd:"btn-ol",        label:"OL">)
+      apply(<toolbar_button cmd:"btn-quote",     label:"Q">)
+      apply(<toolbar_button cmd:"btn-code",      label:"Code">)
+      apply(<toolbar_button cmd:"btn-link",      label:"Link">)
+      apply(<toolbar_button cmd:"btn-image",     label:"Img">)
+      apply(<toolbar_button cmd:"btn-table",     label:"Tbl">)
+      apply(<toolbar_button cmd:"btn-undo",      label:"Undo">)
+      apply(<toolbar_button cmd:"btn-redo",      label:"Redo">)
+      apply(<toolbar_button cmd:"btn-save",      label:"Save">)
     >
     <div id:"doc", contenteditable:"true", class:"doc-host"
-      // S2.1: render the parsed Mark tree directly. The markdown parser
-      // emits HTML-compatible tags so Radiant's DOM builder consumes the
-      // <body> subtree as-is. S2.2 swaps this for `apply(editor.doc,
-      // {mode: "edit"})` once mod_editor.ls integration lands.
-      initial_doc[0]
+      // S2.1: splat the parsed markdown body through the per-tag templates.
+      // S2.2 swaps `initial_doc[0]` for `editor.doc` once mod_editor.ls
+      // integration lands.
+      apply(initial_doc[0])
     >
     <pre id:"markdown-output"; markdown_output>
     <div id:"status"; status>

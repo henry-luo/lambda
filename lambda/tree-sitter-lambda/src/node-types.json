@@ -833,6 +833,10 @@
       "required": true,
       "types": [
         {
+          "type": "apply_stam",
+          "named": true
+        },
+        {
           "type": "assign_stam",
           "named": true
         },
@@ -4235,6 +4239,10 @@
   {
     "type": "and",
     "named": false
+  },
+  {
+    "type": "apply_stam",
+    "named": true
   },
   {
     "type": "as",

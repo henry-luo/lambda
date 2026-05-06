@@ -304,6 +304,7 @@ module.exports = grammar({
       $.raise_stam,
       $.var_stam,
       $.assign_stam,
+      $.apply_stam,
       prec.right('statement_end', seq($._content_expr, choice(token(prec(10, /\r\n|\n/)), ';'))),
     ),
 
@@ -603,9 +604,13 @@ module.exports = grammar({
       '{', field('body', $.content), '}',
     ),
 
-    // Note: apply; (bare apply statement) is handled as a regular identifier expression
-    // followed by ';' — detected during semantic analysis, not in the grammar.
-    // This keeps 'apply' as a normal identifier usable as a function call: apply(item)
+    // Note: apply; (bare apply statement) is a splat statement that
+    // re-dispatches each child of the matched item (~) through the template
+    // registry. Equivalent to `for (c in ~) apply(c)`. Only valid inside a
+    // view/edit body; rejected elsewhere by build_ast semantic analysis.
+    // Tokenized as a single lex unit (no whitespace allowed between 'apply'
+    // and ';') so that `apply(arg)` keeps parsing as a regular call.
+    apply_stam: $ => token(seq('apply', ';')),
 
     // fn with expr body; to KISS and we don't support pn expr
     fn_expr_stam: $ => seq(

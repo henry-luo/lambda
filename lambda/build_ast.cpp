@@ -46,6 +46,9 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
 // Forward declaration for view/edit template building
 AstNode* build_view_stam(Transpiler* tp, TSNode view_node);
 
+// Forward declaration for apply; (splat) statement
+AstNode* build_apply_stam(Transpiler* tp, TSNode apply_node);
+
 // Forward declaration for object type building (used by pub type)
 AstNode* build_object_type(Transpiler* tp, TSNode type_node);
 
@@ -5954,6 +5957,79 @@ AstNode* build_for_stam(Transpiler* tp, TSNode for_node) {
     return (AstNode*)ast_node;
 }
 
+// `apply;` (splat) statement: re-dispatch each child of the matched item (~)
+// through the template registry. Equivalent to `for (c in ~) apply(c)`.
+// Synthesizes the for-expr AST so existing MIR codegen handles it.
+AstNode* build_apply_stam(Transpiler* tp, TSNode apply_node) {
+    log_debug("build apply stam (splat)");
+
+    // synthesize: for (c$apply in ~) apply(c$apply)
+    AstForNode* for_node = (AstForNode*)alloc_ast_node(tp, AST_NODE_FOR_EXPR, apply_node, sizeof(AstForNode));
+    for_node->vars = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
+    for_node->vars->parent = tp->current_scope;
+    for_node->vars->is_proc = tp->current_scope->is_proc;
+    tp->current_scope = for_node->vars;
+
+    // synthesize loop binding `c$apply in ~`
+    AstLoopNode* loop = (AstLoopNode*)alloc_ast_node(tp, AST_NODE_LOOP, apply_node, sizeof(AstLoopNode));
+    StrView c_name = { .str = "c$apply", .length = 7 };
+    loop->name = name_pool_create_strview(tp->name_pool, c_name);
+    loop->index_name = NULL;
+    loop->key_filter = LOOP_KEY_ALL;
+
+    // current item ~ as the source
+    AstNode* current_item = alloc_ast_node(tp, AST_NODE_CURRENT_ITEM, apply_node, sizeof(AstNode));
+    current_item->type = &TYPE_ANY;
+    loop->as = current_item;
+    loop->type = &TYPE_ANY;
+
+    // register the loop var in scope
+    push_name(tp, (AstNamedNode*)loop, NULL);
+    for_node->loop = (AstNode*)loop;
+    for_node->let_clause = NULL;
+    for_node->where = NULL;
+    for_node->group = NULL;
+    for_node->order = NULL;
+    for_node->limit = NULL;
+    for_node->offset = NULL;
+
+    // synthesize body: apply(c$apply)
+    StrView apply_name = { .str = "apply", .length = 5 };
+    SysFuncInfo* apply_info = get_sys_func_info(&apply_name, 1);
+    if (!apply_info) {
+        log_error("apply_stam: 'apply' sys func (arity 1) not found");
+        for_node->then = NULL;
+        for_node->type = &TYPE_ERROR;
+        tp->current_scope = for_node->vars->parent;
+        return (AstNode*)for_node;
+    }
+    AstSysFuncNode* sys_node = (AstSysFuncNode*)alloc_ast_node(tp,
+        AST_NODE_SYS_FUNC, apply_node, sizeof(AstSysFuncNode));
+    sys_node->fn_info = apply_info;
+    sys_node->type = apply_info->return_type;
+
+    AstIdentNode* arg = (AstIdentNode*)alloc_ast_node(tp,
+        AST_NODE_IDENT, apply_node, sizeof(AstIdentNode));
+    arg->name = loop->name;
+    arg->entry = lookup_name(tp, c_name);
+    arg->type = &TYPE_ANY;
+
+    AstCallNode* call = (AstCallNode*)alloc_ast_node(tp,
+        AST_NODE_CALL_EXPR, apply_node, sizeof(AstCallNode));
+    call->function = (AstNode*)sys_node;
+    call->argument = (AstNode*)arg;
+    call->pipe_inject = false;
+    call->propagate = false;
+    call->can_raise = false;
+    call->type = &TYPE_ANY;
+
+    for_node->then = (AstNode*)call;
+    for_node->type = &TYPE_ANY;
+
+    tp->current_scope = for_node->vars->parent;
+    return (AstNode*)for_node;
+}
+
 // while statement (procedural only)
 AstNode* build_while_stam(Transpiler* tp, TSNode while_node) {
     log_debug("build while stam");
@@ -7287,6 +7363,8 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_var_stam(tp, expr_node);
     case SYM_ASSIGN_STAM:
         return build_assign_stam(tp, expr_node);
+    case SYM_APPLY_STAM:
+        return build_apply_stam(tp, expr_node);
     case SYM_IF_EXPR:
     case SYM_IF_STAM:
         return build_if_expr(tp, expr_node);

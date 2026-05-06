@@ -72,6 +72,7 @@ extern "C" {
 #define SYM_RAISE_EXPR sym_raise_expr
 #define SYM_VAR_STAM sym_var_stam
 #define SYM_ASSIGN_STAM sym_assign_stam
+#define SYM_APPLY_STAM sym_apply_stam
 
 #define SYM_BASE_TYPE sym_base_type
 #define SYM_ARRAY_TYPE sym_array_type

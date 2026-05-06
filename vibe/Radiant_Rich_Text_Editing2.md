@@ -22,7 +22,7 @@ Stage 2 turns that machinery into a **runnable Slate/ProseMirror‑class prototy
 8. Supports **full caret + selection** (click, drag, Shift+arrows, word/line/all).
 9. Lives under [test/ui/](../test/ui/) and is covered by **UI automation** (`*.json` event scripts driven by `./lambda.exe view ... --event-file`).
 
-The prototype reuses the existing JS DOM / Radiant text‑control / `state_store` infrastructure and binds the toolbar buttons to the `edit_*` commands already exported from `mod_editor.ls`.
+The prototype reuses the existing HTML DOM / Radiant text‑control / `state_store` infrastructure and binds the toolbar buttons to the `edit_*` commands already exported from `mod_editor.ls`.
 
 > Comparable scope to the **Slate.js Rich Text example** and the **ProseMirror basic example**, in a single `lambda.exe view` invocation, with no browser involved.
 
@@ -45,9 +45,8 @@ The prototype reuses the existing JS DOM / Radiant text‑control / `state_store
 
 What is **missing for a real prototype**:
 
-- A renderer that turns the `editor.doc` Mark tree into editable DOM (not a textarea).
-- A toolbar wired to the actual commands rather than ad‑hoc string toggling.
-- A native bridge (`edit_session_*`) so JS can call into the Lambda command surface without re‑interpreting the script per keystroke.
+- A renderer that turns the `editor.doc` Mark tree into editable DOM (not a textarea) — supplied by the `view <doc_block>` / `view <doc_inline>` templates in [test/ui/rte_prototype.ls](../test/ui/rte_prototype.ls).
+- A toolbar wired to the actual commands rather than ad‑hoc string toggling — supplied by the `view <rte_toolbar>` template's `on click(evt)` handler dispatching `emit("rte_cmd", edit_cmd_*())` to the parent `edit <rte_app>`.
 - UI automation that drives the prototype end‑to‑end against a real `.md` file.
 
 Stage 2 fills exactly those gaps.
@@ -133,18 +132,26 @@ signal handler: SIGSEGV at 0x0 is not stack overflow, re-raising
 
 Two distinct issues are in play:
 
-1. **Splat semantics.** The natural per-tag template `view <h1> { <h1 for (c in ~) c> }` does not splat the loop result into the parent element — `for (c in ~) c` produces a list value that becomes a single child of unexpected type, hence the `length=1 but items=NULL` and `invalid type=…` reports. The proven splat pattern (in [test/lambda/ui/todo.ls](../test/lambda/ui/todo.ls)) iterates and calls `apply(<child_tag …>)` per iteration, but that requires a child template per concrete tag, which is the very thing that crashes when the children include heterogeneous inline values.
+1. **Splat semantics.** The natural per-tag template `view <h1> { <h1 for (c in ~) c> }` does not splat the loop result into the parent element — `for (c in ~) c` produces a list value that becomes a single child of unexpected type, hence the `length=1 but items=NULL` and `invalid type=…` reports. The correct pattern is the bare **`apply;` statement** (per `Reactive_UI.md` §8.3), which the framework expands into a child-template dispatch per child of `~`:
+
+   ```lambda
+   view <h1> { <h1 ; apply; > }
+   view <p>  { <p  ; apply; > }
+   view <strong> { <strong ; apply; > }
+   ```
+
+   `apply;` (statement form, no parens, terminating semicolon) re-dispatches each child of the matched item through the template registry. The function-call form `apply(target)` requires an explicit target argument and is used for top-level entry (`apply(initial_doc[0])`). A single catch-all `view any { ~ }` plus per-tag wrappers cover the whole markdown subtree.
 2. **Inline value types in the markdown Mark tree.** The markdown parser ([lambda/input/markup/](../lambda/input/markup/)) emits inline children that include compound scalar variants (`TypeId` 224, 160, 96 — string-like with attached metadata) which Radiant's `build_dom_tree` does not recognise as valid `Item` payloads and skips with a warning, then dereferences a NULL on the next step.
 
 ### Next steps
 
-1. Add per-tag `view <h1>`, `view <p>`, `view <strong>`, `view <em>`, `view <code>`, `view <a>`, `view <ul>`, `view <ol>`, `view <li>`, `view <blockquote>`, `view <span>`, `view <img>`, `view <hr>` templates that **iterate with `apply(c)` and a catch-all `view any { ~ }`** to coerce the unknown inline types to their string content — confirm the `for` body splats correctly when each iteration body is itself an `apply()` call.
+1. Add per-tag `view <h1>`, `view <p>`, `view <strong>`, `view <em>`, `view <code>`, `view <a>`, `view <ul>`, `view <ol>`, `view <li>`, `view <blockquote>`, `view <span>`, `view <img>`, `view <hr>` templates of the form `<tag ; apply; >` (note: `apply;` statement, not `apply()` call), plus a catch-all `view any { ~ }` to coerce the unknown inline scalar variants to their string content.
 2. Locate the `TypeId` ↔ `build_dom_tree` mapping in [radiant/](../radiant/) and either widen the accepted set or convert the offending inline items to plain `<span>` wrappers in a per-tag template before they reach Radiant's DOM builder.
 3. Once `#doc` renders the markdown source visually, swap the local `editor` from `format(initial_doc, 'markdown)` (current Save behaviour) to the full `mod_editor.ls` flow: `let editor = edit_open(initial_doc, null, null)` plus `editor = edit_exec(editor, edit_cmd_*())` inside `on rte_cmd`, and re-render `#doc` from `editor.doc`. This is the start of S2.2.
 
 ### Working notes
 
-- Per-tag template body must use multi-line element syntax (`<h1\n  for (c in ~) c\n>`); the inline form `<h1 for (c in ~) c>` is rejected by the grammar.
+- Use `<tag ; apply; >` for per-tag templates. The bare **`apply;` statement** (parens-less, terminating semicolon) is the splat form per `Reactive_UI.md` §8.3 — it dispatches each child of `~` through the template registry, splatting them as element children. The function-call form `apply(target)` is for top-level entry (e.g. `apply(initial_doc[0])`) and requires an explicit target. The `<tag for (c in ~) c>` form does not splat: `for` returns a list which becomes a single (broken) child.
 - Smoke runner accepts `.ls` paths in the JSON `"html"` field — no runner change needed for reactive-UI prototypes.
 - `./lambda.exe view <script>.ls --event-file <file>.json --headless` is the canonical smoke invocation; `--no-log` suppresses the per-event trace once the test stabilises.
 

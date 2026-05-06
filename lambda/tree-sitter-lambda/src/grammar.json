@@ -1005,6 +1005,10 @@
           "name": "assign_stam"
         },
         {
+          "type": "SYMBOL",
+          "name": "apply_stam"
+        },
+        {
           "type": "PREC_RIGHT",
           "value": "statement_end",
           "content": {
@@ -5052,6 +5056,22 @@
           "value": "}"
         }
       ]
+    },
+    "apply_stam": {
+      "type": "TOKEN",
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "STRING",
+            "value": "apply"
+          },
+          {
+            "type": "STRING",
+            "value": ";"
+          }
+        ]
+      }
     },
     "fn_expr_stam": {
       "type": "SEQ",
