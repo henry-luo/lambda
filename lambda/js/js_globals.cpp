@@ -11305,6 +11305,7 @@ enum JsConstructorId {
 
 static Item js_constructor_cache[JS_CTOR_MAX];
 static bool js_ctor_cache_init = false;
+static void js_typed_array_base_reset();
 
 // Forward declaration: snapshot mechanism preserves ctor identity across batch resets.
 extern "C" bool js_proto_snapshot_is_valid();
@@ -11317,6 +11318,7 @@ void js_ctor_cache_reset() {
     if (js_proto_snapshot_is_valid()) return;
     memset(js_constructor_cache, 0, sizeof(js_constructor_cache));
     js_ctor_cache_init = false;
+    js_typed_array_base_reset();
 }
 
 // Dummy func_ptr for constructors (makes typeof return "function")
@@ -11553,6 +11555,30 @@ static Item         js_typed_array_per_type_proto_snap[JS_TYPED_ARRAY_TYPE_COUNT
 static MapSnapshot  js_typed_array_per_type_proto_map_snap[JS_TYPED_ARRAY_TYPE_COUNT];
 static bool         js_proto_snapshot_valid = false;
 
+extern "C" Item js_get_constructor(Item name_item);
+extern "C" Item js_property_get(Item object, Item key);
+extern "C" Item js_get_typed_array_base();
+extern "C" Item js_get_typed_array_per_type_proto(int element_type);
+
+static void js_proto_snapshot_bootstrap_constructors() {
+    static const struct { const char* name; int len; } ctor_names[] = {
+        {"Object", 6}, {"Array", 5}, {"Function", 8},
+        {NULL, 0}
+    };
+    Item prototype_key = make_string_item("prototype");
+    for (int i = 0; ctor_names[i].name; i++) {
+        Item name = (Item){.item = s2it(heap_create_name(ctor_names[i].name, ctor_names[i].len))};
+        Item ctor = js_get_constructor(name);
+        if (get_type_id(ctor) == LMD_TYPE_FUNC) {
+            js_property_get(ctor, prototype_key);
+        }
+    }
+    js_get_typed_array_base();
+    for (int i = 0; i < JS_TYPED_ARRAY_TYPE_COUNT; i++) {
+        js_get_typed_array_per_type_proto(i);
+    }
+}
+
 static void js_proto_snapshot_map(MapSnapshot* snap, Map* m) {
     if (!m) { snap->m = NULL; return; }
     TypeMap* tm = (TypeMap*)m->type;
@@ -11642,8 +11668,10 @@ static void js_proto_snapshot_restore_locked() {
 }
 
 extern "C" void js_reset_constructor_prototypes() {
-    if (!js_ctor_cache_init) return;
     if (!js_proto_snapshot_valid) {
+        if (!js_input || !js_input->pool) return;
+        js_proto_snapshot_bootstrap_constructors();
+        if (!js_ctor_cache_init) return;
         // First call after preamble: capture snapshot. State is already correct.
         js_proto_snapshot_take_locked();
         // Still clear globalThis so it's regenerated against the snapshotted prototypes.

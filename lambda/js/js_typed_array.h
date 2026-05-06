@@ -43,6 +43,7 @@ typedef struct JsDataView {
     JsArrayBuffer* buffer;  // backing ArrayBuffer
     int byte_offset;         // offset into buffer
     int byte_length;         // view byte length
+    uint64_t buffer_item;    // original ArrayBuffer Item for identity-preserving .buffer access
 } JsDataView;
 
 typedef struct JsTypedArray {
@@ -92,6 +93,7 @@ Item js_sharedarraybuffer_method(Item sab, Item method_name, Item* args, int arg
 // DataView operations
 Item js_dataview_new(Item buffer, Item offset_item, Item length_item);
 bool js_is_dataview(Item val);
+JsDataView* js_get_dataview_ptr(Item val);
 Item js_dataview_method(Item dv, Item method_name, Item* args, int argc);
 
 // Smart constructor: dispatches based on argument type (number, ArrayBuffer, TypedArray, Array)

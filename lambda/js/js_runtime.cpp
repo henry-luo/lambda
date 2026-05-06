@@ -2832,6 +2832,7 @@ struct JsFunction {
 #define JS_FUNC_FLAG_METHOD    32
 #define JS_FUNC_FLAG_ASYNC_GEN 64  // async generator function (sets is_async in js_generator_create)
 #define JS_FUNC_FLAG_ASYNC     128 // async (non-generator) function: changes [[Prototype]] to %AsyncFunction%.prototype
+#define JS_FUNC_FLAG_DATA_VIEW_ACCESSOR JS_FUNC_FLAG_METHOD
 
 // forward declaration — defined near js_generator_create below
 extern "C" Item js_get_generator_shared_proto(bool is_async);
@@ -5066,6 +5067,10 @@ extern "C" Item js_property_get(Item object, Item key) {
             case MAP_KIND_DATAVIEW: {
                 if (get_type_id(key) == LMD_TYPE_STRING) {
                     String* str_key = it2s(key);
+                    if (object.map->data_cap > 0) {
+                        Item own_result = map_get(object.map, key);
+                        if (own_result.item != ITEM_NULL) return own_result;
+                    }
                     // get native DataView pointer (direct or from upgraded __dv__ property)
                     JsDataView* dv = NULL;
                     if (object.map->data_cap == 0) {
@@ -5076,21 +5081,25 @@ extern "C" Item js_property_get(Item object, Item key) {
                         if (found) dv = (JsDataView*)(uintptr_t)it2i(dv_val);
                     }
                     if (str_key->len == 10 && strncmp(str_key->chars, "byteLength", 10) == 0) {
+                        if (dv && dv->buffer && dv->buffer->detached) {
+                            js_throw_type_error("DataView buffer is detached");
+                            return ItemNull;
+                        }
                         return dv ? (Item){.item = i2it(dv->byte_length)} : (Item){.item = ITEM_NULL};
                     }
                     if (str_key->len == 10 && strncmp(str_key->chars, "byteOffset", 10) == 0) {
+                        if (dv && dv->buffer && dv->buffer->detached) {
+                            js_throw_type_error("DataView buffer is detached");
+                            return ItemNull;
+                        }
                         return dv ? (Item){.item = i2it(dv->byte_offset)} : (Item){.item = ITEM_NULL};
                     }
                     if (str_key->len == 6 && strncmp(str_key->chars, "buffer", 6) == 0) {
                         if (dv && dv->buffer) {
+                            if (dv->buffer_item) return (Item){.item = dv->buffer_item};
                             return js_arraybuffer_wrap(dv->buffer);
                         }
                         return (Item){.item = ITEM_NULL};
-                    }
-                    // check own properties on upgraded maps
-                    if (object.map->data_cap > 0) {
-                        Item own_result = map_get(object.map, key);
-                        if (own_result.item != ITEM_NULL) return own_result;
                     }
                 }
                 // prototype chain lookup (for Reflect.construct with custom newTarget)
@@ -6321,6 +6330,22 @@ extern "C" Item js_property_get(Item object, Item key) {
                                 mfn->name = heap_create_name(dv_methods[mi].name, dv_methods[mi].len);
                                 js_property_set(fn->prototype, mk, (Item){.function = (Function*)mfn});
                                 js_mark_non_enumerable(fn->prototype, mk);
+                            }
+                            struct { const char* name; int len; } dv_accessors[] = {
+                                {"buffer", 6}, {"byteLength", 10}, {"byteOffset", 10}, {NULL, 0}
+                            };
+                            for (int ai = 0; dv_accessors[ai].name; ai++) {
+                                JsFunction* gf = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
+                                gf->type_id = LMD_TYPE_FUNC;
+                                gf->flags = JS_FUNC_FLAG_DATA_VIEW_ACCESSOR | JS_FUNC_FLAG_STRICT;
+                                char getter_name[32];
+                                int getter_len = snprintf(getter_name, sizeof(getter_name), "get %s", dv_accessors[ai].name);
+                                gf->name = heap_create_name(getter_name, getter_len);
+                                gf->param_count = 0;
+                                gf->formal_length = -1;
+                                Item gf_item = (Item){.function = (Function*)gf};
+                                Item prop_name = (Item){.item = s2it(heap_create_name(dv_accessors[ai].name, dv_accessors[ai].len))};
+                                js_install_native_accessor(fn->prototype, prop_name, gf_item, ItemNull, JSPD_NON_ENUMERABLE);
                             }
                         }
                         // ArrayBuffer.prototype methods
@@ -8441,16 +8466,21 @@ extern "C" void js_populate_typed_array_base_proto(Item proto, Item base_ctor) {
         js_mark_non_enumerable(proto, si_key);
     }
 
-    // Accessor getter stubs for buffer, byteLength, byteOffset
+    // Accessor getter stubs for buffer, byteLength, byteOffset, length
     // These throw TypeError when accessed on non-TypedArray (ES spec §23.2.3.1/2/3)
     // Phase 3 Stage A: route through unified js_install_native_accessor.
     struct { const char* name; int len; } ta_accessors[] = {
-        {"buffer", 6}, {"byteLength", 10}, {"byteOffset", 10}, {NULL, 0}
+        {"buffer", 6}, {"byteLength", 10}, {"byteOffset", 10}, {"length", 6}, {NULL, 0}
     };
     for (int i = 0; ta_accessors[i].name; i++) {
         JsFunction* gf = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
         gf->type_id = LMD_TYPE_FUNC;
         gf->flags = JS_FUNC_FLAG_TYPED_ARRAY_METHOD;
+        char getter_name[32];
+        int getter_len = snprintf(getter_name, sizeof(getter_name), "get %s", ta_accessors[i].name);
+        gf->name = heap_create_name(getter_name, getter_len);
+        gf->param_count = 0;
+        gf->formal_length = -1;
         Item gf_item = (Item){.function = (Function*)gf};
         Item prop_name = (Item){.item = s2it(heap_create_name(ta_accessors[i].name, ta_accessors[i].len))};
         js_install_native_accessor(proto, prop_name, gf_item, ItemNull, JSPD_NON_ENUMERABLE);
@@ -10341,9 +10371,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             if (st != LMD_TYPE_STRING) {
                 // allow String wrapper objects (typed JsClass tag)
                 if (js_class_id(this_val) != JS_CLASS_STRING) {
-                    // v28: return default string for exotic objects with
-                    // String.prototype in their prototype chain (handlebars compat)
-                    return (Item){.item = s2it(heap_create_name("[object Object]"))};
+                    return js_throw_type_error("String.prototype method called on incompatible receiver");
                 }
             }
         }
@@ -11487,11 +11515,17 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             js_property_set(this_val, (Item){.item = s2it(heap_create_name("__done__", 8))}, (Item){.item = b2it(true)});
         } else {
             // Global: check for empty match and advance lastIndex
-            Item match_str = js_property_get(match, (Item){.item = s2it(heap_create_name("0", 1))});
+            Item match_zero = js_property_get(match, (Item){.item = s2it(heap_create_name("0", 1))});
+            if (js_exception_pending) return make_js_undefined();
+            Item match_str = js_to_string(match_zero);
+            if (js_exception_pending) return make_js_undefined();
             if (get_type_id(match_str) == LMD_TYPE_STRING && it2s(match_str)->len == 0) {
                 // Empty match — advance lastIndex to avoid infinite loop
                 Item li = js_property_get(regex, (Item){.item = s2it(heap_create_name("lastIndex", 9))});
-                int64_t cur_li = it2i(li);
+                if (js_exception_pending) return make_js_undefined();
+                Item li_num = js_to_number(li);
+                if (js_exception_pending) return make_js_undefined();
+                int64_t cur_li = (int64_t)js_get_number(li_num);
                 js_property_set(regex, (Item){.item = s2it(heap_create_name("lastIndex", 9))}, (Item){.item = i2it(cur_li + 1)});
             }
         }
@@ -12184,6 +12218,58 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
                 Item msg = (Item){.item = s2it(heap_create_name("Method requires a TypedArray as receiver"))};
                 js_throw_value(js_new_error_with_name(type_name, msg));
                 return ItemNull;
+            }
+            if (fn->name) {
+                const char* name = fn->name->chars;
+                int len = (int)fn->name->len;
+                JsTypedArray* ta = js_get_typed_array_ptr(this_val.map);
+                if (len == 10 && strncmp(name, "get length", 10) == 0) {
+                    return (Item){.item = i2it(js_typed_array_length(this_val))};
+                }
+                if (len == 14 && strncmp(name, "get byteLength", 14) == 0) {
+                    return ta ? (Item){.item = i2it(ta->byte_length)} : ItemNull;
+                }
+                if (len == 14 && strncmp(name, "get byteOffset", 14) == 0) {
+                    return ta ? (Item){.item = i2it(ta->byte_offset)} : ItemNull;
+                }
+                if (len == 10 && strncmp(name, "get buffer", 10) == 0) {
+                    Item buffer_key = (Item){.item = s2it(heap_create_name("buffer", 6))};
+                    return js_property_get(this_val, buffer_key);
+                }
+            }
+        }
+        if (fn && (fn->flags & JS_FUNC_FLAG_DATA_VIEW_ACCESSOR)) {
+            if (!fn->name) return ItemNull;
+            const char* name = fn->name->chars;
+            int len = (int)fn->name->len;
+            bool is_dataview_accessor =
+                (len == 10 && strncmp(name, "get buffer", 10) == 0) ||
+                (len == 14 && strncmp(name, "get byteLength", 14) == 0) ||
+                (len == 14 && strncmp(name, "get byteOffset", 14) == 0);
+            if (!is_dataview_accessor) return ItemNull;
+            if (!js_is_dataview(this_val)) {
+                js_throw_type_error("DataView accessor requires a DataView receiver");
+                return ItemNull;
+            }
+            JsDataView* dv = js_get_dataview_ptr(this_val);
+            if (!dv) return ItemNull;
+            if (len == 10 && strncmp(name, "get buffer", 10) == 0) {
+                if (dv->buffer_item) return (Item){.item = dv->buffer_item};
+                return js_arraybuffer_wrap(dv->buffer);
+            }
+            if (len == 14 && strncmp(name, "get byteLength", 14) == 0) {
+                if (dv->buffer && dv->buffer->detached) {
+                    js_throw_type_error("DataView buffer is detached");
+                    return ItemNull;
+                }
+                return (Item){.item = i2it(dv->byte_length)};
+            }
+            if (len == 14 && strncmp(name, "get byteOffset", 14) == 0) {
+                if (dv->buffer && dv->buffer->detached) {
+                    js_throw_type_error("DataView buffer is detached");
+                    return ItemNull;
+                }
+                return (Item){.item = i2it(dv->byte_offset)};
             }
         }
         log_error("js_call_function: null function pointer");
@@ -18473,6 +18559,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
                 return ItemNull;
             }
             start_idx = k + 1;
+            check_proto = js_proto_chain_has_numeric_keys(arr);
         }
         int len = src->length;  // spec: capture length before loop
         for (int i = start_idx; i < len; i++) {
@@ -19299,6 +19386,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
                 return ItemNull;
             }
             start_idx = k - 1;
+            check_proto = js_proto_chain_has_numeric_keys(arr);
         }
         for (int i = start_idx; i >= 0; i--) {
             // v37: use HasProperty (checks prototype chain for holes)

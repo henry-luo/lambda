@@ -7683,6 +7683,32 @@ static void jm_emit_object_destructure(JsMirTranspiler* mt, JsAstNode* pattern_n
 // Handles closure env write-back and scope_env write-back.
 static void jm_bind_destructure_var(JsMirTranspiler* mt, const char* vname, MIR_reg_t val) {
     JsMirVarEntry* var = jm_find_var(mt, vname);
+    if (!var && mt->current_func_index >= 0) {
+        if (mt->module_consts) {
+            JsModuleConstEntry lookup;
+            snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
+            JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
+            if (mc && mc->const_type == MCONST_MODVAR) {
+                if (mc->var_kind == 2) {
+                    const char* js_name = (strncmp(vname, "_js_", 4) == 0) ? vname + 4 : vname;
+                    jm_call_void_2(mt, "js_throw_const_assign",
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)js_name),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)strlen(js_name)));
+                    return;
+                }
+                jm_call_void_2(mt, "js_set_module_var",
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+                return;
+            }
+        }
+        const char* js_name = (strncmp(vname, "_js_", 4) == 0) ? vname + 4 : vname;
+        MIR_reg_t name_reg = jm_box_string_literal(mt, js_name, (int)strlen(js_name));
+        jm_call_void_2(mt, "js_set_global_property",
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+        return;
+    }
     MIR_reg_t reg;
     if (var) {
         reg = var->reg;
@@ -7701,6 +7727,23 @@ static void jm_bind_destructure_var(JsMirTranspiler* mt, const char* vname, MIR_
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_mem_op(mt->ctx, MIR_T_I64, var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1),
             MIR_new_reg_op(mt->ctx, reg)));
+    }
+    if (var && var->from_env && mt->current_func_index >= 0 && mt->module_consts) {
+        JsModuleConstEntry lookup;
+        snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
+        JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
+        if (mc && mc->const_type == MCONST_MODVAR) {
+            if (mc->var_kind == 2) {
+                const char* js_name = (strncmp(vname, "_js_", 4) == 0) ? vname + 4 : vname;
+                jm_call_void_2(mt, "js_throw_const_assign",
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)js_name),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)strlen(js_name)));
+                return;
+            }
+            jm_call_void_2(mt, "js_set_module_var",
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, reg));
+        }
     }
     // Module variable writeback: if this is a module-level var, sync to runtime.
     // Only write back when we are at module scope (js_main) or inside an IIFE
@@ -18414,7 +18457,8 @@ static void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     const char* var_name = NULL;
     int var_len = 0;
 
-    if (fo->left && fo->left->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+    bool left_is_decl = fo->left && fo->left->node_type == JS_AST_NODE_VARIABLE_DECLARATION;
+    if (left_is_decl) {
         JsVariableDeclarationNode* decl = (JsVariableDeclarationNode*)fo->left;
         if (decl->declarations && decl->declarations->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
             JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)decl->declarations;
@@ -18480,7 +18524,8 @@ static void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         MIR_new_int_op(mt->ctx, ITEM_NULL_VAL)));
 
     // Pre-create destructuring variable registers
-    if (destr_pattern) {
+    bool left_creates_bindings = left_is_decl || fo->kind == 1 || fo->kind == 2;
+    if (destr_pattern && left_creates_bindings) {
         JsAstNode* pe = destr_pattern->elements;
         while (pe) {
             if (pe->node_type == JS_AST_NODE_NULL) {
@@ -18571,7 +18616,7 @@ static void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     }
 
     // Pre-create object destructuring variable registers
-    if (obj_destr_pattern) {
+    if (obj_destr_pattern && left_creates_bindings) {
         JsAstNode* prop = obj_destr_pattern->properties;
         while (prop) {
             if (prop->node_type == JS_AST_NODE_PROPERTY) {
