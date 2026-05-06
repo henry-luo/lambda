@@ -4,11 +4,13 @@
 #include "js_typed_array.h"
 #include "js_runtime.h"
 #include "js_class.h"
+#include "js_coerce.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../lambda-decimal.hpp"
 #include "../../lib/log.h"
 #include <cstring>
+#include <cstdlib>
 #include "../../lib/mem.h"
 #include <cmath>
 
@@ -18,6 +20,63 @@ extern "C" Item js_get_constructor(Item name_item);
 extern "C" Item js_property_get(Item object, Item key);
 extern "C" void js_set_prototype(Item object, Item prototype);
 extern Item js_to_number(Item);
+extern "C" Item js_bigint_constructor(Item value);
+extern "C" Item js_bigint_as_int_n(Item bits_item, Item bigint_item);
+extern "C" Item js_bigint_as_uint_n(Item bits_item, Item bigint_item);
+
+static bool js_dataview_is_bigint(Item value) {
+    if (get_type_id(value) != LMD_TYPE_DECIMAL) return false;
+    Decimal* dec = (Decimal*)(value.item & 0x00FFFFFFFFFFFFFFULL);
+    return dec && dec->unlimited == DECIMAL_BIGINT;
+}
+
+static bool js_dataview_to_bigint_value(Item value, Item* out_bigint) {
+    if (js_dataview_is_bigint(value)) {
+        *out_bigint = value;
+        return true;
+    }
+
+    TypeId value_type = get_type_id(value);
+    if (value_type == LMD_TYPE_MAP || value_type == LMD_TYPE_ARRAY || value_type == LMD_TYPE_FUNC) {
+        Item primitive = js_to_primitive(value, JS_HINT_NUMBER);
+        if (js_check_exception()) return false;
+        return js_dataview_to_bigint_value(primitive, out_bigint);
+    }
+
+    if (value_type == LMD_TYPE_INT) {
+        int64_t int_value = it2i(value);
+        if (int_value <= -(int64_t)JS_SYMBOL_BASE) {
+            js_throw_type_error("Cannot convert a Symbol value to a BigInt");
+        } else {
+            js_throw_type_error("Cannot convert non-BigInt value to BigInt");
+        }
+        return false;
+    }
+    if (value_type == LMD_TYPE_FLOAT || value_type == LMD_TYPE_NULL || value.item == ITEM_JS_UNDEFINED) {
+        js_throw_type_error("Cannot convert non-BigInt value to BigInt");
+        return false;
+    }
+
+    Item bigint_value = js_bigint_constructor(value);
+    if (js_check_exception()) return false;
+    *out_bigint = bigint_value;
+    return true;
+}
+
+static Item js_dataview_biguint64_item(uint64_t value) {
+    if (value <= (uint64_t)INT64_MAX) return bigint_from_int64((int64_t)value);
+    char buf[32];
+    int len = snprintf(buf, sizeof(buf), "%llu", (unsigned long long)value);
+    return bigint_from_string(buf, len);
+}
+
+static uint64_t js_dataview_bigint_to_uint64(Item value) {
+    char* value_str = bigint_to_cstring_radix(value, 10);
+    if (!value_str) return 0;
+    unsigned long long raw_value = strtoull(value_str, NULL, 10);
+    decimal_free_string(value_str);
+    return (uint64_t)raw_value;
+}
 
 static bool js_dataview_to_index(Item value, int* out_index) {
     if (get_type_id(value) == LMD_TYPE_UNDEFINED) {
@@ -1147,6 +1206,24 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         *fp = d;
         return (Item){.item = d2it(fp)};
     }
+    if (ml == 11 && strncmp(mn, "getBigInt64", 11) == 0) {
+        uint8_t* p = dv_ptr(dv, offset, 8);
+        if (!p) return js_throw_range_error("Invalid DataView offset");
+        bool little_endian = (argc > 1) ? js_is_truthy(args[1]) : false;
+        uint64_t raw;
+        memcpy(&raw, p, 8);
+        if (little_endian != sys_le) raw = swap64(raw);
+        return bigint_from_int64((int64_t)raw);
+    }
+    if (ml == 12 && strncmp(mn, "getBigUint64", 12) == 0) {
+        uint8_t* p = dv_ptr(dv, offset, 8);
+        if (!p) return js_throw_range_error("Invalid DataView offset");
+        bool little_endian = (argc > 1) ? js_is_truthy(args[1]) : false;
+        uint64_t raw;
+        memcpy(&raw, p, 8);
+        if (little_endian != sys_le) raw = swap64(raw);
+        return js_dataview_biguint64_item(raw);
+    }
 
     // Setter methods
     if (ml == 7 && strncmp(mn, "setInt8", 7) == 0) {
@@ -1248,6 +1325,36 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         bool little_endian = (argc > 2) ? js_is_truthy(args[2]) : false;
         uint64_t raw;
         memcpy(&raw, &d, 8);
+        if (little_endian != sys_le) raw = swap64(raw);
+        memcpy(p, &raw, 8);
+        return (Item){.item = ITEM_JS_UNDEFINED};
+    }
+    if (ml == 11 && strncmp(mn, "setBigInt64", 11) == 0) {
+        Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
+        Item bigint_value;
+        if (!js_dataview_to_bigint_value(value_item, &bigint_value)) return ItemNull;
+        if (dv->buffer->detached) return js_throw_type_error("DataView buffer is detached");
+        uint8_t* p = dv_ptr(dv, offset, 8);
+        if (!p) return js_throw_range_error("Invalid DataView offset");
+        bool little_endian = (argc > 2) ? js_is_truthy(args[2]) : false;
+        Item wrapped = js_bigint_as_int_n((Item){.item = i2it(64)}, bigint_value);
+        if (js_check_exception()) return ItemNull;
+        uint64_t raw = (uint64_t)bigint_to_int64(wrapped);
+        if (little_endian != sys_le) raw = swap64(raw);
+        memcpy(p, &raw, 8);
+        return (Item){.item = ITEM_JS_UNDEFINED};
+    }
+    if (ml == 12 && strncmp(mn, "setBigUint64", 12) == 0) {
+        Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
+        Item bigint_value;
+        if (!js_dataview_to_bigint_value(value_item, &bigint_value)) return ItemNull;
+        if (dv->buffer->detached) return js_throw_type_error("DataView buffer is detached");
+        uint8_t* p = dv_ptr(dv, offset, 8);
+        if (!p) return js_throw_range_error("Invalid DataView offset");
+        bool little_endian = (argc > 2) ? js_is_truthy(args[2]) : false;
+        Item wrapped = js_bigint_as_uint_n((Item){.item = i2it(64)}, bigint_value);
+        if (js_check_exception()) return ItemNull;
+        uint64_t raw = js_dataview_bigint_to_uint64(wrapped);
         if (little_endian != sys_le) raw = swap64(raw);
         memcpy(p, &raw, 8);
         return (Item){.item = ITEM_JS_UNDEFINED};
