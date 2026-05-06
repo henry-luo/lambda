@@ -49,6 +49,21 @@ fn attr_value_at(attrs, key, i, n) {
 }
 fn attr_value(node, key) => attr_value_at(node.attrs, key, 0, len(node.attrs))
 
+fn text_has_mark_at(marks, mark, i, n) {
+  if (i >= n) { false }
+  else if (marks[i] == mark) { true }
+  else { text_has_mark_at(marks, mark, i + 1, n) }
+}
+fn text_has_mark(marks, mark) => text_has_mark_at(marks, mark, 0, len(marks))
+
+fn render_text_leaf(leaf) {
+  let content0 = leaf.text
+  let content1 = if (text_has_mark(leaf.marks, 'code')) { <code; content0> } else { content0 }
+  let content2 = if (text_has_mark(leaf.marks, 'u')) { <u; content1> } else { content1 }
+  let content3 = if (text_has_mark(leaf.marks, 'em')) { <em; content2> } else { content2 }
+  if (text_has_mark(leaf.marks, 'strong')) { <strong; content3> } else { content3 }
+}
+
 let initial_editor_doc = node('doc', [for (child in initial_body) mark_to_editor(child)])
 let initial_title_len = len(doc_text(node_at(initial_editor_doc, [0])))
 let initial_selection = text_selection(pos([0, 0], initial_title_len), pos([0, 0], initial_title_len))
@@ -79,7 +94,7 @@ fn editor_with_event_selection(ed, evt) => edit_set_selection(ed, event_selectio
 view any { ~ }
 
 view map {
-  if (~.kind == 'text') { ~.text }
+  if (~.kind == 'text') { render_text_leaf(~) }
   else if (~.kind == 'node' and ~.tag == 'doc') { <div class:"doc-body"; *[for (c in ~.content) apply(c)]> }
   else if (~.kind == 'node' and ~.tag == 'h1') { <h1; *[for (c in ~.content) apply(c)]> }
   else if (~.kind == 'node' and ~.tag == 'h2') { <h2; *[for (c in ~.content) apply(c)]> }
@@ -180,6 +195,12 @@ on click(evt) {
     status = "selected"
   }
 }
+on selectionchange(evt) {
+  if (evt.source_selection != null or evt.source_pos != null) {
+    editor = editor_with_event_selection(editor, evt)
+    status = "selected"
+  }
+}
 on rte_cmd(evt) {
   // S2.1 dispatch stub — proves toolbar -> state path. S2.2 replaces these
   // branches with `editor = edit_exec(editor, edit_cmd_*())` from the
@@ -190,18 +211,23 @@ on rte_cmd(evt) {
     status = "saved"
   } else if (cmd == "btn-bold") {
     editor = edit_exec(editor, edit_cmd_toggle_mark('strong'))
+    set_selection(editor.selection)
     status = cmd
   } else if (cmd == "btn-italic") {
     editor = edit_exec(editor, edit_cmd_toggle_mark('em'))
+    set_selection(editor.selection)
     status = cmd
   } else if (cmd == "btn-underline") {
     editor = edit_exec(editor, edit_cmd_toggle_mark('u'))
+    set_selection(editor.selection)
     status = cmd
   } else if (cmd == "btn-undo") {
     editor = edit_exec(editor, edit_cmd_history_undo())
+    set_selection(editor.selection)
     status = cmd
   } else if (cmd == "btn-redo") {
     editor = edit_exec(editor, edit_cmd_history_redo())
+    set_selection(editor.selection)
     status = cmd
   } else {
     status = cmd

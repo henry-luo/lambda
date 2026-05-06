@@ -4399,6 +4399,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
             // End selection mode
             if (state && state->selection) {
+                if (!state->selection->is_collapsed && evcon.target) {
+                    if (dispatch_lambda_handler(&evcon, evcon.target, "selectionchange")) {
+                        evcon.need_repaint = true;
+                    }
+                }
                 state->selection->is_selecting = false;
             }
         }

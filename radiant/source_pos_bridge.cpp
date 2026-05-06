@@ -305,6 +305,18 @@ static bool path_equals_prefix(const SourcePathC* path, int prefix_len,
                   sizeof(int) * (size_t)prefix_len) == 0;
 }
 
+static DomText* first_text_descendant(DomNode* node) {
+    if (!node) return NULL;
+    if (node->node_type == DOM_NODE_TEXT) return (DomText*)node;
+    if (node->node_type != DOM_NODE_ELEMENT) return NULL;
+    DomElement* el = (DomElement*)node;
+    for (DomNode* c = el->first_child; c; c = c->next_sibling) {
+        DomText* hit = first_text_descendant(c);
+        if (hit) return hit;
+    }
+    return NULL;
+}
+
 // Resolve a SourcePos against a single DomElement candidate. Reads its
 // recorded source path; on a match, fills `*out` and returns true.
 static bool try_resolve_at_element(DomElement* de, const SourcePosC* pos,
@@ -325,15 +337,22 @@ static bool try_resolve_at_element(DomElement* de, const SourcePosC* pos,
             matched = true;
         }
     } else { // SOURCE_POS_TEXT
-        if (pos->path.depth > 0 &&
+        if (source_path_equal(&pos->path, &recorded)) {
+            DomText* tn = first_text_descendant((DomNode*)de);
+            if (tn) {
+                out->node = (DomNode*)tn;
+                out->offset = dom_text_utf8_to_utf16(tn, pos->offset);
+                matched = true;
+            }
+        } else if (pos->path.depth > 0 &&
             path_equals_prefix(&pos->path, pos->path.depth - 1, &recorded)) {
             // Locate the text child at the recorded index.
             int target_idx = pos->path.indices[pos->path.depth - 1];
             int idx = 0;
             for (DomNode* c = de->first_child; c; c = c->next_sibling) {
                 if (idx == target_idx) {
-                    if (c->node_type == DOM_NODE_TEXT) {
-                        DomText* tn = (DomText*)c;
+                    DomText* tn = first_text_descendant(c);
+                    if (tn) {
                         out->node = (DomNode*)tn;
                         out->offset = dom_text_utf8_to_utf16(tn, pos->offset);
                         matched = true;
