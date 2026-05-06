@@ -123,10 +123,18 @@ fn event_selection_for_doc(doc, evt, fallback) {
   }
 }
 
+fn source_selection_is_range(sel) =>
+  sel != null and (sel.kind != 'text' or not pos_equal(sel.anchor, sel.head))
+
 fn click_selection_for_doc(doc, evt, fallback) {
-  let p = normalize_source_pos(doc, evt.source_pos)
-  if (p != null) { text_selection(p, p) }
-  else { event_selection_for_doc(doc, evt, fallback) }
+  let sel = normalize_source_selection(doc, evt.source_selection)
+  if (source_selection_is_range(sel)) { sel }
+  else {
+    let p = normalize_source_pos(doc, evt.source_pos)
+    if (p != null) { text_selection(p, p) }
+    else if (sel != null) { sel }
+    else { fallback }
+  }
 }
 
 fn editor_with_event_selection(ed, evt) => edit_set_selection(ed, event_selection_for_doc(ed.doc, evt, ed.selection))
@@ -212,7 +220,7 @@ on click() {
 // Top-level reactive editor application
 // ============================================================================
 
-edit <rte_app> state editor: initial_editor, status: ("opened:" ++ SOURCE_PATH), markdown_output: "" {
+edit <rte_app> state editor: initial_editor, status: ("opened:" ++ SOURCE_PATH), markdown_output: "", drag_selection: null, drag_moved: false {
   <div class:"rte-app"
     <div id:"toolbar", class:"toolbar"
       apply(<toolbar_button cmd:"btn-bold",      label:"B">)
@@ -235,6 +243,53 @@ edit <rte_app> state editor: initial_editor, status: ("opened:" ++ SOURCE_PATH),
     <pre id:"markdown-output"; markdown_output>
     <div id:"status"; status>
   >
+}
+on mousemove(evt) {
+  let sel = normalize_source_selection(editor.doc, evt.source_selection)
+  if (evt.selection_press_in_range and source_selection_is_range(sel)) {
+    drag_selection = sel
+    drag_moved = true
+    status = "dragging"
+  } else if (evt.selection_press_in_range and drag_selection != null) {
+    drag_moved = true
+    status = "dragging"
+  }
+}
+on mouseup(evt) {
+  if (drag_selection != null and drag_moved) {
+    let drop_pos = normalize_source_pos(editor.doc, evt.source_pos)
+    if (drop_pos != null) {
+      let moved_text = selection_to_string(editor.doc, drag_selection)
+      let delete_editor = edit_set_selection(editor, drag_selection)
+      if (edit_can_exec(delete_editor, edit_cmd_delete_forward())) {
+        let after_delete = edit_exec(delete_editor, edit_cmd_delete_forward())
+        let drop_after_delete = normalize_source_pos(after_delete.doc, drop_pos)
+        if (drop_after_delete != null) {
+          let insert_editor = edit_set_selection(after_delete, text_selection(drop_after_delete, drop_after_delete))
+          if (edit_can_exec(insert_editor, edit_cmd_insert_text(moved_text))) {
+            editor = edit_exec(insert_editor, edit_cmd_insert_text(moved_text))
+            set_selection(editor.selection)
+            status = "drag-moved"
+          } else {
+            status = "drag-insert-null:" ++ moved_text
+          }
+        } else {
+          status = "drag-drop-null:" ++ moved_text
+        }
+      } else {
+        let move_cmd = edit_cmd_move_text_selection(drag_selection, drop_pos)
+        if (edit_can_exec(editor, move_cmd)) {
+          editor = edit_exec(editor, move_cmd)
+          set_selection(editor.selection)
+          status = "drag-moved"
+        } else {
+          status = "drag-delete-null:" ++ moved_text
+        }
+      }
+    }
+  }
+  drag_selection = null
+  drag_moved = false
 }
 on beforeinput(evt) {
   if (evt.input_intent != null) {

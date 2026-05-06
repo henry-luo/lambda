@@ -62,6 +62,8 @@ pub fn edit_cmd_split_block() => {name: 'split_block'}
 pub fn edit_cmd_set_block_type(tag) => {name: 'set_block_type', tag: tag}
 pub fn edit_cmd_history_undo() => {name: 'history_undo'}
 pub fn edit_cmd_history_redo() => {name: 'history_redo'}
+pub fn edit_cmd_move_text_selection(source_selection, target_pos) =>
+  {name: 'move_text_selection', source_selection: source_selection, target_pos: target_pos}
 
 fn command_tx(editor, command) {
   if (command.name == 'insert_text') { cmd_insert_text(editor, command.text) }
@@ -88,6 +90,7 @@ fn command_tx(editor, command) {
   else if (command.name == 'set_block_type') { cmd_set_block_type(editor, command.tag) }
   else if (command.name == 'history_undo') { dispatch_intent(editor, {input_type: "historyUndo"}) }
   else if (command.name == 'history_redo') { dispatch_intent(editor, {input_type: "historyRedo"}) }
+  else if (command.name == 'move_text_selection') { cmd_move_text_selection(editor, command.source_selection, command.target_pos) }
   else { null }
 }
 

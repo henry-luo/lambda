@@ -821,6 +821,10 @@ static Item build_lambda_event_map(DomDocument* doc, View* target,
         mb.put("text", evcon->paste_text);
     }
 
+    bool event_uses_hit_source_pos = evcon &&
+        (strcmp(event_name, "mousedown") == 0 || strcmp(event_name, "mousemove") == 0 ||
+         strcmp(event_name, "mouseup") == 0 || strcmp(event_name, "click") == 0);
+
     // R7 step 3b — attach SourcePos / SourceSelection for editor handlers.
     // The editor's `mod_source_pos` shapes are:
     //   pos       = { path: [int...], offset: int }
@@ -837,8 +841,10 @@ static Item build_lambda_event_map(DomDocument* doc, View* target,
         if (ds && ds->anchor.node) {
             SourcePosC anchor_pos;
             if (source_pos_from_dom_boundary(&ds->anchor, &anchor_pos)) {
-                mb.put("source_pos",
-                       source_pos_to_item(builder, &anchor_pos));
+                if (!event_uses_hit_source_pos) {
+                    mb.put("source_pos",
+                           source_pos_to_item(builder, &anchor_pos));
+                }
                 if (!ds->is_collapsed && ds->focus.node) {
                     SourcePosC head_pos;
                     if (source_pos_from_dom_boundary(&ds->focus, &head_pos)) {
@@ -857,6 +863,32 @@ static Item build_lambda_event_map(DomDocument* doc, View* target,
         }
     }
 
+    RadiantState* st_press = doc && doc->state ? (RadiantState*)doc->state : nullptr;
+    mb.put("selection_press_in_range",
+           event_uses_hit_source_pos && st_press && st_press->text_selection_press_in_range);
+
+
+    if (event_uses_hit_source_pos && doc && doc->view_tree) {
+        int event_x = 0, event_y = 0;
+        bool has_mouse_pos = false;
+        if (evcon->event.type == RDT_EVENT_MOUSE_MOVE) {
+            event_x = evcon->event.mouse_position.x;
+            event_y = evcon->event.mouse_position.y;
+            has_mouse_pos = true;
+        } else if (evcon->event.type == RDT_EVENT_MOUSE_DOWN || evcon->event.type == RDT_EVENT_MOUSE_UP) {
+            event_x = evcon->event.mouse_button.x;
+            event_y = evcon->event.mouse_button.y;
+            has_mouse_pos = true;
+        }
+        if (has_mouse_pos) {
+            DomBoundary hit = dom_hit_test_to_boundary((View*)doc->view_tree->root, (float)event_x, (float)event_y);
+            SourcePosC hit_pos;
+            if (hit.node && source_pos_from_dom_boundary(&hit, &hit_pos)) {
+                mb.put("source_pos", source_pos_to_item(builder, &hit_pos));
+                source_pos_free(&hit_pos);
+            }
+        }
+    }
     // for drag-and-drop events: add drag_data field
     if (evcon && (strcmp(event_name, "dragstart") == 0 || strcmp(event_name, "dragmove") == 0 ||
                   strcmp(event_name, "drop") == 0 || strcmp(event_name, "dragend") == 0)) {
@@ -3195,6 +3227,41 @@ TextRect* find_text_rect_for_offset(ViewText* text, int char_offset) {
     return prev_rect;
 }
 
+static bool text_point_inside_existing_selection(RadiantState* state, View* view, int char_offset) {
+    if (!state || !state->dom_selection || !view || view->view_type != RDT_VIEW_TEXT) return false;
+    DomSelection* selection = state->dom_selection;
+    if (selection->range_count == 0 || selection->is_collapsed || !selection->ranges[0]) return false;
+
+    DomText* text = (DomText*)view;
+    uint32_t offset = char_offset < 0 ? 0 : dom_text_utf8_to_utf16(text, (uint32_t)char_offset);
+    DomNode* node = (DomNode*)text;
+    if (dom_range_is_point_in_range(selection->ranges[0], node, offset)) return true;
+
+    uint32_t boundary_len = dom_node_boundary_length(node);
+    if (offset < boundary_len && dom_range_is_point_in_range(selection->ranges[0], node, offset + 1)) return true;
+    if (offset > 0 && dom_range_is_point_in_range(selection->ranges[0], node, offset - 1)) return true;
+
+    SourcePosC click_pos = {};
+    SourcePosC start_pos = {};
+    SourcePosC end_pos = {};
+    DomBoundary click_boundary = { node, offset };
+    bool source_inside = false;
+    if (source_pos_from_dom_boundary(&click_boundary, &click_pos) &&
+        source_pos_from_dom_range(selection->ranges[0], &start_pos, &end_pos) &&
+        click_pos.kind == SOURCE_POS_TEXT && start_pos.kind == SOURCE_POS_TEXT && end_pos.kind == SOURCE_POS_TEXT &&
+        source_path_equal(&click_pos.path, &start_pos.path) &&
+        source_path_equal(&click_pos.path, &end_pos.path)) {
+        uint32_t sel_start = start_pos.offset <= end_pos.offset ? start_pos.offset : end_pos.offset;
+        uint32_t sel_end = start_pos.offset <= end_pos.offset ? end_pos.offset : start_pos.offset;
+        source_inside = click_pos.offset + 1 >= sel_start && click_pos.offset <= sel_end + 1;
+    }
+    source_pos_free(&click_pos);
+    source_pos_free(&start_pos);
+    source_pos_free(&end_pos);
+    if (source_inside) return true;
+    return false;
+}
+
 /**
  * Update caret visual position after movement operations
  * Must be called after caret_move, caret_move_line, caret_move_to
@@ -3339,6 +3406,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
         if (evcon.target) {
             log_debug("Target view found at position (%d, %d)", mouse_x, mouse_y);
+            dispatch_lambda_handler(&evcon, evcon.target, "mousemove");
             // build stack of views from root to target view
             ArrayList* target_list = build_view_stack(&evcon, evcon.target);
 
@@ -3858,6 +3926,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
         // Update active and focus states
         if (event->type == RDT_EVENT_MOUSE_DOWN && evcon.target) {
+            if (state) {
+                state->text_selection_press_in_range = false;
+                state->text_selection_press_view = NULL;
+                state->text_selection_press_offset = 0;
+            }
             log_debug("MOUSE_DOWN: target=%p view_type=%d", evcon.target, evcon.target->view_type);
             if (evcon.target->view_type == RDT_VIEW_TEXT) {
                 log_debug("Target is ViewText, target_text_rect=%p", evcon.target_text_rect);
@@ -3868,6 +3941,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
             // Dispatch HTML onmousedown handler
             dispatch_html_event_handler(&evcon, evcon.target, "mousedown");
+
+            dispatch_lambda_handler(&evcon, evcon.target, "mousedown");
             // §7 unification (U-2/U-6): always dispatch via JS EventTarget bridge so
             // addEventListener("mousedown",...) listeners run. Bridge and inline target
             // disjoint registries; preventDefault from real listeners gates link nav.
@@ -3903,6 +3978,22 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     &evcon, text, rect, btn_event->x, btn_event->y);
 
                 log_debug("CLICK IN TEXT at offset %d (target=%p)", char_offset, evcon.target);
+
+                bool mouse_down_in_selection = btn_event->button == GLFW_MOUSE_BUTTON_LEFT &&
+                    event->mouse_button.clicks == 1 &&
+                    !(event->mouse_button.mods & RDT_MOD_SHIFT) &&
+                    text_point_inside_existing_selection(state, evcon.target, char_offset);
+
+                if (mouse_down_in_selection) {
+                    if (state && state->selection) {
+                        state->selection->is_selecting = false;
+                        state->text_selection_press_in_range = true;
+                        state->text_selection_press_view = evcon.target;
+                        state->text_selection_press_offset = char_offset;
+                    }
+                    log_debug("[TEXT SEL PRESS] preserving existing selection on mouse down");
+                    evcon.need_repaint = true;
+                } else {
 
                 // Set caret at clicked position
                 caret_set(state, evcon.target, char_offset);
@@ -3984,6 +4075,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             te_apply_byte_range(state, evcon.target, start, end);
                         }
                     }
+                }
+
                 }
 
                 // Restore font
@@ -4306,6 +4399,34 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             // Clear :active state
             update_active_state(&evcon, NULL, false);
 
+            if (state && state->text_selection_press_in_range) {
+                View* collapse_view = state->text_selection_press_view;
+                int collapse_offset = state->text_selection_press_offset;
+                if (evcon.target && evcon.target->view_type == RDT_VIEW_TEXT && evcon.target_text_rect) {
+                    ViewText* text = (ViewText*)evcon.target;
+                    FontBox saved_font = evcon.font;
+                    if (text->font) {
+                        setup_font(evcon.ui_context, &evcon.font, text->font);
+                    }
+                    collapse_view = evcon.target;
+                    collapse_offset = calculate_char_offset_from_position(
+                        &evcon, text, evcon.target_text_rect, btn_event->x, btn_event->y);
+                    evcon.font = saved_font;
+                }
+                selection_start(state, collapse_view, collapse_offset);
+                if (state->selection) {
+                    state->selection->is_selecting = false;
+                }
+                state->text_selection_press_in_range = false;
+                state->text_selection_press_view = NULL;
+                state->text_selection_press_offset = 0;
+                log_debug("[TEXT SEL PRESS] collapsed preserved selection on mouse up");
+                evcon.need_repaint = true;
+            }
+
+            bool text_selection_drag_handled = state && state->selection &&
+                state->selection->is_selecting && !state->selection->is_collapsed;
+
             // Handle select dropdown click FIRST (before other click handling)
             // If a dropdown is open, handle clicks on it before anything else
             bool dropdown_handled = false;
@@ -4322,7 +4443,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             }
 
             // Only process other click handlers if dropdown wasn't involved and not a drag
-            if (!dropdown_handled && !drag_handled) {
+            if (!dropdown_handled && !drag_handled && !text_selection_drag_handled) {
                 // §7 unification (U-2/U-6): always dispatch click via JS EventTarget
                 // bridge BEFORE built-in default actions, so addEventListener("click")
                 // listeners can call event.preventDefault() to suppress them. The
@@ -4477,6 +4598,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
         if (evcon.target) {
             log_debug("Target view found at position (%d, %d)", mouse_x, mouse_y);
+            if (evcon.event.type == RDT_EVENT_MOUSE_UP) {
+                dispatch_lambda_handler(&evcon, evcon.target, "mouseup");
+            }
             // build stack of views from root to target view
             ArrayList* target_list = build_view_stack(&evcon, evcon.target);
 

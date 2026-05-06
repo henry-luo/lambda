@@ -83,6 +83,21 @@ fn last_caret_pos_in(n, path) {
   else { pos(path, 0) }
 }
 
+fn first_caret_pos_in(n, path) {
+  if (is_text(n)) { pos(path, 0) }
+  else if (is_node(n) and len(n.content) > 0) { first_caret_pos_in(n.content[0], [*path, 0]) }
+  else { pos(path, 0) }
+}
+
+fn text_caret_near_pos(doc, p) {
+  let n = node_at(doc, p.path)
+  if (n == null) { null }
+  else if (is_text(n)) { p }
+  else if (not is_node(n) or len(n.content) == 0) { null }
+  else if (p.offset < len(n.content)) { first_caret_pos_in(n.content[p.offset], [*p.path, p.offset]) }
+  else { last_caret_pos_in(n.content[len(n.content) - 1], [*p.path, len(n.content) - 1]) }
+}
+
 fn selection_after_blocks(blocks) =>
   if (len(blocks) == 0) { caret(pos([], 0)) }
   else { caret(last_caret_pos_in(blocks[len(blocks) - 1], [len(blocks) - 1])) }
@@ -576,6 +591,47 @@ pub fn cmd_move_node(state, source_path, target_parent_path, target_index) {
       let tx1 = tx_step(tx0, step_replace(source_parent_path, source_index, source_index + 1, []))
       let tx2 = tx_step(tx1, step_replace(target_parent_path, insert_index, insert_index, [moved]))
       tx_set_selection(tx2, node_selection([*target_parent_path, insert_index]))
+    }
+  }
+}
+
+fn pos_inside_text_selection(sel, p) {
+  if (sel == null or sel.kind != 'text' or p == null) { false }
+  else {
+    let lo = sel_lo(sel)
+    let hi = sel_hi(sel)
+    let after_start = pos_compare(lo, p) < 1
+    let before_end = pos_compare(p, hi) < 1
+    after_start and before_end
+  }
+}
+
+pub fn cmd_move_text_selection(state, source_selection, target_pos) {
+  if (source_selection == null or source_selection.kind != 'text' or sel_collapsed(source_selection)) { null }
+  else if (target_pos == null or pos_inside_text_selection(source_selection, target_pos)) { null }
+  else {
+    let moved_text = selection_to_string(state.doc, source_selection)
+    if (len(moved_text) == 0) { null }
+    else {
+      let delete_state = {doc: state.doc, schema: state.schema, selection: source_selection,
+                          stored_marks: state.stored_marks, default_block: state.default_block}
+      let tx1 = cmd_delete_forward(delete_state)
+      if (tx1 == null) { null }
+      else {
+        let mapped_target = tx_map_pos(tx1, target_pos)
+        let target_after_delete = text_caret_near_pos(tx1.doc_after, mapped_target)
+        if (target_after_delete == null) { null }
+        else {
+          let insert_state = {doc: tx1.doc_after, schema: state.schema, selection: caret(target_after_delete),
+                              stored_marks: state.stored_marks, default_block: state.default_block}
+          let tx2 = cmd_insert_text(insert_state, moved_text)
+          if (tx2 == null) { null }
+          else {
+            let tx3 = tx_apply_steps(tx1, tx2.steps, 0, len(tx2.steps))
+            tx_set_selection(tx3, tx2.sel_after)
+          }
+        }
+      }
     }
   }
 }

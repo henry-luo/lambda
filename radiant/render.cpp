@@ -726,73 +726,6 @@ static int compare_view_order(View* view_a, View* view_b) {
 }
 
 /**
- * Check if a text view is within a cross-view selection and determine
- * which portion of the text should be selected.
- *
- * Returns:
- *   0: not in selection
- *   1: fully selected (all text)
- *   2: partially selected (check *start_offset and *end_offset)
- */
-static int get_selection_range_for_view(SelectionState* sel, View* text_view,
-    int text_length, int* start_offset, int* end_offset) {
-
-    if (!sel || sel->is_collapsed) return 0;
-
-    View* anchor_view = sel->anchor_view;
-    View* focus_view = sel->focus_view;
-
-    // Single-view selection (legacy)
-    if (!anchor_view || !focus_view) {
-        anchor_view = sel->view;
-        focus_view = sel->view;
-    }
-
-    // Same view for anchor and focus
-    if (anchor_view == focus_view) {
-        if (text_view != anchor_view) return 0;
-        // Normalize selection range
-        *start_offset = sel->anchor_offset < sel->focus_offset ? sel->anchor_offset : sel->focus_offset;
-        *end_offset = sel->anchor_offset > sel->focus_offset ? sel->anchor_offset : sel->focus_offset;
-        return 2;  // partially selected
-    }
-
-    // Cross-view selection: determine order
-    int anchor_vs_focus = compare_view_order(anchor_view, focus_view);
-    View* first_view = (anchor_vs_focus <= 0) ? anchor_view : focus_view;
-    View* last_view = (anchor_vs_focus <= 0) ? focus_view : anchor_view;
-    int first_offset = (anchor_vs_focus <= 0) ? sel->anchor_offset : sel->focus_offset;
-    int last_offset = (anchor_vs_focus <= 0) ? sel->focus_offset : sel->anchor_offset;
-
-    // Check if text_view is the first view
-    if (text_view == first_view) {
-        *start_offset = first_offset;
-        *end_offset = text_length;  // select to end
-        return 2;
-    }
-
-    // Check if text_view is the last view
-    if (text_view == last_view) {
-        *start_offset = 0;
-        *end_offset = last_offset;
-        return 2;
-    }
-
-    // Check if text_view is between first and last
-    int view_vs_first = compare_view_order(text_view, first_view);
-    int view_vs_last = compare_view_order(text_view, last_view);
-
-    if (view_vs_first > 0 && view_vs_last < 0) {
-        // text_view is between first and last - fully selected
-        *start_offset = 0;
-        *end_offset = text_length;
-        return 1;
-    }
-
-    return 0;  // not in selection
-}
-
-/**
  * Check if a view (any type, including images) is within a cross-view selection.
  * Returns true if the view is between anchor and focus views.
  */
@@ -3692,10 +3625,11 @@ void render_ui_overlays(RenderContext* rdcon, RadiantState* state) {
 
     log_debug("[UI_OVERLAY] Rendering overlays: caret=%p", (void*)state->caret);
 
-    // Selection background is painted inline inside render_text_view (per
-    // text view, before glyphs) so that text renders on top of the highlight
-    // rather than being obscured by an after-the-fact overlay. Therefore we
-    // do NOT call render_selection() here.
+    // Selection background is painted inline inside render_text_view when the
+    // active range resolves cleanly to the current text fragments. Reactive UI
+    // rebuilds can leave that inline path without a matching fragment for one
+    // frame, so keep the DomSelection overlay as a canonical fallback.
+    render_selection(rdcon, state);
 
     // Render open dropdown popup (above content)
     if (state->open_dropdown) {

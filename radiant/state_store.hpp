@@ -221,6 +221,9 @@ typedef struct RadiantState {
     // Global interaction states
     CaretState* caret;             // text cursor state (legacy; migrating to dom_selection)
     SelectionState* selection;     // text selection state (legacy; migrating to dom_selection)
+    bool text_selection_press_in_range;  // mouse-down began inside an existing text selection
+    View* text_selection_press_view;     // fallback collapse target for press-in-selection mouse-up
+    int text_selection_press_offset;
 
     // ------------------------------------------------------------------
     // DOM-spec Selection / Range (additive — new code path; legacy

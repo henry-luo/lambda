@@ -1,0 +1,20 @@
+{
+  "name": "RTE mouse down inside selection preserves until mouse up",
+  "html": "test/ui/rte_prototype.ls",
+  "timeout": 5000,
+  "events": [
+    {"type": "wait", "ms": 500},
+    {"type": "mouse_drag", "target": {"text": "simple markdown"}, "to_target": {"text": "testing basic"}, "button": 0},
+    {"type": "wait", "ms": 100},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+    {"type": "mouse_down", "target": {"text": "markdown document"}, "button": 0},
+    {"type": "wait", "ms": 100},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+    {"type": "mouse_move", "target": {"text": "That's all"}},
+    {"type": "wait", "ms": 100},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+    {"type": "mouse_up", "target": {"text": "That's all"}, "button": 0},
+    {"type": "wait", "ms": 100},
+    {"type": "assert_selection", "is_collapsed": true, "check_dom": true}
+  ]
+}

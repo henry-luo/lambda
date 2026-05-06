@@ -1,0 +1,15 @@
+{
+  "name": "RTE manual mouse drag creates an active selection",
+  "html": "test/ui/rte_prototype.ls",
+  "viewport": {"width": 1200, "height": 800},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "mouse_down", "target": {"text": "simple markdown"}, "button": 0},
+    {"type": "wait", "ms": 40},
+    {"type": "mouse_move", "target": {"text": "testing basic"}},
+    {"type": "wait", "ms": 40},
+    {"type": "mouse_up", "target": {"text": "testing basic"}, "button": 0},
+    {"type": "wait", "ms": 140},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true}
+  ]
+}
