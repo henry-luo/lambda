@@ -111,6 +111,7 @@ Item render_map_get_doc_root(void);
 // when not already set.
 void render_map_set_source_doc_root(Item root);
 Item render_map_get_source_doc_root(void);
+bool render_map_maybe_set_source_doc_root(Item target);
 
 // Receiver that persists a computed path for (source_item, template_ref).
 // Implemented in radiant/source_pos_bridge.cpp; lambda layer holds only

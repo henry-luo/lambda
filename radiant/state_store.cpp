@@ -314,6 +314,29 @@ extern "C" void dom_selection_sync_from_legacy_caret(RadiantState* state) {
     state->selection_layout_dirty = true;
 }
 
+static void caret_local_from_absolute(View* view, float abs_x, float abs_y,
+                                      float* out_x, float* out_y) {
+    float x = abs_x;
+    float y = abs_y;
+    View* parent = view ? view->parent : NULL;
+    while (parent) {
+        if (parent->view_type == RDT_VIEW_BLOCK ||
+            parent->view_type == RDT_VIEW_INLINE_BLOCK ||
+            parent->view_type == RDT_VIEW_LIST_ITEM) {
+            ViewBlock* block = (ViewBlock*)parent;
+            x -= block->x;
+            y -= block->y;
+            if (block->scroller && block->scroller->pane) {
+                x += block->scroller->pane->h_scroll_position;
+                y += block->scroller->pane->v_scroll_position;
+            }
+        }
+        parent = parent->parent;
+    }
+    if (out_x) *out_x = x;
+    if (out_y) *out_y = y;
+}
+
 // ---------------------------------------------------------------------------
 // Phase 6 — DomSelection → legacy mirroring (single-source-of-truth direction).
 //
@@ -392,8 +415,10 @@ extern "C" void legacy_sync_from_dom_selection(RadiantState* state) {
                 // Use END boundary (focus) for caret position when range is
                 // forward-directed; spec direction tells us which is focus.
                 bool focus_at_end = (ds->direction != DOM_SEL_DIR_BACKWARD);
-                caret->x      = focus_at_end ? r->end_x : r->start_x;
-                caret->y      = focus_at_end ? r->end_y : r->start_y;
+                float abs_x = focus_at_end ? r->end_x : r->start_x;
+                float abs_y = focus_at_end ? r->end_y : r->start_y;
+                caret_local_from_absolute(foc_view, abs_x, abs_y,
+                                          &caret->x, &caret->y);
                 caret->height = focus_at_end ? r->end_height : r->start_height;
                 // Mirror into selection start/end for legacy renderer.
                 sel->start_x = r->start_x;

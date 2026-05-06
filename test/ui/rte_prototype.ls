@@ -26,11 +26,28 @@ let SOURCE_PATH = './test/input/simple.md'
 let initial_doc^err = input(SOURCE_PATH, 'markdown')
 let initial_body = initial_doc[0]
 
+fn maybe_attr(name, value) => if (value == null) { [] } else { [{name: name, value: value}] }
+fn attrs_concat(a, b) => [*a, *b]
+
+fn editor_attrs(item) {
+  if (type(item) != element) { [] }
+  else if (name(item) == 'a') { attrs_concat(maybe_attr('href', item.href), maybe_attr('title', item.title)) }
+  else if (name(item) == 'img') { attrs_concat(maybe_attr('src', item.src), maybe_attr('alt', item.alt)) }
+  else { [] }
+}
+
 fn mark_to_editor(item) {
   if (type(item) == string) { text(item) }
-  else if (type(item) == element) { node(name(item), [for (i in 0 to len(item) - 1) mark_to_editor(item[i])]) }
+  else if (type(item) == element) { node_attrs(name(item), editor_attrs(item), [for (i in 0 to len(item) - 1) mark_to_editor(item[i])]) }
   else { text(string(item)) }
 }
+
+fn attr_value_at(attrs, key, i, n) {
+  if (i >= n) { null }
+  else if (attrs[i].name == key) { attrs[i].value }
+  else { attr_value_at(attrs, key, i + 1, n) }
+}
+fn attr_value(node, key) => attr_value_at(node.attrs, key, 0, len(node.attrs))
 
 let initial_editor_doc = node('doc', [for (child in initial_body) mark_to_editor(child)])
 let initial_title_len = len(doc_text(node_at(initial_editor_doc, [0])))
@@ -80,6 +97,8 @@ view map {
   else if (~.kind == 'node' and ~.tag == 'ol') { <ol; *[for (c in ~.content) apply(c)]> }
   else if (~.kind == 'node' and ~.tag == 'li') { <li; *[for (c in ~.content) apply(c)]> }
   else if (~.kind == 'node' and ~.tag == 'blockquote') { <blockquote; *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'a') { <a href:attr_value(~, 'href'); *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'img') { <img src:attr_value(~, 'src'), alt:attr_value(~, 'alt')> }
   else if (~.kind == 'node' and ~.tag == 'hr') { <hr> }
   else if (~.kind == 'node') { <div; *[for (c in ~.content) apply(c)]> }
   else { "" }
@@ -149,13 +168,14 @@ edit <rte_app> state editor: initial_editor, status: ("opened:" ++ SOURCE_PATH),
 on beforeinput(evt) {
   if (evt.input_intent != null) {
     editor = edit_dispatch(editor, evt.input_intent)
+    set_selection(editor.selection)
     status = evt.input_type
   } else {
     status = evt.input_type
   }
 }
 on click(evt) {
-  if (evt.source_selection != null or evt.source_pos != null) {
+  if (evt.target_tag != "button" and (evt.source_selection != null or evt.source_pos != null)) {
     editor = editor_with_event_selection(editor, evt)
     status = "selected"
   }
@@ -203,11 +223,12 @@ on rte_cmd(evt) {
       .rte-app { max-width: 920px; margin: 0 auto; background: white;
                  border-radius: 10px; box-shadow: 0 4px 16px rgba(0,0,0,0.08);
                  overflow: hidden; }
-      .toolbar { display: flex; gap: 4px; padding: 10px 14px;
+      .toolbar { display: flex; gap: 4px; align-items: center; min-height: 52px; padding: 10px 14px;
                  background: #f8f9fb; border-bottom: 1px solid #e5e7eb; }
-      .toolbar-btn { min-width: 32px; height: 32px; padding: 0 8px;
-                     border: 1px solid #d8dadf; background: white;
-                     border-radius: 6px; cursor: pointer; font-size: 14px; }
+      .toolbar-btn { flex: 0 0 auto; min-width: 32px; height: 32px; line-height: 30px;
+             padding: 0 8px; border: 1px solid #d8dadf; background: white;
+             border-radius: 6px; cursor: pointer; font-size: 14px;
+             text-align: center; white-space: nowrap; overflow: hidden; }
       .toolbar-btn:hover { background: #eef0f3; }
       .toolbar-btn.active { background: #d8e5ff; border-color: #6b8ce0; }
       .doc-host { min-height: 420px; padding: 24px 30px; outline: none;

@@ -24,6 +24,7 @@ static render_map_path_recorder_fn s_path_recorder = NULL;
 
 // forward declarations
 static Item find_parent_of(Item node, Item target, int* out_index, int depth = 0);
+extern Item _map_get(TypeMap* map_type, void* map_data, char* key, bool* is_found);
 
 // ============================================================================
 // Reverse map: result_node.item → RenderMapKey (source_item, template_ref)
@@ -523,6 +524,40 @@ Item render_map_get_source_doc_root(void) {
     return s_source_doc_root;
 }
 
+static Item render_map_get_map_field(Item node, const char* key) {
+    if (get_type_id(node) != LMD_TYPE_MAP || !key) return ItemNull;
+    Map* map = it2map(node);
+    if (!map || !map->type || !map->data) return ItemNull;
+    bool found = false;
+    return _map_get((TypeMap*)map->type, map->data, (char*)key, &found);
+}
+
+static bool item_chars_equal(Item item, const char* value) {
+    if (!value) return false;
+    TypeId tid = get_type_id(item);
+    if (tid != LMD_TYPE_SYMBOL && tid != LMD_TYPE_STRING) return false;
+    const char* chars = item.get_chars();
+    return chars && strcmp(chars, value) == 0;
+}
+
+static bool is_editor_doc_root(Item target) {
+    if (get_type_id(target) != LMD_TYPE_MAP) return false;
+    Item kind = render_map_get_map_field(target, "kind");
+    Item tag = render_map_get_map_field(target, "tag");
+    Item content = render_map_get_map_field(target, "content");
+    return item_chars_equal(kind, "node") &&
+           item_chars_equal(tag, "doc") &&
+           get_type_id(content) == LMD_TYPE_ARRAY;
+}
+
+bool render_map_maybe_set_source_doc_root(Item target) {
+    if (!s_path_recorder) return false;
+    if (!is_editor_doc_root(target)) return false;
+    render_map_set_source_doc_root(target);
+    log_debug("render_map: source root set to editor doc map");
+    return true;
+}
+
 void render_map_set_path_recorder(render_map_path_recorder_fn fn) {
     s_path_recorder = fn;
 }
@@ -562,6 +597,17 @@ static int find_path_to(Item node, Item target,
         for (unsigned i = 0; i < arr->length; i++) {
             if (depth < max_depth) out_indices[depth] = (int)i;
             int found = find_path_to(arr->items[i], target,
+                                     out_indices, max_depth, depth + 1);
+            if (found >= 0) return found;
+        }
+    } else if (tid == LMD_TYPE_MAP) {
+        Item content_item = render_map_get_map_field(node, "content");
+        if (get_type_id(content_item) != LMD_TYPE_ARRAY) return -1;
+        Array* content = it2arr(content_item);
+        if (!content) return -1;
+        for (unsigned i = 0; i < content->length; i++) {
+            if (depth < max_depth) out_indices[depth] = (int)i;
+            int found = find_path_to(content->items[i], target,
                                      out_indices, max_depth, depth + 1);
             if (found >= 0) return found;
         }

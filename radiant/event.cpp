@@ -855,9 +855,18 @@ typedef struct EmitHandlerContext {
     Item model_item;            // current handler's model item
     const char* template_ref;   // current handler's template reference
     EventContext* evcon;        // event context for passing to nested handlers
+    bool has_pending_selection; // selection to re-apply after reactive rebuild
+    Item pending_selection;
 } EmitHandlerContext;
 
 static __thread EmitHandlerContext* g_emit_handler_ctx = nullptr;
+
+static bool apply_source_selection_to_doc(DomDocument* doc, Item selection) {
+    if (!doc || !doc->root) return false;
+    RadiantState* state = (RadiantState*)doc->state;
+    if (!state || !state->dom_selection) return false;
+    return dom_selection_apply_source_selection(state->dom_selection, (DomNode*)doc->root, selection);
+}
 
 /**
  * dispatch_emit — called from pn_emit() (lambda-proc.cpp).
@@ -977,24 +986,11 @@ extern "C" Item dispatch_set_selection(Item selection) {
         return ItemNull;
     }
 
-    DomDocument* doc = g_emit_handler_ctx->doc;
-    if (!doc->root) {
-        log_debug("dispatch_set_selection: doc has no root");
-        return ItemNull;
-    }
-    RadiantState* state = (RadiantState*)doc->state;
-    if (!state) {
-        log_debug("dispatch_set_selection: doc has no state");
-        return ItemNull;
-    }
-    DomSelection* ds = state->dom_selection;
-    if (!ds) {
-        log_debug("dispatch_set_selection: state has no dom_selection");
-        return ItemNull;
-    }
+    g_emit_handler_ctx->pending_selection = selection;
+    g_emit_handler_ctx->has_pending_selection = true;
 
-    if (!dom_selection_apply_source_selection(ds, (DomNode*)doc->root, selection)) {
-        log_debug("dispatch_set_selection: could not resolve selection (malformed or unresolvable)");
+    if (!apply_source_selection_to_doc(g_emit_handler_ctx->doc, selection)) {
+        log_debug("dispatch_set_selection: deferred selection until after rebuild");
     }
     return ItemNull;
 }
@@ -1092,6 +1088,8 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
                                 emit_ctx.model_item = lookup.source_item;
                                 emit_ctx.template_ref = lookup.template_ref;
                                 emit_ctx.evcon = evcon;
+                                emit_ctx.has_pending_selection = false;
+                                emit_ctx.pending_selection = ItemNull;
                                 EmitHandlerContext* saved_emit_ctx = g_emit_handler_ctx;
                                 g_emit_handler_ctx = &emit_ctx;
 
@@ -1145,6 +1143,15 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
                                 } else {
                                     log_info("[TIMING] event dispatch: handler=%.2fms (no dirty entries)",
                                         duration<double, std::milli>(t_handler - t_start).count());
+                                }
+
+                                if (emit_ctx.has_pending_selection) {
+                                    if (apply_source_selection_to_doc(doc, emit_ctx.pending_selection)) {
+                                        log_debug("dispatch_lambda_handler: applied pending source selection");
+                                        evcon->need_repaint = true;
+                                    } else {
+                                        log_debug("dispatch_lambda_handler: pending source selection did not resolve");
+                                    }
                                 }
 
                                 // restore previous context

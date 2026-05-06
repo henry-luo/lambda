@@ -216,6 +216,8 @@ Item fn_apply1(Item target) {
         return target;  // pass through if no template matches
     }
 
+    render_map_maybe_set_source_doc_root(target);
+
     // R7 step 3c — auto-bootstrap the source doc root on first apply so the
     // editor bridge can compute child-index paths for every recorded item.
     // Only bootstrap when a path recorder is active (radiant runs); pure
@@ -286,6 +288,8 @@ Item fn_apply2(Item target, Item options) {
         edit_bridge_init(NULL);  // NULL input — standalone edit mode
         log_debug("apply: edit bridge initialized for edit-mode apply");
     }
+
+    render_map_maybe_set_source_doc_root(target);
 
     // R7 step 3c — auto-bootstrap source doc root for path tracking (radiant only).
     if (render_map_has_path_recorder() &&

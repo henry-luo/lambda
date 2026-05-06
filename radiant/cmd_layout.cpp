@@ -74,6 +74,7 @@ void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 #include "../radiant/state_store.hpp"
 #include "../radiant/form_control.hpp"
 #include "../radiant/script_runner.h"
+#include "../radiant/source_pos_bridge.hpp"
 #include "../lambda/render_map.h"
 #include "../lambda/template_state.h"
 
@@ -4666,6 +4667,10 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
     runtime->ui_mode = true;
     runtime->result_arena = result_input->arena;
 
+    source_pos_bridge_reset();
+    render_map_init();
+    render_map_set_path_recorder(&render_map_record_path);
+
     log_debug("[Lambda Script] Evaluating script (ui_mode=true, arena allocation)...");
     // Use MIR Direct JIT to evaluate the Lambda script (functional scripts don't need a main() entry point)
     Input* script_output = run_script_mir(runtime, nullptr, script_filepath, false);
@@ -4966,6 +4971,25 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
     dom_doc->url = script_url;
     dom_doc->view_tree = nullptr;  // Will be created during layout
     dom_doc->state = nullptr;
+
+    int total_stylesheets = inline_stylesheet_count + (script_stylesheet ? 1 : 0);
+    if (total_stylesheets > 0) {
+        dom_doc->stylesheet_capacity = total_stylesheets;
+        dom_doc->stylesheets = (CssStylesheet**)pool_alloc(pool, total_stylesheets * sizeof(CssStylesheet*));
+        dom_doc->stylesheet_count = 0;
+        if (script_stylesheet) {
+            dom_doc->stylesheets[dom_doc->stylesheet_count++] = script_stylesheet;
+        }
+        for (int i = 0; i < inline_stylesheet_count; i++) {
+            if (inline_stylesheets[i]) {
+                dom_doc->stylesheets[dom_doc->stylesheet_count++] = inline_stylesheets[i];
+            }
+        }
+        dom_doc->cached_inline_sheets = inline_stylesheets;
+        dom_doc->cached_inline_sheet_count = inline_stylesheet_count;
+        dom_doc->cached_css_engine = css_engine;
+        log_debug("[Lambda Script] Stored %d stylesheet(s) in DomDocument", dom_doc->stylesheet_count);
+    }
 
     // Register doc root for render map parent fixup during retransform
     Item html_item_root = {.element = html_elem};
