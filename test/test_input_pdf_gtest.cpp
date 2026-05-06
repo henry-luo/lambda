@@ -15,7 +15,7 @@
  *   - Multi-page documents with indirect /Pages → /Kids structure
  *
  * Test data sources:
- *   - Static fixtures under test/pdf/data/basic/   (pre-existing PDFs that
+ *   - Static fixtures under test/input/   (pre-existing PDFs that
  *     already exercise indirect-object refs and multi-page kid lists)
  *   - Generated multi-page PDF written via libharu into temp/ in SetUp,
  *     giving the test a fully deterministic page count + media-box assertion
@@ -52,8 +52,8 @@ static void ensure_temp_dir(void) {
 }
 
 // Static fixture paths (PDFs that already contain indirect objects).
-static const char* PDF_FIXTURE_SIMPLE   = "test/pdf/data/basic/test.pdf";
-static const char* PDF_FIXTURE_ADVANCED = "test/pdf/data/basic/advanced_test.pdf";
+static const char* PDF_FIXTURE_SIMPLE   = "test/input/test.pdf";
+static const char* PDF_FIXTURE_ADVANCED = "test/input/advanced_test.pdf";
 
 // Generated fixture path (3-page PDF written in SetUp).
 static const char* PDF_GEN_3PAGE        = "temp/test_input_pdf_3page.pdf";
