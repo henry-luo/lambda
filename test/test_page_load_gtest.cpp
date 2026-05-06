@@ -6,6 +6,7 @@
  * `./lambda.exe view <html> --headless --no-log` to verify they:
  *   1. Load without crashing (exit code 0)
  *   2. Complete layout within 4s and render within 2s
+ *   3. Keep page-induced memory growth within budget
  *
  * Timing is parsed from [LAYOUT_PROF] and [RENDER_PROF] stderr output.
  *
@@ -152,7 +153,8 @@ static std::vector<PageTestInfo> g_page_tests = discover_page_tests();
 // macOS-only enforcement: getrusage(RUSAGE_CHILDREN) reports peak RSS in bytes
 // on Darwin and KB on Linux — we normalise via wait4 + a per-OS multiplier.
 #define MAX_PEAK_RSS_BYTES (160ULL * 1024 * 1024)  // 160 MB hard cap (RSS, includes shared OS pages)
-#define MAX_PEAK_FOOTPRINT_BYTES (180ULL * 1024 * 1024)  // 180 MB cap on app-private memory (excludes shared OS pages)
+#define MAX_PEAK_FOOTPRINT_BYTES (180ULL * 1024 * 1024)  // fallback absolute cap when baseline telemetry is unavailable
+#define MAX_PAGE_FOOTPRINT_DELTA_BYTES (100ULL * 1024 * 1024)  // page-induced private memory growth cap
 
 #ifdef __APPLE__
     #define RUSAGE_MAXRSS_TO_BYTES(x) ((uint64_t)(x))
@@ -167,6 +169,7 @@ struct PageTestResult {
     double layout_ms;     // from [LAYOUT_PROF], -1 if not found
     double render_ms;     // from [RENDER_PROF], -1 if not found
     uint64_t peak_rss_bytes;  // child's peak resident set size (0 if unknown)
+    uint64_t baseline_footprint_bytes;  // child's initial phys_footprint (macOS only, 0 if unknown)
     uint64_t peak_footprint_bytes;  // child's peak phys_footprint (macOS only, 0 if unknown)
     std::string output;   // stderr/stdout from lambda.exe
 };
@@ -196,6 +199,22 @@ static uint64_t parse_peak_footprint(const std::string& output) {
     return strtoull(output.c_str() + pos, nullptr, 10);
 }
 
+// Parse the initial macOS footprint from VIEW_MEM_STAGES output. The absolute
+// lambda.exe baseline includes fixed runtime/JIT/framework allocation, so page
+// load tests enforce page-induced growth when this telemetry is available.
+static uint64_t parse_before_load_footprint(const std::string& output) {
+    const char* stage = "[MEMSTAGE] before-load";
+    size_t pos = output.find(stage);
+    if (pos == std::string::npos) return 0;
+    const char* key = "footprint=";
+    pos = output.find(key, pos);
+    if (pos == std::string::npos) return 0;
+    pos += strlen(key);
+    while (pos < output.size() && (output[pos] < '0' || output[pos] > '9')) pos++;
+    if (pos >= output.size()) return 0;
+    return strtoull(output.c_str() + pos, nullptr, 10) * 1024ULL * 1024ULL;
+}
+
 #ifdef _WIN32
 
 static PageTestResult run_page_test(const PageTestInfo& info) {
@@ -203,10 +222,12 @@ static PageTestResult run_page_test(const PageTestInfo& info) {
     result.exit_code = -1;
     result.timed_out = false;
     result.elapsed_ms = 0;
+    result.baseline_footprint_bytes = 0;
 
     std::string cmd = std::string(LAMBDA_EXE) + " view " + info.html_path + " --headless --no-log 2>&1";
 
     auto t0 = std::chrono::steady_clock::now();
+    _putenv_s("VIEW_MEM_STAGES", "1");
     FILE* pipe = _popen(cmd.c_str(), "r");
     if (!pipe) {
         result.output = "Failed to popen: " + cmd;
@@ -224,6 +245,7 @@ static PageTestResult run_page_test(const PageTestInfo& info) {
     result.elapsed_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
     result.layout_ms = parse_prof_ms(result.output, "[LAYOUT_PROF]");
     result.render_ms = parse_prof_ms(result.output, "[RENDER_PROF]");
+    result.baseline_footprint_bytes = parse_before_load_footprint(result.output);
     result.peak_footprint_bytes = parse_peak_footprint(result.output);
     return result;
 }
@@ -238,6 +260,7 @@ static PageTestResult run_page_test(const PageTestInfo& info) {
     result.layout_ms = -1;
     result.render_ms = -1;
     result.peak_rss_bytes = 0;
+    result.baseline_footprint_bytes = 0;
     result.peak_footprint_bytes = 0;
 
     auto t0 = std::chrono::steady_clock::now();
@@ -265,6 +288,7 @@ static PageTestResult run_page_test(const PageTestInfo& info) {
         close(pipefd[1]);
         // Create new process group so we can kill the whole group on timeout
         setpgid(0, 0);
+        setenv("VIEW_MEM_STAGES", "1", 1);
         execl(LAMBDA_EXE, LAMBDA_EXE, "view", info.html_path.c_str(), "--headless", "--no-log", (char*)NULL);
         _exit(127); // exec failed
     }
@@ -325,6 +349,7 @@ static PageTestResult run_page_test(const PageTestInfo& info) {
 
     result.layout_ms = parse_prof_ms(result.output, "[LAYOUT_PROF]");
     result.render_ms = parse_prof_ms(result.output, "[RENDER_PROF]");
+    result.baseline_footprint_bytes = parse_before_load_footprint(result.output);
     result.peak_footprint_bytes = parse_peak_footprint(result.output);
     return result;
 }
@@ -394,13 +419,19 @@ TEST_P(PageLoadTest, LoadWithoutCrash) {
     SCOPED_TRACE("Page: " + info.test_name);
 
     // Print timing
-    char timing_buf[200];
-    snprintf(timing_buf, sizeof(timing_buf), "  [%s] %dms (layout=%.0fms, render=%.0fms, rss=%lluMB, footprint=%lluMB)%s",
+    uint64_t footprint_delta_bytes =
+        (result.baseline_footprint_bytes > 0 && result.peak_footprint_bytes >= result.baseline_footprint_bytes)
+            ? result.peak_footprint_bytes - result.baseline_footprint_bytes
+            : 0;
+
+    char timing_buf[260];
+    snprintf(timing_buf, sizeof(timing_buf), "  [%s] %dms (layout=%.0fms, render=%.0fms, rss=%lluMB, footprint=%lluMB, page_delta=%lluMB)%s",
              info.test_name.c_str(), (int)result.elapsed_ms,
              result.layout_ms >= 0 ? result.layout_ms : 0.0,
              result.render_ms >= 0 ? result.render_ms : 0.0,
              (unsigned long long)(result.peak_rss_bytes / (1024 * 1024)),
              (unsigned long long)(result.peak_footprint_bytes / (1024 * 1024)),
+             (unsigned long long)(footprint_delta_bytes / (1024 * 1024)),
              result.timed_out ? " (TIMEOUT)" : "");
     std::cout << timing_buf << std::endl;
 
@@ -432,15 +463,24 @@ TEST_P(PageLoadTest, LoadWithoutCrash) {
             << (MAX_RENDER_SECONDS * 1000) << "ms)";
     }
 
-    // Peak memory limit. Prefer phys_footprint when available (macOS): it excludes
-    // shared OS framework pages and matches Activity Monitor's "Memory" column,
-    // giving a true measure of app-private allocation pressure. Fall back to RSS
-    // (which includes shared pages) when footprint is not reported.
+    // Peak memory limit. Prefer page-induced phys_footprint growth when available
+    // (macOS): the absolute process footprint includes fixed runtime/JIT/framework
+    // allocation before a page is loaded. Fall back to the older absolute cap when
+    // baseline telemetry is unavailable, and then to RSS when footprint is absent.
     if (result.peak_footprint_bytes > 0) {
-        EXPECT_LE(result.peak_footprint_bytes, MAX_PEAK_FOOTPRINT_BYTES)
-            << info.test_name << " peak phys_footprint = "
-            << (result.peak_footprint_bytes / (1024 * 1024)) << " MB (limit: "
-            << (MAX_PEAK_FOOTPRINT_BYTES / (1024 * 1024)) << " MB)";
+        if (footprint_delta_bytes > 0) {
+            EXPECT_LE(footprint_delta_bytes, MAX_PAGE_FOOTPRINT_DELTA_BYTES)
+                << info.test_name << " page phys_footprint growth = "
+                << (footprint_delta_bytes / (1024 * 1024)) << " MB (limit: "
+                << (MAX_PAGE_FOOTPRINT_DELTA_BYTES / (1024 * 1024)) << " MB, baseline: "
+                << (result.baseline_footprint_bytes / (1024 * 1024)) << " MB, peak: "
+                << (result.peak_footprint_bytes / (1024 * 1024)) << " MB)";
+        } else {
+            EXPECT_LE(result.peak_footprint_bytes, MAX_PEAK_FOOTPRINT_BYTES)
+                << info.test_name << " peak phys_footprint = "
+                << (result.peak_footprint_bytes / (1024 * 1024)) << " MB (limit: "
+                << (MAX_PEAK_FOOTPRINT_BYTES / (1024 * 1024)) << " MB)";
+        }
     } else if (result.peak_rss_bytes > 0) {
         EXPECT_LE(result.peak_rss_bytes, MAX_PEAK_RSS_BYTES)
             << info.test_name << " peak RSS = "
@@ -472,9 +512,9 @@ INSTANTIATE_TEST_SUITE_P(
 int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
 
-    // Parse -j N for parallelism (default: hardware concurrency)
-    int jobs = (int)std::thread::hardware_concurrency();
-    if (jobs <= 0) jobs = 4;
+    // Parse -j N for parallelism (default: CPU count - 1, minimum 1).
+    int jobs = (int)std::thread::hardware_concurrency() - 1;
+    if (jobs <= 0) jobs = 1;
     for (int i = 1; i < argc; i++) {
         if ((strcmp(argv[i], "-j") == 0 || strcmp(argv[i], "--jobs") == 0) && i + 1 < argc) {
             jobs = atoi(argv[++i]);
@@ -490,7 +530,7 @@ int main(int argc, char** argv) {
     std::cout << "║  test/layout/data/markdown/ via:                         ║\n";
     std::cout << "║    ./lambda.exe view <html> --headless --no-log          ║\n";
     std::cout << "║  Verifies pages load without crashing and within         ║\n";
-    std::cout << "║  time limits (layout <4s, render <2s).                   ║\n";
+    std::cout << "║  time and page memory-growth limits.                     ║\n";
     std::cout << "╚═══════════════════════════════════════════════════════════╝\n";
     std::cout << "\n";
 
