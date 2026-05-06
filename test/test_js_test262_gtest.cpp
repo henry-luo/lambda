@@ -940,6 +940,7 @@ static bool g_no_stripped = false;  // --no-stripped: force original test files
 static std::string g_batch_file;   // --batch-file=<path>: run only tests from this list in a single batch
 static int g_opt_level = 0;  // default -O0 (fastest for short-lived test262 scripts)
 static char g_opt_level_arg[20] = "--opt-level=0";  // "--opt-level=N"
+static char g_js_timeout_arg[20] = "--timeout=10";  // child js-test-batch timeout
 static int g_total_tests = 0;   // total discovered tests
 static int g_total_skipped = 0; // total skipped tests
 static int g_total_batched = 0; // total batched (executed) tests
@@ -1260,7 +1261,7 @@ static void run_t262_sub_batch(
     }
 
     // Build command line
-    std::string cmd = "lambda.exe js-test-batch --timeout=10";
+    std::string cmd = std::string("lambda.exe js-test-batch ") + g_js_timeout_arg;
     if (g_no_hot_reload) cmd += " --no-hot-reload";
     if (g_opt_level >= 0) cmd += std::string(" ") + g_opt_level_arg;
     if (g_mir_interp) cmd += " --mir-interp";
@@ -1391,7 +1392,7 @@ static void run_t262_sub_batch(
     posix_spawn_file_actions_addclose(&file_actions, stdout_pipe[1]);
 
     char* argv[8] = {
-        (char*)"lambda.exe", (char*)"js-test-batch", (char*)"--timeout=10", NULL, NULL, NULL, NULL, NULL
+        (char*)"lambda.exe", (char*)"js-test-batch", g_js_timeout_arg, NULL, NULL, NULL, NULL, NULL
     };
     int argi = 3;
     if (g_no_hot_reload) {
@@ -2762,6 +2763,12 @@ int main(int argc, char** argv) {
             g_opt_level = atoi(argv[i] + 12);
             if (g_opt_level < 0 || g_opt_level > 3) g_opt_level = 0;
             snprintf(g_opt_level_arg, sizeof(g_opt_level_arg), "--opt-level=%d", g_opt_level);
+        }
+        if (strncmp(argv[i], "--js-timeout=", 13) == 0) {
+            int timeout_secs = atoi(argv[i] + 13);
+            if (timeout_secs < 1) timeout_secs = 10;
+            if (timeout_secs > 120) timeout_secs = 120;
+            snprintf(g_js_timeout_arg, sizeof(g_js_timeout_arg), "--timeout=%d", timeout_secs);
         }
     }
 

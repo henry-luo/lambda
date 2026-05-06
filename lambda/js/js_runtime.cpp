@@ -6300,6 +6300,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                             Item cnk = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
                             Item cnv = (Item){.item = s2it(heap_create_name("DataView", 8))};
                             js_property_set(fn->prototype, cnk, cnv);
+                            js_class_stamp(fn->prototype, JS_CLASS_DATA_VIEW);
                             // Symbol.toStringTag
                             Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
                             Item tag_val = (Item){.item = s2it(heap_create_name("DataView", 8))};
@@ -14759,7 +14760,8 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
     }
     // DataView methods
     if (js_is_dataview(obj)) {
-        return js_dataview_method(obj, method_name, args, argc);
+        Item dv_result = js_dataview_method(obj, method_name, args, argc);
+        if (dv_result.item != ITEM_NULL || js_check_exception()) return dv_result;
     }
     // TypedArray methods
     if (js_is_typed_array(obj)) {

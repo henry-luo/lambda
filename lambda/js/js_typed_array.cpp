@@ -3,6 +3,7 @@
  */
 #include "js_typed_array.h"
 #include "js_runtime.h"
+#include "js_class.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../lambda-decimal.hpp"
@@ -13,7 +14,66 @@
 
 extern void* heap_alloc(int size, TypeId type_id);
 extern "C" int js_check_exception(void);
+extern "C" Item js_get_constructor(Item name_item);
+extern "C" Item js_property_get(Item object, Item key);
+extern "C" void js_set_prototype(Item object, Item prototype);
 extern Item js_to_number(Item);
+
+static bool js_dataview_to_index(Item value, int* out_index) {
+    if (get_type_id(value) == LMD_TYPE_UNDEFINED) {
+        *out_index = 0;
+        return true;
+    }
+    TypeId value_type = get_type_id(value);
+    if (value_type == LMD_TYPE_SYMBOL ||
+        (value_type == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE)) {
+        js_throw_type_error("Cannot convert a Symbol value to a number");
+        return false;
+    }
+    Item num = js_to_number(value);
+    if (js_check_exception()) return false;
+    TypeId type = get_type_id(num);
+    double d = (type == LMD_TYPE_FLOAT) ? it2d(num) : (double)it2i(num);
+    if (std::isnan(d)) {
+        *out_index = 0;
+        return true;
+    }
+    d = std::trunc(d);
+    if (d < 0 || !std::isfinite(d) || d > (double)INT_MAX) {
+        js_throw_range_error("Invalid DataView index");
+        return false;
+    }
+    *out_index = (int)d;
+    return true;
+}
+
+static bool js_dataview_to_number_value(Item value, double* out_number) {
+    TypeId value_type = get_type_id(value);
+    if (value_type == LMD_TYPE_SYMBOL ||
+        (value_type == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE)) {
+        js_throw_type_error("Cannot convert a Symbol value to a number");
+        return false;
+    }
+    Item num = js_to_number(value);
+    if (js_check_exception()) return false;
+    TypeId num_type = get_type_id(num);
+    *out_number = (num_type == LMD_TYPE_FLOAT) ? it2d(num) : (double)it2i(num);
+    return true;
+}
+
+static int64_t js_dataview_to_integer_value(double value) {
+    if (std::isnan(value) || !std::isfinite(value)) return 0;
+    return (int64_t)std::trunc(value);
+}
+
+static void js_dataview_link_prototype(Item view) {
+    Item ctor_name = (Item){.item = s2it(heap_create_name("DataView"))};
+    Item ctor = js_get_constructor(ctor_name);
+    if (get_type_id(ctor) != LMD_TYPE_FUNC) return;
+    Item proto_key = (Item){.item = s2it(heap_create_name("prototype"))};
+    Item proto = js_property_get(ctor, proto_key);
+    if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(view, proto);
+}
 
 // ValidateTypedArray: returns JsTypedArray* or NULL (throws TypeError)
 static JsTypedArray* validate_typed_array(Item ta_item) {
@@ -902,16 +962,14 @@ extern "C" Item js_dataview_new(Item buffer, Item offset_item, Item length_item)
         return ItemNull;
     }
     JsArrayBuffer* ab = js_get_arraybuffer_ptr(buffer.map);
+    if (!ab) return ItemNull;
 
-    // Convert offset to integer (default 0) — spec: ToNumber(byteOffset), so valueOf is called
     int byte_offset = 0;
-    TypeId ot = get_type_id(offset_item);
-    if (ot != LMD_TYPE_UNDEFINED && ot != LMD_TYPE_NULL) {
-        Item off_num = js_to_number(offset_item);
-        if (js_check_exception()) return ItemNull;
-        double d = (get_type_id(off_num) == LMD_TYPE_FLOAT) ? it2d(off_num) : (double)it2i(off_num);
-        if (d != d) byte_offset = 0; // NaN → 0
-        else byte_offset = (int)d;
+    if (!js_dataview_to_index(offset_item, &byte_offset)) return ItemNull;
+
+    if (ab->detached) {
+        js_throw_type_error("DataView buffer is detached");
+        return ItemNull;
     }
 
     if (byte_offset < 0 || byte_offset > ab->byte_length) {
@@ -919,22 +977,15 @@ extern "C" Item js_dataview_new(Item buffer, Item offset_item, Item length_item)
         return ItemNull;
     }
 
-    // Convert length to integer (default: rest of buffer)
     int byte_length;
     TypeId lt = get_type_id(length_item);
-    if (lt == LMD_TYPE_UNDEFINED || lt == LMD_TYPE_NULL) {
+    if (lt == LMD_TYPE_UNDEFINED) {
         byte_length = ab->byte_length - byte_offset;
-    } else if (lt == LMD_TYPE_INT) {
-        byte_length = (int)it2i(length_item);
-    } else if (lt == LMD_TYPE_FLOAT) {
-        double d = it2d(length_item);
-        if (d != d) byte_length = 0;
-        else byte_length = (int)d;
     } else {
-        byte_length = ab->byte_length - byte_offset;
+        if (!js_dataview_to_index(length_item, &byte_length)) return ItemNull;
     }
 
-    if (byte_length < 0 || byte_offset + byte_length > ab->byte_length) {
+    if (byte_length < 0 || (int64_t)byte_offset + (int64_t)byte_length > ab->byte_length) {
         js_throw_range_error("Invalid DataView length");
         return ItemNull;
     }
@@ -951,8 +1002,10 @@ extern "C" Item js_dataview_new(Item buffer, Item offset_item, Item length_item)
     m->type = (void*)&js_dataview_type_marker;
     m->data = dv;
     m->data_cap = 0;
-
-    return (Item){.map = m};
+    Item view = (Item){.map = m};
+    js_class_stamp(view, JS_CLASS_DATA_VIEW);
+    js_dataview_link_prototype(view);
+    return view;
 }
 
 // Helper: get raw pointer into DataView's buffer at given offset
@@ -989,23 +1042,36 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
     const char* mn = mname->chars;
     int ml = (int)mname->len;
 
-    // ES spec: ToIndex(requestIndex) — ToNumber first (so valueOf/toString are called), then validate
-    double offset_num = 0.0;
-    if (argc > 0) {
-        Item num_item = js_to_number(args[0]);
-        if (js_check_exception()) return ItemNull;
-        offset_num = (get_type_id(num_item) == LMD_TYPE_FLOAT) ? it2d(num_item) : (double)it2i(num_item);
+    bool is_view_method =
+        (ml == 7 && strncmp(mn, "getInt8", 7) == 0) ||
+        (ml == 8 && strncmp(mn, "getUint8", 8) == 0) ||
+        (ml == 8 && strncmp(mn, "getInt16", 8) == 0) ||
+        (ml == 9 && strncmp(mn, "getUint16", 9) == 0) ||
+        (ml == 8 && strncmp(mn, "getInt32", 8) == 0) ||
+        (ml == 9 && strncmp(mn, "getUint32", 9) == 0) ||
+        (ml == 10 && strncmp(mn, "getFloat32", 10) == 0) ||
+        (ml == 10 && strncmp(mn, "getFloat64", 10) == 0) ||
+        (ml == 11 && strncmp(mn, "getBigInt64", 11) == 0) ||
+        (ml == 12 && strncmp(mn, "getBigUint64", 12) == 0) ||
+        (ml == 7 && strncmp(mn, "setInt8", 7) == 0) ||
+        (ml == 8 && strncmp(mn, "setUint8", 8) == 0) ||
+        (ml == 8 && strncmp(mn, "setInt16", 8) == 0) ||
+        (ml == 9 && strncmp(mn, "setUint16", 9) == 0) ||
+        (ml == 8 && strncmp(mn, "setInt32", 8) == 0) ||
+        (ml == 9 && strncmp(mn, "setUint32", 9) == 0) ||
+        (ml == 10 && strncmp(mn, "setFloat32", 10) == 0) ||
+        (ml == 10 && strncmp(mn, "setFloat64", 10) == 0) ||
+        (ml == 11 && strncmp(mn, "setBigInt64", 11) == 0) ||
+        (ml == 12 && strncmp(mn, "setBigUint64", 12) == 0);
+    if (!is_view_method) return (Item){.item = ITEM_NULL};
+
+    int offset = 0;
+    Item offset_item = (argc > 0) ? args[0] : (Item){.item = ITEM_JS_UNDEFINED};
+    if (!js_dataview_to_index(offset_item, &offset)) return ItemNull;
+    bool is_set_method = (ml >= 3 && mn[0] == 's' && mn[1] == 'e' && mn[2] == 't');
+    if (!is_set_method && dv->buffer->detached) {
+        return js_throw_type_error("DataView buffer is detached");
     }
-    if (js_check_exception()) return ItemNull;
-    // ToInteger: NaN → 0, otherwise truncate toward zero (so -0.99 → -0 → 0, not error)
-    if (offset_num != offset_num) offset_num = 0.0;  // NaN → 0
-    else if (offset_num > 0) offset_num = floor(offset_num);
-    else if (offset_num < 0) offset_num = ceil(offset_num);  // e.g. -0.99 → -0.0 → 0.0 after add 0
-    // Ensure -0 becomes +0 for comparison
-    if (offset_num == 0.0) offset_num = 0.0;
-    // ToIndex: negative integer throws RangeError
-    if (offset_num < 0 || offset_num > (double)INT_MAX) return js_throw_range_error("Invalid DataView offset");
-    int offset = (int)offset_num;
     bool sys_le = is_little_endian_system();
 
     // Getter methods
@@ -1022,7 +1088,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
     if (ml == 8 && strncmp(mn, "getInt16", 8) == 0) {
         uint8_t* p = dv_ptr(dv, offset, 2);
         if (!p) return js_throw_range_error("Invalid DataView offset");
-        bool little_endian = (argc > 1) ? (it2i(args[1]) != 0) : false;
+        bool little_endian = (argc > 1) ? js_is_truthy(args[1]) : false;
         uint16_t raw;
         memcpy(&raw, p, 2);
         if (little_endian != sys_le) raw = swap16(raw);
@@ -1031,7 +1097,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
     if (ml == 9 && strncmp(mn, "getUint16", 9) == 0) {
         uint8_t* p = dv_ptr(dv, offset, 2);
         if (!p) return js_throw_range_error("Invalid DataView offset");
-        bool little_endian = (argc > 1) ? (it2i(args[1]) != 0) : false;
+        bool little_endian = (argc > 1) ? js_is_truthy(args[1]) : false;
         uint16_t raw;
         memcpy(&raw, p, 2);
         if (little_endian != sys_le) raw = swap16(raw);
@@ -1040,7 +1106,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
     if (ml == 8 && strncmp(mn, "getInt32", 8) == 0) {
         uint8_t* p = dv_ptr(dv, offset, 4);
         if (!p) return js_throw_range_error("Invalid DataView offset");
-        bool little_endian = (argc > 1) ? (it2i(args[1]) != 0) : false;
+        bool little_endian = (argc > 1) ? js_is_truthy(args[1]) : false;
         uint32_t raw;
         memcpy(&raw, p, 4);
         if (little_endian != sys_le) raw = swap32(raw);
@@ -1049,7 +1115,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
     if (ml == 9 && strncmp(mn, "getUint32", 9) == 0) {
         uint8_t* p = dv_ptr(dv, offset, 4);
         if (!p) return js_throw_range_error("Invalid DataView offset");
-        bool little_endian = (argc > 1) ? (it2i(args[1]) != 0) : false;
+        bool little_endian = (argc > 1) ? js_is_truthy(args[1]) : false;
         uint32_t raw;
         memcpy(&raw, p, 4);
         if (little_endian != sys_le) raw = swap32(raw);
@@ -1058,7 +1124,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
     if (ml == 10 && strncmp(mn, "getFloat32", 10) == 0) {
         uint8_t* p = dv_ptr(dv, offset, 4);
         if (!p) return js_throw_range_error("Invalid DataView offset");
-        bool little_endian = (argc > 1) ? (it2i(args[1]) != 0) : false;
+        bool little_endian = (argc > 1) ? js_is_truthy(args[1]) : false;
         uint32_t raw;
         memcpy(&raw, p, 4);
         if (little_endian != sys_le) raw = swap32(raw);
@@ -1071,7 +1137,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
     if (ml == 10 && strncmp(mn, "getFloat64", 10) == 0) {
         uint8_t* p = dv_ptr(dv, offset, 8);
         if (!p) return js_throw_range_error("Invalid DataView offset");
-        bool little_endian = (argc > 1) ? (it2i(args[1]) != 0) : false;
+        bool little_endian = (argc > 1) ? js_is_truthy(args[1]) : false;
         uint64_t raw;
         memcpy(&raw, p, 8);
         if (little_endian != sys_le) raw = swap64(raw);
@@ -1084,63 +1150,88 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
 
     // Setter methods
     if (ml == 7 && strncmp(mn, "setInt8", 7) == 0) {
+        double number_value = 0.0;
+        Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
+        if (!js_dataview_to_number_value(value_item, &number_value)) return ItemNull;
+        if (dv->buffer->detached) return js_throw_type_error("DataView buffer is detached");
         uint8_t* p = dv_ptr(dv, offset, 1);
         if (!p) return js_throw_range_error("Invalid DataView offset");
-        int64_t raw_val = (argc >= 2) ? it2i(args[1]) : 0;
+        int64_t raw_val = js_dataview_to_integer_value(number_value);
         *p = (uint8_t)(int8_t)raw_val;
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
     if (ml == 8 && strncmp(mn, "setUint8", 8) == 0) {
+        double number_value = 0.0;
+        Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
+        if (!js_dataview_to_number_value(value_item, &number_value)) return ItemNull;
+        if (dv->buffer->detached) return js_throw_type_error("DataView buffer is detached");
         uint8_t* p = dv_ptr(dv, offset, 1);
         if (!p) return js_throw_range_error("Invalid DataView offset");
-        int64_t raw_val = (argc >= 2) ? it2i(args[1]) : 0;
+        int64_t raw_val = js_dataview_to_integer_value(number_value);
         *p = (uint8_t)raw_val;
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
     if (ml == 8 && strncmp(mn, "setInt16", 8) == 0) {
+        double number_value = 0.0;
+        Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
+        if (!js_dataview_to_number_value(value_item, &number_value)) return ItemNull;
+        if (dv->buffer->detached) return js_throw_type_error("DataView buffer is detached");
         uint8_t* p = dv_ptr(dv, offset, 2);
         if (!p) return js_throw_range_error("Invalid DataView offset");
-        bool little_endian = (argc > 2) ? (it2i(args[2]) != 0) : false;
-        uint16_t val = (uint16_t)(int16_t)((argc >= 2) ? it2i(args[1]) : 0);
+        bool little_endian = (argc > 2) ? js_is_truthy(args[2]) : false;
+        uint16_t val = (uint16_t)(int16_t)js_dataview_to_integer_value(number_value);
         if (little_endian != sys_le) val = swap16(val);
         memcpy(p, &val, 2);
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
     if (ml == 9 && strncmp(mn, "setUint16", 9) == 0) {
+        double number_value = 0.0;
+        Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
+        if (!js_dataview_to_number_value(value_item, &number_value)) return ItemNull;
+        if (dv->buffer->detached) return js_throw_type_error("DataView buffer is detached");
         uint8_t* p = dv_ptr(dv, offset, 2);
         if (!p) return js_throw_range_error("Invalid DataView offset");
-        bool little_endian = (argc > 2) ? (it2i(args[2]) != 0) : false;
-        uint16_t val = (uint16_t)((argc >= 2) ? it2i(args[1]) : 0);
+        bool little_endian = (argc > 2) ? js_is_truthy(args[2]) : false;
+        uint16_t val = (uint16_t)js_dataview_to_integer_value(number_value);
         if (little_endian != sys_le) val = swap16(val);
         memcpy(p, &val, 2);
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
     if (ml == 8 && strncmp(mn, "setInt32", 8) == 0) {
+        double number_value = 0.0;
+        Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
+        if (!js_dataview_to_number_value(value_item, &number_value)) return ItemNull;
+        if (dv->buffer->detached) return js_throw_type_error("DataView buffer is detached");
         uint8_t* p = dv_ptr(dv, offset, 4);
         if (!p) return js_throw_range_error("Invalid DataView offset");
-        bool little_endian = (argc > 2) ? (it2i(args[2]) != 0) : false;
-        uint32_t val = (uint32_t)(int32_t)((argc >= 2) ? it2i(args[1]) : 0);
+        bool little_endian = (argc > 2) ? js_is_truthy(args[2]) : false;
+        uint32_t val = (uint32_t)(int32_t)js_dataview_to_integer_value(number_value);
         if (little_endian != sys_le) val = swap32(val);
         memcpy(p, &val, 4);
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
     if (ml == 9 && strncmp(mn, "setUint32", 9) == 0) {
+        double number_value = 0.0;
+        Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
+        if (!js_dataview_to_number_value(value_item, &number_value)) return ItemNull;
+        if (dv->buffer->detached) return js_throw_type_error("DataView buffer is detached");
         uint8_t* p = dv_ptr(dv, offset, 4);
         if (!p) return js_throw_range_error("Invalid DataView offset");
-        bool little_endian = (argc > 2) ? (it2i(args[2]) != 0) : false;
-        uint32_t val = (uint32_t)((argc >= 2) ? it2i(args[1]) : 0);
+        bool little_endian = (argc > 2) ? js_is_truthy(args[2]) : false;
+        uint32_t val = (uint32_t)js_dataview_to_integer_value(number_value);
         if (little_endian != sys_le) val = swap32(val);
         memcpy(p, &val, 4);
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
     if (ml == 10 && strncmp(mn, "setFloat32", 10) == 0) {
+        Item val_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
+        double number_value = 0.0;
+        if (!js_dataview_to_number_value(val_item, &number_value)) return ItemNull;
+        if (dv->buffer->detached) return js_throw_type_error("DataView buffer is detached");
         uint8_t* p = dv_ptr(dv, offset, 4);
         if (!p) return js_throw_range_error("Invalid DataView offset");
-        bool little_endian = (argc > 2) ? (it2i(args[2]) != 0) : false;
-        Item val_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
-        Item num_item2 = js_to_number(val_item);
-        if (js_check_exception()) return ItemNull;
-        float f = (float)it2d(num_item2);
+        bool little_endian = (argc > 2) ? js_is_truthy(args[2]) : false;
+        float f = (float)number_value;
         uint32_t raw;
         memcpy(&raw, &f, 4);
         if (little_endian != sys_le) raw = swap32(raw);
@@ -1148,13 +1239,13 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
     if (ml == 10 && strncmp(mn, "setFloat64", 10) == 0) {
+        Item val_item2 = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
+        double d = 0.0;
+        if (!js_dataview_to_number_value(val_item2, &d)) return ItemNull;
+        if (dv->buffer->detached) return js_throw_type_error("DataView buffer is detached");
         uint8_t* p = dv_ptr(dv, offset, 8);
         if (!p) return js_throw_range_error("Invalid DataView offset");
-        bool little_endian = (argc > 2) ? (it2i(args[2]) != 0) : false;
-        Item val_item2 = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
-        Item num_item3 = js_to_number(val_item2);
-        if (js_check_exception()) return ItemNull;
-        double d = it2d(num_item3);
+        bool little_endian = (argc > 2) ? js_is_truthy(args[2]) : false;
         uint64_t raw;
         memcpy(&raw, &d, 8);
         if (little_endian != sys_le) raw = swap64(raw);
