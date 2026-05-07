@@ -1947,7 +1947,7 @@ static void jm_init_block_tdz(JsMirTranspiler* mt, JsAstNode* block) {
     while (hashmap_iter(let_consts, &iter, &item)) {
         JsNameSetEntry* e = (JsNameSetEntry*)item;
         // Skip variables that are module vars (TDZ handled at module level)
-        if (mt->module_consts) {
+        if (mt->current_fc && mt->module_consts) {
             JsModuleConstEntry mclookup;
             memset(&mclookup, 0, sizeof(mclookup));
             snprintf(mclookup.name, sizeof(mclookup.name), "%s", e->name);
@@ -8651,7 +8651,6 @@ static MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* 
             int api = jm_arguments_param_index(mt, vname);
             if (api >= 0) jm_arguments_writeback_param(mt, api, var->reg);
         }
-
         return var->reg;
     }
 
@@ -10336,16 +10335,29 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                         {
                             MIR_reg_t parent_fn = jm_transpile_box_item(mt, mt->current_class->node->superclass);
                             MIR_reg_t this_val = jm_call_0(mt, "js_get_this", MIR_T_I64);
-                            MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
+                            bool super_has_spread = false;
+                            for (JsAstNode* chk = call->arguments; chk; chk = chk->next) {
+                                if (chk->node_type == JS_AST_NODE_SPREAD_ELEMENT) { super_has_spread = true; break; }
+                            }
+                            MIR_reg_t args_ptr = super_has_spread ?
+                                jm_build_spread_args_array(mt, call->arguments) :
+                                jm_build_args_array(mt, call->arguments, arg_count);
                             // Propagate new.target to dynamically-resolved parent via super()
                             MIR_reg_t cur_nt3 = jm_call_0(mt, "js_get_new_target", MIR_T_I64);
                             jm_call_void_1(mt, "js_set_new_target",
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, cur_nt3));
-                            jm_call_4(mt, "js_super_call_native", MIR_T_I64,
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, parent_fn),
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
-                                MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
-                                MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                            if (super_has_spread) {
+                                jm_call_3(mt, "js_super_apply_native", MIR_T_I64,
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, parent_fn),
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, args_ptr));
+                            } else {
+                                jm_call_4(mt, "js_super_call_native", MIR_T_I64,
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, parent_fn),
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
+                                    MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+                                    MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                            }
                             log_debug("js-mir: super() resolved dynamically for non-class parent '%.*s'", slen, sname);
                             return this_val;
                         }
@@ -19253,7 +19265,7 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         // For top-level script: already handled in Phase 3 pre-pass; skip.
         // For function bodies (IIFE or regular): initialize the class object here
         // since Phase 3 only processes program->body, not function bodies.
-        if (mt->current_fc && mt->module_consts) {
+        if (mt->module_consts) {
             JsClassNode* cls_node = (JsClassNode*)stmt;
             if (cls_node->name && cls_node->name->chars) {
                 JsClassEntry* ce = jm_find_class(mt, cls_node->name->chars, (int)cls_node->name->len);
