@@ -128,7 +128,9 @@ void render_svg_to_vec(RdtVector* vec, Element* svg_element,
                       Pool* pool, float pixel_ratio = 1.0f,
                       FontContext* font_ctx = nullptr,
                       const RdtMatrix* base_transform = nullptr,
-                      DisplayList* dl = nullptr);
+                      DisplayList* dl = nullptr,
+                      const Color* initial_current_color = nullptr,
+                      const Color* initial_fill_color = nullptr);
 
 /**
  * Render inline SVG element in document context

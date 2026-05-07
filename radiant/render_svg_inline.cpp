@@ -138,6 +138,53 @@ static const char* get_svg_attr(Element* elem, const char* name) {
     return extract_element_attribute(elem, name, nullptr);
 }
 
+static bool svg_style_name_matches(const char* style, const char* name, size_t name_len) {
+    if (strncmp(style, name, name_len) != 0) return false;
+    const char* p = style + name_len;
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
+    return *p == ':';
+}
+
+static const char* get_svg_attr_or_style(Element* elem, const char* name, char* buffer, size_t buffer_size) {
+    const char* attr = get_svg_attr(elem, name);
+    if (attr) return attr;
+    if (!buffer || buffer_size == 0) return nullptr;
+
+    const char* style = get_svg_attr(elem, "style");
+    if (!style) return nullptr;
+
+    size_t name_len = strlen(name);
+    const char* p = style;
+    while (*p) {
+        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r' || *p == ';') p++;
+        if (!*p) break;
+
+        if (svg_style_name_matches(p, name, name_len)) {
+            p += name_len;
+            while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
+            if (*p == ':') p++;
+            while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
+
+            const char* value_start = p;
+            while (*p && *p != ';') p++;
+            const char* value_end = p;
+            while (value_end > value_start &&
+                   (value_end[-1] == ' ' || value_end[-1] == '\t' || value_end[-1] == '\n' || value_end[-1] == '\r')) {
+                value_end--;
+            }
+            size_t value_len = value_end - value_start;
+            if (value_len >= buffer_size) value_len = buffer_size - 1;
+            memcpy(buffer, value_start, value_len);
+            buffer[value_len] = '\0';
+            return buffer;
+        }
+
+        while (*p && *p != ';') p++;
+        if (*p == ';') p++;
+    }
+    return nullptr;
+}
+
 // ============================================================================
 // Helper: Get child element at index
 // ============================================================================
@@ -821,11 +868,20 @@ static void draw_svg_fill_stroke(SvgRenderContext* ctx, RdtPath* path, Element* 
     if (!path || !elem) return;
 
     // --- FILL ---
-    const char* fill = get_svg_attr(elem, "fill");
+    char fill_buf[256];
+    char fill_rule_buf[64];
+    char fill_opacity_buf[64];
+    char opacity_buf[64];
+    char stroke_buf[256];
+    char stroke_width_buf[64];
+    char stroke_opacity_buf[64];
+    char linecap_buf[64];
+    char linejoin_buf[64];
+    const char* fill = get_svg_attr_or_style(elem, "fill", fill_buf, sizeof(fill_buf));
     Color fc;
     bool has_fill = true;
     bool gradient_applied = false;
-    const char* fill_rule_attr = get_svg_attr(elem, "fill-rule");
+    const char* fill_rule_attr = get_svg_attr_or_style(elem, "fill-rule", fill_rule_buf, sizeof(fill_rule_buf));
     RdtFillRule fill_rule = (fill_rule_attr && strcmp(fill_rule_attr, "evenodd") == 0)
         ? RDT_FILL_EVEN_ODD : RDT_FILL_WINDING;
 
@@ -867,12 +923,12 @@ static void draw_svg_fill_stroke(SvgRenderContext* ctx, RdtPath* path, Element* 
     }
 
     if (has_fill) {
-        const char* fill_opacity = get_svg_attr(elem, "fill-opacity");
+        const char* fill_opacity = get_svg_attr_or_style(elem, "fill-opacity", fill_opacity_buf, sizeof(fill_opacity_buf));
         if (fill_opacity) {
             float opacity = strtof(fill_opacity, nullptr);
             fc.a = (uint8_t)(fc.a * opacity);
         }
-        const char* opacity = get_svg_attr(elem, "opacity");
+        const char* opacity = get_svg_attr_or_style(elem, "opacity", opacity_buf, sizeof(opacity_buf));
         if (opacity) {
             float op = strtof(opacity, nullptr);
             fc.a = (uint8_t)(fc.a * op);
@@ -885,7 +941,7 @@ static void draw_svg_fill_stroke(SvgRenderContext* ctx, RdtPath* path, Element* 
     }
 
     // --- STROKE ---
-    const char* stroke = get_svg_attr(elem, "stroke");
+    const char* stroke = get_svg_attr_or_style(elem, "stroke", stroke_buf, sizeof(stroke_buf));
     bool has_stroke = false;
     Color sc;
 
@@ -904,10 +960,10 @@ static void draw_svg_fill_stroke(SvgRenderContext* ctx, RdtPath* path, Element* 
     }
 
     if (has_stroke) {
-        const char* stroke_width_str = get_svg_attr(elem, "stroke-width");
+        const char* stroke_width_str = get_svg_attr_or_style(elem, "stroke-width", stroke_width_buf, sizeof(stroke_width_buf));
         float stroke_width = stroke_width_str ? parse_svg_length(stroke_width_str, 1.0f) : ctx->stroke_width;
 
-        const char* stroke_opacity = get_svg_attr(elem, "stroke-opacity");
+        const char* stroke_opacity = get_svg_attr_or_style(elem, "stroke-opacity", stroke_opacity_buf, sizeof(stroke_opacity_buf));
         if (stroke_opacity) {
             float opacity = strtof(stroke_opacity, nullptr);
             sc.a = (uint8_t)(sc.a * opacity);
@@ -919,7 +975,7 @@ static void draw_svg_fill_stroke(SvgRenderContext* ctx, RdtPath* path, Element* 
 
         // linecap
         RdtStrokeCap cap = RDT_CAP_BUTT;
-        const char* linecap = get_svg_attr(elem, "stroke-linecap");
+        const char* linecap = get_svg_attr_or_style(elem, "stroke-linecap", linecap_buf, sizeof(linecap_buf));
         if (linecap) {
             if (strcmp(linecap, "round") == 0)       cap = RDT_CAP_ROUND;
             else if (strcmp(linecap, "square") == 0)  cap = RDT_CAP_SQUARE;
@@ -927,7 +983,7 @@ static void draw_svg_fill_stroke(SvgRenderContext* ctx, RdtPath* path, Element* 
 
         // linejoin
         RdtStrokeJoin join = RDT_JOIN_MITER;
-        const char* linejoin = get_svg_attr(elem, "stroke-linejoin");
+        const char* linejoin = get_svg_attr_or_style(elem, "stroke-linejoin", linejoin_buf, sizeof(linejoin_buf));
         if (linejoin) {
             if (strcmp(linejoin, "round") == 0)       join = RDT_JOIN_ROUND;
             else if (strcmp(linejoin, "bevel") == 0)   join = RDT_JOIN_BEVEL;
@@ -2584,7 +2640,8 @@ static void render_svg_group(SvgRenderContext* ctx, Element* elem) {
     const char* saved_text_anchor = ctx->inherited_text_anchor;
 
     // apply group opacity via save/composite for correct compositing
-    const char* opacity_attr = get_svg_attr(elem, "opacity");
+    char opacity_buf[64];
+    const char* opacity_attr = get_svg_attr_or_style(elem, "opacity", opacity_buf, sizeof(opacity_buf));
     float group_op = 1.0f;
     bool use_opacity_layer = false;
     int op_x0 = 0, op_y0 = 0, op_w = 0, op_h = 0;
@@ -2622,13 +2679,15 @@ static void render_svg_group(SvgRenderContext* ctx, Element* elem) {
     }
 
     // update CSS 'color' property (for currentColor keyword)
-    const char* color_attr = get_svg_attr(elem, "color");
+    char color_buf[256];
+    const char* color_attr = get_svg_attr_or_style(elem, "color", color_buf, sizeof(color_buf));
     if (color_attr) {
         ctx->current_color = parse_svg_color(color_attr);
     }
 
     // update inherited state from group attributes
-    const char* fill = get_svg_attr(elem, "fill");
+    char fill_buf[256];
+    const char* fill = get_svg_attr_or_style(elem, "fill", fill_buf, sizeof(fill_buf));
     if (fill) {
         if (strcmp(fill, "none") == 0) {
             ctx->fill_none = true;
@@ -2638,7 +2697,8 @@ static void render_svg_group(SvgRenderContext* ctx, Element* elem) {
         }
     }
 
-    const char* stroke = get_svg_attr(elem, "stroke");
+    char stroke_buf[256];
+    const char* stroke = get_svg_attr_or_style(elem, "stroke", stroke_buf, sizeof(stroke_buf));
     if (stroke) {
         if (strcmp(stroke, "none") == 0) {
             ctx->stroke_none = true;
@@ -2648,7 +2708,8 @@ static void render_svg_group(SvgRenderContext* ctx, Element* elem) {
         }
     }
 
-    const char* stroke_width = get_svg_attr(elem, "stroke-width");
+    char stroke_width_buf[64];
+    const char* stroke_width = get_svg_attr_or_style(elem, "stroke-width", stroke_width_buf, sizeof(stroke_width_buf));
     if (stroke_width) {
         ctx->stroke_width = parse_svg_length(stroke_width, 1.0f);
     }
@@ -2923,7 +2984,7 @@ static void render_svg_element(SvgRenderContext* ctx, Element* elem) {
 
 void render_svg_to_vec(RdtVector* vec, Element* svg_element, float viewport_width, float viewport_height,
                        Pool* pool, float pixel_ratio, FontContext* font_ctx, const RdtMatrix* base_transform,
-                       DisplayList* dl) {
+                       DisplayList* dl, const Color* initial_current_color, const Color* initial_fill_color) {
     if (!svg_element || !vec) return;
 
     log_debug("[SVG] render_svg_to_vec: viewport %.0fx%.0f pixel_ratio=%.2f font_ctx=%p", viewport_width, viewport_height, pixel_ratio, (void*)font_ctx);
@@ -2939,6 +3000,13 @@ void render_svg_to_vec(RdtVector* vec, Element* svg_element, float viewport_widt
     ctx.fill_color.r = 0; ctx.fill_color.g = 0; ctx.fill_color.b = 0; ctx.fill_color.a = 255;  // default black
     ctx.stroke_color.r = 0; ctx.stroke_color.g = 0; ctx.stroke_color.b = 0; ctx.stroke_color.a = 0;  // default none
     ctx.current_color.r = 0; ctx.current_color.g = 0; ctx.current_color.b = 0; ctx.current_color.a = 255;  // default black
+    if (initial_current_color) {
+        ctx.current_color = *initial_current_color;
+    }
+    if (initial_fill_color) {
+        ctx.fill_color = *initial_fill_color;
+        ctx.fill_none = false;
+    }
     ctx.stroke_width = 1.0f;
     ctx.opacity = 1.0f;
     ctx.fill_none = false;
@@ -3105,9 +3173,21 @@ void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
 
     // render SVG directly to the framebuffer
     FontContext* font_ctx = rdcon->ui_context ? rdcon->ui_context->font_ctx : nullptr;
+    Color initial_current_color = {};
+    Color initial_fill_color = {};
+    Color* current_color_ptr = nullptr;
+    Color* fill_color_ptr = nullptr;
+    if (view->in_line && view->in_line->color.c != 0) {
+        initial_current_color = view->in_line->color;
+        current_color_ptr = &initial_current_color;
+    }
+    if (view->in_line && view->in_line->has_svg_fill) {
+        initial_fill_color = view->in_line->svg_fill_color;
+        fill_color_ptr = &initial_fill_color;
+    }
     render_svg_to_vec(&rdcon->vec, svg_elem, view->width, view->height,
                       rdcon->ui_context->document->pool, scale, font_ctx, &base_transform,
-                      rdcon->dl);
+                      rdcon->dl, current_color_ptr, fill_color_ptr);
 
     if (has_clip) {
         rc_pop_clip(rdcon);

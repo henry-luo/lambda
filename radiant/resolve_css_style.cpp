@@ -58,6 +58,107 @@ static bool is_border_radius_slash(const CssValue* value) {
            strcmp(value->data.custom_property.name, "/") == 0;
 }
 
+static bool css_text_has_top_level_comma(const char* text, size_t len) {
+    if (!text) return false;
+
+    int paren_depth = 0;
+    char quote = '\0';
+    bool escaping = false;
+    for (size_t i = 0; i < len; i++) {
+        char ch = text[i];
+        if (quote) {
+            if (escaping) {
+                escaping = false;
+            } else if (ch == '\\') {
+                escaping = true;
+            } else if (ch == quote) {
+                quote = '\0';
+            }
+            continue;
+        }
+
+        if (ch == '\'' || ch == '"') {
+            quote = ch;
+        } else if (ch == '(') {
+            paren_depth++;
+        } else if (ch == ')') {
+            if (paren_depth > 0) paren_depth--;
+        } else if (ch == ',' && paren_depth == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void resolve_background_url_function(LayoutContext* lycon, const CssDeclaration* decl, const CssValue* value) {
+    if (!value || value->type != CSS_VALUE_TYPE_FUNCTION || !value->data.function ||
+        !value->data.function->name || !str_ieq_const(value->data.function->name, strlen(value->data.function->name), "url")) {
+        return;
+    }
+
+    CssDeclaration img_decl = *decl;
+    img_decl.property_id = CSS_PROPERTY_BACKGROUND_IMAGE;
+    img_decl.value = (CssValue*)value;
+    resolve_css_property(CSS_PROPERTY_BACKGROUND_IMAGE, &img_decl, lycon);
+}
+
+static bool css_value_is_background_color_candidate(const CssValue* value) {
+    if (!value) return false;
+    if (value->type == CSS_VALUE_TYPE_COLOR) return true;
+    if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function && value->data.function->name) {
+        const char* name = value->data.function->name;
+        size_t name_len = strlen(name);
+        return str_ieq_const(name, name_len, "rgb") || str_ieq_const(name, name_len, "rgba") ||
+               str_ieq_const(name, name_len, "hsl") || str_ieq_const(name, name_len, "hsla");
+    }
+    if (value->type != CSS_VALUE_TYPE_KEYWORD) return false;
+
+    const CssEnumInfo* info = css_enum_info(value->data.keyword);
+    return info && info->group == CSS_VALUE_GROUP_COLOR;
+}
+
+static bool css_url_has_scheme(const char* url) {
+    if (!url) return false;
+    const char* p = url;
+    while (*p) {
+        if (*p == ':') return p != url;
+        if (!((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
+              (*p >= '0' && *p <= '9') || *p == '+' || *p == '-' || *p == '.')) {
+            return false;
+        }
+        p++;
+    }
+    return false;
+}
+
+static char* resolve_css_resource_url(LayoutContext* lycon, const CssDeclaration* decl, const char* url) {
+    if (!lycon || !url) return nullptr;
+
+    size_t url_len = strlen(url);
+    const char* source_file = decl ? decl->source_file : nullptr;
+    bool already_resolved = url[0] == '/' || (url[0] == '/' && url[1] == '/') ||
+        strncmp(url, "data:", 5) == 0 || css_url_has_scheme(url);
+    bool has_stylesheet_base = source_file && source_file[0] && strcmp(source_file, "<inline-style>") != 0;
+
+    if (!already_resolved && has_stylesheet_base) {
+        const char* slash = strrchr(source_file, '/');
+        if (slash) {
+            size_t dir_len = slash - source_file + 1;
+            char* resolved = (char*)alloc_prop(lycon, dir_len + url_len + 1);
+            if (!resolved) return nullptr;
+            memcpy(resolved, source_file, dir_len);
+            memcpy(resolved + dir_len, url, url_len);
+            resolved[dir_len + url_len] = '\0';
+            return resolved;
+        }
+    }
+
+    char* copy = (char*)alloc_prop(lycon, url_len + 1);
+    if (!copy) return nullptr;
+    str_copy(copy, url_len + 1, url, url_len);
+    return copy;
+}
+
 static bool parse_border_radius_component(LayoutContext* lycon, int prop_id, const CssValue* value,
                                           float* out_radius, bool* out_percent) {
     if (!value || !out_radius || !out_percent) return false;
@@ -3377,6 +3478,16 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             break;
         }
 
+        case CSS_PROPERTY_FILL: {
+            log_debug("[CSS] Processing SVG fill property");
+            if (!span->in_line) {
+                span->in_line = alloc_inline_prop(lycon);
+            }
+            span->in_line->svg_fill_color = resolve_color_value(lycon, value);
+            span->in_line->has_svg_fill = true;
+            break;
+        }
+
         // ===== Font Shorthand (must be before individual font properties) =====
         case CSS_PROPERTY_FONT: {
             log_debug("[CSS] Processing font shorthand property");
@@ -4996,11 +5107,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                         const char* url = (arg->type == CSS_VALUE_TYPE_STRING) ? arg->data.string :
                                          (arg->type == CSS_VALUE_TYPE_URL) ? arg->data.url : nullptr;
                         if (url) {
-                            // Allocate and copy the URL string
-                            size_t url_len = strlen(url);
-                            char* image_path = (char*)alloc_prop(lycon, url_len + 1);
+                            char* image_path = resolve_css_resource_url(lycon, decl, url);
                             if (image_path) {
-                                str_copy(image_path, url_len + 1, url, url_len);
                                 span->bound->background->image = image_path;
                                 log_debug("[CSS] background-image stored: '%s'", image_path);
                             }
@@ -5020,10 +5128,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 // Direct URL/string value (non-function form)
                 const char* url = (value->type == CSS_VALUE_TYPE_URL) ? value->data.url : value->data.string;
                 if (url) {
-                    size_t url_len = strlen(url);
-                    char* image_path = (char*)alloc_prop(lycon, url_len + 1);
+                    char* image_path = resolve_css_resource_url(lycon, decl, url);
                     if (image_path) {
-                        str_copy(image_path, url_len + 1, url, url_len);
                         span->bound->background->image = image_path;
                         log_debug("[CSS] background-image stored: '%s'", image_path);
                     }
@@ -11117,9 +11223,12 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 return;
             }
 
+            bool has_top_level_comma = decl && decl->value_text &&
+                css_text_has_top_level_comma(decl->value_text, decl->value_text_len);
+
             // Handle multiple background layers (comma-separated list)
             // CSS stacks backgrounds bottom-to-top, so last item is base layer
-            if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 1) {
+            if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 1 && has_top_level_comma) {
                 log_debug("[Lambda CSS Background] Multiple background layers: %d", value->data.list.count);
                 CssValue** layers = value->data.list.values;
                 int count = value->data.list.count;
@@ -11247,12 +11356,109 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 return;
             }
 
+            // Space-separated background shorthand components (e.g.
+            // background: 50% / 100% 100% no-repeat; or background: url(...);).
+            // This is not a color layer list. Route only recognized components and
+            // leave other components for their longhand rules/defaults.
+            if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
+                for (int i = 0; i < value->data.list.count; i++) {
+                    CssValue* item = value->data.list.values[i];
+                    if (!item) continue;
+
+                    if (is_border_radius_slash(item) && i + 1 < value->data.list.count) {
+                        CssValue* size_values[2] = {};
+                        int size_count = 0;
+                        int j = i + 1;
+                        while (j < value->data.list.count && size_count < 2) {
+                            CssValue* size_item = value->data.list.values[j];
+                            if (!size_item || is_border_radius_slash(size_item)) break;
+                            if (size_item->type == CSS_VALUE_TYPE_LENGTH ||
+                                size_item->type == CSS_VALUE_TYPE_PERCENTAGE ||
+                                (size_item->type == CSS_VALUE_TYPE_KEYWORD &&
+                                 (size_item->data.keyword == CSS_VALUE_AUTO ||
+                                  size_item->data.keyword == CSS_VALUE_COVER ||
+                                  size_item->data.keyword == CSS_VALUE_CONTAIN))) {
+                                size_values[size_count++] = size_item;
+                                j++;
+                                continue;
+                            }
+                            break;
+                        }
+                        if (size_count > 0) {
+                            CssDeclaration size_decl = *decl;
+                            size_decl.property_id = CSS_PROPERTY_BACKGROUND_SIZE;
+                            if (size_count == 1) {
+                                size_decl.value = size_values[0];
+                            } else {
+                                CssValue size_list = {};
+                                size_list.type = CSS_VALUE_TYPE_LIST;
+                                size_list.data.list.values = size_values;
+                                size_list.data.list.count = size_count;
+                                size_decl.value = &size_list;
+                                resolve_css_property(CSS_PROPERTY_BACKGROUND_SIZE, &size_decl, lycon);
+                                i = j - 1;
+                                continue;
+                            }
+                            resolve_css_property(CSS_PROPERTY_BACKGROUND_SIZE, &size_decl, lycon);
+                            i = j - 1;
+                        }
+                        continue;
+                    }
+
+                    if (item->type == CSS_VALUE_TYPE_FUNCTION && item->data.function && item->data.function->name) {
+                        const char* func_name = item->data.function->name;
+                        size_t func_len = strlen(func_name);
+                        if (str_ieq_const(func_name, func_len, "url")) {
+                            resolve_background_url_function(lycon, decl, item);
+                        } else if (str_ieq_const(func_name, func_len, "linear-gradient") ||
+                                   str_ieq_const(func_name, func_len, "repeating-linear-gradient") ||
+                                   str_ieq_const(func_name, func_len, "radial-gradient") ||
+                                   str_ieq_const(func_name, func_len, "repeating-radial-gradient") ||
+                                   str_ieq_const(func_name, func_len, "conic-gradient")) {
+                            CssDeclaration gradient_decl = *decl;
+                            gradient_decl.value = item;
+                            resolve_css_property(CSS_PROPERTY_BACKGROUND, &gradient_decl, lycon);
+                        } else if (css_value_is_background_color_candidate(item)) {
+                            CssDeclaration color_decl = *decl;
+                            color_decl.property_id = CSS_PROPERTY_BACKGROUND_COLOR;
+                            color_decl.value = item;
+                            resolve_css_property(CSS_PROPERTY_BACKGROUND_COLOR, &color_decl, lycon);
+                        }
+                    } else if (css_value_is_background_color_candidate(item)) {
+                        CssDeclaration color_decl = *decl;
+                        color_decl.property_id = CSS_PROPERTY_BACKGROUND_COLOR;
+                        color_decl.value = item;
+                        resolve_css_property(CSS_PROPERTY_BACKGROUND_COLOR, &color_decl, lycon);
+                    } else if (item->type == CSS_VALUE_TYPE_KEYWORD) {
+                        CssEnum keyword = item->data.keyword;
+                        if (keyword == CSS_VALUE_REPEAT || keyword == CSS_VALUE_NO_REPEAT ||
+                            keyword == CSS_VALUE_ROUND || keyword == CSS_VALUE_SPACE) {
+                            CssDeclaration repeat_decl = *decl;
+                            repeat_decl.property_id = CSS_PROPERTY_BACKGROUND_REPEAT;
+                            repeat_decl.value = item;
+                            resolve_css_property(CSS_PROPERTY_BACKGROUND_REPEAT, &repeat_decl, lycon);
+                        } else if (keyword == CSS_VALUE_COVER || keyword == CSS_VALUE_CONTAIN) {
+                            CssDeclaration size_decl = *decl;
+                            size_decl.property_id = CSS_PROPERTY_BACKGROUND_SIZE;
+                            size_decl.value = item;
+                            resolve_css_property(CSS_PROPERTY_BACKGROUND_SIZE, &size_decl, lycon);
+                        }
+                    }
+                }
+                return;
+            }
+
             // simple case: single color value (e.g., "background: green;")
-            if (value->type == CSS_VALUE_TYPE_COLOR || value->type == CSS_VALUE_TYPE_KEYWORD) {
+            if (css_value_is_background_color_candidate(value)) {
                 CssDeclaration color_decl = *decl;
                 color_decl.property_id = CSS_PROPERTY_BACKGROUND_COLOR;
                 log_debug("[Lambda CSS Shorthand] Expanding background to background-color");
                 resolve_css_property(CSS_PROPERTY_BACKGROUND_COLOR, &color_decl, lycon);
+                return;
+            }
+            if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function && value->data.function->name &&
+                str_ieq_const(value->data.function->name, strlen(value->data.function->name), "url")) {
+                resolve_background_url_function(lycon, decl, value);
                 return;
             }
             // Handle color functions like rgb(), rgba() as background color

@@ -2939,8 +2939,21 @@ void render_svg(ImageSurface* surface) {
         log_debug("no picture to render");  return;
     }
     // Rasterize the SVG picture into a pixel buffer using a temporary vector context
-    uint32_t width = surface->max_render_width;
-    uint32_t height = surface->max_render_width * surface->height / surface->width;
+    if (surface->width <= 0 || surface->height <= 0) {
+        log_debug("invalid svg image size: %dx%d", surface->width, surface->height);
+        return;
+    }
+    int target_width = surface->max_render_width > 0 ? surface->max_render_width : surface->width;
+    if (target_width <= 0) {
+        log_debug("invalid svg render width: %d", target_width);
+        return;
+    }
+    uint32_t width = (uint32_t)target_width; // INT_CAST_OK: ThorVG raster target dimensions are integer pixels
+    uint32_t height = (uint32_t)ceilf((float)target_width * (float)surface->height / (float)surface->width); // INT_CAST_OK: raster target height rounded to pixels
+    if (height == 0) {
+        log_debug("invalid svg render height for width: %d", target_width);
+        return;
+    }
     surface->pixels = (uint32_t*)mem_alloc(width * height * sizeof(uint32_t), MEM_CAT_RENDER);
     if (!surface->pixels) return;
 
@@ -3029,6 +3042,10 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view) {
         // render the SVG image
         log_debug("render svg image at x:%f, y:%f, wd:%f, hg:%f", img_rect.x, img_rect.y, img_rect.width, img_rect.height);
         if (!img->pixels) {
+            int target_width = (int)ceilf(img_rect.width); // INT_CAST_OK: SVG rasterization target width is integer pixels
+            if (target_width > img->max_render_width) {
+                img->max_render_width = target_width;
+            }
             render_svg(img);
         }
         if (img->pixels) {

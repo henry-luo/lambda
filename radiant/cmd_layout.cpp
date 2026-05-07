@@ -110,6 +110,36 @@ static const int MAX_CSS_TREE_DEPTH = 512;
 // Current document charset for CSS fallback encoding (set before collect_linked_stylesheets)
 const char* g_css_document_charset = nullptr;
 
+static void annotate_css_rule_source_file(CssRule* rule, const char* source_file) {
+    if (!rule || !source_file) return;
+
+    if (rule->type == CSS_RULE_STYLE) {
+        for (size_t i = 0; i < rule->data.style_rule.declaration_count; i++) {
+            CssDeclaration* decl = rule->data.style_rule.declarations[i];
+            if (decl && !decl->source_file) {
+                decl->source_file = source_file;
+            }
+        }
+        for (size_t i = 0; i < rule->data.style_rule.nested_rule_count; i++) {
+            annotate_css_rule_source_file(rule->data.style_rule.nested_rules[i], source_file);
+        }
+    } else if (rule->type == CSS_RULE_MEDIA || rule->type == CSS_RULE_SUPPORTS ||
+               rule->type == CSS_RULE_CONTAINER || rule->type == CSS_RULE_SCOPE) {
+        for (size_t i = 0; i < rule->data.conditional_rule.rule_count; i++) {
+            annotate_css_rule_source_file(rule->data.conditional_rule.rules[i], source_file);
+        }
+    }
+}
+
+static void annotate_css_stylesheet_source_file(CssStylesheet* stylesheet, const char* source_file) {
+    if (!stylesheet) return;
+    const char* stable_source_file = stylesheet->origin_url ? stylesheet->origin_url : source_file;
+    if (!stable_source_file) return;
+    for (size_t i = 0; i < stylesheet->rule_count; i++) {
+        annotate_css_rule_source_file(stylesheet->rules[i], stable_source_file);
+    }
+}
+
 // Forward declaration for charset conversion (defined after convert_latin1_to_utf8)
 char* convert_charset_to_utf8(const char* content, size_t content_len, const char* from_charset);
 void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool* pool, int depth = 0);
@@ -882,6 +912,7 @@ static void resolve_stylesheet_imports(CssStylesheet* stylesheet, const char* st
         mem_free(css_content);
 
         CssStylesheet* imported = css_parse_stylesheet(engine, css_pool_copy, import_path);
+        annotate_css_stylesheet_source_file(imported, import_path);
         if (imported && imported->rule_count > 0) {
             log_debug("[CSS @import] Parsed imported stylesheet '%s': %zu rules", import_path, imported->rule_count);
 
@@ -1419,6 +1450,7 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
                     mem_free(css_content);
 
                     CssStylesheet* stylesheet = css_parse_stylesheet(engine, css_pool_copy, css_path);
+                    annotate_css_stylesheet_source_file(stylesheet, css_path);
                     if (stylesheet && stylesheet->rule_count > 0) {
                         log_debug("[CSS] Parsed linked stylesheet '%s': %zu rules", css_path, stylesheet->rule_count);
 
@@ -1490,6 +1522,7 @@ void collect_inline_styles_to_list(Element* elem, CssEngine* engine, Pool* pool,
 
                     // Parse the inline CSS
                     CssStylesheet* stylesheet = css_parse_stylesheet(engine, css_text->chars, "<inline-style>");
+                    annotate_css_stylesheet_source_file(stylesheet, "<inline-style>");
                     if (stylesheet && stylesheet->rule_count > 0) {
                         log_debug("[CSS] Parsed inline <style>: %zu rules", stylesheet->rule_count);
 
@@ -1548,6 +1581,7 @@ void collect_inline_styles_from_dom(DomElement* elem, CssEngine* engine, Pool* p
                         DomText* text_node = (DomText*)child;
                         if (text_node->text && text_node->length > 0) {
                             CssStylesheet* stylesheet = css_parse_stylesheet(engine, text_node->text, "<inline-style>");
+                            annotate_css_stylesheet_source_file(stylesheet, "<inline-style>");
                             if (stylesheet && stylesheet->rule_count > 0) {
                                 log_debug("[CSS] Re-scan: parsed <style> from DOM: %zu rules", stylesheet->rule_count);
                                 *stylesheets = (CssStylesheet**)pool_realloc(pool, *stylesheets,
@@ -1602,6 +1636,7 @@ void collect_inline_styles(Element* elem, CssEngine* engine, Pool* pool, int dep
 
                     // Parse the inline CSS
                     CssStylesheet* stylesheet = css_parse_stylesheet(engine, css_text->chars, "<inline-style>");
+                    annotate_css_stylesheet_source_file(stylesheet, "<inline-style>");
                     if (stylesheet) {
                         log_debug("[CSS] Parsed inline <style>: %zu rules", stylesheet->rule_count);
                         // Note: stylesheet is already added to engine's internal list

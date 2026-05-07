@@ -77,6 +77,32 @@ struct RdtPicture {
 // we keep a global pointer set once at startup.
 static FontContext* g_picture_font_ctx = nullptr;
 
+static bool svg_doc_child_is_renderable(const char* tag) {
+    if (!tag || !*tag) return false;
+    if (tag[0] == '?' || tag[0] == '!') return false;
+    if (strcmp(tag, "svg") == 0 || strcmp(tag, "metadata") == 0) return false;
+    return true;
+}
+
+static void repair_split_svg_document(Input* input, Element* document_wrapper, Element* svg_root, int64_t svg_index) {
+    if (!input || !document_wrapper || !svg_root || svg_index < 0) return;
+    bool appended = false;
+    for (int64_t i = svg_index + 1; i < document_wrapper->length; i++) {
+        Item child = document_wrapper->items[i];
+        if (!child.item || get_type_id(child) != LMD_TYPE_ELEMENT) continue;
+        Element* ce = (Element*)child.item;
+        TypeElmt* ct = (TypeElmt*)ce->type;
+        if (!ct || !ct->name.str) continue;
+        if (!svg_doc_child_is_renderable(ct->name.str)) continue;
+        array_append((Array*)svg_root, child, input->pool, input->arena);
+        appended = true;
+    }
+    if (appended && svg_root->type) {
+        TypeElmt* svg_type = (TypeElmt*)svg_root->type;
+        svg_type->content_length = ((Array*)svg_root)->length;
+    }
+}
+
 // ============================================================================
 // Helpers
 // ============================================================================
@@ -609,7 +635,7 @@ static RdtPicture* svg_picture_create(const char* data, int size) {
         pool_destroy(pool);
         return nullptr;
     }
-    input->ui_mode = true;  // allocate fat DomElements (matches inline SVG path)
+    input->ui_mode = false;
 
     // parse_xml expects a null-terminated string
     char* buf = (char*)mem_alloc(size + 1, MEM_CAT_RENDER);
@@ -641,6 +667,9 @@ static RdtPicture* svg_picture_create(const char* data, int size) {
                 // skip processing instructions and comments
                 if (ct->name.str[0] == '?' || ct->name.str[0] == '!') continue;
                 svg_root = ce;
+                if (strcmp(ct->name.str, "svg") == 0) {
+                    repair_split_svg_document(input, document_wrapper, svg_root, i);
+                }
                 break;
             }
         } else if (doc_type && doc_type->name.str && strcmp(doc_type->name.str, "svg") == 0) {

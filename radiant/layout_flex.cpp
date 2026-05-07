@@ -3005,9 +3005,10 @@ void resolve_flex_item_constraints(ViewElement* item, FlexContainerLayout* flex_
                     calculate_item_intrinsic_sizes(item, flex_layout);
                 }
                 float content_suggestion = item->fi->intrinsic_width.min_content;
-                // Intrinsic sizes are content-box; convert to border-box for border-box items
-                // so the comparison with specified_suggestion (which is border-box) is consistent
-                if (item->blk && item->blk->box_sizing == CSS_VALUE_BORDER_BOX && item->bound) {
+                // Radiant flex main sizes are border-box sizes. Intrinsic min-content
+                // measurements are content-box, so include padding/border before the
+                // value is used for line breaking and flexible length resolution.
+                if (item->bound) {
                     content_suggestion += item->bound->padding.left + item->bound->padding.right;
                     if (item->bound->border) {
                         content_suggestion += item->bound->border->width.left + item->bound->border->width.right;
@@ -3029,6 +3030,12 @@ void resolve_flex_item_constraints(ViewElement* item, FlexContainerLayout* flex_
                     } else {
                         specified_suggestion = item->fi->flex_basis;
                     }
+                    if (item->bound) {
+                        specified_suggestion += item->bound->padding.left + item->bound->padding.right;
+                        if (item->bound->border) {
+                            specified_suggestion += item->bound->border->width.left + item->bound->border->width.right;
+                        }
+                    }
                     if (max_width > 0 && max_width < FLT_MAX && specified_suggestion > max_width) {
                         specified_suggestion = max_width;
                     }
@@ -3038,6 +3045,12 @@ void resolve_flex_item_constraints(ViewElement* item, FlexContainerLayout* flex_
                               content_suggestion, specified_suggestion, min_width);
                 } else if (has_css_width) {
                     float specified_suggestion = item->blk->given_width;
+                    if (item->blk->box_sizing != CSS_VALUE_BORDER_BOX && item->bound) {
+                        specified_suggestion += item->bound->padding.left + item->bound->padding.right;
+                        if (item->bound->border) {
+                            specified_suggestion += item->bound->border->width.left + item->bound->border->width.right;
+                        }
+                    }
                     if (max_width > 0 && max_width < FLT_MAX && specified_suggestion > max_width) {
                         specified_suggestion = max_width;
                     }
@@ -3078,8 +3091,10 @@ void resolve_flex_item_constraints(ViewElement* item, FlexContainerLayout* flex_
                     calculate_item_intrinsic_sizes(item, flex_layout);
                 }
                 float content_suggestion = item->fi->intrinsic_height.min_content;
-                // Intrinsic sizes are content-box; convert to border-box for border-box items
-                if (item->blk && item->blk->box_sizing == CSS_VALUE_BORDER_BOX && item->bound) {
+                // Radiant flex main sizes are border-box sizes. Intrinsic min-content
+                // measurements are content-box, so include padding/border before the
+                // value is used for line breaking and flexible length resolution.
+                if (item->bound) {
                     content_suggestion += item->bound->padding.top + item->bound->padding.bottom;
                     if (item->bound->border) {
                         content_suggestion += item->bound->border->width.top + item->bound->border->width.bottom;
@@ -3098,6 +3113,12 @@ void resolve_flex_item_constraints(ViewElement* item, FlexContainerLayout* flex_
                     } else {
                         specified_suggestion = item->fi->flex_basis;
                     }
+                    if (item->bound) {
+                        specified_suggestion += item->bound->padding.top + item->bound->padding.bottom;
+                        if (item->bound->border) {
+                            specified_suggestion += item->bound->border->width.top + item->bound->border->width.bottom;
+                        }
+                    }
                     if (max_height > 0 && max_height < FLT_MAX && specified_suggestion > max_height) {
                         specified_suggestion = max_height;
                     }
@@ -3107,6 +3128,12 @@ void resolve_flex_item_constraints(ViewElement* item, FlexContainerLayout* flex_
                               content_suggestion, specified_suggestion, min_height);
                 } else if (has_css_height) {
                     float specified_suggestion = item->blk->given_height;
+                    if (item->blk->box_sizing != CSS_VALUE_BORDER_BOX && item->bound) {
+                        specified_suggestion += item->bound->padding.top + item->bound->padding.bottom;
+                        if (item->bound->border) {
+                            specified_suggestion += item->bound->border->width.top + item->bound->border->width.bottom;
+                        }
+                    }
                     if (max_height > 0 && max_height < FLT_MAX && specified_suggestion > max_height) {
                         specified_suggestion = max_height;
                     }

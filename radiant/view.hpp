@@ -553,11 +553,13 @@ typedef struct FlexItemProp {
 struct InlineProp {
     CssEnum cursor;
     Color color;
+    Color svg_fill_color;
     CssEnum vertical_align;
     float vertical_align_offset;  // length/percentage vertical-align offset (px), positive = raise
     float opacity;  // CSS opacity value (0.0 to 1.0)
     int visibility;  // Visibility
     CssEnum mix_blend_mode;  // CSS mix-blend-mode (CSS_VALUE_NORMAL default, CSS_VALUE_MULTIPLY, etc.)
+    bool has_svg_fill;
 };
 
 typedef struct Spacing {

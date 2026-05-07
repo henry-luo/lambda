@@ -122,6 +122,26 @@ static String* parse_tag_name(InputContext& ctx, const char **xml) {
     return builder.createString(sb->str->chars, sb->length);
 }
 
+static bool xml_closing_tag_matches(const char* xml, const char* tag_name, uint32_t tag_len) {
+    if (!xml || !tag_name || tag_len == 0) return false;
+    if (xml[0] != '<' || xml[1] != '/') return false;
+
+    const char* p = xml + 2;
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
+    if (strncmp(p, tag_name, tag_len) != 0) return false;
+    p += tag_len;
+    return *p == '>' || *p == ' ' || *p == '\t' || *p == '\n' || *p == '\r';
+}
+
+static void xml_skip_closing_tag(const char** xml) {
+    if (!xml || !*xml) return;
+    if (**xml == '<' && *(*xml + 1) == '/') {
+        *xml += 2;
+        while (**xml && **xml != '>') (*xml)++;
+        if (**xml == '>') (*xml)++;
+    }
+}
+
 static bool parse_attributes(InputContext& ctx, ElementBuilder& element, const char **xml) {
     skip_whitespace(xml);
     while (**xml && **xml != '>' && **xml != '/' && **xml != '?') {
@@ -594,8 +614,12 @@ static Item parse_element(InputContext& ctx, const char **xml, int depth) {
         // Parse content and add to Element's List part
         skip_whitespace(xml);
 
-        while (**xml && !(**xml == '<' && *(*xml + 1) == '/')) {
+        while (**xml && !xml_closing_tag_matches(*xml, tag_name->chars, tag_name->len)) {
             if (**xml == '<') {
+                if (*(*xml + 1) == '/') {
+                    ctx.addWarning(ctx.tracker.location(), "Mismatched XML closing tag while parsing <%s>", tag_name->chars);
+                    break;
+                }
                 // Child element (could be regular element, comment, or PI)
                 Item child = parse_element(ctx, xml, depth + 1);
                 if (child.item != ITEM_ERROR) {
@@ -675,14 +699,8 @@ static Item parse_element(InputContext& ctx, const char **xml, int depth) {
             skip_whitespace(xml);
         }
 
-        // Skip closing tag
-        if (**xml == '<' && *(*xml + 1) == '/') {
-            *xml += 2; // Skip </
-            while (**xml && **xml != '>') {
-                (*xml)++; // Skip tag name
-            }
-            if (**xml == '>') (*xml)++; // Skip >
-        }
+        // Skip matching closing tag
+        xml_skip_closing_tag(xml);
     }
     return element.final();
 }

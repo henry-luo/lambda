@@ -124,6 +124,7 @@ static CssProperty property_definitions[] = {
 
     // Typography Properties
     {CSS_PROPERTY_COLOR, "color", PROP_TYPE_COLOR, PROP_INHERIT_YES, "black", true, false, NULL, 0, validate_color, NULL},
+    {CSS_PROPERTY_FILL, "fill", PROP_TYPE_COLOR, PROP_INHERIT_YES, "black", true, false, NULL, 0, validate_color, NULL},
     {CSS_PROPERTY_FONT_FAMILY, "font-family", PROP_TYPE_STRING, PROP_INHERIT_YES, "serif", false, false, NULL, 0, validate_string, NULL},
     {CSS_PROPERTY_FONT_SIZE, "font-size", PROP_TYPE_LENGTH, PROP_INHERIT_YES, "medium", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_FONT_WEIGHT, "font-weight", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "normal", true, false, NULL, 0, validate_keyword, NULL},
