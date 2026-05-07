@@ -3344,6 +3344,7 @@ enum JsBuiltinId {
     JS_BUILTIN_PROXY_REVOCABLE,
     // test262 host object $262
     JS_BUILTIN_262_DETACH_ARRAYBUFFER,
+    JS_BUILTIN_262_CREATE_REALM,
     // TypedArray static methods
     JS_BUILTIN_TYPED_ARRAY_FROM,
     JS_BUILTIN_TYPED_ARRAY_OF,
@@ -11096,6 +11097,34 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         js_arraybuffer_detach(arg0);
         return ItemNull;
     }
+    case JS_BUILTIN_262_CREATE_REALM: {
+        Item realm = js_new_object();
+        Item global = js_new_object();
+        static const struct { const char* name; int len; } ctor_names[] = {
+            {"Object", 6}, {"Array", 5}, {"Function", 8},
+            {"String", 6}, {"Number", 6}, {"Boolean", 7}, {"Symbol", 6},
+            {"Error", 5}, {"TypeError", 9}, {"RangeError", 10},
+            {"ReferenceError", 14}, {"SyntaxError", 11}, {"URIError", 8},
+            {"EvalError", 9}, {"AggregateError", 14}, {"RegExp", 6},
+            {"Date", 4}, {"Promise", 7}, {"Map", 3}, {"Set", 3},
+            {"WeakMap", 7}, {"WeakSet", 7}, {"ArrayBuffer", 11}, {"DataView", 8},
+            {"Int8Array", 9}, {"Uint8Array", 10}, {"Uint8ClampedArray", 17},
+            {"Int16Array", 10}, {"Uint16Array", 11}, {"Int32Array", 10},
+            {"Uint32Array", 11}, {"Float32Array", 12}, {"Float64Array", 12},
+            {"BigInt64Array", 13}, {"BigUint64Array", 14}, {"Proxy", 5},
+            {NULL, 0}
+        };
+        for (int i = 0; ctor_names[i].name; i++) {
+            Item name_item = (Item){.item = s2it(heap_create_name(ctor_names[i].name, ctor_names[i].len))};
+            Item ctor = js_get_constructor(name_item);
+            if (get_type_id(ctor) == LMD_TYPE_FUNC) js_property_set(global, name_item, ctor);
+        }
+        js_property_set(global, (Item){.item = s2it(heap_create_name("globalThis", 10))}, global);
+        js_property_set(global, (Item){.item = s2it(heap_create_name("self", 4))}, global);
+        js_property_set(global, (Item){.item = s2it(heap_create_name("window", 6))}, global);
+        js_property_set(realm, (Item){.item = s2it(heap_create_name("global", 6))}, global);
+        return realm;
+    }
     case JS_BUILTIN_TYPED_ARRAY_FROM: {
         // %TypedArray%.from(source [, mapfn [, thisArg]])
         // this_val is the constructor (e.g. Uint8Array)
@@ -12502,6 +12531,13 @@ extern "C" Item js_super_call_class(Item callee, Item this_val, Item* args, int 
 // receiver the JIT already holds.
 extern "C" Item js_object_assign(Item target, Item* sources, int count);
 extern "C" Item js_super_call_native(Item callee, Item this_val, Item* args, int argc) {
+    int ta_type = js_resolve_ta_type_from_ctor(callee);
+    if (ta_type < 0 && get_type_id(callee) == LMD_TYPE_MAP) {
+        ta_type = js_resolve_ta_type_from_class_map(callee);
+    }
+    if (ta_type >= 0 && js_is_typed_array(this_val)) {
+        return this_val;
+    }
     Item result = js_call_function(callee, this_val, args, argc);
     if (js_check_exception()) return this_val;
     // If the parent returned the same receiver (or a non-object), nothing to merge.
@@ -12512,6 +12548,15 @@ extern "C" Item js_super_call_native(Item callee, Item this_val, Item* args, int
     if (get_type_id(this_val) != LMD_TYPE_MAP) return this_val;
     js_object_assign(this_val, &result, 1);
     return this_val;
+}
+
+extern "C" Item js_super_apply_native(Item callee, Item this_val, Item args_array) {
+    int argc = js_array_length(args_array);
+    Item* args = argc > 0 ? (Item*)alloca(argc * sizeof(Item)) : NULL;
+    for (int i = 0; i < argc; i++) {
+        args[i] = js_array_get(args_array, (Item){.item = i2it(i)});
+    }
+    return js_super_call_native(callee, this_val, args, argc);
 }
 
 extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count) {
@@ -20633,6 +20678,9 @@ extern "C" Item js_get_262_object_value() {
         Item key = (Item){.item = s2it(heap_create_name("detachArrayBuffer", 17))};
         Item fn = js_get_or_create_builtin(JS_BUILTIN_262_DETACH_ARRAYBUFFER, "detachArrayBuffer", 1);
         js_property_set(js_262_object, key, fn);
+        Item realm_key = (Item){.item = s2it(heap_create_name("createRealm", 11))};
+        Item realm_fn = js_get_or_create_builtin(JS_BUILTIN_262_CREATE_REALM, "createRealm", 0);
+        js_property_set(js_262_object, realm_key, realm_fn);
     }
     return js_262_object;
 }

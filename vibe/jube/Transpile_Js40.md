@@ -135,9 +135,10 @@ TypedArray progress since the baseline update:
 | `%TypedArray%.prototype.map` / `filter` | 156 / 168 before RAB callback-value work | 166 / 168; remaining `map` subclass species resize paths |
 | `%TypedArray%.prototype.entries` / `keys` / `values` | 43 / 59 before live iterator/RAB work | 59 / 59 |
 | `TypedArrayConstructors/internals` canonical `Get` / `Set` / `HasProperty` / `Delete` | 108 / 240 full internals before canonical-key work | 170 / 240 after canonical-key work |
-| `TypedArrayConstructors/internals` `DefineOwnProperty` / `OwnPropertyKeys` | 58 / 64 after first descriptor/key hook pass | 62 / 64; remaining cross-realm detached-buffer throw cases |
-| `TypedArrayConstructors/internals` prototype-chain `Set`, BigInt wrapping, detached `Infinity` `HasProperty` | 220 / 240 before this slice | 228 / 240; remaining failures are cross-realm detached-buffer cases |
-| Full `TypedArrayConstructors/internals` | 170 / 240 before descriptor/key work | 228 / 240 |
+| `TypedArrayConstructors/internals` `DefineOwnProperty` / `OwnPropertyKeys` | 58 / 64 after first descriptor/key hook pass | 62 / 64 after descriptor/key slice; remaining cross-realm cases fixed by `$262.createRealm` host support |
+| `TypedArrayConstructors/internals` prototype-chain `Set`, BigInt wrapping, detached `Infinity` `HasProperty` | 220 / 240 before this slice | 228 / 240 after this slice; remaining cross-realm cases fixed by `$262.createRealm` host support |
+| `TypedArrayConstructors/internals` cross-realm detached-buffer cases | 0 / 12 before `$262.createRealm` host support | 12 / 12 |
+| Full `TypedArrayConstructors/internals` | 170 / 240 before descriptor/key work | 240 / 240 |
 
 DataView BigInt getter/setter behavior has also landed. The focused list now
 passes all `getBigInt64`, `getBigUint64`, `setBigInt64`, and `setBigUint64`
@@ -261,6 +262,10 @@ Implemented since the initial proposal:
   MIR `new` expressions reload shared captured variables after constructor
   calls so value coercions inside `new TA([value])` are immediately visible to
   surrounding lexical bindings.
+- `$262.createRealm()` host support now returns a realm-like object with a
+  fresh `global` facade populated with the standard constructors needed by
+  Test262 cross-realm cases. This unblocks the remaining cross-realm detached
+  typed-array internals tests without changing normal global object state.
 - String receiver checks, RegExp string-iterator coercions, Array reduce
   prototype-key refresh, and for-of destructuring assignment writeback were
   also fixed while recovering the baseline.
@@ -1065,10 +1070,11 @@ for invalid or detached reads, with `indexOf` / `lastIndexOf` guarding the
 post-`fromIndex` detached-buffer case so existing prototype-method behavior does
 not regress.
 
-Remaining `TypedArrayConstructors/internals` failures are now concentrated in
-cross-realm detached-buffer error identity. Those should be treated as a
-separate Realm/error-constructor identity pass rather than folded into the
-typed-array integer-index path.
+The remaining `TypedArrayConstructors/internals` failures were cross-realm
+detached-buffer tests, but direct repro showed the root cause was missing
+`$262.createRealm` host support rather than typed-array integer-index semantics.
+Adding a realm-like host facade for `createRealm().global` completes the full
+internals manifest.
 
 Additional verification after the `TypedArrayConstructors/internals`
 prototype-chain `Set`, BigInt wrapping, and detached `Infinity` `HasProperty`
@@ -1108,6 +1114,39 @@ guard to native array element write fast paths. It also fixes BigInt64/
 BigUint64 storage wrapping and reloads MIR shared captures after constructor
 calls, which makes `new TA([n])` value-conversion side effects visible before
 the detached `Infinity` `with` binding checks run.
+
+Additional verification after `$262.createRealm` host support:
+
+```bash
+make -j1 lambda
+./lambda.exe js temp/js40_cross_realm_probe.js --no-log
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js40_ta_cross_realm_detached.txt --js-timeout=20
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js40_typedarrayconstructors_internals.txt --js-timeout=20
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --baseline-only --js-timeout=20
+```
+
+Results: direct cross-realm detached-buffer repro passed, focused cross-realm
+detached-buffer list `12 / 12`, full `TypedArrayConstructors/internals`
+manifest `240 / 240`, and refreshed baseline gate `30,009 / 30,009`, `0`
+failures, `0` regressions.
+
+Typed-array subclass species resize checkpoint:
+
+```bash
+make -j1 lambda
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js40_ta_dynamic_subclass_canary.txt --js-timeout=20
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --baseline-only --js-timeout=20
+```
+
+Result after reverting the broad class-method capture promotion and dynamic
+superclass construction reroute: baseline is clean again at `30,009 / 30,009`,
+`0` regressions. The focused dynamic typed-array subclass canary remains `1 / 5`
+with only `TypedArray_regular_subclassing` passing. The rejected branch proved
+that syncing block `rab` / `resizeWhenConstructorCalled` captures via module vars
+can make the resize probes work, but it regressed lexical-scope and builtin
+subclass baseline tests. The next attempt should preserve lexical environment
+identity for block class-method captures instead of promoting them to module
+vars globally.
 
 ## 9. Verification Checklist
 
