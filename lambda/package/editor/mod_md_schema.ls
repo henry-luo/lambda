@@ -43,6 +43,7 @@ pub md_schema = {
                  {name: 'title', required: false, type: 'string', default: ""}]},
   strong:     {role: 'mark',   content: [{role: 'inline', qty: 'star'}],   marks: 'all'},
   em:         {role: 'mark',   content: [{role: 'inline', qty: 'star'}],   marks: 'all'},
+  u:          {role: 'mark',   content: [{role: 'inline', qty: 'star'}],   marks: 'all'},
   code:       {role: 'mark',   content: [{role: 'inline', qty: 'star'}],   marks: 'none', excludes: 'all'}
 }
 

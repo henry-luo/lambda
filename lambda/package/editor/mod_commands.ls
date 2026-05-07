@@ -1334,6 +1334,63 @@ fn wrap_top_blocks(state, start_index, end_index) {
   }
 }
 
+fn state_unordered_list_tag(state) =>
+  if (state_schema(state).ul != null and state_schema(state).list == null) { 'ul' } else { 'list' }
+
+fn state_ordered_list_tag(state) =>
+  if (state_schema(state).ol != null and state_schema(state).list == null) { 'ol' } else { 'list' }
+
+fn state_list_tag_for_kind(state, kind) =>
+  if (kind == 'ordered' or kind == "ordered" or kind == 'ol' or kind == "ol") { state_ordered_list_tag(state) }
+  else { state_unordered_list_tag(state) }
+
+fn list_attrs_for_kind(state, kind) {
+  let tag = state_list_tag_for_kind(state, kind)
+  if (tag == 'list') { [{name: 'ordered', value: (kind == 'ordered' or kind == "ordered" or kind == 'ol' or kind == "ol")}] }
+  else { [] }
+}
+
+fn list_item_from_block(state, block) =>
+  if (state_list_item_tag(state) == 'li') { node('li', [block]) }
+  else if (block.tag == state_default_block(state)) { node('list_item', [block]) }
+  else { node('list_item', [node(state_default_block(state), []), block]) }
+
+fn list_items_from_blocks(state, blocks, i, n, acc) {
+  if (i >= n) { acc }
+  else { list_items_from_blocks(state, blocks, i + 1, n, [*acc, list_item_from_block(state, blocks[i])]) }
+}
+
+fn wrap_top_blocks_in_list(state, start_index, end_index, kind) {
+  if (start_index < 0 or end_index < start_index) { null }
+  else {
+    let wrapped = list_slice(state.doc.content, start_index, end_index + 1)
+    let tag = state_list_tag_for_kind(state, kind)
+    let items = list_items_from_blocks(state, wrapped, 0, len(wrapped), [])
+    let list_node = node_attrs(tag, list_attrs_for_kind(state, kind), items)
+    let tx0 = tx_begin(state.doc, state.selection)
+    let tx1 = tx_step(tx0, step_replace([], start_index, end_index + 1, [list_node]))
+    tx_set_selection(tx1, node_selection([start_index]))
+  }
+}
+
+pub fn cmd_wrap_list(state, kind) {
+  let tag = state_list_tag_for_kind(state, kind)
+  if (state_schema(state)[tag] == null) { null }
+  else {
+    let sel = state.selection
+    if (sel == null or state.doc == null or not is_node(state.doc) or len(state.doc.content) == 0) { null }
+    else if (sel.kind == 'all') { wrap_top_blocks_in_list(state, 0, len(state.doc.content) - 1, kind) }
+    else if (sel.kind == 'node') {
+      if (len(sel.path) == 0) { null } else { wrap_top_blocks_in_list(state, sel.path[0], sel.path[0], kind) }
+    }
+    else if (sel_top_block_range(sel)) { wrap_top_blocks_in_list(state, sel_lo(sel).path[0], selected_top_block_end(sel), kind) }
+    else {
+      let lo = sel_lo(sel)
+      if (len(lo.path) == 0) { null } else { wrap_top_blocks_in_list(state, lo.path[0], lo.path[0], kind) }
+    }
+  }
+}
+
 pub fn cmd_insert_horizontal_rule(state) {
   if (state_schema(state).hr == null) { null }
   else { insert_block_after_selection(state, node('hr', [])) }

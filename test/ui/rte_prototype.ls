@@ -20,6 +20,7 @@
 
 import lambda.package.editor.mod_doc
 import lambda.package.editor.mod_editor
+import lambda.package.editor.mod_md_schema
 import lambda.package.editor.mod_source_pos
 
 let SOURCE_PATH = './test/input/simple.md'
@@ -71,7 +72,7 @@ fn render_text_leaf(leaf) {
 let initial_editor_doc = node('doc', [for (child in initial_body) mark_to_editor(child)])
 let initial_title_len = len(doc_text(node_at(initial_editor_doc, [0])))
 let initial_selection = text_selection(pos([0, 0], initial_title_len), pos([0, 0], initial_title_len))
-let initial_editor = edit_open(initial_editor_doc, null, initial_selection)
+let initial_editor = edit_open(initial_editor_doc, html5_subset_schema, initial_selection)
 
 fn valid_source_pos(doc, p) {
   if (p == null) { false }
@@ -179,6 +180,13 @@ view map {
   else if (~.kind == 'node' and ~.tag == 'a') { <a href:attr_value(~, 'href'); *[for (c in ~.content) apply(c)]> }
   else if (~.kind == 'node' and ~.tag == 'img') { <img src:attr_value(~, 'src'), alt:attr_value(~, 'alt')> }
   else if (~.kind == 'node' and ~.tag == 'hr') { <hr> }
+  else if (~.kind == 'node' and ~.tag == 'table') { <table; *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'thead') { <thead; *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'tbody') { <tbody; *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'tfoot') { <tfoot; *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'tr') { <tr; *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'th') { <th; *[for (c in ~.content) apply(c)]> }
+  else if (~.kind == 'node' and ~.tag == 'td') { <td; *[for (c in ~.content) apply(c)]> }
   else if (~.kind == 'node') { <div; *[for (c in ~.content) apply(c)]> }
   else { "" }
 }
@@ -200,6 +208,13 @@ view <ul> { <ul; apply;> }
 view <ol> { <ol; apply;> }
 view <li> { <li; apply;> }
 view <blockquote> { <blockquote; apply;> }
+view <table> { <table; apply;> }
+view <thead> { <thead; apply;> }
+view <tbody> { <tbody; apply;> }
+view <tfoot> { <tfoot; apply;> }
+view <tr> { <tr; apply;> }
+view <th> { <th; apply;> }
+view <td> { <td; apply;> }
 view <hr> { <hr> }
 view <img> { <img src:~.src, alt:~.alt> }
 view <body> { <div class:"doc-body"; apply;> }
@@ -333,6 +348,34 @@ on rte_cmd(evt) {
     editor = edit_exec(editor, edit_cmd_toggle_mark('u'))
     set_selection(editor.selection)
     status = cmd
+  } else if (cmd == "btn-ul") {
+    editor = edit_exec(editor, edit_cmd_wrap_list('bullet'))
+    set_selection(editor.selection)
+    status = cmd
+  } else if (cmd == "btn-ol") {
+    editor = edit_exec(editor, edit_cmd_wrap_list('ordered'))
+    set_selection(editor.selection)
+    status = cmd
+  } else if (cmd == "btn-quote") {
+    editor = edit_exec(editor, edit_cmd_wrap_blockquote())
+    set_selection(editor.selection)
+    status = cmd
+  } else if (cmd == "btn-code") {
+    editor = edit_exec(editor, edit_cmd_insert_code_block(""))
+    set_selection(editor.selection)
+    status = cmd
+  } else if (cmd == "btn-link") {
+    editor = edit_exec(editor, edit_cmd_insert_link("https://example.com", "", "Example"))
+    set_selection(editor.selection)
+    status = cmd
+  } else if (cmd == "btn-image") {
+    editor = edit_exec(editor, edit_cmd_insert_image("https://example.com/image.png", "Example image"))
+    set_selection(editor.selection)
+    status = cmd
+  } else if (cmd == "btn-table") {
+    editor = edit_exec(editor, edit_cmd_insert_table(2, 2, true))
+    set_selection(editor.selection)
+    status = cmd
   } else if (cmd == "btn-undo") {
     editor = edit_exec(editor, edit_cmd_history_undo())
     set_selection(editor.selection)
@@ -384,6 +427,10 @@ on rte_cmd(evt) {
               font-family: 'SF Mono', Menlo, monospace; font-size: 0.92em;
               line-height: 1.45; white-space: pre-wrap; margin: 0.7em 0; }
       .doc-host a { color: #1d4ed8; text-decoration: underline; }
+      .doc-host table { border-collapse: collapse; margin: 0.8em 0; width: 100%; }
+      .doc-host th, .doc-host td { border: 1px solid #cbd5e1; padding: 6px 8px; text-align: left; }
+      .doc-host th { background: #f8fafc; font-weight: 650; }
+      .doc-host img { max-width: 100%; border: 1px solid #d8dadf; border-radius: 4px; }
       #markdown-output { display: none; }
       #status { padding: 8px 14px; background: #f1f3f5; color: #555;
                 font-size: 12px; border-top: 1px solid #e5e7eb; font-family: monospace; }
