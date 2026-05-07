@@ -863,6 +863,7 @@ extern int64_t js_eq_raw(Item left, Item right);
 extern int64_t js_ne_raw(Item left, Item right);
 extern int64_t js_loose_eq_raw(Item left, Item right);
 extern int64_t js_loose_ne_raw(Item left, Item right);
+extern int64_t js_discard_value(Item value);
 
 // debug-only: native test262 harness functions for performance
 #ifndef NDEBUG
@@ -1311,6 +1312,7 @@ JitImport jit_runtime_imports[] = {
     {"js_donotevaluate", FPTR(js_donotevaluate)},
     {"js_is_constructor", FPTR(js_is_constructor)},
 #endif
+    {"js_discard_value", FPTR(js_discard_value)},
     // always available: emitted unconditionally by JS class transpiler
     {"js_private_field_init_begin", FPTR(js_private_field_init_begin)},
     {"js_private_field_init_end", FPTR(js_private_field_init_end)},

@@ -217,6 +217,11 @@ static bool js_typed_array_is_out_of_bounds(JsTypedArray* ta) {
     return ta->buffer->byte_length < ta->byte_offset + ta->byte_length;
 }
 
+extern "C" bool js_typed_array_is_out_of_bounds_item(Item ta_item) {
+    if (!js_is_typed_array(ta_item)) return false;
+    return js_typed_array_is_out_of_bounds(js_get_typed_array_ptr(ta_item.map));
+}
+
 static int64_t js_typed_array_to_int_n(double value, int bits, bool is_signed) {
     if (std::isnan(value) || !std::isfinite(value) || value == 0.0) return 0;
     double int_value = std::trunc(value);
@@ -752,16 +757,16 @@ extern "C" Item js_typed_array_construct(int type_id, Item arg, int byte_offset,
 }
 
 extern "C" Item js_typed_array_get(Item ta_item, Item index) {
-    if (!js_is_typed_array(ta_item)) return (Item){.item = ITEM_NULL};
+    if (!js_is_typed_array(ta_item)) return (Item){.item = ITEM_JS_UNDEFINED};
 
     Map* m = ta_item.map;
     JsTypedArray* ta = js_get_typed_array_ptr(m);
     int idx = (int)it2i(index);
 
     int current_length = js_typed_array_current_length(ta);
-    if (idx < 0 || idx >= current_length) return (Item){.item = ITEM_NULL};
+    if (idx < 0 || idx >= current_length) return (Item){.item = ITEM_JS_UNDEFINED};
     void* data = js_typed_array_current_data(ta);
-    if (!data) return (Item){.item = ITEM_NULL};
+    if (!data) return (Item){.item = ITEM_JS_UNDEFINED};
 
     switch (ta->element_type) {
     case JS_TYPED_INT8:
@@ -802,7 +807,7 @@ extern "C" Item js_typed_array_get(Item ta_item, Item index) {
         return bigint_from_string(buf, blen);
     }
     default:
-        return (Item){.item = ITEM_NULL};
+        return (Item){.item = ITEM_JS_UNDEFINED};
     }
 }
 
@@ -812,11 +817,6 @@ extern "C" Item js_typed_array_set(Item ta_item, Item index, Item value) {
     Map* m = ta_item.map;
     JsTypedArray* ta = js_get_typed_array_ptr(m);
     int idx = (int)it2i(index);
-
-    int current_length = js_typed_array_current_length(ta);
-    if (idx < 0 || idx >= current_length) return (Item){.item = ITEM_NULL};
-    void* data = js_typed_array_current_data(ta);
-    if (!data) return (Item){.item = ITEM_NULL};
 
     // BigInt types: ToBigInt(value), then store as int64/uint64.
     // Per ES spec §22.2.3.5.4 IntegerIndexedElementSet: BigInt typed arrays use ToBigInt
@@ -853,6 +853,9 @@ extern "C" Item js_typed_array_set(Item ta_item, Item index, Item value) {
             bi = js_bigint_constructor(value);
             if (js_check_exception()) return (Item){.item = ITEM_NULL};
         }
+        int current_length = js_typed_array_current_length(ta);
+        void* data = js_typed_array_current_data(ta);
+        if (idx < 0 || idx >= current_length || !data) return value;
         int64_t iv = bigint_to_int64(bi);  // truncates to int64 for both signed/unsigned
         if (ta->element_type == JS_TYPED_BIGINT64) {
             ((int64_t*)data)[idx] = iv;
@@ -887,6 +890,11 @@ extern "C" Item js_typed_array_set(Item ta_item, Item index, Item value) {
         else if (vtype == LMD_TYPE_FLOAT) num_val = it2d(num_item);
         else num_val = 0.0;
     }
+
+    int current_length = js_typed_array_current_length(ta);
+    if (idx < 0 || idx >= current_length) return value;
+    void* data = js_typed_array_current_data(ta);
+    if (!data) return value;
 
     switch (ta->element_type) {
     case JS_TYPED_INT8:    ((int8_t*)data)[idx] = (int8_t)js_typed_array_to_int_n(num_val, 8, true); break;
@@ -1090,10 +1098,15 @@ extern "C" Item js_typed_array_slice(Item ta_item, int start, int end) {
     if (!js_is_typed_array(ta_item)) return (Item){.item = ITEM_NULL};
     JsTypedArray* ta = js_get_typed_array_ptr(ta_item.map);
 
-    if (start < 0) start = ta->length + start;
-    if (end < 0) end = ta->length + end;
+    if (js_typed_array_is_out_of_bounds(ta)) {
+        return js_throw_type_error("Cannot perform %TypedArray%.prototype.slice on an out-of-bounds ArrayBuffer");
+    }
+
+    int current_len = js_typed_array_current_length(ta);
+
+    if (start < 0) start = current_len + start;
+    if (end < 0) end = current_len + end;
     if (start < 0) start = 0;
-    if (end > ta->length) end = ta->length;
     if (start >= end) {
         Item result = js_typed_array_species_create(ta_item, 0);
         if (js_check_exception()) return (Item){.item = ITEM_NULL};
@@ -1103,16 +1116,49 @@ extern "C" Item js_typed_array_slice(Item ta_item, int start, int end) {
     int new_length = end - start;
     Item result = js_typed_array_species_create(ta_item, new_length);
     if (js_check_exception()) return (Item){.item = ITEM_NULL};
+    if (new_length > 0) {
+        if (ta->buffer && ta->buffer->detached) {
+            return js_throw_type_error("Cannot perform %TypedArray%.prototype.slice on a detached ArrayBuffer");
+        }
+        if (js_typed_array_is_out_of_bounds(ta)) {
+            return js_throw_type_error("Cannot perform %TypedArray%.prototype.slice on an out-of-bounds ArrayBuffer");
+        }
+    }
     // Copy elements — species may return a different typed array type, so use element-by-element copy
     JsTypedArray* rta = js_get_typed_array_ptr(result.map);
     if (rta && rta->element_type == ta->element_type && rta->length >= new_length) {
-        // Same type — fast memcpy
         int elem_size = typed_array_element_size(ta->element_type);
-        memcpy(rta->data, (char*)ta->data + start * elem_size, new_length * elem_size);
+        int count_bytes = new_length * elem_size;
+        int source_byte_length = js_typed_array_current_byte_length(ta);
+        char* src_data = (char*)js_typed_array_current_data(ta);
+        char* dst_data = (char*)js_typed_array_current_data(rta);
+        int src_start = start * elem_size;
+        if (src_data && dst_data && ta->buffer && rta->buffer && ta->buffer == rta->buffer) {
+            for (int i = 0; i < count_bytes; i++) {
+                int src_index = src_start + i;
+                dst_data[i] = (src_index >= 0 && src_index < source_byte_length) ? src_data[src_index] : 0;
+            }
+        } else if (src_data && dst_data && source_byte_length >= src_start + count_bytes) {
+            memcpy(dst_data, src_data + src_start, count_bytes);
+        } else if (dst_data) {
+            for (int i = 0; i < count_bytes; i++) {
+                int src_index = src_start + i;
+                dst_data[i] = (src_data && src_index >= 0 && src_index < source_byte_length) ? src_data[src_index] : 0;
+            }
+        }
     } else {
         // Different type — element-by-element
+        int current_len = js_typed_array_current_length(ta);
         for (int i = 0; i < new_length; i++) {
-            Item elem = js_typed_array_get(ta_item, (Item){.item = i2it(start + i)});
+            Item elem;
+            if (start + i < current_len) {
+                elem = js_typed_array_get(ta_item, (Item){.item = i2it(start + i)});
+            } else if (ta->element_type == JS_TYPED_BIGINT64 || ta->element_type == JS_TYPED_BIGUINT64) {
+                extern Item bigint_from_int64(int64_t val);
+                elem = bigint_from_int64(0);
+            } else {
+                elem = (Item){.item = i2it(0)};
+            }
             js_typed_array_set(result, (Item){.item = i2it(i)}, elem);
         }
     }
@@ -1129,7 +1175,7 @@ extern "C" Item js_typed_array_subarray(Item ta_item, int start, int end, bool e
     int begin_byte_offset = ta->byte_offset + start * elem_size;
     bool result_length_tracking = ta->buffer && ta->length_tracking && end_is_default;
 
-    if (ta->buffer) {
+    if (ta->buffer && !ta->buffer->detached) {
         int available_bytes = ta->buffer->byte_length - ta->byte_offset;
         if (available_bytes < 0) available_bytes = 0;
         available_len = available_bytes / elem_size;

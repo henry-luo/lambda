@@ -41,7 +41,7 @@ static inline Item js_props_undefined() {
 }
 
 static inline Item js_props_accessor_result(Item value) {
-    return js_check_exception() ? value : (value.item == ItemNull.item ? js_props_undefined() : value);
+    return value;
 }
 
 // 2-arg heap_create_name lives in transpiler.hpp (defined in lambda-mem.cpp);

@@ -24,18 +24,19 @@ Infrastructure health is good; semantic compliance is the failure surface.
 Js40 has moved from initial failure analysis into implementation. The baseline
 is now clean and has been refreshed after the latest full `--run-partial`
 update run. The current working tree has additional post-refresh improvements
-from the focused `subarray` species work.
+from the focused TypedArray prototype and `TypedArrayConstructors/internals`
+work.
 
 | Metric | Initial Js40 run | Current after fixes |
 |---|---:|---:|
 | Total discovered tests | 42,219 | 42,219 |
-| Batched / in-scope tests | 34,145 | 34,167 |
-| Fully passing | 29,185 | 29,802 |
-| Failed | 4,960 | 4,362 |
-| Skipped | 8,074 | 8,052 |
-| Pass rate, in-scope | 85.5% | 87.2% |
+| Batched / in-scope tests | 34,145 | 34,147 |
+| Fully passing | 29,185 | 29,992 |
+| Failed | 4,960 | 4,155 |
+| Skipped | 8,074 | 8,072 |
+| Pass rate, in-scope | 85.5% | 87.8% |
 | Baseline passing | 29,149 | 29,802 |
-| Improvements vs baseline | 77 | 181 incorporated into refreshed baseline; 40 current local improvements |
+| Improvements vs baseline | 77 | 181 incorporated into refreshed baseline; 190 current local improvements |
 | Regressions vs baseline | 41 | 0 |
 
 Latest successful update command:
@@ -60,8 +61,8 @@ failures, and `0` regressions.
 
 Latest non-updating full batch after the DataView BigInt, TypedArray
 `@@toStringTag`, TypedArray accessor/RAB, `at`, `includes`, `indexOf`, and
-`lastIndexOf`, `fill`, `find`/`findIndex`, callback-method, and `copyWithin`
-work:
+`lastIndexOf`, `fill`, `find`/`findIndex`, callback-method, `copyWithin`,
+`subarray`, `slice`, iterator, and `TypedArrayConstructors/internals` work:
 
 ```bash
 ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --js-timeout=20
@@ -77,9 +78,17 @@ refreshed baseline and current partial-test accounting: `29,802 / 34,148` fully
 passing, `4,346` failed, `8,071` skipped, `0` improvements, and `0`
 regressions.
 
-Latest non-updating full batch after the focused `subarray` RAB/current-view
-and species-constructor work: `29,842 / 34,148` fully passing, `4,306` failed,
-`8,071` skipped, `40` improvements, and `0` regressions.
+Latest non-updating full batch after the focused `slice` ToInteger/species/RAB,
+`map`/`filter` RAB callback, and `entries`/`keys`/`values` live iterator work:
+`29,885 / 34,147` fully passing, `4,262` failed, `8,072` skipped, `83`
+improvements, and `0` regressions. The refreshed baseline gate remains clean at
+`29,802 / 29,802`, `0` failures, and `0` regressions.
+
+Latest non-updating full batch after the `TypedArrayConstructors/internals`
+canonical numeric-index plus `DefineOwnProperty` / `OwnPropertyKeys` work:
+`29,992 / 34,147` fully passing, `4,155` failed, `8,072` skipped, `190`
+improvements, and `0` regressions. The refreshed baseline gate remains clean at
+`29,802 / 29,802`, `0` failures, and `0` regressions.
 
 The `--js-timeout=20` option was added to the Test262 runner because one
 RegExp test (`built_ins_RegExp_character_class_escape_non_whitespace_js`) could
@@ -110,7 +119,13 @@ TypedArray progress since the baseline update:
 | `%TypedArray%.prototype.{every,some,findLast,findLastIndex}` | 144 / 164 before RAB callback-loop work | 164 / 164 |
 | `%TypedArray%.prototype.copyWithin` | 37 / 64 before coercion/RAB/BigInt work | 64 / 64 |
 | `%TypedArray%.prototype.reverse` | 18 / 21 before RAB/current-length work | 21 / 21 |
-| `%TypedArray%.prototype.subarray` | 29 / 67 before RAB/current-view/species work | 59 / 67; remaining constructor/detached edge cases |
+| `%TypedArray%.prototype.subarray` | 29 / 67 before RAB/current-view/species work | 67 / 67 |
+| `%TypedArray%.prototype.slice` | 70 / 93 before ToInteger/species/RAB work | 92 / 93; remaining subclass species resize path |
+| `%TypedArray%.prototype.map` / `filter` | 156 / 168 before RAB callback-value work | 166 / 168; remaining `map` subclass species resize paths |
+| `%TypedArray%.prototype.entries` / `keys` / `values` | 43 / 59 before live iterator/RAB work | 59 / 59 |
+| `TypedArrayConstructors/internals` canonical `Get` / `Set` / `HasProperty` / `Delete` | 108 / 240 full internals before canonical-key work | 170 / 240 after canonical-key work |
+| `TypedArrayConstructors/internals` `DefineOwnProperty` / `OwnPropertyKeys` | 58 / 64 after first descriptor/key hook pass | 62 / 64; remaining cross-realm detached-buffer throw cases |
+| Full `TypedArrayConstructors/internals` | 170 / 240 before descriptor/key work | 220 / 240 |
 
 DataView BigInt getter/setter behavior has also landed. The focused list now
 passes all `getBigInt64`, `getBigUint64`, `setBigInt64`, and `setBigUint64`
@@ -191,10 +206,40 @@ Implemented since the initial proposal:
   preserves length-tracking results when `end` is omitted, throws RangeError
   for result views that would start or extend beyond the current buffer, and
   routes buffer/byteOffset/length creation through `TypedArraySpeciesCreate`.
-  Custom `@@species` getters, custom constructors, and custom returned typed
-  arrays now pass; the remaining focused failures are limited to inherited
-  `constructor` edge cases, detached-buffer species ordering, and the broader
-  `isConstructor`/`Reflect.construct` path for methods.
+  Custom `@@species` getters, custom constructors, custom returned typed
+  arrays, inherited `constructor` accessors, non-constructable prototype
+  methods, and detached-buffer argument/species ordering now pass. The MIR
+  member-read path now reloads `.constructor` getter side effects so inherited
+  accessor tests observe closure mutations without disturbing unrelated
+  computed member access, and explicit accessor `return null` remains distinct
+  from implicit `undefined`.
+- `%TypedArray%.prototype.slice` now uses `ToIntegerOrInfinity` for `start` and
+  `end`, propagates Symbol/number conversion abrupt completions, uses current
+  RAB length where the spec observes post-coercion growth, preserves the
+  original result count across post-coercion shrink, validates species result
+  length against current typed-array length, and copies from current backing
+  storage with zero-fill for bytes/elements that disappear after RAB resize.
+  Same-buffer species copies now use forward byte-copy semantics instead of
+  `memcpy`, matching the observable overlapping-copy behavior. The remaining
+  focused failure is `speciesctor-resize`, which is rooted in loop-scoped
+  dynamic typed-array subclass construction invoking an explicit subclass
+  constructor.
+- `%TypedArray%.prototype.map` and `filter` now validate the receiver's current
+  RAB bounds before callback/species work, capture current length for
+  length-tracking views, and pass JS `undefined` rather than internal `null` to
+  callbacks when a shrink during iteration makes an element unavailable. The
+  focused `filter` subset is complete, and the remaining focused `map` failures
+  are the same loop-scoped subclass species resize class/super issue that still
+  blocks the final `slice` case.
+- `TypedArrayConstructors/internals` now routes canonical numeric-index strings
+  through integer-indexed exotic `Get`, `Set`, `HasProperty`, `Delete`,
+  `GetOwnProperty`, and `DefineOwnProperty` behavior while preserving ordinary
+  property semantics for non-canonical keys. Typed-array own keys now synthesize
+  current integer indices before ordinary string/symbol properties, numeric
+  descriptors are synthesized from current element values, invalid and detached
+  element reads expose JS `undefined` instead of the internal null sentinel, and
+  `indexOf` / `lastIndexOf` stop searching when `fromIndex` conversion detaches
+  the backing buffer.
 - String receiver checks, RegExp string-iterator coercions, Array reduce
   prototype-key refresh, and for-of destructuring assignment writeback were
   also fixed while recovering the baseline.
@@ -425,8 +470,11 @@ current DataView failure list improved to `187 / 187`. The focused
 `76 / 76`; and the focused `every`/`some`/`findLast`/`findLastIndex` callback
 subset is now `164 / 164`; the focused `copyWithin` subset is now `64 / 64`;
 the focused `reverse` subset is now `21 / 21`; and the focused `subarray`
-subset has improved from `29 / 67` to `59 / 67`. Broader TypedArray method,
-species, and canonical numeric-index work remains.
+subset has improved from `29 / 67` to `67 / 67`; the focused `slice` subset has
+improved from `70 / 93` to `92 / 93`; and the focused `map`/`filter` subset has
+improved from `156 / 168` to `166 / 168`; and the focused `entries`/`keys`/
+`values` subset is now `59 / 59`. Broader TypedArray method, subclass species
+construction, and canonical numeric-index work remains.
 
 Goal: make `TypedArray`/`DataView` behavior spec-driven instead of method-local.
 
@@ -471,15 +519,23 @@ Expected impact:
   accessor/RAB slice converted the focused accessor list from `37 / 50` to
   `50 / 50`; the later `at`, `includes`, `indexOf`, `lastIndexOf`, `fill`,
   `find`/`findIndex`, `every`/`some`/`findLast`/`findLastIndex`, `copyWithin`,
-  `reverse`, `subarray`, Buffer identity, dynamic RAB backing updates, integer
-  conversion, and float-widening work leave the latest non-updating full-batch
-  improvement count at `40` after the baseline was refreshed to incorporate the
-  earlier improvements. The callback-method and `reverse` slices improved their
-  focused manifests but did not change the full-run improvement count because
-  those tests are outside the current partial-list accounting; the earlier
-  `copyWithin` slice moved the pre-refresh full-run improvement count from
-  `158` to `180`, and the `subarray` RAB/current-view/species slice now
-  contributes the first post-refresh full-run improvements.
+  `reverse`, `subarray`, `slice`, `map`/`filter`, `entries`/`keys`/`values`,
+  `TypedArrayConstructors/internals`, Buffer identity, dynamic RAB backing
+  updates, integer conversion, and float-widening work leave the latest
+  non-updating full-batch improvement count at `190` after the baseline was
+  refreshed to incorporate the earlier improvements. The callback-method and
+  `reverse` slices improved their focused manifests but did not change the
+  full-run improvement count because those tests are outside the current
+  partial-list accounting; the earlier `copyWithin` slice moved the pre-refresh
+  full-run improvement count from `158` to `180`, and the completed `subarray`
+  plus partial `slice` species/RAB work started the post-refresh full-run
+  improvements.
+  The focused `map`/`filter` RAB callback-value slice improved its manifest but
+  did not change the full-run improvement count under the current partial-list
+  accounting; the focused live iterator slice completed `entries`/`keys`/`values`
+  and moved the post-refresh full-run improvement count from `82` to `83`. The
+  canonical numeric-index internals slice then moved it to `142`, and the
+  `DefineOwnProperty` / `OwnPropertyKeys` internals slice moved it to `190`.
 
 ### Phase J40-4 - Iterator and Destructuring Runtime Kernels
 
@@ -684,7 +740,7 @@ Progress against that target as of 2026-05-07: the engine has moved from
 with the refreshed baseline clean at 29,802 and `0` regressions. The most
 recent baseline-refresh run was `29,802 / 34,167` fully passing with `181`
 improvements incorporated into the baseline. The current non-updating working
-tree result is `29,842 / 34,148` fully passing with `40` post-refresh
+tree result is `29,992 / 34,147` fully passing with `190` post-refresh
 improvements and `0` regressions.
 The next highest-leverage continuation is to broaden the same internal-slot
 discipline across TypedArray methods, species paths, and canonical numeric-index
@@ -851,13 +907,145 @@ ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batc
 ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --js-timeout=20
 ```
 
-Results: focused `subarray` list `59 / 67`, up from `29 / 67`; refreshed
+Results: focused `subarray` list `67 / 67`, up from `29 / 67`; refreshed
 baseline gate `29,802 / 29,802`, `0` failures, `0` regressions. The full
-non-updating batch is `29,842 / 34,148`, `4,306` failed, `8,071` skipped, `40`
-improvements, `0` regressions, under the current 44-entry partial-test list.
-The remaining focused `subarray` failures are inherited `constructor` edge
-cases, detached-buffer species ordering, and the broader `isConstructor` /
-`Reflect.construct` method path.
+non-updating batch is `29,870 / 34,148`, `4,278` failed, `8,071` skipped, `68`
+improvements, `0` regressions, under the current 48-entry partial-test list.
+The completed slice covers inherited `constructor` accessors, detached-buffer
+species ordering, default species creation, and the `isConstructor`/
+non-constructable typed-array method path while preserving
+`Reflect.construct.length === 2`.
+
+Additional verification after the `%TypedArray%.prototype.slice` ToInteger,
+RAB, and species-copy work:
+
+```bash
+make -j1 lambda
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js40_typedarray_slice.txt --js-timeout=20
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --baseline-only --js-timeout=20
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --js-timeout=20
+```
+
+Results: focused `slice` list `92 / 93`, up from `70 / 93`; refreshed
+baseline gate `29,802 / 29,802`, `0` failures, `0` regressions. The full
+non-updating batch is `29,884 / 34,147`, `4,263` failed, `8,072` skipped, `82`
+improvements, `0` regressions, under the current 50-entry partial-test list.
+The remaining focused `slice` failure is `speciesctor-resize`, where a
+loop-scoped dynamic typed-array subclass species constructor with an explicit
+constructor still reaches the superclass call with an invalid callee
+(`is not a constructor`) before it can resize the source RAB. A prototype fix
+that treated class MAPs as pending `new.target` and routed dynamic class
+construction through the generic class-object constructor was rejected because
+the baseline gate exposed regressions in accepted builtin subclassing tests
+(`ArrayBuffer`, `Map`, `RegExp`, `Set`, `WeakMap`, `WeakSet`, and related
+statement/expression subclass fixtures). The next attempt should solve this at
+the class/super binding model boundary rather than broadening `new.target` MAP
+acceptance globally.
+
+Additional verification after the `%TypedArray%.prototype.map` / `filter` RAB
+callback-value work:
+
+```bash
+make -j1 lambda
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js40_typedarray_map_filter.txt --js-timeout=20
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --baseline-only --js-timeout=20
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --js-timeout=20
+```
+
+Results: focused `map`/`filter` list `166 / 168`, up from `156 / 168`; refreshed
+baseline gate `29,802 / 29,802`, `0` failures, `0` regressions. The full
+non-updating batch remains `29,884 / 34,147`, `4,263` failed, `8,072` skipped,
+`82` improvements, and `0` regressions under the current partial-test list. The
+remaining focused `map` failures are `speciesctor-resizable-buffer-grow` and
+`speciesctor-resizable-buffer-shrink`, both blocked on the same loop-scoped
+typed-array subclass species constructor issue as the final `slice` failure.
+
+Additional verification after the `%TypedArray%.prototype.entries` / `keys` /
+`values` live RAB iterator work:
+
+```bash
+make -j1 lambda
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js40_typedarray_iterators.txt --js-timeout=20
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --baseline-only --js-timeout=20
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --js-timeout=20
+```
+
+Results: focused `entries`/`keys`/`values` list `59 / 59`, up from `43 / 59`;
+refreshed baseline gate `29,802 / 29,802`, `0` failures, `0` regressions. The
+full non-updating batch is `29,885 / 34,147`, `4,262` failed, `8,072` skipped,
+`83` improvements, and `0` regressions under the current partial-test list. This
+slice replaces the old eager snapshot with a live typed-array-backed iterator
+for direct `.next()` and `for...of`, including RAB out-of-bounds throws,
+current-length grow/shrink behavior, `entries` pair materialization, and sticky
+exhaustion after a length-tracking view reaches done.
+
+Additional verification after the `TypedArrayConstructors/internals` canonical
+numeric-index `Get` / `Set` / `HasProperty` / `Delete` work:
+
+```bash
+make -j1 lambda
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js40_ta_canonical_groups.txt --js-timeout=20
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js40_typedarrayconstructors_internals.txt --js-timeout=20
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --baseline-only --js-timeout=20
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --js-timeout=20
+```
+
+Results: affected `Get` / `Set` / `HasProperty` / `Delete` list `130 / 152`,
+up from `121 / 152` after the first canonical-key patch and from a much broader
+ad hoc numeric-key failure cluster. The full `TypedArrayConstructors/internals`
+manifest is now `170 / 240`, up from `108 / 240`. The baseline gate is clean at
+`29,802 / 29,802`, `0` failures, `0` regressions. The full non-updating batch is
+now `29,944 / 34,147`, `4,203` failed, `8,072` skipped, `142` improvements, and
+`0` regressions under the current partial-test list.
+
+This slice adds canonical numeric-index string detection for typed-array
+property hooks, including `-0`, `Infinity`, `NaN`, integer strings, and JS-style
+decimal canonicalization down to `0.000001`; routes non-canonical keys through
+ordinary own/prototype property behavior; makes valid integer-index deletes
+non-configurable; preserves ordinary properties for keys like `"1.0"` and
+`"+1"`; fixes `Reflect.set` receiver-sensitive valid-index behavior; and moves
+typed-array element value conversion ahead of integer-index validity checks for
+direct assignment so abrupt `ToNumber` / `ToBigInt` completions propagate.
+
+Additional verification after the `TypedArrayConstructors/internals`
+`DefineOwnProperty` / `OwnPropertyKeys` work:
+
+```bash
+make -j1 lambda
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js40_ta_defown_ownkeys.txt --js-timeout=20
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js40_typedarrayconstructors_internals.txt --js-timeout=20
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --baseline-only --js-timeout=20
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --js-timeout=20
+```
+
+Results: focused `DefineOwnProperty` / `OwnPropertyKeys` list `62 / 64`, up
+from `58 / 64`; all `OwnPropertyKeys` tests pass. The two remaining focused
+failures are the normal and BigInt cross-realm detached-buffer throw cases. The
+full `TypedArrayConstructors/internals` manifest is now `220 / 240`, up from
+`170 / 240` after the canonical-key slice and `108 / 240` before the internals
+work. The baseline gate is clean at `29,802 / 29,802`, `0` failures, `0`
+regressions. The full non-updating batch is now `29,992 / 34,147`, `4,155`
+failed, `8,072` skipped, `190` improvements, and `0` regressions under the
+current partial-test list.
+
+This slice adds typed-array integer-indexed `[[DefineOwnProperty]]` handling
+for `Object.defineProperty` and `Reflect.defineProperty`, including the
+throw-vs-boolean distinction, accessor and non-writable/non-enumerable/
+non-configurable rejection, invalid-index false results, and value-conversion
+ordering before detached/OOB no-op semantics. `Object.getOwnPropertyNames` /
+`Reflect.ownKeys` now synthesize current typed-array integer indices before
+ordinary keys, and `Object.getOwnPropertyDescriptor` now synthesizes numeric
+element descriptors while returning `undefined` for invalid numeric indices.
+The MIR and runtime typed-array element read paths now expose JS `undefined`
+for invalid or detached reads, with `indexOf` / `lastIndexOf` guarding the
+post-`fromIndex` detached-buffer case so existing prototype-method behavior does
+not regress.
+
+Remaining `TypedArrayConstructors/internals` failures are now concentrated in
+cross-realm detached-buffer error identity, prototype-chain `Set`,
+BigInt64/BigUint64 modulo storage edge cases, and two detached `Infinity`
+`HasProperty` cases. Those should be treated as separate structural internals
+passes rather than folded into the descriptor/key path.
 
 ## 9. Verification Checklist
 

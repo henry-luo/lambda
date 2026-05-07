@@ -13130,12 +13130,13 @@ static MIR_reg_t jm_transpile_typed_array_get(JsMirTranspiler* mt, MIR_reg_t arr
                                                MIR_reg_t h_data, MIR_reg_t h_len) {
     // P4h: use hoisted data pointer and length when available
     MIR_reg_t data_ptr, ta_len;
+    MIR_reg_t ta_ptr = 0;
     if (h_data && h_len) {
         data_ptr = h_data;
         ta_len = h_len;
     } else {
         // Load JsTypedArray* from Map.data (offset 16)
-        MIR_reg_t ta_ptr = jm_new_reg(mt, "ta_ptr", MIR_T_I64);
+        ta_ptr = jm_new_reg(mt, "ta_ptr", MIR_T_I64);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, ta_ptr),
             MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, arr_reg, 0, 1)));
 
@@ -13150,11 +13151,26 @@ static MIR_reg_t jm_transpile_typed_array_get(JsMirTranspiler* mt, MIR_reg_t arr
             MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, ta_ptr, 0, 1)));
     }
 
-    // Bounds check: if idx < 0 || idx >= ta_length → null
+    // Bounds check: if idx < 0 || idx >= ta_length → undefined
     MIR_reg_t result = jm_new_reg(mt, "ta_get", MIR_T_I64);
     MIR_label_t l_ok = jm_new_label(mt);
     MIR_label_t l_oob = jm_new_label(mt);
     MIR_label_t l_end = jm_new_label(mt);
+
+    if (ta_ptr) {
+        MIR_reg_t buf_ptr = jm_new_reg(mt, "ta_buf", MIR_T_I64);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, buf_ptr),
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, 24, ta_ptr, 0, 1)));
+        MIR_label_t l_not_detached = jm_new_label(mt);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_not_detached),
+            MIR_new_reg_op(mt->ctx, buf_ptr)));
+        MIR_reg_t detached = jm_new_reg(mt, "ta_det", MIR_T_I64);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, detached),
+            MIR_new_mem_op(mt->ctx, MIR_T_U8, 12, buf_ptr, 0, 1)));
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
+            MIR_new_reg_op(mt->ctx, detached)));
+        jm_emit_label(mt, l_not_detached);
+    }
 
     // idx < 0
     MIR_reg_t neg_check = jm_new_reg(mt, "neg_ck", MIR_T_I64);
@@ -13173,10 +13189,10 @@ static MIR_reg_t jm_transpile_typed_array_get(JsMirTranspiler* mt, MIR_reg_t arr
     // In-bounds: compute element address and load
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_ok)));
 
-    // Out of bounds: return ItemNull
+    // Out of bounds: return JS undefined
     jm_emit_label(mt, l_oob);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
-        MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL_VAL)));
+        MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
 
     jm_emit_label(mt, l_ok);
@@ -15377,8 +15393,18 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
         jm_env_reload_shared_captures(mt);
         return r;
     }
-    case JS_AST_NODE_MEMBER_EXPRESSION:
-        return jm_transpile_member(mt, (JsMemberNode*)expr);
+    case JS_AST_NODE_MEMBER_EXPRESSION: {
+        JsMemberNode* mem = (JsMemberNode*)expr;
+        MIR_reg_t r = jm_transpile_member(mt, mem);
+        if (!mem->computed && mem->property && mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
+            JsIdentifierNode* prop = (JsIdentifierNode*)mem->property;
+            if (prop->name && prop->name->len == 11 && strncmp(prop->name->chars, "constructor", 11) == 0) {
+                jm_scope_env_reload_vars(mt);
+                jm_env_reload_shared_captures(mt);
+            }
+        }
+        return r;
+    }
     case JS_AST_NODE_ARRAY_EXPRESSION:
         return jm_transpile_array(mt, (JsArrayNode*)expr);
     case JS_AST_NODE_OBJECT_EXPRESSION:
@@ -19764,6 +19790,10 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         JsExpressionStatementNode* es = (JsExpressionStatementNode*)stmt;
         if (es->expression) {
             MIR_reg_t val = jm_transpile_box_item(mt, es->expression);
+            if (!mt->eval_completion_reg && es->expression->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+                jm_call_void_1(mt, "js_discard_value",
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+            }
             // Eval completion value: update the completion register so that
             // expression statements inside control flow (for/while/if/switch)
             // propagate their value as the eval() result.
@@ -26101,7 +26131,6 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
                     }
-
                     // Inherit static methods from parent classes (base-first, then own overrides)
                     {
                         JsClassEntry* s_chain[32];
@@ -26561,6 +26590,10 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             JsExpressionStatementNode* es = (JsExpressionStatementNode*)actual_stmt;
             if (es->expression) {
                 MIR_reg_t val = jm_transpile_box_item(mt, es->expression);
+                if (es->expression->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+                    jm_call_void_1(mt, "js_discard_value",
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+                }
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_reg_op(mt->ctx, result),
                     MIR_new_reg_op(mt->ctx, val)));

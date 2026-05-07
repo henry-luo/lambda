@@ -517,6 +517,114 @@ extern bool js_strict_mode;
 
 // forward declarations
 static bool js_is_symbol_item(Item item);
+extern "C" bool js_typed_array_is_out_of_bounds_item(Item ta_item);
+
+static bool js_ta_key_canonical_numeric(Item key, double* numeric_index, bool* is_negative_zero) {
+    if (is_negative_zero) *is_negative_zero = false;
+    TypeId key_type = get_type_id(key);
+    if (key_type == LMD_TYPE_INT) {
+        int64_t iv = it2i(key);
+        if (iv <= -(int64_t)JS_SYMBOL_BASE) return false;
+        if (numeric_index) *numeric_index = (double)iv;
+        return true;
+    }
+    if (key_type == LMD_TYPE_FLOAT) {
+        if (numeric_index) *numeric_index = it2d(key);
+        return true;
+    }
+    if (key_type != LMD_TYPE_STRING) return false;
+    String* str = it2s(key);
+    if (!str || str->len == 0 || str->len >= 128) return false;
+    const char* chars = str->chars;
+    int len = (int)str->len;
+    if (len == 2 && chars[0] == '-' && chars[1] == '0') {
+        if (numeric_index) *numeric_index = -0.0;
+        if (is_negative_zero) *is_negative_zero = true;
+        return true;
+    }
+    if (len == 3 && strncmp(chars, "NaN", 3) == 0) {
+        if (numeric_index) *numeric_index = NAN;
+        return true;
+    }
+    if (len == 8 && strncmp(chars, "Infinity", 8) == 0) {
+        if (numeric_index) *numeric_index = INFINITY;
+        return true;
+    }
+    if (len == 9 && strncmp(chars, "-Infinity", 9) == 0) {
+        if (numeric_index) *numeric_index = -INFINITY;
+        return true;
+    }
+    char buf[128];
+    memcpy(buf, chars, len);
+    buf[len] = '\0';
+    char* endptr = NULL;
+    double value = strtod(buf, &endptr);
+    if (!endptr || *endptr != '\0') return false;
+    char canon[128];
+    if (value == 0.0) {
+        snprintf(canon, sizeof(canon), "0");
+    } else if (isnan(value)) {
+        snprintf(canon, sizeof(canon), "NaN");
+    } else if (isinf(value)) {
+        snprintf(canon, sizeof(canon), value > 0 ? "Infinity" : "-Infinity");
+    } else if (fabs(value) >= 0.000001 && fabs(value) < 1000000000000000000000.0) {
+        snprintf(canon, sizeof(canon), "%.15f", value);
+        int canon_len = (int)strlen(canon);
+        while (canon_len > 0 && canon[canon_len - 1] == '0') canon[--canon_len] = '\0';
+        if (canon_len > 0 && canon[canon_len - 1] == '.') canon[--canon_len] = '\0';
+    } else {
+        snprintf(canon, sizeof(canon), "%.15g", value);
+    }
+    if ((int)strlen(canon) != len || strncmp(canon, chars, len) != 0) return false;
+    if (numeric_index) *numeric_index = value;
+    return true;
+}
+
+static bool js_ta_numeric_index_valid(Item object, double numeric_index, bool is_negative_zero) {
+    if (is_negative_zero || !isfinite(numeric_index)) return false;
+    double int_part = floor(numeric_index);
+    if (int_part != numeric_index || numeric_index < 0) return false;
+    if (js_typed_array_is_out_of_bounds_item(object)) return false;
+    int64_t idx64 = (int64_t)numeric_index;
+    int len = js_typed_array_length(object);
+    return idx64 >= 0 && idx64 < len;
+}
+
+static bool js_ta_numeric_index_to_int(double numeric_index, bool is_negative_zero, int* out_index) {
+    if (is_negative_zero || !isfinite(numeric_index)) return false;
+    double int_part = floor(numeric_index);
+    if (int_part != numeric_index || numeric_index < 0) return false;
+    if (numeric_index > (double)INT32_MAX) return false;
+    if (out_index) *out_index = (int)numeric_index;
+    return true;
+}
+
+static bool js_ta_define_own_numeric_index(Item obj, Item key, Item desc, bool* handled) {
+    if (handled) *handled = false;
+    if (get_type_id(obj) != LMD_TYPE_MAP || !obj.map || obj.map->map_kind != MAP_KIND_TYPED_ARRAY) return false;
+    double numeric_index = 0;
+    bool is_negative_zero = false;
+    if (!js_ta_key_canonical_numeric(key, &numeric_index, &is_negative_zero)) return false;
+    if (handled) *handled = true;
+
+    JsPropertyDescriptor pd = {};
+    if (!js_descriptor_from_object(desc, &pd)) return false;
+
+    int idx = -1;
+    if (!js_ta_numeric_index_valid(obj, numeric_index, is_negative_zero) ||
+        !js_ta_numeric_index_to_int(numeric_index, is_negative_zero, &idx)) {
+        return false;
+    }
+    if (js_pd_is_accessor(&pd)) return false;
+    if ((pd.flags & JS_PD_HAS_CONFIGURABLE) && !js_pd_is_configurable(&pd)) return false;
+    if ((pd.flags & JS_PD_HAS_ENUMERABLE) && ((pd.flags & JS_PD_ENUMERABLE) == 0)) return false;
+    if ((pd.flags & JS_PD_HAS_WRITABLE) && ((pd.flags & JS_PD_WRITABLE) == 0)) return false;
+    if (pd.flags & JS_PD_HAS_VALUE) {
+        js_typed_array_set(obj, (Item){.item = i2it(idx)}, pd.value);
+        if (js_check_exception()) return false;
+    }
+    return true;
+}
 
 #ifdef __APPLE__
 #include <mach/mach_time.h>
@@ -4390,74 +4498,11 @@ extern "C" Item js_in(Item key, Item object) {
     }
     // ES spec §9.4.5.2: TypedArray [[HasProperty]] — numeric indices only check bounds
     if (type == LMD_TYPE_MAP && object.map->map_kind == MAP_KIND_TYPED_ARRAY) {
-        // coerce key to string for numeric check
-        const char* ks = NULL; int kl = 0;
-        char nbuf[64];
-        if (get_type_id(key) == LMD_TYPE_STRING) {
-            String* s = it2s(key);
-            ks = s->chars; kl = (int)s->len;
-        } else if (get_type_id(key) == LMD_TYPE_INT) {
-            int64_t iv = it2i(key);
-            if (iv > -(int64_t)JS_SYMBOL_BASE) { // not a symbol
-                kl = snprintf(nbuf, sizeof(nbuf), "%lld", (long long)iv);
-                ks = nbuf;
-            }
-        } else if (get_type_id(key) == LMD_TYPE_FLOAT) {
-            double dv = it2d(key);
-            if (dv == 0.0) { kl = 1; ks = "0"; }
-            else { kl = snprintf(nbuf, sizeof(nbuf), "%g", dv); ks = nbuf; }
-        }
-        if (ks && kl > 0) {
-            // check if this is a CanonicalNumericIndexString
-            // includes: integer strings "0"-"N", "-0", floats like "1.1", "Infinity", "NaN"
-            bool is_canonical_numeric = false;
-            bool is_valid_index = false;
-            // special cases: "-0", "Infinity", "-Infinity", "NaN" are canonical numeric but not valid indices
-            if (kl == 2 && ks[0] == '-' && ks[1] == '0') {
-                is_canonical_numeric = true;
-                is_valid_index = false;
-            } else if ((kl == 8 && strncmp(ks, "Infinity", 8) == 0) ||
-                       (kl == 9 && strncmp(ks, "-Infinity", 9) == 0) ||
-                       (kl == 3 && strncmp(ks, "NaN", 3) == 0)) {
-                is_canonical_numeric = true;
-                is_valid_index = false;
-            } else {
-                // try parsing as a number
-                bool has_dot = false;
-                bool has_digit = false;
-                bool is_neg = false;
-                bool all_ok = true;
-                int start = 0;
-                if (kl > 0 && ks[0] == '-') { is_neg = true; start = 1; }
-                for (int i = start; i < kl && all_ok; i++) {
-                    if (ks[i] == '.') { if (has_dot) all_ok = false; has_dot = true; }
-                    else if (ks[i] >= '0' && ks[i] <= '9') has_digit = true;
-                    else all_ok = false;
-                }
-                if (all_ok && has_digit) {
-                    is_canonical_numeric = true;
-                    if (!has_dot && !is_neg) {
-                        // non-negative integer: valid if 0 <= idx < length and buffer not detached
-                        // reject leading zeros (except "0" itself)
-                        if (kl > 1 && ks[0] == '0') {
-                            is_valid_index = false;
-                        } else {
-                            JsTypedArray* ta = js_get_typed_array_ptr(object.map);
-                            if (ta && ta->buffer && ta->buffer->detached) {
-                                is_valid_index = false;
-                            } else {
-                                int64_t idx = 0;
-                                for (int i = 0; i < kl; i++) idx = idx * 10 + (ks[i] - '0');
-                                is_valid_index = (ta && idx >= 0 && idx < ta->length);
-                            }
-                        }
-                    }
-                    // negative integers and floats are not valid indices
-                }
-            }
-            if (is_canonical_numeric) {
-                return (Item){.item = b2it(is_valid_index)};
-            }
+        double numeric_index = 0;
+        bool is_negative_zero = false;
+        if (js_ta_key_canonical_numeric(key, &numeric_index, &is_negative_zero)) {
+            bool valid_index = js_ta_numeric_index_valid(object, numeric_index, is_negative_zero);
+            return (Item){.item = b2it(valid_index)};
         }
         // non-numeric key: fall through to normal MAP handling (check own + prototype)
     }
@@ -5432,8 +5477,46 @@ extern "C" Item js_reflect_set(Item target, Item key, Item value, Item receiver)
     }
     if (get_type_id(target) == LMD_TYPE_MAP &&
         target.map && target.map->map_kind == MAP_KIND_TYPED_ARRAY) {
-        js_property_set(target, key, value);
-        return (Item){.item = b2it(true)};
+        double numeric_index = 0;
+        bool is_negative_zero = false;
+        if (js_ta_key_canonical_numeric(key, &numeric_index, &is_negative_zero)) {
+            if (receiver.item == target.item) {
+                js_property_set(target, key, value);
+                if (js_check_exception()) return ItemNull;
+                return (Item){.item = b2it(true)};
+            }
+            bool target_valid_index = js_ta_numeric_index_valid(target, numeric_index, is_negative_zero);
+            if (!target_valid_index) return (Item){.item = b2it(true)};
+            TypeId rt = get_type_id(receiver);
+            bool recv_is_obj = (rt == LMD_TYPE_MAP || rt == LMD_TYPE_ARRAY ||
+                                rt == LMD_TYPE_FUNC || rt == LMD_TYPE_ELEMENT);
+            if (!recv_is_obj) return (Item){.item = b2it(false)};
+            if (rt == LMD_TYPE_MAP && receiver.map && receiver.map->map_kind == MAP_KIND_TYPED_ARRAY) {
+                bool receiver_valid_index = js_ta_numeric_index_valid(receiver, numeric_index, is_negative_zero);
+                if (!receiver_valid_index) return (Item){.item = b2it(false)};
+                js_property_set(receiver, key, value);
+                if (js_check_exception()) return ItemNull;
+                return (Item){.item = b2it(true)};
+            }
+            Item recv_own = js_object_get_own_property_descriptor(receiver, key);
+            if (get_type_id(recv_own) == LMD_TYPE_MAP) {
+                Item set_key = (Item){.item = s2it(heap_create_name("set", 3))};
+                Item get_key = (Item){.item = s2it(heap_create_name("get", 3))};
+                Item writable_key = (Item){.item = s2it(heap_create_name("writable", 8))};
+                bool has_set = false, has_get = false, has_writable = false;
+                js_map_get_fast_ext(recv_own.map, it2s(set_key)->chars, (int)it2s(set_key)->len, &has_set);
+                js_map_get_fast_ext(recv_own.map, it2s(get_key)->chars, (int)it2s(get_key)->len, &has_get);
+                if (has_set || has_get) return (Item){.item = b2it(false)};
+                Item writable = js_map_get_fast_ext(recv_own.map,
+                    it2s(writable_key)->chars, (int)it2s(writable_key)->len, &has_writable);
+                if (has_writable && !js_is_truthy(writable)) return (Item){.item = b2it(false)};
+            } else if (!js_is_truthy(js_object_is_extensible(receiver))) {
+                return (Item){.item = b2it(false)};
+            }
+            js_property_set(receiver, key, value);
+            if (js_check_exception()) return ItemNull;
+            return (Item){.item = b2it(true)};
+        }
     }
     key = js_to_property_key(key);
     if (js_check_exception()) return ItemNull;
@@ -5441,7 +5524,9 @@ extern "C" Item js_reflect_set(Item target, Item key, Item value, Item receiver)
     // If receiver == target and target is plain Array/Map without indexed
     // accessor traps, the legacy fast path is correct and preserves prior
     // behavior (avoids subtle regressions in shape-keyed array writes).
-    if (receiver.item == target.item) {
+    bool target_is_typed_array = get_type_id(target) == LMD_TYPE_MAP &&
+        target.map && target.map->map_kind == MAP_KIND_TYPED_ARRAY;
+    if (receiver.item == target.item && !target_is_typed_array) {
         js_property_set(target, key, value);
         return (Item){.item = b2it(true)};
     }
@@ -5563,7 +5648,17 @@ extern "C" Item js_reflect_define_property(Item obj, Item key, Item desc) {
         if (get_type_id(result) == LMD_TYPE_BOOL) return result;
         return (Item){.item = b2it(it2b(js_to_boolean(result)))};
     }
+    if (get_type_id(obj) == LMD_TYPE_MAP && obj.map && obj.map->map_kind == MAP_KIND_TYPED_ARRAY) {
+        bool ta_define_handled = false;
+        bool ta_define_ok = js_ta_define_own_numeric_index(obj, key, desc, &ta_define_handled);
+        if (js_check_exception()) return ItemNull;
+        if (ta_define_handled) return (Item){.item = b2it(ta_define_ok)};
+        if (!js_is_truthy(js_object_is_extensible(obj)) && !it2b(js_has_own_property(obj, key))) {
+            return (Item){.item = b2it(false)};
+        }
+    }
     js_object_define_property(obj, key, desc);
+    if (js_check_exception()) return ItemNull;
     return (Item){.item = b2it(true)};
 }
 
@@ -6084,6 +6179,26 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
         Map* m = obj.map;
         if (!m || !m->type) return make_js_undefined();
 
+        if (m->map_kind == MAP_KIND_TYPED_ARRAY) {
+            double numeric_index = 0;
+            bool is_negative_zero = false;
+            if (js_ta_key_canonical_numeric(name, &numeric_index, &is_negative_zero)) {
+                int idx = 0;
+                if (!js_ta_numeric_index_valid(obj, numeric_index, is_negative_zero) ||
+                    !js_ta_numeric_index_to_int(numeric_index, is_negative_zero, &idx)) {
+                    return make_js_undefined();
+                }
+                Item value = js_typed_array_get(obj, (Item){.item = i2it(idx)});
+                if (value.item == ITEM_NULL) return make_js_undefined();
+                Item desc = js_new_object();
+                js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, value);
+                js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
+                js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(true)});
+                js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
+                return desc;
+            }
+        }
+
         // Stage A2.1: route accessor/legacy-marker descriptor synthesis
         // through unified js_get_own_property_descriptor inspector. Falls
         // through to the data-property + virtual-builtin paths below when
@@ -6369,6 +6484,15 @@ extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor) 
     }
     if (!js_require_object_type(obj, "defineProperty")) return ItemNull;
     if (obj.item == 0) return obj;
+    bool ta_define_handled = false;
+    bool ta_define_ok = js_ta_define_own_numeric_index(obj, js_to_property_key(name), descriptor, &ta_define_handled);
+    if (js_check_exception()) return obj;
+    if (ta_define_handled) {
+        if (!ta_define_ok) {
+            js_throw_type_error("Cannot define TypedArray integer-indexed property");
+        }
+        return obj;
+    }
 
     // v18l: Non-extensible check — cannot add new properties to non-extensible objects
     TypeId obj_type = get_type_id(obj);
@@ -6565,6 +6689,35 @@ extern "C" Item js_object_get_own_property_names(Item object) {
     if (type != LMD_TYPE_MAP) return js_array_new(0);
     Map* m = object.map;
     if (!m || !m->type) return js_array_new(0);
+
+    if (m->map_kind == MAP_KIND_TYPED_ARRAY) {
+        Item result = js_array_new(0);
+        int len = js_typed_array_length(object);
+        for (int i = 0; i < len; i++) {
+            char buf[24];
+            int blen = snprintf(buf, sizeof(buf), "%d", i);
+            js_array_push(result, (Item){.item = s2it(heap_create_name(buf, blen))});
+        }
+        TypeMap* tm = (TypeMap*)m->type;
+        ShapeEntry* e = tm ? tm->shape : NULL;
+        while (e) {
+            const char* s = e->name->str;
+            int slen = (int)e->name->length;
+            if (slen >= 2 && s[0] == '_' && s[1] == '_') { e = e->next; continue; }
+            Item val = _map_read_field(e, m->data);
+            if (val.item == JS_DELETED_SENTINEL_VAL) { e = e->next; continue; }
+            Item key_item = (Item){.item = s2it(heap_create_name(s, slen))};
+            double numeric_index = 0;
+            bool is_negative_zero = false;
+            if (js_ta_key_canonical_numeric(key_item, &numeric_index, &is_negative_zero)) {
+                e = e->next;
+                continue;
+            }
+            js_array_push(result, key_item);
+            e = e->next;
+        }
+        return result;
+    }
 
     // v25: String wrapper objects — character indices + "length"
     {
@@ -8223,9 +8376,9 @@ extern "C" Item js_is_constructor(Item fn) {
     }
 
     JsFunctionLayout* jfn = (JsFunctionLayout*)fn.function;
-    // Not constructable: builtins, arrow functions, generators
+    // Not constructable: builtins, arrows, generators, concise methods, and typed-array prototype methods.
     if (jfn->builtin_id > 0 || jfn->builtin_id == -2 ||
-        (jfn->flags & (JS_FUNC_FLAG_ARROW_G | JS_FUNC_FLAG_GENERATOR_G))) {
+        (jfn->flags & (JS_FUNC_FLAG_ARROW_G | JS_FUNC_FLAG_GENERATOR_G | JS_FUNC_FLAG_METHOD_G | JS_FUNC_FLAG_TYPED_ARRAY_METHOD_G))) {
         return (Item){.item = ITEM_FALSE};
     }
     return (Item){.item = ITEM_TRUE};
@@ -9837,6 +9990,17 @@ extern "C" Item js_delete_property(Item obj, Item key) {
         return (Item){.item = b2it(true)};
     }
     if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(true)};
+    if (obj.map && obj.map->map_kind == MAP_KIND_TYPED_ARRAY) {
+        double numeric_index = 0;
+        bool is_negative_zero = false;
+        if (js_ta_key_canonical_numeric(key, &numeric_index, &is_negative_zero)) {
+            bool valid_index = js_ta_numeric_index_valid(obj, numeric_index, is_negative_zero);
+            if (valid_index && js_strict_mode) {
+                return js_throw_type_error("Cannot delete property of TypedArray");
+            }
+            return (Item){.item = b2it(!valid_index)};
+        }
+    }
     // Stage A1: canonicalize key via js_to_property_key (Symbol→__sym_N,
     // INT/FLOAT→decimal string) so marker tombstones below match the shape
     // entry created at defineProperty time.
