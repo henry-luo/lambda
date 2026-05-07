@@ -1,6 +1,7 @@
 #include "html5_parser.h"
 #include "html5_tokenizer.h"
 #include "../../../lib/log.h"
+#include "../../../lib/memtrack.h"
 #include "../../../lib/str.h"
 #include "../../mark_builder.hpp"
 #include "../../mark_reader.hpp"
@@ -315,6 +316,90 @@ Element* html5_parse_ex(Input* input, const char* html, Html5ParseOptions* opts)
               parser->mode, parser->open_elements->length);
 
     return parser->document;
+}
+
+static const char* html5_svg_skip_ws(const char* ptr) {
+    while (*ptr == ' ' || *ptr == '\t' || *ptr == '\n' || *ptr == '\r' || *ptr == '\f') {
+        ptr++;
+    }
+    return ptr;
+}
+
+static const char* html5_svg_skip_preamble(const char* source) {
+    if (!source) return nullptr;
+    const char* ptr = source;
+    if ((unsigned char)ptr[0] == 0xEF && (unsigned char)ptr[1] == 0xBB && (unsigned char)ptr[2] == 0xBF) {
+        ptr += 3;
+    }
+
+    bool advanced = true;
+    while (advanced) {
+        advanced = false;
+        ptr = html5_svg_skip_ws(ptr);
+        if (strncmp(ptr, "<?xml", 5) == 0) {
+            const char* end = strstr(ptr, "?>");
+            if (end) {
+                ptr = end + 2;
+                advanced = true;
+            }
+        }
+        else if (str_istarts_with(ptr, strlen(ptr), "<!DOCTYPE", 9)) {
+            const char* end = strchr(ptr, '>');
+            if (end) {
+                ptr = end + 1;
+                advanced = true;
+            }
+        }
+    }
+    return ptr;
+}
+
+static Element* html5_find_first_svg(Element* elem) {
+    if (!elem || !elem->type) return nullptr;
+    TypeElmt* elem_type = (TypeElmt*)elem->type;
+    if (elem_type && elem_type->name.str && strcmp(elem_type->name.str, "svg") == 0) {
+        return elem;
+    }
+    for (int64_t i = 0; i < elem->length; i++) {
+        Item child = elem->items[i];
+        if (!child.item || get_type_id(child) != LMD_TYPE_ELEMENT) continue;
+        Element* found = html5_find_first_svg((Element*)child.item);
+        if (found) return found;
+    }
+    return nullptr;
+}
+
+Element* html5_parse_svg_document(Input* input, const char* svg_source, Html5ParseOptions* opts) {
+    if (!input || !svg_source) return nullptr;
+
+    const char* svg_body = html5_svg_skip_preamble(svg_source);
+    if (!svg_body || !*svg_body) {
+        input->root = (Item){.item = ITEM_NULL};
+        return nullptr;
+    }
+
+    static const char* prefix = "<!doctype html><html><body>";
+    static const char* suffix = "</body></html>";
+    size_t prefix_len = strlen(prefix);
+    size_t body_len = strlen(svg_body);
+    size_t suffix_len = strlen(suffix);
+    char* html = (char*)mem_alloc(prefix_len + body_len + suffix_len + 1, MEM_CAT_INPUT_HTML);
+    if (!html) return nullptr;
+
+    memcpy(html, prefix, prefix_len);
+    memcpy(html + prefix_len, svg_body, body_len);
+    memcpy(html + prefix_len + body_len, suffix, suffix_len);
+    html[prefix_len + body_len + suffix_len] = '\0';
+
+    Element* doc = html5_parse_ex(input, html, opts);
+    mem_free(html);
+
+    input->root = (Item){.element = doc};
+    Element* svg_root = html5_find_first_svg(doc);
+    if (!svg_root) {
+        log_error("html5_svg: no <svg> root found in external SVG document");
+    }
+    return svg_root;
 }
 
 // ============================================================================

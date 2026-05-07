@@ -3039,17 +3039,29 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view) {
               rdcon->block.clip.left, rdcon->block.clip.top,
               rdcon->block.clip.right, rdcon->block.clip.bottom);
     if (img->format == IMAGE_FORMAT_SVG) {
-        // render the SVG image
-        log_debug("render svg image at x:%f, y:%f, wd:%f, hg:%f", img_rect.x, img_rect.y, img_rect.width, img_rect.height);
-        if (!img->pixels) {
-            int target_width = (int)ceilf(img_rect.width); // INT_CAST_OK: SVG rasterization target width is integer pixels
-            if (target_width > img->max_render_width) {
-                img->max_render_width = target_width;
+        log_debug("render svg image vector-first at x:%f, y:%f, wd:%f, hg:%f", img_rect.x, img_rect.y, img_rect.width, img_rect.height);
+        if (img->pic) {
+            RdtPicture* pic = rdt_picture_dup(img->pic);
+            if (pic) {
+                rdt_picture_set_size(pic, img_rect.width, img_rect.height);
+                RdtMatrix m = rdt_matrix_identity();
+                m.e13 = img_rect.x;
+                m.e23 = img_rect.y;
+
+                Bound* clip = &rdcon->block.clip;
+                RdtPath* clip_path = rdt_path_new();
+                rdt_path_add_rect(clip_path, clip->left, clip->top, clip->right - clip->left, clip->bottom - clip->top, 0, 0);
+                rc_push_clip(rdcon, clip_path, nullptr);
+                rdt_path_free(clip_path);
+
+                rc_draw_picture(rdcon, pic, 255, &m);
+
+                rc_pop_clip(rdcon);
+                if (!rdcon->dl) {
+                    rdt_picture_free(pic);
+                }
             }
-            render_svg(img);
-        }
-        if (img->pixels) {
-            // clip to block bounds
+        } else if (img->pixels) {
             Bound* clip = &rdcon->block.clip;
             RdtPath* clip_path = rdt_path_new();
             rdt_path_add_rect(clip_path, clip->left, clip->top, clip->right - clip->left, clip->bottom - clip->top, 0, 0);
@@ -3061,7 +3073,7 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view) {
 
             rc_pop_clip(rdcon);
         } else {
-            log_debug("failed to render svg image");
+            log_debug("failed to render svg image: no vector picture or raster pixels");
         }
     } else {
         // ensure raster image pixels are decoded (lazy loading) at the displayed size

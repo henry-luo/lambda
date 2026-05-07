@@ -244,6 +244,10 @@ Element* html5_parse(Input* input, const char* html);
 // Extended parsing function with options
 Element* html5_parse_ex(Input* input, const char* html, Html5ParseOptions* opts);
 
+// Parse an external SVG document through the HTML5/SVG parser path.
+// Returns the first <svg> element and stores the full parsed document in input->root.
+Element* html5_parse_svg_document(Input* input, const char* svg_source, Html5ParseOptions* opts);
+
 // Fragment parsing (for markdown HTML blocks/inline)
 // Creates a parser in body mode for parsing HTML fragments
 Html5Parser* html5_fragment_parser_create(Pool* pool, Arena* arena, Input* input);

@@ -2397,6 +2397,23 @@ static void render_svg_text(SvgRenderContext* ctx, Element* elem) {
  * Render SVG <image> element using Radiant's image loading infrastructure
  * Images are loaded via Radiant's load_image() and converted to ThorVG pictures
  */
+static bool svg_image_href_is_svg(const char* href) {
+    if (!href || !*href) return false;
+    if (strncmp(href, "data:", 5) == 0) {
+        const char* comma = strchr(href, ',');
+        size_t meta_len = comma ? (size_t)(comma - href) : strlen(href);
+        return strcasestr(href, "image/svg") && (size_t)(strcasestr(href, "image/svg") - href) < meta_len;
+    }
+
+    const char* end = href + strlen(href);
+    const char* fragment = strchr(href, '#');
+    if (fragment && fragment < end) end = fragment;
+    const char* query = strchr(href, '?');
+    if (query && query < end) end = query;
+    if (end - href < 4) return false;
+    return str_ieq_const(end - 4, 4, ".svg");
+}
+
 static void render_svg_image(SvgRenderContext* ctx, Element* elem) {
     if (!elem) return;
 
@@ -2414,12 +2431,7 @@ static void render_svg_image(SvgRenderContext* ctx, Element* elem) {
     float width = parse_svg_length(get_svg_attr(elem, "width"), 0);
     float height = parse_svg_length(get_svg_attr(elem, "height"), 0);
 
-    // TODO: integrate with Radiant's load_image() when UiContext is available
-    // For now, use ThorVG's picture loading for SVG images
-    Tvg_Paint pic = tvg_picture_new();
-    if (!pic) return;
-
-    Tvg_Result result;
+    bool href_is_svg = svg_image_href_is_svg(href);
 
     // Handle data: URIs by decoding base64 and feeding raw bytes to ThorVG.
     // The mime type embedded in the URI is sometimes wrong (e.g. "data:false;base64,...")
@@ -2431,7 +2443,6 @@ static void render_svg_image(SvgRenderContext* ctx, Element* elem) {
         if (!decoded || decoded_len == 0) {
             log_debug("[SVG] <image> data URI decode failed");
             if (decoded) mem_free(decoded);
-            tvg_paint_unref(pic, true);
             return;
         }
 
@@ -2456,13 +2467,44 @@ static void render_svg_image(SvgRenderContext* ctx, Element* elem) {
         if (!mime_hint) {
             log_debug("[SVG] <image> unknown data URI format (declared mime='%s')", declared_mime);
             mem_free(decoded);
-            tvg_paint_unref(pic, true);
             return;
         }
 
+        if (strcmp(mime_hint, "svg") == 0) {
+            RdtPicture* rdt_pic = rdt_picture_load_data((const char*)decoded, (int)decoded_len, "svg");
+            mem_free(decoded);
+            if (!rdt_pic) {
+                log_debug("[SVG] <image> failed to parse nested SVG data URI");
+                return;
+            }
+            if (width > 0 && height > 0) {
+                rdt_picture_set_size(rdt_pic, width, height);
+            }
+
+            uint8_t op = 255;
+            const char* opacity = get_svg_attr(elem, "opacity");
+            if (opacity) {
+                float opf = strtof(opacity, nullptr);
+                op = (uint8_t)(opf * 255);
+            }
+
+            RdtMatrix m = compose_element_transform(ctx, elem);
+            RdtMatrix translate = rdt_matrix_translate(x, y);
+            RdtMatrix final_m = rdt_matrix_multiply(&m, &translate);
+            svg_draw_picture(ctx, rdt_pic, op, &final_m);
+            if (!ctx->dl) {
+                rdt_picture_free(rdt_pic);
+            }
+            log_debug("[SVG] <image> loaded nested SVG data URI at (%.1f, %.1f) size %.1fx%.1f", x, y, width, height);
+            return;
+        }
+
+        Tvg_Paint pic = tvg_picture_new();
+        if (!pic) { mem_free(decoded); return; }
+
         // copy=true so ThorVG holds its own copy and we can free decoded
-        result = tvg_picture_load_data(pic, (const char*)decoded, (uint32_t)decoded_len,
-                                       mime_hint, NULL, true);
+        Tvg_Result result = tvg_picture_load_data(pic, (const char*)decoded, (uint32_t)decoded_len,
+                                                  mime_hint, NULL, true);
         mem_free(decoded);
         if (result != TVG_RESULT_SUCCESS) {
             log_debug("[SVG] <image> failed to load data URI (mime=%s, declared=%s)",
@@ -2470,42 +2512,91 @@ static void render_svg_image(SvgRenderContext* ctx, Element* elem) {
             tvg_paint_unref(pic, true);
             return;
         }
+
+        if (width > 0 && height > 0) {
+            tvg_picture_set_size(pic, width, height);
+        }
+        tvg_paint_translate(pic, x, y);
+
+        uint8_t op = 255;
+        const char* opacity = get_svg_attr(elem, "opacity");
+        if (opacity) {
+            float opf = strtof(opacity, nullptr);
+            op = (uint8_t)(opf * 255);
+        }
+
+        RdtMatrix m = compose_element_transform(ctx, elem);
+        RdtPicture* rdt_pic = rdt_picture_take_tvg_paint(pic, 0, 0);
+        if (rdt_pic) {
+            svg_draw_picture(ctx, rdt_pic, op, &m);
+        }
+
+        log_debug("[SVG] <image> loaded: %s at (%.1f, %.1f) size %.1fx%.1f", href, x, y, width, height);
+        return;
+    } else if (href_is_svg) {
+        RdtPicture* rdt_pic = rdt_picture_load(href);
+        if (!rdt_pic) {
+            log_debug("[SVG] <image> failed to parse nested SVG: %s", href);
+            return;
+        }
+        if (width > 0 && height > 0) {
+            rdt_picture_set_size(rdt_pic, width, height);
+        }
+
+        uint8_t op = 255;
+        const char* opacity = get_svg_attr(elem, "opacity");
+        if (opacity) {
+            float opf = strtof(opacity, nullptr);
+            op = (uint8_t)(opf * 255);
+        }
+
+        RdtMatrix m = compose_element_transform(ctx, elem);
+        RdtMatrix translate = rdt_matrix_translate(x, y);
+        RdtMatrix final_m = rdt_matrix_multiply(&m, &translate);
+        svg_draw_picture(ctx, rdt_pic, op, &final_m);
+        if (!ctx->dl) {
+            rdt_picture_free(rdt_pic);
+        }
+        log_debug("[SVG] <image> loaded nested SVG: %s at (%.1f, %.1f) size %.1fx%.1f", href, x, y, width, height);
+        return;
     } else {
-        result = tvg_picture_load(pic, href);
+        Tvg_Paint pic = tvg_picture_new();
+        if (!pic) return;
+        Tvg_Result result = tvg_picture_load(pic, href);
         if (result != TVG_RESULT_SUCCESS) {
             log_debug("[SVG] <image> failed to load: %s", href);
             tvg_paint_unref(pic, true);
             return;
         }
+
+        // set size if specified
+        if (width > 0 && height > 0) {
+            tvg_picture_set_size(pic, width, height);
+        }
+
+        // position the image
+        tvg_paint_translate(pic, x, y);
+
+        // apply opacity if present
+        uint8_t op = 255;
+        const char* opacity = get_svg_attr(elem, "opacity");
+        if (opacity) {
+            float opf = strtof(opacity, nullptr);
+            op = (uint8_t)(opf * 255);
+        }
+
+        // compose element transform with accumulated context transform
+        RdtMatrix m = compose_element_transform(ctx, elem);
+
+        // wrap as RdtPicture and draw
+        RdtPicture* rdt_pic = rdt_picture_take_tvg_paint(pic, 0, 0);
+        if (rdt_pic) {
+            svg_draw_picture(ctx, rdt_pic, op, &m);
+        }
+
+        log_debug("[SVG] <image> loaded: %s at (%.1f, %.1f) size %.1fx%.1f",
+                  href, x, y, width, height);
     }
-
-    // set size if specified
-    if (width > 0 && height > 0) {
-        tvg_picture_set_size(pic, width, height);
-    }
-
-    // position the image
-    tvg_paint_translate(pic, x, y);
-
-    // apply opacity if present
-    uint8_t op = 255;
-    const char* opacity = get_svg_attr(elem, "opacity");
-    if (opacity) {
-        float opf = strtof(opacity, nullptr);
-        op = (uint8_t)(opf * 255);
-    }
-
-    // compose element transform with accumulated context transform
-    RdtMatrix m = compose_element_transform(ctx, elem);
-
-    // wrap as RdtPicture and draw
-    RdtPicture* rdt_pic = rdt_picture_take_tvg_paint(pic, 0, 0);
-    if (rdt_pic) {
-        svg_draw_picture(ctx, rdt_pic, op, &m);
-    }
-
-    log_debug("[SVG] <image> loaded: %s at (%.1f, %.1f) size %.1fx%.1f",
-              href, x, y, width, height);
 }
 
 // ============================================================================

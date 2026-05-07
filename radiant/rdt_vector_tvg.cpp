@@ -637,45 +637,19 @@ static RdtPicture* svg_picture_create(const char* data, int size) {
     }
     input->ui_mode = false;
 
-    // parse_xml expects a null-terminated string
+    // html5_parse_svg_document expects a null-terminated string and applies the
+    // same SVG tag/attribute correction path used by inline HTML SVG.
     char* buf = (char*)mem_alloc(size + 1, MEM_CAT_RENDER);
     if (!buf) { pool_destroy(pool); return nullptr; }
     memcpy(buf, data, size);
     buf[size] = '\0';
-    parse_xml(input, buf);
+    Element* svg_root = html5_parse_svg_document(input, buf, nullptr);
     mem_free(buf);
 
     if (!input->root.item || input->root.item == ITEM_ERROR) {
-        log_error("svg_picture_create: parse_xml failed");
+        log_error("svg_picture_create: html5_parse_svg_document failed");
         pool_destroy(pool);
         return nullptr;
-    }
-
-    // walk the document wrapper to find the first <svg> element
-    Element* svg_root = nullptr;
-    Element* document_wrapper = (Element*)input->root.item;
-    if (document_wrapper && document_wrapper->type) {
-        TypeElmt* doc_type = (TypeElmt*)document_wrapper->type;
-        if (doc_type && doc_type->name.str && strcmp(doc_type->name.str, "document") == 0) {
-            for (int64_t i = 0; i < document_wrapper->length; i++) {
-                Item child = document_wrapper->items[i];
-                if (!child.item) continue;
-                if (get_type_id(child) != LMD_TYPE_ELEMENT) continue;
-                Element* ce = (Element*)child.item;
-                TypeElmt* ct = (TypeElmt*)ce->type;
-                if (!ct || !ct->name.str) continue;
-                // skip processing instructions and comments
-                if (ct->name.str[0] == '?' || ct->name.str[0] == '!') continue;
-                svg_root = ce;
-                if (strcmp(ct->name.str, "svg") == 0) {
-                    repair_split_svg_document(input, document_wrapper, svg_root, i);
-                }
-                break;
-            }
-        } else if (doc_type && doc_type->name.str && strcmp(doc_type->name.str, "svg") == 0) {
-            // root itself is the <svg>
-            svg_root = document_wrapper;
-        }
     }
     if (!svg_root) {
         log_error("svg_picture_create: no <svg> root element found");

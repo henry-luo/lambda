@@ -2305,6 +2305,10 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     LayoutContext lycon;
     if (!doc) return;
     log_debug("layout html doc - start");
+    if (!is_reflow && !doc->root && doc->view_tree && doc->view_tree->root) {
+        log_debug("layout html doc - using prebuilt view tree");
+        return;
+    }
     if (is_reflow) {
         // if (doc->view_tree->root) free_view(doc->view_tree, doc->view_tree->root);
         // view_pool_destroy(doc->view_tree);

@@ -348,9 +348,12 @@ void view_pool_init(ViewTree* tree) {
 }
 
 void view_pool_destroy(ViewTree* tree) {
-    if (tree->arena) { arena_destroy(tree->arena); tree->arena = NULL; }
-    if (tree->pool) pool_destroy(tree->pool);
+    Arena* arena = tree->arena;
+    Pool* pool = tree->pool;
+    tree->arena = NULL;
     tree->pool = NULL;
+    if (arena) arena_destroy(arena);
+    if (pool) pool_destroy(pool);
 }
 
 void print_inline_props(ViewSpan* span, StrBuf* buf, int indent) {
