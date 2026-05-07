@@ -50,6 +50,7 @@ struct SvgRenderContext {
     FontContext* font_ctx;       // font context for font resolution (may be nullptr)
     RdtVector* vec;              // target vector renderer for direct drawing
     DisplayList* dl;             // display list for deferred rendering (Phase 1, may be nullptr)
+    const char* source_path;      // source SVG path for resolving nested resources
     RdtMatrix transform;         // accumulated transform from root (viewBox × group × element)
     
     // pixel ratio for text sizing - text font sizes need to be divided by this
@@ -84,6 +85,11 @@ struct SvgRenderContext {
     
     // gradient/pattern definitions from <defs>
     HashMap* defs;               // id → SvgDefTable*
+
+    // lightweight SVG-document stylesheet cache from embedded <style> nodes
+    void* style_rules;           // SvgStyleRule* (private to render_svg_inline.cpp)
+    int style_rule_count;
+    int style_rule_capacity;
 };
 
 // ============================================================================
@@ -130,7 +136,8 @@ void render_svg_to_vec(RdtVector* vec, Element* svg_element,
                       const RdtMatrix* base_transform = nullptr,
                       DisplayList* dl = nullptr,
                       const Color* initial_current_color = nullptr,
-                      const Color* initial_fill_color = nullptr);
+                      const Color* initial_fill_color = nullptr,
+                      const char* source_path = nullptr);
 
 /**
  * Render inline SVG element in document context

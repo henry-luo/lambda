@@ -161,10 +161,16 @@ void rdt_draw_image(RdtVector* vec, const uint32_t* pixels, int src_w, int src_h
 // ---------------------------------------------------------------------------
 
 typedef struct RdtPicture RdtPicture;
+struct Element;
+struct Pool;
 
 RdtPicture* rdt_picture_load(const char* path);
 RdtPicture* rdt_picture_load_data(const char* data, int size, const char* mime_type);
 RdtPicture* rdt_picture_dup(RdtPicture* pic);
+Element*    rdt_picture_get_svg_root(RdtPicture* pic);
+Element*    rdt_picture_find_svg_element_by_id(RdtPicture* pic, const char* id);
+Pool*       rdt_picture_get_pool(RdtPicture* pic);
+const char* rdt_picture_get_source_path(RdtPicture* pic);
 void        rdt_picture_get_size(RdtPicture* pic, float* w, float* h);
 void        rdt_picture_set_size(RdtPicture* pic, float w, float h);
 bool        rdt_picture_get_transform(RdtPicture* pic, RdtMatrix* out);
