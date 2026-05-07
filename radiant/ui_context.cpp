@@ -6,6 +6,7 @@
 #include "webview.h"
 #include "state_store.hpp"
 #include <locale.h>
+#include <stdlib.h>
 
 #include "../lib/log.h"
 #include "../lib/font/font.h"
@@ -60,27 +61,37 @@ int ui_context_init(UiContext* uicon, bool headless) {
     setlocale(LC_ALL, "");  // Set locale to support Unicode (input)
 
     if (headless) {
-        // Headless mode: create a hidden GLFW window so that native subsystems
-        // (e.g. WKWebView) that require a parent window still function.
-        #if defined(__linux__) && defined(GLFW_PLATFORM) && defined(GLFW_PLATFORM_X11)
-        glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
-        #endif
-        #ifdef __APPLE__
-        // Prevent dock icon and menu bar creation in headless mode.
-        // Must be set before glfwInit() — glfwInit() creates the NSApp dock icon.
-        glfwInitHint(GLFW_COCOA_MENUBAR, GLFW_FALSE);
-        #endif
-        if (!glfwInit()) {
-            fprintf(stderr, "Error: Could not initialize GLFW for headless mode.\n");
-            return EXIT_FAILURE;
-        }
-        glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);  // hidden window
-        uicon->window = glfwCreateWindow(window_width, window_height, "Lambda Headless", NULL, NULL);
-        if (!uicon->window) {
-            log_error("Headless: could not create hidden GLFW window, falling back to NULL window");
-            uicon->window = NULL;
+        // Headless automation runs entirely against the in-memory view tree.
+        // Avoid creating a hidden native window by default: on macOS, GLFW's
+        // hidden-window path can block in LaunchServices before the test runner
+        // ever reaches document loading.  Webview/native integration tests that
+        // truly need a parent window can opt into the old behavior.
+        bool create_hidden_window = getenv("LAMBDA_HEADLESS_GLFW_WINDOW") != NULL;
+        if (create_hidden_window) {
+            #if defined(__linux__) && defined(GLFW_PLATFORM) && defined(GLFW_PLATFORM_X11)
+            glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
+            #endif
+            #ifdef __APPLE__
+            // Prevent dock icon and menu bar creation in headless mode.
+            // Must be set before glfwInit() — glfwInit() creates the NSApp dock icon.
+            glfwInitHint(GLFW_COCOA_MENUBAR, GLFW_FALSE);
+            #endif
+            if (!glfwInit()) {
+                fprintf(stderr, "Error: Could not initialize GLFW for headless mode.\n");
+                return EXIT_FAILURE;
+            }
+            glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);  // hidden window
+            uicon->window = glfwCreateWindow(window_width, window_height, "Lambda Headless", NULL, NULL);
+            if (!uicon->window) {
+                log_error("Headless: could not create hidden GLFW window, falling back to NULL window");
+                glfwTerminate();
+                uicon->window = NULL;
+            } else {
+                log_info("Running in headless mode (hidden GLFW window)");
+            }
         } else {
-            log_info("Running in headless mode (hidden GLFW window)");
+            uicon->window = NULL;
+            log_info("Running in headless mode (windowless)");
         }
         uicon->pixel_ratio = 1.0;  // Default pixel ratio for headless
         uicon->window_width = window_width;
