@@ -1,0 +1,23 @@
+{
+  "name": "RTE copy paste styled inline into list item preserves item boundaries",
+  "html": "test/ui/rte_prototype.ls",
+  "viewport": {"width": 1200, "height": 800},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "mouse_drag", "target": {"text": "bold text"}, "to_target": {"text": "italic text"}, "button": 0},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+    {"type": "key_combo", "key": "c", "mods_str": "ctrl"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_clipboard", "contains": "bold text"},
+    {"type": "click", "target": {"text": "Item 1", "offset_x": 110, "offset_y": 10}},
+    {"type": "key_combo", "key": "v", "mods_str": "ctrl"},
+    {"type": "wait", "ms": 140},
+    {"type": "assert_count", "target": {"selector": "#doc li"}, "count": 3},
+    {"type": "assert_count", "target": {"selector": "#doc li strong"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": "#doc li em"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": "#doc li strong"}, "contains": "bold text"},
+    {"type": "assert_text", "target": {"selector": "#doc li"}, "contains": "item 1"},
+    {"type": "assert_selection", "is_collapsed": true, "check_dom": true}
+  ]
+}

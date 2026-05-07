@@ -3504,6 +3504,14 @@ void render_caret(RenderContext* rdcon, RadiantState* state) {
     if (doc && doc->view_tree && doc->view_tree->root && doc->view_tree->root->view_type == RDT_VIEW_BLOCK) {
         root_block = (ViewBlock*)doc->view_tree->root;
     }
+    float root_scroll_x = 0.0f;
+    float root_scroll_y = 0.0f;
+    if (root_block && root_block->scroller && root_block->scroller->pane) {
+        root_scroll_x = root_block->scroller->pane->h_scroll_position;
+        root_scroll_y = root_block->scroller->pane->v_scroll_position;
+    }
+    bool offset_covers_root_scroll_x = fabsf(caret->iframe_offset_x + root_scroll_x) < 0.5f;
+    bool offset_covers_root_scroll_y = fabsf(caret->iframe_offset_y + root_scroll_y) < 0.5f;
     while (parent) {
         if (parent->view_type == RDT_VIEW_BLOCK ||
             parent->view_type == RDT_VIEW_INLINE_BLOCK ||
@@ -3513,8 +3521,12 @@ void render_caret(RenderContext* rdcon, RadiantState* state) {
             y += block->y;
             // Account for scroll offset (same as render traversal does)
             if (block->scroller && block->scroller->pane) {
-                x -= block->scroller->pane->h_scroll_position;
-                y -= block->scroller->pane->v_scroll_position;
+                if (!(block == root_block && offset_covers_root_scroll_x)) {
+                    x -= block->scroller->pane->h_scroll_position;
+                }
+                if (!(block == root_block && offset_covers_root_scroll_y)) {
+                    y -= block->scroller->pane->v_scroll_position;
+                }
                 if (block == root_block) applied_root_scroll = true;
             }
         }
@@ -3522,8 +3534,12 @@ void render_caret(RenderContext* rdcon, RadiantState* state) {
     }
 
     if (!applied_root_scroll && root_block && root_block->scroller && root_block->scroller->pane) {
-        x -= root_block->scroller->pane->h_scroll_position;
-        y -= root_block->scroller->pane->v_scroll_position;
+        if (!offset_covers_root_scroll_x) {
+            x -= root_scroll_x;
+        }
+        if (!offset_covers_root_scroll_y) {
+            y -= root_scroll_y;
+        }
     }
 
     // Add iframe offset (if the caret is inside an iframe, parent chain stops at iframe doc root)
@@ -3587,8 +3603,12 @@ static void selection_paint_rect_cb(float x, float y, float w, float h, void* ud
             scroll_y = root->scroller->pane->v_scroll_position;
         }
     }
-    float px = (x + ctx->iframe_offset_x - scroll_x) * s;
-    float py = (y + ctx->iframe_offset_y - scroll_y) * s;
+    bool offset_covers_scroll_x = fabsf(ctx->iframe_offset_x + scroll_x) < 0.5f;
+    bool offset_covers_scroll_y = fabsf(ctx->iframe_offset_y + scroll_y) < 0.5f;
+    float paint_scroll_x = offset_covers_scroll_x ? 0.0f : scroll_x;
+    float paint_scroll_y = offset_covers_scroll_y ? 0.0f : scroll_y;
+    float px = (x + ctx->iframe_offset_x - paint_scroll_x) * s;
+    float py = (y + ctx->iframe_offset_y - paint_scroll_y) * s;
     float pw = w * s;
     float ph = h * s;
     rc_fill_rect(ctx->rdcon, px, py, pw, ph, ctx->color);
