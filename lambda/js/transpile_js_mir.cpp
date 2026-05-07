@@ -15430,8 +15430,10 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
         return jm_transpile_assignment(mt, (JsAssignmentNode*)expr);
     case JS_AST_NODE_NEW_EXPRESSION: {
         MIR_reg_t r = jm_transpile_new_expr(mt, (JsCallNode*)expr);
+        jm_scope_env_reload_vars(mt);
         // check for pending exception after constructor call
         jm_emit_exc_propagate_check(mt);
+        jm_env_reload_shared_captures(mt);
         return r;
     }
     case JS_AST_NODE_SEQUENCE_EXPRESSION: {

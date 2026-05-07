@@ -23,20 +23,20 @@ Infrastructure health is good; semantic compliance is the failure surface.
 
 Js40 has moved from initial failure analysis into implementation. The baseline
 is now clean and has been refreshed after the latest full `--run-partial`
-update run. The current working tree has additional post-refresh improvements
-from the focused TypedArray prototype and `TypedArrayConstructors/internals`
-work.
+update run. The focused TypedArray prototype and
+`TypedArrayConstructors/internals` improvements are now incorporated into the
+Test262 baseline.
 
 | Metric | Initial Js40 run | Current after fixes |
 |---|---:|---:|
 | Total discovered tests | 42,219 | 42,219 |
-| Batched / in-scope tests | 34,145 | 34,147 |
-| Fully passing | 29,185 | 29,992 |
-| Failed | 4,960 | 4,155 |
-| Skipped | 8,074 | 8,072 |
+| Batched / in-scope tests | 34,145 | 34,167 |
+| Fully passing | 29,185 | 30,009 |
+| Failed | 4,960 | 4,158 |
+| Skipped | 8,074 | 8,052 |
 | Pass rate, in-scope | 85.5% | 87.8% |
-| Baseline passing | 29,149 | 29,802 |
-| Improvements vs baseline | 77 | 181 incorporated into refreshed baseline; 190 current local improvements |
+| Baseline passing | 29,149 | 30,009 |
+| Improvements vs baseline | 77 | 207 incorporated into refreshed baseline; 0 current local improvements |
 | Regressions vs baseline | 41 | 0 |
 
 Latest successful update command:
@@ -51,13 +51,14 @@ Latest verification command:
 ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --baseline-only --js-timeout=20
 ```
 
-Latest baseline update result: `29,802 / 34,167` fully passing, `4,362`
-failed, `8,052` skipped, `181` improvements, `0` regressions. The update run
-also cleaned `test/js262/t262_partial.txt` from 52 to 44 entries.
+Latest baseline update result: `30,009 / 34,167` fully passing, `4,158`
+failed, `8,052` skipped, `207` improvements, `0` regressions. The update run
+also cleaned `test/js262/t262_partial.txt` by removing 24 stale entries that
+are now in the baseline.
 
-Latest baseline verification result after the baseline refresh and follow-up
-TypedArray `reverse`/`subarray` work: `29,802 / 29,802` fully passing, `0`
-failures, and `0` regressions.
+Latest baseline verification result after the baseline refresh: `30,008 /
+30,009` fully passing, `1` non-fully-passing slow Phase-4-recovered RegExp
+case, `0` failures, and `0` regressions.
 
 Latest non-updating full batch after the DataView BigInt, TypedArray
 `@@toStringTag`, TypedArray accessor/RAB, `at`, `includes`, `indexOf`, and
@@ -89,6 +90,16 @@ canonical numeric-index plus `DefineOwnProperty` / `OwnPropertyKeys` work:
 `29,992 / 34,147` fully passing, `4,155` failed, `8,072` skipped, `190`
 improvements, and `0` regressions. The refreshed baseline gate remains clean at
 `29,802 / 29,802`, `0` failures, and `0` regressions.
+
+Latest non-updating full batch after the `TypedArrayConstructors/internals`
+prototype-chain `Set`, BigInt64/BigUint64 wrapping, and detached `Infinity`
+`HasProperty` work: `30,005 / 34,147` fully passing, `4,142` failed, `8,072`
+skipped, `203` improvements, and `0` regressions. The refreshed baseline gate
+remains clean at `29,802 / 29,802`, `0` failures, and `0` regressions.
+
+Those `203` post-refresh improvements, plus four additional stable passes from
+the latest full `--run-partial --update-baseline` accounting, are now folded
+into the refreshed `30,009`-entry baseline.
 
 The `--js-timeout=20` option was added to the Test262 runner because one
 RegExp test (`built_ins_RegExp_character_class_escape_non_whitespace_js`) could
@@ -125,7 +136,8 @@ TypedArray progress since the baseline update:
 | `%TypedArray%.prototype.entries` / `keys` / `values` | 43 / 59 before live iterator/RAB work | 59 / 59 |
 | `TypedArrayConstructors/internals` canonical `Get` / `Set` / `HasProperty` / `Delete` | 108 / 240 full internals before canonical-key work | 170 / 240 after canonical-key work |
 | `TypedArrayConstructors/internals` `DefineOwnProperty` / `OwnPropertyKeys` | 58 / 64 after first descriptor/key hook pass | 62 / 64; remaining cross-realm detached-buffer throw cases |
-| Full `TypedArrayConstructors/internals` | 170 / 240 before descriptor/key work | 220 / 240 |
+| `TypedArrayConstructors/internals` prototype-chain `Set`, BigInt wrapping, detached `Infinity` `HasProperty` | 220 / 240 before this slice | 228 / 240; remaining failures are cross-realm detached-buffer cases |
+| Full `TypedArrayConstructors/internals` | 170 / 240 before descriptor/key work | 228 / 240 |
 
 DataView BigInt getter/setter behavior has also landed. The focused list now
 passes all `getBigInt64`, `getBigUint64`, `setBigInt64`, and `setBigUint64`
@@ -240,6 +252,15 @@ Implemented since the initial proposal:
   element reads expose JS `undefined` instead of the internal null sentinel, and
   `indexOf` / `lastIndexOf` stop searching when `fromIndex` conversion detaches
   the backing buffer.
+- `TypedArrayConstructors/internals` prototype-chain `Set` now follows the
+  receiver-sensitive `OrdinarySet` branch for valid indices without coercing the
+  value, no-ops for invalid canonical numeric indices, preserves proxy
+  `defineProperty` traps, respects non-extensible receivers, and covers native
+  array write fast paths whose prototype is a typed-array instance. BigInt typed
+  array stores now use `BigInt.asIntN(64)` / `BigInt.asUintN(64)` wrapping, and
+  MIR `new` expressions reload shared captured variables after constructor
+  calls so value coercions inside `new TA([value])` are immediately visible to
+  surrounding lexical bindings.
 - String receiver checks, RegExp string-iterator coercions, Array reduce
   prototype-key refresh, and for-of destructuring assignment writeback were
   also fixed while recovering the baseline.
@@ -521,9 +542,8 @@ Expected impact:
   `find`/`findIndex`, `every`/`some`/`findLast`/`findLastIndex`, `copyWithin`,
   `reverse`, `subarray`, `slice`, `map`/`filter`, `entries`/`keys`/`values`,
   `TypedArrayConstructors/internals`, Buffer identity, dynamic RAB backing
-  updates, integer conversion, and float-widening work leave the latest
-  non-updating full-batch improvement count at `190` after the baseline was
-  refreshed to incorporate the earlier improvements. The callback-method and
+  updates, integer conversion, and float-widening work are now incorporated
+  into the refreshed `30,009`-entry baseline. The callback-method and
   `reverse` slices improved their focused manifests but did not change the
   full-run improvement count because those tests are outside the current
   partial-list accounting; the earlier `copyWithin` slice moved the pre-refresh
@@ -536,6 +556,10 @@ Expected impact:
   and moved the post-refresh full-run improvement count from `82` to `83`. The
   canonical numeric-index internals slice then moved it to `142`, and the
   `DefineOwnProperty` / `OwnPropertyKeys` internals slice moved it to `190`.
+  The prototype-chain `Set`, BigInt wrapping, and detached `Infinity`
+  `HasProperty` slice moved it to `203`; the latest full `--run-partial`
+  baseline update incorporated `207` total improvements and reset current local
+  improvements to `0`.
 
 ### Phase J40-4 - Iterator and Destructuring Runtime Kernels
 
@@ -736,12 +760,12 @@ clean. Phases 5-7 can then push class and async compliance without fighting the
 lower-level property, iterator, and internal-slot gaps.
 
 Progress against that target as of 2026-05-07: the engine has moved from
-29,185 to 29,802 fully passing tests in the full `--run-partial` accounting,
-with the refreshed baseline clean at 29,802 and `0` regressions. The most
-recent baseline-refresh run was `29,802 / 34,167` fully passing with `181`
-improvements incorporated into the baseline. The current non-updating working
-tree result is `29,992 / 34,147` fully passing with `190` post-refresh
-improvements and `0` regressions.
+29,185 to 30,009 fully passing tests in the full `--run-partial` accounting,
+with the refreshed baseline at 30,009 and `0` regressions. The most recent
+baseline-refresh run was `30,009 / 34,167` fully passing with `207`
+improvements incorporated into the baseline. The follow-up baseline-only gate
+reported `30,008 / 30,009` fully passing, `1` non-fully-passing slow
+Phase-4-recovered RegExp case, `0` failures, and `0` regressions.
 The next highest-leverage continuation is to broaden the same internal-slot
 discipline across TypedArray methods, species paths, and canonical numeric-index
 behavior.
@@ -1042,10 +1066,48 @@ post-`fromIndex` detached-buffer case so existing prototype-method behavior does
 not regress.
 
 Remaining `TypedArrayConstructors/internals` failures are now concentrated in
-cross-realm detached-buffer error identity, prototype-chain `Set`,
-BigInt64/BigUint64 modulo storage edge cases, and two detached `Infinity`
-`HasProperty` cases. Those should be treated as separate structural internals
-passes rather than folded into the descriptor/key path.
+cross-realm detached-buffer error identity. Those should be treated as a
+separate Realm/error-constructor identity pass rather than folded into the
+typed-array integer-index path.
+
+Additional verification after the `TypedArrayConstructors/internals`
+prototype-chain `Set`, BigInt wrapping, and detached `Infinity` `HasProperty`
+work:
+
+```bash
+make -j1 lambda
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js40_ta_set_next.txt --js-timeout=20
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js40_ta_has_infinity.txt --js-timeout=20
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js40_typedarrayconstructors_internals.txt --js-timeout=20
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --baseline-only --js-timeout=20
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --js-timeout=20
+```
+
+Results before the baseline refresh: focused prototype-chain `Set` / BigInt
+wrapping list `6 / 6`, focused detached `Infinity` `HasProperty` list `2 / 2`,
+and full
+`TypedArrayConstructors/internals` manifest `228 / 240`, up from `220 / 240`
+after the descriptor/key slice and `108 / 240` before the internals work. The
+baseline gate is clean at `29,802 / 29,802`, `0` failures, `0` regressions. The
+full non-updating batch is now `30,005 / 34,147`, `4,142` failed, `8,072`
+skipped, `203` improvements, and `0` regressions under the current partial-test
+list.
+
+The subsequent requested full `--run-partial --update-baseline` run produced
+`30,009 / 34,167` fully passing, `4,158` failed, `8,052` skipped, `207`
+improvements, and `0` regressions, then refreshed
+`test/js262/test262_baseline.txt` to `30,009` fully passing tests. The
+follow-up `--baseline-only --js-timeout=20` gate returned status `0` with
+`30,008 / 30,009` fully passing, `1` non-fully-passing slow Phase-4-recovered
+RegExp case, `0` failures, and `0` regressions.
+
+This slice fixes the receiver-altered branch of integer-indexed `[[Set]]` by
+creating ordinary receiver properties for valid typed-array prototype indices,
+returning true/no-op for invalid canonical numeric indices, and adding the same
+guard to native array element write fast paths. It also fixes BigInt64/
+BigUint64 storage wrapping and reloads MIR shared captures after constructor
+calls, which makes `new TA([n])` value-conversion side effects visible before
+the detached `Infinity` `with` binding checks run.
 
 ## 9. Verification Checklist
 
