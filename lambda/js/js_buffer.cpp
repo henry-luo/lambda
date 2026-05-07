@@ -51,7 +51,12 @@ static uint8_t* buffer_data(Item buf, int* out_len) {
 // property_set to typed_array_set which only handles numeric indices).
 // Instead, Buffer identity is checked via js_is_typed_array().
 static Item create_buffer(int size) {
-    return js_typed_array_new(JS_TYPED_UINT8, size);
+    Item buffer = js_typed_array_new(JS_TYPED_UINT8, size);
+    if (js_is_typed_array(buffer)) {
+        JsTypedArray* ta = js_get_typed_array_ptr(buffer.map);
+        if (ta) ta->is_buffer = true;
+    }
+    return buffer;
 }
 
 // Helper: format "Received type <type> (<value>)" suffix for ERR_INVALID_ARG_TYPE errors

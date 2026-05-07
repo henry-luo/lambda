@@ -34,8 +34,10 @@ typedef enum JsTypedArrayType {
 typedef struct JsArrayBuffer {
     void* data;         // heap-allocated byte buffer
     int byte_length;    // total bytes
+    int max_byte_length; // max bytes for resizable buffers
     bool detached;      // true after ArrayBuffer has been detached
     bool is_shared;     // true for SharedArrayBuffer
+    bool resizable;     // true for ArrayBuffer(length, {maxByteLength})
 } JsArrayBuffer;
 
 // DataView: structured access into an ArrayBuffer
@@ -54,6 +56,8 @@ typedef struct JsTypedArray {
     void* data;                      // offset 16: raw data pointer (direct pointer to first element)
     JsArrayBuffer* buffer;           // offset 24: optional backing ArrayBuffer (NULL if standalone)
     uint64_t buffer_item;            // offset 32: original ArrayBuffer Item for identity-preserving .buffer access
+    bool length_tracking;            // true when constructed from buffer without explicit length
+    bool is_buffer;                  // true only for Node Buffer instances backed by Uint8Array storage
 } JsTypedArray;
 
 // Sentinel markers for identifying typed arrays, array buffers, data views
@@ -66,6 +70,8 @@ Item js_typed_array_new_from_array(int type_id, Item source);
 Item js_typed_array_get(Item ta, Item index);
 Item js_typed_array_set(Item ta, Item index, Item value);
 int  js_typed_array_length(Item ta);
+int  js_typed_array_byte_length(Item ta);
+int  js_typed_array_byte_offset(Item ta);
 Item js_typed_array_fill(Item ta, Item value, int start, int end);
 bool js_is_typed_array(Item val);
 JsTypedArray* js_get_typed_array_ptr(Map* m);
@@ -76,9 +82,11 @@ Item js_typed_array_set_from(Item ta, Item source, int offset);
 // ArrayBuffer operations
 Item js_arraybuffer_new(int byte_length);
 Item js_arraybuffer_construct(Item length_arg);
+Item js_arraybuffer_construct_resizable(Item length_arg, Item options_arg);
 Item js_arraybuffer_wrap(JsArrayBuffer* ab);
 bool js_is_arraybuffer(Item val);
 int  js_arraybuffer_byte_length(Item val);
+Item js_arraybuffer_resize(Item val, Item new_length_item);
 Item js_arraybuffer_slice(Item val, int begin, int end);
 bool js_arraybuffer_is_view(Item val);
 Item js_arraybuffer_is_view_item(Item val);
