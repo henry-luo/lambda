@@ -42,6 +42,20 @@ struct Url;
 void execute_document_scripts(Element* html_root, DomDocument* dom_doc, Pool* pool, Url* base_url);
 
 /**
+ * Control whether execute_document_scripts() keeps the compiled JS runtime alive
+ * for later event dispatch. Static headless renders can release it immediately
+ * after load-time scripts finish mutating the DOM.
+ */
+void script_runner_set_retain_js_state(bool retain);
+
+/**
+ * Control whether external <script src="..."> files are loaded and executed.
+ * Static headless smoke renders keep inline scripts but skip external browser
+ * libraries that do not affect the initial parsed HTML/CSS view.
+ */
+void script_runner_set_execute_external_scripts(bool execute);
+
+/**
  * Collect and compile inline event handler attributes (onclick, onmouseover, etc.)
  * from the DomElement* tree. Uses the retained MIR context from execute_document_scripts()
  * so that handler code can reference functions defined in <script> blocks.

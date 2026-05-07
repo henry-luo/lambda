@@ -1887,18 +1887,22 @@ pub fn cmd_split_block(state) {
   else { split_block_collapsed_selection(state) }
 }
 
+fn code_block_path_for_ancestor(state, path) {
+  if (len(path) == 0) { null }
+  else {
+    let block = node_at(state.doc, path)
+    let parent = node_at(state.doc, parent_path(path))
+    if (block == null or not is_node(block)) { code_block_path_for_ancestor(state, parent_path(path)) }
+    else if (block.tag == 'code_block' or block.tag == state_code_block_tag(state) or block.tag == 'pre') { path }
+    else if (block.tag == 'code' and parent != null and is_node(parent) and (parent.tag == 'doc' or parent.tag == 'pre')) { path }
+    else { code_block_path_for_ancestor(state, parent_path(path)) }
+  }
+}
+
 fn code_block_path_for_selection(state) {
   let sel = state.selection
   if (sel == null or sel.kind != 'text' or not sel_single_leaf(sel)) { null }
-  else {
-    let block_path = parent_path(sel.anchor.path)
-    let block = node_at(state.doc, block_path)
-    let parent = node_at(state.doc, parent_path(block_path))
-    if (block == null or not is_node(block)) { null }
-    else if (block.tag == state_code_block_tag(state) or block.tag == 'pre') { block_path }
-    else if (block.tag == 'code' and parent != null and is_node(parent) and parent.tag == 'doc') { block_path }
-    else { null }
-  }
+  else { code_block_path_for_ancestor(state, parent_path(sel.anchor.path)) }
 }
 
 pub fn cmd_insert_paragraph(state) {

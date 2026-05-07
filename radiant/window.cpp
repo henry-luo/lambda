@@ -16,6 +16,7 @@
 #include "webview.h"
 #include "animation.h"
 #include "browsing_session.h"
+#include "script_runner.h"
 #include "../lambda/network/network_resource_manager.h"
 #include "../lambda/network/network_integration.h"
 #include "../lambda/network/network_thread_pool.h"
@@ -859,6 +860,13 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
             ui_context.viewport_height = css_height;
             log_info("event_sim: viewport override to %dx%d CSS pixels", css_width, css_height);
         }
+
+        // Static headless smoke renders do not need retained JS event state after
+        // load-time scripts have mutated the DOM. Interactive windows and event
+        // simulations keep the compiled context alive for dispatch.
+        bool needs_interactive_js = !headless || sim_ctx != nullptr;
+        script_runner_set_retain_js_state(needs_interactive_js);
+        script_runner_set_execute_external_scripts(needs_interactive_js);
 
         // Load document based on file extension
         log_notice("view: loading document...");

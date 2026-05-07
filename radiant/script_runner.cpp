@@ -19,6 +19,7 @@
 #include "../lambda/js/js_transpiler.hpp"
 #include "../lambda/js/js_dom.h"
 #include "../lambda/js/js_dom_events.h"
+#include "../lambda/js/js_runtime.h"
 #include "../lambda/transpiler.hpp"
 #include "../lib/gc/gc_heap.h"
 #include "../lambda/input/css/dom_element.hpp"
@@ -98,6 +99,16 @@ static void js_exec_crash_handler(int sig, siginfo_t* info, void* ctx) {
 // Pool from the most recent JS execution.
 // Destroyed by script_runner_cleanup_heap() in per-file cleanup (after layout).
 static Pool* s_js_reuse_pool = nullptr;
+static bool s_retain_js_state = true;
+static bool s_execute_external_scripts = true;
+
+extern "C" void script_runner_set_retain_js_state(bool retain) {
+    s_retain_js_state = retain;
+}
+
+extern "C" void script_runner_set_execute_external_scripts(bool execute) {
+    s_execute_external_scripts = execute;
+}
 
 extern "C" void script_runner_cleanup_heap() {
     if (s_js_reuse_pool) {
@@ -344,6 +355,9 @@ static void collect_scripts_recursive(Element* elem, StrBuf* script_buf, StrBuf*
         // check for src attribute - load external scripts
         const char* src_attr = extract_element_attribute(elem, "src", nullptr);
         if (src_attr && src_attr[0]) {
+            if (!s_execute_external_scripts) {
+                return;
+            }
             bool is_http = false;
             const char* resolved = resolve_script_url(src_attr, base_url, &is_http);
             char* content = load_script_content(resolved, is_http);
@@ -597,8 +611,14 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
         dom_doc->js_runtime_nursery = runtime.nursery;
         dom_doc->js_runtime_name_pool = runtime.name_pool;
         dom_doc->js_runtime_pool = runtime.reuse_pool;
-        log_info("execute_document_scripts: retained MIR context for event handlers");
-        // Do NOT destroy heap/nursery/pool — they're retained on the document
+        if (s_retain_js_state) {
+            log_info("execute_document_scripts: retained MIR context for event handlers");
+            // Do NOT destroy heap/nursery/pool — they're retained on the document
+        } else {
+            log_info("execute_document_scripts: releasing transient JS context");
+            js_batch_reset();
+            script_runner_cleanup_js_state(dom_doc);
+        }
     } else {
         // Fallback: no valid preamble — destroy as before
         if (preamble) { mem_free(preamble); }
