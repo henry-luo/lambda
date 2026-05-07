@@ -7,7 +7,7 @@
     {"type": "mouse_drag", "target": {"text": "simple markdown"}, "to_target": {"text": "testing basic"}, "button": 0},
     {"type": "wait", "ms": 250},
     {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
-    {"type": "assert_snapshot", "reference": "test/ui/ref/rte_selection_visible.png", "threshold": 0.2,
+    {"type": "assert_snapshot", "reference": "test/ui/snapshots/rte_selection_visible.png", "threshold": 0.2,
      "save_actual": "./temp/rte_selection_render_visible_actual.png",
      "save_diff": "./temp/rte_selection_render_visible_diff.png"}
   ]

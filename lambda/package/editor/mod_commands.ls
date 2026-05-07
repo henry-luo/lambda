@@ -206,6 +206,67 @@ fn replace_same_parent_text_selection(state, txt) {
   }
 }
 
+fn inline_prefix_before_pos(node0, rel_path, offset) {
+  if (is_text(node0)) {
+    if (len(rel_path) == 0) { nonempty_text_leaf(slice(node0.text, 0, offset), node0.marks) } else { [] }
+  } else if (is_node(node0) and len(rel_path) > 0) {
+    let child_index = rel_path[0]
+    if (child_index < 0 or child_index >= len(node0.content)) { [] }
+    else {
+      let child_prefix = inline_prefix_before_pos(node0.content[child_index], slice(rel_path, 1, len(rel_path)), offset)
+      let kept = list_concat(list_slice(node0.content, 0, child_index), child_prefix)
+      if (len(kept) == 0) { [] } else { [node_attrs(node0.tag, node0.attrs, kept)] }
+    }
+  } else { [] }
+}
+
+fn inline_suffix_after_pos(node0, rel_path, offset) {
+  if (is_text(node0)) {
+    if (len(rel_path) == 0) { nonempty_text_leaf(slice(node0.text, offset, len(node0.text)), node0.marks) } else { [] }
+  } else if (is_node(node0) and len(rel_path) > 0) {
+    let child_index = rel_path[0]
+    if (child_index < 0 or child_index >= len(node0.content)) { [] }
+    else {
+      let child_suffix = inline_suffix_after_pos(node0.content[child_index], slice(rel_path, 1, len(rel_path)), offset)
+      let kept = list_concat(child_suffix, list_slice(node0.content, child_index + 1, len(node0.content)))
+      if (len(kept) == 0) { [] } else { [node_attrs(node0.tag, node0.attrs, kept)] }
+    }
+  } else { [] }
+}
+
+fn same_block_nested_text_selection(state) {
+  let sel = state.selection
+  if (sel == null or sel.kind != 'text' or sel_collapsed(sel)) { null }
+  else {
+    let lo = sel_lo(sel)
+    let hi = sel_hi(sel)
+    if (len(lo.path) < 2 or len(hi.path) < 2 or lo.path[0] != hi.path[0]) { null }
+    else {
+      let block_index = lo.path[0]
+      let lo_index = lo.path[1]
+      let hi_index = hi.path[1]
+      let block = node_at(state.doc, [block_index])
+      if (block == null or not is_node(block) or lo_index > hi_index or hi_index >= len(block.content)) { null }
+      else {
+        let before_top = list_slice(block.content, 0, lo_index)
+        let start_edge = inline_prefix_before_pos(block.content[lo_index], slice(lo.path, 2, len(lo.path)), lo.offset)
+        let end_edge = inline_suffix_after_pos(block.content[hi_index], slice(hi.path, 2, len(hi.path)), hi.offset)
+        let after_top = list_slice(block.content, hi_index + 1, len(block.content))
+        let content0 = list_concat(list_concat(list_concat(before_top, start_edge), end_edge), after_top)
+        let content1 = if (len(content0) == 0) { [text("")] } else { content0 }
+        let insert_index = len(before_top) + len(start_edge)
+        let caret_index = if (insert_index > 0) { insert_index - 1 } else { 0 }
+        let caret_pos = if (insert_index > 0) { last_caret_pos_in(content1[caret_index], [block_index, caret_index]) }
+          else { first_caret_pos_in(content1[0], [block_index, 0]) }
+        let new_block = node_attrs(block.tag, block.attrs, content1)
+        let tx0 = tx_begin(state.doc, sel)
+        let tx1 = tx_step(tx0, step_replace([], block_index, block_index + 1, [new_block]))
+        tx_set_selection(tx1, caret(caret_pos))
+      }
+    }
+  }
+}
+
 fn list_take_range(arr, start, end, i, acc) {
   if (i >= end) { acc }
   else { list_take_range(arr, start, end, i + 1, [*acc, arr[i]]) }
@@ -661,6 +722,7 @@ fn delete_selection(state) {
   else if (sel.kind == 'node') { delete_node_selection(state) }
   else if (sel_single_leaf(sel)) { delete_range(state, sel_lo(sel), sel_hi(sel)) }
   else if (sel_same_parent_leaves(sel)) { replace_same_parent_text_selection(state, "") }
+  else if (same_block_nested_text_selection(state) != null) { same_block_nested_text_selection(state) }
   else if (sel_top_block_range(sel)) { replace_cross_block_text_selection_with_inline(state, [], 'at_boundary') }
   else { null }
 }

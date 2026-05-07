@@ -268,6 +268,42 @@ static DomBoundary boundary_from_legacy(View* view, int byte_offset) {
     return b;
 }
 
+static DomNode* selection_sync_root_from_boundary(const DomBoundary* boundary) {
+    if (!boundary || !boundary->node) return NULL;
+    DomNode* root = boundary->node;
+    while (root->parent) root = root->parent;
+    return root;
+}
+
+static bool selection_sync_boundary_in_root(DomNode* root, const DomBoundary* boundary) {
+    if (!root || !boundary || !boundary->node) return false;
+    for (DomNode* cur = boundary->node; cur; cur = cur->parent) {
+        if (cur == root) return true;
+    }
+    return false;
+}
+
+static bool selection_sync_rebind_boundary(DomNode* root,
+                                           const DomBoundary* boundary,
+                                           DomBoundary* out) {
+    if (!root || !boundary || !boundary->node || !out) return false;
+    if (selection_sync_boundary_in_root(root, boundary)) {
+        *out = *boundary;
+        return true;
+    }
+
+    SourcePosC source_pos;
+    if (!source_pos_from_dom_boundary(boundary, &source_pos)) return false;
+    DomBoundary rebound = {NULL, 0};
+    bool ok = dom_boundary_from_source_pos(root, &source_pos, &rebound);
+    source_pos_free(&source_pos);
+    if (!ok || !rebound.node) return false;
+    *out = rebound;
+    log_debug("[DOM-SYNC REBIND] rebound legacy endpoint %p to current %p offset=%u",
+        (void*)boundary->node, (void*)rebound.node, rebound.offset);
+    return true;
+}
+
 extern "C" void dom_selection_sync_from_legacy_selection(RadiantState* state) {
     if (!state || !state->selection) return;
     DomSelection* ds = sync_ensure_selection(state);
@@ -276,6 +312,21 @@ extern "C" void dom_selection_sync_from_legacy_selection(RadiantState* state) {
     DomBoundary anc = boundary_from_legacy(sel->anchor_view, sel->anchor_offset);
     DomBoundary foc = boundary_from_legacy(sel->focus_view,  sel->focus_offset);
     if (!anc.node || !foc.node) return;
+
+    DomNode* current_root = selection_sync_root_from_boundary(&foc);
+    if (!current_root) current_root = selection_sync_root_from_boundary(&anc);
+    if (current_root) {
+        DomBoundary rebound_anc = anc;
+        DomBoundary rebound_foc = foc;
+        if (!selection_sync_rebind_boundary(current_root, &anc, &rebound_anc) ||
+            !selection_sync_rebind_boundary(current_root, &foc, &rebound_foc)) {
+            log_debug("[DOM-SYNC REBIND] skipped legacy selection sync; endpoint cannot resolve in current tree");
+            return;
+        }
+        anc = rebound_anc;
+        foc = rebound_foc;
+    }
+
     const char* exc = NULL;
     state->dom_selection_sync_depth++;  // suppress inverse sync re-entry
     if (!dom_selection_set_base_and_extent(ds,

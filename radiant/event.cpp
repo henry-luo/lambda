@@ -3814,8 +3814,19 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
             // Check if we're dragging over a text view (could be the same or different)
             View* drag_target_view = nullptr;
+            int drag_hit_offset = -1;
             if (current_target && current_target->view_type == RDT_VIEW_TEXT) {
                 drag_target_view = current_target;
+            } else if (anchor_view && anchor_view->view_type == RDT_VIEW_TEXT &&
+                       is_in_rich_editable_subtree(anchor_view) &&
+                       doc && doc->view_tree && doc->view_tree->root) {
+                DomBoundary hit = dom_hit_test_to_boundary((View*)doc->view_tree->root,
+                    (float)motion->x, (float)motion->y);
+                if (hit.node && hit.node->node_type == DOM_NODE_TEXT) {
+                    DomText* hit_text = (DomText*)hit.node;
+                    drag_target_view = (View*)hit_text;
+                    drag_hit_offset = (int)dom_text_utf16_to_utf8(hit_text, hit.offset); // INT_CAST_OK: editor selection offsets are byte-index ints
+                }
             } else if (state->selection && state->selection->focus_view &&
                        state->selection->focus_view->view_type == RDT_VIEW_TEXT &&
                        !state->selection->is_collapsed) {
@@ -3916,6 +3927,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 int char_offset;
                 if (use_margin_offset) {
                     char_offset = evcon.target_text_offset;
+                } else if (drag_hit_offset >= 0) {
+                    char_offset = drag_hit_offset;
                 } else if (in_gap && gap_offset >= 0) {
                     char_offset = gap_offset;
                 } else {
@@ -6173,6 +6186,12 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             evcon.need_repaint = true;  // repaint includes relayout
             log_debug("Reflow required, will trigger relayout");
         }
+    }
+
+    // Selection repaint changes both the old and new highlight spans. A
+    // caret-sized dirty region leaves stale highlight pixels during live drag.
+    if (evcon.need_repaint && state && state->selection && !state->selection->is_collapsed) {
+        state->dirty_tracker.full_repaint = true;
     }
 
     // Phase 19: detect caret-only repaint — no DOM changes, no reflow, only caret moved
