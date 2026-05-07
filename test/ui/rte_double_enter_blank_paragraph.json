@@ -1,0 +1,15 @@
+{
+  "name": "RTE repeated Enter creates blank paragraphs",
+  "html": "test/ui/rte_prototype.ls",
+  "viewport": {"width": 1200, "height": 800},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "click", "target": {"text": "simple markdown document"}},
+    {"type": "key_press", "key": "enter"},
+    {"type": "wait", "ms": 120},
+    {"type": "key_press", "key": "enter"},
+    {"type": "wait", "ms": 160},
+    {"type": "assert_count", "target": {"selector": "#doc p"}, "min_count": 9},
+    {"type": "assert_selection", "is_collapsed": true, "check_dom": true}
+  ]
+}

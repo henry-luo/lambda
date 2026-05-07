@@ -1,0 +1,16 @@
+{
+  "name": "RTE Ctrl+X cuts selection across styled spans",
+  "html": "test/ui/rte_prototype.ls",
+  "viewport": {"width": 1200, "height": 800},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "mouse_drag", "target": {"text": "bold text"}, "to_target": {"text": "italic text"}, "button": 0},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+    {"type": "key_combo", "key": "x", "mods_str": "ctrl"},
+    {"type": "wait", "ms": 140},
+    {"type": "assert_clipboard", "contains": "bold text"},
+    {"type": "assert_count", "target": {"selector": "#doc strong"}, "count": 0},
+    {"type": "assert_selection", "is_collapsed": true, "check_dom": true}
+  ]
+}

@@ -62,7 +62,7 @@ fn text_has_mark_at(marks, mark, i, n) {
 fn text_has_mark(marks, mark) => text_has_mark_at(marks, mark, 0, len(marks))
 
 fn render_text_leaf(leaf) {
-  let content0 = leaf.text
+  let content0 = if (leaf.text == "") { "\u200B" } else { leaf.text }
   let content1 = if (text_has_mark(leaf.marks, 'code')) { <code; content0> } else { content0 }
   let content2 = if (text_has_mark(leaf.marks, 'u')) { <u; content1> } else { content1 }
   let content3 = if (text_has_mark(leaf.marks, 'em')) { <em; content2> } else { content2 }
@@ -92,6 +92,10 @@ fn valid_source_pos(doc, p) {
 fn normalize_source_pos(doc, p) {
   if (p == null) { null }
   else if (valid_source_pos(doc, p)) { p }
+  else if (node_at(doc, p.path) != null and is_text(node_at(doc, p.path))) {
+    let leaf = node_at(doc, p.path)
+    if (p.offset < 0) { pos(p.path, 0) } else { pos(p.path, len(leaf.text)) }
+  }
   else if (len(p.path) == 0) { null }
   else { normalize_source_pos(doc, pos(parent_path(p.path), p.offset)) }
 }

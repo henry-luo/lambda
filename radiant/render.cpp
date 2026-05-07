@@ -10,6 +10,7 @@
 #include "state_store.hpp"
 #include "dom_range.hpp"
 #include "dom_range_resolver.hpp"
+#include "source_pos_bridge.hpp"
 #include "tile_pool.h"
 #include "webview.h"
 #include "context_menu.hpp"
@@ -907,24 +908,22 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
         return;
     }
 
-    // Resolve DomSelection once for this text view; rects are emitted per
-    // fragment further below (after the parent inline background) so the
-    // selection band sits beneath glyphs but above any <code>/<span>
-    // background, matching native browser behavior.
-    DomRange* sel_range = nullptr;
+    // Diagnostic selection paint path: inline text-fragment painter.
+    // Magenta means the highlight came from render_text_view().
+    DomRange* diagnostic_inline_sel_range = nullptr;
     {
         RadiantState* st = rdcon->ui_context && rdcon->ui_context->document
             ? rdcon->ui_context->document->state : nullptr;
         DomSelection* ds = st ? st->dom_selection : nullptr;
-        if (ds && ds->range_count > 0 && !ds->is_collapsed && ds->ranges[0]) {
-            sel_range = ds->ranges[0];
+        if (st && st->selection && st->selection->is_selecting &&
+            ds && ds->range_count > 0 && !ds->is_collapsed && ds->ranges[0]) {
+            diagnostic_inline_sel_range = ds->ranges[0];
         }
     }
 
     // Check if this text view has a selection (supports cross-view selection)
-    // Phase A: inline glyph-by-glyph painter disabled. The multi-rect overlay
-    // in render_selection() (driven by DomSelection / dom_range_for_each_rect)
-    // now paints text-selection backgrounds during render_ui_overlays.
+    // Diagnostic mode: render_text_view paints magenta, and render_selection()
+    // paints blue so we can identify which path creates an extra highlight.
     SelectionState* sel = rdcon->selection;
     int sel_start = 0, sel_end = 0;
     (void)sel; (void)sel_start; (void)sel_end;
@@ -936,7 +935,8 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
     }
     (void)total_text_length;
 
-    // Inline selection painter disabled — see comment above.
+    // Legacy glyph-by-glyph selection code remains disabled; diagnostic
+    // inline painting below uses DomSelection fragments only.
     bool has_selection = false;
 
     // Apply text color from text_view if set (PDF text uses this for fill color)
@@ -1061,19 +1061,17 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
             }
         }
 
-        // Paint selection background for THIS text rect, after parent inline
-        // background but before glyphs. This way the highlight always sits
-        // above any <code>/<span> background and below the text itself.
-        if (sel_range) {
+        if (diagnostic_inline_sel_range) {
             SelectionPaintCtx ctx;
             ctx.rdcon = rdcon;
             ctx.scale = rdcon->scale;
             RadiantState* st = rdcon->ui_context->document->state;
             ctx.iframe_offset_x = st->selection ? st->selection->iframe_offset_x : 0;
             ctx.iframe_offset_y = st->selection ? st->selection->iframe_offset_y : 0;
-            ctx.color.r = 0xB3; ctx.color.g = 0xD7; ctx.color.b = 0xFF; ctx.color.a = 0xFF;
-            dom_range_for_each_rect_in_text_rect(sel_range, (DomText*)text_view,
-                text_rect, rdcon->ui_context, selection_paint_rect_cb, &ctx);
+            ctx.color.r = 0xFF; ctx.color.g = 0x00; ctx.color.b = 0xB8; ctx.color.a = 0x80;
+            dom_range_for_each_rect_in_text_rect(diagnostic_inline_sel_range,
+                (DomText*)text_view, text_rect, rdcon->ui_context,
+                selection_paint_rect_cb, &ctx);
         }
 
         unsigned char* p = str + text_rect->start_index;  unsigned char* end = p + text_rect->length;
@@ -3500,6 +3498,12 @@ void render_caret(RenderContext* rdcon, RadiantState* state) {
     // Walk up from the text view's parent to get absolute coordinates
     // The caret x/y is already relative to the text's parent block
     View* parent = view->parent;  // Start from parent, not from view itself
+    bool applied_root_scroll = false;
+    DomDocument* doc = rdcon && rdcon->ui_context ? rdcon->ui_context->document : nullptr;
+    ViewBlock* root_block = nullptr;
+    if (doc && doc->view_tree && doc->view_tree->root && doc->view_tree->root->view_type == RDT_VIEW_BLOCK) {
+        root_block = (ViewBlock*)doc->view_tree->root;
+    }
     while (parent) {
         if (parent->view_type == RDT_VIEW_BLOCK ||
             parent->view_type == RDT_VIEW_INLINE_BLOCK ||
@@ -3511,9 +3515,15 @@ void render_caret(RenderContext* rdcon, RadiantState* state) {
             if (block->scroller && block->scroller->pane) {
                 x -= block->scroller->pane->h_scroll_position;
                 y -= block->scroller->pane->v_scroll_position;
+                if (block == root_block) applied_root_scroll = true;
             }
         }
         parent = parent->parent;
+    }
+
+    if (!applied_root_scroll && root_block && root_block->scroller && root_block->scroller->pane) {
+        x -= root_block->scroller->pane->h_scroll_position;
+        y -= root_block->scroller->pane->v_scroll_position;
     }
 
     // Add iframe offset (if the caret is inside an iframe, parent chain stops at iframe doc root)
@@ -3567,11 +3577,76 @@ static void selection_paint_rect_cb(float x, float y, float w, float h, void* ud
     SelectionPaintCtx* ctx = (SelectionPaintCtx*)ud;
     if (w <= 0 || h <= 0) return;
     float s = ctx->scale;
-    float px = (x + ctx->iframe_offset_x) * s;
-    float py = (y + ctx->iframe_offset_y) * s;
+    float scroll_x = 0.0f;
+    float scroll_y = 0.0f;
+    DomDocument* doc = ctx->rdcon && ctx->rdcon->ui_context ? ctx->rdcon->ui_context->document : nullptr;
+    if (doc && doc->view_tree && doc->view_tree->root && doc->view_tree->root->view_type == RDT_VIEW_BLOCK) {
+        ViewBlock* root = (ViewBlock*)doc->view_tree->root;
+        if (root->scroller && root->scroller->pane) {
+            scroll_x = root->scroller->pane->h_scroll_position;
+            scroll_y = root->scroller->pane->v_scroll_position;
+        }
+    }
+    float px = (x + ctx->iframe_offset_x - scroll_x) * s;
+    float py = (y + ctx->iframe_offset_y - scroll_y) * s;
     float pw = w * s;
     float ph = h * s;
     rc_fill_rect(ctx->rdcon, px, py, pw, ph, ctx->color);
+}
+
+static bool render_dom_node_is_in_current_tree(DomNode* root, DomNode* node) {
+    if (!root || !node) return false;
+    for (DomNode* cur = node; cur; cur = cur->parent) {
+        if (cur == root) return true;
+    }
+    return false;
+}
+
+static bool rebind_paint_boundary_to_current_tree(DomNode* root,
+                                                  const DomBoundary* boundary,
+                                                  DomBoundary* out) {
+    if (!root || !boundary || !boundary->node || !out) return false;
+    if (render_dom_node_is_in_current_tree(root, boundary->node)) {
+        *out = *boundary;
+        return false;
+    }
+
+    SourcePosC source_pos;
+    if (!source_pos_from_dom_boundary(boundary, &source_pos)) return false;
+    DomBoundary rebound = {NULL, 0};
+    bool ok = dom_boundary_from_source_pos(root, &source_pos, &rebound);
+    source_pos_free(&source_pos);
+    if (!ok || !rebound.node) return false;
+    *out = rebound;
+    return true;
+}
+
+static DomRange* selection_paint_range_for_current_tree(RenderContext* rdcon,
+                                                        DomRange* range,
+                                                        DomRange* scratch) {
+    if (!rdcon || !rdcon->ui_context || !rdcon->ui_context->document ||
+        !rdcon->ui_context->document->view_tree ||
+        !rdcon->ui_context->document->view_tree->root || !range || !scratch) {
+        return range;
+    }
+
+    DomNode* root = (DomNode*)rdcon->ui_context->document->view_tree->root;
+    DomBoundary rebound_start = range->start;
+    DomBoundary rebound_end = range->end;
+    bool rebound_any = false;
+    rebound_any = rebind_paint_boundary_to_current_tree(root, &range->start, &rebound_start) || rebound_any;
+    rebound_any = rebind_paint_boundary_to_current_tree(root, &range->end, &rebound_end) || rebound_any;
+    if (!rebound_any) return range;
+
+    *scratch = *range;
+    scratch->start = rebound_start;
+    scratch->end = rebound_end;
+    scratch->layout_valid = false;
+    scratch->start_view = NULL;
+    scratch->end_view = NULL;
+    log_debug("[SELECTION PAINT REBIND] rebound stale paint range endpoints start=%p end=%p",
+        (void*)rebound_start.node, (void*)rebound_end.node);
+    return scratch;
 }
 
 void render_selection(RenderContext* rdcon, RadiantState* state) {
@@ -3591,6 +3666,9 @@ void render_selection(RenderContext* rdcon, RadiantState* state) {
 
     DomRange* r = ds->ranges[0];
     if (!r) return;
+
+    DomRange paint_range;
+    r = selection_paint_range_for_current_tree(rdcon, r, &paint_range);
 
     // Resolve layout (idempotent when already valid).
     if (!dom_range_resolve_layout(r)) {
