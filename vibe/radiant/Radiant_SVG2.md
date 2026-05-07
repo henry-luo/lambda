@@ -27,6 +27,29 @@ This proposal makes the following decisions explicit:
 - External `<use href="external.svg#id">` should use render-by-reference as the initial behavior.
 - Embedded `<style>` in external SVG loaded as an image should be supported by reusing the same CSS parsing/style machinery used for HTML `<style>`, with SVG-document isolation rules.
 
+## Implementation Status
+
+Status as of 2026-05-07: **partially implemented**. The core parser/render unification path is now in place, but the full `SvgDocument` resource/cache architecture described below is not yet complete.
+
+| Area | Status | Notes |
+|------|--------|-------|
+| Parse external SVG through HTML/SVG path | Done | `html5_parse_svg_document()` parses external SVG through the HTML5 SVG correction path. `rdt_picture_load()` now uses this instead of `parse_xml()` for SVG pictures. |
+| Standalone `.svg` rendering | Done | Standalone SVG keeps its prebuilt SVG/image view tree and renders through `RdtPicture` / `render_svg_to_vec()`. |
+| `<img src="foo.svg">` vector-first rendering | Done | `render_image_content()` draws SVG images as `RdtPicture` vector content instead of forcing `render_svg()` rasterization first. |
+| `background-image: url(foo.svg)` vector path | Mostly done | Background SVG tiles draw through duplicated `RdtPicture` instances and `rc_draw_picture()`. It still uses the current `ImageSurface` compatibility wrapper. |
+| Nested SVG `<image href="nested.svg">` | Done for local files/data URIs | SVG data URIs and local `.svg` hrefs route through `RdtPicture`; raster image hrefs still use the existing ThorVG image loader path. Relative file resolution is now source-path aware. |
+| External `<use href="external.svg#id">` | Done for synchronous local files | The renderer splits file/fragment, loads the external SVG DOM, finds the referenced id, and renders by reference with the `<use>` transform/viewport behavior. It does not yet use a shared async resource cache. |
+| Embedded `<style>` inside external SVG | Partial | A lightweight scoped style bridge handles simple selectors (`tag`, `.class`, `#id`, and simple combinations) for presentation properties used by the SVG renderer. It is not yet routed through the full HTML CSS parser/cascade engine. |
+| Inline SVG host CSS inheritance/selectors | Existing/partial | Inline SVG remains in the host DOM path. Full spec-grade CSS/SVG cascade normalization is still future work. |
+| `SvgDocument` / `SvgDocumentRef` API | Not yet | Current implementation extends `RdtPicture` as the compatibility document wrapper instead of introducing the formal structs. |
+| Shared `SvgResourceManager`, URL cache, async/network integration | Not yet | External SVG loads are still synchronous in the render/resource paths that were touched. Cache-by-canonical-URL and async repaint/reflow are pending. |
+| Central id table | Not yet | Id lookup is recursive or render-time defs based. A persistent document-level id table is still pending. |
+| Renderer API rename/split (`svg_render_document`, `svg_render_element`) | Not yet | `render_svg_to_vec()` remains the shared lower-level renderer; `render_svg_inline.cpp` still contains general SVG rendering logic. |
+| Cycle detection for recursive SVG references | Partial | Local file SVG recursion now has a thread-local render stack guard. Recursive external `<use>` and file-based nested SVG `<image>` references are skipped with a debug log; broader async/cache-cycle detection is still pending. |
+| Full CSS parser integration for SVG `<style>` | Not yet | The current bridge is intentionally narrow; full selector/cascade support remains part of the style cleanup phase. |
+
+So, no: **not every designed action item has been implemented**. The implemented slice covers the high-impact behavior requested first: parser unification for external SVG pictures, vector-first external image rendering, nested SVG image support, local external `<use>` render-by-reference, and basic scoped embedded styles.
+
 ## Current State
 
 ### Inline SVG

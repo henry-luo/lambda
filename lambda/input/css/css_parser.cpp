@@ -594,6 +594,73 @@ static CssValue* css_parse_function_from_tokens(const CssToken* tokens, int* pos
 
     (*pos)++;  // Skip FUNCTION token
 
+    CssValue* func_value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
+    if (!func_value) return NULL;
+
+    func_value->type = CSS_VALUE_TYPE_FUNCTION;
+    func_value->data.function = (CssFunction*)pool_calloc(pool, sizeof(CssFunction));
+    if (!func_value->data.function) return NULL;
+
+    if (func_name && strcmp(func_name, "url") == 0) {
+        int url_start_pos = *pos;
+        int url_end_pos = *pos;
+        int url_paren_depth = 1;
+        while (url_end_pos < token_count && url_paren_depth > 0) {
+            CssTokenType t = tokens[url_end_pos].type;
+            if (t == CSS_TOKEN_EOF) break;
+            if (t == CSS_TOKEN_LEFT_PAREN || t == CSS_TOKEN_FUNCTION) {
+                url_paren_depth++;
+            } else if (t == CSS_TOKEN_RIGHT_PAREN) {
+                url_paren_depth--;
+                if (url_paren_depth == 0) break;
+            }
+            url_end_pos++;
+        }
+
+        while (url_start_pos < url_end_pos && tokens[url_start_pos].type == CSS_TOKEN_WHITESPACE) {
+            url_start_pos++;
+        }
+        int last_token_pos = url_end_pos - 1;
+        while (last_token_pos >= url_start_pos && tokens[last_token_pos].type == CSS_TOKEN_WHITESPACE) {
+            last_token_pos--;
+        }
+
+        func_value->data.function->name = func_name ? pool_strdup(pool, func_name) : "url";
+        func_value->data.function->arg_count = 1;
+        func_value->data.function->args = (CssValue**)pool_calloc(pool, sizeof(CssValue*));
+        if (!func_value->data.function->args) return NULL;
+
+        CssValue* url_value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
+        if (!url_value) return NULL;
+        url_value->type = CSS_VALUE_TYPE_URL;
+
+        if (last_token_pos >= url_start_pos && tokens[url_start_pos].start && tokens[last_token_pos].start) {
+            const char* raw_start = tokens[url_start_pos].start;
+            const char* raw_end = tokens[last_token_pos].start + tokens[last_token_pos].length;
+            while (raw_start < raw_end && (*raw_start == ' ' || *raw_start == '\t' || *raw_start == '\n' || *raw_start == '\r' || *raw_start == '\f')) raw_start++;
+            while (raw_end > raw_start && (raw_end[-1] == ' ' || raw_end[-1] == '\t' || raw_end[-1] == '\n' || raw_end[-1] == '\r' || raw_end[-1] == '\f')) raw_end--;
+            if (raw_end - raw_start >= 2 && ((*raw_start == '"' && raw_end[-1] == '"') || (*raw_start == '\'' && raw_end[-1] == '\''))) {
+                raw_start++;
+                raw_end--;
+            }
+            size_t url_len = raw_end > raw_start ? (size_t)(raw_end - raw_start) : 0;
+            char* url_buf = (char*)pool_calloc(pool, url_len + 1);
+            if (url_buf && url_len > 0) {
+                memcpy(url_buf, raw_start, url_len);
+                url_buf[url_len] = '\0';
+            }
+            url_value->data.url = url_buf ? url_buf : "";
+        } else {
+            url_value->data.url = "";
+        }
+        func_value->data.function->args[0] = url_value;
+        *pos = url_end_pos;
+        if (*pos < token_count && tokens[*pos].type == CSS_TOKEN_RIGHT_PAREN) {
+            (*pos)++;
+        }
+        return func_value;
+    }
+
     // Count arguments by counting top-level commas + 1 (or 0 if empty)
     int arg_count = 0;
     int paren_depth = 1;
@@ -621,14 +688,6 @@ static CssValue* css_parse_function_from_tokens(const CssToken* tokens, int* pos
     if (has_content) {
         arg_count++;  // commas + 1 = number of arguments
     }
-
-    // Create the function value
-    CssValue* func_value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
-    if (!func_value) return NULL;
-
-    func_value->type = CSS_VALUE_TYPE_FUNCTION;
-    func_value->data.function = (CssFunction*)pool_calloc(pool, sizeof(CssFunction));
-    if (!func_value->data.function) return NULL;
 
     func_value->data.function->name = func_name ? pool_strdup(pool, func_name) : "";
     func_value->data.function->arg_count = arg_count;
@@ -819,6 +878,21 @@ static CssValue* css_parse_token_to_value(const CssToken* token, Pool* pool) {
                 }
             }
             value->data.string = str_val ? pool_strdup(pool, str_val) : "";
+            break;
+        }
+
+        case CSS_TOKEN_URL: {
+            value->type = CSS_VALUE_TYPE_URL;
+            const char* url_val = token->value;
+            if (!url_val && token->start && token->length > 0) {
+                char* buf = (char*)pool_calloc(pool, token->length + 1);
+                if (buf) {
+                    memcpy(buf, token->start, token->length);
+                    buf[token->length] = '\0';
+                    url_val = buf;
+                }
+            }
+            value->data.url = url_val ? pool_strdup(pool, url_val) : "";
             break;
         }
 

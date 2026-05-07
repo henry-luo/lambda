@@ -207,16 +207,43 @@ void dl_draw_image(DisplayList* dl, const uint32_t* pixels,
 }
 
 void dl_draw_glyph(DisplayList* dl, GlyphBitmap* bitmap, int x, int y,
-                   Color color, bool is_color_emoji, const Bound* clip) {
+                   Color color, bool is_color_emoji, const Bound* clip,
+                   const RdtMatrix* transform) {
     DisplayItem* item = dl_alloc_item(dl);
     item->op = DL_DRAW_GLYPH;
     item->bounds[0] = (float)x; item->bounds[1] = (float)y;
     item->bounds[2] = (float)bitmap->width; item->bounds[3] = (float)bitmap->height;
+    if (transform) {
+        float x0 = (float)x, y0 = (float)y;
+        float x1 = (float)(x + (int)bitmap->width), y1 = y0;
+        float x2 = x1, y2 = (float)(y + (int)bitmap->height);
+        float x3 = x0, y3 = y2;
+        float tx0 = transform->e11 * x0 + transform->e12 * y0 + transform->e13;
+        float ty0 = transform->e21 * x0 + transform->e22 * y0 + transform->e23;
+        float tx1 = transform->e11 * x1 + transform->e12 * y1 + transform->e13;
+        float ty1 = transform->e21 * x1 + transform->e22 * y1 + transform->e23;
+        float tx2 = transform->e11 * x2 + transform->e12 * y2 + transform->e13;
+        float ty2 = transform->e21 * x2 + transform->e22 * y2 + transform->e23;
+        float tx3 = transform->e11 * x3 + transform->e12 * y3 + transform->e13;
+        float ty3 = transform->e21 * x3 + transform->e22 * y3 + transform->e23;
+        float min_x = std::min(std::min(tx0, tx1), std::min(tx2, tx3));
+        float max_x = std::max(std::max(tx0, tx1), std::max(tx2, tx3));
+        float min_y = std::min(std::min(ty0, ty1), std::min(ty2, ty3));
+        float max_y = std::max(std::max(ty0, ty1), std::max(ty2, ty3));
+        item->bounds[0] = floorf(min_x) - 1.0f;
+        item->bounds[1] = floorf(min_y) - 1.0f;
+        item->bounds[2] = ceilf(max_x - min_x) + 2.0f;
+        item->bounds[3] = ceilf(max_y - min_y) + 2.0f;
+    }
     item->draw_glyph.bitmap = *bitmap;  // copy descriptor, buffer pointer borrowed
     item->draw_glyph.x = x;
     item->draw_glyph.y = y;
     item->draw_glyph.color = color;
     item->draw_glyph.is_color_emoji = is_color_emoji;
+    item->draw_glyph.has_transform = (transform != nullptr);
+    if (transform) {
+        item->draw_glyph.transform = *transform;
+    }
     item->draw_glyph.clip = clip ? *clip : (Bound){0, 0, 99999, 99999};
 }
 
@@ -501,6 +528,52 @@ static void replay_draw_glyph(ImageSurface* surface, const DlDrawGlyph* g) {
     int x = g->x, y = g->y;
     Color color = g->color;
     const Bound* clip = &g->clip;
+
+    if (g->has_transform && !g->is_color_emoji) {
+        bool is_mono = (bitmap->pixel_mode == GLYPH_PIXEL_MONO);
+        for (int i = 0; i < (int)bitmap->height; i++) {
+            for (int j = 0; j < (int)bitmap->width; j++) {
+                uint32_t intensity;
+                if (is_mono) {
+                    int byte_index = j / 8;
+                    int bit_index = 7 - (j % 8);
+                    uint8_t byte_val = bitmap->buffer[i * bitmap->pitch + byte_index];
+                    intensity = (byte_val & (1 << bit_index)) ? 255 : 0;
+                } else {
+                    intensity = bitmap->buffer[i * bitmap->pitch + j];
+                }
+                if (intensity == 0) continue;
+
+                float src_x = (float)(x + j) + 0.5f;
+                float src_y = (float)(y + i) + 0.5f;
+                float dst_xf = g->transform.e11 * src_x + g->transform.e12 * src_y + g->transform.e13;
+                float dst_yf = g->transform.e21 * src_x + g->transform.e22 * src_y + g->transform.e23;
+                int dst_x = (int)floorf(dst_xf);
+                int dst_y = (int)floorf(dst_yf);
+                if (dst_x < (int)clip->left || dst_x >= (int)clip->right ||
+                    dst_y < (int)clip->top || dst_y >= (int)clip->bottom ||
+                    dst_x < 0 || dst_x >= surface->width ||
+                    dst_y < surface->tile_offset_y || dst_y >= surface->tile_offset_y + surface->height) {
+                    continue;
+                }
+
+                uint8_t* p = (uint8_t*)surface->pixels + (dst_y - surface->tile_offset_y) * surface->pitch + dst_x * 4;
+                uint32_t v = 255 - intensity;
+                if (color.c == 0xFF000000) {
+                    p[0] = p[0] * v / 255;
+                    p[1] = p[1] * v / 255;
+                    p[2] = p[2] * v / 255;
+                    p[3] = 0xFF;
+                } else {
+                    p[0] = (p[0] * v + color.r * intensity) / 255;
+                    p[1] = (p[1] * v + color.g * intensity) / 255;
+                    p[2] = (p[2] * v + color.b * intensity) / 255;
+                    p[3] = 0xFF;
+                }
+            }
+        }
+        return;
+    }
 
     if (g->is_color_emoji) {
         // color emoji replay

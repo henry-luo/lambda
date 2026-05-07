@@ -117,6 +117,15 @@ static bool css_value_is_background_color_candidate(const CssValue* value) {
     return info && info->group == CSS_VALUE_GROUP_COLOR;
 }
 
+static bool css_value_is_background_position_candidate(const CssValue* value) {
+    if (!value) return false;
+    if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_PERCENTAGE) return true;
+    if (value->type != CSS_VALUE_TYPE_KEYWORD) return false;
+    CssEnum keyword = value->data.keyword;
+    return keyword == CSS_VALUE_LEFT || keyword == CSS_VALUE_RIGHT || keyword == CSS_VALUE_TOP ||
+           keyword == CSS_VALUE_BOTTOM || keyword == CSS_VALUE_CENTER;
+}
+
 static bool css_url_has_scheme(const char* url) {
     if (!url) return false;
     const char* p = url;
@@ -11402,6 +11411,33 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                             resolve_css_property(CSS_PROPERTY_BACKGROUND_SIZE, &size_decl, lycon);
                             i = j - 1;
                         }
+                        continue;
+                    }
+
+                    if (css_value_is_background_position_candidate(item)) {
+                        CssValue* position_values[2] = {};
+                        int position_count = 1;
+                        position_values[0] = item;
+                        if (i + 1 < value->data.list.count) {
+                            CssValue* next_item = value->data.list.values[i + 1];
+                            if (css_value_is_background_position_candidate(next_item)) {
+                                position_values[position_count++] = next_item;
+                            }
+                        }
+
+                        CssDeclaration position_decl = *decl;
+                        position_decl.property_id = CSS_PROPERTY_BACKGROUND_POSITION;
+                        if (position_count == 1) {
+                            position_decl.value = position_values[0];
+                        } else {
+                            CssValue position_list = {};
+                            position_list.type = CSS_VALUE_TYPE_LIST;
+                            position_list.data.list.values = position_values;
+                            position_list.data.list.count = position_count;
+                            position_decl.value = &position_list;
+                        }
+                        resolve_css_property(CSS_PROPERTY_BACKGROUND_POSITION, &position_decl, lycon);
+                        if (position_count == 2) i++;
                         continue;
                     }
 

@@ -291,6 +291,58 @@ static inline bool bounds_intersect(const float item_bounds[4],
 static void replay_tile_glyph(ImageSurface* tile_surface,
                                DlDrawGlyph* g, float tile_x, float tile_y) {
     GlyphBitmap* bitmap = &g->bitmap;
+
+    if (g->has_transform && !g->is_color_emoji) {
+        bool is_mono = (bitmap->pixel_mode == GLYPH_PIXEL_MONO);
+        for (int i = 0; i < (int)bitmap->height; i++) {
+            for (int j = 0; j < (int)bitmap->width; j++) {
+                uint32_t intensity;
+                if (is_mono) {
+                    int byte_index = j / 8;
+                    int bit_index = 7 - (j % 8);
+                    uint8_t byte_val = bitmap->buffer[i * bitmap->pitch + byte_index];
+                    intensity = (byte_val & (1 << bit_index)) ? 255 : 0;
+                } else {
+                    intensity = bitmap->buffer[i * bitmap->pitch + j];
+                }
+                if (intensity == 0) continue;
+
+                float src_x = (float)(g->x + j) + 0.5f;
+                float src_y = (float)(g->y + i) + 0.5f;
+                float page_x = g->transform.e11 * src_x + g->transform.e12 * src_y + g->transform.e13;
+                float page_y = g->transform.e21 * src_x + g->transform.e22 * src_y + g->transform.e23;
+                if (page_x < g->clip.left || page_x >= g->clip.right ||
+                    page_y < g->clip.top || page_y >= g->clip.bottom ||
+                    page_x < tile_x || page_x >= tile_x + tile_surface->width ||
+                    page_y < tile_y || page_y >= tile_y + tile_surface->height) {
+                    continue;
+                }
+
+                int dst_x = (int)floorf(page_x - tile_x);
+                int dst_y = (int)floorf(page_y - tile_y);
+                if (dst_x < 0 || dst_x >= tile_surface->width || dst_y < 0 || dst_y >= tile_surface->height) {
+                    continue;
+                }
+
+                uint8_t* p = (uint8_t*)tile_surface->pixels + dst_y * tile_surface->pitch + dst_x * 4;
+                uint32_t v = 255 - intensity;
+                Color color = g->color;
+                if (color.c == 0xFF000000) {
+                    p[0] = p[0] * v / 255;
+                    p[1] = p[1] * v / 255;
+                    p[2] = p[2] * v / 255;
+                    p[3] = 0xFF;
+                } else {
+                    p[0] = (p[0] * v + color.r * intensity) / 255;
+                    p[1] = (p[1] * v + color.g * intensity) / 255;
+                    p[2] = (p[2] * v + color.b * intensity) / 255;
+                    p[3] = 0xFF;
+                }
+            }
+        }
+        return;
+    }
+
     int x = g->x - (int)tile_x;
     int y = g->y - (int)tile_y;
     Color color = g->color;
