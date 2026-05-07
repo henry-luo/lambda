@@ -1817,6 +1817,8 @@ extern "C" int64_t js_loose_ne_raw(Item left, Item right) {
 // js_property_get_str: property access with C string key (avoids string boxing)
 extern "C" Item js_property_get_str(Item object, const char* key, int key_len);
 extern "C" bool js_typed_array_is_out_of_bounds_item(Item ta_item);
+extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor);
+extern "C" Item js_has_own_property(Item obj, Item key);
 
 static bool js_ta_key_canonical_numeric(Item key, double* numeric_index, bool* is_negative_zero) {
     if (is_negative_zero) *is_negative_zero = false;
@@ -1888,6 +1890,59 @@ static bool js_ta_numeric_index_valid(Item object, double numeric_index, bool is
     int len = js_typed_array_length(object);
     if (idx64 < 0 || idx64 >= len) return false;
     if (out_index) *out_index = (int)idx64;
+    return true;
+}
+
+static bool js_ta_proto_chain_set(Item object, Item key, Item value) {
+    if (js_skip_accessor_dispatch) return false;
+    TypeId object_type = get_type_id(object);
+    if (object_type != LMD_TYPE_MAP && object_type != LMD_TYPE_ARRAY) return false;
+    if (object_type == LMD_TYPE_MAP && object.map && object.map->map_kind == MAP_KIND_TYPED_ARRAY) return false;
+
+    double numeric_index = 0;
+    bool is_negative_zero = false;
+    if (!js_ta_key_canonical_numeric(key, &numeric_index, &is_negative_zero)) return false;
+    if (it2b(js_has_own_property(object, key))) return false;
+
+    Item proto = js_get_prototype_of(object);
+    int depth = 0;
+    while (proto.item != ItemNull.item && depth < 16) {
+        if (get_type_id(proto) == LMD_TYPE_MAP && proto.map && proto.map->map_kind == MAP_KIND_TYPED_ARRAY) {
+            int idx = 0;
+            if (!js_ta_numeric_index_valid(proto, numeric_index, is_negative_zero, &idx)) return true;
+
+            Item receiver = js_proxy_receiver.item ? js_proxy_receiver : object;
+            Item desc = js_new_object();
+            js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, value);
+            js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
+            js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(true)});
+            js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
+            js_object_define_property(receiver, key, desc);
+            return true;
+        }
+        if (get_type_id(proto) == LMD_TYPE_MAP && it2b(js_has_own_property(proto, key))) return false;
+        proto = js_get_prototype_of(proto);
+        depth++;
+    }
+    return false;
+}
+
+static bool js_array_ta_proto_numeric_set(Item array, Item key, bool* no_op) {
+    if (no_op) *no_op = false;
+    if (get_type_id(array) != LMD_TYPE_ARRAY) return false;
+    double numeric_index = 0;
+    bool is_negative_zero = false;
+    if (!js_ta_key_canonical_numeric(key, &numeric_index, &is_negative_zero)) return false;
+    if (it2b(js_has_own_property(array, key))) return false;
+
+    Item proto = js_get_prototype_of(array);
+    if (get_type_id(proto) != LMD_TYPE_MAP || !proto.map || proto.map->map_kind != MAP_KIND_TYPED_ARRAY) {
+        return false;
+    }
+    int idx = 0;
+    if (!js_ta_numeric_index_valid(proto, numeric_index, is_negative_zero, &idx)) {
+        if (no_op) *no_op = true;
+    }
     return true;
 }
 
@@ -6869,6 +6924,8 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
     js_dual_write_marker_flags(object, key, value);
 
     TypeId type = get_type_id(object);
+    if (js_ta_proto_chain_set(object, key, value)) return value;
+
     // v95: If __sym_1 (Symbol.iterator) is ever set on a map, note it for Array.prototype override detection
     if (!g_array_sym_iter_ever_set && type == LMD_TYPE_MAP && get_type_id(key) == LMD_TYPE_STRING) {
         String* _sk = it2s(key);
@@ -8208,6 +8265,10 @@ extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
         return js_property_set(array, (Item){.item = i2it((int)index)}, value);
     }
     Array* arr = array.array;
+    Item index_key = (Item){.item = i2it((int)index)};
+    bool ta_proto_no_op = false;
+    bool ta_proto_bypass_accessor = js_array_ta_proto_numeric_set(array, index_key, &ta_proto_no_op);
+    if (ta_proto_no_op) return value;
     // check companion map for accessor/non-writable markers — must check even when idx >= length
     if (arr->extra != 0 && index >= 0) {
         Map* pm = (Map*)(uintptr_t)arr->extra;
@@ -8260,7 +8321,7 @@ extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
     // J39-7: ES OrdinarySet — walk Array.prototype chain for inherited
     // accessor on numeric-index key. Skipped during array literal construction
     // (transpiler emits js_array_set, not js_array_set_int — different path).
-    if (!js_skip_accessor_dispatch && index >= 0) {
+    if (!js_skip_accessor_dispatch && !ta_proto_bypass_accessor && index >= 0) {
         char idx_buf2[32];
         int idx_len2 = snprintf(idx_buf2, sizeof(idx_buf2), "%lld", (long long)index);
         Item arr_proto = js_get_prototype_of(array);
@@ -8339,6 +8400,9 @@ extern "C" Item js_array_set(Item array, Item index, Item value) {
     }
     int64_t idx = (int64_t)idx_d;
     Array* arr = array.array;
+    bool ta_proto_no_op = false;
+    js_array_ta_proto_numeric_set(array, index, &ta_proto_no_op);
+    if (ta_proto_no_op) return value;
 
     // v27: check __nw_ (non-writable) marker from companion map before writing
     if (arr->extra != 0 && idx >= 0 && idx < arr->length) {

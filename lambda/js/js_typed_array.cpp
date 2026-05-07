@@ -856,12 +856,15 @@ extern "C" Item js_typed_array_set(Item ta_item, Item index, Item value) {
         int current_length = js_typed_array_current_length(ta);
         void* data = js_typed_array_current_data(ta);
         if (idx < 0 || idx >= current_length || !data) return value;
-        int64_t iv = bigint_to_int64(bi);  // truncates to int64 for both signed/unsigned
         if (ta->element_type == JS_TYPED_BIGINT64) {
+            Item wrapped = js_bigint_as_int_n((Item){.item = i2it(64)}, bi);
+            if (js_check_exception()) return (Item){.item = ITEM_NULL};
+            int64_t iv = bigint_to_int64(wrapped);
             ((int64_t*)data)[idx] = iv;
         } else {
-            // BigUint64: take low 64 bits (unsigned wrap-around per spec)
-            ((uint64_t*)data)[idx] = (uint64_t)iv;
+            Item wrapped = js_bigint_as_uint_n((Item){.item = i2it(64)}, bi);
+            if (js_check_exception()) return (Item){.item = ITEM_NULL};
+            ((uint64_t*)data)[idx] = js_dataview_bigint_to_uint64(wrapped);
         }
         return value;
     }
