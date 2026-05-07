@@ -492,6 +492,14 @@ let tx_sp0 = cmd_split_block(s_at0)
 "split-at-0 left:";  len(doc_text(node_at(tx_sp0.doc_after, [0]))) == 0
 "split-at-0 right:"; doc_text(node_at(tx_sp0.doc_after, [1])) == "Hello, world."
 
+let empty_block_doc = node('doc', [node('paragraph', [text("")])])
+let empty_block_state = {doc: empty_block_doc, selection: text_selection(pos([0], 0), pos([0], 0))}
+let tx_empty_block_split = cmd_split_block(empty_block_state)
+"split empty block count:"; len(tx_empty_block_split.doc_after.content) == 2
+"split empty block left:"; node_at(tx_empty_block_split.doc_after, [0, 0]).text == ""
+"split empty block right:"; node_at(tx_empty_block_split.doc_after, [1, 0]).text == ""
+"split empty block caret:"; path_equal(tx_empty_block_split.sel_after.anchor.path, [1, 0]) and tx_empty_block_split.sel_after.anchor.offset == 0
+
 // split at end of a non-default block creates the schema default block
 let heading_doc = node('doc', [node_attrs('heading', [{name: 'level', value: 2}], [text("Title")])])
 let heading_state = {doc: heading_doc, selection: text_selection(pos([0, 0], 5), pos([0, 0], 5))}

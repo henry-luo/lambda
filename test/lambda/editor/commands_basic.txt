@@ -488,6 +488,14 @@ true
 true
 "split-at-0 right:"
 true
+"split empty block count:"
+true
+"split empty block left:"
+true
+"split empty block right:"
+true
+"split empty block caret:"
+true
 "split heading right tag:"
 true
 "split heading right attrs:"

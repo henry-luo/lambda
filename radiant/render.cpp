@@ -3500,6 +3500,12 @@ void render_caret(RenderContext* rdcon, RadiantState* state) {
     // Walk up from the text view's parent to get absolute coordinates
     // The caret x/y is already relative to the text's parent block
     View* parent = view->parent;  // Start from parent, not from view itself
+    bool applied_root_scroll = false;
+    DomDocument* doc = rdcon && rdcon->ui_context ? rdcon->ui_context->document : nullptr;
+    ViewBlock* root_block = nullptr;
+    if (doc && doc->view_tree && doc->view_tree->root && doc->view_tree->root->view_type == RDT_VIEW_BLOCK) {
+        root_block = (ViewBlock*)doc->view_tree->root;
+    }
     while (parent) {
         if (parent->view_type == RDT_VIEW_BLOCK ||
             parent->view_type == RDT_VIEW_INLINE_BLOCK ||
@@ -3511,9 +3517,15 @@ void render_caret(RenderContext* rdcon, RadiantState* state) {
             if (block->scroller && block->scroller->pane) {
                 x -= block->scroller->pane->h_scroll_position;
                 y -= block->scroller->pane->v_scroll_position;
+                if (block == root_block) applied_root_scroll = true;
             }
         }
         parent = parent->parent;
+    }
+
+    if (!applied_root_scroll && root_block && root_block->scroller && root_block->scroller->pane) {
+        x -= root_block->scroller->pane->h_scroll_position;
+        y -= root_block->scroller->pane->v_scroll_position;
     }
 
     // Add iframe offset (if the caret is inside an iframe, parent chain stops at iframe doc root)
@@ -3567,8 +3579,18 @@ static void selection_paint_rect_cb(float x, float y, float w, float h, void* ud
     SelectionPaintCtx* ctx = (SelectionPaintCtx*)ud;
     if (w <= 0 || h <= 0) return;
     float s = ctx->scale;
-    float px = (x + ctx->iframe_offset_x) * s;
-    float py = (y + ctx->iframe_offset_y) * s;
+    float scroll_x = 0.0f;
+    float scroll_y = 0.0f;
+    DomDocument* doc = ctx->rdcon && ctx->rdcon->ui_context ? ctx->rdcon->ui_context->document : nullptr;
+    if (doc && doc->view_tree && doc->view_tree->root && doc->view_tree->root->view_type == RDT_VIEW_BLOCK) {
+        ViewBlock* root = (ViewBlock*)doc->view_tree->root;
+        if (root->scroller && root->scroller->pane) {
+            scroll_x = root->scroller->pane->h_scroll_position;
+            scroll_y = root->scroller->pane->v_scroll_position;
+        }
+    }
+    float px = (x + ctx->iframe_offset_x - scroll_x) * s;
+    float py = (y + ctx->iframe_offset_y - scroll_y) * s;
     float pw = w * s;
     float ph = h * s;
     rc_fill_rect(ctx->rdcon, px, py, pw, ph, ctx->color);

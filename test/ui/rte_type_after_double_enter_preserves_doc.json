@@ -1,0 +1,20 @@
+{
+  "name": "RTE typing after repeated Enter preserves document",
+  "html": "test/ui/rte_prototype.ls",
+  "viewport": {"width": 1200, "height": 800},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "click", "target": {"text": "simple markdown document"}},
+    {"type": "key_press", "key": "enter"},
+    {"type": "wait", "ms": 120},
+    {"type": "key_press", "key": "enter"},
+    {"type": "wait", "ms": 120},
+    {"type": "type", "text": "x"},
+    {"type": "wait", "ms": 160},
+    {"type": "assert_text", "target": {"selector": "#doc"}, "contains": "Simple Markdown Test"},
+    {"type": "assert_text", "target": {"selector": "#doc"}, "contains": "This is a si"},
+    {"type": "assert_text", "target": {"selector": "#doc"}, "contains": "si\u200Bxmple markdown document"},
+    {"type": "assert_text", "target": {"selector": "#doc"}, "contains": "Basic Text"},
+    {"type": "assert_selection", "is_collapsed": true, "check_dom": true}
+  ]
+}

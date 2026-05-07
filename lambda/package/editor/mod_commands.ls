@@ -1651,6 +1651,24 @@ fn split_right_tag(state, block, cut, text_len) {
 fn split_right_attrs(block, right_tag) =>
   if (right_tag == block.tag) { block.attrs } else { [] }
 
+fn first_text_marks_in(n) {
+  if (is_text(n)) { n.marks }
+  else if (is_node(n) and len(n.content) > 0) { first_text_marks_in(n.content[0]) }
+  else { [] }
+}
+
+fn last_text_marks_in(n) {
+  if (is_text(n)) { n.marks }
+  else if (is_node(n) and len(n.content) > 0) { last_text_marks_in(n.content[len(n.content) - 1]) }
+  else { [] }
+}
+
+fn block_boundary_marks(block, offset) {
+  if (offset > 0 and offset <= len(block.content)) { last_text_marks_in(block.content[offset - 1]) }
+  else if (offset < len(block.content)) { first_text_marks_in(block.content[offset]) }
+  else { [] }
+}
+
 fn split_block_text_selection(state) {
   let span = same_parent_text_span_parts(state)
   if (span == null or len(span.parent_path) < 1) { null }
@@ -1734,11 +1752,33 @@ fn split_block_collapsed_selection(state) {
   }
 }
 
+fn split_block_node_selection(state) {
+  let sel = state.selection
+  let p = sel.anchor
+  let block_path = p.path
+  let block = node_at(state.doc, block_path)
+  if (len(block_path) < 1 or block == null or not is_node(block) or p.offset < 0 or p.offset > len(block.content)) { null }
+  else {
+    let grand_path = parent_path(block_path)
+    let block_idx = last_index(block_path)
+    let marks = block_boundary_marks(block, p.offset)
+    let left_content = nonempty_or_empty_text(list_slice(block.content, 0, p.offset), marks)
+    let right_content = nonempty_or_empty_text(list_slice(block.content, p.offset, len(block.content)), marks)
+    let right_tag = if (p.offset >= len(block.content) and block.tag != state_default_block(state)) { state_default_block(state) } else { block.tag }
+    let left_block = node_attrs(block.tag, block.attrs, left_content)
+    let right_block = node_attrs(right_tag, split_right_attrs(block, right_tag), right_content)
+    let tx0 = tx_begin(state.doc, sel)
+    let tx1 = tx_step(tx0, step_replace(grand_path, block_idx, block_idx + 1, [left_block, right_block]))
+    tx_set_selection(tx1, caret(first_caret_pos_in(right_block, [*grand_path, block_idx + 1])))
+  }
+}
+
 pub fn cmd_split_block(state) {
   let sel = state.selection
   if (sel == null) { null }
   else if (sel.kind == 'text' and not sel_collapsed(sel) and sel_same_parent_leaves(sel)) { split_block_text_selection(state) }
   else if (not sel_collapsed(sel)) { null }
+  else if (node_at(state.doc, sel.anchor.path) != null and is_node(node_at(state.doc, sel.anchor.path))) { split_block_node_selection(state) }
   else if (not sel_single_leaf(sel)) { null }
   else { split_block_collapsed_selection(state) }
 }
