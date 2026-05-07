@@ -1,8 +1,31 @@
 # Radiant Interactive State Machine and Event Log Proposal
 
-Status: proposal  
-Date: 2026-05-07  
-Scope: Radiant interactive UI state, state-machine consistency, JSON event/state logging, replay, and diagnostics
+**Status**: proposal by GPT 5.5       **Date**: 2026-05-07  
+
+**Prompt**
+Write a proposal at ./vibe/radiant/Radiant_State_Machine.md, to enhance interactive state handing under Radiant.
+1. ensure UI/radiant interactive states, like focus, caret, selection, doc history/url visited, form control states are centrally stored under the StateStore;
+2. model focus, caret, selection with state machine;
+to ensure ensure they are always in a consistent state.
+e.g. the entire doc always has only one focus, one caret position; selection if on, always has proper start and end;
+3. a new event/state log, other than current log.txt.
+log major events (doc load/unload, input events), major stats (like layout, render timing and memory usage), state snapshot (hit target, focus, caret, selection) after an event cascade session.
+log in JSON format.
+
+in order to make it easy to identify the elements, may need to device a way to give each element an id.
+opt 1: source/char position in the source doc. 
+only works for static doc.
+opt 2: p.2.span.5 // path like
+any other better options?
+
+the log serve multiple purposes:
+1) for debugging/diagnosing - easier to process than the text log.
+2) can be used to playback and test on the doc with the same sequence of event;
+3) can dev tools/scripts to monitor the stats, etc.;
+
+Any similar design/framework from other systems that we can reference and adopt the best design and practice? doc as prior art in the proposal.
+
+**Scope**: Radiant interactive UI state, state-machine consistency, JSON event/state logging, replay, and diagnostics
 
 ## Goal
 

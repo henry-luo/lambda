@@ -1,6 +1,31 @@
 # Radiant Interactive State Machine & Event Log — Design Proposal
 
-**Status:** Proposal · **Scope:** `radiant/state_store.{hpp,cpp}`,
+**Status:** Proposal by Opus 4.7
+
+**Prompt**
+Write a proposal at ./vibe/radiant/Radiant_State_Machine.md, to enhance interactive state handing under Radiant.
+1. ensure UI/radiant interactive states, like focus, caret, selection, doc history/url visited, form control states are centrally stored under the StateStore;
+2. model focus, caret, selection with state machine;
+to ensure ensure they are always in a consistent state.
+e.g. the entire doc always has only one focus, one caret position; selection if on, always has proper start and end;
+3. a new event/state log, other than current log.txt.
+log major events (doc load/unload, input events), major stats (like layout, render timing and memory usage), state snapshot (hit target, focus, caret, selection) after an event cascade session.
+log in JSON format.
+
+in order to make it easy to identify the elements, may need to device a way to give each element an id.
+opt 1: source/char position in the source doc. 
+only works for static doc.
+opt 2: p.2.span.5 // path like
+any other better options?
+
+the log serve multiple purposes:
+1) for debugging/diagnosing - easier to process than the text log.
+2) can be used to playback and test on the doc with the same sequence of event;
+3) can dev tools/scripts to monitor the stats, etc.;
+
+Any similar design/framework from other systems that we can reference and adopt the best design and practice? doc as prior art in the proposal.
+
+**Scope:** `radiant/state_store.{hpp,cpp}`,
 `radiant/event.cpp`, `radiant/dom_range.*`, `radiant/source_pos_bridge.*`
 **Related prior art in this repo:**
 [Radiant_Design_State.md](Radiant_Design_State.md),
