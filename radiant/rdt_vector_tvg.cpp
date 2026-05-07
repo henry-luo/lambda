@@ -63,6 +63,7 @@ struct RdtPicture {
     Pool* pool;            // owned pool (created by rdt_picture_load*); freed on rdt_picture_free
     bool owns_pool;        // true for originals, false for dups
     Element* svg_root;     // root <svg> element
+    char* source_path;     // original file path for resolving nested SVG refs
 
     // Common
     float width;           // intrinsic width (from viewBox or width attr) or override via set_size
@@ -622,7 +623,7 @@ void rdt_draw_image(RdtVector* vec, const uint32_t* pixels, int src_w, int src_h
 // Helper: parse SVG content into an Element tree and locate the root <svg>.
 // On success, allocates a private Pool and Input, returns a fully-populated
 // RdtPicture* in SVG_DOM mode.  Returns nullptr on failure.
-static RdtPicture* svg_picture_create(const char* data, int size) {
+static RdtPicture* svg_picture_create(const char* data, int size, const char* source_path) {
     if (!data || size <= 0) return nullptr;
 
     Pool* pool = pool_create();
@@ -668,6 +669,7 @@ static RdtPicture* svg_picture_create(const char* data, int size) {
     p->pool = pool;
     p->owns_pool = true;
     p->svg_root = svg_root;
+    p->source_path = source_path ? mem_strdup(source_path, MEM_CAT_RENDER) : nullptr;
     p->width = w;
     p->height = h;
     p->has_transform = false;
@@ -692,7 +694,7 @@ RdtPicture* rdt_picture_load(const char* path) {
     size_t rd = fread(buf, 1, (size_t)fsz, fp);
     fclose(fp);
 
-    RdtPicture* p = svg_picture_create(buf, (int)rd);
+    RdtPicture* p = svg_picture_create(buf, (int)rd, path);
     mem_free(buf);
     if (!p) {
         log_error("rdt_picture_load: failed to parse %s", path);
@@ -706,7 +708,7 @@ RdtPicture* rdt_picture_load_data(const char* data, int size, const char* mime_t
     // mime_type is accepted for API compatibility; non-svg types fall through
     // to the SVG parser which will fail gracefully.
     (void)mime_type;
-    return svg_picture_create(data, size);
+    return svg_picture_create(data, size, nullptr);
 }
 
 RdtPicture* rdt_picture_dup(RdtPicture* pic) {
@@ -731,11 +733,68 @@ RdtPicture* rdt_picture_dup(RdtPicture* pic) {
     p->pool = pic->pool;
     p->owns_pool = false;
     p->svg_root = pic->svg_root;
+    p->source_path = pic->source_path;
     p->width = pic->width;
     p->height = pic->height;
     p->transform = pic->transform;
     p->has_transform = pic->has_transform;
     return p;
+}
+
+static const char* rdt_picture_elem_attr(Element* element, const char* attr_name) {
+    if (!element || !element->data || !attr_name) return nullptr;
+    TypeElmt* elem_type = (TypeElmt*)element->type;
+    if (!elem_type) return nullptr;
+    TypeMap* map_type = (TypeMap*)elem_type;
+    if (!map_type->shape) return nullptr;
+
+    size_t attr_len = strlen(attr_name);
+    ShapeEntry* field = map_type->shape;
+    for (int i = 0; i < map_type->length && field; i++) {
+        if (field->name && field->name->str &&
+            field->name->length == attr_len &&
+            strncmp(field->name->str, attr_name, attr_len) == 0 &&
+            field->type && field->type->type_id == LMD_TYPE_STRING) {
+            void* data = ((char*)element->data) + field->byte_offset;
+            String* str_val = *(String**)data;
+            return str_val ? str_val->chars : nullptr;
+        }
+        field = field->next;
+    }
+    return nullptr;
+}
+
+static Element* rdt_picture_find_id_recursive(Element* elem, const char* id) {
+    if (!elem || !id) return nullptr;
+    const char* elem_id = rdt_picture_elem_attr(elem, "id");
+    if (elem_id && strcmp(elem_id, id) == 0) return elem;
+    for (int64_t i = 0; i < elem->length; i++) {
+        Item child = elem->items[i];
+        if (get_type_id(child) != LMD_TYPE_ELEMENT) continue;
+        Element* found = rdt_picture_find_id_recursive(child.element, id);
+        if (found) return found;
+    }
+    return nullptr;
+}
+
+Element* rdt_picture_get_svg_root(RdtPicture* pic) {
+    if (!pic || pic->kind != RdtPicture::KIND_SVG_DOM) return nullptr;
+    return pic->svg_root;
+}
+
+Element* rdt_picture_find_svg_element_by_id(RdtPicture* pic, const char* id) {
+    if (!pic || pic->kind != RdtPicture::KIND_SVG_DOM || !id || !*id) return nullptr;
+    return rdt_picture_find_id_recursive(pic->svg_root, id);
+}
+
+Pool* rdt_picture_get_pool(RdtPicture* pic) {
+    if (!pic || pic->kind != RdtPicture::KIND_SVG_DOM) return nullptr;
+    return pic->pool;
+}
+
+const char* rdt_picture_get_source_path(RdtPicture* pic) {
+    if (!pic || pic->kind != RdtPicture::KIND_SVG_DOM) return nullptr;
+    return pic->source_path;
 }
 
 void rdt_picture_get_size(RdtPicture* pic, float* w, float* h) {
@@ -765,7 +824,8 @@ static void svg_dom_picture_draw(RdtVector* vec, RdtPicture* pic,
     // SVG_DOM; it's only used for raster image draw via rdt_draw_image.
     (void)opacity;
     render_svg_to_vec(vec, pic->svg_root, pic->width, pic->height,
-                      pic->pool, 1.0f, g_picture_font_ctx, &base, nullptr);
+                      pic->pool, 1.0f, g_picture_font_ctx, &base, nullptr,
+                      nullptr, nullptr, pic->source_path);
 }
 
 void rdt_picture_draw(RdtVector* vec, RdtPicture* pic,
@@ -841,6 +901,9 @@ void rdt_picture_free(RdtPicture* pic) {
     if (pic->kind == RdtPicture::KIND_SVG_DOM) {
         if (pic->owns_pool && pic->pool) {
             pool_destroy(pic->pool);
+        }
+        if (pic->owns_pool && pic->source_path) {
+            mem_free(pic->source_path);
         }
         // input is allocated from the pool; destroyed implicitly above
     } else {

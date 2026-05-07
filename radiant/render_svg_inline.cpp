@@ -15,6 +15,7 @@
 #include "../lib/font/font_internal.h"
 #include "../lib/strbuf.h"
 #include "../lib/str.h"
+#include "../lib/file.h"
 #include <string.h>
 #include "../lib/mem.h"
 #include "../lib/base64.h"
@@ -138,6 +139,101 @@ static const char* get_svg_attr(Element* elem, const char* name) {
     return extract_element_attribute(elem, name, nullptr);
 }
 
+struct SvgStyleRule {
+    char selector[128];
+    char name[64];
+    char value[256];
+    int specificity;
+    int order;
+};
+
+static void svg_copy_trim(char* dst, size_t dst_size, const char* start, const char* end) {
+    if (!dst || dst_size == 0) return;
+    if (!start || !end || end <= start) { dst[0] = '\0'; return; }
+    while (start < end && isspace((unsigned char)*start)) start++;
+    while (end > start && isspace((unsigned char)end[-1])) end--;
+    size_t len = (size_t)(end - start);
+    if (len >= dst_size) len = dst_size - 1;
+    memcpy(dst, start, len);
+    dst[len] = '\0';
+}
+
+static bool svg_class_list_contains(const char* class_attr, const char* cls, size_t cls_len) {
+    if (!class_attr || !cls || cls_len == 0) return false;
+    const char* p = class_attr;
+    while (*p) {
+        while (*p && isspace((unsigned char)*p)) p++;
+        const char* start = p;
+        while (*p && !isspace((unsigned char)*p)) p++;
+        if ((size_t)(p - start) == cls_len && strncmp(start, cls, cls_len) == 0) return true;
+    }
+    return false;
+}
+
+static int svg_selector_specificity(const char* selector) {
+    if (!selector || !*selector) return 0;
+    int score = 0;
+    for (const char* p = selector; *p; p++) {
+        if (*p == '#') score += 100;
+        else if (*p == '.') score += 10;
+    }
+    if (selector[0] != '#' && selector[0] != '.' && selector[0] != '*') score += 1;
+    return score;
+}
+
+static bool svg_simple_selector_matches(Element* elem, const char* selector) {
+    if (!elem || !selector || !*selector) return false;
+    while (isspace((unsigned char)*selector)) selector++;
+    if (strchr(selector, ' ') || strchr(selector, '>') || strchr(selector, '+') ||
+        strchr(selector, '~') || strchr(selector, ',')) {
+        return false;
+    }
+    if (strcmp(selector, "*") == 0) return true;
+
+    const char* tag = get_element_tag_name(elem);
+    const char* id = get_svg_attr(elem, "id");
+    const char* cls_attr = get_svg_attr(elem, "class");
+    const char* p = selector;
+    if (*p && *p != '#' && *p != '.') {
+        const char* start = p;
+        while (*p && *p != '#' && *p != '.') p++;
+        if (!tag || (size_t)(p - start) != strlen(tag) || strncmp(start, tag, (size_t)(p - start)) != 0) return false;
+    }
+    while (*p) {
+        if (*p == '#') {
+            p++;
+            const char* start = p;
+            while (*p && *p != '.' && *p != '#') p++;
+            if (!id || (size_t)(p - start) != strlen(id) || strncmp(start, id, (size_t)(p - start)) != 0) return false;
+        } else if (*p == '.') {
+            p++;
+            const char* start = p;
+            while (*p && *p != '.' && *p != '#') p++;
+            if (!svg_class_list_contains(cls_attr, start, (size_t)(p - start))) return false;
+        } else {
+            return false;
+        }
+    }
+    return true;
+}
+
+static const char* get_svg_style_rule_value(SvgRenderContext* ctx, Element* elem, const char* name, char* buffer, size_t buffer_size) {
+    if (!ctx || !ctx->style_rules || !elem || !name || !buffer || buffer_size == 0) return nullptr;
+    SvgStyleRule* rules = (SvgStyleRule*)ctx->style_rules;
+    SvgStyleRule* best = nullptr;
+    for (int i = 0; i < ctx->style_rule_count; i++) {
+        if (strcmp(rules[i].name, name) != 0) continue;
+        if (!svg_simple_selector_matches(elem, rules[i].selector)) continue;
+        if (!best || rules[i].specificity > best->specificity ||
+            (rules[i].specificity == best->specificity && rules[i].order > best->order)) {
+            best = &rules[i];
+        }
+    }
+    if (!best) return nullptr;
+    str_copy(buffer, buffer_size, best->value, strlen(best->value));
+    return buffer;
+}
+
 static bool svg_style_name_matches(const char* style, const char* name, size_t name_len) {
     if (strncmp(style, name, name_len) != 0) return false;
     const char* p = style + name_len;
@@ -145,44 +241,96 @@ static bool svg_style_name_matches(const char* style, const char* name, size_t n
     return *p == ':';
 }
 
-static const char* get_svg_attr_or_style(Element* elem, const char* name, char* buffer, size_t buffer_size) {
-    const char* attr = get_svg_attr(elem, name);
-    if (attr) return attr;
+static const char* get_svg_attr_or_style(SvgRenderContext* ctx, Element* elem, const char* name, char* buffer, size_t buffer_size) {
     if (!buffer || buffer_size == 0) return nullptr;
 
     const char* style = get_svg_attr(elem, "style");
-    if (!style) return nullptr;
+    if (style) {
+        size_t name_len = strlen(name);
+        const char* p = style;
+        while (*p) {
+            while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r' || *p == ';') p++;
+            if (!*p) break;
 
-    size_t name_len = strlen(name);
-    const char* p = style;
-    while (*p) {
-        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r' || *p == ';') p++;
-        if (!*p) break;
+            if (svg_style_name_matches(p, name, name_len)) {
+                p += name_len;
+                while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
+                if (*p == ':') p++;
+                while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
 
-        if (svg_style_name_matches(p, name, name_len)) {
-            p += name_len;
-            while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
-            if (*p == ':') p++;
-            while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
-
-            const char* value_start = p;
-            while (*p && *p != ';') p++;
-            const char* value_end = p;
-            while (value_end > value_start &&
-                   (value_end[-1] == ' ' || value_end[-1] == '\t' || value_end[-1] == '\n' || value_end[-1] == '\r')) {
-                value_end--;
+                const char* value_start = p;
+                while (*p && *p != ';') p++;
+                svg_copy_trim(buffer, buffer_size, value_start, p);
+                return buffer;
             }
-            size_t value_len = value_end - value_start;
-            if (value_len >= buffer_size) value_len = buffer_size - 1;
-            memcpy(buffer, value_start, value_len);
-            buffer[value_len] = '\0';
-            return buffer;
-        }
 
-        while (*p && *p != ';') p++;
-        if (*p == ';') p++;
+            while (*p && *p != ';') p++;
+            if (*p == ';') p++;
+        }
     }
+
+    const char* rule_value = get_svg_style_rule_value(ctx, elem, name, buffer, buffer_size);
+    if (rule_value) return rule_value;
+
+    const char* attr = get_svg_attr(elem, name);
+    if (attr) return attr;
     return nullptr;
+}
+
+static void svg_add_style_rule(SvgRenderContext* ctx, const char* selector_start, const char* selector_end,
+                               const char* name_start, const char* name_end,
+                               const char* value_start, const char* value_end) {
+    if (!ctx || !selector_start || !name_start || !value_start) return;
+    if (ctx->style_rule_count >= 256) return;
+    if (!ctx->style_rules) {
+        ctx->style_rule_capacity = 64;
+        ctx->style_rules = mem_calloc(ctx->style_rule_capacity, sizeof(SvgStyleRule), MEM_CAT_RENDER);
+    } else if (ctx->style_rule_count >= ctx->style_rule_capacity) {
+        int new_cap = ctx->style_rule_capacity * 2;
+        SvgStyleRule* old_rules = (SvgStyleRule*)ctx->style_rules;
+        SvgStyleRule* new_rules = (SvgStyleRule*)mem_calloc(new_cap, sizeof(SvgStyleRule), MEM_CAT_RENDER);
+        if (!new_rules) return;
+        memcpy(new_rules, old_rules, sizeof(SvgStyleRule) * ctx->style_rule_count);
+        mem_free(old_rules);
+        ctx->style_rules = new_rules;
+        ctx->style_rule_capacity = new_cap;
+    }
+    SvgStyleRule* rules = (SvgStyleRule*)ctx->style_rules;
+    SvgStyleRule* rule = &rules[ctx->style_rule_count];
+    svg_copy_trim(rule->selector, sizeof(rule->selector), selector_start, selector_end);
+    svg_copy_trim(rule->name, sizeof(rule->name), name_start, name_end);
+    svg_copy_trim(rule->value, sizeof(rule->value), value_start, value_end);
+    if (!rule->selector[0] || !rule->name[0] || !rule->value[0]) return;
+    rule->specificity = svg_selector_specificity(rule->selector);
+    rule->order = ctx->style_rule_count;
+    ctx->style_rule_count++;
+}
+
+static void parse_svg_style_text(SvgRenderContext* ctx, const char* css) {
+    if (!ctx || !css) return;
+    const char* p = css;
+    while (*p) {
+        while (*p && isspace((unsigned char)*p)) p++;
+        const char* selector_start = p;
+        while (*p && *p != '{') p++;
+        if (*p != '{') break;
+        const char* selector_end = p++;
+        const char* block_end = strchr(p, '}');
+        if (!block_end) break;
+        const char* d = p;
+        while (d < block_end) {
+            while (d < block_end && (isspace((unsigned char)*d) || *d == ';')) d++;
+            const char* name_start = d;
+            while (d < block_end && *d != ':' && *d != ';') d++;
+            if (d >= block_end || *d != ':') break;
+            const char* name_end = d++;
+            const char* value_start = d;
+            while (d < block_end && *d != ';') d++;
+            svg_add_style_rule(ctx, selector_start, selector_end, name_start, name_end, value_start, d);
+            if (d < block_end && *d == ';') d++;
+        }
+        p = block_end + 1;
+    }
 }
 
 // ============================================================================
@@ -877,11 +1025,11 @@ static void draw_svg_fill_stroke(SvgRenderContext* ctx, RdtPath* path, Element* 
     char stroke_opacity_buf[64];
     char linecap_buf[64];
     char linejoin_buf[64];
-    const char* fill = get_svg_attr_or_style(elem, "fill", fill_buf, sizeof(fill_buf));
+    const char* fill = get_svg_attr_or_style(ctx, elem, "fill", fill_buf, sizeof(fill_buf));
     Color fc;
     bool has_fill = true;
     bool gradient_applied = false;
-    const char* fill_rule_attr = get_svg_attr_or_style(elem, "fill-rule", fill_rule_buf, sizeof(fill_rule_buf));
+    const char* fill_rule_attr = get_svg_attr_or_style(ctx, elem, "fill-rule", fill_rule_buf, sizeof(fill_rule_buf));
     RdtFillRule fill_rule = (fill_rule_attr && strcmp(fill_rule_attr, "evenodd") == 0)
         ? RDT_FILL_EVEN_ODD : RDT_FILL_WINDING;
 
@@ -923,12 +1071,12 @@ static void draw_svg_fill_stroke(SvgRenderContext* ctx, RdtPath* path, Element* 
     }
 
     if (has_fill) {
-        const char* fill_opacity = get_svg_attr_or_style(elem, "fill-opacity", fill_opacity_buf, sizeof(fill_opacity_buf));
+        const char* fill_opacity = get_svg_attr_or_style(ctx, elem, "fill-opacity", fill_opacity_buf, sizeof(fill_opacity_buf));
         if (fill_opacity) {
             float opacity = strtof(fill_opacity, nullptr);
             fc.a = (uint8_t)(fc.a * opacity);
         }
-        const char* opacity = get_svg_attr_or_style(elem, "opacity", opacity_buf, sizeof(opacity_buf));
+        const char* opacity = get_svg_attr_or_style(ctx, elem, "opacity", opacity_buf, sizeof(opacity_buf));
         if (opacity) {
             float op = strtof(opacity, nullptr);
             fc.a = (uint8_t)(fc.a * op);
@@ -941,7 +1089,7 @@ static void draw_svg_fill_stroke(SvgRenderContext* ctx, RdtPath* path, Element* 
     }
 
     // --- STROKE ---
-    const char* stroke = get_svg_attr_or_style(elem, "stroke", stroke_buf, sizeof(stroke_buf));
+    const char* stroke = get_svg_attr_or_style(ctx, elem, "stroke", stroke_buf, sizeof(stroke_buf));
     bool has_stroke = false;
     Color sc;
 
@@ -960,10 +1108,10 @@ static void draw_svg_fill_stroke(SvgRenderContext* ctx, RdtPath* path, Element* 
     }
 
     if (has_stroke) {
-        const char* stroke_width_str = get_svg_attr_or_style(elem, "stroke-width", stroke_width_buf, sizeof(stroke_width_buf));
+        const char* stroke_width_str = get_svg_attr_or_style(ctx, elem, "stroke-width", stroke_width_buf, sizeof(stroke_width_buf));
         float stroke_width = stroke_width_str ? parse_svg_length(stroke_width_str, 1.0f) : ctx->stroke_width;
 
-        const char* stroke_opacity = get_svg_attr_or_style(elem, "stroke-opacity", stroke_opacity_buf, sizeof(stroke_opacity_buf));
+        const char* stroke_opacity = get_svg_attr_or_style(ctx, elem, "stroke-opacity", stroke_opacity_buf, sizeof(stroke_opacity_buf));
         if (stroke_opacity) {
             float opacity = strtof(stroke_opacity, nullptr);
             sc.a = (uint8_t)(sc.a * opacity);
@@ -975,7 +1123,7 @@ static void draw_svg_fill_stroke(SvgRenderContext* ctx, RdtPath* path, Element* 
 
         // linecap
         RdtStrokeCap cap = RDT_CAP_BUTT;
-        const char* linecap = get_svg_attr_or_style(elem, "stroke-linecap", linecap_buf, sizeof(linecap_buf));
+        const char* linecap = get_svg_attr_or_style(ctx, elem, "stroke-linecap", linecap_buf, sizeof(linecap_buf));
         if (linecap) {
             if (strcmp(linecap, "round") == 0)       cap = RDT_CAP_ROUND;
             else if (strcmp(linecap, "square") == 0)  cap = RDT_CAP_SQUARE;
@@ -983,7 +1131,7 @@ static void draw_svg_fill_stroke(SvgRenderContext* ctx, RdtPath* path, Element* 
 
         // linejoin
         RdtStrokeJoin join = RDT_JOIN_MITER;
-        const char* linejoin = get_svg_attr_or_style(elem, "stroke-linejoin", linejoin_buf, sizeof(linejoin_buf));
+        const char* linejoin = get_svg_attr_or_style(ctx, elem, "stroke-linejoin", linejoin_buf, sizeof(linejoin_buf));
         if (linejoin) {
             if (strcmp(linejoin, "round") == 0)       join = RDT_JOIN_ROUND;
             else if (strcmp(linejoin, "bevel") == 0)   join = RDT_JOIN_BEVEL;
@@ -2036,6 +2184,25 @@ static const char* get_direct_text_content(Element* elem) {
     return nullptr;
 }
 
+static void collect_svg_style_rules(SvgRenderContext* ctx, Element* elem) {
+    if (!ctx || !elem) return;
+    const char* tag = get_element_tag_name(elem);
+    if (tag && strcmp(tag, "style") == 0) {
+        const char* css = get_direct_text_content(elem);
+        if (css && *css) {
+            parse_svg_style_text(ctx, css);
+            log_debug("[SVG] collected embedded style rules, total=%d", ctx->style_rule_count);
+            mem_free((void*)css);
+        }
+        return;
+    }
+    for (int64_t i = 0; i < elem->length; i++) {
+        Element* child = get_child_element_at(elem, i);
+        if (!child) continue;
+        collect_svg_style_rules(ctx, child);
+    }
+}
+
 /**
  * Create a single ThorVG text object with specified properties
  * Note: font_size is in CSS pixels, but ThorVG uses points internally.
@@ -2414,6 +2581,33 @@ static bool svg_image_href_is_svg(const char* href) {
     return str_ieq_const(end - 4, 4, ".svg");
 }
 
+static char* svg_href_file_part(const char* href, const char** fragment_out) {
+    if (fragment_out) *fragment_out = nullptr;
+    if (!href || !*href) return nullptr;
+    const char* fragment = strchr(href, '#');
+    const char* end = fragment ? fragment : href + strlen(href);
+    if (fragment_out && fragment && fragment[1]) *fragment_out = fragment + 1;
+    if (end == href) return mem_strdup("", MEM_CAT_RENDER);
+    char* out = (char*)mem_alloc((size_t)(end - href) + 1, MEM_CAT_RENDER);
+    if (!out) return nullptr;
+    memcpy(out, href, (size_t)(end - href));
+    out[end - href] = '\0';
+    return out;
+}
+
+static char* svg_resolve_resource_path(SvgRenderContext* ctx, const char* href_no_fragment) {
+    if (!href_no_fragment || !*href_no_fragment) return nullptr;
+    if (strncmp(href_no_fragment, "data:", 5) == 0 || strstr(href_no_fragment, "://") || href_no_fragment[0] == '/') {
+        return mem_strdup(href_no_fragment, MEM_CAT_RENDER);
+    }
+    if (!ctx || !ctx->source_path || !*ctx->source_path) return mem_strdup(href_no_fragment, MEM_CAT_RENDER);
+    char* dir = file_path_dirname(ctx->source_path);
+    if (!dir) return mem_strdup(href_no_fragment, MEM_CAT_RENDER);
+    char* path = file_path_join(dir, href_no_fragment);
+    mem_free(dir);
+    return path;
+}
+
 static void render_svg_image(SvgRenderContext* ctx, Element* elem) {
     if (!elem) return;
 
@@ -2534,9 +2728,13 @@ static void render_svg_image(SvgRenderContext* ctx, Element* elem) {
         log_debug("[SVG] <image> loaded: %s at (%.1f, %.1f) size %.1fx%.1f", href, x, y, width, height);
         return;
     } else if (href_is_svg) {
-        RdtPicture* rdt_pic = rdt_picture_load(href);
+        char* href_file = svg_href_file_part(href, nullptr);
+        char* resolved_href = svg_resolve_resource_path(ctx, href_file ? href_file : href);
+        if (href_file) mem_free(href_file);
+        RdtPicture* rdt_pic = rdt_picture_load(resolved_href ? resolved_href : href);
         if (!rdt_pic) {
             log_debug("[SVG] <image> failed to parse nested SVG: %s", href);
+            if (resolved_href) mem_free(resolved_href);
             return;
         }
         if (width > 0 && height > 0) {
@@ -2557,14 +2755,19 @@ static void render_svg_image(SvgRenderContext* ctx, Element* elem) {
         if (!ctx->dl) {
             rdt_picture_free(rdt_pic);
         }
-        log_debug("[SVG] <image> loaded nested SVG: %s at (%.1f, %.1f) size %.1fx%.1f", href, x, y, width, height);
+        log_debug("[SVG] <image> loaded nested SVG: %s at (%.1f, %.1f) size %.1fx%.1f", resolved_href ? resolved_href : href, x, y, width, height);
+        if (resolved_href) mem_free(resolved_href);
         return;
     } else {
         Tvg_Paint pic = tvg_picture_new();
         if (!pic) return;
-        Tvg_Result result = tvg_picture_load(pic, href);
+        char* href_file = svg_href_file_part(href, nullptr);
+        char* resolved_href = svg_resolve_resource_path(ctx, href_file ? href_file : href);
+        if (href_file) mem_free(href_file);
+        Tvg_Result result = tvg_picture_load(pic, resolved_href ? resolved_href : href);
         if (result != TVG_RESULT_SUCCESS) {
             log_debug("[SVG] <image> failed to load: %s", href);
+            if (resolved_href) mem_free(resolved_href);
             tvg_paint_unref(pic, true);
             return;
         }
@@ -2596,6 +2799,7 @@ static void render_svg_image(SvgRenderContext* ctx, Element* elem) {
 
         log_debug("[SVG] <image> loaded: %s at (%.1f, %.1f) size %.1fx%.1f",
                   href, x, y, width, height);
+        if (resolved_href) mem_free(resolved_href);
     }
 }
 
@@ -2732,7 +2936,7 @@ static void render_svg_group(SvgRenderContext* ctx, Element* elem) {
 
     // apply group opacity via save/composite for correct compositing
     char opacity_buf[64];
-    const char* opacity_attr = get_svg_attr_or_style(elem, "opacity", opacity_buf, sizeof(opacity_buf));
+    const char* opacity_attr = get_svg_attr_or_style(ctx, elem, "opacity", opacity_buf, sizeof(opacity_buf));
     float group_op = 1.0f;
     bool use_opacity_layer = false;
     int op_x0 = 0, op_y0 = 0, op_w = 0, op_h = 0;
@@ -2771,14 +2975,14 @@ static void render_svg_group(SvgRenderContext* ctx, Element* elem) {
 
     // update CSS 'color' property (for currentColor keyword)
     char color_buf[256];
-    const char* color_attr = get_svg_attr_or_style(elem, "color", color_buf, sizeof(color_buf));
+    const char* color_attr = get_svg_attr_or_style(ctx, elem, "color", color_buf, sizeof(color_buf));
     if (color_attr) {
         ctx->current_color = parse_svg_color(color_attr);
     }
 
     // update inherited state from group attributes
     char fill_buf[256];
-    const char* fill = get_svg_attr_or_style(elem, "fill", fill_buf, sizeof(fill_buf));
+    const char* fill = get_svg_attr_or_style(ctx, elem, "fill", fill_buf, sizeof(fill_buf));
     if (fill) {
         if (strcmp(fill, "none") == 0) {
             ctx->fill_none = true;
@@ -2789,7 +2993,7 @@ static void render_svg_group(SvgRenderContext* ctx, Element* elem) {
     }
 
     char stroke_buf[256];
-    const char* stroke = get_svg_attr_or_style(elem, "stroke", stroke_buf, sizeof(stroke_buf));
+    const char* stroke = get_svg_attr_or_style(ctx, elem, "stroke", stroke_buf, sizeof(stroke_buf));
     if (stroke) {
         if (strcmp(stroke, "none") == 0) {
             ctx->stroke_none = true;
@@ -2800,7 +3004,7 @@ static void render_svg_group(SvgRenderContext* ctx, Element* elem) {
     }
 
     char stroke_width_buf[64];
-    const char* stroke_width = get_svg_attr_or_style(elem, "stroke-width", stroke_width_buf, sizeof(stroke_width_buf));
+    const char* stroke_width = get_svg_attr_or_style(ctx, elem, "stroke-width", stroke_width_buf, sizeof(stroke_width_buf));
     if (stroke_width) {
         ctx->stroke_width = parse_svg_length(stroke_width, 1.0f);
     }
@@ -2875,6 +3079,142 @@ static void process_svg_defs(SvgRenderContext* ctx, Element* defs) {
     }
 }
 
+static void process_svg_root_resources(SvgRenderContext* ctx, Element* svg_element) {
+    if (!ctx || !svg_element) return;
+    collect_svg_style_rules(ctx, svg_element);
+    for (int64_t i = 0; i < svg_element->length; i++) {
+        Element* child = get_child_element_at(svg_element, i);
+        if (!child) continue;
+        const char* child_tag = get_element_tag_name(child);
+        if (!child_tag) continue;
+        if (strcmp(child_tag, "defs") == 0) {
+            process_svg_defs(ctx, child);
+        } else if (strcmp(child_tag, "linearGradient") == 0 ||
+                   strcmp(child_tag, "radialGradient") == 0 ||
+                   strcmp(child_tag, "clipPath") == 0 ||
+                   strcmp(child_tag, "mask") == 0 ||
+                   strcmp(child_tag, "symbol") == 0 ||
+                   strcmp(child_tag, "pattern") == 0) {
+            register_svg_def_element(ctx, child);
+        }
+    }
+}
+
+static void render_svg_use_target(SvgRenderContext* ctx, Element* use_elem, Element* ref, const char* href) {
+    if (!ctx || !use_elem || !ref) return;
+    float ux = parse_svg_length(get_svg_attr(use_elem, "x"), 0.0f);
+    float uy = parse_svg_length(get_svg_attr(use_elem, "y"), 0.0f);
+    RdtMatrix saved = ctx->transform;
+    Color saved_color = ctx->current_color;
+    RdtMatrix el_m = compose_element_transform(ctx, use_elem);
+    if (ux != 0.0f || uy != 0.0f) {
+        RdtMatrix translate = rdt_matrix_translate(ux, uy);
+        ctx->transform = rdt_matrix_multiply(&el_m, &translate);
+    } else {
+        ctx->transform = el_m;
+    }
+
+    const char* use_color = get_svg_attr(use_elem, "color");
+    if (use_color) {
+        ctx->current_color = parse_svg_color(use_color);
+    }
+
+    const char* ref_tag = get_element_tag_name(ref);
+    if (ref_tag && strcmp(ref_tag, "symbol") == 0) {
+        const char* vb_attr = get_svg_attr(ref, "viewBox");
+        SvgViewBox vb = parse_svg_viewbox(vb_attr);
+        float sym_w = parse_svg_length(get_svg_attr(use_elem, "width"), vb.has_viewbox ? vb.width : 0);
+        float sym_h = parse_svg_length(get_svg_attr(use_elem, "height"), vb.has_viewbox ? vb.height : 0);
+
+        if (vb.has_viewbox && sym_w > 0 && sym_h > 0) {
+            float sx = sym_w / vb.width;
+            float sy = sym_h / vb.height;
+            const char* par = get_svg_attr(ref, "preserveAspectRatio");
+            bool par_none = par && strcmp(par, "none") == 0;
+            bool par_slice = par && strstr(par, "slice") != nullptr;
+            if (!par_none) {
+                float scale = par_slice ? fmax(sx, sy) : fmin(sx, sy);
+                float align_x = 0.5f, align_y = 0.5f;
+                if (par) {
+                    if      (strstr(par, "xMin")) align_x = 0.0f;
+                    else if (strstr(par, "xMax")) align_x = 1.0f;
+                    if      (strstr(par, "YMin")) align_y = 0.0f;
+                    else if (strstr(par, "YMax")) align_y = 1.0f;
+                }
+                float tx = -vb.min_x * scale + (sym_w - vb.width * scale) * align_x;
+                float ty = -vb.min_y * scale + (sym_h - vb.height * scale) * align_y;
+                RdtMatrix vb_m = {scale, 0, tx, 0, scale, ty, 0, 0, 1};
+                ctx->transform = rdt_matrix_multiply(&ctx->transform, &vb_m);
+            } else {
+                float tx = -vb.min_x * sx;
+                float ty = -vb.min_y * sy;
+                RdtMatrix vb_m = {sx, 0, tx, 0, sy, ty, 0, 0, 1};
+                ctx->transform = rdt_matrix_multiply(&ctx->transform, &vb_m);
+            }
+        }
+        render_svg_children(ctx, ref);
+        log_debug("[SVG] rendered <use> -> <symbol> href='%s'", href ? href : "(none)");
+    } else {
+        render_svg_element(ctx, ref);
+    }
+
+    ctx->transform = saved;
+    ctx->current_color = saved_color;
+}
+
+static bool render_svg_external_use(SvgRenderContext* ctx, Element* use_elem, const char* href) {
+    if (!ctx || !use_elem || !href) return false;
+    const char* fragment = nullptr;
+    char* href_file = svg_href_file_part(href, &fragment);
+    if (!href_file || !*href_file || !fragment || !*fragment) {
+        if (href_file) mem_free(href_file);
+        return false;
+    }
+    char* resolved_href = svg_resolve_resource_path(ctx, href_file);
+    mem_free(href_file);
+    if (!resolved_href) return false;
+
+    RdtPicture* pic = rdt_picture_load(resolved_href);
+    if (!pic) {
+        log_debug("[SVG] external <use> failed to load '%s'", resolved_href);
+        mem_free(resolved_href);
+        return false;
+    }
+    Element* root = rdt_picture_get_svg_root(pic);
+    Element* ref = rdt_picture_find_svg_element_by_id(pic, fragment);
+    if (!root || !ref) {
+        log_debug("[SVG] external <use> missing id '%s' in '%s'", fragment, resolved_href);
+        rdt_picture_free(pic);
+        mem_free(resolved_href);
+        return false;
+    }
+
+    HashMap* saved_defs = ctx->defs;
+    void* saved_rules = ctx->style_rules;
+    int saved_rule_count = ctx->style_rule_count;
+    int saved_rule_capacity = ctx->style_rule_capacity;
+    const char* saved_source_path = ctx->source_path;
+    ctx->defs = nullptr;
+    ctx->style_rules = nullptr;
+    ctx->style_rule_count = 0;
+    ctx->style_rule_capacity = 0;
+    ctx->source_path = rdt_picture_get_source_path(pic);
+    process_svg_root_resources(ctx, root);
+    render_svg_use_target(ctx, use_elem, ref, href);
+    if (ctx->style_rules) mem_free(ctx->style_rules);
+    if (ctx->defs) mem_free(ctx->defs);
+    ctx->defs = saved_defs;
+    ctx->style_rules = saved_rules;
+    ctx->style_rule_count = saved_rule_count;
+    ctx->style_rule_capacity = saved_rule_capacity;
+    ctx->source_path = saved_source_path;
+
+    rdt_picture_free(pic);
+    log_debug("[SVG] external <use> rendered href='%s'", href);
+    mem_free(resolved_href);
+    return true;
+}
+
 // ============================================================================
 // Main SVG Element Dispatcher
 // ============================================================================
@@ -2923,75 +3263,17 @@ static void render_svg_element(SvgRenderContext* ctx, Element* elem) {
     } else if (strcmp(tag, "use") == 0) {
         const char* href = get_svg_attr(elem, "href");
         if (!href) href = get_svg_attr(elem, "xlink:href");
+        bool resolved = false;
         if (href && href[0] == '#' && ctx->defs) {
             Element* ref = lookup_elem_def((SvgDefTable*)ctx->defs, href + 1);
             if (ref) {
-                float ux = parse_svg_length(get_svg_attr(elem, "x"), 0.0f);
-                float uy = parse_svg_length(get_svg_attr(elem, "y"), 0.0f);
-                // compose <use> offset + element transform with accumulated transform
-                RdtMatrix saved = ctx->transform;
-                Color saved_color = ctx->current_color;
-                RdtMatrix el_m = compose_element_transform(ctx, elem);
-                if (ux != 0.0f || uy != 0.0f) {
-                    RdtMatrix translate = rdt_matrix_translate(ux, uy);
-                    ctx->transform = rdt_matrix_multiply(&el_m, &translate);
-                } else {
-                    ctx->transform = el_m;
-                }
-
-                // update currentColor from <use> element's color attribute
-                const char* use_color = get_svg_attr(elem, "color");
-                if (use_color) {
-                    ctx->current_color = parse_svg_color(use_color);
-                }
-
-                const char* ref_tag = get_element_tag_name(ref);
-                if (ref_tag && strcmp(ref_tag, "symbol") == 0) {
-                    // <symbol> needs viewBox/preserveAspectRatio applied
-                    const char* vb_attr = get_svg_attr(ref, "viewBox");
-                    SvgViewBox vb = parse_svg_viewbox(vb_attr);
-
-                    // <use> width/height override (default: symbol's viewBox or 100%)
-                    float sym_w = parse_svg_length(get_svg_attr(elem, "width"), vb.has_viewbox ? vb.width : 0);
-                    float sym_h = parse_svg_length(get_svg_attr(elem, "height"), vb.has_viewbox ? vb.height : 0);
-
-                    if (vb.has_viewbox && sym_w > 0 && sym_h > 0) {
-                        float sx = sym_w / vb.width;
-                        float sy = sym_h / vb.height;
-                        const char* par = get_svg_attr(ref, "preserveAspectRatio");
-                        bool par_none = par && strcmp(par, "none") == 0;
-                        bool par_slice = par && strstr(par, "slice") != nullptr;
-                        if (!par_none) {
-                            float scale = par_slice ? fmax(sx, sy) : fmin(sx, sy);
-                            float align_x = 0.5f, align_y = 0.5f;
-                            if (par) {
-                                if      (strstr(par, "xMin")) align_x = 0.0f;
-                                else if (strstr(par, "xMax")) align_x = 1.0f;
-                                if      (strstr(par, "YMin")) align_y = 0.0f;
-                                else if (strstr(par, "YMax")) align_y = 1.0f;
-                            }
-                            float tx = -vb.min_x * scale + (sym_w - vb.width * scale) * align_x;
-                            float ty = -vb.min_y * scale + (sym_h - vb.height * scale) * align_y;
-                            RdtMatrix vb_m = {scale, 0, tx, 0, scale, ty, 0, 0, 1};
-                            ctx->transform = rdt_matrix_multiply(&ctx->transform, &vb_m);
-                        } else {
-                            float tx = -vb.min_x * sx;
-                            float ty = -vb.min_y * sy;
-                            RdtMatrix vb_m = {sx, 0, tx, 0, sy, ty, 0, 0, 1};
-                            ctx->transform = rdt_matrix_multiply(&ctx->transform, &vb_m);
-                        }
-                    }
-                    // render <symbol> children
-                    render_svg_children(ctx, ref);
-                    log_debug("[SVG] rendered <use> -> <symbol> href='%s' vb=%s", href, vb_attr ? vb_attr : "(none)");
-                } else {
-                    render_svg_element(ctx, ref);
-                }
-                ctx->transform = saved;
-                ctx->current_color = saved_color;
+                render_svg_use_target(ctx, elem, ref, href);
+                resolved = true;
             }
+        } else if (href && strchr(href, '#')) {
+            resolved = render_svg_external_use(ctx, elem, href);
         }
-        log_debug("[SVG] <use> href='%s' not resolved", href ? href : "(none)");
+        if (!resolved) log_debug("[SVG] <use> href='%s' not resolved", href ? href : "(none)");
     } else if (strcmp(tag, "text") == 0) {
         render_svg_text(ctx, elem);
     } else if (strcmp(tag, "image") == 0) {
@@ -3075,7 +3357,8 @@ static void render_svg_element(SvgRenderContext* ctx, Element* elem) {
 
 void render_svg_to_vec(RdtVector* vec, Element* svg_element, float viewport_width, float viewport_height,
                        Pool* pool, float pixel_ratio, FontContext* font_ctx, const RdtMatrix* base_transform,
-                       DisplayList* dl, const Color* initial_current_color, const Color* initial_fill_color) {
+                       DisplayList* dl, const Color* initial_current_color, const Color* initial_fill_color,
+                       const char* source_path) {
     if (!svg_element || !vec) return;
 
     log_debug("[SVG] render_svg_to_vec: viewport %.0fx%.0f pixel_ratio=%.2f font_ctx=%p", viewport_width, viewport_height, pixel_ratio, (void*)font_ctx);
@@ -3087,6 +3370,7 @@ void render_svg_to_vec(RdtVector* vec, Element* svg_element, float viewport_widt
     ctx.font_ctx = font_ctx;
     ctx.vec = vec;
     ctx.dl = dl;
+    ctx.source_path = source_path;
     ctx.pixel_ratio = (pixel_ratio > 0) ? pixel_ratio : 1.0f;
     ctx.fill_color.r = 0; ctx.fill_color.g = 0; ctx.fill_color.b = 0; ctx.fill_color.a = 255;  // default black
     ctx.stroke_color.r = 0; ctx.stroke_color.g = 0; ctx.stroke_color.b = 0; ctx.stroke_color.a = 0;  // default none
@@ -3178,26 +3462,7 @@ void render_svg_to_vec(RdtVector* vec, Element* svg_element, float viewport_widt
         ctx.translate_x = ctx.translate_y = 0;
     }
 
-    // pre-pass: process all <defs> AND any top-level definition elements so
-    // gradients, masks, clipPaths, symbols and id'd elements are ready before
-    // rendering shapes.  Many real-world SVGs (badges, shields.io output)
-    // place <linearGradient>/<mask> directly under the root, not in <defs>.
-    for (int64_t i = 0; i < svg_element->length; i++) {
-        Element* child = get_child_element_at(svg_element, i);
-        if (!child) continue;
-        const char* child_tag = get_element_tag_name(child);
-        if (!child_tag) continue;
-        if (strcmp(child_tag, "defs") == 0) {
-            process_svg_defs(&ctx, child);
-        } else if (strcmp(child_tag, "linearGradient") == 0 ||
-                   strcmp(child_tag, "radialGradient") == 0 ||
-                   strcmp(child_tag, "clipPath") == 0 ||
-                   strcmp(child_tag, "mask") == 0 ||
-                   strcmp(child_tag, "symbol") == 0 ||
-                   strcmp(child_tag, "pattern") == 0) {
-            register_svg_def_element(&ctx, child);
-        }
-    }
+    process_svg_root_resources(&ctx, svg_element);
 
     // render children directly to vec
     for (int64_t i = 0; i < svg_element->length; i++) {
@@ -3207,6 +3472,8 @@ void render_svg_to_vec(RdtVector* vec, Element* svg_element, float viewport_widt
     }
 
     log_debug("[SVG] render_svg_to_vec complete");
+    if (ctx.style_rules) mem_free(ctx.style_rules);
+    if (ctx.defs) mem_free(ctx.defs);
 }
 
 // ============================================================================
