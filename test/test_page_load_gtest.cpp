@@ -170,7 +170,8 @@ struct PageTestResult {
     double render_ms;     // from [RENDER_PROF], -1 if not found
     uint64_t peak_rss_bytes;  // child's peak resident set size (0 if unknown)
     uint64_t baseline_footprint_bytes;  // child's initial phys_footprint (macOS only, 0 if unknown)
-    uint64_t peak_footprint_bytes;  // child's peak phys_footprint (macOS only, 0 if unknown)
+    uint64_t current_footprint_bytes;  // child's retained phys_footprint after render (macOS only, 0 if unknown)
+    uint64_t peak_footprint_bytes;  // child's peak phys_footprint including transient spikes (macOS only, 0 if unknown)
     std::string output;   // stderr/stdout from lambda.exe
 };
 
@@ -199,11 +200,9 @@ static uint64_t parse_peak_footprint(const std::string& output) {
     return strtoull(output.c_str() + pos, nullptr, 10);
 }
 
-// Parse the initial macOS footprint from VIEW_MEM_STAGES output. The absolute
-// lambda.exe baseline includes fixed runtime/JIT/framework allocation, so page
-// load tests enforce page-induced growth when this telemetry is available.
-static uint64_t parse_before_load_footprint(const std::string& output) {
-    const char* stage = "[MEMSTAGE] before-load";
+// Parse a specific VIEW_MEM_STAGES footprint. This is used for retained page
+// footprint so temporary compile/render spikes do not masquerade as leaks.
+static uint64_t parse_memstage_footprint(const std::string& output, const char* stage) {
     size_t pos = output.find(stage);
     if (pos == std::string::npos) return 0;
     const char* key = "footprint=";
@@ -213,6 +212,17 @@ static uint64_t parse_before_load_footprint(const std::string& output) {
     while (pos < output.size() && (output[pos] < '0' || output[pos] > '9')) pos++;
     if (pos >= output.size()) return 0;
     return strtoull(output.c_str() + pos, nullptr, 10) * 1024ULL * 1024ULL;
+}
+
+// Parse the initial macOS footprint from VIEW_MEM_STAGES output. The absolute
+// lambda.exe baseline includes fixed runtime/JIT/framework allocation, so page
+// load tests enforce page-induced growth when this telemetry is available.
+static uint64_t parse_before_load_footprint(const std::string& output) {
+    return parse_memstage_footprint(output, "[MEMSTAGE] before-load");
+}
+
+static uint64_t parse_after_render_footprint(const std::string& output) {
+    return parse_memstage_footprint(output, "[MEMSTAGE] after-render");
 }
 
 #ifdef _WIN32
@@ -246,6 +256,7 @@ static PageTestResult run_page_test(const PageTestInfo& info) {
     result.layout_ms = parse_prof_ms(result.output, "[LAYOUT_PROF]");
     result.render_ms = parse_prof_ms(result.output, "[RENDER_PROF]");
     result.baseline_footprint_bytes = parse_before_load_footprint(result.output);
+    result.current_footprint_bytes = parse_after_render_footprint(result.output);
     result.peak_footprint_bytes = parse_peak_footprint(result.output);
     return result;
 }
@@ -261,6 +272,7 @@ static PageTestResult run_page_test(const PageTestInfo& info) {
     result.render_ms = -1;
     result.peak_rss_bytes = 0;
     result.baseline_footprint_bytes = 0;
+    result.current_footprint_bytes = 0;
     result.peak_footprint_bytes = 0;
 
     auto t0 = std::chrono::steady_clock::now();
@@ -350,6 +362,7 @@ static PageTestResult run_page_test(const PageTestInfo& info) {
     result.layout_ms = parse_prof_ms(result.output, "[LAYOUT_PROF]");
     result.render_ms = parse_prof_ms(result.output, "[RENDER_PROF]");
     result.baseline_footprint_bytes = parse_before_load_footprint(result.output);
+    result.current_footprint_bytes = parse_after_render_footprint(result.output);
     result.peak_footprint_bytes = parse_peak_footprint(result.output);
     return result;
 }
@@ -419,17 +432,21 @@ TEST_P(PageLoadTest, LoadWithoutCrash) {
     SCOPED_TRACE("Page: " + info.test_name);
 
     // Print timing
+    uint64_t page_footprint_bytes = result.current_footprint_bytes > 0
+        ? result.current_footprint_bytes
+        : result.peak_footprint_bytes;
     uint64_t footprint_delta_bytes =
-        (result.baseline_footprint_bytes > 0 && result.peak_footprint_bytes >= result.baseline_footprint_bytes)
-            ? result.peak_footprint_bytes - result.baseline_footprint_bytes
+        (result.baseline_footprint_bytes > 0 && page_footprint_bytes >= result.baseline_footprint_bytes)
+            ? page_footprint_bytes - result.baseline_footprint_bytes
             : 0;
 
     char timing_buf[260];
-    snprintf(timing_buf, sizeof(timing_buf), "  [%s] %dms (layout=%.0fms, render=%.0fms, rss=%lluMB, footprint=%lluMB, page_delta=%lluMB)%s",
+    snprintf(timing_buf, sizeof(timing_buf), "  [%s] %dms (layout=%.0fms, render=%.0fms, rss=%lluMB, footprint=%lluMB, peak=%lluMB, page_delta=%lluMB)%s",
              info.test_name.c_str(), (int)result.elapsed_ms,
              result.layout_ms >= 0 ? result.layout_ms : 0.0,
              result.render_ms >= 0 ? result.render_ms : 0.0,
              (unsigned long long)(result.peak_rss_bytes / (1024 * 1024)),
+             (unsigned long long)(page_footprint_bytes / (1024 * 1024)),
              (unsigned long long)(result.peak_footprint_bytes / (1024 * 1024)),
              (unsigned long long)(footprint_delta_bytes / (1024 * 1024)),
              result.timed_out ? " (TIMEOUT)" : "");
@@ -463,22 +480,24 @@ TEST_P(PageLoadTest, LoadWithoutCrash) {
             << (MAX_RENDER_SECONDS * 1000) << "ms)";
     }
 
-    // Peak memory limit. Prefer page-induced phys_footprint growth when available
-    // (macOS): the absolute process footprint includes fixed runtime/JIT/framework
-    // allocation before a page is loaded. Fall back to the older absolute cap when
-    // baseline telemetry is unavailable, and then to RSS when footprint is absent.
-    if (result.peak_footprint_bytes > 0) {
+    // Memory limit. Prefer retained page-induced phys_footprint growth when
+    // available (macOS): the absolute process footprint includes fixed runtime,
+    // JIT, framework allocation, and short-lived compile spikes. Fall back to
+    // the older absolute peak cap when retained telemetry is unavailable, and
+    // then to RSS when footprint is absent.
+    if (page_footprint_bytes > 0) {
         if (footprint_delta_bytes > 0) {
             EXPECT_LE(footprint_delta_bytes, MAX_PAGE_FOOTPRINT_DELTA_BYTES)
                 << info.test_name << " page phys_footprint growth = "
                 << (footprint_delta_bytes / (1024 * 1024)) << " MB (limit: "
                 << (MAX_PAGE_FOOTPRINT_DELTA_BYTES / (1024 * 1024)) << " MB, baseline: "
-                << (result.baseline_footprint_bytes / (1024 * 1024)) << " MB, peak: "
+                << (result.baseline_footprint_bytes / (1024 * 1024)) << " MB, retained: "
+                << (page_footprint_bytes / (1024 * 1024)) << " MB, peak: "
                 << (result.peak_footprint_bytes / (1024 * 1024)) << " MB)";
         } else {
-            EXPECT_LE(result.peak_footprint_bytes, MAX_PEAK_FOOTPRINT_BYTES)
+            EXPECT_LE(page_footprint_bytes, MAX_PEAK_FOOTPRINT_BYTES)
                 << info.test_name << " peak phys_footprint = "
-                << (result.peak_footprint_bytes / (1024 * 1024)) << " MB (limit: "
+                << (page_footprint_bytes / (1024 * 1024)) << " MB (limit: "
                 << (MAX_PEAK_FOOTPRINT_BYTES / (1024 * 1024)) << " MB)";
         }
     } else if (result.peak_rss_bytes > 0) {

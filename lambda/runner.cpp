@@ -706,7 +706,7 @@ static char* resolve_module_path(const char* module_text, int module_len, const 
         }
     }
 
-    char* resolved = realpath(buf->str, NULL);
+    char* resolved = file_realpath(buf->str);
     strbuf_free(buf);
     return resolved;
 }
@@ -847,7 +847,7 @@ static void* compile_module_worker(void* arg) {
 // Discovers the full dependency graph, then compiles level by level (leaves first).
 static void precompile_imports(Runtime* runtime, const char* main_script_path) {
     // read main script source for discovery
-    char* canonical = realpath(main_script_path, NULL);
+    char* canonical = file_realpath(main_script_path);
     const char* main_path = canonical ? canonical : main_script_path;
     const char* main_source = read_text_file(main_path);
     if (!main_source) {
@@ -1024,12 +1024,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     const char* lookup_path = script_path;
     char* canonical_path = NULL;
     if (!source) {
-#ifdef _WIN32
-        char resolved[_MAX_PATH];
-        canonical_path = _fullpath(resolved, script_path, _MAX_PATH) ? mem_strdup(resolved, MEM_CAT_SYSTEM) : NULL;
-#else
-        canonical_path = realpath(script_path, NULL);
-#endif
+        canonical_path = file_realpath(script_path);
         if (canonical_path) {
             lookup_path = canonical_path;
         }

@@ -329,7 +329,6 @@ on selectionchange(evt) {
   if (evt.source_selection != null or evt.source_pos != null) {
     editor = editor_with_event_selection(editor, evt)
     set_selection(editor.selection)
-    status = "selected"
   }
 }
 on rte_cmd(evt) {

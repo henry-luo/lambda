@@ -234,6 +234,36 @@ fn inline_suffix_after_pos(node0, rel_path, offset) {
   } else { [] }
 }
 
+fn content_term_allows_inline(term) {
+  if (term.role == 'inline' or term.role == 'mark') { true }
+  else if (term.any != null) { content_terms_allow_inline(term.any, 0, len(term.any)) }
+  else { false }
+}
+
+fn content_terms_allow_inline(terms, i, n) {
+  if (i >= n) { false }
+  else if (content_term_allows_inline(terms[i])) { true }
+  else { content_terms_allow_inline(terms, i + 1, n) }
+}
+
+fn node_accepts_inline_children(schema, n) {
+  if (not is_node(n)) { false }
+  else {
+    let entry = schema[n.tag]
+    entry != null and entry.content != null and content_terms_allow_inline(entry.content, 0, len(entry.content))
+  }
+}
+
+fn find_inline_container_path(doc, schema, leaf_path, depth) {
+  if (depth >= len(leaf_path)) { null }
+  else {
+    let path0 = slice(leaf_path, 0, depth)
+    let n = node_at(doc, path0)
+    if (node_accepts_inline_children(schema, n)) { path0 }
+    else { find_inline_container_path(doc, schema, leaf_path, depth + 1) }
+  }
+}
+
 fn same_block_nested_text_selection(state) {
   let sel = state.selection
   if (sel == null or sel.kind != 'text' or sel_collapsed(sel)) { null }
@@ -572,23 +602,35 @@ pub fn cmd_paste_fragment(state, fragment) {
     let leaf = node_at(state.doc, lo.path)
     if (leaf == null or not is_text(leaf) or len(lo.path) < 2) { null }
     else {
-      let block_path = parent_path(lo.path)
-      let block = node_at(state.doc, block_path)
-      if (block == null or not is_node(block)) { null }
-      else {
-        let blocks = coerce_children(state_schema(state), fragment, 'block')
-        if (len(blocks) == 0) { null }
-        else if (len(blocks) == 1 and blocks[0].tag == state_default_block(state)) {
-          let before = nonempty_text_leaf(slice(leaf.text, 0, lo.offset), leaf.marks)
-          let after = nonempty_text_leaf(slice(leaf.text, hi.offset, len(leaf.text)), leaf.marks)
-          let new_block = node_attrs(block.tag, block.attrs, list_concat(list_concat(before, blocks[0].content), after))
+      let blocks = coerce_children(state_schema(state), fragment, 'block')
+      if (len(blocks) == 0) { null }
+      else if (len(blocks) == 1 and blocks[0].tag == state_default_block(state)) {
+        let block_path = find_inline_container_path(state.doc, state_schema(state), lo.path, 0)
+        let block = if (block_path == null) { null } else { node_at(state.doc, block_path) }
+        if (block == null or not is_node(block)) { cmd_paste_text(state, doc_text(node('fragment', blocks))) }
+        else {
+          let top_index = lo.path[len(block_path)]
+          let target = block.content[top_index]
+          let rel_lo = slice(lo.path, len(block_path) + 1, len(lo.path))
+          let rel_hi = slice(hi.path, len(block_path) + 1, len(hi.path))
+          let before = inline_prefix_before_pos(target, rel_lo, lo.offset)
+          let after = inline_suffix_after_pos(target, rel_hi, hi.offset)
+          let prefix = list_slice(block.content, 0, top_index)
+          let suffix = list_slice(block.content, top_index + 1, len(block.content))
+          let content0 = list_concat(list_concat(list_concat(list_concat(prefix, before), blocks[0].content), after), suffix)
+          let content1 = if (len(content0) == 0) { [text("")] } else { content0 }
+          let new_block = node_attrs(block.tag, block.attrs, content1)
           let tx0 = tx_begin(state.doc, sel)
           let tx1 = tx_step(tx0, step_replace(parent_path(block_path), last_index(block_path), last_index(block_path) + 1, [new_block]))
-          let caret_path = [*block_path, len(before) + len(blocks[0].content) - 1]
-          let caret_off = if (len(blocks[0].content) == 0) { 0 } else { last_text_offset_in(blocks[0].content[len(blocks[0].content) - 1]) }
-          tx_set_selection(tx1, caret(pos(caret_path, caret_off)))
-        } else { cmd_paste_text(state, doc_text(node('fragment', blocks))) }
-      }
+          let inserted_count = len(blocks[0].content)
+          let caret_index = if (inserted_count > 0) { len(prefix) + len(before) + inserted_count - 1 }
+            else if (len(prefix) + len(before) > 0) { len(prefix) + len(before) - 1 }
+            else { 0 }
+          let caret_pos = if (inserted_count > 0) { last_caret_pos_in(blocks[0].content[inserted_count - 1], [*block_path, caret_index]) }
+            else { last_caret_pos_in(content1[caret_index], [*block_path, caret_index]) }
+          tx_set_selection(tx1, caret(caret_pos))
+        }
+      } else { cmd_paste_text(state, doc_text(node('fragment', blocks))) }
     }
   }
 }
@@ -1845,18 +1887,22 @@ pub fn cmd_split_block(state) {
   else { split_block_collapsed_selection(state) }
 }
 
+fn code_block_path_for_ancestor(state, path) {
+  if (len(path) == 0) { null }
+  else {
+    let block = node_at(state.doc, path)
+    let parent = node_at(state.doc, parent_path(path))
+    if (block == null or not is_node(block)) { code_block_path_for_ancestor(state, parent_path(path)) }
+    else if (block.tag == 'code_block' or block.tag == state_code_block_tag(state) or block.tag == 'pre') { path }
+    else if (block.tag == 'code' and parent != null and is_node(parent) and (parent.tag == 'doc' or parent.tag == 'pre')) { path }
+    else { code_block_path_for_ancestor(state, parent_path(path)) }
+  }
+}
+
 fn code_block_path_for_selection(state) {
   let sel = state.selection
   if (sel == null or sel.kind != 'text' or not sel_single_leaf(sel)) { null }
-  else {
-    let block_path = parent_path(sel.anchor.path)
-    let block = node_at(state.doc, block_path)
-    let parent = node_at(state.doc, parent_path(block_path))
-    if (block == null or not is_node(block)) { null }
-    else if (block.tag == state_code_block_tag(state) or block.tag == 'pre') { block_path }
-    else if (block.tag == 'code' and parent != null and is_node(parent) and parent.tag == 'doc') { block_path }
-    else { null }
-  }
+  else { code_block_path_for_ancestor(state, parent_path(sel.anchor.path)) }
 }
 
 pub fn cmd_insert_paragraph(state) {

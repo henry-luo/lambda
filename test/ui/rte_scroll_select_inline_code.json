@@ -1,0 +1,14 @@
+{
+  "name": "RTE scrolled selection renders at inline code",
+  "html": "test/ui/rte_prototype.ls",
+  "viewport": {"width": 596, "height": 529},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "scroll_to", "x": 0, "y": 95},
+    {"type": "wait", "ms": 80},
+    {"type": "mouse_drag", "from_x": 152, "from_y": 438, "to_x": 258, "to_y": 438, "button": 0},
+    {"type": "wait", "ms": 160},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+    {"type": "assert_snapshot", "reference": "test/ui/snapshots/rte_scroll_select_inline_code.png", "threshold": 0}
+  ]
+}
