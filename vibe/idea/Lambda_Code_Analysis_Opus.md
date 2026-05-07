@@ -1,8 +1,25 @@
 # Lambda Code Semantic Analysis Framework — Proposal
 
-**Status**: Draft proposal
+**Status**: Draft proposal (by Opus 4.7)
 **Stage**: 1 (C/C++ analysis of Lambda/Radiant source)
 **Author**: Lambda team
+
+## Prompt
+Write a proposal to develop code semantic analysis framework under Lambda.
+stage 1 is to analyze the C/C++ code of the Lambda/Radiant code itself.
+use treesitter c/c++ parser to parse the source code into syntax tree.
+then a simple adaptor/builder to turn the syntax tree into AST as lambda node tree.
+AST can reference CodeQL or any other similar framework with best design.
+AST should be able to generalize to support many languages (C/C++, JS, Python, etc.).
+then use Lambda script to analyze, query, transform the AST.
+
+Some initial test cases can be:
+1. check the headers files, and certain C header file should only be used in ./lib;
+2. certain C++ features, like std::string, std::vector, std::map are not used in Lambda/Radiant code;
+3. malloc, calloc, free, not used;
+4. type inference and verify that Lambda item access casting are always checking/based on the type_id;
+
+Reference existing code semantic analysis frameworks, and adopt the best designs/features from them. doc them in the proposal as prior art. then propose our design.
 
 ## 1. Motivation
 
