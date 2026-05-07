@@ -27,6 +27,35 @@
 #include <thorvg_capi.h>  // needed for SVG text rendering (tvg_text_* API)
 #endif
 
+static const int SVG_RESOURCE_STACK_MAX = 32;
+static thread_local const char* g_svg_resource_stack[SVG_RESOURCE_STACK_MAX];
+static thread_local int g_svg_resource_stack_depth = 0;
+
+static bool svg_resource_stack_contains(const char* path) {
+    if (!path || !*path) return false;
+    for (int i = 0; i < g_svg_resource_stack_depth; i++) {
+        const char* entry = g_svg_resource_stack[i];
+        if (entry && strcmp(entry, path) == 0) return true;
+    }
+    return false;
+}
+
+static bool svg_resource_stack_push(const char* path) {
+    if (!path || !*path) return false;
+    if (svg_resource_stack_contains(path)) return false;
+    if (g_svg_resource_stack_depth >= SVG_RESOURCE_STACK_MAX) return false;
+    g_svg_resource_stack[g_svg_resource_stack_depth++] = path;
+    return true;
+}
+
+static void svg_resource_stack_pop(const char* path) {
+    if (!path || !*path || g_svg_resource_stack_depth <= 0) return;
+    const char* top = g_svg_resource_stack[g_svg_resource_stack_depth - 1];
+    if (top == path || (top && strcmp(top, path) == 0)) {
+        g_svg_resource_stack[--g_svg_resource_stack_depth] = nullptr;
+    }
+}
+
 // ============================================================================
 // Forward Declarations
 // ============================================================================
@@ -2731,6 +2760,11 @@ static void render_svg_image(SvgRenderContext* ctx, Element* elem) {
         char* href_file = svg_href_file_part(href, nullptr);
         char* resolved_href = svg_resolve_resource_path(ctx, href_file ? href_file : href);
         if (href_file) mem_free(href_file);
+        if (resolved_href && svg_resource_stack_contains(resolved_href)) {
+            log_debug("[SVG] <image> skipped recursive SVG reference: %s", resolved_href);
+            mem_free(resolved_href);
+            return;
+        }
         RdtPicture* rdt_pic = rdt_picture_load(resolved_href ? resolved_href : href);
         if (!rdt_pic) {
             log_debug("[SVG] <image> failed to parse nested SVG: %s", href);
@@ -3173,10 +3207,17 @@ static bool render_svg_external_use(SvgRenderContext* ctx, Element* use_elem, co
     char* resolved_href = svg_resolve_resource_path(ctx, href_file);
     mem_free(href_file);
     if (!resolved_href) return false;
+    if (svg_resource_stack_contains(resolved_href)) {
+        log_debug("[SVG] external <use> skipped recursive reference '%s'", resolved_href);
+        mem_free(resolved_href);
+        return false;
+    }
+    bool pushed_resource = svg_resource_stack_push(resolved_href);
 
     RdtPicture* pic = rdt_picture_load(resolved_href);
     if (!pic) {
         log_debug("[SVG] external <use> failed to load '%s'", resolved_href);
+        if (pushed_resource) svg_resource_stack_pop(resolved_href);
         mem_free(resolved_href);
         return false;
     }
@@ -3185,6 +3226,7 @@ static bool render_svg_external_use(SvgRenderContext* ctx, Element* use_elem, co
     if (!root || !ref) {
         log_debug("[SVG] external <use> missing id '%s' in '%s'", fragment, resolved_href);
         rdt_picture_free(pic);
+        if (pushed_resource) svg_resource_stack_pop(resolved_href);
         mem_free(resolved_href);
         return false;
     }
@@ -3211,6 +3253,7 @@ static bool render_svg_external_use(SvgRenderContext* ctx, Element* use_elem, co
 
     rdt_picture_free(pic);
     log_debug("[SVG] external <use> rendered href='%s'", href);
+    if (pushed_resource) svg_resource_stack_pop(resolved_href);
     mem_free(resolved_href);
     return true;
 }
@@ -3224,6 +3267,13 @@ static void render_svg_element(SvgRenderContext* ctx, Element* elem) {
 
     const char* tag = get_element_tag_name(elem);
     if (!tag) return;
+
+    char display_buf[64];
+    const char* display = get_svg_attr_or_style(ctx, elem, "display", display_buf, sizeof(display_buf));
+    if (display && strcmp(display, "none") == 0) {
+        log_debug("[SVG] skipping display:none element: %s", tag);
+        return;
+    }
 
     log_debug("[SVG] rendering element: %s", tag);
 
@@ -3360,6 +3410,11 @@ void render_svg_to_vec(RdtVector* vec, Element* svg_element, float viewport_widt
                        DisplayList* dl, const Color* initial_current_color, const Color* initial_fill_color,
                        const char* source_path) {
     if (!svg_element || !vec) return;
+    if (source_path && svg_resource_stack_contains(source_path)) {
+        log_debug("[SVG] skipped recursive render of SVG resource: %s", source_path);
+        return;
+    }
+    bool pushed_source = svg_resource_stack_push(source_path);
 
     log_debug("[SVG] render_svg_to_vec: viewport %.0fx%.0f pixel_ratio=%.2f font_ctx=%p", viewport_width, viewport_height, pixel_ratio, (void*)font_ctx);
 
@@ -3474,6 +3529,7 @@ void render_svg_to_vec(RdtVector* vec, Element* svg_element, float viewport_widt
     log_debug("[SVG] render_svg_to_vec complete");
     if (ctx.style_rules) mem_free(ctx.style_rules);
     if (ctx.defs) mem_free(ctx.defs);
+    if (pushed_source) svg_resource_stack_pop(source_path);
 }
 
 // ============================================================================

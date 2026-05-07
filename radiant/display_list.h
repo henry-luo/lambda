@@ -131,6 +131,8 @@ typedef struct {
     int x, y;                // destination pixel position
     Color color;             // text color at recording time
     bool is_color_emoji;     // BGRA color emoji (no tint)
+    bool has_transform;
+    RdtMatrix transform;
     Bound clip;              // rectangular clip bounds at recording time
 } DlDrawGlyph;
 
@@ -361,7 +363,8 @@ void dl_draw_image(DisplayList* dl, const uint32_t* pixels,
 
 // Record a glyph draw command.  bitmap buffer is borrowed (must outlive display list).
 void dl_draw_glyph(DisplayList* dl, GlyphBitmap* bitmap, int x, int y,
-                   Color color, bool is_color_emoji, const Bound* clip);
+                   Color color, bool is_color_emoji, const Bound* clip,
+                   const RdtMatrix* transform = nullptr);
 
 void dl_draw_picture(DisplayList* dl, RdtPicture* picture,
                      uint8_t opacity, const RdtMatrix* transform);

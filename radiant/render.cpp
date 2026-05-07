@@ -585,7 +585,8 @@ void draw_color_glyph(RenderContext* rdcon, GlyphBitmap *bitmap, int x, int y) {
 void draw_glyph(RenderContext* rdcon, GlyphBitmap *bitmap, int x, int y) {
     if (rdcon->dl) {
         bool is_color = (bitmap->pixel_mode == GLYPH_PIXEL_BGRA);
-        dl_draw_glyph(rdcon->dl, bitmap, x, y, rdcon->color, is_color, &rdcon->block.clip);
+        dl_draw_glyph(rdcon->dl, bitmap, x, y, rdcon->color, is_color, &rdcon->block.clip,
+            rdcon->has_transform ? &rdcon->transform : nullptr);
         return;
     }
     // handle color emoji bitmaps (BGRA format)
