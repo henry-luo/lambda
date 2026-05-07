@@ -30,12 +30,12 @@ baseline.
 |---|---:|---:|
 | Total discovered tests | 42,219 | 42,219 |
 | Batched / in-scope tests | 34,145 | 34,153 |
-| Fully passing | 29,185 | 29,669 |
-| Failed | 4,960 | 4,484 |
+| Fully passing | 29,185 | 29,749 |
+| Failed | 4,960 | 4,404 |
 | Skipped | 8,074 | 8,066 |
-| Pass rate, in-scope | 85.5% | 86.9% |
+| Pass rate, in-scope | 85.5% | 87.1% |
 | Baseline passing | 29,149 | 29,624 |
-| Improvements vs baseline | 77 | 45 after post-baseline local fixes |
+| Improvements vs baseline | 77 | 125 after post-baseline local fixes |
 | Regressions vs baseline | 41 | 0 |
 
 Latest successful update command:
@@ -53,15 +53,16 @@ ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batc
 Verification result: `29,624 / 29,624` fully passing, `0` failures, `0`
 regressions.
 
-Latest non-updating full batch after the DataView BigInt and TypedArray
-`@@toStringTag` work:
+Latest non-updating full batch after the DataView BigInt, TypedArray
+`@@toStringTag`, TypedArray accessor/RAB, `at`, `includes`, `indexOf`, and
+`lastIndexOf` work:
 
 ```bash
 ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --js-timeout=20
 ```
 
-Result: `29,669 / 34,153` fully passing, `4,484` failed, `8,066` skipped,
-`45` improvements, `0` regressions.
+Result: `29,749 / 34,153` fully passing, `4,404` failed, `8,066` skipped,
+`125` improvements, `0` regressions.
 
 The `--js-timeout=20` option was added to the Test262 runner because one
 RegExp test (`built_ins_RegExp_character_class_escape_non_whitespace_js`) could
@@ -82,6 +83,11 @@ TypedArray progress since the baseline update:
 | TypedArray focused subset | Before | After |
 |---|---:|---:|
 | `%TypedArray%.prototype[@@toStringTag]` | failing descriptor/receiver/name cases | 18 / 18 |
+| `%TypedArray%.prototype.{buffer,byteLength,byteOffset,length}` plus RAB edge cases | 37 / 50 before RAB/accessor work | 50 / 50 |
+| `%TypedArray%.prototype.at` | 9 / 15 before method/internal-slot work | 15 / 15 |
+| `%TypedArray%.prototype.includes` | 24 / 45 before method/RAB/Buffer identity work | 45 / 45 |
+| `%TypedArray%.prototype.indexOf` | 31 / 43 before method/RAB work | 43 / 43 |
+| `%TypedArray%.prototype.lastIndexOf` | 36 / 42 before method/RAB/fill work | 42 / 42 |
 
 DataView BigInt getter/setter behavior has also landed. The focused list now
 passes all `getBigInt64`, `getBigUint64`, `setBigInt64`, and `setBigUint64`
@@ -110,6 +116,31 @@ Implemented since the initial proposal:
 - `%TypedArray%.prototype[@@toStringTag]` is now installed as a native accessor;
   direct typed-array property access preserves the original receiver and returns
   the correct concrete typed-array name.
+- `%TypedArray%.prototype` accessors for `buffer`, `byteLength`, `byteOffset`,
+  and `length` now pass the focused 50-test list, including minimal resizable
+  ArrayBuffer `maxByteLength`/`resize` support, length-tracking views,
+  fixed-view out-of-bounds handling, TypedArray subclass construction over
+  inherited typed-array constructors, and native Test262 `compareArray`
+  support for ArrayBuffer identity checks.
+- `%TypedArray%.prototype.at` now validates detached/out-of-bounds views,
+  preserves pre-index-conversion length semantics for length-tracking RAB views,
+  propagates Symbol/ToNumber abrupt completions, returns JS `undefined` for
+  post-conversion out-of-range reads, recognizes BigInt typed-array
+  `instanceof`, and snapshots regular-array constructor inputs before value
+  conversion. The focused list improved from `9 / 15` to `15 / 15` after the
+  float-widening pre-scan learned to treat `NaN` and `Infinity` assignments as
+  float evidence for ordinary function locals.
+- `%TypedArray%.prototype.includes` now captures initial TypedArray length
+  before `fromIndex` coercion, uses `ToIntegerOrInfinity`, handles
+  shrink/grow RAB reads as JS `undefined` when appropriate, compares with
+  SameValueZero including `NaN`, and avoids routing ordinary `Uint8Array`
+  instances through Node Buffer methods by marking real Buffer instances
+  explicitly.
+- `%TypedArray%.prototype.indexOf` and `lastIndexOf` now share the same
+  receiver validation and initial-length-before-`fromIndex` discipline, while
+  preserving strict-equality search semantics. The `lastIndexOf` slice also
+  fixed length-tracking RAB `fill` setup by making `js_typed_array_fill` use
+  dynamic view length and backing data after resize.
 - String receiver checks, RegExp string-iterator coercions, Array reduce
   prototype-key refresh, and for-of destructuring assignment writeback were
   also fixed while recovering the baseline.
@@ -331,8 +362,11 @@ Expected impact:
 Status: in progress, with the focused DataView portion complete. The focused
 DataView constructor/prototype/extensibility subset is now `21 / 21`, and the
 current DataView failure list improved to `187 / 187`. The focused
-`%TypedArray%.prototype[@@toStringTag]` subset is also `18 / 18`. Broader
-TypedArray and ArrayBuffer internal-slot work remains.
+`%TypedArray%.prototype[@@toStringTag]` subset is also `18 / 18`. The focused
+`%TypedArray%.prototype` accessor/RAB subset is now `50 / 50`; the focused
+`%TypedArray%.prototype.includes` subset is now `45 / 45`; and the focused
+`indexOf`/`lastIndexOf` subsets are now `43 / 43` and `42 / 42`. Broader
+TypedArray method, species, and canonical numeric-index work remains.
 
 Goal: make `TypedArray`/`DataView` behavior spec-driven instead of method-local.
 
@@ -348,7 +382,10 @@ Scope:
   endian-aware read/write paths.
 - Completed for TypedArray incrementally: native `@@toStringTag` accessor
   descriptor/receiver behavior and direct typed-array `[[TypedArrayName]]`
-  lookup.
+  lookup; `buffer`/`byteLength`/`byteOffset`/`length` accessor receiver and
+  descriptor behavior; minimal resizable ArrayBuffer construction and resize;
+  length-tracking and fixed-view resize accounting; and TypedArray subclass
+  construction over inherited concrete typed-array constructors.
 - Every TypedArray/DataView method must call the same validation helpers before
   reading user-visible `length`, `byteLength`, or `byteOffset` properties.
 - Centralize canonical numeric index parsing (`-0`, BigInt keys, floats,
@@ -370,7 +407,11 @@ Expected impact:
 - Targets roughly 1,650 failures across `TypedArray`,
   `TypedArrayConstructors`, `DataView`, and `ArrayBuffer`, and fixes several
   current regressions. The DataView portion has converted all 158 remaining
-  cases in the 187-test focused list to passing status.
+  cases in the 187-test focused list to passing status; the latest TypedArray
+  accessor/RAB slice converted the focused accessor list from `37 / 50` to
+  `50 / 50`; the later `at`, `includes`, `indexOf`, `lastIndexOf`, Buffer
+  identity, dynamic RAB `fill`, and float-widening work raised the non-updating
+  full-batch improvement count to `125`.
 
 ### Phase J40-4 - Iterator and Destructuring Runtime Kernels
 
@@ -572,9 +613,11 @@ lower-level property, iterator, and internal-slot gaps.
 
 Progress against that target as of 2026-05-07: the engine has moved from
 29,185 to 29,624 fully passing tests in the full `--run-partial` accounting,
-with the baseline clean at 29,624. The next highest-leverage continuation is to
-broaden the same internal-slot discipline across TypedArray methods and
-ArrayBuffer behavior.
+with the baseline clean at 29,624. The current non-updating working-tree result
+is `29,749 / 34,153` fully passing with `125` improvements and `0` regressions.
+The next highest-leverage continuation is to broaden the same internal-slot
+discipline across TypedArray methods, species paths, and canonical numeric-index
+behavior.
 
 Additional verification after the DataView BigInt work:
 
@@ -593,6 +636,67 @@ ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batc
 
 Result: `18 / 18` passing in the focused TypedArray `@@toStringTag` list, with
 the baseline gate still clean at `29,624 / 29,624`, `0` regressions.
+
+Additional verification after the TypedArray accessor/RAB work:
+
+```bash
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js40_typedarray_accessors.txt --js-timeout=20
+```
+
+Result: `50 / 50` passing in the focused TypedArray accessor list.
+
+Follow-up baseline and full-batch verification:
+
+```bash
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --baseline-only --js-timeout=20
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --js-timeout=20
+```
+
+Results: baseline gate `29,624 / 29,624`, `0` failures, `0` regressions; full
+non-updating batch `29,686 / 34,153`, `4,467` failed, `8,066` skipped, `62`
+improvements, `0` regressions.
+
+Additional verification after the `%TypedArray%.prototype.at` work:
+
+```bash
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js40_typedarray_at.txt --js-timeout=20
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js40_ctor_regression.txt --js-timeout=20
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --baseline-only --js-timeout=20
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --js-timeout=20
+```
+
+Results: focused `at` list `15 / 15`, constructor snapshot regression `1 / 1`,
+baseline gate `29,624 / 29,624`, `0` failures, `0` regressions. The full
+non-updating batch is now `29,692 / 34,153`, `4,461` failed, `8,066` skipped,
+`68` improvements, `0` regressions.
+
+Additional verification after the `%TypedArray%.prototype.includes` work:
+
+```bash
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js40_typedarray_includes.txt --js-timeout=20
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --baseline-only --js-timeout=20
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --js-timeout=20
+```
+
+Results: focused `includes` list `45 / 45`, baseline gate `29,624 / 29,624`,
+`0` failures, `0` regressions. The full non-updating batch is now
+`29,739 / 34,153`, `4,414` failed, `8,066` skipped, `115` improvements,
+`0` regressions.
+
+Additional verification after the `%TypedArray%.prototype.indexOf` and
+`lastIndexOf` work:
+
+```bash
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js40_typedarray_indexof.txt --js-timeout=20
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js40_typedarray_lastindexof.txt --js-timeout=20
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --baseline-only --js-timeout=20
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --js-timeout=20
+```
+
+Results: focused `indexOf` list `43 / 43`, focused `lastIndexOf` list
+`42 / 42`, baseline gate `29,624 / 29,624`, `0` failures, `0` regressions.
+The full non-updating batch is now `29,749 / 34,153`, `4,404` failed,
+`8,066` skipped, `125` improvements, `0` regressions.
 
 ## 9. Verification Checklist
 

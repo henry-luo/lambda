@@ -5866,6 +5866,12 @@ static bool jm_expression_has_float_hint(JsAstNode* node) {
         JsUnaryNode* un = (JsUnaryNode*)node;
         return jm_expression_has_float_hint(un->operand);
     }
+    case JS_AST_NODE_IDENTIFIER: {
+        JsIdentifierNode* id = (JsIdentifierNode*)node;
+        if (id->name->len == 3 && strncmp(id->name->chars, "NaN", 3) == 0) return true;
+        if (id->name->len == 8 && strncmp(id->name->chars, "Infinity", 8) == 0) return true;
+        return false;
+    }
     case JS_AST_NODE_MEMBER_EXPRESSION: {
         JsMemberNode* mem = (JsMemberNode*)node;
         if (!mem->computed) return true;
@@ -17578,8 +17584,13 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     // new ArrayBuffer(byteLength)
     if (is_arraybuffer) {
         MIR_reg_t len_arg = first_arg ? first_arg : jm_emit_undefined(mt);
-        return jm_call_1(mt, "js_arraybuffer_construct", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, len_arg));
+        MIR_reg_t options_arg = 0;
+        JsAstNode* arg2 = call->arguments ? call->arguments->next : NULL;
+        if (arg2) options_arg = jm_transpile_box_item(mt, arg2);
+        else options_arg = jm_emit_undefined(mt);
+        return jm_call_2(mt, "js_arraybuffer_construct_resizable", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, len_arg),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, options_arg));
     }
 
     // new SharedArrayBuffer(byteLength)

@@ -3225,6 +3225,7 @@ enum JsBuiltinId {
     JS_BUILTIN_REGEXP_GET_STICKY,
     JS_BUILTIN_REGEXP_GET_HASINDICES,
     JS_BUILTIN_ARRAYBUFFER_SLICE,    // ArrayBuffer.prototype.slice
+    JS_BUILTIN_ARRAYBUFFER_RESIZE,   // ArrayBuffer.prototype.resize
     // Atomics methods
     JS_BUILTIN_ATOMICS_ADD,
     JS_BUILTIN_ATOMICS_AND,
@@ -4179,8 +4180,8 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 js_pending_new_target = ItemNull;
                 js_has_pending_new_target = false;
                 Item arg = (argc > 0 && args) ? args[0] : ItemNull;
-                int off = (argc > 1 && args) ? (int)it2i(args[1]) : 0;
-                int tlen = (argc > 2 && args) ? (int)it2i(args[2]) : -1;
+                int off = (argc > 1 && args) ? (int)js_get_number(args[1]) : 0;
+                int tlen = (argc > 2 && args) ? (int)js_get_number(args[2]) : -1;
                 return js_typed_array_construct(ta_type, arg, off, tlen, argc);
             }
 
@@ -4189,7 +4190,8 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 js_pending_new_target = ItemNull;
                 js_has_pending_new_target = false;
                 Item blen_arg = (argc > 0 && args) ? args[0] : ItemNull;
-                return js_arraybuffer_construct(blen_arg);
+                Item options_arg = (argc > 1 && args) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
+                return js_arraybuffer_construct_resizable(blen_arg, options_arg);
             }
 
             // SharedArrayBuffer
@@ -4397,6 +4399,49 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
             Item msg = (Item){.item = s2it(heap_create_name("is not a constructor", 20))};
             js_throw_value(js_new_error_with_name(tn, msg));
             return ItemNull;
+        }
+        if (instance_proto.item != ItemNull.item && get_type_id(instance_proto) == LMD_TYPE_MAP) {
+            Item proto = instance_proto;
+            int depth = 0, subclass_ta_type = -1;
+            while (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP && depth < 16) {
+                bool ctor_own = false;
+                Item proto_ctor = js_map_get_fast(proto.map, "constructor", 11, &ctor_own);
+                if (get_type_id(proto_ctor) == LMD_TYPE_FUNC) {
+                    JsFunction* pf = (JsFunction*)proto_ctor.function;
+                    if (pf && pf->name) {
+                        const char* pname = pf->name->chars;
+                        int plen = (int)pf->name->len;
+                        if      (plen == 9  && strncmp(pname, "Int8Array", 9) == 0)          subclass_ta_type = JS_TYPED_INT8;
+                        else if (plen == 10 && strncmp(pname, "Uint8Array", 10) == 0)        subclass_ta_type = JS_TYPED_UINT8;
+                        else if (plen == 17 && strncmp(pname, "Uint8ClampedArray", 17) == 0) subclass_ta_type = JS_TYPED_UINT8_CLAMPED;
+                        else if (plen == 10 && strncmp(pname, "Int16Array", 10) == 0)        subclass_ta_type = JS_TYPED_INT16;
+                        else if (plen == 11 && strncmp(pname, "Uint16Array", 11) == 0)       subclass_ta_type = JS_TYPED_UINT16;
+                        else if (plen == 10 && strncmp(pname, "Int32Array", 10) == 0)        subclass_ta_type = JS_TYPED_INT32;
+                        else if (plen == 11 && strncmp(pname, "Uint32Array", 11) == 0)       subclass_ta_type = JS_TYPED_UINT32;
+                        else if (plen == 12 && strncmp(pname, "Float32Array", 12) == 0)      subclass_ta_type = JS_TYPED_FLOAT32;
+                        else if (plen == 12 && strncmp(pname, "Float64Array", 12) == 0)      subclass_ta_type = JS_TYPED_FLOAT64;
+                        else if (plen == 13 && strncmp(pname, "BigInt64Array", 13) == 0)     subclass_ta_type = JS_TYPED_BIGINT64;
+                        else if (plen == 14 && strncmp(pname, "BigUint64Array", 14) == 0)    subclass_ta_type = JS_TYPED_BIGUINT64;
+                        if (subclass_ta_type >= 0) break;
+                    }
+                }
+                proto = js_get_prototype(proto);
+                depth++;
+            }
+            if (subclass_ta_type >= 0) {
+                Item arg = (argc > 0 && args) ? args[0] : ItemNull;
+                int off = (argc > 1 && args) ? (int)js_get_number(args[1]) : 0;
+                int tlen = (argc > 2 && args) ? (int)js_get_number(args[2]) : -1;
+                Item result = js_typed_array_construct(subclass_ta_type, arg, off, tlen, argc);
+                if (get_type_id(result) == LMD_TYPE_MAP) {
+                    js_set_prototype(result, instance_proto);
+                    if (class_name.item != ItemNull.item) {
+                        Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
+                        js_property_set(result, cn_key, class_name);
+                    }
+                }
+                return result;
+            }
         }
         Item obj = js_new_object();
         // Subclass builtin detection: walk the prototype chain of instance_proto
@@ -4953,6 +4998,24 @@ extern "C" Item js_property_get(Item object, Item key) {
 
     if (type == LMD_TYPE_MAP) {
         Map* m = object.map;
+        if (get_type_id(key) == LMD_TYPE_STRING) {
+            String* str_key = it2s(key);
+            if (str_key->len == 17 && strncmp(str_key->chars, "BYTES_PER_ELEMENT", 17) == 0) {
+                bool own_meta = false;
+                Item instance_proto = js_map_get_fast(m, "__instance_proto__", 18, &own_meta);
+                if (instance_proto.item != ItemNull.item && get_type_id(instance_proto) == LMD_TYPE_MAP) {
+                    Item proto = js_get_prototype(instance_proto);
+                    int depth = 0;
+                    while (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP && depth < 16) {
+                        bool own_bpe = false;
+                        Item inherited_bpe = js_map_get_fast(proto.map, "BYTES_PER_ELEMENT", 17, &own_bpe);
+                        if (inherited_bpe.item != ItemNull.item) return inherited_bpe;
+                        proto = js_get_prototype(proto);
+                        depth++;
+                    }
+                }
+            }
+        }
         // MapKind fast path: plain objects (95%+ of accesses) skip all exotic checks
         if (m->map_kind != MAP_KIND_PLAIN) {
             switch (m->map_kind) {
@@ -4972,12 +5035,12 @@ extern "C" Item js_property_get(Item object, Item key) {
                     if (str_key->len == 10 && strncmp(str_key->chars, "byteLength", 10) == 0) {
                         JsTypedArray* ta = js_get_typed_array_ptr(object.map);
                         if (ta && ta->buffer && ta->buffer->detached) return (Item){.item = i2it(0)};
-                        return (Item){.item = i2it(ta->byte_length)};
+                        return (Item){.item = i2it(js_typed_array_byte_length(object))};
                     }
                     if (str_key->len == 10 && strncmp(str_key->chars, "byteOffset", 10) == 0) {
                         JsTypedArray* ta = js_get_typed_array_ptr(object.map);
                         if (ta && ta->buffer && ta->buffer->detached) return (Item){.item = i2it(0)};
-                        return (Item){.item = i2it(ta->byte_offset)};
+                        return (Item){.item = i2it(js_typed_array_byte_offset(object))};
                     }
                     if (str_key->len == 6 && strncmp(str_key->chars, "buffer", 6) == 0) {
                         JsTypedArray* ta = js_get_typed_array_ptr(object.map);
@@ -4999,10 +5062,10 @@ extern "C" Item js_property_get(Item object, Item key) {
                         JsTypedArray* ta = js_get_typed_array_ptr(object.map);
                         int bpe = 4;
                         switch (ta->element_type) {
-                        case JS_TYPED_INT8: case JS_TYPED_UINT8: bpe = 1; break;
+                        case JS_TYPED_INT8: case JS_TYPED_UINT8: case JS_TYPED_UINT8_CLAMPED: bpe = 1; break;
                         case JS_TYPED_INT16: case JS_TYPED_UINT16: bpe = 2; break;
                         case JS_TYPED_INT32: case JS_TYPED_UINT32: case JS_TYPED_FLOAT32: bpe = 4; break;
-                        case JS_TYPED_FLOAT64: bpe = 8; break;
+                        case JS_TYPED_FLOAT64: case JS_TYPED_BIGINT64: case JS_TYPED_BIGUINT64: bpe = 8; break;
                         }
                         return (Item){.item = i2it(bpe)};
                     }
@@ -5052,6 +5115,9 @@ extern "C" Item js_property_get(Item object, Item key) {
                     String* str_key = it2s(key);
                     if (str_key->len == 10 && strncmp(str_key->chars, "byteLength", 10) == 0) {
                         return (Item){.item = i2it(js_arraybuffer_byte_length(object))};
+                    }
+                    if (str_key->len == 6 && strncmp(str_key->chars, "length", 6) == 0) {
+                        return (Item){.item = i2it(0)};
                     }
                     // check own properties on upgraded maps (data_cap > 0 means upgraded)
                     if (object.map->data_cap > 0) {
@@ -6371,6 +6437,10 @@ extern "C" Item js_property_get(Item object, Item key) {
                             Item sf = js_get_or_create_builtin(JS_BUILTIN_ARRAYBUFFER_SLICE, "slice", 2);
                             js_property_set(fn->prototype, sk, sf);
                             js_mark_non_enumerable(fn->prototype, sk);
+                            Item rk = (Item){.item = s2it(heap_create_name("resize", 6))};
+                            Item rf = js_get_or_create_builtin(JS_BUILTIN_ARRAYBUFFER_RESIZE, "resize", 1);
+                            js_property_set(fn->prototype, rk, rf);
+                            js_mark_non_enumerable(fn->prototype, rk);
                         }
 
                     }
@@ -11922,6 +11992,10 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         if (arg1.item != ItemNull.item && get_type_id(arg1) != LMD_TYPE_NULL) end = (int)js_get_number(arg1);
         return js_arraybuffer_slice(obj, begin, end);
     }
+    case JS_BUILTIN_ARRAYBUFFER_RESIZE: {
+        extern Item js_arraybuffer_resize(Item val, Item new_length_item);
+        return js_arraybuffer_resize(this_val, arg0);
+    }
 
     // Reflect methods
     case JS_BUILTIN_REFLECT_APPLY: {
@@ -12251,10 +12325,10 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
                     return (Item){.item = i2it(js_typed_array_length(this_val))};
                 }
                 if (len == 14 && strncmp(name, "get byteLength", 14) == 0) {
-                    return ta ? (Item){.item = i2it(ta->byte_length)} : ItemNull;
+                    return ta ? (Item){.item = i2it(js_typed_array_byte_length(this_val))} : ItemNull;
                 }
                 if (len == 14 && strncmp(name, "get byteOffset", 14) == 0) {
-                    return ta ? (Item){.item = i2it(ta->byte_offset)} : ItemNull;
+                    return ta ? (Item){.item = i2it(js_typed_array_byte_offset(this_val))} : ItemNull;
                 }
                 if (len == 10 && strncmp(name, "get buffer", 10) == 0) {
                     Item buffer_key = (Item){.item = s2it(heap_create_name("buffer", 6))};
@@ -14802,7 +14876,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
             // back to TypedArray.prototype, which would cause infinite recursion
             {
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
-                if (ta && ta->element_type == JS_TYPED_UINT8) {
+                if (ta && ta->element_type == JS_TYPED_UINT8 && ta->is_buffer) {
                     extern Item js_get_buffer_prototype(void);
                     Item buf_proto = js_get_buffer_prototype();
                     if (buf_proto.item != ITEM_NULL) {
@@ -14892,41 +14966,127 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 return result;
             }
             if (method->len == 7 && strncmp(method->chars, "indexOf", 7) == 0) {
-                if (argc < 1) return (Item){.item = i2it(-1)};
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
-                int len = ta->length;
-                int from = argc > 1 ? (int)it2i(args[1]) : 0;
+                if (ta && ta->buffer) {
+                    if (ta->length_tracking) {
+                        if (ta->buffer->byte_length < ta->byte_offset) {
+                            return js_throw_type_error("Cannot perform %TypedArray%.prototype.indexOf on an out-of-bounds ArrayBuffer");
+                        }
+                    } else if (ta->buffer->byte_length < ta->byte_offset + ta->byte_length) {
+                        return js_throw_type_error("Cannot perform %TypedArray%.prototype.indexOf on an out-of-bounds ArrayBuffer");
+                    }
+                }
+                int len = js_typed_array_length(obj);
+                if (len == 0) return (Item){.item = i2it(-1)};
+                Item search_val = argc > 0 ? args[0] : (Item){.item = ITEM_JS_UNDEFINED};
+                int from = 0;
+                if (argc > 1) {
+                    Item from_arg = args[1];
+                    TypeId from_type = get_type_id(from_arg);
+                    if (from_type == LMD_TYPE_SYMBOL ||
+                        (from_type == LMD_TYPE_INT && it2i(from_arg) <= -(int64_t)JS_SYMBOL_BASE)) {
+                        return js_throw_type_error("Cannot convert a Symbol value to a number");
+                    }
+                    Item from_num = js_to_number(from_arg);
+                    if (js_check_exception()) return ItemNull;
+                    double d_from = js_get_number(from_num);
+                    if (d_from != d_from) d_from = 0;
+                    d_from = d_from >= 0 ? floor(d_from) : ceil(d_from);
+                    if (d_from == INFINITY) return (Item){.item = i2it(-1)};
+                    if (d_from < (double)INT_MIN) d_from = (double)INT_MIN;
+                    if (d_from > (double)INT_MAX) d_from = (double)INT_MAX;
+                    from = (int)d_from;
+                }
                 if (from < 0) { from += len; if (from < 0) from = 0; }
+                if (from >= len) return (Item){.item = i2it(-1)};
                 for (int i = from; i < len; i++) {
                     Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
-                    if (it2b(js_strict_equal(elem, args[0]))) return (Item){.item = i2it(i)};
+                    if (it2b(js_strict_equal(elem, search_val))) return (Item){.item = i2it(i)};
                 }
                 return (Item){.item = i2it(-1)};
             }
             if (method->len == 11 && strncmp(method->chars, "lastIndexOf", 11) == 0) {
-                if (argc < 1) return (Item){.item = i2it(-1)};
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
-                int len = ta->length;
+                if (ta && ta->buffer) {
+                    if (ta->length_tracking) {
+                        if (ta->buffer->byte_length < ta->byte_offset) {
+                            return js_throw_type_error("Cannot perform %TypedArray%.prototype.lastIndexOf on an out-of-bounds ArrayBuffer");
+                        }
+                    } else if (ta->buffer->byte_length < ta->byte_offset + ta->byte_length) {
+                        return js_throw_type_error("Cannot perform %TypedArray%.prototype.lastIndexOf on an out-of-bounds ArrayBuffer");
+                    }
+                }
+                int len = js_typed_array_length(obj);
                 if (len == 0) return (Item){.item = i2it(-1)};
-                int from = argc > 1 ? (int)js_get_number(args[1]) : len - 1;
+                Item search_val = argc > 0 ? args[0] : (Item){.item = ITEM_JS_UNDEFINED};
+                int from = len - 1;
+                if (argc > 1) {
+                    Item from_arg = args[1];
+                    TypeId from_type = get_type_id(from_arg);
+                    if (from_type == LMD_TYPE_SYMBOL ||
+                        (from_type == LMD_TYPE_INT && it2i(from_arg) <= -(int64_t)JS_SYMBOL_BASE)) {
+                        return js_throw_type_error("Cannot convert a Symbol value to a number");
+                    }
+                    Item from_num = js_to_number(from_arg);
+                    if (js_check_exception()) return ItemNull;
+                    double d_from = js_get_number(from_num);
+                    if (d_from != d_from) d_from = 0;
+                    d_from = d_from >= 0 ? floor(d_from) : ceil(d_from);
+                    if (d_from == -INFINITY) return (Item){.item = i2it(-1)};
+                    if (d_from == INFINITY || d_from > (double)(len - 1)) from = len - 1;
+                    else if (d_from < (double)INT_MIN) from = INT_MIN;
+                    else from = (int)d_from;
+                }
                 if (from < 0) from += len;
-                if (from >= len) from = len - 1;
                 if (from < 0) return (Item){.item = i2it(-1)};
                 for (int i = from; i >= 0; i--) {
                     Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
-                    if (it2b(js_strict_equal(elem, args[0]))) return (Item){.item = i2it(i)};
+                    if (it2b(js_strict_equal(elem, search_val))) return (Item){.item = i2it(i)};
                 }
                 return (Item){.item = i2it(-1)};
             }
             if (method->len == 8 && strncmp(method->chars, "includes", 8) == 0) {
-                if (argc < 1) return (Item){.item = ITEM_FALSE};
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
-                int len = ta->length;
-                int from = argc > 1 ? (int)it2i(args[1]) : 0;
+                if (ta && ta->buffer) {
+                    if (ta->length_tracking) {
+                        if (ta->buffer->byte_length < ta->byte_offset) {
+                            return js_throw_type_error("Cannot perform %TypedArray%.prototype.includes on an out-of-bounds ArrayBuffer");
+                        }
+                    } else if (ta->buffer->byte_length < ta->byte_offset + ta->byte_length) {
+                        return js_throw_type_error("Cannot perform %TypedArray%.prototype.includes on an out-of-bounds ArrayBuffer");
+                    }
+                }
+                int len = js_typed_array_length(obj);
+                if (len == 0) return (Item){.item = ITEM_FALSE};
+                Item search_val = argc > 0 ? args[0] : (Item){.item = ITEM_JS_UNDEFINED};
+                int from = 0;
+                if (argc > 1) {
+                    Item from_arg = args[1];
+                    TypeId from_type = get_type_id(from_arg);
+                    if (from_type == LMD_TYPE_SYMBOL ||
+                        (from_type == LMD_TYPE_INT && it2i(from_arg) <= -(int64_t)JS_SYMBOL_BASE)) {
+                        return js_throw_type_error("Cannot convert a Symbol value to a number");
+                    }
+                    Item from_num = js_to_number(from_arg);
+                    if (js_check_exception()) return ItemNull;
+                    double d_from = js_get_number(from_num);
+                    if (d_from != d_from) d_from = 0;
+                    d_from = d_from >= 0 ? floor(d_from) : ceil(d_from);
+                    if (d_from == INFINITY) return (Item){.item = ITEM_FALSE};
+                    if (d_from < (double)INT_MIN) d_from = (double)INT_MIN;
+                    if (d_from > (double)INT_MAX) d_from = (double)INT_MAX;
+                    from = (int)d_from;
+                }
                 if (from < 0) { from += len; if (from < 0) from = 0; }
+                if (from >= len) return (Item){.item = ITEM_FALSE};
                 for (int i = from; i < len; i++) {
                     Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
-                    if (it2b(js_strict_equal(elem, args[0]))) return (Item){.item = ITEM_TRUE};
+                    if (elem.item == ITEM_NULL) elem = (Item){.item = ITEM_JS_UNDEFINED};
+                    if (it2b(js_strict_equal(elem, search_val))) return (Item){.item = ITEM_TRUE};
+                    if (get_type_id(elem) == LMD_TYPE_FLOAT && get_type_id(search_val) == LMD_TYPE_FLOAT) {
+                        double d_elem = it2d(elem), d_search = it2d(search_val);
+                        if (d_elem != d_elem && d_search != d_search) return (Item){.item = ITEM_TRUE};
+                    }
                 }
                 return (Item){.item = ITEM_FALSE};
             }
@@ -15220,10 +15380,31 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
             }
             if (method->len == 2 && strncmp(method->chars, "at", 2) == 0) {
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
-                int idx = argc > 0 ? (int)js_get_number(args[0]) : 0;
-                if (idx < 0) idx += ta->length;
-                if (idx < 0 || idx >= ta->length) return make_js_undefined();
-                return js_typed_array_get(obj, (Item){.item = i2it(idx)});
+                if (ta && ta->buffer) {
+                    if (ta->length_tracking) {
+                        if (ta->buffer->byte_length < ta->byte_offset) {
+                            return js_throw_type_error("Cannot perform %TypedArray%.prototype.at on an out-of-bounds ArrayBuffer");
+                        }
+                    } else if (ta->buffer->byte_length < ta->byte_offset + ta->byte_length) {
+                        return js_throw_type_error("Cannot perform %TypedArray%.prototype.at on an out-of-bounds ArrayBuffer");
+                    }
+                }
+                int len = js_typed_array_length(obj);
+                Item index_arg = argc > 0 ? args[0] : (Item){.item = ITEM_JS_UNDEFINED};
+                TypeId index_type = get_type_id(index_arg);
+                if (index_type == LMD_TYPE_SYMBOL ||
+                    (index_type == LMD_TYPE_INT && it2i(index_arg) <= -(int64_t)JS_SYMBOL_BASE)) {
+                    return js_throw_type_error("Cannot convert a Symbol value to a number");
+                }
+                Item index_num = js_to_number(index_arg);
+                if (js_check_exception()) return ItemNull;
+                double d_idx = js_get_number(index_num);
+                int idx = 0;
+                if (d_idx == d_idx) idx = (int)(d_idx >= 0 ? floor(d_idx) : ceil(d_idx));
+                if (idx < 0) idx += len;
+                if (idx < 0 || idx >= len) return make_js_undefined();
+                Item value = js_typed_array_get(obj, (Item){.item = i2it(idx)});
+                return value.item == ITEM_NULL ? make_js_undefined() : value;
             }
             // TypedArray.prototype.keys/values/entries — return array iterators
             // Convert typed array to regular array, then create iterator object
@@ -15360,6 +15541,10 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 int begin = argc > 0 ? (int)it2i(args[0]) : 0;
                 int end = argc > 1 ? (int)it2i(args[1]) : js_arraybuffer_byte_length(obj);
                 return js_arraybuffer_slice(obj, begin, end);
+            }
+            if (method->len == 6 && strncmp(method->chars, "resize", 6) == 0) {
+                Item new_length = argc > 0 ? args[0] : (Item){.item = ITEM_JS_UNDEFINED};
+                return js_arraybuffer_resize(obj, new_length);
             }
         }
     }

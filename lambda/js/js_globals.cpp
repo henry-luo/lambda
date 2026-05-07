@@ -4234,9 +4234,10 @@ extern "C" Item js_instanceof_classname(Item left, Item classname) {
                 return (Item){.item = b2it(ta->element_type == JS_TYPED_FLOAT32)};
             if (rn->len == 12 && strncmp(rn->chars, "Float64Array", 12) == 0)
                 return (Item){.item = b2it(ta->element_type == JS_TYPED_FLOAT64)};
-            // BigInt64Array/BigUint64Array — not supported, always false
-            if (rn->len >= 12 && strncmp(rn->chars, "Big", 3) == 0)
-                return (Item){.item = b2it(false)};
+            if (rn->len == 13 && strncmp(rn->chars, "BigInt64Array", 13) == 0)
+                return (Item){.item = b2it(ta->element_type == JS_TYPED_BIGINT64)};
+            if (rn->len == 14 && strncmp(rn->chars, "BigUint64Array", 14) == 0)
+                return (Item){.item = b2it(ta->element_type == JS_TYPED_BIGUINT64)};
         }
 
         // ArrayBuffer check
@@ -7610,6 +7611,7 @@ static bool is_array_like(Item v) {
     TypeId t = get_type_id(v);
     if (t == LMD_TYPE_ARRAY) return true;
     if (t == LMD_TYPE_MAP && ((Container*)(uintptr_t)v.item)->map_kind == MAP_KIND_TYPED_ARRAY) return true;
+    if (t == LMD_TYPE_MAP && ((Container*)(uintptr_t)v.item)->map_kind == MAP_KIND_ARRAYBUFFER) return true;
     return false;
 }
 

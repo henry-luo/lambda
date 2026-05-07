@@ -1540,6 +1540,7 @@ JitImport jit_runtime_imports[] = {
     // ArrayBuffer
     {"js_arraybuffer_new", FPTR(js_arraybuffer_new)},
     {"js_arraybuffer_construct", FPTR(js_arraybuffer_construct)},
+    {"js_arraybuffer_construct_resizable", FPTR(js_arraybuffer_construct_resizable)},
     {"js_is_arraybuffer", FPTR(js_is_arraybuffer)},
     {"js_arraybuffer_byte_length", FPTR(js_arraybuffer_byte_length)},
     {"js_arraybuffer_slice", FPTR(js_arraybuffer_slice)},

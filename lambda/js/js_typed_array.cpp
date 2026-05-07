@@ -176,6 +176,68 @@ static int typed_array_element_size(JsTypedArrayType type) {
     }
 }
 
+static int js_typed_array_current_byte_length(JsTypedArray* ta) {
+    if (!ta) return 0;
+    if (!ta->buffer) return ta->byte_length;
+    if (ta->buffer->detached) return 0;
+    int available = ta->buffer->byte_length - ta->byte_offset;
+    if (available < 0) return 0;
+    if (ta->length_tracking) {
+        int elem_size = typed_array_element_size(ta->element_type);
+        return (available / elem_size) * elem_size;
+    }
+    return available >= ta->byte_length ? ta->byte_length : 0;
+}
+
+static int js_typed_array_current_length(JsTypedArray* ta) {
+    if (!ta) return 0;
+    int elem_size = typed_array_element_size(ta->element_type);
+    return js_typed_array_current_byte_length(ta) / elem_size;
+}
+
+static int js_typed_array_current_byte_offset(JsTypedArray* ta) {
+    if (!ta) return 0;
+    if (!ta->buffer) return ta->byte_offset;
+    if (ta->buffer->detached) return 0;
+    if (ta->length_tracking) return ta->buffer->byte_length >= ta->byte_offset ? ta->byte_offset : 0;
+    return ta->buffer->byte_length >= ta->byte_offset + ta->byte_length ? ta->byte_offset : 0;
+}
+
+static void* js_typed_array_current_data(JsTypedArray* ta) {
+    if (!ta) return NULL;
+    if (!ta->buffer) return ta->data;
+    if (js_typed_array_current_byte_length(ta) == 0) return NULL;
+    return (char*)ta->buffer->data + ta->byte_offset;
+}
+
+static bool js_to_index_int(Item value, int* out_index, const char* error_message) {
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED) {
+        *out_index = 0;
+        return true;
+    }
+    if (type == LMD_TYPE_SYMBOL ||
+        (type == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE)) {
+        js_throw_type_error("Cannot convert a Symbol value to a number");
+        return false;
+    }
+    Item num = js_to_number(value);
+    if (js_check_exception()) return false;
+    type = get_type_id(num);
+    double dval = (type == LMD_TYPE_FLOAT) ? it2d(num) : (double)it2i(num);
+    if (std::isnan(dval)) {
+        *out_index = 0;
+        return true;
+    }
+    dval = std::trunc(dval);
+    if (dval < 0 || !std::isfinite(dval) || dval > 1073741824.0) {
+        js_throw_range_error(error_message);
+        return false;
+    }
+    *out_index = (int)dval;
+    return true;
+}
+
 // Returns the JS type name for a typed array element type (e.g. "Uint8Array")
 extern "C" const char* js_typed_array_type_name(Item val) {
     if (get_type_id(val) != LMD_TYPE_MAP) return NULL;
@@ -206,9 +268,11 @@ extern "C" const char* js_typed_array_type_name(Item val) {
 static JsArrayBuffer* js_arraybuffer_alloc(int byte_length) {
     JsArrayBuffer* ab = (JsArrayBuffer*)mem_alloc(sizeof(JsArrayBuffer), MEM_CAT_JS_RUNTIME);
     ab->byte_length = byte_length;
+    ab->max_byte_length = byte_length;
     ab->data = mem_calloc(1, byte_length > 0 ? byte_length : 1, MEM_CAT_JS_RUNTIME);
     ab->detached = false;
     ab->is_shared = false;
+    ab->resizable = false;
     return ab;
 }
 
@@ -230,43 +294,35 @@ extern "C" Item js_arraybuffer_new(int byte_length) {
 // Performs ToIndex validation per spec: non-negative integer, throws RangeError for invalid.
 // Practical allocation limit: 1 GB (matches typical engine limits).
 extern "C" Item js_arraybuffer_construct(Item length_arg) {
+    return js_arraybuffer_construct_resizable(length_arg, (Item){.item = ITEM_JS_UNDEFINED});
+}
+
+extern "C" Item js_arraybuffer_construct_resizable(Item length_arg, Item options_arg) {
     // ToIndex: undefined/null → 0
-    TypeId type = get_type_id(length_arg);
-    if (type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED) {
-        return js_arraybuffer_new(0);
+    int byte_length = 0;
+    if (!js_to_index_int(length_arg, &byte_length, "Invalid array buffer length")) return ItemNull;
+
+    int max_byte_length = byte_length;
+    bool resizable = false;
+    if (get_type_id(options_arg) == LMD_TYPE_MAP) {
+        Item max_key = (Item){.item = s2it(heap_create_name("maxByteLength"))};
+        Item max_item = js_property_get(options_arg, max_key);
+        if (get_type_id(max_item) != LMD_TYPE_UNDEFINED && max_item.item != ITEM_NULL) {
+            if (!js_to_index_int(max_item, &max_byte_length, "Invalid array buffer maxByteLength")) return ItemNull;
+            if (max_byte_length < byte_length) return js_throw_range_error("Invalid array buffer maxByteLength");
+            resizable = true;
+        }
     }
 
-    // Convert to number: handles strings, objects (valueOf/toString), booleans
-    Item num = js_to_number(length_arg);
-    if (js_check_exception()) return ItemNull;
-    type = get_type_id(num);
-
-    // Extract numeric value as double for validation
-    double dval;
-    if (type == LMD_TYPE_FLOAT) {
-        dval = *((double*)((uintptr_t)num.item & 0x00FFFFFFFFFFFFFF));
-    } else {
-        dval = (double)it2i(num);
+    Item result = js_arraybuffer_new(byte_length);
+    if (js_is_arraybuffer(result)) {
+        JsArrayBuffer* ab = (JsArrayBuffer*)result.map->data;
+        if (ab) {
+            ab->max_byte_length = max_byte_length;
+            ab->resizable = resizable;
+        }
     }
-
-    // NaN → 0 (per ToInteger spec)
-    if (std::isnan(dval)) {
-        return js_arraybuffer_new(0);
-    }
-
-    // ToInteger: truncate toward zero (not floor)
-    dval = std::trunc(dval);
-
-    // Validate: must be non-negative and <= 2^53 - 1
-    if (dval < 0 || !std::isfinite(dval) || dval > 9007199254740991.0) {
-        return js_throw_range_error("Invalid array buffer length");
-    }
-
-    int64_t ival = (int64_t)dval;
-    if (ival > 1073741824) { // 1 GB practical limit
-        return js_throw_range_error("Array buffer allocation failed");
-    }
-    return js_arraybuffer_new((int)ival);
+    return result;
 }
 
 extern "C" bool js_is_arraybuffer(Item val) {
@@ -307,6 +363,25 @@ extern "C" int js_arraybuffer_byte_length(Item val) {
     JsArrayBuffer* ab = js_get_arraybuffer_ptr(val.map);
     if (!ab) return 0;
     return ab->byte_length;
+}
+
+extern "C" Item js_arraybuffer_resize(Item val, Item new_length_item) {
+    if (!js_is_arraybuffer(val) || js_is_sharedarraybuffer(val)) {
+        return js_throw_type_error("ArrayBuffer.prototype.resize requires a resizable ArrayBuffer receiver");
+    }
+    JsArrayBuffer* ab = js_get_arraybuffer_ptr(val.map);
+    if (!ab || ab->detached) return js_throw_type_error("ArrayBuffer is detached");
+    if (!ab->resizable) return js_throw_type_error("ArrayBuffer is not resizable");
+    int new_length = 0;
+    if (!js_to_index_int(new_length_item, &new_length, "Invalid array buffer length")) return ItemNull;
+    if (new_length > ab->max_byte_length) return js_throw_range_error("Invalid array buffer length");
+
+    void* new_data = mem_calloc(1, new_length > 0 ? new_length : 1, MEM_CAT_JS_RUNTIME);
+    int copy_len = ab->byte_length < new_length ? ab->byte_length : new_length;
+    if (ab->data && copy_len > 0) memcpy(new_data, ab->data, copy_len);
+    ab->data = new_data;
+    ab->byte_length = new_length;
+    return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
 extern "C" Item js_arraybuffer_slice(Item val, int begin, int end) {
@@ -405,9 +480,11 @@ extern "C" Item js_sharedarraybuffer_construct(Item length_arg) {
     int byte_length = (int)ival;
     JsArrayBuffer* ab = (JsArrayBuffer*)mem_alloc(sizeof(JsArrayBuffer), MEM_CAT_JS_RUNTIME);
     ab->byte_length = byte_length;
+    ab->max_byte_length = byte_length;
     ab->data = mem_calloc(1, byte_length > 0 ? byte_length : 1, MEM_CAT_JS_RUNTIME);
     ab->detached = false;
     ab->is_shared = true;
+    ab->resizable = false;
 
     Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     m->type_id = LMD_TYPE_MAP;
@@ -510,6 +587,8 @@ extern "C" Item js_typed_array_new(int type_id, int length) {
     ta->data = mem_calloc(length > 0 ? length : 1, elem_size, MEM_CAT_JS_RUNTIME);
     ta->buffer = NULL;
     ta->buffer_item = 0;
+    ta->length_tracking = false;
+    ta->is_buffer = false;
 
     Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     m->type_id = LMD_TYPE_MAP;
@@ -540,7 +619,8 @@ extern "C" Item js_typed_array_new_from_buffer(int type_id, Item buffer_item, in
     int available = ab->byte_length - byte_offset;
     if (available < 0) available = 0;
 
-    if (length < 0) {
+    bool length_tracking = length < 0;
+    if (length_tracking) {
         // auto-compute length from remaining buffer
         length = available / elem_size;
     }
@@ -559,6 +639,8 @@ extern "C" Item js_typed_array_new_from_buffer(int type_id, Item buffer_item, in
     ta->data = (char*)ab->data + byte_offset;  // direct pointer into buffer
     ta->buffer = ab;
     ta->buffer_item = buffer_item.item;  // preserve original Item for identity-preserving .buffer
+    ta->length_tracking = length_tracking;
+    ta->is_buffer = false;
 
     Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     m->type_id = LMD_TYPE_MAP;
@@ -598,10 +680,15 @@ extern "C" Item js_typed_array_new_from_array(int type_id, Item source) {
         Array* arr = source.array;
         int len = (int)arr->length;
         Item result = js_typed_array_new(type_id, len);
+        Item* values = len > 0 ? (Item*)malloc(sizeof(Item) * len) : NULL;
+        for (int i = 0; i < len; i++) values[i] = arr->items[i];
         for (int i = 0; i < len; i++) {
             Item idx = (Item){.item = i2it(i)};
-            js_typed_array_set(result, idx, arr->items[i]);
+            Item val = values ? values[i] : ItemNull;
+            if (val.item == JS_DELETED_SENTINEL_VAL) val = (Item){.item = ITEM_JS_UNDEFINED};
+            js_typed_array_set(result, idx, val);
         }
+        if (values) free(values);
         return result;
     }
 
@@ -651,40 +738,43 @@ extern "C" Item js_typed_array_get(Item ta_item, Item index) {
     JsTypedArray* ta = js_get_typed_array_ptr(m);
     int idx = (int)it2i(index);
 
-    if (idx < 0 || idx >= ta->length) return (Item){.item = ITEM_NULL};
+    int current_length = js_typed_array_current_length(ta);
+    if (idx < 0 || idx >= current_length) return (Item){.item = ITEM_NULL};
+    void* data = js_typed_array_current_data(ta);
+    if (!data) return (Item){.item = ITEM_NULL};
 
     switch (ta->element_type) {
     case JS_TYPED_INT8:
-        return (Item){.item = i2it((int64_t)((int8_t*)ta->data)[idx])};
+        return (Item){.item = i2it((int64_t)((int8_t*)data)[idx])};
     case JS_TYPED_UINT8:
     case JS_TYPED_UINT8_CLAMPED:
-        return (Item){.item = i2it((int64_t)((uint8_t*)ta->data)[idx])};
+        return (Item){.item = i2it((int64_t)((uint8_t*)data)[idx])};
     case JS_TYPED_INT16:
-        return (Item){.item = i2it((int64_t)((int16_t*)ta->data)[idx])};
+        return (Item){.item = i2it((int64_t)((int16_t*)data)[idx])};
     case JS_TYPED_UINT16:
-        return (Item){.item = i2it((int64_t)((uint16_t*)ta->data)[idx])};
+        return (Item){.item = i2it((int64_t)((uint16_t*)data)[idx])};
     case JS_TYPED_INT32:
-        return (Item){.item = i2it((int64_t)((int32_t*)ta->data)[idx])};
+        return (Item){.item = i2it((int64_t)((int32_t*)data)[idx])};
     case JS_TYPED_UINT32:
-        return (Item){.item = i2it((int64_t)((uint32_t*)ta->data)[idx])};
+        return (Item){.item = i2it((int64_t)((uint32_t*)data)[idx])};
     case JS_TYPED_FLOAT32: {
         double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-        *fp = (double)((float*)ta->data)[idx];
+        *fp = (double)((float*)data)[idx];
         return (Item){.item = d2it(fp)};
     }
     case JS_TYPED_FLOAT64: {
         double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-        *fp = ((double*)ta->data)[idx];
+        *fp = ((double*)data)[idx];
         return (Item){.item = d2it(fp)};
     }
     case JS_TYPED_BIGINT64: {
         extern Item bigint_from_int64(int64_t val);
-        return bigint_from_int64(((int64_t*)ta->data)[idx]);
+        return bigint_from_int64(((int64_t*)data)[idx]);
     }
     case JS_TYPED_BIGUINT64: {
         extern Item bigint_from_int64(int64_t val);
         extern Item bigint_from_string(const char* str, int len);
-        uint64_t v = ((uint64_t*)ta->data)[idx];
+        uint64_t v = ((uint64_t*)data)[idx];
         if (v <= (uint64_t)INT64_MAX) return bigint_from_int64((int64_t)v);
         // Value exceeds int64 range — construct from string
         char buf[32];
@@ -703,7 +793,10 @@ extern "C" Item js_typed_array_set(Item ta_item, Item index, Item value) {
     JsTypedArray* ta = js_get_typed_array_ptr(m);
     int idx = (int)it2i(index);
 
-    if (idx < 0 || idx >= ta->length) return (Item){.item = ITEM_NULL};
+    int current_length = js_typed_array_current_length(ta);
+    if (idx < 0 || idx >= current_length) return (Item){.item = ITEM_NULL};
+    void* data = js_typed_array_current_data(ta);
+    if (!data) return (Item){.item = ITEM_NULL};
 
     // BigInt types: ToBigInt(value), then store as int64/uint64.
     // Per ES spec §22.2.3.5.4 IntegerIndexedElementSet: BigInt typed arrays use ToBigInt
@@ -742,17 +835,19 @@ extern "C" Item js_typed_array_set(Item ta_item, Item index, Item value) {
         }
         int64_t iv = bigint_to_int64(bi);  // truncates to int64 for both signed/unsigned
         if (ta->element_type == JS_TYPED_BIGINT64) {
-            ((int64_t*)ta->data)[idx] = iv;
+            ((int64_t*)data)[idx] = iv;
         } else {
             // BigUint64: take low 64 bits (unsigned wrap-around per spec)
-            ((uint64_t*)ta->data)[idx] = (uint64_t)iv;
+            ((uint64_t*)data)[idx] = (uint64_t)iv;
         }
         return value;
     }
 
     double num_val;
     TypeId vtype = get_type_id(value);
-    if (vtype == LMD_TYPE_INT) {
+    if (value.item == ITEM_JS_UNDEFINED) {
+        num_val = NAN;
+    } else if (vtype == LMD_TYPE_INT) {
         // Check for Symbol (encoded as negative int <= -JS_SYMBOL_BASE)
         int64_t iv = it2i(value);
         if (iv <= -(int64_t)JS_SYMBOL_BASE) {
@@ -774,27 +869,27 @@ extern "C" Item js_typed_array_set(Item ta_item, Item index, Item value) {
     }
 
     switch (ta->element_type) {
-    case JS_TYPED_INT8:    ((int8_t*)ta->data)[idx] = (int8_t)(int32_t)num_val; break;
-    case JS_TYPED_UINT8:   ((uint8_t*)ta->data)[idx] = (uint8_t)(uint32_t)num_val; break;
+    case JS_TYPED_INT8:    ((int8_t*)data)[idx] = (int8_t)(int32_t)num_val; break;
+    case JS_TYPED_UINT8:   ((uint8_t*)data)[idx] = (uint8_t)(uint32_t)num_val; break;
     case JS_TYPED_UINT8_CLAMPED: {
         // ECMAScript ToUint8Clamp: NaN→0, clamp to [0,255], then round-half-to-even
-        if (isnan(num_val) || num_val <= 0.0) { ((uint8_t*)ta->data)[idx] = 0; break; }
-        if (num_val >= 255.0) { ((uint8_t*)ta->data)[idx] = 255; break; }
+        if (isnan(num_val) || num_val <= 0.0) { ((uint8_t*)data)[idx] = 0; break; }
+        if (num_val >= 255.0) { ((uint8_t*)data)[idx] = 255; break; }
         int f = (int)num_val;  // floor
         double fmod = num_val - f;
         uint8_t v;
         if (fmod < 0.5) v = (uint8_t)f;
         else if (fmod > 0.5) v = (uint8_t)(f + 1);
         else v = (f & 1) ? (uint8_t)(f + 1) : (uint8_t)f;  // ties to even
-        ((uint8_t*)ta->data)[idx] = v;
+        ((uint8_t*)data)[idx] = v;
         break;
     }
-    case JS_TYPED_INT16:   ((int16_t*)ta->data)[idx] = (int16_t)(int32_t)num_val; break;
-    case JS_TYPED_UINT16:  ((uint16_t*)ta->data)[idx] = (uint16_t)(uint32_t)num_val; break;
-    case JS_TYPED_INT32:   ((int32_t*)ta->data)[idx] = (int32_t)num_val; break;
-    case JS_TYPED_UINT32:  ((uint32_t*)ta->data)[idx] = (uint32_t)num_val; break;
-    case JS_TYPED_FLOAT32: ((float*)ta->data)[idx] = (float)num_val; break;
-    case JS_TYPED_FLOAT64: ((double*)ta->data)[idx] = num_val; break;
+    case JS_TYPED_INT16:   ((int16_t*)data)[idx] = (int16_t)(int32_t)num_val; break;
+    case JS_TYPED_UINT16:  ((uint16_t*)data)[idx] = (uint16_t)(uint32_t)num_val; break;
+    case JS_TYPED_INT32:   ((int32_t*)data)[idx] = (int32_t)num_val; break;
+    case JS_TYPED_UINT32:  ((uint32_t*)data)[idx] = (uint32_t)num_val; break;
+    case JS_TYPED_FLOAT32: ((float*)data)[idx] = (float)num_val; break;
+    case JS_TYPED_FLOAT64: ((double*)data)[idx] = num_val; break;
     }
 
     return value;
@@ -804,7 +899,19 @@ extern "C" int js_typed_array_length(Item ta_item) {
     if (!js_is_typed_array(ta_item)) return 0;
     Map* m = ta_item.map;
     JsTypedArray* ta = js_get_typed_array_ptr(m);
-    return ta->length;
+    return js_typed_array_current_length(ta);
+}
+
+extern "C" int js_typed_array_byte_length(Item ta_item) {
+    if (!js_is_typed_array(ta_item)) return 0;
+    JsTypedArray* ta = js_get_typed_array_ptr(ta_item.map);
+    return js_typed_array_current_byte_length(ta);
+}
+
+extern "C" int js_typed_array_byte_offset(Item ta_item) {
+    if (!js_is_typed_array(ta_item)) return 0;
+    JsTypedArray* ta = js_get_typed_array_ptr(ta_item.map);
+    return js_typed_array_current_byte_offset(ta);
 }
 
 extern "C" Item js_typed_array_fill(Item ta_item, Item value, int start, int end) {
@@ -812,11 +919,14 @@ extern "C" Item js_typed_array_fill(Item ta_item, Item value, int start, int end
 
     Map* m = ta_item.map;
     JsTypedArray* ta = js_get_typed_array_ptr(m);
+    int len = js_typed_array_current_length(ta);
+    void* data = js_typed_array_current_data(ta);
+    if (!data || len <= 0) return ta_item;
 
-    if (start < 0) start = ta->length + start;
+    if (start < 0) start = len + start;
     if (start < 0) start = 0;
-    if (end == INT_MAX || end > ta->length) end = ta->length;
-    else if (end < 0) end = ta->length + end;
+    if (end == INT_MAX || end > len) end = len;
+    else if (end < 0) end = len + end;
     if (end < 0) end = 0;
     if (start >= end) return ta_item;
 
@@ -835,46 +945,46 @@ extern "C" Item js_typed_array_fill(Item ta_item, Item value, int start, int end
         if (ta->element_type == JS_TYPED_UINT8_CLAMPED) {
             if (v < 0) v = 0; else if (v > 255) v = 255;
         }
-        memset((uint8_t*)ta->data + start, (uint8_t)v, count);
+        memset((uint8_t*)data + start, (uint8_t)v, count);
         return ta_item;
     }
     case JS_TYPED_INT8: {
-        memset((int8_t*)ta->data + start, (int8_t)(int32_t)num_val, count);
+        memset((int8_t*)data + start, (int8_t)(int32_t)num_val, count);
         return ta_item;
     }
     case JS_TYPED_INT16: {
         int16_t v = (int16_t)(int32_t)num_val;
-        int16_t* p = (int16_t*)ta->data + start;
+        int16_t* p = (int16_t*)data + start;
         for (int i = 0; i < count; i++) p[i] = v;
         return ta_item;
     }
     case JS_TYPED_UINT16: {
         uint16_t v = (uint16_t)(uint32_t)num_val;
-        uint16_t* p = (uint16_t*)ta->data + start;
+        uint16_t* p = (uint16_t*)data + start;
         for (int i = 0; i < count; i++) p[i] = v;
         return ta_item;
     }
     case JS_TYPED_INT32: {
         int32_t v = (int32_t)num_val;
-        int32_t* p = (int32_t*)ta->data + start;
+        int32_t* p = (int32_t*)data + start;
         for (int i = 0; i < count; i++) p[i] = v;
         return ta_item;
     }
     case JS_TYPED_UINT32: {
         uint32_t v = (uint32_t)num_val;
-        uint32_t* p = (uint32_t*)ta->data + start;
+        uint32_t* p = (uint32_t*)data + start;
         for (int i = 0; i < count; i++) p[i] = v;
         return ta_item;
     }
     case JS_TYPED_FLOAT32: {
         float v = (float)num_val;
-        float* p = (float*)ta->data + start;
+        float* p = (float*)data + start;
         for (int i = 0; i < count; i++) p[i] = v;
         return ta_item;
     }
     case JS_TYPED_FLOAT64: {
         double v = num_val;
-        double* p = (double*)ta->data + start;
+        double* p = (double*)data + start;
         for (int i = 0; i < count; i++) p[i] = v;
         return ta_item;
     }
