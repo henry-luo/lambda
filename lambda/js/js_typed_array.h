@@ -75,7 +75,7 @@ int  js_typed_array_byte_offset(Item ta);
 Item js_typed_array_fill(Item ta, Item value, int start, int end);
 bool js_is_typed_array(Item val);
 JsTypedArray* js_get_typed_array_ptr(Map* m);
-Item js_typed_array_subarray(Item ta, int start, int end);
+Item js_typed_array_subarray(Item ta, int start, int end, bool end_is_default);
 Item js_typed_array_slice(Item ta, int start, int end);
 Item js_typed_array_set_from(Item ta, Item source, int offset);
 
@@ -112,6 +112,7 @@ const char* js_typed_array_type_name(Item val);
 
 // ES §22.2.4.7 TypedArraySpeciesCreate — creates result using @@species constructor
 Item js_typed_array_species_create(Item exemplar, int length);
+Item js_typed_array_species_create_from_buffer(Item exemplar, Item buffer, int byte_offset, int length, bool length_tracking);
 
 #ifdef __cplusplus
 }

@@ -40,6 +40,10 @@ static inline Item js_props_undefined() {
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
+static inline Item js_props_accessor_result(Item value) {
+    return js_check_exception() ? value : (value.item == ItemNull.item ? js_props_undefined() : value);
+}
+
 // 2-arg heap_create_name lives in transpiler.hpp (defined in lambda-mem.cpp);
 // forward-declare here so the kernels below can build name keys.
 extern "C++" String* heap_create_name(const char* name, size_t len);
@@ -102,7 +106,7 @@ extern "C" JsOwnGetStatus js_ordinary_get_own(Item object, Item key,
             JsAccessorPair* pair = js_item_to_accessor_pair(slot);
             if (pair && pair->getter.item != ItemNull.item) {
                 Item this_val = (Receiver.item ? Receiver : object);
-                *out_value = js_call_function(pair->getter, this_val, NULL, 0);
+                *out_value = js_props_accessor_result(js_call_function(pair->getter, this_val, NULL, 0));
                 return JS_OWN_READY;
             }
             // Setter-only accessor:
@@ -315,7 +319,7 @@ extern "C" JsResolveFieldStatus js_ordinary_resolve_shape_value(ShapeEntry* e,
     if (jspd_is_accessor(e)) {
         JsAccessorPair* pair = js_item_to_accessor_pair(slot);
         if (pair && pair->getter.item != ItemNull.item) {
-            Item v = js_call_function(pair->getter, receiver, NULL, 0);
+            Item v = js_props_accessor_result(js_call_function(pair->getter, receiver, NULL, 0));
             if (js_check_exception()) return JS_RESOLVE_THREW;
             if (out_value) *out_value = v;
             return JS_RESOLVE_VALUE;

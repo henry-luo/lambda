@@ -22,20 +22,20 @@ Infrastructure health is good; semantic compliance is the failure surface.
 ### 2026-05-07 Progress Update
 
 Js40 has moved from initial failure analysis into implementation. The baseline
-is now clean and has been updated after a full `--run-partial` run. The current
-working tree has additional non-baseline improvements beyond that updated
-baseline.
+is now clean and has been refreshed after the latest full `--run-partial`
+update run. The current working tree has additional post-refresh improvements
+from the focused `subarray` species work.
 
 | Metric | Initial Js40 run | Current after fixes |
 |---|---:|---:|
 | Total discovered tests | 42,219 | 42,219 |
-| Batched / in-scope tests | 34,145 | 34,153 |
-| Fully passing | 29,185 | 29,749 |
-| Failed | 4,960 | 4,404 |
-| Skipped | 8,074 | 8,066 |
-| Pass rate, in-scope | 85.5% | 87.1% |
-| Baseline passing | 29,149 | 29,624 |
-| Improvements vs baseline | 77 | 125 after post-baseline local fixes |
+| Batched / in-scope tests | 34,145 | 34,167 |
+| Fully passing | 29,185 | 29,802 |
+| Failed | 4,960 | 4,362 |
+| Skipped | 8,074 | 8,052 |
+| Pass rate, in-scope | 85.5% | 87.2% |
+| Baseline passing | 29,149 | 29,802 |
+| Improvements vs baseline | 77 | 181 incorporated into refreshed baseline; 40 current local improvements |
 | Regressions vs baseline | 41 | 0 |
 
 Latest successful update command:
@@ -50,19 +50,36 @@ Latest verification command:
 ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --baseline-only --js-timeout=20
 ```
 
-Verification result: `29,624 / 29,624` fully passing, `0` failures, `0`
-regressions.
+Latest baseline update result: `29,802 / 34,167` fully passing, `4,362`
+failed, `8,052` skipped, `181` improvements, `0` regressions. The update run
+also cleaned `test/js262/t262_partial.txt` from 52 to 44 entries.
+
+Latest baseline verification result after the baseline refresh and follow-up
+TypedArray `reverse`/`subarray` work: `29,802 / 29,802` fully passing, `0`
+failures, and `0` regressions.
 
 Latest non-updating full batch after the DataView BigInt, TypedArray
 `@@toStringTag`, TypedArray accessor/RAB, `at`, `includes`, `indexOf`, and
-`lastIndexOf` work:
+`lastIndexOf`, `fill`, `find`/`findIndex`, callback-method, and `copyWithin`
+work:
 
 ```bash
 ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --js-timeout=20
 ```
 
-Result: `29,749 / 34,153` fully passing, `4,404` failed, `8,066` skipped,
-`125` improvements, `0` regressions.
+Result before the baseline refresh: `29,804 / 34,151` fully passing, `4,347`
+failed, `8,068` skipped, `180` improvements, `0` regressions. That run used
+the then-current partial-test list with 52 non-fully-passing entries, so the
+denominator differs from the later baseline-refresh run.
+
+Latest non-updating full batch after the focused `reverse` work, under the
+refreshed baseline and current partial-test accounting: `29,802 / 34,148` fully
+passing, `4,346` failed, `8,071` skipped, `0` improvements, and `0`
+regressions.
+
+Latest non-updating full batch after the focused `subarray` RAB/current-view
+and species-constructor work: `29,842 / 34,148` fully passing, `4,306` failed,
+`8,071` skipped, `40` improvements, and `0` regressions.
 
 The `--js-timeout=20` option was added to the Test262 runner because one
 RegExp test (`built_ins_RegExp_character_class_escape_non_whitespace_js`) could
@@ -88,6 +105,12 @@ TypedArray progress since the baseline update:
 | `%TypedArray%.prototype.includes` | 24 / 45 before method/RAB/Buffer identity work | 45 / 45 |
 | `%TypedArray%.prototype.indexOf` | 31 / 43 before method/RAB work | 43 / 43 |
 | `%TypedArray%.prototype.lastIndexOf` | 36 / 42 before method/RAB/fill work | 42 / 42 |
+| `%TypedArray%.prototype.fill` | 19 / 51 before coercion/RAB/integer conversion work | 51 / 51 |
+| `%TypedArray%.prototype.{find,findIndex}` | 66 / 76 before RAB callback-loop work | 76 / 76 |
+| `%TypedArray%.prototype.{every,some,findLast,findLastIndex}` | 144 / 164 before RAB callback-loop work | 164 / 164 |
+| `%TypedArray%.prototype.copyWithin` | 37 / 64 before coercion/RAB/BigInt work | 64 / 64 |
+| `%TypedArray%.prototype.reverse` | 18 / 21 before RAB/current-length work | 21 / 21 |
+| `%TypedArray%.prototype.subarray` | 29 / 67 before RAB/current-view/species work | 59 / 67; remaining constructor/detached edge cases |
 
 DataView BigInt getter/setter behavior has also landed. The focused list now
 passes all `getBigInt64`, `getBigUint64`, `setBigInt64`, and `setBigUint64`
@@ -141,6 +164,37 @@ Implemented since the initial proposal:
   preserving strict-equality search semantics. The `lastIndexOf` slice also
   fixed length-tracking RAB `fill` setup by making `js_typed_array_fill` use
   dynamic view length and backing data after resize.
+- `%TypedArray%.prototype.fill` now computes start/end from initial TypedArray
+  length, propagates `ToIntegerOrInfinity` abrupt completions, converts the
+  fill value exactly once, supports BigInt typed-array value conversion, and
+  revalidates RAB state after coercion. Integer typed-array stores now use a
+  shared JS ToInt/ToUint modulo conversion helper instead of C casts for
+  `Infinity` and out-of-range doubles.
+- `%TypedArray%.prototype.find` and `findIndex` now validate RAB-backed
+  receivers before callback iteration, capture the current internal length
+  rather than stale construction length, and pass `undefined` for elements that
+  become out of bounds after a mid-iteration resize.
+- `%TypedArray%.prototype.every`, `some`, `findLast`, and `findLastIndex` now
+  follow the same RAB callback-loop discipline: entry validation, dynamic
+  current-length capture, and `undefined` callback values for elements made
+  out of bounds by resize during iteration.
+- `%TypedArray%.prototype.copyWithin` now validates RAB-backed receivers before
+  coercion, coerces `target`/`start`/`end` through `js_to_number` with Symbol
+  abrupt-completion handling, revalidates after user coercion, computes the
+  copy window from the pre-coercion length plus current RAB bounds, uses current
+  backing data, and preserves BigInt typed-array 8-byte element copies.
+- `%TypedArray%.prototype.reverse` now validates detached/out-of-bounds
+  RAB-backed receivers before swapping and uses the current internal length
+  instead of the construction-time cached length.
+- `%TypedArray%.prototype.subarray` now captures the source length before
+  argument coercion, creates shared-buffer results from current RAB state,
+  preserves length-tracking results when `end` is omitted, throws RangeError
+  for result views that would start or extend beyond the current buffer, and
+  routes buffer/byteOffset/length creation through `TypedArraySpeciesCreate`.
+  Custom `@@species` getters, custom constructors, and custom returned typed
+  arrays now pass; the remaining focused failures are limited to inherited
+  `constructor` edge cases, detached-buffer species ordering, and the broader
+  `isConstructor`/`Reflect.construct` path for methods.
 - String receiver checks, RegExp string-iterator coercions, Array reduce
   prototype-key refresh, and for-of destructuring assignment writeback were
   also fixed while recovering the baseline.
@@ -214,9 +268,10 @@ One-level-deeper clusters show the same shape:
 
 ## 3. Regressions First
 
-Status: complete as of 2026-05-07. The baseline update now records `29,624`
-passing tests and a clean `--baseline-only --js-timeout=20` verification run
-reports `0` regressions.
+Status: complete as of 2026-05-07. The latest baseline refresh now records
+`29,802` passing tests; the follow-up `--baseline-only --js-timeout=20`
+verification reports `0` failures and `0` regressions, with two slow/batch-kill
+cases recovered in Phase 4 retry.
 
 The run has 77 improvements, but 41 baseline regressions. Js40 should begin by
 making the baseline clean again before attempting broad gains.
@@ -274,8 +329,8 @@ Each phase must be independently shippable:
 ### Phase J40-0 - Restore Baseline Health
 
 Status: complete. The 41 initial baseline regressions were reduced to zero, and
-the baseline was updated to 29,624 passing tests after a full `--run-partial`
-run.
+the baseline has now been refreshed to 29,802 passing tests after a full
+`--run-partial --update-baseline` run.
 
 Goal: reduce the 41 regressions to zero without deleting baseline entries.
 
@@ -365,8 +420,13 @@ current DataView failure list improved to `187 / 187`. The focused
 `%TypedArray%.prototype[@@toStringTag]` subset is also `18 / 18`. The focused
 `%TypedArray%.prototype` accessor/RAB subset is now `50 / 50`; the focused
 `%TypedArray%.prototype.includes` subset is now `45 / 45`; and the focused
-`indexOf`/`lastIndexOf` subsets are now `43 / 43` and `42 / 42`. Broader
-TypedArray method, species, and canonical numeric-index work remains.
+`indexOf`/`lastIndexOf` subsets are now `43 / 43` and `42 / 42`; the focused
+`fill` subset is now `51 / 51`; the focused `find`/`findIndex` subset is now
+`76 / 76`; and the focused `every`/`some`/`findLast`/`findLastIndex` callback
+subset is now `164 / 164`; the focused `copyWithin` subset is now `64 / 64`;
+the focused `reverse` subset is now `21 / 21`; and the focused `subarray`
+subset has improved from `29 / 67` to `59 / 67`. Broader TypedArray method,
+species, and canonical numeric-index work remains.
 
 Goal: make `TypedArray`/`DataView` behavior spec-driven instead of method-local.
 
@@ -409,9 +469,17 @@ Expected impact:
   current regressions. The DataView portion has converted all 158 remaining
   cases in the 187-test focused list to passing status; the latest TypedArray
   accessor/RAB slice converted the focused accessor list from `37 / 50` to
-  `50 / 50`; the later `at`, `includes`, `indexOf`, `lastIndexOf`, Buffer
-  identity, dynamic RAB `fill`, and float-widening work raised the non-updating
-  full-batch improvement count to `125`.
+  `50 / 50`; the later `at`, `includes`, `indexOf`, `lastIndexOf`, `fill`,
+  `find`/`findIndex`, `every`/`some`/`findLast`/`findLastIndex`, `copyWithin`,
+  `reverse`, `subarray`, Buffer identity, dynamic RAB backing updates, integer
+  conversion, and float-widening work leave the latest non-updating full-batch
+  improvement count at `40` after the baseline was refreshed to incorporate the
+  earlier improvements. The callback-method and `reverse` slices improved their
+  focused manifests but did not change the full-run improvement count because
+  those tests are outside the current partial-list accounting; the earlier
+  `copyWithin` slice moved the pre-refresh full-run improvement count from
+  `158` to `180`, and the `subarray` RAB/current-view/species slice now
+  contributes the first post-refresh full-run improvements.
 
 ### Phase J40-4 - Iterator and Destructuring Runtime Kernels
 
@@ -612,9 +680,12 @@ clean. Phases 5-7 can then push class and async compliance without fighting the
 lower-level property, iterator, and internal-slot gaps.
 
 Progress against that target as of 2026-05-07: the engine has moved from
-29,185 to 29,624 fully passing tests in the full `--run-partial` accounting,
-with the baseline clean at 29,624. The current non-updating working-tree result
-is `29,749 / 34,153` fully passing with `125` improvements and `0` regressions.
+29,185 to 29,802 fully passing tests in the full `--run-partial` accounting,
+with the refreshed baseline clean at 29,802 and `0` regressions. The most
+recent baseline-refresh run was `29,802 / 34,167` fully passing with `181`
+improvements incorporated into the baseline. The current non-updating working
+tree result is `29,842 / 34,148` fully passing with `40` post-refresh
+improvements and `0` regressions.
 The next highest-leverage continuation is to broaden the same internal-slot
 discipline across TypedArray methods, species paths, and canonical numeric-index
 behavior.
@@ -697,6 +768,96 @@ Results: focused `indexOf` list `43 / 43`, focused `lastIndexOf` list
 `42 / 42`, baseline gate `29,624 / 29,624`, `0` failures, `0` regressions.
 The full non-updating batch is now `29,749 / 34,153`, `4,404` failed,
 `8,066` skipped, `125` improvements, `0` regressions.
+
+Additional verification after the `%TypedArray%.prototype.fill` work:
+
+```bash
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js40_typedarray_fill.txt --js-timeout=20
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --baseline-only --js-timeout=20
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --js-timeout=20
+```
+
+Results: focused `fill` list `51 / 51`, baseline gate `29,624 / 29,624`,
+`0` failures, `0` regressions. The full non-updating batch is now
+`29,783 / 34,153`, `4,370` failed, `8,066` skipped, `159` improvements,
+`0` regressions.
+
+Additional verification after the `%TypedArray%.prototype.find` and
+`findIndex` work:
+
+```bash
+make -j1 lambda
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js40_typedarray_find_findindex.txt --js-timeout=20
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --baseline-only --js-timeout=20
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --js-timeout=20
+```
+
+Results: focused `find`/`findIndex` list `76 / 76`, baseline gate
+`29,624 / 29,624`, `0` failures, `0` regressions. The full non-updating batch
+under the current 52-entry partial-test list is `29,782 / 34,151`, `4,369`
+failed, `8,068` skipped, `158` improvements, `0` regressions.
+
+Additional verification after the `%TypedArray%.prototype.every`, `some`,
+`findLast`, and `findLastIndex` work:
+
+```bash
+make -j1 lambda
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js40_typedarray_callback_methods.txt --js-timeout=20
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --baseline-only --js-timeout=20
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --js-timeout=20
+```
+
+Results: focused callback-method list `164 / 164`, up from `144 / 164`;
+baseline gate `29,624 / 29,624`, `0` failures, `0` regressions. The full
+non-updating batch remains `29,782 / 34,151`, `4,369` failed, `8,068` skipped,
+`158` improvements, `0` regressions, under the current 52-entry partial-test
+list.
+
+Additional verification after the `%TypedArray%.prototype.copyWithin` work:
+
+```bash
+make -j1 lambda
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js40_typedarray_copywithin.txt --js-timeout=20
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --baseline-only --js-timeout=20
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --js-timeout=20
+```
+
+Results: focused `copyWithin` list `64 / 64`, up from `37 / 64`; baseline gate
+`29,624 / 29,624`, `0` failures, `0` regressions. The full non-updating batch
+is now `29,804 / 34,151`, `4,347` failed, `8,068` skipped, `180`
+improvements, `0` regressions, under the current 52-entry partial-test list.
+
+Additional verification after the `%TypedArray%.prototype.reverse` work:
+
+```bash
+make -j1 lambda
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js40_typedarray_reverse.txt --js-timeout=20
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --baseline-only --js-timeout=20
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --js-timeout=20
+```
+
+Results: focused `reverse` list `21 / 21`, up from `18 / 21`; refreshed
+baseline gate `29,802 / 29,802`, `0` failures, `0` regressions. The full
+non-updating batch is `29,802 / 34,148`, `4,346` failed, `8,071` skipped, `0`
+improvements, `0` regressions, under the current 44-entry partial-test list.
+
+Additional verification after the `%TypedArray%.prototype.subarray` RAB,
+current-view, and species-constructor work:
+
+```bash
+make -j1 lambda
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js40_typedarray_subarray.txt --js-timeout=20
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --baseline-only --js-timeout=20
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --js-timeout=20
+```
+
+Results: focused `subarray` list `59 / 67`, up from `29 / 67`; refreshed
+baseline gate `29,802 / 29,802`, `0` failures, `0` regressions. The full
+non-updating batch is `29,842 / 34,148`, `4,306` failed, `8,071` skipped, `40`
+improvements, `0` regressions, under the current 44-entry partial-test list.
+The remaining focused `subarray` failures are inherited `constructor` edge
+cases, detached-buffer species ordering, and the broader `isConstructor` /
+`Reflect.construct` method path.
 
 ## 9. Verification Checklist
 

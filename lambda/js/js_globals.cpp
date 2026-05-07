@@ -5039,6 +5039,7 @@ extern Item js_throw_type_error(const char* msg);
 // Arrow functions, generators, and built-in prototype methods are NOT constructors.
 #define JS_FUNC_FLAG_GENERATOR_G 1
 #define JS_FUNC_FLAG_ARROW_G     2
+#define JS_FUNC_FLAG_TYPED_ARRAY_METHOD_G 4
 #define JS_FUNC_FLAG_METHOD_G    32
 
 struct JsFunctionLayout {
@@ -5068,6 +5069,7 @@ static bool js_func_is_constructor(Item func_item) {
     JsFunctionLayout* fn = (JsFunctionLayout*)func_item.function;
     if (fn->flags & JS_FUNC_FLAG_ARROW_G) return false;
     if (fn->flags & JS_FUNC_FLAG_GENERATOR_G) return false;
+    if (fn->flags & JS_FUNC_FLAG_TYPED_ARRAY_METHOD_G) return false;
     if (fn->flags & JS_FUNC_FLAG_METHOD_G) return false;
     if (fn->builtin_id > 0) return false;
     if (fn->builtin_id == -2) return false; // global builtin wrappers are not constructors
@@ -5079,7 +5081,7 @@ static bool js_func_is_constructor(Item func_item) {
 static bool js_func_has_own_prototype(Item func_item) {
     if (get_type_id(func_item) != LMD_TYPE_FUNC) return false;
     JsFunctionLayout* fn = (JsFunctionLayout*)func_item.function;
-    if (fn->flags & (JS_FUNC_FLAG_ARROW_G | JS_FUNC_FLAG_METHOD_G)) return false;
+    if (fn->flags & (JS_FUNC_FLAG_ARROW_G | JS_FUNC_FLAG_METHOD_G | JS_FUNC_FLAG_TYPED_ARRAY_METHOD_G)) return false;
     if (fn->builtin_id > 0) return false;
     if (fn->builtin_id == -2) return false;
     return true;
