@@ -37,6 +37,9 @@ typedef struct {
   uint16_t length;
 } TSMapSlice;
 
+// Compatibility alias for parsers generated with newer tree-sitter versions.
+typedef TSMapSlice TSFieldMapSlice;
+
 typedef struct {
   bool visible;
   bool named;
@@ -105,7 +108,7 @@ typedef struct {
 } TSCharacterRange;
 
 struct TSLanguage {
-  uint32_t abi_version;
+  uint32_t version;
   uint32_t symbol_count;
   uint32_t alias_count;
   uint32_t token_count;
@@ -127,7 +130,7 @@ struct TSLanguage {
   const TSSymbol *public_symbol_map;
   const uint16_t *alias_map;
   const TSSymbol *alias_sequences;
-  const TSLexerMode *lex_modes;
+  const TSLexMode *lex_modes;
   bool (*lex_fn)(TSLexer *, TSStateId);
   bool (*keyword_lex_fn)(TSLexer *, TSStateId);
   TSSymbol keyword_capture_token;

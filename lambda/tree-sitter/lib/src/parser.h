@@ -38,6 +38,9 @@ typedef struct {
   uint16_t length;
 } TSMapSlice;
 
+// Compatibility alias for parsers generated with newer tree-sitter versions.
+typedef TSMapSlice TSFieldMapSlice;
+
 typedef struct {
   bool visible;
   bool named;
