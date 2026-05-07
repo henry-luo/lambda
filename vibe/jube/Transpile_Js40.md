@@ -1,6 +1,7 @@
 # Transpile_Js40 - Structural test262 Enhancement Plan
 
 Date: 2026-05-06
+Last updated: 2026-05-07
 
 This proposal analyzes the failing run of:
 
@@ -18,6 +19,104 @@ run is useful here because it exposes the failed case names directly.
 
 Infrastructure health is good; semantic compliance is the failure surface.
 
+### 2026-05-07 Progress Update
+
+Js40 has moved from initial failure analysis into implementation. The baseline
+is now clean and has been updated after a full `--run-partial` run. The current
+working tree has additional non-baseline improvements beyond that updated
+baseline.
+
+| Metric | Initial Js40 run | Current after fixes |
+|---|---:|---:|
+| Total discovered tests | 42,219 | 42,219 |
+| Batched / in-scope tests | 34,145 | 34,153 |
+| Fully passing | 29,185 | 29,669 |
+| Failed | 4,960 | 4,484 |
+| Skipped | 8,074 | 8,066 |
+| Pass rate, in-scope | 85.5% | 86.9% |
+| Baseline passing | 29,149 | 29,624 |
+| Improvements vs baseline | 77 | 45 after post-baseline local fixes |
+| Regressions vs baseline | 41 | 0 |
+
+Latest successful update command:
+
+```bash
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --run-partial --update-baseline --js-timeout=20
+```
+
+Latest verification command:
+
+```bash
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --baseline-only --js-timeout=20
+```
+
+Verification result: `29,624 / 29,624` fully passing, `0` failures, `0`
+regressions.
+
+Latest non-updating full batch after the DataView BigInt and TypedArray
+`@@toStringTag` work:
+
+```bash
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --js-timeout=20
+```
+
+Result: `29,669 / 34,153` fully passing, `4,484` failed, `8,066` skipped,
+`45` improvements, `0` regressions.
+
+The `--js-timeout=20` option was added to the Test262 runner because one
+RegExp test (`built_ins_RegExp_character_class_escape_non_whitespace_js`) could
+pass individually but repeatedly hit the child `js-test-batch --timeout=10`
+limit during full `--run-partial` baseline-update runs. Raising only the child
+JS timeout allowed the runner's normal regression gate to complete without
+weakening the zero-regression requirement.
+
+DataView was the main semantic progress area:
+
+| DataView focused subset | Before | After |
+|---|---:|---:|
+| Constructor/prototype/extensibility subset | 7 / 21, then 11 / 21 after ToIndex fixes | 21 / 21 |
+| Current DataView failure list | 29 / 187 before accessor/constructor work | 187 / 187 |
+
+TypedArray progress since the baseline update:
+
+| TypedArray focused subset | Before | After |
+|---|---:|---:|
+| `%TypedArray%.prototype[@@toStringTag]` | failing descriptor/receiver/name cases | 18 / 18 |
+
+DataView BigInt getter/setter behavior has also landed. The focused list now
+passes all `getBigInt64`, `getBigUint64`, `setBigInt64`, and `setBigUint64`
+coverage that was previously blocking this part of J40-3.
+
+Implemented since the initial proposal:
+
+- Constructor/prototype snapshot and lazy TypedArray cache reset fixes brought
+  the baseline regressions to zero.
+- The Test262 runner race around `g_preamble_includes` was fixed with a mutex,
+  making bare diagnostic mode reliable again.
+- DataView constructor `ToIndex`, explicit `null` length, detached-buffer, and
+  Symbol conversion behavior were aligned with the spec.
+- DataView instances now preserve `.buffer` identity, link to
+  `DataView.prototype`, expose `sample.constructor === DataView`, and remain
+  extensible for ordinary own properties.
+- DataView prototype accessors for `buffer`, `byteLength`, and `byteOffset` now
+  have proper native accessor descriptors, receiver validation, getter metadata,
+  and detached-buffer checks.
+- DataView numeric getters/setters now share better offset/value coercion,
+  `littleEndian` truthiness, Symbol TypeError behavior, setter detached-check
+  ordering, and ordinary method fallback (`hasOwnProperty`, etc.).
+- DataView BigInt getters/setters now perform 64-bit endian-aware buffer
+  reads/writes, `ToBigInt` value conversion, `BigInt.asIntN(64)` /
+  `BigInt.asUintN(64)` wrapping, and unsigned 64-bit BigInt materialization.
+- `%TypedArray%.prototype[@@toStringTag]` is now installed as a native accessor;
+  direct typed-array property access preserves the original receiver and returns
+  the correct concrete typed-array name.
+- String receiver checks, RegExp string-iterator coercions, Array reduce
+  prototype-key refresh, and for-of destructuring assignment writeback were
+  also fixed while recovering the baseline.
+
+The initial snapshot below is kept as historical context for why the phases were
+chosen.
+
 | Metric | Value |
 |---|---:|
 | Total discovered tests | 42,219 |
@@ -33,9 +132,11 @@ Infrastructure health is good; semantic compliance is the failure surface.
 | Slow in fresh run | 5 slow at Phase 3, 9 slow observed before partial rewrite |
 | Known partial entries loaded | 44 |
 
-The important conclusion: the JS engine is not crashing or losing tests. The
-remaining failures are spec machinery gaps plus 41 current baseline regressions.
-Therefore Js40 should be a structural correctness program, not a crasher hunt.
+The important initial conclusion still holds: the JS engine is not primarily
+failing because of crashes or lost tests. The remaining failures are spec
+machinery gaps. The original 41 baseline regressions have now been recovered,
+so Js40 can continue as a structural correctness program rather than a crasher
+hunt.
 
 ## 2. Failure Landscape
 
@@ -81,6 +182,10 @@ One-level-deeper clusters show the same shape:
 | `language/expressions/compound/assignment` | 202 | Reference and coercion ordering |
 
 ## 3. Regressions First
+
+Status: complete as of 2026-05-07. The baseline update now records `29,624`
+passing tests and a clean `--baseline-only --js-timeout=20` verification run
+reports `0` regressions.
 
 The run has 77 improvements, but 41 baseline regressions. Js40 should begin by
 making the baseline clean again before attempting broad gains.
@@ -136,6 +241,10 @@ Each phase must be independently shippable:
 - `regressions=0` before any baseline update
 
 ### Phase J40-0 - Restore Baseline Health
+
+Status: complete. The 41 initial baseline regressions were reduced to zero, and
+the baseline was updated to 29,624 passing tests after a full `--run-partial`
+run.
 
 Goal: reduce the 41 regressions to zero without deleting baseline entries.
 
@@ -219,6 +328,12 @@ Expected impact:
 
 ### Phase J40-3 - TypedArray, DataView, and ArrayBuffer Internal Slots
 
+Status: in progress, with the focused DataView portion complete. The focused
+DataView constructor/prototype/extensibility subset is now `21 / 21`, and the
+current DataView failure list improved to `187 / 187`. The focused
+`%TypedArray%.prototype[@@toStringTag]` subset is also `18 / 18`. Broader
+TypedArray and ArrayBuffer internal-slot work remains.
+
 Goal: make `TypedArray`/`DataView` behavior spec-driven instead of method-local.
 
 Scope:
@@ -227,6 +342,13 @@ Scope:
   `js_is_typed_array`, `js_validate_typed_array`, `js_validate_dataview`,
   `js_is_detached_buffer`, `js_get_viewed_array_buffer`, and
   `js_typed_array_length_internal`.
+- Completed for DataView incrementally: `js_get_dataview_ptr`, stored
+  `buffer_item`, prototype linking, class stamping, accessor receiver checks,
+  shared `ToIndex`/numeric conversion helpers, and BigInt64/BigUint64
+  endian-aware read/write paths.
+- Completed for TypedArray incrementally: native `@@toStringTag` accessor
+  descriptor/receiver behavior and direct typed-array `[[TypedArrayName]]`
+  lookup.
 - Every TypedArray/DataView method must call the same validation helpers before
   reading user-visible `length`, `byteLength`, or `byteOffset` properties.
 - Centralize canonical numeric index parsing (`-0`, BigInt keys, floats,
@@ -247,7 +369,8 @@ Expected impact:
 
 - Targets roughly 1,650 failures across `TypedArray`,
   `TypedArrayConstructors`, `DataView`, and `ArrayBuffer`, and fixes several
-  current regressions.
+  current regressions. The DataView portion has converted all 158 remaining
+  cases in the 187-test focused list to passing status.
 
 ### Phase J40-4 - Iterator and Destructuring Runtime Kernels
 
@@ -399,6 +522,10 @@ artifacts:
   in this proposal should become automatic.
 - Normalize the bare command guidance: docs should say bare mode is diagnostic;
   `--batch-only` is the compliance gate.
+- Completed: add `--js-timeout=N` to pass a larger timeout through to child
+  `lambda.exe js-test-batch` runs. This is useful for full `--run-partial`
+  baseline updates when a known-slow passing test is near the default 10s child
+  timeout.
 - Deduplicate and sort `test/js262/t262_partial.txt` when rewriting. The current
   file contains carried-forward duplicate-looking blocks after partial updates.
 - Track memory regressions with a separate threshold. This run peaked at about
@@ -409,11 +536,12 @@ artifacts:
 
 Recommended order:
 
-1. **J40-0 Regression recovery** - required before any baseline movement.
+1. **J40-0 Regression recovery** - complete; baseline is clean and updated.
 2. **J40-1 Descriptor/exotic kernel** - fixes regressions and unlocks broad
    Object/Array/String/Function behavior.
-3. **J40-3 TypedArray/DataView internal slots** - high count and currently
-   regression-linked.
+3. **J40-3 TypedArray/DataView internal slots** - in progress; the focused
+    DataView list is complete, while broader TypedArray work remains high
+    priority.
 4. **J40-2 RegExp protocol** - largest cluster and memory/slow pressure.
 5. **J40-4 Iterator/destructuring kernels** - high leverage across language and
    built-ins.
@@ -442,6 +570,30 @@ That would move the engine from 29,185 fully passing toward roughly
 clean. Phases 5-7 can then push class and async compliance without fighting the
 lower-level property, iterator, and internal-slot gaps.
 
+Progress against that target as of 2026-05-07: the engine has moved from
+29,185 to 29,624 fully passing tests in the full `--run-partial` accounting,
+with the baseline clean at 29,624. The next highest-leverage continuation is to
+broaden the same internal-slot discipline across TypedArray methods and
+ArrayBuffer behavior.
+
+Additional verification after the DataView BigInt work:
+
+```bash
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js40_dataview_all.txt --js-timeout=20
+```
+
+Result: `187 / 187` passing in the focused DataView list, followed by a clean
+baseline verification: `29,624 / 29,624`, `0` failures, `0` regressions.
+
+Additional verification after the TypedArray `@@toStringTag` work:
+
+```bash
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js40_typedarray_tostringtag.txt --js-timeout=20
+```
+
+Result: `18 / 18` passing in the focused TypedArray `@@toStringTag` list, with
+the baseline gate still clean at `29,624 / 29,624`, `0` regressions.
+
 ## 9. Verification Checklist
 
 Use this checklist after each phase:
@@ -456,3 +608,11 @@ ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batc
 For baseline updates, follow `test/js262/JS262_Test_Guide.md`: run at least two
 stable `--batch-only` verification passes, require `regressions=0`, and only
 then use `--update-baseline`.
+
+When updating with partial tests included, use the runner timeout knob if a
+known-slow passing test hits the child batch timeout:
+
+```bash
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --run-partial --update-baseline --js-timeout=20
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --baseline-only --js-timeout=20
+```

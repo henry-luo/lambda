@@ -4959,6 +4959,11 @@ extern "C" Item js_property_get(Item object, Item key) {
             case MAP_KIND_TYPED_ARRAY: {
                 if (get_type_id(key) == LMD_TYPE_STRING) {
                     String* str_key = it2s(key);
+                    if (str_key->len == 7 && strncmp(str_key->chars, "__sym_4", 7) == 0) {
+                        const char* ta_name = js_typed_array_type_name(object);
+                        if (!ta_name) return make_js_undefined();
+                        return (Item){.item = s2it(heap_create_name(ta_name, (int)strlen(ta_name)))};
+                    }
                     if (str_key->len == 6 && strncmp(str_key->chars, "length", 6) == 0) {
                         JsTypedArray* ta = js_get_typed_array_ptr(object.map);
                         if (ta && ta->buffer && ta->buffer->detached) return (Item){.item = i2it(0)};
@@ -6300,6 +6305,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                             Item cnk = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
                             Item cnv = (Item){.item = s2it(heap_create_name("DataView", 8))};
                             js_property_set(fn->prototype, cnk, cnv);
+                            js_class_stamp(fn->prototype, JS_CLASS_DATA_VIEW);
                             // Symbol.toStringTag
                             Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
                             Item tag_val = (Item){.item = s2it(heap_create_name("DataView", 8))};
@@ -8464,6 +8470,18 @@ extern "C" void js_populate_typed_array_base_proto(Item proto, Item base_ctor) {
         Item values_fn = js_property_get(proto, values_key);
         js_property_set(proto, si_key, values_fn);
         js_mark_non_enumerable(proto, si_key);
+    }
+
+    // get %TypedArray%.prototype[@@toStringTag]
+    {
+        JsFunction* tag_getter = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
+        tag_getter->type_id = LMD_TYPE_FUNC;
+        tag_getter->name = heap_create_name("get [Symbol.toStringTag]", 24);
+        tag_getter->param_count = 0;
+        tag_getter->formal_length = -1;
+        Item getter_item = (Item){.function = (Function*)tag_getter};
+        Item tag_name = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
+        js_install_native_accessor(proto, tag_name, getter_item, ItemNull, JSPD_NON_ENUMERABLE);
     }
 
     // Accessor getter stubs for buffer, byteLength, byteOffset, length
@@ -12211,6 +12229,12 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
     }
 
     if (!fn || (!fn->func_ptr && fn->builtin_id == 0)) {
+        if (fn && fn->name && fn->name->len == 24 &&
+            strncmp(fn->name->chars, "get [Symbol.toStringTag]", 24) == 0) {
+            const char* ta_name = js_typed_array_type_name(this_val);
+            if (!ta_name) return make_js_undefined();
+            return (Item){.item = s2it(heap_create_name(ta_name, (int)strlen(ta_name)))};
+        }
         // TypedArray stub methods: validate this before returning
         if (fn && (fn->flags & JS_FUNC_FLAG_TYPED_ARRAY_METHOD)) {
             if (!js_is_typed_array(this_val)) {
@@ -14759,7 +14783,8 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
     }
     // DataView methods
     if (js_is_dataview(obj)) {
-        return js_dataview_method(obj, method_name, args, argc);
+        Item dv_result = js_dataview_method(obj, method_name, args, argc);
+        if (dv_result.item != ITEM_NULL || js_check_exception()) return dv_result;
     }
     // TypedArray methods
     if (js_is_typed_array(obj)) {
