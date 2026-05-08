@@ -5,6 +5,7 @@
  * Registered as built-in module 'net' via js_module_get().
  */
 #include "js_runtime.h"
+#include "js_runtime_state.hpp"
 #include "js_event_loop.h"
 #include "js_class.h"
 #include "../lambda-data.hpp"
@@ -14,8 +15,6 @@
 #include "../../lib/mem.h"
 
 #include <cstring>
-
-extern Input* js_input;
 
 static Item make_string_item(const char* str, int len) {
     if (!str) return ItemNull;

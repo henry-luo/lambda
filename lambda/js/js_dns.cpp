@@ -5,6 +5,7 @@
  * Registered as built-in module 'dns' via js_module_get().
  */
 #include "js_runtime.h"
+#include "js_runtime_state.hpp"
 #include "js_event_loop.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
@@ -13,8 +14,6 @@
 #include "../../lib/mem.h"
 
 #include <cstring>
-
-extern Input* js_input;
 
 static inline Item make_js_undefined() {
     return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};

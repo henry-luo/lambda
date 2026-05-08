@@ -15,6 +15,7 @@
 #include "js_xhr.h"
 #include "js_cssom.h"
 #include "js_runtime.h"
+#include "js_runtime_state.hpp"
 #include "js_event_loop.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
@@ -52,7 +53,6 @@ static inline bool is_js_undefined(Item val) {
 
 // Forward declarations
 extern "C" void heap_register_gc_root(uint64_t* slot);
-extern Input* js_input;
 static void js_camel_to_css_prop(const char* js_prop, char* css_buf, size_t buf_size);
 static CssDeclaration* js_match_element_property(DomElement* elem, CssPropertyId prop_id, int pseudo_type);
 static CssDeclaration* js_match_custom_property(DomElement* elem, const char* prop_name);
@@ -7637,4 +7637,3 @@ extern "C" void js_dom_install_option_constructor(void) {
     js_property_set(global, (Item){.item = s2it(heap_create_name("Option"))}, ctor);
     log_debug("js_dom_install_option_constructor: installed Option");
 }
-

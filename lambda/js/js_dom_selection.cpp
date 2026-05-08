@@ -19,6 +19,7 @@
 #include "js_dom_events.h"
 #include "js_event_loop.h"
 #include "js_runtime.h"
+#include "js_runtime_state.hpp"
 #include "../lambda.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
@@ -34,7 +35,6 @@
 #include <cstdlib>
 
 extern __thread EvalContext* context;
-extern Input* js_input;
 
 // ============================================================================
 // Helpers

@@ -5,6 +5,7 @@
  * Registered as built-in module 'fs' via js_module_get().
  */
 #include "js_runtime.h"
+#include "js_runtime_state.hpp"
 #include "js_event_loop.h"
 #include "js_typed_array.h"
 #include "js_error_codes.h"
@@ -22,8 +23,6 @@
 #define S_IFSOCK 0xC000
 #endif
 #endif
-
-extern Input* js_input;
 
 // Helper: make JS undefined value
 static inline Item make_js_undefined() {

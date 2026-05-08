@@ -13,6 +13,7 @@
 #include "js_props.h"
 #include "js_class.h"
 #include "js_coerce.h"
+#include "js_runtime_state.hpp"
 #include "../lambda-data.hpp"
 #include "../lambda-decimal.hpp"
 #include "../transpiler.hpp"
@@ -477,48 +478,6 @@ extern "C" char* normalize_utf8proc_nfkc(const char* str, int len, int* out_len)
 extern "C" char* normalize_utf8proc_nfkd(const char* str, int len, int* out_len);
 
 extern TypeMap EmptyMap;
-extern Input* js_input;
-extern bool js_strict_mode;
-extern bool js_skip_accessor_dispatch;
-extern int g_array_sym_iter_ever_set;
-
-#define JS_MAX_MODULE_VARS 2048
-extern Item js_module_vars[JS_MAX_MODULE_VARS];
-extern Item* js_active_module_vars;
-extern int js_module_var_count;
-extern uint64_t js_heap_epoch;
-
-#define JS_REGEXP_MAX_PAREN 9
-struct JsRegexpLastMatch {
-    String* input;
-    String* match;
-    String* groups[JS_REGEXP_MAX_PAREN];
-    int group_count;
-    int match_start;
-    int match_end;
-};
-extern JsRegexpLastMatch js_regexp_last_match;
-
-extern Item js_current_this;
-extern Item js_proxy_receiver;
-extern Item js_new_target;
-extern Item js_pending_new_target;
-extern bool js_has_pending_new_target;
-extern Item* js_pending_call_args;
-extern int js_pending_call_argc;
-extern Item js_array_method_real_this;
-extern Map* js_cached_object_proto;
-extern bool js_resolving_object_proto;
-extern bool js_private_field_initializing;
-extern bool js_exception_pending;
-extern Item js_exception_value;
-extern char js_exception_msg_buf[1024];
-extern int js_pending_args_is_strict;
-extern Item js_pending_args_callee;
-
-extern const char* _trace_last_fn;
-extern int _trace_last_fn_len;
-extern int _trace_total_calls;
 
 extern "C" bool js_func_is_builtin_ctor(Item fn);
 extern "C" Item js_lookup_builtin_method(TypeId type, const char* name, int len);

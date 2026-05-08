@@ -442,36 +442,73 @@ Gate:
 
 ### Phase J41-2 - Mechanical runtime split
 
+Status: complete as of 2026-05-08.
+
 Deliverables:
 
-- Move value conversion and operators first.
+- Move value conversion and operators first. Completed in
+  `lambda/js/js_runtime_value.cpp`.
 - Move property/descriptor code around existing `js_props` and
-  `js_property_attrs` files.
-- Move function call/construct and built-in registry skeleton.
-- Preserve public symbols in `js_runtime.h`.
+  `js_property_attrs` files. Completed by preserving those spec-kernel files
+  and leaving property descriptors on their existing public ABI.
+- Move function call/construct and built-in registry skeleton. Completed
+  mechanically by centralizing the shared `JsFunction` layout and built-in ids
+  in `lambda/js/js_runtime_internal.hpp`, moving function object wrappers and
+  cache reset to `lambda/js/js_runtime_function.cpp`, and moving the built-in
+  method tables/installers/descriptor-registry helpers to
+  `lambda/js/js_runtime_builtin_registry.cpp`. The large dispatch switch stays
+  in `js_runtime.cpp` for the later semantic phases.
+- Preserve public symbols in `js_runtime.h`. Public MIR/runtime entrypoints
+  remained stable; only internal C++ linkage moved.
+- Use real top-level `.cpp` translation units, not include fragments.
 
 Gate:
 
-- `make build`
-- `./test/test_js_coerce_gtest.exe`
-- `./test/test_js_props_gtest.exe`
-- baseline-only js262 gate.
+- `make build`: passed.
+- `./test/test_js_coerce_gtest.exe`: passed `15 / 15`.
+- `./test/test_js_props_gtest.exe`: passed `24 / 24`.
+- Focused `./test/test_js_gtest.exe` runtime smoke: passed `9 / 9`.
+- `make test262-baseline`: fully passed `30009 / 30009`, failed `0`,
+  regressions `0`.
 
 ### Phase J41-3 - Runtime state isolation
+
+Status: complete for the baseline isolation gate. The runtime now has a
+single shared `JsRuntimeState` capsule used across the split runtime and host
+modules instead of exported free globals for transient execution state.
 
 Deliverables:
 
 - Introduce `JsRuntimeState`.
-- Migrate exception, current-this, new-target, pending args, active module vars,
-  strict mode, and proxy receiver.
-- Centralize batch reset.
+- Migrated exception, current-this, new-target, pending args, active module
+  vars, strict mode, proxy receiver, RegExp legacy match state, heap epoch,
+  and trace counters into `JsRuntimeState`.
+- Added `lambda/js/js_runtime_state.hpp` as the narrow shared state header.
+- Switched runtime helpers, globals, DOM selection, property attributes, and
+  Node-style modules away from direct `extern js_input` /
+  `extern js_strict_mode` / `extern js_skip_accessor_dispatch` globals.
+- Centralized batch reset around the state capsule while preserving the
+  existing public C ABI and MIR-imported symbols.
 - Add debug assertions that no pending state leaks after each script in
   `js-test-batch`.
 
 Gate:
 
-- baseline-only js262 gate repeated twice to catch order sensitivity.
-- full batch with `--run-partial` only after the repeated gate is stable.
+- `make build`: passed with `Errors: 0`.
+- `./test/test_js_coerce_gtest.exe`: passed `15 / 15`.
+- `./test/test_js_props_gtest.exe`: passed `24 / 24`.
+- Focused `./test/test_js_gtest.exe` runtime smoke: passed `9 / 9`.
+- `make test262-baseline` repeated twice: both runs fully passed
+  `30009 / 30009`, failed `0`, regressions `0`.
+- Full batch without partial promotion:
+  `./test/test_js_test262_gtest.exe --batch-only` fully passed
+  `30013 / 34157`, failed `4144`, regressions `0`, improvements `4`.
+- Full batch with `--run-partial` was executed after the repeated baseline
+  gate. It exposed existing partial-list pressure around RegExp/URI slow tests:
+  `30010 / 34169` fully passed, `2` retry-only slow URI tests, `1`
+  RegExp crash under the merged partial batch. The RegExp case is already in
+  `test/js262/t262_partial.txt` as `SLOW_20017` and passed when run isolated
+  with GoogleTest filtering.
 
 ### Phase J41-4 - Built-in descriptor registry
 

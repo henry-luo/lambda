@@ -8,6 +8,7 @@
  * which maps event names to arrays of listener functions.
  */
 #include "js_runtime.h"
+#include "js_runtime_state.hpp"
 #include "js_class.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
@@ -15,8 +16,6 @@
 #include "../../lib/mem.h"
 
 #include <cstring>
-
-extern Input* js_input;
 
 static inline Item make_js_undefined() {
     return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};

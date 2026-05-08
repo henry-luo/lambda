@@ -22,9 +22,7 @@
 
 #pragma once
 
-extern "C" {
-extern bool js_skip_accessor_dispatch;
-}
+#include "js_runtime_state.hpp"
 
 // Set js_skip_accessor_dispatch=true for the lifetime of the guard,
 // restoring the previous value on destruction. Safe across early returns
