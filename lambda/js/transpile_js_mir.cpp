@@ -412,6 +412,33 @@ struct JsMirTranspiler {
     int with_depth;                           // nesting depth of 'with' statements (for break/continue/return cleanup)
 };
 
+static void jm_cleanup_mir_transpiler_state(JsMirTranspiler* mt) {
+    if (!mt) return;
+    if (mt->import_cache) {
+        hashmap_free(mt->import_cache);
+        mt->import_cache = NULL;
+    }
+    if (mt->local_funcs) {
+        hashmap_free(mt->local_funcs);
+        mt->local_funcs = NULL;
+    }
+    if (mt->widen_to_float) {
+        hashmap_free(mt->widen_to_float);
+        mt->widen_to_float = NULL;
+    }
+    if (mt->module_consts) {
+        hashmap_free(mt->module_consts);
+        mt->module_consts = NULL;
+    }
+    for (int i = 0; i <= mt->scope_depth && i < 64; i++) {
+        if (mt->var_scopes[i]) {
+            hashmap_free(mt->var_scopes[i]);
+            mt->var_scopes[i] = NULL;
+        }
+    }
+    jm_free_scope_env_names(mt->func_entries, mt->func_count);
+}
+
 // ============================================================================
 // Hashmap helpers
 // ============================================================================
@@ -492,6 +519,41 @@ static int js_module_const_cmp(const void *a, const void *b, void *udata) {
 static uint64_t js_module_const_hash(const void *item, uint64_t seed0, uint64_t seed1) {
     return hashmap_sip(((JsModuleConstEntry*)item)->name,
         strlen(((JsModuleConstEntry*)item)->name), seed0, seed1);
+}
+
+static JsMirTranspiler* jm_create_mir_transpiler(
+    JsTranspiler* tp, MIR_context_t ctx, const char* filename, bool is_module,
+    int import_capacity, int local_func_capacity, int var_scope_capacity,
+    const char* log_prefix)
+{
+    JsMirTranspiler* mt = (JsMirTranspiler*)mem_alloc(sizeof(JsMirTranspiler), MEM_CAT_JS_RUNTIME);
+    if (!mt) {
+        log_error("%s: failed to allocate JsMirTranspiler", log_prefix ? log_prefix : "js-mir");
+        return NULL;
+    }
+    memset(mt, 0, sizeof(JsMirTranspiler));
+    mt->tp = tp;
+    mt->ctx = ctx;
+    mt->is_module = is_module;
+    mt->filename = filename;
+    mt->import_cache = hashmap_new(sizeof(JsImportCacheEntry), import_capacity, 0, 0,
+        js_import_cache_hash, js_import_cache_cmp, NULL, NULL);
+    mt->local_funcs = hashmap_new(sizeof(JsLocalFuncEntry), local_func_capacity, 0, 0,
+        js_local_func_hash, js_local_func_cmp, NULL, NULL);
+    mt->var_scopes[0] = hashmap_new(sizeof(JsVarScopeEntry), var_scope_capacity, 0, 0,
+        js_var_scope_hash, js_var_scope_cmp, NULL, NULL);
+    mt->scope_depth = 0;
+    mt->var_hoist_depth = -1;
+    mt->collect_parent_func_index = -1;
+    mt->scope_env_reg = 0;
+    mt->scope_env_slot_count = 0;
+    mt->current_func_index = -1;
+    return mt;
+}
+
+static void jm_destroy_mir_transpiler(JsMirTranspiler* mt) {
+    jm_cleanup_mir_transpiler_state(mt);
+    mem_free(mt);
 }
 
 // Forward declarations
@@ -9940,9 +10002,16 @@ static MIR_reg_t jm_transpile_math_native(JsMirTranspiler* mt, JsCallNode* call,
 static String* jm_get_math_method(JsCallNode* call) {
     if (!jm_is_math_call(call)) return NULL;
     JsMemberNode* m = (JsMemberNode*)call->callee;
-    if (!m->property || m->property->node_type != JS_AST_NODE_IDENTIFIER) return NULL;
-    JsIdentifierNode* prop = (JsIdentifierNode*)m->property;
-    return prop->name;
+    if (!m->property) return NULL;
+    if (!m->computed && m->property->node_type == JS_AST_NODE_IDENTIFIER) {
+        JsIdentifierNode* prop = (JsIdentifierNode*)m->property;
+        return prop->name;
+    }
+    if (m->computed && m->property->node_type == JS_AST_NODE_LITERAL) {
+        JsLiteralNode* prop = (JsLiteralNode*)m->property;
+        if (prop->literal_type == JS_LITERAL_STRING) return prop->value.string_value;
+    }
+    return NULL;
 }
 
 static bool jm_is_document_call(JsCallNode* call) {
@@ -10631,11 +10700,11 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
     }
 
-    // Math.<method>(args...) → Phase 5: compile-time resolution
-    if (jm_is_math_call(call)) {
-        JsMemberNode* m = (JsMemberNode*)call->callee;
-        JsIdentifierNode* prop = (JsIdentifierNode*)m->property;
-        return jm_transpile_math_call(mt, call, prop->name);
+    // Math.<method>(args...) and Math["method"](...) -> Phase 5 resolution.
+    // Non-literal computed keys fall through to the ordinary member-call path.
+    String* math_method = jm_get_math_method(call);
+    if (math_method) {
+        return jm_transpile_math_call(mt, call, math_method);
     }
 
 #ifndef NDEBUG
@@ -26850,6 +26919,7 @@ static int jm_compute_depth(JsImportGraphNode* nodes, int idx) {
 static bool jm_validate_mir_labels(MIR_context_t ctx) {
     bool safe = true;
     int func_count = 0, insn_count = 0;
+    bool trace_validation = getenv("JS_MIR_VALIDATE_TRACE") != NULL;
     for (MIR_module_t m = DLIST_HEAD(MIR_module_t, *MIR_get_module_list(ctx)); m != NULL;
          m = DLIST_NEXT(MIR_module_t, m)) {
         for (MIR_item_t item = DLIST_HEAD(MIR_item_t, m->items); item != NULL;
@@ -26862,9 +26932,7 @@ static bool jm_validate_mir_labels(MIR_context_t ctx) {
                 insn_count++;
                 for (size_t i = 0; i < insn->nops; i++) {
                     if (insn->ops[i].mode == MIR_OP_LABEL && insn->ops[i].u.label == NULL) {
-                        fprintf(stderr, "js-mir: NULL label in func '%s' insn_code=%d op=%zu\n",
-                            func->name, insn->code, (size_t)i);
-                        log_error("js-mir: NULL label in func '%s' insn code=%d op=%zu — aborting link",
+                        log_error("js-mir: NULL label in func '%s' insn code=%d op=%zu - aborting link",
                             func->name, insn->code, i);
                         safe = false;
                     }
@@ -26872,7 +26940,9 @@ static bool jm_validate_mir_labels(MIR_context_t ctx) {
             }
         }
     }
-    fprintf(stderr, "js-mir: validate scanned %d funcs %d insns safe=%d\n", func_count, insn_count, safe);
+    if (trace_validation || !safe) {
+        log_debug("js-mir: validate scanned %d funcs %d insns safe=%d", func_count, insn_count, safe);
+    }
     return safe;
 }
 
@@ -26915,30 +26985,12 @@ static bool jm_compile_js_module(Runtime* runtime, JsImportGraphNode* node) {
         MIR_set_error_func(ctx, g_batch_mir_error_handler);
     }
 
-    JsMirTranspiler* mt = (JsMirTranspiler*)mem_alloc(sizeof(JsMirTranspiler), MEM_CAT_JS_RUNTIME);
+    JsMirTranspiler* mt = jm_create_mir_transpiler(tp, ctx, node->path, true, 64, 32, 16, "js-parallel");
     if (!mt) {
-        log_error("js-parallel: failed to allocate JsMirTranspiler for '%s'", node->path);
         MIR_finish(ctx);
         js_transpiler_destroy(tp);
         return false;
     }
-    memset(mt, 0, sizeof(JsMirTranspiler));
-    mt->tp = tp;
-    mt->ctx = ctx;
-    mt->is_module = true;
-    mt->filename = node->path;
-    mt->import_cache = hashmap_new(sizeof(JsImportCacheEntry), 64, 0, 0,
-        js_import_cache_hash, js_import_cache_cmp, NULL, NULL);
-    mt->local_funcs = hashmap_new(sizeof(JsLocalFuncEntry), 32, 0, 0,
-        js_local_func_hash, js_local_func_cmp, NULL, NULL);
-    mt->var_scopes[0] = hashmap_new(sizeof(JsVarScopeEntry), 16, 0, 0,
-        js_var_scope_hash, js_var_scope_cmp, NULL, NULL);
-    mt->scope_depth = 0;
-    mt->var_hoist_depth = -1;
-    mt->collect_parent_func_index = -1;
-    mt->scope_env_reg = 0;
-    mt->scope_env_slot_count = 0;
-    mt->current_func_index = -1;
 
     mt->module = MIR_new_module(ctx, "js_module");
 
@@ -26946,16 +26998,7 @@ static bool jm_compile_js_module(Runtime* runtime, JsImportGraphNode* node) {
 
     if (!jm_validate_mir_labels(ctx)) {
         log_error("js-parallel: NULL labels detected for '%s'", node->path);
-        hashmap_free(mt->import_cache);
-        hashmap_free(mt->local_funcs);
-        if (mt->widen_to_float) hashmap_free(mt->widen_to_float);
-        if (mt->module_consts) hashmap_free(mt->module_consts);
-        for (int i = 0; i <= mt->scope_depth; i++) {
-            if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
-        }
-        jm_free_scope_env_names(mt->func_entries, mt->func_count);
-    jm_free_scope_env_names(mt->func_entries, mt->func_count);
-    mem_free(mt);
+        jm_destroy_mir_transpiler(mt);
         js_transpiler_destroy(tp);
         MIR_finish(ctx);
         return false;
@@ -26967,16 +27010,7 @@ static bool jm_compile_js_module(Runtime* runtime, JsImportGraphNode* node) {
     js_main_func_t js_main = (js_main_func_t)find_func(ctx, (char*)"js_main");
 
     // cleanup transpiler state
-    hashmap_free(mt->import_cache);
-    hashmap_free(mt->local_funcs);
-    if (mt->widen_to_float) hashmap_free(mt->widen_to_float);
-    if (mt->module_consts) hashmap_free(mt->module_consts);
-    for (int i = 0; i <= mt->scope_depth; i++) {
-        if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
-    }
-    jm_free_scope_env_names(mt->func_entries, mt->func_count);
-    jm_free_scope_env_names(mt->func_entries, mt->func_count);
-    mem_free(mt);
+    jm_destroy_mir_transpiler(mt);
     // Detach name_pool and ast_pool from the transpiler so they survive cleanup.
     // JIT code embeds raw String* pointers interned in the name pool.
     // Freeing the pool would leave dangling pointers in the generated code.
@@ -27191,30 +27225,12 @@ static Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, 
         return ItemNull;
     }
 
-    JsMirTranspiler* mt = (JsMirTranspiler*)mem_alloc(sizeof(JsMirTranspiler), MEM_CAT_JS_RUNTIME);
+    JsMirTranspiler* mt = jm_create_mir_transpiler(tp, ctx, filename, true, 64, 32, 16, "js-mir: module");
     if (!mt) {
-        log_error("js-mir: module: failed to allocate transpiler for '%s'", filename);
         MIR_finish(ctx);
         js_transpiler_destroy(tp);
         return ItemNull;
     }
-    memset(mt, 0, sizeof(JsMirTranspiler));
-    mt->tp = tp;
-    mt->ctx = ctx;
-    mt->is_module = true;
-    mt->filename = filename;
-    mt->import_cache = hashmap_new(sizeof(JsImportCacheEntry), 64, 0, 0,
-        js_import_cache_hash, js_import_cache_cmp, NULL, NULL);
-    mt->local_funcs = hashmap_new(sizeof(JsLocalFuncEntry), 32, 0, 0,
-        js_local_func_hash, js_local_func_cmp, NULL, NULL);
-    mt->var_scopes[0] = hashmap_new(sizeof(JsVarScopeEntry), 16, 0, 0,
-        js_var_scope_hash, js_var_scope_cmp, NULL, NULL);
-    mt->scope_depth = 0;
-    mt->var_hoist_depth = -1;
-    mt->collect_parent_func_index = -1;
-    mt->scope_env_reg = 0;
-    mt->scope_env_slot_count = 0;
-    mt->current_func_index = -1;
 
     mt->module = MIR_new_module(ctx, "js_module");
 
@@ -27222,16 +27238,7 @@ static Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, 
 
     if (!jm_validate_mir_labels(ctx)) {
         log_error("js-mir: module: NULL labels detected for '%s'", filename);
-        hashmap_free(mt->import_cache);
-        hashmap_free(mt->local_funcs);
-        if (mt->widen_to_float) hashmap_free(mt->widen_to_float);
-        if (mt->module_consts) hashmap_free(mt->module_consts);
-        for (int i = 0; i <= mt->scope_depth; i++) {
-            if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
-        }
-        jm_free_scope_env_names(mt->func_entries, mt->func_count);
-    jm_free_scope_env_names(mt->func_entries, mt->func_count);
-    mem_free(mt);
+        jm_destroy_mir_transpiler(mt);
         MIR_finish(ctx);
         js_transpiler_destroy(tp);
         return (Item){.item = ITEM_ERROR};
@@ -27244,16 +27251,7 @@ static Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, 
 
     if (!js_main) {
         log_error("js-mir: module: failed to find js_main for '%s'", filename);
-        hashmap_free(mt->import_cache);
-        hashmap_free(mt->local_funcs);
-        if (mt->widen_to_float) hashmap_free(mt->widen_to_float);
-        if (mt->module_consts) hashmap_free(mt->module_consts);
-        for (int i = 0; i <= mt->scope_depth; i++) {
-            if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
-        }
-        jm_free_scope_env_names(mt->func_entries, mt->func_count);
-    jm_free_scope_env_names(mt->func_entries, mt->func_count);
-    mem_free(mt);
+        jm_destroy_mir_transpiler(mt);
         MIR_finish(ctx);
         js_transpiler_destroy(tp);
         return ItemNull;
@@ -27279,16 +27277,7 @@ static Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, 
 
     // Cleanup transpiler state but DEFER MIR context cleanup
     // (module function pointers must remain alive for the main program)
-    hashmap_free(mt->import_cache);
-    hashmap_free(mt->local_funcs);
-    if (mt->widen_to_float) hashmap_free(mt->widen_to_float);
-    if (mt->module_consts) hashmap_free(mt->module_consts);
-    for (int i = 0; i <= mt->scope_depth; i++) {
-        if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
-    }
-    jm_free_scope_env_names(mt->func_entries, mt->func_count);
-    jm_free_scope_env_names(mt->func_entries, mt->func_count);
-    mem_free(mt);
+    jm_destroy_mir_transpiler(mt);
     jm_defer_mir_cleanup(ctx);
     // Attach name_pool and ast_pool to the deferred entry so they are freed
     // when the deferred context is cleaned up.
@@ -27482,30 +27471,12 @@ extern "C" Item js_new_function_from_string(Item* args, int argc) {
         MIR_set_error_func(ctx, g_batch_mir_error_handler);
     }
 
-    JsMirTranspiler* mt = (JsMirTranspiler*)mem_alloc(sizeof(JsMirTranspiler), MEM_CAT_JS_RUNTIME);
+    JsMirTranspiler* mt = jm_create_mir_transpiler(tp, ctx, "<new Function>", false, 16, 8, 8, "js-new-function");
     if (!mt) {
-        log_error("js-new-function: failed to allocate transpiler");
         MIR_finish(ctx);
         js_transpiler_destroy(tp);
         return ItemNull;
     }
-    memset(mt, 0, sizeof(JsMirTranspiler));
-    mt->tp = tp;
-    mt->ctx = ctx;
-    mt->is_module = false;  // not a module — js_main returns the fn value
-    mt->filename = "<new Function>";
-    mt->import_cache = hashmap_new(sizeof(JsImportCacheEntry), 16, 0, 0,
-        js_import_cache_hash, js_import_cache_cmp, NULL, NULL);
-    mt->local_funcs = hashmap_new(sizeof(JsLocalFuncEntry), 8, 0, 0,
-        js_local_func_hash, js_local_func_cmp, NULL, NULL);
-    mt->var_scopes[0] = hashmap_new(sizeof(JsVarScopeEntry), 8, 0, 0,
-        js_var_scope_hash, js_var_scope_cmp, NULL, NULL);
-    mt->scope_depth = 0;
-    mt->var_hoist_depth = -1;
-    mt->collect_parent_func_index = -1;
-    mt->scope_env_reg = 0;
-    mt->scope_env_slot_count = 0;
-    mt->current_func_index = -1;
 
     // Inherit outer script's module_consts so eval()/new Function() can
     // resolve var declarations from the calling scope.
@@ -27523,15 +27494,7 @@ extern "C" Item js_new_function_from_string(Item* args, int argc) {
 
     if (!jm_validate_mir_labels(ctx)) {
         log_error("js-new-function: NULL labels detected");
-        hashmap_free(mt->import_cache);
-        hashmap_free(mt->local_funcs);
-        if (mt->widen_to_float) hashmap_free(mt->widen_to_float);
-        for (int i = 0; i <= mt->scope_depth; i++) {
-            if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
-        }
-        jm_free_scope_env_names(mt->func_entries, mt->func_count);
-    jm_free_scope_env_names(mt->func_entries, mt->func_count);
-    mem_free(mt);
+        jm_destroy_mir_transpiler(mt);
         MIR_finish(ctx);
         js_transpiler_destroy(tp);
         return ItemNull;
@@ -27544,16 +27507,7 @@ extern "C" Item js_new_function_from_string(Item* args, int argc) {
 
     if (!js_main_fn) {
         log_error("js-new-function: failed to find js_main");
-        hashmap_free(mt->import_cache);
-        hashmap_free(mt->local_funcs);
-        if (mt->widen_to_float) hashmap_free(mt->widen_to_float);
-        if (mt->module_consts) hashmap_free(mt->module_consts);
-        for (int i = 0; i <= mt->scope_depth; i++) {
-            if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
-        }
-        jm_free_scope_env_names(mt->func_entries, mt->func_count);
-    jm_free_scope_env_names(mt->func_entries, mt->func_count);
-    mem_free(mt);
+        jm_destroy_mir_transpiler(mt);
         MIR_finish(ctx);
         js_transpiler_destroy(tp);
         return ItemNull;
@@ -27566,16 +27520,7 @@ extern "C" Item js_new_function_from_string(Item* args, int argc) {
     // Also keep name_pool and ast_pool alive: JIT code embeds raw String* pointers
     // interned in the name pool (via jm_box_string_literal). Freeing the pool would
     // leave dangling pointers in the generated code.
-    hashmap_free(mt->import_cache);
-    hashmap_free(mt->local_funcs);
-    if (mt->widen_to_float) hashmap_free(mt->widen_to_float);
-    if (mt->module_consts) hashmap_free(mt->module_consts);
-    for (int i = 0; i <= mt->scope_depth; i++) {
-        if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
-    }
-    jm_free_scope_env_names(mt->func_entries, mt->func_count);
-    jm_free_scope_env_names(mt->func_entries, mt->func_count);
-    mem_free(mt);
+    jm_destroy_mir_transpiler(mt);
     jm_defer_mir_cleanup(ctx);
     // Attach name_pool and ast_pool to the deferred entry so they are freed
     // together with the MIR context (e.g., when eval() calls jm_finish_last_deferred_mir).
@@ -27951,31 +27896,13 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t is_global_scope) {
             MIR_set_error_func(eval_ctx, g_batch_mir_error_handler);
         }
 
-        JsMirTranspiler* mt = (JsMirTranspiler*)mem_alloc(sizeof(JsMirTranspiler), MEM_CAT_JS_RUNTIME);
+        JsMirTranspiler* mt = jm_create_mir_transpiler(tp, eval_ctx, "<eval>", false, 16, 8, 8, "js-eval");
         if (!mt) {
-            log_error("js-eval: failed to allocate transpiler");
             MIR_finish(eval_ctx);
             js_transpiler_destroy(tp);
             return ItemNull;
         }
-        memset(mt, 0, sizeof(JsMirTranspiler));
-        mt->tp = tp;
-        mt->ctx = eval_ctx;
-        mt->is_module = false;
         mt->is_eval_direct = (is_global_scope != 0);  // sloppy-mode eval: export vars to globalThis
-        mt->filename = "<eval>";
-        mt->import_cache = hashmap_new(sizeof(JsImportCacheEntry), 16, 0, 0,
-            js_import_cache_hash, js_import_cache_cmp, NULL, NULL);
-        mt->local_funcs = hashmap_new(sizeof(JsLocalFuncEntry), 8, 0, 0,
-            js_local_func_hash, js_local_func_cmp, NULL, NULL);
-        mt->var_scopes[0] = hashmap_new(sizeof(JsVarScopeEntry), 8, 0, 0,
-            js_var_scope_hash, js_var_scope_cmp, NULL, NULL);
-        mt->scope_depth = 0;
-        mt->var_hoist_depth = -1;
-        mt->collect_parent_func_index = -1;
-        mt->scope_env_reg = 0;
-        mt->scope_env_slot_count = 0;
-        mt->current_func_index = -1;
 
         // Inherit outer script's module_consts so eval() can resolve var declarations
         if (g_eval_preamble_entries && g_eval_preamble_entry_count > 0) {
@@ -27992,15 +27919,7 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t is_global_scope) {
 
         if (!jm_validate_mir_labels(eval_ctx)) {
             log_error("js-eval: NULL labels detected in direct script");
-            hashmap_free(mt->import_cache);
-            hashmap_free(mt->local_funcs);
-            if (mt->widen_to_float) hashmap_free(mt->widen_to_float);
-            for (int i = 0; i <= mt->scope_depth; i++) {
-                if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
-            }
-        jm_free_scope_env_names(mt->func_entries, mt->func_count);
-    jm_free_scope_env_names(mt->func_entries, mt->func_count);
-    mem_free(mt);
+            jm_destroy_mir_transpiler(mt);
             MIR_finish(eval_ctx);
             js_transpiler_destroy(tp);
             return ItemNull;
@@ -28013,16 +27932,7 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t is_global_scope) {
 
         if (!js_main_fn) {
             log_error("js-eval: failed to find js_main in direct script");
-            hashmap_free(mt->import_cache);
-            hashmap_free(mt->local_funcs);
-            if (mt->widen_to_float) hashmap_free(mt->widen_to_float);
-            if (mt->module_consts) hashmap_free(mt->module_consts);
-            for (int i = 0; i <= mt->scope_depth; i++) {
-                if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
-            }
-        jm_free_scope_env_names(mt->func_entries, mt->func_count);
-    jm_free_scope_env_names(mt->func_entries, mt->func_count);
-    mem_free(mt);
+            jm_destroy_mir_transpiler(mt);
             MIR_finish(eval_ctx);
             js_transpiler_destroy(tp);
             return ItemNull;
@@ -28042,16 +27952,7 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t is_global_scope) {
         js_set_direct_new_target(prev_nt);
 
         // Cleanup
-        hashmap_free(mt->import_cache);
-        hashmap_free(mt->local_funcs);
-        if (mt->widen_to_float) hashmap_free(mt->widen_to_float);
-        if (mt->module_consts) hashmap_free(mt->module_consts);
-        for (int i = 0; i <= mt->scope_depth; i++) {
-            if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
-        }
-        jm_free_scope_env_names(mt->func_entries, mt->func_count);
-    jm_free_scope_env_names(mt->func_entries, mt->func_count);
-    mem_free(mt);
+        jm_destroy_mir_transpiler(mt);
         // Defer MIR context cleanup — eval code may return closures/functions
         // whose JIT pointers must remain valid, and string literals from the
         // name_pool/ast_pool may be captured by variables or closures.
@@ -28113,29 +28014,12 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
     }
 
     // set up MIR transpiler
-    JsMirTranspiler* mt = (JsMirTranspiler*)mem_alloc(sizeof(JsMirTranspiler), MEM_CAT_JS_RUNTIME);
+    JsMirTranspiler* mt = jm_create_mir_transpiler(tp, ctx, filename, false, 64, 32, 16, "js-mir-ast");
     if (!mt) {
-        log_error("js-mir-ast: failed to allocate JsMirTranspiler");
         MIR_finish(ctx);
         context = old_context;
         return (Item){.item = ITEM_ERROR};
     }
-    memset(mt, 0, sizeof(JsMirTranspiler));
-    mt->tp = tp;
-    mt->ctx = ctx;
-    mt->import_cache = hashmap_new(sizeof(JsImportCacheEntry), 64, 0, 0,
-        js_import_cache_hash, js_import_cache_cmp, NULL, NULL);
-    mt->local_funcs = hashmap_new(sizeof(JsLocalFuncEntry), 32, 0, 0,
-        js_local_func_hash, js_local_func_cmp, NULL, NULL);
-    mt->var_scopes[0] = hashmap_new(sizeof(JsVarScopeEntry), 16, 0, 0,
-        js_var_scope_hash, js_var_scope_cmp, NULL, NULL);
-    mt->scope_depth = 0;
-    mt->var_hoist_depth = -1;
-    mt->collect_parent_func_index = -1;
-    mt->scope_env_reg = 0;
-    mt->scope_env_slot_count = 0;
-    mt->current_func_index = -1;
-    mt->filename = filename;
 
     mt->module = MIR_new_module(ctx, "ts_script");
 
@@ -28181,16 +28065,7 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
 
     if (!jm_validate_mir_labels(ctx)) {
         log_error("js-mir-ast: NULL labels detected");
-        hashmap_free(mt->import_cache);
-        hashmap_free(mt->local_funcs);
-        if (mt->widen_to_float) hashmap_free(mt->widen_to_float);
-        if (mt->module_consts) hashmap_free(mt->module_consts);
-        for (int i = 0; i <= mt->scope_depth; i++) {
-            if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
-        }
-        jm_free_scope_env_names(mt->func_entries, mt->func_count);
-    jm_free_scope_env_names(mt->func_entries, mt->func_count);
-    mem_free(mt);
+        jm_destroy_mir_transpiler(mt);
         MIR_finish(ctx);
         js_transpiler_destroy(tp);
         return (Item){.item = ITEM_ERROR};
@@ -28203,16 +28078,7 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
 
     if (!js_main) {
         log_error("js-mir-ast: failed to find js_main");
-        hashmap_free(mt->import_cache);
-        hashmap_free(mt->local_funcs);
-        if (mt->widen_to_float) hashmap_free(mt->widen_to_float);
-        if (mt->module_consts) hashmap_free(mt->module_consts);
-        for (int i = 0; i <= mt->scope_depth; i++) {
-            if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
-        }
-        jm_free_scope_env_names(mt->func_entries, mt->func_count);
-    jm_free_scope_env_names(mt->func_entries, mt->func_count);
-    mem_free(mt);
+        jm_destroy_mir_transpiler(mt);
         MIR_finish(ctx);
         context = old_context;
         return (Item){.item = ITEM_ERROR};
@@ -28248,16 +28114,7 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
     context = old_context;
 
     // cleanup
-    hashmap_free(mt->import_cache);
-    hashmap_free(mt->local_funcs);
-    if (mt->widen_to_float) hashmap_free(mt->widen_to_float);
-    if (mt->module_consts) hashmap_free(mt->module_consts);
-    for (int i = 0; i <= mt->scope_depth; i++) {
-        if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
-    }
-    jm_free_scope_env_names(mt->func_entries, mt->func_count);
-    jm_free_scope_env_names(mt->func_entries, mt->func_count);
-    mem_free(mt);
+    jm_destroy_mir_transpiler(mt);
     MIR_finish(ctx);
 
     // stash ephemeral GC heap on Runtime for caller cleanup
@@ -28452,29 +28309,12 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
     }
 
     // Set up MIR transpiler (heap-allocated: struct is ~3 MB due to func_entries[256])
-    JsMirTranspiler* mt = (JsMirTranspiler*)mem_alloc(sizeof(JsMirTranspiler), MEM_CAT_JS_RUNTIME);
+    JsMirTranspiler* mt = jm_create_mir_transpiler(tp, ctx, filename, false, 64, 32, 16, "js-mir");
     if (!mt) {
-        log_error("js-mir: failed to allocate JsMirTranspiler");
         MIR_finish(ctx);
         js_transpiler_destroy(tp);
         return (Item){.item = ITEM_ERROR};
     }
-    memset(mt, 0, sizeof(JsMirTranspiler));
-    mt->tp = tp;
-    mt->ctx = ctx;
-    mt->import_cache = hashmap_new(sizeof(JsImportCacheEntry), 64, 0, 0,
-        js_import_cache_hash, js_import_cache_cmp, NULL, NULL);
-    mt->local_funcs = hashmap_new(sizeof(JsLocalFuncEntry), 32, 0, 0,
-        js_local_func_hash, js_local_func_cmp, NULL, NULL);
-    mt->var_scopes[0] = hashmap_new(sizeof(JsVarScopeEntry), 16, 0, 0,
-        js_var_scope_hash, js_var_scope_cmp, NULL, NULL);
-    mt->scope_depth = 0;
-    mt->var_hoist_depth = -1;
-    mt->collect_parent_func_index = -1;
-    mt->scope_env_reg = 0;
-    mt->scope_env_slot_count = 0;
-    mt->current_func_index = -1;
-    mt->filename = filename;
 
     // Preamble mode setup
     mt->preamble_mode = g_jm_preamble_mode;
@@ -28534,15 +28374,7 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
     // Pre-link validation: abort gracefully if NULL labels found
     if (!jm_validate_mir_labels(ctx)) {
         log_error("js-mir: NULL labels detected, aborting link for '%s'", filename ? filename : "<string>");
-        hashmap_free(mt->import_cache);
-        hashmap_free(mt->local_funcs);
-        if (mt->widen_to_float) hashmap_free(mt->widen_to_float);
-        for (int i = 0; i <= mt->scope_depth; i++) {
-            if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
-        }
-        jm_free_scope_env_names(mt->func_entries, mt->func_count);
-    jm_free_scope_env_names(mt->func_entries, mt->func_count);
-    mem_free(mt);
+        jm_destroy_mir_transpiler(mt);
         MIR_finish(ctx);
         js_transpiler_destroy(tp);
         return (Item){.item = ITEM_ERROR};
@@ -28601,15 +28433,7 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
 
     if (!js_main) {
         log_error("js-mir: failed to find js_main");
-        hashmap_free(mt->import_cache);
-        hashmap_free(mt->local_funcs);
-        if (mt->widen_to_float) hashmap_free(mt->widen_to_float);
-        for (int i = 0; i <= mt->scope_depth; i++) {
-            if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
-        }
-        jm_free_scope_env_names(mt->func_entries, mt->func_count);
-    jm_free_scope_env_names(mt->func_entries, mt->func_count);
-    mem_free(mt);
+        jm_destroy_mir_transpiler(mt);
         MIR_finish(ctx);
         js_transpiler_destroy(tp);
         return (Item){.item = ITEM_ERROR};
@@ -28723,16 +28547,7 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
     context = old_context;
 
     // Cleanup
-    hashmap_free(mt->import_cache);
-    hashmap_free(mt->local_funcs);
-    if (mt->widen_to_float) hashmap_free(mt->widen_to_float);
-    if (mt->module_consts) hashmap_free(mt->module_consts);
-    for (int i = 0; i <= mt->scope_depth; i++) {
-        if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
-    }
-    jm_free_scope_env_names(mt->func_entries, mt->func_count);
-    jm_free_scope_env_names(mt->func_entries, mt->func_count);
-    mem_free(mt);
+    jm_destroy_mir_transpiler(mt);
     if (g_jm_preamble_out) {
         // Preamble mode: keep MIR context alive — harness function objects reference compiled code
         g_jm_preamble_out->mir_ctx = ctx;

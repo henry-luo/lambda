@@ -387,9 +387,9 @@ JavaScript scoping semantics are implemented through `JsScope` (parser phase) an
 
 | File | Lines | Purpose |
 |------|------:|---------|
-| `transpile_js_mir.cpp` | ~28K | Core MIR transpiler: AST → MIR IR, type inference, native optimization, closures, classes, generators, async |
-| `js_runtime.cpp` | ~21K | Runtime library: operators, type coercion, property access, prototype chain, iterators, generators, collections |
-| `js_globals.cpp` | ~11K | Built-in objects: JSON, Date, Symbol, Object.*, Math, Reflect, constructors, URI encoding |
+| `transpile_js_mir.cpp` | ~29K | Core MIR transpiler: AST → MIR IR, analysis, native optimization, closures, classes, modules, eval, batch/preamble |
+| `js_runtime.cpp` | ~26K | Runtime library: coercion, operators, property access, prototype chain, function calls, iterators, generators, collections, typed-array hooks |
+| `js_globals.cpp` | ~13K | Built-in objects and host globals: JSON, Date, Symbol, Object.*, Math, Reflect, constructors, `$262`, process/console pieces |
 | `build_js_ast.cpp` | ~4K | AST builder: Tree-sitter CST → typed JS AST nodes |
 | `js_dom.cpp` | ~3.8K | DOM bridge: wraps Radiant DomElement as JS Maps via sentinel markers |
 | `js_buffer.cpp` | ~2.5K | Node.js Buffer implementation |
@@ -405,6 +405,12 @@ JavaScript scoping semantics are implemented through `JsScope` (parser phase) an
 | `js_transpiler.hpp` | ~256 | Transpiler context struct, scope types, forward declarations |
 | `js_print.cpp` | ~178 | Debug AST printer |
 | + 18 more | ~17K | Node.js compat (http, net, path, os, stream, etc.), DOM events, CSSOM, Canvas, Fetch, XHR |
+
+Current refactor direction: the runtime is moving away from marker-primary
+descriptor metadata toward `ShapeEntry::flags`, `JsAccessorPair`, and the
+ordinary-operation kernels in `js_props.{h,cpp}`. New property/descriptor work
+should prefer those chokepoints over adding another ad-hoc path inside
+`js_runtime.cpp`.
 
 > See [JS_Runtime_Detailed.md](JS_Runtime_Detailed.md) for the complete file listing and detailed subsystem documentation.
 

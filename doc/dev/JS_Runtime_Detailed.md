@@ -58,8 +58,15 @@ ShapeEntry (per-property metadata)
 ├── name            : StrView* (interned property name)
 ├── byte_offset     : int64  (offset into Map.data)
 ├── type            : Type*  (runtime value type)
+├── flags           : uint8  (JSPD_* descriptor/accessor/deleted bits)
 └── next            : ShapeEntry* (linked list next)
 ```
+
+Current implementation note: older docs and historical proposals may describe
+descriptor metadata as `__get_` / `__set_` / `__nw_` marker properties. Named
+properties now primarily use `ShapeEntry::flags` plus `JsAccessorPair` storage.
+Legacy marker fallbacks remain only for transition and indexed companion-map
+edge cases that do not yet have a normal shape entry.
 
 ### 1.2 Property Lookup (`js_property_get`)
 
@@ -75,53 +82,82 @@ Dispatch order for `LMD_TYPE_MAP`:
    - `MAP_KIND_PROXY` → `js_proxy_trap_get()`
    - `MAP_KIND_COLLECTION` → Map/Set method dispatch
 
-2. **Key coercion** — non-string keys converted: int→string, float→string, symbol→`__sym_N`
+2. **Key coercion** — callers route raw keys through `js_to_property_key()`.
+   This canonicalizes symbols to internal `__sym_N` strings and converts
+   numeric/bool/null/undefined keys with JavaScript `ToString` semantics.
 
-3. **Own property lookup** via `js_map_get_fast(map, key, len)`:
+3. **Own property lookup** via the `js_props` ordinary-operation kernels:
+   - `js_ordinary_get_own()` resolves own data slots and accessor pairs
+   - `js_ordinary_get_own_descriptor()` inspects descriptor kind without
+     invoking getters
+   - `js_ordinary_has_own()` / `js_ordinary_own_status()` handle tombstones
+     without resurrecting deleted built-ins
+   - storage still uses `js_map_get_fast()` and the shape hash underneath:
    - Hash table first: FNV-1a hash → `field_index[hash % 32]`, pointer comparison (interned strings), `memcmp` fallback
    - Linear scan: walks `ShapeEntry` chain for hash overflow
    - Nested map scan: entries with `name == NULL` contain nested `Map*` (for spread objects)
 
-4. **Getter check (own)** — looks for `__get_<propName>` property; if found and is FUNC, invokes with `this = receiver`
+4. **Accessor dispatch (own)** — `ShapeEntry::flags & JSPD_IS_ACCESSOR`
+   marks the slot as a `JsAccessorPair*`. `js_ordinary_get_own()` invokes the
+   getter with the supplied Receiver, or returns `undefined` for setter-only
+   accessors.
 
-5. **Prototype chain** via `js_prototype_lookup()` — walks `__proto__` chain (max depth 32):
+5. **Prototype chain** via `js_ordinary_get()` / `js_prototype_lookup_ex()` —
+   walks the prototype chain (max depth 32 in ordinary kernels):
    ```
    proto = obj.__proto__
    while proto != null && depth < 32:
-       result = js_map_get_fast(proto, key)
+       result = js_ordinary_get_own(proto, key, receiver)
        if found: return result
        proto = proto.__proto__
    ```
 
-6. **Built-in method fallback** — if `__class_name__` property exists (e.g., "Date", "RegExp"), routes to type-specific method table via `js_lookup_builtin_method()`
+6. **Built-in method fallback** — uses typed `JsClass` stamping where available,
+   with older `__class_name__` strings only as compatibility fallback for
+   un-migrated or user-defined class paths. Dispatch still routes through
+   `js_lookup_builtin_method()` / `js_dispatch_builtin()`.
 
-### 1.3 Property Attributes (Marker-Based)
+### 1.3 Property Attributes (Shape-Flag Based)
 
-Property attributes are stored as **companion properties** with special prefixes rather than in `ShapeEntry` metadata:
+Named-property attributes are stored on `ShapeEntry::flags` through
+`js_property_attrs.{h,cpp}`. The bits are inverse-encoded where possible, so a
+zero-initialized shape entry has the JavaScript defaults: writable,
+enumerable, configurable, data property.
 
-| Prefix | Meaning | Example |
-|--------|---------|---------|
-| `__ne_<name>` | Non-enumerable | `__ne_message = true` |
-| `__nw_<name>` | Non-writable (read-only) | `__nw_length = true` |
-| `__nc_<name>` | Non-configurable | `__nc_length = true` |
-| `__get_<name>` | Getter accessor | `__get_name = <function>` |
-| `__set_<name>` | Setter accessor | `__set_name = <function>` |
-| `__frozen__` | Object is frozen | `__frozen__ = true` |
-| `__sealed__` | Object is sealed | `__sealed__ = true` |
-| `__non_extensible__` | Preventextensions | `__non_extensible__ = true` |
+| Flag | Meaning |
+|------|---------|
+| `JSPD_NON_ENUMERABLE` | Property is non-enumerable |
+| `JSPD_NON_WRITABLE` | Data property is read-only |
+| `JSPD_NON_CONFIGURABLE` | Property is non-configurable |
+| `JSPD_IS_ACCESSOR` | Slot stores a `JsAccessorPair*` instead of a data value |
+| `JSPD_DELETED` | Shape-entry tombstone bit for deleted named properties |
 
-**Trade-off**: Simple implementation (no `ShapeEntry` changes needed), but roughly doubles the property count for heavily-attributed objects. Works well in practice since most JS objects have few attributed properties.
+Map-local shape cloning prevents attribute mutations on one object from
+corrupting siblings that share a constructor or call-site shape cache. Helper
+entry points include `js_shape_entry_update_flags()`,
+`js_shape_entry_set_accessor()`, `js_shape_entry_set_deleted()`, and
+`js_props_query_writable/_enumerable/_configurable()`.
+
+Legacy marker properties (`__nw_`, `__ne_`, `__nc_`, `__get_`, `__set_`) are no
+longer the primary named-property representation. They are retained only where
+the storage path has no normal `ShapeEntry` yet, especially indexed
+array-companion cases.
+
+Object state markers still exist as ordinary internal properties:
+`__frozen__`, `__sealed__`, and `__non_extensible__`.
 
 ### 1.4 Object.defineProperty
 
-Implemented in `ValidateAndApplyPropertyDescriptor()` (`js_globals.cpp`):
+Implemented through descriptor helpers in `js_props.cpp` / `js_globals.cpp`:
 
 1. Validates descriptor (rejects mixed accessor+data, non-callable get/set)
 2. Non-extensible check for new properties
 3. Non-configurable enforcement: rejects configurable→true, enumerable change, accessor↔data conversion, non-writable value change (uses SameValue)
-4. Data descriptors: sets value via `js_property_set` (temporarily clears `__nw_` to bypass guard)
-5. Accessor descriptors: writes `__get_<name>` / `__set_<name>` markers
-6. Sets attribute markers based on descriptor's `enumerable`/`writable`/`configurable`
+4. Data descriptors: store the value slot and update shape flags
+5. Accessor descriptors: allocate/store a `JsAccessorPair*` and set
+   `JSPD_IS_ACCESSOR`
+6. Attribute writes go through clone-aware shape helpers, with marker fallback
+   only for storage paths that cannot carry flags yet
 
 ### 1.5 Built-in Method Dispatch
 
@@ -136,10 +172,13 @@ Two dispatch mechanisms:
 
 Returns lazily-created singleton `JsFunction` objects via `js_get_or_create_builtin(builtin_id)`. Invocation dispatches through `js_dispatch_builtin()`.
 
-**`__class_name__` system** — for wrapper objects and exotic types:
-- Property value: `"String"`, `"Number"`, `"Boolean"`, `"Date"`, `"RegExp"`, `"Symbol"`, `"BigInt"`
-- `js_property_get` checks `__class_name__` first, routes to type-specific prototype
-- `__primitiveValue__` stores the wrapped primitive value
+**`JsClass` stamping** — for wrapper objects and built-in families:
+- `TypeMap::js_class` stores a compact class id for many built-in maps
+- `js_class_id()` and `js_proto_class_method_dispatch()` avoid repeated
+  string-probe dispatch
+- legacy `__class_name__` remains for un-migrated classes and user-defined
+  class name behavior
+- `__primitiveValue__` stores wrapped primitive values
 
 ### 1.6 Constructor Shape Pre-allocation (A5)
 
@@ -1007,41 +1046,25 @@ Module resolution via `require()` / CommonJS pattern in `module_registry.cpp`.
 
 | File | Lines | Purpose |
 |------|------:|---------|
-| `transpile_js_mir.cpp` | 27,963 | Core MIR transpiler: AST → MIR IR, type inference, closures, classes, generators, async |
-| `js_runtime.cpp` | 21,296 | Runtime: operators, property access, prototype chain, iterators, generators, collections, batch reset |
-| `js_globals.cpp` | 11,151 | Built-in objects: Object.*, JSON, Date, Symbol, Math, Reflect, constructors, URI, GOPD |
-| `build_js_ast.cpp` | 3,957 | AST builder: Tree-sitter JS CST → typed JsAstNode tree |
-| `js_dom.cpp` | 3,820 | DOM bridge: wraps Radiant DomElement as JS Maps |
-| `js_buffer.cpp` | 2,473 | Node.js Buffer implementation |
-| `js_fs.cpp` | 1,794 | Node.js fs module |
-| `js_crypto.cpp` | 1,753 | Node.js crypto module |
-| `js_cssom.cpp` | 1,355 | CSSOM bridge (getComputedStyle, CSSStyleDeclaration) |
-| `js_http.cpp` | 1,322 | Node.js http module |
-| `js_util.cpp` | 1,215 | Node.js util module |
-| `js_assert.cpp` | 1,181 | Node.js assert module |
-| `js_path.cpp` | 1,084 | Node.js path module |
-| `js_typed_array.cpp` | 1,072 | TypedArray + ArrayBuffer + DataView |
-| `js_early_errors.cpp` | 1,063 | Early error detection, strict mode validation |
-| `js_stream.cpp` | 848 | Node.js stream module |
-| `js_event_loop.cpp` | 802 | Event loop, microtask queue, timers |
-| `js_regex_wrapper.cpp` | 780 | JS regex → RE2 transpilation + post-filters |
-| `js_url_module.cpp` | 763 | Node.js url module (URL, URLSearchParams) |
-| `js_runtime.h` | 741 | Runtime C API declarations |
-| `js_os.cpp` | 723 | Node.js os module |
-| `js_child_process.cpp` | 654 | Node.js child_process module |
-| `js_net.cpp` | 652 | Node.js net module |
-| `js_ast.hpp` | 624 | AST node types (~45 types, ~50 operators) |
-| `js_tls.cpp` | 623 | TLS/SSL support |
-| `js_events.cpp` | 564 | Node.js events (EventEmitter) |
-| `js_xhr.cpp` | 551 | XMLHttpRequest |
-| `js_dom_events.cpp` | 505 | DOM event handling |
-| `js_zlib.cpp` | 460 | Node.js zlib module |
-| `js_querystring.cpp` | 458 | Node.js querystring module |
-| `js_scope.cpp` | 440 | Scope management: var/let/const semantics |
-| `js_canvas.cpp` | 417 | Canvas 2D API |
-| `js_fetch.cpp` | 405 | Fetch API |
-| `js_dom.h` | 302 | DOM API declarations |
-| `js_transpiler.hpp` | 256 | Transpiler context struct |
-| `js_dns.cpp` | 220 | Node.js dns module |
+| `transpile_js_mir.cpp` | 29,035 | Core MIR transpiler: AST -> MIR IR, analysis, closures, classes, modules, eval, batch/preamble |
+| `js_runtime.cpp` | 25,575 | Runtime: coercion, operators, property access, prototypes, functions, generators, collections, typed arrays, batch reset |
+| `js_globals.cpp` | 12,739 | Built-ins and host globals: Object.*, JSON, Date, Symbol, Math, Reflect, constructors, `$262`, process/console pieces |
+| `build_js_ast.cpp` | 4,040 | AST builder: Tree-sitter JS CST -> typed JsAstNode tree |
+| `js_dom.cpp` | 333,639 bytes | DOM bridge: wraps Radiant DomElement as JS Maps |
+| `js_buffer.cpp` | 113,132 bytes | Node.js Buffer implementation |
+| `js_fs.cpp` | 72,367 bytes | Node.js fs module |
+| `js_crypto.cpp` | 72,635 bytes | Node.js crypto module |
+| `js_typed_array.cpp` | 65,591 bytes | TypedArray + ArrayBuffer + DataView helpers |
+| `js_cssom.cpp` | 58,973 bytes | CSSOM bridge |
+| `js_dom_selection.cpp` | 55,976 bytes | DOM selection bridge |
+| `js_util.cpp` | 51,969 bytes | Node.js util module |
+| `js_http.cpp` | 51,485 bytes | Node.js http module |
+| `js_regex_wrapper.cpp` | 49,479 bytes | JS regex -> RE2 transpilation + post-filters |
+| `js_early_errors.cpp` | 43,489 bytes | Early error detection, strict mode validation |
+| `js_path.cpp` | 38,730 bytes | Node.js path module |
+| `js_stream.cpp` | 35,728 bytes | Node.js stream module |
+| `js_props.cpp` | 765 | Ordinary property-operation kernels |
+| `js_property_attrs.cpp` | 673 | Shape-flag descriptor and accessor helpers |
+| `js_coerce.cpp` | 135 | Focused coercion helper tests/runtime slice |
 | `js_print.cpp` | 178 | Debug AST printer |
-| **Total** | **~95K** | |
+| **Total** | **100K+** | JS engine, DOM bridge, Node-compatible modules, test harness support |

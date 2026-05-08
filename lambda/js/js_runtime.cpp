@@ -27,6 +27,7 @@
 #include <cmath>
 #include "../../lib/mem.h"
 #include <cstdio>
+#include <cstdlib>
 #include <uv.h>
 #include <cctype>
 #include <string>
@@ -138,13 +139,19 @@ private:
     Item prev_;
 };
 } // namespace
-// TRACE: track last called function name for debugging
+// TRACE: track last called function name for opt-in runtime diagnostics.
 static const char* _trace_last_fn = "(none)";
 static int _trace_last_fn_len = 6;
-static const char* _trace_setter_prop = "(none)";
-static int _trace_setter_prop_len = 6;
-static int _trace_call_id = 0;
 static int _trace_total_calls = 0;
+
+static bool js_runtime_trace_enabled() {
+    static int trace_enabled = -1;
+    if (trace_enabled < 0) {
+        const char* env = getenv("JS_RUNTIME_TRACE");
+        trace_enabled = (env && env[0] != '\0' && strcmp(env, "0") != 0) ? 1 : 0;
+    }
+    return trace_enabled != 0;
+}
 
 // new.target: set to the constructor function when called via 'new', undefined otherwise.
 // Uses a pending pattern: js_set_new_target sets a pending value that js_call_function
@@ -415,6 +422,9 @@ extern "C" void js_throw_const_assign(const char* name, int name_len) {
 
 // forward declaration for js_batch_reset (defined near js_module_count_v14)
 static void js_module_cache_reset();
+static void js_reset_transient_call_state();
+static void js_reset_heap_bound_runtime_state();
+static void js_assert_batch_runtime_state_clear(const char* reset_name, bool include_heap_bound);
 // forward declaration for array custom prototype check
 extern "C" Item js_array_get_custom_proto(Item arr);
 // forward declarations for module namespace cache resets
@@ -438,20 +448,8 @@ extern "C" void js_batch_reset() {
     // clear any pending exception from previous script
     js_exception_pending = false;
     js_exception_value = (Item){0};
-    // clear current this binding
-    js_current_this = (Item){0};
-    // clear new.target
-    js_new_target = (Item){0};
-    js_pending_new_target = (Item){0};
-    js_has_pending_new_target = false;
-    // clear array method real this
-    js_array_method_real_this = (Item){0};
-    // v37: clear cached Object.prototype (stale after heap reset)
-    js_cached_object_proto = NULL;
-    js_resolving_object_proto = false;
-    js_private_field_initializing = false;
-    // clear Input context
-    js_input = NULL;
+    js_reset_transient_call_state();
+    js_reset_heap_bound_runtime_state();
     // reset cached global objects (Math, JSON, console, Reflect) so they're recreated fresh
     // — tests may modify them (delete/overwrite properties)
     extern void js_reset_math_object();
@@ -548,6 +546,7 @@ extern "C" void js_batch_reset() {
     js_node_test_reset();
     // v95: reset Array.prototype[Symbol.iterator] override flag
     g_array_sym_iter_ever_set = 0;
+    js_assert_batch_runtime_state_clear("js_batch_reset", true);
 }
 
 // Get current module var count (for checkpointing)
@@ -582,18 +581,8 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     // clear pending exception
     js_exception_pending = false;
     js_exception_value = (Item){0};
-    // clear this/new.target
-    js_current_this = (Item){0};
-    js_new_target = (Item){0};
-    js_pending_new_target = (Item){0};
-    js_has_pending_new_target = false;
-    js_array_method_real_this = (Item){0};
-    // v37: reset cached Object.prototype — tests may modify Object.prototype
-    js_cached_object_proto = NULL;
-    js_resolving_object_proto = false;
-    js_private_field_initializing = false;
-    // clear Input context (recreated per script by transpile_js_to_mir)
-    js_input = NULL;
+    js_reset_transient_call_state();
+    js_reset_heap_bound_runtime_state();
     // reset cached global objects — tests may modify them
     extern void js_reset_math_object();
     js_reset_math_object();
@@ -677,6 +666,7 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     js_node_test_reset();
     // v95: reset Array.prototype[Symbol.iterator] override flag
     g_array_sym_iter_ever_set = 0;
+    js_assert_batch_runtime_state_clear("js_batch_reset_to", true);
 }
 
 extern "C" Item js_new_error(Item message) {
@@ -927,6 +917,104 @@ static Item js_pending_args_callee = {0};    // callee function object — set b
 
 extern "C" void js_set_arguments_info(int64_t is_strict) {
     js_pending_args_is_strict = (int)is_strict;
+}
+
+static void js_reset_transient_call_state() {
+    js_skip_accessor_dispatch = false;
+    js_current_this = (Item){0};
+    js_proxy_receiver = (Item){0};
+    js_new_target = (Item){0};
+    js_pending_new_target = (Item){0};
+    js_has_pending_new_target = false;
+    js_pending_call_args = NULL;
+    js_pending_call_argc = 0;
+    js_pending_args_is_strict = 0;
+    js_pending_args_callee = (Item){0};
+    js_array_method_real_this = (Item){0};
+}
+
+static void js_reset_heap_bound_runtime_state() {
+    js_cached_object_proto = NULL;
+    js_resolving_object_proto = false;
+    js_private_field_initializing = false;
+    js_input = NULL;
+}
+
+static void js_assert_batch_runtime_state_clear(const char* reset_name, bool include_heap_bound) {
+    int leak_count = 0;
+    const char* name = reset_name ? reset_name : "js_batch_reset";
+
+    if (js_exception_pending) {
+        leak_count++;
+        log_error("js-batch-state: %s left pending exception", name);
+    }
+    if (js_exception_value.item != 0) {
+        leak_count++;
+        log_error("js-batch-state: %s left exception value item=%lld", name, (long long)js_exception_value.item);
+    }
+    if (js_strict_mode) {
+        leak_count++;
+        log_error("js-batch-state: %s left strict mode enabled", name);
+    }
+    if (js_skip_accessor_dispatch) {
+        leak_count++;
+        log_error("js-batch-state: %s left accessor dispatch bypass enabled", name);
+    }
+    if (js_current_this.item != 0) {
+        leak_count++;
+        log_error("js-batch-state: %s left current this item=%lld", name, (long long)js_current_this.item);
+    }
+    if (js_proxy_receiver.item != 0) {
+        leak_count++;
+        log_error("js-batch-state: %s left proxy receiver item=%lld", name, (long long)js_proxy_receiver.item);
+    }
+    if (js_new_target.item != 0) {
+        leak_count++;
+        log_error("js-batch-state: %s left new.target item=%lld", name, (long long)js_new_target.item);
+    }
+    if (js_pending_new_target.item != 0 || js_has_pending_new_target) {
+        leak_count++;
+        log_error("js-batch-state: %s left pending new.target item=%lld flag=%d",
+            name, (long long)js_pending_new_target.item, js_has_pending_new_target ? 1 : 0);
+    }
+    if (js_pending_call_args || js_pending_call_argc != 0) {
+        leak_count++;
+        log_error("js-batch-state: %s left pending call args ptr=%p argc=%d",
+            name, (void*)js_pending_call_args, js_pending_call_argc);
+    }
+    if (js_pending_args_is_strict || js_pending_args_callee.item != 0) {
+        leak_count++;
+        log_error("js-batch-state: %s left pending arguments state strict=%d callee=%lld",
+            name, js_pending_args_is_strict, (long long)js_pending_args_callee.item);
+    }
+    if (js_array_method_real_this.item != 0) {
+        leak_count++;
+        log_error("js-batch-state: %s left array method receiver item=%lld",
+            name, (long long)js_array_method_real_this.item);
+    }
+
+    if (include_heap_bound) {
+        if (js_cached_object_proto) {
+            leak_count++;
+            log_error("js-batch-state: %s left cached Object.prototype ptr=%p", name, (void*)js_cached_object_proto);
+        }
+        if (js_resolving_object_proto) {
+            leak_count++;
+            log_error("js-batch-state: %s left Object.prototype resolving flag enabled", name);
+        }
+        if (js_private_field_initializing) {
+            leak_count++;
+            log_error("js-batch-state: %s left private-field init flag enabled", name);
+        }
+        if (js_input) {
+            leak_count++;
+            log_error("js-batch-state: %s left Input context ptr=%p", name, (void*)js_input);
+        }
+    }
+
+    if (leak_count > 0) {
+        log_error("js-batch-state: %s found %d uncleared runtime state field(s)", name, leak_count);
+    }
 }
 
 extern "C" Item js_lookup_builtin_method(TypeId type, const char* name, int len);
@@ -5014,8 +5102,7 @@ extern "C" Item js_get_shaped_slot(Item object, int64_t slot) {
     if (!tm || !tm->shape) return ItemNull;
     // P1: O(1) array lookup when slot_entries is populated
     if (tm->slot_entries && slot < tm->slot_count) {
-        // TRACE: detect when R slot reads as non-MAP
-        {
+        if (js_runtime_trace_enabled()) {
             static int _gs_trace = 0;
             ShapeEntry* e = tm->slot_entries[slot];
             if (_gs_trace < 3 && e && e->name && e->name->length == 1 && e->name->str[0] == 'R') {
@@ -5134,9 +5221,8 @@ extern "C" void js_set_slot_f(Item object, int64_t byte_offset, double value) {
     if (tm && tm->slot_entries && slot < tm->slot_count) {
         ShapeEntry* entry = tm->slot_entries[slot];
         if (entry && entry->type->type_id != LMD_TYPE_FLOAT) {
-            // TRACE: log type change from MAP to FLOAT
             static int _tc_trace = 0;
-            if (_tc_trace < 10 && entry->type->type_id == LMD_TYPE_MAP) {
+            if (js_runtime_trace_enabled() && _tc_trace < 10 && entry->type->type_id == LMD_TYPE_MAP) {
                 log_error("TRACE set_slot_f MAP->FLOAT: slot=%d name='%.*s' total=%d byte_off=%d",
                     slot, entry->name ? (int)entry->name->length : 0,
                     entry->name ? entry->name->str : "?",
@@ -7133,8 +7219,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
         if (js_canvas_property_set_intercept(object, key, value))
             return value;
         Map* m = object.map;
-        // TRACE: detect when .R gets a float value
-        {
+        if (js_runtime_trace_enabled()) {
             static int _r_trace = 0;
             if (_r_trace < 3 && get_type_id(key) == LMD_TYPE_STRING) {
                 String* rk = it2s(key);
@@ -7591,6 +7676,7 @@ extern "C" void js_func_init_property(Item fn_item, Item key, Item value) {
 }
 
 extern "C" Item js_property_access(Item object, Item key) {
+    bool trace_enabled = js_runtime_trace_enabled();
     // TRACE: ring buffer of last 8 property accesses for debugging
     static struct { const char* key; int klen; TypeId obj_type; TypeId result_type; } _ring[8] = {
         {"?",1,(TypeId)0,(TypeId)0},{"?",1,(TypeId)0,(TypeId)0},{"?",1,(TypeId)0,(TypeId)0},{"?",1,(TypeId)0,(TypeId)0},
@@ -7601,7 +7687,7 @@ extern "C" Item js_property_access(Item object, Item key) {
     TypeId type = get_type_id(object);
 
     // TRACE: detect .col1 on non-MAP
-    if (type != LMD_TYPE_MAP && type != LMD_TYPE_NULL && type != LMD_TYPE_UNDEFINED &&
+    if (trace_enabled && type != LMD_TYPE_MAP && type != LMD_TYPE_NULL && type != LMD_TYPE_UNDEFINED &&
         get_type_id(key) == LMD_TYPE_STRING) {
         String* ck = it2s(key);
         if (ck && ck->len == 4 && strncmp(ck->chars, "col1", 4) == 0) {
@@ -7623,11 +7709,11 @@ extern "C" Item js_property_access(Item object, Item key) {
             String* sk = it2s(key);
             // TRACE: log first accesses on undefined for Box2D debugging
             static int y_trace = 0;
-            if (y_trace < 10 && sk) {
-                log_error("TRACE undef .%.*s — last 8 accesses (obj_type→result_type):", (int)sk->len, sk->chars);
+            if (trace_enabled && y_trace < 10 && sk) {
+                log_error("TRACE undef .%.*s - last 8 accesses (obj_type->result_type):", (int)sk->len, sk->chars);
                 for (int ri = 8; ri >= 1; ri--) {
                     int idx = (_ring_idx - ri + 8) % 8;
-                    log_error("  [-%d] .%.*s  obj_t=%d→res_t=%d", ri,
+                    log_error("  [-%d] .%.*s  obj_t=%d->res_t=%d", ri,
                         _ring[idx].klen, _ring[idx].key,
                         (int)_ring[idx].obj_type, (int)_ring[idx].result_type);
                 }
@@ -7646,7 +7732,7 @@ extern "C" Item js_property_access(Item object, Item key) {
     }
     Item result = js_property_get(object, key);
     // TRACE: update ring buffer with result type
-    if (get_type_id(key) == LMD_TYPE_STRING) {
+    if (trace_enabled && get_type_id(key) == LMD_TYPE_STRING) {
         String* sk = it2s(key);
         if (sk) {
             _ring[_ring_idx].key = sk->chars;
@@ -7657,7 +7743,7 @@ extern "C" Item js_property_access(Item object, Item key) {
         }
     }
     // TRACE: detect when .R on MAP returns a non-MAP type
-    {
+    if (trace_enabled) {
         static int _r_read_trace = 0;
         if (_r_read_trace < 3 && type == LMD_TYPE_MAP && get_type_id(key) == LMD_TYPE_STRING) {
             String* rk = it2s(key);
@@ -7818,7 +7904,7 @@ extern "C" Item js_property_get_str(Item object, const char* key, int key_len) {
         const char* type_str = (type == LMD_TYPE_NULL) ? "null" : "undefined";
         // TRACE: log first few .y accesses on undefined for Box2D debugging
         static int y_trace2 = 0;
-        if (y_trace2 < 3 && key_len == 1 && key[0] == 'y') {
+        if (js_runtime_trace_enabled() && y_trace2 < 3 && key_len == 1 && key[0] == 'y') {
             log_error("TRACE js_property_get_str: .y on %s (trace %d) last_fn='%.*s'", type_str, y_trace2, _trace_last_fn_len, _trace_last_fn);
             y_trace2++;
         }
@@ -8570,6 +8656,72 @@ void js_func_cache_reset() {
 // Built-in method function cache — keyed by builtin_id
 static Item js_builtin_cache[JS_BUILTIN_MAX];
 static bool js_builtin_cache_init = false;
+
+struct JsBuiltinMethodSpec {
+    const char* name;
+    int len;
+    int builtin_id;
+    int param_count;
+};
+
+static Item js_lookup_builtin_method_spec(const JsBuiltinMethodSpec* specs, const char* name, int len) {
+    if (!specs || !name) return ItemNull;
+    for (int i = 0; specs[i].name; i++) {
+        if (len == specs[i].len && strncmp(name, specs[i].name, len) == 0) {
+            return js_get_or_create_builtin(specs[i].builtin_id, specs[i].name, specs[i].param_count);
+        }
+    }
+    return ItemNull;
+}
+
+static void js_install_builtin_method_specs(Item object, const JsBuiltinMethodSpec* specs) {
+    if (!specs) return;
+    for (int i = 0; specs[i].name; i++) {
+        Item key = (Item){.item = s2it(heap_create_name(specs[i].name, specs[i].len))};
+        Item fn = js_get_or_create_builtin(specs[i].builtin_id, specs[i].name, specs[i].param_count);
+        js_property_set(object, key, fn);
+        js_mark_non_enumerable(object, key);
+    }
+}
+
+static const JsBuiltinMethodSpec JS_MATH_METHOD_SPECS[] = {
+    {"abs", 3, JS_BUILTIN_MATH_ABS, 1},
+    {"floor", 5, JS_BUILTIN_MATH_FLOOR, 1},
+    {"ceil", 4, JS_BUILTIN_MATH_CEIL, 1},
+    {"round", 5, JS_BUILTIN_MATH_ROUND, 1},
+    {"sqrt", 4, JS_BUILTIN_MATH_SQRT, 1},
+    {"pow", 3, JS_BUILTIN_MATH_POW, 2},
+    {"min", 3, JS_BUILTIN_MATH_MIN, 2},
+    {"max", 3, JS_BUILTIN_MATH_MAX, 2},
+    {"log", 3, JS_BUILTIN_MATH_LOG, 1},
+    {"log10", 5, JS_BUILTIN_MATH_LOG10, 1},
+    {"log2", 4, JS_BUILTIN_MATH_LOG2, 1},
+    {"exp", 3, JS_BUILTIN_MATH_EXP, 1},
+    {"sin", 3, JS_BUILTIN_MATH_SIN, 1},
+    {"cos", 3, JS_BUILTIN_MATH_COS, 1},
+    {"tan", 3, JS_BUILTIN_MATH_TAN, 1},
+    {"sign", 4, JS_BUILTIN_MATH_SIGN, 1},
+    {"trunc", 5, JS_BUILTIN_MATH_TRUNC, 1},
+    {"random", 6, JS_BUILTIN_MATH_RANDOM, 0},
+    {"asin", 4, JS_BUILTIN_MATH_ASIN, 1},
+    {"acos", 4, JS_BUILTIN_MATH_ACOS, 1},
+    {"atan", 4, JS_BUILTIN_MATH_ATAN, 1},
+    {"atan2", 5, JS_BUILTIN_MATH_ATAN2, 2},
+    {"cbrt", 4, JS_BUILTIN_MATH_CBR, 1},
+    {"hypot", 5, JS_BUILTIN_MATH_HYPOT, 2},
+    {"clz32", 5, JS_BUILTIN_MATH_CLZ32, 1},
+    {"fround", 6, JS_BUILTIN_MATH_FROUND, 1},
+    {"imul", 4, JS_BUILTIN_MATH_IMUL, 2},
+    {"sinh", 4, JS_BUILTIN_MATH_SINH, 1},
+    {"cosh", 4, JS_BUILTIN_MATH_COSH, 1},
+    {"tanh", 4, JS_BUILTIN_MATH_TANH, 1},
+    {"asinh", 5, JS_BUILTIN_MATH_ASINH, 1},
+    {"acosh", 5, JS_BUILTIN_MATH_ACOSH, 1},
+    {"atanh", 5, JS_BUILTIN_MATH_ATANH, 1},
+    {"expm1", 5, JS_BUILTIN_MATH_EXPM1, 1},
+    {"log1p", 5, JS_BUILTIN_MATH_LOG1P, 1},
+    {NULL, 0, 0, 0}
+};
 
 void js_builtin_cache_reset() {
     for (int i = 0; i < JS_BUILTIN_MAX; i++) js_builtin_cache[i] = ItemNull;
@@ -20475,33 +20627,8 @@ static Item js_get_math_object() {
             js_mark_non_writable(js_math_object, key);
             js_mark_non_configurable(js_math_object, key);
         }
-        // Populate Math methods as function properties for dynamic access (Math[m])
-        struct { const char* name; int id; int pc; } mm[] = {
-            {"abs", JS_BUILTIN_MATH_ABS, 1}, {"floor", JS_BUILTIN_MATH_FLOOR, 1},
-            {"ceil", JS_BUILTIN_MATH_CEIL, 1}, {"round", JS_BUILTIN_MATH_ROUND, 1},
-            {"sqrt", JS_BUILTIN_MATH_SQRT, 1}, {"pow", JS_BUILTIN_MATH_POW, 2},
-            {"min", JS_BUILTIN_MATH_MIN, 2}, {"max", JS_BUILTIN_MATH_MAX, 2},
-            {"log", JS_BUILTIN_MATH_LOG, 1}, {"log10", JS_BUILTIN_MATH_LOG10, 1},
-            {"log2", JS_BUILTIN_MATH_LOG2, 1}, {"exp", JS_BUILTIN_MATH_EXP, 1},
-            {"sin", JS_BUILTIN_MATH_SIN, 1}, {"cos", JS_BUILTIN_MATH_COS, 1},
-            {"tan", JS_BUILTIN_MATH_TAN, 1}, {"sign", JS_BUILTIN_MATH_SIGN, 1},
-            {"trunc", JS_BUILTIN_MATH_TRUNC, 1}, {"random", JS_BUILTIN_MATH_RANDOM, 0},
-            {"asin", JS_BUILTIN_MATH_ASIN, 1}, {"acos", JS_BUILTIN_MATH_ACOS, 1},
-            {"atan", JS_BUILTIN_MATH_ATAN, 1}, {"atan2", JS_BUILTIN_MATH_ATAN2, 2},
-            {"cbrt", JS_BUILTIN_MATH_CBR, 1}, {"hypot", JS_BUILTIN_MATH_HYPOT, 2},
-            {"clz32", JS_BUILTIN_MATH_CLZ32, 1}, {"fround", JS_BUILTIN_MATH_FROUND, 1},
-            {"imul", JS_BUILTIN_MATH_IMUL, 2}, {"sinh", JS_BUILTIN_MATH_SINH, 1},
-            {"cosh", JS_BUILTIN_MATH_COSH, 1}, {"tanh", JS_BUILTIN_MATH_TANH, 1},
-            {"asinh", JS_BUILTIN_MATH_ASINH, 1}, {"acosh", JS_BUILTIN_MATH_ACOSH, 1},
-            {"atanh", JS_BUILTIN_MATH_ATANH, 1}, {"expm1", JS_BUILTIN_MATH_EXPM1, 1},
-            {"log1p", JS_BUILTIN_MATH_LOG1P, 1},
-        };
-        for (int i = 0; i < (int)(sizeof(mm) / sizeof(mm[0])); i++) {
-            Item key = (Item){.item = s2it(heap_create_name(mm[i].name, strlen(mm[i].name)))};
-            Item fn = js_get_or_create_builtin(mm[i].id, mm[i].name, mm[i].pc);
-            js_property_set(js_math_object, key, fn);
-            js_mark_non_enumerable(js_math_object, key);
-        }
+        // Populate Math methods as function properties for dynamic access (Math[m]).
+        js_install_builtin_method_specs(js_math_object, JS_MATH_METHOD_SPECS);
     }
     return js_math_object;
 }
@@ -21126,49 +21253,10 @@ extern "C" Item js_math_property(Item prop_name) {
         return js_make_number(M_SQRT1_2);
     }
 
-    // Math methods as first-class function values
-    struct MathMethodEntry { const char* name; int len; int id; int pc; };
-    static const MathMethodEntry math_methods[] = {
-        {"abs", 3, JS_BUILTIN_MATH_ABS, 1},
-        {"floor", 5, JS_BUILTIN_MATH_FLOOR, 1},
-        {"ceil", 4, JS_BUILTIN_MATH_CEIL, 1},
-        {"round", 5, JS_BUILTIN_MATH_ROUND, 1},
-        {"sqrt", 4, JS_BUILTIN_MATH_SQRT, 1},
-        {"pow", 3, JS_BUILTIN_MATH_POW, 2},
-        {"min", 3, JS_BUILTIN_MATH_MIN, 2},
-        {"max", 3, JS_BUILTIN_MATH_MAX, 2},
-        {"log", 3, JS_BUILTIN_MATH_LOG, 1},
-        {"log10", 5, JS_BUILTIN_MATH_LOG10, 1},
-        {"log2", 4, JS_BUILTIN_MATH_LOG2, 1},
-        {"exp", 3, JS_BUILTIN_MATH_EXP, 1},
-        {"sin", 3, JS_BUILTIN_MATH_SIN, 1},
-        {"cos", 3, JS_BUILTIN_MATH_COS, 1},
-        {"tan", 3, JS_BUILTIN_MATH_TAN, 1},
-        {"sign", 4, JS_BUILTIN_MATH_SIGN, 1},
-        {"trunc", 5, JS_BUILTIN_MATH_TRUNC, 1},
-        {"random", 6, JS_BUILTIN_MATH_RANDOM, 0},
-        {"asin", 4, JS_BUILTIN_MATH_ASIN, 1},
-        {"acos", 4, JS_BUILTIN_MATH_ACOS, 1},
-        {"atan", 4, JS_BUILTIN_MATH_ATAN, 1},
-        {"atan2", 5, JS_BUILTIN_MATH_ATAN2, 2},
-        {"cbrt", 4, JS_BUILTIN_MATH_CBR, 1},
-        {"hypot", 5, JS_BUILTIN_MATH_HYPOT, 2},
-        {"clz32", 5, JS_BUILTIN_MATH_CLZ32, 1},
-        {"fround", 6, JS_BUILTIN_MATH_FROUND, 1},
-        {"imul", 4, JS_BUILTIN_MATH_IMUL, 2},
-        {"sinh", 4, JS_BUILTIN_MATH_SINH, 1},
-        {"cosh", 4, JS_BUILTIN_MATH_COSH, 1},
-        {"tanh", 4, JS_BUILTIN_MATH_TANH, 1},
-        {"asinh", 5, JS_BUILTIN_MATH_ASINH, 1},
-        {"acosh", 5, JS_BUILTIN_MATH_ACOSH, 1},
-        {"atanh", 5, JS_BUILTIN_MATH_ATANH, 1},
-        {"expm1", 5, JS_BUILTIN_MATH_EXPM1, 1},
-        {"log1p", 5, JS_BUILTIN_MATH_LOG1P, 1},
-    };
-    for (int i = 0; i < (int)(sizeof(math_methods) / sizeof(math_methods[0])); i++) {
-        if (prop->len == math_methods[i].len && strncmp(prop->chars, math_methods[i].name, prop->len) == 0) {
-            return js_get_or_create_builtin(math_methods[i].id, math_methods[i].name, math_methods[i].pc);
-        }
+    // Math methods as first-class function values.
+    {
+        Item method = js_lookup_builtin_method_spec(JS_MATH_METHOD_SPECS, prop->chars, (int)prop->len);
+        if (method.item != ItemNull.item) return method;
     }
 
     // fallback: resolve via prototype chain (Object.prototype properties)
@@ -25563,9 +25651,7 @@ void js_deep_batch_reset() {
     memset(js_async_contexts, 0, sizeof(js_async_contexts));
     js_async_context_count = 0;
     js_async_resolved_value = (Item){0};
-    // pending call args
-    js_pending_call_args = NULL;
-    js_pending_call_argc = 0;
+    js_reset_transient_call_state();
     // generator proto caches point into old heap — must reset
     js_generator_proto_depth1_cache = (Item){0};
     js_async_generator_proto_depth1_cache = (Item){0};
