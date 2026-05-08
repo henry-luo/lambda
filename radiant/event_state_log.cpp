@@ -6,6 +6,7 @@
 
 #include "event_state_log.hpp"
 #include "../lib/log.h"
+#include "../lambda/input/css/dom_element.hpp"
 
 #include <ctype.h>
 #include <errno.h>
@@ -442,6 +443,103 @@ void event_state_log_finish_record(EventStateLog* log, JsonWriter* w) {
 void event_state_log_emit_raw(EventStateLog* log, const char* json_line) {
     if (!event_state_log_enabled(log) || !json_line) return;
     if (clog_raw(log->category, json_line) != LOG_OK) g_event_log_dropped++;
+}
+
+static void build_node_path(const DomNode* node, char* buf, size_t buf_sz) {
+    if (!buf || buf_sz == 0) return;
+    buf[0] = '\0';
+    if (!node) return;
+
+    const DomNode* chain[64];
+    int depth = 0;
+    const DomNode* cur = node;
+    while (cur && depth < 64) {
+        chain[depth++] = cur;
+        cur = cur->parent;
+    }
+
+    size_t pos = 0;
+    for (int i = depth - 1; i >= 0; i--) {
+        const DomNode* n = chain[i];
+        const char* name = n->node_name();
+        if (!name || !name[0]) name = "node";
+
+        int sibling_index = 0;
+        if (n->parent) {
+            const DomNode* scan = n->parent->as_element()
+                ? n->parent->as_element()->first_child : nullptr;
+            while (scan && scan != n) {
+                if (strcmp(scan->node_name(), name) == 0) sibling_index++;
+                scan = scan->next_sibling;
+            }
+        }
+
+        int written = snprintf(buf + pos, pos < buf_sz ? buf_sz - pos : 0,
+            "%s%s.%d", pos == 0 ? "" : ".", name, sibling_index);
+        if (written < 0) break;
+        if ((size_t)written >= (pos < buf_sz ? buf_sz - pos : 0)) {
+            pos = buf_sz - 1;
+            break;
+        }
+        pos += (size_t)written;
+    }
+    buf[buf_sz - 1] = '\0';
+}
+
+static void build_stable_id(const DomNode* node, const char* path,
+                            char* buf, size_t buf_sz) {
+    if (!buf || buf_sz == 0) return;
+    buf[0] = '\0';
+    if (!node) return;
+
+    const DomElement* el = node->as_element();
+    if (el && el->id && el->id[0]) {
+        snprintf(buf, buf_sz, "id:%s", el->id);
+    } else if (node->source_line > 0) {
+        snprintf(buf, buf_sz, "src:line=%d:%s", node->source_line, node->node_name());
+    } else if (path && path[0]) {
+        snprintf(buf, buf_sz, "path:%s", path);
+    } else {
+        snprintf(buf, buf_sz, "node:%u", node->id);
+    }
+}
+
+void event_state_log_write_node_ref(JsonWriter* w, const char* key,
+                                    const DomNode* node) {
+    if (key) jw_key(w, key);
+    if (!node) {
+        jw_null(w);
+        return;
+    }
+
+    char path[256];
+    char stable_id[320];
+    build_node_path(node, path, sizeof(path));
+    build_stable_id(node, path, stable_id, sizeof(stable_id));
+
+    jw_obj_begin(w);
+        jw_kv_uint(w, "id", node->id);
+        jw_kv_str(w, "stable_id", stable_id);
+        if (path[0]) jw_kv_str(w, "path", path);
+        jw_kv_str(w, "tag", node->node_name());
+        if (node->source_line > 0) {
+            jw_key(w, "source");
+            jw_obj_begin(w);
+                jw_kv_int(w, "line", node->source_line);
+            jw_obj_end(w);
+        }
+
+        const DomElement* el = node->as_element();
+        if (el && el->id && el->id[0]) jw_kv_str(w, "author_id", el->id);
+        if (el && el->class_count > 0) {
+            jw_key(w, "classes");
+            jw_arr_begin(w);
+            for (int i = 0; i < el->class_count; i++) {
+                jw_str(w, el->class_names[i]);
+            }
+            jw_arr_end(w);
+        }
+    jw_obj_end(w);
 }
 
 void event_state_log_session_start(EventStateLog* log,

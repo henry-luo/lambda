@@ -74,6 +74,7 @@ typedef struct ViewElement ViewElement;
  * Note: This is a plain C++ struct, not a polymorphic class (no virtual methods)
  */
 struct DomNode {
+    uint32_t id;             // event/state log id, monotonic per document epoch
     DomNodeType node_type;   // Node type discriminator
     DomNode* parent;         // Parent node (nullptr at root)
     DomNode* next_sibling;   // Next sibling node (nullptr if last)
@@ -175,7 +176,7 @@ struct DomNode {
 
 protected:
     // Constructor (only callable by derived classes)
-    DomNode(DomNodeType type) : node_type(type), parent(nullptr),
+    DomNode(DomNodeType type) : id(0), node_type(type), parent(nullptr),
         next_sibling(nullptr), prev_sibling(nullptr), view_type(RDT_VIEW_NONE),
         x(0), y(0), width(0), height(0), source_line(0),
         layout_dirty(false), layout_height_contribution(0) {}

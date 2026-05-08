@@ -594,6 +594,7 @@ In debug builds, failed validation logs `state.invalid` to JSON and `log_error()
 - Reuse source position tracking where available (no URL embedded in element refs).
 - Add structural path generation using the existing render-map / source-path recorder concepts.
 - Create one serializer for `ElementRef` so event sim, WebDriver, debug logs, and state logs share the same identity format.
+- Scoped implementation note: the first implementation assigns ids through the normal document constructors. Some anonymous layout-only wrapper nodes are still manually allocated in layout code and can be swept later if replay/debugging needs identity for those generated wrappers too.
 
 ### Phase 3: Event cascade boundary
 

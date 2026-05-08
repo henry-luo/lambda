@@ -5825,6 +5825,9 @@ static bool layout_single_file(
                 jw_kv_int(&event_writer, "viewport_width", viewport_width);
                 jw_kv_int(&event_writer, "viewport_height", viewport_height);
                 jw_kv_bool(&event_writer, "full", true);
+                if (doc->view_tree && doc->view_tree->root) {
+                    event_state_log_write_node_ref(&event_writer, "root", doc->view_tree->root);
+                }
             jw_obj_end(&event_writer);
             event_state_log_finish_record(event_log, &event_writer);
         }

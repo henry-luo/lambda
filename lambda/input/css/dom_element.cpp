@@ -149,6 +149,13 @@ void dom_document_destroy(DomDocument* document) {
 // DOM Element Creation and Destruction
 // ============================================================================
 
+static uint32_t dom_document_alloc_node_id(DomDocument* doc) {
+    if (!doc) return 0;
+    uint32_t id = doc->next_node_id++;
+    if (id == 0) id = doc->next_node_id++;
+    return id;
+}
+
 DomElement* dom_element_create(DomDocument* doc, const char* tag_name, Element* native_element) {
     if (!doc || !tag_name) {
         return NULL;
@@ -175,6 +182,7 @@ bool dom_element_init(DomElement* element, DomDocument* doc, const char* tag_nam
 
     // NOTE: arena_calloc already zeros the memory, so we just need to initialize specific fields
     // Initialize base DomNode fields
+    ((DomNode*)element)->id = dom_document_alloc_node_id(doc);
     element->node_type = DOM_NODE_ELEMENT;
     element->parent = NULL;
     element->next_sibling = NULL;
@@ -2003,6 +2011,7 @@ DomText* dom_text_create(String* native_string, DomElement* parent_element) {
     }
 
     // Initialize base DomNode fields
+    text_node->id = dom_document_alloc_node_id(parent_element->doc);
     text_node->node_type = DOM_NODE_TEXT;
     text_node->parent = parent_element;
     text_node->next_sibling = nullptr;
@@ -2035,6 +2044,7 @@ DomText* dom_text_create_detached(String* native_string, DomDocument* doc) {
         return nullptr;
     }
 
+    text_node->id = dom_document_alloc_node_id(doc);
     text_node->node_type = DOM_NODE_TEXT;
     text_node->parent = nullptr;
     text_node->next_sibling = nullptr;
@@ -2068,6 +2078,7 @@ DomText* dom_text_create_symbol(const char* name, size_t len, DomElement* parent
     }
 
     // Initialize base DomNode fields
+    text_node->id = dom_document_alloc_node_id(parent_element->doc);
     text_node->node_type = DOM_NODE_TEXT;
     text_node->parent = parent_element;
     text_node->next_sibling = nullptr;
@@ -2375,6 +2386,7 @@ DomComment* dom_comment_create(Element* native_element, DomElement* parent_eleme
     }
 
     // Initialize base DomNode
+    comment_node->id = dom_document_alloc_node_id(parent_element->doc);
     comment_node->node_type = node_type;
     comment_node->parent = parent_element;
     comment_node->next_sibling = nullptr;
@@ -2438,6 +2450,7 @@ DomComment* dom_comment_create_detached(Element* native_element, DomDocument* do
         return nullptr;
     }
 
+    comment_node->id = dom_document_alloc_node_id(doc);
     comment_node->node_type = node_type;
     comment_node->parent = nullptr;
     comment_node->next_sibling = nullptr;

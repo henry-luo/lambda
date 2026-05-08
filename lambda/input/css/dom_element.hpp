@@ -63,6 +63,7 @@ struct DomDocument {
     Element* html_root;          // Parsed HTML tree in Mark notation (Lambda tree)
     DomElement* root;            // Root element of DOM tree (optional)
     int html_version;            // Detected HTML version - maps to HtmlVersion enum
+    uint32_t next_node_id;        // next DomNode id for event/state logs (0 reserved)
 
     // CSS stylesheets (for @font-face processing after UiContext init)
     struct CssStylesheet** stylesheets;  // Array of parsed stylesheets
@@ -135,6 +136,7 @@ struct DomDocument {
     // Constructor
     DomDocument() : input(nullptr), pool(nullptr), arena(nullptr),
                     url(nullptr), html_root(nullptr), root(nullptr), html_version(0),
+                    next_node_id(1),
                     stylesheets(nullptr), stylesheet_count(0), stylesheet_capacity(0),
                     view_tree(nullptr), state(nullptr),
                     given_scale(1.0f), scale(1.0f),

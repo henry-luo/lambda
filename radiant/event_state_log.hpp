@@ -81,6 +81,7 @@ const char* jw_finish(JsonWriter* w);
 /* ------------------------------------------------------------------ */
 
 typedef struct EventStateLog EventStateLog;
+struct DomNode;
 
 /* Open a per-document log file. doc_name is sanitized into the path:
  *   ./temp/events_${pid}_${sanitized_doc_name}.jsonl
@@ -135,6 +136,15 @@ void event_state_log_finish_record(EventStateLog* log, JsonWriter* w);
 /* Emit an already-fully-formed JSON object string as one line.
  * Useful for tests and for code paths that want full control. */
 void event_state_log_emit_raw(EventStateLog* log, const char* json_line);
+
+/* Serialize a layered node reference:
+ *   { "id": N, "stable_id": "...", "path": "...", "source": { ... }, ... }
+ * The document URL is intentionally omitted from source; it belongs to
+ * session_start. If key is non-null, writes it as an object property;
+ * otherwise writes the object as the next array/value item.
+ */
+void event_state_log_write_node_ref(JsonWriter* w, const char* key,
+                                    const struct DomNode* node);
 
 /* ------------------------------------------------------------------ */
 /* Convenience record helpers.                                         */
