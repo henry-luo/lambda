@@ -101,6 +101,14 @@ int dl_item_count(const DisplayList* dl) {
     return dl->count;
 }
 
+bool dl_contains_glyphs(const DisplayList* dl) {
+    if (!dl) return false;
+    for (int i = 0; i < dl->count; i++) {
+        if (dl->items[i].op == DL_DRAW_GLYPH) return true;
+    }
+    return false;
+}
+
 // ---------------------------------------------------------------------------
 // Recording: rdt_* mirrors
 // ---------------------------------------------------------------------------

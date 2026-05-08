@@ -447,6 +447,7 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
 // ---------------------------------------------------------------------------
 
 int dl_item_count(const DisplayList* dl);
+bool dl_contains_glyphs(const DisplayList* dl);
 
 #ifdef __cplusplus
 }

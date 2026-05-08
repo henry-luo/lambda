@@ -40,6 +40,14 @@ extern "C" __attribute__((weak)) void legacy_sync_from_dom_selection(struct Radi
     // weak fallback for test targets without state_store
 }
 
+__attribute__((weak)) bool tc_is_text_control(DomElement* /*elem*/) {
+    return false;
+}
+
+__attribute__((weak)) void tc_ensure_init(DomElement* /*elem*/) {
+    // weak fallback for DOM-only test targets without text_control.cpp.
+}
+
 // We do NOT include state_store.hpp here — it transitively pulls in GLFW
 // and the full Radiant render stack, which would force every unit test
 // linking dom_range.cpp to drag in the world. Instead we declare the two
