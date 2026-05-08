@@ -5126,8 +5126,8 @@ void rebuild_lambda_doc(UiContext* uicon) {
     const char* focus_tag = nullptr;
     const char* focus_class = nullptr;
     bool had_focus = false;
-    if (state && state->focus && state->focus->current) {
-        View* focused = state->focus->current;
+    if (state && focus_has_current(state)) {
+        View* focused = focus_get(state);
         if (focused->is_element()) {
             DomElement* felem = (DomElement*)focused;
             focus_tag = felem->tag_name;
@@ -5212,7 +5212,7 @@ void rebuild_lambda_doc(UiContext* uicon) {
     }
 
     // autofocus — if no focus was restored, scan the new tree for an autofocus input
-    if (state && (!state->focus || !state->focus->current) &&
+    if (state && !focus_has_current(state) &&
         doc->view_tree && doc->view_tree->root) {
         View* af = find_matching_input((View*)doc->view_tree->root, "input", nullptr);
         if (af && af->is_element()) {
@@ -5371,8 +5371,8 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
     const char* focus_tag = nullptr;
     const char* focus_class = nullptr;
     bool had_focus = false;
-    if (state && state->focus && state->focus->current) {
-        View* focused = state->focus->current;
+    if (state && focus_has_current(state)) {
+        View* focused = focus_get(state);
         if (focused->is_element()) {
             DomElement* felem = (DomElement*)focused;
             focus_tag = felem->tag_name;
@@ -5499,7 +5499,7 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
 
     // Phase 20: autofocus — if no focus was restored and new subtree contains an input,
     // check for autofocus attribute and set focus to it
-    if (state && (!state->focus || !state->focus->current)) {
+    if (state && !focus_has_current(state)) {
         for (int i = 0; i < result_count; i++) {
             if (new_doms[i]) {
                 View* af = find_matching_input((View*)new_doms[i], "input", nullptr);

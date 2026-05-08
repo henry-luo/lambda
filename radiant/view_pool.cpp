@@ -2380,40 +2380,49 @@ void print_caret_state(RadiantState* state, const char* output_path) {
 
     strbuf_append_str(buf, "\n================== CARET STATE ==================\n");
 
-    if (state->caret) {
-        CaretState* caret = state->caret;
+    View* caret_view = NULL;
+    int caret_offset = 0, caret_line = 0, caret_column = 0;
+    float caret_x = 0, caret_y = 0, caret_height = 0;
+    bool caret_visible = false;
+    if (caret_get_debug_snapshot(state, &caret_view, &caret_offset, &caret_line,
+            &caret_column, &caret_x, &caret_y, &caret_height, &caret_visible)) {
         strbuf_append_format(buf, "Caret:\n");
-        strbuf_append_format(buf, "  view: %p\n", (void*)caret->view);
-        if (caret->view) {
+        strbuf_append_format(buf, "  view: %p\n", (void*)caret_view);
+        if (caret_view) {
             strbuf_append_format(buf, "  view_type: %d (%s)\n",
-                caret->view->view_type, caret->view->view_name());
-            strbuf_append_format(buf, "  node_name: %s\n", caret->view->node_name() ? caret->view->node_name() : "(null)");
+                caret_view->view_type, caret_view->view_name());
+            strbuf_append_format(buf, "  node_name: %s\n", caret_view->node_name() ? caret_view->node_name() : "(null)");
         }
-        strbuf_append_format(buf, "  char_offset: %d\n", caret->char_offset);
-        strbuf_append_format(buf, "  line: %d, column: %d\n", caret->line, caret->column);
-        strbuf_append_format(buf, "  position: (%.1f, %.1f)\n", caret->x, caret->y);
-        strbuf_append_format(buf, "  height: %.1f\n", caret->height);
-        strbuf_append_format(buf, "  visible: %s\n", caret->visible ? "true" : "false");
+        strbuf_append_format(buf, "  char_offset: %d\n", caret_offset);
+        strbuf_append_format(buf, "  line: %d, column: %d\n", caret_line, caret_column);
+        strbuf_append_format(buf, "  position: (%.1f, %.1f)\n", caret_x, caret_y);
+        strbuf_append_format(buf, "  height: %.1f\n", caret_height);
+        strbuf_append_format(buf, "  visible: %s\n", caret_visible ? "true" : "false");
     } else {
         strbuf_append_str(buf, "Caret: (none)\n");
     }
 
     strbuf_append_str(buf, "\n");
 
-    if (state->selection) {
-        SelectionState* sel = state->selection;
+    View* selection_view = NULL;
+    bool selection_collapsed = true, selection_selecting = false;
+    int anchor_offset = 0, anchor_line = 0, focus_offset = 0, focus_line = 0;
+    float start_x = 0, start_y = 0, end_x = 0, end_y = 0;
+    if (selection_get_debug_snapshot(state, &selection_view, &selection_collapsed,
+            &selection_selecting, &anchor_offset, &anchor_line, &focus_offset,
+            &focus_line, &start_x, &start_y, &end_x, &end_y)) {
         strbuf_append_format(buf, "Selection:\n");
-        strbuf_append_format(buf, "  view: %p\n", (void*)sel->view);
-        if (sel->view) {
+        strbuf_append_format(buf, "  view: %p\n", (void*)selection_view);
+        if (selection_view) {
             strbuf_append_format(buf, "  view_type: %d (%s)\n",
-                sel->view->view_type, sel->view->view_name());
+                selection_view->view_type, selection_view->view_name());
         }
-        strbuf_append_format(buf, "  is_collapsed: %s\n", sel->is_collapsed ? "true" : "false");
-        strbuf_append_format(buf, "  is_selecting: %s\n", sel->is_selecting ? "true" : "false");
-        strbuf_append_format(buf, "  anchor_offset: %d (line: %d)\n", sel->anchor_offset, sel->anchor_line);
-        strbuf_append_format(buf, "  focus_offset: %d (line: %d)\n", sel->focus_offset, sel->focus_line);
-        strbuf_append_format(buf, "  start: (%.1f, %.1f)\n", sel->start_x, sel->start_y);
-        strbuf_append_format(buf, "  end: (%.1f, %.1f)\n", sel->end_x, sel->end_y);
+        strbuf_append_format(buf, "  is_collapsed: %s\n", selection_collapsed ? "true" : "false");
+        strbuf_append_format(buf, "  is_selecting: %s\n", selection_selecting ? "true" : "false");
+        strbuf_append_format(buf, "  anchor_offset: %d (line: %d)\n", anchor_offset, anchor_line);
+        strbuf_append_format(buf, "  focus_offset: %d (line: %d)\n", focus_offset, focus_line);
+        strbuf_append_format(buf, "  start: (%.1f, %.1f)\n", start_x, start_y);
+        strbuf_append_format(buf, "  end: (%.1f, %.1f)\n", end_x, end_y);
     } else {
         strbuf_append_str(buf, "Selection: (none)\n");
     }

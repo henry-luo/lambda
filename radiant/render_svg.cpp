@@ -2,6 +2,7 @@
 #include "render_backend.h"
 #include "view.hpp"
 #include "layout.hpp"
+#include "state_store.hpp"
 #include "font_face.h"
 #include "../lib/font/font.h"
 #include "../lib/utf.h"
@@ -1535,15 +1536,19 @@ void calculate_content_bounds(View* view, int* max_x, int* max_y) {
 
 // Render caret to SVG
 static void render_caret_svg(SvgRenderContext* ctx, RadiantState* state) {
-    if (!state || !state->caret || !state->caret->visible) return;
-    if (!state->caret->view) return;
-
-    CaretState* caret = state->caret;
-    View* view = caret->view;
+    View* view = NULL;
+    float caret_x = 0, caret_y = 0, caret_height = 0;
+    float iframe_offset_x = 0, iframe_offset_y = 0;
+    bool caret_visible = false;
+    if (!caret_get_render_snapshot(state, &view, NULL, &caret_x, &caret_y,
+            &caret_height, &iframe_offset_x, &iframe_offset_y, &caret_visible) ||
+        !caret_visible) {
+        return;
+    }
 
     // Calculate absolute position (CSS pixels)
-    float x = caret->x;
-    float y = caret->y;
+    float x = caret_x;
+    float y = caret_y;
 
     // Walk up the tree to get absolute coordinates
     View* parent = view;
@@ -1556,10 +1561,10 @@ static void render_caret_svg(SvgRenderContext* ctx, RadiantState* state) {
     }
 
     // Add iframe offset (if the caret is inside an iframe, parent chain stops at iframe doc root)
-    x += caret->iframe_offset_x;
-    y += caret->iframe_offset_y;
+    x += iframe_offset_x;
+    y += iframe_offset_y;
 
-    float height = caret->height;
+    float height = caret_height;
 
     // Render caret as a line
     svg_indent(ctx);

@@ -181,8 +181,8 @@ char* dom_range_to_string_ex(const DomRange* r, DomStringifyMode mode);
 // DomSelection — the document's editing selection (also the caret)
 // ============================================================================
 //
-// A collapsed DomSelection IS the caret. There is no separate caret object;
-// `caret_visible` / `caret_blink_time` apply iff `is_collapsed`.
+// A collapsed DomSelection IS the canonical caret boundary. Presentation
+// details live in the StateStore projection while legacy render paths remain.
 //
 // The spec allows multiple ranges, but every WPT test we need to pass and
 // every mainstream browser only uses 0 or 1. We support range_count ∈ {0,1}
@@ -204,19 +204,6 @@ typedef struct DomSelection {
     DomBoundary   focus;
     DomSelectionDirection direction;
     bool          is_collapsed;         // mirrors range[0].collapsed when present
-
-    // Caret presentation (only meaningful when is_collapsed == true)
-    bool          caret_visible;
-    uint64_t      caret_blink_time;
-    float         caret_height;         // resolved from anchor; 0 = stale
-    float         caret_prev_abs_x;     // dirty-rect repaint tracking
-    float         caret_prev_abs_y;
-    float         caret_prev_abs_height;
-
-    // Iframe nesting offset (set when a click/drag begins inside an iframe).
-    // Renderer adds these to absolute CSS coords before painting.
-    float         iframe_offset_x;
-    float         iframe_offset_y;
 
     // Legacy backing storage (Phase B consolidation). Allocated once in
     // `dom_selection_create()` and aliased onto `state->caret` /

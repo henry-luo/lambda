@@ -492,6 +492,40 @@ void caret_project_visual_from_selection(RadiantState* state, float x, float y, 
  */
 void selection_project_anchor_visual_from_caret(RadiantState* state, float x, float y, float height);
 void selection_project_focus_visual(RadiantState* state, float x, float y, float height);
+void selection_finish_active_gesture(RadiantState* state);
+
+/**
+ * Track mouse press inside an existing text selection until mouse-up decides
+ * whether to preserve or collapse the selection.
+ */
+void selection_press_in_range_begin(RadiantState* state, View* view, int offset);
+void selection_press_in_range_clear(RadiantState* state);
+bool selection_press_in_range_pending(RadiantState* state, View** out_view, int* out_offset);
+
+/**
+ * Mark dirty regions for a caret-only repaint when selective repaint is safe.
+ */
+bool caret_prepare_selective_repaint(RadiantState* state);
+
+/**
+ * Read the legacy-projection caret view/offset as a query-only snapshot.
+ */
+bool caret_get_position(RadiantState* state, View** out_view, int* out_offset);
+bool caret_get_offset(RadiantState* state, int* out_offset);
+View* caret_get_view(RadiantState* state);
+bool caret_get_visual_snapshot(RadiantState* state, float* out_x, float* out_y,
+                               float* out_height, float* out_iframe_offset_x,
+                               float* out_iframe_offset_y);
+bool caret_get_render_snapshot(RadiantState* state, View** out_view,
+                               int* out_offset, float* out_x, float* out_y,
+                               float* out_height, float* out_iframe_offset_x,
+                               float* out_iframe_offset_y, bool* out_visible);
+bool caret_get_debug_snapshot(RadiantState* state, View** out_view,
+                              int* out_offset, int* out_line, int* out_column,
+                              float* out_x, float* out_y, float* out_height,
+                              bool* out_visible);
+bool caret_is_visible(RadiantState* state);
+void caret_project_previous_visual_rect(RadiantState* state, float x, float y, float height);
 
 /**
  * Toggle caret visibility (for blink animation)
@@ -543,6 +577,39 @@ void selection_clear(RadiantState* state);
 bool selection_has(RadiantState* state);
 
 /**
+ * Check whether a live pointer selection gesture owns a non-collapsed range.
+ */
+bool selection_is_pointer_range_active(RadiantState* state);
+
+/**
+ * Snapshot the active pointer-selection anchor used by event drag handling.
+ */
+bool selection_get_pointer_anchor(RadiantState* state, View** out_anchor_view,
+                                  int* out_anchor_offset);
+
+/**
+ * Snapshot the current focus endpoint for drag fallback/geometry.
+ */
+bool selection_get_focus_snapshot(RadiantState* state, View** out_focus_view,
+                                  int* out_focus_offset,
+                                  float* out_iframe_offset_x,
+                                  float* out_iframe_offset_y,
+                                  bool* out_collapsed);
+bool selection_get_focus_visual_snapshot(RadiantState* state, float* out_x,
+                                         float* out_y, bool* out_collapsed);
+bool selection_get_iframe_offset(RadiantState* state, float* out_x, float* out_y);
+bool selection_get_anchor_range(RadiantState* state, View* anchor_view,
+                                int* out_start, int* out_end);
+bool selection_get_debug_snapshot(RadiantState* state, View** out_view,
+                                  bool* out_collapsed, bool* out_selecting,
+                                  int* out_anchor_offset, int* out_anchor_line,
+                                  int* out_focus_offset, int* out_focus_line,
+                                  float* out_start_x, float* out_start_y,
+                                  float* out_end_x, float* out_end_y);
+bool selection_get_extent_views(RadiantState* state, View** out_anchor_view,
+                                View** out_focus_view);
+
+/**
  * Get normalized selection range (start <= end)
  */
 void selection_get_range(RadiantState* state, int* start, int* end);
@@ -578,6 +645,8 @@ bool focus_restore(RadiantState* state);
  * Get the currently focused element
  */
 View* focus_get(RadiantState* state);
+bool focus_has_current(RadiantState* state);
+View* focus_get_visible(RadiantState* state);
 
 /**
  * Check if element or ancestor has focus

@@ -2443,6 +2443,148 @@ void selection_project_focus_visual(RadiantState* state, float x, float y, float
     state->needs_repaint = true;
 }
 
+void selection_finish_active_gesture(RadiantState* state) {
+    if (!state || !state->selection) return;
+    state->selection->is_selecting = false;
+}
+
+void selection_press_in_range_begin(RadiantState* state, View* view, int offset) {
+    if (!state) return;
+    state->text_selection_press_in_range = true;
+    state->text_selection_press_view = view;
+    state->text_selection_press_offset = offset;
+}
+
+void selection_press_in_range_clear(RadiantState* state) {
+    if (!state) return;
+    state->text_selection_press_in_range = false;
+    state->text_selection_press_view = NULL;
+    state->text_selection_press_offset = 0;
+}
+
+bool selection_press_in_range_pending(RadiantState* state, View** out_view, int* out_offset) {
+    if (!state || !state->text_selection_press_in_range) return false;
+    if (out_view) *out_view = state->text_selection_press_view;
+    if (out_offset) *out_offset = state->text_selection_press_offset;
+    return true;
+}
+
+bool caret_prepare_selective_repaint(RadiantState* state) {
+    if (!state || state->needs_reflow || state->dirty_tracker.full_repaint ||
+        dirty_has_regions(&state->dirty_tracker) || !state->caret || !state->caret->view) {
+        return false;
+    }
+
+    float caret_w = 5.0f;
+    if (state->caret->prev_abs_x >= 0) {
+        dirty_mark_rect(&state->dirty_tracker,
+            state->caret->prev_abs_x - 1, state->caret->prev_abs_y - 1,
+            caret_w + 2, state->caret->prev_abs_height + 2);
+    }
+    View* caret_parent = state->caret->view->parent;
+    if (caret_parent) {
+        dirty_mark_element(state, caret_parent);
+    }
+    return true;
+}
+
+bool caret_get_position(RadiantState* state, View** out_view, int* out_offset) {
+    if (out_view) *out_view = NULL;
+    if (out_offset) *out_offset = 0;
+    if (!state || !state->caret || !state->caret->view) return false;
+    if (out_view) *out_view = state->caret->view;
+    if (out_offset) *out_offset = state->caret->char_offset;
+    return true;
+}
+
+bool caret_get_offset(RadiantState* state, int* out_offset) {
+    if (out_offset) *out_offset = 0;
+    if (!state || !state->caret) return false;
+    if (out_offset) *out_offset = state->caret->char_offset;
+    return true;
+}
+
+View* caret_get_view(RadiantState* state) {
+    if (!state || !state->caret) return NULL;
+    return state->caret->view;
+}
+
+bool caret_get_visual_snapshot(RadiantState* state, float* out_x, float* out_y,
+                               float* out_height, float* out_iframe_offset_x,
+                               float* out_iframe_offset_y) {
+    if (out_x) *out_x = 0;
+    if (out_y) *out_y = 0;
+    if (out_height) *out_height = 0;
+    if (out_iframe_offset_x) *out_iframe_offset_x = 0;
+    if (out_iframe_offset_y) *out_iframe_offset_y = 0;
+    if (!state || !state->caret) return false;
+    if (out_x) *out_x = state->caret->x;
+    if (out_y) *out_y = state->caret->y;
+    if (out_height) *out_height = state->caret->height;
+    if (out_iframe_offset_x) *out_iframe_offset_x = state->caret->iframe_offset_x;
+    if (out_iframe_offset_y) *out_iframe_offset_y = state->caret->iframe_offset_y;
+    return true;
+}
+
+bool caret_get_render_snapshot(RadiantState* state, View** out_view,
+                               int* out_offset, float* out_x, float* out_y,
+                               float* out_height, float* out_iframe_offset_x,
+                               float* out_iframe_offset_y, bool* out_visible) {
+    if (out_view) *out_view = NULL;
+    if (out_offset) *out_offset = 0;
+    if (out_x) *out_x = 0;
+    if (out_y) *out_y = 0;
+    if (out_height) *out_height = 0;
+    if (out_iframe_offset_x) *out_iframe_offset_x = 0;
+    if (out_iframe_offset_y) *out_iframe_offset_y = 0;
+    if (out_visible) *out_visible = false;
+    if (!state || !state->caret) return false;
+    if (out_view) *out_view = state->caret->view;
+    if (out_offset) *out_offset = state->caret->char_offset;
+    if (out_x) *out_x = state->caret->x;
+    if (out_y) *out_y = state->caret->y;
+    if (out_height) *out_height = state->caret->height;
+    if (out_iframe_offset_x) *out_iframe_offset_x = state->caret->iframe_offset_x;
+    if (out_iframe_offset_y) *out_iframe_offset_y = state->caret->iframe_offset_y;
+    if (out_visible) *out_visible = state->caret->visible;
+    return state->caret->view != NULL;
+}
+
+bool caret_get_debug_snapshot(RadiantState* state, View** out_view,
+                              int* out_offset, int* out_line, int* out_column,
+                              float* out_x, float* out_y, float* out_height,
+                              bool* out_visible) {
+    if (out_view) *out_view = NULL;
+    if (out_offset) *out_offset = 0;
+    if (out_line) *out_line = 0;
+    if (out_column) *out_column = 0;
+    if (out_x) *out_x = 0;
+    if (out_y) *out_y = 0;
+    if (out_height) *out_height = 0;
+    if (out_visible) *out_visible = false;
+    if (!state || !state->caret) return false;
+    if (out_view) *out_view = state->caret->view;
+    if (out_offset) *out_offset = state->caret->char_offset;
+    if (out_line) *out_line = state->caret->line;
+    if (out_column) *out_column = state->caret->column;
+    if (out_x) *out_x = state->caret->x;
+    if (out_y) *out_y = state->caret->y;
+    if (out_height) *out_height = state->caret->height;
+    if (out_visible) *out_visible = state->caret->visible;
+    return true;
+}
+
+bool caret_is_visible(RadiantState* state) {
+    return state && state->caret && state->caret->visible;
+}
+
+void caret_project_previous_visual_rect(RadiantState* state, float x, float y, float height) {
+    if (!state || !state->caret) return;
+    state->caret->prev_abs_x = x;
+    state->caret->prev_abs_y = y;
+    state->caret->prev_abs_height = height;
+}
+
 void caret_toggle_blink(RadiantState* state) {
     if (!state || !state->caret) return;
 
@@ -2871,6 +3013,118 @@ bool selection_has(RadiantState* state) {
     return !state->selection->is_collapsed;
 }
 
+bool selection_is_pointer_range_active(RadiantState* state) {
+    if (!state || !state->selection) return false;
+    return state->selection->is_selecting && !state->selection->is_collapsed;
+}
+
+bool selection_get_pointer_anchor(RadiantState* state, View** out_anchor_view,
+                                  int* out_anchor_offset) {
+    if (out_anchor_view) *out_anchor_view = NULL;
+    if (out_anchor_offset) *out_anchor_offset = 0;
+    if (!state || !state->selection || !state->selection->is_selecting) return false;
+    if (out_anchor_view) *out_anchor_view = state->selection->anchor_view;
+    if (out_anchor_offset) *out_anchor_offset = state->selection->anchor_offset;
+    return true;
+}
+
+bool selection_get_focus_snapshot(RadiantState* state, View** out_focus_view,
+                                  int* out_focus_offset,
+                                  float* out_iframe_offset_x,
+                                  float* out_iframe_offset_y,
+                                  bool* out_collapsed) {
+    if (out_focus_view) *out_focus_view = NULL;
+    if (out_focus_offset) *out_focus_offset = 0;
+    if (out_iframe_offset_x) *out_iframe_offset_x = 0;
+    if (out_iframe_offset_y) *out_iframe_offset_y = 0;
+    if (out_collapsed) *out_collapsed = true;
+    if (!state || !state->selection) return false;
+
+    if (out_focus_view) *out_focus_view = state->selection->focus_view;
+    if (out_focus_offset) *out_focus_offset = state->selection->focus_offset;
+    if (out_iframe_offset_x) *out_iframe_offset_x = state->selection->iframe_offset_x;
+    if (out_iframe_offset_y) *out_iframe_offset_y = state->selection->iframe_offset_y;
+    if (out_collapsed) *out_collapsed = state->selection->is_collapsed;
+    return true;
+}
+
+bool selection_get_focus_visual_snapshot(RadiantState* state, float* out_x,
+                                         float* out_y, bool* out_collapsed) {
+    if (out_x) *out_x = 0;
+    if (out_y) *out_y = 0;
+    if (out_collapsed) *out_collapsed = true;
+    if (!state || !state->selection) return false;
+    if (out_x) *out_x = state->selection->end_x;
+    if (out_y) *out_y = state->selection->end_y;
+    if (out_collapsed) *out_collapsed = state->selection->is_collapsed;
+    return true;
+}
+
+bool selection_get_iframe_offset(RadiantState* state, float* out_x, float* out_y) {
+    if (out_x) *out_x = 0;
+    if (out_y) *out_y = 0;
+    if (!state || !state->selection) return false;
+    if (out_x) *out_x = state->selection->iframe_offset_x;
+    if (out_y) *out_y = state->selection->iframe_offset_y;
+    return true;
+}
+
+bool selection_get_anchor_range(RadiantState* state, View* anchor_view,
+                                int* out_start, int* out_end) {
+    if (out_start) *out_start = 0;
+    if (out_end) *out_end = 0;
+    if (!state || !state->selection || !anchor_view || state->selection->is_collapsed ||
+        state->selection->anchor_view != anchor_view) {
+        return false;
+    }
+    selection_get_range(state, out_start, out_end);
+    return true;
+}
+
+bool selection_get_debug_snapshot(RadiantState* state, View** out_view,
+                                  bool* out_collapsed, bool* out_selecting,
+                                  int* out_anchor_offset, int* out_anchor_line,
+                                  int* out_focus_offset, int* out_focus_line,
+                                  float* out_start_x, float* out_start_y,
+                                  float* out_end_x, float* out_end_y) {
+    if (out_view) *out_view = NULL;
+    if (out_collapsed) *out_collapsed = true;
+    if (out_selecting) *out_selecting = false;
+    if (out_anchor_offset) *out_anchor_offset = 0;
+    if (out_anchor_line) *out_anchor_line = 0;
+    if (out_focus_offset) *out_focus_offset = 0;
+    if (out_focus_line) *out_focus_line = 0;
+    if (out_start_x) *out_start_x = 0;
+    if (out_start_y) *out_start_y = 0;
+    if (out_end_x) *out_end_x = 0;
+    if (out_end_y) *out_end_y = 0;
+    if (!state || !state->selection) return false;
+
+    SelectionState* sel = state->selection;
+    if (out_view) *out_view = sel->view;
+    if (out_collapsed) *out_collapsed = sel->is_collapsed;
+    if (out_selecting) *out_selecting = sel->is_selecting;
+    if (out_anchor_offset) *out_anchor_offset = sel->anchor_offset;
+    if (out_anchor_line) *out_anchor_line = sel->anchor_line;
+    if (out_focus_offset) *out_focus_offset = sel->focus_offset;
+    if (out_focus_line) *out_focus_line = sel->focus_line;
+    if (out_start_x) *out_start_x = sel->start_x;
+    if (out_start_y) *out_start_y = sel->start_y;
+    if (out_end_x) *out_end_x = sel->end_x;
+    if (out_end_y) *out_end_y = sel->end_y;
+    return true;
+}
+
+bool selection_get_extent_views(RadiantState* state, View** out_anchor_view,
+                                View** out_focus_view) {
+    if (out_anchor_view) *out_anchor_view = NULL;
+    if (out_focus_view) *out_focus_view = NULL;
+    if (!state || !state->selection || state->selection->is_collapsed) return false;
+    if (out_anchor_view) *out_anchor_view = state->selection->anchor_view;
+    if (out_focus_view) *out_focus_view = state->selection->focus_view;
+    return state->selection->anchor_view && state->selection->focus_view;
+}
+
 void selection_get_range(RadiantState* state, int* start, int* end) {
     if (!state || !state->selection || !start || !end) return;
 
@@ -3112,6 +3366,15 @@ bool focus_restore(RadiantState* state) {
 
 View* focus_get(RadiantState* state) {
     if (!state || !state->focus) return NULL;
+    return state->focus->current;
+}
+
+bool focus_has_current(RadiantState* state) {
+    return focus_get(state) != NULL;
+}
+
+View* focus_get_visible(RadiantState* state) {
+    if (!state || !state->focus || !state->focus->focus_visible) return NULL;
     return state->focus->current;
 }
 

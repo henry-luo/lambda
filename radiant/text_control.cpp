@@ -348,7 +348,8 @@ void tc_sync_legacy_to_form(DomElement* elem, RadiantState* state) {
         f->selection_direction = (a <= b) ? 1 : 2;
     } else {
         // Collapsed or no selection
-        int caret_byte = state->caret ? state->caret->char_offset : 0;
+        int caret_byte = 0;
+        caret_get_offset(state, &caret_byte);
         if (caret_byte < 0) caret_byte = 0;
         if ((uint32_t)caret_byte > blen) caret_byte = (int)blen;
         uint32_t u16 = tc_utf8_to_utf16_offset(f->current_value, blen, (uint32_t)caret_byte);
