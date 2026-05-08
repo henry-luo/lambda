@@ -1,4 +1,5 @@
 #include "state_store.hpp"
+#include "state_store_internal.hpp"
 #include "animation.h"
 #include "dom_range.hpp"
 #include "dom_range_resolver.hpp"
@@ -236,9 +237,8 @@ extern "C" struct DomSelection* dom_range_state_selection(RadiantState* state) {
 
 // ----------------------------------------------------------------------------
 // Selection/caret machine helpers.
-// DomSelection is the canonical representation; legacy CaretState and
-// SelectionState are projections kept for render/event call sites that still
-// read those structs directly.
+// DomSelection is the canonical representation; CaretState and SelectionState
+// are private projections kept for render/event compatibility.
 // ----------------------------------------------------------------------------
 static DomSelection* sync_ensure_selection(RadiantState* state) {
     if (!state) return NULL;
@@ -295,31 +295,26 @@ static void text_control_sync_selection(RadiantState* state, View* view) {
     tc_sync_legacy_to_form((DomElement*)view, state);
 }
 
-// Phase B (consolidation) — called from `dom_selection_create` (in
-// dom_range.cpp) immediately after the DomSelection is allocated. Allocates
-// the embedded CaretState and SelectionState into the same arena and
-// aliases `state->caret` / `state->selection` onto them. Result: a single
-// owner for the legacy interactive-state structs (DomSelection), no more
-// lazy allocations scattered through caret_*/selection_* entry points.
+// Called from `dom_selection_create` (in dom_range.cpp) immediately after the
+// DomSelection is allocated. Ensures StateStore projection storage exists so
+// older renderer/event paths can keep using StateStore helper APIs while
+// DomSelection remains canonical.
 extern "C" void dom_selection_attach_legacy_storage(DomSelection* s,
                                                     RadiantState* state) {
     if (!s || !state || !state->arena) return;
-    if (!s->caret) {
-        s->caret = (CaretState*)arena_alloc(state->arena, sizeof(CaretState));
-        if (s->caret) {
-            memset(s->caret, 0, sizeof(CaretState));
-            s->caret->prev_abs_x = -1;  // Phase 19: not yet rendered
+    if (!state->caret) {
+        state->caret = (CaretState*)arena_alloc(state->arena, sizeof(CaretState));
+        if (state->caret) {
+            memset(state->caret, 0, sizeof(CaretState));
+            state->caret->prev_abs_x = -1;  // not yet rendered
         }
     }
-    if (!s->selection) {
-        s->selection = (SelectionState*)arena_alloc(state->arena, sizeof(SelectionState));
-        if (s->selection) {
-            memset(s->selection, 0, sizeof(SelectionState));
+    if (!state->selection) {
+        state->selection = (SelectionState*)arena_alloc(state->arena, sizeof(SelectionState));
+        if (state->selection) {
+            memset(state->selection, 0, sizeof(SelectionState));
         }
     }
-    // Alias — single source of truth for the legacy field-access syntax.
-    state->caret     = s->caret;
-    state->selection = s->selection;
 }
 
 // View* in the legacy API IS a DomNode* (typedef in dom_node.hpp).
@@ -441,12 +436,12 @@ extern "C" void dom_selection_sync_from_legacy_caret(RadiantState* state) {
     if (!state || !state->caret) return;
     DomSelection* ds = sync_ensure_selection(state);
     if (!ds) return;
-    // During an active drag-selection (or any non-collapsed legacy selection
-    // whose focus matches the caret), the legacy caret_set() call is just
+    // During an active drag-selection (or any non-collapsed projection
+    // whose focus matches the caret), the caret_set() call is just
     // moving the focus end of the selection — NOT collapsing it. Mirroring
     // it as `collapse(...)` here would wipe out the selection that
     // `selection_extend()` just synced into DomSelection a moment ago.
-    // In that case skip the sync; the legacy SelectionState→DomSelection
+    // In that case skip the sync; the projection-to-DomSelection
     // mirror in selection_extend already updated the focus boundary.
     SelectionState* sel = state->selection;
     if (sel && !sel->is_collapsed && sel->is_selecting &&
@@ -489,12 +484,11 @@ static void caret_local_from_absolute(View* view, float abs_x, float abs_y,
 }
 
 // ---------------------------------------------------------------------------
-// Phase 6 — DomSelection → legacy mirroring (single-source-of-truth direction).
+// DomSelection → StateStore projection mirroring.
 //
-// The renderer (radiant/render.cpp) and event code (radiant/event.cpp) still
-// read `state->selection` / `state->caret`. When the spec algorithms or JS
-// bindings mutate `state->dom_selection` we must keep the legacy structs in
-// sync so the visual selection reflects the change. Layout cache fields
+// When the spec algorithms or JS bindings mutate `state->dom_selection`, keep
+// the compatibility projections in sync so visual caret/selection helpers
+// reflect the change. Layout cache fields
 // (caret x/y/height) are derived via the resolver. View* IS DomNode*, so
 // the node→view conversion is just a cast; UTF-16→UTF-8 for text offsets.
 // ---------------------------------------------------------------------------
@@ -534,9 +528,9 @@ extern "C" void legacy_sync_from_dom_selection(RadiantState* state) {
     to_legacy(ds->anchor, &anc_view, &anc_off);
     to_legacy(ds->focus,  &foc_view, &foc_off);
 
-    // Phase B: legacy storage is owned by DomSelection (allocated in
-    // dom_selection_create via dom_selection_attach_legacy_storage), so
-    // state->caret / state->selection are guaranteed non-null here.
+    // Projection storage is allocated during dom_selection_create via
+    // dom_selection_attach_legacy_storage, so state->caret / state->selection
+    // are expected to be non-null here.
     if (!state->selection || !state->caret) {
         state->dom_selection_sync_depth--;
         return;
@@ -1235,7 +1229,7 @@ void caret_set(RadiantState* state, View* view, int char_offset) {
 
     DomSelection* selection = sync_ensure_selection(state);
     if (!selection || !state->caret) {
-        log_error("caret_set: failed to ensure DomSelection / legacy storage");
+        log_error("caret_set: failed to ensure DomSelection / projection storage");
         return;
     }
 
@@ -1253,7 +1247,7 @@ void caret_set(RadiantState* state, View* view, int char_offset) {
     }
 
     if (selection_is_text_control_view(view)) {
-        // Canonical: update DomSelection only, then sync legacy projections
+        // Canonical: update DomSelection only, then sync projections.
         DomSelection* sel = selection;
         DomBoundary boundary = boundary_from_legacy(view, char_offset);
         const char* exc = NULL;
@@ -2443,6 +2437,152 @@ void selection_project_focus_visual(RadiantState* state, float x, float y, float
     state->needs_repaint = true;
 }
 
+void selection_finish_active_gesture(RadiantState* state) {
+    if (!state || !state->selection) return;
+    state->selection->is_selecting = false;
+}
+
+void selection_press_in_range_begin(RadiantState* state, View* view, int offset) {
+    if (!state) return;
+    state->text_selection_press_in_range = true;
+    state->text_selection_press_view = view;
+    state->text_selection_press_offset = offset;
+}
+
+void selection_press_in_range_clear(RadiantState* state) {
+    if (!state) return;
+    state->text_selection_press_in_range = false;
+    state->text_selection_press_view = NULL;
+    state->text_selection_press_offset = 0;
+}
+
+bool selection_press_in_range_pending(RadiantState* state, View** out_view, int* out_offset) {
+    if (!state || !state->text_selection_press_in_range) return false;
+    if (out_view) *out_view = state->text_selection_press_view;
+    if (out_offset) *out_offset = state->text_selection_press_offset;
+    return true;
+}
+
+bool caret_prepare_selective_repaint(RadiantState* state) {
+    if (!state || state->needs_reflow || state->dirty_tracker.full_repaint ||
+        dirty_has_regions(&state->dirty_tracker) || !state->caret || !state->caret->view) {
+        return false;
+    }
+
+    float caret_w = 5.0f;
+    if (state->caret->prev_abs_x >= 0) {
+        dirty_mark_rect(&state->dirty_tracker,
+            state->caret->prev_abs_x - 1, state->caret->prev_abs_y - 1,
+            caret_w + 2, state->caret->prev_abs_height + 2);
+    }
+    View* caret_parent = state->caret->view->parent;
+    if (caret_parent) {
+        dirty_mark_element(state, caret_parent);
+    }
+    return true;
+}
+
+bool caret_get_position(RadiantState* state, View** out_view, int* out_offset) {
+    if (out_view) *out_view = NULL;
+    if (out_offset) *out_offset = 0;
+    if (!state || !state->caret || !state->caret->view) return false;
+    if (out_view) *out_view = state->caret->view;
+    if (out_offset) *out_offset = state->caret->char_offset;
+    return true;
+}
+
+bool caret_get_offset(RadiantState* state, int* out_offset) {
+    if (out_offset) *out_offset = 0;
+    if (!state || !state->caret) return false;
+    if (out_offset) *out_offset = state->caret->char_offset;
+    return true;
+}
+
+View* caret_get_view(RadiantState* state) {
+    if (!state || !state->caret) return NULL;
+    return state->caret->view;
+}
+
+bool caret_get_visual_snapshot(RadiantState* state, float* out_x, float* out_y,
+                               float* out_height, float* out_iframe_offset_x,
+                               float* out_iframe_offset_y) {
+    if (out_x) *out_x = 0;
+    if (out_y) *out_y = 0;
+    if (out_height) *out_height = 0;
+    if (out_iframe_offset_x) *out_iframe_offset_x = 0;
+    if (out_iframe_offset_y) *out_iframe_offset_y = 0;
+    if (!state || !state->caret) return false;
+    if (out_x) *out_x = state->caret->x;
+    if (out_y) *out_y = state->caret->y;
+    if (out_height) *out_height = state->caret->height;
+    if (out_iframe_offset_x) *out_iframe_offset_x = state->caret->iframe_offset_x;
+    if (out_iframe_offset_y) *out_iframe_offset_y = state->caret->iframe_offset_y;
+    return true;
+}
+
+bool caret_get_render_snapshot(RadiantState* state, View** out_view,
+                               int* out_offset, float* out_x, float* out_y,
+                               float* out_height, float* out_iframe_offset_x,
+                               float* out_iframe_offset_y, bool* out_visible) {
+    if (out_view) *out_view = NULL;
+    if (out_offset) *out_offset = 0;
+    if (out_x) *out_x = 0;
+    if (out_y) *out_y = 0;
+    if (out_height) *out_height = 0;
+    if (out_iframe_offset_x) *out_iframe_offset_x = 0;
+    if (out_iframe_offset_y) *out_iframe_offset_y = 0;
+    if (out_visible) *out_visible = false;
+    if (!state || !state->caret) return false;
+    if (out_view) *out_view = state->caret->view;
+    if (out_offset) *out_offset = state->caret->char_offset;
+    if (out_x) *out_x = state->caret->x;
+    if (out_y) *out_y = state->caret->y;
+    if (out_height) *out_height = state->caret->height;
+    if (out_iframe_offset_x) *out_iframe_offset_x = state->caret->iframe_offset_x;
+    if (out_iframe_offset_y) *out_iframe_offset_y = state->caret->iframe_offset_y;
+    if (out_visible) *out_visible = state->caret->visible;
+    return state->caret->view != NULL;
+}
+
+bool caret_get_debug_snapshot(RadiantState* state, View** out_view,
+                              int* out_offset, int* out_line, int* out_column,
+                              float* out_x, float* out_y, float* out_height,
+                              bool* out_visible) {
+    if (out_view) *out_view = NULL;
+    if (out_offset) *out_offset = 0;
+    if (out_line) *out_line = 0;
+    if (out_column) *out_column = 0;
+    if (out_x) *out_x = 0;
+    if (out_y) *out_y = 0;
+    if (out_height) *out_height = 0;
+    if (out_visible) *out_visible = false;
+    if (!state || !state->caret) return false;
+    if (out_view) *out_view = state->caret->view;
+    if (out_offset) *out_offset = state->caret->char_offset;
+    if (out_line) *out_line = state->caret->line;
+    if (out_column) *out_column = state->caret->column;
+    if (out_x) *out_x = state->caret->x;
+    if (out_y) *out_y = state->caret->y;
+    if (out_height) *out_height = state->caret->height;
+    if (out_visible) *out_visible = state->caret->visible;
+    return true;
+}
+
+bool caret_has_projection(RadiantState* state) {
+    return state && state->caret != NULL;
+}
+
+bool caret_is_visible(RadiantState* state) {
+    return state && state->caret && state->caret->visible;
+}
+
+void caret_project_previous_visual_rect(RadiantState* state, float x, float y, float height) {
+    if (!state || !state->caret) return;
+    state->caret->prev_abs_x = x;
+    state->caret->prev_abs_y = y;
+    state->caret->prev_abs_height = height;
+}
+
 void caret_toggle_blink(RadiantState* state) {
     if (!state || !state->caret) return;
 
@@ -2471,12 +2611,12 @@ void selection_start(RadiantState* state, View* view, int char_offset) {
 
     DomSelection* selection = sync_ensure_selection(state);
     if (!selection || !state->selection) {
-        log_error("selection_start: failed to ensure DomSelection / legacy storage");
+        log_error("selection_start: failed to ensure DomSelection / projection storage");
         return;
     }
 
     if (selection_is_text_control_view(view)) {
-        // Canonical: update DomSelection only, then sync legacy projections
+        // Canonical: update DomSelection only, then sync projections.
         DomSelection* sel = selection;
         DomBoundary boundary = boundary_from_legacy(view, char_offset);
         const char* exc = NULL;
@@ -2532,7 +2672,7 @@ void selection_extend(RadiantState* state, int char_offset) {
     View* focus_view = sel->focus_view ? sel->focus_view : sel->anchor_view;
     if (!focus_view && state->caret) focus_view = state->caret->view;
     if (selection_is_text_control_view(focus_view)) {
-        // Canonical: update DomSelection only, then sync legacy projections
+        // Canonical: update DomSelection only, then sync projections.
         DomBoundary focus = boundary_from_legacy(focus_view, char_offset);
         const char* exc = NULL;
         if (!selection_extend_dom_to_focus(selection, &focus, &exc)) {
@@ -2585,7 +2725,7 @@ void selection_extend_to_view(RadiantState* state, View* view, int char_offset) 
     bool was_selecting = state->selection->is_selecting;
 
     if (selection_is_text_control_view(view)) {
-        // Canonical: update DomSelection only, then sync legacy projections
+        // Canonical: update DomSelection only, then sync projections.
         DomBoundary focus = boundary_from_legacy(view, char_offset);
         const char* exc = NULL;
         if (!selection_extend_dom_to_focus(selection, &focus, &exc)) {
@@ -2641,7 +2781,7 @@ void selection_set(RadiantState* state, View* view, int anchor_offset, int focus
     if (!selection || !state->selection) return;
 
     if (selection_is_text_control_view(view)) {
-        // Canonical: update DomSelection only, then sync legacy projections
+        // Canonical: update DomSelection only, then sync projections.
         DomBoundary anchor = boundary_from_legacy(view, anchor_offset);
         DomBoundary focus = boundary_from_legacy(view, focus_offset);
         const char* exc = NULL;
@@ -2692,7 +2832,7 @@ void selection_select_all(RadiantState* state) {
 
     SelectionState* sel = state->selection;
     if (selection_is_text_control_view(sel->view)) {
-        // Canonical: update DomSelection only, then sync legacy projections
+        // Canonical: update DomSelection only, then sync projections.
         DomElement* elem = (DomElement*)sel->view;
         tc_ensure_init(elem);
         uint32_t len = 0;
@@ -2760,7 +2900,7 @@ void selection_collapse(RadiantState* state, bool to_start) {
     if (!selection || !state->selection) return;
 
     if (selection_is_text_control_view(state->selection->view)) {
-        // Canonical: update DomSelection only, then sync legacy projections
+        // Canonical: update DomSelection only, then sync projections.
         SelectionState* sel = state->selection;
         int pos = to_start ?
             (sel->anchor_offset < sel->focus_offset ? sel->anchor_offset : sel->focus_offset) :
@@ -2822,7 +2962,7 @@ void selection_clear(RadiantState* state) {
     View* caret_view = state->caret ? state->caret->view : NULL;
     int caret_offset = state->caret ? state->caret->char_offset : 0;
     if (selection_is_text_control_view(caret_view)) {
-        // Canonical: update DomSelection only, then sync legacy projections
+        // Canonical: update DomSelection only, then sync projections.
         DomBoundary boundary = boundary_from_legacy(caret_view, caret_offset);
         const char* exc = NULL;
         if (boundary.node) {
@@ -2869,6 +3009,122 @@ void selection_clear(RadiantState* state) {
 bool selection_has(RadiantState* state) {
     if (!state || !state->selection) return false;
     return !state->selection->is_collapsed;
+}
+
+bool selection_is_pointer_range_active(RadiantState* state) {
+    if (!state || !state->selection) return false;
+    return state->selection->is_selecting && !state->selection->is_collapsed;
+}
+
+bool selection_get_pointer_anchor(RadiantState* state, View** out_anchor_view,
+                                  int* out_anchor_offset) {
+    if (out_anchor_view) *out_anchor_view = NULL;
+    if (out_anchor_offset) *out_anchor_offset = 0;
+    if (!state || !state->selection || !state->selection->is_selecting) return false;
+    if (out_anchor_view) *out_anchor_view = state->selection->anchor_view;
+    if (out_anchor_offset) *out_anchor_offset = state->selection->anchor_offset;
+    return true;
+}
+
+bool selection_get_focus_snapshot(RadiantState* state, View** out_focus_view,
+                                  int* out_focus_offset,
+                                  float* out_iframe_offset_x,
+                                  float* out_iframe_offset_y,
+                                  bool* out_collapsed) {
+    if (out_focus_view) *out_focus_view = NULL;
+    if (out_focus_offset) *out_focus_offset = 0;
+    if (out_iframe_offset_x) *out_iframe_offset_x = 0;
+    if (out_iframe_offset_y) *out_iframe_offset_y = 0;
+    if (out_collapsed) *out_collapsed = true;
+    if (!state || !state->selection) return false;
+
+    if (out_focus_view) *out_focus_view = state->selection->focus_view;
+    if (out_focus_offset) *out_focus_offset = state->selection->focus_offset;
+    if (out_iframe_offset_x) *out_iframe_offset_x = state->selection->iframe_offset_x;
+    if (out_iframe_offset_y) *out_iframe_offset_y = state->selection->iframe_offset_y;
+    if (out_collapsed) *out_collapsed = state->selection->is_collapsed;
+    return true;
+}
+
+bool selection_get_focus_visual_snapshot(RadiantState* state, float* out_x,
+                                         float* out_y, bool* out_collapsed) {
+    if (out_x) *out_x = 0;
+    if (out_y) *out_y = 0;
+    if (out_collapsed) *out_collapsed = true;
+    if (!state || !state->selection) return false;
+    if (out_x) *out_x = state->selection->end_x;
+    if (out_y) *out_y = state->selection->end_y;
+    if (out_collapsed) *out_collapsed = state->selection->is_collapsed;
+    return true;
+}
+
+bool selection_get_iframe_offset(RadiantState* state, float* out_x, float* out_y) {
+    if (out_x) *out_x = 0;
+    if (out_y) *out_y = 0;
+    if (!state || !state->selection) return false;
+    if (out_x) *out_x = state->selection->iframe_offset_x;
+    if (out_y) *out_y = state->selection->iframe_offset_y;
+    return true;
+}
+
+bool selection_get_anchor_range(RadiantState* state, View* anchor_view,
+                                int* out_start, int* out_end) {
+    if (out_start) *out_start = 0;
+    if (out_end) *out_end = 0;
+    if (!state || !state->selection || !anchor_view || state->selection->is_collapsed ||
+        state->selection->anchor_view != anchor_view) {
+        return false;
+    }
+    selection_get_range(state, out_start, out_end);
+    return true;
+}
+
+bool selection_get_debug_snapshot(RadiantState* state, View** out_view,
+                                  bool* out_collapsed, bool* out_selecting,
+                                  int* out_anchor_offset, int* out_anchor_line,
+                                  int* out_focus_offset, int* out_focus_line,
+                                  float* out_start_x, float* out_start_y,
+                                  float* out_end_x, float* out_end_y) {
+    if (out_view) *out_view = NULL;
+    if (out_collapsed) *out_collapsed = true;
+    if (out_selecting) *out_selecting = false;
+    if (out_anchor_offset) *out_anchor_offset = 0;
+    if (out_anchor_line) *out_anchor_line = 0;
+    if (out_focus_offset) *out_focus_offset = 0;
+    if (out_focus_line) *out_focus_line = 0;
+    if (out_start_x) *out_start_x = 0;
+    if (out_start_y) *out_start_y = 0;
+    if (out_end_x) *out_end_x = 0;
+    if (out_end_y) *out_end_y = 0;
+    if (!state || !state->selection) return false;
+
+    SelectionState* sel = state->selection;
+    if (out_view) *out_view = sel->view;
+    if (out_collapsed) *out_collapsed = sel->is_collapsed;
+    if (out_selecting) *out_selecting = sel->is_selecting;
+    if (out_anchor_offset) *out_anchor_offset = sel->anchor_offset;
+    if (out_anchor_line) *out_anchor_line = sel->anchor_line;
+    if (out_focus_offset) *out_focus_offset = sel->focus_offset;
+    if (out_focus_line) *out_focus_line = sel->focus_line;
+    if (out_start_x) *out_start_x = sel->start_x;
+    if (out_start_y) *out_start_y = sel->start_y;
+    if (out_end_x) *out_end_x = sel->end_x;
+    if (out_end_y) *out_end_y = sel->end_y;
+    return true;
+}
+
+bool selection_get_extent_views(RadiantState* state, View** out_anchor_view,
+                                View** out_focus_view) {
+    if (out_anchor_view) *out_anchor_view = NULL;
+    if (out_focus_view) *out_focus_view = NULL;
+    if (!state || !state->selection || state->selection->is_collapsed) return false;
+    if (out_anchor_view) *out_anchor_view = state->selection->anchor_view;
+    if (out_focus_view) *out_focus_view = state->selection->focus_view;
+    return state->selection->anchor_view && state->selection->focus_view;
+}
+
+bool selection_has_projection(RadiantState* state) {
+    return state && state->selection != NULL;
 }
 
 void selection_get_range(RadiantState* state, int* start, int* end) {
@@ -3112,6 +3368,15 @@ bool focus_restore(RadiantState* state) {
 
 View* focus_get(RadiantState* state) {
     if (!state || !state->focus) return NULL;
+    return state->focus->current;
+}
+
+bool focus_has_current(RadiantState* state) {
+    return focus_get(state) != NULL;
+}
+
+View* focus_get_visible(RadiantState* state) {
+    if (!state || !state->focus || !state->focus->focus_visible) return NULL;
     return state->focus->current;
 }
 

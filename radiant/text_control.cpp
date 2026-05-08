@@ -305,15 +305,15 @@ void tc_set_selection_range(DomElement* elem,
     }
 }
 
-// ---- public: bidirectional sync ---------------------------------------
+// ---- public: text-control projection sync -----------------------------
 
-// Locate the focused element's containing element. The legacy CaretState
-// stores a View*; for form controls the View is the ViewBlock that is also
+// Locate the focused element's containing element. The caret projection stores
+// a View*; for form controls the View is the ViewBlock that is also
 // the DomElement (since DomElement extends ViewBlock in radiant's unified
 // DOM). Caller passes the *known* DomElement so we don't have to dispatch.
 
 void tc_sync_legacy_to_form(DomElement* elem, RadiantState* state) {
-    // Only derive legacy fields from DomSelection; never update DomSelection from legacy fields.
+    // Only derive text-control fields from DomSelection; never update DomSelection from projection fields.
     if (!elem || !state) return;
     if (!tc_is_text_control(elem)) return;
     tc_ensure_init(elem);
@@ -348,7 +348,8 @@ void tc_sync_legacy_to_form(DomElement* elem, RadiantState* state) {
         f->selection_direction = (a <= b) ? 1 : 2;
     } else {
         // Collapsed or no selection
-        int caret_byte = state->caret ? state->caret->char_offset : 0;
+        int caret_byte = 0;
+        caret_get_offset(state, &caret_byte);
         if (caret_byte < 0) caret_byte = 0;
         if ((uint32_t)caret_byte > blen) caret_byte = (int)blen;
         uint32_t u16 = tc_utf8_to_utf16_offset(f->current_value, blen, (uint32_t)caret_byte);
@@ -359,7 +360,7 @@ void tc_sync_legacy_to_form(DomElement* elem, RadiantState* state) {
 }
 
 void tc_sync_form_to_legacy(DomElement* elem, RadiantState* state) {
-    // No-op: legacy fields are now always derived from DomSelection. Do not update DomSelection from legacy fields.
+    // No-op: projection fields are now derived from DomSelection.
     (void)elem; (void)state;
 }
 

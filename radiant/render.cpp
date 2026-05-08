@@ -804,11 +804,14 @@ static int compare_view_order(View* view_a, View* view_b) {
  * Check if a view (any type, including images) is within a cross-view selection.
  * Returns true if the view is between anchor and focus views.
  */
-static bool is_view_in_selection(SelectionState* sel, View* view) {
-    if (!sel || sel->is_collapsed || !view) return false;
+static bool is_view_in_selection(RadiantState* state, View* view) {
+    if (!state || !view) return false;
 
-    View* anchor_view = sel->anchor_view;
-    View* focus_view = sel->focus_view;
+    View* anchor_view = NULL;
+    View* focus_view = NULL;
+    if (!selection_get_extent_views(state, &anchor_view, &focus_view)) {
+        return false;
+    }
 
     // Single-view selection (legacy) - images won't be text views
     if (!anchor_view || !focus_view) {
@@ -989,18 +992,16 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
         RadiantState* st = rdcon->ui_context && rdcon->ui_context->document
             ? rdcon->ui_context->document->state : nullptr;
         DomSelection* ds = st ? st->dom_selection : nullptr;
-        if (st && st->selection && st->selection->is_selecting &&
+        if (selection_is_pointer_range_active(st) &&
             ds && ds->range_count > 0 && !ds->is_collapsed && ds->ranges[0]) {
             diagnostic_inline_sel_range = ds->ranges[0];
         }
     }
 
-    // Check if this text view has a selection (supports cross-view selection)
-    // Diagnostic mode: render_text_view paints magenta, and render_selection()
-    // paints blue so we can identify which path creates an extra highlight.
-    SelectionState* sel = rdcon->selection;
+    // Legacy glyph-by-glyph selection code remains disabled; diagnostic
+    // inline painting below uses DomSelection fragments only.
     int sel_start = 0, sel_end = 0;
-    (void)sel; (void)sel_start; (void)sel_end;
+    (void)sel_start; (void)sel_end;
 
     // Calculate total text length for cross-view selection check
     int total_text_length = 0;
@@ -1009,8 +1010,6 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
     }
     (void)total_text_length;
 
-    // Legacy glyph-by-glyph selection code remains disabled; diagnostic
-    // inline painting below uses DomSelection fragments only.
     bool has_selection = false;
 
     // Apply text color from text_view if set (PDF text uses this for fill color)
@@ -1140,8 +1139,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
             ctx.rdcon = rdcon;
             ctx.scale = rdcon->scale;
             RadiantState* st = rdcon->ui_context->document->state;
-            ctx.iframe_offset_x = st->selection ? st->selection->iframe_offset_x : 0;
-            ctx.iframe_offset_y = st->selection ? st->selection->iframe_offset_y : 0;
+            selection_get_iframe_offset(st, &ctx.iframe_offset_x, &ctx.iframe_offset_y);
             ctx.color.r = 0xFF; ctx.color.g = 0x00; ctx.color.b = 0xB8; ctx.color.a = 0x80;
             dom_range_for_each_rect_in_text_rect(diagnostic_inline_sel_range,
                 (DomText*)text_view, text_rect, rdcon->ui_context,
@@ -1336,7 +1334,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
             // Debug first selected character
             if (is_selected && char_index == sel_start) {
                 log_debug("[SEL-INLINE] First selected char at index=%d, x=%.1f y=%.1f, advance_so_far=%.1f (expected overlay start_x=%.1f * scale=%.1f = %.1f)",
-                    char_index, x, y, x - debug_start_x, rdcon->selection->start_x, s, rdcon->selection->start_x * s);
+                    char_index, x, y, x - debug_start_x, 0.0f, s, 0.0f);
             }
 
             // log_debug("draw character '%c'", *p);
@@ -3158,7 +3156,9 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view) {
     }
 
     // Render blue selection overlay if image is within a cross-view selection
-    if (rdcon->selection && is_view_in_selection(rdcon->selection, (View*)view)) {
+    RadiantState* state = rdcon->ui_context && rdcon->ui_context->document
+        ? rdcon->ui_context->document->state : NULL;
+    if (is_view_in_selection(state, (View*)view)) {
         // Semi-transparent blue overlay (same color as text selection)
         uint32_t sel_bg_color = 0x80FF9933;  // ABGR format: semi-transparent blue
         rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &rect, sel_bg_color, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
@@ -3514,12 +3514,8 @@ void render_children(RenderContext* rdcon, View* view) {
  * Draws a 2px dotted outline outside the element's border box
  */
 void render_focus_outline(RenderContext* rdcon, RadiantState* state) {
-    if (!state || !state->focus || !state->focus->current) return;
-
-    // Only render focus-visible (keyboard navigation)
-    if (!state->focus->focus_visible) return;
-
-    View* focused = state->focus->current;
+    View* focused = focus_get_visible(state);
+    if (!focused) return;
     if (focused->view_type != RDT_VIEW_BLOCK) return;
 
     ViewBlock* block = (ViewBlock*)focused;
@@ -3569,16 +3565,16 @@ void render_focus_outline(RenderContext* rdcon, RadiantState* state) {
  * Render the text caret (blinking cursor) in an editable element
  */
 void render_caret(RenderContext* rdcon, RadiantState* state) {
-    if (!state || !state->caret) {
+    View* view = NULL;
+    int caret_offset = 0;
+    float caret_x = 0, caret_y = 0, caret_height = 0;
+    float iframe_offset_x = 0, iframe_offset_y = 0;
+    bool caret_visible = false;
+    if (!caret_get_render_snapshot(state, &view, &caret_offset, &caret_x, &caret_y,
+            &caret_height, &iframe_offset_x, &iframe_offset_y, &caret_visible) ||
+        !caret_visible) {
         return;
     }
-    // Force visible for debugging
-    state->caret->visible = true;
-
-    if (!state->caret->view) return;
-
-    CaretState* caret = state->caret;
-    View* view = caret->view;
 
     // Form controls draw their own caret in render_text_input() / render_textarea()
     if (view->is_element()) {
@@ -3593,10 +3589,10 @@ void render_caret(RenderContext* rdcon, RadiantState* state) {
 
     float s = rdcon->scale;
 
-    // caret->x and caret->y are relative to the parent block (from TextRect coordinates)
+    // caret_x/caret_y are relative to the parent block (from TextRect coordinates)
     // So we start with those coordinates and walk up from the parent block
-    float x = caret->x;
-    float y = caret->y;
+    float x = caret_x;
+    float y = caret_y;
 
     // Walk up from the text view's parent to get absolute coordinates
     // The caret x/y is already relative to the text's parent block
@@ -3613,8 +3609,8 @@ void render_caret(RenderContext* rdcon, RadiantState* state) {
         root_scroll_x = root_block->scroller->pane->h_scroll_position;
         root_scroll_y = root_block->scroller->pane->v_scroll_position;
     }
-    bool offset_covers_root_scroll_x = fabsf(caret->iframe_offset_x + root_scroll_x) < 0.5f;
-    bool offset_covers_root_scroll_y = fabsf(caret->iframe_offset_y + root_scroll_y) < 0.5f;
+    bool offset_covers_root_scroll_x = fabsf(iframe_offset_x + root_scroll_x) < 0.5f;
+    bool offset_covers_root_scroll_y = fabsf(iframe_offset_y + root_scroll_y) < 0.5f;
     while (parent) {
         if (parent->view_type == RDT_VIEW_BLOCK ||
             parent->view_type == RDT_VIEW_INLINE_BLOCK ||
@@ -3646,21 +3642,19 @@ void render_caret(RenderContext* rdcon, RadiantState* state) {
     }
 
     // Add iframe offset (if the caret is inside an iframe, parent chain stops at iframe doc root)
-    x += caret->iframe_offset_x;
-    y += caret->iframe_offset_y;
+    x += iframe_offset_x;
+    y += iframe_offset_y;
 
     // Store CSS pixel coordinates for logging
     float css_x = x;
     float css_y = y;
 
     // Phase 19: save absolute CSS position for dirty-rect caret repaint
-    caret->prev_abs_x = css_x;
-    caret->prev_abs_y = css_y;
-    caret->prev_abs_height = caret->height;
+    caret_project_previous_visual_rect(state, css_x, css_y, caret_height);
 
     // Scale to physical pixels
     x *= s;  y *= s;
-    float height = caret->height * s;
+    float height = caret_height * s;
     float caret_width = 3.0f * s;  // 3 CSS pixels wide
 
     log_debug("[CARET] Before render: CSS pos (%.1f,%.1f), physical pos (%.1f,%.1f) height=%.1f",
@@ -3682,12 +3676,10 @@ void render_caret(RenderContext* rdcon, RadiantState* state) {
  * Selection model), resolves layout via `dom_range_for_each_rect()`,
  * and emits one semi-transparent rectangle per visual fragment.
  *
- * The renderer's inline glyph-by-glyph selection background painter in
- * `render_text_view` is still active for backward compatibility — it
- * paints under each selected glyph using the legacy SelectionState.
- * `render_selection` is therefore registered as an overlay only when
- * the legacy path didn't / can't paint (e.g. element-level selection
- * spanning across non-text nodes set by JS via `setBaseAndExtent`).
+ * The inline glyph-by-glyph selection background painter in `render_text_view`
+ * is still active for form/static text compatibility. `render_selection` is
+ * therefore registered as an overlay when the inline path did not or cannot
+ * paint, such as element-level ranges spanning non-text nodes set via JS.
  *
  * `dom_range_for_each_rect()` returns rectangles in absolute CSS
  * coordinates; we just scale to physical pixels and fill.
@@ -3775,15 +3767,13 @@ static DomRange* selection_paint_range_for_current_tree(RenderContext* rdcon,
 void render_selection(RenderContext* rdcon, RadiantState* state) {
     if (!state) return;
 
-    // Prefer DomSelection (canonical). Fall back to legacy SelectionState
-    // only when DomSelection is not yet populated (early boot / non-DOM
-    // paths). Both should be in sync via legacy_sync_from_dom_selection.
+    // DomSelection is canonical. When it is empty, inline text/form painters
+    // cover any projection-only compatibility case.
     DomSelection* ds = state->dom_selection;
     bool use_dom = ds && ds->range_count > 0 && !ds->is_collapsed;
 
     if (!use_dom) {
-        // Nothing selected via DOM; legacy painter (inline in
-        // render_text_view) covers the legacy SelectionState case.
+        // Nothing selected via DOM; inline painters cover compatibility cases.
         return;
     }
 
@@ -3802,10 +3792,9 @@ void render_selection(RenderContext* rdcon, RadiantState* state) {
     SelectionPaintCtx ctx;
     ctx.rdcon = rdcon;
     ctx.scale = rdcon->scale;
-    // Iframe offset cached on the legacy selection (resolver itself doesn't
-    // know about iframe nesting). 0 when not in an iframe.
-    ctx.iframe_offset_x = state->selection ? state->selection->iframe_offset_x : 0;
-    ctx.iframe_offset_y = state->selection ? state->selection->iframe_offset_y : 0;
+    // Iframe offset cached on StateStore's projection because the resolver
+    // itself doesn't know about iframe nesting. 0 when not in an iframe.
+    selection_get_iframe_offset(state, &ctx.iframe_offset_x, &ctx.iframe_offset_y);
     // Standard text-selection blue; alpha 0x80 = 50% (matches inline painter).
     ctx.color.r = 0x00; ctx.color.g = 0x78; ctx.color.b = 0xD7; ctx.color.a = 0x80;
 
@@ -3824,7 +3813,8 @@ void render_ui_overlays(RenderContext* rdcon, RadiantState* state) {
         return;
     }
 
-    log_debug("[UI_OVERLAY] Rendering overlays: caret=%p", (void*)state->caret);
+    log_debug("[UI_OVERLAY] Rendering overlays: caret=%s",
+        caret_has_projection(state) ? "present" : "none");
 
     // Selection background is painted inline inside render_text_view when the
     // active range resolves cleanly to the current text fragments. Reactive UI
@@ -3912,13 +3902,6 @@ void render_init(RenderContext* rdcon, UiContext* uicon, ViewTree* view_tree) {
     // Initialize HiDPI scale factor for converting CSS logical pixels to physical surface pixels
     rdcon->scale = uicon->pixel_ratio > 0 ? uicon->pixel_ratio : 1.0f;
     log_debug("render_init: scale factor = %.2f (pixel_ratio)", rdcon->scale);
-
-    // Initialize selection state from document state
-    if (uicon->document && uicon->document->state && uicon->document->state->selection) {
-        rdcon->selection = uicon->document->state->selection;
-    } else {
-        rdcon->selection = nullptr;
-    }
 
     // load default font
     FontProp* default_font = view_tree->html_version == HTML5 ? &uicon->default_font : &uicon->legacy_default_font;

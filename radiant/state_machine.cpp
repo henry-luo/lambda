@@ -1,6 +1,7 @@
 /* Radiant interaction state-machine boundary — Phase 3 implementation. */
 
 #include "state_machine.hpp"
+#include "state_store_internal.hpp"
 #include "dom_range.hpp"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"

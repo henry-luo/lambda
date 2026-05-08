@@ -146,9 +146,7 @@ bool te_apply_byte_range(RadiantState* state, void* target,
     selection_start (state, view, (int)start);
     selection_extend(state, (int)end);
     caret_set       (state, view, (int)end);
-    if (state->selection) {
-        state->selection->is_selecting = false;  // gesture is complete
-    }
+    selection_finish_active_gesture(state);
     log_debug("text_edit: applied selection bytes=[%u..%u] view=%p",
               start, end, view);
     return true;
@@ -254,7 +252,7 @@ bool te_replace_byte_range(DomElement* elem, RadiantState* state, void* target,
 
     // Place caret at end of inserted text and clear any selection.
     uint32_t new_caret = start + repl_len;
-    if (state->selection) selection_clear(state);
+    if (selection_has_projection(state)) selection_clear(state);
     caret_set(state, (View*)target, (int)new_caret);
 
     // tc_set_value already pushed an undo entry; just notify selection

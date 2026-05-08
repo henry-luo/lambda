@@ -96,25 +96,19 @@ void dom_range_for_each_rect_in_text_rect(struct DomRange* range,
 // Legacy → DOM mirroring
 // ---------------------------------------------------------------------------
 
-// Phase 6 is non-invasive: existing `caret_*` and `selection_*` paths still
-// drive the legacy `CaretState` / `SelectionState`. After they update the
-// legacy state, they call into here to keep `state->dom_selection` in sync,
-// so JavaScript reads (`window.getSelection()`) observe the same anchor /
-// focus the user set with the mouse / keyboard.
+// Compatibility direction for older projection entry points. Most callers now
+// update DomSelection first, but projection-only paths can still call into here
+// to keep `state->dom_selection` in sync.
 //
 // Both functions are no-ops when `state->dom_selection` is null. They
 // allocate it lazily on first call so JS reads match what the user sees.
 void dom_selection_sync_from_legacy_selection(struct RadiantState* state);
 void dom_selection_sync_from_legacy_caret    (struct RadiantState* state);
 
-// Inverse direction (Phase 6 single-source-of-truth). Reads
-// `state->dom_selection` and writes the resulting (anchor/focus/caret)
-// boundaries, including resolved layout x/y/height, into the legacy
-// `SelectionState` and `CaretState` so the renderer (which still reads
-// the legacy structs) reflects DOM-side mutations made by JS or by the
-// spec algorithms (e.g. on DOM mutation). No-op when DomSelection is
-// empty (clears legacy selection in that case). Re-entry guarded via
-// `state->dom_selection_sync_depth`.
+// Canonical direction. Reads `state->dom_selection` and refreshes StateStore's
+// projection structs with anchor/focus/caret boundaries plus resolved layout
+// x/y/height. No-op when DomSelection is empty (clears selection projection in
+// that case). Re-entry guarded via `state->dom_selection_sync_depth`.
 void legacy_sync_from_dom_selection(struct RadiantState* state);
 
 // Register a glyph-precise X resolver. When set, `dom_range_for_each_rect()`

@@ -29,9 +29,6 @@ typedef struct {
     // HiDPI scaling: CSS logical pixels -> physical surface pixels
     float scale;                   // pixel_ratio (1.0 for standard, 2.0 for Retina, etc.)
     
-    // Selection state for text rendering
-    SelectionState* selection;     // Current selection (if any)
-
     // Phase 18: Dirty-region tracking for render tree clipping
     DirtyTracker* dirty_tracker;   // NULL = full repaint (no clipping)
     Bound dirty_union;             // union bbox of all dirty rects (CSS pixels, valid when dirty_tracker != NULL)

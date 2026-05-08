@@ -51,9 +51,10 @@ void tc_set_selection_range(DomElement* elem,
 // (setTimeout(0)) by the JS-side strong impl.
 void tc_notify_selection_changed(DomElement* elem);
 
-// Bidirectional sync with legacy CaretState/SelectionState ---------------
-// (Phase 6E. The legacy state still owns the visual caret position; the
-// new form->selection_* mirrors it for JS observability.)
+// Text-control selection projection sync ---------------------------------
+// DomSelection is canonical. form->selection_* mirrors it for JS
+// observability; StateStore projection fields preserve existing renderer and
+// event helper contracts.
 
 // Read state->caret + state->selection (UTF-8 byte offsets into form->value)
 // and write form->selection_start/_end/_direction (UTF-16 code units).

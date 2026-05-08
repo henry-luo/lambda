@@ -5,10 +5,9 @@
  * DOM Boundary, Range, Selection — W3C-conformant primitives.
  *
  * These types are owned by the per-document `RadiantState` (StateStore) and
- * are the canonical source of truth for caret + selection. The existing
- * `CaretState` / `SelectionState` structs in `state_store.hpp` are kept
- * (additively) for now; future phases migrate their consumers to read from
- * `state->dom_selection` and the layout-cache fields embedded in `DomRange`.
+ * are the canonical source of truth for caret + selection. StateStore keeps
+ * private projection structs for renderer/event compatibility while those
+ * paths finish migrating to `state->dom_selection` and DomRange layout cache.
  *
  * See vibe/radiant/Radiant_Design_Selection.md for the full design.
  */
@@ -22,9 +21,8 @@ struct DomText;
 struct DomElement;
 struct RadiantState;
 struct Pool;
-// Legacy interactive-state structs (defined in state_store.hpp). DomSelection
-// owns one of each as the canonical backing storage; `state->caret` and
-// `state->selection` on RadiantState are aliases pointing at these.
+// Projection structs are private to StateStore; public code should use
+// StateStore helper APIs rather than dereferencing them.
 struct CaretState;
 struct SelectionState;
 
@@ -181,8 +179,8 @@ char* dom_range_to_string_ex(const DomRange* r, DomStringifyMode mode);
 // DomSelection — the document's editing selection (also the caret)
 // ============================================================================
 //
-// A collapsed DomSelection IS the caret. There is no separate caret object;
-// `caret_visible` / `caret_blink_time` apply iff `is_collapsed`.
+// A collapsed DomSelection IS the canonical caret boundary. Presentation
+// details live in the StateStore projection while legacy render paths remain.
 //
 // The spec allows multiple ranges, but every WPT test we need to pass and
 // every mainstream browser only uses 0 or 1. We support range_count ∈ {0,1}
@@ -204,25 +202,6 @@ typedef struct DomSelection {
     DomBoundary   focus;
     DomSelectionDirection direction;
     bool          is_collapsed;         // mirrors range[0].collapsed when present
-
-    // Caret presentation (only meaningful when is_collapsed == true)
-    bool          caret_visible;
-    uint64_t      caret_blink_time;
-    float         caret_height;         // resolved from anchor; 0 = stale
-    float         caret_prev_abs_x;     // dirty-rect repaint tracking
-    float         caret_prev_abs_y;
-    float         caret_prev_abs_height;
-
-    // Iframe nesting offset (set when a click/drag begins inside an iframe).
-    // Renderer adds these to absolute CSS coords before painting.
-    float         iframe_offset_x;
-    float         iframe_offset_y;
-
-    // Legacy backing storage (Phase B consolidation). Allocated once in
-    // `dom_selection_create()` and aliased onto `state->caret` /
-    // `state->selection`. Single owner; lifetime = DomSelection's.
-    struct CaretState*     caret;
-    struct SelectionState* selection;
 
     // Document root captured when the current range was added (or its
     // boundaries first set). Used by Range mutators to detect the

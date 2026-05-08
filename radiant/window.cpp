@@ -1099,7 +1099,7 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
 
         // Handle caret blinking
         RadiantState* state = ui_context.document ? ui_context.document->state : nullptr;
-        if (state && state->caret) {
+        if (caret_has_projection(state)) {
             caretBlinkTime += deltaTime;
             if (caretBlinkTime >= CARET_BLINK_INTERVAL) {
                 caretBlinkTime = 0.0;

@@ -1552,13 +1552,13 @@ static bool assert_caret(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {
         return false;
     }
 
-    CaretState* caret = doc->state->caret;
     bool passed = true;
+    View* caret_view = caret_get_view(doc->state);
 
     if (ev->expected_view_type >= 0) {
         if (ev->negate_view_type) {
             // pass if there is no caret, or caret view type is not the rejected type
-            bool has_forbidden = caret && caret->view && caret->view->view_type == ev->expected_view_type;
+            bool has_forbidden = caret_view && caret_view->view_type == ev->expected_view_type;
             if (has_forbidden) {
                 log_error("event_sim: assert_caret - view_type should NOT be %d, but it is",
                          ev->expected_view_type);
@@ -1566,11 +1566,11 @@ static bool assert_caret(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {
             }
         } else {
             // Check view type of caret view
-            if (!caret || !caret->view) {
+            if (!caret_view) {
                 log_error("event_sim: assert_caret - no caret view");
                 passed = false;
             } else {
-                ViewType actual_type = caret->view->view_type;
+                ViewType actual_type = caret_view->view_type;
                 if (actual_type != ev->expected_view_type) {
                     log_error("event_sim: assert_caret - view_type mismatch: expected %d, got %d",
                              ev->expected_view_type, actual_type);
@@ -1581,9 +1581,11 @@ static bool assert_caret(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {
     }
 
     if (ev->expected_char_offset >= 0) {
-        if (!caret || caret->char_offset != ev->expected_char_offset) {
+        int caret_offset = 0;
+        bool has_caret_offset = caret_get_offset(doc->state, &caret_offset);
+        if (!has_caret_offset || caret_offset != ev->expected_char_offset) {
             log_error("event_sim: assert_caret - char_offset mismatch: expected %d, got %d",
-                     ev->expected_char_offset, caret ? caret->char_offset : -1);
+                     ev->expected_char_offset, has_caret_offset ? caret_offset : -1);
             passed = false;
         }
     }
@@ -1599,8 +1601,8 @@ static bool assert_caret(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {
 }
 
 // Assert helper for selection state.
-// Checks both legacy SelectionState (used by event/caret code) and the
-// canonical DomSelection (used by the renderer to paint highlight rects).
+// Checks both StateStore's compatibility projection and the canonical
+// DomSelection used by selection render paths.
 // They MUST agree — disagreement means the selection is set internally but
 // nothing visible is drawn (or vice-versa).
 static bool assert_selection(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {
@@ -1611,8 +1613,7 @@ static bool assert_selection(EventSimContext* ctx, UiContext* uicon, SimEvent* e
         return false;
     }
 
-    SelectionState* sel = doc->state->selection;
-    bool legacy_collapsed = sel ? sel->is_collapsed : true;
+    bool legacy_collapsed = !selection_has(doc->state);
 
     DomSelection* ds = doc->state->dom_selection;
     bool dom_collapsed = (!ds || ds->range_count == 0) ? true : ds->is_collapsed;
@@ -1651,15 +1652,15 @@ static bool assert_target(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) 
         return false;
     }
 
-    CaretState* caret = doc->state->caret;
+    View* caret_view = caret_get_view(doc->state);
 
-    if (!caret || !caret->view) {
+    if (!caret_view) {
         log_error("event_sim: assert_target - no caret view");
         ctx->fail_count++;
         return false;
     }
 
-    ViewType actual_type = caret->view->view_type;
+    ViewType actual_type = caret_view->view_type;
     if (actual_type != ev->expected_view_type) {
         log_error("event_sim: assert_target - view_type mismatch: expected %d, got %d",
                  ev->expected_view_type, actual_type);
@@ -2550,13 +2551,13 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
 
         case SIM_EVENT_ASSERT_FOCUS: {
             DomDocument* doc = uicon->document;
-            if (!doc || !doc->state || !doc->state->focus) {
+            if (!doc || !doc->state) {
                 log_error("event_sim: assert_focus - no document or focus state");
                 ctx->fail_count++;
                 break;
             }
             View* expected = resolve_target_element(ev, doc);
-            View* actual = doc->state->focus->current;
+            View* actual = focus_get(doc->state);
             if (!expected) {
                 log_error("event_sim: assert_focus - target element not found");
                 ctx->fail_count++;

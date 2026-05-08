@@ -1,6 +1,7 @@
 #include "render.hpp"
 #include "layout.hpp"
 #include "form_control.hpp"
+#include "state_store.hpp"
 #include "text_control.hpp"
 #include "../lib/font/font.h"
 
@@ -296,8 +297,8 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
         ? (RadiantState*)rdcon->ui_context->document->state : nullptr;
     bool focused_here = state && focus_get(state) == (View*)block;
     float caret_x_logical = 0.0f;
-    if (focused_here && state->caret && !is_placeholder && text && block->font) {
-        int caret_byte = state->caret->char_offset;
+    int caret_byte = 0;
+    if (focused_here && caret_get_offset(state, &caret_byte) && !is_placeholder && text && block->font) {
         int src_len = src_text ? (int)strlen(src_text) : 0;
         if (caret_byte > src_len) caret_byte = src_len;
         int meas_byte = is_password
@@ -370,11 +371,10 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
 
     // Draw caret if this input has focus
     if (focused_here) {
-        // F4: respect global caret blink visibility (state->caret->visible).
+        // F4: respect global caret blink visibility.
         // Headless / first-frame rendering keeps it true so screenshot tests
         // see the caret.
-        bool caret_visible = state->caret && state->caret->visible;
-        if (caret_visible) {
+        if (caret_is_visible(state)) {
             float caret_x = text_x + caret_x_logical - scroll_px;
             float caret_y_pos = text_y;
             float caret_h = font_size_scaled;
@@ -1084,14 +1084,12 @@ void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
 
     // Draw selection highlight if textarea has an active selection
     RadiantState* state = (RadiantState*)rdcon->ui_context->document->state;
-    if (state && state->selection && !state->selection->is_collapsed && !is_placeholder) {
+    if (state && !is_placeholder) {
         View* focused = focus_get(state);
-        if (focused == (View*)block && state->selection->anchor_view == focused) {
+        int sel_start = 0, sel_end = 0;
+        if (focused == (View*)block && selection_get_anchor_range(state, focused, &sel_start, &sel_end)) {
             const char* value = form->value;
             int val_len = value ? (int)strlen(value) : 0;
-            int sel_start = state->selection->anchor_offset;
-            int sel_end = state->selection->focus_offset;
-            if (sel_start > sel_end) { int tmp = sel_start; sel_start = sel_end; sel_end = tmp; }
             if (sel_start < 0) sel_start = 0;
             if (sel_end > val_len) sel_end = val_len;
 
@@ -1152,10 +1150,9 @@ void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
     // browser behavior).
     if (state) {
         View* focused = focus_get(state);
-        if (focused == (View*)block && state->caret
-            && state->caret->visible) {
+        int caret_off = 0;
+        if (focused == (View*)block && caret_is_visible(state) && caret_get_offset(state, &caret_off)) {
             const char* value = form->value;
-            int caret_off = state->caret->char_offset;
             int val_len = value ? (int)strlen(value) : 0;
             if (caret_off > val_len) caret_off = val_len;
 
