@@ -12,6 +12,7 @@
 struct AnimationScheduler;
 struct DomElement;
 struct DomDocument;
+struct EventStateLog;
 
 /**
  * Radiant State Store - Centralized UI state management
@@ -218,6 +219,14 @@ typedef struct RadiantState {
     StateUpdateMode mode;
     uint64_t version;              // monotonically increasing version number
     struct RadiantState* prev_version;  // previous version (immutable mode only)
+
+    // Active event/state log cascade. Set by state_machine.cpp while a
+    // top-level input/event cascade is open so transition APIs can emit
+    // state.transition records without threading log handles through every
+    // legacy call site.
+    EventStateLog* active_event_log;
+    uint64_t active_cascade_id;
+    uint32_t active_cascade_depth;
     
     // Global interaction states
     CaretState* caret;             // text cursor state (legacy; migrating to dom_selection)

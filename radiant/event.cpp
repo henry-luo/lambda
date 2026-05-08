@@ -2792,17 +2792,6 @@ bool is_view_focusable(View* view) {
 }
 
 /**
- * Propagate :focus-within pseudo-state up the ancestor chain
- */
-static void propagate_focus_within(View* view, bool set) {
-    View* ancestor = view ? view->parent : nullptr;
-    while (ancestor) {
-        sync_pseudo_state(ancestor, PSEUDO_STATE_FOCUS_WITHIN, set);
-        ancestor = ancestor->parent;
-    }
-}
-
-/**
  * Update focus state when an element gains/loses focus
  * @param from_keyboard true if focus change was triggered by keyboard (Tab key, etc.)
  */
@@ -2837,28 +2826,12 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
             dispatch_html_event_handler(evcon, prev_focus, "blur");
             radiant_dispatch_focus_event(evcon, prev_focus, "blur", new_focus);
             radiant_dispatch_focus_event(evcon, prev_focus, "focusout", new_focus);
-
-            sync_pseudo_state(prev_focus, PSEUDO_STATE_FOCUS, false);
-            sync_pseudo_state(prev_focus, PSEUDO_STATE_FOCUS_VISIBLE, false);
-            // Clear :focus-within from previous ancestor chain
-            propagate_focus_within(prev_focus, false);
         }
-
-        // Set :focus on new element
-        sync_pseudo_state(new_focus, PSEUDO_STATE_FOCUS, true);
 
         // §7 unification (U-4/U-6): inline + bridge always both fire.
         dispatch_html_event_handler(evcon, new_focus, "focus");
         radiant_dispatch_focus_event(evcon, new_focus, "focus", prev_focus);
         radiant_dispatch_focus_event(evcon, new_focus, "focusin", prev_focus);
-
-        // Set :focus-visible only for keyboard navigation
-        if (from_keyboard) {
-            sync_pseudo_state(new_focus, PSEUDO_STATE_FOCUS_VISIBLE, true);
-        }
-
-        // Propagate :focus-within up the ancestor chain
-        propagate_focus_within(new_focus, true);
 
         // F1 (Radiant_Design_Form_Input.md §3.1): snapshot the value at
         // focus time so a later blur can decide whether to fire `change`.
@@ -2886,11 +2859,6 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
             dispatch_html_event_handler(evcon, prev_focus, "blur");
             radiant_dispatch_focus_event(evcon, prev_focus, "blur", nullptr);
             radiant_dispatch_focus_event(evcon, prev_focus, "focusout", nullptr);
-
-            sync_pseudo_state(prev_focus, PSEUDO_STATE_FOCUS, false);
-            sync_pseudo_state(prev_focus, PSEUDO_STATE_FOCUS_VISIBLE, false);
-            // Clear :focus-within from ancestor chain
-            propagate_focus_within(prev_focus, false);
         }
 
         log_debug("update_focus_state: cleared focus");

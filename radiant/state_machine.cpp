@@ -33,6 +33,85 @@ static bool same_view_position(View* a_view, int a_offset, View* b_view, int b_o
     return a_view == b_view && a_offset == b_offset;
 }
 
+static View* focus_validation_root(View* view) {
+    View* root = view;
+    while (root && root->parent) {
+        root = (View*)root->parent;
+    }
+    return root;
+}
+
+static bool focus_path_contains(View* focused, View* candidate) {
+    View* node = focused;
+    while (node) {
+        if (node == candidate) return true;
+        node = (View*)node->parent;
+    }
+    return false;
+}
+
+static void validate_focus_node(RadiantState* state, View* node, View* focused,
+                                StateValidationReport* report,
+                                uint32_t* focus_count) {
+    if (!state || !node) return;
+
+    bool expected_focus = node == focused;
+    bool expected_within = focused && focus_path_contains(focused, node);
+    bool expected_visible = expected_focus && state->focus && state->focus->focus_visible;
+
+    bool store_focus = state_get_bool(state, node, STATE_FOCUS);
+    bool store_within = state_get_bool(state, node, STATE_FOCUS_WITHIN);
+    bool store_visible = state_get_bool(state, node, STATE_FOCUS_VISIBLE);
+
+    if (store_focus) (*focus_count)++;
+    if (store_focus != expected_focus) {
+        report_fail(report, "focus pseudo-state does not match focus target");
+    }
+    if (store_within != expected_within) {
+        report_fail(report, ":focus-within ancestry is inconsistent");
+    }
+    if (store_visible != expected_visible) {
+        report_fail(report, ":focus-visible state is inconsistent");
+    }
+
+    if (node->is_element()) {
+        DomElement* element = (DomElement*)node;
+        if (dom_element_has_pseudo_state(element, PSEUDO_STATE_FOCUS) != expected_focus) {
+            report_fail(report, "DOM focus pseudo bit is inconsistent");
+        }
+        if (dom_element_has_pseudo_state(element, PSEUDO_STATE_FOCUS_WITHIN) != expected_within) {
+            report_fail(report, "DOM focus-within pseudo bit is inconsistent");
+        }
+        if (dom_element_has_pseudo_state(element, PSEUDO_STATE_FOCUS_VISIBLE) != expected_visible) {
+            report_fail(report, "DOM focus-visible pseudo bit is inconsistent");
+        }
+
+        DomNode* child = element->first_child;
+        while (child) {
+            validate_focus_node(state, (View*)child, focused, report, focus_count);
+            child = child->next_sibling;
+        }
+    }
+}
+
+static void validate_focus_invariants(RadiantState* state,
+                                      StateValidationReport* report) {
+    if (!state || !state->focus) return;
+
+    View* focused = state->focus->current;
+    View* root = focus_validation_root(focused ? focused : state->focus->previous);
+    if (!root) return;
+
+    uint32_t focus_count = 0;
+    validate_focus_node(state, root, focused, report, &focus_count);
+    if (focused && focus_count != 1) {
+        report_fail(report, "focused document does not have exactly one :focus target");
+    }
+    if (!focused && focus_count != 0) {
+        report_fail(report, "inactive focus document still has :focus target");
+    }
+}
+
 bool radiant_state_validate_interaction(RadiantState* state,
                                         StateValidationReport* report) {
     report_init(report);
@@ -46,6 +125,8 @@ bool radiant_state_validate_interaction(RadiantState* state,
             report_fail(report, "focused target is not focusable");
         }
     }
+
+    validate_focus_invariants(state, report);
 
     if (state->caret) {
         if (state->caret->visible && !state->caret->view) {
@@ -89,7 +170,12 @@ uint64_t state_begin_event_cascade(RadiantState* state,
                                    EventStateLog* log,
                                    const char* cause) {
     if (state) {
+        state->active_event_log = log;
+        state->active_cascade_id = event_state_log_enabled(log) ?
+            event_state_log_begin_cascade(log, cause ? cause : "internal") : 0;
+        state->active_cascade_depth++;
         state_begin_batch(state);
+        return state->active_cascade_id;
     }
     return event_state_log_begin_cascade(log, cause ? cause : "internal");
 }
@@ -227,4 +313,11 @@ void state_end_event_cascade(RadiantState* state,
     }
     radiant_state_settle(state, log, cascade_id);
     event_state_log_end_cascade(log, cascade_id);
+    if (state && state->active_cascade_depth > 0) {
+        state->active_cascade_depth--;
+        if (state->active_cascade_depth == 0) {
+            state->active_event_log = NULL;
+            state->active_cascade_id = 0;
+        }
+    }
 }

@@ -6,6 +6,7 @@
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include "../lambda/input/css/dom_element.hpp"
+#include "event_state_log.hpp"
 // str.h included via view.hpp
 #include "view.hpp"
 #include "../lib/arraylist.h"
@@ -2464,6 +2465,57 @@ void selection_get_range(RadiantState* state, int* start, int* end) {
 // Focus API
 // ============================================================================
 
+static void focus_set_pseudo(RadiantState* state, View* view,
+                             const char* state_name, uint32_t pseudo_state,
+                             bool set) {
+    if (!state || !view || !state_name) return;
+
+    state_set_bool(state, view, state_name, set);
+    if (view->is_element()) {
+        DomElement* element = (DomElement*)view;
+        if (set) {
+            dom_element_set_pseudo_state(element, pseudo_state);
+        } else {
+            dom_element_clear_pseudo_state(element, pseudo_state);
+        }
+    }
+}
+
+static void focus_set_within_chain(RadiantState* state, View* view, bool set) {
+    View* node = view;
+    while (node) {
+        focus_set_pseudo(state, node, STATE_FOCUS_WITHIN,
+                         PSEUDO_STATE_FOCUS_WITHIN, set);
+        node = (View*)node->parent;
+    }
+}
+
+static void focus_write_optional_ref(JsonWriter* w, const char* key, View* view) {
+    event_state_log_write_node_ref(w, key, (const DomNode*)view);
+}
+
+static void focus_log_transition(RadiantState* state, const char* transition,
+                                 View* from, View* to,
+                                 bool from_keyboard, bool focus_visible) {
+    if (!state || !event_state_log_enabled(state->active_event_log)) return;
+
+    char buf[1024];
+    JsonWriter w;
+    event_state_log_begin_record(state->active_event_log, &w, buf, sizeof(buf),
+        "state.transition", state->active_cascade_id);
+    jw_key(&w, "data");
+    jw_obj_begin(&w);
+        jw_kv_str(&w, "machine", "focus");
+        jw_kv_str(&w, "transition", transition ? transition : "focus_update");
+        jw_kv_str(&w, "cause", from_keyboard ? "KEYBOARD_TAB" : "MOUSE");
+        focus_write_optional_ref(&w, "from", from);
+        focus_write_optional_ref(&w, "to", to);
+        jw_kv_bool(&w, "from_keyboard", from_keyboard);
+        jw_kv_bool(&w, "focus_visible", focus_visible);
+    jw_obj_end(&w);
+    event_state_log_finish_record(state->active_event_log, &w);
+}
+
 void focus_set(RadiantState* state, View* view, bool from_keyboard) {
     if (!state) return;
 
@@ -2478,55 +2530,36 @@ void focus_set(RadiantState* state, View* view, bool from_keyboard) {
     }
 
     FocusState* focus = state->focus;
+    View* old_focus = focus->current;
 
     // Store previous focus for restoration
-    focus->previous = focus->current;
+    focus->previous = old_focus;
     focus->current = view;
     focus->from_keyboard = from_keyboard;
     focus->from_mouse = !from_keyboard;
     focus->focus_visible = from_keyboard;  // :focus-visible only for keyboard
 
     // Update :focus pseudo-state on old element
-    if (focus->previous && focus->previous != view) {
-        state_set_bool(state, focus->previous, STATE_FOCUS, false);
-        state_set_bool(state, focus->previous, STATE_FOCUS_VISIBLE, false);
-        // also update the DomElement pseudo_state bitfield
-        if (focus->previous->is_element()) {
-            dom_element_clear_pseudo_state((DomElement*)focus->previous, PSEUDO_STATE_FOCUS);
-            dom_element_clear_pseudo_state((DomElement*)focus->previous, PSEUDO_STATE_FOCUS_VISIBLE);
-        }
-
-        // Clear :focus-within on ancestors
-        View* node = (View*)focus->previous->parent;
-        while (node) {
-            state_set_bool(state, node, STATE_FOCUS_WITHIN, false);
-            node = (View*)node->parent;
-        }
+    if (old_focus && old_focus != view) {
+        focus_set_pseudo(state, old_focus, STATE_FOCUS, PSEUDO_STATE_FOCUS, false);
+        focus_set_pseudo(state, old_focus, STATE_FOCUS_VISIBLE,
+                         PSEUDO_STATE_FOCUS_VISIBLE, false);
+        focus_set_within_chain(state, old_focus, false);
     }
 
     // Update :focus pseudo-state on new element
     if (view) {
-        state_set_bool(state, view, STATE_FOCUS, true);
-        if (from_keyboard) {
-            state_set_bool(state, view, STATE_FOCUS_VISIBLE, true);
-        }
-        // also update the DomElement pseudo_state bitfield
-        if (view->is_element()) {
-            dom_element_set_pseudo_state((DomElement*)view, PSEUDO_STATE_FOCUS);
-            if (from_keyboard) {
-                dom_element_set_pseudo_state((DomElement*)view, PSEUDO_STATE_FOCUS_VISIBLE);
-            }
-        }
-
-        // Set :focus-within on ancestors
-        View* node = (View*)view->parent;
-        while (node) {
-            state_set_bool(state, node, STATE_FOCUS_WITHIN, true);
-            node = (View*)node->parent;
-        }
+        focus_set_pseudo(state, view, STATE_FOCUS, PSEUDO_STATE_FOCUS, true);
+        focus_set_pseudo(state, view, STATE_FOCUS_VISIBLE,
+                         PSEUDO_STATE_FOCUS_VISIBLE, from_keyboard);
+        focus_set_within_chain(state, view, true);
     }
 
     state->needs_repaint = true;
+
+    focus_log_transition(state,
+        old_focus == view ? "focus_update" : (view ? "focus_element" : "blur_current"),
+        old_focus, view, from_keyboard, focus->focus_visible);
 
     log_debug("focus_set: view=%p, from_keyboard=%d", view, from_keyboard);
 }
@@ -2538,25 +2571,26 @@ void focus_clear(RadiantState* state) {
 
     // Clear pseudo-states on current element
     if (focus->current) {
-        state_set_bool(state, focus->current, STATE_FOCUS, false);
-        state_set_bool(state, focus->current, STATE_FOCUS_VISIBLE, false);
-
-        // Clear :focus-within on ancestors
-        View* node = (View*)focus->current->parent;
-        while (node) {
-            state_set_bool(state, node, STATE_FOCUS_WITHIN, false);
-            node = (View*)node->parent;
-        }
+        focus_set_pseudo(state, focus->current, STATE_FOCUS, PSEUDO_STATE_FOCUS, false);
+        focus_set_pseudo(state, focus->current, STATE_FOCUS_VISIBLE,
+                         PSEUDO_STATE_FOCUS_VISIBLE, false);
+        focus_set_within_chain(state, focus->current, false);
     }
 
+    View* old_focus = focus->current;
     focus->previous = focus->current;
     focus->current = NULL;
+    focus->from_keyboard = false;
+    focus->from_mouse = false;
+    focus->focus_visible = false;
 
     // Also clear caret and selection
     caret_clear(state);
     selection_clear(state);
 
     state->needs_repaint = true;
+
+    focus_log_transition(state, "blur_current", old_focus, NULL, false, false);
 
     log_debug("focus_clear");
 }
