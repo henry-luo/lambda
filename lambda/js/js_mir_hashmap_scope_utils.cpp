@@ -1,0 +1,254 @@
+#include "js_mir_internal.hpp"
+
+// ============================================================================
+// Hashmap helpers
+// ============================================================================
+
+int js_import_cache_cmp(const void *a, const void *b, void *udata) {
+    (void)udata;
+    return strcmp(((JsImportCacheEntry*)a)->name, ((JsImportCacheEntry*)b)->name);
+}
+uint64_t js_import_cache_hash(const void *item, uint64_t seed0, uint64_t seed1) {
+    return hashmap_sip(((JsImportCacheEntry*)item)->name,
+        strlen(((JsImportCacheEntry*)item)->name), seed0, seed1);
+}
+
+int js_var_scope_cmp(const void *a, const void *b, void *udata) {
+    (void)udata;
+    return strcmp(((JsVarScopeEntry*)a)->name, ((JsVarScopeEntry*)b)->name);
+}
+uint64_t js_var_scope_hash(const void *item, uint64_t seed0, uint64_t seed1) {
+    return hashmap_sip(((JsVarScopeEntry*)item)->name,
+        strlen(((JsVarScopeEntry*)item)->name), seed0, seed1);
+}
+
+int js_local_func_cmp(const void *a, const void *b, void *udata) {
+    (void)udata;
+    return strcmp(((JsLocalFuncEntry*)a)->name, ((JsLocalFuncEntry*)b)->name);
+}
+uint64_t js_local_func_hash(const void *item, uint64_t seed0, uint64_t seed1) {
+    return hashmap_sip(((JsLocalFuncEntry*)item)->name,
+        strlen(((JsLocalFuncEntry*)item)->name), seed0, seed1);
+}
+
+int js_module_const_cmp(const void *a, const void *b, void *udata) {
+    (void)udata;
+    return strcmp(((JsModuleConstEntry*)a)->name, ((JsModuleConstEntry*)b)->name);
+}
+uint64_t js_module_const_hash(const void *item, uint64_t seed0, uint64_t seed1) {
+    return hashmap_sip(((JsModuleConstEntry*)item)->name,
+        strlen(((JsModuleConstEntry*)item)->name), seed0, seed1);
+}
+
+JsMirTranspiler* jm_create_mir_transpiler(
+    JsTranspiler* tp, MIR_context_t ctx, const char* filename, bool is_module,
+    int import_capacity, int local_func_capacity, int var_scope_capacity,
+    const char* log_prefix)
+{
+    JsMirTranspiler* mt = (JsMirTranspiler*)mem_alloc(sizeof(JsMirTranspiler), MEM_CAT_JS_RUNTIME);
+    if (!mt) {
+        log_error("%s: failed to allocate JsMirTranspiler", log_prefix ? log_prefix : "js-mir");
+        return NULL;
+    }
+    memset(mt, 0, sizeof(JsMirTranspiler));
+    mt->tp = tp;
+    mt->ctx = ctx;
+    mt->is_module = is_module;
+    mt->filename = filename;
+    mt->import_cache = hashmap_new(sizeof(JsImportCacheEntry), import_capacity, 0, 0,
+        js_import_cache_hash, js_import_cache_cmp, NULL, NULL);
+    mt->local_funcs = hashmap_new(sizeof(JsLocalFuncEntry), local_func_capacity, 0, 0,
+        js_local_func_hash, js_local_func_cmp, NULL, NULL);
+    mt->var_scopes[0] = hashmap_new(sizeof(JsVarScopeEntry), var_scope_capacity, 0, 0,
+        js_var_scope_hash, js_var_scope_cmp, NULL, NULL);
+    mt->scope_depth = 0;
+    mt->var_hoist_depth = -1;
+    mt->collect_parent_func_index = -1;
+    mt->scope_env_reg = 0;
+    mt->scope_env_slot_count = 0;
+    mt->current_func_index = -1;
+    return mt;
+}
+
+void jm_destroy_mir_transpiler(JsMirTranspiler* mt) {
+    jm_cleanup_mir_transpiler_state(mt);
+    mem_free(mt);
+}
+
+// Forward declarations
+MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc);
+Type* jm_get_full_type(JsMirTranspiler* mt, JsAstNode* node);
+JsFuncCollected* jm_find_collected_func_for_call(JsMirTranspiler* mt, JsCallNode* call);
+
+// ============================================================================
+// Basic MIR helpers
+// ============================================================================
+
+MIR_reg_t jm_new_reg(JsMirTranspiler* mt, const char* prefix, MIR_type_t type) {
+    char name[64];
+    snprintf(name, sizeof(name), "%s_%d", prefix, mt->reg_counter++);
+    MIR_type_t rtype = (type == MIR_T_P) ? MIR_T_I64 : type;
+    return MIR_new_func_reg(mt->ctx, mt->current_func, rtype, name);
+}
+
+MIR_label_t jm_new_label(JsMirTranspiler* mt) {
+    return MIR_new_label(mt->ctx);
+}
+
+void jm_emit(JsMirTranspiler* mt, MIR_insn_t insn) {
+    MIR_append_insn(mt->ctx, mt->current_func_item, insn);
+}
+
+void jm_emit_label(JsMirTranspiler* mt, MIR_label_t label) {
+    if (!label) {
+        log_error("js-mir: attempt to emit NULL label — skipping");
+        return;
+    }
+    MIR_append_insn(mt->ctx, mt->current_func_item, label);
+}
+
+// Eval completion value: reset completion register to undefined.
+// Called at the point where the ES spec says "Let V = undefined" for compound statements.
+void jm_eval_cptn_reset(JsMirTranspiler* mt) {
+    if (mt->eval_completion_reg) {
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, mt->eval_completion_reg),
+            MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
+    }
+}
+
+// v11: push loop labels, consuming any pending label from a labeled statement
+void jm_push_loop_labels(JsMirTranspiler* mt, MIR_label_t continue_label, MIR_label_t break_label) {
+    if (mt->loop_depth < 32) {
+        mt->loop_stack[mt->loop_depth].continue_label = continue_label;
+        mt->loop_stack[mt->loop_depth].break_label = break_label;
+        mt->loop_stack[mt->loop_depth].label_name = mt->pending_label_name;
+        mt->loop_stack[mt->loop_depth].label_name_len = mt->pending_label_len;
+        mt->loop_depth++;
+    }
+    mt->pending_label_name = NULL;
+    mt->pending_label_len = 0;
+}
+
+// Zero-extend uint8_t return value to full i64 (needed on Windows x64 ABI
+// where upper bits of RAX may contain garbage after a uint8_t-returning call)
+MIR_reg_t jm_emit_uext8(JsMirTranspiler* mt, MIR_reg_t r) {
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_UEXT8,
+        MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, r)));
+    return r;
+}
+
+// ============================================================================
+// Scope management
+// ============================================================================
+
+void jm_push_scope(JsMirTranspiler* mt) {
+    if (mt->scope_depth >= 63) { log_error("js-mir: scope overflow"); return; }
+    mt->scope_depth++;
+    mt->var_scopes[mt->scope_depth] = hashmap_new(sizeof(JsVarScopeEntry), 16, 0, 0,
+        js_var_scope_hash, js_var_scope_cmp, NULL, NULL);
+}
+
+// v20: Find the formal parameter index for a variable name in arguments aliasing.
+// Returns -1 if not found or arguments aliasing is not active.
+int jm_arguments_param_index(JsMirTranspiler* mt, const char* vname) {
+    if (mt->arguments_reg == 0 || mt->arguments_param_count <= 0) return -1;
+    for (int i = 0; i < mt->arguments_param_count; i++) {
+        if (strcmp(mt->arguments_param_names[i], vname) == 0) return i;
+    }
+    return -1;
+}
+
+// v20: Check if a function body starts with "use strict" directive.
+bool jm_has_use_strict_directive(JsFunctionNode* fn) {
+    if (!fn->body) return false;
+    JsAstNode* stmt = NULL;
+    if (fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
+        JsBlockNode* blk = (JsBlockNode*)fn->body;
+        stmt = blk->statements;
+    } else {
+        return false;
+    }
+    // scan directive prologue: string literal expression statements at the top
+    while (stmt && stmt->node_type == JS_AST_NODE_EXPRESSION_STATEMENT) {
+        JsExpressionStatementNode* es = (JsExpressionStatementNode*)stmt;
+        if (!es->expression || es->expression->node_type != JS_AST_NODE_LITERAL) break;
+        JsLiteralNode* lit = (JsLiteralNode*)es->expression;
+        if (lit->literal_type != JS_LITERAL_STRING) break;
+        if (lit->value.string_value &&
+            lit->value.string_value->len == 10 &&
+            strncmp(lit->value.string_value->chars, "use strict", 10) == 0) {
+            return true;
+        }
+        stmt = stmt->next;
+    }
+    return false;
+}
+
+// v20: Emit writeback from param register to arguments[param_index]
+// NOTE: This is a forward declaration stub. Actual implementation uses jm_call_3
+// which isn't available until after all helpers are defined. So we use a runtime
+// function that takes (arguments, index, value).
+void jm_arguments_writeback_param(JsMirTranspiler* mt, int param_index, MIR_reg_t val_reg);
+
+void jm_pop_scope(JsMirTranspiler* mt) {
+    if (mt->scope_depth <= 0) { log_error("js-mir: scope underflow"); return; }
+    hashmap_free(mt->var_scopes[mt->scope_depth]);
+    mt->var_scopes[mt->scope_depth] = NULL;
+    mt->scope_depth--;
+}
+
+JsMirVarEntry* jm_find_var(JsMirTranspiler* mt, const char* name);
+
+void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
+                       MIR_type_t mir_type , TypeId type_id ) {
+    JsVarScopeEntry entry;
+    memset(&entry, 0, sizeof(entry));
+    snprintf(entry.name, sizeof(entry.name), "%s", name);
+    entry.var.reg = reg;
+    entry.var.mir_type = mir_type;
+    entry.var.type_id = type_id;
+    entry.var.typed_array_type = -1;  // P9: not a typed array by default
+
+    // Preserve metadata from TDZ-hoisted entries
+    {
+        JsMirVarEntry* existing = jm_find_var(mt, name);
+        if (existing) {
+            // v15: In generators, preserve env slot info from hoisted variables
+            if (mt->in_generator && existing->from_env) {
+                entry.var.from_env = true;
+                entry.var.env_slot = existing->env_slot;
+                entry.var.env_reg = existing->env_reg;
+            }
+            // Preserve const flag from TDZ init
+            if (existing->is_const) {
+                entry.var.is_const = true;
+            }
+            // Preserve let/const flag from TDZ init
+            if (existing->is_let_const) {
+                entry.var.is_let_const = true;
+            }
+        }
+    }
+
+    int target_depth = (mt->var_hoist_depth >= 0) ? mt->var_hoist_depth : mt->scope_depth;
+    hashmap_set(mt->var_scopes[target_depth], &entry);
+}
+
+JsMirVarEntry* jm_find_var(JsMirTranspiler* mt, const char* name) {
+    JsVarScopeEntry key;
+    memset(&key, 0, sizeof(key));
+    snprintf(key.name, sizeof(key.name), "%s", name);
+    for (int i = mt->scope_depth; i >= 0; i--) {
+        if (!mt->var_scopes[i]) continue;
+        JsVarScopeEntry* found = (JsVarScopeEntry*)hashmap_get(mt->var_scopes[i], &key);
+        if (found) return &found->var;
+    }
+    return NULL;
+}
+
+// ============================================================================
+// Capture analysis for closures
+// ============================================================================
+
+// Simple string set using hashmap

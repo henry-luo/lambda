@@ -698,3 +698,56 @@ Verification:
 - `./test/test_css_dom_integration.exe`: passed `77`, skipped `25`, failed `0`
 - `make test262-baseline`: fully passed `30009 / 30009`, failed `0`,
   regressions `0`
+
+## Phase J41-1 Complete - Mechanical Transpiler Split
+
+Finished the full J41-1 mechanical split for the JavaScript MIR transpiler.
+The transpiler is now split into real top-level C++ translation units so later
+semantic phases can work in named ownership areas without touching a 28K-line
+monolith.
+
+Code changes:
+
+- Replaced `lambda/js/transpile_js_mir.cpp` with a state anchor for the shared
+  extern declarations, MIR optimization globals, and module/eval global state.
+- Added `lambda/js/js_mir_context.hpp` for the shared JS MIR transpiler context
+  structs and cleanup helper.
+- Added `lambda/js/js_mir_internal.hpp` for shared helper declarations and
+  cross-file extern state.
+- Added `lambda/js/js_mir_hashmap_scope_utils.cpp`.
+- Added `lambda/js/js_mir_analysis.cpp`.
+- Added `lambda/js/js_mir_calls_boxing_types.cpp`.
+- Added `lambda/js/js_mir_function_collection_class_inference.cpp`.
+- Added `lambda/js/js_mir_expression_lowering.cpp`.
+- Added `lambda/js/js_mir_statement_lowering.cpp`.
+- Added `lambda/js/js_mir_function_class_lowering.cpp`.
+- Added `lambda/js/js_mir_module_batch_lowering.cpp`.
+- Added `lambda/js/js_mir_eval_lowering.cpp`.
+- Added `lambda/js/js_mir_entrypoints_require.cpp`.
+
+Boundary notes:
+
+- This phase intentionally made no semantic extraction and no manual
+  build-system change.
+- Shared local structs, constants, helper prototypes, and module/eval globals
+  are centralized in `js_mir_context.hpp` and `js_mir_internal.hpp` rather than
+  in include fragments.
+- The generated Premake configuration picks up the new top-level `.cpp` files
+  automatically.
+- `make build` regenerated `lambda/lambda-embed.h` from the current
+  `lambda/lambda.h`; that generated-file change is incidental to the build
+  gate rather than part of the transpiler split.
+
+Verification:
+
+- `make build`: passed.
+- `./test/test_js_props_gtest.exe`: passed `24 / 24`.
+- `./test/test_js_coerce_gtest.exe`: passed `15 / 15`.
+- Focused `./test/test_js_gtest.exe` coverage for native-backed properties,
+  typed arrays, CSS namespace, DOM style/basic, eval, and module paths:
+  passed `9 / 9`.
+- Full `./test/test_js_gtest.exe`: still has 6 unrelated JS semantic failures
+  (`buffer_advanced`, `lib_handlebars`, `lib_pretext`, `lib_yup`, `lib_zod`,
+  `zlib_basic`); the same 6 fail when filtered directly.
+- `make test262-baseline`: fully passed `30009 / 30009`, failed `0`,
+  regressions `0`.

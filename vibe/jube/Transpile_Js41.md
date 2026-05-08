@@ -410,12 +410,29 @@ Gate:
 
 ### Phase J41-1 - Mechanical transpiler split
 
+Status: complete as of 2026-05-08.
+
 Deliverables:
 
 - Move MIR utilities, analysis, expression lowering, statement lowering,
   functions/classes/modules/eval/batch into separate files.
 - Add `js_mir_context.hpp` and a single cleanup helper.
 - No semantic changes.
+
+Completion notes:
+
+- `lambda/js/transpile_js_mir.cpp` now anchors the shared global state for the
+  split transpiler.
+- `lambda/js/js_mir_context.hpp` owns the shared transpiler context structs and
+  cleanup helper; `lambda/js/js_mir_internal.hpp` owns the cross-translation-unit
+  helper declarations and shared extern state.
+- Top-level `lambda/js/js_mir_*.cpp` files contain the mechanical phase areas:
+  hashmap/scope utilities, analysis, MIR call/boxing/type helpers, function and
+  class collection/inference, expression lowering, statement lowering,
+  function/class lowering, module/batch lowering, eval lowering, and public
+  entrypoint/require/import lowering.
+- No manual build-config change was needed; the normal generated build picks up
+  the new top-level `lambda/js/*.cpp` translation units.
 
 Gate:
 
