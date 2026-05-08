@@ -1634,6 +1634,7 @@ extern "C" Item js_to_string(Item value) {
                 // toString/valueOf placeholders — fall through to default string conversion
                 // instead of throwing.
                 if (value.map && (value.map->map_kind == MAP_KIND_DOM ||
+                                  value.map->map_kind == MAP_KIND_CSS_NAMESPACE ||
                                   value.map->map_kind == MAP_KIND_CSSOM ||
                                   value.map->map_kind == MAP_KIND_DOC_PROXY ||
                                   value.map->map_kind == MAP_KIND_FOREIGN_DOC)) {
@@ -3467,6 +3468,13 @@ enum JsBuiltinId {
     JS_BUILTIN_CSS_ESCAPE,
     JS_BUILTIN_MAX
 };
+
+struct JsBuiltinMethodSpec;
+static void js_populate_builtin_prototype_methods(Item prototype, const char* ctor_name, int ctor_len);
+static void js_populate_dataview_prototype_methods(Item prototype);
+static Item js_lookup_builtin_prototype_method_for_class(JsClass cls, const char* name, int len);
+static void js_install_builtin_function_specs(Item object, const JsBuiltinMethodSpec* specs, int flags, bool use_cache);
+static void js_install_builtin_accessor_specs(Item object, const JsBuiltinMethodSpec* specs, int flags);
 
 extern "C" void* js_function_get_ptr(Item fn_item) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return NULL;
@@ -5575,8 +5583,9 @@ extern "C" Item js_property_get(Item object, Item key) {
             case MAP_KIND_DOM:
                 if (js_is_computed_style_item(object)) return js_computed_style_get_property(object, key);
                 return js_dom_get_property(object, key);
+            case MAP_KIND_CSS_NAMESPACE:
+                break;
             case MAP_KIND_CSSOM:
-                if (js_is_css_namespace(object)) return ItemNull; // methods only, no properties
                 if (js_is_stylesheet(object)) return js_cssom_stylesheet_get_property(object, key);
                 if (js_is_css_rule(object)) return js_cssom_rule_get_property(object, key);
                 return js_cssom_rule_decl_get_property(object, key);
@@ -5723,74 +5732,15 @@ extern "C" Item js_property_get(Item object, Item key) {
                             return js_get_or_create_builtin(JS_BUILTIN_NUM_TO_EXPONENTIAL, "toExponential", 1);
                         }
                     } else if (cls == JS_CLASS_DATE) {
-                        // v45: Date prototype methods — make Date methods visible as properties
-                        struct { const char* name; int len; int id; int pc; } date_methods[] = {
-                            {"getTime", 7, JS_BUILTIN_DATE_GET_TIME, 0},
-                            {"getFullYear", 11, JS_BUILTIN_DATE_GET_FULL_YEAR, 0},
-                            {"getMonth", 8, JS_BUILTIN_DATE_GET_MONTH, 0},
-                            {"getDate", 7, JS_BUILTIN_DATE_GET_DATE, 0},
-                            {"getHours", 8, JS_BUILTIN_DATE_GET_HOURS, 0},
-                            {"getMinutes", 10, JS_BUILTIN_DATE_GET_MINUTES, 0},
-                            {"getSeconds", 10, JS_BUILTIN_DATE_GET_SECONDS, 0},
-                            {"getMilliseconds", 15, JS_BUILTIN_DATE_GET_MILLISECONDS, 0},
-                            {"toISOString", 11, JS_BUILTIN_DATE_TO_ISO_STRING, 0},
-                            {"toJSON", 6, JS_BUILTIN_DATE_TO_JSON, 0},
-                            {"toUTCString", 11, JS_BUILTIN_DATE_TO_UTC_STRING, 0},
-                            {"toDateString", 12, JS_BUILTIN_DATE_TO_DATE_STRING, 0},
-                            {"toTimeString", 12, JS_BUILTIN_DATE_TO_TIME_STRING, 0},
-                            {"toString", 8, JS_BUILTIN_DATE_TO_STRING, 0},
-                            {"toLocaleDateString", 18, JS_BUILTIN_DATE_TO_LOCALE_DATE_STRING, 0},
-                            {"toLocaleTimeString", 18, JS_BUILTIN_DATE_TO_LOCALE_DATE_STRING, 0},
-                            {"valueOf", 7, JS_BUILTIN_DATE_VALUE_OF, 0},
-                            {"getDay", 6, JS_BUILTIN_DATE_GET_DAY, 0},
-                            {"getUTCFullYear", 14, JS_BUILTIN_DATE_GET_UTC_FULL_YEAR, 0},
-                            {"getUTCMonth", 11, JS_BUILTIN_DATE_GET_UTC_MONTH, 0},
-                            {"getUTCDate", 10, JS_BUILTIN_DATE_GET_UTC_DATE, 0},
-                            {"getUTCHours", 11, JS_BUILTIN_DATE_GET_UTC_HOURS, 0},
-                            {"getUTCMinutes", 13, JS_BUILTIN_DATE_GET_UTC_MINUTES, 0},
-                            {"getUTCSeconds", 13, JS_BUILTIN_DATE_GET_UTC_SECONDS, 0},
-                            {"getUTCMilliseconds", 18, JS_BUILTIN_DATE_GET_UTC_MILLISECONDS, 0},
-                            {"getUTCDay", 9, JS_BUILTIN_DATE_GET_UTC_DAY, 0},
-                            {"getTimezoneOffset", 17, JS_BUILTIN_DATE_GET_TIMEZONE_OFFSET, 0},
-                            {"setTime", 7, JS_BUILTIN_DATE_SET_TIME, 1},
-                            {"setFullYear", 11, JS_BUILTIN_DATE_SET_FULL_YEAR, 3},
-                            {"setMonth", 8, JS_BUILTIN_DATE_SET_MONTH, 2},
-                            {"setDate", 7, JS_BUILTIN_DATE_SET_DATE, 1},
-                            {"setHours", 8, JS_BUILTIN_DATE_SET_HOURS, 4},
-                            {"setMinutes", 10, JS_BUILTIN_DATE_SET_MINUTES, 3},
-                            {"setSeconds", 10, JS_BUILTIN_DATE_SET_SECONDS, 2},
-                            {"setMilliseconds", 15, JS_BUILTIN_DATE_SET_MILLISECONDS, 1},
-                            {"setUTCFullYear", 14, JS_BUILTIN_DATE_SET_UTC_FULL_YEAR, 3},
-                            {"setUTCMonth", 11, JS_BUILTIN_DATE_SET_UTC_MONTH, 2},
-                            {"setUTCDate", 10, JS_BUILTIN_DATE_SET_UTC_DATE, 1},
-                            {"setUTCHours", 11, JS_BUILTIN_DATE_SET_UTC_HOURS, 4},
-                            {"setUTCMinutes", 13, JS_BUILTIN_DATE_SET_UTC_MINUTES, 3},
-                            {"setUTCSeconds", 13, JS_BUILTIN_DATE_SET_UTC_SECONDS, 2},
-                            {"setUTCMilliseconds", 18, JS_BUILTIN_DATE_SET_UTC_MILLISECONDS, 1},
-                            {"getYear", 7, JS_BUILTIN_DATE_GET_YEAR, 0},
-                            {"setYear", 7, JS_BUILTIN_DATE_SET_YEAR, 1},
-                            {NULL, 0, 0, 0}
-                        };
-                        for (int i = 0; date_methods[i].name; i++) {
-                            if ((int)str_key->len == date_methods[i].len &&
-                                strncmp(str_key->chars, date_methods[i].name, str_key->len) == 0) {
-                                return js_get_or_create_builtin(date_methods[i].id, date_methods[i].name, date_methods[i].pc);
-                            }
-                        }
+                        Item date_method = js_lookup_builtin_prototype_method_for_class(JS_CLASS_DATE, str_key->chars, (int)str_key->len);
+                        if (date_method.item != ItemNull.item) return date_method;
                         // Symbol.toPrimitive (stored as __sym_2)
                         if (str_key->len == 7 && strncmp(str_key->chars, "__sym_2", 7) == 0) {
                             return js_get_or_create_builtin(JS_BUILTIN_DATE_TO_PRIMITIVE, "[Symbol.toPrimitive]", 1);
                         }
                     } else if (cls == JS_CLASS_REGEXP) {
-                        // v46: RegExp prototype methods
-                        if (str_key->len == 4 && strncmp(str_key->chars, "exec", 4) == 0)
-                            return js_get_or_create_builtin(JS_BUILTIN_REGEXP_EXEC, "exec", 1);
-                        if (str_key->len == 4 && strncmp(str_key->chars, "test", 4) == 0)
-                            return js_get_or_create_builtin(JS_BUILTIN_REGEXP_TEST, "test", 1);
-                        if (str_key->len == 8 && strncmp(str_key->chars, "toString", 8) == 0)
-                            return js_get_or_create_builtin(JS_BUILTIN_REGEXP_TO_STRING, "toString", 0);
-                        if (str_key->len == 7 && strncmp(str_key->chars, "compile", 7) == 0)
-                            return js_get_or_create_builtin(JS_BUILTIN_REGEXP_COMPILE, "compile", 2);
+                        Item regexp_method = js_lookup_builtin_prototype_method_for_class(JS_CLASS_REGEXP, str_key->chars, (int)str_key->len);
+                        if (regexp_method.item != ItemNull.item) return regexp_method;
                         // v90: Symbol-keyed methods resolved via prototype chain (supports delete/override)
                     } else if (cls == JS_CLASS_ARRAY) {
                         // Array.prototype[Symbol.iterator] → values
@@ -6346,24 +6296,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                         }
                         // v76: Populate Map/Set prototype methods for test262 compliance
                         if (nl == 3 && strncmp(nm, "Map", 3) == 0) {
-                            struct { const char* name; int len; int bid; int pc; } methods[] = {
-                                {"set", 3, JS_BUILTIN_MAP_SET, 2},
-                                {"get", 3, JS_BUILTIN_MAP_GET, 1},
-                                {"has", 3, JS_BUILTIN_MAP_HAS, 1},
-                                {"delete", 6, JS_BUILTIN_MAP_DELETE, 1},
-                                {"clear", 5, JS_BUILTIN_MAP_CLEAR, 0},
-                                {"forEach", 7, JS_BUILTIN_MAP_FOREACH, 1},
-                                {"keys", 4, JS_BUILTIN_MAP_KEYS, 0},
-                                {"values", 6, JS_BUILTIN_MAP_VALUES, 0},
-                                {"entries", 7, JS_BUILTIN_MAP_ENTRIES, 0},
-                                {NULL, 0, 0, 0}
-                            };
-                            for (int mi = 0; methods[mi].name; mi++) {
-                                Item mk = (Item){.item = s2it(heap_create_name(methods[mi].name, methods[mi].len))};
-                                Item mf = js_get_or_create_builtin(methods[mi].bid, methods[mi].name, methods[mi].pc);
-                                js_property_set(fn->prototype, mk, mf);
-                                js_mark_non_enumerable(fn->prototype, mk);
-                            }
+                            js_populate_builtin_prototype_methods(fn->prototype, nm, nl);
                             // Symbol.iterator = entries
                             Item si_key = (Item){.item = s2it(heap_create_name("__sym_1", 7))};
                             Item si_fn = js_get_or_create_builtin(JS_BUILTIN_MAP_ENTRIES, "[Symbol.iterator]", 0);
@@ -6371,32 +6304,9 @@ extern "C" Item js_property_get(Item object, Item key) {
                             js_mark_non_enumerable(fn->prototype, si_key);
                         }
                         if (nl == 3 && strncmp(nm, "Set", 3) == 0) {
-                            struct { const char* name; int len; int bid; int pc; } methods[] = {
-                                {"add", 3, JS_BUILTIN_SET_ADD, 1},
-                                {"has", 3, JS_BUILTIN_SET_HAS, 1},
-                                {"delete", 6, JS_BUILTIN_SET_DELETE, 1},
-                                {"clear", 5, JS_BUILTIN_SET_CLEAR, 0},
-                                {"forEach", 7, JS_BUILTIN_SET_FOREACH, 1},
-                                {"values", 6, JS_BUILTIN_SET_VALUES, 0},
-                                {"entries", 7, JS_BUILTIN_SET_ENTRIES, 0},
-                                {"intersection", 12, JS_BUILTIN_SET_INTERSECTION, 1},
-                                {"union", 5, JS_BUILTIN_SET_UNION, 1},
-                                {"difference", 10, JS_BUILTIN_SET_DIFFERENCE, 1},
-                                {"symmetricDifference", 19, JS_BUILTIN_SET_SYM_DIFF, 1},
-                                {"isSubsetOf", 10, JS_BUILTIN_SET_IS_SUBSET, 1},
-                                {"isSupersetOf", 12, JS_BUILTIN_SET_IS_SUPERSET, 1},
-                                {"isDisjointFrom", 14, JS_BUILTIN_SET_IS_DISJOINT, 1},
-                                {NULL, 0, 0, 0}
-                            };
-                            Item values_fn = ItemNull;
-                            for (int mi = 0; methods[mi].name; mi++) {
-                                Item mk = (Item){.item = s2it(heap_create_name(methods[mi].name, methods[mi].len))};
-                                Item mf = js_get_or_create_builtin(methods[mi].bid, methods[mi].name, methods[mi].pc);
-                                js_property_set(fn->prototype, mk, mf);
-                                js_mark_non_enumerable(fn->prototype, mk);
-                                if (methods[mi].bid == JS_BUILTIN_SET_VALUES) values_fn = mf;
-                            }
+                            js_populate_builtin_prototype_methods(fn->prototype, nm, nl);
                             // ES spec: Set.prototype.keys === Set.prototype.values
+                            Item values_fn = js_get_or_create_builtin(JS_BUILTIN_SET_VALUES, "values", 0);
                             if (values_fn.item != ItemNull.item) {
                                 Item keys_key = (Item){.item = s2it(heap_create_name("keys", 4))};
                                 js_property_set(fn->prototype, keys_key, values_fn);
@@ -6410,90 +6320,15 @@ extern "C" Item js_property_get(Item object, Item key) {
                         }
                         // Populate WeakMap.prototype methods
                         if (nl == 7 && strncmp(nm, "WeakMap", 7) == 0) {
-                            struct { const char* name; int len; int bid; int pc; } methods[] = {
-                                {"set", 3, JS_BUILTIN_WEAKMAP_SET, 2},
-                                {"get", 3, JS_BUILTIN_WEAKMAP_GET, 1},
-                                {"has", 3, JS_BUILTIN_WEAKMAP_HAS, 1},
-                                {"delete", 6, JS_BUILTIN_WEAKMAP_DELETE, 1},
-                                {NULL, 0, 0, 0}
-                            };
-                            for (int mi = 0; methods[mi].name; mi++) {
-                                Item mk = (Item){.item = s2it(heap_create_name(methods[mi].name, methods[mi].len))};
-                                Item mf = js_get_or_create_builtin(methods[mi].bid, methods[mi].name, methods[mi].pc);
-                                js_property_set(fn->prototype, mk, mf);
-                                js_mark_non_enumerable(fn->prototype, mk);
-                            }
+                            js_populate_builtin_prototype_methods(fn->prototype, nm, nl);
                         }
                         // Populate WeakSet.prototype methods
                         if (nl == 7 && strncmp(nm, "WeakSet", 7) == 0) {
-                            struct { const char* name; int len; int bid; int pc; } methods[] = {
-                                {"add", 3, JS_BUILTIN_WEAKSET_ADD, 1},
-                                {"has", 3, JS_BUILTIN_WEAKSET_HAS, 1},
-                                {"delete", 6, JS_BUILTIN_WEAKSET_DELETE, 1},
-                                {NULL, 0, 0, 0}
-                            };
-                            for (int mi = 0; methods[mi].name; mi++) {
-                                Item mk = (Item){.item = s2it(heap_create_name(methods[mi].name, methods[mi].len))};
-                                Item mf = js_get_or_create_builtin(methods[mi].bid, methods[mi].name, methods[mi].pc);
-                                js_property_set(fn->prototype, mk, mf);
-                                js_mark_non_enumerable(fn->prototype, mk);
-                            }
+                            js_populate_builtin_prototype_methods(fn->prototype, nm, nl);
                         }
                         // v82: Populate Date.prototype methods for test262 compliance
                         if (nl == 4 && strncmp(nm, "Date", 4) == 0) {
-                            struct { const char* name; int len; int bid; int pc; } methods[] = {
-                                {"getTime", 7, JS_BUILTIN_DATE_GET_TIME, 0},
-                                {"getFullYear", 11, JS_BUILTIN_DATE_GET_FULL_YEAR, 0},
-                                {"getMonth", 8, JS_BUILTIN_DATE_GET_MONTH, 0},
-                                {"getDate", 7, JS_BUILTIN_DATE_GET_DATE, 0},
-                                {"getHours", 8, JS_BUILTIN_DATE_GET_HOURS, 0},
-                                {"getMinutes", 10, JS_BUILTIN_DATE_GET_MINUTES, 0},
-                                {"getSeconds", 10, JS_BUILTIN_DATE_GET_SECONDS, 0},
-                                {"getMilliseconds", 15, JS_BUILTIN_DATE_GET_MILLISECONDS, 0},
-                                {"getDay", 6, JS_BUILTIN_DATE_GET_DAY, 0},
-                                {"getUTCFullYear", 14, JS_BUILTIN_DATE_GET_UTC_FULL_YEAR, 0},
-                                {"getUTCMonth", 11, JS_BUILTIN_DATE_GET_UTC_MONTH, 0},
-                                {"getUTCDate", 10, JS_BUILTIN_DATE_GET_UTC_DATE, 0},
-                                {"getUTCHours", 11, JS_BUILTIN_DATE_GET_UTC_HOURS, 0},
-                                {"getUTCMinutes", 13, JS_BUILTIN_DATE_GET_UTC_MINUTES, 0},
-                                {"getUTCSeconds", 13, JS_BUILTIN_DATE_GET_UTC_SECONDS, 0},
-                                {"getUTCMilliseconds", 18, JS_BUILTIN_DATE_GET_UTC_MILLISECONDS, 0},
-                                {"getUTCDay", 9, JS_BUILTIN_DATE_GET_UTC_DAY, 0},
-                                {"getTimezoneOffset", 17, JS_BUILTIN_DATE_GET_TIMEZONE_OFFSET, 0},
-                                {"setTime", 7, JS_BUILTIN_DATE_SET_TIME, 1},
-                                {"setFullYear", 11, JS_BUILTIN_DATE_SET_FULL_YEAR, 3},
-                                {"setMonth", 8, JS_BUILTIN_DATE_SET_MONTH, 2},
-                                {"setDate", 7, JS_BUILTIN_DATE_SET_DATE, 1},
-                                {"setHours", 8, JS_BUILTIN_DATE_SET_HOURS, 4},
-                                {"setMinutes", 10, JS_BUILTIN_DATE_SET_MINUTES, 3},
-                                {"setSeconds", 10, JS_BUILTIN_DATE_SET_SECONDS, 2},
-                                {"setMilliseconds", 15, JS_BUILTIN_DATE_SET_MILLISECONDS, 1},
-                                {"setUTCFullYear", 14, JS_BUILTIN_DATE_SET_UTC_FULL_YEAR, 3},
-                                {"setUTCMonth", 11, JS_BUILTIN_DATE_SET_UTC_MONTH, 2},
-                                {"setUTCDate", 10, JS_BUILTIN_DATE_SET_UTC_DATE, 1},
-                                {"setUTCHours", 11, JS_BUILTIN_DATE_SET_UTC_HOURS, 4},
-                                {"setUTCMinutes", 13, JS_BUILTIN_DATE_SET_UTC_MINUTES, 3},
-                                {"setUTCSeconds", 13, JS_BUILTIN_DATE_SET_UTC_SECONDS, 2},
-                                {"setUTCMilliseconds", 18, JS_BUILTIN_DATE_SET_UTC_MILLISECONDS, 1},
-                                {"toISOString", 11, JS_BUILTIN_DATE_TO_ISO_STRING, 0},
-                                {"toJSON", 6, JS_BUILTIN_DATE_TO_JSON, 1},
-                                {"toUTCString", 11, JS_BUILTIN_DATE_TO_UTC_STRING, 0},
-                                {"toDateString", 12, JS_BUILTIN_DATE_TO_DATE_STRING, 0},
-                                {"toTimeString", 12, JS_BUILTIN_DATE_TO_TIME_STRING, 0},
-                                {"toString", 8, JS_BUILTIN_DATE_TO_STRING, 0},
-                                {"toLocaleDateString", 18, JS_BUILTIN_DATE_TO_LOCALE_DATE_STRING, 0},
-                                {"toLocaleTimeString", 18, JS_BUILTIN_DATE_TO_LOCALE_DATE_STRING, 0},
-                                {"valueOf", 7, JS_BUILTIN_DATE_VALUE_OF, 0},
-                                {"getYear", 7, JS_BUILTIN_DATE_GET_YEAR, 0},
-                                {"setYear", 7, JS_BUILTIN_DATE_SET_YEAR, 1},
-                                {NULL, 0, 0, 0}
-                            };
-                            for (int mi = 0; methods[mi].name; mi++) {
-                                Item mk = (Item){.item = s2it(heap_create_name(methods[mi].name, methods[mi].len))};
-                                Item mf = js_get_or_create_builtin(methods[mi].bid, methods[mi].name, methods[mi].pc);
-                                js_property_set(fn->prototype, mk, mf);
-                                js_mark_non_enumerable(fn->prototype, mk);
-                            }
+                            js_populate_builtin_prototype_methods(fn->prototype, nm, nl);
                             // Symbol.toPrimitive
                             Item tp_key = (Item){.item = s2it(heap_create_name("__sym_2", 7))};
                             Item tp_fn = js_get_or_create_builtin(JS_BUILTIN_DATE_TO_PRIMITIVE, "[Symbol.toPrimitive]", 1);
@@ -6502,36 +6337,11 @@ extern "C" Item js_property_get(Item object, Item key) {
                         }
                         // v82b: Populate Number.prototype methods
                         if (nl == 6 && strncmp(nm, "Number", 6) == 0) {
-                            struct { const char* name; int len; int bid; int pc; } methods[] = {
-                                {"toString", 8, JS_BUILTIN_NUM_TO_STRING, 1},
-                                {"valueOf", 7, JS_BUILTIN_NUM_VALUE_OF, 0},
-                                {"toFixed", 7, JS_BUILTIN_NUM_TO_FIXED, 1},
-                                {"toPrecision", 11, JS_BUILTIN_NUM_TO_PRECISION, 1},
-                                {"toExponential", 13, JS_BUILTIN_NUM_TO_EXPONENTIAL, 1},
-                                {NULL, 0, 0, 0}
-                            };
-                            for (int mi = 0; methods[mi].name; mi++) {
-                                Item mk = (Item){.item = s2it(heap_create_name(methods[mi].name, methods[mi].len))};
-                                Item mf = js_get_or_create_builtin(methods[mi].bid, methods[mi].name, methods[mi].pc);
-                                js_property_set(fn->prototype, mk, mf);
-                                js_mark_non_enumerable(fn->prototype, mk);
-                            }
+                            js_populate_builtin_prototype_methods(fn->prototype, nm, nl);
                         }
                         // v82c: Populate RegExp.prototype methods
                         if (nl == 6 && strncmp(nm, "RegExp", 6) == 0) {
-                            struct { const char* name; int len; int bid; int pc; } methods[] = {
-                                {"exec", 4, JS_BUILTIN_REGEXP_EXEC, 1},
-                                {"test", 4, JS_BUILTIN_REGEXP_TEST, 1},
-                                {"toString", 8, JS_BUILTIN_REGEXP_TO_STRING, 0},
-                                {"compile", 7, JS_BUILTIN_REGEXP_COMPILE, 2},
-                                {NULL, 0, 0, 0}
-                            };
-                            for (int mi = 0; methods[mi].name; mi++) {
-                                Item mk = (Item){.item = s2it(heap_create_name(methods[mi].name, methods[mi].len))};
-                                Item mf = js_get_or_create_builtin(methods[mi].bid, methods[mi].name, methods[mi].pc);
-                                js_property_set(fn->prototype, mk, mf);
-                                js_mark_non_enumerable(fn->prototype, mk);
-                            }
+                            js_populate_builtin_prototype_methods(fn->prototype, nm, nl);
                             // v83: Symbol-keyed methods (@@match, @@replace, @@search, @@split, @@matchAll)
                             struct { const char* sym_key; int sym_len; int bid; const char* display; int pc; } sym_methods[] = {
                                 {"__sym_7",  7, JS_BUILTIN_REGEXP_SYMBOL_MATCH,     "[Symbol.match]",    1},
@@ -6571,18 +6381,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                         }
                         // v88: Populate Promise.prototype methods
                         if (nl == 7 && strncmp(nm, "Promise", 7) == 0) {
-                            struct { const char* name; int len; int bid; int pc; } methods[] = {
-                                {"then", 4, JS_BUILTIN_PROMISE_PROTO_THEN, 2},
-                                {"catch", 5, JS_BUILTIN_PROMISE_PROTO_CATCH, 1},
-                                {"finally", 7, JS_BUILTIN_PROMISE_PROTO_FINALLY, 1},
-                                {NULL, 0, 0, 0}
-                            };
-                            for (int mi = 0; methods[mi].name; mi++) {
-                                Item mk = (Item){.item = s2it(heap_create_name(methods[mi].name, methods[mi].len))};
-                                Item mf = js_get_or_create_builtin(methods[mi].bid, methods[mi].name, methods[mi].pc);
-                                js_property_set(fn->prototype, mk, mf);
-                                js_mark_non_enumerable(fn->prototype, mk);
-                            }
+                            js_populate_builtin_prototype_methods(fn->prototype, nm, nl);
                             // Symbol.toStringTag = "Promise"
                             Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
                             Item tag_val = (Item){.item = s2it(heap_create_name("Promise", 7))};
@@ -6591,52 +6390,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                         }
                         // v29: Populate Array.prototype methods for test262 compliance
                         if (nl == 5 && strncmp(nm, "Array", 5) == 0) {
-                            struct { const char* name; int len; int bid; int pc; } methods[] = {
-                                {"push", 4, JS_BUILTIN_ARR_PUSH, 1},
-                                {"pop", 3, JS_BUILTIN_ARR_POP, 0},
-                                {"shift", 5, JS_BUILTIN_ARR_SHIFT, 0},
-                                {"unshift", 7, JS_BUILTIN_ARR_UNSHIFT, 1},
-                                {"join", 4, JS_BUILTIN_ARR_JOIN, 1},
-                                {"slice", 5, JS_BUILTIN_ARR_SLICE, 2},
-                                {"splice", 6, JS_BUILTIN_ARR_SPLICE, 2},
-                                {"indexOf", 7, JS_BUILTIN_ARR_INDEX_OF, 1},
-                                {"lastIndexOf", 11, JS_BUILTIN_ARR_LAST_INDEX_OF, 1},
-                                {"includes", 8, JS_BUILTIN_ARR_INCLUDES, 1},
-                                {"map", 3, JS_BUILTIN_ARR_MAP, 1},
-                                {"filter", 6, JS_BUILTIN_ARR_FILTER, 1},
-                                {"reduce", 6, JS_BUILTIN_ARR_REDUCE, 1},
-                                {"forEach", 7, JS_BUILTIN_ARR_FOR_EACH, 1},
-                                {"find", 4, JS_BUILTIN_ARR_FIND, 1},
-                                {"findIndex", 9, JS_BUILTIN_ARR_FIND_INDEX, 1},
-                                {"some", 4, JS_BUILTIN_ARR_SOME, 1},
-                                {"every", 5, JS_BUILTIN_ARR_EVERY, 1},
-                                {"sort", 4, JS_BUILTIN_ARR_SORT, 1},
-                                {"reverse", 7, JS_BUILTIN_ARR_REVERSE, 0},
-                                {"concat", 6, JS_BUILTIN_ARR_CONCAT, 1},
-                                {"flat", 4, JS_BUILTIN_ARR_FLAT, 0},
-                                {"flatMap", 7, JS_BUILTIN_ARR_FLAT_MAP, 1},
-                                {"fill", 4, JS_BUILTIN_ARR_FILL, 1},
-                                {"copyWithin", 10, JS_BUILTIN_ARR_COPY_WITHIN, 2},
-                                {"toString", 8, JS_BUILTIN_ARR_TO_STRING, 0},
-                                {"keys", 4, JS_BUILTIN_ARR_KEYS, 0},
-                                {"values", 6, JS_BUILTIN_ARR_VALUES, 0},
-                                {"entries", 7, JS_BUILTIN_ARR_ENTRIES, 0},
-                                {"at", 2, JS_BUILTIN_ARR_AT, 1},
-                                {"reduceRight", 11, JS_BUILTIN_ARR_REDUCE_RIGHT, 1},
-                                {"findLast", 8, JS_BUILTIN_ARR_FIND_LAST, 1},
-                                {"findLastIndex", 13, JS_BUILTIN_ARR_FIND_LAST_INDEX, 1},
-                                {"toSorted", 8, JS_BUILTIN_ARR_TO_SORTED, 1},
-                                {"toReversed", 10, JS_BUILTIN_ARR_TO_REVERSED, 0},
-                                {"toSpliced", 9, JS_BUILTIN_ARR_TO_SPLICED, 2},
-                                {"with", 4, JS_BUILTIN_ARR_WITH, 2},
-                                {NULL, 0, 0, 0}
-                            };
-                            for (int mi = 0; methods[mi].name; mi++) {
-                                Item mk = (Item){.item = s2it(heap_create_name(methods[mi].name, methods[mi].len))};
-                                Item mf = js_get_or_create_builtin(methods[mi].bid, methods[mi].name, methods[mi].pc);
-                                js_property_set(fn->prototype, mk, mf);
-                                js_mark_non_enumerable(fn->prototype, mk);
-                            }
+                            js_populate_builtin_prototype_methods(fn->prototype, nm, nl);
                             // Symbol.iterator = values
                             Item si_key = (Item){.item = s2it(heap_create_name("__sym_1", 7))};
                             Item si_fn = js_get_or_create_builtin(JS_BUILTIN_ARR_VALUES, "[Symbol.iterator]", 0);
@@ -6645,45 +6399,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                         }
                         // v29: Populate String.prototype methods for test262 compliance
                         if (nl == 6 && strncmp(nm, "String", 6) == 0) {
-                            struct { const char* name; int len; int bid; int pc; } methods[] = {
-                                {"charAt", 6, JS_BUILTIN_STR_CHAR_AT, 1},
-                                {"charCodeAt", 10, JS_BUILTIN_STR_CHAR_CODE_AT, 1},
-                                {"indexOf", 7, JS_BUILTIN_STR_INDEX_OF, 1},
-                                {"lastIndexOf", 11, JS_BUILTIN_STR_LAST_INDEX_OF, 1},
-                                {"includes", 8, JS_BUILTIN_STR_INCLUDES, 1},
-                                {"slice", 5, JS_BUILTIN_STR_SLICE, 2},
-                                {"substring", 9, JS_BUILTIN_STR_SUBSTRING, 2},
-                                {"toLowerCase", 11, JS_BUILTIN_STR_TO_LOWER_CASE, 0},
-                                {"toUpperCase", 11, JS_BUILTIN_STR_TO_UPPER_CASE, 0},
-                                {"trim", 4, JS_BUILTIN_STR_TRIM, 0},
-                                {"trimStart", 9, JS_BUILTIN_STR_TRIM_START, 0},
-                                {"trimEnd", 7, JS_BUILTIN_STR_TRIM_END, 0},
-                                {"split", 5, JS_BUILTIN_STR_SPLIT, 2},
-                                {"replace", 7, JS_BUILTIN_STR_REPLACE, 2},
-                                {"replaceAll", 10, JS_BUILTIN_STR_REPLACE_ALL, 2},
-                                {"match", 5, JS_BUILTIN_STR_MATCH, 1},
-                                {"matchAll", 8, JS_BUILTIN_STR_MATCH_ALL, 1},
-                                {"search", 6, JS_BUILTIN_STR_SEARCH, 1},
-                                {"startsWith", 10, JS_BUILTIN_STR_STARTS_WITH, 1},
-                                {"endsWith", 8, JS_BUILTIN_STR_ENDS_WITH, 1},
-                                {"repeat", 6, JS_BUILTIN_STR_REPEAT, 1},
-                                {"padStart", 8, JS_BUILTIN_STR_PAD_START, 1},
-                                {"padEnd", 6, JS_BUILTIN_STR_PAD_END, 1},
-                                {"toString", 8, JS_BUILTIN_STR_TO_STRING, 0},
-                                {"valueOf", 7, JS_BUILTIN_STR_VALUE_OF, 0},
-                                {"codePointAt", 11, JS_BUILTIN_STR_CODE_POINT_AT, 1},
-                                {"normalize", 9, JS_BUILTIN_STR_NORMALIZE, 0},
-                                {"concat", 6, JS_BUILTIN_STR_CONCAT, 1},
-                                {"at", 2, JS_BUILTIN_STR_AT, 1},
-                                {"localeCompare", 13, JS_BUILTIN_STR_LOCALE_COMPARE, 1},
-                                {NULL, 0, 0, 0}
-                            };
-                            for (int mi = 0; methods[mi].name; mi++) {
-                                Item mk = (Item){.item = s2it(heap_create_name(methods[mi].name, methods[mi].len))};
-                                Item mf = js_get_or_create_builtin(methods[mi].bid, methods[mi].name, methods[mi].pc);
-                                js_property_set(fn->prototype, mk, mf);
-                                js_mark_non_enumerable(fn->prototype, mk);
-                            }
+                            js_populate_builtin_prototype_methods(fn->prototype, nm, nl);
                             // Symbol.iterator
                             Item si_key = (Item){.item = s2it(heap_create_name("__sym_1", 7))};
                             Item si_fn = js_get_or_create_builtin(JS_BUILTIN_STRING_ITER, "[Symbol.iterator]", 0);
@@ -6692,41 +6408,11 @@ extern "C" Item js_property_get(Item object, Item key) {
                         }
                         // v29: Populate Object.prototype methods for test262 compliance
                         if (nl == 6 && strncmp(nm, "Object", 6) == 0) {
-                            struct { const char* name; int len; int bid; int pc; } methods[] = {
-                                {"hasOwnProperty", 14, JS_BUILTIN_OBJ_HAS_OWN_PROPERTY, 1},
-                                {"propertyIsEnumerable", 20, JS_BUILTIN_OBJ_PROPERTY_IS_ENUMERABLE, 1},
-                                {"toString", 8, JS_BUILTIN_OBJ_TO_STRING, 0},
-                                {"valueOf", 7, JS_BUILTIN_OBJ_VALUE_OF, 0},
-                                {"isPrototypeOf", 13, JS_BUILTIN_OBJ_IS_PROTOTYPE_OF, 1},
-                                {"toLocaleString", 14, JS_BUILTIN_OBJ_TO_LOCALE_STRING, 0},
-                                {"__defineGetter__", 16, JS_BUILTIN_OBJ_DEFINE_GETTER, 2},
-                                {"__defineSetter__", 16, JS_BUILTIN_OBJ_DEFINE_SETTER, 2},
-                                {"__lookupGetter__", 16, JS_BUILTIN_OBJ_LOOKUP_GETTER, 1},
-                                {"__lookupSetter__", 16, JS_BUILTIN_OBJ_LOOKUP_SETTER, 1},
-                                {NULL, 0, 0, 0}
-                            };
-                            for (int mi = 0; methods[mi].name; mi++) {
-                                Item mk = (Item){.item = s2it(heap_create_name(methods[mi].name, methods[mi].len))};
-                                Item mf = js_get_or_create_builtin(methods[mi].bid, methods[mi].name, methods[mi].pc);
-                                js_property_set(fn->prototype, mk, mf);
-                                js_mark_non_enumerable(fn->prototype, mk);
-                            }
+                            js_populate_builtin_prototype_methods(fn->prototype, nm, nl);
                         }
                         // v29: Populate Function.prototype methods for test262 compliance
                         if (nl == 8 && strncmp(nm, "Function", 8) == 0) {
-                            struct { const char* name; int len; int bid; int pc; } methods[] = {
-                                {"call", 4, JS_BUILTIN_FUNC_CALL, 1},
-                                {"apply", 5, JS_BUILTIN_FUNC_APPLY, 2},
-                                {"bind", 4, JS_BUILTIN_FUNC_BIND, 1},
-                                {"toString", 8, JS_BUILTIN_FUNC_TO_STRING, 0},
-                                {NULL, 0, 0, 0}
-                            };
-                            for (int mi = 0; methods[mi].name; mi++) {
-                                Item mk = (Item){.item = s2it(heap_create_name(methods[mi].name, methods[mi].len))};
-                                Item mf = js_get_or_create_builtin(methods[mi].bid, methods[mi].name, methods[mi].pc);
-                                js_property_set(fn->prototype, mk, mf);
-                                js_mark_non_enumerable(fn->prototype, mk);
-                            }
+                            js_populate_builtin_prototype_methods(fn->prototype, nm, nl);
                         }
                         {
                             extern Item js_get_typed_array_base_proto();
@@ -6750,47 +6436,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                             js_property_set(fn->prototype, tag_key, tag_val);
                             js_mark_non_writable(fn->prototype, tag_key);
                             js_mark_non_enumerable(fn->prototype, tag_key);
-                            // DataView methods as function objects with correct .length
-                            struct { const char* name; int len; int pc; } dv_methods[] = {
-                                {"getInt8",      7, 1}, {"getUint8",      8, 1},
-                                {"getInt16",     8, 1}, {"getUint16",     9, 1},
-                                {"getInt32",     8, 1}, {"getUint32",     9, 1},
-                                {"getFloat32",   10, 1}, {"getFloat64",   10, 1},
-                                {"getBigInt64",  11, 1}, {"getBigUint64",  12, 1},
-                                {"setInt8",      7, 2}, {"setUint8",      8, 2},
-                                {"setInt16",     8, 2}, {"setUint16",     9, 2},
-                                {"setInt32",     8, 2}, {"setUint32",     9, 2},
-                                {"setFloat32",   10, 2}, {"setFloat64",   10, 2},
-                                {"setBigInt64",  11, 2}, {"setBigUint64",  12, 2},
-                                {NULL, 0, 0}
-                            };
-                            for (int mi = 0; dv_methods[mi].name; mi++) {
-                                Item mk = (Item){.item = s2it(heap_create_name(dv_methods[mi].name, dv_methods[mi].len))};
-                                JsFunction* mfn = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
-                                mfn->type_id = LMD_TYPE_FUNC;
-                                mfn->param_count = dv_methods[mi].pc;
-                                mfn->formal_length = -1;
-                                mfn->builtin_id = -2; // non-constructor builtin
-                                mfn->name = heap_create_name(dv_methods[mi].name, dv_methods[mi].len);
-                                js_property_set(fn->prototype, mk, (Item){.function = (Function*)mfn});
-                                js_mark_non_enumerable(fn->prototype, mk);
-                            }
-                            struct { const char* name; int len; } dv_accessors[] = {
-                                {"buffer", 6}, {"byteLength", 10}, {"byteOffset", 10}, {NULL, 0}
-                            };
-                            for (int ai = 0; dv_accessors[ai].name; ai++) {
-                                JsFunction* gf = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
-                                gf->type_id = LMD_TYPE_FUNC;
-                                gf->flags = JS_FUNC_FLAG_DATA_VIEW_ACCESSOR | JS_FUNC_FLAG_STRICT;
-                                char getter_name[32];
-                                int getter_len = snprintf(getter_name, sizeof(getter_name), "get %s", dv_accessors[ai].name);
-                                gf->name = heap_create_name(getter_name, getter_len);
-                                gf->param_count = 0;
-                                gf->formal_length = -1;
-                                Item gf_item = (Item){.function = (Function*)gf};
-                                Item prop_name = (Item){.item = s2it(heap_create_name(dv_accessors[ai].name, dv_accessors[ai].len))};
-                                js_install_native_accessor(fn->prototype, prop_name, gf_item, ItemNull, JSPD_NON_ENUMERABLE);
-                            }
+                            js_populate_dataview_prototype_methods(fn->prototype);
                         }
                         // ArrayBuffer.prototype methods
                         if (nl == 11 && strncmp(nm, "ArrayBuffer", 11) == 0) {
@@ -6804,15 +6450,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                             js_property_set(fn->prototype, tag_key, tag_val);
                             js_mark_non_writable(fn->prototype, tag_key);
                             js_mark_non_enumerable(fn->prototype, tag_key);
-                            // slice method
-                            Item sk = (Item){.item = s2it(heap_create_name("slice", 5))};
-                            Item sf = js_get_or_create_builtin(JS_BUILTIN_ARRAYBUFFER_SLICE, "slice", 2);
-                            js_property_set(fn->prototype, sk, sf);
-                            js_mark_non_enumerable(fn->prototype, sk);
-                            Item rk = (Item){.item = s2it(heap_create_name("resize", 6))};
-                            Item rf = js_get_or_create_builtin(JS_BUILTIN_ARRAYBUFFER_RESIZE, "resize", 1);
-                            js_property_set(fn->prototype, rk, rf);
-                            js_mark_non_enumerable(fn->prototype, rk);
+                            js_populate_builtin_prototype_methods(fn->prototype, nm, nl);
                         }
 
                     }
@@ -7321,6 +6959,8 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                 return value;
             case MAP_KIND_DOM:
                 return js_dom_set_property(object, key, value);
+            case MAP_KIND_CSS_NAMESPACE:
+                break;
             case MAP_KIND_CSSOM:
                 if (js_is_css_rule(object)) return js_cssom_rule_set_property(object, key, value);
                 return js_cssom_rule_decl_set_property(object, key, value);
@@ -8662,13 +8302,18 @@ struct JsBuiltinMethodSpec {
     int len;
     int builtin_id;
     int param_count;
+    const char* display_name;
 };
+
+static const char* js_builtin_method_spec_display_name(const JsBuiltinMethodSpec* spec) {
+    return spec->display_name ? spec->display_name : spec->name;
+}
 
 static Item js_lookup_builtin_method_spec(const JsBuiltinMethodSpec* specs, const char* name, int len) {
     if (!specs || !name) return ItemNull;
     for (int i = 0; specs[i].name; i++) {
         if (len == specs[i].len && strncmp(name, specs[i].name, len) == 0) {
-            return js_get_or_create_builtin(specs[i].builtin_id, specs[i].name, specs[i].param_count);
+            return js_get_or_create_builtin(specs[i].builtin_id, js_builtin_method_spec_display_name(&specs[i]), specs[i].param_count);
         }
     }
     return ItemNull;
@@ -8678,7 +8323,7 @@ static void js_install_builtin_method_specs(Item object, const JsBuiltinMethodSp
     if (!specs) return;
     for (int i = 0; specs[i].name; i++) {
         Item key = (Item){.item = s2it(heap_create_name(specs[i].name, specs[i].len))};
-        Item fn = js_get_or_create_builtin(specs[i].builtin_id, specs[i].name, specs[i].param_count);
+        Item fn = js_get_or_create_builtin(specs[i].builtin_id, js_builtin_method_spec_display_name(&specs[i]), specs[i].param_count);
         js_property_set(object, key, fn);
         js_mark_non_enumerable(object, key);
     }
@@ -8694,9 +8339,43 @@ static void js_install_builtin_method_specs_on_function(Item function_item, cons
             Item existing = map_get(fn->properties_map.map, key);
             if (existing.item != ItemNull.item) continue;
         }
-        Item method = js_get_or_create_builtin(specs[i].builtin_id, specs[i].name, specs[i].param_count);
+        Item method = js_get_or_create_builtin(specs[i].builtin_id, js_builtin_method_spec_display_name(&specs[i]), specs[i].param_count);
         js_func_init_property(function_item, key, method);
         js_mark_non_enumerable(function_item, key);
+    }
+}
+
+static Item js_create_builtin_function_from_spec(const JsBuiltinMethodSpec* spec, int flags, bool use_cache) {
+    const char* display_name = js_builtin_method_spec_display_name(spec);
+    if (use_cache && flags == 0 && spec->builtin_id > 0) {
+        return js_get_or_create_builtin(spec->builtin_id, display_name, spec->param_count);
+    }
+    JsFunction* fn = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
+    fn->type_id = LMD_TYPE_FUNC;
+    fn->param_count = spec->param_count;
+    fn->formal_length = -1;
+    fn->builtin_id = spec->builtin_id;
+    fn->name = heap_create_name(display_name, strlen(display_name));
+    fn->flags = flags;
+    return (Item){.function = (Function*)fn};
+}
+
+static void js_install_builtin_function_specs(Item object, const JsBuiltinMethodSpec* specs, int flags, bool use_cache) {
+    if (!specs) return;
+    for (int i = 0; specs[i].name; i++) {
+        Item key = (Item){.item = s2it(heap_create_name(specs[i].name, specs[i].len))};
+        Item fn = js_create_builtin_function_from_spec(&specs[i], flags, use_cache);
+        js_property_set(object, key, fn);
+        js_mark_non_enumerable(object, key);
+    }
+}
+
+static void js_install_builtin_accessor_specs(Item object, const JsBuiltinMethodSpec* specs, int flags) {
+    if (!specs) return;
+    for (int i = 0; specs[i].name; i++) {
+        Item getter = js_create_builtin_function_from_spec(&specs[i], flags, false);
+        Item prop_name = (Item){.item = s2it(heap_create_name(specs[i].name, specs[i].len))};
+        js_install_native_accessor(object, prop_name, getter, ItemNull, JSPD_NON_ENUMERABLE);
     }
 }
 
@@ -8739,6 +8418,284 @@ static const JsBuiltinMethodSpec JS_MATH_METHOD_SPECS[] = {
     {NULL, 0, 0, 0}
 };
 
+static const JsBuiltinMethodSpec JS_OBJECT_PROTOTYPE_METHOD_SPECS[] = {
+    {"hasOwnProperty", 14, JS_BUILTIN_OBJ_HAS_OWN_PROPERTY, 1},
+    {"propertyIsEnumerable", 20, JS_BUILTIN_OBJ_PROPERTY_IS_ENUMERABLE, 1},
+    {"toString", 8, JS_BUILTIN_OBJ_TO_STRING, 0},
+    {"valueOf", 7, JS_BUILTIN_OBJ_VALUE_OF, 0},
+    {"isPrototypeOf", 13, JS_BUILTIN_OBJ_IS_PROTOTYPE_OF, 1},
+    {"toLocaleString", 14, JS_BUILTIN_OBJ_TO_LOCALE_STRING, 0},
+    {"__defineGetter__", 16, JS_BUILTIN_OBJ_DEFINE_GETTER, 2},
+    {"__defineSetter__", 16, JS_BUILTIN_OBJ_DEFINE_SETTER, 2},
+    {"__lookupGetter__", 16, JS_BUILTIN_OBJ_LOOKUP_GETTER, 1},
+    {"__lookupSetter__", 16, JS_BUILTIN_OBJ_LOOKUP_SETTER, 1},
+    {NULL, 0, 0, 0}
+};
+
+static const JsBuiltinMethodSpec JS_FUNCTION_PROTOTYPE_METHOD_SPECS[] = {
+    {"call", 4, JS_BUILTIN_FUNC_CALL, 1},
+    {"apply", 5, JS_BUILTIN_FUNC_APPLY, 2},
+    {"bind", 4, JS_BUILTIN_FUNC_BIND, 1},
+    {"toString", 8, JS_BUILTIN_FUNC_TO_STRING, 0},
+    {NULL, 0, 0, 0}
+};
+
+static const JsBuiltinMethodSpec JS_ARRAY_PROTOTYPE_METHOD_SPECS[] = {
+    {"push", 4, JS_BUILTIN_ARR_PUSH, 1},
+    {"pop", 3, JS_BUILTIN_ARR_POP, 0},
+    {"shift", 5, JS_BUILTIN_ARR_SHIFT, 0},
+    {"unshift", 7, JS_BUILTIN_ARR_UNSHIFT, 1},
+    {"join", 4, JS_BUILTIN_ARR_JOIN, 1},
+    {"slice", 5, JS_BUILTIN_ARR_SLICE, 2},
+    {"splice", 6, JS_BUILTIN_ARR_SPLICE, 2},
+    {"indexOf", 7, JS_BUILTIN_ARR_INDEX_OF, 1},
+    {"lastIndexOf", 11, JS_BUILTIN_ARR_LAST_INDEX_OF, 1},
+    {"includes", 8, JS_BUILTIN_ARR_INCLUDES, 1},
+    {"map", 3, JS_BUILTIN_ARR_MAP, 1},
+    {"filter", 6, JS_BUILTIN_ARR_FILTER, 1},
+    {"reduce", 6, JS_BUILTIN_ARR_REDUCE, 1},
+    {"forEach", 7, JS_BUILTIN_ARR_FOR_EACH, 1},
+    {"find", 4, JS_BUILTIN_ARR_FIND, 1},
+    {"findIndex", 9, JS_BUILTIN_ARR_FIND_INDEX, 1},
+    {"some", 4, JS_BUILTIN_ARR_SOME, 1},
+    {"every", 5, JS_BUILTIN_ARR_EVERY, 1},
+    {"sort", 4, JS_BUILTIN_ARR_SORT, 1},
+    {"reverse", 7, JS_BUILTIN_ARR_REVERSE, 0},
+    {"concat", 6, JS_BUILTIN_ARR_CONCAT, 1},
+    {"flat", 4, JS_BUILTIN_ARR_FLAT, 0},
+    {"flatMap", 7, JS_BUILTIN_ARR_FLAT_MAP, 1},
+    {"fill", 4, JS_BUILTIN_ARR_FILL, 1},
+    {"copyWithin", 10, JS_BUILTIN_ARR_COPY_WITHIN, 2},
+    {"toString", 8, JS_BUILTIN_ARR_TO_STRING, 0},
+    {"keys", 4, JS_BUILTIN_ARR_KEYS, 0},
+    {"values", 6, JS_BUILTIN_ARR_VALUES, 0},
+    {"entries", 7, JS_BUILTIN_ARR_ENTRIES, 0},
+    {"at", 2, JS_BUILTIN_ARR_AT, 1},
+    {"reduceRight", 11, JS_BUILTIN_ARR_REDUCE_RIGHT, 1},
+    {"findLast", 8, JS_BUILTIN_ARR_FIND_LAST, 1},
+    {"findLastIndex", 13, JS_BUILTIN_ARR_FIND_LAST_INDEX, 1},
+    {"toSorted", 8, JS_BUILTIN_ARR_TO_SORTED, 1},
+    {"toReversed", 10, JS_BUILTIN_ARR_TO_REVERSED, 0},
+    {"toSpliced", 9, JS_BUILTIN_ARR_TO_SPLICED, 2},
+    {"with", 4, JS_BUILTIN_ARR_WITH, 2},
+    {NULL, 0, 0, 0}
+};
+
+static const JsBuiltinMethodSpec JS_NUMBER_PROTOTYPE_METHOD_SPECS[] = {
+    {"toString", 8, JS_BUILTIN_NUM_TO_STRING, 1},
+    {"valueOf", 7, JS_BUILTIN_NUM_VALUE_OF, 0},
+    {"toFixed", 7, JS_BUILTIN_NUM_TO_FIXED, 1},
+    {"toPrecision", 11, JS_BUILTIN_NUM_TO_PRECISION, 1},
+    {"toExponential", 13, JS_BUILTIN_NUM_TO_EXPONENTIAL, 1},
+    {NULL, 0, 0, 0}
+};
+
+static const JsBuiltinMethodSpec JS_STRING_PROTOTYPE_METHOD_SPECS[] = {
+    {"charAt", 6, JS_BUILTIN_STR_CHAR_AT, 1},
+    {"charCodeAt", 10, JS_BUILTIN_STR_CHAR_CODE_AT, 1},
+    {"indexOf", 7, JS_BUILTIN_STR_INDEX_OF, 1},
+    {"lastIndexOf", 11, JS_BUILTIN_STR_LAST_INDEX_OF, 1},
+    {"includes", 8, JS_BUILTIN_STR_INCLUDES, 1},
+    {"slice", 5, JS_BUILTIN_STR_SLICE, 2},
+    {"substring", 9, JS_BUILTIN_STR_SUBSTRING, 2},
+    {"toLowerCase", 11, JS_BUILTIN_STR_TO_LOWER_CASE, 0},
+    {"toUpperCase", 11, JS_BUILTIN_STR_TO_UPPER_CASE, 0},
+    {"trim", 4, JS_BUILTIN_STR_TRIM, 0},
+    {"trimStart", 9, JS_BUILTIN_STR_TRIM_START, 0},
+    {"trimEnd", 7, JS_BUILTIN_STR_TRIM_END, 0},
+    {"split", 5, JS_BUILTIN_STR_SPLIT, 2},
+    {"replace", 7, JS_BUILTIN_STR_REPLACE, 2},
+    {"replaceAll", 10, JS_BUILTIN_STR_REPLACE_ALL, 2},
+    {"match", 5, JS_BUILTIN_STR_MATCH, 1},
+    {"matchAll", 8, JS_BUILTIN_STR_MATCH_ALL, 1},
+    {"search", 6, JS_BUILTIN_STR_SEARCH, 1},
+    {"startsWith", 10, JS_BUILTIN_STR_STARTS_WITH, 1},
+    {"endsWith", 8, JS_BUILTIN_STR_ENDS_WITH, 1},
+    {"repeat", 6, JS_BUILTIN_STR_REPEAT, 1},
+    {"padStart", 8, JS_BUILTIN_STR_PAD_START, 1},
+    {"padEnd", 6, JS_BUILTIN_STR_PAD_END, 1},
+    {"toString", 8, JS_BUILTIN_STR_TO_STRING, 0},
+    {"valueOf", 7, JS_BUILTIN_STR_VALUE_OF, 0},
+    {"codePointAt", 11, JS_BUILTIN_STR_CODE_POINT_AT, 1},
+    {"normalize", 9, JS_BUILTIN_STR_NORMALIZE, 0},
+    {"concat", 6, JS_BUILTIN_STR_CONCAT, 1},
+    {"at", 2, JS_BUILTIN_STR_AT, 1},
+    {"localeCompare", 13, JS_BUILTIN_STR_LOCALE_COMPARE, 1},
+    {"trimLeft", 8, JS_BUILTIN_STR_TRIM_START, 0, "trimStart"},
+    {"trimRight", 9, JS_BUILTIN_STR_TRIM_END, 0, "trimEnd"},
+    {"isWellFormed", 12, JS_BUILTIN_STR_IS_WELL_FORMED, 0},
+    {"toWellFormed", 12, JS_BUILTIN_STR_TO_WELL_FORMED, 0},
+    {"anchor", 6, JS_BUILTIN_STR_ANCHOR, 1},
+    {"big", 3, JS_BUILTIN_STR_BIG, 0},
+    {"blink", 5, JS_BUILTIN_STR_BLINK, 0},
+    {"bold", 4, JS_BUILTIN_STR_BOLD, 0},
+    {"fixed", 5, JS_BUILTIN_STR_FIXED, 0},
+    {"fontcolor", 9, JS_BUILTIN_STR_FONTCOLOR, 1},
+    {"fontsize", 8, JS_BUILTIN_STR_FONTSIZE, 1},
+    {"italics", 7, JS_BUILTIN_STR_ITALICS, 0},
+    {"link", 4, JS_BUILTIN_STR_LINK, 1},
+    {"small", 5, JS_BUILTIN_STR_SMALL, 0},
+    {"strike", 6, JS_BUILTIN_STR_STRIKE, 0},
+    {"sub", 3, JS_BUILTIN_STR_SUB, 0},
+    {"sup", 3, JS_BUILTIN_STR_SUP, 0},
+    {"substr", 6, JS_BUILTIN_STR_SUBSTR, 2},
+    {"toLocaleLowerCase", 17, JS_BUILTIN_STR_TO_LOCALE_LOWER_CASE, 0},
+    {"toLocaleUpperCase", 17, JS_BUILTIN_STR_TO_LOCALE_UPPER_CASE, 0},
+    {NULL, 0, 0, 0}
+};
+
+static const JsBuiltinMethodSpec JS_PROMISE_PROTOTYPE_METHOD_SPECS[] = {
+    {"then", 4, JS_BUILTIN_PROMISE_PROTO_THEN, 2},
+    {"catch", 5, JS_BUILTIN_PROMISE_PROTO_CATCH, 1},
+    {"finally", 7, JS_BUILTIN_PROMISE_PROTO_FINALLY, 1},
+    {NULL, 0, 0, 0}
+};
+
+static const JsBuiltinMethodSpec JS_MAP_PROTOTYPE_METHOD_SPECS[] = {
+    {"set", 3, JS_BUILTIN_MAP_SET, 2},
+    {"get", 3, JS_BUILTIN_MAP_GET, 1},
+    {"has", 3, JS_BUILTIN_MAP_HAS, 1},
+    {"delete", 6, JS_BUILTIN_MAP_DELETE, 1},
+    {"clear", 5, JS_BUILTIN_MAP_CLEAR, 0},
+    {"forEach", 7, JS_BUILTIN_MAP_FOREACH, 1},
+    {"keys", 4, JS_BUILTIN_MAP_KEYS, 0},
+    {"values", 6, JS_BUILTIN_MAP_VALUES, 0},
+    {"entries", 7, JS_BUILTIN_MAP_ENTRIES, 0},
+    {NULL, 0, 0, 0}
+};
+
+static const JsBuiltinMethodSpec JS_SET_PROTOTYPE_METHOD_SPECS[] = {
+    {"add", 3, JS_BUILTIN_SET_ADD, 1},
+    {"has", 3, JS_BUILTIN_SET_HAS, 1},
+    {"delete", 6, JS_BUILTIN_SET_DELETE, 1},
+    {"clear", 5, JS_BUILTIN_SET_CLEAR, 0},
+    {"forEach", 7, JS_BUILTIN_SET_FOREACH, 1},
+    {"values", 6, JS_BUILTIN_SET_VALUES, 0},
+    {"entries", 7, JS_BUILTIN_SET_ENTRIES, 0},
+    {"intersection", 12, JS_BUILTIN_SET_INTERSECTION, 1},
+    {"union", 5, JS_BUILTIN_SET_UNION, 1},
+    {"difference", 10, JS_BUILTIN_SET_DIFFERENCE, 1},
+    {"symmetricDifference", 19, JS_BUILTIN_SET_SYM_DIFF, 1},
+    {"isSubsetOf", 10, JS_BUILTIN_SET_IS_SUBSET, 1},
+    {"isSupersetOf", 12, JS_BUILTIN_SET_IS_SUPERSET, 1},
+    {"isDisjointFrom", 14, JS_BUILTIN_SET_IS_DISJOINT, 1},
+    {NULL, 0, 0, 0}
+};
+
+static const JsBuiltinMethodSpec JS_WEAKMAP_PROTOTYPE_METHOD_SPECS[] = {
+    {"set", 3, JS_BUILTIN_WEAKMAP_SET, 2},
+    {"get", 3, JS_BUILTIN_WEAKMAP_GET, 1},
+    {"has", 3, JS_BUILTIN_WEAKMAP_HAS, 1},
+    {"delete", 6, JS_BUILTIN_WEAKMAP_DELETE, 1},
+    {NULL, 0, 0, 0}
+};
+
+static const JsBuiltinMethodSpec JS_WEAKSET_PROTOTYPE_METHOD_SPECS[] = {
+    {"add", 3, JS_BUILTIN_WEAKSET_ADD, 1},
+    {"has", 3, JS_BUILTIN_WEAKSET_HAS, 1},
+    {"delete", 6, JS_BUILTIN_WEAKSET_DELETE, 1},
+    {NULL, 0, 0, 0}
+};
+
+static const JsBuiltinMethodSpec JS_ARRAYBUFFER_PROTOTYPE_METHOD_SPECS[] = {
+    {"slice", 5, JS_BUILTIN_ARRAYBUFFER_SLICE, 2},
+    {"resize", 6, JS_BUILTIN_ARRAYBUFFER_RESIZE, 1},
+    {NULL, 0, 0, 0}
+};
+
+static const JsBuiltinMethodSpec JS_DATAVIEW_PROTOTYPE_METHOD_SPECS[] = {
+    {"getInt8", 7, -2, 1},
+    {"getUint8", 8, -2, 1},
+    {"getInt16", 8, -2, 1},
+    {"getUint16", 9, -2, 1},
+    {"getInt32", 8, -2, 1},
+    {"getUint32", 9, -2, 1},
+    {"getFloat32", 10, -2, 1},
+    {"getFloat64", 10, -2, 1},
+    {"getBigInt64", 11, -2, 1},
+    {"getBigUint64", 12, -2, 1},
+    {"setInt8", 7, -2, 2},
+    {"setUint8", 8, -2, 2},
+    {"setInt16", 8, -2, 2},
+    {"setUint16", 9, -2, 2},
+    {"setInt32", 8, -2, 2},
+    {"setUint32", 9, -2, 2},
+    {"setFloat32", 10, -2, 2},
+    {"setFloat64", 10, -2, 2},
+    {"setBigInt64", 11, -2, 2},
+    {"setBigUint64", 12, -2, 2},
+    {NULL, 0, 0, 0}
+};
+
+static const JsBuiltinMethodSpec JS_DATAVIEW_ACCESSOR_SPECS[] = {
+    {"buffer", 6, 0, 0, "get buffer"},
+    {"byteLength", 10, 0, 0, "get byteLength"},
+    {"byteOffset", 10, 0, 0, "get byteOffset"},
+    {NULL, 0, 0, 0}
+};
+
+static void js_populate_dataview_prototype_methods(Item prototype) {
+    js_install_builtin_function_specs(prototype, JS_DATAVIEW_PROTOTYPE_METHOD_SPECS, 0, false);
+    js_install_builtin_accessor_specs(prototype, JS_DATAVIEW_ACCESSOR_SPECS,
+        JS_FUNC_FLAG_DATA_VIEW_ACCESSOR | JS_FUNC_FLAG_STRICT);
+}
+
+static const JsBuiltinMethodSpec JS_DATE_PROTOTYPE_METHOD_SPECS[] = {
+    {"getTime", 7, JS_BUILTIN_DATE_GET_TIME, 0},
+    {"getFullYear", 11, JS_BUILTIN_DATE_GET_FULL_YEAR, 0},
+    {"getMonth", 8, JS_BUILTIN_DATE_GET_MONTH, 0},
+    {"getDate", 7, JS_BUILTIN_DATE_GET_DATE, 0},
+    {"getHours", 8, JS_BUILTIN_DATE_GET_HOURS, 0},
+    {"getMinutes", 10, JS_BUILTIN_DATE_GET_MINUTES, 0},
+    {"getSeconds", 10, JS_BUILTIN_DATE_GET_SECONDS, 0},
+    {"getMilliseconds", 15, JS_BUILTIN_DATE_GET_MILLISECONDS, 0},
+    {"getDay", 6, JS_BUILTIN_DATE_GET_DAY, 0},
+    {"getUTCFullYear", 14, JS_BUILTIN_DATE_GET_UTC_FULL_YEAR, 0},
+    {"getUTCMonth", 11, JS_BUILTIN_DATE_GET_UTC_MONTH, 0},
+    {"getUTCDate", 10, JS_BUILTIN_DATE_GET_UTC_DATE, 0},
+    {"getUTCHours", 11, JS_BUILTIN_DATE_GET_UTC_HOURS, 0},
+    {"getUTCMinutes", 13, JS_BUILTIN_DATE_GET_UTC_MINUTES, 0},
+    {"getUTCSeconds", 13, JS_BUILTIN_DATE_GET_UTC_SECONDS, 0},
+    {"getUTCMilliseconds", 18, JS_BUILTIN_DATE_GET_UTC_MILLISECONDS, 0},
+    {"getUTCDay", 9, JS_BUILTIN_DATE_GET_UTC_DAY, 0},
+    {"getTimezoneOffset", 17, JS_BUILTIN_DATE_GET_TIMEZONE_OFFSET, 0},
+    {"setTime", 7, JS_BUILTIN_DATE_SET_TIME, 1},
+    {"setFullYear", 11, JS_BUILTIN_DATE_SET_FULL_YEAR, 3},
+    {"setMonth", 8, JS_BUILTIN_DATE_SET_MONTH, 2},
+    {"setDate", 7, JS_BUILTIN_DATE_SET_DATE, 1},
+    {"setHours", 8, JS_BUILTIN_DATE_SET_HOURS, 4},
+    {"setMinutes", 10, JS_BUILTIN_DATE_SET_MINUTES, 3},
+    {"setSeconds", 10, JS_BUILTIN_DATE_SET_SECONDS, 2},
+    {"setMilliseconds", 15, JS_BUILTIN_DATE_SET_MILLISECONDS, 1},
+    {"setUTCFullYear", 14, JS_BUILTIN_DATE_SET_UTC_FULL_YEAR, 3},
+    {"setUTCMonth", 11, JS_BUILTIN_DATE_SET_UTC_MONTH, 2},
+    {"setUTCDate", 10, JS_BUILTIN_DATE_SET_UTC_DATE, 1},
+    {"setUTCHours", 11, JS_BUILTIN_DATE_SET_UTC_HOURS, 4},
+    {"setUTCMinutes", 13, JS_BUILTIN_DATE_SET_UTC_MINUTES, 3},
+    {"setUTCSeconds", 13, JS_BUILTIN_DATE_SET_UTC_SECONDS, 2},
+    {"setUTCMilliseconds", 18, JS_BUILTIN_DATE_SET_UTC_MILLISECONDS, 1},
+    {"toISOString", 11, JS_BUILTIN_DATE_TO_ISO_STRING, 0},
+    {"toJSON", 6, JS_BUILTIN_DATE_TO_JSON, 1},
+    {"toUTCString", 11, JS_BUILTIN_DATE_TO_UTC_STRING, 0},
+    {"toDateString", 12, JS_BUILTIN_DATE_TO_DATE_STRING, 0},
+    {"toTimeString", 12, JS_BUILTIN_DATE_TO_TIME_STRING, 0},
+    {"toString", 8, JS_BUILTIN_DATE_TO_STRING, 0},
+    {"toLocaleDateString", 18, JS_BUILTIN_DATE_TO_LOCALE_DATE_STRING, 0},
+    {"toLocaleTimeString", 18, JS_BUILTIN_DATE_TO_LOCALE_DATE_STRING, 0},
+    {"valueOf", 7, JS_BUILTIN_DATE_VALUE_OF, 0},
+    {"getYear", 7, JS_BUILTIN_DATE_GET_YEAR, 0},
+    {"setYear", 7, JS_BUILTIN_DATE_SET_YEAR, 1},
+    {NULL, 0, 0, 0}
+};
+
+static const JsBuiltinMethodSpec JS_REGEXP_PROTOTYPE_METHOD_SPECS[] = {
+    {"exec", 4, JS_BUILTIN_REGEXP_EXEC, 1},
+    {"test", 4, JS_BUILTIN_REGEXP_TEST, 1},
+    {"toString", 8, JS_BUILTIN_REGEXP_TO_STRING, 0},
+    {"compile", 7, JS_BUILTIN_REGEXP_COMPILE, 2},
+    {NULL, 0, 0, 0}
+};
+
 static const JsBuiltinMethodSpec JS_JSON_METHOD_SPECS[] = {
     {"parse", 5, JS_BUILTIN_JSON_PARSE, 2},
     {"stringify", 9, JS_BUILTIN_JSON_STRINGIFY, 3},
@@ -8775,6 +8732,12 @@ static const JsBuiltinMethodSpec JS_ATOMICS_METHOD_SPECS[] = {
     {"sub", 3, JS_BUILTIN_ATOMICS_SUB, 3},
     {"wait", 4, JS_BUILTIN_ATOMICS_WAIT, 3},
     {"xor", 3, JS_BUILTIN_ATOMICS_XOR, 3},
+    {NULL, 0, 0, 0}
+};
+
+static const JsBuiltinMethodSpec JS_CSS_METHOD_SPECS[] = {
+    {"supports", 8, JS_BUILTIN_CSS_SUPPORTS, 2},
+    {"escape", 6, JS_BUILTIN_CSS_ESCAPE, 1},
     {NULL, 0, 0, 0}
 };
 
@@ -8873,6 +8836,53 @@ static const JsBuiltinMethodSpec JS_SYMBOL_STATIC_METHOD_SPECS[] = {
     {NULL, 0, 0, 0}
 };
 
+static const JsBuiltinMethodSpec JS_TYPED_ARRAY_PROTOTYPE_METHOD_SPECS[] = {
+    {"at", 2, JS_BUILTIN_ARR_AT, 1},
+    {"copyWithin", 10, JS_BUILTIN_ARR_COPY_WITHIN, 2},
+    {"entries", 7, JS_BUILTIN_ARR_ENTRIES, 0},
+    {"every", 5, JS_BUILTIN_ARR_EVERY, 1},
+    {"fill", 4, JS_BUILTIN_ARR_FILL, 1},
+    {"filter", 6, JS_BUILTIN_ARR_FILTER, 1},
+    {"find", 4, JS_BUILTIN_ARR_FIND, 1},
+    {"findIndex", 9, JS_BUILTIN_ARR_FIND_INDEX, 1},
+    {"findLast", 8, JS_BUILTIN_ARR_FIND_LAST, 1},
+    {"findLastIndex", 13, JS_BUILTIN_ARR_FIND_LAST_INDEX, 1},
+    {"forEach", 7, JS_BUILTIN_ARR_FOR_EACH, 1},
+    {"includes", 8, JS_BUILTIN_ARR_INCLUDES, 1},
+    {"indexOf", 7, JS_BUILTIN_ARR_INDEX_OF, 1},
+    {"join", 4, JS_BUILTIN_ARR_JOIN, 0},
+    {"keys", 4, JS_BUILTIN_ARR_KEYS, 0},
+    {"lastIndexOf", 11, JS_BUILTIN_ARR_LAST_INDEX_OF, 1},
+    {"map", 3, JS_BUILTIN_ARR_MAP, 1},
+    {"reduce", 6, JS_BUILTIN_ARR_REDUCE, 1},
+    {"reduceRight", 11, JS_BUILTIN_ARR_REDUCE_RIGHT, 1},
+    {"reverse", 7, JS_BUILTIN_ARR_REVERSE, 0},
+    {"slice", 5, JS_BUILTIN_ARR_SLICE, 2},
+    {"some", 4, JS_BUILTIN_ARR_SOME, 1},
+    {"sort", 4, JS_BUILTIN_ARR_SORT, 1},
+    {"toReversed", 10, JS_BUILTIN_ARR_TO_REVERSED, 0},
+    {"toSorted", 8, JS_BUILTIN_ARR_TO_SORTED, 1},
+    {"toString", 8, JS_BUILTIN_ARR_TO_STRING, 0},
+    {"values", 6, JS_BUILTIN_ARR_VALUES, 0},
+    {"with", 4, JS_BUILTIN_ARR_WITH, 2},
+    {NULL, 0, 0, 0}
+};
+
+static const JsBuiltinMethodSpec JS_TYPED_ARRAY_STUB_METHOD_SPECS[] = {
+    {"set", 3, 0, 1},
+    {"subarray", 8, 0, 2},
+    {"toLocaleString", 14, 0, 0},
+    {NULL, 0, 0, 0}
+};
+
+static const JsBuiltinMethodSpec JS_TYPED_ARRAY_ACCESSOR_SPECS[] = {
+    {"buffer", 6, 0, 0, "get buffer"},
+    {"byteLength", 10, 0, 0, "get byteLength"},
+    {"byteOffset", 10, 0, 0, "get byteOffset"},
+    {"length", 6, 0, 0, "get length"},
+    {NULL, 0, 0, 0}
+};
+
 static const JsBuiltinMethodSpec* js_get_constructor_static_method_specs(const char* ctor_name, int ctor_len) {
     if (!ctor_name) return NULL;
     if (ctor_len == 6 && strncmp(ctor_name, "Object", 6) == 0) return JS_OBJECT_STATIC_METHOD_SPECS;
@@ -8887,6 +8897,55 @@ static const JsBuiltinMethodSpec* js_get_constructor_static_method_specs(const c
     if (ctor_len == 10 && strncmp(ctor_name, "TypedArray", 10) == 0) return JS_TYPED_ARRAY_STATIC_METHOD_SPECS;
     if (ctor_len == 6 && strncmp(ctor_name, "Symbol", 6) == 0) return JS_SYMBOL_STATIC_METHOD_SPECS;
     return NULL;
+}
+
+static const JsBuiltinMethodSpec* js_get_prototype_method_specs_for_ctor(const char* ctor_name, int ctor_len) {
+    if (!ctor_name) return NULL;
+    if (ctor_len == 6 && strncmp(ctor_name, "Object", 6) == 0) return JS_OBJECT_PROTOTYPE_METHOD_SPECS;
+    if (ctor_len == 5 && strncmp(ctor_name, "Array", 5) == 0) return JS_ARRAY_PROTOTYPE_METHOD_SPECS;
+    if (ctor_len == 8 && strncmp(ctor_name, "Function", 8) == 0) return JS_FUNCTION_PROTOTYPE_METHOD_SPECS;
+    if (ctor_len == 6 && strncmp(ctor_name, "Number", 6) == 0) return JS_NUMBER_PROTOTYPE_METHOD_SPECS;
+    if (ctor_len == 6 && strncmp(ctor_name, "String", 6) == 0) return JS_STRING_PROTOTYPE_METHOD_SPECS;
+    if (ctor_len == 7 && strncmp(ctor_name, "Promise", 7) == 0) return JS_PROMISE_PROTOTYPE_METHOD_SPECS;
+    if (ctor_len == 3 && strncmp(ctor_name, "Map", 3) == 0) return JS_MAP_PROTOTYPE_METHOD_SPECS;
+    if (ctor_len == 3 && strncmp(ctor_name, "Set", 3) == 0) return JS_SET_PROTOTYPE_METHOD_SPECS;
+    if (ctor_len == 7 && strncmp(ctor_name, "WeakMap", 7) == 0) return JS_WEAKMAP_PROTOTYPE_METHOD_SPECS;
+    if (ctor_len == 7 && strncmp(ctor_name, "WeakSet", 7) == 0) return JS_WEAKSET_PROTOTYPE_METHOD_SPECS;
+    if (ctor_len == 11 && strncmp(ctor_name, "ArrayBuffer", 11) == 0) return JS_ARRAYBUFFER_PROTOTYPE_METHOD_SPECS;
+    if (ctor_len == 4 && strncmp(ctor_name, "Date", 4) == 0) return JS_DATE_PROTOTYPE_METHOD_SPECS;
+    if (ctor_len == 6 && strncmp(ctor_name, "RegExp", 6) == 0) return JS_REGEXP_PROTOTYPE_METHOD_SPECS;
+    return NULL;
+}
+
+static const JsBuiltinMethodSpec* js_get_prototype_method_specs_for_type(TypeId type) {
+    if (type == LMD_TYPE_ARRAY) return JS_ARRAY_PROTOTYPE_METHOD_SPECS;
+    if (type == LMD_TYPE_FUNC) return JS_FUNCTION_PROTOTYPE_METHOD_SPECS;
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT) return JS_NUMBER_PROTOTYPE_METHOD_SPECS;
+    if (type == LMD_TYPE_STRING) return JS_STRING_PROTOTYPE_METHOD_SPECS;
+    return NULL;
+}
+
+static void js_populate_builtin_prototype_methods(Item prototype, const char* ctor_name, int ctor_len) {
+    const JsBuiltinMethodSpec* specs = js_get_prototype_method_specs_for_ctor(ctor_name, ctor_len);
+    js_install_builtin_method_specs(prototype, specs);
+}
+
+static void js_append_builtin_method_spec_names(const JsBuiltinMethodSpec* specs, Item result) {
+    if (!specs) return;
+    for (int i = 0; specs[i].name; i++) {
+        Item key = (Item){.item = s2it(heap_create_name(specs[i].name, specs[i].len))};
+        js_array_push(result, key);
+    }
+}
+
+static Item js_lookup_builtin_prototype_method_for_class(JsClass cls, const char* name, int len) {
+    const JsBuiltinMethodSpec* specs = NULL;
+    if (cls == JS_CLASS_DATE) specs = JS_DATE_PROTOTYPE_METHOD_SPECS;
+    else if (cls == JS_CLASS_REGEXP) specs = JS_REGEXP_PROTOTYPE_METHOD_SPECS;
+    else if (cls == JS_CLASS_NUMBER) specs = JS_NUMBER_PROTOTYPE_METHOD_SPECS;
+    else if (cls == JS_CLASS_ARRAY) specs = JS_ARRAY_PROTOTYPE_METHOD_SPECS;
+    else if (cls == JS_CLASS_STRING) specs = JS_STRING_PROTOTYPE_METHOD_SPECS;
+    return js_lookup_builtin_method_spec(specs, name, len);
 }
 
 void js_builtin_cache_reset() {
@@ -8970,67 +9029,12 @@ extern "C" void js_populate_typed_array_base_proto(Item proto, Item base_ctor) {
     js_mark_non_enumerable(proto, ctor_key);
 
     // Prototype methods: reuse Array builtins (dispatch handles typed arrays)
-    struct { const char* name; int len; int bid; int pc; } methods[] = {
-        {"at",             2,  JS_BUILTIN_ARR_AT,              1},
-        {"copyWithin",    10,  JS_BUILTIN_ARR_COPY_WITHIN,     2},
-        {"entries",        7,  JS_BUILTIN_ARR_ENTRIES,          0},
-        {"every",          5,  JS_BUILTIN_ARR_EVERY,            1},
-        {"fill",           4,  JS_BUILTIN_ARR_FILL,             1},
-        {"filter",         6,  JS_BUILTIN_ARR_FILTER,           1},
-        {"find",           4,  JS_BUILTIN_ARR_FIND,             1},
-        {"findIndex",      9,  JS_BUILTIN_ARR_FIND_INDEX,       1},
-        {"findLast",       8,  JS_BUILTIN_ARR_FIND_LAST,        1},
-        {"findLastIndex", 13,  JS_BUILTIN_ARR_FIND_LAST_INDEX,  1},
-        {"forEach",        7,  JS_BUILTIN_ARR_FOR_EACH,         1},
-        {"includes",       8,  JS_BUILTIN_ARR_INCLUDES,         1},
-        {"indexOf",        7,  JS_BUILTIN_ARR_INDEX_OF,         1},
-        {"join",           4,  JS_BUILTIN_ARR_JOIN,              0},
-        {"keys",           4,  JS_BUILTIN_ARR_KEYS,              0},
-        {"lastIndexOf",   11,  JS_BUILTIN_ARR_LAST_INDEX_OF,    1},
-        {"map",            3,  JS_BUILTIN_ARR_MAP,               1},
-        {"reduce",         6,  JS_BUILTIN_ARR_REDUCE,            1},
-        {"reduceRight",   11,  JS_BUILTIN_ARR_REDUCE_RIGHT,     1},
-        {"reverse",        7,  JS_BUILTIN_ARR_REVERSE,           0},
-        {"slice",          5,  JS_BUILTIN_ARR_SLICE,             2},
-        {"some",           4,  JS_BUILTIN_ARR_SOME,              1},
-        {"sort",           4,  JS_BUILTIN_ARR_SORT,              1},
-        {"toReversed",    10,  JS_BUILTIN_ARR_TO_REVERSED,       0},
-        {"toSorted",       8,  JS_BUILTIN_ARR_TO_SORTED,         1},
-        {"toString",       8,  JS_BUILTIN_ARR_TO_STRING,         0},
-        {"values",         6,  JS_BUILTIN_ARR_VALUES,             0},
-        {"with",           4,  JS_BUILTIN_ARR_WITH,               2},
-        {NULL, 0, 0, 0}
-    };
-    for (int i = 0; methods[i].name; i++) {
-        Item mk = (Item){.item = s2it(heap_create_name(methods[i].name, methods[i].len))};
-        // Create NEW function objects (not cached) with TypedArray validation flag
-        JsFunction* mfn = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
-        mfn->type_id = LMD_TYPE_FUNC;
-        mfn->param_count = methods[i].pc;
-        mfn->formal_length = -1;
-        mfn->builtin_id = methods[i].bid;
-        mfn->name = heap_create_name(methods[i].name, methods[i].len);
-        mfn->flags = JS_FUNC_FLAG_TYPED_ARRAY_METHOD;
-        Item mf = {.function = (Function*)mfn};
-        js_property_set(proto, mk, mf);
-        js_mark_non_enumerable(proto, mk);
-    }
+    js_install_builtin_function_specs(proto, JS_TYPED_ARRAY_PROTOTYPE_METHOD_SPECS,
+        JS_FUNC_FLAG_TYPED_ARRAY_METHOD, false);
 
     // TypedArray-specific methods (stubs — no Array equivalent)
-    struct { const char* name; int len; int pc; } ta_only[] = {
-        {"set", 3, 1}, {"subarray", 8, 2}, {"toLocaleString", 14, 0}, {NULL, 0, 0}
-    };
-    for (int i = 0; ta_only[i].name; i++) {
-        Item mk = (Item){.item = s2it(heap_create_name(ta_only[i].name, ta_only[i].len))};
-        JsFunction* sf = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
-        sf->type_id = LMD_TYPE_FUNC;
-        sf->param_count = ta_only[i].pc;
-        sf->formal_length = -1;
-        sf->name = heap_create_name(ta_only[i].name, ta_only[i].len);
-        sf->flags = JS_FUNC_FLAG_TYPED_ARRAY_METHOD;
-        js_property_set(proto, mk, (Item){.function = (Function*)sf});
-        js_mark_non_enumerable(proto, mk);
-    }
+    js_install_builtin_function_specs(proto, JS_TYPED_ARRAY_STUB_METHOD_SPECS,
+        JS_FUNC_FLAG_TYPED_ARRAY_METHOD, false);
 
     // Symbol.iterator = values (same function object as TypedArray.prototype.values per spec)
     {
@@ -9056,22 +9060,8 @@ extern "C" void js_populate_typed_array_base_proto(Item proto, Item base_ctor) {
     // Accessor getter stubs for buffer, byteLength, byteOffset, length
     // These throw TypeError when accessed on non-TypedArray (ES spec §23.2.3.1/2/3)
     // Phase 3 Stage A: route through unified js_install_native_accessor.
-    struct { const char* name; int len; } ta_accessors[] = {
-        {"buffer", 6}, {"byteLength", 10}, {"byteOffset", 10}, {"length", 6}, {NULL, 0}
-    };
-    for (int i = 0; ta_accessors[i].name; i++) {
-        JsFunction* gf = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
-        gf->type_id = LMD_TYPE_FUNC;
-        gf->flags = JS_FUNC_FLAG_TYPED_ARRAY_METHOD;
-        char getter_name[32];
-        int getter_len = snprintf(getter_name, sizeof(getter_name), "get %s", ta_accessors[i].name);
-        gf->name = heap_create_name(getter_name, getter_len);
-        gf->param_count = 0;
-        gf->formal_length = -1;
-        Item gf_item = (Item){.function = (Function*)gf};
-        Item prop_name = (Item){.item = s2it(heap_create_name(ta_accessors[i].name, ta_accessors[i].len))};
-        js_install_native_accessor(proto, prop_name, gf_item, ItemNull, JSPD_NON_ENUMERABLE);
-    }
+    js_install_builtin_accessor_specs(proto, JS_TYPED_ARRAY_ACCESSOR_SPECS,
+        JS_FUNC_FLAG_TYPED_ARRAY_METHOD);
 
     // Install static methods from/of on %TypedArray% constructor (base_ctor)
     {
@@ -9143,141 +9133,26 @@ extern "C" Item js_lookup_builtin_method(TypeId type, const char* name, int len)
 
     // Function.prototype methods
     if (type == LMD_TYPE_FUNC) {
-        if (len == 4 && strncmp(name, "call", 4) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_FUNC_CALL, "call", 1);
-        if (len == 5 && strncmp(name, "apply", 5) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_FUNC_APPLY, "apply", 2);
-        if (len == 4 && strncmp(name, "bind", 4) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_FUNC_BIND, "bind", 1);
-        if (len == 8 && strncmp(name, "toString", 8) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_FUNC_TO_STRING, "toString", 0);
+        Item method = js_lookup_builtin_method_spec(JS_FUNCTION_PROTOTYPE_METHOD_SPECS, name, len);
+        if (method.item != ItemNull.item) return method;
     }
 
     // Array.prototype methods
     if (type == LMD_TYPE_ARRAY) {
-        struct { const char* name; int len; int id; int pc; } arr_methods[] = {
-            {"push", 4, JS_BUILTIN_ARR_PUSH, 1},
-            {"pop", 3, JS_BUILTIN_ARR_POP, 0},
-            {"shift", 5, JS_BUILTIN_ARR_SHIFT, 0},
-            {"unshift", 7, JS_BUILTIN_ARR_UNSHIFT, 1},
-            {"join", 4, JS_BUILTIN_ARR_JOIN, 1},
-            {"slice", 5, JS_BUILTIN_ARR_SLICE, 2},
-            {"splice", 6, JS_BUILTIN_ARR_SPLICE, 2},
-            {"indexOf", 7, JS_BUILTIN_ARR_INDEX_OF, 1},
-            {"lastIndexOf", 11, JS_BUILTIN_ARR_LAST_INDEX_OF, 1},
-            {"includes", 8, JS_BUILTIN_ARR_INCLUDES, 1},
-            {"map", 3, JS_BUILTIN_ARR_MAP, 1},
-            {"filter", 6, JS_BUILTIN_ARR_FILTER, 1},
-            {"reduce", 6, JS_BUILTIN_ARR_REDUCE, 1},
-            {"forEach", 7, JS_BUILTIN_ARR_FOR_EACH, 1},
-            {"find", 4, JS_BUILTIN_ARR_FIND, 1},
-            {"findIndex", 9, JS_BUILTIN_ARR_FIND_INDEX, 1},
-            {"some", 4, JS_BUILTIN_ARR_SOME, 1},
-            {"every", 5, JS_BUILTIN_ARR_EVERY, 1},
-            {"sort", 4, JS_BUILTIN_ARR_SORT, 1},
-            {"reverse", 7, JS_BUILTIN_ARR_REVERSE, 0},
-            {"concat", 6, JS_BUILTIN_ARR_CONCAT, 1},
-            {"flat", 4, JS_BUILTIN_ARR_FLAT, 0},
-            {"flatMap", 7, JS_BUILTIN_ARR_FLAT_MAP, 1},
-            {"fill", 4, JS_BUILTIN_ARR_FILL, 1},
-            {"copyWithin", 10, JS_BUILTIN_ARR_COPY_WITHIN, 2},
-            {"toString", 8, JS_BUILTIN_ARR_TO_STRING, 0},
-            {"keys", 4, JS_BUILTIN_ARR_KEYS, 0},
-            {"values", 6, JS_BUILTIN_ARR_VALUES, 0},
-            {"entries", 7, JS_BUILTIN_ARR_ENTRIES, 0},
-            {"at", 2, JS_BUILTIN_ARR_AT, 1},
-            {"reduceRight", 11, JS_BUILTIN_ARR_REDUCE_RIGHT, 1},
-            {"findLast", 8, JS_BUILTIN_ARR_FIND_LAST, 1},
-            {"findLastIndex", 13, JS_BUILTIN_ARR_FIND_LAST_INDEX, 1},
-            {"toSorted", 8, JS_BUILTIN_ARR_TO_SORTED, 1},
-            {"toReversed", 10, JS_BUILTIN_ARR_TO_REVERSED, 0},
-            {"toSpliced", 9, JS_BUILTIN_ARR_TO_SPLICED, 2},
-            {"with", 4, JS_BUILTIN_ARR_WITH, 2},
-            {NULL, 0, 0, 0}
-        };
-        for (int i = 0; arr_methods[i].name; i++) {
-            if (len == arr_methods[i].len && strncmp(name, arr_methods[i].name, len) == 0) {
-                return js_get_or_create_builtin(arr_methods[i].id, arr_methods[i].name, arr_methods[i].pc);
-            }
-        }
+        Item method = js_lookup_builtin_method_spec(JS_ARRAY_PROTOTYPE_METHOD_SPECS, name, len);
+        if (method.item != ItemNull.item) return method;
     }
 
     // String.prototype methods
     if (type == LMD_TYPE_STRING) {
-        struct { const char* name; int len; int id; int pc; const char* canon; } str_methods[] = {
-            {"charAt", 6, JS_BUILTIN_STR_CHAR_AT, 1, NULL},
-            {"charCodeAt", 10, JS_BUILTIN_STR_CHAR_CODE_AT, 1, NULL},
-            {"indexOf", 7, JS_BUILTIN_STR_INDEX_OF, 1, NULL},
-            {"lastIndexOf", 11, JS_BUILTIN_STR_LAST_INDEX_OF, 1, NULL},
-            {"includes", 8, JS_BUILTIN_STR_INCLUDES, 1, NULL},
-            {"slice", 5, JS_BUILTIN_STR_SLICE, 2, NULL},
-            {"substring", 9, JS_BUILTIN_STR_SUBSTRING, 2, NULL},
-            {"toLowerCase", 11, JS_BUILTIN_STR_TO_LOWER_CASE, 0, NULL},
-            {"toUpperCase", 11, JS_BUILTIN_STR_TO_UPPER_CASE, 0, NULL},
-            {"trim", 4, JS_BUILTIN_STR_TRIM, 0, NULL},
-            {"trimStart", 9, JS_BUILTIN_STR_TRIM_START, 0, NULL},
-            {"trimEnd", 7, JS_BUILTIN_STR_TRIM_END, 0, NULL},
-            {"split", 5, JS_BUILTIN_STR_SPLIT, 2, NULL},
-            {"replace", 7, JS_BUILTIN_STR_REPLACE, 2, NULL},
-            {"replaceAll", 10, JS_BUILTIN_STR_REPLACE_ALL, 2, NULL},
-            {"match", 5, JS_BUILTIN_STR_MATCH, 1, NULL},
-            {"matchAll", 8, JS_BUILTIN_STR_MATCH_ALL, 1, NULL},
-            {"search", 6, JS_BUILTIN_STR_SEARCH, 1, NULL},
-            {"startsWith", 10, JS_BUILTIN_STR_STARTS_WITH, 1, NULL},
-            {"endsWith", 8, JS_BUILTIN_STR_ENDS_WITH, 1, NULL},
-            {"repeat", 6, JS_BUILTIN_STR_REPEAT, 1, NULL},
-            {"padStart", 8, JS_BUILTIN_STR_PAD_START, 1, NULL},
-            {"padEnd", 6, JS_BUILTIN_STR_PAD_END, 1, NULL},
-            {"toString", 8, JS_BUILTIN_STR_TO_STRING, 0, NULL},
-            {"valueOf", 7, JS_BUILTIN_STR_VALUE_OF, 0, NULL},
-            {"codePointAt", 11, JS_BUILTIN_STR_CODE_POINT_AT, 1, NULL},
-            {"normalize", 9, JS_BUILTIN_STR_NORMALIZE, 0, NULL},
-            {"concat", 6, JS_BUILTIN_STR_CONCAT, 1, NULL},
-            {"at", 2, JS_BUILTIN_STR_AT, 1, NULL},
-            {"localeCompare", 13, JS_BUILTIN_STR_LOCALE_COMPARE, 1, NULL},
-            {"trimLeft", 8, JS_BUILTIN_STR_TRIM_START, 0, "trimStart"},
-            {"trimRight", 9, JS_BUILTIN_STR_TRIM_END, 0, "trimEnd"},
-            {"isWellFormed", 12, JS_BUILTIN_STR_IS_WELL_FORMED, 0, NULL},
-            {"toWellFormed", 12, JS_BUILTIN_STR_TO_WELL_FORMED, 0, NULL},
-            // HTML wrapper methods (Annex B)
-            {"anchor", 6, JS_BUILTIN_STR_ANCHOR, 1, NULL},
-            {"big", 3, JS_BUILTIN_STR_BIG, 0, NULL},
-            {"blink", 5, JS_BUILTIN_STR_BLINK, 0, NULL},
-            {"bold", 4, JS_BUILTIN_STR_BOLD, 0, NULL},
-            {"fixed", 5, JS_BUILTIN_STR_FIXED, 0, NULL},
-            {"fontcolor", 9, JS_BUILTIN_STR_FONTCOLOR, 1, NULL},
-            {"fontsize", 8, JS_BUILTIN_STR_FONTSIZE, 1, NULL},
-            {"italics", 7, JS_BUILTIN_STR_ITALICS, 0, NULL},
-            {"link", 4, JS_BUILTIN_STR_LINK, 1, NULL},
-            {"small", 5, JS_BUILTIN_STR_SMALL, 0, NULL},
-            {"strike", 6, JS_BUILTIN_STR_STRIKE, 0, NULL},
-            {"sub", 3, JS_BUILTIN_STR_SUB, 0, NULL},
-            {"sup", 3, JS_BUILTIN_STR_SUP, 0, NULL},
-            {"substr", 6, JS_BUILTIN_STR_SUBSTR, 2, NULL},
-            {"toLocaleLowerCase", 17, JS_BUILTIN_STR_TO_LOCALE_LOWER_CASE, 0, NULL},
-            {"toLocaleUpperCase", 17, JS_BUILTIN_STR_TO_LOCALE_UPPER_CASE, 0, NULL},
-            {NULL, 0, 0, 0, NULL}
-        };
-        for (int i = 0; str_methods[i].name; i++) {
-            if (len == str_methods[i].len && strncmp(name, str_methods[i].name, len) == 0) {
-                const char* fn_name = str_methods[i].canon ? str_methods[i].canon : str_methods[i].name;
-                return js_get_or_create_builtin(str_methods[i].id, fn_name, str_methods[i].pc);
-            }
-        }
+        Item method = js_lookup_builtin_method_spec(JS_STRING_PROTOTYPE_METHOD_SPECS, name, len);
+        if (method.item != ItemNull.item) return method;
     }
 
     // Number.prototype methods
     if (type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT) {
-        if (len == 8 && strncmp(name, "toString", 8) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_NUM_TO_STRING, "toString", 1);
-        if (len == 7 && strncmp(name, "valueOf", 7) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_NUM_VALUE_OF, "valueOf", 0);
-        if (len == 7 && strncmp(name, "toFixed", 7) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_NUM_TO_FIXED, "toFixed", 1);
-        if (len == 11 && strncmp(name, "toPrecision", 11) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_NUM_TO_PRECISION, "toPrecision", 1);
-        if (len == 13 && strncmp(name, "toExponential", 13) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_NUM_TO_EXPONENTIAL, "toExponential", 1);
+        Item method = js_lookup_builtin_method_spec(JS_NUMBER_PROTOTYPE_METHOD_SPECS, name, len);
+        if (method.item != ItemNull.item) return method;
     }
 
     return ItemNull;
@@ -9286,54 +9161,17 @@ extern "C" Item js_lookup_builtin_method(TypeId type, const char* name, int len)
 // v26: Return all builtin method names for a prototype type as a Lambda array.
 // Used by getOwnPropertyNames to enumerate builtin methods on prototype objects.
 extern "C" void js_append_builtin_method_names(TypeId type, Item result) {
-    // Object.prototype methods (available on all objects)
-    static const char* obj_methods[] = {
-        "hasOwnProperty", "propertyIsEnumerable", "toString", "valueOf",
-        "isPrototypeOf", "constructor", NULL
-    };
-    // Function.prototype methods
-    static const char* func_methods[] = {
-        "call", "apply", "bind", "toString", "constructor", NULL
-    };
-    // Array.prototype methods
-    static const char* arr_methods[] = {
-        "push", "pop", "shift", "unshift", "join", "slice", "splice",
-        "indexOf", "lastIndexOf", "includes", "map", "filter", "reduce",
-        "forEach", "find", "findIndex", "some", "every", "sort", "reverse",
-        "concat", "flat", "flatMap", "fill", "copyWithin", "toString",
-        "keys", "values", "entries", "at", "reduceRight",
-        "findLast", "findLastIndex", "toSorted", "toReversed", "toSpliced",
-        "with", "toLocaleString", "constructor", NULL
-    };
-    // String.prototype methods
-    static const char* str_methods[] = {
-        "charAt", "charCodeAt", "indexOf", "lastIndexOf", "includes",
-        "slice", "substring", "toLowerCase", "toUpperCase", "trim",
-        "trimStart", "trimEnd", "split", "replace", "replaceAll",
-        "match", "matchAll", "search", "startsWith", "endsWith",
-        "repeat", "padStart", "padEnd", "toString", "valueOf",
-        "codePointAt", "normalize", "concat", "at", "localeCompare",
-        "trimLeft", "trimRight", "isWellFormed", "toWellFormed",
-        "anchor", "big", "blink", "bold", "fixed", "fontcolor", "fontsize",
-        "italics", "link", "small", "strike", "sub", "sup", "substr",
-        "toLocaleLowerCase", "toLocaleUpperCase", "constructor", NULL
-    };
-    // Number.prototype methods
-    static const char* num_methods[] = {
-        "toString", "valueOf", "toFixed", "toPrecision", "toExponential",
-        "constructor", NULL
-    };
-
-    const char** names = NULL;
-    if (type == LMD_TYPE_ARRAY) names = arr_methods;
-    else if (type == LMD_TYPE_STRING) names = str_methods;
-    else if (type == LMD_TYPE_FUNC) names = func_methods;
-    else if (type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT) names = num_methods;
-    else names = obj_methods;
-
-    for (int i = 0; names[i]; i++) {
-        Item key = (Item){.item = s2it(heap_create_name(names[i], strlen(names[i])))};
-        js_array_push(result, key);
+    const JsBuiltinMethodSpec* specs = js_get_prototype_method_specs_for_type(type);
+    if (!specs) specs = JS_OBJECT_PROTOTYPE_METHOD_SPECS;
+    if (specs) {
+        js_append_builtin_method_spec_names(specs, result);
+        if (type == LMD_TYPE_ARRAY) {
+            Item locale_key = (Item){.item = s2it(heap_create_name("toLocaleString", 14))};
+            js_array_push(result, locale_key);
+        }
+        Item ctor_key = (Item){.item = s2it(heap_create_name("constructor", 11))};
+        js_array_push(result, ctor_key);
+        return;
     }
 }
 
@@ -11758,6 +11596,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         TypeId tv = get_type_id(this_val);
         if (tv == LMD_TYPE_MAP && this_val.map &&
             (this_val.map->map_kind == MAP_KIND_DOM ||
+             this_val.map->map_kind == MAP_KIND_CSS_NAMESPACE ||
              this_val.map->map_kind == MAP_KIND_CSSOM ||
              this_val.map->map_kind == MAP_KIND_DOC_PROXY ||
              this_val.map->map_kind == MAP_KIND_FOREIGN_DOC)) {
@@ -20659,25 +20498,13 @@ extern "C" Item js_get_css_object_value() {
     js_css_namespace_object = js_object_create(ItemNull);
     heap_register_gc_root(&js_css_namespace_object.item);
 
-    // tag as CSS namespace via MAP_KIND_CSSOM + sentinel marker
-    extern TypeMap js_css_namespace_marker;
+    // tag as CSS namespace while preserving ordinary shape-backed properties
     if (get_type_id(js_css_namespace_object) == LMD_TYPE_MAP) {
         Map* m = js_css_namespace_object.map;
-        m->map_kind = MAP_KIND_CSSOM;
-        m->type = (void*)&js_css_namespace_marker;
+        m->map_kind = MAP_KIND_CSS_NAMESPACE;
     }
 
-    // register supports and escape as callable builtin function properties
-    struct { const char* name; int id; int pc; } methods[] = {
-        {"supports", JS_BUILTIN_CSS_SUPPORTS, 2},
-        {"escape", JS_BUILTIN_CSS_ESCAPE, 1},
-    };
-    for (int i = 0; i < (int)(sizeof(methods) / sizeof(methods[0])); i++) {
-        Item key = (Item){.item = s2it(heap_create_name(methods[i].name, strlen(methods[i].name)))};
-        Item fn = js_get_or_create_builtin(methods[i].id, methods[i].name, methods[i].pc);
-        js_property_set(js_css_namespace_object, key, fn);
-        js_mark_non_enumerable(js_css_namespace_object, key);
-    }
+    js_install_builtin_method_specs(js_css_namespace_object, JS_CSS_METHOD_SPECS);
 
     // toStringTag
     Item tag_k = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
@@ -21610,85 +21437,16 @@ static Item js_proto_class_dispatch_for_class(JsClass cls, const char* key_str, 
             return js_lookup_builtin_method(LMD_TYPE_ARRAY, "values", 6);
         return js_lookup_builtin_method(LMD_TYPE_ARRAY, key_str, key_len);
     case JS_CLASS_NUMBER:
-        if (key_len == 8 && strncmp(key_str, "toString", 8) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_NUM_TO_STRING, "toString", 1);
-        if (key_len == 7 && strncmp(key_str, "valueOf", 7) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_NUM_VALUE_OF, "valueOf", 0);
-        if (key_len == 7 && strncmp(key_str, "toFixed", 7) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_NUM_TO_FIXED, "toFixed", 1);
-        if (key_len == 11 && strncmp(key_str, "toPrecision", 11) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_NUM_TO_PRECISION, "toPrecision", 1);
-        if (key_len == 13 && strncmp(key_str, "toExponential", 13) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_NUM_TO_EXPONENTIAL, "toExponential", 1);
-        return ItemNull;
+        return js_lookup_builtin_prototype_method_for_class(JS_CLASS_NUMBER, key_str, key_len);
     case JS_CLASS_DATE: {
-        // Date.prototype methods table — mirrors js_property_get fallback at ~L5530.
-        static const struct { const char* name; int len; int id; int pc; } date_methods[] = {
-            {"getTime", 7, JS_BUILTIN_DATE_GET_TIME, 0},
-            {"getFullYear", 11, JS_BUILTIN_DATE_GET_FULL_YEAR, 0},
-            {"getMonth", 8, JS_BUILTIN_DATE_GET_MONTH, 0},
-            {"getDate", 7, JS_BUILTIN_DATE_GET_DATE, 0},
-            {"getHours", 8, JS_BUILTIN_DATE_GET_HOURS, 0},
-            {"getMinutes", 10, JS_BUILTIN_DATE_GET_MINUTES, 0},
-            {"getSeconds", 10, JS_BUILTIN_DATE_GET_SECONDS, 0},
-            {"getMilliseconds", 15, JS_BUILTIN_DATE_GET_MILLISECONDS, 0},
-            {"toISOString", 11, JS_BUILTIN_DATE_TO_ISO_STRING, 0},
-            {"toJSON", 6, JS_BUILTIN_DATE_TO_JSON, 0},
-            {"toUTCString", 11, JS_BUILTIN_DATE_TO_UTC_STRING, 0},
-            {"toDateString", 12, JS_BUILTIN_DATE_TO_DATE_STRING, 0},
-            {"toTimeString", 12, JS_BUILTIN_DATE_TO_TIME_STRING, 0},
-            {"toString", 8, JS_BUILTIN_DATE_TO_STRING, 0},
-            {"toLocaleDateString", 18, JS_BUILTIN_DATE_TO_LOCALE_DATE_STRING, 0},
-            {"toLocaleTimeString", 18, JS_BUILTIN_DATE_TO_LOCALE_DATE_STRING, 0},
-            {"valueOf", 7, JS_BUILTIN_DATE_VALUE_OF, 0},
-            {"getDay", 6, JS_BUILTIN_DATE_GET_DAY, 0},
-            {"getUTCFullYear", 14, JS_BUILTIN_DATE_GET_UTC_FULL_YEAR, 0},
-            {"getUTCMonth", 11, JS_BUILTIN_DATE_GET_UTC_MONTH, 0},
-            {"getUTCDate", 10, JS_BUILTIN_DATE_GET_UTC_DATE, 0},
-            {"getUTCHours", 11, JS_BUILTIN_DATE_GET_UTC_HOURS, 0},
-            {"getUTCMinutes", 13, JS_BUILTIN_DATE_GET_UTC_MINUTES, 0},
-            {"getUTCSeconds", 13, JS_BUILTIN_DATE_GET_UTC_SECONDS, 0},
-            {"getUTCMilliseconds", 18, JS_BUILTIN_DATE_GET_UTC_MILLISECONDS, 0},
-            {"getUTCDay", 9, JS_BUILTIN_DATE_GET_UTC_DAY, 0},
-            {"getTimezoneOffset", 17, JS_BUILTIN_DATE_GET_TIMEZONE_OFFSET, 0},
-            {"setTime", 7, JS_BUILTIN_DATE_SET_TIME, 1},
-            {"setFullYear", 11, JS_BUILTIN_DATE_SET_FULL_YEAR, 3},
-            {"setMonth", 8, JS_BUILTIN_DATE_SET_MONTH, 2},
-            {"setDate", 7, JS_BUILTIN_DATE_SET_DATE, 1},
-            {"setHours", 8, JS_BUILTIN_DATE_SET_HOURS, 4},
-            {"setMinutes", 10, JS_BUILTIN_DATE_SET_MINUTES, 3},
-            {"setSeconds", 10, JS_BUILTIN_DATE_SET_SECONDS, 2},
-            {"setMilliseconds", 15, JS_BUILTIN_DATE_SET_MILLISECONDS, 1},
-            {"setUTCFullYear", 14, JS_BUILTIN_DATE_SET_UTC_FULL_YEAR, 3},
-            {"setUTCMonth", 11, JS_BUILTIN_DATE_SET_UTC_MONTH, 2},
-            {"setUTCDate", 10, JS_BUILTIN_DATE_SET_UTC_DATE, 1},
-            {"setUTCHours", 11, JS_BUILTIN_DATE_SET_UTC_HOURS, 4},
-            {"setUTCMinutes", 13, JS_BUILTIN_DATE_SET_UTC_MINUTES, 3},
-            {"setUTCSeconds", 13, JS_BUILTIN_DATE_SET_UTC_SECONDS, 2},
-            {"setUTCMilliseconds", 18, JS_BUILTIN_DATE_SET_UTC_MILLISECONDS, 1},
-            {"getYear", 7, JS_BUILTIN_DATE_GET_YEAR, 0},
-            {"setYear", 7, JS_BUILTIN_DATE_SET_YEAR, 1},
-            {NULL, 0, 0, 0}
-        };
-        for (int i = 0; date_methods[i].name; i++) {
-            if (key_len == date_methods[i].len && strncmp(key_str, date_methods[i].name, key_len) == 0) {
-                return js_get_or_create_builtin(date_methods[i].id, date_methods[i].name, date_methods[i].pc);
-            }
-        }
+        Item date_method = js_lookup_builtin_prototype_method_for_class(JS_CLASS_DATE, key_str, key_len);
+        if (date_method.item != ItemNull.item) return date_method;
         if (key_len == 7 && strncmp(key_str, "__sym_2", 7) == 0)
             return js_get_or_create_builtin(JS_BUILTIN_DATE_TO_PRIMITIVE, "[Symbol.toPrimitive]", 1);
         return ItemNull;
     }
     case JS_CLASS_REGEXP:
-        if (key_len == 4 && strncmp(key_str, "exec", 4) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_REGEXP_EXEC, "exec", 1);
-        if (key_len == 4 && strncmp(key_str, "test", 4) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_REGEXP_TEST, "test", 1);
-        if (key_len == 8 && strncmp(key_str, "toString", 8) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_REGEXP_TO_STRING, "toString", 0);
-        if (key_len == 7 && strncmp(key_str, "compile", 7) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_REGEXP_COMPILE, "compile", 2);
-        return ItemNull;
+        return js_lookup_builtin_prototype_method_for_class(JS_CLASS_REGEXP, key_str, key_len);
     default:
         return ItemNull;
     }

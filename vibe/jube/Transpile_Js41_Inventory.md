@@ -54,6 +54,7 @@ Observed `MAP_KIND_*` values:
 | `MAP_KIND_ITERATOR` | engine-internal iterator objects |
 | `MAP_KIND_PROXY` | Proxy object |
 | `MAP_KIND_PROCESS_ENV` | Node `process.env` host object |
+| `MAP_KIND_CSS_NAMESPACE` | global `CSS` namespace object with ordinary shape-backed methods |
 
 Refactor rule: each exotic should hook named operations (`Get`, `Set`,
 `Delete`, `DefineOwnProperty`, `OwnPropertyKeys`, `HasProperty`) explicitly,
@@ -159,18 +160,21 @@ Execution slices:
 2. Migrate `JSON` and `Reflect` namespace methods to the same helper.
    Extended to include the same low-risk namespace method pattern for
    `Atomics`, because it already used a local method table with matching
-   non-enumerable installation semantics. `CSS` was investigated but left for
-   a separate exotic-object cleanup because its namespace marker currently
-   occupies `Map::type`, which conflicts with ordinary shape-backed method
-   storage.
+   non-enumerable installation semantics. `CSS` was investigated and then
+   completed in the later CSS namespace representation phase, because its old
+   marker occupied `Map::type`, which conflicted with ordinary shape-backed
+   method storage.
 3. Migrate constructor static methods (`Object`, `Array`, `Number`, `Promise`,
    `Date`, `Symbol`, `TypedArray`) without changing their existing fallback
    semantics. Done for the plain method surfaces, and extended to matching
    `String`, `Map`, `ArrayBuffer`, and `Proxy` statics. Accessor statics such
    as `[Symbol.species]` remain in their existing accessor installation paths.
-4. Migrate prototype families (`Array`, `String`, `Function`, `Number`) only
-   after adding focused descriptor/name/length tests, since these have a larger
-   compatibility surface.
+4. Migrate prototype families after focused descriptor/name/length checks.
+   Completed for the plain method/accessor surfaces of `Object`, `Function`,
+   `Array`, `Number`, `String`, `Promise`, `Map`, `Set`, `WeakMap`,
+   `WeakSet`, `ArrayBuffer`, `Date`, `RegExp`, `DataView`, and
+   `%TypedArray%`. Symbol and exotic descriptor surfaces remain on their
+   dedicated paths where they carry non-method semantics.
 
 ## First Mechanical Cleanup Candidates
 
@@ -268,12 +272,12 @@ This removes three ad-hoc local method tables while preserving the existing
 method names, built-in ids, `.length` values, and non-enumerable method
 installation behavior.
 
-`CSS` was deliberately postponed after investigation. Its namespace object is
-tagged through `MAP_KIND_CSSOM` plus `js_css_namespace_marker` in `Map::type`,
-and `Map::type` is also the ordinary property shape pointer used by
-`js_property_set` / `js_map_get_fast`. Migrating `CSS.supports` and
-`CSS.escape` to the ordinary registry path therefore needs a separate
-representation fix rather than a small method-table substitution.
+`CSS` was deliberately postponed after investigation, then completed in the
+CSS namespace representation phase below. Its namespace object had been tagged
+through `MAP_KIND_CSSOM` plus a marker in `Map::type`, and `Map::type` is also
+the ordinary property shape pointer used by `js_property_set` /
+`js_map_get_fast`. Migrating `CSS.supports` and `CSS.escape` therefore needed a
+representation fix before the method-table substitution.
 
 Constructor static methods and prototype methods remain outside this tranche.
 Those need descriptor/name/length tests before migration because they carry a
@@ -300,3 +304,186 @@ This removes the separate name-only constructor population tables and the large
 hand-written static lookup branch, making first-class access, own-property
 reflection, `.length`, and enumerability draw from one method spec source for
 these constructor families.
+
+### Tranche 11 - Prototype registry foundation
+
+Extended the `JsBuiltinMethodSpec` foundation to the first low-risk prototype
+families: `Object.prototype`, `Function.prototype`, `Array.prototype`, and
+`Number.prototype`. Added shared prototype method spec tables and routed
+prototype population through `js_populate_builtin_prototype_methods(...)`.
+Dynamic built-in fallback lookup for Array, Function, and Number receiver
+types now uses the same tables instead of local ad-hoc arrays/branches.
+
+`js_append_builtin_method_names(...)` also reuses the shared prototype specs
+for these families, while keeping String on its existing path because String
+has alias display-name rules (`trimLeft`/`trimRight`) and Annex B wrapper
+methods that should be migrated in a dedicated slice.
+
+Verification:
+
+- `make -C build/premake config=debug_native lambda -j1 CC="cc" CXX="c++"`
+- temporary smoke script for dynamic Array/Function/Number/Object prototype
+  access through `./lambda.exe js ... --no-log`
+- `./test/test_js_gtest.exe --gtest_filter='JavaScriptTests/JsFileTest.Run/array_methods:JavaScriptTests/JsFileTest.Run/number_methods:JavaScriptTests/JsFileTest.Run/v11_function_bind:JavaScriptTests/JsFileTest.Run/v11_object_methods:JavaScriptTests/JsFileTest.Run/v9_array_methods'`
+- `make test262-baseline`: fully passed `30009 / 30009`, failed `0`,
+  regressions `0`.
+
+### Tranche 12 - Collection and promise prototype registry expansion
+
+Expanded the prototype registry foundation to the next receiver-sensitive but
+plain-method families: `Promise.prototype`, `Map.prototype`, `Set.prototype`,
+`WeakMap.prototype`, `WeakSet.prototype`, and `ArrayBuffer.prototype`.
+Added shared `JsBuiltinMethodSpec` tables and routed each constructor
+prototype population path through `js_populate_builtin_prototype_methods(...)`.
+
+Special semantics stayed local to the population blocks: `Map.prototype`
+still aliases `[Symbol.iterator]` to `entries`, `Set.prototype.keys` remains
+the exact same function object as `Set.prototype.values`, collection
+`@@toStringTag` attributes are unchanged, and `ArrayBuffer.prototype`
+keeps its existing tag/class setup before installing `slice` and `resize`.
+
+Verification:
+
+- `make -C build/premake config=debug_native lambda -j1 CC="cc" CXX="c++"`
+- temporary smoke script for Map/Set/Promise/ArrayBuffer prototype
+  method length, enumerability, and iterator identity through
+  `./lambda.exe js ... --no-log`
+- `./test/test_js_gtest.exe --gtest_filter='JavaScriptTests/JsFileTest.Run/v11_map_set:JavaScriptTests/JsFileTest.Run/collections_advanced:JavaScriptTests/JsFileTest.Run/promise_basic:JavaScriptTests/JsFileTest.Run/typed_arrays'`
+- `make test262-baseline`: fully passed `30009 / 30009`, failed `0`,
+  regressions `0`.
+
+### Tranche 13 - Date and RegExp prototype registry expansion
+
+Moved the plain named method surfaces for `Date.prototype` and
+`RegExp.prototype` onto shared `JsBuiltinMethodSpec` tables. Prototype
+population now uses `js_populate_builtin_prototype_methods(...)`, and the
+receiver-class fallback/prototype dispatch paths use
+`js_lookup_builtin_prototype_method_for_class(...)` instead of separate local
+Date/RegExp method lists.
+
+Special properties stayed on their existing dedicated paths:
+`Date.prototype[Symbol.toPrimitive]` remains installed and resolved through
+the symbol-specific handling, while RegExp symbol methods and accessor
+properties (`source`, `flags`, `global`, `unicode`, etc.) remain in the
+RegExp population block because they carry getter and symbol semantics beyond
+the plain method registry.
+
+This also makes `Date.prototype.toJSON.length` consistently come from the
+eager-install table value of `1`, matching the spec-facing prototype
+installation path instead of preserving the older duplicate fallback value.
+String prototype migration is still left for a separate tranche because of
+alias/display-name behavior (`trimLeft` / `trimRight`) and Annex B methods.
+
+Verification:
+
+- `make -C build/premake config=debug_native lambda -j1 CC="cc" CXX="c++"`
+- temporary smoke script for Date/RegExp prototype method length,
+  enumerability, symbol visibility, dynamic dispatch, and RegExp source
+  getter through `./lambda.exe js ... --no-log`
+- `./test/test_js_gtest.exe --gtest_filter='JavaScriptTests/JsFileTest.Run/v11_date_methods:JavaScriptTests/JsFileTest.Run/v11_regex_methods:JavaScriptTests/JsFileTest.Run/regex_advanced:JavaScriptTests/JsFileTest.Run/regex_backrefs:JavaScriptTests/JsFileTest.Run/regex_lookahead:JavaScriptTests/JsFileTest.Run/regex_lookbehind:JavaScriptTests/JsFileTest.Run/regex_neg_lookahead:JavaScriptTests/JsFileTest.Run/regex_unicode_props'`
+- `make test262-baseline`: fully passed `30009 / 30009`, failed `0`,
+  regressions `0`.
+
+### Tranche 14 - String prototype registry expansion
+
+Moved `String.prototype` named methods onto the shared
+`JsBuiltinMethodSpec` registry. The table now drives prototype population,
+primitive string method lookup, class fallback lookup for String wrapper
+objects, and `getOwnPropertyNames` method-name enumeration.
+
+Extended `JsBuiltinMethodSpec` with an optional `display_name` field so
+property aliases can preserve their spec-visible function identity and names.
+`trimLeft` and `trimRight` remain properties in the table, but create/resolve
+the same cached builtins as `trimStart` and `trimEnd`, with canonical function
+names `trimStart` and `trimEnd`. This keeps the alias behavior explicit in
+data rather than reintroducing one-off lookup code.
+
+The String registry includes the newer well-formed Unicode methods and Annex B
+HTML wrapper methods (`anchor`, `bold`, `link`, `substr`, etc.). They are now
+installed as non-enumerable own properties on `String.prototype`, matching the
+existing name-enumeration surface that already exposed them.
+
+Verification:
+
+- `make -C build/premake config=debug_native lambda -j1 CC="cc" CXX="c++"`
+- temporary smoke script for `trimLeft` / `trimRight` alias identity and
+  canonical names, non-enumerability, Annex B own-property installation,
+  primitive lookup, and String wrapper calls through
+  `./lambda.exe js ... --no-log`
+- `./test/test_js_gtest.exe --gtest_filter='JavaScriptTests/JsFileTest.Run/string_methods:JavaScriptTests/JsFileTest.Run/v9_string_methods:JavaScriptTests/JsFileTest.Run/string_decoder_basic:JavaScriptTests/JsFileTest.Run/numeric_string_key_equivalence'`
+- `make test262-baseline`: fully passed `30009 / 30009`, failed `0`,
+  regressions `0`.
+
+## Phase Completion - Built-in Registry Foundation
+
+Finished the built-in registry foundation as a phase instead of continuing
+family-by-family tranche work. The remaining ad-hoc prototype method/accessor
+tables for `DataView.prototype` and `%TypedArray%.prototype` now use shared
+`JsBuiltinMethodSpec` data plus reusable installation helpers:
+
+- `js_install_builtin_function_specs(...)` creates method functions from table
+  data while preserving specialized function flags for receiver-sensitive
+  typed-array and DataView paths.
+- `js_install_builtin_accessor_specs(...)` installs native getter descriptors
+  from the same spec shape, preserving getter names such as `get buffer`,
+  `get byteLength`, and `get length`.
+- `js_populate_dataview_prototype_methods(...)` keeps early constructor
+  initialization independent from the later registry table definitions.
+- `%TypedArray%.prototype[Symbol.iterator]` remains an identity alias of
+  `values`, while typed-array-only stub methods (`set`, `subarray`,
+  `toLocaleString`) keep their existing dispatch behavior.
+
+The registry phase now covers namespace methods (`Math`, `JSON`, `Reflect`,
+`Atomics`), constructor static methods, and the plain built-in prototype method
+surfaces listed in the phase plan. `CSS` was completed in the following
+namespace representation phase. Remaining Js41 work should move to the next
+structural boundary: exotic object operation tables, descriptor synthesis from
+registry data, and eventual file splits.
+
+Verification:
+
+- `make -C build/premake config=debug_native lambda -j1 CC="cc" CXX="c++"`
+- temporary smoke script for DataView and `%TypedArray%.prototype` function
+  lengths, getter names, non-enumerability, iterator identity, and runtime
+  dispatch through `./lambda.exe js ... --no-log`
+- `./test/test_js_gtest.exe --gtest_filter='JavaScriptTests/JsFileTest.Run/typed_arrays:JavaScriptTests/JsFileTest.Run/opt_p4_typed_reads'`
+- `make test262-baseline`: fully passed `30009 / 30009`, failed `0`,
+  regressions `0`.
+
+## Phase Completion - CSS Namespace Representation
+
+Finished the CSS namespace representation phase that the registry work had
+deferred. The global `CSS` object no longer identifies itself by writing a
+sentinel into `Map::type`; it now has a dedicated `MAP_KIND_CSS_NAMESPACE`.
+That keeps `Map::type` available for ordinary shape storage, so the namespace
+can safely hold built-in methods and user-defined own properties at the same
+time.
+
+Code changes:
+
+- Added `MAP_KIND_CSS_NAMESPACE` as a distinct exotic kind for the global
+  `CSS` namespace object.
+- Changed `js_is_css_namespace(...)` to test the map kind instead of a
+  `Map::type` sentinel.
+- Routed `CSS.supports` and `CSS.escape` through `JS_CSS_METHOD_SPECS` and
+  `js_install_builtin_method_specs(...)`, matching the registry pattern used
+  for `Math`, `JSON`, `Reflect`, and `Atomics`.
+- Let the CSS namespace fall through to ordinary property get/set after the
+  map-kind dispatch, while keeping CSSOM wrapper objects on `MAP_KIND_CSSOM`.
+- Carried the new map kind through object-to-primitive fallback checks so
+  string conversion keeps the previous namespace behavior.
+- Added `test/js/css_namespace.js` and `test/js/css_namespace.txt` to lock the
+  behavior: method `.length`, non-enumerability, `@@toStringTag`, direct and
+  extracted calls, and user property writes after method installation.
+
+Verification:
+
+- `make -C build/premake config=debug_native lambda -j1 CC="cc" CXX="c++"`
+- temporary smoke script for CSS namespace descriptors, own property writes,
+  and method dispatch through `./lambda.exe js ... --no-log`
+- `./test/test_js_gtest.exe --gtest_filter='JavaScriptTests/JsFileTest.Run/css_namespace:JavaScriptTests/JsFileTest.Run/dom_style:JavaScriptTests/JsFileTest.Run/dom_basic'`
+- `./test/test_css_dom_integration.exe`: passed `77`, skipped `25`, failed `0`
+- `./test/test_wpt_css_syntax_gtest.exe`: still has unrelated existing CSS
+  syntax failures in charset/escaped-url cases; not a CSS namespace regression
+- `make test262-baseline`: fully passed `30009 / 30009`, failed `0`,
+  regressions `0`.
