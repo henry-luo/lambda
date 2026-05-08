@@ -100,6 +100,7 @@ int clog_fatal(log_category_t *category, const char *format, ...);
 int clog_error(log_category_t *category, const char *format, ...);
 int clog_warn(log_category_t *category, const char *format, ...);
 int clog_notice(log_category_t *category, const char *format, ...);
+int clog_raw(log_category_t *category, const char *message);
 
 /*
  * Release build optimization: clog_debug() and clog_info() are stripped

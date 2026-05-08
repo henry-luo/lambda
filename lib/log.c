@@ -735,6 +735,29 @@ static int log_output(log_category_t *category, int level, const char *format, v
     return LOG_OK;
 }
 
+/* Write an already-formatted line to a category output without timestamp,
+ * level, category prefix, colors, or console fan-out. This is intended for
+ * structured side-channel logs such as JSON Lines event logs. */
+int clog_raw(log_category_t *category, const char *message) {
+    if (!category || !category->enabled || !category->output || !message) {
+        return LOG_OK;
+    }
+
+    if (fputs(message, category->output) == EOF) {
+        return LOG_WRITE_FAIL;
+    }
+
+    size_t len = strlen(message);
+    if (len == 0 || message[len - 1] != '\n') {
+        if (fputc('\n', category->output) == EOF) {
+            return LOG_WRITE_FAIL;
+        }
+    }
+
+    fflush(category->output);
+    return LOG_OK;
+}
+
 /* Initialize logging system */
 int log_init(const char *config) {
     if (log_initialized) {

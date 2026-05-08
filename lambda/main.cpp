@@ -1940,6 +1940,7 @@ int main(int argc, char *argv[]) {
             printf("  --continue-on-error                Continue processing on errors in batch mode\n");
             printf("  --summary                          Print summary statistics\n");
             printf("  --debug                            Enable debug output\n");
+            printf("  --event-log                        Emit per-document JSONL event/state log under ./temp/\n");
             printf("  --help                             Show this help message\n");
             printf("\nSingle File Examples:\n");
             printf("  %s layout index.html                   # Basic HTML layout\n", argv[0]);

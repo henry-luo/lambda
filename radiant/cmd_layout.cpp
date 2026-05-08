@@ -14,6 +14,7 @@
  *   -vh, --viewport-height HEIGHT  Viewport height in pixels (default: 800)
  *   --format FORMAT                Output format: json, text (default: text)
  *   --debug                        Enable debug output
+ *   --event-log                    Emit per-document JSONL event/state log under ./temp/
  *   --flavor FLAVOR                LaTeX rendering pipeline: latex-js (default), tex-proper
  */
 
@@ -75,6 +76,7 @@ void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 #include "../radiant/form_control.hpp"
 #include "../radiant/script_runner.h"
 #include "../radiant/source_pos_bridge.hpp"
+#include "../radiant/event_state_log.hpp"
 #include "../lambda/render_map.h"
 #include "../lambda/template_state.h"
 
@@ -5548,6 +5550,7 @@ struct LayoutOptions {
     int viewport_width;
     int viewport_height;
     bool debug;
+    bool event_log;
     bool continue_on_error;                     // continue processing on errors in batch mode
     bool summary;                               // print summary statistics
 };
@@ -5563,6 +5566,7 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
     opts->viewport_width = 1200;  // Standard viewport width for layout tests (matches browser reference)
     opts->viewport_height = 800;  // Standard viewport height for layout tests (matches browser reference)
     opts->debug = false;
+    opts->event_log = false;
     opts->continue_on_error = false;
     opts->summary = false;
 
@@ -5620,6 +5624,9 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
         }
         else if (strcmp(argv[i], "--debug") == 0) {
             opts->debug = true;
+        }
+        else if (strcmp(argv[i], "--event-log") == 0) {
+            opts->event_log = true;
         }
         else if (strcmp(argv[i], "--continue-on-error") == 0) {
             opts->continue_on_error = true;
@@ -5679,7 +5686,8 @@ static bool layout_single_file(
     int viewport_height,
     UiContext* ui_context,
     Url* cwd,
-    bool track_source_lines = false
+    bool track_source_lines = false,
+    bool enable_event_log = false
 ) {
     log_debug("[Layout] Processing file: %s", input_file);
 
@@ -5691,6 +5699,14 @@ static bool layout_single_file(
     }
 
     Url* input_url = url_parse_with_base(input_file, cwd);
+    EventStateLog* event_log = nullptr;
+    if (enable_event_log && input_url) {
+        event_log = event_state_log_open(input_file, url_get_href(input_url));
+        if (event_log) {
+            event_state_log_session_start(event_log, viewport_width, viewport_height, 1.0);
+            event_state_log_document(event_log, "load_start");
+        }
+    }
 
     // For HTTP URLs without clear extension, fetch and determine type from Content-Type
     const char* effective_ext = nullptr;
@@ -5722,6 +5738,10 @@ static bool layout_single_file(
             log_error("Failed to fetch URL: %s (HTTP %ld)", url_str,
                       response ? response->status_code : 0);
             if (response) free_fetch_response(response);
+            if (event_log) {
+                event_state_log_document(event_log, "load_failed");
+                event_state_log_close(event_log);
+            }
             pool_destroy(pool);
             return false;
         }
@@ -5767,8 +5787,16 @@ static bool layout_single_file(
 
     if (!doc) {
         log_error("Failed to load document: %s", input_file);
+        if (event_log) {
+            event_state_log_document(event_log, "load_failed");
+            event_state_log_close(event_log);
+        }
         pool_destroy(pool);
         return false;
+    }
+
+    if (event_log) {
+        event_state_log_document(event_log, "load_complete");
     }
 
     // Process @font-face rules from stored stylesheets
@@ -5781,7 +5809,25 @@ static bool layout_single_file(
         log_info("[Layout] Document already has view_tree (PDF/SVG/image), skipping CSS layout");
     } else {
         log_debug("[Layout] About to call layout_html_doc...");
+        auto event_layout_start = std::chrono::high_resolution_clock::now();
         layout_html_doc(ui_context, doc, false);
+        auto event_layout_end = std::chrono::high_resolution_clock::now();
+        if (event_log) {
+            char event_buf[1024];
+            JsonWriter event_writer;
+            double duration_ms = std::chrono::duration<double, std::milli>(
+                event_layout_end - event_layout_start).count();
+            event_state_log_begin_record(event_log, &event_writer,
+                event_buf, sizeof(event_buf), "layout.stats", 0);
+            jw_key(&event_writer, "data");
+            jw_obj_begin(&event_writer);
+                jw_kv_double(&event_writer, "duration_ms", duration_ms);
+                jw_kv_int(&event_writer, "viewport_width", viewport_width);
+                jw_kv_int(&event_writer, "viewport_height", viewport_height);
+                jw_kv_bool(&event_writer, "full", true);
+            jw_obj_end(&event_writer);
+            event_state_log_finish_record(event_log, &event_writer);
+        }
         log_debug("[Layout] layout_html_doc returned");
     }
 
@@ -5812,6 +5858,10 @@ static bool layout_single_file(
     // Failing to free them leaks pools/arenas across batch files, which can cause
     // rpmalloc heap corruption that manifests as SIGTRAP in system malloc.
 
+    if (event_log) {
+        event_state_log_document(event_log, "unload_start");
+    }
+
     if (doc) {
         // Clean up retained JS state (MIR context, event registry, runtime heap)
         // before destroying the document that owns the pointers.
@@ -5823,6 +5873,12 @@ static bool layout_single_file(
             doc->view_tree = nullptr;
         }
         dom_document_destroy(doc);
+    }
+
+    if (event_log) {
+        event_state_log_document(event_log, "unload_complete");
+        event_state_log_close(event_log);
+        event_log = nullptr;
     }
 
     // Free the input URL (dom_document_destroy doesn't own it)
@@ -6108,7 +6164,8 @@ int cmd_layout(int argc, char** argv) {
                 opts.viewport_height,
                 &ui_context,
                 cwd,
-                opts.debug
+                opts.debug,
+                opts.event_log
             );
         } catch (...) {
             log_error("batch layout: uncaught exception processing %s", input_file);
@@ -6128,7 +6185,8 @@ int cmd_layout(int argc, char** argv) {
                     opts.viewport_height,
                     &ui_context,
                     cwd,
-                    opts.debug
+                    opts.debug,
+                    opts.event_log
                 );
             } catch (...) {
                 log_error("batch layout: uncaught exception processing %s", input_file);
