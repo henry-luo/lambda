@@ -3,6 +3,7 @@
 #include "state_machine.hpp"
 #include "state_store_internal.hpp"
 #include "dom_range.hpp"
+#include "dom_range_resolver.hpp"
 #include "form_control.hpp"
 #include "text_control.hpp"
 #include "../lambda/input/css/dom_node.hpp"
@@ -57,6 +58,17 @@ bool focus_transition(RadiantState* state,
     return radiant_state_validate_interaction(state, NULL);
 }
 
+static void state_machine_sync_selection_projection(RadiantState* state) {
+    if (!state) return;
+    if (state->selection && !state->selection->is_collapsed) {
+        dom_selection_sync_from_legacy_selection(state);
+        legacy_sync_from_dom_selection(state);
+    } else if (state->caret && state->caret->view) {
+        dom_selection_sync_from_legacy_caret(state);
+        legacy_sync_from_dom_selection(state);
+    }
+}
+
 bool caret_transition(RadiantState* state,
                       CaretTransitionKind kind,
                       CaretTransitionArgs* args) {
@@ -72,6 +84,7 @@ bool caret_transition(RadiantState* state,
             return false;
     }
     transition_leave(state);
+    state_machine_sync_selection_projection(state);
     radiant_state_assert_valid(state, "caret_transition");
     return radiant_state_validate_interaction(state, NULL);
 }
@@ -120,6 +133,7 @@ bool selection_transition(RadiantState* state,
             return false;
     }
     transition_leave(state);
+    state_machine_sync_selection_projection(state);
     radiant_state_assert_valid(state, "selection_transition");
     return radiant_state_validate_interaction(state, NULL);
 }

@@ -2392,6 +2392,11 @@ void caret_move_line(RadiantState* state, int delta, struct UiContext* uicon) {
 void caret_clear(RadiantState* state) {
     if (!state) return;
 
+    DomSelection* selection = state->dom_selection;
+    if (selection && selection->range_count > 0 && selection->is_collapsed) {
+        dom_selection_remove_all_ranges(selection);
+    }
+
     if (state->caret) {
         memset(state->caret, 0, sizeof(CaretState));
     }

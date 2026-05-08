@@ -269,7 +269,6 @@ static bool text_target_allows_caret(View* target) {
                 elem->form && elem->form->disabled) {
                 return false;
             }
-            if (elem->tag() == HTM_TAG_BUTTON) return false;
             if (elem->has_attribute("data-editable")) return true;
             const char* ce = elem->get_attribute("contenteditable");
             if (ce && strcmp(ce, "false") != 0) return true;
@@ -5172,6 +5171,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             had_keydown_selection = true;
             selection_get_range(state, &keydown_sel_start, &keydown_sel_end_capture);
         }
+        int keydown_caret_offset = 0;
+        bool had_keydown_caret = caret_get_offset(state, &keydown_caret_offset);
 
         // Rich-text editing path (Phase R4): translate platform key events
         // into browser-like beforeinput intents for data-editable/contenteditable
@@ -5388,8 +5389,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     bool editable = !focus_elem->form->readonly && !focus_elem->form->disabled;
                     if (had_lambda_keydown) {
                         // Lambda handler deleted char before caret; move caret back by 1 char
-                        if (cur > 0 && value) {
-                            int new_off = cur - 1;
+                        int base_off = had_keydown_caret ? keydown_caret_offset : cur;
+                        if (base_off > 0 && value) {
+                            int new_off = base_off - 1;
                             while (new_off > 0 && ((unsigned char)value[new_off] & 0xC0) == 0x80)
                                 new_off--;
                             int new_len = focus_elem->form->value
@@ -5806,9 +5808,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             int new_len = focus_elem->form->value
                                 ? (int)strlen(focus_elem->form->value) : 0;
                             caret_set(state, focused, keydown_sel_start <= new_len ? keydown_sel_start : new_len);
-                        } else if (cur > 0 && value) {
+                        } else if ((had_keydown_caret ? keydown_caret_offset : cur) > 0 && value) {
                             // single char delete: move caret back by 1 UTF-8 char
-                            int new_off = cur - 1;
+                            int base_off = had_keydown_caret ? keydown_caret_offset : cur;
+                            int new_off = base_off - 1;
                             while (new_off > 0 && ((unsigned char)value[new_off] & 0xC0) == 0x80)
                                 new_off--;
                             int new_len = focus_elem->form->value
@@ -5871,7 +5874,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             // normal enter: advance caret by 1 byte
                             int new_len = focus_elem->form->value
                                 ? (int)strlen(focus_elem->form->value) : 0;
-                            int new_off = cur + 1;
+                            int new_off = (had_keydown_caret ? keydown_caret_offset : cur) + 1;
                             caret_set(state, focused, new_off <= new_len ? new_off : new_len);
                         }
                     } else if (editable) {
@@ -6138,6 +6141,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             had_input_selection = true;
             selection_get_range(state, &input_sel_start, &input_sel_end);
         }
+        int input_caret_offset = 0;
+        bool had_input_caret = caret_get_offset(state, &input_caret_offset);
 
         // Rich-text text insertion is driven through beforeinput/insertText.
         // This avoids the legacy contenteditable TODO path and lets Lambda
@@ -6187,7 +6192,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 int caret_offset = 0;
                 if (had_lambda_handler) {
                     // legacy path: handler mutated value; just advance caret.
-                    if (caret_get_offset(state, &caret_offset)) {
+                    if (had_input_caret || caret_get_offset(state, &caret_offset)) {
                         uint32_t cp = text_event->codepoint;
                         int char_bytes = (cp < 0x80) ? 1 : (cp < 0x800) ? 2 : (cp < 0x10000) ? 3 : 4;
                         int new_off;
@@ -6195,7 +6200,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             new_off = input_sel_start + char_bytes;
                             selection_clear(state);
                         } else {
-                            new_off = caret_offset + char_bytes;
+                            new_off = (had_input_caret ? input_caret_offset : caret_offset) + char_bytes;
                         }
                         const char* val = elem->form->value;
                         int val_len = val ? (int)strlen(val) : 0;
