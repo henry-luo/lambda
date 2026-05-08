@@ -33,6 +33,21 @@ static bool same_view_position(View* a_view, int a_offset, View* b_view, int b_o
     return a_view == b_view && a_offset == b_offset;
 }
 
+static DomNode* boundary_root(const DomBoundary* boundary) {
+    if (!boundary || !boundary->node) return NULL;
+    DomNode* root = boundary->node;
+    while (root->parent) root = root->parent;
+    return root;
+}
+
+static int boundary_legacy_offset(const DomBoundary* boundary) {
+    if (!boundary || !boundary->node) return 0;
+    if (boundary->node->is_text()) {
+        return (int)dom_text_utf16_to_utf8((DomText*)boundary->node, boundary->offset);
+    }
+    return (int)boundary->offset;
+}
+
 static View* focus_validation_root(View* view) {
     View* root = view;
     while (root && root->parent) {
@@ -112,6 +127,90 @@ static void validate_focus_invariants(RadiantState* state,
     }
 }
 
+static void validate_selection_invariants(RadiantState* state,
+                                          StateValidationReport* report) {
+    if (!state || !state->dom_selection) return;
+
+    DomSelection* selection = state->dom_selection;
+    if (selection->range_count > 1) {
+        report_fail(report, "DOM selection has more than one range");
+        return;
+    }
+
+    if (selection->range_count == 0) {
+        if (selection->anchor.node || selection->focus.node || !selection->is_collapsed ||
+            selection->direction != DOM_SEL_DIR_NONE) {
+            report_fail(report, "empty DOM selection has stale anchor/focus state");
+        }
+        return;
+    }
+
+    DomRange* range = selection->ranges[0];
+    if (!range) {
+        report_fail(report, "DOM selection range slot is empty");
+        return;
+    }
+
+    if (!dom_boundary_is_valid(&selection->anchor) ||
+        !dom_boundary_is_valid(&selection->focus) ||
+        !dom_boundary_is_valid(&range->start) ||
+        !dom_boundary_is_valid(&range->end)) {
+        report_fail(report, "DOM selection contains invalid boundary");
+    }
+
+    DomNode* anchor_root = boundary_root(&selection->anchor);
+    DomNode* focus_root = boundary_root(&selection->focus);
+    DomNode* start_root = boundary_root(&range->start);
+    DomNode* end_root = boundary_root(&range->end);
+    if (!anchor_root || !focus_root || !start_root || !end_root ||
+        anchor_root != focus_root || anchor_root != start_root || anchor_root != end_root) {
+        report_fail(report, "DOM selection endpoints are in incompatible roots");
+    }
+
+    bool range_collapsed = dom_range_collapsed(range);
+    if (selection->is_collapsed != range_collapsed) {
+        report_fail(report, "DOM selection collapsed flag disagrees with range");
+    }
+    if (selection->is_collapsed) {
+        if (selection->direction != DOM_SEL_DIR_NONE) {
+            report_fail(report, "collapsed DOM selection has non-none direction");
+        }
+        if (dom_boundary_compare(&selection->anchor, &selection->focus) != DOM_BOUNDARY_EQUAL) {
+            report_fail(report, "collapsed DOM selection endpoints differ");
+        }
+    } else {
+        DomBoundaryOrder anchor_focus = dom_boundary_compare(&selection->anchor, &selection->focus);
+        if (selection->direction == DOM_SEL_DIR_NONE) {
+            report_fail(report, "non-collapsed DOM selection has no direction");
+        } else if (selection->direction == DOM_SEL_DIR_FORWARD && anchor_focus == DOM_BOUNDARY_AFTER) {
+            report_fail(report, "forward DOM selection direction is inconsistent");
+        } else if (selection->direction == DOM_SEL_DIR_BACKWARD && anchor_focus == DOM_BOUNDARY_BEFORE) {
+            report_fail(report, "backward DOM selection direction is inconsistent");
+        }
+    }
+
+    if (state->selection) {
+        SelectionState* legacy = state->selection;
+        if ((DomNode*)legacy->anchor_view != selection->anchor.node ||
+            (DomNode*)legacy->focus_view != selection->focus.node ||
+            legacy->anchor_offset != boundary_legacy_offset(&selection->anchor) ||
+            legacy->focus_offset != boundary_legacy_offset(&selection->focus) ||
+            legacy->is_collapsed != selection->is_collapsed) {
+            report_fail(report, "legacy selection projection is stale");
+        }
+        if (legacy->is_selecting && selection->range_count == 0) {
+            report_fail(report, "active legacy selection has no DOM range");
+        }
+    }
+
+    if (state->caret && selection->is_collapsed) {
+        if ((DomNode*)state->caret->view != selection->focus.node ||
+            state->caret->char_offset != boundary_legacy_offset(&selection->focus)) {
+            report_fail(report, "legacy caret projection is stale");
+        }
+    }
+}
+
 bool radiant_state_validate_interaction(RadiantState* state,
                                         StateValidationReport* report) {
     report_init(report);
@@ -159,9 +258,7 @@ bool radiant_state_validate_interaction(RadiantState* state,
         }
     }
 
-    if (state->dom_selection && state->dom_selection->range_count > 1) {
-        report_fail(report, "DOM selection has more than one range");
-    }
+    validate_selection_invariants(state, report);
 
     return !report || report->ok;
 }

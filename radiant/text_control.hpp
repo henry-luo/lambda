@@ -10,7 +10,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
-class DomElement;
+struct DomElement;
 struct FormControlProp;
 struct RadiantState;
 

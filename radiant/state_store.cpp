@@ -7,6 +7,8 @@
 #include "../lib/memtrack.h"
 #include "../lambda/input/css/dom_element.hpp"
 #include "event_state_log.hpp"
+#include "form_control.hpp"
+#include "text_control.hpp"
 // str.h included via view.hpp
 #include "view.hpp"
 #include "../lib/arraylist.h"
@@ -232,17 +234,64 @@ extern "C" struct DomSelection* dom_range_state_selection(RadiantState* state) {
 }
 
 // ----------------------------------------------------------------------------
-// Phase 6 — non-invasive legacy → DOM mirroring.
-// The legacy `caret_*` / `selection_*` API still drives the GUI directly.
-// After they update the legacy state we mirror the result into
-// `state->dom_selection` so JavaScript reads (`window.getSelection()`)
-// observe the same anchor / focus the user just produced.
+// Selection/caret machine helpers.
+// DomSelection is the canonical representation; legacy CaretState and
+// SelectionState are projections kept for render/event call sites that still
+// read those structs directly.
 // ----------------------------------------------------------------------------
 static DomSelection* sync_ensure_selection(RadiantState* state) {
     if (!state) return NULL;
     if (state->dom_selection) return state->dom_selection;
     state->dom_selection = dom_selection_create(state);
     return state->dom_selection;
+}
+
+static void selection_write_optional_ref(JsonWriter* w, const char* key, View* view) {
+    event_state_log_write_node_ref(w, key, (const DomNode*)view);
+}
+
+static const char* selection_state_name(DomSelection* selection) {
+    if (!selection || selection->range_count == 0) return "SelectionEmpty";
+    if (selection->is_collapsed) return "CaretCollapsed";
+    return selection->direction == DOM_SEL_DIR_BACKWARD ?
+        "RangeSelectedBackward" : "RangeSelectedForward";
+}
+
+static void selection_log_transition(RadiantState* state, const char* transition,
+                                     View* anchor_view, int anchor_offset,
+                                     View* focus_view, int focus_offset) {
+    if (!state || !event_state_log_enabled(state->active_event_log)) return;
+
+    char buf[1024];
+    JsonWriter w;
+    event_state_log_begin_record(state->active_event_log, &w, buf, sizeof(buf),
+        "state.transition", state->active_cascade_id);
+    jw_key(&w, "data");
+    jw_obj_begin(&w);
+        jw_kv_str(&w, "machine", "selection");
+        jw_kv_str(&w, "transition", transition ? transition : "selection_update");
+        jw_kv_str(&w, "state", selection_state_name(state->dom_selection));
+        jw_key(&w, "anchor");
+        jw_obj_begin(&w);
+            selection_write_optional_ref(&w, "node", anchor_view);
+            jw_kv_int(&w, "offset", anchor_offset);
+        jw_obj_end(&w);
+        jw_key(&w, "focus");
+        jw_obj_begin(&w);
+            selection_write_optional_ref(&w, "node", focus_view);
+            jw_kv_int(&w, "offset", focus_offset);
+        jw_obj_end(&w);
+    jw_obj_end(&w);
+    event_state_log_finish_record(state->active_event_log, &w);
+}
+
+static bool selection_is_text_control_view(View* view) {
+    return view && view->is_element() && tc_is_text_control((DomElement*)view);
+}
+
+static void text_control_sync_selection(RadiantState* state, View* view) {
+    if (!state || !selection_is_text_control_view(view)) return;
+    tc_sync_legacy_to_form((DomElement*)view, state);
 }
 
 // Phase B (consolidation) — called from `dom_selection_create` (in
@@ -328,6 +377,30 @@ static bool selection_sync_rebind_boundary(DomNode* root,
     log_debug("[DOM-SYNC REBIND] rebound legacy endpoint %p to current %p offset=%u",
         (void*)boundary->node, (void*)rebound.node, rebound.offset);
     return true;
+}
+
+static bool selection_extend_dom_to_focus(DomSelection* selection,
+                                          const DomBoundary* focus,
+                                          const char** out_exception) {
+    if (!selection || !focus || !focus->node) return false;
+    if (selection->range_count == 0) {
+        return dom_selection_collapse(selection, focus->node, focus->offset, out_exception);
+    }
+
+    DomBoundary anchor = selection->anchor;
+    DomNode* current_root = selection_sync_root_from_boundary(focus);
+    if (current_root && !selection_sync_boundary_in_root(current_root, &anchor)) {
+        DomBoundary rebound_anchor = anchor;
+        if (!selection_sync_rebind_boundary(current_root, &anchor, &rebound_anchor)) {
+            log_debug("selection_extend_dom_to_focus: skipped extend; anchor cannot resolve in current tree");
+            return false;
+        }
+        return dom_selection_set_base_and_extent(selection,
+            rebound_anchor.node, rebound_anchor.offset,
+            focus->node, focus->offset, out_exception);
+    }
+
+    return dom_selection_extend(selection, focus->node, focus->offset, out_exception);
 }
 
 extern "C" void dom_selection_sync_from_legacy_selection(RadiantState* state) {
@@ -1153,23 +1226,58 @@ void caret_set(RadiantState* state, View* view, int char_offset) {
     log_info("CARET_SET called: state=%p view=%p offset=%d", state, view, char_offset);
     if (!state) return;
 
-    // Phase B: ensure DomSelection (and its embedded legacy storage) exists.
-    if (!sync_ensure_selection(state) || !state->caret) {
+    DomSelection* selection = sync_ensure_selection(state);
+    if (!selection || !state->caret) {
         log_error("caret_set: failed to ensure DomSelection / legacy storage");
         return;
     }
 
-    CaretState* caret = state->caret;
-    caret->view = view;
-    caret->char_offset = char_offset;
-    caret->visible = true;
-    caret->blink_time = 0;
+    SelectionState* active_selection = state->selection;
+    if (active_selection && !active_selection->is_collapsed &&
+        active_selection->focus_view == view && active_selection->focus_offset == char_offset) {
+        state->caret->view = view;
+        state->caret->char_offset = char_offset;
+        state->caret->visible = true;
+        state->caret->blink_time = 0;
+        state->needs_repaint = true;
+        text_control_sync_selection(state, view);
+        log_debug("caret_set: projected active selection focus view=%p offset=%d", view, char_offset);
+        return;
+    }
 
-    // Update visual position (caller should call caret_update_visual)
+    if (selection_is_text_control_view(view)) {
+        // Canonical: update DomSelection only, then sync legacy projections
+        DomSelection* sel = selection;
+        DomBoundary boundary = boundary_from_legacy(view, char_offset);
+        const char* exc = NULL;
+        if (!dom_selection_collapse(sel, boundary.node, boundary.offset, &exc)) {
+            log_debug("caret_set: text-control collapse rejected: %s", exc ? exc : "?");
+            return;
+        }
+        // Sync legacy projections from canonical state
+        text_control_sync_selection(state, view);
+        state->selection_layout_dirty = true;
+        state->needs_repaint = true;
+        selection_log_transition(state, "collapse_to_text_control_boundary",
+            view, char_offset, view, char_offset);
+        log_debug("caret_set: text-control view=%p, offset=%d", view, char_offset);
+        return;
+    }
+
+    DomBoundary boundary = boundary_from_legacy(view, char_offset);
+    if (!boundary.node) return;
+
+    const char* exc = NULL;
+    if (!dom_selection_collapse(selection, boundary.node, boundary.offset, &exc)) {
+        log_debug("caret_set: collapse rejected: %s", exc ? exc : "?");
+        return;
+    }
+    if (state->selection) {
+        state->selection->is_selecting = false;
+    }
+    state->selection_layout_dirty = true;
     state->needs_repaint = true;
-
-    // Phase 6: mirror caret into DOM selection (collapsed range).
-    dom_selection_sync_from_legacy_caret(state);
+    selection_log_transition(state, "collapse_to_boundary", view, char_offset, view, char_offset);
 
     log_debug("caret_set: view=%p, offset=%d", view, char_offset);
 }
@@ -2289,157 +2397,349 @@ void caret_toggle_blink(RadiantState* state) {
 void selection_start(RadiantState* state, View* view, int char_offset) {
     if (!state) return;
 
-    // Phase B: ensure DomSelection (and its embedded legacy storage) exists.
-    if (!sync_ensure_selection(state) || !state->selection) {
+    DomSelection* selection = sync_ensure_selection(state);
+    if (!selection || !state->selection) {
         log_error("selection_start: failed to ensure DomSelection / legacy storage");
         return;
     }
 
-    SelectionState* sel = state->selection;
-    memset(sel, 0, sizeof(SelectionState));
-    sel->view = view;
-    sel->anchor_view = view;
-    sel->focus_view = view;
-    sel->anchor_offset = char_offset;
-    sel->focus_offset = char_offset;
-    sel->is_collapsed = true;
-    sel->is_selecting = true;
+    if (selection_is_text_control_view(view)) {
+        // Canonical: update DomSelection only, then sync legacy projections
+        DomSelection* sel = selection;
+        DomBoundary boundary = boundary_from_legacy(view, char_offset);
+        const char* exc = NULL;
+        if (!dom_selection_collapse(sel, boundary.node, boundary.offset, &exc)) {
+            log_debug("selection_start: text-control collapse rejected: %s", exc ? exc : "?");
+            return;
+        }
+        text_control_sync_selection(state, view);
+        state->selection_layout_dirty = true;
+        state->needs_repaint = true;
+        selection_log_transition(state, "start_text_control_selection",
+            view, char_offset, view, char_offset);
+        log_debug("selection_start: text-control view=%p, offset=%d", view, char_offset);
+        return;
+    }
 
-    // Also set caret to this position (this also mirrors into DomSelection).
-    caret_set(state, view, char_offset);
+    DomBoundary boundary = boundary_from_legacy(view, char_offset);
+    if (!boundary.node) return;
 
-    // Phase 6: mirror legacy selection into DOM selection.
-    dom_selection_sync_from_legacy_selection(state);
+    const char* exc = NULL;
+    if (!dom_selection_collapse(selection, boundary.node, boundary.offset, &exc)) {
+        log_debug("selection_start: collapse rejected: %s", exc ? exc : "?");
+        return;
+    }
+    if (state->selection) {
+        state->selection->is_selecting = true;
+    }
+    state->selection_layout_dirty = true;
+    state->needs_repaint = true;
+    selection_log_transition(state, "start_pointer_selection", view, char_offset, view, char_offset);
 
     log_debug("selection_start: view=%p, offset=%d", view, char_offset);
 }
 
 void selection_extend(RadiantState* state, int char_offset) {
-    if (!state || !state->selection) return;
+    if (!state) return;
+    DomSelection* selection = sync_ensure_selection(state);
+    if (!selection || !state->selection) return;
 
     SelectionState* sel = state->selection;
-    sel->focus_offset = char_offset;
-    // Check if collapsed: same view and same offset
-    sel->is_collapsed = (sel->anchor_view == sel->focus_view &&
-                         sel->anchor_offset == sel->focus_offset);
-
-    // Move caret to focus position
-    if (state->caret) {
-        state->caret->char_offset = char_offset;
-        state->caret->visible = true;
+    bool was_selecting = sel->is_selecting;
+    View* focus_view = sel->focus_view ? sel->focus_view : sel->anchor_view;
+    if (!focus_view && state->caret) focus_view = state->caret->view;
+    if (selection_is_text_control_view(focus_view)) {
+        // Canonical: update DomSelection only, then sync legacy projections
+        DomBoundary focus = boundary_from_legacy(focus_view, char_offset);
+        const char* exc = NULL;
+        if (!selection_extend_dom_to_focus(selection, &focus, &exc)) {
+            log_debug("selection_extend: text-control extend rejected: %s", exc ? exc : "?");
+            return;
+        }
+        if (state->selection) state->selection->is_selecting = was_selecting;
+        text_control_sync_selection(state, focus_view);
+        state->selection_layout_dirty = true;
+        state->needs_repaint = true;
+        selection_log_transition(state, "extend_text_control_selection",
+            sel->anchor_view, sel->anchor_offset, focus_view, char_offset);
+        log_debug("selection_extend: text-control focus=%d", char_offset);
+        return;
     }
+    DomBoundary focus = boundary_from_legacy(focus_view, char_offset);
+    if (!focus.node) return;
 
+    const char* exc = NULL;
+    if (!selection_extend_dom_to_focus(selection, &focus, &exc)) {
+        log_debug("selection_extend: extend rejected: %s", exc ? exc : "?");
+        return;
+    }
+    if (state->selection) state->selection->is_selecting = was_selecting;
+    state->selection_layout_dirty = true;
     state->needs_repaint = true;
-
-    // Phase 6: mirror into DOM selection.
-    dom_selection_sync_from_legacy_selection(state);
+    selection_log_transition(state, "extend_to_boundary",
+        state->selection ? state->selection->anchor_view : NULL,
+        state->selection ? state->selection->anchor_offset : 0,
+        focus_view, char_offset);
 
     log_debug("selection_extend: focus=%d, collapsed=%d", char_offset, sel->is_collapsed);
 }
 
 void selection_extend_to_view(RadiantState* state, View* view, int char_offset) {
-    if (!state || !state->selection) return;
+    if (!state) return;
+    DomSelection* selection = sync_ensure_selection(state);
+    if (!selection || !state->selection) return;
+    bool was_selecting = state->selection->is_selecting;
 
-    SelectionState* sel = state->selection;
-    sel->focus_view = view;
-    sel->view = view;  // keep view updated for compatibility
-    sel->focus_offset = char_offset;
-    // Check if collapsed: same view and same offset
-    sel->is_collapsed = (sel->anchor_view == sel->focus_view &&
-                         sel->anchor_offset == sel->focus_offset);
-
-    // Move caret to focus position in the new view
-    if (state->caret) {
-        state->caret->view = view;
-        state->caret->char_offset = char_offset;
-        state->caret->visible = true;
+    if (selection_is_text_control_view(view)) {
+        // Canonical: update DomSelection only, then sync legacy projections
+        DomBoundary focus = boundary_from_legacy(view, char_offset);
+        const char* exc = NULL;
+        if (!selection_extend_dom_to_focus(selection, &focus, &exc)) {
+            log_debug("selection_extend_to_view: text-control extend rejected: %s", exc ? exc : "?");
+            return;
+        }
+        if (state->selection) state->selection->is_selecting = was_selecting;
+        text_control_sync_selection(state, view);
+        state->selection_layout_dirty = true;
+        state->needs_repaint = true;
+        selection_log_transition(state, "extend_text_control_selection",
+            state->selection ? state->selection->anchor_view : NULL,
+            state->selection ? state->selection->anchor_offset : 0,
+            view, char_offset);
+        log_debug("selection_extend_to_view: text-control focus_view=%p, focus_offset=%d", view, char_offset);
+        return;
     }
 
-    state->needs_repaint = true;
+    DomBoundary focus = boundary_from_legacy(view, char_offset);
+    if (!focus.node) return;
 
-    // Phase 6: mirror into DOM selection.
-    dom_selection_sync_from_legacy_selection(state);
+    const char* exc = NULL;
+    if (!selection_extend_dom_to_focus(selection, &focus, &exc)) {
+        log_debug("selection_extend_to_view: extend rejected: %s", exc ? exc : "?");
+        return;
+    }
+    if (state->selection) state->selection->is_selecting = was_selecting;
+    state->selection_layout_dirty = true;
+    state->needs_repaint = true;
+    selection_log_transition(state, "extend_to_boundary",
+        state->selection ? state->selection->anchor_view : NULL,
+        state->selection ? state->selection->anchor_offset : 0,
+        view, char_offset);
 
     log_debug("selection_extend_to_view: focus_view=%p, focus_offset=%d, anchor_view=%p, collapsed=%d",
-        view, char_offset, sel->anchor_view, sel->is_collapsed);
+        view, char_offset, state->selection->anchor_view, state->selection->is_collapsed);
 }
 
 void selection_set(RadiantState* state, View* view, int anchor_offset, int focus_offset) {
     if (!state) return;
 
-    // Phase B: ensure DomSelection (and its embedded legacy storage) exists.
-    if (!sync_ensure_selection(state) || !state->selection) return;
+    DomSelection* selection = sync_ensure_selection(state);
+    if (!selection || !state->selection) return;
 
-    SelectionState* sel = state->selection;
-    sel->view = view;
-    sel->anchor_view = view;
-    sel->focus_view = view;
-    sel->anchor_offset = anchor_offset;
-    sel->focus_offset = focus_offset;
-    sel->is_collapsed = (anchor_offset == focus_offset);
-    sel->is_selecting = false;
+    if (selection_is_text_control_view(view)) {
+        // Canonical: update DomSelection only, then sync legacy projections
+        DomBoundary anchor = boundary_from_legacy(view, anchor_offset);
+        DomBoundary focus = boundary_from_legacy(view, focus_offset);
+        const char* exc = NULL;
+        if (!anchor.node || !focus.node) return;
+        if (!dom_selection_set_base_and_extent(selection,
+                anchor.node, anchor.offset, focus.node, focus.offset, &exc)) {
+            log_debug("selection_set: text-control set_base_and_extent rejected: %s", exc ? exc : "?");
+            return;
+        }
+        text_control_sync_selection(state, view);
+        state->selection_layout_dirty = true;
+        state->needs_repaint = true;
+        selection_log_transition(state, "set_text_control_extent", view, anchor_offset, view, focus_offset);
+        log_debug("selection_set: text-control anchor=%d, focus=%d", anchor_offset, focus_offset);
+        return;
+    }
 
-    // Set caret to focus position
-    caret_set(state, view, focus_offset);
+    DomBoundary anchor = boundary_from_legacy(view, anchor_offset);
+    DomBoundary focus = boundary_from_legacy(view, focus_offset);
+    if (!anchor.node || !focus.node) return;
 
+    const char* exc = NULL;
+    if (!dom_selection_set_base_and_extent(selection,
+            anchor.node, anchor.offset, focus.node, focus.offset, &exc)) {
+        log_debug("selection_set: set_base_and_extent rejected: %s", exc ? exc : "?");
+        return;
+    }
+    if (state->selection) {
+        state->selection->is_selecting = false;
+    }
+    state->selection_layout_dirty = true;
     state->needs_repaint = true;
+    selection_log_transition(state, "set_base_and_extent", view, anchor_offset, view, focus_offset);
 
     log_debug("selection_set: anchor=%d, focus=%d", anchor_offset, focus_offset);
 }
 
 void selection_select_all(RadiantState* state) {
-    if (!state || !state->selection || !state->selection->view) return;
+    if (!state) return;
+    DomSelection* selection = sync_ensure_selection(state);
+    if (!selection || !state->selection || !state->selection->view) return;
 
     SelectionState* sel = state->selection;
-    sel->anchor_offset = 0;
-    // TODO: get text length for focus_offset
-    sel->focus_offset = INT32_MAX;  // placeholder
-    sel->is_collapsed = false;
+    if (selection_is_text_control_view(sel->view)) {
+        // Canonical: update DomSelection only, then sync legacy projections
+        DomElement* elem = (DomElement*)sel->view;
+        tc_ensure_init(elem);
+        uint32_t len = 0;
+        if (elem->form && elem->form->current_value) {
+            len = elem->form->current_value_len;
+        } else if (elem->form && elem->form->value) {
+            len = (uint32_t)strlen(elem->form->value);
+        }
+        DomBoundary anchor = boundary_from_legacy((View*)elem, 0);
+        DomBoundary focus = boundary_from_legacy((View*)elem, (int)len);
+        const char* exc = NULL;
+        if (!anchor.node || !focus.node) return;
+        if (!dom_selection_set_base_and_extent(selection, anchor.node, anchor.offset, focus.node, focus.offset, &exc)) {
+            log_debug("selection_select_all: text-control set_base_and_extent rejected: %s", exc ? exc : "?");
+            return;
+        }
+        text_control_sync_selection(state, (View*)elem);
+        state->selection_layout_dirty = true;
+        state->needs_repaint = true;
+        selection_log_transition(state, "select_text_control_all",
+            sel->anchor_view, sel->anchor_offset, sel->focus_view, sel->focus_offset);
+        log_debug("selection_select_all: text-control len=%u", len);
+        return;
+    }
 
+    DomNode* node = (DomNode*)sel->view;
+    const char* exc = NULL;
+    bool ok = false;
+    if (node->is_text()) {
+        uint32_t len = dom_node_boundary_length(node);
+        ok = dom_selection_set_base_and_extent(selection, node, 0, node, len, &exc);
+    } else {
+        ok = dom_selection_select_all_children(selection, node, &exc);
+    }
+    if (!ok) {
+        log_debug("selection_select_all: rejected: %s", exc ? exc : "?");
+        return;
+    }
+    if (state->selection) {
+        state->selection->is_selecting = false;
+    }
+
+    state->selection_layout_dirty = true;
     state->needs_repaint = true;
+    selection_log_transition(state, "select_all",
+        state->selection ? state->selection->anchor_view : NULL,
+        state->selection ? state->selection->anchor_offset : 0,
+        state->selection ? state->selection->focus_view : NULL,
+        state->selection ? state->selection->focus_offset : 0);
 
     log_debug("selection_select_all");
 }
 
 void selection_collapse(RadiantState* state, bool to_start) {
-    if (!state || !state->selection) return;
+    if (!state) return;
+    DomSelection* selection = sync_ensure_selection(state);
+    if (!selection || !state->selection) return;
 
-    SelectionState* sel = state->selection;
-    int pos = to_start ?
-        (sel->anchor_offset < sel->focus_offset ? sel->anchor_offset : sel->focus_offset) :
-        (sel->anchor_offset > sel->focus_offset ? sel->anchor_offset : sel->focus_offset);
-
-    sel->anchor_offset = pos;
-    sel->focus_offset = pos;
-    sel->is_collapsed = true;
-
-    if (state->caret) {
-        state->caret->char_offset = pos;
+    if (selection_is_text_control_view(state->selection->view)) {
+        // Canonical: update DomSelection only, then sync legacy projections
+        SelectionState* sel = state->selection;
+        int pos = to_start ?
+            (sel->anchor_offset < sel->focus_offset ? sel->anchor_offset : sel->focus_offset) :
+            (sel->anchor_offset > sel->focus_offset ? sel->anchor_offset : sel->focus_offset);
+        DomBoundary boundary = boundary_from_legacy(sel->view, pos);
+        const char* exc = NULL;
+        if (!boundary.node) return;
+        if (!dom_selection_collapse(selection, boundary.node, boundary.offset, &exc)) {
+            log_debug("selection_collapse: text-control collapse rejected: %s", exc ? exc : "?");
+            return;
+        }
+        text_control_sync_selection(state, sel->view);
+        state->selection_layout_dirty = true;
+        state->needs_repaint = true;
+        selection_log_transition(state, to_start ? "collapse_text_control_to_start" : "collapse_text_control_to_end",
+            sel->anchor_view, sel->anchor_offset, sel->focus_view, sel->focus_offset);
+        log_debug("selection_collapse: text-control to_start=%d, pos=%d", to_start, pos);
+        return;
     }
 
-    state->needs_repaint = true;
+    if (selection->range_count == 0) return;
 
-    log_debug("selection_collapse: to_start=%d, pos=%d", to_start, pos);
+    const char* exc = NULL;
+    if (to_start) {
+        dom_selection_collapse_to_start(selection, &exc);
+    } else {
+        dom_selection_collapse_to_end(selection, &exc);
+    }
+    if (exc) {
+        log_debug("selection_collapse: rejected: %s", exc);
+        return;
+    }
+    if (state->selection) {
+        state->selection->is_selecting = false;
+    }
+
+    state->selection_layout_dirty = true;
+    state->needs_repaint = true;
+    selection_log_transition(state, to_start ? "collapse_to_start" : "collapse_to_end",
+        state->selection ? state->selection->anchor_view : NULL,
+        state->selection ? state->selection->anchor_offset : 0,
+        state->selection ? state->selection->focus_view : NULL,
+        state->selection ? state->selection->focus_offset : 0);
+
+    log_debug("selection_collapse: to_start=%d", to_start);
 }
 
 void selection_clear(RadiantState* state) {
     if (!state) return;
 
+    DomSelection* selection = sync_ensure_selection(state);
+    if (!selection) return;
+
+    View* caret_view = state->caret ? state->caret->view : NULL;
+    int caret_offset = state->caret ? state->caret->char_offset : 0;
+    if (selection_is_text_control_view(caret_view)) {
+        // Canonical: update DomSelection only, then sync legacy projections
+        DomBoundary boundary = boundary_from_legacy(caret_view, caret_offset);
+        const char* exc = NULL;
+        if (boundary.node) {
+            if (!dom_selection_collapse(selection, boundary.node, boundary.offset, &exc)) {
+                log_debug("selection_clear: text-control collapse rejected: %s", exc ? exc : "?");
+                return;
+            }
+        } else {
+            dom_selection_remove_all_ranges(selection);
+        }
+        text_control_sync_selection(state, caret_view);
+        state->selection_layout_dirty = true;
+        state->needs_repaint = true;
+        selection_log_transition(state, "clear_text_control_selection",
+            caret_view, caret_offset, caret_view, caret_offset);
+        log_debug("selection_clear: text-control");
+        return;
+    }
+
+    DomBoundary boundary = boundary_from_legacy(caret_view, caret_offset);
+    const char* exc = NULL;
+    if (boundary.node) {
+        if (!dom_selection_collapse(selection, boundary.node, boundary.offset, &exc)) {
+            log_debug("selection_clear: collapse rejected: %s", exc ? exc : "?");
+            return;
+        }
+    } else {
+        dom_selection_remove_all_ranges(selection);
+    }
     if (state->selection) {
-        state->selection->is_collapsed = true;
         state->selection->is_selecting = false;
-        state->selection->anchor_offset = 0;
-        state->selection->focus_offset = 0;
     }
 
-    // Mirror the clear into the canonical DomSelection so the renderer
-    // (which reads DomSelection) stops painting the highlight. Collapse to
-    // the current caret position rather than to the stale anchor view.
-    if (state->caret) {
-        dom_selection_sync_from_legacy_caret(state);
-    }
-
+    state->selection_layout_dirty = true;
     state->needs_repaint = true;
+    selection_log_transition(state, "clear_selection",
+        state->selection ? state->selection->anchor_view : NULL,
+        state->selection ? state->selection->anchor_offset : 0,
+        state->selection ? state->selection->focus_view : NULL,
+        state->selection ? state->selection->focus_offset : 0);
     log_debug("selection_clear");
 }
 

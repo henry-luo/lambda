@@ -1160,15 +1160,28 @@ static Item _wpt_selectionchange_fire(Item this_val, Item* args, int argc) {
 extern "C" void js_dom_queue_selectionchange(DomSelection* sel) {
     if (!sel || !sel->state) return;
     if (!js_input || !js_input->pool) return;
+    DomDocument* doc = nullptr;
+    if (sel->anchor.node) doc = node_owning_doc(sel->anchor.node);
+    if (!doc && sel->focus.node) doc = node_owning_doc(sel->focus.node);
+    if (!doc) doc = (DomDocument*)js_dom_get_document();
+    JsDocRuntimeScope scope;
+    if (!js_doc_runtime_enter_if_needed(doc, &scope)) return;
     RadiantState* state = sel->state;
     // Suppress while the legacy↔DOM mirror is running so a single user
     // mutation doesn't ping-pong into multiple events.
-    if (state->dom_selection_sync_depth > 0) return;
+    if (state->dom_selection_sync_depth > 0) {
+        js_doc_runtime_exit(&scope);
+        return;
+    }
     state->selection_mutation_seq++;
-    if (state->selectionchange_pending) return;  // coalesce
+    if (state->selectionchange_pending) {
+        js_doc_runtime_exit(&scope);
+        return;
+    }
     state->selectionchange_pending = true;
     Item cb = js_new_function((void*)_wpt_selectionchange_fire, 0);
     js_setTimeout(cb, (Item){.item = i2it(0)});
+    js_doc_runtime_exit(&scope);
 }
 
 // ----------------------------------------------------------------------------

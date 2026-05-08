@@ -923,8 +923,10 @@ static Item build_lambda_event_map(DomDocument* doc, View* target,
             }
             mb.put("caret_pos", (int64_t)char_idx);
 
-            // add selection range (as character indices) when selection is active
-            if (st->selection && !st->selection->is_collapsed) {
+            // add selection range (as character indices) for form controls.
+            // Document selections use source_selection below; flat offsets are
+            // only meaningful within a single value buffer.
+            if (val && st->selection && !st->selection->is_collapsed) {
                 int sel_s, sel_e;
                 selection_get_range(st, &sel_s, &sel_e);
                 int sel_start_char = sel_s;

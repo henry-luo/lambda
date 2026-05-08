@@ -4,6 +4,7 @@
 #include "text_control.hpp"
 #include "text_edit.hpp"
 #include "form_control.hpp"
+#include "dom_range.hpp"
 #include "state_store.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/strbuf.h"
@@ -312,17 +313,15 @@ void tc_set_selection_range(DomElement* elem,
 // DOM). Caller passes the *known* DomElement so we don't have to dispatch.
 
 void tc_sync_legacy_to_form(DomElement* elem, RadiantState* state) {
+    // Only derive legacy fields from DomSelection; never update DomSelection from legacy fields.
     if (!elem || !state) return;
     if (!tc_is_text_control(elem)) return;
     tc_ensure_init(elem);
     FormControlProp* f = elem->form;
     const char* val = f->value ? f->value : "";
     uint32_t blen = (uint32_t)strlen(val);
-
-    // Refresh cached lengths in case form->value was reallocated by the
-    // legacy text-edit path (resolve_htm_style or future input handlers).
+    // Always keep current_value in sync with value pointer
     if (val != f->current_value) {
-        // Adopt the new buffer when value changed under us.
         if (f->current_value) free(f->current_value);
         f->current_value = (char*)malloc(blen + 1);
         memcpy(f->current_value, val, blen);
@@ -333,15 +332,12 @@ void tc_sync_legacy_to_form(DomElement* elem, RadiantState* state) {
         f->current_value_len = blen;
     }
     f->current_value_u16_len = tc_utf8_to_utf16_length(f->current_value, blen);
-
-    int caret_byte = state->caret ? state->caret->char_offset : 0;
-    if (caret_byte < 0) caret_byte = 0;
-    if ((uint32_t)caret_byte > blen) caret_byte = (int)blen;
-
-    if (state->selection && !state->selection->is_collapsed
-        && state->selection->anchor_view == state->selection->focus_view) {
-        int a = state->selection->anchor_offset;
-        int b = state->selection->focus_offset;
+    // Derive selection fields from DomSelection (canonical)
+    DomSelection* ds = state->dom_selection;
+    if (ds && ds->range_count > 0 && ds->anchor.node == ds->focus.node) {
+        // Text control selection: anchor/focus on same node
+        int a = ds->anchor.offset;
+        int b = ds->focus.offset;
         if (a < 0) a = 0; if (b < 0) b = 0;
         if ((uint32_t)a > blen) a = (int)blen;
         if ((uint32_t)b > blen) b = (int)blen;
@@ -349,8 +345,12 @@ void tc_sync_legacy_to_form(DomElement* elem, RadiantState* state) {
         uint32_t hi = a < b ? (uint32_t)b : (uint32_t)a;
         f->selection_start = tc_utf8_to_utf16_offset(f->current_value, blen, lo);
         f->selection_end   = tc_utf8_to_utf16_offset(f->current_value, blen, hi);
-        f->selection_direction = (a <= b) ? 1 : 2;  // forward / backward
+        f->selection_direction = (a <= b) ? 1 : 2;
     } else {
+        // Collapsed or no selection
+        int caret_byte = state->caret ? state->caret->char_offset : 0;
+        if (caret_byte < 0) caret_byte = 0;
+        if ((uint32_t)caret_byte > blen) caret_byte = (int)blen;
         uint32_t u16 = tc_utf8_to_utf16_offset(f->current_value, blen, (uint32_t)caret_byte);
         f->selection_start = u16;
         f->selection_end = u16;
@@ -359,42 +359,8 @@ void tc_sync_legacy_to_form(DomElement* elem, RadiantState* state) {
 }
 
 void tc_sync_form_to_legacy(DomElement* elem, RadiantState* state) {
-    if (!elem || !state) return;
-    if (!tc_is_text_control(elem)) return;
-    tc_ensure_init(elem);
-    FormControlProp* f = elem->form;
-    const char* val = f->current_value ? f->current_value : "";
-    uint32_t blen = f->current_value_len;
-    uint32_t a8 = tc_utf16_to_utf8_offset(val, blen, f->selection_start);
-    uint32_t b8 = tc_utf16_to_utf8_offset(val, blen, f->selection_end);
-
-    View* view = (View*)elem;
-    if (state->caret) {
-        state->caret->view = view;
-        state->caret->char_offset = (int)b8;  // caret follows focus end
-    }
-    if (state->selection) {
-        if (f->selection_start == f->selection_end) {
-            // collapsed — clear the selection range
-            state->selection->is_collapsed = true;
-            state->selection->anchor_view = view;
-            state->selection->focus_view = view;
-            state->selection->anchor_offset = (int)a8;
-            state->selection->focus_offset = (int)b8;
-        } else {
-            state->selection->is_collapsed = false;
-            state->selection->anchor_view = view;
-            state->selection->focus_view = view;
-            if (f->selection_direction == 2) {
-                // backward: anchor at end, focus at start
-                state->selection->anchor_offset = (int)b8;
-                state->selection->focus_offset = (int)a8;
-            } else {
-                state->selection->anchor_offset = (int)a8;
-                state->selection->focus_offset = (int)b8;
-            }
-        }
-    }
+    // No-op: legacy fields are now always derived from DomSelection. Do not update DomSelection from legacy fields.
+    (void)elem; (void)state;
 }
 
 // ---- public: focus tracker ---------------------------------------------

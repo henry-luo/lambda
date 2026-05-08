@@ -15,6 +15,8 @@
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "view.hpp"  // For HTM_TAG_* constants
+#include "form_control.hpp"
+#include "text_control.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/input/css/css_style.hpp"
 #include "../lambda/input/css/css_value.hpp"
@@ -105,6 +107,11 @@ uint32_t dom_node_boundary_length(const DomNode* node) {
     }
     if (node->is_element()) {
         const DomElement* e = node->as_element();
+        if (tc_is_text_control((DomElement*)e)) {
+            DomElement* elem = (DomElement*)e;
+            tc_ensure_init(elem);
+            return elem->form ? elem->form->current_value_len : 0;
+        }
         uint32_t n = 0;
         for (DomNode* c = e->first_child; c; c = c->next_sibling) n++;
         return n;
