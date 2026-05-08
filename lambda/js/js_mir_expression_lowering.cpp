@@ -3206,7 +3206,7 @@ bool jm_is_math_call(JsCallNode* call) {
 // and runtime string matching per call.
 
 // Check if name matches a known string (helper macro for readability)
-#define MATH_MATCH(s, slen) (ml )
+#define MATH_MATCH(s, slen) (ml == (slen) && strncmp(m, (s), (slen)) == 0)
 
 // Compile-time Math method resolution for boxed path.
 // Returns boxed Item result.
@@ -10016,4 +10016,3 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
         return jm_emit_null(mt);
     }
 }
-
