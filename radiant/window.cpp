@@ -810,7 +810,9 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
     // Load event simulation if specified
     EventSimContext* sim_ctx = NULL;
     if (event_file) {
-        sim_ctx = event_sim_load(event_file);
+        size_t event_file_len = strlen(event_file);
+        bool replay_jsonl = event_file_len >= 6 && strcmp(event_file + event_file_len - 6, ".jsonl") == 0;
+        sim_ctx = replay_jsonl ? event_sim_load_replay_log(event_file) : event_sim_load(event_file);
         if (!sim_ctx) {
             log_error("Failed to load event file: %s", event_file);
             // Continue without simulation

@@ -163,6 +163,8 @@ extern int view_doc_in_window(const char* doc_file);
 extern int view_doc_in_window_with_events(const char* doc_file, const char* event_file, bool headless,
                                            const char** font_dirs = nullptr, int font_dir_count = 0,
                                            bool enable_event_log = false);
+extern char* event_sim_replay_document_path(const char* jsonl_file);
+extern void event_sim_set_replay_assert_state(bool assert_state);
 
 // REPL functions from main-repl.cpp
 extern int lambda_repl_init();
@@ -2347,6 +2349,81 @@ int main(int argc, char *argv[]) {
         return exit_code;
     }
 
+
+    // Handle replay command (replay event/state JSONL through the viewer)
+    if (argc >= 2 && strcmp(argv[1], "replay") == 0) {
+        if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
+            printf("Lambda Replay Runner v1.0\n\n");
+            printf("Usage: %s replay --event-log <events.jsonl> [document_file] [options]\n", argv[0]);
+            printf("\nOptions:\n");
+            printf("  --event-log <file.jsonl>  Replay input.raw records from an event/state log\n");
+            printf("  --assert-state            Compare final state.snapshot after replay\n");
+            printf("  --record                  Write a fresh event/state log for the replay run\n");
+            printf("  --headless                Run without creating a window (default)\n");
+            printf("  --window                  Run with an interactive window\n");
+            printf("  --font-dir <dir>          Add custom font scan directory\n");
+            log_finish();
+            return 0;
+        }
+
+        const char* replay_log = NULL;
+        const char* filename = NULL;
+        bool headless = true;
+        bool assert_state = false;
+        bool record_replay = false;
+        const char* font_dirs[16];
+        int font_dir_count = 0;
+
+        for (int i = 2; i < argc; i++) {
+            if (strcmp(argv[i], "--event-log") == 0 && i + 1 < argc) {
+                replay_log = argv[++i];
+            } else if (strcmp(argv[i], "--assert-state") == 0) {
+                assert_state = true;
+            } else if (strcmp(argv[i], "--record") == 0) {
+                record_replay = true;
+            } else if (strcmp(argv[i], "--headless") == 0) {
+                headless = true;
+            } else if (strcmp(argv[i], "--window") == 0) {
+                headless = false;
+            } else if (strcmp(argv[i], "--font-dir") == 0 && i + 1 < argc) {
+                if (font_dir_count < 16) font_dirs[font_dir_count++] = argv[++i];
+                else i++;
+            } else if (argv[i][0] != '-' && filename == NULL) {
+                filename = argv[i];
+            }
+        }
+
+        if (!replay_log) {
+            printf("Error: replay requires --event-log <events.jsonl>\n");
+            log_finish();
+            return 1;
+        }
+        if (!file_exists(replay_log)) {
+            printf("Error: Event log '%s' does not exist\n", replay_log);
+            log_finish();
+            return 1;
+        }
+
+        char* replay_doc = NULL;
+        if (!filename) {
+            replay_doc = event_sim_replay_document_path(replay_log);
+            filename = replay_doc;
+        }
+        if (!filename || !filename[0]) {
+            printf("Error: Could not find session_start document.url in '%s'\n", replay_log);
+            if (replay_doc) mem_free(replay_doc);
+            log_finish();
+            return 1;
+        }
+
+        event_sim_set_replay_assert_state(assert_state);
+        int exit_code = view_doc_in_window_with_events(filename, replay_log, headless,
+                                                       font_dirs, font_dir_count,
+                                                       record_replay);
+        if (replay_doc) mem_free(replay_doc);
+        log_debug("replay command completed with result: %d", exit_code);
+        return exit_code;
+    }
 
     // Handle view command (open PDF or HTML in window)
     log_debug("Checking for view command");

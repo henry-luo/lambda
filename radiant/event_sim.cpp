@@ -4,6 +4,7 @@
 
 #include "event_sim.hpp"
 #include "event.hpp"
+#include "event_state_log.hpp"
 #include "state_store.hpp"
 #include "dom_range.hpp"
 #include "form_control.hpp"
@@ -60,6 +61,31 @@ extern void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event);
 
 // Forward declaration for parse_json
 void parse_json(Input* input, const char* json_string);
+
+static bool g_replay_assert_state = false;
+
+void event_sim_set_replay_assert_state(bool assert_state) {
+    g_replay_assert_state = assert_state;
+}
+
+static EventSimContext* event_sim_create_context() {
+    EventSimContext* ctx = (EventSimContext*)mem_calloc(1, sizeof(EventSimContext), MEM_CAT_LAYOUT);
+    if (!ctx) return NULL;
+    ctx->events = arraylist_new(16);
+    ctx->current_index = 0;
+    ctx->next_event_time = 0;
+    ctx->is_running = true;
+    ctx->auto_close = true;
+    ctx->pass_count = 0;
+    ctx->fail_count = 0;
+    ctx->test_name = NULL;
+    ctx->default_timeout = 2000;
+    ctx->replay_assert_state = g_replay_assert_state;
+    ctx->replay_expected_focus_id = -1;
+    ctx->replay_expected_caret_id = -1;
+    ctx->replay_expected_caret_offset = -1;
+    return ctx;
+}
 
 // Map key name string to GLFW key code
 static int key_name_to_glfw(const char* name) {
@@ -1409,15 +1435,8 @@ EventSimContext* event_sim_load(const char* json_file) {
     ArrayReader events_arr = events_item.asArray();
 
     // Create context
-    EventSimContext* ctx = (EventSimContext*)mem_calloc(1, sizeof(EventSimContext), MEM_CAT_LAYOUT);
-    ctx->events = arraylist_new(16);
-    ctx->current_index = 0;
-    ctx->next_event_time = 0;
-    ctx->is_running = true;
-    ctx->auto_close = true;
-    ctx->pass_count = 0;
-    ctx->fail_count = 0;
-    ctx->test_name = NULL;
+    EventSimContext* ctx = event_sim_create_context();
+    if (!ctx) return NULL;
 
     // Parse optional test name
     const char* name = root_map.get("name").cstring();
@@ -1464,6 +1483,227 @@ EventSimContext* event_sim_load(const char* json_file) {
     return ctx;
 }
 
+static char* replay_document_path_from_url(const char* url) {
+    if (!url) return NULL;
+    if (strncmp(url, "file://", 7) == 0) return mem_strdup(url + 7, MEM_CAT_LAYOUT);
+    if (strncmp(url, "file:", 5) == 0) return mem_strdup(url + 5, MEM_CAT_LAYOUT);
+    return mem_strdup(url, MEM_CAT_LAYOUT);
+}
+
+static bool replay_parse_json_line(const char* jsonl_file, const char* line,
+                                   ItemReader* out_root, MarkReader** out_doc) {
+    if (!line || !line[0]) return false;
+    Url* url = url_parse(jsonl_file);
+    Input* input = InputManager::create_input(url);
+    if (!input) return false;
+    parse_json(input, line);
+    if (input->root.item == 0) return false;
+    MarkReader* doc = new MarkReader(input->root);
+    ItemReader root = doc->getRoot();
+    if (!root.isMap()) {
+        delete doc;
+        return false;
+    }
+    *out_root = root;
+    *out_doc = doc;
+    return true;
+}
+
+static void replay_parse_expected_snapshot(EventSimContext* ctx, MapReader& root_map) {
+    if (!ctx) return;
+    ItemReader data_item = root_map.get("data");
+    if (!data_item.isMap()) return;
+    MapReader data = data_item.asMap();
+    ctx->replay_has_expected_state = true;
+
+    ItemReader focus_item = data.get("focus");
+    if (focus_item.isMap()) {
+        MapReader focus = focus_item.asMap();
+        ItemReader target_item = focus.get("target");
+        ctx->replay_expected_focus_id = 0;
+        if (target_item.isMap()) {
+            MapReader target = target_item.asMap();
+            ctx->replay_expected_focus_id = target.get("id").asInt32();
+        }
+    }
+
+    ItemReader caret_item = data.get("caret");
+    if (caret_item.isMap()) {
+        MapReader caret = caret_item.asMap();
+        ItemReader target_item = caret.get("target");
+        ctx->replay_expected_caret_id = 0;
+        if (target_item.isMap()) {
+            MapReader target = target_item.asMap();
+            ctx->replay_expected_caret_id = target.get("id").asInt32();
+        }
+        if (caret.has("offset")) {
+            ctx->replay_expected_caret_offset = caret.get("offset").asInt32();
+            ctx->replay_has_caret_offset = true;
+        } else {
+            ctx->replay_expected_caret_offset = -1;
+            ctx->replay_has_caret_offset = false;
+        }
+    }
+
+    ItemReader selection_item = data.get("selection");
+    if (selection_item.isMap()) {
+        MapReader selection = selection_item.asMap();
+        if (selection.has("is_collapsed")) {
+            ctx->replay_expected_selection_collapsed = selection.get("is_collapsed").asBool();
+            ctx->replay_has_selection_collapsed = true;
+        }
+    }
+
+    ItemReader doc_state_item = data.get("document_state");
+    if (doc_state_item.isMap()) {
+        MapReader doc_state = doc_state_item.asMap();
+        ctx->replay_expected_scroll_x = (float)doc_state.get("scroll_x").asFloat();
+        ctx->replay_expected_scroll_y = (float)doc_state.get("scroll_y").asFloat();
+        ctx->replay_has_scroll = true;
+    }
+}
+
+static SimEvent* replay_input_raw_to_event(MapReader& data) {
+    const char* event_name = data.get("event").cstring();
+    if (!event_name) return NULL;
+    SimEvent* ev = (SimEvent*)mem_calloc(1, sizeof(SimEvent), MEM_CAT_LAYOUT);
+    if (!ev) return NULL;
+    ev->type = SIM_EVENT_REPLAY_INPUT;
+    ev->replay_event_name = mem_strdup(event_name, MEM_CAT_LAYOUT);
+    ev->x = data.get("x").asInt32();
+    ev->y = data.get("y").asInt32();
+    ev->button = data.has("button") ? data.get("button").asInt32() : 0;
+    ev->mods = data.has("mods") ? data.get("mods").asInt32() : 0;
+    ev->click_count = data.has("clicks") ? data.get("clicks").asInt32() : 1;
+    ev->key = data.get("key").asInt32();
+    ev->replay_scancode = data.get("scancode").asInt32();
+    ev->scroll_dx = (float)data.get("xoffset").asFloat();
+    ev->scroll_dy = (float)data.get("yoffset").asFloat();
+    ev->replay_codepoint = (uint32_t)data.get("codepoint").asInt32();
+    ev->replay_preedit_caret = (uint32_t)data.get("preedit_caret").asInt32();
+    const char* text = data.get("text").cstring();
+    if (text) ev->input_text = mem_strdup(text, MEM_CAT_LAYOUT);
+    return ev;
+}
+
+static void replay_attach_hit_target(SimEvent* ev, MapReader& data) {
+    if (!ev) return;
+    ItemReader target_item = data.get("target");
+    if (!target_item.isMap()) return;
+    MapReader target = target_item.asMap();
+    const char* author_id = target.get("author_id").cstring();
+    const char* stable_id = target.get("stable_id").cstring();
+    const char* selector_id = author_id;
+    if (!selector_id && stable_id && strncmp(stable_id, "id:", 3) == 0) selector_id = stable_id + 3;
+    if (selector_id && !ev->target_selector) {
+        size_t len = strlen(selector_id) + 2;
+        char* selector = (char*)mem_alloc(len, MEM_CAT_LAYOUT);
+        if (selector) {
+            snprintf(selector, len, "#%s", selector_id);
+            ev->target_selector = selector;
+        }
+    }
+    if (data.has("offset_x") || data.has("offset_y")) {
+        ev->target_offset_x = (int)data.get("offset_x").asFloat();
+        ev->target_offset_y = (int)data.get("offset_y").asFloat();
+        ev->has_target_offset = true;
+    }
+}
+
+char* event_sim_replay_document_path(const char* jsonl_file) {
+    char* content = read_text_file(jsonl_file);
+    if (!content) return NULL;
+    char* line = content;
+    char* doc_path = NULL;
+    while (line && *line && !doc_path) {
+        char* next = strchr(line, '\n');
+        if (next) *next = '\0';
+        ItemReader root;
+        MarkReader* doc = NULL;
+        if (replay_parse_json_line(jsonl_file, line, &root, &doc)) {
+            MapReader root_map = root.asMap();
+            const char* type = root_map.get("type").cstring();
+            if (type && strcmp(type, "session_start") == 0) {
+                ItemReader document_item = root_map.get("document");
+                if (document_item.isMap()) {
+                    MapReader document = document_item.asMap();
+                    doc_path = replay_document_path_from_url(document.get("url").cstring());
+                }
+            }
+            delete doc;
+        }
+        line = next ? next + 1 : NULL;
+    }
+    mem_free(content);
+    return doc_path;
+}
+
+EventSimContext* event_sim_load_replay_log(const char* jsonl_file) {
+    log_info("event_sim: loading replay log '%s'", jsonl_file);
+    char* content = read_text_file(jsonl_file);
+    if (!content) {
+        log_error("event_sim: failed to read replay log '%s'", jsonl_file);
+        return NULL;
+    }
+
+    EventSimContext* ctx = event_sim_create_context();
+    if (!ctx) {
+        mem_free(content);
+        return NULL;
+    }
+    ctx->test_name = mem_strdup("Replay log", MEM_CAT_LAYOUT);
+
+    SimEvent* last_input = NULL;
+    int line_no = 0;
+    for (char* line = content; line && *line; ) {
+        char* next = strchr(line, '\n');
+        if (next) *next = '\0';
+        line_no++;
+        if (line[0]) {
+            ItemReader root;
+            MarkReader* doc = NULL;
+            if (replay_parse_json_line(jsonl_file, line, &root, &doc)) {
+                MapReader root_map = root.asMap();
+                const char* type = root_map.get("type").cstring();
+                if (type && strcmp(type, "session_start") == 0) {
+                    ItemReader viewport_item = root_map.get("viewport");
+                    if (viewport_item.isMap()) {
+                        MapReader viewport = viewport_item.asMap();
+                        ctx->viewport_width = viewport.get("w").asInt32();
+                        ctx->viewport_height = viewport.get("h").asInt32();
+                    }
+                } else if (type && strcmp(type, "input.raw") == 0) {
+                    ItemReader data_item = root_map.get("data");
+                    if (data_item.isMap()) {
+                        MapReader data = data_item.asMap();
+                        SimEvent* ev = replay_input_raw_to_event(data);
+                        if (ev) {
+                            arraylist_append(ctx->events, ev);
+                            last_input = ev;
+                        }
+                    }
+                } else if (type && strcmp(type, "hit.target") == 0) {
+                    ItemReader data_item = root_map.get("data");
+                    if (data_item.isMap()) {
+                        MapReader data = data_item.asMap();
+                        replay_attach_hit_target(last_input, data);
+                    }
+                } else if (type && strcmp(type, "state.snapshot") == 0) {
+                    replay_parse_expected_snapshot(ctx, root_map);
+                }
+                delete doc;
+            } else {
+                log_warn("event_sim: skipped invalid replay JSONL line %d", line_no);
+            }
+        }
+        line = next ? next + 1 : NULL;
+    }
+
+    mem_free(content);
+    log_info("event_sim: loaded %d replay input events from %s", ctx->events->length, jsonl_file);
+    return ctx;
+}
+
 void event_sim_free(EventSimContext* ctx) {
     if (!ctx) return;
 
@@ -1482,6 +1722,7 @@ void event_sim_free(EventSimContext* ctx) {
             if (ev->option_value) mem_free(ev->option_value);
             if (ev->option_label) mem_free(ev->option_label);
             if (ev->js_code) mem_free(ev->js_code);
+            if (ev->replay_event_name) mem_free(ev->replay_event_name);
             mem_free(ev);
         }
         arraylist_free(ctx->events);
@@ -1548,6 +1789,73 @@ static void sim_text_input(UiContext* uicon, uint32_t codepoint) {
     event.text_input.type = RDT_EVENT_TEXT_INPUT;
     event.text_input.timestamp = get_monotonic_time();
     event.text_input.codepoint = codepoint;
+    handle_event(uicon, uicon->document, &event);
+}
+
+static void sim_replay_input(UiContext* uicon, SimEvent* ev) {
+    if (!uicon || !ev || !ev->replay_event_name) return;
+    RdtEvent event;
+    memset(&event, 0, sizeof(event));
+    double now = get_monotonic_time();
+
+    if (strcmp(ev->replay_event_name, "mouse_down") == 0 ||
+        strcmp(ev->replay_event_name, "mouse_up") == 0) {
+        int x, y;
+        if (!resolve_target(ev, uicon->document, &x, &y)) return;
+        event.mouse_button.type = strcmp(ev->replay_event_name, "mouse_down") == 0 ?
+            RDT_EVENT_MOUSE_DOWN : RDT_EVENT_MOUSE_UP;
+        event.mouse_button.timestamp = now;
+        event.mouse_button.x = x;
+        event.mouse_button.y = y;
+        event.mouse_button.button = (uint8_t)ev->button;
+        event.mouse_button.clicks = (uint8_t)(ev->click_count > 0 ? ev->click_count : 1);
+        event.mouse_button.mods = ev->mods;
+    } else if (strcmp(ev->replay_event_name, "mouse_move") == 0 ||
+               strcmp(ev->replay_event_name, "mouse_drag") == 0) {
+        int x, y;
+        if (!resolve_target(ev, uicon->document, &x, &y)) return;
+        event.mouse_position.type = strcmp(ev->replay_event_name, "mouse_drag") == 0 ?
+            RDT_EVENT_MOUSE_DRAG : RDT_EVENT_MOUSE_MOVE;
+        event.mouse_position.timestamp = now;
+        event.mouse_position.x = x;
+        event.mouse_position.y = y;
+    } else if (strcmp(ev->replay_event_name, "scroll") == 0) {
+        event.scroll.type = RDT_EVENT_SCROLL;
+        event.scroll.timestamp = now;
+        event.scroll.x = ev->x;
+        event.scroll.y = ev->y;
+        event.scroll.xoffset = ev->scroll_dx;
+        event.scroll.yoffset = ev->scroll_dy;
+    } else if (strcmp(ev->replay_event_name, "key_down") == 0 ||
+               strcmp(ev->replay_event_name, "key_up") == 0) {
+        event.key.type = strcmp(ev->replay_event_name, "key_down") == 0 ?
+            RDT_EVENT_KEY_DOWN : RDT_EVENT_KEY_UP;
+        event.key.timestamp = now;
+        event.key.key = ev->key;
+        event.key.scancode = ev->replay_scancode;
+        event.key.mods = ev->mods;
+    } else if (strcmp(ev->replay_event_name, "text_input") == 0) {
+        event.text_input.type = RDT_EVENT_TEXT_INPUT;
+        event.text_input.timestamp = now;
+        event.text_input.codepoint = ev->replay_codepoint;
+    } else if (strcmp(ev->replay_event_name, "composition_start") == 0 ||
+               strcmp(ev->replay_event_name, "composition_update") == 0 ||
+               strcmp(ev->replay_event_name, "composition_end") == 0) {
+        if (strcmp(ev->replay_event_name, "composition_start") == 0) {
+            event.composition.type = RDT_EVENT_COMPOSITION_START;
+        } else if (strcmp(ev->replay_event_name, "composition_update") == 0) {
+            event.composition.type = RDT_EVENT_COMPOSITION_UPDATE;
+        } else {
+            event.composition.type = RDT_EVENT_COMPOSITION_END;
+        }
+        event.composition.timestamp = now;
+        event.composition.text = ev->input_text ? ev->input_text : "";
+        event.composition.preedit_caret = ev->replay_preedit_caret;
+    } else {
+        log_warn("event_sim: unsupported replay input.raw event '%s'", ev->replay_event_name);
+        return;
+    }
+
     handle_event(uicon, uicon->document, &event);
 }
 
@@ -1988,6 +2296,12 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             sim_scroll(uicon, ev->x, ev->y, ev->scroll_dx, ev->scroll_dy);
             // Re-render after scroll to update surface pixels
             force_render_surface(uicon);
+            break;
+
+        case SIM_EVENT_REPLAY_INPUT:
+            log_info("event_sim: replay input.raw '%s'", ev->replay_event_name ? ev->replay_event_name : "unknown");
+            sim_replay_input(uicon, ev);
+            if (ev->replay_event_name && strcmp(ev->replay_event_name, "scroll") == 0) force_render_surface(uicon);
             break;
 
         // ===== High-level actions =====
@@ -3280,6 +3594,97 @@ static void process_sim_event_with_retry(EventSimContext* ctx, SimEvent* ev, UiC
     }
 }
 
+static void replay_emit_mismatch(EventSimContext* ctx, UiContext* uicon,
+                                 const char* field, const char* expected,
+                                 const char* actual) {
+    log_error("event_sim: replay mismatch %s expected=%s actual=%s",
+              field ? field : "unknown", expected ? expected : "(null)",
+              actual ? actual : "(null)");
+    if (ctx) ctx->fail_count++;
+    EventStateLog* event_log = uicon ? uicon->event_log : NULL;
+    if (event_state_log_enabled(event_log)) {
+        char buf[1024];
+        JsonWriter w;
+        event_state_log_begin_record(event_log, &w, buf, sizeof(buf), "replay.mismatch", 0);
+        jw_key(&w, "data");
+        jw_obj_begin(&w);
+            jw_kv_str(&w, "field", field ? field : "unknown");
+            jw_kv_str(&w, "expected", expected ? expected : "(null)");
+            jw_kv_str(&w, "actual", actual ? actual : "(null)");
+        jw_obj_end(&w);
+        event_state_log_finish_record(event_log, &w);
+    }
+}
+
+static void replay_check_final_state(EventSimContext* ctx, UiContext* uicon) {
+    if (!ctx || !ctx->replay_assert_state || ctx->replay_state_checked) return;
+    ctx->replay_state_checked = true;
+    if (!ctx->replay_has_expected_state) {
+        replay_emit_mismatch(ctx, uicon, "state.snapshot", "present", "missing");
+        return;
+    }
+    DomDocument* doc = uicon ? uicon->document : NULL;
+    RadiantState* state = doc ? doc->state : NULL;
+    if (!state) {
+        replay_emit_mismatch(ctx, uicon, "state", "present", "missing");
+        return;
+    }
+
+    char expected[64];
+    char actual[64];
+    View* focus = focus_get(state);
+    int actual_focus_id = focus ? (int)((DomNode*)focus)->id : 0;
+    if (ctx->replay_expected_focus_id >= 0 && actual_focus_id != ctx->replay_expected_focus_id) {
+        snprintf(expected, sizeof(expected), "%d", ctx->replay_expected_focus_id);
+        snprintf(actual, sizeof(actual), "%d", actual_focus_id);
+        replay_emit_mismatch(ctx, uicon, "focus.target.id", expected, actual);
+    }
+
+    View* caret = caret_get_view(state);
+    int actual_caret_id = caret ? (int)((DomNode*)caret)->id : 0;
+    if (ctx->replay_expected_caret_id >= 0 && actual_caret_id != ctx->replay_expected_caret_id) {
+        snprintf(expected, sizeof(expected), "%d", ctx->replay_expected_caret_id);
+        snprintf(actual, sizeof(actual), "%d", actual_caret_id);
+        replay_emit_mismatch(ctx, uicon, "caret.target.id", expected, actual);
+    }
+
+    if (ctx->replay_has_caret_offset) {
+        int actual_offset = -1;
+        caret_get_offset(state, &actual_offset);
+        if (actual_offset != ctx->replay_expected_caret_offset) {
+            snprintf(expected, sizeof(expected), "%d", ctx->replay_expected_caret_offset);
+            snprintf(actual, sizeof(actual), "%d", actual_offset);
+            replay_emit_mismatch(ctx, uicon, "caret.offset", expected, actual);
+        }
+    }
+
+    if (ctx->replay_has_selection_collapsed) {
+        bool actual_collapsed = !selection_has(state);
+        if (actual_collapsed != ctx->replay_expected_selection_collapsed) {
+            replay_emit_mismatch(ctx, uicon, "selection.is_collapsed",
+                ctx->replay_expected_selection_collapsed ? "true" : "false",
+                actual_collapsed ? "true" : "false");
+        }
+    }
+
+    if (ctx->replay_has_scroll) {
+        float dx = state->scroll_x - ctx->replay_expected_scroll_x;
+        if (dx < 0) dx = -dx;
+        float dy = state->scroll_y - ctx->replay_expected_scroll_y;
+        if (dy < 0) dy = -dy;
+        if (dx > 1.0f || dy > 1.0f) {
+            snprintf(expected, sizeof(expected), "%.2f,%.2f", ctx->replay_expected_scroll_x, ctx->replay_expected_scroll_y);
+            snprintf(actual, sizeof(actual), "%.2f,%.2f", state->scroll_x, state->scroll_y);
+            replay_emit_mismatch(ctx, uicon, "document_state.scroll", expected, actual);
+        }
+    }
+
+    if (ctx->fail_count == 0) {
+        ctx->pass_count++;
+        log_info("event_sim: replay final state PASS");
+    }
+}
+
 bool event_sim_update(EventSimContext* ctx, void* uicon_ptr, GLFWwindow* window, double current_time) {
     UiContext* uicon = (UiContext*)uicon_ptr;
     if (!ctx || !ctx->is_running) return false;
@@ -3310,6 +3715,7 @@ bool event_sim_update(EventSimContext* ctx, void* uicon_ptr, GLFWwindow* window,
     if (ctx->current_index >= ctx->events->length) {
         ctx->is_running = false;
         log_info("event_sim: simulation complete");
+        replay_check_final_state(ctx, uicon);
         event_sim_print_results(ctx);
         return false;
     }
