@@ -994,6 +994,14 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         ev->expected_is_collapsed = reader.get("is_collapsed").asBool();
         ev->check_dom_selection = reader.get("check_dom").asBool();
     }
+    else if (strcmp(type_str, "assert_preedit") == 0) {
+        ev->type = SIM_EVENT_ASSERT_PREEDIT;
+        const char* equals = reader.get("equals").cstring();
+        if (equals) ev->assert_equals = mem_strdup(equals, MEM_CAT_LAYOUT);
+        const char* contains = reader.get("contains").cstring();
+        if (contains) ev->assert_contains = mem_strdup(contains, MEM_CAT_LAYOUT);
+        parse_target(reader, ev);
+    }
     else if (strcmp(type_str, "assert_target") == 0) {
         ev->type = SIM_EVENT_ASSERT_TARGET;
         ev->expected_view_type = reader.get("view_type").asInt32();
@@ -2377,6 +2385,43 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             log_info("event_sim: assert_selection is_collapsed=%s", ev->expected_is_collapsed ? "true" : "false");
             assert_selection(ctx, uicon, ev);
             break;
+
+        case SIM_EVENT_ASSERT_PREEDIT: {
+            DomDocument* doc = uicon->document;
+            View* elem = resolve_target_element(ev, doc);
+            if (!elem || !elem->is_element()) {
+                log_error("event_sim: assert_preedit - target element not found");
+                ctx->fail_count++;
+                break;
+            }
+            DomElement* dom_elem = (DomElement*)elem;
+            if (!tc_is_text_control(dom_elem)) {
+                log_error("event_sim: assert_preedit - target is not a text control");
+                ctx->fail_count++;
+                break;
+            }
+            tc_ensure_init(dom_elem);
+            const char* actual = dom_elem->form && dom_elem->form->preedit_utf8
+                ? dom_elem->form->preedit_utf8 : "";
+            bool passed = true;
+            if (ev->assert_equals && strcmp(actual, ev->assert_equals) != 0) {
+                log_error("event_sim: assert_preedit FAIL - expected '%s', got '%s'",
+                          ev->assert_equals, actual);
+                passed = false;
+            }
+            if (ev->assert_contains && !strstr(actual, ev->assert_contains)) {
+                log_error("event_sim: assert_preedit FAIL - expected to contain '%s', got '%s'",
+                          ev->assert_contains, actual);
+                passed = false;
+            }
+            if (passed) {
+                log_info("event_sim: assert_preedit PASS (preedit='%s')", actual);
+                ctx->pass_count++;
+            } else {
+                ctx->fail_count++;
+            }
+            break;
+        }
 
         case SIM_EVENT_ASSERT_TARGET:
             log_info("event_sim: assert_target view_type=%d", ev->expected_view_type);

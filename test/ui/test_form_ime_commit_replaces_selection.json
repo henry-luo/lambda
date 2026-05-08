@@ -19,8 +19,10 @@
 
     {"type": "ime_compose", "phase": "begin"},
     {"type": "ime_compose", "phase": "update", "preedit": "に", "caret": 1},
+    {"type": "assert_preedit", "target": {"selector": "#name"}, "equals": "に"},
     {"type": "ime_compose", "phase": "commit", "commit": "日本語"},
     {"type": "wait", "ms": 80},
+    {"type": "assert_preedit", "target": {"selector": "#name"}, "equals": ""},
     {"type": "assert_value", "target": {"selector": "#name"}, "equals": "日本語"},
 
     {"type": "log", "message": "Sequential commits append (no preedit residue)"},
