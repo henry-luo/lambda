@@ -14,6 +14,7 @@
 #include "tile_pool.h"
 #include "webview.h"
 #include "context_menu.hpp"
+#include "event_state_log.hpp"
 
 #include "../lib/log.h"
 #include "../lib/font/font.h"
@@ -173,6 +174,78 @@ void stderr_render_stats() {
     fprintf(stderr, "[RENDER_PROF] overflow_clip=%lld(%.1fms) font_metrics=%lld(%.1fms)\n",
         g_render_overflow_clip_count, g_render_overflow_clip_time,
         g_render_font_metrics_count, g_render_font_metrics_time);
+}
+
+static void emit_render_stats_record(UiContext* uicon, RadiantState* state,
+                                     double record_ms, double replay_ms,
+                                     double total_ms, int item_count,
+                                     bool selective, bool tiled,
+                                     int tile_count, int thread_count) {
+    EventStateLog* log = state && state->active_event_log ? state->active_event_log :
+        (uicon ? uicon->event_log : NULL);
+    if (!event_state_log_enabled(log)) return;
+
+    char buf[2048];
+    JsonWriter w;
+    uint64_t cascade_id = state ? state->active_cascade_id : 0;
+    event_state_log_begin_record(log, &w, buf, sizeof(buf), "render.stats", cascade_id);
+    jw_key(&w, "data");
+    jw_obj_begin(&w);
+        jw_kv_double(&w, "record_ms", record_ms);
+        jw_kv_double(&w, "replay_ms", replay_ms);
+        jw_kv_double(&w, "total_ms", total_ms);
+        jw_kv_int(&w, "display_list_items", item_count);
+        jw_kv_bool(&w, "selective", selective);
+        jw_kv_bool(&w, "tiled", tiled);
+        jw_kv_int(&w, "tile_count", tile_count);
+        jw_kv_int(&w, "thread_count", thread_count);
+        if (uicon && uicon->surface) {
+            jw_kv_int(&w, "surface_width", uicon->surface->width);
+            jw_kv_int(&w, "surface_height", uicon->surface->height);
+        }
+        jw_key(&w, "font");
+        jw_obj_begin(&w);
+            jw_kv_int(&w, "load_glyph_count", g_render_glyph_count);
+            jw_kv_double(&w, "load_glyph_ms", g_render_load_glyph_time);
+            jw_kv_int(&w, "draw_glyph_count", g_render_draw_count);
+            jw_kv_double(&w, "draw_glyph_ms", g_render_draw_glyph_time);
+            jw_kv_int(&w, "setup_font_count", g_render_setup_font_count);
+            jw_kv_double(&w, "setup_font_ms", g_render_setup_font_time);
+            jw_kv_int(&w, "font_metrics_count", g_render_font_metrics_count);
+            jw_kv_double(&w, "font_metrics_ms", g_render_font_metrics_time);
+        jw_obj_end(&w);
+        jw_key(&w, "ops");
+        jw_obj_begin(&w);
+            jw_kv_int(&w, "bound_count", g_render_bound_count);
+            jw_kv_double(&w, "bound_ms", g_render_bound_time);
+            jw_kv_int(&w, "text_count", g_render_text_count);
+            jw_kv_double(&w, "text_ms", g_render_text_total_time);
+            jw_kv_int(&w, "image_count", g_render_image_count);
+            jw_kv_double(&w, "image_ms", g_render_image_time);
+            jw_kv_int(&w, "svg_count", g_render_svg_count);
+            jw_kv_double(&w, "svg_ms", g_render_svg_time);
+            jw_kv_int(&w, "filter_count", g_render_filter_count);
+            jw_kv_double(&w, "filter_ms", g_render_filter_time);
+            jw_kv_int(&w, "clip_count", g_render_clip_count);
+            jw_kv_double(&w, "clip_ms", g_render_clip_time);
+            jw_kv_int(&w, "opacity_count", g_render_opacity_count);
+            jw_kv_double(&w, "opacity_ms", g_render_opacity_time);
+            jw_kv_int(&w, "blend_count", g_render_blend_count);
+            jw_kv_double(&w, "blend_ms", g_render_blend_time);
+            jw_kv_int(&w, "overflow_clip_count", g_render_overflow_clip_count);
+            jw_kv_double(&w, "overflow_clip_ms", g_render_overflow_clip_time);
+        jw_obj_end(&w);
+        jw_key(&w, "tree");
+        jw_obj_begin(&w);
+            jw_kv_int(&w, "block_count", g_render_block_count);
+            jw_kv_double(&w, "block_self_ms", g_render_block_self_time);
+            jw_kv_int(&w, "inline_count", g_render_inline_count);
+            jw_kv_double(&w, "inline_ms", g_render_inline_time);
+            jw_kv_int(&w, "dispatch_count", g_render_dispatch_count);
+            jw_kv_double(&w, "children_ms", g_render_children_time);
+        jw_obj_end(&w);
+    jw_obj_end(&w);
+    event_state_log_finish_record(log, &w);
 }
 
 /**
@@ -4012,6 +4085,10 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
     int render_threads = get_render_thread_count();
     int item_count = dl_item_count(&display_list);
     bool has_glyphs = dl_contains_glyphs(&display_list);
+    double replay_ms = 0;
+    bool replay_tiled = false;
+    int replay_tile_count = 0;
+    int replay_thread_count = 1;
 
     if (!selective && render_threads != 1 && item_count > 0 && !has_glyphs) {
         // --- Tile-based parallel rasterization ---
@@ -4041,11 +4118,15 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
 
         auto t_replay_end = high_resolution_clock::now();
         int total_tiles = grid.total;
+        replay_ms = duration<double, std::milli>(t_replay_end - t_replay_start).count();
+        replay_tiled = true;
+        replay_tile_count = total_tiles;
+        replay_thread_count = g_render_pool->thread_count;
         log_info("[TIMING] dl_replay_tiled: %.1fms (%d items, %d tiles, %d threads)",
-                 duration<double, std::milli>(t_replay_end - t_replay_start).count(),
+             replay_ms,
                  item_count, total_tiles, g_render_pool->thread_count);
         fprintf(stderr, "[RENDER_PROF] dl_replay_tiled: %.1fms  items: %d  tiles: %d  threads: %d\n",
-                duration<double, std::milli>(t_replay_end - t_replay_start).count(),
+            replay_ms,
                 item_count, total_tiles, g_render_pool->thread_count);
 
         mem_free(jobs);
@@ -4057,11 +4138,12 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
                   &rdcon.block.clip, &rdcon.scratch, rdcon.scale, replay_dirty);
 
         auto t_replay_end = high_resolution_clock::now();
+        replay_ms = duration<double, std::milli>(t_replay_end - t_replay_start).count();
         log_info("[TIMING] dl_replay: %.1fms (%d items)",
-                 duration<double, std::milli>(t_replay_end - t_replay_start).count(),
+             replay_ms,
                  item_count);
         fprintf(stderr, "[RENDER_PROF] dl_replay: %.1fms  items: %d\n",
-                duration<double, std::milli>(t_replay_end - t_replay_start).count(),
+            replay_ms,
                 item_count);
     }
 
@@ -4071,6 +4153,10 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
 
     auto t_sync = high_resolution_clock::now();
     log_info("[TIMING] render complete: %.1fms", duration<double, std::milli>(t_sync - t_render).count());
+    emit_render_stats_record(uicon, rstate, render_ms, replay_ms,
+                             duration<double, std::milli>(t_sync - t_start).count(),
+                             item_count, selective, replay_tiled,
+                             replay_tile_count, replay_thread_count);
 
     // save the rendered surface to image file (PNG or JPEG based on extension)
     if (output_file) {

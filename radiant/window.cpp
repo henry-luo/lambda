@@ -16,6 +16,7 @@
 #include "webview.h"
 #include "animation.h"
 #include "browsing_session.h"
+#include "event_state_log.hpp"
 #include "script_runner.h"
 #include "../lambda/network/network_resource_manager.h"
 #include "../lambda/network/network_integration.h"
@@ -231,6 +232,32 @@ static const char* get_format_name(const char* filename) {
 bool do_redraw = false;
 UiContext ui_context;
 
+static void view_close_event_log() {
+    if (!ui_context.event_log) return;
+    event_state_log_document(ui_context.event_log, "unload_start");
+    event_state_log_document(ui_context.event_log, "unload_complete");
+    event_state_log_close(ui_context.event_log);
+    ui_context.event_log = nullptr;
+}
+
+static void view_attach_event_log(DomDocument* doc, const char* doc_name) {
+    if (!ui_context.event_log_enabled || !doc) return;
+
+    view_close_event_log();
+
+    const char* href = doc->url ? url_get_href(doc->url) : doc_name;
+    ui_context.event_log = event_state_log_open(doc_name ? doc_name : "document", href);
+    if (!ui_context.event_log) return;
+
+    event_state_log_session_start(ui_context.event_log,
+        (int)ui_context.viewport_width, (int)ui_context.viewport_height,
+        doc->scale > 0 ? doc->scale : 1.0);
+    event_state_log_document(ui_context.event_log, "load_start");
+    event_state_log_document(ui_context.event_log, "load_complete");
+
+    radiant_document_ensure_state(doc, "view_attach_event_log");
+}
+
 // update the GLFW window title (safe to call from event handlers)
 void update_window_title(const char* title) {
     if (!ui_context.window || !title) return;
@@ -253,6 +280,7 @@ DomDocument* show_html_doc(Url* base, char* doc_url, int viewport_width, int vie
         doc->state = radiant_state_create(doc->pool, STATE_MODE_IN_PLACE);
         log_debug("show_html_doc: created RadiantState for document");
     }
+    view_attach_event_log(doc, doc_url);
 
     // Process @font-face rules before layout
     process_document_font_faces(&ui_context, doc);
@@ -758,11 +786,13 @@ int run_layout(const char* html_file) {
 // event_file: optional JSON file with simulated events for automated testing
 // headless: if true, run without creating a window (for CI/automated testing)
 int view_doc_in_window_with_events(const char* doc_file, const char* event_file, bool headless,
-                                    const char** font_dirs, int font_dir_count) {
+                                    const char** font_dirs, int font_dir_count,
+                                    bool enable_event_log) {
     log_init_wrapper();
     log_info("VIEW_DOC_IN_WINDOW STARTED with file: %s, event_file: %s, headless: %d",
              doc_file ? doc_file : "NULL", event_file ? event_file : "NULL", headless);
     ui_context_init(&ui_context, headless);
+    ui_context.event_log_enabled = enable_event_log;
 
     // Add custom font scan directories (must be done before any font resolution)
     for (int i = 0; i < font_dir_count; i++) {
@@ -919,6 +949,7 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
             doc->state = radiant_state_create(doc->pool, STATE_MODE_IN_PLACE);
             log_debug("view_doc_in_window: created RadiantState for document");
         }
+        view_attach_event_log(doc, file_to_load);
 
         // Process @font-face rules before layout
         process_document_font_faces(&ui_context, doc);
@@ -1017,6 +1048,7 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
         if (thread_pool) thread_pool_destroy(thread_pool);
         if (file_cache) enhanced_cache_destroy(file_cache);
         network_downloader_cleanup_shared();
+        view_close_event_log();
         ui_context_cleanup(&ui_context);
         log_cleanup();
         return sim_fail_count > 0 ? 1 : 0;
@@ -1151,6 +1183,7 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
     if (thread_pool) thread_pool_destroy(thread_pool);
     if (file_cache) enhanced_cache_destroy(file_cache);
     network_downloader_cleanup_shared();
+    view_close_event_log();
     ui_context_cleanup(&ui_context);
     log_cleanup();
 
@@ -1160,7 +1193,7 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
 
 // Wrapper for backward compatibility
 int view_doc_in_window(const char* doc_file) {
-    return view_doc_in_window_with_events(doc_file, NULL, false, NULL, 0);
+    return view_doc_in_window_with_events(doc_file, NULL, false, NULL, 0, false);
 }
 
 int window_main(int argc, char* argv[]) {

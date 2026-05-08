@@ -1012,7 +1012,8 @@ static Item build_lambda_event_map(DomDocument* doc, View* target,
                   strcmp(event_name, "paste") == 0 || strcmp(event_name, "cut") == 0)) {
         RadiantState* st = doc->state ? (RadiantState*)doc->state : nullptr;
         if (st && st->caret) {
-            int byte_off = st->caret->char_offset;
+            int byte_off = evcon->caret_pos_override_valid ?
+                evcon->caret_pos_override : st->caret->char_offset;
             // use 'target' (the focused element passed to us, valid before retransform)
             // to convert byte offset → character index for Lambda
             int char_idx = byte_off;  // default: same (correct for ASCII)
@@ -1513,6 +1514,20 @@ static bool dispatch_rich_beforeinput(EventContext* evcon, View* target,
         log_debug("dispatch_rich_beforeinput: no beforeinput handler on data-editable/contenteditable subtree");
     }
     return true;
+}
+
+static void dispatch_selectstart(EventContext* evcon, View* target) {
+    if (!evcon || !target) return;
+    if (dispatch_lambda_handler(evcon, target, "selectstart")) {
+        evcon->need_repaint = true;
+    }
+}
+
+static void dispatch_selectionchange(EventContext* evcon, RadiantState* state, View* target) {
+    if (!evcon || !state || !state->selection || state->selection->is_collapsed || !target) return;
+    if (dispatch_lambda_handler(evcon, target, "selectionchange")) {
+        evcon->need_repaint = true;
+    }
 }
 
 extern "C" bool radiant_dispatch_rich_composition_event(UiContext* uicon,
@@ -3583,25 +3598,16 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
     }
     event_context_init(&evcon, uicon, event);
     RadiantState* cascade_state = (RadiantState*)doc->state;
-    EventStateLog* cascade_log = cascade_state ? cascade_state->active_event_log : NULL;
+    EventStateLog* cascade_log = cascade_state && cascade_state->active_event_log
+        ? cascade_state->active_event_log : evcon.ui_context->event_log;
     uint64_t cascade_id = state_begin_event_cascade(cascade_state, cascade_log, "input");
     event_log_raw_input(cascade_log, cascade_id, event);
 
     // ------------------------------------------------------------------
-    // Phase 6 (single source of truth): every selection_*/caret_* call
-    // below routes into DomSelection automatically via the bidirectional
-    // sync hooks in state_store.cpp:
-    //   - selection_start  -> dom_selection_sync_from_legacy_selection()
-    //                         -> dom_selection_set_base_and_extent(...)
-    //   - selection_extend / selection_extend_to_view -> same
-    //   - caret_set        -> dom_selection_sync_from_legacy_caret()
-    //                         -> dom_selection_collapse(...)
-    // The legacy CaretState/SelectionState writes here remain because
-    // event.cpp computes glyph-precise caret X/Y/height via
-    // calculate_position_from_char_offset (better than the resolver's
-    // linear interpolation). The DOM Selection model is thus the
-    // canonical state, while the legacy structs cache the precise
-    // visual coordinates needed by the renderer / inline glyph painter.
+    // Phase 6 (single source of truth): selection_*/caret_* calls route
+    // through DomSelection and state-machine transitions. Event code may
+    // compute glyph-precise visual geometry, but legacy projection writes
+    // go through StateStore helper APIs.
     // ------------------------------------------------------------------
 
     // find target view based on mouse position
@@ -4055,20 +4061,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 evcon.block = saved_block;
                 evcon.font = saved_font;
 
-                if (state->caret) {
-                    state->caret->x = caret_x;
-                    state->caret->y = caret_y;
-                    state->caret->height = caret_height;
-
-                    // Use the same iframe offset as the selection
-                    state->caret->iframe_offset_x = state->selection->iframe_offset_x;
-                    state->caret->iframe_offset_y = state->selection->iframe_offset_y;
-                }
+                caret_project_visual_from_selection(state, caret_x, caret_y, caret_height);
 
                 // Update selection end visual coordinates for rendering
                 if (state->selection) {
-                    state->selection->end_x = caret_x;
-                    state->selection->end_y = caret_y + caret_height;
+                    selection_project_focus_visual(state, caret_x, caret_y, caret_height);
                     log_debug("[SEL-END] Setting selection end: (%.1f, %.1f), caret at (%.1f, %.1f)",
                         state->selection->end_x, state->selection->end_y,
                         state->caret ? state->caret->x : -1, state->caret ? state->caret->y : -1);
@@ -4227,7 +4224,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
                 if (mouse_down_in_selection) {
                     if (state && state->selection) {
-                        state->selection->is_selecting = false;
+                        selection_transition(state, SELECTION_TRANSITION_END_POINTER_SELECTION, NULL);
                         state->text_selection_press_in_range = true;
                         state->text_selection_press_view = evcon.target;
                         state->text_selection_press_offset = char_offset;
@@ -4244,31 +4241,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 calculate_position_from_char_offset(&evcon, text, rect, char_offset,
                     &caret_x, &caret_y, &caret_height);
 
-                // Set caret visual position
+                caret_project_visual_from_block(state, (View*)text, caret_x, caret_y, caret_height,
+                                                evcon.block.x, evcon.block.y);
                 if (state->caret) {
-                    state->caret->x = caret_x;
-                    state->caret->y = caret_y;
-                    state->caret->height = caret_height;
-
-                    // Calculate iframe offset: evcon.block has the absolute position of
-                    // the text's parent block (including any iframe offset). We need to
-                    // find the offset that isn't accounted for when walking up the parent
-                    // chain within the iframe document.
-                    float chain_x = 0, chain_y = 0;
-                    View* parent = text->parent;
-                    while (parent) {
-                        if (parent->view_type == RDT_VIEW_BLOCK ||
-                            parent->view_type == RDT_VIEW_INLINE_BLOCK ||
-                            parent->view_type == RDT_VIEW_LIST_ITEM) {
-                            chain_x += ((ViewBlock*)parent)->x;
-                            chain_y += ((ViewBlock*)parent)->y;
-                        }
-                        parent = parent->parent;
-                    }
-                    // iframe offset is the difference between evcon.block and chain position
-                    state->caret->iframe_offset_x = evcon.block.x - chain_x;
-                    state->caret->iframe_offset_y = evcon.block.y - chain_y;
-
                     log_debug("CARET VISUAL: x=%.1f y=%.1f height=%.1f iframe_offset=(%.1f,%.1f)",
                         caret_x, caret_y, caret_height,
                         state->caret->iframe_offset_x, state->caret->iframe_offset_y);
@@ -4292,18 +4267,12 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
                 // Start new selection if shift not pressed, otherwise extend
                 if (!(event->mouse_button.mods & RDT_MOD_SHIFT)) {
+                    dispatch_selectstart(&evcon, evcon.target);
                     selection_start(state, evcon.target, char_offset);
-                    state->selection->is_selecting = true;  // enter selection mode
 
                     // Set visual coordinates for selection (same point for start)
                     if (state->selection) {
-                        state->selection->start_x = caret_x;
-                        state->selection->start_y = caret_y;
-                        state->selection->end_x = caret_x;
-                        state->selection->end_y = caret_y + caret_height;
-                        // Copy iframe offset from caret
-                        state->selection->iframe_offset_x = state->caret->iframe_offset_x;
-                        state->selection->iframe_offset_y = state->caret->iframe_offset_y;
+                        selection_project_anchor_visual_from_caret(state, caret_x, caret_y, caret_height);
                     }
                 } else if (state->selection && !state->selection->is_collapsed) {
                     // Shift-click extends selection
@@ -4311,8 +4280,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
                     // Update end visual coordinates
                     if (state->selection) {
-                        state->selection->end_x = caret_x;
-                        state->selection->end_y = caret_y + caret_height;
+                        selection_project_focus_visual(state, caret_x, caret_y, caret_height);
                     }
                 }
 
@@ -4422,26 +4390,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         (input_block->height - 2*border - font_size) / 2;
                     float caret_height = font_size;
 
-                    if (state->caret) {
-                        state->caret->x = caret_x;
-                        state->caret->y = caret_y;
-                        state->caret->height = caret_height;
-
-                        // Compute iframe offset (same as text caret)
-                        float chain_x = 0, chain_y = 0;
-                        View* parent = evcon.target->parent;
-                        while (parent) {
-                            if (parent->view_type == RDT_VIEW_BLOCK ||
-                                parent->view_type == RDT_VIEW_INLINE_BLOCK ||
-                                parent->view_type == RDT_VIEW_LIST_ITEM) {
-                                chain_x += ((ViewBlock*)parent)->x;
-                                chain_y += ((ViewBlock*)parent)->y;
-                            }
-                            parent = parent->parent;
-                        }
-                        state->caret->iframe_offset_x = evcon.block.x - chain_x;
-                        state->caret->iframe_offset_y = evcon.block.y - chain_y;
-                    }
+                    caret_project_visual_from_block(state, evcon.target, caret_x, caret_y, caret_height,
+                                                    evcon.block.x, evcon.block.y);
 
                     log_debug("INPUT CARET: offset=%d x=%.1f y=%.1f height=%.1f",
                         char_offset, caret_x, caret_y, caret_height);
@@ -4451,8 +4401,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     // the single-line input drag-selection branch and
                     // mirrors the result back into form->selection_*.
                     if (!(event->mouse_button.mods & RDT_MOD_SHIFT)) {
+                        dispatch_selectstart(&evcon, evcon.target);
                         selection_start(state, evcon.target, char_offset);
-                        state->selection->is_selecting = true;
                     } else if (state->selection) {
                         selection_extend(state, char_offset);
                     }
@@ -4556,8 +4506,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
                     // Start/extend textarea selection
                     if (!(event->mouse_button.mods & RDT_MOD_SHIFT)) {
+                        dispatch_selectstart(&evcon, evcon.target);
                         selection_start(state, evcon.target, char_offset);
-                        state->selection->is_selecting = true;
                     } else if (state->selection) {
                         selection_extend(state, char_offset);
                     }
@@ -4673,9 +4623,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     evcon.font = saved_font;
                 }
                 selection_start(state, collapse_view, collapse_offset);
-                if (state->selection) {
-                    state->selection->is_selecting = false;
-                }
+                selection_transition(state, SELECTION_TRANSITION_END_POINTER_SELECTION, NULL);
                 state->text_selection_press_in_range = false;
                 state->text_selection_press_view = NULL;
                 state->text_selection_press_offset = 0;
@@ -4846,12 +4794,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
             // End selection mode
             if (state && state->selection) {
-                if (!state->selection->is_collapsed && evcon.target) {
-                    if (dispatch_lambda_handler(&evcon, evcon.target, "selectionchange")) {
-                        evcon.need_repaint = true;
-                    }
-                }
-                state->selection->is_selecting = false;
+                dispatch_selectionchange(&evcon, state, evcon.target);
+                selection_transition(state, SELECTION_TRANSITION_END_POINTER_SELECTION, NULL);
             }
         }
 
@@ -5521,7 +5465,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 auto sel_begin_or_extend = [&](int new_off) {
                     if (!state->selection || state->selection->is_collapsed) {
                         selection_start(state, focused, cur);
-                        state->selection->is_selecting = false;
+                        selection_transition(state, SELECTION_TRANSITION_END_POINTER_SELECTION, NULL);
                     }
                     selection_extend(state, new_off);
                 };
@@ -5563,14 +5507,15 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             arena_destroy(ta);
                             pool_destroy(tp);
 
-                            // set caret to selection start before dispatch
-                            state->caret->char_offset = s;
-
                             // dispatch "cut" event to Lambda handler
+                            evcon.caret_pos_override_valid = true;
+                            evcon.caret_pos_override = s;
                             dispatch_lambda_handler(&evcon, focused, "cut");
+                            evcon.caret_pos_override_valid = false;
                             focused = focus_get(state);
 
                             // clear selection, clamp caret to new value length
+                            if (focused) caret_set(state, focused, s);
                             selection_clear(state);
                             if (focused && focused->is_element()) {
                                 DomElement* fe = (DomElement*)focused;
@@ -5615,8 +5560,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 // Cmd+A: select all text in textarea
                 if (cmd && key_event->key == RDT_KEY_A) {
                     selection_start(state, focused, 0);
-                    state->selection->is_selecting = false;
                     selection_extend(state, value_len);
+                    selection_transition(state, SELECTION_TRANSITION_END_POINTER_SELECTION, NULL);
                     evcon.need_repaint = true;
                     break;
                 }
