@@ -3,6 +3,8 @@ console.log("escape length: " + CSS.escape.length);
 console.log("supports enum: " + Object.prototype.propertyIsEnumerable.call(CSS, "supports"));
 console.log("escape enum: " + Object.getOwnPropertyDescriptor(CSS, "escape").enumerable);
 console.log("tag: " + Object.prototype.toString.call(CSS));
+console.log("string: " + String(CSS));
+console.log("plus: " + (CSS + ""));
 console.log("supports color: " + CSS.supports("color", "red"));
 console.log("supports bad: " + CSS.supports("not-a-real-prop", "red"));
 console.log("escape digit: " + CSS.escape("1a"));

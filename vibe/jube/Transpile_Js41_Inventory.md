@@ -450,6 +450,50 @@ Verification:
 - `make test262-baseline`: fully passed `30009 / 30009`, failed `0`,
   regressions `0`.
 
+## Phase J41-4 Complete - Built-in Descriptor Registry
+
+Finished the full J41-4 phase by closing the gap left after the registry
+foundation: descriptor and own-name synthesis now read from the same
+`JsBuiltinMethodSpec` registry data used by method installation and runtime
+lookup.
+
+Code changes:
+
+- Added registry-backed descriptor helpers in `lambda/js/js_runtime.cpp`:
+  `js_builtin_registry_prototype_method_descriptor(...)`,
+  `js_builtin_registry_has_prototype_method(...)`, and
+  `js_append_builtin_method_names_for_class(...)`.
+- Routed prototype virtual descriptor synthesis in
+  `js_object_get_own_property_descriptor(...)` through the registry instead of
+  rebuilding built-in descriptors from scattered `JsClass` / `TypeId` checks.
+- Routed prototype built-in own-name synthesis through class-aware registry
+  tables, so Date, RegExp, Map, Set, typed-array, DataView, and other
+  registry-backed prototypes use the same source of truth.
+- Added registry entries for compatibility surfaces that had previously been
+  supplied by generic fallback behavior: `Array.prototype.toLocaleString`,
+  `Number.prototype.toLocaleString`, `Date.prototype.toLocaleString`, and
+  `Symbol.prototype.valueOf`.
+- Added `JS_BOOLEAN_PROTOTYPE_METHOD_SPECS` and
+  `JS_SYMBOL_PROTOTYPE_METHOD_SPECS` so Boolean and Symbol prototype descriptor
+  behavior is explicit in registry data.
+- Preserved specialized receiver-sensitive function flags for typed-array and
+  DataView descriptor values/accessor getters when synthesizing descriptors
+  from registry data.
+- Added `Props.J41_4_BuiltinRegistry_DescriptorSynthesis` to the fast property
+  kernel suite. It checks descriptor metadata across Date, RegExp, Map, Set,
+  Promise, String alias functions, Array/Number locale methods, Symbol valueOf,
+  `%TypedArray%.prototype`, and `DataView.prototype`.
+
+Verification:
+
+- `make -C build/premake config=debug_native lambda test_js_props_gtest -j1 CC="cc" CXX="c++"`
+- `./test/test_js_props_gtest.exe`: passed `24 / 24`
+- `./test/test_js_coerce_gtest.exe`: passed `15 / 15`
+- `./test/test_js_gtest.exe --gtest_filter='JavaScriptTests/JsFileTest.Run/typed_arrays:JavaScriptTests/JsFileTest.Run/opt_p4_typed_reads:JavaScriptTests/JsFileTest.Run/v11_date_methods:JavaScriptTests/JsFileTest.Run/v11_regex_methods:JavaScriptTests/JsFileTest.Run/string_methods:JavaScriptTests/JsFileTest.Run/v9_string_methods:JavaScriptTests/JsFileTest.Run/css_namespace:JavaScriptTests/JsFileTest.Run/native_backing_props'`: passed `8 / 8`
+- `./test/test_css_dom_integration.exe`: passed `77`, skipped `25`, failed `0`
+- `make test262-baseline`: fully passed `30009 / 30009`, failed `0`,
+  regressions `0`
+
 ## Phase Completion - CSS Namespace Representation
 
 Finished the CSS namespace representation phase that the registry work had
@@ -485,5 +529,225 @@ Verification:
 - `./test/test_css_dom_integration.exe`: passed `77`, skipped `25`, failed `0`
 - `./test/test_wpt_css_syntax_gtest.exe`: still has unrelated existing CSS
   syntax failures in charset/escaped-url cases; not a CSS namespace regression
+- `make test262-baseline`: fully passed `30009 / 30009`, failed `0`,
+  regressions `0`.
+
+## Phase Completion - Exotic Primitive Fallback Boundary
+
+Finished a small but structural exotic-operation cleanup phase. The list of
+map kinds that intentionally use the engine's default object-to-primitive
+fallback is now centralized in one predicate:
+`js_map_kind_uses_default_object_to_primitive(...)`.
+
+Before this phase, the same list appeared separately in `js_to_primitive(...)`,
+the object branch of `js_to_string(...)`, and Date's
+`@@toPrimitive` fallback. The CSS namespace representation phase had to edit
+all of those sites when it introduced `MAP_KIND_CSS_NAMESPACE`, which made the
+duplication visible. The new helper is the single policy point for:
+
+- DOM wrappers
+- CSS namespace objects
+- CSSOM wrappers
+- document proxies
+- foreign document wrappers
+
+Code changes:
+
+- Added `js_map_kind_uses_default_object_to_primitive(...)` in
+  `lambda/js/js_runtime.h`.
+- Replaced the repeated map-kind checks in `lambda/js/js_coerce.cpp` and
+  `lambda/js/js_runtime.cpp`.
+- Extended `test/js/css_namespace.js` / `.txt` to cover `String(CSS)` and
+  `CSS + ""`, so both string-hint and default-hint primitive conversion paths
+  stay guarded after the centralization.
+
+Verification:
+
+- `make -C build/premake config=debug_native lambda -j1 CC="cc" CXX="c++"`
+- `./test/test_js_gtest.exe --gtest_filter='JavaScriptTests/JsFileTest.Run/css_namespace:JavaScriptTests/JsFileTest.Run/dom_style:JavaScriptTests/JsFileTest.Run/dom_basic'`
+- `./test/test_js_coerce_gtest.exe`
+- `make test262-baseline`: fully passed `30009 / 30009`, failed `0`,
+  regressions `0`.
+
+## Phase Completion - Native-Backed Property Upgrade Boundary
+
+Finished a focused exotic-object cleanup phase for native-backed map objects.
+`ArrayBuffer`, `DataView`, and typed-array instances all start with
+`Map::data` holding a native runtime pointer, then upgrade to ordinary
+shape-backed storage the first time user code writes a non-index property.
+Before this phase, each map-kind branch repeated the same conversion sequence:
+capture the native pointer, reset the map to `EmptyMap`, and store the pointer
+under an internal `__ab__`, `__dv__`, or `__ta__` slot.
+
+Code changes:
+
+- Added `js_upgrade_native_backed_map_for_properties(...)` in
+  `lambda/js/js_runtime.cpp`.
+- Routed `MAP_KIND_ARRAYBUFFER`, `MAP_KIND_DATAVIEW`, and
+  `MAP_KIND_TYPED_ARRAY` property-write upgrades through the helper while
+  preserving their existing map kinds and internal pointer slot names.
+- Added `test/js/native_backing_props.js` / `.txt` to lock the boundary:
+  user properties survive on ArrayBuffer/DataView/TypedArray objects after
+  upgrade, and native getters/indexed storage still resolve correctly through
+  the preserved internal pointer slots.
+
+This is intentionally a small structural phase. It does not change the
+ArrayBuffer/DataView/TypedArray exotic get/set semantics; it makes the
+native-pointer-to-shape-storage transition one named operation so later exotic
+operation table work has a single upgrade hook to call.
+
+Verification:
+
+- `make -C build/premake config=debug_native lambda -j1 CC="cc" CXX="c++"`
+- `./test/test_js_gtest.exe --gtest_filter='JavaScriptTests/JsFileTest.Run/native_backing_props:JavaScriptTests/JsFileTest.Run/typed_arrays:JavaScriptTests/JsFileTest.Run/opt_p4_typed_reads'`
+- `make test262-baseline`: fully passed `30009 / 30009`, failed `0`,
+  regressions `0`.
+
+## Phase Completion - Exotic Property Dispatch Boundary
+
+Finished a complete structural phase for `MapKind` property operations in
+`lambda/js/js_runtime.cpp`. The large exotic `Get` and `Set` switch blocks no
+longer sit inline inside `js_property_get(...)` and `js_property_set(...)`.
+They now route through named helpers:
+
+- `js_try_exotic_property_get(...)`
+- `js_try_exotic_property_set(...)`
+
+This phase keeps behavior unchanged while creating the next extraction
+boundary for Js41's exotic operation table work. The helpers preserve the
+existing handling for:
+
+- typed-array indexed and intrinsic property reads
+- ArrayBuffer/DataView native-backed reads and prototype fallback
+- document proxies and foreign document active-document swapping
+- DOM and CSSOM host-object property dispatch
+- CSS namespace ordinary-property fallthrough
+- iterator opacity and `[Symbol.iterator]` identity
+- Proxy get/set traps
+- process.env value coercion and host environment propagation
+- native-backed property upgrade hooks for ArrayBuffer, DataView, and
+  typed-array instances
+
+Code changes:
+
+- Added file-scope forward declarations for the typed-array base prototype and
+  Buffer prototype helpers so the extracted property dispatcher can call them
+  without introducing conflicting block-scope linkage.
+- Moved the `js_property_get(...)` map-kind switch into
+  `js_try_exotic_property_get(...)`.
+- Moved the `js_property_set(...)` map-kind switch into
+  `js_try_exotic_property_set(...)`, passing the value by pointer for
+  `process.env` string coercion before ordinary storage.
+- Left ordinary map property conversion, frozen/non-writable checks, accessor
+  dispatch, and final `map_put(...)` storage in the main `js_property_set(...)`
+  path.
+
+Verification:
+
+- `make -C build/premake config=debug_native lambda -j1 CC="cc" CXX="c++"`
+- `./test/test_js_gtest.exe --gtest_filter='JavaScriptTests/JsFileTest.Run/native_backing_props:JavaScriptTests/JsFileTest.Run/typed_arrays:JavaScriptTests/JsFileTest.Run/opt_p4_typed_reads:JavaScriptTests/JsFileTest.Run/css_namespace:JavaScriptTests/JsFileTest.Run/dom_style:JavaScriptTests/JsFileTest.Run/dom_basic'`
+- `./test/test_js_coerce_gtest.exe`: passed `15 / 15`
+- `./test/test_css_dom_integration.exe`: passed `77`, skipped `25`, failed `0`
+- `make test262-baseline`: fully passed `30009 / 30009`, failed `0`,
+  regressions `0`.
+
+## Phase J41-5 Complete - Spec-Operation Convergence
+
+Finished the full J41-5 phase. The runtime now has explicit exotic boundaries
+around the ordinary property operations that test262 exercises most heavily:
+`[[Get]]`, `[[Set]]`, `[[HasProperty]]`, `[[Delete]]`,
+`[[OwnPropertyKeys]]`, and `[[GetOwnProperty]]`.
+
+Code changes:
+
+- `lambda/js/js_runtime.cpp` routes `js_property_get(...)` and
+  `js_property_set(...)` through `js_try_exotic_property_get(...)` and
+  `js_try_exotic_property_set(...)` before ordinary storage/prototype handling.
+- `lambda/js/js_globals.cpp` routes `in`, `delete`, `Object.getOwnPropertyNames`,
+  and `Object.getOwnPropertyDescriptor` through named exotic helpers:
+  `js_try_exotic_has_property(...)`,
+  `js_try_exotic_delete_property(...)`,
+  `js_try_exotic_own_property_names(...)`, and
+  `js_try_exotic_own_property_descriptor(...)`.
+- Proxy traps for `has`, `deleteProperty`, `ownKeys`, and
+  `getOwnPropertyDescriptor` now sit at the same abstract-operation boundary
+  instead of being scattered inline through the public built-ins.
+- Typed-array numeric index behavior is explicit for has/delete/ownKeys/GOPD,
+  while named properties continue through ordinary map storage.
+- String wrapper indexed properties are now explicit in `[[HasProperty]]`, so
+  `"1" in Object("abc")` agrees with the existing own-name and descriptor paths.
+- Arrays retain their indexed exotic behavior through the existing array paths,
+  with the new GTest covering deletion, own keys, and named ordinary properties.
+- Module namespace objects are currently represented as ordinary frozen maps
+  (`js_module_namespace_create(...)` returns the export map), so there is no
+  separate module-namespace `MapKind` hook to wire in this phase. The new
+  abstract-operation dispatch points are ready for that future representation.
+
+Spec-kernel tests added:
+
+- `Props.J41_5_TypedArrayExotic_AbstractOps`
+- `Props.J41_5_ProxyExotic_AbstractOps`
+- `Props.J41_5_ArrayAndStringExotic_AbstractOps`
+
+Verification:
+
+- `make build-test -j1`
+- `./test/test_js_props_gtest.exe`: passed `23 / 23`
+- `./test/test_js_coerce_gtest.exe`: passed `15 / 15`
+- `./test/test_js_gtest.exe --gtest_filter='JavaScriptTests/JsFileTest.Run/native_backing_props:JavaScriptTests/JsFileTest.Run/typed_arrays:JavaScriptTests/JsFileTest.Run/opt_p4_typed_reads:JavaScriptTests/JsFileTest.Run/css_namespace:JavaScriptTests/JsFileTest.Run/dom_style:JavaScriptTests/JsFileTest.Run/dom_basic'`: passed `6 / 6`
+- `./test/test_css_dom_integration.exe`: passed `77`, skipped `25`, failed `0`
+- `make test262-baseline`: fully passed `30009 / 30009`, failed `0`,
+  regressions `0`
+
+## Phase J41-1 Complete - Mechanical Transpiler Split
+
+Finished the full J41-1 mechanical split for the JavaScript MIR transpiler.
+The transpiler is now split into real top-level C++ translation units so later
+semantic phases can work in named ownership areas without touching a 28K-line
+monolith.
+
+Code changes:
+
+- Replaced `lambda/js/transpile_js_mir.cpp` with a state anchor for the shared
+  extern declarations, MIR optimization globals, and module/eval global state.
+- Added `lambda/js/js_mir_context.hpp` for the shared JS MIR transpiler context
+  structs and cleanup helper.
+- Added `lambda/js/js_mir_internal.hpp` for shared helper declarations and
+  cross-file extern state.
+- Added `lambda/js/js_mir_hashmap_scope_utils.cpp`.
+- Added `lambda/js/js_mir_analysis.cpp`.
+- Added `lambda/js/js_mir_calls_boxing_types.cpp`.
+- Added `lambda/js/js_mir_function_collection_class_inference.cpp`.
+- Added `lambda/js/js_mir_expression_lowering.cpp`.
+- Added `lambda/js/js_mir_statement_lowering.cpp`.
+- Added `lambda/js/js_mir_function_class_lowering.cpp`.
+- Added `lambda/js/js_mir_module_batch_lowering.cpp`.
+- Added `lambda/js/js_mir_eval_lowering.cpp`.
+- Added `lambda/js/js_mir_entrypoints_require.cpp`.
+
+Boundary notes:
+
+- This phase intentionally made no semantic extraction and no manual
+  build-system change.
+- Shared local structs, constants, helper prototypes, and module/eval globals
+  are centralized in `js_mir_context.hpp` and `js_mir_internal.hpp` rather than
+  in include fragments.
+- The generated Premake configuration picks up the new top-level `.cpp` files
+  automatically.
+- `make build` regenerated `lambda/lambda-embed.h` from the current
+  `lambda/lambda.h`; that generated-file change is incidental to the build
+  gate rather than part of the transpiler split.
+
+Verification:
+
+- `make build`: passed.
+- `./test/test_js_props_gtest.exe`: passed `24 / 24`.
+- `./test/test_js_coerce_gtest.exe`: passed `15 / 15`.
+- Focused `./test/test_js_gtest.exe` coverage for native-backed properties,
+  typed arrays, CSS namespace, DOM style/basic, eval, and module paths:
+  passed `9 / 9`.
+- Full `./test/test_js_gtest.exe`: still has 6 unrelated JS semantic failures
+  (`buffer_advanced`, `lib_handlebars`, `lib_pretext`, `lib_yup`, `lib_zod`,
+  `zlib_basic`); the same 6 fail when filtered directly.
 - `make test262-baseline`: fully passed `30009 / 30009`, failed `0`,
   regressions `0`.

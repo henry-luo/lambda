@@ -3,6 +3,8 @@ escape length: 1
 supports enum: false
 escape enum: false
 tag: [object CSS]
+string: [object Object]
+plus: [object Object]
 supports color: true
 supports bad: false
 escape digit: \31 a

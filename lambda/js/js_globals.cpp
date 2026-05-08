@@ -669,6 +669,161 @@ static bool js_require_object_type(Item arg, const char* method_name) {
     return false;
 }
 
+static bool js_try_exotic_has_property(Item object, Item key, TypeId type, Item* out_result) {
+    if (type == LMD_TYPE_MAP &&
+        (object.map->map_kind == MAP_KIND_DOC_PROXY ||
+         object.map->map_kind == MAP_KIND_FOREIGN_DOC ||
+         object.map->map_kind == MAP_KIND_DOM)) {
+        Item v = js_property_get(object, key);
+        if (v.item != ItemNull.item && v.item != ITEM_JS_UNDEFINED) {
+            *out_result = (Item){.item = b2it(true)};
+            return true;
+        }
+        return false;
+    }
+    if (js_is_proxy(object)) {
+        *out_result = js_proxy_trap_has(object, key);
+        return true;
+    }
+    if (type == LMD_TYPE_MAP && object.map->map_kind == MAP_KIND_TYPED_ARRAY) {
+        double numeric_index = 0;
+        bool is_negative_zero = false;
+        if (js_ta_key_canonical_numeric(key, &numeric_index, &is_negative_zero)) {
+            bool valid_index = js_ta_numeric_index_valid(object, numeric_index, is_negative_zero);
+            *out_result = (Item){.item = b2it(valid_index)};
+            return true;
+        }
+    }
+    if (type == LMD_TYPE_MAP && js_class_id(object) == JS_CLASS_STRING) {
+        Item prop_key = js_to_property_key(key);
+        if (get_type_id(prop_key) == LMD_TYPE_STRING) {
+            String* ks = it2s(prop_key);
+            if (ks && ks->len == 6 && memcmp(ks->chars, "length", 6) == 0) {
+                *out_result = (Item){.item = b2it(true)};
+                return true;
+            }
+            if (ks && ks->len > 0) {
+                bool all_digits = true;
+                int64_t idx = 0;
+                for (int i = 0; i < (int)ks->len; i++) {
+                    if (ks->chars[i] < '0' || ks->chars[i] > '9') {
+                        all_digits = false;
+                        break;
+                    }
+                    idx = idx * 10 + (ks->chars[i] - '0');
+                }
+                if (all_digits && (ks->len == 1 || ks->chars[0] != '0')) {
+                    bool own_pv = false;
+                    Item pv = js_map_get_fast_ext(object.map, "__primitiveValue__", 18, &own_pv);
+                    if (own_pv && get_type_id(pv) == LMD_TYPE_STRING) {
+                        String* pv_s = it2s(pv);
+                        if (pv_s && idx >= 0 && idx < (int64_t)pv_s->len) {
+                            *out_result = (Item){.item = b2it(true)};
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return false;
+}
+
+static bool js_try_exotic_delete_property(Item obj, Item key, Item* out_result) {
+    if (js_is_proxy(obj)) {
+        *out_result = js_proxy_trap_delete(obj, key);
+        return true;
+    }
+    if (get_type_id(obj) == LMD_TYPE_MAP && obj.map && obj.map->map_kind == MAP_KIND_TYPED_ARRAY) {
+        double numeric_index = 0;
+        bool is_negative_zero = false;
+        if (js_ta_key_canonical_numeric(key, &numeric_index, &is_negative_zero)) {
+            bool valid_index = js_ta_numeric_index_valid(obj, numeric_index, is_negative_zero);
+            if (valid_index && js_strict_mode) {
+                *out_result = js_throw_type_error("Cannot delete property of TypedArray");
+            } else {
+                *out_result = (Item){.item = b2it(!valid_index)};
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool js_try_exotic_own_property_names(Item object, Item* out_result) {
+    if (js_is_proxy(object)) {
+        *out_result = js_proxy_trap_own_keys(object);
+        return true;
+    }
+    if (get_type_id(object) == LMD_TYPE_MAP && object.map &&
+        object.map->map_kind == MAP_KIND_TYPED_ARRAY) {
+        Map* m = object.map;
+        Item result = js_array_new(0);
+        int len = js_typed_array_length(object);
+        for (int i = 0; i < len; i++) {
+            char buf[24];
+            int blen = snprintf(buf, sizeof(buf), "%d", i);
+            js_array_push(result, (Item){.item = s2it(heap_create_name(buf, blen))});
+        }
+        TypeMap* tm = (TypeMap*)m->type;
+        ShapeEntry* e = tm ? tm->shape : NULL;
+        while (e) {
+            const char* s = e->name->str;
+            int slen = (int)e->name->length;
+            if (slen >= 2 && s[0] == '_' && s[1] == '_') { e = e->next; continue; }
+            Item val = _map_read_field(e, m->data);
+            if (val.item == JS_DELETED_SENTINEL_VAL) { e = e->next; continue; }
+            Item key_item = (Item){.item = s2it(heap_create_name(s, slen))};
+            double numeric_index = 0;
+            bool is_negative_zero = false;
+            if (js_ta_key_canonical_numeric(key_item, &numeric_index, &is_negative_zero)) {
+                e = e->next;
+                continue;
+            }
+            js_array_push(result, key_item);
+            e = e->next;
+        }
+        *out_result = result;
+        return true;
+    }
+    return false;
+}
+
+static bool js_try_exotic_own_property_descriptor(Item obj, Item name,
+                                                  String* name_str, TypeId type,
+                                                  Item* out_result) {
+    if (js_is_proxy(obj)) {
+        *out_result = js_proxy_trap_get_own_property_descriptor(obj, name);
+        return true;
+    }
+    if (type == LMD_TYPE_MAP && obj.map && obj.map->map_kind == MAP_KIND_TYPED_ARRAY) {
+        double numeric_index = 0;
+        bool is_negative_zero = false;
+        if (js_ta_key_canonical_numeric(name, &numeric_index, &is_negative_zero)) {
+            int idx = 0;
+            if (!js_ta_numeric_index_valid(obj, numeric_index, is_negative_zero) ||
+                !js_ta_numeric_index_to_int(numeric_index, is_negative_zero, &idx)) {
+                *out_result = make_js_undefined();
+                return true;
+            }
+            Item value = js_typed_array_get(obj, (Item){.item = i2it(idx)});
+            if (value.item == ITEM_NULL) {
+                *out_result = make_js_undefined();
+                return true;
+            }
+            Item desc = js_new_object();
+            js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, value);
+            js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
+            js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(true)});
+            js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
+            *out_result = desc;
+            return true;
+        }
+    }
+    (void)name_str;
+    return false;
+}
+
 // =============================================================================
 // Process I/O
 // =============================================================================
@@ -4477,35 +4632,8 @@ extern "C" Item js_in(Item key, Item object) {
         && type != LMD_TYPE_ELEMENT) {
         return js_throw_type_error("Cannot use 'in' operator to search for a property in a non-object");
     }
-    // Document proxy / foreign-document wrappers: properties are served by
-    // custom get_property handlers (not stored in the underlying map). Use
-    // js_property_get to detect existence — anything other than ItemNull /
-    // undefined counts as present.
-    if (type == LMD_TYPE_MAP &&
-        (object.map->map_kind == MAP_KIND_DOC_PROXY ||
-         object.map->map_kind == MAP_KIND_FOREIGN_DOC ||
-         object.map->map_kind == MAP_KIND_DOM)) {
-        Item v = js_property_get(object, key);
-        if (v.item != ItemNull.item && v.item != ITEM_JS_UNDEFINED) {
-            return (Item){.item = b2it(true)};
-        }
-        // Fall through so prototype-chain methods (Object.prototype.toString,
-        // hasOwnProperty, etc.) still resolve true.
-    }
-    // Proxy [[HasProperty]] trap
-    if (js_is_proxy(object)) {
-        return js_proxy_trap_has(object, key);
-    }
-    // ES spec §9.4.5.2: TypedArray [[HasProperty]] — numeric indices only check bounds
-    if (type == LMD_TYPE_MAP && object.map->map_kind == MAP_KIND_TYPED_ARRAY) {
-        double numeric_index = 0;
-        bool is_negative_zero = false;
-        if (js_ta_key_canonical_numeric(key, &numeric_index, &is_negative_zero)) {
-            bool valid_index = js_ta_numeric_index_valid(object, numeric_index, is_negative_zero);
-            return (Item){.item = b2it(valid_index)};
-        }
-        // non-numeric key: fall through to normal MAP handling (check own + prototype)
-    }
+    Item exotic_result = ItemNull;
+    if (js_try_exotic_has_property(object, key, type, &exotic_result)) return exotic_result;
     if (type == LMD_TYPE_MAP) {
         // Check for symbol keys FIRST (before any numeric coercion)
         // Symbol items are encoded as negative ints <= -JS_SYMBOL_BASE
@@ -5896,10 +6024,6 @@ extern "C" bool js_func_is_builtin_ctor(Item fn) {
 }
 
 extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
-    // Proxy [[GetOwnProperty]] trap
-    if (js_is_proxy(obj)) {
-        return js_proxy_trap_get_own_property_descriptor(obj, name);
-    }
     // v20: GOPD should accept primitives (ES spec uses ToObject internally)
     // Only null/undefined throw TypeError
     TypeId type = get_type_id(obj);
@@ -5911,6 +6035,13 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
         Item msg = (Item){.item = s2it(heap_create_name("Cannot convert undefined or null to object"))};
         js_throw_value(js_new_error_with_name(tn, msg));
         return ItemNull;
+    }
+    {
+        Item proxy_result = ItemNull;
+        if (js_is_proxy(obj) &&
+            js_try_exotic_own_property_descriptor(obj, name, NULL, type, &proxy_result)) {
+            return proxy_result;
+        }
     }
 
     // Convert name to string for comparison
@@ -5932,6 +6063,12 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
     // whose toString returns the actual key — see test
     // built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-2-42).
     name = name_str_item;
+
+    Item exotic_result = ItemNull;
+    if (!js_is_proxy(obj) &&
+        js_try_exotic_own_property_descriptor(obj, name, name_str, type, &exotic_result)) {
+        return exotic_result;
+    }
 
     // J39-7: ES §B.2.2.1 / §10.4.7 — the `__proto__` slot is the [[Prototype]]
     // internal slot, NOT an own property of plain objects. Object literal
@@ -6179,26 +6316,6 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
         Map* m = obj.map;
         if (!m || !m->type) return make_js_undefined();
 
-        if (m->map_kind == MAP_KIND_TYPED_ARRAY) {
-            double numeric_index = 0;
-            bool is_negative_zero = false;
-            if (js_ta_key_canonical_numeric(name, &numeric_index, &is_negative_zero)) {
-                int idx = 0;
-                if (!js_ta_numeric_index_valid(obj, numeric_index, is_negative_zero) ||
-                    !js_ta_numeric_index_to_int(numeric_index, is_negative_zero, &idx)) {
-                    return make_js_undefined();
-                }
-                Item value = js_typed_array_get(obj, (Item){.item = i2it(idx)});
-                if (value.item == ITEM_NULL) return make_js_undefined();
-                Item desc = js_new_object();
-                js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, value);
-                js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
-                js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(true)});
-                js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
-                return desc;
-            }
-        }
-
         // Stage A2.1: route accessor/legacy-marker descriptor synthesis
         // through unified js_get_own_property_descriptor inspector. Falls
         // through to the data-property + virtual-builtin paths below when
@@ -6251,23 +6368,19 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
                     else if (cls == JS_CLASS_NUMBER) lookup_type = LMD_TYPE_INT;
                     else if (cls == JS_CLASS_BOOLEAN) lookup_type = LMD_TYPE_BOOL;
 
-                    Item builtin = ItemNull;
-                    if (lookup_type != (TypeId)0) {
-                        builtin = js_lookup_builtin_method(lookup_type, name_str->chars, (int)name_str->len);
-                    }
-                    if (builtin.item == ItemNull.item) {
-                        builtin = js_lookup_builtin_method(LMD_TYPE_MAP, name_str->chars, (int)name_str->len);
-                    }
+                    Item registry_desc = js_builtin_registry_prototype_method_descriptor(
+                        (int)cls, lookup_type, name_str->chars, (int)name_str->len);
+                    if (get_type_id(registry_desc) != LMD_TYPE_UNDEFINED) return registry_desc;
+
                     // Symbol.iterator (__sym_1) — virtual property on Array/String prototypes
-                    if (builtin.item == ItemNull.item && name_str->len == 7 && strncmp(name_str->chars, "__sym_1", 7) == 0) {
+                    Item builtin = ItemNull;
+                    if (name_str->len == 7 && strncmp(name_str->chars, "__sym_1", 7) == 0) {
                         if (lookup_type == LMD_TYPE_ARRAY || lookup_type == LMD_TYPE_STRING) {
                             builtin = js_property_get(obj, name);
                         }
                     }
-                    // fallback: check via js_property_get for class-name-based methods
-                    // (Date, RegExp, Error, Map, Set, etc.) not in js_lookup_builtin_method
-                    // Use js_property_get on the map directly — class-name resolution happens
-                    // at the MAP level without following __proto__, so this is safe for own-check
+                    // Remaining symbol-named built-ins and host-prototype
+                    // methods are not yet in JsBuiltinMethodSpec tables.
                     if (builtin.item == ItemNull.item && js_map_has_builtin_method(m, name_str->chars, (int)name_str->len)) {
                         builtin = js_property_get(obj, name);
                     }
@@ -6602,10 +6715,8 @@ extern "C" Item js_alert(Item msg) {
 
 // Object.getOwnPropertyNames — includes non-enumerable own properties
 extern "C" Item js_object_get_own_property_names(Item object) {
-    // Proxy: forward through ownKeys trap (which handles undefined trap by forwarding to target)
-    if (js_is_proxy(object)) {
-        return js_proxy_trap_own_keys(object);
-    }
+    Item exotic_result = ItemNull;
+    if (js_try_exotic_own_property_names(object, &exotic_result)) return exotic_result;
     // ES6: ToObject for primitives
     TypeId ot = get_type_id(object);
     if (ot == LMD_TYPE_STRING) {
@@ -6689,35 +6800,6 @@ extern "C" Item js_object_get_own_property_names(Item object) {
     if (type != LMD_TYPE_MAP) return js_array_new(0);
     Map* m = object.map;
     if (!m || !m->type) return js_array_new(0);
-
-    if (m->map_kind == MAP_KIND_TYPED_ARRAY) {
-        Item result = js_array_new(0);
-        int len = js_typed_array_length(object);
-        for (int i = 0; i < len; i++) {
-            char buf[24];
-            int blen = snprintf(buf, sizeof(buf), "%d", i);
-            js_array_push(result, (Item){.item = s2it(heap_create_name(buf, blen))});
-        }
-        TypeMap* tm = (TypeMap*)m->type;
-        ShapeEntry* e = tm ? tm->shape : NULL;
-        while (e) {
-            const char* s = e->name->str;
-            int slen = (int)e->name->length;
-            if (slen >= 2 && s[0] == '_' && s[1] == '_') { e = e->next; continue; }
-            Item val = _map_read_field(e, m->data);
-            if (val.item == JS_DELETED_SENTINEL_VAL) { e = e->next; continue; }
-            Item key_item = (Item){.item = s2it(heap_create_name(s, slen))};
-            double numeric_index = 0;
-            bool is_negative_zero = false;
-            if (js_ta_key_canonical_numeric(key_item, &numeric_index, &is_negative_zero)) {
-                e = e->next;
-                continue;
-            }
-            js_array_push(result, key_item);
-            e = e->next;
-        }
-        return result;
-    }
 
     // v25: String wrapper objects — character indices + "length"
     {
@@ -6861,9 +6943,9 @@ extern "C" Item js_object_get_own_property_names(Item object) {
                     else if (cls == JS_CLASS_ARRAY) lookup_type = LMD_TYPE_ARRAY;
                     else if (cls == JS_CLASS_NUMBER) lookup_type = LMD_TYPE_INT;
                     else if (cls == JS_CLASS_FUNCTION) lookup_type = LMD_TYPE_FUNC;
-                    // Append builtin method names (they are "own" properties of the prototype)
+                    // Append registry method names (they are "own" properties of the prototype)
                     int prev_len = arr->length;
-                    js_append_builtin_method_names(lookup_type, result);
+                    js_append_builtin_method_names_for_class((int)cls, lookup_type, result);
                     // Deduplicate: remove any that were already in the list
                     for (int i = arr->length - 1; i >= prev_len; i--) {
                         String* new_s = it2s(arr->items[i]);
@@ -8564,47 +8646,12 @@ static bool js_map_has_builtin_method(Map* m, const char* name, int len) {
     if (len == 7 && strncmp(name, "__sym_1", 7) == 0) {
         if (lookup_type == LMD_TYPE_ARRAY || lookup_type == LMD_TYPE_STRING) return true;
     }
-    Item builtin = js_lookup_builtin_method(lookup_type, name, len);
-    if (builtin.item != ItemNull.item) return true;
-    // check class-name-specific methods not in js_lookup_builtin_method
-    // (Date, RegExp, Error, Map/Set collections, etc.)
-    if (cls == JS_CLASS_DATE) {
-        // Date prototype methods — same table as js_property_get
-        static const char* date_methods[] = {
-            "getTime","getFullYear","getMonth","getDate","getHours","getMinutes",
-            "getSeconds","getMilliseconds","toISOString","toJSON","toUTCString",
-            "toDateString","toTimeString","toString","toLocaleDateString","valueOf",
-            "getDay","getUTCFullYear","getUTCMonth","getUTCDate","getUTCHours",
-            "getUTCMinutes","getUTCSeconds","getUTCMilliseconds","getUTCDay",
-            "getTimezoneOffset","setTime","setFullYear","setMonth","setDate",
-            "setHours","setMinutes","setSeconds","setMilliseconds",
-            "setUTCFullYear","setUTCMonth","setUTCDate","setUTCHours",
-            "setUTCMinutes","setUTCSeconds","setUTCMilliseconds",
-            "getYear","setYear","toLocaleString","toLocaleTimeString",NULL
-        };
-        for (int i = 0; date_methods[i]; i++) {
-            if ((int)strlen(date_methods[i]) == len && strncmp(name, date_methods[i], len) == 0) return true;
-        }
-    } else if (cls == JS_CLASS_REGEXP) {
-        static const char* regexp_methods[] = {
-            "exec","test","toString","compile",NULL
-        };
-        for (int i = 0; regexp_methods[i]; i++) {
-            if ((int)strlen(regexp_methods[i]) == len && strncmp(name, regexp_methods[i], len) == 0) return true;
-        }
+    if (js_builtin_registry_has_prototype_method((int)cls, lookup_type, name, len)) {
+        return true;
+    }
+    if (cls == JS_CLASS_REGEXP) {
         // symbol methods
         if (len >= 7 && strncmp(name, "__sym_", 6) == 0) return true;
-    }
-    // collection methods (Map, Set, WeakMap, WeakSet)
-    if (cls == JS_CLASS_MAP || cls == JS_CLASS_SET || cls == JS_CLASS_WEAK_MAP || cls == JS_CLASS_WEAK_SET) {
-        static const char* collection_methods[] = {
-            "values","keys","entries","forEach","has","get","set",
-            "add","delete","clear",NULL
-        };
-        for (int i = 0; collection_methods[i]; i++) {
-            if ((int)strlen(collection_methods[i]) == len && strncmp(name, collection_methods[i], len) == 0) return true;
-        }
-        if (len == 7 && strncmp(name, "__sym_1", 7) == 0) return true;
     }
     return false;
 }
@@ -9827,10 +9874,8 @@ extern "C" Item js_delete_property(Item obj, Item key) {
         }
         return (Item){.item = b2it(false)};
     }
-    // Proxy [[Delete]] trap
-    if (js_is_proxy(obj)) {
-        return js_proxy_trap_delete(obj, key);
-    }
+    Item exotic_result = ItemNull;
+    if (js_try_exotic_delete_property(obj, key, &exotic_result)) return exotic_result;
     // v23: Handle function property deletion (name, length, prototype, custom)
     if (get_type_id(obj) == LMD_TYPE_FUNC) {
         JsFuncProps* fn = (JsFuncProps*)obj.function;
@@ -9990,17 +10035,6 @@ extern "C" Item js_delete_property(Item obj, Item key) {
         return (Item){.item = b2it(true)};
     }
     if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(true)};
-    if (obj.map && obj.map->map_kind == MAP_KIND_TYPED_ARRAY) {
-        double numeric_index = 0;
-        bool is_negative_zero = false;
-        if (js_ta_key_canonical_numeric(key, &numeric_index, &is_negative_zero)) {
-            bool valid_index = js_ta_numeric_index_valid(obj, numeric_index, is_negative_zero);
-            if (valid_index && js_strict_mode) {
-                return js_throw_type_error("Cannot delete property of TypedArray");
-            }
-            return (Item){.item = b2it(!valid_index)};
-        }
-    }
     // Stage A1: canonicalize key via js_to_property_key (Symbol→__sym_N,
     // INT/FLOAT→decimal string) so marker tombstones below match the shape
     // entry created at defineProperty time.

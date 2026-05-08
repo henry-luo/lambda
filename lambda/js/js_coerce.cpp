@@ -124,11 +124,7 @@ extern "C" Item js_to_primitive(Item value, JsHint hint) {
     // (returning boolean ITEM_TRUE for feature detection). Fall through to
     // default string conversion instead of throwing.
     if (vt == LMD_TYPE_MAP && value.map &&
-        (value.map->map_kind == MAP_KIND_DOM ||
-         value.map->map_kind == MAP_KIND_CSS_NAMESPACE ||
-         value.map->map_kind == MAP_KIND_CSSOM ||
-         value.map->map_kind == MAP_KIND_DOC_PROXY ||
-         value.map->map_kind == MAP_KIND_FOREIGN_DOC)) {
+        js_map_kind_uses_default_object_to_primitive(value.map->map_kind)) {
         return (Item){.item = s2it(heap_create_name("[object Object]"))};
     }
     js_throw_type_error("Cannot convert object to primitive value");

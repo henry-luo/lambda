@@ -410,12 +410,29 @@ Gate:
 
 ### Phase J41-1 - Mechanical transpiler split
 
+Status: complete as of 2026-05-08.
+
 Deliverables:
 
 - Move MIR utilities, analysis, expression lowering, statement lowering,
   functions/classes/modules/eval/batch into separate files.
 - Add `js_mir_context.hpp` and a single cleanup helper.
 - No semantic changes.
+
+Completion notes:
+
+- `lambda/js/transpile_js_mir.cpp` now anchors the shared global state for the
+  split transpiler.
+- `lambda/js/js_mir_context.hpp` owns the shared transpiler context structs and
+  cleanup helper; `lambda/js/js_mir_internal.hpp` owns the cross-translation-unit
+  helper declarations and shared extern state.
+- Top-level `lambda/js/js_mir_*.cpp` files contain the mechanical phase areas:
+  hashmap/scope utilities, analysis, MIR call/boxing/type helpers, function and
+  class collection/inference, expression lowering, statement lowering,
+  function/class lowering, module/batch lowering, eval lowering, and public
+  entrypoint/require/import lowering.
+- No manual build-config change was needed; the normal generated build picks up
+  the new top-level `lambda/js/*.cpp` translation units.
 
 Gate:
 
@@ -458,6 +475,12 @@ Gate:
 
 ### Phase J41-4 - Built-in descriptor registry
 
+Status: complete. Built-in method/accessor registry tables now drive method
+installation, runtime lookup, prototype own-property name synthesis, and
+`Object.getOwnPropertyDescriptor` synthesis for registry-backed prototype
+methods/accessors. Remaining non-registry host surfaces are outside this phase
+and should be handled as future family-specific registry additions.
+
 Deliverables:
 
 - Introduce `JsBuiltinSpec` tables.
@@ -470,7 +493,25 @@ Gate:
 - focused manifests for each converted family.
 - full non-updating batch after each major family.
 
+Completion gate:
+
+- `./test/test_js_props_gtest.exe`: passed `24 / 24`.
+- `./test/test_js_coerce_gtest.exe`: passed `15 / 15`.
+- focused JS file tests for typed arrays, Date, RegExp, String, CSS namespace,
+  and native-backed properties: passed `8 / 8`.
+- `./test/test_css_dom_integration.exe`: passed `77`, skipped `25`, failed `0`.
+- `make test262-baseline`: fully passed `30009 / 30009`, failed `0`,
+  regressions `0`.
+
 ### Phase J41-5 - Spec-operation convergence
+
+Status: complete as of the Js41 phase recorded in
+`Transpile_Js41_Inventory.md`. Property get/set, has, delete, own-key, and
+own-descriptor dispatch now have named exotic boundaries before ordinary
+storage/prototype fallback. Module namespace objects currently alias ordinary
+frozen maps (`js_module_namespace_create` returns the export map), so there is
+no separate module-namespace `MapKind` hook to wire yet; the explicit exotic
+dispatch points are in place for when that representation is introduced.
 
 Deliverables:
 
@@ -484,6 +525,15 @@ Gate:
 
 - `test_js_props_gtest` grows into a fast spec-kernel suite.
 - no baseline regressions.
+
+Completion gate:
+
+- `./test/test_js_props_gtest.exe`: passed `23 / 23`.
+- `./test/test_js_coerce_gtest.exe`: passed `15 / 15`.
+- `./test/test_js_gtest.exe --gtest_filter='JavaScriptTests/JsFileTest.Run/native_backing_props:JavaScriptTests/JsFileTest.Run/typed_arrays:JavaScriptTests/JsFileTest.Run/opt_p4_typed_reads:JavaScriptTests/JsFileTest.Run/css_namespace:JavaScriptTests/JsFileTest.Run/dom_style:JavaScriptTests/JsFileTest.Run/dom_basic'`: passed `6 / 6`.
+- `./test/test_css_dom_integration.exe`: passed `77`, skipped `25`, failed `0`.
+- `make test262-baseline`: fully passed `30009 / 30009`, failed `0`,
+  regressions `0`.
 
 ### Phase J41-6 - js262 growth program
 
@@ -531,4 +581,3 @@ The refactor is successful if:
 - The baseline-only js262 gate remains zero-regression throughout.
 - Full js262 progress becomes predictable: focused manifests improve first,
   then the full baseline grows after stable `--run-partial` runs.
-
