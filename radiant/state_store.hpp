@@ -227,6 +227,7 @@ typedef struct RadiantState {
     EventStateLog* active_event_log;
     uint64_t active_cascade_id;
     uint32_t active_cascade_depth;
+    uint32_t transition_depth;     // nonzero while state_machine.cpp applies a transition
     
     // Global interaction states
     CaretState* caret;             // text cursor state (legacy; migrating to dom_selection)

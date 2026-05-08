@@ -1,6 +1,7 @@
 #include "handler.hpp"
 #include "render.hpp"
 #include "state_store.hpp"
+#include "state_machine.hpp"
 #include "form_control.hpp"
 #include "text_control.hpp"
 #include "text_edit.hpp"
@@ -3471,6 +3472,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         return;
     }
     event_context_init(&evcon, uicon, event);
+    RadiantState* cascade_state = (RadiantState*)doc->state;
+    EventStateLog* cascade_log = cascade_state ? cascade_state->active_event_log : NULL;
+    uint64_t cascade_id = state_begin_event_cascade(cascade_state, cascade_log, "input");
 
     // ------------------------------------------------------------------
     // Phase 6 (single source of truth): every selection_*/caret_* call
@@ -5148,7 +5152,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         int vlen = focus_elem->form->value
                             ? (int)strlen(focus_elem->form->value) : 0;
                         if (state->caret->char_offset > vlen) {
-                            state->caret->char_offset = vlen;
+                            caret_set(state, focused, vlen);
                         }
                         evcon.need_repaint = true;
                     }
@@ -5160,7 +5164,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         int vlen = focus_elem->form->value
                             ? (int)strlen(focus_elem->form->value) : 0;
                         if (state->caret->char_offset > vlen) {
-                            state->caret->char_offset = vlen;
+                            caret_set(state, focused, vlen);
                         }
                         evcon.need_repaint = true;
                     }
@@ -5195,38 +5199,38 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 // on the live UTF-8 buffer). Caret-only; no selection extend
                 // here to keep behavior change minimal.
                 if (alt && key_event->key == RDT_KEY_LEFT) {
-                    state->caret->char_offset = (int)te_prev_word_byte(
-                        value, (uint32_t)value_len, (uint32_t)cur);
+                    caret_set(state, focused, (int)te_prev_word_byte(
+                        value, (uint32_t)value_len, (uint32_t)cur));
                     evcon.need_repaint = true;
                     break;
                 }
                 if (alt && key_event->key == RDT_KEY_RIGHT) {
-                    state->caret->char_offset = (int)te_next_word_byte(
-                        value, (uint32_t)value_len, (uint32_t)cur);
+                    caret_set(state, focused, (int)te_next_word_byte(
+                        value, (uint32_t)value_len, (uint32_t)cur));
                     evcon.need_repaint = true;
                     break;
                 }
                 // F3: Cmd+Left == Home, Cmd+Right == End on macOS for
                 // single-line inputs.
                 if (cmd && key_event->key == RDT_KEY_LEFT) {
-                    state->caret->char_offset = 0;
+                    caret_set(state, focused, 0);
                     evcon.need_repaint = true;
                     break;
                 }
                 if (cmd && key_event->key == RDT_KEY_RIGHT) {
-                    state->caret->char_offset = value_len;
+                    caret_set(state, focused, value_len);
                     evcon.need_repaint = true;
                     break;
                 }
                 // F3: Up/Down in single-line <input> mirrors Chrome —
                 // move caret to start/end of value (no vertical motion).
                 if (key_event->key == RDT_KEY_UP) {
-                    state->caret->char_offset = 0;
+                    caret_set(state, focused, 0);
                     evcon.need_repaint = true;
                     break;
                 }
                 if (key_event->key == RDT_KEY_DOWN) {
-                    state->caret->char_offset = value_len;
+                    caret_set(state, focused, value_len);
                     evcon.need_repaint = true;
                     break;
                 }
@@ -5265,7 +5269,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         // walk back to UTF-8 character boundary
                         while (new_off > 0 && ((unsigned char)value[new_off] & 0xC0) == 0x80)
                             new_off--;
-                        state->caret->char_offset = new_off;
+                        caret_set(state, focused, new_off);
                     }
                     evcon.need_repaint = true;
                     break;
@@ -5275,16 +5279,16 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         uint32_t cp;
                         int bytes = str_utf8_decode(value + cur, (size_t)(value_len - cur), &cp);
                         if (bytes > 0)
-                            state->caret->char_offset = cur + bytes;
+                            caret_set(state, focused, cur + bytes);
                     }
                     evcon.need_repaint = true;
                     break;
                 } else if (key_event->key == RDT_KEY_HOME) {
-                    state->caret->char_offset = 0;
+                    caret_set(state, focused, 0);
                     evcon.need_repaint = true;
                     break;
                 } else if (key_event->key == RDT_KEY_END) {
-                    state->caret->char_offset = value_len;
+                    caret_set(state, focused, value_len);
                     evcon.need_repaint = true;
                     break;
                 } else if (key_event->key == RDT_KEY_BACKSPACE) {
@@ -5297,7 +5301,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                                 new_off--;
                             int new_len = focus_elem->form->value
                                 ? (int)strlen(focus_elem->form->value) : 0;
-                            state->caret->char_offset = new_off <= new_len ? new_off : new_len;
+                            caret_set(state, focused, new_off <= new_len ? new_off : new_len);
                         }
                     } else if (editable) {
                         // Plain HTML input: perform the delete ourselves.
@@ -5459,7 +5463,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                                 if (fe->form && fe->form->value) {
                                     int new_len = (int)strlen(fe->form->value);
                                     if (state->caret->char_offset > new_len)
-                                        state->caret->char_offset = new_len;
+                                        caret_set(state, focused, new_len);
                                 }
                             }
                         }
@@ -5513,7 +5517,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         int vlen = focus_elem->form->value
                             ? (int)strlen(focus_elem->form->value) : 0;
                         if (state->caret->char_offset > vlen) {
-                            state->caret->char_offset = vlen;
+                            caret_set(state, focused, vlen);
                         }
                         if (state->selection) selection_clear(state);
                         evcon.need_repaint = true;
@@ -5526,7 +5530,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         int vlen = focus_elem->form->value
                             ? (int)strlen(focus_elem->form->value) : 0;
                         if (state->caret->char_offset > vlen) {
-                            state->caret->char_offset = vlen;
+                            caret_set(state, focused, vlen);
                         }
                         if (state->selection) selection_clear(state);
                         evcon.need_repaint = true;
@@ -5541,7 +5545,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     int new_off = (int)te_prev_word_byte(
                         value, (uint32_t)value_len, (uint32_t)cur);
                     if (shift) sel_begin_or_extend(new_off);
-                    else { selection_clear(state); state->caret->char_offset = new_off; }
+                    else { caret_set(state, focused, new_off); }
                     evcon.need_repaint = true;
                     break;
                 }
@@ -5549,7 +5553,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     int new_off = (int)te_next_word_byte(
                         value, (uint32_t)value_len, (uint32_t)cur);
                     if (shift) sel_begin_or_extend(new_off);
-                    else { selection_clear(state); state->caret->char_offset = new_off; }
+                    else { caret_set(state, focused, new_off); }
                     evcon.need_repaint = true;
                     break;
                 }
@@ -5602,7 +5606,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     int target_col = cur_col < llen ? cur_col : llen;
                     int new_off = loff + target_col;
                     if (shift) sel_begin_or_extend(new_off);
-                    else { selection_clear(state); state->caret->char_offset = new_off; }
+                    else { caret_set(state, focused, new_off); }
                     evcon.need_repaint = true;
                     break;
                 }
@@ -5621,10 +5625,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         if (state->selection && !state->selection->is_collapsed) {
                             int start = state->selection->anchor_offset < state->selection->focus_offset
                                 ? state->selection->anchor_offset : state->selection->focus_offset;
-                            state->caret->char_offset = start;
-                            selection_clear(state);
+                            caret_set(state, focused, start);
                         } else {
-                            state->caret->char_offset = new_off;
+                            caret_set(state, focused, new_off);
                         }
                     }
                     evcon.need_repaint = true;
@@ -5642,10 +5645,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         if (state->selection && !state->selection->is_collapsed) {
                             int end = state->selection->anchor_offset > state->selection->focus_offset
                                 ? state->selection->anchor_offset : state->selection->focus_offset;
-                            state->caret->char_offset = end;
-                            selection_clear(state);
+                            caret_set(state, focused, end);
                         } else {
-                            state->caret->char_offset = new_off;
+                            caret_set(state, focused, new_off);
                         }
                     }
                     evcon.need_repaint = true;
@@ -5661,8 +5663,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     if (shift) {
                         sel_begin_or_extend(new_off);
                     } else {
-                        selection_clear(state);
-                        state->caret->char_offset = new_off;
+                        caret_set(state, focused, new_off);
                     }
                     evcon.need_repaint = true;
                     break;
@@ -5677,8 +5678,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     if (shift) {
                         sel_begin_or_extend(new_off);
                     } else {
-                        selection_clear(state);
-                        state->caret->char_offset = new_off;
+                        caret_set(state, focused, new_off);
                     }
                     evcon.need_repaint = true;
                     break;
@@ -5687,8 +5687,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     if (shift) {
                         sel_begin_or_extend(new_off);
                     } else {
-                        selection_clear(state);
-                        state->caret->char_offset = new_off;
+                        caret_set(state, focused, new_off);
                     }
                     evcon.need_repaint = true;
                     break;
@@ -5698,8 +5697,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     if (shift) {
                         sel_begin_or_extend(new_off);
                     } else {
-                        selection_clear(state);
-                        state->caret->char_offset = new_off;
+                        caret_set(state, focused, new_off);
                     }
                     evcon.need_repaint = true;
                     break;
@@ -5711,8 +5709,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             // selection was deleted: caret goes to selection start
                             int new_len = focus_elem->form->value
                                 ? (int)strlen(focus_elem->form->value) : 0;
-                            state->caret->char_offset = keydown_sel_start <= new_len ? keydown_sel_start : new_len;
-                            selection_clear(state);
+                            caret_set(state, focused, keydown_sel_start <= new_len ? keydown_sel_start : new_len);
                         } else if (cur > 0 && value) {
                             // single char delete: move caret back by 1 UTF-8 char
                             int new_off = cur - 1;
@@ -6189,5 +6186,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
     }
     log_debug("end of event %d", event->type);
 
+    state_end_event_cascade(cascade_state, cascade_log, cascade_id);
     event_context_cleanup(&evcon);
 }
