@@ -5,6 +5,7 @@
 #include "source_pos_bridge.hpp"   // R7 step 3c — register path recorder
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
+#include "../lambda/input/css/dom_element.hpp"
 // str.h included via view.hpp
 #include "view.hpp"
 #include "../lib/arraylist.h"
@@ -184,6 +185,30 @@ RadiantState* radiant_state_create(Pool* pool, StateUpdateMode mode) {
 
     log_debug("radiant_state_create: created state store with mode %d", mode);
     return state;
+}
+
+RadiantState* radiant_document_ensure_state(DomDocument* document, const char* owner) {
+    const char* prefix = owner ? owner : "radiant_document_ensure_state";
+    if (!document) {
+        log_error("%s: document is NULL", prefix);
+        return NULL;
+    }
+    if (document->state) {
+        return (RadiantState*)document->state;
+    }
+    document->state = radiant_state_create(document->pool, STATE_MODE_IN_PLACE);
+    if (!document->state) {
+        log_error("%s: failed to create RadiantState", prefix);
+        return NULL;
+    }
+    log_debug("%s: created RadiantState for document", prefix);
+    return (RadiantState*)document->state;
+}
+
+void radiant_document_destroy_state(DomDocument* document) {
+    if (!document || !document->state) return;
+    radiant_state_destroy((RadiantState*)document->state);
+    document->state = NULL;
 }
 
 // ----------------------------------------------------------------------------

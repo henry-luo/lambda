@@ -11,6 +11,7 @@
 // Forward declarations
 struct AnimationScheduler;
 struct DomElement;
+struct DomDocument;
 
 /**
  * Radiant State Store - Centralized UI state management
@@ -334,6 +335,16 @@ typedef struct RadiantState {
  * @return New state store, or NULL on failure
  */
 RadiantState* radiant_state_create(Pool* pool, StateUpdateMode mode);
+
+/**
+ * Ensure an active document owns a RadiantState for interaction/state APIs.
+ */
+RadiantState* radiant_document_ensure_state(DomDocument* document, const char* owner);
+
+/**
+ * Destroy a document's RadiantState before its owning pool is released.
+ */
+void radiant_document_destroy_state(DomDocument* document);
 
 /**
  * Destroy a state store and free all resources

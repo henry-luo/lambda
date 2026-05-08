@@ -3037,6 +3037,11 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 ctx->nav_history[ctx->nav_history_depth++] = uicon->document;
             }
             uicon->document = new_doc;
+            if (!radiant_document_ensure_state(new_doc, "event_sim:navigate")) {
+                log_error("event_sim: navigate FAIL - could not create RadiantState");
+                ctx->fail_count++;
+                break;
+            }
             layout_html_doc(uicon, new_doc, false);
             render_html_doc(uicon, new_doc->view_tree, nullptr);
             log_info("event_sim: navigated to '%s'", ev->navigate_url);

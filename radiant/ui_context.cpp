@@ -233,6 +233,8 @@ void free_document(DomDocument* doc) {
     // before destroying the document that owns the pointers.
     script_runner_cleanup_js_state(doc);
 
+    radiant_document_destroy_state(doc);
+
     if (doc->view_tree) {
         // destroy video resources before bulk-freeing the pool
         // (RdtVideo* and poster ImageSurface* are heap-allocated, not pool-allocated)

@@ -77,6 +77,7 @@ void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 #include "../radiant/script_runner.h"
 #include "../radiant/source_pos_bridge.hpp"
 #include "../radiant/event_state_log.hpp"
+#include "../radiant/state_machine.hpp"
 #include "../lambda/render_map.h"
 #include "../lambda/template_state.h"
 
@@ -5795,16 +5796,38 @@ static bool layout_single_file(
         return false;
     }
 
+    ui_context->document = doc;
+
+    RadiantState* state = radiant_document_ensure_state(doc, "layout_single_file");
+    if (!state) {
+        log_error("Failed to create RadiantState for headless document: %s", input_file);
+        if (event_log) {
+            event_state_log_document(event_log, "load_failed");
+            event_state_log_close(event_log);
+        }
+        script_runner_cleanup_js_state(doc);
+        dom_document_destroy(doc);
+        ui_context->document = nullptr;
+        if (input_url) {
+            url_destroy(input_url);
+        }
+        pool_destroy(pool);
+        return false;
+    }
+
     if (event_log) {
         event_state_log_document(event_log, "load_complete");
     }
+
+    uint64_t layout_cascade_id = state_begin_event_cascade(
+        state,
+        event_log,
+        "layout");
 
     // Process @font-face rules from stored stylesheets
     process_document_font_faces(ui_context, doc);
 
     // Perform layout computation
-    ui_context->document = doc;
-
     if (doc->view_tree && doc->view_tree->root) {
         log_info("[Layout] Document already has view_tree (PDF/SVG/image), skipping CSS layout");
     } else {
@@ -5818,7 +5841,7 @@ static bool layout_single_file(
             double duration_ms = std::chrono::duration<double, std::milli>(
                 event_layout_end - event_layout_start).count();
             event_state_log_begin_record(event_log, &event_writer,
-                event_buf, sizeof(event_buf), "layout.stats", 0);
+                event_buf, sizeof(event_buf), "layout.stats", layout_cascade_id);
             jw_key(&event_writer, "data");
             jw_obj_begin(&event_writer);
                 jw_kv_double(&event_writer, "duration_ms", duration_ms);
@@ -5862,6 +5885,13 @@ static bool layout_single_file(
     // rpmalloc heap corruption that manifests as SIGTRAP in system malloc.
 
     if (event_log) {
+        state_end_event_cascade(
+            doc && doc->state ? (RadiantState*)doc->state : nullptr,
+            event_log,
+            layout_cascade_id);
+    }
+
+    if (event_log) {
         event_state_log_document(event_log, "unload_start");
     }
 
@@ -5870,12 +5900,17 @@ static bool layout_single_file(
         // before destroying the document that owns the pointers.
         script_runner_cleanup_js_state(doc);
 
+        radiant_document_destroy_state(doc);
+
         if (doc->view_tree) {
             view_pool_destroy(doc->view_tree);
             mem_free(doc->view_tree);
             doc->view_tree = nullptr;
         }
         dom_document_destroy(doc);
+        if (ui_context->document == doc) {
+            ui_context->document = nullptr;
+        }
     }
 
     if (event_log) {

@@ -249,6 +249,10 @@ WebDriverError webdriver_session_navigate(WebDriverSession* session, const char*
     session->document = doc;
     session->document_version++;
     session->uicon->document = doc;
+    if (!radiant_document_ensure_state(doc, "webdriver:navigate")) {
+        log_error("webdriver: failed to create RadiantState for document: %s", url);
+        return WD_ERROR_UNKNOWN_ERROR;
+    }
     
     // Clear old element references (they're now stale)
     element_registry_clear(session->elements);
