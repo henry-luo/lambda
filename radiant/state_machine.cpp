@@ -78,6 +78,10 @@ bool selection_transition(RadiantState* state,
         case SELECTION_TRANSITION_START_POINTER_SELECTION:
             if (!args) { transition_leave(state); return false; }
             selection_start(state, args->target, args->focus_offset);
+            if (state->selection) state->selection->is_selecting = true;
+            break;
+        case SELECTION_TRANSITION_END_POINTER_SELECTION:
+            if (state->selection) state->selection->is_selecting = false;
             break;
         case SELECTION_TRANSITION_EXTEND_TO_BOUNDARY:
             if (!args) { transition_leave(state); return false; }

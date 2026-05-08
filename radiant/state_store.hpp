@@ -471,9 +471,27 @@ int utf8_offset_by_chars(unsigned char* text_data, int current_offset, int delta
 void caret_clear(RadiantState* state);
 
 /**
- * Update caret visual position based on text layout
+ * Project visual caret geometry for legacy render paths.
  */
-void caret_update_visual(RadiantState* state);
+void caret_project_visual(RadiantState* state, float x, float y, float height);
+
+/**
+ * Project visual caret geometry and iframe/document offset from a block origin.
+ */
+void caret_project_visual_from_block(RadiantState* state, View* view,
+                                     float x, float y, float height,
+                                     float block_x, float block_y);
+
+/**
+ * Project visual caret geometry using the current selection iframe offset.
+ */
+void caret_project_visual_from_selection(RadiantState* state, float x, float y, float height);
+
+/**
+ * Project visual selection anchor/focus geometry for legacy render paths.
+ */
+void selection_project_anchor_visual_from_caret(RadiantState* state, float x, float y, float height);
+void selection_project_focus_visual(RadiantState* state, float x, float y, float height);
 
 /**
  * Toggle caret visibility (for blink animation)

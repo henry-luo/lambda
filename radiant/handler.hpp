@@ -32,6 +32,12 @@ typedef struct EventContext {
     // paste text (set before dispatching "paste" event)
     const char* paste_text;
 
+    // caret position override for synthetic/default-action event payloads.
+    // the cut default action reports the selection start without collapsing
+    // the live selection before user handlers observe it.
+    bool caret_pos_override_valid;
+    int caret_pos_override;
+
     // iframe bridging: when target is inside an iframe, this points to the
     // iframe block in the parent document so events can propagate across
     // the iframe boundary

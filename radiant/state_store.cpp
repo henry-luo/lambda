@@ -2376,16 +2376,71 @@ void caret_clear(RadiantState* state) {
     log_debug("caret_clear");
 }
 
-void caret_update_visual(RadiantState* state) {
-    if (!state || !state->caret || !state->caret->view) return;
+static void projection_chain_offset(View* view, float* out_x, float* out_y) {
+    float chain_x = 0;
+    float chain_y = 0;
+    for (View* parent = view ? view->parent : NULL; parent; parent = parent->parent) {
+        if (parent->view_type == RDT_VIEW_BLOCK ||
+            parent->view_type == RDT_VIEW_INLINE_BLOCK ||
+            parent->view_type == RDT_VIEW_LIST_ITEM) {
+            ViewBlock* block = (ViewBlock*)parent;
+            chain_x += block->x;
+            chain_y += block->y;
+        }
+    }
+    if (out_x) *out_x = chain_x;
+    if (out_y) *out_y = chain_y;
+}
 
-    CaretState* caret = state->caret;
+void caret_project_visual(RadiantState* state, float x, float y, float height) {
+    if (!state || !state->caret) return;
+    state->caret->x = x;
+    state->caret->y = y;
+    state->caret->height = height;
+    state->needs_repaint = true;
+}
 
-    // TODO: calculate visual x,y based on text layout
-    // This requires access to font metrics and text content
-    // For now, this is a placeholder that should be overridden by layout code
+void caret_project_visual_from_block(RadiantState* state, View* view,
+                                     float x, float y, float height,
+                                     float block_x, float block_y) {
+    if (!state || !state->caret) return;
+    caret_project_visual(state, x, y, height);
+    float chain_x = 0;
+    float chain_y = 0;
+    projection_chain_offset(view, &chain_x, &chain_y);
+    state->caret->iframe_offset_x = block_x - chain_x;
+    state->caret->iframe_offset_y = block_y - chain_y;
+}
 
-    log_debug("caret_update_visual: char_offset=%d", caret->char_offset);
+void caret_project_visual_from_selection(RadiantState* state, float x, float y, float height) {
+    if (!state || !state->caret) return;
+    caret_project_visual(state, x, y, height);
+    if (state->selection) {
+        state->caret->iframe_offset_x = state->selection->iframe_offset_x;
+        state->caret->iframe_offset_y = state->selection->iframe_offset_y;
+    }
+}
+
+void selection_project_anchor_visual_from_caret(RadiantState* state, float x, float y, float height) {
+    if (!state || !state->selection) return;
+    state->selection->start_x = x;
+    state->selection->start_y = y;
+    state->selection->end_x = x;
+    state->selection->end_y = y + height;
+    if (state->caret) {
+        state->selection->iframe_offset_x = state->caret->iframe_offset_x;
+        state->selection->iframe_offset_y = state->caret->iframe_offset_y;
+    }
+    state->selection_layout_dirty = true;
+    state->needs_repaint = true;
+}
+
+void selection_project_focus_visual(RadiantState* state, float x, float y, float height) {
+    if (!state || !state->selection) return;
+    state->selection->end_x = x;
+    state->selection->end_y = y + height;
+    state->selection_layout_dirty = true;
+    state->needs_repaint = true;
 }
 
 void caret_toggle_blink(RadiantState* state) {

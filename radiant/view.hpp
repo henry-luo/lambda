@@ -1387,6 +1387,7 @@ struct CursorState;
 struct SelectionState;
 struct FocusState;
 struct BrowsingSession;  // Browsing session for web navigation
+struct EventStateLog;    // per-document JSONL event/state log
 
 // StateStore is now an alias for RadiantState
 // Use RadiantState directly for new code
@@ -1436,6 +1437,8 @@ typedef struct UiContext {
     MouseState mouse_state; // current mouse state
     struct BrowsingSession* browsing_session;  // web browsing session with history
     struct WebViewManager* webview_mgr;  // native web view manager (NULL until first <webview> element)
+    struct EventStateLog* event_log;  // view-mode per-document event/state log owner
+    bool event_log_enabled; // true when --event-log is active for view mode
     bool headless;          // true if running headless (no visible window). When true, clipboard
                             // operations use the in-process ClipboardStore only and do NOT touch
                             // the OS pasteboard via GLFW (avoids cross-process races in tests).
