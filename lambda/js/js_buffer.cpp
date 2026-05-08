@@ -7,6 +7,7 @@
  * buf.byteLength.
  */
 #include "js_runtime.h"
+#include "js_runtime_state.hpp"
 #include "js_typed_array.h"
 #include "js_error_codes.h"
 #include "../lambda-data.hpp"
@@ -16,8 +17,6 @@
 
 #include <cstring>
 #include <cstdlib>
-
-extern Input* js_input;
 
 static inline Item make_js_undefined() {
     return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};

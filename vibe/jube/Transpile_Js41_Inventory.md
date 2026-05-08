@@ -751,3 +751,110 @@ Verification:
   `zlib_basic`); the same 6 fail when filtered directly.
 - `make test262-baseline`: fully passed `30009 / 30009`, failed `0`,
   regressions `0`.
+
+## Phase J41-2 Complete - Mechanical Runtime Split
+
+Finished the full J41-2 mechanical split for the JavaScript runtime. The split
+uses real top-level C++ translation units and a shared internal header instead
+of include fragments.
+
+Code changes:
+
+- Added `lambda/js/js_runtime_internal.hpp` as the shared internal runtime
+  header for cross-file state, helper declarations, `JsFunction`, built-in ids,
+  and built-in method specs.
+- Added `lambda/js/js_runtime_state.cpp` for runtime globals, exception state,
+  module vars, current `this`/`new.target`, reset helpers, and batch reset
+  orchestration.
+- Added `lambda/js/js_runtime_value.cpp` for `ToNumber`/`ToNumeric`/string
+  conversion, numeric helpers, operators, BigInt checks, comparisons, bitwise
+  operations, unary operations, and `typeof`.
+- Added `lambda/js/js_runtime_function.cpp` for function wrapper allocation,
+  closure env allocation, function metadata setters, function flags, and the
+  function wrapper cache reset.
+- Added `lambda/js/js_runtime_builtin_registry.cpp` for built-in method tables,
+  method/spec lookup, method installation helpers, prototype/static installer
+  helpers, and built-in descriptor synthesis hooks.
+- Kept `lambda/js/js_runtime.cpp` as the remaining object/exotic/array/string/
+  RegExp/promise/module host surface and the large built-in dispatch switch.
+- Preserved existing property/descriptor split files:
+  `lambda/js/js_props.cpp` and `lambda/js/js_property_attrs.cpp`.
+- No manual build-system source list change was needed; the generated Premake
+  files pick up the new `lambda/js/*.cpp` files.
+
+Boundary notes:
+
+- This phase is mechanical: public runtime ABI and MIR-imported symbols remain
+  stable.
+- The dispatch switch intentionally remains in `js_runtime.cpp`; moving it
+  safely is a later semantic split after more built-ins are table-backed.
+- The IDE's old `transpile_js_mir_parts/*.inc` tabs are stale. The source tree
+  now uses proper `.cpp` files for both J41-1 and J41-2.
+
+Verification:
+
+- `make build`: passed with `Errors: 0`.
+- `./test/test_js_coerce_gtest.exe`: passed `15 / 15`.
+- `./test/test_js_props_gtest.exe`: passed `24 / 24`.
+- Focused `./test/test_js_gtest.exe` coverage for native-backed properties,
+  typed arrays, CSS namespace, DOM style/basic, eval, and module paths:
+  passed `9 / 9`.
+- `make test262-baseline`: fully passed `30009 / 30009`, failed `0`,
+  regressions `0`.
+
+## Phase J41-3 Complete - Runtime State Isolation
+
+Finished the full J41-3 baseline state-isolation phase. The JS runtime no
+longer exposes the migrated transient execution state as scattered free
+globals; split runtime files and host modules now share one runtime-state
+capsule through a narrow header.
+
+Code changes:
+
+- Added `lambda/js/js_runtime_state.hpp` with `JsRuntimeState`, the single
+  `js_runtime_state` extern, active module-var accessor, and compatibility
+  aliases for existing internal call sites.
+- Moved the state struct and legacy-name aliases out of
+  `lambda/js/js_runtime_internal.hpp`, leaving that header focused on internal
+  runtime declarations.
+- Kept the single `JsRuntimeState js_runtime_state` definition in
+  `lambda/js/js_runtime_state.cpp`.
+- Removed direct `extern` declarations for migrated state from
+  `lambda/js/js_globals.cpp`, `lambda/js/js_property_attrs.cpp`,
+  `lambda/js/js_state_guards.h`, `lambda/js/js_dom.cpp`,
+  `lambda/js/js_dom_selection.cpp`, and the Node-style module files:
+  `js_buffer.cpp`, `js_child_process.cpp`, `js_dns.cpp`, `js_events.cpp`,
+  `js_fetch.cpp`, `js_fs.cpp`, `js_net.cpp`, and `js_querystring.cpp`.
+- Migrated shared references for `js_input`, strict mode, accessor-dispatch
+  suppression, Array iterator override tracking, module vars, heap epoch,
+  RegExp legacy match state, current `this`, proxy receiver, `new.target`,
+  pending call args, exception state, and runtime trace counters.
+
+Boundary notes:
+
+- Public MIR/runtime symbols remain stable; this is a state-ownership change,
+  not a JS semantics change.
+- The header still provides legacy-name aliases so the next semantic phases can
+  migrate call sites incrementally without reintroducing exported globals.
+- A full `--run-partial` test262 run still exposes existing partial-list
+  pressure in RegExp/URI stress tests. The baseline isolation gate and normal
+  full batch are clean.
+
+Verification:
+
+- `make build`: passed with `Errors: 0`.
+- `./test/test_js_coerce_gtest.exe`: passed `15 / 15`.
+- `./test/test_js_props_gtest.exe`: passed `24 / 24`.
+- Focused `./test/test_js_gtest.exe` coverage for native-backed properties,
+  typed arrays, CSS namespace, DOM style/basic, eval, and module paths:
+  passed `9 / 9`.
+- `make test262-baseline`: passed twice; both runs fully passed
+  `30009 / 30009`, failed `0`, regressions `0`.
+- `./test/test_js_test262_gtest.exe --batch-only`: fully passed
+  `30013 / 34157`, failed `4144`, regressions `0`, improvements `4`.
+- `./test/test_js_test262_gtest.exe --batch-only --run-partial`: ran
+  `34169` tests; fully passed `30010`, failed `4157`, had `2`
+  non-fully-passing URI slow/retry-only tests and one RegExp crash under merged
+  partial pressure. The RegExp case
+  `built_ins_RegExp_character_class_escape_non_whitespace_js` is already listed
+  in `test/js262/t262_partial.txt` as `SLOW_20017` and passed isolated.

@@ -15,6 +15,7 @@
 #include "js_props.h"
 #include "js_class.h"
 #include "js_coerce.h"
+#include "js_runtime_state.hpp"
 #include "../lambda-data.hpp"
 #include "../lambda-decimal.hpp"
 #include "../lambda.hpp"
@@ -151,7 +152,6 @@ static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descrip
     // js_property_set calls in this function must bypass accessor dispatch (which
     // would otherwise trigger inherited-setter logic and reject writes for objects
     // whose prototype chain has an accessor with no setter).
-    extern bool js_skip_accessor_dispatch;
     bool _prev_skip_accessor_dispatch = js_skip_accessor_dispatch;
     js_skip_accessor_dispatch = true;
     struct _RestoreSkip { bool* p; bool v; ~_RestoreSkip() { *p = v; } }
@@ -513,7 +513,6 @@ static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descrip
 }
 
 // v24: strict mode flag from js_runtime.cpp
-extern bool js_strict_mode;
 
 // forward declarations
 static bool js_is_symbol_item(Item item);
@@ -9389,7 +9388,6 @@ extern "C" Item js_array_from_with_mapper_this(Item iterable, Item mapFn, Item t
 // JSON.parse(str) — parse JSON string to Lambda object
 // =============================================================================
 
-extern Input* js_input;
 
 extern "C" Item js_json_parse(Item str_item) {
     Item str_val = js_to_string(str_item);
@@ -10045,7 +10043,6 @@ extern "C" Item js_delete_property(Item obj, Item key) {
         }
     }
     // v95: Track __sym_1 deletion on a map (Array.prototype[Symbol.iterator] may be deleted)
-    extern int g_array_sym_iter_ever_set;
     if (!g_array_sym_iter_ever_set && get_type_id(key) == LMD_TYPE_STRING) {
         String* _dk = it2s(key);
         if (_dk && _dk->len == 7 && strncmp(_dk->chars, "__sym_1", 7) == 0)

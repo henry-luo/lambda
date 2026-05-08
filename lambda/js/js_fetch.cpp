@@ -6,6 +6,7 @@
  * Returns a Promise<Response> matching the web fetch() API.
  */
 #include "js_runtime.h"
+#include "js_runtime_state.hpp"
 #include "js_event_loop.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
@@ -18,8 +19,6 @@
 #include <cstdlib>
 #include <sys/stat.h>
 #include "../../lib/mem.h"
-
-extern Input* js_input;
 
 // Base directory for resolving relative fetch() URLs to on-disk files.
 // Set by main.cpp when --document is supplied; NULL otherwise. Owned here.

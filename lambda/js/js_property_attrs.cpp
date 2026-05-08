@@ -5,6 +5,7 @@
 
 #include "js_property_attrs.h"
 #include "js_runtime.h"
+#include "js_runtime_state.hpp"
 #include "js_state_guards.h"
 #include "../lambda-data.hpp"
 #include "../../lib/log.h"
@@ -13,7 +14,6 @@
 
 extern "C" void* heap_calloc(size_t size, TypeId type);
 String* heap_create_name(const char* name, size_t len);
-extern Input* js_input;
 
 // Mirror of JsFuncProps from js_globals.cpp / js_runtime.cpp — only used here to
 // reach `properties_map`. Layout MUST stay in sync with the canonical definitions.

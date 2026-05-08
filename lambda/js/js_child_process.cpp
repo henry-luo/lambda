@@ -5,6 +5,7 @@
  * Registered as built-in module 'child_process' via js_module_get().
  */
 #include "js_runtime.h"
+#include "js_runtime_state.hpp"
 #include "js_event_loop.h"
 #include "js_error_codes.h"
 #include "../lambda-data.hpp"
@@ -23,8 +24,6 @@
 #define WIFEXITED(s)  (1)
 #define WEXITSTATUS(s) (s)
 #endif
-
-extern Input* js_input;
 
 // =============================================================================
 // Helpers

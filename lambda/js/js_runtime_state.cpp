@@ -1,24 +1,13 @@
 #include "js_runtime_internal.hpp"
 
-// Global Input context for JS runtime map_put operations.
-// Initialized in transpile_js_to_mir() before JIT execution.
-Input* js_input = NULL;
+JsRuntimeState js_runtime_state;
 
 // Forward declaration for regex compilation cache reset (defined near JsRegexData)
 void js_regex_cache_reset();
 
-// v24: Global strict mode flag. Set by transpiler when "use strict" directive is active.
-// Used by js_property_set to throw TypeError instead of silently rejecting writes.
-bool js_strict_mode = false;
-
 extern "C" void js_set_strict_mode(int64_t strict) {
     js_strict_mode = (strict != 0);
 }
-
-// When true, js_property_set bypasses accessor (getter/setter) dispatch and writes
-// data directly. Used by Object.defineProperty data branch — defineProperty performs
-// [[DefineOwnProperty]], not [[Set]], so it must NOT trigger inherited accessor logic.
-bool js_skip_accessor_dispatch = false;
 
 // v24: throw TypeError in strict mode for property write violations
 void js_strict_throw_property_error(const char* reason, const char* prop_name, int prop_len) {
@@ -39,20 +28,7 @@ void js_strict_throw_property_error(const char* reason, const char* prop_name, i
 Item _map_read_field(ShapeEntry* field, void* map_data);
 // Forward declaration for _map_get (used as fallback for nested/spread maps)
 Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found);
-// v95: Global flag — set to 1 any time __sym_1 is assigned on any map (conservative guard)
-int g_array_sym_iter_ever_set = 0;
-
-// Global 'this' binding for the current method call
-Item js_current_this = {0};
 extern "C" Item js_get_current_this(void) { return js_current_this; }
-// Proxy receiver: when proxy get/set forwarding to target, the receiver (proxy) is saved here.
-// Getter/setter invocations check this to use the proxy as 'this' instead of the target.
-Item js_proxy_receiver = {0};
-
-// TRACE: track last called function name for opt-in runtime diagnostics.
-const char* _trace_last_fn = "(none)";
-int _trace_last_fn_len = 6;
-int _trace_total_calls = 0;
 
 bool js_runtime_trace_enabled() {
     static int trace_enabled = -1;
@@ -63,45 +39,9 @@ bool js_runtime_trace_enabled() {
     return trace_enabled != 0;
 }
 
-// new.target: set to the constructor function when called via 'new', undefined otherwise.
-// Uses a pending pattern: js_set_new_target sets a pending value that js_call_function
-// picks up on entry. Regular calls see new.target as undefined ({0}).
-Item js_new_target = {0};
-Item js_pending_new_target = {0};
-bool js_has_pending_new_target = false;
-
-// Pending arguments for building 'arguments' object inside JIT-compiled functions.
-// Set by js_invoke_fn before each call, read by js_build_arguments_object().
-Item* js_pending_call_args = NULL;
-int js_pending_call_argc = 0;
-
 // Forward declaration: defined in js_globals.cpp.
 extern "C" bool js_func_is_builtin_ctor(Item fn);
-
-// Module-level variable table for top-level bindings accessible from any function.
-// Populated during js_main execution, read by class method closures.
-Item js_module_vars[JS_MAX_MODULE_VARS];
-Item* js_active_module_vars = js_module_vars;
-int js_module_var_count = 0;
-
-// Epoch counter: incremented on batch reset to invalidate cached heap objects.
-uint64_t js_heap_epoch = 1;
 extern "C" uint64_t js_get_heap_epoch() { return js_heap_epoch; }
-
-// Annex B legacy RegExp static properties — global state tracking last match
-JsRegexpLastMatch js_regexp_last_match = {};
-
-// v18m: Original 'this' for Array.prototype.call() on non-array objects.
-// When filter/forEach/every/map/etc. are called on a MAP via .call(),
-// we convert to array-like internally but callbacks should get the original object.
-Item js_array_method_real_this = {0};
-
-// v37: Cached Object.prototype pointer for fast prototype chain fallback.
-// Plain objects created via js_new_object() don't store __proto__, so
-// js_get_prototype() needs this fallback to walk up to Object.prototype.
-Map* js_cached_object_proto = NULL;
-bool js_resolving_object_proto = false; // re-entrancy guard
-bool js_private_field_initializing = false; // v37: brand check bypass during field init
 
 // v37: Toggle private field initialization mode (called from transpiled code)
 extern "C" void js_private_field_init_begin() { js_private_field_initializing = true; }
@@ -207,10 +147,6 @@ extern "C" void js_set_active_module_vars(Item* vars) {
 // =============================================================================
 // Exception Handling State
 // =============================================================================
-
-bool js_exception_pending = false;
-Item js_exception_value = {0};
-char js_exception_msg_buf[1024] = {0};
 
 // Throw TypeError if value is null or undefined (ES spec RequireObjectCoercible)
 extern "C" void js_require_object_coercible(Item value) {
@@ -758,10 +694,6 @@ extern "C" void js_set_direct_new_target(Item target) {
 // Build the 'arguments' array-like object from the pending call args.
 // Called at the top of JIT-compiled functions that reference 'arguments'.
 
-// v29: Arguments exotic object pending state. Set by transpiler before js_build_arguments_object().
-int js_pending_args_is_strict = 0;   // strict mode flag
-Item js_pending_args_callee = {0};    // callee function object — set by js_call_function
-
 extern "C" void js_set_arguments_info(int64_t is_strict) {
     js_pending_args_is_strict = (int)is_strict;
 }
@@ -909,4 +841,3 @@ extern "C" Item js_build_arguments_object() {
 }
 
 extern TypeMap EmptyMap;
-
