@@ -259,6 +259,26 @@ static bool is_rich_editable_host(View* view) {
     return ce && strcmp(ce, "false") != 0;
 }
 
+static bool text_target_allows_caret(View* target) {
+    if (!target) return false;
+    DomNode* node = (DomNode*)target;
+    while (node) {
+        if (node->node_type == DOM_NODE_ELEMENT) {
+            DomElement* elem = (DomElement*)node;
+            if (elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
+                elem->form && elem->form->disabled) {
+                return false;
+            }
+            if (elem->tag() == HTM_TAG_BUTTON) return false;
+            if (elem->has_attribute("data-editable")) return true;
+            const char* ce = elem->get_attribute("contenteditable");
+            if (ce && strcmp(ce, "false") != 0) return true;
+        }
+        node = node->parent;
+    }
+    return true;
+}
+
 static bool event_inside_block(EventContext* evcon, ViewBlock* block) {
     if (!evcon || !block) return false;
     MousePositionEvent* event = &evcon->event.mouse_position;
@@ -1836,10 +1856,19 @@ static bool dispatch_html_event_handler(EventContext* evcon, View* target, const
                 }
 
                 // Invoke: function __evt_handler_N() { ... }
-                // JS handler functions return Item but we ignore the return value
                 typedef Item (*js_handler_fn)(void);
                 js_handler_fn fn = (js_handler_fn)handler->compiled_func;
-                fn();
+                Item handler_result = fn();
+                bool handler_prevented = false;
+                if (window_event_set && js_event_is_default_prevented(synth_ev)) {
+                    handler_prevented = true;
+                }
+                if (get_type_id(handler_result) == LMD_TYPE_BOOL && !handler_result.bool_val) {
+                    handler_prevented = true;
+                }
+                if (handler_prevented) {
+                    evcon->default_prevented = true;
+                }
 
                 if (window_event_set) {
                     js_restore_window_event_for_legacy(prev_window_event);
@@ -4199,13 +4228,18 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 if (prevented) evcon.default_prevented = true;
             }
 
-            // Update focus if target is focusable (mouse-triggered focus)
-            if (is_view_focusable(evcon.target)) {
+            // Update focus if target is focusable (mouse-triggered focus).
+            // A canceled mousedown suppresses the browser focus default action;
+            // toolbar controls use this to keep text-control selection active.
+            if (!evcon.default_prevented && is_view_focusable(evcon.target)) {
                 update_focus_state(&evcon, evcon.target, false);  // from_keyboard=false
             }
 
-            // Handle click in text - position caret or start selection
-            if (evcon.target->view_type == RDT_VIEW_TEXT && evcon.target_text_rect) {
+            // Handle click in text - position caret or start selection.
+            // This is a mousedown default action, so a canceled mousedown must
+            // leave the existing text-control selection intact.
+            if (!evcon.default_prevented && evcon.target->view_type == RDT_VIEW_TEXT &&
+                evcon.target_text_rect && text_target_allows_caret(evcon.target)) {
                 ViewText* text = (ViewText*)evcon.target;
                 TextRect* rect = evcon.target_text_rect;
                 // Setup font from text view (critical for correct glyph advance calculation)
@@ -4306,13 +4340,14 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 // Restore font
                 evcon.font = saved_font;
                 evcon.need_repaint = true;
-            } else if (evcon.target->is_element()) {
+            } else if (!evcon.default_prevented && evcon.target->is_element()) {
                 DomElement* target_elem = (DomElement*)evcon.target;
 
                 // Text input form controls: place caret inside the input
                 if (target_elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
                     target_elem->form &&
-                    target_elem->form->control_type == FORM_CONTROL_TEXT) {
+                    target_elem->form->control_type == FORM_CONTROL_TEXT &&
+                    !target_elem->form->disabled) {
 
                     ViewBlock* input_block = (ViewBlock*)target_elem;
                     const char* value = target_elem->form->value;
@@ -4421,7 +4456,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
                 } else if (target_elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
                            target_elem->form &&
-                           target_elem->form->control_type == FORM_CONTROL_TEXTAREA) {
+                           target_elem->form->control_type == FORM_CONTROL_TEXTAREA &&
+                           !target_elem->form->disabled) {
                     // Textarea form controls: click-to-position caret
                     ViewBlock* ta_block = (ViewBlock*)target_elem;
                     const char* value = target_elem->form->value;
