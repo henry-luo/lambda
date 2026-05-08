@@ -458,6 +458,12 @@ Gate:
 
 ### Phase J41-4 - Built-in descriptor registry
 
+Status: complete. Built-in method/accessor registry tables now drive method
+installation, runtime lookup, prototype own-property name synthesis, and
+`Object.getOwnPropertyDescriptor` synthesis for registry-backed prototype
+methods/accessors. Remaining non-registry host surfaces are outside this phase
+and should be handled as future family-specific registry additions.
+
 Deliverables:
 
 - Introduce `JsBuiltinSpec` tables.
@@ -470,7 +476,25 @@ Gate:
 - focused manifests for each converted family.
 - full non-updating batch after each major family.
 
+Completion gate:
+
+- `./test/test_js_props_gtest.exe`: passed `24 / 24`.
+- `./test/test_js_coerce_gtest.exe`: passed `15 / 15`.
+- focused JS file tests for typed arrays, Date, RegExp, String, CSS namespace,
+  and native-backed properties: passed `8 / 8`.
+- `./test/test_css_dom_integration.exe`: passed `77`, skipped `25`, failed `0`.
+- `make test262-baseline`: fully passed `30009 / 30009`, failed `0`,
+  regressions `0`.
+
 ### Phase J41-5 - Spec-operation convergence
+
+Status: complete as of the Js41 phase recorded in
+`Transpile_Js41_Inventory.md`. Property get/set, has, delete, own-key, and
+own-descriptor dispatch now have named exotic boundaries before ordinary
+storage/prototype fallback. Module namespace objects currently alias ordinary
+frozen maps (`js_module_namespace_create` returns the export map), so there is
+no separate module-namespace `MapKind` hook to wire yet; the explicit exotic
+dispatch points are in place for when that representation is introduced.
 
 Deliverables:
 
@@ -484,6 +508,15 @@ Gate:
 
 - `test_js_props_gtest` grows into a fast spec-kernel suite.
 - no baseline regressions.
+
+Completion gate:
+
+- `./test/test_js_props_gtest.exe`: passed `23 / 23`.
+- `./test/test_js_coerce_gtest.exe`: passed `15 / 15`.
+- `./test/test_js_gtest.exe --gtest_filter='JavaScriptTests/JsFileTest.Run/native_backing_props:JavaScriptTests/JsFileTest.Run/typed_arrays:JavaScriptTests/JsFileTest.Run/opt_p4_typed_reads:JavaScriptTests/JsFileTest.Run/css_namespace:JavaScriptTests/JsFileTest.Run/dom_style:JavaScriptTests/JsFileTest.Run/dom_basic'`: passed `6 / 6`.
+- `./test/test_css_dom_integration.exe`: passed `77`, skipped `25`, failed `0`.
+- `make test262-baseline`: fully passed `30009 / 30009`, failed `0`,
+  regressions `0`.
 
 ### Phase J41-6 - js262 growth program
 
@@ -531,4 +564,3 @@ The refactor is successful if:
 - The baseline-only js262 gate remains zero-regression throughout.
 - Full js262 progress becomes predictable: focused manifests improve first,
   then the full baseline grows after stable `--run-partial` runs.
-

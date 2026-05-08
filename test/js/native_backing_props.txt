@@ -1,0 +1,12 @@
+ab label: buffer
+ab byteLength: 8
+ab has label: true
+ta extra: typed
+ta length: 3
+ta byteLength: 3
+ta first: 7
+ta has extra: true
+dv note: view
+dv byteLength: 8
+dv get: 33
+ab through dv: 33

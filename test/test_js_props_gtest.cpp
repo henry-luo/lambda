@@ -581,3 +581,151 @@ TEST(Props, Tombstone_DeletePropagatesAcrossReaders) {
     EXPECT_NE(out.find("revived.in=true"),std::string::npos) << out;
     EXPECT_NE(out.find("OK"),             std::string::npos) << out;
 }
+
+// =============================================================================
+// 21. J41_5_TypedArrayExotic_AbstractOps
+// TypedArray hooks for [[HasProperty]], [[Delete]], [[OwnPropertyKeys]], and
+// [[GetOwnProperty]] must remain explicit around ordinary property storage.
+// =============================================================================
+TEST(Props, J41_5_TypedArrayExotic_AbstractOps) {
+    auto out = expect_ok("J41_5_TypedArrayExotic_AbstractOps", R"JS(
+        var ta = new Uint8Array(2);
+        ta[0] = 11;
+        ta.extra = "own";
+        var d0 = Object.getOwnPropertyDescriptor(ta, "0");
+        console.log("has0=" + (0 in ta));
+        console.log("has2=" + (2 in ta));
+        console.log("desc0=" + d0.value + ":" + d0.enumerable + ":" + d0.configurable);
+        console.log("names=" + Object.getOwnPropertyNames(ta).join(","));
+        console.log("del0=" + (delete ta[0]));
+        console.log("del99=" + (delete ta[99]));
+        console.log("extra=" + ta.extra);
+        console.log("OK");
+    )JS");
+    EXPECT_NE(out.find("has0=true"),        std::string::npos) << out;
+    EXPECT_NE(out.find("has2=false"),       std::string::npos) << out;
+    EXPECT_NE(out.find("desc0=11:true:true"), std::string::npos) << out;
+    EXPECT_NE(out.find("names=0,1,extra"),  std::string::npos) << out;
+    EXPECT_NE(out.find("del0=false"),       std::string::npos) << out;
+    EXPECT_NE(out.find("del99=true"),       std::string::npos) << out;
+    EXPECT_NE(out.find("extra=own"),        std::string::npos) << out;
+    EXPECT_NE(out.find("OK"),               std::string::npos) << out;
+}
+
+// =============================================================================
+// 22. J41_5_ProxyExotic_AbstractOps
+// Proxy traps should remain explicit hooks for has/delete/ownKeys/GOPD.
+// =============================================================================
+TEST(Props, J41_5_ProxyExotic_AbstractOps) {
+    auto out = expect_ok("J41_5_ProxyExotic_AbstractOps", R"JS(
+        var target = {};
+        Object.defineProperty(target, "x", { value: 7, configurable: true });
+        var p = new Proxy(target, {
+            has: function(t, k) { console.log("trap.has=" + k); return k === "x"; },
+            deleteProperty: function(t, k) { console.log("trap.delete=" + k); return true; },
+            ownKeys: function(t) { console.log("trap.keys"); return ["x"]; },
+            getOwnPropertyDescriptor: function(t, k) {
+                console.log("trap.gopd=" + k);
+                return { value: 9, writable: true, enumerable: true, configurable: true };
+            }
+        });
+        console.log("has=" + ("x" in p));
+        console.log("del=" + (delete p.x));
+        console.log("keys=" + Reflect.ownKeys(p).join(","));
+        console.log("desc=" + Object.getOwnPropertyDescriptor(p, "x").value);
+        console.log("OK");
+    )JS");
+    EXPECT_NE(out.find("trap.has=x"),    std::string::npos) << out;
+    EXPECT_NE(out.find("has=true"),      std::string::npos) << out;
+    EXPECT_NE(out.find("trap.delete=x"), std::string::npos) << out;
+    EXPECT_NE(out.find("del=true"),      std::string::npos) << out;
+    EXPECT_NE(out.find("trap.keys"),     std::string::npos) << out;
+    EXPECT_NE(out.find("keys=x"),        std::string::npos) << out;
+    EXPECT_NE(out.find("trap.gopd=x"),   std::string::npos) << out;
+    EXPECT_NE(out.find("desc=9"),        std::string::npos) << out;
+    EXPECT_NE(out.find("OK"),            std::string::npos) << out;
+}
+
+// =============================================================================
+// 23. J41_5_ArrayAndStringExotic_AbstractOps
+// Arrays and strings keep their indexed exotic behavior while ordinary named
+// properties and descriptors continue through the shared property readers.
+// =============================================================================
+TEST(Props, J41_5_ArrayAndStringExotic_AbstractOps) {
+    auto out = expect_ok("J41_5_ArrayAndStringExotic_AbstractOps", R"JS(
+        var a = [10, 20];
+        delete a[0];
+        a.note = "arr";
+        console.log("array.has0=" + (0 in a));
+        console.log("array.has1=" + (1 in a));
+        console.log("array.names=" + Object.getOwnPropertyNames(a).join(","));
+        console.log("array.desc0=" + (Object.getOwnPropertyDescriptor(a, "0") === undefined));
+        console.log("array.note=" + Object.getOwnPropertyDescriptor(a, "note").value);
+        var s = "abc";
+        var sd = Object.getOwnPropertyDescriptor(s, "1");
+        console.log("str.has1=" + ("1" in Object(s)));
+        console.log("str.names=" + Object.getOwnPropertyNames(s).join(","));
+        console.log("str.desc=" + sd.value + ":" + sd.enumerable + ":" + sd.configurable);
+        console.log("OK");
+    )JS");
+    EXPECT_NE(out.find("array.has0=false"),     std::string::npos) << out;
+    EXPECT_NE(out.find("array.has1=true"),      std::string::npos) << out;
+    EXPECT_NE(out.find("array.names=1,length,note"), std::string::npos) << out;
+    EXPECT_NE(out.find("array.desc0=true"),     std::string::npos) << out;
+    EXPECT_NE(out.find("array.note=arr"),       std::string::npos) << out;
+    EXPECT_NE(out.find("str.has1=true"),        std::string::npos) << out;
+    EXPECT_NE(out.find("str.names=0,1,2,length"), std::string::npos) << out;
+    EXPECT_NE(out.find("str.desc=b:true:false"), std::string::npos) << out;
+    EXPECT_NE(out.find("OK"),                   std::string::npos) << out;
+}
+
+// =============================================================================
+// 24. J41_4_BuiltinRegistry_DescriptorSynthesis
+// Registry-backed prototype methods and accessors should expose descriptors from
+// the same table data used for lookup/installation.
+// =============================================================================
+TEST(Props, J41_4_BuiltinRegistry_DescriptorSynthesis) {
+    auto out = expect_ok("J41_4_BuiltinRegistry_DescriptorSynthesis", R"JS(
+        function data(label, obj, name) {
+            var d = Object.getOwnPropertyDescriptor(obj, name);
+            console.log(label + "=" + d.value.name + ":" + d.value.length + ":" +
+                d.writable + ":" + d.enumerable + ":" + d.configurable);
+        }
+        function accessor(label, obj, name) {
+            var d = Object.getOwnPropertyDescriptor(obj, name);
+            console.log(label + "=" + d.get.name + ":" + (d.set === undefined) + ":" +
+                d.enumerable + ":" + d.configurable);
+        }
+        data("date", Date.prototype, "getTime");
+        data("regexp", RegExp.prototype, "exec");
+        data("map", Map.prototype, "set");
+        data("set", Set.prototype, "add");
+        data("promise", Promise.prototype, "then");
+        data("arrayLocale", Array.prototype, "toLocaleString");
+        data("numberLocale", Number.prototype, "toLocaleString");
+        data("symbolValue", Symbol.prototype, "valueOf");
+        data("stringAlias", String.prototype, "trimLeft");
+        var tap = Object.getPrototypeOf(Uint8Array.prototype);
+        data("typedArray", tap, "set");
+        accessor("typedArrayLength", tap, "length");
+        accessor("dataViewByteLength", DataView.prototype, "byteLength");
+        console.log("names.has.mapSet=" + (Object.getOwnPropertyNames(Map.prototype).indexOf("set") >= 0));
+        console.log("names.has.taLength=" + (Object.getOwnPropertyNames(tap).indexOf("length") >= 0));
+        console.log("OK");
+    )JS");
+    EXPECT_NE(out.find("date=getTime:0:true:false:true"), std::string::npos) << out;
+    EXPECT_NE(out.find("regexp=exec:1:true:false:true"), std::string::npos) << out;
+    EXPECT_NE(out.find("map=set:2:true:false:true"), std::string::npos) << out;
+    EXPECT_NE(out.find("set=add:1:true:false:true"), std::string::npos) << out;
+    EXPECT_NE(out.find("promise=then:2:true:false:true"), std::string::npos) << out;
+    EXPECT_NE(out.find("arrayLocale=toLocaleString:0:true:false:true"), std::string::npos) << out;
+    EXPECT_NE(out.find("numberLocale=toLocaleString:0:true:false:true"), std::string::npos) << out;
+    EXPECT_NE(out.find("symbolValue=valueOf:0:true:false:true"), std::string::npos) << out;
+    EXPECT_NE(out.find("stringAlias=trimStart:0:true:false:true"), std::string::npos) << out;
+    EXPECT_NE(out.find("typedArray=set:1:true:false:true"), std::string::npos) << out;
+    EXPECT_NE(out.find("typedArrayLength=get length:true:false:true"), std::string::npos) << out;
+    EXPECT_NE(out.find("dataViewByteLength=get byteLength:true:false:true"), std::string::npos) << out;
+    EXPECT_NE(out.find("names.has.mapSet=true"), std::string::npos) << out;
+    EXPECT_NE(out.find("names.has.taLength=true"), std::string::npos) << out;
+    EXPECT_NE(out.find("OK"), std::string::npos) << out;
+}

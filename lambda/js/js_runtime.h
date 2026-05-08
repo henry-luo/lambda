@@ -12,6 +12,14 @@ extern "C" {
 
 #include "../lambda.h"
 
+static inline bool js_map_kind_uses_default_object_to_primitive(uint8_t map_kind) {
+    return map_kind == MAP_KIND_DOM ||
+           map_kind == MAP_KIND_CSS_NAMESPACE ||
+           map_kind == MAP_KIND_CSSOM ||
+           map_kind == MAP_KIND_DOC_PROXY ||
+           map_kind == MAP_KIND_FOREIGN_DOC;
+}
+
 // Sentinel value for deleted properties (used by delete operator).
 // Encoded as a tagged INT (LMD_TYPE_INT=4) with a unique payload 0x00DEAD00DEAD00.
 // This roundtrips correctly through map_field_store/map_read_field for INT fields.
@@ -278,6 +286,9 @@ Item js_object_create_define_properties(Item obj, Item props);
 Item js_object_get_own_property_descriptor(Item obj, Item name);
 Item js_object_get_own_property_descriptors(Item obj);
 Item js_lookup_builtin_method(TypeId type, const char* name, int len);
+Item js_builtin_registry_prototype_method_descriptor(int js_class, TypeId fallback_type, const char* name, int len);
+bool js_builtin_registry_has_prototype_method(int js_class, TypeId fallback_type, const char* name, int len);
+void js_append_builtin_method_names_for_class(int js_class, TypeId fallback_type, Item result);
 void js_append_builtin_method_names(TypeId type, Item result);
 Item js_array_is_array(Item value);
 Item js_performance_now(void);

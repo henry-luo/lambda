@@ -1633,11 +1633,8 @@ extern "C" Item js_to_string(Item value) {
                 // v28: DOM elements (and other exotic objects) may have non-callable
                 // toString/valueOf placeholders — fall through to default string conversion
                 // instead of throwing.
-                if (value.map && (value.map->map_kind == MAP_KIND_DOM ||
-                                  value.map->map_kind == MAP_KIND_CSS_NAMESPACE ||
-                                  value.map->map_kind == MAP_KIND_CSSOM ||
-                                  value.map->map_kind == MAP_KIND_DOC_PROXY ||
-                                  value.map->map_kind == MAP_KIND_FOREIGN_DOC)) {
+                if (value.map &&
+                    js_map_kind_uses_default_object_to_primitive(value.map->map_kind)) {
                     break;  // fall through to default "[object Object]"
                 }
                 js_throw_type_error("Cannot convert object to primitive value");
@@ -5351,12 +5348,355 @@ static Item js_get_proto_key() {
 // Forward declaration for builtin method lookup (extern — used by js_globals.cpp too)
 extern "C" Item js_lookup_builtin_method(TypeId type, const char* name, int len);
 extern "C" Item js_collection_method(Item obj, int method_id, Item arg1, Item arg2);
+extern "C" Item js_get_typed_array_base_proto();
+extern "C" Item js_get_buffer_prototype(void);
 Item js_get_or_create_builtin(int builtin_id, const char* name, int param_count);
 static Item js_lookup_constructor_static(const char* ctor_name, int ctor_len,
                                           const char* prop_name, int prop_len);
 
 static inline Item js_accessor_call_result(Item getter, Item receiver) {
     return js_call_function(getter, receiver, NULL, 0);
+}
+
+static bool js_upgrade_native_backed_map_for_properties(Map* m, const char* tag_name, int tag_len) {
+    if (!m || m->data_cap != 0 || !js_input) return false;
+    void* native_ptr = m->data;
+    m->type = (void*)&EmptyMap;
+    m->data = NULL;
+    m->data_cap = 0;
+    String* tag_key = heap_create_name(tag_name, tag_len);
+    map_put(m, tag_key, (Item){.item = i2it((int64_t)(uintptr_t)native_ptr)}, js_input);
+    return true;
+}
+
+static bool js_try_exotic_property_get(Item object, Item key, Item* out_result) {
+    Map* m = object.map;
+    switch (m->map_kind) {
+    case MAP_KIND_TYPED_ARRAY: {
+        if (get_type_id(key) == LMD_TYPE_STRING) {
+            String* str_key = it2s(key);
+            if (str_key->len == 7 && strncmp(str_key->chars, "__sym_4", 7) == 0) {
+                const char* ta_name = js_typed_array_type_name(object);
+                *out_result = ta_name ? (Item){.item = s2it(heap_create_name(ta_name, (int)strlen(ta_name)))}
+                                      : make_js_undefined();
+                return true;
+            }
+            if (str_key->len == 6 && strncmp(str_key->chars, "length", 6) == 0) {
+                JsTypedArray* ta = js_get_typed_array_ptr(object.map);
+                *out_result = (ta && ta->buffer && ta->buffer->detached)
+                    ? (Item){.item = i2it(0)}
+                    : (Item){.item = i2it(js_typed_array_length(object))};
+                return true;
+            }
+            if (str_key->len == 10 && strncmp(str_key->chars, "byteLength", 10) == 0) {
+                JsTypedArray* ta = js_get_typed_array_ptr(object.map);
+                *out_result = (ta && ta->buffer && ta->buffer->detached)
+                    ? (Item){.item = i2it(0)}
+                    : (Item){.item = i2it(js_typed_array_byte_length(object))};
+                return true;
+            }
+            if (str_key->len == 10 && strncmp(str_key->chars, "byteOffset", 10) == 0) {
+                JsTypedArray* ta = js_get_typed_array_ptr(object.map);
+                *out_result = (ta && ta->buffer && ta->buffer->detached)
+                    ? (Item){.item = i2it(0)}
+                    : (Item){.item = i2it(js_typed_array_byte_offset(object))};
+                return true;
+            }
+            if (str_key->len == 6 && strncmp(str_key->chars, "buffer", 6) == 0) {
+                JsTypedArray* ta = js_get_typed_array_ptr(object.map);
+                if (ta->buffer_item) {
+                    *out_result = (Item){.item = ta->buffer_item};
+                    return true;
+                }
+                if (!ta->buffer) {
+                    JsArrayBuffer* ab = (JsArrayBuffer*)mem_alloc(sizeof(JsArrayBuffer), MEM_CAT_JS_RUNTIME);
+                    ab->data = ta->data;
+                    ab->byte_length = ta->byte_length;
+                    ab->detached = false;
+                    ta->buffer = ab;
+                }
+                Item wrapped = js_arraybuffer_wrap(ta->buffer);
+                ta->buffer_item = wrapped.item;
+                *out_result = wrapped;
+                return true;
+            }
+            if (str_key->len == 17 && strncmp(str_key->chars, "BYTES_PER_ELEMENT", 17) == 0) {
+                JsTypedArray* ta = js_get_typed_array_ptr(object.map);
+                int bpe = 4;
+                switch (ta->element_type) {
+                case JS_TYPED_INT8: case JS_TYPED_UINT8: case JS_TYPED_UINT8_CLAMPED: bpe = 1; break;
+                case JS_TYPED_INT16: case JS_TYPED_UINT16: bpe = 2; break;
+                case JS_TYPED_INT32: case JS_TYPED_UINT32: case JS_TYPED_FLOAT32: bpe = 4; break;
+                case JS_TYPED_FLOAT64: case JS_TYPED_BIGINT64: case JS_TYPED_BIGUINT64: bpe = 8; break;
+                }
+                *out_result = (Item){.item = i2it(bpe)};
+                return true;
+            }
+            double numeric_index = 0;
+            bool is_negative_zero = false;
+            if (js_ta_key_canonical_numeric(key, &numeric_index, &is_negative_zero)) {
+                int idx = 0;
+                if (!js_ta_numeric_index_valid(object, numeric_index, is_negative_zero, &idx)) {
+                    *out_result = make_js_undefined();
+                    return true;
+                }
+                *out_result = js_typed_array_get(object, (Item){.item = i2it(idx)});
+                return true;
+            }
+            if (object.map->data_cap > 0) {
+                Item own_result = ItemNull;
+                JsOwnGetStatus st = js_ordinary_get_own(object, key, object, &own_result);
+                if (st == JS_OWN_READY) {
+                    *out_result = own_result;
+                    return true;
+                }
+                if (st == JS_OWN_DELETED) {
+                    *out_result = make_js_undefined();
+                    return true;
+                }
+            }
+            Item ta_proto = js_get_prototype(object);
+            if (ta_proto.item == ITEM_NULL) {
+                ta_proto = js_get_typed_array_base_proto();
+            }
+            if (ta_proto.item != ITEM_NULL) {
+                Item result = js_property_get(ta_proto, key);
+                if (result.item != ITEM_NULL) {
+                    *out_result = result;
+                    return true;
+                }
+            }
+            JsTypedArray* ta = js_get_typed_array_ptr(object.map);
+            if (ta && ta->element_type == JS_TYPED_UINT8) {
+                Item buf_proto = js_get_buffer_prototype();
+                if (buf_proto.item != ITEM_NULL) {
+                    Item result = map_get(buf_proto.map, key);
+                    if (result.item != ITEM_NULL) {
+                        *out_result = result;
+                        return true;
+                    }
+                }
+            }
+            *out_result = make_js_undefined();
+            return true;
+        }
+        double numeric_index = 0;
+        bool is_negative_zero = false;
+        if (js_ta_key_canonical_numeric(key, &numeric_index, &is_negative_zero)) {
+            int idx = 0;
+            if (!js_ta_numeric_index_valid(object, numeric_index, is_negative_zero, &idx)) {
+                *out_result = make_js_undefined();
+                return true;
+            }
+            *out_result = js_typed_array_get(object, (Item){.item = i2it(idx)});
+            return true;
+        }
+        *out_result = (Item){.item = ITEM_NULL};
+        return true;
+    }
+    case MAP_KIND_ARRAYBUFFER: {
+        if (get_type_id(key) == LMD_TYPE_STRING) {
+            String* str_key = it2s(key);
+            if (str_key->len == 10 && strncmp(str_key->chars, "byteLength", 10) == 0) {
+                *out_result = (Item){.item = i2it(js_arraybuffer_byte_length(object))};
+                return true;
+            }
+            if (str_key->len == 6 && strncmp(str_key->chars, "length", 6) == 0) {
+                *out_result = (Item){.item = i2it(0)};
+                return true;
+            }
+            if (object.map->data_cap > 0) {
+                Item own_result = map_get(object.map, key);
+                if (own_result.item != ITEM_NULL) {
+                    *out_result = own_result;
+                    return true;
+                }
+            }
+        }
+        Item ab_proto = js_get_prototype(object);
+        if (ab_proto.item != ITEM_NULL) {
+            Item result = js_property_get(ab_proto, key);
+            if (result.item != ITEM_NULL && get_type_id(result) != LMD_TYPE_UNDEFINED) {
+                *out_result = result;
+                return true;
+            }
+        }
+        *out_result = (Item){.item = ITEM_NULL};
+        return true;
+    }
+    case MAP_KIND_DATAVIEW: {
+        if (get_type_id(key) == LMD_TYPE_STRING) {
+            String* str_key = it2s(key);
+            if (object.map->data_cap > 0) {
+                Item own_result = map_get(object.map, key);
+                if (own_result.item != ITEM_NULL) {
+                    *out_result = own_result;
+                    return true;
+                }
+            }
+            JsDataView* dv = NULL;
+            if (object.map->data_cap == 0) {
+                dv = (JsDataView*)object.map->data;
+            } else {
+                bool found = false;
+                Item dv_val = js_map_get_fast(object.map, "__dv__", 6, &found);
+                if (found) dv = (JsDataView*)(uintptr_t)it2i(dv_val);
+            }
+            if (str_key->len == 10 && strncmp(str_key->chars, "byteLength", 10) == 0) {
+                if (dv && dv->buffer && dv->buffer->detached) {
+                    js_throw_type_error("DataView buffer is detached");
+                    *out_result = ItemNull;
+                    return true;
+                }
+                *out_result = dv ? (Item){.item = i2it(dv->byte_length)} : (Item){.item = ITEM_NULL};
+                return true;
+            }
+            if (str_key->len == 10 && strncmp(str_key->chars, "byteOffset", 10) == 0) {
+                if (dv && dv->buffer && dv->buffer->detached) {
+                    js_throw_type_error("DataView buffer is detached");
+                    *out_result = ItemNull;
+                    return true;
+                }
+                *out_result = dv ? (Item){.item = i2it(dv->byte_offset)} : (Item){.item = ITEM_NULL};
+                return true;
+            }
+            if (str_key->len == 6 && strncmp(str_key->chars, "buffer", 6) == 0) {
+                if (dv && dv->buffer) {
+                    *out_result = dv->buffer_item ? (Item){.item = dv->buffer_item}
+                                                  : js_arraybuffer_wrap(dv->buffer);
+                    return true;
+                }
+                *out_result = (Item){.item = ITEM_NULL};
+                return true;
+            }
+        }
+        Item dv_proto = js_get_prototype(object);
+        if (dv_proto.item != ITEM_NULL) {
+            Item result = js_property_get(dv_proto, key);
+            if (result.item != ITEM_NULL && get_type_id(result) != LMD_TYPE_UNDEFINED) {
+                *out_result = result;
+                return true;
+            }
+        }
+        *out_result = (Item){.item = ITEM_NULL};
+        return true;
+    }
+    case MAP_KIND_DOC_PROXY:
+        if (object.map->data_cap > 0) {
+            Item own_result = map_get(object.map, key);
+            if (own_result.item != ITEM_NULL) {
+                *out_result = own_result;
+                return true;
+            }
+        }
+        *out_result = js_document_proxy_get_property(key);
+        return true;
+    case MAP_KIND_FOREIGN_DOC: {
+        void* prev = js_dom_swap_active_document(js_get_foreign_doc(object));
+        Item r = js_document_proxy_get_property(key);
+        js_dom_restore_active_document(prev);
+        *out_result = r;
+        return true;
+    }
+    case MAP_KIND_DOM:
+        *out_result = js_is_computed_style_item(object)
+            ? js_computed_style_get_property(object, key)
+            : js_dom_get_property(object, key);
+        return true;
+    case MAP_KIND_CSS_NAMESPACE:
+        return false;
+    case MAP_KIND_CSSOM:
+        if (js_is_stylesheet(object)) *out_result = js_cssom_stylesheet_get_property(object, key);
+        else if (js_is_css_rule(object)) *out_result = js_cssom_rule_get_property(object, key);
+        else *out_result = js_cssom_rule_decl_get_property(object, key);
+        return true;
+    case MAP_KIND_ITERATOR:
+        if (get_type_id(key) == LMD_TYPE_STRING) {
+            String* sk = it2s(key);
+            if (sk->len == 7 && strncmp(sk->chars, "__sym_1", 7) == 0) {
+                *out_result = js_get_or_create_builtin(JS_BUILTIN_ITER_IDENTITY, "[Symbol.iterator]", 0);
+                return true;
+            }
+        }
+        *out_result = make_js_undefined();
+        return true;
+    case MAP_KIND_PROXY:
+        *out_result = js_proxy_trap_get(object, key);
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool js_try_exotic_property_set(Item object, Item key, Item* value, Item* out_result) {
+    Map* m = object.map;
+    switch (m->map_kind) {
+    case MAP_KIND_DOC_PROXY:
+        if (m->data_cap == 0 && js_input) {
+            m->type = (void*)&EmptyMap;
+            m->data = NULL;
+            m->data_cap = 0;
+        }
+        return false;
+    case MAP_KIND_FOREIGN_DOC:
+        *out_result = *value;
+        return true;
+    case MAP_KIND_DOM:
+        *out_result = js_dom_set_property(object, key, *value);
+        return true;
+    case MAP_KIND_CSS_NAMESPACE:
+        return false;
+    case MAP_KIND_CSSOM:
+        *out_result = js_is_css_rule(object)
+            ? js_cssom_rule_set_property(object, key, *value)
+            : js_cssom_rule_decl_set_property(object, key, *value);
+        return true;
+    case MAP_KIND_ARRAYBUFFER:
+    case MAP_KIND_DATAVIEW:
+        js_upgrade_native_backed_map_for_properties(
+            m, (m->map_kind == MAP_KIND_ARRAYBUFFER) ? "__ab__" : "__dv__", 6);
+        return false;
+    case MAP_KIND_TYPED_ARRAY:
+        js_upgrade_native_backed_map_for_properties(m, "__ta__", 6);
+        return false;
+    case MAP_KIND_ITERATOR:
+        *out_result = *value;
+        return true;
+    case MAP_KIND_PROCESS_ENV:
+        if (get_type_id(key) == LMD_TYPE_SYMBOL) {
+            *out_result = js_throw_type_error("Cannot convert a Symbol value to a string");
+            return true;
+        }
+        if (get_type_id(*value) == LMD_TYPE_SYMBOL) {
+            *out_result = js_throw_type_error("Cannot convert a Symbol value to a string");
+            return true;
+        }
+        if (get_type_id(*value) != LMD_TYPE_STRING && value->item != JS_DELETED_SENTINEL_VAL) {
+            *value = js_to_string(*value);
+        }
+        if (get_type_id(key) == LMD_TYPE_STRING && get_type_id(*value) == LMD_TYPE_STRING) {
+            String* env_key = it2s(key);
+            String* env_val = it2s(*value);
+            if (env_key && env_val) {
+                char kbuf[256], vbuf[4096];
+                int klen = env_key->len < 255 ? env_key->len : 255;
+                int vlen = env_val->len < 4095 ? env_val->len : 4095;
+                memcpy(kbuf, env_key->chars, klen); kbuf[klen] = '\0';
+                memcpy(vbuf, env_val->chars, vlen); vbuf[vlen] = '\0';
+                if (vlen == 0) {
+                    unsetenv(kbuf);
+                } else {
+                    setenv(kbuf, vbuf, 1);
+                }
+            }
+        }
+        return false;
+    case MAP_KIND_PROXY:
+        *out_result = js_proxy_trap_set(object, key, *value);
+        return true;
+    default:
+        return false;
+    }
 }
 
 extern "C" Item js_property_get(Item object, Item key) {
@@ -5386,222 +5726,8 @@ extern "C" Item js_property_get(Item object, Item key) {
         }
         // MapKind fast path: plain objects (95%+ of accesses) skip all exotic checks
         if (m->map_kind != MAP_KIND_PLAIN) {
-            switch (m->map_kind) {
-            case MAP_KIND_TYPED_ARRAY: {
-                if (get_type_id(key) == LMD_TYPE_STRING) {
-                    String* str_key = it2s(key);
-                    if (str_key->len == 7 && strncmp(str_key->chars, "__sym_4", 7) == 0) {
-                        const char* ta_name = js_typed_array_type_name(object);
-                        if (!ta_name) return make_js_undefined();
-                        return (Item){.item = s2it(heap_create_name(ta_name, (int)strlen(ta_name)))};
-                    }
-                    if (str_key->len == 6 && strncmp(str_key->chars, "length", 6) == 0) {
-                        JsTypedArray* ta = js_get_typed_array_ptr(object.map);
-                        if (ta && ta->buffer && ta->buffer->detached) return (Item){.item = i2it(0)};
-                        return (Item){.item = i2it(js_typed_array_length(object))};
-                    }
-                    if (str_key->len == 10 && strncmp(str_key->chars, "byteLength", 10) == 0) {
-                        JsTypedArray* ta = js_get_typed_array_ptr(object.map);
-                        if (ta && ta->buffer && ta->buffer->detached) return (Item){.item = i2it(0)};
-                        return (Item){.item = i2it(js_typed_array_byte_length(object))};
-                    }
-                    if (str_key->len == 10 && strncmp(str_key->chars, "byteOffset", 10) == 0) {
-                        JsTypedArray* ta = js_get_typed_array_ptr(object.map);
-                        if (ta && ta->buffer && ta->buffer->detached) return (Item){.item = i2it(0)};
-                        return (Item){.item = i2it(js_typed_array_byte_offset(object))};
-                    }
-                    if (str_key->len == 6 && strncmp(str_key->chars, "buffer", 6) == 0) {
-                        JsTypedArray* ta = js_get_typed_array_ptr(object.map);
-                        if (ta->buffer_item) {
-                            return (Item){.item = ta->buffer_item};
-                        }
-                        if (!ta->buffer) {
-                            JsArrayBuffer* ab = (JsArrayBuffer*)mem_alloc(sizeof(JsArrayBuffer), MEM_CAT_JS_RUNTIME);
-                            ab->data = ta->data;
-                            ab->byte_length = ta->byte_length;
-                            ab->detached = false;
-                            ta->buffer = ab;
-                        }
-                        Item wrapped = js_arraybuffer_wrap(ta->buffer);
-                        ta->buffer_item = wrapped.item;
-                        return wrapped;
-                    }
-                    if (str_key->len == 17 && strncmp(str_key->chars, "BYTES_PER_ELEMENT", 17) == 0) {
-                        JsTypedArray* ta = js_get_typed_array_ptr(object.map);
-                        int bpe = 4;
-                        switch (ta->element_type) {
-                        case JS_TYPED_INT8: case JS_TYPED_UINT8: case JS_TYPED_UINT8_CLAMPED: bpe = 1; break;
-                        case JS_TYPED_INT16: case JS_TYPED_UINT16: bpe = 2; break;
-                        case JS_TYPED_INT32: case JS_TYPED_UINT32: case JS_TYPED_FLOAT32: bpe = 4; break;
-                        case JS_TYPED_FLOAT64: case JS_TYPED_BIGINT64: case JS_TYPED_BIGUINT64: bpe = 8; break;
-                        }
-                        return (Item){.item = i2it(bpe)};
-                    }
-                    {
-                        double numeric_index = 0;
-                        bool is_negative_zero = false;
-                        if (js_ta_key_canonical_numeric(key, &numeric_index, &is_negative_zero)) {
-                            int idx = 0;
-                            if (!js_ta_numeric_index_valid(object, numeric_index, is_negative_zero, &idx)) {
-                                return make_js_undefined();
-                            }
-                            return js_typed_array_get(object, (Item){.item = i2it(idx)});
-                        }
-                    }
-                    // check own properties on upgraded maps (data_cap > 0 means upgraded)
-                    if (object.map->data_cap > 0) {
-                        Item own_result = ItemNull;
-                        JsOwnGetStatus st = js_ordinary_get_own(object, key, object, &own_result);
-                        if (st == JS_OWN_READY) return own_result;
-                        if (st == JS_OWN_DELETED) return make_js_undefined();
-                    }
-                    Item ta_proto = js_get_prototype(object);
-                    if (ta_proto.item == ITEM_NULL) {
-                        extern Item js_get_typed_array_base_proto();
-                        ta_proto = js_get_typed_array_base_proto();
-                    }
-                    if (ta_proto.item != ITEM_NULL) {
-                        Item result = js_property_get(ta_proto, key);
-                        if (result.item != ITEM_NULL) return result;
-                    }
-                    // fallback: check buffer prototype for Uint8Array (Buffer) instances
-                    // use map_get (own-property only) to avoid prototype chain recursion
-                    {
-                        JsTypedArray* ta = js_get_typed_array_ptr(object.map);
-                        if (ta && ta->element_type == JS_TYPED_UINT8) {
-                            extern Item js_get_buffer_prototype(void);
-                            Item buf_proto = js_get_buffer_prototype();
-                            if (buf_proto.item != ITEM_NULL) {
-                                Item result = map_get(buf_proto.map, key);
-                                if (result.item != ITEM_NULL) return result;
-                            }
-                        }
-                    }
-                    return make_js_undefined();
-                }
-                double numeric_index = 0;
-                bool is_negative_zero = false;
-                if (js_ta_key_canonical_numeric(key, &numeric_index, &is_negative_zero)) {
-                    int idx = 0;
-                    if (!js_ta_numeric_index_valid(object, numeric_index, is_negative_zero, &idx)) {
-                        return make_js_undefined();
-                    }
-                    return js_typed_array_get(object, (Item){.item = i2it(idx)});
-                }
-                return (Item){.item = ITEM_NULL};
-            }
-            case MAP_KIND_ARRAYBUFFER: {
-                if (get_type_id(key) == LMD_TYPE_STRING) {
-                    String* str_key = it2s(key);
-                    if (str_key->len == 10 && strncmp(str_key->chars, "byteLength", 10) == 0) {
-                        return (Item){.item = i2it(js_arraybuffer_byte_length(object))};
-                    }
-                    if (str_key->len == 6 && strncmp(str_key->chars, "length", 6) == 0) {
-                        return (Item){.item = i2it(0)};
-                    }
-                    // check own properties on upgraded maps (data_cap > 0 means upgraded)
-                    if (object.map->data_cap > 0) {
-                        Item own_result = map_get(object.map, key);
-                        if (own_result.item != ITEM_NULL) return own_result;
-                    }
-                }
-                // prototype chain lookup (for Reflect.construct with custom newTarget)
-                {
-                    Item ab_proto = js_get_prototype(object);
-                    if (ab_proto.item != ITEM_NULL) {
-                        Item result = js_property_get(ab_proto, key);
-                        if (result.item != ITEM_NULL && get_type_id(result) != LMD_TYPE_UNDEFINED) return result;
-                    }
-                }
-                return (Item){.item = ITEM_NULL};
-            }
-            case MAP_KIND_DATAVIEW: {
-                if (get_type_id(key) == LMD_TYPE_STRING) {
-                    String* str_key = it2s(key);
-                    if (object.map->data_cap > 0) {
-                        Item own_result = map_get(object.map, key);
-                        if (own_result.item != ITEM_NULL) return own_result;
-                    }
-                    // get native DataView pointer (direct or from upgraded __dv__ property)
-                    JsDataView* dv = NULL;
-                    if (object.map->data_cap == 0) {
-                        dv = (JsDataView*)object.map->data;
-                    } else {
-                        bool found = false;
-                        Item dv_val = js_map_get_fast(object.map, "__dv__", 6, &found);
-                        if (found) dv = (JsDataView*)(uintptr_t)it2i(dv_val);
-                    }
-                    if (str_key->len == 10 && strncmp(str_key->chars, "byteLength", 10) == 0) {
-                        if (dv && dv->buffer && dv->buffer->detached) {
-                            js_throw_type_error("DataView buffer is detached");
-                            return ItemNull;
-                        }
-                        return dv ? (Item){.item = i2it(dv->byte_length)} : (Item){.item = ITEM_NULL};
-                    }
-                    if (str_key->len == 10 && strncmp(str_key->chars, "byteOffset", 10) == 0) {
-                        if (dv && dv->buffer && dv->buffer->detached) {
-                            js_throw_type_error("DataView buffer is detached");
-                            return ItemNull;
-                        }
-                        return dv ? (Item){.item = i2it(dv->byte_offset)} : (Item){.item = ITEM_NULL};
-                    }
-                    if (str_key->len == 6 && strncmp(str_key->chars, "buffer", 6) == 0) {
-                        if (dv && dv->buffer) {
-                            if (dv->buffer_item) return (Item){.item = dv->buffer_item};
-                            return js_arraybuffer_wrap(dv->buffer);
-                        }
-                        return (Item){.item = ITEM_NULL};
-                    }
-                }
-                // prototype chain lookup (for Reflect.construct with custom newTarget)
-                {
-                    Item dv_proto = js_get_prototype(object);
-                    if (dv_proto.item != ITEM_NULL) {
-                        Item result = js_property_get(dv_proto, key);
-                        if (result.item != ITEM_NULL && get_type_id(result) != LMD_TYPE_UNDEFINED) return result;
-                    }
-                }
-                return (Item){.item = ITEM_NULL};
-            }
-            case MAP_KIND_DOC_PROXY: {
-                // check own properties stored on the upgraded map first
-                if (object.map->data_cap > 0) {
-                    Item own_result = map_get(object.map, key);
-                    if (own_result.item != ITEM_NULL) return own_result;
-                }
-                return js_document_proxy_get_property(key);
-            }
-            case MAP_KIND_FOREIGN_DOC: {
-                // Foreign document: temporarily swap the thread-local active
-                // document so that the proxy property dispatch resolves
-                // against the foreign doc's tree (body/head/title/etc.).
-                void* prev = js_dom_swap_active_document(js_get_foreign_doc(object));
-                Item r = js_document_proxy_get_property(key);
-                js_dom_restore_active_document(prev);
-                return r;
-            }
-            case MAP_KIND_DOM:
-                if (js_is_computed_style_item(object)) return js_computed_style_get_property(object, key);
-                return js_dom_get_property(object, key);
-            case MAP_KIND_CSS_NAMESPACE:
-                break;
-            case MAP_KIND_CSSOM:
-                if (js_is_stylesheet(object)) return js_cssom_stylesheet_get_property(object, key);
-                if (js_is_css_rule(object)) return js_cssom_rule_get_property(object, key);
-                return js_cssom_rule_decl_get_property(object, key);
-            case MAP_KIND_ITERATOR:
-                // v28: iterators are opaque engine-internal objects
-                // [Symbol.iterator]() returns this (iterators are their own iterable)
-                if (get_type_id(key) == LMD_TYPE_STRING) {
-                    String* sk = it2s(key);
-                    if (sk->len == 7 && strncmp(sk->chars, "__sym_1", 7) == 0) {
-                        return js_get_or_create_builtin(JS_BUILTIN_ITER_IDENTITY, "[Symbol.iterator]", 0);
-                    }
-                }
-                return make_js_undefined();
-            case MAP_KIND_PROXY:
-                return js_proxy_trap_get(object, key);
-            }
+            Item exotic_result = ItemNull;
+            if (js_try_exotic_property_get(object, key, &exotic_result)) return exotic_result;
         }
         // Regular Lambda map (including JS objects)
         // P10f: Use fast lookup with pre-computed key length (memcmp instead of strncmp+strlen)
@@ -6944,95 +7070,8 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
         }
         // MapKind fast path: skip exotic checks for plain objects
         if (m->map_kind != MAP_KIND_PLAIN) {
-            switch (m->map_kind) {
-            case MAP_KIND_DOC_PROXY:
-                // upgrade map for property storage on first write (like ArrayBuffer)
-                if (m->data_cap == 0 && js_input) {
-                    m->type = (void*)&EmptyMap;
-                    m->data = NULL;
-                    m->data_cap = 0;
-                }
-                break;  // fall through to regular property set
-            case MAP_KIND_FOREIGN_DOC:
-                // Foreign documents: data holds DomDocument*, must not be
-                // overwritten. Silently ignore property sets (rare in tests).
-                return value;
-            case MAP_KIND_DOM:
-                return js_dom_set_property(object, key, value);
-            case MAP_KIND_CSS_NAMESPACE:
-                break;
-            case MAP_KIND_CSSOM:
-                if (js_is_css_rule(object)) return js_cssom_rule_set_property(object, key, value);
-                return js_cssom_rule_decl_set_property(object, key, value);
-            case MAP_KIND_ARRAYBUFFER:
-            case MAP_KIND_DATAVIEW:
-                // upgrade map for property storage: convert native-pointer layout
-                // to a regular map on first user-property write.
-                // Save the native pointer as an __ab__ (or __dv__) int64 property.
-                if (m->data_cap == 0 && js_input) {
-                    void* native_ptr = m->data;
-                    const char* tag = (m->map_kind == MAP_KIND_ARRAYBUFFER) ? "__ab__" : "__dv__";
-                    m->type = (void*)&EmptyMap;
-                    m->data = NULL;
-                    m->data_cap = 0;
-                    // map_put will allocate proper data storage since type == &EmptyMap
-                    String* tag_key = heap_create_name(tag, 6);
-                    map_put(m, tag_key, (Item){.item = i2it((int64_t)(uintptr_t)native_ptr)}, js_input);
-                }
-                break;  // fall through to regular property set
-            case MAP_KIND_TYPED_ARRAY:
-                // upgrade map for property storage on first non-numeric write.
-                // Save the JsTypedArray* as __ta__ int64 property.
-                if (m->data_cap == 0 && js_input) {
-                    void* native_ptr = m->data;
-                    m->type = (void*)&EmptyMap;
-                    m->data = NULL;
-                    m->data_cap = 0;
-                    String* tag_key = heap_create_name("__ta__", 6);
-                    map_put(m, tag_key, (Item){.item = i2it((int64_t)(uintptr_t)native_ptr)}, js_input);
-                }
-                break;  // fall through to regular property set
-            case MAP_KIND_ITERATOR:
-                // v28: iterators are opaque — ignore external property writes
-                return value;
-            case MAP_KIND_PROCESS_ENV:
-                // process.env: symbols as keys/values throw TypeError
-                if (get_type_id(key) == LMD_TYPE_SYMBOL) {
-                    js_throw_type_error("Cannot convert a Symbol value to a string");
-                    return make_js_undefined();
-                }
-                if (get_type_id(value) == LMD_TYPE_SYMBOL) {
-                    js_throw_type_error("Cannot convert a Symbol value to a string");
-                    return make_js_undefined();
-                }
-                // process.env coerces all values to strings (Node.js semantics)
-                // but allow sentinel values through for delete operations
-                if (get_type_id(value) != LMD_TYPE_STRING && value.item != JS_DELETED_SENTINEL_VAL) {
-                    value = js_to_string(value);
-                }
-                // propagate to actual system environment (Node.js semantics)
-                if (get_type_id(key) == LMD_TYPE_STRING && get_type_id(value) == LMD_TYPE_STRING) {
-                    String* env_key = it2s(key);
-                    String* env_val = it2s(value);
-                    if (env_key && env_val) {
-                        char kbuf[256], vbuf[4096];
-                        int klen = env_key->len < 255 ? env_key->len : 255;
-                        int vlen = env_val->len < 4095 ? env_val->len : 4095;
-                        memcpy(kbuf, env_key->chars, klen); kbuf[klen] = '\0';
-                        memcpy(vbuf, env_val->chars, vlen); vbuf[vlen] = '\0';
-                        if (vlen == 0) {
-                            unsetenv(kbuf);
-                        } else {
-                            setenv(kbuf, vbuf, 1);
-                        }
-                    }
-                }
-                break;  // fall through to regular property set
-            case MAP_KIND_PROXY:
-                return js_proxy_trap_set(object, key, value);
-            default:
-                break;  // typed arrays fall through to regular set
-            }
+            Item exotic_result = ItemNull;
+            if (js_try_exotic_property_set(object, key, &value, &exotic_result)) return exotic_result;
         }
         // Setter property dispatch: check for __set_<propName> on object or prototype
         // Skip setter check only for __get_/__set_ keys (to prevent infinite recursion)
@@ -8309,12 +8348,20 @@ static const char* js_builtin_method_spec_display_name(const JsBuiltinMethodSpec
     return spec->display_name ? spec->display_name : spec->name;
 }
 
-static Item js_lookup_builtin_method_spec(const JsBuiltinMethodSpec* specs, const char* name, int len) {
-    if (!specs || !name) return ItemNull;
+static const JsBuiltinMethodSpec* js_find_builtin_method_spec(const JsBuiltinMethodSpec* specs, const char* name, int len) {
+    if (!specs || !name) return NULL;
     for (int i = 0; specs[i].name; i++) {
         if (len == specs[i].len && strncmp(name, specs[i].name, len) == 0) {
-            return js_get_or_create_builtin(specs[i].builtin_id, js_builtin_method_spec_display_name(&specs[i]), specs[i].param_count);
+            return &specs[i];
         }
+    }
+    return NULL;
+}
+
+static Item js_lookup_builtin_method_spec(const JsBuiltinMethodSpec* specs, const char* name, int len) {
+    const JsBuiltinMethodSpec* spec = js_find_builtin_method_spec(specs, name, len);
+    if (spec) {
+        return js_get_or_create_builtin(spec->builtin_id, js_builtin_method_spec_display_name(spec), spec->param_count);
     }
     return ItemNull;
 }
@@ -8440,6 +8487,12 @@ static const JsBuiltinMethodSpec JS_FUNCTION_PROTOTYPE_METHOD_SPECS[] = {
     {NULL, 0, 0, 0}
 };
 
+static const JsBuiltinMethodSpec JS_BOOLEAN_PROTOTYPE_METHOD_SPECS[] = {
+    {"toString", 8, JS_BUILTIN_BOOL_TO_STRING, 0},
+    {"valueOf", 7, JS_BUILTIN_BOOL_VALUE_OF, 0},
+    {NULL, 0, 0, 0}
+};
+
 static const JsBuiltinMethodSpec JS_ARRAY_PROTOTYPE_METHOD_SPECS[] = {
     {"push", 4, JS_BUILTIN_ARR_PUSH, 1},
     {"pop", 3, JS_BUILTIN_ARR_POP, 0},
@@ -8467,6 +8520,7 @@ static const JsBuiltinMethodSpec JS_ARRAY_PROTOTYPE_METHOD_SPECS[] = {
     {"fill", 4, JS_BUILTIN_ARR_FILL, 1},
     {"copyWithin", 10, JS_BUILTIN_ARR_COPY_WITHIN, 2},
     {"toString", 8, JS_BUILTIN_ARR_TO_STRING, 0},
+    {"toLocaleString", 14, JS_BUILTIN_OBJ_TO_LOCALE_STRING, 0},
     {"keys", 4, JS_BUILTIN_ARR_KEYS, 0},
     {"values", 6, JS_BUILTIN_ARR_VALUES, 0},
     {"entries", 7, JS_BUILTIN_ARR_ENTRIES, 0},
@@ -8484,9 +8538,16 @@ static const JsBuiltinMethodSpec JS_ARRAY_PROTOTYPE_METHOD_SPECS[] = {
 static const JsBuiltinMethodSpec JS_NUMBER_PROTOTYPE_METHOD_SPECS[] = {
     {"toString", 8, JS_BUILTIN_NUM_TO_STRING, 1},
     {"valueOf", 7, JS_BUILTIN_NUM_VALUE_OF, 0},
+    {"toLocaleString", 14, JS_BUILTIN_OBJ_TO_LOCALE_STRING, 0},
     {"toFixed", 7, JS_BUILTIN_NUM_TO_FIXED, 1},
     {"toPrecision", 11, JS_BUILTIN_NUM_TO_PRECISION, 1},
     {"toExponential", 13, JS_BUILTIN_NUM_TO_EXPONENTIAL, 1},
+    {NULL, 0, 0, 0}
+};
+
+static const JsBuiltinMethodSpec JS_SYMBOL_PROTOTYPE_METHOD_SPECS[] = {
+    {"toString", 8, JS_BUILTIN_SYM_TO_STRING, 0},
+    {"valueOf", 7, JS_BUILTIN_OBJ_VALUE_OF, 0},
     {NULL, 0, 0, 0}
 };
 
@@ -8680,6 +8741,7 @@ static const JsBuiltinMethodSpec JS_DATE_PROTOTYPE_METHOD_SPECS[] = {
     {"toDateString", 12, JS_BUILTIN_DATE_TO_DATE_STRING, 0},
     {"toTimeString", 12, JS_BUILTIN_DATE_TO_TIME_STRING, 0},
     {"toString", 8, JS_BUILTIN_DATE_TO_STRING, 0},
+    {"toLocaleString", 14, JS_BUILTIN_OBJ_TO_LOCALE_STRING, 0},
     {"toLocaleDateString", 18, JS_BUILTIN_DATE_TO_LOCALE_DATE_STRING, 0},
     {"toLocaleTimeString", 18, JS_BUILTIN_DATE_TO_LOCALE_DATE_STRING, 0},
     {"valueOf", 7, JS_BUILTIN_DATE_VALUE_OF, 0},
@@ -8922,7 +8984,121 @@ static const JsBuiltinMethodSpec* js_get_prototype_method_specs_for_type(TypeId 
     if (type == LMD_TYPE_FUNC) return JS_FUNCTION_PROTOTYPE_METHOD_SPECS;
     if (type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT) return JS_NUMBER_PROTOTYPE_METHOD_SPECS;
     if (type == LMD_TYPE_STRING) return JS_STRING_PROTOTYPE_METHOD_SPECS;
+    if (type == LMD_TYPE_BOOL) return JS_BOOLEAN_PROTOTYPE_METHOD_SPECS;
     return NULL;
+}
+
+static const JsBuiltinMethodSpec* js_get_prototype_method_specs_for_class_or_type(
+    int js_class, TypeId fallback_type, int* out_flags, bool* out_use_cache) {
+    if (out_flags) *out_flags = 0;
+    if (out_use_cache) *out_use_cache = true;
+    switch ((JsClass)js_class) {
+    case JS_CLASS_OBJECT: return JS_OBJECT_PROTOTYPE_METHOD_SPECS;
+    case JS_CLASS_FUNCTION: return JS_FUNCTION_PROTOTYPE_METHOD_SPECS;
+    case JS_CLASS_BOOLEAN: return JS_BOOLEAN_PROTOTYPE_METHOD_SPECS;
+    case JS_CLASS_NUMBER: return JS_NUMBER_PROTOTYPE_METHOD_SPECS;
+    case JS_CLASS_SYMBOL: return JS_SYMBOL_PROTOTYPE_METHOD_SPECS;
+    case JS_CLASS_STRING: return JS_STRING_PROTOTYPE_METHOD_SPECS;
+    case JS_CLASS_ARRAY: return JS_ARRAY_PROTOTYPE_METHOD_SPECS;
+    case JS_CLASS_DATE: return JS_DATE_PROTOTYPE_METHOD_SPECS;
+    case JS_CLASS_REGEXP: return JS_REGEXP_PROTOTYPE_METHOD_SPECS;
+    case JS_CLASS_PROMISE: return JS_PROMISE_PROTOTYPE_METHOD_SPECS;
+    case JS_CLASS_MAP: return JS_MAP_PROTOTYPE_METHOD_SPECS;
+    case JS_CLASS_SET: return JS_SET_PROTOTYPE_METHOD_SPECS;
+    case JS_CLASS_WEAK_MAP: return JS_WEAKMAP_PROTOTYPE_METHOD_SPECS;
+    case JS_CLASS_WEAK_SET: return JS_WEAKSET_PROTOTYPE_METHOD_SPECS;
+    case JS_CLASS_ARRAY_BUFFER: return JS_ARRAYBUFFER_PROTOTYPE_METHOD_SPECS;
+    case JS_CLASS_DATA_VIEW:
+        if (out_use_cache) *out_use_cache = false;
+        return JS_DATAVIEW_PROTOTYPE_METHOD_SPECS;
+    case JS_CLASS_TYPED_ARRAY:
+        if (out_flags) *out_flags = JS_FUNC_FLAG_TYPED_ARRAY_METHOD;
+        if (out_use_cache) *out_use_cache = false;
+        return JS_TYPED_ARRAY_PROTOTYPE_METHOD_SPECS;
+    default:
+        break;
+    }
+    return js_get_prototype_method_specs_for_type(fallback_type);
+}
+
+static void js_append_builtin_method_spec_names(const JsBuiltinMethodSpec* specs, Item result);
+
+static Item js_builtin_registry_data_descriptor_from_spec(const JsBuiltinMethodSpec* spec,
+                                                          int flags, bool use_cache) {
+    if (!spec) return make_js_undefined();
+    Item value = js_create_builtin_function_from_spec(spec, flags, use_cache);
+    Item desc = js_new_object();
+    js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, value);
+    js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
+    js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(false)});
+    js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
+    return desc;
+}
+
+static Item js_builtin_registry_accessor_descriptor_from_spec(const JsBuiltinMethodSpec* spec,
+                                                              int flags) {
+    if (!spec) return make_js_undefined();
+    Item getter = js_create_builtin_function_from_spec(spec, flags, false);
+    Item desc = js_new_object();
+    js_property_set(desc, (Item){.item = s2it(heap_create_name("get", 3))}, getter);
+    js_property_set(desc, (Item){.item = s2it(heap_create_name("set", 3))}, make_js_undefined());
+    js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(false)});
+    js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
+    return desc;
+}
+
+extern "C" Item js_builtin_registry_prototype_method_descriptor(
+    int js_class, TypeId fallback_type, const char* name, int len) {
+    int flags = 0;
+    bool use_cache = true;
+    const JsBuiltinMethodSpec* specs =
+        js_get_prototype_method_specs_for_class_or_type(js_class, fallback_type, &flags, &use_cache);
+    const JsBuiltinMethodSpec* spec = js_find_builtin_method_spec(specs, name, len);
+    if (spec) return js_builtin_registry_data_descriptor_from_spec(spec, flags, use_cache);
+
+    if ((JsClass)js_class == JS_CLASS_TYPED_ARRAY) {
+        spec = js_find_builtin_method_spec(JS_TYPED_ARRAY_STUB_METHOD_SPECS, name, len);
+        if (spec) {
+            return js_builtin_registry_data_descriptor_from_spec(
+                spec, JS_FUNC_FLAG_TYPED_ARRAY_METHOD, false);
+        }
+        spec = js_find_builtin_method_spec(JS_TYPED_ARRAY_ACCESSOR_SPECS, name, len);
+        if (spec) {
+            return js_builtin_registry_accessor_descriptor_from_spec(
+                spec, JS_FUNC_FLAG_TYPED_ARRAY_METHOD);
+        }
+    }
+    if ((JsClass)js_class == JS_CLASS_DATA_VIEW) {
+        spec = js_find_builtin_method_spec(JS_DATAVIEW_ACCESSOR_SPECS, name, len);
+        if (spec) {
+            return js_builtin_registry_accessor_descriptor_from_spec(
+                spec, JS_FUNC_FLAG_DATA_VIEW_ACCESSOR | JS_FUNC_FLAG_STRICT);
+        }
+    }
+    return make_js_undefined();
+}
+
+extern "C" bool js_builtin_registry_has_prototype_method(
+    int js_class, TypeId fallback_type, const char* name, int len) {
+    Item desc = js_builtin_registry_prototype_method_descriptor(js_class, fallback_type, name, len);
+    return get_type_id(desc) != LMD_TYPE_UNDEFINED;
+}
+
+extern "C" void js_append_builtin_method_names_for_class(
+    int js_class, TypeId fallback_type, Item result) {
+    int flags = 0;
+    bool use_cache = true;
+    (void)flags;
+    (void)use_cache;
+    const JsBuiltinMethodSpec* specs =
+        js_get_prototype_method_specs_for_class_or_type(js_class, fallback_type, NULL, NULL);
+    js_append_builtin_method_spec_names(specs, result);
+    if ((JsClass)js_class == JS_CLASS_TYPED_ARRAY) {
+        js_append_builtin_method_spec_names(JS_TYPED_ARRAY_STUB_METHOD_SPECS, result);
+        js_append_builtin_method_spec_names(JS_TYPED_ARRAY_ACCESSOR_SPECS, result);
+    } else if ((JsClass)js_class == JS_CLASS_DATA_VIEW) {
+        js_append_builtin_method_spec_names(JS_DATAVIEW_ACCESSOR_SPECS, result);
+    }
 }
 
 static void js_populate_builtin_prototype_methods(Item prototype, const char* ctor_name, int ctor_len) {
@@ -8939,12 +9115,12 @@ static void js_append_builtin_method_spec_names(const JsBuiltinMethodSpec* specs
 }
 
 static Item js_lookup_builtin_prototype_method_for_class(JsClass cls, const char* name, int len) {
-    const JsBuiltinMethodSpec* specs = NULL;
-    if (cls == JS_CLASS_DATE) specs = JS_DATE_PROTOTYPE_METHOD_SPECS;
-    else if (cls == JS_CLASS_REGEXP) specs = JS_REGEXP_PROTOTYPE_METHOD_SPECS;
-    else if (cls == JS_CLASS_NUMBER) specs = JS_NUMBER_PROTOTYPE_METHOD_SPECS;
-    else if (cls == JS_CLASS_ARRAY) specs = JS_ARRAY_PROTOTYPE_METHOD_SPECS;
-    else if (cls == JS_CLASS_STRING) specs = JS_STRING_PROTOTYPE_METHOD_SPECS;
+    int flags = 0;
+    bool use_cache = true;
+    const JsBuiltinMethodSpec* specs =
+        js_get_prototype_method_specs_for_class_or_type((int)cls, LMD_TYPE_MAP, &flags, &use_cache);
+    (void)flags;
+    (void)use_cache;
     return js_lookup_builtin_method_spec(specs, name, len);
 }
 
@@ -9110,12 +9286,10 @@ extern "C" Item js_lookup_builtin_method(TypeId type, const char* name, int len)
         return js_get_or_create_builtin(JS_BUILTIN_OBJ_PROPERTY_IS_ENUMERABLE, "propertyIsEnumerable", 1);
     if (len == 8 && strncmp(name, "toString", 8) == 0 && type != LMD_TYPE_FUNC && type != LMD_TYPE_BOOL && type != LMD_TYPE_ARRAY && type != LMD_TYPE_STRING)
         return js_get_or_create_builtin(JS_BUILTIN_OBJ_TO_STRING, "toString", 0);
-    // Boolean.prototype.toString → returns "true"/"false"
-    if (len == 8 && strncmp(name, "toString", 8) == 0 && type == LMD_TYPE_BOOL)
-        return js_get_or_create_builtin(JS_BUILTIN_BOOL_TO_STRING, "toString", 0);
-    // Boolean.prototype.valueOf → type-checked
-    if (len == 7 && strncmp(name, "valueOf", 7) == 0 && type == LMD_TYPE_BOOL)
-        return js_get_or_create_builtin(JS_BUILTIN_BOOL_VALUE_OF, "valueOf", 0);
+    if (type == LMD_TYPE_BOOL) {
+        Item method = js_lookup_builtin_method_spec(JS_BOOLEAN_PROTOTYPE_METHOD_SPECS, name, len);
+        if (method.item != ItemNull.item) return method;
+    }
     if (len == 7 && strncmp(name, "valueOf", 7) == 0 && type != LMD_TYPE_FUNC)
         return js_get_or_create_builtin(JS_BUILTIN_OBJ_VALUE_OF, "valueOf", 0);
     if (len == 13 && strncmp(name, "isPrototypeOf", 13) == 0)
@@ -11595,11 +11769,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         // Fall through to default string conversion instead of throwing.
         TypeId tv = get_type_id(this_val);
         if (tv == LMD_TYPE_MAP && this_val.map &&
-            (this_val.map->map_kind == MAP_KIND_DOM ||
-             this_val.map->map_kind == MAP_KIND_CSS_NAMESPACE ||
-             this_val.map->map_kind == MAP_KIND_CSSOM ||
-             this_val.map->map_kind == MAP_KIND_DOC_PROXY ||
-             this_val.map->map_kind == MAP_KIND_FOREIGN_DOC)) {
+            js_map_kind_uses_default_object_to_primitive(this_val.map->map_kind)) {
             return (Item){.item = s2it(heap_create_name("[object Object]"))};
         }
         js_throw_type_error("Cannot convert object to primitive value");
