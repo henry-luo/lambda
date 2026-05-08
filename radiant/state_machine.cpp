@@ -13,6 +13,104 @@ extern bool is_view_focusable(View* view);
 
 #define STATE_MACHINE_RECORD_BUFSZ 2048
 
+static void transition_enter(RadiantState* state) {
+    if (state) state->transition_depth++;
+}
+
+static void transition_leave(RadiantState* state) {
+    if (state && state->transition_depth > 0) state->transition_depth--;
+}
+
+bool focus_transition(RadiantState* state,
+                      FocusTransitionKind kind,
+                      FocusTransitionArgs* args) {
+    if (!state) return false;
+
+    transition_enter(state);
+    switch (kind) {
+        case FOCUS_TRANSITION_FOCUS_ELEMENT:
+            focus_set(state, args ? args->target : NULL,
+                      args ? args->from_keyboard : false);
+            break;
+        case FOCUS_TRANSITION_BLUR_CURRENT:
+            focus_clear(state);
+            break;
+        case FOCUS_TRANSITION_MOVE:
+            if (!args) { transition_leave(state); return false; }
+            if (!focus_move(state, args->root, args->forward)) {
+                transition_leave(state);
+                return false;
+            }
+            break;
+        default:
+            transition_leave(state);
+            return false;
+    }
+    transition_leave(state);
+    return radiant_state_validate_interaction(state, NULL);
+}
+
+bool caret_transition(RadiantState* state,
+                      CaretTransitionKind kind,
+                      CaretTransitionArgs* args) {
+    if (!state || !args) return false;
+
+    transition_enter(state);
+    switch (kind) {
+        case CARET_TRANSITION_COLLAPSE_TO_BOUNDARY:
+            caret_set(state, args->target, args->offset);
+            break;
+        default:
+            transition_leave(state);
+            return false;
+    }
+    transition_leave(state);
+    return radiant_state_validate_interaction(state, NULL);
+}
+
+bool selection_transition(RadiantState* state,
+                          SelectionTransitionKind kind,
+                          SelectionTransitionArgs* args) {
+    if (!state) return false;
+
+    transition_enter(state);
+    switch (kind) {
+        case SELECTION_TRANSITION_START_POINTER_SELECTION:
+            if (!args) { transition_leave(state); return false; }
+            selection_start(state, args->target, args->focus_offset);
+            break;
+        case SELECTION_TRANSITION_EXTEND_TO_BOUNDARY:
+            if (!args) { transition_leave(state); return false; }
+            selection_extend(state, args->focus_offset);
+            break;
+        case SELECTION_TRANSITION_EXTEND_TO_VIEW:
+            if (!args) { transition_leave(state); return false; }
+            selection_extend_to_view(state, args->target, args->focus_offset);
+            break;
+        case SELECTION_TRANSITION_SET_BASE_AND_EXTENT:
+            if (!args) { transition_leave(state); return false; }
+            selection_set(state, args->target, args->anchor_offset, args->focus_offset);
+            break;
+        case SELECTION_TRANSITION_SELECT_ALL:
+            selection_select_all(state);
+            break;
+        case SELECTION_TRANSITION_COLLAPSE_TO_START:
+            selection_collapse(state, true);
+            break;
+        case SELECTION_TRANSITION_COLLAPSE_TO_END:
+            selection_collapse(state, false);
+            break;
+        case SELECTION_TRANSITION_CLEAR_SELECTION:
+            selection_clear(state);
+            break;
+        default:
+            transition_leave(state);
+            return false;
+    }
+    transition_leave(state);
+    return radiant_state_validate_interaction(state, NULL);
+}
+
 static void report_init(StateValidationReport* report) {
     if (!report) return;
     report->ok = true;

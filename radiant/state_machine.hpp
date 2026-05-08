@@ -25,6 +25,57 @@ typedef struct StateValidationReport {
     char message[256];
 } StateValidationReport;
 
+typedef enum FocusTransitionKind {
+    FOCUS_TRANSITION_FOCUS_ELEMENT,
+    FOCUS_TRANSITION_BLUR_CURRENT,
+    FOCUS_TRANSITION_MOVE,
+} FocusTransitionKind;
+
+typedef struct FocusTransitionArgs {
+    View* target;
+    bool from_keyboard;
+    View* root;
+    bool forward;
+} FocusTransitionArgs;
+
+typedef enum CaretTransitionKind {
+    CARET_TRANSITION_COLLAPSE_TO_BOUNDARY,
+} CaretTransitionKind;
+
+typedef struct CaretTransitionArgs {
+    View* target;
+    int offset;
+} CaretTransitionArgs;
+
+typedef enum SelectionTransitionKind {
+    SELECTION_TRANSITION_START_POINTER_SELECTION,
+    SELECTION_TRANSITION_EXTEND_TO_BOUNDARY,
+    SELECTION_TRANSITION_EXTEND_TO_VIEW,
+    SELECTION_TRANSITION_SET_BASE_AND_EXTENT,
+    SELECTION_TRANSITION_SELECT_ALL,
+    SELECTION_TRANSITION_COLLAPSE_TO_START,
+    SELECTION_TRANSITION_COLLAPSE_TO_END,
+    SELECTION_TRANSITION_CLEAR_SELECTION,
+} SelectionTransitionKind;
+
+typedef struct SelectionTransitionArgs {
+    View* target;
+    int anchor_offset;
+    int focus_offset;
+} SelectionTransitionArgs;
+
+bool focus_transition(RadiantState* state,
+                      FocusTransitionKind kind,
+                      FocusTransitionArgs* args);
+
+bool caret_transition(RadiantState* state,
+                      CaretTransitionKind kind,
+                      CaretTransitionArgs* args);
+
+bool selection_transition(RadiantState* state,
+                          SelectionTransitionKind kind,
+                          SelectionTransitionArgs* args);
+
 /* Begin one event cascade. `cause` follows the design vocabulary:
  * input, webdriver, event_sim, navigation, timer, script, internal, layout.
  * Returns 0 when logging is disabled; callers may still call end safely.

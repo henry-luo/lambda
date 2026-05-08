@@ -9,6 +9,7 @@
 #include "event_state_log.hpp"
 #include "form_control.hpp"
 #include "text_control.hpp"
+#include "state_machine.hpp"
 // str.h included via view.hpp
 #include "view.hpp"
 #include "../lib/arraylist.h"
@@ -1226,6 +1227,12 @@ void caret_set(RadiantState* state, View* view, int char_offset) {
     log_info("CARET_SET called: state=%p view=%p offset=%d", state, view, char_offset);
     if (!state) return;
 
+    if (state->transition_depth == 0) {
+        CaretTransitionArgs args = { .target = view, .offset = char_offset };
+        caret_transition(state, CARET_TRANSITION_COLLAPSE_TO_BOUNDARY, &args);
+        return;
+    }
+
     DomSelection* selection = sync_ensure_selection(state);
     if (!selection || !state->caret) {
         log_error("caret_set: failed to ensure DomSelection / legacy storage");
@@ -2397,6 +2404,16 @@ void caret_toggle_blink(RadiantState* state) {
 void selection_start(RadiantState* state, View* view, int char_offset) {
     if (!state) return;
 
+    if (state->transition_depth == 0) {
+        SelectionTransitionArgs args = {
+            .target = view,
+            .anchor_offset = char_offset,
+            .focus_offset = char_offset,
+        };
+        selection_transition(state, SELECTION_TRANSITION_START_POINTER_SELECTION, &args);
+        return;
+    }
+
     DomSelection* selection = sync_ensure_selection(state);
     if (!selection || !state->selection) {
         log_error("selection_start: failed to ensure DomSelection / legacy storage");
@@ -2441,6 +2458,17 @@ void selection_start(RadiantState* state, View* view, int char_offset) {
 
 void selection_extend(RadiantState* state, int char_offset) {
     if (!state) return;
+
+    if (state->transition_depth == 0) {
+        SelectionTransitionArgs args = {
+            .target = NULL,
+            .anchor_offset = 0,
+            .focus_offset = char_offset,
+        };
+        selection_transition(state, SELECTION_TRANSITION_EXTEND_TO_BOUNDARY, &args);
+        return;
+    }
+
     DomSelection* selection = sync_ensure_selection(state);
     if (!selection || !state->selection) return;
 
@@ -2486,6 +2514,17 @@ void selection_extend(RadiantState* state, int char_offset) {
 
 void selection_extend_to_view(RadiantState* state, View* view, int char_offset) {
     if (!state) return;
+
+    if (state->transition_depth == 0) {
+        SelectionTransitionArgs args = {
+            .target = view,
+            .anchor_offset = 0,
+            .focus_offset = char_offset,
+        };
+        selection_transition(state, SELECTION_TRANSITION_EXTEND_TO_VIEW, &args);
+        return;
+    }
+
     DomSelection* selection = sync_ensure_selection(state);
     if (!selection || !state->selection) return;
     bool was_selecting = state->selection->is_selecting;
@@ -2533,6 +2572,16 @@ void selection_extend_to_view(RadiantState* state, View* view, int char_offset) 
 void selection_set(RadiantState* state, View* view, int anchor_offset, int focus_offset) {
     if (!state) return;
 
+    if (state->transition_depth == 0) {
+        SelectionTransitionArgs args = {
+            .target = view,
+            .anchor_offset = anchor_offset,
+            .focus_offset = focus_offset,
+        };
+        selection_transition(state, SELECTION_TRANSITION_SET_BASE_AND_EXTENT, &args);
+        return;
+    }
+
     DomSelection* selection = sync_ensure_selection(state);
     if (!selection || !state->selection) return;
 
@@ -2577,6 +2626,12 @@ void selection_set(RadiantState* state, View* view, int anchor_offset, int focus
 
 void selection_select_all(RadiantState* state) {
     if (!state) return;
+
+    if (state->transition_depth == 0) {
+        selection_transition(state, SELECTION_TRANSITION_SELECT_ALL, NULL);
+        return;
+    }
+
     DomSelection* selection = sync_ensure_selection(state);
     if (!selection || !state->selection || !state->selection->view) return;
 
@@ -2638,6 +2693,14 @@ void selection_select_all(RadiantState* state) {
 
 void selection_collapse(RadiantState* state, bool to_start) {
     if (!state) return;
+
+    if (state->transition_depth == 0) {
+        selection_transition(state,
+            to_start ? SELECTION_TRANSITION_COLLAPSE_TO_START : SELECTION_TRANSITION_COLLAPSE_TO_END,
+            NULL);
+        return;
+    }
+
     DomSelection* selection = sync_ensure_selection(state);
     if (!selection || !state->selection) return;
 
@@ -2692,6 +2755,11 @@ void selection_collapse(RadiantState* state, bool to_start) {
 
 void selection_clear(RadiantState* state) {
     if (!state) return;
+
+    if (state->transition_depth == 0) {
+        selection_transition(state, SELECTION_TRANSITION_CLEAR_SELECTION, NULL);
+        return;
+    }
 
     DomSelection* selection = sync_ensure_selection(state);
     if (!selection) return;
@@ -2819,6 +2887,12 @@ static void focus_log_transition(RadiantState* state, const char* transition,
 void focus_set(RadiantState* state, View* view, bool from_keyboard) {
     if (!state) return;
 
+    if (state->transition_depth == 0) {
+        FocusTransitionArgs args = { .target = view, .from_keyboard = from_keyboard };
+        focus_transition(state, FOCUS_TRANSITION_FOCUS_ELEMENT, &args);
+        return;
+    }
+
     // Allocate focus state if needed
     if (!state->focus) {
         state->focus = (FocusState*)arena_alloc(state->arena, sizeof(FocusState));
@@ -2867,6 +2941,11 @@ void focus_set(RadiantState* state, View* view, bool from_keyboard) {
 void focus_clear(RadiantState* state) {
     if (!state || !state->focus) return;
 
+    if (state->transition_depth == 0) {
+        focus_transition(state, FOCUS_TRANSITION_BLUR_CURRENT, NULL);
+        return;
+    }
+
     FocusState* focus = state->focus;
 
     // Clear pseudo-states on current element
@@ -2914,6 +2993,16 @@ static void collect_focusable(View* view, ArrayList* list) {
 
 bool focus_move(RadiantState* state, View* root, bool forward) {
     if (!state || !root) return false;
+
+    if (state->transition_depth == 0) {
+        FocusTransitionArgs args = {
+            .target = NULL,
+            .from_keyboard = true,
+            .root = root,
+            .forward = forward,
+        };
+        return focus_transition(state, FOCUS_TRANSITION_MOVE, &args);
+    }
 
     // build list of focusable elements in DOM order
     ArrayList* focusable = arraylist_new(32);

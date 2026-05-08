@@ -5202,12 +5202,12 @@ void rebuild_lambda_doc(UiContext* uicon) {
         View* new_focused = find_matching_input(
             (View*)doc->view_tree->root, focus_tag, focus_class);
         if (new_focused) {
-            state->focus->current = new_focused;
+            focus_set(state, new_focused, false);
             log_debug("rebuild_lambda_doc: restored focus to new view %p (tag=%s class=%s)",
                      new_focused, focus_tag ? focus_tag : "", focus_class ? focus_class : "");
         } else if (state->focus) {
             // old focused element was removed; clear stale pointer so autofocus can fire
-            state->focus->current = nullptr;
+            focus_clear(state);
         }
     }
 
@@ -5489,11 +5489,11 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
         View* new_focused = find_matching_input(
             (View*)doc->view_tree->root, focus_tag, focus_class);
         if (new_focused) {
-            state->focus->current = new_focused;
+            focus_set(state, new_focused, false);
             log_debug("rebuild_lambda_doc_incremental: restored focus");
         } else if (state->focus) {
             // old focused element was removed; clear stale pointer so autofocus can fire
-            state->focus->current = nullptr;
+            focus_clear(state);
         }
     }
 
