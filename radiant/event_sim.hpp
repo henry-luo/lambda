@@ -95,6 +95,7 @@ enum SimEventType {
     // Assertions
     SIM_EVENT_ASSERT_CARET,
     SIM_EVENT_ASSERT_SELECTION,
+    SIM_EVENT_ASSERT_PREEDIT,   // verify transient IME preedit text
     SIM_EVENT_ASSERT_TARGET,
     SIM_EVENT_ASSERT_TEXT,     // verify element text content
     SIM_EVENT_ASSERT_VALUE,    // verify form field value

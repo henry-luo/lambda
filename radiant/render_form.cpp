@@ -221,6 +221,58 @@ static int password_mask_byte_offset(const char* src, int src_byte_off) {
     return cp * 3;
 }
 
+static uint32_t utf8_byte_offset_for_codepoints(const char* text, uint32_t len,
+                                                uint32_t codepoints) {
+    if (!text || codepoints == 0) return 0;
+    uint32_t seen = 0;
+    uint32_t i = 0;
+    while (i < len && seen < codepoints) {
+        unsigned char b = (unsigned char)text[i];
+        uint32_t step = 1;
+        if (b >= 0xF0) step = 4;
+        else if (b >= 0xE0) step = 3;
+        else if (b >= 0xC0) step = 2;
+        if (i + step > len) step = 1;
+        i += step;
+        seen++;
+    }
+    return i > len ? len : i;
+}
+
+static char* build_preedit_display_text(FormControlProp* form,
+                                        const char* value,
+                                        uint32_t value_len,
+                                        uint32_t* out_preedit_start,
+                                        uint32_t* out_preedit_end,
+                                        uint32_t* out_caret_byte) {
+    if (!form || !form->preedit_utf8 || form->preedit_len == 0) return nullptr;
+    if (!value) { value = ""; value_len = 0; }
+
+    uint32_t start = tc_utf16_to_utf8_offset(value, value_len, form->selection_start);
+    uint32_t end = tc_utf16_to_utf8_offset(value, value_len, form->selection_end);
+    if (start > end) { uint32_t t = start; start = end; end = t; }
+    if (start > value_len) start = value_len;
+    if (end > value_len) end = value_len;
+
+    uint32_t caret_in_preedit = utf8_byte_offset_for_codepoints(
+        form->preedit_utf8, form->preedit_len, form->preedit_caret);
+    uint32_t display_len = start + form->preedit_len + (value_len - end);
+    char* display = (char*)malloc((size_t)display_len + 1);
+    if (!display) return nullptr;
+
+    if (start > 0) memcpy(display, value, start);
+    memcpy(display + start, form->preedit_utf8, form->preedit_len);
+    if (end < value_len) {
+        memcpy(display + start + form->preedit_len, value + end, value_len - end);
+    }
+    display[display_len] = '\0';
+
+    if (out_preedit_start) *out_preedit_start = start;
+    if (out_preedit_end) *out_preedit_end = start + form->preedit_len;
+    if (out_caret_byte) *out_caret_byte = start + caret_in_preedit;
+    return display;
+}
+
 /**
  * Render a text input control (text, password, email, etc.)
  */
@@ -266,13 +318,25 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
     // every codepoint with U+25CF so the existing measurement and rendering
     // paths can treat it uniformly. The unmasked `src_text` is still used
     // for caret-byte→codepoint mapping.
-    const char* src_text = form->value;
+    const char* value_text = form->value ? form->value : "";
+    uint32_t value_len = (uint32_t)strlen(value_text);
+    uint32_t preedit_start = 0;
+    uint32_t preedit_end = 0;
+    uint32_t preedit_caret_byte = 0;
+    char* preedit_display = nullptr;
+    bool has_preedit = form->preedit_utf8 && form->preedit_len > 0;
+    const char* src_text = value_text;
     bool is_placeholder = false;
-    if (!src_text || !*src_text) {
+    if (has_preedit) {
+        preedit_display = build_preedit_display_text(form, value_text, value_len,
+                                                     &preedit_start, &preedit_end,
+                                                     &preedit_caret_byte);
+        if (preedit_display) src_text = preedit_display;
+    } else if (!src_text || !*src_text) {
         src_text = form->placeholder;
         is_placeholder = true;
     }
-    bool is_password = !is_placeholder && src_text
+    bool is_password = !has_preedit && !is_placeholder && src_text
         && form->input_type && strcmp(form->input_type, "password") == 0;
     char* mask_buf = nullptr;
     const char* text = src_text;
@@ -298,8 +362,10 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
     bool focused_here = state && focus_get(state) == (View*)block;
     float caret_x_logical = 0.0f;
     int caret_byte = 0;
-    if (focused_here && caret_get_offset(state, &caret_byte) && !is_placeholder && text && block->font) {
+    if (focused_here && !is_placeholder && text && block->font &&
+        (has_preedit || caret_get_offset(state, &caret_byte))) {
         int src_len = src_text ? (int)strlen(src_text) : 0;
+        if (has_preedit) caret_byte = (int)preedit_caret_byte;
         if (caret_byte > src_len) caret_byte = src_len;
         int meas_byte = is_password
             ? password_mask_byte_offset(src_text, caret_byte)
@@ -323,7 +389,7 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
 
     // Draw selection highlight BEFORE the text so glyphs render on top
     // of the highlight (matches native widgets and CSS ::selection).
-    if (focused_here && !is_placeholder && form->tc_initialized
+    if (focused_here && !has_preedit && !is_placeholder && form->tc_initialized
         && form->selection_start != form->selection_end
         && text && *text) {
         uint32_t a8_src = tc_utf16_to_utf8_offset(form->current_value
@@ -369,6 +435,18 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
                              block->font, text_color);
     }
 
+    if (has_preedit && preedit_display && block->font && preedit_end > preedit_start) {
+        float ux0 = text_x + measure_input_text_width(rdcon, block->font, text,
+                                                      (int)preedit_start) * s - scroll_px;
+        float ux1 = text_x + measure_input_text_width(rdcon, block->font, text,
+                                                      (int)preedit_end) * s - scroll_px;
+        if (ux1 > ux0) {
+            Color underline = make_color(0x33, 0x33, 0x33, 0xCC);
+            rc_fill_rect(rdcon, ux0, text_y + font_size_scaled - 2.0f * s,
+                         ux1 - ux0, 1.0f * s, underline);
+        }
+    }
+
     // Draw caret if this input has focus
     if (focused_here) {
         // F4: respect global caret blink visibility.
@@ -385,6 +463,7 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
     }
 
     if (mask_buf) free(mask_buf);
+    if (preedit_display) free(preedit_display);
     log_debug("[FORM] render_text_input at (%.1f, %.1f) size %.1fx%.1f", x, y, w, h);
 }
 
@@ -994,9 +1073,21 @@ void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
     // when an actual placeholder string is present — otherwise an empty
     // textarea would be flagged as a placeholder and the caret-render
     // path (guarded by !is_placeholder) would skip drawing the caret.
-    const char* text = form->value;
+    const char* value_text = form->value ? form->value : "";
+    uint32_t value_len = (uint32_t)strlen(value_text);
+    uint32_t preedit_start = 0;
+    uint32_t preedit_end = 0;
+    uint32_t preedit_caret_byte = 0;
+    char* preedit_display = nullptr;
+    bool has_preedit = form->preedit_utf8 && form->preedit_len > 0;
+    const char* text = value_text;
     bool is_placeholder = false;
-    if ((!text || !*text) && form->placeholder && *form->placeholder) {
+    if (has_preedit) {
+        preedit_display = build_preedit_display_text(form, value_text, value_len,
+                                                     &preedit_start, &preedit_end,
+                                                     &preedit_caret_byte);
+        if (preedit_display) text = preedit_display;
+    } else if ((!text || !*text) && form->placeholder && *form->placeholder) {
         text = form->placeholder;
         is_placeholder = true;
     }
@@ -1087,7 +1178,7 @@ void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
     if (state && !is_placeholder) {
         View* focused = focus_get(state);
         int sel_start = 0, sel_end = 0;
-        if (focused == (View*)block && selection_get_anchor_range(state, focused, &sel_start, &sel_end)) {
+        if (!has_preedit && focused == (View*)block && selection_get_anchor_range(state, focused, &sel_start, &sel_end)) {
             const char* value = form->value;
             int val_len = value ? (int)strlen(value) : 0;
             if (sel_start < 0) sel_start = 0;
@@ -1144,6 +1235,34 @@ void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
         }
     }
 
+    if (has_preedit && preedit_display && block->font && preedit_end > preedit_start) {
+        int line_start = 0;
+        int start_line = 0, start_col = 0;
+        int end_line = 0, end_col = 0;
+        textarea_offset_to_line_col(preedit_display, (int)preedit_start, &start_line, &start_col);
+        textarea_offset_to_line_col(preedit_display, (int)preedit_end, &end_line, &end_col);
+        if (start_line == end_line) {
+            line_start = textarea_line_start(preedit_display, start_line);
+            FontBox fbox = {0};
+            setup_font(rdcon->ui_context, &fbox, block->font);
+            if (fbox.font_handle) {
+                float pixel_ratio = (rdcon->ui_context && rdcon->ui_context->pixel_ratio > 0)
+                    ? rdcon->ui_context->pixel_ratio : 1.0f;
+                float ux0 = content_x + measure_text_width(fbox.font_handle, block->font,
+                                                           pixel_ratio, preedit_display + line_start,
+                                                           start_col) * s;
+                float ux1 = content_x + measure_text_width(fbox.font_handle, block->font,
+                                                           pixel_ratio, preedit_display + line_start,
+                                                           end_col) * s;
+                if (ux1 > ux0) {
+                    Color underline = make_color(0x33, 0x33, 0x33, 0xCC);
+                    float uy = content_y + start_line * line_height + font_size_scaled - 2.0f * s;
+                    rc_fill_rect(rdcon, ux0, uy, ux1 - ux0, 1.0f * s, underline);
+                }
+            }
+        }
+    }
+
     // Draw caret if this textarea has focus. Note: do NOT gate on
     // !is_placeholder — when the value is empty and a placeholder is
     // shown, the caret still belongs at offset 0 (matches native
@@ -1151,9 +1270,11 @@ void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
     if (state) {
         View* focused = focus_get(state);
         int caret_off = 0;
-        if (focused == (View*)block && caret_is_visible(state) && caret_get_offset(state, &caret_off)) {
-            const char* value = form->value;
+        if (focused == (View*)block && caret_is_visible(state) &&
+            (has_preedit || caret_get_offset(state, &caret_off))) {
+            const char* value = text;
             int val_len = value ? (int)strlen(value) : 0;
+            if (has_preedit) caret_off = (int)preedit_caret_byte;
             if (caret_off > val_len) caret_off = val_len;
 
             // compute caret line/column from byte offset
@@ -1185,6 +1306,8 @@ void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
             rc_fill_rect(rdcon, caret_x, caret_y_pos, caret_w, caret_h, ta_caret_color);
         }
     }
+
+    if (preedit_display) free(preedit_display);
 
     log_debug("[FORM] render_textarea at (%.1f, %.1f) size %.1fx%.1f", x, y, w, h);
 }

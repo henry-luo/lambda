@@ -127,12 +127,6 @@ const char* ns_to_utf8(id obj) {
                   utf8, (unsigned long)selectedRange.location);
         return;
     }
-    {
-        struct objc_super sup = { self, [self superclass] };
-        ((void (*)(struct objc_super*, SEL, id, NSRange, NSRange))objc_msgSendSuper)(
-            &sup, _cmd, string, selectedRange, replacementRange);
-        return;
-    }
     const char* utf8 = ns_to_utf8(string);
     uint32_t len = (uint32_t)strlen(utf8);
     if (!te_ime_is_composing(e)) {
