@@ -5588,6 +5588,22 @@ extern "C" Item js_reflect_own_keys(Item obj) {
     return result;
 }
 
+static Item js_make_reflect_set_value_desc(Item value, bool include_create_attrs) {
+    Item desc = js_new_object();
+    js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, value);
+    if (include_create_attrs) {
+        js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
+        js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(true)});
+        js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
+    }
+    return desc;
+}
+
+static Item js_reflect_set_define_receiver(Item receiver, Item key, Item value, bool include_create_attrs) {
+    Item desc = js_make_reflect_set_value_desc(value, include_create_attrs);
+    return js_reflect_define_property(receiver, key, desc);
+}
+
 // Reflect.set(target, key, value [, receiver]) — returns boolean.
 // ES §28.1.14 → §10.1.9.1 OrdinarySet → §10.1.9.2 OrdinarySetWithOwnDescriptor.
 extern "C" Item js_reflect_set(Item target, Item key, Item value, Item receiver) {
@@ -5663,6 +5679,14 @@ extern "C" Item js_reflect_set(Item target, Item key, Item value, Item receiver)
     Item cur = target;
     int depth = 0;
     while (cur.item != ItemNull.item && depth < 100) {
+        if (get_type_id(cur) == LMD_TYPE_MAP &&
+            cur.map && cur.map->map_kind == MAP_KIND_TYPED_ARRAY) {
+            double numeric_index = 0;
+            bool is_negative_zero = false;
+            if (js_ta_key_canonical_numeric(key, &numeric_index, &is_negative_zero)) {
+                return js_reflect_set(cur, key, value, receiver);
+            }
+        }
         ownDesc = js_object_get_own_property_descriptor(cur, key);
         if (get_type_id(ownDesc) == LMD_TYPE_MAP) break;
         cur = js_get_prototype_of(cur);
@@ -5729,9 +5753,9 @@ extern "C" Item js_reflect_set(Item target, Item key, Item value, Item receiver)
                 bool r_writable = rh_w ? it2b(js_to_boolean(rw)) : true;
                 if (!r_writable) return (Item){.item = b2it(false)};
             }
-            // CreateDataProperty(receiver, key, value).
-            js_property_set(receiver, key, value);
-            return (Item){.item = b2it(true)};
+            Item def = js_reflect_set_define_receiver(receiver, key, value, get_type_id(recv_own) != LMD_TYPE_MAP);
+            if (js_check_exception()) return ItemNull;
+            return def;
         }
         // receiver == target: ordinary write.
         js_property_set(target, key, value);
@@ -5757,8 +5781,9 @@ extern "C" Item js_reflect_set(Item target, Item key, Item value, Item receiver)
             bool r_writable = rh_w ? it2b(js_to_boolean(rw)) : true;
             if (!r_writable) return (Item){.item = b2it(false)};
         }
-        js_property_set(receiver, key, value);
-        return (Item){.item = b2it(true)};
+        Item def = js_reflect_set_define_receiver(receiver, key, value, get_type_id(recv_own) != LMD_TYPE_MAP);
+        if (js_check_exception()) return ItemNull;
+        return def;
     }
 }
 
@@ -11271,20 +11296,35 @@ extern "C" Item js_get_global_object() {
 #define JS_WITH_STACK_MAX 16
 static Item js_with_stack[JS_WITH_STACK_MAX];
 static int js_with_stack_depth = 0;
+static Item js_last_with_binding_scope = {.item = ITEM_NULL};
+static Item js_last_with_binding_key = {.item = ITEM_NULL};
+static bool js_last_with_binding_valid = false;
+
+static bool js_with_binding_key_same(Item a, Item b) {
+    if (a.item == b.item) return true;
+    if (get_type_id(a) != LMD_TYPE_STRING || get_type_id(b) != LMD_TYPE_STRING) return false;
+    String* sa = it2s(a);
+    String* sb = it2s(b);
+    if (!sa || !sb || sa->len != sb->len) return false;
+    return memcmp(sa->chars, sb->chars, sa->len) == 0;
+}
 
 extern "C" void js_with_batch_reset(void) {
     js_with_stack_depth = 0;
+    js_last_with_binding_valid = false;
     memset(js_with_stack, 0, sizeof(js_with_stack));
 }
 
 extern "C" void js_with_push(Item obj) {
     if (js_with_stack_depth < JS_WITH_STACK_MAX) {
+        js_last_with_binding_valid = false;
         js_with_stack[js_with_stack_depth++] = obj;
     }
 }
 
 extern "C" void js_with_pop() {
     if (js_with_stack_depth > 0) {
+        js_last_with_binding_valid = false;
         js_with_stack_depth--;
     }
 }
@@ -11304,8 +11344,11 @@ static Item js_with_scope_lookup(Item key, bool* found) {
     for (int i = js_with_stack_depth - 1; i >= 0; i--) {
         Item scope_obj = js_with_stack[i];
         if (get_type_id(scope_obj) == LMD_TYPE_MAP) {
-            extern Item js_has_own_property(Item obj, Item key);
-            if (it2b(js_has_own_property(scope_obj, key))) {
+            if (it2b(js_in(key, scope_obj))) {
+                if (js_check_exception()) {
+                    *found = true;
+                    return ItemNull;
+                }
                 // ES2023 9.1.1.2.1 step 6-9: check @@unscopables
                 Item unscopables_sym = (Item){.item = i2it(-(int64_t)(11 + JS_SYMBOL_BASE))}; // Symbol.unscopables
                 Item unscopables = js_property_get(scope_obj, unscopables_sym);
@@ -11324,8 +11367,29 @@ static Item js_with_scope_lookup(Item key, bool* found) {
                         continue; // binding is blocked by @@unscopables
                     }
                 }
+                // GetBindingValue performs HasProperty again before [[Get]].
+                if (!it2b(js_in(key, scope_obj))) {
+                    if (js_check_exception()) {
+                        *found = true;
+                        return ItemNull;
+                    }
+                    *found = true;
+                    js_last_with_binding_valid = false;
+                    return make_js_undefined();
+                }
+                if (js_check_exception()) {
+                    *found = true;
+                    return ItemNull;
+                }
                 *found = true;
+                js_last_with_binding_scope = scope_obj;
+                js_last_with_binding_key = key;
+                js_last_with_binding_valid = true;
                 return js_property_get(scope_obj, key);
+            }
+            if (js_check_exception()) {
+                *found = true;
+                return ItemNull;
             }
         }
     }
@@ -11383,14 +11447,43 @@ extern "C" void js_set_global_property(Item key, Item value) {
         for (int i = js_with_stack_depth - 1; i >= 0; i--) {
             Item scope_obj = js_with_stack[i];
             if (get_type_id(scope_obj) == LMD_TYPE_MAP) {
-                extern Item js_has_own_property(Item obj, Item key);
-                if (it2b(js_has_own_property(scope_obj, key))) {
+                if (js_last_with_binding_valid &&
+                    js_last_with_binding_scope.item == scope_obj.item &&
+                    js_with_binding_key_same(js_last_with_binding_key, key)) {
+                    js_last_with_binding_valid = false;
+                    if (it2b(js_in(key, scope_obj))) {
+                        if (js_check_exception()) return;
+                        js_property_set(scope_obj, key, value);
+                        return;
+                    }
+                    if (js_check_exception()) return;
+                    continue;
+                }
+                if (it2b(js_in(key, scope_obj))) {
+                    if (js_check_exception()) return;
+                    Item unscopables_sym = (Item){.item = i2it(-(int64_t)(11 + JS_SYMBOL_BASE))};
+                    Item unscopables = js_property_get(scope_obj, unscopables_sym);
+                    if (js_check_exception()) return;
+                    if (get_type_id(unscopables) == LMD_TYPE_MAP) {
+                        Item blocked = js_property_get(unscopables, key);
+                        if (js_check_exception()) return;
+                        if (js_is_truthy(blocked)) {
+                            continue;
+                        }
+                    }
+                    if (!it2b(js_in(key, scope_obj))) {
+                        if (js_check_exception()) return;
+                        continue;
+                    }
+                    if (js_check_exception()) return;
                     js_property_set(scope_obj, key, value);
                     return;
                 }
+                if (js_check_exception()) return;
             }
         }
     }
+    js_last_with_binding_valid = false;
     Item global = js_get_global_this();
     js_property_set(global, key, value);
 }

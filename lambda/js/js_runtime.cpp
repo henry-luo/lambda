@@ -2251,9 +2251,12 @@ static bool js_try_exotic_property_set(Item object, Item key, Item* value, Item*
 }
 
 extern "C" Item js_property_get(Item object, Item key) {
-    // Convert Symbol keys to unique string keys for property lookup
-    if (js_key_is_symbol(key)) key = js_symbol_to_key(key);
     TypeId type = get_type_id(object);
+    bool proxy_key = false;
+    if (type == LMD_TYPE_MAP && object.map && object.map->map_kind == MAP_KIND_PROXY) {
+        proxy_key = true;
+    }
+    if (js_key_is_symbol(key) && !proxy_key) key = js_symbol_to_key(key);
 
     if (type == LMD_TYPE_MAP) {
         Map* m = object.map;
@@ -2280,6 +2283,9 @@ extern "C" Item js_property_get(Item object, Item key) {
             Item exotic_result = ItemNull;
             if (js_try_exotic_property_get(object, key, &exotic_result)) return exotic_result;
         }
+        // Convert Symbol keys to unique string keys for ordinary property lookup.
+        // Proxy traps above observe the original Symbol key.
+        if (js_key_is_symbol(key)) key = js_symbol_to_key(key);
         // Regular Lambda map (including JS objects)
         // P10f: Use fast lookup with pre-computed key length (memcmp instead of strncmp+strlen)
         // JS semantics: non-string keys are coerced to strings (ToPropertyKey)
@@ -7938,7 +7944,8 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         return js_reflect_prevent_extensions(arg0);
     }
     case JS_BUILTIN_REFLECT_SET: {
-        return js_reflect_set(arg0, arg1, arg2, ItemNull);
+        Item receiver = (arg_count > 3) ? args[3] : ItemNull;
+        return js_reflect_set(arg0, arg1, arg2, receiver);
     }
     case JS_BUILTIN_REFLECT_SET_PROTOTYPE_OF: {
         return js_reflect_set_prototype_of(arg0, arg1);

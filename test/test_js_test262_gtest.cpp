@@ -818,6 +818,10 @@ static std::string get_source_path(const std::string& test_path) {
         // ref/test262/test/... -> test/js262/test/...
         std::string stripped = std::string(TEST262_SOURCE_DIR) +
                                test_path.substr(strlen(TEST262_ROOT));
+        struct stat st;
+        if (stat(stripped.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) {
+            return test_path;
+        }
         return stripped;
     }
     return test_path;
