@@ -68,6 +68,115 @@ void scrollpane_drag(EventContext* evcon, ViewBlock* block);
 void update_scroller(ViewBlock* block, float content_width, float content_height);
 void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event);
 
+static const char* rdt_event_type_name(EventType type) {
+    switch (type) {
+    case RDT_EVENT_NIL: return "nil";
+    case RDT_EVENT_MOUSE_DOWN: return "mouse_down";
+    case RDT_EVENT_MOUSE_UP: return "mouse_up";
+    case RDT_EVENT_MOUSE_MOVE: return "mouse_move";
+    case RDT_EVENT_MOUSE_DRAG: return "mouse_drag";
+    case RDT_EVENT_SCROLL: return "scroll";
+    case RDT_EVENT_KEY_DOWN: return "key_down";
+    case RDT_EVENT_KEY_UP: return "key_up";
+    case RDT_EVENT_TEXT_INPUT: return "text_input";
+    case RDT_EVENT_COMPOSITION_START: return "composition_start";
+    case RDT_EVENT_COMPOSITION_UPDATE: return "composition_update";
+    case RDT_EVENT_COMPOSITION_END: return "composition_end";
+    case RDT_EVENT_FOCUS_IN: return "focus_in";
+    case RDT_EVENT_FOCUS_OUT: return "focus_out";
+    case RDT_EVENT_CLICK: return "click";
+    case RDT_EVENT_DBL_CLICK: return "dbl_click";
+    default: return "unknown";
+    }
+}
+
+static void event_log_raw_input(EventStateLog* log, uint64_t cascade_id,
+                                const RdtEvent* event) {
+    if (!event_state_log_enabled(log) || !event) return;
+
+    char buf[1024];
+    JsonWriter w;
+    event_state_log_begin_record(log, &w, buf, sizeof(buf), "input.raw", cascade_id);
+    jw_key(&w, "data");
+    jw_obj_begin(&w);
+        jw_kv_str(&w, "event", rdt_event_type_name(event->type));
+        jw_kv_double(&w, "timestamp", event->timestamp);
+        switch (event->type) {
+        case RDT_EVENT_MOUSE_DOWN:
+        case RDT_EVENT_MOUSE_UP:
+            jw_kv_int(&w, "x", event->mouse_button.x);
+            jw_kv_int(&w, "y", event->mouse_button.y);
+            jw_kv_int(&w, "button", event->mouse_button.button);
+            jw_kv_int(&w, "clicks", event->mouse_button.clicks);
+            jw_kv_int(&w, "mods", event->mouse_button.mods);
+            break;
+        case RDT_EVENT_MOUSE_MOVE:
+        case RDT_EVENT_MOUSE_DRAG:
+            jw_kv_int(&w, "x", event->mouse_position.x);
+            jw_kv_int(&w, "y", event->mouse_position.y);
+            break;
+        case RDT_EVENT_SCROLL:
+            jw_kv_int(&w, "x", event->scroll.x);
+            jw_kv_int(&w, "y", event->scroll.y);
+            jw_kv_double(&w, "xoffset", event->scroll.xoffset);
+            jw_kv_double(&w, "yoffset", event->scroll.yoffset);
+            break;
+        case RDT_EVENT_KEY_DOWN:
+        case RDT_EVENT_KEY_UP:
+            jw_kv_int(&w, "key", event->key.key);
+            jw_kv_int(&w, "scancode", event->key.scancode);
+            jw_kv_int(&w, "mods", event->key.mods);
+            break;
+        case RDT_EVENT_TEXT_INPUT:
+            jw_kv_uint(&w, "codepoint", event->text_input.codepoint);
+            break;
+        case RDT_EVENT_COMPOSITION_START:
+        case RDT_EVENT_COMPOSITION_UPDATE:
+        case RDT_EVENT_COMPOSITION_END:
+            jw_kv_str(&w, "text", event->composition.text);
+            jw_kv_uint(&w, "preedit_caret", event->composition.preedit_caret);
+            break;
+        default:
+            break;
+        }
+    jw_obj_end(&w);
+    event_state_log_finish_record(log, &w);
+}
+
+static void event_log_hit_target(EventStateLog* log, uint64_t cascade_id,
+                                 const EventContext* evcon) {
+    if (!event_state_log_enabled(log) || !evcon) return;
+
+    char buf[1536];
+    JsonWriter w;
+    event_state_log_begin_record(log, &w, buf, sizeof(buf), "hit.target", cascade_id);
+    jw_key(&w, "data");
+    jw_obj_begin(&w);
+        event_state_log_write_node_ref(&w, "target", (const DomNode*)evcon->target);
+        jw_kv_double(&w, "offset_x", evcon->offset_x);
+        jw_kv_double(&w, "offset_y", evcon->offset_y);
+        if (evcon->target_text_offset_valid) {
+            jw_kv_int(&w, "text_offset", evcon->target_text_offset);
+        }
+    jw_obj_end(&w);
+    event_state_log_finish_record(log, &w);
+}
+
+static void event_log_focused_target(EventStateLog* log, uint64_t cascade_id,
+                                     View* target) {
+    if (!event_state_log_enabled(log)) return;
+
+    char buf[1024];
+    JsonWriter w;
+    event_state_log_begin_record(log, &w, buf, sizeof(buf), "hit.target", cascade_id);
+    jw_key(&w, "data");
+    jw_obj_begin(&w);
+        event_state_log_write_node_ref(&w, "target", (const DomNode*)target);
+        jw_kv_str(&w, "source", "focus");
+    jw_obj_end(&w);
+    event_state_log_finish_record(log, &w);
+}
+
 void target_children(EventContext* evcon, View* view) {
     do {
         if (view->is_block()) {
@@ -1543,6 +1652,19 @@ static void post_html_handler_rebuild(EventContext* evcon,
 
     auto t1 = high_resolution_clock::now();
 
+    RadiantState* state = (RadiantState*)doc->state;
+
+    // Clear interaction targets before freeing views so transition helpers can
+    // still update pseudo-state mirrors on the old tree.
+    if (state) {
+        if (state->focus && state->focus->current) {
+            focus_clear(state);
+        } else {
+            selection_clear(state);
+            caret_clear(state);
+        }
+    }
+
     // Force full relayout by clearing view tree
     if (doc->view_tree) {
         view_pool_destroy(doc->view_tree);
@@ -1551,24 +1673,12 @@ static void post_html_handler_rebuild(EventContext* evcon,
     }
 
     // Clear stale view pointers in RadiantState — old views are now freed
-    RadiantState* state = (RadiantState*)doc->state;
     if (state) {
         state->hover_target = nullptr;
         state->active_target = nullptr;
         state->drag_target = nullptr;
         state->is_dragging = false;
         state->open_dropdown = nullptr;
-        if (state->caret) state->caret->view = nullptr;
-        if (state->selection) {
-            state->selection->view = nullptr;
-            state->selection->anchor_view = nullptr;
-            state->selection->focus_view = nullptr;
-            state->selection->is_selecting = false;
-        }
-        if (state->focus) {
-            state->focus->current = nullptr;
-            state->focus->previous = nullptr;
-        }
         if (state->cursor) state->cursor->view = nullptr;
         if (state->drag_drop) {
             state->drag_drop->source_view = nullptr;
@@ -3475,6 +3585,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
     RadiantState* cascade_state = (RadiantState*)doc->state;
     EventStateLog* cascade_log = cascade_state ? cascade_state->active_event_log : NULL;
     uint64_t cascade_id = state_begin_event_cascade(cascade_state, cascade_log, "input");
+    event_log_raw_input(cascade_log, cascade_id, event);
 
     // ------------------------------------------------------------------
     // Phase 6 (single source of truth): every selection_*/caret_* call
@@ -3501,6 +3612,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         log_debug("Mouse event at (%d, %d)", motion->x, motion->y);
         mouse_x = motion->x;  mouse_y = motion->y;
         target_html_doc(&evcon, doc->view_tree);
+        event_log_hit_target(cascade_log, cascade_id, &evcon);
 
         // Update hover state based on new target
         update_hover_state(&evcon, evcon.target);
@@ -4001,6 +4113,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         log_debug("Mouse button event (%d, %d)", btn_event->x, btn_event->y);
         mouse_x = btn_event->x;  mouse_y = btn_event->y; // changed to use btn_event's y
         target_html_doc(&evcon, doc->view_tree);
+        event_log_hit_target(cascade_log, cascade_id, &evcon);
 
         // Forward mouse button events to layer-mode webview
         if (evcon.target && evcon.target->is_element()) {
@@ -4933,6 +5046,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         log_debug("Mouse scroll event");
         mouse_x = scroll->x;  mouse_y = scroll->y; // updated to use scroll's x and y
         target_html_doc(&evcon, doc->view_tree);
+        event_log_hit_target(cascade_log, cascade_id, &evcon);
 
         // Forward scroll to layer-mode webview
         if (evcon.target && evcon.target->is_element()) {
@@ -5001,6 +5115,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         }
 
         View* focused = focus_get(state);
+        event_log_focused_target(cascade_log, cascade_id, focused);
         log_debug("Key down: key=%d, mods=0x%x, focused=%p", key_event->key, key_event->mods, focused);
         View* intent_target = focused ? focused
             : ((state->caret && state->caret->view) ? state->caret->view : nullptr);
@@ -5409,7 +5524,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         state->selection->is_selecting = false;
                     }
                     selection_extend(state, new_off);
-                    state->caret->char_offset = new_off;
                 };
 
                 // Cmd+C: copy selected textarea text to clipboard
@@ -5503,7 +5617,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     selection_start(state, focused, 0);
                     state->selection->is_selecting = false;
                     selection_extend(state, value_len);
-                    state->caret->char_offset = value_len;
                     evcon.need_repaint = true;
                     break;
                 }
@@ -5717,7 +5830,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                                 new_off--;
                             int new_len = focus_elem->form->value
                                 ? (int)strlen(focus_elem->form->value) : 0;
-                            state->caret->char_offset = new_off <= new_len ? new_off : new_len;
+                            caret_set(state, focused, new_off <= new_len ? new_off : new_len);
                         }
                     } else if (editable) {
                         uint32_t a, b;
@@ -5770,14 +5883,13 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             int new_len = focus_elem->form->value
                                 ? (int)strlen(focus_elem->form->value) : 0;
                             int new_off = keydown_sel_start + 1;
-                            state->caret->char_offset = new_off <= new_len ? new_off : new_len;
-                            selection_clear(state);
+                            caret_set(state, focused, new_off <= new_len ? new_off : new_len);
                         } else {
                             // normal enter: advance caret by 1 byte
                             int new_len = focus_elem->form->value
                                 ? (int)strlen(focus_elem->form->value) : 0;
                             int new_off = cur + 1;
-                            state->caret->char_offset = new_off <= new_len ? new_off : new_len;
+                            caret_set(state, focused, new_off <= new_len ? new_off : new_len);
                         }
                     } else if (editable) {
                         // Plain HTML textarea: insert newline ourselves.
@@ -5972,6 +6084,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             RadiantState* state = (RadiantState*)evcon.ui_context->document->state;
             if (state) {
                 View* focused = focus_get(state);
+                event_log_focused_target(cascade_log, cascade_id, focused);
                 if (focused && focused->is_element()) {
                     ViewBlock* fblock = (ViewBlock*)focused;
                     if (fblock->embed && fblock->embed->webview &&
@@ -6000,6 +6113,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         if (!state) break;
 
         View* focused = focus_get(state);
+        event_log_focused_target(cascade_log, cascade_id, focused);
         View* intent_target = focused ? focused
             : ((state->caret && state->caret->view) ? state->caret->view : nullptr);
         InputIntent intent;
@@ -6015,6 +6129,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         if (!state) break;
 
         View* focused = focus_get(state);
+        event_log_focused_target(cascade_log, cascade_id, focused);
         log_debug("Text input: codepoint=U+%04X, focused=%p", text_event->codepoint, focused);
 
         // Forward text input to layer-mode webview if focused
@@ -6096,7 +6211,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         }
                         const char* val = elem->form->value;
                         int val_len = val ? (int)strlen(val) : 0;
-                        state->caret->char_offset = new_off <= val_len ? new_off : val_len;
+                        caret_set(state, focused, new_off <= val_len ? new_off : val_len);
                     }
                 } else if (editable && state->caret) {
                     // No Lambda handler — insert directly into the form

@@ -2994,6 +2994,16 @@ static void collect_focusable(View* view, ArrayList* list) {
 bool focus_move(RadiantState* state, View* root, bool forward) {
     if (!state || !root) return false;
 
+    if (state->transition_depth == 0) {
+        FocusTransitionArgs args = {
+            .target = NULL,
+            .from_keyboard = true,
+            .root = root,
+            .forward = forward,
+        };
+        return focus_transition(state, FOCUS_TRANSITION_MOVE, &args);
+    }
+
     // build list of focusable elements in DOM order
     ArrayList* focusable = arraylist_new(32);
     collect_focusable(root, focusable);

@@ -28,11 +28,14 @@ typedef struct StateValidationReport {
 typedef enum FocusTransitionKind {
     FOCUS_TRANSITION_FOCUS_ELEMENT,
     FOCUS_TRANSITION_BLUR_CURRENT,
+    FOCUS_TRANSITION_MOVE,
 } FocusTransitionKind;
 
 typedef struct FocusTransitionArgs {
     View* target;
     bool from_keyboard;
+    View* root;
+    bool forward;
 } FocusTransitionArgs;
 
 typedef enum CaretTransitionKind {

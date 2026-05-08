@@ -35,6 +35,13 @@ bool focus_transition(RadiantState* state,
         case FOCUS_TRANSITION_BLUR_CURRENT:
             focus_clear(state);
             break;
+        case FOCUS_TRANSITION_MOVE:
+            if (!args) { transition_leave(state); return false; }
+            if (!focus_move(state, args->root, args->forward)) {
+                transition_leave(state);
+                return false;
+            }
+            break;
         default:
             transition_leave(state);
             return false;
