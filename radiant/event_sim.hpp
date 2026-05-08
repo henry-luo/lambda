@@ -78,6 +78,7 @@ enum SimEventType {
     SIM_EVENT_KEY_UP,
     SIM_EVENT_KEY_COMBO,
     SIM_EVENT_SCROLL,
+    SIM_EVENT_REPLAY_INPUT,     // exact input.raw event from event/state JSONL
     // High-level actions
     SIM_EVENT_CLICK,           // click (mouse_down + mouse_up)
     SIM_EVENT_DBLCLICK,        // double-click
@@ -222,6 +223,11 @@ struct SimEvent {
     // for SIM_EVENT_IME_COMPOSE. One of "begin", "update", "commit",
     // "cancel". Empty / unknown defaults to "update".
     char* ime_phase;
+    // Phase 7: replay input.raw fields
+    char* replay_event_name;
+    int replay_scancode;
+    uint32_t replay_codepoint;
+    uint32_t replay_preedit_caret;
 };
 
 // Event simulation context
@@ -245,11 +251,36 @@ struct EventSimContext {
     void* original_document;     // main document (DomDocument*) before any switch_frame
     void* frame_stack[8];        // stack of DomDocument* for nested switch_frame
     int frame_stack_depth;       // current depth in frame_stack
+    // Phase 7: replay state assertion parsed from final state.snapshot
+    bool replay_assert_state;
+    bool replay_state_checked;
+    bool replay_has_expected_state;
+    int replay_expected_focus_id;
+    int replay_expected_caret_id;
+    int replay_expected_caret_offset;
+    bool replay_has_caret_offset;
+    bool replay_expected_selection_collapsed;
+    bool replay_has_selection_collapsed;
+    float replay_expected_scroll_x;
+    float replay_expected_scroll_y;
+    bool replay_has_scroll;
 };
 
 // Load events from JSON file
 // Returns NULL on error
 EventSimContext* event_sim_load(const char* json_file);
+
+// Load replay commands from an event/state JSON Lines log. Consumes input.raw
+// records and final state.snapshot expectations.
+EventSimContext* event_sim_load_replay_log(const char* jsonl_file);
+
+// Extract the document path from the session_start record in a replay JSONL log.
+// Caller owns the returned buffer and must mem_free() it.
+char* event_sim_replay_document_path(const char* jsonl_file);
+
+// Configure whether replay logs loaded after this call compare the final
+// state.snapshot when simulation completes.
+void event_sim_set_replay_assert_state(bool assert_state);
 
 // Free simulation context
 void event_sim_free(EventSimContext* ctx);
