@@ -109,62 +109,9 @@ typedef struct ReflowScheduler {
     bool is_processing;            // prevent re-entry
 } ReflowScheduler;
 
-/**
- * Caret (text cursor) state for editable elements
- */
-typedef struct CaretState {
-    View* view;                    // view containing caret (input, textarea, contenteditable)
-    int char_offset;               // character offset from start of text
-    int line;                      // line number (0-based, for textarea/multiline)
-    int column;                    // column within line (0-based)
-    float x;                       // visual x position (pixels from element left)
-    float y;                       // visual y position (pixels from element top)
-    float height;                  // caret height (based on font)
-    float iframe_offset_x;         // iframe x offset if caret is inside an iframe
-    float iframe_offset_y;         // iframe y offset if caret is inside an iframe
-    bool visible;                  // caret visibility (for blinking)
-    uint64_t blink_time;           // timestamp for blink cycle
-    // Phase 19: previous rendered absolute CSS position for dirty-rect caret repaint
-    float prev_abs_x;             // -1 = not yet rendered
-    float prev_abs_y;
-    float prev_abs_height;
-} CaretState;
-
-/**
- * Selection state for text selection
- * Uses anchor/focus model like DOM Selection API:
- * - anchor: where selection started (user clicked)
- * - focus: where selection ends (user dragged to)
- * anchor can be before or after focus (selection direction)
- * Supports cross-view selection: anchor_view and focus_view can be different
- */
-typedef struct SelectionState {
-    View* view;                    // view containing selection (deprecated, use anchor_view)
-    View* anchor_view;             // view where selection started
-    View* focus_view;              // view where selection ends (can differ from anchor_view)
-    int anchor_offset;             // character offset where selection started
-    int anchor_line;               // line of anchor (for multiline)
-    int focus_offset;              // character offset where selection ends
-    int focus_line;                // line of focus (for multiline)
-    bool is_collapsed;             // true if anchor == focus (no selection)
-    bool is_selecting;             // true if user is actively selecting (mouse down)
-    float start_x, start_y;        // visual start position
-    float end_x, end_y;            // visual end position
-    float iframe_offset_x;         // iframe offset x (for content inside iframes)
-    float iframe_offset_y;         // iframe offset y (for content inside iframes)
-} SelectionState;
-
-/**
- * Focus state with keyboard navigation support
- */
-typedef struct FocusState {
-    View* current;                 // currently focused element
-    View* previous;                // previously focused element (for focus restoration)
-    int tab_index;                 // current element's tabindex
-    bool focus_visible;            // :focus-visible applies (keyboard navigation)
-    bool from_keyboard;            // focus was set via keyboard (Tab, arrow keys)
-    bool from_mouse;               // focus was set via mouse click
-} FocusState;
+typedef struct CaretState CaretState;
+typedef struct SelectionState SelectionState;
+typedef struct FocusState FocusState;
 
 /**
  * Mouse cursor state
@@ -524,6 +471,7 @@ bool caret_get_debug_snapshot(RadiantState* state, View** out_view,
                               int* out_offset, int* out_line, int* out_column,
                               float* out_x, float* out_y, float* out_height,
                               bool* out_visible);
+bool caret_has_projection(RadiantState* state);
 bool caret_is_visible(RadiantState* state);
 void caret_project_previous_visual_rect(RadiantState* state, float x, float y, float height);
 
@@ -608,6 +556,7 @@ bool selection_get_debug_snapshot(RadiantState* state, View** out_view,
                                   float* out_end_x, float* out_end_y);
 bool selection_get_extent_views(RadiantState* state, View** out_anchor_view,
                                 View** out_focus_view);
+bool selection_has_projection(RadiantState* state);
 
 /**
  * Get normalized selection range (start <= end)

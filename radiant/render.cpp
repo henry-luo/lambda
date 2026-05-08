@@ -3676,12 +3676,10 @@ void render_caret(RenderContext* rdcon, RadiantState* state) {
  * Selection model), resolves layout via `dom_range_for_each_rect()`,
  * and emits one semi-transparent rectangle per visual fragment.
  *
- * The renderer's inline glyph-by-glyph selection background painter in
- * `render_text_view` is still active for backward compatibility — it
- * paints under each selected glyph using the legacy SelectionState.
- * `render_selection` is therefore registered as an overlay only when
- * the legacy path didn't / can't paint (e.g. element-level selection
- * spanning across non-text nodes set by JS via `setBaseAndExtent`).
+ * The inline glyph-by-glyph selection background painter in `render_text_view`
+ * is still active for form/static text compatibility. `render_selection` is
+ * therefore registered as an overlay when the inline path did not or cannot
+ * paint, such as element-level ranges spanning non-text nodes set via JS.
  *
  * `dom_range_for_each_rect()` returns rectangles in absolute CSS
  * coordinates; we just scale to physical pixels and fill.
@@ -3769,15 +3767,13 @@ static DomRange* selection_paint_range_for_current_tree(RenderContext* rdcon,
 void render_selection(RenderContext* rdcon, RadiantState* state) {
     if (!state) return;
 
-    // Prefer DomSelection (canonical). Fall back to legacy SelectionState
-    // only when DomSelection is not yet populated (early boot / non-DOM
-    // paths). Both should be in sync via legacy_sync_from_dom_selection.
+    // DomSelection is canonical. When it is empty, inline text/form painters
+    // cover any projection-only compatibility case.
     DomSelection* ds = state->dom_selection;
     bool use_dom = ds && ds->range_count > 0 && !ds->is_collapsed;
 
     if (!use_dom) {
-        // Nothing selected via DOM; legacy painter (inline in
-        // render_text_view) covers the legacy SelectionState case.
+        // Nothing selected via DOM; inline painters cover compatibility cases.
         return;
     }
 
@@ -3796,8 +3792,8 @@ void render_selection(RenderContext* rdcon, RadiantState* state) {
     SelectionPaintCtx ctx;
     ctx.rdcon = rdcon;
     ctx.scale = rdcon->scale;
-    // Iframe offset cached on the legacy selection (resolver itself doesn't
-    // know about iframe nesting). 0 when not in an iframe.
+    // Iframe offset cached on StateStore's projection because the resolver
+    // itself doesn't know about iframe nesting. 0 when not in an iframe.
     selection_get_iframe_offset(state, &ctx.iframe_offset_x, &ctx.iframe_offset_y);
     // Standard text-selection blue; alpha 0x80 = 50% (matches inline painter).
     ctx.color.r = 0x00; ctx.color.g = 0x78; ctx.color.b = 0xD7; ctx.color.a = 0x80;
@@ -3817,7 +3813,8 @@ void render_ui_overlays(RenderContext* rdcon, RadiantState* state) {
         return;
     }
 
-    log_debug("[UI_OVERLAY] Rendering overlays: caret=%p", (void*)state->caret);
+    log_debug("[UI_OVERLAY] Rendering overlays: caret=%s",
+        caret_has_projection(state) ? "present" : "none");
 
     // Selection background is painted inline inside render_text_view when the
     // active range resolves cleanly to the current text fragments. Reactive UI

@@ -26,11 +26,10 @@
 #include <stdlib.h>
 #include <limits.h>
 
-// Phase 6 — single source of truth: after every selection-state mutation
-// inside this file, mirror the result back into the legacy
-// CaretState/SelectionState so the renderer (which still reads the legacy
-// structs) reflects spec-driven and JS-driven changes. Implemented in
-// state_store.cpp; declared here as a forward to avoid pulling in
+// Single source of truth: after every selection-state mutation inside this
+// file, ask StateStore to refresh its private projection structs so older
+// renderer/event paths reflect spec-driven and JS-driven changes. Implemented
+// in state_store.cpp; declared here as a forward to avoid pulling in
 // state_store.hpp (which transitively includes GLFW). A weak default
 // no-op is provided so unit-test targets that don't link state_store.cpp
 // (e.g. test_dom_range_gtest) still link successfully — the strong
@@ -55,10 +54,8 @@ __attribute__((weak)) void tc_ensure_init(DomElement* /*elem*/) {
 // state_store.cpp (production) or in a unit-test stub.
 struct Arena;
 extern "C" Arena*    dom_range_state_arena(RadiantState* state);
-// Implemented in state_store.cpp — allocates the embedded CaretState /
-// SelectionState into `state`'s arena and stores pointers on `s`. Also
-// aliases `state->caret` / `state->selection` to the same pointers so
-// the legacy field-access syntax keeps working.
+// Implemented in state_store.cpp — ensures private projection storage exists
+// for this document. Strong def in production; weak no-op for unit tests.
 extern "C" void      dom_selection_attach_legacy_storage(struct DomSelection* s,
                                                          RadiantState* state);
 extern "C" __attribute__((weak)) void dom_selection_attach_legacy_storage(
@@ -553,8 +550,8 @@ DomSelection* dom_selection_create(RadiantState* state) {
     memset(s, 0, sizeof(*s));
     s->state = state;
     s->is_collapsed = true;
-    // Allocate the embedded legacy storage and alias state->caret/selection
-    // onto it. Strong def in state_store.cpp; weak no-op for unit tests.
+    // Ensure StateStore projection storage exists. Strong def in
+    // state_store.cpp; weak no-op for DOM-only unit tests.
     dom_selection_attach_legacy_storage(s, state);
     return s;
 }

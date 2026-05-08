@@ -252,7 +252,7 @@ bool te_replace_byte_range(DomElement* elem, RadiantState* state, void* target,
 
     // Place caret at end of inserted text and clear any selection.
     uint32_t new_caret = start + repl_len;
-    if (state->selection) selection_clear(state);
+    if (selection_has_projection(state)) selection_clear(state);
     caret_set(state, (View*)target, (int)new_caret);
 
     // tc_set_value already pushed an undo entry; just notify selection

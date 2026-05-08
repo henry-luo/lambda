@@ -1601,8 +1601,8 @@ static bool assert_caret(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {
 }
 
 // Assert helper for selection state.
-// Checks both legacy SelectionState (used by event/caret code) and the
-// canonical DomSelection (used by the renderer to paint highlight rects).
+// Checks both StateStore's compatibility projection and the canonical
+// DomSelection used by selection render paths.
 // They MUST agree — disagreement means the selection is set internally but
 // nothing visible is drawn (or vice-versa).
 static bool assert_selection(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {

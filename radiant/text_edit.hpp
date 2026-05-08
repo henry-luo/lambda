@@ -8,11 +8,10 @@
 //   - focus snapshot + change-event commit logic (F1 §3.1).
 //   - undo/redo ring skeleton (F1 §3.2).
 //
-// Caret/selection offsets here use UTF-8 *byte* indices, matching the legacy
-// CaretState/SelectionState used in radiant/event.cpp. The companion
-// tc_set_selection_range path in text_control.hpp uses UTF-16 code units;
-// the bidirectional sync (tc_sync_legacy_to_form / tc_sync_form_to_legacy)
-// keeps the two views consistent.
+// Caret/selection offsets here use UTF-8 *byte* indices, matching StateStore's
+// projection helpers. The companion tc_set_selection_range path in
+// text_control.hpp uses UTF-16 code units; sync helpers keep the views
+// consistent.
 
 #include <stdint.h>
 #include <stddef.h>
@@ -40,8 +39,8 @@ uint32_t te_line_end  (const char* buf, uint32_t buf_len, uint32_t byte_off);
 
 // ---------- selection helpers (F2) -------------------------------------
 
-// Apply the (start, end) byte range as a selection to the legacy
-// CaretState/SelectionState owned by `state`, anchored on `target` view.
+// Apply the (start, end) byte range as a selection in StateStore, anchored on
+// `target` view.
 // Caret moves to `end`. Returns true on success.
 //
 // `target` must be the view associated with the text control (typically

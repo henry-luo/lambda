@@ -5205,7 +5205,7 @@ void rebuild_lambda_doc(UiContext* uicon) {
             focus_set(state, new_focused, false);
             log_debug("rebuild_lambda_doc: restored focus to new view %p (tag=%s class=%s)",
                      new_focused, focus_tag ? focus_tag : "", focus_class ? focus_class : "");
-        } else if (state->focus) {
+        } else if (focus_has_current(state)) {
             // old focused element was removed; clear stale pointer so autofocus can fire
             focus_clear(state);
         }
@@ -5491,7 +5491,7 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
         if (new_focused) {
             focus_set(state, new_focused, false);
             log_debug("rebuild_lambda_doc_incremental: restored focus");
-        } else if (state->focus) {
+        } else if (focus_has_current(state)) {
             // old focused element was removed; clear stale pointer so autofocus can fire
             focus_clear(state);
         }

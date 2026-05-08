@@ -4071,15 +4071,13 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 caret_project_visual_from_selection(state, caret_x, caret_y, caret_height);
 
                 // Update selection end visual coordinates for rendering
-                if (state->selection) {
-                    selection_project_focus_visual(state, caret_x, caret_y, caret_height);
-                    float selection_end_x = 0, selection_end_y = 0;
-                    float caret_visual_x = 0, caret_visual_y = 0;
-                    selection_get_focus_visual_snapshot(state, &selection_end_x, &selection_end_y, NULL);
-                    caret_get_visual_snapshot(state, &caret_visual_x, &caret_visual_y, NULL, NULL, NULL);
-                    log_debug("[SEL-END] Setting selection end: (%.1f, %.1f), caret at (%.1f, %.1f)",
-                        selection_end_x, selection_end_y, caret_visual_x, caret_visual_y);
-                }
+                selection_project_focus_visual(state, caret_x, caret_y, caret_height);
+                float selection_end_x = 0, selection_end_y = 0;
+                float caret_visual_x = 0, caret_visual_y = 0;
+                selection_get_focus_visual_snapshot(state, &selection_end_x, &selection_end_y, NULL);
+                caret_get_visual_snapshot(state, &caret_visual_x, &caret_visual_y, NULL, NULL, NULL);
+                log_debug("[SEL-END] Setting selection end: (%.1f, %.1f), caret at (%.1f, %.1f)",
+                    selection_end_x, selection_end_y, caret_visual_x, caret_visual_y);
 
                 selection_get_focus_visual_snapshot(state, NULL, NULL, &selection_collapsed);
                 log_debug("Dragging selection to offset %d, collapsed=%d", char_offset, selection_collapsed);
@@ -4230,10 +4228,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     text_point_inside_existing_selection(state, evcon.target, char_offset);
 
                 if (mouse_down_in_selection) {
-                    if (state && state->selection) {
-                        selection_transition(state, SELECTION_TRANSITION_END_POINTER_SELECTION, NULL);
-                        selection_press_in_range_begin(state, evcon.target, char_offset);
-                    }
+                    selection_transition(state, SELECTION_TRANSITION_END_POINTER_SELECTION, NULL);
+                    selection_press_in_range_begin(state, evcon.target, char_offset);
                     log_debug("[TEXT SEL PRESS] preserving existing selection on mouse down");
                     evcon.need_repaint = true;
                 } else {
@@ -4278,17 +4274,13 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     selection_start(state, evcon.target, char_offset);
 
                     // Set visual coordinates for selection (same point for start)
-                    if (state->selection) {
-                        selection_project_anchor_visual_from_caret(state, caret_x, caret_y, caret_height);
-                    }
+                    selection_project_anchor_visual_from_caret(state, caret_x, caret_y, caret_height);
                 } else if (selection_has(state)) {
                     // Shift-click extends selection
                     selection_extend(state, char_offset);
 
                     // Update end visual coordinates
-                    if (state->selection) {
-                        selection_project_focus_visual(state, caret_x, caret_y, caret_height);
-                    }
+                    selection_project_focus_visual(state, caret_x, caret_y, caret_height);
                 }
 
                 if (!(event->mouse_button.mods & RDT_MOD_SHIFT)) {
@@ -4410,7 +4402,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     if (!(event->mouse_button.mods & RDT_MOD_SHIFT)) {
                         dispatch_selectstart(&evcon, evcon.target);
                         selection_start(state, evcon.target, char_offset);
-                    } else if (state->selection) {
+                    } else if (selection_has_projection(state)) {
                         selection_extend(state, char_offset);
                     }
 
@@ -4515,7 +4507,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     if (!(event->mouse_button.mods & RDT_MOD_SHIFT)) {
                         dispatch_selectstart(&evcon, evcon.target);
                         selection_start(state, evcon.target, char_offset);
-                    } else if (state->selection) {
+                    } else if (selection_has_projection(state)) {
                         selection_extend(state, char_offset);
                     }
 
@@ -4797,7 +4789,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             }
 
             // End selection mode
-            if (state && state->selection) {
+            if (selection_has_projection(state)) {
                 dispatch_selectionchange(&evcon, state, evcon.target);
                 selection_transition(state, SELECTION_TRANSITION_END_POINTER_SELECTION, NULL);
             }
@@ -5586,7 +5578,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         if (caret_get_offset(state, &caret_offset) && caret_offset > vlen) {
                             caret_set(state, focused, vlen);
                         }
-                        if (state->selection) selection_clear(state);
+                        if (selection_has_projection(state)) selection_clear(state);
                         evcon.need_repaint = true;
                     }
                     break;
@@ -5600,7 +5592,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         if (caret_get_offset(state, &caret_offset) && caret_offset > vlen) {
                             caret_set(state, focused, vlen);
                         }
-                        if (state->selection) selection_clear(state);
+                        if (selection_has_projection(state)) selection_clear(state);
                         evcon.need_repaint = true;
                     }
                     break;
@@ -6022,9 +6014,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     break;
             }
         }
-        // Phase 6E: mirror legacy CaretState/SelectionState into the new
-        // form->selection_* fields so JS reads (selectionStart/End/value)
-        // observe user-typed/arrow-keyed changes immediately.
+        // Mirror StateStore selection projection into form->selection_* so JS
+        // reads (selectionStart/End/value) observe text edits immediately.
         {
             RadiantState* tc_state = (RadiantState*)evcon.ui_context->document->state;
             View* tc_focused = tc_state ? focus_get(tc_state) : nullptr;
@@ -6196,7 +6187,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             }
         }
 
-        if (!is_form_input && focused && state->caret) {
+        if (!is_form_input && focused && caret_has_projection(state)) {
             // Delete any existing selection first
             if (selection_has(state)) {
                 // TODO: delete selected text

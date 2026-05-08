@@ -5,10 +5,9 @@
  * DOM Boundary, Range, Selection — W3C-conformant primitives.
  *
  * These types are owned by the per-document `RadiantState` (StateStore) and
- * are the canonical source of truth for caret + selection. The existing
- * `CaretState` / `SelectionState` structs in `state_store.hpp` are kept
- * (additively) for now; future phases migrate their consumers to read from
- * `state->dom_selection` and the layout-cache fields embedded in `DomRange`.
+ * are the canonical source of truth for caret + selection. StateStore keeps
+ * private projection structs for renderer/event compatibility while those
+ * paths finish migrating to `state->dom_selection` and DomRange layout cache.
  *
  * See vibe/radiant/Radiant_Design_Selection.md for the full design.
  */
@@ -22,9 +21,8 @@ struct DomText;
 struct DomElement;
 struct RadiantState;
 struct Pool;
-// Legacy interactive-state structs (defined in state_store.hpp). DomSelection
-// owns one of each as the canonical backing storage; `state->caret` and
-// `state->selection` on RadiantState are aliases pointing at these.
+// Projection structs are private to StateStore; public code should use
+// StateStore helper APIs rather than dereferencing them.
 struct CaretState;
 struct SelectionState;
 
@@ -204,12 +202,6 @@ typedef struct DomSelection {
     DomBoundary   focus;
     DomSelectionDirection direction;
     bool          is_collapsed;         // mirrors range[0].collapsed when present
-
-    // Legacy backing storage (Phase B consolidation). Allocated once in
-    // `dom_selection_create()` and aliased onto `state->caret` /
-    // `state->selection`. Single owner; lifetime = DomSelection's.
-    struct CaretState*     caret;
-    struct SelectionState* selection;
 
     // Document root captured when the current range was added (or its
     // boundaries first set). Used by Range mutators to detect the
