@@ -125,6 +125,7 @@ extern "C" Item js_to_primitive(Item value, JsHint hint) {
     // default string conversion instead of throwing.
     if (vt == LMD_TYPE_MAP && value.map &&
         (value.map->map_kind == MAP_KIND_DOM ||
+         value.map->map_kind == MAP_KIND_CSS_NAMESPACE ||
          value.map->map_kind == MAP_KIND_CSSOM ||
          value.map->map_kind == MAP_KIND_DOC_PROXY ||
          value.map->map_kind == MAP_KIND_FOREIGN_DOC)) {

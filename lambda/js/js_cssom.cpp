@@ -281,7 +281,6 @@ static const char* css_parse_unicode_range_canonical(const char* input, Pool* po
 static TypeMap js_stylesheet_marker = {};    // CSSStyleSheet wrapper
 static TypeMap js_css_rule_marker = {};      // CSSStyleRule wrapper
 static TypeMap js_rule_decl_marker = {};     // CSSStyleDeclaration (rule) wrapper
-TypeMap js_css_namespace_marker = {}; // CSS namespace object (CSS.supports, CSS.escape)
 
 // =============================================================================
 // Type Checking
@@ -1367,7 +1366,7 @@ extern "C" Item js_cssom_get_style_element_sheet(Item elem_item) {
 extern "C" bool js_is_css_namespace(Item item) {
     if (get_type_id(item) != LMD_TYPE_MAP) return false;
     Map* m = item.map;
-    return m->type == (void*)&js_css_namespace_marker;
+    return m && m->map_kind == MAP_KIND_CSS_NAMESPACE;
 }
 
 /**

@@ -514,6 +514,8 @@ enum MapKind {
     MAP_KIND_ARRAY_PROPS = 11, // array `extra` companion map: stores literal
                                // legacy markers (__get_N/__set_N/__nw_N/...)
                                // — bypasses Phase 4 accessor-marker intercept.
+    MAP_KIND_CSS_NAMESPACE = 12, // CSS namespace object; ordinary shape-backed
+                                 // properties plus CSS-specific method dispatch.
 };
 
 // Array and List struct defintions needed for for-loop

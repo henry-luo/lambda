@@ -1,0 +1,12 @@
+supports length: 2
+escape length: 1
+supports enum: false
+escape enum: false
+tag: [object CSS]
+supports color: true
+supports bad: false
+escape digit: \31 a
+escape extracted: a\ b
+extra: 42
+supports after set: true
+keys: extra

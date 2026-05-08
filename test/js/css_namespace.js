@@ -1,0 +1,15 @@
+console.log("supports length: " + CSS.supports.length);
+console.log("escape length: " + CSS.escape.length);
+console.log("supports enum: " + Object.prototype.propertyIsEnumerable.call(CSS, "supports"));
+console.log("escape enum: " + Object.getOwnPropertyDescriptor(CSS, "escape").enumerable);
+console.log("tag: " + Object.prototype.toString.call(CSS));
+console.log("supports color: " + CSS.supports("color", "red"));
+console.log("supports bad: " + CSS.supports("not-a-real-prop", "red"));
+console.log("escape digit: " + CSS.escape("1a"));
+var esc = CSS.escape;
+console.log("escape extracted: " + esc("a b"));
+CSS.extra = 41;
+CSS.extra = CSS.extra + 1;
+console.log("extra: " + CSS.extra);
+console.log("supports after set: " + CSS.supports("display", "block"));
+console.log("keys: " + Object.keys(CSS).join(","));
