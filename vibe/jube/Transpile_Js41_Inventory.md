@@ -157,9 +157,17 @@ Execution slices:
 1. Add a generic `JsBuiltinMethodSpec` plus lookup/install helpers. Done for
    `Math`.
 2. Migrate `JSON` and `Reflect` namespace methods to the same helper.
+   Extended to include the same low-risk namespace method pattern for
+   `Atomics`, because it already used a local method table with matching
+   non-enumerable installation semantics. `CSS` was investigated but left for
+   a separate exotic-object cleanup because its namespace marker currently
+   occupies `Map::type`, which conflicts with ordinary shape-backed method
+   storage.
 3. Migrate constructor static methods (`Object`, `Array`, `Number`, `Promise`,
    `Date`, `Symbol`, `TypedArray`) without changing their existing fallback
-   semantics.
+   semantics. Done for the plain method surfaces, and extended to matching
+   `String`, `Map`, `ArrayBuffer`, and `Proxy` statics. Accessor statics such
+   as `[Symbol.species]` remain in their existing accessor installation paths.
 4. Migrate prototype families (`Array`, `String`, `Function`, `Number`) only
    after adding focused descriptor/name/length tests, since these have a larger
    compatibility surface.
@@ -249,3 +257,46 @@ computed calls such as `Math["max"](...)` now resolve through
 computed calls such as `Math[name](...)` fall through to ordinary member-call
 lowering with receiver binding. This keeps the fast path explicit while
 removing the unsafe AST cast that caused the direct bracket-call crash.
+
+### Tranche 9 - Namespace registry expansion
+
+Expanded the built-in registry foundation from Math to other low-risk
+namespace method surfaces in `js_runtime.cpp`: `JSON`, `Reflect`, and
+`Atomics`. Added shared `JsBuiltinMethodSpec` tables for each family and routed
+their object initialization through `js_install_builtin_method_specs(...)`.
+This removes three ad-hoc local method tables while preserving the existing
+method names, built-in ids, `.length` values, and non-enumerable method
+installation behavior.
+
+`CSS` was deliberately postponed after investigation. Its namespace object is
+tagged through `MAP_KIND_CSSOM` plus `js_css_namespace_marker` in `Map::type`,
+and `Map::type` is also the ordinary property shape pointer used by
+`js_property_set` / `js_map_get_fast`. Migrating `CSS.supports` and
+`CSS.escape` to the ordinary registry path therefore needs a separate
+representation fix rather than a small method-table substitution.
+
+Constructor static methods and prototype methods remain outside this tranche.
+Those need descriptor/name/length tests before migration because they carry a
+larger compatibility surface and more receiver-sensitive dispatch paths.
+
+### Tranche 10 - Constructor static registry expansion
+
+Moved constructor static method lookup and eager reflection population onto the
+same `JsBuiltinMethodSpec` foundation. Added shared tables for `Object`,
+`Array`, `String`, `Date`, `Promise`, `Number`, `Map`, `ArrayBuffer`, `Proxy`,
+`%TypedArray%`, and `Symbol` static methods. `js_lookup_constructor_static(...)`
+now resolves through the selected table, and `js_populate_constructor_statics(...)`
+uses the same selected table when installing own non-enumerable constructor
+properties.
+
+Added `js_install_builtin_method_specs_on_function(...)` for function-object
+properties, preserving the existing skip-if-present behavior used by
+`Number.parseInt` / `Number.parseFloat` so they keep identity with the global
+builtins. `%TypedArray%.from` and `%TypedArray%.of` now use that helper as
+well, while `%TypedArray%[Symbol.species]` and the other species accessors stay
+on the existing native-accessor path.
+
+This removes the separate name-only constructor population tables and the large
+hand-written static lookup branch, making first-class access, own-property
+reflection, `.length`, and enumerability draw from one method spec source for
+these constructor families.

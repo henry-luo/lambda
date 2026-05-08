@@ -24,12 +24,12 @@ LAMBDA_JUBE_EXE = lambda-jube.exe
 NPROCS := 1
 OS := $(shell uname -s)
 ifeq ($(OS),Darwin)
-	NPROCS := $(shell sysctl -n hw.ncpu)
+	NPROCS := $(shell sysctl -n hw.ncpu 2>/dev/null || echo 1)
 	PREMAKE_FILE := premake5.mac.lua
 	PREMAKE_CLI_FILE := premake5.cli.mac.lua
 	PREMAKE_JUBE_FILE := premake5.jube.mac.lua
 else ifeq ($(OS),Linux)
-	NPROCS := $(shell nproc)
+	NPROCS := $(shell nproc 2>/dev/null || echo 1)
 	PREMAKE_FILE := premake5.lin.lua
 	PREMAKE_CLI_FILE := premake5.cli.lin.lua
 	PREMAKE_JUBE_FILE := premake5.jube.lin.lua
@@ -40,6 +40,7 @@ else
 	PREMAKE_CLI_FILE := premake5.cli.win.lua
 	PREMAKE_JUBE_FILE := premake5.jube.win.lua
 endif
+NPROCS := $(shell n="$(NPROCS)"; if expr "$$n" : '^[1-9][0-9]*$$' >/dev/null; then echo "$$n"; else echo 1; fi)
 
 # Optimize parallel jobs: use all cores for compilation, limit linking to 1
 JOBS := $(NPROCS)
@@ -914,7 +915,7 @@ test-c2mir: build-test
 	@LAMBDA_USE_C2MIR=1 node test/test_run.js --target=lambda --category=baseline --parallel
 
 # test262 baseline: run only tests in baseline, must pass 100%
-test262-baseline: build-test
+test262-baseline:
 	@echo "Running test262 baseline ($(shell wc -l < test/js262/test262_baseline.txt | tr -d ' ') entries)..."
 	@./test/test_js_test262_gtest.exe --baseline-only --batch-only
 

@@ -8684,6 +8684,22 @@ static void js_install_builtin_method_specs(Item object, const JsBuiltinMethodSp
     }
 }
 
+static void js_install_builtin_method_specs_on_function(Item function_item, const JsBuiltinMethodSpec* specs, bool skip_existing) {
+    if (!specs || get_type_id(function_item) != LMD_TYPE_FUNC) return;
+    JsFunction* fn = (JsFunction*)function_item.function;
+    for (int i = 0; specs[i].name; i++) {
+        Item key = (Item){.item = s2it(heap_create_name(specs[i].name, specs[i].len))};
+        if (skip_existing && fn->properties_map.item != 0 &&
+            get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
+            Item existing = map_get(fn->properties_map.map, key);
+            if (existing.item != ItemNull.item) continue;
+        }
+        Item method = js_get_or_create_builtin(specs[i].builtin_id, specs[i].name, specs[i].param_count);
+        js_func_init_property(function_item, key, method);
+        js_mark_non_enumerable(function_item, key);
+    }
+}
+
 static const JsBuiltinMethodSpec JS_MATH_METHOD_SPECS[] = {
     {"abs", 3, JS_BUILTIN_MATH_ABS, 1},
     {"floor", 5, JS_BUILTIN_MATH_FLOOR, 1},
@@ -8722,6 +8738,156 @@ static const JsBuiltinMethodSpec JS_MATH_METHOD_SPECS[] = {
     {"log1p", 5, JS_BUILTIN_MATH_LOG1P, 1},
     {NULL, 0, 0, 0}
 };
+
+static const JsBuiltinMethodSpec JS_JSON_METHOD_SPECS[] = {
+    {"parse", 5, JS_BUILTIN_JSON_PARSE, 2},
+    {"stringify", 9, JS_BUILTIN_JSON_STRINGIFY, 3},
+    {NULL, 0, 0, 0}
+};
+
+static const JsBuiltinMethodSpec JS_REFLECT_METHOD_SPECS[] = {
+    {"apply", 5, JS_BUILTIN_REFLECT_APPLY, 3},
+    {"construct", 9, JS_BUILTIN_REFLECT_CONSTRUCT, 2},
+    {"defineProperty", 14, JS_BUILTIN_REFLECT_DEFINE_PROPERTY, 3},
+    {"deleteProperty", 14, JS_BUILTIN_REFLECT_DELETE_PROPERTY, 2},
+    {"get", 3, JS_BUILTIN_REFLECT_GET, 2},
+    {"getOwnPropertyDescriptor", 24, JS_BUILTIN_REFLECT_GET_OWN_PROPERTY_DESCRIPTOR, 2},
+    {"getPrototypeOf", 14, JS_BUILTIN_REFLECT_GET_PROTOTYPE_OF, 1},
+    {"has", 3, JS_BUILTIN_REFLECT_HAS, 2},
+    {"isExtensible", 12, JS_BUILTIN_REFLECT_IS_EXTENSIBLE, 1},
+    {"ownKeys", 7, JS_BUILTIN_REFLECT_OWN_KEYS, 1},
+    {"preventExtensions", 17, JS_BUILTIN_REFLECT_PREVENT_EXTENSIONS, 1},
+    {"set", 3, JS_BUILTIN_REFLECT_SET, 3},
+    {"setPrototypeOf", 14, JS_BUILTIN_REFLECT_SET_PROTOTYPE_OF, 2},
+    {NULL, 0, 0, 0}
+};
+
+static const JsBuiltinMethodSpec JS_ATOMICS_METHOD_SPECS[] = {
+    {"add", 3, JS_BUILTIN_ATOMICS_ADD, 3},
+    {"and", 3, JS_BUILTIN_ATOMICS_AND, 3},
+    {"compareExchange", 15, JS_BUILTIN_ATOMICS_COMPAREEXCHANGE, 4},
+    {"exchange", 8, JS_BUILTIN_ATOMICS_EXCHANGE, 3},
+    {"isLockFree", 10, JS_BUILTIN_ATOMICS_ISLOCKFREE, 1},
+    {"load", 4, JS_BUILTIN_ATOMICS_LOAD, 2},
+    {"notify", 6, JS_BUILTIN_ATOMICS_NOTIFY, 3},
+    {"or", 2, JS_BUILTIN_ATOMICS_OR, 3},
+    {"store", 5, JS_BUILTIN_ATOMICS_STORE, 3},
+    {"sub", 3, JS_BUILTIN_ATOMICS_SUB, 3},
+    {"wait", 4, JS_BUILTIN_ATOMICS_WAIT, 3},
+    {"xor", 3, JS_BUILTIN_ATOMICS_XOR, 3},
+    {NULL, 0, 0, 0}
+};
+
+static const JsBuiltinMethodSpec JS_OBJECT_STATIC_METHOD_SPECS[] = {
+    {"keys", 4, JS_BUILTIN_OBJECT_KEYS, 1},
+    {"values", 6, JS_BUILTIN_OBJECT_VALUES, 1},
+    {"entries", 7, JS_BUILTIN_OBJECT_ENTRIES, 1},
+    {"fromEntries", 11, JS_BUILTIN_OBJECT_FROM_ENTRIES, 1},
+    {"create", 6, JS_BUILTIN_OBJECT_CREATE, 2},
+    {"assign", 6, JS_BUILTIN_OBJECT_ASSIGN, 2},
+    {"freeze", 6, JS_BUILTIN_OBJECT_FREEZE, 1},
+    {"isFrozen", 8, JS_BUILTIN_OBJECT_IS_FROZEN, 1},
+    {"seal", 4, JS_BUILTIN_OBJECT_SEAL, 1},
+    {"isSealed", 8, JS_BUILTIN_OBJECT_IS_SEALED, 1},
+    {"preventExtensions", 17, JS_BUILTIN_OBJECT_PREVENT_EXTENSIONS, 1},
+    {"isExtensible", 12, JS_BUILTIN_OBJECT_IS_EXTENSIBLE, 1},
+    {"is", 2, JS_BUILTIN_OBJECT_IS, 2},
+    {"getPrototypeOf", 14, JS_BUILTIN_OBJECT_GET_PROTOTYPE_OF, 1},
+    {"setPrototypeOf", 14, JS_BUILTIN_OBJECT_SET_PROTOTYPE_OF, 2},
+    {"defineProperty", 14, JS_BUILTIN_OBJECT_DEFINE_PROPERTY, 3},
+    {"defineProperties", 16, JS_BUILTIN_OBJECT_DEFINE_PROPERTIES, 2},
+    {"getOwnPropertyDescriptor", 24, JS_BUILTIN_OBJECT_GET_OWN_PROPERTY_DESCRIPTOR, 2},
+    {"getOwnPropertyDescriptors", 25, JS_BUILTIN_OBJECT_GET_OWN_PROPERTY_DESCRIPTORS, 1},
+    {"getOwnPropertyNames", 19, JS_BUILTIN_OBJECT_GET_OWN_PROPERTY_NAMES, 1},
+    {"getOwnPropertySymbols", 21, JS_BUILTIN_OBJECT_GET_OWN_PROPERTY_SYMBOLS, 1},
+    {"hasOwn", 6, JS_BUILTIN_OBJECT_HAS_OWN, 2},
+    {"groupBy", 7, JS_BUILTIN_OBJECT_GROUP_BY, 2},
+    {NULL, 0, 0, 0}
+};
+
+static const JsBuiltinMethodSpec JS_ARRAY_STATIC_METHOD_SPECS[] = {
+    {"isArray", 7, JS_BUILTIN_ARRAY_IS_ARRAY, 1},
+    {"from", 4, JS_BUILTIN_ARRAY_FROM, 1},
+    {"of", 2, JS_BUILTIN_ARRAY_OF, 0},
+    {NULL, 0, 0, 0}
+};
+
+static const JsBuiltinMethodSpec JS_STRING_STATIC_METHOD_SPECS[] = {
+    {"fromCharCode", 12, JS_BUILTIN_STRING_FROM_CHAR_CODE, 1},
+    {"fromCodePoint", 13, JS_BUILTIN_STRING_FROM_CODE_POINT, 1},
+    {"raw", 3, JS_BUILTIN_STRING_RAW, 1},
+    {NULL, 0, 0, 0}
+};
+
+static const JsBuiltinMethodSpec JS_DATE_STATIC_METHOD_SPECS[] = {
+    {"now", 3, JS_BUILTIN_DATE_NOW, 0},
+    {"parse", 5, JS_BUILTIN_DATE_PARSE, 1},
+    {"UTC", 3, JS_BUILTIN_DATE_UTC, 7},
+    {NULL, 0, 0, 0}
+};
+
+static const JsBuiltinMethodSpec JS_PROMISE_STATIC_METHOD_SPECS[] = {
+    {"resolve", 7, JS_BUILTIN_PROMISE_RESOLVE, 1},
+    {"reject", 6, JS_BUILTIN_PROMISE_REJECT, 1},
+    {"all", 3, JS_BUILTIN_PROMISE_ALL, 1},
+    {"allSettled", 10, JS_BUILTIN_PROMISE_ALL_SETTLED, 1},
+    {"any", 3, JS_BUILTIN_PROMISE_ANY, 1},
+    {"race", 4, JS_BUILTIN_PROMISE_RACE, 1},
+    {NULL, 0, 0, 0}
+};
+
+static const JsBuiltinMethodSpec JS_NUMBER_STATIC_METHOD_SPECS[] = {
+    {"isFinite", 8, JS_BUILTIN_NUMBER_IS_FINITE, 1},
+    {"isNaN", 5, JS_BUILTIN_NUMBER_IS_NAN, 1},
+    {"isInteger", 9, JS_BUILTIN_NUMBER_IS_INTEGER, 1},
+    {"isSafeInteger", 13, JS_BUILTIN_NUMBER_IS_SAFE_INTEGER, 1},
+    {"parseInt", 8, JS_BUILTIN_NUMBER_PARSE_INT, 2},
+    {"parseFloat", 10, JS_BUILTIN_NUMBER_PARSE_FLOAT, 1},
+    {NULL, 0, 0, 0}
+};
+
+static const JsBuiltinMethodSpec JS_MAP_STATIC_METHOD_SPECS[] = {
+    {"groupBy", 7, JS_BUILTIN_MAP_GROUP_BY, 2},
+    {NULL, 0, 0, 0}
+};
+
+static const JsBuiltinMethodSpec JS_ARRAYBUFFER_STATIC_METHOD_SPECS[] = {
+    {"isView", 6, JS_BUILTIN_ARRAYBUFFER_ISVIEW, 1},
+    {NULL, 0, 0, 0}
+};
+
+static const JsBuiltinMethodSpec JS_PROXY_STATIC_METHOD_SPECS[] = {
+    {"revocable", 9, JS_BUILTIN_PROXY_REVOCABLE, 2},
+    {NULL, 0, 0, 0}
+};
+
+static const JsBuiltinMethodSpec JS_TYPED_ARRAY_STATIC_METHOD_SPECS[] = {
+    {"from", 4, JS_BUILTIN_TYPED_ARRAY_FROM, 1},
+    {"of", 2, JS_BUILTIN_TYPED_ARRAY_OF, 0},
+    {NULL, 0, 0, 0}
+};
+
+static const JsBuiltinMethodSpec JS_SYMBOL_STATIC_METHOD_SPECS[] = {
+    {"for", 3, JS_BUILTIN_SYMBOL_FOR, 1},
+    {"keyFor", 6, JS_BUILTIN_SYMBOL_KEY_FOR, 1},
+    {NULL, 0, 0, 0}
+};
+
+static const JsBuiltinMethodSpec* js_get_constructor_static_method_specs(const char* ctor_name, int ctor_len) {
+    if (!ctor_name) return NULL;
+    if (ctor_len == 6 && strncmp(ctor_name, "Object", 6) == 0) return JS_OBJECT_STATIC_METHOD_SPECS;
+    if (ctor_len == 5 && strncmp(ctor_name, "Array", 5) == 0) return JS_ARRAY_STATIC_METHOD_SPECS;
+    if (ctor_len == 6 && strncmp(ctor_name, "String", 6) == 0) return JS_STRING_STATIC_METHOD_SPECS;
+    if (ctor_len == 4 && strncmp(ctor_name, "Date", 4) == 0) return JS_DATE_STATIC_METHOD_SPECS;
+    if (ctor_len == 7 && strncmp(ctor_name, "Promise", 7) == 0) return JS_PROMISE_STATIC_METHOD_SPECS;
+    if (ctor_len == 6 && strncmp(ctor_name, "Number", 6) == 0) return JS_NUMBER_STATIC_METHOD_SPECS;
+    if (ctor_len == 3 && strncmp(ctor_name, "Map", 3) == 0) return JS_MAP_STATIC_METHOD_SPECS;
+    if (ctor_len == 11 && strncmp(ctor_name, "ArrayBuffer", 11) == 0) return JS_ARRAYBUFFER_STATIC_METHOD_SPECS;
+    if (ctor_len == 5 && strncmp(ctor_name, "Proxy", 5) == 0) return JS_PROXY_STATIC_METHOD_SPECS;
+    if (ctor_len == 10 && strncmp(ctor_name, "TypedArray", 10) == 0) return JS_TYPED_ARRAY_STATIC_METHOD_SPECS;
+    if (ctor_len == 6 && strncmp(ctor_name, "Symbol", 6) == 0) return JS_SYMBOL_STATIC_METHOD_SPECS;
+    return NULL;
+}
 
 void js_builtin_cache_reset() {
     for (int i = 0; i < JS_BUILTIN_MAX; i++) js_builtin_cache[i] = ItemNull;
@@ -8762,129 +8928,10 @@ extern "C" Item js_symbol_builtin_method(int which) {
 // Returns ItemNull if not a known constructor or not a known static method.
 static Item js_lookup_constructor_static(const char* ctor_name, int ctor_len,
                                           const char* prop_name, int prop_len) {
-    // Object static methods
-    if (ctor_len == 6 && strncmp(ctor_name, "Object", 6) == 0) {
-        struct { const char* name; int len; int id; int pc; } methods[] = {
-            {"defineProperty", 14, JS_BUILTIN_OBJECT_DEFINE_PROPERTY, 3},
-            {"defineProperties", 16, JS_BUILTIN_OBJECT_DEFINE_PROPERTIES, 2},
-            {"getOwnPropertyDescriptor", 24, JS_BUILTIN_OBJECT_GET_OWN_PROPERTY_DESCRIPTOR, 2},
-            {"getOwnPropertyDescriptors", 25, JS_BUILTIN_OBJECT_GET_OWN_PROPERTY_DESCRIPTORS, 1},
-            {"getOwnPropertyNames", 19, JS_BUILTIN_OBJECT_GET_OWN_PROPERTY_NAMES, 1},
-            {"getOwnPropertySymbols", 21, JS_BUILTIN_OBJECT_GET_OWN_PROPERTY_SYMBOLS, 1},
-            {"keys", 4, JS_BUILTIN_OBJECT_KEYS, 1},
-            {"values", 6, JS_BUILTIN_OBJECT_VALUES, 1},
-            {"entries", 7, JS_BUILTIN_OBJECT_ENTRIES, 1},
-            {"fromEntries", 11, JS_BUILTIN_OBJECT_FROM_ENTRIES, 1},
-            {"create", 6, JS_BUILTIN_OBJECT_CREATE, 2},
-            {"assign", 6, JS_BUILTIN_OBJECT_ASSIGN, 2},
-            {"freeze", 6, JS_BUILTIN_OBJECT_FREEZE, 1},
-            {"isFrozen", 8, JS_BUILTIN_OBJECT_IS_FROZEN, 1},
-            {"seal", 4, JS_BUILTIN_OBJECT_SEAL, 1},
-            {"isSealed", 8, JS_BUILTIN_OBJECT_IS_SEALED, 1},
-            {"preventExtensions", 17, JS_BUILTIN_OBJECT_PREVENT_EXTENSIONS, 1},
-            {"isExtensible", 12, JS_BUILTIN_OBJECT_IS_EXTENSIBLE, 1},
-            {"is", 2, JS_BUILTIN_OBJECT_IS, 2},
-            {"getPrototypeOf", 14, JS_BUILTIN_OBJECT_GET_PROTOTYPE_OF, 1},
-            {"setPrototypeOf", 14, JS_BUILTIN_OBJECT_SET_PROTOTYPE_OF, 2},
-            {"hasOwn", 6, JS_BUILTIN_OBJECT_HAS_OWN, 2},
-            {"groupBy", 7, JS_BUILTIN_OBJECT_GROUP_BY, 2},
-            {NULL, 0, 0, 0}
-        };
-        for (int i = 0; methods[i].name; i++) {
-            if (prop_len == methods[i].len && strncmp(prop_name, methods[i].name, prop_len) == 0) {
-                return js_get_or_create_builtin(methods[i].id, methods[i].name, methods[i].pc);
-            }
-        }
-    }
-    // Array static methods
-    if (ctor_len == 5 && strncmp(ctor_name, "Array", 5) == 0) {
-        if (prop_len == 7 && strncmp(prop_name, "isArray", 7) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_ARRAY_IS_ARRAY, "isArray", 1);
-        if (prop_len == 4 && strncmp(prop_name, "from", 4) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_ARRAY_FROM, "from", 1);
-        if (prop_len == 2 && strncmp(prop_name, "of", 2) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_ARRAY_OF, "of", 0);
-    }
-    // String static methods
-    if (ctor_len == 6 && strncmp(ctor_name, "String", 6) == 0) {
-        if (prop_len == 3 && strncmp(prop_name, "raw", 3) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_STRING_RAW, "raw", 1);
-        if (prop_len == 13 && strncmp(prop_name, "fromCodePoint", 13) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_STRING_FROM_CODE_POINT, "fromCodePoint", 1);
-        if (prop_len == 12 && strncmp(prop_name, "fromCharCode", 12) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_STRING_FROM_CHAR_CODE, "fromCharCode", 1);
-    }
-    // Number static methods
-    if (ctor_len == 6 && strncmp(ctor_name, "Number", 6) == 0) {
-        if (prop_len == 9 && strncmp(prop_name, "isInteger", 9) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_NUMBER_IS_INTEGER, "isInteger", 1);
-        if (prop_len == 8 && strncmp(prop_name, "isFinite", 8) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_NUMBER_IS_FINITE, "isFinite", 1);
-        if (prop_len == 5 && strncmp(prop_name, "isNaN", 5) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_NUMBER_IS_NAN, "isNaN", 1);
-        if (prop_len == 13 && strncmp(prop_name, "isSafeInteger", 13) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_NUMBER_IS_SAFE_INTEGER, "isSafeInteger", 1);
-        if (prop_len == 8 && strncmp(prop_name, "parseInt", 8) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_NUMBER_PARSE_INT, "parseInt", 2);
-        if (prop_len == 10 && strncmp(prop_name, "parseFloat", 10) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_NUMBER_PARSE_FLOAT, "parseFloat", 1);
-    }
-    // Promise static methods
-    if (ctor_len == 7 && strncmp(ctor_name, "Promise", 7) == 0) {
-        struct { const char* name; int len; int id; int pc; } methods[] = {
-            {"resolve", 7, JS_BUILTIN_PROMISE_RESOLVE, 1},
-            {"reject", 6, JS_BUILTIN_PROMISE_REJECT, 1},
-            {"all", 3, JS_BUILTIN_PROMISE_ALL, 1},
-            {"allSettled", 10, JS_BUILTIN_PROMISE_ALL_SETTLED, 1},
-            {"any", 3, JS_BUILTIN_PROMISE_ANY, 1},
-            {"race", 4, JS_BUILTIN_PROMISE_RACE, 1},
-            {NULL, 0, 0, 0}
-        };
-        for (int i = 0; methods[i].name; i++) {
-            if (prop_len == methods[i].len && strncmp(prop_name, methods[i].name, prop_len) == 0) {
-                return js_get_or_create_builtin(methods[i].id, methods[i].name, methods[i].pc);
-            }
-        }
-    }
-    // Date static methods
-    if (ctor_len == 4 && strncmp(ctor_name, "Date", 4) == 0) {
-        if (prop_len == 3 && strncmp(prop_name, "now", 3) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_DATE_NOW, "now", 0);
-        if (prop_len == 5 && strncmp(prop_name, "parse", 5) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_DATE_PARSE, "parse", 1);
-        if (prop_len == 3 && strncmp(prop_name, "UTC", 3) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_DATE_UTC, "UTC", 7);
-    }
-    // Map static methods
-    if (ctor_len == 3 && strncmp(ctor_name, "Map", 3) == 0) {
-        if (prop_len == 7 && strncmp(prop_name, "groupBy", 7) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_MAP_GROUP_BY, "groupBy", 2);
-    }
-    // ArrayBuffer static methods
-    if (ctor_len == 11 && strncmp(ctor_name, "ArrayBuffer", 11) == 0) {
-        if (prop_len == 6 && strncmp(prop_name, "isView", 6) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_ARRAYBUFFER_ISVIEW, "isView", 1);
-    }
-    // Proxy static methods
-    if (ctor_len == 5 && strncmp(ctor_name, "Proxy", 5) == 0) {
-        if (prop_len == 9 && strncmp(prop_name, "revocable", 9) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_PROXY_REVOCABLE, "revocable", 2);
-    }
-    // TypedArray constructor static methods (from, of)
-    // Only match %TypedArray% abstract base — concrete constructors inherit via prototype chain
-    if (ctor_len == 10 && strncmp(ctor_name, "TypedArray", 10) == 0) {
-        if (prop_len == 4 && strncmp(prop_name, "from", 4) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_TYPED_ARRAY_FROM, "from", 1);
-        if (prop_len == 2 && strncmp(prop_name, "of", 2) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_TYPED_ARRAY_OF, "of", 0);
-    }
-    // Symbol static methods
-    if (ctor_len == 6 && strncmp(ctor_name, "Symbol", 6) == 0) {
-        if (prop_len == 3 && strncmp(prop_name, "for", 3) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_SYMBOL_FOR, "for", 1);
-        if (prop_len == 6 && strncmp(prop_name, "keyFor", 6) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_SYMBOL_KEY_FOR, "keyFor", 1);
-    }
+    const JsBuiltinMethodSpec* specs = js_get_constructor_static_method_specs(ctor_name, ctor_len);
+    Item method = js_lookup_builtin_method_spec(specs, prop_name, prop_len);
+    if (method.item != ItemNull.item) return method;
+
     // Handle .prototype on any constructor — delegate to the constructor's property access
     if (prop_len == 9 && strncmp(prop_name, "prototype", 9) == 0) {
         Item ctor_name_item = (Item){.item = s2it(heap_create_name(ctor_name, ctor_len))};
@@ -9028,15 +9075,7 @@ extern "C" void js_populate_typed_array_base_proto(Item proto, Item base_ctor) {
 
     // Install static methods from/of on %TypedArray% constructor (base_ctor)
     {
-        Item from_fn = js_get_or_create_builtin(JS_BUILTIN_TYPED_ARRAY_FROM, "from", 1);
-        Item from_key = (Item){.item = s2it(heap_create_name("from", 4))};
-        js_func_init_property(base_ctor, from_key, from_fn);
-        js_mark_non_enumerable(base_ctor, from_key);
-
-        Item of_fn = js_get_or_create_builtin(JS_BUILTIN_TYPED_ARRAY_OF, "of", 0);
-        Item of_key = (Item){.item = s2it(heap_create_name("of", 2))};
-        js_func_init_property(base_ctor, of_key, of_fn);
-        js_mark_non_enumerable(base_ctor, of_key);
+        js_install_builtin_method_specs_on_function(base_ctor, JS_TYPED_ARRAY_STATIC_METHOD_SPECS, false);
 
         // Install get [Symbol.species]() { return this; } on %TypedArray%
         // Phase 3 Stage A: route through unified js_install_native_accessor.
@@ -9049,69 +9088,8 @@ extern "C" void js_populate_typed_array_base_proto(Item proto, Item base_ctor) {
 // Populate all known static methods on a constructor function as own properties.
 // This makes them visible to hasOwnProperty, getOwnPropertyDescriptor, getOwnPropertyNames.
 extern "C" void js_populate_constructor_statics(Item ctor_item, const char* ctor_name, int ctor_len) {
-    // Method tables: name, length pairs per constructor
-    struct method_entry { const char* name; int len; };
-    static const method_entry object_methods[] = {
-        {"keys",4}, {"values",6}, {"entries",7}, {"fromEntries",11}, {"create",6}, {"assign",6},
-        {"freeze",6}, {"isFrozen",8}, {"seal",4}, {"isSealed",8}, {"preventExtensions",17},
-        {"isExtensible",12}, {"is",2}, {"getPrototypeOf",14}, {"setPrototypeOf",14},
-        {"defineProperty",14}, {"defineProperties",16}, {"getOwnPropertyDescriptor",24},
-        {"getOwnPropertyDescriptors",25}, {"getOwnPropertyNames",19},
-        {"getOwnPropertySymbols",21}, {"hasOwn",6}, {"groupBy",7}, {NULL,0}
-    };
-    static const method_entry array_methods[] = {
-        {"isArray",7}, {"from",4}, {"of",2}, {NULL,0}
-    };
-    static const method_entry string_methods[] = {
-        {"fromCharCode",12}, {"fromCodePoint",13}, {"raw",3}, {NULL,0}
-    };
-    static const method_entry date_methods[] = {
-        {"now",3}, {"parse",5}, {"UTC",3}, {NULL,0}
-    };
-    static const method_entry promise_methods[] = {
-        {"resolve",7}, {"reject",6}, {"all",3}, {"allSettled",10}, {"any",3}, {"race",4}, {NULL,0}
-    };
-    static const method_entry number_methods[] = {
-        {"isFinite",8}, {"isNaN",5}, {"isInteger",9}, {"isSafeInteger",13},
-        {"parseInt",8}, {"parseFloat",10}, {NULL,0}
-    };
-    static const method_entry map_methods[] = {
-        {"groupBy",7}, {NULL,0}
-    };
-    static const method_entry arraybuffer_methods[] = {
-        {"isView",6}, {NULL,0}
-    };
-    static const method_entry proxy_methods[] = {
-        {"revocable",9}, {NULL,0}
-    };
-
-    const method_entry* table = NULL;
-    if (ctor_len == 6 && strncmp(ctor_name, "Object", 6) == 0) table = object_methods;
-    else if (ctor_len == 5 && strncmp(ctor_name, "Array", 5) == 0) table = array_methods;
-    else if (ctor_len == 6 && strncmp(ctor_name, "String", 6) == 0) table = string_methods;
-    else if (ctor_len == 4 && strncmp(ctor_name, "Date", 4) == 0) table = date_methods;
-    else if (ctor_len == 7 && strncmp(ctor_name, "Promise", 7) == 0) table = promise_methods;
-    else if (ctor_len == 6 && strncmp(ctor_name, "Number", 6) == 0) table = number_methods;
-    else if (ctor_len == 3 && strncmp(ctor_name, "Map", 3) == 0) table = map_methods;
-    else if (ctor_len == 11 && strncmp(ctor_name, "ArrayBuffer", 11) == 0) table = arraybuffer_methods;
-    else if (ctor_len == 5 && strncmp(ctor_name, "Proxy", 5) == 0) table = proxy_methods;
-    if (table) {
-    JsFunction* fn = (JsFunction*)ctor_item.function;
-    for (int i = 0; table[i].name; i++) {
-        Item key = (Item){.item = s2it(heap_create_name(table[i].name, table[i].len))};
-        // Skip if already populated (e.g. Number.parseInt/parseFloat set by
-        // js_populate_number_ctor to preserve identity with global builtins)
-        if (fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
-            Item existing = map_get(fn->properties_map.map, key);
-            if (existing.item != ItemNull.item) continue;
-        }
-        Item method = js_lookup_constructor_static(ctor_name, ctor_len, table[i].name, table[i].len);
-        if (method.item != ItemNull.item) {
-            js_func_init_property(ctor_item, key, method);
-            js_mark_non_enumerable(ctor_item, key);
-        }
-    }
-    } // end if(table)
+    const JsBuiltinMethodSpec* specs = js_get_constructor_static_method_specs(ctor_name, ctor_len);
+    js_install_builtin_method_specs_on_function(ctor_item, specs, true);
 
     // ES spec: install get [Symbol.species]() { return this; } on constructors
     // that support @@species (Array, RegExp, Promise, Map, Set, ArrayBuffer, TypedArray constructors)
@@ -20662,16 +20640,7 @@ extern "C" Item js_get_json_object_value() {
         js_mark_non_writable(js_json_object, tag_k);
         js_mark_non_enumerable(js_json_object, tag_k);
         // v28: add parse and stringify as callable function properties
-        struct { const char* name; int id; int pc; } jm[] = {
-            {"parse", JS_BUILTIN_JSON_PARSE, 2},
-            {"stringify", JS_BUILTIN_JSON_STRINGIFY, 3},
-        };
-        for (int i = 0; i < (int)(sizeof(jm) / sizeof(jm[0])); i++) {
-            Item key = (Item){.item = s2it(heap_create_name(jm[i].name, strlen(jm[i].name)))};
-            Item fn = js_get_or_create_builtin(jm[i].id, jm[i].name, jm[i].pc);
-            js_property_set(js_json_object, key, fn);
-            js_mark_non_enumerable(js_json_object, key);
-        }
+        js_install_builtin_method_specs(js_json_object, JS_JSON_METHOD_SPECS);
     }
     return js_json_object;
 }
@@ -20834,28 +20803,7 @@ extern "C" Item js_get_reflect_object_value() {
         js_property_set(js_reflect_object, tag_k, (Item){.item = s2it(heap_create_name("Reflect", 7))});
 
         // Populate Reflect methods as function objects
-        struct { const char* name; int len; int bid; int pc; } methods[] = {
-            {"apply",                      5, JS_BUILTIN_REFLECT_APPLY,                       3},
-            {"construct",                  9, JS_BUILTIN_REFLECT_CONSTRUCT,                    2},
-            {"defineProperty",            14, JS_BUILTIN_REFLECT_DEFINE_PROPERTY,               3},
-            {"deleteProperty",            14, JS_BUILTIN_REFLECT_DELETE_PROPERTY,                2},
-            {"get",                        3, JS_BUILTIN_REFLECT_GET,                            2},
-            {"getOwnPropertyDescriptor",  24, JS_BUILTIN_REFLECT_GET_OWN_PROPERTY_DESCRIPTOR,   2},
-            {"getPrototypeOf",            14, JS_BUILTIN_REFLECT_GET_PROTOTYPE_OF,               1},
-            {"has",                        3, JS_BUILTIN_REFLECT_HAS,                            2},
-            {"isExtensible",              12, JS_BUILTIN_REFLECT_IS_EXTENSIBLE,                  1},
-            {"ownKeys",                    7, JS_BUILTIN_REFLECT_OWN_KEYS,                       1},
-            {"preventExtensions",         17, JS_BUILTIN_REFLECT_PREVENT_EXTENSIONS,             1},
-            {"set",                        3, JS_BUILTIN_REFLECT_SET,                            3},
-            {"setPrototypeOf",            14, JS_BUILTIN_REFLECT_SET_PROTOTYPE_OF,               2},
-            {NULL, 0, 0, 0}
-        };
-        for (int i = 0; methods[i].name; i++) {
-            Item mk = (Item){.item = s2it(heap_create_name(methods[i].name, methods[i].len))};
-            Item mf = js_get_or_create_builtin(methods[i].bid, methods[i].name, methods[i].pc);
-            js_property_set(js_reflect_object, mk, mf);
-            js_mark_non_enumerable(js_reflect_object, mk);
-        }
+        js_install_builtin_method_specs(js_reflect_object, JS_REFLECT_METHOD_SPECS);
     }
     return js_reflect_object;
 }
@@ -20872,27 +20820,7 @@ extern "C" Item js_get_atomics_object_value() {
         Item tag_k = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
         js_property_set(js_atomics_object, tag_k, (Item){.item = s2it(heap_create_name("Atomics", 7))});
 
-        struct { const char* name; int len; int bid; int pc; } methods[] = {
-            {"add",             3, JS_BUILTIN_ATOMICS_ADD,             3},
-            {"and",             3, JS_BUILTIN_ATOMICS_AND,             3},
-            {"compareExchange", 15, JS_BUILTIN_ATOMICS_COMPAREEXCHANGE, 4},
-            {"exchange",        8, JS_BUILTIN_ATOMICS_EXCHANGE,        3},
-            {"isLockFree",     10, JS_BUILTIN_ATOMICS_ISLOCKFREE,      1},
-            {"load",            4, JS_BUILTIN_ATOMICS_LOAD,            2},
-            {"notify",          6, JS_BUILTIN_ATOMICS_NOTIFY,          3},
-            {"or",              2, JS_BUILTIN_ATOMICS_OR,              3},
-            {"store",           5, JS_BUILTIN_ATOMICS_STORE,           3},
-            {"sub",             3, JS_BUILTIN_ATOMICS_SUB,             3},
-            {"wait",            4, JS_BUILTIN_ATOMICS_WAIT,            3},
-            {"xor",             3, JS_BUILTIN_ATOMICS_XOR,             3},
-            {NULL, 0, 0, 0}
-        };
-        for (int i = 0; methods[i].name; i++) {
-            Item mk = (Item){.item = s2it(heap_create_name(methods[i].name, methods[i].len))};
-            Item mf = js_get_or_create_builtin(methods[i].bid, methods[i].name, methods[i].pc);
-            js_property_set(js_atomics_object, mk, mf);
-            js_mark_non_enumerable(js_atomics_object, mk);
-        }
+        js_install_builtin_method_specs(js_atomics_object, JS_ATOMICS_METHOD_SPECS);
     }
     return js_atomics_object;
 }
