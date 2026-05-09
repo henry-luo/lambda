@@ -242,6 +242,15 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
         child = child->next();
     }
 
+    if (span->has_inline_fragment_union) {
+        if (span->inline_fragment_min_x < min_x) min_x = span->inline_fragment_min_x;
+        if (span->inline_fragment_max_x > max_x) max_x = span->inline_fragment_max_x;
+        if (span->inline_fragment_min_y < visual_min_y) visual_min_y = span->inline_fragment_min_y;
+        if (span->inline_fragment_max_y > visual_max_y) visual_max_y = span->inline_fragment_max_y;
+        if (span->inline_fragment_min_y < content_min_y) content_min_y = span->inline_fragment_min_y;
+        if (span->inline_fragment_max_y > content_max_y) content_max_y = span->inline_fragment_max_y;
+    }
+
     // Get border and padding widths
     float border_top = 0, border_right = 0, border_bottom = 0, border_left = 0;
     float pad_left = 0, pad_right = 0, pad_top = 0, pad_bottom = 0;

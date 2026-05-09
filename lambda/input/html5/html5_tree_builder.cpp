@@ -1022,6 +1022,7 @@ static void html5_process_in_text_mode(Html5Parser* parser, Html5Token* token) {
 
     if (token->type == HTML5_TOKEN_EOF) {
         log_error("html5: unexpected EOF in text mode");
+        parser->ignore_next_lf = false;
         // Pop current element and switch back to original mode
         html5_pop_element(parser);
         parser->mode = parser->original_insertion_mode;
@@ -1032,6 +1033,7 @@ static void html5_process_in_text_mode(Html5Parser* parser, Html5Token* token) {
     if (token->type == HTML5_TOKEN_END_TAG) {
         // End tag closes the raw text element (title, textarea, style, script, etc.)
         // Pop the element and switch back to original insertion mode
+        parser->ignore_next_lf = false;
         html5_flush_pending_text(parser);  // flush any buffered text
 
         // Check for JSON-LD script: <script type="application/ld+json">

@@ -70,6 +70,115 @@ static float get_border_width_from_css(LayoutContext* lycon, DomElement* element
 // ============================================================================
 CssEnum get_white_space_value(DomNode* node);
 
+static float measure_current_space_advance(LayoutContext* lycon, FontHandle* handle, FontProp* style) {
+    if (!style) return 0.0f;
+    if (!handle) handle = style->font_handle;
+
+    if (handle) {
+        FontStyleDesc sd = font_style_desc_from_prop(style);
+        LoadedGlyph* glyph = font_load_glyph(handle, &sd, (uint32_t)' ', false);
+        if (glyph && glyph->advance_x > 0.0f) {
+            float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0)
+                ? lycon->ui_context->pixel_ratio : 1.0f;
+            return glyph->advance_x / pixel_ratio;
+        }
+    }
+    return style->space_width;
+}
+
+static bool text_line_has_tab(const char* text, size_t length) {
+    for (size_t i = 0; i < length; i++) {
+        if (text[i] == '\t') return true;
+    }
+    return false;
+}
+
+static float measure_preserved_line_width_with_tabs(LayoutContext* lycon, const char* text,
+                                                    size_t length, float start_offset,
+                                                    CssEnum text_transform, CssEnum font_variant,
+                                                    float tab_size) {
+    if (!text || length == 0) return 0.0f;
+
+    float width = 0.0f;
+    bool is_word_start = true;
+    const unsigned char* str = (const unsigned char*)text;
+    size_t i = 0;
+
+    while (i < length) {
+        unsigned char ch = str[i];
+        if (ch == '\t') {
+            float raw_space = measure_current_space_advance(
+                lycon, lycon->font.font_handle, lycon->font.style);
+            float tab_period = raw_space * tab_size;
+            if (tab_period > 0.0f) {
+                float current_x = start_offset + width;
+                float half_ch = raw_space * 0.5f;
+                float next_tab = tab_period * ceilf((current_x + half_ch) / tab_period);
+                width += next_tab - current_x;
+            }
+            is_word_start = true;
+            i++;
+            continue;
+        }
+
+        if (ch == ' ' || ch == '\r' || ch == '\n') {
+            float space_width = measure_current_space_advance(
+                lycon, lycon->font.font_handle, lycon->font.style);
+            if (lycon->font.style) {
+                space_width += lycon->font.style->word_spacing;
+                space_width += lycon->font.style->letter_spacing;
+            }
+            width += space_width;
+            is_word_start = true;
+            i++;
+            continue;
+        }
+
+        uint32_t codepoint = ch;
+        int bytes = 1;
+        if (codepoint >= 128) {
+            bytes = str_utf8_decode((const char*)&str[i], length - i, &codepoint);
+            if (bytes <= 0) {
+                width += lycon->font.style ? lycon->font.style->font_size * 0.5f : 8.0f;
+                i++;
+                is_word_start = false;
+                continue;
+            }
+        }
+
+        uint32_t tt_out[3];
+        int tt_count = apply_text_transform_full(codepoint, text_transform, is_word_start, tt_out);
+        codepoint = tt_out[0];
+        bool is_small_caps_lower = false;
+        if (font_variant == CSS_VALUE_SMALL_CAPS) {
+            uint32_t original = codepoint;
+            codepoint = apply_text_transform(codepoint, CSS_VALUE_UPPERCASE, false);
+            is_small_caps_lower = (codepoint != original);
+        }
+        is_word_start = false;
+
+        FontStyleDesc sd = font_style_desc_from_prop(lycon->font.style);
+        float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0)
+            ? lycon->ui_context->pixel_ratio : 1.0f;
+        for (int ti = 0; ti < tt_count; ti++) {
+            uint32_t cp = (ti == 0) ? codepoint : tt_out[ti];
+            if (cp == 0 || cp == 0x00AD || cp == 0x200B || cp == 0xFEFF ||
+                cp == 0x200C || cp == 0x200D) {
+                continue;
+            }
+            LoadedGlyph* glyph = font_load_glyph(lycon->font.font_handle, &sd, cp, false);
+            float advance = glyph ? (glyph->advance_x / pixel_ratio)
+                                  : (lycon->font.style ? lycon->font.style->font_size * 0.5f : 8.0f);
+            if (is_small_caps_lower) advance *= 0.7f;
+            if (lycon->font.style) advance += lycon->font.style->letter_spacing;
+            width += advance;
+        }
+        i += (size_t)bytes;
+    }
+
+    return width;
+}
+
 // ============================================================================
 // Text Measurement (Core Implementation)
 // ============================================================================
@@ -206,12 +315,8 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                 kerning_adj = font_get_kerning(lycon->font.font_handle, prev_codepoint, (uint32_t)ch);
             }
 
-            // Use the same space_width as layout_text.cpp for consistency
-            // This is pre-calculated in font.cpp using backend font metrics.
-            float space_width = 4.0f;  // Default fallback
-            if (lycon->font.style && lycon->font.style->space_width > 0) {
-                space_width = lycon->font.style->space_width;
-            }
+            float space_width = measure_current_space_advance(
+                lycon, lycon->font.font_handle, lycon->font.style);
             // Apply word-spacing to space characters (matching layout_text.cpp)
             if (lycon->font.style) {
                 space_width += lycon->font.style->word_spacing;
@@ -371,12 +476,17 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
             kerning = font_get_kerning(lycon->font.font_handle, prev_codepoint, codepoint);
         }
 
-        // Get glyph advance via font module (returns CSS pixels directly)
-        GlyphInfo ginfo = font_get_glyph(lycon->font.font_handle, codepoint);
-        if (ginfo.id != 0) {
-            // small-caps: scale advance for lowercase-origin characters
-            float advance = ginfo.advance_x * (is_small_caps_lower ? 0.7f : 1.0f) + kerning;
-
+        // Use the same glyph loading path as layout_text.cpp. font_get_glyph()
+        // can report stale/default-sized advances for dynamically loaded
+        // @font-face fonts; font_load_glyph() returns the backend advance for
+        // the current FontStyleDesc and fallback chain.
+        FontStyleDesc _sd = font_style_desc_from_prop(lycon->font.style);
+        LoadedGlyph* glyph = font_load_glyph(lycon->font.font_handle, &_sd, codepoint, false);
+        if (glyph) {
+            float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0)
+                ? lycon->ui_context->pixel_ratio : 1.0f;
+            float advance = (glyph->advance_x / pixel_ratio) + kerning;
+            if (is_small_caps_lower) advance *= 0.7f;
             // Apply letter-spacing (CSS 2.1 §16.4: after every character including last)
             if (lycon->font.style) {
                 advance += lycon->font.style->letter_spacing;
@@ -386,7 +496,6 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                 advance += lycon->font.style->word_spacing;
                 is_word_start = true;
             }
-
             current_word += advance;
             total_width += advance;
         } else {
@@ -496,10 +605,8 @@ float compute_text_height_at_width(LayoutContext* lycon,
             }
             current_word_width = 0;
             // add space width
-            float space_width = 4.0f;
-            if (lycon->font.style && lycon->font.style->space_width > 0) {
-                space_width = lycon->font.style->space_width;
-            }
+            float space_width = measure_current_space_advance(
+                lycon, lycon->font.font_handle, lycon->font.style);
             if (lycon->font.style) {
                 space_width += lycon->font.style->word_spacing;
             }
@@ -654,6 +761,7 @@ static bool is_inline_level_element(DomElement* element) {
             strcmp(tag, "sub") == 0 ||
             strcmp(tag, "sup") == 0 ||
             strcmp(tag, "code") == 0 ||
+            strcmp(tag, "tt") == 0 ||
             strcmp(tag, "kbd") == 0 ||
             strcmp(tag, "samp") == 0 ||
             strcmp(tag, "var") == 0 ||
@@ -2418,6 +2526,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 }
 
                 TextIntrinsicWidths text_widths;
+                float tab_size = (view_block->blk && view_block->blk->tab_size >= 0)
+                    ? view_block->blk->tab_size : 8.0f;
                 if (preserve_newlines) {
                     // For pre/pre-wrap/break-spaces/pre-line: newlines create forced line breaks.
                     // Measure each line separately; max-content = widest line.
@@ -2434,6 +2544,12 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                         if (line_len > 0) {
                             TextIntrinsicWidths lw = measure_text_intrinsic_widths(
                                 lycon, line_start, line_len, text_transform, font_variant, ws, ow, wb);
+                            if (preserve_spaces && text_line_has_tab(line_start, line_len)) {
+                                float start_offset = (line_count == 0) ? inline_max_sum : 0.0f;
+                                lw.max_content = measure_preserved_line_width_with_tabs(
+                                    lycon, line_start, line_len, start_offset,
+                                    text_transform, font_variant, tab_size);
+                            }
                             if (lw.max_content > text_widths.max_content)
                                 text_widths.max_content = lw.max_content;
                             if (lw.min_content > text_widths.min_content)
@@ -2458,6 +2574,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     text_widths = measure_text_intrinsic_widths(
                         lycon, normalized_buffer, out_pos, text_transform, font_variant,
                         CSS_VALUE_NORMAL, ow, wb);
+                    if (preserve_spaces && text_line_has_tab(normalized_buffer, out_pos)) {
+                        text_widths.max_content = measure_preserved_line_width_with_tabs(
+                            lycon, normalized_buffer, out_pos, inline_max_sum,
+                            text_transform, font_variant, tab_size);
+                    }
                 }
                 child_sizes.min_content = text_widths.min_content;
                 child_sizes.max_content = text_widths.max_content;
