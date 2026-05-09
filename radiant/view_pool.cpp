@@ -206,6 +206,8 @@ BlockProp* alloc_block_prop(LayoutContext* lycon) {
     prop->text_transform = (CssEnum)0;  // 0 = not set, will be inherited if needed
     prop->word_break = (CssEnum)0;      // 0 = not set, treat as CSS_VALUE_NORMAL
     prop->overflow_wrap = (CssEnum)0;    // 0 = not set, treat as CSS_VALUE_NORMAL
+    prop->break_before = CSS_VALUE_AUTO;
+    prop->break_after = CSS_VALUE_AUTO;
     prop->tab_size = 8;                  // CSS default tab-size is 8
     prop->given_min_height = prop->given_min_width = prop->given_max_height = prop->given_max_width = -1;  // -1 for undefined
     prop->box_sizing = CSS_VALUE_CONTENT_BOX;  // default to content-box
@@ -818,7 +820,7 @@ static bool calculate_transform_offset(View* view, float* out_dx, float* out_dy)
     return (dx != 0 || dy != 0);
 }
 
-void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nullptr) {
+void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nullptr, bool trailing_comma = false) {
     // CSS Display Level 3: display:contents elements don't generate a box
     // They report (0, 0, 0, 0) in getComputedStyle/getBoundingClientRect
     if (view->is_element()) {
@@ -838,7 +840,7 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nul
             strbuf_append_char_n(buf, ' ', indent + 4);
             strbuf_append_str(buf, "\"width\": 0.0,\n");
             strbuf_append_char_n(buf, ' ', indent + 4);
-            strbuf_append_str(buf, "\"height\": 0.0\n");
+            strbuf_append_format(buf, "\"height\": 0.0%s\n", trailing_comma ? "," : "");
             return;
         }
     }
@@ -1038,7 +1040,7 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nul
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_format(buf, "\"width\": %.1f,\n", css_width);
     strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_format(buf, "\"height\": %.1f\n", css_height);
+    strbuf_append_format(buf, "\"height\": %.1f%s\n", css_height, trailing_comma ? "," : "");
 }
 
 /**
@@ -1344,6 +1346,45 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent);
 void print_br_json(View* br, StrBuf* buf, int indent);
 void print_inline_json(ViewSpan* span, StrBuf* buf, int indent);
 
+static void print_layout_fragments_json(ViewBlock* block, StrBuf* buf, int indent) {
+    if (!block) return;
+    DomElement* elem = (DomElement*)block;
+    if (!elem->layout_fragments || elem->layout_fragment_count <= 0) return;
+
+    strbuf_append_char_n(buf, ' ', indent + 4);
+    strbuf_append_str(buf, "\"fragments\": [\n");
+    LayoutFragmentBox* fragment = elem->layout_fragments;
+    int index = 0;
+    while (fragment) {
+        if (index > 0) {
+            strbuf_append_str(buf, ",\n");
+        }
+        strbuf_append_char_n(buf, ' ', indent + 6);
+        strbuf_append_str(buf, "{\n");
+        strbuf_append_char_n(buf, ' ', indent + 8);
+        strbuf_append_format(buf, "\"index\": %d,\n", fragment->fragment_index);
+        strbuf_append_char_n(buf, ' ', indent + 8);
+        strbuf_append_format(buf, "\"column\": %d,\n", fragment->column_index);
+        strbuf_append_char_n(buf, ' ', indent + 8);
+        strbuf_append_format(buf, "\"row\": %d,\n", fragment->row_index);
+        strbuf_append_char_n(buf, ' ', indent + 8);
+        strbuf_append_format(buf, "\"offsetX\": %.1f,\n", fragment->x);
+        strbuf_append_char_n(buf, ' ', indent + 8);
+        strbuf_append_format(buf, "\"offsetY\": %.1f,\n", fragment->y);
+        strbuf_append_char_n(buf, ' ', indent + 8);
+        strbuf_append_format(buf, "\"width\": %.1f,\n", fragment->width);
+        strbuf_append_char_n(buf, ' ', indent + 8);
+        strbuf_append_format(buf, "\"height\": %.1f\n", fragment->height);
+        strbuf_append_char_n(buf, ' ', indent + 6);
+        strbuf_append_str(buf, "}");
+        fragment = fragment->next;
+        index++;
+    }
+    strbuf_append_str(buf, "\n");
+    strbuf_append_char_n(buf, ' ', indent + 4);
+    strbuf_append_str(buf, "]\n");
+}
+
 // Helper to print children, skipping anonymous wrapper elements
 static void print_children_json(ViewBlock* block, StrBuf* buf, int indent, bool* first_child) {
     View* child = ((ViewElement*)block)->first_child;
@@ -1560,7 +1601,12 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent) {
 
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"layout\": {\n");
-    print_bounds_json(block, buf, indent);
+    DomElement* block_elem = (DomElement*)block;
+    bool has_fragments = block_elem->layout_fragments && block_elem->layout_fragment_count > 0;
+    print_bounds_json(block, buf, indent, nullptr, has_fragments);
+    if (has_fragments) {
+        print_layout_fragments_json(block, buf, indent);
+    }
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "},\n");
 

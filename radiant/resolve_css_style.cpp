@@ -6577,6 +6577,34 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             break;
         }
 
+        case CSS_PROPERTY_BREAK_BEFORE:
+        case CSS_PROPERTY_PAGE_BREAK_BEFORE: {
+            log_debug("[CSS] Processing break-before property");
+            if (!block) break;
+            if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                block->blk->break_before = value->data.keyword;
+                log_debug("[CSS] break-before: %s",
+                          css_enum_info(value->data.keyword) ? css_enum_info(value->data.keyword)->name : "unknown");
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_BREAK_AFTER:
+        case CSS_PROPERTY_PAGE_BREAK_AFTER: {
+            log_debug("[CSS] Processing break-after property");
+            if (!block) break;
+            if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                block->blk->break_after = value->data.keyword;
+                log_debug("[CSS] break-after: %s",
+                          css_enum_info(value->data.keyword) ? css_enum_info(value->data.keyword)->name : "unknown");
+            }
+            break;
+        }
+
         case CSS_PROPERTY_COLUMN_FILL: {
             log_debug("[CSS] Processing column-fill property");
             if (!block) break;
