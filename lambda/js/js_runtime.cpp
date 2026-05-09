@@ -361,6 +361,8 @@ extern "C" Item js_proxy_trap_delete(Item proxy, Item key) {
 }
 
 // Proxy [[OwnKeys]]()
+static Item js_array_like_to_array(Item obj);
+
 extern "C" Item js_proxy_trap_own_keys(Item proxy) {
     JsProxyData* pd = js_get_proxy_data(proxy);
     if (!pd) return js_array_new(0);
@@ -372,28 +374,40 @@ extern "C" Item js_proxy_trap_own_keys(Item proxy) {
     Item args[1] = { PD_TARGET(pd) };
     Item trap_result = js_call_function(trap, PD_HANDLER(pd), args, 1);
     if (js_exception_pending) return ItemNull;
+
+    Item key_list = trap_result;
+    if (get_type_id(key_list) != LMD_TYPE_ARRAY) {
+        TypeId result_type = get_type_id(key_list);
+        if (result_type != LMD_TYPE_NULL && result_type != LMD_TYPE_UNDEFINED &&
+            result_type != LMD_TYPE_INT && result_type != LMD_TYPE_INT64 &&
+            result_type != LMD_TYPE_FLOAT && result_type != LMD_TYPE_BOOL &&
+            result_type != LMD_TYPE_STRING && !js_key_is_symbol(key_list)) {
+            key_list = js_array_like_to_array(key_list);
+            if (js_exception_pending) return ItemNull;
+        }
+    }
     
     // ES2020 §9.5.11 invariant checks
-    // trap result must be a List (array)
-    if (get_type_id(trap_result) != LMD_TYPE_ARRAY) {
+    // trap result must be converted to a List (array)
+    if (get_type_id(key_list) != LMD_TYPE_ARRAY) {
         return js_throw_type_error("'ownKeys' on proxy: trap result is not an Array");
     }
     
     // Each element must be a String or Symbol
-    int len = js_array_length(trap_result);
+    int len = js_array_length(key_list);
     for (int i = 0; i < len; i++) {
-        Item elem = js_array_get_int(trap_result, i);
+        Item elem = js_array_get_int(key_list, i);
         TypeId tid = get_type_id(elem);
-        if (tid != LMD_TYPE_STRING && tid != LMD_TYPE_SYMBOL) {
+        if (tid != LMD_TYPE_STRING && tid != LMD_TYPE_SYMBOL && !js_key_is_symbol(elem)) {
             return js_throw_type_error("'ownKeys' on proxy: trap result must only contain Strings and Symbols");
         }
     }
     
     // Check for duplicates
     for (int i = 0; i < len; i++) {
-        Item a = js_array_get_int(trap_result, i);
+        Item a = js_array_get_int(key_list, i);
         for (int j = i + 1; j < len; j++) {
-            Item b = js_array_get_int(trap_result, j);
+            Item b = js_array_get_int(key_list, j);
             extern Item js_strict_equal(Item a, Item b);
             if (it2b(js_strict_equal(a, b))) {
                 return js_throw_type_error("'ownKeys' on proxy: trap result must not contain duplicate entries");
@@ -412,7 +426,7 @@ extern "C" Item js_proxy_trap_own_keys(Item proxy) {
             bool found = false;
             for (int j = 0; j < len; j++) {
                 extern Item js_strict_equal(Item a, Item b);
-                if (it2b(js_strict_equal(tk, js_array_get_int(trap_result, j)))) { found = true; break; }
+                if (it2b(js_strict_equal(tk, js_array_get_int(key_list, j)))) { found = true; break; }
             }
             if (!found) {
                 return js_throw_type_error("'ownKeys' on proxy: trap result did not include all non-extensible target's own keys");
@@ -437,7 +451,7 @@ extern "C" Item js_proxy_trap_own_keys(Item proxy) {
                     bool found = false;
                     for (int j = 0; j < len; j++) {
                         extern Item js_strict_equal(Item a, Item b);
-                        if (it2b(js_strict_equal(tk, js_array_get_int(trap_result, j)))) { found = true; break; }
+                        if (it2b(js_strict_equal(tk, js_array_get_int(key_list, j)))) { found = true; break; }
                     }
                     if (!found) {
                         return js_throw_type_error("'ownKeys' on proxy: trap result did not include non-configurable key");
@@ -447,7 +461,11 @@ extern "C" Item js_proxy_trap_own_keys(Item proxy) {
         }
     }
     
-    return trap_result;
+    Item result = js_array_new(0);
+    for (int i = 0; i < len; i++) {
+        js_array_push(result, js_array_get_int(key_list, i));
+    }
+    return result;
 }
 
 // Proxy [[GetOwnProperty]](key)
@@ -2622,15 +2640,16 @@ extern "C" Item js_property_get(Item object, Item key) {
             }
         }
         // Numeric index access
-        int idx = (int)js_get_number(key);
+        double idx_d = js_get_number(key);
+        int64_t idx = (idx_d == idx_d) ? (int64_t)idx_d : -1;
         // check for accessor on companion map — must check even when idx >= length
-        if (idx >= 0 && object.array->extra != 0) {
+        if (idx_d == idx_d && idx >= 0 && object.array->extra != 0) {
             Map* props = (Map*)(uintptr_t)object.array->extra;
             // Phase 5D: IS_ACCESSOR shape-flag dispatch under the digit-string
             // name. js_define_accessor_partial stores a JsAccessorPair* under
             // "<idx>" when defineProperty installs an accessor on an array index.
             char idx_buf[32];
-            int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%d", idx);
+            int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)idx);
             Item pm_item = (Item){.map = props};
             ShapeEntry* _se_idx = js_find_shape_entry(pm_item, idx_buf, idx_len);
             if (_se_idx && jspd_is_accessor(_se_idx)) {
@@ -2649,8 +2668,15 @@ extern "C" Item js_property_get(Item object, Item key) {
             // Post-AT-1 the intercept routes companion-map accessor writes
             // through JsAccessorPair under the digit-string name with
             // IS_ACCESSOR shape flag, which the probe above already finds.
+            bool sparse_found = false;
+            Item sparse_val = js_map_get_fast_ext(props, idx_buf, idx_len, &sparse_found);
+            if (sparse_found && sparse_val.item != JS_DELETED_SENTINEL_VAL) {
+                bool dense_present = idx < object.array->length && idx < object.array->capacity &&
+                    object.array->items[idx].item != JS_DELETED_SENTINEL_VAL;
+                if (!dense_present) return sparse_val;
+            }
         }
-        if (idx >= 0 && idx < object.array->length) {
+        if (idx_d == idx_d && idx >= 0 && idx < object.array->length && idx < object.array->capacity) {
             // v25: check for deleted sentinel (array hole) — fall through to prototype chain
             if (object.array->items[idx].item != JS_DELETED_SENTINEL_VAL) {
                 return object.array->items[idx];
@@ -2658,9 +2684,9 @@ extern "C" Item js_property_get(Item object, Item key) {
             // hole — fall through to prototype chain lookup below
         } else {
             // Arguments overflow: numeric index stored in companion map
-            if (idx >= 0 && object.array->is_content == 1 && object.array->extra != 0) {
+            if (idx_d == idx_d && idx >= 0 && object.array->is_content == 1 && object.array->extra != 0) {
                 char idx_buf[32];
-                snprintf(idx_buf, sizeof(idx_buf), "%d", idx);
+                snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)idx);
                 Map* pm = (Map*)(uintptr_t)object.array->extra;
                 bool pm_found = false;
                 Item pm_val = js_map_get_fast_ext(pm, idx_buf, (int)strlen(idx_buf), &pm_found);
@@ -3311,6 +3337,94 @@ extern "C" Item js_property_get(Item object, Item key) {
     return make_js_undefined();
 }
 
+extern "C" Item js_property_set(Item object, Item key, Item value);
+
+static Map* js_array_ensure_props_map(Array* arr) {
+    if (!arr) return NULL;
+    if (arr->extra == 0) {
+        Item obj = js_new_object();
+        obj.map->map_kind = MAP_KIND_ARRAY_PROPS;
+        arr->extra = (int64_t)(uintptr_t)obj.map;
+    }
+    return (Map*)(uintptr_t)arr->extra;
+}
+
+static void js_array_store_sparse_property(Item array_item, int64_t index, Item value, bool update_length) {
+    if (get_type_id(array_item) != LMD_TYPE_ARRAY || index < 0) return;
+    Array* arr = array_item.array;
+    Map* pm = js_array_ensure_props_map(arr);
+    if (!pm) return;
+    char idx_buf[32];
+    int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)index);
+    Item map_item = (Item){.map = pm};
+    Item str_key = (Item){.item = s2it(heap_create_name(idx_buf, idx_len))};
+    js_property_set(map_item, str_key, value);
+    if (update_length && index <= 0xFFFFFFFELL && arr->length <= index) {
+        arr->length = index + 1;
+    }
+}
+
+static bool js_array_parse_index_name(const char* name, int name_len, int64_t* out_index) {
+    if (!name || name_len <= 0 || name_len > 10) return false;
+    if (name_len > 1 && name[0] == '0') return false;
+    int64_t index = 0;
+    for (int i = 0; i < name_len; i++) {
+        char c = name[i];
+        if (c < '0' || c > '9') return false;
+        index = index * 10 + (int64_t)(c - '0');
+    }
+    if (index > 0xFFFFFFFELL) return false;
+    if (out_index) *out_index = index;
+    return true;
+}
+
+static void js_array_delete_sparse_indices_from(Array* arr, int64_t new_len) {
+    if (!arr || arr->extra == 0) return;
+    Map* pm = (Map*)(uintptr_t)arr->extra;
+    if (!pm || !pm->type) return;
+    TypeMap* tm = (TypeMap*)pm->type;
+    Item map_item = (Item){.map = pm};
+    Item deleted = (Item){.item = JS_DELETED_SENTINEL_VAL};
+    for (ShapeEntry* entry = tm->shape; entry; entry = entry->next) {
+        if (!entry->name) continue;
+        int name_len = (int)entry->name->length;
+        const char* name = entry->name->str;
+        int64_t index = -1;
+        if (!js_array_parse_index_name(name, name_len, &index)) continue;
+        if (index < new_len) continue;
+        ShapeEntry* se = js_find_shape_entry(map_item, name, name_len);
+        if (!js_props_query_configurable(pm, se, name, name_len)) continue;
+        Item key = (Item){.item = s2it(heap_create_name(name, name_len))};
+        js_property_set(map_item, key, deleted);
+    }
+}
+
+static bool js_proto_chain_has_nonwritable_data(Item object, const char* name, int name_len) {
+    Item proto = js_get_prototype_of(object);
+    int depth = 0;
+    while (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP && depth < 32) {
+        ShapeEntry* se = js_find_shape_entry(proto, name, name_len);
+        if (se) {
+            if (jspd_is_accessor(se)) return false;
+            return !js_props_query_writable(proto.map, se, name, name_len);
+        }
+        proto = js_get_prototype_of(proto);
+        depth++;
+    }
+    return false;
+}
+
+static bool js_func_has_own_property_map_key(Item object, const char* name, int name_len) {
+    if (get_type_id(object) != LMD_TYPE_FUNC) return false;
+    JsFunction* fn = (JsFunction*)object.function;
+    if (fn->properties_map.item == 0 || get_type_id(fn->properties_map) != LMD_TYPE_MAP) return false;
+    ShapeEntry* se = js_find_shape_entry(fn->properties_map, name, name_len);
+    if (!se) return false;
+    bool found = false;
+    Item val = js_map_get_fast_ext(fn->properties_map.map, name, name_len, &found);
+    return found && val.item != JS_DELETED_SENTINEL_VAL;
+}
+
 extern "C" Item js_property_set(Item object, Item key, Item value) {
     // process.env: symbol keys throw TypeError (before symbol-to-key conversion)
     if (js_key_is_symbol(key) && get_type_id(object) == LMD_TYPE_MAP &&
@@ -3370,6 +3484,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                         if (gap > SPARSE_GAP_MAX) {
                             log_debug("js_property_set: array length expansion %lld->%lld (gap %lld) too large, skipping",
                                       (long long)arr->length, (long long)new_len, (long long)gap);
+                            arr->length = new_len;
                             return value;
                         }
                         // Extend: ensure capacity and fill with undefined.
@@ -3391,6 +3506,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                         arr->length = new_len;
                     } else if (new_len < arr->length) {
                         // Truncate
+                        js_array_delete_sparse_indices_from(arr, new_len);
                         arr->length = new_len;
                     }
                 }
@@ -3404,6 +3520,18 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                 // check if the key is a numeric array index
                 double idx_d = js_get_number(key);
                 if (idx_d != idx_d) { // NaN → not a valid numeric index
+                    if (!js_skip_accessor_dispatch) {
+                        Item lookup_root = js_get_prototype(object);
+                        if (lookup_root.item == ItemNull.item) lookup_root = js_get_prototype_of(object);
+                        JsSetterDispatchStatus st = js_ordinary_set_via_accessor(
+                            lookup_root, sk->chars, (int)sk->len, value, object);
+                        if (st == JS_SET_DISPATCHED) return value;
+                        if (st == JS_SET_NO_SETTER) {
+                            js_strict_throw_property_error("set property which has only a getter on",
+                                                           sk->chars, (int)sk->len);
+                            return value;
+                        }
+                    }
                     // store in companion map
                     Array* arr = object.array;
                     Map* pm;
@@ -3416,6 +3544,13 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                     Item map_item = (Item){.map = pm};
                     js_property_set(map_item, key, value);
                     return value;
+                }
+                if (idx_d >= 0.0 && idx_d == floor(idx_d)) {
+                    int64_t idx = (int64_t)idx_d;
+                    if (idx > 0xFFFFFFFELL) {
+                        js_array_store_sparse_property(object, idx, value, false);
+                        return value;
+                    }
                 }
             }
         }
@@ -3439,8 +3574,9 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                             js_call_function(pair->setter, object, args, 1);
                             return value;
                         }
-                        // getter-only accessor: silently no-op (sloppy) — strict
-                        // throw is handled by the regular setter dispatch path.
+                        // getter-only accessor: strict TypeError, sloppy no-op.
+                        js_strict_throw_property_error("set property which has only a getter on",
+                                                       idx_buf, idx_len);
                         return value;
                     }
                 }
@@ -3578,7 +3714,14 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                 // skip writes to internal properties (needed for freeze itself)
                 if (get_type_id(key) == LMD_TYPE_STRING) {
                     String* sk = it2s(key);
-                    if (!(sk && sk->len >= 2 && sk->chars[0] == '_' && sk->chars[1] == '_')) {
+                    bool internal_non_symbol = sk && sk->len >= 2 && sk->chars[0] == '_' && sk->chars[1] == '_' &&
+                        !(sk->len > 6 && strncmp(sk->chars, "__sym_", 6) == 0);
+                    bool own_accessor_property = false;
+                    if (!internal_non_symbol && sk) {
+                        ShapeEntry* shape_entry = js_find_shape_entry(object, sk->chars, (int)sk->len);
+                        own_accessor_property = shape_entry && jspd_is_accessor(shape_entry);
+                    }
+                    if (!internal_non_symbol && !own_accessor_property) {
                         js_strict_throw_property_error("assign to read only", sk ? sk->chars : NULL, sk ? (int)sk->len : 0);
                         return value; // silently reject write to frozen object
                     }
@@ -3685,6 +3828,11 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                     }
                     // JS_SET_NOT_FOUND: fall through to normal data write below.
                 }
+                if (!js_ordinary_has_own(object, str_key->chars, (int)str_key->len) &&
+                    js_proto_chain_has_nonwritable_data(object, str_key->chars, (int)str_key->len)) {
+                    js_strict_throw_property_error("assign to read only", str_key->chars, (int)str_key->len);
+                    return value;
+                }
                 // Phase 5: legacy __get_X / __set_X probe block removed. Phase 4
                 // intercept routes all transpiled accessor writes through
                 // JsAccessorPair storage, and Phase 3 Stage C migrated native
@@ -3750,7 +3898,9 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
             if (get_type_id(key) == LMD_TYPE_STRING) {
                 String* sk = it2s(key);
                 // skip internal properties (__ prefix)
-                if (!(sk && sk->len >= 2 && sk->chars[0] == '_' && sk->chars[1] == '_')) {
+                bool internal_non_symbol = sk && sk->len >= 2 && sk->chars[0] == '_' && sk->chars[1] == '_' &&
+                    !(sk->len > 6 && strncmp(sk->chars, "__sym_", 6) == 0);
+                if (!internal_non_symbol) {
                     bool ne_found = false;
                     Item ne_val = js_map_get_fast(m, "__non_extensible__", 17, &ne_found);
                     if (ne_found && js_is_truthy(ne_val)) {
@@ -3870,6 +4020,24 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
             }
         }
         // v18: store arbitrary properties in backing map (e.g. assert._isSameValue = fn)
+        if (!js_skip_accessor_dispatch && str_key && str_key->len > 0 && str_key->len < 200 &&
+            !js_func_has_own_property_map_key(object, str_key->chars, (int)str_key->len)) {
+            Item proto = js_get_prototype_of(object);
+            if (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP) {
+                JsSetterDispatchStatus st = js_ordinary_set_via_accessor(
+                    proto, str_key->chars, (int)str_key->len, value, object);
+                if (st == JS_SET_DISPATCHED) return value;
+                if (st == JS_SET_NO_SETTER) {
+                    js_strict_throw_property_error("set property which has only a getter on",
+                                                   str_key->chars, (int)str_key->len);
+                    return value;
+                }
+            }
+            if (js_proto_chain_has_nonwritable_data(object, str_key->chars, (int)str_key->len)) {
+                js_strict_throw_property_error("assign to read only", str_key->chars, (int)str_key->len);
+                return value;
+            }
+        }
         if (fn->properties_map.item == 0) {
             fn->properties_map = js_new_object();
             heap_register_gc_root(&fn->properties_map.item);
@@ -4431,6 +4599,25 @@ extern "C" Item js_create_arguments() {
     return js_array_new(0);
 }
 
+extern "C" Item js_arguments_mapped_get(Item arguments, int64_t index, Item current_value) {
+    if (get_type_id(arguments) != LMD_TYPE_ARRAY || arguments.array->is_content != 1 || arguments.array->extra == 0) {
+        return current_value;
+    }
+    if (index >= 0 && index < arguments.array->length && index < arguments.array->capacity &&
+        arguments.array->items[index].item == JS_DELETED_SENTINEL_VAL) {
+        return current_value;
+    }
+    Item companion = {.map = (Map*)(uintptr_t)arguments.array->extra};
+    char marker_key[64];
+    snprintf(marker_key, sizeof(marker_key), "__arg_unmapped_%lld", (long long)index);
+    bool marker_found = false;
+    Item marker = js_map_get_fast_ext(companion.map, marker_key, (int)strlen(marker_key), &marker_found);
+    if (marker_found && js_is_truthy(marker)) {
+        return current_value;
+    }
+    return js_property_get(arguments, (Item){.item = i2it(index)});
+}
+
 // new Array(arg) — JS spec: if arg is a valid non-negative integer, create sparse
 // array of that length. Otherwise, if arg is numeric but not a valid length, throw
 // RangeError. Otherwise, create a single-element array [arg].
@@ -4480,31 +4667,40 @@ extern "C" Item js_array_get(Item array, Item index) {
         return found ? v : make_js_undefined();
     }
 
-    int idx = (int)js_get_number(index);
+    double idx_d = js_get_number(index);
+    int64_t idx = (idx_d == idx_d) ? (int64_t)idx_d : -1;
     Array* arr = array.array;
 
-    if (idx >= 0 && idx < arr->length) {
+    if (idx >= 0 && arr->extra != 0) {
+        char idx_buf[32];
+        int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)idx);
+        Map* props = (Map*)(uintptr_t)arr->extra;
         // check for accessor (getter) on companion map
-        if (arr->extra != 0) {
-            // AT-3: IS_ACCESSOR shape-flag dispatch under digit-string name
-            // (post-AT-1 the intercept routes accessor writes here).
-            char idx_buf[32];
-            int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%d", idx);
-            Map* props = (Map*)(uintptr_t)arr->extra;
-            Item pm_item = (Item){.map = props};
-            ShapeEntry* _se_idx = js_find_shape_entry(pm_item, idx_buf, idx_len);
-            if (_se_idx && jspd_is_accessor(_se_idx)) {
-                bool slot_found = false;
-                Item slot_val = js_map_get_fast_ext(props, idx_buf, idx_len, &slot_found);
-                if (slot_found && slot_val.item != JS_DELETED_SENTINEL_VAL) {
-                    JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
-                    if (pair && pair->getter.item != ItemNull.item) {
-                        return js_accessor_call_result(pair->getter, array);
-                    }
-                    return make_js_undefined();
+        // AT-3: IS_ACCESSOR shape-flag dispatch under digit-string name
+        // (post-AT-1 the intercept routes accessor writes here).
+        Item pm_item = (Item){.map = props};
+        ShapeEntry* _se_idx = js_find_shape_entry(pm_item, idx_buf, idx_len);
+        if (_se_idx && jspd_is_accessor(_se_idx)) {
+            bool slot_found = false;
+            Item slot_val = js_map_get_fast_ext(props, idx_buf, idx_len, &slot_found);
+            if (slot_found && slot_val.item != JS_DELETED_SENTINEL_VAL) {
+                JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
+                if (pair && pair->getter.item != ItemNull.item) {
+                    return js_accessor_call_result(pair->getter, array);
                 }
+                return make_js_undefined();
             }
         }
+        bool sparse_found = false;
+        Item sparse_val = js_map_get_fast_ext(props, idx_buf, idx_len, &sparse_found);
+        if (sparse_found && sparse_val.item != JS_DELETED_SENTINEL_VAL) {
+            bool dense_present = idx < arr->length && idx < arr->capacity &&
+                arr->items[idx].item != JS_DELETED_SENTINEL_VAL;
+            if (!dense_present) return sparse_val;
+        }
+    }
+
+    if (idx >= 0 && idx < arr->length && idx < arr->capacity) {
         // return undefined for holes (deleted sentinel)
         if (arr->items[idx].item == JS_DELETED_SENTINEL_VAL)
             return make_js_undefined();
@@ -4539,7 +4735,19 @@ extern "C" Item js_array_get_int(Item array, int64_t index) {
             }
             // AT-3: legacy __get_<idx> marker fallback retired.
         }
-        if (index >= 0 && index < arr->length) {
+        if (index >= 0 && arr->extra != 0) {
+            char idx_buf[32];
+            int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)index);
+            Map* props = (Map*)(uintptr_t)arr->extra;
+            bool sparse_found = false;
+            Item sparse_val = js_map_get_fast_ext(props, idx_buf, idx_len, &sparse_found);
+            if (sparse_found && sparse_val.item != JS_DELETED_SENTINEL_VAL) {
+                bool dense_present = index < arr->length && index < arr->capacity &&
+                    arr->items[index].item != JS_DELETED_SENTINEL_VAL;
+                if (!dense_present) return sparse_val;
+            }
+        }
+        if (index >= 0 && index < arr->length && index < arr->capacity) {
             // v25: check for deleted sentinel (array hole) — fall through to prototype chain
             if (arr->items[index].item != JS_DELETED_SENTINEL_VAL) {
                 return arr->items[index];
@@ -4606,19 +4814,25 @@ extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
                     js_call_function(pair->setter, array, &value, 1);
                     return value;
                 }
-                // getter-only: silently no-op (sloppy)
+                // getter-only accessor: strict TypeError, sloppy no-op.
+                js_strict_throw_property_error("set property which has only a getter on",
+                                               idx_buf, idx_len);
                 return value;
             }
         }
         // AT-3: legacy __set_<idx> marker fallback retired (post-AT-1 the
         // intercept routes companion-map accessor writes through the
         // IS_ACCESSOR shape path above).
+        if (!js_props_query_writable(pm, _se_idx, idx_buf, idx_len)) {
+            return value;
+        }
         // check non-writable
         char nw_buf[32];
         snprintf(nw_buf, sizeof(nw_buf), "__nw_%lld", (long long)index);
         bool nw_found = false;
-        js_map_get_fast_ext(pm, nw_buf, (int)strlen(nw_buf), &nw_found);
-        if (nw_found) {
+        Item nw_val = js_map_get_fast_ext(pm, nw_buf, (int)strlen(nw_buf), &nw_found);
+        if (nw_found && nw_val.item == JS_DELETED_SENTINEL_VAL) nw_found = false;
+        if (nw_found && js_is_truthy(nw_val)) {
             return value; // silently fail for non-writable properties (sloppy mode)
         }
     }
@@ -4664,14 +4878,26 @@ extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
             }
         }
     }
-    if (index >= 0 && index < arr->length) {
+    if (index >= 0 && index < arr->length && index < arr->capacity) {
         arr->items[index] = value;
     } else if (index >= 0) {
+        if (index >= arr->capacity) {
+            int64_t capacity_gap = index - arr->capacity;
+            if (index < arr->length || capacity_gap > SPARSE_GAP_MAX) {
+                js_array_store_sparse_property(array, index, value, index <= 0xFFFFFFFELL);
+                return value;
+            }
+        }
+        if (index < arr->length && index >= arr->capacity) {
+            js_array_store_sparse_property(array, index, value, false);
+            return value;
+        }
         int64_t gap = index - arr->length;
         if (gap > SPARSE_GAP_MAX) {
             // v22: Sparse index — gap too large, skip dense expansion to prevent OOM
             log_debug("js_array_set_int: sparse index %lld (gap %lld), skipping dense expansion",
                       (long long)index, (long long)gap);
+            js_array_store_sparse_property(array, index, value, true);
             return value;
         }
         // Expand array: fill gaps with holes (deleted sentinel), then set the value
@@ -4727,6 +4953,13 @@ extern "C" Item js_array_set(Item array, Item index, Item value) {
     // v27: check __nw_ (non-writable) marker from companion map before writing
     if (arr->extra != 0 && idx >= 0 && idx < arr->length) {
         Map* pm = (Map*)(uintptr_t)arr->extra;
+        char idx_buf[32];
+        int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)idx);
+        Item pm_item = (Item){.map = pm};
+        ShapeEntry* _se_idx = js_find_shape_entry(pm_item, idx_buf, idx_len);
+        if (!js_props_query_writable(pm, _se_idx, idx_buf, idx_len)) {
+            return value;
+        }
         char nw_buf[32];
         snprintf(nw_buf, sizeof(nw_buf), "__nw_%lld", (long long)idx);
         bool nw_found = false;
@@ -4755,14 +4988,26 @@ extern "C" Item js_array_set(Item array, Item index, Item value) {
         return value;
     }
 
-    if (idx >= 0 && idx < arr->length) {
+    if (idx >= 0 && idx < arr->length && idx < arr->capacity) {
         arr->items[idx] = value;
     } else if (idx >= 0) {
+        if (idx >= arr->capacity) {
+            int64_t capacity_gap = idx - arr->capacity;
+            if (idx < arr->length || capacity_gap > SPARSE_GAP_MAX) {
+                js_array_store_sparse_property(array, idx, value, idx <= 0xFFFFFFFELL);
+                return value;
+            }
+        }
+        if (idx < arr->length && idx >= arr->capacity) {
+            js_array_store_sparse_property(array, idx, value, false);
+            return value;
+        }
         int64_t gap = idx - arr->length;
         if (gap > SPARSE_GAP_MAX) {
             // v22: Sparse index — gap too large, skip dense expansion to prevent OOM
             log_debug("js_array_set: sparse index %lld (gap %lld), skipping dense expansion",
                       (long long)idx, (long long)gap);
+            js_array_store_sparse_property(array, idx, value, idx <= 0xFFFFFFFELL);
             return value;
         }
         // Expand array: fill gaps with holes (deleted sentinel), then set the value
@@ -6484,7 +6729,6 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         case JS_BUILTIN_OBJECT_IS_SEALED:
             return js_object_is_sealed(arg0);
         case JS_BUILTIN_OBJECT_PREVENT_EXTENSIONS:
-            if (js_is_proxy(arg0)) { js_proxy_trap_prevent_extensions(arg0); return arg0; }
             return js_object_prevent_extensions(arg0);
         case JS_BUILTIN_OBJECT_IS_EXTENSIBLE:
             if (js_is_proxy(arg0)) return js_proxy_trap_is_extensible(arg0);
@@ -8692,21 +8936,29 @@ static Item js_regex_build_object_from_cache(const JsRegexCacheEntry& ce) {
     Item source_key = (Item){.item = s2it(heap_create_name("source"))};
     Item source_val = (Item){.item = s2it(heap_strcpy((char*)ce.source, ce.source_len))};
     js_property_set(regex_obj, source_key, source_val);
+    js_mark_non_enumerable(regex_obj, source_key);
     Item flags_key = (Item){.item = s2it(heap_create_name("flags"))};
     Item flags_val = (Item){.item = s2it(heap_create_name(ce.canonical_flags))};
     js_property_set(regex_obj, flags_key, flags_val);
+    js_mark_non_enumerable(regex_obj, flags_key);
     Item global_key = (Item){.item = s2it(heap_create_name("global"))};
     js_property_set(regex_obj, global_key, (Item){.item = b2it(rd->global ? BOOL_TRUE : BOOL_FALSE)});
+    js_mark_non_enumerable(regex_obj, global_key);
     Item ic_key = (Item){.item = s2it(heap_create_name("ignoreCase"))};
     js_property_set(regex_obj, ic_key, (Item){.item = b2it(rd->ignore_case ? BOOL_TRUE : BOOL_FALSE)});
+    js_mark_non_enumerable(regex_obj, ic_key);
     Item ml_key = (Item){.item = s2it(heap_create_name("multiline"))};
     js_property_set(regex_obj, ml_key, (Item){.item = b2it(rd->multiline ? BOOL_TRUE : BOOL_FALSE)});
+    js_mark_non_enumerable(regex_obj, ml_key);
     Item da_key = (Item){.item = s2it(heap_create_name("dotAll"))};
     js_property_set(regex_obj, da_key, (Item){.item = b2it(ce.dot_all ? BOOL_TRUE : BOOL_FALSE)});
+    js_mark_non_enumerable(regex_obj, da_key);
     Item uni_key = (Item){.item = s2it(heap_create_name("unicode"))};
     js_property_set(regex_obj, uni_key, (Item){.item = b2it(ce.has_unicode ? BOOL_TRUE : BOOL_FALSE)});
+    js_mark_non_enumerable(regex_obj, uni_key);
     Item sticky_key = (Item){.item = s2it(heap_create_name("sticky"))};
     js_property_set(regex_obj, sticky_key, (Item){.item = b2it(rd->sticky ? BOOL_TRUE : BOOL_FALSE)});
+    js_mark_non_enumerable(regex_obj, sticky_key);
     Item li_key = (Item){.item = s2it(heap_create_name("lastIndex"))};
     js_property_set(regex_obj, li_key, (Item){.item = i2it(0)});
     // Per ES §22.2.3.1 RegExpAlloc: lastIndex is {writable:true, enumerable:false, configurable:false}
@@ -9349,12 +9601,15 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     Item source_key = (Item){.item = s2it(heap_create_name("source"))};
     Item source_val = (Item){.item = s2it(heap_strcpy(src_buf, pattern_len))};
     js_property_set(regex_obj, source_key, source_val);
+    js_mark_non_enumerable(regex_obj, source_key);
     Item flags_key = (Item){.item = s2it(heap_create_name("flags"))};
     Item flags_val = (Item){.item = s2it(heap_create_name(flg_buf))};
     js_property_set(regex_obj, flags_key, flags_val);
+    js_mark_non_enumerable(regex_obj, flags_key);
     Item global_key = (Item){.item = s2it(heap_create_name("global"))};
     Item global_val = (Item){.item = b2it(global ? BOOL_TRUE : BOOL_FALSE)};
     js_property_set(regex_obj, global_key, global_val);
+    js_mark_non_enumerable(regex_obj, global_key);
     // v18: expose all standard RegExp flag properties
     bool ignore_case = !opts.case_sensitive();
     bool dot_all = opts.dot_nl();
@@ -9365,14 +9620,19 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     }
     Item ic_key = (Item){.item = s2it(heap_create_name("ignoreCase"))};
     js_property_set(regex_obj, ic_key, (Item){.item = b2it(ignore_case ? BOOL_TRUE : BOOL_FALSE)});
+    js_mark_non_enumerable(regex_obj, ic_key);
     Item ml_key = (Item){.item = s2it(heap_create_name("multiline"))};
     js_property_set(regex_obj, ml_key, (Item){.item = b2it(multiline ? BOOL_TRUE : BOOL_FALSE)});
+    js_mark_non_enumerable(regex_obj, ml_key);
     Item da_key = (Item){.item = s2it(heap_create_name("dotAll"))};
     js_property_set(regex_obj, da_key, (Item){.item = b2it(dot_all ? BOOL_TRUE : BOOL_FALSE)});
+    js_mark_non_enumerable(regex_obj, da_key);
     Item uni_key = (Item){.item = s2it(heap_create_name("unicode"))};
     js_property_set(regex_obj, uni_key, (Item){.item = b2it(has_unicode ? BOOL_TRUE : BOOL_FALSE)});
+    js_mark_non_enumerable(regex_obj, uni_key);
     Item sticky_key = (Item){.item = s2it(heap_create_name("sticky"))};
     js_property_set(regex_obj, sticky_key, (Item){.item = b2it(has_sticky ? BOOL_TRUE : BOOL_FALSE)});
+    js_mark_non_enumerable(regex_obj, sticky_key);
     Item li_key = (Item){.item = s2it(heap_create_name("lastIndex"))};
     js_property_set(regex_obj, li_key, (Item){.item = i2it(0)});
     // Per ES §22.2.3.1: lastIndex is {writable:true, enumerable:false, configurable:false}
@@ -14242,7 +14502,8 @@ static bool js_proto_chain_has_numeric_keys(Item arr) {
 // then walks the prototype chain only if check_proto is true.
 // When present=true, *out receives the value (from prototype if needed).
 static bool js_array_has_element(Item arr, Array* a, int idx, Item* out, bool check_proto) {
-    if (idx < a->length && a->items[idx].item != JS_DELETED_SENTINEL_VAL) {
+    if (idx >= 0 && idx < a->length && idx < a->capacity &&
+        a->items[idx].item != JS_DELETED_SENTINEL_VAL) {
         // Own element — fast path
         *out = js_array_element(arr, idx);
         return true;
@@ -14530,24 +14791,31 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         if (a->length == 0) return (Item){.item = i2it(-1)};
         Item search_val = (argc >= 1) ? args[0] : make_js_undefined();
         // J39-7: ToInteger(fromIndex) — Symbol throws TypeError, object → ToPrimitive (may throw).
-        int start = 0;
+        int64_t start = 0;
         if (argc >= 2) {
             if (js_key_is_symbol(args[1]))
                 return js_throw_type_error("Cannot convert a Symbol value to a number");
             double d_from = js_get_number(args[1]);
             if (js_exception_pending) return ItemNull;
             if (d_from != d_from) d_from = 0;
+            if (isinf(d_from)) {
+                if (d_from > 0) return (Item){.item = i2it(-1)};
+                d_from = 0;
+            }
             d_from = d_from >= 0 ? floor(d_from) : ceil(d_from);
-            if (d_from < (double)INT_MIN) d_from = (double)INT_MIN;
-            if (d_from > (double)INT_MAX) d_from = (double)INT_MAX;
-            start = (int)d_from;
+            if (d_from < (double)INT64_MIN) d_from = (double)INT64_MIN;
+            if (d_from > (double)INT64_MAX) d_from = (double)INT64_MAX;
+            start = (int64_t)d_from;
         }
         // v24: ES spec - negative fromIndex means length + fromIndex
         if (start < 0) { start = a->length + start; if (start < 0) start = 0; }
+        if (start >= a->length) return (Item){.item = i2it(-1)};
         bool check_proto = js_proto_chain_has_numeric_keys(arr);
-        for (int i = start; i < a->length; i++) {
+        int64_t dense_limit = a->capacity < a->length ? a->capacity : a->length;
+        for (int64_t i64 = start; i64 < dense_limit; i64++) {
             // v37: ES spec — use HasProperty (checks prototype chain for holes)
             Item elem;
+            int i = (int)i64;
             if (!js_array_has_element(arr, a, i, &elem, check_proto)) continue;
             if (it2b(js_strict_equal(elem, search_val))) return (Item){.item = i2it(i)};
         }
@@ -16809,6 +17077,7 @@ extern "C" Item js_new_string_wrapper(Item arg) {
     Item len_val = (Item){.item = i2it(len)};
     js_property_set(obj, len_key, len_val);
     js_wrapper_set_proto(obj, "String", 6);
+    js_mark_non_enumerable(obj, len_key);
     return obj;
 }
 
