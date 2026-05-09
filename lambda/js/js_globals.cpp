@@ -1,3 +1,12 @@
+/**
+ * JavaScript Process I/O and Global Functions for Lambda v5
+ *
+ * Implements:
+ * - process.stdout.write(str)
+ * - process.hrtime.bigint() (as float64 nanoseconds)
+ * - process.argv
+ * - parseInt, parseFloat, isNaN, isFinite
+ * - console.log with multiple arguments
  */
 #include "js_runtime.h"
 #include "js_typed_array.h"
