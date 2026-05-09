@@ -1,13 +1,13 @@
 /**
  * Lambda Unified Font Module — Public API
  *
- * Single header that callers include. No FreeType types are exposed.
+ * Single header that callers include. Native backend details stay opaque.
  * Provides: FontContext lifecycle, font resolution, glyph metrics/rendering,
  * font face management (@font-face registry), fallback chain resolution,
  * and multi-format loading (TTF/OTF/TTC/WOFF1/WOFF2/data URI).
  *
  * Memory: all allocations go through Lambda Pool/Arena allocators.
- * Thread safety: single-threaded (matches FreeType constraints).
+ * Thread safety: single-threaded.
  *
  * Copyright (c) 2025 Lambda Script Project
  */
@@ -36,7 +36,7 @@ struct Pool;
 struct Arena;
 
 // ============================================================================
-// Font Context — replaces FT_Library + FontDatabase + UiContext font fields
+// Font Context — shared font database, caches, and native backend state
 // ============================================================================
 
 typedef struct FontContextConfig {
@@ -172,7 +172,7 @@ typedef enum GlyphRenderMode {
     GLYPH_RENDER_SDF,           // signed distance field
 } GlyphRenderMode;
 
-// pixel format of a rasterized glyph bitmap (replaces FT_PIXEL_MODE_*)
+// pixel format of a rasterized glyph bitmap
 typedef enum GlyphPixelMode {
     GLYPH_PIXEL_GRAY,           // 8-bit grayscale (1 byte per pixel)
     GLYPH_PIXEL_MONO,           // 1-bit monochrome (8 pixels per byte, MSB first)
@@ -192,7 +192,7 @@ typedef struct GlyphBitmap {
 } GlyphBitmap;
 
 // a fully loaded glyph ready for rendering — combines bitmap + advance.
-// returned by font_load_glyph(), replaces raw FT_GlyphSlot in the render layer.
+// returned by font_load_glyph().
 typedef struct LoadedGlyph {
     GlyphBitmap  bitmap;        // rasterized bitmap (buffer, dimensions, bearings)
     float        advance_x;     // horizontal advance in physical pixels (26.6 already decoded)
@@ -213,8 +213,8 @@ const GlyphBitmap* font_render_glyph(FontHandle* handle, uint32_t codepoint,
 // first; if the glyph is missing, resolves a fallback font via FontContext's
 // codepoint fallback cache and fallback_fonts chain.
 //
-// for_rendering=true:  loads with FT_LOAD_RENDER (bitmap data populated)
-// for_rendering=false: loads with FT_LOAD_DEFAULT (measurement only, advance valid)
+// for_rendering=true:  request bitmap data when the backend supports it
+// for_rendering=false: request metrics-only loading when possible
 //
 // returns a pointer to static LoadedGlyph storage (valid until next call).
 // advance_x/advance_y are in physical pixels (26.6 decoded).
@@ -262,7 +262,7 @@ FontHandle* font_resolve_for_codepoint(FontContext* ctx, const FontStyleDesc* st
 bool font_has_codepoint(FontHandle* handle, uint32_t codepoint);
 
 // ============================================================================
-// Font Handle Accessors — for callers migrating from FT_Face
+// Font Handle Accessors
 // ============================================================================
 
 // get the font family name (e.g., "Arial", "Times New Roman")
@@ -304,7 +304,7 @@ void font_get_normal_lh_split(FontHandle* handle, float* out_ascender, float* ou
 // Get the font cell height for text rect height computation.
 // Matches browser's Range.getClientRects() which uses font metrics, not CSS line-height.
 // For Apple's classic fonts (Times/Helvetica/Courier), uses CoreText with 15% hack.
-// For all other fonts, returns FreeType metrics.height (ascent + descent).
+// For all other fonts, returns the font metrics cell height (ascent + descent).
 float font_get_cell_height(FontHandle* handle);
 
 // Get the raw content-area ascender for rendering glyph baseline positioning.
@@ -456,23 +456,10 @@ typedef struct FontCacheStats {
 FontCacheStats font_get_cache_stats(FontContext* ctx);
 
 // ============================================================================
-// Internal access — for Radiant integration during migration
+// Internal access — for Radiant integration
 // ============================================================================
 
-// get the underlying FreeType library handle (void* to avoid FT_Library in API).
-// only use this for code that still needs direct FreeType access during migration.
-void* font_context_get_ft_library(FontContext* ctx);
-
-// get the underlying FT_Face from a FontHandle (void* to avoid FT_Face in API).
-// only use this for code that still needs direct FreeType access during migration.
-void* font_handle_get_ft_face(FontHandle* handle);
-
-// wrap an externally-loaded FT_Face into a FontHandle (borrowed — does NOT own the face).
-// the returned handle provides FontMetrics, accessors, etc., but will NOT call FT_Done_Face
-// on release. caller is responsible for the FT_Face lifetime.
-FontHandle* font_handle_wrap(FontContext* ctx, void* ft_face, float size_px);
-
-// get the font database from context (for backward compat during migration).
+// get the font database from context.
 // returns the internal FontDatabase pointer.
 struct FontDatabase* font_context_get_database(FontContext* ctx);
 

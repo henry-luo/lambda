@@ -172,16 +172,6 @@ if ! brew list mbedtls@3 >/dev/null 2>&1; then
     fi
 fi
 
-# Check for freetype
-if ! brew list freetype >/dev/null 2>&1; then
-    echo "Installing freetype..."
-    if command -v brew >/dev/null 2>&1; then
-        brew install freetype
-    else
-        echo "Warning: freetype not found."
-    fi
-fi
-
 # Check for xxd (needed for binary data conversion)
 if ! command -v xxd >/dev/null 2>&1; then
     echo "Error: xxd is required but not found. This is unusual on macOS as xxd is typically included by default."
@@ -788,85 +778,6 @@ build_gtest_for_mac() {
     return 1
 }
 
-# Function to setup FreeType 2.13.3 for Mac (specific version required by build config)
-setup_freetype_2_13_3_for_mac() {
-    echo "Setting up FreeType 2.13.3 for Mac..."
-
-    # Expected paths from build config
-    EXPECTED_FREETYPE_PATH="/opt/homebrew/Cellar/freetype/2.13.3"
-    EXPECTED_INCLUDE_PATH="$EXPECTED_FREETYPE_PATH/include/freetype2"
-    EXPECTED_LIB_PATH="$EXPECTED_FREETYPE_PATH/lib/libfreetype.a"
-
-    # Check if the exact version is already installed
-    if [ -d "$EXPECTED_FREETYPE_PATH" ] && [ -f "$EXPECTED_INCLUDE_PATH/ft2build.h" ] && [ -f "$EXPECTED_LIB_PATH" ]; then
-        echo "✅ FreeType 2.13.3 already available at expected location"
-        return 0
-    fi
-
-    if command -v brew >/dev/null 2>&1; then
-        echo "Installing FreeType 2.13.3 via Homebrew..."
-
-        # Try to install the specific version
-        # First check if we need to unlink current version
-        if brew list freetype >/dev/null 2>&1; then
-            CURRENT_VERSION=$(brew list --versions freetype | cut -d' ' -f2)
-            if [ "$CURRENT_VERSION" != "2.13.3" ]; then
-                echo "Current FreeType version: $CURRENT_VERSION, need 2.13.3"
-                echo "Attempting to install FreeType 2.13.3..."
-
-                # Try to install the specific version using Homebrew formula
-                if brew install freetype@2.13.3 2>/dev/null || brew install freetype; then
-                    echo "FreeType installation completed"
-                else
-                    echo "❌ Failed to install FreeType via Homebrew"
-                    return 1
-                fi
-            fi
-        else
-            # FreeType not installed, install it
-            if brew install freetype; then
-                echo "✅ FreeType installed successfully"
-            else
-                echo "❌ Failed to install FreeType via Homebrew"
-                return 1
-            fi
-        fi
-
-        # Check what we actually got after installation
-        ACTUAL_PATH=$(find /opt/homebrew/Cellar/freetype -name "2.13.3*" -type d 2>/dev/null | head -1)
-        if [ -z "$ACTUAL_PATH" ]; then
-            # Try to find any freetype version and create symlink if needed
-            LATEST_VERSION=$(ls /opt/homebrew/Cellar/freetype/ | sort -V | tail -1)
-            ACTUAL_PATH="/opt/homebrew/Cellar/freetype/$LATEST_VERSION"
-
-            if [ -d "$ACTUAL_PATH" ]; then
-                echo "Found FreeType $LATEST_VERSION, creating compatibility symlink for 2.13.3..."
-                ln -sf "$ACTUAL_PATH" "$EXPECTED_FREETYPE_PATH" 2>/dev/null || {
-                    echo "⚠️  Warning: Could not create symlink, build config may need manual adjustment"
-                    echo "Available at: $ACTUAL_PATH"
-                    echo "Expected at: $EXPECTED_FREETYPE_PATH"
-                    return 1
-                }
-            else
-                echo "❌ Could not find installed FreeType"
-                return 1
-            fi
-        fi
-
-        # Final verification
-        if [ -f "$EXPECTED_INCLUDE_PATH/ft2build.h" ]; then
-            echo "✅ FreeType 2.13.3 setup completed successfully"
-            return 0
-        else
-            echo "❌ FreeType headers not found at expected location: $EXPECTED_INCLUDE_PATH"
-            return 1
-        fi
-    else
-        echo "❌ Homebrew not available - cannot install FreeType"
-        return 1
-    fi
-}
-
 # Function to build nghttp2 for Mac
 build_nghttp2_for_mac() {
     echo "Building nghttp2 for Mac..."
@@ -1287,15 +1198,6 @@ else
     fi
 fi
 
-# Setup FreeType 2.13.3 for Mac (required by Radiant project)
-echo "Setting up FreeType 2.13.3..."
-if ! setup_freetype_2_13_3_for_mac; then
-    echo "❌ FreeType 2.13.3 setup failed - required for Radiant project"
-    exit 1
-else
-    echo "✅ FreeType 2.13.3 setup completed successfully"
-fi
-
 # Clone RE2 source (no-abseil version) for building via Makefile
 echo "Setting up RE2..."
 RE2_SRC="build_temp/re2-noabsl"
@@ -1354,7 +1256,6 @@ HOMEBREW_DEPS=(
 # Note: libcurl will be rebuilt with mbedTLS support (see build_curl_with_http2_for_mac)
 
 # Radiant project dependencies - for HTML/CSS/SVG rendering engine
-# Note: freetype is handled separately to ensure specific version 2.13.3
 RADIANT_DEPS=(
     "glfw"       # OpenGL window and context management
     "libpng"     # PNG image format support
@@ -1455,7 +1356,6 @@ if command -v brew >/dev/null 2>&1; then
     echo "- timeout: $([ -f "$BREW_PREFIX/bin/timeout" ] && command -v timeout >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
     echo ""
     echo "Radiant project dependencies:"
-    echo "- freetype: $(brew list freetype >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
     echo "- ThorVG: $([ -f "$SYSTEM_PREFIX/lib/libthorvg.a" ] || [ -f "$SYSTEM_PREFIX/lib/libthorvg.dylib" ] && echo "✓ Available" || echo "✗ Missing")"
     echo "- GLFW: $(brew list glfw >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
     echo "- libpng: $(brew list libpng >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"

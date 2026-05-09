@@ -953,12 +953,6 @@
                     "link": "none"
                 },
                 {
-                    "name": "freetype",
-                    "include": "/clang64/include/freetype2",
-                    "lib": "/clang64/lib/libfreetype.a",
-                    "link": "static"
-                },
-                {
                     "name": "ThorVG",
                     "include": "win-native-deps/include",
                     "lib": "win-native-deps/lib/libthorvg.a",
@@ -998,18 +992,6 @@
                     "link": "static"
                 },
                 {
-                    "name": "harfbuzz",
-                    "description": "HarfBuzz text shaping (required by FreeType)",
-                    "lib": "/clang64/lib/libharfbuzz.a",
-                    "link": "static"
-                },
-                {
-                    "name": "graphite2",
-                    "description": "Graphite2 (required by HarfBuzz)",
-                    "lib": "/clang64/lib/libgraphite2.a",
-                    "link": "static"
-                },
-                {
                     "name": "webp",
                     "description": "WebP image library (required by ThorVG)",
                     "lib": "/clang64/lib/libwebp.a",
@@ -1017,31 +999,31 @@
                 },
                 {
                     "name": "brotlidec",
-                    "description": "Brotli decompression (FreeType dependency)",
+                    "description": "Brotli decompression (WOFF2 dependency)",
                     "lib": "/clang64/lib/libbrotlidec.a",
                     "link": "static"
                 },
                 {
                     "name": "brotlicommon",
-                    "description": "Brotli common (FreeType dependency)",
+                    "description": "Brotli common (WOFF2 dependency)",
                     "lib": "/clang64/lib/libbrotlicommon.a",
                     "link": "static"
                 },
                 {
                     "name": "zlib",
-                    "description": "Compression library (must come after freetype, libpng)",
+                    "description": "Compression library (used by image/font codecs)",
                     "lib": "/clang64/lib/libz.a",
                     "link": "static"
                 },
                 {
                     "name": "bzip2",
-                    "description": "BZip2 compression (must come after freetype)",
+                    "description": "BZip2 compression",
                     "lib": "/clang64/lib/libbz2.a",
                     "link": "static"
                 },
                 {
                     "name": "dwrite",
-                    "description": "DirectWrite (required by HarfBuzz)",
+                    "description": "DirectWrite native Windows text backend",
                     "lib": "-ldwrite",
                     "link": "dynamic"
                 },

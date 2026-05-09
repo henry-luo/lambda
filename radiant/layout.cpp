@@ -1505,7 +1505,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                 // Create inline view for the marker with fixed width
                 ViewSpan* marker_span = (ViewSpan*)set_view(lycon, RDT_VIEW_MARKER, elem);
                 if (marker_span) {
-                    // FreeType metrics are in physical pixels, divide by pixel_ratio for CSS pixels
+                    // font metrics are in physical pixels, divide by pixel_ratio for CSS pixels
                     float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
                     marker_span->width = marker_prop->width;
                     // Use CSS computed line-height for marker height (not raw font metrics)

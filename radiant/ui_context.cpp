@@ -110,7 +110,7 @@ int ui_context_init(UiContext* uicon, bool headless) {
         }
 
         // create a window and its OpenGL context
-        uicon->window = glfwCreateWindow(window_width, window_height, "FreeType and GLFW Text Rendering", NULL, NULL);
+        uicon->window = glfwCreateWindow(window_width, window_height, "Lambda Radiant Text Rendering", NULL, NULL);
         if (!uicon->window) {
             fprintf(stderr, "Error: Could not create GLFW window.\n");
             return EXIT_FAILURE;

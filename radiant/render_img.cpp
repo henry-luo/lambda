@@ -500,7 +500,7 @@ int render_uicontext_to_svg(UiContext* uicon, const char* svg_file) {
 //   <html_file>\t<output_png>\t<viewport_width>\t<viewport_height>\t<pixel_ratio>
 //
 // Initializes UiContext ONCE and reuses it across all renders, saving ~70MB of
-// per-process overhead (GLFW/Metal driver, font database scan, ThorVG, FreeType).
+// per-process overhead (GLFW/Metal driver, font database scan, ThorVG, native font backend).
 //
 // Writes results to stdout (one per line):
 //   OK\t<html_file>

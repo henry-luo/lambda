@@ -1510,19 +1510,19 @@ void line_break(LayoutContext* lycon) {
     //
     // CSS 2.1 §10.8.1: For lines with inline-blocks/replaced elements, always use
     // max(css_lh, font_lh) when font_lh > css_lh, regardless of the difference.
-    // The 2px tolerance only applies to text-only content where FreeType rounding
+    // The 2px tolerance only applies to text-only content where font metric rounding
     // can inflate font metrics by 1-2px beyond the CSS line-height.
     bool has_mixed_fonts;
     if (lycon->line.has_replaced_content && font_line_height > css_line_height) {
         // Inline-block/replaced element expands the line box: always respect it.
         has_mixed_fonts = true;
     } else {
-        // Text-only: apply 2px tolerance for FreeType rounding artifacts.
+        // Text-only: apply 2px tolerance for font metric rounding artifacts.
         has_mixed_fonts = (font_line_height > css_line_height + 2);
     }
     float used_line_height;
 
-    // CSS 2.1 §10.8.1: FreeType rounds font metrics (ascender/descender) to integer
+    // CSS 2.1 §10.8.1: font backends may round ascender/descender metrics to integer
     // pixels, which may inflate their sum beyond the normal line-height by 1-2px.
     // When vertical-align offsets expand the line box, this rounding error propagates.
     // Correct by subtracting the small excess from the base font metrics.
@@ -2231,7 +2231,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         last_rect->next = rect;
     }
     rect->start_index = str - text_start;
-    // FreeType metrics are in physical pixels, divide by pixel_ratio for CSS pixels
+    // font metrics are in physical pixels, divide by pixel_ratio for CSS pixels
     float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
     const FontMetrics* _fm = font_get_metrics(lycon->font.font_handle);
     float font_height = _fm ? _fm->hhea_line_height : 16.0f;
@@ -2244,7 +2244,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     // Text rect y-position based on vertical alignment
     // CSS half-leading model: text is centered within the line box
     // When line-height < font height, half_leading can be negative (text extends above line box)
-    // Use FreeType font_height for half-leading calculation (consistent with lead_y calculation)
+    // Use backend font_height for half-leading calculation (consistent with lead_y calculation)
     if (lycon->line.vertical_align == CSS_VALUE_MIDDLE) {
         log_debug("middle-aligned-text: font %f, line %f", font_height, lycon->block.line_height);
         rect->y = lycon->block.advance_y + (lycon->block.line_height - font_height) / 2;
@@ -2258,7 +2258,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         rect->y = lycon->block.advance_y;
     }
     else { // baseline - use half-leading model
-        // Calculate half-leading based on FreeType metrics for consistency with lead_y
+        // Calculate half-leading based on backend metrics for consistency with lead_y
         // Allow negative half-leading only when line-height is explicitly less than font height
         // (e.g., line-height: 1em with large fonts). For normal line-height >= font_height,
         // use clamped lead_y (compatible with table cell vertical alignment).
@@ -2480,7 +2480,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 }
                 // CSS Fonts 3: small-caps lowercase chars rendered at ~0.7x font size
                 // font_load_glyph returns advance at the handle's fixed size;
-                // scale proportionally since FT_LOAD_NO_HINTING produces linear metrics
+                // scale proportionally since backend layout metrics are linear
                 if (is_small_caps_lower) {
                     wd *= 0.7f;
                 }

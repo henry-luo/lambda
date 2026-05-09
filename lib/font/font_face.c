@@ -281,7 +281,7 @@ FontHandle* font_face_load(FontContext* ctx, const FontFaceDesc* desc,
 
         if (handle) {
             // reject sources whose font tables couldn't be parsed (e.g. EOT
-            // wrappers that FreeType opens but cannot decode). Without
+            // wrappers or unsupported containers). Without
             // `tables` we can't look up cmap/glyphs, so the font would
             // render as empty boxes. Try the next source instead.
             if (!handle->tables) {

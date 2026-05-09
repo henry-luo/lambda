@@ -2,7 +2,7 @@
  * Lambda Unified Font Module — TTF/OTF Table Parser (Header)
  *
  * Parses OpenType/TrueType font tables directly from raw font bytes,
- * replacing FreeType for metric extraction and codepoint lookup.
+ * providing metric extraction and codepoint lookup from OpenType tables.
  *
  * Tables are parsed lazily on first access and cached on the FontTables struct.
  * Data stays in the original memory-mapped buffer where possible (zero-copy).
@@ -178,17 +178,17 @@ typedef struct FontTables {
 } FontTables;
 
 // parsed_flags bits
-#define FT_PARSED_HEAD  (1u << 0)
-#define FT_PARSED_HHEA  (1u << 1)
-#define FT_PARSED_MAXP  (1u << 2)
-#define FT_PARSED_OS2   (1u << 3)
-#define FT_PARSED_POST  (1u << 4)
-#define FT_PARSED_CMAP  (1u << 5)
-#define FT_PARSED_HMTX  (1u << 6)
-#define FT_PARSED_KERN  (1u << 7)
-#define FT_PARSED_FVAR  (1u << 8)
-#define FT_PARSED_NAME  (1u << 9)
-#define FT_PARSED_GPOS  (1u << 10)
+#define FONT_PARSED_HEAD  (1u << 0)
+#define FONT_PARSED_HHEA  (1u << 1)
+#define FONT_PARSED_MAXP  (1u << 2)
+#define FONT_PARSED_OS2   (1u << 3)
+#define FONT_PARSED_POST  (1u << 4)
+#define FONT_PARSED_CMAP  (1u << 5)
+#define FONT_PARSED_HMTX  (1u << 6)
+#define FONT_PARSED_KERN  (1u << 7)
+#define FONT_PARSED_FVAR  (1u << 8)
+#define FONT_PARSED_NAME  (1u << 9)
+#define FONT_PARSED_GPOS  (1u << 10)
 
 // ============================================================================
 // Public API

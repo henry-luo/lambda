@@ -2,8 +2,7 @@
  * Lambda Unified Font Module — ThorVG Glyph Rasterizer
  *
  * Rasterizes TrueType glyph outlines using ThorVG's software canvas.
- * Used on Linux (and future WASM) as the platform rasterization backend,
- * replacing FreeType's FT_Load_Glyph(FT_LOAD_RENDER).
+ * Used on Linux (and future WASM) as the platform rasterization backend.
  *
  * Pipeline:
  *   1. Extract outline via glyf_get_outline() (font_glyf.c)

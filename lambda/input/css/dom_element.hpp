@@ -182,6 +182,14 @@ typedef struct TableProp TableProp;
 typedef struct FormControlProp FormControlProp;
 typedef struct ViewBlock ViewBlock;
 
+typedef struct LayoutFragmentBox {
+    float x, y, width, height;
+    int fragment_index;
+    int column_index;
+    int row_index;
+    struct LayoutFragmentBox* next;
+} LayoutFragmentBox;
+
 // Layout cache (from radiant/layout_cache.hpp)
 namespace radiant { struct LayoutCache; }
 
@@ -289,6 +297,9 @@ struct DomElement : DomNode {
     FilterProp* filter;
     // CSS multi-column layout properties
     MultiColumnProp* multicol;
+    // CSS fragmentation: generated border-box fragments for a single element.
+    LayoutFragmentBox* layout_fragments;
+    int layout_fragment_count;
     // pseudo-element content and layout state (::before/::after)
     PseudoContentProp* pseudo;
     // vector path for PDF/SVG curve rendering
@@ -319,7 +330,8 @@ struct DomElement : DomNode {
         item_prop_type(ITEM_PROP_NONE), fi(nullptr),
         content_width(0), content_height(0),
         blk(nullptr), scroller(nullptr), embed(nullptr), position(nullptr),
-        transform(nullptr), filter(nullptr), multicol(nullptr), pseudo(nullptr),
+        transform(nullptr), filter(nullptr), multicol(nullptr),
+        layout_fragments(nullptr), layout_fragment_count(0), pseudo(nullptr),
         vpath(nullptr), layout_cache(nullptr), tex_root(nullptr),
         cached_min_content_width(0), cached_max_content_width(0),
         has_cached_intrinsic_widths(false), measuring_intrinsic_width(false) {}

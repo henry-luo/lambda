@@ -355,6 +355,16 @@ Expected benefit:
 - largest gain in `multicol-span-all-*`
 - unblocks `multicol-span-all-children-height-*`
 
+Current implementation status:
+
+- Same-BFC direct descendant spanners inside a block child now split that child into pre-spanner and post-spanner column groups.
+- Spanners inside BFC roots, inline-blocks, tables, flex, and grid remain isolated and do not escape to the ancestor multicol flow.
+- Group height accounting now uses fragment extents through `ColumnGroup` and `FragmentedFlowCursor`, so post-spanner content resumes below the full-width spanner.
+- `break-before: column` / page-break aliases are now stored on block props and force cursor breaks, including overflow columns.
+- Split containers now distinguish their visual fragmented border-box union from the flow extent they contribute upward; `multicol-span-all-children-height-004a` and `004b` now pass.
+- Explicit `column-count:1` containers now remain multicol-aware for spanner splitting while otherwise using normal flow; `multicol-span-all-children-height-005` now passes in the full suite.
+- Remaining work: relayout escaped spanners and their descendants at full-width constraint, and materialize continuation block boxes for a single DOM block split across columns.
+
 ### Stage 3: Balancing pass
 
 Implement:
@@ -368,6 +378,16 @@ Expected benefit:
 - `multicol-fill-balance-*`
 - `multicol-rule-nested-balancing-*`
 - many `multicol-nested-*`
+
+Current implementation status:
+
+- Column groups now run a lightweight target-height search over measured block heights and forced break points before committing placement.
+- The CSS initial value for `column-fill` is corrected to `balance`.
+- Fragmented monolithic children now store per-column `LayoutFragmentBox` records on the DOM/layout element and expose them in debug JSON as `layout.fragments`.
+- Balanced definite-height multicol containers can now fragment a tall single child into a browser-like fragmented border-box union; `multicol-rule-nested-balancing-001` now matches browser geometry.
+- Nested multicol projection now composes parent and child fragmentainer slots, including descendant block continuations inside nested columns; `multicol-fill-balance-003` now passes.
+- Full `wpt-css-multicol` improved from `103 / 362` to `122 / 362` after Stage 3 fragment metadata, union placement, nested descendant continuation projection, split-container visual union accounting, and single-column spanner splitting.
+- Remaining work: replace fragment metadata with materialized continuation boxes for painting, hit testing, and full `getClientRects()` behavior, then continue into positioned descendant fragment anchors.
 
 ### Stage 4: Positioned descendants in multicol
 

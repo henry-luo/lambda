@@ -22,11 +22,9 @@ ALL_LIBS=(
 )
 
 # Radiant project dependencies - for HTML/CSS/SVG rendering engine
-# Note: freetype is included but may need specific version handling
 # Note: ThorVG is built from source (see build_thorvg_v1_0_pre34_for_linux function)
 RADIANT_DEPS=(
     "libglfw3-dev"           # OpenGL window and context management
-    "libfreetype6-dev"       # FreeType font rendering library
     "libpng-dev"             # PNG image format support
     "libbz2-dev"             # Alternative compression library
     "zlib1g-dev"             # Compression library (already included above)
@@ -1515,7 +1513,6 @@ echo "- coreutils: $(command -v timeout >/dev/null 2>&1 && echo "✓ Available" 
 echo "- premake5: $(command -v premake5 >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
 echo ""
 echo "Radiant project dependencies:"
-echo "- FreeType: $(dpkg -l | grep -q libfreetype6-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- ThorVG: $([ -f "$SYSTEM_PREFIX/lib/libthorvg.a" ] || [ -f "$SYSTEM_PREFIX/lib/libthorvg.so" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- GLFW: $(dpkg -l | grep -q libglfw3-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- libpng: $(dpkg -l | grep -q libpng-dev && echo "✓ Available" || echo "✗ Missing")"

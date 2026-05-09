@@ -1,5 +1,11 @@
 #pragma once
 
+#if defined(__GNUC__) || defined(__clang__)
+#include_next <string.h>
+#else
+#include <string.h>
+#endif
+
 #include <stdint.h>
 #include "mempool.h"
 #include "strview.h"

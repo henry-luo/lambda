@@ -2,8 +2,7 @@
  * Lambda Unified Font Module — CoreText Rasterization Backend (macOS)
  *
  * Provides glyph rasterization and per-glyph metric extraction using
- * CoreText/CoreGraphics.  Replaces FreeType's FT_Load_Glyph(FT_LOAD_RENDER)
- * and FT_Load_Glyph(metrics-only) paths on macOS.
+ * CoreText/CoreGraphics.
  *
  * Three entry points:
  *   font_rasterize_ct_create()   — create CTFont from raw TTF/OTF data
