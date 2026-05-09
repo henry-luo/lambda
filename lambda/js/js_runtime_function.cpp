@@ -167,6 +167,51 @@ extern "C" void js_set_function_name(Item fn_item, Item name_item) {
         fn->name = it2s(name_item);
     }
 }
+extern "C" void js_set_function_name_if_anonymous(Item fn_item, Item name_item) {
+    if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
+    if (get_type_id(name_item) != LMD_TYPE_STRING) return;
+    JsFunction* fn = (JsFunction*)fn_item.function;
+    if (fn->func_ptr && (!fn->name || fn->name->len == 0)) {
+        fn->name = it2s(name_item);
+    }
+}
+
+extern "C" void js_set_class_name(Item cls_item, Item name_item) {
+    if (get_type_id(cls_item) != LMD_TYPE_MAP) return;
+    if (get_type_id(name_item) != LMD_TYPE_STRING) return;
+    ShapeEntry* existing = js_find_shape_entry(cls_item, "name", 4);
+    if (existing && !jspd_is_deleted(existing)) return;
+    Item key = (Item){.item = s2it(heap_create_name("name", 4))};
+    js_property_set(cls_item, key, name_item);
+    js_attr_set_writable(cls_item, "name", 4, false);
+    js_attr_set_enumerable(cls_item, "name", 4, false);
+    js_attr_set_configurable(cls_item, "name", 4, true);
+}
+
+extern "C" void js_set_default_constructor_property(Item proto_item, Item cls_item) {
+    if (get_type_id(proto_item) != LMD_TYPE_MAP) return;
+    ShapeEntry* existing = js_find_shape_entry(proto_item, "constructor", 11);
+    if (existing && !jspd_is_deleted(existing)) return;
+    Item key = (Item){.item = s2it(heap_create_name("constructor", 11))};
+    js_property_set(proto_item, key, cls_item);
+    js_attr_set_enumerable(proto_item, "constructor", 11, false);
+}
+
+extern "C" void js_prepare_class_prototype_property(Item cls_item) {
+    if (get_type_id(cls_item) != LMD_TYPE_MAP) return;
+    ShapeEntry* existing = js_find_shape_entry(cls_item, "prototype", 9);
+    if (existing && !jspd_is_deleted(existing)) {
+        js_throw_type_error("Cannot redefine property: prototype");
+    }
+}
+
+extern "C" void js_check_class_static_field_key(Item key_item) {
+    if (get_type_id(key_item) != LMD_TYPE_STRING) return;
+    String* key = it2s(key_item);
+    if (key && key->len == 9 && strncmp(key->chars, "prototype", 9) == 0) {
+        js_throw_type_error("Cannot redefine property: prototype");
+    }
+}
 
 // Set the source text of a JsFunction for Function.prototype.toString
 extern "C" void js_set_function_source(Item fn_item, Item source_item) {

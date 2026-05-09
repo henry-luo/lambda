@@ -14,6 +14,7 @@ extern "C" void js_reset_module_vars();
 extern "C" Item* js_alloc_module_vars(void);
 extern "C" Item* js_get_active_module_vars(void);
 extern "C" void js_set_active_module_vars(Item* vars);
+extern void js_double_to_string(double d, char* out, int out_size);
 extern "C" void js_process_emit_exit(int code);
 extern MIR_error_func_t g_batch_mir_error_handler;
 extern unsigned int g_js_mir_optimize_level;
@@ -160,6 +161,7 @@ void jm_emit_install_method_or_accessor(JsMirTranspiler* mt,
     MIR_reg_t obj, MIR_reg_t key, MIR_reg_t fn_item,
     bool is_getter, bool is_setter);
 void jm_emit_set_function_name(JsMirTranspiler* mt, MIR_reg_t fn_reg, const char* name, int formal_length = -1);
+void jm_emit_set_class_assignment_name(JsMirTranspiler* mt, JsAssignmentNode* asgn, MIR_reg_t rhs, String* name);
 void jm_emit_set_function_source(JsMirTranspiler* mt, MIR_reg_t fn_reg, JsFunctionNode* fn_node);
 void jm_emit_set_class_source(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassNode* cls_node);
 void jm_emit_formal_length(JsMirTranspiler* mt, MIR_reg_t fn_reg, int formal_length);

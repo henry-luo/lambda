@@ -826,6 +826,9 @@ extern void js_with_pop(void);
 extern int js_with_save_depth(void);
 extern void js_with_restore_depth(int depth);
 extern void js_set_global_property(Item key, Item value);
+extern void js_define_global_var_property(Item key, Item value);
+extern void js_evalscript_check_global_var_decl(Item key);
+extern void js_evalscript_check_global_function_decl(Item key);
 extern void js_eval_env_push_frame(void);
 extern void js_eval_env_bind(Item key, Item value);
 extern int64_t js_eval_env_has_binding(Item key);
@@ -834,6 +837,7 @@ extern void js_eval_env_track_global_binding(Item key);
 extern void js_eval_env_pop_frame(void);
 extern void js_check_unresolved_capture(Item value, const char* name, int64_t len);
 extern Item js_resolve_unresolved_binding(Item value, const char* name, int64_t len, int64_t in_typeof);
+extern int64_t js_262_eval_script_is_active(void);
 
 // Object.groupBy / Map.groupBy (ES2024)
 extern Item js_object_group_by(Item items, Item callback);
@@ -859,6 +863,13 @@ extern Item js_reflect_get_own_property_descriptor(Item target, Item key);
 extern Item js_get_reflect_object_value();
 extern Item js_get_atomics_object_value();
 extern Item js_install_user_accessor(Item obj, Item name, Item fn, int is_setter);
+extern void js_set_function_name_if_anonymous(Item fn_item, Item name_item);
+extern void js_set_class_name(Item cls_item, Item name_item);
+extern void js_set_default_constructor_property(Item proto_item, Item cls_item);
+extern void js_prepare_class_prototype_property(Item cls_item);
+extern void js_check_class_static_field_key(Item key_item);
+extern void js_mark_non_configurable(Item object, Item name);
+extern Item js_to_property_key(Item key);
 
 // v23: Performance facade functions (js_runtime.cpp)
 extern int64_t js_typeof_is(Item value, const char* type_str);
@@ -1459,6 +1470,13 @@ JitImport jit_runtime_imports[] = {
     {"js_object_get_own_property_descriptor", FPTR(js_object_get_own_property_descriptor)},
     {"js_object_get_own_property_descriptors", FPTR(js_object_get_own_property_descriptors)},
     {"js_set_function_name", FPTR(js_set_function_name)},
+    {"js_set_function_name_if_anonymous", FPTR(js_set_function_name_if_anonymous)},
+    {"js_set_class_name", FPTR(js_set_class_name)},
+    {"js_set_default_constructor_property", FPTR(js_set_default_constructor_property)},
+    {"js_prepare_class_prototype_property", FPTR(js_prepare_class_prototype_property)},
+    {"js_check_class_static_field_key", FPTR(js_check_class_static_field_key)},
+    {"js_mark_non_configurable", FPTR(js_mark_non_configurable)},
+    {"js_to_property_key", FPTR(js_to_property_key)},
     {"js_set_function_source", FPTR(js_set_function_source)},
     {"js_mark_generator_func", FPTR(js_mark_generator_func)},
     {"js_mark_async_generator_func", FPTR(js_mark_async_generator_func)},
@@ -1594,6 +1612,9 @@ JitImport jit_runtime_imports[] = {
     {"js_with_save_depth", FPTR(js_with_save_depth)},
     {"js_with_restore_depth", FPTR(js_with_restore_depth)},
     {"js_set_global_property", FPTR(js_set_global_property)},
+    {"js_define_global_var_property", FPTR(js_define_global_var_property)},
+    {"js_evalscript_check_global_var_decl", FPTR(js_evalscript_check_global_var_decl)},
+    {"js_evalscript_check_global_function_decl", FPTR(js_evalscript_check_global_function_decl)},
     {"js_eval_env_push_frame", FPTR(js_eval_env_push_frame)},
     {"js_eval_env_bind", FPTR(js_eval_env_bind)},
     {"js_eval_env_has_binding", FPTR(js_eval_env_has_binding)},
@@ -1602,6 +1623,7 @@ JitImport jit_runtime_imports[] = {
     {"js_eval_env_pop_frame", FPTR(js_eval_env_pop_frame)},
     {"js_check_unresolved_capture", FPTR(js_check_unresolved_capture)},
     {"js_resolve_unresolved_binding", FPTR(js_resolve_unresolved_binding)},
+    {"js_262_eval_script_is_active", FPTR(js_262_eval_script_is_active)},
 
     {"js_symbol_create", FPTR(js_symbol_create)},
     {"js_symbol_for", FPTR(js_symbol_for)},

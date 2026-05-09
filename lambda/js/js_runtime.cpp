@@ -6,6 +6,9 @@
  */
 #include "js_runtime_internal.hpp"
 
+extern "C" Item js_to_property_key(Item key);
+extern void js_double_to_string(double d, char* out, int out_size);
+
 // =============================================================================
 // Object Functions
 // =============================================================================
@@ -2296,11 +2299,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                 snprintf(buf, sizeof(buf), "%lld", (long long)it2i(key));
             } else {
                 double dv = it2d(key);
-                if (dv != dv) snprintf(buf, sizeof(buf), "NaN");
-                else if (dv == 1.0/0.0) snprintf(buf, sizeof(buf), "Infinity");
-                else if (dv == -1.0/0.0) snprintf(buf, sizeof(buf), "-Infinity");
-                else if (dv == 0.0) snprintf(buf, sizeof(buf), "0");
-                else snprintf(buf, sizeof(buf), "%g", dv);
+                js_double_to_string(dv, buf, sizeof(buf));
             }
             key = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
         } else if (kt == LMD_TYPE_BOOL) {
@@ -2310,6 +2309,8 @@ extern "C" Item js_property_get(Item object, Item key) {
             key = (Item){.item = s2it(heap_create_name("null", 4))};
         } else if (kt == LMD_TYPE_UNDEFINED) {
             key = (Item){.item = s2it(heap_create_name("undefined", 9))};
+        } else if (kt != LMD_TYPE_STRING) {
+            key = js_to_property_key(key);
         }
         // Stage A1.3a: own-property lookup + IS_ACCESSOR getter dispatch is
         // now centralized in js_ordinary_get_own (lambda/js/js_props.cpp).
@@ -3558,11 +3559,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                 snprintf(buf, sizeof(buf), "%lld", (long long)it2i(key));
             } else {
                 double dv = it2d(key);
-                if (dv != dv) snprintf(buf, sizeof(buf), "NaN");
-                else if (dv == 1.0/0.0) snprintf(buf, sizeof(buf), "Infinity");
-                else if (dv == -1.0/0.0) snprintf(buf, sizeof(buf), "-Infinity");
-                else if (dv == 0.0) snprintf(buf, sizeof(buf), "0");
-                else snprintf(buf, sizeof(buf), "%g", dv);
+                js_double_to_string(dv, buf, sizeof(buf));
             }
             key = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
         } else if (kt == LMD_TYPE_BOOL) {
@@ -3638,7 +3635,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
         // tombstone a slot — must not trigger accessor / TypeError-on-no-setter logic).
         if (!js_skip_accessor_dispatch && !js_is_deleted_sentinel(value) && get_type_id(key) == LMD_TYPE_STRING) {
             String* str_key = it2s(key);
-            if (str_key && str_key->len < 64 && str_key->len > 0 &&
+            if (str_key && str_key->len < 64 &&
                 !(str_key->len > 6 && (strncmp(str_key->chars, "__get_", 6) == 0 ||
                                         strncmp(str_key->chars, "__set_", 6) == 0)) &&
                 !(str_key->len == 9 && strncmp(str_key->chars, "__proto__", 9) == 0)) {
@@ -16165,7 +16162,22 @@ extern "C" Item js_get_console_object_value() {
 
 // test262 host object $262 — provides detachArrayBuffer for typed array tests
 static Item js_262_object = {.item = ITEM_NULL};
+static int64_t js_262_eval_script_active = 0;
 void js_reset_262_object() { js_262_object = (Item){.item = ITEM_NULL}; }
+
+extern "C" Item js_builtin_eval(Item code_item, int64_t is_global_scope);
+
+extern "C" int64_t js_262_eval_script_is_active() {
+    return js_262_eval_script_active;
+}
+
+static Item js_262_eval_script(Item code) {
+    int64_t saved = js_262_eval_script_active;
+    js_262_eval_script_active = 1;
+    Item result = js_builtin_eval(code, 1);
+    js_262_eval_script_active = saved;
+    return result;
+}
 
 extern "C" Item js_get_262_object_value() {
     if (js_262_object.item == ITEM_NULL) {
@@ -16177,6 +16189,9 @@ extern "C" Item js_get_262_object_value() {
         Item realm_key = (Item){.item = s2it(heap_create_name("createRealm", 11))};
         Item realm_fn = js_get_or_create_builtin(JS_BUILTIN_262_CREATE_REALM, "createRealm", 0);
         js_property_set(js_262_object, realm_key, realm_fn);
+        Item eval_script_key = (Item){.item = s2it(heap_create_name("evalScript", 10))};
+        Item eval_script_fn = js_new_function((void*)js_262_eval_script, 1);
+        js_property_set(js_262_object, eval_script_key, eval_script_fn);
     }
     return js_262_object;
 }

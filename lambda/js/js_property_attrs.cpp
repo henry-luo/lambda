@@ -533,7 +533,7 @@ extern "C" void js_define_accessor_partial(Item obj, Item name, Item fn,
                                             int is_setter, uint8_t attrs) {
     if (get_type_id(name) != LMD_TYPE_STRING) return;
     String* ns = it2s(name);
-    if (!ns || ns->len == 0) return;
+    if (!ns) return;
 
     // Bypass setter accessor-dispatch in our own recursive js_property_set call:
     // we are storing the pair Item literally under name X, not invoking the
