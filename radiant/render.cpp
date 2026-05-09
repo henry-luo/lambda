@@ -2065,8 +2065,11 @@ void render_column_rules(RenderContext* rdcon, ViewBlock* block) {
 
     MultiColumnProp* mc = block->multicol;
 
-    // Only render if we have rules and multiple columns
-    if (mc->computed_column_count <= 1 || mc->rule_width <= 0 ||
+    // Only render rules between columns that actually received content.
+    int rule_column_count = mc->computed_used_column_count > 0
+        ? mc->computed_used_column_count
+        : mc->computed_column_count;
+    if (rule_column_count <= 1 || mc->rule_width <= 0 ||
         mc->rule_style == CSS_VALUE_NONE) {
         return;
     }
@@ -2114,10 +2117,10 @@ void render_column_rules(RenderContext* rdcon, ViewBlock* block) {
     }
 
     log_debug("[MULTICOL] Rendering %d column rules, width=%.1f, style=%d",
-              mc->computed_column_count - 1, mc->rule_width, mc->rule_style);
+              rule_column_count - 1, mc->rule_width, mc->rule_style);
 
     // Draw rule between each pair of columns
-    for (int i = 0; i < mc->computed_column_count - 1; i++) {
+    for (int i = 0; i < rule_column_count - 1; i++) {
         float rule_x = block_x + (i + 1) * column_width + i * gap + gap / 2.0f - mc->rule_width / 2.0f;
 
         if (mc->rule_style == CSS_VALUE_DOUBLE) {

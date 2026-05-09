@@ -267,6 +267,8 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_COLUMN_RULE_COLOR, "column-rule-color", PROP_TYPE_COLOR, PROP_INHERIT_NO, "currentColor", true, false, NULL, 0, validate_color, NULL},
     {CSS_PROPERTY_COLUMN_SPAN, "column-span", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_COLUMN_FILL, "column-fill", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_COLUMN_HEIGHT, "column-height", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "auto", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_COLUMN_WRAP, "column-wrap", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
 
     // Gap Properties
     {CSS_PROPERTY_GAP, "gap", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, true, NULL, 0, validate_length, NULL},

@@ -941,8 +941,11 @@ void render_column_rules_svg(SvgRenderContext* ctx, ViewBlock* block) {
 
     MultiColumnProp* mc = block->multicol;
 
-    // Only render if we have rules and multiple columns
-    if (mc->computed_column_count <= 1 || mc->rule_width <= 0 ||
+    // Only render rules between columns that actually received content.
+    int rule_column_count = mc->computed_used_column_count > 0
+        ? mc->computed_used_column_count
+        : mc->computed_column_count;
+    if (rule_column_count <= 1 || mc->rule_width <= 0 ||
         mc->rule_style == CSS_VALUE_NONE) {
         return;
     }
@@ -991,10 +994,10 @@ void render_column_rules_svg(SvgRenderContext* ctx, ViewBlock* block) {
     svg_color_to_string(mc->rule_color, rule_color_str);
 
     log_debug("[MULTICOL SVG] Rendering %d column rules, width=%.1f, style=%d, height=%.1f",
-              mc->computed_column_count - 1, mc->rule_width, mc->rule_style, rule_height);
+              rule_column_count - 1, mc->rule_width, mc->rule_style, rule_height);
 
     // Draw rule between each pair of columns
-    for (int i = 0; i < mc->computed_column_count - 1; i++) {
+    for (int i = 0; i < rule_column_count - 1; i++) {
         float rule_x = block_x + (i + 1) * column_width + i * gap + gap / 2.0f;
 
         svg_indent(ctx);
