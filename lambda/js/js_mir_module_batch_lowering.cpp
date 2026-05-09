@@ -1440,6 +1440,16 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     {
         struct hashmap* hoisted_vars = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
             jm_name_hash, jm_name_cmp, NULL, NULL);
+        struct hashmap* eval_lex_collisions = NULL;
+        if (mt->is_eval_direct && !mt->is_global_strict && !mt->is_module && js_eval_env_is_active()) {
+            eval_lex_collisions = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+                jm_name_hash, jm_name_cmp, NULL, NULL);
+            JsAstNode* ls = program->body;
+            while (ls) {
+                jm_collect_all_let_const_names_recursive(ls, eval_lex_collisions);
+                ls = ls->next;
+            }
+        }
         JsAstNode* s = program->body;
         while (s) {
             JsAstNode* actual = s;
@@ -1460,6 +1470,15 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         size_t iter = 0; void* item;
         while (hashmap_iter(hoisted_vars, &iter, &item)) {
             JsNameSetEntry* e = (JsNameSetEntry*)item;
+            if (eval_lex_collisions && e->from_func_decl) {
+                JsNameSetEntry lex_lookup;
+                memset(&lex_lookup, 0, sizeof(lex_lookup));
+                snprintf(lex_lookup.name, sizeof(lex_lookup.name), "%s", e->name);
+                if (hashmap_get(eval_lex_collisions, &lex_lookup)) {
+                    log_debug("js-mir: suppress AnnexB nested func hoist '%s' (let/const collision)", e->name);
+                    continue;
+                }
+            }
             JsModuleConstEntry lookup;
             snprintf(lookup.name, sizeof(lookup.name), "%s", e->name);
             if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < 2048) {
@@ -1475,6 +1494,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     e->from_func_decl ? " (nested func decl)" : "");
             }
         }
+        if (eval_lex_collisions) hashmap_free(eval_lex_collisions);
         hashmap_free(hoisted_vars);
     }
 
@@ -3009,13 +3029,39 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             if (mce->const_type == MCONST_MODVAR &&
                 mce->var_kind == JS_VAR_VAR && !mce->is_implicit_global &&
                 (int)mce->int_val >= preamble_var_limit) {
-                MIR_reg_t undef_val = jm_new_reg(mt, "var_init", MIR_T_I64);
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_reg_op(mt->ctx, undef_val),
-                    MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEF_VAL)));
+                MIR_reg_t init_val = 0;
+                if (mt->is_eval_direct && mce->is_nested_func_hoist) {
+                    const char* js_name = mce->name;
+                    if (strncmp(js_name, "_js_", 4) == 0) js_name += 4;
+                    MIR_reg_t key_reg = jm_box_string_literal(mt, js_name, strlen(js_name));
+                    MIR_reg_t bridged_reg = jm_call_1(mt, "js_eval_env_has_binding", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
+                    MIR_label_t use_undef = jm_new_label(mt);
+                    MIR_label_t init_done = jm_new_label(mt);
+                    init_val = jm_new_reg(mt, "var_init", MIR_T_I64);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+                        MIR_new_label_op(mt->ctx, use_undef),
+                        MIR_new_reg_op(mt->ctx, bridged_reg)));
+                    MIR_reg_t bridged_val = jm_call_1(mt, "js_get_global_property", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, init_val),
+                        MIR_new_reg_op(mt->ctx, bridged_val)));
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, init_done)));
+                    jm_emit_label(mt, use_undef);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, init_val),
+                        MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEF_VAL)));
+                    jm_emit_label(mt, init_done);
+                } else {
+                    init_val = jm_new_reg(mt, "var_init", MIR_T_I64);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, init_val),
+                        MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEF_VAL)));
+                }
                 jm_call_void_2(mt, "js_set_module_var",
                     MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mce->int_val),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, undef_val));
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, init_val));
             }
         }
     }
@@ -3055,6 +3101,14 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             const char* js_name = mce->name;
             if (strncmp(js_name, "_js_", 4) == 0) js_name += 4;
             MIR_reg_t key_reg = jm_box_string_literal(mt, js_name, strlen(js_name));
+            MIR_reg_t bridged_reg = jm_call_1(mt, "js_eval_env_has_binding", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
+            MIR_label_t skip_bridge_preinit = jm_new_label(mt);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                MIR_new_label_op(mt->ctx, skip_bridge_preinit),
+                MIR_new_reg_op(mt->ctx, bridged_reg)));
+            jm_call_void_1(mt, "js_eval_env_track_global_binding",
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
             MIR_reg_t undef_reg = jm_new_reg(mt, "annexb_undef", MIR_T_I64);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_reg_op(mt->ctx, undef_reg),
@@ -3064,6 +3118,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, undef_reg));
             log_debug("js-mir: AnnexB pre-init globalThis.%s = undefined", js_name);
+            jm_emit_label(mt, skip_bridge_preinit);
         }
         hashmap_free(annexb_lex_collisions);
     }

@@ -775,7 +775,10 @@ static const std::string& get_harness_file(const std::string& name) {
 struct Test262Prepared {
     std::string test_name;       // GTest param name
     std::string test_path;       // path to .js test file (for lazy read)
+    std::string category;        // language, built-ins, annexB, etc.
+    std::string subcategory;     // expressions, Array, eval-code, etc.
     std::vector<std::string> includes; // harness includes (e.g. "propertyHelper.js")
+    std::vector<std::string> features; // metadata feature tags
     bool is_strict;              // add "use strict" prefix
     Test262Result skip_result;   // T262_SKIP if test should be skipped
     std::string skip_message;
@@ -942,6 +945,8 @@ static bool g_no_hot_reload = false;
 static bool g_mir_interp = false;
 static bool g_no_stripped = false;  // --no-stripped: force original test files
 static std::string g_batch_file;   // --batch-file=<path>: run only tests from this list in a single batch
+static std::string g_write_failures_path; // --write-failures=<path>: write failed test manifest TSV
+static bool g_feature_summary = false;    // --feature-summary: write failure summaries under temp/
 static int g_opt_level = 0;  // default -O0 (fastest for short-lived test262 scripts)
 static char g_opt_level_arg[20] = "--opt-level=0";  // "--opt-level=N"
 static char g_js_timeout_arg[20] = "--timeout=10";  // child js-test-batch timeout
@@ -965,6 +970,181 @@ static size_t g_phase_batch_lost = 0;       // tests lost in batch, recovered in
 static std::unordered_map<std::string, size_t> g_batch_assignment;  // test_name → batch_index
 static std::vector<std::vector<std::string>> g_batch_contents;      // batch_index → [test_names]
 static std::set<size_t> g_crashed_batches;  // batches that had a BATCH_KILL crash-point
+
+struct Test262FailureInfo {
+    std::string test_path;
+    std::string category;
+    std::string subcategory;
+    std::vector<std::string> features;
+    std::vector<std::string> includes;
+    bool native_harness = false;
+};
+
+static std::unordered_map<std::string, Test262RunResult> g_cached_results;
+static std::mutex g_results_mutex;
+static std::unordered_map<std::string, BatchResult> g_cached_batch_results;
+static std::unordered_map<std::string, Test262FailureInfo> g_failure_info;
+
+static std::string tsv_clean(std::string value) {
+    for (char& ch : value) {
+        unsigned char byte = (unsigned char)ch;
+        if (ch == '\t' || ch == '\n' || ch == '\r') {
+            ch = ' ';
+        } else if (byte < 32 || byte > 126) {
+            ch = '?';
+        }
+    }
+    return value;
+}
+
+static std::string join_fields(const std::vector<std::string>& values, const char* separator) {
+    std::string out;
+    for (size_t i = 0; i < values.size(); i++) {
+        if (i > 0) out += separator;
+        out += values[i];
+    }
+    return out;
+}
+
+static const char* t262_result_name(Test262Result result) {
+    switch (result) {
+        case T262_PASS: return "PASS";
+        case T262_PARTIAL_PASS: return "PARTIAL";
+        case T262_FAIL: return "FAIL";
+        case T262_SKIP: return "SKIP";
+        case T262_TIMEOUT: return "TIMEOUT";
+        case T262_CRASH: return "CRASH";
+    }
+    return "UNKNOWN";
+}
+
+static bool t262_is_manifest_failure(Test262Result result) {
+    return result == T262_FAIL || result == T262_TIMEOUT || result == T262_CRASH;
+}
+
+static std::string first_diagnostic_line(const std::string& message) {
+    size_t end = message.find('\n');
+    std::string line = end == std::string::npos ? message : message.substr(0, end);
+    if (line.size() > 300) line = line.substr(0, 300);
+    return tsv_clean(line);
+}
+
+static const char* classify_failure_kind(Test262Result result, const std::string& message) {
+    if (result == T262_TIMEOUT) return "timeout";
+    if (result == T262_CRASH) return "crash";
+    if (message.find("not found in batch") != std::string::npos) return "missing";
+    if (message.find("SyntaxError") != std::string::npos ||
+        message.find("parse") != std::string::npos ||
+        message.find("parser") != std::string::npos) return "parse";
+    if (message.find("Test262Error") != std::string::npos ||
+        message.find("negative test did not throw") != std::string::npos) return "assert";
+    return "runtime";
+}
+
+static std::string summary_path_for(const std::string& manifest_path, const char* suffix) {
+    if (manifest_path.empty()) return std::string("temp/js262_failures_") + suffix + ".tsv";
+    size_t dot = manifest_path.rfind('.');
+    size_t slash = manifest_path.rfind('/');
+    if (dot != std::string::npos && (slash == std::string::npos || dot > slash)) {
+        return manifest_path.substr(0, dot) + "_by_" + suffix + manifest_path.substr(dot);
+    }
+    return manifest_path + "_by_" + suffix + ".tsv";
+}
+
+static void write_count_summary(const std::string& path, const char* label,
+                                const std::map<std::string, int>& counts) {
+    FILE* f = fopen(path.c_str(), "w");
+    if (!f) {
+        fprintf(stderr, "[test262] Warning: cannot write failure summary: %s\n", path.c_str());
+        return;
+    }
+    fprintf(f, "%s\tfailures\n", label);
+    for (auto& kv : counts) {
+        fprintf(f, "%s\t%d\n", tsv_clean(kv.first).c_str(), kv.second);
+    }
+    fclose(f);
+    fprintf(stderr, "[test262] Failure summary: %zu rows -> %s\n", counts.size(), path.c_str());
+}
+
+static void write_failure_artifacts() {
+    if (g_write_failures_path.empty() && !g_feature_summary) return;
+
+    std::string manifest_path = g_write_failures_path.empty()
+        ? std::string("temp/js262_failures.tsv")
+        : g_write_failures_path;
+
+    std::vector<std::pair<std::string, Test262RunResult>> failures;
+    {
+        std::lock_guard<std::mutex> lock(g_results_mutex);
+        for (auto& kv : g_cached_results) {
+            if (t262_is_manifest_failure(kv.second.result)) failures.push_back(kv);
+        }
+    }
+    std::sort(failures.begin(), failures.end(),
+              [](const auto& a, const auto& b) { return a.first < b.first; });
+
+    std::map<std::string, int> feature_counts;
+    std::map<std::string, int> path_counts;
+    FILE* f = fopen(manifest_path.c_str(), "w");
+    if (!f) {
+        fprintf(stderr, "[test262] Warning: cannot write failure manifest: %s\n", manifest_path.c_str());
+    } else {
+        fprintf(f, "test_name\tpath\tstatus\tfailure_kind\tmessage\tcategory\tsubcategory\tfeatures\tincludes\tnative_harness\telapsed_us\trss_delta_kb\n");
+    }
+
+    for (auto& kv : failures) {
+        const std::string& name = kv.first;
+        const Test262RunResult& result = kv.second;
+        Test262FailureInfo info;
+        auto info_it = g_failure_info.find(name);
+        if (info_it != g_failure_info.end()) info = info_it->second;
+
+        long elapsed_us = 0;
+        long rss_delta_kb = 0;
+        auto br_it = g_cached_batch_results.find(name);
+        if (br_it != g_cached_batch_results.end()) {
+            elapsed_us = br_it->second.elapsed_us;
+            rss_delta_kb = (long)(br_it->second.rss_after / 1024) -
+                           (long)(br_it->second.rss_before / 1024);
+        }
+
+        std::string path_bucket = info.category.empty() ? "(unknown)" : info.category;
+        if (!info.subcategory.empty()) path_bucket += "/" + info.subcategory;
+        path_counts[path_bucket]++;
+        if (info.features.empty()) {
+            feature_counts["(none)"]++;
+        } else {
+            for (auto& feature : info.features) feature_counts[feature]++;
+        }
+
+        if (f) {
+            fprintf(f, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%ld\t%ld\n",
+                    tsv_clean(name).c_str(),
+                    tsv_clean(info.test_path).c_str(),
+                    t262_result_name(result.result),
+                    classify_failure_kind(result.result, result.message),
+                    first_diagnostic_line(result.message).c_str(),
+                    tsv_clean(info.category).c_str(),
+                    tsv_clean(info.subcategory).c_str(),
+                    tsv_clean(join_fields(info.features, ";")).c_str(),
+                    tsv_clean(join_fields(info.includes, ";")).c_str(),
+                    info.native_harness ? 1 : 0,
+                    elapsed_us,
+                    rss_delta_kb);
+        }
+    }
+
+    if (f) {
+        fclose(f);
+        fprintf(stderr, "[test262] Failure manifest: %zu rows -> %s\n",
+                failures.size(), manifest_path.c_str());
+    }
+
+    if (g_feature_summary || !g_write_failures_path.empty()) {
+        write_count_summary(summary_path_for(manifest_path, "feature"), "feature", feature_counts);
+        write_count_summary(summary_path_for(manifest_path, "path"), "path", path_counts);
+    }
+}
 
 // Get short git commit hash for baseline header
 static std::string get_git_commit_hash() {
@@ -1112,6 +1292,8 @@ static void prepare_all_tests(
             Test262Prepared& p = prepared[i];
             p.test_name = param.test_name;
             p.test_path = param.test_path;
+            p.category = param.category;
+            p.subcategory = param.subcategory;
             p.skip_result = T262_PASS; // not skipped by default
             p.is_negative = false;
             p.is_strict = false;
@@ -1195,6 +1377,7 @@ static void prepare_all_tests(
             p.negative_type = meta.negative_type;
             p.is_strict = meta.is_strict;
             p.includes = std::move(meta.includes);
+            p.features = std::move(meta.features);
 
 #ifndef NDEBUG
             // Native harness eligibility: pre-computed in metadata cache (V2+),
@@ -1756,8 +1939,6 @@ static Test262RunResult evaluate_batch_result(
 // Batch pre-run: prepare, execute, evaluate — cache all results
 // =============================================================================
 
-static std::unordered_map<std::string, Test262RunResult> g_cached_results;
-static std::mutex g_results_mutex;
 static bool g_parallel_done = false;
 
 static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
@@ -1978,6 +2159,8 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
 
         exec_time = retry_time;  // update for total calculation
     }
+
+    g_cached_batch_results = batch_results;
 
     // Write non-fully-passing list for next run.
     // Cumulative: merge previous entries with newly-discovered ones.
@@ -2382,6 +2565,9 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
     size_t pp_skipped_partial = 0;
     for (size_t i = 0; i < prepared.size(); i++) {
         const auto& pname = prepared[i].test_name;
+        g_failure_info[pname] = {prepared[i].test_path, prepared[i].category,
+                                 prepared[i].subcategory, prepared[i].features,
+                                 prepared[i].includes, prepared[i].native_harness};
         // Tests on the known-partial list that were NOT promoted to clean (i.e. skipped
         // from this run's batch) must not be evaluated as FAIL("not found in batch").
         // They are intentionally skipped — we have no fresh result for them this run.
@@ -2707,6 +2893,8 @@ public:
                        BASELINE_FILE, current_passing.size(), STABLE_BASELINE_MIN);
             }
         }
+
+        write_failure_artifacts();
     }
 };
 
@@ -2762,6 +2950,12 @@ int main(int argc, char** argv) {
         }
         if (strncmp(argv[i], "--batch-file=", 13) == 0) {
             g_batch_file = argv[i] + 13;
+        }
+        if (strncmp(argv[i], "--write-failures=", 17) == 0) {
+            g_write_failures_path = argv[i] + 17;
+        }
+        if (strcmp(argv[i], "--feature-summary") == 0) {
+            g_feature_summary = true;
         }
         if (strncmp(argv[i], "--opt-level=", 12) == 0) {
             g_opt_level = atoi(argv[i] + 12);
@@ -2885,6 +3079,8 @@ int main(int argc, char** argv) {
             Test262Prepared p;
             p.test_name = param.test_name;
             p.test_path = param.test_path;
+            p.category = param.category;
+            p.subcategory = param.subcategory;
             p.skip_result = T262_PASS;
             p.is_negative = false;
             p.is_strict = false;
@@ -2896,6 +3092,7 @@ int main(int argc, char** argv) {
                 p.negative_type = cm.neg_type;
                 p.is_strict = cm.flags & 8;
                 p.includes = cm.includes;
+                p.features = cm.features;
                 p.native_harness = cm.native_harness;
             }
             indices.push_back(prepared.size());
@@ -2909,8 +3106,13 @@ int main(int argc, char** argv) {
         // Evaluate and report per-test results
         int passed = 0, failed = 0;
         std::vector<std::string> failed_names;
+        g_cached_batch_results = results;
         for (size_t i = 0; i < prepared.size(); i++) {
             auto result = evaluate_batch_result(prepared[i], results);
+            g_failure_info[prepared[i].test_name] = {prepared[i].test_path, prepared[i].category,
+                                                     prepared[i].subcategory, prepared[i].features,
+                                                     prepared[i].includes, prepared[i].native_harness};
+            g_cached_results[prepared[i].test_name] = result;
             const char* status = "?";
             switch (result.result) {
                 case T262_PASS: status = "PASS"; passed++; break;
@@ -2937,6 +3139,7 @@ int main(int argc, char** argv) {
                 fprintf(stderr, "  - %s\n", name.c_str());
             }
         }
+        write_failure_artifacts();
         return failed > 0 ? 1 : 0;
     }
 
@@ -3036,6 +3239,10 @@ int main(int argc, char** argv) {
                             passed++;
                             failed--;
                             current_passing.push_back(reg_name);
+                            {
+                                std::lock_guard<std::mutex> lock(g_results_mutex);
+                                g_cached_results[reg_name] = {T262_PASS, "recovered in Phase 4 retry (crash-collateral)"};
+                            }
                         } else {
                             // Genuine batch-instability — keep as partial
                             partial++;
@@ -3190,6 +3397,7 @@ int main(int argc, char** argv) {
                        BASELINE_FILE, current_passing.size(), STABLE_BASELINE_MIN);
             }
         }
+        write_failure_artifacts();
         return regressions.empty() ? 0 : 1;
     }
 

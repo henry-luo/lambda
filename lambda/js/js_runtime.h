@@ -551,6 +551,14 @@ Item js_get_global_object(void);
 Item js_get_global_property(Item key);
 Item js_get_global_property_strict(Item key);
 Item js_get_global_builtin_fn(Item name, Item param_count);
+void js_eval_env_push_frame(void);
+void js_eval_env_bind(Item key, Item value);
+int64_t js_eval_env_has_binding(Item key);
+int64_t js_eval_env_is_active(void);
+void js_eval_env_track_global_binding(Item key);
+void js_eval_env_pop_frame(void);
+void js_check_unresolved_capture(Item value, const char* name, int64_t len);
+Item js_resolve_unresolved_binding(Item value, const char* name, int64_t len, int64_t in_typeof);
 
 // URL constructor
 Item js_url_construct(Item input);

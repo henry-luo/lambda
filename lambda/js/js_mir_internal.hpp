@@ -38,6 +38,19 @@ extern NamePool* module_mir_name_pools[];
 extern Pool* module_mir_ast_pools[];
 extern int module_mir_context_count;
 
+typedef enum JsMirReferenceKind {
+    JS_MIR_REF_INVALID = 0,
+    JS_MIR_REF_PROPERTY,
+    JS_MIR_REF_SUPER_PROPERTY
+} JsMirReferenceKind;
+
+typedef struct JsMirReference {
+    JsMirReferenceKind kind;
+    MIR_reg_t base_reg;
+    MIR_reg_t key_reg;
+    bool strict;
+} JsMirReference;
+
 // internal function declarations
 int js_import_cache_cmp(const void *a, const void *b, void *udata);
 uint64_t js_import_cache_hash(const void *item, uint64_t seed0, uint64_t seed1);
@@ -56,6 +69,10 @@ MIR_reg_t jm_new_reg(JsMirTranspiler* mt, const char* prefix, MIR_type_t type);
 MIR_label_t jm_new_label(JsMirTranspiler* mt);
 void jm_emit(JsMirTranspiler* mt, MIR_insn_t insn);
 void jm_emit_label(JsMirTranspiler* mt, MIR_label_t label);
+JsMirReference jm_emit_reference(JsMirTranspiler* mt, JsAstNode* node);
+MIR_reg_t jm_emit_get_value(JsMirTranspiler* mt, const JsMirReference* ref);
+MIR_reg_t jm_emit_put_value(JsMirTranspiler* mt, const JsMirReference* ref, MIR_reg_t value);
+MIR_reg_t jm_emit_delete_reference(JsMirTranspiler* mt, const JsMirReference* ref);
 void jm_eval_cptn_reset(JsMirTranspiler* mt);
 void jm_push_loop_labels(JsMirTranspiler* mt, MIR_label_t continue_label, MIR_label_t break_label);
 MIR_reg_t jm_emit_uext8(JsMirTranspiler* mt, MIR_reg_t r);
