@@ -240,8 +240,8 @@ static void calc_button_size(LayoutContext* lycon, ViewBlock* block, FormControl
     }
 
     if (text && *text && font && font->font_size > 0) {
-        // Use FreeType measurement for accurate button text width.
-        // FreeType overestimates proportional font width by ~12.5% vs Chrome UA
+        // Use backend font measurement for accurate button text width.
+        // font backend measurement can overestimate proportional font width by ~12.5% vs Chrome UA
         // (likely due to hinting/kerning differences), so apply a correction factor.
         TextIntrinsicWidths tw = measure_text_intrinsic_widths(lycon, text, (int)strlen(text)); // INT_CAST_OK: string length
         form->intrinsic_width = tw.max_content * 0.875f;
@@ -324,7 +324,7 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
 
     // Chrome select border-box width includes text + arrow area + internal padding.
     // Chrome uses the system font for select text, which differs from the page font.
-    // FreeType measures with the page font — sometimes wider, sometimes narrower than Chrome.
+    // backend metrics measure with the page font — sometimes wider, sometimes narrower than Chrome.
     // A moderate overhead balances both cases across the test suite.
 
     // HTML §4.10.7: listbox mode when multiple attr is set OR size > 1

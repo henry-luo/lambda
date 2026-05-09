@@ -2,7 +2,7 @@
  * Lambda Unified Font Module — TTF/OTF Table Parser
  *
  * Parses OpenType/TrueType font tables directly from raw font bytes.
- * Replaces FreeType for metric extraction and codepoint lookup.
+ * Extracts metrics and codepoint mappings from OpenType tables.
  *
  * Supported tables:
  *   head, hhea, maxp, OS/2, post, cmap (format 4, 12), hmtx, kern (format 0),
@@ -205,8 +205,8 @@ bool font_tables_has(FontTables* tables, uint32_t tag) {
 
 HeadTable* font_tables_get_head(FontTables* tables) {
     if (!tables) return NULL;
-    if (tables->parsed_flags & FT_PARSED_HEAD) return tables->head;
-    tables->parsed_flags |= FT_PARSED_HEAD;
+    if (tables->parsed_flags & FONT_PARSED_HEAD) return tables->head;
+    tables->parsed_flags |= FONT_PARSED_HEAD;
 
     uint32_t len = 0;
     const uint8_t* raw = font_tables_find(tables, FONT_TAG('h','e','a','d'), &len);
@@ -235,8 +235,8 @@ HeadTable* font_tables_get_head(FontTables* tables) {
 
 HheaTable* font_tables_get_hhea(FontTables* tables) {
     if (!tables) return NULL;
-    if (tables->parsed_flags & FT_PARSED_HHEA) return tables->hhea;
-    tables->parsed_flags |= FT_PARSED_HHEA;
+    if (tables->parsed_flags & FONT_PARSED_HHEA) return tables->hhea;
+    tables->parsed_flags |= FONT_PARSED_HHEA;
 
     uint32_t len = 0;
     const uint8_t* raw = font_tables_find(tables, FONT_TAG('h','h','e','a'), &len);
@@ -262,8 +262,8 @@ HheaTable* font_tables_get_hhea(FontTables* tables) {
 
 MaxpTable* font_tables_get_maxp(FontTables* tables) {
     if (!tables) return NULL;
-    if (tables->parsed_flags & FT_PARSED_MAXP) return tables->maxp;
-    tables->parsed_flags |= FT_PARSED_MAXP;
+    if (tables->parsed_flags & FONT_PARSED_MAXP) return tables->maxp;
+    tables->parsed_flags |= FONT_PARSED_MAXP;
 
     uint32_t len = 0;
     const uint8_t* raw = font_tables_find(tables, FONT_TAG('m','a','x','p'), &len);
@@ -285,8 +285,8 @@ MaxpTable* font_tables_get_maxp(FontTables* tables) {
 
 Os2Table* font_tables_get_os2(FontTables* tables) {
     if (!tables) return NULL;
-    if (tables->parsed_flags & FT_PARSED_OS2) return tables->os2;
-    tables->parsed_flags |= FT_PARSED_OS2;
+    if (tables->parsed_flags & FONT_PARSED_OS2) return tables->os2;
+    tables->parsed_flags |= FONT_PARSED_OS2;
 
     uint32_t len = 0;
     const uint8_t* raw = font_tables_find(tables, FONT_TAG('O','S','/','2'), &len);
@@ -340,8 +340,8 @@ Os2Table* font_tables_get_os2(FontTables* tables) {
 
 PostTable* font_tables_get_post(FontTables* tables) {
     if (!tables) return NULL;
-    if (tables->parsed_flags & FT_PARSED_POST) return tables->post;
-    tables->parsed_flags |= FT_PARSED_POST;
+    if (tables->parsed_flags & FONT_PARSED_POST) return tables->post;
+    tables->parsed_flags |= FONT_PARSED_POST;
 
     uint32_t len = 0;
     const uint8_t* raw = font_tables_find(tables, FONT_TAG('p','o','s','t'), &len);
@@ -433,8 +433,8 @@ static CmapSubtable* parse_cmap_format12(const uint8_t* raw, uint32_t len, Pool*
 
 CmapTable* font_tables_get_cmap(FontTables* tables) {
     if (!tables) return NULL;
-    if (tables->parsed_flags & FT_PARSED_CMAP) return tables->cmap;
-    tables->parsed_flags |= FT_PARSED_CMAP;
+    if (tables->parsed_flags & FONT_PARSED_CMAP) return tables->cmap;
+    tables->parsed_flags |= FONT_PARSED_CMAP;
 
     uint32_t len = 0;
     const uint8_t* raw = font_tables_find(tables, FONT_TAG('c','m','a','p'), &len);
@@ -611,8 +611,8 @@ uint16_t cmap_lookup(CmapTable* cmap, uint32_t codepoint) {
 
 HmtxTable* font_tables_get_hmtx(FontTables* tables) {
     if (!tables) return NULL;
-    if (tables->parsed_flags & FT_PARSED_HMTX) return tables->hmtx;
-    tables->parsed_flags |= FT_PARSED_HMTX;
+    if (tables->parsed_flags & FONT_PARSED_HMTX) return tables->hmtx;
+    tables->parsed_flags |= FONT_PARSED_HMTX;
 
     // hmtx depends on hhea (for numberOfHMetrics) and maxp (for numGlyphs)
     HheaTable* hhea = font_tables_get_hhea(tables);
@@ -678,8 +678,8 @@ int16_t hmtx_get_lsb(HmtxTable* hmtx, uint16_t glyph_id) {
 
 KernTable* font_tables_get_kern(FontTables* tables) {
     if (!tables) return NULL;
-    if (tables->parsed_flags & FT_PARSED_KERN) return tables->kern;
-    tables->parsed_flags |= FT_PARSED_KERN;
+    if (tables->parsed_flags & FONT_PARSED_KERN) return tables->kern;
+    tables->parsed_flags |= FONT_PARSED_KERN;
 
     uint32_t len = 0;
     const uint8_t* raw = font_tables_find(tables, FONT_TAG('k','e','r','n'), &len);
@@ -772,8 +772,8 @@ int16_t kern_get_pair(KernTable* kern, uint16_t left, uint16_t right) {
 
 FvarTable* font_tables_get_fvar(FontTables* tables) {
     if (!tables) return NULL;
-    if (tables->parsed_flags & FT_PARSED_FVAR) return tables->fvar;
-    tables->parsed_flags |= FT_PARSED_FVAR;
+    if (tables->parsed_flags & FONT_PARSED_FVAR) return tables->fvar;
+    tables->parsed_flags |= FONT_PARSED_FVAR;
 
     uint32_t len = 0;
     const uint8_t* raw = font_tables_find(tables, FONT_TAG('f','v','a','r'), &len);
@@ -858,8 +858,8 @@ static char* copy_mac_string(const uint8_t* data, uint16_t byte_len, Pool* pool)
 
 NameTable* font_tables_get_name(FontTables* tables) {
     if (!tables) return NULL;
-    if (tables->parsed_flags & FT_PARSED_NAME) return tables->name;
-    tables->parsed_flags |= FT_PARSED_NAME;
+    if (tables->parsed_flags & FONT_PARSED_NAME) return tables->name;
+    tables->parsed_flags |= FONT_PARSED_NAME;
 
     uint32_t len = 0;
     const uint8_t* raw = font_tables_find(tables, FONT_TAG('n','a','m','e'), &len);
@@ -945,8 +945,8 @@ NameTable* font_tables_get_name(FontTables* tables) {
 
 GposTable* font_tables_get_gpos(FontTables* tables) {
     if (!tables) return NULL;
-    if (tables->parsed_flags & FT_PARSED_GPOS) return tables->gpos;
-    tables->parsed_flags |= FT_PARSED_GPOS;
+    if (tables->parsed_flags & FONT_PARSED_GPOS) return tables->gpos;
+    tables->parsed_flags |= FONT_PARSED_GPOS;
 
     tables->gpos = font_gpos_parse(tables, tables->pool);
     return tables->gpos;

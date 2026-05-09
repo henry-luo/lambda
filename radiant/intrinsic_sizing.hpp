@@ -173,7 +173,7 @@ float calculate_fit_content_width(LayoutContext* lycon, DomNode* node, float ava
 // ============================================================================
 
 /**
- * Measure text intrinsic widths using FreeType font metrics.
+ * Measure text intrinsic widths using the shared font backend metrics.
  *
  * This is the core text measurement function used by all layout modes.
  * Uses accurate glyph metrics with kerning support.

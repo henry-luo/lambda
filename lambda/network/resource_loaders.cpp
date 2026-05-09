@@ -1,6 +1,6 @@
 // resource_loaders.cpp
 // Implementation of resource type handlers for network-loaded resources
-// Integrates with CSS parser, image loader, FreeType font system, and SVG parser
+// Integrates with CSS parser, image loader, native font system, and SVG parser
 
 #include "resource_loaders.h"
 #include "network_resource_manager.h"

@@ -221,7 +221,7 @@ void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
     }
 
     // Check if text is justified by comparing TextRect width with natural width
-    // Use FreeType to measure text width (similar to canvas renderer)
+    // Use shared font backend to measure text width (similar to canvas renderer)
     float space_width = ctx->font.style ? ctx->font.style->space_width : 4.0f;
     float adjusted_space_width = space_width;
 

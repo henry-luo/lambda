@@ -1,12 +1,12 @@
 /**
  * Lambda Unified Font Module — Internal Header
  *
- * This header contains FreeType types and internal struct definitions.
+ * This header contains platform backend types and internal struct definitions.
  * It is ONLY included by files inside lib/font/. No external caller
  * should ever include this header directly.
  *
- * FreeType types (FT_Face, FT_Library, etc.) are confined here so that
- * the public API (font.h) exposes only opaque handles.
+ * Platform APIs are confined here so that the public API (font.h) exposes only
+ * opaque handles.
  *
  * Copyright (c) 2025 Lambda Script Project
  */
@@ -22,23 +22,9 @@
 #include "../arraylist.h"
 #include "../log.h"
 
-// FreeType is only used on Windows. macOS uses CoreText, Linux uses ThorVG+FontTables.
+// macOS uses CoreText, Linux uses ThorVG+FontTables, and Windows uses DirectWrite.
 #if defined(_WIN32)
-#define LAMBDA_HAS_FREETYPE 1
-#endif
-
-#ifdef LAMBDA_HAS_FREETYPE
-#include <ft2build.h>
-#include FT_FREETYPE_H
-#include FT_GLYPH_H
-#include FT_BITMAP_H
-#include FT_SFNT_NAMES_H
-#include FT_TRUETYPE_IDS_H
-#include FT_TRUETYPE_TABLES_H
-#include FT_LCD_FILTER_H
-#include FT_SIZES_H
-#include FT_MODULE_H
-#include FT_MULTIPLE_MASTERS_H
+#define LAMBDA_HAS_DWRITE 1
 #endif
 
 #include <time.h>
@@ -62,6 +48,13 @@ typedef enum FontFormat {
     FONT_FORMAT_UNKNOWN,
 } FontFormat;
 
+typedef enum FontBackendKind {
+    FONT_BACKEND_NONE,
+    FONT_BACKEND_CORETEXT,
+    FONT_BACKEND_TVG,
+    FONT_BACKEND_DWRITE,
+} FontBackendKind;
+
 // detect format from magic bytes in data buffer
 FontFormat font_detect_format(const uint8_t* data, size_t len);
 
@@ -73,12 +66,11 @@ FontFormat font_detect_format_ext(const char* path);
 // ============================================================================
 
 struct FontHandle {
-#ifdef LAMBDA_HAS_FREETYPE
-    FT_Face     ft_face;                // FreeType face object (Windows only)
-#endif
+    FontBackendKind backend_kind;        // preferred native/platform backend
+    void*       platform_font_ref;       // platform native font face (CTFont/DWrite/etc.)
+    void*       platform_aux_ref;        // secondary platform object (CT advance font/etc.)
     FontTables* tables;                 // parsed TTF/OTF tables (NULL if not available)
     int         ref_count;              // reference counting
-    bool        borrowed_face;          // true if ft_face is NOT owned (don't FT_Done_Face on release)
 
     // cached metrics (computed lazily on first font_get_metrics call)
     FontMetrics metrics;
@@ -89,7 +81,7 @@ struct FontHandle {
     bool        cached_rendering_ascender_ready;
 
     // memory buffer for in-memory loaded fonts (WOFF decompressed, data URI, etc.)
-    // FreeType requires the buffer to outlive the face.
+    // native backends require the buffer to outlive the face.
     uint8_t*    memory_buffer;
     size_t      memory_buffer_size;
     char*       file_data_path;         // key into file_data_cache for ref-count management (malloc'd)
@@ -107,14 +99,14 @@ struct FontHandle {
     struct hashmap* kern_cache;
 
 #ifdef __APPLE__
-    // CoreText font reference for GPOS kerning (when FreeType lacks kern table)
+    // CoreText font reference for GPOS kerning when table kerning is insufficient
     void* ct_font_ref;  // actually CTFontRef, void* to avoid CoreText headers
 
-    // CoreText font for rasterization (replaces FT_Load_Glyph+FT_LOAD_RENDER)
+    // CoreText font for rasterization
     // Created from raw font data for all fonts on macOS.
     void* ct_raster_ref;  // CTFontRef, void* to avoid CoreText headers
 #else
-    // ThorVG rasterization context (Linux/WASM — replaces FreeType rendering)
+    // ThorVG rasterization context (Linux/WASM)
     void* tvg_raster_ctx;  // TvgRasterCtx*, void* to avoid ThorVG headers
 #endif
 
@@ -126,7 +118,7 @@ struct FontHandle {
 
     // font info
     float       size_px;                // requested size in CSS pixels
-    float       physical_size_px;       // size * pixel_ratio (actual FreeType size)
+    float       physical_size_px;       // size * pixel_ratio
     float       bitmap_scale;           // scale factor for fixed-size bitmap fonts (target/actual ppem), 1.0 for scalable fonts
     FontWeight  weight;                 // requested CSS weight (100-900)
     int         actual_font_weight;     // weight of the loaded font file (from OS/2 usWeightClass); 0 = unknown
@@ -259,12 +251,6 @@ struct FontContext {
     bool            owns_pool;          // true if we created the pool
     bool            owns_arena;         // true if we created the arena
 
-    // FreeType (Windows only)
-#ifdef LAMBDA_HAS_FREETYPE
-    FT_Library      ft_library;
-    struct FT_MemoryRec_   ft_memory;          // custom allocator routing to pool
-#endif
-
     // font database
     FontDatabase*   database;
 
@@ -324,7 +310,7 @@ typedef struct FontFileDataEntry {
     char*       path;           // malloc-allocated canonical path
     uint8_t*    data;           // raw font data (TTF/SFNT); mmap'd or mem_alloc'd
     size_t      data_len;
-    int         ref_count;      // number of active FT_Faces using this data
+    int         ref_count;      // number of active font handles using this data
     bool        is_mmap;        // true if data was mmap()'d (must munmap), false if mem_alloc'd
 } FontFileDataEntry;
 
@@ -371,7 +357,7 @@ typedef struct BitmapCacheEntry {
 
 // ============================================================================
 // Phase 17: Full LoadedGlyph cache entry for font_load_glyph
-// Caches the complete glyph (bitmap + metrics) to avoid repeated FT_Load_Glyph.
+// Caches the complete glyph (bitmap + metrics) to avoid repeated rasterization.
 // Bitmap data is deep-copied into glyph_arena for persistence across frames.
 // ============================================================================
 
@@ -452,10 +438,6 @@ FontHandle*         font_load_face_internal(FontContext* ctx, const char* path,
 FontHandle*         font_load_memory_internal(FontContext* ctx, const uint8_t* data,
                                               size_t len, int face_index, float size_px,
                                               float physical_size, FontWeight weight, FontSlant slant);
-#ifdef LAMBDA_HAS_FREETYPE
-void                font_select_best_fixed_size(FT_Face face, int target_ppem);
-#endif
-
 // font_decompress.c
 bool                font_decompress_woff1(Arena* arena, const uint8_t* data, size_t len,
                                           uint8_t** out, size_t* out_len);
@@ -470,6 +452,31 @@ void                font_compute_metrics(FontHandle* handle);
 
 // font_glyph.c
 GlyphInfo           font_load_glyph_internal(FontHandle* handle, uint32_t codepoint);
+
+// font_backend.c / platform files
+bool                font_backend_create(FontHandle* handle, const uint8_t* data, size_t len,
+                                         int face_index, FontWeight weight, FontSlant slant);
+void                font_backend_destroy(FontHandle* handle);
+bool                font_backend_metrics(FontHandle* handle, uint32_t codepoint, GlyphInfo* out);
+GlyphBitmap*        font_backend_render(FontHandle* handle, uint32_t codepoint,
+                                         GlyphRenderMode mode, Arena* arena);
+float               font_backend_glyph_advance(FontHandle* handle, uint32_t codepoint);
+
+#ifdef LAMBDA_HAS_DWRITE
+void*               font_backend_dwrite_create(const uint8_t* data, size_t len,
+                                                int face_index, float size_px);
+void                font_backend_dwrite_destroy(void* dwrite_ref);
+bool                font_backend_dwrite_metrics(void* dwrite_ref, uint32_t codepoint,
+                                                 float bitmap_scale, GlyphInfo* out);
+GlyphBitmap*        font_backend_dwrite_render(void* dwrite_ref, uint32_t codepoint,
+                                                GlyphRenderMode mode, float bitmap_scale,
+                                                float pixel_ratio, Arena* arena);
+float               font_backend_dwrite_glyph_advance(void* dwrite_ref, uint32_t codepoint,
+                                                       float bitmap_scale);
+char*               font_backend_dwrite_find_codepoint_font(uint32_t codepoint,
+                                                            bool emoji_presentation,
+                                                            int* out_face_index);
+#endif
 
 // font_cache.c
 FontHandle*         font_cache_lookup(FontContext* ctx, const char* key);
@@ -493,17 +500,6 @@ const FontFaceEntry* font_face_find_internal(FontContext* ctx, const char* famil
 // ============================================================================
 // Internal utility macros
 // ============================================================================
-
-#ifndef __APPLE__
-// 26.6 fixed-point to float conversion (FreeType uses 26.6 format)
-#define FT_F26DOT6_TO_FLOAT(x) ((float)(x) / 64.0f)
-
-// float to 26.6 fixed-point
-#define FT_FLOAT_TO_F26DOT6(x) ((FT_F26Dot6)((x) * 64.0f))
-
-// 16.16 fixed-point to float (FreeType uses for some metrics)
-#define FT_F16DOT16_TO_FLOAT(x) ((float)(x) / 65536.0f)
-#endif
 
 #ifndef MIN
 #define MIN(a, b) ((a) < (b) ? (a) : (b))

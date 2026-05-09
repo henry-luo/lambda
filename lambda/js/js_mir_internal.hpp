@@ -14,6 +14,7 @@ extern "C" void js_reset_module_vars();
 extern "C" Item* js_alloc_module_vars(void);
 extern "C" Item* js_get_active_module_vars(void);
 extern "C" void js_set_active_module_vars(Item* vars);
+extern void js_double_to_string(double d, char* out, int out_size);
 extern "C" void js_process_emit_exit(int code);
 extern MIR_error_func_t g_batch_mir_error_handler;
 extern unsigned int g_js_mir_optimize_level;
@@ -38,6 +39,19 @@ extern NamePool* module_mir_name_pools[];
 extern Pool* module_mir_ast_pools[];
 extern int module_mir_context_count;
 
+typedef enum JsMirReferenceKind {
+    JS_MIR_REF_INVALID = 0,
+    JS_MIR_REF_PROPERTY,
+    JS_MIR_REF_SUPER_PROPERTY
+} JsMirReferenceKind;
+
+typedef struct JsMirReference {
+    JsMirReferenceKind kind;
+    MIR_reg_t base_reg;
+    MIR_reg_t key_reg;
+    bool strict;
+} JsMirReference;
+
 // internal function declarations
 int js_import_cache_cmp(const void *a, const void *b, void *udata);
 uint64_t js_import_cache_hash(const void *item, uint64_t seed0, uint64_t seed1);
@@ -56,6 +70,10 @@ MIR_reg_t jm_new_reg(JsMirTranspiler* mt, const char* prefix, MIR_type_t type);
 MIR_label_t jm_new_label(JsMirTranspiler* mt);
 void jm_emit(JsMirTranspiler* mt, MIR_insn_t insn);
 void jm_emit_label(JsMirTranspiler* mt, MIR_label_t label);
+JsMirReference jm_emit_reference(JsMirTranspiler* mt, JsAstNode* node);
+MIR_reg_t jm_emit_get_value(JsMirTranspiler* mt, const JsMirReference* ref);
+MIR_reg_t jm_emit_put_value(JsMirTranspiler* mt, const JsMirReference* ref, MIR_reg_t value);
+MIR_reg_t jm_emit_delete_reference(JsMirTranspiler* mt, const JsMirReference* ref);
 void jm_eval_cptn_reset(JsMirTranspiler* mt);
 void jm_push_loop_labels(JsMirTranspiler* mt, MIR_label_t continue_label, MIR_label_t break_label);
 MIR_reg_t jm_emit_uext8(JsMirTranspiler* mt, MIR_reg_t r);
@@ -143,6 +161,7 @@ void jm_emit_install_method_or_accessor(JsMirTranspiler* mt,
     MIR_reg_t obj, MIR_reg_t key, MIR_reg_t fn_item,
     bool is_getter, bool is_setter);
 void jm_emit_set_function_name(JsMirTranspiler* mt, MIR_reg_t fn_reg, const char* name, int formal_length = -1);
+void jm_emit_set_class_assignment_name(JsMirTranspiler* mt, JsAssignmentNode* asgn, MIR_reg_t rhs, String* name);
 void jm_emit_set_function_source(JsMirTranspiler* mt, MIR_reg_t fn_reg, JsFunctionNode* fn_node);
 void jm_emit_set_class_source(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassNode* cls_node);
 void jm_emit_formal_length(JsMirTranspiler* mt, MIR_reg_t fn_reg, int formal_length);

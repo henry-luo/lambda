@@ -102,7 +102,7 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
         if (m) {
             fprop->space_width = m->space_width;
         // When the font has CoreText metrics (e.g., SFNS / -apple-system), prefer
-        // the CT-based space advance over FreeType to match Chrome text widths.
+        // the CT-based space advance over table metrics to match Chrome text widths.
         // font_get_glyph() returns CT advance in CSS pixels when ct_font_ref is set.
         {
             GlyphInfo sp = font_get_glyph(handle, (uint32_t)' ');

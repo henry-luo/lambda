@@ -1,12 +1,12 @@
 // render_texnode.hpp - Direct TexNode Tree Rendering
 //
-// Renders TexNode trees directly to the screen using FreeType + ThorVG.
+// Renders TexNode trees directly to the screen using the shared font backend + ThorVG.
 // This is used for RDT_VIEW_TEXNODE view type elements.
 //
 // Key features:
 // - No intermediate ViewTree conversion (TexNode IS the view tree)
 // - Coordinates in CSS pixels (consistent with Radiant)
-// - Font rendering via FreeType
+// - Font rendering via the shared font backend
 // - Vector graphics via ThorVG
 
 #ifndef RADIANT_RENDER_TEXNODE_HPP
@@ -48,7 +48,7 @@ struct TexNodeRenderConfig {
 
 /**
  * Map a TeX font name to a system font name.
- * Used when rendering with FreeType instead of TFM fonts.
+ * Used when rendering with the shared font backend instead of TFM fonts.
  *
  * @param tex_font  TeX font name (e.g., "cmr10", "cmmi10")
  * @return          System font name (e.g., "CMU Serif")
@@ -80,7 +80,7 @@ void render_texnode_element(RenderContext* ctx, DomElement* elem);
 
 /**
  * Render a TexNode tree at the given position.
- * Recursively renders the tree using FreeType for glyphs.
+ * Recursively renders the tree using the shared font backend for glyphs.
  *
  * @param ctx   Render context
  * @param root  Root of the TexNode tree

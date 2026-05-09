@@ -6930,14 +6930,74 @@ extern "C" Item js_object_get_own_property_names(Item object) {
     }
 
     TypeMap* tm = (TypeMap*)m->type;
-    // Use dynamic array approach: push matched entries to result array
     Item result = js_array_new(0);
     Array* arr = result.array;
+    bool is_class_ctor = false;
+    bool has_class_name_marker = false;
+    bool has_class_prototype = false;
+    js_map_get_fast_ext(m, "__class_name__", 14, &has_class_name_marker);
+    js_map_get_fast_ext(m, "prototype", 9, &has_class_prototype);
+    is_class_ctor = has_class_name_marker && has_class_prototype;
+    int entry_count = 0;
+    for (ShapeEntry* count_entry = tm->shape; count_entry; count_entry = count_entry->next) entry_count++;
+    int64_t* idx_pairs = entry_count > 0 ? (int64_t*)malloc(sizeof(int64_t) * 2 * entry_count) : NULL;
+    int idx_count = 0;
     ShapeEntry* e = tm->shape;
     while (e) {
         const char* s = e->name->str;
         int len = (int)e->name->length;
         bool skip = (len >= 2 && s[0] == '_' && s[1] == '_');
+        if (!skip) {
+            Item val = _map_read_field(e, m->data);
+            if (val.item == JS_DELETED_SENTINEL_VAL) skip = true;
+        }
+        if (!skip) {
+            int64_t idx = js_parse_array_index(s, len);
+            if (idx >= 0 && idx_pairs) {
+                idx_pairs[idx_count * 2 + 0] = idx;
+                idx_pairs[idx_count * 2 + 1] = (int64_t)(uintptr_t)e;
+                idx_count++;
+            }
+        }
+        e = e->next;
+    }
+    if (idx_count > 1) qsort(idx_pairs, idx_count, sizeof(int64_t) * 2, js_idx_pair_cmp);
+    for (int i = 0; i < idx_count; i++) {
+        ShapeEntry* idx_entry = (ShapeEntry*)(uintptr_t)idx_pairs[i * 2 + 1];
+        const char* s = idx_entry->name->str;
+        int len = (int)idx_entry->name->length;
+        int nlen = len < 255 ? len : 255;
+        char nbuf[256];
+        memcpy(nbuf, s, nlen);
+        nbuf[nlen] = '\0';
+        Item key_item = (Item){.item = s2it(heap_create_name(nbuf, nlen))};
+        array_push(arr, key_item);
+    }
+    if (is_class_ctor) {
+        const char* intrinsic_names[] = {"length", "name", "prototype"};
+        int intrinsic_lens[] = {6, 4, 9};
+        for (int i = 0; i < 3; i++) {
+            bool found = false;
+            Item val = js_map_get_fast_ext(m, intrinsic_names[i], intrinsic_lens[i], &found);
+            if (found && val.item != JS_DELETED_SENTINEL_VAL) {
+                Item key_item = (Item){.item = s2it(heap_create_name(intrinsic_names[i], intrinsic_lens[i]))};
+                array_push(arr, key_item);
+            }
+        }
+    }
+    e = tm->shape;
+    while (e) {
+        const char* s = e->name->str;
+        int len = (int)e->name->length;
+        bool skip = (len >= 2 && s[0] == '_' && s[1] == '_');
+        if (!skip && js_parse_array_index(s, len) >= 0) skip = true;
+        if (!skip && is_class_ctor) {
+            if ((len == 6 && strncmp(s, "length", 6) == 0) ||
+                (len == 4 && strncmp(s, "name", 4) == 0) ||
+                (len == 9 && strncmp(s, "prototype", 9) == 0)) {
+                skip = true;
+            }
+        }
         if (!skip) {
             Item val = _map_read_field(e, m->data);
             if (val.item == JS_DELETED_SENTINEL_VAL) skip = true;
@@ -6952,6 +7012,7 @@ extern "C" Item js_object_get_own_property_names(Item object) {
         }
         e = e->next;
     }
+    if (idx_pairs) free(idx_pairs);
     // Phase-5D: legacy __get_<name>/__set_<name> pass-2 scan removed.
     // Accessor properties now use IS_ACCESSOR shape flag with bare-name
     // shape entries — pass 1 above already enumerates them.
@@ -11486,6 +11547,155 @@ extern "C" void js_set_global_property(Item key, Item value) {
     js_last_with_binding_valid = false;
     Item global = js_get_global_this();
     js_property_set(global, key, value);
+}
+extern "C" void js_define_global_var_property(Item key, Item value) {
+    Item global = js_get_global_this();
+    Item name = js_to_string(key);
+    if (get_type_id(name) != LMD_TYPE_STRING) return;
+    String* str = it2s(name);
+    if (!str || str->len <= 0 || str->len >= 200) return;
+    JsPropertyDescriptor pd;
+    memset(&pd, 0, sizeof(pd));
+    pd.flags = JS_PD_HAS_VALUE | JS_PD_HAS_WRITABLE | JS_PD_HAS_ENUMERABLE |
+        JS_PD_HAS_CONFIGURABLE | JS_PD_WRITABLE | JS_PD_ENUMERABLE;
+    js_pd_set_configurable(&pd, true);
+    pd.value = value;
+    bool is_new_property = !it2b(js_has_own_property(global, key));
+    if (!is_new_property) return;
+    if (is_new_property && get_type_id(value) == LMD_TYPE_UNDEFINED && get_type_id(global) == LMD_TYPE_MAP) {
+        map_put(global.map, str, value, js_input);
+        is_new_property = false;
+    }
+    js_define_own_property_from_descriptor(global, str->chars, (int)str->len, &pd, is_new_property);
+}
+
+extern "C" void js_evalscript_check_global_var_decl(Item key) {
+    if (!js_262_eval_script_is_active()) return;
+    key = js_to_property_key(key);
+    if (js_check_exception()) return;
+    Item global = js_get_global_this();
+    if (it2b(js_has_own_property(global, key))) return;
+    if (js_is_truthy(js_object_is_extensible(global))) return;
+    js_throw_type_error("Cannot declare global var on non-extensible global object");
+}
+
+extern "C" void js_evalscript_check_global_function_decl(Item key) {
+    if (!js_262_eval_script_is_active()) return;
+    key = js_to_property_key(key);
+    if (js_check_exception()) return;
+    Item global = js_get_global_this();
+    Item name = js_to_string(key);
+    if (get_type_id(name) != LMD_TYPE_STRING) return;
+    String* str = it2s(name);
+    JsPropertyDescriptor desc;
+    bool has_desc = js_get_own_property_descriptor(global, str->chars, (int)str->len, &desc);
+    if (!has_desc) {
+        if (js_is_truthy(js_object_is_extensible(global))) return;
+        js_throw_type_error("Cannot declare global function on non-extensible global object");
+        return;
+    }
+    if (js_pd_is_configurable(&desc)) return;
+    if (js_pd_is_data(&desc) &&
+        (desc.flags & JS_PD_WRITABLE) &&
+        (desc.flags & JS_PD_ENUMERABLE)) return;
+    js_throw_type_error("Cannot declare global function over incompatible global property");
+}
+
+// Direct eval bridge: function-scope eval code is compiled as a small script,
+// so temporarily expose caller var/parameter bindings through global lookup.
+#define JS_EVAL_ENV_BIND_MAX 512
+#define JS_EVAL_ENV_FRAME_MAX 32
+typedef struct JsEvalEnvBinding {
+    Item key;
+    Item old_value;
+    bool had_own;
+} JsEvalEnvBinding;
+
+static JsEvalEnvBinding js_eval_env_bindings[JS_EVAL_ENV_BIND_MAX];
+static int js_eval_env_binding_count = 0;
+static int js_eval_env_frame_stack[JS_EVAL_ENV_FRAME_MAX];
+static int js_eval_env_frame_depth = 0;
+
+extern "C" void js_eval_env_push_frame(void) {
+    if (js_eval_env_frame_depth >= JS_EVAL_ENV_FRAME_MAX) {
+        log_error("js-eval-env: frame stack overflow");
+        return;
+    }
+    js_eval_env_frame_stack[js_eval_env_frame_depth++] = js_eval_env_binding_count;
+}
+
+extern "C" void js_eval_env_bind(Item key, Item value) {
+    if (js_eval_env_frame_depth <= 0) return;
+    if (js_eval_env_binding_count >= JS_EVAL_ENV_BIND_MAX) {
+        log_error("js-eval-env: binding stack overflow");
+        return;
+    }
+    Item global = js_get_global_this();
+    JsEvalEnvBinding* binding = &js_eval_env_bindings[js_eval_env_binding_count++];
+    binding->key = key;
+    binding->had_own = it2b(js_has_own_property(global, key));
+    binding->old_value = binding->had_own ? js_property_get(global, key) : make_js_undefined();
+    js_property_set(global, key, value);
+}
+
+extern "C" int64_t js_eval_env_has_binding(Item key) {
+    if (js_eval_env_frame_depth <= 0) return 0;
+    int frame_start = js_eval_env_frame_stack[js_eval_env_frame_depth - 1];
+    for (int i = js_eval_env_binding_count - 1; i >= frame_start; i--) {
+        if (js_with_binding_key_same(js_eval_env_bindings[i].key, key)) return 1;
+    }
+    return 0;
+}
+
+extern "C" int64_t js_eval_env_is_active(void) {
+    return js_eval_env_frame_depth > 0 ? 1 : 0;
+}
+
+extern "C" void js_eval_env_track_global_binding(Item key) {
+    if (js_eval_env_frame_depth <= 0) return;
+    int frame_start = js_eval_env_frame_stack[js_eval_env_frame_depth - 1];
+    for (int i = js_eval_env_binding_count - 1; i >= frame_start; i--) {
+        if (js_with_binding_key_same(js_eval_env_bindings[i].key, key)) return;
+    }
+    if (js_eval_env_binding_count >= JS_EVAL_ENV_BIND_MAX) {
+        log_error("js-eval-env: binding stack overflow");
+        return;
+    }
+    Item global = js_get_global_this();
+    JsEvalEnvBinding* binding = &js_eval_env_bindings[js_eval_env_binding_count++];
+    binding->key = key;
+    binding->had_own = it2b(js_has_own_property(global, key));
+    binding->old_value = binding->had_own ? js_property_get(global, key) : make_js_undefined();
+}
+
+extern "C" void js_eval_env_pop_frame(void) {
+    if (js_eval_env_frame_depth <= 0) return;
+    int frame_start = js_eval_env_frame_stack[--js_eval_env_frame_depth];
+    Item global = js_get_global_this();
+    while (js_eval_env_binding_count > frame_start) {
+        JsEvalEnvBinding* binding = &js_eval_env_bindings[--js_eval_env_binding_count];
+        if (binding->had_own) {
+            js_property_set(global, binding->key, binding->old_value);
+        } else {
+            js_delete_property(global, binding->key);
+        }
+    }
+}
+
+extern "C" void js_check_unresolved_capture(Item value, const char* name, int64_t len) {
+    if (value.item != ITEM_ERROR) return;
+    char msg[256];
+    int n = (int)len;
+    if (n > 200) n = 200;
+    snprintf(msg, sizeof(msg), "%.*s is not defined", n, name ? name : "");
+    js_throw_reference_error((Item){.item = s2it(heap_create_name(msg, strlen(msg)))});
+}
+
+extern "C" Item js_resolve_unresolved_binding(Item value, const char* name, int64_t len, int64_t in_typeof) {
+    if (value.item != ITEM_ERROR) return value;
+    if (in_typeof) return make_js_undefined();
+    js_check_unresolved_capture(value, name, len);
+    return ItemNull;
 }
 
 // v48: Return a function wrapper for global builtins (parseInt, parseFloat, etc.)

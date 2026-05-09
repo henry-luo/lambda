@@ -159,7 +159,6 @@ install_msys2_package "${TOOLCHAIN_PREFIX}-mpdecimal" "Multi-precision decimal l
 install_msys2_package "${TOOLCHAIN_PREFIX}-mbedtls" "mbedTLS - SSL/TLS library"
 
 # Graphics and rendering libraries (for Radiant engine)
-install_msys2_package "${TOOLCHAIN_PREFIX}-freetype" "FreeType font rendering"
 install_msys2_package "${TOOLCHAIN_PREFIX}-glfw" "GLFW window management"
 install_msys2_package "${TOOLCHAIN_PREFIX}-libpng" "PNG image library"
 install_msys2_package "${TOOLCHAIN_PREFIX}-libjpeg-turbo" "JPEG image library"
@@ -1235,7 +1234,6 @@ echo "  ✅ Compiler toolchain ($COMPILER_NAME)"
 echo "  ✅ ccache (compiler cache for 5-30x faster rebuilds)"
 echo "  ✅ mpdecimal (multi-precision decimal arithmetic)"
 echo "  ✅ mbedTLS (SSL/TLS library)"
-echo "  ✅ FreeType (font rendering)"
 echo "  ✅ GLFW (window management)"
 echo "  ✅ Image libraries (PNG, JPEG, GIF)"
 echo "  📦 Tree-sitter library (building from source - see verification below)"
@@ -1316,13 +1314,6 @@ if pacman -Qq "${TOOLCHAIN_PREFIX}-mbedtls" &>/dev/null; then
     echo "✅ mbedTLS library installed (from MSYS2)"
 else
     echo "⚠️  mbedTLS library not installed"
-fi
-
-# Check FreeType (from MSYS2 package)
-if pacman -Qq "${TOOLCHAIN_PREFIX}-freetype" &>/dev/null; then
-    echo "✅ FreeType library installed (from MSYS2)"
-else
-    echo "⚠️  FreeType library not installed"
 fi
 
 # Check GLFW (from MSYS2 package)

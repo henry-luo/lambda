@@ -1,11 +1,8 @@
 /**
  * Lambda Unified Font Module — Font Loader
  *
- * Unified face loading pipeline: detect format → decompress if needed →
- * FT_New_Face or FT_New_Memory_Face → size selection → wrap in FontHandle.
- *
- * Consolidates the duplicated FT_Select_Size logic (was in 4 places)
- * into a single select_best_fixed_size() helper.
+ * Unified face loading pipeline: detect format, decompress if needed, create
+ * FontTables/native backend state, and wrap the result in FontHandle.
  *
  * Copyright (c) 2025 Lambda Script Project
  */
@@ -16,8 +13,8 @@
 #include "../memtrack.h"
 
 #include <stdio.h>
-#include <limits.h>
 #include <fcntl.h>
+#include <string.h>
 #ifdef _WIN32
 #include <io.h>
 // mmap not available on Windows — define stubs; mmap always "fails" so the
@@ -26,6 +23,9 @@
 #define MAP_PRIVATE 0
 #define MAP_FAILED ((void*)-1)
 #define O_CLOEXEC  0
+#ifndef O_BINARY
+#define O_BINARY 0
+#endif
 static inline void* mmap(void* a, size_t b, int c, int d, int e, long f)
     { (void)a;(void)b;(void)c;(void)d;(void)e;(void)f; return MAP_FAILED; }
 static inline int munmap(void* a, size_t b) { (void)a;(void)b; return 0; }
@@ -35,54 +35,11 @@ static inline int munmap(void* a, size_t b) { (void)a;(void)b; return 0; }
 #endif
 #include <sys/stat.h>
 // ============================================================================
-// Fixed size selection (for bitmap/emoji fonts) — unified from 4 duplicates
-// ============================================================================
-
-#ifdef LAMBDA_HAS_FREETYPE
-void font_select_best_fixed_size(FT_Face face, int target_ppem) {
-    if (!face || face->num_fixed_sizes <= 0) return;
-
-    int best_idx = 0;
-    int best_diff = INT_MAX;
-
-    for (int i = 0; i < face->num_fixed_sizes; i++) {
-        int ppem = face->available_sizes[i].y_ppem >> 6;
-        int diff = abs(ppem - target_ppem);
-        if (diff < best_diff) {
-            best_diff = diff;
-            best_idx = i;
-        }
-    }
-
-    FT_Select_Size(face, best_idx);
-    log_debug("font_loader: selected fixed size index %d (ppem=%ld) for target %d",
-              best_idx, face->available_sizes[best_idx].y_ppem >> 6, target_ppem);
-}
-
-// ============================================================================
-// Set face size — handles both scalable and fixed-size fonts
-// ============================================================================
-
-static void set_face_size(FT_Face face, float physical_size_px) {
-    int target_ppem = (int)physical_size_px;
-
-    // color emoji / fixed bitmap fonts: use FT_Select_Size
-    if ((face->face_flags & FT_FACE_FLAG_FIXED_SIZES) &&
-        (face->face_flags & FT_FACE_FLAG_COLOR) &&
-        face->num_fixed_sizes > 0) {
-        font_select_best_fixed_size(face, target_ppem);
-    } else {
-        FT_Set_Pixel_Sizes(face, 0, (FT_UInt)physical_size_px);
-    }
-}
-#endif
-
-// ============================================================================
 // Wrap font data into a FontHandle
 // ============================================================================
 
 #ifdef __APPLE__
-// macOS: create FontHandle using CoreText + FontTables (no FreeType)
+// macOS: create FontHandle using CoreText + FontTables
 static FontHandle* create_handle(FontContext* ctx,
                                   uint8_t* memory_buffer, size_t memory_buffer_size,
                                   int face_index, float size_px, float physical_size,
@@ -119,43 +76,20 @@ static FontHandle* create_handle(FontContext* ctx,
         }
     }
 
-    // create CoreText rasterizer from raw font data
-    if (memory_buffer && memory_buffer_size > 0) {
-        handle->ct_raster_ref = font_rasterize_ct_create(memory_buffer, memory_buffer_size,
-                                                          size_px, face_index, weight, slant);
-        if (!handle->ct_raster_ref) {
-            log_debug("font_loader: ct_raster_ref creation failed (non-fatal)");
-        }
-    }
-
-    // create CoreText font for glyph advance overrides and GPOS kerning.
-    // Use FontTables name table for PostScript and family names.
-    {
-        const char* ps_name = NULL;
-        const char* family = handle->family_name;
-        if (handle->tables) {
-            NameTable* name = font_tables_get_name(handle->tables);
-            if (name) ps_name = name->postscript_name;
-        }
-        handle->ct_font_ref = font_platform_create_ct_font(
-            ps_name, family, size_px, (int)weight);
-    }
+    font_backend_create(handle, memory_buffer, memory_buffer_size,
+                        face_index, weight, slant);
 
     return handle;
 }
-#elif defined(LAMBDA_HAS_FREETYPE)
-// Windows: create FontHandle using FreeType + ThorVG
-static FontHandle* create_handle(FontContext* ctx, FT_Face face,
+#elif defined(LAMBDA_HAS_DWRITE)
+// Windows: create FontHandle using FontTables + DirectWrite
+static FontHandle* create_handle(FontContext* ctx,
                                   uint8_t* memory_buffer, size_t memory_buffer_size,
-                                  float size_px, float physical_size,
+                                  int face_index, float size_px, float physical_size,
                                   FontWeight weight, FontSlant slant) {
     FontHandle* handle = (FontHandle*)pool_calloc(ctx->pool, sizeof(FontHandle));
-    if (!handle) {
-        FT_Done_Face(face);
-        return NULL;
-    }
+    if (!handle) return NULL;
 
-    handle->ft_face = face;
     handle->tables = NULL;
     handle->ref_count = 1;
     handle->ctx = ctx;
@@ -166,46 +100,53 @@ static FontHandle* create_handle(FontContext* ctx, FT_Face face,
     handle->weight = weight;
     handle->slant = slant;
     handle->metrics_ready = false;
+    handle->bitmap_scale = 1.0f;
 
     // create FontTables from raw font data for direct table access
     if (memory_buffer && memory_buffer_size > 0) {
-        handle->tables = font_tables_open(memory_buffer, memory_buffer_size, ctx->pool);
+        handle->tables = font_tables_open_face(memory_buffer, memory_buffer_size,
+                                               face_index, ctx->pool);
         if (!handle->tables) {
-            log_debug("font_loader: font_tables_open failed (non-fatal, FreeType fallback)");
+            log_debug("font_loader: font_tables_open_face failed (non-fatal, DirectWrite fallback)");
         }
     }
 
-    // create ThorVG rasterization context (preferred rasterizer)
+    font_backend_create(handle, memory_buffer, memory_buffer_size,
+                        face_index, weight, slant);
+
+    // get family name from FontTables name table
     if (handle->tables) {
-        handle->tvg_raster_ctx = font_rasterize_tvg_create();
-        if (!handle->tvg_raster_ctx) {
-            log_debug("font_loader: tvg_raster_ctx creation failed (non-fatal, FreeType fallback)");
+        NameTable* name = font_tables_get_name(handle->tables);
+        if (name && name->family_name) {
+            handle->family_name = arena_strdup(ctx->arena, name->family_name);
         }
     }
 
-    // compute bitmap scale for fixed-size bitmap fonts (e.g. color emoji)
-    handle->bitmap_scale = 1.0f;
-    if ((face->face_flags & FT_FACE_FLAG_FIXED_SIZES) &&
-        (face->face_flags & FT_FACE_FLAG_COLOR) &&
-        face->num_fixed_sizes > 0 &&
-        face->size && face->size->metrics.y_ppem > 0) {
-        float actual_ppem = (float)face->size->metrics.y_ppem;
-        if (actual_ppem > 0 && physical_size > 0 && actual_ppem != physical_size) {
-            handle->bitmap_scale = physical_size / actual_ppem;
-            log_debug("font_loader: bitmap_scale=%.4f (target=%.0f, actual_ppem=%.0f)",
-                      handle->bitmap_scale, physical_size, actual_ppem);
-        }
+    // read actual font weight from OS/2 table for synthetic bold detection
+    {
+        Os2Table* os2t = font_tables_get_os2(handle->tables);
+        handle->actual_font_weight = (os2t && os2t->weight_class > 0)
+            ? (int)os2t->weight_class
+            : (int)weight;
     }
 
-    // copy family name from FreeType face
-    if (face->family_name) {
-        handle->family_name = arena_strdup(ctx->arena, face->family_name);
+    // compute bitmap_scale for fixed-size bitmap fonts via CBDT/CBLC
+    if (handle->tables && physical_size > 0) {
+        if (cbdt_has_table(handle->tables)) {
+            CbdtBitmap probe = {0};
+            if (cbdt_get_bitmap(handle->tables, 0 /* any glyph */, (int)physical_size, &probe) &&
+                probe.ppem > 0 && (float)probe.ppem != physical_size) {
+                handle->bitmap_scale = physical_size / (float)probe.ppem;
+                log_debug("font_loader: bitmap_scale=%.4f (target=%.0f, strike_ppem=%d)",
+                          handle->bitmap_scale, physical_size, probe.ppem);
+            }
+        }
     }
 
     return handle;
 }
 #else
-// Linux/WASM: create FontHandle using FontTables + ThorVG (no FreeType)
+// Linux/WASM: create FontHandle using FontTables + ThorVG
 static FontHandle* create_handle(FontContext* ctx,
                                   uint8_t* memory_buffer, size_t memory_buffer_size,
                                   int face_index, float size_px, float physical_size,
@@ -242,13 +183,8 @@ static FontHandle* create_handle(FontContext* ctx,
         }
     }
 
-    // create ThorVG rasterization context (sole rasterizer on Linux)
-    if (handle->tables) {
-        handle->tvg_raster_ctx = font_rasterize_tvg_create();
-        if (!handle->tvg_raster_ctx) {
-            log_debug("font_loader: tvg_raster_ctx creation failed");
-        }
-    }
+    font_backend_create(handle, memory_buffer, memory_buffer_size,
+                        face_index, weight, slant);
 
     // read actual font weight from OS/2 table for synthetic bold detection
     {
@@ -275,57 +211,6 @@ static FontHandle* create_handle(FontContext* ctx,
     return handle;
 }
 #endif
-
-// ============================================================================
-// Variable font axis selection (opsz, wght)
-// ============================================================================
-
-#ifdef LAMBDA_HAS_FREETYPE
-static void apply_variable_font_axes(FT_Face face, FT_Library library,
-                                     float size_px, FontWeight weight) {
-    if (!face || !(face->face_flags & FT_FACE_FLAG_MULTIPLE_MASTERS)) return;
-
-    FT_MM_Var* mm = NULL;
-    if (FT_Get_MM_Var(face, &mm) != 0 || !mm) return;
-
-    // read current design coordinates
-    FT_Fixed* coords = (FT_Fixed*)mem_alloc(mm->num_axis * sizeof(FT_Fixed), MEM_CAT_FONT);
-    if (!coords) { FT_Done_MM_Var(library, mm); return; }
-
-    FT_Get_Var_Design_Coordinates(face, mm->num_axis, coords);
-
-    bool changed = false;
-    for (FT_UInt i = 0; i < mm->num_axis; i++) {
-        FT_ULong tag = mm->axis[i].tag;
-        if (tag == FT_MAKE_TAG('o','p','s','z')) {
-            // set optical size to font size (clamped to axis range)
-            FT_Fixed min_val = mm->axis[i].minimum;
-            FT_Fixed max_val = mm->axis[i].maximum;
-            FT_Fixed target = (FT_Fixed)(size_px * 65536.0f);
-            if (target < min_val) target = min_val;
-            if (target > max_val) target = max_val;
-            coords[i] = target;
-            changed = true;
-        } else if (tag == FT_MAKE_TAG('w','g','h','t')) {
-            // set weight axis
-            FT_Fixed min_val = mm->axis[i].minimum;
-            FT_Fixed max_val = mm->axis[i].maximum;
-            FT_Fixed target = (FT_Fixed)((float)weight * 65536.0f);
-            if (target < min_val) target = min_val;
-            if (target > max_val) target = max_val;
-            coords[i] = target;
-            changed = true;
-        }
-    }
-
-    if (changed) {
-        FT_Set_Var_Design_Coordinates(face, mm->num_axis, coords);
-    }
-
-    mem_free(coords);
-    FT_Done_MM_Var(library, mm);
-}
-#endif // LAMBDA_HAS_FREETYPE
 
 // ============================================================================
 // Font file data cache — avoids re-reading the same file into the arena
@@ -451,22 +336,8 @@ FontHandle* font_load_face_internal(FontContext* ctx, const char* path,
         size_t cached_len = 0;
         if (file_data_cache_lookup(ctx, path, &cached_data, &cached_len)) {
             // reuse cached decompressed SFNT data
-#ifdef LAMBDA_HAS_FREETYPE
-            FT_Face face = NULL;
-            FT_Error err = FT_New_Memory_Face(ctx->ft_library, cached_data, (FT_Long)cached_len,
-                                               face_index, &face);
-            if (err) {
-                log_error("font_loader: FT_New_Memory_Face failed for '%s' (error %d)", path, err);
-                return NULL;
-            }
-            apply_variable_font_axes(face, ctx->ft_library, size_px, weight);
-            set_face_size(face, physical_size);
-            FontHandle* handle = create_handle(ctx, face, (uint8_t*)cached_data, cached_len,
-                                                size_px, physical_size, weight, slant);
-#else
             FontHandle* handle = create_handle(ctx, (uint8_t*)cached_data, cached_len,
                                                 face_index, size_px, physical_size, weight, slant);
-#endif
             if (handle) {
                 handle->file_data_path = mem_strdup(path, MEM_CAT_FONT);  // raw strdup: freed by raw free
                 log_info("font_loader: loaded WOFF '%s' from file cache (family=%s, size=%.0f)",
@@ -511,22 +382,8 @@ FontHandle* font_load_face_internal(FontContext* ctx, const char* path,
         file_data_cache_insert(ctx, path, (uint8_t*)sfnt_data, sfnt_len, false);
 
         // use cached data directly — avoid a second copy
-#ifdef LAMBDA_HAS_FREETYPE
-        FT_Face face = NULL;
-        FT_Error err = FT_New_Memory_Face(ctx->ft_library, sfnt_data, (FT_Long)sfnt_len,
-                                           face_index, &face);
-        if (err) {
-            log_error("font_loader: FT_New_Memory_Face failed for '%s' (error %d)", path, err);
-            return NULL;
-        }
-        apply_variable_font_axes(face, ctx->ft_library, size_px, weight);
-        set_face_size(face, physical_size);
-        FontHandle* handle = create_handle(ctx, face, (uint8_t*)sfnt_data, sfnt_len,
-                                            size_px, physical_size, weight, slant);
-#else
         FontHandle* handle = create_handle(ctx, (uint8_t*)sfnt_data, sfnt_len,
                                             face_index, size_px, physical_size, weight, slant);
-#endif
         if (handle) {
             handle->file_data_path = mem_strdup(path, MEM_CAT_FONT);  // raw strdup: freed by raw free
             log_info("font_loader: loaded WOFF '%s' (family=%s, size=%.0f)",
@@ -541,22 +398,8 @@ FontHandle* font_load_face_internal(FontContext* ctx, const char* path,
         size_t cached_len = 0;
         if (file_data_cache_lookup(ctx, path, &cached_data, &cached_len)) {
             // reuse cached file data — avoid re-reading and arena-allocating
-#ifdef LAMBDA_HAS_FREETYPE
-            FT_Face face = NULL;
-            FT_Error err = FT_New_Memory_Face(ctx->ft_library, cached_data, (FT_Long)cached_len,
-                                               face_index, &face);
-            if (err) {
-                log_error("font_loader: FT_New_Memory_Face failed for '%s' (error %d)", path, err);
-                return NULL;
-            }
-            apply_variable_font_axes(face, ctx->ft_library, size_px, weight);
-            set_face_size(face, physical_size);
-            FontHandle* handle = create_handle(ctx, face, (uint8_t*)cached_data, cached_len,
-                                                size_px, physical_size, weight, slant);
-#else
             FontHandle* handle = create_handle(ctx, (uint8_t*)cached_data, cached_len,
                                                 face_index, size_px, physical_size, weight, slant);
-#endif
             if (handle) {
                 handle->file_data_path = mem_strdup(path, MEM_CAT_FONT);  // raw strdup: freed by raw free
                 log_info("font_loader: loaded '%s' from file cache (family=%s, size=%.0f)",
@@ -570,7 +413,7 @@ FontHandle* font_load_face_internal(FontContext* ctx, const char* path,
         // Emoji.ttc = 188 MB) and we typically touch only a small fraction of
         // pages — mmap lets the kernel demand-page and reclaim under pressure.
         // Fall back to fread on mmap failure.
-        int fd = open(path, O_RDONLY | O_CLOEXEC);
+        int fd = open(path, O_RDONLY | O_BINARY | O_CLOEXEC);
         if (fd < 0) {
             log_error("font_loader: cannot open '%s'", path);
             return NULL;
@@ -608,24 +451,8 @@ FontHandle* font_load_face_internal(FontContext* ctx, const char* path,
         // cache the raw file data for reuse at different sizes
         file_data_cache_insert(ctx, path, ttf_buf, ttf_size, ttf_is_mmap);
 
-#ifdef LAMBDA_HAS_FREETYPE
-        FT_Face face = NULL;
-        FT_Error err = FT_New_Memory_Face(ctx->ft_library, ttf_buf, (FT_Long)ttf_size,
-                                           face_index, &face);
-        if (err) {
-            log_error("font_loader: FT_New_Memory_Face failed for '%s' (error %d)", path, err);
-            return NULL;
-        }
-
-        apply_variable_font_axes(face, ctx->ft_library, size_px, weight);
-        set_face_size(face, physical_size);
-
-        FontHandle* handle = create_handle(ctx, face, ttf_buf, ttf_size,
-                                            size_px, physical_size, weight, slant);
-#else
         FontHandle* handle = create_handle(ctx, ttf_buf, ttf_size,
                                             face_index, size_px, physical_size, weight, slant);
-#endif
         if (handle) {
             handle->file_data_path = mem_strdup(path, MEM_CAT_FONT);  // raw strdup: freed by raw free
             log_info("font_loader: loaded '%s' (family=%s, size=%.0f)",
@@ -678,24 +505,8 @@ FontHandle* font_load_memory_internal(FontContext* ctx, const uint8_t* data,
         if (sfnt_data != data) mem_free((void*)sfnt_data);
     }
 
-#ifdef LAMBDA_HAS_FREETYPE
-    FT_Face face = NULL;
-    FT_Error err = FT_New_Memory_Face(ctx->ft_library, buf, (FT_Long)sfnt_len,
-                                       face_index, &face);
-    if (err) {
-        log_error("font_loader: FT_New_Memory_Face failed (error %d)", err);
-        return NULL;
-    }
-
-    apply_variable_font_axes(face, ctx->ft_library, size_px, weight);
-    set_face_size(face, physical_size);
-
-    FontHandle* handle = create_handle(ctx, face, buf, sfnt_len,
-                                        size_px, physical_size, weight, slant);
-#else
     FontHandle* handle = create_handle(ctx, buf, sfnt_len,
                                         face_index, size_px, physical_size, weight, slant);
-#endif
     if (handle) {
         log_info("font_loader: loaded from memory (family=%s, size=%.0f, %zu bytes)",
                  handle->family_name ? handle->family_name : "?", physical_size, sfnt_len);

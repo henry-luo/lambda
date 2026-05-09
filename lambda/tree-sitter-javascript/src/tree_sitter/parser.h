@@ -18,6 +18,7 @@ typedef uint16_t TSStateId;
 typedef uint16_t TSSymbol;
 typedef uint16_t TSFieldId;
 typedef struct TSLanguage TSLanguage;
+typedef struct TSLanguageMetadata TSLanguageMetadata;
 typedef struct TSLanguageMetadata {
   uint8_t major_version;
   uint8_t minor_version;
@@ -108,7 +109,7 @@ typedef struct {
 } TSCharacterRange;
 
 struct TSLanguage {
-  uint32_t version;
+  uint32_t abi_version;
   uint32_t symbol_count;
   uint32_t alias_count;
   uint32_t token_count;
@@ -130,7 +131,7 @@ struct TSLanguage {
   const TSSymbol *public_symbol_map;
   const uint16_t *alias_map;
   const TSSymbol *alias_sequences;
-  const TSLexMode *lex_modes;
+  const TSLexerMode *lex_modes;
   bool (*lex_fn)(TSLexer *, TSStateId);
   bool (*keyword_lex_fn)(TSLexer *, TSStateId);
   TSSymbol keyword_capture_token;

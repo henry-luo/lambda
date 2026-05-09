@@ -239,6 +239,10 @@ int jm_count_yields(JsAstNode* node) {
         // Only count yields in computed key (value is a nested function, excluded by recursion)
         return md->computed ? jm_count_yields(md->key) : 0;
     }
+    case JS_AST_NODE_FIELD_DEFINITION: {
+        JsFieldDefinitionNode* fd = (JsFieldDefinitionNode*)node;
+        return fd->computed ? jm_count_yields(fd->key) : 0;
+    }
     default:
         return 0;
     }
@@ -1234,6 +1238,9 @@ void jm_collect_all_let_const_names_recursive(JsAstNode* node, struct hashmap* n
     }
     case JS_AST_NODE_CATCH_CLAUSE: {
         JsCatchNode* c = (JsCatchNode*)node;
+        if (c->param && c->param->node_type != JS_AST_NODE_IDENTIFIER) {
+            jm_collect_pattern_names(c->param, names);
+        }
         jm_collect_all_let_const_names_recursive(c->body, names);
         break;
     }
