@@ -6290,6 +6290,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 block->multicol = (MultiColumnProp*)alloc_prop(lycon, sizeof(MultiColumnProp));
                 block->multicol->column_count = 0;  // auto
                 block->multicol->column_width = 0;  // auto
+                block->multicol->column_height = 0; // auto
                 block->multicol->column_gap = 16.0f;  // default 1em (assuming 16px font)
                 block->multicol->column_gap_is_normal = true;
                 block->multicol->rule_width = 0;
@@ -6300,6 +6301,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 block->multicol->rule_color.a = 255;
                 block->multicol->span = COLUMN_SPAN_NONE;
                 block->multicol->fill = COLUMN_FILL_BALANCE;
+                block->multicol->wrap = COLUMN_WRAP_AUTO;
             }
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
@@ -6326,6 +6328,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 block->multicol = (MultiColumnProp*)alloc_prop(lycon, sizeof(MultiColumnProp));
                 block->multicol->column_count = 0;
                 block->multicol->column_width = 0;
+                block->multicol->column_height = 0;
                 block->multicol->column_gap = 16.0f;
                 block->multicol->column_gap_is_normal = true;
                 block->multicol->rule_width = 0;
@@ -6336,6 +6339,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 block->multicol->rule_color.a = 255;
                 block->multicol->span = COLUMN_SPAN_NONE;
                 block->multicol->fill = COLUMN_FILL_BALANCE;
+                block->multicol->wrap = COLUMN_WRAP_AUTO;
             }
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
@@ -6366,6 +6370,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 block->multicol = (MultiColumnProp*)alloc_prop(lycon, sizeof(MultiColumnProp));
                 block->multicol->column_count = 0;
                 block->multicol->column_width = 0;
+                block->multicol->column_height = 0;
                 block->multicol->column_gap = 16.0f;
                 block->multicol->column_gap_is_normal = true;
                 block->multicol->rule_width = 0;
@@ -6376,6 +6381,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 block->multicol->rule_color.a = 255;
                 block->multicol->span = COLUMN_SPAN_NONE;
                 block->multicol->fill = COLUMN_FILL_BALANCE;
+                block->multicol->wrap = COLUMN_WRAP_AUTO;
             }
 
             // Reset both longhands to initial (auto) per shorthand rules
@@ -6591,6 +6597,60 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 } else {
                     block->multicol->fill = COLUMN_FILL_BALANCE;
                     log_debug("[CSS] column-fill: balance");
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_COLUMN_HEIGHT: {
+            log_debug("[CSS] Processing column-height property");
+            if (!block) break;
+
+            if (!block->multicol) {
+                block->multicol = (MultiColumnProp*)alloc_prop(lycon, sizeof(MultiColumnProp));
+                memset(block->multicol, 0, sizeof(MultiColumnProp));
+                block->multicol->column_gap = 16.0f;
+                block->multicol->column_gap_is_normal = true;
+                block->multicol->fill = COLUMN_FILL_BALANCE;
+                block->multicol->wrap = COLUMN_WRAP_AUTO;
+            }
+
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
+                block->multicol->column_height = 0;
+                log_debug("[CSS] column-height: auto");
+            } else if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_NUMBER) {
+                float height = resolve_length_value(lycon, prop_id, value);
+                if (height > 0) {
+                    block->multicol->column_height = height;
+                    log_debug("[CSS] column-height: %.2fpx", height);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_COLUMN_WRAP: {
+            log_debug("[CSS] Processing column-wrap property");
+            if (!block) break;
+
+            if (!block->multicol) {
+                block->multicol = (MultiColumnProp*)alloc_prop(lycon, sizeof(MultiColumnProp));
+                memset(block->multicol, 0, sizeof(MultiColumnProp));
+                block->multicol->column_gap = 16.0f;
+                block->multicol->column_gap_is_normal = true;
+                block->multicol->fill = COLUMN_FILL_BALANCE;
+                block->multicol->wrap = COLUMN_WRAP_AUTO;
+            }
+
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                if (value->data.keyword == CSS_VALUE_WRAP) {
+                    block->multicol->wrap = COLUMN_WRAP_WRAP;
+                    log_debug("[CSS] column-wrap: wrap");
+                } else if (value->data.keyword == CSS_VALUE_AUTO) {
+                    block->multicol->wrap = COLUMN_WRAP_AUTO;
+                    log_debug("[CSS] column-wrap: auto");
+                } else {
+                    block->multicol->wrap = COLUMN_WRAP_NOWRAP;
+                    log_debug("[CSS] column-wrap: nowrap");
                 }
             }
             break;
@@ -8989,6 +9049,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 block->multicol = (MultiColumnProp*)alloc_prop(lycon, sizeof(MultiColumnProp));
                 block->multicol->column_count = 0;  // auto
                 block->multicol->column_width = 0;  // auto
+                block->multicol->column_height = 0; // auto
                 block->multicol->column_gap = 16.0f;  // default 1em
                 block->multicol->column_gap_is_normal = true;
                 block->multicol->rule_width = 0;
@@ -8999,6 +9060,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 block->multicol->rule_color.a = 255;
                 block->multicol->span = COLUMN_SPAN_NONE;
                 block->multicol->fill = COLUMN_FILL_BALANCE;
+                block->multicol->wrap = COLUMN_WRAP_AUTO;
             }
             block->multicol->column_gap = gap_value;
             block->multicol->column_gap_is_normal = is_normal;

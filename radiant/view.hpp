@@ -847,10 +847,17 @@ typedef enum ColumnFill {
     COLUMN_FILL_AUTO,        // Fill columns sequentially
 } ColumnFill;
 
+typedef enum ColumnWrap {
+    COLUMN_WRAP_AUTO = 0,    // Wrap when block-size is unconstrained
+    COLUMN_WRAP_NOWRAP,      // Overflow after the last column
+    COLUMN_WRAP_WRAP,        // Continue columns in the next row
+} ColumnWrap;
+
 typedef struct MultiColumnProp {
     // Column sizing
     int column_count;            // Number of columns (0 = auto)
     float column_width;          // Ideal column width (0 = auto)
+    float column_height;         // Fragmentainer height (0 = auto)
     float column_gap;            // Gap between columns (default: 1em)
     bool column_gap_is_normal;   // Use normal (1em) gap
 
@@ -862,9 +869,11 @@ typedef struct MultiColumnProp {
     // Column behavior
     ColumnSpan span;             // column-span: none | all
     ColumnFill fill;             // column-fill: balance | auto
+    ColumnWrap wrap;             // column-wrap: nowrap | wrap
 
     // Computed values (set during layout)
     int computed_column_count;   // Actual number of columns after layout
+    int computed_used_column_count; // Columns that received content in layout
     float computed_column_width; // Actual column width after layout
 } MultiColumnProp;
 
