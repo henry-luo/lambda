@@ -2572,7 +2572,32 @@ float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) 
             return form_flex_basis;
         }
 
-        // flex-basis: auto - use intrinsic size
+        // CSS Flexbox §7.2.3: flex-basis:auto retrieves the used main-size
+        // property before falling back to content sizing.
+        if (is_horizontal && item->blk && item->blk->given_width >= 0) {
+            float basis = item->blk->given_width;
+            if (item->blk->box_sizing != CSS_VALUE_BORDER_BOX && item->bound) {
+                basis += item->bound->padding.left + item->bound->padding.right;
+                if (item->bound->border) {
+                    basis += item->bound->border->width.left + item->bound->border->width.right;
+                }
+            }
+            log_debug("calculate_flex_basis - form control explicit width: %.1f", basis);
+            return basis;
+        }
+        if (!is_horizontal && item->blk && item->blk->given_height >= 0) {
+            float basis = item->blk->given_height;
+            if (item->blk->box_sizing != CSS_VALUE_BORDER_BOX && item->bound) {
+                basis += item->bound->padding.top + item->bound->padding.bottom;
+                if (item->bound->border) {
+                    basis += item->bound->border->width.top + item->bound->border->width.bottom;
+                }
+            }
+            log_debug("calculate_flex_basis - form control explicit height: %.1f", basis);
+            return basis;
+        }
+
+        // flex-basis:auto with no definite main size uses intrinsic size.
         float basis = is_horizontal ? item->form->intrinsic_width : item->form->intrinsic_height;
 
         // <button> elements have flow children — measure content if intrinsic size is 0

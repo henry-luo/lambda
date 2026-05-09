@@ -37,6 +37,14 @@ static inline int munmap(void* a, size_t b) { (void)a;(void)b; return 0; }
 #endif
 #endif
 #include <sys/stat.h>
+
+#ifndef O_BINARY
+#define O_BINARY 0
+#endif
+
+#ifndef O_CLOEXEC
+#define O_CLOEXEC 0
+#endif
 // ============================================================================
 // Wrap font data into a FontHandle
 // ============================================================================

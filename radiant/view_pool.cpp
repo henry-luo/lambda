@@ -9,6 +9,7 @@
 #include <cmath>  // for INFINITY
 
 void print_view_group(ViewElement* view_group, StrBuf* buf, int indent);
+extern CssEnum get_white_space_value(DomNode* node);
 
 // Flag to control whether consecutive text nodes are combined during JSON output
 // When true (default), consecutive ViewText nodes are merged for HTML output compatibility
@@ -766,97 +767,16 @@ void append_json_string(StrBuf* buf, const char* str) {
  * @param out_dy Output: vertical translation offset
  * @return true if a transform offset was calculated, false otherwise
  */
-static bool calculate_transform_offset(View* view, float* out_dx, float* out_dy) {
-    *out_dx = 0;
-    *out_dy = 0;
-
-    if (!view->is_block()) return false;
-
-    ViewBlock* block = (ViewBlock*)view;
-    if (!block->transform || !block->transform->functions) return false;
-
-    // Walk through transform functions and accumulate translation
-    // Note: For accurate results, we'd need full matrix multiplication,
-    // but for common cases (translate only), we can just sum translations
-    float dx = 0, dy = 0;
-    float width = block->width;
-    float height = block->height;
-
-    for (TransformFunction* tf = block->transform->functions; tf; tf = tf->next) {
-        switch (tf->type) {
-            case TRANSFORM_TRANSLATE:
-            case TRANSFORM_TRANSLATEX:
-            case TRANSFORM_TRANSLATEY: {
-                // Handle percentage values: resolve against element's own dimensions
-                // CSS spec: translate percentages are relative to element's own width/height
-                float tx = tf->params.translate.x;
-                float ty = tf->params.translate.y;
-                if (!std::isnan(tf->translate_x_percent)) {
-                    tx = tf->translate_x_percent * width / 100.0f;
-                }
-                if (!std::isnan(tf->translate_y_percent)) {
-                    ty = tf->translate_y_percent * height / 100.0f;
-                }
-                dx += tx;
-                dy += ty;
-                break;
-            }
-
-            case TRANSFORM_TRANSLATE3D:
-            case TRANSFORM_TRANSLATEZ:
-                dx += tf->params.translate3d.x;
-                dy += tf->params.translate3d.y;
-                break;
-
-            default:
-                // Other transforms (scale, rotate, etc.) don't affect position
-                // in a simple additive way. For full accuracy we'd need matrix math.
-                break;
-        }
-    }
-
-    *out_dx = dx;
-    *out_dy = dy;
-    return (dx != 0 || dy != 0);
-}
-
-void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nullptr, bool trailing_comma = false) {
-    // CSS Display Level 3: display:contents elements don't generate a box
-    // They report (0, 0, 0, 0) in getComputedStyle/getBoundingClientRect
-    if (view->is_element()) {
-        DomElement* elem = (DomElement*)view;
-        // display:contents elements don't generate a box → (0,0,0,0)
-        // option/optgroup in combo-box selects are not rendered → getBoundingClientRect returns (0,0,0,0)
-        // In listbox mode, options have non-zero dimensions and are reported via normal path.
-        // HTML5 §4.5.27: <wbr> is a line break opportunity with no visual box → (0,0,0,0)
-        bool is_unrendered_option = (elem->tag() == HTM_TAG_OPTION || elem->tag() == HTM_TAG_OPTGROUP)
-                                    && elem->width == 0 && elem->height == 0;
-        if (elem->display.outer == CSS_VALUE_CONTENTS || is_unrendered_option
-            || elem->tag() == HTM_TAG_WBR) {
-            strbuf_append_char_n(buf, ' ', indent + 4);
-            strbuf_append_str(buf, "\"x\": 0.0,\n");
-            strbuf_append_char_n(buf, ' ', indent + 4);
-            strbuf_append_str(buf, "\"y\": 0.0,\n");
-            strbuf_append_char_n(buf, ' ', indent + 4);
-            strbuf_append_str(buf, "\"width\": 0.0,\n");
-            strbuf_append_char_n(buf, ' ', indent + 4);
-            strbuf_append_format(buf, "\"height\": 0.0%s\n", trailing_comma ? "," : "");
-            return;
-        }
-    }
-
-    // calculate absolute position for view (already in CSS logical pixels)
-    float abs_x = rect ? rect->x : view->x, abs_y = rect ? rect->y : view->y;
-
+static void calculate_absolute_position(View* view, TextRect* rect, float* out_x, float* out_y) {
+    float abs_x = rect ? rect->x : view->x;
+    float abs_y = rect ? rect->y : view->y;
     bool is_fixed = false;
     bool is_absolute = false;
-    ViewBlock* containing_block = nullptr;
 
     if (view->is_block()) {
         ViewBlock* block = (ViewBlock*)view;
         if (block->position) {
             is_fixed = (block->position->position == CSS_VALUE_FIXED);
-
             is_absolute = (block->position->position == CSS_VALUE_ABSOLUTE);
         }
     }
@@ -996,27 +916,102 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nul
         }
     }
 
-    // Apply CSS transform translation to coordinates
-    // This makes layout coordinates match browser getBoundingClientRect() which includes transforms
-    float transform_dx = 0, transform_dy = 0;
-    if (calculate_transform_offset(view, &transform_dx, &transform_dy)) {
-        abs_x += transform_dx;
-        abs_y += transform_dy;
-    }
+    *out_x = abs_x;
+    *out_y = abs_y;
+}
 
-    // Also apply transforms from ancestor elements
-    // (transforms are cumulative down the tree)
+static bool get_transform_matrix_for_view(View* view, RdtMatrix* out_matrix) {
+    if (!view || !view->is_block()) return false;
+
+    ViewBlock* block = (ViewBlock*)view;
+    if (!block->transform || !block->transform->functions) return false;
+
+    float abs_x = 0.0f, abs_y = 0.0f;
+    calculate_absolute_position(view, nullptr, &abs_x, &abs_y);
+    float origin_x = block->transform->origin_x_percent
+        ? abs_x + (block->transform->origin_x / 100.0f) * block->width
+        : abs_x + block->transform->origin_x;
+    float origin_y = block->transform->origin_y_percent
+        ? abs_y + (block->transform->origin_y / 100.0f) * block->height
+        : abs_y + block->transform->origin_y;
+
+    *out_matrix = radiant::compute_transform_matrix(
+        block->transform->functions, block->width, block->height, origin_x, origin_y);
+    return true;
+}
+
+static void apply_matrix_to_bounds(const RdtMatrix* matrix, float* x, float* y, float* width, float* height) {
+    float x0 = *x, y0 = *y;
+    float x1 = *x + *width, y1 = *y;
+    float x2 = *x, y2 = *y + *height;
+    float x3 = *x + *width, y3 = *y + *height;
+
+    radiant::transform_point(x0, y0, *matrix);
+    radiant::transform_point(x1, y1, *matrix);
+    radiant::transform_point(x2, y2, *matrix);
+    radiant::transform_point(x3, y3, *matrix);
+
+    float min_x = fminf(fminf(x0, x1), fminf(x2, x3));
+    float max_x = fmaxf(fmaxf(x0, x1), fmaxf(x2, x3));
+    float min_y = fminf(fminf(y0, y1), fminf(y2, y3));
+    float max_y = fmaxf(fmaxf(y0, y1), fmaxf(y2, y3));
+
+    *x = min_x;
+    *y = min_y;
+    *width = max_x - min_x;
+    *height = max_y - min_y;
+}
+
+static void apply_css_transforms_to_bounds(View* view, float* x, float* y, float* width, float* height) {
+    View* chain[256];
+    int count = 0;
     ViewElement* ancestor = view->parent_view();
-    while (ancestor) {
-        float ancestor_dx = 0, ancestor_dy = 0;
-        if (calculate_transform_offset((View*)ancestor, &ancestor_dx, &ancestor_dy)) {
-            abs_x += ancestor_dx;
-            abs_y += ancestor_dy;
-        }
+    while (ancestor && count < 256) {
+        chain[count++] = (View*)ancestor;
         ancestor = ancestor->parent_view();
     }
 
+    for (int i = count - 1; i >= 0; i--) { // INT_CAST_OK: bounded ancestor stack index
+        RdtMatrix matrix;
+        if (get_transform_matrix_for_view(chain[i], &matrix)) {
+            apply_matrix_to_bounds(&matrix, x, y, width, height);
+        }
+    }
+
+    RdtMatrix matrix;
+    if (get_transform_matrix_for_view(view, &matrix)) {
+        apply_matrix_to_bounds(&matrix, x, y, width, height);
+    }
+}
+
+void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nullptr, bool trailing_comma = false) {
+    // CSS Display Level 3: display:contents elements don't generate a box
+    // They report (0, 0, 0, 0) in getComputedStyle/getBoundingClientRect
+    if (view->is_element()) {
+        DomElement* elem = (DomElement*)view;
+        // display:contents elements don't generate a box → (0,0,0,0)
+        // option/optgroup in combo-box selects are not rendered → getBoundingClientRect returns (0,0,0,0)
+        // In listbox mode, options have non-zero dimensions and are reported via normal path.
+        // HTML5 §4.5.27: <wbr> is a line break opportunity with no visual box → (0,0,0,0)
+        bool is_unrendered_option = (elem->tag() == HTM_TAG_OPTION || elem->tag() == HTM_TAG_OPTGROUP)
+                                    && elem->width == 0 && elem->height == 0;
+        if (elem->display.outer == CSS_VALUE_CONTENTS || is_unrendered_option
+            || elem->tag() == HTM_TAG_WBR) {
+            strbuf_append_char_n(buf, ' ', indent + 4);
+            strbuf_append_str(buf, "\"x\": 0.0,\n");
+            strbuf_append_char_n(buf, ' ', indent + 4);
+            strbuf_append_str(buf, "\"y\": 0.0,\n");
+            strbuf_append_char_n(buf, ' ', indent + 4);
+            strbuf_append_str(buf, "\"width\": 0.0,\n");
+            strbuf_append_char_n(buf, ' ', indent + 4);
+            strbuf_append_format(buf, "\"height\": 0.0%s\n", trailing_comma ? "," : "");
+            return;
+        }
+    }
+
     // Output dimensions directly (already in CSS logical pixels)
+    float abs_x = 0.0f, abs_y = 0.0f;
+    calculate_absolute_position(view, rect, &abs_x, &abs_y);
     float css_x = abs_x;
     float css_y = abs_y;
     float css_width = rect ? rect->width : view->width;
@@ -1032,6 +1027,8 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nul
             css_height = elem->content_height;
         }
     }
+
+    apply_css_transforms_to_bounds(view, &css_x, &css_y, &css_width, &css_height);
 
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_format(buf, "\"x\": %.1f,\n", css_x);
@@ -1053,6 +1050,9 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nul
  * @param indent Current indentation level
  * @return Pointer to the last text node processed (to continue iteration from next sibling)
  */
+static bool text_rect_is_collapsed_whitespace(ViewText* text, TextRect* rect);
+static bool text_has_visible_rect(ViewText* text);
+
 static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int indent) {
     // If text combination is disabled, just print this single text node
     if (!g_combine_text_nodes) {
@@ -1129,18 +1129,10 @@ static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int ind
         bool first_emitted = true;
 
         while (rect) {
-            // Skip zero-width rects that contain only whitespace (e.g., trailing
-            // spaces at line ends).  Chrome's extraction omits these invisible
-            // fragments, so we must match that behaviour for stable comparison.
-            if (rect->width <= 0 && rect->length > 0 && rect->next) {
-                unsigned char* td = text->text_data();
-                bool all_ws = true;
-                for (int i = 0; i < rect->length && all_ws; i++) {
-                    unsigned char ch = td[rect->start_index + i];
-                    if (ch != ' ' && ch != '\t' && ch != '\n' && ch != '\r')
-                        all_ws = false;
-                }
-                if (all_ws) { rect = rect->next; continue; }
+            // browsers do not expose DOMRects for fully-collapsed whitespace.
+            if (text_rect_is_collapsed_whitespace(text, rect)) {
+                rect = rect->next;
+                continue;
             }
 
             if (!first_emitted) strbuf_append_str(buf, ",\n");
@@ -1225,6 +1217,11 @@ static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int ind
 
         // Collect text from all rects
         while (rect) {
+            if (text_rect_is_collapsed_whitespace(text, rect)) {
+                rect = rect->next;
+                continue;
+            }
+
             if (text_data && rect->length > 0) {
                 int copy_len = min((int)(sizeof(combined_content) - combined_len - 1), rect->length);
                 if (copy_len > 0) {
@@ -1248,6 +1245,10 @@ static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int ind
 
             rect = rect->next;
         }
+    }
+
+    if (combined_len <= 0 || min_x == INFINITY) {
+        return (View*)text_nodes[text_node_count - 1].text;
     }
 
     // Output combined text node
@@ -1385,11 +1386,129 @@ static void print_layout_fragments_json(ViewBlock* block, StrBuf* buf, int inden
     strbuf_append_str(buf, "]\n");
 }
 
+static bool should_skip_non_rendered_dom_tag(const char* tag) {
+    return tag && (strcmp(tag, "head") == 0 || strcmp(tag, "meta") == 0 ||
+        strcmp(tag, "title") == 0 || strcmp(tag, "link") == 0 ||
+        strcmp(tag, "style") == 0 || strcmp(tag, "script") == 0);
+}
+
+static void append_element_selector_json(ViewElement* elem, StrBuf* buf, const char* tag_name) {
+    const char* class_attr = elem->get_attribute("class");
+    char base_selector[256];
+    if (class_attr) {
+        size_t class_len = strlen(class_attr);
+        snprintf(base_selector, sizeof(base_selector), "%s.%.*s", tag_name, (int)class_len, class_attr);
+    } else {
+        snprintf(base_selector, sizeof(base_selector), "%s", tag_name);
+    }
+
+    char final_selector[512];
+    DomNode* parent = elem->parent;
+    if (parent) {
+        int sibling_count = 0;
+        int current_index = 0;
+        DomNode* sibling = parent->is_element() ? static_cast<DomElement*>(parent)->first_child : nullptr;
+        while (sibling) {
+            if (sibling->node_type == DOM_NODE_ELEMENT) {
+                const char* sibling_tag = sibling->node_name();
+                if (sibling_tag && strcmp(sibling_tag, tag_name) == 0) {
+                    sibling_count++;
+                    if (sibling == elem) current_index = sibling_count;
+                }
+            }
+            sibling = sibling->next_sibling;
+        }
+        if (sibling_count > 1 && current_index > 0) {
+            snprintf(final_selector, sizeof(final_selector), "%s:nth-of-type(%d)", base_selector, current_index);
+        } else {
+            snprintf(final_selector, sizeof(final_selector), "%s", base_selector);
+        }
+    } else {
+        snprintf(final_selector, sizeof(final_selector), "%s", base_selector);
+    }
+    append_json_string(buf, final_selector);
+}
+
+static void print_display_none_json(ViewElement* elem, StrBuf* buf, int indent) {
+    const char* tag_name = elem->node_name() ? elem->node_name() : "div";
+    strbuf_append_char_n(buf, ' ', indent);
+    strbuf_append_str(buf, "{\n");
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"type\": \"none\",\n");
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"tag\": ");
+    append_json_string(buf, tag_name);
+    strbuf_append_str(buf, ",\n");
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"selector\": ");
+    append_element_selector_json(elem, buf, tag_name);
+    strbuf_append_str(buf, ",\n");
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"classes\": [");
+    const char* class_attr = elem->get_attribute("class");
+    if (class_attr) {
+        append_json_string(buf, class_attr);
+    }
+    strbuf_append_str(buf, "],\n");
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"layout\": {\n");
+    strbuf_append_char_n(buf, ' ', indent + 4);
+    strbuf_append_str(buf, "\"x\": 0.0,\n");
+    strbuf_append_char_n(buf, ' ', indent + 4);
+    strbuf_append_str(buf, "\"y\": 0.0,\n");
+    strbuf_append_char_n(buf, ' ', indent + 4);
+    strbuf_append_str(buf, "\"width\": 0.0,\n");
+    strbuf_append_char_n(buf, ' ', indent + 4);
+    strbuf_append_str(buf, "\"height\": 0.0\n");
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "},\n");
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"computed\": {\n");
+    strbuf_append_char_n(buf, ' ', indent + 4);
+    strbuf_append_str(buf, "\"display\": \"none\"\n");
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "}");
+
+    bool first_child = true;
+    View* child = elem->first_child;
+    while (child) {
+        if (child->is_element() && !should_skip_non_rendered_dom_tag(child->node_name())) {
+            if (first_child) {
+                strbuf_append_str(buf, ",\n");
+                strbuf_append_char_n(buf, ' ', indent + 2);
+                strbuf_append_str(buf, "\"children\": [\n");
+            } else {
+                strbuf_append_str(buf, ",\n");
+            }
+            first_child = false;
+            print_display_none_json((ViewElement*)child, buf, indent + 4);
+        }
+        child = child->next_sibling;
+    }
+    if (!first_child) {
+        strbuf_append_str(buf, "\n");
+        strbuf_append_char_n(buf, ' ', indent + 2);
+        strbuf_append_str(buf, "]");
+    }
+    strbuf_append_str(buf, "\n");
+    strbuf_append_char_n(buf, ' ', indent);
+    strbuf_append_str(buf, "}");
+}
+
 // Helper to print children, skipping anonymous wrapper elements
 static void print_children_json(ViewBlock* block, StrBuf* buf, int indent, bool* first_child) {
     View* child = ((ViewElement*)block)->first_child;
     while (child) {
-        if (child->view_type == RDT_VIEW_NONE) {  // skip the view
+        if (child->view_type == RDT_VIEW_NONE) {
+            if (child->is_element()) {
+                DomElement* elmt = (DomElement*)child;
+                const char* tag = child->node_name();
+                if (elmt->display.outer == CSS_VALUE_NONE && !should_skip_non_rendered_dom_tag(tag)) {
+                    if (!*first_child) { strbuf_append_str(buf, ",\n"); }
+                    *first_child = false;
+                    print_display_none_json((ViewElement*)elmt, buf, indent);
+                }
+            }
             child = child->next_sibling;
             continue;
         }
@@ -1420,6 +1539,10 @@ static void print_children_json(ViewBlock* block, StrBuf* buf, int indent, bool*
             View* fl_child = ((ViewElement*)child)->first_child;
             while (fl_child) {
                 if (fl_child->view_type == RDT_VIEW_TEXT) {
+                    if (!text_has_visible_rect((ViewText*)fl_child)) {
+                        fl_child = fl_child->next_sibling;
+                        continue;
+                    }
                     if (!*first_child) { strbuf_append_str(buf, ",\n"); }
                     *first_child = false;
                     View* last_text = print_combined_text_json((ViewText*)fl_child, buf, indent);
@@ -1444,6 +1567,11 @@ static void print_children_json(ViewBlock* block, StrBuf* buf, int indent, bool*
             log_debug("JSON: Skipping anonymous element %s, processing its children", child->node_name());
             print_children_json((ViewBlock*)child, buf, indent, first_child);
             child = child->next();
+            continue;
+        }
+
+        if (child->view_type == RDT_VIEW_TEXT && !text_has_visible_rect((ViewText*)child)) {
+            child = child->next_sibling;
             continue;
         }
 
@@ -2047,9 +2175,39 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent) {
 }
 
 // JSON generation for text nodes
+static bool text_rect_is_collapsed_whitespace(ViewText* text, TextRect* rect) {
+    if (!text || !rect || rect->width > 0 || rect->length <= 0) return false;
+    CssEnum white_space = get_white_space_value((DomNode*)text);
+    if (white_space != CSS_VALUE_NORMAL &&
+        white_space != CSS_VALUE_NOWRAP &&
+        white_space != CSS_VALUE_PRE_LINE) {
+        return false;
+    }
+    unsigned char* td = text->text_data();
+    if (!td) return false;
+    for (int i = 0; i < rect->length; i++) {
+        unsigned char ch = td[rect->start_index + i];
+        if (ch != ' ' && ch != '\t' && ch != '\n' && ch != '\r') {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool text_has_visible_rect(ViewText* text) {
+    if (!text) return false;
+    TextRect* rect = text->rect;
+    while (rect) {
+        if (!text_rect_is_collapsed_whitespace(text, rect)) return true;
+        rect = rect->next;
+    }
+    return false;
+}
+
 void print_text_json(ViewText* text, StrBuf* buf, int indent) {
     TextRect* rect = text->rect;
     if (!rect) return;  // guard against null text rect (fuzzer-found)
+    if (!text_has_visible_rect(text)) return;
 
     NEXT_RECT:
     bool is_last_char_space = false;
@@ -2315,6 +2473,11 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent) {
         if (tag && (strcmp(tag, "#comment") == 0 || strcmp(tag, "!--") == 0)) {
             log_debug("JSON: Skipping HTML comment node from inline children");
             child = child->next();
+            continue;
+        }
+
+        if (child->view_type == RDT_VIEW_TEXT && !text_has_visible_rect((ViewText*)child)) {
+            child = child->next_sibling;
             continue;
         }
 

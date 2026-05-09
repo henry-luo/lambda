@@ -259,6 +259,10 @@ typedef struct Linebox {
     inline void reset_space() {
         is_line_start = false;  has_space = false;  last_space = NULL;  last_space_pos = 0;
         last_space_kind = BRK_TEXT;  last_space_hanging_width = 0;
+        trailing_space_width = 0;
+        committed_trailing_rect = NULL;
+        committed_trailing_view = NULL;
+        committed_trailing_space = 0;
     }
 } Linebox;
 
