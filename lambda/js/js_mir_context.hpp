@@ -268,6 +268,7 @@ struct JsStaticFieldEntry {
     JsAstNode* key_expr;            // key expression for computed fields
     JsAstNode* initializer;         // initializer expression
     int module_var_index;           // index into js_module_vars[] (-1 for computed)
+    int key_module_var_index;       // class-evaluation computed key slot (-1 if not computed)
     bool computed;                  // whether this is a computed property name
 };
 
@@ -276,6 +277,7 @@ struct JsInstanceFieldEntry {
     String* name;                   // field name (already __private_ prefixed if private, NULL if computed)
     JsAstNode* key_expr;            // key expression for computed fields
     JsAstNode* initializer;         // initializer expression (NULL if no initializer)
+    int key_module_var_index;       // class-evaluation computed key slot (-1 if not computed)
     bool computed;                  // whether this is a computed property name
 };
 

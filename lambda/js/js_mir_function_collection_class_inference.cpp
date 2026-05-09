@@ -587,6 +587,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                         }
                         sf->initializer = fd->value;
                         sf->module_var_index = -1; // assigned later in Phase 1.1 (only for non-computed)
+                        sf->key_module_var_index = -1;
                         // if the initializer contains functions, collect them
                         if (fd->value) jm_collect_functions(mt, fd->value);
                         ce->static_field_count++;
@@ -605,6 +606,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                             inf->name = NULL;
                         }
                         inf->initializer = fd->value;
+                        inf->key_module_var_index = -1;
                         if (fd->value) jm_collect_functions(mt, fd->value);
                         ce->instance_field_count++;
                         log_debug("js-mir: class '%.*s' instance field %s'%.*s'",
