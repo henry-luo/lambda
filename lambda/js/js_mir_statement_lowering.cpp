@@ -54,6 +54,12 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                         jm_call_void_2(mt, "js_set_module_var",
                             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)modvar_index),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_val));
+                        if (var->kind == JS_VAR_VAR && mt->in_main) {
+                            MIR_reg_t key_reg = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
+                            jm_call_void_2(mt, "js_define_global_var_property",
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_val));
+                        }
                         if (mt->is_eval_direct && (var->kind == JS_VAR_LET || var->kind == JS_VAR_CONST)) {
                             MIR_reg_t eval_env_active = jm_call_0(mt, "js_262_eval_script_is_active", MIR_T_I64);
                             MIR_label_t skip_global_lex = jm_new_label(mt);

@@ -279,6 +279,13 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)id->name->len));
             jm_emit_exc_propagate_check(mt);
         }
+        int param_index = jm_arguments_param_index(mt, vname);
+        if (param_index >= 0) {
+            return jm_call_3(mt, "js_arguments_mapped_get", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->arguments_reg),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, param_index),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, var->reg));
+        }
         return var->reg;
     }
 
@@ -8385,7 +8392,7 @@ MIR_reg_t jm_transpile_object(JsMirTranspiler* mt, JsObjectNode* obj) {
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, object),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
                 } else {
-                    jm_call_3(mt, "js_property_set", MIR_T_I64,
+                    jm_call_3(mt, "js_create_data_property", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, object),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, val));

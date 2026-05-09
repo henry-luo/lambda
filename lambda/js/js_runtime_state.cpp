@@ -28,7 +28,16 @@ void js_strict_throw_property_error(const char* reason, const char* prop_name, i
 Item _map_read_field(ShapeEntry* field, void* map_data);
 // Forward declaration for _map_get (used as fallback for nested/spread maps)
 Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found);
+extern "C" void js_mark_non_enumerable(Item object, Item name);
+extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor);
 extern "C" Item js_get_current_this(void) { return js_current_this; }
+
+static void js_runtime_make_non_enumerable(Item object, Item name) {
+    Item desc = js_new_object();
+    Item enum_key = (Item){.item = s2it(heap_create_name("enumerable", 10))};
+    js_property_set(desc, enum_key, (Item){.item = b2it(false)});
+    js_object_define_property(object, name, desc);
+}
 
 bool js_runtime_trace_enabled() {
     static int trace_enabled = -1;
@@ -615,6 +624,7 @@ extern "C" Item js_new_error_with_name_stack(Item error_name, Item message, Item
     // Mark stack as non-enumerable (per ES spec)
     Item ne_stack = (Item){.item = s2it(heap_create_name("__ne_stack", 10))};
     js_property_set(obj, ne_stack, (Item){.item = b2it(true)});
+    js_runtime_make_non_enumerable(obj, stack_key);
     return obj;
 }
 
@@ -832,8 +842,12 @@ extern "C" Item js_build_arguments_object() {
         // Non-strict: callee is the function object (ES5 §10.6 step 13)
         if (js_pending_args_callee.item != 0) {
             Item callee_key = (Item){.item = s2it(heap_create_name("callee", 6))};
-            js_property_set(companion, callee_key, js_pending_args_callee);
-            js_mark_non_enumerable(companion, callee_key);
+            Item desc = js_new_object();
+            js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, js_pending_args_callee);
+            js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
+            js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(false)});
+            js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
+            js_object_define_property(companion, callee_key, desc);
         }
     }
 

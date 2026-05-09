@@ -875,6 +875,10 @@ JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node) {
 
                 // Build as function expression using build_js_function (handles params for setters)
                 property->value = build_js_function(tp, property_node);
+                if (property->value && (property->value->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
+                                        property->value->node_type == JS_AST_NODE_FUNCTION_DECLARATION)) {
+                    ((JsFunctionNode*)property->value)->name = NULL;
+                }
             } else if (!ts_node_is_null(name_node)) {
                 const char* name_type = ts_node_type(name_node);
                 if (strcmp(name_type, "computed_property_name") == 0) {
@@ -936,6 +940,10 @@ JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node) {
                 }
                 // Build the full method as a function expression
                 property->value = build_js_function(tp, property_node);
+                if (property->value && (property->value->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
+                                        property->value->node_type == JS_AST_NODE_FUNCTION_DECLARATION)) {
+                    ((JsFunctionNode*)property->value)->name = NULL;
+                }
             }
 
             property->base.type = &TYPE_ANY;
