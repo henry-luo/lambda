@@ -398,6 +398,19 @@ void jm_emit_set_function_name(JsMirTranspiler* mt, MIR_reg_t fn_reg, const char
     }
 }
 
+void jm_emit_set_class_assignment_name(JsMirTranspiler* mt, JsAssignmentNode* asgn, MIR_reg_t rhs, String* name) {
+    if (!asgn || asgn->lhs_is_parenthesized || !asgn->right || !name || !name->chars) return;
+    if (asgn->op != JS_OP_ASSIGN) return;
+    if (asgn->right->node_type != JS_AST_NODE_CLASS_EXPRESSION &&
+        asgn->right->node_type != JS_AST_NODE_CLASS_DECLARATION) return;
+    JsClassNode* cls = (JsClassNode*)asgn->right;
+    if (cls->name) return;
+    MIR_reg_t name_reg = jm_box_string_literal(mt, name->chars, (int)name->len);
+    jm_call_void_2(mt, "js_set_class_name",
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, rhs),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg));
+}
+
 // Helper: emit js_set_function_source call to store original source text for toString
 void jm_emit_set_function_source(JsMirTranspiler* mt, MIR_reg_t fn_reg, JsFunctionNode* fn_node) {
     if (!fn_node || !mt->tp || !mt->tp->source) return;

@@ -3638,7 +3638,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
         // tombstone a slot — must not trigger accessor / TypeError-on-no-setter logic).
         if (!js_skip_accessor_dispatch && !js_is_deleted_sentinel(value) && get_type_id(key) == LMD_TYPE_STRING) {
             String* str_key = it2s(key);
-            if (str_key && str_key->len < 64 && str_key->len > 0 &&
+            if (str_key && str_key->len < 64 &&
                 !(str_key->len > 6 && (strncmp(str_key->chars, "__get_", 6) == 0 ||
                                         strncmp(str_key->chars, "__set_", 6) == 0)) &&
                 !(str_key->len == 9 && strncmp(str_key->chars, "__proto__", 9) == 0)) {

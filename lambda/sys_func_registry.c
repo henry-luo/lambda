@@ -863,6 +863,8 @@ extern Item js_reflect_get_own_property_descriptor(Item target, Item key);
 extern Item js_get_reflect_object_value();
 extern Item js_get_atomics_object_value();
 extern Item js_install_user_accessor(Item obj, Item name, Item fn, int is_setter);
+extern void js_set_class_name(Item cls_item, Item name_item);
+extern void js_set_default_constructor_property(Item proto_item, Item cls_item);
 
 // v23: Performance facade functions (js_runtime.cpp)
 extern int64_t js_typeof_is(Item value, const char* type_str);
@@ -1463,6 +1465,8 @@ JitImport jit_runtime_imports[] = {
     {"js_object_get_own_property_descriptor", FPTR(js_object_get_own_property_descriptor)},
     {"js_object_get_own_property_descriptors", FPTR(js_object_get_own_property_descriptors)},
     {"js_set_function_name", FPTR(js_set_function_name)},
+    {"js_set_class_name", FPTR(js_set_class_name)},
+    {"js_set_default_constructor_property", FPTR(js_set_default_constructor_property)},
     {"js_set_function_source", FPTR(js_set_function_source)},
     {"js_mark_generator_func", FPTR(js_mark_generator_func)},
     {"js_mark_async_generator_func", FPTR(js_mark_async_generator_func)},

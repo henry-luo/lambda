@@ -2208,6 +2208,7 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                                 jm_emit_set_function_name(mt, rhs, id->name->chars);
                             }
                         }
+                        jm_emit_set_class_assignment_name(mt, asgn, rhs, id->name);
                     }
                     jm_call_void_2(mt, "js_set_module_var",
                         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
@@ -2267,6 +2268,7 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                     return result;
                 }
                 MIR_reg_t rhs = jm_transpile_box_item(mt, asgn->right);
+                jm_emit_set_class_assignment_name(mt, asgn, rhs, id->name);
                 if (asgn->op != JS_OP_ASSIGN) {
                     // Compound assignment: read current value from global, apply op, store
                     MIR_reg_t name_reg = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
@@ -2414,6 +2416,7 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                     jm_emit_set_function_name(mt, rhs, id->name->chars);
                 }
             }
+            jm_emit_set_class_assignment_name(mt, asgn, rhs, id->name);
         } else if (asgn->op == JS_OP_AND_ASSIGN || asgn->op == JS_OP_OR_ASSIGN ||
                    asgn->op == JS_OP_NULLISH_ASSIGN) {
             // Logical assignment with short-circuit: do NOT evaluate RHS if condition met
@@ -9790,6 +9793,9 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                 }
                 // Create __instance_proto__ with all instance methods (inherited + own)
                 MIR_reg_t proto_obj = jm_call_0(mt, "js_new_object", MIR_T_I64);
+                jm_call_void_2(mt, "js_set_default_constructor_property",
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
                 // Set __class_name__ on prototype for instanceof chain
                 if (effective_name) {
                     MIR_reg_t pcn_key = jm_box_string_literal(mt, "__class_name__", 14);
@@ -10014,11 +10020,14 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, pt_key),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj));
-                // Set prototype.constructor = class (ES spec §14.6.13 step 10)
-                MIR_reg_t ctor_prop_key = jm_box_string_literal(mt, "constructor", 11);
-                jm_call_3(mt, "js_property_set", MIR_T_I64,
+                jm_call_void_2(mt, "js_mark_non_writable",
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, pt_key));
+                jm_call_void_2(mt, "js_mark_non_enumerable",
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, pt_key));
+                jm_call_void_2(mt, "js_set_default_constructor_property",
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_prop_key),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
                 // Mark all prototype methods as non-enumerable (ES spec)
                 jm_call_void_1(mt, "js_mark_all_non_enumerable",

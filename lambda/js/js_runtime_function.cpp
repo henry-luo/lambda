@@ -168,6 +168,27 @@ extern "C" void js_set_function_name(Item fn_item, Item name_item) {
     }
 }
 
+extern "C" void js_set_class_name(Item cls_item, Item name_item) {
+    if (get_type_id(cls_item) != LMD_TYPE_MAP) return;
+    if (get_type_id(name_item) != LMD_TYPE_STRING) return;
+    ShapeEntry* existing = js_find_shape_entry(cls_item, "name", 4);
+    if (existing && !jspd_is_deleted(existing)) return;
+    Item key = (Item){.item = s2it(heap_create_name("name", 4))};
+    js_property_set(cls_item, key, name_item);
+    js_attr_set_writable(cls_item, "name", 4, false);
+    js_attr_set_enumerable(cls_item, "name", 4, false);
+    js_attr_set_configurable(cls_item, "name", 4, true);
+}
+
+extern "C" void js_set_default_constructor_property(Item proto_item, Item cls_item) {
+    if (get_type_id(proto_item) != LMD_TYPE_MAP) return;
+    ShapeEntry* existing = js_find_shape_entry(proto_item, "constructor", 11);
+    if (existing && !jspd_is_deleted(existing)) return;
+    Item key = (Item){.item = s2it(heap_create_name("constructor", 11))};
+    js_property_set(proto_item, key, cls_item);
+    js_attr_set_enumerable(proto_item, "constructor", 11, false);
+}
+
 // Set the source text of a JsFunction for Function.prototype.toString
 extern "C" void js_set_function_source(Item fn_item, Item source_item) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;

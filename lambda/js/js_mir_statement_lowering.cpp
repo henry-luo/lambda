@@ -3222,6 +3222,9 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                     // Create __instance_proto__ with instance methods and store as prototype
                     {
                         MIR_reg_t proto_obj = jm_call_0(mt, "js_new_object", MIR_T_I64);
+                        jm_call_void_2(mt, "js_set_default_constructor_property",
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
                         {
                             MIR_reg_t pcn_key = jm_box_string_literal(mt, "__class_name__", 14);
                             MIR_reg_t pcn_val = jm_box_string_literal(mt, cls_node->name->chars, (int)cls_node->name->len);
@@ -3277,15 +3280,17 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                                     if (!me->is_getter && !me->is_setter) jm_call_void_1(mt, "js_mark_method_func", MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
                                     MIR_reg_t mk;
                                     if (me->computed && me->key_expr) {
-                                        // generator spill: save proto_obj and fn_item before yield-containing key expr
-                                        int proto_spill = -1, fn_spill = -1;
+                                        // generator spill: save proto_obj, cls_obj, and fn_item before yield-containing key expr
+                                        int proto_spill = -1, cls_spill = -1, fn_spill = -1;
                                         if (mt->in_generator && jm_has_yield(me->key_expr)) {
                                             proto_spill = jm_gen_spill_save(mt, proto_obj);
+                                            cls_spill = jm_gen_spill_save(mt, cls_obj);
                                             fn_spill = jm_gen_spill_save(mt, fn_item);
                                         }
                                         mk = jm_transpile_box_item(mt, me->key_expr);
                                         if (proto_spill >= 0) {
                                             jm_gen_spill_load(mt, proto_obj, proto_spill);
+                                            jm_gen_spill_load(mt, cls_obj, cls_spill);
                                             jm_gen_spill_load(mt, fn_item, fn_spill);
                                         }
                                         // Phase-5C: no key wrap.
@@ -3319,15 +3324,17 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                             if (!me->is_getter && !me->is_setter) jm_call_void_1(mt, "js_mark_method_func", MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
                             MIR_reg_t mk;
                             if (me->computed && me->key_expr) {
-                                // generator spill: save proto_obj and fn_item before yield-containing key expr
-                                int proto_spill = -1, fn_spill = -1;
+                                // generator spill: save proto_obj, cls_obj, and fn_item before yield-containing key expr
+                                int proto_spill = -1, cls_spill = -1, fn_spill = -1;
                                 if (mt->in_generator && jm_has_yield(me->key_expr)) {
                                     proto_spill = jm_gen_spill_save(mt, proto_obj);
+                                    cls_spill = jm_gen_spill_save(mt, cls_obj);
                                     fn_spill = jm_gen_spill_save(mt, fn_item);
                                 }
                                 mk = jm_transpile_box_item(mt, me->key_expr);
                                 if (proto_spill >= 0) {
                                     jm_gen_spill_load(mt, proto_obj, proto_spill);
+                                    jm_gen_spill_load(mt, cls_obj, cls_spill);
                                     jm_gen_spill_load(mt, fn_item, fn_spill);
                                 }
                                 // Phase-5C: no key wrap.
@@ -3347,10 +3354,14 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, pt_key),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj));
-                        MIR_reg_t ctor_prop_key = jm_box_string_literal(mt, "constructor", 11);
-                        jm_call_3(mt, "js_property_set", MIR_T_I64,
+                        jm_call_void_2(mt, "js_mark_non_writable",
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, pt_key));
+                        jm_call_void_2(mt, "js_mark_non_enumerable",
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, pt_key));
+                        jm_call_void_2(mt, "js_set_default_constructor_property",
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_prop_key),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
                         jm_call_void_1(mt, "js_mark_all_non_enumerable",
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj));

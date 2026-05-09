@@ -653,20 +653,9 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                                 if (lit->literal_type == JS_LITERAL_STRING) {
                                     method_name = lit->value.string_value;
                                 } else if (lit->literal_type == JS_LITERAL_NUMBER) {
-                                    // Numeric method key: normalize to decimal string (e.g. 0x10 → "16")
-                                    uint32_t sb = ts_node_start_byte(md->key->node);
-                                    uint32_t eb = ts_node_end_byte(md->key->node);
-                                    int slen = (int)(eb - sb);
-                                    char ntmp[64];
-                                    if (slen > 62) slen = 62;
-                                    memcpy(ntmp, mt->tp->source + sb, slen);
-                                    ntmp[slen] = '\0';
-                                    double d = strtod(ntmp, NULL);
-                                    char nbuf[64]; int nlen;
-                                    if (d == (double)(long long)d && d >= 0 && d < 1e15)
-                                        nlen = snprintf(nbuf, sizeof(nbuf), "%lld", (long long)d);
-                                    else
-                                        nlen = snprintf(nbuf, sizeof(nbuf), "%.17g", d);
+                                    char nbuf[64];
+                                    js_double_to_string(lit->value.number_value, nbuf, sizeof(nbuf));
+                                    int nlen = (int)strlen(nbuf);
                                     String* ns = name_pool_create_len(mt->tp->name_pool, nbuf, nlen);
                                     method_name = ns;
                                 }
@@ -737,7 +726,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                                 me->computed = md->computed;
                                 me->key_expr = md->key;
                                 // Detect constructor by name
-                                me->is_constructor = (method_name &&
+                                me->is_constructor = (!me->computed && method_name &&
                                     method_name->len == 11 &&
                                     strncmp(method_name->chars, "constructor", 11) == 0);
                                 if (me->is_constructor) {

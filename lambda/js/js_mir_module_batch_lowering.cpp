@@ -3734,6 +3734,9 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     // Create __instance_proto__ with all instance methods
                     {
                         MIR_reg_t proto_obj = jm_call_0(mt, "js_new_object", MIR_T_I64);
+                        jm_call_void_2(mt, "js_set_default_constructor_property",
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
                         // Set __class_name__ on prototype for instanceof chain
                         {
                             MIR_reg_t pcn_key = jm_box_string_literal(mt, "__class_name__", 14);
@@ -3923,11 +3926,14 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, pt_key),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj));
-                        // Set prototype.constructor = class
-                        MIR_reg_t ctor_prop_key = jm_box_string_literal(mt, "constructor", 11);
-                        jm_call_3(mt, "js_property_set", MIR_T_I64,
+                        jm_call_void_2(mt, "js_mark_non_writable",
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, pt_key));
+                        jm_call_void_2(mt, "js_mark_non_enumerable",
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, pt_key));
+                        jm_call_void_2(mt, "js_set_default_constructor_property",
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_prop_key),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
                         // Mark all prototype methods as non-enumerable (ES spec)
                         jm_call_void_1(mt, "js_mark_all_non_enumerable",
