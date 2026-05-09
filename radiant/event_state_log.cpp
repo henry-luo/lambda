@@ -19,6 +19,7 @@
 #include <time.h>
 
 #ifdef _WIN32
+  #include <direct.h>
   #include <process.h>
   #define getpid _getpid
 #else
@@ -228,8 +229,10 @@ static uint64_t g_event_log_dropped = 0;
 
 static void make_temp_dir(void) {
     /* best-effort mkdir; ignore EEXIST. */
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(__MINGW32__)
     _mkdir("temp");
+#elif defined(_WIN32)
+    mkdir("temp");
 #else
     mkdir("temp", 0755);
 #endif

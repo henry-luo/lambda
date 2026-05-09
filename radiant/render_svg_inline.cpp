@@ -2598,7 +2598,7 @@ static bool svg_image_href_is_svg(const char* href) {
     if (strncmp(href, "data:", 5) == 0) {
         const char* comma = strchr(href, ',');
         size_t meta_len = comma ? (size_t)(comma - href) : strlen(href);
-        return strcasestr(href, "image/svg") && (size_t)(strcasestr(href, "image/svg") - href) < meta_len;
+        return str_ifind(href, meta_len, "image/svg", strlen("image/svg")) != STR_NPOS;
     }
 
     const char* end = href + strlen(href);
