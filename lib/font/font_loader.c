@@ -32,6 +32,9 @@ static inline int munmap(void* a, size_t b) { (void)a;(void)b; return 0; }
 #else
 #include <unistd.h>
 #include <sys/mman.h>
+#ifndef O_BINARY
+#define O_BINARY 0
+#endif
 #endif
 #include <sys/stat.h>
 

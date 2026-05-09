@@ -484,7 +484,9 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t is_global_scope) {
 
     // If expression form succeeded, call and return
     if (fn_item.item != 0 && fn_item.item != ITEM_NULL && fn_item.item != ITEM_ERROR) {
-        Item result = js_call_function(fn_item, ItemNull, NULL, 0);
+        extern Item js_get_this();
+        Item eval_this = js_get_this();
+        Item result = js_call_function(fn_item, eval_this, NULL, 0);
         return result;
     }
 
