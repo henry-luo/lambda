@@ -386,7 +386,10 @@ Current implementation status:
 - Fragmented monolithic children now store per-column `LayoutFragmentBox` records on the DOM/layout element and expose them in debug JSON as `layout.fragments`.
 - Balanced definite-height multicol containers can now fragment a tall single child into a browser-like fragmented border-box union; `multicol-rule-nested-balancing-001` now matches browser geometry.
 - Nested multicol projection now composes parent and child fragmentainer slots, including descendant block continuations inside nested columns; `multicol-fill-balance-003` now passes.
-- Full `wpt-css-multicol` improved from `103 / 362` to `122 / 362` after Stage 3 fragment metadata, union placement, nested descendant continuation projection, split-container visual union accounting, and single-column spanner splitting.
+- Balanced column groups now allow oversized in-flow blocks to split at the searched fragmentainer target instead of forcing the target back to the monolithic child height; `abspos-after-spanner-static-pos` now matches the browser's pre-spanner 35px/35px split.
+- Split wrappers with descendant spanners now compute browser-like fragmented border-box unions for fixed-height content-box, decorated, and single-column auto-fill cases; `multicol-span-all-children-height-004a`, `-005`, and `-006` now pass.
+- Recursive nested continuation projection now uses source-order flow offsets for sub-slots inside a parent fragment, avoiding double application of earlier local multicol redistribution.
+- Full `wpt-css-multicol` improved from `103 / 362` to `131 / 362` after Stage 3 fragment metadata, union placement, nested descendant continuation projection, split-container visual union accounting, and single-column spanner splitting.
 - Remaining work: replace fragment metadata with materialized continuation boxes for painting, hit testing, and full `getClientRects()` behavior, then continue into positioned descendant fragment anchors.
 
 ### Stage 4: Positioned descendants in multicol
@@ -402,6 +405,23 @@ Expected benefit:
 - `abspos-*`
 - `fixed-*`
 - `multicol-oof-*`
+
+Current implementation status:
+
+- Multicol now runs a positioned-descendant post-pass after column group placement.
+- Direct out-of-flow children with auto/static insets resolve to the next or previous in-flow fragment anchor, using the multicol container's normal-flow absolute origin.
+- Nested out-of-flow children with auto/static insets now resolve against their own in-flow sibling context inside multicol, including previous siblings that were fragmented across columns.
+- Positioned descendants nested under `column-span: all` now get a spanner-aware explicit inset correction, converting viewport/root offsets back into the containing block coordinate space used by existing abspos serialization.
+- Empty wrapper blocks that contain only escaped spanners now collapse to the post-spanner continuation slot while the escaped spanner keeps contributing to the multicol flow.
+- `abspos-after-spanner`, `abspos-containing-block-outside-spanner`, `abspos-autopos-contained-by-viewport-000`, and `abspos-autopos-contained-by-viewport-001` now pass.
+- `abspos-after-spanner-static-pos` now passes: the pre-spanner block is split into balanced fragments, the spanner is positioned on the browser-like split boundary, and the out-of-flow static-position box anchors to the following in-flow fragment.
+
+Remaining Stage 4 follow-up:
+
+- Generalize the positioned pass into a dedicated `layout_multicol_positioned.cpp` module once the current monolithic file is split.
+- Share containing-block lookup with `layout_positioned.cpp` and `view_pool.cpp` so layout, render, and debug JSON use one spanner-aware coordinate model.
+- Extend the same anchor model to fixed-position descendants, transformed containing blocks, clipped containers, and materialized continuation boxes.
+- Continue replacing metadata-only continuation records with materialized continuation boxes so positioned layout, painting, hit testing, and future CSSOM-style geometry all consume the same fragment tree.
 
 ### Stage 5: Paint/rule cleanup and edge behavior
 
