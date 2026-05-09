@@ -6,6 +6,9 @@
  */
 #include "js_runtime_internal.hpp"
 
+extern "C" Item js_to_property_key(Item key);
+extern void js_double_to_string(double d, char* out, int out_size);
+
 // =============================================================================
 // Object Functions
 // =============================================================================
@@ -2296,11 +2299,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                 snprintf(buf, sizeof(buf), "%lld", (long long)it2i(key));
             } else {
                 double dv = it2d(key);
-                if (dv != dv) snprintf(buf, sizeof(buf), "NaN");
-                else if (dv == 1.0/0.0) snprintf(buf, sizeof(buf), "Infinity");
-                else if (dv == -1.0/0.0) snprintf(buf, sizeof(buf), "-Infinity");
-                else if (dv == 0.0) snprintf(buf, sizeof(buf), "0");
-                else snprintf(buf, sizeof(buf), "%g", dv);
+                js_double_to_string(dv, buf, sizeof(buf));
             }
             key = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
         } else if (kt == LMD_TYPE_BOOL) {
@@ -2310,6 +2309,8 @@ extern "C" Item js_property_get(Item object, Item key) {
             key = (Item){.item = s2it(heap_create_name("null", 4))};
         } else if (kt == LMD_TYPE_UNDEFINED) {
             key = (Item){.item = s2it(heap_create_name("undefined", 9))};
+        } else if (kt != LMD_TYPE_STRING) {
+            key = js_to_property_key(key);
         }
         // Stage A1.3a: own-property lookup + IS_ACCESSOR getter dispatch is
         // now centralized in js_ordinary_get_own (lambda/js/js_props.cpp).
@@ -3558,11 +3559,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                 snprintf(buf, sizeof(buf), "%lld", (long long)it2i(key));
             } else {
                 double dv = it2d(key);
-                if (dv != dv) snprintf(buf, sizeof(buf), "NaN");
-                else if (dv == 1.0/0.0) snprintf(buf, sizeof(buf), "Infinity");
-                else if (dv == -1.0/0.0) snprintf(buf, sizeof(buf), "-Infinity");
-                else if (dv == 0.0) snprintf(buf, sizeof(buf), "0");
-                else snprintf(buf, sizeof(buf), "%g", dv);
+                js_double_to_string(dv, buf, sizeof(buf));
             }
             key = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
         } else if (kt == LMD_TYPE_BOOL) {

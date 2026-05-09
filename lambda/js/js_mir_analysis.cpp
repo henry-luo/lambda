@@ -239,6 +239,10 @@ int jm_count_yields(JsAstNode* node) {
         // Only count yields in computed key (value is a nested function, excluded by recursion)
         return md->computed ? jm_count_yields(md->key) : 0;
     }
+    case JS_AST_NODE_FIELD_DEFINITION: {
+        JsFieldDefinitionNode* fd = (JsFieldDefinitionNode*)node;
+        return fd->computed ? jm_count_yields(fd->key) : 0;
+    }
     default:
         return 0;
     }

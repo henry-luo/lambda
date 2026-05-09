@@ -349,6 +349,8 @@ MIR_reg_t jm_box_string_literal(JsMirTranspiler* mt, const char* str, int len) {
 void jm_emit_install_method_or_accessor(JsMirTranspiler* mt,
     MIR_reg_t obj, MIR_reg_t key, MIR_reg_t fn_item,
     bool is_getter, bool is_setter) {
+    key = jm_call_1(mt, "js_to_property_key", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
     if (is_getter || is_setter) {
         MIR_reg_t is_set = jm_new_reg(mt, "is_set", MIR_T_I64);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,

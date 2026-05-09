@@ -575,6 +575,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
             while (m) {
                 if (m->node_type == JS_AST_NODE_FIELD_DEFINITION) {
                     JsFieldDefinitionNode* fd = (JsFieldDefinitionNode*)m;
+                    if (fd->computed && fd->key) jm_collect_functions(mt, fd->key);
                     if (fd->is_static && fd->key && ce->static_field_count < 16) {
                         JsStaticFieldEntry* sf = &ce->static_fields[ce->static_field_count];
                         sf->computed = fd->computed;
@@ -623,6 +624,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                     }
                 } else if (m->node_type == JS_AST_NODE_METHOD_DEFINITION) {
                     JsMethodDefinitionNode* md = (JsMethodDefinitionNode*)m;
+                    if (md->computed && md->key) jm_collect_functions(mt, md->key);
                     if (md->value && (md->value->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
                                       md->value->node_type == JS_AST_NODE_FUNCTION_DECLARATION)) {
                         JsFunctionNode* fn = (JsFunctionNode*)md->value;

@@ -6930,14 +6930,74 @@ extern "C" Item js_object_get_own_property_names(Item object) {
     }
 
     TypeMap* tm = (TypeMap*)m->type;
-    // Use dynamic array approach: push matched entries to result array
     Item result = js_array_new(0);
     Array* arr = result.array;
+    bool is_class_ctor = false;
+    bool has_class_name_marker = false;
+    bool has_class_prototype = false;
+    js_map_get_fast_ext(m, "__class_name__", 14, &has_class_name_marker);
+    js_map_get_fast_ext(m, "prototype", 9, &has_class_prototype);
+    is_class_ctor = has_class_name_marker && has_class_prototype;
+    int entry_count = 0;
+    for (ShapeEntry* count_entry = tm->shape; count_entry; count_entry = count_entry->next) entry_count++;
+    int64_t* idx_pairs = entry_count > 0 ? (int64_t*)malloc(sizeof(int64_t) * 2 * entry_count) : NULL;
+    int idx_count = 0;
     ShapeEntry* e = tm->shape;
     while (e) {
         const char* s = e->name->str;
         int len = (int)e->name->length;
         bool skip = (len >= 2 && s[0] == '_' && s[1] == '_');
+        if (!skip) {
+            Item val = _map_read_field(e, m->data);
+            if (val.item == JS_DELETED_SENTINEL_VAL) skip = true;
+        }
+        if (!skip) {
+            int64_t idx = js_parse_array_index(s, len);
+            if (idx >= 0 && idx_pairs) {
+                idx_pairs[idx_count * 2 + 0] = idx;
+                idx_pairs[idx_count * 2 + 1] = (int64_t)(uintptr_t)e;
+                idx_count++;
+            }
+        }
+        e = e->next;
+    }
+    if (idx_count > 1) qsort(idx_pairs, idx_count, sizeof(int64_t) * 2, js_idx_pair_cmp);
+    for (int i = 0; i < idx_count; i++) {
+        ShapeEntry* idx_entry = (ShapeEntry*)(uintptr_t)idx_pairs[i * 2 + 1];
+        const char* s = idx_entry->name->str;
+        int len = (int)idx_entry->name->length;
+        int nlen = len < 255 ? len : 255;
+        char nbuf[256];
+        memcpy(nbuf, s, nlen);
+        nbuf[nlen] = '\0';
+        Item key_item = (Item){.item = s2it(heap_create_name(nbuf, nlen))};
+        array_push(arr, key_item);
+    }
+    if (is_class_ctor) {
+        const char* intrinsic_names[] = {"length", "name", "prototype"};
+        int intrinsic_lens[] = {6, 4, 9};
+        for (int i = 0; i < 3; i++) {
+            bool found = false;
+            Item val = js_map_get_fast_ext(m, intrinsic_names[i], intrinsic_lens[i], &found);
+            if (found && val.item != JS_DELETED_SENTINEL_VAL) {
+                Item key_item = (Item){.item = s2it(heap_create_name(intrinsic_names[i], intrinsic_lens[i]))};
+                array_push(arr, key_item);
+            }
+        }
+    }
+    e = tm->shape;
+    while (e) {
+        const char* s = e->name->str;
+        int len = (int)e->name->length;
+        bool skip = (len >= 2 && s[0] == '_' && s[1] == '_');
+        if (!skip && js_parse_array_index(s, len) >= 0) skip = true;
+        if (!skip && is_class_ctor) {
+            if ((len == 6 && strncmp(s, "length", 6) == 0) ||
+                (len == 4 && strncmp(s, "name", 4) == 0) ||
+                (len == 9 && strncmp(s, "prototype", 9) == 0)) {
+                skip = true;
+            }
+        }
         if (!skip) {
             Item val = _map_read_field(e, m->data);
             if (val.item == JS_DELETED_SENTINEL_VAL) skip = true;
@@ -6952,6 +7012,7 @@ extern "C" Item js_object_get_own_property_names(Item object) {
         }
         e = e->next;
     }
+    if (idx_pairs) free(idx_pairs);
     // Phase-5D: legacy __get_<name>/__set_<name> pass-2 scan removed.
     // Accessor properties now use IS_ACCESSOR shape flag with bare-name
     // shape entries — pass 1 above already enumerates them.
