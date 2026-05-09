@@ -85,7 +85,12 @@ static void calc_text_input_size(LayoutContext* lycon, FormControlProp* form, Fo
     float calibrated_char_w = default_content_w / FormDefaults::TEXT_SIZE_CHARS;  // 7.25
 
     float content_w = 0;
-    if (font && font->font_size > 0 && lycon->ui_context) {
+    if (size == FormDefaults::TEXT_SIZE_CHARS) {
+        // Chrome keeps the default text-control `size=20` visual width at the
+        // UA calibrated content width; author font metrics affect text drawing,
+        // but not this default intrinsic control width.
+        content_w = default_content_w;
+    } else if (font && font->font_size > 0 && lycon->ui_context) {
         FontBox temp_font;
         setup_font(lycon->ui_context, &temp_font, font);
         if (temp_font.font_handle) {
@@ -137,6 +142,10 @@ static void calc_text_input_size(LayoutContext* lycon, FormControlProp* form, Fo
             if (temp_font.font_handle) {
                 line_h = calc_normal_line_height(temp_font.font_handle);
             }
+        }
+        if (font && font->font_size > 0 && font->font_size != ua_font_size) {
+            float css_normal_line_h = font->font_size * 1.15f;
+            line_h = css_normal_line_h;
         }
         form->intrinsic_height = (line_h > default_content_h) ? line_h : default_content_h;
     }

@@ -471,9 +471,123 @@ ViewBlock* find_containing_block(ViewBlock* element, CssEnum position_type) {
     return nullptr;
 }
 
+static void calculate_parent_to_cb_offset(ViewBlock* block, ViewBlock* containing_block, float* out_x, float* out_y) {
+    float parent_to_cb_offset_x = 0;
+    float parent_to_cb_offset_y = 0;
+    ViewElement* walk_start = block->parent_view();
+
+    while (walk_start && !walk_start->is_block()) {
+        walk_start = walk_start->parent_view();
+    }
+
+    if (walk_start && walk_start->is_block()) {
+        ViewBlock* p = (ViewBlock*)walk_start;
+        while (p && p != containing_block) {
+            parent_to_cb_offset_x += p->x;
+            parent_to_cb_offset_y += p->y;
+
+            if (p->position && p->position->position == CSS_VALUE_FIXED) {
+                break;
+            }
+            if (p->position && p->position->position == CSS_VALUE_ABSOLUTE) {
+                ViewElement* ancestor = p->parent_view();
+                ViewBlock* p_cb = nullptr;
+                while (ancestor) {
+                    if (ancestor->is_block()) {
+                        ViewBlock* ab = (ViewBlock*)ancestor;
+                        if (ab->position && ab->position->position != CSS_VALUE_STATIC) {
+                            p_cb = ab;
+                            break;
+                        }
+                    }
+                    ancestor = ancestor->parent_view();
+                }
+                if (p_cb) {
+                    p = p_cb;
+                    continue;
+                }
+                break;
+            }
+
+            ViewElement* gp = p->parent_view();
+            while (gp && !gp->is_block()) {
+                gp = gp->parent_view();
+            }
+            if (gp && gp->is_block()) {
+                p = (ViewBlock*)gp;
+            } else {
+                break;
+            }
+        }
+    }
+
+    if (block->position && block->position->position == CSS_VALUE_FIXED && containing_block) {
+        parent_to_cb_offset_x += containing_block->x;
+        parent_to_cb_offset_y += containing_block->y;
+    }
+
+    *out_x = parent_to_cb_offset_x;
+    *out_y = parent_to_cb_offset_y;
+}
+
+static TextDirection get_static_position_direction(ViewElement* parent) {
+    TextDirection static_direction = TD_LTR;
+    if (parent && parent->is_element()) {
+        DomElement* parent_elem = (DomElement*)parent;
+        if (parent_elem->blk && parent_elem->blk->direction == CSS_VALUE_RTL) {
+            static_direction = TD_RTL;
+        } else if (parent_elem->specified_style) {
+            CssValue* dir_val = (CssValue*)style_tree_get_computed_value(
+                parent_elem->specified_style, CSS_PROPERTY_DIRECTION,
+                parent_elem->parent && parent_elem->parent->is_element() ?
+                    ((DomElement*)parent_elem->parent)->specified_style : NULL);
+            if (dir_val && dir_val->type == CSS_VALUE_TYPE_KEYWORD &&
+                dir_val->data.keyword == CSS_VALUE_RTL) {
+                static_direction = TD_RTL;
+            }
+        }
+    }
+    return static_direction;
+}
+
+static float calculate_static_line_x(BlockContext* pa_block, Linebox* pa_line,
+    TextDirection static_direction, bool was_inline) {
+    float line_x = was_inline ? pa_line->advance_x : pa_line->left;
+
+    if (was_inline && line_x <= pa_line->left + 0.01f) {
+        BlockContext* bfc = block_context_find_bfc(pa_block);
+        if (bfc) {
+            float static_y_bfc = pa_block->advance_y + pa_block->bfc_offset_y;
+            float lh = pa_block->line_height > 0 ? pa_block->line_height : 16.0f;
+            FloatAvailableSpace space = block_context_space_at_y(bfc, static_y_bfc, lh);
+
+            float avail_left = space.left - pa_block->bfc_offset_x;
+            float avail_right = space.right - pa_block->bfc_offset_x;
+            avail_left = fmax(avail_left, pa_line->left);
+            avail_right = fmin(avail_right, pa_line->right);
+
+            CssEnum ta = pa_block->text_align;
+            if (ta == CSS_VALUE_CENTER) {
+                line_x = (avail_left + avail_right) / 2.0f;
+            } else if ((ta == CSS_VALUE_RIGHT && static_direction == TD_LTR) ||
+                       (ta == CSS_VALUE_LEFT && static_direction == TD_RTL) ||
+                       (ta == CSS_VALUE_END)) {
+                line_x = (static_direction == TD_LTR) ? avail_right : avail_left;
+            } else {
+                line_x = (static_direction == TD_LTR) ? avail_left : avail_right;
+            }
+            log_debug("[STATIC POS] Float+align adjusted line_x=%.1f (avail=[%.1f,%.1f], text-align=%d)",
+                      line_x, avail_left, avail_right, (int)ta); // INT_CAST_OK: enum for log
+        }
+    }
+
+    return line_x;
+}
+
 // calculate absolute position based on containing block and offset properties
 // Implements CSS 2.1 §10.3.7 (horizontal) and §10.6.4 (vertical) constraint equations
-void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlock* containing_block) {
+void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlock* containing_block,
+    BlockContext* pa_block, Linebox* pa_line) {
 
     // get containing block dimensions
     float cb_x = containing_block->x, cb_y = containing_block->y;
@@ -618,6 +732,17 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     bool has_auto_margin_left = block->bound && block->bound->margin.left_type == CSS_VALUE_AUTO;
     bool has_auto_margin_right = block->bound && block->bound->margin.right_type == CSS_VALUE_AUTO;
     bool has_width = (lycon->block.given_width >= 0 && !is_intrinsic_width);
+    ViewElement* parent = block->parent_view();
+    TextDirection static_direction = get_static_position_direction(parent);
+    bool was_inline = false;
+    was_inline = was_specified_inline((DomElement*)block);
+    float parent_to_cb_offset_x = 0;
+    float parent_to_cb_offset_y = 0;
+    calculate_parent_to_cb_offset(block, containing_block, &parent_to_cb_offset_x, &parent_to_cb_offset_y);
+    float static_line_x = (pa_block && pa_line)
+        ? calculate_static_line_x(pa_block, pa_line, static_direction, was_inline)
+        : 0.0f;
+    float static_left = parent_to_cb_offset_x + static_line_x;
 
     // First determine content_width: use CSS width if specified, otherwise calculate from constraints
     if (has_width) {
@@ -676,10 +801,20 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         // CSS 2.1 §10.3.7: width is auto, at most one of left/right specified (non-replaced)
         // Use shrink-to-fit width = min(max(preferred_minimum_width, available_width), preferred_width)
         // where preferred_minimum_width = min-content, preferred_width = max-content,
-        // available_width = cb_width - margins (border-box available space)
+        // available_width is the remaining containing-block padding-box width after
+        // substituting the used static inset for auto left/right.
         float margin_left = has_auto_margin_left ? 0 : (block->bound ? block->bound->margin.left : 0);
         float margin_right = has_auto_margin_right ? 0 : (block->bound ? block->bound->margin.right : 0);
-        float available_width = max(cb_width - margin_left - margin_right, 0.0f);
+        float used_left = block->position->has_left ? block->position->left : 0.0f;
+        float used_right = block->position->has_right ? block->position->right : 0.0f;
+        if (!block->position->has_left && !block->position->has_right) {
+            if (static_direction == TD_LTR) {
+                used_left = static_left;
+            } else {
+                used_right = max(cb_width - static_left, 0.0f);
+            }
+        }
+        float available_width = max(cb_width - used_left - used_right - margin_left - margin_right, 0.0f);
 
         // Measure intrinsic widths (returns border-box sizes including element's padding+border)
         IntrinsicSizes intrinsic = measure_element_intrinsic_widths(lycon, (DomElement*)block);
@@ -714,7 +849,7 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     float pre_clamp_cw = content_width;
     content_width = adjust_min_max_width(block, content_width);
     if (content_width != pre_clamp_cw) {
-        fprintf(stderr, "[TRACE ABS] %s adjust_min_max clamped: %.1f -> %.1f\n", block->source_loc(), pre_clamp_cw, content_width);
+        log_debug("[ABS POS] %s adjust_min_max clamped: %.1f -> %.1f", block->source_loc(), pre_clamp_cw, content_width);
     }
 
     // CSS 2.1 §10.3.7: Solve auto margins for horizontal axis
@@ -1046,7 +1181,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     }
 
     // calculate position based on offset properties and containing block
-    calculate_absolute_position(lycon, block, cb);
+    calculate_absolute_position(lycon, block, cb, pa_block, pa_line);
 
     // Load image for IMG elements - same as layout_block does for regular flow
     uintptr_t elmt_name = block->tag();
@@ -1549,6 +1684,12 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
         if (has_flex_calculated_width || has_grid_calculated_width || has_form_intrinsic_width) {
             log_debug("auto-sizing width: SKIPPED - %s already has calculated width %.1f",
                       has_form_intrinsic_width ? "form control" : (is_flex_container ? "flex" : "grid"), block->width);
+        } else if (pre_layout_width > 0) {
+            // CSS 2.1 §10.3.7: non-replaced abspos auto width is resolved by
+            // shrink-to-fit before content layout. Wrapped line widths are an
+            // effect of that used width, not a second sizing pass.
+            block->width = pre_layout_width;
+            log_debug("[ABS POS] preserving shrink-to-fit width %.1f", block->width);
         } else {
             // Note: max_width already includes left border + left padding from setup_inline
             // So we only need to add right padding and right border
