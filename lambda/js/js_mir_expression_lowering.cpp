@@ -341,6 +341,87 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
             case MCONST_MODVAR: {
                 MIR_reg_t mv = jm_call_1(mt, "js_get_module_var", MIR_T_I64,
                     MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val));
+                if (mc->is_nested_func_hoist) {
+                    const char* js_name = mc->name;
+                    if (strncmp(js_name, "_js_", 4) == 0) js_name += 4;
+                    MIR_reg_t global_reg = jm_call_0(mt, "js_get_global_this", MIR_T_I64);
+                    MIR_reg_t key_reg = jm_box_string_literal(mt, js_name, (int)strlen(js_name));
+                    MIR_reg_t has_global = jm_call_2(mt, "js_has_own_property", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, global_reg),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
+                    MIR_label_t use_module = jm_new_label(mt);
+                    MIR_label_t read_done = jm_new_label(mt);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+                        MIR_new_label_op(mt->ctx, use_module),
+                        MIR_new_reg_op(mt->ctx, has_global)));
+                    MIR_reg_t global_val = jm_call_1(mt, "js_get_global_property", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
+                    MIR_reg_t global_is_undef = jm_new_reg(mt, "annexb_gundef", MIR_T_I64);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ,
+                        MIR_new_reg_op(mt->ctx, global_is_undef),
+                        MIR_new_reg_op(mt->ctx, global_val),
+                        MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEF_VAL)));
+                    MIR_reg_t module_is_undef = jm_new_reg(mt, "annexb_mundef", MIR_T_I64);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ,
+                        MIR_new_reg_op(mt->ctx, module_is_undef),
+                        MIR_new_reg_op(mt->ctx, mv),
+                        MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEF_VAL)));
+                    MIR_reg_t module_is_function = jm_call_2(mt, "js_typeof_is", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, mv),
+                        MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)"function"));
+                    MIR_reg_t module_not_function = jm_new_reg(mt, "annexb_mnotfn", MIR_T_I64);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ,
+                        MIR_new_reg_op(mt->ctx, module_not_function),
+                        MIR_new_reg_op(mt->ctx, module_is_function),
+                        MIR_new_int_op(mt->ctx, 0)));
+                    MIR_reg_t global_is_function = jm_call_2(mt, "js_typeof_is", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, global_val),
+                        MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)"function"));
+                    bool annexb_self_body = false;
+                    if (mt->current_fc && mt->current_fc->node && mt->current_fc->node->name) {
+                        String* cur_name = mt->current_fc->node->name;
+                        annexb_self_body = cur_name->len == strlen(js_name) &&
+                            memcmp(cur_name->chars, js_name, cur_name->len) == 0;
+                    }
+                    MIR_reg_t prefer_non_function_module = jm_new_reg(mt, "annexb_pnfm", MIR_T_I64);
+                    if (mt->is_eval_direct || annexb_self_body) {
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, prefer_non_function_module),
+                            MIR_new_reg_op(mt->ctx, module_not_function)));
+                    } else {
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ,
+                            MIR_new_reg_op(mt->ctx, prefer_non_function_module),
+                            MIR_new_reg_op(mt->ctx, global_is_function),
+                            MIR_new_int_op(mt->ctx, 0)));
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
+                            MIR_new_reg_op(mt->ctx, prefer_non_function_module),
+                            MIR_new_reg_op(mt->ctx, prefer_non_function_module),
+                            MIR_new_reg_op(mt->ctx, module_not_function)));
+                    }
+                    MIR_reg_t prefer_concrete_module = jm_new_reg(mt, "annexb_pcm", MIR_T_I64);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_OR,
+                        MIR_new_reg_op(mt->ctx, prefer_concrete_module),
+                        MIR_new_reg_op(mt->ctx, global_is_undef),
+                        MIR_new_reg_op(mt->ctx, prefer_non_function_module)));
+                    MIR_reg_t prefer_module = jm_new_reg(mt, "annexb_pmod", MIR_T_I64);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ,
+                        MIR_new_reg_op(mt->ctx, prefer_module),
+                        MIR_new_reg_op(mt->ctx, module_is_undef),
+                        MIR_new_int_op(mt->ctx, 0)));
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
+                        MIR_new_reg_op(mt->ctx, prefer_module),
+                        MIR_new_reg_op(mt->ctx, prefer_module),
+                        MIR_new_reg_op(mt->ctx, prefer_concrete_module)));
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                        MIR_new_label_op(mt->ctx, use_module),
+                        MIR_new_reg_op(mt->ctx, prefer_module)));
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, mv),
+                        MIR_new_reg_op(mt->ctx, global_val)));
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, read_done)));
+                    jm_emit_label(mt, use_module);
+                    jm_emit_label(mt, read_done);
+                }
                 mv = jm_call_4(mt, "js_resolve_unresolved_binding", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, mv),
                     MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)id->name->chars),
@@ -6407,6 +6488,20 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
         }
 
         if (resolved_fn) {
+            char direct_vname[128];
+            snprintf(direct_vname, sizeof(direct_vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+            if (mt->module_consts) {
+                JsModuleConstEntry direct_lookup;
+                snprintf(direct_lookup.name, sizeof(direct_lookup.name), "%s", direct_vname);
+                JsModuleConstEntry* direct_mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &direct_lookup);
+                if (direct_mc && direct_mc->const_type == MCONST_MODVAR &&
+                        direct_mc->is_nested_func_hoist) {
+                    resolved_fn = NULL;
+                }
+            }
+        }
+
+        if (resolved_fn) {
             JsFuncCollected* fc = jm_find_collected_func(mt, resolved_fn);
             // If any argument is a spread, skip compile-time dispatch — fall through to fallback
             bool direct_has_spread = false;
@@ -6416,7 +6511,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             if (direct_has_spread) fc = NULL;  // nullify so we fall through to fallback
             if (fc && fc->has_rest_param) fc = NULL;  // rest-param functions need runtime arg collection
             if (fc && fc->uses_arguments) fc = NULL;  // uses_arguments needs runtime pending args from js_invoke_fn
-            if (fc && fc->is_reassigned) fc = NULL;   // function name is reassigned — use dynamic dispatch
+            if (fc && fc->is_reassigned) fc = NULL;
 
             if (fc && (fc->func_item || fc->native_func_item) && fc->capture_count == 0) {
                 // Phase 4: Check if we can call the native version

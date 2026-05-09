@@ -16165,7 +16165,22 @@ extern "C" Item js_get_console_object_value() {
 
 // test262 host object $262 — provides detachArrayBuffer for typed array tests
 static Item js_262_object = {.item = ITEM_NULL};
+static int64_t js_262_eval_script_active = 0;
 void js_reset_262_object() { js_262_object = (Item){.item = ITEM_NULL}; }
+
+extern "C" Item js_builtin_eval(Item code_item, int64_t is_global_scope);
+
+extern "C" int64_t js_262_eval_script_is_active() {
+    return js_262_eval_script_active;
+}
+
+static Item js_262_eval_script(Item code) {
+    int64_t saved = js_262_eval_script_active;
+    js_262_eval_script_active = 1;
+    Item result = js_builtin_eval(code, 1);
+    js_262_eval_script_active = saved;
+    return result;
+}
 
 extern "C" Item js_get_262_object_value() {
     if (js_262_object.item == ITEM_NULL) {
@@ -16177,6 +16192,9 @@ extern "C" Item js_get_262_object_value() {
         Item realm_key = (Item){.item = s2it(heap_create_name("createRealm", 11))};
         Item realm_fn = js_get_or_create_builtin(JS_BUILTIN_262_CREATE_REALM, "createRealm", 0);
         js_property_set(js_262_object, realm_key, realm_fn);
+        Item eval_script_key = (Item){.item = s2it(heap_create_name("evalScript", 10))};
+        Item eval_script_fn = js_new_function((void*)js_262_eval_script, 1);
+        js_property_set(js_262_object, eval_script_key, eval_script_fn);
     }
     return js_262_object;
 }

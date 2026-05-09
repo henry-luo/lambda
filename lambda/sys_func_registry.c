@@ -826,6 +826,9 @@ extern void js_with_pop(void);
 extern int js_with_save_depth(void);
 extern void js_with_restore_depth(int depth);
 extern void js_set_global_property(Item key, Item value);
+extern void js_define_global_var_property(Item key, Item value);
+extern void js_evalscript_check_global_var_decl(Item key);
+extern void js_evalscript_check_global_function_decl(Item key);
 extern void js_eval_env_push_frame(void);
 extern void js_eval_env_bind(Item key, Item value);
 extern int64_t js_eval_env_has_binding(Item key);
@@ -834,6 +837,7 @@ extern void js_eval_env_track_global_binding(Item key);
 extern void js_eval_env_pop_frame(void);
 extern void js_check_unresolved_capture(Item value, const char* name, int64_t len);
 extern Item js_resolve_unresolved_binding(Item value, const char* name, int64_t len, int64_t in_typeof);
+extern int64_t js_262_eval_script_is_active(void);
 
 // Object.groupBy / Map.groupBy (ES2024)
 extern Item js_object_group_by(Item items, Item callback);
@@ -1594,6 +1598,9 @@ JitImport jit_runtime_imports[] = {
     {"js_with_save_depth", FPTR(js_with_save_depth)},
     {"js_with_restore_depth", FPTR(js_with_restore_depth)},
     {"js_set_global_property", FPTR(js_set_global_property)},
+    {"js_define_global_var_property", FPTR(js_define_global_var_property)},
+    {"js_evalscript_check_global_var_decl", FPTR(js_evalscript_check_global_var_decl)},
+    {"js_evalscript_check_global_function_decl", FPTR(js_evalscript_check_global_function_decl)},
     {"js_eval_env_push_frame", FPTR(js_eval_env_push_frame)},
     {"js_eval_env_bind", FPTR(js_eval_env_bind)},
     {"js_eval_env_has_binding", FPTR(js_eval_env_has_binding)},
@@ -1602,6 +1609,7 @@ JitImport jit_runtime_imports[] = {
     {"js_eval_env_pop_frame", FPTR(js_eval_env_pop_frame)},
     {"js_check_unresolved_capture", FPTR(js_check_unresolved_capture)},
     {"js_resolve_unresolved_binding", FPTR(js_resolve_unresolved_binding)},
+    {"js_262_eval_script_is_active", FPTR(js_262_eval_script_is_active)},
 
     {"js_symbol_create", FPTR(js_symbol_create)},
     {"js_symbol_for", FPTR(js_symbol_for)},

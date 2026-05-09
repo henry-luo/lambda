@@ -1234,6 +1234,9 @@ void jm_collect_all_let_const_names_recursive(JsAstNode* node, struct hashmap* n
     }
     case JS_AST_NODE_CATCH_CLAUSE: {
         JsCatchNode* c = (JsCatchNode*)node;
+        if (c->param && c->param->node_type != JS_AST_NODE_IDENTIFIER) {
+            jm_collect_pattern_names(c->param, names);
+        }
         jm_collect_all_let_const_names_recursive(c->body, names);
         break;
     }

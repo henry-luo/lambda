@@ -1131,6 +1131,121 @@ void jm_callsite_propagate(JsMirTranspiler* mt, JsAstNode* program_body) {
     }
 }
 
+static void jm_emit_evalscript_global_decl_check_name(JsMirTranspiler* mt, String* name, bool is_func) {
+    if (!name || !name->chars || name->len <= 0) return;
+    MIR_reg_t key_reg = jm_box_string_literal(mt, name->chars, (int)name->len);
+    jm_call_void_1(mt,
+        is_func ? "js_evalscript_check_global_function_decl" : "js_evalscript_check_global_var_decl",
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
+    jm_emit_exc_propagate_check(mt);
+}
+
+static void jm_emit_evalscript_global_decl_check_prefixed(JsMirTranspiler* mt, const char* name) {
+    if (!name) return;
+    if (strncmp(name, "_js_", 4) == 0) name += 4;
+    if (!name[0]) return;
+    MIR_reg_t key_reg = jm_box_string_literal(mt, name, (int)strlen(name));
+    jm_call_void_1(mt, "js_evalscript_check_global_var_decl",
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
+    jm_emit_exc_propagate_check(mt);
+}
+
+static void jm_emit_evalscript_global_decl_prechecks(JsMirTranspiler* mt, JsAstNode* node) {
+    if (!node) return;
+    switch (node->node_type) {
+    case JS_AST_NODE_VARIABLE_DECLARATION: {
+        JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)node;
+        if (vd->kind != JS_VAR_VAR) return;
+        for (JsAstNode* d = vd->declarations; d; d = d->next) {
+            if (d->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
+            JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)d;
+            if (!decl->id) continue;
+            if (decl->id->node_type == JS_AST_NODE_IDENTIFIER) {
+                jm_emit_evalscript_global_decl_check_name(mt, ((JsIdentifierNode*)decl->id)->name, false);
+            } else if (decl->id->node_type == JS_AST_NODE_OBJECT_PATTERN ||
+                       decl->id->node_type == JS_AST_NODE_ARRAY_PATTERN) {
+                struct hashmap* names = hashmap_new(sizeof(JsNameSetEntry), 8, 0, 0,
+                    jm_name_hash, jm_name_cmp, NULL, NULL);
+                jm_collect_pattern_names(decl->id, names);
+                size_t iter = 0; void* item;
+                while (hashmap_iter(names, &iter, &item)) {
+                    JsNameSetEntry* entry = (JsNameSetEntry*)item;
+                    jm_emit_evalscript_global_decl_check_prefixed(mt, entry->name);
+                }
+                hashmap_free(names);
+            }
+        }
+        break;
+    }
+    case JS_AST_NODE_FUNCTION_DECLARATION: {
+        JsFunctionNode* fn = (JsFunctionNode*)node;
+        jm_emit_evalscript_global_decl_check_name(mt, fn->name, true);
+        break;
+    }
+    case JS_AST_NODE_EXPORT_DECLARATION: {
+        JsExportNode* exp = (JsExportNode*)node;
+        jm_emit_evalscript_global_decl_prechecks(mt, exp->declaration);
+        break;
+    }
+    case JS_AST_NODE_BLOCK_STATEMENT: {
+        JsBlockNode* block = (JsBlockNode*)node;
+        for (JsAstNode* s = block->statements; s; s = s->next)
+            jm_emit_evalscript_global_decl_prechecks(mt, s);
+        break;
+    }
+    case JS_AST_NODE_IF_STATEMENT: {
+        JsIfNode* ifn = (JsIfNode*)node;
+        jm_emit_evalscript_global_decl_prechecks(mt, ifn->consequent);
+        jm_emit_evalscript_global_decl_prechecks(mt, ifn->alternate);
+        break;
+    }
+    case JS_AST_NODE_SWITCH_STATEMENT: {
+        JsSwitchNode* sw = (JsSwitchNode*)node;
+        for (JsAstNode* c = sw->cases; c; c = c->next)
+            jm_emit_evalscript_global_decl_prechecks(mt, c);
+        break;
+    }
+    case JS_AST_NODE_SWITCH_CASE: {
+        JsSwitchCaseNode* sc = (JsSwitchCaseNode*)node;
+        for (JsAstNode* s = sc->consequent; s; s = s->next)
+            jm_emit_evalscript_global_decl_prechecks(mt, s);
+        break;
+    }
+    case JS_AST_NODE_FOR_STATEMENT: {
+        JsForNode* for_node = (JsForNode*)node;
+        jm_emit_evalscript_global_decl_prechecks(mt, for_node->init);
+        jm_emit_evalscript_global_decl_prechecks(mt, for_node->body);
+        break;
+    }
+    case JS_AST_NODE_FOR_IN_STATEMENT:
+    case JS_AST_NODE_FOR_OF_STATEMENT: {
+        JsForInNode* for_node = (JsForInNode*)node;
+        jm_emit_evalscript_global_decl_prechecks(mt, for_node->left);
+        jm_emit_evalscript_global_decl_prechecks(mt, for_node->body);
+        break;
+    }
+    case JS_AST_NODE_TRY_STATEMENT: {
+        JsTryNode* try_node = (JsTryNode*)node;
+        jm_emit_evalscript_global_decl_prechecks(mt, try_node->block);
+        jm_emit_evalscript_global_decl_prechecks(mt, try_node->handler);
+        jm_emit_evalscript_global_decl_prechecks(mt, try_node->finalizer);
+        break;
+    }
+    case JS_AST_NODE_CATCH_CLAUSE: {
+        JsCatchNode* catch_node = (JsCatchNode*)node;
+        jm_emit_evalscript_global_decl_prechecks(mt, catch_node->body);
+        break;
+    }
+    case JS_AST_NODE_LABELED_STATEMENT: {
+        JsLabeledStatementNode* label = (JsLabeledStatementNode*)node;
+        jm_emit_evalscript_global_decl_prechecks(mt, label->body);
+        break;
+    }
+    default:
+        break;
+    }
+}
+
 void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     if (!root || root->node_type != JS_AST_NODE_PROGRAM) {
         log_error("js-mir: expected program node");
@@ -3070,6 +3185,14 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     jm_call_void_1(mt, "js_set_strict_mode",
         MIR_T_I64, MIR_new_int_op(mt->ctx, (mt->is_global_strict || mt->is_module) ? 1 : 0));
 
+    if (!mt->is_global_strict && !mt->is_module) {
+        JsAstNode* precheck_stmt = program->body;
+        while (precheck_stmt) {
+            jm_emit_evalscript_global_decl_prechecks(mt, precheck_stmt);
+            precheck_stmt = precheck_stmt->next;
+        }
+    }
+
     // AnnexB B.3.3.3 step 1.a.ii.6.b: For sloppy-mode global eval, pre-initialize
     // globalThis.<name> = undefined for nested function declarations (those that
     // would be created via CreateGlobalFunctionBinding).  This ensures the binding
@@ -3082,13 +3205,11 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             jm_name_hash, jm_name_cmp, NULL, NULL);
         JsAstNode* s = program->body;
         while (s) { jm_collect_all_let_const_names_recursive(s, annexb_lex_collisions); s = s->next; }
-        MIR_reg_t global_reg = jm_call_0(mt, "js_get_global_this", MIR_T_I64);
         size_t aiter = 0; void* aitem;
         while (hashmap_iter(mt->module_consts, &aiter, &aitem)) {
             JsModuleConstEntry* mce = (JsModuleConstEntry*)aitem;
             if (mce->const_type != MCONST_MODVAR) continue;
             if (!mce->is_nested_func_hoist) continue;
-            if ((int)mce->int_val < preamble_var_limit) continue;
             // Suppress if a let/const in the program shadows this name
             JsNameSetEntry lex_lookup;
             memset(&lex_lookup, 0, sizeof(lex_lookup));
@@ -3096,6 +3217,13 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             if (hashmap_get(annexb_lex_collisions, &lex_lookup)) {
                 log_debug("js-mir: AnnexB suppress globalThis pre-init for %s (let/const collision)", mce->name);
                 mce->annexb_suppressed = true;
+                MIR_reg_t unresolved_reg = jm_new_reg(mt, "annexb_unres", MIR_T_I64);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, unresolved_reg),
+                    MIR_new_int_op(mt->ctx, (int64_t)ITEM_ERROR)));
+                jm_call_void_2(mt, "js_set_module_var",
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mce->int_val),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, unresolved_reg));
                 continue;
             }
             const char* js_name = mce->name;
@@ -3113,8 +3241,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_reg_op(mt->ctx, undef_reg),
                 MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEF_VAL)));
-            jm_call_3(mt, "js_property_set", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, global_reg),
+            jm_call_void_2(mt, "js_define_global_var_property",
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, undef_reg));
             log_debug("js-mir: AnnexB pre-init globalThis.%s = undefined", js_name);
@@ -3982,7 +4109,6 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     if (mt->is_eval_direct && !mt->is_global_strict && !mt->is_module && mt->module_consts) {
         int preamble_limit = (mt->preamble_entries && mt->preamble_entry_count > 0)
             ? mt->preamble_var_count : 0;
-        MIR_reg_t global_reg = jm_call_0(mt, "js_get_global_this", MIR_T_I64);
         size_t ev_iter = 0; void* ev_item;
         while (hashmap_iter(mt->module_consts, &ev_iter, &ev_item)) {
             JsModuleConstEntry* mce = (JsModuleConstEntry*)ev_item;
@@ -4006,8 +4132,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             MIR_reg_t key_reg = jm_box_string_literal(mt, js_name, strlen(js_name));
             MIR_reg_t val_reg = jm_call_1(mt, "js_get_module_var", MIR_T_I64,
                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mce->int_val));
-            jm_call_3(mt, "js_property_set", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, global_reg),
+            jm_call_void_2(mt, "js_set_global_property",
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, val_reg));
             log_debug("js-mir: eval export var '%s' to globalThis", js_name);

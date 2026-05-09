@@ -11487,6 +11487,58 @@ extern "C" void js_set_global_property(Item key, Item value) {
     Item global = js_get_global_this();
     js_property_set(global, key, value);
 }
+extern "C" void js_define_global_var_property(Item key, Item value) {
+    Item global = js_get_global_this();
+    Item name = js_to_string(key);
+    if (get_type_id(name) != LMD_TYPE_STRING) return;
+    String* str = it2s(name);
+    if (!str || str->len <= 0 || str->len >= 200) return;
+    JsPropertyDescriptor pd;
+    memset(&pd, 0, sizeof(pd));
+    pd.flags = JS_PD_HAS_VALUE | JS_PD_HAS_WRITABLE | JS_PD_HAS_ENUMERABLE |
+        JS_PD_HAS_CONFIGURABLE | JS_PD_WRITABLE | JS_PD_ENUMERABLE;
+    js_pd_set_configurable(&pd, true);
+    pd.value = value;
+    bool is_new_property = !it2b(js_has_own_property(global, key));
+    if (!is_new_property) return;
+    if (is_new_property && get_type_id(value) == LMD_TYPE_UNDEFINED && get_type_id(global) == LMD_TYPE_MAP) {
+        map_put(global.map, str, value, js_input);
+        is_new_property = false;
+    }
+    js_define_own_property_from_descriptor(global, str->chars, (int)str->len, &pd, is_new_property);
+}
+
+extern "C" void js_evalscript_check_global_var_decl(Item key) {
+    if (!js_262_eval_script_is_active()) return;
+    key = js_to_property_key(key);
+    if (js_check_exception()) return;
+    Item global = js_get_global_this();
+    if (it2b(js_has_own_property(global, key))) return;
+    if (js_is_truthy(js_object_is_extensible(global))) return;
+    js_throw_type_error("Cannot declare global var on non-extensible global object");
+}
+
+extern "C" void js_evalscript_check_global_function_decl(Item key) {
+    if (!js_262_eval_script_is_active()) return;
+    key = js_to_property_key(key);
+    if (js_check_exception()) return;
+    Item global = js_get_global_this();
+    Item name = js_to_string(key);
+    if (get_type_id(name) != LMD_TYPE_STRING) return;
+    String* str = it2s(name);
+    JsPropertyDescriptor desc;
+    bool has_desc = js_get_own_property_descriptor(global, str->chars, (int)str->len, &desc);
+    if (!has_desc) {
+        if (js_is_truthy(js_object_is_extensible(global))) return;
+        js_throw_type_error("Cannot declare global function on non-extensible global object");
+        return;
+    }
+    if (js_pd_is_configurable(&desc)) return;
+    if (js_pd_is_data(&desc) &&
+        (desc.flags & JS_PD_WRITABLE) &&
+        (desc.flags & JS_PD_ENUMERABLE)) return;
+    js_throw_type_error("Cannot declare global function over incompatible global property");
+}
 
 // Direct eval bridge: function-scope eval code is compiled as a small script,
 // so temporarily expose caller var/parameter bindings through global lookup.
