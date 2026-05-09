@@ -259,6 +259,25 @@ static bool is_rich_editable_host(View* view) {
     return ce && strcmp(ce, "false") != 0;
 }
 
+static bool text_target_allows_caret(View* target) {
+    if (!target) return false;
+    DomNode* node = (DomNode*)target;
+    while (node) {
+        if (node->node_type == DOM_NODE_ELEMENT) {
+            DomElement* elem = (DomElement*)node;
+            if (elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
+                elem->form && elem->form->disabled) {
+                return false;
+            }
+            if (elem->has_attribute("data-editable")) return true;
+            const char* ce = elem->get_attribute("contenteditable");
+            if (ce && strcmp(ce, "false") != 0) return true;
+        }
+        node = node->parent;
+    }
+    return true;
+}
+
 static bool event_inside_block(EventContext* evcon, ViewBlock* block) {
     if (!evcon || !block) return false;
     MousePositionEvent* event = &evcon->event.mouse_position;
@@ -1836,10 +1855,19 @@ static bool dispatch_html_event_handler(EventContext* evcon, View* target, const
                 }
 
                 // Invoke: function __evt_handler_N() { ... }
-                // JS handler functions return Item but we ignore the return value
                 typedef Item (*js_handler_fn)(void);
                 js_handler_fn fn = (js_handler_fn)handler->compiled_func;
-                fn();
+                Item handler_result = fn();
+                bool handler_prevented = false;
+                if (window_event_set && js_event_is_default_prevented(synth_ev)) {
+                    handler_prevented = true;
+                }
+                if (get_type_id(handler_result) == LMD_TYPE_BOOL && !handler_result.bool_val) {
+                    handler_prevented = true;
+                }
+                if (handler_prevented) {
+                    evcon->default_prevented = true;
+                }
 
                 if (window_event_set) {
                     js_restore_window_event_for_legacy(prev_window_event);
@@ -4199,13 +4227,18 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 if (prevented) evcon.default_prevented = true;
             }
 
-            // Update focus if target is focusable (mouse-triggered focus)
-            if (is_view_focusable(evcon.target)) {
+            // Update focus if target is focusable (mouse-triggered focus).
+            // A canceled mousedown suppresses the browser focus default action;
+            // toolbar controls use this to keep text-control selection active.
+            if (!evcon.default_prevented && is_view_focusable(evcon.target)) {
                 update_focus_state(&evcon, evcon.target, false);  // from_keyboard=false
             }
 
-            // Handle click in text - position caret or start selection
-            if (evcon.target->view_type == RDT_VIEW_TEXT && evcon.target_text_rect) {
+            // Handle click in text - position caret or start selection.
+            // This is a mousedown default action, so a canceled mousedown must
+            // leave the existing text-control selection intact.
+            if (!evcon.default_prevented && evcon.target->view_type == RDT_VIEW_TEXT &&
+                evcon.target_text_rect && text_target_allows_caret(evcon.target)) {
                 ViewText* text = (ViewText*)evcon.target;
                 TextRect* rect = evcon.target_text_rect;
                 // Setup font from text view (critical for correct glyph advance calculation)
@@ -4306,13 +4339,14 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 // Restore font
                 evcon.font = saved_font;
                 evcon.need_repaint = true;
-            } else if (evcon.target->is_element()) {
+            } else if (!evcon.default_prevented && evcon.target->is_element()) {
                 DomElement* target_elem = (DomElement*)evcon.target;
 
                 // Text input form controls: place caret inside the input
                 if (target_elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
                     target_elem->form &&
-                    target_elem->form->control_type == FORM_CONTROL_TEXT) {
+                    target_elem->form->control_type == FORM_CONTROL_TEXT &&
+                    !target_elem->form->disabled) {
 
                     ViewBlock* input_block = (ViewBlock*)target_elem;
                     const char* value = target_elem->form->value;
@@ -4421,7 +4455,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
                 } else if (target_elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
                            target_elem->form &&
-                           target_elem->form->control_type == FORM_CONTROL_TEXTAREA) {
+                           target_elem->form->control_type == FORM_CONTROL_TEXTAREA &&
+                           !target_elem->form->disabled) {
                     // Textarea form controls: click-to-position caret
                     ViewBlock* ta_block = (ViewBlock*)target_elem;
                     const char* value = target_elem->form->value;
@@ -5136,6 +5171,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             had_keydown_selection = true;
             selection_get_range(state, &keydown_sel_start, &keydown_sel_end_capture);
         }
+        int keydown_caret_offset = 0;
+        bool had_keydown_caret = caret_get_offset(state, &keydown_caret_offset);
 
         // Rich-text editing path (Phase R4): translate platform key events
         // into browser-like beforeinput intents for data-editable/contenteditable
@@ -5352,8 +5389,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     bool editable = !focus_elem->form->readonly && !focus_elem->form->disabled;
                     if (had_lambda_keydown) {
                         // Lambda handler deleted char before caret; move caret back by 1 char
-                        if (cur > 0 && value) {
-                            int new_off = cur - 1;
+                        int base_off = had_keydown_caret ? keydown_caret_offset : cur;
+                        if (base_off > 0 && value) {
+                            int new_off = base_off - 1;
                             while (new_off > 0 && ((unsigned char)value[new_off] & 0xC0) == 0x80)
                                 new_off--;
                             int new_len = focus_elem->form->value
@@ -5770,9 +5808,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             int new_len = focus_elem->form->value
                                 ? (int)strlen(focus_elem->form->value) : 0;
                             caret_set(state, focused, keydown_sel_start <= new_len ? keydown_sel_start : new_len);
-                        } else if (cur > 0 && value) {
+                        } else if ((had_keydown_caret ? keydown_caret_offset : cur) > 0 && value) {
                             // single char delete: move caret back by 1 UTF-8 char
-                            int new_off = cur - 1;
+                            int base_off = had_keydown_caret ? keydown_caret_offset : cur;
+                            int new_off = base_off - 1;
                             while (new_off > 0 && ((unsigned char)value[new_off] & 0xC0) == 0x80)
                                 new_off--;
                             int new_len = focus_elem->form->value
@@ -5835,7 +5874,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             // normal enter: advance caret by 1 byte
                             int new_len = focus_elem->form->value
                                 ? (int)strlen(focus_elem->form->value) : 0;
-                            int new_off = cur + 1;
+                            int new_off = (had_keydown_caret ? keydown_caret_offset : cur) + 1;
                             caret_set(state, focused, new_off <= new_len ? new_off : new_len);
                         }
                     } else if (editable) {
@@ -6102,6 +6141,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             had_input_selection = true;
             selection_get_range(state, &input_sel_start, &input_sel_end);
         }
+        int input_caret_offset = 0;
+        bool had_input_caret = caret_get_offset(state, &input_caret_offset);
 
         // Rich-text text insertion is driven through beforeinput/insertText.
         // This avoids the legacy contenteditable TODO path and lets Lambda
@@ -6151,7 +6192,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 int caret_offset = 0;
                 if (had_lambda_handler) {
                     // legacy path: handler mutated value; just advance caret.
-                    if (caret_get_offset(state, &caret_offset)) {
+                    if (had_input_caret || caret_get_offset(state, &caret_offset)) {
                         uint32_t cp = text_event->codepoint;
                         int char_bytes = (cp < 0x80) ? 1 : (cp < 0x800) ? 2 : (cp < 0x10000) ? 3 : 4;
                         int new_off;
@@ -6159,7 +6200,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             new_off = input_sel_start + char_bytes;
                             selection_clear(state);
                         } else {
-                            new_off = caret_offset + char_bytes;
+                            new_off = (had_input_caret ? input_caret_offset : caret_offset) + char_bytes;
                         }
                         const char* val = elem->form->value;
                         int val_len = val ? (int)strlen(val) : 0;

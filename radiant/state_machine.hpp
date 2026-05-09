@@ -103,6 +103,9 @@ void state_end_event_cascade(RadiantState* state,
 bool radiant_state_validate_interaction(RadiantState* state,
                                         StateValidationReport* report);
 
+/* Debug-only invariant assertion. Compiles to a no-op under NDEBUG. */
+void radiant_state_assert_valid(RadiantState* state, const char* context);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

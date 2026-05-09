@@ -501,8 +501,18 @@ extern "C" void legacy_sync_from_dom_selection(RadiantState* state) {
     // Empty selection: clear legacy state too.
     if (ds->range_count == 0 || !ds->anchor.node) {
         if (state->selection) {
+            state->selection->anchor_view = NULL;
+            state->selection->focus_view = NULL;
+            state->selection->view = NULL;
+            state->selection->anchor_offset = 0;
+            state->selection->focus_offset = 0;
             state->selection->is_collapsed = true;
             state->selection->is_selecting = false;
+        }
+        if (state->caret) {
+            state->caret->view = NULL;
+            state->caret->char_offset = 0;
+            state->caret->visible = false;
         }
         state->needs_repaint = true;
         return;
@@ -707,6 +717,14 @@ bool state_has(RadiantState* state, void* node, const char* name) {
     return hashmap_get(state->state_map, &query) != NULL;
 }
 
+static bool s_in_batch = false;
+
+static void state_assert_after_mutation(RadiantState* state, const char* context) {
+    if (!state) return;
+    if (state->transition_depth > 0 || state->active_cascade_depth > 0 || s_in_batch) return;
+    radiant_state_assert_valid(state, context);
+}
+
 void state_set(RadiantState* state, void* node, const char* name, Item value) {
     if (!state || !node || !name) return;
 
@@ -746,6 +764,7 @@ void state_set(RadiantState* state, void* node, const char* name, Item value) {
     state->version++;
 
     log_debug("state_set: node=%p, name=%s, version=%llu", node, name, state->version);
+    state_assert_after_mutation(state, "state_set");
 }
 
 void state_set_bool(RadiantState* state, void* node, const char* name, bool value) {
@@ -771,6 +790,7 @@ void state_remove(RadiantState* state, void* node, const char* name) {
         state->version++;
 
         log_debug("state_remove: node=%p, name=%s", node, name);
+        state_assert_after_mutation(state, "state_remove");
     }
 }
 
@@ -910,17 +930,27 @@ void state_on_change(RadiantState* state, void* node, const char* name,
 // Batch Operations
 // ============================================================================
 
-static bool s_in_batch = false;
-
 void state_begin_batch(RadiantState* state) {
     (void)state;
     s_in_batch = true;
 }
 
+static void state_sync_selection_before_assert(RadiantState* state) {
+    if (!state) return;
+    if (state->selection && !state->selection->is_collapsed) {
+        dom_selection_sync_from_legacy_selection(state);
+        legacy_sync_from_dom_selection(state);
+    } else if (state->caret && state->caret->view) {
+        dom_selection_sync_from_legacy_caret(state);
+        legacy_sync_from_dom_selection(state);
+    }
+}
+
 void state_end_batch(RadiantState* state) {
-    (void)state;
+    state_sync_selection_before_assert(state);
     s_in_batch = false;
     // TODO: trigger deferred callbacks
+    radiant_state_assert_valid(state, "state_end_batch");
 }
 
 // ============================================================================
@@ -2362,6 +2392,11 @@ void caret_move_line(RadiantState* state, int delta, struct UiContext* uicon) {
 void caret_clear(RadiantState* state) {
     if (!state) return;
 
+    DomSelection* selection = state->dom_selection;
+    if (selection && selection->range_count > 0 && selection->is_collapsed) {
+        dom_selection_remove_all_ranges(selection);
+    }
+
     if (state->caret) {
         memset(state->caret, 0, sizeof(CaretState));
     }
@@ -2992,6 +3027,7 @@ void selection_clear(RadiantState* state) {
     } else {
         dom_selection_remove_all_ranges(selection);
     }
+    legacy_sync_from_dom_selection(state);
     if (state->selection) {
         state->selection->is_selecting = false;
     }
@@ -3195,6 +3231,36 @@ static void focus_log_transition(RadiantState* state, const char* transition,
     event_state_log_finish_record(state->active_event_log, &w);
 }
 
+static void focus_sync_text_control_state(RadiantState* state, View* view) {
+    if (!state) return;
+
+    if (view && view->is_element() && tc_is_text_control((DomElement*)view)) {
+        DomElement* elem = (DomElement*)view;
+        tc_ensure_init(elem);
+        FormControlProp* form = elem->form;
+        tc_set_active_element(elem);
+        tc_set_last_focused_text_control(elem);
+        if (!form) return;
+
+        uint32_t start = tc_utf16_to_utf8_offset(form->current_value,
+            form->current_value_len, form->selection_start);
+        uint32_t end = tc_utf16_to_utf8_offset(form->current_value,
+            form->current_value_len, form->selection_end);
+        if (start == end) {
+            caret_set(state, view, (int)start);
+        } else if (form->selection_direction == 2) {
+            selection_set(state, view, (int)end, (int)start);
+        } else {
+            selection_set(state, view, (int)start, (int)end);
+        }
+        return;
+    }
+
+    if (tc_get_active_element()) tc_set_active_element(NULL);
+    if (state->caret && state->caret->view) caret_clear(state);
+    if (state->selection && state->selection->anchor_view) selection_clear(state);
+}
+
 void focus_set(RadiantState* state, View* view, bool from_keyboard) {
     if (!state) return;
 
@@ -3217,6 +3283,11 @@ void focus_set(RadiantState* state, View* view, bool from_keyboard) {
     FocusState* focus = state->focus;
     View* old_focus = focus->current;
 
+    if (old_focus && old_focus != view && old_focus->is_element() &&
+        tc_is_text_control((DomElement*)old_focus)) {
+        tc_set_active_element(NULL);
+    }
+
     // Store previous focus for restoration
     focus->previous = old_focus;
     focus->current = view;
@@ -3238,6 +3309,10 @@ void focus_set(RadiantState* state, View* view, bool from_keyboard) {
         focus_set_pseudo(state, view, STATE_FOCUS_VISIBLE,
                          PSEUDO_STATE_FOCUS_VISIBLE, from_keyboard);
         focus_set_within_chain(state, view, true);
+    }
+
+    if (old_focus != view) {
+        focus_sync_text_control_state(state, view);
     }
 
     state->needs_repaint = true;
@@ -3268,6 +3343,10 @@ void focus_clear(RadiantState* state) {
     }
 
     View* old_focus = focus->current;
+    if (old_focus && old_focus->is_element() &&
+        tc_is_text_control((DomElement*)old_focus)) {
+        tc_set_active_element(NULL);
+    }
     focus->previous = focus->current;
     focus->current = NULL;
     focus->from_keyboard = false;
