@@ -3,7 +3,7 @@
  *
  * Extracts TrueType glyph outlines (contour points and flags) from the
  * glyf and loca tables. Used by the ThorVG rasterizer on Linux/WASM
- * to render glyphs without FreeType.
+ * to render glyphs from parsed OpenType tables.
  *
  * Supports simple glyphs (quadratic Bézier contours) and compound glyphs
  * (component references with affine transforms, recursively flattened).

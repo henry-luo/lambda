@@ -1,6 +1,6 @@
 // render_texnode.cpp - Direct TexNode Tree Rendering Implementation
 //
-// Renders TexNode trees directly to the screen using FreeType + ThorVG.
+// Renders TexNode trees directly to the screen using the shared font backend + ThorVG.
 // Integrates with Radiant's font system for font loading and caching.
 
 #include "render_texnode.hpp"

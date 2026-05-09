@@ -731,7 +731,7 @@ void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
     }
 
     // Use unified intrinsic sizing API (same as flex layout)
-    // This uses FreeType for accurate text measurement
+    // This uses the shared font backend for accurate text measurement
     if (!has_explicit_width) {
         IntrinsicSizes item_sizes = measure_element_intrinsic_widths(lycon, (DomElement*)item);
         *min_width = item_sizes.min_content;

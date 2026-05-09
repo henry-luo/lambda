@@ -4,7 +4,7 @@
  * Key-based face cache: "family:weight:slant:size" → FontHandle.
  * Supports LRU eviction when cache exceeds configured maximum.
  *
- * Replaces the ad-hoc fontface_map (hashmap<name, FT_Face>) in
+ * Replaces the ad-hoc fontface_map in
  * radiant/font.cpp with a proper ref-counted cache.
  *
  * Copyright (c) 2025 Lambda Script Project

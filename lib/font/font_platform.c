@@ -500,7 +500,7 @@ float get_cjk_system_line_height(float font_size) {
 #else
 
 /**
- * Non-macOS stub: Font metrics via FreeType only.
+ * Non-macOS stub: platform-specific font metrics are not available here.
  * Returns 0 to indicate platform metrics not available.
  */
 int get_font_metrics_platform(const char* font_family, float font_size,
@@ -691,6 +691,16 @@ char* font_platform_find_emoji_font(uint32_t codepoint, int* out_face_index) {
     return NULL;
 }
 
+#elif defined(_WIN32)
+
+char* font_platform_find_codepoint_font(uint32_t codepoint, int* out_face_index) {
+    return font_backend_dwrite_find_codepoint_font(codepoint, false, out_face_index);
+}
+
+char* font_platform_find_emoji_font(uint32_t codepoint, int* out_face_index) {
+    return font_backend_dwrite_find_codepoint_font(codepoint, true, out_face_index);
+}
+
 #else
 
 char* font_platform_find_codepoint_font(uint32_t codepoint, int* out_face_index) {
@@ -710,10 +720,9 @@ char* font_platform_find_emoji_font(uint32_t codepoint, int* out_face_index) {
 // ============================================================================
 // CoreText GPOS kerning (macOS only)
 //
-// FreeType's FT_Get_Kerning only reads the legacy 'kern' table. Modern fonts
-// (especially Apple's System Font / SF Pro) store kerning in the OpenType GPOS
-// table. CoreText reads GPOS natively, so we use it as a fallback for pair
-// kerning when FreeType reports has_kerning=false.
+// Modern fonts (especially Apple's System Font / SF Pro) often store kerning in
+// the OpenType GPOS table rather than the legacy 'kern' table. CoreText reads
+// GPOS natively, so we use it as a platform fallback for pair kerning.
 // ============================================================================
 
 #ifdef __APPLE__
@@ -724,7 +733,7 @@ void* font_platform_create_ct_font(const char* postscript_name,
                                     int css_weight) {
     CTFontRef ct_font = NULL;
 
-    // SFNS.ttf (System Font / -apple-system) is a variable font whose FreeType
+    // SFNS.ttf (System Font / -apple-system) is a variable font whose
     // PostScript names like "SFNS_17opsz" are NOT registered in the macOS font
     // catalog.  CTFontCreateWithName would silently fall back to Helvetica.
     // Use the system UI font API which gives exactly the font Chrome uses.
@@ -813,7 +822,7 @@ void font_platform_destroy_ct_font(void* ct_font_ref) {
 /**
  * Get the nominal (un-kerned) advance width of a single glyph using CoreText.
  *
- * CoreText and FreeType can differ for variable fonts like SFNS.ttf due to
+ * CoreText and table-only metrics can differ for variable fonts like SFNS.ttf due to
  * optical-size axis selection.  CTFont is created at CSS_size so that CoreText
  * selects the same opsz as Chrome; the returned advance is therefore already
  * in CSS pixels and requires no pixel_ratio division.

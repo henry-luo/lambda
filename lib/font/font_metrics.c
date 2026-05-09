@@ -1,7 +1,7 @@
 /**
  * Lambda Unified Font Module — Font Metrics
  *
- * Extracts and caches per-face metrics: FreeType size metrics, OS/2
+ * Extracts and caches per-face metrics: OS/2
  * table values (typo ascender/descender, x-height, cap-height),
  * hhea metrics, kerning flag, space width.
  *
@@ -32,7 +32,7 @@
  * Convert font design units to CSS pixels.
  * scale = size_px / units_per_em * bitmap_scale
  *
- * Uses FontTables head.units_per_em when available, falls back to FreeType.
+ * Uses FontTables head.units_per_em.
  */
 static float units_to_css_px(FontHandle* handle) {
     float upem = 0;
@@ -162,11 +162,7 @@ const FontMetrics* font_get_metrics(FontHandle* handle) {
     }
 
     FontTables* ft = handle->tables;
-#ifdef LAMBDA_HAS_FREETYPE
-    if (!handle->ft_face && !ft) return NULL;
-#else
     if (!ft) return NULL;
-#endif
 
     FontMetrics* m = &handle->metrics;
     float bscale = handle->bitmap_scale; // 1.0 for scalable fonts, <1 for fixed-size bitmap fonts
@@ -458,8 +454,8 @@ void font_get_normal_lh_split(FontHandle* handle, float* out_ascender, float* ou
  *
  * Matches browser's Range.getClientRects() which uses font metrics,
  * not CSS line-height. For Apple's classic fonts (Times/Helvetica/Courier),
- * uses CoreText with 15% hack. For all other fonts, returns
- * FreeType metrics.height (ascent + descent).
+ * uses CoreText with 15% hack. For all other fonts, returns the
+ * font metrics cell height (ascent + descent).
  *
  * Returns cell height in CSS pixels.
  */

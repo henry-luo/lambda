@@ -1678,7 +1678,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                     tt_node = tt_node->parent;
                 }
 
-                // Use accurate FreeType-based measurement
+                // Use accurate backend font measurement
                 TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, measure_text, measure_len, text_transform);
                 min_width = widths.min_content;
                 max_width = widths.max_content;

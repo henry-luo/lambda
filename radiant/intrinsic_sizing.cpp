@@ -207,7 +207,7 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
             }
 
             // Use the same space_width as layout_text.cpp for consistency
-            // This is pre-calculated in font.cpp using FT_Load_Char with FT_LOAD_NO_HINTING
+            // This is pre-calculated in font.cpp using backend font metrics.
             float space_width = 4.0f;  // Default fallback
             if (lycon->font.style && lycon->font.style->space_width > 0) {
                 space_width = lycon->font.style->space_width;

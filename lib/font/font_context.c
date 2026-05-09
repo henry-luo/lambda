@@ -1,9 +1,8 @@
 /**
  * Lambda Unified Font Module — Context Lifecycle
  *
- * Manages the FontContext: FreeType library initialization with custom
- * FT_Memory routing through Pool, arena creation, database setup, and
- * orderly shutdown.
+ * Manages the FontContext: arena creation, database setup, cache lifecycle,
+ * and orderly shutdown.
  *
  * Copyright (c) 2025 Lambda Script Project
  */
@@ -17,28 +16,6 @@
 static inline int munmap(void* addr, size_t len) { (void)addr; (void)len; return 0; }
 #endif
 #include "../memtrack.h"
-
-// ============================================================================
-// FreeType Custom Memory Allocator — routes through Lambda Pool
-// ============================================================================
-
-#ifdef LAMBDA_HAS_FREETYPE
-static void* ft_pool_alloc(FT_Memory memory, long size) {
-    Pool* pool = (Pool*)memory->user;
-    return pool_alloc(pool, (size_t)size);
-}
-
-static void ft_pool_free(FT_Memory memory, void* block) {
-    Pool* pool = (Pool*)memory->user;
-    pool_free(pool, block);
-}
-
-static void* ft_pool_realloc(FT_Memory memory, long cur_size, long new_size, void* block) {
-    (void)cur_size;
-    Pool* pool = (Pool*)memory->user;
-    return pool_realloc(pool, block, (size_t)new_size);
-}
-#endif
 
 // ============================================================================
 // Face cache hashmap callbacks
@@ -152,39 +129,10 @@ FontContext* font_context_create(FontContextConfig* config) {
     if (ctx->config.max_cached_glyphs <= 0) ctx->config.max_cached_glyphs = 4096;
     if (ctx->config.pixel_ratio <= 0.0f) ctx->config.pixel_ratio = 1.0f;
 
-    // set up FreeType custom memory allocator routing through our pool (Windows only)
-#ifdef LAMBDA_HAS_FREETYPE
-    ctx->ft_memory.user    = pool;
-    ctx->ft_memory.alloc   = ft_pool_alloc;
-    ctx->ft_memory.free    = ft_pool_free;
-    ctx->ft_memory.realloc = ft_pool_realloc;
-
-    // initialize FreeType with custom memory
-    FT_Error error = FT_New_Library(&ctx->ft_memory, &ctx->ft_library);
-    if (error) {
-        log_error("font_context_create: FT_New_Library failed (error %d)", error);
-        arena_destroy(ctx->glyph_arena);
-        if (owns_arena) arena_destroy(arena);
-        if (owns_pool)  pool_destroy(pool);
-        return NULL;
-    }
-
-    // add default FreeType modules
-    FT_Add_Default_Modules(ctx->ft_library);
-
-    // enable LCD subpixel filtering if requested
-    if (ctx->config.enable_lcd_rendering) {
-        FT_Library_SetLcdFilter(ctx->ft_library, FT_LCD_FILTER_DEFAULT);
-    }
-#endif
-
     // create font database
     ctx->database = font_database_create_internal(pool, arena);
     if (!ctx->database) {
         log_error("font_context_create: failed to create font database");
-#ifdef LAMBDA_HAS_FREETYPE
-        FT_Done_Library(ctx->ft_library);
-#endif
         arena_destroy(ctx->glyph_arena);
         if (owns_arena) arena_destroy(arena);
         if (owns_pool)  pool_destroy(pool);
@@ -279,14 +227,6 @@ void font_context_destroy(FontContext* ctx) {
         font_database_destroy_internal(ctx->database);
         ctx->database = NULL;
     }
-
-    // shut down FreeType (Windows only)
-#ifdef LAMBDA_HAS_FREETYPE
-    if (ctx->ft_library) {
-        FT_Done_Library(ctx->ft_library);
-        ctx->ft_library = NULL;
-    }
-#endif
 
     // skip glyph arena destroy — pool_destroy will free all allocations
     // via rpmalloc_heap_free_all. Individual arena_destroy would double-free.
@@ -437,26 +377,8 @@ bool font_context_scan(FontContext* ctx) {
 }
 
 // ============================================================================
-// Migration helpers — allow Radiant to access internals during transition
+// Internal helpers — allow Radiant to access shared font database state
 // ============================================================================
-
-void* font_context_get_ft_library(FontContext* ctx) {
-#ifdef LAMBDA_HAS_FREETYPE
-    return ctx ? ctx->ft_library : NULL;
-#else
-    (void)ctx;
-    return NULL;
-#endif
-}
-
-void* font_handle_get_ft_face(FontHandle* handle) {
-#ifdef LAMBDA_HAS_FREETYPE
-    return handle ? handle->ft_face : NULL;
-#else
-    (void)handle;
-    return NULL;
-#endif
-}
 
 struct FontDatabase* font_context_get_database(FontContext* ctx) {
     return ctx ? ctx->database : NULL;
@@ -511,20 +433,7 @@ void font_handle_release(FontHandle* handle) {
         // pressure, causing SIGSEGV in heap_free_all.
         bool bulk_destroy = (handle->ctx && handle->ctx->destroying);
 
-        // destroy the FreeType face (only if we own it)
-#ifdef LAMBDA_HAS_FREETYPE
-        if (handle->ft_face && !handle->borrowed_face) {
-            FT_Done_Face(handle->ft_face);
-            handle->ft_face = NULL;
-        }
-#endif
-#ifndef __APPLE__
-        // destroy ThorVG rasterization context
-        if (handle->tvg_raster_ctx) {
-            font_rasterize_tvg_destroy(handle->tvg_raster_ctx);
-            handle->tvg_raster_ctx = NULL;
-        }
-#endif
+        font_backend_destroy(handle);
         // destroy FontTables (pool-allocated — skip during bulk destroy)
         if (handle->tables && handle->ctx && !bulk_destroy) {
             font_tables_close(handle->tables, handle->ctx->pool);
@@ -540,17 +449,6 @@ void font_handle_release(FontHandle* handle) {
             hashmap_free(handle->kern_cache);
             handle->kern_cache = NULL;
         }
-#ifdef __APPLE__
-        // release CoreText fonts
-        if (handle->ct_font_ref) {
-            font_platform_destroy_ct_font(handle->ct_font_ref);
-            handle->ct_font_ref = NULL;
-        }
-        if (handle->ct_raster_ref) {
-            font_platform_destroy_ct_font(handle->ct_raster_ref);
-            handle->ct_raster_ref = NULL;
-        }
-#endif
         // free font file data: decrement ref in file_data_cache, or free directly
         if (handle->file_data_path && handle->ctx->file_data_cache) {
             FontFileDataEntry search = {.path = handle->file_data_path, .data = NULL, .data_len = 0};
@@ -759,44 +657,3 @@ float font_get_x_height_ratio(FontHandle* handle) {
 
     return 0.5f; // fallback
 }
-
-// ============================================================================
-// Font handle wrapping — borrow an existing FT_Face
-// ============================================================================
-
-#ifdef LAMBDA_HAS_FREETYPE
-FontHandle* font_handle_wrap(FontContext* ctx, void* ft_face_ptr, float size_px) {
-    if (!ctx || !ft_face_ptr) return NULL;
-
-    FT_Face face = (FT_Face)ft_face_ptr;
-    float pixel_ratio = (ctx->config.pixel_ratio > 0) ? ctx->config.pixel_ratio : 1.0f;
-
-    FontHandle* handle = (FontHandle*)pool_calloc(ctx->pool, sizeof(FontHandle));
-    if (!handle) return NULL;
-
-    handle->ft_face          = face;
-    handle->ref_count        = 1;
-    handle->borrowed_face    = true; // do NOT call FT_Done_Face on release
-    handle->metrics_ready    = false;
-    handle->ctx              = ctx;
-    handle->size_px          = size_px;
-    handle->physical_size_px = size_px * pixel_ratio;
-
-    // copy family name into arena
-    if (face->family_name) {
-        size_t len = strlen(face->family_name);
-        handle->family_name = (char*)arena_alloc(ctx->arena, len + 1);
-        if (handle->family_name) {
-            memcpy(handle->family_name, face->family_name, len + 1);
-        }
-    }
-
-    log_debug("font_handle_wrap: borrowed %s @%.0fpx", face->family_name, size_px);
-    return handle;
-}
-#else
-FontHandle* font_handle_wrap(FontContext* ctx, void* ft_face_ptr, float size_px) {
-    (void)ctx; (void)ft_face_ptr; (void)size_px;
-    return NULL; // FreeType not available on macOS/Linux
-}
-#endif
