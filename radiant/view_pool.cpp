@@ -9,6 +9,7 @@
 #include <cmath>  // for INFINITY
 
 void print_view_group(ViewElement* view_group, StrBuf* buf, int indent);
+extern CssEnum get_white_space_value(DomNode* node);
 
 // Flag to control whether consecutive text nodes are combined during JSON output
 // When true (default), consecutive ViewText nodes are merged for HTML output compatibility
@@ -1049,6 +1050,9 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nul
  * @param indent Current indentation level
  * @return Pointer to the last text node processed (to continue iteration from next sibling)
  */
+static bool text_rect_is_collapsed_whitespace(ViewText* text, TextRect* rect);
+static bool text_has_visible_rect(ViewText* text);
+
 static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int indent) {
     // If text combination is disabled, just print this single text node
     if (!g_combine_text_nodes) {
@@ -1125,18 +1129,10 @@ static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int ind
         bool first_emitted = true;
 
         while (rect) {
-            // Skip zero-width rects that contain only whitespace (e.g., trailing
-            // spaces at line ends).  Chrome's extraction omits these invisible
-            // fragments, so we must match that behaviour for stable comparison.
-            if (rect->width <= 0 && rect->length > 0 && rect->next) {
-                unsigned char* td = text->text_data();
-                bool all_ws = true;
-                for (int i = 0; i < rect->length && all_ws; i++) {
-                    unsigned char ch = td[rect->start_index + i];
-                    if (ch != ' ' && ch != '\t' && ch != '\n' && ch != '\r')
-                        all_ws = false;
-                }
-                if (all_ws) { rect = rect->next; continue; }
+            // browsers do not expose DOMRects for fully-collapsed whitespace.
+            if (text_rect_is_collapsed_whitespace(text, rect)) {
+                rect = rect->next;
+                continue;
             }
 
             if (!first_emitted) strbuf_append_str(buf, ",\n");
@@ -1221,6 +1217,11 @@ static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int ind
 
         // Collect text from all rects
         while (rect) {
+            if (text_rect_is_collapsed_whitespace(text, rect)) {
+                rect = rect->next;
+                continue;
+            }
+
             if (text_data && rect->length > 0) {
                 int copy_len = min((int)(sizeof(combined_content) - combined_len - 1), rect->length);
                 if (copy_len > 0) {
@@ -1244,6 +1245,10 @@ static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int ind
 
             rect = rect->next;
         }
+    }
+
+    if (combined_len <= 0 || min_x == INFINITY) {
+        return (View*)text_nodes[text_node_count - 1].text;
     }
 
     // Output combined text node
@@ -1490,9 +1495,6 @@ static void print_display_none_json(ViewElement* elem, StrBuf* buf, int indent) 
     strbuf_append_str(buf, "}");
 }
 
-static bool text_has_visible_rect(ViewText* text);
-static bool should_skip_collapsed_text_before_form_control(View* child);
-
 // Helper to print children, skipping anonymous wrapper elements
 static void print_children_json(ViewBlock* block, StrBuf* buf, int indent, bool* first_child) {
     View* child = ((ViewElement*)block)->first_child;
@@ -1537,6 +1539,10 @@ static void print_children_json(ViewBlock* block, StrBuf* buf, int indent, bool*
             View* fl_child = ((ViewElement*)child)->first_child;
             while (fl_child) {
                 if (fl_child->view_type == RDT_VIEW_TEXT) {
+                    if (!text_has_visible_rect((ViewText*)fl_child)) {
+                        fl_child = fl_child->next_sibling;
+                        continue;
+                    }
                     if (!*first_child) { strbuf_append_str(buf, ",\n"); }
                     *first_child = false;
                     View* last_text = print_combined_text_json((ViewText*)fl_child, buf, indent);
@@ -1564,9 +1570,8 @@ static void print_children_json(ViewBlock* block, StrBuf* buf, int indent, bool*
             continue;
         }
 
-        if (should_skip_collapsed_text_before_form_control(child)) {
-            log_debug("JSON: Skipping collapsed whitespace text node");
-            child = child->next();
+        if (child->view_type == RDT_VIEW_TEXT && !text_has_visible_rect((ViewText*)child)) {
+            child = child->next_sibling;
             continue;
         }
 
@@ -2172,6 +2177,12 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent) {
 // JSON generation for text nodes
 static bool text_rect_is_collapsed_whitespace(ViewText* text, TextRect* rect) {
     if (!text || !rect || rect->width > 0 || rect->length <= 0) return false;
+    CssEnum white_space = get_white_space_value((DomNode*)text);
+    if (white_space != CSS_VALUE_NORMAL &&
+        white_space != CSS_VALUE_NOWRAP &&
+        white_space != CSS_VALUE_PRE_LINE) {
+        return false;
+    }
     unsigned char* td = text->text_data();
     if (!td) return false;
     for (int i = 0; i < rect->length; i++) {
@@ -2193,21 +2204,10 @@ static bool text_has_visible_rect(ViewText* text) {
     return false;
 }
 
-static bool is_form_control_tag(View* view) {
-    if (!view || !view->is_element()) return false;
-    uintptr_t tag = ((ViewElement*)view)->tag();
-    return tag == HTM_TAG_INPUT || tag == HTM_TAG_SELECT || tag == HTM_TAG_TEXTAREA;
-}
-
-static bool should_skip_collapsed_text_before_form_control(View* child) {
-    if (!child || child->view_type != RDT_VIEW_TEXT) return false;
-    if (text_has_visible_rect((ViewText*)child)) return false;
-    return is_form_control_tag(child->next_sibling);
-}
-
 void print_text_json(ViewText* text, StrBuf* buf, int indent) {
     TextRect* rect = text->rect;
     if (!rect) return;  // guard against null text rect (fuzzer-found)
+    if (!text_has_visible_rect(text)) return;
 
     NEXT_RECT:
     bool is_last_char_space = false;
@@ -2476,7 +2476,7 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent) {
             continue;
         }
 
-        if (should_skip_collapsed_text_before_form_control(child)) {
+        if (child->view_type == RDT_VIEW_TEXT && !text_has_visible_rect((ViewText*)child)) {
             child = child->next_sibling;
             continue;
         }

@@ -1798,12 +1798,12 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
                 resolve_font_size(lycon, NULL);
             }
             if (lycon->font.font_handle) {
-                GlyphInfo zero_glyph = font_get_glyph(lycon->font.font_handle, '0');
-                if (zero_glyph.id != 0) {
-                    // advance_x is at the handle's loaded size; scale to current_font_size
-                    float handle_size = font_handle_get_size_px(lycon->font.font_handle);
-                    float ch_ratio = (handle_size > 0) ? zero_glyph.advance_x / handle_size : 0.5f;
-                    result = num * lycon->font.current_font_size * ch_ratio;
+                FontStyleDesc style = font_style_desc_from_prop(lycon->font.style);
+                LoadedGlyph* zero_glyph = font_load_glyph(lycon->font.font_handle, &style, (uint32_t)'0', false);
+                if (zero_glyph && zero_glyph->advance_x > 0.0f) {
+                    float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0.0f)
+                        ? lycon->ui_context->pixel_ratio : 1.0f;
+                    result = num * (zero_glyph->advance_x / pixel_ratio);
                 } else {
                     result = num * lycon->font.current_font_size * 0.5f;
                 }
