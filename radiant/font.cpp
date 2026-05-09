@@ -19,6 +19,26 @@ char* load_font_path(FontContext *font_ctx, const char* font_name) {
     return font_find_path(font_ctx, font_name);
 }
 
+static float resolved_space_width(UiContext* uicon, FontHandle* handle, const FontStyleDesc* style) {
+    float pixel_ratio = (uicon && uicon->pixel_ratio > 0.0f) ? uicon->pixel_ratio : 1.0f;
+    LoadedGlyph* glyph = font_load_glyph(handle, style, (uint32_t)' ', false);
+    if (glyph && glyph->advance_x > 0.0f) {
+        return glyph->advance_x / pixel_ratio;
+    }
+
+    const FontMetrics* m = font_get_metrics(handle);
+    if (m && m->space_width > 0.0f) {
+        return m->space_width;
+    }
+
+    GlyphInfo sp = font_get_glyph(handle, (uint32_t)' ');
+    if (sp.advance_x > 0.0f) {
+        return sp.advance_x;
+    }
+
+    return 0.0f;
+}
+
 void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
     fbox->style = fprop;
     fbox->current_font_size = fprop->font_size;
@@ -64,11 +84,12 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
                 fprop->font_handle = parent_handle;
                 const FontMetrics* m = font_get_metrics(parent_handle);
                 if (m) {
-                    fprop->space_width = m->space_width;
-                    {
-                        GlyphInfo sp = font_get_glyph(parent_handle, (uint32_t)' ');
-                        if (sp.advance_x > 0.0f) fprop->space_width = sp.advance_x;
-                    }
+                    FontStyleDesc parent_style = {};
+                    parent_style.family = fprop->family;
+                    parent_style.size_px = fprop->font_size;
+                    parent_style.weight = fw;
+                    parent_style.slant = fs;
+                    fprop->space_width = resolved_space_width(uicon, parent_handle, &parent_style);
                     float _lh_asc, _lh_desc;
                     font_get_normal_lh_split(parent_handle, &_lh_asc, &_lh_desc);
                     fprop->ascender    = _lh_asc;
@@ -100,14 +121,7 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
         // populate FontProp derived fields from unified metrics
         const FontMetrics* m = font_get_metrics(handle);
         if (m) {
-            fprop->space_width = m->space_width;
-        // When the font has CoreText metrics (e.g., SFNS / -apple-system), prefer
-        // the CT-based space advance over table metrics to match Chrome text widths.
-        // font_get_glyph() returns CT advance in CSS pixels when ct_font_ref is set.
-        {
-            GlyphInfo sp = font_get_glyph(handle, (uint32_t)' ');
-            if (sp.advance_x > 0.0f) fprop->space_width = sp.advance_x;
-        }
+            fprop->space_width = resolved_space_width(uicon, handle, &style);
             // Use normal line-height split (platform-based with half-leading) for
             // ascender/descender.  This ensures font->ascender == init_ascender used
             // by the layout engine's strut baseline, which is critical for correct
