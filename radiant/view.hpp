@@ -1033,6 +1033,9 @@ typedef struct BlockProp {
     CssEnum given_height_type;
     float given_width_percent;  // Raw percentage if width: X% (NaN if not percentage)
     float given_height_percent; // Raw percentage if height: X% (NaN if not percentage)
+    float contain_intrinsic_width;
+    float contain_intrinsic_height;
+    bool contain_size;
     float given_min_width_percent;   // Raw percentage if min-width: X% (NaN if not percentage)
     float given_max_width_percent;   // Raw percentage if max-width: X% (NaN if not percentage)
     float given_min_height_percent;  // Raw percentage if min-height: X% (NaN if not percentage)

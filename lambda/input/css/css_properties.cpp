@@ -381,6 +381,10 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_CONTAINER, "container", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
     {CSS_PROPERTY_CONTAINER_TYPE, "container-type", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "normal", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_CONTAINER_NAME, "container-name", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_CONTAIN, "contain", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_string, NULL},
+    {CSS_PROPERTY_CONTAIN_INTRINSIC_WIDTH, "contain-intrinsic-width", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_CONTAIN_INTRINSIC_HEIGHT, "contain-intrinsic-height", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE, "contain-intrinsic-size", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
 
     // Baseline Properties
     {CSS_PROPERTY_ALIGNMENT_BASELINE, "alignment-baseline", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "baseline", false, false, NULL, 0, validate_keyword, NULL},

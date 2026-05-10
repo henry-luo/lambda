@@ -122,6 +122,64 @@ static bool image_orientation_uses_from_image(DomElement* element) {
 static ObjectViewBoxUsedRect resolve_object_view_box_rect(LayoutContext* lycon,
                                                           DomElement* element,
                                                           float intrinsic_width,
+                                                          float intrinsic_height);
+
+static void apply_contain_intrinsic_used_size(LayoutContext* lycon, ViewBlock* block) {
+    if (!lycon || !block || !block->blk || !block->blk->contain_size) return;
+
+    if (block->blk->contain_intrinsic_width >= 0.0f &&
+        (block->blk->given_width < 0.0f || block->blk->given_width_type == CSS_VALUE_AUTO)) {
+        lycon->block.given_width = block->blk->contain_intrinsic_width;
+        block->blk->given_width = lycon->block.given_width;
+        if (block->blk->given_width_type == CSS_VALUE_AUTO) {
+            block->blk->given_width_type = CSS_VALUE__UNDEF;
+        }
+        log_debug("%s [ContainIntrinsic] used width %.1f", block->source_loc(), lycon->block.given_width);
+    }
+
+    if (block->blk->contain_intrinsic_height >= 0.0f &&
+        (block->blk->given_height < 0.0f || block->blk->given_height_type == CSS_VALUE_AUTO)) {
+        lycon->block.given_height = block->blk->contain_intrinsic_height;
+        block->blk->given_height = lycon->block.given_height;
+        if (block->blk->given_height_type == CSS_VALUE_AUTO) {
+            block->blk->given_height_type = CSS_VALUE__UNDEF;
+        }
+        log_debug("%s [ContainIntrinsic] used height %.1f", block->source_loc(), lycon->block.given_height);
+    }
+}
+
+static void apply_canvas_object_view_box_auto_size(LayoutContext* lycon, ViewBlock* block) {
+    if (!lycon || !block || block->tag() != HTM_TAG_CANVAS ||
+        lycon->block.given_width <= 0.0f || lycon->block.given_height <= 0.0f) {
+        return;
+    }
+
+    bool width_is_auto = !block->blk || block->blk->given_width < 0.0f ||
+                         block->blk->given_width_type == CSS_VALUE_AUTO;
+    bool height_is_auto = !block->blk || block->blk->given_height < 0.0f ||
+                          block->blk->given_height_type == CSS_VALUE_AUTO;
+    if (!width_is_auto && !height_is_auto) return;
+
+    ObjectViewBoxUsedRect object_view_box = resolve_object_view_box_rect(
+        lycon, block->as_element(), lycon->block.given_width, lycon->block.given_height);
+    if (!object_view_box.valid) return;
+
+    if (width_is_auto && height_is_auto) {
+        lycon->block.given_width = object_view_box.width;
+        lycon->block.given_height = object_view_box.height;
+    } else if (width_is_auto && object_view_box.height > 0.0f) {
+        lycon->block.given_width = lycon->block.given_height * object_view_box.width / object_view_box.height;
+    } else if (height_is_auto && object_view_box.width > 0.0f) {
+        lycon->block.given_height = lycon->block.given_width * object_view_box.height / object_view_box.width;
+    }
+
+    log_debug("%s [CanvasObjectViewBox] auto size %.1f x %.1f",
+              block->source_loc(), lycon->block.given_width, lycon->block.given_height);
+}
+
+static ObjectViewBoxUsedRect resolve_object_view_box_rect(LayoutContext* lycon,
+                                                          DomElement* element,
+                                                          float intrinsic_width,
                                                           float intrinsic_height) {
     ObjectViewBoxUsedRect rect = {false, 0.0f, 0.0f, intrinsic_width, intrinsic_height};
     if (!lycon || !element || intrinsic_width <= 0.0f || intrinsic_height <= 0.0f) return rect;
@@ -4730,6 +4788,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     }
 
     uintptr_t elmt_name = block->tag();
+    apply_contain_intrinsic_used_size(lycon, block);
+    apply_canvas_object_view_box_auto_size(lycon, block);
 
     // CSS 2.1 §10.3.2/§10.6.2: For replaced elements with 'width: auto' or
     // 'height: auto', use intrinsic dimensions. Per HTML spec, iframe default

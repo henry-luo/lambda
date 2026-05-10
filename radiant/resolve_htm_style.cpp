@@ -519,9 +519,22 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->display.inner = RDT_DISPLAY_REPLACED;
         lycon->block.given_width = 300;
         lycon->block.given_height = 150;
-        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
-        block->blk->given_width = 300;
-        block->blk->given_height = 150;
+        if (const char* w_attr = elmt->get_attribute("width")) {
+            size_t w_len = strlen(w_attr);
+            if (w_len > 0 && w_attr[0] >= '0' && w_attr[0] <= '9') {
+                StrView w_view = strview_init(w_attr, w_len);
+                float w = strview_to_int(&w_view);
+                if (w >= 0.0f) lycon->block.given_width = w;
+            }
+        }
+        if (const char* h_attr = elmt->get_attribute("height")) {
+            size_t h_len = strlen(h_attr);
+            if (h_len > 0 && h_attr[0] >= '0' && h_attr[0] <= '9') {
+                StrView h_view = strview_init(h_attr, h_len);
+                float h = strview_to_int(&h_view);
+                if (h >= 0.0f) lycon->block.given_height = h;
+            }
+        }
         break;
     case HTM_TAG_WEBVIEW: {
         // webview: replaced element with default 300x150, supports width/height attributes
@@ -601,20 +614,19 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     case HTM_TAG_VIDEO: {
         // replaced element with default 300x150 per HTML spec
         block->display.inner = RDT_DISPLAY_REPLACED;
-        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
         // Parse HTML width/height attributes; default 300x150
         if (const char* w_attr = elmt->get_attribute("width")) {
             StrView w_view = strview_init(w_attr, strlen(w_attr));
             float w = strview_to_int(&w_view);
-            if (w >= 0) { lycon->block.given_width = w; block->blk->given_width = w; }
-            else { lycon->block.given_width = 300; block->blk->given_width = 300; }
-        } else { lycon->block.given_width = 300; block->blk->given_width = 300; }
+            if (w >= 0) { lycon->block.given_width = w; }
+            else { lycon->block.given_width = 300; }
+        } else { lycon->block.given_width = 300; }
         if (const char* h_attr = elmt->get_attribute("height")) {
             StrView h_view = strview_init(h_attr, strlen(h_attr));
             float h = strview_to_int(&h_view);
-            if (h >= 0) { lycon->block.given_height = h; block->blk->given_height = h; }
-            else { lycon->block.given_height = 150; block->blk->given_height = 150; }
-        } else { lycon->block.given_height = 150; block->blk->given_height = 150; }
+            if (h >= 0) { lycon->block.given_height = h; }
+            else { lycon->block.given_height = 150; }
+        } else { lycon->block.given_height = 150; }
 
         // initialize video playback if src attribute is present
         const char* src = elmt->get_attribute("src");
@@ -675,15 +687,26 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         break;
     }
     case HTM_TAG_CANVAS:
-        // HTML §4.8.9: <audio> without controls is not rendered (display: none)
-        // With controls, it's a replaced element with browser-specific dimensions
-        if (elmt->has_attribute("controls")) {
-            block->display.inner = RDT_DISPLAY_REPLACED;
-            if (!block->blk) { block->blk = alloc_block_prop(lycon); }
-            lycon->block.given_width = 300;
-            lycon->block.given_height = 54;
-            block->blk->given_width = 300;
-            block->blk->given_height = 54;
+        // HTML §4.12.5: canvas is a replaced element with default
+        // coordinate-space dimensions 300x150 when attributes are absent.
+        block->display.inner = RDT_DISPLAY_REPLACED;
+        lycon->block.given_width = 300;
+        lycon->block.given_height = 150;
+        if (const char* w_attr = elmt->get_attribute("width")) {
+            size_t w_len = strlen(w_attr);
+            if (w_len > 0 && w_attr[0] >= '0' && w_attr[0] <= '9') {
+                StrView w_view = strview_init(w_attr, w_len);
+                float w = strview_to_int(&w_view);
+                if (w >= 0.0f) lycon->block.given_width = w;
+            }
+        }
+        if (const char* h_attr = elmt->get_attribute("height")) {
+            size_t h_len = strlen(h_attr);
+            if (h_len > 0 && h_attr[0] >= '0' && h_attr[0] <= '9') {
+                StrView h_view = strview_init(h_attr, h_len);
+                float h = strview_to_int(&h_view);
+                if (h >= 0.0f) lycon->block.given_height = h;
+            }
         }
         break;
     case HTM_TAG_OBJECT:
