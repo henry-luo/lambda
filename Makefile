@@ -459,15 +459,14 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 .DEFAULT_GOAL := build
 
 # Phony targets (don't correspond to actual files)
-.PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild test test-all test-all-baseline test-lambda-baseline test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-tex test-tex-baseline test-tex-dvi test-tex-dvi-baseline test-tex-dvi-extended test-tex-reference test-extended test-input run help install uninstall ensure-yaml-submodule \
+.PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild \
+	    test test-all test-all-baseline test-lambda-baseline test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-extended test-input run help \
 	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint check check-raw-alloc docs intellisense analyze-binary \
 	    build-debug build-release clean-all distclean \
 	    tree-sitter-libs tree-sitter-core-libs \
-	    verify-windows verify-linux \
 	    generate-premake clean-premake build-test build-test-linux build-jube-test test-jube run-radiant-baseline \
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc tidy-printf benchmark bench-compile \
-	    test-pdf test-pdf-export setup-pdf-tests \
-	    test-fuzzy test-fuzzy-extended fuzz-radiant fuzz-radiant-quick test-c2mir type-chart build-mir \
+	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick test-c2mir type-chart build-mir \
 	    test-ui-automation test-reactive-ui test-redex-baseline \
 	    node-official node-official-update-baseline
 
@@ -521,15 +520,6 @@ help:
 	@echo "  test-reactive-ui     - Run Reactive UI event simulation tests (todo toggle/delete)"
 	@echo "  test-redex-baseline  - Run Redex formal semantics baseline verification"
 	@echo "  layout-snapshot       - Save page suite snapshot: make layout-snapshot suite=page"
-	@echo "  test-tex      - Run all TeX typesetting unit tests"
-	@echo "  test-tex-baseline - Run TeX baseline tests (core box/AST tests)"
-	@echo "  test-tex-dvi  - Run TeX DVI comparison tests against reference (all tests)"
-	@echo "  test-tex-dvi-baseline - Run TeX DVI comparison BASELINE tests (stable, must pass)"
-	@echo "  test-tex-dvi-extended - Run TeX DVI comparison EXTENDED tests (work-in-progress)"
-	@echo "  test-tex-reference - Generate reference DVI files from test/*.tex"
-	@echo "  test-pdf      - Run PDF rendering test suite (compare vs pdf.js)"
-	@echo "  test-pdf-export - Export pdf.js operator lists as JSON references"
-	@echo "  setup-pdf-tests - Set up PDF test fixtures and dependencies"
 	@echo "  test-extended - Run EXTENDED test suites only (HTTP/HTTPS, ongoing features)"
 	@echo "  test-library  - Run library tests only"
 	@echo "  test-input    - Run input processing test suite (MIME detection & math)"
@@ -540,8 +530,8 @@ help:
 	@echo "  test-std      - Run Lambda Standard Tests (custom test runner)"
 	@echo "  test-coverage - Run tests with code coverage analysis"
 	@echo "  test-benchmark- Run performance benchmark tests"
-	@echo "  test-fuzzy    - Run fuzzy tests (5 minutes, mutation + random generation)"
-	@echo "  test-fuzzy-extended - Run extended fuzzy tests (1 hour)"
+	@echo "  fuzz-lambda    - Run fuzzy tests (5 minutes, mutation + random generation)"
+	@echo "  fuzz-lambda-extended - Run extended fuzzy tests (1 hour)"
 	@echo "  test-integration - Run end-to-end integration tests"
 	@echo "  test-all      - Run complete test suite (all test types)"
 
@@ -1399,30 +1389,6 @@ generate-math-references:
 	@cd test/latex && npm run generate:katex
 	@echo "Reference files generated in test/latex/reference/"
 
-# PDF Testing targets
-test-pdf: build
-	@echo "Running Radiant PDF test suite..."
-	@echo "=============================================================="
-	@cd test/pdf && npm test
-
-test-pdf-export:
-	@echo "Exporting pdf.js operator lists as JSON references..."
-	@cd test/pdf && npm run export
-
-setup-pdf-tests:
-	@echo "Setting up PDF test fixtures..."
-	@mkdir -p test/pdf/data/basic test/pdf/reference test/pdf/output
-	@echo "Copying test PDFs from pdf-js..."
-	@for pdf in tracemonkey.pdf standard_fonts.pdf colors.pdf empty.pdf rotated.pdf rotation.pdf basicapi.pdf canvas.pdf; do \
-		if [ -f "pdf-js/test/pdfs/$$pdf" ]; then \
-			cp "pdf-js/test/pdfs/$$pdf" test/pdf/data/basic/; \
-			echo "  Copied: $$pdf"; \
-		fi; \
-	done
-	@echo "Installing npm dependencies..."
-	@cd test/pdf && npm install
-	@echo "PDF test setup complete. Run 'make test-pdf-export' to generate references."
-
 test-extended: build-test
 	@echo "Clearing HTTP cache for clean test runs..."
 	@rm -rf temp/cache
@@ -1574,14 +1540,14 @@ test-benchmark:
 # Shell-based fuzzer for testing Lambda robustness
 
 # Run fuzzy tests (quick mode: 5 minutes)
-test-fuzzy: build
+fuzz-lambda: build
 	@echo "Running fuzzy tests (quick mode: 5 minutes)..."
 	@chmod +x test/fuzzy/lambda/test_fuzzy.sh
 	@./test/fuzzy/lambda/test_fuzzy.sh --duration=300
 	@echo "✅ Fuzzy tests completed"
 
 # Run extended fuzzy tests (1 hour)
-test-fuzzy-extended: build
+fuzz-lambda-extended: build
 	@echo "Running extended fuzzy tests (1 hour)..."
 	@chmod +x test/fuzzy/lambda/test_fuzzy.sh
 	@./test/fuzzy/lambda/test_fuzzy.sh --duration=3600
@@ -2065,18 +2031,6 @@ tidy-printf:
 		echo ""; \
 	done; \
 	echo "✓ Completed processing $$FILE_COUNT file(s)"
-
-# Installation targets (optional)
-install: build
-	@echo "Installing $(PROJECT_NAME)..."
-	@mkdir -p /usr/local/bin
-	@cp $(LAMBDA_EXE) /usr/local/bin/$(PROJECT_NAME)
-	@echo "$(PROJECT_NAME) installed to /usr/local/bin/$(PROJECT_NAME)"
-
-uninstall:
-	@echo "Uninstalling $(PROJECT_NAME)..."
-	@rm -f /usr/local/bin/$(PROJECT_NAME)
-	@echo "$(PROJECT_NAME) uninstalled."
 
 # Documentation generation (if docs exist)
 # docs:
