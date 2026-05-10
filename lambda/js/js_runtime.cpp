@@ -9429,12 +9429,27 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     static const char* S_EXPAND = "[\\p{Z}\\t\\n\\r\\f\\x0b\\x{FEFF}]";
     static const char* S_EXPAND_INNER = "\\p{Z}\\t\\n\\r\\f\\x0b\\x{FEFF}";  // inside existing []
     static const char* NOT_S_EXPAND = "[^\\p{Z}\\t\\n\\r\\f\\x0b\\x{FEFF}]";
+    bool requested_dot_all = false;
+    for (int fi = 0; fi < flags_len; fi++) {
+        if (flags[fi] == 's') {
+            requested_dot_all = true;
+            break;
+        }
+    }
     std::string processed_pattern;
     processed_pattern.reserve(effective_pattern_len + 64);
     int bracket_depth = 0;
     for (int i = 0; i < effective_pattern_len; i++) {
         if (effective_pattern[i] == '\\' && i + 1 < effective_pattern_len) {
             char next = effective_pattern[i + 1];
+            // Inside a JS character class, \b is a backspace character, not a
+            // word-boundary assertion. RE2 treats \b as an assertion, so make
+            // the character semantics explicit before compiling.
+            if (next == 'b' && bracket_depth > 0) {
+                processed_pattern += "\\x{08}";
+                i++;
+                continue;
+            }
             if (next == 's') {
                 if (bracket_depth > 0) {
                     processed_pattern += S_EXPAND_INNER; // inline within existing []
@@ -9521,6 +9536,21 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
             processed_pattern += effective_pattern[i];
             processed_pattern += effective_pattern[i + 1];
             i++;
+            continue;
+        }
+        // JS [^] is a negated empty class, which matches any code point.
+        // RE2 rejects it as a malformed class, so lower it to an explicit Any.
+        if (bracket_depth == 0 && effective_pattern[i] == '[' &&
+            i + 2 < effective_pattern_len &&
+            effective_pattern[i + 1] == '^' && effective_pattern[i + 2] == ']') {
+            processed_pattern += "[\\x{00}-\\x{10FFFF}]";
+            i += 2;
+            continue;
+        }
+        // JS dot without /s excludes all line terminators: LF, CR, LS, and PS.
+        // RE2's dot excludes only LF in the direct path, so spell out the class.
+        if (bracket_depth == 0 && effective_pattern[i] == '.' && !requested_dot_all) {
+            processed_pattern += "[^\\n\\r\\x{2028}\\x{2029}]";
             continue;
         }
         if (effective_pattern[i] == '[') {
@@ -15083,10 +15113,10 @@ static bool js_array_has_element(Item arr, Array* a, int idx, Item* out, bool ch
         int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%d", idx);
         Item pm_item = (Item){.map = props};
         ShapeEntry* _se_idx = js_find_shape_entry(pm_item, idx_buf, idx_len);
-        if (_se_idx && jspd_is_accessor(_se_idx)) {
-            bool slot_found = false;
-            Item slot_val = js_map_get_fast_ext(props, idx_buf, idx_len, &slot_found);
-            if (slot_found && slot_val.item != JS_DELETED_SENTINEL_VAL) {
+        bool slot_found = false;
+        Item slot_val = js_map_get_fast_ext(props, idx_buf, idx_len, &slot_found);
+        if (slot_found && slot_val.item != JS_DELETED_SENTINEL_VAL) {
+            if (_se_idx && jspd_is_accessor(_se_idx)) {
                 JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
                 if (pair && pair->getter.item != ItemNull.item) {
                     *out = js_call_function(pair->getter, arr, NULL, 0);
@@ -15096,6 +15126,11 @@ static bool js_array_has_element(Item arr, Array* a, int idx, Item* out, bool ch
                 }
                 return true;
             }
+            // Sparse high-index elements are stored as ordinary data
+            // properties on the companion map. Array iteration HasProperty
+            // must see them just like dense slots.
+            *out = slot_val;
+            return true;
         }
         // AT-3: legacy __get_<idx>/__set_<idx> marker fallback retired (post-AT-1
         // the intercept routes companion-map accessor writes through IS_ACCESSOR

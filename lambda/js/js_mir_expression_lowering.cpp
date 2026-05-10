@@ -9557,6 +9557,17 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                         MIR_new_reg_op(mt->ctx, tc->return_val_reg),
                         MIR_new_int_op(mt->ctx, 0)));
                 }
+                if (tc->saved_exc_flag_reg) {
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, tc->saved_exc_flag_reg),
+                        MIR_new_int_op(mt->ctx, 0)));
+                }
+                if (tc->saved_exc_val_reg) {
+                    MIR_reg_t null_val = jm_emit_null(mt);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, tc->saved_exc_val_reg),
+                        MIR_new_reg_op(mt->ctx, null_val)));
+                }
             }
 
             // The yield expression evaluates to the 'input' parameter (sent value)
@@ -9661,6 +9672,17 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_reg_op(mt->ctx, tc->return_val_reg),
                         MIR_new_int_op(mt->ctx, 0)));
+                }
+                if (tc->saved_exc_flag_reg) {
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, tc->saved_exc_flag_reg),
+                        MIR_new_int_op(mt->ctx, 0)));
+                }
+                if (tc->saved_exc_val_reg) {
+                    MIR_reg_t null_val = jm_emit_null(mt);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, tc->saved_exc_val_reg),
+                        MIR_new_reg_op(mt->ctx, null_val)));
                 }
             }
             // Resume value comes from gen_input register (the resolved value)

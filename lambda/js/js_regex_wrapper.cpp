@@ -783,19 +783,14 @@ JsRegexCompiled* js_regex_wrapper_compile(const char* pattern, int pattern_len,
     std::string pat(pattern, pattern_len);
 
     bool has_s = false;
-    bool has_u = false;
     for (int i = 0; i < flags_len; i++) {
         if (flags[i] == 's') has_s = true;
-        else if (flags[i] == 'u' || flags[i] == 'v') has_u = true;
     }
 
-    // Annex B B.1.4 strict validation under `u`/`v` flag
-    if (has_u) {
-        if (!validate_unicode_strict(pat)) {
-            log_debug("js regex wrapper: pattern '%s' invalid under `u` flag", pat.c_str());
-            return nullptr;
-        }
-    }
+    // The public RegExp constructor validates the original JS source before
+    // preprocessing. At this point `pat` may already contain RE2-only rewrites
+    // such as \x{2028}, so re-validating it as JS source would reject valid
+    // patterns that need the wrapper for backreferences/lookarounds.
 
     RewriteResult rw;
     if (!rewrite_pattern(pat, &rw, has_s)) {
