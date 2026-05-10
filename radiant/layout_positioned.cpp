@@ -13,6 +13,79 @@
 using std::min;
 using std::max;
 
+static bool extract_aspect_ratio_number_for_positioned(const char* text, double* out_value) {
+    if (!text || !out_value) return false;
+    const char* cursor = text;
+    char* end = nullptr;
+    double first = strtod(cursor, &end);
+    if (end == cursor || first <= 0.0) return false;
+    cursor = end;
+    double second = 0.0;
+    bool has_second = false;
+    while (*cursor) {
+        char* next_end = nullptr;
+        double value = strtod(cursor, &next_end);
+        if (next_end != cursor) {
+            second = value;
+            has_second = true;
+            break;
+        }
+        cursor++;
+    }
+    if (has_second) {
+        if (second <= 0.0) return false;
+        *out_value = first / second;
+    } else {
+        *out_value = first;
+    }
+    return true;
+}
+
+static float get_preferred_aspect_ratio_for_positioned(ViewBlock* block) {
+    if (!block) return 0.0f;
+    if (block->fi && block->fi->aspect_ratio > 0.0f) return block->fi->aspect_ratio;
+    DomElement* element = block->as_element();
+    if (!element) return 0.0f;
+    CssDeclaration* decl = dom_element_get_specified_value(element, CSS_PROPERTY_ASPECT_RATIO);
+    if (!decl || !decl->value) return 0.0f;
+    CssValue* value = decl->value;
+    if (value->type == CSS_VALUE_TYPE_NUMBER && value->data.number.value > 0.0) {
+        return (float)value->data.number.value;
+    }
+    if (value->type == CSS_VALUE_TYPE_STRING) {
+        double ratio = 0.0;
+        return extract_aspect_ratio_number_for_positioned(value->data.string, &ratio) ? (float)ratio : 0.0f;
+    }
+    if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
+        double ratio = 0.0;
+        return extract_aspect_ratio_number_for_positioned(value->data.custom_property.name, &ratio) ? (float)ratio : 0.0f;
+    }
+    if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
+        double numerator = 0.0;
+        double denominator = 0.0;
+        bool got_numerator = false;
+        bool got_denominator = false;
+        for (int i = 0; i < value->data.list.count && !got_denominator; i++) {
+            CssValue* item = value->data.list.values[i];
+            if (!item) continue;
+            if (item->type == CSS_VALUE_TYPE_NUMBER) {
+                if (!got_numerator) {
+                    numerator = item->data.number.value;
+                    got_numerator = true;
+                } else {
+                    denominator = item->data.number.value;
+                    got_denominator = true;
+                }
+            }
+        }
+        if (got_numerator && got_denominator && numerator > 0.0 && denominator > 0.0) {
+            return (float)(numerator / denominator);
+        }
+        if (got_numerator && numerator > 0.0) return (float)numerator;
+    }
+    return 0.0f;
+}
+
 // Forward declarations
 ViewBlock* find_containing_block(ViewBlock* element, CssEnum position_type);
 // adjust_min_max_* and adjust_border_padding_* declared in layout.hpp
@@ -521,7 +594,10 @@ static void calculate_parent_to_cb_offset(ViewBlock* block, ViewBlock* containin
         }
     }
 
-    if (block->position && block->position->position == CSS_VALUE_FIXED && containing_block) {
+    if (containing_block && containing_block->parent_view() == nullptr &&
+        block->position &&
+        (block->position->position == CSS_VALUE_ABSOLUTE ||
+         block->position->position == CSS_VALUE_FIXED)) {
         parent_to_cb_offset_x += containing_block->x;
         parent_to_cb_offset_y += containing_block->y;
     }
@@ -945,6 +1021,16 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     if (has_height) {
         content_height = lycon->block.given_height;
         log_debug("[ABS POS] using explicit height: %.1f", content_height);
+    } else if (get_preferred_aspect_ratio_for_positioned(block) > 0.0f && content_width >= 0.0f) {
+        // CSS Sizing: a preferred aspect ratio transfers a definite width to
+        // the auto height before abspos vertical constraint resolution.
+        float aspect_ratio = get_preferred_aspect_ratio_for_positioned(block);
+        content_height = content_width / aspect_ratio;
+        lycon->block.given_height = content_height;
+        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+        block->blk->given_height = content_height;
+        log_debug("[ABS POS] height from aspect-ratio: width=%.1f / ratio=%.3f -> height=%.1f",
+                  content_width, aspect_ratio, content_height);
     } else if (block->position->has_top && block->position->has_bottom && !is_replaced) {
         // CSS 2.1 §10.6.4: height is auto, both top and bottom specified
         // Auto margins are treated as 0 when height is auto
@@ -1394,80 +1480,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     // accounted for in the positioned ancestor's coordinates.
     float parent_to_cb_offset_x = 0, parent_to_cb_offset_y = 0;
     ViewElement* parent = block->parent_view();
-
-    // Walk past inline ancestors to find the nearest block ancestor.
-    // Inline spans don't have their own block coordinate space; pa_line->advance_x
-    // and pa_block->advance_y are already relative to the nearest block ancestor's
-    // content area.
-    ViewElement* walk_start = parent;
-    while (walk_start && !walk_start->is_block()) {
-        walk_start = walk_start->parent_view();
-    }
-
-    if (walk_start && walk_start->is_block()) {
-        ViewBlock* p = (ViewBlock*)walk_start;
-        // Walk from nearest block ancestor to containing block, accumulating offsets
-        while (p && p != cb) {
-            parent_to_cb_offset_x += p->x;
-            parent_to_cb_offset_y += p->y;
-            log_debug("[STATIC POS] Adding parent %s offset: (%f, %f)", p->node_name(), p->x, p->y);
-
-            // Check if this ancestor is positioned — if so, its coordinates are
-            // relative to its own CB, not its DOM parent. Jump to that CB.
-            if (p->position && p->position->position == CSS_VALUE_FIXED) {
-                // Fixed: coordinates are viewport-relative, done
-                log_debug("[STATIC POS] Encountered fixed ancestor %s, stopping walk", p->node_name());
-                break;
-            }
-            if (p->position && p->position->position == CSS_VALUE_ABSOLUTE) {
-                // Absolute: coordinates are relative to p's containing block.
-                // Find p's CB and jump there, skipping intermediate DOM ancestors.
-                ViewElement* ancestor = p->parent_view();
-                ViewBlock* p_cb = nullptr;
-                while (ancestor) {
-                    if (ancestor->is_block()) {
-                        ViewBlock* ab = (ViewBlock*)ancestor;
-                        if (ab->position && ab->position->position != CSS_VALUE_STATIC) {
-                            p_cb = ab;
-                            break;
-                        }
-                    }
-                    ancestor = ancestor->parent_view();
-                }
-                if (p_cb) {
-                    log_debug("[STATIC POS] Absolute ancestor %s: jumping to its CB %s", p->node_name(), p_cb->node_name());
-                    p = p_cb;
-                    continue;  // Continue walk from p's containing block
-                }
-                // No positioned ancestor: p's coordinates are relative to ICB (root)
-                log_debug("[STATIC POS] Absolute ancestor %s: CB is ICB, stopping walk", p->node_name());
-                break;
-            }
-
-            // Normal flow or relative: coordinates are relative to DOM parent, continue walk
-            // Skip inline ancestors to find the next block ancestor
-            ViewElement* gp = p->parent_view();
-            while (gp && !gp->is_block()) {
-                gp = gp->parent_view();
-            }
-            if (gp && gp->is_block()) {
-                p = (ViewBlock*)gp;
-            } else {
-                break;
-            }
-        }
-    }
-
-    // CSS 2.1 §9.3.1: For fixed positioning, the containing block is the viewport (ICB),
-    // not the root element. The walk above stops AT the root element (cb) without
-    // including its position. Since the root element's x/y includes its margin offset
-    // from the viewport origin, we must add cb->x/y to convert from root-border-box-
-    // relative coordinates to viewport coordinates.
-    if (block->position->position == CSS_VALUE_FIXED && cb) {
-        parent_to_cb_offset_x += cb->x;
-        parent_to_cb_offset_y += cb->y;
-        log_debug("[STATIC POS] Fixed: added CB root offset (%f, %f)", cb->x, cb->y);
-    }
+    calculate_parent_to_cb_offset(block, cb, &parent_to_cb_offset_x, &parent_to_cb_offset_y);
 
     log_debug("[STATIC POS] Total parent-to-CB offset: (%f, %f)", parent_to_cb_offset_x, parent_to_cb_offset_y);
 

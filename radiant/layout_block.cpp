@@ -25,6 +25,7 @@
 #include <utf8proc.h>
 #include <chrono>
 #include <cfloat>
+#include <cstdlib>
 using namespace std::chrono;
 
 // Check if a view element is a descendant of another view element
@@ -35,6 +36,572 @@ static bool view_is_descendant_of(ViewElement* child, ViewElement* ancestor) {
         walker = walker->parent_view();
     }
     return false;
+}
+
+static const char* pseudo_css_value_extract_name(const CssValue* value) {
+    if (!value) return nullptr;
+    if (value->type == CSS_VALUE_TYPE_STRING) return value->data.string;
+    if (value->type == CSS_VALUE_TYPE_URL) return value->data.url;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        const CssEnumInfo* info = css_enum_info(value->data.keyword);
+        return info ? info->name : nullptr;
+    }
+    if (value->type == CSS_VALUE_TYPE_CUSTOM) return value->data.custom_property.name;
+    return nullptr;
+}
+
+static int pseudo_check_quote_content(const CssValue* value) {
+    if (!value) return 0;
+    if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
+        if (strcmp(value->data.custom_property.name, "open-quote") == 0) return 1;
+        if (strcmp(value->data.custom_property.name, "close-quote") == 0) return 2;
+        if (strcmp(value->data.custom_property.name, "no-open-quote") == 0) return 3;
+        if (strcmp(value->data.custom_property.name, "no-close-quote") == 0) return 4;
+    }
+    return 0;
+}
+
+typedef struct ObjectViewBoxUsedRect {
+    bool valid;
+    float x;
+    float y;
+    float width;
+    float height;
+} ObjectViewBoxUsedRect;
+
+static bool resolve_object_view_box_component(LayoutContext* lycon, const CssValue* value,
+                                              CssPropertyId prop_id, float reference,
+                                              float auto_value, float* out_value) {
+    if (!value || !out_value) return false;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
+        *out_value = auto_value;
+        return true;
+    }
+    if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+        *out_value = (float)(value->data.percentage.value / 100.0 * reference);
+        return true;
+    }
+    if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_NUMBER) {
+        *out_value = resolve_length_value(lycon, prop_id, value);
+        return true;
+    }
+    return false;
+}
+
+static int collect_object_view_box_args(CssFunction* func, CssValue** args, int max_args) {
+    if (!func || !args || max_args <= 0) return 0;
+
+    int count = 0;
+    for (int i = 0; i < func->arg_count && count < max_args; i++) {
+        CssValue* arg = func->args ? func->args[i] : nullptr;
+        if (!arg) continue;
+        if (arg->type == CSS_VALUE_TYPE_LIST) {
+            for (int j = 0; j < arg->data.list.count && count < max_args; j++) {
+                CssValue* item = arg->data.list.values ? arg->data.list.values[j] : nullptr;
+                if (item) args[count++] = item;
+            }
+        } else {
+            args[count++] = arg;
+        }
+    }
+    return count;
+}
+
+static bool image_orientation_uses_from_image(DomElement* element) {
+    for (DomElement* cur = element; cur; cur = dom_element_get_parent(cur)) {
+        CssDeclaration* decl = dom_element_get_specified_value(cur, CSS_PROPERTY_IMAGE_ORIENTATION);
+        if (!decl || !decl->value) continue;
+        if (decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
+            decl->value->data.keyword == CSS_VALUE_NONE) {
+            return false;
+        }
+        return true;
+    }
+    return true;
+}
+
+static ObjectViewBoxUsedRect resolve_object_view_box_rect(LayoutContext* lycon,
+                                                          DomElement* element,
+                                                          float intrinsic_width,
+                                                          float intrinsic_height);
+
+static void apply_contain_intrinsic_used_size(LayoutContext* lycon, ViewBlock* block) {
+    if (!lycon || !block || !block->blk || !block->blk->contain_size) return;
+
+    if (block->blk->contain_intrinsic_width >= 0.0f &&
+        (block->blk->given_width < 0.0f || block->blk->given_width_type == CSS_VALUE_AUTO)) {
+        lycon->block.given_width = block->blk->contain_intrinsic_width;
+        block->blk->given_width = lycon->block.given_width;
+        if (block->blk->given_width_type == CSS_VALUE_AUTO) {
+            block->blk->given_width_type = CSS_VALUE__UNDEF;
+        }
+        log_debug("%s [ContainIntrinsic] used width %.1f", block->source_loc(), lycon->block.given_width);
+    }
+
+    if (block->blk->contain_intrinsic_height >= 0.0f &&
+        (block->blk->given_height < 0.0f || block->blk->given_height_type == CSS_VALUE_AUTO)) {
+        lycon->block.given_height = block->blk->contain_intrinsic_height;
+        block->blk->given_height = lycon->block.given_height;
+        if (block->blk->given_height_type == CSS_VALUE_AUTO) {
+            block->blk->given_height_type = CSS_VALUE__UNDEF;
+        }
+        log_debug("%s [ContainIntrinsic] used height %.1f", block->source_loc(), lycon->block.given_height);
+    }
+}
+
+static void apply_canvas_object_view_box_auto_size(LayoutContext* lycon, ViewBlock* block) {
+    if (!lycon || !block || block->tag() != HTM_TAG_CANVAS ||
+        lycon->block.given_width <= 0.0f || lycon->block.given_height <= 0.0f) {
+        return;
+    }
+
+    bool width_is_auto = !block->blk || block->blk->given_width < 0.0f ||
+                         block->blk->given_width_type == CSS_VALUE_AUTO;
+    bool height_is_auto = !block->blk || block->blk->given_height < 0.0f ||
+                          block->blk->given_height_type == CSS_VALUE_AUTO;
+    if (!width_is_auto && !height_is_auto) return;
+
+    ObjectViewBoxUsedRect object_view_box = resolve_object_view_box_rect(
+        lycon, block->as_element(), lycon->block.given_width, lycon->block.given_height);
+    if (!object_view_box.valid) return;
+
+    if (width_is_auto && height_is_auto) {
+        lycon->block.given_width = object_view_box.width;
+        lycon->block.given_height = object_view_box.height;
+    } else if (width_is_auto && object_view_box.height > 0.0f) {
+        lycon->block.given_width = lycon->block.given_height * object_view_box.width / object_view_box.height;
+    } else if (height_is_auto && object_view_box.width > 0.0f) {
+        lycon->block.given_height = lycon->block.given_width * object_view_box.height / object_view_box.width;
+    }
+
+    log_debug("%s [CanvasObjectViewBox] auto size %.1f x %.1f",
+              block->source_loc(), lycon->block.given_width, lycon->block.given_height);
+}
+
+static bool extract_aspect_ratio_number(const char* text, double* out_value) {
+    if (!text || !out_value) return false;
+    const char* cursor = text;
+    char* end = nullptr;
+    double first = strtod(cursor, &end);
+    if (end == cursor || first <= 0.0) return false;
+    cursor = end;
+    double second = 0.0;
+    bool has_second = false;
+    while (*cursor) {
+        char* next_end = nullptr;
+        double value = strtod(cursor, &next_end);
+        if (next_end != cursor) {
+            second = value;
+            has_second = true;
+            break;
+        }
+        cursor++;
+    }
+    if (has_second) {
+        if (second <= 0.0) return false;
+        *out_value = first / second;
+    } else {
+        *out_value = first;
+    }
+    return true;
+}
+
+static float extract_aspect_ratio_value(const CssValue* value) {
+    if (!value) return 0.0f;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) return 0.0f;
+    if (value->type == CSS_VALUE_TYPE_NUMBER && value->data.number.value > 0.0) {
+        return (float)value->data.number.value;
+    }
+    if (value->type == CSS_VALUE_TYPE_STRING) {
+        double ratio = 0.0;
+        return extract_aspect_ratio_number(value->data.string, &ratio) ? (float)ratio : 0.0f;
+    }
+    if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
+        double ratio = 0.0;
+        return extract_aspect_ratio_number(value->data.custom_property.name, &ratio) ? (float)ratio : 0.0f;
+    }
+    if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
+        double numerator = 0.0;
+        double denominator = 0.0;
+        bool got_numerator = false;
+        bool got_denominator = false;
+        for (int i = 0; i < value->data.list.count && !got_denominator; i++) {
+            CssValue* item = value->data.list.values[i];
+            if (!item) continue;
+            if (item->type == CSS_VALUE_TYPE_NUMBER) {
+                if (!got_numerator) {
+                    numerator = item->data.number.value;
+                    got_numerator = true;
+                } else {
+                    denominator = item->data.number.value;
+                    got_denominator = true;
+                }
+            }
+        }
+        if (got_numerator && got_denominator && numerator > 0.0 && denominator > 0.0) {
+            return (float)(numerator / denominator);
+        }
+        if (got_numerator && numerator > 0.0) return (float)numerator;
+    }
+    return 0.0f;
+}
+
+static float get_preferred_aspect_ratio(ViewBlock* block) {
+    if (!block) return 0.0f;
+    if (block->fi && block->fi->aspect_ratio > 0.0f) return block->fi->aspect_ratio;
+    DomElement* element = block->as_element();
+    if (!element) return 0.0f;
+    CssDeclaration* decl = dom_element_get_specified_value(element, CSS_PROPERTY_ASPECT_RATIO);
+    return decl ? extract_aspect_ratio_value(decl->value) : 0.0f;
+}
+
+static ObjectViewBoxUsedRect resolve_object_view_box_rect(LayoutContext* lycon,
+                                                          DomElement* element,
+                                                          float intrinsic_width,
+                                                          float intrinsic_height) {
+    ObjectViewBoxUsedRect rect = {false, 0.0f, 0.0f, intrinsic_width, intrinsic_height};
+    if (!lycon || !element || intrinsic_width <= 0.0f || intrinsic_height <= 0.0f) return rect;
+
+    CssDeclaration* decl = dom_element_get_specified_value(element, CSS_PROPERTY_OBJECT_VIEW_BOX);
+    if (!decl || !decl->value) return rect;
+    if (decl->value->type == CSS_VALUE_TYPE_KEYWORD && decl->value->data.keyword == CSS_VALUE_NONE) return rect;
+    if (decl->value->type != CSS_VALUE_TYPE_FUNCTION || !decl->value->data.function) return rect;
+
+    CssFunction* func = decl->value->data.function;
+    if (!func->name || !func->args) return rect;
+
+    CssValue* args[4] = {nullptr, nullptr, nullptr, nullptr};
+    int arg_count = collect_object_view_box_args(func, args, 4);
+
+    if (strcmp(func->name, "rect") == 0 && arg_count == 4) {
+        float top = 0.0f;
+        float right = intrinsic_width;
+        float bottom = intrinsic_height;
+        float left = 0.0f;
+        if (!resolve_object_view_box_component(lycon, args[0], CSS_PROPERTY_OBJECT_VIEW_BOX, intrinsic_height, 0.0f, &top) ||
+            !resolve_object_view_box_component(lycon, args[1], CSS_PROPERTY_OBJECT_VIEW_BOX, intrinsic_width, intrinsic_width, &right) ||
+            !resolve_object_view_box_component(lycon, args[2], CSS_PROPERTY_OBJECT_VIEW_BOX, intrinsic_height, intrinsic_height, &bottom) ||
+            !resolve_object_view_box_component(lycon, args[3], CSS_PROPERTY_OBJECT_VIEW_BOX, intrinsic_width, 0.0f, &left)) {
+            return rect;
+        }
+        rect.x = left;
+        rect.y = top;
+        rect.width = right - left;
+        rect.height = bottom - top;
+    } else if (strcmp(func->name, "xywh") == 0 && arg_count == 4) {
+        if (!resolve_object_view_box_component(lycon, args[0], CSS_PROPERTY_OBJECT_VIEW_BOX, intrinsic_width, 0.0f, &rect.x) ||
+            !resolve_object_view_box_component(lycon, args[1], CSS_PROPERTY_OBJECT_VIEW_BOX, intrinsic_height, 0.0f, &rect.y) ||
+            !resolve_object_view_box_component(lycon, args[2], CSS_PROPERTY_OBJECT_VIEW_BOX, intrinsic_width, intrinsic_width, &rect.width) ||
+            !resolve_object_view_box_component(lycon, args[3], CSS_PROPERTY_OBJECT_VIEW_BOX, intrinsic_height, intrinsic_height, &rect.height)) {
+            return rect;
+        }
+    } else if (strcmp(func->name, "inset") == 0 && arg_count >= 1 && arg_count <= 4) {
+        float top = 0.0f;
+        float right = 0.0f;
+        float bottom = 0.0f;
+        float left = 0.0f;
+        if (!resolve_object_view_box_component(lycon, args[0], CSS_PROPERTY_OBJECT_VIEW_BOX, intrinsic_height, 0.0f, &top)) return rect;
+        if (arg_count == 1) {
+            right = bottom = left = top;
+        } else if (arg_count == 2) {
+            bottom = top;
+            if (!resolve_object_view_box_component(lycon, args[1], CSS_PROPERTY_OBJECT_VIEW_BOX, intrinsic_width, 0.0f, &right)) return rect;
+            left = right;
+        } else if (arg_count == 3) {
+            if (!resolve_object_view_box_component(lycon, args[1], CSS_PROPERTY_OBJECT_VIEW_BOX, intrinsic_width, 0.0f, &right) ||
+                !resolve_object_view_box_component(lycon, args[2], CSS_PROPERTY_OBJECT_VIEW_BOX, intrinsic_height, 0.0f, &bottom)) {
+                return rect;
+            }
+            left = right;
+        } else {
+            if (!resolve_object_view_box_component(lycon, args[1], CSS_PROPERTY_OBJECT_VIEW_BOX, intrinsic_width, 0.0f, &right) ||
+                !resolve_object_view_box_component(lycon, args[2], CSS_PROPERTY_OBJECT_VIEW_BOX, intrinsic_height, 0.0f, &bottom) ||
+                !resolve_object_view_box_component(lycon, args[3], CSS_PROPERTY_OBJECT_VIEW_BOX, intrinsic_width, 0.0f, &left)) {
+                return rect;
+            }
+        }
+        rect.x = left;
+        rect.y = top;
+        rect.width = intrinsic_width - left - right;
+        rect.height = intrinsic_height - top - bottom;
+    } else {
+        return rect;
+    }
+
+    if (rect.width < 0.0f) rect.width = 0.0f;
+    if (rect.height < 0.0f) rect.height = 0.0f;
+    if (rect.width <= 0.0f || rect.height <= 0.0f) return {false, 0.0f, 0.0f, intrinsic_width, intrinsic_height};
+    rect.valid = true;
+    return rect;
+}
+
+static const char* pseudo_resolve_quote_char(DomElement* element, bool is_open_quote, int depth) {
+    DomElement* cur = element;
+    CssDeclaration* quotes_decl = nullptr;
+    while (cur) {
+        quotes_decl = dom_element_get_specified_value(cur, CSS_PROPERTY_QUOTES);
+        if (quotes_decl && quotes_decl->value) break;
+        cur = dom_element_get_parent(cur);
+    }
+
+    if (!quotes_decl || !quotes_decl->value) {
+        return is_open_quote ? "\xe2\x80\x9c" : "\xe2\x80\x9d";
+    }
+
+    CssValue* qval = quotes_decl->value;
+    if (qval->type == CSS_VALUE_TYPE_KEYWORD && qval->data.keyword == CSS_VALUE_NONE) {
+        return "";
+    }
+
+    if (qval->type == CSS_VALUE_TYPE_LIST && qval->data.list.count >= 2) {
+        int pair_count = qval->data.list.count / 2;
+        int pair_index = depth < pair_count ? depth : pair_count - 1;
+        int str_index = pair_index * 2 + (is_open_quote ? 0 : 1);
+        if (str_index < qval->data.list.count) {
+            CssValue* sv = qval->data.list.values[str_index];
+            if (sv && sv->type == CSS_VALUE_TYPE_STRING && sv->data.string) {
+                return sv->data.string;
+            }
+        }
+    }
+
+    if (qval->type == CSS_VALUE_TYPE_STRING && qval->data.string) {
+        return qval->data.string;
+    }
+
+    return is_open_quote ? "\xe2\x80\x9c" : "\xe2\x80\x9d";
+}
+
+static char* pseudo_resolve_content_url(LayoutContext* lycon, const CssDeclaration* decl, const char* url) {
+    if (!lycon || !url) return nullptr;
+
+    size_t url_len = strlen(url);
+    const char* source_file = decl ? decl->source_file : nullptr;
+    bool already_resolved = url[0] == '/' || strncmp(url, "data:", 5) == 0;
+    if (!already_resolved) {
+        const char* p = url;
+        while (*p) {
+            if (*p == ':') {
+                already_resolved = (p != url);
+                break;
+            }
+            if (!((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
+                  (*p >= '0' && *p <= '9') || *p == '+' || *p == '-' || *p == '.')) {
+                break;
+            }
+            p++;
+        }
+    }
+
+    if (!already_resolved && source_file && source_file[0] && strcmp(source_file, "<inline-style>") != 0) {
+        const char* slash = strrchr(source_file, '/');
+        if (slash) {
+            size_t dir_len = slash - source_file + 1;
+            char* resolved = (char*)alloc_prop(lycon, dir_len + url_len + 1);
+            if (!resolved) return nullptr;
+            memcpy(resolved, source_file, dir_len);
+            memcpy(resolved + dir_len, url, url_len);
+            resolved[dir_len + url_len] = '\0';
+            return resolved;
+        }
+    }
+
+    char* copy = (char*)alloc_prop(lycon, url_len + 1);
+    if (!copy) return nullptr;
+    str_copy(copy, url_len + 1, url, url_len);
+    return copy;
+}
+
+static void pseudo_append_child(DomElement* parent, DomNode* child) {
+    if (!parent || !child) return;
+    child->parent = parent;
+    child->next_sibling = nullptr;
+    if (!parent->first_child) {
+        child->prev_sibling = nullptr;
+        parent->first_child = child;
+        parent->last_child = child;
+        return;
+    }
+    child->prev_sibling = parent->last_child;
+    parent->last_child->next_sibling = child;
+    parent->last_child = child;
+}
+
+static void pseudo_append_text_child(DomElement* pseudo_elem, const char* text) {
+    if (!pseudo_elem || !pseudo_elem->doc || !text || !text[0]) return;
+
+    size_t text_len = strlen(text);
+    String* text_string = (String*)arena_alloc(pseudo_elem->doc->arena, sizeof(String) + text_len + 1);
+    if (!text_string) return;
+    text_string->len = text_len;
+    memcpy(text_string->chars, text, text_len);
+    text_string->chars[text_len] = '\0';
+
+    DomText* text_node = dom_text_create(text_string, pseudo_elem);
+    if (!text_node) return;
+    pseudo_append_child(pseudo_elem, (DomNode*)text_node);
+}
+
+static DomElement* pseudo_create_image_child(LayoutContext* lycon, DomElement* pseudo_elem,
+                                             const CssDeclaration* content_decl, const char* raw_url) {
+    if (!lycon || !pseudo_elem || !raw_url || !raw_url[0]) return nullptr;
+
+    DomElement* img_elem = dom_element_create(pseudo_elem->doc, "img", nullptr);
+    if (!img_elem) return nullptr;
+
+    if (!img_elem->embed) {
+        img_elem->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
+    }
+    if (!img_elem->embed) return nullptr;
+
+    char* resolved_url = pseudo_resolve_content_url(lycon, content_decl, raw_url);
+    if (!resolved_url) return nullptr;
+
+    img_elem->embed->img = load_image(lycon->ui_context, resolved_url);
+    if (!img_elem->embed->img) {
+        log_debug("[PSEUDO IMG] Failed to load generated content image: %s", resolved_url);
+        return nullptr;
+    }
+
+    return img_elem;
+}
+
+static const char* pseudo_resolve_text_fragment(LayoutContext* lycon, DomElement* element,
+                                                const CssValue* item, int quote_depth) {
+    if (!element || !item) return nullptr;
+
+    if (item->type == CSS_VALUE_TYPE_STRING) {
+        return item->data.string ? item->data.string : "";
+    }
+
+    if (item->type == CSS_VALUE_TYPE_ATTR) {
+        CSSAttrRef* attr_ref = item->data.attr_ref;
+        if (attr_ref && attr_ref->name) {
+            const char* attr_value = dom_element_get_attribute(element, attr_ref->name);
+            return attr_value ? attr_value : "";
+        }
+        return "";
+    }
+
+    if (item->type == CSS_VALUE_TYPE_FUNCTION) {
+        CssFunction* func = item->data.function;
+        if (!func || !func->name) return nullptr;
+
+        if (strcmp(func->name, "attr") == 0 && func->arg_count > 0) {
+            const char* attr_name = pseudo_css_value_extract_name(func->args[0]);
+            if (!attr_name) return "";
+            const char* attr_value = dom_element_get_attribute(element, attr_name);
+            return attr_value ? attr_value : "";
+        }
+
+        if (!lycon->counter_context) return nullptr;
+
+        if (strcmp(func->name, "counter") == 0 && func->arg_count >= 1) {
+            const char* counter_name = pseudo_css_value_extract_name(func->args[0]);
+            uint32_t style_type = 0x00AA;  // CSS_VALUE_DECIMAL
+            if (func->arg_count >= 2 && func->args[1] &&
+                func->args[1]->type == CSS_VALUE_TYPE_KEYWORD) {
+                style_type = func->args[1]->data.keyword;
+            }
+            char* buffer = (char*)arena_alloc(lycon->doc->arena, 64);
+            if (!buffer || !counter_name) return "";
+            counter_format((CounterContext*)lycon->counter_context, counter_name, style_type, buffer, 64);
+            return buffer;
+        }
+
+        if (strcmp(func->name, "counters") == 0 && func->arg_count >= 2) {
+            const char* counter_name = pseudo_css_value_extract_name(func->args[0]);
+            const char* separator = func->args[1] ? func->args[1]->data.string : ".";
+            uint32_t style_type = 0x00AA;  // CSS_VALUE_DECIMAL
+            if (func->arg_count >= 3 && func->args[2] &&
+                func->args[2]->type == CSS_VALUE_TYPE_KEYWORD) {
+                style_type = func->args[2]->data.keyword;
+            }
+            char* buffer = (char*)arena_alloc(lycon->doc->arena, 128);
+            if (!buffer || !counter_name) return "";
+            counters_format((CounterContext*)lycon->counter_context, counter_name,
+                            separator ? separator : ".", style_type, buffer, 128);
+            return buffer;
+        }
+
+        return nullptr;
+    }
+
+    int quote_type = pseudo_check_quote_content(item);
+    if (quote_type == 1 || quote_type == 2) {
+        return pseudo_resolve_quote_char(element, quote_type == 1, quote_depth);
+    }
+    if (quote_type == 3 || quote_type == 4) {
+        return "";
+    }
+
+    return nullptr;
+}
+
+static bool pseudo_materialize_content_children(LayoutContext* lycon, DomElement* parent,
+                                                DomElement* pseudo_elem, bool is_before) {
+    if (!lycon || !parent || !pseudo_elem) return false;
+
+    StyleTree* pseudo_styles = is_before ? parent->before_styles : parent->after_styles;
+    if (!pseudo_styles) return false;
+
+    CssDeclaration* content_decl = style_tree_get_declaration(pseudo_styles, CSS_PROPERTY_CONTENT);
+    if (!content_decl || !content_decl->value) return false;
+
+    CssValue* value = content_decl->value;
+    StrBuf* text_buf = strbuf_new_cap(64);
+    if (!text_buf) return false;
+
+    bool appended_any = false;
+    int open_quote_count = 0;
+    int item_count = (value->type == CSS_VALUE_TYPE_LIST) ? value->data.list.count : 1;
+
+    for (int i = 0; i < item_count; i++) {
+        CssValue* item = (value->type == CSS_VALUE_TYPE_LIST) ? value->data.list.values[i] : value;
+        if (!item) continue;
+
+        const char* raw_url = nullptr;
+        if (item->type == CSS_VALUE_TYPE_URL) {
+            raw_url = item->data.url;
+        } else if (item->type == CSS_VALUE_TYPE_FUNCTION && item->data.function &&
+                   item->data.function->name && strcmp(item->data.function->name, "url") == 0 &&
+                   item->data.function->arg_count > 0 && item->data.function->args[0]) {
+            raw_url = pseudo_css_value_extract_name(item->data.function->args[0]);
+        }
+
+        if (raw_url && raw_url[0]) {
+            if (text_buf->length > 0) {
+                pseudo_append_text_child(pseudo_elem, text_buf->str);
+                text_buf->length = 0;
+                if (text_buf->str) text_buf->str[0] = '\0';
+                appended_any = true;
+            }
+
+            DomElement* img_elem = pseudo_create_image_child(lycon, pseudo_elem, content_decl, raw_url);
+            if (img_elem) {
+                pseudo_append_child(pseudo_elem, (DomNode*)img_elem);
+                appended_any = true;
+            }
+        } else {
+            const char* fragment = pseudo_resolve_text_fragment(lycon, parent, item, open_quote_count);
+            if (fragment && fragment[0]) {
+                strbuf_append_str(text_buf, fragment);
+            }
+        }
+
+        int quote_type = pseudo_check_quote_content(item);
+        if (quote_type == 1 || quote_type == 3) {
+            open_quote_count++;
+        }
+    }
+
+    if (text_buf->length > 0) {
+        pseudo_append_text_child(pseudo_elem, text_buf->str);
+        appended_any = true;
+    }
+
+    strbuf_free(text_buf);
+    return appended_any;
 }
 
 // CSS 2.1 §8.3.1: Collapse two margins according to spec rules
@@ -249,22 +816,16 @@ static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* paren
     // Allow empty content - pseudo-elements with display:block and clear:both still need to be created
     if (!lycon || !parent) return nullptr;
 
-    Pool* pool = lycon->doc->view_tree->pool;
-    if (!pool) return nullptr;
-
     // Create the pseudo DomElement
     // Per CSS spec: pseudo-element is child of defining element,
     // text node is child of pseudo-element
-    DomElement* pseudo_elem = (DomElement*)pool_calloc(pool, sizeof(DomElement));
+    DomElement* pseudo_elem = dom_element_create(parent->doc, is_before ? "::before" : "::after", nullptr);
     if (!pseudo_elem) return nullptr;
 
-    // Initialize as element node
-    pseudo_elem->node_type = DOM_NODE_ELEMENT;
-    pseudo_elem->tag_name = is_before ? "::before" : "::after";
-    pseudo_elem->doc = parent->doc;
     // Pseudo-element is child of defining element
     pseudo_elem->parent = parent;
     pseudo_elem->first_child = nullptr;
+    pseudo_elem->last_child = nullptr;
     pseudo_elem->next_sibling = nullptr;
     pseudo_elem->prev_sibling = nullptr;
 
@@ -316,41 +877,15 @@ static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* paren
         pseudo_elem->specified_style = pseudo_styles;
     }
 
-    // Create the text child only if there's content
-    // Empty content pseudo-elements still participate in layout (e.g., clearfix)
-    if (content && *content) {
-        log_info("%s [PSEUDO] Creating text node for pseudo-element, content_len=%zu, first_byte=0x%02x", parent->source_loc(),
+    bool materialized_children = pseudo_materialize_content_children(lycon, parent, pseudo_elem, is_before);
+
+    // Fallback for simple-content paths when no structured children were produced.
+    // Empty content pseudo-elements still participate in layout (e.g., clearfix).
+    if (!materialized_children && content && *content) {
+        log_info("%s [PSEUDO] Creating fallback text node for pseudo-element, content_len=%zu, first_byte=0x%02x", parent->source_loc(),
             strlen(content), (unsigned char)*content);
-        DomText* text_node = (DomText*)pool_calloc(pool, sizeof(DomText));
-        if (text_node) {
-            // Initialize as text node
-            text_node->node_type = DOM_NODE_TEXT;
-            // Text node is child of pseudo-element
-            text_node->parent = pseudo_elem;
-            text_node->next_sibling = nullptr;
-            text_node->prev_sibling = nullptr;
-
-            // Copy the content string
-            size_t content_len = strlen(content);
-            char* text_content = (char*)pool_calloc(pool, content_len + 1);
-            if (text_content) {
-                memcpy(text_content, content, content_len);
-                text_content[content_len] = '\0';
-                log_info("%s [PSEUDO] Text node created with content_len=%zu, bytes=[%02x %02x %02x]", parent->source_loc(),
-                    content_len,
-                    content_len > 0 ? (unsigned char)text_content[0] : 0,
-                    content_len > 1 ? (unsigned char)text_content[1] : 0,
-                    content_len > 2 ? (unsigned char)text_content[2] : 0);
-            }
-            text_node->text = text_content;
-            text_node->length = content_len;
-            text_node->native_string = nullptr;  // Not backed by Lambda String
-            text_node->content_type = DOM_TEXT_STRING;
-
-            // Link text node as child of pseudo element
-            pseudo_elem->first_child = text_node;
-        }
-    } else {
+        pseudo_append_text_child(pseudo_elem, content);
+    } else if (!materialized_children) {
         log_info("%s [PSEUDO] NOT creating text node: content=%p, first_byte=%s", parent->source_loc(),
             (void*)content, content ? ((*content) ? "nonzero" : "ZERO") : "NULL");
     }
@@ -1950,12 +2485,17 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
         log_debug("%s finalizing block, display=%d, given wd:%f", block->source_loc(), display, lycon->block.given_width);
     }
     if (display == CSS_VALUE_INLINE_BLOCK && lycon->block.given_width < 0) {
-        // CSS 2.1 §10.3.9: Save the pre-layout fit-content width (border-box).
-        // When max-content > available, the fit-content equals available width,
-        // and text wraps within it. After layout, flow_width (widest wrapped line)
-        // can be less than available. Floor at pre-layout width to prevent
-        // incorrect shrinking below the shrink-to-fit width.
-        float pre_layout_fit_width = block->width;
+        // CSS 2.1 §10.3.9: inline-block auto width uses the shrink-to-fit
+        // algorithm: min(max(preferred minimum width, available width),
+        // preferred width). Use intrinsic widths rather than the pre-layout
+        // available width; otherwise short inline-blocks incorrectly stretch.
+        float available_width = block->width;
+        IntrinsicSizes intrinsic = {0, 0};
+        if (block->is_element()) {
+            intrinsic = measure_element_intrinsic_widths(lycon, (DomElement*)block);
+        }
+        float shrink_to_fit_width = min(max(intrinsic.min_content, available_width),
+                                        intrinsic.max_content);
 
         // CSS 2.1 §10.3.9: shrink-to-fit width cannot be less than border+padding
         float min_bp_width = 0;
@@ -1975,15 +2515,14 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
         // to inline-block shrink-to-fit width, same as other auto-width paths
         block->width = adjust_min_max_width(block, block->width);
 
-        // CSS 2.1 §10.3.9: Floor at the pre-layout fit-content width.
-        // The fit-content formula min(max-content, max(min-content, available))
-        // is the correct shrink-to-fit width. Post-layout flow_width can be less
-        // (text wrapped within the available width). Allow expansion (overflow)
-        // but not spurious shrinking.
-        if (block->width < pre_layout_fit_width) {
-            log_debug("%s inline-block floor: flow_width=%.1f -> fit_width=%.1f",
-                      block->source_loc(), block->width, pre_layout_fit_width);
-            block->width = pre_layout_fit_width;
+        // Post-layout flow_width may be narrower than the shrink-to-fit width
+        // when text wrapped inside the available width. Floor to the formula,
+        // not to the full available width.
+        if (block->width < shrink_to_fit_width) {
+            log_debug("%s inline-block shrink-to-fit floor: flow_width=%.1f -> fit_width=%.1f (min=%.1f, max=%.1f, avail=%.1f)",
+                      block->source_loc(), block->width, shrink_to_fit_width,
+                      intrinsic.min_content, intrinsic.max_content, available_width);
+            block->width = shrink_to_fit_width;
         }
 
         log_debug("%s inline-block final width set to: %f, text_align=%d", block->source_loc(), block->width, lycon->block.text_align);
@@ -4327,6 +4866,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     }
 
     uintptr_t elmt_name = block->tag();
+    apply_contain_intrinsic_used_size(lycon, block);
+    apply_canvas_object_view_box_auto_size(lycon, block);
 
     // CSS 2.1 §10.3.2/§10.6.2: For replaced elements with 'width: auto' or
     // 'height: auto', use intrinsic dimensions. Per HTML spec, iframe default
@@ -4387,7 +4928,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         const char *value;
         value = block->get_attribute("src");
         log_debug("%s [IMG LAYOUT] src attribute: %s", block->source_loc(), value ? value : "NULL");
-        if (value) {
+        bool has_src_attr = value && value[0] != '\0';
+        if (has_src_attr) {
             size_t value_len = strlen(value);
             StrBuf* src = strbuf_new_cap(value_len);
             strbuf_append_str_n(src, value, value_len);
@@ -4405,8 +4947,21 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         if (block->embed && block->embed->img) {
             ImageSurface* img = block->embed->img;
             // Image intrinsic dimensions are in CSS logical pixels
-            float w = img->width;
-            float h = img->height;
+            bool from_image_orientation = image_orientation_uses_from_image(block->as_element());
+            float w = (from_image_orientation || img->encoded_width <= 0) ? img->width : img->encoded_width;
+            float h = (from_image_orientation || img->encoded_height <= 0) ? img->height : img->encoded_height;
+            ObjectViewBoxUsedRect object_view_box = img->has_intrinsic_size
+                ? resolve_object_view_box_rect(lycon, block->as_element(), w, h)
+                : ObjectViewBoxUsedRect{false, 0.0f, 0.0f, w, h};
+            if (object_view_box.valid) {
+                // CSS Images 4 §2.1: object-view-box changes the source object
+                // dimensions used by object sizing. The element's auto size and
+                // intrinsic aspect ratio are based on the specified view box.
+                w = object_view_box.width;
+                h = object_view_box.height;
+                log_debug("%s object-view-box intrinsic dims: %.1f x %.1f",
+                          block->source_loc(), w, h);
+            }
 
             // HTML percentage width/height (e.g., width="50%") — re-resolve
             // against the actual containing block width now that layout is known.
@@ -4432,12 +4987,12 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             if (lycon->block.given_width < 0 || lycon->block.given_height < 0 || width_is_zero_percent) {
                 if (lycon->block.given_width >= 0 && !width_is_zero_percent) {
                     // Width specified, scale unspecified height
-                    lycon->block.given_height = lycon->block.given_width * h / w;
+                    lycon->block.given_height = (w > 0.0f) ? (lycon->block.given_width * h / w) : 0.0f;
                     image_height_auto_derived = true;
                 }
                 else if (lycon->block.given_height >= 0 && lycon->block.given_width < 0) {
                     // Height specified, scale unspecified width
-                    lycon->block.given_width = lycon->block.given_height * w / h;
+                    lycon->block.given_width = (h > 0.0f) ? (lycon->block.given_height * w / h) : 0.0f;
                     image_width_auto_derived = true;
                 }
                 else {
@@ -4468,6 +5023,18 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 img->max_render_width = max(lycon->block.given_width, img->max_render_width);
             }
             log_debug("%s image dimensions: %f x %f", block->source_loc(), lycon->block.given_width, lycon->block.given_height);
+        }
+        else if (!has_src_attr) {
+            // HTML <img> without a src/current request has no intrinsic size.
+            // Explicit CSS width/height still produce a box; auto dimensions collapse.
+            if (!(block->blk && block->blk->given_width >= 0)) {
+                lycon->block.given_width = 0;
+            }
+            if (!(block->blk && block->blk->given_height >= 0)) {
+                lycon->block.given_height = 0;
+            }
+            log_debug("%s image without src: given_width=%.1f, given_height=%.1f",
+                      block->source_loc(), lycon->block.given_width, lycon->block.given_height);
         }
         else { // failed to load image
             // CSS Images 3 + browser behavior: when an image fails to load,
@@ -4664,9 +5231,17 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         }
     }
     else { // auto height - will be determined by content
+        float aspect_ratio = get_preferred_aspect_ratio(block);
+        if (aspect_ratio > 0.0f && content_width >= 0.0f) {
+            content_height = content_width / aspect_ratio;
+            lycon->block.given_height = content_height;
+            if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+            block->blk->given_height = content_height;
+            log_debug("%s [AspectRatio] auto height %.1f from width %.1f / ratio %.3f",
+                      block->source_loc(), content_height, content_width, aspect_ratio);
+        }
         // Don't inherit parent's content_height for auto height blocks
         // The height will be finalized after content is laid out in finalize_block_flow
-        content_height = 0;  // Initial value, will be updated during layout
         if (block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
             content_height = adjust_min_max_height(block, content_height);
             if (block->bound) content_height = adjust_border_padding_height(block, content_height);

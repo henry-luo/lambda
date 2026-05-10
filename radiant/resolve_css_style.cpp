@@ -58,6 +58,57 @@ static bool is_border_radius_slash(const CssValue* value) {
            strcmp(value->data.custom_property.name, "/") == 0;
 }
 
+static const char* css_value_identifier_name(const CssValue* value) {
+    if (!value) return nullptr;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        const CssEnumInfo* info = css_enum_info(value->data.keyword);
+        return info ? info->name : nullptr;
+    }
+    if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
+        return value->data.custom_property.name;
+    }
+    if (value->type == CSS_VALUE_TYPE_STRING) {
+        return value->data.string;
+    }
+    return nullptr;
+}
+
+static bool css_value_identifier_is(const CssValue* value, const char* name) {
+    const char* ident = css_value_identifier_name(value);
+    return ident && name && strcasecmp(ident, name) == 0;
+}
+
+static bool resolve_nonnegative_css_length(LayoutContext* lycon, uintptr_t property,
+                                           const CssValue* value, float* out_length) {
+    if (!value || !out_length) return false;
+    if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_NUMBER) {
+        float length = resolve_length_value(lycon, property, value);
+        if (isnan(length)) return false;
+        *out_length = max(length, 0.0f);
+        return true;
+    }
+    return false;
+}
+
+static bool resolve_contain_intrinsic_length(LayoutContext* lycon, uintptr_t property,
+                                             const CssValue* value, float* out_length) {
+    if (!value || !out_length) return false;
+    if (resolve_nonnegative_css_length(lycon, property, value, out_length)) return true;
+    if (value->type == CSS_VALUE_TYPE_LIST) {
+        bool found = false;
+        for (int i = 0; i < value->data.list.count; i++) {
+            CssValue* item = value->data.list.values ? value->data.list.values[i] : nullptr;
+            float length = 0.0f;
+            if (resolve_nonnegative_css_length(lycon, property, item, &length)) {
+                *out_length = length;
+                found = true;
+            }
+        }
+        return found;
+    }
+    return false;
+}
+
 static bool css_text_has_top_level_comma(const char* text, size_t len) {
     if (!text) return false;
 
@@ -12158,6 +12209,78 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             }
             log_debug("[Lambda CSS Shorthand] Gap shorthand expansion complete");
             return;
+        }
+
+        case CSS_PROPERTY_CONTAIN: {
+            if (!block || !value) break;
+            if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+            bool contains_size = false;
+            if (css_value_identifier_is(value, "size") || css_value_identifier_is(value, "strict")) {
+                contains_size = true;
+            } else if (value->type == CSS_VALUE_TYPE_LIST) {
+                for (int i = 0; i < value->data.list.count; i++) {
+                    CssValue* item = value->data.list.values ? value->data.list.values[i] : nullptr;
+                    if (css_value_identifier_is(item, "size") || css_value_identifier_is(item, "strict")) {
+                        contains_size = true;
+                        break;
+                    }
+                }
+            }
+            block->blk->contain_size = contains_size;
+            log_debug("[CSS] contain size containment: %d", contains_size);
+            break;
+        }
+
+        case CSS_PROPERTY_CONTAIN_INTRINSIC_WIDTH: {
+            if (!block || !value) break;
+            float width = -1.0f;
+            if (resolve_contain_intrinsic_length(lycon, prop_id, value, &width)) {
+                if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+                block->blk->contain_intrinsic_width = width;
+                log_debug("[CSS] contain-intrinsic-width: %.1f", width);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_CONTAIN_INTRINSIC_HEIGHT: {
+            if (!block || !value) break;
+            float height = -1.0f;
+            if (resolve_contain_intrinsic_length(lycon, prop_id, value, &height)) {
+                if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+                block->blk->contain_intrinsic_height = height;
+                log_debug("[CSS] contain-intrinsic-height: %.1f", height);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE: {
+            if (!block || !value) break;
+            float first = -1.0f;
+            float second = -1.0f;
+            if (value->type == CSS_VALUE_TYPE_LIST) {
+                for (int i = 0; i < value->data.list.count; i++) {
+                    CssValue* item = value->data.list.values ? value->data.list.values[i] : nullptr;
+                    float length = -1.0f;
+                    if (!resolve_contain_intrinsic_length(lycon, prop_id, item, &length)) continue;
+                    if (first < 0.0f) {
+                        first = length;
+                    } else {
+                        second = length;
+                        break;
+                    }
+                }
+            } else {
+                resolve_contain_intrinsic_length(lycon, prop_id, value, &first);
+            }
+            if (first >= 0.0f) {
+                if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+                block->blk->contain_intrinsic_width = first;
+                block->blk->contain_intrinsic_height = second >= 0.0f ? second : first;
+                log_debug("[CSS] contain-intrinsic-size: %.1f %.1f",
+                          block->blk->contain_intrinsic_width,
+                          block->blk->contain_intrinsic_height);
+            }
+            break;
         }
 
         case CSS_PROPERTY_OBJECT_FIT: {

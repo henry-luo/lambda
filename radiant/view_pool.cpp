@@ -214,6 +214,8 @@ BlockProp* alloc_block_prop(LayoutContext* lycon) {
     prop->box_sizing = CSS_VALUE_CONTENT_BOX;  // default to content-box
     prop->given_width = prop->given_height = -1;  // -1 for not specified
     prop->given_width_percent = prop->given_height_percent = NAN;  // NAN for not percentage
+    prop->contain_intrinsic_width = prop->contain_intrinsic_height = -1;
+    prop->contain_size = false;
     prop->given_min_width_percent = prop->given_max_width_percent = NAN;
     prop->given_min_height_percent = prop->given_max_height_percent = NAN;
     prop->text_indent = 0;  // default to 0
@@ -913,6 +915,32 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
                 }
             }
             parent = parent->parent_view();
+        }
+    }
+
+    if (!is_fixed) {
+        ViewElement* parent = view->parent_view();
+        while (parent) {
+            if (parent->is_block()) {
+                ViewBlock* parent_block = (ViewBlock*)parent;
+                if (parent_block->scroller && parent_block->scroller->pane) {
+                    abs_x -= parent_block->scroller->pane->h_scroll_position;
+                    abs_y -= parent_block->scroller->pane->v_scroll_position;
+                }
+                if (parent_block->position &&
+                    parent_block->position->position == CSS_VALUE_FIXED) {
+                    break;
+                }
+            }
+            parent = parent->parent_view();
+        }
+
+        if (view->is_block() && !view->parent_view()) {
+            ViewBlock* root_block = (ViewBlock*)view;
+            if (root_block->scroller && root_block->scroller->pane) {
+                abs_x -= root_block->scroller->pane->h_scroll_position;
+                abs_y -= root_block->scroller->pane->v_scroll_position;
+            }
         }
     }
 

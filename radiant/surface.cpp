@@ -56,6 +56,163 @@ static bool is_svg_content(const unsigned char* data, size_t size) {
     return false;
 }
 
+static const char* find_bytes(const char* data, size_t size, const char* needle, size_t needle_len) {
+    if (!data || !needle || needle_len == 0 || size < needle_len) return NULL;
+    for (size_t i = 0; i <= size - needle_len; i++) {
+        if (memcmp(data + i, needle, needle_len) == 0) return data + i;
+    }
+    return NULL;
+}
+
+static bool svg_has_intrinsic_size_in_memory(const char* data, size_t size) {
+    if (!data || size == 0) return false;
+
+    const char* end = data + size;
+    const char* svg = find_bytes(data, size, "<svg", 4);
+    if (!svg) return false;
+
+    const char* tag_end = svg;
+    while (tag_end < end && *tag_end != '>') tag_end++;
+    if (tag_end >= end) return false;
+
+    size_t tag_len = (size_t)(tag_end - svg);
+    bool has_width = find_bytes(svg, tag_len, "width", 5) != NULL;
+    bool has_height = find_bytes(svg, tag_len, "height", 6) != NULL;
+    return has_width && has_height;
+}
+
+static bool svg_has_intrinsic_size_in_file(const char* file_path) {
+    if (!file_path) return false;
+
+    FILE* fp = fopen(file_path, "rb");
+    if (!fp) return false;
+
+    char buffer[4096];
+    size_t read_count = fread(buffer, 1, sizeof(buffer), fp);
+    fclose(fp);
+    return svg_has_intrinsic_size_in_memory(buffer, read_count);
+}
+
+static uint16_t read_exif_u16(const unsigned char* p, bool little_endian) {
+    if (little_endian) return (uint16_t)(p[0] | (p[1] << 8));
+    return (uint16_t)((p[0] << 8) | p[1]);
+}
+
+static uint32_t read_exif_u32(const unsigned char* p, bool little_endian) {
+    if (little_endian) {
+        return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+               ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+    }
+    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
+           ((uint32_t)p[2] << 8) | (uint32_t)p[3];
+}
+
+static int jpeg_exif_orientation_from_memory(const unsigned char* data, size_t size) {
+    if (!data || size < 4 || data[0] != 0xFF || data[1] != 0xD8) return 1;
+
+    size_t pos = 2;
+    while (pos + 4 <= size) {
+        while (pos < size && data[pos] == 0xFF) pos++;
+        if (pos >= size) break;
+
+        unsigned char marker = data[pos++];
+        if (marker == 0xDA || marker == 0xD9) break;
+        if (pos + 2 > size) break;
+
+        uint16_t seg_len = (uint16_t)((data[pos] << 8) | data[pos + 1]);
+        pos += 2;
+        if (seg_len < 2) break;
+
+        size_t payload_len = (size_t)seg_len - 2;
+        if (pos + payload_len > size) break;
+
+        if (marker == 0xE1 && payload_len >= 14 && memcmp(data + pos, "Exif\0\0", 6) == 0) {
+            const unsigned char* tiff = data + pos + 6;
+            size_t tiff_len = payload_len - 6;
+            if (tiff_len < 8) return 1;
+
+            bool little_endian = false;
+            if (tiff[0] == 'I' && tiff[1] == 'I') little_endian = true;
+            else if (tiff[0] == 'M' && tiff[1] == 'M') little_endian = false;
+            else return 1;
+
+            if (read_exif_u16(tiff + 2, little_endian) != 42) return 1;
+            uint32_t ifd_offset = read_exif_u32(tiff + 4, little_endian);
+            if (ifd_offset + 2 > tiff_len) return 1;
+
+            const unsigned char* ifd = tiff + ifd_offset;
+            uint16_t entry_count = read_exif_u16(ifd, little_endian);
+            size_t entries_start = ifd_offset + 2;
+            for (uint16_t i = 0; i < entry_count; i++) {
+                size_t entry_offset = entries_start + (size_t)i * 12;
+                if (entry_offset + 12 > tiff_len) break;
+
+                const unsigned char* entry = tiff + entry_offset;
+                uint16_t tag = read_exif_u16(entry, little_endian);
+                uint16_t type = read_exif_u16(entry + 2, little_endian);
+                uint32_t count = read_exif_u32(entry + 4, little_endian);
+                if (tag == 0x0112 && type == 3 && count >= 1) {
+                    int orientation = read_exif_u16(entry + 8, little_endian);
+                    return (orientation >= 1 && orientation <= 8) ? orientation : 1;
+                }
+            }
+            return 1;
+        }
+        pos += payload_len;
+    }
+    return 1;
+}
+
+static int jpeg_exif_orientation_from_file(const char* file_path) {
+    if (!file_path) return 1;
+
+    FILE* fp = fopen(file_path, "rb");
+    if (!fp) return 1;
+
+    if (fseek(fp, 0, SEEK_END) != 0) {
+        fclose(fp);
+        return 1;
+    }
+    long file_size = ftell(fp);
+    if (file_size <= 0) {
+        fclose(fp);
+        return 1;
+    }
+    if (fseek(fp, 0, SEEK_SET) != 0) {
+        fclose(fp);
+        return 1;
+    }
+
+    unsigned char* bytes = (unsigned char*)mem_alloc((size_t)file_size, MEM_CAT_IMAGE);
+    if (!bytes) {
+        fclose(fp);
+        return 1;
+    }
+    size_t read_count = fread(bytes, 1, (size_t)file_size, fp);
+    fclose(fp);
+
+    int orientation = 1;
+    if (read_count == (size_t)file_size) {
+        orientation = jpeg_exif_orientation_from_memory(bytes, (size_t)file_size);
+    }
+    mem_free(bytes);
+    return orientation;
+}
+
+static void image_surface_apply_orientation_metadata(ImageSurface* surface, int orientation) {
+    if (!surface) return;
+
+    surface->encoded_width = surface->width;
+    surface->encoded_height = surface->height;
+    surface->orientation = (orientation >= 1 && orientation <= 8) ? orientation : 1;
+    surface->has_intrinsic_size = true;
+    if (surface->orientation >= 5 && surface->orientation <= 8) {
+        int width = surface->width;
+        surface->width = surface->height;
+        surface->height = width;
+    }
+}
+
 ImageSurface* load_image(UiContext* uicon, const char *img_url) {
     if (uicon->document == NULL || uicon->document->url == NULL) {
         log_error("Missing URL context for image: %s", img_url);
@@ -111,8 +268,11 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
             rdt_picture_get_size(surface->pic, &svg_w, &svg_h);
             surface->width = svg_w;
             surface->height = svg_h;
+            image_surface_apply_orientation_metadata(surface, 1);
+            surface->has_intrinsic_size = svg_has_intrinsic_size_in_memory((const char*)decoded, decoded_len);
         } else {
             int width, height, channels;
+            int orientation = jpeg_exif_orientation_from_memory(decoded, decoded_len);
             unsigned char* data = image_load_from_memory(decoded, decoded_len, &width, &height, &channels);
             mem_free(decoded);
             if (!data) {
@@ -126,6 +286,11 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
             else if (strstr(img_url, "image/jpeg") || strstr(img_url, "image/jpg")) surface->format = IMAGE_FORMAT_JPEG;
             else if (strstr(img_url, "image/gif")) surface->format = IMAGE_FORMAT_GIF;
             else if (strstr(img_url, "image/svg")) surface->format = IMAGE_FORMAT_SVG;
+            if (surface->format == IMAGE_FORMAT_JPEG) {
+                image_surface_apply_orientation_metadata(surface, orientation);
+            } else {
+                image_surface_apply_orientation_metadata(surface, 1);
+            }
         }
         log_debug("[BG-IMAGE] Loaded data URI image: %dx%d", surface->width, surface->height);
         return surface;
@@ -223,6 +388,10 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         rdt_picture_get_size(surface->pic, &svg_w, &svg_h);
         surface->width = svg_w;
         surface->height = svg_h;
+        image_surface_apply_orientation_metadata(surface, 1);
+        surface->has_intrinsic_size = is_http && downloaded_data
+            ? svg_has_intrinsic_size_in_memory((const char*)downloaded_data, downloaded_size)
+            : svg_has_intrinsic_size_in_file(file_path);
         log_debug("SVG image size: %f x %f\n", svg_w, svg_h);
         if (downloaded_data) mem_free(downloaded_data);
     }
@@ -270,6 +439,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         }
         if (downloaded_data) mem_free(downloaded_data);
         if (!surface) return NULL;
+        image_surface_apply_orientation_metadata(surface, 1);
     }
     else {
         int width, height;
@@ -328,6 +498,20 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         else if (slen > 4 && strcmp(file_path + slen - 4, ".gif") == 0) {
             surface->format = IMAGE_FORMAT_GIF;
         }
+        if (surface->format == IMAGE_FORMAT_JPEG) {
+            int orientation = 1;
+            if (is_http && surface->source_data && surface->source_data_len > 0) {
+                orientation = jpeg_exif_orientation_from_memory(surface->source_data, surface->source_data_len);
+            } else {
+                orientation = jpeg_exif_orientation_from_file(file_path);
+            }
+            image_surface_apply_orientation_metadata(surface, orientation);
+            log_debug("[image] JPEG orientation: exif=%d encoded=%dx%d natural=%dx%d",
+                      surface->orientation, surface->encoded_width, surface->encoded_height,
+                      surface->width, surface->height);
+        } else {
+            image_surface_apply_orientation_metadata(surface, 1);
+        }
     }
     surface->url = abs_url;
 
@@ -381,6 +565,9 @@ ImageSurface* image_surface_create(int pixel_width, int pixel_height) {
     }
     ImageSurface* img_surface = (ImageSurface*)mem_calloc(1, sizeof(ImageSurface), MEM_CAT_IMAGE);
     img_surface->width = pixel_width;  img_surface->height = pixel_height;
+    img_surface->encoded_width = pixel_width;  img_surface->encoded_height = pixel_height;
+    img_surface->orientation = 1;
+    img_surface->has_intrinsic_size = true;
     img_surface->pitch = pixel_width * 4;
     img_surface->pixels = mem_calloc(pixel_width * pixel_height * 4, sizeof(uint32_t), MEM_CAT_IMAGE);
     if (!img_surface->pixels) {
@@ -399,6 +586,9 @@ ImageSurface* image_surface_create_from(int pixel_width, int pixel_height, void*
     ImageSurface* img_surface = (ImageSurface*)mem_calloc(1, sizeof(ImageSurface), MEM_CAT_IMAGE);
     if (img_surface) {
         img_surface->width = pixel_width;  img_surface->height = pixel_height;
+        img_surface->encoded_width = pixel_width;  img_surface->encoded_height = pixel_height;
+        img_surface->orientation = 1;
+        img_surface->has_intrinsic_size = true;
         img_surface->pitch = pixel_width * 4;
         img_surface->pixels = pixels;
     }

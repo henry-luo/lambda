@@ -358,6 +358,10 @@ typedef struct ImageSurface {
     ImageFormat format;
     int width;             // the intrinsic width of the surface/image (used for layout/intrinsic sizing)
     int height;            // the intrinsic height of the surface/image
+    int encoded_width;     // raster source dimensions before image-orientation metadata
+    int encoded_height;
+    int orientation;       // EXIF orientation value, 1 when absent/normal/invalid
+    bool has_intrinsic_size;
     int pitch;             // no. of bytes per row of the actual decoded pixel buffer
     // image pixels, 32-bits per pixel, RGBA format
     // pack order is [R] [G] [B] [A], high bit -> low bit
@@ -1029,6 +1033,9 @@ typedef struct BlockProp {
     CssEnum given_height_type;
     float given_width_percent;  // Raw percentage if width: X% (NaN if not percentage)
     float given_height_percent; // Raw percentage if height: X% (NaN if not percentage)
+    float contain_intrinsic_width;
+    float contain_intrinsic_height;
+    bool contain_size;
     float given_min_width_percent;   // Raw percentage if min-width: X% (NaN if not percentage)
     float given_max_width_percent;   // Raw percentage if max-width: X% (NaN if not percentage)
     float given_min_height_percent;  // Raw percentage if min-height: X% (NaN if not percentage)
