@@ -8811,12 +8811,19 @@ extern "C" Item js_func_bind(Item func_item, Item bound_this, Item* bound_args, 
 static const char* JS_REGEX_DATA_KEY = "__rd";
 
 // update legacy static state after a successful regex exec
-static void js_regexp_update_last_match(const char* input_str, int input_len,
+static void js_regexp_update_last_match(String* input_s,
     re2::StringPiece* matches, int num_groups) {
-    js_regexp_last_match.input = heap_strcpy((char*)input_str, input_len);
-    js_regexp_last_match.match = matches[0].data()
-        ? heap_strcpy((char*)matches[0].data(), (int)matches[0].size())
-        : heap_create_name("", 0);
+    const char* input_str = input_s ? input_s->chars : "";
+    int input_len = input_s ? (int)input_s->len : 0;
+    js_regexp_last_match.input = input_s ? input_s : heap_create_name("", 0);
+    if (matches[0].data() && input_s && matches[0].data() == input_str &&
+        (int)matches[0].size() == input_len) {
+        js_regexp_last_match.match = input_s;
+    } else {
+        js_regexp_last_match.match = matches[0].data()
+            ? heap_strcpy((char*)matches[0].data(), (int)matches[0].size())
+            : heap_create_name("", 0);
+    }
     js_regexp_last_match.match_start = matches[0].data()
         ? (int)(matches[0].data() - input_str) : 0;
     js_regexp_last_match.match_end = js_regexp_last_match.match_start
@@ -8828,7 +8835,12 @@ static void js_regexp_update_last_match(const char* input_str, int input_len,
     for (int i = 0; i < gc; i++) {
         int gi = i + 1; // groups[0] is full match, groups[1] is $1
         if (gi < num_groups && matches[gi].data()) {
-            js_regexp_last_match.groups[i] = heap_strcpy((char*)matches[gi].data(), (int)matches[gi].size());
+            if (input_s && matches[gi].data() == input_str &&
+                (int)matches[gi].size() == input_len) {
+                js_regexp_last_match.groups[i] = input_s;
+            } else {
+                js_regexp_last_match.groups[i] = heap_strcpy((char*)matches[gi].data(), (int)matches[gi].size());
+            }
         } else {
             js_regexp_last_match.groups[i] = heap_create_name("", 0);
         }
@@ -9029,10 +9041,8 @@ static Item js_regex_build_object_from_cache(const JsRegexCacheEntry& ce) {
     Item li_key = (Item){.item = s2it(heap_create_name("lastIndex"))};
     js_regex_put_fresh(regex_obj, "lastIndex", 9, (Item){.item = i2it(0)});
     // Per ES §22.2.3.1 RegExpAlloc: lastIndex is {writable:true, enumerable:false, configurable:false}
-    Item ne_li_key = (Item){.item = s2it(heap_create_name("__ne_lastIndex", 14))};
-    js_regex_put_fresh(regex_obj, "__ne_lastIndex", 14, (Item){.item = b2it(BOOL_TRUE)});
-    Item nc_li_key = (Item){.item = s2it(heap_create_name("__nc_lastIndex", 14))};
-    js_regex_put_fresh(regex_obj, "__nc_lastIndex", 14, (Item){.item = b2it(BOOL_TRUE)});
+    js_mark_non_enumerable(regex_obj, li_key);
+    js_mark_non_configurable(regex_obj, li_key);
     Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
     Item cn_val = (Item){.item = s2it(heap_create_name("RegExp", 6))};
     js_regex_put_fresh(regex_obj, "__class_name__", 14, cn_val);
@@ -9730,10 +9740,8 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     Item li_key = (Item){.item = s2it(heap_create_name("lastIndex"))};
     js_property_set(regex_obj, li_key, (Item){.item = i2it(0)});
     // Per ES §22.2.3.1: lastIndex is {writable:true, enumerable:false, configurable:false}
-    Item ne_li_key2 = (Item){.item = s2it(heap_create_name("__ne_lastIndex", 14))};
-    js_property_set(regex_obj, ne_li_key2, (Item){.item = b2it(BOOL_TRUE)});
-    Item nc_li_key2 = (Item){.item = s2it(heap_create_name("__nc_lastIndex", 14))};
-    js_property_set(regex_obj, nc_li_key2, (Item){.item = b2it(BOOL_TRUE)});
+    js_mark_non_enumerable(regex_obj, li_key);
+    js_mark_non_configurable(regex_obj, li_key);
     // v46: set __class_name__ for RegExp prototype method resolution
     Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
     Item cn_val = (Item){.item = s2it(heap_create_name("RegExp", 6))};
@@ -9901,8 +9909,9 @@ extern "C" Item js_regex_test(Item regex, Item str) {
         tid = get_type_id(str);
         if (tid != LMD_TYPE_STRING) return ItemNull;
     }
-    const char* chars = str.get_chars();
-    int len = str.get_len();
+    String* input_s = it2s(str);
+    const char* chars = input_s ? input_s->chars : "";
+    int len = input_s ? (int)input_s->len : 0;
 
     int start_pos = 0;
     Item li_key = (Item){.item = s2it(heap_create_name("lastIndex", 9))};
@@ -9939,7 +9948,7 @@ extern "C" Item js_regex_test(Item regex, Item str) {
         int match_end = (int)(matches[0].data() - chars) + (int)matches[0].size();
         if (!js_regex_set_lastindex_strict(regex, li_key, match_end)) return ItemNull;
     }
-    js_regexp_update_last_match(chars, len, matches, num_groups);
+    js_regexp_update_last_match(input_s, matches, num_groups);
     return (Item){.item = b2it(matched ? BOOL_TRUE : BOOL_FALSE)};
 }
 
@@ -9973,8 +9982,9 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
         tid = get_type_id(str);
         if (tid != LMD_TYPE_STRING) return ItemNull;
     }
-    const char* chars = str.get_chars();
-    int len = str.get_len();
+    String* input_s = it2s(str);
+    const char* chars = input_s ? input_s->chars : "";
+    int len = input_s ? (int)input_s->len : 0;
 
     // for global/sticky regexes, read lastIndex to start search from there
     int start_pos = 0;
@@ -10022,7 +10032,7 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     }
 
     // update legacy RegExp static properties ($1-$9, input, lastMatch, etc.)
-    js_regexp_update_last_match(chars, len, matches, num_groups);
+    js_regexp_update_last_match(input_s, matches, num_groups);
 
     // build result as an Array with .index, .input, .groups properties (per ES spec)
     Item result = js_array_new(num_groups);

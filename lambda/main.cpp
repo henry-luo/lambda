@@ -3509,6 +3509,8 @@ int main(int argc, char *argv[]) {
             // but memory-hungry tests (like RegExp CharacterClassEscapes) only
             // exist in a few batches, so actual peak is much lower.
             static const size_t RSS_LIMIT = 4096UL * 1024 * 1024; // 4 GB
+            static const size_t RSS_RESET_LIMIT = 1024UL * 1024 * 1024; // 1 GB
+            static const size_t RSS_GROWTH_RESET_LIMIT = 256UL * 1024 * 1024; // 256 MB
             static const int MAX_CRASH_COUNT = 10;
 
             if (hot_reload) {
@@ -3567,6 +3569,36 @@ int main(int argc, char *argv[]) {
                             rss_after / (1024*1024), RSS_LIMIT / (1024*1024), batch_test_count);
                     fflush(stdout);
                     break;
+                } else if (rss_after > RSS_RESET_LIMIT ||
+                           (rss_after > rss_before && rss_after - rss_before > RSS_GROWTH_RESET_LIMIT)) {
+                    // Successful but memory-heavy test. Recycle the hot heap before
+                    // the next test so large temporary strings from generated
+                    // Unicode/URI suites do not make later tests hit the alarm.
+                    js_batch_reset();
+                    heap_destroy();
+                    jm_cleanup_deferred_mir();
+                    if (batch_context.nursery) gc_nursery_destroy(batch_context.nursery);
+                    memset(&batch_context, 0, sizeof(EvalContext));
+                    context = &batch_context;
+                    batch_context.nursery = gc_nursery_create(0);
+                    heap_init();
+                    batch_context.pool = batch_context.heap->pool;
+                    batch_context.name_pool = name_pool_create(batch_context.pool, nullptr);
+                    batch_context.type_list = arraylist_new(64);
+
+                    if (has_preamble) {
+                        preamble_state_destroy(&preamble);
+                        has_preamble = false;
+                    }
+                    if (saved_harness_src) {
+                        memset(&preamble, 0, sizeof(preamble));
+                        Item pres = transpile_js_to_mir_preamble(&runtime, saved_harness_src, "<harness>", &preamble);
+                        if (pres.item != ITEM_ERROR) {
+                            has_preamble = true;
+                            preamble_var_checkpoint = preamble.module_var_count;
+                            js_batch_reset_to(preamble_var_checkpoint);
+                        }
+                    }
                 } else if (has_preamble) {
                     js_batch_reset_to(preamble_var_checkpoint);
                 } else {
