@@ -879,6 +879,7 @@ extern Item js_to_property_key(Item key);
 extern int64_t js_typeof_is(Item value, const char* type_str);
 extern Item js_property_get_str(Item object, const char* key, int key_len);
 extern Item js_arguments_mapped_get(Item arguments, int64_t index, Item current_value);
+extern Item js_arguments_mapped_param_writeback(Item arguments, int64_t index, Item value);
 // v23b: Comparison facades returning raw int64_t 0/1
 extern int64_t js_lt_raw(Item left, Item right);
 extern int64_t js_gt_raw(Item left, Item right);
@@ -1308,6 +1309,7 @@ JitImport jit_runtime_imports[] = {
     {"js_new_object", FPTR(js_new_object)},
     {"js_property_get", FPTR(js_property_get)},
     {"js_arguments_mapped_get", FPTR(js_arguments_mapped_get)},
+    {"js_arguments_mapped_param_writeback", FPTR(js_arguments_mapped_param_writeback)},
     {"js_property_set", FPTR(js_property_set)},
     {"js_create_data_property", FPTR(js_create_data_property)},
     {"js_property_access", FPTR(js_property_access)},

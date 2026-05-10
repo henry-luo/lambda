@@ -545,7 +545,7 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
             if ((int)id->name->len == (int)strlen(builtins[i]) &&
                 strncmp(id->name->chars, builtins[i], id->name->len) == 0) {
                 MIR_reg_t name_reg = jm_box_string_literal(mt, builtins[i], (int)strlen(builtins[i]));
-                return jm_call_1(mt, "js_get_constructor", MIR_T_I64,
+                return jm_call_1(mt, "js_get_global_property_strict", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg));
             }
         }

@@ -4613,9 +4613,38 @@ extern "C" Item js_arguments_mapped_get(Item arguments, int64_t index, Item curr
     bool marker_found = false;
     Item marker = js_map_get_fast_ext(companion.map, marker_key, (int)strlen(marker_key), &marker_found);
     if (marker_found && js_is_truthy(marker)) {
+        char written_key[64];
+        snprintf(written_key, sizeof(written_key), "__arg_param_written_%lld", (long long)index);
+        bool written_found = false;
+        Item written = js_map_get_fast_ext(companion.map, written_key, (int)strlen(written_key), &written_found);
+        if (written_found && js_is_truthy(written)) return current_value;
+        char value_key[64];
+        snprintf(value_key, sizeof(value_key), "__arg_value_%lld", (long long)index);
+        bool value_found = false;
+        Item value = js_map_get_fast_ext(companion.map, value_key, (int)strlen(value_key), &value_found);
+        if (value_found) return value;
         return current_value;
     }
     return js_property_get(arguments, (Item){.item = i2it(index)});
+}
+
+extern "C" Item js_arguments_mapped_param_writeback(Item arguments, int64_t index, Item value) {
+    if (get_type_id(arguments) != LMD_TYPE_ARRAY || arguments.array->is_content != 1 || arguments.array->extra == 0) {
+        return js_property_set(arguments, (Item){.item = i2it(index)}, value);
+    }
+    Item companion = {.map = (Map*)(uintptr_t)arguments.array->extra};
+    char marker_key[64];
+    snprintf(marker_key, sizeof(marker_key), "__arg_unmapped_%lld", (long long)index);
+    bool marker_found = false;
+    Item marker = js_map_get_fast_ext(companion.map, marker_key, (int)strlen(marker_key), &marker_found);
+    if (marker_found && js_is_truthy(marker)) {
+        char written_key[64];
+        snprintf(written_key, sizeof(written_key), "__arg_param_written_%lld", (long long)index);
+        js_property_set(companion, (Item){.item = s2it(heap_create_name(written_key, strlen(written_key)))},
+                        (Item){.item = b2it(true)});
+        return value;
+    }
+    return js_property_set(arguments, (Item){.item = i2it(index)}, value);
 }
 
 // new Array(arg) — JS spec: if arg is a valid non-negative integer, create sparse
@@ -4881,6 +4910,7 @@ extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
     if (index >= 0 && index < arr->length && index < arr->capacity) {
         arr->items[index] = value;
     } else if (index >= 0) {
+        if (!js_is_extensible(array)) return value;
         if (index >= arr->capacity) {
             int64_t capacity_gap = index - arr->capacity;
             if (index < arr->length || capacity_gap > SPARSE_GAP_MAX) {
@@ -4991,6 +5021,7 @@ extern "C" Item js_array_set(Item array, Item index, Item value) {
     if (idx >= 0 && idx < arr->length && idx < arr->capacity) {
         arr->items[idx] = value;
     } else if (idx >= 0) {
+        if (!js_is_extensible(array)) return value;
         if (idx >= arr->capacity) {
             int64_t capacity_gap = idx - arr->capacity;
             if (idx < arr->length || capacity_gap > SPARSE_GAP_MAX) {

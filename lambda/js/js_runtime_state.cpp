@@ -83,7 +83,8 @@ extern "C" int64_t js_key_is_symbol_c(Item key) {
 }
 
 // ES2020 §7.1.14 ToPropertyKey(argument)
-// Symbols → internal __sym_N string; strings → as-is; others → ToString
+// ToPrimitive(string hint), then Symbols → internal __sym_N string,
+// strings → as-is, others → ToString.
 extern "C" Item js_to_property_key(Item key) {
     if (js_key_is_symbol(key)) return js_symbol_to_key(key);
     TypeId kt = get_type_id(key);
@@ -92,6 +93,17 @@ extern "C" Item js_to_property_key(Item key) {
         return (Item){.item = s2it(heap_create_name("null", 4))};
     if (kt == LMD_TYPE_UNDEFINED)
         return (Item){.item = s2it(heap_create_name("undefined", 9))};
+    if (kt == LMD_TYPE_MAP || kt == LMD_TYPE_ARRAY || kt == LMD_TYPE_ELEMENT) {
+        key = js_to_primitive(key, JS_HINT_STRING);
+        if (js_check_exception()) return ItemNull;
+        if (js_key_is_symbol(key)) return js_symbol_to_key(key);
+        kt = get_type_id(key);
+        if (kt == LMD_TYPE_STRING) return key;
+        if (key.item == 0 || kt == LMD_TYPE_NULL)
+            return (Item){.item = s2it(heap_create_name("null", 4))};
+        if (kt == LMD_TYPE_UNDEFINED)
+            return (Item){.item = s2it(heap_create_name("undefined", 9))};
+    }
     return js_to_string(key);
 }
 

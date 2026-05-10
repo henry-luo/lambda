@@ -6913,15 +6913,21 @@ extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor) 
                 Item companion = {.map = (Map*)(uintptr_t)obj.array->extra};
                 char marker_key[64];
                 snprintf(marker_key, sizeof(marker_key), "__arg_unmapped_%lld", (long long)arg_index);
-                js_property_set(companion, (Item){.item = s2it(heap_create_name(marker_key, strlen(marker_key)))},
-                                (Item){.item = b2it(true)});
-                bool value_found = false;
-                Item value = js_map_get_fast_ext(descriptor.map, "value", 5, &value_found);
-                if (value_found) {
+                bool already_unmapped = false;
+                Item existing_marker = js_map_get_fast_ext(companion.map, marker_key, (int)strlen(marker_key), &already_unmapped);
+                bool was_mapped = !(already_unmapped && js_is_truthy(existing_marker));
+                if (was_mapped && writable_found && !js_is_truthy(writable) && !getter_found && !setter_found) {
+                    bool value_found = false;
+                    Item value = js_map_get_fast_ext(descriptor.map, "value", 5, &value_found);
+                    if (!value_found) {
+                        value = js_property_get(obj, (Item){.item = i2it(arg_index)});
+                    }
                     char value_key[64];
                     snprintf(value_key, sizeof(value_key), "__arg_value_%lld", (long long)arg_index);
                     js_property_set(companion, (Item){.item = s2it(heap_create_name(value_key, strlen(value_key)))}, value);
                 }
+                js_property_set(companion, (Item){.item = s2it(heap_create_name(marker_key, strlen(marker_key)))},
+                                (Item){.item = b2it(true)});
             }
         }
     }
@@ -7757,6 +7763,12 @@ extern "C" Item js_for_in_keys(Item object) {
         return js_array_new(0);
     }
 
+    // String exotic objects expose their character indices as enumerable own
+    // properties even though the backing map only stores the primitive value.
+    if (js_class_id(object) == JS_CLASS_STRING) {
+        return js_object_keys(object);
+    }
+
     // Proxy: forward for-in to target (enumerate own + inherited enumerable keys)
     if (js_is_proxy(object)) {
         return js_for_in_keys(js_proxy_get_target(object));
@@ -8125,8 +8137,11 @@ extern "C" Item js_object_group_by(Item items, Item callback) {
         // Stage A1: ToPropertyKey per spec — Symbol callback returns must yield
         // a property key (__sym_N), not throw via js_to_string.
         Item key_str = js_to_property_key(key);
+        if (js_check_exception()) return ItemNull;
+        if (get_type_id(key_str) != LMD_TYPE_STRING) return ItemNull;
         // get or create array for this group
         String* ks = it2s(key_str);
+        if (!ks) return ItemNull;
         bool found = false;
         Item group = js_map_get_fast_ext(result.map, ks->chars, (int)ks->len, &found);
         if (!found) {

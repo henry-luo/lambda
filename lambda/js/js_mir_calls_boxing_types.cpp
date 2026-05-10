@@ -239,10 +239,9 @@ MIR_reg_t jm_box_int_const(JsMirTranspiler* mt, int64_t value) {
 // v20: Emit writeback from param register to arguments[param_index]
 void jm_arguments_writeback_param(JsMirTranspiler* mt, int param_index, MIR_reg_t val_reg) {
     if (mt->arguments_reg == 0) return;
-    MIR_reg_t idx_reg = jm_box_int_const(mt, param_index);
-    jm_call_3(mt, "js_property_set", MIR_T_I64,
+    jm_call_3(mt, "js_arguments_mapped_param_writeback", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->arguments_reg),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_reg),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, param_index),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, val_reg));
 }
 
@@ -1515,4 +1514,3 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
         return jm_emit_double_to_int(mt, as_dbl);
     }
 }
-
