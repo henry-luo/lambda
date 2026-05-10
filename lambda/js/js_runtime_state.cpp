@@ -827,9 +827,9 @@ extern "C" Item js_build_arguments_object() {
     Item* args = js_pending_call_args;
     int is_strict = js_pending_args_is_strict;
 
-    Item arr = js_array_new(0);
+    Item arr = js_array_new(argc);
     for (int i = 0; i < argc; i++) {
-        js_array_push(arr, args ? args[i] : ItemNull);
+        arr.array->items[i] = args ? args[i] : ItemNull;
     }
     // Mark as Arguments object via is_content flag (used by iterator to snapshot length)
     arr.array->is_content = 1;

@@ -313,6 +313,8 @@ struct JsTryContext {
     bool yield_state_only;       // synthetic ctx solely for yield-resume re-init of state regs;
                                  // invisible to throw/return routing (skip in stack walks)
     JsAstNode* finally_body;     // v18: AST of finally block for inlining before break/continue
+    MIR_reg_t saved_exc_flag_reg; // generator finally: pending-exception flag saved before finalizer
+    MIR_reg_t saved_exc_val_reg;  // generator finally: pending-exception value saved before finalizer
 };
 
 struct JsMirTranspiler {

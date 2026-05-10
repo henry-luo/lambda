@@ -2733,6 +2733,8 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         tc->inlining_finally = false;
         tc->yield_state_only = false;
         tc->finally_body = NULL;
+        tc->saved_exc_flag_reg = 0;
+        tc->saved_exc_val_reg = 0;
         pushed_try = true;
     }
 
@@ -3795,6 +3797,8 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             tc->inlining_finally = false;
             tc->yield_state_only = false;
             tc->finally_body = has_finally ? try_node->finalizer : NULL; // v18
+            tc->saved_exc_flag_reg = 0;
+            tc->saved_exc_val_reg = 0;
         }
 
         // Save with-scope depth so we can restore it if an exception escapes a 'with' block
@@ -3861,6 +3865,8 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                 tc->has_finally = true;
                 tc->yield_state_only = false;
                 tc->finally_body = try_node->finalizer; // v18
+                tc->saved_exc_flag_reg = 0;
+                tc->saved_exc_val_reg = 0;
                 pushed_catch_ctx = true;
             } else if (!has_finally && mt->in_generator && mt->try_ctx_depth < 16) {
                 // Generator yield inside catch body needs the inner try's state
@@ -3877,6 +3883,8 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                 tc->has_finally = false;
                 tc->yield_state_only = true;
                 tc->finally_body = NULL;
+                tc->saved_exc_flag_reg = 0;
+                tc->saved_exc_val_reg = 0;
                 pushed_catch_ctx = true;
             }
 
@@ -3967,6 +3975,8 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                 tc->has_finally = true;
                 tc->yield_state_only = false;
                 tc->finally_body = NULL;
+                tc->saved_exc_flag_reg = 0;
+                tc->saved_exc_val_reg = 0;
                 pushed_gen_finally_ctx = true;
             }
 
@@ -3987,6 +3997,11 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             // not the outer pending exception (ES spec §13.15.8 step 7-8).
             MIR_reg_t saved_exc_flag = jm_call_0(mt, "js_check_exception", MIR_T_I64);
             MIR_reg_t saved_exc_val = jm_call_0(mt, "js_clear_exception", MIR_T_I64);
+            if (pushed_gen_finally_ctx && mt->try_ctx_depth > 0) {
+                JsTryContext* tc = &mt->try_ctx_stack[mt->try_ctx_depth - 1];
+                tc->saved_exc_flag_reg = saved_exc_flag;
+                tc->saved_exc_val_reg = saved_exc_val;
+            }
 
             if (try_node->finalizer->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
                 jm_push_scope(mt);

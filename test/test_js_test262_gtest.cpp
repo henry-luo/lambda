@@ -2680,6 +2680,10 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
 
 class Test262Suite : public testing::TestWithParam<Test262Param> {};
 
+static int REPORT_ALL_TESTS() {
+    return RUN_ALL_TESTS();
+}
+
 TEST_P(Test262Suite, Run) {
     const Test262Param& param = GetParam();
 
@@ -3421,5 +3425,5 @@ int main(int argc, char** argv) {
         return regressions.empty() ? 0 : 1;
     }
 
-    return RUN_ALL_TESTS();
+    return REPORT_ALL_TESTS();
 }

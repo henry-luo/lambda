@@ -1171,6 +1171,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 tc->inlining_finally = false;
                 tc->yield_state_only = false;
                 tc->finally_body = NULL;
+                tc->saved_exc_flag_reg = 0;
+                tc->saved_exc_val_reg = 0;
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_reg_op(mt->ctx, tc->return_val_reg),
                     MIR_new_int_op(mt->ctx, 0)));
@@ -2199,6 +2201,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 tc->inlining_finally = false;
                 tc->yield_state_only = false;
                 tc->finally_body = NULL;
+                tc->saved_exc_flag_reg = 0;
+                tc->saved_exc_val_reg = 0;
                 // Save register refs before try context could be popped
                 async_return_val_reg = tc->return_val_reg;
                 async_has_return_reg = tc->has_return_reg;
@@ -2438,4 +2442,3 @@ bool jm_try_eval_const_expr(JsMirTranspiler* mt, JsAstNode* node, double* result
 
     return false;
 }
-
