@@ -5205,6 +5205,12 @@ static Item js_get_generator_function_prototype(bool is_async) {
         js_property_set(proto, proto_key, depth2);
         js_mark_non_writable(proto, proto_key);
         js_mark_non_enumerable(proto, proto_key);
+        if (get_type_id(depth2) == LMD_TYPE_MAP) {
+            Item ctor_key = (Item){.item = s2it(heap_create_name("constructor", 11))};
+            js_property_set(depth2, ctor_key, proto);
+            js_mark_non_writable(depth2, ctor_key);
+            js_mark_non_enumerable(depth2, ctor_key);
+        }
     }
 
     *cache = proto;
@@ -8219,15 +8225,13 @@ extern "C" Item js_object_is(Item left, Item right) {
 }
 
 // =============================================================================
-// Native assert.sameValue / assert.notSameValue for test262 (debug builds only)
+// Native assert.sameValue / assert.notSameValue for test262 batch mode
 // =============================================================================
 // These bypass the JS-level assert.sameValue/notSameValue, avoiding:
 //   - full JS function dispatch overhead (property lookup, args array, etc.)
 //   - string concatenation for error messages on the hot (passing) path
 // The transpiler intercepts assert.sameValue(a,b,msg) calls and emits direct
 // calls to these C++ functions instead.
-
-#ifndef NDEBUG
 
 // helper: build error message string for assert.sameValue/notSameValue
 static Item assert_build_error_msg(Item actual, Item expected, Item message, bool same) {
@@ -8393,7 +8397,7 @@ extern "C" void js_validate_native_function_source(Item source_item) {
 }
 
 // =============================================================================
-// Native compareArray / assert.compareArray for test262 (debug builds only)
+// Native compareArray / assert.compareArray for test262 batch mode
 // =============================================================================
 
 // check if item is an array or typed array (array-like for comparison)
@@ -9018,8 +9022,6 @@ extern "C" Item js_is_constructor(Item fn) {
     }
     return (Item){.item = ITEM_TRUE};
 }
-
-#endif // !NDEBUG
 
 // =============================================================================
 // Object.assign(target, ...sources)

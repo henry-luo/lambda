@@ -425,6 +425,10 @@ enum JsBuiltinId {
     JS_BUILTIN_REFLECT_PREVENT_EXTENSIONS,
     JS_BUILTIN_REFLECT_SET,
     JS_BUILTIN_REFLECT_SET_PROTOTYPE_OF,
+    // Generator prototype methods
+    JS_BUILTIN_GENERATOR_NEXT,
+    JS_BUILTIN_GENERATOR_RETURN,
+    JS_BUILTIN_GENERATOR_THROW,
     // Iterator protocol: [Symbol.iterator]() { return this; }
     JS_BUILTIN_ITER_IDENTITY, // returns this_val (for iterators that are their own iterable)
     // Proxy static methods

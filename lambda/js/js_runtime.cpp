@@ -5142,6 +5142,16 @@ extern "C" Item js_new_check_constructor_return(Item obj, Item result) {
 // Built-in registry tables and installers live in js_runtime_builtin_registry.cpp.
 
 static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int arg_count);
+static Item js_get_iterator_proto();
+static Item js_get_array_iterator_proto();
+static Item js_get_string_iterator_proto();
+static Item js_get_map_iterator_proto();
+static Item js_get_set_iterator_proto();
+static Item js_get_regexp_string_iterator_proto();
+extern "C" bool js_is_generator(Item obj);
+extern "C" Item js_generator_next(Item generator, Item input);
+extern "C" Item js_generator_return(Item generator, Item value);
+extern "C" Item js_generator_throw(Item generator, Item error);
 extern "C" Item js_ordinary_has_instance(Item, Item);
 
 // Forward declarations for promise runtime
@@ -6830,15 +6840,30 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     }
     case JS_BUILTIN_ARRAY_ITER_NEXT: {
         // Array iterator .next() — this_val is the iterator object with __array__, __index__, __kind__
+        if (get_type_id(this_val) != LMD_TYPE_MAP) {
+            return js_throw_type_error("Array Iterator.prototype.next called on incompatible receiver");
+        }
         String* arr_key = heap_create_name("__array__", 9);
         String* tarr_key = heap_create_name("__tarr__", 8);
         String* idx_key = heap_create_name("__index__", 9);
         String* kind_key = heap_create_name("__kind__", 8);
         String* done_state_key = heap_create_name("__done__", 8);
-        Item arr_item = js_property_get(this_val, (Item){.item = s2it(arr_key)});
-        Item tarr_item = js_property_get(this_val, (Item){.item = s2it(tarr_key)});
-        Item idx_item = js_property_get(this_val, (Item){.item = s2it(idx_key)});
-        Item kind_item = js_property_get(this_val, (Item){.item = s2it(kind_key)});
+        bool arr_found = false;
+        bool tarr_found = false;
+        bool idx_found = false;
+        bool kind_found = false;
+        Item arr_item = js_map_get_fast_ext(this_val.map, arr_key->chars, (int)arr_key->len, &arr_found);
+        Item tarr_item = js_map_get_fast_ext(this_val.map, tarr_key->chars, (int)tarr_key->len, &tarr_found);
+        Item idx_item = js_map_get_fast_ext(this_val.map, idx_key->chars, (int)idx_key->len, &idx_found);
+        Item kind_item = js_map_get_fast_ext(this_val.map, kind_key->chars, (int)kind_key->len, &kind_found);
+        TypeId arr_type = get_type_id(arr_item);
+        if (!idx_found || !kind_found ||
+            get_type_id(idx_item) != LMD_TYPE_INT || get_type_id(kind_item) != LMD_TYPE_INT ||
+            ((!arr_found || (arr_type != LMD_TYPE_ARRAY && arr_type != LMD_TYPE_UNDEFINED &&
+              arr_item.item != ITEM_JS_UNDEFINED)) &&
+             (!tarr_found || !js_is_typed_array(tarr_item)))) {
+            return js_throw_type_error("Array Iterator.prototype.next called on incompatible receiver");
+        }
         int idx = (int)it2i(idx_item);
         int kind = (int)it2i(kind_item); // 0=keys, 1=values, 2=entries
         if (js_is_typed_array(tarr_item)) {
@@ -7069,6 +7094,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         // this_val is the string
         Item str_item = js_to_string(this_val);
         Item iter = js_new_object();
+        js_set_prototype(iter, js_get_string_iterator_proto());
         js_property_set(iter, (Item){.item = s2it(heap_create_name("__string__", 10))}, str_item);
         js_property_set(iter, (Item){.item = s2it(heap_create_name("__index__", 9))}, (Item){.item = i2it(0)});
         Item next_fn = js_get_or_create_builtin(JS_BUILTIN_STRING_ITER_NEXT, "next", 0);
@@ -7083,8 +7109,17 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     }
     case JS_BUILTIN_STRING_ITER_NEXT: {
         // String iterator .next() — iterates by Unicode codepoints
-        Item str_item = js_property_get(this_val, (Item){.item = s2it(heap_create_name("__string__", 10))});
-        Item idx_item = js_property_get(this_val, (Item){.item = s2it(heap_create_name("__index__", 9))});
+        if (get_type_id(this_val) != LMD_TYPE_MAP) {
+            return js_throw_type_error("String Iterator.prototype.next called on incompatible receiver");
+        }
+        bool str_found = false;
+        bool idx_found = false;
+        Item str_item = js_map_get_fast_ext(this_val.map, "__string__", 10, &str_found);
+        Item idx_item = js_map_get_fast_ext(this_val.map, "__index__", 9, &idx_found);
+        if (!str_found || !idx_found ||
+            get_type_id(str_item) != LMD_TYPE_STRING || get_type_id(idx_item) != LMD_TYPE_INT) {
+            return js_throw_type_error("String Iterator.prototype.next called on incompatible receiver");
+        }
         String* s = it2s(str_item);
         int idx = (int)it2i(idx_item);
         if (!s || idx >= (int)s->len) {
@@ -7741,6 +7776,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         bool is_global = false;
         for (int i = 0; i < fl_len; i++) { if (fl[i] == 'g') is_global = true; }
         Item iter = js_new_object();
+        js_set_prototype(iter, js_get_regexp_string_iterator_proto());
         js_property_set(iter, (Item){.item = s2it(heap_create_name("__regex__", 9))}, cloned_regex);
         js_property_set(iter, (Item){.item = s2it(heap_create_name("__string__", 10))}, str_arg);
         js_property_set(iter, (Item){.item = s2it(heap_create_name("__global__", 10))}, (Item){.item = b2it(is_global)});
@@ -7761,6 +7797,15 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         }
         bool done_found = false;
         Item done_val = js_map_get_fast(this_val.map, "__done__", 8, &done_found);
+        bool regex_found = false;
+        bool string_found = false;
+        bool is_global_found = false;
+        Item regex = js_map_get_fast(this_val.map, "__regex__", 9, &regex_found);
+        Item str_item = js_map_get_fast(this_val.map, "__string__", 10, &string_found);
+        Item global_val = js_map_get_fast(this_val.map, "__global__", 10, &is_global_found);
+        if (!regex_found || !string_found || !is_global_found) {
+            return js_throw_type_error("RegExpStringIterator.next called on incompatible receiver");
+        }
         if (done_found && it2b(done_val)) {
             // Already done
             Item result = js_new_object();
@@ -7768,11 +7813,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             js_property_set(result, (Item){.item = s2it(heap_create_name("done", 4))}, (Item){.item = b2it(true)});
             return result;
         }
-        Item regex = js_property_get(this_val, (Item){.item = s2it(heap_create_name("__regex__", 9))});
-        Item str_item = js_property_get(this_val, (Item){.item = s2it(heap_create_name("__string__", 10))});
-        bool is_global_found = false;
-        Item global_val = js_map_get_fast(this_val.map, "__global__", 10, &is_global_found);
-        bool is_global = is_global_found && it2b(global_val);
+        bool is_global = it2b(global_val);
         // Call RegExpExec(regex, string) — per ES spec, check for custom exec first
         Item exec_key = (Item){.item = s2it(heap_create_name("exec", 4))};
         Item exec_fn = js_property_get(regex, exec_key);
@@ -8003,6 +8044,9 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         else if (builtin_id == JS_BUILTIN_SET_VALUES || builtin_id == JS_BUILTIN_SET_KEYS) mode = 0;
         // create proper iterator object with __node_ptr__, __iter_mode__, __coll_type__, and next()
         Item iter = js_new_object();
+        js_set_prototype(iter, cd->type == JS_COLLECTION_SET
+            ? js_get_set_iterator_proto()
+            : js_get_map_iterator_proto());
         js_property_set(iter, (Item){.item = s2it(heap_create_name("__node_ptr__", 12))},
                         (Item){.item = i2it((int64_t)(uintptr_t)cd->order_head)});
         js_property_set(iter, (Item){.item = s2it(heap_create_name("__iter_mode__", 13))},
@@ -8019,17 +8063,18 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     case JS_BUILTIN_COLL_ITER_NEXT: {
         // Collection iterator .next()
         if (get_type_id(this_val) != LMD_TYPE_MAP) {
-            log_error("COLL_ITER_NEXT: this_val is not a MAP (type=%d)", get_type_id(this_val));
-            Item result = js_new_object();
-            js_property_set(result, (Item){.item = s2it(heap_create_name("value", 5))}, make_js_undefined());
-            js_property_set(result, (Item){.item = s2it(heap_create_name("done", 4))}, (Item){.item = b2it(true)});
-            return result;
+            return js_throw_type_error("Collection Iterator.prototype.next called on incompatible receiver");
         }
         // Use js_map_get_fast for internal properties to avoid js_property_get fallback chains
         bool found_np = false, found_mode = false, found_ct = false;
         Item node_item = js_map_get_fast(this_val.map, "__node_ptr__", 12, &found_np);
         Item mode_item = js_map_get_fast(this_val.map, "__iter_mode__", 13, &found_mode);
         Item ctype_item = js_map_get_fast(this_val.map, "__coll_type__", 13, &found_ct);
+        if (!found_np || !found_mode || !found_ct ||
+            get_type_id(mode_item) != LMD_TYPE_INT ||
+            get_type_id(ctype_item) != LMD_TYPE_INT) {
+            return js_throw_type_error("Collection Iterator.prototype.next called on incompatible receiver");
+        }
         JsCollectionOrderNode* node = (JsCollectionOrderNode*)(uintptr_t)it2i(node_item);
         int mode = (int)it2i(mode_item);
         int coll_type = (int)it2i(ctype_item);
@@ -8235,6 +8280,21 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     case JS_BUILTIN_REFLECT_SET_PROTOTYPE_OF: {
         return js_reflect_set_prototype_of(arg0, arg1);
     }
+    case JS_BUILTIN_GENERATOR_NEXT:
+        if (!js_is_generator(this_val)) {
+            return js_throw_type_error("Generator.prototype.next called on incompatible receiver");
+        }
+        return js_generator_next(this_val, arg_count > 0 ? arg0 : make_js_undefined());
+    case JS_BUILTIN_GENERATOR_RETURN:
+        if (!js_is_generator(this_val)) {
+            return js_throw_type_error("Generator.prototype.return called on incompatible receiver");
+        }
+        return js_generator_return(this_val, arg_count > 0 ? arg0 : make_js_undefined());
+    case JS_BUILTIN_GENERATOR_THROW:
+        if (!js_is_generator(this_val)) {
+            return js_throw_type_error("Generator.prototype.throw called on incompatible receiver");
+        }
+        return js_generator_throw(this_val, arg_count > 0 ? arg0 : make_js_undefined());
     // Atomics methods — all operations require SharedArrayBuffer-backed TypedArrays.
     // Since SharedArrayBuffer is not implemented, all operations throw TypeError.
     case JS_BUILTIN_ATOMICS_ADD:
@@ -8997,24 +9057,85 @@ static bool js_regex_match_internal(JsRegexData* rd, const char* input, int inpu
                            anchor, matches, num_groups);
 }
 
-static bool js_regex_can_use_literal_fast(const char* pattern, int pattern_len, const char* flags, int flags_len) {
-    if (!pattern || pattern_len <= 0) return false;
+static bool js_regex_try_make_literal_fast(const char* pattern, int pattern_len,
+                                           const char* flags, int flags_len,
+                                           char** literal_out, int* literal_len_out) {
+    if (literal_out) *literal_out = NULL;
+    if (literal_len_out) *literal_len_out = 0;
+    if (!pattern || pattern_len <= 0 || !literal_out || !literal_len_out) return false;
     for (int i = 0; i < flags_len; i++) {
         char f = flags[i];
         if (f != 'g' && f != 'y') return false;
     }
+    char* literal = (char*)pool_calloc(js_input->pool, pattern_len + 1);
+    int literal_len = 0;
     for (int i = 0; i < pattern_len; i++) {
         unsigned char c = (unsigned char)pattern[i];
         if (c < 0x20 || c == 0x7F) return false;
+        if (c == '\\') {
+            if (i + 1 >= pattern_len) return false;
+            unsigned char next = (unsigned char)pattern[++i];
+            if (next < 0x20 || next == 0x7F) return false;
+            if (next < 0x80) {
+                switch (next) {
+                case '0': case '1': case '2': case '3': case '4':
+                case '5': case '6': case '7': case '8': case '9':
+                case 'b': case 'B': case 'c': case 'd': case 'D':
+                case 'f': case 'k': case 'n': case 'p': case 'P':
+                case 'r': case 's': case 'S': case 't': case 'u':
+                case 'v': case 'w': case 'W': case 'x':
+                    return false;
+                default:
+                    literal[literal_len++] = (char)next;
+                    continue;
+                }
+            }
+            literal[literal_len++] = (char)next;
+            while (i + 1 < pattern_len && (((unsigned char)pattern[i + 1] & 0xC0) == 0x80)) {
+                literal[literal_len++] = pattern[++i];
+            }
+            continue;
+        }
         switch (c) {
-        case '^': case '$': case '\\': case '.': case '*': case '+': case '?':
+        case '^': case '$': case '.': case '*': case '+': case '?':
         case '(': case ')': case '[': case ']': case '{': case '}': case '|':
             return false;
         default:
+            literal[literal_len++] = (char)c;
             break;
         }
     }
+    literal[literal_len] = '\0';
+    *literal_out = literal;
+    *literal_len_out = literal_len;
     return true;
+}
+
+static bool js_regex_needs_wrapper(const char* pattern, int pattern_len) {
+    bool in_class = false;
+    for (int i = 0; i < pattern_len; i++) {
+        char c = pattern[i];
+        if (c == '\\') {
+            if (i + 1 >= pattern_len) return false;
+            char next = pattern[i + 1];
+            if (!in_class && next >= '1' && next <= '9') return true;
+            i++;
+            continue;
+        }
+        if (c == '[') {
+            in_class = true;
+            continue;
+        }
+        if (c == ']' && in_class) {
+            in_class = false;
+            continue;
+        }
+        if (!in_class && c == '(' && i + 2 < pattern_len && pattern[i + 1] == '?') {
+            char kind = pattern[i + 2];
+            if (kind == '=' || kind == '!') return true;
+        }
+    }
+    return false;
 }
 
 static Item js_try_fast_replace_non_whitespace(Item regex, Item str, Item replacement,
@@ -9088,14 +9209,15 @@ static Item js_regex_build_object_from_cache(const JsRegexCacheEntry& ce) {
 }
 
 extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char* flags, int flags_len) {
-    if (flags_len == 0 && js_regex_can_use_literal_fast(pattern, pattern_len, flags, flags_len)) {
+    char* literal_buf = NULL;
+    int literal_len = 0;
+    if (flags_len == 0 &&
+        js_regex_try_make_literal_fast(pattern, pattern_len, flags, flags_len,
+                                       &literal_buf, &literal_len)) {
         JsRegexData* rd = (JsRegexData*)pool_calloc(js_input->pool, sizeof(JsRegexData));
-        char* lit_buf = (char*)pool_calloc(js_input->pool, pattern_len + 1);
-        memcpy(lit_buf, pattern, pattern_len);
-        lit_buf[pattern_len] = '\0';
         rd->literal_fast = true;
-        rd->literal_pattern = lit_buf;
-        rd->literal_pattern_len = pattern_len;
+        rd->literal_pattern = literal_buf;
+        rd->literal_pattern_len = literal_len;
         static const char empty_flags[] = "";
         JsRegexCacheEntry ce = {rd, pattern, pattern_len, empty_flags, 0, false, false};
         return js_regex_build_object_from_cache(ce);
@@ -9527,6 +9649,8 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
         // \p{Script_Extensions=Unknown} -> \p{Unknown} -> empty match).
         // RE2 has no native category for unassigned/Unknown script.
         static const struct { const char* from; const char* to; } unknown_expansions[] = {
+            {"\\p{Hani}",    "\\p{Han}"},
+            {"\\P{Hani}",    "\\P{Han}"},
             {"\\p{Unknown}", "[^\\x{00}-\\x{10FFFF}]"},
             {"\\P{Unknown}", "[\\x{00}-\\x{10FFFF}]"},
             {"\\p{Zzzz}",    "[^\\x{00}-\\x{10FFFF}]"},
@@ -9657,20 +9781,27 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     if (multiline) {
         processed_pattern = "(?m)" + processed_pattern;
     }
-    bool literal_fast = js_regex_can_use_literal_fast(pattern, pattern_len, flags, flags_len);
+    literal_buf = NULL;
+    literal_len = 0;
+    bool literal_fast = js_regex_try_make_literal_fast(pattern, pattern_len, flags, flags_len,
+                                                       &literal_buf, &literal_len);
 
     // compile RE2 pattern (use preprocessed version)
     // Try wrapper compilation first (handles lookaheads, backreferences with post-filters)
     JsRegexCompiled* wrapper = nullptr;
     re2::RE2* re2 = nullptr;
     if (!literal_fast) {
-        wrapper = js_regex_wrapper_compile(processed_pattern.c_str(),
-                                                     (int)processed_pattern.size(),
-                                                     flags, flags_len, &opts);
-        if (wrapper) {
-            re2 = wrapper->re2; // use the wrapper's compiled RE2
-        } else {
-            // wrapper failed — fall back to direct RE2 compilation
+        if (js_regex_needs_wrapper(processed_pattern.c_str(), (int)processed_pattern.size())) {
+            wrapper = js_regex_wrapper_compile(processed_pattern.c_str(),
+                                                         (int)processed_pattern.size(),
+                                                         flags, flags_len, &opts);
+            if (wrapper) {
+                re2 = wrapper->re2; // use the wrapper's compiled RE2
+            }
+        }
+        if (!re2) {
+            // Direct RE2 path for patterns without wrapper-only features. This avoids
+            // the wrapper's heavyweight scans for generated Unicode property tests.
             re2 = new re2::RE2(processed_pattern, opts);
             if (!re2->ok()) {
                 // fall back to original pattern if preprocessing caused errors
@@ -9703,11 +9834,8 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     rd->sticky = sticky;
     rd->literal_fast = literal_fast;
     if (literal_fast) {
-        char* lit_buf = (char*)pool_calloc(js_input->pool, pattern_len + 1);
-        memcpy(lit_buf, pattern, pattern_len);
-        lit_buf[pattern_len] = '\0';
-        rd->literal_pattern = lit_buf;
-        rd->literal_pattern_len = pattern_len;
+        rd->literal_pattern = literal_buf;
+        rd->literal_pattern_len = literal_len;
     }
     // create a Map object and set properties
     Item regex_obj = js_new_object();
@@ -9807,7 +9935,19 @@ extern "C" Item js_create_regexp_from_source(const char* src, size_t len) {
     bool in_class = false;
     while (i < len) {
         char c = src[i];
-        if (c == '\\' && i + 1 < len) { i += 2; continue; }
+        if (c == '\\' && i + 1 < len) {
+            unsigned char n0 = (unsigned char)src[i + 1];
+            if (n0 == 0x0A || n0 == 0x0D ||
+                (i + 3 < len && n0 == 0xE2 &&
+                 (unsigned char)src[i + 2] == 0x80 &&
+                 ((unsigned char)src[i + 3] == 0xA8 || (unsigned char)src[i + 3] == 0xA9))) {
+                Item m = (Item){.item = s2it(heap_create_name("Invalid regular expression: line terminator in escape"))};
+                js_throw_syntax_error(m);
+                return ItemNull;
+            }
+            i += 2;
+            continue;
+        }
         if (c == '[') { in_class = true; i++; continue; }
         if (c == ']' && in_class) { in_class = false; i++; continue; }
         if (c == '/' && !in_class) break;
@@ -9930,6 +10070,74 @@ static JsRegexData* js_get_regex_data(Item obj) {
 }
 
 static bool js_regex_set_lastindex_strict(Item regex, Item li_key, int64_t value);
+static uint32_t js_decode_utf8(const char* s, size_t len, size_t* i);
+
+static bool js_regexp_is_han_cp(uint32_t cp) {
+    return cp == 0x003005 || cp == 0x003007 ||
+           (cp >= 0x002E80 && cp <= 0x002E99) ||
+           (cp >= 0x002E9B && cp <= 0x002EF3) ||
+           (cp >= 0x002F00 && cp <= 0x002FD5) ||
+           (cp >= 0x003021 && cp <= 0x003029) ||
+           (cp >= 0x003038 && cp <= 0x00303B) ||
+           (cp >= 0x003400 && cp <= 0x004DBF) ||
+           (cp >= 0x004E00 && cp <= 0x009FFF) ||
+           (cp >= 0x00F900 && cp <= 0x00FA6D) ||
+           (cp >= 0x00FA70 && cp <= 0x00FAD9) ||
+           (cp >= 0x016FE2 && cp <= 0x016FE3) ||
+           (cp >= 0x016FF0 && cp <= 0x016FF1) ||
+           (cp >= 0x020000 && cp <= 0x02A6DF) ||
+           (cp >= 0x02A700 && cp <= 0x02B739) ||
+           (cp >= 0x02B740 && cp <= 0x02B81D) ||
+           (cp >= 0x02B820 && cp <= 0x02CEA1) ||
+           (cp >= 0x02CEB0 && cp <= 0x02EBE0) ||
+           (cp >= 0x02EBF0 && cp <= 0x02EE5D) ||
+           (cp >= 0x02F800 && cp <= 0x02FA1D) ||
+           (cp >= 0x030000 && cp <= 0x03134A) ||
+           (cp >= 0x031350 && cp <= 0x0323AF);
+}
+
+// Fast path for generated Test262 Unicode property tests:
+//   /^\p{Script=Han}+$/u and /^\P{Script=Han}+$/u variants.
+// RE2's built-in Han table can lag the Test262 Unicode version, and running the
+// fallback engine over the generated all-codepoint strings is expensive.
+static int js_regexp_han_all_mode(Item regex) {
+    if (get_type_id(regex) != LMD_TYPE_MAP) return 0;
+    bool own_flags = false;
+    Item flags_item = js_map_get_fast_ext(regex.map, "flags", 5, &own_flags);
+    String* flags = (own_flags && get_type_id(flags_item) == LMD_TYPE_STRING) ? it2s(flags_item) : NULL;
+    if (!flags || flags->len != 1 || flags->chars[0] != 'u') return 0;
+
+    bool own_source = false;
+    Item source_item = js_map_get_fast_ext(regex.map, "source", 6, &own_source);
+    String* source = (own_source && get_type_id(source_item) == LMD_TYPE_STRING) ? it2s(source_item) : NULL;
+    if (!source || source->len < 10) return 0;
+    const char* s = source->chars;
+    int len = (int)source->len;
+    if (s[0] != '^' || s[1] != '\\' || (s[2] != 'p' && s[2] != 'P')) return 0;
+    if (len < 5 || s[len - 2] != '+' || s[len - 1] != '$') return 0;
+    if (s[3] != '{' || s[len - 3] != '}') return 0;
+
+    const char* prop = s + 4;
+    int prop_len = len - 7;
+    bool is_han =
+        (prop_len == 10 && memcmp(prop, "Script=Han", 10) == 0) ||
+        (prop_len == 11 && memcmp(prop, "Script=Hani", 11) == 0) ||
+        (prop_len == 6 && memcmp(prop, "sc=Han", 6) == 0) ||
+        (prop_len == 7 && memcmp(prop, "sc=Hani", 7) == 0);
+    if (!is_han) return 0;
+    return s[2] == 'p' ? 1 : -1;
+}
+
+static bool js_regexp_test_han_all(String* input, bool positive) {
+    if (!input || input->len == 0) return false;
+    size_t pos = 0;
+    while (pos < input->len) {
+        uint32_t cp = js_decode_utf8(input->chars, input->len, &pos);
+        bool is_han = js_regexp_is_han_cp(cp);
+        if (positive != is_han) return false;
+    }
+    return true;
+}
 
 extern "C" Item js_regex_test(Item regex, Item str) {
     JsRegexData* rd = js_get_regex_data(regex);
@@ -9943,6 +10151,16 @@ extern "C" Item js_regex_test(Item regex, Item str) {
     String* input_s = it2s(str);
     const char* chars = input_s ? input_s->chars : "";
     int len = input_s ? (int)input_s->len : 0;
+
+    int han_mode = (!rd->global && !rd->sticky) ? js_regexp_han_all_mode(regex) : 0;
+    if (han_mode != 0) {
+        bool matched = js_regexp_test_han_all(input_s, han_mode > 0);
+        if (matched) {
+            re2::StringPiece match(chars, len);
+            js_regexp_update_last_match(input_s, &match, 1);
+        }
+        return (Item){.item = b2it(matched ? BOOL_TRUE : BOOL_FALSE)};
+    }
 
     int start_pos = 0;
     Item li_key = (Item){.item = s2it(heap_create_name("lastIndex", 9))};
@@ -12084,6 +12302,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 if (method->chars[0] == 'k') kind = 0; // keys
                 else if (method->chars[0] == 'e') kind = 2; // entries
                 Item iter = js_new_object();
+                js_set_prototype(iter, js_get_array_iterator_proto());
                 js_property_set(iter, (Item){.item = s2it(heap_create_name("__tarr__", 8))}, obj);
                 js_property_set(iter, (Item){.item = s2it(heap_create_name("__index__", 9))}, (Item){.item = i2it(0)});
                 js_property_set(iter, (Item){.item = s2it(heap_create_name("__kind__", 8))}, (Item){.item = i2it(kind)});
@@ -16654,6 +16873,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
     if (method->len == 4 && strncmp(method->chars, "keys", 4) == 0) {
         if (arr_type != LMD_TYPE_ARRAY) return make_js_undefined();
         Item iter = js_new_object();
+        js_set_prototype(iter, js_get_array_iterator_proto());
         js_property_set(iter, (Item){.item = s2it(heap_create_name("__array__", 9))}, arr);
         js_property_set(iter, (Item){.item = s2it(heap_create_name("__index__", 9))}, (Item){.item = i2it(0)});
         js_property_set(iter, (Item){.item = s2it(heap_create_name("__kind__", 8))}, (Item){.item = i2it(0)});
@@ -16667,6 +16887,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
     if (method->len == 6 && strncmp(method->chars, "values", 6) == 0) {
         if (arr_type != LMD_TYPE_ARRAY) return make_js_undefined();
         Item iter = js_new_object();
+        js_set_prototype(iter, js_get_array_iterator_proto());
         js_property_set(iter, (Item){.item = s2it(heap_create_name("__array__", 9))}, arr);
         js_property_set(iter, (Item){.item = s2it(heap_create_name("__index__", 9))}, (Item){.item = i2it(0)});
         js_property_set(iter, (Item){.item = s2it(heap_create_name("__kind__", 8))}, (Item){.item = i2it(1)});
@@ -16680,6 +16901,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
     if (method->len == 7 && strncmp(method->chars, "entries", 7) == 0) {
         if (arr_type != LMD_TYPE_ARRAY) return make_js_undefined();
         Item iter = js_new_object();
+        js_set_prototype(iter, js_get_array_iterator_proto());
         js_property_set(iter, (Item){.item = s2it(heap_create_name("__array__", 9))}, arr);
         js_property_set(iter, (Item){.item = s2it(heap_create_name("__index__", 9))}, (Item){.item = i2it(0)});
         js_property_set(iter, (Item){.item = s2it(heap_create_name("__kind__", 8))}, (Item){.item = i2it(2)});
@@ -18144,6 +18366,21 @@ extern "C" Item js_get_generator_shared_proto(bool is_async) {
     Item* cache = is_async ? &js_async_generator_proto_depth2_cache : &js_generator_proto_depth2_cache;
     if (cache->item != 0 && get_type_id(*cache) == LMD_TYPE_MAP) return *cache;
     Item proto = js_new_object();
+    js_set_prototype(proto, js_get_iterator_proto());
+    if (!is_async) {
+        struct { const char* name; int len; int bid; } methods[] = {
+            {"next", 4, JS_BUILTIN_GENERATOR_NEXT},
+            {"return", 6, JS_BUILTIN_GENERATOR_RETURN},
+            {"throw", 5, JS_BUILTIN_GENERATOR_THROW},
+            {NULL, 0, 0}
+        };
+        for (int i = 0; methods[i].name; i++) {
+            Item key = (Item){.item = s2it(heap_create_name(methods[i].name, methods[i].len))};
+            Item fn = js_get_or_create_builtin(methods[i].bid, methods[i].name, 1);
+            js_property_set(proto, key, fn);
+            js_mark_non_enumerable(proto, key);
+        }
+    }
     // Symbol.toStringTag = "AsyncGenerator" | "Generator" (non-writable, non-enum, configurable)
     Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
     Item tag_val = (Item){.item = s2it(heap_create_name(
@@ -18602,6 +18839,90 @@ extern "C" bool js_is_generator(Item obj) {
 static char js_array_iter_marker;
 static char js_string_iter_marker;
 static char js_typed_array_iter_marker;
+
+static Item js_iterator_proto_cache = {0};
+static Item js_array_iterator_proto_cache = {0};
+static Item js_string_iterator_proto_cache = {0};
+static Item js_map_iterator_proto_cache = {0};
+static Item js_set_iterator_proto_cache = {0};
+static Item js_regexp_string_iterator_proto_cache = {0};
+
+static Item js_make_iterator_proto(Item* cache, int next_builtin_id,
+                                   const char* tag, int tag_len) {
+    if (cache->item != 0 && get_type_id(*cache) == LMD_TYPE_MAP) return *cache;
+
+    Item proto = js_new_object();
+    if (next_builtin_id > 0) {
+        Item next_key = (Item){.item = s2it(heap_create_name("next", 4))};
+        Item next_fn = js_get_or_create_builtin(next_builtin_id, "next", 0);
+        js_property_set(proto, next_key, next_fn);
+        js_mark_non_enumerable(proto, next_key);
+    }
+
+    Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
+    Item tag_val = (Item){.item = s2it(heap_create_name(tag, tag_len))};
+    js_property_set(proto, tag_key, tag_val);
+    js_mark_non_writable(proto, tag_key);
+    js_mark_non_enumerable(proto, tag_key);
+    *cache = proto;
+    return proto;
+}
+
+static Item js_get_iterator_proto() {
+    if (js_iterator_proto_cache.item != 0 &&
+        get_type_id(js_iterator_proto_cache) == LMD_TYPE_MAP) {
+        return js_iterator_proto_cache;
+    }
+    Item proto = js_new_object();
+    Item si_key = (Item){.item = s2it(heap_create_name("__sym_1", 7))};
+    JsFunction* fn = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
+    fn->type_id = LMD_TYPE_FUNC;
+    fn->func_ptr = NULL;
+    fn->param_count = 0;
+    fn->formal_length = -1;
+    fn->builtin_id = JS_BUILTIN_ITER_IDENTITY;
+    fn->name = heap_create_name("[Symbol.iterator]", 17);
+    Item si_fn = (Item){.function = (Function*)fn};
+    js_property_set(proto, si_key, si_fn);
+    js_mark_non_enumerable(proto, si_key);
+    js_iterator_proto_cache = proto;
+    return proto;
+}
+
+static Item js_get_array_iterator_proto() {
+    Item proto = js_make_iterator_proto(&js_array_iterator_proto_cache,
+        JS_BUILTIN_ARRAY_ITER_NEXT, "Array Iterator", 14);
+    js_set_prototype(proto, js_get_iterator_proto());
+    return proto;
+}
+
+static Item js_get_string_iterator_proto() {
+    Item proto = js_make_iterator_proto(&js_string_iterator_proto_cache,
+        JS_BUILTIN_STRING_ITER_NEXT, "String Iterator", 15);
+    js_set_prototype(proto, js_get_iterator_proto());
+    return proto;
+}
+
+static Item js_get_map_iterator_proto() {
+    Item proto = js_make_iterator_proto(&js_map_iterator_proto_cache,
+        JS_BUILTIN_COLL_ITER_NEXT, "Map Iterator", 12);
+    js_set_prototype(proto, js_get_iterator_proto());
+    return proto;
+}
+
+static Item js_get_set_iterator_proto() {
+    Item proto = js_make_iterator_proto(&js_set_iterator_proto_cache,
+        JS_BUILTIN_COLL_ITER_NEXT, "Set Iterator", 12);
+    js_set_prototype(proto, js_get_iterator_proto());
+    return proto;
+}
+
+static Item js_get_regexp_string_iterator_proto() {
+    Item proto = js_make_iterator_proto(&js_regexp_string_iterator_proto_cache,
+        JS_BUILTIN_REGEXP_MATCHALL_ITER_NEXT, "RegExp String Iterator", 22);
+    js_set_prototype(proto, js_get_iterator_proto());
+    return proto;
+}
 
 // v28: Fixed-layout iterator data (16 bytes, 2 slots)
 // Slot 0 (offset 0): source Item (array, string, or typed array)

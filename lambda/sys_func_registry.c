@@ -891,8 +891,7 @@ extern int64_t js_loose_eq_raw(Item left, Item right);
 extern int64_t js_loose_ne_raw(Item left, Item right);
 extern int64_t js_discard_value(Item value);
 
-// debug-only: native test262 harness functions for performance
-#ifndef NDEBUG
+// native test262 harness functions for batch performance
 extern void js_assert_same_value(Item actual, Item expected, Item message);
 extern void js_assert_not_same_value(Item actual, Item unexpected, Item message);
 extern void js_assert_compare_array(Item actual, Item expected, Item message);
@@ -903,7 +902,6 @@ extern void js_assert_throws(Item expected_ctor, Item func, Item message);
 extern void js_assert_base(Item must_be_true, Item message);
 extern void js_donotevaluate(void);
 extern Item js_is_constructor(Item fn);
-#endif
 
 // always available: emitted unconditionally by JS class transpiler
 extern void js_private_field_init_begin(void);
@@ -1330,7 +1328,6 @@ JitImport jit_runtime_imports[] = {
     {"js_new_check_constructor_return", FPTR(js_new_check_constructor_return)},
     {"js_check_tdz", FPTR(js_check_tdz)},
     {"js_throw_const_assign", FPTR(js_throw_const_assign)},
-#ifndef NDEBUG
     {"js_assert_same_value", FPTR(js_assert_same_value)},
     {"js_assert_not_same_value", FPTR(js_assert_not_same_value)},
     {"js_assert_compare_array", FPTR(js_assert_compare_array)},
@@ -1341,7 +1338,6 @@ JitImport jit_runtime_imports[] = {
     {"js_assert_base", FPTR(js_assert_base)},
     {"js_donotevaluate", FPTR(js_donotevaluate)},
     {"js_is_constructor", FPTR(js_is_constructor)},
-#endif
     {"js_discard_value", FPTR(js_discard_value)},
     // always available: emitted unconditionally by JS class transpiler
     {"js_private_field_init_begin", FPTR(js_private_field_init_begin)},

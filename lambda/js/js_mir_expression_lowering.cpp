@@ -4531,11 +4531,13 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
         return jm_transpile_math_call(mt, call, math_method);
     }
 
-#ifndef NDEBUG
     // assert.sameValue(a, b [, msg]) / assert.notSameValue(a, b [, msg])
     // assert.compareArray(a, b [, msg]) / assert.deepEqual(a, b [, msg])
-    // → native C++ implementation for test262 performance (debug builds only)
-    if (call->callee && call->callee->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+    // → native C++ implementation for test262 batch performance.
+    // Limit this to with-preamble mode so ordinary user scripts can freely use a
+    // global `assert` object without the compiler assuming Test262 harness semantics.
+    if (mt->preamble_entries && mt->preamble_entry_count > 0 &&
+        call->callee && call->callee->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
         JsMemberNode* m = (JsMemberNode*)call->callee;
         if (!m->computed && m->object && m->object->node_type == JS_AST_NODE_IDENTIFIER &&
             m->property && m->property->node_type == JS_AST_NODE_IDENTIFIER) {
@@ -4566,7 +4568,15 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     JsAstNode* a3 = a2 ? a2->next : NULL;
                     MIR_reg_t actual_reg   = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_undefined(mt);
                     MIR_reg_t expected_reg = a2 ? jm_transpile_box_item(mt, a2) : jm_emit_undefined(mt);
-                    MIR_reg_t msg_reg      = a3 ? jm_transpile_box_item(mt, a3) : jm_emit_undefined(mt);
+                    // Test262 assertion messages are diagnostics for failure. Avoid
+                    // constructing them on the hot passing path in batch mode; this
+                    // matters for 65k-iteration regexp scans with "Code unit: " + ...
+                    // messages.
+                    bool same_value_native =
+                        (native_fn[10] == 's' && strcmp(native_fn, "js_assert_same_value") == 0) ||
+                        (native_fn[10] == 'n' && strcmp(native_fn, "js_assert_not_same_value") == 0);
+                    MIR_reg_t msg_reg = (a3 && !same_value_native)
+                        ? jm_transpile_box_item(mt, a3) : jm_emit_undefined(mt);
                     jm_call_void_3(mt, native_fn,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, actual_reg),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, expected_reg),
@@ -4578,8 +4588,9 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
     }
 
     // verifyProperty(obj, name, desc [, options]) / compareArray(a, b)
-    // → native C++ standalone function interception for test262 (debug builds only)
-    if (call->callee && call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
+    // → native C++ standalone function interception for test262 batch mode.
+    if (mt->preamble_entries && mt->preamble_entry_count > 0 &&
+        call->callee && call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
         JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
         if (id->name) {
             // verifyProperty(obj, name, desc [, options])
@@ -4641,8 +4652,6 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             }
         }
     }
-#endif // !NDEBUG
-
     // ClassName.staticMethod(args) → compile-time static method dispatch
     if (call->callee && call->callee->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
         JsMemberNode* m = (JsMemberNode*)call->callee;
