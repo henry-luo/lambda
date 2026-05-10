@@ -37,6 +37,298 @@ static bool view_is_descendant_of(ViewElement* child, ViewElement* ancestor) {
     return false;
 }
 
+static const char* pseudo_css_value_extract_name(const CssValue* value) {
+    if (!value) return nullptr;
+    if (value->type == CSS_VALUE_TYPE_STRING) return value->data.string;
+    if (value->type == CSS_VALUE_TYPE_URL) return value->data.url;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        const CssEnumInfo* info = css_enum_info(value->data.keyword);
+        return info ? info->name : nullptr;
+    }
+    if (value->type == CSS_VALUE_TYPE_CUSTOM) return value->data.custom_property.name;
+    return nullptr;
+}
+
+static int pseudo_check_quote_content(const CssValue* value) {
+    if (!value) return 0;
+    if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
+        if (strcmp(value->data.custom_property.name, "open-quote") == 0) return 1;
+        if (strcmp(value->data.custom_property.name, "close-quote") == 0) return 2;
+        if (strcmp(value->data.custom_property.name, "no-open-quote") == 0) return 3;
+        if (strcmp(value->data.custom_property.name, "no-close-quote") == 0) return 4;
+    }
+    return 0;
+}
+
+static const char* pseudo_resolve_quote_char(DomElement* element, bool is_open_quote, int depth) {
+    DomElement* cur = element;
+    CssDeclaration* quotes_decl = nullptr;
+    while (cur) {
+        quotes_decl = dom_element_get_specified_value(cur, CSS_PROPERTY_QUOTES);
+        if (quotes_decl && quotes_decl->value) break;
+        cur = dom_element_get_parent(cur);
+    }
+
+    if (!quotes_decl || !quotes_decl->value) {
+        return is_open_quote ? "\xe2\x80\x9c" : "\xe2\x80\x9d";
+    }
+
+    CssValue* qval = quotes_decl->value;
+    if (qval->type == CSS_VALUE_TYPE_KEYWORD && qval->data.keyword == CSS_VALUE_NONE) {
+        return "";
+    }
+
+    if (qval->type == CSS_VALUE_TYPE_LIST && qval->data.list.count >= 2) {
+        int pair_count = qval->data.list.count / 2;
+        int pair_index = depth < pair_count ? depth : pair_count - 1;
+        int str_index = pair_index * 2 + (is_open_quote ? 0 : 1);
+        if (str_index < qval->data.list.count) {
+            CssValue* sv = qval->data.list.values[str_index];
+            if (sv && sv->type == CSS_VALUE_TYPE_STRING && sv->data.string) {
+                return sv->data.string;
+            }
+        }
+    }
+
+    if (qval->type == CSS_VALUE_TYPE_STRING && qval->data.string) {
+        return qval->data.string;
+    }
+
+    return is_open_quote ? "\xe2\x80\x9c" : "\xe2\x80\x9d";
+}
+
+static char* pseudo_resolve_content_url(LayoutContext* lycon, const CssDeclaration* decl, const char* url) {
+    if (!lycon || !url) return nullptr;
+
+    size_t url_len = strlen(url);
+    const char* source_file = decl ? decl->source_file : nullptr;
+    bool already_resolved = url[0] == '/' || strncmp(url, "data:", 5) == 0;
+    if (!already_resolved) {
+        const char* p = url;
+        while (*p) {
+            if (*p == ':') {
+                already_resolved = (p != url);
+                break;
+            }
+            if (!((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
+                  (*p >= '0' && *p <= '9') || *p == '+' || *p == '-' || *p == '.')) {
+                break;
+            }
+            p++;
+        }
+    }
+
+    if (!already_resolved && source_file && source_file[0] && strcmp(source_file, "<inline-style>") != 0) {
+        const char* slash = strrchr(source_file, '/');
+        if (slash) {
+            size_t dir_len = slash - source_file + 1;
+            char* resolved = (char*)alloc_prop(lycon, dir_len + url_len + 1);
+            if (!resolved) return nullptr;
+            memcpy(resolved, source_file, dir_len);
+            memcpy(resolved + dir_len, url, url_len);
+            resolved[dir_len + url_len] = '\0';
+            return resolved;
+        }
+    }
+
+    char* copy = (char*)alloc_prop(lycon, url_len + 1);
+    if (!copy) return nullptr;
+    str_copy(copy, url_len + 1, url, url_len);
+    return copy;
+}
+
+static void pseudo_append_child(DomElement* parent, DomNode* child) {
+    if (!parent || !child) return;
+    child->parent = parent;
+    child->next_sibling = nullptr;
+    if (!parent->first_child) {
+        child->prev_sibling = nullptr;
+        parent->first_child = child;
+        parent->last_child = child;
+        return;
+    }
+    child->prev_sibling = parent->last_child;
+    parent->last_child->next_sibling = child;
+    parent->last_child = child;
+}
+
+static void pseudo_append_text_child(DomElement* pseudo_elem, const char* text) {
+    if (!pseudo_elem || !pseudo_elem->doc || !text || !text[0]) return;
+
+    size_t text_len = strlen(text);
+    String* text_string = (String*)arena_alloc(pseudo_elem->doc->arena, sizeof(String) + text_len + 1);
+    if (!text_string) return;
+    text_string->len = text_len;
+    memcpy(text_string->chars, text, text_len);
+    text_string->chars[text_len] = '\0';
+
+    DomText* text_node = dom_text_create(text_string, pseudo_elem);
+    if (!text_node) return;
+    pseudo_append_child(pseudo_elem, (DomNode*)text_node);
+}
+
+static DomElement* pseudo_create_image_child(LayoutContext* lycon, DomElement* pseudo_elem,
+                                             const CssDeclaration* content_decl, const char* raw_url) {
+    if (!lycon || !pseudo_elem || !raw_url || !raw_url[0]) return nullptr;
+
+    DomElement* img_elem = dom_element_create(pseudo_elem->doc, "img", nullptr);
+    if (!img_elem) return nullptr;
+
+    if (!img_elem->embed) {
+        img_elem->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
+    }
+    if (!img_elem->embed) return nullptr;
+
+    char* resolved_url = pseudo_resolve_content_url(lycon, content_decl, raw_url);
+    if (!resolved_url) return nullptr;
+
+    img_elem->embed->img = load_image(lycon->ui_context, resolved_url);
+    if (!img_elem->embed->img) {
+        log_debug("[PSEUDO IMG] Failed to load generated content image: %s", resolved_url);
+        return nullptr;
+    }
+
+    return img_elem;
+}
+
+static const char* pseudo_resolve_text_fragment(LayoutContext* lycon, DomElement* element,
+                                                const CssValue* item, int quote_depth) {
+    if (!element || !item) return nullptr;
+
+    if (item->type == CSS_VALUE_TYPE_STRING) {
+        return item->data.string ? item->data.string : "";
+    }
+
+    if (item->type == CSS_VALUE_TYPE_ATTR) {
+        CSSAttrRef* attr_ref = item->data.attr_ref;
+        if (attr_ref && attr_ref->name) {
+            const char* attr_value = dom_element_get_attribute(element, attr_ref->name);
+            return attr_value ? attr_value : "";
+        }
+        return "";
+    }
+
+    if (item->type == CSS_VALUE_TYPE_FUNCTION) {
+        CssFunction* func = item->data.function;
+        if (!func || !func->name) return nullptr;
+
+        if (strcmp(func->name, "attr") == 0 && func->arg_count > 0) {
+            const char* attr_name = pseudo_css_value_extract_name(func->args[0]);
+            if (!attr_name) return "";
+            const char* attr_value = dom_element_get_attribute(element, attr_name);
+            return attr_value ? attr_value : "";
+        }
+
+        if (!lycon->counter_context) return nullptr;
+
+        if (strcmp(func->name, "counter") == 0 && func->arg_count >= 1) {
+            const char* counter_name = pseudo_css_value_extract_name(func->args[0]);
+            uint32_t style_type = 0x00AA;  // CSS_VALUE_DECIMAL
+            if (func->arg_count >= 2 && func->args[1] &&
+                func->args[1]->type == CSS_VALUE_TYPE_KEYWORD) {
+                style_type = func->args[1]->data.keyword;
+            }
+            char* buffer = (char*)arena_alloc(lycon->doc->arena, 64);
+            if (!buffer || !counter_name) return "";
+            counter_format((CounterContext*)lycon->counter_context, counter_name, style_type, buffer, 64);
+            return buffer;
+        }
+
+        if (strcmp(func->name, "counters") == 0 && func->arg_count >= 2) {
+            const char* counter_name = pseudo_css_value_extract_name(func->args[0]);
+            const char* separator = func->args[1] ? func->args[1]->data.string : ".";
+            uint32_t style_type = 0x00AA;  // CSS_VALUE_DECIMAL
+            if (func->arg_count >= 3 && func->args[2] &&
+                func->args[2]->type == CSS_VALUE_TYPE_KEYWORD) {
+                style_type = func->args[2]->data.keyword;
+            }
+            char* buffer = (char*)arena_alloc(lycon->doc->arena, 128);
+            if (!buffer || !counter_name) return "";
+            counters_format((CounterContext*)lycon->counter_context, counter_name,
+                            separator ? separator : ".", style_type, buffer, 128);
+            return buffer;
+        }
+
+        return nullptr;
+    }
+
+    int quote_type = pseudo_check_quote_content(item);
+    if (quote_type == 1 || quote_type == 2) {
+        return pseudo_resolve_quote_char(element, quote_type == 1, quote_depth);
+    }
+    if (quote_type == 3 || quote_type == 4) {
+        return "";
+    }
+
+    return nullptr;
+}
+
+static bool pseudo_materialize_content_children(LayoutContext* lycon, DomElement* parent,
+                                                DomElement* pseudo_elem, bool is_before) {
+    if (!lycon || !parent || !pseudo_elem) return false;
+
+    StyleTree* pseudo_styles = is_before ? parent->before_styles : parent->after_styles;
+    if (!pseudo_styles) return false;
+
+    CssDeclaration* content_decl = style_tree_get_declaration(pseudo_styles, CSS_PROPERTY_CONTENT);
+    if (!content_decl || !content_decl->value) return false;
+
+    CssValue* value = content_decl->value;
+    StrBuf* text_buf = strbuf_new_cap(64);
+    if (!text_buf) return false;
+
+    bool appended_any = false;
+    int open_quote_count = 0;
+    int item_count = (value->type == CSS_VALUE_TYPE_LIST) ? value->data.list.count : 1;
+
+    for (int i = 0; i < item_count; i++) {
+        CssValue* item = (value->type == CSS_VALUE_TYPE_LIST) ? value->data.list.values[i] : value;
+        if (!item) continue;
+
+        const char* raw_url = nullptr;
+        if (item->type == CSS_VALUE_TYPE_URL) {
+            raw_url = item->data.url;
+        } else if (item->type == CSS_VALUE_TYPE_FUNCTION && item->data.function &&
+                   item->data.function->name && strcmp(item->data.function->name, "url") == 0 &&
+                   item->data.function->arg_count > 0 && item->data.function->args[0]) {
+            raw_url = pseudo_css_value_extract_name(item->data.function->args[0]);
+        }
+
+        if (raw_url && raw_url[0]) {
+            if (text_buf->length > 0) {
+                pseudo_append_text_child(pseudo_elem, text_buf->str);
+                text_buf->length = 0;
+                if (text_buf->str) text_buf->str[0] = '\0';
+                appended_any = true;
+            }
+
+            DomElement* img_elem = pseudo_create_image_child(lycon, pseudo_elem, content_decl, raw_url);
+            if (img_elem) {
+                pseudo_append_child(pseudo_elem, (DomNode*)img_elem);
+                appended_any = true;
+            }
+        } else {
+            const char* fragment = pseudo_resolve_text_fragment(lycon, parent, item, open_quote_count);
+            if (fragment && fragment[0]) {
+                strbuf_append_str(text_buf, fragment);
+            }
+        }
+
+        int quote_type = pseudo_check_quote_content(item);
+        if (quote_type == 1 || quote_type == 3) {
+            open_quote_count++;
+        }
+    }
+
+    if (text_buf->length > 0) {
+        pseudo_append_text_child(pseudo_elem, text_buf->str);
+        appended_any = true;
+    }
+
+    strbuf_free(text_buf);
+    return appended_any;
+}
+
 // CSS 2.1 §8.3.1: Collapse two margins according to spec rules
 // - Both positive: max(a, b)
 // - Both negative: min(a, b) — most negative
@@ -249,22 +541,16 @@ static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* paren
     // Allow empty content - pseudo-elements with display:block and clear:both still need to be created
     if (!lycon || !parent) return nullptr;
 
-    Pool* pool = lycon->doc->view_tree->pool;
-    if (!pool) return nullptr;
-
     // Create the pseudo DomElement
     // Per CSS spec: pseudo-element is child of defining element,
     // text node is child of pseudo-element
-    DomElement* pseudo_elem = (DomElement*)pool_calloc(pool, sizeof(DomElement));
+    DomElement* pseudo_elem = dom_element_create(parent->doc, is_before ? "::before" : "::after", nullptr);
     if (!pseudo_elem) return nullptr;
 
-    // Initialize as element node
-    pseudo_elem->node_type = DOM_NODE_ELEMENT;
-    pseudo_elem->tag_name = is_before ? "::before" : "::after";
-    pseudo_elem->doc = parent->doc;
     // Pseudo-element is child of defining element
     pseudo_elem->parent = parent;
     pseudo_elem->first_child = nullptr;
+    pseudo_elem->last_child = nullptr;
     pseudo_elem->next_sibling = nullptr;
     pseudo_elem->prev_sibling = nullptr;
 
@@ -316,41 +602,15 @@ static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* paren
         pseudo_elem->specified_style = pseudo_styles;
     }
 
-    // Create the text child only if there's content
-    // Empty content pseudo-elements still participate in layout (e.g., clearfix)
-    if (content && *content) {
-        log_info("%s [PSEUDO] Creating text node for pseudo-element, content_len=%zu, first_byte=0x%02x", parent->source_loc(),
+    bool materialized_children = pseudo_materialize_content_children(lycon, parent, pseudo_elem, is_before);
+
+    // Fallback for simple-content paths when no structured children were produced.
+    // Empty content pseudo-elements still participate in layout (e.g., clearfix).
+    if (!materialized_children && content && *content) {
+        log_info("%s [PSEUDO] Creating fallback text node for pseudo-element, content_len=%zu, first_byte=0x%02x", parent->source_loc(),
             strlen(content), (unsigned char)*content);
-        DomText* text_node = (DomText*)pool_calloc(pool, sizeof(DomText));
-        if (text_node) {
-            // Initialize as text node
-            text_node->node_type = DOM_NODE_TEXT;
-            // Text node is child of pseudo-element
-            text_node->parent = pseudo_elem;
-            text_node->next_sibling = nullptr;
-            text_node->prev_sibling = nullptr;
-
-            // Copy the content string
-            size_t content_len = strlen(content);
-            char* text_content = (char*)pool_calloc(pool, content_len + 1);
-            if (text_content) {
-                memcpy(text_content, content, content_len);
-                text_content[content_len] = '\0';
-                log_info("%s [PSEUDO] Text node created with content_len=%zu, bytes=[%02x %02x %02x]", parent->source_loc(),
-                    content_len,
-                    content_len > 0 ? (unsigned char)text_content[0] : 0,
-                    content_len > 1 ? (unsigned char)text_content[1] : 0,
-                    content_len > 2 ? (unsigned char)text_content[2] : 0);
-            }
-            text_node->text = text_content;
-            text_node->length = content_len;
-            text_node->native_string = nullptr;  // Not backed by Lambda String
-            text_node->content_type = DOM_TEXT_STRING;
-
-            // Link text node as child of pseudo element
-            pseudo_elem->first_child = text_node;
-        }
-    } else {
+        pseudo_append_text_child(pseudo_elem, content);
+    } else if (!materialized_children) {
         log_info("%s [PSEUDO] NOT creating text node: content=%p, first_byte=%s", parent->source_loc(),
             (void*)content, content ? ((*content) ? "nonzero" : "ZERO") : "NULL");
     }
@@ -1950,12 +2210,17 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
         log_debug("%s finalizing block, display=%d, given wd:%f", block->source_loc(), display, lycon->block.given_width);
     }
     if (display == CSS_VALUE_INLINE_BLOCK && lycon->block.given_width < 0) {
-        // CSS 2.1 §10.3.9: Save the pre-layout fit-content width (border-box).
-        // When max-content > available, the fit-content equals available width,
-        // and text wraps within it. After layout, flow_width (widest wrapped line)
-        // can be less than available. Floor at pre-layout width to prevent
-        // incorrect shrinking below the shrink-to-fit width.
-        float pre_layout_fit_width = block->width;
+        // CSS 2.1 §10.3.9: inline-block auto width uses the shrink-to-fit
+        // algorithm: min(max(preferred minimum width, available width),
+        // preferred width). Use intrinsic widths rather than the pre-layout
+        // available width; otherwise short inline-blocks incorrectly stretch.
+        float available_width = block->width;
+        IntrinsicSizes intrinsic = {0, 0};
+        if (block->is_element()) {
+            intrinsic = measure_element_intrinsic_widths(lycon, (DomElement*)block);
+        }
+        float shrink_to_fit_width = min(max(intrinsic.min_content, available_width),
+                                        intrinsic.max_content);
 
         // CSS 2.1 §10.3.9: shrink-to-fit width cannot be less than border+padding
         float min_bp_width = 0;
@@ -1975,15 +2240,14 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
         // to inline-block shrink-to-fit width, same as other auto-width paths
         block->width = adjust_min_max_width(block, block->width);
 
-        // CSS 2.1 §10.3.9: Floor at the pre-layout fit-content width.
-        // The fit-content formula min(max-content, max(min-content, available))
-        // is the correct shrink-to-fit width. Post-layout flow_width can be less
-        // (text wrapped within the available width). Allow expansion (overflow)
-        // but not spurious shrinking.
-        if (block->width < pre_layout_fit_width) {
-            log_debug("%s inline-block floor: flow_width=%.1f -> fit_width=%.1f",
-                      block->source_loc(), block->width, pre_layout_fit_width);
-            block->width = pre_layout_fit_width;
+        // Post-layout flow_width may be narrower than the shrink-to-fit width
+        // when text wrapped inside the available width. Floor to the formula,
+        // not to the full available width.
+        if (block->width < shrink_to_fit_width) {
+            log_debug("%s inline-block shrink-to-fit floor: flow_width=%.1f -> fit_width=%.1f (min=%.1f, max=%.1f, avail=%.1f)",
+                      block->source_loc(), block->width, shrink_to_fit_width,
+                      intrinsic.min_content, intrinsic.max_content, available_width);
+            block->width = shrink_to_fit_width;
         }
 
         log_debug("%s inline-block final width set to: %f, text_align=%d", block->source_loc(), block->width, lycon->block.text_align);

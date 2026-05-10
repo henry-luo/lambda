@@ -2346,6 +2346,22 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     log_debug("calling layout_html_root...");
     layout_html_root(&lycon, root_node);
 
+    if (doc->view_tree && doc->view_tree->root && doc->view_tree->root->view_type == RDT_VIEW_BLOCK) {
+        ViewBlock* root_block = (ViewBlock*)doc->view_tree->root;
+        if (root_block->scroller && root_block->scroller->pane) {
+            ScrollPane* pane = root_block->scroller->pane;
+            float target_x = doc->pending_viewport_scroll_x;
+            float target_y = doc->pending_viewport_scroll_y;
+            if (target_x < 0.0f) target_x = 0.0f;
+            if (target_y < 0.0f) target_y = 0.0f;
+            if (target_x > pane->h_max_scroll) target_x = pane->h_max_scroll;
+            if (target_y > pane->v_max_scroll) target_y = pane->v_max_scroll;
+            pane->h_scroll_position = target_x;
+            pane->v_scroll_position = target_y;
+            log_info("layout_html_doc: applied viewport scroll (%.1f, %.1f)", target_x, target_y);
+        }
+    }
+
     auto t_layout = high_resolution_clock::now();
     double layout_ms = duration<double, std::milli>(t_layout - t_init).count();
     log_info("[TIMING] layout_html_root: %.1fms", layout_ms);

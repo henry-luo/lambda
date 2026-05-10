@@ -133,6 +133,11 @@ struct DomDocument {
     // Document charset (from <meta charset> or HTTP Content-Type), for CSS fallback encoding
     const char* document_charset;     // e.g. "windows-1251", nullptr means UTF-8
 
+    // JS-requested viewport scroll offsets. Captured after script execution and
+    // applied to the root viewport scroller after layout establishes scroll ranges.
+    float pending_viewport_scroll_x;
+    float pending_viewport_scroll_y;
+
     // Constructor
     DomDocument() : input(nullptr), pool(nullptr), arena(nullptr),
                     url(nullptr), html_root(nullptr), root(nullptr), html_version(0),
@@ -157,7 +162,8 @@ struct DomDocument {
                     js_runtime_heap(nullptr), js_runtime_nursery(nullptr),
                     js_runtime_name_pool(nullptr), js_runtime_pool(nullptr),
                     js_event_registry(nullptr),
-                    document_charset(nullptr) {}
+                    document_charset(nullptr),
+                    pending_viewport_scroll_x(0.0f), pending_viewport_scroll_y(0.0f) {}
 };
 
 typedef struct {

@@ -5282,6 +5282,46 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
     }
     DomElement* elem = node->as_element();
 
+    auto item_to_scroll_value = [](Item scroll_value) -> float {
+        TypeId value_type = get_type_id(scroll_value);
+        if (value_type == LMD_TYPE_INT) return (float)it2i(scroll_value);
+        if (value_type == LMD_TYPE_FLOAT) return (float)it2d(scroll_value);
+        if (value_type == LMD_TYPE_BOOL) return it2b(scroll_value) ? 1.0f : 0.0f;
+        return 0.0f;
+    };
+
+    if (strcmp(prop, "scrollTop") == 0 || strcmp(prop, "scrollLeft") == 0) {
+        float scroll_value = item_to_scroll_value(value);
+        if (scroll_value < 0.0f) scroll_value = 0.0f;
+
+        bool is_vertical = strcmp(prop, "scrollTop") == 0;
+        bool is_root_scroll_target =
+            (elem->tag_name && (strcasecmp(elem->tag_name, "html") == 0 ||
+                                strcasecmp(elem->tag_name, "body") == 0));
+
+        if (is_root_scroll_target && elem->doc) {
+            if (is_vertical) {
+                elem->doc->pending_viewport_scroll_y = scroll_value;
+            } else {
+                elem->doc->pending_viewport_scroll_x = scroll_value;
+            }
+            log_debug("js_dom_set_property: pending viewport %s=%.1f on <%s>",
+                      prop, scroll_value, elem->tag_name);
+            return value;
+        }
+
+        if (elem->scroller && elem->scroller->pane) {
+            if (is_vertical) {
+                elem->scroller->pane->v_scroll_position = scroll_value;
+            } else {
+                elem->scroller->pane->h_scroll_position = scroll_value;
+            }
+            log_debug("js_dom_set_property: set %s=%.1f on <%s>",
+                      prop, scroll_value, elem->tag_name ? elem->tag_name : "?");
+            return value;
+        }
+    }
+
     // className
     if (strcmp(prop, "className") == 0) {
         const char* class_str = fn_to_cstr(value);

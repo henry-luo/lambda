@@ -916,6 +916,32 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
         }
     }
 
+    if (!is_fixed) {
+        ViewElement* parent = view->parent_view();
+        while (parent) {
+            if (parent->is_block()) {
+                ViewBlock* parent_block = (ViewBlock*)parent;
+                if (parent_block->scroller && parent_block->scroller->pane) {
+                    abs_x -= parent_block->scroller->pane->h_scroll_position;
+                    abs_y -= parent_block->scroller->pane->v_scroll_position;
+                }
+                if (parent_block->position &&
+                    parent_block->position->position == CSS_VALUE_FIXED) {
+                    break;
+                }
+            }
+            parent = parent->parent_view();
+        }
+
+        if (view->is_block() && !view->parent_view()) {
+            ViewBlock* root_block = (ViewBlock*)view;
+            if (root_block->scroller && root_block->scroller->pane) {
+                abs_x -= root_block->scroller->pane->h_scroll_position;
+                abs_y -= root_block->scroller->pane->v_scroll_position;
+            }
+        }
+    }
+
     *out_x = abs_x;
     *out_y = abs_y;
 }
