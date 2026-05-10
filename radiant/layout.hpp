@@ -202,6 +202,11 @@ typedef struct Linebox {
     unsigned char* last_space;      // last space character in the line
     float last_space_pos;             // position of the last space in the line
     BreakKind last_space_kind;        // semantic type of the last recorded break opportunity
+    unsigned char* last_non_shy_space; // previous non-SHY break opportunity before a soft hyphen
+    float last_non_shy_space_pos;
+    BreakKind last_non_shy_space_kind;
+    float last_non_shy_space_hanging_width;
+    float last_non_shy_space_hanging_text_trim;
     View* start_view;
     CssEnum vertical_align;
     float vertical_align_offset;    // length/percentage vertical-align offset (px), positive = raise
@@ -259,6 +264,9 @@ typedef struct Linebox {
     inline void reset_space() {
         is_line_start = false;  has_space = false;  last_space = NULL;  last_space_pos = 0;
         last_space_kind = BRK_TEXT;  last_space_hanging_width = 0;
+        last_non_shy_space = NULL;  last_non_shy_space_pos = 0;
+        last_non_shy_space_kind = BRK_TEXT;  last_non_shy_space_hanging_width = 0;
+        last_non_shy_space_hanging_text_trim = 0;
         trailing_space_width = 0;
         committed_trailing_rect = NULL;
         committed_trailing_view = NULL;

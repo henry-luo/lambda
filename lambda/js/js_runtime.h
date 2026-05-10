@@ -109,6 +109,7 @@ Item js_typeof(Item value);         // typeof x
 Item js_new_object(void);
 Item js_property_get(Item object, Item key);
 Item js_property_set(Item object, Item key, Item value);
+Item js_create_data_property(Item object, Item key, Item value);
 Item js_property_access(Item object, Item key);
 
 // =============================================================================

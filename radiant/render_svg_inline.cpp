@@ -761,6 +761,7 @@ SvgIntrinsicSize calculate_svg_intrinsic_size(Element* svg_element) {
     const char* width_attr = get_svg_attr(svg_element, "width");
     const char* height_attr = get_svg_attr(svg_element, "height");
     const char* viewbox_attr = get_svg_attr(svg_element, "viewBox");
+    if (!viewbox_attr) viewbox_attr = get_svg_attr(svg_element, "viewbox");
 
     SvgViewBox vb = parse_svg_viewbox(viewbox_attr);
 
