@@ -60,6 +60,145 @@ static int pseudo_check_quote_content(const CssValue* value) {
     return 0;
 }
 
+typedef struct ObjectViewBoxUsedRect {
+    bool valid;
+    float x;
+    float y;
+    float width;
+    float height;
+} ObjectViewBoxUsedRect;
+
+static bool resolve_object_view_box_component(LayoutContext* lycon, const CssValue* value,
+                                              CssPropertyId prop_id, float reference,
+                                              float auto_value, float* out_value) {
+    if (!value || !out_value) return false;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
+        *out_value = auto_value;
+        return true;
+    }
+    if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+        *out_value = (float)(value->data.percentage.value / 100.0 * reference);
+        return true;
+    }
+    if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_NUMBER) {
+        *out_value = resolve_length_value(lycon, prop_id, value);
+        return true;
+    }
+    return false;
+}
+
+static int collect_object_view_box_args(CssFunction* func, CssValue** args, int max_args) {
+    if (!func || !args || max_args <= 0) return 0;
+
+    int count = 0;
+    for (int i = 0; i < func->arg_count && count < max_args; i++) {
+        CssValue* arg = func->args ? func->args[i] : nullptr;
+        if (!arg) continue;
+        if (arg->type == CSS_VALUE_TYPE_LIST) {
+            for (int j = 0; j < arg->data.list.count && count < max_args; j++) {
+                CssValue* item = arg->data.list.values ? arg->data.list.values[j] : nullptr;
+                if (item) args[count++] = item;
+            }
+        } else {
+            args[count++] = arg;
+        }
+    }
+    return count;
+}
+
+static bool image_orientation_uses_from_image(DomElement* element) {
+    for (DomElement* cur = element; cur; cur = dom_element_get_parent(cur)) {
+        CssDeclaration* decl = dom_element_get_specified_value(cur, CSS_PROPERTY_IMAGE_ORIENTATION);
+        if (!decl || !decl->value) continue;
+        if (decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
+            decl->value->data.keyword == CSS_VALUE_NONE) {
+            return false;
+        }
+        return true;
+    }
+    return true;
+}
+
+static ObjectViewBoxUsedRect resolve_object_view_box_rect(LayoutContext* lycon,
+                                                          DomElement* element,
+                                                          float intrinsic_width,
+                                                          float intrinsic_height) {
+    ObjectViewBoxUsedRect rect = {false, 0.0f, 0.0f, intrinsic_width, intrinsic_height};
+    if (!lycon || !element || intrinsic_width <= 0.0f || intrinsic_height <= 0.0f) return rect;
+
+    CssDeclaration* decl = dom_element_get_specified_value(element, CSS_PROPERTY_OBJECT_VIEW_BOX);
+    if (!decl || !decl->value) return rect;
+    if (decl->value->type == CSS_VALUE_TYPE_KEYWORD && decl->value->data.keyword == CSS_VALUE_NONE) return rect;
+    if (decl->value->type != CSS_VALUE_TYPE_FUNCTION || !decl->value->data.function) return rect;
+
+    CssFunction* func = decl->value->data.function;
+    if (!func->name || !func->args) return rect;
+
+    CssValue* args[4] = {nullptr, nullptr, nullptr, nullptr};
+    int arg_count = collect_object_view_box_args(func, args, 4);
+
+    if (strcmp(func->name, "rect") == 0 && arg_count == 4) {
+        float top = 0.0f;
+        float right = intrinsic_width;
+        float bottom = intrinsic_height;
+        float left = 0.0f;
+        if (!resolve_object_view_box_component(lycon, args[0], CSS_PROPERTY_OBJECT_VIEW_BOX, intrinsic_height, 0.0f, &top) ||
+            !resolve_object_view_box_component(lycon, args[1], CSS_PROPERTY_OBJECT_VIEW_BOX, intrinsic_width, intrinsic_width, &right) ||
+            !resolve_object_view_box_component(lycon, args[2], CSS_PROPERTY_OBJECT_VIEW_BOX, intrinsic_height, intrinsic_height, &bottom) ||
+            !resolve_object_view_box_component(lycon, args[3], CSS_PROPERTY_OBJECT_VIEW_BOX, intrinsic_width, 0.0f, &left)) {
+            return rect;
+        }
+        rect.x = left;
+        rect.y = top;
+        rect.width = right - left;
+        rect.height = bottom - top;
+    } else if (strcmp(func->name, "xywh") == 0 && arg_count == 4) {
+        if (!resolve_object_view_box_component(lycon, args[0], CSS_PROPERTY_OBJECT_VIEW_BOX, intrinsic_width, 0.0f, &rect.x) ||
+            !resolve_object_view_box_component(lycon, args[1], CSS_PROPERTY_OBJECT_VIEW_BOX, intrinsic_height, 0.0f, &rect.y) ||
+            !resolve_object_view_box_component(lycon, args[2], CSS_PROPERTY_OBJECT_VIEW_BOX, intrinsic_width, intrinsic_width, &rect.width) ||
+            !resolve_object_view_box_component(lycon, args[3], CSS_PROPERTY_OBJECT_VIEW_BOX, intrinsic_height, intrinsic_height, &rect.height)) {
+            return rect;
+        }
+    } else if (strcmp(func->name, "inset") == 0 && arg_count >= 1 && arg_count <= 4) {
+        float top = 0.0f;
+        float right = 0.0f;
+        float bottom = 0.0f;
+        float left = 0.0f;
+        if (!resolve_object_view_box_component(lycon, args[0], CSS_PROPERTY_OBJECT_VIEW_BOX, intrinsic_height, 0.0f, &top)) return rect;
+        if (arg_count == 1) {
+            right = bottom = left = top;
+        } else if (arg_count == 2) {
+            bottom = top;
+            if (!resolve_object_view_box_component(lycon, args[1], CSS_PROPERTY_OBJECT_VIEW_BOX, intrinsic_width, 0.0f, &right)) return rect;
+            left = right;
+        } else if (arg_count == 3) {
+            if (!resolve_object_view_box_component(lycon, args[1], CSS_PROPERTY_OBJECT_VIEW_BOX, intrinsic_width, 0.0f, &right) ||
+                !resolve_object_view_box_component(lycon, args[2], CSS_PROPERTY_OBJECT_VIEW_BOX, intrinsic_height, 0.0f, &bottom)) {
+                return rect;
+            }
+            left = right;
+        } else {
+            if (!resolve_object_view_box_component(lycon, args[1], CSS_PROPERTY_OBJECT_VIEW_BOX, intrinsic_width, 0.0f, &right) ||
+                !resolve_object_view_box_component(lycon, args[2], CSS_PROPERTY_OBJECT_VIEW_BOX, intrinsic_height, 0.0f, &bottom) ||
+                !resolve_object_view_box_component(lycon, args[3], CSS_PROPERTY_OBJECT_VIEW_BOX, intrinsic_width, 0.0f, &left)) {
+                return rect;
+            }
+        }
+        rect.x = left;
+        rect.y = top;
+        rect.width = intrinsic_width - left - right;
+        rect.height = intrinsic_height - top - bottom;
+    } else {
+        return rect;
+    }
+
+    if (rect.width < 0.0f) rect.width = 0.0f;
+    if (rect.height < 0.0f) rect.height = 0.0f;
+    if (rect.width <= 0.0f || rect.height <= 0.0f) return {false, 0.0f, 0.0f, intrinsic_width, intrinsic_height};
+    rect.valid = true;
+    return rect;
+}
+
 static const char* pseudo_resolve_quote_char(DomElement* element, bool is_open_quote, int depth) {
     DomElement* cur = element;
     CssDeclaration* quotes_decl = nullptr;
@@ -4669,8 +4808,21 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         if (block->embed && block->embed->img) {
             ImageSurface* img = block->embed->img;
             // Image intrinsic dimensions are in CSS logical pixels
-            float w = img->width;
-            float h = img->height;
+            bool from_image_orientation = image_orientation_uses_from_image(block->as_element());
+            float w = (from_image_orientation || img->encoded_width <= 0) ? img->width : img->encoded_width;
+            float h = (from_image_orientation || img->encoded_height <= 0) ? img->height : img->encoded_height;
+            ObjectViewBoxUsedRect object_view_box = img->has_intrinsic_size
+                ? resolve_object_view_box_rect(lycon, block->as_element(), w, h)
+                : ObjectViewBoxUsedRect{false, 0.0f, 0.0f, w, h};
+            if (object_view_box.valid) {
+                // CSS Images 4 §2.1: object-view-box changes the source object
+                // dimensions used by object sizing. The element's auto size and
+                // intrinsic aspect ratio are based on the specified view box.
+                w = object_view_box.width;
+                h = object_view_box.height;
+                log_debug("%s object-view-box intrinsic dims: %.1f x %.1f",
+                          block->source_loc(), w, h);
+            }
 
             // HTML percentage width/height (e.g., width="50%") — re-resolve
             // against the actual containing block width now that layout is known.
@@ -4696,12 +4848,12 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             if (lycon->block.given_width < 0 || lycon->block.given_height < 0 || width_is_zero_percent) {
                 if (lycon->block.given_width >= 0 && !width_is_zero_percent) {
                     // Width specified, scale unspecified height
-                    lycon->block.given_height = lycon->block.given_width * h / w;
+                    lycon->block.given_height = (w > 0.0f) ? (lycon->block.given_width * h / w) : 0.0f;
                     image_height_auto_derived = true;
                 }
                 else if (lycon->block.given_height >= 0 && lycon->block.given_width < 0) {
                     // Height specified, scale unspecified width
-                    lycon->block.given_width = lycon->block.given_height * w / h;
+                    lycon->block.given_width = (h > 0.0f) ? (lycon->block.given_height * w / h) : 0.0f;
                     image_width_auto_derived = true;
                 }
                 else {

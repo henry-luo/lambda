@@ -358,6 +358,10 @@ typedef struct ImageSurface {
     ImageFormat format;
     int width;             // the intrinsic width of the surface/image (used for layout/intrinsic sizing)
     int height;            // the intrinsic height of the surface/image
+    int encoded_width;     // raster source dimensions before image-orientation metadata
+    int encoded_height;
+    int orientation;       // EXIF orientation value, 1 when absent/normal/invalid
+    bool has_intrinsic_size;
     int pitch;             // no. of bytes per row of the actual decoded pixel buffer
     // image pixels, 32-bits per pixel, RGBA format
     // pack order is [R] [G] [B] [A], high bit -> low bit

@@ -397,6 +397,7 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_MIX_BLEND_MODE, "mix-blend-mode", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "normal", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_OBJECT_FIT, "object-fit", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "fill", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_OBJECT_POSITION, "object-position", PROP_TYPE_STRING, PROP_INHERIT_NO, "50% 50%", false, false, NULL, 0, validate_string, NULL},
+    {CSS_PROPERTY_OBJECT_VIEW_BOX, "object-view-box", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_string, NULL},
     {CSS_PROPERTY_POINTER_EVENTS, "pointer-events", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "auto", false, false, NULL, 0, validate_keyword, NULL},
 
     // Remaining Additional Properties
