@@ -5516,6 +5516,10 @@ static Item js_array_like_to_array(Item obj) {
     return result;
 }
 
+static Item js_array_generic_fill(Item object, Item* args, int argc);
+static Item js_array_generic_copy_within(Item object, Item* args, int argc);
+static Item js_array_generic_reverse(Item object);
+
 // Forward declarations for JSON functions (defined in js_globals.cpp)
 extern "C" Item js_json_parse(Item str_item);
 extern "C" Item js_json_parse_full(Item str_item, Item reviver);
@@ -6156,6 +6160,15 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                 Item result = js_array_method(this_val, method_name, args, arg_count);
                 js_array_method_real_this = (Item){0};
                 return result;
+            }
+            if (builtin_id == JS_BUILTIN_ARR_FILL) {
+                return js_array_generic_fill(this_val, args, arg_count);
+            }
+            if (builtin_id == JS_BUILTIN_ARR_COPY_WITHIN) {
+                return js_array_generic_copy_within(this_val, args, arg_count);
+            }
+            if (builtin_id == JS_BUILTIN_ARR_REVERSE) {
+                return js_array_generic_reverse(this_val);
             }
             // Plain Map: treat as array-like object (has length + numeric indices)
             // For indexOf/lastIndexOf: iterate directly to respect getter side-effects
@@ -8828,10 +8841,13 @@ static void js_regexp_update_last_match(const char* input_str, int input_len,
 struct JsRegexData {
     re2::RE2* re2;            // compiled regex (direct, for patterns without assertions)
     JsRegexCompiled* wrapper; // wrapper with post-filters (for patterns with lookaheads/backrefs)
+    const char* literal_pattern; // simple literal pattern handled without RE2
+    int literal_pattern_len;
     bool global;              // 'g' flag
     bool ignore_case;         // 'i' flag
     bool multiline;           // 'm' flag
     bool sticky;              // 'y' flag (v46)
+    bool literal_fast;
 };
 
 // Regex compilation cache: avoids re-compiling the same regex literal in loops.
@@ -8882,6 +8898,7 @@ static inline uint64_t js_regex_content_hash(const char* pat, int plen, const ch
 // Helper: get the correct number of capturing groups for output
 // When wrapper is active, use original JS group count (not RE2's inflated count)
 static int js_regex_num_groups(JsRegexData* rd) {
+    if (rd->literal_fast) return 1;
     if (rd->wrapper && rd->wrapper->has_filters) {
         return rd->wrapper->original_group_count + 1; // +1 for full match
     }
@@ -8893,6 +8910,28 @@ static int js_regex_num_groups(JsRegexData* rd) {
 static bool js_regex_match_internal(JsRegexData* rd, const char* input, int input_len,
                                      int start_pos, re2::RE2::Anchor anchor,
                                      re2::StringPiece* matches, int num_groups) {
+    if (rd->literal_fast) {
+        if (start_pos < 0 || start_pos > input_len) return false;
+        int pat_len = rd->literal_pattern_len;
+        const char* found = NULL;
+        if (anchor == re2::RE2::ANCHOR_START) {
+            if (start_pos + pat_len <= input_len &&
+                memcmp(input + start_pos, rd->literal_pattern, pat_len) == 0) {
+                found = input + start_pos;
+            }
+        } else {
+            int max_pos = input_len - pat_len;
+            for (int i = start_pos; i <= max_pos; i++) {
+                if (memcmp(input + i, rd->literal_pattern, pat_len) == 0) {
+                    found = input + i;
+                    break;
+                }
+            }
+        }
+        if (!found) return false;
+        if (num_groups > 0) matches[0] = re2::StringPiece(found, pat_len);
+        return true;
+    }
     if (rd->wrapper && rd->wrapper->has_filters) {
         // use wrapper with post-filter verification
         int starts[JS_REGEX_MAX_GROUPS], ends[JS_REGEX_MAX_GROUPS];
@@ -8915,6 +8954,29 @@ static bool js_regex_match_internal(JsRegexData* rd, const char* input, int inpu
                            anchor, matches, num_groups);
 }
 
+static bool js_regex_can_use_literal_fast(const char* pattern, int pattern_len, const char* flags, int flags_len) {
+    if (!pattern || pattern_len <= 0) return false;
+    for (int i = 0; i < flags_len; i++) {
+        char f = flags[i];
+        if (f != 'g' && f != 'y') return false;
+    }
+    for (int i = 0; i < pattern_len; i++) {
+        unsigned char c = (unsigned char)pattern[i];
+        if (c < 0x20 || c == 0x7F) return false;
+        switch (c) {
+        case '^': case '$': case '\\': case '.': case '*': case '+': case '?':
+        case '(': case ')': case '[': case ']': case '{': case '}': case '|':
+            return false;
+        default:
+            break;
+        }
+    }
+    return true;
+}
+
+static Item js_try_fast_replace_non_whitespace(Item regex, Item str, Item replacement,
+                                               JsRegexData* rd, bool replacement_is_func);
+
 // v90: Get RegExp.prototype for setting __proto__ on regex instances
 static Item js_get_regexp_prototype() {
     extern Item js_get_constructor(Item name_item);
@@ -8926,59 +8988,78 @@ static Item js_get_regexp_prototype() {
     return ItemNull;
 }
 
+static void js_regex_put_fresh(Item obj, const char* key, int key_len, Item value) {
+    if (get_type_id(obj) != LMD_TYPE_MAP || !obj.map || !js_input) return;
+    map_put(obj.map, heap_create_name(key, key_len), value, js_input);
+}
+
 // Build a JS RegExp Map object from a cached regex entry, reusing compiled JsRegexData.
 static Item js_regex_build_object_from_cache(const JsRegexCacheEntry& ce) {
     JsRegexData* rd = ce.rd;
     Item regex_obj = js_new_object();
     Item rd_key = (Item){.item = s2it(heap_create_name(JS_REGEX_DATA_KEY))};
     Item rd_val = (Item){.item = i2it((int64_t)(uintptr_t)rd)};
-    js_property_set(regex_obj, rd_key, rd_val);
+    js_regex_put_fresh(regex_obj, JS_REGEX_DATA_KEY, 4, rd_val);
     Item source_key = (Item){.item = s2it(heap_create_name("source"))};
     Item source_val = (Item){.item = s2it(heap_strcpy((char*)ce.source, ce.source_len))};
-    js_property_set(regex_obj, source_key, source_val);
+    js_regex_put_fresh(regex_obj, "source", 6, source_val);
     js_mark_non_enumerable(regex_obj, source_key);
     Item flags_key = (Item){.item = s2it(heap_create_name("flags"))};
     Item flags_val = (Item){.item = s2it(heap_create_name(ce.canonical_flags))};
-    js_property_set(regex_obj, flags_key, flags_val);
+    js_regex_put_fresh(regex_obj, "flags", 5, flags_val);
     js_mark_non_enumerable(regex_obj, flags_key);
     Item global_key = (Item){.item = s2it(heap_create_name("global"))};
-    js_property_set(regex_obj, global_key, (Item){.item = b2it(rd->global ? BOOL_TRUE : BOOL_FALSE)});
+    js_regex_put_fresh(regex_obj, "global", 6, (Item){.item = b2it(rd->global ? BOOL_TRUE : BOOL_FALSE)});
     js_mark_non_enumerable(regex_obj, global_key);
     Item ic_key = (Item){.item = s2it(heap_create_name("ignoreCase"))};
-    js_property_set(regex_obj, ic_key, (Item){.item = b2it(rd->ignore_case ? BOOL_TRUE : BOOL_FALSE)});
+    js_regex_put_fresh(regex_obj, "ignoreCase", 10, (Item){.item = b2it(rd->ignore_case ? BOOL_TRUE : BOOL_FALSE)});
     js_mark_non_enumerable(regex_obj, ic_key);
     Item ml_key = (Item){.item = s2it(heap_create_name("multiline"))};
-    js_property_set(regex_obj, ml_key, (Item){.item = b2it(rd->multiline ? BOOL_TRUE : BOOL_FALSE)});
+    js_regex_put_fresh(regex_obj, "multiline", 9, (Item){.item = b2it(rd->multiline ? BOOL_TRUE : BOOL_FALSE)});
     js_mark_non_enumerable(regex_obj, ml_key);
     Item da_key = (Item){.item = s2it(heap_create_name("dotAll"))};
-    js_property_set(regex_obj, da_key, (Item){.item = b2it(ce.dot_all ? BOOL_TRUE : BOOL_FALSE)});
+    js_regex_put_fresh(regex_obj, "dotAll", 6, (Item){.item = b2it(ce.dot_all ? BOOL_TRUE : BOOL_FALSE)});
     js_mark_non_enumerable(regex_obj, da_key);
     Item uni_key = (Item){.item = s2it(heap_create_name("unicode"))};
-    js_property_set(regex_obj, uni_key, (Item){.item = b2it(ce.has_unicode ? BOOL_TRUE : BOOL_FALSE)});
+    js_regex_put_fresh(regex_obj, "unicode", 7, (Item){.item = b2it(ce.has_unicode ? BOOL_TRUE : BOOL_FALSE)});
     js_mark_non_enumerable(regex_obj, uni_key);
     Item sticky_key = (Item){.item = s2it(heap_create_name("sticky"))};
-    js_property_set(regex_obj, sticky_key, (Item){.item = b2it(rd->sticky ? BOOL_TRUE : BOOL_FALSE)});
+    js_regex_put_fresh(regex_obj, "sticky", 6, (Item){.item = b2it(rd->sticky ? BOOL_TRUE : BOOL_FALSE)});
     js_mark_non_enumerable(regex_obj, sticky_key);
     Item li_key = (Item){.item = s2it(heap_create_name("lastIndex"))};
-    js_property_set(regex_obj, li_key, (Item){.item = i2it(0)});
+    js_regex_put_fresh(regex_obj, "lastIndex", 9, (Item){.item = i2it(0)});
     // Per ES §22.2.3.1 RegExpAlloc: lastIndex is {writable:true, enumerable:false, configurable:false}
     Item ne_li_key = (Item){.item = s2it(heap_create_name("__ne_lastIndex", 14))};
-    js_property_set(regex_obj, ne_li_key, (Item){.item = b2it(BOOL_TRUE)});
+    js_regex_put_fresh(regex_obj, "__ne_lastIndex", 14, (Item){.item = b2it(BOOL_TRUE)});
     Item nc_li_key = (Item){.item = s2it(heap_create_name("__nc_lastIndex", 14))};
-    js_property_set(regex_obj, nc_li_key, (Item){.item = b2it(BOOL_TRUE)});
+    js_regex_put_fresh(regex_obj, "__nc_lastIndex", 14, (Item){.item = b2it(BOOL_TRUE)});
     Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
     Item cn_val = (Item){.item = s2it(heap_create_name("RegExp", 6))};
-    js_property_set(regex_obj, cn_key, cn_val);
+    js_regex_put_fresh(regex_obj, "__class_name__", 14, cn_val);
+    js_class_stamp(regex_obj, JS_CLASS_REGEXP);
     // v90: set __proto__ so prototype chain overrides (delete/reassign Symbol.matchAll etc.) work
     Item regexp_proto = js_get_regexp_prototype();
     if (regexp_proto.item != ItemNull.item) {
         Item proto_key = (Item){.item = s2it(heap_create_name("__proto__", 9))};
-        js_property_set(regex_obj, proto_key, regexp_proto);
+        js_regex_put_fresh(regex_obj, "__proto__", 9, regexp_proto);
     }
     return regex_obj;
 }
 
 extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char* flags, int flags_len) {
+    if (flags_len == 0 && js_regex_can_use_literal_fast(pattern, pattern_len, flags, flags_len)) {
+        JsRegexData* rd = (JsRegexData*)pool_calloc(js_input->pool, sizeof(JsRegexData));
+        char* lit_buf = (char*)pool_calloc(js_input->pool, pattern_len + 1);
+        memcpy(lit_buf, pattern, pattern_len);
+        lit_buf[pattern_len] = '\0';
+        rd->literal_fast = true;
+        rd->literal_pattern = lit_buf;
+        rd->literal_pattern_len = pattern_len;
+        static const char empty_flags[] = "";
+        JsRegexCacheEntry ce = {rd, pattern, pattern_len, empty_flags, 0, false, false};
+        return js_regex_build_object_from_cache(ce);
+    }
+
     // Check permanent RE2 cache — survives pool resets, avoids recompiling huge regex literals between tests
     uint64_t perm_key = js_regex_content_hash(pattern, pattern_len, flags, flags_len);
     {
@@ -9535,34 +9616,39 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     if (multiline) {
         processed_pattern = "(?m)" + processed_pattern;
     }
+    bool literal_fast = js_regex_can_use_literal_fast(pattern, pattern_len, flags, flags_len);
+
     // compile RE2 pattern (use preprocessed version)
     // Try wrapper compilation first (handles lookaheads, backreferences with post-filters)
-    JsRegexCompiled* wrapper = js_regex_wrapper_compile(processed_pattern.c_str(),
-                                                 (int)processed_pattern.size(),
-                                                 flags, flags_len, &opts);
+    JsRegexCompiled* wrapper = nullptr;
     re2::RE2* re2 = nullptr;
-    if (wrapper) {
-        re2 = wrapper->re2; // use the wrapper's compiled RE2
-    } else {
-        // wrapper failed — fall back to direct RE2 compilation
-        re2 = new re2::RE2(processed_pattern, opts);
-        if (!re2->ok()) {
-            // fall back to original pattern if preprocessing caused errors
-            std::string err1 = re2->error();
-            delete re2;
-            re2 = new re2::RE2(re2::StringPiece(pattern, pattern_len), opts);
+    if (!literal_fast) {
+        wrapper = js_regex_wrapper_compile(processed_pattern.c_str(),
+                                                     (int)processed_pattern.size(),
+                                                     flags, flags_len, &opts);
+        if (wrapper) {
+            re2 = wrapper->re2; // use the wrapper's compiled RE2
+        } else {
+            // wrapper failed — fall back to direct RE2 compilation
+            re2 = new re2::RE2(processed_pattern, opts);
             if (!re2->ok()) {
-                std::string err2 = re2->error();
-                log_error("js regex compile error: /%.*s/%.*s: %s",
-                    pattern_len, pattern, flags_len, flags, err2.c_str());
+                // fall back to original pattern if preprocessing caused errors
+                std::string err1 = re2->error();
                 delete re2;
-                // throw SyntaxError per ES spec §22.2.3.2.1
-                char msg[512];
-                snprintf(msg, sizeof(msg), "Invalid regular expression: /%.*s/%.*s: %s",
-                    pattern_len, pattern, flags_len, flags, err2.c_str());
-                Item m = (Item){.item = s2it(heap_create_name(msg))};
-                js_throw_syntax_error(m);
-                return ItemNull;
+                re2 = new re2::RE2(re2::StringPiece(pattern, pattern_len), opts);
+                if (!re2->ok()) {
+                    std::string err2 = re2->error();
+                    log_error("js regex compile error: /%.*s/%.*s: %s",
+                        pattern_len, pattern, flags_len, flags, err2.c_str());
+                    delete re2;
+                    // throw SyntaxError per ES spec §22.2.3.2.1
+                    char msg[512];
+                    snprintf(msg, sizeof(msg), "Invalid regular expression: /%.*s/%.*s: %s",
+                        pattern_len, pattern, flags_len, flags, err2.c_str());
+                    Item m = (Item){.item = s2it(heap_create_name(msg))};
+                    js_throw_syntax_error(m);
+                    return ItemNull;
+                }
             }
         }
     }
@@ -9574,6 +9660,14 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     rd->ignore_case = !opts.case_sensitive();
     rd->multiline = multiline;
     rd->sticky = sticky;
+    rd->literal_fast = literal_fast;
+    if (literal_fast) {
+        char* lit_buf = (char*)pool_calloc(js_input->pool, pattern_len + 1);
+        memcpy(lit_buf, pattern, pattern_len);
+        lit_buf[pattern_len] = '\0';
+        rd->literal_pattern = lit_buf;
+        rd->literal_pattern_len = pattern_len;
+    }
     // create a Map object and set properties
     Item regex_obj = js_new_object();
     // store regex data pointer as int in hidden property
@@ -9652,7 +9746,7 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     }
     // Store in permanent RE2 cache if no complex wrapper — survives batch resets for cross-test reuse.
     // Even pass-through wrappers (has_filters=false) are cached here since re2 is safe to reuse.
-    if (!wrapper || !wrapper->has_filters) {
+    if (!literal_fast && (!wrapper || !wrapper->has_filters)) {
         re2::RE2* perm_re2 = re2; // re2 points to either wrapper->re2 or directly-compiled re2
         char* perm_flags = new char[flags_len + 1];
         memcpy(perm_flags, flg_buf, flags_len + 1);
@@ -9796,15 +9890,56 @@ static JsRegexData* js_get_regex_data(Item obj) {
     return (JsRegexData*)(uintptr_t)ptr_val;
 }
 
+static bool js_regex_set_lastindex_strict(Item regex, Item li_key, int64_t value);
+
 extern "C" Item js_regex_test(Item regex, Item str) {
     JsRegexData* rd = js_get_regex_data(regex);
     if (!rd) return js_throw_type_error("Method RegExp.prototype.test called on incompatible receiver");
-    // ES §22.2.5.13 RegExp.prototype.test: Let match be ? RegExpExec(R, string).
-    // Return true if match is not null. This ensures sticky/global/lastIndex
-    // semantics match exec() exactly.
-    Item m = js_regex_exec(regex, str);
-    if (js_exception_pending) return ItemNull;
-    bool matched = (get_type_id(m) != LMD_TYPE_NULL && m.item != ItemNull.item);
+    TypeId tid = get_type_id(str);
+    if (tid != LMD_TYPE_STRING) {
+        str = js_to_string(str);
+        tid = get_type_id(str);
+        if (tid != LMD_TYPE_STRING) return ItemNull;
+    }
+    const char* chars = str.get_chars();
+    int len = str.get_len();
+
+    int start_pos = 0;
+    Item li_key = (Item){.item = s2it(heap_create_name("lastIndex", 9))};
+    bool uses_last_index = rd->global || rd->sticky;
+    if (uses_last_index) {
+        Item li_val = js_property_get(regex, li_key);
+        li_val = js_to_number(li_val);
+        TypeId li_tid = get_type_id(li_val);
+        if (li_tid == LMD_TYPE_INT || li_tid == LMD_TYPE_INT64) {
+            start_pos = (int)it2i(li_val);
+        } else if (li_tid == LMD_TYPE_FLOAT) {
+            double d = li_val.get_double();
+            start_pos = (d != d) ? 0 : (int)d;
+        }
+        if (start_pos < 0 || start_pos > len) {
+            if (!js_regex_set_lastindex_strict(regex, li_key, 0)) return ItemNull;
+            return (Item){.item = b2it(BOOL_FALSE)};
+        }
+    }
+
+    int num_groups = js_regex_num_groups(rd);
+    if (num_groups > 16) num_groups = 16;
+    re2::StringPiece matches[16];
+    re2::RE2::Anchor anchor = rd->sticky ? re2::RE2::ANCHOR_START : re2::RE2::UNANCHORED;
+    bool matched = js_regex_match_internal(rd, chars, len, start_pos, anchor, matches, num_groups);
+    if (!matched) {
+        if (uses_last_index) {
+            if (!js_regex_set_lastindex_strict(regex, li_key, 0)) return ItemNull;
+        }
+        return (Item){.item = b2it(BOOL_FALSE)};
+    }
+
+    if (uses_last_index) {
+        int match_end = (int)(matches[0].data() - chars) + (int)matches[0].size();
+        if (!js_regex_set_lastindex_strict(regex, li_key, match_end)) return ItemNull;
+    }
+    js_regexp_update_last_match(chars, len, matches, num_groups);
     return (Item){.item = b2it(matched ? BOOL_TRUE : BOOL_FALSE)};
 }
 
@@ -9917,8 +10052,9 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     // groups property — populated with named captures if regex has named groups
     // ES spec: groups object must be a null-prototype object (Object.create(null))
     Item groups_key = (Item){.item = s2it(heap_create_name("groups", 6))};
-    const std::map<std::string, int>& named = rd->re2->NamedCapturingGroups();
-    if (!named.empty()) {
+    if (!rd->literal_fast && rd->re2) {
+        const std::map<std::string, int>& named = rd->re2->NamedCapturingGroups();
+        if (!named.empty()) {
         Item groups_obj = js_object_create(ItemNull);
         for (auto& pair : named) {
             int re2_idx = pair.second;
@@ -9943,9 +10079,10 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
             js_property_set(groups_obj, key, val);
         }
         js_property_set(result, groups_key, groups_obj);
-    } else {
-        js_property_set(result, groups_key, make_js_undefined());
+            return result;
+        }
     }
+    js_property_set(result, groups_key, make_js_undefined());
     return result;
 }
 
@@ -10140,6 +10277,21 @@ static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) 
         replacement = js_to_string(replacement);
         if (js_exception_pending) return ItemNull;
     }
+    JsRegexData* fast_rd = js_get_regex_data(this_val);
+    if (fast_rd && fast_rd->global && !functional_replace) {
+        bool own_global_fast = false;
+        Item own_global_val = js_map_get_fast_ext(this_val.map, "global", 6, &own_global_fast);
+        bool own_flags_fast = false;
+        Item own_flags_val = js_map_get_fast_ext(this_val.map, "flags", 5, &own_flags_fast);
+        String* own_flags_str = own_flags_fast ? it2s(own_flags_val) : NULL;
+        if (own_global_fast && it2b(js_to_boolean(own_global_val)) &&
+            own_flags_str && own_flags_str->len == 1 && own_flags_str->chars[0] == 'g') {
+            Item li_key_fast = (Item){.item = s2it(heap_create_name("lastIndex", 9))};
+            if (!js_regex_set_lastindex_strict(this_val, li_key_fast, 0)) return ItemNull;
+            Item fast = js_try_fast_replace_non_whitespace(this_val, str, replacement, fast_rd, false);
+            if (fast.item != ItemNull.item || js_exception_pending) return fast;
+        }
+    }
     // Step 6.a.i (ES2021): if not functionalReplace, read Get(rx,"flags") to propagate getter errors
     // (test: get-flags-err.js, flags-tostring-error.js). We don't use the result for global detection.
     if (!functional_replace) {
@@ -10160,6 +10312,8 @@ static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) 
         // Step 8: Set rx.lastIndex = 0 (Throw=true)
         if (!js_regex_set_lastindex_strict(this_val, li_key, 0)) return ItemNull;
     }
+    Item fast = js_try_fast_replace_non_whitespace(this_val, str, replacement, fast_rd, functional_replace);
+    if (fast.item != ItemNull.item || js_exception_pending) return fast;
     // Steps 9-11: collect all RegExpExec results
     Item results_array = js_array_new(0);
     for (int safety = 0; safety < 2000000; safety++) {
@@ -12616,6 +12770,157 @@ static Item js_build_groups_object(JsRegexData* rd, re2::StringPiece* matches, i
     return groups_obj;
 }
 
+static int js_utf8_decode_one_bmp(const char* s, int len, int pos, int* codepoint) {
+    if (pos >= len) return 0;
+    unsigned char c0 = (unsigned char)s[pos];
+    if (c0 < 0x80) {
+        *codepoint = c0;
+        return 1;
+    }
+    if ((c0 & 0xE0) == 0xC0 && pos + 1 < len) {
+        unsigned char c1 = (unsigned char)s[pos + 1];
+        if ((c1 & 0xC0) == 0x80) {
+            *codepoint = ((c0 & 0x1F) << 6) | (c1 & 0x3F);
+            return 2;
+        }
+    }
+    if ((c0 & 0xF0) == 0xE0 && pos + 2 < len) {
+        unsigned char c1 = (unsigned char)s[pos + 1];
+        unsigned char c2 = (unsigned char)s[pos + 2];
+        if ((c1 & 0xC0) == 0x80 && (c2 & 0xC0) == 0x80) {
+            *codepoint = ((c0 & 0x0F) << 12) | ((c1 & 0x3F) << 6) | (c2 & 0x3F);
+            return 3;
+        }
+    }
+    *codepoint = c0;
+    return 1;
+}
+
+static bool js_regexp_s_whitespace(int cp) {
+    return cp == 0x0009 || cp == 0x000A || cp == 0x000B || cp == 0x000C ||
+           cp == 0x000D || cp == 0x0020 || cp == 0x00A0 || cp == 0x1680 ||
+           (cp >= 0x2000 && cp <= 0x200A) || cp == 0x2028 || cp == 0x2029 ||
+           cp == 0x202F || cp == 0x205F || cp == 0x3000 || cp == 0xFEFF;
+}
+
+static bool js_replacement_has_dollar_pattern(String* repl) {
+    if (!repl) return false;
+    for (int i = 0; i < (int)repl->len; i++) {
+        if (repl->chars[i] == '$') return true;
+    }
+    return false;
+}
+
+static Item js_try_fast_replace_non_whitespace(Item regex, Item str, Item replacement,
+                                               JsRegexData* rd, bool replacement_is_func) {
+    if (!rd || !rd->global || replacement_is_func) return ItemNull;
+    bool own_source = false;
+    Item source_item = js_map_get_fast_ext(regex.map, "source", 6, &own_source);
+    const char* source_chars = NULL;
+    int source_len = 0;
+    if (own_source && get_type_id(source_item) == LMD_TYPE_STRING) {
+        String* source = it2s(source_item);
+        source_chars = source ? source->chars : NULL;
+        source_len = source ? (int)source->len : 0;
+    }
+    if (!source_chars || source_len != 3 || memcmp(source_chars, "\\S+", 3) != 0) return ItemNull;
+    String* repl = it2s(js_to_string(replacement));
+    if (js_exception_pending || !repl || js_replacement_has_dollar_pattern(repl)) return ItemNull;
+
+    String* s = it2s(str);
+    if (!s) return str;
+    int single_cp = 0;
+    int single_width = js_utf8_decode_one_bmp(s->chars, (int)s->len, 0, &single_cp);
+    if (single_width == (int)s->len && single_width > 0) {
+        return js_regexp_s_whitespace(single_cp) ? str : replacement;
+    }
+    StrBuf* buf = strbuf_new();
+    bool changed = false;
+    int pos = 0;
+    int last = 0;
+    while (pos < (int)s->len) {
+        int cp = 0;
+        int width = js_utf8_decode_one_bmp(s->chars, (int)s->len, pos, &cp);
+        if (width <= 0) break;
+        if (js_regexp_s_whitespace(cp)) {
+            pos += width;
+            continue;
+        }
+        int start = pos;
+        pos += width;
+        while (pos < (int)s->len) {
+            int next_cp = 0;
+            int next_width = js_utf8_decode_one_bmp(s->chars, (int)s->len, pos, &next_cp);
+            if (next_width <= 0 || js_regexp_s_whitespace(next_cp)) break;
+            pos += next_width;
+        }
+        if (start > last) strbuf_append_str_n(buf, s->chars + last, start - last);
+        if (repl->len > 0) strbuf_append_str_n(buf, repl->chars, repl->len);
+        last = pos;
+        changed = true;
+    }
+    if (!changed) {
+        strbuf_free(buf);
+        return str;
+    }
+    if (last < (int)s->len) strbuf_append_str_n(buf, s->chars + last, (int)s->len - last);
+    String* result = heap_strcpy(buf->str, buf->length);
+    strbuf_free(buf);
+    return (Item){.item = s2it(result)};
+}
+
+extern "C" Item js_string_replace_nonws_global_fast(Item str, Item replacement) {
+    if (get_type_id(str) != LMD_TYPE_STRING) {
+        str = js_to_string(str);
+        if (js_exception_pending) return ItemNull;
+    }
+    if (get_type_id(replacement) != LMD_TYPE_STRING) {
+        replacement = js_to_string(replacement);
+        if (js_exception_pending) return ItemNull;
+    }
+    String* s = it2s(str);
+    String* repl = it2s(replacement);
+    if (!s || !repl || js_replacement_has_dollar_pattern(repl)) return str;
+    int single_cp = 0;
+    int single_width = js_utf8_decode_one_bmp(s->chars, (int)s->len, 0, &single_cp);
+    if (single_width == (int)s->len && single_width > 0) {
+        return js_regexp_s_whitespace(single_cp) ? str : replacement;
+    }
+    StrBuf* buf = strbuf_new();
+    bool changed = false;
+    int pos = 0;
+    int last = 0;
+    while (pos < (int)s->len) {
+        int cp = 0;
+        int width = js_utf8_decode_one_bmp(s->chars, (int)s->len, pos, &cp);
+        if (width <= 0) break;
+        if (js_regexp_s_whitespace(cp)) {
+            pos += width;
+            continue;
+        }
+        int start = pos;
+        pos += width;
+        while (pos < (int)s->len) {
+            int next_cp = 0;
+            int next_width = js_utf8_decode_one_bmp(s->chars, (int)s->len, pos, &next_cp);
+            if (next_width <= 0 || js_regexp_s_whitespace(next_cp)) break;
+            pos += next_width;
+        }
+        if (start > last) strbuf_append_str_n(buf, s->chars + last, start - last);
+        if (repl->len > 0) strbuf_append_str_n(buf, repl->chars, repl->len);
+        last = pos;
+        changed = true;
+    }
+    if (!changed) {
+        strbuf_free(buf);
+        return str;
+    }
+    if (last < (int)s->len) strbuf_append_str_n(buf, s->chars + last, (int)s->len - last);
+    String* result = heap_strcpy(buf->str, buf->length);
+    strbuf_free(buf);
+    return (Item){.item = s2it(result)};
+}
+
 static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_replace_all) {
     String* s = it2s(str);
     if (!s) return str;
@@ -12650,6 +12955,8 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
     }
 
     if (rd) {
+        Item fast = js_try_fast_replace_non_whitespace(args[0], str, args[1], rd, replacement_is_func);
+        if (fast.item != ItemNull.item || js_exception_pending) return fast;
         // regex-based replace
         re2::StringPiece input(s->chars, s->len);
         int ngroups = js_regex_num_groups(rd);
@@ -14574,6 +14881,141 @@ static bool js_array_length_is_non_writable(Item arr) {
     return found && v.item != JS_DELETED_SENTINEL_VAL && js_is_truthy(v);
 }
 
+static double js_array_to_integer_or_infinity(Item value) {
+    if (js_key_is_symbol(value)) {
+        js_throw_type_error("Cannot convert a Symbol value to a number");
+        return 0.0;
+    }
+    double n = js_get_number(value);
+    if (js_exception_pending) return 0.0;
+    if (n != n || n == 0.0) return 0.0;
+    if (isinf(n)) return n;
+    return n > 0.0 ? floor(n) : ceil(n);
+}
+
+static int64_t js_array_to_length(Item value) {
+    double n = js_array_to_integer_or_infinity(value);
+    if (js_exception_pending) return 0;
+    if (n <= 0.0) return 0;
+    if (n >= 9007199254740991.0) return 9007199254740991LL;
+    return (int64_t)n;
+}
+
+static int64_t js_array_relative_index(Item value, int64_t len, int64_t default_value) {
+    if (get_type_id(value) == LMD_TYPE_UNDEFINED || value.item == ITEM_JS_UNDEFINED) {
+        return default_value;
+    }
+    double n = js_array_to_integer_or_infinity(value);
+    if (js_exception_pending) return 0;
+    if (n == -INFINITY) return 0;
+    if (n < 0.0) {
+        double rel = (double)len + n;
+        return rel <= 0.0 ? 0 : (int64_t)rel;
+    }
+    if (n >= (double)len) return len;
+    return (int64_t)n;
+}
+
+static Item js_array_index_key(int64_t index) {
+    char buf[32];
+    int blen = snprintf(buf, sizeof(buf), "%lld", (long long)index);
+    return (Item){.item = s2it(heap_create_name(buf, blen))};
+}
+
+static Item js_array_generic_fill(Item object, Item* args, int argc) {
+    Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
+    int64_t len = js_array_to_length(js_property_get(object, len_key));
+    if (js_exception_pending) return ItemNull;
+    Item value = argc > 0 ? args[0] : make_js_undefined();
+    int64_t start = argc > 1 ? js_array_relative_index(args[1], len, 0) : 0;
+    if (js_exception_pending) return ItemNull;
+    int64_t end = argc > 2 ? js_array_relative_index(args[2], len, len) : len;
+    if (js_exception_pending) return ItemNull;
+    for (int64_t k = start; k < end; k++) {
+        js_property_set(object, js_array_index_key(k), value);
+        if (js_exception_pending) return ItemNull;
+    }
+    return object;
+}
+
+static Item js_array_generic_copy_within(Item object, Item* args, int argc) {
+    Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
+    int64_t len = js_array_to_length(js_property_get(object, len_key));
+    if (js_exception_pending) return ItemNull;
+    int64_t to = argc > 0 ? js_array_relative_index(args[0], len, 0) : 0;
+    if (js_exception_pending) return ItemNull;
+    int64_t from = argc > 1 ? js_array_relative_index(args[1], len, 0) : 0;
+    if (js_exception_pending) return ItemNull;
+    int64_t final = argc > 2 ? js_array_relative_index(args[2], len, len) : len;
+    if (js_exception_pending) return ItemNull;
+    int64_t count = final - from;
+    if (count > len - to) count = len - to;
+    if (count <= 0) return object;
+    int64_t direction = 1;
+    if (from < to && to < from + count) {
+        direction = -1;
+        from += count - 1;
+        to += count - 1;
+    }
+    while (count > 0) {
+        Item from_key = js_array_index_key(from);
+        Item to_key = js_array_index_key(to);
+        if (js_has_property(object, from_key)) {
+            Item from_val = js_property_get(object, from_key);
+            if (js_exception_pending) return ItemNull;
+            js_property_set(object, to_key, from_val);
+        } else {
+            js_delete_property(object, to_key);
+        }
+        if (js_exception_pending) return ItemNull;
+        from += direction;
+        to += direction;
+        count--;
+    }
+    return object;
+}
+
+static Item js_array_generic_reverse(Item object) {
+    Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
+    int64_t len = js_array_to_length(js_property_get(object, len_key));
+    if (js_exception_pending) return ItemNull;
+    int64_t lower = 0;
+    int64_t middle = len / 2;
+    while (lower != middle) {
+        int64_t upper = len - lower - 1;
+        Item lower_key = js_array_index_key(lower);
+        Item upper_key = js_array_index_key(upper);
+        bool lower_exists = js_has_property(object, lower_key);
+        bool upper_exists = js_has_property(object, upper_key);
+        Item lower_value = make_js_undefined();
+        Item upper_value = make_js_undefined();
+        if (lower_exists) {
+            lower_value = js_property_get(object, lower_key);
+            if (js_exception_pending) return ItemNull;
+        }
+        if (upper_exists) {
+            upper_value = js_property_get(object, upper_key);
+            if (js_exception_pending) return ItemNull;
+        }
+        if (lower_exists && upper_exists) {
+            js_property_set(object, lower_key, upper_value);
+            if (js_exception_pending) return ItemNull;
+            js_property_set(object, upper_key, lower_value);
+        } else if (!lower_exists && upper_exists) {
+            js_property_set(object, lower_key, upper_value);
+            if (js_exception_pending) return ItemNull;
+            js_delete_property(object, upper_key);
+        } else if (lower_exists) {
+            js_delete_property(object, lower_key);
+            if (js_exception_pending) return ItemNull;
+            js_property_set(object, upper_key, lower_value);
+        }
+        if (js_exception_pending) return ItemNull;
+        lower++;
+    }
+    return object;
+}
+
 extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc) {
     if (get_type_id(method_name) != LMD_TYPE_STRING) return ItemNull;
     String* method = it2s(method_name);
@@ -14618,6 +15060,15 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
     if (arr_type != LMD_TYPE_ARRAY && (arr_type == LMD_TYPE_MAP || arr_type == LMD_TYPE_ELEMENT)) {
         const char* c = method->chars;
         int len = method->len;
+        if (len == 4 && strncmp(c, "fill", 4) == 0) {
+            return js_array_generic_fill(arr, args, argc);
+        }
+        if (len == 10 && strncmp(c, "copyWithin", 10) == 0) {
+            return js_array_generic_copy_within(arr, args, argc);
+        }
+        if (len == 7 && strncmp(c, "reverse", 7) == 0) {
+            return js_array_generic_reverse(arr);
+        }
         bool is_generic =
             (len == 7  && strncmp(c, "indexOf", 7) == 0) ||
             (len == 11 && strncmp(c, "lastIndexOf", 11) == 0) ||
@@ -14641,10 +15092,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             (len == 6  && strncmp(c, "values", 6) == 0) ||
             (len == 7  && strncmp(c, "entries", 7) == 0) ||
             (len == 2  && strncmp(c, "at", 2) == 0) ||
-            (len == 4  && strncmp(c, "sort", 4) == 0) ||
-            (len == 7  && strncmp(c, "reverse", 7) == 0) ||
-            (len == 4  && strncmp(c, "fill", 4) == 0) ||
-            (len == 10 && strncmp(c, "copyWithin", 10) == 0);
+            (len == 4  && strncmp(c, "sort", 4) == 0);
         if (is_generic) {
             // Note: slice/map/filter length validation per ArraySpeciesCreate is done
             // up-front in js_dispatch_builtin (LMD_TYPE_MAP branch) before reaching here.
@@ -14812,6 +15260,16 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         if (start >= a->length) return (Item){.item = i2it(-1)};
         bool check_proto = js_proto_chain_has_numeric_keys(arr);
         int64_t dense_limit = a->capacity < a->length ? a->capacity : a->length;
+        if (!check_proto && a->extra == 0) {
+            for (int64_t i64 = start; i64 < dense_limit; i64++) {
+                Item elem = a->items[i64];
+                if (elem.item == JS_DELETED_SENTINEL_VAL) continue;
+                if (elem.item == search_val.item || it2b(js_strict_equal(elem, search_val))) {
+                    return (Item){.item = i2it((int)i64)};
+                }
+            }
+            return (Item){.item = i2it(-1)};
+        }
         for (int64_t i64 = start; i64 < dense_limit; i64++) {
             // v37: ES spec — use HasProperty (checks prototype chain for holes)
             Item elem;
@@ -15970,7 +16428,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         if (a->length == 0) return (Item){.item = i2it(-1)};
         Item search_val = (argc >= 1) ? args[0] : make_js_undefined();
         // J39-7: ToInteger(fromIndex) — Symbol throws TypeError, object → ToPrimitive (may throw).
-        int from;
+        int64_t from;
         if (argc > 1) {
             if (js_key_is_symbol(args[1]))
                 return js_throw_type_error("Cannot convert a Symbol value to a number");
@@ -15978,16 +16436,38 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             if (js_exception_pending) return ItemNull;
             if (d_from != d_from) d_from = 0;
             d_from = d_from >= 0 ? floor(d_from) : ceil(d_from);
-            if (d_from < (double)INT_MIN) d_from = (double)INT_MIN;
-            if (d_from > (double)INT_MAX) d_from = (double)INT_MAX;
-            from = (int)d_from;
+            if (d_from < (double)INT64_MIN) d_from = (double)INT64_MIN;
+            if (d_from > (double)INT64_MAX) d_from = (double)INT64_MAX;
+            from = (int64_t)d_from;
         } else {
             from = a->length - 1;
         }
         if (from < 0) from = a->length + from;
         if (from >= a->length) from = a->length - 1;
+        if (a->extra != 0) {
+            Map* pm = (Map*)(uintptr_t)a->extra;
+            if (pm && pm->type) {
+                TypeMap* tm = (TypeMap*)pm->type;
+                int64_t best_sparse = -1;
+                for (ShapeEntry* se = tm ? tm->shape : NULL; se; se = se->next) {
+                    if (!se->name) continue;
+                    int64_t sparse_idx = -1;
+                    if (!js_array_parse_index_name(se->name->str, (int)se->name->length, &sparse_idx)) continue;
+                    if (sparse_idx > from || sparse_idx < a->capacity) continue;
+                    bool found = false;
+                    Item elem = js_map_get_fast_ext(pm, se->name->str, (int)se->name->length, &found);
+                    if (!found || elem.item == JS_DELETED_SENTINEL_VAL) continue;
+                    if (it2b(js_strict_equal(elem, search_val)) && sparse_idx > best_sparse) {
+                        best_sparse = sparse_idx;
+                    }
+                }
+                if (best_sparse >= 0) return (Item){.item = i2it(best_sparse)};
+            }
+        }
         bool check_proto = js_proto_chain_has_numeric_keys(arr);
-        for (int i = from; i >= 0; i--) {
+        int64_t dense_from = from;
+        if (dense_from >= a->capacity) dense_from = a->capacity - 1;
+        for (int64_t i = dense_from; i >= 0; i--) {
             // v37: use HasProperty (checks prototype chain for holes)
             Item elem;
             if (!js_array_has_element(arr, a, i, &elem, check_proto)) continue;
@@ -17604,6 +18084,10 @@ extern "C" Item js_gen_yield_delegate_result(Item iterable, int64_t resume_state
     return arr;
 }
 
+extern "C" Item js_get_iterator(Item iterable);
+extern "C" Item js_iterator_step(Item iterator);
+extern "C" Item js_generator_next(Item generator, Item input);
+
 // Static prototype caches for Generator and AsyncGenerator instances.
 // Per ES spec, the prototype chain for generator instances is:
 //   gen → %GeneratorFunction%.prototype.prototype → %GeneratorPrototype% → %IteratorPrototype% → Object.prototype
@@ -17736,6 +18220,58 @@ static JsGenerator* js_get_generator(Item gen_obj) {
     return &js_generators[idx];
 }
 
+static bool js_iter_result_is_done(Item result) {
+    TypeId tid = get_type_id(result);
+    if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_ELEMENT && tid != LMD_TYPE_ARRAY) {
+        js_throw_type_error("iterator result is not an object");
+        return true;
+    }
+    Item done_key = (Item){.item = s2it(heap_create_name("done", 4))};
+    Item done_item = js_property_get(result, done_key);
+    if (js_check_exception()) return true;
+    Item done_bool = js_to_boolean(done_item);
+    if (js_check_exception()) return true;
+    return it2b(done_bool);
+}
+
+static Item js_iter_result_value(Item result) {
+    Item val_key = (Item){.item = s2it(heap_create_name("value", 5))};
+    Item value = js_property_get(result, val_key);
+    return js_check_exception() ? ItemNull : value;
+}
+
+static Item js_yield_delegate_next_result(Item iterator, Item input) {
+    if (js_is_generator(iterator)) {
+        return js_generator_next(iterator, input);
+    }
+
+    if (get_type_id(iterator) == LMD_TYPE_MAP && iterator.map->map_kind == MAP_KIND_ITERATOR) {
+        Item value = js_iterator_step(iterator);
+        if (js_check_exception()) return ItemNull;
+        if (value.item == JS_ITER_DONE_SENTINEL) return js_make_iter_result(make_js_undefined(), true);
+        return js_make_iter_result(value, false);
+    }
+
+    TypeId tid = get_type_id(iterator);
+    if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_ELEMENT) {
+        Item next_key = (Item){.item = s2it(heap_create_name("next", 4))};
+        Item next_fn = js_property_get(iterator, next_key);
+        if (js_check_exception()) return ItemNull;
+        if (get_type_id(next_fn) != LMD_TYPE_FUNC) {
+            js_throw_type_error("iterator next is not a function");
+            return ItemNull;
+        }
+        Item args[1];
+        args[0] = input;
+        Item result = js_call_function(next_fn, iterator, args, 1);
+        if (js_check_exception()) return ItemNull;
+        return result;
+    }
+
+    js_throw_type_error("iterator result is not an object");
+    return ItemNull;
+}
+
 extern "C" Item js_generator_next(Item generator, Item input) {
     JsGenerator* gen = js_get_generator(generator);
     if (!gen) {
@@ -17763,63 +18299,63 @@ extern "C" Item js_generator_next(Item generator, Item input) {
 
     gen->executing = true;
 
-    // If we have an active delegate (from yield*), drain it first
+    // If we have an active delegate (from yield*), advance it by one
+    // iterator result. Delegates can be infinite; do not drain them here.
     if (get_type_id(gen->delegate) != LMD_TYPE_NULL) {
-        // Handle delegation to generators vs plain iterables (arrays, strings, etc.)
-        if (js_is_generator(gen->delegate)) {
-            Item del_result = js_generator_next(gen->delegate, input);
-            // Check if delegate is done
-            if (get_type_id(del_result) == LMD_TYPE_MAP) {
-                String* done_key = heap_create_name("done", 4);
-                Item done_val = js_property_get(del_result, (Item){.item = s2it(done_key)});
-                if (get_type_id(done_val) == LMD_TYPE_BOOL && it2b(done_val)) {
-                    // Delegate exhausted — clear it and resume our state machine
-                    String* val_key = heap_create_name("value", 5);
-                    Item return_val = js_property_get(del_result, (Item){.item = s2it(val_key)});
-                    gen->delegate = ItemNull;
-                    gen->state = gen->delegate_resume;
-                    gen->delegate_resume = -1;
-                    input = return_val;
-                    // Fall through to call state machine at resumed state
-                } else {
-                    // Delegate still producing — return its result
-                    gen->executing = false;
-                    return is_async ? js_promise_resolve(del_result) : del_result;
-                }
-            }
-        } else {
-            // Non-generator delegate (array, string, etc.) — convert to array and iterate
-            Item delegate_arr = gen->delegate;
-            if (get_type_id(delegate_arr) != LMD_TYPE_ARRAY) {
-                delegate_arr = js_iterable_to_array(delegate_arr);
-                gen->delegate = delegate_arr;
-            }
-            if (get_type_id(delegate_arr) == LMD_TYPE_ARRAY) {
-                Array* darr = delegate_arr.array;
-                int idx = gen->delegate_idx;
-                if (idx < darr->length) {
-                    Item value = darr->items[idx];
-                    gen->delegate_idx = idx + 1;
-                    gen->executing = false;
-                    Item iter_result = js_make_iter_result(value, false);
-                    return is_async ? js_promise_resolve(iter_result) : iter_result;
-                } else {
-                    // Array exhausted — resume state machine
-                    gen->delegate = ItemNull;
-                    gen->state = gen->delegate_resume;
-                    gen->delegate_resume = -1;
-                    gen->delegate_idx = 0;
-                    // Fall through to call state machine at resumed state
-                }
-            } else {
-                // Conversion failed — resume
+        Item del_result = js_yield_delegate_next_result(gen->delegate, input);
+        if (js_check_exception()) {
+            gen->delegate = ItemNull;
+            gen->state = gen->delegate_resume;
+            gen->delegate_resume = -1;
+            gen->delegate_idx = 0;
+            input = make_js_undefined();
+            // Resume the generator state machine with the pending exception so
+            // its normal try/catch/finally lowering can handle the abrupt step.
+            goto run_state_machine;
+        }
+        bool del_done = js_iter_result_is_done(del_result);
+        if (js_check_exception()) {
+            gen->delegate = ItemNull;
+            gen->state = gen->delegate_resume;
+            gen->delegate_resume = -1;
+            gen->delegate_idx = 0;
+            input = make_js_undefined();
+            goto run_state_machine;
+        }
+        if (del_done) {
+            Item return_val = js_iter_result_value(del_result);
+            if (js_check_exception()) {
                 gen->delegate = ItemNull;
                 gen->state = gen->delegate_resume;
                 gen->delegate_resume = -1;
+                gen->delegate_idx = 0;
+                input = make_js_undefined();
+                goto run_state_machine;
             }
+            // Delegate exhausted — clear it and resume our state machine
+            gen->delegate = ItemNull;
+            gen->state = gen->delegate_resume;
+            gen->delegate_resume = -1;
+            gen->delegate_idx = 0;
+            input = return_val;
+            // Fall through to call state machine at resumed state
+        } else {
+            Item value = js_iter_result_value(del_result);
+            if (js_check_exception()) {
+                gen->delegate = ItemNull;
+                gen->state = gen->delegate_resume;
+                gen->delegate_resume = -1;
+                gen->delegate_idx = 0;
+                input = make_js_undefined();
+                goto run_state_machine;
+            }
+            gen->executing = false;
+            Item iter_result = js_make_iter_result(value, false);
+            return is_async ? js_promise_resolve(iter_result) : iter_result;
         }
     }
 
+run_state_machine:
     // Call the state machine: fn(env, input, state) -> [value, next_state]
     // The state machine returns {value, next_state} as a 2-element array
     // If next_state == -1, the generator is done
@@ -17839,10 +18375,19 @@ extern "C" Item js_generator_next(Item generator, Item input) {
         // Check for yield* delegation marker (3-element array with flag)
         if (arr->length > 2 && get_type_id(arr->items[2]) == LMD_TYPE_INT && it2i(arr->items[2]) == 1) {
             // value is the iterable to delegate to, next_state is the resume state
-            gen->delegate = value;
+            Item iterator = js_get_iterator(value);
+            if (js_check_exception()) {
+                gen->delegate = ItemNull;
+                gen->state = next_state;
+                gen->delegate_resume = -1;
+                gen->delegate_idx = 0;
+                input = make_js_undefined();
+                goto run_state_machine;
+            }
+            gen->delegate = iterator;
             gen->delegate_resume = next_state;
             gen->delegate_idx = 0;
-            // Immediately start draining the delegate
+            // Immediately take the first delegated step.
             gen->executing = false;
             return js_generator_next(generator, make_js_undefined());
         }
@@ -17873,6 +18418,55 @@ extern "C" Item js_generator_return(Item generator, Item value) {
     JsGenerator* gen = js_get_generator(generator);
     bool is_async = gen && gen->is_async;
     if (gen) {
+        if (get_type_id(gen->delegate) != LMD_TYPE_NULL) {
+            Item return_fn = js_property_get_str(gen->delegate, "return", 6);
+            if (js_check_exception()) {
+                gen->delegate = ItemNull;
+                gen->done = true;
+                gen->state = -1;
+                return ItemNull;
+            }
+            if (get_type_id(return_fn) == LMD_TYPE_FUNC) {
+                Item args[1];
+                args[0] = value;
+                Item inner = js_call_function(return_fn, gen->delegate, args, 1);
+                if (js_check_exception()) {
+                    gen->delegate = ItemNull;
+                    gen->done = true;
+                    gen->state = -1;
+                    return ItemNull;
+                }
+                TypeId itid = get_type_id(inner);
+                if (itid != LMD_TYPE_MAP && itid != LMD_TYPE_ELEMENT && itid != LMD_TYPE_ARRAY) {
+                    gen->delegate = ItemNull;
+                    gen->done = true;
+                    gen->state = -1;
+                    js_throw_type_error("iterator result is not an object");
+                    return ItemNull;
+                }
+                bool done = js_iter_result_is_done(inner);
+                if (js_check_exception()) {
+                    gen->delegate = ItemNull;
+                    gen->done = true;
+                    gen->state = -1;
+                    return ItemNull;
+                }
+                if (!done) {
+                    Item inner_value = js_iter_result_value(inner);
+                    if (js_check_exception()) {
+                        gen->delegate = ItemNull;
+                        gen->done = true;
+                        gen->state = -1;
+                        return ItemNull;
+                    }
+                    Item result = js_make_iter_result(inner_value, false);
+                    return is_async ? js_promise_resolve(result) : result;
+                }
+            }
+            gen->delegate = ItemNull;
+            gen->delegate_resume = -1;
+            gen->delegate_idx = 0;
+        }
         gen->done = true;
         gen->state = -1;
     }
@@ -17884,6 +18478,60 @@ extern "C" Item js_generator_throw(Item generator, Item error) {
     JsGenerator* gen = js_get_generator(generator);
     bool is_async = gen && gen->is_async;
     if (gen) {
+        if (get_type_id(gen->delegate) != LMD_TYPE_NULL) {
+            Item throw_fn = js_property_get_str(gen->delegate, "throw", 5);
+            if (js_check_exception()) {
+                gen->delegate = ItemNull;
+                gen->done = true;
+                gen->state = -1;
+                return ItemNull;
+            }
+            if (get_type_id(throw_fn) == LMD_TYPE_FUNC) {
+                Item args[1];
+                args[0] = error;
+                Item inner = js_call_function(throw_fn, gen->delegate, args, 1);
+                if (js_check_exception()) {
+                    gen->delegate = ItemNull;
+                    gen->done = true;
+                    gen->state = -1;
+                    return ItemNull;
+                }
+                TypeId itid = get_type_id(inner);
+                if (itid != LMD_TYPE_MAP && itid != LMD_TYPE_ELEMENT && itid != LMD_TYPE_ARRAY) {
+                    gen->delegate = ItemNull;
+                    gen->done = true;
+                    gen->state = -1;
+                    js_throw_type_error("iterator result is not an object");
+                    return ItemNull;
+                }
+                bool done = js_iter_result_is_done(inner);
+                if (js_check_exception()) {
+                    gen->delegate = ItemNull;
+                    gen->done = true;
+                    gen->state = -1;
+                    return ItemNull;
+                }
+                if (!done) {
+                    Item result = js_make_iter_result(make_js_undefined(), false);
+                    return is_async ? js_promise_resolve(result) : result;
+                }
+                Item inner_value = js_iter_result_value(inner);
+                if (js_check_exception()) {
+                    gen->delegate = ItemNull;
+                    gen->done = true;
+                    gen->state = -1;
+                    return ItemNull;
+                }
+                gen->delegate = ItemNull;
+                gen->state = gen->delegate_resume;
+                gen->delegate_resume = -1;
+                gen->delegate_idx = 0;
+                return js_generator_next(generator, inner_value);
+            }
+            gen->delegate = ItemNull;
+            gen->delegate_resume = -1;
+            gen->delegate_idx = 0;
+        }
         gen->done = true;
         gen->state = -1;
     }
@@ -18048,8 +18696,8 @@ extern "C" Item js_get_iterator(Item iterable) {
         }
 
         // Check for [Symbol.iterator]()
-        Item iter_factory_key = (Item){.item = s2it(heap_create_name("__sym_1", 7))};
-        Item iter_factory = js_property_get(iterable, iter_factory_key);
+        Item iter_factory = js_property_get_str(iterable, "__sym_1", 7);
+        if (js_check_exception()) return ItemNull;
         if (get_type_id(iter_factory) == LMD_TYPE_FUNC) {
             Item iterator = js_call_function(iter_factory, iterable, NULL, 0);
             if (js_check_exception()) return ItemNull;
@@ -18065,8 +18713,8 @@ extern "C" Item js_get_iterator(Item iterable) {
     }
     if (tid == LMD_TYPE_ELEMENT) {
         // Check for [Symbol.iterator]()
-        Item iter_factory_key = (Item){.item = s2it(heap_create_name("__sym_1", 7))};
-        Item iter_factory = js_property_get(iterable, iter_factory_key);
+        Item iter_factory = js_property_get_str(iterable, "__sym_1", 7);
+        if (js_check_exception()) return ItemNull;
         if (get_type_id(iter_factory) == LMD_TYPE_FUNC) {
             Item iterator = js_call_function(iter_factory, iterable, NULL, 0);
             if (js_check_exception()) return ItemNull;

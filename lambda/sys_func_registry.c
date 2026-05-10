@@ -39,6 +39,7 @@ extern Item fn_replace(Item str, Item old_str, Item new_str); // JIT name: fn_re
 extern Item js_super_property_get(Item receiver, Item key);
 extern Item js_super_instance_method_get(Item receiver, Item key);
 extern Item js_super_property_set(Item receiver, Item key, Item value);
+extern Item js_create_data_property(Item obj, Item name, Item value);
 
 // super() for class-expression superclasses: handles FUNC and MAP (class object) callee
 extern Item js_super_call_class(Item callee, Item this_val, Item* args, int argc);
@@ -165,6 +166,9 @@ extern bool target_equal(Target* a, Target* b);
 #include "js/js_event_loop.h"
 #include "js/js_xhr.h"
 extern Item js_buffer_construct(Item arg, Item encoding);
+extern Item js_string_replace_nonws_global_fast(Item str, Item replacement);
+extern Item js_string_fromCharCode2(Item first_item, Item second_item);
+extern void js_validate_native_function_source(Item source_item);
 // Phase 8C: Image() constructor (defined in js_dom.cpp)
 extern Item js_image_construct(Item width_arg, Item height_arg, int argc);
 
@@ -1401,6 +1405,9 @@ JitImport jit_runtime_imports[] = {
     {"js_error_captureStackTrace", FPTR(js_error_captureStackTrace)},
     // method dispatchers
     {"js_string_method", FPTR(js_string_method)},
+    {"js_string_replace_nonws_global_fast", FPTR(js_string_replace_nonws_global_fast)},
+    {"js_string_fromCharCode2", FPTR(js_string_fromCharCode2)},
+    {"js_validate_native_function_source", FPTR(js_validate_native_function_source)},
     {"js_array_method", FPTR(js_array_method)},
     {"js_array_method_direct", FPTR(js_array_method_direct)},
     {"js_math_method", FPTR(js_math_method)},

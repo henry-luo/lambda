@@ -30,10 +30,12 @@ Item _map_read_field(ShapeEntry* field, void* map_data);
 Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found);
 extern "C" void js_mark_non_enumerable(Item object, Item name);
 extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor);
+extern "C" void js_set_prototype(Item object, Item prototype);
 extern "C" Item js_get_current_this(void) { return js_current_this; }
 
 static void js_runtime_make_non_enumerable(Item object, Item name) {
     Item desc = js_new_object();
+    js_set_prototype(desc, ItemNull);
     Item enum_key = (Item){.item = s2it(heap_create_name("enumerable", 10))};
     js_property_set(desc, enum_key, (Item){.item = b2it(false)});
     js_object_define_property(object, name, desc);
@@ -843,6 +845,7 @@ extern "C" Item js_build_arguments_object() {
         if (js_pending_args_callee.item != 0) {
             Item callee_key = (Item){.item = s2it(heap_create_name("callee", 6))};
             Item desc = js_new_object();
+            js_set_prototype(desc, ItemNull);
             js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, js_pending_args_callee);
             js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
             js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(false)});

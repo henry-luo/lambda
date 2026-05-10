@@ -950,6 +950,15 @@ static bool g_feature_summary = false;    // --feature-summary: write failure su
 static int g_opt_level = 0;  // default -O0 (fastest for short-lived test262 scripts)
 static char g_opt_level_arg[20] = "--opt-level=0";  // "--opt-level=N"
 static char g_js_timeout_arg[20] = "--timeout=10";  // child js-test-batch timeout
+static const int T262_PHASE4_RETRY_TIMEOUT_SECS = 60;
+
+static int current_js_timeout_secs() {
+    if (strncmp(g_js_timeout_arg, "--timeout=", 10) == 0) {
+        int secs = atoi(g_js_timeout_arg + 10);
+        if (secs > 0) return secs;
+    }
+    return 10;
+}
 static int g_total_tests = 0;   // total discovered tests
 static int g_total_skipped = 0; // total skipped tests
 static int g_total_batched = 0; // total batched (executed) tests
@@ -1422,9 +1431,13 @@ static void prepare_all_tests(
 
 // Hard per-worker timeout: 15s per test, minimum 30s.
 // If a worker exceeds this, a watchdog thread sends SIGKILL to prevent infinite hangs
-// (the internal --timeout=10 only catches JS-level loops, not hangs in JIT/parser).
+// (the internal js-test-batch timeout only catches JS-level loops, not hangs in JIT/parser).
 static constexpr int T262_HARD_TIMEOUT_PER_TEST = 15;
 static constexpr int T262_HARD_TIMEOUT_MIN = 30;
+static int hard_timeout_per_test_secs() {
+    int timeout_secs = current_js_timeout_secs() + 5;
+    return std::max(T262_HARD_TIMEOUT_PER_TEST, timeout_secs);
+}
 
 // Run a sub-batch of tests from a pre-written manifest file + stdout pipe
 // Run a sub-batch from a manifest file using posix_spawn (avoids fork's page table copy)
@@ -1469,7 +1482,7 @@ static void run_t262_sub_batch(
     CloseHandle(manifest_h);
     CloseHandle(pipe_wr);
 
-    int hard_timeout_secs = std::max(T262_HARD_TIMEOUT_MIN, (int)(num_tests * T262_HARD_TIMEOUT_PER_TEST));
+    int hard_timeout_secs = std::max(T262_HARD_TIMEOUT_MIN, (int)(num_tests * hard_timeout_per_test_secs()));
     std::atomic<bool> worker_done{false};
     std::thread watchdog([&pi, hard_timeout_secs, &worker_done]() {
         auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(hard_timeout_secs);
@@ -1606,9 +1619,9 @@ static void run_t262_sub_batch(
 
     // Watchdog thread: kills the worker if it exceeds the hard timeout.
     // This catches hangs in JIT compilation, parsing, or native code that the
-    // internal --timeout=10 can't interrupt. Killing the process closes its
+    // internal js-test-batch timeout can't interrupt. Killing the process closes its
     // stdout pipe, which unblocks the fgets loop below.
-    int hard_timeout_secs = std::max(T262_HARD_TIMEOUT_MIN, (int)(num_tests * T262_HARD_TIMEOUT_PER_TEST));
+    int hard_timeout_secs = std::max(T262_HARD_TIMEOUT_MIN, (int)(num_tests * hard_timeout_per_test_secs()));
     std::atomic<bool> worker_done{false};
     std::thread watchdog([pid, hard_timeout_secs, &worker_done]() {
         auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(hard_timeout_secs);
@@ -1913,7 +1926,7 @@ static Test262RunResult evaluate_batch_result(
     if (br.exit_code == 124) {
         if (br.output.find("slow") != std::string::npos)
             return {T262_TIMEOUT, "slow test (took >3s in previous run)"};
-        return {T262_TIMEOUT, "test timed out (10s)"};
+        return {T262_TIMEOUT, "test timed out"};
     }
 
     // crash (signalled)
@@ -3213,7 +3226,14 @@ int main(int argc, char** argv) {
             }
             // Run each individually (chunk_size=1) to isolate from batch effects
             if (!retry_prepared.empty()) {
+                char saved_js_timeout_arg[sizeof(g_js_timeout_arg)];
+                memcpy(saved_js_timeout_arg, g_js_timeout_arg, sizeof(g_js_timeout_arg));
+                snprintf(g_js_timeout_arg, sizeof(g_js_timeout_arg),
+                         "--timeout=%d", T262_PHASE4_RETRY_TIMEOUT_SECS);
+                fprintf(stderr, "[test262] Phase 4: using %ds isolated retry timeout\n",
+                        T262_PHASE4_RETRY_TIMEOUT_SECS);
                 auto retry_results = execute_t262_batch(retry_prepared, retry_indices, 1);
+                memcpy(g_js_timeout_arg, saved_js_timeout_arg, sizeof(g_js_timeout_arg));
                 std::vector<std::string> real_regressions;
                 std::vector<std::string> recovered_names;
                 size_t recovered = 0;

@@ -1404,6 +1404,7 @@ extern "C" Item js_strict_equal(Item left, Item right) {
     }
 
     case LMD_TYPE_STRING: {
+        if (left.item == right.item) return (Item){.item = b2it(true)};
         String* l_str = it2s(left);
         String* r_str = it2s(right);
         if (l_str->len != r_str->len) {
@@ -1929,4 +1930,3 @@ extern "C" Item js_typeof(Item value) {
 done:
     return (Item){.item = s2it(heap_create_name(result))};
 }
-
