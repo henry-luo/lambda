@@ -3749,6 +3749,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         }
                     }
 
+                    MIR_reg_t ctor_super_val = 0;
                     // Create __instance_proto__ with all instance methods
                     {
                         MIR_reg_t proto_obj = jm_call_0(mt, "js_new_object", MIR_T_I64);
@@ -3782,10 +3783,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                 jm_call_void_2(mt, "js_set_prototype",
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, last_proto),
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_proto));
-                                // Also set constructor chain: Child.__proto__ = Parent
-                                jm_call_void_2(mt, "js_set_prototype",
-                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
-                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, super_val));
+                                ctor_super_val = super_val;
                             }
                             // v20: Handle builtin superclass (Error, etc.) when no JsClassEntry
                             if (!ce->superclass && ce->node && ce->node->superclass &&
@@ -3816,10 +3814,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                         jm_call_void_2(mt, "js_set_prototype",
                                             MIR_T_I64, MIR_new_reg_op(mt->ctx, last_proto),
                                             MIR_T_I64, MIR_new_reg_op(mt->ctx, err_proto));
-                                        // Also set constructor chain: Child.__proto__ = Parent
-                                        jm_call_void_2(mt, "js_set_prototype",
-                                            MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
-                                            MIR_T_I64, MIR_new_reg_op(mt->ctx, super_ctor2));
+                                        ctor_super_val = super_ctor2;
                                     } else {
                                         MIR_reg_t super_val = jm_transpile_box_item(mt, (JsAstNode*)super_id);
                                         MIR_reg_t sp_key = jm_box_string_literal(mt, "prototype", 9);
@@ -3829,10 +3824,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                         jm_call_void_2(mt, "js_set_prototype",
                                             MIR_T_I64, MIR_new_reg_op(mt->ctx, last_proto),
                                             MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_proto));
-                                        // Also set constructor chain: Child.__proto__ = Parent
-                                        jm_call_void_2(mt, "js_set_prototype",
-                                            MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
-                                            MIR_T_I64, MIR_new_reg_op(mt->ctx, super_val));
+                                        ctor_super_val = super_val;
                                     }
                                 }
                             }
@@ -3847,58 +3839,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                 jm_call_void_2(mt, "js_set_prototype",
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, last_proto),
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_proto));
-                                jm_call_void_2(mt, "js_set_prototype",
-                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
-                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, super_val));
-                            }
-                        }
-                        // Add inherited instance methods (base-first)
-                        {
-                            JsClassEntry* m_chain[32];
-                            int m_chain_len = 0;
-                            {
-                                JsClassEntry* p = ce->superclass;
-                                while (p && m_chain_len < 32) {
-                                    m_chain[m_chain_len++] = p;
-                                    p = p->superclass;
-                                }
-                            }
-                            for (int ci = m_chain_len - 1; ci >= 0; ci--) {
-                                JsClassEntry* parent = m_chain[ci];
-                                for (int mi = 0; mi < parent->method_count; mi++) {
-                                    JsClassMethodEntry* me = &parent->methods[mi];
-                                    if (me->is_constructor || me->is_static) continue;
-                                    if (!me->fc || !me->fc->func_item) continue;
-                                    if (!me->name && !(me->computed && me->key_expr)) continue;
-                                    MIR_reg_t fn_item;
-                                    if (me->fc->capture_count > 0) {
-                                        fn_item = jm_build_closure_for_method(mt, me->fc, me->param_count);
-                                    } else {
-                                        fn_item = jm_call_2(mt, "js_new_function", MIR_T_I64,
-                                            MIR_T_I64, MIR_new_ref_op(mt->ctx, me->fc->func_item),
-                                            MIR_T_I64, MIR_new_int_op(mt->ctx, me->param_count));
-                                    }
-                                    if (me->name && !me->computed) {
-                                        char fname[256];
-                                        if (me->is_getter) snprintf(fname, sizeof(fname), "get %.*s", (int)me->name->len, me->name->chars);
-                                        else if (me->is_setter) snprintf(fname, sizeof(fname), "set %.*s", (int)me->name->len, me->name->chars);
-                                        else snprintf(fname, sizeof(fname), "%.*s", (int)me->name->len, me->name->chars);
-                                        jm_emit_set_function_name(mt, fn_item, fname, me->fc ? me->fc->formal_length : -1);
-                                    }
-                                    if (me->fc) jm_emit_set_function_source(mt, fn_item, me->fc->node);
-                                    jm_call_void_1(mt, "js_mark_method_func", MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
-                                    MIR_reg_t mk;
-                                    if (me->computed && me->key_expr) {
-                                        mk = jm_transpile_box_item(mt, me->key_expr);
-                                        // Phase-5C: no key wrap.
-                                    } else if (me->is_getter || me->is_setter) {
-                                        mk = jm_box_string_literal(mt, me->name->chars, (int)me->name->len);
-                                    } else {
-                                        mk = jm_box_string_literal(mt, me->name->chars, (int)me->name->len);
-                                    }
-                                    jm_emit_install_method_or_accessor(mt, proto_obj, mk, fn_item,
-                                        me->is_getter, me->is_setter);
-                                }
+                                ctor_super_val = super_val;
                             }
                         }
                         // Add own instance methods
@@ -4190,6 +4131,11 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     jm_call_void_1(mt, "js_set_this",
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, prev_static_this));
                     jm_call_void_0(mt, "js_private_field_init_end");
+                    if (ctor_super_val) {
+                        jm_call_void_2(mt, "js_set_prototype",
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_super_val));
+                    }
                 }
             }
             stmt = stmt->next;

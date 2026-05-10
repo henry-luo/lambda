@@ -30,10 +30,12 @@ Item _map_read_field(ShapeEntry* field, void* map_data);
 Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found);
 extern "C" void js_mark_non_enumerable(Item object, Item name);
 extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor);
+extern "C" void js_set_prototype(Item object, Item prototype);
 extern "C" Item js_get_current_this(void) { return js_current_this; }
 
 static void js_runtime_make_non_enumerable(Item object, Item name) {
     Item desc = js_new_object();
+    js_set_prototype(desc, ItemNull);
     Item enum_key = (Item){.item = s2it(heap_create_name("enumerable", 10))};
     js_property_set(desc, enum_key, (Item){.item = b2it(false)});
     js_object_define_property(object, name, desc);
@@ -81,7 +83,8 @@ extern "C" int64_t js_key_is_symbol_c(Item key) {
 }
 
 // ES2020 §7.1.14 ToPropertyKey(argument)
-// Symbols → internal __sym_N string; strings → as-is; others → ToString
+// ToPrimitive(string hint), then Symbols → internal __sym_N string,
+// strings → as-is, others → ToString.
 extern "C" Item js_to_property_key(Item key) {
     if (js_key_is_symbol(key)) return js_symbol_to_key(key);
     TypeId kt = get_type_id(key);
@@ -90,6 +93,17 @@ extern "C" Item js_to_property_key(Item key) {
         return (Item){.item = s2it(heap_create_name("null", 4))};
     if (kt == LMD_TYPE_UNDEFINED)
         return (Item){.item = s2it(heap_create_name("undefined", 9))};
+    if (kt == LMD_TYPE_MAP || kt == LMD_TYPE_ARRAY || kt == LMD_TYPE_ELEMENT) {
+        key = js_to_primitive(key, JS_HINT_STRING);
+        if (js_check_exception()) return ItemNull;
+        if (js_key_is_symbol(key)) return js_symbol_to_key(key);
+        kt = get_type_id(key);
+        if (kt == LMD_TYPE_STRING) return key;
+        if (key.item == 0 || kt == LMD_TYPE_NULL)
+            return (Item){.item = s2it(heap_create_name("null", 4))};
+        if (kt == LMD_TYPE_UNDEFINED)
+            return (Item){.item = s2it(heap_create_name("undefined", 9))};
+    }
     return js_to_string(key);
 }
 
@@ -843,6 +857,7 @@ extern "C" Item js_build_arguments_object() {
         if (js_pending_args_callee.item != 0) {
             Item callee_key = (Item){.item = s2it(heap_create_name("callee", 6))};
             Item desc = js_new_object();
+            js_set_prototype(desc, ItemNull);
             js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, js_pending_args_callee);
             js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
             js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(false)});

@@ -39,6 +39,7 @@ extern Item fn_replace(Item str, Item old_str, Item new_str); // JIT name: fn_re
 extern Item js_super_property_get(Item receiver, Item key);
 extern Item js_super_instance_method_get(Item receiver, Item key);
 extern Item js_super_property_set(Item receiver, Item key, Item value);
+extern Item js_create_data_property(Item obj, Item name, Item value);
 
 // super() for class-expression superclasses: handles FUNC and MAP (class object) callee
 extern Item js_super_call_class(Item callee, Item this_val, Item* args, int argc);
@@ -165,6 +166,9 @@ extern bool target_equal(Target* a, Target* b);
 #include "js/js_event_loop.h"
 #include "js/js_xhr.h"
 extern Item js_buffer_construct(Item arg, Item encoding);
+extern Item js_string_replace_nonws_global_fast(Item str, Item replacement);
+extern Item js_string_fromCharCode2(Item first_item, Item second_item);
+extern void js_validate_native_function_source(Item source_item);
 // Phase 8C: Image() constructor (defined in js_dom.cpp)
 extern Item js_image_construct(Item width_arg, Item height_arg, int argc);
 
@@ -875,6 +879,7 @@ extern Item js_to_property_key(Item key);
 extern int64_t js_typeof_is(Item value, const char* type_str);
 extern Item js_property_get_str(Item object, const char* key, int key_len);
 extern Item js_arguments_mapped_get(Item arguments, int64_t index, Item current_value);
+extern Item js_arguments_mapped_param_writeback(Item arguments, int64_t index, Item value);
 // v23b: Comparison facades returning raw int64_t 0/1
 extern int64_t js_lt_raw(Item left, Item right);
 extern int64_t js_gt_raw(Item left, Item right);
@@ -886,8 +891,7 @@ extern int64_t js_loose_eq_raw(Item left, Item right);
 extern int64_t js_loose_ne_raw(Item left, Item right);
 extern int64_t js_discard_value(Item value);
 
-// debug-only: native test262 harness functions for performance
-#ifndef NDEBUG
+// native test262 harness functions for batch performance
 extern void js_assert_same_value(Item actual, Item expected, Item message);
 extern void js_assert_not_same_value(Item actual, Item unexpected, Item message);
 extern void js_assert_compare_array(Item actual, Item expected, Item message);
@@ -898,7 +902,6 @@ extern void js_assert_throws(Item expected_ctor, Item func, Item message);
 extern void js_assert_base(Item must_be_true, Item message);
 extern void js_donotevaluate(void);
 extern Item js_is_constructor(Item fn);
-#endif
 
 // always available: emitted unconditionally by JS class transpiler
 extern void js_private_field_init_begin(void);
@@ -1304,6 +1307,7 @@ JitImport jit_runtime_imports[] = {
     {"js_new_object", FPTR(js_new_object)},
     {"js_property_get", FPTR(js_property_get)},
     {"js_arguments_mapped_get", FPTR(js_arguments_mapped_get)},
+    {"js_arguments_mapped_param_writeback", FPTR(js_arguments_mapped_param_writeback)},
     {"js_property_set", FPTR(js_property_set)},
     {"js_create_data_property", FPTR(js_create_data_property)},
     {"js_property_access", FPTR(js_property_access)},
@@ -1324,7 +1328,6 @@ JitImport jit_runtime_imports[] = {
     {"js_new_check_constructor_return", FPTR(js_new_check_constructor_return)},
     {"js_check_tdz", FPTR(js_check_tdz)},
     {"js_throw_const_assign", FPTR(js_throw_const_assign)},
-#ifndef NDEBUG
     {"js_assert_same_value", FPTR(js_assert_same_value)},
     {"js_assert_not_same_value", FPTR(js_assert_not_same_value)},
     {"js_assert_compare_array", FPTR(js_assert_compare_array)},
@@ -1335,7 +1338,6 @@ JitImport jit_runtime_imports[] = {
     {"js_assert_base", FPTR(js_assert_base)},
     {"js_donotevaluate", FPTR(js_donotevaluate)},
     {"js_is_constructor", FPTR(js_is_constructor)},
-#endif
     {"js_discard_value", FPTR(js_discard_value)},
     // always available: emitted unconditionally by JS class transpiler
     {"js_private_field_init_begin", FPTR(js_private_field_init_begin)},
@@ -1401,6 +1403,9 @@ JitImport jit_runtime_imports[] = {
     {"js_error_captureStackTrace", FPTR(js_error_captureStackTrace)},
     // method dispatchers
     {"js_string_method", FPTR(js_string_method)},
+    {"js_string_replace_nonws_global_fast", FPTR(js_string_replace_nonws_global_fast)},
+    {"js_string_fromCharCode2", FPTR(js_string_fromCharCode2)},
+    {"js_validate_native_function_source", FPTR(js_validate_native_function_source)},
     {"js_array_method", FPTR(js_array_method)},
     {"js_array_method_direct", FPTR(js_array_method_direct)},
     {"js_math_method", FPTR(js_math_method)},
