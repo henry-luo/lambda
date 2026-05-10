@@ -715,15 +715,16 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         struct FontHandle* br_fh = lycon->font.font_handle;
         float br_font_height = br_fh ? font_get_cell_height(br_fh) : lycon->block.line_height;
         br_view->height = br_font_height;
-        // CSS 2.1 §10.8.1: Position <br> at text content top using half-leading,
-        // consistent with how text nodes are positioned within the line box.
-        // When line-height < font height, use negative half-leading (same as text nodes).
-        if (lycon->block.line_height < br_font_height) {
-            float half_leading = (lycon->block.line_height - br_font_height) / 2;
-            br_view->y = lycon->block.advance_y + half_leading;
-        } else {
-            br_view->y = lycon->block.advance_y + lycon->block.lead_y;
+        // CSS 2.1 §10.8.1: <br> participates in the current line before forcing
+        // the break. Its zero-width inline box is baseline-aligned with earlier
+        // content on the line, including replaced elements.
+        float br_ascender = lycon->block.init_ascender + lycon->block.lead_y;
+        if (lycon->font.font_handle && lycon->block.line_height_is_normal) {
+            float br_descender = 0.0f;
+            font_get_normal_lh_split(lycon->font.font_handle, &br_ascender, &br_descender);
         }
+        float baseline_pos = max(lycon->line.max_ascender, lycon->block.init_ascender + lycon->block.lead_y);
+        br_view->y = lycon->block.advance_y + baseline_pos - br_ascender;
         // CSS Text 3 §7.2: text-align-last applies to lines immediately before
         // a forced line break. <br> is a forced break per CSS Text 3 §4.1.
         lycon->line.is_last_line = true;

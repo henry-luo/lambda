@@ -2074,10 +2074,10 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     auto t_body_find = high_resolution_clock::now();
     log_info("%s [TIMING] layout: body find: %.1fms", elmt->source_loc(), duration<double, std::milli>(t_body_find - t_style).count());
 
+    ViewBlock* body_view = nullptr;
     if (body_node) {
         // After layout, find the body view for scroll height calculation
         View* child = html->first_placed_child();
-        ViewBlock* body_view = nullptr;
         while (child) {
             if (child->is_block()) {
                 ViewBlock* vb = (ViewBlock*)child;
@@ -2103,6 +2103,33 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     log_info("%s [TIMING] layout: layout_block: %.1fms", elmt->source_loc(), duration<double, std::milli>(t_layout_block - t_body_find).count());
 
     finalize_block_flow(lycon, html, CSS_VALUE_BLOCK);
+
+    if (!root_has_explicit_width && !root_has_explicit_height &&
+        html->embed && html->embed->flex &&
+        (html->embed->flex->writing_mode == WM_VERTICAL_LR ||
+         html->embed->flex->writing_mode == WM_VERTICAL_RL) &&
+        body_view) {
+        float body_margin_left = body_view->bound ? body_view->bound->margin.left : 0.0f;
+        float body_margin_right = body_view->bound ? body_view->bound->margin.right : 0.0f;
+        float body_margin_bottom = body_view->bound ? body_view->bound->margin.bottom : 0.0f;
+        float content_block_size = 0.0f;
+        View* vc = body_view->first_placed_child();
+        while (vc) {
+            float child_extent = vc->x + vc->width;
+            if (child_extent > content_block_size) content_block_size = child_extent;
+            vc = vc->next();
+        }
+        if (content_block_size < body_view->height) content_block_size = body_view->height;
+        body_view->width = content_block_size;
+        body_view->content_width = content_block_size;
+        body_view->height = physical_height - body_view->y - body_margin_bottom;
+        if (body_view->height < 0.0f) body_view->height = 0.0f;
+        body_view->content_height = body_view->height;
+        html->width = body_margin_left + content_block_size + body_margin_right;
+        html->content_width = html->width;
+        html->height = physical_height;
+        html->content_height = physical_height;
+    }
 
     // Quirks mode behavior: html/body stretch to at least viewport height.
     // Chrome's getBoundingClientRect reports html height = max(content, viewport) in quirks mode

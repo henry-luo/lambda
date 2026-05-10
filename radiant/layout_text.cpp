@@ -2713,6 +2713,25 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             }
             else if (is_space(*str)) { // break at the current space (collapsible or break-spaces)
                 log_debug("break on space");
+                if (collapse_spaces && white_space != CSS_VALUE_BREAK_SPACES &&
+                    rect->width <= wd + 0.01f) {
+                    // CSS Text §4: collapsible whitespace at the line edge is removed.
+                    // Do not synthesize an automatic line break before a following <br>;
+                    // the explicit break element must terminate the current line.
+                    do { str++; } while (is_space(*str) && (collapse_newlines || (*str != '\n' && *str != '\r')));
+                    rect->width = 0.0f;
+                    rect->length = (int)(str - text_start - rect->start_index); // INT_CAST_OK: text byte length
+                    lycon->line.trailing_space_width = 0.0f;
+                    lycon->line.has_space = true;
+                    if (wrap_lines && !lycon->line.is_line_start) {
+                        lycon->line.wrap_opportunity_before_nowrap = true;
+                    }
+                    if (*str) {
+                        line_break(lycon);
+                        goto LAYOUT_TEXT;
+                    }
+                    return;
+                }
                 // CSS Text 3 §3: For break-spaces, "a line breaking opportunity exists
                 // after every preserved white space character." When a space overflows:
                 // - If a prior break opportunity exists, rewind to it.
