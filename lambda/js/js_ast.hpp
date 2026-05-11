@@ -294,6 +294,8 @@ typedef struct JsFunctionNode {
     bool is_arrow;                  // Arrow function vs regular function
     bool is_async;                  // Async function
     bool is_generator;              // Generator function
+    int lexical_for_head_capture_count;
+    char lexical_for_head_capture_names[8][64];
     struct TsTypeAnnotationNode* ts_return_type; // TS return type annotation (NULL in JS mode)
 } JsFunctionNode;
 

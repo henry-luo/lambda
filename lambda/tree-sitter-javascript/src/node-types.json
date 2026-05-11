@@ -1290,6 +1290,10 @@
             "named": false
           },
           {
+            "type": "using",
+            "named": false
+          },
+          {
             "type": "var",
             "named": false
           }
@@ -3510,6 +3514,10 @@
   {
     "type": "undefined",
     "named": true
+  },
+  {
+    "type": "using",
+    "named": false
   },
   {
     "type": "var",

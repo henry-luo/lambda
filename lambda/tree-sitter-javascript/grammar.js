@@ -340,6 +340,15 @@ module.exports = grammar({
     _for_header: $ => seq(
       '(',
       choice(
+        seq(
+          optional('await'),
+          field('kind', 'using'),
+          field('left', choice(
+            $.identifier,
+            $._destructuring_pattern,
+          )),
+          optional($._automatic_semicolon),
+        ),
         field('left', choice(
           $._lhs_expression,
           $.parenthesized_expression,

@@ -177,6 +177,7 @@ struct JsCaptureEntry {
                           // grandparent env (stored in parent env slot 0). -1 if not transitive.
     bool is_let_const;   // v29 TDZ: true if captured variable is let/const (needs TDZ check)
     bool is_const;       // true if captured variable is const (assignment throws)
+    bool force_env_capture; // true when a lexical loop head shadows a module var
 };
 
 // Function entry for pre-pass collection

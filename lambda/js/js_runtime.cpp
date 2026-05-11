@@ -7,6 +7,8 @@
 #include "js_runtime_internal.hpp"
 
 extern "C" Item js_to_property_key(Item key);
+extern "C" Item js_reflect_own_keys(Item obj);
+extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name);
 extern void js_double_to_string(double d, char* out, int out_size);
 
 // =============================================================================
@@ -18710,84 +18712,62 @@ extern "C" Item js_prototype_lookup(Item object, Item property) {
 // v12: Object rest destructuring
 // =============================================================================
 
-extern "C" Item js_object_rest(Item src, Item* exclude_keys, int exclude_count) {
-    if (get_type_id(src) != LMD_TYPE_MAP) return js_new_object();
-    Map* m = it2map(src);
-    TypeMap* tm = (TypeMap*)m->type;
-    if (!tm) return js_new_object();
-    ShapeEntry* e = tm->shape;
-    Item rest = js_new_object();
-    // pass 1: copy own enumerable data properties (using js_property_get to invoke getters)
-    while (e) {
-        if (e->name) {
-            const char* n = e->name->str;
-            int nlen = (int)e->name->length;
-            // skip internal marker properties (but allow __sym_ symbol keys)
-            if (nlen >= 2 && n[0] == '_' && n[1] == '_') {
-                if (!(nlen >= 6 && n[2] == 's' && n[3] == 'y' && n[4] == 'm' && n[5] == '_')) {
-                    e = e->next;
-                    continue;
-                }
-            }
-            // skip non-enumerable properties (Stage A3.2: shape-flag-first)
-            if (!js_props_query_enumerable(m, e, n, nlen)) {
-                e = e->next;
-                continue;
-            }
-            bool excluded = false;
-            for (int i = 0; i < exclude_count; i++) {
-                String* ek = it2s(exclude_keys[i]);
-                if (ek && (int)e->name->length == (int)ek->len && memcmp(e->name->str, ek->chars, ek->len) == 0) {
-                    excluded = true;
-                    break;
-                }
-            }
-            if (!excluded) {
-                Item key = (Item){.item = s2it(heap_create_name(n, nlen))};
-                Item val = js_property_get(src, key);
-                if (!js_is_deleted_sentinel(val)) {
-                    js_property_set(rest, key, val);
-                }
-            }
+static bool js_object_rest_key_excluded(Item key, Item* exclude_keys, int exclude_count) {
+    Item prop_key = js_to_property_key(key);
+    if (js_check_exception()) return true;
+    for (int i = 0; i < exclude_count; i++) {
+        Item exclude_key = js_to_property_key(exclude_keys[i]);
+        if (js_check_exception()) return true;
+        if (js_key_is_symbol(prop_key) || js_key_is_symbol(exclude_key)) {
+            if (prop_key.item == exclude_key.item) return true;
+            continue;
         }
-        e = e->next;
+        if (get_type_id(prop_key) == LMD_TYPE_STRING && get_type_id(exclude_key) == LMD_TYPE_STRING) {
+            String* pk = it2s(prop_key);
+            String* ek = it2s(exclude_key);
+            if (pk && ek && pk->len == ek->len && memcmp(pk->chars, ek->chars, pk->len) == 0) return true;
+        }
     }
-    // pass 2: detect accessor-only properties (__get_<name> with no data entry)
-    e = tm->shape;
-    while (e) {
-        if (e->name) {
-            const char* s = e->name->str;
-            int slen = (int)e->name->length;
-            if (slen > 6 && strncmp(s, "__get_", 6) == 0) {
-                const char* prop_name = s + 6;
-                int prop_len = slen - 6;
-                if (prop_len > 0 && prop_len < 200) {
-                    // Stage A3.2: shape-flag-first non-enumerable check on accessor prop
-                    if (js_props_query_enumerable(m, NULL, prop_name, prop_len)) {
-                        // skip if already copied (had a data entry)
-                        bool data_found = false;
-                        js_map_get_fast_ext(m, prop_name, prop_len, &data_found);
-                        if (!data_found) {
-                            // check exclusion list
-                            bool excluded = false;
-                            for (int i = 0; i < exclude_count; i++) {
-                                String* ek = it2s(exclude_keys[i]);
-                                if (ek && prop_len == (int)ek->len && memcmp(prop_name, ek->chars, ek->len) == 0) {
-                                    excluded = true;
-                                    break;
-                                }
-                            }
-                            if (!excluded) {
-                                Item key = (Item){.item = s2it(heap_create_name(prop_name, prop_len))};
-                                Item val = js_property_get(src, key);
-                                js_property_set(rest, key, val);
-                            }
-                        }
-                    }
-                }
-            }
+    return false;
+}
+
+extern "C" Item js_object_rest(Item src, Item* exclude_keys, int exclude_count) {
+    Item rest = js_new_object();
+
+    if (get_type_id(src) == LMD_TYPE_STRING) {
+        String* str = it2s(src);
+        int slen = str ? (int)str->len : 0;
+        for (int i = 0; i < slen; i++) {
+            char key_buf[16];
+            int key_len = snprintf(key_buf, sizeof(key_buf), "%d", i);
+            Item key = (Item){.item = s2it(heap_create_name(key_buf, key_len))};
+            if (js_object_rest_key_excluded(key, exclude_keys, exclude_count)) continue;
+            Item val = js_property_get(src, key);
+            if (js_check_exception()) return rest;
+            js_property_set(rest, key, val);
         }
-        e = e->next;
+        return rest;
+    }
+
+    TypeId src_type = get_type_id(src);
+    if (src_type != LMD_TYPE_MAP && src_type != LMD_TYPE_ARRAY && src_type != LMD_TYPE_FUNC) return rest;
+
+    Item keys = js_reflect_own_keys(src);
+    if (js_check_exception() || get_type_id(keys) != LMD_TYPE_ARRAY) return rest;
+    Array* key_arr = keys.array;
+    for (int i = 0; i < key_arr->length; i++) {
+        Item key = key_arr->items[i];
+        if (js_object_rest_key_excluded(key, exclude_keys, exclude_count)) continue;
+        Item desc = js_object_get_own_property_descriptor(src, key);
+        if (js_check_exception()) return rest;
+        if (get_type_id(desc) != LMD_TYPE_MAP) continue;
+        bool enum_found = false;
+        Item enum_val = js_map_get_fast_ext(desc.map, "enumerable", 10, &enum_found);
+        if (!enum_found || !js_is_truthy(enum_val)) continue;
+        Item val = js_property_get(src, key);
+        if (js_check_exception()) return rest;
+        if (!js_is_deleted_sentinel(val)) js_property_set(rest, key, val);
+        if (js_check_exception()) return rest;
     }
     return rest;
 }
@@ -19863,6 +19843,10 @@ extern "C" Item js_iterator_step(Item iterator) {
         }
         if (m->type == (void*)&js_typed_array_iter_marker) {
             // Typed array iterator: direct index read + increment
+            if (js_typed_array_is_out_of_bounds_item(d->source)) {
+                js_throw_type_error("Cannot perform %TypedArray%.prototype iterator on an out-of-bounds ArrayBuffer");
+                return (Item){.item = JS_ITER_DONE_SENTINEL};
+            }
             int len = js_typed_array_length(d->source);
             if (idx >= len) return (Item){.item = JS_ITER_DONE_SENTINEL};
             Item elem = js_typed_array_get(d->source, (Item){.item = i2it((int)idx)});
