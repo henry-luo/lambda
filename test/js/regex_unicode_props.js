@@ -32,3 +32,14 @@ console.log("t7:" + re7.test("myVar123") + "," + re7.test("_test") + "," + re7.t
 // --- Test 8: Negated Unicode property \P{ASCII} ---
 var re8 = new RegExp("\\P{ASCII}", "u");
 console.log("t8:" + re8.test("hello") + "," + re8.test("café"));
+
+// --- Test 9: General_Category aliases used by test262 generated cases ---
+var re9a = new RegExp("^\\p{General_Category=digit}+$", "u");
+var re9b = new RegExp("^\\p{gc=Decimal_Number}+$", "u");
+console.log("t9:" + re9a.test("123") + "," + re9b.test("٤٥٦") + "," + re9a.test("abc"));
+
+// --- Test 10: Script aliases and Script_Extensions aliases ---
+var re10a = new RegExp("^\\p{Script=Grek}+$", "u");
+var re10b = new RegExp("^\\p{sc=Grek}+$", "u");
+var re10c = new RegExp("^\\p{scx=Grek}+$", "u");
+console.log("t10:" + re10a.test("Ω") + "," + re10b.test("π") + "," + re10c.test("\u0301") + "," + re10c.test("A"));

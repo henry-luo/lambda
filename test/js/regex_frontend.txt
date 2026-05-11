@@ -1,0 +1,4 @@
+t1:SyntaxError,SyntaxError,SyntaxError
+t2:gim
+t3:SyntaxError,SyntaxError,ok
+t4:true,false
