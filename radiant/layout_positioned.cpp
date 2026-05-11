@@ -43,7 +43,8 @@ static bool extract_aspect_ratio_number_for_positioned(const char* text, double*
 
 static float get_preferred_aspect_ratio_for_positioned(ViewBlock* block) {
     if (!block) return 0.0f;
-    if (block->fi && block->fi->aspect_ratio > 0.0f) return block->fi->aspect_ratio;
+    if (block->item_prop_type == DomElement::ITEM_PROP_FLEX &&
+        block->fi && block->fi->aspect_ratio > 0.0f) return block->fi->aspect_ratio;
     DomElement* element = block->as_element();
     if (!element) return 0.0f;
     CssDeclaration* decl = dom_element_get_specified_value(element, CSS_PROPERTY_ASPECT_RATIO);
@@ -843,7 +844,8 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     } else if (is_intrinsic_width) {
         content_width = 0;
         log_debug("Using intrinsic sizing for absolutely positioned element: content_width=0 (shrink-to-fit)");
-    } else if (block->fi && block->fi->aspect_ratio > 0 &&
+    } else if (block->item_prop_type == DomElement::ITEM_PROP_FLEX &&
+               block->fi && block->fi->aspect_ratio > 0 &&
                !(lycon->block.given_height >= 0) && block->blk && block->blk->given_max_height > 0) {
         // CSS Sizing Level 4: abs-pos with aspect-ratio, auto width/height, and max-height
         // Derive width from max-height * aspect-ratio
