@@ -100,6 +100,9 @@ bool event_state_log_enabled(EventStateLog* log);
  * or NULL if not open. Pointer is valid until close. */
 const char* event_state_log_path(EventStateLog* log);
 
+/* Returns the stable per-log document id used in record envelopes. */
+const char* event_state_log_doc_id(EventStateLog* log);
+
 /* ------------------------------------------------------------------ */
 /* Cascade lifecycle.                                                  */
 /* A cascade is the unit of work triggered by one external cause       */

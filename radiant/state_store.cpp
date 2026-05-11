@@ -921,6 +921,19 @@ static uint32_t view_state_resolve_id(View* view) {
     return 0;
 }
 
+static void state_transition_write_anchor(JsonWriter* w, DocState* state, View* view) {
+    jw_key(w, "anchor");
+    jw_obj_begin(w);
+        const char* doc_id = event_state_log_doc_id(state ? state->active_event_log : NULL);
+        if (doc_id) jw_kv_str(w, "doc_id", doc_id);
+        if (view) {
+            uint32_t view_id = view_state_resolve_id(view);
+            if (view_id != 0) jw_kv_uint(w, "view_id", view_id);
+            event_state_log_write_node_ref(w, "view", (const DomNode*)view);
+        }
+    jw_obj_end(w);
+}
+
 ViewState* view_state_get(DocState* state, View* view) {
     if (!state || !view) return NULL;
 
@@ -977,10 +990,7 @@ static void view_state_log_bool_transition(DocState* state, View* view,
     jw_key(&w, "data");
     jw_obj_begin(&w);
         jw_kv_str(&w, "scope", "view");
-        jw_key(&w, "anchor");
-        jw_obj_begin(&w);
-            event_state_log_write_node_ref(&w, "view", (const DomNode*)view);
-        jw_obj_end(&w);
+        state_transition_write_anchor(&w, state, view);
         jw_kv_str(&w, "name", name ? name : "view.state");
         jw_key(&w, "old");
         jw_obj_begin(&w);
@@ -1006,10 +1016,7 @@ static void view_state_log_int_transition(DocState* state, View* view,
     jw_key(&w, "data");
     jw_obj_begin(&w);
         jw_kv_str(&w, "scope", "view");
-        jw_key(&w, "anchor");
-        jw_obj_begin(&w);
-            event_state_log_write_node_ref(&w, "view", (const DomNode*)view);
-        jw_obj_end(&w);
+        state_transition_write_anchor(&w, state, view);
         jw_kv_str(&w, "name", name ? name : "view.state");
         jw_key(&w, "old");
         jw_obj_begin(&w);
@@ -1035,10 +1042,7 @@ static void view_state_log_float_transition(DocState* state, View* view,
     jw_key(&w, "data");
     jw_obj_begin(&w);
         jw_kv_str(&w, "scope", "view");
-        jw_key(&w, "anchor");
-        jw_obj_begin(&w);
-            event_state_log_write_node_ref(&w, "view", (const DomNode*)view);
-        jw_obj_end(&w);
+        state_transition_write_anchor(&w, state, view);
         jw_kv_str(&w, "name", name ? name : "view.state");
         jw_key(&w, "old");
         jw_obj_begin(&w);
@@ -1068,10 +1072,7 @@ static void view_state_log_scroll_transition(DocState* state, View* view,
     jw_key(&w, "data");
     jw_obj_begin(&w);
         jw_kv_str(&w, "scope", "view");
-        jw_key(&w, "anchor");
-        jw_obj_begin(&w);
-            event_state_log_write_node_ref(&w, "view", (const DomNode*)view);
-        jw_obj_end(&w);
+        state_transition_write_anchor(&w, state, view);
         jw_kv_str(&w, "name", name ? name : "scroll");
         jw_key(&w, "old");
         jw_obj_begin(&w);
@@ -1103,9 +1104,7 @@ static void doc_state_log_dropdown_owner_transition(DocState* state,
     jw_key(&w, "data");
     jw_obj_begin(&w);
         jw_kv_str(&w, "scope", "doc");
-        jw_key(&w, "anchor");
-        jw_obj_begin(&w);
-        jw_obj_end(&w);
+        state_transition_write_anchor(&w, state, NULL);
         jw_kv_str(&w, "name", "dropdown.owner");
         jw_key(&w, "old");
         jw_obj_begin(&w);
@@ -1131,9 +1130,7 @@ static void doc_state_log_context_menu_target_transition(DocState* state,
     jw_key(&w, "data");
     jw_obj_begin(&w);
         jw_kv_str(&w, "scope", "doc");
-        jw_key(&w, "anchor");
-        jw_obj_begin(&w);
-        jw_obj_end(&w);
+        state_transition_write_anchor(&w, state, NULL);
         jw_kv_str(&w, "name", "context_menu.target");
         jw_key(&w, "old");
         jw_obj_begin(&w);
@@ -1159,9 +1156,7 @@ static void doc_state_log_context_menu_hover_transition(DocState* state,
     jw_key(&w, "data");
     jw_obj_begin(&w);
         jw_kv_str(&w, "scope", "doc");
-        jw_key(&w, "anchor");
-        jw_obj_begin(&w);
-        jw_obj_end(&w);
+        state_transition_write_anchor(&w, state, NULL);
         jw_kv_str(&w, "name", "context_menu.hover");
         jw_key(&w, "old");
         jw_obj_begin(&w);
@@ -1188,9 +1183,7 @@ static void doc_state_log_view_target_transition(DocState* state,
     jw_key(&w, "data");
     jw_obj_begin(&w);
         jw_kv_str(&w, "scope", "doc");
-        jw_key(&w, "anchor");
-        jw_obj_begin(&w);
-        jw_obj_end(&w);
+        state_transition_write_anchor(&w, state, NULL);
         jw_kv_str(&w, "name", name ? name : "target");
         jw_key(&w, "old");
         jw_obj_begin(&w);
@@ -1215,9 +1208,7 @@ static void doc_state_log_bool_transition(DocState* state, const char* name,
     jw_key(&w, "data");
     jw_obj_begin(&w);
         jw_kv_str(&w, "scope", "doc");
-        jw_key(&w, "anchor");
-        jw_obj_begin(&w);
-        jw_obj_end(&w);
+        state_transition_write_anchor(&w, state, NULL);
         jw_kv_str(&w, "name", name ? name : "doc.state");
         jw_key(&w, "old");
         jw_obj_begin(&w);
@@ -1267,6 +1258,7 @@ static ViewState* form_view_state_get(DocState* state, View* view) {
 static ViewState* form_view_state_get_or_create(DocState* state, View* view, FormControlProp* form) {
     if (!state || !view || !form) return NULL;
     ViewState* view_state = view_state_get(state, view);
+    bool should_seed_from_form = false;
     if (view_state) {
         if (view_state->kind != VIEW_STATE_BASE && view_state->kind != VIEW_STATE_FORM_CONTROL) {
             log_error("form_view_state_get_or_create: incompatible ViewState kind %d", view_state->kind);
@@ -1274,22 +1266,26 @@ static ViewState* form_view_state_get_or_create(DocState* state, View* view, For
         }
         if (view_state->kind == VIEW_STATE_FORM_CONTROL) return view_state;
         view_state->kind = VIEW_STATE_FORM_CONTROL;
+        should_seed_from_form = true;
     } else {
         view_state = view_state_get_or_create(state, view, VIEW_STATE_FORM_CONTROL);
         if (!view_state) return NULL;
+        should_seed_from_form = true;
     }
 
-    view_state->data.form.disabled = form->disabled;
-    view_state->data.form.readonly = form->readonly;
-    view_state->data.form.required = form->required;
-    view_state->data.form.checked = form->checked;
-    view_state->data.form.dropdown_open = form->dropdown_open;
-    view_state->data.form.selected_index = form->selected_index;
-    view_state->data.form.hover_index = form->hover_index;
-    view_state->data.form.range_value = form->range_value;
-    view_state->data.form.selection_start = form->selection_start;
-    view_state->data.form.selection_end = form->selection_end;
-    view_state->data.form.selection_direction = form->selection_direction;
+    if (should_seed_from_form) {
+        view_state->data.form.disabled = form->disabled;
+        view_state->data.form.readonly = form->readonly;
+        view_state->data.form.required = form->required;
+        view_state->data.form.checked = form->checked;
+        view_state->data.form.dropdown_open = form->dropdown_open;
+        view_state->data.form.selected_index = form->selected_index;
+        view_state->data.form.hover_index = form->hover_index;
+        view_state->data.form.range_value = form->range_value;
+        view_state->data.form.selection_start = form->selection_start;
+        view_state->data.form.selection_end = form->selection_end;
+        view_state->data.form.selection_direction = form->selection_direction;
+    }
     return view_state;
 }
 
@@ -1809,9 +1805,6 @@ void form_control_set_value(DocState* state, View* view, const char* value, uint
         view_state->data.form.selection_start = block->form->selection_start;
         view_state->data.form.selection_end = block->form->selection_end;
         view_state->data.form.selection_direction = block->form->selection_direction;
-        view_state->data.form.range_value = block->form->range_value;
-        view_state->data.form.selected_index = block->form->selected_index;
-        view_state->data.form.hover_index = block->form->hover_index;
     }
 
     form_state_mark_dirty(state);
@@ -1894,14 +1887,6 @@ void form_control_sync_text_control_state(DocState* state, View* view) {
     view_state->data.form.selection_start = form->selection_start;
     view_state->data.form.selection_end = form->selection_end;
     view_state->data.form.selection_direction = form->selection_direction;
-    view_state->data.form.disabled = form->disabled;
-    view_state->data.form.readonly = form->readonly;
-    view_state->data.form.required = form->required;
-    view_state->data.form.checked = form->checked;
-    view_state->data.form.dropdown_open = form->dropdown_open;
-    view_state->data.form.selected_index = form->selected_index;
-    view_state->data.form.hover_index = form->hover_index;
-    view_state->data.form.range_value = form->range_value;
 }
 
 int form_control_get_selected_index(DocState* state, View* view) {
@@ -2227,12 +2212,13 @@ void form_control_open_dropdown(DocState* state, View* view) {
     ViewState* view_state = form_view_state_get_or_create(state, view, form);
     bool old_open = view_state ? view_state->data.form.dropdown_open != 0 : form->dropdown_open != 0;
     int old_hover = view_state ? view_state->data.form.hover_index : form->hover_index;
+    int selected_index = view_state ? view_state->data.form.selected_index : form->selected_index;
     if (view_state) {
         view_state->data.form.dropdown_open = 1;
-        view_state->data.form.hover_index = form->selected_index;
+        view_state->data.form.hover_index = selected_index;
     }
     form->dropdown_open = 1;
-    form->hover_index = form->selected_index;  // Start with selected option highlighted
+    form->hover_index = selected_index;
     view_state_log_bool_transition(state, view, "form.dropdown_open", old_open, true);
     view_state_log_int_transition(state, view, "form.hover_index", old_hover, form->hover_index);
     form_state_mark_dirty(state);

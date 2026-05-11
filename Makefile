@@ -1861,6 +1861,10 @@ check-state-store:
 		radiant/ \
 		| grep -v 'radiant/state_store.cpp' \
 		|| true); \
+	VIEW_STATE_WRITE_VIOLATIONS=$$(grep -rnE --include='*.cpp' --include='*.hpp' -- '->data\.(form|scroll)\.[A-Za-z0-9_]+[[:space:]]*([+*/%-]?=|\+\+|--)|->flags\.(hovered|active|focused)[[:space:]]*([+*/%-]?=|\+\+|--)' \
+		radiant/ \
+		| grep -v 'radiant/state_store.cpp' \
+		|| true); \
 	if [ -n "$$FORM_MIRROR_VIOLATIONS" ]; then \
 		VIOLATIONS="$${VIOLATIONS}$${VIOLATIONS:+\n}External form mirror reads/writes:\n$$FORM_MIRROR_VIOLATIONS"; \
 	fi; \
@@ -1869,6 +1873,9 @@ check-state-store:
 	fi; \
 	if [ -n "$$SCROLL_API_VIOLATIONS" ]; then \
 		VIOLATIONS="$${VIOLATIONS}$${VIOLATIONS:+\n}External pane-only scroll API usage:\n$$SCROLL_API_VIOLATIONS"; \
+	fi; \
+	if [ -n "$$VIEW_STATE_WRITE_VIOLATIONS" ]; then \
+		VIOLATIONS="$${VIOLATIONS}$${VIOLATIONS:+\n}External ViewState direct writes:\n$$VIEW_STATE_WRITE_VIOLATIONS"; \
 	fi; \
 	if [ -n "$$VIOLATIONS" ]; then \
 		echo "❌ StateStore migration invariant violations:"; \

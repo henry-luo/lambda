@@ -1299,6 +1299,45 @@ static SimEvent* parse_sim_event(MapReader& reader) {
             return NULL;
         }
     }
+    else if (strcmp(type_str, "assert_state_store") == 0) {
+        ev->type = SIM_EVENT_ASSERT_STATE_STORE;
+        parse_target(reader, ev);
+        if (reader.has("view_state")) {
+            ev->has_expected_view_state = true;
+            ev->expected_view_state_exists = reader.get("view_state").asBool();
+        }
+        const char* kind = reader.get("kind").cstring();
+        if (kind) ev->expected_view_state_kind = mem_strdup(kind, MEM_CAT_LAYOUT);
+        if (reader.has("weak_ref")) {
+            ev->has_expected_weak_ref = true;
+            ev->expected_weak_ref = reader.get("weak_ref").asBool();
+        }
+        if (reader.has("doc_scroll_x")) {
+            ev->has_expected_doc_scroll_x = true;
+            ItemReader sx = reader.get("doc_scroll_x");
+            ev->expected_doc_scroll_x = (float)(sx.isFloat() ? sx.asFloat() : sx.asInt());
+        }
+        if (reader.has("doc_scroll_y")) {
+            ev->has_expected_doc_scroll_y = true;
+            ItemReader sy = reader.get("doc_scroll_y");
+            ev->expected_doc_scroll_y = (float)(sy.isFloat() ? sy.asFloat() : sy.asInt());
+        }
+        if (reader.has("view_scroll_x")) {
+            ev->has_expected_view_scroll_x = true;
+            ItemReader sx = reader.get("view_scroll_x");
+            ev->expected_view_scroll_x = (float)(sx.isFloat() ? sx.asFloat() : sx.asInt());
+        }
+        if (reader.has("view_scroll_y")) {
+            ev->has_expected_view_scroll_y = true;
+            ItemReader sy = reader.get("view_scroll_y");
+            ev->expected_view_scroll_y = (float)(sy.isFloat() ? sy.asFloat() : sy.asInt());
+        }
+        {
+            ItemReader st = reader.get("tolerance");
+            ev->scroll_tolerance = (float)(st.isFloat() ? st.asFloat() : st.asInt());
+        }
+        if (ev->scroll_tolerance <= 0) ev->scroll_tolerance = 1.0f;
+    }
     else if (strcmp(type_str, "navigate") == 0) {
         ev->type = SIM_EVENT_NAVIGATE;
         const char* url = reader.get("url").cstring();
@@ -1743,6 +1782,7 @@ void event_sim_free(EventSimContext* ctx) {
             if (ev->assert_equals) mem_free(ev->assert_equals);
             if (ev->option_value) mem_free(ev->option_value);
             if (ev->option_label) mem_free(ev->option_label);
+            if (ev->expected_view_state_kind) mem_free(ev->expected_view_state_kind);
             if (ev->js_code) mem_free(ev->js_code);
             if (ev->replay_event_name) mem_free(ev->replay_event_name);
             mem_free(ev);
@@ -3321,6 +3361,116 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             }
             if (passed) {
                 log_info("event_sim: assert_count PASS - '%s' count=%d", ev->target_selector, actual);
+                ctx->pass_count++;
+            } else {
+                ctx->fail_count++;
+            }
+            break;
+        }
+
+        case SIM_EVENT_ASSERT_STATE_STORE: {
+            DomDocument* doc = uicon->document;
+            if (!doc) {
+                log_error("event_sim: assert_state_store - no document");
+                ctx->fail_count++;
+                break;
+            }
+
+            DocState* state = (DocState*)doc->state;
+            bool passed = true;
+            if (!doc->state_store) {
+                log_error("event_sim: assert_state_store FAIL - document has no StateStore");
+                passed = false;
+            }
+            if (!state) {
+                log_error("event_sim: assert_state_store FAIL - document has no DocState projection");
+                passed = false;
+            }
+            if (doc->state_store && doc->state_store->doc_state != state) {
+                log_error("event_sim: assert_state_store FAIL - StateStore DocState does not match document projection");
+                passed = false;
+            }
+
+            View* elem = NULL;
+            if (ev->target_selector || ev->target_text) {
+                elem = resolve_target_element(ev, doc);
+                if (!elem) {
+                    log_error("event_sim: assert_state_store FAIL - target element not found");
+                    passed = false;
+                }
+            }
+
+            ViewState* view_state = (state && elem) ? view_state_get(state, elem) : NULL;
+            if (elem && ev->has_expected_view_state && ((view_state != NULL) != ev->expected_view_state_exists)) {
+                log_error("event_sim: assert_state_store FAIL - expected ViewState %s, got %s",
+                    ev->expected_view_state_exists ? "present" : "absent",
+                    view_state ? "present" : "absent");
+                passed = false;
+            }
+            if (elem && ev->has_expected_weak_ref && ((elem->view_state_ref == view_state && view_state != NULL) != ev->expected_weak_ref)) {
+                log_error("event_sim: assert_state_store FAIL - weak ViewState ref expectation mismatch");
+                passed = false;
+            }
+            if (elem && ev->expected_view_state_kind) {
+                const char* actual_kind = "none";
+                if (view_state) {
+                    switch (view_state->kind) {
+                        case VIEW_STATE_BASE: actual_kind = "base"; break;
+                        case VIEW_STATE_SCROLL: actual_kind = "scroll"; break;
+                        case VIEW_STATE_FORM_CONTROL: actual_kind = "form"; break;
+                        case VIEW_STATE_CUSTOM: actual_kind = "custom"; break;
+                        default: actual_kind = "unknown"; break;
+                    }
+                }
+                if (strcmp(actual_kind, ev->expected_view_state_kind) != 0) {
+                    log_error("event_sim: assert_state_store FAIL - expected kind '%s', got '%s'",
+                        ev->expected_view_state_kind, actual_kind);
+                    passed = false;
+                }
+            }
+
+            float tol = ev->scroll_tolerance > 0.0f ? ev->scroll_tolerance : 1.0f;
+            if (state && (ev->has_expected_doc_scroll_x || ev->has_expected_doc_scroll_y)) {
+                if (ev->has_expected_doc_scroll_x &&
+                    (state->scroll_x < ev->expected_doc_scroll_x - tol || state->scroll_x > ev->expected_doc_scroll_x + tol)) {
+                    log_error("event_sim: assert_state_store FAIL - doc scroll_x expected %.1f, got %.1f",
+                        ev->expected_doc_scroll_x, state->scroll_x);
+                    passed = false;
+                }
+                if (ev->has_expected_doc_scroll_y &&
+                    (state->scroll_y < ev->expected_doc_scroll_y - tol || state->scroll_y > ev->expected_doc_scroll_y + tol)) {
+                    log_error("event_sim: assert_state_store FAIL - doc scroll_y expected %.1f, got %.1f",
+                        ev->expected_doc_scroll_y, state->scroll_y);
+                    passed = false;
+                }
+            }
+
+            if (elem && (ev->has_expected_view_scroll_x || ev->has_expected_view_scroll_y)) {
+                if (!elem->is_block()) {
+                    log_error("event_sim: assert_state_store FAIL - scroll target is not a block view");
+                    passed = false;
+                } else {
+                    ViewBlock* block = (ViewBlock*)elem;
+                    float actual_x = 0.0f, actual_y = 0.0f;
+                    void* pane = block->scroller ? (void*)block->scroller->pane : NULL;
+                    scroll_state_get_position_for_view(state, elem, pane, &actual_x, &actual_y, NULL, NULL);
+                    if (ev->has_expected_view_scroll_x &&
+                        (actual_x < ev->expected_view_scroll_x - tol || actual_x > ev->expected_view_scroll_x + tol)) {
+                        log_error("event_sim: assert_state_store FAIL - view scroll_x expected %.1f, got %.1f",
+                            ev->expected_view_scroll_x, actual_x);
+                        passed = false;
+                    }
+                    if (ev->has_expected_view_scroll_y &&
+                        (actual_y < ev->expected_view_scroll_y - tol || actual_y > ev->expected_view_scroll_y + tol)) {
+                        log_error("event_sim: assert_state_store FAIL - view scroll_y expected %.1f, got %.1f",
+                            ev->expected_view_scroll_y, actual_y);
+                        passed = false;
+                    }
+                }
+            }
+
+            if (passed) {
+                log_info("event_sim: assert_state_store PASS");
                 ctx->pass_count++;
             } else {
                 ctx->fail_count++;

@@ -2878,6 +2878,7 @@ bool is_view_focusable(View* view) {
         // is not part of the tabbing order. The HTML/ARIA spec says
         // disabled form elements are inert.
         DomElement* delem = (DomElement*)view;
+        DocState* state = delem->doc ? (DocState*)delem->doc->state : NULL;
         if (delem->item_prop_type == DomElement::ITEM_PROP_FORM &&
             delem->form && form_control_is_disabled(state, (View*)delem)) {
             return false;

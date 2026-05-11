@@ -1,0 +1,36 @@
+{
+  "name": "StateStore refactor integration coverage",
+  "html": "test/ui/test_state_store_refactor.html",
+  "viewport_width": 900,
+  "viewport_height": 420,
+  "events": [
+    {"type": "assert_state_store"},
+    {"type": "assert_state", "target": {"selector": "#enabled-btn"}, "state": ":enabled", "value": true},
+    {"type": "assert_state", "target": {"selector": "#disabled-btn"}, "state": ":disabled", "value": true},
+    {"type": "assert_state_store", "target": {"selector": "#enabled-btn"}, "view_state": false, "weak_ref": false},
+
+    {"type": "mouse_move", "target": {"selector": "#hover-target"}},
+    {"type": "assert_state", "target": {"selector": "#hover-target"}, "state": ":hover", "value": true},
+    {"type": "assert_style", "target": {"selector": "#hover-target"}, "property": "background-color", "equals": "rgb(120, 180, 240)"},
+    {"type": "assert_state_store", "target": {"selector": "#hover-target"}, "view_state": true, "kind": "base", "weak_ref": true},
+
+    {"type": "focus", "target": {"selector": "#name"}},
+    {"type": "assert_focus", "target": {"selector": "#name"}},
+    {"type": "assert_state", "target": {"selector": "#name"}, "state": ":focus", "value": true},
+    {"type": "assert_state_store", "target": {"selector": "#name"}, "view_state": true, "kind": "form", "weak_ref": true},
+
+    {"type": "check", "target": {"selector": "#agree"}, "checked": true},
+    {"type": "assert_checked", "target": {"selector": "#agree"}, "checked": true},
+    {"type": "assert_state", "target": {"selector": "#agree"}, "state": ":checked", "value": true},
+    {"type": "assert_state_store", "target": {"selector": "#agree"}, "view_state": true, "kind": "form", "weak_ref": true},
+
+    {"type": "scroll_to", "y": 480},
+    {"type": "assert_scroll", "x": 0, "y": 480, "tolerance": 5},
+    {"type": "assert_state_store", "target": {"selector": "html"}, "view_state": true, "kind": "scroll", "weak_ref": true, "view_scroll_x": 0, "view_scroll_y": 480, "doc_scroll_x": 0, "doc_scroll_y": 480, "tolerance": 5},
+
+    {"type": "mouse_move", "target": {"selector": "#section-2"}},
+    {"type": "assert_state", "target": {"selector": "#hover-target"}, "state": ":hover", "value": false},
+    {"type": "assert_scroll", "x": 0, "y": 480, "tolerance": 5},
+    {"type": "assert_state_store", "target": {"selector": "html"}, "view_state": true, "kind": "scroll", "view_scroll_y": 480, "doc_scroll_y": 480, "tolerance": 5}
+  ]
+}
