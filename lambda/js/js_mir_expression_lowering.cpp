@@ -5441,6 +5441,50 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
     if (call->callee && call->callee->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
         JsMemberNode* m = (JsMemberNode*)call->callee;
         if (m->computed) {
+            bool is_super_computed_call = false;
+            if (m->object && m->object->node_type == JS_AST_NODE_IDENTIFIER) {
+                JsIdentifierNode* obj_id = (JsIdentifierNode*)m->object;
+                is_super_computed_call = obj_id->name && obj_id->name->len == 5 &&
+                    strncmp(obj_id->name->chars, "super", 5) == 0;
+            }
+            if (is_super_computed_call) {
+                MIR_reg_t recv = jm_call_0(mt, "js_get_this", MIR_T_I64);
+                int recv_key_spill = -1;
+                if (mt->in_generator && jm_has_yield(m->property)) {
+                    recv_key_spill = jm_gen_spill_save(mt, recv);
+                }
+                MIR_reg_t key = jm_transpile_box_item(mt, m->property);
+                if (recv_key_spill >= 0) {
+                    jm_gen_spill_load(mt, recv, recv_key_spill);
+                }
+
+                bool args_have_yield = false;
+                if (mt->in_generator) {
+                    for (JsAstNode* chk = call->arguments; chk; chk = chk->next) {
+                        if (jm_has_yield(chk)) { args_have_yield = true; break; }
+                    }
+                }
+
+                MIR_reg_t fn = jm_call_2(mt, "js_super_property_get", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+                int recv_arg_spill = -1, fn_arg_spill = -1;
+                if (args_have_yield) {
+                    recv_arg_spill = jm_gen_spill_save(mt, recv);
+                    fn_arg_spill = jm_gen_spill_save(mt, fn);
+                }
+                MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
+                if (recv_arg_spill >= 0) {
+                    jm_gen_spill_load(mt, recv, recv_arg_spill);
+                    jm_gen_spill_load(mt, fn, fn_arg_spill);
+                }
+                return jm_call_4(mt, "js_call_function", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, fn),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                    MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+            }
+
             MIR_reg_t recv = jm_transpile_box_item(mt, m->object);
             int recv_key_spill = -1;
             if (mt->in_generator && jm_has_yield(m->property)) {
@@ -7778,6 +7822,15 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
         }
     }
 
+    // super.x / super[expr] property access must bypass local receiver fast paths.
+    if (mem->object && mem->object->node_type == JS_AST_NODE_IDENTIFIER) {
+        JsIdentifierNode* obj_id = (JsIdentifierNode*)mem->object;
+        if (obj_id->name && obj_id->name->len == 5 && strncmp(obj_id->name->chars, "super", 5) == 0) {
+            JsMirReference ref = jm_emit_reference(mt, (JsAstNode*)mem);
+            return jm_emit_get_value(mt, &ref);
+        }
+    }
+
     // P9: .length for known typed arrays → inline memory load (no function call)
     // Note: skip when optional chaining (?.) — optional chaining needs null/undefined guard first
     if (!mem->computed && !mem->optional && mem->property &&
@@ -8081,15 +8134,6 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
                     MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)p4_slot));
             }
-        }
-    }
-
-    // super.x property access — use js_super_property_get for correct receiver binding
-    if (mem->object && mem->object->node_type == JS_AST_NODE_IDENTIFIER) {
-        JsIdentifierNode* obj_id = (JsIdentifierNode*)mem->object;
-        if (obj_id->name && obj_id->name->len == 5 && strncmp(obj_id->name->chars, "super", 5) == 0) {
-            JsMirReference ref = jm_emit_reference(mt, (JsAstNode*)mem);
-            return jm_emit_get_value(mt, &ref);
         }
     }
 
