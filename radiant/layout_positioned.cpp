@@ -87,6 +87,17 @@ static float get_preferred_aspect_ratio_for_positioned(ViewBlock* block) {
     return 0.0f;
 }
 
+static bool view_tree_has_table_flow(View* view) {
+    if (!view || !view->is_element()) return false;
+    ViewElement* element = (ViewElement*)view;
+    ViewBlock* block = view->is_block() ? (ViewBlock*)view : nullptr;
+    if (block && block->display.inner == CSS_VALUE_TABLE) return true;
+    for (View* child = element->first_child; child; child = child->next_sibling) {
+        if (view_tree_has_table_flow(child)) return true;
+    }
+    return false;
+}
+
 // Forward declarations
 ViewBlock* find_containing_block(ViewBlock* element, CssEnum position_type);
 // adjust_min_max_* and adjust_border_padding_* declared in layout.hpp
@@ -893,6 +904,10 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
             }
         }
         float available_width = max(cb_width - used_left - used_right - margin_left - margin_right, 0.0f);
+        if (block->display.inner == CSS_VALUE_TABLE && available_width > cb_width) {
+            available_width = cb_width;
+            log_debug("[ABS POS] capped abspos table available width to containing block: %.1f", available_width);
+        }
 
         // Measure intrinsic widths (returns border-box sizes including element's padding+border)
         IntrinsicSizes intrinsic = measure_element_intrinsic_widths(lycon, (DomElement*)block);
@@ -1023,7 +1038,7 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     if (has_height) {
         content_height = lycon->block.given_height;
         log_debug("[ABS POS] using explicit height: %.1f", content_height);
-    } else if (get_preferred_aspect_ratio_for_positioned(block) > 0.0f && content_width >= 0.0f) {
+    } else if (get_preferred_aspect_ratio_for_positioned(block) > 0.0f && content_width > 0.0f) {
         // CSS Sizing: a preferred aspect ratio transfers a definite width to
         // the auto height before abspos vertical constraint resolution.
         float aspect_ratio = get_preferred_aspect_ratio_for_positioned(block);
@@ -1065,6 +1080,17 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     // CSS 2.1 §10.7: Apply min-height/max-height constraints BEFORE position calculation.
     // Same rationale as horizontal: bottom-positioned elements need the clamped height.
     content_height = adjust_min_max_height(block, content_height);
+
+    float preferred_aspect_ratio = get_preferred_aspect_ratio_for_positioned(block);
+    if (!has_width && preferred_aspect_ratio > 0.0f && content_height > 0.0f &&
+        !(block->position->has_left && block->position->has_right && !is_intrinsic_width && !is_replaced)) {
+        float aspect_width = content_height * preferred_aspect_ratio;
+        if (aspect_width > content_width) {
+            content_width = aspect_width;
+            log_debug("[ABS POS] width from definite height/aspect-ratio: height=%.1f * ratio=%.3f -> width=%.1f",
+                      content_height, preferred_aspect_ratio, content_width);
+        }
+    }
 
     // CSS 2.1 §10.6.4: Solve auto margins for vertical axis
     // When top, bottom, and height are all NOT auto, auto margins absorb remaining space.
@@ -1682,12 +1708,12 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     // layout_grid_content. Trust the flex-calculated width if the container has children or
     // border/padding (the flex algorithm handles both cases now that layout_block_content
     // dispatches to flex even for empty containers).
-    bool has_flex_calculated_width = is_flex_container && block->width > 0 &&
+    bool has_flex_calculated_width = is_flex_container &&
         (block->first_child != nullptr || (block->bound && (
             block->bound->padding.left + block->bound->padding.right +
             (block->bound->border ? block->bound->border->width.left + block->bound->border->width.right : 0)
         ) > 0));
-    bool has_grid_calculated_width = is_grid_container && block->width > 0;
+    bool has_grid_calculated_width = is_grid_container;
     // Form controls (checkbox, radio, etc.) have intrinsic sizes set by layout_form_control.
     // Don't overwrite with flow-based auto-sizing (void elements have 0 flow content).
     bool has_form_intrinsic_width = block->item_prop_type == DomElement::ITEM_PROP_FORM &&
@@ -1703,7 +1729,36 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
             // CSS 2.1 §10.3.7: non-replaced abspos auto width is resolved by
             // shrink-to-fit before content layout. Wrapped line widths are an
             // effect of that used width, not a second sizing pass.
-            block->width = pre_layout_width;
+            bool has_child_pct_width = false;
+            bool has_table_flow_child = false;
+            for (View* ch = block->first_child; ch; ch = ch->next_sibling) {
+                if (!ch->is_element()) continue;
+                ViewBlock* child_block = (ViewBlock*)ch;
+                if (child_block->blk && !isnan(child_block->blk->given_width_percent)) {
+                    has_child_pct_width = true;
+                }
+                if (view_tree_has_table_flow(child_block)) {
+                    has_table_flow_child = true;
+                }
+            }
+
+            float final_width = pre_layout_width;
+            if (!has_child_pct_width && lycon->block.max_width > 0.0f) {
+                float padding_right = block->bound ? block->bound->padding.right : 0;
+                float border_right = (block->bound && block->bound->border) ? block->bound->border->width.right : 0;
+                float post_layout_flow_width = lycon->block.max_width + padding_right + border_right;
+                if (post_layout_flow_width > final_width) {
+                    final_width = post_layout_flow_width;
+                    log_debug("[ABS POS] expanding shrink-to-fit width %.1f -> %.1f from post-layout flow",
+                              pre_layout_width, final_width);
+                }
+                float table_flow_width = post_layout_flow_width;
+                if (has_table_flow_child && table_flow_width > 0.0f && table_flow_width < final_width) {
+                    final_width = table_flow_width;
+                    log_debug("[ABS POS] tightening table shrink-to-fit width %.1f -> %.1f", pre_layout_width, final_width);
+                }
+            }
+            block->width = final_width;
             log_debug("[ABS POS] preserving shrink-to-fit width %.1f", block->width);
         } else {
             // Note: max_width already includes left border + left padding from setup_inline

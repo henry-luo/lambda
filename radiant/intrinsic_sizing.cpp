@@ -1827,6 +1827,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             // Helper: count columns in a row (accounting for colspan)
             auto count_cells = [&get_cell_colspan](DomElement* row_elem) -> int {
                 int n = 0;
+                bool in_non_cell_run = false;
                 for (DomNode* cell = row_elem->first_child; cell; cell = cell->next_sibling) {
                     if (!cell->is_element()) continue;
                     DomElement* cell_elem = cell->as_element();
@@ -1834,7 +1835,13 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     DisplayValue cell_display = resolve_display_value((void*)cell_elem);
                     bool is_cell = (cell_display.inner == CSS_VALUE_TABLE_CELL ||
                                     cell_elem->tag() == HTM_TAG_TD || cell_elem->tag() == HTM_TAG_TH);
-                    if (is_cell) n += get_cell_colspan(cell_elem, cell_view);
+                    if (is_cell) {
+                        n += get_cell_colspan(cell_elem, cell_view);
+                        in_non_cell_run = false;
+                    } else if (!in_non_cell_run) {
+                        n++;
+                        in_non_cell_run = true;
+                    }
                 }
                 return n;
             };
@@ -1945,6 +1952,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             // then distribute multi-span cells across their spanned columns.
             for_each_row([&](DomElement* row_elem) {
                 int col = 0;
+                bool in_non_cell_run = false;
                 for (DomNode* cell = row_elem->first_child; cell; cell = cell->next_sibling) {
                     if (!cell->is_element()) continue;
                     DomElement* cell_elem = cell->as_element();
@@ -1952,13 +1960,14 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     DisplayValue cell_display = resolve_display_value((void*)cell_elem);
                     bool is_cell = (cell_display.inner == CSS_VALUE_TABLE_CELL ||
                                     cell_elem->tag() == HTM_TAG_TD || cell_elem->tag() == HTM_TAG_TH);
-                    if (!is_cell) continue;
-                    int span = get_cell_colspan(cell_elem, cell_view);
+                    int span = is_cell ? get_cell_colspan(cell_elem, cell_view) : 1;
+                    if (!is_cell && in_non_cell_run) continue;
                     if (col + span > num_columns) break;
+                    in_non_cell_run = !is_cell;
                     if (span == 1) {
                         IntrinsicSizes cell_sizes = measure_element_intrinsic_widths(lycon, cell_elem);
                         float extra = 0;
-                        if (!cell_view->bound) {
+                        if (is_cell && !cell_view->bound) {
                             bool css_sets_padding = false;
                             if (cell_elem->specified_style) {
                                 css_sets_padding =
@@ -1976,6 +1985,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                         if (cmax > col_max[col]) col_max[col] = cmax;
                     }
                     col += span;
+                    if (is_cell) in_non_cell_run = false;
                 }
             });
 
@@ -1984,6 +1994,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             // cell is less than the cell's intrinsic width, distribute the deficit evenly.
             for_each_row([&](DomElement* row_elem) {
                 int col = 0;
+                bool in_non_cell_run = false;
                 for (DomNode* cell = row_elem->first_child; cell; cell = cell->next_sibling) {
                     if (!cell->is_element()) continue;
                     DomElement* cell_elem = cell->as_element();
@@ -1991,13 +2002,14 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     DisplayValue cell_display = resolve_display_value((void*)cell_elem);
                     bool is_cell = (cell_display.inner == CSS_VALUE_TABLE_CELL ||
                                     cell_elem->tag() == HTM_TAG_TD || cell_elem->tag() == HTM_TAG_TH);
-                    if (!is_cell) continue;
-                    int span = get_cell_colspan(cell_elem, cell_view);
+                    int span = is_cell ? get_cell_colspan(cell_elem, cell_view) : 1;
+                    if (!is_cell && in_non_cell_run) continue;
                     if (col + span > num_columns) break;
+                    in_non_cell_run = !is_cell;
                     if (span > 1) {
                         IntrinsicSizes cell_sizes = measure_element_intrinsic_widths(lycon, cell_elem);
                         float extra = 0;
-                        if (!cell_view->bound) {
+                        if (is_cell && !cell_view->bound) {
                             bool css_sets_padding = false;
                             if (cell_elem->specified_style) {
                                 css_sets_padding =
@@ -2036,6 +2048,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                         }
                     }
                     col += span;
+                    if (is_cell) in_non_cell_run = false;
                 }
             });
 

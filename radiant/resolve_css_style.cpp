@@ -1854,7 +1854,13 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
                 if (zero_glyph && zero_glyph->advance_x > 0.0f) {
                     float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0.0f)
                         ? lycon->ui_context->pixel_ratio : 1.0f;
-                    result = num * (zero_glyph->advance_x / pixel_ratio);
+                    float advance = zero_glyph->advance_x / pixel_ratio;
+                    if (lycon->font.style && lycon->font.style->font_size > 0.0f &&
+                        lycon->font.current_font_size > 0.0f &&
+                        lycon->font.style->font_size != lycon->font.current_font_size) {
+                        advance *= lycon->font.current_font_size / lycon->font.style->font_size;
+                    }
+                    result = num * advance;
                 } else {
                     result = num * lycon->font.current_font_size * 0.5f;
                 }

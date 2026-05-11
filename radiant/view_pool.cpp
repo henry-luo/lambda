@@ -1149,6 +1149,10 @@ static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int ind
         current = current->next_sibling;
     }
 
+    if (text_node_count > 1 && current && current->view_type == RDT_VIEW_INLINE) {
+        text_node_count = 1;
+    }
+
     // If only one text node, use the regular print function
     if (text_node_count == 1) {
         // Output single text node with all its rects
