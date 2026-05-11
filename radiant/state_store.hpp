@@ -706,6 +706,10 @@ bool focus_within(DocState* state, View* view);
 void doc_state_set_hover_target(DocState* state, View* target);
 void doc_state_set_active_target(DocState* state, View* target);
 void doc_state_set_drag_state(DocState* state, View* target, bool dragging);
+DragDropState* doc_state_begin_drag_drop(DocState* state, View* source,
+                                         float start_x, float start_y,
+                                         const char* drag_data);
+void doc_state_clear_drag_drop(DocState* state);
 
 // ============================================================================
 // Doc-Level Scheduling / Viewport State API

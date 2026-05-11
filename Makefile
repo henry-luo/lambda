@@ -1848,10 +1848,9 @@ check-state-store:
 		--include='*.c' --include='*.cpp' --include='*.h' --include='*.hpp' \
 		| grep -v 'test/css/test_css_dom_integration.cpp' \
 		|| true); \
-	FORM_MIRROR_VIOLATIONS=$$(grep -rnE --include='*.cpp' 'form->(disabled|readonly|selected_index|hover_index|dropdown_open|checked|required|range_value|selection_start|selection_end|selection_direction)' \
-		radiant/ \
+	FORM_MIRROR_VIOLATIONS=$$(grep -rnE --include='*.cpp' '((form|[A-Za-z0-9_]+->form)->(disabled|readonly|selected_index|hover_index|dropdown_open|checked|required|range_value|selection_start|selection_end|selection_direction))' \
+		radiant/ lambda/js/ \
 		| grep -v 'radiant/state_store.cpp' \
-		| grep -v 'Mirror legacy selection' \
 		|| true); \
 	SCROLL_MIRROR_VIOLATIONS=$$(grep -rnE --include='*.cpp' -- '->(h_scroll_position|v_scroll_position|h_max_scroll|v_max_scroll)' \
 		radiant/ \
@@ -1862,6 +1861,10 @@ check-state-store:
 		| grep -v 'radiant/state_store.cpp' \
 		|| true); \
 	VIEW_STATE_WRITE_VIOLATIONS=$$(grep -rnE --include='*.cpp' --include='*.hpp' -- '->data\.(form|scroll)\.[A-Za-z0-9_]+[[:space:]]*([+*/%-]?=|\+\+|--)|->flags\.(hovered|active|focused)[[:space:]]*([+*/%-]?=|\+\+|--)' \
+		radiant/ \
+		| grep -v 'radiant/state_store.cpp' \
+		|| true); \
+	DOC_STATE_DRAG_DROP_VIOLATIONS=$$(grep -rnE --include='*.cpp' -- 'state->drag_drop[[:space:]]*=' \
 		radiant/ \
 		| grep -v 'radiant/state_store.cpp' \
 		|| true); \
@@ -1876,6 +1879,9 @@ check-state-store:
 	fi; \
 	if [ -n "$$VIEW_STATE_WRITE_VIOLATIONS" ]; then \
 		VIOLATIONS="$${VIOLATIONS}$${VIOLATIONS:+\n}External ViewState direct writes:\n$$VIEW_STATE_WRITE_VIOLATIONS"; \
+	fi; \
+	if [ -n "$$DOC_STATE_DRAG_DROP_VIOLATIONS" ]; then \
+		VIOLATIONS="$${VIOLATIONS}$${VIOLATIONS:+\n}External DocState drag_drop ownership writes:\n$$DOC_STATE_DRAG_DROP_VIOLATIONS"; \
 	fi; \
 	if [ -n "$$VIOLATIONS" ]; then \
 		echo "❌ StateStore migration invariant violations:"; \

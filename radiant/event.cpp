@@ -1742,12 +1742,7 @@ static void post_html_handler_rebuild(EventContext* evcon,
     // Clear stale view pointers in DocState — old views are now freed
     if (state) {
         if (state->cursor) state->cursor->view = nullptr;
-        if (state->drag_drop) {
-            state->drag_drop->source_view = nullptr;
-            state->drag_drop->drop_target = nullptr;
-            state->drag_drop->active = false;
-            state->drag_drop->pending = false;
-        }
+        doc_state_clear_drag_drop(state);
         // Clear per-view state entries — they reference old view pointers as keys
         if (state->state_map) {
             hashmap_clear(state->state_map, false);
@@ -3881,9 +3876,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
                     selection_extend(state, char_offset);
                     caret_set(state, anchor_view, char_offset);
-                    // Mirror legacy selection into form->selection_start/end
-                    // so render_form's text-input branch shows the highlight
-                    // live during the drag.
+                    // Refresh StateStore text-control selection projection so
+                    // render_form shows the live drag highlight.
                     tc_sync_legacy_to_form(anchor_elem, state);
                     uint32_t sel_start = 0, sel_end = 0;
                     form_control_get_selection(state, (View*)anchor_elem, &sel_start, &sel_end, NULL);
@@ -4557,23 +4551,14 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 node = node->parent;
             }
             if (draggable_elem) {
-                // allocate drag-drop state on state arena
-                if (!state->drag_drop) {
-                    state->drag_drop = (DragDropState*)arena_alloc(state->arena, sizeof(DragDropState));
-                }
-                memset(state->drag_drop, 0, sizeof(DragDropState));
-                state->drag_drop->source_view = (View*)draggable_elem;
-                state->drag_drop->start_x = (float)btn_event->x;
-                state->drag_drop->start_y = (float)btn_event->y;
-                state->drag_drop->current_x = (float)btn_event->x;
-                state->drag_drop->current_y = (float)btn_event->y;
-                state->drag_drop->pending = true;
-                // read drag data type from dragdata attribute
                 const char* drag_data = dom_element_get_attribute(draggable_elem, "dragdata");
-                state->drag_drop->drag_data = drag_data;
-                log_debug("DRAG PENDING: source=%p start=(%.0f,%.0f) data=%s",
-                    draggable_elem, state->drag_drop->start_x, state->drag_drop->start_y,
-                    drag_data ? drag_data : "(none)");
+                DragDropState* drag_drop = doc_state_begin_drag_drop(state, (View*)draggable_elem,
+                    (float)btn_event->x, (float)btn_event->y, drag_data);
+                if (drag_drop) {
+                    log_debug("DRAG PENDING: source=%p start=(%.0f,%.0f) data=%s",
+                        draggable_elem, drag_drop->start_x, drag_drop->start_y,
+                        drag_data ? drag_data : "(none)");
+                }
             }
         }
 
@@ -4598,8 +4583,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     drag_handled = true;
                     evcon.need_repaint = true;
                 }
-                // clear drag state
-                memset(dd, 0, sizeof(DragDropState));
+                doc_state_clear_drag_drop(state);
             }
 
             // Clear :active state

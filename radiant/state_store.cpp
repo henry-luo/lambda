@@ -1385,6 +1385,37 @@ void doc_state_set_drag_state(DocState* state, View* target, bool dragging) {
     state_assert_after_mutation(state, "doc_state_set_drag_state");
 }
 
+DragDropState* doc_state_begin_drag_drop(DocState* state, View* source,
+                                         float start_x, float start_y,
+                                         const char* drag_data) {
+    if (!state || !source) return NULL;
+    if (!state->drag_drop) {
+        state->drag_drop = (DragDropState*)arena_alloc(state->arena, sizeof(DragDropState));
+    }
+    if (!state->drag_drop) return NULL;
+
+    DragDropState* drag_drop = state->drag_drop;
+    memset(drag_drop, 0, sizeof(DragDropState));
+    drag_drop->source_view = source;
+    drag_drop->start_x = start_x;
+    drag_drop->start_y = start_y;
+    drag_drop->current_x = start_x;
+    drag_drop->current_y = start_y;
+    drag_drop->pending = true;
+    drag_drop->drag_data = drag_data;
+
+    state->version++;
+    state_assert_after_mutation(state, "doc_state_begin_drag_drop");
+    return drag_drop;
+}
+
+void doc_state_clear_drag_drop(DocState* state) {
+    if (!state || !state->drag_drop) return;
+    memset(state->drag_drop, 0, sizeof(DragDropState));
+    state->version++;
+    state_assert_after_mutation(state, "doc_state_clear_drag_drop");
+}
+
 void doc_state_mark_dirty(DocState* state) {
     if (!state) return;
     if (state->is_dirty) return;
