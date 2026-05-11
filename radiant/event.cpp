@@ -2667,8 +2667,7 @@ static bool handle_select_click(EventContext* evcon, View* target) {
         // Close the dropdown
         log_debug("handle_select_click: closing dropdown");
         state->open_dropdown = nullptr;
-        select->form->dropdown_open = 0;
-        select->form->hover_index = -1;
+        form_control_close_dropdown(state, (View*)select);
         state->needs_repaint = true;
         return true;
     }
@@ -2677,16 +2676,14 @@ static bool handle_select_click(EventContext* evcon, View* target) {
     if (state->open_dropdown) {
         ViewBlock* prev_select = (ViewBlock*)state->open_dropdown;
         if (prev_select->form) {
-            prev_select->form->dropdown_open = 0;
-            prev_select->form->hover_index = -1;
+            form_control_close_dropdown(state, (View*)prev_select);
         }
     }
 
     // Open this dropdown
     log_debug("handle_select_click: opening dropdown with %d options", select->form->option_count);
     state->open_dropdown = select_view;
-    select->form->dropdown_open = 1;
-    select->form->hover_index = select->form->selected_index;
+    form_control_open_dropdown(state, (View*)select);
 
     // Calculate position (below the select, in absolute screen coords)
     // Walk up parent chain to get absolute position
@@ -2751,9 +2748,7 @@ static bool handle_dropdown_option_click(EventContext* evcon, float mouse_x, flo
 
         // Close dropdown
         state->open_dropdown = nullptr;
-        select->form->dropdown_open = 0;
-        select->form->hover_index = -1;
-        state->needs_repaint = true;
+        form_control_close_dropdown(state, (View*)select);
         return true;
     }
 
@@ -2777,8 +2772,7 @@ static void update_dropdown_hover(EventContext* evcon, float mouse_x, float mous
     if (mouse_x < state->dropdown_x || mouse_x > state->dropdown_x + state->dropdown_width ||
         mouse_y < state->dropdown_y || mouse_y > state->dropdown_y + state->dropdown_height) {
         if (select->form->hover_index != -1) {
-            select->form->hover_index = -1;
-            state->needs_repaint = true;
+            form_control_set_hover_index(state, (View*)select, -1);
         }
         return;
     }
@@ -2789,8 +2783,7 @@ static void update_dropdown_hover(EventContext* evcon, float mouse_x, float mous
 
     if (hover_index >= 0 && hover_index < select->form->option_count) {
         if (select->form->hover_index != hover_index) {
-            select->form->hover_index = hover_index;
-            state->needs_repaint = true;
+            form_control_set_hover_index(state, (View*)select, hover_index);
         }
     }
 }
@@ -2811,15 +2804,13 @@ static bool handle_dropdown_key(EventContext* evcon, int key) {
     switch (key) {
     case RDT_KEY_UP:
         if (hover > 0) {
-            select->form->hover_index = hover - 1;
-            state->needs_repaint = true;
+            form_control_set_hover_index(state, (View*)select, hover - 1);
         }
         return true;
 
     case RDT_KEY_DOWN:
         if (hover < count - 1) {
-            select->form->hover_index = hover + 1;
-            state->needs_repaint = true;
+            form_control_set_hover_index(state, (View*)select, hover + 1);
         }
         return true;
 
@@ -2827,17 +2818,13 @@ static bool handle_dropdown_key(EventContext* evcon, int key) {
         if (hover >= 0 && hover < count) {
             form_control_set_selected_index(state, (View*)select, hover);
             state->open_dropdown = nullptr;
-            select->form->dropdown_open = 0;
-            select->form->hover_index = -1;
-            state->needs_repaint = true;
+            form_control_close_dropdown(state, (View*)select);
         }
         return true;
 
     case RDT_KEY_ESCAPE:
         state->open_dropdown = nullptr;
-        select->form->dropdown_open = 0;
-        select->form->hover_index = -1;
-        state->needs_repaint = true;
+        form_control_close_dropdown(state, (View*)select);
         return true;
     }
 
@@ -2888,9 +2875,7 @@ static void close_dropdown_if_outside(EventContext* evcon, float mouse_x, float 
     // Click outside - close dropdown
     log_debug("close_dropdown_if_outside: closing dropdown");
     state->open_dropdown = nullptr;
-    select->form->dropdown_open = 0;
-    select->form->hover_index = -1;
-    state->needs_repaint = true;
+    form_control_close_dropdown(state, (View*)select);
 }
 
 /**

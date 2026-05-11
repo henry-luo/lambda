@@ -1371,7 +1371,10 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             block->form = (FormControlProp*)alloc_prop(lycon, sizeof(FormControlProp));
             new (block->form) FormControlProp();
             block->form->control_type = FORM_CONTROL_BUTTON;
-            if (block->has_attribute("disabled")) block->form->disabled = 1;
+            if (block->has_attribute("disabled")) {
+                RadiantState* state = (RadiantState*)lycon->doc->state;
+                form_control_set_disabled(state, block, true);
+            }
         }
 
         block->display.outer = CSS_VALUE_INLINE_BLOCK;
@@ -1431,14 +1434,18 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             block->form->state_ref = state;
             if (block->has_attribute("disabled") ||
                 (block->pseudo_state & PSEUDO_STATE_DISABLED)) {
-                block->form->disabled = 1;
+                form_control_set_disabled(state, block, true);
             }
-            if (block->has_attribute("readonly")) block->form->readonly = 1;
+            if (block->has_attribute("readonly")) {
+                form_control_set_readonly(state, block, true);
+            }
             if (block->has_attribute("checked") ||
                 (block->pseudo_state & PSEUDO_STATE_CHECKED)) {
                 form_control_set_checked(state, block, true);
             }
-            if (block->has_attribute("required")) block->form->required = 1;
+            if (block->has_attribute("required")) {
+                form_control_set_required(state, block, true);
+            }
         }
 
         // Set display and intrinsic size based on control type
@@ -1598,7 +1605,10 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             new (block->form) FormControlProp();
             block->form->control_type = FORM_CONTROL_SELECT;
             block->form->name = block->get_attribute("name");
-            if (block->has_attribute("disabled")) block->form->disabled = 1;
+            if (block->has_attribute("disabled")) {
+                RadiantState* state = (RadiantState*)lycon->doc->state;
+                form_control_set_disabled(state, block, true);
+            }
             if (block->has_attribute("multiple")) block->form->multiple = 1;
             // HTML §4.10.7: size attr specifies visible rows in listbox mode
             const char* size_attr = block->get_attribute("size");
@@ -1702,8 +1712,13 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             block->form->control_type = FORM_CONTROL_TEXTAREA;
             block->form->name = block->get_attribute("name");
             block->form->placeholder = block->get_attribute("placeholder");
-            if (block->has_attribute("disabled")) block->form->disabled = 1;
-            if (block->has_attribute("readonly")) block->form->readonly = 1;
+            RadiantState* state = (RadiantState*)lycon->doc->state;
+            if (block->has_attribute("disabled")) {
+                form_control_set_disabled(state, block, true);
+            }
+            if (block->has_attribute("readonly")) {
+                form_control_set_readonly(state, block, true);
+            }
             // Parse cols/rows
             const char* cols_attr = block->get_attribute("cols");
             const char* rows_attr = block->get_attribute("rows");

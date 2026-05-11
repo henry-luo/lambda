@@ -701,6 +701,74 @@ float form_control_get_range_value(RadiantState* state, View* view);
 void form_control_set_range_value(RadiantState* state, View* view, float value);
 
 // ============================================================================
+// Constraint Attributes API (disabled, readonly, required)
+// ============================================================================
+
+/**
+ * Check if a form control is disabled.
+ */
+bool form_control_is_disabled(RadiantState* state, View* view);
+
+/**
+ * Set the disabled state for a form control through the state store.
+ * Disabled controls cannot receive focus or user input.
+ */
+void form_control_set_disabled(RadiantState* state, View* view, bool disabled);
+
+/**
+ * Check if a text control is readonly.
+ */
+bool form_control_is_readonly(RadiantState* state, View* view);
+
+/**
+ * Set the readonly state for a text control through the state store.
+ * Readonly controls cannot be edited but can receive focus.
+ */
+void form_control_set_readonly(RadiantState* state, View* view, bool readonly);
+
+/**
+ * Check if a form control is required.
+ */
+bool form_control_is_required(RadiantState* state, View* view);
+
+/**
+ * Set the required state for a form control through the state store.
+ * Required controls must have a value for form submission.
+ */
+void form_control_set_required(RadiantState* state, View* view, bool required);
+
+// ============================================================================
+// Dropdown State Machine API (open, close, hover tracking)
+// ============================================================================
+
+/**
+ * Open a select control's dropdown menu.
+ * Automatically closes any other open dropdown in the same document.
+ */
+void form_control_open_dropdown(RadiantState* state, View* view);
+
+/**
+ * Close a select control's dropdown menu.
+ */
+void form_control_close_dropdown(RadiantState* state, View* view);
+
+/**
+ * Set the hovered option index in an open dropdown (-1 to clear hover).
+ * Index is bounds-checked against option count.
+ */
+void form_control_set_hover_index(RadiantState* state, View* view, int index);
+
+/**
+ * Get the currently hovered option index in a dropdown (-1 if none).
+ */
+int form_control_get_hover_index(RadiantState* state, View* view);
+
+/**
+ * Check if a select control's dropdown is currently open.
+ */
+bool form_control_is_dropdown_open(RadiantState* state, View* view);
+
+// ============================================================================
 // Text Extraction and Clipboard API
 // ============================================================================
 

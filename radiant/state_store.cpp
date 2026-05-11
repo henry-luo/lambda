@@ -1043,6 +1043,167 @@ void form_control_set_range_value(RadiantState* state, View* view, float value) 
     }
 }
 
+// ============================================================================
+// Phase 4A: Constraint Attributes (disabled, readonly, required)
+// ============================================================================
+
+bool form_control_is_disabled(RadiantState* state, View* view) {
+    (void)state;
+    if (!view || !view->is_block()) return false;
+
+    ViewBlock* block = (ViewBlock*)view;
+    if (!block->form) return false;
+
+    return block->form->disabled != 0;
+}
+
+void form_control_set_disabled(RadiantState* state, View* view, bool disabled) {
+    if (!view || !view->is_block()) return;
+
+    ViewBlock* block = (ViewBlock*)view;
+    if (!block->form) return;
+
+    FormControlProp* form = block->form;
+    form->state_ref = state;
+    form->disabled = disabled ? 1 : 0;
+
+    if (state) {
+        state->is_dirty = true;
+        state->needs_repaint = true;
+    }
+}
+
+bool form_control_is_readonly(RadiantState* state, View* view) {
+    (void)state;
+    if (!view || !view->is_block()) return false;
+
+    ViewBlock* block = (ViewBlock*)view;
+    if (!block->form) return false;
+
+    return block->form->readonly != 0;
+}
+
+void form_control_set_readonly(RadiantState* state, View* view, bool readonly) {
+    if (!view || !view->is_block()) return;
+
+    ViewBlock* block = (ViewBlock*)view;
+    if (!block->form) return;
+
+    FormControlProp* form = block->form;
+    form->state_ref = state;
+    form->readonly = readonly ? 1 : 0;
+
+    if (state) {
+        state->is_dirty = true;
+        state->needs_repaint = true;
+    }
+}
+
+bool form_control_is_required(RadiantState* state, View* view) {
+    (void)state;
+    if (!view || !view->is_block()) return false;
+
+    ViewBlock* block = (ViewBlock*)view;
+    if (!block->form) return false;
+
+    return block->form->required != 0;
+}
+
+void form_control_set_required(RadiantState* state, View* view, bool required) {
+    if (!view || !view->is_block()) return;
+
+    ViewBlock* block = (ViewBlock*)view;
+    if (!block->form) return;
+
+    FormControlProp* form = block->form;
+    form->state_ref = state;
+    form->required = required ? 1 : 0;
+
+    if (state) {
+        state->is_dirty = true;
+        state->needs_repaint = true;
+    }
+}
+
+// ============================================================================
+// Phase 4B: Dropdown State Machine (open, close, hover tracking)
+// ============================================================================
+
+bool form_control_is_dropdown_open(RadiantState* state, View* view) {
+    (void)state;
+    if (!view || !view->is_block()) return false;
+
+    ViewBlock* block = (ViewBlock*)view;
+    if (!block->form) return false;
+
+    return block->form->dropdown_open != 0;
+}
+
+void form_control_open_dropdown(RadiantState* state, View* view) {
+    if (!view || !view->is_block()) return;
+
+    ViewBlock* block = (ViewBlock*)view;
+    if (!block->form) return;
+
+    FormControlProp* form = block->form;
+    form->state_ref = state;
+    form->dropdown_open = 1;
+    form->hover_index = form->selected_index;  // Start with selected option highlighted
+
+    if (state) {
+        state->is_dirty = true;
+        state->needs_repaint = true;
+    }
+}
+
+void form_control_close_dropdown(RadiantState* state, View* view) {
+    if (!view || !view->is_block()) return;
+
+    ViewBlock* block = (ViewBlock*)view;
+    if (!block->form) return;
+
+    FormControlProp* form = block->form;
+    form->state_ref = state;
+    form->dropdown_open = 0;
+    form->hover_index = -1;
+
+    if (state) {
+        state->is_dirty = true;
+        state->needs_repaint = true;
+    }
+}
+
+void form_control_set_hover_index(RadiantState* state, View* view, int index) {
+    if (!view || !view->is_block()) return;
+
+    ViewBlock* block = (ViewBlock*)view;
+    if (!block->form) return;
+
+    FormControlProp* form = block->form;
+    form->state_ref = state;
+
+    // Clamp index to valid range
+    if (index < -1) index = -1;
+    if (index >= form->option_count) index = form->option_count - 1;
+
+    form->hover_index = index;
+
+    if (state) {
+        state->is_dirty = true;
+        state->needs_repaint = true;
+    }
+}
+
+int form_control_get_hover_index(RadiantState* state, View* view) {
+    (void)state;
+    if (!view || !view->is_block()) return -1;
+
+    ViewBlock* block = (ViewBlock*)view;
+    if (!block->form) return -1;
+
+    return block->form->hover_index;
+}
+
 void state_remove(RadiantState* state, void* node, const char* name) {
     if (!state || !node || !name) return;
 
