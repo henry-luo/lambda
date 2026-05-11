@@ -985,21 +985,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
         return;
     }
 
-    // Diagnostic selection paint path: inline text-fragment painter.
-    // Magenta means the highlight came from render_text_view().
-    DomRange* diagnostic_inline_sel_range = nullptr;
-    {
-        RadiantState* st = rdcon->ui_context && rdcon->ui_context->document
-            ? rdcon->ui_context->document->state : nullptr;
-        DomSelection* ds = st ? st->dom_selection : nullptr;
-        if (selection_is_pointer_range_active(st) &&
-            ds && ds->range_count > 0 && !ds->is_collapsed && ds->ranges[0]) {
-            diagnostic_inline_sel_range = ds->ranges[0];
-        }
-    }
-
-    // Legacy glyph-by-glyph selection code remains disabled; diagnostic
-    // inline painting below uses DomSelection fragments only.
+    // Legacy glyph-by-glyph selection code remains disabled.
     int sel_start = 0, sel_end = 0;
     (void)sel_start; (void)sel_end;
 
@@ -1132,18 +1118,6 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
             } else {
                 rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &bg_rect, bg_color->c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
             }
-        }
-
-        if (diagnostic_inline_sel_range) {
-            SelectionPaintCtx ctx;
-            ctx.rdcon = rdcon;
-            ctx.scale = rdcon->scale;
-            RadiantState* st = rdcon->ui_context->document->state;
-            selection_get_iframe_offset(st, &ctx.iframe_offset_x, &ctx.iframe_offset_y);
-            ctx.color.r = 0xFF; ctx.color.g = 0x00; ctx.color.b = 0xB8; ctx.color.a = 0x80;
-            dom_range_for_each_rect_in_text_rect(diagnostic_inline_sel_range,
-                (DomText*)text_view, text_rect, rdcon->ui_context,
-                selection_paint_rect_cb, &ctx);
         }
 
         unsigned char* p = str + text_rect->start_index;  unsigned char* end = p + text_rect->length;
@@ -3679,10 +3653,8 @@ void render_caret(RenderContext* rdcon, RadiantState* state) {
  * Selection model), resolves layout via `dom_range_for_each_rect()`,
  * and emits one semi-transparent rectangle per visual fragment.
  *
- * The inline glyph-by-glyph selection background painter in `render_text_view`
- * is still active for form/static text compatibility. `render_selection` is
- * therefore registered as an overlay when the inline path did not or cannot
- * paint, such as element-level ranges spanning non-text nodes set via JS.
+ * This is the single highlight paint path for document selections.
+ * It reads only canonical StateStore selection (`state->dom_selection`).
  *
  * `dom_range_for_each_rect()` returns rectangles in absolute CSS
  * coordinates; we just scale to physical pixels and fill.
@@ -3819,10 +3791,7 @@ void render_ui_overlays(RenderContext* rdcon, RadiantState* state) {
     log_debug("[UI_OVERLAY] Rendering overlays: caret=%s",
         caret_has_projection(state) ? "present" : "none");
 
-    // Selection background is painted inline inside render_text_view when the
-    // active range resolves cleanly to the current text fragments. Reactive UI
-    // rebuilds can leave that inline path without a matching fragment for one
-    // frame, so keep the DomSelection overlay as a canonical fallback.
+    // Selection highlight is rendered only through canonical DomSelection.
     render_selection(rdcon, state);
 
     // Render open dropdown popup (above content)

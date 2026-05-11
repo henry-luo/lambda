@@ -343,7 +343,11 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
                 ViewBlock* root = new_doc->view_tree ? (ViewBlock*)new_doc->view_tree->root : nullptr;
                 if (root && root->scroller && root->scroller->pane) {
                     float saved_y = session_get_scroll_position(session);
-                    root->scroller->pane->v_scroll_position = saved_y;
+                    scroll_state_set_position((RadiantState*)new_doc->state,
+                                              root->scroller->pane,
+                                              root->scroller->pane->h_scroll_position,
+                                              saved_y,
+                                              true);
                 }
                 // update title
                 const char* page_title = session_current_title(session);

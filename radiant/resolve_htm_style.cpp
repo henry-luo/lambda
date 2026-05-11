@@ -1427,6 +1427,8 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
 
             // Parse state attributes - check both attribute and pseudo_state
             // The pseudo_state may have been set during DOM tree building
+            RadiantState* state = (RadiantState*)lycon->doc->state;
+            block->form->state_ref = state;
             if (block->has_attribute("disabled") ||
                 (block->pseudo_state & PSEUDO_STATE_DISABLED)) {
                 block->form->disabled = 1;
@@ -1434,7 +1436,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             if (block->has_attribute("readonly")) block->form->readonly = 1;
             if (block->has_attribute("checked") ||
                 (block->pseudo_state & PSEUDO_STATE_CHECKED)) {
-                block->form->checked = 1;
+                form_control_set_checked(state, block, true);
             }
             if (block->has_attribute("required")) block->form->required = 1;
         }
@@ -1522,8 +1524,10 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             if (step_attr) block->form->range_step = str_to_double_default(step_attr, strlen(step_attr), 0.0);
             if (block->form->value) {
                 float val = (float)str_to_double_default(block->form->value, strlen(block->form->value), 0.0);
-                block->form->range_value = (val - block->form->range_min) /
+                float normalized = (val - block->form->range_min) /
                     (block->form->range_max - block->form->range_min);
+                RadiantState* state = lycon && lycon->doc ? (RadiantState*)lycon->doc->state : nullptr;
+                form_control_set_range_value(state, (View*)block, normalized);
             }
             break;
         }
@@ -1635,7 +1639,9 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 child = child->next_sibling;
             }
             block->form->option_count = option_count;
-            block->form->selected_index = (selected_idx >= 0) ? selected_idx : (option_count > 0 ? 0 : -1);
+            int init_index = (selected_idx >= 0) ? selected_idx : (option_count > 0 ? 0 : -1);
+            RadiantState* state = lycon && lycon->doc ? (RadiantState*)lycon->doc->state : nullptr;
+            form_control_set_selected_index(state, (View*)block, init_index);
         }
         // Read CSS `appearance` property — affects intrinsic width and UA-rendered chrome.
         // `appearance: none` removes the native dropdown arrow so author CSS can supply its own.

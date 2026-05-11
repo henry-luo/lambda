@@ -772,6 +772,277 @@ void state_set_bool(RadiantState* state, void* node, const char* name, bool valu
     state_set(state, node, name, item_value);
 }
 
+bool form_control_get_checked(RadiantState* state, View* view) {
+    if (!view || !view->is_element()) return false;
+
+    if (state && state_has(state, view, STATE_CHECKED)) {
+        return state_get_bool(state, view, STATE_CHECKED);
+    }
+
+    DomElement* elem = (DomElement*)view;
+    if (dom_element_has_pseudo_state(elem, PSEUDO_STATE_CHECKED)) {
+        return true;
+    }
+
+    if (view->is_block()) {
+        ViewBlock* block = (ViewBlock*)view;
+        if (block->form) {
+            return block->form->checked != 0;
+        }
+    }
+
+    return false;
+}
+
+void form_control_set_checked(RadiantState* state, View* view, bool checked) {
+    if (!view || !view->is_element()) return;
+
+    if (state) {
+        state_set_bool(state, view, STATE_CHECKED, checked);
+    }
+
+    if (view->is_block()) {
+        ViewBlock* block = (ViewBlock*)view;
+        if (block->form) {
+            block->form->state_ref = state;
+            block->form->checked = checked ? 1 : 0;
+        }
+    }
+
+    state->needs_repaint = true;
+}
+
+void scroll_state_attach(RadiantState* state, void* pane_ptr) {
+    if (!state || !pane_ptr) return;
+    ScrollPane* pane = (ScrollPane*)pane_ptr;
+    pane->state_ref = state;
+}
+
+void scroll_state_set_max(RadiantState* state, void* pane_ptr,
+                          float h_max, float v_max) {
+    if (!pane_ptr) return;
+    ScrollPane* pane = (ScrollPane*)pane_ptr;
+    if (state) scroll_state_attach(state, pane_ptr);
+
+    if (h_max < 0.0f) h_max = 0.0f;
+    if (v_max < 0.0f) v_max = 0.0f;
+
+    pane->h_max_scroll = h_max;
+    pane->v_max_scroll = v_max;
+
+    if (pane->h_scroll_position > pane->h_max_scroll) {
+        pane->h_scroll_position = pane->h_max_scroll;
+    }
+    if (pane->v_scroll_position > pane->v_max_scroll) {
+        pane->v_scroll_position = pane->v_max_scroll;
+    }
+}
+
+void scroll_state_set_position(RadiantState* state, void* pane_ptr,
+                               float h_pos, float v_pos,
+                               bool is_viewport) {
+    if (!pane_ptr) return;
+    ScrollPane* pane = (ScrollPane*)pane_ptr;
+    if (state) scroll_state_attach(state, pane_ptr);
+
+    if (h_pos < 0.0f) h_pos = 0.0f;
+    if (v_pos < 0.0f) v_pos = 0.0f;
+
+    if (h_pos > pane->h_max_scroll) h_pos = pane->h_max_scroll;
+    if (v_pos > pane->v_max_scroll) v_pos = pane->v_max_scroll;
+
+    pane->h_scroll_position = h_pos;
+    pane->v_scroll_position = v_pos;
+
+    if (state) {
+        state->is_dirty = true;
+        state->needs_repaint = true;
+        if (is_viewport) {
+            state->scroll_x = h_pos;
+            state->scroll_y = v_pos;
+        }
+    }
+}
+
+void scroll_state_get_position(RadiantState* state, void* pane_ptr,
+                               float* out_h_pos, float* out_v_pos,
+                               float* out_h_max, float* out_v_max) {
+    (void)state;
+    if (out_h_pos) *out_h_pos = 0.0f;
+    if (out_v_pos) *out_v_pos = 0.0f;
+    if (out_h_max) *out_h_max = 0.0f;
+    if (out_v_max) *out_v_max = 0.0f;
+
+    if (!pane_ptr) return;
+    ScrollPane* pane = (ScrollPane*)pane_ptr;
+    if (out_h_pos) *out_h_pos = pane->h_scroll_position;
+    if (out_v_pos) *out_v_pos = pane->v_scroll_position;
+    if (out_h_max) *out_h_max = pane->h_max_scroll;
+    if (out_v_max) *out_v_max = pane->v_max_scroll;
+}
+
+const char* form_control_get_value(RadiantState* state, View* view, uint32_t* out_len) {
+    if (out_len) *out_len = 0;
+    if (!view || !view->is_block()) return nullptr;
+
+    ViewBlock* block = (ViewBlock*)view;
+    if (!block->form) return nullptr;
+
+    FormControlProp* form = block->form;
+    if (out_len) *out_len = form->current_value_len;
+    return form->current_value;
+}
+
+void form_control_set_value(RadiantState* state, View* view, const char* value, uint32_t len) {
+    if (!view || !view->is_block()) return;
+
+    ViewBlock* block = (ViewBlock*)view;
+    if (!block->form) return;
+
+    DomElement* elem = (DomElement*)block;
+    block->form->state_ref = state;
+
+    // For text controls (input text, textarea), route through tc_set_value
+    // to ensure all side effects (validation, events, history) are handled.
+    if (tc_is_text_control(elem)) {
+        tc_set_value(elem, value, len);
+    } else {
+        // For non-text controls, directly update the value field.
+        // (Selects, file inputs, etc. don't have the complex mutation semantics
+        // of text editing and validation history that tc_set_value provides.)
+        FormControlProp* form = block->form;
+        if (form->current_value) {
+            free(form->current_value);
+        }
+        form->current_value = (char*)malloc(len + 1);
+        memcpy(form->current_value, value, len);
+        form->current_value[len] = '\0';
+        form->current_value_len = len;
+        extern uint32_t tc_utf8_to_utf16_length(const char* utf8, uint32_t byte_len);
+        form->current_value_u16_len = tc_utf8_to_utf16_length(form->current_value, len);
+        form->selection_start = form->current_value_u16_len;
+        form->selection_end = form->current_value_u16_len;
+        form->selection_direction = 0;
+        form->value = form->current_value;
+    }
+
+    if (state) {
+        state->is_dirty = true;
+        state->needs_repaint = true;
+    }
+}
+
+void form_control_get_selection(RadiantState* state, View* view,
+                                uint32_t* out_start, uint32_t* out_end, uint8_t* out_direction) {
+    (void)state;
+    if (out_start) *out_start = 0;
+    if (out_end) *out_end = 0;
+    if (out_direction) *out_direction = 0;
+
+    if (!view || !view->is_block()) return;
+
+    ViewBlock* block = (ViewBlock*)view;
+    if (!block->form) return;
+
+    FormControlProp* form = block->form;
+    if (out_start) *out_start = form->selection_start;
+    if (out_end) *out_end = form->selection_end;
+    if (out_direction) *out_direction = form->selection_direction;
+}
+
+void form_control_set_selection(RadiantState* state, View* view,
+                                uint32_t start, uint32_t end, uint8_t direction) {
+    if (!view || !view->is_block()) return;
+
+    ViewBlock* block = (ViewBlock*)view;
+    if (!block->form) return;
+
+    DomElement* elem = (DomElement*)block;
+    FormControlProp* form = block->form;
+    form->state_ref = state;
+
+    // For text controls, route through tc_set_selection_range to ensure
+    // selection change events and callbacks are properly triggered.
+    if (tc_is_text_control(elem)) {
+        tc_set_selection_range(elem, start, end, direction);
+    } else {
+        // For non-text controls, directly update selection fields.
+        uint32_t max_offset = form->current_value_u16_len;
+        if (start > max_offset) start = max_offset;
+        if (end > max_offset) end = max_offset;
+        form->selection_start = start;
+        form->selection_end = end;
+        form->selection_direction = direction & 3;
+    }
+
+    if (state) {
+        state->is_dirty = true;
+        state->needs_repaint = true;
+    }
+}
+
+int form_control_get_selected_index(RadiantState* state, View* view) {
+    (void)state;
+    if (!view || !view->is_block()) return -1;
+
+    ViewBlock* block = (ViewBlock*)view;
+    if (!block->form) return -1;
+
+    return block->form->selected_index;
+}
+
+void form_control_set_selected_index(RadiantState* state, View* view, int index) {
+    if (!view || !view->is_block()) return;
+
+    ViewBlock* block = (ViewBlock*)view;
+    if (!block->form) return;
+
+    FormControlProp* form = block->form;
+    form->state_ref = state;
+
+    // Clamp to valid range: -1 (none) or 0 to option_count-1
+    if (index < -1) index = -1;
+    if (index >= form->option_count) index = form->option_count - 1;
+
+    form->selected_index = index;
+
+    if (state) {
+        state->is_dirty = true;
+        state->needs_repaint = true;
+    }
+}
+
+float form_control_get_range_value(RadiantState* state, View* view) {
+    (void)state;
+    if (!view || !view->is_block()) return 0.5f;
+
+    ViewBlock* block = (ViewBlock*)view;
+    if (!block->form) return 0.5f;
+
+    return block->form->range_value;
+}
+
+void form_control_set_range_value(RadiantState* state, View* view, float value) {
+    if (!view || !view->is_block()) return;
+
+    ViewBlock* block = (ViewBlock*)view;
+    if (!block->form) return;
+
+    FormControlProp* form = block->form;
+    form->state_ref = state;
+
+    // Clamp to 0.0-1.0
+    if (value < 0.0f) value = 0.0f;
+    if (value > 1.0f) value = 1.0f;
+
+    form->range_value = value;
+
+    if (state) {
+        state->is_dirty = true;
+        state->needs_repaint = true;
+    }
+}
+
 void state_remove(RadiantState* state, void* node, const char* name) {
     if (!state || !node || !name) return;
 
@@ -946,8 +1217,23 @@ static void state_sync_selection_before_assert(RadiantState* state) {
     }
 }
 
+static void state_sync_dirty_flags_before_assert(RadiantState* state) {
+    if (!state) return;
+
+    // Dirty tracking is authoritative for pending visual work. Keep flags
+    // aligned so invariant checks and the render loop observe one source.
+    if (state->dirty_tracker.full_reflow) {
+        state->needs_reflow = true;
+    }
+    if (state->selection_layout_dirty || state->dirty_tracker.full_repaint ||
+        state->dirty_tracker.full_reflow || dirty_has_regions(&state->dirty_tracker)) {
+        state->needs_repaint = true;
+    }
+}
+
 void state_end_batch(RadiantState* state) {
     state_sync_selection_before_assert(state);
+    state_sync_dirty_flags_before_assert(state);
     s_in_batch = false;
     // TODO: trigger deferred callbacks
     radiant_state_assert_valid(state, "state_end_batch");
@@ -2604,7 +2890,7 @@ bool caret_get_debug_snapshot(RadiantState* state, View** out_view,
 }
 
 bool caret_has_projection(RadiantState* state) {
-    return state && state->caret != NULL;
+    return state && state->caret && state->caret->view != NULL;
 }
 
 bool caret_is_visible(RadiantState* state) {
@@ -2620,6 +2906,17 @@ void caret_project_previous_visual_rect(RadiantState* state, float x, float y, f
 
 void caret_toggle_blink(RadiantState* state) {
     if (!state || !state->caret) return;
+
+    // Guard invariant: caret visibility is only meaningful when projection
+    // has a concrete target view.
+    if (!state->caret->view) {
+        if (state->caret->visible) {
+            state->caret->visible = false;
+            state->needs_repaint = true;
+        }
+        state->caret->blink_time = 0;
+        return;
+    }
 
     // DISABLED for debugging - keep caret always visible
     // state->caret->visible = !state->caret->visible;

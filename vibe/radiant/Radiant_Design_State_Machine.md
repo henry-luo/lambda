@@ -6,6 +6,54 @@
 
 **Scope**: Radiant interactive UI state, state-machine consistency, JSON event/state logging, replay, and diagnostics.
 
+## Implementation Update (2026-05-11)
+
+Centralized writer APIs and state ownership are now landing in code. Phases 1, 2, 2b, and 3 are complete.
+
+**Phase 1: Checkbox/Radio Checked State (COMPLETE)**
+
+- Added APIs: `form_control_get_checked()`, `form_control_set_checked()`
+- Refactored all checked state mutations in [radiant/event.cpp](../../radiant/event.cpp) to use centralized writers.
+- Fast-read pointer: `FormControlProp::state_ref` in [radiant/form_control.hpp](../../radiant/form_control.hpp)
+- Regression tests: PASS (radio outline, selection, interaction)
+
+**Phase 2: Scroll Position/Max State (COMPLETE)**
+
+- Added APIs: `scroll_state_attach()`, `scroll_state_set_max()`, `scroll_state_set_position()`, `scroll_state_get_position()`
+- Refactored scroll mutations in [radiant/scroller.cpp](../../radiant/scroller.cpp), [radiant/layout.cpp](../../radiant/layout.cpp), [radiant/event_sim.cpp](../../radiant/event_sim.cpp), [radiant/window.cpp](../../radiant/window.cpp)
+- Fast-read pointer: `ScrollPane::state_ref` in [radiant/view.hpp](../../radiant/view.hpp)
+- Regression tests: PASS (scroll persistence after mouse move)
+
+**Phase 2b: Form Value, Selection, Select Index, Range Value (COMPLETE)**
+
+- Added APIs:
+  - `form_control_get_value()`, `form_control_set_value()`
+  - `form_control_get_selection()`, `form_control_set_selection()`
+  - `form_control_get_selected_index()`, `form_control_set_selected_index()`
+  - `form_control_get_range_value()`, `form_control_set_range_value()`
+- Refactored select option mutations in [radiant/event.cpp](../../radiant/event.cpp), [radiant/event_sim.cpp](../../radiant/event_sim.cpp)
+- Refactored range/select initialization in [radiant/resolve_htm_style.cpp](../../radiant/resolve_htm_style.cpp)
+- Fast-read pointers and bounds clamping enforced at centralized API level
+
+**Phase 3: Text Control Integration (COMPLETE)**
+
+- Refactored `form_control_set_value()` and `form_control_set_selection()` to route text control mutations through `tc_set_value()` and `tc_set_selection_range()` helpers in [radiant/text_control.cpp](../../radiant/text_control.cpp)
+- For text controls: ensures validation callbacks, event dispatch, history tracking, and pseudo-state updates all fire correctly
+- For non-text controls (select, range): maintains direct field mutation semantics while preserving dirty flag management
+- Text edit undo/redo now consistently routes through centralized state mutation path
+- Preserves all side effects: validation (`te_validate`), placeholder-shown refresh, aria-invalid reflection, history guards
+
+### Writer Rule (now fully enforced)
+
+- Form checked state: MUST use `form_control_set_checked()`
+- Scroll position/max: MUST use `scroll_state_set_max()` / `scroll_state_set_position()`
+- Form value/selection: MUST use `form_control_set_value()` / `form_control_set_selection()` (routes through `tc_set_value()` / `tc_set_selection_range()` for text controls)
+- Select option index: MUST use `form_control_set_selected_index()`
+- Range value: MUST use `form_control_set_range_value()`
+- Local structures may keep fast-read pointers, but direct local field mutation is forbidden.
+
+### Next Steps (Phase 4 if needed)
+
 **Source proposals**:
 - [Radiant_State_Machine_GPT.md](../idea/Radiant_State_Machine_GPT.md) — primary design.
 - [Radiant_State_Machine_Opus.md](../idea/Radiant_State_Machine_Opus.md) — incorporated FSM details for focus, selection, IME.

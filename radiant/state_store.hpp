@@ -603,6 +603,104 @@ View* focus_get_visible(RadiantState* state);
 bool focus_within(RadiantState* state, View* view);
 
 // ============================================================================
+// Form and Scroll State API (centralized writers)
+// ============================================================================
+
+/**
+ * Query checked state for checkbox/radio controls.
+ * Prefers centralized state_map entry and falls back to element pseudo-state.
+ */
+bool form_control_get_checked(RadiantState* state, View* view);
+
+/**
+ * Set checked state for checkbox/radio controls through the state store.
+ * This is the only supported writer path for checked state transitions.
+ */
+void form_control_set_checked(RadiantState* state, View* view, bool checked);
+
+/**
+ * Attach a scroll pane to the central state store for fast-read access.
+ * The pane argument is a ScrollPane* passed as void* to avoid header coupling.
+ */
+void scroll_state_attach(RadiantState* state, void* pane);
+
+/**
+ * Set pane scroll max values through centralized API.
+ */
+void scroll_state_set_max(RadiantState* state, void* pane,
+                          float h_max, float v_max);
+
+/**
+ * Set pane scroll position through centralized API.
+ * When is_viewport is true, document-level viewport mirrors are also updated.
+ */
+void scroll_state_set_position(RadiantState* state, void* pane,
+                               float h_pos, float v_pos,
+                               bool is_viewport);
+
+/**
+ * Read pane scroll values.
+ */
+void scroll_state_get_position(RadiantState* state, void* pane,
+                               float* out_h_pos, float* out_v_pos,
+                               float* out_h_max, float* out_v_max);
+
+// ============================================================================
+// Text Control Value and Selection API (centralized writers)
+// ============================================================================
+
+/**
+ * Get the current text value for a text control (input, textarea).
+ * Returns the UTF-8 encoded string; may be nullptr if not yet set.
+ */
+const char* form_control_get_value(RadiantState* state, View* view, uint32_t* out_len);
+
+/**
+ * Set the text value for a text control through the state store.
+ * Resets selection to end of text (HTML default).
+ * This is the only supported writer path for value mutations.
+ */
+void form_control_set_value(RadiantState* state, View* view, const char* value, uint32_t len);
+
+/**
+ * Get the current text selection offsets for a text control.
+ * Offsets are in UTF-16 code units (per HTML spec).
+ */
+void form_control_get_selection(RadiantState* state, View* view,
+                                uint32_t* out_start, uint32_t* out_end, uint8_t* out_direction);
+
+/**
+ * Set the text selection offsets for a text control.
+ * Start/end are UTF-16 code units; direction is 0=none, 1=forward, 2=backward.
+ * This is the only supported writer path for selection mutations.
+ */
+void form_control_set_selection(RadiantState* state, View* view,
+                                uint32_t start, uint32_t end, uint8_t direction);
+
+/**
+ * Get the selected option index for a select control (-1 if none selected).
+ */
+int form_control_get_selected_index(RadiantState* state, View* view);
+
+/**
+ * Set the selected option index for a select control.
+ * Negative index clears selection; index >= count wraps to last.
+ * This is the only supported writer path for option selection mutations.
+ */
+void form_control_set_selected_index(RadiantState* state, View* view, int index);
+
+/**
+ * Get the current value for a range input control (0.0-1.0).
+ */
+float form_control_get_range_value(RadiantState* state, View* view);
+
+/**
+ * Set the value for a range input control (clamped to 0.0-1.0).
+ * This is the only supported writer path for range value mutations.
+ */
+void form_control_set_range_value(RadiantState* state, View* view, float value);
+
+// ============================================================================
 // Text Extraction and Clipboard API
 // ============================================================================
 
