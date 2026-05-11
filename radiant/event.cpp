@@ -2311,7 +2311,7 @@ static void uncheck_radio_group(View* root, const char* name, View* exclude, Doc
             const char* elem_name = elem->get_attribute("name");
             if (elem_name && strcmp(elem_name, name) == 0) {
                 // Uncheck this radio button
-                if (dom_element_has_pseudo_state(elem, PSEUDO_STATE_CHECKED)) {
+                if (state_get_pseudo_state(state, current, PSEUDO_STATE_CHECKED)) {
                     form_control_set_checked(state, current, false);
                     sync_pseudo_state(current, PSEUDO_STATE_CHECKED, false);
                     log_debug("uncheck_radio_group: unchecked radio name=%s", elem_name);
@@ -2471,14 +2471,14 @@ static bool handle_checkbox_radio_click(EventContext* evcon, View* target) {
     ViewElement* elem = (ViewElement*)input;
 
     // Check if disabled
-    if (dom_element_has_pseudo_state(elem, PSEUDO_STATE_DISABLED)) {
+    if (state_get_pseudo_state(state, input, PSEUDO_STATE_DISABLED)) {
         log_debug("handle_checkbox_radio_click: element is disabled");
         return false;
     }
 
     if (is_checkbox(input)) {
         // Toggle checkbox state
-        bool is_checked = dom_element_has_pseudo_state(elem, PSEUDO_STATE_CHECKED);
+        bool is_checked = state_get_pseudo_state(state, input, PSEUDO_STATE_CHECKED);
         bool new_state = !is_checked;
 
         form_control_set_checked(state, input, new_state);
@@ -2494,7 +2494,7 @@ static bool handle_checkbox_radio_click(EventContext* evcon, View* target) {
     if (is_radio(input)) {
         // Radio button: only allow checking, not unchecking by click
         // Also need to uncheck other radio buttons in the same name group
-        bool is_checked = dom_element_has_pseudo_state(elem, PSEUDO_STATE_CHECKED);
+        bool is_checked = state_get_pseudo_state(state, input, PSEUDO_STATE_CHECKED);
 
         if (!is_checked) {
             // Uncheck other radio buttons in the same group

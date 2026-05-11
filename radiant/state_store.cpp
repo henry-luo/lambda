@@ -103,6 +103,7 @@ static void init_interned_names(void) {
     intern_state_name(STATE_FOCUS_WITHIN);
     intern_state_name(STATE_FOCUS_VISIBLE);
     intern_state_name(STATE_VISITED);
+    intern_state_name(STATE_LINK);
     intern_state_name(STATE_CHECKED);
     intern_state_name(STATE_INDETERMINATE);
     intern_state_name(STATE_DISABLED);
@@ -113,6 +114,7 @@ static void init_interned_names(void) {
     intern_state_name(STATE_REQUIRED);
     intern_state_name(STATE_OPTIONAL);
     intern_state_name(STATE_PLACEHOLDER);
+    intern_state_name(STATE_SELECTED);
     intern_state_name(STATE_EMPTY);
     intern_state_name(STATE_TARGET);
     intern_state_name(STATE_VALUE);
@@ -756,6 +758,55 @@ bool state_get_bool(DocState* state, void* node, const char* name) {
     }
     // For other types, treat non-null as true
     return true;
+}
+
+bool state_get_pseudo_state(DocState* state, View* view, uint32_t pseudo_state) {
+    if (!view) return false;
+
+    switch (pseudo_state) {
+        case PSEUDO_STATE_HOVER:
+            return state_get_bool(state, view, STATE_HOVER);
+        case PSEUDO_STATE_ACTIVE:
+            return state_get_bool(state, view, STATE_ACTIVE);
+        case PSEUDO_STATE_FOCUS:
+            return state_get_bool(state, view, STATE_FOCUS);
+        case PSEUDO_STATE_FOCUS_WITHIN:
+            return state_get_bool(state, view, STATE_FOCUS_WITHIN);
+        case PSEUDO_STATE_FOCUS_VISIBLE:
+            return state_get_bool(state, view, STATE_FOCUS_VISIBLE);
+        case PSEUDO_STATE_VISITED:
+            return state_get_bool(state, view, STATE_VISITED);
+        case PSEUDO_STATE_LINK:
+            return state_get_bool(state, view, STATE_LINK);
+        case PSEUDO_STATE_TARGET:
+            return state_get_bool(state, view, STATE_TARGET);
+        case PSEUDO_STATE_CHECKED:
+            return form_control_get_checked(state, view);
+        case PSEUDO_STATE_DISABLED:
+            return form_control_is_disabled(state, view);
+        case PSEUDO_STATE_ENABLED:
+            return !form_control_is_disabled(state, view);
+        case PSEUDO_STATE_REQUIRED:
+            return form_control_is_required(state, view);
+        case PSEUDO_STATE_OPTIONAL:
+            return !form_control_is_required(state, view);
+        case PSEUDO_STATE_READ_ONLY:
+            return form_control_is_readonly(state, view);
+        case PSEUDO_STATE_READ_WRITE:
+            return !form_control_is_readonly(state, view);
+        case PSEUDO_STATE_INDETERMINATE:
+            return state_get_bool(state, view, STATE_INDETERMINATE);
+        case PSEUDO_STATE_VALID:
+            return state_get_bool(state, view, STATE_VALID);
+        case PSEUDO_STATE_INVALID:
+            return state_get_bool(state, view, STATE_INVALID);
+        case PSEUDO_STATE_PLACEHOLDER_SHOWN:
+            return state_get_bool(state, view, STATE_PLACEHOLDER);
+        case PSEUDO_STATE_SELECTED:
+            return state_get_bool(state, view, STATE_SELECTED);
+        default:
+            return false;
+    }
 }
 
 static uint32_t view_state_resolve_id(View* view) {
@@ -1414,11 +1465,6 @@ bool form_control_get_checked(DocState* state, View* view) {
 
     ViewState* view_state = form_view_state_get(state, view);
     if (view_state) return view_state->data.form.checked != 0;
-
-    DomElement* elem = (DomElement*)view;
-    if (dom_element_has_pseudo_state(elem, PSEUDO_STATE_CHECKED)) {
-        return true;
-    }
 
     if (view->is_block()) {
         ViewBlock* block = (ViewBlock*)view;

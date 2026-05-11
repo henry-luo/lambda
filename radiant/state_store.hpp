@@ -380,6 +380,12 @@ bool view_state_get_active(DocState* state, View* view);
 bool view_state_get_focused(DocState* state, View* view);
 
 /**
+ * Read dynamic pseudo-state through canonical StateStore/ViewState data.
+ * Missing state is interpreted as the default value for the pseudo-state.
+ */
+bool state_get_pseudo_state(DocState* state, View* view, uint32_t pseudo_state);
+
+/**
  * Writer-only per-view interaction state APIs.
  */
 void view_state_set_hovered(DocState* state, View* view, bool hovered);
@@ -1049,6 +1055,7 @@ bool visited_links_check(VisitedLinks* visited, const char* url);
 #define STATE_FOCUS_WITHIN    ":focus-within"
 #define STATE_FOCUS_VISIBLE   ":focus-visible"
 #define STATE_VISITED         ":visited"
+#define STATE_LINK            ":link"
 #define STATE_CHECKED         ":checked"
 #define STATE_INDETERMINATE   ":indeterminate"
 #define STATE_DISABLED        ":disabled"
@@ -1059,6 +1066,7 @@ bool visited_links_check(VisitedLinks* visited, const char* url);
 #define STATE_REQUIRED        ":required"
 #define STATE_OPTIONAL        ":optional"
 #define STATE_PLACEHOLDER     ":placeholder-shown"
+#define STATE_SELECTED        ":selected"
 #define STATE_EMPTY           ":empty"
 #define STATE_TARGET          ":target"
 

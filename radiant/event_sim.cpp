@@ -2334,7 +2334,8 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 DomDocument* doc = uicon->document;
                 form_elem = find_element_by_selector(doc, ev->target_selector, ev->target_index);
                 if (form_elem && sim_is_checkbox_or_radio(form_elem)) {
-                    was_checked = dom_element_has_pseudo_state((DomElement*)form_elem, PSEUDO_STATE_CHECKED);
+                    DocState* state = doc ? (DocState*)doc->state : nullptr;
+                    was_checked = state_get_pseudo_state(state, form_elem, PSEUDO_STATE_CHECKED);
                 } else {
                     form_elem = nullptr;
                 }
@@ -2348,11 +2349,11 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
 
             // If the coordinate click didn't toggle the checkbox/radio, do it directly
             if (form_elem) {
-                bool is_checked_now = dom_element_has_pseudo_state((DomElement*)form_elem, PSEUDO_STATE_CHECKED);
+                DocState* state = (DocState*)uicon->document->state;
+                bool is_checked_now = state_get_pseudo_state(state, form_elem, PSEUDO_STATE_CHECKED);
                 if (is_checked_now == was_checked) {
                     // State didn't change — coordinate click missed the element
-                    DocState* state = (DocState*)uicon->document->state;
-                    if (state && !dom_element_has_pseudo_state((DomElement*)form_elem, PSEUDO_STATE_DISABLED)) {
+                    if (state && !state_get_pseudo_state(state, form_elem, PSEUDO_STATE_DISABLED)) {
                         sim_toggle_checkbox_radio(form_elem, state);
                     }
                 }
@@ -2398,8 +2399,9 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             // text selection (e.g. from a preceding tripleclick).
             if (ev->target_selector || ev->target_text) {
                 View* target_elem = resolve_target_element(ev, uicon->document);
+                DocState* state = uicon->document ? (DocState*)uicon->document->state : nullptr;
                 bool already_focused = target_elem && target_elem->is_element() &&
-                    dom_element_has_pseudo_state((DomElement*)target_elem, PSEUDO_STATE_FOCUS);
+                    state_get_pseudo_state(state, target_elem, PSEUDO_STATE_FOCUS);
                 if (!already_focused) {
                     int x, y;
                     if (resolve_target(ev, uicon->document, &x, &y)) {
@@ -2455,10 +2457,10 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 log_error("event_sim: check - target is not a checkbox or radio");
                 break;
             }
-            bool is_checked = dom_element_has_pseudo_state((DomElement*)elem, PSEUDO_STATE_CHECKED);
+            DocState* state = (DocState*)doc->state;
+            bool is_checked = state_get_pseudo_state(state, elem, PSEUDO_STATE_CHECKED);
             if (is_checked != ev->expected_checked) {
-                DocState* state = (DocState*)doc->state;
-                if (state && !dom_element_has_pseudo_state((DomElement*)elem, PSEUDO_STATE_DISABLED)) {
+                if (state && !state_get_pseudo_state(state, elem, PSEUDO_STATE_DISABLED)) {
                     sim_toggle_checkbox_radio(elem, state);
                     log_info("event_sim: check - toggled to %s", ev->expected_checked ? "checked" : "unchecked");
                 }
@@ -2896,7 +2898,6 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 ctx->fail_count++;
                 break;
             }
-            DomElement* dom_elem = (DomElement*)elem;
             uint32_t mask = 0;
             if (strcmp(ev->state_name, ":hover") == 0) mask = PSEUDO_STATE_HOVER;
             else if (strcmp(ev->state_name, ":active") == 0) mask = PSEUDO_STATE_ACTIVE;
@@ -2911,7 +2912,8 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 ctx->fail_count++;
                 break;
             }
-            bool has_state = (dom_elem->pseudo_state & mask) != 0;
+            DocState* state = doc ? (DocState*)doc->state : nullptr;
+            bool has_state = state_get_pseudo_state(state, elem, mask);
             if (has_state != ev->expected_state_value) {
                 log_error("event_sim: assert_state FAIL - expected %s=%s, got %s",
                          ev->state_name,

@@ -271,16 +271,6 @@ static void validate_focus_node(DocState* state, View* node, View* focused,
 
     if (node->is_element()) {
         DomElement* element = (DomElement*)node;
-        if (dom_element_has_pseudo_state(element, PSEUDO_STATE_FOCUS) != expected_focus) {
-            report_fail(report, "DOM focus pseudo bit is inconsistent");
-        }
-        if (dom_element_has_pseudo_state(element, PSEUDO_STATE_FOCUS_WITHIN) != expected_within) {
-            report_fail(report, "DOM focus-within pseudo bit is inconsistent");
-        }
-        if (dom_element_has_pseudo_state(element, PSEUDO_STATE_FOCUS_VISIBLE) != expected_visible) {
-            report_fail(report, "DOM focus-visible pseudo bit is inconsistent");
-        }
-
         DomNode* child = element->first_child;
         while (child) {
             validate_focus_node(state, (View*)child, focused, report, focus_count);

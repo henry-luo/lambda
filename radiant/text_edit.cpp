@@ -809,7 +809,8 @@ void te_aria_reflect(DomElement* elem) {
     // aria-invalid mirrors :invalid pseudo-state. Use "true"/"false"
     // rather than removing — assistive tech treats the explicit "false"
     // value as "validation has run and the control is currently OK".
-    bool invalid = (elem->pseudo_state & PSEUDO_STATE_INVALID) != 0;
+    DocState* state = f->state_ref ? f->state_ref : (elem->doc ? (DocState*)elem->doc->state : nullptr);
+    bool invalid = state_get_pseudo_state(state, (View*)elem, PSEUDO_STATE_INVALID);
     dom_element_set_attribute(elem, "aria-invalid", invalid ? "true" : "false");
 
     // aria-valuenow / valuemin / valuemax for <input type="range">.
