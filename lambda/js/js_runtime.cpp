@@ -5464,6 +5464,7 @@ extern "C" Item js_has_own_property(Item obj, Item key);
 extern "C" Item js_array_is_array(Item value);
 extern "C" Item js_array_from(Item iterable);
 extern "C" Item js_array_from_with_mapper_this(Item iterable, Item mapFn, Item this_arg);
+extern "C" Item js_array_from_with_constructor(Item ctor, Item iterable, Item mapFn, Item this_arg, bool mapping);
 extern "C" Item js_number_is_integer(Item value);
 extern "C" Item js_number_is_finite(Item value);
 extern "C" Item js_number_is_nan(Item value);
@@ -6870,7 +6871,17 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         return js_array_is_array(arg0);
     case JS_BUILTIN_ARRAY_FROM: {
         // Array.from(arrayLike [, mapFn [, thisArg]])
-        if (arg_count >= 2 && get_type_id(arg1) == LMD_TYPE_FUNC) {
+        if (get_type_id(this_val) == LMD_TYPE_FUNC) {
+            JsFunction* fn = (JsFunction*)this_val.function;
+            bool is_array_ctor = fn->name && fn->name->len == 5 && strncmp(fn->name->chars, "Array", 5) == 0;
+            if (!is_array_ctor) {
+                TypeId map_type = get_type_id(arg1);
+                bool mapping = arg_count >= 2 && arg1.item != ITEM_JS_UNDEFINED && map_type != LMD_TYPE_UNDEFINED;
+                Item map_this = (arg_count >= 3) ? arg2 : make_js_undefined();
+                return js_array_from_with_constructor(this_val, arg0, arg1, map_this, mapping);
+            }
+        }
+        if (arg_count >= 2) {
             Item this_arg = (arg_count >= 3) ? arg2 : make_js_undefined();
             return js_array_from_with_mapper_this(arg0, arg1, this_arg);
         }
@@ -18756,6 +18767,7 @@ struct JsGenerator {
     int    env_size;
     int64_t state;            // current state index (0=initial, -1=done)
     bool   done;
+    bool   started;            // false until the first .next() enters body execution
     bool   executing;         // true while state machine is running (re-entrance guard)
     bool   is_async;          // true for async generators: .next()/.return()/.throw() return Promises
     Item   delegate;          // active yield* delegate iterator (ItemNull when none)
@@ -18878,6 +18890,7 @@ extern "C" Item js_generator_create(void* func_ptr, Item* env, int env_size, int
     gen->env_size = env_size;
     gen->state = 0;
     gen->done = false;
+    gen->started = false;
     gen->executing = false;
     gen->is_async = (is_async != 0);
     gen->delegate = ItemNull;
@@ -18943,6 +18956,33 @@ static JsGenerator* js_get_generator(Item gen_obj) {
     int64_t idx = it2i(idx_item);
     if (idx < 0 || idx >= js_generator_count) return NULL;
     return &js_generators[idx];
+}
+
+static Item js_gen_return_signal_marker = {0};
+
+static Item js_get_gen_return_signal_marker() {
+    if (js_gen_return_signal_marker.item == 0) {
+        js_gen_return_signal_marker = js_new_object();
+    }
+    return js_gen_return_signal_marker;
+}
+
+extern "C" Item js_gen_return_signal(Item value) {
+    Item signal = js_array_new(2);
+    signal.array->items[0] = value;
+    signal.array->items[1] = js_get_gen_return_signal_marker();
+    return signal;
+}
+
+extern "C" int64_t js_gen_is_return_signal(Item value) {
+    if (get_type_id(value) != LMD_TYPE_ARRAY || value.array->length < 2) return 0;
+    Item tag = value.array->items[1];
+    return (tag.item == js_get_gen_return_signal_marker().item) ? 1 : 0;
+}
+
+extern "C" Item js_gen_return_signal_value(Item value) {
+    if (get_type_id(value) != LMD_TYPE_ARRAY || value.array->length < 1) return make_js_undefined();
+    return value.array->items[0];
 }
 
 static bool js_iter_result_is_done(Item result) {
@@ -19027,6 +19067,7 @@ extern "C" Item js_generator_next(Item generator, Item input) {
         return is_async ? js_promise_resolve(result) : result;
     }
 
+    gen->started = true;
     gen->executing = true;
 
     // If we have an active delegate (from yield*), advance it by one
@@ -19148,6 +19189,12 @@ extern "C" Item js_generator_return(Item generator, Item value) {
     JsGenerator* gen = js_get_generator(generator);
     bool is_async = gen && gen->is_async;
     if (gen) {
+        if (!gen->done && !gen->started) {
+            gen->done = true;
+            gen->state = -1;
+            Item result = js_make_iter_result(value, true);
+            return is_async ? js_promise_resolve(result) : result;
+        }
         if (gen->env && gen->env_size > 0) {
             int active_slot = gen->env_size - 1;
             Item active_iterator = gen->env[active_slot];
@@ -19214,8 +19261,43 @@ extern "C" Item js_generator_return(Item generator, Item value) {
             gen->delegate_resume = -1;
             gen->delegate_idx = 0;
         }
-        gen->done = true;
-        gen->state = -1;
+        if (!gen->done) {
+            if (gen->executing) {
+                js_throw_type_error("Generator is already running");
+                return ItemNull;
+            }
+            gen->executing = true;
+            typedef Item (*GenFn)(Item*, Item, int64_t);
+            Item signal = js_gen_return_signal(value);
+            Item result = ((GenFn)gen->state_fn)(gen->env, signal, gen->state);
+            gen->executing = false;
+            if (js_check_exception()) {
+                gen->done = true;
+                gen->state = -1;
+                return ItemNull;
+            }
+            if (get_type_id(result) == LMD_TYPE_ARRAY) {
+                Array* arr = result.array;
+                Item out_value = (arr->length > 0) ? arr->items[0] : make_js_undefined();
+                int64_t next_state = -1;
+                if (arr->length > 1 && get_type_id(arr->items[1]) == LMD_TYPE_INT) {
+                    next_state = it2i(arr->items[1]);
+                }
+                if (next_state < 0) {
+                    gen->done = true;
+                    gen->state = -1;
+                    Item done_result = js_make_iter_result(out_value, true);
+                    return is_async ? js_promise_resolve(done_result) : done_result;
+                }
+                gen->state = next_state;
+                Item yield_result = js_make_iter_result(out_value, false);
+                return is_async ? js_promise_resolve(yield_result) : yield_result;
+            }
+            gen->done = true;
+            gen->state = -1;
+            Item done_result = js_make_iter_result(result, true);
+            return is_async ? js_promise_resolve(done_result) : done_result;
+        }
     }
     Item result = js_make_iter_result(value, true);
     return is_async ? js_promise_resolve(result) : result;
@@ -19647,94 +19729,102 @@ extern "C" Item js_iterator_step(Item iterator) {
         }
     }
 
-    // Legacy synthetic array iterator (property-based, for backwards compatibility)
-    bool has_arr = false;
-    Item arr_val = js_map_get_fast(iterator.map, "__arr__", 7, &has_arr);
-    if (has_arr) {
-        bool has_idx = false;
-        Item idx_val = js_map_get_fast(iterator.map, "__idx__", 7, &has_idx);
-        int idx = has_idx ? (int)it2i(idx_val) : 0;
-        int len = (get_type_id(arr_val) == LMD_TYPE_ARRAY) ? arr_val.array->length : 0;
-        if (idx >= len) return (Item){.item = JS_ITER_DONE_SENTINEL};  // done
-        Item elem = js_property_access(arr_val, (Item){.item = i2it(idx)});
-        js_property_set(iterator, (Item){.item = s2it(heap_create_name("__idx__", 7))}, (Item){.item = i2it(idx + 1)});
-        return elem;
+    TypeId iterator_tid = get_type_id(iterator);
+    if (iterator_tid != LMD_TYPE_MAP && iterator_tid != LMD_TYPE_ELEMENT && !js_is_generator(iterator)) {
+        js_throw_type_error("iterator next is not a function");
+        return (Item){.item = JS_ITER_DONE_SENTINEL};
     }
 
-    // Synthetic string iterator
-    bool has_str = false;
-    Item str_val = js_map_get_fast(iterator.map, "__str__", 7, &has_str);
-    if (has_str && get_type_id(str_val) == LMD_TYPE_STRING) {
-        bool has_idx = false;
-        Item idx_val = js_map_get_fast(iterator.map, "__idx__", 7, &has_idx);
-        int idx = has_idx ? (int)it2i(idx_val) : 0;
-        String* str = it2s(str_val);
-        if (idx >= (int)str->len) return (Item){.item = JS_ITER_DONE_SENTINEL};  // done
-        // advance by full UTF-8 code point (1-4 bytes)
-        unsigned char lead = (unsigned char)str->chars[idx];
-        int cp_len = 1;
-        if (lead >= 0xF0 && idx + 4 <= (int)str->len)      cp_len = 4;
-        else if (lead >= 0xE0 && idx + 3 <= (int)str->len)  cp_len = 3;
-        else if (lead >= 0xC0 && idx + 2 <= (int)str->len)  cp_len = 2;
-        int total_len = cp_len;
-        // combine WTF-8/CESU-8 surrogate pairs: high surrogate (ED A0-AF xx) + low surrogate (ED B0-BF xx)
-        if (cp_len == 3 && lead == 0xED && idx + 1 < (int)str->len) {
-            unsigned char second = (unsigned char)str->chars[idx + 1];
-            if (second >= 0xA0 && second <= 0xAF) {
-                // high surrogate — check for following low surrogate
-                int next = idx + 3;
-                if (next + 2 < (int)str->len &&
-                    (unsigned char)str->chars[next] == 0xED) {
-                    unsigned char ns = (unsigned char)str->chars[next + 1];
-                    if (ns >= 0xB0 && ns <= 0xBF) {
-                        total_len = 6;  // combine both surrogates
+    if (iterator_tid == LMD_TYPE_MAP) {
+        // Legacy synthetic array iterator (property-based, for backwards compatibility)
+        bool has_arr = false;
+        Item arr_val = js_map_get_fast(iterator.map, "__arr__", 7, &has_arr);
+        if (has_arr) {
+            bool has_idx = false;
+            Item idx_val = js_map_get_fast(iterator.map, "__idx__", 7, &has_idx);
+            int idx = has_idx ? (int)it2i(idx_val) : 0;
+            int len = (get_type_id(arr_val) == LMD_TYPE_ARRAY) ? arr_val.array->length : 0;
+            if (idx >= len) return (Item){.item = JS_ITER_DONE_SENTINEL};  // done
+            Item elem = js_property_access(arr_val, (Item){.item = i2it(idx)});
+            js_property_set(iterator, (Item){.item = s2it(heap_create_name("__idx__", 7))}, (Item){.item = i2it(idx + 1)});
+            return elem;
+        }
+
+        // Synthetic string iterator
+        bool has_str = false;
+        Item str_val = js_map_get_fast(iterator.map, "__str__", 7, &has_str);
+        if (has_str && get_type_id(str_val) == LMD_TYPE_STRING) {
+            bool has_idx = false;
+            Item idx_val = js_map_get_fast(iterator.map, "__idx__", 7, &has_idx);
+            int idx = has_idx ? (int)it2i(idx_val) : 0;
+            String* str = it2s(str_val);
+            if (idx >= (int)str->len) return (Item){.item = JS_ITER_DONE_SENTINEL};  // done
+            // advance by full UTF-8 code point (1-4 bytes)
+            unsigned char lead = (unsigned char)str->chars[idx];
+            int cp_len = 1;
+            if (lead >= 0xF0 && idx + 4 <= (int)str->len)      cp_len = 4;
+            else if (lead >= 0xE0 && idx + 3 <= (int)str->len)  cp_len = 3;
+            else if (lead >= 0xC0 && idx + 2 <= (int)str->len)  cp_len = 2;
+            int total_len = cp_len;
+            // combine WTF-8/CESU-8 surrogate pairs: high surrogate (ED A0-AF xx) + low surrogate (ED B0-BF xx)
+            if (cp_len == 3 && lead == 0xED && idx + 1 < (int)str->len) {
+                unsigned char second = (unsigned char)str->chars[idx + 1];
+                if (second >= 0xA0 && second <= 0xAF) {
+                    // high surrogate — check for following low surrogate
+                    int next = idx + 3;
+                    if (next + 2 < (int)str->len &&
+                        (unsigned char)str->chars[next] == 0xED) {
+                        unsigned char ns = (unsigned char)str->chars[next + 1];
+                        if (ns >= 0xB0 && ns <= 0xBF) {
+                            total_len = 6;  // combine both surrogates
+                        }
                     }
                 }
             }
+            String* ch = heap_create_name(str->chars + idx, total_len);
+            js_property_set(iterator, (Item){.item = s2it(heap_create_name("__idx__", 7))}, (Item){.item = i2it(idx + total_len)});
+            return (Item){.item = s2it(ch)};
         }
-        String* ch = heap_create_name(str->chars + idx, total_len);
-        js_property_set(iterator, (Item){.item = s2it(heap_create_name("__idx__", 7))}, (Item){.item = i2it(idx + total_len)});
-        return (Item){.item = s2it(ch)};
-    }
 
-    // Synthetic typed array iterator
-    bool has_tarr = false;
-    Item tarr_val = js_map_get_fast(iterator.map, "__tarr__", 8, &has_tarr);
-    if (has_tarr) {
-        bool has_done = false;
-        Item done_val = js_map_get_fast(iterator.map, "__done__", 8, &has_done);
-        if (has_done && get_type_id(done_val) == LMD_TYPE_BOOL && it2b(done_val)) {
-            return (Item){.item = JS_ITER_DONE_SENTINEL};
+        // Synthetic typed array iterator
+        bool has_tarr = false;
+        Item tarr_val = js_map_get_fast(iterator.map, "__tarr__", 8, &has_tarr);
+        if (has_tarr) {
+            bool has_done = false;
+            Item done_val = js_map_get_fast(iterator.map, "__done__", 8, &has_done);
+            if (has_done && get_type_id(done_val) == LMD_TYPE_BOOL && it2b(done_val)) {
+                return (Item){.item = JS_ITER_DONE_SENTINEL};
+            }
+            if (js_typed_array_is_out_of_bounds_item(tarr_val)) {
+                js_throw_type_error("Cannot perform %TypedArray%.prototype iterator on an out-of-bounds ArrayBuffer");
+                return (Item){.item = JS_ITER_DONE_SENTINEL};
+            }
+            bool has_index = false;
+            Item idx_val = js_map_get_fast(iterator.map, "__index__", 9, &has_index);
+            if (!has_index) idx_val = js_map_get_fast(iterator.map, "__idx__", 7, &has_index);
+            int idx = has_index ? (int)it2i(idx_val) : 0;
+            bool has_kind = false;
+            Item kind_val = js_map_get_fast(iterator.map, "__kind__", 8, &has_kind);
+            int kind = has_kind ? (int)it2i(kind_val) : 1;
+            int len = js_typed_array_length(tarr_val);
+            if (idx >= len) {
+                js_property_set(iterator, (Item){.item = s2it(heap_create_name("__done__", 8))}, (Item){.item = b2it(true)});
+                return (Item){.item = JS_ITER_DONE_SENTINEL};
+            }
+            js_property_set(iterator, (Item){.item = s2it(heap_create_name("__index__", 9))}, (Item){.item = i2it(idx + 1)});
+            if (kind == 0) {
+                return (Item){.item = i2it(idx)};
+            }
+            Item elem = js_typed_array_get(tarr_val, (Item){.item = i2it(idx)});
+            if (elem.item == ITEM_NULL) elem = make_js_undefined();
+            if (kind == 2) {
+                Item pair = js_array_new(2);
+                pair.array->items[0] = (Item){.item = i2it(idx)};
+                pair.array->items[1] = elem;
+                return pair;
+            }
+            return elem;
         }
-        if (js_typed_array_is_out_of_bounds_item(tarr_val)) {
-            js_throw_type_error("Cannot perform %TypedArray%.prototype iterator on an out-of-bounds ArrayBuffer");
-            return (Item){.item = JS_ITER_DONE_SENTINEL};
-        }
-        bool has_index = false;
-        Item idx_val = js_map_get_fast(iterator.map, "__index__", 9, &has_index);
-        if (!has_index) idx_val = js_map_get_fast(iterator.map, "__idx__", 7, &has_index);
-        int idx = has_index ? (int)it2i(idx_val) : 0;
-        bool has_kind = false;
-        Item kind_val = js_map_get_fast(iterator.map, "__kind__", 8, &has_kind);
-        int kind = has_kind ? (int)it2i(kind_val) : 1;
-        int len = js_typed_array_length(tarr_val);
-        if (idx >= len) {
-            js_property_set(iterator, (Item){.item = s2it(heap_create_name("__done__", 8))}, (Item){.item = b2it(true)});
-            return (Item){.item = JS_ITER_DONE_SENTINEL};
-        }
-        js_property_set(iterator, (Item){.item = s2it(heap_create_name("__index__", 9))}, (Item){.item = i2it(idx + 1)});
-        if (kind == 0) {
-            return (Item){.item = i2it(idx)};
-        }
-        Item elem = js_typed_array_get(tarr_val, (Item){.item = i2it(idx)});
-        if (elem.item == ITEM_NULL) elem = make_js_undefined();
-        if (kind == 2) {
-            Item pair = js_array_new(2);
-            pair.array->items[0] = (Item){.item = i2it(idx)};
-            pair.array->items[1] = elem;
-            return pair;
-        }
-        return elem;
     }
 
     // Generator: call js_generator_next
@@ -19752,17 +19842,27 @@ extern "C" Item js_iterator_step(Item iterator) {
     if (get_type_id(iterator) == LMD_TYPE_MAP || get_type_id(iterator) == LMD_TYPE_ELEMENT) {
         String* next_key = heap_create_name("next", 4);
         Item next_fn = js_property_get(iterator, (Item){.item = s2it(next_key)});
+        if (js_check_exception()) return (Item){.item = JS_ITER_DONE_SENTINEL};
         if (get_type_id(next_fn) == LMD_TYPE_FUNC) {
             Item result = js_call_function(next_fn, iterator, NULL, 0);
             if (js_check_exception()) return (Item){.item = JS_ITER_DONE_SENTINEL};
+            TypeId result_tid = get_type_id(result);
+            if (result_tid != LMD_TYPE_MAP && result_tid != LMD_TYPE_ELEMENT &&
+                result_tid != LMD_TYPE_ARRAY && result_tid != LMD_TYPE_FUNC &&
+                result_tid != LMD_TYPE_OBJECT && result_tid != LMD_TYPE_VMAP) {
+                js_throw_type_error("iterator result is not an object");
+                return (Item){.item = JS_ITER_DONE_SENTINEL};
+            }
             String* done_key = heap_create_name("done", 4);
             Item done_item = js_property_get(result, (Item){.item = s2it(done_key)});
+            if (js_check_exception()) return (Item){.item = JS_ITER_DONE_SENTINEL};
             if (get_type_id(done_item) == LMD_TYPE_BOOL && it2b(done_item)) return (Item){.item = JS_ITER_DONE_SENTINEL};
             String* val_key = heap_create_name("value", 5);
             return js_property_get(result, (Item){.item = s2it(val_key)});
         }
     }
 
+    js_throw_type_error("iterator next is not a function");
     return (Item){.item = JS_ITER_DONE_SENTINEL};  // done
 }
 
@@ -19919,102 +20019,16 @@ extern "C" Item js_iterable_to_array(Item iterable) {
         }
     }
 
-    // Check for iterator protocol: object with .next() method
-    if (get_type_id(iterable) == LMD_TYPE_MAP) {
-        // Already handled above - this is for other objects with next()
-    }
-    TypeId tid2 = get_type_id(iterable);
-    if (tid2 == LMD_TYPE_MAP || tid2 == LMD_TYPE_ELEMENT) {
-        // Check for [Symbol.iterator]() which returns an iterator (JS iterable protocol)
-        // Symbol.iterator has well-known ID=1, stored as property key "__sym_1"
-        Item iter_factory_key = (Item){.item = s2it(heap_create_name("__sym_1", 7))};
-        Item iter_factory = js_property_get(iterable, iter_factory_key);
+    Item iterator = js_get_iterator(iterable);
+    if (js_exception_pending) return ItemNull;
+    Item arr = js_array_new(0);
+    for (int safety = 0; safety < 100000; safety++) {
+        Item value = js_iterator_step(iterator);
         if (js_exception_pending) return ItemNull;
-        // Per ES GetIterator/GetMethod: if method exists but is not callable, throw TypeError
-        TypeId ift = get_type_id(iter_factory);
-        if (ift != LMD_TYPE_FUNC && ift != LMD_TYPE_UNDEFINED && ift != LMD_TYPE_NULL) {
-            js_throw_type_error("Symbol.iterator is not a function");
-            return ItemNull;
-        }
-        if (get_type_id(iter_factory) == LMD_TYPE_FUNC) {
-            Item iterator = js_call_function(iter_factory, iterable, NULL, 0);
-            if (js_exception_pending) return ItemNull;
-            // Per ES GetIterator: if iterator is not an Object, throw TypeError
-            TypeId itt = get_type_id(iterator);
-            if (itt != LMD_TYPE_ARRAY && itt != LMD_TYPE_MAP && itt != LMD_TYPE_ELEMENT &&
-                itt != LMD_TYPE_FUNC && !js_is_generator(iterator)) {
-                js_throw_type_error("iterator result is not an object");
-                return ItemNull;
-            }
-            // if [Symbol.iterator]() returned an array directly, use it as-is
-            if (get_type_id(iterator) == LMD_TYPE_ARRAY) return iterator;
-            // drain the iterator (generator or object with next())
-            if (js_is_generator(iterator)) {
-                Item arr = js_array_new(0);
-                for (int safety = 0; safety < 100000; safety++) {
-                    Item result = js_generator_next(iterator, make_js_undefined());
-                    if (js_exception_pending) return ItemNull;
-                    String* done_key = heap_create_name("done", 4);
-                    Item done_item = js_property_get(result, (Item){.item = s2it(done_key)});
-                    if (get_type_id(done_item) == LMD_TYPE_BOOL && it2b(done_item)) break;
-                    String* val_key = heap_create_name("value", 5);
-                    Item value = js_property_get(result, (Item){.item = s2it(val_key)});
-                    js_array_push_item_direct(arr.array, value);
-                }
-                return arr;
-            }
-            if (get_type_id(iterator) == LMD_TYPE_MAP || get_type_id(iterator) == LMD_TYPE_ELEMENT) {
-                // plain iterator: call .next() in a loop
-                String* next_key2 = heap_create_name("next", 4);
-                Item next_fn2 = js_property_get(iterator, (Item){.item = s2it(next_key2)});
-                if (js_exception_pending) return ItemNull;
-                // Per ES spec: if next is not callable, throw TypeError
-                if (get_type_id(next_fn2) != LMD_TYPE_FUNC) {
-                    js_throw_type_error("iterator next is not a function");
-                    return ItemNull;
-                }
-                {
-                    Item arr = js_array_new(0);
-                    for (int safety = 0; safety < 100000; safety++) {
-                        Item result = js_call_function(next_fn2, iterator, NULL, 0);
-                        if (js_exception_pending) return ItemNull;
-                        TypeId rtid = get_type_id(result);
-                        if (rtid != LMD_TYPE_MAP && rtid != LMD_TYPE_ELEMENT && rtid != LMD_TYPE_ARRAY) {
-                            js_throw_type_error("iterator result is not an object");
-                            return ItemNull;
-                        }
-                        String* done_key = heap_create_name("done", 4);
-                        Item done_item = js_property_get(result, (Item){.item = s2it(done_key)});
-                        if (get_type_id(done_item) == LMD_TYPE_BOOL && it2b(done_item)) break;
-                        String* val_key = heap_create_name("value", 5);
-                        Item value = js_property_get(result, (Item){.item = s2it(val_key)});
-                        js_array_push_item_direct(arr.array, value);
-                    }
-                    return arr;
-                }
-            }
-        }
-        // Check if object has a next() method (iterator protocol — already is an iterator)
-        String* next_key = heap_create_name("next", 4);
-        Item next_fn = js_property_get(iterable, (Item){.item = s2it(next_key)});
-        if (get_type_id(next_fn) == LMD_TYPE_FUNC) {
-            Item arr = js_array_new(0);
-            for (int safety = 0; safety < 100000; safety++) {
-                Item result = js_call_function(next_fn, iterable, NULL, 0);
-                if (js_exception_pending) return ItemNull;
-                String* done_key = heap_create_name("done", 4);
-                Item done_item = js_property_get(result, (Item){.item = s2it(done_key)});
-                if (get_type_id(done_item) == LMD_TYPE_BOOL && it2b(done_item)) break;
-                String* val_key = heap_create_name("value", 5);
-                Item value = js_property_get(result, (Item){.item = s2it(val_key)});
-                js_array_push_item_direct(arr.array, value);
-            }
-            return arr;
-        }
+        if (value.item == JS_ITER_DONE_SENTINEL) break;
+        js_array_push_item_direct(arr.array, value);
     }
-
-    // Fallback: return as-is (might be a map treated as iterable)
-    return iterable;
+    return arr;
 }
 
 // =============================================================================
@@ -20717,10 +20731,33 @@ static void js_invoke_promise_then(Item elem, Item resolve_fn, Item reject_fn) {
     }
 }
 
-extern "C" Item js_promise_all(Item iterable) {
-    if (get_type_id(iterable) != LMD_TYPE_ARRAY) return js_promise_resolve(iterable);
+static bool js_promise_materialize_iterable(Item iterable, Item* out_array, Item* out_rejection) {
+    if (get_type_id(iterable) == LMD_TYPE_ARRAY) {
+        *out_array = iterable;
+        return true;
+    }
+    Item arr = js_iterable_to_array(iterable);
+    if (js_check_exception()) {
+        *out_rejection = js_clear_exception();
+        return false;
+    }
+    if (get_type_id(arr) != LMD_TYPE_ARRAY) {
+        js_throw_type_error("Promise combinator input is not iterable");
+        *out_rejection = js_clear_exception();
+        return false;
+    }
+    *out_array = arr;
+    return true;
+}
 
-    Array* arr = iterable.array;
+extern "C" Item js_promise_all(Item iterable) {
+    Item arr_item = ItemNull;
+    Item rejection = ItemNull;
+    if (!js_promise_materialize_iterable(iterable, &arr_item, &rejection)) {
+        return js_promise_reject(rejection);
+    }
+
+    Array* arr = arr_item.array;
     int count = arr->length;
 
     if (count == 0) {
@@ -20760,9 +20797,13 @@ extern "C" Item js_promise_all(Item iterable) {
 }
 
 extern "C" Item js_promise_race(Item iterable) {
-    if (get_type_id(iterable) != LMD_TYPE_ARRAY) return js_promise_resolve(iterable);
+    Item arr_item = ItemNull;
+    Item rejection = ItemNull;
+    if (!js_promise_materialize_iterable(iterable, &arr_item, &rejection)) {
+        return js_promise_reject(rejection);
+    }
 
-    Array* arr = iterable.array;
+    Array* arr = arr_item.array;
 
     // per spec: empty array → never-settling promise
     JsPromise* result = js_alloc_promise();
@@ -20789,9 +20830,13 @@ extern "C" Item js_promise_race(Item iterable) {
 }
 
 extern "C" Item js_promise_any(Item iterable) {
-    if (get_type_id(iterable) != LMD_TYPE_ARRAY) return js_promise_resolve(iterable);
+    Item arr_item = ItemNull;
+    Item rejection = ItemNull;
+    if (!js_promise_materialize_iterable(iterable, &arr_item, &rejection)) {
+        return js_promise_reject(rejection);
+    }
 
-    Array* arr = iterable.array;
+    Array* arr = arr_item.array;
     int count = arr->length;
 
     if (count == 0) {
@@ -20832,9 +20877,13 @@ extern "C" Item js_promise_any(Item iterable) {
 }
 
 extern "C" Item js_promise_all_settled(Item iterable) {
-    if (get_type_id(iterable) != LMD_TYPE_ARRAY) return js_promise_resolve(iterable);
+    Item arr_item = ItemNull;
+    Item rejection = ItemNull;
+    if (!js_promise_materialize_iterable(iterable, &arr_item, &rejection)) {
+        return js_promise_reject(rejection);
+    }
 
-    Array* arr = iterable.array;
+    Array* arr = arr_item.array;
     int count = arr->length;
 
     if (count == 0) {

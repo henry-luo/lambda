@@ -1655,6 +1655,8 @@ JitImport jit_runtime_imports[] = {
     // v15: Generator state machine helper
     {"js_gen_yield_result", FPTR(js_gen_yield_result)},
     {"js_gen_yield_delegate_result", FPTR(js_gen_yield_delegate_result)},
+    {"js_gen_is_return_signal", FPTR(js_gen_is_return_signal)},
+    {"js_gen_return_signal_value", FPTR(js_gen_return_signal_value)},
     {"js_iterable_to_array", FPTR(js_iterable_to_array)},
     // v29: Lazy iterator protocol for for-of
     {"js_get_iterator", FPTR(js_get_iterator)},

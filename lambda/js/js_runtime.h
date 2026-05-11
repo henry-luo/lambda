@@ -615,6 +615,9 @@ Item js_generator_throw(Item generator, Item error);
  */
 Item js_gen_yield_result(Item value, int64_t next_state);
 Item js_gen_yield_delegate_result(Item iterable, int64_t resume_state);
+Item js_gen_return_signal(Item value);
+int64_t js_gen_is_return_signal(Item value);
+Item js_gen_return_signal_value(Item value);
 
 /**
  * v15: Convert an iterable to an array. Drains generators, passes arrays through.
