@@ -2848,6 +2848,7 @@ extern "C" Item js_property_get(Item object, Item key) {
             }
             // .prototype — lazy initialization (skip for global builtin wrappers like parseInt)
             if (str_key->len == 9 && strncmp(str_key->chars, "prototype", 9) == 0) {
+                if (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS) return make_js_undefined();
                 // Return explicitly-set prototype (e.g., %TypedArray%.prototype) even for builtin_id == -2
                 if (fn->prototype.item != 0 && get_type_id(fn->prototype) == LMD_TYPE_MAP) return fn->prototype;
                 // ES: .prototype can also be set to Array/Element/Function — return as-is.
@@ -5202,6 +5203,13 @@ extern "C" Item js_ordinary_has_instance(Item, Item);
 // Forward declarations for promise runtime
 struct JsPromise;
 static JsPromise* js_get_promise(Item promise_obj);
+static bool js_promise_is_builtin_promise_constructor(Item constructor);
+static Item js_promise_resolve_with_constructor(Item constructor, Item value);
+static Item js_promise_reject_with_constructor(Item constructor, Item reason);
+static Item js_promise_all_with_constructor(Item constructor, Item iterable);
+static Item js_promise_all_settled_with_constructor(Item constructor, Item iterable);
+static Item js_promise_any_with_constructor(Item constructor, Item iterable);
+static Item js_promise_race_with_constructor(Item constructor, Item iterable);
 
 // Invoke a JsFunction with args, handling env if it's a closure
 static Item js_invoke_fn(JsFunction* fn, Item* args, int arg_count) {
@@ -7641,7 +7649,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             tt != LMD_TYPE_FUNC && tt != LMD_TYPE_OBJECT && tt != LMD_TYPE_VMAP) {
             return js_throw_type_error("Promise.resolve requires that 'this' be an Object");
         }
-        return js_promise_resolve(arg0);
+        return js_promise_resolve_with_constructor(this_val, arg0);
     }
     case JS_BUILTIN_PROMISE_REJECT: {
         TypeId tt = get_type_id(this_val);
@@ -7649,16 +7657,20 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             tt != LMD_TYPE_FUNC && tt != LMD_TYPE_OBJECT && tt != LMD_TYPE_VMAP) {
             return js_throw_type_error("Promise.reject requires that 'this' be an Object");
         }
-        return js_promise_reject(arg0);
+        return js_promise_reject_with_constructor(this_val, arg0);
     }
     case JS_BUILTIN_PROMISE_ALL:
-        return js_promise_all(arg0);
+        if (js_promise_is_builtin_promise_constructor(this_val)) return js_promise_all(arg0);
+        return js_promise_all_with_constructor(this_val, arg0);
     case JS_BUILTIN_PROMISE_ALL_SETTLED:
-        return js_promise_all_settled(arg0);
+        if (js_promise_is_builtin_promise_constructor(this_val)) return js_promise_all_settled(arg0);
+        return js_promise_all_settled_with_constructor(this_val, arg0);
     case JS_BUILTIN_PROMISE_ANY:
-        return js_promise_any(arg0);
+        if (js_promise_is_builtin_promise_constructor(this_val)) return js_promise_any(arg0);
+        return js_promise_any_with_constructor(this_val, arg0);
     case JS_BUILTIN_PROMISE_RACE:
-        return js_promise_race(arg0);
+        if (js_promise_is_builtin_promise_constructor(this_val)) return js_promise_race(arg0);
+        return js_promise_race_with_constructor(this_val, arg0);
 
     // Promise.prototype.then/catch/finally (this_val is the promise instance)
     case JS_BUILTIN_PROMISE_PROTO_THEN: {
@@ -20264,6 +20276,12 @@ static Item js_resolve_callback(Item promise_idx_item, Item value);
 static Item js_reject_callback(Item promise_idx_item, Item reason);
 static void js_promise_enqueue_handler(Item handler, Item result, Item next_promise_item);
 static void js_promise_enqueue_passthrough(Item next_promise_item, JsPromiseState state, Item result);
+static bool js_promise_materialize_iterable(Item iterable, Item* out_array, Item* out_rejection);
+static Item js_promise_make_aggregate_error(Item errors);
+extern "C" Item js_promise_all(Item iterable);
+extern "C" Item js_promise_race(Item iterable);
+extern "C" Item js_promise_any(Item iterable);
+extern "C" Item js_promise_all_settled(Item iterable);
 
 static bool js_promise_is_object_like(Item value) {
     TypeId tid = get_type_id(value);
@@ -20275,6 +20293,34 @@ static Item js_promise_make_type_error(const char* message, int len) {
     return js_new_error_with_name(
         (Item){.item = s2it(heap_create_name("TypeError", 9))},
         (Item){.item = s2it(heap_create_name(message, len))});
+}
+
+static Item js_promise_make_resolving_state(JsPromise* p) {
+    Item state = js_new_object();
+    int idx = p ? (int)(p - js_promises) : -1;
+    js_property_set(state, (Item){.item = s2it(heap_create_name("idx", 3))}, (Item){.item = i2it(idx)});
+    js_property_set(state, (Item){.item = s2it(heap_create_name("called", 6))}, (Item){.item = ITEM_FALSE});
+    return state;
+}
+
+static bool js_promise_resolving_state_claim(Item state_item, int64_t* out_idx) {
+    if (get_type_id(state_item) == LMD_TYPE_INT) {
+        *out_idx = it2i(state_item);
+        return true;
+    }
+    if (get_type_id(state_item) != LMD_TYPE_MAP) return false;
+
+    Item idx = js_property_get(state_item, (Item){.item = s2it(heap_create_name("idx", 3))});
+    if (get_type_id(idx) != LMD_TYPE_INT) return false;
+
+    Item called_key = (Item){.item = s2it(heap_create_name("called", 6))};
+    Item called = js_property_get(state_item, called_key);
+    if (get_type_id(called) == LMD_TYPE_BOOL && it2b(called)) {
+        return false;
+    }
+    js_property_set(state_item, called_key, (Item){.item = ITEM_TRUE});
+    *out_idx = it2i(idx);
+    return true;
 }
 
 static void js_promise_adopt_native(JsPromise* target, JsPromise* source) {
@@ -20308,18 +20354,18 @@ static Item js_promise_thenable_job(Item promise_item, Item thenable, Item then_
     JsPromise* p = js_get_promise(promise_item);
     if (!p || p->state != JS_PROMISE_PENDING) return ItemNull;
 
-    int idx = (int)(p - js_promises);
-    Item idx_item = (Item){.item = i2it(idx)};
+    Item resolving_state = js_promise_make_resolving_state(p);
     Item resolve_base = js_new_function((void*)js_resolve_callback, 2);
     Item reject_base = js_new_function((void*)js_reject_callback, 2);
-    Item resolve_fn = js_bind_function(resolve_base, ItemNull, &idx_item, 1);
-    Item reject_fn = js_bind_function(reject_base, ItemNull, &idx_item, 1);
+    Item resolve_fn = js_bind_function(resolve_base, ItemNull, &resolving_state, 1);
+    Item reject_fn = js_bind_function(reject_base, ItemNull, &resolving_state, 1);
 
     Item args[2] = {resolve_fn, reject_fn};
     js_call_function(then_fn, thenable, args, 2);
     if (js_check_exception()) {
         Item error = js_clear_exception();
-        js_promise_settle(p, JS_PROMISE_REJECTED, error);
+        Item reject_args[1] = {error};
+        js_call_function(reject_fn, ItemNull, reject_args, 1);
     }
     return ItemNull;
 }
@@ -20500,7 +20546,8 @@ static void js_promise_settle(JsPromise* p, JsPromiseState state, Item result) {
 // Each callback is bound (via js_bind_function) to its promise index,
 // so these work even when called asynchronously (e.g. in setTimeout).
 static Item js_resolve_callback(Item promise_idx_item, Item value) {
-    int64_t idx = it2i(promise_idx_item);
+    int64_t idx = -1;
+    if (!js_promise_resolving_state_claim(promise_idx_item, &idx)) return ItemNull;
     if (idx >= 0 && idx < js_promise_count) {
         js_promise_resolve_with_value(&js_promises[idx], value);
     }
@@ -20508,7 +20555,8 @@ static Item js_resolve_callback(Item promise_idx_item, Item value) {
 }
 
 static Item js_reject_callback(Item promise_idx_item, Item reason) {
-    int64_t idx = it2i(promise_idx_item);
+    int64_t idx = -1;
+    if (!js_promise_resolving_state_claim(promise_idx_item, &idx)) return ItemNull;
     if (idx >= 0 && idx < js_promise_count) {
         js_promise_settle(&js_promises[idx], JS_PROMISE_REJECTED, reason);
     }
@@ -20525,12 +20573,11 @@ extern "C" Item js_promise_create(Item executor) {
 
     {
         // Create resolve/reject functions bound to this promise's index
-        int idx = (int)(p - js_promises);
-        Item idx_item = (Item){.item = i2it(idx)};
+        Item resolving_state = js_promise_make_resolving_state(p);
         Item resolve_base = js_new_function((void*)js_resolve_callback, 2);
         Item reject_base = js_new_function((void*)js_reject_callback, 2);
-        Item resolve_fn = js_bind_function(resolve_base, ItemNull, &idx_item, 1);
-        Item reject_fn = js_bind_function(reject_base, ItemNull, &idx_item, 1);
+        Item resolve_fn = js_bind_function(resolve_base, ItemNull, &resolving_state, 1);
+        Item reject_fn = js_bind_function(reject_base, ItemNull, &resolving_state, 1);
 
         Item args[2] = {resolve_fn, reject_fn};
         js_call_function(executor, ItemNull, args, 2);
@@ -20561,15 +20608,230 @@ extern "C" Item js_promise_reject(Item reason) {
     return js_promise_to_item(p);
 }
 
+static bool js_promise_is_builtin_promise_constructor(Item constructor) {
+    if (get_type_id(constructor) != LMD_TYPE_FUNC) return false;
+    JsFunction* fn = (JsFunction*)constructor.function;
+    if (!fn || !fn->name) return false;
+    const char* name = fn->name->chars;
+    int len = (int)fn->name->len;
+    if (len > 6 && strncmp(name, "bound ", 6) == 0) {
+        name += 6;
+        len -= 6;
+    }
+    return len == 7 && strncmp(name, "Promise", 7) == 0;
+}
+
+// NewPromiseCapability executor. Bound arg: holder object.
+static Item js_promise_capability_executor(Item holder, Item resolve, Item reject) {
+    js_property_set(holder, (Item){.item = s2it(heap_create_name("resolve", 7))}, resolve);
+    js_property_set(holder, (Item){.item = s2it(heap_create_name("reject", 6))}, reject);
+    return make_js_undefined();
+}
+
+static Item js_promise_new_capability(Item constructor, Item* out_resolve, Item* out_reject) {
+    Item holder = js_new_object();
+    Item capture_base = js_new_function((void*)js_promise_capability_executor, 3);
+    Item executor = js_bind_function(capture_base, ItemNull, &holder, 1);
+    Item args[1] = {executor};
+    Item promise = js_new_from_class_object(constructor, args, 1);
+    if (js_check_exception()) return ItemNull;
+
+    Item resolve = js_property_get(holder, (Item){.item = s2it(heap_create_name("resolve", 7))});
+    Item reject = js_property_get(holder, (Item){.item = s2it(heap_create_name("reject", 6))});
+    if (get_type_id(resolve) != LMD_TYPE_FUNC || get_type_id(reject) != LMD_TYPE_FUNC) {
+        js_throw_type_error("Promise capability executor did not capture resolving functions");
+        return ItemNull;
+    }
+    *out_resolve = resolve;
+    *out_reject = reject;
+    return promise;
+}
+
+static Item js_promise_resolve_with_constructor(Item constructor, Item value) {
+    if (js_promise_is_builtin_promise_constructor(constructor)) {
+        return js_promise_resolve(value);
+    }
+
+    JsPromise* existing = js_get_promise(value);
+    if (existing) {
+        Item ctor_key = (Item){.item = s2it(heap_create_name("constructor", 11))};
+        Item value_ctor = js_property_get(value, ctor_key);
+        if (js_check_exception()) return ItemNull;
+        if (value_ctor.item == constructor.item) return value;
+    }
+
+    Item resolve = ItemNull;
+    Item reject = ItemNull;
+    Item promise = js_promise_new_capability(constructor, &resolve, &reject);
+    if (js_check_exception()) return ItemNull;
+    (void)reject;
+    Item args[1] = {value};
+    js_call_function(resolve, ItemNull, args, 1);
+    if (js_check_exception()) return ItemNull;
+    return promise;
+}
+
+static Item js_promise_reject_with_constructor(Item constructor, Item reason) {
+    if (js_promise_is_builtin_promise_constructor(constructor)) {
+        return js_promise_reject(reason);
+    }
+
+    Item resolve = ItemNull;
+    Item reject = ItemNull;
+    Item promise = js_promise_new_capability(constructor, &resolve, &reject);
+    if (js_check_exception()) return ItemNull;
+    (void)resolve;
+    Item args[1] = {reason};
+    js_call_function(reject, ItemNull, args, 1);
+    if (js_check_exception()) return ItemNull;
+    return promise;
+}
+
+static Item js_promise_capability_forward_resolve(Item resolve, Item reject, Item value) {
+    Item args[1] = {value};
+    js_call_function(resolve, ItemNull, args, 1);
+    if (js_check_exception()) {
+        Item error = js_clear_exception();
+        Item reject_args[1] = {error};
+        js_call_function(reject, ItemNull, reject_args, 1);
+        if (js_check_exception()) js_clear_exception();
+    }
+    return make_js_undefined();
+}
+
+static Item js_promise_capability_forward_reject(Item reject, Item reason) {
+    Item args[1] = {reason};
+    js_call_function(reject, ItemNull, args, 1);
+    if (js_check_exception()) js_clear_exception();
+    return make_js_undefined();
+}
+
+static Item js_promise_call_capability_resolve(Item resolve, Item reject, Item value) {
+    Item args[1] = {value};
+    js_call_function(resolve, ItemNull, args, 1);
+    if (js_check_exception()) {
+        Item error = js_clear_exception();
+        Item reject_args[1] = {error};
+        js_call_function(reject, ItemNull, reject_args, 1);
+        if (js_check_exception()) js_clear_exception();
+    }
+    return make_js_undefined();
+}
+
+static Item js_promise_call_capability_reject(Item reject, Item reason) {
+    Item args[1] = {reason};
+    js_call_function(reject, ItemNull, args, 1);
+    if (js_check_exception()) js_clear_exception();
+    return make_js_undefined();
+}
+
+static void js_promise_forward_native_to_capability(Item native_promise, Item resolve, Item reject) {
+    Item resolve_base = js_new_function((void*)js_promise_capability_forward_resolve, 3);
+    Item resolve_args[2] = {resolve, reject};
+    Item resolve_fn = js_bind_function(resolve_base, ItemNull, resolve_args, 2);
+
+    Item reject_base = js_new_function((void*)js_promise_capability_forward_reject, 2);
+    Item reject_fn = js_bind_function(reject_base, ItemNull, &reject, 1);
+
+    js_promise_then(native_promise, resolve_fn, reject_fn);
+}
+
+static bool js_promise_resolve_elements_with_constructor(Item constructor, Item arr_item, Item* out_array, Item reject) {
+    Item resolve_method = js_property_get(constructor, (Item){.item = s2it(heap_create_name("resolve", 7))});
+    if (js_check_exception()) {
+        Item error = js_clear_exception();
+        js_promise_call_capability_reject(reject, error);
+        return false;
+    }
+    if (get_type_id(resolve_method) != LMD_TYPE_FUNC) {
+        Item error = js_promise_make_type_error("Promise resolve is not callable", 31);
+        js_promise_call_capability_reject(reject, error);
+        return false;
+    }
+
+    Array* arr = arr_item.array;
+    Item resolved = js_array_new(arr->length);
+    for (int i = 0; i < arr->length; i++) {
+        Item args[1] = {arr->items[i]};
+        Item next = js_call_function(resolve_method, constructor, args, 1);
+        if (js_check_exception()) {
+            Item error = js_clear_exception();
+            js_promise_call_capability_reject(reject, error);
+            return false;
+        }
+        js_array_push(resolved, next);
+    }
+    *out_array = resolved;
+    return true;
+}
+
+static Item js_promise_combinator_with_constructor(Item constructor, Item iterable, int kind) {
+    Item resolve = ItemNull;
+    Item reject = ItemNull;
+    Item promise = js_promise_new_capability(constructor, &resolve, &reject);
+    if (js_check_exception()) return ItemNull;
+
+    Item arr_item = ItemNull;
+    Item rejection = ItemNull;
+    if (!js_promise_materialize_iterable(iterable, &arr_item, &rejection)) {
+        js_promise_call_capability_reject(reject, rejection);
+        return promise;
+    }
+
+    Array* arr = arr_item.array;
+    if (arr->length == 0) {
+        if (kind == 0 || kind == 1) {
+            js_promise_call_capability_resolve(resolve, reject, js_array_new(0));
+        } else if (kind == 2) {
+            js_promise_call_capability_reject(reject, js_promise_make_aggregate_error(js_array_new(0)));
+        }
+        return promise;
+    }
+
+    Item resolved_arr = ItemNull;
+    if (!js_promise_resolve_elements_with_constructor(constructor, arr_item, &resolved_arr, reject)) {
+        return promise;
+    }
+
+    Item native = ItemNull;
+    if (kind == 0) native = js_promise_all(resolved_arr);
+    else if (kind == 1) native = js_promise_all_settled(resolved_arr);
+    else if (kind == 2) native = js_promise_any(resolved_arr);
+    else native = js_promise_race(resolved_arr);
+
+    if (js_check_exception()) {
+        Item error = js_clear_exception();
+        js_promise_call_capability_reject(reject, error);
+        return promise;
+    }
+    js_promise_forward_native_to_capability(native, resolve, reject);
+    return promise;
+}
+
+static Item js_promise_all_with_constructor(Item constructor, Item iterable) {
+    return js_promise_combinator_with_constructor(constructor, iterable, 0);
+}
+
+static Item js_promise_all_settled_with_constructor(Item constructor, Item iterable) {
+    return js_promise_combinator_with_constructor(constructor, iterable, 1);
+}
+
+static Item js_promise_any_with_constructor(Item constructor, Item iterable) {
+    return js_promise_combinator_with_constructor(constructor, iterable, 2);
+}
+
+static Item js_promise_race_with_constructor(Item constructor, Item iterable) {
+    return js_promise_combinator_with_constructor(constructor, iterable, 3);
+}
+
 extern "C" Item js_promise_with_resolvers(void) {
     JsPromise* p = js_alloc_promise();
     if (!p) return ItemNull;
-    int idx = (int)(p - js_promises);
-    Item idx_item = (Item){.item = i2it(idx)};
+    Item resolving_state = js_promise_make_resolving_state(p);
     Item resolve_base = js_new_function((void*)js_resolve_callback, 2);
     Item reject_base = js_new_function((void*)js_reject_callback, 2);
-    Item resolve_fn = js_bind_function(resolve_base, ItemNull, &idx_item, 1);
-    Item reject_fn = js_bind_function(reject_base, ItemNull, &idx_item, 1);
+    Item resolve_fn = js_bind_function(resolve_base, ItemNull, &resolving_state, 1);
+    Item reject_fn = js_bind_function(reject_base, ItemNull, &resolving_state, 1);
     Item promise = js_promise_to_item(p);
     // Build { promise, resolve, reject } object
     Item result = js_new_object();
@@ -20845,9 +21107,38 @@ extern "C" Item js_promise_finally(Item promise, Item on_finally) {
 // Promise Combinator Helpers (spec-compliant microtask scheduling)
 // =============================================================================
 
+static bool js_promise_element_mark_called(Item counter_obj, Item index_item) {
+    Item called_key = (Item){.item = s2it(heap_create_name("called", 6))};
+    Item called_arr = js_property_get(counter_obj, called_key);
+    int idx = (int)it2i(index_item);
+    if (get_type_id(called_arr) != LMD_TYPE_ARRAY || idx < 0 || idx >= called_arr.array->length) {
+        return false;
+    }
+    Item called = called_arr.array->items[idx];
+    if (get_type_id(called) == LMD_TYPE_BOOL && it2b(called)) {
+        return false;
+    }
+    called_arr.array->items[idx] = (Item){.item = ITEM_TRUE};
+    return true;
+}
+
+static Item js_promise_make_aggregate_error(Item errors) {
+    Item msg = (Item){.item = s2it(heap_create_name("All promises were rejected", 26))};
+    Item err = js_new_error(msg);
+    js_property_set(err, (Item){.item = s2it(heap_create_name("errors", 6))}, errors);
+    // Mark as AggregateError for instanceof and constructor.name checks
+    // (T5b: typed JsClass byte; legacy `__class_name__` string write retired).
+    js_class_stamp(err, JS_CLASS_AGGREGATE_ERROR);  // A3-T3b
+    js_property_set(err, (Item){.item = s2it(heap_create_name("name", 4))},
+        (Item){.item = s2it(heap_create_name("AggregateError", 14))});
+    return err;
+}
+
 // Helper for Promise.all: individual element fulfillment
 // Bound args: counter_obj, index_item, result_item; Call arg: value
 static Item js_all_resolve_element(Item counter_obj, Item index_item, Item result_item, Item value) {
+    if (!js_promise_element_mark_called(counter_obj, index_item)) return ItemNull;
+
     String* k_remaining = heap_create_name("remaining", 9);
     String* k_results = heap_create_name("results", 7);
 
@@ -20867,9 +21158,29 @@ static Item js_all_resolve_element(Item counter_obj, Item index_item, Item resul
     return ItemNull;
 }
 
+// Helper for Promise.all: individual element rejection
+// Bound args: counter_obj, index_item, result_item; Call arg: reason
+static Item js_all_reject_element(Item counter_obj, Item index_item, Item result_item, Item reason) {
+    if (!js_promise_element_mark_called(counter_obj, index_item)) return ItemNull;
+    JsPromise* result = js_get_promise(result_item);
+    if (result) js_promise_settle(result, JS_PROMISE_REJECTED, reason);
+    return ItemNull;
+}
+
+// Helper for Promise.any: individual element fulfillment
+// Bound args: counter_obj, index_item, result_item; Call arg: value
+static Item js_any_fulfill_element(Item counter_obj, Item index_item, Item result_item, Item value) {
+    if (!js_promise_element_mark_called(counter_obj, index_item)) return ItemNull;
+    JsPromise* result = js_get_promise(result_item);
+    if (result) js_promise_resolve_with_value(result, value);
+    return ItemNull;
+}
+
 // Helper for Promise.any: individual element rejection
 // Bound args: counter_obj, index_item, result_item; Call arg: reason
 static Item js_any_reject_element(Item counter_obj, Item index_item, Item result_item, Item reason) {
+    if (!js_promise_element_mark_called(counter_obj, index_item)) return ItemNull;
+
     String* k_remaining = heap_create_name("remaining", 9);
     String* k_errors = heap_create_name("errors", 6);
 
@@ -20883,22 +21194,16 @@ static Item js_any_reject_element(Item counter_obj, Item index_item, Item result
     js_property_set(counter_obj, (Item){.item = s2it(k_remaining)}, (Item){.item = i2it(remaining)});
 
     if (remaining == 0) {
-        Item msg = (Item){.item = s2it(heap_create_name("All promises were rejected", 26))};
-        Item err = js_new_error(msg);
-        js_property_set(err, (Item){.item = s2it(k_errors)}, errors);
-        // Mark as AggregateError for instanceof and constructor.name checks
-        // (T5b: typed JsClass byte; legacy `__class_name__` string write retired).
-        js_class_stamp(err, JS_CLASS_AGGREGATE_ERROR);  // A3-T3b
-        js_property_set(err, (Item){.item = s2it(heap_create_name("name", 4))},
-            (Item){.item = s2it(heap_create_name("AggregateError", 14))});
         JsPromise* result = js_get_promise(result_item);
-        if (result) js_promise_settle(result, JS_PROMISE_REJECTED, err);
+        if (result) js_promise_settle(result, JS_PROMISE_REJECTED, js_promise_make_aggregate_error(errors));
     }
     return ItemNull;
 }
 
 // Helper for Promise.allSettled: individual element fulfillment
 static Item js_settled_fulfill_element(Item counter_obj, Item index_item, Item result_item, Item value) {
+    if (!js_promise_element_mark_called(counter_obj, index_item)) return ItemNull;
+
     String* k_remaining = heap_create_name("remaining", 9);
     String* k_results = heap_create_name("results", 7);
 
@@ -20925,6 +21230,8 @@ static Item js_settled_fulfill_element(Item counter_obj, Item index_item, Item r
 
 // Helper for Promise.allSettled: individual element rejection
 static Item js_settled_reject_element(Item counter_obj, Item index_item, Item result_item, Item reason) {
+    if (!js_promise_element_mark_called(counter_obj, index_item)) return ItemNull;
+
     String* k_remaining = heap_create_name("remaining", 9);
     String* k_results = heap_create_name("results", 7);
 
@@ -21022,12 +21329,10 @@ extern "C" Item js_promise_all(Item iterable) {
     Item results_arr = js_array_new(count);
     results_arr.array->length = count;
     js_property_set(counter, (Item){.item = s2it(heap_create_name("results", 7))}, results_arr);
-
-    // any single rejection rejects the result immediately
-    int idx = (int)(result - js_promises);
-    Item idx_item = (Item){.item = i2it(idx)};
-    Item reject_base = js_new_function((void*)js_reject_callback, 2);
-    Item reject_fn = js_bind_function(reject_base, ItemNull, &idx_item, 1);
+    Item called_arr = js_array_new(count);
+    called_arr.array->length = count;
+    for (int i = 0; i < count; i++) called_arr.array->items[i] = (Item){.item = ITEM_FALSE};
+    js_property_set(counter, (Item){.item = s2it(heap_create_name("called", 6))}, called_arr);
 
     for (int i = 0; i < count; i++) {
         Item elem = arr->items[i];
@@ -21035,8 +21340,12 @@ extern "C" Item js_promise_all(Item iterable) {
         if (!p) elem = js_promise_resolve(elem);
 
         Item resolve_handler = js_new_function((void*)js_all_resolve_element, 4);
-        Item bound_args[3] = {counter, (Item){.item = i2it(i)}, result_item};
-        Item resolve_fn = js_bind_function(resolve_handler, ItemNull, bound_args, 3);
+        Item resolve_args[3] = {counter, (Item){.item = i2it(i)}, result_item};
+        Item resolve_fn = js_bind_function(resolve_handler, ItemNull, resolve_args, 3);
+
+        Item reject_handler = js_new_function((void*)js_all_reject_element, 4);
+        Item reject_args[3] = {counter, (Item){.item = i2it(i)}, result_item};
+        Item reject_fn = js_bind_function(reject_handler, ItemNull, reject_args, 3);
 
         js_invoke_promise_then(elem, resolve_fn, reject_fn);
     }
@@ -21060,12 +21369,11 @@ extern "C" Item js_promise_race(Item iterable) {
 
     if (arr->length == 0) return result_item;
 
-    int idx = (int)(result - js_promises);
-    Item idx_item = (Item){.item = i2it(idx)};
+    Item resolving_state = js_promise_make_resolving_state(result);
     Item resolve_base = js_new_function((void*)js_resolve_callback, 2);
     Item reject_base = js_new_function((void*)js_reject_callback, 2);
-    Item resolve_fn = js_bind_function(resolve_base, ItemNull, &idx_item, 1);
-    Item reject_fn = js_bind_function(reject_base, ItemNull, &idx_item, 1);
+    Item resolve_fn = js_bind_function(resolve_base, ItemNull, &resolving_state, 1);
+    Item reject_fn = js_bind_function(reject_base, ItemNull, &resolving_state, 1);
 
     for (int i = 0; i < arr->length; i++) {
         Item elem = arr->items[i];
@@ -21088,19 +21396,12 @@ extern "C" Item js_promise_any(Item iterable) {
     int count = arr->length;
 
     if (count == 0) {
-        Item msg = (Item){.item = s2it(heap_create_name("All promises were rejected", 26))};
-        return js_promise_reject(js_new_error(msg));
+        return js_promise_reject(js_promise_make_aggregate_error(js_array_new(0)));
     }
 
     JsPromise* result_p = js_alloc_promise();
     if (!result_p) return ItemNull;
     Item result_item = js_promise_to_item(result_p);
-
-    // first fulfillment wins (reuse resolve_callback bound to result)
-    int idx = (int)(result_p - js_promises);
-    Item idx_item = (Item){.item = i2it(idx)};
-    Item resolve_base = js_new_function((void*)js_resolve_callback, 2);
-    Item resolve_fn = js_bind_function(resolve_base, ItemNull, &idx_item, 1);
 
     // shared counter for rejection tracking
     Item counter = js_new_object();
@@ -21108,15 +21409,23 @@ extern "C" Item js_promise_any(Item iterable) {
     Item errors_arr = js_array_new(count);
     errors_arr.array->length = count;
     js_property_set(counter, (Item){.item = s2it(heap_create_name("errors", 6))}, errors_arr);
+    Item called_arr = js_array_new(count);
+    called_arr.array->length = count;
+    for (int i = 0; i < count; i++) called_arr.array->items[i] = (Item){.item = ITEM_FALSE};
+    js_property_set(counter, (Item){.item = s2it(heap_create_name("called", 6))}, called_arr);
 
     for (int i = 0; i < count; i++) {
         Item elem = arr->items[i];
         JsPromise* p = js_get_promise(elem);
         if (!p) elem = js_promise_resolve(elem);
 
+        Item fulfill_handler = js_new_function((void*)js_any_fulfill_element, 4);
+        Item fulfill_args[3] = {counter, (Item){.item = i2it(i)}, result_item};
+        Item resolve_fn = js_bind_function(fulfill_handler, ItemNull, fulfill_args, 3);
+
         Item reject_handler = js_new_function((void*)js_any_reject_element, 4);
-        Item bound_args[3] = {counter, (Item){.item = i2it(i)}, result_item};
-        Item reject_fn = js_bind_function(reject_handler, ItemNull, bound_args, 3);
+        Item reject_args[3] = {counter, (Item){.item = i2it(i)}, result_item};
+        Item reject_fn = js_bind_function(reject_handler, ItemNull, reject_args, 3);
 
         js_invoke_promise_then(elem, resolve_fn, reject_fn);
     }
@@ -21147,19 +21456,25 @@ extern "C" Item js_promise_all_settled(Item iterable) {
     Item results_arr = js_array_new(count);
     results_arr.array->length = count;
     js_property_set(counter, (Item){.item = s2it(heap_create_name("results", 7))}, results_arr);
+    Item called_arr = js_array_new(count);
+    called_arr.array->length = count;
+    for (int i = 0; i < count; i++) called_arr.array->items[i] = (Item){.item = ITEM_FALSE};
+    js_property_set(counter, (Item){.item = s2it(heap_create_name("called", 6))}, called_arr);
 
     for (int i = 0; i < count; i++) {
         Item elem = arr->items[i];
         JsPromise* p = js_get_promise(elem);
         if (!p) elem = js_promise_resolve(elem);
 
-        Item bound_args[3] = {counter, (Item){.item = i2it(i)}, result_item};
+        Item fulfill_args[3] = {counter, (Item){.item = i2it(i)}, result_item};
 
         Item fulfill_handler = js_new_function((void*)js_settled_fulfill_element, 4);
-        Item fulfill_fn = js_bind_function(fulfill_handler, ItemNull, bound_args, 3);
+        Item fulfill_fn = js_bind_function(fulfill_handler, ItemNull, fulfill_args, 3);
+
+        Item reject_args[3] = {counter, (Item){.item = i2it(i)}, result_item};
 
         Item reject_handler = js_new_function((void*)js_settled_reject_element, 4);
-        Item reject_fn = js_bind_function(reject_handler, ItemNull, bound_args, 3);
+        Item reject_fn = js_bind_function(reject_handler, ItemNull, reject_args, 3);
 
         js_invoke_promise_then(elem, fulfill_fn, reject_fn);
     }
@@ -21250,7 +21565,7 @@ static Item js_vm_isContext(Item obj) {
     }
     if (t != LMD_TYPE_MAP) return (Item){.item = ITEM_FALSE};
     Item marker = js_property_get(obj, (Item){.item = s2it(heap_create_name("__vmContext", 11))});
-    if (get_type_id(marker) == LMD_TYPE_BOOL && marker.item == ITEM_TRUE)
+    if (get_type_id(marker) == LMD_TYPE_BOOL && it2b(marker))
         return (Item){.item = ITEM_TRUE};
     return (Item){.item = ITEM_FALSE};
 }

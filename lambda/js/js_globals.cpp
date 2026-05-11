@@ -23,6 +23,8 @@
 
 extern "C" Item js_to_property_key(Item key);
 
+#define JS_FUNC_FLAG_HAS_BOUND_THIS_G 16
+
 #include "../format/format.h"
 #include "../../lib/log.h"
 #include "../../lib/url.h"
@@ -4550,6 +4552,9 @@ struct JsFuncName {
     Item* bound_args;
     int bound_argc;
     String* name;
+    int builtin_id;
+    Item properties_map;
+    uint8_t flags;
 };
 
 static Item js_instanceof_impl(Item left, Item right, bool skip_symbol);
@@ -4614,7 +4619,11 @@ static Item js_instanceof_impl(Item left, Item right, bool skip_symbol) {
     if (right_type == LMD_TYPE_FUNC) {
         // v20: Get Func.prototype via property access (handles both Function and JsFunction)
         Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
-        Item func_proto = js_property_get(right, proto_key);
+        JsFuncName* right_fn = (JsFuncName*)right.function;
+        Item func_proto = (right_fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS_G)
+            ? right_fn->prototype
+            : js_property_get(right, proto_key);
+        if (js_check_exception()) return ItemNull;
         // ES spec 7.3.19 step 6: If Type(P) is not Object, throw TypeError
         TypeId fp_type = get_type_id(func_proto);
         if (fp_type != LMD_TYPE_MAP && fp_type != LMD_TYPE_ARRAY && fp_type != LMD_TYPE_FUNC) {
@@ -5523,6 +5532,9 @@ static bool js_func_is_constructor(Item func_item) {
 static bool js_func_has_own_prototype(Item func_item) {
     if (get_type_id(func_item) != LMD_TYPE_FUNC) return false;
     JsFunctionLayout* fn = (JsFunctionLayout*)func_item.function;
+    // Bound functions retain [[Construct]] when their target is constructable,
+    // but they do not have a public own "prototype" property.
+    if (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS_G) return false;
     if (fn->flags & (JS_FUNC_FLAG_ARROW_G | JS_FUNC_FLAG_METHOD_G | JS_FUNC_FLAG_TYPED_ARRAY_METHOD_G)) return false;
     if (fn->builtin_id > 0) return false;
     if (fn->builtin_id == -2) return false;
@@ -5640,6 +5652,7 @@ extern "C" Item js_reflect_construct(Item target, Item args_array, Item new_targ
     if (needs_fixup) {
         Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
         resolved_nt_proto = js_property_get(new_target, proto_key);
+        if (js_check_exception()) return ItemNull;
     }
 
     // Helper: apply the pre-resolved prototype to a newly constructed built-in object

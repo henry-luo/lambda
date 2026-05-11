@@ -671,7 +671,7 @@ PromiseJobs are routed through `js_job_queue.{h,cpp}`:
 - `Promise.all()`, `Promise.race()`, `Promise.any()`, `Promise.allSettled()`
 - `Promise.withResolvers()`
 
-The Promise Resolution Procedure now assimilates native promises and generic thenables. Reactions, missing-handler pass-through, executor throws, `.finally()` cleanup promises, and `await` thenables all flow through PromiseJobs.
+The Promise Resolution Procedure now assimilates native promises and generic thenables. Reactions, missing-handler pass-through, executor throws, `.finally()` cleanup promises, and `await` thenables all flow through PromiseJobs. Resolver pairs share an `AlreadyResolved` guard, combinator element callbacks share per-element guards, and static Promise methods use a `NewPromiseCapability`-style constructor path for custom Promise constructors.
 
 **Limitations**: Max 1024 promises per run and max 8 chained handlers per promise.
 

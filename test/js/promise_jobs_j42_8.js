@@ -46,8 +46,95 @@ Promise.resolve("marker").then(function(value) {
     log.push("marker:" + value);
 });
 
+var guardThenable = {
+    then: function(resolve, reject) {
+        log.push("guard-thenable-job");
+        resolve("guard-ok");
+    }
+};
+new Promise(function(resolve, reject) {
+    resolve(guardThenable);
+    reject("guard-bad");
+}).then(function(value) {
+    log.push("resolver-guard:" + value);
+}).catch(function(reason) {
+    log.push("resolver-guard-bad:" + reason);
+});
+
+var throwAfterResolve = {
+    then: function(resolve, reject) {
+        log.push("throw-after-resolve");
+        resolve("tar-ok");
+        throw "tar-bad";
+    }
+};
+Promise.resolve(throwAfterResolve).then(function(value) {
+    log.push("throw-after-resolve-result:" + value);
+}).catch(function(reason) {
+    log.push("throw-after-resolve-bad:" + reason);
+});
+
+function CustomPromise(executor) {
+    log.push("custom-capability");
+    return new Promise(executor);
+}
+Promise.resolve.call(CustomPromise, guardThenable).then(function(value) {
+    log.push("custom-resolve:" + value);
+});
+Promise.reject.call(CustomPromise, "custom-fail").catch(function(reason) {
+    log.push("custom-reject:" + reason);
+});
+Promise.all.call(CustomPromise, [Promise.resolve("custom-a"), guardThenable]).then(function(values) {
+    log.push("custom-all:" + values[0] + "," + values[1]);
+});
+
 Promise.all([1, thenable, Promise.resolve(3)]).then(function(values) {
     log.push("all:" + values[0] + "," + values[1] + "," + values[2]);
+});
+
+var doubleAll = Promise.resolve("unused");
+doubleAll.then = function(resolve, reject) {
+    log.push("all-double");
+    resolve("first");
+    resolve("second");
+    reject("bad");
+};
+Promise.all([doubleAll, Promise.resolve("later")]).then(function(values) {
+    log.push("all-double-result:" + values[0] + "," + values[1]);
+});
+
+var doubleAny = Promise.resolve("unused");
+doubleAny.then = function(resolve, reject) {
+    log.push("any-double");
+    reject("first-reject");
+    resolve("late-fulfill");
+};
+Promise.any([doubleAny, Promise.reject("second-reject")]).then(function(value) {
+    log.push("any-double-fulfill:" + value);
+}).catch(function(error) {
+    log.push("any-double-reject:" + error.name + "," + error.errors[0] + "," + error.errors[1]);
+});
+
+var doubleSettled = Promise.resolve("unused");
+doubleSettled.then = function(resolve, reject) {
+    log.push("settled-double");
+    resolve("settled-first");
+    reject("settled-late");
+};
+Promise.allSettled([doubleSettled, Promise.reject("settled-second")]).then(function(results) {
+    log.push("settled-double-result:" + results[0].status + "," + results[0].value + "," + results[1].status + "," + results[1].reason);
+});
+
+var doubleRace = Promise.resolve("unused");
+doubleRace.then = function(resolve, reject) {
+    log.push("race-double");
+    resolve(guardThenable);
+    reject("race-bad");
+};
+Promise.race([doubleRace]).then(function(value) {
+    log.push("race-double-result:" + value);
+}).catch(function(reason) {
+    log.push("race-double-bad:" + reason);
 });
 
 Promise.resolve("pass").finally(function() {

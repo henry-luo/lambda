@@ -1,17 +1,38 @@
+custom-capability
+custom-capability
+custom-capability
+all-double
+any-double
+settled-double
+race-double
 thenable job
 executor:executor
 source:source
 marker:marker
+guard-thenable-job
+throw-after-resolve
+guard-thenable-job
+custom-reject:custom-fail
+guard-thenable-job
 thenable job
+guard-thenable-job
 thenable job
 resolve:assimilated
 caught:boom
 adopted:source
 pass-through:through
+resolver-guard:guard-ok
+throw-after-resolve-result:tar-ok
+custom-resolve:guard-ok
+all-double-result:first,later
+settled-double-result:fulfilled,settled-first,rejected,settled-second
+race-double-result:guard-ok
 thenable job
 await:assimilated
 await-reject:await-fail
 all:1,assimilated,3
+any-double-reject:AggregateError,first-reject,second-reject
 finally-reject:orig
 finally-cleanup:cleanup-fail
+custom-all:custom-a,guard-ok
 finally-pass:pass
