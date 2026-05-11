@@ -918,8 +918,16 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
                     if (refined_pattern[p] == '\\' && p + 1 < refined_pattern.size()) {
                         p++; continue;
                     }
+                    bool is_capture = false;
                     if (refined_pattern[p] == '(' && p + 1 < refined_pattern.size() &&
                         refined_pattern[p + 1] != '?') {
+                        is_capture = true;
+                    } else if (refined_pattern[p] == '(' && p + 3 < refined_pattern.size() &&
+                               refined_pattern[p + 1] == '?' && refined_pattern[p + 2] == 'P' &&
+                               refined_pattern[p + 3] == '<') {
+                        is_capture = true;
+                    }
+                    if (is_capture) {
                         group_count++;
                         if (group_count == target_group) {
                             size_t close = find_matching_paren(refined_pattern, p);

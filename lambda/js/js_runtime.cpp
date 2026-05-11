@@ -8994,6 +8994,7 @@ extern "C" Item js_func_bind(Item func_item, Item bound_this, Item* bound_args, 
 // =============================================================================
 
 #include "js_regex_wrapper.h"
+#include "js_regexp_compile.h"
 
 // hidden property key for storing regex data pointer
 static const char* JS_REGEX_DATA_KEY = "__rd";
@@ -9043,7 +9044,7 @@ struct JsRegexData {
     JsRegexCompiled* wrapper; // wrapper with post-filters (for patterns with lookaheads/backrefs)
     const char* literal_pattern; // simple literal pattern handled without RE2
     int literal_pattern_len;
-    int special_property_kind; // +/-: 1 Other, 2 Unassigned, 3 Unknown script
+    int special_property_kind; // +/-: 1 Other, 2 Unassigned, 3 Unknown script, 4 Decimal_Number
     bool global;              // 'g' flag
     bool ignore_case;         // 'i' flag
     bool multiline;           // 'm' flag
@@ -9174,6 +9175,16 @@ static int js_regex_detect_simple_property_repeat(const char* pattern, int patte
                js_regex_match_property_name(name, name_len, "gc=Cn") ||
                js_regex_match_property_name(name, name_len, "Cn")) {
         kind = 2;
+    } else if (js_regex_match_property_name(name, name_len, "General_Category=Decimal_Number") ||
+               js_regex_match_property_name(name, name_len, "gc=Decimal_Number") ||
+               js_regex_match_property_name(name, name_len, "Decimal_Number") ||
+               js_regex_match_property_name(name, name_len, "General_Category=digit") ||
+               js_regex_match_property_name(name, name_len, "gc=digit") ||
+               js_regex_match_property_name(name, name_len, "digit") ||
+               js_regex_match_property_name(name, name_len, "General_Category=Nd") ||
+               js_regex_match_property_name(name, name_len, "gc=Nd") ||
+               js_regex_match_property_name(name, name_len, "Nd")) {
+        kind = 4;
     } else if (js_regex_match_property_name(name, name_len, "Script=Unknown") ||
                js_regex_match_property_name(name, name_len, "Script_Extensions=Unknown") ||
                js_regex_match_property_name(name, name_len, "sc=Unknown") ||
@@ -9217,6 +9228,17 @@ static int js_regex_detect_property_repeat_loose(const char* pattern, int patter
         js_regex_contains_text(pattern, pattern_len, "gc=Cn") ||
         js_regex_contains_text(pattern, pattern_len, "{Cn}")) {
         return negate ? -2 : 2;
+    }
+    if (js_regex_contains_text(pattern, pattern_len, "General_Category=Decimal_Number") ||
+        js_regex_contains_text(pattern, pattern_len, "gc=Decimal_Number") ||
+        js_regex_contains_text(pattern, pattern_len, "{Decimal_Number}") ||
+        js_regex_contains_text(pattern, pattern_len, "General_Category=digit") ||
+        js_regex_contains_text(pattern, pattern_len, "gc=digit") ||
+        js_regex_contains_text(pattern, pattern_len, "{digit}") ||
+        js_regex_contains_text(pattern, pattern_len, "General_Category=Nd") ||
+        js_regex_contains_text(pattern, pattern_len, "gc=Nd") ||
+        js_regex_contains_text(pattern, pattern_len, "{Nd}")) {
+        return negate ? -4 : 4;
     }
     if (js_regex_contains_text(pattern, pattern_len, "Script=Unknown") ||
         js_regex_contains_text(pattern, pattern_len, "Script_Extensions=Unknown") ||
@@ -9278,6 +9300,38 @@ static bool js_regex_special_property_contains(int kind, int cp) {
         return cat == UTF8PROC_CATEGORY_CN ||
                cat == UTF8PROC_CATEGORY_CS ||
                cat == UTF8PROC_CATEGORY_CO;
+    }
+    if (kind == 4) {
+        static const struct { int first; int last; } nd_ranges[] = {
+            {0x000030, 0x000039}, {0x000660, 0x000669}, {0x0006F0, 0x0006F9},
+            {0x0007C0, 0x0007C9}, {0x000966, 0x00096F}, {0x0009E6, 0x0009EF},
+            {0x000A66, 0x000A6F}, {0x000AE6, 0x000AEF}, {0x000B66, 0x000B6F},
+            {0x000BE6, 0x000BEF}, {0x000C66, 0x000C6F}, {0x000CE6, 0x000CEF},
+            {0x000D66, 0x000D6F}, {0x000DE6, 0x000DEF}, {0x000E50, 0x000E59},
+            {0x000ED0, 0x000ED9}, {0x000F20, 0x000F29}, {0x001040, 0x001049},
+            {0x001090, 0x001099}, {0x0017E0, 0x0017E9}, {0x001810, 0x001819},
+            {0x001946, 0x00194F}, {0x0019D0, 0x0019D9}, {0x001A80, 0x001A89},
+            {0x001A90, 0x001A99}, {0x001B50, 0x001B59}, {0x001BB0, 0x001BB9},
+            {0x001C40, 0x001C49}, {0x001C50, 0x001C59}, {0x00A620, 0x00A629},
+            {0x00A8D0, 0x00A8D9}, {0x00A900, 0x00A909}, {0x00A9D0, 0x00A9D9},
+            {0x00A9F0, 0x00A9F9}, {0x00AA50, 0x00AA59}, {0x00ABF0, 0x00ABF9},
+            {0x00FF10, 0x00FF19}, {0x0104A0, 0x0104A9}, {0x010D30, 0x010D39},
+            {0x010D40, 0x010D49}, {0x011066, 0x01106F}, {0x0110F0, 0x0110F9},
+            {0x011136, 0x01113F}, {0x0111D0, 0x0111D9}, {0x0112F0, 0x0112F9},
+            {0x011450, 0x011459}, {0x0114D0, 0x0114D9}, {0x011650, 0x011659},
+            {0x0116C0, 0x0116C9}, {0x0116D0, 0x0116E3}, {0x011730, 0x011739},
+            {0x0118E0, 0x0118E9}, {0x011950, 0x011959}, {0x011BF0, 0x011BF9},
+            {0x011C50, 0x011C59}, {0x011D50, 0x011D59}, {0x011DA0, 0x011DA9},
+            {0x011F50, 0x011F59}, {0x016130, 0x016139},
+            {0x016A60, 0x016A69}, {0x016AC0, 0x016AC9}, {0x016B50, 0x016B59},
+            {0x016D70, 0x016D79}, {0x01CCF0, 0x01CCF9}, {0x01D7CE, 0x01D7FF},
+            {0x01E140, 0x01E149}, {0x01E2F0, 0x01E2F9}, {0x01E4F0, 0x01E4F9},
+            {0x01E5F1, 0x01E5FA}, {0x01E950, 0x01E959}, {0x01FBF0, 0x01FBF9},
+        };
+        for (int i = 0; i < (int)(sizeof(nd_ranges) / sizeof(nd_ranges[0])); i++) {
+            if (cp >= nd_ranges[i].first && cp <= nd_ranges[i].last) return true;
+        }
+        return false;
     }
     return false;
 }
@@ -9535,6 +9589,13 @@ static Item js_regex_build_object_from_cache(const JsRegexCacheEntry& ce) {
 }
 
 extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char* flags, int flags_len) {
+    JsRegExpCompileInfo compile_info;
+    if (!js_regexp_compile_frontend(pattern, pattern_len, flags, flags_len, &compile_info)) {
+        Item m = (Item){.item = s2it(heap_create_name(compile_info.error, strlen(compile_info.error)))};
+        js_throw_syntax_error(m);
+        return ItemNull;
+    }
+
     char* literal_buf = NULL;
     int literal_len = 0;
     int special_property_kind = js_regex_detect_simple_property_repeat(pattern, pattern_len);
@@ -9587,18 +9648,12 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
         }
     }
 
-    // Check for 'v' flag (Unicode Sets mode) — needs preprocessing for set operations
-    bool has_v_flag = false;
-    for (int i = 0; i < flags_len; i++) {
-        if (flags[i] == 'v') has_v_flag = true;
-    }
-
     // If v flag is present, preprocess set subtraction [A--B] and intersection [A&&B]
     // by transforming them into RE2-compatible character classes.
     std::string v_processed;
     const char* effective_pattern = pattern;
     int effective_pattern_len = pattern_len;
-    if (has_v_flag) {
+    if (compile_info.unicode_sets) {
         v_processed.reserve(pattern_len + 128);
         int i = 0;
         while (i < pattern_len) {
@@ -9733,6 +9788,19 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
         effective_pattern_len = (int)v_processed.size();
     }
 
+    std::string named_backref_processed;
+    {
+        int rewritten_len = 0;
+        char* rewritten = js_regexp_rewrite_named_backrefs(
+            effective_pattern, effective_pattern_len, &rewritten_len);
+        if (rewritten) {
+            named_backref_processed.assign(rewritten, rewritten_len);
+            free(rewritten);
+            effective_pattern = named_backref_processed.c_str();
+            effective_pattern_len = (int)named_backref_processed.size();
+        }
+    }
+
     // count capture groups for backreference validation (Annex B: \8/\9 identity escapes)
     int total_groups = 0;
     {
@@ -9759,13 +9827,7 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     static const char* S_EXPAND = "[\\p{Z}\\t\\n\\r\\f\\x0b\\x{FEFF}]";
     static const char* S_EXPAND_INNER = "\\p{Z}\\t\\n\\r\\f\\x0b\\x{FEFF}";  // inside existing []
     static const char* NOT_S_EXPAND = "[^\\p{Z}\\t\\n\\r\\f\\x0b\\x{FEFF}]";
-    bool requested_dot_all = false;
-    for (int fi = 0; fi < flags_len; fi++) {
-        if (flags[fi] == 's') {
-            requested_dot_all = true;
-            break;
-        }
-    }
+    bool requested_dot_all = compile_info.dot_all;
     std::string processed_pattern;
     processed_pattern.reserve(effective_pattern_len + 64);
     int bracket_depth = 0;
@@ -9921,6 +9983,14 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     //    NOTE: The wrapper rewriting is done later at compile time, not here.
     // 3. Map unsupported Unicode property names to RE2-compatible equivalents
     {
+        int canonical_len = 0;
+        char* canonicalized = js_regexp_canonicalize_property_escapes(
+            processed_pattern.c_str(), (int)processed_pattern.size(), &canonical_len);
+        if (canonicalized) {
+            processed_pattern.assign(canonicalized, canonical_len);
+            free(canonicalized);
+        }
+
         // Short alias expansion: \p{Ideo} → \p{Ideographic}, etc.
         // ES2018 specifies both canonical names and short aliases for property escapes.
         static const struct { const char* alias; int alias_len; const char* canonical; int canonical_len; } prop_aliases[] = {
@@ -10002,10 +10072,6 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
         if (special_property_kind == 0) {
             special_property_kind = js_regex_detect_simple_property_repeat(
                 processed_pattern.c_str(), (int)processed_pattern.size());
-            if (special_property_kind == 0) {
-                special_property_kind = js_regex_detect_property_repeat_loose(
-                    processed_pattern.c_str(), (int)processed_pattern.size());
-            }
         }
         // After prefix-strip, re-apply Unknown/Zzzz expansion (e.g.,
         // \p{Script_Extensions=Unknown} -> \p{Unknown}). RE2 has no native
@@ -10089,70 +10155,12 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     re2::RE2::Options opts;
     opts.set_log_errors(false);
     opts.set_one_line(true);  // v18: JS default is non-multiline (^ and $ match string boundaries only)
-    bool global = false;
-    bool multiline = false;
-    bool sticky = false;
-    // ES §22.2.3.2.2 step 1: validate flags — must each be one of d/g/i/m/s/u/v/y
-    // and no duplicates allowed.
-    {
-        unsigned int seen = 0;
-        for (int i = 0; i < flags_len; i++) {
-            char fc = flags[i];
-            int bit;
-            switch (fc) {
-                case 'd': bit = 1<<0; break;
-                case 'g': bit = 1<<1; break;
-                case 'i': bit = 1<<2; break;
-                case 'm': bit = 1<<3; break;
-                case 's': bit = 1<<4; break;
-                case 'u': bit = 1<<5; break;
-                case 'v': bit = 1<<6; break;
-                case 'y': bit = 1<<7; break;
-                default: bit = 0; break;
-            }
-            if (bit == 0 || (seen & bit)) {
-                char msg[128];
-                snprintf(msg, sizeof(msg), "Invalid flags supplied to RegExp constructor '%.*s'",
-                         flags_len, flags);
-                Item m = (Item){.item = s2it(heap_create_name(msg))};
-                js_throw_syntax_error(m);
-                return ItemNull;
-            }
-            seen |= bit;
-        }
-        // u and v are mutually exclusive (ES2024)
-        if ((seen & (1<<5)) && (seen & (1<<6))) {
-            Item m = (Item){.item = s2it(heap_create_name("Invalid flags: u and v are mutually exclusive"))};
-            js_throw_syntax_error(m);
-            return ItemNull;
-        }
-    }
-    for (int i = 0; i < flags_len; i++) {
-        if (flags[i] == 'i') opts.set_case_sensitive(false);
-        else if (flags[i] == 'm') { opts.set_one_line(false); multiline = true; }
-        else if (flags[i] == 'g') global = true;
-        else if (flags[i] == 's') opts.set_dot_nl(true);
-        else if (flags[i] == 'y') sticky = true;
-    }
-    // Annex B B.1.4 strict validation under `u`/`v` flag — validate the
-    // ORIGINAL source pattern (before any rewrites which may sanitize bad escapes)
-    {
-        bool has_u_or_v = false;
-        for (int i = 0; i < flags_len; i++) {
-            if (flags[i] == 'u' || flags[i] == 'v') { has_u_or_v = true; break; }
-        }
-        if (has_u_or_v) {
-            if (!js_regex_wrapper_validate_unicode(pattern, pattern_len)) {
-                char msg[512];
-                snprintf(msg, sizeof(msg),
-                    "Invalid regular expression: /%.*s/%.*s: Annex B legacy syntax not allowed under `u` flag",
-                    pattern_len, pattern, flags_len, flags);
-                Item m = (Item){.item = s2it(heap_create_name(msg))};
-                js_throw_syntax_error(m);
-                return ItemNull;
-            }
-        }
-    }
+    bool global = compile_info.global;
+    bool multiline = compile_info.multiline;
+    bool sticky = compile_info.sticky;
+    if (compile_info.ignore_case) opts.set_case_sensitive(false);
+    if (compile_info.multiline) opts.set_one_line(false);
+    if (compile_info.dot_all) opts.set_dot_nl(true);
     // RE2: set_one_line(false) doesn't reliably enable multiline ^ and $,
     // so prepend (?m) inline flag when multiline mode is requested
     if (multiline) {
@@ -10228,15 +10236,9 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     char* flg_buf = (char*)pool_calloc(js_input->pool, flags_len + 1);
     // v89: store flags in canonical order dgimsuy (ES spec §22.2.5.4)
     {
-        int fi = 0;
-        static const char flag_order[] = "dgimsuy";
-        for (int oi = 0; flag_order[oi]; oi++) {
-            for (int si = 0; si < flags_len; si++) {
-                if (flags[si] == flag_order[oi]) { flg_buf[fi++] = flag_order[oi]; break; }
-            }
-        }
-        flg_buf[fi] = '\0';
-        flags_len = fi;
+        memcpy(flg_buf, compile_info.canonical_flags, compile_info.canonical_flags_len);
+        flg_buf[compile_info.canonical_flags_len] = '\0';
+        flags_len = compile_info.canonical_flags_len;
     }
     // set visible properties — use heap_strcpy with explicit length to handle NUL bytes
     Item source_key = (Item){.item = s2it(heap_create_name("source"))};
@@ -10254,11 +10256,8 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     // v18: expose all standard RegExp flag properties
     bool ignore_case = !opts.case_sensitive();
     bool dot_all = opts.dot_nl();
-    bool has_sticky = false, has_unicode = false;
-    for (int i = 0; i < flags_len; i++) {
-        if (flags[i] == 'y') has_sticky = true;
-        if (flags[i] == 'u' || flags[i] == 'v') has_unicode = true;
-    }
+    bool has_sticky = compile_info.sticky;
+    bool has_unicode = compile_info.unicode || compile_info.unicode_sets;
     Item ic_key = (Item){.item = s2it(heap_create_name("ignoreCase"))};
     js_property_set(regex_obj, ic_key, (Item){.item = b2it(ignore_case ? BOOL_TRUE : BOOL_FALSE)});
     js_mark_non_enumerable(regex_obj, ic_key);

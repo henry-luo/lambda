@@ -1096,6 +1096,10 @@ void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
     // path (guarded by !is_placeholder) would skip drawing the caret.
     const char* value_text = form->value ? form->value : "";
     uint32_t value_len = (uint32_t)strlen(value_text);
+    DocState* state = rdcon->ui_context && rdcon->ui_context->document
+        ? (DocState*)rdcon->ui_context->document->state : nullptr;
+    uint32_t selection_start = 0, selection_end = 0;
+    form_control_get_selection(state, (View*)block, &selection_start, &selection_end, NULL);
     uint32_t preedit_start = 0;
     uint32_t preedit_end = 0;
     uint32_t preedit_caret_byte = 0;
@@ -1105,6 +1109,7 @@ void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
     bool is_placeholder = false;
     if (has_preedit) {
         preedit_display = build_preedit_display_text(form, value_text, value_len,
+                                                     selection_start, selection_end,
                                                      &preedit_start, &preedit_end,
                                                      &preedit_caret_byte);
         if (preedit_display) text = preedit_display;
@@ -1195,7 +1200,6 @@ void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
     }
 
     // Draw selection highlight if textarea has an active selection
-    DocState* state = (DocState*)rdcon->ui_context->document->state;
     if (state && !is_placeholder) {
         View* focused = focus_get(state);
         int sel_start = 0, sel_end = 0;
