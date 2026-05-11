@@ -545,7 +545,7 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
             if ((int)id->name->len == (int)strlen(builtins[i]) &&
                 strncmp(id->name->chars, builtins[i], id->name->len) == 0) {
                 MIR_reg_t name_reg = jm_box_string_literal(mt, builtins[i], (int)strlen(builtins[i]));
-                return jm_call_1(mt, "js_get_global_property_strict", MIR_T_I64,
+                return jm_call_1(mt, "js_get_constructor", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg));
             }
         }
@@ -1792,9 +1792,9 @@ void jm_emit_array_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MIR
         }
     }
 
-    // Check if pattern contains yield expressions (in generator context, yield
-    // inside destructuring defaults breaks with step-by-step iteration because
-    // the generator state machine doesn't handle yield inside conditional branches)
+    // Check if pattern contains yield expressions in generator context. Iterator
+    // state is held in MIR registers, so any yield-containing target must spill
+    // that state across suspension before destructuring continues.
     bool has_yields = false;
     {
         JsFuncCollected* fc = &mt->func_entries[mt->current_func_index];
@@ -1805,43 +1805,6 @@ void jm_emit_array_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MIR
                 chk = chk->next;
             }
         }
-    }
-
-    if (has_yields) {
-        // Fallback: eager materialization for generator yield compatibility
-        src = jm_call_1(mt, "js_iterable_to_array", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, src));
-        MIR_reg_t arr_exc_chk = jm_call_0(mt, "js_check_exception", MIR_T_I64);
-        MIR_label_t skip_arr_destr = jm_new_label(mt);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, skip_arr_destr),
-            MIR_new_reg_op(mt->ctx, arr_exc_chk)));
-        int idx = 0;
-        JsAstNode* elem = pattern->elements;
-        while (elem) {
-            if (elem->node_type == JS_AST_NODE_NULL) {
-                // elision: skip index (array already materialized, elision consumed)
-            } else if (elem->node_type == JS_AST_NODE_SPREAD_ELEMENT ||
-                       elem->node_type == JS_AST_NODE_REST_ELEMENT) {
-                JsSpreadElementNode* sp = (JsSpreadElementNode*)elem;
-                if (sp->argument) {
-                    MIR_reg_t start = jm_box_int_const(mt, idx);
-                    MIR_reg_t rest = jm_call_2(mt, "js_array_slice_from", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, src),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, start));
-                    jm_emit_destructure_target(mt, sp->argument, rest);
-                }
-            } else {
-                MIR_reg_t key = jm_box_int_const(mt, idx);
-                MIR_reg_t val = jm_call_2(mt, "js_property_access", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, src),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
-                jm_emit_destructure_target(mt, elem, val);
-            }
-            idx++;
-            elem = elem->next;
-        }
-        jm_emit_label(mt, skip_arr_destr);
-        return;
     }
 
     // Get iterator from iterable (ES spec: GetIterator)
@@ -1924,7 +1887,31 @@ void jm_emit_array_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MIR
                 MIR_new_reg_op(mt->ctx, is_done)));
 
             // not done: bind step value to target
+            int iterator_spill = -1;
+            int iter_done_spill = -1;
+            bool elem_has_yield = has_yields && mt->in_generator && jm_has_yield(elem);
+            if (elem_has_yield) {
+                iterator_spill = jm_gen_spill_save(mt, iterator);
+                iter_done_spill = jm_gen_spill_save(mt, iter_done);
+                if (mt->gen_active_iterator_slot >= 0) {
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                            mt->gen_active_iterator_slot * (int)sizeof(uint64_t), mt->gen_env_reg, 0, 1),
+                        MIR_new_reg_op(mt->ctx, iterator)));
+                }
+            }
             jm_emit_destructure_target(mt, elem, step_val);
+            if (elem_has_yield) {
+                if (mt->gen_active_iterator_slot >= 0) {
+                    MIR_reg_t null_iter = jm_emit_null(mt);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                            mt->gen_active_iterator_slot * (int)sizeof(uint64_t), mt->gen_env_reg, 0, 1),
+                        MIR_new_reg_op(mt->ctx, null_iter)));
+                }
+                jm_gen_spill_load(mt, iterator, iterator_spill);
+                jm_gen_spill_load(mt, iter_done, iter_done_spill);
+            }
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, elem_end)));
 
             // done: mark done, bind undefined
@@ -7880,7 +7867,14 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
     // P4: Direct property access for known class instances — avoids hash lookup.
     // For `let node = new Node(...)`, `node.val` emits js_get_shaped_slot(node, slot)
     // instead of js_property_access(node, "val").
-    if (!mem->computed && !mem->optional &&
+    bool p4_skip_constructor = false;
+    if (!mem->computed &&
+        mem->property && mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
+        JsIdentifierNode* p4_skip_prop = (JsIdentifierNode*)mem->property;
+        p4_skip_constructor = p4_skip_prop->name && p4_skip_prop->name->len == 11 &&
+            strncmp(p4_skip_prop->name->chars, "constructor", 11) == 0;
+    }
+    if (!p4_skip_constructor && !mem->computed && !mem->optional &&
         mem->object && mem->object->node_type == JS_AST_NODE_IDENTIFIER &&
         mem->property && mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
         JsIdentifierNode* p4_obj = (JsIdentifierNode*)mem->object;
@@ -9404,15 +9398,7 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
     }
     case JS_AST_NODE_MEMBER_EXPRESSION: {
         JsMemberNode* mem = (JsMemberNode*)expr;
-        MIR_reg_t r = jm_transpile_member(mt, mem);
-        if (!mem->computed && mem->property && mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
-            JsIdentifierNode* prop = (JsIdentifierNode*)mem->property;
-            if (prop->name && prop->name->len == 11 && strncmp(prop->name->chars, "constructor", 11) == 0) {
-                jm_scope_env_reload_vars(mt);
-                jm_env_reload_shared_captures(mt);
-            }
-        }
-        return r;
+        return jm_transpile_member(mt, mem);
     }
     case JS_AST_NODE_ARRAY_EXPRESSION:
         return jm_transpile_array(mt, (JsArrayNode*)expr);

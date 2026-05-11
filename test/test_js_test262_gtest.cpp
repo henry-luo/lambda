@@ -112,6 +112,7 @@ static std::string g_harness_dir = "ref/test262/harness";
 // Only tests with runtime < 3s (debug build) belong in the baseline.
 // Slow tests (>= 3s) should be moved to test/js262/t262_partial.txt (non-fully-passing list) with SLOW status.
 static const char* BASELINE_FILE = "test/js262/test262_baseline.txt";
+static const char* SKIP_LIST_FILE = "test/js262/skip_list.txt";
 static bool g_use_stripped = false;  // use comment-stripped test files from TEST262_SOURCE_DIR
 
 // Features above ES2020 — skip tests requiring these.
@@ -214,16 +215,84 @@ static const std::set<std::string> UNSUPPORTED_FEATURES = {
     "caller",                                     // Function.prototype.caller (Annex B)
 };
 
+static std::string trim_skip_list_field(const std::string& text) {
+    size_t start = 0;
+    while (start < text.size() && (text[start] == ' ' || text[start] == '\t' ||
+           text[start] == '\r' || text[start] == '\n')) {
+        start++;
+    }
+    size_t end = text.size();
+    while (end > start && (text[end - 1] == ' ' || text[end - 1] == '\t' ||
+           text[end - 1] == '\r' || text[end - 1] == '\n')) {
+        end--;
+    }
+    return text.substr(start, end - start);
+}
+
+static std::string normalize_skip_list_path(const std::string& path) {
+    static const std::string prefix = std::string(TEST262_ROOT) + "/test/";
+    if (path.compare(0, prefix.size(), prefix) == 0) return path.substr(prefix.size());
+    static const std::string stripped_prefix = "test/";
+    if (path.compare(0, stripped_prefix.size(), stripped_prefix) == 0) {
+        return path.substr(stripped_prefix.size());
+    }
+    return path;
+}
+
 // Tests skipped by relative path (under ref/test262/test/).
-// Use this for tests that are non-deterministic, test implementation-specific
-// behavior, or are known false positives unrelated to grammar/runtime correctness.
-static const std::map<std::string, std::string> SKIPPED_TESTS = {
-    // Math.random() is inherently non-deterministic — this test calls
-    // Math.random() 100 times and checks values are in [0,1). It can
-    // intermittently fail depending on the PRNG state and does not
-    // indicate a real engine regression.
-    {"built-ins/Math/random/S15.8.2.14_A1.js", "non-deterministic (Math.random)"},
-};
+// The text file format is:
+//   # reason/comment for the next path or path block
+//   relative/or/ref/test262/test/path.js
+// A path line may also use: path.js<TAB>reason
+static const std::map<std::string, std::string>& skipped_tests() {
+    static std::map<std::string, std::string> skipped;
+    static bool loaded = false;
+    if (loaded) return skipped;
+    loaded = true;
+
+    std::ifstream in(SKIP_LIST_FILE);
+    if (!in.is_open()) return skipped;
+
+    std::string line;
+    std::vector<std::string> comments;
+    bool comment_block_used = false;
+    while (std::getline(in, line)) {
+        std::string trimmed = trim_skip_list_field(line);
+        if (trimmed.empty()) {
+            comments.clear();
+            comment_block_used = false;
+            continue;
+        }
+        if (trimmed[0] == '#') {
+            if (comment_block_used) {
+                comments.clear();
+                comment_block_used = false;
+            }
+            std::string comment = trim_skip_list_field(trimmed.substr(1));
+            if (!comment.empty()) comments.push_back(comment);
+            continue;
+        }
+
+        std::string path = trimmed;
+        std::string reason;
+        size_t tab = trimmed.find('\t');
+        if (tab != std::string::npos) {
+            path = trim_skip_list_field(trimmed.substr(0, tab));
+            reason = trim_skip_list_field(trimmed.substr(tab + 1));
+        }
+        if (reason.empty() && !comments.empty()) {
+            for (size_t i = 0; i < comments.size(); i++) {
+                if (i > 0) reason += " ";
+                reason += comments[i];
+            }
+        }
+        if (reason.empty()) reason = std::string("listed in ") + SKIP_LIST_FILE;
+        path = normalize_skip_list_path(path);
+        if (!path.empty()) skipped[path] = reason;
+        comment_block_used = true;
+    }
+    return skipped;
+}
 
 
 
@@ -926,6 +995,15 @@ struct BatchTiming {
     size_t num_tests;
 };
 
+static const char* batch_worker_status_label(int worker_status, size_t produced, size_t expected) {
+    if (worker_status < 0) return "spawn-failed";
+    if (worker_status == 124) return "timeout";
+    if (worker_status > 128) return "crash";
+    if (worker_status != 0) return "worker-error";
+    if (produced < expected) return "lost";
+    return "finished";
+}
+
 // Forward declarations for globals used in prepare phase
 static std::set<std::string> g_baseline_passing;
 static std::set<std::string> g_known_partial;
@@ -965,6 +1043,13 @@ static int g_total_batched = 0; // total batched (executed) tests
 static double g_prep_secs = 0;  // Phase 1 (prepare) runtime
 static double g_exec_secs = 0;  // Phase 2 (execute) runtime
 static double g_total_secs = 0; // total runtime
+static double g_phase_batch_secs = 0;      // Phase 2 main batch runtime
+static double g_phase_retry_secs = 0;      // Phase 2b retry runtime
+static double g_phase_partial_secs = 0;    // non-fully-passing list update runtime
+static double g_phase_timing_secs = 0;     // timing TSV write runtime
+static double g_phase_memory_secs = 0;     // memory TSV + summary runtime
+static double g_phase_evaluate_secs = 0;   // Phase 3 result evaluation runtime
+static double g_phase4_secs = 0;           // Phase 4 regression retry runtime
 
 // Stable checkpoint baseline (commit 86235a964, 2026-04-15).
 // --update-baseline requires fully passing >= this value.
@@ -991,6 +1076,7 @@ struct Test262FailureInfo {
 
 static std::unordered_map<std::string, Test262RunResult> g_cached_results;
 static std::mutex g_results_mutex;
+static std::mutex g_progress_mutex;
 static std::unordered_map<std::string, BatchResult> g_cached_batch_results;
 static std::unordered_map<std::string, Test262FailureInfo> g_failure_info;
 
@@ -1179,6 +1265,9 @@ static void write_baseline_file(const char* path, std::vector<std::string>& pass
     std::string commit = get_git_commit_hash();
     std::sort(passing.begin(), passing.end());
     fprintf(f, "# test262 baseline: tests that PASS (auto-updated)\n");
+    fprintf(f, "# DO NOT EDIT THIS FILE MANUALLY.\n");
+    fprintf(f, "# Update it only by running this gtest with --update-baseline.\n");
+    fprintf(f, "# The update gate admits only fully passing tests: batch-safe, non-crashing, non-regressing, and under the slow-test threshold.\n");
     fprintf(f, "# Commit: %s\n", commit.c_str());
     fprintf(f, "# Scope: ES2020 (skip ES2021+ features)\n");
     fprintf(f, "# Total passing: %zu\n", passing.size());
@@ -1186,6 +1275,14 @@ static void write_baseline_file(const char* path, std::vector<std::string>& pass
             total_tests, skipped, batched, passing.size(), failed);
     fprintf(f, "# Runtime: %.1fs total (prep %.1fs + exec %.1fs)\n",
             g_total_secs, g_prep_secs, g_exec_secs);
+    fprintf(f, "# Phase timing: prepare %.1fs\n", g_prep_secs);
+    fprintf(f, "# Phase timing: batch-execute %.1fs\n", g_phase_batch_secs);
+    fprintf(f, "# Phase timing: retry-lost %.1fs\n", g_phase_retry_secs);
+    fprintf(f, "# Phase timing: update-partial-list %.1fs\n", g_phase_partial_secs);
+    fprintf(f, "# Phase timing: write-timing-log %.1fs\n", g_phase_timing_secs);
+    fprintf(f, "# Phase timing: write-memory-log %.1fs\n", g_phase_memory_secs);
+    fprintf(f, "# Phase timing: evaluate-results %.1fs\n", g_phase_evaluate_secs);
+    fprintf(f, "# Phase timing: retry-regressions %.1fs\n", g_phase4_secs);
     for (auto& name : passing) {
         fprintf(f, "%s\n", name.c_str());
     }
@@ -1314,8 +1411,9 @@ static void prepare_all_tests(
                 if (param.test_path.size() > prefix.size() &&
                     param.test_path.compare(0, prefix.size(), prefix) == 0) {
                     std::string rel = param.test_path.substr(prefix.size());
-                    auto sit = SKIPPED_TESTS.find(rel);
-                    if (sit != SKIPPED_TESTS.end()) {
+                    const auto& skip_map = skipped_tests();
+                    auto sit = skip_map.find(rel);
+                    if (sit != skip_map.end()) {
                         p.skip_result = T262_SKIP;
                         p.skip_message = sit->second;
                         continue;
@@ -1442,7 +1540,7 @@ static int hard_timeout_per_test_secs() {
 // Run a sub-batch of tests from a pre-written manifest file + stdout pipe
 // Run a sub-batch from a manifest file using posix_spawn (avoids fork's page table copy)
 #ifdef _WIN32
-static void run_t262_sub_batch(
+static int run_t262_sub_batch(
     const char* manifest_path,
     std::unordered_map<std::string, BatchResult>& results,
     size_t num_tests = T262_BATCH_CHUNK_SIZE)
@@ -1450,14 +1548,14 @@ static void run_t262_sub_batch(
     // Windows implementation using CreateProcess + anonymous pipes
     HANDLE pipe_rd = NULL, pipe_wr = NULL;
     SECURITY_ATTRIBUTES sa = { sizeof(sa), NULL, TRUE };
-    if (!CreatePipe(&pipe_rd, &pipe_wr, &sa, 0)) return;
+    if (!CreatePipe(&pipe_rd, &pipe_wr, &sa, 0)) return -1;
     SetHandleInformation(pipe_rd, HANDLE_FLAG_INHERIT, 0);
 
     HANDLE manifest_h = CreateFileA(manifest_path, GENERIC_READ, FILE_SHARE_READ,
                                      &sa, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (manifest_h == INVALID_HANDLE_VALUE) {
         CloseHandle(pipe_rd); CloseHandle(pipe_wr);
-        return;
+        return -1;
     }
 
     // Build command line
@@ -1477,7 +1575,7 @@ static void run_t262_sub_batch(
     std::string cmd_copy = cmd;
     if (!CreateProcessA(NULL, &cmd_copy[0], NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi)) {
         CloseHandle(manifest_h); CloseHandle(pipe_rd); CloseHandle(pipe_wr);
-        return;
+        return -1;
     }
     CloseHandle(manifest_h);
     CloseHandle(pipe_wr);
@@ -1558,22 +1656,23 @@ static void run_t262_sub_batch(
     CloseHandle(pi.hThread);
     worker_done.store(true, std::memory_order_relaxed);
     watchdog.join();
+    return (int)exit_code;
 }
 #else
-static void run_t262_sub_batch(
+static int run_t262_sub_batch(
     const char* manifest_path,
     std::unordered_map<std::string, BatchResult>& results,
     size_t num_tests = T262_BATCH_CHUNK_SIZE)
 {
     int stdout_pipe[2];
-    if (pipe(stdout_pipe) != 0) return;
+    if (pipe(stdout_pipe) != 0) return -1;
     fcntl(stdout_pipe[0], F_SETFD, FD_CLOEXEC);
     fcntl(stdout_pipe[1], F_SETFD, FD_CLOEXEC);
 
     int manifest_fd = open(manifest_path, O_RDONLY);
     if (manifest_fd < 0) {
         close(stdout_pipe[0]); close(stdout_pipe[1]);
-        return;
+        return -1;
     }
     fcntl(manifest_fd, F_SETFD, FD_CLOEXEC);
 
@@ -1614,7 +1713,7 @@ static void run_t262_sub_batch(
 
     if (ret != 0) {
         close(stdout_pipe[0]);
-        return;
+        return -1;
     }
 
     // Watchdog thread: kills the worker if it exceeds the hard timeout.
@@ -1685,17 +1784,21 @@ static void run_t262_sub_batch(
     int wstatus;
     waitpid(pid, &wstatus, 0);
     // Log if the batch process exited abnormally (helps diagnose killed batches)
+    int worker_status = 0;
     if (WIFSIGNALED(wstatus)) {
         int sig = WTERMSIG(wstatus);
+        worker_status = 128 + sig;
         fprintf(stderr, "[test262] Batch worker PID %d killed by signal %d (%s), collected %zu results\n",
                 pid, sig, strsignal(sig), results.size());
     } else if (WIFEXITED(wstatus) && WEXITSTATUS(wstatus) != 0) {
+        worker_status = WEXITSTATUS(wstatus);
         // Normal exit with non-zero status (e.g., from MAX_CRASH_COUNT break)
         fprintf(stderr, "[test262] Batch worker PID %d exited with status %d, collected %zu results\n",
                 pid, WEXITSTATUS(wstatus), results.size());
     }
     worker_done.store(true, std::memory_order_relaxed);
     watchdog.join();
+    return worker_status;
 }
 #endif // _WIN32
 
@@ -1837,10 +1940,25 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
                 // Execute: fork/exec with stdin from manifest, read stdout via pipe
                 auto t0 = std::chrono::steady_clock::now();
                 size_t batch_num_tests = batches[i].end - batches[i].start;
-                run_t262_sub_batch(manifest_path, thread_results[i], batch_num_tests);
+                {
+                    std::lock_guard<std::mutex> lock(g_progress_mutex);
+                    fprintf(stderr, "[test262] batch[%zu/%zu] start worker=%zu kind=%s tests=%zu range=%zu..%zu\n",
+                            i + 1, batches.size(), w, batches[i].native ? "native" : "js",
+                            batch_num_tests, batches[i].start, batches[i].end - 1);
+                }
+                int worker_status = run_t262_sub_batch(manifest_path, thread_results[i], batch_num_tests);
                 auto t1 = std::chrono::steady_clock::now();
                 batch_timings[i] = {i, std::chrono::duration<double>(t1 - t0).count(),
                                     batch_num_tests};
+                size_t produced = thread_results[i].size();
+                {
+                    std::lock_guard<std::mutex> lock(g_progress_mutex);
+                    fprintf(stderr, "[test262] batch[%zu/%zu] %s worker=%zu status=%d results=%zu/%zu elapsed=%.1fs\n",
+                            i + 1, batches.size(),
+                            batch_worker_status_label(worker_status, produced, batch_num_tests),
+                            w, worker_status, produced, batch_num_tests,
+                            batch_timings[i].elapsed_secs);
+                }
             }
             unlink(manifest_path);
         });
@@ -1988,7 +2106,10 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
             g_run_partial ? "merged" : "skipped");
 
     // Phase 2: execute clean tests through js-test-batch (batch size 50)
+    auto batch_exec_start = std::chrono::steady_clock::now();
     auto batch_results = execute_t262_batch(prepared, clean_indices);
+    auto batch_exec_done = std::chrono::steady_clock::now();
+    double batch_exec_secs = std::chrono::duration<double>(batch_exec_done - batch_exec_start).count();
 
     // Build batch assignment map for Phase 4 diagnostics.
     // Must mirror the actual sub-batch composition used by execute_t262_batch:
@@ -2110,6 +2231,7 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
             lost_indices.push_back(idx);
         }
     }
+    double retry_secs = 0;
     if (!lost_indices.empty()) {
         auto retry_start = std::chrono::steady_clock::now();
         fprintf(stderr, "[test262] Phase 2b (retry): %zu batch-lost tests, re-running in small batches...\n",
@@ -2166,7 +2288,7 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
         }
 
         auto retry_time = std::chrono::steady_clock::now();
-        double retry_secs = std::chrono::duration<double>(retry_time - retry_start).count();
+        retry_secs = std::chrono::duration<double>(retry_time - retry_start).count();
         fprintf(stderr, "[test262] Phase 2b (retry): %.1fs — recovered %zu of %zu lost tests\n",
                 retry_secs, recovered, lost_indices.size());
 
@@ -2178,6 +2300,7 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
     // Write non-fully-passing list for next run.
     // Cumulative: merge previous entries with newly-discovered ones.
     // Tests are removed from the list if they fully PASS in batch in Phase 2.
+    auto partial_start = std::chrono::steady_clock::now();
     {
         // Preserve manually-added TIMEOUT_ entries, SLOW_ entries, and # comments from the existing file.
         // TIMEOUT_ entries are tests that loop forever (Lambda bug: missing throw guard),
@@ -2441,8 +2564,11 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
             g_phase_crash_exit = crash_exit + still_lost;
         }
     }
+    auto partial_done = std::chrono::steady_clock::now();
+    double partial_secs = std::chrono::duration<double>(partial_done - partial_start).count();
 
     // Write per-test timing data to temp/_t262_timing.tsv (or _o0/_o3 suffix when --opt-level used)
+    auto timing_start = std::chrono::steady_clock::now();
     {
         char timing_path[128] = "temp/_t262_timing.tsv";
         if (g_opt_level >= 0)
@@ -2459,8 +2585,11 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                     batch_results.size(), timing_path);
         }
     }
+    auto timing_done = std::chrono::steady_clock::now();
+    double timing_secs = std::chrono::duration<double>(timing_done - timing_start).count();
 
     // Write per-test memory profiling data and summary
+    auto memory_start = std::chrono::steady_clock::now();
     {
         char mem_path[128] = "temp/_t262_memory.tsv";
         if (g_opt_level >= 0)
@@ -2558,6 +2687,8 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
             fprintf(stderr, "[test262]   Memory data → %s\n", mem_path);
         }
     }
+    auto memory_done = std::chrono::steady_clock::now();
+    double memory_secs = std::chrono::duration<double>(memory_done - memory_start).count();
 
     // Build classification sets for non-fully-passing logic.
     // All tests must pass in their original Phase 2 batch with time < 3s to be "fully passed".
@@ -2574,6 +2705,7 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
     }
 
     // Phase 3: evaluate results and cache, applying non-fully-passing classification
+    auto eval_start = std::chrono::steady_clock::now();
     size_t pp_partial = 0, pp_batch_lost = 0, pp_slow = 0, pp_collateral = 0;
     size_t pp_skipped_partial = 0;
     for (size_t i = 0; i < prepared.size(); i++) {
@@ -2643,10 +2775,12 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                 auto br_it = batch_results.find(name);
                 if (br_it != batch_results.end() && br_it->second.elapsed_us >= SLOW_THRESHOLD_US) {
                     // Test passed in batch but exceeded slow threshold (>= 3s).
-                    // Track for the partial-list output (next run will skip from batch),
-                    // but DO NOT demote this run's PASS — the test passed correctly.
-                    // Demoting would flag a baseline test as a regression purely for being
-                    // borderline-slow, which oscillates the gate without a real bug.
+                    // Slow tests are not "fully passing" for baseline purposes:
+                    // they go to t262_partial.txt and are excluded from baseline updates.
+                    long elapsed_ms = br_it->second.elapsed_us / 1000;
+                    result = {T262_PARTIAL_PASS,
+                              "non-fully-passing: slow batch runtime " +
+                              std::to_string(elapsed_ms) + "ms >= 3000ms"};
                     pp_slow++;
                 }
             }
@@ -2662,15 +2796,23 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
     }
     // Expose batch-lost count for --update-baseline gate
     g_phase_batch_lost = pp_batch_lost;
+    auto eval_done = std::chrono::steady_clock::now();
+    double eval_secs = std::chrono::duration<double>(eval_done - eval_start).count();
 
     auto total_time = std::chrono::steady_clock::now();
     double total_secs = std::chrono::duration<double>(total_time - start_time).count();
-    fprintf(stderr, "[test262] All %zu tests completed in %.1fs (prep %.1fs + exec %.1fs + eval <0.1s)\n",
+    fprintf(stderr, "[test262] All %zu tests completed in %.1fs (prep %.1fs + batch %.1fs + retry %.1fs + partial %.1fs + timing %.1fs + memory %.1fs + eval %.1fs)\n",
             tests.size(), total_secs, prep_secs,
-            std::chrono::duration<double>(exec_time - prep_time).count());
+            batch_exec_secs, retry_secs, partial_secs, timing_secs, memory_secs, eval_secs);
     g_prep_secs = prep_secs;
     g_exec_secs = std::chrono::duration<double>(exec_time - prep_time).count();
     g_total_secs = total_secs;
+    g_phase_batch_secs = batch_exec_secs;
+    g_phase_retry_secs = retry_secs;
+    g_phase_partial_secs = partial_secs;
+    g_phase_timing_secs = timing_secs;
+    g_phase_memory_secs = memory_secs;
+    g_phase_evaluate_secs = eval_secs;
     g_parallel_done = true;
 }
 
@@ -3102,6 +3244,17 @@ int main(int argc, char** argv) {
             p.is_negative = false;
             p.is_strict = false;
             p.native_harness = false;
+            static const std::string prefix = std::string(TEST262_ROOT) + "/test/";
+            if (param.test_path.size() > prefix.size() &&
+                param.test_path.compare(0, prefix.size(), prefix) == 0) {
+                std::string rel = param.test_path.substr(prefix.size());
+                const auto& skip_map = skipped_tests();
+                auto sit = skip_map.find(rel);
+                if (sit != skip_map.end()) {
+                    p.skip_result = T262_SKIP;
+                    p.skip_message = sit->second;
+                }
+            }
             auto cm_it = g_metadata_cache.find(param.test_path);
             if (cm_it != g_metadata_cache.end()) {
                 const CachedMeta& cm = cm_it->second;
@@ -3112,7 +3265,7 @@ int main(int argc, char** argv) {
                 p.features = cm.features;
                 p.native_harness = cm.native_harness;
             }
-            indices.push_back(prepared.size());
+            if (p.skip_result != T262_SKIP) indices.push_back(prepared.size());
             prepared.push_back(std::move(p));
         }
 
@@ -3194,6 +3347,7 @@ int main(int argc, char** argv) {
 
         // Phase 4: Retry regressions individually to distinguish real regressions
         // from batch-mode infrastructure failures (OOM kills, signal 9, etc.)
+        auto phase4_start = std::chrono::steady_clock::now();
         if (!regressions.empty()) {
             fprintf(stderr, "[test262] Phase 4: Retrying %zu regressions individually...\n", regressions.size());
             // Build name→path lookup from all_tests
@@ -3342,6 +3496,8 @@ int main(int argc, char** argv) {
                 regressions = std::move(real_regressions);
             }
         }
+        auto phase4_done = std::chrono::steady_clock::now();
+        g_phase4_secs = std::chrono::duration<double>(phase4_done - phase4_start).count();
 
         int total = passed + failed + partial;
         double pct = total > 0 ? 100.0 * passed / total : 0.0;
