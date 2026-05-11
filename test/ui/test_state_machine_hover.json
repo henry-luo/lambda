@@ -1,0 +1,22 @@
+{
+  "name": "State machine hover ViewState chain",
+  "html": "test/ui/test_state_machine_hover.html",
+  "events": [
+    {"type": "assert_state_store"},
+    {"type": "mouse_move", "target": {"selector": "#target"}},
+    {"type": "assert_state", "target": {"selector": "#target"}, "state": ":hover", "value": true},
+    {"type": "assert_state", "target": {"selector": "#inner"}, "state": ":hover", "value": true},
+    {"type": "assert_state", "target": {"selector": "#outer"}, "state": ":hover", "value": true},
+    {"type": "assert_state", "target": {"selector": "#sibling"}, "state": ":hover", "value": false},
+    {"type": "assert_state_store", "target": {"selector": "#target"}, "view_state": true, "kind": "base", "weak_ref": true},
+    {"type": "mouse_move", "target": {"selector": "#sibling"}},
+    {"type": "assert_state", "target": {"selector": "#target"}, "state": ":hover", "value": false},
+    {"type": "assert_state", "target": {"selector": "#inner"}, "state": ":hover", "value": false},
+    {"type": "assert_state", "target": {"selector": "#sibling"}, "state": ":hover", "value": true},
+    {"type": "assert_state", "target": {"selector": "#outer"}, "state": ":hover", "value": true},
+    {"type": "mouse_move", "target": {"selector": "#outside"}},
+    {"type": "assert_state", "target": {"selector": "#outer"}, "state": ":hover", "value": false},
+    {"type": "assert_state", "target": {"selector": "#outside"}, "state": ":hover", "value": true},
+    {"type": "assert_state_store"}
+  ]
+}

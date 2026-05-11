@@ -240,6 +240,9 @@ Any local mirror update code that bypasses StateStore must be removed.
 - Orphaned `ViewState` registry entries are pruned after DOM mutations and before debug interaction validation.
 - Explicit subtree detach cleanup clears weak `view->view_state_ref` pointers and doc-scoped transient owners for detached views.
 - `ViewState` memory remains arena-owned by `StateStore`; recycling removes registry ownership rather than freeing individual arena allocations.
+- Hover is represented as a document target plus a ViewState chain: the hovered view and each ancestor carry `ViewState.flags.hovered`, and siblings/outside subtrees do not.
+- Active is represented the same way: `DocState.active_target` owns the innermost active view while `ViewState.flags.active` is applied to that view and its ancestor chain.
+- Drag/drop is a document-scoped state-machine session with validated source, drag target, pending/active drop state, and live drop target ownership.
 
 ## Implementation Notes
 
@@ -247,8 +250,10 @@ Any local mirror update code that bypasses StateStore must be removed.
 - Dynamic pseudo-state and form/scroll interaction state resolve through StateStore/ViewState with static defaults when no `ViewState` exists.
 - `DomElement::pseudo_state` and non-text `FormControlProp` dynamic mirrors are not used as canonical state.
 - DOM detach lifecycle prunes orphaned `ViewState` entries so registry validation only sees live view ids.
+- Hover and active updates run through state-machine transitions and StateStore writers that update the full target-to-root ViewState chain atomically before validation.
+- Drag and drag/drop updates run through state-machine transitions so drag target, pending/active state, coordinates, source, and drop target are validated as one document interaction model.
 - `make check-state-store` guards against reintroducing element pseudo-state caches, non-text form mirror access, external scroll mirrors, external direct ViewState writes, and external direct DocState writes.
-- Event simulation includes `assert_state_store` for internal StateStore/ViewState assertions, including optional `view_state_count` checks.
+- Event simulation includes `assert_state_store` for internal StateStore/ViewState assertions, including optional `view_state_count`, active target, and drag/drop checks.
 
 ## Success Criteria
 

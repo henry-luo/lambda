@@ -1508,7 +1508,8 @@ static void form_state_mark_dirty(DocState* state) {
     state_assert_after_mutation(state, "form_view_state_mutation");
 }
 
-void view_state_set_hovered(DocState* state, View* view, bool hovered) {
+static void view_state_set_hovered_internal(DocState* state, View* view, bool hovered,
+                                            bool assert_after_mutation) {
     ViewState* view_state = view_state_get(state, view);
     if (!view_state && !hovered) return;
     if (!view_state) view_state = view_state_get_or_create(state, view, VIEW_STATE_BASE);
@@ -1520,10 +1521,22 @@ void view_state_set_hovered(DocState* state, View* view, bool hovered) {
     state->is_dirty = true;
     state->needs_repaint = true;
     state->version++;
-    state_assert_after_mutation(state, "view_state_set_hovered");
+    if (assert_after_mutation) state_assert_after_mutation(state, "view_state_set_hovered");
 }
 
+void view_state_set_hovered(DocState* state, View* view, bool hovered) {
+    view_state_set_hovered_internal(state, view, hovered, true);
+}
+
+static void view_state_set_active_internal(DocState* state, View* view, bool active,
+                                           bool assert_after_mutation);
+
 void view_state_set_active(DocState* state, View* view, bool active) {
+    view_state_set_active_internal(state, view, active, true);
+}
+
+static void view_state_set_active_internal(DocState* state, View* view, bool active,
+                                           bool assert_after_mutation) {
     ViewState* view_state = view_state_get(state, view);
     if (!view_state && !active) return;
     if (!view_state) view_state = view_state_get_or_create(state, view, VIEW_STATE_BASE);
@@ -1535,7 +1548,7 @@ void view_state_set_active(DocState* state, View* view, bool active) {
     state->is_dirty = true;
     state->needs_repaint = true;
     state->version++;
-    state_assert_after_mutation(state, "view_state_set_active");
+    if (assert_after_mutation) state_assert_after_mutation(state, "view_state_set_active");
 }
 
 void view_state_set_focused(DocState* state, View* view, bool focused) {
@@ -1558,6 +1571,18 @@ void doc_state_set_hover_target(DocState* state, View* target) {
     View* old_target = state->hover_target;
     if (old_target == target) return;
 
+    View* node = old_target;
+    while (node) {
+        view_state_set_hovered_internal(state, node, false, false);
+        node = (View*)node->parent;
+    }
+
+    node = target;
+    while (node) {
+        view_state_set_hovered_internal(state, node, true, false);
+        node = (View*)node->parent;
+    }
+
     state->hover_target = target;
     doc_state_log_view_target_transition(state, "hover.target", old_target, target);
     state->is_dirty = true;
@@ -1570,6 +1595,18 @@ void doc_state_set_active_target(DocState* state, View* target) {
     if (!state) return;
     View* old_target = state->active_target;
     if (old_target == target) return;
+
+    View* node = old_target;
+    while (node) {
+        view_state_set_active_internal(state, node, false, false);
+        node = (View*)node->parent;
+    }
+
+    node = target;
+    while (node) {
+        view_state_set_active_internal(state, node, true, false);
+        node = (View*)node->parent;
+    }
 
     state->active_target = target;
     doc_state_log_view_target_transition(state, "active.target", old_target, target);
@@ -1618,6 +1655,43 @@ DragDropState* doc_state_begin_drag_drop(DocState* state, View* source,
     state->version++;
     state_assert_after_mutation(state, "doc_state_begin_drag_drop");
     return drag_drop;
+}
+
+void doc_state_update_drag_drop_motion(DocState* state, float x, float y) {
+    if (!state || !state->drag_drop) return;
+    DragDropState* drag_drop = state->drag_drop;
+    if (drag_drop->current_x == x && drag_drop->current_y == y) return;
+    drag_drop->current_x = x;
+    drag_drop->current_y = y;
+    state->is_dirty = true;
+    state->needs_repaint = true;
+    state->version++;
+    state_assert_after_mutation(state, "doc_state_update_drag_drop_motion");
+}
+
+void doc_state_set_drag_drop_active(DocState* state, bool active) {
+    if (!state || !state->drag_drop) return;
+    DragDropState* drag_drop = state->drag_drop;
+    bool old_active = drag_drop->active;
+    bool old_pending = drag_drop->pending;
+    drag_drop->active = active;
+    drag_drop->pending = active ? false : drag_drop->pending;
+    if (old_active == drag_drop->active && old_pending == drag_drop->pending) return;
+    state->is_dirty = true;
+    state->needs_repaint = true;
+    state->version++;
+    state_assert_after_mutation(state, "doc_state_set_drag_drop_active");
+}
+
+void doc_state_set_drag_drop_target(DocState* state, View* drop_target) {
+    if (!state || !state->drag_drop) return;
+    DragDropState* drag_drop = state->drag_drop;
+    if (drag_drop->drop_target == drop_target) return;
+    drag_drop->drop_target = drop_target;
+    state->is_dirty = true;
+    state->needs_repaint = true;
+    state->version++;
+    state_assert_after_mutation(state, "doc_state_set_drag_drop_target");
 }
 
 void doc_state_clear_drag_drop(DocState* state) {

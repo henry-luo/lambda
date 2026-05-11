@@ -1,0 +1,23 @@
+{
+  "name": "State machine active and drag ViewState lifecycle",
+  "html": "test/ui/test_state_machine_active_drag.html",
+  "events": [
+    {"type": "assert_state_store"},
+    {"type": "mouse_down", "target": {"selector": "#press"}},
+    {"type": "assert_state", "target": {"selector": "#press"}, "state": ":active", "value": true},
+    {"type": "assert_state", "target": {"selector": "#panel"}, "state": ":active", "value": true},
+    {"type": "assert_state_store", "target": {"selector": "#press"}, "view_state": true, "kind": "base", "weak_ref": true},
+    {"type": "mouse_up", "target": {"selector": "#press"}},
+    {"type": "assert_state", "target": {"selector": "#press"}, "state": ":active", "value": false},
+    {"type": "assert_state", "target": {"selector": "#panel"}, "state": ":active", "value": false},
+    {"type": "assert_state_store", "target": {"selector": "#press"}, "active_target": false, "drag_active": false, "drag_drop": false},
+
+    {"type": "mouse_down", "target": {"selector": "#drag-src"}},
+    {"type": "assert_state_store", "target": {"selector": "#drag-src"}, "drag_drop": true, "drag_drop_pending": true, "drag_drop_active": false, "drag_drop_source": true},
+    {"type": "mouse_move", "target": {"selector": "#drop-zone"}},
+    {"type": "assert_state_store", "target": {"selector": "#drag-src"}, "drag_drop": true, "drag_drop_pending": false, "drag_drop_active": true, "drag_drop_source": true},
+    {"type": "assert_state_store", "target": {"selector": "#drop-zone"}, "drag_drop": true, "drag_drop_active": true, "drag_drop_target": true},
+    {"type": "mouse_up", "target": {"selector": "#drop-zone"}},
+    {"type": "assert_state_store", "target": {"selector": "#drag-src"}, "drag_drop": false, "drag_active": false}
+  ]
+}

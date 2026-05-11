@@ -2188,25 +2188,23 @@ void update_hover_state(EventContext* evcon, View* new_target) {
 
     if (prev_hover == new_target) return;  // no change
 
-    // Clear :hover on previous target and its ancestors
-    if (prev_hover) {
-        View* node = prev_hover;
-        while (node) {
-            state_set_bool(state, node, STATE_HOVER, false);
-            sync_pseudo_state(node, PSEUDO_STATE_HOVER, false);
-            node = (View*)node->parent;
-        }
-        log_debug("update_hover_state: cleared hover on %p", prev_hover);
+    HoverTransitionArgs hover_args = { .target = new_target };
+    hover_transition(state, HOVER_TRANSITION_SET_TARGET, &hover_args);
+
+    View* node = prev_hover;
+    while (node) {
+        sync_pseudo_state(node, PSEUDO_STATE_HOVER, false);
+        node = (View*)node->parent;
+    }
+    if (prev_hover) log_debug("update_hover_state: cleared hover on %p", prev_hover);
+
+    node = new_target;
+    while (node) {
+        sync_pseudo_state(node, PSEUDO_STATE_HOVER, true);
+        node = (View*)node->parent;
     }
 
-    // Set :hover on new target and its ancestors
     if (new_target) {
-        View* node = new_target;
-        while (node) {
-            state_set_bool(state, node, STATE_HOVER, true);
-            sync_pseudo_state(node, PSEUDO_STATE_HOVER, true);
-            node = (View*)node->parent;
-        }
         log_debug("update_hover_state: set hover on %p", new_target);
 
         // Dispatch HTML onmouseover handler if registered
@@ -2220,8 +2218,6 @@ void update_hover_state(EventContext* evcon, View* new_target) {
             evcon->event.mouse_position.x, evcon->event.mouse_position.y,
             0, 0, false, false, false, false, 0);
     }
-
-    doc_state_set_hover_target(state, new_target);
 }
 
 /**
@@ -2232,27 +2228,25 @@ void update_active_state(EventContext* evcon, View* target, bool is_active) {
     if (!state) return;
 
     if (is_active) {
-        // Set :active on target and ancestors
+        ActiveTransitionArgs active_args = { .target = target };
+        active_transition(state, ACTIVE_TRANSITION_SET_TARGET, &active_args);
         View* node = target;
         while (node) {
-            state_set_bool(state, node, STATE_ACTIVE, true);
             sync_pseudo_state(node, PSEUDO_STATE_ACTIVE, true);
             node = (View*)node->parent;
         }
-        doc_state_set_active_target(state, target);
         log_debug("update_active_state: set active on %p", target);
     } else {
-        // Clear :active on previous active target
         View* prev_active = (View*)state->active_target;
+        ActiveTransitionArgs active_args = { .target = NULL };
+        active_transition(state, ACTIVE_TRANSITION_SET_TARGET, &active_args);
         if (prev_active) {
             View* node = prev_active;
             while (node) {
-                state_set_bool(state, node, STATE_ACTIVE, false);
                 sync_pseudo_state(node, PSEUDO_STATE_ACTIVE, false);
                 node = (View*)node->parent;
             }
         }
-        doc_state_set_active_target(state, NULL);
         log_debug("update_active_state: cleared active");
     }
 }
@@ -2987,7 +2981,8 @@ void update_drag_state(EventContext* evcon, View* target, bool is_dragging) {
     DocState* state = (DocState*)evcon->ui_context->document->state;
     if (!state) return;
 
-    doc_state_set_drag_state(state, target, is_dragging);
+    DragTransitionArgs drag_args = { .target = target, .dragging = is_dragging };
+    drag_transition(state, DRAG_TRANSITION_SET_STATE, &drag_args);
 
     log_debug("update_drag_state: dragging=%d, target=%p", is_dragging, target);
 }
@@ -3630,16 +3625,16 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         // Handle element drag-and-drop
         if (state && state->drag_drop && (state->drag_drop->pending || state->drag_drop->active)) {
             DragDropState* dd = state->drag_drop;
-            dd->current_x = (float)motion->x;
-            dd->current_y = (float)motion->y;
+            DragTransitionArgs motion_args = { .x = (float)motion->x, .y = (float)motion->y };
+            drag_transition(state, DRAG_TRANSITION_UPDATE_DROP_MOTION, &motion_args);
 
             if (dd->pending && !dd->active) {
                 // check movement threshold (5px in physical pixels)
                 float dx = dd->current_x - dd->start_x;
                 float dy = dd->current_y - dd->start_y;
                 if (dx * dx + dy * dy > 25.0f) {
-                    dd->pending = false;
-                    dd->active = true;
+                    DragTransitionArgs active_args = { .active = true };
+                    drag_transition(state, DRAG_TRANSITION_SET_DROP_ACTIVE, &active_args);
                     log_debug("DRAG START: source=%p distance=%.1f", dd->source_view, sqrtf(dx*dx + dy*dy));
                     // dispatch "dragstart" to source element
                     dispatch_lambda_handler(&evcon, dd->source_view, "dragstart");
@@ -3669,7 +3664,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     if (dd->drop_target) {
                         dispatch_lambda_handler(&evcon, dd->drop_target, "dragleave");
                     }
-                    dd->drop_target = new_drop_target;
+                    DragTransitionArgs target_args = { .drop_target = new_drop_target };
+                    drag_transition(state, DRAG_TRANSITION_SET_DROP_TARGET, &target_args);
                     if (dd->drop_target) {
                         dispatch_lambda_handler(&evcon, dd->drop_target, "dragover");
                     }
@@ -4552,8 +4548,14 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             }
             if (draggable_elem) {
                 const char* drag_data = dom_element_get_attribute(draggable_elem, "dragdata");
-                DragDropState* drag_drop = doc_state_begin_drag_drop(state, (View*)draggable_elem,
-                    (float)btn_event->x, (float)btn_event->y, drag_data);
+                DragTransitionArgs drag_args = {
+                    .source = (View*)draggable_elem,
+                    .x = (float)btn_event->x,
+                    .y = (float)btn_event->y,
+                    .drag_data = drag_data
+                };
+                drag_transition(state, DRAG_TRANSITION_BEGIN_DROP, &drag_args);
+                DragDropState* drag_drop = state->drag_drop;
                 if (drag_drop) {
                     log_debug("DRAG PENDING: source=%p start=(%.0f,%.0f) data=%s",
                         draggable_elem, drag_drop->start_x, drag_drop->start_y,
@@ -4583,7 +4585,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     drag_handled = true;
                     evcon.need_repaint = true;
                 }
-                doc_state_clear_drag_drop(state);
+                drag_transition(state, DRAG_TRANSITION_CLEAR_DROP, NULL);
             }
 
             // Clear :active state

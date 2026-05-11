@@ -718,6 +718,9 @@ void doc_state_set_drag_state(DocState* state, View* target, bool dragging);
 DragDropState* doc_state_begin_drag_drop(DocState* state, View* source,
                                          float start_x, float start_y,
                                          const char* drag_data);
+void doc_state_update_drag_drop_motion(DocState* state, float x, float y);
+void doc_state_set_drag_drop_active(DocState* state, bool active);
+void doc_state_set_drag_drop_target(DocState* state, View* drop_target);
 void doc_state_clear_drag_drop(DocState* state);
 
 // ============================================================================
