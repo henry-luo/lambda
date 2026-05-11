@@ -2324,6 +2324,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     // Check if the loop variable is a destructuring pattern
     JsArrayPatternNode* destr_pattern = NULL;
     JsObjectPatternNode* obj_destr_pattern = NULL;
+    JsAstNode* lhs_ref_node = NULL;
     const char* var_name = NULL;
     int var_len = 0;
 
@@ -2351,9 +2352,11 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         destr_pattern = (JsArrayPatternNode*)fo->left;
     } else if (fo->left && fo->left->node_type == JS_AST_NODE_OBJECT_PATTERN) {
         obj_destr_pattern = (JsObjectPatternNode*)fo->left;
+    } else if (fo->left && fo->left->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+        lhs_ref_node = fo->left;
     }
 
-    if (!var_name && !destr_pattern && !obj_destr_pattern) {
+    if (!var_name && !destr_pattern && !obj_destr_pattern && !lhs_ref_node) {
         log_error("js-mir: for-of/for-in missing loop variable");
         jm_pop_scope(mt);
         return;
@@ -2743,7 +2746,9 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     // Test: call js_iterator_step(iterator) → value or JS_ITER_DONE_SENTINEL (done)
     jm_emit_label(mt, l_test);
     MIR_reg_t step_result = jm_emit_iterator_step(mt, iterator);
-    jm_emit_iterator_close_on_exception(mt, iterator, l_iter_exc);
+    MIR_reg_t step_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_iter_err),
+        MIR_new_reg_op(mt->ctx, step_exc)));
     // Check if done (JS_ITER_DONE_SENTINEL — unique sentinel that won't collide with null/undefined/false)
     MIR_reg_t is_done = jm_emit_iterator_done_test(mt, step_result, "forofdone");
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_end),
@@ -2796,6 +2801,14 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         MIR_reg_t obj_destr_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_iter_exc),
             MIR_new_reg_op(mt->ctx, obj_destr_exc)));
+    }
+
+    if (lhs_ref_node) {
+        JsMirReference lhs_ref = jm_emit_reference(mt, lhs_ref_node);
+        jm_emit_put_value(mt, &lhs_ref, loop_var);
+        MIR_reg_t lhs_put_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_iter_exc),
+            MIR_new_reg_op(mt->ctx, lhs_put_exc)));
     }
 
     // P4b-of: Infer class type for for-of loop variable from field accesses in body.
@@ -2855,6 +2868,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
 
     jm_emit_label(mt, l_end);
     jm_emit_label(mt, l_iter_err);  // exception from js_get_iterator jumps here
+    jm_emit_exc_propagate_check(mt);
 
     // IteratorClose on exception from body — call return() then re-throw
     {
@@ -3915,7 +3929,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                 tc->has_return_reg = has_return_reg;
                 tc->has_catch = false;
                 tc->has_finally = true;
-                tc->yield_state_only = false;
+                tc->yield_state_only = true;
                 tc->finally_body = NULL;
                 tc->saved_exc_flag_reg = 0;
                 tc->saved_exc_val_reg = 0;
@@ -3939,6 +3953,12 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             // not the outer pending exception (ES spec §13.15.8 step 7-8).
             MIR_reg_t saved_exc_flag = jm_call_0(mt, "js_check_exception", MIR_T_I64);
             MIR_reg_t saved_exc_val = jm_call_0(mt, "js_clear_exception", MIR_T_I64);
+            int saved_exc_flag_spill = -1;
+            int saved_exc_val_spill = -1;
+            if (mt->in_generator && jm_has_yield(try_node->finalizer)) {
+                saved_exc_flag_spill = jm_gen_spill_save(mt, saved_exc_flag);
+                saved_exc_val_spill = jm_gen_spill_save(mt, saved_exc_val);
+            }
             if (pushed_gen_finally_ctx && mt->try_ctx_depth > 0) {
                 JsTryContext* tc = &mt->try_ctx_stack[mt->try_ctx_depth - 1];
                 tc->saved_exc_flag_reg = saved_exc_flag;
@@ -3959,6 +3979,11 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_reg_op(mt->ctx, mt->eval_completion_reg),
                     MIR_new_reg_op(mt->ctx, saved_cptn)));
+            }
+
+            if (saved_exc_flag_spill >= 0) {
+                jm_gen_spill_load(mt, saved_exc_flag, saved_exc_flag_spill);
+                jm_gen_spill_load(mt, saved_exc_val, saved_exc_val_spill);
             }
 
             // Restore saved exception if finally completed normally.

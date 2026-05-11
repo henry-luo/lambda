@@ -1570,6 +1570,55 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
 void jm_emit_destructure_target(JsMirTranspiler* mt, JsAstNode* target, MIR_reg_t val);
 void jm_emit_array_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MIR_reg_t src);
 void jm_emit_object_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MIR_reg_t src);
+MIR_reg_t jm_emit_destructure_default(JsMirTranspiler* mt, MIR_reg_t val, JsAstNode* default_expr);
+
+static void jm_emit_destructure_put_reference(JsMirTranspiler* mt, const JsMirReference* ref, MIR_reg_t val) {
+    if (!ref) return;
+    switch (ref->kind) {
+    case JS_MIR_REF_PROPERTY:
+        jm_call_3(mt, "js_property_set", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->key_reg),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+        break;
+    case JS_MIR_REF_SUPER_PROPERTY:
+        jm_call_3(mt, "js_super_property_set", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->key_reg),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+        break;
+    default:
+        break;
+    }
+}
+
+static bool jm_emit_destructure_pre_reference(JsMirTranspiler* mt, JsAstNode* target, JsMirReference* ref) {
+    if (!target || !ref) return false;
+    if (target->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+        *ref = jm_emit_reference(mt, target);
+        return ref->kind != JS_MIR_REF_INVALID;
+    }
+    if (target->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
+        JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)target;
+        if (ap->left && ap->left->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+            *ref = jm_emit_reference(mt, ap->left);
+            return ref->kind != JS_MIR_REF_INVALID;
+        }
+    }
+    return false;
+}
+
+static void jm_emit_destructure_bind_pre_reference(JsMirTranspiler* mt, JsAstNode* target,
+    const JsMirReference* ref, MIR_reg_t val)
+{
+    if (!target || !ref) return;
+    MIR_reg_t put_val = val;
+    if (target->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
+        JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)target;
+        put_val = jm_emit_destructure_default(mt, val, ap->right);
+    }
+    jm_emit_destructure_put_reference(mt, ref, put_val);
+}
 
 // Bind a value to a named variable (find existing or create new register).
 // Handles closure env write-back and scope_env write-back.
@@ -1826,6 +1875,26 @@ void jm_emit_array_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MIR
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, iter_done),
         MIR_new_int_op(mt->ctx, 0)));
 
+    MIR_label_t arr_destr_exc = jm_new_label(mt);
+    MIR_label_t arr_destr_after = jm_new_label(mt);
+    bool pushed_arr_destr_try = false;
+    if (mt->try_ctx_depth < 16) {
+        JsTryContext* tc = &mt->try_ctx_stack[mt->try_ctx_depth++];
+        tc->catch_label = arr_destr_exc;
+        tc->finally_label = 0;
+        tc->end_label = arr_destr_after;
+        tc->return_val_reg = 0;
+        tc->has_return_reg = 0;
+        tc->has_catch = true;
+        tc->has_finally = false;
+        tc->inlining_finally = false;
+        tc->yield_state_only = false;
+        tc->finally_body = NULL;
+        tc->saved_exc_flag_reg = 0;
+        tc->saved_exc_val_reg = 0;
+        pushed_arr_destr_try = true;
+    }
+
     JsAstNode* elem = pattern->elements;
     while (elem) {
         if (elem->node_type == JS_AST_NODE_SPREAD_ELEMENT ||
@@ -1835,19 +1904,62 @@ void jm_emit_array_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MIR
             if (sp->argument) {
                 MIR_label_t rest_skip = jm_new_label(mt);
                 MIR_label_t rest_end = jm_new_label(mt);
+                JsMirReference rest_ref;
+                rest_ref.kind = JS_MIR_REF_INVALID;
+                rest_ref.base_reg = 0;
+                rest_ref.key_reg = 0;
+                rest_ref.strict = false;
+                int rest_pre_iterator_spill = -1;
+                int rest_pre_iter_done_spill = -1;
+                bool rest_pre_has_yield = mt->in_generator && jm_has_yield(sp->argument);
+                if (rest_pre_has_yield) {
+                    rest_pre_iterator_spill = jm_gen_spill_save(mt, iterator);
+                    rest_pre_iter_done_spill = jm_gen_spill_save(mt, iter_done);
+                    if (mt->gen_active_iterator_slot >= 0) {
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                                mt->gen_active_iterator_slot * (int)sizeof(uint64_t), mt->gen_env_reg, 0, 1),
+                            MIR_new_reg_op(mt->ctx, iterator)));
+                    }
+                }
+                bool has_rest_ref = jm_emit_destructure_pre_reference(mt, sp->argument, &rest_ref);
+                if (rest_pre_has_yield) {
+                    if (mt->gen_active_iterator_slot >= 0) {
+                        MIR_reg_t null_iter = jm_emit_null(mt);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                                mt->gen_active_iterator_slot * (int)sizeof(uint64_t), mt->gen_env_reg, 0, 1),
+                            MIR_new_reg_op(mt->ctx, null_iter)));
+                    }
+                    jm_gen_spill_load(mt, iterator, rest_pre_iterator_spill);
+                    jm_gen_spill_load(mt, iter_done, rest_pre_iter_done_spill);
+                }
+                if (has_rest_ref) {
+                    jm_emit_iterator_close_on_exception_if_open(mt, iterator, iter_done, skip_arr_destr);
+                }
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, rest_skip),
                     MIR_new_reg_op(mt->ctx, iter_done)));
                 MIR_reg_t rest = jm_emit_iterator_collect_rest(mt, iterator);
-                jm_emit_iterator_close_on_exception_if_open(mt, iterator, iter_done, skip_arr_destr);
+                MIR_reg_t rest_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, skip_arr_destr),
+                    MIR_new_reg_op(mt->ctx, rest_exc)));
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, iter_done),
                     MIR_new_int_op(mt->ctx, 1)));
-                jm_emit_destructure_target(mt, sp->argument, rest);
+                if (has_rest_ref) {
+                    jm_emit_destructure_bind_pre_reference(mt, sp->argument, &rest_ref, rest);
+                } else {
+                    jm_emit_destructure_target(mt, sp->argument, rest);
+                }
                 jm_emit_iterator_close_on_exception_if_open(mt, iterator, iter_done, skip_arr_destr);
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, rest_end)));
                 jm_emit_label(mt, rest_skip);
                 MIR_reg_t empty_arr = jm_call_1(mt, "js_array_new", MIR_T_I64,
                     MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
-                jm_emit_destructure_target(mt, sp->argument, empty_arr);
+                if (has_rest_ref) {
+                    jm_emit_destructure_bind_pre_reference(mt, sp->argument, &rest_ref, empty_arr);
+                } else {
+                    jm_emit_destructure_target(mt, sp->argument, empty_arr);
+                }
                 jm_emit_label(mt, rest_end);
             }
         } else if (elem->node_type == JS_AST_NODE_NULL) {
@@ -1857,7 +1969,9 @@ void jm_emit_array_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MIR
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, elision_end),
                 MIR_new_reg_op(mt->ctx, iter_done)));
             MIR_reg_t step_val = jm_emit_iterator_step(mt, iterator);
-            jm_emit_iterator_close_on_exception_if_open(mt, iterator, iter_done, skip_arr_destr);
+            MIR_reg_t elision_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, skip_arr_destr),
+                MIR_new_reg_op(mt->ctx, elision_exc)));
             // check if done
             MIR_reg_t is_done = jm_emit_iterator_done_test(mt, step_val, "eldone");
             // if done, mark iter_done
@@ -1872,6 +1986,39 @@ void jm_emit_array_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MIR
             // regular element: step iterator and bind value
             MIR_label_t assign_undef = jm_new_label(mt);
             MIR_label_t elem_end = jm_new_label(mt);
+            JsMirReference pre_ref;
+            pre_ref.kind = JS_MIR_REF_INVALID;
+            pre_ref.base_reg = 0;
+            pre_ref.key_reg = 0;
+            pre_ref.strict = false;
+            int pre_iterator_spill = -1;
+            int pre_iter_done_spill = -1;
+            bool pre_ref_has_yield = mt->in_generator && jm_has_yield(elem);
+            if (pre_ref_has_yield) {
+                pre_iterator_spill = jm_gen_spill_save(mt, iterator);
+                pre_iter_done_spill = jm_gen_spill_save(mt, iter_done);
+                if (mt->gen_active_iterator_slot >= 0) {
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                            mt->gen_active_iterator_slot * (int)sizeof(uint64_t), mt->gen_env_reg, 0, 1),
+                        MIR_new_reg_op(mt->ctx, iterator)));
+                }
+            }
+            bool has_pre_ref = jm_emit_destructure_pre_reference(mt, elem, &pre_ref);
+            if (pre_ref_has_yield) {
+                if (mt->gen_active_iterator_slot >= 0) {
+                    MIR_reg_t null_iter = jm_emit_null(mt);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                            mt->gen_active_iterator_slot * (int)sizeof(uint64_t), mt->gen_env_reg, 0, 1),
+                        MIR_new_reg_op(mt->ctx, null_iter)));
+                }
+                jm_gen_spill_load(mt, iterator, pre_iterator_spill);
+                jm_gen_spill_load(mt, iter_done, pre_iter_done_spill);
+            }
+            if (has_pre_ref) {
+                jm_emit_iterator_close_on_exception_if_open(mt, iterator, iter_done, skip_arr_destr);
+            }
 
             // if already done, assign undefined
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, assign_undef),
@@ -1879,7 +2026,9 @@ void jm_emit_array_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MIR
 
             // call js_iterator_step
             MIR_reg_t step_val = jm_emit_iterator_step(mt, iterator);
-            jm_emit_iterator_close_on_exception_if_open(mt, iterator, iter_done, skip_arr_destr);
+            MIR_reg_t step_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, skip_arr_destr),
+                MIR_new_reg_op(mt->ctx, step_exc)));
 
             // check if done
             MIR_reg_t is_done = jm_emit_iterator_done_test(mt, step_val, "stdone");
@@ -1900,7 +2049,11 @@ void jm_emit_array_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MIR
                         MIR_new_reg_op(mt->ctx, iterator)));
                 }
             }
-            jm_emit_destructure_target(mt, elem, step_val);
+            if (has_pre_ref) {
+                jm_emit_destructure_bind_pre_reference(mt, elem, &pre_ref, step_val);
+            } else {
+                jm_emit_destructure_target(mt, elem, step_val);
+            }
             if (elem_has_yield) {
                 if (mt->gen_active_iterator_slot >= 0) {
                     MIR_reg_t null_iter = jm_emit_null(mt);
@@ -1935,7 +2088,11 @@ void jm_emit_array_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MIR
                         MIR_new_reg_op(mt->ctx, iterator)));
                 }
             }
-            jm_emit_destructure_target(mt, elem, undef_val);
+            if (has_pre_ref) {
+                jm_emit_destructure_bind_pre_reference(mt, elem, &pre_ref, undef_val);
+            } else {
+                jm_emit_destructure_target(mt, elem, undef_val);
+            }
             if (undef_elem_has_yield) {
                 if (mt->gen_active_iterator_slot >= 0) {
                     MIR_reg_t null_iter = jm_emit_null(mt);
@@ -1959,6 +2116,12 @@ void jm_emit_array_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MIR
         MIR_new_reg_op(mt->ctx, iter_done)));
     jm_emit_iterator_close(mt, iterator);
     jm_emit_label(mt, no_close);
+
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, arr_destr_after)));
+    if (pushed_arr_destr_try) mt->try_ctx_depth--;
+    jm_emit_label(mt, arr_destr_exc);
+    jm_emit_iterator_close_on_exception_if_open(mt, iterator, iter_done, skip_arr_destr);
+    jm_emit_label(mt, arr_destr_after);
 
     jm_emit_label(mt, skip_arr_destr);
 }
@@ -9635,21 +9798,53 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
                     MIR_new_label_op(mt->ctx, no_return_signal),
                     MIR_new_reg_op(mt->ctx, is_return_signal)));
+                if (mt->gen_active_iterator_slot >= 0 && mt->gen_env_reg) {
+                    MIR_reg_t active_iter = jm_new_reg(mt, "actiter", MIR_T_I64);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, active_iter),
+                        MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                            mt->gen_active_iterator_slot * (int)sizeof(uint64_t), mt->gen_env_reg, 0, 1)));
+                    MIR_reg_t null_iter = jm_emit_null(mt);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                            mt->gen_active_iterator_slot * (int)sizeof(uint64_t), mt->gen_env_reg, 0, 1),
+                        MIR_new_reg_op(mt->ctx, null_iter)));
+                    jm_emit_iterator_close(mt, active_iter);
+                    MIR_reg_t close_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
+                    MIR_label_t close_ok = jm_new_label(mt);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+                        MIR_new_label_op(mt->ctx, close_ok),
+                        MIR_new_reg_op(mt->ctx, close_exc)));
+                    jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1,
+                        MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL_VAL)));
+                    jm_emit_label(mt, close_ok);
+                }
                 MIR_reg_t return_value = jm_call_1(mt, "js_gen_return_signal_value", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->gen_input_reg));
                 int return_d = mt->try_ctx_depth - 1;
-                while (return_d >= 0 && mt->try_ctx_stack[return_d].yield_state_only) return_d--;
+                while (return_d >= 0 &&
+                       (mt->try_ctx_stack[return_d].yield_state_only ||
+                        !mt->try_ctx_stack[return_d].has_finally)) {
+                    return_d--;
+                }
                 if (return_d >= 0) {
                     JsTryContext* tc = &mt->try_ctx_stack[return_d];
+                    MIR_label_t target = tc->finally_label;
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_reg_op(mt->ctx, tc->return_val_reg),
                         MIR_new_reg_op(mt->ctx, return_value)));
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_reg_op(mt->ctx, tc->has_return_reg),
                         MIR_new_int_op(mt->ctx, 1)));
-                    MIR_label_t target = tc->has_finally ? tc->finally_label : tc->end_label;
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-                        MIR_new_label_op(mt->ctx, target)));
+                    if (target) {
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                            MIR_new_label_op(mt->ctx, target)));
+                    } else {
+                        MIR_reg_t done_result = jm_call_2(mt, "js_gen_yield_result", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, return_value),
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)-1));
+                        jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, done_result)));
+                    }
                 } else {
                     MIR_reg_t done_result = jm_call_2(mt, "js_gen_yield_result", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, return_value),
@@ -9658,6 +9853,8 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                 }
                 jm_emit_label(mt, no_return_signal);
             }
+
+            jm_emit_exc_propagate_check(mt);
 
             // The yield expression evaluates to the 'input' parameter (sent value)
             return mt->gen_input_reg;

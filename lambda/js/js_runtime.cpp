@@ -41,6 +41,7 @@ struct JsCollectionOrderNode {
     Item value;
     JsCollectionOrderNode* next;
     JsCollectionOrderNode* prev;
+    bool deleted;
 };
 
 struct JsCollectionData {
@@ -7194,6 +7195,11 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         else if ((*p & 0xE0) == 0xC0 && remaining >= 2) cp_len = 2;
         else if ((*p & 0xF0) == 0xE0 && remaining >= 3) cp_len = 3;
         else if ((*p & 0xF8) == 0xF0 && remaining >= 4) cp_len = 4;
+        if (cp_len == 3 && *p == 0xED && remaining >= 6 &&
+            p[1] >= 0xA0 && p[1] <= 0xAF &&
+            p[3] == 0xED && p[4] >= 0xB0 && p[4] <= 0xBF) {
+            cp_len = 6;
+        }
         // Advance index
         js_property_set(this_val, (Item){.item = s2it(heap_create_name("__index__", 9))}, (Item){.item = i2it(idx + cp_len)});
         // Create single-codepoint string
@@ -8106,6 +8112,12 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             : js_get_map_iterator_proto());
         js_property_set(iter, (Item){.item = s2it(heap_create_name("__node_ptr__", 12))},
                         (Item){.item = i2it((int64_t)(uintptr_t)cd->order_head)});
+        js_property_set(iter, (Item){.item = s2it(heap_create_name("__coll_ptr__", 12))},
+                (Item){.item = i2it((int64_t)(uintptr_t)cd)});
+        js_property_set(iter, (Item){.item = s2it(heap_create_name("__last_node__", 13))},
+                (Item){.item = i2it(0)});
+        js_property_set(iter, (Item){.item = s2it(heap_create_name("__iter_done__", 13))},
+                (Item){.item = b2it(false)});
         js_property_set(iter, (Item){.item = s2it(heap_create_name("__iter_mode__", 13))},
                         (Item){.item = i2it(mode)});
         js_property_set(iter, (Item){.item = s2it(heap_create_name("__coll_type__", 13))},
@@ -8123,21 +8135,45 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             return js_throw_type_error("Collection Iterator.prototype.next called on incompatible receiver");
         }
         // Use js_map_get_fast for internal properties to avoid js_property_get fallback chains
-        bool found_np = false, found_mode = false, found_ct = false;
+        bool found_np = false, found_cp = false, found_last = false, found_done = false, found_mode = false, found_ct = false;
         Item node_item = js_map_get_fast(this_val.map, "__node_ptr__", 12, &found_np);
+        Item coll_item = js_map_get_fast(this_val.map, "__coll_ptr__", 12, &found_cp);
+        Item last_item = js_map_get_fast(this_val.map, "__last_node__", 13, &found_last);
+        Item done_item = js_map_get_fast(this_val.map, "__iter_done__", 13, &found_done);
         Item mode_item = js_map_get_fast(this_val.map, "__iter_mode__", 13, &found_mode);
         Item ctype_item = js_map_get_fast(this_val.map, "__coll_type__", 13, &found_ct);
-        if (!found_np || !found_mode || !found_ct ||
+        if (!found_np || !found_cp || !found_last || !found_done || !found_mode || !found_ct ||
             get_type_id(mode_item) != LMD_TYPE_INT ||
             get_type_id(ctype_item) != LMD_TYPE_INT) {
             return js_throw_type_error("Collection Iterator.prototype.next called on incompatible receiver");
         }
         JsCollectionOrderNode* node = (JsCollectionOrderNode*)(uintptr_t)it2i(node_item);
+        JsCollectionData* cd = (JsCollectionData*)(uintptr_t)it2i(coll_item);
+        JsCollectionOrderNode* last_node = (JsCollectionOrderNode*)(uintptr_t)it2i(last_item);
         int mode = (int)it2i(mode_item);
         int coll_type = (int)it2i(ctype_item);
         Item result = js_new_object();
+        if (js_is_truthy(done_item)) {
+            js_property_set(result, (Item){.item = s2it(heap_create_name("value", 5))}, make_js_undefined());
+            js_property_set(result, (Item){.item = s2it(heap_create_name("done", 4))}, (Item){.item = b2it(true)});
+            return result;
+        }
+        if (!node && cd) {
+            node = last_node ? last_node->next : cd->order_head;
+        }
+        while (node && node->deleted) {
+            node = node->next;
+        }
+        if (!node && cd) {
+            node = last_node ? last_node->next : cd->order_head;
+        }
+        while (node && node->deleted) {
+            node = node->next;
+        }
         if (!node) {
             // iterator exhausted
+            js_property_set(this_val, (Item){.item = s2it(heap_create_name("__iter_done__", 13))},
+                            (Item){.item = b2it(true)});
             js_property_set(result, (Item){.item = s2it(heap_create_name("value", 5))}, make_js_undefined());
             js_property_set(result, (Item){.item = s2it(heap_create_name("done", 4))}, (Item){.item = b2it(true)});
             return result;
@@ -8164,6 +8200,8 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         js_property_set(result, (Item){.item = s2it(heap_create_name("value", 5))}, val);
         js_property_set(result, (Item){.item = s2it(heap_create_name("done", 4))}, (Item){.item = b2it(false)});
         // advance to next node
+        js_property_set(this_val, (Item){.item = s2it(heap_create_name("__last_node__", 13))},
+                (Item){.item = i2it((int64_t)(uintptr_t)node)});
         js_property_set(this_val, (Item){.item = s2it(heap_create_name("__node_ptr__", 12))},
                         (Item){.item = i2it((int64_t)(uintptr_t)node->next)});
         return result;
@@ -11521,6 +11559,7 @@ static void js_collection_order_remove(JsCollectionData* cd, Item key) {
         JsCollectionEntry ea = {.key = node->key};
         JsCollectionEntry eb = {.key = key};
         if (js_collection_compare(&ea, &eb, NULL) == 0) {
+            node->deleted = true;
             if (node->prev) node->prev->next = node->next;
             else cd->order_head = node->next;
             if (node->next) node->next->prev = node->prev;
@@ -19042,6 +19081,14 @@ static Item js_yield_delegate_next_result(Item iterator, Item input) {
     return ItemNull;
 }
 
+static Item js_generator_resume_after_delegate_abrupt(Item generator, JsGenerator* gen) {
+    gen->delegate = ItemNull;
+    gen->state = gen->delegate_resume;
+    gen->delegate_resume = -1;
+    gen->delegate_idx = 0;
+    return js_generator_next(generator, make_js_undefined());
+}
+
 extern "C" Item js_generator_next(Item generator, Item input) {
     JsGenerator* gen = js_get_generator(generator);
     if (!gen) {
@@ -19111,18 +19158,8 @@ extern "C" Item js_generator_next(Item generator, Item input) {
             input = return_val;
             // Fall through to call state machine at resumed state
         } else {
-            Item value = js_iter_result_value(del_result);
-            if (js_check_exception()) {
-                gen->delegate = ItemNull;
-                gen->state = gen->delegate_resume;
-                gen->delegate_resume = -1;
-                gen->delegate_idx = 0;
-                input = make_js_undefined();
-                goto run_state_machine;
-            }
             gen->executing = false;
-            Item iter_result = js_make_iter_result(value, false);
-            return is_async ? js_promise_resolve(iter_result) : iter_result;
+            return is_async ? js_promise_resolve(del_result) : del_result;
         }
     }
 
@@ -19215,48 +19252,85 @@ extern "C" Item js_generator_return(Item generator, Item value) {
         if (get_type_id(gen->delegate) != LMD_TYPE_NULL) {
             Item return_fn = js_property_get_str(gen->delegate, "return", 6);
             if (js_check_exception()) {
-                gen->delegate = ItemNull;
-                gen->done = true;
-                gen->state = -1;
-                return ItemNull;
+                return js_generator_resume_after_delegate_abrupt(generator, gen);
             }
             if (get_type_id(return_fn) == LMD_TYPE_FUNC) {
                 Item args[1];
                 args[0] = value;
                 Item inner = js_call_function(return_fn, gen->delegate, args, 1);
                 if (js_check_exception()) {
-                    gen->delegate = ItemNull;
-                    gen->done = true;
-                    gen->state = -1;
-                    return ItemNull;
+                    return js_generator_resume_after_delegate_abrupt(generator, gen);
                 }
                 TypeId itid = get_type_id(inner);
                 if (itid != LMD_TYPE_MAP && itid != LMD_TYPE_ELEMENT && itid != LMD_TYPE_ARRAY) {
-                    gen->delegate = ItemNull;
-                    gen->done = true;
-                    gen->state = -1;
                     js_throw_type_error("iterator result is not an object");
-                    return ItemNull;
+                    return js_generator_resume_after_delegate_abrupt(generator, gen);
                 }
                 bool done = js_iter_result_is_done(inner);
                 if (js_check_exception()) {
-                    gen->delegate = ItemNull;
-                    gen->done = true;
-                    gen->state = -1;
-                    return ItemNull;
+                    return js_generator_resume_after_delegate_abrupt(generator, gen);
                 }
                 if (!done) {
-                    Item inner_value = js_iter_result_value(inner);
+                    return is_async ? js_promise_resolve(inner) : inner;
+                }
+                Item inner_value = js_iter_result_value(inner);
+                if (js_check_exception()) {
+                    return js_generator_resume_after_delegate_abrupt(generator, gen);
+                }
+                gen->state = gen->delegate_resume;
+                gen->delegate = ItemNull;
+                gen->delegate_resume = -1;
+                gen->delegate_idx = 0;
+                if (!gen->done) {
+                    if (gen->executing) {
+                        js_throw_type_error("Generator is already running");
+                        return ItemNull;
+                    }
+                    gen->executing = true;
+                    typedef Item (*GenFn)(Item*, Item, int64_t);
+                    Item signal = js_gen_return_signal(inner_value);
+                    Item result = ((GenFn)gen->state_fn)(gen->env, signal, gen->state);
+                    gen->executing = false;
                     if (js_check_exception()) {
-                        gen->delegate = ItemNull;
                         gen->done = true;
                         gen->state = -1;
                         return ItemNull;
                     }
-                    Item result = js_make_iter_result(inner_value, false);
-                    return is_async ? js_promise_resolve(result) : result;
+                    if (get_type_id(result) == LMD_TYPE_ARRAY) {
+                        Array* arr = result.array;
+                        Item out_value = (arr->length > 0) ? arr->items[0] : make_js_undefined();
+                        int64_t next_state = -1;
+                        if (arr->length > 1 && get_type_id(arr->items[1]) == LMD_TYPE_INT) {
+                            next_state = it2i(arr->items[1]);
+                        }
+                        if (next_state < 0) {
+                            gen->done = true;
+                            gen->state = -1;
+                            if (js_gen_is_return_signal(out_value)) {
+                                out_value = js_gen_return_signal_value(out_value);
+                            }
+                            Item done_result = js_make_iter_result(out_value, true);
+                            return is_async ? js_promise_resolve(done_result) : done_result;
+                        }
+                        gen->state = next_state;
+                        Item yield_result = js_make_iter_result(out_value, false);
+                        return is_async ? js_promise_resolve(yield_result) : yield_result;
+                    }
+                    gen->done = true;
+                    gen->state = -1;
+                    Item done_result = js_make_iter_result(result, true);
+                    return is_async ? js_promise_resolve(done_result) : done_result;
+                }
+                Item done_result = js_make_iter_result(inner_value, true);
+                return is_async ? js_promise_resolve(done_result) : done_result;
+            } else {
+                TypeId rtid = get_type_id(return_fn);
+                if (rtid != LMD_TYPE_UNDEFINED && rtid != LMD_TYPE_NULL && return_fn.item != ITEM_JS_UNDEFINED) {
+                    js_throw_type_error("iterator return is not a function");
+                    return js_generator_resume_after_delegate_abrupt(generator, gen);
                 }
             }
+            gen->state = gen->delegate_resume;
             gen->delegate = ItemNull;
             gen->delegate_resume = -1;
             gen->delegate_idx = 0;
@@ -19286,6 +19360,9 @@ extern "C" Item js_generator_return(Item generator, Item value) {
                 if (next_state < 0) {
                     gen->done = true;
                     gen->state = -1;
+                    if (js_gen_is_return_signal(out_value)) {
+                        out_value = js_gen_return_signal_value(out_value);
+                    }
                     Item done_result = js_make_iter_result(out_value, true);
                     return is_async ? js_promise_resolve(done_result) : done_result;
                 }
@@ -19307,49 +19384,40 @@ extern "C" Item js_generator_throw(Item generator, Item error) {
     JsGenerator* gen = js_get_generator(generator);
     bool is_async = gen && gen->is_async;
     if (gen) {
+        if (!gen->done && !gen->started) {
+            gen->done = true;
+            gen->state = -1;
+            js_throw_value(error);
+            Item result = js_make_iter_result(make_js_undefined(), true);
+            return is_async ? js_promise_resolve(result) : result;
+        }
         if (get_type_id(gen->delegate) != LMD_TYPE_NULL) {
             Item throw_fn = js_property_get_str(gen->delegate, "throw", 5);
             if (js_check_exception()) {
-                gen->delegate = ItemNull;
-                gen->done = true;
-                gen->state = -1;
-                return ItemNull;
+                return js_generator_resume_after_delegate_abrupt(generator, gen);
             }
             if (get_type_id(throw_fn) == LMD_TYPE_FUNC) {
                 Item args[1];
                 args[0] = error;
                 Item inner = js_call_function(throw_fn, gen->delegate, args, 1);
                 if (js_check_exception()) {
-                    gen->delegate = ItemNull;
-                    gen->done = true;
-                    gen->state = -1;
-                    return ItemNull;
+                    return js_generator_resume_after_delegate_abrupt(generator, gen);
                 }
                 TypeId itid = get_type_id(inner);
                 if (itid != LMD_TYPE_MAP && itid != LMD_TYPE_ELEMENT && itid != LMD_TYPE_ARRAY) {
-                    gen->delegate = ItemNull;
-                    gen->done = true;
-                    gen->state = -1;
                     js_throw_type_error("iterator result is not an object");
-                    return ItemNull;
+                    return js_generator_resume_after_delegate_abrupt(generator, gen);
                 }
                 bool done = js_iter_result_is_done(inner);
                 if (js_check_exception()) {
-                    gen->delegate = ItemNull;
-                    gen->done = true;
-                    gen->state = -1;
-                    return ItemNull;
+                    return js_generator_resume_after_delegate_abrupt(generator, gen);
                 }
                 if (!done) {
-                    Item result = js_make_iter_result(make_js_undefined(), false);
-                    return is_async ? js_promise_resolve(result) : result;
+                    return is_async ? js_promise_resolve(inner) : inner;
                 }
                 Item inner_value = js_iter_result_value(inner);
                 if (js_check_exception()) {
-                    gen->delegate = ItemNull;
-                    gen->done = true;
-                    gen->state = -1;
-                    return ItemNull;
+                    return js_generator_resume_after_delegate_abrupt(generator, gen);
                 }
                 gen->delegate = ItemNull;
                 gen->state = gen->delegate_resume;
@@ -19357,12 +19425,31 @@ extern "C" Item js_generator_throw(Item generator, Item error) {
                 gen->delegate_idx = 0;
                 return js_generator_next(generator, inner_value);
             }
+            TypeId ttid = get_type_id(throw_fn);
+            if (ttid != LMD_TYPE_UNDEFINED && ttid != LMD_TYPE_NULL && throw_fn.item != ITEM_JS_UNDEFINED) {
+                js_throw_type_error("iterator throw is not a function");
+                return js_generator_resume_after_delegate_abrupt(generator, gen);
+            }
+            Item delegate_iterator = gen->delegate;
             gen->delegate = ItemNull;
+            gen->state = gen->delegate_resume;
             gen->delegate_resume = -1;
             gen->delegate_idx = 0;
+            js_iterator_close(delegate_iterator);
+            if (js_check_exception()) {
+                return js_generator_next(generator, make_js_undefined());
+            }
+            js_throw_type_error("iterator throw is undefined");
+            return js_generator_next(generator, make_js_undefined());
         }
-        gen->done = true;
-        gen->state = -1;
+        if (!gen->done) {
+            if (gen->executing) {
+                js_throw_type_error("Generator is already running");
+                return ItemNull;
+            }
+            js_throw_value(error);
+            return js_generator_next(generator, make_js_undefined());
+        }
     }
     // Throw the error via the JS exception mechanism
     js_throw_value(error);
@@ -19552,6 +19639,23 @@ Item js_check_array_sym_iterator() {
 }
 
 // Get the iterator for an iterable (GetIterator, ES spec §7.4.1)
+static bool js_iterator_cache_next_method(Item iterator) {
+    TypeId it_tid = get_type_id(iterator);
+    if (it_tid != LMD_TYPE_MAP && it_tid != LMD_TYPE_ELEMENT && it_tid != LMD_TYPE_ARRAY) {
+        js_throw_type_error("iterator is not an object");
+        return false;
+    }
+    Item next_fn = js_property_get_str(iterator, "next", 4);
+    if (js_check_exception()) return false;
+    if (get_type_id(next_fn) != LMD_TYPE_FUNC) {
+        js_throw_type_error("iterator next is not a function");
+        return false;
+    }
+    Item cache_key = (Item){.item = s2it(heap_create_name("__iter_next__", 13))};
+    js_property_set(iterator, cache_key, next_fn);
+    return !js_check_exception();
+}
+
 extern "C" Item js_get_iterator(Item iterable) {
     TypeId tid = get_type_id(iterable);
 
@@ -19583,6 +19687,7 @@ extern "C" Item js_get_iterator(Item iterable) {
                     js_throw_type_error("iterator is not an object");
                     return ItemNull;
                 }
+                if (!js_iterator_cache_next_method(iterator)) return ItemNull;
                 return iterator;
             }
         }
@@ -19608,9 +19713,12 @@ extern "C" Item js_get_iterator(Item iterable) {
     if (tid == LMD_TYPE_MAP) {
         JsCollectionData* cd = js_get_collection_data(iterable);
         if (cd) {
-            // Drain to array and wrap in array iterator (collections are small enough)
-            Item arr = js_iterable_to_array(iterable);
-            return js_create_array_iterator(arr);
+            int builtin_id = cd->type == JS_COLLECTION_SET ? JS_BUILTIN_SET_VALUES : JS_BUILTIN_MAP_ENTRIES;
+            Item iter_fn = js_get_or_create_builtin(builtin_id, "[Symbol.iterator]", 0);
+            Item iterator = js_call_function(iter_fn, iterable, NULL, 0);
+            if (js_check_exception()) return ItemNull;
+            if (!js_iterator_cache_next_method(iterator)) return ItemNull;
+            return iterator;
         }
 
         // Check for [Symbol.iterator]()
@@ -19624,6 +19732,7 @@ extern "C" Item js_get_iterator(Item iterable) {
                 js_throw_type_error("iterator is not an object");
                 return ItemNull;
             }
+            if (!js_iterator_cache_next_method(iterator)) return ItemNull;
             return iterator;
         }
 
@@ -19631,6 +19740,9 @@ extern "C" Item js_get_iterator(Item iterable) {
         String* next_key = heap_create_name("next", 4);
         Item next_fn = js_property_get(iterable, (Item){.item = s2it(next_key)});
         if (get_type_id(next_fn) == LMD_TYPE_FUNC) {
+            Item cache_key = (Item){.item = s2it(heap_create_name("__iter_next__", 13))};
+            js_property_set(iterable, cache_key, next_fn);
+            if (js_check_exception()) return ItemNull;
             return iterable;
         }
     }
@@ -19646,6 +19758,26 @@ extern "C" Item js_get_iterator(Item iterable) {
                 js_throw_type_error("iterator is not an object");
                 return ItemNull;
             }
+            if (!js_iterator_cache_next_method(iterator)) return ItemNull;
+            return iterator;
+        }
+    }
+
+    if (tid == LMD_TYPE_BOOL || tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64 ||
+        tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_SYMBOL ||
+        (tid == LMD_TYPE_DECIMAL && js_is_bigint(iterable))) {
+        Item wrapped = js_to_object(iterable);
+        Item iter_factory = js_property_get_str(wrapped, "__sym_1", 7);
+        if (js_check_exception()) return ItemNull;
+        if (get_type_id(iter_factory) == LMD_TYPE_FUNC) {
+            Item iterator = js_call_function(iter_factory, wrapped, NULL, 0);
+            if (js_check_exception()) return ItemNull;
+            TypeId it_tid = get_type_id(iterator);
+            if (it_tid != LMD_TYPE_MAP && it_tid != LMD_TYPE_ELEMENT && it_tid != LMD_TYPE_ARRAY) {
+                js_throw_type_error("iterator is not an object");
+                return ItemNull;
+            }
+            if (!js_iterator_cache_next_method(iterator)) return ItemNull;
             return iterator;
         }
     }
@@ -19833,16 +19965,24 @@ extern "C" Item js_iterator_step(Item iterator) {
         if (js_check_exception()) return (Item){.item = JS_ITER_DONE_SENTINEL};
         String* done_key = heap_create_name("done", 4);
         Item done_item = js_property_get(result, (Item){.item = s2it(done_key)});
-        if (get_type_id(done_item) == LMD_TYPE_BOOL && it2b(done_item)) return (Item){.item = JS_ITER_DONE_SENTINEL};
+        if (js_check_exception()) return (Item){.item = JS_ITER_DONE_SENTINEL};
+        if (js_is_truthy(done_item)) return (Item){.item = JS_ITER_DONE_SENTINEL};
         String* val_key = heap_create_name("value", 5);
         return js_property_get(result, (Item){.item = s2it(val_key)});
     }
 
     // Generic iterator: call .next()
     if (get_type_id(iterator) == LMD_TYPE_MAP || get_type_id(iterator) == LMD_TYPE_ELEMENT) {
-        String* next_key = heap_create_name("next", 4);
-        Item next_fn = js_property_get(iterator, (Item){.item = s2it(next_key)});
-        if (js_check_exception()) return (Item){.item = JS_ITER_DONE_SENTINEL};
+        bool found_cached = false;
+        Item next_fn = ItemNull;
+        if (get_type_id(iterator) == LMD_TYPE_MAP) {
+            next_fn = js_map_get_fast(iterator.map, "__iter_next__", 13, &found_cached);
+        }
+        if (!found_cached) {
+            String* next_key = heap_create_name("next", 4);
+            next_fn = js_property_get(iterator, (Item){.item = s2it(next_key)});
+            if (js_check_exception()) return (Item){.item = JS_ITER_DONE_SENTINEL};
+        }
         if (get_type_id(next_fn) == LMD_TYPE_FUNC) {
             Item result = js_call_function(next_fn, iterator, NULL, 0);
             if (js_check_exception()) return (Item){.item = JS_ITER_DONE_SENTINEL};
@@ -19856,7 +19996,7 @@ extern "C" Item js_iterator_step(Item iterator) {
             String* done_key = heap_create_name("done", 4);
             Item done_item = js_property_get(result, (Item){.item = s2it(done_key)});
             if (js_check_exception()) return (Item){.item = JS_ITER_DONE_SENTINEL};
-            if (get_type_id(done_item) == LMD_TYPE_BOOL && it2b(done_item)) return (Item){.item = JS_ITER_DONE_SENTINEL};
+            if (js_is_truthy(done_item)) return (Item){.item = JS_ITER_DONE_SENTINEL};
             String* val_key = heap_create_name("value", 5);
             return js_property_get(result, (Item){.item = s2it(val_key)});
         }
@@ -19888,6 +20028,12 @@ extern "C" Item js_iterator_close(Item iterator) {
                 result_tid != LMD_TYPE_ARRAY && result_tid != LMD_TYPE_FUNC &&
                 result_tid != LMD_TYPE_OBJECT && result_tid != LMD_TYPE_VMAP) {
                 js_throw_type_error("Iterator result is not an object");
+                return ItemNull;
+            }
+        } else {
+            TypeId rtid = get_type_id(return_fn);
+            if (rtid != LMD_TYPE_UNDEFINED && rtid != LMD_TYPE_NULL && return_fn.item != ITEM_JS_UNDEFINED) {
+                js_throw_type_error("iterator return is not a function");
                 return ItemNull;
             }
         }
