@@ -125,24 +125,24 @@ static inline void js_dom_mutation_notify() {
 
 // ----------------------------------------------------------------------------
 // Phase 3: live-range mutation envelopes — thin wrappers that bail when no
-// per-document RadiantState (and thus no live ranges) is attached. All DOM
+// per-document DocState (and thus no live ranges) is attached. All DOM
 // mutation paths in this file route through these to keep boundary points
 // in sync per WHATWG DOM §5.3.
 // ----------------------------------------------------------------------------
-static inline RadiantState* js_dom_current_state() {
+static inline DocState* js_dom_current_state() {
     return _js_current_document ? _js_current_document->state : nullptr;
 }
 static inline void dom_pre_remove(DomNode* child) {
-    RadiantState* st = js_dom_current_state();
+    DocState* st = js_dom_current_state();
     if (st && child) dom_mutation_pre_remove(st, child);
 }
 static inline void dom_post_insert(DomNode* parent, DomNode* node) {
-    RadiantState* st = js_dom_current_state();
+    DocState* st = js_dom_current_state();
     if (st && parent && node) dom_mutation_post_insert(st, parent, node);
 }
 static inline void dom_text_replace_data(DomText* text, uint32_t off,
                                          uint32_t cnt, uint32_t repl_len) {
-    RadiantState* st = js_dom_current_state();
+    DocState* st = js_dom_current_state();
     if (st && text) dom_mutation_text_replace_data(st, text, off, cnt, repl_len);
 }
 
@@ -3287,7 +3287,7 @@ static void _reset_form_control(DomElement* elem) {
             if (!dv) dv = "";
             tc_set_value(elem, dv, strlen(dv));
             _value_clear_dirty(elem);
-            if (RadiantState* st = js_dom_current_state()) tc_sync_form_to_legacy(elem, st);
+            if (DocState* st = js_dom_current_state()) tc_sync_form_to_legacy(elem, st);
         }
         return;
     }
@@ -3301,7 +3301,7 @@ static void _reset_form_control(DomElement* elem) {
             tc_set_value(elem, s, sb->length);
             _value_clear_dirty(elem);
             strbuf_free(sb);
-            if (RadiantState* st = js_dom_current_state()) tc_sync_form_to_legacy(elem, st);
+            if (DocState* st = js_dom_current_state()) tc_sync_form_to_legacy(elem, st);
         }
         return;
     }
@@ -5681,7 +5681,7 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
     // expando/attribute fallback. Per HTML §4.10.6.
     // ------------------------------------------------------------------
     if (tc_is_text_control_elem(elem)) {
-        RadiantState* tc_st = js_dom_current_state();
+        DocState* tc_st = js_dom_current_state();
         if (strcmp(prop, "value") == 0) {
             const char* s = fn_to_cstr(value);
             if (!s) s = "";
@@ -6427,7 +6427,7 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
                     // Spec: ranges with (next_text, k) move to (text, head_u16 + k);
                     // appended-data shift handled separately.
                     {
-                        RadiantState* st = js_dom_current_state();
+                        DocState* st = js_dom_current_state();
                         if (st) {
                             // (a) shift any existing endpoints in `text` past head_u16 by tail_u16
                             dom_mutation_text_replace_data(st, text, head_u16, 0, tail_u16);
@@ -6957,7 +6957,7 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         tc_set_selection_range(elem, (uint32_t)s, (uint32_t)e, dir);
         // Phase 6E: mirror to legacy CaretState/SelectionState so a focused
         // input visibly moves its caret + highlights its selection.
-        if (RadiantState* st = js_dom_current_state()) tc_sync_form_to_legacy(elem, st);
+        if (DocState* st = js_dom_current_state()) tc_sync_form_to_legacy(elem, st);
         return make_js_undefined();
     }
 
@@ -6969,7 +6969,7 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         // Per HTML, select() implicitly focuses the control.
         _js_active_element = elem;
         _js_last_focused_text_control = elem;
-        if (RadiantState* st = js_dom_current_state()) tc_sync_form_to_legacy(elem, st);
+        if (DocState* st = js_dom_current_state()) tc_sync_form_to_legacy(elem, st);
         return make_js_undefined();
     }
 

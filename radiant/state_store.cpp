@@ -120,7 +120,7 @@ static void init_interned_names(void) {
 // State Store Creation/Destruction
 // ============================================================================
 
-RadiantState* radiant_state_create(Pool* pool, StateUpdateMode mode) {
+DocState* radiant_state_create(Pool* pool, StateUpdateMode mode) {
     init_interned_names();
 
     if (!pool) {
@@ -128,9 +128,9 @@ RadiantState* radiant_state_create(Pool* pool, StateUpdateMode mode) {
         return NULL;
     }
 
-    RadiantState* state = (RadiantState*)pool_calloc(pool, sizeof(RadiantState));
+    DocState* state = (DocState*)pool_calloc(pool, sizeof(DocState));
     if (!state) {
-        log_error("radiant_state_create: failed to allocate RadiantState");
+        log_error("radiant_state_create: failed to allocate DocState");
         return NULL;
     }
 
@@ -192,27 +192,27 @@ RadiantState* radiant_state_create(Pool* pool, StateUpdateMode mode) {
     return state;
 }
 
-RadiantState* radiant_document_ensure_state(DomDocument* document, const char* owner) {
+DocState* radiant_document_ensure_state(DomDocument* document, const char* owner) {
     const char* prefix = owner ? owner : "radiant_document_ensure_state";
     if (!document) {
         log_error("%s: document is NULL", prefix);
         return NULL;
     }
     if (document->state) {
-        return (RadiantState*)document->state;
+        return (DocState*)document->state;
     }
     document->state = radiant_state_create(document->pool, STATE_MODE_IN_PLACE);
     if (!document->state) {
-        log_error("%s: failed to create RadiantState", prefix);
+        log_error("%s: failed to create DocState", prefix);
         return NULL;
     }
-    log_debug("%s: created RadiantState for document", prefix);
-    return (RadiantState*)document->state;
+    log_debug("%s: created DocState for document", prefix);
+    return (DocState*)document->state;
 }
 
 void radiant_document_destroy_state(DomDocument* document) {
     if (!document || !document->state) return;
-    radiant_state_destroy((RadiantState*)document->state);
+    radiant_state_destroy((DocState*)document->state);
     document->state = NULL;
 }
 
@@ -222,16 +222,16 @@ void radiant_document_destroy_state(DomDocument* document) {
 // pull in GLFW + the full render stack into every unit test). It declares
 // these two functions extern "C" and we provide the production
 // implementation here. Unit tests can supply their own implementation
-// against a minimal RadiantState stub.
+// against a minimal DocState stub.
 // ----------------------------------------------------------------------------
 struct DomRange;
-extern "C" Arena* dom_range_state_arena(RadiantState* state) {
+extern "C" Arena* dom_range_state_arena(DocState* state) {
     return state ? state->arena : NULL;
 }
-extern "C" DomRange** dom_range_state_live_ranges_slot(RadiantState* state) {
+extern "C" DomRange** dom_range_state_live_ranges_slot(DocState* state) {
     return state ? (DomRange**)&state->live_ranges : NULL;
 }
-extern "C" struct DomSelection* dom_range_state_selection(RadiantState* state) {
+extern "C" struct DomSelection* dom_range_state_selection(DocState* state) {
     return state ? state->dom_selection : NULL;
 }
 
@@ -240,7 +240,7 @@ extern "C" struct DomSelection* dom_range_state_selection(RadiantState* state) {
 // DomSelection is the canonical representation; CaretState and SelectionState
 // are private projections kept for render/event compatibility.
 // ----------------------------------------------------------------------------
-static DomSelection* sync_ensure_selection(RadiantState* state) {
+static DomSelection* sync_ensure_selection(DocState* state) {
     if (!state) return NULL;
     if (state->dom_selection) return state->dom_selection;
     state->dom_selection = dom_selection_create(state);
@@ -258,7 +258,7 @@ static const char* selection_state_name(DomSelection* selection) {
         "RangeSelectedBackward" : "RangeSelectedForward";
 }
 
-static void selection_log_transition(RadiantState* state, const char* transition,
+static void selection_log_transition(DocState* state, const char* transition,
                                      View* anchor_view, int anchor_offset,
                                      View* focus_view, int focus_offset) {
     if (!state || !event_state_log_enabled(state->active_event_log)) return;
@@ -290,7 +290,7 @@ static bool selection_is_text_control_view(View* view) {
     return view && view->is_element() && tc_is_text_control((DomElement*)view);
 }
 
-static void text_control_sync_selection(RadiantState* state, View* view) {
+static void text_control_sync_selection(DocState* state, View* view) {
     if (!state || !selection_is_text_control_view(view)) return;
     tc_sync_legacy_to_form((DomElement*)view, state);
 }
@@ -300,7 +300,7 @@ static void text_control_sync_selection(RadiantState* state, View* view) {
 // older renderer/event paths can keep using StateStore helper APIs while
 // DomSelection remains canonical.
 extern "C" void dom_selection_attach_legacy_storage(DomSelection* s,
-                                                    RadiantState* state) {
+                                                    DocState* state) {
     if (!s || !state || !state->arena) return;
     if (!state->caret) {
         state->caret = (CaretState*)arena_alloc(state->arena, sizeof(CaretState));
@@ -399,7 +399,7 @@ static bool selection_extend_dom_to_focus(DomSelection* selection,
     return dom_selection_extend(selection, focus->node, focus->offset, out_exception);
 }
 
-extern "C" void dom_selection_sync_from_legacy_selection(RadiantState* state) {
+extern "C" void dom_selection_sync_from_legacy_selection(DocState* state) {
     if (!state || !state->selection) return;
     DomSelection* ds = sync_ensure_selection(state);
     if (!ds) return;
@@ -432,7 +432,7 @@ extern "C" void dom_selection_sync_from_legacy_selection(RadiantState* state) {
     state->selection_layout_dirty = true;
 }
 
-extern "C" void dom_selection_sync_from_legacy_caret(RadiantState* state) {
+extern "C" void dom_selection_sync_from_legacy_caret(DocState* state) {
     if (!state || !state->caret) return;
     DomSelection* ds = sync_ensure_selection(state);
     if (!ds) return;
@@ -492,7 +492,7 @@ static void caret_local_from_absolute(View* view, float abs_x, float abs_y,
 // (caret x/y/height) are derived via the resolver. View* IS DomNode*, so
 // the node→view conversion is just a cast; UTF-16→UTF-8 for text offsets.
 // ---------------------------------------------------------------------------
-extern "C" void legacy_sync_from_dom_selection(RadiantState* state) {
+extern "C" void legacy_sync_from_dom_selection(DocState* state) {
     if (!state) return;
     if (state->dom_selection_sync_depth > 0) return;  // re-entry guard
     DomSelection* ds = state->dom_selection;
@@ -591,7 +591,7 @@ extern "C" void legacy_sync_from_dom_selection(RadiantState* state) {
               (void*)anc_view, anc_off, (void*)foc_view, foc_off, ds->is_collapsed);
 }
 
-void radiant_state_destroy(RadiantState* state) {
+void radiant_state_destroy(DocState* state) {
     if (!state) return;
 
     // Detach template state map from global store before destroying
@@ -640,7 +640,7 @@ void radiant_state_destroy(RadiantState* state) {
     log_debug("radiant_state_destroy: destroyed state store");
 }
 
-void radiant_state_reset(RadiantState* state) {
+void radiant_state_reset(DocState* state) {
     if (!state) return;
 
     // Clear the state map
@@ -684,7 +684,7 @@ void radiant_state_reset(RadiantState* state) {
 // State Get/Set Operations
 // ============================================================================
 
-Item state_get(RadiantState* state, void* node, const char* name) {
+Item state_get(DocState* state, void* node, const char* name) {
     if (!state || !node || !name) return ItemNull;
 
     const char* interned = intern_state_name(name);
@@ -697,7 +697,7 @@ Item state_get(RadiantState* state, void* node, const char* name) {
     return ItemNull;
 }
 
-bool state_get_bool(RadiantState* state, void* node, const char* name) {
+bool state_get_bool(DocState* state, void* node, const char* name) {
     Item value = state_get(state, node, name);
     if (value.item == ItemNull.item) return false;
     // Check bool type and value
@@ -708,7 +708,7 @@ bool state_get_bool(RadiantState* state, void* node, const char* name) {
     return true;
 }
 
-bool state_has(RadiantState* state, void* node, const char* name) {
+bool state_has(DocState* state, void* node, const char* name) {
     if (!state || !node || !name) return false;
 
     const char* interned = intern_state_name(name);
@@ -719,13 +719,13 @@ bool state_has(RadiantState* state, void* node, const char* name) {
 
 static bool s_in_batch = false;
 
-static void state_assert_after_mutation(RadiantState* state, const char* context) {
+static void state_assert_after_mutation(DocState* state, const char* context) {
     if (!state) return;
     if (state->transition_depth > 0 || state->active_cascade_depth > 0 || s_in_batch) return;
     radiant_state_assert_valid(state, context);
 }
 
-void state_set(RadiantState* state, void* node, const char* name, Item value) {
+void state_set(DocState* state, void* node, const char* name, Item value) {
     if (!state || !node || !name) return;
 
     const char* interned = intern_state_name(name);
@@ -767,12 +767,12 @@ void state_set(RadiantState* state, void* node, const char* name, Item value) {
     state_assert_after_mutation(state, "state_set");
 }
 
-void state_set_bool(RadiantState* state, void* node, const char* name, bool value) {
+void state_set_bool(DocState* state, void* node, const char* name, bool value) {
     Item item_value = { .item = value ? ITEM_TRUE : ITEM_FALSE };
     state_set(state, node, name, item_value);
 }
 
-bool form_control_get_checked(RadiantState* state, View* view) {
+bool form_control_get_checked(DocState* state, View* view) {
     if (!view || !view->is_element()) return false;
 
     if (state && state_has(state, view, STATE_CHECKED)) {
@@ -794,7 +794,7 @@ bool form_control_get_checked(RadiantState* state, View* view) {
     return false;
 }
 
-void form_control_set_checked(RadiantState* state, View* view, bool checked) {
+void form_control_set_checked(DocState* state, View* view, bool checked) {
     if (!view || !view->is_element()) return;
 
     if (state) {
@@ -812,13 +812,13 @@ void form_control_set_checked(RadiantState* state, View* view, bool checked) {
     state->needs_repaint = true;
 }
 
-void scroll_state_attach(RadiantState* state, void* pane_ptr) {
+void scroll_state_attach(DocState* state, void* pane_ptr) {
     if (!state || !pane_ptr) return;
     ScrollPane* pane = (ScrollPane*)pane_ptr;
     pane->state_ref = state;
 }
 
-void scroll_state_set_max(RadiantState* state, void* pane_ptr,
+void scroll_state_set_max(DocState* state, void* pane_ptr,
                           float h_max, float v_max) {
     if (!pane_ptr) return;
     ScrollPane* pane = (ScrollPane*)pane_ptr;
@@ -838,7 +838,7 @@ void scroll_state_set_max(RadiantState* state, void* pane_ptr,
     }
 }
 
-void scroll_state_set_position(RadiantState* state, void* pane_ptr,
+void scroll_state_set_position(DocState* state, void* pane_ptr,
                                float h_pos, float v_pos,
                                bool is_viewport) {
     if (!pane_ptr) return;
@@ -864,7 +864,7 @@ void scroll_state_set_position(RadiantState* state, void* pane_ptr,
     }
 }
 
-void scroll_state_get_position(RadiantState* state, void* pane_ptr,
+void scroll_state_get_position(DocState* state, void* pane_ptr,
                                float* out_h_pos, float* out_v_pos,
                                float* out_h_max, float* out_v_max) {
     (void)state;
@@ -881,7 +881,7 @@ void scroll_state_get_position(RadiantState* state, void* pane_ptr,
     if (out_v_max) *out_v_max = pane->v_max_scroll;
 }
 
-const char* form_control_get_value(RadiantState* state, View* view, uint32_t* out_len) {
+const char* form_control_get_value(DocState* state, View* view, uint32_t* out_len) {
     if (out_len) *out_len = 0;
     if (!view || !view->is_block()) return nullptr;
 
@@ -893,7 +893,7 @@ const char* form_control_get_value(RadiantState* state, View* view, uint32_t* ou
     return form->current_value;
 }
 
-void form_control_set_value(RadiantState* state, View* view, const char* value, uint32_t len) {
+void form_control_set_value(DocState* state, View* view, const char* value, uint32_t len) {
     if (!view || !view->is_block()) return;
 
     ViewBlock* block = (ViewBlock*)view;
@@ -932,7 +932,7 @@ void form_control_set_value(RadiantState* state, View* view, const char* value, 
     }
 }
 
-void form_control_get_selection(RadiantState* state, View* view,
+void form_control_get_selection(DocState* state, View* view,
                                 uint32_t* out_start, uint32_t* out_end, uint8_t* out_direction) {
     (void)state;
     if (out_start) *out_start = 0;
@@ -950,7 +950,7 @@ void form_control_get_selection(RadiantState* state, View* view,
     if (out_direction) *out_direction = form->selection_direction;
 }
 
-void form_control_set_selection(RadiantState* state, View* view,
+void form_control_set_selection(DocState* state, View* view,
                                 uint32_t start, uint32_t end, uint8_t direction) {
     if (!view || !view->is_block()) return;
 
@@ -981,7 +981,7 @@ void form_control_set_selection(RadiantState* state, View* view,
     }
 }
 
-int form_control_get_selected_index(RadiantState* state, View* view) {
+int form_control_get_selected_index(DocState* state, View* view) {
     (void)state;
     if (!view || !view->is_block()) return -1;
 
@@ -991,7 +991,7 @@ int form_control_get_selected_index(RadiantState* state, View* view) {
     return block->form->selected_index;
 }
 
-void form_control_set_selected_index(RadiantState* state, View* view, int index) {
+void form_control_set_selected_index(DocState* state, View* view, int index) {
     if (!view || !view->is_block()) return;
 
     ViewBlock* block = (ViewBlock*)view;
@@ -1012,7 +1012,7 @@ void form_control_set_selected_index(RadiantState* state, View* view, int index)
     }
 }
 
-float form_control_get_range_value(RadiantState* state, View* view) {
+float form_control_get_range_value(DocState* state, View* view) {
     (void)state;
     if (!view || !view->is_block()) return 0.5f;
 
@@ -1022,7 +1022,7 @@ float form_control_get_range_value(RadiantState* state, View* view) {
     return block->form->range_value;
 }
 
-void form_control_set_range_value(RadiantState* state, View* view, float value) {
+void form_control_set_range_value(DocState* state, View* view, float value) {
     if (!view || !view->is_block()) return;
 
     ViewBlock* block = (ViewBlock*)view;
@@ -1047,7 +1047,7 @@ void form_control_set_range_value(RadiantState* state, View* view, float value) 
 // Phase 4A: Constraint Attributes (disabled, readonly, required)
 // ============================================================================
 
-bool form_control_is_disabled(RadiantState* state, View* view) {
+bool form_control_is_disabled(DocState* state, View* view) {
     (void)state;
     if (!view || !view->is_block()) return false;
 
@@ -1057,7 +1057,7 @@ bool form_control_is_disabled(RadiantState* state, View* view) {
     return block->form->disabled != 0;
 }
 
-void form_control_set_disabled(RadiantState* state, View* view, bool disabled) {
+void form_control_set_disabled(DocState* state, View* view, bool disabled) {
     if (!view || !view->is_block()) return;
 
     ViewBlock* block = (ViewBlock*)view;
@@ -1073,7 +1073,7 @@ void form_control_set_disabled(RadiantState* state, View* view, bool disabled) {
     }
 }
 
-bool form_control_is_readonly(RadiantState* state, View* view) {
+bool form_control_is_readonly(DocState* state, View* view) {
     (void)state;
     if (!view || !view->is_block()) return false;
 
@@ -1083,7 +1083,7 @@ bool form_control_is_readonly(RadiantState* state, View* view) {
     return block->form->readonly != 0;
 }
 
-void form_control_set_readonly(RadiantState* state, View* view, bool readonly) {
+void form_control_set_readonly(DocState* state, View* view, bool readonly) {
     if (!view || !view->is_block()) return;
 
     ViewBlock* block = (ViewBlock*)view;
@@ -1099,7 +1099,7 @@ void form_control_set_readonly(RadiantState* state, View* view, bool readonly) {
     }
 }
 
-bool form_control_is_required(RadiantState* state, View* view) {
+bool form_control_is_required(DocState* state, View* view) {
     (void)state;
     if (!view || !view->is_block()) return false;
 
@@ -1109,7 +1109,7 @@ bool form_control_is_required(RadiantState* state, View* view) {
     return block->form->required != 0;
 }
 
-void form_control_set_required(RadiantState* state, View* view, bool required) {
+void form_control_set_required(DocState* state, View* view, bool required) {
     if (!view || !view->is_block()) return;
 
     ViewBlock* block = (ViewBlock*)view;
@@ -1129,7 +1129,7 @@ void form_control_set_required(RadiantState* state, View* view, bool required) {
 // Phase 4B: Dropdown State Machine (open, close, hover tracking)
 // ============================================================================
 
-bool form_control_is_dropdown_open(RadiantState* state, View* view) {
+bool form_control_is_dropdown_open(DocState* state, View* view) {
     (void)state;
     if (!view || !view->is_block()) return false;
 
@@ -1139,7 +1139,7 @@ bool form_control_is_dropdown_open(RadiantState* state, View* view) {
     return block->form->dropdown_open != 0;
 }
 
-void form_control_open_dropdown(RadiantState* state, View* view) {
+void form_control_open_dropdown(DocState* state, View* view) {
     if (!view || !view->is_block()) return;
 
     ViewBlock* block = (ViewBlock*)view;
@@ -1156,7 +1156,7 @@ void form_control_open_dropdown(RadiantState* state, View* view) {
     }
 }
 
-void form_control_close_dropdown(RadiantState* state, View* view) {
+void form_control_close_dropdown(DocState* state, View* view) {
     if (!view || !view->is_block()) return;
 
     ViewBlock* block = (ViewBlock*)view;
@@ -1173,7 +1173,7 @@ void form_control_close_dropdown(RadiantState* state, View* view) {
     }
 }
 
-void form_control_set_hover_index(RadiantState* state, View* view, int index) {
+void form_control_set_hover_index(DocState* state, View* view, int index) {
     if (!view || !view->is_block()) return;
 
     ViewBlock* block = (ViewBlock*)view;
@@ -1194,7 +1194,7 @@ void form_control_set_hover_index(RadiantState* state, View* view, int index) {
     }
 }
 
-int form_control_get_hover_index(RadiantState* state, View* view) {
+int form_control_get_hover_index(DocState* state, View* view) {
     (void)state;
     if (!view || !view->is_block()) return -1;
 
@@ -1204,7 +1204,7 @@ int form_control_get_hover_index(RadiantState* state, View* view) {
     return block->form->hover_index;
 }
 
-void state_remove(RadiantState* state, void* node, const char* name) {
+void state_remove(DocState* state, void* node, const char* name) {
     if (!state || !node || !name) return;
 
     const char* interned = intern_state_name(name);
@@ -1230,7 +1230,7 @@ void state_remove(RadiantState* state, void* node, const char* name) {
 // Immutable Mode Operations
 // ============================================================================
 
-RadiantState* state_set_immutable(RadiantState* state, void* node, const char* name, Item value) {
+DocState* state_set_immutable(DocState* state, void* node, const char* name, Item value) {
     if (!state || state->mode != STATE_MODE_IMMUTABLE) {
         // Fallback to in-place
         state_set(state, node, name, value);
@@ -1238,7 +1238,7 @@ RadiantState* state_set_immutable(RadiantState* state, void* node, const char* n
     }
 
     // Create new state version with shallow copy
-    RadiantState* new_state = (RadiantState*)arena_alloc(state->arena, sizeof(RadiantState));
+    DocState* new_state = (DocState*)arena_alloc(state->arena, sizeof(DocState));
     if (!new_state) {
         log_error("state_set_immutable: failed to allocate new state");
         return state;
@@ -1283,14 +1283,14 @@ RadiantState* state_set_immutable(RadiantState* state, void* node, const char* n
     return new_state;
 }
 
-RadiantState* state_remove_immutable(RadiantState* state, void* node, const char* name) {
+DocState* state_remove_immutable(DocState* state, void* node, const char* name) {
     if (!state || state->mode != STATE_MODE_IMMUTABLE) {
         state_remove(state, node, name);
         return state;
     }
 
     // Similar to set_immutable but deletes instead
-    RadiantState* new_state = (RadiantState*)arena_alloc(state->arena, sizeof(RadiantState));
+    DocState* new_state = (DocState*)arena_alloc(state->arena, sizeof(DocState));
     if (!new_state) {
         log_error("state_remove_immutable: failed to allocate new state");
         return state;
@@ -1331,7 +1331,7 @@ RadiantState* state_remove_immutable(RadiantState* state, void* node, const char
 // Callback Registration
 // ============================================================================
 
-void state_on_change(RadiantState* state, void* node, const char* name,
+void state_on_change(DocState* state, void* node, const char* name,
     StateChangeCallback callback, void* udata) {
     if (!state || !node || !name) return;
 
@@ -1362,12 +1362,12 @@ void state_on_change(RadiantState* state, void* node, const char* name,
 // Batch Operations
 // ============================================================================
 
-void state_begin_batch(RadiantState* state) {
+void state_begin_batch(DocState* state) {
     (void)state;
     s_in_batch = true;
 }
 
-static void state_sync_selection_before_assert(RadiantState* state) {
+static void state_sync_selection_before_assert(DocState* state) {
     if (!state) return;
     if (state->selection && !state->selection->is_collapsed) {
         dom_selection_sync_from_legacy_selection(state);
@@ -1378,7 +1378,7 @@ static void state_sync_selection_before_assert(RadiantState* state) {
     }
 }
 
-static void state_sync_dirty_flags_before_assert(RadiantState* state) {
+static void state_sync_dirty_flags_before_assert(DocState* state) {
     if (!state) return;
 
     // Dirty tracking is authoritative for pending visual work. Keep flags
@@ -1392,7 +1392,7 @@ static void state_sync_dirty_flags_before_assert(RadiantState* state) {
     }
 }
 
-void state_end_batch(RadiantState* state) {
+void state_end_batch(DocState* state) {
     state_sync_selection_before_assert(state);
     state_sync_dirty_flags_before_assert(state);
     s_in_batch = false;
@@ -1454,7 +1454,7 @@ void dirty_mark_rect(DirtyTracker* tracker, float x, float y, float width, float
     tracker->dirty_list = new_dr;
 }
 
-void dirty_mark_element(RadiantState* state, void* view_ptr) {
+void dirty_mark_element(DocState* state, void* view_ptr) {
     if (!state || !view_ptr) return;
 
     View* view = (View*)view_ptr;
@@ -1493,7 +1493,7 @@ bool dirty_has_regions(DirtyTracker* tracker) {
 // Reflow Scheduling
 // ============================================================================
 
-void reflow_schedule(RadiantState* state, void* node, ReflowScope scope, uint32_t reason) {
+void reflow_schedule(DocState* state, void* node, ReflowScope scope, uint32_t reason) {
     if (!state || !node) return;
 
     ReflowScheduler* scheduler = &state->reflow_scheduler;
@@ -1579,7 +1579,7 @@ static void mark_for_style_recompute(View* view, ReflowScope scope) {
     }
 }
 
-void reflow_process_pending(RadiantState* state) {
+void reflow_process_pending(DocState* state) {
     if (!state) return;
 
     ReflowScheduler* scheduler = &state->reflow_scheduler;
@@ -1616,7 +1616,7 @@ void reflow_process_pending(RadiantState* state) {
     state->needs_reflow = (max_scope > REFLOW_NONE);
 }
 
-void reflow_clear(RadiantState* state) {
+void reflow_clear(DocState* state) {
     if (!state) return;
 
     ReflowScheduler* scheduler = &state->reflow_scheduler;
@@ -1694,7 +1694,7 @@ bool visited_links_check(VisitedLinks* visited, const char* url) {
 // Caret API
 // ============================================================================
 
-void caret_set(RadiantState* state, View* view, int char_offset) {
+void caret_set(DocState* state, View* view, int char_offset) {
     log_info("CARET_SET called: state=%p view=%p offset=%d", state, view, char_offset);
     if (!state) return;
 
@@ -1760,7 +1760,7 @@ void caret_set(RadiantState* state, View* view, int char_offset) {
     log_debug("caret_set: view=%p, offset=%d", view, char_offset);
 }
 
-void caret_set_position(RadiantState* state, View* view, int line, int column) {
+void caret_set_position(DocState* state, View* view, int line, int column) {
     if (!state) return;
 
     if (!sync_ensure_selection(state) || !state->caret) return;
@@ -2105,7 +2105,7 @@ static int skip_collapsed_whitespace_backward(unsigned char* str, int prev_offse
     return new_offset;
 }
 
-void caret_move(RadiantState* state, int delta) {
+void caret_move(DocState* state, int delta) {
     if (!state || !state->caret || !state->caret->view) {
         log_debug("caret_move: early return - state=%p, caret=%p, view=%p",
             state, state ? state->caret : nullptr,
@@ -2297,7 +2297,7 @@ void caret_move(RadiantState* state, int delta) {
         delta, caret->view, caret->char_offset);
 }
 
-void caret_move_to(RadiantState* state, int where) {
+void caret_move_to(DocState* state, int where) {
     if (!state || !state->caret || !state->caret->view) return;
 
     CaretState* caret = state->caret;
@@ -2792,7 +2792,7 @@ done_down: ;
     return best_view;
 }
 
-void caret_move_line(RadiantState* state, int delta, struct UiContext* uicon) {
+void caret_move_line(DocState* state, int delta, struct UiContext* uicon) {
     if (!state || !state->caret || !state->caret->view) return;
 
     CaretState* caret = state->caret;
@@ -2836,7 +2836,7 @@ void caret_move_line(RadiantState* state, int delta, struct UiContext* uicon) {
     state->needs_repaint = true;
 }
 
-void caret_clear(RadiantState* state) {
+void caret_clear(DocState* state) {
     if (!state) return;
 
     DomSelection* selection = state->dom_selection;
@@ -2868,7 +2868,7 @@ static void projection_chain_offset(View* view, float* out_x, float* out_y) {
     if (out_y) *out_y = chain_y;
 }
 
-void caret_project_visual(RadiantState* state, float x, float y, float height) {
+void caret_project_visual(DocState* state, float x, float y, float height) {
     if (!state || !state->caret) return;
     state->caret->x = x;
     state->caret->y = y;
@@ -2876,7 +2876,7 @@ void caret_project_visual(RadiantState* state, float x, float y, float height) {
     state->needs_repaint = true;
 }
 
-void caret_project_visual_from_block(RadiantState* state, View* view,
+void caret_project_visual_from_block(DocState* state, View* view,
                                      float x, float y, float height,
                                      float block_x, float block_y) {
     if (!state || !state->caret) return;
@@ -2888,7 +2888,7 @@ void caret_project_visual_from_block(RadiantState* state, View* view,
     state->caret->iframe_offset_y = block_y - chain_y;
 }
 
-void caret_project_visual_from_selection(RadiantState* state, float x, float y, float height) {
+void caret_project_visual_from_selection(DocState* state, float x, float y, float height) {
     if (!state || !state->caret) return;
     caret_project_visual(state, x, y, height);
     if (state->selection) {
@@ -2897,7 +2897,7 @@ void caret_project_visual_from_selection(RadiantState* state, float x, float y, 
     }
 }
 
-void selection_project_anchor_visual_from_caret(RadiantState* state, float x, float y, float height) {
+void selection_project_anchor_visual_from_caret(DocState* state, float x, float y, float height) {
     if (!state || !state->selection) return;
     state->selection->start_x = x;
     state->selection->start_y = y;
@@ -2911,7 +2911,7 @@ void selection_project_anchor_visual_from_caret(RadiantState* state, float x, fl
     state->needs_repaint = true;
 }
 
-void selection_project_focus_visual(RadiantState* state, float x, float y, float height) {
+void selection_project_focus_visual(DocState* state, float x, float y, float height) {
     if (!state || !state->selection) return;
     state->selection->end_x = x;
     state->selection->end_y = y + height;
@@ -2919,33 +2919,33 @@ void selection_project_focus_visual(RadiantState* state, float x, float y, float
     state->needs_repaint = true;
 }
 
-void selection_finish_active_gesture(RadiantState* state) {
+void selection_finish_active_gesture(DocState* state) {
     if (!state || !state->selection) return;
     state->selection->is_selecting = false;
 }
 
-void selection_press_in_range_begin(RadiantState* state, View* view, int offset) {
+void selection_press_in_range_begin(DocState* state, View* view, int offset) {
     if (!state) return;
     state->text_selection_press_in_range = true;
     state->text_selection_press_view = view;
     state->text_selection_press_offset = offset;
 }
 
-void selection_press_in_range_clear(RadiantState* state) {
+void selection_press_in_range_clear(DocState* state) {
     if (!state) return;
     state->text_selection_press_in_range = false;
     state->text_selection_press_view = NULL;
     state->text_selection_press_offset = 0;
 }
 
-bool selection_press_in_range_pending(RadiantState* state, View** out_view, int* out_offset) {
+bool selection_press_in_range_pending(DocState* state, View** out_view, int* out_offset) {
     if (!state || !state->text_selection_press_in_range) return false;
     if (out_view) *out_view = state->text_selection_press_view;
     if (out_offset) *out_offset = state->text_selection_press_offset;
     return true;
 }
 
-bool caret_prepare_selective_repaint(RadiantState* state) {
+bool caret_prepare_selective_repaint(DocState* state) {
     if (!state || state->needs_reflow || state->dirty_tracker.full_repaint ||
         dirty_has_regions(&state->dirty_tracker) || !state->caret || !state->caret->view) {
         return false;
@@ -2964,7 +2964,7 @@ bool caret_prepare_selective_repaint(RadiantState* state) {
     return true;
 }
 
-bool caret_get_position(RadiantState* state, View** out_view, int* out_offset) {
+bool caret_get_position(DocState* state, View** out_view, int* out_offset) {
     if (out_view) *out_view = NULL;
     if (out_offset) *out_offset = 0;
     if (!state || !state->caret || !state->caret->view) return false;
@@ -2973,19 +2973,19 @@ bool caret_get_position(RadiantState* state, View** out_view, int* out_offset) {
     return true;
 }
 
-bool caret_get_offset(RadiantState* state, int* out_offset) {
+bool caret_get_offset(DocState* state, int* out_offset) {
     if (out_offset) *out_offset = 0;
     if (!state || !state->caret) return false;
     if (out_offset) *out_offset = state->caret->char_offset;
     return true;
 }
 
-View* caret_get_view(RadiantState* state) {
+View* caret_get_view(DocState* state) {
     if (!state || !state->caret) return NULL;
     return state->caret->view;
 }
 
-bool caret_get_visual_snapshot(RadiantState* state, float* out_x, float* out_y,
+bool caret_get_visual_snapshot(DocState* state, float* out_x, float* out_y,
                                float* out_height, float* out_iframe_offset_x,
                                float* out_iframe_offset_y) {
     if (out_x) *out_x = 0;
@@ -3002,7 +3002,7 @@ bool caret_get_visual_snapshot(RadiantState* state, float* out_x, float* out_y,
     return true;
 }
 
-bool caret_get_render_snapshot(RadiantState* state, View** out_view,
+bool caret_get_render_snapshot(DocState* state, View** out_view,
                                int* out_offset, float* out_x, float* out_y,
                                float* out_height, float* out_iframe_offset_x,
                                float* out_iframe_offset_y, bool* out_visible) {
@@ -3026,7 +3026,7 @@ bool caret_get_render_snapshot(RadiantState* state, View** out_view,
     return state->caret->view != NULL;
 }
 
-bool caret_get_debug_snapshot(RadiantState* state, View** out_view,
+bool caret_get_debug_snapshot(DocState* state, View** out_view,
                               int* out_offset, int* out_line, int* out_column,
                               float* out_x, float* out_y, float* out_height,
                               bool* out_visible) {
@@ -3050,22 +3050,22 @@ bool caret_get_debug_snapshot(RadiantState* state, View** out_view,
     return true;
 }
 
-bool caret_has_projection(RadiantState* state) {
+bool caret_has_projection(DocState* state) {
     return state && state->caret && state->caret->view != NULL;
 }
 
-bool caret_is_visible(RadiantState* state) {
+bool caret_is_visible(DocState* state) {
     return state && state->caret && state->caret->visible;
 }
 
-void caret_project_previous_visual_rect(RadiantState* state, float x, float y, float height) {
+void caret_project_previous_visual_rect(DocState* state, float x, float y, float height) {
     if (!state || !state->caret) return;
     state->caret->prev_abs_x = x;
     state->caret->prev_abs_y = y;
     state->caret->prev_abs_height = height;
 }
 
-void caret_toggle_blink(RadiantState* state) {
+void caret_toggle_blink(DocState* state) {
     if (!state || !state->caret) return;
 
     // Guard invariant: caret visibility is only meaningful when projection
@@ -3089,7 +3089,7 @@ void caret_toggle_blink(RadiantState* state) {
 // Selection API
 // ============================================================================
 
-void selection_start(RadiantState* state, View* view, int char_offset) {
+void selection_start(DocState* state, View* view, int char_offset) {
     if (!state) return;
 
     if (state->transition_depth == 0) {
@@ -3144,7 +3144,7 @@ void selection_start(RadiantState* state, View* view, int char_offset) {
     log_debug("selection_start: view=%p, offset=%d", view, char_offset);
 }
 
-void selection_extend(RadiantState* state, int char_offset) {
+void selection_extend(DocState* state, int char_offset) {
     if (!state) return;
 
     if (state->transition_depth == 0) {
@@ -3200,7 +3200,7 @@ void selection_extend(RadiantState* state, int char_offset) {
     log_debug("selection_extend: focus=%d, collapsed=%d", char_offset, sel->is_collapsed);
 }
 
-void selection_extend_to_view(RadiantState* state, View* view, int char_offset) {
+void selection_extend_to_view(DocState* state, View* view, int char_offset) {
     if (!state) return;
 
     if (state->transition_depth == 0) {
@@ -3257,7 +3257,7 @@ void selection_extend_to_view(RadiantState* state, View* view, int char_offset) 
         view, char_offset, state->selection->anchor_view, state->selection->is_collapsed);
 }
 
-void selection_set(RadiantState* state, View* view, int anchor_offset, int focus_offset) {
+void selection_set(DocState* state, View* view, int anchor_offset, int focus_offset) {
     if (!state) return;
 
     if (state->transition_depth == 0) {
@@ -3312,7 +3312,7 @@ void selection_set(RadiantState* state, View* view, int anchor_offset, int focus
     log_debug("selection_set: anchor=%d, focus=%d", anchor_offset, focus_offset);
 }
 
-void selection_select_all(RadiantState* state) {
+void selection_select_all(DocState* state) {
     if (!state) return;
 
     if (state->transition_depth == 0) {
@@ -3379,7 +3379,7 @@ void selection_select_all(RadiantState* state) {
     log_debug("selection_select_all");
 }
 
-void selection_collapse(RadiantState* state, bool to_start) {
+void selection_collapse(DocState* state, bool to_start) {
     if (!state) return;
 
     if (state->transition_depth == 0) {
@@ -3441,7 +3441,7 @@ void selection_collapse(RadiantState* state, bool to_start) {
     log_debug("selection_collapse: to_start=%d", to_start);
 }
 
-void selection_clear(RadiantState* state) {
+void selection_clear(DocState* state) {
     if (!state) return;
 
     if (state->transition_depth == 0) {
@@ -3500,17 +3500,17 @@ void selection_clear(RadiantState* state) {
     log_debug("selection_clear");
 }
 
-bool selection_has(RadiantState* state) {
+bool selection_has(DocState* state) {
     if (!state || !state->selection) return false;
     return !state->selection->is_collapsed;
 }
 
-bool selection_is_pointer_range_active(RadiantState* state) {
+bool selection_is_pointer_range_active(DocState* state) {
     if (!state || !state->selection) return false;
     return state->selection->is_selecting && !state->selection->is_collapsed;
 }
 
-bool selection_get_pointer_anchor(RadiantState* state, View** out_anchor_view,
+bool selection_get_pointer_anchor(DocState* state, View** out_anchor_view,
                                   int* out_anchor_offset) {
     if (out_anchor_view) *out_anchor_view = NULL;
     if (out_anchor_offset) *out_anchor_offset = 0;
@@ -3520,7 +3520,7 @@ bool selection_get_pointer_anchor(RadiantState* state, View** out_anchor_view,
     return true;
 }
 
-bool selection_get_focus_snapshot(RadiantState* state, View** out_focus_view,
+bool selection_get_focus_snapshot(DocState* state, View** out_focus_view,
                                   int* out_focus_offset,
                                   float* out_iframe_offset_x,
                                   float* out_iframe_offset_y,
@@ -3540,7 +3540,7 @@ bool selection_get_focus_snapshot(RadiantState* state, View** out_focus_view,
     return true;
 }
 
-bool selection_get_focus_visual_snapshot(RadiantState* state, float* out_x,
+bool selection_get_focus_visual_snapshot(DocState* state, float* out_x,
                                          float* out_y, bool* out_collapsed) {
     if (out_x) *out_x = 0;
     if (out_y) *out_y = 0;
@@ -3552,7 +3552,7 @@ bool selection_get_focus_visual_snapshot(RadiantState* state, float* out_x,
     return true;
 }
 
-bool selection_get_iframe_offset(RadiantState* state, float* out_x, float* out_y) {
+bool selection_get_iframe_offset(DocState* state, float* out_x, float* out_y) {
     if (out_x) *out_x = 0;
     if (out_y) *out_y = 0;
     if (!state || !state->selection) return false;
@@ -3561,7 +3561,7 @@ bool selection_get_iframe_offset(RadiantState* state, float* out_x, float* out_y
     return true;
 }
 
-bool selection_get_anchor_range(RadiantState* state, View* anchor_view,
+bool selection_get_anchor_range(DocState* state, View* anchor_view,
                                 int* out_start, int* out_end) {
     if (out_start) *out_start = 0;
     if (out_end) *out_end = 0;
@@ -3573,7 +3573,7 @@ bool selection_get_anchor_range(RadiantState* state, View* anchor_view,
     return true;
 }
 
-bool selection_get_debug_snapshot(RadiantState* state, View** out_view,
+bool selection_get_debug_snapshot(DocState* state, View** out_view,
                                   bool* out_collapsed, bool* out_selecting,
                                   int* out_anchor_offset, int* out_anchor_line,
                                   int* out_focus_offset, int* out_focus_line,
@@ -3607,7 +3607,7 @@ bool selection_get_debug_snapshot(RadiantState* state, View** out_view,
     return true;
 }
 
-bool selection_get_extent_views(RadiantState* state, View** out_anchor_view,
+bool selection_get_extent_views(DocState* state, View** out_anchor_view,
                                 View** out_focus_view) {
     if (out_anchor_view) *out_anchor_view = NULL;
     if (out_focus_view) *out_focus_view = NULL;
@@ -3617,11 +3617,11 @@ bool selection_get_extent_views(RadiantState* state, View** out_anchor_view,
     return state->selection->anchor_view && state->selection->focus_view;
 }
 
-bool selection_has_projection(RadiantState* state) {
+bool selection_has_projection(DocState* state) {
     return state && state->selection != NULL;
 }
 
-void selection_get_range(RadiantState* state, int* start, int* end) {
+void selection_get_range(DocState* state, int* start, int* end) {
     if (!state || !state->selection || !start || !end) return;
 
     SelectionState* sel = state->selection;
@@ -3638,7 +3638,7 @@ void selection_get_range(RadiantState* state, int* start, int* end) {
 // Focus API
 // ============================================================================
 
-static void focus_set_pseudo(RadiantState* state, View* view,
+static void focus_set_pseudo(DocState* state, View* view,
                              const char* state_name, uint32_t pseudo_state,
                              bool set) {
     if (!state || !view || !state_name) return;
@@ -3654,7 +3654,7 @@ static void focus_set_pseudo(RadiantState* state, View* view,
     }
 }
 
-static void focus_set_within_chain(RadiantState* state, View* view, bool set) {
+static void focus_set_within_chain(DocState* state, View* view, bool set) {
     View* node = view;
     while (node) {
         focus_set_pseudo(state, node, STATE_FOCUS_WITHIN,
@@ -3667,7 +3667,7 @@ static void focus_write_optional_ref(JsonWriter* w, const char* key, View* view)
     event_state_log_write_node_ref(w, key, (const DomNode*)view);
 }
 
-static void focus_log_transition(RadiantState* state, const char* transition,
+static void focus_log_transition(DocState* state, const char* transition,
                                  View* from, View* to,
                                  bool from_keyboard, bool focus_visible) {
     if (!state || !event_state_log_enabled(state->active_event_log)) return;
@@ -3689,7 +3689,7 @@ static void focus_log_transition(RadiantState* state, const char* transition,
     event_state_log_finish_record(state->active_event_log, &w);
 }
 
-static void focus_sync_text_control_state(RadiantState* state, View* view) {
+static void focus_sync_text_control_state(DocState* state, View* view) {
     if (!state) return;
 
     if (view && view->is_element() && tc_is_text_control((DomElement*)view)) {
@@ -3719,7 +3719,7 @@ static void focus_sync_text_control_state(RadiantState* state, View* view) {
     if (state->selection && state->selection->anchor_view) selection_clear(state);
 }
 
-void focus_set(RadiantState* state, View* view, bool from_keyboard) {
+void focus_set(DocState* state, View* view, bool from_keyboard) {
     if (!state) return;
 
     if (state->transition_depth == 0) {
@@ -3782,7 +3782,7 @@ void focus_set(RadiantState* state, View* view, bool from_keyboard) {
     log_debug("focus_set: view=%p, from_keyboard=%d", view, from_keyboard);
 }
 
-void focus_clear(RadiantState* state) {
+void focus_clear(DocState* state) {
     if (!state || !state->focus) return;
 
     if (state->transition_depth == 0) {
@@ -3839,7 +3839,7 @@ static void collect_focusable(View* view, ArrayList* list) {
     }
 }
 
-bool focus_move(RadiantState* state, View* root, bool forward) {
+bool focus_move(DocState* state, View* root, bool forward) {
     if (!state || !root) return false;
 
     if (state->transition_depth == 0) {
@@ -3893,7 +3893,7 @@ bool focus_move(RadiantState* state, View* root, bool forward) {
     return true;
 }
 
-bool focus_restore(RadiantState* state) {
+bool focus_restore(DocState* state) {
     if (!state || !state->focus || !state->focus->previous) return false;
 
     View* prev = state->focus->previous;
@@ -3903,21 +3903,21 @@ bool focus_restore(RadiantState* state) {
     return true;
 }
 
-View* focus_get(RadiantState* state) {
+View* focus_get(DocState* state) {
     if (!state || !state->focus) return NULL;
     return state->focus->current;
 }
 
-bool focus_has_current(RadiantState* state) {
+bool focus_has_current(DocState* state) {
     return focus_get(state) != NULL;
 }
 
-View* focus_get_visible(RadiantState* state) {
+View* focus_get_visible(DocState* state) {
     if (!state || !state->focus || !state->focus->focus_visible) return NULL;
     return state->focus->current;
 }
 
-bool focus_within(RadiantState* state, View* view) {
+bool focus_within(DocState* state, View* view) {
     if (!state || !state->focus || !view) return false;
 
     View* focused = state->focus->current;
@@ -4256,7 +4256,7 @@ char* extract_html_from_view(View* view, Arena* arena) {
     return result;
 }
 
-char* extract_selected_text(RadiantState* state, Arena* arena) {
+char* extract_selected_text(DocState* state, Arena* arena) {
     if (!state || !state->selection || state->selection->is_collapsed || !arena) {
         return NULL;
     }
@@ -4293,7 +4293,7 @@ char* extract_selected_text(RadiantState* state, Arena* arena) {
     return result;
 }
 
-char* extract_selected_html(RadiantState* state, Arena* arena) {
+char* extract_selected_html(DocState* state, Arena* arena) {
     if (!state || !state->selection || state->selection->is_collapsed || !arena) {
         return NULL;
     }

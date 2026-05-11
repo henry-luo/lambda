@@ -65,15 +65,15 @@ typedef struct SelectionTransitionArgs {
     int focus_offset;
 } SelectionTransitionArgs;
 
-bool focus_transition(RadiantState* state,
+bool focus_transition(DocState* state,
                       FocusTransitionKind kind,
                       FocusTransitionArgs* args);
 
-bool caret_transition(RadiantState* state,
+bool caret_transition(DocState* state,
                       CaretTransitionKind kind,
                       CaretTransitionArgs* args);
 
-bool selection_transition(RadiantState* state,
+bool selection_transition(DocState* state,
                           SelectionTransitionKind kind,
                           SelectionTransitionArgs* args);
 
@@ -81,30 +81,30 @@ bool selection_transition(RadiantState* state,
  * input, webdriver, event_sim, navigation, timer, script, internal, layout.
  * Returns 0 when logging is disabled; callers may still call end safely.
  */
-uint64_t state_begin_event_cascade(RadiantState* state,
+uint64_t state_begin_event_cascade(DocState* state,
                                    EventStateLog* log,
                                    const char* cause);
 
 /* Settle state, validate interaction invariants, emit state.validated or
  * state.invalid plus a compact state.snapshot.
  */
-bool radiant_state_settle(RadiantState* state,
+bool radiant_state_settle(DocState* state,
                           EventStateLog* log,
                           uint64_t cascade_id);
 
 /* End one event cascade. Calls radiant_state_settle() before emitting
  * cascade.end, making the boundary the single consistency checkpoint.
  */
-void state_end_event_cascade(RadiantState* state,
+void state_end_event_cascade(DocState* state,
                              EventStateLog* log,
                              uint64_t cascade_id);
 
 /* Validate interaction invariants without emitting log records. */
-bool radiant_state_validate_interaction(RadiantState* state,
+bool radiant_state_validate_interaction(DocState* state,
                                         StateValidationReport* report);
 
 /* Debug-only invariant assertion. Compiles to a no-op under NDEBUG. */
-void radiant_state_assert_valid(RadiantState* state, const char* context);
+void radiant_state_assert_valid(DocState* state, const char* context);
 
 #ifdef __cplusplus
 } /* extern "C" */

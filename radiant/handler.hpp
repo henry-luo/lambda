@@ -4,7 +4,7 @@
 // Forward declaration
 struct ViewText;
 struct TextRect;
-struct RadiantState;
+struct DocState;
 
 typedef struct EventContext {
     RdtEvent event;
@@ -83,4 +83,4 @@ float text_glyph_x_for_byte_offset(UiContext* uicon, ViewText* text,
  * Update caret visual position after movement operations
  * Must be called after caret_move, caret_move_line, caret_move_to
  */
-void update_caret_visual_position(UiContext* uicon, RadiantState* state);
+void update_caret_visual_position(UiContext* uicon, DocState* state);

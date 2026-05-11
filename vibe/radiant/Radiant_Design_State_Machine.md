@@ -10,6 +10,14 @@
 
 Centralized writer APIs and state ownership are now landing in code. Phases 1, 2, 2b, and 3 are complete.
 
+New large-scope architecture work is captured in [Radiant_Design_State_Machine2.md](./Radiant_Design_State_Machine2.md):
+
+- rename `DocState` as the canonical document state type (no legacy type name);
+- add lazily-populated per-view `ViewState` using a tagged union for state families;
+- evolve `StateStore` into a per-document arena/pool-backed owner of `DocState` + all `ViewState`;
+- enforce strict no-direct-field-mutation through standardized writer APIs from day one;
+- keep event-log schema consistent between doc-level and view-level transitions (only anchor/node id differs).
+
 **Phase 1: Checkbox/Radio Checked State (COMPLETE)**
 
 - Added APIs: `form_control_get_checked()`, `form_control_set_checked()`
@@ -52,7 +60,10 @@ Centralized writer APIs and state ownership are now landing in code. Phases 1, 2
 - Range value: MUST use `form_control_set_range_value()`
 - Local structures may keep fast-read pointers, but direct local field mutation is forbidden.
 
-### Next Steps (Phase 4 if needed)
+### Next Steps
+
+- Phase 4 remains implementation completion work for centralized writers in existing modules.
+- Phase 5 (new architecture phase) is defined in [Radiant_Design_State_Machine2.md](./Radiant_Design_State_Machine2.md).
 
 **Source proposals**:
 - [Radiant_State_Machine_GPT.md](../idea/Radiant_State_Machine_GPT.md) — primary design.
@@ -62,7 +73,7 @@ Centralized writer APIs and state ownership are now landing in code. Phases 1, 2
 
 ## Goal
 
-Radiant already has a central `RadiantState` / `StateStore` in [radiant/state_store.hpp](../../radiant/state_store.hpp), plus event simulation and WebDriver-oriented automation paths. This design tightens that architecture so all interactive state is owned by the StateStore and mutated through explicit transition APIs.
+Radiant already has a central `DocState` / `StateStore` in [radiant/state_store.hpp](../../radiant/state_store.hpp), plus event simulation and WebDriver-oriented automation paths. This design tightens that architecture so all interactive state is owned by the StateStore and mutated through explicit transition APIs.
 
 The intended result:
 
@@ -95,7 +106,7 @@ raw platform input / event_sim / WebDriver
    transition layer (radiant/state_machine.cpp) ──► JSON event/state log
                 |
                 v
-          RadiantState (StateStore)
+          DocState (StateStore)
                 |
                 v
          layout / render observe state
@@ -109,11 +120,11 @@ typedef enum FocusTransitionKind { ... } FocusTransitionKind;
 typedef enum SelectionTransitionKind { ... } SelectionTransitionKind;
 typedef enum CaretTransitionKind { ... } CaretTransitionKind;
 
-bool focus_transition(RadiantState* state, FocusTransitionKind kind, FocusTransitionArgs* args);
-bool selection_transition(RadiantState* state, SelectionTransitionKind kind, SelectionTransitionArgs* args);
-bool caret_transition(RadiantState* state, CaretTransitionKind kind, CaretTransitionArgs* args);
+bool focus_transition(DocState* state, FocusTransitionKind kind, FocusTransitionArgs* args);
+bool selection_transition(DocState* state, SelectionTransitionKind kind, SelectionTransitionArgs* args);
+bool caret_transition(DocState* state, CaretTransitionKind kind, CaretTransitionArgs* args);
 
-bool radiant_state_validate_interaction(RadiantState* state, StateValidationReport* report);
+bool radiant_state_validate_interaction(DocState* state, StateValidationReport* report);
 ```
 
 The existing `focus_set`, `focus_clear`, `caret_set`, `selection_start`, `selection_extend`, and text-control APIs become wrappers around this layer during migration. Call sites do not need to be rewritten all at once.
@@ -144,7 +155,7 @@ form_control.cpp → form_set_value / form_set_checked / ...
 
 ### Document-level state
 
-Stored once per `RadiantState`:
+Stored once per `DocState`:
 
 - document lifecycle: current document id, current URL, load state, active/inactive/unloading;
 - navigation: history entries, current history index, scroll restoration per history entry;
@@ -305,7 +316,7 @@ Radio groups are a good example of why this matters: checking one radio button i
 
 ## Navigation, URL, and Visited State
 
-Add a `NavigationState` owned by `RadiantState`:
+Add a `NavigationState` owned by `DocState`:
 
 ```cpp
 typedef struct NavigationEntry {
@@ -668,7 +679,7 @@ In debug builds, failed validation logs `state.invalid` to JSON and `log_error()
 
 ### Phase 6: IME and form state migration
 
-- Move active IME composition to `RadiantState.ime`; platform shims call only IME transitions.
+- Move active IME composition to `DocState.ime`; platform shims call only IME transitions.
 - Move user-mutable form values into StateStore entries.
 - Keep static/control metadata in `FormControlProp`.
 - Implement radio group, checkbox, select, text input, textarea, and range transitions.
@@ -689,11 +700,11 @@ Each phase is independently shippable and gated by `make test-radiant-baseline` 
 - Should replay logs redact text input by default? Recommended: yes for normal logs, no for explicit `--event-log-include-text` test runs.
 - Should layout/render stats use the same categories as future profiler traces, so one log can later convert to Perfetto/Chrome trace format?
 - Hierarchical states (statecharts) or flat FSMs? Current sketch is flat; revisit if "hover during selecting" or "ime-composing during selection" combinations grow.
-- Per-iframe vs. per-document state: for now one `RadiantState` per top-level browsing session, with the `doc` field on log records distinguishing frames, and one log file per document.
+- Per-iframe vs. per-document state: for now one `DocState` per top-level browsing session, with the `doc` field on log records distinguishing frames, and one log file per document.
 
 ## Recommended Decisions
 
-1. Use `RadiantState` as the central StateStore; do not introduce a separate global interactive-state owner.
+1. Use `DocState` as the central StateStore; do not introduce a separate global interactive-state owner.
 2. Make `DomSelection` canonical; keep `CaretState` and `SelectionState` as compatibility/render projections.
 3. Add state-machine transition wrappers first, then migrate call sites incrementally.
 4. Use JSON Lines under `./temp/events_${pid}_${doc_name}.jsonl`, one file per document, with `session_start` carrying the URL.

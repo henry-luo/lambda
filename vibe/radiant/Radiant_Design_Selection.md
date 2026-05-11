@@ -26,12 +26,12 @@ The original plan (§3.3 / §4.1) called for **deleting**
 container. **What actually shipped is bidirectional sync** between the
 two, not unification:
 
-- `RadiantState` keeps `caret`, `selection`, AND `dom_selection`. The
+- `DocState` keeps `caret`, `selection`, AND `dom_selection`. The
   legacy structs cache precise visual coordinates (caret X/Y/height
   computed glyph-precisely by `event.cpp::calculate_position_from_char_offset`);
   `DomSelection` holds the spec-canonical anchor/focus.
 - A re-entry-guarded sync (counter `dom_selection_sync_depth` on
-  `RadiantState`) propagates changes both ways:
+  `DocState`) propagates changes both ways:
   - **legacy → DOM**: `dom_selection_sync_from_legacy_selection()` and
     `_from_legacy_caret()` run at the end of `caret_set` /
     `selection_start` / `selection_extend` / `selection_extend_to_view`.
@@ -145,7 +145,7 @@ The proposal is layered:
    selection primitive.
 2. **Unify** today's `CaretState` and `SelectionState` with new `DomRange` and
    `DomSelection` types. There is one `DomSelection` per document, stored
-   directly on the per-document `RadiantState` (the existing StateStore),
+   directly on the per-document `DocState` (the existing StateStore),
    replacing the separate `caret`/`selection` pointers.
 3. The cached layout data (`View*`, byte offset, x/y, line/column, blink
    timer) moves *into* `DomRange` / `DomSelection` as resolver-managed
@@ -158,7 +158,7 @@ The proposal is layered:
 5. Wire DOM mutations (text edit, node insert/remove) so live ranges and the
    selection update in spec-conformant ways.
 
-`RadiantState` remains **the** centralized container for all view state in a
+`DocState` remains **the** centralized container for all view state in a
 document: hover/focus/active targets, dirty tracking, reflow scheduler,
 animations — and now the selection. Existing visual rendering and
 mouse/keyboard handling keeps working unchanged, while scripts (and the WPT
@@ -251,7 +251,7 @@ remaining 49 all fail at the first `getSelection is not a function` /
 
 ### 1.6 Reactive plumbing
 
-Selection lives inside `RadiantState`, already integrated with
+Selection lives inside `DocState`, already integrated with
 `reflow_schedule()`, dirty rect tracking, focus management, and the keyboard
 event path. The `state->is_dirty` / `needs_reflow` / `needs_repaint` flags
 will be reused by the DOM-side selection updates described below.
@@ -333,7 +333,7 @@ sort step in `Selection.collapse`/`extend`.
 
 ```cpp
 typedef struct DomRange {
-    RadiantState* state;            // owning state store (per document)
+    DocState* state;            // owning state store (per document)
     DomBoundary   start;
     DomBoundary   end;              // start <= end (invariant maintained)
     bool          is_live;          // false for StaticRange
@@ -416,7 +416,7 @@ typedef enum {
 } DomSelectionDirection;
 
 typedef struct DomSelection {
-    RadiantState* state;          // owning state store
+    DocState* state;          // owning state store
     DomRange**    ranges;         // dynamically grown small array (see note)
     uint32_t      range_count;
     uint32_t      range_capacity;
@@ -465,14 +465,14 @@ typedef struct DomSelection {
 | `containsNode(n, partial)` | `dom_selection_contains_node` |
 | `toString()` | `dom_selection_to_string` |
 
-`DomSelection` is owned by the per-document `RadiantState`; created lazily
+`DomSelection` is owned by the per-document `DocState`; created lazily
 on first access.
 
 ---
 
-## 4. Integration with `RadiantState` (StateStore)
+## 4. Integration with `DocState` (StateStore)
 
-`RadiantState` is **the** centralized container for all view state in a DOM
+`DocState` is **the** centralized container for all view state in a DOM
 document. The selection and live ranges live there directly — *not* on
 `DomDocument` — keeping `DomDocument` as a pure data-model object and
 concentrating all interactive/runtime state in one place.
@@ -481,7 +481,7 @@ concentrating all interactive/runtime state in one place.
 
 ```cpp
 // radiant/state_store.hpp
-typedef struct RadiantState {
+typedef struct DocState {
     /* ... existing pool/arena/state_map/dirty/reflow/focus fields ... */
 
     // Legacy interactive state (kept; see Implementation Status note).
@@ -497,7 +497,7 @@ typedef struct RadiantState {
                                              // legacy <-> DOM sync hooks
 
     /* ... cursor, drag_target, animation_scheduler, etc. ... */
-} RadiantState;
+} DocState;
 ```
 
 > **Original plan (not done):** delete `CaretState*` / `SelectionState*`.
@@ -523,9 +523,9 @@ and input handlers do not read these fields directly; they call:
 
 ```cpp
 // radiant/dom_range_resolver.cpp
-void resolve_range_layout(RadiantState* state, DomRange* range);
-void resolve_selection_layout(RadiantState* state, DomSelection* sel);
-void resolve_boundary_layout(RadiantState* state,
+void resolve_range_layout(DocState* state, DomRange* range);
+void resolve_selection_layout(DocState* state, DomSelection* sel);
+void resolve_boundary_layout(DocState* state,
                              const DomBoundary* b,
                              View** out_view, int* out_byte_offset,
                              float* out_x, float* out_y, float* out_h);
@@ -772,7 +772,7 @@ document:
 
 | Model | Anchored on | Owns | Scope |
 |-------|-------------|------|-------|
-| **DOM selection** (§3) | `(DomNode*, utf16-offset)` boundaries | `DomSelection` on `RadiantState` | Whole document tree, stops at the boundary of an `<input>`/`<textarea>` element |
+| **DOM selection** (§3) | `(DomNode*, utf16-offset)` boundaries | `DomSelection` on `DocState` | Whole document tree, stops at the boundary of an `<input>`/`<textarea>` element |
 | **Text-control selection** (this §) | UTF-16 offsets into the control's `value` string | `TextControlSelection` on the form element's per-control state | One text control |
 
 When focus is in a text control, the document selection is **not** the
@@ -835,14 +835,14 @@ struct FormElementState {            // existing
 ```
 
 The selection lives next to the form-element state — *not* on
-`RadiantState->live_ranges`. It is **not** a `DomRange`; it does **not**
+`DocState->live_ranges`. It is **not** a `DomRange`; it does **not**
 participate in `dom_mutation_*` envelopes. (Mutations to the control's
 value go through a dedicated path, §8.5.)
 
 ### 8.3 Authority over the user-visible caret
 
 Today (Phase 6) the visible caret is driven by the legacy
-`CaretState` / `SelectionState` pair on `RadiantState`, kept in sync
+`CaretState` / `SelectionState` pair on `DocState`, kept in sync
 with `DomSelection`. With text controls in the mix the rule becomes:
 
 ```
@@ -870,7 +870,7 @@ if (tc) {
 `text_control_handle_event` runs the same hit-test → `(view, byte)` →
 UTF-16 conversion the document path uses, but the result is written to
 `tc->form->tc_sel`, never to `state->dom_selection`. The legacy→DOM
-sync hook on `RadiantState` is bypassed for this branch.
+sync hook on `DocState` is bypassed for this branch.
 
 ### 8.4 Selection authority and `Selection.toString()` interaction
 
@@ -1020,7 +1020,7 @@ the caret rendering pulls from `tc_sel`; when not, from
 
 ### 8.9 Focus / blur interaction
 
-The current focus tracking on `RadiantState` (`state->focus_target`
+The current focus tracking on `DocState` (`state->focus_target`
 or equivalent) gains one rule applied at every focus transition:
 
 | Transition | DomSelection effect | tc_sel effect |
@@ -1180,7 +1180,7 @@ Exit criteria: `selection-modify-*` WPT tests pass.
 3. ✅ Bidirectional sync instead of unidirectional reroute.
    `legacy_sync_from_dom_selection()` and
    `dom_selection_sync_from_legacy_*()` keep both states in agreement;
-   re-entry counter `dom_selection_sync_depth` on `RadiantState`
+   re-entry counter `dom_selection_sync_depth` on `DocState`
    prevents ping-pong.
 
 Exit criteria met: visual selection in the GUI matches the

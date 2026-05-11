@@ -357,8 +357,8 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
     // F4: compute caret X (logical, before scroll) so we can clamp scroll_x
     // to keep the caret inside the content box. Done up-front so the same
     // scroll offset is applied to text, selection and caret rendering.
-    RadiantState* state = rdcon->ui_context && rdcon->ui_context->document
-        ? (RadiantState*)rdcon->ui_context->document->state : nullptr;
+    DocState* state = rdcon->ui_context && rdcon->ui_context->document
+        ? (DocState*)rdcon->ui_context->document->state : nullptr;
     bool focused_here = state && focus_get(state) == (View*)block;
     float caret_x_logical = 0.0f;
     int caret_byte = 0;
@@ -483,8 +483,8 @@ void render_checkbox(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
     // 3D inset border
     draw_3d_border(rdcon, x, y, size, size, true, 1 * s);
 
-    RadiantState* state = rdcon->ui_context && rdcon->ui_context->document
-        ? (RadiantState*)rdcon->ui_context->document->state : nullptr;
+    DocState* state = rdcon->ui_context && rdcon->ui_context->document
+        ? (DocState*)rdcon->ui_context->document->state : nullptr;
     bool checked = form_control_get_checked(state, (View*)block);
 
     // Checkmark if checked - draw using RdtVector stroked path
@@ -552,8 +552,8 @@ void render_radio(RenderContext* rdcon, ViewBlock* block, FormControlProp* form)
     float bw = 1 * s;
     stroke_circle(rdcon, cx, cy, radius - bw / 2, border_color, bw);
 
-    RadiantState* state = rdcon->ui_context && rdcon->ui_context->document
-        ? (RadiantState*)rdcon->ui_context->document->state : nullptr;
+    DocState* state = rdcon->ui_context && rdcon->ui_context->document
+        ? (DocState*)rdcon->ui_context->document->state : nullptr;
     bool checked = form_control_get_checked(state, (View*)block);
 
     // Inner dot if checked
@@ -645,8 +645,8 @@ void render_button(RenderContext* rdcon, ViewBlock* block, FormControlProp* form
     }
 
     // Focus ring (Tab navigation indicator).
-    RadiantState* state = rdcon->ui_context && rdcon->ui_context->document
-        ? (RadiantState*)rdcon->ui_context->document->state : nullptr;
+    DocState* state = rdcon->ui_context && rdcon->ui_context->document
+        ? (DocState*)rdcon->ui_context->document->state : nullptr;
     if (state && focus_get(state) == (View*)block) {
         float ring = 2.0f * s;
         Color ring_color = make_color(0x1A, 0x73, 0xE8, 0xFF);
@@ -845,7 +845,7 @@ static const char* get_option_text_at_index(ViewBlock* select, int index) {
  * Render a select dropdown popup (when open).
  * Called separately from render_select to ensure it's drawn on top.
  */
-void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, RadiantState* state) {
+void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, DocState* state) {
     if (!select || !select->form || !select->form->dropdown_open) return;
     if (!state) return;
 
@@ -1178,7 +1178,7 @@ void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
     }
 
     // Draw selection highlight if textarea has an active selection
-    RadiantState* state = (RadiantState*)rdcon->ui_context->document->state;
+    DocState* state = (DocState*)rdcon->ui_context->document->state;
     if (state && !is_placeholder) {
         View* focused = focus_get(state);
         int sel_start = 0, sel_end = 0;

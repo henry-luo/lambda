@@ -1372,7 +1372,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             new (block->form) FormControlProp();
             block->form->control_type = FORM_CONTROL_BUTTON;
             if (block->has_attribute("disabled")) {
-                RadiantState* state = (RadiantState*)lycon->doc->state;
+                DocState* state = (DocState*)lycon->doc->state;
                 form_control_set_disabled(state, block, true);
             }
         }
@@ -1430,7 +1430,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
 
             // Parse state attributes - check both attribute and pseudo_state
             // The pseudo_state may have been set during DOM tree building
-            RadiantState* state = (RadiantState*)lycon->doc->state;
+            DocState* state = (DocState*)lycon->doc->state;
             block->form->state_ref = state;
             if (block->has_attribute("disabled") ||
                 (block->pseudo_state & PSEUDO_STATE_DISABLED)) {
@@ -1533,7 +1533,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 float val = (float)str_to_double_default(block->form->value, strlen(block->form->value), 0.0);
                 float normalized = (val - block->form->range_min) /
                     (block->form->range_max - block->form->range_min);
-                RadiantState* state = lycon && lycon->doc ? (RadiantState*)lycon->doc->state : nullptr;
+                DocState* state = lycon && lycon->doc ? (DocState*)lycon->doc->state : nullptr;
                 form_control_set_range_value(state, (View*)block, normalized);
             }
             break;
@@ -1606,7 +1606,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             block->form->control_type = FORM_CONTROL_SELECT;
             block->form->name = block->get_attribute("name");
             if (block->has_attribute("disabled")) {
-                RadiantState* state = (RadiantState*)lycon->doc->state;
+                DocState* state = (DocState*)lycon->doc->state;
                 form_control_set_disabled(state, block, true);
             }
             if (block->has_attribute("multiple")) block->form->multiple = 1;
@@ -1650,7 +1650,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             }
             block->form->option_count = option_count;
             int init_index = (selected_idx >= 0) ? selected_idx : (option_count > 0 ? 0 : -1);
-            RadiantState* state = lycon && lycon->doc ? (RadiantState*)lycon->doc->state : nullptr;
+            DocState* state = lycon && lycon->doc ? (DocState*)lycon->doc->state : nullptr;
             form_control_set_selected_index(state, (View*)block, init_index);
         }
         // Read CSS `appearance` property — affects intrinsic width and UA-rendered chrome.
@@ -1712,7 +1712,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             block->form->control_type = FORM_CONTROL_TEXTAREA;
             block->form->name = block->get_attribute("name");
             block->form->placeholder = block->get_attribute("placeholder");
-            RadiantState* state = (RadiantState*)lycon->doc->state;
+            DocState* state = (DocState*)lycon->doc->state;
             if (block->has_attribute("disabled")) {
                 form_control_set_disabled(state, block, true);
             }

@@ -793,7 +793,7 @@ if (has_textarea_selection(state)) {
 ### 9.5 `delete_textarea_selection` Helper
 
 ```cpp
-void delete_textarea_selection(RadiantState* state, EventContext* evcon) {
+void delete_textarea_selection(DocState* state, EventContext* evcon) {
     int start = min(sel->anchor_offset, sel->focus_offset);
     int end = max(sel->anchor_offset, sel->focus_offset);
     
@@ -896,7 +896,7 @@ Currently, only `"click"` is dispatched to Lambda handlers. Drag-and-drop requir
 #### 10.2.2 Drag State
 
 ```cpp
-// In RadiantState or new DragState:
+// In DocState or new DragState:
 typedef struct DragState {
     View* source_view;          // the view being dragged
     DomElement* source_elem;    // DOM element being dragged
@@ -1015,7 +1015,7 @@ Mitigation strategies:
 ### 10.5 Implementation Results (Phase 26 — Complete)
 
 **Engine changes:**
-- **DragDropState struct** (`radiant/state_store.hpp`): `source_view`, `start_x/y`, `current_x/y`, `active`, `pending`, `drop_target`, `drag_data` fields. Added `drag_drop` field to `RadiantState`.
+- **DragDropState struct** (`radiant/state_store.hpp`): `source_view`, `start_x/y`, `current_x/y`, `active`, `pending`, `drop_target`, `drag_data` fields. Added `drag_drop` field to `DocState`.
 - **Drag event fields** (`radiant/event.cpp` in `build_lambda_event_map`): Added `drag_data`, `drop_target_class`, `drop_target_tag` for drag-related events.
 - **MOUSE_DOWN drag initiation** (`radiant/event.cpp`): Walks up DOM from click target to find element with `draggable="true"` attribute. Allocates DragDropState, records start position, reads `dragdata` attribute.
 - **MOUSE_MOVE drag detection** (`radiant/event.cpp`): 5px movement threshold (25.0f squared distance). Once active, dispatches `"dragstart"` to source. During drag: walks up from hit-test target for `dropzone` attribute, dispatches `"dragover"`/`"dragleave"` on target changes, dispatches `"dragmove"` to source.
@@ -1154,7 +1154,7 @@ Each JSON file:
 | `radiant/render_form.cpp` | 23, 24 | Textarea text rendering with line wrapping; selection highlight rendering (ThorVG shapes) |
 | `radiant/cmd_layout.cpp` | 22, 23 | Autofocus on newly inserted `<input>`; stale focus pointer fix |
 | `radiant/handler.hpp` | 25 | `paste_text` field on EventContext |
-| `radiant/state_store.hpp` | 25, 26 | `DragDropState` struct; `drag_drop` field on RadiantState |
+| `radiant/state_store.hpp` | 25, 26 | `DragDropState` struct; `drag_drop` field on DocState |
 | `radiant/state_store.cpp` | 25 | `clipboard_get_text()` function |
 | `radiant/render.cpp` | 23, 26 | Textarea caret exclusion; drag overlay rendering (drop target highlight + cursor indicator) |
 

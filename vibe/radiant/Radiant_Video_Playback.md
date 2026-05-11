@@ -751,7 +751,7 @@ HTML `src` attributes use paths relative to the document (e.g., `"../media/test_
 | `radiant/display_list.cpp` | Added `dl_video_placeholder()` recording function |
 | `radiant/tile_pool.cpp` | Added `DL_VIDEO_PLACEHOLDER` no-op cases in both tile replay switches |
 | `radiant/view.hpp` | Added `RdtVideo* video` to `EmbedProp` |
-| `radiant/state_store.hpp` | Added `bool has_active_video`, `video_placements[8]` cache, `video_placement_count` to `RadiantState` |
+| `radiant/state_store.hpp` | Added `bool has_active_video`, `video_placements[8]` cache, `video_placement_count` to `DocState` |
 | `radiant/render.cpp` | Added `render_video_content()` for DL placeholder recording; dispatch for video elements; post-composite `render_video_frames()` call |
 | `radiant/resolve_htm_style.cpp` | `HTM_TAG_VIDEO` case: resolve src path, create `RdtVideo`, parse autoplay/loop/muted, set `has_active_video` |
 | `radiant/window.cpp` | `has_active_video` drives continuous redraw; video-only dirty path calls `render_video_frames_cached()` when no layout changes |
@@ -764,7 +764,7 @@ HTML `src` attributes use paths relative to the document (e.g., `"../media/test_
 | `test/media/test_video_audio.mp4` | New — Sintel 564×240 12s H.264+AAC stereo clip (~692KB, CC-BY) |
 | `test/media/test_audio.m4a` | New — audio-only M4A test file (~37KB) |
 | `radiant/intrinsic_sizing.cpp` | Added `rdt_video_get_width/height()` queries for video intrinsic dimensions (replaces 300×150 default) |
-| `radiant/state_store.hpp` | Added `video_placements[8]` cache + `video_placement_count` to `RadiantState` for video-only dirty optimisation |
+| `radiant/state_store.hpp` | Added `video_placements[8]` cache + `video_placement_count` to `DocState` for video-only dirty optimisation |
 
 ### 7.6 Video-Only Dirty Optimisation
 
@@ -772,7 +772,7 @@ After Phase 2, video playback no longer forces a full display list rebuild every
 
 **Mechanism:**
 - `window.cpp` no longer sets `is_dirty = true` for `has_active_video`. Instead, when no layout/CSS/scroll changes occurred, the render loop takes a lightweight cached-blit path.
-- `render_video_frames()` (full path) caches video placement data (destination rect + clip bounds) into `RadiantState::video_placements[]` during the first full render.
+- `render_video_frames()` (full path) caches video placement data (destination rect + clip bounds) into `DocState::video_placements[]` during the first full render.
 - `render_video_frames_cached()` (lightweight path) reuses cached placements to blit new video frames without scanning the display list.
 - `is_video_visible()` performs viewport culling — videos scrolled fully off-screen are skipped (audio continues).
 

@@ -94,7 +94,7 @@ Add **one** chokepoint in `radiant/dom_range.cpp`:
 ```cpp
 // radiant/dom_range.cpp
 static void notify_selection_changed(DomSelection* sel) {
-    RadiantState* st = sel->state;
+    DocState* st = sel->state;
     if (st->dom_selection_sync_depth > 0) return;        // batch with sync
     if (st->selection_mutation_seq == st->selection_event_seq) return;
     st->selection_event_seq = st->selection_mutation_seq;
@@ -422,7 +422,7 @@ verifies it returns a *distinct* selection from the outer
 `window.getSelection()`.
 
 **Design:**
-- Each `DomDocument` already has its own `RadiantState`. Iframe
+- Each `DomDocument` already has its own `DocState`. Iframe
   `srcdoc` parsing was added recently in
   [`lambda/js/js_dom.cpp`](../lambda/js/js_dom.cpp)
   (`js_iframe_get_content_document`). Extend to also expose
@@ -437,7 +437,7 @@ verifies it returns a *distinct* selection from the outer
   ```
 
 - The inner-window's `getSelection()` uses the inner `DomDocument`'s
-  `RadiantState->dom_selection` — an entirely separate instance,
+  `DocState->dom_selection` — an entirely separate instance,
   satisfying the test's distinctness assertion.
 
 ### 4.5 Tests it unlocks
@@ -553,7 +553,7 @@ is currently incomplete:
    ```cpp
    // radiant/dom_range.cpp
    void dom_mutation_pre_remove(DomNode* parent, DomNode* child) {
-       RadiantState* st = node_state(parent);
+       DocState* st = node_state(parent);
        int idx = dom_node_index_of(parent, child);
        // 1. Move every live-range endpoint inside the subtree.
        for (DomRange* r = st->live_ranges; r; r = r->next) {

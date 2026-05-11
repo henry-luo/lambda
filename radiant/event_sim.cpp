@@ -750,7 +750,7 @@ static bool sim_is_checkbox_or_radio(View* view) {
 
 // Direct toggle of checkbox/radio state (bypasses coordinate hit-testing)
 // Used when event simulator clicks a selector-resolved form control.
-static void sim_toggle_checkbox_radio(View* input, RadiantState* state) {
+static void sim_toggle_checkbox_radio(View* input, DocState* state) {
     if (!input || !input->is_element()) return;
     ViewElement* elem = (ViewElement*)input;
     const char* type = elem->get_attribute("type");
@@ -2021,7 +2021,7 @@ static bool assert_target(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) 
 static void force_render_surface(UiContext* uicon) {
     extern void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file);
     if (uicon->document && uicon->document->view_tree) {
-        RadiantState* state = (RadiantState*)uicon->document->state;
+        DocState* state = (DocState*)uicon->document->state;
         if (state) state->is_dirty = true;
         render_html_doc(uicon, uicon->document->view_tree, nullptr);
         if (state) {
@@ -2358,7 +2358,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 bool is_checked_now = dom_element_has_pseudo_state((DomElement*)form_elem, PSEUDO_STATE_CHECKED);
                 if (is_checked_now == was_checked) {
                     // State didn't change — coordinate click missed the element
-                    RadiantState* state = (RadiantState*)uicon->document->state;
+                    DocState* state = (DocState*)uicon->document->state;
                     if (state && !dom_element_has_pseudo_state((DomElement*)form_elem, PSEUDO_STATE_DISABLED)) {
                         sim_toggle_checkbox_radio(form_elem, state);
                     }
@@ -2464,7 +2464,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             }
             bool is_checked = dom_element_has_pseudo_state((DomElement*)elem, PSEUDO_STATE_CHECKED);
             if (is_checked != ev->expected_checked) {
-                RadiantState* state = (RadiantState*)doc->state;
+                DocState* state = (DocState*)doc->state;
                 if (state && !dom_element_has_pseudo_state((DomElement*)elem, PSEUDO_STATE_DISABLED)) {
                     sim_toggle_checkbox_radio(elem, state);
                     log_info("event_sim: check - toggled to %s", ev->expected_checked ? "checked" : "unchecked");
@@ -2574,7 +2574,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                          ev->option_label ? ev->option_label : "(null)");
                 break;
             }
-            RadiantState* state = (RadiantState*)doc->state;
+            DocState* state = (DocState*)doc->state;
             form_control_set_selected_index(state, (View*)select, match_index);
             if (state) {
                 // Close dropdown if open
@@ -2676,7 +2676,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                     sim_mouse_button(uicon, x, y, 0, 0, false);
                 }
             }
-            RadiantState* state = (RadiantState*)doc->state;
+            DocState* state = (DocState*)doc->state;
             View* focused = focus_get(state);
             if (!focused || !focused->is_element()) {
                 log_error("event_sim: ime_compose - no focused element");
@@ -3057,7 +3057,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 break;
             }
 
-            RadiantState* state = doc ? (RadiantState*)doc->state : nullptr;
+            DocState* state = doc ? (DocState*)doc->state : nullptr;
             if (state && state->needs_reflow) {
                 reflow_process_pending(state);
                 if (state->needs_reflow) {
@@ -3373,7 +3373,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             ViewBlock* root_block = (ViewBlock*)doc->view_tree->root;
             if (root_block && root_block->scroller && root_block->scroller->pane) {
                 ScrollPane* pane = root_block->scroller->pane;
-                scroll_state_set_position((RadiantState*)doc->state,
+                scroll_state_set_position((DocState*)doc->state,
                                           pane,
                                           target_x,
                                           target_y,
@@ -3390,7 +3390,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 log_error("event_sim: advance_time - no document state");
                 break;
             }
-            RadiantState* state = (RadiantState*)doc->state;
+            DocState* state = (DocState*)doc->state;
             AnimationScheduler* sched = state->animation_scheduler;
             if (!sched) {
                 log_error("event_sim: advance_time - no animation scheduler");
@@ -3438,7 +3438,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             }
             uicon->document = new_doc;
             if (!radiant_document_ensure_state(new_doc, "event_sim:navigate")) {
-                log_error("event_sim: navigate FAIL - could not create RadiantState");
+                log_error("event_sim: navigate FAIL - could not create DocState");
                 ctx->fail_count++;
                 break;
             }
@@ -3535,7 +3535,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 log_info("event_sim: dump_caret to %s", path);
                 DomDocument* doc = uicon->document;
                 if (doc && doc->state) {
-                    extern void print_caret_state(RadiantState* state, const char* output_path);
+                    extern void print_caret_state(DocState* state, const char* output_path);
                     print_caret_state(doc->state, path);
                 } else {
                     log_error("event_sim: dump_caret - no document state");
@@ -3664,7 +3664,7 @@ static void replay_check_final_state(EventSimContext* ctx, UiContext* uicon) {
         return;
     }
     DomDocument* doc = uicon ? uicon->document : NULL;
-    RadiantState* state = doc ? doc->state : NULL;
+    DocState* state = doc ? doc->state : NULL;
     if (!state) {
         replay_emit_mismatch(ctx, uicon, "state", "present", "missing");
         return;

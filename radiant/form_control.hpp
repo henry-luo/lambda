@@ -114,7 +114,7 @@ namespace FormDefaults {
  */
 struct FormControlProp {
     // Fast-read pointer to centralized state owner. Writers must use state_store APIs.
-    struct RadiantState* state_ref;
+    struct DocState* state_ref;
 
     FormControlType control_type;
     const char* input_type;     // Original type attribute value

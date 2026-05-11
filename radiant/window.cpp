@@ -56,7 +56,7 @@ extern "C" void log_mem_stage(const char*) {}
 
 void render(GLFWwindow* window);
 void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file);
-void render_video_frames_cached(RadiantState* rstate, ImageSurface* surface, UiContext* uicon);
+void render_video_frames_cached(DocState* rstate, ImageSurface* surface, UiContext* uicon);
 // load_html_doc is declared in view.hpp (via layout.hpp)
 DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio);
@@ -275,10 +275,10 @@ DomDocument* show_html_doc(Url* base, char* doc_url, int viewport_width, int vie
 
     ui_context.document = doc;
 
-    // Create RadiantState for interactive state management (caret, selection, focus, etc.)
+    // Create DocState for interactive state management (caret, selection, focus, etc.)
     if (!doc->state) {
         doc->state = radiant_state_create(doc->pool, STATE_MODE_IN_PLACE);
-        log_debug("show_html_doc: created RadiantState for document");
+        log_debug("show_html_doc: created DocState for document");
     }
     view_attach_event_log(doc, doc_url);
 
@@ -306,7 +306,7 @@ void reflow_html_doc(DomDocument* doc) {
     // Skip render here — let the main loop handle it via render().
     // Mark dirty so the main loop knows to repaint.
     if (doc->state) {
-        RadiantState* state = (RadiantState*)doc->state;
+        DocState* state = (DocState*)doc->state;
         state->is_dirty = true;
     }
 }
@@ -343,7 +343,7 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
                 ViewBlock* root = new_doc->view_tree ? (ViewBlock*)new_doc->view_tree->root : nullptr;
                 if (root && root->scroller && root->scroller->pane) {
                     float saved_y = session_get_scroll_position(session);
-                    scroll_state_set_position((RadiantState*)new_doc->state,
+                    scroll_state_set_position((DocState*)new_doc->state,
                                               root->scroller->pane,
                                               root->scroller->pane->h_scroll_position,
                                               saved_y,
@@ -415,7 +415,7 @@ static void cursor_position_callback(GLFWwindow* window, double xpos, double ypo
     // Trigger redraw so any pending reflows/repaints from hover state
     // changes get processed promptly. Without this, reflow requests
     // accumulate without being cleared, causing O(n^2) list traversal.
-    RadiantState* mstate = ui_context.document ? ui_context.document->state : nullptr;
+    DocState* mstate = ui_context.document ? ui_context.document->state : nullptr;
     if (mstate && (mstate->needs_reflow || mstate->needs_repaint || mstate->is_dirty)) {
         do_redraw = 1;
     }
@@ -667,7 +667,7 @@ void render(GLFWwindow* window) {
     }
 
     // Check for incremental reflow due to state changes (pseudo-classes, etc.)
-    RadiantState* state = ui_context.document ? ui_context.document->state : nullptr;
+    DocState* state = ui_context.document ? ui_context.document->state : nullptr;
     if (state && state->needs_reflow) {
         log_debug("render: incremental reflow triggered by state change");
         double start_time = glfwGetTime();
@@ -950,10 +950,10 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
             log_info("view: browsing session created");
         }
 
-        // Create RadiantState for interactive state management (caret, selection, focus, etc.)
+        // Create DocState for interactive state management (caret, selection, focus, etc.)
         if (!doc->state) {
             doc->state = radiant_state_create(doc->pool, STATE_MODE_IN_PLACE);
-            log_debug("view_doc_in_window: created RadiantState for document");
+            log_debug("view_doc_in_window: created DocState for document");
         }
         view_attach_event_log(doc, file_to_load);
 
@@ -1104,7 +1104,7 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
         }
 
         // Handle caret blinking
-        RadiantState* state = ui_context.document ? ui_context.document->state : nullptr;
+        DocState* state = ui_context.document ? ui_context.document->state : nullptr;
         if (caret_has_projection(state)) {
             caretBlinkTime += deltaTime;
             if (caretBlinkTime >= CARET_BLINK_INTERVAL) {

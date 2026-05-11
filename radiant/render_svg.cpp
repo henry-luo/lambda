@@ -1538,7 +1538,7 @@ void calculate_content_bounds(View* view, int* max_x, int* max_y) {
 }
 
 // Render caret to SVG
-static void render_caret_svg(SvgRenderContext* ctx, RadiantState* state) {
+static void render_caret_svg(SvgRenderContext* ctx, DocState* state) {
     View* view = NULL;
     float caret_x = 0, caret_y = 0, caret_height = 0;
     float iframe_offset_x = 0, iframe_offset_y = 0;
@@ -1580,7 +1580,7 @@ static void render_caret_svg(SvgRenderContext* ctx, RadiantState* state) {
 }
 
 // Main SVG rendering function
-char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int height, RadiantState* state) {
+char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int height, DocState* state) {
     if (!root_view || !uicon) {
         return NULL;
     }

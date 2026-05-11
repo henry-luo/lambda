@@ -26,19 +26,19 @@
 
 // Opaque types — see ime_mac.mm comment.
 struct UiContext;
-struct RadiantState;
+struct DocState;
 class DomElement;
 class View;
 
 extern "C" GLFWwindow*   radiant_ui_get_glfw_window(struct UiContext*);
-extern "C" RadiantState* radiant_ui_get_state(struct UiContext*);
+extern "C" DocState* radiant_ui_get_state(struct UiContext*);
 
-View* focus_get(RadiantState*);
+View* focus_get(DocState*);
 bool  tc_is_text_control(DomElement*);
 
 void te_ime_begin(DomElement*);
 void te_ime_update(DomElement*, const char*, uint32_t, uint32_t);
-void te_ime_commit(DomElement*, RadiantState*, void*, const char*, uint32_t);
+void te_ime_commit(DomElement*, DocState*, void*, const char*, uint32_t);
 void te_ime_cancel(DomElement*);
 bool te_ime_is_composing(DomElement*);
 
@@ -51,7 +51,7 @@ WNDPROC    g_orig_wndproc = nullptr;
 
 DomElement* ime_focused_text_control() {
     if (!g_ime_uicon) return nullptr;
-    RadiantState* state = radiant_ui_get_state(g_ime_uicon);
+    DocState* state = radiant_ui_get_state(g_ime_uicon);
     if (!state) return nullptr;
     View* v = focus_get(state);
     if (!v) return nullptr;
@@ -59,7 +59,7 @@ DomElement* ime_focused_text_control() {
     return tc_is_text_control(e) ? e : nullptr;
 }
 
-RadiantState* ime_state() {
+DocState* ime_state() {
     if (!g_ime_uicon) return nullptr;
     return radiant_ui_get_state(g_ime_uicon);
 }
@@ -94,7 +94,7 @@ uint32_t ime_caret_position(HIMC himc) {
 
 LRESULT CALLBACK ime_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     DomElement* e = ime_focused_text_control();
-    RadiantState* state = ime_state();
+    DocState* state = ime_state();
 
     if (e) {
         switch (msg) {

@@ -169,9 +169,9 @@ namespace te {
     bool select_line_at(DomElement*, uint32_t u16_offset);
     bool clear_selection_to_caret(DomElement*, bool collapse_to_start);
 
-    bool cut   (DomElement*, RadiantState*);
-    bool copy  (DomElement*, RadiantState*);
-    bool paste (DomElement*, RadiantState*, const char* utf8, uint32_t len);
+    bool cut   (DomElement*, DocState*);
+    bool copy  (DomElement*, DocState*);
+    bool paste (DomElement*, DocState*, const char* utf8, uint32_t len);
 
     bool undo  (DomElement*);
     bool redo  (DomElement*);
@@ -220,9 +220,9 @@ The `sticky_x` resets on any horizontal motion, matching browser behavior.
 | Shift + click | Extend selection from anchor to point. |
 | Cmd/Ctrl + click | (no-op in inputs; reserved.) |
 
-State lives in `RadiantState`:
+State lives in `DocState`:
 ```cpp
-struct RadiantState {
+struct DocState {
     /* ... */
     enum class DragMode { Char, Word, Line } drag_mode;
     uint32_t    drag_anchor_u16;          // anchor offset

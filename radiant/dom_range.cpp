@@ -34,8 +34,8 @@
 // no-op is provided so unit-test targets that don't link state_store.cpp
 // (e.g. test_dom_range_gtest) still link successfully — the strong
 // definition in state_store.cpp wins for the full binary.
-extern "C" void legacy_sync_from_dom_selection(struct RadiantState* state);
-extern "C" __attribute__((weak)) void legacy_sync_from_dom_selection(struct RadiantState* /*state*/) {
+extern "C" void legacy_sync_from_dom_selection(struct DocState* state);
+extern "C" __attribute__((weak)) void legacy_sync_from_dom_selection(struct DocState* /*state*/) {
     // weak fallback for test targets without state_store
 }
 
@@ -53,17 +53,17 @@ __attribute__((weak)) void tc_ensure_init(DomElement* /*elem*/) {
 // fields we need via thin accessor functions implemented in
 // state_store.cpp (production) or in a unit-test stub.
 struct Arena;
-extern "C" Arena*    dom_range_state_arena(RadiantState* state);
+extern "C" Arena*    dom_range_state_arena(DocState* state);
 // Implemented in state_store.cpp — ensures private projection storage exists
 // for this document. Strong def in production; weak no-op for unit tests.
 extern "C" void      dom_selection_attach_legacy_storage(struct DomSelection* s,
-                                                         RadiantState* state);
+                                                         DocState* state);
 extern "C" __attribute__((weak)) void dom_selection_attach_legacy_storage(
-        struct DomSelection* /*s*/, RadiantState* /*state*/) {
+        struct DomSelection* /*s*/, DocState* /*state*/) {
     // weak fallback for test targets that don't link state_store.cpp.
 }
-extern "C" DomRange** dom_range_state_live_ranges_slot(RadiantState* state);
-extern "C" struct DomSelection* dom_range_state_selection(RadiantState* state);
+extern "C" DomRange** dom_range_state_live_ranges_slot(DocState* state);
+extern "C" struct DomSelection* dom_range_state_selection(DocState* state);
 
 // ============================================================================
 // Helpers
@@ -269,7 +269,7 @@ DomBoundaryOrder dom_boundary_compare(const DomBoundary* a, const DomBoundary* b
 
 static uint32_t s_range_id_counter = 1;  // global; only used for debug ids
 
-DomRange* dom_range_create(RadiantState* state) {
+DomRange* dom_range_create(DocState* state) {
     if (!state) {
         log_error("dom_range_create: NULL state");
         return NULL;
@@ -541,7 +541,7 @@ DomRange* dom_range_clone(const DomRange* r) {
 // DomSelection
 // ============================================================================
 
-DomSelection* dom_selection_create(RadiantState* state) {
+DomSelection* dom_selection_create(DocState* state) {
     if (!state) return NULL;
     Arena* arena = dom_range_state_arena(state);
     if (!arena) return NULL;
@@ -858,7 +858,7 @@ bool dom_selection_contains_node(const DomSelection* s, DomNode* node, bool allo
 // Live-range list management
 // ============================================================================
 
-void dom_range_link_into_state(RadiantState* state, DomRange* range) {
+void dom_range_link_into_state(DocState* state, DomRange* range) {
     if (!state || !range) return;
     DomRange** head = dom_range_state_live_ranges_slot(state);
     if (!head) return;
@@ -869,7 +869,7 @@ void dom_range_link_into_state(RadiantState* state, DomRange* range) {
     *head = range;
 }
 
-void dom_range_unlink_from_state(RadiantState* state, DomRange* range) {
+void dom_range_unlink_from_state(DocState* state, DomRange* range) {
     if (!state || !range) return;
     DomRange** head = dom_range_state_live_ranges_slot(state);
     if (!head) return;
@@ -879,7 +879,7 @@ void dom_range_unlink_from_state(RadiantState* state, DomRange* range) {
     range->prev = range->next = NULL;
 }
 
-void dom_state_invalidate_all_range_layouts(RadiantState* state) {
+void dom_state_invalidate_all_range_layouts(DocState* state) {
     if (!state) return;
     DomRange** head = dom_range_state_live_ranges_slot(state);
     if (!head) return;
@@ -894,7 +894,7 @@ void dom_state_invalidate_all_range_layouts(RadiantState* state) {
 
 // Re-sync the selection's cached anchor/focus from its primary range, then
 // invalidate layout. No-op if state has no selection.
-static void resync_selection_after_mutation(RadiantState* state) {
+static void resync_selection_after_mutation(DocState* state) {
     DomSelection* s = dom_range_state_selection(state);
     if (!s) return;
     bool forward = (s->direction != DOM_SEL_DIR_BACKWARD);
@@ -922,7 +922,7 @@ static void adjust_one_endpoint_for_remove(DomBoundary* b,
     }
 }
 
-void dom_mutation_pre_remove(RadiantState* state, DomNode* child) {
+void dom_mutation_pre_remove(DocState* state, DomNode* child) {
     if (!state || !child || !child->parent) return;
     DomNode* parent = child->parent;
     uint32_t index = dom_node_child_index(child);
@@ -939,7 +939,7 @@ void dom_mutation_pre_remove(RadiantState* state, DomNode* child) {
     resync_selection_after_mutation(state);
 }
 
-void dom_mutation_post_insert(RadiantState* state, DomNode* parent, DomNode* node) {
+void dom_mutation_post_insert(DocState* state, DomNode* parent, DomNode* node) {
     if (!state || !parent || !node) return;
     if (node->parent != parent) return;
     uint32_t index = dom_node_child_index(node);
@@ -958,7 +958,7 @@ void dom_mutation_post_insert(RadiantState* state, DomNode* parent, DomNode* nod
     resync_selection_after_mutation(state);
 }
 
-void dom_mutation_text_replace_data(RadiantState* state, DomText* text,
+void dom_mutation_text_replace_data(DocState* state, DomText* text,
                                     uint32_t offset, uint32_t count,
                                     uint32_t replacement_len) {
     if (!state || !text) return;
@@ -989,7 +989,7 @@ void dom_mutation_text_replace_data(RadiantState* state, DomText* text,
     resync_selection_after_mutation(state);
 }
 
-void dom_mutation_text_split(RadiantState* state, DomText* original,
+void dom_mutation_text_split(DocState* state, DomText* original,
                              DomText* new_node, uint32_t offset) {
     if (!state || !original || !new_node) return;
     DomRange** head = dom_range_state_live_ranges_slot(state);
@@ -1015,7 +1015,7 @@ void dom_mutation_text_split(RadiantState* state, DomText* original,
     }
 }
 
-void dom_mutation_text_merge(RadiantState* state, DomText* prev,
+void dom_mutation_text_merge(DocState* state, DomText* prev,
                              DomText* next, uint32_t prev_u16_len) {
     if (!state || !prev || !next) return;
     DomRange** head = dom_range_state_live_ranges_slot(state);
@@ -1111,7 +1111,7 @@ DomNode* dom_node_clone(DomNode* node, bool deep) {
     return nullptr;
 }
 
-DomText* dom_text_split_at(RadiantState* state, DomText* original, uint32_t offset) {
+DomText* dom_text_split_at(DocState* state, DomText* original, uint32_t offset) {
     if (!original || !original->parent) return nullptr;
     uint32_t total = dom_text_utf16_length(original);
     if (offset > total) return nullptr;
@@ -1147,7 +1147,7 @@ DomText* dom_text_split_at(RadiantState* state, DomText* original, uint32_t offs
 
 // Replace [u16_offset, u16_offset+u16_count) in `t` with `repl_str` (or empty
 // if null), and fire the range envelope.
-static void text_replace_data_str(RadiantState* st, DomText* t,
+static void text_replace_data_str(DocState* st, DomText* t,
                                   uint32_t u16_offset, uint32_t u16_count,
                                   const char* repl_chars, size_t repl_bytes,
                                   uint32_t repl_u16_len) {

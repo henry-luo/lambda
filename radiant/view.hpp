@@ -1119,7 +1119,7 @@ typedef ViewElement ViewSpan;
 
 typedef struct {
     // Fast-read pointer to centralized state owner. Writers must use state_store APIs.
-    RadiantState* state_ref;
+    DocState* state_ref;
 
     float v_scroll_position, h_scroll_position;
     float v_max_scroll, h_max_scroll;
@@ -1406,9 +1406,9 @@ struct ViewTree {
     HtmlVersion html_version;
 };
 
-// Forward declaration for RadiantState (full definition in state_store.hpp)
-struct RadiantState;
-typedef struct RadiantState RadiantState;
+// Forward declaration for DocState (full definition in state_store.hpp)
+struct DocState;
+typedef struct DocState DocState;
 
 // Forward declarations for state types (full definitions in state_store.hpp)
 struct CaretState;
@@ -1418,9 +1418,9 @@ struct FocusState;
 struct BrowsingSession;  // Browsing session for web navigation
 struct EventStateLog;    // per-document JSONL event/state log
 
-// StateStore is now an alias for RadiantState
-// Use RadiantState directly for new code
-typedef RadiantState StateStore;
+// StateStore is now an alias for DocState
+// Use DocState directly for new code
+typedef DocState StateStore;
 
 // rendering context structs
 typedef struct {

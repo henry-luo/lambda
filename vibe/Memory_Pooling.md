@@ -156,7 +156,7 @@ The rpmalloc integration is **well-designed**:
 
 | File | Arena Source | What is Allocated | Reset/Destroy |
 |------|------------|-------------------|---------------|
-| `radiant/state_store.cpp` | `state->arena` | RadiantState snapshots, DragDropState, caret/selection/focus states | `arena_reset()` per frame |
+| `radiant/state_store.cpp` | `state->arena` | DocState snapshots, DragDropState, caret/selection/focus states | `arena_reset()` per frame |
 | `radiant/state_store.cpp` | `dirty_tracker.arena` | DirtyRect linked list | `arena_reset()` per frame |
 | `radiant/state_store.cpp` | `reflow_scheduler.arena` | ReflowRequest linked list | `arena_reset()` per frame |
 | `radiant/layout.cpp:2156` | `doc->arena` | CounterContext for CSS counters | Destroyed with document |

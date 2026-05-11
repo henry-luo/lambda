@@ -77,7 +77,7 @@ FormControlProp* tc_get_or_create_form(DomElement* elem) {
     if (elem->form && elem->item_prop_type == DomElement::ITEM_PROP_FORM)
         return elem->form;
     FormControlProp* f = new FormControlProp();
-    f->state_ref = elem && elem->doc ? (RadiantState*)elem->doc->state : nullptr;
+    f->state_ref = elem && elem->doc ? (DocState*)elem->doc->state : nullptr;
     if (elem->tag_name && strcasecmp(elem->tag_name, "textarea") == 0) {
         f->control_type = FORM_CONTROL_TEXTAREA;
     } else {
@@ -313,7 +313,7 @@ void tc_set_selection_range(DomElement* elem,
 // the DomElement (since DomElement extends ViewBlock in radiant's unified
 // DOM). Caller passes the *known* DomElement so we don't have to dispatch.
 
-void tc_sync_legacy_to_form(DomElement* elem, RadiantState* state) {
+void tc_sync_legacy_to_form(DomElement* elem, DocState* state) {
     // Only derive text-control fields from DomSelection; never update DomSelection from projection fields.
     if (!elem || !state) return;
     if (!tc_is_text_control(elem)) return;
@@ -360,7 +360,7 @@ void tc_sync_legacy_to_form(DomElement* elem, RadiantState* state) {
     }
 }
 
-void tc_sync_form_to_legacy(DomElement* elem, RadiantState* state) {
+void tc_sync_form_to_legacy(DomElement* elem, DocState* state) {
     // No-op: projection fields are now derived from DomSelection.
     (void)elem; (void)state;
 }

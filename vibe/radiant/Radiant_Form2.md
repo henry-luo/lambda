@@ -135,10 +135,10 @@ struct FocusManager {
     ViewBlock* focused;          // Currently focused element
     int tab_index_mode;          // 0=natural, 1=explicit tabindex
 
-    void focus(ViewBlock* target, RadiantState* state);
-    void blur(RadiantState* state);
-    void tab_next(RadiantState* state);   // Tab key handler
-    void tab_prev(RadiantState* state);   // Shift+Tab
+    void focus(ViewBlock* target, DocState* state);
+    void blur(DocState* state);
+    void tab_next(DocState* state);   // Tab key handler
+    void tab_prev(DocState* state);   // Shift+Tab
     bool is_focusable(ViewBlock* block);  // form controls, links, tabindex>=0
 };
 ```
@@ -215,7 +215,7 @@ After pseudo-state change, mark `needs_restyle = true` to re-resolve matched CSS
 2. **`:indeterminate` state** for checkbox: Render horizontal dash instead of checkmark. Set via JavaScript-only in browsers, but useful for test compatibility.
 
 3. **Radio group management**: Current toggle logic in `sim_toggle_checkbox_radio()` walks the entire view tree. Optimize by:
-   - Caching radio groups by `name` attribute in `RadiantState`
+   - Caching radio groups by `name` attribute in `DocState`
    - Or limiting search to the containing `<form>` element (spec-correct behavior)
 
 4. **Label click integration**: When `<label for="checkbox-id">` is clicked, toggle the checkbox. Already described in Phase 2a.3.
@@ -585,7 +585,7 @@ P3 — Phase 2g: UI automation tests
 | `radiant/layout_form.cpp` | Select listbox mode, improved button sizing |
 | `radiant/render_form.cpp` | Focus ring, caret, selection, improved checkbox/radio/select rendering |
 | `radiant/event_sim.cpp` | `type_text`, `clear_text`, `assert_value`, `assert_focused`, `key` events, label click delegation |
-| `radiant/layout.hpp` | `FocusManager*` in `RadiantState` |
+| `radiant/layout.hpp` | `FocusManager*` in `DocState` |
 | `build_lambda_config.json` | Add `text_edit.cpp`, `focus.cpp` to build |
 
 ### Success Metrics

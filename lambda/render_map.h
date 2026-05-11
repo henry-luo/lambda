@@ -68,10 +68,10 @@ int render_map_retransform_with_results(RetransformResult* out_results, int max_
 // Clear all entries
 void render_map_reset(void);
 
-// Get the underlying hashmap pointer (for RadiantState unification)
+// Get the underlying hashmap pointer (for DocState unification)
 struct hashmap* render_map_get_map(void);
 
-// Inject an external hashmap (e.g., from RadiantState). Caller owns the map.
+// Inject an external hashmap (e.g., from DocState). Caller owns the map.
 void render_map_set_map(struct hashmap* map);
 
 // ============================================================================

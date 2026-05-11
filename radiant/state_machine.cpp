@@ -20,15 +20,15 @@ extern bool is_view_focusable(View* view);
 
 #define STATE_MACHINE_RECORD_BUFSZ 2048
 
-static void transition_enter(RadiantState* state) {
+static void transition_enter(DocState* state) {
     if (state) state->transition_depth++;
 }
 
-static void transition_leave(RadiantState* state) {
+static void transition_leave(DocState* state) {
     if (state && state->transition_depth > 0) state->transition_depth--;
 }
 
-bool focus_transition(RadiantState* state,
+bool focus_transition(DocState* state,
                       FocusTransitionKind kind,
                       FocusTransitionArgs* args) {
     if (!state) return false;
@@ -58,7 +58,7 @@ bool focus_transition(RadiantState* state,
     return radiant_state_validate_interaction(state, NULL);
 }
 
-static void state_machine_sync_selection_projection(RadiantState* state) {
+static void state_machine_sync_selection_projection(DocState* state) {
     if (!state) return;
     if (state->selection && !state->selection->is_collapsed) {
         dom_selection_sync_from_legacy_selection(state);
@@ -69,7 +69,7 @@ static void state_machine_sync_selection_projection(RadiantState* state) {
     }
 }
 
-bool caret_transition(RadiantState* state,
+bool caret_transition(DocState* state,
                       CaretTransitionKind kind,
                       CaretTransitionArgs* args) {
     if (!state || !args) return false;
@@ -89,7 +89,7 @@ bool caret_transition(RadiantState* state,
     return radiant_state_validate_interaction(state, NULL);
 }
 
-bool selection_transition(RadiantState* state,
+bool selection_transition(DocState* state,
                           SelectionTransitionKind kind,
                           SelectionTransitionArgs* args) {
     if (!state) return false;
@@ -245,7 +245,7 @@ static void validate_transient_ui_target(View* view, const char* name,
     }
 }
 
-static void validate_focus_node(RadiantState* state, View* node, View* focused,
+static void validate_focus_node(DocState* state, View* node, View* focused,
                                 StateValidationReport* report,
                                 uint32_t* focus_count) {
     if (!state || !node) return;
@@ -289,7 +289,7 @@ static void validate_focus_node(RadiantState* state, View* node, View* focused,
     }
 }
 
-static void validate_focus_invariants(RadiantState* state,
+static void validate_focus_invariants(DocState* state,
                                       StateValidationReport* report) {
     if (!state || !state->focus) return;
 
@@ -310,7 +310,7 @@ static void validate_focus_invariants(RadiantState* state,
     }
 }
 
-static void validate_selection_invariants(RadiantState* state,
+static void validate_selection_invariants(DocState* state,
                                           StateValidationReport* report) {
     if (!state || !state->dom_selection) return;
 
@@ -394,7 +394,7 @@ static void validate_selection_invariants(RadiantState* state,
     }
 }
 
-bool radiant_state_validate_interaction(RadiantState* state,
+bool radiant_state_validate_interaction(DocState* state,
                                         StateValidationReport* report) {
     report_init(report);
 
@@ -513,7 +513,7 @@ bool radiant_state_validate_interaction(RadiantState* state,
     return !report || report->ok;
 }
 
-void radiant_state_assert_valid(RadiantState* state, const char* context) {
+void radiant_state_assert_valid(DocState* state, const char* context) {
 #ifndef NDEBUG
     StateValidationReport report;
     bool ok = radiant_state_validate_interaction(state, &report);
@@ -522,14 +522,14 @@ void radiant_state_assert_valid(RadiantState* state, const char* context) {
             context ? context : "state mutation",
             report.message[0] ? report.message : "interaction invariant failed");
     }
-    assert(ok && "RadiantState interaction invariant failed");
+    assert(ok && "DocState interaction invariant failed");
 #else
     (void)state;
     (void)context;
 #endif
 }
 
-uint64_t state_begin_event_cascade(RadiantState* state,
+uint64_t state_begin_event_cascade(DocState* state,
                                    EventStateLog* log,
                                    const char* cause) {
     if (state) {
@@ -566,7 +566,7 @@ static void write_optional_view_ref(JsonWriter* w, const char* key, View* view) 
     event_state_log_write_node_ref(w, key, (const DomNode*)view);
 }
 
-static void emit_state_snapshot(RadiantState* state,
+static void emit_state_snapshot(DocState* state,
                                 EventStateLog* log,
                                 uint64_t cascade_id) {
     if (!event_state_log_enabled(log)) return;
@@ -653,7 +653,7 @@ static void emit_state_snapshot(RadiantState* state,
     event_state_log_finish_record(log, &w);
 }
 
-bool radiant_state_settle(RadiantState* state,
+bool radiant_state_settle(DocState* state,
                           EventStateLog* log,
                           uint64_t cascade_id) {
     StateValidationReport report;
@@ -668,7 +668,7 @@ bool radiant_state_settle(RadiantState* state,
     return ok;
 }
 
-void state_end_event_cascade(RadiantState* state,
+void state_end_event_cascade(DocState* state,
                              EventStateLog* log,
                              uint64_t cascade_id) {
     if (state) {

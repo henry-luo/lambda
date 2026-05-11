@@ -182,12 +182,12 @@ int ui_context_init(UiContext* uicon, bool headless) {
 extern "C" GLFWwindow* radiant_ui_get_glfw_window(UiContext* uicon) {
     return uicon ? uicon->window : nullptr;
 }
-extern "C" RadiantState* radiant_ui_get_state(UiContext* uicon) {
+extern "C" DocState* radiant_ui_get_state(UiContext* uicon) {
     if (!uicon || !uicon->document) return nullptr;
-    return (RadiantState*)uicon->document->state;
+    return (DocState*)uicon->document->state;
 }
 
-extern "C" void radiant_state_request_repaint(RadiantState* state) {
+extern "C" void radiant_state_request_repaint(DocState* state) {
     if (state) {
         // Set both flags so render() actually rebuilds the display list.
         // `needs_repaint` alone only triggers a repaint when there is a
