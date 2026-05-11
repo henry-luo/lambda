@@ -1,0 +1,6 @@
+thenable job
+executor:executor
+thenable job
+resolve:assimilated
+caught:boom
+all:1,assimilated,3

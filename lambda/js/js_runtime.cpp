@@ -20253,10 +20253,102 @@ static JsPromise* js_get_promise(Item promise_obj) {
 
 // Forward declaration — js_promise_settle is called recursively from microtask runner
 static void js_promise_settle(JsPromise* p, JsPromiseState state, Item result);
+static void js_promise_resolve_with_value(JsPromise* p, Item value);
 
 // Forward declarations for promise microtask helpers
 static Item js_promise_microtask_resolve(Item next_promise_item, Item value);
 static Item js_promise_microtask_reject(Item next_promise_item, Item reason);
+static Item js_resolve_callback(Item promise_idx_item, Item value);
+static Item js_reject_callback(Item promise_idx_item, Item reason);
+
+static bool js_promise_is_object_like(Item value) {
+    TypeId tid = get_type_id(value);
+    return tid == LMD_TYPE_MAP || tid == LMD_TYPE_ELEMENT || tid == LMD_TYPE_ARRAY ||
+           tid == LMD_TYPE_FUNC || tid == LMD_TYPE_OBJECT || tid == LMD_TYPE_VMAP;
+}
+
+static Item js_promise_make_type_error(const char* message, int len) {
+    return js_new_error_with_name(
+        (Item){.item = s2it(heap_create_name("TypeError", 9))},
+        (Item){.item = s2it(heap_create_name(message, len))});
+}
+
+static void js_promise_adopt_native(JsPromise* target, JsPromise* source) {
+    if (!target || !source) return;
+    if (target == source) {
+        Item error = js_promise_make_type_error("Chaining cycle detected for promise", 35);
+        js_promise_settle(target, JS_PROMISE_REJECTED, error);
+        return;
+    }
+    if (source->state != JS_PROMISE_PENDING) {
+        js_promise_settle(target, source->state, source->result);
+        return;
+    }
+    Item target_item = js_promise_to_item(target);
+    if (source->then_count < 8) {
+        Item resolve_fn = js_new_function((void*)js_promise_microtask_resolve, 2);
+        Item reject_fn = js_new_function((void*)js_promise_microtask_reject, 2);
+        source->on_fulfilled[source->then_count] = js_bind_function(resolve_fn, ItemNull, &target_item, 1);
+        source->on_rejected[source->then_count] = js_bind_function(reject_fn, ItemNull, &target_item, 1);
+        source->next_promise[source->then_count] = ItemNull;
+        source->then_count++;
+    }
+}
+
+// PromiseResolveThenableJob: invoke the captured then method asynchronously.
+// Bound args: promise_item, thenable, then_fn.
+static Item js_promise_thenable_job(Item promise_item, Item thenable, Item then_fn) {
+    JsPromise* p = js_get_promise(promise_item);
+    if (!p || p->state != JS_PROMISE_PENDING) return ItemNull;
+
+    int idx = (int)(p - js_promises);
+    Item idx_item = (Item){.item = i2it(idx)};
+    Item resolve_base = js_new_function((void*)js_resolve_callback, 2);
+    Item reject_base = js_new_function((void*)js_reject_callback, 2);
+    Item resolve_fn = js_bind_function(resolve_base, ItemNull, &idx_item, 1);
+    Item reject_fn = js_bind_function(reject_base, ItemNull, &idx_item, 1);
+
+    Item args[2] = {resolve_fn, reject_fn};
+    js_call_function(then_fn, thenable, args, 2);
+    if (js_check_exception()) {
+        Item error = js_clear_exception();
+        js_promise_settle(p, JS_PROMISE_REJECTED, error);
+    }
+    return ItemNull;
+}
+
+static void js_promise_enqueue_thenable_job(JsPromise* p, Item thenable, Item then_fn) {
+    Item runner_fn = js_new_function((void*)js_promise_thenable_job, 3);
+    Item bound_args[3] = {js_promise_to_item(p), thenable, then_fn};
+    Item thunk = js_bind_function(runner_fn, ItemNull, bound_args, 3);
+    js_microtask_enqueue(thunk);
+}
+
+static void js_promise_resolve_with_value(JsPromise* p, Item value) {
+    if (!p || p->state != JS_PROMISE_PENDING) return;
+
+    JsPromise* native_promise = js_get_promise(value);
+    if (native_promise) {
+        js_promise_adopt_native(p, native_promise);
+        return;
+    }
+
+    if (js_promise_is_object_like(value)) {
+        Item then_key = (Item){.item = s2it(heap_create_name("then", 4))};
+        Item then_fn = js_property_get(value, then_key);
+        if (js_check_exception()) {
+            Item error = js_clear_exception();
+            js_promise_settle(p, JS_PROMISE_REJECTED, error);
+            return;
+        }
+        if (get_type_id(then_fn) == LMD_TYPE_FUNC) {
+            js_promise_enqueue_thenable_job(p, value, then_fn);
+            return;
+        }
+    }
+
+    js_promise_settle(p, JS_PROMISE_FULFILLED, value);
+}
 
 // Microtask runner for promise then() handlers.
 // Called with 3 bound args: handler, result, next_promise_item.
@@ -20266,27 +20358,13 @@ static Item js_promise_microtask_run(Item handler, Item result, Item next_promis
     Item handler_result = js_call_function(handler, ItemNull, args, 1);
 
     JsPromise* next = js_get_promise(next_promise_item);
+    if (js_check_exception()) {
+        Item error = js_clear_exception();
+        if (next) js_promise_settle(next, JS_PROMISE_REJECTED, error);
+        return ItemNull;
+    }
     if (next) {
-        JsPromise* returned_p = js_get_promise(handler_result);
-        if (returned_p) {
-            // handler returned a promise — chain resolution
-            if (returned_p->state != JS_PROMISE_PENDING) {
-                js_promise_settle(next, returned_p->state, returned_p->result);
-            } else {
-                // pending: register then handler to settle next when returned resolves
-                Item next_item = next_promise_item;
-                if (returned_p->then_count < 8) {
-                    Item resolve_fn = js_new_function((void*)js_promise_microtask_resolve, 2);
-                    Item reject_fn = js_new_function((void*)js_promise_microtask_reject, 2);
-                    returned_p->on_fulfilled[returned_p->then_count] = js_bind_function(resolve_fn, ItemNull, &next_item, 1);
-                    returned_p->on_rejected[returned_p->then_count] = js_bind_function(reject_fn, ItemNull, &next_item, 1);
-                    returned_p->next_promise[returned_p->then_count] = ItemNull; // these are direct settlers, no further chain
-                    returned_p->then_count++;
-                }
-            }
-        } else {
-            js_promise_settle(next, JS_PROMISE_FULFILLED, handler_result);
-        }
+        js_promise_resolve_with_value(next, handler_result);
     }
     return ItemNull;
 }
@@ -20294,8 +20372,14 @@ static Item js_promise_microtask_run(Item handler, Item result, Item next_promis
 // Microtask runner for finally() handlers.
 // Called with 4 bound args: handler, next_promise_item, state_item, original_result.
 static Item js_promise_finally_microtask_run(Item handler, Item next_promise_item, Item state_item, Item original_result) {
-    js_call_function(handler, ItemNull, NULL, 0);
     JsPromise* next = js_get_promise(next_promise_item);
+    Item finally_result = js_call_function(handler, ItemNull, NULL, 0);
+    if (js_check_exception()) {
+        Item error = js_clear_exception();
+        if (next) js_promise_settle(next, JS_PROMISE_REJECTED, error);
+        return ItemNull;
+    }
+    (void)finally_result;
     if (next) {
         JsPromiseState orig_state = (JsPromiseState)it2i(state_item);
         js_promise_settle(next, orig_state, original_result);
@@ -20308,7 +20392,7 @@ static Item js_promise_finally_microtask_run(Item handler, Item next_promise_ite
 // handlers on that returned promise. When it settles, they settle the next promise.
 static Item js_promise_microtask_resolve(Item next_promise_item, Item value) {
     JsPromise* next = js_get_promise(next_promise_item);
-    if (next) js_promise_settle(next, JS_PROMISE_FULFILLED, value);
+    if (next) js_promise_resolve_with_value(next, value);
     return ItemNull;
 }
 
@@ -20381,27 +20465,7 @@ static void js_promise_settle(JsPromise* p, JsPromiseState state, Item result) {
 static Item js_resolve_callback(Item promise_idx_item, Item value) {
     int64_t idx = it2i(promise_idx_item);
     if (idx >= 0 && idx < js_promise_count) {
-        JsPromise* p = &js_promises[idx];
-        // if value is a promise, chain resolution
-        JsPromise* thenable = js_get_promise(value);
-        if (thenable) {
-            if (thenable->state != JS_PROMISE_PENDING) {
-                js_promise_settle(p, thenable->state, thenable->result);
-            } else {
-                // register then on thenable to forward settlement
-                Item p_item = js_promise_to_item(p);
-                if (thenable->then_count < 8) {
-                    Item resolve_fn = js_new_function((void*)js_promise_microtask_resolve, 2);
-                    Item reject_fn = js_new_function((void*)js_promise_microtask_reject, 2);
-                    thenable->on_fulfilled[thenable->then_count] = js_bind_function(resolve_fn, ItemNull, &p_item, 1);
-                    thenable->on_rejected[thenable->then_count] = js_bind_function(reject_fn, ItemNull, &p_item, 1);
-                    thenable->next_promise[thenable->then_count] = ItemNull;
-                    thenable->then_count++;
-                }
-            }
-        } else {
-            js_promise_settle(p, JS_PROMISE_FULFILLED, value);
-        }
+        js_promise_resolve_with_value(&js_promises[idx], value);
     }
     return ItemNull;
 }
@@ -20433,6 +20497,10 @@ extern "C" Item js_promise_create(Item executor) {
 
         Item args[2] = {resolve_fn, reject_fn};
         js_call_function(executor, ItemNull, args, 2);
+        if (js_check_exception()) {
+            Item error = js_clear_exception();
+            js_promise_settle(p, JS_PROMISE_REJECTED, error);
+        }
     }
 
     return js_promise_to_item(p);
@@ -20445,7 +20513,7 @@ extern "C" Item js_promise_resolve(Item value) {
 
     JsPromise* p = js_alloc_promise();
     if (!p) return ItemNull;
-    js_promise_settle(p, JS_PROMISE_FULFILLED, value);
+    js_promise_resolve_with_value(p, value);
     return js_promise_to_item(p);
 }
 
@@ -20568,33 +20636,9 @@ static void js_async_drive(int ctx_idx, Item input, int64_t state) {
     int64_t next_state = it2i(arr->items[1]);
 
     if (next_state == -1) {
-        // Done — fulfill the async function's promise.
-        // Per ECMAScript spec, if the returned value is a thenable, the
-        // outer promise must adopt the thenable's state (chain) rather
-        // than fulfill with the thenable as its value. Mirror the logic
-        // in js_resolve_callback().
-        JsPromise* outer = &js_promises[ctx->promise_idx];
-        JsPromise* thenable = js_get_promise(value);
-        if (thenable) {
-            if (thenable->state != JS_PROMISE_PENDING) {
-                js_promise_settle(outer, thenable->state, thenable->result);
-            } else {
-                // Forward thenable's eventual settlement directly to outer
-                // promise. Reuse the microtask resolve/reject helpers used
-                // by Promise.resolve / chain logic.
-                Item p_item = js_promise_to_item(outer);
-                if (thenable->then_count < 8) {
-                    Item resolve_fn = js_new_function((void*)js_promise_microtask_resolve, 2);
-                    Item reject_fn = js_new_function((void*)js_promise_microtask_reject, 2);
-                    thenable->on_fulfilled[thenable->then_count] = js_bind_function(resolve_fn, ItemNull, &p_item, 1);
-                    thenable->on_rejected[thenable->then_count] = js_bind_function(reject_fn, ItemNull, &p_item, 1);
-                    thenable->next_promise[thenable->then_count] = ItemNull;
-                    thenable->then_count++;
-                }
-            }
-        } else {
-            js_promise_settle(outer, JS_PROMISE_FULFILLED, value);
-        }
+        // Done — resolve the async function promise with the shared Promise
+        // Resolution Procedure so returned promises/thenables are adopted.
+        js_promise_resolve_with_value(&js_promises[ctx->promise_idx], value);
     } else if (next_state == -2) {
         // Rejected — reject the async function's promise
         js_promise_settle(&js_promises[ctx->promise_idx], JS_PROMISE_REJECTED, value);
@@ -20861,9 +20905,20 @@ static Item js_settled_reject_element(Item counter_obj, Item index_item, Item re
 static void js_invoke_promise_then(Item elem, Item resolve_fn, Item reject_fn) {
     Item then_key = (Item){.item = s2it(heap_create_name("then", 4))};
     Item then_fn = js_property_get(elem, then_key);
+    if (js_check_exception()) {
+        Item error = js_clear_exception();
+        Item args[1] = {error};
+        js_call_function(reject_fn, ItemNull, args, 1);
+        return;
+    }
     if (get_type_id(then_fn) == LMD_TYPE_FUNC) {
         Item call_args[2] = {resolve_fn, reject_fn};
         js_call_function(then_fn, elem, call_args, 2);
+        if (js_check_exception()) {
+            Item error = js_clear_exception();
+            Item args[1] = {error};
+            js_call_function(reject_fn, ItemNull, args, 1);
+        }
     } else {
         // fallback: use internal then for non-standard promise objects
         js_promise_then(elem, resolve_fn, reject_fn);
