@@ -76,6 +76,17 @@ MIR_reg_t jm_emit_put_value(JsMirTranspiler* mt, const JsMirReference* ref, MIR_
 MIR_reg_t jm_emit_delete_reference(JsMirTranspiler* mt, const JsMirReference* ref);
 void jm_eval_cptn_reset(JsMirTranspiler* mt);
 void jm_push_loop_labels(JsMirTranspiler* mt, MIR_label_t continue_label, MIR_label_t break_label);
+MIR_reg_t jm_emit_get_iterator(JsMirTranspiler* mt, MIR_reg_t iterable);
+MIR_reg_t jm_emit_iterator_step(JsMirTranspiler* mt, MIR_reg_t iterator);
+MIR_reg_t jm_emit_iterator_done_test(JsMirTranspiler* mt, MIR_reg_t step_result, const char* prefix);
+MIR_reg_t jm_emit_iterator_collect_rest(JsMirTranspiler* mt, MIR_reg_t iterator);
+void jm_emit_iterator_close(JsMirTranspiler* mt, MIR_reg_t iterator);
+void jm_emit_iterator_close_on_exception(JsMirTranspiler* mt, MIR_reg_t iterator, MIR_label_t target);
+void jm_emit_iterator_close_on_exception_if_open(JsMirTranspiler* mt, MIR_reg_t iterator,
+    MIR_reg_t iter_done, MIR_label_t target);
+void jm_emit_abrupt_jump_cleanup(JsMirTranspiler* mt);
+void jm_emit_break_completion(JsMirTranspiler* mt, JsBreakContinueNode* brk);
+void jm_emit_continue_completion(JsMirTranspiler* mt, JsBreakContinueNode* cont);
 MIR_reg_t jm_emit_uext8(JsMirTranspiler* mt, MIR_reg_t r);
 void jm_push_scope(JsMirTranspiler* mt);
 int jm_arguments_param_index(JsMirTranspiler* mt, const char* vname);

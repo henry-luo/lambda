@@ -122,6 +122,7 @@ void jm_push_loop_labels(JsMirTranspiler* mt, MIR_label_t continue_label, MIR_la
     if (mt->loop_depth < 32) {
         mt->loop_stack[mt->loop_depth].continue_label = continue_label;
         mt->loop_stack[mt->loop_depth].break_label = break_label;
+        mt->loop_stack[mt->loop_depth].iterator_to_close = 0;
         mt->loop_stack[mt->loop_depth].label_name = mt->pending_label_name;
         mt->loop_stack[mt->loop_depth].label_name_len = mt->pending_label_len;
         mt->loop_depth++;

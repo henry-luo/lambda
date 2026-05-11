@@ -2627,8 +2627,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
 
     // for-of: use lazy iterator protocol (v29)
     // Get iterator from iterable
-    MIR_reg_t iterator = jm_call_1(mt, "js_get_iterator", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, iterable));
+    MIR_reg_t iterator = jm_emit_get_iterator(mt, iterable);
     if (mt->for_of_depth < 32) {
         mt->for_of_iterators[mt->for_of_depth++] = iterator;
     }
@@ -2675,6 +2674,9 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
 
     // v29: Use l_break as the break target so IteratorClose is called
     jm_push_loop_labels(mt, l_update, l_break);
+    if (mt->loop_depth > 0) {
+        mt->loop_stack[mt->loop_depth - 1].iterator_to_close = iterator;
+    }
 
     // Pre-initialize delayed-return registers BEFORE the loop test label,
     // so they are valid even when the iterable is empty and the loop body
@@ -2740,12 +2742,10 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
 
     // Test: call js_iterator_step(iterator) → value or JS_ITER_DONE_SENTINEL (done)
     jm_emit_label(mt, l_test);
-    MIR_reg_t step_result = jm_call_1(mt, "js_iterator_step", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, iterator));
+    MIR_reg_t step_result = jm_emit_iterator_step(mt, iterator);
+    jm_emit_iterator_close_on_exception(mt, iterator, l_iter_exc);
     // Check if done (JS_ITER_DONE_SENTINEL — unique sentinel that won't collide with null/undefined/false)
-    MIR_reg_t is_done = jm_new_reg(mt, "forofdone", MIR_T_I64);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_done),
-        MIR_new_reg_op(mt->ctx, step_result), MIR_new_int_op(mt->ctx, (int64_t)JS_ITER_DONE_SENTINEL)));
+    MIR_reg_t is_done = jm_emit_iterator_done_test(mt, step_result, "forofdone");
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_end),
         MIR_new_reg_op(mt->ctx, is_done)));
 
@@ -2850,7 +2850,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
 
     // v29: Break target — call IteratorClose before exiting
     jm_emit_label(mt, l_break);
-    jm_call_1(mt, "js_iterator_close", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, iterator));
+    jm_emit_iterator_close(mt, iterator);
     // fall through to l_end
 
     jm_emit_label(mt, l_end);
@@ -2863,8 +2863,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         jm_emit_label(mt, l_iter_exc);
         // Save exception, close iterator, restore exception and re-throw
         MIR_reg_t saved_exc = jm_call_0(mt, "js_clear_exception", MIR_T_I64);
-        jm_call_1(mt, "js_iterator_close", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, iterator));
+        jm_emit_iterator_close(mt, iterator);
         jm_call_0(mt, "js_clear_exception", MIR_T_I64);  // clear any exc from iterator close
         jm_call_void_1(mt, "js_throw_value",
             MIR_T_I64, MIR_new_reg_op(mt->ctx, saved_exc));
@@ -2883,8 +2882,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
             MIR_new_label_op(mt->ctx, l_no_delayed_ret),
             MIR_new_reg_op(mt->ctx, forit_has_return)));
         // Close iterator before returning
-        jm_call_1(mt, "js_iterator_close", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, iterator));
+        jm_emit_iterator_close(mt, iterator);
         // Propagate return to outer try context if any
         if (mt->try_ctx_depth > 0) {
             JsTryContext* outer = &mt->try_ctx_stack[mt->try_ctx_depth - 1];
@@ -3627,78 +3625,12 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         break;
     case JS_AST_NODE_BREAK_STATEMENT: {
         JsBreakContinueNode* brk = (JsBreakContinueNode*)stmt;
-        // v18: inline any pending finally blocks before jumping
-        for (int t = mt->try_ctx_depth - 1; t >= 0; t--) {
-            JsTryContext* tc = &mt->try_ctx_stack[t];
-            if (tc->has_finally && tc->finally_body && !tc->inlining_finally &&
-                tc->finally_body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
-                tc->inlining_finally = true;
-                JsBlockNode* fin = (JsBlockNode*)tc->finally_body;
-                JsAstNode* fs = fin->statements;
-                while (fs) { jm_transpile_statement(mt, fs); fs = fs->next; }
-                tc->inlining_finally = false;
-            }
-        }
-        // pop with-scope(s) before jumping out of with block
-        for (int w = 0; w < mt->with_depth; w++)
-            jm_call_void_0(mt, "js_with_pop");
-        if (brk->label && brk->label_len > 0) {
-            // labeled break: search loop_stack for matching label
-            for (int i = mt->loop_depth - 1; i >= 0; i--) {
-                if (mt->loop_stack[i].label_name &&
-                    mt->loop_stack[i].label_name_len == brk->label_len &&
-                    memcmp(mt->loop_stack[i].label_name, brk->label, brk->label_len) == 0) {
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-                        MIR_new_label_op(mt->ctx, mt->loop_stack[i].break_label)));
-                    break;
-                }
-            }
-        } else if (mt->loop_depth > 0) {
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-                MIR_new_label_op(mt->ctx, mt->loop_stack[mt->loop_depth - 1].break_label)));
-        }
+        jm_emit_break_completion(mt, brk);
         break;
     }
     case JS_AST_NODE_CONTINUE_STATEMENT: {
         JsBreakContinueNode* cont = (JsBreakContinueNode*)stmt;
-        // v18: inline any pending finally blocks before jumping
-        for (int t = mt->try_ctx_depth - 1; t >= 0; t--) {
-            JsTryContext* tc = &mt->try_ctx_stack[t];
-            if (tc->has_finally && tc->finally_body && !tc->inlining_finally &&
-                tc->finally_body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
-                tc->inlining_finally = true;
-                JsBlockNode* fin = (JsBlockNode*)tc->finally_body;
-                JsAstNode* fs = fin->statements;
-                while (fs) { jm_transpile_statement(mt, fs); fs = fs->next; }
-                tc->inlining_finally = false;
-            }
-        }
-        // pop with-scope(s) before jumping out of with block
-        for (int w = 0; w < mt->with_depth; w++)
-            jm_call_void_0(mt, "js_with_pop");
-        if (cont->label && cont->label_len > 0) {
-            // labeled continue: search loop_stack for matching label
-            for (int i = mt->loop_depth - 1; i >= 0; i--) {
-                if (mt->loop_stack[i].label_name &&
-                    mt->loop_stack[i].label_name_len == cont->label_len &&
-                    memcmp(mt->loop_stack[i].label_name, cont->label, cont->label_len) == 0) {
-                    if (mt->loop_stack[i].continue_label) {
-                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-                            MIR_new_label_op(mt->ctx, mt->loop_stack[i].continue_label)));
-                    }
-                    break;
-                }
-            }
-        } else if (mt->loop_depth > 0) {
-            // search backwards for the nearest actual loop (skip switch entries which have continue_label=NULL)
-            for (int i = mt->loop_depth - 1; i >= 0; i--) {
-                if (mt->loop_stack[i].continue_label) {
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-                        MIR_new_label_op(mt->ctx, mt->loop_stack[i].continue_label)));
-                    break;
-                }
-            }
-        }
+        jm_emit_continue_completion(mt, cont);
         break;
     }
     case JS_AST_NODE_LABELED_STATEMENT: {

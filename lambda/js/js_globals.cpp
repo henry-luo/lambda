@@ -9821,6 +9821,71 @@ static bool js_has_sym_iterator(Item iterable) {
     return get_type_id(iter_factory) == LMD_TYPE_FUNC;
 }
 
+static void js_array_from_define_index_or_throw(Item object, int64_t index, Item value) {
+    char buf[24];
+    snprintf(buf, sizeof(buf), "%lld", (long long)index);
+    Item key = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
+    Item desc = js_new_object();
+    js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, value);
+    js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
+    js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(true)});
+    js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
+    js_object_define_property(object, key, desc);
+}
+
+static void js_array_from_close_preserve_exception(Item iterator) {
+    extern Item js_clear_exception(void);
+    extern void js_throw_value(Item value);
+    Item saved = js_clear_exception();
+    js_iterator_close(iterator);
+    (void)js_clear_exception();
+    js_throw_value(saved);
+}
+
+extern "C" Item js_array_from_with_constructor(Item ctor, Item iterable, Item mapFn, Item this_arg, bool mapping) {
+    if (mapping && get_type_id(mapFn) != LMD_TYPE_FUNC) {
+        js_throw_type_error("Array.from: mapFn is not a function");
+        return ItemNull;
+    }
+    TypeId tid = get_type_id(iterable);
+    if (tid == LMD_TYPE_NULL || iterable.item == ITEM_JS_UNDEFINED) {
+        js_throw_type_error("Cannot convert undefined or null to object");
+        return ItemNull;
+    }
+
+    Item result = js_new_from_class_object(ctor, NULL, 0);
+    if (js_check_exception()) return ItemNull;
+
+    Item iterator = js_get_iterator(iterable);
+    if (js_check_exception()) return ItemNull;
+    int64_t k = 0;
+    while (true) {
+        Item next_val = js_iterator_step(iterator);
+        if (js_check_exception()) return ItemNull;
+        if (next_val.item == JS_ITER_DONE_SENTINEL) break;
+
+        Item mapped = next_val;
+        if (mapping) {
+            Item idx_item = (Item){.item = i2it((int)k)};
+            Item args[2] = {next_val, idx_item};
+            mapped = js_call_function(mapFn, this_arg, args, 2);
+            if (js_check_exception()) {
+                js_array_from_close_preserve_exception(iterator);
+                return ItemNull;
+            }
+        }
+
+        js_array_from_define_index_or_throw(result, k, mapped);
+        if (js_check_exception()) {
+            js_array_from_close_preserve_exception(iterator);
+            return ItemNull;
+        }
+        k++;
+    }
+    js_property_set(result, (Item){.item = s2it(heap_create_name("length", 6))}, (Item){.item = i2it((int)k)});
+    return result;
+}
+
 extern "C" Item js_array_from(Item iterable) {
     extern Item js_throw_type_error(const char* msg);
     TypeId tid = get_type_id(iterable);

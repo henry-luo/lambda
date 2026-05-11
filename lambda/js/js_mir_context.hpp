@@ -164,6 +164,7 @@ struct JsLocalFuncEntry {
 struct JsLoopLabels {
     MIR_label_t continue_label;
     MIR_label_t break_label;
+    MIR_reg_t iterator_to_close;   // nonzero for for-of entries that need IteratorClose on outer abrupt jumps
     const char* label_name;       // v11: named label (NULL if anonymous)
     int label_name_len;           // v11: length of label name
 };
