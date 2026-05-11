@@ -2347,10 +2347,12 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         JsIdentifierNode* id = (JsIdentifierNode*)fo->left;
         var_name = id->name->chars;
         var_len = (int)id->name->len;
-    } else if (fo->left && fo->left->node_type == JS_AST_NODE_ARRAY_PATTERN) {
+    } else if (fo->left && (fo->left->node_type == JS_AST_NODE_ARRAY_PATTERN ||
+                            fo->left->node_type == JS_AST_NODE_ARRAY_EXPRESSION)) {
         // for (const [a, b] of arr) — left is array_pattern directly
         destr_pattern = (JsArrayPatternNode*)fo->left;
-    } else if (fo->left && fo->left->node_type == JS_AST_NODE_OBJECT_PATTERN) {
+    } else if (fo->left && (fo->left->node_type == JS_AST_NODE_OBJECT_PATTERN ||
+                            fo->left->node_type == JS_AST_NODE_OBJECT_EXPRESSION)) {
         obj_destr_pattern = (JsObjectPatternNode*)fo->left;
     } else if (fo->left && fo->left->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
         lhs_ref_node = fo->left;
@@ -2601,8 +2603,18 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
             jm_scope_env_mark_and_writeback(mt, wb_vname, loop_var);
         }
 
-        if (destr_pattern) jm_emit_array_destructure(mt, (JsAstNode*)destr_pattern, loop_var);
-        if (obj_destr_pattern) jm_emit_object_destructure(mt, (JsAstNode*)obj_destr_pattern, loop_var);
+        if (destr_pattern) {
+            bool prev_dstr_assignment = mt->destructure_assignment_mode;
+            mt->destructure_assignment_mode = !left_creates_bindings;
+            jm_emit_array_destructure(mt, (JsAstNode*)destr_pattern, loop_var);
+            mt->destructure_assignment_mode = prev_dstr_assignment;
+        }
+        if (obj_destr_pattern) {
+            bool prev_dstr_assignment = mt->destructure_assignment_mode;
+            mt->destructure_assignment_mode = !left_creates_bindings;
+            jm_emit_object_destructure(mt, (JsAstNode*)obj_destr_pattern, loop_var);
+            mt->destructure_assignment_mode = prev_dstr_assignment;
+        }
 
         if (fo->body) {
             if (fo->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
@@ -2786,7 +2798,10 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
 
     // Destructure element into individual variables if array pattern
     if (destr_pattern) {
+        bool prev_dstr_assignment = mt->destructure_assignment_mode;
+        mt->destructure_assignment_mode = !left_creates_bindings;
         jm_emit_array_destructure(mt, (JsAstNode*)destr_pattern, loop_var);
+        mt->destructure_assignment_mode = prev_dstr_assignment;
         // Check for exception from destructuring (e.g. non-iterable value for empty array pattern).
         // If exception is pending, close the for-of iterator and rethrow (l_iter_exc handler).
         MIR_reg_t arr_destr_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
@@ -2796,7 +2811,10 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
 
     // Destructure element into individual variables if object pattern
     if (obj_destr_pattern) {
+        bool prev_dstr_assignment = mt->destructure_assignment_mode;
+        mt->destructure_assignment_mode = !left_creates_bindings;
         jm_emit_object_destructure(mt, (JsAstNode*)obj_destr_pattern, loop_var);
+        mt->destructure_assignment_mode = prev_dstr_assignment;
         // Check for exception from destructuring
         MIR_reg_t obj_destr_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_iter_exc),

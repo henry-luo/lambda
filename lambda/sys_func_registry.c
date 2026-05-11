@@ -1660,6 +1660,7 @@ JitImport jit_runtime_imports[] = {
     {"js_iterable_to_array", FPTR(js_iterable_to_array)},
     // v29: Lazy iterator protocol for for-of
     {"js_get_iterator", FPTR(js_get_iterator)},
+    {"js_get_iterator_lazy", FPTR(js_get_iterator_lazy)},
     {"js_iterator_step", FPTR(js_iterator_step)},
     {"js_iterator_close", FPTR(js_iterator_close)},
     {"js_iterator_collect_rest", FPTR(js_iterator_collect_rest)},

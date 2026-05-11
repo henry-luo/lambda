@@ -9,6 +9,11 @@ MIR_reg_t jm_emit_get_iterator(JsMirTranspiler* mt, MIR_reg_t iterable) {
         MIR_T_I64, MIR_new_reg_op(mt->ctx, iterable));
 }
 
+MIR_reg_t jm_emit_get_iterator_lazy(JsMirTranspiler* mt, MIR_reg_t iterable) {
+    return jm_call_1(mt, "js_get_iterator_lazy", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, iterable));
+}
+
 
 MIR_reg_t jm_emit_iterator_step(JsMirTranspiler* mt, MIR_reg_t iterator) {
     return jm_call_1(mt, "js_iterator_step", MIR_T_I64,

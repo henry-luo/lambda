@@ -77,6 +77,7 @@ MIR_reg_t jm_emit_delete_reference(JsMirTranspiler* mt, const JsMirReference* re
 void jm_eval_cptn_reset(JsMirTranspiler* mt);
 void jm_push_loop_labels(JsMirTranspiler* mt, MIR_label_t continue_label, MIR_label_t break_label);
 MIR_reg_t jm_emit_get_iterator(JsMirTranspiler* mt, MIR_reg_t iterable);
+MIR_reg_t jm_emit_get_iterator_lazy(JsMirTranspiler* mt, MIR_reg_t iterable);
 MIR_reg_t jm_emit_iterator_step(JsMirTranspiler* mt, MIR_reg_t iterator);
 MIR_reg_t jm_emit_iterator_done_test(JsMirTranspiler* mt, MIR_reg_t step_result, const char* prefix);
 MIR_reg_t jm_emit_iterator_collect_rest(JsMirTranspiler* mt, MIR_reg_t iterator);
