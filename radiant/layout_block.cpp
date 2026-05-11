@@ -878,7 +878,23 @@ static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* paren
         pseudo_elem->specified_style = pseudo_styles;
     }
 
-    bool materialized_children = pseudo_materialize_content_children(lycon, parent, pseudo_elem, is_before);
+    bool has_counter_content = false;
+    if (pseudo_styles) {
+        CssDeclaration* content_decl = style_tree_get_declaration(pseudo_styles, CSS_PROPERTY_CONTENT);
+        CssValue* content_value = content_decl ? content_decl->value : nullptr;
+        int item_count = (content_value && content_value->type == CSS_VALUE_TYPE_LIST) ? content_value->data.list.count : 1;
+        for (int i = 0; content_value && i < item_count; i++) {
+            CssValue* item = (content_value->type == CSS_VALUE_TYPE_LIST) ? content_value->data.list.values[i] : content_value;
+            if (item && item->type == CSS_VALUE_TYPE_FUNCTION && item->data.function && item->data.function->name &&
+                (strcmp(item->data.function->name, "counter") == 0 || strcmp(item->data.function->name, "counters") == 0)) {
+                has_counter_content = true;
+                break;
+            }
+        }
+    }
+
+    bool materialized_children = has_counter_content ? false :
+        pseudo_materialize_content_children(lycon, parent, pseudo_elem, is_before);
 
     // Fallback for simple-content paths when no structured children were produced.
     // Empty content pseudo-elements still participate in layout (e.g., clearfix).

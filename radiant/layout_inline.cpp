@@ -6,6 +6,7 @@
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/font/font.h"
 #include "../lib/strbuf.h"
+#include <cstring>
 
 // Forward declarations from layout_block.cpp for pseudo-element handling
 extern PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* block);
@@ -826,13 +827,17 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // Push a new counter scope for this inline element so that counter-reset
     // creates a properly nested counter instance (not modifying the parent scope)
     bool pushed_counter_scope = false;
+    bool is_before_pseudo = elmt->is_element() && static_cast<DomElement*>(elmt)->tag_name &&
+        strcmp(static_cast<DomElement*>(elmt)->tag_name, "::before") == 0;
+    bool is_after_pseudo = elmt->is_element() && static_cast<DomElement*>(elmt)->tag_name &&
+        strcmp(static_cast<DomElement*>(elmt)->tag_name, "::after") == 0;
     if (lycon->counter_context) {
         counter_push_scope(lycon->counter_context);
         pushed_counter_scope = true;
     }
 
     // Apply counter operations for this inline element
-    if (lycon->counter_context && span->blk) {
+    if (lycon->counter_context && span->blk && !is_before_pseudo) {
         // Apply counter-reset if specified
         if (span->blk->counter_reset) {
             log_debug("%s     [Inline] Applying counter-reset: %s", elmt->source_loc(), span->blk->counter_reset);
@@ -850,6 +855,32 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         if (span->blk->counter_set) {
             log_debug("%s     [Inline] Applying counter-set: %s", elmt->source_loc(), span->blk->counter_set);
             counter_set(lycon->counter_context, span->blk->counter_set);
+        }
+
+        if (is_after_pseudo && elmt->parent && elmt->parent->is_element()) {
+            DomElement* origin = elmt->parent->as_element();
+            const char* content = dom_element_get_pseudo_element_content_with_counters(
+                origin, 2, lycon->counter_context, lycon->doc->arena);
+            if (!content) content = dom_element_get_pseudo_element_content(origin, 2);
+            if (content && elmt->is_element()) {
+                DomElement* pseudo_elem = static_cast<DomElement*>(elmt);
+                DomNode* first = pseudo_elem->first_child;
+                if (first && first->is_text()) {
+                    DomText* text_node = first->as_text();
+                    size_t content_len = strlen(content);
+                    String* text_string = (String*)arena_alloc(pseudo_elem->doc->arena,
+                        sizeof(String) + content_len + 1);
+                    if (text_string) {
+                        text_string->len = content_len;
+                        memcpy(text_string->chars, content, content_len);
+                        text_string->chars[content_len] = '\0';
+                        text_node->native_string = text_string;
+                        text_node->text = text_string->chars;
+                        text_node->length = content_len;
+                        text_node->rect = nullptr;
+                    }
+                }
+            }
         }
     }
 
