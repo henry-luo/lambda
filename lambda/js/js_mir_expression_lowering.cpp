@@ -27,7 +27,8 @@ JsMirReference jm_emit_reference(JsMirTranspiler* mt, JsAstNode* node) {
     ref.kind = JS_MIR_REF_INVALID;
     ref.base_reg = 0;
     ref.key_reg = 0;
-    ref.strict = mt->is_global_strict || mt->is_module;
+    ref.strict = mt->is_global_strict || mt->is_module ||
+        (mt->current_fc && mt->current_fc->is_strict);
 
     if (!node) return ref;
 
@@ -107,10 +108,15 @@ MIR_reg_t jm_emit_put_value(JsMirTranspiler* mt, const JsMirReference* ref, MIR_
 MIR_reg_t jm_emit_delete_reference(JsMirTranspiler* mt, const JsMirReference* ref) {
     if (!ref) return jm_box_int_const(mt, 1);
     switch (ref->kind) {
-    case JS_MIR_REF_PROPERTY:
-        return jm_call_2(mt, "js_delete_property", MIR_T_I64,
+    case JS_MIR_REF_PROPERTY: {
+        MIR_reg_t result = jm_call_2(mt, ref->strict ? "js_delete_property_strict" : "js_delete_property", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->key_reg));
+        if (ref->strict) {
+            jm_emit_exc_propagate_check(mt);
+        }
+        return result;
+    }
     case JS_MIR_REF_SUPER_PROPERTY: {
         MIR_reg_t msg = jm_box_string_literal(mt, "Unsupported reference to 'super'", 32);
         jm_call_void_1(mt, "js_throw_reference_error",
@@ -1650,6 +1656,13 @@ void jm_bind_destructure_var(JsMirTranspiler* mt, const char* vname, MIR_reg_t v
     }
     bool writes_module_binding = module_var && !local_shadows_module;
     if (writes_module_binding) {
+        if (!mt->destructure_assignment_mode &&
+            (module_var->var_kind == JS_VAR_LET || module_var->var_kind == JS_VAR_CONST)) {
+            jm_call_void_2(mt, "js_set_module_var",
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)module_var->int_val),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+            return;
+        }
         if (module_var->var_kind == JS_VAR_CONST) {
             jm_call_void_2(mt, "js_throw_const_assign",
                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)js_name),
@@ -1743,12 +1756,6 @@ void jm_bind_destructure_var(JsMirTranspiler* mt, const char* vname, MIR_reg_t v
     }
     MIR_reg_t reg;
     if (var) {
-        if (var->is_const) {
-            jm_call_void_2(mt, "js_throw_const_assign",
-                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)js_name),
-                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)js_name_len));
-            return;
-        }
         if (var->tdz_active && !mt->destructure_assignment_mode) {
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_reg_op(mt->ctx, var->reg), MIR_new_reg_op(mt->ctx, val)));
@@ -1763,6 +1770,12 @@ void jm_bind_destructure_var(JsMirTranspiler* mt, const char* vname, MIR_reg_t v
                     MIR_new_reg_op(mt->ctx, val)));
             }
             var->tdz_active = false;
+            return;
+        }
+        if (var->is_const) {
+            jm_call_void_2(mt, "js_throw_const_assign",
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)js_name),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)js_name_len));
             return;
         }
         if (var->tdz_active) {
@@ -2276,7 +2289,7 @@ void jm_emit_object_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MI
     // Pre-initialize all destructured target variables to undefined.
     // This prevents uninitialized variable usage if the exception check below
     // skips the property gets (e.g., due to a stale pending exception).
-    {
+    if (mt->destructure_assignment_mode) {
         MIR_reg_t pre_undef = jm_emit_undefined(mt);
         JsAstNode* p = pattern->properties;
         while (p) {

@@ -239,6 +239,8 @@ static bool js_array_apply_failed_length_shrink(Item obj, int64_t new_len, bool 
     }
     return true;
 }
+static int64_t js_parse_array_index(const char* s, int len);
+
 // ES2020 §9.1.6.3 ValidateAndApplyPropertyDescriptor
 static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descriptor) {
     if (!js_require_object_type(obj, "defineProperty")) return ItemNull;
@@ -434,6 +436,16 @@ static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descrip
     }
     // v18n: check is_new_property BEFORE setting any value (since js_property_set creates the property)
     bool is_new_property = !it2b(js_has_own_property(obj, name));
+    if (is_new_property && get_type_id(obj) == LMD_TYPE_ARRAY) {
+        Item nsc = js_to_string(name);
+        if (get_type_id(nsc) == LMD_TYPE_STRING) {
+            String* ns = it2s(nsc);
+            int64_t idx = ns ? js_parse_array_index(ns->chars, (int)ns->len) : -1;
+            if (idx >= 0 && obj.array && idx < obj.array->length) {
+                is_new_property = false;
+            }
+        }
+    }
     // also check accessor markers: accessor-only properties on arrays may not be detected by js_has_own_property
     if (is_new_property && get_type_id(obj) == LMD_TYPE_ARRAY) {
         Item nsc = js_to_string(name);
@@ -447,6 +459,49 @@ static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descrip
                     Item pm_item = (Item){.map = pm};
                     ShapeEntry* _se = js_find_shape_entry(pm_item, ns->chars, (int)ns->len);
                     if (_se && jspd_is_accessor(_se)) is_new_property = false;
+                }
+            }
+        }
+    }
+
+    if (get_type_id(obj) == LMD_TYPE_ARRAY && obj.array && obj.array->extra != 0) {
+        Item nsc = js_to_string(name);
+        if (get_type_id(nsc) == LMD_TYPE_STRING) {
+            String* ns = it2s(nsc);
+            if (ns && ns->len > 0 && ns->len < 200 &&
+                js_parse_array_index(ns->chars, (int)ns->len) >= 0) {
+                Map* pm = (Map*)(uintptr_t)obj.array->extra;
+                Item pm_item = (Item){.map = pm};
+                ShapeEntry* se = js_find_shape_entry(pm_item, ns->chars, (int)ns->len);
+                bool companion_non_config = !js_props_query_configurable(pm, se, ns->chars, (int)ns->len);
+                bool companion_accessor = se && jspd_is_accessor(se);
+
+                Item cfg_key = (Item){.item = s2it(heap_create_name("configurable", 12))};
+                if (companion_non_config && it2b(js_in(cfg_key, descriptor)) &&
+                    js_is_truthy(js_property_get(descriptor, cfg_key))) {
+                    Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
+                    Item msg = (Item){.item = s2it(heap_create_name("Cannot redefine property: configurable"))};
+                    js_throw_value(js_new_error_with_name(tn, msg));
+                    return obj;
+                }
+
+                Item val_key_check = (Item){.item = s2it(heap_create_name("value", 5))};
+                Item wri_key_check = (Item){.item = s2it(heap_create_name("writable", 8))};
+                Item get_key_check = (Item){.item = s2it(heap_create_name("get", 3))};
+                Item set_key_check = (Item){.item = s2it(heap_create_name("set", 3))};
+                bool desc_is_data = it2b(js_in(val_key_check, descriptor)) || it2b(js_in(wri_key_check, descriptor));
+                bool desc_is_accessor = it2b(js_in(get_key_check, descriptor)) || it2b(js_in(set_key_check, descriptor));
+                if (companion_non_config && companion_accessor && desc_is_data) {
+                    Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
+                    Item msg = (Item){.item = s2it(heap_create_name("Cannot redefine property: accessor to data"))};
+                    js_throw_value(js_new_error_with_name(tn, msg));
+                    return obj;
+                }
+                if (companion_non_config && !companion_accessor && se && desc_is_accessor) {
+                    Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
+                    Item msg = (Item){.item = s2it(heap_create_name("Cannot redefine property: data to accessor"))};
+                    js_throw_value(js_new_error_with_name(tn, msg));
+                    return obj;
                 }
             }
         }
@@ -494,6 +549,11 @@ static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descrip
                     // AT-3: accessors are stored as JsAccessorPair with IS_ACCESSOR
                     // shape flag (post-AT-1). Probe shape entry only.
                     ShapeEntry* _se_acc_chk = js_find_shape_entry(obj, ns_check->chars, (int)ns_check->len);
+                    if (!_se_acc_chk && get_type_id(obj) == LMD_TYPE_ARRAY && obj.array && obj.array->extra != 0 &&
+                        js_parse_array_index(ns_check->chars, (int)ns_check->len) >= 0) {
+                        Item companion = (Item){.map = (Map*)(uintptr_t)obj.array->extra};
+                        _se_acc_chk = js_find_shape_entry(companion, ns_check->chars, (int)ns_check->len);
+                    }
                     bool cur_is_accessor = (_se_acc_chk && jspd_is_accessor(_se_acc_chk));
 
                     Item val_key_check = (Item){.item = s2it(heap_create_name("value", 5))};
@@ -2968,7 +3028,7 @@ static Item structured_clone_impl(Item value, int depth) {
     }
 
     // maps/objects: clone properties
-    if (tid == LMD_TYPE_MAP) {
+    if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_ELEMENT) {
         Item result = js_new_object();
         Item keys = js_object_keys(value);
         int64_t len = js_array_length(keys);
@@ -9818,7 +9878,14 @@ static bool js_has_sym_iterator(Item iterable) {
     if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_ELEMENT) return false;
     Item key = (Item){.item = s2it(heap_create_name("__sym_1", 7))};
     Item iter_factory = js_property_get(iterable, key);
-    return get_type_id(iter_factory) == LMD_TYPE_FUNC;
+    if (js_check_exception()) return false;
+    TypeId ft = get_type_id(iter_factory);
+    if (iter_factory.item == ITEM_JS_UNDEFINED || ft == LMD_TYPE_UNDEFINED || ft == LMD_TYPE_NULL) return false;
+    if (ft != LMD_TYPE_FUNC) {
+        js_throw_type_error("Symbol.iterator is not a function");
+        return false;
+    }
+    return true;
 }
 
 static void js_array_from_define_index_or_throw(Item object, int64_t index, Item value) {
@@ -9842,6 +9909,42 @@ static void js_array_from_close_preserve_exception(Item iterator) {
     js_throw_value(saved);
 }
 
+static int64_t js_array_from_array_like_length(Item object) {
+    Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
+    Item len_val = js_property_get(object, len_key);
+    if (js_check_exception()) return 0;
+    if (len_val.item == ITEM_JS_UNDEFINED || get_type_id(len_val) == LMD_TYPE_UNDEFINED) return 0;
+    Item len_num = js_to_number(len_val);
+    if (js_check_exception()) return 0;
+    TypeId len_tid = get_type_id(len_num);
+    double len_d = 0;
+    if (len_tid == LMD_TYPE_INT) len_d = (double)it2i(len_num);
+    else if (len_tid == LMD_TYPE_INT64) len_d = (double)it2l(len_num);
+    else if (len_tid == LMD_TYPE_FLOAT) len_d = it2d(len_num);
+    if (!(len_d > 0)) return 0;
+    if (len_d > 9007199254740991.0) return 9007199254740991LL;
+    return (int64_t)len_d;
+}
+
+static void js_array_from_array_like_into(Item result, Item iterable, int64_t len, Item mapFn, Item this_arg, bool mapping) {
+    for (int64_t k = 0; k < len; k++) {
+        char idx_buf[24];
+        snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)k);
+        Item idx_key = (Item){.item = s2it(heap_create_name(idx_buf, strlen(idx_buf)))};
+        Item value = js_property_get(iterable, idx_key);
+        if (js_check_exception()) return;
+        if (mapping) {
+            Item idx_item = (Item){.item = i2it((int)k)};
+            Item args[2] = {value, idx_item};
+            value = js_call_function(mapFn, this_arg, args, 2);
+            if (js_check_exception()) return;
+        }
+        js_array_from_define_index_or_throw(result, k, value);
+        if (js_check_exception()) return;
+    }
+    js_property_set(result, (Item){.item = s2it(heap_create_name("length", 6))}, (Item){.item = i2it((int)len)});
+}
+
 extern "C" Item js_array_from_with_constructor(Item ctor, Item iterable, Item mapFn, Item this_arg, bool mapping) {
     if (mapping && get_type_id(mapFn) != LMD_TYPE_FUNC) {
         js_throw_type_error("Array.from: mapFn is not a function");
@@ -9855,6 +9958,14 @@ extern "C" Item js_array_from_with_constructor(Item ctor, Item iterable, Item ma
 
     Item result = js_new_from_class_object(ctor, NULL, 0);
     if (js_check_exception()) return ItemNull;
+
+    if (!js_has_sym_iterator(iterable)) {
+        if (js_check_exception()) return ItemNull;
+        int64_t len = js_array_from_array_like_length(iterable);
+        if (js_check_exception()) return ItemNull;
+        js_array_from_array_like_into(result, iterable, len, mapFn, this_arg, mapping);
+        return js_check_exception() ? ItemNull : result;
+    }
 
     Item iterator = js_get_iterator(iterable);
     if (js_check_exception()) return ItemNull;
@@ -9949,23 +10060,21 @@ extern "C" Item js_array_from(Item iterable) {
         return result;
     }
     // v20: Array-like objects with .length property (e.g. {0: 'a', 1: 'b', length: 2})
-    if (tid == LMD_TYPE_MAP) {
-        Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
-        Item len_val = js_property_get(iterable, len_key);
-        TypeId lt = get_type_id(len_val);
-        if (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT) {
-            int len = (lt == LMD_TYPE_INT) ? (int)it2i(len_val) : (int)it2d(len_val);
-            if (len >= 0) {
-                Item result = js_array_new(0);
-                for (int i = 0; i < len; i++) {
-                    char idx_buf[16];
-                    snprintf(idx_buf, sizeof(idx_buf), "%d", i);
-                    Item idx_key = (Item){.item = s2it(heap_create_name(idx_buf, strlen(idx_buf)))};
-                    Item val = js_property_get(iterable, idx_key);
-                    js_array_push(result, val);
-                }
-                return result;
+    if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_ELEMENT) {
+        if (!js_has_sym_iterator(iterable)) {
+            if (js_check_exception()) return js_array_new(0);
+            int64_t len = js_array_from_array_like_length(iterable);
+            if (js_check_exception()) return js_array_new(0);
+            Item result = js_array_new(0);
+            for (int64_t i = 0; i < len; i++) {
+                char idx_buf[24];
+                snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)i);
+                Item idx_key = (Item){.item = s2it(heap_create_name(idx_buf, strlen(idx_buf)))};
+                Item val = js_property_get(iterable, idx_key);
+                if (js_check_exception()) return js_array_new(0);
+                js_array_push(result, val);
             }
+            return result;
         }
     }
     // Use js_iterable_to_array for Map, Set, generators, and other iterables
@@ -10004,6 +10113,7 @@ extern "C" Item js_array_from_with_mapper(Item iterable, Item mapFn) {
     if (js_has_sym_iterator(iterable)) {
         return js_array_from_iter_mapped(iterable, mapFn, make_js_undefined());
     }
+    if (js_check_exception()) return js_array_new(0);
     // J39-7 spec §22.1.2.1: source[k] must be read each iteration so that callbacks
     // mutating the source array are observed. For LMD_TYPE_ARRAY and array-like maps,
     // iterate the source live.
@@ -10064,6 +10174,7 @@ extern "C" Item js_array_from_with_mapper_this(Item iterable, Item mapFn, Item t
     if (js_has_sym_iterator(iterable)) {
         return js_array_from_iter_mapped(iterable, mapFn, this_arg);
     }
+    if (js_check_exception()) return js_array_new(0);
     if (stid == LMD_TYPE_ARRAY) {
         Array* src = iterable.array;
         Item result = js_array_new(0);
@@ -10625,6 +10736,7 @@ extern "C" Item js_delete_property(Item obj, Item key) {
                                                   sk->chars, (int)sk->len)) {
                     return (Item){.item = b2it(false)};
                 }
+
             }
         }
         // Mark as deleted in properties_map. The bare-key sentinel write
@@ -10688,8 +10800,12 @@ extern "C" Item js_delete_property(Item obj, Item key) {
                     if (ks) {
                         Map* pm = (Map*)(uintptr_t)arr->extra;
                         // Stage A3.2: shape-flag-first non-configurable check.
-                        ShapeEntry* _se = js_find_shape_entry(obj, ks->chars, (int)ks->len);
+                        Item pm_item = (Item){.map = pm};
+                        ShapeEntry* _se = js_find_shape_entry(pm_item, ks->chars, (int)ks->len);
                         if (!js_props_query_configurable(pm, _se, ks->chars, (int)ks->len)) {
+                            if (js_strict_mode) {
+                                js_throw_type_error("Cannot delete non-configurable property");
+                            }
                             return (Item){.item = b2it(false)};
                         }
                     }
@@ -10761,6 +10877,9 @@ extern "C" Item js_delete_property(Item obj, Item key) {
                 String* ks = it2s(k);
                 if (ks && ks->len > 0 && ks->len < 200) {
                     if (!js_ordinary_delete(pm_item, ks->chars, (int)ks->len)) {
+                        if (js_strict_mode) {
+                            js_throw_type_error("Cannot delete non-configurable property");
+                        }
                         return (Item){.item = b2it(false)};
                     }
                 }
@@ -10934,6 +11053,29 @@ extern "C" Item js_delete_property(Item obj, Item key) {
         }
     }
     return (Item){.item = b2it(true)};
+}
+
+extern "C" Item js_delete_property_strict(Item obj, Item key) {
+    Item prop_key = js_to_property_key(key);
+    if (js_check_exception()) return (Item){.item = b2it(false)};
+    Item desc = js_object_get_own_property_descriptor(obj, prop_key);
+    if (js_check_exception()) return (Item){.item = b2it(false)};
+    TypeId desc_type = get_type_id(desc);
+    bool desc_present = desc.item != ItemNull.item && desc.item != ITEM_JS_UNDEFINED &&
+        desc_type != LMD_TYPE_UNDEFINED && desc_type != LMD_TYPE_NULL;
+    if (desc_present) {
+        Item cfg_key = (Item){.item = s2it(heap_create_name("configurable", 12))};
+        Item cfg = js_property_get(desc, cfg_key);
+        if (!js_is_truthy(cfg)) {
+            js_throw_type_error("Cannot delete non-configurable property");
+            return (Item){.item = b2it(false)};
+        }
+    }
+    Item result = js_delete_property(obj, prop_key);
+    if (!js_check_exception() && !js_is_truthy(result)) {
+        js_throw_type_error("Cannot delete non-configurable property");
+    }
+    return result;
 }
 
 // =============================================================================
