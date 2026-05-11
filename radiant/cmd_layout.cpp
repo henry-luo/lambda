@@ -5927,16 +5927,18 @@ static bool layout_single_file(
 
     pool_destroy(pool);
 
-    // Reset JS runtime state to avoid cross-document leakage in batch mode.
-    // Must happen BEFORE script_runner_cleanup_heap: js_batch_reset clears
-    // global Items (js_input, js_exception_value, etc.) that reference the
-    // JS heap. Freeing the heap first would leave dangling pointers.
-    js_batch_reset();
-    js_dom_batch_reset();
-    js_globals_batch_reset();
+    if (!script_runner_js_batch_cleanup_unsafe()) {
+        // Reset JS runtime state to avoid cross-document leakage in batch mode.
+        // Must happen BEFORE script_runner_cleanup_heap: js_batch_reset clears
+        // global Items (js_input, js_exception_value, etc.) that reference the
+        // JS heap. Freeing the heap first would leave dangling pointers.
+        js_batch_reset();
+        js_dom_batch_reset();
+        js_globals_batch_reset();
 
-    // Drain the mmap pool from JS execution (after js_batch_reset cleared globals).
-    script_runner_cleanup_heap();
+        // Drain the mmap pool from JS execution (after js_batch_reset cleared globals).
+        script_runner_cleanup_heap();
+    }
 
     // Reset per-document font state to avoid cross-document cache pollution in batch mode.
     font_context_reset_document_fonts(ui_context->font_ctx);

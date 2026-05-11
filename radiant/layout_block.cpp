@@ -2339,6 +2339,29 @@ static float apply_text_box_trim(ViewBlock* block) {
     return total_trim;
 }
 
+static bool inline_span_has_multiple_child_y(ViewSpan* span) {
+    if (!span) return false;
+    View* first = span->first_placed_child();
+    if (!first) return false;
+    float first_y = first->y;
+    for (View* child = first->next(); child; child = child->next()) {
+        if (child->view_type != RDT_VIEW_NONE && child->y != first_y) return true;
+    }
+    return false;
+}
+
+static void recompute_inline_descendant_bounds(View* view, FontHandle* fallback_fh) {
+    if (!view || !view->is_element()) return;
+    DomElement* element = (DomElement*)view;
+    for (DomNode* child_node = element->first_child; child_node; child_node = child_node->next_sibling) {
+        recompute_inline_descendant_bounds((View*)child_node, fallback_fh);
+    }
+    if (view->view_type == RDT_VIEW_INLINE) {
+        ViewSpan* span = (ViewSpan*)view;
+        compute_span_bounding_box(span, inline_span_has_multiple_child_y(span), fallback_fh);
+    }
+}
+
 // CSS 2.1 §10.3.3: After an inline-block shrinks to fit, its block-level children
 // in normal flow with auto width must be adjusted to match the new containing block
 // width. During initial layout, these children stretched to the full available width
@@ -6922,6 +6945,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 block->y += block->bound->margin.top;
                 lycon->line.advance_x += block->bound->margin.left + block->bound->margin.right;
             }
+            recompute_inline_descendant_bounds((View*)block, lycon->font.font_handle);
             log_debug("%s inline-block in line: x: %d, y: %d, adv-x: %d, mg-left: %d, mg-top: %d", elmt->source_loc(),
                 block->x, block->y, lycon->line.advance_x, block->bound ? block->bound->margin.left : 0, block->bound ? block->bound->margin.top : 0);
 

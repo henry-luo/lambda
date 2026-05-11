@@ -809,7 +809,9 @@ void form_control_set_checked(DocState* state, View* view, bool checked) {
         }
     }
 
-    state->needs_repaint = true;
+    if (state) {
+        state->needs_repaint = true;
+    }
 }
 
 void scroll_state_attach(DocState* state, void* pane_ptr) {

@@ -75,6 +75,13 @@ void collect_and_compile_event_handlers(DomDocument* dom_doc);
  */
 void script_runner_cleanup_js_state(DomDocument* dom_doc);
 
+/**
+ * Returns true after JS execution has been interrupted by the watchdog while
+ * inside the MIR/JS runtime. In that state, static JS batch globals may point
+ * into partially-built runtime memory and must not be reset.
+ */
+bool script_runner_js_batch_cleanup_unsafe(void);
+
 #ifdef __cplusplus
 }
 #endif
