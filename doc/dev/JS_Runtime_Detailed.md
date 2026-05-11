@@ -645,9 +645,9 @@ struct JsPromise {
     Item result;                    // fulfillment value or rejection reason
     Item on_fulfilled[8];           // then callbacks (max 8 per promise)
     Item on_rejected[8];
-    int  next_promise[8];           // chained promise indices
+    Item next_promise[8];           // chained promise object for each reaction
     bool is_finally[8];
-    int  handler_count;
+    int  then_count;
 };
 ```
 
@@ -660,6 +660,10 @@ Ring buffer in `js_event_loop.cpp`:
 - `js_microtask_flush()` — drains all (including newly enqueued during execution), with `CAPACITY*2` safety limit
 - Called after each top-level statement in batch mode
 
+PromiseJobs are routed through `js_job_queue.{h,cpp}`:
+- `js_enqueue_promise_job(job)` validates and enqueues Promise reaction/thenable jobs into the host microtask queue.
+- `js_run_microtasks()` drains the shared host microtask queue.
+
 ### 7.3 Methods Implemented
 
 - `Promise.resolve()`, `Promise.reject()`
@@ -667,7 +671,9 @@ Ring buffer in `js_event_loop.cpp`:
 - `Promise.all()`, `Promise.race()`, `Promise.any()`, `Promise.allSettled()`
 - `Promise.withResolvers()`
 
-**Limitations**: Max 1024 promises per run, max 8 chained handlers per promise, no thenable assimilation (only native promises recognized).
+The Promise Resolution Procedure now assimilates native promises and generic thenables. Reactions, missing-handler pass-through, executor throws, `.finally()` cleanup promises, and `await` thenables all flow through PromiseJobs.
+
+**Limitations**: Max 1024 promises per run and max 8 chained handlers per promise.
 
 ---
 

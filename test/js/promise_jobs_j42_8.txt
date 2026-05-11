@@ -1,6 +1,17 @@
 thenable job
 executor:executor
+source:source
+marker:marker
+thenable job
 thenable job
 resolve:assimilated
 caught:boom
+adopted:source
+pass-through:through
+thenable job
+await:assimilated
+await-reject:await-fail
 all:1,assimilated,3
+finally-reject:orig
+finally-cleanup:cleanup-fail
+finally-pass:pass
