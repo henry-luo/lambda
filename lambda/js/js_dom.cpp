@@ -158,14 +158,11 @@ static inline void dom_text_replace_data(DomText* text, uint32_t off,
  * document pointer so next file starts fresh.
  */
 static void expando_reset(); // forward declaration
-// Phase 6E: text-control state + focus tracker live in radiant/text_control.{hpp,cpp}.
-// We re-expose the focus slots here as macros so existing `_js_active_element = elem`
-// assignments keep compiling.
+// Phase 6E: text-control helpers are shared with Radiant event/render paths.
 #include "../../radiant/text_control.hpp"
-#define _js_active_element              (*tc_active_element_slot())
-#define _js_last_focused_text_control   (*tc_last_focused_text_control_slot())
 #define tc_is_text_control_elem(e)      tc_is_text_control(e)
 extern "C" void js_dom_batch_reset() {
+    DocState* state = js_dom_current_state();
     js_document_proxy_item = (Item){.item = ITEM_NULL};
     js_document_default_view = (Item){.item = ITEM_NULL};
     js_document_title_value = (Item){.item = ITEM_NULL};
@@ -173,7 +170,7 @@ extern "C" void js_dom_batch_reset() {
     js_dom_events_reset();
     js_xhr_reset();
     expando_reset();
-    tc_reset_focus_state();
+    tc_reset_focus_state(state);
 }
 
 // ============================================================================
@@ -2787,7 +2784,8 @@ extern "C" Item js_document_get_property(Item prop_name) {
 
     // activeElement — currently focused element, or <body> as default per spec.
     if (strcmp(prop, "activeElement") == 0) {
-        if (_js_active_element) return js_dom_wrap_element(_js_active_element);
+        DomElement* active_element = tc_get_active_element(js_dom_current_state());
+        if (active_element) return js_dom_wrap_element(active_element);
         // default to <body> if available
         DomNode* child = root ? root->first_child : nullptr;
         while (child) {
@@ -2832,7 +2830,7 @@ extern "C" Item js_document_get_property(Item prop_name) {
 // Returns nullptr if no text control should contribute.
 extern "C" String* js_dom_active_text_control_selected_text(void) {
     uint32_t blen = 0;
-    const char* sel = tc_active_selected_text(&blen);
+    const char* sel = tc_active_selected_text(js_dom_current_state(), &blen);
     if (!sel || !blen) return nullptr;
     return heap_strcpy((char*)sel, (int64_t)blen);
 }
@@ -6930,14 +6928,15 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
     // focus() / blur() — stubs for headless mode
     if (strcmp(method, "focus") == 0 || strcmp(method, "blur") == 0) {
         if (strcmp(method, "focus") == 0) {
-            _js_active_element = elem;
+            tc_set_active_element(js_dom_current_state(), elem);
             if (tc_is_text_control_elem(elem)) {
                 tc_ensure_init(elem);
-                _js_last_focused_text_control = elem;
+                tc_set_last_focused_text_control(js_dom_current_state(), elem);
             }
         } else {
             // blur: clear activeElement only if it points to us.
-            if (_js_active_element == elem) _js_active_element = nullptr;
+            DocState* state = js_dom_current_state();
+            if (tc_get_active_element(state) == elem) tc_set_active_element(state, nullptr);
         }
         return make_js_undefined();
     }
@@ -7002,8 +7001,8 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         FormControlProp* f = elem->form;
         form_control_set_selection(js_dom_current_state(), (View*)elem, 0, f->current_value_u16_len, 0);
         // Per HTML, select() implicitly focuses the control.
-        _js_active_element = elem;
-        _js_last_focused_text_control = elem;
+        tc_set_active_element(js_dom_current_state(), elem);
+        tc_set_last_focused_text_control(js_dom_current_state(), elem);
         return make_js_undefined();
     }
 

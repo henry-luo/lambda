@@ -1019,6 +1019,11 @@ static void doc_state_detach_transient_owner(DocState* state, View* view) {
             memset(state->drag_drop, 0, sizeof(DragDropState));
         }
     }
+    if (view->is_element()) {
+        DomElement* elem = (DomElement*)view;
+        if (state->active_text_control == elem) state->active_text_control = NULL;
+        if (state->last_focused_text_control == elem) state->last_focused_text_control = NULL;
+    }
 }
 
 static uint32_t view_state_detach_node(DocState* state, DomNode* node) {
@@ -1060,12 +1065,104 @@ static View* view_state_find_live_id(DomNode* node, uint32_t view_id) {
     return NULL;
 }
 
+static bool view_state_tree_contains_view(DomNode* node, View* view) {
+    if (!node || !view) return false;
+    if ((View*)node == view) return true;
+    if (node->is_element()) {
+        DomElement* element = (DomElement*)node;
+        for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+            if (view_state_tree_contains_view(child, view)) return true;
+        }
+    }
+    return false;
+}
+
+static uint32_t view_state_clear_interaction_flag(DocState* state, const char* name) {
+    if (!state || !state->view_state_map || !name) return 0;
+    uint32_t changed = 0;
+    size_t iter = 0;
+    void* item = NULL;
+    while (hashmap_iter(state->view_state_map, &iter, &item)) {
+        ViewStateEntry* entry = (ViewStateEntry*)item;
+        ViewState* view_state = entry ? entry->state : NULL;
+        if (!view_state) continue;
+        if (strcmp(name, "hover") == 0 && view_state->flags.hovered) {
+            view_state->flags.hovered = 0;
+            changed++;
+        } else if (strcmp(name, "active") == 0 && view_state->flags.active) {
+            view_state->flags.active = 0;
+            changed++;
+        }
+    }
+    return changed;
+}
+
+static uint32_t doc_state_prune_stale_transient_owners(DocState* state, DomNode* root) {
+    if (!state || !root) return 0;
+    uint32_t changed = 0;
+
+    if (state->hover_target && !view_state_tree_contains_view(root, state->hover_target)) {
+        doc_state_log_view_target_transition(state, "hover.target", state->hover_target, NULL);
+        state->hover_target = NULL;
+        changed++;
+    }
+    if (!state->hover_target) changed += view_state_clear_interaction_flag(state, "hover");
+
+    if (state->active_target && !view_state_tree_contains_view(root, state->active_target)) {
+        doc_state_log_view_target_transition(state, "active.target", state->active_target, NULL);
+        state->active_target = NULL;
+        changed++;
+    }
+    if (!state->active_target) changed += view_state_clear_interaction_flag(state, "active");
+
+    if (state->drag_target && !view_state_tree_contains_view(root, state->drag_target)) {
+        doc_state_log_view_target_transition(state, "drag.target", state->drag_target, NULL);
+        state->drag_target = NULL;
+        state->is_dragging = false;
+        changed++;
+    }
+    if (state->open_dropdown && !view_state_tree_contains_view(root, state->open_dropdown)) {
+        doc_state_log_dropdown_owner_transition(state, state->open_dropdown, NULL);
+        state->open_dropdown = NULL;
+        state->dropdown_width = 0.0f;
+        state->dropdown_height = 0.0f;
+        changed++;
+    }
+    if (state->context_menu_target && !view_state_tree_contains_view(root, state->context_menu_target)) {
+        doc_state_log_context_menu_target_transition(state, state->context_menu_target, NULL);
+        state->context_menu_target = NULL;
+        state->context_menu_hover = -1;
+        state->context_menu_width = 0.0f;
+        state->context_menu_height = 0.0f;
+        changed++;
+    }
+    if (state->drag_drop) {
+        bool stale_source = state->drag_drop->source_view && !view_state_tree_contains_view(root, state->drag_drop->source_view);
+        bool stale_target = state->drag_drop->drop_target && !view_state_tree_contains_view(root, state->drag_drop->drop_target);
+        if (stale_source || stale_target) {
+            memset(state->drag_drop, 0, sizeof(DragDropState));
+            changed++;
+        }
+    }
+    if (state->active_text_control && !view_state_tree_contains_view(root, (View*)state->active_text_control)) {
+        state->active_text_control = NULL;
+        changed++;
+    }
+    if (state->last_focused_text_control && !view_state_tree_contains_view(root, (View*)state->last_focused_text_control)) {
+        state->last_focused_text_control = NULL;
+        changed++;
+    }
+
+    return changed;
+}
+
 uint32_t view_state_prune_orphans(DocState* state) {
     if (!state || !state->view_state_map || !state->owner_store || !state->owner_store->document) return 0;
 
     DomDocument* doc = state->owner_store->document;
     DomNode* root = doc->root ? (DomNode*)doc->root : (DomNode*)doc->html_root;
     uint32_t removed = 0;
+    uint32_t owner_changes = doc_state_prune_stale_transient_owners(state, root);
     bool found_orphan = true;
     while (found_orphan) {
         found_orphan = false;
@@ -1086,13 +1183,14 @@ uint32_t view_state_prune_orphans(DocState* state) {
         }
     }
 
-    if (removed > 0) {
+    if (removed > 0 || owner_changes > 0) {
         state->is_dirty = true;
         state->needs_repaint = true;
         state->version++;
-        log_debug("view_state_prune_orphans: removed %u orphaned ViewState entries", removed);
+        log_debug("view_state_prune_orphans: removed %u orphaned ViewState entries, pruned %u transient owners/flags",
+            removed, owner_changes);
     }
-    return removed;
+    return removed + owner_changes;
 }
 
 uint32_t view_state_detach_subtree(DocState* state, DomNode* root) {
@@ -2057,6 +2155,119 @@ void scroll_state_get_position_for_view(DocState* state, View* view, void* pane_
     }
 
     scroll_state_get_position(state, pane_ptr, out_h_pos, out_v_pos, out_h_max, out_v_max);
+}
+
+static void scroll_interaction_mark_dirty(DocState* state) {
+    if (!state) return;
+    state->is_dirty = true;
+    state->needs_repaint = true;
+    state->version++;
+}
+
+void scroll_state_set_hover_for_view(DocState* state, View* view, void* pane_ptr,
+                                     bool h_hovered, bool v_hovered) {
+    if (!state || !view) return;
+    ScrollPane* pane = (ScrollPane*)pane_ptr;
+    if (pane) scroll_state_attach(state, pane_ptr);
+
+    ViewState* view_state = scroll_view_state_get_or_create(state, view, pane);
+    if (!view_state) return;
+
+    bool old_h = view_state->data.scroll.h_hovered != 0;
+    bool old_v = view_state->data.scroll.v_hovered != 0;
+    if (old_h == h_hovered && old_v == v_hovered) return;
+
+    view_state->data.scroll.h_hovered = h_hovered ? 1 : 0;
+    view_state->data.scroll.v_hovered = v_hovered ? 1 : 0;
+    view_state_log_bool_transition(state, view, "scroll.h_hovered", old_h, h_hovered);
+    view_state_log_bool_transition(state, view, "scroll.v_hovered", old_v, v_hovered);
+    scroll_interaction_mark_dirty(state);
+    state_assert_after_mutation(state, "scroll_state_set_hover_for_view");
+}
+
+void scroll_state_begin_drag_for_view(DocState* state, View* view, void* pane_ptr,
+                                      bool horizontal,
+                                      float start_x, float start_y,
+                                      float h_start_scroll, float v_start_scroll) {
+    if (!state || !view) return;
+    ScrollPane* pane = (ScrollPane*)pane_ptr;
+    if (pane) scroll_state_attach(state, pane_ptr);
+
+    ViewState* view_state = scroll_view_state_get_or_create(state, view, pane);
+    if (!view_state) return;
+
+    bool old_h = view_state->data.scroll.h_dragging != 0;
+    bool old_v = view_state->data.scroll.v_dragging != 0;
+    view_state->data.scroll.h_dragging = horizontal ? 1 : 0;
+    view_state->data.scroll.v_dragging = horizontal ? 0 : 1;
+    view_state->data.scroll.drag_start_x = start_x;
+    view_state->data.scroll.drag_start_y = start_y;
+    view_state->data.scroll.h_drag_start_scroll = h_start_scroll;
+    view_state->data.scroll.v_drag_start_scroll = v_start_scroll;
+
+    view_state_log_bool_transition(state, view, "scroll.h_dragging", old_h, horizontal);
+    view_state_log_bool_transition(state, view, "scroll.v_dragging", old_v, !horizontal);
+    scroll_interaction_mark_dirty(state);
+    state_assert_after_mutation(state, "scroll_state_begin_drag_for_view");
+}
+
+void scroll_state_clear_drag_for_view(DocState* state, View* view, void* pane_ptr) {
+    if (!state || !view) return;
+    ScrollPane* pane = (ScrollPane*)pane_ptr;
+    if (pane) scroll_state_attach(state, pane_ptr);
+
+    ViewState* view_state = scroll_view_state_get_or_create(state, view, pane);
+    if (!view_state) return;
+
+    bool old_h = view_state->data.scroll.h_dragging != 0;
+    bool old_v = view_state->data.scroll.v_dragging != 0;
+    if (!old_h && !old_v && view_state->data.scroll.drag_start_x == 0.0f &&
+        view_state->data.scroll.drag_start_y == 0.0f &&
+        view_state->data.scroll.h_drag_start_scroll == 0.0f &&
+        view_state->data.scroll.v_drag_start_scroll == 0.0f) {
+        return;
+    }
+
+    view_state->data.scroll.h_dragging = 0;
+    view_state->data.scroll.v_dragging = 0;
+    view_state->data.scroll.drag_start_x = 0.0f;
+    view_state->data.scroll.drag_start_y = 0.0f;
+    view_state->data.scroll.h_drag_start_scroll = 0.0f;
+    view_state->data.scroll.v_drag_start_scroll = 0.0f;
+
+    view_state_log_bool_transition(state, view, "scroll.h_dragging", old_h, false);
+    view_state_log_bool_transition(state, view, "scroll.v_dragging", old_v, false);
+    scroll_interaction_mark_dirty(state);
+    state_assert_after_mutation(state, "scroll_state_clear_drag_for_view");
+}
+
+void scroll_state_get_interaction_for_view(DocState* state, View* view,
+                                           ScrollInteractionState* out_state) {
+    if (!out_state) return;
+    memset(out_state, 0, sizeof(ScrollInteractionState));
+    ViewState* view_state = state && view ? view_state_get(state, view) : NULL;
+    if (!view_state || view_state->kind != VIEW_STATE_SCROLL) return;
+
+    out_state->h_hovered = view_state->data.scroll.h_hovered != 0;
+    out_state->v_hovered = view_state->data.scroll.v_hovered != 0;
+    out_state->h_dragging = view_state->data.scroll.h_dragging != 0;
+    out_state->v_dragging = view_state->data.scroll.v_dragging != 0;
+    out_state->drag_start_x = view_state->data.scroll.drag_start_x;
+    out_state->drag_start_y = view_state->data.scroll.drag_start_y;
+    out_state->h_drag_start_scroll = view_state->data.scroll.h_drag_start_scroll;
+    out_state->v_drag_start_scroll = view_state->data.scroll.v_drag_start_scroll;
+}
+
+bool scroll_state_is_hovered_for_view(DocState* state, View* view) {
+    ScrollInteractionState interaction;
+    scroll_state_get_interaction_for_view(state, view, &interaction);
+    return interaction.h_hovered || interaction.v_hovered;
+}
+
+bool scroll_state_is_dragging_for_view(DocState* state, View* view) {
+    ScrollInteractionState interaction;
+    scroll_state_get_interaction_for_view(state, view, &interaction);
+    return interaction.h_dragging || interaction.v_dragging;
 }
 
 const char* form_control_get_value(DocState* state, View* view, uint32_t* out_len) {
@@ -5029,8 +5240,8 @@ static void focus_sync_text_control_state(DocState* state, View* view) {
         DomElement* elem = (DomElement*)view;
         tc_ensure_init(elem);
         FormControlProp* form = elem->form;
-        tc_set_active_element(elem);
-        tc_set_last_focused_text_control(elem);
+        tc_set_active_element(state, elem);
+        tc_set_last_focused_text_control(state, elem);
         if (!form) return;
 
         uint32_t start = tc_utf16_to_utf8_offset(form->current_value,
@@ -5047,7 +5258,7 @@ static void focus_sync_text_control_state(DocState* state, View* view) {
         return;
     }
 
-    if (tc_get_active_element()) tc_set_active_element(NULL);
+    if (tc_get_active_element(state)) tc_set_active_element(state, NULL);
     if (state->caret && state->caret->view) caret_clear(state);
     if (state->selection && state->selection->anchor_view) selection_clear(state);
 }
@@ -5076,7 +5287,7 @@ void focus_set(DocState* state, View* view, bool from_keyboard) {
 
     if (old_focus && old_focus != view && old_focus->is_element() &&
         tc_is_text_control((DomElement*)old_focus)) {
-        tc_set_active_element(NULL);
+        tc_set_active_element(state, NULL);
     }
 
     // Store previous focus for restoration
@@ -5136,7 +5347,7 @@ void focus_clear(DocState* state) {
     View* old_focus = focus->current;
     if (old_focus && old_focus->is_element() &&
         tc_is_text_control((DomElement*)old_focus)) {
-        tc_set_active_element(NULL);
+        tc_set_active_element(state, NULL);
     }
     focus->previous = focus->current;
     focus->current = NULL;

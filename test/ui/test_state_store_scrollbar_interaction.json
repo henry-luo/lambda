@@ -1,0 +1,36 @@
+{
+  "name": "StateStore scrollbar hover and drag interaction",
+  "html": "test/ui/test_state_store_scrollbar_interaction.html",
+  "events": [
+    {"type": "log", "message": "=== StateStore scrollbar interaction ==="},
+    {"type": "wait", "ms": 100},
+
+    {"type": "mouse_move", "target": {"selector": "#pane", "offset_x": 216, "offset_y": 20}},
+    {"type": "assert_state_store", "target": {"selector": "#pane"}, "view_state": true, "kind": "scroll", "weak_ref": true,
+     "scrollbar_v_hovered": true, "scrollbar_h_hovered": false,
+     "scrollbar_v_dragging": false, "scrollbar_h_dragging": false},
+
+    {"type": "mouse_down", "target": {"selector": "#pane", "offset_x": 216, "offset_y": 20}},
+    {"type": "assert_state_store", "target": {"selector": "#pane"},
+     "scrollbar_v_hovered": true, "scrollbar_v_dragging": true,
+     "scrollbar_h_dragging": false, "drag_active": true, "drag_target": true},
+
+    {"type": "mouse_up", "target": {"selector": "#pane", "offset_x": 216, "offset_y": 20}},
+    {"type": "assert_state_store", "target": {"selector": "#pane"},
+     "scrollbar_v_dragging": false, "scrollbar_h_dragging": false, "drag_active": false, "drag_target": false},
+
+    {"type": "mouse_move", "target": {"selector": "#pane", "offset_x": 40, "offset_y": 156}},
+    {"type": "assert_state_store", "target": {"selector": "#pane"},
+     "scrollbar_h_hovered": true, "scrollbar_v_hovered": false,
+     "scrollbar_h_dragging": false, "scrollbar_v_dragging": false},
+
+    {"type": "mouse_down", "target": {"selector": "#pane", "offset_x": 40, "offset_y": 156}},
+    {"type": "assert_state_store", "target": {"selector": "#pane"},
+     "scrollbar_h_hovered": true, "scrollbar_h_dragging": true,
+     "scrollbar_v_dragging": false, "drag_active": true, "drag_target": true},
+
+    {"type": "mouse_up", "target": {"selector": "#pane", "offset_x": 40, "offset_y": 156}},
+    {"type": "assert_state_store", "target": {"selector": "#pane"},
+     "scrollbar_h_dragging": false, "scrollbar_v_dragging": false, "drag_active": false, "drag_target": false}
+  ]
+}

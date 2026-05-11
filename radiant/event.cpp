@@ -657,14 +657,14 @@ void fire_block_event(EventContext* evcon, ViewBlock* block) {
             scrollpane_scroll(evcon, block, block->scroller->pane);
         }
         else if (evcon->event.type == RDT_EVENT_MOUSE_DOWN &&
-            (block->scroller->pane->is_h_hovered || block->scroller->pane->is_v_hovered)) {
+            scroll_state_is_hovered_for_view(evcon->ui_context->document->state, (View*)block)) {
             scrollpane_mouse_down(evcon, block);
         }
         else if (evcon->event.type == RDT_EVENT_MOUSE_UP) {
             scrollpane_mouse_up(evcon, block);
         }
         else if (evcon->event.type == RDT_EVENT_MOUSE_DRAG &&
-            (block->scroller->pane->h_is_dragging || block->scroller->pane->v_is_dragging)) {
+            scroll_state_is_dragging_for_view(evcon->ui_context->document->state, (View*)block)) {
             scrollpane_drag(evcon, block);
         }
     }
@@ -4974,8 +4974,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 DomElement* tc_elem = (DomElement*)tc_focused;
                 if (tc_is_text_control(tc_elem)) {
                     tc_sync_legacy_to_form(tc_elem, tc_state);
-                    tc_set_active_element(tc_elem);
-                    tc_set_last_focused_text_control(tc_elem);
+                    tc_set_active_element(state, tc_elem);
+                    tc_set_last_focused_text_control(state, tc_elem);
                 }
             }
         }

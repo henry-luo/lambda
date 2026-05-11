@@ -27,12 +27,6 @@ void tc_notify_selection_changed(DomElement* elem) {
     js_dom_queue_textcontrol_selectionchange(elem);
 }
 
-// Module-local focus tracker. The JS bindings and event.cpp both write to
-// this so Selection.toString() / document.activeElement can resolve to the
-// same source of truth even when JS runs without Radiant layout.
-static DomElement* g_active_element = nullptr;
-static DomElement* g_last_focused_text_control = nullptr;
-
 // ---- DomNode text walker (textarea initial value) ----------------------
 // Local to this TU so radiant code does not need to depend on lambda/js/.
 static void tc_collect_text(DomNode* n, StrBuf* sb) {
@@ -183,7 +177,6 @@ void tc_ensure_init(DomElement* elem) {
         bool show = (f->current_value_len == 0) && f->placeholder && f->placeholder[0];
         state_set_bool(f->state_ref ? f->state_ref : (elem->doc ? (DocState*)elem->doc->state : nullptr),
             elem, STATE_PLACEHOLDER, show);
-        f->placeholder_shown = show ? 1 : 0;
     }
 
     // F5: seed :valid / :invalid / :required / :read-only on first init so
@@ -201,7 +194,6 @@ static void tc_refresh_placeholder_shown(DomElement* elem, FormControlProp* f) {
     bool show = (f->current_value_len == 0) && f->placeholder && f->placeholder[0];
     state_set_bool(f->state_ref ? f->state_ref : (elem->doc ? (DocState*)elem->doc->state : nullptr),
         elem, STATE_PLACEHOLDER, show);
-    f->placeholder_shown = show ? 1 : 0;
 }
 
 // F4 (Radiant_Design_Form_Input.md §3.5): suppress recursive history push
@@ -358,26 +350,46 @@ void tc_sync_legacy_to_form(DomElement* elem, DocState* state) {
 
 // ---- public: focus tracker ---------------------------------------------
 
-void tc_set_active_element(DomElement* elem) { g_active_element = elem; }
-DomElement* tc_get_active_element(void) { return g_active_element; }
-void tc_set_last_focused_text_control(DomElement* elem) { g_last_focused_text_control = elem; }
-DomElement* tc_get_last_focused_text_control(void) { return g_last_focused_text_control; }
-DomElement** tc_active_element_slot(void) { return &g_active_element; }
-DomElement** tc_last_focused_text_control_slot(void) { return &g_last_focused_text_control; }
-void tc_reset_focus_state(void) {
-    g_active_element = nullptr;
-    g_last_focused_text_control = nullptr;
+static DocState* tc_resolve_state(DocState* state, DomElement* elem) {
+    if (state) return state;
+    return elem && elem->doc ? (DocState*)elem->doc->state : nullptr;
+}
+
+void tc_set_active_element(DocState* state, DomElement* elem) {
+    DocState* resolved = tc_resolve_state(state, elem);
+    if (!resolved) return;
+    resolved->active_text_control = elem;
+}
+
+DomElement* tc_get_active_element(DocState* state) {
+    return state ? state->active_text_control : nullptr;
+}
+
+void tc_set_last_focused_text_control(DocState* state, DomElement* elem) {
+    DocState* resolved = tc_resolve_state(state, elem);
+    if (!resolved) return;
+    resolved->last_focused_text_control = elem;
+}
+
+DomElement* tc_get_last_focused_text_control(DocState* state) {
+    return state ? state->last_focused_text_control : nullptr;
+}
+
+void tc_reset_focus_state(DocState* state) {
+    if (!state) return;
+    state->active_text_control = nullptr;
+    state->last_focused_text_control = nullptr;
 }
 
 // ---- public: Selection.toString() bridge -------------------------------
 
-const char* tc_active_selected_text(uint32_t* out_byte_len) {
+const char* tc_active_selected_text(DocState* state, uint32_t* out_byte_len) {
     if (out_byte_len) *out_byte_len = 0;
-    DomElement* tc = g_last_focused_text_control;
+    DomElement* tc = tc_get_last_focused_text_control(state);
     if (!tc || !tc_is_text_control(tc)) return nullptr;
-    if (g_active_element && tc_is_text_control(g_active_element)
-        && g_active_element != tc) {
-        tc = g_active_element;
+    DomElement* active = tc_get_active_element(state);
+    if (active && tc_is_text_control(active) && active != tc) {
+        tc = active;
     }
     tc_ensure_init(tc);
     FormControlProp* f = tc->form;

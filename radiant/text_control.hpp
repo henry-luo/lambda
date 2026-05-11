@@ -67,16 +67,12 @@ void tc_sync_legacy_to_form(DomElement* elem, DocState* state);
 // length in bytes, or nullptr / 0 when no text control is focused or the
 // selection is empty. Result is a pointer into form->current_value valid
 // until the next mutation; copy if the caller needs to persist it.
-const char* tc_active_selected_text(uint32_t* out_byte_len);
+const char* tc_active_selected_text(DocState* state, uint32_t* out_byte_len);
 
 // Focus tracking (used by document.activeElement and Selection.toString) -
 
-void tc_set_active_element(DomElement* elem);
-DomElement* tc_get_active_element(void);
-void tc_set_last_focused_text_control(DomElement* elem);
-DomElement* tc_get_last_focused_text_control(void);
-void tc_reset_focus_state(void);
-
-// Direct slot accessors (used by JS bindings to keep `slot = elem` syntax).
-DomElement** tc_active_element_slot(void);
-DomElement** tc_last_focused_text_control_slot(void);
+void tc_set_active_element(DocState* state, DomElement* elem);
+DomElement* tc_get_active_element(DocState* state);
+void tc_set_last_focused_text_control(DocState* state, DomElement* elem);
+DomElement* tc_get_last_focused_text_control(DocState* state);
+void tc_reset_focus_state(DocState* state);

@@ -75,6 +75,15 @@ struct ViewState {
             float y;
             float max_x;
             float max_y;
+          uint8_t h_hovered : 1;
+          uint8_t v_hovered : 1;
+          uint8_t h_dragging : 1;
+          uint8_t v_dragging : 1;
+          uint8_t reserved : 4;
+          float drag_start_x;
+          float drag_start_y;
+          float h_drag_start_scroll;
+          float v_drag_start_scroll;
         } scroll;
 
         struct {
@@ -203,6 +212,7 @@ Any local mirror update code that bypasses StateStore must be removed.
 ### Step 5.4 Move block scroll to ViewState
 
 - Move mutable block scroll position/max into `ViewState.scroll`.
+- Move scrollbar hover and thumb-drag substate into `ViewState.scroll`; `ScrollPane` keeps only render geometry/projection fields.
 - Preserve default behavior when no ViewState exists.
 
 ### Step 5.5 Move form mutable state to ViewState
@@ -243,17 +253,19 @@ Any local mirror update code that bypasses StateStore must be removed.
 - Hover is represented as a document target plus a ViewState chain: the hovered view and each ancestor carry `ViewState.flags.hovered`, and siblings/outside subtrees do not.
 - Active is represented the same way: `DocState.active_target` owns the innermost active view while `ViewState.flags.active` is applied to that view and its ancestor chain.
 - Drag/drop is a document-scoped state-machine session with validated source, drag target, pending/active drop state, and live drop target ownership.
+- Text-control active/last-focused ownership is per-document `DocState`, not a module-global cache.
 
 ## Implementation Notes
 
 - `StateStore` owns the per-document `DocState` and lazy `ViewState` registry.
 - Dynamic pseudo-state and form/scroll interaction state resolve through StateStore/ViewState with static defaults when no `ViewState` exists.
-- `DomElement::pseudo_state` and non-text `FormControlProp` dynamic mirrors are not used as canonical state.
+- Scrollbar hover and thumb-drag substate is stored in `ViewState.scroll`, not `ScrollPane`.
+- `DomElement::pseudo_state`, text-control pseudo caches, and non-text `FormControlProp` dynamic mirrors are not used as canonical state.
 - DOM detach lifecycle prunes orphaned `ViewState` entries so registry validation only sees live view ids.
 - Hover and active updates run through state-machine transitions and StateStore writers that update the full target-to-root ViewState chain atomically before validation.
 - Drag and drag/drop updates run through state-machine transitions so drag target, pending/active state, coordinates, source, and drop target are validated as one document interaction model.
-- `make check-state-store` guards against reintroducing element pseudo-state caches, non-text form mirror access, external scroll mirrors, external direct ViewState writes, and external direct DocState writes.
-- Event simulation includes `assert_state_store` for internal StateStore/ViewState assertions, including optional `view_state_count`, active target, and drag/drop checks.
+- `make check-state-store` guards against reintroducing element pseudo-state caches, text-control focus globals, text-control pseudo caches, non-text form mirror access, external scroll mirrors, ScrollPane interaction mirrors, external direct ViewState writes, and external direct DocState writes.
+- Event simulation includes `assert_state_store` for internal StateStore/ViewState assertions, including optional `view_state_count`, active target, drag/drop checks, and scrollbar hover/drag checks.
 
 ## Success Criteria
 

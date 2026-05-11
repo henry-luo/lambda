@@ -693,7 +693,6 @@ void te_ime_update(DomElement* elem, const char* preedit, uint32_t len,
     // Hide the placeholder while composing (even if value is still empty).
     state_set_bool(f->state_ref ? f->state_ref : (elem->doc ? (DocState*)elem->doc->state : nullptr),
         elem, STATE_PLACEHOLDER, false);
-    f->placeholder_shown = 0;
 
     if (len == 0 || !preedit) {
         te_clear_preedit(f);
@@ -761,7 +760,6 @@ void te_ime_cancel(DomElement* elem) {
     bool show = (f->current_value_len == 0) && f->placeholder && f->placeholder[0];
     state_set_bool(f->state_ref ? f->state_ref : (elem->doc ? (DocState*)elem->doc->state : nullptr),
         elem, STATE_PLACEHOLDER, show);
-    f->placeholder_shown = show ? 1 : 0;
     log_debug("te_ime_cancel: composition aborted");
     js_dom_queue_textcontrol_compositionend(elem, "");
 }

@@ -213,16 +213,13 @@ struct FormControlProp {
     //   - caret_blink_t: monotonic seconds since the last caret toggle.
     //   - caret_on: visibility flag toggled by the blink timer (always
     //     true in headless renders so snapshots stay deterministic).
-    //   - placeholder_shown / focus_visible: cached pseudo-state bits,
-    //     refreshed on focus/blur/value-change so CSS selector matching
-    //     can read them in O(1).
+    //   - pseudo-state bits live in StateStore; FormControlProp keeps only
+    //     text rendering/session projection fields here.
     // ------------------------------------------------------------------
     float    scroll_x;
     float    scroll_y;
     float    caret_blink_t;
     uint8_t  caret_on : 1;
-    uint8_t  placeholder_shown : 1;
-    uint8_t  focus_visible : 1;
 
     // ------------------------------------------------------------------
     // F7 (Radiant_Design_Form_Input.md §3.7): IME / composition preedit.
@@ -255,7 +252,7 @@ struct FormControlProp {
         custom_validity_msg(nullptr),
         value_at_focus(nullptr), value_at_focus_len(0), history(nullptr),
         scroll_x(0.0f), scroll_y(0.0f), caret_blink_t(0.0f),
-        caret_on(1), placeholder_shown(0), focus_visible(0),
+        caret_on(1),
         preedit_utf8(nullptr), preedit_len(0), preedit_caret(0) {}
 
     ~FormControlProp() {
