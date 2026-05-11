@@ -45,18 +45,20 @@ static DomElement* ctx_menu_target_elem(DocState* state) {
     return tc_is_text_control(e) ? e : nullptr;
 }
 
-static bool ctx_menu_has_selection(DomElement* elem) {
+static bool ctx_menu_has_selection(DocState* state, DomElement* elem) {
     if (!elem || !elem->form) return false;
-    return elem->form->selection_start != elem->form->selection_end;
+    uint32_t start = 0, end = 0;
+    form_control_get_selection(state, (View*)elem, &start, &end, NULL);
+    return start != end;
 }
 
 bool context_menu_item_enabled(DocState* state, int item) {
     DomElement* elem = ctx_menu_target_elem(state);
     if (!elem || !elem->form) return false;
-    bool readonly = elem->form->readonly;
-    bool disabled = elem->form->disabled;
+    bool readonly = form_control_is_readonly(state, (View*)elem);
+    bool disabled = form_control_is_disabled(state, (View*)elem);
     if (disabled) return false;
-    bool has_sel  = ctx_menu_has_selection(elem);
+    bool has_sel  = ctx_menu_has_selection(state, elem);
     bool has_val  = elem->form->current_value_len > 0;
     const char* clip = clipboard_get_text();
     bool has_clip = clip && *clip;
@@ -77,22 +79,15 @@ void context_menu_open(DocState* state, View* target, float x, float y) {
     DomElement* e = (DomElement*)target;
     if (!tc_is_text_control(e)) return;
 
-    state->context_menu_target = target;
-    state->context_menu_x      = x;
-    state->context_menu_y      = y;
     // Width/height are nominal CSS-px values; render scales them.
-    state->context_menu_width  = CTX_MENU_WIDTH;
-    state->context_menu_height = CTX_MENU_ITEM_HEIGHT * CTX_MENU_ITEM_COUNT;
-    state->context_menu_hover  = -1;
-    state->needs_repaint = true;
+    doc_state_open_context_menu(state, target, x, y,
+        CTX_MENU_WIDTH, CTX_MENU_ITEM_HEIGHT * CTX_MENU_ITEM_COUNT);
     log_debug("context_menu_open at (%.1f, %.1f)", x, y);
 }
 
 void context_menu_close(DocState* state) {
     if (!state || !state->context_menu_target) return;
-    state->context_menu_target = nullptr;
-    state->context_menu_hover  = -1;
-    state->needs_repaint = true;
+    doc_state_close_context_menu(state);
     log_debug("context_menu_close");
 }
 
@@ -107,8 +102,7 @@ bool context_menu_contains(DocState* state, float x, float y) {
 bool context_menu_hover(DocState* state, float x, float y) {
     if (!context_menu_contains(state, x, y)) {
         if (state && state->context_menu_target && state->context_menu_hover != -1) {
-            state->context_menu_hover = -1;
-            state->needs_repaint = true;
+            doc_state_set_context_menu_hover(state, -1);
         }
         return false;
     }
@@ -116,8 +110,7 @@ bool context_menu_hover(DocState* state, float x, float y) {
     if (idx < 0) idx = 0;
     if (idx >= CTX_MENU_ITEM_COUNT) idx = CTX_MENU_ITEM_COUNT - 1;
     if (state->context_menu_hover != idx) {
-        state->context_menu_hover = idx;
-        state->needs_repaint = true;
+        doc_state_set_context_menu_hover(state, idx);
     }
     return true;
 }

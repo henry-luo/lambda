@@ -9,9 +9,9 @@
  * hidden "__range_id" / "__sel_id" property on the JS object. Methods
  * recover the receiver via js_get_this() and look up native state.
  *
- * The selection / live-range list lives on the document's DocState
- * (DomDocument::state). In headless JS mode that may be NULL on entry, so
- * we lazily create it via radiant_state_create() on first use.
+ * The selection / live-range list lives on the document's StateStore-backed
+ * DocState projection. In headless JS mode that may be NULL on entry, so
+ * we lazily create the document StateStore on first use.
  */
 
 #include "js_dom_selection.h"
@@ -147,8 +147,7 @@ static DocState* get_or_create_state() {
     if (!doc) return nullptr;
     if (doc->state) return doc->state;
     if (!doc->pool) return nullptr;
-    doc->state = radiant_state_create(doc->pool, STATE_MODE_IN_PLACE);
-    return doc->state;
+    return radiant_document_ensure_state(doc, "js_dom_selection");
 }
 
 // ============================================================================

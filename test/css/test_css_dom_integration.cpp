@@ -43,10 +43,50 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
 
 class DomIntegrationTest : public ::testing::Test {
 protected:
+    typedef struct TestPseudoStateEntry {
+        DomElement* element;
+        uint32_t pseudo_state;
+    } TestPseudoStateEntry;
+
     Pool* pool;
     Input* input;
     DomDocument* doc;
     SelectorMatcher* matcher;
+    TestPseudoStateEntry pseudo_states[64];
+    int pseudo_state_count;
+
+    static bool test_pseudo_state_resolver(void* context, DomElement* element, uint32_t pseudo_state) {
+        DomIntegrationTest* test = (DomIntegrationTest*)context;
+        if (!test || !element) return false;
+        switch (pseudo_state) {
+            case PSEUDO_STATE_LINK:
+                return dom_element_has_attribute(element, "href");
+            case PSEUDO_STATE_CHECKED:
+                return test->has_pseudo_state(element, pseudo_state) || dom_element_has_attribute(element, "checked");
+            case PSEUDO_STATE_DISABLED:
+                return test->has_pseudo_state(element, pseudo_state) || dom_element_has_attribute(element, "disabled");
+            case PSEUDO_STATE_ENABLED:
+                return !test->has_pseudo_state(element, PSEUDO_STATE_DISABLED) && !dom_element_has_attribute(element, "disabled");
+            case PSEUDO_STATE_REQUIRED:
+                return test->has_pseudo_state(element, pseudo_state) || dom_element_has_attribute(element, "required");
+            case PSEUDO_STATE_OPTIONAL:
+                return !test->has_pseudo_state(element, PSEUDO_STATE_REQUIRED) && !dom_element_has_attribute(element, "required");
+            case PSEUDO_STATE_READ_ONLY:
+                return test->has_pseudo_state(element, pseudo_state) || dom_element_has_attribute(element, "readonly");
+            case PSEUDO_STATE_READ_WRITE:
+                return !test->has_pseudo_state(element, PSEUDO_STATE_READ_ONLY) && !dom_element_has_attribute(element, "readonly");
+            case PSEUDO_STATE_SELECTED:
+                return test->has_pseudo_state(element, pseudo_state) || dom_element_has_attribute(element, "selected");
+            case PSEUDO_STATE_PLACEHOLDER_SHOWN:
+                {
+                    const char* placeholder = dom_element_get_attribute(element, "placeholder");
+                    const char* value = dom_element_get_attribute(element, "value");
+                    return placeholder && placeholder[0] && (!value || !value[0]);
+                }
+            default:
+                return test->has_pseudo_state(element, pseudo_state);
+        }
+    }
 
     void SetUp() override {
         // Create Input for MarkBuilder
@@ -66,9 +106,11 @@ protected:
         // Create DomDocument for DOM tree
         doc = dom_document_create(input);
         ASSERT_NE(doc, nullptr);
+        pseudo_state_count = 0;
 
         matcher = selector_matcher_create(pool);
         ASSERT_NE(matcher, nullptr);
+        selector_matcher_set_pseudo_state_resolver(matcher, test_pseudo_state_resolver, this);
     }
 
     void TearDown() override {
@@ -79,6 +121,33 @@ protected:
             dom_document_destroy(doc);
         }
         // Input cleanup handled automatically, pool is owned by Input
+    }
+
+    uint32_t* pseudo_state_for(DomElement* element) {
+        if (!element) return nullptr;
+        for (int i = 0; i < pseudo_state_count; i++) {
+            if (pseudo_states[i].element == element) return &pseudo_states[i].pseudo_state;
+        }
+        if (pseudo_state_count >= 64) return nullptr;
+        pseudo_states[pseudo_state_count].element = element;
+        pseudo_states[pseudo_state_count].pseudo_state = 0;
+        pseudo_state_count++;
+        return &pseudo_states[pseudo_state_count - 1].pseudo_state;
+    }
+
+    void set_pseudo_state(DomElement* element, uint32_t pseudo_state) {
+        uint32_t* state = pseudo_state_for(element);
+        if (state) *state |= pseudo_state;
+    }
+
+    void clear_pseudo_state(DomElement* element, uint32_t pseudo_state) {
+        uint32_t* state = pseudo_state_for(element);
+        if (state) *state &= ~pseudo_state;
+    }
+
+    bool has_pseudo_state(DomElement* element, uint32_t pseudo_state) {
+        uint32_t* state = pseudo_state_for(element);
+        return state ? ((*state & pseudo_state) != 0) : false;
     }
 
     // Helper: Build DomElement from Lambda Element with MarkBuilder
@@ -534,23 +603,23 @@ TEST_F(DomIntegrationTest, PseudoClass_UserAction) {
     DomElement* link = create_element_with_backing("a");
 
     // :hover
-    dom_element_set_pseudo_state(link, PSEUDO_STATE_HOVER);
+    set_pseudo_state(link, PSEUDO_STATE_HOVER);
     EXPECT_TRUE(selector_matcher_matches_pseudo_class(matcher, CSS_SELECTOR_PSEUDO_HOVER, nullptr, link));
     EXPECT_FALSE(selector_matcher_matches_pseudo_class(matcher, CSS_SELECTOR_PSEUDO_ACTIVE, nullptr, link));
 
     // :active
-    dom_element_clear_pseudo_state(link, PSEUDO_STATE_HOVER);
-    dom_element_set_pseudo_state(link, PSEUDO_STATE_ACTIVE);
+    clear_pseudo_state(link, PSEUDO_STATE_HOVER);
+    set_pseudo_state(link, PSEUDO_STATE_ACTIVE);
     EXPECT_TRUE(selector_matcher_matches_pseudo_class(matcher, CSS_SELECTOR_PSEUDO_ACTIVE, nullptr, link));
     EXPECT_FALSE(selector_matcher_matches_pseudo_class(matcher, CSS_SELECTOR_PSEUDO_HOVER, nullptr, link));
 
     // :focus
-    dom_element_clear_pseudo_state(link, PSEUDO_STATE_ACTIVE);
-    dom_element_set_pseudo_state(link, PSEUDO_STATE_FOCUS);
+    clear_pseudo_state(link, PSEUDO_STATE_ACTIVE);
+    set_pseudo_state(link, PSEUDO_STATE_FOCUS);
     EXPECT_TRUE(selector_matcher_matches_pseudo_class(matcher, CSS_SELECTOR_PSEUDO_FOCUS, nullptr, link));
 
     // :visited
-    dom_element_set_pseudo_state(link, PSEUDO_STATE_VISITED);
+    set_pseudo_state(link, PSEUDO_STATE_VISITED);
     EXPECT_TRUE(selector_matcher_matches_pseudo_class(matcher, CSS_SELECTOR_PSEUDO_VISITED, nullptr, link));
 }
 
@@ -560,19 +629,19 @@ TEST_F(DomIntegrationTest, PseudoClass_InputStates) {
 
     // :enabled / :disabled
     EXPECT_TRUE(selector_matcher_matches_pseudo_class(matcher, CSS_SELECTOR_PSEUDO_ENABLED, nullptr, input));
-    dom_element_set_pseudo_state(input, PSEUDO_STATE_DISABLED);
+    set_pseudo_state(input, PSEUDO_STATE_DISABLED);
     EXPECT_TRUE(selector_matcher_matches_pseudo_class(matcher, CSS_SELECTOR_PSEUDO_DISABLED, nullptr, input));
     EXPECT_FALSE(selector_matcher_matches_pseudo_class(matcher, CSS_SELECTOR_PSEUDO_ENABLED, nullptr, input));
 
     // :checked
     DomElement* checkbox = create_element_with_backing("input");
     dom_element_set_attribute(checkbox, "type", "checkbox");
-    dom_element_set_pseudo_state(checkbox, PSEUDO_STATE_CHECKED);
+    set_pseudo_state(checkbox, PSEUDO_STATE_CHECKED);
     EXPECT_TRUE(selector_matcher_matches_pseudo_class(matcher, CSS_SELECTOR_PSEUDO_CHECKED, nullptr, checkbox));
 
     // :required / :optional
     DomElement* required_input = create_element_with_backing("input");
-    dom_element_set_pseudo_state(required_input, PSEUDO_STATE_REQUIRED);
+    set_pseudo_state(required_input, PSEUDO_STATE_REQUIRED);
     EXPECT_TRUE(selector_matcher_matches_pseudo_class(matcher, CSS_SELECTOR_PSEUDO_REQUIRED, nullptr, required_input));
 
     DomElement* optional_input = create_element_with_backing("input");
@@ -580,16 +649,16 @@ TEST_F(DomIntegrationTest, PseudoClass_InputStates) {
 
     // :valid / :invalid
     DomElement* valid_input = create_element_with_backing("input");
-    dom_element_set_pseudo_state(valid_input, PSEUDO_STATE_VALID);
+    set_pseudo_state(valid_input, PSEUDO_STATE_VALID);
     EXPECT_TRUE(selector_matcher_matches_pseudo_class(matcher, CSS_SELECTOR_PSEUDO_VALID, nullptr, valid_input));
 
     DomElement* invalid_input = create_element_with_backing("input");
-    dom_element_set_pseudo_state(invalid_input, PSEUDO_STATE_INVALID);
+    set_pseudo_state(invalid_input, PSEUDO_STATE_INVALID);
     EXPECT_TRUE(selector_matcher_matches_pseudo_class(matcher, CSS_SELECTOR_PSEUDO_INVALID, nullptr, invalid_input));
 
     // :read-only / :read-write
     DomElement* readonly_input = create_element_with_backing("input");
-    dom_element_set_pseudo_state(readonly_input, PSEUDO_STATE_READ_ONLY);
+    set_pseudo_state(readonly_input, PSEUDO_STATE_READ_ONLY);
     EXPECT_TRUE(selector_matcher_matches_pseudo_class(matcher, CSS_SELECTOR_PSEUDO_READ_ONLY, nullptr, readonly_input));
 
     DomElement* readwrite_input = create_element_with_backing("input");
@@ -603,11 +672,11 @@ TEST_F(DomIntegrationTest, PseudoClass_InputStates) {
 TEST_F(DomIntegrationTest, PseudoStateMatching) {
     DomElement* element = create_element_with_backing("button");
 
-    dom_element_set_pseudo_state(element, PSEUDO_STATE_HOVER);
+    set_pseudo_state(element, PSEUDO_STATE_HOVER);
     EXPECT_TRUE(selector_matcher_matches_pseudo_class(matcher, CSS_SELECTOR_PSEUDO_HOVER, nullptr, element));
     EXPECT_FALSE(selector_matcher_matches_pseudo_class(matcher, CSS_SELECTOR_PSEUDO_ACTIVE, nullptr, element));
 
-    dom_element_set_pseudo_state(element, PSEUDO_STATE_ACTIVE);
+    set_pseudo_state(element, PSEUDO_STATE_ACTIVE);
     EXPECT_TRUE(selector_matcher_matches_pseudo_class(matcher, CSS_SELECTOR_PSEUDO_ACTIVE, nullptr, element));
 }
 
@@ -1741,21 +1810,21 @@ TEST_F(DomIntegrationTest, AdvancedSelector_PseudoClassCombinations) {
     dom_element_set_attribute(input, "required", "true");
 
     // Set multiple pseudo-class states
-    dom_element_set_pseudo_state(input, PSEUDO_STATE_FOCUS);
-    dom_element_set_pseudo_state(input, PSEUDO_STATE_VALID);
+    set_pseudo_state(input, PSEUDO_STATE_FOCUS);
+    set_pseudo_state(input, PSEUDO_STATE_VALID);
 
     // Verify multiple states
-    EXPECT_TRUE(dom_element_has_pseudo_state(input, PSEUDO_STATE_FOCUS));
-    EXPECT_TRUE(dom_element_has_pseudo_state(input, PSEUDO_STATE_VALID));
-    EXPECT_FALSE(dom_element_has_pseudo_state(input, PSEUDO_STATE_INVALID));
+    EXPECT_TRUE(has_pseudo_state(input, PSEUDO_STATE_FOCUS));
+    EXPECT_TRUE(has_pseudo_state(input, PSEUDO_STATE_VALID));
+    EXPECT_FALSE(has_pseudo_state(input, PSEUDO_STATE_INVALID));
 
     // Change state
-    dom_element_clear_pseudo_state(input, PSEUDO_STATE_VALID);
-    dom_element_set_pseudo_state(input, PSEUDO_STATE_INVALID);
+    clear_pseudo_state(input, PSEUDO_STATE_VALID);
+    set_pseudo_state(input, PSEUDO_STATE_INVALID);
 
-    EXPECT_TRUE(dom_element_has_pseudo_state(input, PSEUDO_STATE_FOCUS));
-    EXPECT_FALSE(dom_element_has_pseudo_state(input, PSEUDO_STATE_VALID));
-    EXPECT_TRUE(dom_element_has_pseudo_state(input, PSEUDO_STATE_INVALID));
+    EXPECT_TRUE(has_pseudo_state(input, PSEUDO_STATE_FOCUS));
+    EXPECT_FALSE(has_pseudo_state(input, PSEUDO_STATE_VALID));
+    EXPECT_TRUE(has_pseudo_state(input, PSEUDO_STATE_INVALID));
 }
 
 TEST_F(DomIntegrationTest, AdvancedSelector_FormElementHierarchy) {
@@ -1844,8 +1913,8 @@ TEST_F(DomIntegrationTest, AdvancedSelector_FormElementHierarchy) {
     DomElement* input5 = (DomElement*)input4->next_sibling;
 
     // Set pseudo-states (must be done after element creation)
-    dom_element_set_pseudo_state(input3, PSEUDO_STATE_CHECKED);
-    dom_element_set_pseudo_state(input5, PSEUDO_STATE_CHECKED);
+    set_pseudo_state(input3, PSEUDO_STATE_CHECKED);
+    set_pseudo_state(input5, PSEUDO_STATE_CHECKED);
 
     // Verify hierarchy
     EXPECT_EQ(input1->parent, fieldset1);
@@ -1860,9 +1929,9 @@ TEST_F(DomIntegrationTest, AdvancedSelector_FormElementHierarchy) {
     EXPECT_STREQ(dom_element_get_attribute(input3, "type"), "checkbox");
 
     // Verify pseudo-states
-    EXPECT_TRUE(dom_element_has_pseudo_state(input3, PSEUDO_STATE_CHECKED));
-    EXPECT_TRUE(dom_element_has_pseudo_state(input5, PSEUDO_STATE_CHECKED));
-    EXPECT_FALSE(dom_element_has_pseudo_state(input4, PSEUDO_STATE_CHECKED));
+    EXPECT_TRUE(has_pseudo_state(input3, PSEUDO_STATE_CHECKED));
+    EXPECT_TRUE(has_pseudo_state(input5, PSEUDO_STATE_CHECKED));
+    EXPECT_FALSE(has_pseudo_state(input4, PSEUDO_STATE_CHECKED));
 }
 
 TEST_F(DomIntegrationTest, AdvancedSelector_SpecificityTieBreaker_SourceOrder) {

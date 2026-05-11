@@ -3025,6 +3025,7 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
 
     // Step 6: Apply CSS cascade (external + <style> elements)
     SelectorMatcher* matcher = selector_matcher_create(pool);
+    state_configure_selector_matcher((DocState*)dom_doc->state, matcher);
 
     auto t_cascade_start = high_resolution_clock::now();
     reset_cascade_timing();  // reset timing accumulators
@@ -3638,6 +3639,7 @@ DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_heigh
 
     // Create selector matcher
     SelectorMatcher* matcher = selector_matcher_create(pool);
+    state_configure_selector_matcher((DocState*)dom_doc->state, matcher);
 
     // Apply stylesheets to DOM tree
     for (int i = 0; i < stylesheet_count; i++) {
@@ -4000,6 +4002,7 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
     auto step4_start = std::chrono::high_resolution_clock::now();
     {
         SelectorMatcher* matcher = selector_matcher_create(pool);
+        state_configure_selector_matcher((DocState*)dom_doc->state, matcher);
         if (markdown_stylesheet && markdown_stylesheet->rule_count > 0) {
             apply_stylesheet_to_dom_tree_fast(dom_root, markdown_stylesheet, matcher, pool, css_engine);
         }
@@ -4179,6 +4182,7 @@ DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width, int viewport_heigh
     auto step4_start = std::chrono::high_resolution_clock::now();
     if (wiki_stylesheet && wiki_stylesheet->rule_count > 0) {
         SelectorMatcher* matcher = selector_matcher_create(pool);
+        state_configure_selector_matcher((DocState*)dom_doc->state, matcher);
         apply_stylesheet_to_dom_tree_fast(dom_root, wiki_stylesheet, matcher, pool, css_engine);
     }
     auto step4_end = std::chrono::high_resolution_clock::now();
@@ -4369,6 +4373,7 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
 
     // Step 7: Apply CSS cascade to DOM tree
     SelectorMatcher* matcher = selector_matcher_create(pool);
+    state_configure_selector_matcher((DocState*)dom_doc->state, matcher);
 
     // Apply LaTeX stylesheet first if available
     if (latex_stylesheet && latex_stylesheet->rule_count > 0) {
@@ -4627,6 +4632,7 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
         log_error("[Lambda XML] Failed to create selector matcher");
         return nullptr;
     }
+    state_configure_selector_matcher((DocState*)dom_doc->state, matcher);
 
     // Reset timing stats before cascade
     reset_cascade_timing();
@@ -4981,6 +4987,7 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
     // Step 8: Apply CSS cascade to DOM tree
     auto step7_start = std::chrono::high_resolution_clock::now();
     SelectorMatcher* matcher = selector_matcher_create(pool);
+    state_configure_selector_matcher((DocState*)dom_doc->state, matcher);
 
     // Apply script.css if loaded
     if (script_stylesheet && script_stylesheet->rule_count > 0) {
@@ -5178,6 +5185,7 @@ void rebuild_lambda_doc(UiContext* uicon) {
 
     if (css_engine && inline_sheets && inline_count > 0) {
         SelectorMatcher* matcher = selector_matcher_create(doc->pool);
+        state_configure_selector_matcher((DocState*)doc->state, matcher);
         for (int i = 0; i < inline_count; i++) {
             if (inline_sheets[i] && inline_sheets[i]->rule_count > 0) {
                 apply_stylesheet_to_dom_tree_fast(new_root, inline_sheets[i],
@@ -5229,8 +5237,8 @@ void rebuild_lambda_doc(UiContext* uicon) {
     // Full rebuild: mark dirty tracker for full repaint so the main loop does a full render.
     if (state) {
         state->dirty_tracker.full_repaint = true;
-        state->is_dirty = true;
-        state->needs_reflow = false;  // layout already done by rebuild
+        doc_state_mark_dirty(state);
+        doc_state_clear_reflow(state);  // layout already done by rebuild
         reflow_clear(state);          // discard stale pending reflow requests
     }
     auto t_end = high_resolution_clock::now();
@@ -5444,6 +5452,7 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
         // Phase 12.2: Apply CSS cascade to new subtree only
         if (css_engine && inline_sheets && inline_count > 0) {
             SelectorMatcher* matcher = selector_matcher_create(doc->pool);
+            state_configure_selector_matcher((DocState*)doc->state, matcher);
             for (int s = 0; s < inline_count; s++) {
                 if (inline_sheets[s] && inline_sheets[s]->rule_count > 0) {
                     apply_stylesheet_to_dom_tree_fast(new_dom, inline_sheets[s],
@@ -5518,8 +5527,8 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
 
     // Skip render here — let the main loop handle it via render().
     if (state) {
-        state->is_dirty = true;
-        state->needs_reflow = false;  // layout already done by rebuild
+        doc_state_mark_dirty(state);
+        doc_state_clear_reflow(state);  // layout already done by rebuild
         reflow_clear(state);          // discard stale pending reflow requests
     }
     bool has_selective = state && !state->dirty_tracker.full_repaint

@@ -34,7 +34,7 @@ typedef struct Input Input;
 typedef struct Arena Arena;
 typedef struct ViewTree ViewTree;  // From radiant/view.hpp
 typedef struct DocState DocState;  // From radiant/state_store.h
-typedef DocState StateStore;  // For backward compatibility
+typedef struct StateStore StateStore;  // From radiant/state_store.hpp
 typedef struct Url Url;  // From lib/url.h
 typedef struct VectorPathProp VectorPathProp;  // From radiant/view.hpp
 typedef struct MultiColumnProp MultiColumnProp;  // From radiant/view.hpp
@@ -72,7 +72,8 @@ struct DomDocument {
 
     // Layout and state
     ViewTree* view_tree;         // View tree after layout
-    StateStore* state;           // Document state (cursor, caret, etc.)
+    StateStore* state_store;     // Per-document state store owner
+    DocState* state;             // Compatibility pointer to state_store->doc_state
 
     // Scale system for rendering
     // Layout operates in CSS logical pixels; scaling applied only during rendering
@@ -143,7 +144,7 @@ struct DomDocument {
                     url(nullptr), html_root(nullptr), root(nullptr), html_version(0),
                     next_node_id(1),
                     stylesheets(nullptr), stylesheet_count(0), stylesheet_capacity(0),
-                    view_tree(nullptr), state(nullptr),
+                    view_tree(nullptr), state_store(nullptr), state(nullptr),
                     given_scale(1.0f), scale(1.0f),
                     viewport_initial_scale(1.0f), viewport_min_scale(0.0f), viewport_max_scale(0.0f),
                     viewport_width(0), viewport_height(0),
@@ -254,9 +255,6 @@ struct DomElement : DomNode {
     bool needs_style_recompute;  // Flag indicating computed values are stale
     bool styles_resolved;        // Flag to track if styles resolved in current layout pass
     bool float_prelaid;          // Flag to skip float during normal flow (pre-laid in float pass)
-    // pseudo-class state (for :hover, :focus, etc.)
-    uint32_t pseudo_state;       // Bitmask of pseudo-class states
-
     // document reference (provides Arena and Input*)
     DomDocument* doc;            // Parent document (provides arena and input)
 
@@ -331,7 +329,7 @@ struct DomElement : DomNode {
         class_names(nullptr), class_count(0), specified_style(nullptr),
         before_styles(nullptr), after_styles(nullptr), first_letter_styles(nullptr),
         style_version(0), needs_style_recompute(false), styles_resolved(false), float_prelaid(false),
-        pseudo_state(0), doc(nullptr), css_variables(nullptr), display{CSS_VALUE_NONE, CSS_VALUE_NONE},
+        doc(nullptr), css_variables(nullptr), display{CSS_VALUE_NONE, CSS_VALUE_NONE},
         font(nullptr), bound(nullptr), in_line(nullptr),
         item_prop_type(ITEM_PROP_NONE), fi(nullptr),
         content_width(0), content_height(0),
@@ -652,40 +650,6 @@ const char* dom_element_get_pseudo_element_content_with_counters(
  * @return true if property was removed, false if not found
  */
 bool dom_element_remove_property(DomElement* element, CssPropertyId property_id);
-
-// ============================================================================
-// Pseudo-Class State Management
-// ============================================================================
-
-/**
- * Set a pseudo-class state flag
- * @param element Target element
- * @param pseudo_state Pseudo-state flag(s) to set
- */
-void dom_element_set_pseudo_state(DomElement* element, uint32_t pseudo_state);
-
-/**
- * Clear a pseudo-class state flag
- * @param element Target element
- * @param pseudo_state Pseudo-state flag(s) to clear
- */
-void dom_element_clear_pseudo_state(DomElement* element, uint32_t pseudo_state);
-
-/**
- * Check if a pseudo-class state is set
- * @param element Target element
- * @param pseudo_state Pseudo-state flag to check
- * @return true if state is set, false otherwise
- */
-bool dom_element_has_pseudo_state(DomElement* element, uint32_t pseudo_state);
-
-/**
- * Toggle a pseudo-class state flag
- * @param element Target element
- * @param pseudo_state Pseudo-state flag to toggle
- * @return true if state is now set, false if cleared
- */
-bool dom_element_toggle_pseudo_state(DomElement* element, uint32_t pseudo_state);
 
 // ============================================================================
 // DOM Tree Navigation

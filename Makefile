@@ -461,7 +461,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild \
 	    test test-all test-all-baseline test-lambda-baseline test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-extended test-input run help \
-	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint check check-raw-alloc docs intellisense analyze-binary \
+	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint check check-raw-alloc check-state-store docs intellisense analyze-binary \
 	    build-debug build-release clean-all distclean \
 	    tree-sitter-libs tree-sitter-core-libs \
 	    generate-premake clean-premake build-test build-test-linux build-jube-test test-jube run-radiant-baseline \
@@ -1838,6 +1838,44 @@ check-raw-alloc:
 		exit 1; \
 	else \
 		echo "✅ No raw allocation violations found"; \
+	fi
+
+# Check StateStore migration invariants that should not regress.
+check-state-store:
+	@echo "Checking StateStore/pseudo-state migration invariants..."
+	@VIOLATIONS=$$(grep -rnE 'dom_element_(set|clear|has|toggle)_pseudo_state|DomElement::pseudo_state|uint32_t pseudo_state;|typedef DocState StateStore' \
+		lambda/ radiant/ test/ \
+		--include='*.c' --include='*.cpp' --include='*.h' --include='*.hpp' \
+		| grep -v 'test/css/test_css_dom_integration.cpp' \
+		|| true); \
+	FORM_MIRROR_VIOLATIONS=$$(grep -rnE --include='*.cpp' 'form->(disabled|readonly|selected_index|hover_index|dropdown_open|checked|required|range_value|selection_start|selection_end|selection_direction)' \
+		radiant/ \
+		| grep -v 'radiant/state_store.cpp' \
+		| grep -v 'Mirror legacy selection' \
+		|| true); \
+	SCROLL_MIRROR_VIOLATIONS=$$(grep -rnE --include='*.cpp' -- '->(h_scroll_position|v_scroll_position|h_max_scroll|v_max_scroll)' \
+		radiant/ \
+		| grep -v 'radiant/state_store.cpp' \
+		|| true); \
+	SCROLL_API_VIOLATIONS=$$(grep -rnE --include='*.cpp' --include='*.hpp' 'scroll_state_(attach|set_max|set_position|get_position)\(' \
+		radiant/ \
+		| grep -v 'radiant/state_store.cpp' \
+		|| true); \
+	if [ -n "$$FORM_MIRROR_VIOLATIONS" ]; then \
+		VIOLATIONS="$${VIOLATIONS}$${VIOLATIONS:+\n}External form mirror reads/writes:\n$$FORM_MIRROR_VIOLATIONS"; \
+	fi; \
+	if [ -n "$$SCROLL_MIRROR_VIOLATIONS" ]; then \
+		VIOLATIONS="$${VIOLATIONS}$${VIOLATIONS:+\n}External scroll mirror reads/writes:\n$$SCROLL_MIRROR_VIOLATIONS"; \
+	fi; \
+	if [ -n "$$SCROLL_API_VIOLATIONS" ]; then \
+		VIOLATIONS="$${VIOLATIONS}$${VIOLATIONS:+\n}External pane-only scroll API usage:\n$$SCROLL_API_VIOLATIONS"; \
+	fi; \
+	if [ -n "$$VIOLATIONS" ]; then \
+		echo "❌ StateStore migration invariant violations:"; \
+		echo "$$VIOLATIONS"; \
+		exit 1; \
+	else \
+		echo "✅ StateStore migration invariants hold"; \
 	fi
 
 # Check for (int) casts in Radiant layout code that may truncate float dimensions.

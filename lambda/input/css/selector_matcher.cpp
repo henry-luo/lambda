@@ -41,6 +41,8 @@ SelectorMatcher* selector_matcher_create(Pool* pool) {
     matcher->quirks_mode = false;
     matcher->case_sensitive_classes = true;  // Default: case-sensitive
     matcher->case_sensitive_attrs = true;    // Default: case-sensitive
+    matcher->pseudo_state_resolver = NULL;
+    matcher->pseudo_state_context = NULL;
 
     // Create match cache - disabled for now
     matcher->match_cache = NULL;
@@ -105,6 +107,53 @@ void selector_matcher_set_case_sensitive_classes(SelectorMatcher* matcher, bool 
 void selector_matcher_set_case_sensitive_attributes(SelectorMatcher* matcher, bool case_sensitive) {
     if (matcher) {
         matcher->case_sensitive_attrs = case_sensitive;
+    }
+}
+
+void selector_matcher_set_pseudo_state_resolver(SelectorMatcher* matcher,
+                                                SelectorPseudoStateResolver resolver,
+                                                void* context) {
+    if (matcher) {
+        matcher->pseudo_state_resolver = resolver;
+        matcher->pseudo_state_context = context;
+    }
+}
+
+static bool selector_matcher_get_pseudo_state(SelectorMatcher* matcher,
+                                              DomElement* element,
+                                              uint32_t pseudo_state) {
+    if (!element) return false;
+    if (matcher && matcher->pseudo_state_resolver) {
+        return matcher->pseudo_state_resolver(matcher->pseudo_state_context, element, pseudo_state);
+    }
+
+    switch (pseudo_state) {
+        case PSEUDO_STATE_LINK:
+            return dom_element_has_attribute(element, "href");
+        case PSEUDO_STATE_CHECKED:
+            return dom_element_has_attribute(element, "checked");
+        case PSEUDO_STATE_DISABLED:
+            return dom_element_has_attribute(element, "disabled");
+        case PSEUDO_STATE_ENABLED:
+            return !dom_element_has_attribute(element, "disabled");
+        case PSEUDO_STATE_REQUIRED:
+            return dom_element_has_attribute(element, "required");
+        case PSEUDO_STATE_OPTIONAL:
+            return !dom_element_has_attribute(element, "required");
+        case PSEUDO_STATE_READ_ONLY:
+            return dom_element_has_attribute(element, "readonly");
+        case PSEUDO_STATE_READ_WRITE:
+            return !dom_element_has_attribute(element, "readonly");
+        case PSEUDO_STATE_SELECTED:
+            return dom_element_has_attribute(element, "selected");
+        case PSEUDO_STATE_PLACEHOLDER_SHOWN:
+            {
+                const char* placeholder = dom_element_get_attribute(element, "placeholder");
+                const char* value = dom_element_get_attribute(element, "value");
+                return placeholder && placeholder[0] && (!value || !value[0]);
+            }
+        default:
+            return false;
     }
 }
 
@@ -701,48 +750,48 @@ bool selector_matcher_matches_pseudo_class(SelectorMatcher* matcher,
     switch (pseudo_type) {
         // User interaction pseudo-classes
         case CSS_SELECTOR_PSEUDO_HOVER:
-            return dom_element_has_pseudo_state(element, PSEUDO_STATE_HOVER);
+            return selector_matcher_get_pseudo_state(matcher, element, PSEUDO_STATE_HOVER);
         case CSS_SELECTOR_PSEUDO_ACTIVE:
-            return dom_element_has_pseudo_state(element, PSEUDO_STATE_ACTIVE);
+            return selector_matcher_get_pseudo_state(matcher, element, PSEUDO_STATE_ACTIVE);
         case CSS_SELECTOR_PSEUDO_FOCUS:
-            return dom_element_has_pseudo_state(element, PSEUDO_STATE_FOCUS);
+            return selector_matcher_get_pseudo_state(matcher, element, PSEUDO_STATE_FOCUS);
         case CSS_SELECTOR_PSEUDO_FOCUS_VISIBLE:
             // :focus-visible matches when focused via keyboard navigation
-            return dom_element_has_pseudo_state(element, PSEUDO_STATE_FOCUS_VISIBLE);
+            return selector_matcher_get_pseudo_state(matcher, element, PSEUDO_STATE_FOCUS_VISIBLE);
         case CSS_SELECTOR_PSEUDO_FOCUS_WITHIN:
             // :focus-within matches when element or any descendant has focus
-            return dom_element_has_pseudo_state(element, PSEUDO_STATE_FOCUS_WITHIN);
+            return selector_matcher_get_pseudo_state(matcher, element, PSEUDO_STATE_FOCUS_WITHIN);
         case CSS_SELECTOR_PSEUDO_VISITED:
-            return dom_element_has_pseudo_state(element, PSEUDO_STATE_VISITED);
+            return selector_matcher_get_pseudo_state(matcher, element, PSEUDO_STATE_VISITED);
         case CSS_SELECTOR_PSEUDO_LINK:
-            return dom_element_has_pseudo_state(element, PSEUDO_STATE_LINK);
+            return selector_matcher_get_pseudo_state(matcher, element, PSEUDO_STATE_LINK);
         case CSS_SELECTOR_PSEUDO_TARGET:
-            return dom_element_has_pseudo_state(element, PSEUDO_STATE_TARGET);
+            return selector_matcher_get_pseudo_state(matcher, element, PSEUDO_STATE_TARGET);
 
         // Form pseudo-classes
         case CSS_SELECTOR_PSEUDO_ENABLED:
             // :enabled matches when NOT disabled
-            return !dom_element_has_pseudo_state(element, PSEUDO_STATE_DISABLED);
+            return selector_matcher_get_pseudo_state(matcher, element, PSEUDO_STATE_ENABLED);
         case CSS_SELECTOR_PSEUDO_DISABLED:
-            return dom_element_has_pseudo_state(element, PSEUDO_STATE_DISABLED);
+            return selector_matcher_get_pseudo_state(matcher, element, PSEUDO_STATE_DISABLED);
         case CSS_SELECTOR_PSEUDO_CHECKED:
-            return dom_element_has_pseudo_state(element, PSEUDO_STATE_CHECKED);
+            return selector_matcher_get_pseudo_state(matcher, element, PSEUDO_STATE_CHECKED);
         case CSS_SELECTOR_PSEUDO_REQUIRED:
-            return dom_element_has_pseudo_state(element, PSEUDO_STATE_REQUIRED);
+            return selector_matcher_get_pseudo_state(matcher, element, PSEUDO_STATE_REQUIRED);
         case CSS_SELECTOR_PSEUDO_OPTIONAL:
             // :optional matches when NOT required
-            return !dom_element_has_pseudo_state(element, PSEUDO_STATE_REQUIRED);
+            return selector_matcher_get_pseudo_state(matcher, element, PSEUDO_STATE_OPTIONAL);
         case CSS_SELECTOR_PSEUDO_VALID:
-            return dom_element_has_pseudo_state(element, PSEUDO_STATE_VALID);
+            return selector_matcher_get_pseudo_state(matcher, element, PSEUDO_STATE_VALID);
         case CSS_SELECTOR_PSEUDO_INVALID:
-            return dom_element_has_pseudo_state(element, PSEUDO_STATE_INVALID);
+            return selector_matcher_get_pseudo_state(matcher, element, PSEUDO_STATE_INVALID);
         case CSS_SELECTOR_PSEUDO_READ_ONLY:
-            return dom_element_has_pseudo_state(element, PSEUDO_STATE_READ_ONLY);
+            return selector_matcher_get_pseudo_state(matcher, element, PSEUDO_STATE_READ_ONLY);
         case CSS_SELECTOR_PSEUDO_READ_WRITE:
             // :read-write matches when NOT read-only
-            return !dom_element_has_pseudo_state(element, PSEUDO_STATE_READ_ONLY);
+            return selector_matcher_get_pseudo_state(matcher, element, PSEUDO_STATE_READ_WRITE);
         case CSS_SELECTOR_PSEUDO_PLACEHOLDER_SHOWN:
-            return dom_element_has_pseudo_state(element, PSEUDO_STATE_PLACEHOLDER_SHOWN);
+            return selector_matcher_get_pseudo_state(matcher, element, PSEUDO_STATE_PLACEHOLDER_SHOWN);
 
         // Structural pseudo-classes
         case CSS_SELECTOR_PSEUDO_ROOT:

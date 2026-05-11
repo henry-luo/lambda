@@ -234,7 +234,6 @@ bool dom_element_init(DomElement* element, DomDocument* doc, const char* tag_nam
     // Initialize arrays
     element->class_names = NULL;
     element->class_count = 0;
-    element->pseudo_state = 0;
 
     // Initialize cached attribute fields from native element (if exists)
     if (native_element) {
@@ -1524,66 +1523,6 @@ const char* dom_element_get_pseudo_element_content_with_counters(
 }
 
 // ============================================================================
-// Pseudo-Class State Management
-// ============================================================================
-
-void dom_element_set_pseudo_state(DomElement* element, uint32_t pseudo_state) {
-    if (!element) {
-        return;
-    }
-
-    uint32_t old_state = element->pseudo_state;
-    element->pseudo_state |= pseudo_state;
-
-    // If pseudo-state actually changed, invalidate styles
-    if (element->pseudo_state != old_state) {
-        element->needs_style_recompute = true;
-        element->style_version++;
-        log_debug("dom_element_set_pseudo_state: %s added state 0x%x, invalidated style",
-                  element->tag_name, pseudo_state);
-    }
-}
-
-void dom_element_clear_pseudo_state(DomElement* element, uint32_t pseudo_state) {
-    if (!element) {
-        return;
-    }
-
-    uint32_t old_state = element->pseudo_state;
-    element->pseudo_state &= ~pseudo_state;
-
-    // If pseudo-state actually changed, invalidate styles
-    if (element->pseudo_state != old_state) {
-        element->needs_style_recompute = true;
-        element->style_version++;
-        log_debug("dom_element_clear_pseudo_state: %s removed state 0x%x, invalidated style",
-                  element->tag_name, pseudo_state);
-    }
-}
-
-bool dom_element_has_pseudo_state(DomElement* element, uint32_t pseudo_state) {
-    if (!element) {
-        return false;
-    }
-
-    return (element->pseudo_state & pseudo_state) != 0;
-}
-
-bool dom_element_toggle_pseudo_state(DomElement* element, uint32_t pseudo_state) {
-    if (!element) {
-        return false;
-    }
-
-    if (dom_element_has_pseudo_state(element, pseudo_state)) {
-        dom_element_clear_pseudo_state(element, pseudo_state);
-        return false;
-    } else {
-        dom_element_set_pseudo_state(element, pseudo_state);
-        return true;
-    }
-}
-
-// ============================================================================
 // DOM Tree Navigation
 // ============================================================================
 
@@ -1981,9 +1920,6 @@ DomElement* dom_element_clone(DomElement* source, Pool* pool) {
     if (source->specified_style) {
         clone->specified_style = style_tree_clone(source->specified_style, pool);
     }
-
-    // Copy pseudo state
-    clone->pseudo_state = source->pseudo_state;
 
     // Note: Children are not cloned - caller should handle that if needed
 
@@ -2902,19 +2838,17 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
         }
     }
 
-    // Set :link pseudo-state for anchor and area elements with href attribute
-    // Per HTML spec: :link matches <a> and <area> elements with href that haven't been visited
+    // Store href for anchor and area elements; selector matching derives :link
+    // from attributes when no StateStore resolver is installed.
     if (str_ieq_const(tag_name, strlen(tag_name), "a") || str_ieq_const(tag_name, strlen(tag_name), "area")) {
         const char* href_value = extract_element_attribute(elem, "href", doc->arena);
         if (href_value && strlen(href_value) > 0) {
-            dom_element_set_pseudo_state(dom_elem, PSEUDO_STATE_LINK);
-            // Store href attribute for later use (e.g., navigation)
             dom_element_set_attribute(dom_elem, "href", href_value);
         }
     }
 
-    // Set :checked, :disabled pseudo-states for input elements
-    // These boolean attributes set the initial state from HTML
+    // Store form attributes; selector matching derives static pseudo-class
+    // defaults from attributes before StateStore-backed view state exists.
     if (str_ieq_const(tag_name, strlen(tag_name), "input")) {
         // Store the type attribute for later use
         const char* type_value = extract_element_attribute(elem, "type", doc->arena);
@@ -2926,26 +2860,25 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
         if (name_value) {
             dom_element_set_attribute(dom_elem, "name", name_value);
         }
-        // checked attribute sets :checked pseudo-state (for checkbox/radio)
-        // Use has_attr() since boolean attributes have no string value (stored as ITEM_NULL)
         if (elem->has_attr("checked")) {
-            dom_element_set_pseudo_state(dom_elem, PSEUDO_STATE_CHECKED);
+            dom_element_set_attribute(dom_elem, "checked", "checked");
         }
-        // disabled attribute sets :disabled pseudo-state
         if (elem->has_attr("disabled")) {
-            dom_element_set_pseudo_state(dom_elem, PSEUDO_STATE_DISABLED);
+            dom_element_set_attribute(dom_elem, "disabled", "disabled");
         }
-        // :placeholder-shown — initial seed before any user/JS interaction
-        // applies when the value is empty AND a non-empty placeholder is set
-        // (only meaningful for text-like inputs; we don't gate by type here
-        // because the placeholder attribute itself only renders for text-like
-        // controls, matching browser behavior closely enough for static layout).
+        if (elem->has_attr("required")) {
+            dom_element_set_attribute(dom_elem, "required", "required");
+        }
+        if (elem->has_attr("readonly")) {
+            dom_element_set_attribute(dom_elem, "readonly", "readonly");
+        }
         const char* ph_value = extract_element_attribute(elem, "placeholder", doc->arena);
-        if (ph_value && ph_value[0]) {
-            const char* val_attr = extract_element_attribute(elem, "value", doc->arena);
-            if (!val_attr || !val_attr[0]) {
-                dom_element_set_pseudo_state(dom_elem, PSEUDO_STATE_PLACEHOLDER_SHOWN);
-            }
+        if (ph_value) {
+            dom_element_set_attribute(dom_elem, "placeholder", ph_value);
+        }
+        const char* val_attr = extract_element_attribute(elem, "value", doc->arena);
+        if (val_attr) {
+            dom_element_set_attribute(dom_elem, "value", val_attr);
         }
     }
     // :disabled also applies to <select>, <textarea>, <button>, <optgroup>, <option>,
@@ -2957,17 +2890,24 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
              str_ieq_const(tag_name, strlen(tag_name), "option") ||
              str_ieq_const(tag_name, strlen(tag_name), "fieldset")) {
         if (elem->has_attr("disabled")) {
-            dom_element_set_pseudo_state(dom_elem, PSEUDO_STATE_DISABLED);
+            dom_element_set_attribute(dom_elem, "disabled", "disabled");
         }
-        // <textarea>: :placeholder-shown when no child text content and
-        // placeholder attr present. The textarea's initial value is its
-        // child text; here we approximate by checking whether the element
-        // has any children. text_control.cpp later refines on first JS access.
-        if (str_ieq_const(tag_name, strlen(tag_name), "textarea")) {
-            const char* ph_value = extract_element_attribute(elem, "placeholder", doc->arena);
-            if (ph_value && ph_value[0] && elem->length == 0) {
-                dom_element_set_pseudo_state(dom_elem, PSEUDO_STATE_PLACEHOLDER_SHOWN);
-            }
+        if (elem->has_attr("selected")) {
+            dom_element_set_attribute(dom_elem, "selected", "selected");
+        }
+        if (elem->has_attr("required")) {
+            dom_element_set_attribute(dom_elem, "required", "required");
+        }
+        if (elem->has_attr("readonly")) {
+            dom_element_set_attribute(dom_elem, "readonly", "readonly");
+        }
+        const char* ph_value = extract_element_attribute(elem, "placeholder", doc->arena);
+        if (ph_value) {
+            dom_element_set_attribute(dom_elem, "placeholder", ph_value);
+        }
+        const char* val_attr = extract_element_attribute(elem, "value", doc->arena);
+        if (val_attr) {
+            dom_element_set_attribute(dom_elem, "value", val_attr);
         }
     }
 

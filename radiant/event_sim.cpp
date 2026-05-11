@@ -309,6 +309,7 @@ static View* find_element_by_selector(DomDocument* doc, const char* selector_tex
 
     SelectorMatcher* matcher = selector_matcher_create(pool);
     if (!matcher) return NULL;
+    state_configure_selector_matcher((DocState*)doc->state, matcher);
 
     SimSelectorCtx ctx = {0};
     ctx.selector = selector;
@@ -354,6 +355,7 @@ static int count_elements_by_selector(DomDocument* doc, const char* selector_tex
 
     SelectorMatcher* matcher = selector_matcher_create(pool);
     if (!matcher) return 0;
+    state_configure_selector_matcher((DocState*)doc->state, matcher);
 
     SimCountCtx ctx = {0};
     ctx.selector = selector;
@@ -748,7 +750,7 @@ static bool sim_is_checkbox_or_radio(View* view) {
     return type && (strcmp(type, "checkbox") == 0 || strcmp(type, "radio") == 0);
 }
 
-// Direct toggle of checkbox/radio state (bypasses coordinate hit-testing)
+// writer-backed toggle of checkbox/radio state for selector-resolved controls.
 // Used when event simulator clicks a selector-resolved form control.
 static void sim_toggle_checkbox_radio(View* input, DocState* state) {
     if (!input || !input->is_element()) return;
@@ -757,18 +759,13 @@ static void sim_toggle_checkbox_radio(View* input, DocState* state) {
     if (!type) return;
 
     if (strcmp(type, "checkbox") == 0) {
-        bool is_checked = dom_element_has_pseudo_state(elem, PSEUDO_STATE_CHECKED);
+        bool is_checked = form_control_get_checked(state, input);
         bool new_state = !is_checked;
-        if (new_state) {
-            elem->pseudo_state |= PSEUDO_STATE_CHECKED;
-        } else {
-            elem->pseudo_state &= ~PSEUDO_STATE_CHECKED;
-        }
-        state->needs_repaint = true;
+        form_control_set_checked(state, input, new_state);
         log_info("event_sim: toggled checkbox to %s", new_state ? "checked" : "unchecked");
     }
     else if (strcmp(type, "radio") == 0) {
-        bool is_checked = dom_element_has_pseudo_state(elem, PSEUDO_STATE_CHECKED);
+        bool is_checked = form_control_get_checked(state, input);
         if (!is_checked) {
             // Uncheck other radios in the same group
             const char* name = elem->get_attribute("name");
@@ -784,8 +781,8 @@ static void sim_toggle_checkbox_radio(View* input, DocState* state) {
                             const char* st = se->get_attribute("type");
                             const char* sn = se->get_attribute("name");
                             if (st && strcmp(st, "radio") == 0 && sn && strcmp(sn, name) == 0) {
-                                if (dom_element_has_pseudo_state(se, PSEUDO_STATE_CHECKED)) {
-                                    se->pseudo_state &= ~PSEUDO_STATE_CHECKED;
+                                if (form_control_get_checked(state, search)) {
+                                    form_control_set_checked(state, search, false);
                                 }
                             }
                         }
@@ -802,8 +799,7 @@ static void sim_toggle_checkbox_radio(View* input, DocState* state) {
                 }
             }
             // Check this radio
-            elem->pseudo_state |= PSEUDO_STATE_CHECKED;
-            state->needs_repaint = true;
+            form_control_set_checked(state, input, true);
             log_info("event_sim: checked radio button");
         }
     }
@@ -2022,13 +2018,9 @@ static void force_render_surface(UiContext* uicon) {
     extern void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file);
     if (uicon->document && uicon->document->view_tree) {
         DocState* state = (DocState*)uicon->document->state;
-        if (state) state->is_dirty = true;
+        if (state) doc_state_mark_dirty(state);
         render_html_doc(uicon, uicon->document->view_tree, nullptr);
-        if (state) {
-            state->is_dirty = false;
-            state->needs_repaint = false;
-            dirty_clear(&state->dirty_tracker);
-        }
+        if (state) doc_state_clear_render_flags(state);
     }
 }
 
@@ -2264,7 +2256,6 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 ctx->fail_count++;
                 break;
             }
-            DomElement* dst_dom = dst_view->as_element();
             // Get source and destination centers
             float src_fx, src_fy, dst_fx, dst_fy;
             get_element_center_abs(src_view, &src_fx, &src_fy);
@@ -2273,8 +2264,6 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             int dst_x = (int)dst_fx, dst_y = (int)dst_fy;
             log_info("event_sim: drag_and_drop from '%s' (%d,%d) to '%s' (%d,%d)",
                 ev->target_selector, src_x, src_y, ev->to_target_selector, dst_x, dst_y);
-            // Set drag pseudo-state on source
-            if (src_dom) dom_element_set_pseudo_state(src_dom, PSEUDO_STATE_DRAG);
             // Dispatch: mouse_down on source
             sim_mouse_button(uicon, src_x, src_y, 0, 0, true);
             // Intermediate mouse_move steps
@@ -2284,13 +2273,8 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 int py = src_y + (dst_y - src_y) * step / steps;
                 sim_mouse_move(uicon, px, py);
             }
-            // Set drag-over on destination
-            if (dst_dom) dom_element_set_pseudo_state(dst_dom, PSEUDO_STATE_DRAG_OVER);
             // Drop: mouse_up on destination
             sim_mouse_button(uicon, dst_x, dst_y, 0, 0, false);
-            // Clear drag pseudo-states
-            if (src_dom) dom_element_clear_pseudo_state(src_dom, PSEUDO_STATE_DRAG);
-            if (dst_dom) dom_element_clear_pseudo_state(dst_dom, PSEUDO_STATE_DRAG_OVER);
             log_info("event_sim: drag_and_drop completed");
             break;
         }
@@ -2341,7 +2325,8 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 DomDocument* doc = uicon->document;
                 form_elem = find_element_by_selector(doc, ev->target_selector, ev->target_index);
                 if (form_elem && sim_is_checkbox_or_radio(form_elem)) {
-                    was_checked = dom_element_has_pseudo_state((DomElement*)form_elem, PSEUDO_STATE_CHECKED);
+                    DocState* state = doc ? (DocState*)doc->state : nullptr;
+                    was_checked = state_get_pseudo_state(state, form_elem, PSEUDO_STATE_CHECKED);
                 } else {
                     form_elem = nullptr;
                 }
@@ -2355,11 +2340,11 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
 
             // If the coordinate click didn't toggle the checkbox/radio, do it directly
             if (form_elem) {
-                bool is_checked_now = dom_element_has_pseudo_state((DomElement*)form_elem, PSEUDO_STATE_CHECKED);
+                DocState* state = (DocState*)uicon->document->state;
+                bool is_checked_now = state_get_pseudo_state(state, form_elem, PSEUDO_STATE_CHECKED);
                 if (is_checked_now == was_checked) {
                     // State didn't change — coordinate click missed the element
-                    DocState* state = (DocState*)uicon->document->state;
-                    if (state && !dom_element_has_pseudo_state((DomElement*)form_elem, PSEUDO_STATE_DISABLED)) {
+                    if (state && !state_get_pseudo_state(state, form_elem, PSEUDO_STATE_DISABLED)) {
                         sim_toggle_checkbox_radio(form_elem, state);
                     }
                 }
@@ -2405,8 +2390,9 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             // text selection (e.g. from a preceding tripleclick).
             if (ev->target_selector || ev->target_text) {
                 View* target_elem = resolve_target_element(ev, uicon->document);
+                DocState* state = uicon->document ? (DocState*)uicon->document->state : nullptr;
                 bool already_focused = target_elem && target_elem->is_element() &&
-                    dom_element_has_pseudo_state((DomElement*)target_elem, PSEUDO_STATE_FOCUS);
+                    state_get_pseudo_state(state, target_elem, PSEUDO_STATE_FOCUS);
                 if (!already_focused) {
                     int x, y;
                     if (resolve_target(ev, uicon->document, &x, &y)) {
@@ -2462,10 +2448,10 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 log_error("event_sim: check - target is not a checkbox or radio");
                 break;
             }
-            bool is_checked = dom_element_has_pseudo_state((DomElement*)elem, PSEUDO_STATE_CHECKED);
+            DocState* state = (DocState*)doc->state;
+            bool is_checked = state_get_pseudo_state(state, elem, PSEUDO_STATE_CHECKED);
             if (is_checked != ev->expected_checked) {
-                DocState* state = (DocState*)doc->state;
-                if (state && !dom_element_has_pseudo_state((DomElement*)elem, PSEUDO_STATE_DISABLED)) {
+                if (state && !state_get_pseudo_state(state, elem, PSEUDO_STATE_DISABLED)) {
                     sim_toggle_checkbox_radio(elem, state);
                     log_info("event_sim: check - toggled to %s", ev->expected_checked ? "checked" : "unchecked");
                 }
@@ -2579,10 +2565,9 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             if (state) {
                 // Close dropdown if open
                 if (state->open_dropdown == select_view) {
-                    state->open_dropdown = nullptr;
-                    form_control_close_dropdown(state, (View*)select);
+                    doc_state_close_dropdown(state, (View*)select);
                 }
-                state->needs_repaint = true;
+                doc_state_request_repaint(state);
             }
             log_info("event_sim: select_option - selected index %d", match_index);
             break;
@@ -2710,7 +2695,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 ctx->fail_count++;
                 break;
             }
-            state->needs_repaint = true;
+            doc_state_request_repaint(state);
             break;
         }
 
@@ -2877,8 +2862,8 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 ctx->fail_count++;
                 break;
             }
-            DomElement* dom_elem = (DomElement*)elem;
-            bool is_checked = (dom_elem->pseudo_state & PSEUDO_STATE_CHECKED) != 0;
+            DocState* state = doc ? (DocState*)doc->state : nullptr;
+            bool is_checked = form_control_get_checked(state, elem);
             if (is_checked != ev->expected_checked) {
                 log_error("event_sim: assert_checked FAIL - expected %s, got %s",
                          ev->expected_checked ? "checked" : "unchecked",
@@ -2904,7 +2889,6 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 ctx->fail_count++;
                 break;
             }
-            DomElement* dom_elem = (DomElement*)elem;
             uint32_t mask = 0;
             if (strcmp(ev->state_name, ":hover") == 0) mask = PSEUDO_STATE_HOVER;
             else if (strcmp(ev->state_name, ":active") == 0) mask = PSEUDO_STATE_ACTIVE;
@@ -2919,7 +2903,8 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 ctx->fail_count++;
                 break;
             }
-            bool has_state = (dom_elem->pseudo_state & mask) != 0;
+            DocState* state = doc ? (DocState*)doc->state : nullptr;
+            bool has_state = state_get_pseudo_state(state, elem, mask);
             if (has_state != ev->expected_state_value) {
                 log_error("event_sim: assert_state FAIL - expected %s=%s, got %s",
                          ev->state_name,
@@ -2982,8 +2967,8 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             float actual_x = 0, actual_y = 0;
             ViewBlock* root_block = (ViewBlock*)doc->view_tree->root;
             if (root_block && root_block->scroller && root_block->scroller->pane) {
-                actual_x = root_block->scroller->pane->h_scroll_position;
-                actual_y = root_block->scroller->pane->v_scroll_position;
+                scroll_state_get_position_for_view((DocState*)doc->state, (View*)root_block,
+                    root_block->scroller->pane, &actual_x, &actual_y, NULL, NULL);
             }
             float tol = ev->scroll_tolerance;
             bool pass_x = (ev->expected_scroll_x == 0 && !ev->expected_scroll_y) ||
@@ -3063,7 +3048,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 if (state->needs_reflow) {
                     extern void reflow_html_doc(DomDocument* doc);
                     reflow_html_doc(doc);
-                    state->needs_reflow = false;
+                    doc_state_clear_reflow(state);
                 }
             }
 
@@ -3373,15 +3358,14 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             ViewBlock* root_block = (ViewBlock*)doc->view_tree->root;
             if (root_block && root_block->scroller && root_block->scroller->pane) {
                 ScrollPane* pane = root_block->scroller->pane;
-                scroll_state_set_position((DocState*)doc->state,
-                                          pane,
-                                          target_x,
-                                          target_y,
-                                          true);
-                doc->pending_viewport_scroll_x = pane->h_scroll_position;
-                doc->pending_viewport_scroll_y = pane->v_scroll_position;
+                DocState* state = (DocState*)doc->state;
+                scroll_state_set_position_for_view(state, (View*)root_block, pane,
+                                                   target_x, target_y, true);
+                scroll_state_get_position_for_view(state, (View*)root_block, pane,
+                                                   &target_x, &target_y, NULL, NULL);
+                doc_state_sync_viewport_scroll(state, doc, target_x, target_y);
             }
-            if (doc->state) doc->state->needs_repaint = true;
+            if (doc->state) doc_state_request_repaint(doc->state);
             force_render_surface(uicon);
             break;
         }

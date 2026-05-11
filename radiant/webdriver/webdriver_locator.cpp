@@ -5,6 +5,7 @@
 
 #include "webdriver.hpp"
 #include "../view.hpp"
+#include "../state_store.hpp"
 #include "../../lambda/input/css/dom_element.hpp"
 #include "../../lambda/input/css/selector_matcher.hpp"
 #include "../../lambda/input/css/css_parser.hpp"
@@ -183,6 +184,7 @@ static View* find_by_css_selector(WebDriverSession* session, const char* selecto
         log_error("webdriver: failed to create selector matcher");
         return NULL;
     }
+    state_configure_selector_matcher(session->document ? (DocState*)session->document->state : nullptr, matcher);
 
     CssFindContext ctx = {0};
     ctx.arena = session->arena;
@@ -214,6 +216,7 @@ static int find_all_by_css_selector(WebDriverSession* session, const char* selec
         log_error("webdriver: failed to create selector matcher");
         return 0;
     }
+    state_configure_selector_matcher(session->document ? (DocState*)session->document->state : nullptr, matcher);
 
     CssFindContext ctx = {0};
     ctx.arena = session->arena;

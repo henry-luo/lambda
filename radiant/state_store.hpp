@@ -13,6 +13,7 @@ struct AnimationScheduler;
 struct DomElement;
 struct DomDocument;
 struct EventStateLog;
+struct SelectorMatcher;
 
 /**
  * Radiant State Store - Centralized UI state management
@@ -153,6 +154,13 @@ typedef struct ViewStateEntry {
     uint32_t view_id;
     ViewState* state;
 } ViewStateEntry;
+
+typedef struct StateStore {
+    DomDocument* document;
+    Pool* pool;
+    Arena* arena;
+    struct DocState* doc_state;
+} StateStore;
 
 typedef struct CaretState CaretState;
 typedef struct SelectionState SelectionState;
@@ -332,7 +340,7 @@ typedef struct DocState {
 // ============================================================================
 
 /**
- * Create a new state store
+ * Create a new DocState projection. Prefer state_store_create() for documents.
  * @param pool Memory pool for allocations
  * @param mode Update mode (in-place or immutable)
  * @return New state store, or NULL on failure
@@ -340,12 +348,27 @@ typedef struct DocState {
 DocState* radiant_state_create(Pool* pool, StateUpdateMode mode);
 
 /**
- * Ensure an active document owns a DocState for interaction/state APIs.
+ * Create or return the per-document StateStore owner.
+ */
+StateStore* state_store_create(DomDocument* document);
+
+/**
+ * Destroy the per-document StateStore and its DocState projection.
+ */
+void state_store_destroy(DomDocument* document);
+
+/**
+ * Return the canonical DocState owned by a StateStore.
+ */
+DocState* state_store_doc_state(StateStore* store);
+
+/**
+ * Ensure an active document owns a StateStore and return its DocState projection.
  */
 DocState* radiant_document_ensure_state(DomDocument* document, const char* owner);
 
 /**
- * Destroy a document's DocState before its owning pool is released.
+ * Destroy a document's StateStore before its owning pool is released.
  */
 void radiant_document_destroy_state(DomDocument* document);
 
@@ -378,6 +401,14 @@ ViewState* view_state_get(DocState* state, View* view);
 bool view_state_get_hovered(DocState* state, View* view);
 bool view_state_get_active(DocState* state, View* view);
 bool view_state_get_focused(DocState* state, View* view);
+
+/**
+ * Read dynamic pseudo-state through canonical StateStore/ViewState data.
+ * Missing state is interpreted as the default value for the pseudo-state.
+ */
+bool state_get_pseudo_state(DocState* state, View* view, uint32_t pseudo_state);
+bool state_resolve_selector_pseudo_state(void* context, DomElement* element, uint32_t pseudo_state);
+void state_configure_selector_matcher(DocState* state, SelectorMatcher* matcher);
 
 /**
  * Writer-only per-view interaction state APIs.
@@ -664,6 +695,39 @@ View* focus_get_visible(DocState* state);
 bool focus_within(DocState* state, View* view);
 
 // ============================================================================
+// Doc-Level Interaction Target API
+// ============================================================================
+
+/**
+ * Update document-level hover/active/drag owners through the state store.
+ * Per-view pseudo bits remain synchronized by the event paths through
+ * state_set_bool()/ViewState writers.
+ */
+void doc_state_set_hover_target(DocState* state, View* target);
+void doc_state_set_active_target(DocState* state, View* target);
+void doc_state_set_drag_state(DocState* state, View* target, bool dragging);
+
+// ============================================================================
+// Doc-Level Scheduling / Viewport State API
+// ============================================================================
+
+/**
+ * Centralized writers for document dirty/reflow/repaint scheduling flags.
+ */
+void doc_state_mark_dirty(DocState* state);
+void doc_state_request_repaint(DocState* state);
+void doc_state_request_reflow(DocState* state);
+void doc_state_clear_reflow(DocState* state);
+void doc_state_clear_render_flags(DocState* state);
+void doc_state_clear_repaint(DocState* state);
+
+/**
+ * Synchronize document-level viewport scroll mirrors and pending relayout target.
+ */
+void doc_state_sync_viewport_scroll(DocState* state, DomDocument* doc,
+                                    float scroll_x, float scroll_y);
+
+// ============================================================================
 // Form and Scroll State API (centralized writers)
 // ============================================================================
 
@@ -680,31 +744,11 @@ bool form_control_get_checked(DocState* state, View* view);
 void form_control_set_checked(DocState* state, View* view, bool checked);
 
 /**
- * Attach a scroll pane to the central state store for fast-read access.
- * The pane argument is a ScrollPane* passed as void* to avoid header coupling.
- */
-void scroll_state_attach(DocState* state, void* pane);
-
-/**
- * Set pane scroll max values through centralized API.
- */
-void scroll_state_set_max(DocState* state, void* pane,
-                          float h_max, float v_max);
-
-/**
  * Set a concrete view's scroll max values through ViewState.scroll.
  * The pane argument remains a compatibility mirror for rendering.
  */
 void scroll_state_set_max_for_view(DocState* state, View* view, void* pane,
                                    float h_max, float v_max);
-
-/**
- * Set pane scroll position through centralized API.
- * When is_viewport is true, document-level viewport mirrors are also updated.
- */
-void scroll_state_set_position(DocState* state, void* pane,
-                               float h_pos, float v_pos,
-                               bool is_viewport);
 
 /**
  * Set a concrete view's scroll position through ViewState.scroll.
@@ -715,11 +759,11 @@ void scroll_state_set_position_for_view(DocState* state, View* view, void* pane,
                                         bool is_viewport);
 
 /**
- * Read pane scroll values.
+ * Read a concrete view's scroll values, preferring ViewState.scroll when present.
  */
-void scroll_state_get_position(DocState* state, void* pane,
-                               float* out_h_pos, float* out_v_pos,
-                               float* out_h_max, float* out_v_max);
+void scroll_state_get_position_for_view(DocState* state, View* view, void* pane,
+                                        float* out_h_pos, float* out_v_pos,
+                                        float* out_h_max, float* out_v_max);
 
 // ============================================================================
 // Text Control Value and Selection API (centralized writers)
@@ -822,6 +866,35 @@ void form_control_set_required(DocState* state, View* view, bool required);
 // ============================================================================
 // Dropdown State Machine API (open, close, hover tracking)
 // ============================================================================
+
+/**
+ * Set or clear the document-level dropdown owner through the state store.
+ * These APIs also synchronize the owning select control's ViewState.form.
+ */
+void doc_state_open_dropdown(DocState* state, View* view);
+void doc_state_close_dropdown(DocState* state, View* view);
+
+/**
+ * Update document-level dropdown overlay geometry through the state store.
+ */
+void doc_state_set_dropdown_geometry(DocState* state,
+                                     float x, float y, float width, float height);
+
+// ============================================================================
+// Context Menu DocState API (doc-scoped overlay state)
+// ============================================================================
+
+/**
+ * Open or close the document-level native context menu overlay.
+ */
+void doc_state_open_context_menu(DocState* state, View* target,
+                                 float x, float y, float width, float height);
+void doc_state_close_context_menu(DocState* state);
+
+/**
+ * Update the highlighted context-menu item (-1 clears hover).
+ */
+void doc_state_set_context_menu_hover(DocState* state, int hover_index);
 
 /**
  * Open a select control's dropdown menu.
@@ -982,6 +1055,7 @@ bool visited_links_check(VisitedLinks* visited, const char* url);
 #define STATE_FOCUS_WITHIN    ":focus-within"
 #define STATE_FOCUS_VISIBLE   ":focus-visible"
 #define STATE_VISITED         ":visited"
+#define STATE_LINK            ":link"
 #define STATE_CHECKED         ":checked"
 #define STATE_INDETERMINATE   ":indeterminate"
 #define STATE_DISABLED        ":disabled"
@@ -992,6 +1066,7 @@ bool visited_links_check(VisitedLinks* visited, const char* url);
 #define STATE_REQUIRED        ":required"
 #define STATE_OPTIONAL        ":optional"
 #define STATE_PLACEHOLDER     ":placeholder-shown"
+#define STATE_SELECTED        ":selected"
 #define STATE_EMPTY           ":empty"
 #define STATE_TARGET          ":target"
 

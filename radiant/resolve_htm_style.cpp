@@ -1428,19 +1428,16 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 if (block->form->size <= 0) block->form->size = FormDefaults::TEXT_SIZE_CHARS;
             }
 
-            // Parse state attributes - check both attribute and pseudo_state
-            // The pseudo_state may have been set during DOM tree building
+            // Parse state attributes and seed canonical StateStore state.
             DocState* state = (DocState*)lycon->doc->state;
             block->form->state_ref = state;
-            if (block->has_attribute("disabled") ||
-                (block->pseudo_state & PSEUDO_STATE_DISABLED)) {
+            if (block->has_attribute("disabled")) {
                 form_control_set_disabled(state, block, true);
             }
             if (block->has_attribute("readonly")) {
                 form_control_set_readonly(state, block, true);
             }
-            if (block->has_attribute("checked") ||
-                (block->pseudo_state & PSEUDO_STATE_CHECKED)) {
+            if (block->has_attribute("checked")) {
                 form_control_set_checked(state, block, true);
             }
             if (block->has_attribute("required")) {
@@ -1695,7 +1692,8 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             block->bound->border->radius.bottom_left_y = block->bound->border->radius.bottom_right_y = 2.0f;
         // UA background: white normally, light grey when disabled (Chrome ~rgb(235,235,228))
         if (!block->bound->background) { block->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp)); }
-        if (block->form->disabled) {
+        DocState* state = block->doc ? block->doc->state : NULL;
+        if (form_control_is_disabled(state, (View*)block)) {
             block->bound->background->color = (Color){ .r=235, .g=235, .b=228, .a=255 };
         } else {
             block->bound->background->color = (Color){ .r=255, .g=255, .b=255, .a=255 };

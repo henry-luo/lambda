@@ -527,22 +527,11 @@ void te_validate(DomElement* elem) {
     if (!elem || !tc_is_text_control(elem)) return;
     FormControlProp* f = elem->form;
     if (!f) return;
+    DocState* state = f->state_ref ? f->state_ref : (elem->doc ? (DocState*)elem->doc->state : nullptr);
 
-    // Mirror static attribute bits as pseudo-states. Cheap and idempotent.
-    if (f->required) {
-        dom_element_set_pseudo_state(elem, PSEUDO_STATE_REQUIRED);
-        dom_element_clear_pseudo_state(elem, PSEUDO_STATE_OPTIONAL);
-    } else {
-        dom_element_clear_pseudo_state(elem, PSEUDO_STATE_REQUIRED);
-        dom_element_set_pseudo_state(elem, PSEUDO_STATE_OPTIONAL);
-    }
-    if (f->readonly || f->disabled) {
-        dom_element_set_pseudo_state(elem, PSEUDO_STATE_READ_ONLY);
-        dom_element_clear_pseudo_state(elem, PSEUDO_STATE_READ_WRITE);
-    } else {
-        dom_element_clear_pseudo_state(elem, PSEUDO_STATE_READ_ONLY);
-        dom_element_set_pseudo_state(elem, PSEUDO_STATE_READ_WRITE);
-    }
+    state_set_bool(state, elem, STATE_REQUIRED, f->required != 0);
+    state_set_bool(state, elem, STATE_OPTIONAL, f->required == 0);
+    state_set_bool(state, elem, STATE_READONLY, (f->readonly || f->disabled) != 0);
 
     // Resolve current value bytes for content-based checks.
     const char* val = f->current_value
@@ -572,13 +561,8 @@ void te_validate(DomElement* elem) {
     }
     // TODO(F5): pattern="..." — needs lazy-compiled regex.
 
-    if (valid) {
-        dom_element_set_pseudo_state(elem, PSEUDO_STATE_VALID);
-        dom_element_clear_pseudo_state(elem, PSEUDO_STATE_INVALID);
-    } else {
-        dom_element_clear_pseudo_state(elem, PSEUDO_STATE_VALID);
-        dom_element_set_pseudo_state(elem, PSEUDO_STATE_INVALID);
-    }
+    state_set_bool(state, elem, STATE_VALID, valid);
+    state_set_bool(state, elem, STATE_INVALID, !valid);
 }
 
 // ---------- F6: paste sanitization (Radiant_Design_Form_Input.md §3.6) -
@@ -704,7 +688,8 @@ void te_ime_update(DomElement* elem, const char* preedit, uint32_t len,
     if (!f) return;
 
     // Hide the placeholder while composing (even if value is still empty).
-    dom_element_clear_pseudo_state(elem, PSEUDO_STATE_PLACEHOLDER_SHOWN);
+    state_set_bool(f->state_ref ? f->state_ref : (elem->doc ? (DocState*)elem->doc->state : nullptr),
+        elem, STATE_PLACEHOLDER, false);
     f->placeholder_shown = 0;
 
     if (len == 0 || !preedit) {
@@ -771,13 +756,9 @@ void te_ime_cancel(DomElement* elem) {
     te_clear_preedit(f);
     // Recompute placeholder_shown: visible iff value is empty.
     bool show = (f->current_value_len == 0) && f->placeholder && f->placeholder[0];
-    if (show) {
-        dom_element_set_pseudo_state(elem, PSEUDO_STATE_PLACEHOLDER_SHOWN);
-        f->placeholder_shown = 1;
-    } else {
-        dom_element_clear_pseudo_state(elem, PSEUDO_STATE_PLACEHOLDER_SHOWN);
-        f->placeholder_shown = 0;
-    }
+    state_set_bool(f->state_ref ? f->state_ref : (elem->doc ? (DocState*)elem->doc->state : nullptr),
+        elem, STATE_PLACEHOLDER, show);
+    f->placeholder_shown = show ? 1 : 0;
     log_debug("te_ime_cancel: composition aborted");
     js_dom_queue_textcontrol_compositionend(elem, "");
 }
@@ -809,7 +790,8 @@ void te_aria_reflect(DomElement* elem) {
     // aria-invalid mirrors :invalid pseudo-state. Use "true"/"false"
     // rather than removing — assistive tech treats the explicit "false"
     // value as "validation has run and the control is currently OK".
-    bool invalid = (elem->pseudo_state & PSEUDO_STATE_INVALID) != 0;
+    DocState* state = f->state_ref ? f->state_ref : (elem->doc ? (DocState*)elem->doc->state : nullptr);
+    bool invalid = state_get_pseudo_state(state, (View*)elem, PSEUDO_STATE_INVALID);
     dom_element_set_attribute(elem, "aria-invalid", invalid ? "true" : "false");
 
     // aria-valuenow / valuemin / valuemax for <input type="range">.

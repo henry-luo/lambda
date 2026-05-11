@@ -275,11 +275,7 @@ DomDocument* show_html_doc(Url* base, char* doc_url, int viewport_width, int vie
 
     ui_context.document = doc;
 
-    // Create DocState for interactive state management (caret, selection, focus, etc.)
-    if (!doc->state) {
-        doc->state = radiant_state_create(doc->pool, STATE_MODE_IN_PLACE);
-        log_debug("show_html_doc: created DocState for document");
-    }
+    radiant_document_ensure_state(doc, "show_html_doc");
     view_attach_event_log(doc, doc_url);
 
     // Process @font-face rules before layout
@@ -307,7 +303,7 @@ void reflow_html_doc(DomDocument* doc) {
     // Mark dirty so the main loop knows to repaint.
     if (doc->state) {
         DocState* state = (DocState*)doc->state;
-        state->is_dirty = true;
+        doc_state_mark_dirty(state);
     }
 }
 
@@ -328,14 +324,22 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
                 log_info("browse_nav: keyboard back");
                 // save scroll before leaving
                 ViewBlock* root = ui_context.document->view_tree ? (ViewBlock*)ui_context.document->view_tree->root : nullptr;
-                if (root && root->scroller && root->scroller->pane)
-                    session_save_scroll_position(session, root->scroller->pane->v_scroll_position);
+                if (root && root->scroller && root->scroller->pane) {
+                    float scroll_y = 0.0f;
+                    scroll_state_get_position_for_view(ui_context.document->state, (View*)root,
+                        root->scroller->pane, NULL, &scroll_y, NULL, NULL);
+                    session_save_scroll_position(session, scroll_y);
+                }
                 new_doc = session_go_back(session, &ui_context, css_vw, css_vh);
             } else if (key == GLFW_KEY_RIGHT && session_can_go_forward(session)) {
                 log_info("browse_nav: keyboard forward");
                 ViewBlock* root = ui_context.document->view_tree ? (ViewBlock*)ui_context.document->view_tree->root : nullptr;
-                if (root && root->scroller && root->scroller->pane)
-                    session_save_scroll_position(session, root->scroller->pane->v_scroll_position);
+                if (root && root->scroller && root->scroller->pane) {
+                    float scroll_y = 0.0f;
+                    scroll_state_get_position_for_view(ui_context.document->state, (View*)root,
+                        root->scroller->pane, NULL, &scroll_y, NULL, NULL);
+                    session_save_scroll_position(session, scroll_y);
+                }
                 new_doc = session_go_forward(session, &ui_context, css_vw, css_vh);
             }
             if (new_doc) {
@@ -343,11 +347,11 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
                 ViewBlock* root = new_doc->view_tree ? (ViewBlock*)new_doc->view_tree->root : nullptr;
                 if (root && root->scroller && root->scroller->pane) {
                     float saved_y = session_get_scroll_position(session);
-                    scroll_state_set_position((DocState*)new_doc->state,
-                                              root->scroller->pane,
-                                              root->scroller->pane->h_scroll_position,
-                                              saved_y,
-                                              true);
+                    float scroll_x = 0.0f;
+                    scroll_state_get_position_for_view((DocState*)new_doc->state, (View*)root,
+                        root->scroller->pane, &scroll_x, NULL, NULL, NULL);
+                    scroll_state_set_position_for_view((DocState*)new_doc->state, (View*)root,
+                        root->scroller->pane, scroll_x, saved_y, true);
                 }
                 // update title
                 const char* page_title = session_current_title(session);
@@ -661,7 +665,7 @@ void render(GLFWwindow* window) {
         }
         // new surface is blank — force full repaint (not selective)
         if (ui_context.document && ui_context.document->state) {
-            ui_context.document->state->is_dirty = true;
+            doc_state_mark_dirty(ui_context.document->state);
         }
         log_debug("Reflow time: %.2f ms", (glfwGetTime() - start_time) * 1000);
     }
@@ -675,7 +679,7 @@ void render(GLFWwindow* window) {
         if (ui_context.document) {
             reflow_html_doc(ui_context.document);
         }
-        state->needs_reflow = false;
+        doc_state_clear_reflow(state);
         log_debug("Incremental reflow time: %.2f ms", (glfwGetTime() - start_time) * 1000);
     }
 
@@ -685,13 +689,11 @@ void render(GLFWwindow* window) {
          (ui_context.document->state->needs_repaint &&
           dirty_has_regions(&ui_context.document->state->dirty_tracker)))) {
         render_html_doc(&ui_context, ui_context.document->view_tree, NULL);
-        ui_context.document->state->is_dirty = false;
-        ui_context.document->state->needs_repaint = false;
         // Phase 19: clear dirty tracker after render (for caret-only repaints)
-        dirty_clear(&ui_context.document->state->dirty_tracker);
+        doc_state_clear_render_flags(ui_context.document->state);
     } else if (ui_context.document && ui_context.document->state) {
         // Clear stale needs_repaint when there are no dirty regions to render
-        ui_context.document->state->needs_repaint = false;
+        doc_state_clear_repaint(ui_context.document->state);
 
         // Video-only dirty path: skip full DL rebuild, just blit new video frames
         if (ui_context.document->state->has_active_video &&
@@ -950,11 +952,7 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
             log_info("view: browsing session created");
         }
 
-        // Create DocState for interactive state management (caret, selection, focus, etc.)
-        if (!doc->state) {
-            doc->state = radiant_state_create(doc->pool, STATE_MODE_IN_PLACE);
-            log_debug("view_doc_in_window: created DocState for document");
-        }
+        radiant_document_ensure_state(doc, "view_doc_in_window");
         view_attach_event_log(doc, file_to_load);
 
         // Process @font-face rules before layout
@@ -1120,15 +1118,17 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
             float scroll_y = 0;
             if (ui_context.document && ui_context.document->view_tree && ui_context.document->view_tree->root) {
                 ViewBlock* root = (ViewBlock*)ui_context.document->view_tree->root;
-                if (root->scroller && root->scroller->pane)
-                    scroll_y = root->scroller->pane->v_scroll_position;
+                if (root->scroller && root->scroller->pane) {
+                    scroll_state_get_position_for_view(state, (View*)root, root->scroller->pane,
+                        NULL, &scroll_y, NULL, NULL);
+                }
             }
             state->dirty_tracker.viewport_y = scroll_y;
             state->dirty_tracker.viewport_height = (float)ui_context.viewport_height;
 
             bool still_active = animation_scheduler_tick(state->animation_scheduler,
                                                          currentTime, &state->dirty_tracker);
-            state->needs_repaint = true;
+            doc_state_request_repaint(state);
             do_redraw = 1;
         }
 
@@ -1154,7 +1154,7 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
                 // mark document dirty so render_html_doc rebuilds the DL
                 // (the post-composite blit needs fresh DL_WEBVIEW_LAYER_PLACEHOLDER items)
                 if (ui_context.document->state) {
-                    ui_context.document->state->is_dirty = true;
+                    doc_state_mark_dirty(ui_context.document->state);
                 }
             }
         }

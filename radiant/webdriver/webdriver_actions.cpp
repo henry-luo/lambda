@@ -309,10 +309,10 @@ bool webdriver_element_is_enabled(WebDriverSession* session, View* element) {
     if (!session || !element) return false;
     if (!element->is_element()) return true;
     
-    DomElement* dom_elem = (DomElement*)element;
-    
-    // Check disabled pseudo-state
-    if (dom_elem->pseudo_state & PSEUDO_STATE_DISABLED) {
+    DocState* state = session->document ? (DocState*)session->document->state : nullptr;
+
+    // Check disabled state from StateStore/defaults
+    if (state_get_pseudo_state(state, element, PSEUDO_STATE_DISABLED)) {
         return false;
     }
     
@@ -355,10 +355,10 @@ bool webdriver_element_is_selected(WebDriverSession* session, View* element) {
     if (!session || !element) return false;
     if (!element->is_element()) return false;
     
-    DomElement* dom_elem = (DomElement*)element;
-    
-    // Check checked pseudo-state
-    if (dom_elem->pseudo_state & PSEUDO_STATE_CHECKED) {
+    DocState* state = session->document ? (DocState*)session->document->state : nullptr;
+
+    // Check checked state from StateStore/defaults
+    if (state_get_pseudo_state(state, element, PSEUDO_STATE_CHECKED)) {
         return true;
     }
     

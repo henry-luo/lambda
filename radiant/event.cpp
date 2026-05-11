@@ -190,15 +190,13 @@ static void sync_viewport_scroll_state(EventContext* evcon) {
     ViewBlock* root_block = (ViewBlock*)doc->view_tree->root;
     if (!root_block->scroller || !root_block->scroller->pane) return;
 
-    float scroll_x = root_block->scroller->pane->h_scroll_position;
-    float scroll_y = root_block->scroller->pane->v_scroll_position;
+    float scroll_x = 0.0f, scroll_y = 0.0f;
+    scroll_state_get_position_for_view(state, (View*)root_block, root_block->scroller->pane,
+                                       &scroll_x, &scroll_y, NULL, NULL);
 
     // Keep viewport scroll in the centralized state store and the document
     // reflow target so incremental relayout does not snap back to top.
-    state->scroll_x = scroll_x;
-    state->scroll_y = scroll_y;
-    doc->pending_viewport_scroll_x = scroll_x;
-    doc->pending_viewport_scroll_y = scroll_y;
+    doc_state_sync_viewport_scroll(state, doc, scroll_x, scroll_y);
 }
 
 void target_children(EventContext* evcon, View* view) {
@@ -290,7 +288,7 @@ static bool text_target_allows_caret(View* target) {
         if (node->node_type == DOM_NODE_ELEMENT) {
             DomElement* elem = (DomElement*)node;
             if (elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
-                elem->form && elem->form->disabled) {
+                elem->form && form_control_is_disabled(elem->doc ? elem->doc->state : NULL, (View*)elem)) {
                 return false;
             }
             if (elem->has_attribute("data-editable")) return true;
@@ -406,8 +404,13 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
             log_debug("hit not on block scroll");
         }
         // setup scrolling offset
-        evcon->block.x -= block->scroller->pane->h_scroll_position;
-        evcon->block.y -= block->scroller->pane->v_scroll_position;
+        DocState* state = evcon && evcon->ui_context && evcon->ui_context->document
+            ? evcon->ui_context->document->state : NULL;
+        float scroll_x = 0.0f, scroll_y = 0.0f;
+        scroll_state_get_position_for_view(state, (View*)block, block->scroller->pane,
+                                           &scroll_x, &scroll_y, NULL, NULL);
+        evcon->block.x -= scroll_x;
+        evcon->block.y -= scroll_y;
     }
 
     // Check if this block is a child-window webview — stop hit-testing here.
@@ -1697,6 +1700,7 @@ static void post_html_handler_rebuild(EventContext* evcon,
     Pool* pool = doc->pool;
     CssEngine* css_engine = (CssEngine*)doc->cached_css_engine;
     SelectorMatcher* matcher = selector_matcher_create(pool);
+    state_configure_selector_matcher((DocState*)doc->state, matcher);
 
     // Apply all cached stylesheets
     for (int i = 0; i < doc->stylesheet_count; i++) {
@@ -1715,6 +1719,11 @@ static void post_html_handler_rebuild(EventContext* evcon,
     // Clear interaction targets before freeing views so transition helpers can
     // still update pseudo-state mirrors on the old tree.
     if (state) {
+        doc_state_close_dropdown(state, NULL);
+        doc_state_close_context_menu(state);
+        doc_state_set_hover_target(state, NULL);
+        doc_state_set_active_target(state, NULL);
+        doc_state_set_drag_state(state, NULL, false);
         if (focus_has_current(state)) {
             focus_clear(state);
         } else {
@@ -1732,11 +1741,6 @@ static void post_html_handler_rebuild(EventContext* evcon,
 
     // Clear stale view pointers in DocState — old views are now freed
     if (state) {
-        state->hover_target = nullptr;
-        state->active_target = nullptr;
-        state->drag_target = nullptr;
-        state->is_dragging = false;
-        state->open_dropdown = nullptr;
         if (state->cursor) state->cursor->view = nullptr;
         if (state->drag_drop) {
             state->drag_drop->source_view = nullptr;
@@ -2102,13 +2106,7 @@ void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event) 
     // load default font Arial, size 16 px
     setup_font(uicon, &evcon->font, &uicon->default_font);
     evcon->new_cursor = CSS_VALUE_AUTO;
-    if (!uicon->document->state) {
-        // Create the new DocState with in-place mode
-        uicon->document->state = radiant_state_create(uicon->document->pool, STATE_MODE_IN_PLACE);
-        if (uicon->document->state) {
-            log_debug("event_context_init: created DocState for document");
-        }
-    }
+    radiant_document_ensure_state(uicon->document, "event_context_init");
 }
 
 void event_context_cleanup(EventContext* evcon) {
@@ -2137,23 +2135,15 @@ static void clear_cascaded_styles_recursive(DomNode* node) {
 }
 
 /**
- * Helper to update element's pseudo_state bitmask along with state store
- * Also schedules reflow if the pseudo-state change may affect layout
+ * Schedule style/layout work after StateStore pseudo-state changes.
  */
 static void sync_pseudo_state(View* view, uint32_t pseudo_flag, bool set) {
+    (void)pseudo_flag;
+    (void)set;
     if (!view || !view->is_element()) return;
 
     DomElement* element = (DomElement*)view;
-    uint32_t old_state = element->pseudo_state;
-
-    if (set) {
-        dom_element_set_pseudo_state(element, pseudo_flag);
-    } else {
-        dom_element_clear_pseudo_state(element, pseudo_flag);
-    }
-
-    // If state actually changed, schedule potential reflow
-    if (element->pseudo_state != old_state && element->doc && element->doc->state) {
+    if (element->doc && element->doc->state) {
         DocState* state = (DocState*)element->doc->state;
         DomDocument* doc = element->doc;
 
@@ -2173,6 +2163,7 @@ static void sync_pseudo_state(View* view, uint32_t pseudo_flag, bool set) {
             clear_cascaded_styles_recursive((DomNode*)doc->root);
 
             SelectorMatcher* matcher = selector_matcher_create(pool);
+            state_configure_selector_matcher(state, matcher);
             for (int i = 0; i < doc->stylesheet_count; i++) {
                 if (doc->stylesheets[i]) {
                     apply_stylesheet_to_dom_tree_fast(doc->root, doc->stylesheets[i],
@@ -2186,7 +2177,7 @@ static void sync_pseudo_state(View* view, uint32_t pseudo_flag, bool set) {
 
         // Always mark for repaint
         dirty_mark_element(state, view);
-        state->is_dirty = true;
+        doc_state_mark_dirty(state);
     }
 }
 
@@ -2235,8 +2226,7 @@ void update_hover_state(EventContext* evcon, View* new_target) {
             0, 0, false, false, false, false, 0);
     }
 
-    state->hover_target = new_target;
-    state->needs_repaint = true;
+    doc_state_set_hover_target(state, new_target);
 }
 
 /**
@@ -2254,7 +2244,7 @@ void update_active_state(EventContext* evcon, View* target, bool is_active) {
             sync_pseudo_state(node, PSEUDO_STATE_ACTIVE, true);
             node = (View*)node->parent;
         }
-        state->active_target = target;
+        doc_state_set_active_target(state, target);
         log_debug("update_active_state: set active on %p", target);
     } else {
         // Clear :active on previous active target
@@ -2267,11 +2257,9 @@ void update_active_state(EventContext* evcon, View* target, bool is_active) {
                 node = (View*)node->parent;
             }
         }
-        state->active_target = NULL;
+        doc_state_set_active_target(state, NULL);
         log_debug("update_active_state: cleared active");
     }
-
-    state->needs_repaint = true;
 }
 
 // ============================================================================
@@ -2317,7 +2305,7 @@ static void uncheck_radio_group(View* root, const char* name, View* exclude, Doc
             const char* elem_name = elem->get_attribute("name");
             if (elem_name && strcmp(elem_name, name) == 0) {
                 // Uncheck this radio button
-                if (dom_element_has_pseudo_state(elem, PSEUDO_STATE_CHECKED)) {
+                if (state_get_pseudo_state(state, current, PSEUDO_STATE_CHECKED)) {
                     form_control_set_checked(state, current, false);
                     sync_pseudo_state(current, PSEUDO_STATE_CHECKED, false);
                     log_debug("uncheck_radio_group: unchecked radio name=%s", elem_name);
@@ -2477,14 +2465,14 @@ static bool handle_checkbox_radio_click(EventContext* evcon, View* target) {
     ViewElement* elem = (ViewElement*)input;
 
     // Check if disabled
-    if (dom_element_has_pseudo_state(elem, PSEUDO_STATE_DISABLED)) {
+    if (state_get_pseudo_state(state, input, PSEUDO_STATE_DISABLED)) {
         log_debug("handle_checkbox_radio_click: element is disabled");
         return false;
     }
 
     if (is_checkbox(input)) {
         // Toggle checkbox state
-        bool is_checked = dom_element_has_pseudo_state(elem, PSEUDO_STATE_CHECKED);
+        bool is_checked = state_get_pseudo_state(state, input, PSEUDO_STATE_CHECKED);
         bool new_state = !is_checked;
 
         form_control_set_checked(state, input, new_state);
@@ -2493,14 +2481,14 @@ static bool handle_checkbox_radio_click(EventContext* evcon, View* target) {
         log_debug("handle_checkbox_radio_click: input->is_block()=%d view_type=%d", input->is_block(), input->view_type);
 
         log_debug("handle_checkbox_radio_click: toggled checkbox to %s", new_state ? "checked" : "unchecked");
-        state->needs_repaint = true;
+        doc_state_request_repaint(state);
         return true;
     }
 
     if (is_radio(input)) {
         // Radio button: only allow checking, not unchecking by click
         // Also need to uncheck other radio buttons in the same name group
-        bool is_checked = dom_element_has_pseudo_state(elem, PSEUDO_STATE_CHECKED);
+        bool is_checked = state_get_pseudo_state(state, input, PSEUDO_STATE_CHECKED);
 
         if (!is_checked) {
             // Uncheck other radio buttons in the same group
@@ -2519,7 +2507,7 @@ static bool handle_checkbox_radio_click(EventContext* evcon, View* target) {
             sync_pseudo_state(input, PSEUDO_STATE_CHECKED, true);
 
             log_debug("handle_checkbox_radio_click: checked radio name=%s", name ? name : "(none)");
-            state->needs_repaint = true;
+            doc_state_request_repaint(state);
         }
         return true;
     }
@@ -2617,7 +2605,8 @@ static const char* get_option_text(DomElement* option) {
 static const char* get_selected_option_text(ViewBlock* select) {
     if (!select || !select->form) return nullptr;
 
-    DomElement* option = get_option_at_index(select, select->form->selected_index);
+    DocState* state = ((DomElement*)select)->doc ? ((DomElement*)select)->doc->state : NULL;
+    DomElement* option = get_option_at_index(select, form_control_get_selected_index(state, (View*)select));
     return get_option_text(option);
 }
 
@@ -2638,8 +2627,8 @@ static void calculate_dropdown_dimensions(ViewBlock* select, DocState* state, fl
     float option_height = select->height;
 
     // Calculate popup dimensions
-    state->dropdown_width = select->width * scale;
-    state->dropdown_height = visible_count * option_height * scale;
+    doc_state_set_dropdown_geometry(state, state->dropdown_x, state->dropdown_y,
+        select->width * scale, visible_count * option_height * scale);
 }
 
 /**
@@ -2657,33 +2646,28 @@ static bool handle_select_click(EventContext* evcon, View* target) {
     if (!state) return false;
 
     ViewBlock* select = (ViewBlock*)select_view;
+    bool disabled = !select->form || form_control_is_disabled(state, (View*)select);
     log_debug("handle_select_click: select->form=%p, disabled=%d",
-        (void*)select->form, select->form ? select->form->disabled : -1);
-    if (!select->form || select->form->disabled) return false;
+        (void*)select->form, disabled ? 1 : 0);
+    if (disabled) return false;
 
     float scale = evcon->ui_context->pixel_ratio > 0 ? evcon->ui_context->pixel_ratio : 1.0f;
 
     if (state->open_dropdown == select_view) {
         // Close the dropdown
         log_debug("handle_select_click: closing dropdown");
-        state->open_dropdown = nullptr;
-        form_control_close_dropdown(state, (View*)select);
-        state->needs_repaint = true;
+        doc_state_close_dropdown(state, (View*)select);
         return true;
     }
 
     // Close any other open dropdown first
     if (state->open_dropdown) {
-        ViewBlock* prev_select = (ViewBlock*)state->open_dropdown;
-        if (prev_select->form) {
-            form_control_close_dropdown(state, (View*)prev_select);
-        }
+        doc_state_close_dropdown(state, state->open_dropdown);
     }
 
     // Open this dropdown
     log_debug("handle_select_click: opening dropdown with %d options", select->form->option_count);
-    state->open_dropdown = select_view;
-    form_control_open_dropdown(state, (View*)select);
+    doc_state_open_dropdown(state, (View*)select);
 
     // Calculate position (below the select, in absolute screen coords)
     // Walk up parent chain to get absolute position
@@ -2699,11 +2683,9 @@ static bool handle_select_click(EventContext* evcon, View* target) {
         parent = parent->parent;
     }
 
-    state->dropdown_x = abs_x * scale;
-    state->dropdown_y = abs_y * scale;
+    doc_state_set_dropdown_geometry(state, abs_x * scale, abs_y * scale,
+        state->dropdown_width, state->dropdown_height);
     calculate_dropdown_dimensions(select, state, scale);
-
-    state->needs_repaint = true;
     return true;
 }
 
@@ -2747,8 +2729,7 @@ static bool handle_dropdown_option_click(EventContext* evcon, float mouse_x, flo
         form_control_set_selected_index(state, (View*)select, clicked_index);
 
         // Close dropdown
-        state->open_dropdown = nullptr;
-        form_control_close_dropdown(state, (View*)select);
+        doc_state_close_dropdown(state, (View*)select);
         return true;
     }
 
@@ -2771,7 +2752,7 @@ static void update_dropdown_hover(EventContext* evcon, float mouse_x, float mous
     // Check if mouse is within dropdown popup
     if (mouse_x < state->dropdown_x || mouse_x > state->dropdown_x + state->dropdown_width ||
         mouse_y < state->dropdown_y || mouse_y > state->dropdown_y + state->dropdown_height) {
-        if (select->form->hover_index != -1) {
+        if (form_control_get_hover_index(state, (View*)select) != -1) {
             form_control_set_hover_index(state, (View*)select, -1);
         }
         return;
@@ -2782,7 +2763,7 @@ static void update_dropdown_hover(EventContext* evcon, float mouse_x, float mous
     int hover_index = (int)((mouse_y - state->dropdown_y) / option_height);
 
     if (hover_index >= 0 && hover_index < select->form->option_count) {
-        if (select->form->hover_index != hover_index) {
+        if (form_control_get_hover_index(state, (View*)select) != hover_index) {
             form_control_set_hover_index(state, (View*)select, hover_index);
         }
     }
@@ -2798,7 +2779,7 @@ static bool handle_dropdown_key(EventContext* evcon, int key) {
     ViewBlock* select = (ViewBlock*)state->open_dropdown;
     if (!select->form) return false;
 
-    int hover = select->form->hover_index;
+    int hover = form_control_get_hover_index(state, (View*)select);
     int count = select->form->option_count;
 
     switch (key) {
@@ -2817,14 +2798,12 @@ static bool handle_dropdown_key(EventContext* evcon, int key) {
     case RDT_KEY_ENTER:
         if (hover >= 0 && hover < count) {
             form_control_set_selected_index(state, (View*)select, hover);
-            state->open_dropdown = nullptr;
-            form_control_close_dropdown(state, (View*)select);
+            doc_state_close_dropdown(state, (View*)select);
         }
         return true;
 
     case RDT_KEY_ESCAPE:
-        state->open_dropdown = nullptr;
-        form_control_close_dropdown(state, (View*)select);
+        doc_state_close_dropdown(state, (View*)select);
         return true;
     }
 
@@ -2874,8 +2853,7 @@ static void close_dropdown_if_outside(EventContext* evcon, float mouse_x, float 
 
     // Click outside - close dropdown
     log_debug("close_dropdown_if_outside: closing dropdown");
-    state->open_dropdown = nullptr;
-    form_control_close_dropdown(state, (View*)select);
+    doc_state_close_dropdown(state, (View*)select);
 }
 
 /**
@@ -2901,7 +2879,7 @@ bool is_view_focusable(View* view) {
         // disabled form elements are inert.
         DomElement* delem = (DomElement*)view;
         if (delem->item_prop_type == DomElement::ITEM_PROP_FORM &&
-            delem->form && delem->form->disabled) {
+            delem->form && form_control_is_disabled(state, (View*)delem)) {
             return false;
         }
 
@@ -3013,8 +2991,7 @@ void update_drag_state(EventContext* evcon, View* target, bool is_dragging) {
     DocState* state = (DocState*)evcon->ui_context->document->state;
     if (!state) return;
 
-    state->drag_target = is_dragging ? target : NULL;
-    state->is_dirty = true;
+    doc_state_set_drag_state(state, target, is_dragging);
 
     log_debug("update_drag_state: dragging=%d, target=%p", is_dragging, target);
 }
@@ -3061,6 +3038,7 @@ DomNode* set_iframe_src_by_name(DomElement *document, const char *target_name, c
         log_error("Failed to create selector matcher");
         return NULL;
     }
+    state_configure_selector_matcher(document->doc ? (DocState*)document->doc->state : nullptr, matcher);
 
     // find the iframe element matching the selector
     DomElement* iframe_element = selector_matcher_find_first(matcher, selector, document);
@@ -3906,10 +3884,12 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     // so render_form's text-input branch shows the highlight
                     // live during the drag.
                     tc_sync_legacy_to_form(anchor_elem, state);
+                    uint32_t sel_start = 0, sel_end = 0;
+                    form_control_get_selection(state, (View*)anchor_elem, &sel_start, &sel_end, NULL);
                     log_debug("[INPUT DRAG SEL] char_offset=%d sel_u16=[%u..%u] tc_init=%d",
                               char_offset,
-                              anchor_elem->form->selection_start,
-                              anchor_elem->form->selection_end,
+                              sel_start,
+                              sel_end,
                               anchor_elem->form->tc_initialized ? 1 : 0);
                     evcon.need_repaint = true;
                     goto textarea_drag_done;
@@ -4330,7 +4310,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 if (target_elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
                     target_elem->form &&
                     target_elem->form->control_type == FORM_CONTROL_TEXT &&
-                    !target_elem->form->disabled) {
+                    !form_control_is_disabled(state, (View*)target_elem)) {
 
                     ViewBlock* input_block = (ViewBlock*)target_elem;
                     const char* value = target_elem->form->value;
@@ -4440,7 +4420,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 } else if (target_elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
                            target_elem->form &&
                            target_elem->form->control_type == FORM_CONTROL_TEXTAREA &&
-                           !target_elem->form->disabled) {
+                           !form_control_is_disabled(state, (View*)target_elem)) {
                     // Textarea form controls: click-to-position caret
                     ViewBlock* ta_block = (ViewBlock*)target_elem;
                     const char* value = target_elem->form->value;
@@ -4714,8 +4694,12 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                                         vid_x += wb->x;
                                         vid_y += wb->y;
                                         if (wb->scroller && wb->scroller->pane) {
-                                            vid_x -= wb->scroller->pane->h_scroll_position;
-                                            vid_y -= wb->scroller->pane->v_scroll_position;
+                                            DocState* scroll_state = wb->doc ? wb->doc->state : NULL;
+                                            float scroll_x = 0.0f, scroll_y = 0.0f;
+                                            scroll_state_get_position_for_view(scroll_state, (View*)wb,
+                                                wb->scroller->pane, &scroll_x, &scroll_y, NULL, NULL);
+                                            vid_x -= scroll_x;
+                                            vid_y -= scroll_y;
                                         }
                                     }
                                     walk = (View*)walk->parent;
@@ -4855,14 +4839,17 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         if (root_block && root_block->scroller && root_block->scroller->pane) {
                             ScrollPane* pane = root_block->scroller->pane;
                             float target_y = target_view->y;
-                            scroll_state_set_position((DocState*)uicon->document->state,
-                                                      pane,
-                                                      pane->h_scroll_position,
-                                                      target_y,
-                                                      true);
+                            DocState* scroll_state = (DocState*)uicon->document->state;
+                            float scroll_x = 0.0f, scroll_y = 0.0f;
+                            scroll_state_get_position_for_view(scroll_state, (View*)root_block, pane,
+                                                               &scroll_x, &scroll_y, NULL, NULL);
+                            scroll_state_set_position_for_view(scroll_state, (View*)root_block,
+                                                               pane, scroll_x, target_y, true);
+                            scroll_state_get_position_for_view(scroll_state, (View*)root_block, pane,
+                                                               NULL, &scroll_y, NULL, NULL);
                             log_info("browse_nav: scrolled to #%s at y=%.0f", fragment_id,
-                                     pane->v_scroll_position);
-                            uicon->document->state->is_dirty = true;
+                                     scroll_y);
+                            doc_state_mark_dirty(uicon->document->state);
                         }
                     } else {
                         log_warn("browse_nav: element #%s found but no view for it", fragment_id);
@@ -4945,7 +4932,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             }
                         }
                         free_document(old_doc);
-                        uicon->document->state->is_dirty = true;
+                        doc_state_mark_dirty(uicon->document->state);
                     }
                     else {
                         log_debug("iframe view has no embed");
@@ -4964,7 +4951,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     // save current scroll position in history
                     ViewBlock* root_block = doc->view_tree ? (ViewBlock*)doc->view_tree->root : nullptr;
                     if (root_block && root_block->scroller && root_block->scroller->pane) {
-                        session_save_scroll_position(session, root_block->scroller->pane->v_scroll_position);
+                        float scroll_y = 0.0f;
+                        scroll_state_get_position_for_view(state, (View*)root_block, root_block->scroller->pane,
+                                                           NULL, &scroll_y, NULL, NULL);
+                        session_save_scroll_position(session, scroll_y);
                     }
                     log_info("browse_nav: navigating via session to %s", new_url);
                     new_doc = session_navigate(session, evcon.ui_context, new_url, css_vw, css_vh);
@@ -5128,7 +5118,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 // Disabled buttons are inert.
                 DomElement* delem = (DomElement*)focused;
                 bool disabled = delem->item_prop_type == DomElement::ITEM_PROP_FORM
-                    && delem->form && delem->form->disabled;
+                    && delem->form && form_control_is_disabled(state, (View*)delem);
                 if (!disabled) {
                     dispatch_html_event_handler(&evcon, focused, "click");
                     radiant_dispatch_mouse_event(&evcon, focused, "click",
@@ -5140,7 +5130,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 // the dropdown popup, matching native browser behavior.
                 DomElement* delem = (DomElement*)focused;
                 bool disabled = delem->item_prop_type == DomElement::ITEM_PROP_FORM
-                    && delem->form && delem->form->disabled;
+                    && delem->form && form_control_is_disabled(state, (View*)delem);
                 if (!disabled) {
                     handled = handle_select_click(&evcon, focused);
                 }
@@ -5374,7 +5364,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     evcon.need_repaint = true;
                     break;
                 } else if (key_event->key == RDT_KEY_BACKSPACE) {
-                    bool editable = !focus_elem->form->readonly && !focus_elem->form->disabled;
+                    bool editable = !form_control_is_readonly(state, (View*)focus_elem) &&
+                        !form_control_is_disabled(state, (View*)focus_elem);
                     if (had_lambda_keydown) {
                         // Lambda handler deleted char before caret; move caret back by 1 char
                         int base_off = had_keydown_caret ? keydown_caret_offset : cur;
@@ -5409,7 +5400,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     evcon.need_repaint = true;
                     break;
                 } else if (key_event->key == RDT_KEY_DELETE) {
-                    bool editable = !focus_elem->form->readonly && !focus_elem->form->disabled;
+                    bool editable = !form_control_is_readonly(state, (View*)focus_elem) &&
+                        !form_control_is_disabled(state, (View*)focus_elem);
                     if (!had_lambda_keydown && editable) {
                         uint32_t a, b;
                         if (had_keydown_selection) {
@@ -5788,7 +5780,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     evcon.need_repaint = true;
                     break;
                 } else if (key_event->key == RDT_KEY_BACKSPACE) {
-                    bool editable = !focus_elem->form->readonly && !focus_elem->form->disabled;
+                    bool editable = !form_control_is_readonly(state, (View*)focus_elem) &&
+                        !form_control_is_disabled(state, (View*)focus_elem);
                     if (had_lambda_keydown) {
                         // Lambda handler already processed the delete; adjust caret
                         if (had_keydown_selection) {
@@ -5827,7 +5820,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     }
                     evcon.need_repaint = true;
                 } else if (key_event->key == RDT_KEY_DELETE) {
-                    bool editable = !focus_elem->form->readonly && !focus_elem->form->disabled;
+                    bool editable = !form_control_is_readonly(state, (View*)focus_elem) &&
+                        !form_control_is_disabled(state, (View*)focus_elem);
                     if (!had_lambda_keydown && editable) {
                         uint32_t a, b;
                         if (had_keydown_selection) {
@@ -5849,7 +5843,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     }
                     evcon.need_repaint = true;
                 } else if (key_event->key == RDT_KEY_ENTER) {
-                    bool editable = !focus_elem->form->readonly && !focus_elem->form->disabled;
+                    bool editable = !form_control_is_readonly(state, (View*)focus_elem) &&
+                        !form_control_is_disabled(state, (View*)focus_elem);
                     if (had_lambda_keydown) {
                         // Lambda handler processed the enter; adjust caret
                         if (had_keydown_selection) {
@@ -6176,7 +6171,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 (elem->form->control_type == FORM_CONTROL_TEXT ||
                  elem->form->control_type == FORM_CONTROL_TEXTAREA)) {
                 is_form_input = true;
-                bool editable = !elem->form->readonly && !elem->form->disabled;
+                bool editable = !form_control_is_readonly(state, (View*)elem) &&
+                    !form_control_is_disabled(state, (View*)elem);
                 int caret_offset = 0;
                 if (had_lambda_handler) {
                     // legacy path: handler mutated value; just advance caret.
@@ -6269,7 +6265,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
     }
 
     if (evcon.need_repaint) {
-        uicon->document->state->is_dirty = true;
+        doc_state_mark_dirty(uicon->document->state);
         to_repaint();
     }
     log_debug("end of event %d", event->type);
