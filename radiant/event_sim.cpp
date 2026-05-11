@@ -1316,6 +1316,38 @@ static SimEvent* parse_sim_event(MapReader& reader) {
             ev->has_expected_weak_ref = true;
             ev->expected_weak_ref = reader.get("weak_ref").asBool();
         }
+        if (reader.has("active_target")) {
+            ev->has_expected_active_target = true;
+            ev->expected_active_target = reader.get("active_target").asBool();
+        }
+        if (reader.has("drag_target")) {
+            ev->has_expected_drag_target = true;
+            ev->expected_drag_target = reader.get("drag_target").asBool();
+        }
+        if (reader.has("drag_active")) {
+            ev->has_expected_drag_active = true;
+            ev->expected_drag_active = reader.get("drag_active").asBool();
+        }
+        if (reader.has("drag_drop")) {
+            ev->has_expected_drag_drop = true;
+            ev->expected_drag_drop = reader.get("drag_drop").asBool();
+        }
+        if (reader.has("drag_drop_pending")) {
+            ev->has_expected_drag_drop_pending = true;
+            ev->expected_drag_drop_pending = reader.get("drag_drop_pending").asBool();
+        }
+        if (reader.has("drag_drop_active")) {
+            ev->has_expected_drag_drop_active = true;
+            ev->expected_drag_drop_active = reader.get("drag_drop_active").asBool();
+        }
+        if (reader.has("drag_drop_source")) {
+            ev->has_expected_drag_drop_source = true;
+            ev->expected_drag_drop_source = reader.get("drag_drop_source").asBool();
+        }
+        if (reader.has("drag_drop_target")) {
+            ev->has_expected_drag_drop_target = true;
+            ev->expected_drag_drop_target = reader.get("drag_drop_target").asBool();
+        }
         if (reader.has("doc_scroll_x")) {
             ev->has_expected_doc_scroll_x = true;
             ItemReader sx = reader.get("doc_scroll_x");
@@ -3421,6 +3453,46 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             }
             if (elem && ev->has_expected_weak_ref && ((elem->view_state_ref == view_state && view_state != NULL) != ev->expected_weak_ref)) {
                 log_error("event_sim: assert_state_store FAIL - weak ViewState ref expectation mismatch");
+                passed = false;
+            }
+            if (state && elem && ev->has_expected_active_target && ((state->active_target == elem) != ev->expected_active_target)) {
+                log_error("event_sim: assert_state_store FAIL - active target expectation mismatch");
+                passed = false;
+            }
+            if (state && elem && ev->has_expected_drag_target && ((state->drag_target == elem) != ev->expected_drag_target)) {
+                log_error("event_sim: assert_state_store FAIL - drag target expectation mismatch");
+                passed = false;
+            }
+            if (state && ev->has_expected_drag_active && (state->is_dragging != ev->expected_drag_active)) {
+                log_error("event_sim: assert_state_store FAIL - drag active expected %s, got %s",
+                    ev->expected_drag_active ? "true" : "false",
+                    state->is_dragging ? "true" : "false");
+                passed = false;
+            }
+            if (state && ev->has_expected_drag_drop) {
+                bool has_drag_drop = state->drag_drop && (state->drag_drop->pending || state->drag_drop->active || state->drag_drop->source_view);
+                if (has_drag_drop != ev->expected_drag_drop) {
+                    log_error("event_sim: assert_state_store FAIL - drag_drop expected %s, got %s",
+                        ev->expected_drag_drop ? "present" : "absent",
+                        has_drag_drop ? "present" : "absent");
+                    passed = false;
+                }
+            }
+            DragDropState* drag_drop = state ? state->drag_drop : NULL;
+            if (drag_drop && ev->has_expected_drag_drop_pending && (drag_drop->pending != ev->expected_drag_drop_pending)) {
+                log_error("event_sim: assert_state_store FAIL - drag_drop pending expectation mismatch");
+                passed = false;
+            }
+            if (drag_drop && ev->has_expected_drag_drop_active && (drag_drop->active != ev->expected_drag_drop_active)) {
+                log_error("event_sim: assert_state_store FAIL - drag_drop active expectation mismatch");
+                passed = false;
+            }
+            if (drag_drop && elem && ev->has_expected_drag_drop_source && ((drag_drop->source_view == elem) != ev->expected_drag_drop_source)) {
+                log_error("event_sim: assert_state_store FAIL - drag_drop source expectation mismatch");
+                passed = false;
+            }
+            if (drag_drop && elem && ev->has_expected_drag_drop_target && ((drag_drop->drop_target == elem) != ev->expected_drag_drop_target)) {
+                log_error("event_sim: assert_state_store FAIL - drag_drop target expectation mismatch");
                 passed = false;
             }
             if (elem && ev->expected_view_state_kind) {

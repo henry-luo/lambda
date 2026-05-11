@@ -65,6 +65,42 @@ typedef struct SelectionTransitionArgs {
     int focus_offset;
 } SelectionTransitionArgs;
 
+typedef enum HoverTransitionKind {
+    HOVER_TRANSITION_SET_TARGET,
+} HoverTransitionKind;
+
+typedef struct HoverTransitionArgs {
+    View* target;
+} HoverTransitionArgs;
+
+typedef enum ActiveTransitionKind {
+    ACTIVE_TRANSITION_SET_TARGET,
+} ActiveTransitionKind;
+
+typedef struct ActiveTransitionArgs {
+    View* target;
+} ActiveTransitionArgs;
+
+typedef enum DragTransitionKind {
+    DRAG_TRANSITION_SET_STATE,
+    DRAG_TRANSITION_BEGIN_DROP,
+    DRAG_TRANSITION_UPDATE_DROP_MOTION,
+    DRAG_TRANSITION_SET_DROP_ACTIVE,
+    DRAG_TRANSITION_SET_DROP_TARGET,
+    DRAG_TRANSITION_CLEAR_DROP,
+} DragTransitionKind;
+
+typedef struct DragTransitionArgs {
+    View* target;
+    View* source;
+    View* drop_target;
+    bool dragging;
+    bool active;
+    float x;
+    float y;
+    const char* drag_data;
+} DragTransitionArgs;
+
 bool focus_transition(DocState* state,
                       FocusTransitionKind kind,
                       FocusTransitionArgs* args);
@@ -76,6 +112,18 @@ bool caret_transition(DocState* state,
 bool selection_transition(DocState* state,
                           SelectionTransitionKind kind,
                           SelectionTransitionArgs* args);
+
+bool hover_transition(DocState* state,
+                      HoverTransitionKind kind,
+                      HoverTransitionArgs* args);
+
+bool active_transition(DocState* state,
+                       ActiveTransitionKind kind,
+                       ActiveTransitionArgs* args);
+
+bool drag_transition(DocState* state,
+                     DragTransitionKind kind,
+                     DragTransitionArgs* args);
 
 /* Begin one event cascade. `cause` follows the design vocabulary:
  * input, webdriver, event_sim, navigation, timer, script, internal, layout.

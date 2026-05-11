@@ -1,6 +1,7 @@
 #include "render.hpp"
 #include "handler.hpp"
 #include "state_store.hpp"
+#include "state_machine.hpp"
 #include "../lib/log.h"
 
 struct ScrollConfig {
@@ -184,7 +185,8 @@ void scrollpane_mouse_down(EventContext* evcon, ViewBlock* block) {
             sp->h_is_dragging = true; // start dragging the handle
             sp->drag_start_x = event->x; // capture the current mouse X position
             sp->h_drag_start_scroll = h;
-            doc_state_set_drag_state(evcon->ui_context->document->state, (View*)block, true);
+            DragTransitionArgs drag_args = { .target = (View*)block, .dragging = true };
+            drag_transition(evcon->ui_context->document->state, DRAG_TRANSITION_SET_STATE, &drag_args);
         }
     }
     else if (sp->is_v_hovered) {
@@ -202,7 +204,8 @@ void scrollpane_mouse_down(EventContext* evcon, ViewBlock* block) {
             sp->v_is_dragging = true; // start dragging the handle
             sp->drag_start_y = event->y; // capture the current mouse Y position
             sp->v_drag_start_scroll = v;
-            doc_state_set_drag_state(evcon->ui_context->document->state, (View*)block, true);
+            DragTransitionArgs drag_args = { .target = (View*)block, .dragging = true };
+            drag_transition(evcon->ui_context->document->state, DRAG_TRANSITION_SET_STATE, &drag_args);
         }
     }
 }
@@ -214,7 +217,8 @@ void scrollpane_mouse_up(EventContext* evcon, ViewBlock* block) {
         sp->drag_start_x = 0;  sp->h_drag_start_scroll = 0;
         sp->v_is_dragging = false;
         sp->drag_start_y = 0;  sp->v_drag_start_scroll = 0;
-        doc_state_set_drag_state(evcon->ui_context->document->state, NULL, false);
+        DragTransitionArgs drag_args = { .target = NULL, .dragging = false };
+        drag_transition(evcon->ui_context->document->state, DRAG_TRANSITION_SET_STATE, &drag_args);
     }
 }
 

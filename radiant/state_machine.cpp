@@ -138,6 +138,84 @@ bool selection_transition(DocState* state,
     return radiant_state_validate_interaction(state, NULL);
 }
 
+bool hover_transition(DocState* state,
+                      HoverTransitionKind kind,
+                      HoverTransitionArgs* args) {
+    if (!state) return false;
+
+    transition_enter(state);
+    switch (kind) {
+        case HOVER_TRANSITION_SET_TARGET:
+            doc_state_set_hover_target(state, args ? args->target : NULL);
+            break;
+        default:
+            transition_leave(state);
+            return false;
+    }
+    transition_leave(state);
+    radiant_state_assert_valid(state, "hover_transition");
+    return radiant_state_validate_interaction(state, NULL);
+}
+
+bool active_transition(DocState* state,
+                       ActiveTransitionKind kind,
+                       ActiveTransitionArgs* args) {
+    if (!state) return false;
+
+    transition_enter(state);
+    switch (kind) {
+        case ACTIVE_TRANSITION_SET_TARGET:
+            doc_state_set_active_target(state, args ? args->target : NULL);
+            break;
+        default:
+            transition_leave(state);
+            return false;
+    }
+    transition_leave(state);
+    radiant_state_assert_valid(state, "active_transition");
+    return radiant_state_validate_interaction(state, NULL);
+}
+
+bool drag_transition(DocState* state,
+                     DragTransitionKind kind,
+                     DragTransitionArgs* args) {
+    if (!state) return false;
+
+    transition_enter(state);
+    switch (kind) {
+        case DRAG_TRANSITION_SET_STATE:
+            doc_state_set_drag_state(state, args ? args->target : NULL,
+                                     args ? args->dragging : false);
+            break;
+        case DRAG_TRANSITION_BEGIN_DROP:
+            if (!args) { transition_leave(state); return false; }
+            if (!doc_state_begin_drag_drop(state, args->source, args->x, args->y, args->drag_data)) {
+                transition_leave(state);
+                return false;
+            }
+            break;
+        case DRAG_TRANSITION_UPDATE_DROP_MOTION:
+            if (!args) { transition_leave(state); return false; }
+            doc_state_update_drag_drop_motion(state, args->x, args->y);
+            break;
+        case DRAG_TRANSITION_SET_DROP_ACTIVE:
+            doc_state_set_drag_drop_active(state, args ? args->active : false);
+            break;
+        case DRAG_TRANSITION_SET_DROP_TARGET:
+            doc_state_set_drag_drop_target(state, args ? args->drop_target : NULL);
+            break;
+        case DRAG_TRANSITION_CLEAR_DROP:
+            doc_state_clear_drag_drop(state);
+            break;
+        default:
+            transition_leave(state);
+            return false;
+    }
+    transition_leave(state);
+    radiant_state_assert_valid(state, "drag_transition");
+    return radiant_state_validate_interaction(state, NULL);
+}
+
 static void report_init(StateValidationReport* report) {
     if (!report) return;
     report->ok = true;
@@ -183,6 +261,15 @@ static View* focus_validation_root(View* view) {
 
 static bool focus_path_contains(View* focused, View* candidate) {
     View* node = focused;
+    while (node) {
+        if (node == candidate) return true;
+        node = (View*)node->parent;
+    }
+    return false;
+}
+
+static bool view_path_contains(View* target, View* candidate) {
+    View* node = target;
     while (node) {
         if (node == candidate) return true;
         node = (View*)node->parent;
@@ -323,6 +410,131 @@ static void validate_focus_invariants(DocState* state,
     }
     if (!focused && focus_count != 0) {
         report_fail(report, "inactive focus document still has :focus target");
+    }
+}
+
+static void validate_hover_node(DocState* state, View* node, View* hovered,
+                                StateValidationReport* report,
+                                uint32_t* hover_count) {
+    if (!state || !node) return;
+
+    bool expected_hover = hovered && view_path_contains(hovered, node);
+    bool store_hover = state_get_bool(state, node, STATE_HOVER);
+    if (store_hover) (*hover_count)++;
+    if (store_hover != expected_hover) {
+        report_fail(report, ":hover ancestry chain is inconsistent");
+    }
+
+    if (node->is_element()) {
+        DomElement* element = (DomElement*)node;
+        DomNode* child = element->first_child;
+        while (child) {
+            validate_hover_node(state, (View*)child, hovered, report, hover_count);
+            child = child->next_sibling;
+        }
+    }
+}
+
+static void validate_hover_invariants(DocState* state,
+                                      StateValidationReport* report) {
+    if (!state) return;
+
+    View* hovered = state->hover_target;
+    if (hovered && !view_has_document_root(hovered)) {
+        report_fail(report, "hover target is detached");
+    }
+
+    View* root = NULL;
+    if (state->owner_store && state->owner_store->document) {
+        DomDocument* doc = state->owner_store->document;
+        root = doc->root ? (View*)doc->root : (View*)doc->html_root;
+    }
+    if (!root) root = focus_validation_root(hovered);
+    if (!root) return;
+
+    uint32_t hover_count = 0;
+    validate_hover_node(state, root, hovered, report, &hover_count);
+    if (!hovered && hover_count != 0) {
+        report_fail(report, "inactive hover document still has :hover target");
+    }
+}
+
+static void validate_active_node(DocState* state, View* node, View* active,
+                                 StateValidationReport* report,
+                                 uint32_t* active_count) {
+    if (!state || !node) return;
+
+    bool expected_active = active && view_path_contains(active, node);
+    bool store_active = state_get_bool(state, node, STATE_ACTIVE);
+    if (store_active) (*active_count)++;
+    if (store_active != expected_active) {
+        report_fail(report, ":active ancestry chain is inconsistent");
+    }
+
+    if (node->is_element()) {
+        DomElement* element = (DomElement*)node;
+        DomNode* child = element->first_child;
+        while (child) {
+            validate_active_node(state, (View*)child, active, report, active_count);
+            child = child->next_sibling;
+        }
+    }
+}
+
+static void validate_active_invariants(DocState* state,
+                                       StateValidationReport* report) {
+    if (!state) return;
+
+    View* active = state->active_target;
+    if (active && !view_has_document_root(active)) {
+        report_fail(report, "active target is detached");
+    }
+
+    View* root = NULL;
+    if (state->owner_store && state->owner_store->document) {
+        DomDocument* doc = state->owner_store->document;
+        root = doc->root ? (View*)doc->root : (View*)doc->html_root;
+    }
+    if (!root) root = focus_validation_root(active);
+    if (!root) return;
+
+    uint32_t active_count = 0;
+    validate_active_node(state, root, active, report, &active_count);
+    if (!active && active_count != 0) {
+        report_fail(report, "inactive document still has :active target");
+    }
+}
+
+static void validate_drag_invariants(DocState* state,
+                                     StateValidationReport* report) {
+    if (!state) return;
+
+    if (state->is_dragging && !state->drag_target) {
+        report_fail(report, "active drag has no drag target");
+    }
+    if (!state->is_dragging && state->drag_target) {
+        report_fail(report, "inactive drag has stale drag target");
+    }
+    if (state->drag_target && !view_has_document_root(state->drag_target)) {
+        report_fail(report, "drag target is detached");
+    }
+
+    DragDropState* drag_drop = state->drag_drop;
+    if (!drag_drop) return;
+    if (drag_drop->pending && drag_drop->active) {
+        report_fail(report, "drag-drop is both pending and active");
+    }
+    if ((drag_drop->pending || drag_drop->active) && !drag_drop->source_view) {
+        report_fail(report, "drag-drop session has no source view");
+    }
+    if (drag_drop->source_view && !view_has_document_root(drag_drop->source_view)) {
+        report_fail(report, "drag-drop source is detached");
+    }
+    if (drag_drop->drop_target && !view_has_document_root(drag_drop->drop_target)) {
+        report_fail(report, "drag-drop target is detached");
+    }
+    if (drag_drop->drop_target && !drag_drop->active) {
+        report_fail(report, "inactive drag-drop has drop target");
     }
 }
 
@@ -505,6 +717,9 @@ bool radiant_state_validate_interaction(DocState* state,
     }
 
     validate_focus_invariants(state, report);
+    validate_hover_invariants(state, report);
+    validate_active_invariants(state, report);
+    validate_drag_invariants(state, report);
     validate_view_state_registry(state, report);
 
     if (state->caret) {

@@ -11,6 +11,7 @@
 
     {"type": "mouse_move", "target": {"selector": "#hover-target"}},
     {"type": "assert_state", "target": {"selector": "#hover-target"}, "state": ":hover", "value": true},
+    {"type": "assert_state", "target": {"selector": ".toolbar"}, "state": ":hover", "value": true},
     {"type": "assert_style", "target": {"selector": "#hover-target"}, "property": "background-color", "equals": "rgb(120, 180, 240)"},
     {"type": "assert_state_store", "target": {"selector": "#hover-target"}, "view_state": true, "kind": "base", "weak_ref": true},
 
@@ -30,6 +31,7 @@
 
     {"type": "mouse_move", "target": {"selector": "#section-2"}},
     {"type": "assert_state", "target": {"selector": "#hover-target"}, "state": ":hover", "value": false},
+    {"type": "assert_state", "target": {"selector": ".toolbar"}, "state": ":hover", "value": false},
     {"type": "assert_scroll", "x": 0, "y": 480, "tolerance": 5},
     {"type": "assert_state_store", "target": {"selector": "html"}, "view_state": true, "kind": "scroll", "view_scroll_y": 480, "doc_scroll_y": 480, "tolerance": 5}
   ]
