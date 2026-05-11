@@ -31,6 +31,7 @@ struct DomElement;
 struct DomText;
 struct DomComment;
 struct DomDocument;
+struct ViewState;
 typedef struct String String;  // Lambda String type
 typedef struct Element Element;  // Lambda Element type
 
@@ -84,6 +85,7 @@ struct DomNode {
     ViewType view_type;
     // view always has x, y, wd, hg;  otherwise, it is a property group
     float x, y, width, height;  // (x, y) relative to the BORDER box of parent block, and (width, height) forms the BORDER box of current block
+    ViewState* view_state_ref;  // weak pointer to canonical per-view state owned by DocState
 
     // source line number in the original HTML file (0 = not tracked)
     int source_line;
@@ -178,7 +180,7 @@ protected:
     // Constructor (only callable by derived classes)
     DomNode(DomNodeType type) : id(0), node_type(type), parent(nullptr),
         next_sibling(nullptr), prev_sibling(nullptr), view_type(RDT_VIEW_NONE),
-        x(0), y(0), width(0), height(0), source_line(0),
+        x(0), y(0), width(0), height(0), view_state_ref(nullptr), source_line(0),
         layout_dirty(false), layout_height_contribution(0) {}
 };
 

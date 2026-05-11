@@ -103,7 +103,7 @@ void scrollpane_render(RdtVector* vec, ScrollPane* sp, Rect* block_bound,
     log_debug("finished rendering scroller");
 }
 
-void scrollpane_scroll(EventContext* evcon, ScrollPane* sp) {
+void scrollpane_scroll(EventContext* evcon, ViewBlock* block, ScrollPane* sp) {
     ScrollEvent* event = &evcon->event.scroll;
     // GLFW gives scroll deltas that are pre-adjusted to match the user's OS scrolling preference
     // yoffset > 0 = Scroll up, yoffset < 0 = Scroll down
@@ -127,7 +127,7 @@ void scrollpane_scroll(EventContext* evcon, ScrollPane* sp) {
     }
 
     // Centralized writer path for scroll mutations.
-    scroll_state_set_position(state, sp, h, v, false);
+    scroll_state_set_position_for_view(state, (View*)block, sp, h, v, false);
 
     log_debug("updated scroll position: %f, %f", sp->h_scroll_position, sp->v_scroll_position);
     evcon->need_repaint = true;
@@ -173,7 +173,7 @@ void scrollpane_mouse_down(EventContext* evcon, ViewBlock* block) {
     if (sp->is_h_hovered) {
         if (evcon->offset_x < sp->h_handle_x ) {
             float h = sp->h_scroll_position - block->width * 0.85f;  // scroll 85% of the block width
-            scroll_state_set_position(state, sp, h, sp->v_scroll_position, false);
+            scroll_state_set_position_for_view(state, (View*)block, sp, h, sp->v_scroll_position, false);
             evcon->need_repaint = true;
         }
         else if (evcon->offset_x > sp->h_handle_x + sp->h_handle_width) { // page right
@@ -192,7 +192,7 @@ void scrollpane_mouse_down(EventContext* evcon, ViewBlock* block) {
     else if (sp->is_v_hovered) {
         if (evcon->offset_y < sp->v_handle_y) { // page up
             float v = sp->v_scroll_position - block->height * 0.85f;  // scroll 85% of the block height
-            scroll_state_set_position(state, sp, sp->h_scroll_position, v, false);
+            scroll_state_set_position_for_view(state, (View*)block, sp, sp->h_scroll_position, v, false);
             evcon->need_repaint = true;
         }
         else if (evcon->offset_y > sp->v_handle_y + sp->v_handle_height) { // page down
@@ -241,7 +241,7 @@ void scrollpane_drag(EventContext* evcon, ViewBlock* block) {
         float scroll_per_pixel = scroll_range > 0 ? sp->v_max_scroll / scroll_range : 0;
         float v_scroll_position = sp->v_drag_start_scroll + (delta_y * scroll_per_pixel);
         if (v_scroll_position != sp->v_scroll_position) {
-            scroll_state_set_position(state, sp, sp->h_scroll_position, v_scroll_position, false);
+            scroll_state_set_position_for_view(state, (View*)block, sp, sp->h_scroll_position, v_scroll_position, false);
             evcon->need_repaint = true;
         }
     }
@@ -259,7 +259,7 @@ void scrollpane_drag(EventContext* evcon, ViewBlock* block) {
         float scroll_per_pixel = scroll_range > 0 ? sp->h_max_scroll / scroll_range : 0;
         float h_scroll_position = sp->h_drag_start_scroll + (delta_x * scroll_per_pixel);
         if (h_scroll_position != sp->h_scroll_position) {
-            scroll_state_set_position(state, sp, h_scroll_position, sp->v_scroll_position, false);
+            scroll_state_set_position_for_view(state, (View*)block, sp, h_scroll_position, sp->v_scroll_position, false);
             evcon->need_repaint = true;
         }
     }
@@ -276,7 +276,7 @@ void update_scroller(ViewBlock* block, float content_width, float content_height
         DocState* state = block->doc ? (DocState*)block->doc->state : nullptr;
         float h_max = content_width > block->width ? content_width - block->width : 0.0f;
         float v_max = content_height > block->height ? content_height - block->height : 0.0f;
-        scroll_state_set_max(state, block->scroller->pane, h_max, v_max);
+        scroll_state_set_max_for_view(state, (View*)block, block->scroller->pane, h_max, v_max);
         log_debug("update_scroller: h_max_scroll=%.1f, v_max_scroll=%.1f",
             block->scroller->pane->h_max_scroll, block->scroller->pane->v_max_scroll);
     }

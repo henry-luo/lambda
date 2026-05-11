@@ -2996,8 +2996,10 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
     finalize_block_flow(lycon, block, display.outer);
     // Set v_max_scroll on the iframe block's pane
     if (block->scroller && block->scroller->pane) {
-        block->scroller->pane->v_max_scroll = block->content_height > block->height ?
+        float v_max = block->content_height > block->height ?
             block->content_height - block->height : 0;
+        scroll_state_set_max_for_view((DocState*)lycon->doc->state, (View*)block,
+            block->scroller->pane, block->scroller->pane->h_max_scroll, v_max);
     }
     log_debug("IFRAME TRACE: after finalize_block_flow, iframe block->content_height=%.1f", block->content_height);
 }

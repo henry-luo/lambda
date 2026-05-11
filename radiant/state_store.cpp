@@ -46,6 +46,19 @@ static int state_key_compare(const void* a, const void* b, void* udata) {
     return 0;
 }
 
+static uint64_t view_state_entry_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const ViewStateEntry* entry = (const ViewStateEntry*)item;
+    return hashmap_murmur(&entry->view_id, sizeof(uint32_t), seed0, seed1);
+}
+
+static int view_state_entry_compare(const void* a, const void* b, void* udata) {
+    (void)udata;
+    const ViewStateEntry* ea = (const ViewStateEntry*)a;
+    const ViewStateEntry* eb = (const ViewStateEntry*)b;
+    if (ea->view_id == eb->view_id) return 0;
+    return ea->view_id < eb->view_id ? -1 : 1;
+}
+
 // ============================================================================
 // Interned State Names
 // ============================================================================
@@ -159,6 +172,24 @@ DocState* radiant_state_create(Pool* pool, StateUpdateMode mode) {
     if (!state->state_map) {
         log_error("radiant_state_create: failed to create state_map");
         arena_destroy(state->arena);
+        return NULL;
+    }
+
+    state->view_state_map = hashmap_new(
+        sizeof(ViewStateEntry),
+        64,
+        0x31415926, 0x27182818,
+        view_state_entry_hash,
+        view_state_entry_compare,
+        NULL,
+        NULL
+    );
+    if (!state->view_state_map) {
+        log_error("radiant_state_create: failed to create view_state_map");
+        hashmap_free(state->state_map);
+        state->state_map = NULL;
+        arena_destroy(state->arena);
+        state->arena = NULL;
         return NULL;
     }
 
@@ -611,6 +642,11 @@ void radiant_state_destroy(DocState* state) {
         state->state_map = NULL;
     }
 
+    if (state->view_state_map) {
+        hashmap_free(state->view_state_map);
+        state->view_state_map = NULL;
+    }
+
     if (state->arena) {
         arena_destroy(state->arena);
         state->arena = NULL;
@@ -645,6 +681,7 @@ void radiant_state_reset(DocState* state) {
 
     // Clear the state map
     hashmap_clear(state->state_map, false);
+    hashmap_clear(state->view_state_map, false);
 
     // Reset arenas
     if (state->arena) {
@@ -697,7 +734,20 @@ Item state_get(DocState* state, void* node, const char* name) {
     return ItemNull;
 }
 
+static void state_assert_after_mutation(DocState* state, const char* context);
+
 bool state_get_bool(DocState* state, void* node, const char* name) {
+    if (state && node && name) {
+        View* view = (View*)node;
+        if (strcmp(name, STATE_HOVER) == 0) return view_state_get_hovered(state, view);
+        if (strcmp(name, STATE_ACTIVE) == 0) return view_state_get_active(state, view);
+        if (strcmp(name, STATE_FOCUS) == 0) return view_state_get_focused(state, view);
+        if (strcmp(name, STATE_CHECKED) == 0) return form_control_get_checked(state, view);
+        if (strcmp(name, STATE_DISABLED) == 0) return form_control_is_disabled(state, view);
+        if (strcmp(name, STATE_READONLY) == 0) return form_control_is_readonly(state, view);
+        if (strcmp(name, STATE_REQUIRED) == 0) return form_control_is_required(state, view);
+    }
+
     Item value = state_get(state, node, name);
     if (value.item == ItemNull.item) return false;
     // Check bool type and value
@@ -708,8 +758,213 @@ bool state_get_bool(DocState* state, void* node, const char* name) {
     return true;
 }
 
+static uint32_t view_state_resolve_id(View* view) {
+    if (!view) return 0;
+    if (view->id != 0) return view->id;
+    if (view->is_element()) {
+        DomElement* elem = (DomElement*)view;
+        if (elem->doc) {
+            view->id = elem->doc->next_node_id++;
+            return view->id;
+        }
+    }
+    return 0;
+}
+
+ViewState* view_state_get(DocState* state, View* view) {
+    if (!state || !view) return NULL;
+
+    uint32_t view_id = view_state_resolve_id(view);
+    if (view_id == 0 || !state->view_state_map) return NULL;
+
+    ViewStateEntry query = { .view_id = view_id, .state = NULL };
+    const ViewStateEntry* found = (const ViewStateEntry*)hashmap_get(state->view_state_map, &query);
+    if (!found) {
+        view->view_state_ref = NULL;
+        return NULL;
+    }
+    view->view_state_ref = found->state;
+    return found->state;
+}
+
+static ViewState* view_state_get_or_create(DocState* state, View* view, ViewStateKind kind) {
+    if (!state || !view || !state->arena || !state->view_state_map) return NULL;
+    ViewState* existing = view_state_get(state, view);
+    if (existing) {
+        if (existing->kind == VIEW_STATE_BASE && kind != VIEW_STATE_BASE) {
+            existing->kind = kind;
+        }
+        return existing;
+    }
+
+    uint32_t view_id = view_state_resolve_id(view);
+    if (view_id == 0) return NULL;
+
+    ViewState* created = (ViewState*)arena_alloc(state->arena, sizeof(ViewState));
+    if (!created) return NULL;
+    memset(created, 0, sizeof(ViewState));
+    created->view_id = view_id;
+    created->kind = kind;
+    created->data.form.selected_index = -1;
+    created->data.form.hover_index = -1;
+    created->data.form.range_value = 0.5f;
+
+    ViewStateEntry entry = { .view_id = view_id, .state = created };
+    hashmap_set(state->view_state_map, &entry);
+    view->view_state_ref = created;
+    return created;
+}
+
+static void view_state_log_bool_transition(DocState* state, View* view,
+                                           const char* name, bool old_value,
+                                           bool new_value) {
+    if (!state || old_value == new_value || !event_state_log_enabled(state->active_event_log)) return;
+
+    char buf[512];
+    JsonWriter w;
+    event_state_log_begin_record(state->active_event_log, &w, buf, sizeof(buf),
+        "state.transition", state->active_cascade_id);
+    jw_key(&w, "data");
+    jw_obj_begin(&w);
+        jw_kv_str(&w, "scope", "view");
+        jw_key(&w, "anchor");
+        jw_obj_begin(&w);
+            event_state_log_write_node_ref(&w, "view", (const DomNode*)view);
+        jw_obj_end(&w);
+        jw_kv_str(&w, "name", name ? name : "view.state");
+        jw_key(&w, "old");
+        jw_obj_begin(&w);
+            jw_kv_bool(&w, "value", old_value);
+        jw_obj_end(&w);
+        jw_key(&w, "new");
+        jw_obj_begin(&w);
+            jw_kv_bool(&w, "value", new_value);
+        jw_obj_end(&w);
+    jw_obj_end(&w);
+    event_state_log_finish_record(state->active_event_log, &w);
+}
+
+bool view_state_get_hovered(DocState* state, View* view) {
+    ViewState* view_state = view_state_get(state, view);
+    return view_state ? view_state->flags.hovered != 0 : false;
+}
+
+bool view_state_get_active(DocState* state, View* view) {
+    ViewState* view_state = view_state_get(state, view);
+    return view_state ? view_state->flags.active != 0 : false;
+}
+
+bool view_state_get_focused(DocState* state, View* view) {
+    ViewState* view_state = view_state_get(state, view);
+    return view_state ? view_state->flags.focused != 0 : false;
+}
+
+static FormControlProp* form_prop_for_view(View* view) {
+    if (!view || !view->is_block()) return NULL;
+    ViewBlock* block = (ViewBlock*)view;
+    return block->form;
+}
+
+static ViewState* form_view_state_get(DocState* state, View* view) {
+    ViewState* view_state = view_state_get(state, view);
+    if (!view_state || view_state->kind != VIEW_STATE_FORM_CONTROL) return NULL;
+    return view_state;
+}
+
+static ViewState* form_view_state_get_or_create(DocState* state, View* view, FormControlProp* form) {
+    if (!state || !view || !form) return NULL;
+    ViewState* view_state = view_state_get(state, view);
+    if (view_state) {
+        if (view_state->kind != VIEW_STATE_BASE && view_state->kind != VIEW_STATE_FORM_CONTROL) {
+            log_error("form_view_state_get_or_create: incompatible ViewState kind %d", view_state->kind);
+            return NULL;
+        }
+        if (view_state->kind == VIEW_STATE_FORM_CONTROL) return view_state;
+        view_state->kind = VIEW_STATE_FORM_CONTROL;
+    } else {
+        view_state = view_state_get_or_create(state, view, VIEW_STATE_FORM_CONTROL);
+        if (!view_state) return NULL;
+    }
+
+    view_state->data.form.disabled = form->disabled;
+    view_state->data.form.readonly = form->readonly;
+    view_state->data.form.required = form->required;
+    view_state->data.form.checked = form->checked;
+    view_state->data.form.dropdown_open = form->dropdown_open;
+    view_state->data.form.selected_index = form->selected_index;
+    view_state->data.form.hover_index = form->hover_index;
+    view_state->data.form.range_value = form->range_value;
+    view_state->data.form.selection_start = form->selection_start;
+    view_state->data.form.selection_end = form->selection_end;
+    view_state->data.form.selection_direction = form->selection_direction;
+    return view_state;
+}
+
+static void form_state_mark_dirty(DocState* state) {
+    if (!state) return;
+    state->is_dirty = true;
+    state->needs_repaint = true;
+    state->version++;
+    state_assert_after_mutation(state, "form_view_state_mutation");
+}
+
+void view_state_set_hovered(DocState* state, View* view, bool hovered) {
+    ViewState* view_state = view_state_get(state, view);
+    if (!view_state && !hovered) return;
+    if (!view_state) view_state = view_state_get_or_create(state, view, VIEW_STATE_BASE);
+    if (!view_state) return;
+    bool old_value = view_state->flags.hovered != 0;
+    if (old_value == hovered) return;
+    view_state->flags.hovered = hovered ? 1 : 0;
+    view_state_log_bool_transition(state, view, "hover", old_value, hovered);
+    state->is_dirty = true;
+    state->needs_repaint = true;
+    state->version++;
+    state_assert_after_mutation(state, "view_state_set_hovered");
+}
+
+void view_state_set_active(DocState* state, View* view, bool active) {
+    ViewState* view_state = view_state_get(state, view);
+    if (!view_state && !active) return;
+    if (!view_state) view_state = view_state_get_or_create(state, view, VIEW_STATE_BASE);
+    if (!view_state) return;
+    bool old_value = view_state->flags.active != 0;
+    if (old_value == active) return;
+    view_state->flags.active = active ? 1 : 0;
+    view_state_log_bool_transition(state, view, "active", old_value, active);
+    state->is_dirty = true;
+    state->needs_repaint = true;
+    state->version++;
+    state_assert_after_mutation(state, "view_state_set_active");
+}
+
+void view_state_set_focused(DocState* state, View* view, bool focused) {
+    ViewState* view_state = view_state_get(state, view);
+    if (!view_state && !focused) return;
+    if (!view_state) view_state = view_state_get_or_create(state, view, VIEW_STATE_BASE);
+    if (!view_state) return;
+    bool old_value = view_state->flags.focused != 0;
+    if (old_value == focused) return;
+    view_state->flags.focused = focused ? 1 : 0;
+    view_state_log_bool_transition(state, view, "focus", old_value, focused);
+    state->is_dirty = true;
+    state->needs_repaint = true;
+    state->version++;
+    state_assert_after_mutation(state, "view_state_set_focused");
+}
+
 bool state_has(DocState* state, void* node, const char* name) {
     if (!state || !node || !name) return false;
+
+    if (strcmp(name, STATE_HOVER) == 0 ||
+        strcmp(name, STATE_ACTIVE) == 0 ||
+        strcmp(name, STATE_FOCUS) == 0 ||
+        strcmp(name, STATE_CHECKED) == 0 ||
+        strcmp(name, STATE_DISABLED) == 0 ||
+        strcmp(name, STATE_READONLY) == 0 ||
+        strcmp(name, STATE_REQUIRED) == 0) {
+        return view_state_get(state, (View*)node) != NULL;
+    }
 
     const char* interned = intern_state_name(name);
     StateEntry query = { .key = { node, interned } };
@@ -768,6 +1023,38 @@ void state_set(DocState* state, void* node, const char* name, Item value) {
 }
 
 void state_set_bool(DocState* state, void* node, const char* name, bool value) {
+    if (state && node && name) {
+        View* view = (View*)node;
+        if (strcmp(name, STATE_HOVER) == 0) {
+            view_state_set_hovered(state, view, value);
+            return;
+        }
+        if (strcmp(name, STATE_ACTIVE) == 0) {
+            view_state_set_active(state, view, value);
+            return;
+        }
+        if (strcmp(name, STATE_FOCUS) == 0) {
+            view_state_set_focused(state, view, value);
+            return;
+        }
+        if (strcmp(name, STATE_CHECKED) == 0) {
+            form_control_set_checked(state, view, value);
+            return;
+        }
+        if (strcmp(name, STATE_DISABLED) == 0) {
+            form_control_set_disabled(state, view, value);
+            return;
+        }
+        if (strcmp(name, STATE_READONLY) == 0) {
+            form_control_set_readonly(state, view, value);
+            return;
+        }
+        if (strcmp(name, STATE_REQUIRED) == 0) {
+            form_control_set_required(state, view, value);
+            return;
+        }
+    }
+
     Item item_value = { .item = value ? ITEM_TRUE : ITEM_FALSE };
     state_set(state, node, name, item_value);
 }
@@ -775,9 +1062,8 @@ void state_set_bool(DocState* state, void* node, const char* name, bool value) {
 bool form_control_get_checked(DocState* state, View* view) {
     if (!view || !view->is_element()) return false;
 
-    if (state && state_has(state, view, STATE_CHECKED)) {
-        return state_get_bool(state, view, STATE_CHECKED);
-    }
+    ViewState* view_state = form_view_state_get(state, view);
+    if (view_state) return view_state->data.form.checked != 0;
 
     DomElement* elem = (DomElement*)view;
     if (dom_element_has_pseudo_state(elem, PSEUDO_STATE_CHECKED)) {
@@ -797,21 +1083,19 @@ bool form_control_get_checked(DocState* state, View* view) {
 void form_control_set_checked(DocState* state, View* view, bool checked) {
     if (!view || !view->is_element()) return;
 
-    if (state) {
-        state_set_bool(state, view, STATE_CHECKED, checked);
+    FormControlProp* form = form_prop_for_view(view);
+    ViewState* view_state = form_view_state_get_or_create(state, view, form);
+    if (view_state) {
+        if ((view_state->data.form.checked != 0) == checked) return;
+        view_state->data.form.checked = checked ? 1 : 0;
     }
 
-    if (view->is_block()) {
-        ViewBlock* block = (ViewBlock*)view;
-        if (block->form) {
-            block->form->state_ref = state;
-            block->form->checked = checked ? 1 : 0;
-        }
+    if (form) {
+        form->state_ref = state;
+        form->checked = checked ? 1 : 0;
     }
 
-    if (state) {
-        state->needs_repaint = true;
-    }
+    form_state_mark_dirty(state);
 }
 
 void scroll_state_attach(DocState* state, void* pane_ptr) {
@@ -828,6 +1112,58 @@ void scroll_state_set_max(DocState* state, void* pane_ptr,
 
     if (h_max < 0.0f) h_max = 0.0f;
     if (v_max < 0.0f) v_max = 0.0f;
+
+    pane->h_max_scroll = h_max;
+    pane->v_max_scroll = v_max;
+
+    if (pane->h_scroll_position > pane->h_max_scroll) {
+        pane->h_scroll_position = pane->h_max_scroll;
+    }
+    if (pane->v_scroll_position > pane->v_max_scroll) {
+        pane->v_scroll_position = pane->v_max_scroll;
+    }
+}
+
+static ViewState* scroll_view_state_get_or_create(DocState* state, View* view, ScrollPane* pane) {
+    if (!state || !view || !pane) return NULL;
+    ViewState* view_state = view_state_get(state, view);
+    if (view_state) {
+        if (view_state->kind != VIEW_STATE_BASE && view_state->kind != VIEW_STATE_SCROLL) {
+            log_error("scroll_view_state_get_or_create: incompatible ViewState kind %d", view_state->kind);
+            return NULL;
+        }
+        if (view_state->kind == VIEW_STATE_SCROLL) return view_state;
+        view_state->kind = VIEW_STATE_SCROLL;
+    } else {
+        view_state = view_state_get_or_create(state, view, VIEW_STATE_SCROLL);
+        if (!view_state) return NULL;
+    }
+
+    view_state->data.scroll.x = pane->h_scroll_position;
+    view_state->data.scroll.y = pane->v_scroll_position;
+    view_state->data.scroll.max_x = pane->h_max_scroll;
+    view_state->data.scroll.max_y = pane->v_max_scroll;
+    return view_state;
+}
+
+void scroll_state_set_max_for_view(DocState* state, View* view, void* pane_ptr,
+                                   float h_max, float v_max) {
+    if (!pane_ptr) return;
+    ScrollPane* pane = (ScrollPane*)pane_ptr;
+    if (state) scroll_state_attach(state, pane_ptr);
+
+    if (h_max < 0.0f) h_max = 0.0f;
+    if (v_max < 0.0f) v_max = 0.0f;
+
+    ViewState* view_state = scroll_view_state_get_or_create(state, view, pane);
+    if (view_state) {
+        view_state->data.scroll.max_x = h_max;
+        view_state->data.scroll.max_y = v_max;
+        if (view_state->data.scroll.x > h_max) view_state->data.scroll.x = h_max;
+        if (view_state->data.scroll.y > v_max) view_state->data.scroll.y = v_max;
+        pane->h_scroll_position = view_state->data.scroll.x;
+        pane->v_scroll_position = view_state->data.scroll.y;
+    }
 
     pane->h_max_scroll = h_max;
     pane->v_max_scroll = v_max;
@@ -866,6 +1202,41 @@ void scroll_state_set_position(DocState* state, void* pane_ptr,
     }
 }
 
+void scroll_state_set_position_for_view(DocState* state, View* view, void* pane_ptr,
+                                        float h_pos, float v_pos,
+                                        bool is_viewport) {
+    if (!pane_ptr) return;
+    ScrollPane* pane = (ScrollPane*)pane_ptr;
+    if (state) scroll_state_attach(state, pane_ptr);
+
+    if (h_pos < 0.0f) h_pos = 0.0f;
+    if (v_pos < 0.0f) v_pos = 0.0f;
+    if (h_pos > pane->h_max_scroll) h_pos = pane->h_max_scroll;
+    if (v_pos > pane->v_max_scroll) v_pos = pane->v_max_scroll;
+
+    ViewState* view_state = scroll_view_state_get_or_create(state, view, pane);
+    if (view_state) {
+        view_state->data.scroll.x = h_pos;
+        view_state->data.scroll.y = v_pos;
+        view_state->data.scroll.max_x = pane->h_max_scroll;
+        view_state->data.scroll.max_y = pane->v_max_scroll;
+    }
+
+    pane->h_scroll_position = h_pos;
+    pane->v_scroll_position = v_pos;
+
+    if (state) {
+        state->is_dirty = true;
+        state->needs_repaint = true;
+        if (is_viewport) {
+            state->scroll_x = h_pos;
+            state->scroll_y = v_pos;
+        }
+        state->version++;
+        state_assert_after_mutation(state, "scroll_state_set_position_for_view");
+    }
+}
+
 void scroll_state_get_position(DocState* state, void* pane_ptr,
                                float* out_h_pos, float* out_v_pos,
                                float* out_h_max, float* out_v_max) {
@@ -884,6 +1255,7 @@ void scroll_state_get_position(DocState* state, void* pane_ptr,
 }
 
 const char* form_control_get_value(DocState* state, View* view, uint32_t* out_len) {
+    (void)state;
     if (out_len) *out_len = 0;
     if (!view || !view->is_block()) return nullptr;
 
@@ -928,18 +1300,32 @@ void form_control_set_value(DocState* state, View* view, const char* value, uint
         form->value = form->current_value;
     }
 
-    if (state) {
-        state->is_dirty = true;
-        state->needs_repaint = true;
+    ViewState* view_state = form_view_state_get_or_create(state, view, block->form);
+    if (view_state) {
+        view_state->data.form.selection_start = block->form->selection_start;
+        view_state->data.form.selection_end = block->form->selection_end;
+        view_state->data.form.selection_direction = block->form->selection_direction;
+        view_state->data.form.range_value = block->form->range_value;
+        view_state->data.form.selected_index = block->form->selected_index;
+        view_state->data.form.hover_index = block->form->hover_index;
     }
+
+    form_state_mark_dirty(state);
 }
 
 void form_control_get_selection(DocState* state, View* view,
                                 uint32_t* out_start, uint32_t* out_end, uint8_t* out_direction) {
-    (void)state;
     if (out_start) *out_start = 0;
     if (out_end) *out_end = 0;
     if (out_direction) *out_direction = 0;
+
+    ViewState* view_state = form_view_state_get(state, view);
+    if (view_state) {
+        if (out_start) *out_start = view_state->data.form.selection_start;
+        if (out_end) *out_end = view_state->data.form.selection_end;
+        if (out_direction) *out_direction = view_state->data.form.selection_direction;
+        return;
+    }
 
     if (!view || !view->is_block()) return;
 
@@ -967,6 +1353,12 @@ void form_control_set_selection(DocState* state, View* view,
     // selection change events and callbacks are properly triggered.
     if (tc_is_text_control(elem)) {
         tc_set_selection_range(elem, start, end, direction);
+        ViewState* view_state = form_view_state_get_or_create(state, view, form);
+        if (view_state) {
+            view_state->data.form.selection_start = form->selection_start;
+            view_state->data.form.selection_end = form->selection_end;
+            view_state->data.form.selection_direction = form->selection_direction;
+        }
     } else {
         // For non-text controls, directly update selection fields.
         uint32_t max_offset = form->current_value_u16_len;
@@ -975,16 +1367,43 @@ void form_control_set_selection(DocState* state, View* view,
         form->selection_start = start;
         form->selection_end = end;
         form->selection_direction = direction & 3;
+        ViewState* view_state = form_view_state_get_or_create(state, view, form);
+        if (view_state) {
+            view_state->data.form.selection_start = form->selection_start;
+            view_state->data.form.selection_end = form->selection_end;
+            view_state->data.form.selection_direction = form->selection_direction;
+        }
     }
 
-    if (state) {
-        state->is_dirty = true;
-        state->needs_repaint = true;
-    }
+    form_state_mark_dirty(state);
+}
+
+void form_control_sync_text_control_state(DocState* state, View* view) {
+    if (!state || !view || !view->is_block()) return;
+    ViewBlock* block = (ViewBlock*)view;
+    FormControlProp* form = block->form;
+    if (!form) return;
+
+    form->state_ref = state;
+    ViewState* view_state = form_view_state_get_or_create(state, view, form);
+    if (!view_state) return;
+    view_state->data.form.selection_start = form->selection_start;
+    view_state->data.form.selection_end = form->selection_end;
+    view_state->data.form.selection_direction = form->selection_direction;
+    view_state->data.form.disabled = form->disabled;
+    view_state->data.form.readonly = form->readonly;
+    view_state->data.form.required = form->required;
+    view_state->data.form.checked = form->checked;
+    view_state->data.form.dropdown_open = form->dropdown_open;
+    view_state->data.form.selected_index = form->selected_index;
+    view_state->data.form.hover_index = form->hover_index;
+    view_state->data.form.range_value = form->range_value;
 }
 
 int form_control_get_selected_index(DocState* state, View* view) {
-    (void)state;
+    ViewState* view_state = form_view_state_get(state, view);
+    if (view_state) return view_state->data.form.selected_index;
+
     if (!view || !view->is_block()) return -1;
 
     ViewBlock* block = (ViewBlock*)view;
@@ -1006,16 +1425,20 @@ void form_control_set_selected_index(DocState* state, View* view, int index) {
     if (index < -1) index = -1;
     if (index >= form->option_count) index = form->option_count - 1;
 
-    form->selected_index = index;
-
-    if (state) {
-        state->is_dirty = true;
-        state->needs_repaint = true;
+    ViewState* view_state = form_view_state_get_or_create(state, view, form);
+    if (view_state) {
+        if (view_state->data.form.selected_index == index) return;
+        view_state->data.form.selected_index = index;
     }
+
+    form->selected_index = index;
+    form_state_mark_dirty(state);
 }
 
 float form_control_get_range_value(DocState* state, View* view) {
-    (void)state;
+    ViewState* view_state = form_view_state_get(state, view);
+    if (view_state) return view_state->data.form.range_value;
+
     if (!view || !view->is_block()) return 0.5f;
 
     ViewBlock* block = (ViewBlock*)view;
@@ -1037,12 +1460,14 @@ void form_control_set_range_value(DocState* state, View* view, float value) {
     if (value < 0.0f) value = 0.0f;
     if (value > 1.0f) value = 1.0f;
 
-    form->range_value = value;
-
-    if (state) {
-        state->is_dirty = true;
-        state->needs_repaint = true;
+    ViewState* view_state = form_view_state_get_or_create(state, view, form);
+    if (view_state) {
+        if (view_state->data.form.range_value == value) return;
+        view_state->data.form.range_value = value;
     }
+
+    form->range_value = value;
+    form_state_mark_dirty(state);
 }
 
 // ============================================================================
@@ -1050,7 +1475,9 @@ void form_control_set_range_value(DocState* state, View* view, float value) {
 // ============================================================================
 
 bool form_control_is_disabled(DocState* state, View* view) {
-    (void)state;
+    ViewState* view_state = form_view_state_get(state, view);
+    if (view_state) return view_state->data.form.disabled != 0;
+
     if (!view || !view->is_block()) return false;
 
     ViewBlock* block = (ViewBlock*)view;
@@ -1067,16 +1494,19 @@ void form_control_set_disabled(DocState* state, View* view, bool disabled) {
 
     FormControlProp* form = block->form;
     form->state_ref = state;
-    form->disabled = disabled ? 1 : 0;
-
-    if (state) {
-        state->is_dirty = true;
-        state->needs_repaint = true;
+    ViewState* view_state = form_view_state_get_or_create(state, view, form);
+    if (view_state) {
+        if ((view_state->data.form.disabled != 0) == disabled) return;
+        view_state->data.form.disabled = disabled ? 1 : 0;
     }
+    form->disabled = disabled ? 1 : 0;
+    form_state_mark_dirty(state);
 }
 
 bool form_control_is_readonly(DocState* state, View* view) {
-    (void)state;
+    ViewState* view_state = form_view_state_get(state, view);
+    if (view_state) return view_state->data.form.readonly != 0;
+
     if (!view || !view->is_block()) return false;
 
     ViewBlock* block = (ViewBlock*)view;
@@ -1093,16 +1523,19 @@ void form_control_set_readonly(DocState* state, View* view, bool readonly) {
 
     FormControlProp* form = block->form;
     form->state_ref = state;
-    form->readonly = readonly ? 1 : 0;
-
-    if (state) {
-        state->is_dirty = true;
-        state->needs_repaint = true;
+    ViewState* view_state = form_view_state_get_or_create(state, view, form);
+    if (view_state) {
+        if ((view_state->data.form.readonly != 0) == readonly) return;
+        view_state->data.form.readonly = readonly ? 1 : 0;
     }
+    form->readonly = readonly ? 1 : 0;
+    form_state_mark_dirty(state);
 }
 
 bool form_control_is_required(DocState* state, View* view) {
-    (void)state;
+    ViewState* view_state = form_view_state_get(state, view);
+    if (view_state) return view_state->data.form.required != 0;
+
     if (!view || !view->is_block()) return false;
 
     ViewBlock* block = (ViewBlock*)view;
@@ -1119,12 +1552,13 @@ void form_control_set_required(DocState* state, View* view, bool required) {
 
     FormControlProp* form = block->form;
     form->state_ref = state;
-    form->required = required ? 1 : 0;
-
-    if (state) {
-        state->is_dirty = true;
-        state->needs_repaint = true;
+    ViewState* view_state = form_view_state_get_or_create(state, view, form);
+    if (view_state) {
+        if ((view_state->data.form.required != 0) == required) return;
+        view_state->data.form.required = required ? 1 : 0;
     }
+    form->required = required ? 1 : 0;
+    form_state_mark_dirty(state);
 }
 
 // ============================================================================
@@ -1132,7 +1566,9 @@ void form_control_set_required(DocState* state, View* view, bool required) {
 // ============================================================================
 
 bool form_control_is_dropdown_open(DocState* state, View* view) {
-    (void)state;
+    ViewState* view_state = form_view_state_get(state, view);
+    if (view_state) return view_state->data.form.dropdown_open != 0;
+
     if (!view || !view->is_block()) return false;
 
     ViewBlock* block = (ViewBlock*)view;
@@ -1149,13 +1585,14 @@ void form_control_open_dropdown(DocState* state, View* view) {
 
     FormControlProp* form = block->form;
     form->state_ref = state;
+    ViewState* view_state = form_view_state_get_or_create(state, view, form);
+    if (view_state) {
+        view_state->data.form.dropdown_open = 1;
+        view_state->data.form.hover_index = form->selected_index;
+    }
     form->dropdown_open = 1;
     form->hover_index = form->selected_index;  // Start with selected option highlighted
-
-    if (state) {
-        state->is_dirty = true;
-        state->needs_repaint = true;
-    }
+    form_state_mark_dirty(state);
 }
 
 void form_control_close_dropdown(DocState* state, View* view) {
@@ -1166,13 +1603,14 @@ void form_control_close_dropdown(DocState* state, View* view) {
 
     FormControlProp* form = block->form;
     form->state_ref = state;
+    ViewState* view_state = form_view_state_get_or_create(state, view, form);
+    if (view_state) {
+        view_state->data.form.dropdown_open = 0;
+        view_state->data.form.hover_index = -1;
+    }
     form->dropdown_open = 0;
     form->hover_index = -1;
-
-    if (state) {
-        state->is_dirty = true;
-        state->needs_repaint = true;
-    }
+    form_state_mark_dirty(state);
 }
 
 void form_control_set_hover_index(DocState* state, View* view, int index) {
@@ -1188,16 +1626,20 @@ void form_control_set_hover_index(DocState* state, View* view, int index) {
     if (index < -1) index = -1;
     if (index >= form->option_count) index = form->option_count - 1;
 
-    form->hover_index = index;
-
-    if (state) {
-        state->is_dirty = true;
-        state->needs_repaint = true;
+    ViewState* view_state = form_view_state_get_or_create(state, view, form);
+    if (view_state) {
+        if (view_state->data.form.hover_index == index) return;
+        view_state->data.form.hover_index = index;
     }
+
+    form->hover_index = index;
+    form_state_mark_dirty(state);
 }
 
 int form_control_get_hover_index(DocState* state, View* view) {
-    (void)state;
+    ViewState* view_state = form_view_state_get(state, view);
+    if (view_state) return view_state->data.form.hover_index;
+
     if (!view || !view->is_block()) return -1;
 
     ViewBlock* block = (ViewBlock*)view;

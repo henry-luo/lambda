@@ -60,7 +60,7 @@ void target_html_doc(EventContext* evcon, ViewTree* view_tree);
 void target_block_view(EventContext* evcon, ViewBlock* block);
 void target_inline_view(EventContext* evcon, ViewSpan* view_span);
 void target_text_view(EventContext* evcon, ViewText* text);
-void scrollpane_scroll(EventContext* evcon, ScrollPane* sp);
+void scrollpane_scroll(EventContext* evcon, ViewBlock* block, ScrollPane* sp);
 bool scrollpane_target(EventContext* evcon, ViewBlock* block);
 void scrollpane_mouse_up(EventContext* evcon, ViewBlock* block);
 void scrollpane_mouse_down(EventContext* evcon, ViewBlock* block);
@@ -651,7 +651,7 @@ void fire_block_event(EventContext* evcon, ViewBlock* block) {
     fire_inline_event(evcon, (ViewSpan*)block);
     if (block->scroller && block->scroller->pane) {
         if (evcon->event.type == RDT_EVENT_SCROLL) {
-            scrollpane_scroll(evcon, block->scroller->pane);
+            scrollpane_scroll(evcon, block, block->scroller->pane);
         }
         else if (evcon->event.type == RDT_EVENT_MOUSE_DOWN &&
             (block->scroller->pane->is_h_hovered || block->scroller->pane->is_v_hovered)) {

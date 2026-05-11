@@ -173,6 +173,7 @@ void tc_ensure_init(DomElement* elem) {
     f->selection_end = f->current_value_u16_len;
     f->selection_direction = 0;
     f->tc_initialized = 1;
+    form_control_sync_text_control_state(f->state_ref, (View*)elem);
     // Mirror live value into legacy display field used by render_form.cpp.
     if (!f->value || f->value != f->current_value) {
         f->value = f->current_value;
@@ -261,6 +262,7 @@ void tc_set_value(DomElement* elem, const char* new_val, size_t new_len) {
     f->selection_direction = 0;
     f->tc_initialized = 1;
     f->value = buf;
+    form_control_sync_text_control_state(f->state_ref, (View*)elem);
     // Notify if value-setter caused the selection to move (e.g. previous
     // selection was past the new length and got clamped). Suppress on
     // initial init so parsing-time setup doesn't fire spurious events.
@@ -301,6 +303,7 @@ void tc_set_selection_range(DomElement* elem,
     f->selection_start = start;
     f->selection_end = end;
     f->selection_direction = dir;
+    form_control_sync_text_control_state(f->state_ref, (View*)elem);
     if (start != old_start || end != old_end || dir != old_dir) {
         tc_notify_selection_changed(elem);
     }
@@ -358,6 +361,7 @@ void tc_sync_legacy_to_form(DomElement* elem, DocState* state) {
         f->selection_end = u16;
         f->selection_direction = 0;
     }
+    form_control_sync_text_control_state(state, (View*)elem);
 }
 
 void tc_sync_form_to_legacy(DomElement* elem, DocState* state) {
