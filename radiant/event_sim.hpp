@@ -226,6 +226,14 @@ struct SimEvent {
     bool expected_drag_drop_source;
     bool has_expected_drag_drop_target;
     bool expected_drag_drop_target;
+    bool has_expected_scrollbar_h_hovered;
+    bool expected_scrollbar_h_hovered;
+    bool has_expected_scrollbar_v_hovered;
+    bool expected_scrollbar_v_hovered;
+    bool has_expected_scrollbar_h_dragging;
+    bool expected_scrollbar_h_dragging;
+    bool has_expected_scrollbar_v_dragging;
+    bool expected_scrollbar_v_dragging;
     bool has_expected_doc_scroll_x;
     bool has_expected_doc_scroll_y;
     bool has_expected_view_scroll_x;

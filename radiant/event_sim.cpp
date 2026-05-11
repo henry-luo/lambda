@@ -1348,6 +1348,22 @@ static SimEvent* parse_sim_event(MapReader& reader) {
             ev->has_expected_drag_drop_target = true;
             ev->expected_drag_drop_target = reader.get("drag_drop_target").asBool();
         }
+        if (reader.has("scrollbar_h_hovered")) {
+            ev->has_expected_scrollbar_h_hovered = true;
+            ev->expected_scrollbar_h_hovered = reader.get("scrollbar_h_hovered").asBool();
+        }
+        if (reader.has("scrollbar_v_hovered")) {
+            ev->has_expected_scrollbar_v_hovered = true;
+            ev->expected_scrollbar_v_hovered = reader.get("scrollbar_v_hovered").asBool();
+        }
+        if (reader.has("scrollbar_h_dragging")) {
+            ev->has_expected_scrollbar_h_dragging = true;
+            ev->expected_scrollbar_h_dragging = reader.get("scrollbar_h_dragging").asBool();
+        }
+        if (reader.has("scrollbar_v_dragging")) {
+            ev->has_expected_scrollbar_v_dragging = true;
+            ev->expected_scrollbar_v_dragging = reader.get("scrollbar_v_dragging").asBool();
+        }
         if (reader.has("doc_scroll_x")) {
             ev->has_expected_doc_scroll_x = true;
             ItemReader sx = reader.get("doc_scroll_x");
@@ -3550,6 +3566,36 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                             ev->expected_view_scroll_y, actual_y);
                         passed = false;
                     }
+                }
+            }
+
+            if (elem && (ev->has_expected_scrollbar_h_hovered || ev->has_expected_scrollbar_v_hovered ||
+                         ev->has_expected_scrollbar_h_dragging || ev->has_expected_scrollbar_v_dragging)) {
+                ScrollInteractionState interaction;
+                scroll_state_get_interaction_for_view(state, elem, &interaction);
+                if (ev->has_expected_scrollbar_h_hovered && interaction.h_hovered != ev->expected_scrollbar_h_hovered) {
+                    log_error("event_sim: assert_state_store FAIL - scrollbar_h_hovered expected %s, got %s",
+                        ev->expected_scrollbar_h_hovered ? "true" : "false",
+                        interaction.h_hovered ? "true" : "false");
+                    passed = false;
+                }
+                if (ev->has_expected_scrollbar_v_hovered && interaction.v_hovered != ev->expected_scrollbar_v_hovered) {
+                    log_error("event_sim: assert_state_store FAIL - scrollbar_v_hovered expected %s, got %s",
+                        ev->expected_scrollbar_v_hovered ? "true" : "false",
+                        interaction.v_hovered ? "true" : "false");
+                    passed = false;
+                }
+                if (ev->has_expected_scrollbar_h_dragging && interaction.h_dragging != ev->expected_scrollbar_h_dragging) {
+                    log_error("event_sim: assert_state_store FAIL - scrollbar_h_dragging expected %s, got %s",
+                        ev->expected_scrollbar_h_dragging ? "true" : "false",
+                        interaction.h_dragging ? "true" : "false");
+                    passed = false;
+                }
+                if (ev->has_expected_scrollbar_v_dragging && interaction.v_dragging != ev->expected_scrollbar_v_dragging) {
+                    log_error("event_sim: assert_state_store FAIL - scrollbar_v_dragging expected %s, got %s",
+                        ev->expected_scrollbar_v_dragging ? "true" : "false",
+                        interaction.v_dragging ? "true" : "false");
+                    passed = false;
                 }
             }
 

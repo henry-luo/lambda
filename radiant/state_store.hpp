@@ -132,6 +132,15 @@ typedef struct ViewState {
             float y;
             float max_x;
             float max_y;
+            uint8_t h_hovered : 1;
+            uint8_t v_hovered : 1;
+            uint8_t h_dragging : 1;
+            uint8_t v_dragging : 1;
+            uint8_t reserved : 4;
+            float drag_start_x;
+            float drag_start_y;
+            float h_drag_start_scroll;
+            float v_drag_start_scroll;
         } scroll;
         struct {
             uint8_t disabled : 1;
@@ -265,6 +274,8 @@ typedef struct DocState {
     // setTimeout(0) callback queued via `js_dom_queue_textcontrol_selectionchange`.
     DomElement*          tc_selectionchange_head;
     bool                 tc_selectionchange_drain_scheduled;
+    DomElement*          active_text_control;
+    DomElement*          last_focused_text_control;
     FocusState* focus;             // focus state with navigation info
     CursorState* cursor;           // mouse cursor state
     View* hover_target;            // currently hovered element
@@ -334,6 +345,17 @@ typedef struct DocState {
         float seek_fraction;       // seek position during drag (0.0–1.0)
     } video_controls;
 } DocState;
+
+typedef struct ScrollInteractionState {
+    bool h_hovered;
+    bool v_hovered;
+    bool h_dragging;
+    bool v_dragging;
+    float drag_start_x;
+    float drag_start_y;
+    float h_drag_start_scroll;
+    float v_drag_start_scroll;
+} ScrollInteractionState;
 
 
 // ============================================================================
@@ -780,6 +802,21 @@ void scroll_state_set_position_for_view(DocState* state, View* view, void* pane,
 void scroll_state_get_position_for_view(DocState* state, View* view, void* pane,
                                         float* out_h_pos, float* out_v_pos,
                                         float* out_h_max, float* out_v_max);
+
+/**
+ * Store scrollbar hover and drag-session substate in ViewState.scroll.
+ */
+void scroll_state_set_hover_for_view(DocState* state, View* view, void* pane,
+                                     bool h_hovered, bool v_hovered);
+void scroll_state_begin_drag_for_view(DocState* state, View* view, void* pane,
+                                      bool horizontal,
+                                      float start_x, float start_y,
+                                      float h_start_scroll, float v_start_scroll);
+void scroll_state_clear_drag_for_view(DocState* state, View* view, void* pane);
+void scroll_state_get_interaction_for_view(DocState* state, View* view,
+                                           ScrollInteractionState* out_state);
+bool scroll_state_is_hovered_for_view(DocState* state, View* view);
+bool scroll_state_is_dragging_for_view(DocState* state, View* view);
 
 // ============================================================================
 // Text Control Value and Selection API (centralized writers)

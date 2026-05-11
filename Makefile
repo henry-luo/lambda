@@ -1855,9 +1855,21 @@ check-state-store:
 	STATE_STORE_FORM_MIRROR_ACCESS_VIOLATIONS=$$(grep -nE 'form->(disabled|readonly|selected_index|hover_index|dropdown_open|checked|required|range_value)' \
 		radiant/state_store.cpp \
 		|| true); \
+	TEXT_CONTROL_FOCUS_GLOBAL_VIOLATIONS=$$(grep -rnE 'g_active_element|g_last_focused_text_control|tc_active_element_slot|tc_last_focused_text_control_slot|_js_active_element|_js_last_focused_text_control' \
+		radiant/ lambda/js/ \
+		--include='*.c' --include='*.cpp' --include='*.h' --include='*.hpp' \
+		|| true); \
+	FORM_PSEUDO_CACHE_VIOLATIONS=$$(grep -rnE 'placeholder_shown|focus_visible' \
+		radiant/form_control.hpp \
+		|| true); \
 	SCROLL_MIRROR_VIOLATIONS=$$(grep -rnE --include='*.cpp' -- '->(h_scroll_position|v_scroll_position|h_max_scroll|v_max_scroll)' \
 		radiant/ \
 		| grep -v 'radiant/state_store.cpp' \
+		|| true); \
+	SCROLL_INTERACTION_MIRROR_VIOLATIONS=$$(grep -rnE --include='*.c' --include='*.cpp' --include='*.h' --include='*.hpp' -- '->(is_h_hovered|is_v_hovered|h_is_dragging|v_is_dragging|drag_start_x|drag_start_y|h_drag_start_scroll|v_drag_start_scroll)|bool[[:space:]]+is_h_hovered|float[[:space:]]+drag_start_x' \
+		radiant/ \
+		| grep -v 'radiant/state_store.cpp' \
+		| grep -v 'radiant/state_store.hpp' \
 		|| true); \
 	SCROLL_API_VIOLATIONS=$$(grep -rnE --include='*.cpp' --include='*.hpp' 'scroll_state_(attach|set_max|set_position|get_position)\(' \
 		radiant/ \
@@ -1881,8 +1893,17 @@ check-state-store:
 	if [ -n "$$STATE_STORE_FORM_MIRROR_ACCESS_VIOLATIONS" ]; then \
 		VIOLATIONS="$${VIOLATIONS}$${VIOLATIONS:+\n}StateStore non-text form mirror access:\n$$STATE_STORE_FORM_MIRROR_ACCESS_VIOLATIONS"; \
 	fi; \
+	if [ -n "$$TEXT_CONTROL_FOCUS_GLOBAL_VIOLATIONS" ]; then \
+		VIOLATIONS="$${VIOLATIONS}$${VIOLATIONS:+\n}Text-control focus globals/slot accessors:\n$$TEXT_CONTROL_FOCUS_GLOBAL_VIOLATIONS"; \
+	fi; \
+	if [ -n "$$FORM_PSEUDO_CACHE_VIOLATIONS" ]; then \
+		VIOLATIONS="$${VIOLATIONS}$${VIOLATIONS:+\n}FormControlProp pseudo-state caches:\n$$FORM_PSEUDO_CACHE_VIOLATIONS"; \
+	fi; \
 	if [ -n "$$SCROLL_MIRROR_VIOLATIONS" ]; then \
 		VIOLATIONS="$${VIOLATIONS}$${VIOLATIONS:+\n}External scroll mirror reads/writes:\n$$SCROLL_MIRROR_VIOLATIONS"; \
+	fi; \
+	if [ -n "$$SCROLL_INTERACTION_MIRROR_VIOLATIONS" ]; then \
+		VIOLATIONS="$${VIOLATIONS}$${VIOLATIONS:+\n}ScrollPane interaction-state mirrors:\n$$SCROLL_INTERACTION_MIRROR_VIOLATIONS"; \
 	fi; \
 	if [ -n "$$SCROLL_API_VIOLATIONS" ]; then \
 		VIOLATIONS="$${VIOLATIONS}$${VIOLATIONS:+\n}External pane-only scroll API usage:\n$$SCROLL_API_VIOLATIONS"; \

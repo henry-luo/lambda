@@ -1125,11 +1125,6 @@ typedef struct {
     float v_max_scroll, h_max_scroll;
     float v_handle_y, v_handle_height;
     float h_handle_x, h_handle_width;
-
-    bool is_h_hovered, is_v_hovered;
-    bool v_is_dragging, h_is_dragging;
-    float drag_start_x, drag_start_y;
-    float v_drag_start_scroll, h_drag_start_scroll;
     void reset();
 } ScrollPane;
 

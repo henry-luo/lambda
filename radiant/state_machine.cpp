@@ -772,7 +772,7 @@ bool radiant_state_validate_interaction(DocState* state,
         }
     }
 
-    DomElement* active_text_control = tc_get_active_element();
+    DomElement* active_text_control = tc_get_active_element(state);
     View* focused = state->focus ? state->focus->current : NULL;
     if (focused && focused->is_element() && tc_is_text_control((DomElement*)focused)) {
         if (active_text_control && active_text_control != (DomElement*)focused) {

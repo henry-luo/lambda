@@ -135,42 +135,51 @@ void scrollpane_scroll(EventContext* evcon, ViewBlock* block, ScrollPane* sp) {
     // todo: set invalidate_rect
 }
 
+static DocState* scrollpane_doc_state(EventContext* evcon) {
+    return evcon && evcon->ui_context && evcon->ui_context->document
+        ? (DocState*)evcon->ui_context->document->state : nullptr;
+}
+
 bool scrollpane_target(EventContext* evcon, ViewBlock* block) {
     MousePositionEvent *event = &evcon->event.mouse_position;
     ScrollPane* sp = block->scroller->pane;
+    DocState* state = scrollpane_doc_state(evcon);
     float bottom = evcon->block.y + block->height;  float right = evcon->block.x + block->width;
     // sc.SCROLLBAR_SIZE is in physical pixels; convert to CSS pixels for event-coordinate comparisons
     float pixel_ratio = evcon->ui_context->pixel_ratio;
     float scrollbar_css = sc.SCROLLBAR_SIZE / pixel_ratio;
+    bool h_hovered = false, v_hovered = false;
     if (block->scroller->has_hz_scroll) {
         if (evcon->block.x <= event->x && event->x < right &&
             bottom - scrollbar_css <= event->y && event->y < bottom) {
-            sp->is_h_hovered = true;
+            h_hovered = true;
+            scroll_state_set_hover_for_view(state, (View*)block, sp, h_hovered, v_hovered);
             return true;
         }
-        else sp->is_h_hovered = false;
     }
     if (block->scroller->has_vt_scroll) {
         if (evcon->block.y <= event->y && event->y < bottom &&
             right - scrollbar_css <= event->x && event->x < right) {
-            sp->is_v_hovered = true;
+            v_hovered = true;
+            scroll_state_set_hover_for_view(state, (View*)block, sp, h_hovered, v_hovered);
             return true;
         }
-        else sp->is_v_hovered = false;
     }
+    scroll_state_set_hover_for_view(state, (View*)block, sp, false, false);
     return false;
 }
 
 void scrollpane_mouse_down(EventContext* evcon, ViewBlock* block) {
     MouseButtonEvent *event = &evcon->event.mouse_button;
     ScrollPane* sp = block->scroller->pane;
-    DocState* state = evcon && evcon->ui_context && evcon->ui_context->document
-        ? (DocState*)evcon->ui_context->document->state : nullptr;
+    DocState* state = scrollpane_doc_state(evcon);
+    ScrollInteractionState interaction;
+    scroll_state_get_interaction_for_view(state, (View*)block, &interaction);
 
     float h = 0.0f, v = 0.0f;
     scroll_state_get_position_for_view(state, (View*)block, sp, &h, &v, NULL, NULL);
 
-    if (sp->is_h_hovered) {
+    if (interaction.h_hovered) {
         if (evcon->offset_x < sp->h_handle_x ) {
             float next_h = h - block->width * 0.85f;  // scroll 85% of the block width
             scroll_state_set_position_for_view(state, (View*)block, sp, next_h, v, false);
@@ -182,14 +191,12 @@ void scrollpane_mouse_down(EventContext* evcon, ViewBlock* block) {
             evcon->need_repaint = true;
         }
         else {
-            sp->h_is_dragging = true; // start dragging the handle
-            sp->drag_start_x = event->x; // capture the current mouse X position
-            sp->h_drag_start_scroll = h;
+            scroll_state_begin_drag_for_view(state, (View*)block, sp, true, event->x, event->y, h, v);
             DragTransitionArgs drag_args = { .target = (View*)block, .dragging = true };
             drag_transition(evcon->ui_context->document->state, DRAG_TRANSITION_SET_STATE, &drag_args);
         }
     }
-    else if (sp->is_v_hovered) {
+    else if (interaction.v_hovered) {
         if (evcon->offset_y < sp->v_handle_y) { // page up
             float next_v = v - block->height * 0.85f;  // scroll 85% of the block height
             scroll_state_set_position_for_view(state, (View*)block, sp, h, next_v, false);
@@ -201,9 +208,7 @@ void scrollpane_mouse_down(EventContext* evcon, ViewBlock* block) {
             evcon->need_repaint = true;
         }
         else {
-            sp->v_is_dragging = true; // start dragging the handle
-            sp->drag_start_y = event->y; // capture the current mouse Y position
-            sp->v_drag_start_scroll = v;
+            scroll_state_begin_drag_for_view(state, (View*)block, sp, false, event->x, event->y, h, v);
             DragTransitionArgs drag_args = { .target = (View*)block, .dragging = true };
             drag_transition(evcon->ui_context->document->state, DRAG_TRANSITION_SET_STATE, &drag_args);
         }
@@ -212,11 +217,9 @@ void scrollpane_mouse_down(EventContext* evcon, ViewBlock* block) {
 
 void scrollpane_mouse_up(EventContext* evcon, ViewBlock* block) {
     ScrollPane* sp = block->scroller->pane;
-    if (sp->h_is_dragging || sp->v_is_dragging) {
-        sp->h_is_dragging = false;
-        sp->drag_start_x = 0;  sp->h_drag_start_scroll = 0;
-        sp->v_is_dragging = false;
-        sp->drag_start_y = 0;  sp->v_drag_start_scroll = 0;
+    DocState* state = scrollpane_doc_state(evcon);
+    if (scroll_state_is_dragging_for_view(state, (View*)block)) {
+        scroll_state_clear_drag_for_view(state, (View*)block, sp);
         DragTransitionArgs drag_args = { .target = NULL, .dragging = false };
         drag_transition(evcon->ui_context->document->state, DRAG_TRANSITION_SET_STATE, &drag_args);
     }
@@ -225,15 +228,16 @@ void scrollpane_mouse_up(EventContext* evcon, ViewBlock* block) {
 void scrollpane_drag(EventContext* evcon, ViewBlock* block) {
     MousePositionEvent *event = &evcon->event.mouse_position;
     ScrollPane* sp = block->scroller->pane;
-    DocState* state = evcon && evcon->ui_context && evcon->ui_context->document
-        ? (DocState*)evcon->ui_context->document->state : nullptr;
+    DocState* state = scrollpane_doc_state(evcon);
+    ScrollInteractionState interaction;
+    scroll_state_get_interaction_for_view(state, (View*)block, &interaction);
     float h = 0.0f, v = 0.0f, h_max = 0.0f, v_max = 0.0f;
     scroll_state_get_position_for_view(state, (View*)block, sp, &h, &v, &h_max, &v_max);
 
     // Vertical dragging
-    if (sp->v_is_dragging) {
+    if (interaction.v_dragging) {
         float handle_h = sp->v_handle_height;  // CSS pixels
-        float delta_y = event->y - sp->drag_start_y;  // CSS pixels
+        float delta_y = event->y - interaction.drag_start_y;  // CSS pixels
         // scroll track length in CSS pixels = block height - scrollbar bottom strip - borders
         float pixel_ratio = evcon->ui_context->pixel_ratio;
         float scrollbar_css = sc.SCROLLBAR_SIZE / pixel_ratio;
@@ -241,7 +245,7 @@ void scrollpane_drag(EventContext* evcon, ViewBlock* block) {
         float scroll_track = block->height - scrollbar_css - border_css * 2;
         float scroll_range = scroll_track - handle_h;
         float scroll_per_pixel = scroll_range > 0 ? v_max / scroll_range : 0;
-        float v_scroll_position = sp->v_drag_start_scroll + (delta_y * scroll_per_pixel);
+        float v_scroll_position = interaction.v_drag_start_scroll + (delta_y * scroll_per_pixel);
         if (v_scroll_position != v) {
             scroll_state_set_position_for_view(state, (View*)block, sp, h, v_scroll_position, false);
             evcon->need_repaint = true;
@@ -249,9 +253,9 @@ void scrollpane_drag(EventContext* evcon, ViewBlock* block) {
     }
 
     // Horizontal dragging
-    if (sp->h_is_dragging) {
+    if (interaction.h_dragging) {
         float handle_w = sp->h_handle_width;  // CSS pixels
-        float delta_x = event->x - sp->drag_start_x;  // CSS pixels
+        float delta_x = event->x - interaction.drag_start_x;  // CSS pixels
         // scroll track length in CSS pixels = block width - scrollbar right strip - borders
         float pixel_ratio2 = evcon->ui_context->pixel_ratio;
         float scrollbar_css2 = sc.SCROLLBAR_SIZE / pixel_ratio2;
@@ -259,7 +263,7 @@ void scrollpane_drag(EventContext* evcon, ViewBlock* block) {
         float scroll_track_h = block->width - scrollbar_css2 - border_css2 * 2;
         float scroll_range = scroll_track_h - handle_w;
         float scroll_per_pixel = scroll_range > 0 ? h_max / scroll_range : 0;
-        float h_scroll_position = sp->h_drag_start_scroll + (delta_x * scroll_per_pixel);
+        float h_scroll_position = interaction.h_drag_start_scroll + (delta_x * scroll_per_pixel);
         if (h_scroll_position != h) {
             scroll_state_set_position_for_view(state, (View*)block, sp, h_scroll_position, v, false);
             evcon->need_repaint = true;
