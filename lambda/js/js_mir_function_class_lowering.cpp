@@ -293,6 +293,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     int gen_env_total_slots = 0;
     int gen_this_slot = -1;  // env slot for 'this' in generator/async state machines
     int gen_args_slot = -1;  // env slot for 'arguments' object in generator/async state machines
+    int gen_active_iterator_slot = -1;  // env slot for iterator cleanup on generator.return()
 
     if (fn->is_generator) {
         // Count yield points to determine number of states
@@ -344,6 +345,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         gen_env_total_slots += 32;  // padding for dynamically allocated for-of/for-in loop vars
         int gen_spill_start = gen_env_total_slots;  // spill slots start here
         gen_env_total_slots += 16;  // padding for generator yield spill slots (temporaries across yields)
+        gen_active_iterator_slot = gen_env_total_slots++;
 
         // Create state machine function: gen_sm_<name>(Item* env, Item input, int64_t state) -> Item
         char sm_name[160];
@@ -395,6 +397,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->gen_local_offset = local_offset;
         mt->gen_local_slot_count = (gen_args_slot >= 0 ? gen_args_slot : gen_this_slot) + 1;  // next available slot (within padding area)
         mt->gen_spill_slot_next = gen_spill_start;  // spill slots start at beginning of spill padding area
+        mt->gen_active_iterator_slot = gen_active_iterator_slot;
 
         jm_push_scope(mt);
 
@@ -852,6 +855,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             gen_env_total_slots += 32;  // padding for dynamically allocated for-of/for-in loop vars
             int gen_spill_start = gen_env_total_slots;  // spill slots start here
             gen_env_total_slots += 16;  // padding for async yield spill slots
+            gen_active_iterator_slot = gen_env_total_slots++;
 
             // Create state machine function: async_sm_<name>(Item* env, Item input, int64_t state) -> Item
             char sm_name[160];
@@ -904,6 +908,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             mt->gen_local_offset = local_offset;
             mt->gen_local_slot_count = (gen_args_slot >= 0 ? gen_args_slot : gen_this_slot) + 1;  // next available slot (within padding area)
             mt->gen_spill_slot_next = gen_spill_start;  // spill slots start at beginning of spill padding area
+            mt->gen_active_iterator_slot = gen_active_iterator_slot;
 
             jm_push_scope(mt);
 
@@ -1425,6 +1430,12 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         // Allocate env array for the generator's state machine
         MIR_reg_t gen_env = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
             MIR_T_I64, MIR_new_int_op(mt->ctx, gen_env_total_slots));
+        if (gen_active_iterator_slot >= 0) {
+            MIR_reg_t null_iter = jm_emit_null(mt);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_mem_op(mt->ctx, MIR_T_I64, gen_active_iterator_slot * (int)sizeof(uint64_t), gen_env, 0, 1),
+                MIR_new_reg_op(mt->ctx, null_iter)));
+        }
 
         // Store captured variables into env[0..capture_count-1]
         if (has_captures) {
@@ -1549,6 +1560,12 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         // Allocate env array for the async state machine
         MIR_reg_t async_env = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
             MIR_T_I64, MIR_new_int_op(mt->ctx, gen_env_total_slots));
+        if (gen_active_iterator_slot >= 0) {
+            MIR_reg_t null_iter = jm_emit_null(mt);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_mem_op(mt->ctx, MIR_T_I64, gen_active_iterator_slot * (int)sizeof(uint64_t), async_env, 0, 1),
+                MIR_new_reg_op(mt->ctx, null_iter)));
+        }
 
         // Store captured variables into env[0..capture_count-1]
         if (has_captures) {

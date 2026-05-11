@@ -33,6 +33,7 @@
 #include <unordered_map>
 #include <map>
 #include <re2/re2.h>
+#include <utf8proc.h>
 #ifndef _WIN32
 #include <execinfo.h>
 #else

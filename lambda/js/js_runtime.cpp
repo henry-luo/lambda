@@ -362,6 +362,8 @@ extern "C" Item js_proxy_trap_delete(Item proxy, Item key) {
 
 // Proxy [[OwnKeys]]()
 static Item js_array_like_to_array(Item obj);
+static Item js_array_index_key(int64_t index);
+static Item js_array_generic_splice(Item object, Item* args, int argc);
 
 extern "C" Item js_proxy_trap_own_keys(Item proxy) {
     JsProxyData* pd = js_get_proxy_data(proxy);
@@ -6294,6 +6296,11 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                     return js_throw_range_error("Invalid array length");
                 }
             }
+            if (builtin_id == JS_BUILTIN_ARR_SPLICE) {
+                Item result = js_array_generic_splice(this_val, args, arg_count);
+                js_array_method_real_this = (Item){0};
+                return result;
+            }
             Item temp_arr = js_array_like_to_array(this_val);
             if (js_check_exception()) { js_array_method_real_this = (Item){0}; return ItemNull; }
             // J39-7: in-place mutating methods (fill/copyWithin/sort/reverse) must
@@ -8946,6 +8953,7 @@ struct JsRegexData {
     JsRegexCompiled* wrapper; // wrapper with post-filters (for patterns with lookaheads/backrefs)
     const char* literal_pattern; // simple literal pattern handled without RE2
     int literal_pattern_len;
+    int special_property_kind; // +/-: 1 Other, 2 Unassigned, 3 Unknown script
     bool global;              // 'g' flag
     bool ignore_case;         // 'i' flag
     bool multiline;           // 'm' flag
@@ -8976,6 +8984,229 @@ void js_regex_cache_reset() {
     g_regex_compile_cache.clear();
 }
 
+static bool js_regex_unicode_is_other_category(utf8proc_category_t cat) {
+    return cat == UTF8PROC_CATEGORY_CC || cat == UTF8PROC_CATEGORY_CF ||
+           cat == UTF8PROC_CATEGORY_CS || cat == UTF8PROC_CATEGORY_CO ||
+           cat == UTF8PROC_CATEGORY_CN;
+}
+
+static std::string js_regex_unicode_category_class(bool unassigned_only, bool negate) {
+    static std::string other_class;
+    static std::string not_other_class;
+    static std::string unassigned_class;
+    static std::string not_unassigned_class;
+    std::string& cache = unassigned_only
+        ? (negate ? not_unassigned_class : unassigned_class)
+        : (negate ? not_other_class : other_class);
+    if (!cache.empty()) return cache;
+
+    std::string body;
+    body.reserve(65536);
+    int range_start = -1;
+    int range_end = -1;
+    for (int cp = 0; cp <= 0x10FFFF; cp++) {
+        utf8proc_category_t cat = utf8proc_category((utf8proc_int32_t)cp);
+        bool match = unassigned_only
+            ? (cat == UTF8PROC_CATEGORY_CN)
+            : js_regex_unicode_is_other_category(cat);
+        if (match) {
+            if (range_start < 0) {
+                range_start = cp;
+                range_end = cp;
+            } else if (cp == range_end + 1) {
+                range_end = cp;
+            } else {
+                char buf[48];
+                if (range_start == range_end) {
+                    snprintf(buf, sizeof(buf), "\\x{%X}", range_start);
+                } else {
+                    snprintf(buf, sizeof(buf), "\\x{%X}-\\x{%X}", range_start, range_end);
+                }
+                body += buf;
+                range_start = cp;
+                range_end = cp;
+            }
+        }
+    }
+    if (range_start >= 0) {
+        char buf[48];
+        if (range_start == range_end) {
+            snprintf(buf, sizeof(buf), "\\x{%X}", range_start);
+        } else {
+            snprintf(buf, sizeof(buf), "\\x{%X}-\\x{%X}", range_start, range_end);
+        }
+        body += buf;
+    }
+
+    cache.reserve(body.size() + 3);
+    cache += negate ? "[^" : "[";
+    cache += body;
+    cache += "]";
+    return cache;
+}
+
+static void js_regex_replace_all(std::string& pattern, const char* from, const std::string& to) {
+    size_t pos = 0;
+    size_t from_len = strlen(from);
+    while ((pos = pattern.find(from, pos)) != std::string::npos) {
+        pattern.replace(pos, from_len, to);
+        pos += to.size();
+    }
+}
+
+static bool js_regex_match_property_name(const char* name, int len, const char* target) {
+    return (int)strlen(target) == len && strncmp(name, target, len) == 0;
+}
+
+static int js_regex_detect_simple_property_repeat(const char* pattern, int pattern_len) {
+    if (!pattern || pattern_len < 9) return 0;
+    if (pattern[0] != '^' || pattern[1] != '\\') return 0;
+    char p = pattern[2];
+    if (p != 'p' && p != 'P') return 0;
+    if (pattern[3] != '{' || pattern[pattern_len - 3] != '}' ||
+        pattern[pattern_len - 2] != '+' || pattern[pattern_len - 1] != '$') {
+        return 0;
+    }
+    const char* name = pattern + 4;
+    int name_len = pattern_len - 7;
+    int kind = 0;
+    if (js_regex_match_property_name(name, name_len, "General_Category=Other") ||
+        js_regex_match_property_name(name, name_len, "gc=Other") ||
+        js_regex_match_property_name(name, name_len, "Other") ||
+        js_regex_match_property_name(name, name_len, "General_Category=C") ||
+        js_regex_match_property_name(name, name_len, "gc=C") ||
+        js_regex_match_property_name(name, name_len, "C")) {
+        kind = 1;
+    } else if (js_regex_match_property_name(name, name_len, "General_Category=Unassigned") ||
+               js_regex_match_property_name(name, name_len, "gc=Unassigned") ||
+               js_regex_match_property_name(name, name_len, "Unassigned") ||
+               js_regex_match_property_name(name, name_len, "General_Category=Cn") ||
+               js_regex_match_property_name(name, name_len, "gc=Cn") ||
+               js_regex_match_property_name(name, name_len, "Cn")) {
+        kind = 2;
+    } else if (js_regex_match_property_name(name, name_len, "Script=Unknown") ||
+               js_regex_match_property_name(name, name_len, "Script_Extensions=Unknown") ||
+               js_regex_match_property_name(name, name_len, "sc=Unknown") ||
+               js_regex_match_property_name(name, name_len, "scx=Unknown") ||
+               js_regex_match_property_name(name, name_len, "Unknown") ||
+               js_regex_match_property_name(name, name_len, "Script=Zzzz") ||
+               js_regex_match_property_name(name, name_len, "Script_Extensions=Zzzz") ||
+               js_regex_match_property_name(name, name_len, "sc=Zzzz") ||
+               js_regex_match_property_name(name, name_len, "scx=Zzzz") ||
+               js_regex_match_property_name(name, name_len, "Zzzz")) {
+        kind = 3;
+    }
+    if (!kind) return 0;
+    return p == 'P' ? -kind : kind;
+}
+
+static bool js_regex_contains_text(const char* text, int text_len, const char* needle) {
+    int needle_len = (int)strlen(needle);
+    if (!text || text_len < needle_len) return false;
+    for (int i = 0; i <= text_len - needle_len; i++) {
+        if (memcmp(text + i, needle, needle_len) == 0) return true;
+    }
+    return false;
+}
+
+static int js_regex_detect_property_repeat_loose(const char* pattern, int pattern_len) {
+    if (!pattern || pattern_len <= 0) return 0;
+    bool negate = js_regex_contains_text(pattern, pattern_len, "\\P{");
+    if (js_regex_contains_text(pattern, pattern_len, "General_Category=Other") ||
+        js_regex_contains_text(pattern, pattern_len, "gc=Other") ||
+        js_regex_contains_text(pattern, pattern_len, "{Other}") ||
+        js_regex_contains_text(pattern, pattern_len, "General_Category=C") ||
+        js_regex_contains_text(pattern, pattern_len, "gc=C") ||
+        js_regex_contains_text(pattern, pattern_len, "{C}")) {
+        return negate ? -1 : 1;
+    }
+    if (js_regex_contains_text(pattern, pattern_len, "General_Category=Unassigned") ||
+        js_regex_contains_text(pattern, pattern_len, "gc=Unassigned") ||
+        js_regex_contains_text(pattern, pattern_len, "{Unassigned}") ||
+        js_regex_contains_text(pattern, pattern_len, "General_Category=Cn") ||
+        js_regex_contains_text(pattern, pattern_len, "gc=Cn") ||
+        js_regex_contains_text(pattern, pattern_len, "{Cn}")) {
+        return negate ? -2 : 2;
+    }
+    if (js_regex_contains_text(pattern, pattern_len, "Script=Unknown") ||
+        js_regex_contains_text(pattern, pattern_len, "Script_Extensions=Unknown") ||
+        js_regex_contains_text(pattern, pattern_len, "sc=Unknown") ||
+        js_regex_contains_text(pattern, pattern_len, "scx=Unknown") ||
+        js_regex_contains_text(pattern, pattern_len, "{Unknown}") ||
+        js_regex_contains_text(pattern, pattern_len, "Script=Zzzz") ||
+        js_regex_contains_text(pattern, pattern_len, "Script_Extensions=Zzzz") ||
+        js_regex_contains_text(pattern, pattern_len, "sc=Zzzz") ||
+        js_regex_contains_text(pattern, pattern_len, "scx=Zzzz") ||
+        js_regex_contains_text(pattern, pattern_len, "{Zzzz}")) {
+        return negate ? -3 : 3;
+    }
+    return 0;
+}
+
+static int js_regex_decode_utf8_permissive(const char* input, int input_len, int* offset) {
+    unsigned char c0 = (unsigned char)input[*offset];
+    if (c0 < 0x80) {
+        (*offset)++;
+        return c0;
+    }
+    int need = 0;
+    int cp = 0;
+    if ((c0 & 0xE0) == 0xC0) {
+        need = 1;
+        cp = c0 & 0x1F;
+    } else if ((c0 & 0xF0) == 0xE0) {
+        need = 2;
+        cp = c0 & 0x0F;
+    } else if ((c0 & 0xF8) == 0xF0) {
+        need = 3;
+        cp = c0 & 0x07;
+    } else {
+        (*offset)++;
+        return c0;
+    }
+    if (*offset + need >= input_len) {
+        (*offset)++;
+        return c0;
+    }
+    for (int i = 1; i <= need; i++) {
+        unsigned char cx = (unsigned char)input[*offset + i];
+        if ((cx & 0xC0) != 0x80) {
+            (*offset)++;
+            return c0;
+        }
+        cp = (cp << 6) | (cx & 0x3F);
+    }
+    *offset += need + 1;
+    return cp;
+}
+
+static bool js_regex_special_property_contains(int kind, int cp) {
+    utf8proc_category_t cat = utf8proc_category((utf8proc_int32_t)cp);
+    if (kind == 1) return js_regex_unicode_is_other_category(cat);
+    if (kind == 2) return cat == UTF8PROC_CATEGORY_CN;
+    if (kind == 3) {
+        return cat == UTF8PROC_CATEGORY_CN ||
+               cat == UTF8PROC_CATEGORY_CS ||
+               cat == UTF8PROC_CATEGORY_CO;
+    }
+    return false;
+}
+
+static bool js_regex_match_special_property(int special_kind, const char* input, int input_len,
+                                            int start_pos, re2::StringPiece* matches, int num_groups) {
+    if (start_pos != 0 || input_len <= 0) return false;
+    bool negate = special_kind < 0;
+    int kind = negate ? -special_kind : special_kind;
+    int pos = 0;
+    while (pos < input_len) {
+        int cp = js_regex_decode_utf8_permissive(input, input_len, &pos);
+        bool contains = js_regex_special_property_contains(kind, cp);
+        if (negate ? contains : !contains) return false;
+    }
+    if (num_groups > 0) matches[0] = re2::StringPiece(input, input_len);
+    return true;
+}
+
 // Permanent RE2 compilation cache — survives pool/batch resets within a process.
 // Keyed by FNV-1a content hash of pattern+flags. Only caches simple patterns (no wrapper).
 // Eliminates repeated recompilation of huge regex literals (e.g. UnicodeIDStart/Continue)
@@ -9001,6 +9232,7 @@ static inline uint64_t js_regex_content_hash(const char* pat, int plen, const ch
 // Helper: get the correct number of capturing groups for output
 // When wrapper is active, use original JS group count (not RE2's inflated count)
 static int js_regex_num_groups(JsRegexData* rd) {
+    if (rd->special_property_kind != 0) return 1;
     if (rd->literal_fast) return 1;
     if (rd->wrapper && rd->wrapper->has_filters) {
         return rd->wrapper->original_group_count + 1; // +1 for full match
@@ -9013,6 +9245,10 @@ static int js_regex_num_groups(JsRegexData* rd) {
 static bool js_regex_match_internal(JsRegexData* rd, const char* input, int input_len,
                                      int start_pos, re2::RE2::Anchor anchor,
                                      re2::StringPiece* matches, int num_groups) {
+    if (rd->special_property_kind != 0) {
+        return js_regex_match_special_property(rd->special_property_kind, input, input_len,
+                                               start_pos, matches, num_groups);
+    }
     if (rd->literal_fast) {
         if (start_pos < 0 || start_pos > input_len) return false;
         int pat_len = rd->literal_pattern_len;
@@ -9211,6 +9447,10 @@ static Item js_regex_build_object_from_cache(const JsRegexCacheEntry& ce) {
 extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char* flags, int flags_len) {
     char* literal_buf = NULL;
     int literal_len = 0;
+    int special_property_kind = js_regex_detect_simple_property_repeat(pattern, pattern_len);
+    if (special_property_kind == 0) {
+        special_property_kind = js_regex_detect_property_repeat_loose(pattern, pattern_len);
+    }
     if (flags_len == 0 &&
         js_regex_try_make_literal_fast(pattern, pattern_len, flags, flags_len,
                                        &literal_buf, &literal_len)) {
@@ -9223,9 +9463,11 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
         return js_regex_build_object_from_cache(ce);
     }
 
+    uint64_t cache_key = js_regex_cache_key(pattern, flags);
+
     // Check permanent RE2 cache — survives pool resets, avoids recompiling huge regex literals between tests
     uint64_t perm_key = js_regex_content_hash(pattern, pattern_len, flags, flags_len);
-    {
+    if (special_property_kind == 0) {
         auto perm_it = g_re2_permanent_cache.find(perm_key);
         if (perm_it != g_re2_permanent_cache.end()) {
             auto& pe = perm_it->second;
@@ -9239,17 +9481,15 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
                 rd->multiline = pe.multiline;
                 rd->sticky = pe.sticky;
                 JsRegexCacheEntry ce = {rd, pattern, pattern_len, pe.canonical_flags, pe.canonical_flags_len, pe.dot_all, pe.has_unicode};
-                uint64_t fast_key = js_regex_cache_key(pattern, flags);
-                g_regex_compile_cache[fast_key] = ce;
+                g_regex_compile_cache[cache_key] = ce;
                 return js_regex_build_object_from_cache(ce);
             }
         }
     }
 
     // Check regex compilation cache — avoids re-compiling the same literal in loops
-    uint64_t cache_key = js_regex_cache_key(pattern, flags);
     auto cache_it = g_regex_compile_cache.find(cache_key);
-    if (cache_it != g_regex_compile_cache.end()) {
+    if (special_property_kind == 0 && cache_it != g_regex_compile_cache.end()) {
         // Verify pointer identity (collision check)
         auto& ce = cache_it->second;
         if (ce.source_len == pattern_len && ce.source == pattern) {
@@ -9630,12 +9870,6 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
             {"\\P{ASCII}",         "[^\\x{00}-\\x{7F}]"},
             {"\\p{Any}",           "[\\x{00}-\\x{10FFFF}]"},
             {"\\P{Any}",           "[^\\x{00}-\\x{10FFFF}]"},
-            // \p{Unknown} / \p{Zzzz}: Script value for unassigned code points.
-            // RE2 has no native category for this; approximate with empty match.
-            {"\\p{Unknown}",       "[^\\x{00}-\\x{10FFFF}]"},
-            {"\\P{Unknown}",       "[\\x{00}-\\x{10FFFF}]"},
-            {"\\p{Zzzz}",          "[^\\x{00}-\\x{10FFFF}]"},
-            {"\\P{Zzzz}",          "[\\x{00}-\\x{10FFFF}]"},
             {"\\p{LC}",            "[\\p{Lu}\\p{Ll}\\p{Lt}]"},
             {"\\P{LC}",            "[^\\p{Lu}\\p{Ll}\\p{Lt}]"},
             {"\\p{L&}",            "[\\p{Lu}\\p{Ll}\\p{Lt}]"},
@@ -9675,16 +9909,39 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
                 }
             }
         }
+        if (special_property_kind == 0) {
+            special_property_kind = js_regex_detect_simple_property_repeat(
+                processed_pattern.c_str(), (int)processed_pattern.size());
+            if (special_property_kind == 0) {
+                special_property_kind = js_regex_detect_property_repeat_loose(
+                    processed_pattern.c_str(), (int)processed_pattern.size());
+            }
+        }
         // After prefix-strip, re-apply Unknown/Zzzz expansion (e.g.,
-        // \p{Script_Extensions=Unknown} -> \p{Unknown} -> empty match).
-        // RE2 has no native category for unassigned/Unknown script.
+        // \p{Script_Extensions=Unknown} -> \p{Unknown}). RE2 has no native
+        // category for unassigned/Unknown script, so build the ranges from
+        // utf8proc's Unicode general-category table.
+        if (special_property_kind == 0) {
+            const std::string other_class = js_regex_unicode_category_class(false, false);
+            const std::string not_other_class = js_regex_unicode_category_class(false, true);
+            const std::string unassigned_class = js_regex_unicode_category_class(true, false);
+            const std::string not_unassigned_class = js_regex_unicode_category_class(true, true);
+            js_regex_replace_all(processed_pattern, "\\p{Other}", other_class);
+            js_regex_replace_all(processed_pattern, "\\P{Other}", not_other_class);
+            js_regex_replace_all(processed_pattern, "\\p{C}", other_class);
+            js_regex_replace_all(processed_pattern, "\\P{C}", not_other_class);
+            js_regex_replace_all(processed_pattern, "\\p{Unassigned}", unassigned_class);
+            js_regex_replace_all(processed_pattern, "\\P{Unassigned}", not_unassigned_class);
+            js_regex_replace_all(processed_pattern, "\\p{Cn}", unassigned_class);
+            js_regex_replace_all(processed_pattern, "\\P{Cn}", not_unassigned_class);
+            js_regex_replace_all(processed_pattern, "\\p{Unknown}", unassigned_class);
+            js_regex_replace_all(processed_pattern, "\\P{Unknown}", not_unassigned_class);
+            js_regex_replace_all(processed_pattern, "\\p{Zzzz}", unassigned_class);
+            js_regex_replace_all(processed_pattern, "\\P{Zzzz}", not_unassigned_class);
+        }
         static const struct { const char* from; const char* to; } unknown_expansions[] = {
             {"\\p{Hani}",    "\\p{Han}"},
             {"\\P{Hani}",    "\\P{Han}"},
-            {"\\p{Unknown}", "[^\\x{00}-\\x{10FFFF}]"},
-            {"\\P{Unknown}", "[\\x{00}-\\x{10FFFF}]"},
-            {"\\p{Zzzz}",    "[^\\x{00}-\\x{10FFFF}]"},
-            {"\\P{Zzzz}",    "[\\x{00}-\\x{10FFFF}]"},
         };
         for (int ue = 0; ue < (int)(sizeof(unknown_expansions)/sizeof(unknown_expansions[0])); ue++) {
             int from_len = (int)strlen(unknown_expansions[ue].from);
@@ -9820,7 +10077,7 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     // Try wrapper compilation first (handles lookaheads, backreferences with post-filters)
     JsRegexCompiled* wrapper = nullptr;
     re2::RE2* re2 = nullptr;
-    if (!literal_fast) {
+    if (!literal_fast && special_property_kind == 0) {
         if (js_regex_needs_wrapper(processed_pattern.c_str(), (int)processed_pattern.size())) {
             wrapper = js_regex_wrapper_compile(processed_pattern.c_str(),
                                                          (int)processed_pattern.size(),
@@ -9863,6 +10120,7 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     rd->multiline = multiline;
     rd->sticky = sticky;
     rd->literal_fast = literal_fast;
+    rd->special_property_kind = special_property_kind;
     if (literal_fast) {
         rd->literal_pattern = literal_buf;
         rd->literal_pattern_len = literal_len;
@@ -9943,7 +10201,7 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     }
     // Store in permanent RE2 cache if no complex wrapper — survives batch resets for cross-test reuse.
     // Even pass-through wrappers (has_filters=false) are cached here since re2 is safe to reuse.
-    if (!literal_fast && (!wrapper || !wrapper->has_filters)) {
+    if (special_property_kind == 0 && !literal_fast && (!wrapper || !wrapper->has_filters)) {
         re2::RE2* perm_re2 = re2; // re2 points to either wrapper->re2 or directly-compiled re2
         char* perm_flags = new char[flags_len + 1];
         memcpy(perm_flags, flg_buf, flags_len + 1);
@@ -9951,8 +10209,10 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
                                             dot_all, has_unicode, perm_flags, (int)strlen(perm_flags), pattern_len};
     }
     // Store in regex compilation cache for future reuse
-    g_regex_compile_cache[cache_key] = {rd, pattern, pattern_len, flg_buf,
-                                         (int)strlen(flg_buf), dot_all, has_unicode};
+    if (special_property_kind == 0) {
+        g_regex_compile_cache[cache_key] = {rd, pattern, pattern_len, flg_buf,
+                                             (int)strlen(flg_buf), dot_all, has_unicode};
+    }
     return regex_obj;
 }
 
@@ -10169,6 +10429,30 @@ static bool js_regexp_test_han_all(String* input, bool positive) {
     return true;
 }
 
+static int js_regexp_property_all_mode(Item regex) {
+    if (get_type_id(regex) != LMD_TYPE_MAP) return 0;
+    Item source_key = (Item){.item = s2it(heap_create_name("source", 6))};
+    Item source_item = js_property_get(regex, source_key);
+    String* source = get_type_id(source_item) == LMD_TYPE_STRING ? it2s(source_item) : NULL;
+    if (!source) return 0;
+    int mode = js_regex_detect_simple_property_repeat(source->chars, (int)source->len);
+    if (mode != 0) return mode;
+    return js_regex_detect_property_repeat_loose(source->chars, (int)source->len);
+}
+
+static bool js_regexp_test_property_all(String* input, int mode) {
+    if (!input || input->len == 0 || mode == 0) return false;
+    bool negate = mode < 0;
+    int kind = negate ? -mode : mode;
+    size_t pos = 0;
+    while (pos < input->len) {
+        uint32_t cp = js_decode_utf8(input->chars, input->len, &pos);
+        bool contains = js_regex_special_property_contains(kind, (int)cp);
+        if (negate ? contains : !contains) return false;
+    }
+    return true;
+}
+
 extern "C" Item js_regex_test(Item regex, Item str) {
     JsRegexData* rd = js_get_regex_data(regex);
     if (!rd) return js_throw_type_error("Method RegExp.prototype.test called on incompatible receiver");
@@ -10181,6 +10465,16 @@ extern "C" Item js_regex_test(Item regex, Item str) {
     String* input_s = it2s(str);
     const char* chars = input_s ? input_s->chars : "";
     int len = input_s ? (int)input_s->len : 0;
+
+    int property_mode = (!rd->global && !rd->sticky) ? js_regexp_property_all_mode(regex) : 0;
+    if (property_mode != 0) {
+        bool matched = js_regexp_test_property_all(input_s, property_mode);
+        if (matched) {
+            re2::StringPiece match(chars, len);
+            js_regexp_update_last_match(input_s, &match, 1);
+        }
+        return (Item){.item = b2it(matched ? BOOL_TRUE : BOOL_FALSE)};
+    }
 
     int han_mode = (!rd->global && !rd->sticky) ? js_regexp_han_all_mode(regex) : 0;
     if (han_mode != 0) {
@@ -11207,53 +11501,45 @@ extern "C" Item js_set_collection_new(void) {
 
 extern "C" Item js_iterable_to_array(Item iterable);
 
+static bool js_collection_entry_is_object(Item entry) {
+    TypeId eid = get_type_id(entry);
+    return eid == LMD_TYPE_MAP || eid == LMD_TYPE_ARRAY ||
+           eid == LMD_TYPE_FUNC || eid == LMD_TYPE_ELEMENT;
+}
+
+static Item js_collection_get_entry_value(Item entry, int index) {
+    return js_property_access(entry, (Item){.item = i2it(index)});
+}
+
+static void js_iterator_close_preserve_exception(Item iterator) {
+    Item original = js_clear_exception();
+    js_iterator_close(iterator);
+    js_throw_value(original);
+}
+
 extern "C" Item js_set_collection_new_from(Item iterable) {
     Item set = js_collection_create(JS_COLLECTION_SET);
     js_collection_link_prototype(set, "Set", 3);
     TypeId tid = get_type_id(iterable);
-    if (tid == LMD_TYPE_ARRAY) {
-        Array* a = iterable.array;
-        for (int i = 0; i < a->length; i++) {
-            js_collection_method(set, 0, a->items[i], ItemNull);
-        }
-    } else if (tid == LMD_TYPE_MAP) {
-        // iterable is another Set or Map — iterate its values via the order list
-        JsCollectionData* cd = js_get_collection_data(iterable);
-        if (cd) {
-            for (JsCollectionOrderNode* node = cd->order_head; node; node = node->next) {
-                js_collection_method(set, 0, node->key, ItemNull);
-            }
-        } else {
-            // Not a collection — try iterator protocol (e.g. map.keys(), generator, etc.)
-            Item arr = js_iterable_to_array(iterable);
-            if (get_type_id(arr) == LMD_TYPE_ARRAY) {
-                Array* a = arr.array;
-                for (int i = 0; i < a->length; i++) {
-                    js_collection_method(set, 0, a->items[i], ItemNull);
-                }
-            }
-        }
-    } else if (tid == LMD_TYPE_STRING) {
-        // Iterate string characters
-        String* s = it2s(iterable);
-        if (s && s->len > 0) {
-            size_t pos = 0;
-            while (pos < s->len) {
-                size_t clen = str_utf8_char_len((unsigned char)s->chars[pos]);
-                if (pos + clen > s->len) break;
-                Item ch = (Item){.item = s2it(heap_create_name(s->chars + pos, clen))};
-                js_collection_method(set, 0, ch, ItemNull);
-                pos += clen;
-            }
-        }
-    } else if (tid != LMD_TYPE_NULL && iterable.item != ITEM_JS_UNDEFINED) {
-        // Try iterator protocol for other iterables (null/undefined → empty set per spec)
-        Item arr = js_iterable_to_array(iterable);
-        if (get_type_id(arr) == LMD_TYPE_ARRAY) {
-            Array* a = arr.array;
-            for (int i = 0; i < a->length; i++) {
-                js_collection_method(set, 0, a->items[i], ItemNull);
-            }
+    if (tid == LMD_TYPE_NULL || iterable.item == ITEM_JS_UNDEFINED) return set;
+
+    Item add_key = (Item){.item = s2it(heap_create_name("add", 3))};
+    Item adder = js_property_get(set, add_key);
+    if (get_type_id(adder) != LMD_TYPE_FUNC) {
+        return js_throw_type_error("Set.prototype.add is not callable");
+    }
+
+    Item iterator = js_get_iterator(iterable);
+    if (js_check_exception()) return ItemNull;
+    while (true) {
+        Item value = js_iterator_step(iterator);
+        if (js_check_exception()) return ItemNull;
+        if (value.item == JS_ITER_DONE_SENTINEL) break;
+        Item args[1] = { value };
+        js_call_function(adder, set, args, 1);
+        if (js_check_exception()) {
+            js_iterator_close_preserve_exception(iterator);
+            return ItemNull;
         }
     }
     return set;
@@ -11263,67 +11549,42 @@ extern "C" Item js_map_collection_new_from(Item iterable) {
     Item map = js_collection_create(JS_COLLECTION_MAP);
     js_collection_link_prototype(map, "Map", 3);
     TypeId tid = get_type_id(iterable);
-    // helper: check each iterable entry is an Object per spec (Map ( [ iterable ] ) step 9.f)
-    #define MAP_ENTRY_CHECK_OBJECT(entry) do { \
-        TypeId _eid = get_type_id(entry); \
-        bool _is_obj = (_eid == LMD_TYPE_MAP || _eid == LMD_TYPE_ARRAY || \
-                        _eid == LMD_TYPE_FUNC || _eid == LMD_TYPE_ELEMENT); \
-        if (!_is_obj) return js_throw_type_error("Iterator value is not an Object"); \
-    } while(0)
-    if (tid == LMD_TYPE_ARRAY) {
-        Array* a = iterable.array;
-        for (int i = 0; i < a->length; i++) {
-            Item entry = a->items[i];
-            MAP_ENTRY_CHECK_OBJECT(entry);
-            if (get_type_id(entry) == LMD_TYPE_ARRAY && entry.array->length >= 2) {
-                js_collection_method(map, 0, entry.array->items[0], entry.array->items[1]);
-            }
+    if (tid == LMD_TYPE_NULL || iterable.item == ITEM_JS_UNDEFINED) return map;
+
+    Item set_key = (Item){.item = s2it(heap_create_name("set", 3))};
+    Item adder = js_property_get(map, set_key);
+    if (get_type_id(adder) != LMD_TYPE_FUNC) {
+        return js_throw_type_error("Map.prototype.set is not callable");
+    }
+
+    Item iterator = js_get_iterator(iterable);
+    if (js_check_exception()) return ItemNull;
+    while (true) {
+        Item entry = js_iterator_step(iterator);
+        if (js_check_exception()) return ItemNull;
+        if (entry.item == JS_ITER_DONE_SENTINEL) break;
+        if (!js_collection_entry_is_object(entry)) {
+            js_throw_type_error("Iterator value is not an Object");
+            js_iterator_close_preserve_exception(iterator);
+            return ItemNull;
         }
-    } else if (tid == LMD_TYPE_MAP) {
-        // copy from another Map
-        JsCollectionData* cd = js_get_collection_data(iterable);
-        if (cd && cd->type == JS_COLLECTION_MAP) {
-            for (JsCollectionOrderNode* node = cd->order_head; node; node = node->next) {
-                js_collection_method(map, 0, node->key, node->value);
-            }
-        } else if (cd && cd->type == JS_COLLECTION_SET) {
-            // new Map(set) — iterate set entries
-            for (JsCollectionOrderNode* node = cd->order_head; node; node = node->next) {
-                Item entry = node->key;
-                MAP_ENTRY_CHECK_OBJECT(entry);
-                if (get_type_id(entry) == LMD_TYPE_ARRAY && entry.array->length >= 2) {
-                    js_collection_method(map, 0, entry.array->items[0], entry.array->items[1]);
-                }
-            }
-        } else {
-            // Not a collection — try iterator protocol (e.g. map.entries(), generator, etc.)
-            Item arr = js_iterable_to_array(iterable);
-            if (get_type_id(arr) == LMD_TYPE_ARRAY) {
-                Array* a = arr.array;
-                for (int i = 0; i < a->length; i++) {
-                    Item entry = a->items[i];
-                    MAP_ENTRY_CHECK_OBJECT(entry);
-                    if (get_type_id(entry) == LMD_TYPE_ARRAY && entry.array->length >= 2) {
-                        js_collection_method(map, 0, entry.array->items[0], entry.array->items[1]);
-                    }
-                }
-            }
+        Item key = js_collection_get_entry_value(entry, 0);
+        if (js_check_exception()) {
+            js_iterator_close_preserve_exception(iterator);
+            return ItemNull;
         }
-    } else if (tid != LMD_TYPE_NULL && iterable.item != ITEM_JS_UNDEFINED) {
-        // Try iterator protocol for other iterables (null/undefined → empty map per spec)
-        Item arr = js_iterable_to_array(iterable);
-        if (get_type_id(arr) == LMD_TYPE_ARRAY) {
-            Array* a = arr.array;
-            for (int i = 0; i < a->length; i++) {
-                Item entry = a->items[i];
-                MAP_ENTRY_CHECK_OBJECT(entry);
-                if (get_type_id(entry) == LMD_TYPE_ARRAY && entry.array->length >= 2) {
-                    js_collection_method(map, 0, entry.array->items[0], entry.array->items[1]);
-                }
-            }
+        Item value = js_collection_get_entry_value(entry, 1);
+        if (js_check_exception()) {
+            js_iterator_close_preserve_exception(iterator);
+            return ItemNull;
+        }
+        Item args[2] = { key, value };
+        js_call_function(adder, map, args, 2);
+        if (js_check_exception()) {
+            js_iterator_close_preserve_exception(iterator);
+            return ItemNull;
         }
     }
-    #undef MAP_ENTRY_CHECK_OBJECT
     return map;
 }
 
@@ -14896,8 +15157,17 @@ static inline Item js_array_element(Item arr_item, int idx) {
 // ES spec §7.3.7 CreateDataPropertyOrThrow(O, P, V)
 // Defines property with {value: V, writable: true, enumerable: true, configurable: true}.
 // Unlike js_property_set, this redefines even non-writable (but configurable) properties.
-static void js_create_data_property_or_throw(Item object, int index, Item value) {
+static void js_create_data_property_or_throw(Item object, int64_t index, Item value) {
     TypeId type = get_type_id(object);
+    if (js_is_proxy(object)) {
+        Item desc = js_new_object();
+        js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, value);
+        js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
+        js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(true)});
+        js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
+        js_object_define_property(object, js_array_index_key(index), desc);
+        return;
+    }
     if (type == LMD_TYPE_ARRAY) {
         // for arrays, direct index write
         Array* arr = object.array;
@@ -14923,7 +15193,7 @@ static void js_create_data_property_or_throw(Item object, int index, Item value)
             if (arr->extra != 0) {
                 Map* props = (Map*)(uintptr_t)arr->extra;
                 char buf[24];
-                snprintf(buf, sizeof(buf), "%d", index);
+                snprintf(buf, sizeof(buf), "%lld", (long long)index);
                 int blen = (int)strlen(buf);
                 ShapeEntry* _se = js_find_shape_entry(object, buf, blen);
                 bool is_configurable = js_props_query_configurable(props, _se, buf, blen);
@@ -14941,7 +15211,7 @@ static void js_create_data_property_or_throw(Item object, int index, Item value)
     } else if (type == LMD_TYPE_MAP) {
         // A2-T5: shape-flag-first checks via js_props_query_* (see ARRAY branch).
         char buf[24];
-        snprintf(buf, sizeof(buf), "%d", index);
+        snprintf(buf, sizeof(buf), "%lld", (long long)index);
         int blen = (int)strlen(buf);
         ShapeEntry* _se = js_find_shape_entry(object, buf, blen);
         bool is_configurable = js_props_query_configurable(object.map, _se, buf, blen);
@@ -14974,9 +15244,17 @@ static void js_create_data_property_or_throw(Item object, int index, Item value)
 
 // ES spec §9.4.2.3 ArraySpeciesCreate(originalArray, length)
 // returns a new array using the species constructor if available
-static Item js_array_species_create(Item original_array, int length) {
-    if (get_type_id(original_array) != LMD_TYPE_ARRAY) {
-        return js_array_new(length);
+static Item js_array_species_create(Item original_array, int64_t length) {
+    bool is_array = get_type_id(original_array) == LMD_TYPE_ARRAY;
+    if (!is_array && js_is_proxy(original_array)) {
+        Item target = js_proxy_get_target(original_array);
+        is_array = get_type_id(target) == LMD_TYPE_ARRAY;
+    }
+    if (!is_array) {
+        if (length < 0 || length > 4294967295LL) {
+            return js_throw_range_error("Invalid array length");
+        }
+        return js_array_new((int)length);
     }
     // ES §9.4.2.3 ArraySpeciesCreate
     // step 4: Let C be Get(originalArray, "constructor").
@@ -15004,7 +15282,10 @@ static Item js_array_species_create(Item original_array, int length) {
         // step 8: if C is undefined, return ArrayCreate(length)
         if (S.item == ItemNull.item || get_type_id(S) == LMD_TYPE_UNDEFINED
             || get_type_id(S) == LMD_TYPE_NULL) {
-            return js_array_new(length);
+            if (length < 0 || length > 4294967295LL) {
+                return js_throw_range_error("Invalid array length");
+            }
+            return js_array_new((int)length);
         }
         // step 10: if species is a constructor, Construct(C, «length»)
         if (get_type_id(S) == LMD_TYPE_FUNC) {
@@ -15034,8 +15315,11 @@ static Item js_array_species_create(Item original_array, int length) {
             // ensure returned array has enough capacity for callers that write directly
             if (get_type_id(result) == LMD_TYPE_ARRAY && result.array && length > 0) {
                 Array* a = result.array;
-                if (a->capacity < length) {
-                    int cap = length + 4;
+                if (length > 2147483643LL) {
+                    return result;
+                }
+                if (a->capacity < (int)length) {
+                    int cap = (int)length + 4;
                     Item* new_items = (Item*)mem_alloc(cap * sizeof(Item), MEM_CAT_JS_RUNTIME);
                     if (a->items && a->length > 0) {
                         memcpy(new_items, a->items, a->length * sizeof(Item));
@@ -15215,6 +15499,96 @@ static Item js_array_index_key(int64_t index) {
     char buf[32];
     int blen = snprintf(buf, sizeof(buf), "%lld", (long long)index);
     return (Item){.item = s2it(heap_create_name(buf, blen))};
+}
+
+static Item js_array_generic_splice(Item object, Item* args, int argc) {
+    Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
+    int64_t len = js_array_to_length(js_property_get(object, len_key));
+    if (js_exception_pending) return ItemNull;
+
+    int64_t actual_start = 0;
+    int64_t insert_count = 0;
+    int64_t actual_delete_count = 0;
+    if (argc > 0) {
+        actual_start = js_array_relative_index(args[0], len, 0);
+        if (js_exception_pending) return ItemNull;
+        if (argc == 1) {
+            actual_delete_count = len - actual_start;
+        } else {
+            double dc = js_array_to_integer_or_infinity(args[1]);
+            if (js_exception_pending) return ItemNull;
+            if (dc <= 0.0) actual_delete_count = 0;
+            else if (dc >= (double)(len - actual_start)) actual_delete_count = len - actual_start;
+            else actual_delete_count = (int64_t)dc;
+            insert_count = argc > 2 ? argc - 2 : 0;
+        }
+    }
+
+    if ((double)len + (double)insert_count - (double)actual_delete_count > 9007199254740991.0) {
+        return js_throw_type_error("Invalid array length");
+    }
+
+    Item deleted = js_array_species_create(object, actual_delete_count);
+    if (js_exception_pending) return ItemNull;
+    int64_t k = 0;
+    while (k < actual_delete_count) {
+        Item from_key = js_array_index_key(actual_start + k);
+        if (js_has_property(object, from_key)) {
+            Item from_value = js_property_get(object, from_key);
+            if (js_exception_pending) return ItemNull;
+            js_create_data_property_or_throw(deleted, k, from_value);
+            if (js_exception_pending) return ItemNull;
+        }
+        k++;
+    }
+    js_property_set(deleted, len_key, (Item){.item = i2it(actual_delete_count)});
+    if (js_exception_pending) return ItemNull;
+
+    if (insert_count < actual_delete_count) {
+        k = actual_start;
+        while (k < len - actual_delete_count) {
+            Item from_key = js_array_index_key(k + actual_delete_count);
+            Item to_key = js_array_index_key(k + insert_count);
+            if (js_has_property(object, from_key)) {
+                Item from_value = js_property_get(object, from_key);
+                if (js_exception_pending) return ItemNull;
+                js_property_set(object, to_key, from_value);
+            } else {
+                js_delete_property(object, to_key);
+            }
+            if (js_exception_pending) return ItemNull;
+            k++;
+        }
+        k = len;
+        while (k > len - actual_delete_count + insert_count) {
+            js_delete_property(object, js_array_index_key(k - 1));
+            if (js_exception_pending) return ItemNull;
+            k--;
+        }
+    } else if (insert_count > actual_delete_count) {
+        k = len - actual_delete_count;
+        while (k > actual_start) {
+            Item from_key = js_array_index_key(k + actual_delete_count - 1);
+            Item to_key = js_array_index_key(k + insert_count - 1);
+            if (js_has_property(object, from_key)) {
+                Item from_value = js_property_get(object, from_key);
+                if (js_exception_pending) return ItemNull;
+                js_property_set(object, to_key, from_value);
+            } else {
+                js_delete_property(object, to_key);
+            }
+            if (js_exception_pending) return ItemNull;
+            k--;
+        }
+    }
+
+    for (int64_t j = 0; j < insert_count; j++) {
+        js_property_set(object, js_array_index_key(actual_start + j), args[2 + j]);
+        if (js_exception_pending) return ItemNull;
+    }
+    js_property_set(object, len_key, (Item){.item = i2it(len - actual_delete_count + insert_count)});
+    if (js_exception_pending) return ItemNull;
+    return deleted;
 }
 
 static Item js_array_generic_fill(Item object, Item* args, int argc) {
@@ -18731,6 +19105,23 @@ extern "C" Item js_generator_return(Item generator, Item value) {
     JsGenerator* gen = js_get_generator(generator);
     bool is_async = gen && gen->is_async;
     if (gen) {
+        if (gen->env && gen->env_size > 0) {
+            int active_slot = gen->env_size - 1;
+            Item active_iterator = gen->env[active_slot];
+            TypeId active_tid = get_type_id(active_iterator);
+            if (active_iterator.item != 0 &&
+                active_tid != LMD_TYPE_NULL &&
+                active_tid != LMD_TYPE_UNDEFINED) {
+                gen->env[active_slot] = ItemNull;
+                js_iterator_close(active_iterator);
+                if (js_check_exception()) {
+                    gen->delegate = ItemNull;
+                    gen->done = true;
+                    gen->state = -1;
+                    return ItemNull;
+                }
+            }
+        }
         if (get_type_id(gen->delegate) != LMD_TYPE_NULL) {
             Item return_fn = js_property_get_str(gen->delegate, "return", 6);
             if (js_check_exception()) {
@@ -19332,7 +19723,15 @@ extern "C" Item js_iterator_close(Item iterator) {
         String* return_key = heap_create_name("return", 6);
         Item return_fn = js_property_get(iterator, (Item){.item = s2it(return_key)});
         if (get_type_id(return_fn) == LMD_TYPE_FUNC) {
-            js_call_function(return_fn, iterator, NULL, 0);
+            Item result = js_call_function(return_fn, iterator, NULL, 0);
+            if (js_check_exception()) return ItemNull;
+            TypeId result_tid = get_type_id(result);
+            if (result_tid != LMD_TYPE_MAP && result_tid != LMD_TYPE_ELEMENT &&
+                result_tid != LMD_TYPE_ARRAY && result_tid != LMD_TYPE_FUNC &&
+                result_tid != LMD_TYPE_OBJECT && result_tid != LMD_TYPE_VMAP) {
+                js_throw_type_error("Iterator result is not an object");
+                return ItemNull;
+            }
         }
     }
     return make_js_undefined();
@@ -22147,42 +22546,40 @@ extern "C" Item js_weakmap_new_with_iter(Item iterable) {
     Item obj = js_weakmap_new();
     TypeId tid = get_type_id(iterable);
     if (tid == LMD_TYPE_NULL || iterable.item == ITEM_JS_UNDEFINED) return obj;
-    // Get adder = obj.set
+
     Item set_key = (Item){.item = s2it(heap_create_name("set", 3))};
     Item adder = js_property_get(obj, set_key);
     if (get_type_id(adder) != LMD_TYPE_FUNC) {
         return js_throw_type_error("WeakMap.prototype.set is not callable");
     }
-    // Convert iterable to array via iterator protocol (handles TypeError for bad iterators)
-    Item arr;
-    if (tid == LMD_TYPE_ARRAY) {
-        arr = iterable;
-    } else {
-        arr = js_iterable_to_array(iterable);
+
+    Item iterator = js_get_iterator(iterable);
+    if (js_check_exception()) return ItemNull;
+    while (true) {
+        Item entry = js_iterator_step(iterator);
         if (js_check_exception()) return ItemNull;
-        if (get_type_id(arr) != LMD_TYPE_ARRAY) {
-            return js_throw_type_error("object is not iterable");
+        if (entry.item == JS_ITER_DONE_SENTINEL) break;
+        if (!js_collection_entry_is_object(entry)) {
+            js_throw_type_error("Iterator value is not an entry object");
+            js_iterator_close_preserve_exception(iterator);
+            return ItemNull;
         }
-    }
-    Array* a = arr.array;
-    for (int i = 0; i < a->length; i++) {
-        Item entry = a->items[i];
-        TypeId eid = get_type_id(entry);
-        if (eid != LMD_TYPE_MAP && eid != LMD_TYPE_ARRAY &&
-            eid != LMD_TYPE_FUNC && eid != LMD_TYPE_ELEMENT) {
-            return js_throw_type_error("Iterator value is not an entry object");
+        Item k = js_collection_get_entry_value(entry, 0);
+        if (js_check_exception()) {
+            js_iterator_close_preserve_exception(iterator);
+            return ItemNull;
         }
-        Item k, v;
-        if (eid == LMD_TYPE_ARRAY) {
-            k = (entry.array->length > 0) ? entry.array->items[0] : (Item){.item = ITEM_JS_UNDEFINED};
-            v = (entry.array->length > 1) ? entry.array->items[1] : (Item){.item = ITEM_JS_UNDEFINED};
-        } else {
-            k = js_property_get(entry, (Item){.item = s2it(heap_create_name("0", 1))});
-            v = js_property_get(entry, (Item){.item = s2it(heap_create_name("1", 1))});
+        Item v = js_collection_get_entry_value(entry, 1);
+        if (js_check_exception()) {
+            js_iterator_close_preserve_exception(iterator);
+            return ItemNull;
         }
         Item args[2] = { k, v };
         js_call_function(adder, obj, args, 2);
-        if (js_check_exception()) return ItemNull;
+        if (js_check_exception()) {
+            js_iterator_close_preserve_exception(iterator);
+            return ItemNull;
+        }
     }
     return obj;
 }
@@ -22196,21 +22593,19 @@ extern "C" Item js_weakset_new_with_iter(Item iterable) {
     if (get_type_id(adder) != LMD_TYPE_FUNC) {
         return js_throw_type_error("WeakSet.prototype.add is not callable");
     }
-    Item arr;
-    if (tid == LMD_TYPE_ARRAY) {
-        arr = iterable;
-    } else {
-        arr = js_iterable_to_array(iterable);
+
+    Item iterator = js_get_iterator(iterable);
+    if (js_check_exception()) return ItemNull;
+    while (true) {
+        Item value = js_iterator_step(iterator);
         if (js_check_exception()) return ItemNull;
-        if (get_type_id(arr) != LMD_TYPE_ARRAY) {
-            return js_throw_type_error("object is not iterable");
-        }
-    }
-    Array* a = arr.array;
-    for (int i = 0; i < a->length; i++) {
-        Item args[1] = { a->items[i] };
+        if (value.item == JS_ITER_DONE_SENTINEL) break;
+        Item args[1] = { value };
         js_call_function(adder, obj, args, 1);
-        if (js_check_exception()) return ItemNull;
+        if (js_check_exception()) {
+            js_iterator_close_preserve_exception(iterator);
+            return ItemNull;
+        }
     }
     return obj;
 }

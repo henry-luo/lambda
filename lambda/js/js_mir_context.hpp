@@ -427,6 +427,7 @@ struct JsMirTranspiler {
     int gen_param_offset;            // start of params in env
     int gen_local_offset;            // start of locals in env
     int gen_spill_slot_next;         // next available spill slot in env (for temporaries across yields)
+    int gen_active_iterator_slot;    // iterator to close if generator.return interrupts destructuring
 
     // Exception propagation: label to jump to when an exception is detected outside a try block.
     // Lazily created when first needed within a function body. Jumps to this label → return null.

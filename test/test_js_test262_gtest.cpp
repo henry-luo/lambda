@@ -112,6 +112,7 @@ static std::string g_harness_dir = "ref/test262/harness";
 // Only tests with runtime < 3s (debug build) belong in the baseline.
 // Slow tests (>= 3s) should be moved to test/js262/t262_partial.txt (non-fully-passing list) with SLOW status.
 static const char* BASELINE_FILE = "test/js262/test262_baseline.txt";
+static const char* SKIP_LIST_FILE = "test/js262/skip_list.txt";
 static bool g_use_stripped = false;  // use comment-stripped test files from TEST262_SOURCE_DIR
 
 // Features above ES2020 — skip tests requiring these.
@@ -214,16 +215,84 @@ static const std::set<std::string> UNSUPPORTED_FEATURES = {
     "caller",                                     // Function.prototype.caller (Annex B)
 };
 
+static std::string trim_skip_list_field(const std::string& text) {
+    size_t start = 0;
+    while (start < text.size() && (text[start] == ' ' || text[start] == '\t' ||
+           text[start] == '\r' || text[start] == '\n')) {
+        start++;
+    }
+    size_t end = text.size();
+    while (end > start && (text[end - 1] == ' ' || text[end - 1] == '\t' ||
+           text[end - 1] == '\r' || text[end - 1] == '\n')) {
+        end--;
+    }
+    return text.substr(start, end - start);
+}
+
+static std::string normalize_skip_list_path(const std::string& path) {
+    static const std::string prefix = std::string(TEST262_ROOT) + "/test/";
+    if (path.compare(0, prefix.size(), prefix) == 0) return path.substr(prefix.size());
+    static const std::string stripped_prefix = "test/";
+    if (path.compare(0, stripped_prefix.size(), stripped_prefix) == 0) {
+        return path.substr(stripped_prefix.size());
+    }
+    return path;
+}
+
 // Tests skipped by relative path (under ref/test262/test/).
-// Use this for tests that are non-deterministic, test implementation-specific
-// behavior, or are known false positives unrelated to grammar/runtime correctness.
-static const std::map<std::string, std::string> SKIPPED_TESTS = {
-    // Math.random() is inherently non-deterministic — this test calls
-    // Math.random() 100 times and checks values are in [0,1). It can
-    // intermittently fail depending on the PRNG state and does not
-    // indicate a real engine regression.
-    {"built-ins/Math/random/S15.8.2.14_A1.js", "non-deterministic (Math.random)"},
-};
+// The text file format is:
+//   # reason/comment for the next path or path block
+//   relative/or/ref/test262/test/path.js
+// A path line may also use: path.js<TAB>reason
+static const std::map<std::string, std::string>& skipped_tests() {
+    static std::map<std::string, std::string> skipped;
+    static bool loaded = false;
+    if (loaded) return skipped;
+    loaded = true;
+
+    std::ifstream in(SKIP_LIST_FILE);
+    if (!in.is_open()) return skipped;
+
+    std::string line;
+    std::vector<std::string> comments;
+    bool comment_block_used = false;
+    while (std::getline(in, line)) {
+        std::string trimmed = trim_skip_list_field(line);
+        if (trimmed.empty()) {
+            comments.clear();
+            comment_block_used = false;
+            continue;
+        }
+        if (trimmed[0] == '#') {
+            if (comment_block_used) {
+                comments.clear();
+                comment_block_used = false;
+            }
+            std::string comment = trim_skip_list_field(trimmed.substr(1));
+            if (!comment.empty()) comments.push_back(comment);
+            continue;
+        }
+
+        std::string path = trimmed;
+        std::string reason;
+        size_t tab = trimmed.find('\t');
+        if (tab != std::string::npos) {
+            path = trim_skip_list_field(trimmed.substr(0, tab));
+            reason = trim_skip_list_field(trimmed.substr(tab + 1));
+        }
+        if (reason.empty() && !comments.empty()) {
+            for (size_t i = 0; i < comments.size(); i++) {
+                if (i > 0) reason += " ";
+                reason += comments[i];
+            }
+        }
+        if (reason.empty()) reason = std::string("listed in ") + SKIP_LIST_FILE;
+        path = normalize_skip_list_path(path);
+        if (!path.empty()) skipped[path] = reason;
+        comment_block_used = true;
+    }
+    return skipped;
+}
 
 
 
@@ -1314,8 +1383,9 @@ static void prepare_all_tests(
                 if (param.test_path.size() > prefix.size() &&
                     param.test_path.compare(0, prefix.size(), prefix) == 0) {
                     std::string rel = param.test_path.substr(prefix.size());
-                    auto sit = SKIPPED_TESTS.find(rel);
-                    if (sit != SKIPPED_TESTS.end()) {
+                    const auto& skip_map = skipped_tests();
+                    auto sit = skip_map.find(rel);
+                    if (sit != skip_map.end()) {
                         p.skip_result = T262_SKIP;
                         p.skip_message = sit->second;
                         continue;
@@ -3102,6 +3172,17 @@ int main(int argc, char** argv) {
             p.is_negative = false;
             p.is_strict = false;
             p.native_harness = false;
+            static const std::string prefix = std::string(TEST262_ROOT) + "/test/";
+            if (param.test_path.size() > prefix.size() &&
+                param.test_path.compare(0, prefix.size(), prefix) == 0) {
+                std::string rel = param.test_path.substr(prefix.size());
+                const auto& skip_map = skipped_tests();
+                auto sit = skip_map.find(rel);
+                if (sit != skip_map.end()) {
+                    p.skip_result = T262_SKIP;
+                    p.skip_message = sit->second;
+                }
+            }
             auto cm_it = g_metadata_cache.find(param.test_path);
             if (cm_it != g_metadata_cache.end()) {
                 const CachedMeta& cm = cm_it->second;
@@ -3112,7 +3193,7 @@ int main(int argc, char** argv) {
                 p.features = cm.features;
                 p.native_harness = cm.native_harness;
             }
-            indices.push_back(prepared.size());
+            if (p.skip_result != T262_SKIP) indices.push_back(prepared.size());
             prepared.push_back(std::move(p));
         }
 
