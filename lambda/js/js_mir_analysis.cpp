@@ -1529,6 +1529,18 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
         log_debug("js-mir: arrow capture '_js_this' in function '%s'", fc->name);
     }
 
+    if (fn->is_arrow && jm_name_set_has(refs, "_js_arguments")) {
+        jm_ensure_captures_capacity(fc);
+        snprintf(fc->captures[fc->capture_count].name, 128, "_js_arguments");
+        fc->captures[fc->capture_count].scope_env_slot = -1;
+        fc->captures[fc->capture_count].grandparent_slot = -1;
+        fc->captures[fc->capture_count].is_let_const = false;
+        fc->captures[fc->capture_count].is_const = false;
+        fc->captures[fc->capture_count].force_env_capture = false;
+        fc->capture_count++;
+        log_debug("js-mir: arrow capture '_js_arguments' in function '%s'", fc->name);
+    }
+
     // v18q: Check if function uses 'arguments' keyword
     fc->uses_arguments = !fn->is_arrow && jm_name_set_has(refs, "_js_arguments");
 

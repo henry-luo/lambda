@@ -68,6 +68,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         // Save exception label — must not leak from outer function into native version
         MIR_label_t saved_except_label = mt->func_except_label;
 
+        if (jm_has_use_strict_directive(fn)) {
+            fc->is_strict = true;
+        }
+
         mt->current_func_item = native_item;
         mt->current_func = native_func;
         mt->loop_depth = 0;
@@ -373,6 +377,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         int saved_scope_env_slot_sm = mt->scope_env_slot_count;
         int saved_func_index_sm = mt->current_func_index;
         bool saved_in_generator = mt->in_generator;
+
+        if (jm_has_use_strict_directive(fn)) {
+            fc->is_strict = true;
+        }
 
         mt->current_func_item = gen_sm_func_item;
         mt->current_func = sm_func;
@@ -890,6 +898,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             bool saved_in_generator = mt->in_generator;
             bool saved_in_async = mt->in_async;
 
+            if (jm_has_use_strict_directive(fn)) {
+                fc->is_strict = true;
+            }
+
             mt->current_func_item = gen_sm_func_item;
             mt->current_func = sm_func;
             mt->loop_depth = 0;
@@ -1353,6 +1365,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     }
     found_class:
 
+    if (jm_has_use_strict_directive(fn)) {
+        fc->is_strict = true;
+    }
+
     mt->current_func_item = func_item;
     mt->current_func = func;
     mt->loop_depth = 0;
@@ -1364,6 +1380,39 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     mt->func_except_label = 0;  // reset for this function
 
     jm_push_scope(mt);
+
+    {
+        struct hashmap* dstr_param_names = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+            jm_name_hash, jm_name_cmp, NULL, NULL);
+        JsAstNode* dstr_param = fn->params;
+        while (dstr_param) {
+            JsAstNode* pat = dstr_param;
+            if (pat->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN)
+                pat = ((JsAssignmentPatternNode*)pat)->left;
+            if (pat->node_type == JS_AST_NODE_OBJECT_PATTERN ||
+                pat->node_type == JS_AST_NODE_ARRAY_PATTERN) {
+                jm_collect_pattern_names(pat, dstr_param_names);
+            }
+            dstr_param = dstr_param->next;
+        }
+        size_t dstr_iter = 0; void* dstr_item;
+        while (hashmap_iter(dstr_param_names, &dstr_iter, &dstr_item)) {
+            JsNameSetEntry* ns = (JsNameSetEntry*)dstr_item;
+            MIR_reg_t local_reg = jm_new_reg(mt, ns->name, MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, local_reg),
+                MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
+            JsVarScopeEntry entry;
+            memset(&entry, 0, sizeof(entry));
+            snprintf(entry.name, sizeof(entry.name), "%s", ns->name);
+            entry.var.reg = local_reg;
+            entry.var.mir_type = MIR_T_I64;
+            entry.var.type_id = LMD_TYPE_ANY;
+            entry.var.typed_array_type = -1;
+            hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
+        }
+        hashmap_free(dstr_param_names);
+    }
 
     // If we have a native version, the boxed version becomes a thin wrapper:
     // unbox params → call native → box result
@@ -2029,6 +2078,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             hashmap_free(let_consts);
         }
 
+        bool arguments_object_materialized = false;
+
         // The scope env is a single heap-allocated Item array shared by all child closures,
         // enabling mutable capture semantics (JS captures by reference, not by value).
         if (fc->has_scope_env && fc->scope_env_count > 0) {
@@ -2120,6 +2171,31 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     svar->scope_env_reg = mt->scope_env_reg;
                 } else if (strcmp(sname, "_js_this") == 0) {
                     val = jm_call_0(mt, "js_get_this", MIR_T_I64);
+                } else if (strcmp(sname, "_js_arguments") == 0 && fc->uses_arguments) {
+                    bool args_aliased = !fc->has_non_simple_params &&
+                                        !mt->is_module &&
+                                        !mt->is_global_strict &&
+                                        !jm_has_use_strict_directive(fn);
+                    jm_call_void_1(mt, "js_set_arguments_info",
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, args_aliased ? 0 : 1));
+                    val = jm_call_0(mt, "js_build_arguments_object", MIR_T_I64);
+                    jm_set_var(mt, "_js_arguments", val);
+                    arguments_object_materialized = true;
+                    if (args_aliased) {
+                        mt->arguments_reg = val;
+                        mt->arguments_param_count = 0;
+                        JsAstNode* ap = fn->params;
+                        while (ap && mt->arguments_param_count < 16) {
+                            char apname[128];
+                            jm_get_param_name(ap, mt->arguments_param_count, apname, sizeof(apname));
+                            snprintf(mt->arguments_param_names[mt->arguments_param_count], 128, "%s", apname);
+                            mt->arguments_param_count++;
+                            ap = ap->next;
+                        }
+                    } else {
+                        mt->arguments_reg = 0;
+                        mt->arguments_param_count = 0;
+                    }
                 } else {
                     // Variable not found locally. Try transitive capture from parent's scope env.
                     bool found_transitive = false;
@@ -2253,12 +2329,18 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                                 !mt->is_module &&
                                 !mt->is_global_strict &&
                                 !jm_has_use_strict_directive(fn);
-            // v29: Tell runtime whether this is strict arguments (for callee/caller TypeError)
-            jm_call_void_1(mt, "js_set_arguments_info",
-                MIR_T_I64, MIR_new_int_op(mt->ctx, args_aliased ? 0 : 1));
-            // Build arguments object from the actual call-site args (stored by js_invoke_fn)
-            MIR_reg_t args_arr = jm_call_0(mt, "js_build_arguments_object", MIR_T_I64);
-            jm_set_var(mt, "_js_arguments", args_arr);
+            JsMirVarEntry* existing_args = jm_find_var(mt, "_js_arguments");
+            MIR_reg_t args_arr;
+            if (arguments_object_materialized && existing_args) {
+                args_arr = existing_args->reg;
+            } else {
+                // v29: Tell runtime whether this is strict arguments (for callee/caller TypeError)
+                jm_call_void_1(mt, "js_set_arguments_info",
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, args_aliased ? 0 : 1));
+                // Build arguments object from the actual call-site args (stored by js_invoke_fn)
+                args_arr = jm_call_0(mt, "js_build_arguments_object", MIR_T_I64);
+                jm_set_var(mt, "_js_arguments", args_arr);
+            }
             if (args_aliased) {
                 mt->arguments_reg = args_arr;
                 mt->arguments_param_count = 0;

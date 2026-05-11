@@ -378,6 +378,7 @@ Item js_json_parse_full(Item str_item, Item reviver);
 Item js_json_stringify(Item value);
 Item js_json_stringify_full(Item value, Item replacer, Item space);
 Item js_delete_property(Item obj, Item key);
+Item js_delete_property_strict(Item obj, Item key);
 
 // v15: fetch() API
 Item js_fetch(Item url, Item options);

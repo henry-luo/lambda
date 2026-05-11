@@ -2403,6 +2403,9 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     for (int ci = 0; ci < parent->capture_count; ci++) {
                         jm_name_set_add(parent_own, parent->captures[ci].name);
                     }
+                    if (parent->uses_arguments) {
+                        jm_name_set_add(parent_own, "_js_arguments");
+                    }
 
                     // Check each capture of child: if it's not in parent's own scope,
                     // parent must also capture it

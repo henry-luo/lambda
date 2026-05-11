@@ -874,6 +874,7 @@ extern void js_prepare_class_prototype_property(Item cls_item);
 extern void js_check_class_static_field_key(Item key_item);
 extern void js_mark_non_configurable(Item object, Item name);
 extern Item js_to_property_key(Item key);
+extern Item js_delete_property_strict(Item obj, Item key);
 
 // v23: Performance facade functions (js_runtime.cpp)
 extern int64_t js_typeof_is(Item value, const char* type_str);
@@ -1544,6 +1545,7 @@ JitImport jit_runtime_imports[] = {
     {"js_json_stringify", FPTR(js_json_stringify)},
     {"js_json_stringify_full", FPTR(js_json_stringify_full)},
     {"js_delete_property", FPTR(js_delete_property)},
+    {"js_delete_property_strict", FPTR(js_delete_property_strict)},
     // timing
     {"js_performance_now", FPTR(js_performance_now)},
     {"js_date_now", FPTR(js_date_now)},
