@@ -483,8 +483,12 @@ void render_checkbox(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
     // 3D inset border
     draw_3d_border(rdcon, x, y, size, size, true, 1 * s);
 
+    RadiantState* state = rdcon->ui_context && rdcon->ui_context->document
+        ? (RadiantState*)rdcon->ui_context->document->state : nullptr;
+    bool checked = form_control_get_checked(state, (View*)block);
+
     // Checkmark if checked - draw using RdtVector stroked path
-    if (form->checked) {
+    if (checked) {
         float inset = 3 * s;
         // Checkmark points: short leg down-left, then long leg up-right
         float cx1 = x + inset;
@@ -506,8 +510,6 @@ void render_checkbox(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
 
     // Focus ring — a 2px outset blue rectangle (matches our text-input
     // focus indicator and gives Tab navigation a visible target).
-    RadiantState* state = rdcon->ui_context && rdcon->ui_context->document
-        ? (RadiantState*)rdcon->ui_context->document->state : nullptr;
     if (state && focus_get(state) == (View*)block) {
         float ring = 2.0f * s;
         Color ring_color = make_color(0x1A, 0x73, 0xE8, 0xFF);
@@ -524,7 +526,7 @@ void render_checkbox(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
         rdt_path_free(p);
     }
 
-    log_debug("[FORM] render_checkbox at (%.1f, %.1f) checked=%d", x, y, form->checked);
+    log_debug("[FORM] render_checkbox at (%.1f, %.1f) checked=%d", x, y, checked ? 1 : 0);
 }
 
 /**
@@ -550,23 +552,25 @@ void render_radio(RenderContext* rdcon, ViewBlock* block, FormControlProp* form)
     float bw = 1 * s;
     stroke_circle(rdcon, cx, cy, radius - bw / 2, border_color, bw);
 
+    RadiantState* state = rdcon->ui_context && rdcon->ui_context->document
+        ? (RadiantState*)rdcon->ui_context->document->state : nullptr;
+    bool checked = form_control_get_checked(state, (View*)block);
+
     // Inner dot if checked
-    if (form->checked) {
+    if (checked) {
         Color dot_color = make_color(0, 0, 0);
         float dot_radius = radius * 0.4f;  // inner dot is ~40% of radio size
         fill_circle(rdcon, cx, cy, dot_radius, dot_color);
     }
 
     // Focus ring (see render_checkbox).
-    RadiantState* state = rdcon->ui_context && rdcon->ui_context->document
-        ? (RadiantState*)rdcon->ui_context->document->state : nullptr;
     if (state && focus_get(state) == (View*)block) {
         float ring = 2.0f * s;
         Color ring_color = make_color(0x1A, 0x73, 0xE8, 0xFF);
         stroke_circle(rdcon, cx, cy, radius + ring, ring_color, ring);
     }
 
-    log_debug("[FORM] render_radio at (%.1f, %.1f) checked=%d", x, y, form->checked);
+    log_debug("[FORM] render_radio at (%.1f, %.1f) checked=%d", x, y, checked ? 1 : 0);
 }
 
 /**

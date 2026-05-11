@@ -2879,6 +2879,37 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
     assert(dom_elem);
     log_debug("[Lambda CSS] Resolving styles for element <%s>", dom_elem->tag_name);
 
+    ViewSpan* resolved_view = (ViewSpan*)lycon->view;
+    if (resolved_view && resolved_view->bound && resolved_view->bound->outline) {
+        // clear stale outline data from previous pseudo-class matches before
+        // replaying the current cascaded declarations
+        resolved_view->bound->outline->width = 0.0f;
+        resolved_view->bound->outline->offset = 0.0f;
+        resolved_view->bound->outline->style = CSS_VALUE_NONE;
+        resolved_view->bound->outline->color.r = 0;
+        resolved_view->bound->outline->color.g = 0;
+        resolved_view->bound->outline->color.b = 0;
+        resolved_view->bound->outline->color.a = 0;
+    }
+    if (resolved_view && resolved_view->bound && resolved_view->bound->background) {
+        // background is not inherited; reset cached values so pseudo-class
+        // transitions (e.g. :checked) don't leave stale fill on controls
+        BackgroundProp* bg = resolved_view->bound->background;
+        bg->color.r = 0;
+        bg->color.g = 0;
+        bg->color.b = 0;
+        bg->color.a = 0;
+        bg->image = NULL;
+        bg->gradient_type = GRADIENT_NONE;
+        bg->linear_gradient = NULL;
+        bg->radial_gradient = NULL;
+        bg->conic_gradient = NULL;
+        bg->linear_layers = NULL;
+        bg->linear_layer_count = 0;
+        bg->radial_layers = NULL;
+        bg->radial_layer_count = 0;
+    }
+
     // iterate through specified_style AVL tree
     StyleTree* style_tree = dom_elem->specified_style;
     if (!style_tree || !style_tree->tree) {

@@ -177,6 +177,30 @@ static void event_log_focused_target(EventStateLog* log, uint64_t cascade_id,
     event_state_log_finish_record(log, &w);
 }
 
+static void sync_viewport_scroll_state(EventContext* evcon) {
+    if (!evcon || !evcon->ui_context || !evcon->ui_context->document) return;
+
+    DomDocument* doc = evcon->ui_context->document;
+    RadiantState* state = (RadiantState*)doc->state;
+    if (!state || !doc->view_tree || !doc->view_tree->root ||
+        doc->view_tree->root->view_type != RDT_VIEW_BLOCK) {
+        return;
+    }
+
+    ViewBlock* root_block = (ViewBlock*)doc->view_tree->root;
+    if (!root_block->scroller || !root_block->scroller->pane) return;
+
+    float scroll_x = root_block->scroller->pane->h_scroll_position;
+    float scroll_y = root_block->scroller->pane->v_scroll_position;
+
+    // Keep viewport scroll in the centralized state store and the document
+    // reflow target so incremental relayout does not snap back to top.
+    state->scroll_x = scroll_x;
+    state->scroll_y = scroll_y;
+    doc->pending_viewport_scroll_x = scroll_x;
+    doc->pending_viewport_scroll_y = scroll_y;
+}
+
 void target_children(EventContext* evcon, View* view) {
     do {
         if (view->is_block()) {
@@ -2294,15 +2318,8 @@ static void uncheck_radio_group(View* root, const char* name, View* exclude, Rad
             if (elem_name && strcmp(elem_name, name) == 0) {
                 // Uncheck this radio button
                 if (dom_element_has_pseudo_state(elem, PSEUDO_STATE_CHECKED)) {
-                    state_set_bool(state, current, STATE_CHECKED, false);
+                    form_control_set_checked(state, current, false);
                     sync_pseudo_state(current, PSEUDO_STATE_CHECKED, false);
-                    // Also update FormControlProp if present
-                    if (current->is_block()) {
-                        ViewBlock* block = (ViewBlock*)current;
-                        if (block->form) {
-                            block->form->checked = 0;
-                        }
-                    }
                     log_debug("uncheck_radio_group: unchecked radio name=%s", elem_name);
                 }
             }
@@ -2470,19 +2487,10 @@ static bool handle_checkbox_radio_click(EventContext* evcon, View* target) {
         bool is_checked = dom_element_has_pseudo_state(elem, PSEUDO_STATE_CHECKED);
         bool new_state = !is_checked;
 
-        state_set_bool(state, input, STATE_CHECKED, new_state);
+        form_control_set_checked(state, input, new_state);
         sync_pseudo_state(input, PSEUDO_STATE_CHECKED, new_state);
 
-        // Update FormControlProp if present
         log_debug("handle_checkbox_radio_click: input->is_block()=%d view_type=%d", input->is_block(), input->view_type);
-        if (input->is_block()) {
-            ViewBlock* block = (ViewBlock*)input;
-            log_debug("handle_checkbox_radio_click: block->form=%p", (void*)block->form);
-            if (block->form) {
-                block->form->checked = new_state ? 1 : 0;
-                log_debug("handle_checkbox_radio_click: set form->checked=%d", block->form->checked);
-            }
-        }
 
         log_debug("handle_checkbox_radio_click: toggled checkbox to %s", new_state ? "checked" : "unchecked");
         state->needs_repaint = true;
@@ -2506,17 +2514,9 @@ static bool handle_checkbox_radio_click(EventContext* evcon, View* target) {
                 uncheck_radio_group(root, name, input, state);
             }
 
-            // Check this radio button
-            state_set_bool(state, input, STATE_CHECKED, true);
+            // Check this radio button through centralized writer API.
+            form_control_set_checked(state, input, true);
             sync_pseudo_state(input, PSEUDO_STATE_CHECKED, true);
-
-            // Update FormControlProp if present
-            if (input->is_block()) {
-                ViewBlock* block = (ViewBlock*)input;
-                if (block->form) {
-                    block->form->checked = 1;
-                }
-            }
 
             log_debug("handle_checkbox_radio_click: checked radio name=%s", name ? name : "(none)");
             state->needs_repaint = true;
@@ -3945,7 +3945,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             if (current_target && current_target->view_type == RDT_VIEW_TEXT) {
                 drag_target_view = current_target;
             } else if (anchor_view && anchor_view->view_type == RDT_VIEW_TEXT &&
-                       is_in_rich_editable_subtree(anchor_view) &&
                        doc && doc->view_tree && doc->view_tree->root) {
                 DomBoundary hit = dom_hit_test_to_boundary((View*)doc->view_tree->root,
                     (float)motion->x, (float)motion->y);
@@ -4871,9 +4870,13 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         if (root_block && root_block->scroller && root_block->scroller->pane) {
                             ScrollPane* pane = root_block->scroller->pane;
                             float target_y = target_view->y;
-                            target_y = target_y < 0 ? 0 : (target_y > pane->v_max_scroll ? pane->v_max_scroll : target_y);
-                            pane->v_scroll_position = target_y;
-                            log_info("browse_nav: scrolled to #%s at y=%.0f", fragment_id, target_y);
+                            scroll_state_set_position((RadiantState*)uicon->document->state,
+                                                      pane,
+                                                      pane->h_scroll_position,
+                                                      target_y,
+                                                      true);
+                            log_info("browse_nav: scrolled to #%s at y=%.0f", fragment_id,
+                                     pane->v_scroll_position);
                             uicon->document->state->is_dirty = true;
                         }
                     } else {
@@ -6248,6 +6251,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         log_debug("Unhandled event type: %d", event->type);
         break;
     }
+
+    // Refresh viewport scroll snapshot after the event mutates scroll panes.
+    // Reflow consumes `pending_viewport_scroll_*`, so keep it synchronized.
+    sync_viewport_scroll_state(&evcon);
 
     // Process pending reflows if any state changes require relayout
     RadiantState* state = (RadiantState*)uicon->document->state;

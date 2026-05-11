@@ -6,6 +6,35 @@
 
 **Scope**: Radiant interactive UI state, state-machine consistency, JSON event/state logging, replay, and diagnostics.
 
+## Implementation Update (2026-05-11)
+
+This design has now started landing in code for form-control checked state and scroll mutations.
+
+- Added centralized writer APIs in [radiant/state_store.hpp](../../radiant/state_store.hpp) and [radiant/state_store.cpp](../../radiant/state_store.cpp):
+  - `form_control_get_checked()`
+  - `form_control_set_checked()`
+  - `scroll_state_attach()`
+  - `scroll_state_set_max()`
+  - `scroll_state_set_position()`
+  - `scroll_state_get_position()`
+- Refactored checkbox/radio transitions in [radiant/event.cpp](../../radiant/event.cpp) to use `form_control_set_checked()` instead of mutating `FormControlProp::checked` directly.
+- Refactored scroll writers in [radiant/scroller.cpp](../../radiant/scroller.cpp), [radiant/layout.cpp](../../radiant/layout.cpp), [radiant/event_sim.cpp](../../radiant/event_sim.cpp), and [radiant/window.cpp](../../radiant/window.cpp) to use centralized scroll APIs.
+- Added fast-read owner pointers:
+  - `FormControlProp::state_ref` in [radiant/form_control.hpp](../../radiant/form_control.hpp)
+  - `ScrollPane::state_ref` in [radiant/view.hpp](../../radiant/view.hpp)
+
+### Writer Rule (now enforced for migrated paths)
+
+- Form checked state updates MUST go through `form_control_set_checked()`.
+- Scroll position/max updates MUST go through `scroll_state_set_max()` / `scroll_state_set_position()`.
+- Local structures may keep fast-read pointers, but direct local field mutation is forbidden on migrated paths.
+
+### Follow-up Actions
+
+- Continue migration of remaining mutable form-control fields (`current_value`, selection offsets, select/range mutable state) to centralized writer APIs.
+- Remove legacy fallback reads once all call sites are migrated.
+- Extend centralized writer APIs to emit richer event/state-log records and validation hooks for each mutation class.
+
 **Source proposals**:
 - [Radiant_State_Machine_GPT.md](../idea/Radiant_State_Machine_GPT.md) — primary design.
 - [Radiant_State_Machine_Opus.md](../idea/Radiant_State_Machine_Opus.md) — incorporated FSM details for focus, selection, IME.

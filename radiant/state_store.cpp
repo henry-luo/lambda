@@ -772,6 +772,115 @@ void state_set_bool(RadiantState* state, void* node, const char* name, bool valu
     state_set(state, node, name, item_value);
 }
 
+bool form_control_get_checked(RadiantState* state, View* view) {
+    if (!view || !view->is_element()) return false;
+
+    if (state && state_has(state, view, STATE_CHECKED)) {
+        return state_get_bool(state, view, STATE_CHECKED);
+    }
+
+    DomElement* elem = (DomElement*)view;
+    if (dom_element_has_pseudo_state(elem, PSEUDO_STATE_CHECKED)) {
+        return true;
+    }
+
+    if (view->is_block()) {
+        ViewBlock* block = (ViewBlock*)view;
+        if (block->form) {
+            return block->form->checked != 0;
+        }
+    }
+
+    return false;
+}
+
+void form_control_set_checked(RadiantState* state, View* view, bool checked) {
+    if (!view || !view->is_element()) return;
+
+    if (state) {
+        state_set_bool(state, view, STATE_CHECKED, checked);
+    }
+
+    if (view->is_block()) {
+        ViewBlock* block = (ViewBlock*)view;
+        if (block->form) {
+            block->form->state_ref = state;
+            block->form->checked = checked ? 1 : 0;
+        }
+    }
+
+    state->needs_repaint = true;
+}
+
+void scroll_state_attach(RadiantState* state, void* pane_ptr) {
+    if (!state || !pane_ptr) return;
+    ScrollPane* pane = (ScrollPane*)pane_ptr;
+    pane->state_ref = state;
+}
+
+void scroll_state_set_max(RadiantState* state, void* pane_ptr,
+                          float h_max, float v_max) {
+    if (!pane_ptr) return;
+    ScrollPane* pane = (ScrollPane*)pane_ptr;
+    if (state) scroll_state_attach(state, pane_ptr);
+
+    if (h_max < 0.0f) h_max = 0.0f;
+    if (v_max < 0.0f) v_max = 0.0f;
+
+    pane->h_max_scroll = h_max;
+    pane->v_max_scroll = v_max;
+
+    if (pane->h_scroll_position > pane->h_max_scroll) {
+        pane->h_scroll_position = pane->h_max_scroll;
+    }
+    if (pane->v_scroll_position > pane->v_max_scroll) {
+        pane->v_scroll_position = pane->v_max_scroll;
+    }
+}
+
+void scroll_state_set_position(RadiantState* state, void* pane_ptr,
+                               float h_pos, float v_pos,
+                               bool is_viewport) {
+    if (!pane_ptr) return;
+    ScrollPane* pane = (ScrollPane*)pane_ptr;
+    if (state) scroll_state_attach(state, pane_ptr);
+
+    if (h_pos < 0.0f) h_pos = 0.0f;
+    if (v_pos < 0.0f) v_pos = 0.0f;
+
+    if (h_pos > pane->h_max_scroll) h_pos = pane->h_max_scroll;
+    if (v_pos > pane->v_max_scroll) v_pos = pane->v_max_scroll;
+
+    pane->h_scroll_position = h_pos;
+    pane->v_scroll_position = v_pos;
+
+    if (state) {
+        state->is_dirty = true;
+        state->needs_repaint = true;
+        if (is_viewport) {
+            state->scroll_x = h_pos;
+            state->scroll_y = v_pos;
+        }
+    }
+}
+
+void scroll_state_get_position(RadiantState* state, void* pane_ptr,
+                               float* out_h_pos, float* out_v_pos,
+                               float* out_h_max, float* out_v_max) {
+    (void)state;
+    if (out_h_pos) *out_h_pos = 0.0f;
+    if (out_v_pos) *out_v_pos = 0.0f;
+    if (out_h_max) *out_h_max = 0.0f;
+    if (out_v_max) *out_v_max = 0.0f;
+
+    if (!pane_ptr) return;
+    ScrollPane* pane = (ScrollPane*)pane_ptr;
+    if (out_h_pos) *out_h_pos = pane->h_scroll_position;
+    if (out_v_pos) *out_v_pos = pane->v_scroll_position;
+    if (out_h_max) *out_h_max = pane->h_max_scroll;
+    if (out_v_max) *out_v_max = pane->v_max_scroll;
+}
+
 void state_remove(RadiantState* state, void* node, const char* name) {
     if (!state || !node || !name) return;
 
@@ -946,8 +1055,23 @@ static void state_sync_selection_before_assert(RadiantState* state) {
     }
 }
 
+static void state_sync_dirty_flags_before_assert(RadiantState* state) {
+    if (!state) return;
+
+    // Dirty tracking is authoritative for pending visual work. Keep flags
+    // aligned so invariant checks and the render loop observe one source.
+    if (state->dirty_tracker.full_reflow) {
+        state->needs_reflow = true;
+    }
+    if (state->selection_layout_dirty || state->dirty_tracker.full_repaint ||
+        state->dirty_tracker.full_reflow || dirty_has_regions(&state->dirty_tracker)) {
+        state->needs_repaint = true;
+    }
+}
+
 void state_end_batch(RadiantState* state) {
     state_sync_selection_before_assert(state);
+    state_sync_dirty_flags_before_assert(state);
     s_in_batch = false;
     // TODO: trigger deferred callbacks
     radiant_state_assert_valid(state, "state_end_batch");
@@ -2604,7 +2728,7 @@ bool caret_get_debug_snapshot(RadiantState* state, View** out_view,
 }
 
 bool caret_has_projection(RadiantState* state) {
-    return state && state->caret != NULL;
+    return state && state->caret && state->caret->view != NULL;
 }
 
 bool caret_is_visible(RadiantState* state) {
@@ -2620,6 +2744,17 @@ void caret_project_previous_visual_rect(RadiantState* state, float x, float y, f
 
 void caret_toggle_blink(RadiantState* state) {
     if (!state || !state->caret) return;
+
+    // Guard invariant: caret visibility is only meaningful when projection
+    // has a concrete target view.
+    if (!state->caret->view) {
+        if (state->caret->visible) {
+            state->caret->visible = false;
+            state->needs_repaint = true;
+        }
+        state->caret->blink_time = 0;
+        return;
+    }
 
     // DISABLED for debugging - keep caret always visible
     // state->caret->visible = !state->caret->visible;

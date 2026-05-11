@@ -1118,6 +1118,9 @@ struct ViewElement : DomElement {
 typedef ViewElement ViewSpan;
 
 typedef struct {
+    // Fast-read pointer to centralized state owner. Writers must use state_store APIs.
+    RadiantState* state_ref;
+
     float v_scroll_position, h_scroll_position;
     float v_max_scroll, h_max_scroll;
     float v_handle_y, v_handle_height;

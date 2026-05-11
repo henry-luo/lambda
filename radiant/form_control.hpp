@@ -113,6 +113,9 @@ namespace FormDefaults {
  * FormControlProp - Properties for form control elements
  */
 struct FormControlProp {
+    // Fast-read pointer to centralized state owner. Writers must use state_store APIs.
+    struct RadiantState* state_ref;
+
     FormControlType control_type;
     const char* input_type;     // Original type attribute value
     const char* value;          // Current value (for display)
@@ -235,7 +238,8 @@ struct FormControlProp {
     uint32_t preedit_caret;
 
     // Constructor
-    FormControlProp() : control_type(FORM_CONTROL_NONE), input_type(nullptr),
+    FormControlProp() : state_ref(nullptr),
+        control_type(FORM_CONTROL_NONE), input_type(nullptr),
         value(nullptr), placeholder(nullptr), name(nullptr),
         size(FormDefaults::TEXT_SIZE_CHARS), cols(FormDefaults::TEXTAREA_COLS),
         rows(FormDefaults::TEXTAREA_ROWS), maxlength(-1),

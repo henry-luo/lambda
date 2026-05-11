@@ -637,6 +637,32 @@ static bool get_computed_style(View* view, const char* property, StrBuf* buf) {
         else strbuf_append_str(buf, "rgb(0, 0, 0)");
         return true;
     }
+    // outline-* 
+    if (strcmp(property, "outline-style") == 0) {
+        if (elem->bound && elem->bound->outline) {
+            strbuf_append_str(buf, serialize_css_enum(elem->bound->outline->style));
+        } else {
+            strbuf_append_str(buf, "none");
+        }
+        return true;
+    }
+    if (strcmp(property, "outline-width") == 0) {
+        if (elem->bound && elem->bound->outline) {
+            snprintf(tmp, sizeof(tmp), "%.4gpx", elem->bound->outline->width);
+            strbuf_append_str(buf, tmp);
+        } else {
+            strbuf_append_str(buf, "0px");
+        }
+        return true;
+    }
+    if (strcmp(property, "outline-color") == 0) {
+        if (elem->bound && elem->bound->outline) {
+            serialize_color(elem->bound->outline->color, buf);
+        } else {
+            strbuf_append_str(buf, "rgba(0, 0, 0, 0)");
+        }
+        return true;
+    }
     // width / height (computed box size in px)
     if (strcmp(property, "width") == 0) {
         snprintf(tmp, sizeof(tmp), "%.4gpx", view->width);
@@ -3030,6 +3056,17 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 ctx->fail_count++;
                 break;
             }
+
+            RadiantState* state = doc ? (RadiantState*)doc->state : nullptr;
+            if (state && state->needs_reflow) {
+                reflow_process_pending(state);
+                if (state->needs_reflow) {
+                    extern void reflow_html_doc(DomDocument* doc);
+                    reflow_html_doc(doc);
+                    state->needs_reflow = false;
+                }
+            }
+
             StrBuf* val_buf = strbuf_new_cap(64);
             if (!get_computed_style(elem, ev->style_property, val_buf)) {
                 log_error("event_sim: assert_style FAIL - unsupported property '%s'", ev->style_property);
@@ -3332,12 +3369,15 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 }
             }
             log_info("event_sim: scroll_to (%.1f, %.1f)", target_x, target_y);
-            // Set scroll position on root block's scroller (the actual scroll mechanism)
+            // Set scroll position through centralized API
             ViewBlock* root_block = (ViewBlock*)doc->view_tree->root;
             if (root_block && root_block->scroller && root_block->scroller->pane) {
                 ScrollPane* pane = root_block->scroller->pane;
-                pane->h_scroll_position = target_x < 0 ? 0 : (target_x > pane->h_max_scroll ? pane->h_max_scroll : target_x);
-                pane->v_scroll_position = target_y < 0 ? 0 : (target_y > pane->v_max_scroll ? pane->v_max_scroll : target_y);
+                scroll_state_set_position((RadiantState*)doc->state,
+                                          pane,
+                                          target_x,
+                                          target_y,
+                                          true);
             }
             if (doc->state) doc->state->needs_repaint = true;
             force_render_surface(uicon);

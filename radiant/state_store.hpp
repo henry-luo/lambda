@@ -603,6 +603,49 @@ View* focus_get_visible(RadiantState* state);
 bool focus_within(RadiantState* state, View* view);
 
 // ============================================================================
+// Form and Scroll State API (centralized writers)
+// ============================================================================
+
+/**
+ * Query checked state for checkbox/radio controls.
+ * Prefers centralized state_map entry and falls back to element pseudo-state.
+ */
+bool form_control_get_checked(RadiantState* state, View* view);
+
+/**
+ * Set checked state for checkbox/radio controls through the state store.
+ * This is the only supported writer path for checked state transitions.
+ */
+void form_control_set_checked(RadiantState* state, View* view, bool checked);
+
+/**
+ * Attach a scroll pane to the central state store for fast-read access.
+ * The pane argument is a ScrollPane* passed as void* to avoid header coupling.
+ */
+void scroll_state_attach(RadiantState* state, void* pane);
+
+/**
+ * Set pane scroll max values through centralized API.
+ */
+void scroll_state_set_max(RadiantState* state, void* pane,
+                          float h_max, float v_max);
+
+/**
+ * Set pane scroll position through centralized API.
+ * When is_viewport is true, document-level viewport mirrors are also updated.
+ */
+void scroll_state_set_position(RadiantState* state, void* pane,
+                               float h_pos, float v_pos,
+                               bool is_viewport);
+
+/**
+ * Read pane scroll values.
+ */
+void scroll_state_get_position(RadiantState* state, void* pane,
+                               float* out_h_pos, float* out_v_pos,
+                               float* out_h_max, float* out_v_max);
+
+// ============================================================================
 // Text Extraction and Clipboard API
 // ============================================================================
 

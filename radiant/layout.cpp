@@ -5,6 +5,7 @@
 #include "layout_cache.hpp"
 #include "layout_counters.hpp"
 #include "form_control.hpp"
+#include "state_store.hpp"
 #include "font_face.h"
 #include "../lib/font/font.h"
 #include "css_animation.h"
@@ -2379,13 +2380,11 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
             ScrollPane* pane = root_block->scroller->pane;
             float target_x = doc->pending_viewport_scroll_x;
             float target_y = doc->pending_viewport_scroll_y;
-            if (target_x < 0.0f) target_x = 0.0f;
-            if (target_y < 0.0f) target_y = 0.0f;
-            if (target_x > pane->h_max_scroll) target_x = pane->h_max_scroll;
-            if (target_y > pane->v_max_scroll) target_y = pane->v_max_scroll;
-            pane->h_scroll_position = target_x;
-            pane->v_scroll_position = target_y;
-            log_info("layout_html_doc: applied viewport scroll (%.1f, %.1f)", target_x, target_y);
+            RadiantState* state = (RadiantState*)doc->state;
+            scroll_state_attach(state, pane);
+            scroll_state_set_position(state, pane, target_x, target_y, true);
+            log_info("layout_html_doc: applied viewport scroll (%.1f, %.1f)",
+                     pane->h_scroll_position, pane->v_scroll_position);
         }
     }
 

@@ -1427,6 +1427,8 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
 
             // Parse state attributes - check both attribute and pseudo_state
             // The pseudo_state may have been set during DOM tree building
+            RadiantState* state = (RadiantState*)lycon->doc->state;
+            block->form->state_ref = state;
             if (block->has_attribute("disabled") ||
                 (block->pseudo_state & PSEUDO_STATE_DISABLED)) {
                 block->form->disabled = 1;
@@ -1434,7 +1436,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             if (block->has_attribute("readonly")) block->form->readonly = 1;
             if (block->has_attribute("checked") ||
                 (block->pseudo_state & PSEUDO_STATE_CHECKED)) {
-                block->form->checked = 1;
+                form_control_set_checked(state, block, true);
             }
             if (block->has_attribute("required")) block->form->required = 1;
         }
