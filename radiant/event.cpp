@@ -181,7 +181,7 @@ static void sync_viewport_scroll_state(EventContext* evcon) {
     if (!evcon || !evcon->ui_context || !evcon->ui_context->document) return;
 
     DomDocument* doc = evcon->ui_context->document;
-    RadiantState* state = (RadiantState*)doc->state;
+    DocState* state = (DocState*)doc->state;
     if (!state || !doc->view_tree || !doc->view_tree->root ||
         doc->view_tree->root->view_type != RDT_VIEW_BLOCK) {
         return;
@@ -919,7 +919,7 @@ static DomElement* rich_editable_from_target(View* target) {
     return nullptr;
 }
 
-static bool copy_current_selection_to_clipboard(RadiantState* state, const char* prefix) {
+static bool copy_current_selection_to_clipboard(DocState* state, const char* prefix) {
     if (!state || !selection_has(state)) return false;
     Pool* temp_pool = pool_create();
     Arena* temp_arena = arena_create_default(temp_pool);
@@ -1053,7 +1053,7 @@ static Item build_lambda_event_map(DomDocument* doc, View* target,
     // add caret position (as character index) for input, keydown, paste, and cut events
     if (evcon && (strcmp(event_name, "input") == 0 || strcmp(event_name, "keydown") == 0 ||
                   strcmp(event_name, "paste") == 0 || strcmp(event_name, "cut") == 0)) {
-        RadiantState* st = doc->state ? (RadiantState*)doc->state : nullptr;
+        DocState* st = doc->state ? (DocState*)doc->state : nullptr;
         int caret_offset = 0;
         if (caret_get_offset(st, &caret_offset)) {
             int byte_off = evcon->caret_pos_override_valid ?
@@ -1116,7 +1116,7 @@ static Item build_lambda_event_map(DomDocument* doc, View* target,
     // `caret_pos` / `selection_*` fields above and don't get a SourcePos
     // (their typed value isn't a template-rendered source path).
     {
-        RadiantState* st2 = doc->state ? (RadiantState*)doc->state : nullptr;
+        DocState* st2 = doc->state ? (DocState*)doc->state : nullptr;
         DomSelection* ds = st2 ? st2->dom_selection : nullptr;
         if (ds && ds->anchor.node) {
             SourcePosC anchor_pos;
@@ -1143,7 +1143,7 @@ static Item build_lambda_event_map(DomDocument* doc, View* target,
         }
     }
 
-    RadiantState* st_press = doc && doc->state ? (RadiantState*)doc->state : nullptr;
+    DocState* st_press = doc && doc->state ? (DocState*)doc->state : nullptr;
     mb.put("selection_press_in_range",
            event_uses_hit_source_pos && selection_press_in_range_pending(st_press, NULL, NULL));
 
@@ -1179,7 +1179,7 @@ static Item build_lambda_event_map(DomDocument* doc, View* target,
     // for drag-and-drop events: add drag_data field
     if (evcon && (strcmp(event_name, "dragstart") == 0 || strcmp(event_name, "dragmove") == 0 ||
                   strcmp(event_name, "drop") == 0 || strcmp(event_name, "dragend") == 0)) {
-        RadiantState* st = doc->state ? (RadiantState*)doc->state : nullptr;
+        DocState* st = doc->state ? (DocState*)doc->state : nullptr;
         if (st && st->drag_drop && st->drag_drop->drag_data) {
             mb.put("drag_data", st->drag_drop->drag_data);
         }
@@ -1225,7 +1225,7 @@ static __thread EmitHandlerContext* g_emit_handler_ctx = nullptr;
 
 static bool apply_source_selection_to_doc(UiContext* uicon, DomDocument* doc, Item selection) {
     if (!doc || !doc->root) return false;
-    RadiantState* state = (RadiantState*)doc->state;
+    DocState* state = (DocState*)doc->state;
     if (!state || !state->dom_selection) return false;
     if (!dom_selection_apply_source_selection(state->dom_selection, (DomNode*)doc->root, selection)) {
         return false;
@@ -1548,7 +1548,7 @@ static bool dispatch_rich_beforeinput(EventContext* evcon, View* target,
     if (!editable) return false;
 
     if (intent->type == INPUT_INTENT_DELETE_BY_CUT) {
-        RadiantState* state = (RadiantState*)evcon->ui_context->document->state;
+        DocState* state = (DocState*)evcon->ui_context->document->state;
         if (!state || !selection_has(state)) return false;
         copy_current_selection_to_clipboard(state, "rich cut");
     }
@@ -1567,7 +1567,7 @@ static void dispatch_selectstart(EventContext* evcon, View* target) {
     }
 }
 
-static void dispatch_selectionchange(EventContext* evcon, RadiantState* state, View* target) {
+static void dispatch_selectionchange(EventContext* evcon, DocState* state, View* target) {
     if (!evcon || !selection_has(state) || !target) return;
     if (dispatch_lambda_handler(evcon, target, "selectionchange")) {
         evcon->need_repaint = true;
@@ -1585,7 +1585,7 @@ extern "C" bool radiant_dispatch_rich_composition_event(UiContext* uicon,
         return false;
     }
 
-    RadiantState* state = (RadiantState*)uicon->document->state;
+    DocState* state = (DocState*)uicon->document->state;
     View* focused = focus_get(state);
     View* target = focused ? focused : caret_get_view(state);
     if (!target || !rich_editable_from_target(target)) return false;
@@ -1710,7 +1710,7 @@ static void post_html_handler_rebuild(EventContext* evcon,
 
     auto t1 = high_resolution_clock::now();
 
-    RadiantState* state = (RadiantState*)doc->state;
+    DocState* state = (DocState*)doc->state;
 
     // Clear interaction targets before freeing views so transition helpers can
     // still update pseudo-state mirrors on the old tree.
@@ -1730,7 +1730,7 @@ static void post_html_handler_rebuild(EventContext* evcon,
         doc->view_tree = nullptr;
     }
 
-    // Clear stale view pointers in RadiantState — old views are now freed
+    // Clear stale view pointers in DocState — old views are now freed
     if (state) {
         state->hover_target = nullptr;
         state->active_target = nullptr;
@@ -2103,10 +2103,10 @@ void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event) 
     setup_font(uicon, &evcon->font, &uicon->default_font);
     evcon->new_cursor = CSS_VALUE_AUTO;
     if (!uicon->document->state) {
-        // Create the new RadiantState with in-place mode
+        // Create the new DocState with in-place mode
         uicon->document->state = radiant_state_create(uicon->document->pool, STATE_MODE_IN_PLACE);
         if (uicon->document->state) {
-            log_debug("event_context_init: created RadiantState for document");
+            log_debug("event_context_init: created DocState for document");
         }
     }
 }
@@ -2154,7 +2154,7 @@ static void sync_pseudo_state(View* view, uint32_t pseudo_flag, bool set) {
 
     // If state actually changed, schedule potential reflow
     if (element->pseudo_state != old_state && element->doc && element->doc->state) {
-        RadiantState* state = (RadiantState*)element->doc->state;
+        DocState* state = (DocState*)element->doc->state;
         DomDocument* doc = element->doc;
 
         // Pseudo-state changes affect which CSS rules match (e.g. `.btn:hover`).
@@ -2195,7 +2195,7 @@ static void sync_pseudo_state(View* view, uint32_t pseudo_flag, bool set) {
  * Sets :hover on target and all ancestors, clears :hover on previous target
  */
 void update_hover_state(EventContext* evcon, View* new_target) {
-    RadiantState* state = (RadiantState*)evcon->ui_context->document->state;
+    DocState* state = (DocState*)evcon->ui_context->document->state;
     if (!state) return;
 
     View* prev_hover = (View*)state->hover_target;
@@ -2243,7 +2243,7 @@ void update_hover_state(EventContext* evcon, View* new_target) {
  * Update active state on mouse down/up
  */
 void update_active_state(EventContext* evcon, View* target, bool is_active) {
-    RadiantState* state = (RadiantState*)evcon->ui_context->document->state;
+    DocState* state = (DocState*)evcon->ui_context->document->state;
     if (!state) return;
 
     if (is_active) {
@@ -2306,7 +2306,7 @@ static bool is_radio(View* view) {
  * @param name The radio button name attribute to match
  * @param exclude The radio button to exclude from unchecking (the one being checked)
  */
-static void uncheck_radio_group(View* root, const char* name, View* exclude, RadiantState* state) {
+static void uncheck_radio_group(View* root, const char* name, View* exclude, DocState* state) {
     if (!root || !name) return;
 
     // Traverse view tree to find all radio buttons with matching name
@@ -2471,7 +2471,7 @@ static bool handle_checkbox_radio_click(EventContext* evcon, View* target) {
     View* input = find_checkbox_radio_input(target);
     if (!input) return false;
 
-    RadiantState* state = (RadiantState*)evcon->ui_context->document->state;
+    DocState* state = (DocState*)evcon->ui_context->document->state;
     if (!state) return false;
 
     ViewElement* elem = (ViewElement*)input;
@@ -2624,7 +2624,7 @@ static const char* get_selected_option_text(ViewBlock* select) {
 /**
  * Calculate dropdown popup dimensions
  */
-static void calculate_dropdown_dimensions(ViewBlock* select, RadiantState* state, float scale) {
+static void calculate_dropdown_dimensions(ViewBlock* select, DocState* state, float scale) {
     if (!select || !state || !select->form) return;
 
     int option_count = select->form->option_count;
@@ -2653,7 +2653,7 @@ static bool handle_select_click(EventContext* evcon, View* target) {
     log_debug("handle_select_click: select_view=%p", (void*)select_view);
     if (!select_view) return false;
 
-    RadiantState* state = (RadiantState*)evcon->ui_context->document->state;
+    DocState* state = (DocState*)evcon->ui_context->document->state;
     if (!state) return false;
 
     ViewBlock* select = (ViewBlock*)select_view;
@@ -2713,7 +2713,7 @@ static bool handle_select_click(EventContext* evcon, View* target) {
  * @return true if an option was selected
  */
 static bool handle_dropdown_option_click(EventContext* evcon, float mouse_x, float mouse_y) {
-    RadiantState* state = (RadiantState*)evcon->ui_context->document->state;
+    DocState* state = (DocState*)evcon->ui_context->document->state;
     if (!state || !state->open_dropdown) return false;
 
     ViewBlock* select = (ViewBlock*)state->open_dropdown;
@@ -2760,7 +2760,7 @@ static bool handle_dropdown_option_click(EventContext* evcon, float mouse_x, flo
  * Handle mouse move to update hover state in dropdown
  */
 static void update_dropdown_hover(EventContext* evcon, float mouse_x, float mouse_y) {
-    RadiantState* state = (RadiantState*)evcon->ui_context->document->state;
+    DocState* state = (DocState*)evcon->ui_context->document->state;
     if (!state || !state->open_dropdown) return;
 
     ViewBlock* select = (ViewBlock*)state->open_dropdown;
@@ -2792,7 +2792,7 @@ static void update_dropdown_hover(EventContext* evcon, float mouse_x, float mous
  * Handle keyboard navigation in dropdown
  */
 static bool handle_dropdown_key(EventContext* evcon, int key) {
-    RadiantState* state = (RadiantState*)evcon->ui_context->document->state;
+    DocState* state = (DocState*)evcon->ui_context->document->state;
     if (!state || !state->open_dropdown) return false;
 
     ViewBlock* select = (ViewBlock*)state->open_dropdown;
@@ -2835,7 +2835,7 @@ static bool handle_dropdown_key(EventContext* evcon, int key) {
  * Close dropdown if clicking outside
  */
 static void close_dropdown_if_outside(EventContext* evcon, float mouse_x, float mouse_y) {
-    RadiantState* state = (RadiantState*)evcon->ui_context->document->state;
+    DocState* state = (DocState*)evcon->ui_context->document->state;
     if (!state || !state->open_dropdown) return;
 
     ViewBlock* select = (ViewBlock*)state->open_dropdown;
@@ -2937,7 +2937,7 @@ bool is_view_focusable(View* view) {
  * @param from_keyboard true if focus change was triggered by keyboard (Tab key, etc.)
  */
 void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard) {
-    RadiantState* state = (RadiantState*)evcon->ui_context->document->state;
+    DocState* state = (DocState*)evcon->ui_context->document->state;
     if (!state) return;
 
     View* prev_focus = focus_get(state);
@@ -3010,7 +3010,7 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
  * Update drag state
  */
 void update_drag_state(EventContext* evcon, View* target, bool is_dragging) {
-    RadiantState* state = (RadiantState*)evcon->ui_context->document->state;
+    DocState* state = (DocState*)evcon->ui_context->document->state;
     if (!state) return;
 
     state->drag_target = is_dragging ? target : NULL;
@@ -3466,7 +3466,7 @@ TextRect* find_text_rect_for_offset(ViewText* text, int char_offset) {
     return prev_rect;
 }
 
-static bool text_point_inside_existing_selection(RadiantState* state, View* view, int char_offset) {
+static bool text_point_inside_existing_selection(DocState* state, View* view, int char_offset) {
     if (!state || !state->dom_selection || !view || view->view_type != RDT_VIEW_TEXT) return false;
     DomSelection* selection = state->dom_selection;
     if (selection->range_count == 0 || selection->is_collapsed || !selection->ranges[0]) return false;
@@ -3506,7 +3506,7 @@ static bool text_point_inside_existing_selection(RadiantState* state, View* view
  * Must be called after caret_move, caret_move_line, caret_move_to
  * Handles text views, images, and other navigable views
  */
-void update_caret_visual_position(UiContext* uicon, RadiantState* state) {
+void update_caret_visual_position(UiContext* uicon, DocState* state) {
     View* view = NULL;
     int caret_offset = 0;
     if (!uicon || !caret_get_position(state, &view, &caret_offset)) return;
@@ -3608,7 +3608,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         return;
     }
     event_context_init(&evcon, uicon, event);
-    RadiantState* cascade_state = (RadiantState*)doc->state;
+    DocState* cascade_state = (DocState*)doc->state;
     EventStateLog* cascade_log = cascade_state && cascade_state->active_event_log
         ? cascade_state->active_event_log : evcon.ui_context->event_log;
     uint64_t cascade_id = state_begin_event_cascade(cascade_state, cascade_log, "input");
@@ -3651,7 +3651,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         }
 
         // fire drag event if dragging in progress
-        RadiantState* state = (RadiantState*)evcon.ui_context->document->state;
+        DocState* state = (DocState*)evcon.ui_context->document->state;
 
         // Handle element drag-and-drop
         if (state && state->drag_drop && (state->drag_drop->pending || state->drag_drop->active)) {
@@ -4151,7 +4151,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             }
         }
 
-        RadiantState* state = (RadiantState*)evcon.ui_context->document->state;
+        DocState* state = (DocState*)evcon.ui_context->document->state;
 
         // F8 (Radiant_Design_Form_Input.md §3.10): native context menu
         // hit-testing. Runs before any focus / drag work so a click inside
@@ -4855,7 +4855,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         if (root_block && root_block->scroller && root_block->scroller->pane) {
                             ScrollPane* pane = root_block->scroller->pane;
                             float target_y = target_view->y;
-                            scroll_state_set_position((RadiantState*)uicon->document->state,
+                            scroll_state_set_position((DocState*)uicon->document->state,
                                                       pane,
                                                       pane->h_scroll_position,
                                                       target_y,
@@ -4991,7 +4991,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         // Phase 6E: sync legacy caret/selection into form->selection_*
         // after mouse-driven focus / hit-test / drag operations.
         {
-            RadiantState* tc_state = (RadiantState*)evcon.ui_context->document->state;
+            DocState* tc_state = (DocState*)evcon.ui_context->document->state;
             View* tc_focused = tc_state ? focus_get(tc_state) : nullptr;
             if (tc_focused && tc_focused->is_element()) {
                 DomElement* tc_elem = (DomElement*)tc_focused;
@@ -5059,7 +5059,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
     }
     case RDT_EVENT_KEY_DOWN: {
         KeyEvent* key_event = &event->key;
-        RadiantState* state = (RadiantState*)evcon.ui_context->document->state;
+        DocState* state = (DocState*)evcon.ui_context->document->state;
         if (!state) break;
 
         // F8: Esc closes the native context menu before any other handler.
@@ -6044,7 +6044,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         // Mirror StateStore selection projection into form->selection_* so JS
         // reads (selectionStart/End/value) observe text edits immediately.
         {
-            RadiantState* tc_state = (RadiantState*)evcon.ui_context->document->state;
+            DocState* tc_state = (DocState*)evcon.ui_context->document->state;
             View* tc_focused = tc_state ? focus_get(tc_state) : nullptr;
             if (tc_focused && tc_focused->is_element()) {
                 DomElement* tc_elem = (DomElement*)tc_focused;
@@ -6059,7 +6059,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         // Key release - forward to layer-mode webview if focused
         log_debug("Key up: key=%d", event->key.key);
         {
-            RadiantState* state = (RadiantState*)evcon.ui_context->document->state;
+            DocState* state = (DocState*)evcon.ui_context->document->state;
             if (state) {
                 View* focused = focus_get(state);
                 event_log_focused_target(cascade_log, cascade_id, focused);
@@ -6087,7 +6087,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
     case RDT_EVENT_COMPOSITION_UPDATE:
     case RDT_EVENT_COMPOSITION_END: {
         CompositionEvent* comp_event = &event->composition;
-        RadiantState* state = (RadiantState*)evcon.ui_context->document->state;
+        DocState* state = (DocState*)evcon.ui_context->document->state;
         if (!state) break;
 
         View* focused = focus_get(state);
@@ -6102,7 +6102,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
     }
     case RDT_EVENT_TEXT_INPUT: {
         TextInputEvent* text_event = &event->text_input;
-        RadiantState* state = (RadiantState*)evcon.ui_context->document->state;
+        DocState* state = (DocState*)evcon.ui_context->document->state;
         if (!state) break;
 
         View* focused = focus_get(state);
@@ -6242,7 +6242,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
     sync_viewport_scroll_state(&evcon);
 
     // Process pending reflows if any state changes require relayout
-    RadiantState* state = (RadiantState*)uicon->document->state;
+    DocState* state = (DocState*)uicon->document->state;
     if (state && state->needs_reflow) {
         log_debug("Processing pending reflows before repaint");
         reflow_process_pending(state);

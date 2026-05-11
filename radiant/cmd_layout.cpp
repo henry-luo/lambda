@@ -5122,7 +5122,7 @@ void rebuild_lambda_doc(UiContext* uicon) {
     auto t_start = high_resolution_clock::now();
 
     // Save focus info before rebuild so we can restore it on the new tree
-    RadiantState* state = (RadiantState*)doc->state;
+    DocState* state = (DocState*)doc->state;
     const char* focus_tag = nullptr;
     const char* focus_class = nullptr;
     bool had_focus = false;
@@ -5367,7 +5367,7 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
     auto t_start = high_resolution_clock::now();
 
     // Save focus info
-    RadiantState* state = (RadiantState*)doc->state;
+    DocState* state = (DocState*)doc->state;
     const char* focus_tag = nullptr;
     const char* focus_class = nullptr;
     bool had_focus = false;
@@ -5798,9 +5798,9 @@ static bool layout_single_file(
 
     ui_context->document = doc;
 
-    RadiantState* state = radiant_document_ensure_state(doc, "layout_single_file");
+    DocState* state = radiant_document_ensure_state(doc, "layout_single_file");
     if (!state) {
-        log_error("Failed to create RadiantState for headless document: %s", input_file);
+        log_error("Failed to create DocState for headless document: %s", input_file);
         if (event_log) {
             event_state_log_document(event_log, "load_failed");
             event_state_log_close(event_log);
@@ -5886,7 +5886,7 @@ static bool layout_single_file(
 
     if (event_log) {
         state_end_event_cascade(
-            doc && doc->state ? (RadiantState*)doc->state : nullptr,
+            doc && doc->state ? (DocState*)doc->state : nullptr,
             event_log,
             layout_cascade_id);
     }

@@ -18,7 +18,7 @@
 
 class DomElement;
 struct FormControlProp;
-struct RadiantState;
+struct DocState;
 
 // ---------- word / line boundary ---------------------------------------
 
@@ -46,22 +46,22 @@ uint32_t te_line_end  (const char* buf, uint32_t buf_len, uint32_t byte_off);
 // `target` must be the view associated with the text control (typically
 // the ViewBlock for an <input>/<textarea>; or the ViewText that holds the
 // content for static text under a text node).
-bool te_apply_byte_range(RadiantState* state, void* target,
+bool te_apply_byte_range(DocState* state, void* target,
                          uint32_t start, uint32_t end);
 
 // Select the word containing byte_off in the form's current_value (or
 // `value` fallback). Returns false when not a text control or no word at
 // position.
-bool te_select_word_at(DomElement* elem, RadiantState* state,
+bool te_select_word_at(DomElement* elem, DocState* state,
                        void* target, uint32_t byte_off);
 
 // Select the logical line containing byte_off (textarea), or the entire
 // value (single-line <input>).
-bool te_select_line_at(DomElement* elem, RadiantState* state,
+bool te_select_line_at(DomElement* elem, DocState* state,
                        void* target, uint32_t byte_off);
 
 // Select all text in the control.
-bool te_select_all(DomElement* elem, RadiantState* state, void* target);
+bool te_select_all(DomElement* elem, DocState* state, void* target);
 
 // ---------- F3: word-granularity navigation ----------------------------
 
@@ -85,7 +85,7 @@ uint32_t te_next_word_byte(const char* buf, uint32_t buf_len, uint32_t byte_off)
 //
 // `repl` may be NULL with repl_len=0 to perform a pure deletion. Returns
 // false if `elem` is not a text control or the range is invalid.
-bool te_replace_byte_range(DomElement* elem, RadiantState* state, void* target,
+bool te_replace_byte_range(DomElement* elem, DocState* state, void* target,
                            uint32_t start, uint32_t end,
                            const char* repl, uint32_t repl_len);
 
@@ -160,7 +160,7 @@ void te_validate(DomElement* elem);
 // Returns the number of bytes actually inserted (0 on failure / no-op).
 // Internally invokes te_replace_byte_range, which already fires
 // `beforeinput` / `input` and pushes an undo entry.
-uint32_t te_paste(DomElement* elem, RadiantState* state, void* target,
+uint32_t te_paste(DomElement* elem, DocState* state, void* target,
                   const char* text, uint32_t len);
 
 // ---------- F7: IME composition (Radiant_Design_Form_Input.md §3.7) ----
@@ -181,7 +181,7 @@ uint32_t te_paste(DomElement* elem, RadiantState* state, void* target,
 void te_ime_begin (DomElement* elem);
 void te_ime_update(DomElement* elem, const char* preedit, uint32_t len,
                    uint32_t caret_cp);
-void te_ime_commit(DomElement* elem, RadiantState* state, void* target,
+void te_ime_commit(DomElement* elem, DocState* state, void* target,
                    const char* committed, uint32_t len);
 void te_ime_cancel(DomElement* elem);
 

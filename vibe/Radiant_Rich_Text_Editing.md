@@ -385,7 +385,7 @@ editor.mount(window, preset: 'markdown_wysiwyg)
 output(editor.doc, "README.md", 'markdown)
 ```
 
-Underneath, `edit.open` builds the `RadiantState`'s editor session, registers schema, links `MarkEditor` history, and selects which `view`/`edit` templates apply.
+Underneath, `edit.open` builds the `DocState`'s editor session, registers schema, links `MarkEditor` history, and selects which `view`/`edit` templates apply.
 
 For C/JIT consumers the same surface is exported through `edit_bridge.h` extended with:
 

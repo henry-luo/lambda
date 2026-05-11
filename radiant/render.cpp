@@ -176,7 +176,7 @@ void stderr_render_stats() {
         g_render_font_metrics_count, g_render_font_metrics_time);
 }
 
-static void emit_render_stats_record(UiContext* uicon, RadiantState* state,
+static void emit_render_stats_record(UiContext* uicon, DocState* state,
                                      double record_ms, double replay_ms,
                                      double total_ms, int item_count,
                                      bool selective, bool tiled,
@@ -333,11 +333,11 @@ void scrollpane_render(RdtVector* vec, ScrollPane* sp, Rect* block_bound,
     float content_width, float content_height, Bound* clip, float scale,
     bool show_hz_scroll = true, bool show_vt_scroll = true);
 void render_form_control(RenderContext* rdcon, ViewBlock* block);  // form controls
-void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, RadiantState* state);  // select dropdown popup
+void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, DocState* state);  // select dropdown popup
 void render_column_rules(RenderContext* rdcon, ViewBlock* block);  // multi-column rules
 // post-composite video frame blit (defined in render_video.cpp)
-void render_video_frames(DisplayList* dl, ImageSurface* surface, RadiantState* rstate, UiContext* uicon);
-void render_video_frames_cached(RadiantState* rstate, ImageSurface* surface, UiContext* uicon);
+void render_video_frames(DisplayList* dl, ImageSurface* surface, DocState* rstate, UiContext* uicon);
+void render_video_frames_cached(DocState* rstate, ImageSurface* surface, UiContext* uicon);
 
 // ============================================================================
 // Per-corner rounded rect path helper
@@ -804,7 +804,7 @@ static int compare_view_order(View* view_a, View* view_b) {
  * Check if a view (any type, including images) is within a cross-view selection.
  * Returns true if the view is between anchor and focus views.
  */
-static bool is_view_in_selection(RadiantState* state, View* view) {
+static bool is_view_in_selection(DocState* state, View* view) {
     if (!state || !view) return false;
 
     View* anchor_view = NULL;
@@ -3133,7 +3133,7 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view) {
     }
 
     // Render blue selection overlay if image is within a cross-view selection
-    RadiantState* state = rdcon->ui_context && rdcon->ui_context->document
+    DocState* state = rdcon->ui_context && rdcon->ui_context->document
         ? rdcon->ui_context->document->state : NULL;
     if (is_view_in_selection(state, (View*)view)) {
         // Semi-transparent blue overlay (same color as text selection)
@@ -3490,7 +3490,7 @@ void render_children(RenderContext* rdcon, View* view) {
  * Render focus outline around the currently focused element
  * Draws a 2px dotted outline outside the element's border box
  */
-void render_focus_outline(RenderContext* rdcon, RadiantState* state) {
+void render_focus_outline(RenderContext* rdcon, DocState* state) {
     View* focused = focus_get_visible(state);
     if (!focused) return;
     if (focused->view_type != RDT_VIEW_BLOCK) return;
@@ -3541,7 +3541,7 @@ void render_focus_outline(RenderContext* rdcon, RadiantState* state) {
 /**
  * Render the text caret (blinking cursor) in an editable element
  */
-void render_caret(RenderContext* rdcon, RadiantState* state) {
+void render_caret(RenderContext* rdcon, DocState* state) {
     View* view = NULL;
     int caret_offset = 0;
     float caret_x = 0, caret_y = 0, caret_height = 0;
@@ -3739,7 +3739,7 @@ static DomRange* selection_paint_range_for_current_tree(RenderContext* rdcon,
     return scratch;
 }
 
-void render_selection(RenderContext* rdcon, RadiantState* state) {
+void render_selection(RenderContext* rdcon, DocState* state) {
     if (!state) return;
 
     // DomSelection is canonical. When it is empty, inline text/form painters
@@ -3782,7 +3782,7 @@ void render_selection(RenderContext* rdcon, RadiantState* state) {
  * Called after main content rendering, before canvas sync
  * Note: Selection is now rendered inline during text rendering
  */
-void render_ui_overlays(RenderContext* rdcon, RadiantState* state) {
+void render_ui_overlays(RenderContext* rdcon, DocState* state) {
     if (!state) {
         log_debug("[UI_OVERLAY] No state");
         return;
@@ -3950,7 +3950,7 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
 
     // Phase 12.4: selective clear — only clear dirty regions when available
     bool selective = false;
-    RadiantState* state = uicon->document ? (RadiantState*)uicon->document->state : nullptr;
+    DocState* state = uicon->document ? (DocState*)uicon->document->state : nullptr;
     bool force_full = state && state->is_dirty;
     if (!force_full && state && !state->dirty_tracker.full_repaint && dirty_has_regions(&state->dirty_tracker)) {
         // Clear only dirty regions to background color
@@ -4103,7 +4103,7 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
     }
 
     // Post-composite: blit video frames onto the final surface
-    RadiantState* rstate = uicon->document ? uicon->document->state : nullptr;
+    DocState* rstate = uicon->document ? uicon->document->state : nullptr;
     render_video_frames(&display_list, rdcon.ui_context->surface, rstate, rdcon.ui_context);
 
     auto t_sync = high_resolution_clock::now();

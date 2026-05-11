@@ -38,7 +38,7 @@ Any similar design/framework from other systems that we can reference and adopt 
 
 ## 1. Motivation
 
-Radiant today already has a centralised [`RadiantState`](../../radiant/state_store.hpp)
+Radiant today already has a centralised [`DocState`](../../radiant/state_store.hpp)
 holding caret, selection, focus, hover, drag, dropdown, context-menu and
 visited-link state. Each of these has grown organically through
 feature work (selection rework, form input, drag-and-drop, IME, video
@@ -71,7 +71,7 @@ controls), and individual sub-systems still:
 
 This proposal does three things, in increasing order of intrusiveness:
 
-1. **Consolidate** all interactive UI state under `RadiantState`
+1. **Consolidate** all interactive UI state under `DocState`
    (finish the migration the codebase is already mid-way through).
 2. **Model** focus / caret / selection as explicit finite-state
    machines with a single mutator API and runtime invariant checks.
@@ -114,7 +114,7 @@ This proposal does three things, in increasing order of intrusiveness:
 
 | System | What we steal | Reference |
 |---|---|---|
-| **Redux / Elm Architecture** | Single store, pure reducers, time-travel via immutable versions. `RadiantState.mode == STATE_MODE_IMMUTABLE` already mirrors this. | [redux.js.org](https://redux.js.org/understanding/thinking-in-redux/three-principles) |
+| **Redux / Elm Architecture** | Single store, pure reducers, time-travel via immutable versions. `DocState.mode == STATE_MODE_IMMUTABLE` already mirrors this. | [redux.js.org](https://redux.js.org/understanding/thinking-in-redux/three-principles) |
 | **Chromium `FocusController` & `FrameSelection`** | The "exactly one focused frame; exactly one focused element per frame" invariant; the explicit *anchor / extent / direction* model on selection. | `third_party/blink/renderer/core/page/focus_controller.h`, `core/editing/frame_selection.h` |
 | **WHATWG DOM Selection / Range** | Anchor / focus boundary points, `selectionchange` task coalescing — already partially done (Phase 8D `selection_mutation_seq` / `selection_event_seq`). | https://www.w3.org/TR/selection-api/ |
 | **xstate / Statecharts (Harel)** | Hierarchical states with explicit `entry` / `exit` actions and guards; lets us model "selecting → idle → selected" cleanly. | https://stately.ai/docs |
@@ -137,16 +137,16 @@ CDP Tracing** (for the log layer, §6).
 
 | State | Current location | Proposed home |
 |---|---|---|
-| Focused element (per document) | `RadiantState.focus` ✓ | unchanged |
-| Caret (text cursor) | `RadiantState.caret` + `dom_selection` (collapsed) | **single** owner: `dom_selection`; `caret` becomes a derived view (cached) |
-| Selection (range) | `RadiantState.selection` (legacy) + `dom_selection` | **single** owner: `dom_selection`; legacy struct retired (Phase 7 of [Radiant_Design_Selection.md](Radiant_Design_Selection.md)) |
-| Hover / active / drag / cursor | `RadiantState.hover_target` etc. ✓ | unchanged |
+| Focused element (per document) | `DocState.focus` ✓ | unchanged |
+| Caret (text cursor) | `DocState.caret` + `dom_selection` (collapsed) | **single** owner: `dom_selection`; `caret` becomes a derived view (cached) |
+| Selection (range) | `DocState.selection` (legacy) + `dom_selection` | **single** owner: `dom_selection`; legacy struct retired (Phase 7 of [Radiant_Design_Selection.md](Radiant_Design_Selection.md)) |
+| Hover / active / drag / cursor | `DocState.hover_target` etc. ✓ | unchanged |
 | Form-control values & dirty flags | `FormControlProp` per-element ✓ | unchanged; **expose** an iterator so the log layer can snapshot them |
-| Document history / current URL | `BrowsingSession` (radiant/browsing_session.h) | move pointer into `RadiantState.session` for one-stop access |
-| Visited URLs | `RadiantState.visited_links` ✓ | unchanged |
-| Scroll, zoom | `RadiantState.scroll_x/y, zoom_level` ✓ | unchanged |
-| Dropdown / context-menu overlay | `RadiantState` ✓ | unchanged |
-| IME composition | scattered across `ime_mac.mm`, `ime_win.cpp` | move active composition into `RadiantState.ime` (new, see §5.4) |
+| Document history / current URL | `BrowsingSession` (radiant/browsing_session.h) | move pointer into `DocState.session` for one-stop access |
+| Visited URLs | `DocState.visited_links` ✓ | unchanged |
+| Scroll, zoom | `DocState.scroll_x/y, zoom_level` ✓ | unchanged |
+| Dropdown / context-menu overlay | `DocState` ✓ | unchanged |
+| IME composition | scattered across `ime_mac.mm`, `ime_win.cpp` | move active composition into `DocState.ime` (new, see §5.4) |
 
 ### 4.2 The "single mutator" rule
 
@@ -249,7 +249,7 @@ States:
   `Range` or `Caret` on pointer-up.
 
 Caret blink, IME composition, and editing all read from this single
-machine. The legacy `RadiantState.caret`/`selection` structs become
+machine. The legacy `DocState.caret`/`selection` structs become
 **read-only cached projections** computed once per cascade, retired
 when call sites are migrated (mirrors the path already laid out in
 [Radiant_Design_Selection.md](Radiant_Design_Selection.md)).
@@ -473,7 +473,7 @@ replay tool can keep its id table in sync.
 
 | Phase | Scope | Done when |
 |---|---|---|
-| **P1** | Inventory + retire legacy `caret` / `selection` structs in favour of `dom_selection` (continues Phase 6/7 of `Radiant_Design_Selection.md`). | All callers go through `dom_selection`; legacy fields removed from `RadiantState`. |
+| **P1** | Inventory + retire legacy `caret` / `selection` structs in favour of `dom_selection` (continues Phase 6/7 of `Radiant_Design_Selection.md`). | All callers go through `dom_selection`; legacy fields removed from `DocState`. |
 | **P2** | Introduce `MutatorToken` + single-writer-module rule for focus, selection, IME, form value. | Compile-time poisoning of direct field writes; `make test-radiant-baseline` green. |
 | **P3** | FSM coordinator (`radiant_state_settle`) + invariant assertions. | Debug-build asserts pass on baseline + WPT events corpus. |
 | **P4** | JSONL session log: schema, ring buffer, writer thread, env-var gating. | New CLI flag wired; `temp/radiant_session_*.jsonl` emitted by `make layout suite=baseline`. |
@@ -493,7 +493,7 @@ Each phase is independently shippable and gated by
    "ime-composing during selection" may push toward statecharts.
    Defer until P3 reveals the need.
 2. **Per-iframe vs. per-document state.** Cross-realm work is
-   already on the WPT skip list; for now one `RadiantState` per
+   already on the WPT skip list; for now one `DocState` per
    top-level browsing session, with `doc` field on log records
    distinguishing frames.
 3. **Snapshot delta granularity.** Per-field deltas vs. JSON-Patch.
@@ -502,5 +502,5 @@ Each phase is independently shippable and gated by
    third-party tool consumes the log.
 4. **Compatibility with the existing `STATE_MODE_IMMUTABLE`.** The
    FSMs must not break time-travel; transitions in immutable mode
-   produce a new `RadiantState*` and the log records the version
+   produce a new `DocState*` and the log records the version
    number, enabling step-back debugging in the future.

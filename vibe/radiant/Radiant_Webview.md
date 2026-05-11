@@ -462,7 +462,7 @@ The web view receives coordinates in its own viewport space (0,0 at top-left of 
 
 ### Keyboard Events
 
-When the web view has focus (tracked by Radiant's `RadiantState.focus_view`):
+When the web view has focus (tracked by Radiant's `DocState.focus_view`):
 - All `KEY_DOWN`, `KEY_UP`, `KEY_REPEAT`, and `TEXT_INPUT` events are forwarded via `webview_inject_key_event()` / `webview_inject_text_input()`
 - Radiant does **not** process these events itself (no Radiant shortcut handling while web view is focused)
 

@@ -19,10 +19,10 @@
 
 // Forward decls (defined elsewhere — keep this file decoupled from the
 // large headers).
-void caret_set        (RadiantState* state, View* view, int char_offset);
-void selection_start  (RadiantState* state, View* view, int char_offset);
-void selection_extend (RadiantState* state, int char_offset);
-void selection_clear  (RadiantState* state);
+void caret_set        (DocState* state, View* view, int char_offset);
+void selection_start  (DocState* state, View* view, int char_offset);
+void selection_extend (DocState* state, int char_offset);
+void selection_clear  (DocState* state);
 
 // F4: tc_set_value pushes a history snapshot on every mutation. To prevent
 // undo/redo restores from re-pushing (and corrupting the cursor), they
@@ -138,7 +138,7 @@ uint32_t te_line_end(const char* buf, uint32_t buf_len, uint32_t byte_off) {
 
 // ---------- selection helpers (F2) -------------------------------------
 
-bool te_apply_byte_range(RadiantState* state, void* target,
+bool te_apply_byte_range(DocState* state, void* target,
                          uint32_t start, uint32_t end) {
     if (!state || !target) return false;
     if (end < start) { uint32_t t = start; start = end; end = t; }
@@ -152,7 +152,7 @@ bool te_apply_byte_range(RadiantState* state, void* target,
     return true;
 }
 
-bool te_select_word_at(DomElement* elem, RadiantState* state,
+bool te_select_word_at(DomElement* elem, DocState* state,
                        void* target, uint32_t byte_off) {
     if (!elem || !state || !target) return false;
     if (!tc_is_text_control(elem)) return false;
@@ -167,7 +167,7 @@ bool te_select_word_at(DomElement* elem, RadiantState* state,
     return te_apply_byte_range(state, target, s, e);
 }
 
-bool te_select_line_at(DomElement* elem, RadiantState* state,
+bool te_select_line_at(DomElement* elem, DocState* state,
                        void* target, uint32_t byte_off) {
     if (!elem || !state || !target) return false;
     if (!tc_is_text_control(elem)) return false;
@@ -181,7 +181,7 @@ bool te_select_line_at(DomElement* elem, RadiantState* state,
     return te_apply_byte_range(state, target, s, e);
 }
 
-bool te_select_all(DomElement* elem, RadiantState* state, void* target) {
+bool te_select_all(DomElement* elem, DocState* state, void* target) {
     if (!elem || !state || !target) return false;
     if (!tc_is_text_control(elem)) return false;
     FormControlProp* f = elem->form;
@@ -216,7 +216,7 @@ uint32_t te_next_word_byte(const char* buf, uint32_t buf_len, uint32_t byte_off)
 
 // ---------- F3: range-based mutation -----------------------------------
 
-bool te_replace_byte_range(DomElement* elem, RadiantState* state, void* target,
+bool te_replace_byte_range(DomElement* elem, DocState* state, void* target,
                            uint32_t start, uint32_t end,
                            const char* repl, uint32_t repl_len) {
     if (!elem || !state || !target) return false;
@@ -583,7 +583,7 @@ void te_validate(DomElement* elem) {
 
 // ---------- F6: paste sanitization (Radiant_Design_Form_Input.md §3.6) -
 
-uint32_t te_paste(DomElement* elem, RadiantState* state, void* target,
+uint32_t te_paste(DomElement* elem, DocState* state, void* target,
                   const char* text, uint32_t len) {
     if (!elem || !state || !target || !text || len == 0) return 0;
     if (!tc_is_text_control(elem)) return 0;
@@ -724,7 +724,7 @@ void te_ime_update(DomElement* elem, const char* preedit, uint32_t len,
         f->preedit_utf8 ? f->preedit_utf8 : "");
 }
 
-void te_ime_commit(DomElement* elem, RadiantState* state, void* target,
+void te_ime_commit(DomElement* elem, DocState* state, void* target,
                    const char* committed, uint32_t len) {
     if (!elem || !tc_is_text_control(elem)) return;
     FormControlProp* f = elem->form;

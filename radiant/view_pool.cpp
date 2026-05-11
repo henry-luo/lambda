@@ -2607,7 +2607,7 @@ void print_view_tree_json(ViewElement* view_root, Url* url, const char* output_p
  * Print caret and selection state to a text file.
  * This helps debug caret positioning issues.
  */
-void print_caret_state(RadiantState* state, const char* output_path) {
+void print_caret_state(DocState* state, const char* output_path) {
     if (!state) {
         log_debug("print_caret_state: no state provided");
         return;

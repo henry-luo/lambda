@@ -472,7 +472,7 @@ int render_uicontext_to_svg(UiContext* uicon, const char* svg_file) {
     content_max_y += 50;
 
     // Render to SVG (now includes caret if present)
-    extern char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int height, RadiantState* state);
+    extern char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int height, DocState* state);
     extern bool save_svg_to_file(const char* svg_content, const char* filename);
 
     char* svg_content = render_view_tree_to_svg(uicon, uicon->document->view_tree->root,

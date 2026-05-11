@@ -1,7 +1,7 @@
 // template_state.h — Central state store for view/edit template reactive state
 // Keyed by (model_item, template_ref, state_name) triple.
 // Unified with Radiant's StateStore: when Radiant is active, the template
-// state map lives on RadiantState; in headless mode, a standalone map is used.
+// state map lives on DocState; in headless mode, a standalone map is used.
 #pragma once
 
 #include "lambda.h"
@@ -48,10 +48,10 @@ bool tmpl_state_has(Item model_item, const char* template_ref, const char* state
 // Reset all template state (e.g., on session end)
 void tmpl_state_reset(void);
 
-// Get the underlying hashmap pointer (for RadiantState unification)
+// Get the underlying hashmap pointer (for DocState unification)
 struct hashmap* tmpl_state_get_map(void);
 
-// Inject an external hashmap (e.g., from RadiantState). Caller owns the map.
+// Inject an external hashmap (e.g., from DocState). Caller owns the map.
 void tmpl_state_set_map(struct hashmap* map);
 
 #ifdef __cplusplus

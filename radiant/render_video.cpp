@@ -476,7 +476,7 @@ static void render_play_button_overlay(ImageSurface* surface,
     rdt_vector_destroy(&vec);
 }
 
-void render_video_frames(DisplayList* dl, ImageSurface* surface, RadiantState* rstate, UiContext* uicon) {
+void render_video_frames(DisplayList* dl, ImageSurface* surface, DocState* rstate, UiContext* uicon) {
     if (!dl || !surface) return;
 
     int count = dl_item_count(dl);
@@ -560,7 +560,7 @@ void render_video_frames(DisplayList* dl, ImageSurface* surface, RadiantState* r
 // Used for video-only dirty path: skips DL rebuild + tile replay
 // ---------------------------------------------------------------------------
 
-void render_video_frames_cached(RadiantState* rstate, ImageSurface* surface, UiContext* uicon) {
+void render_video_frames_cached(DocState* rstate, ImageSurface* surface, UiContext* uicon) {
     if (!rstate || !surface || rstate->video_placement_count <= 0) return;
 
     for (int i = 0; i < rstate->video_placement_count; i++) {

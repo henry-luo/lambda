@@ -54,10 +54,10 @@ void render_html_doc_tiled(UiContext* uicon, ViewTree* view_tree, const char* ou
                            int total_width, int total_height);
 
 // UI overlay rendering (focus, caret, selection)
-void render_focus_outline(RenderContext* rdcon, RadiantState* state);
-void render_caret(RenderContext* rdcon, RadiantState* state);
-void render_selection(RenderContext* rdcon, RadiantState* state);
-void render_ui_overlays(RenderContext* rdcon, RadiantState* state);
+void render_focus_outline(RenderContext* rdcon, DocState* state);
+void render_caret(RenderContext* rdcon, DocState* state);
+void render_selection(RenderContext* rdcon, DocState* state);
+void render_ui_overlays(RenderContext* rdcon, DocState* state);
 
 // ---------------------------------------------------------------------------
 // rc_* — Render-context drawing wrappers (dispatch to display list or rdt_*)

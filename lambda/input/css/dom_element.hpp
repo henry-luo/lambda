@@ -33,8 +33,8 @@ typedef struct Element Element;
 typedef struct Input Input;
 typedef struct Arena Arena;
 typedef struct ViewTree ViewTree;  // From radiant/view.hpp
-typedef struct RadiantState RadiantState;  // From radiant/state_store.h
-typedef RadiantState StateStore;  // For backward compatibility
+typedef struct DocState DocState;  // From radiant/state_store.h
+typedef DocState StateStore;  // For backward compatibility
 typedef struct Url Url;  // From lib/url.h
 typedef struct VectorPathProp VectorPathProp;  // From radiant/view.hpp
 typedef struct MultiColumnProp MultiColumnProp;  // From radiant/view.hpp

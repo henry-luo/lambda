@@ -2380,7 +2380,7 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
             ScrollPane* pane = root_block->scroller->pane;
             float target_x = doc->pending_viewport_scroll_x;
             float target_y = doc->pending_viewport_scroll_y;
-            RadiantState* state = (RadiantState*)doc->state;
+            DocState* state = (DocState*)doc->state;
             scroll_state_attach(state, pane);
             scroll_state_set_position(state, pane, target_x, target_y, true);
             log_info("layout_html_doc: applied viewport scroll (%.1f, %.1f)",

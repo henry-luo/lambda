@@ -9,7 +9,7 @@
  * hidden "__range_id" / "__sel_id" property on the JS object. Methods
  * recover the receiver via js_get_this() and look up native state.
  *
- * The selection / live-range list lives on the document's RadiantState
+ * The selection / live-range list lives on the document's DocState
  * (DomDocument::state). In headless JS mode that may be NULL on entry, so
  * we lazily create it via radiant_state_create() on first use.
  */
@@ -139,10 +139,10 @@ static void throw_from_dom_exc(const char* exc, const char* fallback_msg) {
 }
 
 // ============================================================================
-// Per-document RadiantState (lazy in headless JS mode)
+// Per-document DocState (lazy in headless JS mode)
 // ============================================================================
 
-static RadiantState* get_or_create_state() {
+static DocState* get_or_create_state() {
     DomDocument* doc = (DomDocument*)js_dom_get_document();
     if (!doc) return nullptr;
     if (doc->state) return doc->state;
@@ -234,7 +234,7 @@ static DomDocument* node_owning_doc(DomNode* n) {
 // document — e.g. when JS holds a reference to an iframe's
 // contentWindow.getSelection() and calls addRange after the active doc has
 // been restored to the parent doc. We resolve the selection's doc via its
-// `state` field (each DomDocument owns one RadiantState).
+// `state` field (each DomDocument owns one DocState).
 static bool node_in_selection_doc(DomNode* n, DomSelection* s) {
     // A NULL node means the boundary hasn't been positioned yet (freshly-created
     // Range defaults to (NULL, 0)). Treat as in-document so that addRange of a
@@ -991,7 +991,7 @@ extern "C" Item js_dom_selection_get_property(Item obj, Item key) {
 // ============================================================================
 
 extern "C" Item js_dom_create_range(void) {
-    RadiantState* state = get_or_create_state();
+    DocState* state = get_or_create_state();
     if (!state) {
         log_error("createRange: no document state");
         return ItemNull;
@@ -1002,7 +1002,7 @@ extern "C" Item js_dom_create_range(void) {
 }
 
 extern "C" Item js_dom_get_selection(void) {
-    RadiantState* state = get_or_create_state();
+    DocState* state = get_or_create_state();
     if (!state) {
         log_error("getSelection: no document state");
         return ItemNull;
@@ -1147,7 +1147,7 @@ static Item _wpt_selectionchange_fire(Item this_val, Item* args, int argc) {
     (void)this_val; (void)args; (void)argc;
     DomDocument* doc = (DomDocument*)js_dom_get_document();
     if (!doc || !doc->state) return ItemNull;
-    RadiantState* state = doc->state;
+    DocState* state = doc->state;
     state->selectionchange_pending = false;
     state->selection_event_seq = state->selection_mutation_seq;
     Item ev = js_create_event("selectionchange", /*bubbles=*/false,
@@ -1166,7 +1166,7 @@ extern "C" void js_dom_queue_selectionchange(DomSelection* sel) {
     if (!doc) doc = (DomDocument*)js_dom_get_document();
     JsDocRuntimeScope scope;
     if (!js_doc_runtime_enter_if_needed(doc, &scope)) return;
-    RadiantState* state = sel->state;
+    DocState* state = sel->state;
     // Suppress while the legacy↔DOM mirror is running so a single user
     // mutation doesn't ping-pong into multiple events.
     if (state->dom_selection_sync_depth > 0) {
@@ -1196,7 +1196,7 @@ static Item _tc_selectionchange_drain(Item this_val, Item* args, int argc) {
     DomDocument* doc = (DomDocument*)js_dom_get_document();
     JsDocRuntimeScope scope;
     if (!js_doc_runtime_enter_if_needed(doc, &scope)) return ItemNull;
-    RadiantState* state = get_or_create_state();
+    DocState* state = get_or_create_state();
     if (!state) {
         js_doc_runtime_exit(&scope);
         return ItemNull;
@@ -1233,7 +1233,7 @@ extern "C" void js_dom_queue_textcontrol_selectionchange(DomElement* elem) {
     DomDocument* doc = elem->doc;
     JsDocRuntimeScope scope;
     if (!js_doc_runtime_enter_if_needed(doc, &scope)) return;
-    RadiantState* state = get_or_create_state();
+    DocState* state = get_or_create_state();
     if (!state) {
         js_doc_runtime_exit(&scope);
         return;
@@ -1256,12 +1256,12 @@ extern "C" void js_dom_queue_textcontrol_selectionchange(DomElement* elem) {
 }
 
 extern "C" void js_dom_selection_reset(void) {
-    // Native lifetime is owned by the per-document RadiantState. Walk the
+    // Native lifetime is owned by the per-document DocState. Walk the
     // current document's live ranges, drop our JS-side retain, and clear
     // host_wrapper back-pointers so a fresh document starts clean.
     DomDocument* doc = (DomDocument*)js_dom_get_document();
     if (!doc || !doc->state) return;
-    RadiantState* state = doc->state;
+    DocState* state = doc->state;
     DomRange* r = state->live_ranges;
     while (r) {
         DomRange* next = r->next;

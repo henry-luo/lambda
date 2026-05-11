@@ -523,7 +523,7 @@ void resource_manager_flush_layout_updates(NetworkResourceManager* mgr) {
     // trigger reflow/repaint via document state (main thread safe)
     DomDocument* doc = mgr->document;
     if (doc && doc->state) {
-        RadiantState* state = (RadiantState*)doc->state;
+        DocState* state = (DocState*)doc->state;
         if (needs_reflow) {
             state->needs_reflow = true;
             state->is_dirty = true;

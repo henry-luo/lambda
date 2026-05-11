@@ -408,7 +408,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
 
         // Register with animation scheduler if available
         if (uicon->document && uicon->document->state) {
-            RadiantState* rs = (RadiantState*)uicon->document->state;
+            DocState* rs = (DocState*)uicon->document->state;
             if (rs && rs->animation_scheduler) {
                 AnimationInstance* inst = NULL;
                 if (is_http && downloaded_data) {
@@ -524,7 +524,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
             gif_frames = gif_detect_animated_from_memory(surface->source_data, surface->source_data_len);
         }
         if (gif_frames) {
-            RadiantState* rs = (RadiantState*)uicon->document->state;
+            DocState* rs = (DocState*)uicon->document->state;
             if (rs && rs->animation_scheduler) {
                 gif_animation_create(rs->animation_scheduler, surface, gif_frames,
                                       rs->animation_scheduler->current_time, uicon->document->pool);

@@ -24,7 +24,7 @@ void scroll_config_init(int pixel_ratio) {
 
 
 void ScrollPane::reset() {
-    RadiantState* state = state_ref;
+    DocState* state = state_ref;
     memset(this, 0, sizeof(ScrollPane));
     state_ref = state;
 }
@@ -109,8 +109,8 @@ void scrollpane_scroll(EventContext* evcon, ScrollPane* sp) {
     // yoffset > 0 = Scroll up, yoffset < 0 = Scroll down
     log_debug("firing scroll event: %f, %f", event->xoffset, event->yoffset);
 
-    RadiantState* state = evcon && evcon->ui_context && evcon->ui_context->document
-        ? (RadiantState*)evcon->ui_context->document->state : nullptr;
+    DocState* state = evcon && evcon->ui_context && evcon->ui_context->document
+        ? (DocState*)evcon->ui_context->document->state : nullptr;
     if (state) {
         scroll_state_attach(state, sp);
     }
@@ -163,8 +163,8 @@ bool scrollpane_target(EventContext* evcon, ViewBlock* block) {
 void scrollpane_mouse_down(EventContext* evcon, ViewBlock* block) {
     MouseButtonEvent *event = &evcon->event.mouse_button;
     ScrollPane* sp = block->scroller->pane;
-    RadiantState* state = evcon && evcon->ui_context && evcon->ui_context->document
-        ? (RadiantState*)evcon->ui_context->document->state : nullptr;
+    DocState* state = evcon && evcon->ui_context && evcon->ui_context->document
+        ? (DocState*)evcon->ui_context->document->state : nullptr;
 
     if (state) {
         scroll_state_attach(state, sp);
@@ -225,8 +225,8 @@ void scrollpane_mouse_up(EventContext* evcon, ViewBlock* block) {
 void scrollpane_drag(EventContext* evcon, ViewBlock* block) {
     MousePositionEvent *event = &evcon->event.mouse_position;
     ScrollPane* sp = block->scroller->pane;
-    RadiantState* state = evcon && evcon->ui_context && evcon->ui_context->document
-        ? (RadiantState*)evcon->ui_context->document->state : nullptr;
+    DocState* state = evcon && evcon->ui_context && evcon->ui_context->document
+        ? (DocState*)evcon->ui_context->document->state : nullptr;
 
     // Vertical dragging
     if (sp->v_is_dragging) {
@@ -273,7 +273,7 @@ void update_scroller(ViewBlock* block, float content_width, float content_height
 
     // Update scroll pane max values through centralized API.
     if (block->scroller->pane) {
-        RadiantState* state = block->doc ? (RadiantState*)block->doc->state : nullptr;
+        DocState* state = block->doc ? (DocState*)block->doc->state : nullptr;
         float h_max = content_width > block->width ? content_width - block->width : 0.0f;
         float v_max = content_height > block->height ? content_height - block->height : 0.0f;
         scroll_state_set_max(state, block->scroller->pane, h_max, v_max);

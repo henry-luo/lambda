@@ -29,7 +29,7 @@ Any similar design/framework from other systems that we can reference and adopt 
 
 ## Goal
 
-Radiant already has a central `RadiantState` / `StateStore` in `radiant/state_store.hpp`, plus event simulation and WebDriver-oriented automation paths. This proposal tightens that architecture so all interactive state is owned by the StateStore and mutated through explicit transition APIs.
+Radiant already has a central `DocState` / `StateStore` in `radiant/state_store.hpp`, plus event simulation and WebDriver-oriented automation paths. This proposal tightens that architecture so all interactive state is owned by the StateStore and mutated through explicit transition APIs.
 
 The intended result:
 
@@ -42,7 +42,7 @@ The intended result:
 
 Radiant already has several pieces of this design:
 
-- `RadiantState` is the StateStore alias and centralizes many interaction states: `caret`, `selection`, `dom_selection`, `focus`, `cursor`, `hover_target`, `active_target`, `drag_drop`, dropdown, context menu, scroll, zoom, `visited_links`, dirty tracking, animation, video, and reflow scheduling.
+- `DocState` is the StateStore alias and centralizes many interaction states: `caret`, `selection`, `dom_selection`, `focus`, `cursor`, `hover_target`, `active_target`, `drag_drop`, dropdown, context menu, scroll, zoom, `visited_links`, dirty tracking, animation, video, and reflow scheduling.
 - The legacy `CaretState` / `SelectionState` path is being migrated toward `DomSelection`. `state_store.cpp` now allocates the legacy structs from `DomSelection` storage and aliases `state->caret` / `state->selection` onto them.
 - `event_sim.cpp` already consumes and asserts focus/caret/selection/form states from JSON test scenarios.
 - `Radiant_WebDriver.md` already proposes using StateStore and event simulation as the base for WebDriver actions.
@@ -91,7 +91,7 @@ raw platform input / event_sim / WebDriver
         StateMachine APIs
                 |
                 v
-       RadiantState / StateStore
+       DocState / StateStore
         |       |        |
         |       |        +--> derived pseudo states / dirty tracking
         |       +-----------> layout/render invalidation
@@ -106,11 +106,11 @@ typedef enum FocusTransitionKind { ... } FocusTransitionKind;
 typedef enum SelectionTransitionKind { ... } SelectionTransitionKind;
 typedef enum CaretTransitionKind { ... } CaretTransitionKind;
 
-bool focus_transition(RadiantState* state, FocusTransitionKind kind, FocusTransitionArgs* args);
-bool selection_transition(RadiantState* state, SelectionTransitionKind kind, SelectionTransitionArgs* args);
-bool caret_transition(RadiantState* state, CaretTransitionKind kind, CaretTransitionArgs* args);
+bool focus_transition(DocState* state, FocusTransitionKind kind, FocusTransitionArgs* args);
+bool selection_transition(DocState* state, SelectionTransitionKind kind, SelectionTransitionArgs* args);
+bool caret_transition(DocState* state, CaretTransitionKind kind, CaretTransitionArgs* args);
 
-bool radiant_state_validate_interaction(RadiantState* state, StateValidationReport* report);
+bool radiant_state_validate_interaction(DocState* state, StateValidationReport* report);
 ```
 
 The existing `focus_set`, `focus_clear`, `caret_set`, `selection_start`, `selection_extend`, and text-control APIs can become wrappers around this layer during migration. Call sites do not need to be rewritten all at once.
@@ -119,7 +119,7 @@ The existing `focus_set`, `focus_clear`, `caret_set`, `selection_start`, `select
 
 ### Document-level State
 
-Store these once per `RadiantState`:
+Store these once per `DocState`:
 
 - document lifecycle: current document id, current URL, load state, active/inactive/unloading;
 - navigation: history entries, current history index, scroll restoration per history entry;
@@ -256,7 +256,7 @@ Radio groups are a good example of why this matters: checking one radio button i
 
 ## Navigation, URL, and Visited State
 
-Add a `NavigationState` owned by `RadiantState`:
+Add a `NavigationState` owned by `DocState`:
 
 ```cpp
 typedef struct NavigationEntry {
@@ -592,7 +592,7 @@ Best practice to adopt: event handlers request transitions; StateStore applies t
 
 ### Redux/Event Sourcing as Tooling Inspiration
 
-Radiant should not import a frontend state library, but Redux-style ideas are useful for diagnostics: actions, reducers, immutable snapshots, time travel, and replay. `RadiantState` already supports an immutable update mode, so event logs can serve as action streams when needed.
+Radiant should not import a frontend state library, but Redux-style ideas are useful for diagnostics: actions, reducers, immutable snapshots, time travel, and replay. `DocState` already supports an immutable update mode, so event logs can serve as action streams when needed.
 
 Best practice to adopt: log transitions as named actions with old/new summaries and enough input data to replay.
 
@@ -679,7 +679,7 @@ In debug builds, failed validation should log `state.invalid` to JSON and `log_e
 
 ## Recommended Decisions
 
-1. Use `RadiantState` as the central StateStore; do not introduce a separate global interactive-state owner.
+1. Use `DocState` as the central StateStore; do not introduce a separate global interactive-state owner.
 2. Make `DomSelection` canonical; keep `CaretState` and `SelectionState` as compatibility/render projections.
 3. Add state-machine transition wrappers first, then migrate call sites incrementally.
 4. Use JSON Lines in `./temp/` with a stable envelope and categorized event types.

@@ -102,14 +102,14 @@ void dom_range_for_each_rect_in_text_rect(struct DomRange* range,
 //
 // Both functions are no-ops when `state->dom_selection` is null. They
 // allocate it lazily on first call so JS reads match what the user sees.
-void dom_selection_sync_from_legacy_selection(struct RadiantState* state);
-void dom_selection_sync_from_legacy_caret    (struct RadiantState* state);
+void dom_selection_sync_from_legacy_selection(struct DocState* state);
+void dom_selection_sync_from_legacy_caret    (struct DocState* state);
 
 // Canonical direction. Reads `state->dom_selection` and refreshes StateStore's
 // projection structs with anchor/focus/caret boundaries plus resolved layout
 // x/y/height. No-op when DomSelection is empty (clears selection projection in
 // that case). Re-entry guarded via `state->dom_selection_sync_depth`.
-void legacy_sync_from_dom_selection(struct RadiantState* state);
+void legacy_sync_from_dom_selection(struct DocState* state);
 
 // Register a glyph-precise X resolver. When set, `dom_range_for_each_rect()`
 // uses it instead of linear interpolation so that the right edge of the

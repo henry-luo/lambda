@@ -1285,7 +1285,7 @@ This section documents the actual implementation of the state change → style u
 ### Completed ✓
 
 #### Phase 1: Core State Store (`radiant/state_store.hpp`, `radiant/state_store.cpp`)
-- [x] RadiantState structure with arena allocation
+- [x] DocState structure with arena allocation
 - [x] HashMap-based state storage (StateKey → StateEntry)
 - [x] Basic state API: `state_get`, `state_set`, `state_has`, `state_remove`
 - [x] Boolean convenience functions: `state_get_bool`, `state_set_bool`

@@ -169,7 +169,7 @@ Checks that the element has non-zero dimensions and is not `display: none` or `v
 
 #### `assert_state` — verify arbitrary UI state
 
-Check hover, active, or any state tracked by `RadiantState`.
+Check hover, active, or any state tracked by `DocState`.
 
 ```json
 {"type": "assert_state", "target": {"selector": "button"}, "state": ":hover", "value": true}
@@ -284,7 +284,7 @@ float scroll_tolerance;
 
 Add `assert_text`, `assert_value`, `assert_checked`, `assert_focus`, `assert_visible`, `assert_state`, `assert_scroll`.
 
-Each reads the relevant state from `RadiantState` / DOM and compares against expected values.
+Each reads the relevant state from `DocState` / DOM and compares against expected values.
 
 ### Phase 3: Form controls + metadata
 

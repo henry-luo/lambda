@@ -546,7 +546,7 @@ There are today two completely disjoint event flows:
 | Stage | File | Notes |
 |-------|------|-------|
 | GLFW callbacks (cursor pos, mouse button, scroll, key, char, focus) | [radiant/window.cpp](../../radiant/window.cpp) ~ line 735 | Build a `RdtEvent` (mouse / key / scroll / text) and queue. |
-| Main dispatch | `rdt_event_handle()` / `event_context_init()` in [radiant/event.cpp](../../radiant/event.cpp) ~ line 1107 | Allocates an `EventContext`, snapshots `RadiantState` (hover/active/focus/selection). |
+| Main dispatch | `rdt_event_handle()` / `event_context_init()` in [radiant/event.cpp](../../radiant/event.cpp) ~ line 1107 | Allocates an `EventContext`, snapshots `DocState` (hover/active/focus/selection). |
 | Hit-testing | `target_html_doc` → `target_block_view` → `target_inline_view` → `target_text_view` | Walks the **view tree** (not the DOM tree) to find the topmost `View*` under the cursor. |
 | Mouse-down → click classification | event.cpp ~ line 2833 (`mousedown`) and ~ line 3336 (`click`) | A `click` is synthesised on mouse-up if the up target matches the down target. |
 | Pseudo-state mutation (`:hover`, `:active`, `:focus`) | `update_hover_state` / `update_active_state` (event.cpp ~ line 1180-1240) | Writes through `state_set_bool(state, view, STATE_HOVER, …)` + `sync_pseudo_state(view, PSEUDO_STATE_HOVER, …)`. |
@@ -581,7 +581,7 @@ Radiant-rendered page fires Pipeline A only. A WPT test calling
 * No capture phase, no bubbling beyond the inline-handler
   walk, no `passive` enforcement, no `signal`, no
   `composedPath()` for real input.
-* `:hover` / `:active` / `:focus` are kept on `RadiantState` only;
+* `:hover` / `:active` / `:focus` are kept on `DocState` only;
   the JS side never sees `mouseover` → `mouseenter` differences.
 * Two separate "where is the click target" computations: one walks
   the **view tree**, the other walks the **DOM tree**. They can
@@ -606,7 +606,7 @@ post-dispatch behaviour gated on `event.defaultPrevented`.
             │        Radiant input frontend           │
             │  rdt_event_handle / event_context_init  │
             │  - hit-test view tree → DomNode* target │
-            │  - update RadiantState pseudo-classes   │
+            │  - update DocState pseudo-classes   │
             │  - track button/modifier/click-count    │
             └───────────────────┬─────────────────────┘
                                 │  RdtEvent + DomNode* target
@@ -725,9 +725,9 @@ invokes `run()` if the listener chain did not cancel. This is
 exactly what the HTML spec calls "activation behaviour" and
 it's what Phase 4 of §3 was already going to need.
 
-#### 7.4.5 Pseudo-class state stays on `RadiantState`
+#### 7.4.5 Pseudo-class state stays on `DocState`
 
-`:hover` / `:active` / `:focus` continue to live on `RadiantState`
+`:hover` / `:active` / `:focus` continue to live on `DocState`
 because they are CSS-level state, not DOM events. The change is
 that **after** the JS `mouseover`/`mouseout` dispatch returns,
 Radiant inspects `defaultPrevented` to decide whether to update
@@ -771,7 +771,7 @@ the same dispatcher.
   `onclick` handler that calls `target.click()`) re-enter and
   desync.
 * **Selection drag re-entrancy.** Today Radiant's selection state
-  machine mutates `RadiantState` mid-event and queues a
+  machine mutates `DocState` mid-event and queues a
   `selectionchange` via `js_dom_queue_textcontrol_selectionchange`.
   The unified path must keep that ordering: Radiant's drag handler
   may dispatch `mousedown`/`mousemove`/`mouseup` JS events first,

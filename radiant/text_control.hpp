@@ -12,7 +12,7 @@
 
 struct DomElement;
 struct FormControlProp;
-struct RadiantState;
+struct DocState;
 
 // Identification ---------------------------------------------------------
 
@@ -59,12 +59,12 @@ void tc_notify_selection_changed(DomElement* elem);
 // Read state->caret + state->selection (UTF-8 byte offsets into form->value)
 // and write form->selection_start/_end/_direction (UTF-16 code units).
 // Called at the end of every text-control mouse/keyboard handler in event.cpp.
-void tc_sync_legacy_to_form(DomElement* elem, RadiantState* state);
+void tc_sync_legacy_to_form(DomElement* elem, DocState* state);
 
 // Read form->selection_start/_end (UTF-16) and write state->caret +
 // state->selection (byte). Called from JS when setSelectionRange / value
 // setter mutates the control programmatically.
-void tc_sync_form_to_legacy(DomElement* elem, RadiantState* state);
+void tc_sync_form_to_legacy(DomElement* elem, DocState* state);
 
 // Selection accessor for Selection.toString() integration ----------------
 

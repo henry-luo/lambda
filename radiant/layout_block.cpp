@@ -248,7 +248,8 @@ static float extract_aspect_ratio_value(const CssValue* value) {
 
 static float get_preferred_aspect_ratio(ViewBlock* block) {
     if (!block) return 0.0f;
-    if (block->fi && block->fi->aspect_ratio > 0.0f) return block->fi->aspect_ratio;
+    if (block->item_prop_type == DomElement::ITEM_PROP_FLEX &&
+        block->fi && block->fi->aspect_ratio > 0.0f) return block->fi->aspect_ratio;
     DomElement* element = block->as_element();
     if (!element) return 0.0f;
     CssDeclaration* decl = dom_element_get_specified_value(element, CSS_PROPERTY_ASPECT_RATIO);
@@ -5240,6 +5241,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             log_debug("%s [AspectRatio] auto height %.1f from width %.1f / ratio %.3f",
                       block->source_loc(), content_height, content_width, aspect_ratio);
         }
+        if (content_height < 0.0f) content_height = 0.0f;
         // Don't inherit parent's content_height for auto height blocks
         // The height will be finalized after content is laid out in finalize_block_flow
         if (block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX) {

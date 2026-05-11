@@ -4,7 +4,7 @@
 /**
  * DOM Boundary, Range, Selection — W3C-conformant primitives.
  *
- * These types are owned by the per-document `RadiantState` (StateStore) and
+ * These types are owned by the per-document `DocState` (StateStore) and
  * are the canonical source of truth for caret + selection. StateStore keeps
  * private projection structs for renderer/event compatibility while those
  * paths finish migrating to `state->dom_selection` and DomRange layout cache.
@@ -19,7 +19,7 @@
 struct DomNode;
 struct DomText;
 struct DomElement;
-struct RadiantState;
+struct DocState;
 struct Pool;
 // Projection structs are private to StateStore; public code should use
 // StateStore helper APIs rather than dereferencing them.
@@ -90,7 +90,7 @@ uint32_t dom_text_utf8_to_utf16(const DomText* t, uint32_t u8_offset);
 // reflow or boundary mutation.
 
 typedef struct DomRange {
-    RadiantState* state;            // owning state store
+    DocState* state;            // owning state store
     DomBoundary   start;
     DomBoundary   end;              // start <= end (invariant)
     bool          is_live;          // false for StaticRange (future)
@@ -118,7 +118,7 @@ typedef struct DomRange {
 } DomRange;
 
 // Lifecycle ------------------------------------------------------------------
-DomRange* dom_range_create(RadiantState* state);
+DomRange* dom_range_create(DocState* state);
 void      dom_range_retain(DomRange* range);
 void      dom_range_release(DomRange* range);
 void      dom_range_invalidate_layout(DomRange* range);
@@ -195,7 +195,7 @@ typedef enum DomSelectionDirection {
 #define DOM_SELECTION_MAX_RANGES 1   // see comment above
 
 typedef struct DomSelection {
-    RadiantState* state;
+    DocState* state;
     DomRange*     ranges[DOM_SELECTION_MAX_RANGES];
     uint32_t      range_count;          // 0 or 1
     DomBoundary   anchor;               // valid iff range_count > 0
@@ -216,7 +216,7 @@ typedef struct DomSelection {
     void*         host_wrapper;
 } DomSelection;
 
-DomSelection* dom_selection_create(RadiantState* state);
+DomSelection* dom_selection_create(DocState* state);
 
 // Accessors
 DomNode* dom_selection_anchor_node  (const DomSelection* s);
@@ -251,9 +251,9 @@ bool dom_selection_contains_node(const DomSelection* s, DomNode* node, bool allo
 // Live-range list management (called by mutation hooks; minimal stubs in
 // Phase 1 — full implementation in a later phase).
 // ============================================================================
-void dom_range_link_into_state(RadiantState* state, DomRange* range);
-void dom_range_unlink_from_state(RadiantState* state, DomRange* range);
-void dom_state_invalidate_all_range_layouts(RadiantState* state);
+void dom_range_link_into_state(DocState* state, DomRange* range);
+void dom_range_unlink_from_state(DocState* state, DomRange* range);
+void dom_state_invalidate_all_range_layouts(DocState* state);
 
 // ============================================================================
 // DOM Mutation envelopes (Phase 3) — adjust live ranges per WHATWG DOM §5.3
@@ -266,19 +266,19 @@ void dom_state_invalidate_all_range_layouts(RadiantState* state);
 
 // Call BEFORE removing `child` from its parent. Captures parent + index
 // internally and adjusts ranges/selection per the "removing steps".
-void dom_mutation_pre_remove(RadiantState* state, DomNode* child);
+void dom_mutation_pre_remove(DocState* state, DomNode* child);
 
 // Call AFTER inserting a single `node` into `parent` (i.e. node->parent == parent
 // and dom_node_child_index(node) is its final position). Adjusts ranges per
 // the "insertion steps" (shift offsets > index by 1).
-void dom_mutation_post_insert(RadiantState* state, DomNode* parent, DomNode* node);
+void dom_mutation_post_insert(DocState* state, DomNode* parent, DomNode* node);
 
 // Apply the spec's "replace data" boundary-point adjustments to all ranges
 // pointing into `text`. `offset` and `count` are UTF-16 code-unit positions
 // (the same units used in DomBoundary::offset for text nodes). `replacement_len`
 // is the UTF-16 code-unit length of the inserted replacement.
 // Call AFTER mutating the text node's `text`/`length`/`native_string`.
-void dom_mutation_text_replace_data(RadiantState* state, DomText* text,
+void dom_mutation_text_replace_data(DocState* state, DomText* text,
                                     uint32_t offset, uint32_t count,
                                     uint32_t replacement_len);
 
@@ -291,7 +291,7 @@ void dom_mutation_text_replace_data(RadiantState* state, DomText* text,
 //   1. Move endpoints inside `original` past `offset` to `new_node`.
 //   2. Bump endpoints in original->parent at index >= index_of_new_node
 //      to account for the insertion (delegates to dom_mutation_post_insert).
-void dom_mutation_text_split(RadiantState* state, DomText* original,
+void dom_mutation_text_split(DocState* state, DomText* original,
                              DomText* new_node, uint32_t offset);
 
 // Apply the boundary adjustments for normalize() merging `next` into `prev`.
@@ -300,7 +300,7 @@ void dom_mutation_text_split(RadiantState* state, DomText* original,
 // inside `next` are retargeted to `prev` with offset+=prev_u16_len. Caller
 // must still subsequently call dom_mutation_pre_remove(state, next) and
 // remove `next` from its parent.
-void dom_mutation_text_merge(RadiantState* state, DomText* prev,
+void dom_mutation_text_merge(DocState* state, DomText* prev,
                              DomText* next, uint32_t prev_u16_len);
 
 // ============================================================================
@@ -328,7 +328,7 @@ struct DomNode* dom_node_clone(struct DomNode* node, bool deep);
 //   3. truncates `original`'s data to `offset`;
 //   4. fires `dom_mutation_text_split` envelope.
 // Returns nullptr if `original` has no parent or `offset` is out of bounds.
-struct DomText* dom_text_split_at(RadiantState* state, struct DomText* original,
+struct DomText* dom_text_split_at(DocState* state, struct DomText* original,
                                   uint32_t offset);
 
 // Range methods —---------------------------------------------------------

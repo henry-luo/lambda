@@ -37,7 +37,7 @@ static const float CTX_MENU_WIDTH       = 140.0f;
 static const float CTX_MENU_ITEM_HEIGHT = 24.0f;
 static const float CTX_MENU_PADDING_X   = 12.0f;
 
-static DomElement* ctx_menu_target_elem(RadiantState* state) {
+static DomElement* ctx_menu_target_elem(DocState* state) {
     if (!state || !state->context_menu_target) return nullptr;
     View* v = state->context_menu_target;
     if (!v->is_element()) return nullptr;
@@ -50,7 +50,7 @@ static bool ctx_menu_has_selection(DomElement* elem) {
     return elem->form->selection_start != elem->form->selection_end;
 }
 
-bool context_menu_item_enabled(RadiantState* state, int item) {
+bool context_menu_item_enabled(DocState* state, int item) {
     DomElement* elem = ctx_menu_target_elem(state);
     if (!elem || !elem->form) return false;
     bool readonly = elem->form->readonly;
@@ -71,7 +71,7 @@ bool context_menu_item_enabled(RadiantState* state, int item) {
     }
 }
 
-void context_menu_open(RadiantState* state, View* target, float x, float y) {
+void context_menu_open(DocState* state, View* target, float x, float y) {
     if (!state || !target) return;
     if (!target->is_element()) return;
     DomElement* e = (DomElement*)target;
@@ -88,7 +88,7 @@ void context_menu_open(RadiantState* state, View* target, float x, float y) {
     log_debug("context_menu_open at (%.1f, %.1f)", x, y);
 }
 
-void context_menu_close(RadiantState* state) {
+void context_menu_close(DocState* state) {
     if (!state || !state->context_menu_target) return;
     state->context_menu_target = nullptr;
     state->context_menu_hover  = -1;
@@ -96,7 +96,7 @@ void context_menu_close(RadiantState* state) {
     log_debug("context_menu_close");
 }
 
-bool context_menu_contains(RadiantState* state, float x, float y) {
+bool context_menu_contains(DocState* state, float x, float y) {
     if (!state || !state->context_menu_target) return false;
     return x >= state->context_menu_x &&
            x <  state->context_menu_x + state->context_menu_width &&
@@ -104,7 +104,7 @@ bool context_menu_contains(RadiantState* state, float x, float y) {
            y <  state->context_menu_y + state->context_menu_height;
 }
 
-bool context_menu_hover(RadiantState* state, float x, float y) {
+bool context_menu_hover(DocState* state, float x, float y) {
     if (!context_menu_contains(state, x, y)) {
         if (state && state->context_menu_target && state->context_menu_hover != -1) {
             state->context_menu_hover = -1;
@@ -150,20 +150,20 @@ static void ctx_menu_exec_copy(DomElement* elem) {
     free(tmp);
 }
 
-static void ctx_menu_exec_cut(DomElement* elem, RadiantState* state) {
+static void ctx_menu_exec_cut(DomElement* elem, DocState* state) {
     uint32_t a, b;
     if (!ctx_menu_selection_bytes(elem, &a, &b)) return;
     ctx_menu_exec_copy(elem);
     te_replace_byte_range(elem, state, (View*)elem, a, b, nullptr, 0);
 }
 
-static void ctx_menu_exec_delete(DomElement* elem, RadiantState* state) {
+static void ctx_menu_exec_delete(DomElement* elem, DocState* state) {
     uint32_t a, b;
     if (!ctx_menu_selection_bytes(elem, &a, &b)) return;
     te_replace_byte_range(elem, state, (View*)elem, a, b, nullptr, 0);
 }
 
-static void ctx_menu_exec_paste(DomElement* elem, RadiantState* state) {
+static void ctx_menu_exec_paste(DomElement* elem, DocState* state) {
     const char* clip = clipboard_get_text();
     if (!clip || !*clip) return;
     te_paste(elem, state, (View*)elem, clip, (uint32_t)strlen(clip));
@@ -174,7 +174,7 @@ static void ctx_menu_exec_select_all(DomElement* elem) {
     tc_set_selection_range(elem, 0, elem->form->current_value_u16_len, 1);
 }
 
-bool context_menu_click(RadiantState* state, float x, float y) {
+bool context_menu_click(DocState* state, float x, float y) {
     if (!context_menu_contains(state, x, y)) return false;
     int idx = (int)((y - state->context_menu_y) / CTX_MENU_ITEM_HEIGHT);
     if (idx < 0 || idx >= CTX_MENU_ITEM_COUNT) {
@@ -198,7 +198,7 @@ bool context_menu_click(RadiantState* state, float x, float y) {
     return true;
 }
 
-void context_menu_render(RenderContext* rdcon, RadiantState* state) {
+void context_menu_render(RenderContext* rdcon, DocState* state) {
     if (!state || !state->context_menu_target) return;
     if (!rdcon || !rdcon->ui_context || !rdcon->ui_context->surface) return;
 

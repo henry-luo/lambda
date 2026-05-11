@@ -91,7 +91,7 @@ static void sim_scroll(UiContext* uicon, int x, int y, float dx, float dy);
 
 ### 3.2 State Store Integration
 
-The `RadiantState` structure already tracks the UI state needed for WebDriver:
+The `DocState` structure already tracks the UI state needed for WebDriver:
 
 | State | WebDriver Use |
 |-------|---------------|

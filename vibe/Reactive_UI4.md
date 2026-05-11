@@ -444,8 +444,8 @@ Skip rendering of view subtrees whose bounds don't intersect any dirty region.
 ```cpp
 static bool view_intersects_dirty(RenderContext* rdcon, ViewBlock* block) {
     // In full repaint mode, everything intersects
-    RadiantState* state = rdcon->ui_context->document 
-        ? (RadiantState*)rdcon->ui_context->document->state : nullptr;
+    DocState* state = rdcon->ui_context->document 
+        ? (DocState*)rdcon->ui_context->document->state : nullptr;
     if (!state || state->dirty_tracker.full_repaint || !dirty_has_regions(&state->dirty_tracker)) {
         return true;
     }

@@ -175,7 +175,7 @@ lambda view https://example.com/page.html
 │  │  DomDocument (current page DOM)                              │  │
 │  │    resource_manager : NetworkResourceManager*                 │  │
 │  │    fully_loaded     : bool                                   │  │
-│  │    state            : RadiantState* (reflow/repaint flags)   │  │
+│  │    state            : DocState* (reflow/repaint flags)   │  │
 │  └──────────────────────────────────────────────────────────────┘  │
 │           │ resource_manager_flush_layout_updates() per frame       │
 │           ▼                                                         │

@@ -1035,7 +1035,7 @@ void css_animation_resolve(DomElement* element, LayoutContext* lycon) {
     DomDocument* doc = lycon->ui_context->document;
     if (!doc) return;
 
-    RadiantState* rs = (RadiantState*)doc->state;
+    DocState* rs = (DocState*)doc->state;
     if (!rs || !rs->animation_scheduler) return;
 
     // check if animation already running for this element

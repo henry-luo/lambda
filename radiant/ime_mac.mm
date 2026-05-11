@@ -32,22 +32,22 @@
 // Opaque types provided elsewhere. We never deref any of them in this
 // file; everything is passed by pointer.
 struct UiContext;
-struct RadiantState;
+struct DocState;
 class DomElement;
 class View;
 
 extern "C" GLFWwindow*    radiant_ui_get_glfw_window(struct UiContext*);
-extern "C" RadiantState*  radiant_ui_get_state(struct UiContext*);
-extern "C" void           radiant_state_request_repaint(struct RadiantState*);
+extern "C" DocState*  radiant_ui_get_state(struct UiContext*);
+extern "C" void           radiant_state_request_repaint(struct DocState*);
 extern "C" bool           radiant_dispatch_rich_composition_event(struct UiContext*, EventType,
                                                                   const char*, uint32_t);
 
-View* focus_get(RadiantState* state);
+View* focus_get(DocState* state);
 bool  tc_is_text_control(DomElement* elem);
 
 void te_ime_begin(DomElement* elem);
 void te_ime_update(DomElement* elem, const char* preedit, uint32_t len, uint32_t caret);
-void te_ime_commit(DomElement* elem, RadiantState* state, void* target,
+void te_ime_commit(DomElement* elem, DocState* state, void* target,
                    const char* committed, uint32_t len);
 void te_ime_cancel(DomElement* elem);
 bool te_ime_is_composing(DomElement* elem);
@@ -61,7 +61,7 @@ bool g_rich_composing = false;
 
 DomElement* ime_focused_text_control() {
     if (!g_ime_uicon) return nullptr;
-    RadiantState* state = radiant_ui_get_state(g_ime_uicon);
+    DocState* state = radiant_ui_get_state(g_ime_uicon);
     if (!state) return nullptr;
     View* v = focus_get(state);
     if (!v) return nullptr;
@@ -69,7 +69,7 @@ DomElement* ime_focused_text_control() {
     return tc_is_text_control(e) ? e : nullptr;
 }
 
-RadiantState* ime_state() {
+DocState* ime_state() {
     if (!g_ime_uicon) return nullptr;
     return radiant_ui_get_state(g_ime_uicon);
 }
@@ -160,7 +160,7 @@ const char* ns_to_utf8(id obj) {
 
 - (void)insertText:(id)string replacementRange:(NSRange)replacementRange {
     DomElement* e = ime_focused_text_control();
-    RadiantState* state = ime_state();
+    DocState* state = ime_state();
     if (!e || !state || !te_ime_is_composing(e)) {
         if (g_rich_composing) {
             const char* utf8 = ns_to_utf8(string);

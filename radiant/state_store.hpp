@@ -146,7 +146,7 @@ typedef struct VisitedLinks {
 /**
  * Central State Store
  */
-typedef struct RadiantState {
+typedef struct DocState {
     // Memory management
     Pool* pool;                    // underlying memory pool
     Arena* arena;                  // dedicated arena for state allocations
@@ -165,7 +165,7 @@ typedef struct RadiantState {
     // Update mode and versioning
     StateUpdateMode mode;
     uint64_t version;              // monotonically increasing version number
-    struct RadiantState* prev_version;  // previous version (immutable mode only)
+    struct DocState* prev_version;  // previous version (immutable mode only)
 
     // Active event/state log cascade. Set by state_machine.cpp while a
     // top-level input/event cascade is open so transition APIs can emit
@@ -278,7 +278,7 @@ typedef struct RadiantState {
         bool  is_seeking;          // true while seek bar is being dragged
         float seek_fraction;       // seek position during drag (0.0–1.0)
     } video_controls;
-} RadiantState;
+} DocState;
 
 
 // ============================================================================
@@ -291,85 +291,85 @@ typedef struct RadiantState {
  * @param mode Update mode (in-place or immutable)
  * @return New state store, or NULL on failure
  */
-RadiantState* radiant_state_create(Pool* pool, StateUpdateMode mode);
+DocState* radiant_state_create(Pool* pool, StateUpdateMode mode);
 
 /**
- * Ensure an active document owns a RadiantState for interaction/state APIs.
+ * Ensure an active document owns a DocState for interaction/state APIs.
  */
-RadiantState* radiant_document_ensure_state(DomDocument* document, const char* owner);
+DocState* radiant_document_ensure_state(DomDocument* document, const char* owner);
 
 /**
- * Destroy a document's RadiantState before its owning pool is released.
+ * Destroy a document's DocState before its owning pool is released.
  */
 void radiant_document_destroy_state(DomDocument* document);
 
 /**
  * Destroy a state store and free all resources
  */
-void radiant_state_destroy(RadiantState* state);
+void radiant_state_destroy(DocState* state);
 
 /**
  * Reset state store, clearing all states but keeping allocation
  */
-void radiant_state_reset(RadiantState* state);
+void radiant_state_reset(DocState* state);
 
 /**
  * Get a state value
  * @return The state value, or ItemNull if not found
  */
-Item state_get(RadiantState* state, void* node, const char* name);
+Item state_get(DocState* state, void* node, const char* name);
 
 /**
  * Get a state value as boolean
  * @return true if state exists and is truthy, false otherwise
  */
-bool state_get_bool(RadiantState* state, void* node, const char* name);
+bool state_get_bool(DocState* state, void* node, const char* name);
 
 /**
  * Check if a state exists
  */
-bool state_has(RadiantState* state, void* node, const char* name);
+bool state_has(DocState* state, void* node, const char* name);
 
 /**
  * Set a state value (in-place mode)
  */
-void state_set(RadiantState* state, void* node, const char* name, Item value);
+void state_set(DocState* state, void* node, const char* name, Item value);
 
 /**
  * Set a boolean state value (convenience function)
  */
-void state_set_bool(RadiantState* state, void* node, const char* name, bool value);
+void state_set_bool(DocState* state, void* node, const char* name, bool value);
 
 /**
  * Remove a state
  */
-void state_remove(RadiantState* state, void* node, const char* name);
+void state_remove(DocState* state, void* node, const char* name);
 
 /**
  * Set a state value (immutable mode - returns new state version)
  */
-RadiantState* state_set_immutable(RadiantState* state, void* node, const char* name, Item value);
+DocState* state_set_immutable(DocState* state, void* node, const char* name, Item value);
 
 /**
  * Remove a state (immutable mode - returns new state version)
  */
-RadiantState* state_remove_immutable(RadiantState* state, void* node, const char* name);
+DocState* state_remove_immutable(DocState* state, void* node, const char* name);
 
 /**
  * Register a callback for state changes
  */
-void state_on_change(RadiantState* state, void* node, const char* name,
+void state_on_change(DocState* state, void* node, const char* name,
     StateChangeCallback callback, void* udata);
 
 /**
  * Begin a batch of state updates (defers callbacks and dirty flagging)
  */
-void state_begin_batch(RadiantState* state);
+void state_begin_batch(DocState* state);
 
 /**
  * End a batch of state updates (triggers deferred callbacks)
  */
-void state_end_batch(RadiantState* state);
+void state_end_batch(DocState* state);
 
 // ============================================================================
 // Caret API
@@ -381,27 +381,27 @@ void state_end_batch(RadiantState* state);
  * @param view Target view (input, textarea, or contenteditable)
  * @param char_offset Character offset from start of text
  */
-void caret_set(RadiantState* state, View* view, int char_offset);
+void caret_set(DocState* state, View* view, int char_offset);
 
 /**
  * Set caret position with line/column (for multiline elements)
  */
-void caret_set_position(RadiantState* state, View* view, int line, int column);
+void caret_set_position(DocState* state, View* view, int line, int column);
 
 /**
  * Move caret by character offset (positive = forward, negative = backward)
  */
-void caret_move(RadiantState* state, int delta);
+void caret_move(DocState* state, int delta);
 
 /**
  * Move caret to start/end of line or document
  */
-void caret_move_to(RadiantState* state, int where);  // 0=line start, 1=line end, 2=doc start, 3=doc end
+void caret_move_to(DocState* state, int where);  // 0=line start, 1=line end, 2=doc start, 3=doc end
 
 /**
  * Move caret up/down by lines
  */
-void caret_move_line(RadiantState* state, int delta, struct UiContext* uicon);
+void caret_move_line(DocState* state, int delta, struct UiContext* uicon);
 
 /**
  * Calculate UTF-8 aware byte offset by moving delta characters
@@ -415,70 +415,70 @@ int utf8_offset_by_chars(unsigned char* text_data, int current_offset, int delta
 /**
  * Clear caret (no element focused for text input)
  */
-void caret_clear(RadiantState* state);
+void caret_clear(DocState* state);
 
 /**
  * Project visual caret geometry for legacy render paths.
  */
-void caret_project_visual(RadiantState* state, float x, float y, float height);
+void caret_project_visual(DocState* state, float x, float y, float height);
 
 /**
  * Project visual caret geometry and iframe/document offset from a block origin.
  */
-void caret_project_visual_from_block(RadiantState* state, View* view,
+void caret_project_visual_from_block(DocState* state, View* view,
                                      float x, float y, float height,
                                      float block_x, float block_y);
 
 /**
  * Project visual caret geometry using the current selection iframe offset.
  */
-void caret_project_visual_from_selection(RadiantState* state, float x, float y, float height);
+void caret_project_visual_from_selection(DocState* state, float x, float y, float height);
 
 /**
  * Project visual selection anchor/focus geometry for legacy render paths.
  */
-void selection_project_anchor_visual_from_caret(RadiantState* state, float x, float y, float height);
-void selection_project_focus_visual(RadiantState* state, float x, float y, float height);
-void selection_finish_active_gesture(RadiantState* state);
+void selection_project_anchor_visual_from_caret(DocState* state, float x, float y, float height);
+void selection_project_focus_visual(DocState* state, float x, float y, float height);
+void selection_finish_active_gesture(DocState* state);
 
 /**
  * Track mouse press inside an existing text selection until mouse-up decides
  * whether to preserve or collapse the selection.
  */
-void selection_press_in_range_begin(RadiantState* state, View* view, int offset);
-void selection_press_in_range_clear(RadiantState* state);
-bool selection_press_in_range_pending(RadiantState* state, View** out_view, int* out_offset);
+void selection_press_in_range_begin(DocState* state, View* view, int offset);
+void selection_press_in_range_clear(DocState* state);
+bool selection_press_in_range_pending(DocState* state, View** out_view, int* out_offset);
 
 /**
  * Mark dirty regions for a caret-only repaint when selective repaint is safe.
  */
-bool caret_prepare_selective_repaint(RadiantState* state);
+bool caret_prepare_selective_repaint(DocState* state);
 
 /**
  * Read the legacy-projection caret view/offset as a query-only snapshot.
  */
-bool caret_get_position(RadiantState* state, View** out_view, int* out_offset);
-bool caret_get_offset(RadiantState* state, int* out_offset);
-View* caret_get_view(RadiantState* state);
-bool caret_get_visual_snapshot(RadiantState* state, float* out_x, float* out_y,
+bool caret_get_position(DocState* state, View** out_view, int* out_offset);
+bool caret_get_offset(DocState* state, int* out_offset);
+View* caret_get_view(DocState* state);
+bool caret_get_visual_snapshot(DocState* state, float* out_x, float* out_y,
                                float* out_height, float* out_iframe_offset_x,
                                float* out_iframe_offset_y);
-bool caret_get_render_snapshot(RadiantState* state, View** out_view,
+bool caret_get_render_snapshot(DocState* state, View** out_view,
                                int* out_offset, float* out_x, float* out_y,
                                float* out_height, float* out_iframe_offset_x,
                                float* out_iframe_offset_y, bool* out_visible);
-bool caret_get_debug_snapshot(RadiantState* state, View** out_view,
+bool caret_get_debug_snapshot(DocState* state, View** out_view,
                               int* out_offset, int* out_line, int* out_column,
                               float* out_x, float* out_y, float* out_height,
                               bool* out_visible);
-bool caret_has_projection(RadiantState* state);
-bool caret_is_visible(RadiantState* state);
-void caret_project_previous_visual_rect(RadiantState* state, float x, float y, float height);
+bool caret_has_projection(DocState* state);
+bool caret_is_visible(DocState* state);
+void caret_project_previous_visual_rect(DocState* state, float x, float y, float height);
 
 /**
  * Toggle caret visibility (for blink animation)
  */
-void caret_toggle_blink(RadiantState* state);
+void caret_toggle_blink(DocState* state);
 
 // ============================================================================
 // Selection API
@@ -487,81 +487,81 @@ void caret_toggle_blink(RadiantState* state);
 /**
  * Start a new selection at the given position
  */
-void selection_start(RadiantState* state, View* view, int char_offset);
+void selection_start(DocState* state, View* view, int char_offset);
 
 /**
  * Extend selection to the given position (during drag)
  */
-void selection_extend(RadiantState* state, int char_offset);
+void selection_extend(DocState* state, int char_offset);
 
 /**
  * Extend selection to a different view (for cross-view selection)
  */
-void selection_extend_to_view(RadiantState* state, View* view, int char_offset);
+void selection_extend_to_view(DocState* state, View* view, int char_offset);
 
 /**
  * Set selection range explicitly
  */
-void selection_set(RadiantState* state, View* view, int anchor_offset, int focus_offset);
+void selection_set(DocState* state, View* view, int anchor_offset, int focus_offset);
 
 /**
  * Select all text in the focused element
  */
-void selection_select_all(RadiantState* state);
+void selection_select_all(DocState* state);
 
 /**
  * Collapse selection to caret (at anchor or focus)
  */
-void selection_collapse(RadiantState* state, bool to_start);
+void selection_collapse(DocState* state, bool to_start);
 
 /**
  * Clear selection (no text selected)
  */
-void selection_clear(RadiantState* state);
+void selection_clear(DocState* state);
 
 /**
  * Check if there is an active selection
  */
-bool selection_has(RadiantState* state);
+bool selection_has(DocState* state);
 
 /**
  * Check whether a live pointer selection gesture owns a non-collapsed range.
  */
-bool selection_is_pointer_range_active(RadiantState* state);
+bool selection_is_pointer_range_active(DocState* state);
 
 /**
  * Snapshot the active pointer-selection anchor used by event drag handling.
  */
-bool selection_get_pointer_anchor(RadiantState* state, View** out_anchor_view,
+bool selection_get_pointer_anchor(DocState* state, View** out_anchor_view,
                                   int* out_anchor_offset);
 
 /**
  * Snapshot the current focus endpoint for drag fallback/geometry.
  */
-bool selection_get_focus_snapshot(RadiantState* state, View** out_focus_view,
+bool selection_get_focus_snapshot(DocState* state, View** out_focus_view,
                                   int* out_focus_offset,
                                   float* out_iframe_offset_x,
                                   float* out_iframe_offset_y,
                                   bool* out_collapsed);
-bool selection_get_focus_visual_snapshot(RadiantState* state, float* out_x,
+bool selection_get_focus_visual_snapshot(DocState* state, float* out_x,
                                          float* out_y, bool* out_collapsed);
-bool selection_get_iframe_offset(RadiantState* state, float* out_x, float* out_y);
-bool selection_get_anchor_range(RadiantState* state, View* anchor_view,
+bool selection_get_iframe_offset(DocState* state, float* out_x, float* out_y);
+bool selection_get_anchor_range(DocState* state, View* anchor_view,
                                 int* out_start, int* out_end);
-bool selection_get_debug_snapshot(RadiantState* state, View** out_view,
+bool selection_get_debug_snapshot(DocState* state, View** out_view,
                                   bool* out_collapsed, bool* out_selecting,
                                   int* out_anchor_offset, int* out_anchor_line,
                                   int* out_focus_offset, int* out_focus_line,
                                   float* out_start_x, float* out_start_y,
                                   float* out_end_x, float* out_end_y);
-bool selection_get_extent_views(RadiantState* state, View** out_anchor_view,
+bool selection_get_extent_views(DocState* state, View** out_anchor_view,
                                 View** out_focus_view);
-bool selection_has_projection(RadiantState* state);
+bool selection_has_projection(DocState* state);
 
 /**
  * Get normalized selection range (start <= end)
  */
-void selection_get_range(RadiantState* state, int* start, int* end);
+void selection_get_range(DocState* state, int* start, int* end);
 
 // ============================================================================
 // Focus API
@@ -571,36 +571,36 @@ void selection_get_range(RadiantState* state, int* start, int* end);
  * Set focus to an element
  * @param from_keyboard true if focus was triggered by keyboard (Tab, etc.)
  */
-void focus_set(RadiantState* state, View* view, bool from_keyboard);
+void focus_set(DocState* state, View* view, bool from_keyboard);
 
 /**
  * Clear focus (blur current element)
  */
-void focus_clear(RadiantState* state);
+void focus_clear(DocState* state);
 
 /**
  * Move focus to next/previous focusable element
  * @param forward true for next (Tab), false for previous (Shift+Tab)
  * @return true if focus moved, false if no more focusable elements
  */
-bool focus_move(RadiantState* state, View* root, bool forward);
+bool focus_move(DocState* state, View* root, bool forward);
 
 /**
  * Restore focus to previously focused element
  */
-bool focus_restore(RadiantState* state);
+bool focus_restore(DocState* state);
 
 /**
  * Get the currently focused element
  */
-View* focus_get(RadiantState* state);
-bool focus_has_current(RadiantState* state);
-View* focus_get_visible(RadiantState* state);
+View* focus_get(DocState* state);
+bool focus_has_current(DocState* state);
+View* focus_get_visible(DocState* state);
 
 /**
  * Check if element or ancestor has focus
  */
-bool focus_within(RadiantState* state, View* view);
+bool focus_within(DocState* state, View* view);
 
 // ============================================================================
 // Form and Scroll State API (centralized writers)
@@ -610,38 +610,38 @@ bool focus_within(RadiantState* state, View* view);
  * Query checked state for checkbox/radio controls.
  * Prefers centralized state_map entry and falls back to element pseudo-state.
  */
-bool form_control_get_checked(RadiantState* state, View* view);
+bool form_control_get_checked(DocState* state, View* view);
 
 /**
  * Set checked state for checkbox/radio controls through the state store.
  * This is the only supported writer path for checked state transitions.
  */
-void form_control_set_checked(RadiantState* state, View* view, bool checked);
+void form_control_set_checked(DocState* state, View* view, bool checked);
 
 /**
  * Attach a scroll pane to the central state store for fast-read access.
  * The pane argument is a ScrollPane* passed as void* to avoid header coupling.
  */
-void scroll_state_attach(RadiantState* state, void* pane);
+void scroll_state_attach(DocState* state, void* pane);
 
 /**
  * Set pane scroll max values through centralized API.
  */
-void scroll_state_set_max(RadiantState* state, void* pane,
+void scroll_state_set_max(DocState* state, void* pane,
                           float h_max, float v_max);
 
 /**
  * Set pane scroll position through centralized API.
  * When is_viewport is true, document-level viewport mirrors are also updated.
  */
-void scroll_state_set_position(RadiantState* state, void* pane,
+void scroll_state_set_position(DocState* state, void* pane,
                                float h_pos, float v_pos,
                                bool is_viewport);
 
 /**
  * Read pane scroll values.
  */
-void scroll_state_get_position(RadiantState* state, void* pane,
+void scroll_state_get_position(DocState* state, void* pane,
                                float* out_h_pos, float* out_v_pos,
                                float* out_h_max, float* out_v_max);
 
@@ -653,20 +653,20 @@ void scroll_state_get_position(RadiantState* state, void* pane,
  * Get the current text value for a text control (input, textarea).
  * Returns the UTF-8 encoded string; may be nullptr if not yet set.
  */
-const char* form_control_get_value(RadiantState* state, View* view, uint32_t* out_len);
+const char* form_control_get_value(DocState* state, View* view, uint32_t* out_len);
 
 /**
  * Set the text value for a text control through the state store.
  * Resets selection to end of text (HTML default).
  * This is the only supported writer path for value mutations.
  */
-void form_control_set_value(RadiantState* state, View* view, const char* value, uint32_t len);
+void form_control_set_value(DocState* state, View* view, const char* value, uint32_t len);
 
 /**
  * Get the current text selection offsets for a text control.
  * Offsets are in UTF-16 code units (per HTML spec).
  */
-void form_control_get_selection(RadiantState* state, View* view,
+void form_control_get_selection(DocState* state, View* view,
                                 uint32_t* out_start, uint32_t* out_end, uint8_t* out_direction);
 
 /**
@@ -674,31 +674,31 @@ void form_control_get_selection(RadiantState* state, View* view,
  * Start/end are UTF-16 code units; direction is 0=none, 1=forward, 2=backward.
  * This is the only supported writer path for selection mutations.
  */
-void form_control_set_selection(RadiantState* state, View* view,
+void form_control_set_selection(DocState* state, View* view,
                                 uint32_t start, uint32_t end, uint8_t direction);
 
 /**
  * Get the selected option index for a select control (-1 if none selected).
  */
-int form_control_get_selected_index(RadiantState* state, View* view);
+int form_control_get_selected_index(DocState* state, View* view);
 
 /**
  * Set the selected option index for a select control.
  * Negative index clears selection; index >= count wraps to last.
  * This is the only supported writer path for option selection mutations.
  */
-void form_control_set_selected_index(RadiantState* state, View* view, int index);
+void form_control_set_selected_index(DocState* state, View* view, int index);
 
 /**
  * Get the current value for a range input control (0.0-1.0).
  */
-float form_control_get_range_value(RadiantState* state, View* view);
+float form_control_get_range_value(DocState* state, View* view);
 
 /**
  * Set the value for a range input control (clamped to 0.0-1.0).
  * This is the only supported writer path for range value mutations.
  */
-void form_control_set_range_value(RadiantState* state, View* view, float value);
+void form_control_set_range_value(DocState* state, View* view, float value);
 
 // ============================================================================
 // Constraint Attributes API (disabled, readonly, required)
@@ -707,35 +707,35 @@ void form_control_set_range_value(RadiantState* state, View* view, float value);
 /**
  * Check if a form control is disabled.
  */
-bool form_control_is_disabled(RadiantState* state, View* view);
+bool form_control_is_disabled(DocState* state, View* view);
 
 /**
  * Set the disabled state for a form control through the state store.
  * Disabled controls cannot receive focus or user input.
  */
-void form_control_set_disabled(RadiantState* state, View* view, bool disabled);
+void form_control_set_disabled(DocState* state, View* view, bool disabled);
 
 /**
  * Check if a text control is readonly.
  */
-bool form_control_is_readonly(RadiantState* state, View* view);
+bool form_control_is_readonly(DocState* state, View* view);
 
 /**
  * Set the readonly state for a text control through the state store.
  * Readonly controls cannot be edited but can receive focus.
  */
-void form_control_set_readonly(RadiantState* state, View* view, bool readonly);
+void form_control_set_readonly(DocState* state, View* view, bool readonly);
 
 /**
  * Check if a form control is required.
  */
-bool form_control_is_required(RadiantState* state, View* view);
+bool form_control_is_required(DocState* state, View* view);
 
 /**
  * Set the required state for a form control through the state store.
  * Required controls must have a value for form submission.
  */
-void form_control_set_required(RadiantState* state, View* view, bool required);
+void form_control_set_required(DocState* state, View* view, bool required);
 
 // ============================================================================
 // Dropdown State Machine API (open, close, hover tracking)
@@ -745,28 +745,28 @@ void form_control_set_required(RadiantState* state, View* view, bool required);
  * Open a select control's dropdown menu.
  * Automatically closes any other open dropdown in the same document.
  */
-void form_control_open_dropdown(RadiantState* state, View* view);
+void form_control_open_dropdown(DocState* state, View* view);
 
 /**
  * Close a select control's dropdown menu.
  */
-void form_control_close_dropdown(RadiantState* state, View* view);
+void form_control_close_dropdown(DocState* state, View* view);
 
 /**
  * Set the hovered option index in an open dropdown (-1 to clear hover).
  * Index is bounds-checked against option count.
  */
-void form_control_set_hover_index(RadiantState* state, View* view, int index);
+void form_control_set_hover_index(DocState* state, View* view, int index);
 
 /**
  * Get the currently hovered option index in a dropdown (-1 if none).
  */
-int form_control_get_hover_index(RadiantState* state, View* view);
+int form_control_get_hover_index(DocState* state, View* view);
 
 /**
  * Check if a select control's dropdown is currently open.
  */
-bool form_control_is_dropdown_open(RadiantState* state, View* view);
+bool form_control_is_dropdown_open(DocState* state, View* view);
 
 // ============================================================================
 // Text Extraction and Clipboard API
@@ -794,7 +794,7 @@ char* extract_html_from_view(View* view, Arena* arena);
  * @param arena Arena allocator for output string
  * @return Selected text, or NULL if no selection
  */
-char* extract_selected_text(RadiantState* state, Arena* arena);
+char* extract_selected_text(DocState* state, Arena* arena);
 
 /**
  * Extract the currently selected content as HTML fragment
@@ -802,7 +802,7 @@ char* extract_selected_text(RadiantState* state, Arena* arena);
  * @param arena Arena allocator for output string
  * @return Selected HTML, or NULL if no selection
  */
-char* extract_selected_html(RadiantState* state, Arena* arena);
+char* extract_selected_html(DocState* state, Arena* arena);
 
 /**
  * Copy text to system clipboard
@@ -834,7 +834,7 @@ void dirty_mark_rect(DirtyTracker* tracker, float x, float y, float width, float
 /**
  * Mark an element as needing repaint (uses element's bounds)
  */
-void dirty_mark_element(RadiantState* state, void* view);
+void dirty_mark_element(DocState* state, void* view);
 
 /**
  * Clear all dirty regions
@@ -853,17 +853,17 @@ bool dirty_has_regions(DirtyTracker* tracker);
 /**
  * Schedule a reflow for a node
  */
-void reflow_schedule(RadiantState* state, void* node, ReflowScope scope, uint32_t reason);
+void reflow_schedule(DocState* state, void* node, ReflowScope scope, uint32_t reason);
 
 /**
  * Process all pending reflows
  */
-void reflow_process_pending(RadiantState* state);
+void reflow_process_pending(DocState* state);
 
 /**
  * Clear all pending reflows
  */
-void reflow_clear(RadiantState* state);
+void reflow_clear(DocState* state);
 
 // ============================================================================
 // Visited Links API

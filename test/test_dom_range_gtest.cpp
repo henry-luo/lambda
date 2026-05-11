@@ -5,7 +5,7 @@
  * exercises the DomBoundary / DomRange / DomSelection APIs.
  *
  * Bridge stubs at the top of this file satisfy the two extern "C" hooks
- * that dom_range.cpp uses to reach into RadiantState — production wires
+ * that dom_range.cpp uses to reach into DocState — production wires
  * these to radiant/state_store.cpp; here we point them at a tiny FakeState.
  */
 
@@ -31,13 +31,13 @@ struct FakeState {
     DomRange* live_ranges;
 };
 
-extern "C" Arena* dom_range_state_arena(RadiantState* s) {
+extern "C" Arena* dom_range_state_arena(DocState* s) {
     return reinterpret_cast<FakeState*>(s)->arena;
 }
-extern "C" DomRange** dom_range_state_live_ranges_slot(RadiantState* s) {
+extern "C" DomRange** dom_range_state_live_ranges_slot(DocState* s) {
     return &reinterpret_cast<FakeState*>(s)->live_ranges;
 }
-extern "C" struct DomSelection* dom_range_state_selection(RadiantState*) {
+extern "C" struct DomSelection* dom_range_state_selection(DocState*) {
     return nullptr;  // tests don't exercise selection-resync paths
 }
 
@@ -49,7 +49,7 @@ protected:
     Pool* pool = nullptr;
     Arena* arena = nullptr;
     FakeState fake_state{};
-    RadiantState* state = nullptr;
+    DocState* state = nullptr;
     DomDocument doc_storage{};
 
     DomElement* div = nullptr;
@@ -66,7 +66,7 @@ protected:
         ASSERT_NE(arena, nullptr);
         fake_state.arena = arena;
         fake_state.live_ranges = nullptr;
-        state = reinterpret_cast<RadiantState*>(&fake_state);
+        state = reinterpret_cast<DocState*>(&fake_state);
         doc_storage.pool = pool;
         doc_storage.arena = arena;
 

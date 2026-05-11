@@ -151,7 +151,7 @@ static void assert_snapshot_impl(EventSimContext* ctx, UiContext* uicon, SimEven
 
     // Step 1: Ensure surface is rendered (force full render)
     if (uicon->document && uicon->document->view_tree) {
-        RadiantState* state = (RadiantState*)uicon->document->state;
+        DocState* state = (DocState*)uicon->document->state;
         if (state) state->is_dirty = true;
         render_html_doc(uicon, uicon->document->view_tree, nullptr);
         if (state) {
@@ -481,7 +481,7 @@ case SIM_EVENT_RESIZE: {
     extern void render_html_doc(UiContext*, ViewTree*, const char*);
     if (uicon->document && uicon->document->view_tree) {
         // Mark dirty so render_html_doc takes full-clear path
-        RadiantState* state = (RadiantState*)uicon->document->state;
+        DocState* state = (DocState*)uicon->document->state;
         if (state) state->is_dirty = true;
         render_html_doc(uicon, uicon->document->view_tree, nullptr);
         if (state) {
@@ -597,7 +597,7 @@ case SIM_EVENT_SCROLL:
     // >>> NEW: re-render after scroll to update surface pixels <<<
     extern void render_html_doc(UiContext*, ViewTree*, const char*);
     if (uicon->document && uicon->document->view_tree) {
-        RadiantState* state = (RadiantState*)uicon->document->state;
+        DocState* state = (DocState*)uicon->document->state;
         if (state) state->is_dirty = true;  // full repaint (scroll moves everything)
         render_html_doc(uicon, uicon->document->view_tree, nullptr);
         if (state) {
@@ -649,7 +649,7 @@ Fields:
 **Dispatch:**
 ```cpp
 case SIM_EVENT_SCROLL_TO: {
-    RadiantState* state = uicon->document ? uicon->document->state : nullptr;
+    DocState* state = uicon->document ? uicon->document->state : nullptr;
     if (!state) break;
 
     if (ev->target_selector) {
@@ -841,7 +841,7 @@ duration and ticks all active animations:
 **Dispatch:**
 ```cpp
 case SIM_EVENT_ADVANCE_TIME: {
-    RadiantState* state = uicon->document ? uicon->document->state : nullptr;
+    DocState* state = uicon->document ? uicon->document->state : nullptr;
     if (!state || !state->animation_scheduler) {
         log_warn("event_sim: advance_time but no animation scheduler");
         break;

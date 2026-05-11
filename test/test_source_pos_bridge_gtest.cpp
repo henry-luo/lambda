@@ -22,20 +22,20 @@
 
 // ---------------------------------------------------------------------------
 // Bridge stubs (see test_dom_range_gtest.cpp). dom_range.cpp links against
-// these RadiantState accessors but the bridge tests don't exercise the
+// these DocState accessors but the bridge tests don't exercise the
 // selection-resync paths, so trivial stubs satisfy the linker.
 // ---------------------------------------------------------------------------
 struct Arena;
-struct RadiantState;
+struct DocState;
 struct DomRange;
 struct DomSelection;
 
-extern "C" Arena* dom_range_state_arena(RadiantState*) { return nullptr; }
-extern "C" DomRange** dom_range_state_live_ranges_slot(RadiantState*) {
+extern "C" Arena* dom_range_state_arena(DocState*) { return nullptr; }
+extern "C" DomRange** dom_range_state_live_ranges_slot(DocState*) {
     static DomRange* slot = nullptr;
     return &slot;
 }
-extern "C" struct DomSelection* dom_range_state_selection(RadiantState*) {
+extern "C" struct DomSelection* dom_range_state_selection(DocState*) {
     return nullptr;
 }
 

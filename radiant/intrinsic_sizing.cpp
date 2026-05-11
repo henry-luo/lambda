@@ -1363,7 +1363,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     float aspect_ratio = 0;
 
     // First check fi for resolved aspect-ratio
-    if (view_block_for_aspect->fi && view_block_for_aspect->fi->aspect_ratio > 0) {
+    if (view_block_for_aspect->item_prop_type == DomElement::ITEM_PROP_FLEX &&
+        view_block_for_aspect->fi && view_block_for_aspect->fi->aspect_ratio > 0) {
         aspect_ratio = view_block_for_aspect->fi->aspect_ratio;
     }
     // If not in fi, check specified_style directly
