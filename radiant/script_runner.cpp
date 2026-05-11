@@ -57,6 +57,7 @@ static volatile sig_atomic_t js_exec_timed_out = 0;
 // Per-script timeout: SIGALRM handler for 5s execution limit
 static struct sigaction js_exec_old_alrm;
 #define JS_EXEC_TIMEOUT_SECONDS 5
+static volatile sig_atomic_t js_batch_cleanup_unsafe = 0;
 
 static void js_exec_timeout_handler(int sig) {
     if (js_exec_guarded) {
@@ -607,6 +608,7 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
     } else if (jmp_val == 2) {
         log_error("execute_document_scripts: JS execution timed out after %ds", JS_EXEC_TIMEOUT_SECONDS);
         result = ItemError;
+        js_batch_cleanup_unsafe = 1;
         if (preamble) { mem_free(preamble); preamble = nullptr; }
     } else {
         log_error("execute_document_scripts: recovered from crash in JS JIT code");
@@ -667,6 +669,10 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
 
     strbuf_free(script_buf);
     strbuf_free(onload_buf);
+}
+
+extern "C" bool script_runner_js_batch_cleanup_unsafe(void) {
+    return js_batch_cleanup_unsafe != 0;
 }
 
 // ============================================================================

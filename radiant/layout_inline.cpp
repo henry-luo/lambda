@@ -32,6 +32,15 @@ static inline bool is_out_of_flow_child(View* child) {
     return false;
 }
 
+static bool span_has_direct_visible_text(ViewSpan* span) {
+    for (View* child = span ? span->first_child : nullptr; child; child = child->next()) {
+        if (child->view_type == RDT_VIEW_TEXT && child->width > 0.0f && child->height > 0.0f) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // Compute bounding box of a ViewSpan based on union of child views
 // The bounding box includes the span's own border and padding
 void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHandle* fallback_fh) {
@@ -243,15 +252,6 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
         child = child->next();
     }
 
-    if (span->has_inline_fragment_union) {
-        if (span->inline_fragment_min_x < min_x) min_x = span->inline_fragment_min_x;
-        if (span->inline_fragment_max_x > max_x) max_x = span->inline_fragment_max_x;
-        if (span->inline_fragment_min_y < visual_min_y) visual_min_y = span->inline_fragment_min_y;
-        if (span->inline_fragment_max_y > visual_max_y) visual_max_y = span->inline_fragment_max_y;
-        if (span->inline_fragment_min_y < content_min_y) content_min_y = span->inline_fragment_min_y;
-        if (span->inline_fragment_max_y > content_max_y) content_max_y = span->inline_fragment_max_y;
-    }
-
     // Get border and padding widths
     float border_top = 0, border_right = 0, border_bottom = 0, border_left = 0;
     float pad_left = 0, pad_right = 0, pad_top = 0, pad_bottom = 0;
@@ -294,6 +294,13 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
     float parent_border_bottom_y = content_max_y + roundf(border_bottom) + roundf(pad_bottom);
     float final_min_y = min(visual_min_y, parent_border_top_y);
     float final_max_y = max(visual_max_y, parent_border_bottom_y);
+    if (span->has_inline_fragment_union && span_has_direct_visible_text(span)) {
+        if (span->inline_fragment_min_y < final_min_y) final_min_y = span->inline_fragment_min_y;
+        if (span->inline_fragment_max_y > final_max_y) final_max_y = span->inline_fragment_max_y;
+        if (span->inline_fragment_min_x < min_x) min_x = span->inline_fragment_min_x;
+        if (span->inline_fragment_max_x > max_x) max_x = span->inline_fragment_max_x;
+        content_width = max_x - min_x;
+    }
 
     // CSS 2.1 §8.5.1: Inline elements' border/padding appear at the start and end
     // of the inline box. For single-line spans, border+padding expand the bounding box
@@ -719,13 +726,8 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // CSS 2.1 §10.8.1: <br> participates in the current line before forcing
         // the break. Its zero-width inline box is baseline-aligned with earlier
         // content on the line, including replaced elements.
-        float br_ascender = lycon->block.init_ascender + lycon->block.lead_y;
-        if (lycon->font.font_handle && lycon->block.line_height_is_normal) {
-            float br_descender = 0.0f;
-            font_get_normal_lh_split(lycon->font.font_handle, &br_ascender, &br_descender);
-        }
-        float baseline_pos = max(lycon->line.max_ascender, lycon->block.init_ascender + lycon->block.lead_y);
-        br_view->y = lycon->block.advance_y + baseline_pos - br_ascender;
+        float br_line_height = lycon->block.line_height > 0.0f ? lycon->block.line_height : br_font_height;
+        br_view->y = lycon->block.advance_y + (br_line_height - br_font_height) / 2.0f;
         // CSS Text 3 §7.2: text-align-last applies to lines immediately before
         // a forced line break. <br> is a forced break per CSS Text 3 §4.1.
         lycon->line.is_last_line = true;

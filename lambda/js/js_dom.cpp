@@ -6159,9 +6159,14 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
     // v12b: remove() — self-removal from parent (works on any node type)
     if (strcmp(method, "remove") == 0) {
         if (node->parent) {
+            DomElement* owner_select = nullptr;
+            if (node->is_element() && node->as_element()->tag() == HTM_TAG_OPTION) {
+                owner_select = _option_owner_select(node->as_element());
+            }
             // Phase 8A: live-range cascade must run before the structural change.
             dom_pre_remove(node);
             node->parent->remove_child(node);
+            if (owner_select) _select_ask_for_reset(owner_select);
             js_dom_mutation_notify();
         }
         return ItemNull;
@@ -6335,6 +6340,10 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         // use DomNode::append_child which handles all node types
         ((DomNode*)elem)->append_child(child_node);
         dom_post_insert((DomNode*)elem, child_node);
+        if (child_node->is_element() && child_node->as_element()->tag() == HTM_TAG_OPTION &&
+            elem->tag() == HTM_TAG_SELECT) {
+            _select_ask_for_reset(elem);
+        }
         js_dom_mutation_notify();
         // If we just inserted an <iframe>, queue its synthetic load event.
         if (child_node->is_element()) {
@@ -6356,6 +6365,10 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         }
         dom_pre_remove(child_node);
         ((DomNode*)elem)->remove_child(child_node);
+        if (child_node->is_element() && child_node->as_element()->tag() == HTM_TAG_OPTION &&
+            elem->tag() == HTM_TAG_SELECT) {
+            _select_ask_for_reset(elem);
+        }
         js_dom_mutation_notify();
         return args[0];  // return the removed child
     }

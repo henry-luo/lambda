@@ -3378,6 +3378,8 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                                           target_x,
                                           target_y,
                                           true);
+                doc->pending_viewport_scroll_x = pane->h_scroll_position;
+                doc->pending_viewport_scroll_y = pane->v_scroll_position;
             }
             if (doc->state) doc->state->needs_repaint = true;
             force_render_surface(uicon);

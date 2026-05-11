@@ -116,7 +116,6 @@ View* set_view(LayoutContext* lycon, ViewType type, DomNode* node) {
         return NULL;
     }
     view->view_type = type;
-
     log_debug("*** ALLOC_VIEW: view (type=%d) for node %s (%p), parent=%p (%s)",
         type, node->node_name(), node, node->parent, node->parent ? node->parent->node_name() : "null");
 
@@ -2321,6 +2320,26 @@ void print_br_json(View* br, StrBuf* buf, int indent) {
     strbuf_append_str(buf, "}");
 }
 
+static View* single_inline_child_for_rect(ViewSpan* span) {
+    if (!span) return nullptr;
+    DomNode* parent = span->parent;
+    if (!parent || !parent->is_element() || parent->as_element()->tag() != HTM_TAG_BUTTON) {
+        return nullptr;
+    }
+    View* first = (View*)span->first_child;
+    while (first && (first->view_type == RDT_VIEW_NONE ||
+        (first->view_type == RDT_VIEW_TEXT && !text_has_visible_rect((ViewText*)first)))) {
+        first = (View*)first->next_sibling;
+    }
+    if (!first || first->view_type != RDT_VIEW_INLINE) return nullptr;
+    View* next = (View*)first->next_sibling;
+    while (next && (next->view_type == RDT_VIEW_NONE ||
+        (next->view_type == RDT_VIEW_TEXT && !text_has_visible_rect((ViewText*)next)))) {
+        next = (View*)next->next_sibling;
+    }
+    return next ? nullptr : first;
+}
+
 // JSON generation for inline elements (spans)
 void print_inline_json(ViewSpan* span, StrBuf* buf, int indent) {
     if (!span) {
@@ -2403,7 +2422,8 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent) {
 
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"layout\": {\n");
-    print_bounds_json(span, buf, indent);
+    View* projected_bounds = single_inline_child_for_rect(span);
+    print_bounds_json(projected_bounds ? projected_bounds : (View*)span, buf, indent);
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "},\n");
 
