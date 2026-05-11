@@ -176,6 +176,7 @@ struct JsCaptureEntry {
     int grandparent_slot; // v29: for transitive captures in mixed scope envs, read from
                           // grandparent env (stored in parent env slot 0). -1 if not transitive.
     bool is_let_const;   // v29 TDZ: true if captured variable is let/const (needs TDZ check)
+    bool is_const;       // true if captured variable is const (assignment throws)
 };
 
 // Function entry for pre-pass collection
@@ -452,6 +453,7 @@ struct JsMirTranspiler {
     MIR_reg_t eval_completion_reg;           // 0 if not tracking completion values
     bool in_typeof;                          // true when transpiling operand of typeof
     int with_depth;                           // nesting depth of 'with' statements (for break/continue/return cleanup)
+    bool destructure_assignment_mode;         // true for assignment-pattern destructuring targets
 };
 
 static void jm_cleanup_mir_transpiler_state(JsMirTranspiler* mt) {

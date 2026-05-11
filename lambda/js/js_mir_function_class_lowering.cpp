@@ -632,6 +632,11 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             entry.var.env_slot = cap_offset + ci;
             entry.var.env_reg = mt->gen_env_reg;
             entry.var.typed_array_type = -1;
+            if (fc->captures[ci].is_let_const) {
+                entry.var.tdz_active = true;
+                entry.var.is_let_const = true;
+                entry.var.is_const = fc->captures[ci].is_const;
+            }
             hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
         }
 
@@ -1037,6 +1042,11 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 entry.var.env_slot = cap_offset + ci;
                 entry.var.env_reg = mt->gen_env_reg;
                 entry.var.typed_array_type = -1;
+                if (fc->captures[ci].is_let_const) {
+                    entry.var.tdz_active = true;
+                    entry.var.is_let_const = true;
+                    entry.var.is_const = fc->captures[ci].is_const;
+                }
                 hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
             }
 
@@ -1818,6 +1828,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 if (fc->captures[i].is_let_const) {
                     entry.var.tdz_active = true;
                     entry.var.is_let_const = true;
+                    entry.var.is_const = fc->captures[i].is_const;
                 }
                 hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
             }

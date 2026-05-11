@@ -1057,8 +1057,11 @@ void jm_collect_body_locals(JsAstNode* node, struct hashmap* locals, bool var_on
                     while (d) { jm_collect_body_locals(d, locals, var_only); d = d->next; }
                 }
             } else {
-                // destructuring pattern: for ([a,b] of arr) or for ({x} of arr)
-                jm_collect_pattern_names(fo->left, locals);
+                // destructuring declaration: for (let/const [a,b] of arr) or for ({x} of arr)
+                // Assignment-form for-of heads like `for ([a] of arr)` do not create locals.
+                if (!var_only && (fo->kind == 1 || fo->kind == 2)) {
+                    jm_collect_pattern_names(fo->left, locals);
+                }
             }
         }
         jm_collect_body_locals(fo->body, locals, var_only);
@@ -1465,7 +1468,8 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
             JsModuleConstEntry lookup;
             snprintf(lookup.name, sizeof(lookup.name), "%s", ref->name);
             JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(module_consts, &lookup);
-            if (mc) {
+            if (mc && !(mc->const_type == MCONST_MODVAR &&
+                        (mc->var_kind == JS_VAR_LET || mc->var_kind == JS_VAR_CONST))) {
                 continue;  // resolved via module_consts, no capture needed
             }
         }
@@ -1475,6 +1479,8 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
             snprintf(fc->captures[fc->capture_count].name, 128, "%s", ref->name);
             fc->captures[fc->capture_count].scope_env_slot = -1;
             fc->captures[fc->capture_count].grandparent_slot = -1;
+            fc->captures[fc->capture_count].is_let_const = false;
+            fc->captures[fc->capture_count].is_const = false;
             fc->capture_count++;
             log_debug("js-mir: capture '%s' in function '%s'", ref->name, fc->name);
         }
@@ -1496,6 +1502,8 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
         snprintf(fc->captures[fc->capture_count].name, 128, "%s", self_name);
         fc->captures[fc->capture_count].scope_env_slot = -1;
         fc->captures[fc->capture_count].grandparent_slot = -1;
+        fc->captures[fc->capture_count].is_let_const = false;
+        fc->captures[fc->capture_count].is_const = false;
         fc->capture_count++;
         log_debug("js-mir: self-capture '%s' in closure '%s'", self_name, fc->name);
     }

@@ -1361,6 +1361,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                 memset(&mce, 0, sizeof(mce));
                                 snprintf(mce.name, sizeof(mce.name), "_js_%.*s",
                                     (int)vid->name->len, vid->name->chars);
+                                mce.var_kind = JS_VAR_CONST;
                                 if (lit->literal_type == JS_LITERAL_NUMBER) {
                                     double dv = lit->value.number_value;
                                     if (dv == (int64_t)dv && dv >= -1e15 && dv <= 1e15) {
@@ -2328,8 +2329,13 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 }
                 // Mark captures
                 for (int ci = 0; ci < fc->capture_count; ci++) {
-                    if (jm_name_set_has(let_const_names, fc->captures[ci].name)) {
+                    JsNameSetEntry lookup;
+                    memset(&lookup, 0, sizeof(lookup));
+                    snprintf(lookup.name, sizeof(lookup.name), "%s", fc->captures[ci].name);
+                    JsNameSetEntry* lce = (JsNameSetEntry*)hashmap_get(let_const_names, &lookup);
+                    if (lce) {
                         fc->captures[ci].is_let_const = true;
+                        fc->captures[ci].is_const = (lce->var_kind == JS_VAR_CONST);
                     }
                 }
                 hashmap_free(let_const_names);
@@ -2494,6 +2500,8 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         snprintf(parent->captures[parent->capture_count].name, 128, "%s", cap_name);
                         parent->captures[parent->capture_count].scope_env_slot = -1;
                         parent->captures[parent->capture_count].grandparent_slot = -1;
+                        parent->captures[parent->capture_count].is_let_const = child->captures[ci].is_let_const;
+                        parent->captures[parent->capture_count].is_const = child->captures[ci].is_const;
                         parent->capture_count++;
                         changed = true;
                         log_debug("js-mir: propagated capture '%s' from '%s' to parent '%s'",

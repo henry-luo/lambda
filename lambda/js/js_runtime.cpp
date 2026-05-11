@@ -19656,7 +19656,7 @@ static bool js_iterator_cache_next_method(Item iterator) {
     return !js_check_exception();
 }
 
-extern "C" Item js_get_iterator(Item iterable) {
+static Item js_get_iterator_impl(Item iterable, bool cache_next) {
     TypeId tid = get_type_id(iterable);
 
     // null and undefined are never iterable — throw TypeError immediately
@@ -19687,7 +19687,7 @@ extern "C" Item js_get_iterator(Item iterable) {
                     js_throw_type_error("iterator is not an object");
                     return ItemNull;
                 }
-                if (!js_iterator_cache_next_method(iterator)) return ItemNull;
+                if (cache_next && !js_iterator_cache_next_method(iterator)) return ItemNull;
                 return iterator;
             }
         }
@@ -19717,7 +19717,7 @@ extern "C" Item js_get_iterator(Item iterable) {
             Item iter_fn = js_get_or_create_builtin(builtin_id, "[Symbol.iterator]", 0);
             Item iterator = js_call_function(iter_fn, iterable, NULL, 0);
             if (js_check_exception()) return ItemNull;
-            if (!js_iterator_cache_next_method(iterator)) return ItemNull;
+            if (cache_next && !js_iterator_cache_next_method(iterator)) return ItemNull;
             return iterator;
         }
 
@@ -19732,7 +19732,7 @@ extern "C" Item js_get_iterator(Item iterable) {
                 js_throw_type_error("iterator is not an object");
                 return ItemNull;
             }
-            if (!js_iterator_cache_next_method(iterator)) return ItemNull;
+            if (cache_next && !js_iterator_cache_next_method(iterator)) return ItemNull;
             return iterator;
         }
 
@@ -19740,9 +19740,11 @@ extern "C" Item js_get_iterator(Item iterable) {
         String* next_key = heap_create_name("next", 4);
         Item next_fn = js_property_get(iterable, (Item){.item = s2it(next_key)});
         if (get_type_id(next_fn) == LMD_TYPE_FUNC) {
-            Item cache_key = (Item){.item = s2it(heap_create_name("__iter_next__", 13))};
-            js_property_set(iterable, cache_key, next_fn);
-            if (js_check_exception()) return ItemNull;
+            if (cache_next) {
+                Item cache_key = (Item){.item = s2it(heap_create_name("__iter_next__", 13))};
+                js_property_set(iterable, cache_key, next_fn);
+                if (js_check_exception()) return ItemNull;
+            }
             return iterable;
         }
     }
@@ -19758,7 +19760,7 @@ extern "C" Item js_get_iterator(Item iterable) {
                 js_throw_type_error("iterator is not an object");
                 return ItemNull;
             }
-            if (!js_iterator_cache_next_method(iterator)) return ItemNull;
+            if (cache_next && !js_iterator_cache_next_method(iterator)) return ItemNull;
             return iterator;
         }
     }
@@ -19777,7 +19779,7 @@ extern "C" Item js_get_iterator(Item iterable) {
                 js_throw_type_error("iterator is not an object");
                 return ItemNull;
             }
-            if (!js_iterator_cache_next_method(iterator)) return ItemNull;
+            if (cache_next && !js_iterator_cache_next_method(iterator)) return ItemNull;
             return iterator;
         }
     }
@@ -19796,6 +19798,14 @@ extern "C" Item js_get_iterator(Item iterable) {
         js_throw_type_error(msg);
         return ItemNull;
     }
+}
+
+extern "C" Item js_get_iterator(Item iterable) {
+    return js_get_iterator_impl(iterable, true);
+}
+
+extern "C" Item js_get_iterator_lazy(Item iterable) {
+    return js_get_iterator_impl(iterable, false);
 }
 
 // IteratorStep: call iterator.next(), return result {done, value}
