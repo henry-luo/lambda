@@ -248,6 +248,29 @@ static void validate_transient_ui_target(View* view, const char* name,
     }
 }
 
+static View* find_live_view_by_id(DomNode* node, uint32_t view_id) {
+    if (!node || view_id == 0) return NULL;
+    View* view = (View*)node;
+    if (view->id == view_id) return view;
+    if (node->is_element()) {
+        DomElement* element = (DomElement*)node;
+        DomNode* child = element->first_child;
+        while (child) {
+            View* found = find_live_view_by_id(child, view_id);
+            if (found) return found;
+            child = child->next_sibling;
+        }
+    }
+    return NULL;
+}
+
+static View* find_doc_live_view_by_id(DocState* state, uint32_t view_id) {
+    if (!state || !state->owner_store || !state->owner_store->document || view_id == 0) return NULL;
+    DomDocument* doc = state->owner_store->document;
+    DomNode* root = doc->root ? (DomNode*)doc->root : (DomNode*)doc->html_root;
+    return find_live_view_by_id(root, view_id);
+}
+
 static void validate_focus_node(DocState* state, View* node, View* focused,
                                 StateValidationReport* report,
                                 uint32_t* focus_count) {
@@ -404,6 +427,14 @@ static void validate_view_state_registry(DocState* state,
         if (entry->view_id == 0 || view_state->view_id == 0 || entry->view_id != view_state->view_id) {
             report_fail(report, "view state registry id is inconsistent");
         }
+        View* live_view = find_doc_live_view_by_id(state, view_state->view_id);
+        if (state->owner_store && state->owner_store->document) {
+            if (!live_view) {
+                report_fail(report, "view state registry id has no live view");
+            } else if (live_view->view_state_ref && live_view->view_state_ref != view_state) {
+                report_fail(report, "live view weak ViewState ref is stale");
+            }
+        }
         switch (view_state->kind) {
             case VIEW_STATE_BASE:
                 break;
@@ -420,6 +451,21 @@ static void validate_view_state_registry(DocState* state,
             case VIEW_STATE_FORM_CONTROL: {
                 if (view_state->data.form.selected_index < -1 || view_state->data.form.hover_index < -1) {
                     report_fail(report, "view form state has invalid index");
+                }
+                if (live_view) {
+                    if (!live_view->is_element() || !((DomElement*)live_view)->form) {
+                        report_fail(report, "view form state is not attached to a form control");
+                    } else {
+                        FormControlProp* form = ((DomElement*)live_view)->form;
+                        if (form->option_count >= 0) {
+                            if (view_state->data.form.selected_index >= form->option_count) {
+                                report_fail(report, "view form state selected index exceeds option count");
+                            }
+                            if (view_state->data.form.hover_index >= form->option_count) {
+                                report_fail(report, "view form state hover index exceeds option count");
+                            }
+                        }
+                    }
                 }
                 if (view_state->data.form.selection_start > view_state->data.form.selection_end) {
                     report_fail(report, "view form state selection start exceeds end");
@@ -563,6 +609,7 @@ bool radiant_state_validate_interaction(DocState* state,
 
 void radiant_state_assert_valid(DocState* state, const char* context) {
 #ifndef NDEBUG
+    view_state_prune_orphans(state);
     StateValidationReport report;
     bool ok = radiant_state_validate_interaction(state, &report);
     if (!ok) {

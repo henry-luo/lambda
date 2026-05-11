@@ -1306,6 +1306,10 @@ static SimEvent* parse_sim_event(MapReader& reader) {
             ev->has_expected_view_state = true;
             ev->expected_view_state_exists = reader.get("view_state").asBool();
         }
+        if (reader.has("view_state_count")) {
+            ev->has_expected_view_state_count = true;
+            ev->expected_view_state_count = reader.get("view_state_count").asInt32();
+        }
         const char* kind = reader.get("kind").cstring();
         if (kind) ev->expected_view_state_kind = mem_strdup(kind, MEM_CAT_LAYOUT);
         if (reader.has("weak_ref")) {
@@ -3389,6 +3393,14 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             if (doc->state_store && doc->state_store->doc_state != state) {
                 log_error("event_sim: assert_state_store FAIL - StateStore DocState does not match document projection");
                 passed = false;
+            }
+            if (state && ev->has_expected_view_state_count) {
+                int actual_count = state->view_state_map ? (int)hashmap_count(state->view_state_map) : 0; // INT_CAST_OK: UI test assertion count
+                if (actual_count != ev->expected_view_state_count) {
+                    log_error("event_sim: assert_state_store FAIL - expected ViewState count %d, got %d",
+                        ev->expected_view_state_count, actual_count);
+                    passed = false;
+                }
             }
 
             View* elem = NULL;

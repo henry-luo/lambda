@@ -178,7 +178,7 @@ Stored through `state_map` keyed by element/node plus a state name:
 - scroll offsets for scrollable elements;
 - media state where useful for dev tools: paused, current time, buffered ranges.
 
-The `DomElement::pseudo_state` bitfield remains as a fast render/style cache, but updates flow from StateStore transition functions.
+Superseded by Phase 5: dynamic pseudo-state is resolved from StateStore/ViewState rather than a `DomElement::pseudo_state` cache.
 
 ## Focus State Machine
 

@@ -117,10 +117,14 @@ extern "C" bool js_dom_current_is_main_document(void) {
 extern "C" bool js_doc_has_browsing_context(void* doc);
 extern "C" void js_doc_mark_has_browsing_context(void* doc);
 
+static inline DocState* js_dom_current_state();
+
 // Helper: increment DOM mutation counter on current document
 static inline void js_dom_mutation_notify() {
     if (_js_current_document) {
         _js_current_document->js_mutation_count++;
+        DocState* st = js_dom_current_state();
+        if (st) view_state_prune_orphans(st);
     }
 }
 
@@ -135,7 +139,9 @@ static inline DocState* js_dom_current_state() {
 }
 static inline void dom_pre_remove(DomNode* child) {
     DocState* st = js_dom_current_state();
-    if (st && child) dom_mutation_pre_remove(st, child);
+    if (st && child) {
+        dom_mutation_pre_remove(st, child);
+    }
 }
 static inline void dom_post_insert(DomNode* parent, DomNode* node) {
     DocState* st = js_dom_current_state();
@@ -228,11 +234,11 @@ static void expando_reset() {
 // ------------------------------------------------------------------
 // HTML form-control IDL helpers (Phase 4 click activation).
 // `checked` and `disabled` are boolean IDL attributes that must be
-// returned as real booleans (assert_true requires `=== true`). We
-// store the live "checkedness" in the expando map under
-// `__checked` (initialised from the `checked` content attribute on
-// first read). `disabled` is reflected directly to/from the
-// `disabled` content attribute.
+// returned as real booleans (assert_true requires `=== true`). Live
+// checkedness is owned by StateStore when a document DocState exists;
+// the expando fallback only serves detached/no-state DOM use.
+// `disabled` is reflected directly to/from the `disabled` content
+// attribute.
 // ------------------------------------------------------------------
 
 // Lowercase tag-name comparison helper. Returns true if elem->tag_name
@@ -262,9 +268,17 @@ static bool _is_checkbox_or_radio(DomElement* elem) {
     return strcmp(t, "checkbox") == 0 || strcmp(t, "radio") == 0;
 }
 
+static DocState* _state_for_element(DomElement* elem) {
+    if (elem && elem->doc && elem->doc->state) return elem->doc->state;
+    return js_dom_current_state();
+}
+
 // Read the live "checkedness" state. Initialised lazily from the
 // `checked` content attribute (HTML's defaultChecked) on first read.
 static bool _get_checkedness(DomElement* elem) {
+    DocState* state = _state_for_element(elem);
+    if (state) return form_control_get_checked(state, (View*)elem);
+
     Item exp = expando_get_map((DomNode*)elem);
     if (exp.item != ITEM_NULL) {
         Item key = (Item){.item = s2it(heap_create_name("__checked"))};
@@ -276,6 +290,12 @@ static bool _get_checkedness(DomElement* elem) {
 }
 
 static void _set_checkedness(DomElement* elem, bool v) {
+    DocState* state = _state_for_element(elem);
+    if (state) {
+        form_control_set_checked(state, (View*)elem, v);
+        return;
+    }
+
     Item exp = expando_get_or_create_map((DomNode*)elem);
     if (exp.item == ITEM_NULL) return;
     Item key = (Item){.item = s2it(heap_create_name("__checked"))};

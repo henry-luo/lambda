@@ -205,6 +205,8 @@ struct SimEvent {
     // Phase 5 StateStore invariant assertions
     bool has_expected_view_state;
     bool expected_view_state_exists;
+    bool has_expected_view_state_count;
+    int expected_view_state_count;
     char* expected_view_state_kind;
     bool has_expected_weak_ref;
     bool expected_weak_ref;

@@ -1852,6 +1852,9 @@ check-state-store:
 		radiant/ lambda/js/ \
 		| grep -v 'radiant/state_store.cpp' \
 		|| true); \
+	STATE_STORE_FORM_MIRROR_ACCESS_VIOLATIONS=$$(grep -nE 'form->(disabled|readonly|selected_index|hover_index|dropdown_open|checked|required|range_value)' \
+		radiant/state_store.cpp \
+		|| true); \
 	SCROLL_MIRROR_VIOLATIONS=$$(grep -rnE --include='*.cpp' -- '->(h_scroll_position|v_scroll_position|h_max_scroll|v_max_scroll)' \
 		radiant/ \
 		| grep -v 'radiant/state_store.cpp' \
@@ -1864,12 +1867,19 @@ check-state-store:
 		radiant/ \
 		| grep -v 'radiant/state_store.cpp' \
 		|| true); \
+	DOC_STATE_WRITE_VIOLATIONS=$$(grep -rnE --include='*.cpp' --include='*.hpp' -- '(state|mstate|doc_state|new_state|st)->(hover_target|active_target|drag_target|is_dragging|drag_drop|open_dropdown|dropdown_x|dropdown_y|dropdown_width|dropdown_height|context_menu_target|context_menu_x|context_menu_y|context_menu_width|context_menu_height|context_menu_hover|scroll_x|scroll_y|zoom_level|is_dirty|needs_reflow|needs_repaint)[[:space:]]*([+*/%-]?=[^=]|\+\+|--)' \
+		radiant/ lambda/js/ \
+		| grep -v 'radiant/state_store.cpp' \
+		|| true); \
 	DOC_STATE_DRAG_DROP_VIOLATIONS=$$(grep -rnE --include='*.cpp' -- 'state->drag_drop[[:space:]]*=' \
 		radiant/ \
 		| grep -v 'radiant/state_store.cpp' \
 		|| true); \
 	if [ -n "$$FORM_MIRROR_VIOLATIONS" ]; then \
 		VIOLATIONS="$${VIOLATIONS}$${VIOLATIONS:+\n}External form mirror reads/writes:\n$$FORM_MIRROR_VIOLATIONS"; \
+	fi; \
+	if [ -n "$$STATE_STORE_FORM_MIRROR_ACCESS_VIOLATIONS" ]; then \
+		VIOLATIONS="$${VIOLATIONS}$${VIOLATIONS:+\n}StateStore non-text form mirror access:\n$$STATE_STORE_FORM_MIRROR_ACCESS_VIOLATIONS"; \
 	fi; \
 	if [ -n "$$SCROLL_MIRROR_VIOLATIONS" ]; then \
 		VIOLATIONS="$${VIOLATIONS}$${VIOLATIONS:+\n}External scroll mirror reads/writes:\n$$SCROLL_MIRROR_VIOLATIONS"; \
@@ -1879,6 +1889,9 @@ check-state-store:
 	fi; \
 	if [ -n "$$VIEW_STATE_WRITE_VIOLATIONS" ]; then \
 		VIOLATIONS="$${VIOLATIONS}$${VIOLATIONS:+\n}External ViewState direct writes:\n$$VIEW_STATE_WRITE_VIOLATIONS"; \
+	fi; \
+	if [ -n "$$DOC_STATE_WRITE_VIOLATIONS" ]; then \
+		VIOLATIONS="$${VIOLATIONS}$${VIOLATIONS:+\n}External DocState direct writes:\n$$DOC_STATE_WRITE_VIOLATIONS"; \
 	fi; \
 	if [ -n "$$DOC_STATE_DRAG_DROP_VIOLATIONS" ]; then \
 		VIOLATIONS="$${VIOLATIONS}$${VIOLATIONS:+\n}External DocState drag_drop ownership writes:\n$$DOC_STATE_DRAG_DROP_VIOLATIONS"; \
