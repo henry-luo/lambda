@@ -2580,7 +2580,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 // Close dropdown if open
                 if (state->open_dropdown == select_view) {
                     state->open_dropdown = nullptr;
-                    select->form->dropdown_open = 0;
+                    form_control_close_dropdown(state, (View*)select);
                 }
                 state->needs_repaint = true;
             }

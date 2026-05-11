@@ -394,6 +394,60 @@ static void validate_selection_invariants(DocState* state,
     }
 }
 
+static void validate_view_state_registry(DocState* state,
+                                         StateValidationReport* report) {
+    if (!state || !state->view_state_map) return;
+
+    size_t iter = 0;
+    void* item = NULL;
+    while (hashmap_iter(state->view_state_map, &iter, &item)) {
+        ViewStateEntry* entry = (ViewStateEntry*)item;
+        if (!entry || !entry->state) {
+            report_fail(report, "view state registry has empty entry");
+            continue;
+        }
+
+        ViewState* view_state = entry->state;
+        if (entry->view_id == 0 || view_state->view_id == 0 || entry->view_id != view_state->view_id) {
+            report_fail(report, "view state registry id is inconsistent");
+        }
+        switch (view_state->kind) {
+            case VIEW_STATE_BASE:
+                break;
+            case VIEW_STATE_SCROLL:
+                if (view_state->data.scroll.max_x < 0.0f || view_state->data.scroll.max_y < 0.0f) {
+                    report_fail(report, "view scroll state has negative max");
+                }
+                if (view_state->data.scroll.x < 0.0f || view_state->data.scroll.y < 0.0f ||
+                    view_state->data.scroll.x > view_state->data.scroll.max_x ||
+                    view_state->data.scroll.y > view_state->data.scroll.max_y) {
+                    report_fail(report, "view scroll state is out of bounds");
+                }
+                break;
+            case VIEW_STATE_FORM_CONTROL: {
+                if (view_state->data.form.selected_index < -1 || view_state->data.form.hover_index < -1) {
+                    report_fail(report, "view form state has invalid index");
+                }
+                if (view_state->data.form.selection_start > view_state->data.form.selection_end) {
+                    report_fail(report, "view form state selection start exceeds end");
+                }
+                if (view_state->data.form.selection_direction > 3) {
+                    report_fail(report, "view form state selection direction is invalid");
+                }
+                if (view_state->data.form.range_value < 0.0f || view_state->data.form.range_value > 1.0f) {
+                    report_fail(report, "view form state range value is out of bounds");
+                }
+                break;
+            }
+            case VIEW_STATE_CUSTOM:
+                break;
+            default:
+                report_fail(report, "view state kind is invalid");
+                break;
+        }
+    }
+}
+
 bool radiant_state_validate_interaction(DocState* state,
                                         StateValidationReport* report) {
     report_init(report);
@@ -412,6 +466,7 @@ bool radiant_state_validate_interaction(DocState* state,
     }
 
     validate_focus_invariants(state, report);
+    validate_view_state_registry(state, report);
 
     if (state->caret) {
         if (state->caret->visible && !state->caret->view) {
@@ -479,7 +534,7 @@ bool radiant_state_validate_interaction(DocState* state,
             report_fail(report, "open dropdown target is not an element");
         } else {
             DomElement* elem = (DomElement*)state->open_dropdown;
-            if (!elem->form || !elem->form->dropdown_open) {
+            if (!elem->form || !form_control_is_dropdown_open(state, state->open_dropdown)) {
                 report_fail(report, "open dropdown state disagrees with form control");
             }
         }

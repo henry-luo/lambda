@@ -109,6 +109,51 @@ typedef struct ReflowScheduler {
     bool is_processing;            // prevent re-entry
 } ReflowScheduler;
 
+typedef enum ViewStateKind {
+    VIEW_STATE_BASE = 0,
+    VIEW_STATE_SCROLL,
+    VIEW_STATE_FORM_CONTROL,
+    VIEW_STATE_CUSTOM,
+} ViewStateKind;
+
+typedef struct ViewState {
+    uint32_t view_id;
+    ViewStateKind kind;
+    struct {
+        uint8_t hovered : 1;
+        uint8_t active : 1;
+        uint8_t focused : 1;
+        uint8_t reserved : 5;
+    } flags;
+    union {
+        struct {
+            float x;
+            float y;
+            float max_x;
+            float max_y;
+        } scroll;
+        struct {
+            uint8_t disabled : 1;
+            uint8_t readonly : 1;
+            uint8_t required : 1;
+            uint8_t checked : 1;
+            uint8_t dropdown_open : 1;
+            uint8_t reserved : 3;
+            int selected_index;
+            int hover_index;
+            float range_value;
+            uint32_t selection_start;
+            uint32_t selection_end;
+            uint8_t selection_direction;
+        } form;
+    } data;
+} ViewState;
+
+typedef struct ViewStateEntry {
+    uint32_t view_id;
+    ViewState* state;
+} ViewStateEntry;
+
 typedef struct CaretState CaretState;
 typedef struct SelectionState SelectionState;
 typedef struct FocusState FocusState;
@@ -153,6 +198,7 @@ typedef struct DocState {
     
     // State storage
     HashMap* state_map;            // map from StateKey -> StateEntry
+    HashMap* view_state_map;       // map from ViewId -> ViewStateEntry
     
     // Template reactive state (unified with Lambda template state store)
     // Keyed by (model_item, template_ref, state_name) — see template_state.h
@@ -324,6 +370,21 @@ Item state_get(DocState* state, void* node, const char* name);
  * @return true if state exists and is truthy, false otherwise
  */
 bool state_get_bool(DocState* state, void* node, const char* name);
+
+/**
+ * Read lazily-created per-view interaction state. Missing ViewState means defaults.
+ */
+ViewState* view_state_get(DocState* state, View* view);
+bool view_state_get_hovered(DocState* state, View* view);
+bool view_state_get_active(DocState* state, View* view);
+bool view_state_get_focused(DocState* state, View* view);
+
+/**
+ * Writer-only per-view interaction state APIs.
+ */
+void view_state_set_hovered(DocState* state, View* view, bool hovered);
+void view_state_set_active(DocState* state, View* view, bool active);
+void view_state_set_focused(DocState* state, View* view, bool focused);
 
 /**
  * Check if a state exists
@@ -631,12 +692,27 @@ void scroll_state_set_max(DocState* state, void* pane,
                           float h_max, float v_max);
 
 /**
+ * Set a concrete view's scroll max values through ViewState.scroll.
+ * The pane argument remains a compatibility mirror for rendering.
+ */
+void scroll_state_set_max_for_view(DocState* state, View* view, void* pane,
+                                   float h_max, float v_max);
+
+/**
  * Set pane scroll position through centralized API.
  * When is_viewport is true, document-level viewport mirrors are also updated.
  */
 void scroll_state_set_position(DocState* state, void* pane,
                                float h_pos, float v_pos,
                                bool is_viewport);
+
+/**
+ * Set a concrete view's scroll position through ViewState.scroll.
+ * The pane argument remains a compatibility mirror for rendering.
+ */
+void scroll_state_set_position_for_view(DocState* state, View* view, void* pane,
+                                        float h_pos, float v_pos,
+                                        bool is_viewport);
 
 /**
  * Read pane scroll values.
@@ -676,6 +752,12 @@ void form_control_get_selection(DocState* state, View* view,
  */
 void form_control_set_selection(DocState* state, View* view,
                                 uint32_t start, uint32_t end, uint8_t direction);
+
+/**
+ * Refresh ViewState.form from a text-control mirror after lower-level text
+ * editing helpers update the compatibility projection fields.
+ */
+void form_control_sync_text_control_state(DocState* state, View* view);
 
 /**
  * Get the selected option index for a select control (-1 if none selected).

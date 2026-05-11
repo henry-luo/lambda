@@ -2195,7 +2195,9 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         html->scroller->clip.top = 0;
         html->scroller->clip.right = html->width;
         html->scroller->clip.bottom = physical_height;
-        html->scroller->pane->v_max_scroll = content_height - physical_height;
+        scroll_state_set_max_for_view((DocState*)lycon->doc->state, (View*)html,
+            html->scroller->pane, html->scroller->pane->h_max_scroll,
+            content_height - physical_height);
         log_info("%s viewport scroll: content_height=%.1f, viewport_height=%.1f, v_max_scroll=%.1f", elmt->source_loc(),
             content_height, physical_height, html->scroller->pane->v_max_scroll);
     }
