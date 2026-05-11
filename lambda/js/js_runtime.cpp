@@ -5,6 +5,7 @@
  * All functions are callable from MIR JIT compiled code.
  */
 #include "js_runtime_internal.hpp"
+#include "js_job_queue.h"
 
 extern "C" Item js_to_property_key(Item key);
 extern "C" Item js_reflect_own_keys(Item obj);
@@ -20258,8 +20259,11 @@ static void js_promise_resolve_with_value(JsPromise* p, Item value);
 // Forward declarations for promise microtask helpers
 static Item js_promise_microtask_resolve(Item next_promise_item, Item value);
 static Item js_promise_microtask_reject(Item next_promise_item, Item reason);
+static Item js_promise_finally_continue(Item next_promise_item, Item state_item, Item original_result, Item ignored);
 static Item js_resolve_callback(Item promise_idx_item, Item value);
 static Item js_reject_callback(Item promise_idx_item, Item reason);
+static void js_promise_enqueue_handler(Item handler, Item result, Item next_promise_item);
+static void js_promise_enqueue_passthrough(Item next_promise_item, JsPromiseState state, Item result);
 
 static bool js_promise_is_object_like(Item value) {
     TypeId tid = get_type_id(value);
@@ -20280,11 +20284,14 @@ static void js_promise_adopt_native(JsPromise* target, JsPromise* source) {
         js_promise_settle(target, JS_PROMISE_REJECTED, error);
         return;
     }
+    Item target_item = js_promise_to_item(target);
     if (source->state != JS_PROMISE_PENDING) {
-        js_promise_settle(target, source->state, source->result);
+        Item handler = js_new_function((void*)(source->state == JS_PROMISE_FULFILLED
+            ? js_promise_microtask_resolve : js_promise_microtask_reject), 2);
+        Item bound_handler = js_bind_function(handler, ItemNull, &target_item, 1);
+        js_promise_enqueue_handler(bound_handler, source->result, ItemNull);
         return;
     }
-    Item target_item = js_promise_to_item(target);
     if (source->then_count < 8) {
         Item resolve_fn = js_new_function((void*)js_promise_microtask_resolve, 2);
         Item reject_fn = js_new_function((void*)js_promise_microtask_reject, 2);
@@ -20321,7 +20328,7 @@ static void js_promise_enqueue_thenable_job(JsPromise* p, Item thenable, Item th
     Item runner_fn = js_new_function((void*)js_promise_thenable_job, 3);
     Item bound_args[3] = {js_promise_to_item(p), thenable, then_fn};
     Item thunk = js_bind_function(runner_fn, ItemNull, bound_args, 3);
-    js_microtask_enqueue(thunk);
+    js_enqueue_promise_job(thunk);
 }
 
 static void js_promise_resolve_with_value(JsPromise* p, Item value) {
@@ -20379,7 +20386,23 @@ static Item js_promise_finally_microtask_run(Item handler, Item next_promise_ite
         if (next) js_promise_settle(next, JS_PROMISE_REJECTED, error);
         return ItemNull;
     }
-    (void)finally_result;
+    if (!next) return ItemNull;
+
+    Item cleanup_promise = js_promise_resolve(finally_result);
+    Item continue_base = js_new_function((void*)js_promise_finally_continue, 4);
+    Item continue_args[3] = {next_promise_item, state_item, original_result};
+    Item continue_fn = js_bind_function(continue_base, ItemNull, continue_args, 3);
+
+    Item reject_base = js_new_function((void*)js_promise_microtask_reject, 2);
+    Item reject_fn = js_bind_function(reject_base, ItemNull, &next_promise_item, 1);
+
+    js_promise_then(cleanup_promise, continue_fn, reject_fn);
+    return ItemNull;
+}
+
+static Item js_promise_finally_continue(Item next_promise_item, Item state_item, Item original_result, Item ignored) {
+    (void)ignored;
+    JsPromise* next = js_get_promise(next_promise_item);
     if (next) {
         JsPromiseState orig_state = (JsPromiseState)it2i(state_item);
         js_promise_settle(next, orig_state, original_result);
@@ -20402,13 +20425,24 @@ static Item js_promise_microtask_reject(Item next_promise_item, Item reason) {
     return ItemNull;
 }
 
+// Promise reaction job for a missing handler. It preserves the original state
+// while still making pass-through settlement asynchronous.
+static Item js_promise_passthrough_run(Item next_promise_item, Item state_item, Item result) {
+    JsPromise* next = js_get_promise(next_promise_item);
+    if (next) {
+        JsPromiseState state = (JsPromiseState)it2i(state_item);
+        js_promise_settle(next, state, result);
+    }
+    return ItemNull;
+}
+
 // Enqueue a promise handler as a microtask with proper chaining.
 // Creates a bound thunk: js_promise_microtask_run(handler, result, next_promise_item)
 static void js_promise_enqueue_handler(Item handler, Item result, Item next_promise_item) {
     Item runner_fn = js_new_function((void*)js_promise_microtask_run, 3);
     Item bound_args[3] = {handler, result, next_promise_item};
     Item thunk = js_bind_function(runner_fn, ItemNull, bound_args, 3);
-    js_microtask_enqueue(thunk);
+    js_enqueue_promise_job(thunk);
 }
 
 // Enqueue a finally handler as a microtask.
@@ -20416,7 +20450,14 @@ static void js_promise_enqueue_finally(Item handler, Item next_promise_item, JsP
     Item runner_fn = js_new_function((void*)js_promise_finally_microtask_run, 4);
     Item bound_args[4] = {handler, next_promise_item, (Item){.item = i2it((int64_t)state)}, result};
     Item thunk = js_bind_function(runner_fn, ItemNull, bound_args, 4);
-    js_microtask_enqueue(thunk);
+    js_enqueue_promise_job(thunk);
+}
+
+static void js_promise_enqueue_passthrough(Item next_promise_item, JsPromiseState state, Item result) {
+    Item runner_fn = js_new_function((void*)js_promise_passthrough_run, 3);
+    Item bound_args[3] = {next_promise_item, (Item){.item = i2it((int64_t)state)}, result};
+    Item thunk = js_bind_function(runner_fn, ItemNull, bound_args, 3);
+    js_enqueue_promise_job(thunk);
 }
 
 static void js_promise_settle(JsPromise* p, JsPromiseState state, Item result) {
@@ -20435,8 +20476,7 @@ static void js_promise_settle(JsPromise* p, JsPromiseState state, Item result) {
             if (get_type_id(handler) == LMD_TYPE_FUNC) {
                 js_promise_enqueue_finally(handler, next_item, state, result);
             } else {
-                JsPromise* next = js_get_promise(next_item);
-                if (next) js_promise_settle(next, state, result);
+                js_promise_enqueue_passthrough(next_item, state, result);
             }
         } else if (get_type_id(handler) == LMD_TYPE_FUNC) {
             if (get_type_id(next_item) == LMD_TYPE_MAP) {
@@ -20447,14 +20487,11 @@ static void js_promise_settle(JsPromise* p, JsPromiseState state, Item result) {
                 Item runner_fn = js_new_function((void*)js_promise_microtask_run, 3);
                 Item bound_args[3] = {handler, result, ItemNull};
                 Item thunk = js_bind_function(runner_fn, ItemNull, bound_args, 3);
-                js_microtask_enqueue(thunk);
+                js_enqueue_promise_job(thunk);
             }
         } else {
-            // no handler for this state — propagate to next promise directly
-            JsPromise* next = js_get_promise(next_item);
-            if (next) {
-                js_promise_settle(next, state, result);
-            }
+            // no handler for this state — propagate through a Promise reaction job
+            js_promise_enqueue_passthrough(next_item, state, result);
         }
     }
 }
@@ -20591,6 +20628,23 @@ static Item js_async_resolved_value;
 extern "C" int64_t js_async_must_suspend(Item value) {
     JsPromise* p = js_get_promise(value);
     if (!p) {
+        if (js_promise_is_object_like(value)) {
+            Item wrapped = js_promise_resolve(value);
+            p = js_get_promise(wrapped);
+            if (p) {
+                if (p->state == JS_PROMISE_FULFILLED) {
+                    js_async_resolved_value = p->result;
+                    return 0;
+                }
+                if (p->state == JS_PROMISE_REJECTED) {
+                    js_throw_value(p->result);
+                    js_async_resolved_value = ItemNull;
+                    return 0;
+                }
+                js_async_resolved_value = wrapped;
+                return 1;
+            }
+        }
         js_async_resolved_value = value;
         return 0;
     }
@@ -20604,6 +20658,7 @@ extern "C" int64_t js_async_must_suspend(Item value) {
         return 0;
     }
     // Pending — must suspend
+    js_async_resolved_value = value;
     return 1;
 }
 
@@ -20739,14 +20794,13 @@ extern "C" Item js_promise_then(Item promise, Item on_fulfilled, Item on_rejecte
             // per spec: schedule as microtask even if already resolved
             js_promise_enqueue_handler(on_fulfilled, p->result, next_item);
         } else {
-            // no handler — pass through value
-            js_promise_settle(next, JS_PROMISE_FULFILLED, p->result);
+            js_promise_enqueue_passthrough(next_item, JS_PROMISE_FULFILLED, p->result);
         }
     } else {
         if (get_type_id(on_rejected) == LMD_TYPE_FUNC) {
             js_promise_enqueue_handler(on_rejected, p->result, next_item);
         } else {
-            js_promise_settle(next, JS_PROMISE_REJECTED, p->result);
+            js_promise_enqueue_passthrough(next_item, JS_PROMISE_REJECTED, p->result);
         }
     }
 
@@ -20771,7 +20825,7 @@ extern "C" Item js_promise_finally(Item promise, Item on_finally) {
             // per spec: schedule as microtask even if already settled
             js_promise_enqueue_finally(on_finally, next_item, p->state, p->result);
         } else {
-            js_promise_settle(next, p->state, p->result);
+            js_promise_enqueue_passthrough(next_item, p->state, p->result);
         }
     } else {
         // pending: store both fulfilled/rejected handlers as the same finally callback
