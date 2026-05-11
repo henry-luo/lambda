@@ -11,6 +11,7 @@
 - Rename the document-level state type to `DocState` everywhere (no legacy type name remains).
 - Introduce per-view `ViewState` for interactive state that belongs to a concrete view/element.
 - Keep `StateStore` as the single source of truth for interaction state.
+- Remove `DomElement::pseudo_state`; elements read dynamic states through their state pointer and fall back to defaults when no state exists.
 - Enforce strict writer-only mutation for both doc-level and view-level state from day one.
 - Keep event logging schema consistent across doc/view transitions, differing only by anchor identity.
 
@@ -108,16 +109,17 @@ StateStore is per document and eventually owns its own pool/arena lifecycle.
 - ViewState allocations come from the StateStore arena.
 - Writer APIs are the only allocators for ViewState records.
 - Readers must tolerate missing ViewState and interpret that as default state.
+- Elements never cache dynamic state locally; `view->view_state_ref` is only a weak pointer to canonical StateStore data.
 
 ### Weak pointers for fast read
 
 Because View and DomElement are the same struct in Radiant, a weak pointer to ViewState can live on the shared view/element object:
 
 - `view->view_state_ref` is a non-owning pointer.
-- If null, read defaults from view/dom fields.
+- If null, read the default value for that state.
 - Writer path resolves through StateStore first, then refreshes weak pointer.
 
-No local state cache should become a second source of truth.
+No local state cache should become a second source of truth. A weak state pointer may speed lookup, but it must not duplicate or own state values.
 
 ## Single Source of Truth Rules
 
@@ -126,6 +128,7 @@ No local state cache should become a second source of truth.
 - No direct field mutation for DocState.
 - No direct field mutation for ViewState.
 - No direct mutation to mirrored local caches that bypass StateStore.
+- No `DomElement::pseudo_state` cache or mirror; style/state queries must read StateStore state through the state pointer and use defaults when missing.
 - All mutations go through public writer APIs with invariant checks and logging.
 
 ### Writer API pattern
@@ -137,7 +140,7 @@ No local state cache should become a second source of truth.
   - value normalization and bounds checks;
   - dirty/repaint/reflow scheduling;
   - event-state log emission;
-  - pseudo-state mirror updates (derived only).
+  - style invalidation for state-dependent selectors.
 
 ## Event Log Schema Consistency
 
@@ -164,13 +167,20 @@ Rules:
 - View-level transitions set `scope = "view"` and provide `view_id`.
 - All other envelope fields remain consistent.
 
-## Pseudo-state and Mirrors
+## Pseudo-state Reads
 
-`DomElement::pseudo_state` remains a derived mirror only.
+`DomElement::pseudo_state` should be removed. It is a local dynamic-state cache and conflicts with StateStore as the single source of truth.
 
-- Writer APIs update canonical state first (DocState/ViewState).
-- Then pseudo-state mirrors are synchronized.
-- Any local mirror update code that bypasses StateStore must be removed.
+Pseudo-class matching and state queries must resolve dynamic state through the element/view state pointer:
+
+- If `view->view_state_ref` exists and matches the view id, read the requested state from that `ViewState`.
+- If the weak pointer is missing or stale, resolve through the document `StateStore` by view id.
+- If no `ViewState` exists, return the default value for that pseudo-state.
+- Static/intrinsic attributes such as initially disabled or readonly may still seed defaults during view-state creation, but they do not become mutable caches.
+
+Writer APIs update canonical StateStore state first. They then invalidate style/layout/rendering for selectors that depend on changed pseudo-state, without copying the state into `DomElement`.
+
+Any local mirror update code that bypasses StateStore must be removed.
 
 ## Migration Plan (Phase 5)
 
@@ -204,6 +214,7 @@ Rules:
 
 - Delete direct local cache writes that duplicate interaction state.
 - Keep only weak pointer refreshes to canonical ViewState.
+- Remove `DomElement::pseudo_state` and migrate pseudo-class matching to StateStore-backed reads with default fallback.
 
 ### Step 5.7 Enforce strict mutation policy
 
@@ -222,7 +233,7 @@ Rules:
 - If a ViewState exists, its `view_id` maps to a live view during a cascade.
 - `dropdown_open` implies valid `selected_index`/`hover_index` bounds.
 - Scroll state bounds are normalized (`0 <= pos <= max`).
-- Pseudo-state mirrors are derivable from canonical state.
+- Pseudo-state values are resolved from canonical StateStore state or default values; no element-local pseudo-state mirror exists.
 
 ## Deferred Work
 
@@ -233,6 +244,7 @@ Rules:
 
 - No direct state mutation outside writer APIs for DocState and ViewState.
 - StateStore is the sole canonical owner of document interaction state.
+- `DomElement::pseudo_state` is removed; no dynamic pseudo-state values are cached on elements.
 - ViewState allocation remains sparse (lazy, no default-value duplication).
 - Event logs remain schema-consistent and replay-friendly across scopes.
 - Existing baseline tests remain green after each migration step.

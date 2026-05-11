@@ -5229,8 +5229,8 @@ void rebuild_lambda_doc(UiContext* uicon) {
     // Full rebuild: mark dirty tracker for full repaint so the main loop does a full render.
     if (state) {
         state->dirty_tracker.full_repaint = true;
-        state->is_dirty = true;
-        state->needs_reflow = false;  // layout already done by rebuild
+        doc_state_mark_dirty(state);
+        doc_state_clear_reflow(state);  // layout already done by rebuild
         reflow_clear(state);          // discard stale pending reflow requests
     }
     auto t_end = high_resolution_clock::now();
@@ -5518,8 +5518,8 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
 
     // Skip render here — let the main loop handle it via render().
     if (state) {
-        state->is_dirty = true;
-        state->needs_reflow = false;  // layout already done by rebuild
+        doc_state_mark_dirty(state);
+        doc_state_clear_reflow(state);  // layout already done by rebuild
         reflow_clear(state);          // discard stale pending reflow requests
     }
     bool has_selective = state && !state->dirty_tracker.full_repaint

@@ -195,10 +195,7 @@ static void sync_viewport_scroll_state(EventContext* evcon) {
 
     // Keep viewport scroll in the centralized state store and the document
     // reflow target so incremental relayout does not snap back to top.
-    state->scroll_x = scroll_x;
-    state->scroll_y = scroll_y;
-    doc->pending_viewport_scroll_x = scroll_x;
-    doc->pending_viewport_scroll_y = scroll_y;
+    doc_state_sync_viewport_scroll(state, doc, scroll_x, scroll_y);
 }
 
 void target_children(EventContext* evcon, View* view) {
@@ -1715,6 +1712,11 @@ static void post_html_handler_rebuild(EventContext* evcon,
     // Clear interaction targets before freeing views so transition helpers can
     // still update pseudo-state mirrors on the old tree.
     if (state) {
+        doc_state_close_dropdown(state, NULL);
+        doc_state_close_context_menu(state);
+        doc_state_set_hover_target(state, NULL);
+        doc_state_set_active_target(state, NULL);
+        doc_state_set_drag_state(state, NULL, false);
         if (focus_has_current(state)) {
             focus_clear(state);
         } else {
@@ -1732,11 +1734,6 @@ static void post_html_handler_rebuild(EventContext* evcon,
 
     // Clear stale view pointers in DocState — old views are now freed
     if (state) {
-        state->hover_target = nullptr;
-        state->active_target = nullptr;
-        state->drag_target = nullptr;
-        state->is_dragging = false;
-        state->open_dropdown = nullptr;
         if (state->cursor) state->cursor->view = nullptr;
         if (state->drag_drop) {
             state->drag_drop->source_view = nullptr;
@@ -2186,7 +2183,7 @@ static void sync_pseudo_state(View* view, uint32_t pseudo_flag, bool set) {
 
         // Always mark for repaint
         dirty_mark_element(state, view);
-        state->is_dirty = true;
+        doc_state_mark_dirty(state);
     }
 }
 
@@ -2235,8 +2232,7 @@ void update_hover_state(EventContext* evcon, View* new_target) {
             0, 0, false, false, false, false, 0);
     }
 
-    state->hover_target = new_target;
-    state->needs_repaint = true;
+    doc_state_set_hover_target(state, new_target);
 }
 
 /**
@@ -2254,7 +2250,7 @@ void update_active_state(EventContext* evcon, View* target, bool is_active) {
             sync_pseudo_state(node, PSEUDO_STATE_ACTIVE, true);
             node = (View*)node->parent;
         }
-        state->active_target = target;
+        doc_state_set_active_target(state, target);
         log_debug("update_active_state: set active on %p", target);
     } else {
         // Clear :active on previous active target
@@ -2267,11 +2263,9 @@ void update_active_state(EventContext* evcon, View* target, bool is_active) {
                 node = (View*)node->parent;
             }
         }
-        state->active_target = NULL;
+        doc_state_set_active_target(state, NULL);
         log_debug("update_active_state: cleared active");
     }
-
-    state->needs_repaint = true;
 }
 
 // ============================================================================
@@ -2493,7 +2487,7 @@ static bool handle_checkbox_radio_click(EventContext* evcon, View* target) {
         log_debug("handle_checkbox_radio_click: input->is_block()=%d view_type=%d", input->is_block(), input->view_type);
 
         log_debug("handle_checkbox_radio_click: toggled checkbox to %s", new_state ? "checked" : "unchecked");
-        state->needs_repaint = true;
+        doc_state_request_repaint(state);
         return true;
     }
 
@@ -2519,7 +2513,7 @@ static bool handle_checkbox_radio_click(EventContext* evcon, View* target) {
             sync_pseudo_state(input, PSEUDO_STATE_CHECKED, true);
 
             log_debug("handle_checkbox_radio_click: checked radio name=%s", name ? name : "(none)");
-            state->needs_repaint = true;
+            doc_state_request_repaint(state);
         }
         return true;
     }
@@ -2638,8 +2632,8 @@ static void calculate_dropdown_dimensions(ViewBlock* select, DocState* state, fl
     float option_height = select->height;
 
     // Calculate popup dimensions
-    state->dropdown_width = select->width * scale;
-    state->dropdown_height = visible_count * option_height * scale;
+    doc_state_set_dropdown_geometry(state, state->dropdown_x, state->dropdown_y,
+        select->width * scale, visible_count * option_height * scale);
 }
 
 /**
@@ -2666,24 +2660,18 @@ static bool handle_select_click(EventContext* evcon, View* target) {
     if (state->open_dropdown == select_view) {
         // Close the dropdown
         log_debug("handle_select_click: closing dropdown");
-        state->open_dropdown = nullptr;
-        form_control_close_dropdown(state, (View*)select);
-        state->needs_repaint = true;
+        doc_state_close_dropdown(state, (View*)select);
         return true;
     }
 
     // Close any other open dropdown first
     if (state->open_dropdown) {
-        ViewBlock* prev_select = (ViewBlock*)state->open_dropdown;
-        if (prev_select->form) {
-            form_control_close_dropdown(state, (View*)prev_select);
-        }
+        doc_state_close_dropdown(state, state->open_dropdown);
     }
 
     // Open this dropdown
     log_debug("handle_select_click: opening dropdown with %d options", select->form->option_count);
-    state->open_dropdown = select_view;
-    form_control_open_dropdown(state, (View*)select);
+    doc_state_open_dropdown(state, (View*)select);
 
     // Calculate position (below the select, in absolute screen coords)
     // Walk up parent chain to get absolute position
@@ -2699,11 +2687,9 @@ static bool handle_select_click(EventContext* evcon, View* target) {
         parent = parent->parent;
     }
 
-    state->dropdown_x = abs_x * scale;
-    state->dropdown_y = abs_y * scale;
+    doc_state_set_dropdown_geometry(state, abs_x * scale, abs_y * scale,
+        state->dropdown_width, state->dropdown_height);
     calculate_dropdown_dimensions(select, state, scale);
-
-    state->needs_repaint = true;
     return true;
 }
 
@@ -2747,8 +2733,7 @@ static bool handle_dropdown_option_click(EventContext* evcon, float mouse_x, flo
         form_control_set_selected_index(state, (View*)select, clicked_index);
 
         // Close dropdown
-        state->open_dropdown = nullptr;
-        form_control_close_dropdown(state, (View*)select);
+        doc_state_close_dropdown(state, (View*)select);
         return true;
     }
 
@@ -2817,14 +2802,12 @@ static bool handle_dropdown_key(EventContext* evcon, int key) {
     case RDT_KEY_ENTER:
         if (hover >= 0 && hover < count) {
             form_control_set_selected_index(state, (View*)select, hover);
-            state->open_dropdown = nullptr;
-            form_control_close_dropdown(state, (View*)select);
+            doc_state_close_dropdown(state, (View*)select);
         }
         return true;
 
     case RDT_KEY_ESCAPE:
-        state->open_dropdown = nullptr;
-        form_control_close_dropdown(state, (View*)select);
+        doc_state_close_dropdown(state, (View*)select);
         return true;
     }
 
@@ -2874,8 +2857,7 @@ static void close_dropdown_if_outside(EventContext* evcon, float mouse_x, float 
 
     // Click outside - close dropdown
     log_debug("close_dropdown_if_outside: closing dropdown");
-    state->open_dropdown = nullptr;
-    form_control_close_dropdown(state, (View*)select);
+    doc_state_close_dropdown(state, (View*)select);
 }
 
 /**
@@ -3013,8 +2995,7 @@ void update_drag_state(EventContext* evcon, View* target, bool is_dragging) {
     DocState* state = (DocState*)evcon->ui_context->document->state;
     if (!state) return;
 
-    state->drag_target = is_dragging ? target : NULL;
-    state->is_dirty = true;
+    doc_state_set_drag_state(state, target, is_dragging);
 
     log_debug("update_drag_state: dragging=%d, target=%p", is_dragging, target);
 }
@@ -4862,7 +4843,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                                                       true);
                             log_info("browse_nav: scrolled to #%s at y=%.0f", fragment_id,
                                      pane->v_scroll_position);
-                            uicon->document->state->is_dirty = true;
+                            doc_state_mark_dirty(uicon->document->state);
                         }
                     } else {
                         log_warn("browse_nav: element #%s found but no view for it", fragment_id);
@@ -4945,7 +4926,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             }
                         }
                         free_document(old_doc);
-                        uicon->document->state->is_dirty = true;
+                        doc_state_mark_dirty(uicon->document->state);
                     }
                     else {
                         log_debug("iframe view has no embed");
@@ -6269,7 +6250,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
     }
 
     if (evcon.need_repaint) {
-        uicon->document->state->is_dirty = true;
+        doc_state_mark_dirty(uicon->document->state);
         to_repaint();
     }
     log_debug("end of event %d", event->type);

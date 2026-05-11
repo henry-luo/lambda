@@ -664,6 +664,39 @@ View* focus_get_visible(DocState* state);
 bool focus_within(DocState* state, View* view);
 
 // ============================================================================
+// Doc-Level Interaction Target API
+// ============================================================================
+
+/**
+ * Update document-level hover/active/drag owners through the state store.
+ * Per-view pseudo bits remain synchronized by the event paths through
+ * state_set_bool()/ViewState writers.
+ */
+void doc_state_set_hover_target(DocState* state, View* target);
+void doc_state_set_active_target(DocState* state, View* target);
+void doc_state_set_drag_state(DocState* state, View* target, bool dragging);
+
+// ============================================================================
+// Doc-Level Scheduling / Viewport State API
+// ============================================================================
+
+/**
+ * Centralized writers for document dirty/reflow/repaint scheduling flags.
+ */
+void doc_state_mark_dirty(DocState* state);
+void doc_state_request_repaint(DocState* state);
+void doc_state_request_reflow(DocState* state);
+void doc_state_clear_reflow(DocState* state);
+void doc_state_clear_render_flags(DocState* state);
+void doc_state_clear_repaint(DocState* state);
+
+/**
+ * Synchronize document-level viewport scroll mirrors and pending relayout target.
+ */
+void doc_state_sync_viewport_scroll(DocState* state, DomDocument* doc,
+                                    float scroll_x, float scroll_y);
+
+// ============================================================================
 // Form and Scroll State API (centralized writers)
 // ============================================================================
 
@@ -678,6 +711,11 @@ bool form_control_get_checked(DocState* state, View* view);
  * This is the only supported writer path for checked state transitions.
  */
 void form_control_set_checked(DocState* state, View* view, bool checked);
+
+/**
+ * Refresh derived :checked pseudo-state mirror after canonical checked updates.
+ */
+void form_control_sync_checked_mirror(DocState* state, View* view, bool checked);
 
 /**
  * Attach a scroll pane to the central state store for fast-read access.
@@ -822,6 +860,35 @@ void form_control_set_required(DocState* state, View* view, bool required);
 // ============================================================================
 // Dropdown State Machine API (open, close, hover tracking)
 // ============================================================================
+
+/**
+ * Set or clear the document-level dropdown owner through the state store.
+ * These APIs also synchronize the owning select control's ViewState.form.
+ */
+void doc_state_open_dropdown(DocState* state, View* view);
+void doc_state_close_dropdown(DocState* state, View* view);
+
+/**
+ * Update document-level dropdown overlay geometry through the state store.
+ */
+void doc_state_set_dropdown_geometry(DocState* state,
+                                     float x, float y, float width, float height);
+
+// ============================================================================
+// Context Menu DocState API (doc-scoped overlay state)
+// ============================================================================
+
+/**
+ * Open or close the document-level native context menu overlay.
+ */
+void doc_state_open_context_menu(DocState* state, View* target,
+                                 float x, float y, float width, float height);
+void doc_state_close_context_menu(DocState* state);
+
+/**
+ * Update the highlighted context-menu item (-1 clears hover).
+ */
+void doc_state_set_context_menu_hover(DocState* state, int hover_index);
 
 /**
  * Open a select control's dropdown menu.

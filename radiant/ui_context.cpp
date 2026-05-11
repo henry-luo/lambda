@@ -194,8 +194,7 @@ extern "C" void radiant_state_request_repaint(DocState* state) {
         // dirty region; paths that bypass the event pipeline (macOS IME,
         // async resource loaders) have no opportunity to mark dirty
         // regions, so flip `is_dirty` directly.
-        state->needs_repaint = true;
-        state->is_dirty = true;
+        doc_state_request_repaint(state);
     }
 }
 

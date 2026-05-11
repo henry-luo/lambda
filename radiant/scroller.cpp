@@ -185,8 +185,7 @@ void scrollpane_mouse_down(EventContext* evcon, ViewBlock* block) {
             sp->h_is_dragging = true; // start dragging the handle
             sp->drag_start_x = event->x; // capture the current mouse X position
             sp->h_drag_start_scroll = sp->h_scroll_position;
-            evcon->ui_context->document->state->is_dragging = true;
-            evcon->ui_context->document->state->drag_target = (View*)block;
+            doc_state_set_drag_state(evcon->ui_context->document->state, (View*)block, true);
         }
     }
     else if (sp->is_v_hovered) {
@@ -204,8 +203,7 @@ void scrollpane_mouse_down(EventContext* evcon, ViewBlock* block) {
             sp->v_is_dragging = true; // start dragging the handle
             sp->drag_start_y = event->y; // capture the current mouse Y position
             sp->v_drag_start_scroll = sp->v_scroll_position;
-            evcon->ui_context->document->state->is_dragging = true;
-            evcon->ui_context->document->state->drag_target = (View*)block;
+            doc_state_set_drag_state(evcon->ui_context->document->state, (View*)block, true);
         }
     }
 }
@@ -217,8 +215,7 @@ void scrollpane_mouse_up(EventContext* evcon, ViewBlock* block) {
         sp->drag_start_x = 0;  sp->h_drag_start_scroll = 0;
         sp->v_is_dragging = false;
         sp->drag_start_y = 0;  sp->v_drag_start_scroll = 0;
-        evcon->ui_context->document->state->is_dragging = false;
-        evcon->ui_context->document->state->drag_target = NULL;
+        doc_state_set_drag_state(evcon->ui_context->document->state, NULL, false);
     }
 }
 

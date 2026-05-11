@@ -883,10 +883,7 @@ void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, DocState* s
     float h = visible_count * option_height;
 
     // Update state with actual dropdown position for hit testing
-    state->dropdown_x = x;
-    state->dropdown_y = y;
-    state->dropdown_width = w;
-    state->dropdown_height = h;
+    doc_state_set_dropdown_geometry(state, x, y, w, h);
 
     log_debug("[FORM] dropdown clip before override: (%.1f, %.1f, %.1f, %.1f)",
         rdcon->block.clip.left, rdcon->block.clip.top, rdcon->block.clip.right, rdcon->block.clip.bottom);

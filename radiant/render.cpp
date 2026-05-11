@@ -4130,9 +4130,7 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
 
     dl_destroy(&display_list);
     render_clean_up(&rdcon);
-    if (uicon->document->state) {
-        uicon->document->state->is_dirty = false;
-    }
+    if (uicon->document->state) doc_state_clear_render_flags(uicon->document->state);
 
     auto t_end = high_resolution_clock::now();
     log_info("[TIMING] render_html_doc total: %.1fms%s", duration<double, std::milli>(t_end - t_start).count(),

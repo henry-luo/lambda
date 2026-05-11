@@ -307,7 +307,7 @@ void reflow_html_doc(DomDocument* doc) {
     // Mark dirty so the main loop knows to repaint.
     if (doc->state) {
         DocState* state = (DocState*)doc->state;
-        state->is_dirty = true;
+        doc_state_mark_dirty(state);
     }
 }
 
@@ -661,7 +661,7 @@ void render(GLFWwindow* window) {
         }
         // new surface is blank — force full repaint (not selective)
         if (ui_context.document && ui_context.document->state) {
-            ui_context.document->state->is_dirty = true;
+            doc_state_mark_dirty(ui_context.document->state);
         }
         log_debug("Reflow time: %.2f ms", (glfwGetTime() - start_time) * 1000);
     }
@@ -675,7 +675,7 @@ void render(GLFWwindow* window) {
         if (ui_context.document) {
             reflow_html_doc(ui_context.document);
         }
-        state->needs_reflow = false;
+        doc_state_clear_reflow(state);
         log_debug("Incremental reflow time: %.2f ms", (glfwGetTime() - start_time) * 1000);
     }
 
@@ -685,13 +685,11 @@ void render(GLFWwindow* window) {
          (ui_context.document->state->needs_repaint &&
           dirty_has_regions(&ui_context.document->state->dirty_tracker)))) {
         render_html_doc(&ui_context, ui_context.document->view_tree, NULL);
-        ui_context.document->state->is_dirty = false;
-        ui_context.document->state->needs_repaint = false;
         // Phase 19: clear dirty tracker after render (for caret-only repaints)
-        dirty_clear(&ui_context.document->state->dirty_tracker);
+        doc_state_clear_render_flags(ui_context.document->state);
     } else if (ui_context.document && ui_context.document->state) {
         // Clear stale needs_repaint when there are no dirty regions to render
-        ui_context.document->state->needs_repaint = false;
+        doc_state_clear_repaint(ui_context.document->state);
 
         // Video-only dirty path: skip full DL rebuild, just blit new video frames
         if (ui_context.document->state->has_active_video &&
@@ -1128,7 +1126,7 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
 
             bool still_active = animation_scheduler_tick(state->animation_scheduler,
                                                          currentTime, &state->dirty_tracker);
-            state->needs_repaint = true;
+            doc_state_request_repaint(state);
             do_redraw = 1;
         }
 
@@ -1154,7 +1152,7 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
                 // mark document dirty so render_html_doc rebuilds the DL
                 // (the post-composite blit needs fresh DL_WEBVIEW_LAYER_PLACEHOLDER items)
                 if (ui_context.document->state) {
-                    ui_context.document->state->is_dirty = true;
+                    doc_state_mark_dirty(ui_context.document->state);
                 }
             }
         }
