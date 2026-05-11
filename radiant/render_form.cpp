@@ -242,14 +242,16 @@ static uint32_t utf8_byte_offset_for_codepoints(const char* text, uint32_t len,
 static char* build_preedit_display_text(FormControlProp* form,
                                         const char* value,
                                         uint32_t value_len,
+                                        uint32_t selection_start,
+                                        uint32_t selection_end,
                                         uint32_t* out_preedit_start,
                                         uint32_t* out_preedit_end,
                                         uint32_t* out_caret_byte) {
     if (!form || !form->preedit_utf8 || form->preedit_len == 0) return nullptr;
     if (!value) { value = ""; value_len = 0; }
 
-    uint32_t start = tc_utf16_to_utf8_offset(value, value_len, form->selection_start);
-    uint32_t end = tc_utf16_to_utf8_offset(value, value_len, form->selection_end);
+    uint32_t start = tc_utf16_to_utf8_offset(value, value_len, selection_start);
+    uint32_t end = tc_utf16_to_utf8_offset(value, value_len, selection_end);
     if (start > end) { uint32_t t = start; start = end; end = t; }
     if (start > value_len) start = value_len;
     if (end > value_len) end = value_len;
@@ -320,6 +322,10 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
     // for caret-byte→codepoint mapping.
     const char* value_text = form->value ? form->value : "";
     uint32_t value_len = (uint32_t)strlen(value_text);
+    DocState* state = rdcon->ui_context && rdcon->ui_context->document
+        ? (DocState*)rdcon->ui_context->document->state : nullptr;
+    uint32_t selection_start = 0, selection_end = 0;
+    form_control_get_selection(state, (View*)block, &selection_start, &selection_end, NULL);
     uint32_t preedit_start = 0;
     uint32_t preedit_end = 0;
     uint32_t preedit_caret_byte = 0;
@@ -329,6 +335,7 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
     bool is_placeholder = false;
     if (has_preedit) {
         preedit_display = build_preedit_display_text(form, value_text, value_len,
+                                                     selection_start, selection_end,
                                                      &preedit_start, &preedit_end,
                                                      &preedit_caret_byte);
         if (preedit_display) src_text = preedit_display;
@@ -357,8 +364,6 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
     // F4: compute caret X (logical, before scroll) so we can clamp scroll_x
     // to keep the caret inside the content box. Done up-front so the same
     // scroll offset is applied to text, selection and caret rendering.
-    DocState* state = rdcon->ui_context && rdcon->ui_context->document
-        ? (DocState*)rdcon->ui_context->document->state : nullptr;
     bool focused_here = state && focus_get(state) == (View*)block;
     float caret_x_logical = 0.0f;
     int caret_byte = 0;
@@ -390,20 +395,20 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
     // Draw selection highlight BEFORE the text so glyphs render on top
     // of the highlight (matches native widgets and CSS ::selection).
     if (focused_here && !has_preedit && !is_placeholder && form->tc_initialized
-        && form->selection_start != form->selection_end
+        && selection_start != selection_end
         && text && *text) {
         uint32_t a8_src = tc_utf16_to_utf8_offset(form->current_value
                                                       ? form->current_value : src_text,
                                                   form->current_value
                                                       ? form->current_value_len
                                                       : (uint32_t)strlen(src_text),
-                                                  form->selection_start);
+                                                  selection_start);
         uint32_t b8_src = tc_utf16_to_utf8_offset(form->current_value
                                                       ? form->current_value : src_text,
                                                   form->current_value
                                                       ? form->current_value_len
                                                       : (uint32_t)strlen(src_text),
-                                                  form->selection_end);
+                                                  selection_end);
         int a8 = is_password ? password_mask_byte_offset(src_text, (int)a8_src) : (int)a8_src;
         int b8 = is_password ? password_mask_byte_offset(src_text, (int)b8_src) : (int)b8_src;
         float ax = text_x + measure_input_text_width(rdcon, block->font, text, a8) * s
@@ -471,21 +476,23 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
  * Render a checkbox control.
  */
 void render_checkbox(RenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
+    (void)form;
     float s = rdcon->scale;
     float x = rdcon->block.x + block->x * s;
     float y = rdcon->block.y + block->y * s;
     float size = block->width * s;
 
+    DocState* state = rdcon->ui_context && rdcon->ui_context->document
+        ? (DocState*)rdcon->ui_context->document->state : nullptr;
+    bool disabled = form_control_is_disabled(state, (View*)block);
+    bool checked = form_control_get_checked(state, (View*)block);
+
     // Background
-    Color bg = form->disabled ? make_color(224, 224, 224) : make_color(255, 255, 255);
+    Color bg = disabled ? make_color(224, 224, 224) : make_color(255, 255, 255);
     fill_rect(rdcon, x, y, size, size, bg);
 
     // 3D inset border
     draw_3d_border(rdcon, x, y, size, size, true, 1 * s);
-
-    DocState* state = rdcon->ui_context && rdcon->ui_context->document
-        ? (DocState*)rdcon->ui_context->document->state : nullptr;
-    bool checked = form_control_get_checked(state, (View*)block);
 
     // Checkmark if checked - draw using RdtVector stroked path
     if (checked) {
@@ -503,7 +510,7 @@ void render_checkbox(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
         rdt_path_line_to(p, cx2, cy2);
         rdt_path_line_to(p, cx3, cy3);
 
-        Color check_color = form->disabled ? make_color(128, 128, 128) : make_color(0, 0, 0);
+        Color check_color = disabled ? make_color(128, 128, 128) : make_color(0, 0, 0);
         rc_stroke_path(rdcon, p, check_color, 2.0f * s, RDT_CAP_ROUND, RDT_JOIN_ROUND, NULL, 0, NULL);
         rdt_path_free(p);
     }
@@ -533,6 +540,7 @@ void render_checkbox(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
  * Render a radio button control.
  */
 void render_radio(RenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
+    (void)form;
     float s = rdcon->scale;
     float x = rdcon->block.x + block->x * s;
     float y = rdcon->block.y + block->y * s;
@@ -543,18 +551,19 @@ void render_radio(RenderContext* rdcon, ViewBlock* block, FormControlProp* form)
     float cy = y + size / 2;
     float radius = size / 2;
 
+    DocState* state = rdcon->ui_context && rdcon->ui_context->document
+        ? (DocState*)rdcon->ui_context->document->state : nullptr;
+    bool disabled = form_control_is_disabled(state, (View*)block);
+    bool checked = form_control_get_checked(state, (View*)block);
+
     // Background circle
-    Color bg = form->disabled ? make_color(224, 224, 224) : make_color(255, 255, 255);
+    Color bg = disabled ? make_color(224, 224, 224) : make_color(255, 255, 255);
     fill_circle(rdcon, cx, cy, radius, bg);
 
     // Border circle
     Color border_color = make_color(118, 118, 118);
     float bw = 1 * s;
     stroke_circle(rdcon, cx, cy, radius - bw / 2, border_color, bw);
-
-    DocState* state = rdcon->ui_context && rdcon->ui_context->document
-        ? (DocState*)rdcon->ui_context->document->state : nullptr;
-    bool checked = form_control_get_checked(state, (View*)block);
 
     // Inner dot if checked
     if (checked) {
@@ -592,11 +601,14 @@ void render_button(RenderContext* rdcon, ViewBlock* block, FormControlProp* form
     bool has_css_border = block->bound && block->bound->border &&
         (block->bound->border->width.top > 0 || block->bound->border->width.right > 0 ||
          block->bound->border->width.bottom > 0 || block->bound->border->width.left > 0);
+    DocState* state = rdcon->ui_context && rdcon->ui_context->document
+        ? (DocState*)rdcon->ui_context->document->state : nullptr;
+    bool disabled = form_control_is_disabled(state, (View*)block);
 
     if (!has_css_background) {
         // No CSS background - render default button appearance
         // Background (light gray)
-        Color bg = form->disabled ? make_color(200, 200, 200) : make_color(224, 224, 224);
+        Color bg = disabled ? make_color(200, 200, 200) : make_color(224, 224, 224);
         fill_rect(rdcon, x, y, w, h, bg);
     }
     if (!has_css_background && !has_css_border) {
@@ -645,8 +657,6 @@ void render_button(RenderContext* rdcon, ViewBlock* block, FormControlProp* form
     }
 
     // Focus ring (Tab navigation indicator).
-    DocState* state = rdcon->ui_context && rdcon->ui_context->document
-        ? (DocState*)rdcon->ui_context->document->state : nullptr;
     if (state && focus_get(state) == (View*)block) {
         float ring = 2.0f * s;
         Color ring_color = make_color(0x1A, 0x73, 0xE8, 0xFF);
@@ -688,10 +698,14 @@ void render_select(RenderContext* rdcon, ViewBlock* block, FormControlProp* form
     bool has_css_border = block->bound && block->bound->border &&
         (block->bound->border->width.top > 0 || block->bound->border->width.right > 0 ||
          block->bound->border->width.bottom > 0 || block->bound->border->width.left > 0);
+    DocState* state = rdcon->ui_context && rdcon->ui_context->document
+        ? (DocState*)rdcon->ui_context->document->state : nullptr;
+    bool disabled = form_control_is_disabled(state, (View*)block);
+    int selected_index = form_control_get_selected_index(state, (View*)block);
 
     float bw = 1 * s;
     if (!has_css_background) {
-        Color bg = form->disabled ? make_color(235, 235, 228) : make_color(255, 255, 255);
+        Color bg = disabled ? make_color(235, 235, 228) : make_color(255, 255, 255);
         fill_rect(rdcon, x, y, w, h, bg);
     }
     if (!has_css_border) {
@@ -727,8 +741,8 @@ void render_select(RenderContext* rdcon, ViewBlock* block, FormControlProp* form
     }
 
     // Render selected option text
-    if (block->font && form->selected_index >= 0) {
-        const char* selected_text = get_option_text_at_index(block, form->selected_index);
+    if (block->font && selected_index >= 0) {
+        const char* selected_text = get_option_text_at_index(block, selected_index);
         if (selected_text) {
             // Use actual CSS padding so text starts after the author-specified
             // left padding and is reserved on the right for any UA arrow well
@@ -758,7 +772,7 @@ void render_select(RenderContext* rdcon, ViewBlock* block, FormControlProp* form
             // fallback to dark grey when disabled, black otherwise. Matches
             // Chrome UA default behavior.
             Color text_color;
-            if (form->disabled) {
+            if (disabled) {
                 text_color = make_color(109, 109, 109);
             } else if (block->in_line) {
                 text_color.r = block->in_line->color.r;
@@ -783,7 +797,7 @@ void render_select(RenderContext* rdcon, ViewBlock* block, FormControlProp* form
         }
     }
 
-    log_debug("[FORM] render_select at (%.1f, %.1f) size %.1fx%.1f selected=%d", x, y, w, h, form->selected_index);
+    log_debug("[FORM] render_select at (%.1f, %.1f) size %.1fx%.1f selected=%d", x, y, w, h, selected_index);
 }
 
 /**
@@ -846,11 +860,13 @@ static const char* get_option_text_at_index(ViewBlock* select, int index) {
  * Called separately from render_select to ensure it's drawn on top.
  */
 void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, DocState* state) {
-    if (!select || !select->form || !select->form->dropdown_open) return;
     if (!state) return;
+    if (!select || !select->form || !form_control_is_dropdown_open(state, (View*)select)) return;
 
     float s = rdcon->scale;
     FormControlProp* form = select->form;
+    int selected_index = form_control_get_selected_index(state, (View*)select);
+    int hover_index = form_control_get_hover_index(state, (View*)select);
 
     // Calculate dropdown position relative to the select element
     // Walk up parent chain to get absolute position, then apply scale
@@ -864,8 +880,12 @@ void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, DocState* s
             abs_y += pblock->y;
             // Account for scroll in parent containers
             if (pblock->scroller && pblock->scroller->pane) {
-                abs_y -= pblock->scroller->pane->v_scroll_position;
-                abs_x -= pblock->scroller->pane->h_scroll_position;
+                DocState* scroll_state = pblock->doc ? pblock->doc->state : NULL;
+                float scroll_x = 0.0f, scroll_y = 0.0f;
+                scroll_state_get_position_for_view(scroll_state, (View*)pblock,
+                    pblock->scroller->pane, &scroll_x, &scroll_y, NULL, NULL);
+                abs_y -= scroll_y;
+                abs_x -= scroll_x;
             }
         }
         parent = parent->parent;
@@ -912,12 +932,12 @@ void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, DocState* s
         float opt_y = y + i * option_height;
 
         // Highlight hovered option
-        if (i == form->hover_index) {
+        if (i == hover_index) {
             Color hover_bg = make_color(0, 120, 215);  // Blue highlight
             fill_rect(rdcon, x + bw, opt_y + bw, w - 2 * bw, option_height - bw, hover_bg);
         }
         // Indicate selected option with checkmark or different style
-        else if (i == form->selected_index) {
+        else if (i == selected_index) {
             Color selected_bg = make_color(230, 230, 230);  // Light gray
             fill_rect(rdcon, x + bw, opt_y + bw, w - 2 * bw, option_height - bw, selected_bg);
         }
@@ -926,7 +946,7 @@ void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, DocState* s
         const char* opt_text = get_option_text_at_index(select, i);
         if (opt_text && select->font) {
             // Text color (white for hovered, black otherwise)
-            Color text_color = (i == form->hover_index) ? make_color(255, 255, 255) : make_color(0, 0, 0);
+            Color text_color = (i == hover_index) ? make_color(255, 255, 255) : make_color(0, 0, 0);
 
             // Calculate text position with padding
             float text_padding = 6 * s;
@@ -1317,11 +1337,15 @@ void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
  * Render a range slider control.
  */
 void render_range(RenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
+    (void)form;
     float s = rdcon->scale;
     float x = rdcon->block.x + block->x * s;
     float y = rdcon->block.y + block->y * s;
     float w = block->width * s;
     float h = block->height * s;
+    DocState* state = rdcon->ui_context && rdcon->ui_context->document
+        ? (DocState*)rdcon->ui_context->document->state : nullptr;
+    float range_value = form_control_get_range_value(state, (View*)block);
 
     // Track
     float track_height = FormDefaults::RANGE_TRACK_HEIGHT * s;
@@ -1331,13 +1355,13 @@ void render_range(RenderContext* rdcon, ViewBlock* block, FormControlProp* form)
 
     // Thumb
     float thumb_size = FormDefaults::RANGE_THUMB_SIZE * s;
-    float thumb_x = x + form->range_value * (w - thumb_size);
+    float thumb_x = x + range_value * (w - thumb_size);
     float thumb_y = y + (h - thumb_size) / 2;
     Color thumb_color = make_color(240, 240, 240);
     fill_rect(rdcon, thumb_x, thumb_y, thumb_size, thumb_size, thumb_color);
     draw_3d_border(rdcon, thumb_x, thumb_y, thumb_size, thumb_size, false, 1 * s);
 
-    log_debug("[FORM] render_range at (%.1f, %.1f) value=%.2f", x, y, form->range_value);
+    log_debug("[FORM] render_range at (%.1f, %.1f) value=%.2f", x, y, range_value);
 }
 
 /**

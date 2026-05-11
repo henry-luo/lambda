@@ -2195,11 +2195,16 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         html->scroller->clip.top = 0;
         html->scroller->clip.right = html->width;
         html->scroller->clip.bottom = physical_height;
-        scroll_state_set_max_for_view((DocState*)lycon->doc->state, (View*)html,
-            html->scroller->pane, html->scroller->pane->h_max_scroll,
-            content_height - physical_height);
+        DocState* state = (DocState*)lycon->doc->state;
+        float h_max = 0.0f, v_max = 0.0f;
+        scroll_state_get_position_for_view(state, (View*)html, html->scroller->pane,
+                                           NULL, NULL, &h_max, NULL);
+        scroll_state_set_max_for_view(state, (View*)html, html->scroller->pane,
+                                      h_max, content_height - physical_height);
+        scroll_state_get_position_for_view(state, (View*)html, html->scroller->pane,
+                                           NULL, NULL, NULL, &v_max);
         log_info("%s viewport scroll: content_height=%.1f, viewport_height=%.1f, v_max_scroll=%.1f", elmt->source_loc(),
-            content_height, physical_height, html->scroller->pane->v_max_scroll);
+            content_height, physical_height, v_max);
     }
 
     auto t_finalize = high_resolution_clock::now();
@@ -2383,10 +2388,11 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
             float target_x = doc->pending_viewport_scroll_x;
             float target_y = doc->pending_viewport_scroll_y;
             DocState* state = (DocState*)doc->state;
-            scroll_state_attach(state, pane);
-            scroll_state_set_position(state, pane, target_x, target_y, true);
+            scroll_state_set_position_for_view(state, (View*)root_block, pane, target_x, target_y, true);
+            scroll_state_get_position_for_view(state, (View*)root_block, pane,
+                                               &target_x, &target_y, NULL, NULL);
             log_info("layout_html_doc: applied viewport scroll (%.1f, %.1f)",
-                     pane->h_scroll_position, pane->v_scroll_position);
+                     target_x, target_y);
         }
     }
 

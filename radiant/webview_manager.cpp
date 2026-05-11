@@ -5,6 +5,7 @@
 
 #include "webview.h"
 #include "view.hpp"
+#include "state_store.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/log.h"
 #include "../lib/mem.h"
@@ -182,8 +183,12 @@ static void sync_walk(WebViewManager* mgr, ViewBlock* block,
     // handle scroll offset if this block is a scroll container
     float scroll_dx = 0, scroll_dy = 0;
     if (block->scroller && block->scroller->pane) {
-        scroll_dx = -block->scroller->pane->h_scroll_position;
-        scroll_dy = -block->scroller->pane->v_scroll_position;
+        DocState* state = block->doc ? block->doc->state : NULL;
+        float scroll_x = 0.0f, scroll_y = 0.0f;
+        scroll_state_get_position_for_view(state, (View*)block, block->scroller->pane,
+                                           &scroll_x, &scroll_y, NULL, NULL);
+        scroll_dx = -scroll_x;
+        scroll_dy = -scroll_y;
     }
 
     if (block->tag_id == HTM_TAG_WEBVIEW && block->embed && block->embed->webview) {

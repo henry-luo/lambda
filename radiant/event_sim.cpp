@@ -2967,8 +2967,8 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             float actual_x = 0, actual_y = 0;
             ViewBlock* root_block = (ViewBlock*)doc->view_tree->root;
             if (root_block && root_block->scroller && root_block->scroller->pane) {
-                actual_x = root_block->scroller->pane->h_scroll_position;
-                actual_y = root_block->scroller->pane->v_scroll_position;
+                scroll_state_get_position_for_view((DocState*)doc->state, (View*)root_block,
+                    root_block->scroller->pane, &actual_x, &actual_y, NULL, NULL);
             }
             float tol = ev->scroll_tolerance;
             bool pass_x = (ev->expected_scroll_x == 0 && !ev->expected_scroll_y) ||
@@ -3358,13 +3358,12 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             ViewBlock* root_block = (ViewBlock*)doc->view_tree->root;
             if (root_block && root_block->scroller && root_block->scroller->pane) {
                 ScrollPane* pane = root_block->scroller->pane;
-                scroll_state_set_position((DocState*)doc->state,
-                                          pane,
-                                          target_x,
-                                          target_y,
-                                          true);
-                doc_state_sync_viewport_scroll((DocState*)doc->state, doc,
-                    pane->h_scroll_position, pane->v_scroll_position);
+                DocState* state = (DocState*)doc->state;
+                scroll_state_set_position_for_view(state, (View*)root_block, pane,
+                                                   target_x, target_y, true);
+                scroll_state_get_position_for_view(state, (View*)root_block, pane,
+                                                   &target_x, &target_y, NULL, NULL);
+                doc_state_sync_viewport_scroll(state, doc, target_x, target_y);
             }
             if (doc->state) doc_state_request_repaint(doc->state);
             force_render_surface(uicon);

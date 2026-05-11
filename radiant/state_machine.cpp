@@ -213,7 +213,7 @@ static uint32_t legacy_view_offset_limit(View* view) {
     return dom_node_boundary_length(node);
 }
 
-static void validate_text_control_form_state(DomElement* elem,
+static void validate_text_control_form_state(DocState* state, DomElement* elem,
                                              StateValidationReport* report) {
     if (!elem || !tc_is_text_control(elem)) return;
     tc_ensure_init(elem);
@@ -222,14 +222,17 @@ static void validate_text_control_form_state(DomElement* elem,
         report_fail(report, "text control has no form state");
         return;
     }
-    if (form->selection_start > form->current_value_u16_len ||
-        form->selection_end > form->current_value_u16_len) {
+    uint32_t selection_start = 0, selection_end = 0;
+    uint8_t selection_direction = 0;
+    form_control_get_selection(state, (View*)elem, &selection_start, &selection_end, &selection_direction);
+    if (selection_start > form->current_value_u16_len ||
+        selection_end > form->current_value_u16_len) {
         report_fail(report, "text-control selection exceeds value length");
     }
-    if (form->selection_start > form->selection_end) {
+    if (selection_start > selection_end) {
         report_fail(report, "text-control selection start exceeds end");
     }
-    if (form->selection_direction > 2) {
+    if (selection_direction > 2) {
         report_fail(report, "text-control selection direction is invalid");
     }
     if (form->preedit_len > 0 && form->preedit_caret > form->preedit_len) {
@@ -451,7 +454,7 @@ bool radiant_state_validate_interaction(DocState* state,
             report_fail(report, "focused target is not focusable");
         }
         if (state->focus->current->is_element()) {
-            validate_text_control_form_state((DomElement*)state->focus->current, report);
+            validate_text_control_form_state(state, (DomElement*)state->focus->current, report);
         }
     }
 

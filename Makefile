@@ -1848,6 +1848,28 @@ check-state-store:
 		--include='*.c' --include='*.cpp' --include='*.h' --include='*.hpp' \
 		| grep -v 'test/css/test_css_dom_integration.cpp' \
 		|| true); \
+	FORM_MIRROR_VIOLATIONS=$$(grep -rnE --include='*.cpp' 'form->(disabled|readonly|selected_index|hover_index|dropdown_open|checked|required|range_value|selection_start|selection_end|selection_direction)' \
+		radiant/ \
+		| grep -v 'radiant/state_store.cpp' \
+		| grep -v 'Mirror legacy selection' \
+		|| true); \
+	SCROLL_MIRROR_VIOLATIONS=$$(grep -rnE --include='*.cpp' -- '->(h_scroll_position|v_scroll_position|h_max_scroll|v_max_scroll)' \
+		radiant/ \
+		| grep -v 'radiant/state_store.cpp' \
+		|| true); \
+	SCROLL_API_VIOLATIONS=$$(grep -rnE --include='*.cpp' --include='*.hpp' 'scroll_state_(attach|set_max|set_position|get_position)\(' \
+		radiant/ \
+		| grep -v 'radiant/state_store.cpp' \
+		|| true); \
+	if [ -n "$$FORM_MIRROR_VIOLATIONS" ]; then \
+		VIOLATIONS="$${VIOLATIONS}$${VIOLATIONS:+\n}External form mirror reads/writes:\n$$FORM_MIRROR_VIOLATIONS"; \
+	fi; \
+	if [ -n "$$SCROLL_MIRROR_VIOLATIONS" ]; then \
+		VIOLATIONS="$${VIOLATIONS}$${VIOLATIONS:+\n}External scroll mirror reads/writes:\n$$SCROLL_MIRROR_VIOLATIONS"; \
+	fi; \
+	if [ -n "$$SCROLL_API_VIOLATIONS" ]; then \
+		VIOLATIONS="$${VIOLATIONS}$${VIOLATIONS:+\n}External pane-only scroll API usage:\n$$SCROLL_API_VIOLATIONS"; \
+	fi; \
 	if [ -n "$$VIOLATIONS" ]; then \
 		echo "❌ StateStore migration invariant violations:"; \
 		echo "$$VIOLATIONS"; \

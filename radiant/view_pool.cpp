@@ -923,8 +923,12 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
             if (parent->is_block()) {
                 ViewBlock* parent_block = (ViewBlock*)parent;
                 if (parent_block->scroller && parent_block->scroller->pane) {
-                    abs_x -= parent_block->scroller->pane->h_scroll_position;
-                    abs_y -= parent_block->scroller->pane->v_scroll_position;
+                    DocState* state = parent_block->doc ? parent_block->doc->state : NULL;
+                    float scroll_x = 0.0f, scroll_y = 0.0f;
+                    scroll_state_get_position_for_view(state, (View*)parent_block,
+                        parent_block->scroller->pane, &scroll_x, &scroll_y, NULL, NULL);
+                    abs_x -= scroll_x;
+                    abs_y -= scroll_y;
                 }
                 if (parent_block->position &&
                     parent_block->position->position == CSS_VALUE_FIXED) {
@@ -937,8 +941,12 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
         if (view->is_block() && !view->parent_view()) {
             ViewBlock* root_block = (ViewBlock*)view;
             if (root_block->scroller && root_block->scroller->pane) {
-                abs_x -= root_block->scroller->pane->h_scroll_position;
-                abs_y -= root_block->scroller->pane->v_scroll_position;
+                DocState* state = root_block->doc ? root_block->doc->state : NULL;
+                float scroll_x = 0.0f, scroll_y = 0.0f;
+                scroll_state_get_position_for_view(state, (View*)root_block,
+                    root_block->scroller->pane, &scroll_x, &scroll_y, NULL, NULL);
+                abs_x -= scroll_x;
+                abs_y -= scroll_y;
             }
         }
     }

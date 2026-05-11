@@ -1601,30 +1601,10 @@ void form_control_set_checked(DocState* state, View* view, bool checked) {
     form_state_mark_dirty(state);
 }
 
-void scroll_state_attach(DocState* state, void* pane_ptr) {
+static void scroll_state_attach(DocState* state, void* pane_ptr) {
     if (!state || !pane_ptr) return;
     ScrollPane* pane = (ScrollPane*)pane_ptr;
     pane->state_ref = state;
-}
-
-void scroll_state_set_max(DocState* state, void* pane_ptr,
-                          float h_max, float v_max) {
-    if (!pane_ptr) return;
-    ScrollPane* pane = (ScrollPane*)pane_ptr;
-    if (state) scroll_state_attach(state, pane_ptr);
-
-    if (h_max < 0.0f) h_max = 0.0f;
-    if (v_max < 0.0f) v_max = 0.0f;
-
-    pane->h_max_scroll = h_max;
-    pane->v_max_scroll = v_max;
-
-    if (pane->h_scroll_position > pane->h_max_scroll) {
-        pane->h_scroll_position = pane->h_max_scroll;
-    }
-    if (pane->v_scroll_position > pane->v_max_scroll) {
-        pane->v_scroll_position = pane->v_max_scroll;
-    }
 }
 
 static ViewState* scroll_view_state_get_or_create(DocState* state, View* view, ScrollPane* pane) {
@@ -1694,32 +1674,6 @@ void scroll_state_set_max_for_view(DocState* state, View* view, void* pane_ptr,
     }
 }
 
-void scroll_state_set_position(DocState* state, void* pane_ptr,
-                               float h_pos, float v_pos,
-                               bool is_viewport) {
-    if (!pane_ptr) return;
-    ScrollPane* pane = (ScrollPane*)pane_ptr;
-    if (state) scroll_state_attach(state, pane_ptr);
-
-    if (h_pos < 0.0f) h_pos = 0.0f;
-    if (v_pos < 0.0f) v_pos = 0.0f;
-
-    if (h_pos > pane->h_max_scroll) h_pos = pane->h_max_scroll;
-    if (v_pos > pane->v_max_scroll) v_pos = pane->v_max_scroll;
-
-    pane->h_scroll_position = h_pos;
-    pane->v_scroll_position = v_pos;
-
-    if (state) {
-        state->is_dirty = true;
-        state->needs_repaint = true;
-        if (is_viewport) {
-            state->scroll_x = h_pos;
-            state->scroll_y = v_pos;
-        }
-    }
-}
-
 void scroll_state_set_position_for_view(DocState* state, View* view, void* pane_ptr,
                                         float h_pos, float v_pos,
                                         bool is_viewport) {
@@ -1767,9 +1721,9 @@ void scroll_state_set_position_for_view(DocState* state, View* view, void* pane_
     }
 }
 
-void scroll_state_get_position(DocState* state, void* pane_ptr,
-                               float* out_h_pos, float* out_v_pos,
-                               float* out_h_max, float* out_v_max) {
+static void scroll_state_get_position(DocState* state, void* pane_ptr,
+                                      float* out_h_pos, float* out_v_pos,
+                                      float* out_h_max, float* out_v_max) {
     (void)state;
     if (out_h_pos) *out_h_pos = 0.0f;
     if (out_v_pos) *out_v_pos = 0.0f;
@@ -1782,6 +1736,26 @@ void scroll_state_get_position(DocState* state, void* pane_ptr,
     if (out_v_pos) *out_v_pos = pane->v_scroll_position;
     if (out_h_max) *out_h_max = pane->h_max_scroll;
     if (out_v_max) *out_v_max = pane->v_max_scroll;
+}
+
+void scroll_state_get_position_for_view(DocState* state, View* view, void* pane_ptr,
+                                        float* out_h_pos, float* out_v_pos,
+                                        float* out_h_max, float* out_v_max) {
+    if (out_h_pos) *out_h_pos = 0.0f;
+    if (out_v_pos) *out_v_pos = 0.0f;
+    if (out_h_max) *out_h_max = 0.0f;
+    if (out_v_max) *out_v_max = 0.0f;
+
+    ViewState* view_state = state && view ? view_state_get(state, view) : NULL;
+    if (view_state && view_state->kind == VIEW_STATE_SCROLL) {
+        if (out_h_pos) *out_h_pos = view_state->data.scroll.x;
+        if (out_v_pos) *out_v_pos = view_state->data.scroll.y;
+        if (out_h_max) *out_h_max = view_state->data.scroll.max_x;
+        if (out_v_max) *out_v_max = view_state->data.scroll.max_y;
+        return;
+    }
+
+    scroll_state_get_position(state, pane_ptr, out_h_pos, out_v_pos, out_h_max, out_v_max);
 }
 
 const char* form_control_get_value(DocState* state, View* view, uint32_t* out_len) {

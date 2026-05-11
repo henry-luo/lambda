@@ -1692,7 +1692,8 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             block->bound->border->radius.bottom_left_y = block->bound->border->radius.bottom_right_y = 2.0f;
         // UA background: white normally, light grey when disabled (Chrome ~rgb(235,235,228))
         if (!block->bound->background) { block->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp)); }
-        if (block->form->disabled) {
+        DocState* state = block->doc ? block->doc->state : NULL;
+        if (form_control_is_disabled(state, (View*)block)) {
             block->bound->background->color = (Color){ .r=235, .g=235, .b=228, .a=255 };
         } else {
             block->bound->background->color = (Color){ .r=255, .g=255, .b=255, .a=255 };

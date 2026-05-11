@@ -31,6 +31,7 @@ void ScrollPane::reset() {
 
 void scrollpane_render(RdtVector* vec, ScrollPane* sp, Rect* block_bound,
     float content_width, float content_height, Bound* clip, float scale,
+    DocState* state, View* view,
     bool show_hz_scroll, bool show_vt_scroll) {
     log_info("SCROLLPANE: content size: %.1f x %.1f, view bounds: %.1f x %.1f",
         content_width, content_height, block_bound->width, block_bound->height);
@@ -39,6 +40,8 @@ void scrollpane_render(RdtVector* vec, ScrollPane* sp, Rect* block_bound,
 
     float view_x = block_bound->x, view_y = block_bound->y;
     float view_width = block_bound->width, view_height = block_bound->height;
+    float h_scroll = 0.0f, v_scroll = 0.0f, h_max = 0.0f, v_max = 0.0f;
+    scroll_state_get_position_for_view(state, view, sp, &h_scroll, &v_scroll, &h_max, &v_max);
 
     // clip to visible bounds
     RdtPath* clip_path = rdt_path_new();
@@ -61,7 +64,7 @@ void scrollpane_render(RdtVector* vec, ScrollPane* sp, Rect* block_bound,
             float v_ratio = min(view_height * 100 / content_height, 100.0f);
             float v_handle_height_phys = (v_ratio * bar_height) / 100;
             v_handle_height_phys = max(sc.MIN_HANDLE_SIZE, v_handle_height_phys);
-            float scroll_ratio = (sp->v_max_scroll > 0) ? (sp->v_scroll_position / sp->v_max_scroll) : 0;
+            float scroll_ratio = (v_max > 0) ? (v_scroll / v_max) : 0;
             float v_handle_y_phys = sc.SCROLL_BORDER_MAIN + scroll_ratio * (bar_height - v_handle_height_phys);
             sp->v_handle_height = v_handle_height_phys / scale;
             sp->v_handle_y = v_handle_y_phys / scale;
@@ -83,13 +86,13 @@ void scrollpane_render(RdtVector* vec, ScrollPane* sp, Rect* block_bound,
 
         if (content_width > 0) {
             Color handle_color = {0}; handle_color.r = (uint8_t)sc.HANDLE_COLOR; handle_color.g = (uint8_t)sc.HANDLE_COLOR; handle_color.b = (uint8_t)sc.HANDLE_COLOR; handle_color.a = 255;
-            log_debug("h_max_scroll: %f (content_width=%.1f, view_width=%.1f)", sp->h_max_scroll, content_width, view_width);
+            log_debug("h_max_scroll: %f (content_width=%.1f, view_width=%.1f)", h_max, content_width, view_width);
             float bar_width = view_width - sc.SCROLLBAR_SIZE - sc.SCROLL_BORDER_MAIN * 2;
             log_debug("bar width: %f", bar_width);
             float h_ratio = min(view_width * 100 / content_width, 100.0f);
             float h_handle_width_phys = (h_ratio * bar_width) / 100;
             h_handle_width_phys = max(sc.MIN_HANDLE_SIZE, h_handle_width_phys);
-            float scroll_ratio = (sp->h_max_scroll > 0) ? (sp->h_scroll_position / sp->h_max_scroll) : 0;
+            float scroll_ratio = (h_max > 0) ? (h_scroll / h_max) : 0;
             float h_handle_x_phys = sc.SCROLL_BORDER_MAIN + scroll_ratio * (bar_width - h_handle_width_phys);
             sp->h_handle_width = h_handle_width_phys / scale;
             sp->h_handle_x = h_handle_x_phys / scale;
@@ -111,25 +114,22 @@ void scrollpane_scroll(EventContext* evcon, ViewBlock* block, ScrollPane* sp) {
 
     DocState* state = evcon && evcon->ui_context && evcon->ui_context->document
         ? (DocState*)evcon->ui_context->document->state : nullptr;
-    if (state) {
-        scroll_state_attach(state, sp);
-    }
-
-    float h = sp->h_scroll_position;
-    float v = sp->v_scroll_position;
+    float h = 0.0f, v = 0.0f, h_max = 0.0f, v_max = 0.0f;
+    scroll_state_get_position_for_view(state, (View*)block, sp, &h, &v, &h_max, &v_max);
     float scroll_amount = 50;  // pixels to scroll per offset
 
-    if (event->yoffset != 0 && sp->v_max_scroll > 0) {
+    if (event->yoffset != 0 && v_max > 0) {
         v += -event->yoffset * scroll_amount;
     }
-    if (event->xoffset != 0 && sp->h_max_scroll > 0) {
+    if (event->xoffset != 0 && h_max > 0) {
         h += -event->xoffset * scroll_amount;
     }
 
     // Centralized writer path for scroll mutations.
     scroll_state_set_position_for_view(state, (View*)block, sp, h, v, false);
 
-    log_debug("updated scroll position: %f, %f", sp->h_scroll_position, sp->v_scroll_position);
+    scroll_state_get_position_for_view(state, (View*)block, sp, &h, &v, NULL, NULL);
+    log_debug("updated scroll position: %f, %f", h, v);
     evcon->need_repaint = true;
     // todo: set invalidate_rect
 }
@@ -166,43 +166,42 @@ void scrollpane_mouse_down(EventContext* evcon, ViewBlock* block) {
     DocState* state = evcon && evcon->ui_context && evcon->ui_context->document
         ? (DocState*)evcon->ui_context->document->state : nullptr;
 
-    if (state) {
-        scroll_state_attach(state, sp);
-    }
+    float h = 0.0f, v = 0.0f;
+    scroll_state_get_position_for_view(state, (View*)block, sp, &h, &v, NULL, NULL);
 
     if (sp->is_h_hovered) {
         if (evcon->offset_x < sp->h_handle_x ) {
-            float h = sp->h_scroll_position - block->width * 0.85f;  // scroll 85% of the block width
-            scroll_state_set_position_for_view(state, (View*)block, sp, h, sp->v_scroll_position, false);
+            float next_h = h - block->width * 0.85f;  // scroll 85% of the block width
+            scroll_state_set_position_for_view(state, (View*)block, sp, next_h, v, false);
             evcon->need_repaint = true;
         }
         else if (evcon->offset_x > sp->h_handle_x + sp->h_handle_width) { // page right
-            float h = sp->h_scroll_position + block->width * 0.85f;  // scroll 85% of the block width
-            scroll_state_set_position(state, sp, h, sp->v_scroll_position, false);
+            float next_h = h + block->width * 0.85f;  // scroll 85% of the block width
+            scroll_state_set_position_for_view(state, (View*)block, sp, next_h, v, false);
             evcon->need_repaint = true;
         }
         else {
             sp->h_is_dragging = true; // start dragging the handle
             sp->drag_start_x = event->x; // capture the current mouse X position
-            sp->h_drag_start_scroll = sp->h_scroll_position;
+            sp->h_drag_start_scroll = h;
             doc_state_set_drag_state(evcon->ui_context->document->state, (View*)block, true);
         }
     }
     else if (sp->is_v_hovered) {
         if (evcon->offset_y < sp->v_handle_y) { // page up
-            float v = sp->v_scroll_position - block->height * 0.85f;  // scroll 85% of the block height
-            scroll_state_set_position_for_view(state, (View*)block, sp, sp->h_scroll_position, v, false);
+            float next_v = v - block->height * 0.85f;  // scroll 85% of the block height
+            scroll_state_set_position_for_view(state, (View*)block, sp, h, next_v, false);
             evcon->need_repaint = true;
         }
         else if (evcon->offset_y > sp->v_handle_y + sp->v_handle_height) { // page down
-            float v = sp->v_scroll_position + block->height * 0.85f;  // scroll 85% of the block height
-            scroll_state_set_position(state, sp, sp->h_scroll_position, v, false);
+            float next_v = v + block->height * 0.85f;  // scroll 85% of the block height
+            scroll_state_set_position_for_view(state, (View*)block, sp, h, next_v, false);
             evcon->need_repaint = true;
         }
         else {
             sp->v_is_dragging = true; // start dragging the handle
             sp->drag_start_y = event->y; // capture the current mouse Y position
-            sp->v_drag_start_scroll = sp->v_scroll_position;
+            sp->v_drag_start_scroll = v;
             doc_state_set_drag_state(evcon->ui_context->document->state, (View*)block, true);
         }
     }
@@ -224,6 +223,8 @@ void scrollpane_drag(EventContext* evcon, ViewBlock* block) {
     ScrollPane* sp = block->scroller->pane;
     DocState* state = evcon && evcon->ui_context && evcon->ui_context->document
         ? (DocState*)evcon->ui_context->document->state : nullptr;
+    float h = 0.0f, v = 0.0f, h_max = 0.0f, v_max = 0.0f;
+    scroll_state_get_position_for_view(state, (View*)block, sp, &h, &v, &h_max, &v_max);
 
     // Vertical dragging
     if (sp->v_is_dragging) {
@@ -235,10 +236,10 @@ void scrollpane_drag(EventContext* evcon, ViewBlock* block) {
         float border_css = sc.SCROLL_BORDER_MAIN / pixel_ratio;
         float scroll_track = block->height - scrollbar_css - border_css * 2;
         float scroll_range = scroll_track - handle_h;
-        float scroll_per_pixel = scroll_range > 0 ? sp->v_max_scroll / scroll_range : 0;
+        float scroll_per_pixel = scroll_range > 0 ? v_max / scroll_range : 0;
         float v_scroll_position = sp->v_drag_start_scroll + (delta_y * scroll_per_pixel);
-        if (v_scroll_position != sp->v_scroll_position) {
-            scroll_state_set_position_for_view(state, (View*)block, sp, sp->h_scroll_position, v_scroll_position, false);
+        if (v_scroll_position != v) {
+            scroll_state_set_position_for_view(state, (View*)block, sp, h, v_scroll_position, false);
             evcon->need_repaint = true;
         }
     }
@@ -253,10 +254,10 @@ void scrollpane_drag(EventContext* evcon, ViewBlock* block) {
         float border_css2 = sc.SCROLL_BORDER_MAIN / pixel_ratio2;
         float scroll_track_h = block->width - scrollbar_css2 - border_css2 * 2;
         float scroll_range = scroll_track_h - handle_w;
-        float scroll_per_pixel = scroll_range > 0 ? sp->h_max_scroll / scroll_range : 0;
+        float scroll_per_pixel = scroll_range > 0 ? h_max / scroll_range : 0;
         float h_scroll_position = sp->h_drag_start_scroll + (delta_x * scroll_per_pixel);
-        if (h_scroll_position != sp->h_scroll_position) {
-            scroll_state_set_position_for_view(state, (View*)block, sp, h_scroll_position, sp->v_scroll_position, false);
+        if (h_scroll_position != h) {
+            scroll_state_set_position_for_view(state, (View*)block, sp, h_scroll_position, v, false);
             evcon->need_repaint = true;
         }
     }
@@ -274,8 +275,10 @@ void update_scroller(ViewBlock* block, float content_width, float content_height
         float h_max = content_width > block->width ? content_width - block->width : 0.0f;
         float v_max = content_height > block->height ? content_height - block->height : 0.0f;
         scroll_state_set_max_for_view(state, (View*)block, block->scroller->pane, h_max, v_max);
+        scroll_state_get_position_for_view(state, (View*)block, block->scroller->pane,
+                                           NULL, NULL, &h_max, &v_max);
         log_debug("update_scroller: h_max_scroll=%.1f, v_max_scroll=%.1f",
-            block->scroller->pane->h_max_scroll, block->scroller->pane->v_max_scroll);
+            h_max, v_max);
     }
 
     if (content_width > block->width) { // hz overflow

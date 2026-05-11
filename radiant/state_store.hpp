@@ -744,31 +744,11 @@ bool form_control_get_checked(DocState* state, View* view);
 void form_control_set_checked(DocState* state, View* view, bool checked);
 
 /**
- * Attach a scroll pane to the central state store for fast-read access.
- * The pane argument is a ScrollPane* passed as void* to avoid header coupling.
- */
-void scroll_state_attach(DocState* state, void* pane);
-
-/**
- * Set pane scroll max values through centralized API.
- */
-void scroll_state_set_max(DocState* state, void* pane,
-                          float h_max, float v_max);
-
-/**
  * Set a concrete view's scroll max values through ViewState.scroll.
  * The pane argument remains a compatibility mirror for rendering.
  */
 void scroll_state_set_max_for_view(DocState* state, View* view, void* pane,
                                    float h_max, float v_max);
-
-/**
- * Set pane scroll position through centralized API.
- * When is_viewport is true, document-level viewport mirrors are also updated.
- */
-void scroll_state_set_position(DocState* state, void* pane,
-                               float h_pos, float v_pos,
-                               bool is_viewport);
 
 /**
  * Set a concrete view's scroll position through ViewState.scroll.
@@ -779,11 +759,11 @@ void scroll_state_set_position_for_view(DocState* state, View* view, void* pane,
                                         bool is_viewport);
 
 /**
- * Read pane scroll values.
+ * Read a concrete view's scroll values, preferring ViewState.scroll when present.
  */
-void scroll_state_get_position(DocState* state, void* pane,
-                               float* out_h_pos, float* out_v_pos,
-                               float* out_h_max, float* out_v_max);
+void scroll_state_get_position_for_view(DocState* state, View* view, void* pane,
+                                        float* out_h_pos, float* out_v_pos,
+                                        float* out_h_max, float* out_v_max);
 
 // ============================================================================
 // Text Control Value and Selection API (centralized writers)

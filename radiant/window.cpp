@@ -324,14 +324,22 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
                 log_info("browse_nav: keyboard back");
                 // save scroll before leaving
                 ViewBlock* root = ui_context.document->view_tree ? (ViewBlock*)ui_context.document->view_tree->root : nullptr;
-                if (root && root->scroller && root->scroller->pane)
-                    session_save_scroll_position(session, root->scroller->pane->v_scroll_position);
+                if (root && root->scroller && root->scroller->pane) {
+                    float scroll_y = 0.0f;
+                    scroll_state_get_position_for_view(ui_context.document->state, (View*)root,
+                        root->scroller->pane, NULL, &scroll_y, NULL, NULL);
+                    session_save_scroll_position(session, scroll_y);
+                }
                 new_doc = session_go_back(session, &ui_context, css_vw, css_vh);
             } else if (key == GLFW_KEY_RIGHT && session_can_go_forward(session)) {
                 log_info("browse_nav: keyboard forward");
                 ViewBlock* root = ui_context.document->view_tree ? (ViewBlock*)ui_context.document->view_tree->root : nullptr;
-                if (root && root->scroller && root->scroller->pane)
-                    session_save_scroll_position(session, root->scroller->pane->v_scroll_position);
+                if (root && root->scroller && root->scroller->pane) {
+                    float scroll_y = 0.0f;
+                    scroll_state_get_position_for_view(ui_context.document->state, (View*)root,
+                        root->scroller->pane, NULL, &scroll_y, NULL, NULL);
+                    session_save_scroll_position(session, scroll_y);
+                }
                 new_doc = session_go_forward(session, &ui_context, css_vw, css_vh);
             }
             if (new_doc) {
@@ -339,11 +347,11 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
                 ViewBlock* root = new_doc->view_tree ? (ViewBlock*)new_doc->view_tree->root : nullptr;
                 if (root && root->scroller && root->scroller->pane) {
                     float saved_y = session_get_scroll_position(session);
-                    scroll_state_set_position((DocState*)new_doc->state,
-                                              root->scroller->pane,
-                                              root->scroller->pane->h_scroll_position,
-                                              saved_y,
-                                              true);
+                    float scroll_x = 0.0f;
+                    scroll_state_get_position_for_view((DocState*)new_doc->state, (View*)root,
+                        root->scroller->pane, &scroll_x, NULL, NULL, NULL);
+                    scroll_state_set_position_for_view((DocState*)new_doc->state, (View*)root,
+                        root->scroller->pane, scroll_x, saved_y, true);
                 }
                 // update title
                 const char* page_title = session_current_title(session);
@@ -1110,8 +1118,10 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
             float scroll_y = 0;
             if (ui_context.document && ui_context.document->view_tree && ui_context.document->view_tree->root) {
                 ViewBlock* root = (ViewBlock*)ui_context.document->view_tree->root;
-                if (root->scroller && root->scroller->pane)
-                    scroll_y = root->scroller->pane->v_scroll_position;
+                if (root->scroller && root->scroller->pane) {
+                    scroll_state_get_position_for_view(state, (View*)root, root->scroller->pane,
+                        NULL, &scroll_y, NULL, NULL);
+                }
             }
             state->dirty_tracker.viewport_y = scroll_y;
             state->dirty_tracker.viewport_height = (float)ui_context.viewport_height;

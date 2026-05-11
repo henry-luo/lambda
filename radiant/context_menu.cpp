@@ -45,18 +45,20 @@ static DomElement* ctx_menu_target_elem(DocState* state) {
     return tc_is_text_control(e) ? e : nullptr;
 }
 
-static bool ctx_menu_has_selection(DomElement* elem) {
+static bool ctx_menu_has_selection(DocState* state, DomElement* elem) {
     if (!elem || !elem->form) return false;
-    return elem->form->selection_start != elem->form->selection_end;
+    uint32_t start = 0, end = 0;
+    form_control_get_selection(state, (View*)elem, &start, &end, NULL);
+    return start != end;
 }
 
 bool context_menu_item_enabled(DocState* state, int item) {
     DomElement* elem = ctx_menu_target_elem(state);
     if (!elem || !elem->form) return false;
-    bool readonly = elem->form->readonly;
-    bool disabled = elem->form->disabled;
+    bool readonly = form_control_is_readonly(state, (View*)elem);
+    bool disabled = form_control_is_disabled(state, (View*)elem);
     if (disabled) return false;
-    bool has_sel  = ctx_menu_has_selection(elem);
+    bool has_sel  = ctx_menu_has_selection(state, elem);
     bool has_val  = elem->form->current_value_len > 0;
     const char* clip = clipboard_get_text();
     bool has_clip = clip && *clip;

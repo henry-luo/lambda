@@ -331,7 +331,7 @@ void render_video_content(RenderContext* rdcon, ViewBlock* view);
 void render_webview_layer_content(RenderContext* rdcon, ViewBlock* view);
 void scrollpane_render(RdtVector* vec, ScrollPane* sp, Rect* block_bound,
     float content_width, float content_height, Bound* clip, float scale,
-    bool show_hz_scroll = true, bool show_vt_scroll = true);
+    DocState* state, View* view, bool show_hz_scroll = true, bool show_vt_scroll = true);
 void render_form_control(RenderContext* rdcon, ViewBlock* block);  // form controls
 void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, DocState* state);  // select dropdown popup
 void render_column_rules(RenderContext* rdcon, ViewBlock* block);  // multi-column rules
@@ -2316,8 +2316,12 @@ void setup_scroller(RenderContext* rdcon, ViewBlock* block) {
         }
     }
     if (block->scroller->pane) {
-        rdcon->block.x -= block->scroller->pane->h_scroll_position * s;
-        rdcon->block.y -= block->scroller->pane->v_scroll_position * s;
+        DocState* state = block->doc ? block->doc->state : NULL;
+        float scroll_x = 0.0f, scroll_y = 0.0f;
+        scroll_state_get_position_for_view(state, (View*)block, block->scroller->pane,
+                                           &scroll_x, &scroll_y, NULL, NULL);
+        rdcon->block.x -= scroll_x * s;
+        rdcon->block.y -= scroll_y * s;
     }
 }
 
@@ -2335,8 +2339,10 @@ void render_scroller(RenderContext* rdcon, ViewBlock* block, BlockBlot* pa_block
             rect.height -= (block->bound->border->width.top + block->bound->border->width.bottom) * s;
         }
         if (block->scroller->pane) {
+            DocState* state = block->doc ? block->doc->state : NULL;
             scrollpane_render(&rdcon->vec, block->scroller->pane, &rect,
                 block->content_width * s, block->content_height * s, &rdcon->block.clip, s,
+                state, (View*)block,
                 block->scroller->has_hz_scroll, block->scroller->has_vt_scroll);
         } else {
             log_error("scroller has no scroll pane");
@@ -3583,8 +3589,9 @@ void render_caret(RenderContext* rdcon, DocState* state) {
     float root_scroll_x = 0.0f;
     float root_scroll_y = 0.0f;
     if (root_block && root_block->scroller && root_block->scroller->pane) {
-        root_scroll_x = root_block->scroller->pane->h_scroll_position;
-        root_scroll_y = root_block->scroller->pane->v_scroll_position;
+        DocState* root_state = root_block->doc ? root_block->doc->state : NULL;
+        scroll_state_get_position_for_view(root_state, (View*)root_block, root_block->scroller->pane,
+                                           &root_scroll_x, &root_scroll_y, NULL, NULL);
     }
     bool offset_covers_root_scroll_x = fabsf(iframe_offset_x + root_scroll_x) < 0.5f;
     bool offset_covers_root_scroll_y = fabsf(iframe_offset_y + root_scroll_y) < 0.5f;
@@ -3597,11 +3604,15 @@ void render_caret(RenderContext* rdcon, DocState* state) {
             y += block->y;
             // Account for scroll offset (same as render traversal does)
             if (block->scroller && block->scroller->pane) {
+                DocState* block_state = block->doc ? block->doc->state : NULL;
+                float scroll_x = 0.0f, scroll_y = 0.0f;
+                scroll_state_get_position_for_view(block_state, (View*)block, block->scroller->pane,
+                                                   &scroll_x, &scroll_y, NULL, NULL);
                 if (!(block == root_block && offset_covers_root_scroll_x)) {
-                    x -= block->scroller->pane->h_scroll_position;
+                    x -= scroll_x;
                 }
                 if (!(block == root_block && offset_covers_root_scroll_y)) {
-                    y -= block->scroller->pane->v_scroll_position;
+                    y -= scroll_y;
                 }
                 if (block == root_block) applied_root_scroll = true;
             }
@@ -3669,8 +3680,9 @@ static void selection_paint_rect_cb(float x, float y, float w, float h, void* ud
     if (doc && doc->view_tree && doc->view_tree->root && doc->view_tree->root->view_type == RDT_VIEW_BLOCK) {
         ViewBlock* root = (ViewBlock*)doc->view_tree->root;
         if (root->scroller && root->scroller->pane) {
-            scroll_x = root->scroller->pane->h_scroll_position;
-            scroll_y = root->scroller->pane->v_scroll_position;
+            DocState* root_state = root->doc ? root->doc->state : NULL;
+            scroll_state_get_position_for_view(root_state, (View*)root, root->scroller->pane,
+                                               &scroll_x, &scroll_y, NULL, NULL);
         }
     }
     bool offset_covers_scroll_x = fabsf(ctx->iframe_offset_x + scroll_x) < 0.5f;
