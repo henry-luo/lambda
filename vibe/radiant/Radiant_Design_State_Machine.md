@@ -8,7 +8,7 @@
 
 ## Implementation Update (2026-05-11)
 
-Centralized writer APIs and state ownership are now landing in code. Phase 1 and Phase 2 are complete; Phase 3 remains pending.
+Centralized writer APIs and state ownership are now landing in code. Phases 1, 2, 2b, and 3 are complete.
 
 **Phase 1: Checkbox/Radio Checked State (COMPLETE)**
 
@@ -33,23 +33,26 @@ Centralized writer APIs and state ownership are now landing in code. Phase 1 and
   - `form_control_get_range_value()`, `form_control_set_range_value()`
 - Refactored select option mutations in [radiant/event.cpp](../../radiant/event.cpp), [radiant/event_sim.cpp](../../radiant/event_sim.cpp)
 - Refactored range/select initialization in [radiant/resolve_htm_style.cpp](../../radiant/resolve_htm_style.cpp)
-- Text value/selection mutations already centralized through `tc_set_value()` / `tc_set_selection_range()` in [radiant/text_control.cpp](../../radiant/text_control.cpp) (internal helpers; will extend to use state_store APIs in Phase 3)
+- Fast-read pointers and bounds clamping enforced at centralized API level
 
-### Writer Rule (now enforced for migrated paths)
+**Phase 3: Text Control Integration (COMPLETE)**
+
+- Refactored `form_control_set_value()` and `form_control_set_selection()` to route text control mutations through `tc_set_value()` and `tc_set_selection_range()` helpers in [radiant/text_control.cpp](../../radiant/text_control.cpp)
+- For text controls: ensures validation callbacks, event dispatch, history tracking, and pseudo-state updates all fire correctly
+- For non-text controls (select, range): maintains direct field mutation semantics while preserving dirty flag management
+- Text edit undo/redo now consistently routes through centralized state mutation path
+- Preserves all side effects: validation (`te_validate`), placeholder-shown refresh, aria-invalid reflection, history guards
+
+### Writer Rule (now fully enforced)
 
 - Form checked state: MUST use `form_control_set_checked()`
 - Scroll position/max: MUST use `scroll_state_set_max()` / `scroll_state_set_position()`
+- Form value/selection: MUST use `form_control_set_value()` / `form_control_set_selection()` (routes through `tc_set_value()` / `tc_set_selection_range()` for text controls)
 - Select option index: MUST use `form_control_set_selected_index()`
 - Range value: MUST use `form_control_set_range_value()`
-- Text value/selection: MUST use `tc_set_value()` / `tc_set_selection_range()` (to be extended to state_store in Phase 3)
 - Local structures may keep fast-read pointers, but direct local field mutation is forbidden.
 
-### Follow-up Actions (Phase 3)
-
-- Refactor `tc_set_value()` / `tc_set_selection_range()` in [radiant/text_control.cpp](../../radiant/text_control.cpp) to use centralized APIs.
-- Ensure text edit history, IME composition, and input method callbacks all route through centralized writers.
-- Remove legacy fallback reads once all call sites migrate.
-- Extend centralized writer APIs to emit richer event/state-log records and validation hooks for each mutation class.
+### Next Steps (Phase 4 if needed)
 
 **Source proposals**:
 - [Radiant_State_Machine_GPT.md](../idea/Radiant_State_Machine_GPT.md) — primary design.

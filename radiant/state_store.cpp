@@ -899,31 +899,32 @@ void form_control_set_value(RadiantState* state, View* view, const char* value, 
     ViewBlock* block = (ViewBlock*)view;
     if (!block->form) return;
 
-    FormControlProp* form = block->form;
-    form->state_ref = state;
+    DomElement* elem = (DomElement*)block;
+    block->form->state_ref = state;
 
-    // Free old value if present
-    if (form->current_value) {
-        free(form->current_value);
+    // For text controls (input text, textarea), route through tc_set_value
+    // to ensure all side effects (validation, events, history) are handled.
+    if (tc_is_text_control(elem)) {
+        tc_set_value(elem, value, len);
+    } else {
+        // For non-text controls, directly update the value field.
+        // (Selects, file inputs, etc. don't have the complex mutation semantics
+        // of text editing and validation history that tc_set_value provides.)
+        FormControlProp* form = block->form;
+        if (form->current_value) {
+            free(form->current_value);
+        }
+        form->current_value = (char*)malloc(len + 1);
+        memcpy(form->current_value, value, len);
+        form->current_value[len] = '\0';
+        form->current_value_len = len;
+        extern uint32_t tc_utf8_to_utf16_length(const char* utf8, uint32_t byte_len);
+        form->current_value_u16_len = tc_utf8_to_utf16_length(form->current_value, len);
+        form->selection_start = form->current_value_u16_len;
+        form->selection_end = form->current_value_u16_len;
+        form->selection_direction = 0;
+        form->value = form->current_value;
     }
-
-    // Allocate and copy new value
-    form->current_value = (char*)malloc(len + 1);
-    memcpy(form->current_value, value, len);
-    form->current_value[len] = '\0';
-    form->current_value_len = len;
-
-    // Compute UTF-16 length (needed for selection offsets)
-    extern uint32_t tc_utf8_to_utf16_length(const char* utf8, uint32_t byte_len);
-    form->current_value_u16_len = tc_utf8_to_utf16_length(form->current_value, len);
-
-    // Reset selection to end per HTML default
-    form->selection_start = form->current_value_u16_len;
-    form->selection_end = form->current_value_u16_len;
-    form->selection_direction = 0;
-
-    // Mirror to display value
-    form->value = form->current_value;
 
     if (state) {
         state->is_dirty = true;
@@ -956,17 +957,23 @@ void form_control_set_selection(RadiantState* state, View* view,
     ViewBlock* block = (ViewBlock*)view;
     if (!block->form) return;
 
+    DomElement* elem = (DomElement*)block;
     FormControlProp* form = block->form;
     form->state_ref = state;
 
-    // Clamp to value bounds
-    uint32_t max_offset = form->current_value_u16_len;
-    if (start > max_offset) start = max_offset;
-    if (end > max_offset) end = max_offset;
-
-    form->selection_start = start;
-    form->selection_end = end;
-    form->selection_direction = direction & 3;  // Only valid bits
+    // For text controls, route through tc_set_selection_range to ensure
+    // selection change events and callbacks are properly triggered.
+    if (tc_is_text_control(elem)) {
+        tc_set_selection_range(elem, start, end, direction);
+    } else {
+        // For non-text controls, directly update selection fields.
+        uint32_t max_offset = form->current_value_u16_len;
+        if (start > max_offset) start = max_offset;
+        if (end > max_offset) end = max_offset;
+        form->selection_start = start;
+        form->selection_end = end;
+        form->selection_direction = direction & 3;
+    }
 
     if (state) {
         state->is_dirty = true;
