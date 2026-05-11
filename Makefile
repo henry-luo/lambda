@@ -461,7 +461,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild \
 	    test test-all test-all-baseline test-lambda-baseline test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-extended test-input run help \
-	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint check check-raw-alloc docs intellisense analyze-binary \
+	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint check check-raw-alloc check-state-store docs intellisense analyze-binary \
 	    build-debug build-release clean-all distclean \
 	    tree-sitter-libs tree-sitter-core-libs \
 	    generate-premake clean-premake build-test build-test-linux build-jube-test test-jube run-radiant-baseline \
@@ -1838,6 +1838,22 @@ check-raw-alloc:
 		exit 1; \
 	else \
 		echo "✅ No raw allocation violations found"; \
+	fi
+
+# Check StateStore migration invariants that should not regress.
+check-state-store:
+	@echo "Checking StateStore/pseudo-state migration invariants..."
+	@VIOLATIONS=$$(grep -rnE 'dom_element_(set|clear|has|toggle)_pseudo_state|DomElement::pseudo_state|uint32_t pseudo_state;|typedef DocState StateStore' \
+		lambda/ radiant/ test/ \
+		--include='*.c' --include='*.cpp' --include='*.h' --include='*.hpp' \
+		| grep -v 'test/css/test_css_dom_integration.cpp' \
+		|| true); \
+	if [ -n "$$VIOLATIONS" ]; then \
+		echo "❌ StateStore migration invariant violations:"; \
+		echo "$$VIOLATIONS"; \
+		exit 1; \
+	else \
+		echo "✅ StateStore migration invariants hold"; \
 	fi
 
 # Check for (int) casts in Radiant layout code that may truncate float dimensions.

@@ -7,6 +7,7 @@
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include "../lambda/input/css/dom_element.hpp"
+#include "../lambda/input/css/selector_matcher.hpp"
 #include "event_state_log.hpp"
 #include "form_control.hpp"
 #include "text_control.hpp"
@@ -225,28 +226,85 @@ DocState* radiant_state_create(Pool* pool, StateUpdateMode mode) {
     return state;
 }
 
+StateStore* state_store_create(DomDocument* document) {
+    if (!document) {
+        log_error("state_store_create: document is NULL");
+        return NULL;
+    }
+    if (document->state_store) {
+        if (document->state_store->doc_state && !document->state) {
+            document->state = document->state_store->doc_state;
+        }
+        return document->state_store;
+    }
+
+    StateStore* store = (StateStore*)pool_calloc(document->pool, sizeof(StateStore));
+    if (!store) {
+        log_error("state_store_create: failed to allocate StateStore");
+        return NULL;
+    }
+
+    store->document = document;
+    store->pool = document->pool;
+    store->arena = arena_create_default(document->pool);
+    if (!store->arena) {
+        log_error("state_store_create: failed to create StateStore arena");
+        return NULL;
+    }
+
+    store->doc_state = document->state ? document->state : radiant_state_create(document->pool, STATE_MODE_IN_PLACE);
+    if (!store->doc_state) {
+        log_error("state_store_create: failed to create DocState");
+        arena_destroy(store->arena);
+        store->arena = NULL;
+        return NULL;
+    }
+
+    document->state_store = store;
+    document->state = store->doc_state;
+    log_debug("state_store_create: created StateStore for document");
+    return store;
+}
+
+DocState* state_store_doc_state(StateStore* store) {
+    return store ? store->doc_state : NULL;
+}
+
+void state_store_destroy(DomDocument* document) {
+    if (!document) return;
+    StateStore* store = document->state_store;
+    DocState* state = store ? store->doc_state : document->state;
+    if (state) {
+        radiant_state_destroy(state);
+    }
+    if (store && store->arena) {
+        arena_destroy(store->arena);
+        store->arena = NULL;
+    }
+    if (store) {
+        store->doc_state = NULL;
+    }
+    document->state_store = NULL;
+    document->state = NULL;
+}
+
 DocState* radiant_document_ensure_state(DomDocument* document, const char* owner) {
     const char* prefix = owner ? owner : "radiant_document_ensure_state";
     if (!document) {
         log_error("%s: document is NULL", prefix);
         return NULL;
     }
-    if (document->state) {
-        return (DocState*)document->state;
-    }
-    document->state = radiant_state_create(document->pool, STATE_MODE_IN_PLACE);
-    if (!document->state) {
-        log_error("%s: failed to create DocState", prefix);
+    StateStore* store = state_store_create(document);
+    DocState* state = state_store_doc_state(store);
+    if (!state) {
+        log_error("%s: failed to create StateStore", prefix);
         return NULL;
     }
-    log_debug("%s: created DocState for document", prefix);
-    return (DocState*)document->state;
+    return state;
 }
 
 void radiant_document_destroy_state(DomDocument* document) {
-    if (!document || !document->state) return;
-    radiant_state_destroy((DocState*)document->state);
-    document->state = NULL;
+    state_store_destroy(document);
 }
 
 // ----------------------------------------------------------------------------
@@ -809,6 +867,47 @@ bool state_get_pseudo_state(DocState* state, View* view, uint32_t pseudo_state) 
     }
 }
 
+static bool dom_element_default_pseudo_state(DomElement* element, uint32_t pseudo_state) {
+    if (!element) return false;
+    switch (pseudo_state) {
+        case PSEUDO_STATE_CHECKED:
+            return dom_element_has_attribute(element, "checked");
+        case PSEUDO_STATE_DISABLED:
+            return dom_element_has_attribute(element, "disabled");
+        case PSEUDO_STATE_ENABLED:
+            return !dom_element_has_attribute(element, "disabled");
+        case PSEUDO_STATE_REQUIRED:
+            return dom_element_has_attribute(element, "required");
+        case PSEUDO_STATE_OPTIONAL:
+            return !dom_element_has_attribute(element, "required");
+        case PSEUDO_STATE_READ_ONLY:
+            return dom_element_has_attribute(element, "readonly");
+        case PSEUDO_STATE_READ_WRITE:
+            return !dom_element_has_attribute(element, "readonly");
+        case PSEUDO_STATE_SELECTED:
+            return dom_element_has_attribute(element, "selected");
+        default:
+            return false;
+    }
+}
+
+bool state_resolve_selector_pseudo_state(void* context, DomElement* element, uint32_t pseudo_state) {
+    if (!element) return false;
+    if (!element->doc || !element->doc->view_tree) {
+        return dom_element_default_pseudo_state(element, pseudo_state);
+    }
+    DocState* state = (DocState*)context;
+    if (!state && element->doc) {
+        state = (DocState*)element->doc->state;
+    }
+    return state_get_pseudo_state(state, (View*)element, pseudo_state);
+}
+
+void state_configure_selector_matcher(DocState* state, SelectorMatcher* matcher) {
+    if (!matcher) return;
+    selector_matcher_set_pseudo_state_resolver(matcher, state_resolve_selector_pseudo_state, state);
+}
+
 static uint32_t view_state_resolve_id(View* view) {
     if (!view) return 0;
     if (view->id != 0) return view->id;
@@ -1153,6 +1252,12 @@ static FormControlProp* form_prop_for_view(View* view) {
     return block->form;
 }
 
+static bool view_element_has_attr(View* view, const char* attr_name) {
+    if (!view || !view->is_element() || !attr_name) return false;
+    ViewElement* elem = (ViewElement*)view;
+    return elem->get_attribute(attr_name) != NULL;
+}
+
 static ViewState* form_view_state_get(DocState* state, View* view) {
     ViewState* view_state = view_state_get(state, view);
     if (!view_state || view_state->kind != VIEW_STATE_FORM_CONTROL) return NULL;
@@ -1473,7 +1578,7 @@ bool form_control_get_checked(DocState* state, View* view) {
         }
     }
 
-    return false;
+    return view_element_has_attr(view, "checked");
 }
 
 void form_control_set_checked(DocState* state, View* view, bool checked) {
@@ -1494,18 +1599,6 @@ void form_control_set_checked(DocState* state, View* view, bool checked) {
 
     view_state_log_bool_transition(state, view, "form.checked", old_value, checked);
     form_state_mark_dirty(state);
-}
-
-void form_control_sync_checked_mirror(DocState* state, View* view, bool checked) {
-    if (!view || !view->is_element()) return;
-    DomElement* elem = (DomElement*)view;
-    uint32_t old_state = elem->pseudo_state;
-    if (checked) {
-        dom_element_set_pseudo_state(elem, PSEUDO_STATE_CHECKED);
-    } else {
-        dom_element_clear_pseudo_state(elem, PSEUDO_STATE_CHECKED);
-    }
-    if (state && old_state != elem->pseudo_state) form_state_mark_dirty(state);
 }
 
 void scroll_state_attach(DocState* state, void* pane_ptr) {
@@ -1919,10 +2012,11 @@ bool form_control_is_disabled(DocState* state, View* view) {
     ViewState* view_state = form_view_state_get(state, view);
     if (view_state) return view_state->data.form.disabled != 0;
 
-    if (!view || !view->is_block()) return false;
+    if (!view) return false;
+    if (!view->is_block()) return view_element_has_attr(view, "disabled");
 
     ViewBlock* block = (ViewBlock*)view;
-    if (!block->form) return false;
+    if (!block->form) return view_element_has_attr(view, "disabled");
 
     return block->form->disabled != 0;
 }
@@ -1950,10 +2044,11 @@ bool form_control_is_readonly(DocState* state, View* view) {
     ViewState* view_state = form_view_state_get(state, view);
     if (view_state) return view_state->data.form.readonly != 0;
 
-    if (!view || !view->is_block()) return false;
+    if (!view) return false;
+    if (!view->is_block()) return view_element_has_attr(view, "readonly");
 
     ViewBlock* block = (ViewBlock*)view;
-    if (!block->form) return false;
+    if (!block->form) return view_element_has_attr(view, "readonly");
 
     return block->form->readonly != 0;
 }
@@ -1981,10 +2076,11 @@ bool form_control_is_required(DocState* state, View* view) {
     ViewState* view_state = form_view_state_get(state, view);
     if (view_state) return view_state->data.form.required != 0;
 
-    if (!view || !view->is_block()) return false;
+    if (!view) return false;
+    if (!view->is_block()) return view_element_has_attr(view, "required");
 
     ViewBlock* block = (ViewBlock*)view;
-    if (!block->form) return false;
+    if (!block->form) return view_element_has_attr(view, "required");
 
     return block->form->required != 0;
 }
@@ -4664,17 +4760,10 @@ void selection_get_range(DocState* state, int* start, int* end) {
 static void focus_set_pseudo(DocState* state, View* view,
                              const char* state_name, uint32_t pseudo_state,
                              bool set) {
+    (void)pseudo_state;
     if (!state || !view || !state_name) return;
 
     state_set_bool(state, view, state_name, set);
-    if (view->is_element()) {
-        DomElement* element = (DomElement*)view;
-        if (set) {
-            dom_element_set_pseudo_state(element, pseudo_state);
-        } else {
-            dom_element_clear_pseudo_state(element, pseudo_state);
-        }
-    }
 }
 
 static void focus_set_within_chain(DocState* state, View* view, bool set) {

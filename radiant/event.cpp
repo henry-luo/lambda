@@ -1694,6 +1694,7 @@ static void post_html_handler_rebuild(EventContext* evcon,
     Pool* pool = doc->pool;
     CssEngine* css_engine = (CssEngine*)doc->cached_css_engine;
     SelectorMatcher* matcher = selector_matcher_create(pool);
+    state_configure_selector_matcher((DocState*)doc->state, matcher);
 
     // Apply all cached stylesheets
     for (int i = 0; i < doc->stylesheet_count; i++) {
@@ -2099,13 +2100,7 @@ void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event) 
     // load default font Arial, size 16 px
     setup_font(uicon, &evcon->font, &uicon->default_font);
     evcon->new_cursor = CSS_VALUE_AUTO;
-    if (!uicon->document->state) {
-        // Create the new DocState with in-place mode
-        uicon->document->state = radiant_state_create(uicon->document->pool, STATE_MODE_IN_PLACE);
-        if (uicon->document->state) {
-            log_debug("event_context_init: created DocState for document");
-        }
-    }
+    radiant_document_ensure_state(uicon->document, "event_context_init");
 }
 
 void event_context_cleanup(EventContext* evcon) {
@@ -2134,23 +2129,15 @@ static void clear_cascaded_styles_recursive(DomNode* node) {
 }
 
 /**
- * Helper to update element's pseudo_state bitmask along with state store
- * Also schedules reflow if the pseudo-state change may affect layout
+ * Schedule style/layout work after StateStore pseudo-state changes.
  */
 static void sync_pseudo_state(View* view, uint32_t pseudo_flag, bool set) {
+    (void)pseudo_flag;
+    (void)set;
     if (!view || !view->is_element()) return;
 
     DomElement* element = (DomElement*)view;
-    uint32_t old_state = element->pseudo_state;
-
-    if (set) {
-        dom_element_set_pseudo_state(element, pseudo_flag);
-    } else {
-        dom_element_clear_pseudo_state(element, pseudo_flag);
-    }
-
-    // If state actually changed, schedule potential reflow
-    if (element->pseudo_state != old_state && element->doc && element->doc->state) {
+    if (element->doc && element->doc->state) {
         DocState* state = (DocState*)element->doc->state;
         DomDocument* doc = element->doc;
 
@@ -2170,6 +2157,7 @@ static void sync_pseudo_state(View* view, uint32_t pseudo_flag, bool set) {
             clear_cascaded_styles_recursive((DomNode*)doc->root);
 
             SelectorMatcher* matcher = selector_matcher_create(pool);
+            state_configure_selector_matcher(state, matcher);
             for (int i = 0; i < doc->stylesheet_count; i++) {
                 if (doc->stylesheets[i]) {
                     apply_stylesheet_to_dom_tree_fast(doc->root, doc->stylesheets[i],
@@ -3042,6 +3030,7 @@ DomNode* set_iframe_src_by_name(DomElement *document, const char *target_name, c
         log_error("Failed to create selector matcher");
         return NULL;
     }
+    state_configure_selector_matcher(document->doc ? (DocState*)document->doc->state : nullptr, matcher);
 
     // find the iframe element matching the selector
     DomElement* iframe_element = selector_matcher_find_first(matcher, selector, document);

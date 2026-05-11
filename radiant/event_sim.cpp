@@ -309,6 +309,7 @@ static View* find_element_by_selector(DomDocument* doc, const char* selector_tex
 
     SelectorMatcher* matcher = selector_matcher_create(pool);
     if (!matcher) return NULL;
+    state_configure_selector_matcher((DocState*)doc->state, matcher);
 
     SimSelectorCtx ctx = {0};
     ctx.selector = selector;
@@ -354,6 +355,7 @@ static int count_elements_by_selector(DomDocument* doc, const char* selector_tex
 
     SelectorMatcher* matcher = selector_matcher_create(pool);
     if (!matcher) return 0;
+    state_configure_selector_matcher((DocState*)doc->state, matcher);
 
     SimCountCtx ctx = {0};
     ctx.selector = selector;
@@ -760,7 +762,6 @@ static void sim_toggle_checkbox_radio(View* input, DocState* state) {
         bool is_checked = form_control_get_checked(state, input);
         bool new_state = !is_checked;
         form_control_set_checked(state, input, new_state);
-        form_control_sync_checked_mirror(state, input, new_state);
         log_info("event_sim: toggled checkbox to %s", new_state ? "checked" : "unchecked");
     }
     else if (strcmp(type, "radio") == 0) {
@@ -782,7 +783,6 @@ static void sim_toggle_checkbox_radio(View* input, DocState* state) {
                             if (st && strcmp(st, "radio") == 0 && sn && strcmp(sn, name) == 0) {
                                 if (form_control_get_checked(state, search)) {
                                     form_control_set_checked(state, search, false);
-                                    form_control_sync_checked_mirror(state, search, false);
                                 }
                             }
                         }
@@ -800,7 +800,6 @@ static void sim_toggle_checkbox_radio(View* input, DocState* state) {
             }
             // Check this radio
             form_control_set_checked(state, input, true);
-            form_control_sync_checked_mirror(state, input, true);
             log_info("event_sim: checked radio button");
         }
     }
@@ -2257,7 +2256,6 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 ctx->fail_count++;
                 break;
             }
-            DomElement* dst_dom = dst_view->as_element();
             // Get source and destination centers
             float src_fx, src_fy, dst_fx, dst_fy;
             get_element_center_abs(src_view, &src_fx, &src_fy);
@@ -2266,8 +2264,6 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             int dst_x = (int)dst_fx, dst_y = (int)dst_fy;
             log_info("event_sim: drag_and_drop from '%s' (%d,%d) to '%s' (%d,%d)",
                 ev->target_selector, src_x, src_y, ev->to_target_selector, dst_x, dst_y);
-            // Set drag pseudo-state on source
-            if (src_dom) dom_element_set_pseudo_state(src_dom, PSEUDO_STATE_DRAG);
             // Dispatch: mouse_down on source
             sim_mouse_button(uicon, src_x, src_y, 0, 0, true);
             // Intermediate mouse_move steps
@@ -2277,13 +2273,8 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 int py = src_y + (dst_y - src_y) * step / steps;
                 sim_mouse_move(uicon, px, py);
             }
-            // Set drag-over on destination
-            if (dst_dom) dom_element_set_pseudo_state(dst_dom, PSEUDO_STATE_DRAG_OVER);
             // Drop: mouse_up on destination
             sim_mouse_button(uicon, dst_x, dst_y, 0, 0, false);
-            // Clear drag pseudo-states
-            if (src_dom) dom_element_clear_pseudo_state(src_dom, PSEUDO_STATE_DRAG);
-            if (dst_dom) dom_element_clear_pseudo_state(dst_dom, PSEUDO_STATE_DRAG_OVER);
             log_info("event_sim: drag_and_drop completed");
             break;
         }

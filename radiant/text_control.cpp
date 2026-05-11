@@ -181,13 +181,9 @@ void tc_ensure_init(DomElement* elem) {
     // F4: seed :placeholder-shown after initial value load.
     {
         bool show = (f->current_value_len == 0) && f->placeholder && f->placeholder[0];
-        if (show) {
-            f->placeholder_shown = 1;
-            dom_element_set_pseudo_state(elem, PSEUDO_STATE_PLACEHOLDER_SHOWN);
-        } else {
-            f->placeholder_shown = 0;
-            dom_element_clear_pseudo_state(elem, PSEUDO_STATE_PLACEHOLDER_SHOWN);
-        }
+        state_set_bool(f->state_ref ? f->state_ref : (elem->doc ? (DocState*)elem->doc->state : nullptr),
+            elem, STATE_PLACEHOLDER, show);
+        f->placeholder_shown = show ? 1 : 0;
     }
 
     // F5: seed :valid / :invalid / :required / :read-only on first init so
@@ -203,13 +199,9 @@ void tc_ensure_init(DomElement* elem) {
 static void tc_refresh_placeholder_shown(DomElement* elem, FormControlProp* f) {
     if (!elem || !f) return;
     bool show = (f->current_value_len == 0) && f->placeholder && f->placeholder[0];
-    if (show) {
-        f->placeholder_shown = 1;
-        dom_element_set_pseudo_state(elem, PSEUDO_STATE_PLACEHOLDER_SHOWN);
-    } else {
-        f->placeholder_shown = 0;
-        dom_element_clear_pseudo_state(elem, PSEUDO_STATE_PLACEHOLDER_SHOWN);
-    }
+    state_set_bool(f->state_ref ? f->state_ref : (elem->doc ? (DocState*)elem->doc->state : nullptr),
+        elem, STATE_PLACEHOLDER, show);
+    f->placeholder_shown = show ? 1 : 0;
 }
 
 // F4 (Radiant_Design_Form_Input.md §3.5): suppress recursive history push

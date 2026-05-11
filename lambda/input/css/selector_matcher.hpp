@@ -30,6 +30,7 @@ typedef struct SelectorMatcher SelectorMatcher;
 typedef struct MatchResult MatchResult;
 typedef struct SelectorCache SelectorCache;
 typedef struct SelectorEntry SelectorEntry;
+typedef bool (*SelectorPseudoStateResolver)(void* context, DomElement* element, uint32_t pseudo_state);
 
 // ============================================================================
 // Selector Entry (for caching)
@@ -109,6 +110,10 @@ typedef struct SelectorMatcher {
     bool case_sensitive_classes;     // Case-sensitive class name matching
     bool case_sensitive_attrs;       // Case-sensitive attribute matching
 
+    // Dynamic pseudo-state resolution
+    SelectorPseudoStateResolver pseudo_state_resolver;
+    void* pseudo_state_context;
+
     // Bloom filter (for quick filtering)
     uint8_t* bloom_filter;           // Bloom filter for element properties
     size_t bloom_filter_size;        // Size of bloom filter
@@ -164,6 +169,16 @@ void selector_matcher_set_case_sensitive_classes(SelectorMatcher* matcher, bool 
  * @param case_sensitive true for case-sensitive, false for case-insensitive
  */
 void selector_matcher_set_case_sensitive_attributes(SelectorMatcher* matcher, bool case_sensitive);
+
+/**
+ * Set dynamic pseudo-state resolver
+ * @param matcher Selector matcher
+ * @param resolver Callback used for dynamic pseudo-state lookup
+ * @param context Caller-owned context passed to resolver
+ */
+void selector_matcher_set_pseudo_state_resolver(SelectorMatcher* matcher,
+                                                SelectorPseudoStateResolver resolver,
+                                                void* context);
 
 /**
  * Get or create a cached selector entry

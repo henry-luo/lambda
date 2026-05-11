@@ -13,6 +13,7 @@ struct AnimationScheduler;
 struct DomElement;
 struct DomDocument;
 struct EventStateLog;
+struct SelectorMatcher;
 
 /**
  * Radiant State Store - Centralized UI state management
@@ -153,6 +154,13 @@ typedef struct ViewStateEntry {
     uint32_t view_id;
     ViewState* state;
 } ViewStateEntry;
+
+typedef struct StateStore {
+    DomDocument* document;
+    Pool* pool;
+    Arena* arena;
+    struct DocState* doc_state;
+} StateStore;
 
 typedef struct CaretState CaretState;
 typedef struct SelectionState SelectionState;
@@ -332,7 +340,7 @@ typedef struct DocState {
 // ============================================================================
 
 /**
- * Create a new state store
+ * Create a new DocState projection. Prefer state_store_create() for documents.
  * @param pool Memory pool for allocations
  * @param mode Update mode (in-place or immutable)
  * @return New state store, or NULL on failure
@@ -340,12 +348,27 @@ typedef struct DocState {
 DocState* radiant_state_create(Pool* pool, StateUpdateMode mode);
 
 /**
- * Ensure an active document owns a DocState for interaction/state APIs.
+ * Create or return the per-document StateStore owner.
+ */
+StateStore* state_store_create(DomDocument* document);
+
+/**
+ * Destroy the per-document StateStore and its DocState projection.
+ */
+void state_store_destroy(DomDocument* document);
+
+/**
+ * Return the canonical DocState owned by a StateStore.
+ */
+DocState* state_store_doc_state(StateStore* store);
+
+/**
+ * Ensure an active document owns a StateStore and return its DocState projection.
  */
 DocState* radiant_document_ensure_state(DomDocument* document, const char* owner);
 
 /**
- * Destroy a document's DocState before its owning pool is released.
+ * Destroy a document's StateStore before its owning pool is released.
  */
 void radiant_document_destroy_state(DomDocument* document);
 
@@ -384,6 +407,8 @@ bool view_state_get_focused(DocState* state, View* view);
  * Missing state is interpreted as the default value for the pseudo-state.
  */
 bool state_get_pseudo_state(DocState* state, View* view, uint32_t pseudo_state);
+bool state_resolve_selector_pseudo_state(void* context, DomElement* element, uint32_t pseudo_state);
+void state_configure_selector_matcher(DocState* state, SelectorMatcher* matcher);
 
 /**
  * Writer-only per-view interaction state APIs.
@@ -717,11 +742,6 @@ bool form_control_get_checked(DocState* state, View* view);
  * This is the only supported writer path for checked state transitions.
  */
 void form_control_set_checked(DocState* state, View* view, bool checked);
-
-/**
- * Refresh derived :checked pseudo-state mirror after canonical checked updates.
- */
-void form_control_sync_checked_mirror(DocState* state, View* view, bool checked);
 
 /**
  * Attach a scroll pane to the central state store for fast-read access.

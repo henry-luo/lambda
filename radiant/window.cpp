@@ -275,11 +275,7 @@ DomDocument* show_html_doc(Url* base, char* doc_url, int viewport_width, int vie
 
     ui_context.document = doc;
 
-    // Create DocState for interactive state management (caret, selection, focus, etc.)
-    if (!doc->state) {
-        doc->state = radiant_state_create(doc->pool, STATE_MODE_IN_PLACE);
-        log_debug("show_html_doc: created DocState for document");
-    }
+    radiant_document_ensure_state(doc, "show_html_doc");
     view_attach_event_log(doc, doc_url);
 
     // Process @font-face rules before layout
@@ -948,11 +944,7 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
             log_info("view: browsing session created");
         }
 
-        // Create DocState for interactive state management (caret, selection, focus, etc.)
-        if (!doc->state) {
-            doc->state = radiant_state_create(doc->pool, STATE_MODE_IN_PLACE);
-            log_debug("view_doc_in_window: created DocState for document");
-        }
+        radiant_document_ensure_state(doc, "view_doc_in_window");
         view_attach_event_log(doc, file_to_load);
 
         // Process @font-face rules before layout

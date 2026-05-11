@@ -1418,9 +1418,8 @@ struct FocusState;
 struct BrowsingSession;  // Browsing session for web navigation
 struct EventStateLog;    // per-document JSONL event/state log
 
-// StateStore is now an alias for DocState
-// Use DocState directly for new code
-typedef DocState StateStore;
+struct StateStore;
+typedef struct StateStore StateStore;
 
 // rendering context structs
 typedef struct {

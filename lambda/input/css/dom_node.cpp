@@ -607,18 +607,6 @@ void DomNode::print(StrBuf* buf, int indent) const {
             }
         }
 
-        // Print pseudo-state information if any (for testing/debugging)
-        if (element->pseudo_state != 0) {
-            strbuf_append_str(buf, " [pseudo:");
-            if (element->pseudo_state & PSEUDO_STATE_HOVER) strbuf_append_str(buf, " hover");
-            if (element->pseudo_state & PSEUDO_STATE_ACTIVE) strbuf_append_str(buf, " active");
-            if (element->pseudo_state & PSEUDO_STATE_FOCUS) strbuf_append_str(buf, " focus");
-            if (element->pseudo_state & PSEUDO_STATE_VISITED) strbuf_append_str(buf, " visited");
-            if (element->pseudo_state & PSEUDO_STATE_CHECKED) strbuf_append_str(buf, " checked");
-            if (element->pseudo_state & PSEUDO_STATE_DISABLED) strbuf_append_str(buf, " disabled");
-            strbuf_append_char(buf, ']');
-        }
-
         strbuf_append_char(buf, '>');
 
         // Print specified CSS styles if present
