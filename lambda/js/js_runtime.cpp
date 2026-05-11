@@ -4173,20 +4173,50 @@ extern "C" Item js_property_access(Item object, Item key) {
     return result;
 }
 
+static bool js_is_class_object_item(Item obj) {
+    if (get_type_id(obj) != LMD_TYPE_MAP || !obj.map) return false;
+    bool own_instance_proto = false;
+    js_map_get_fast_ext(obj.map, "__instance_proto__", 18, &own_instance_proto);
+    return own_instance_proto;
+}
+
+static bool js_is_class_instance_prototype(Item proto) {
+    if (get_type_id(proto) != LMD_TYPE_MAP || !proto.map) return false;
+    bool own_constructor = false;
+    Item ctor = js_map_get_fast_ext(proto.map, "constructor", 11, &own_constructor);
+    if (!own_constructor) return false;
+    return js_is_class_object_item(ctor);
+}
+
+static Item js_super_lookup_base(Item receiver) {
+    Item proto = js_get_prototype(receiver);
+    if (proto.item == ItemNull.item) {
+        proto = js_get_prototype_of(receiver);
+        if (proto.item == ItemNull.item) return ItemNull;
+    }
+
+    // Class instance super references start lookup at Parent.prototype, not at
+    // Current.prototype. Static super references keep the one-level parent class.
+    if (!js_is_class_object_item(receiver) &&
+        !js_is_class_instance_prototype(receiver) &&
+        js_is_class_instance_prototype(proto)) {
+        Item parent_proto = js_get_prototype(proto);
+        if (parent_proto.item == ItemNull.item) parent_proto = js_get_prototype_of(proto);
+        if (parent_proto.item != ItemNull.item) return parent_proto;
+    }
+    return proto;
+}
+
 // super.x property read: look up property on [[GetPrototypeOf]](receiver),
 // but call getters with receiver as 'this'. Implements ES spec super reference [[Get]].
 extern "C" Item js_super_property_get(Item receiver, Item key) {
-    // Use raw __proto__ lookup first (fast path), fall back to full prototype resolution
-    Item proto = js_get_prototype(receiver);
-    if (proto.item == ItemNull.item) {
-        // No own __proto__ — use js_get_prototype_of for implicit prototype (Object.prototype etc.)
-        proto = js_get_prototype_of(receiver);
-        if (proto.item == ItemNull.item) return make_js_undefined();
-    }
+    Item proto = js_super_lookup_base(receiver);
+    if (proto.item == ItemNull.item) return make_js_undefined();
     TypeId type = get_type_id(proto);
     if (type != LMD_TYPE_MAP) return js_property_get(proto, key);
 
-    if (js_key_is_symbol(key)) key = js_symbol_to_key(key);
+    key = js_to_property_key(key);
+    if (js_check_exception()) return make_js_undefined();
 
     // Phase 5: if proto has an own accessor at `key` (IS_ACCESSOR flag),
     // Stage A1.3c: own-property + IS_ACCESSOR dispatch on proto routed
@@ -4245,7 +4275,8 @@ extern "C" Item js_super_instance_method_get(Item receiver, Item key) {
     TypeId type = get_type_id(proto);
     if (type != LMD_TYPE_MAP) return js_property_get(proto, key);
 
-    if (js_key_is_symbol(key)) key = js_symbol_to_key(key);
+    key = js_to_property_key(key);
+    if (js_check_exception()) return make_js_undefined();
 
     // Stage A1.3c: own-property + IS_ACCESSOR on proto via shared kernel.
     {
@@ -4267,15 +4298,13 @@ extern "C" Item js_super_instance_method_get(Item receiver, Item key) {
 // super.x = val: look up setter on [[GetPrototypeOf]](receiver),
 // call setter with receiver as 'this'. If no setter, set on receiver.
 extern "C" Item js_super_property_set(Item receiver, Item key, Item value) {
-    Item proto = js_get_prototype(receiver);
-    if (proto.item == ItemNull.item) {
-        proto = js_get_prototype_of(receiver);
-        if (proto.item == ItemNull.item) return js_property_set(receiver, key, value);
-    }
+    Item proto = js_super_lookup_base(receiver);
+    if (proto.item == ItemNull.item) return js_property_set(receiver, key, value);
     TypeId type = get_type_id(proto);
     if (type != LMD_TYPE_MAP) return js_property_set(receiver, key, value);
 
-    if (js_key_is_symbol(key)) key = js_symbol_to_key(key);
+    key = js_to_property_key(key);
+    if (js_check_exception()) return value;
 
     // check setter on proto chain — call with receiver as this.
     // Use accessor-pair lookup (IS_ACCESSOR shape flag) which is the new
