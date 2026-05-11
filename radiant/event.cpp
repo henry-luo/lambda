@@ -2747,7 +2747,7 @@ static bool handle_dropdown_option_click(EventContext* evcon, float mouse_x, flo
 
     if (clicked_index >= 0 && clicked_index < select->form->option_count) {
         log_debug("handle_dropdown_option_click: selecting option %d", clicked_index);
-        select->form->selected_index = clicked_index;
+        form_control_set_selected_index(state, (View*)select, clicked_index);
 
         // Close dropdown
         state->open_dropdown = nullptr;
@@ -2825,7 +2825,7 @@ static bool handle_dropdown_key(EventContext* evcon, int key) {
 
     case RDT_KEY_ENTER:
         if (hover >= 0 && hover < count) {
-            select->form->selected_index = hover;
+            form_control_set_selected_index(state, (View*)select, hover);
             state->open_dropdown = nullptr;
             select->form->dropdown_open = 0;
             select->form->hover_index = -1;

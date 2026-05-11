@@ -881,6 +881,161 @@ void scroll_state_get_position(RadiantState* state, void* pane_ptr,
     if (out_v_max) *out_v_max = pane->v_max_scroll;
 }
 
+const char* form_control_get_value(RadiantState* state, View* view, uint32_t* out_len) {
+    if (out_len) *out_len = 0;
+    if (!view || !view->is_block()) return nullptr;
+
+    ViewBlock* block = (ViewBlock*)view;
+    if (!block->form) return nullptr;
+
+    FormControlProp* form = block->form;
+    if (out_len) *out_len = form->current_value_len;
+    return form->current_value;
+}
+
+void form_control_set_value(RadiantState* state, View* view, const char* value, uint32_t len) {
+    if (!view || !view->is_block()) return;
+
+    ViewBlock* block = (ViewBlock*)view;
+    if (!block->form) return;
+
+    FormControlProp* form = block->form;
+    form->state_ref = state;
+
+    // Free old value if present
+    if (form->current_value) {
+        free(form->current_value);
+    }
+
+    // Allocate and copy new value
+    form->current_value = (char*)malloc(len + 1);
+    memcpy(form->current_value, value, len);
+    form->current_value[len] = '\0';
+    form->current_value_len = len;
+
+    // Compute UTF-16 length (needed for selection offsets)
+    extern uint32_t tc_utf8_to_utf16_length(const char* utf8, uint32_t byte_len);
+    form->current_value_u16_len = tc_utf8_to_utf16_length(form->current_value, len);
+
+    // Reset selection to end per HTML default
+    form->selection_start = form->current_value_u16_len;
+    form->selection_end = form->current_value_u16_len;
+    form->selection_direction = 0;
+
+    // Mirror to display value
+    form->value = form->current_value;
+
+    if (state) {
+        state->is_dirty = true;
+        state->needs_repaint = true;
+    }
+}
+
+void form_control_get_selection(RadiantState* state, View* view,
+                                uint32_t* out_start, uint32_t* out_end, uint8_t* out_direction) {
+    (void)state;
+    if (out_start) *out_start = 0;
+    if (out_end) *out_end = 0;
+    if (out_direction) *out_direction = 0;
+
+    if (!view || !view->is_block()) return;
+
+    ViewBlock* block = (ViewBlock*)view;
+    if (!block->form) return;
+
+    FormControlProp* form = block->form;
+    if (out_start) *out_start = form->selection_start;
+    if (out_end) *out_end = form->selection_end;
+    if (out_direction) *out_direction = form->selection_direction;
+}
+
+void form_control_set_selection(RadiantState* state, View* view,
+                                uint32_t start, uint32_t end, uint8_t direction) {
+    if (!view || !view->is_block()) return;
+
+    ViewBlock* block = (ViewBlock*)view;
+    if (!block->form) return;
+
+    FormControlProp* form = block->form;
+    form->state_ref = state;
+
+    // Clamp to value bounds
+    uint32_t max_offset = form->current_value_u16_len;
+    if (start > max_offset) start = max_offset;
+    if (end > max_offset) end = max_offset;
+
+    form->selection_start = start;
+    form->selection_end = end;
+    form->selection_direction = direction & 3;  // Only valid bits
+
+    if (state) {
+        state->is_dirty = true;
+        state->needs_repaint = true;
+    }
+}
+
+int form_control_get_selected_index(RadiantState* state, View* view) {
+    (void)state;
+    if (!view || !view->is_block()) return -1;
+
+    ViewBlock* block = (ViewBlock*)view;
+    if (!block->form) return -1;
+
+    return block->form->selected_index;
+}
+
+void form_control_set_selected_index(RadiantState* state, View* view, int index) {
+    if (!view || !view->is_block()) return;
+
+    ViewBlock* block = (ViewBlock*)view;
+    if (!block->form) return;
+
+    FormControlProp* form = block->form;
+    form->state_ref = state;
+
+    // Clamp to valid range: -1 (none) or 0 to option_count-1
+    if (index < -1) index = -1;
+    if (index >= form->option_count) index = form->option_count - 1;
+
+    form->selected_index = index;
+
+    if (state) {
+        state->is_dirty = true;
+        state->needs_repaint = true;
+    }
+}
+
+float form_control_get_range_value(RadiantState* state, View* view) {
+    (void)state;
+    if (!view || !view->is_block()) return 0.5f;
+
+    ViewBlock* block = (ViewBlock*)view;
+    if (!block->form) return 0.5f;
+
+    return block->form->range_value;
+}
+
+void form_control_set_range_value(RadiantState* state, View* view, float value) {
+    if (!view || !view->is_block()) return;
+
+    ViewBlock* block = (ViewBlock*)view;
+    if (!block->form) return;
+
+    FormControlProp* form = block->form;
+    form->state_ref = state;
+
+    // Clamp to 0.0-1.0
+    if (value < 0.0f) value = 0.0f;
+    if (value > 1.0f) value = 1.0f;
+
+    form->range_value = value;
+
+    if (state) {
+        state->is_dirty = true;
+        state->needs_repaint = true;
+    }
+}
+
 void state_remove(RadiantState* state, void* node, const char* name) {
     if (!state || !node || !name) return;
 

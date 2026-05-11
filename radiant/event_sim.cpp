@@ -2574,8 +2574,8 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                          ev->option_label ? ev->option_label : "(null)");
                 break;
             }
-            select->form->selected_index = match_index;
             RadiantState* state = (RadiantState*)doc->state;
+            form_control_set_selected_index(state, (View*)select, match_index);
             if (state) {
                 // Close dropdown if open
                 if (state->open_dropdown == select_view) {

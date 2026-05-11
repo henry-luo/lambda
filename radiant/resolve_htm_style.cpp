@@ -1524,8 +1524,10 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             if (step_attr) block->form->range_step = str_to_double_default(step_attr, strlen(step_attr), 0.0);
             if (block->form->value) {
                 float val = (float)str_to_double_default(block->form->value, strlen(block->form->value), 0.0);
-                block->form->range_value = (val - block->form->range_min) /
+                float normalized = (val - block->form->range_min) /
                     (block->form->range_max - block->form->range_min);
+                RadiantState* state = lycon && lycon->doc ? (RadiantState*)lycon->doc->state : nullptr;
+                form_control_set_range_value(state, (View*)block, normalized);
             }
             break;
         }
@@ -1637,7 +1639,9 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 child = child->next_sibling;
             }
             block->form->option_count = option_count;
-            block->form->selected_index = (selected_idx >= 0) ? selected_idx : (option_count > 0 ? 0 : -1);
+            int init_index = (selected_idx >= 0) ? selected_idx : (option_count > 0 ? 0 : -1);
+            RadiantState* state = lycon && lycon->doc ? (RadiantState*)lycon->doc->state : nullptr;
+            form_control_set_selected_index(state, (View*)block, init_index);
         }
         // Read CSS `appearance` property — affects intrinsic width and UA-rendered chrome.
         // `appearance: none` removes the native dropdown arrow so author CSS can supply its own.

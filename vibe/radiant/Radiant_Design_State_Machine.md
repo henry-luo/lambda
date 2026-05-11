@@ -8,31 +8,47 @@
 
 ## Implementation Update (2026-05-11)
 
-This design has now started landing in code for form-control checked state and scroll mutations.
+Centralized writer APIs and state ownership are now landing in code. Phase 1 and Phase 2 are complete; Phase 3 remains pending.
 
-- Added centralized writer APIs in [radiant/state_store.hpp](../../radiant/state_store.hpp) and [radiant/state_store.cpp](../../radiant/state_store.cpp):
-  - `form_control_get_checked()`
-  - `form_control_set_checked()`
-  - `scroll_state_attach()`
-  - `scroll_state_set_max()`
-  - `scroll_state_set_position()`
-  - `scroll_state_get_position()`
-- Refactored checkbox/radio transitions in [radiant/event.cpp](../../radiant/event.cpp) to use `form_control_set_checked()` instead of mutating `FormControlProp::checked` directly.
-- Refactored scroll writers in [radiant/scroller.cpp](../../radiant/scroller.cpp), [radiant/layout.cpp](../../radiant/layout.cpp), [radiant/event_sim.cpp](../../radiant/event_sim.cpp), and [radiant/window.cpp](../../radiant/window.cpp) to use centralized scroll APIs.
-- Added fast-read owner pointers:
-  - `FormControlProp::state_ref` in [radiant/form_control.hpp](../../radiant/form_control.hpp)
-  - `ScrollPane::state_ref` in [radiant/view.hpp](../../radiant/view.hpp)
+**Phase 1: Checkbox/Radio Checked State (COMPLETE)**
+
+- Added APIs: `form_control_get_checked()`, `form_control_set_checked()`
+- Refactored all checked state mutations in [radiant/event.cpp](../../radiant/event.cpp) to use centralized writers.
+- Fast-read pointer: `FormControlProp::state_ref` in [radiant/form_control.hpp](../../radiant/form_control.hpp)
+- Regression tests: PASS (radio outline, selection, interaction)
+
+**Phase 2: Scroll Position/Max State (COMPLETE)**
+
+- Added APIs: `scroll_state_attach()`, `scroll_state_set_max()`, `scroll_state_set_position()`, `scroll_state_get_position()`
+- Refactored scroll mutations in [radiant/scroller.cpp](../../radiant/scroller.cpp), [radiant/layout.cpp](../../radiant/layout.cpp), [radiant/event_sim.cpp](../../radiant/event_sim.cpp), [radiant/window.cpp](../../radiant/window.cpp)
+- Fast-read pointer: `ScrollPane::state_ref` in [radiant/view.hpp](../../radiant/view.hpp)
+- Regression tests: PASS (scroll persistence after mouse move)
+
+**Phase 2b: Form Value, Selection, Select Index, Range Value (COMPLETE)**
+
+- Added APIs:
+  - `form_control_get_value()`, `form_control_set_value()`
+  - `form_control_get_selection()`, `form_control_set_selection()`
+  - `form_control_get_selected_index()`, `form_control_set_selected_index()`
+  - `form_control_get_range_value()`, `form_control_set_range_value()`
+- Refactored select option mutations in [radiant/event.cpp](../../radiant/event.cpp), [radiant/event_sim.cpp](../../radiant/event_sim.cpp)
+- Refactored range/select initialization in [radiant/resolve_htm_style.cpp](../../radiant/resolve_htm_style.cpp)
+- Text value/selection mutations already centralized through `tc_set_value()` / `tc_set_selection_range()` in [radiant/text_control.cpp](../../radiant/text_control.cpp) (internal helpers; will extend to use state_store APIs in Phase 3)
 
 ### Writer Rule (now enforced for migrated paths)
 
-- Form checked state updates MUST go through `form_control_set_checked()`.
-- Scroll position/max updates MUST go through `scroll_state_set_max()` / `scroll_state_set_position()`.
-- Local structures may keep fast-read pointers, but direct local field mutation is forbidden on migrated paths.
+- Form checked state: MUST use `form_control_set_checked()`
+- Scroll position/max: MUST use `scroll_state_set_max()` / `scroll_state_set_position()`
+- Select option index: MUST use `form_control_set_selected_index()`
+- Range value: MUST use `form_control_set_range_value()`
+- Text value/selection: MUST use `tc_set_value()` / `tc_set_selection_range()` (to be extended to state_store in Phase 3)
+- Local structures may keep fast-read pointers, but direct local field mutation is forbidden.
 
-### Follow-up Actions
+### Follow-up Actions (Phase 3)
 
-- Continue migration of remaining mutable form-control fields (`current_value`, selection offsets, select/range mutable state) to centralized writer APIs.
-- Remove legacy fallback reads once all call sites are migrated.
+- Refactor `tc_set_value()` / `tc_set_selection_range()` in [radiant/text_control.cpp](../../radiant/text_control.cpp) to use centralized APIs.
+- Ensure text edit history, IME composition, and input method callbacks all route through centralized writers.
+- Remove legacy fallback reads once all call sites migrate.
 - Extend centralized writer APIs to emit richer event/state-log records and validation hooks for each mutation class.
 
 **Source proposals**:
