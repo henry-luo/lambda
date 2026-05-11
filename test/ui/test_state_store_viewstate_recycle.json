@@ -1,0 +1,14 @@
+{
+  "name": "StateStore ViewState recycling on DOM detach",
+  "html": "test/ui/test_state_store_viewstate_recycle.html",
+  "description": "Removing a DOM subtree prunes its ViewState registry entries and clears weak refs.",
+  "events": [
+    {"type": "assert_state_store", "view_state_count": 0},
+    {"type": "mouse_move", "target": {"selector": "#victim"}},
+    {"type": "assert_state_store", "target": {"selector": "#victim"}, "view_state": true, "kind": "base", "weak_ref": true},
+    {"type": "click", "target": {"selector": "#remove"}},
+    {"type": "assert_text", "target": {"selector": "#status"}, "equals": "removed", "assert_timeout": 500},
+    {"type": "assert_count", "target": {"selector": "#victim"}, "count": 0},
+    {"type": "assert_state_store"}
+  ]
+}

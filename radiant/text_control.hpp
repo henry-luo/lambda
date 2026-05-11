@@ -61,11 +61,6 @@ void tc_notify_selection_changed(DomElement* elem);
 // Called at the end of every text-control mouse/keyboard handler in event.cpp.
 void tc_sync_legacy_to_form(DomElement* elem, DocState* state);
 
-// Read form->selection_start/_end (UTF-16) and write state->caret +
-// state->selection (byte). Called from JS when setSelectionRange / value
-// setter mutates the control programmatically.
-void tc_sync_form_to_legacy(DomElement* elem, DocState* state);
-
 // Selection accessor for Selection.toString() integration ----------------
 
 // Returns the active text control's selected substring (UTF-8) with its

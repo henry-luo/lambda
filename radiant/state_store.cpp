@@ -262,6 +262,7 @@ StateStore* state_store_create(DomDocument* document) {
 
     document->state_store = store;
     document->state = store->doc_state;
+    store->doc_state->owner_store = store;
     log_debug("state_store_create: created StateStore for document");
     return store;
 }
@@ -275,6 +276,7 @@ void state_store_destroy(DomDocument* document) {
     StateStore* store = document->state_store;
     DocState* state = store ? store->doc_state : document->state;
     if (state) {
+        state->owner_store = NULL;
         radiant_state_destroy(state);
     }
     if (store && store->arena) {
@@ -342,6 +344,8 @@ static void selection_write_optional_ref(JsonWriter* w, const char* key, View* v
     event_state_log_write_node_ref(w, key, (const DomNode*)view);
 }
 
+static void state_transition_write_anchor(JsonWriter* w, DocState* state, View* view);
+
 static const char* selection_state_name(DomSelection* selection) {
     if (!selection || selection->range_count == 0) return "SelectionEmpty";
     if (selection->is_collapsed) return "CaretCollapsed";
@@ -360,18 +364,27 @@ static void selection_log_transition(DocState* state, const char* transition,
         "state.transition", state->active_cascade_id);
     jw_key(&w, "data");
     jw_obj_begin(&w);
-        jw_kv_str(&w, "machine", "selection");
-        jw_kv_str(&w, "transition", transition ? transition : "selection_update");
-        jw_kv_str(&w, "state", selection_state_name(state->dom_selection));
-        jw_key(&w, "anchor");
+        jw_kv_str(&w, "scope", "doc");
+        state_transition_write_anchor(&w, state, NULL);
+        jw_kv_str(&w, "name", "selection");
+        jw_key(&w, "old");
         jw_obj_begin(&w);
-            selection_write_optional_ref(&w, "node", anchor_view);
-            jw_kv_int(&w, "offset", anchor_offset);
         jw_obj_end(&w);
-        jw_key(&w, "focus");
+        jw_key(&w, "new");
         jw_obj_begin(&w);
-            selection_write_optional_ref(&w, "node", focus_view);
-            jw_kv_int(&w, "offset", focus_offset);
+            jw_kv_str(&w, "machine", "selection");
+            jw_kv_str(&w, "transition", transition ? transition : "selection_update");
+            jw_kv_str(&w, "state", selection_state_name(state->dom_selection));
+            jw_key(&w, "anchor");
+            jw_obj_begin(&w);
+                selection_write_optional_ref(&w, "node", anchor_view);
+                jw_kv_int(&w, "offset", anchor_offset);
+            jw_obj_end(&w);
+            jw_key(&w, "focus");
+            jw_obj_begin(&w);
+                selection_write_optional_ref(&w, "node", focus_view);
+                jw_kv_int(&w, "offset", focus_offset);
+            jw_obj_end(&w);
         jw_obj_end(&w);
     jw_obj_end(&w);
     event_state_log_finish_record(state->active_event_log, &w);
@@ -921,6 +934,35 @@ static uint32_t view_state_resolve_id(View* view) {
     return 0;
 }
 
+static void doc_state_log_dropdown_owner_transition(DocState* state,
+                                                    View* old_view,
+                                                    View* new_view);
+static void doc_state_log_context_menu_target_transition(DocState* state,
+                                                         View* old_view,
+                                                         View* new_view);
+static void doc_state_log_context_menu_hover_transition(DocState* state,
+                                                        int old_hover,
+                                                        int new_hover);
+static void doc_state_log_view_target_transition(DocState* state,
+                                                 const char* name,
+                                                 View* old_view,
+                                                 View* new_view);
+static void doc_state_log_bool_transition(DocState* state, const char* name,
+                                          bool old_value, bool new_value);
+
+static void state_transition_write_anchor(JsonWriter* w, DocState* state, View* view) {
+    jw_key(w, "anchor");
+    jw_obj_begin(w);
+        const char* doc_id = event_state_log_doc_id(state ? state->active_event_log : NULL);
+        if (doc_id) jw_kv_str(w, "doc_id", doc_id);
+        if (view) {
+            uint32_t view_id = view_state_resolve_id(view);
+            if (view_id != 0) jw_kv_uint(w, "view_id", view_id);
+            event_state_log_write_node_ref(w, "view", (const DomNode*)view);
+        }
+    jw_obj_end(w);
+}
+
 ViewState* view_state_get(DocState* state, View* view) {
     if (!state || !view) return NULL;
 
@@ -935,6 +977,135 @@ ViewState* view_state_get(DocState* state, View* view) {
     }
     view->view_state_ref = found->state;
     return found->state;
+}
+
+static void doc_state_detach_transient_owner(DocState* state, View* view) {
+    if (!state || !view) return;
+
+    if (state->hover_target == view) {
+        doc_state_log_view_target_transition(state, "hover.target", state->hover_target, NULL);
+        state->hover_target = NULL;
+    }
+    if (state->active_target == view) {
+        doc_state_log_view_target_transition(state, "active.target", state->active_target, NULL);
+        state->active_target = NULL;
+    }
+    if (state->drag_target == view) {
+        doc_state_log_view_target_transition(state, "drag.target", state->drag_target, NULL);
+        state->drag_target = NULL;
+        if (state->is_dragging) {
+            doc_state_log_bool_transition(state, "drag.active", true, false);
+            state->is_dragging = false;
+        }
+    }
+    if (state->open_dropdown == view) {
+        doc_state_log_dropdown_owner_transition(state, state->open_dropdown, NULL);
+        state->open_dropdown = NULL;
+        state->dropdown_width = 0.0f;
+        state->dropdown_height = 0.0f;
+    }
+    if (state->context_menu_target == view) {
+        doc_state_log_context_menu_target_transition(state, state->context_menu_target, NULL);
+        if (state->context_menu_hover != -1) {
+            doc_state_log_context_menu_hover_transition(state, state->context_menu_hover, -1);
+        }
+        state->context_menu_target = NULL;
+        state->context_menu_hover = -1;
+        state->context_menu_width = 0.0f;
+        state->context_menu_height = 0.0f;
+    }
+    if (state->drag_drop) {
+        if (state->drag_drop->source_view == view || state->drag_drop->drop_target == view) {
+            memset(state->drag_drop, 0, sizeof(DragDropState));
+        }
+    }
+}
+
+static uint32_t view_state_detach_node(DocState* state, DomNode* node) {
+    if (!state || !node) return 0;
+
+    uint32_t removed = 0;
+    View* view = (View*)node;
+    uint32_t view_id = view->id;
+    doc_state_detach_transient_owner(state, view);
+    if (view_id != 0 && state->view_state_map) {
+        ViewStateEntry query = { .view_id = view_id, .state = NULL };
+        if (hashmap_delete(state->view_state_map, &query)) {
+            removed++;
+        }
+    }
+    view->view_state_ref = NULL;
+
+    if (node->is_element()) {
+        DomElement* element = (DomElement*)node;
+        DomNode* child = element->first_child;
+        while (child) {
+            removed += view_state_detach_node(state, child);
+            child = child->next_sibling;
+        }
+    }
+    return removed;
+}
+
+static View* view_state_find_live_id(DomNode* node, uint32_t view_id) {
+    if (!node || view_id == 0) return NULL;
+    if (node->id == view_id) return (View*)node;
+    if (node->is_element()) {
+        DomElement* element = (DomElement*)node;
+        for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+            View* found = view_state_find_live_id(child, view_id);
+            if (found) return found;
+        }
+    }
+    return NULL;
+}
+
+uint32_t view_state_prune_orphans(DocState* state) {
+    if (!state || !state->view_state_map || !state->owner_store || !state->owner_store->document) return 0;
+
+    DomDocument* doc = state->owner_store->document;
+    DomNode* root = doc->root ? (DomNode*)doc->root : (DomNode*)doc->html_root;
+    uint32_t removed = 0;
+    bool found_orphan = true;
+    while (found_orphan) {
+        found_orphan = false;
+        size_t iter = 0;
+        void* item = NULL;
+        while (hashmap_iter(state->view_state_map, &iter, &item)) {
+            ViewStateEntry* entry = (ViewStateEntry*)item;
+            uint32_t state_view_id = entry->state ? entry->state->view_id : 0;
+            View* key_live = view_state_find_live_id(root, entry->view_id);
+            View* state_live = view_state_find_live_id(root, state_view_id);
+            if (!entry->state || !key_live || !state_live) {
+                ViewStateEntry query = { .view_id = entry->view_id, .state = NULL };
+                hashmap_delete(state->view_state_map, &query);
+                removed++;
+                found_orphan = true;
+                break;
+            }
+        }
+    }
+
+    if (removed > 0) {
+        state->is_dirty = true;
+        state->needs_repaint = true;
+        state->version++;
+        log_debug("view_state_prune_orphans: removed %u orphaned ViewState entries", removed);
+    }
+    return removed;
+}
+
+uint32_t view_state_detach_subtree(DocState* state, DomNode* root) {
+    if (!state || !root) return 0;
+    uint32_t removed = view_state_detach_node(state, root);
+    if (removed > 0) {
+        state->is_dirty = true;
+        state->needs_repaint = true;
+        state->version++;
+        log_debug("view_state_detach_subtree: removed %u ViewState entries", removed);
+        state_assert_after_mutation(state, "view_state_detach_subtree");
+    }
+    return removed;
 }
 
 static ViewState* view_state_get_or_create(DocState* state, View* view, ViewStateKind kind) {
@@ -977,10 +1148,7 @@ static void view_state_log_bool_transition(DocState* state, View* view,
     jw_key(&w, "data");
     jw_obj_begin(&w);
         jw_kv_str(&w, "scope", "view");
-        jw_key(&w, "anchor");
-        jw_obj_begin(&w);
-            event_state_log_write_node_ref(&w, "view", (const DomNode*)view);
-        jw_obj_end(&w);
+        state_transition_write_anchor(&w, state, view);
         jw_kv_str(&w, "name", name ? name : "view.state");
         jw_key(&w, "old");
         jw_obj_begin(&w);
@@ -1006,10 +1174,7 @@ static void view_state_log_int_transition(DocState* state, View* view,
     jw_key(&w, "data");
     jw_obj_begin(&w);
         jw_kv_str(&w, "scope", "view");
-        jw_key(&w, "anchor");
-        jw_obj_begin(&w);
-            event_state_log_write_node_ref(&w, "view", (const DomNode*)view);
-        jw_obj_end(&w);
+        state_transition_write_anchor(&w, state, view);
         jw_kv_str(&w, "name", name ? name : "view.state");
         jw_key(&w, "old");
         jw_obj_begin(&w);
@@ -1035,10 +1200,7 @@ static void view_state_log_float_transition(DocState* state, View* view,
     jw_key(&w, "data");
     jw_obj_begin(&w);
         jw_kv_str(&w, "scope", "view");
-        jw_key(&w, "anchor");
-        jw_obj_begin(&w);
-            event_state_log_write_node_ref(&w, "view", (const DomNode*)view);
-        jw_obj_end(&w);
+        state_transition_write_anchor(&w, state, view);
         jw_kv_str(&w, "name", name ? name : "view.state");
         jw_key(&w, "old");
         jw_obj_begin(&w);
@@ -1068,10 +1230,7 @@ static void view_state_log_scroll_transition(DocState* state, View* view,
     jw_key(&w, "data");
     jw_obj_begin(&w);
         jw_kv_str(&w, "scope", "view");
-        jw_key(&w, "anchor");
-        jw_obj_begin(&w);
-            event_state_log_write_node_ref(&w, "view", (const DomNode*)view);
-        jw_obj_end(&w);
+        state_transition_write_anchor(&w, state, view);
         jw_kv_str(&w, "name", name ? name : "scroll");
         jw_key(&w, "old");
         jw_obj_begin(&w);
@@ -1103,9 +1262,7 @@ static void doc_state_log_dropdown_owner_transition(DocState* state,
     jw_key(&w, "data");
     jw_obj_begin(&w);
         jw_kv_str(&w, "scope", "doc");
-        jw_key(&w, "anchor");
-        jw_obj_begin(&w);
-        jw_obj_end(&w);
+        state_transition_write_anchor(&w, state, NULL);
         jw_kv_str(&w, "name", "dropdown.owner");
         jw_key(&w, "old");
         jw_obj_begin(&w);
@@ -1131,9 +1288,7 @@ static void doc_state_log_context_menu_target_transition(DocState* state,
     jw_key(&w, "data");
     jw_obj_begin(&w);
         jw_kv_str(&w, "scope", "doc");
-        jw_key(&w, "anchor");
-        jw_obj_begin(&w);
-        jw_obj_end(&w);
+        state_transition_write_anchor(&w, state, NULL);
         jw_kv_str(&w, "name", "context_menu.target");
         jw_key(&w, "old");
         jw_obj_begin(&w);
@@ -1159,9 +1314,7 @@ static void doc_state_log_context_menu_hover_transition(DocState* state,
     jw_key(&w, "data");
     jw_obj_begin(&w);
         jw_kv_str(&w, "scope", "doc");
-        jw_key(&w, "anchor");
-        jw_obj_begin(&w);
-        jw_obj_end(&w);
+        state_transition_write_anchor(&w, state, NULL);
         jw_kv_str(&w, "name", "context_menu.hover");
         jw_key(&w, "old");
         jw_obj_begin(&w);
@@ -1188,9 +1341,7 @@ static void doc_state_log_view_target_transition(DocState* state,
     jw_key(&w, "data");
     jw_obj_begin(&w);
         jw_kv_str(&w, "scope", "doc");
-        jw_key(&w, "anchor");
-        jw_obj_begin(&w);
-        jw_obj_end(&w);
+        state_transition_write_anchor(&w, state, NULL);
         jw_kv_str(&w, "name", name ? name : "target");
         jw_key(&w, "old");
         jw_obj_begin(&w);
@@ -1215,9 +1366,7 @@ static void doc_state_log_bool_transition(DocState* state, const char* name,
     jw_key(&w, "data");
     jw_obj_begin(&w);
         jw_kv_str(&w, "scope", "doc");
-        jw_key(&w, "anchor");
-        jw_obj_begin(&w);
-        jw_obj_end(&w);
+        state_transition_write_anchor(&w, state, NULL);
         jw_kv_str(&w, "name", name ? name : "doc.state");
         jw_key(&w, "old");
         jw_obj_begin(&w);
@@ -1258,6 +1407,59 @@ static bool view_element_has_attr(View* view, const char* attr_name) {
     return elem->get_attribute(attr_name) != NULL;
 }
 
+static int form_default_selected_index_from_tree(View* view) {
+    if (!view || !view->is_element()) return -1;
+    DomElement* element = (DomElement*)view;
+    if (element->tag() != HTM_TAG_SELECT) return -1;
+
+    int option_count = 0;
+    int selected_index = -1;
+    DomNode* child = element->first_child;
+    while (child) {
+        if (child->is_element()) {
+            DomElement* child_elem = (DomElement*)child;
+            if (child_elem->tag() == HTM_TAG_OPTION) {
+                if (child_elem->has_attribute("selected") && selected_index < 0) {
+                    selected_index = option_count;
+                }
+                option_count++;
+            } else if (child_elem->tag() == HTM_TAG_OPTGROUP) {
+                DomNode* opt_child = child_elem->first_child;
+                while (opt_child) {
+                    if (opt_child->is_element()) {
+                        DomElement* opt_elem = (DomElement*)opt_child;
+                        if (opt_elem->tag() == HTM_TAG_OPTION) {
+                            if (opt_elem->has_attribute("selected") && selected_index < 0) {
+                                selected_index = option_count;
+                            }
+                            option_count++;
+                        }
+                    }
+                    opt_child = opt_child->next_sibling;
+                }
+            }
+        }
+        child = child->next_sibling;
+    }
+    if (selected_index >= 0) return selected_index;
+    return option_count > 0 ? 0 : -1;
+}
+
+static float form_default_range_value(View* view, FormControlProp* form) {
+    if (!form || form->control_type != FORM_CONTROL_RANGE || !view || !view->is_element()) return 0.5f;
+    ViewElement* elem = (ViewElement*)view;
+    const char* value_attr = elem->get_attribute("value");
+    if (!value_attr) return 0.5f;
+
+    float range_span = form->range_max - form->range_min;
+    if (range_span == 0.0f) return 0.5f;
+    float value = (float)str_to_double_default(value_attr, strlen(value_attr), form->range_min);
+    float normalized = (value - form->range_min) / range_span;
+    if (normalized < 0.0f) return 0.0f;
+    if (normalized > 1.0f) return 1.0f;
+    return normalized;
+}
+
 static ViewState* form_view_state_get(DocState* state, View* view) {
     ViewState* view_state = view_state_get(state, view);
     if (!view_state || view_state->kind != VIEW_STATE_FORM_CONTROL) return NULL;
@@ -1267,6 +1469,7 @@ static ViewState* form_view_state_get(DocState* state, View* view) {
 static ViewState* form_view_state_get_or_create(DocState* state, View* view, FormControlProp* form) {
     if (!state || !view || !form) return NULL;
     ViewState* view_state = view_state_get(state, view);
+    bool should_seed_from_form = false;
     if (view_state) {
         if (view_state->kind != VIEW_STATE_BASE && view_state->kind != VIEW_STATE_FORM_CONTROL) {
             log_error("form_view_state_get_or_create: incompatible ViewState kind %d", view_state->kind);
@@ -1274,22 +1477,26 @@ static ViewState* form_view_state_get_or_create(DocState* state, View* view, For
         }
         if (view_state->kind == VIEW_STATE_FORM_CONTROL) return view_state;
         view_state->kind = VIEW_STATE_FORM_CONTROL;
+        should_seed_from_form = true;
     } else {
         view_state = view_state_get_or_create(state, view, VIEW_STATE_FORM_CONTROL);
         if (!view_state) return NULL;
+        should_seed_from_form = true;
     }
 
-    view_state->data.form.disabled = form->disabled;
-    view_state->data.form.readonly = form->readonly;
-    view_state->data.form.required = form->required;
-    view_state->data.form.checked = form->checked;
-    view_state->data.form.dropdown_open = form->dropdown_open;
-    view_state->data.form.selected_index = form->selected_index;
-    view_state->data.form.hover_index = form->hover_index;
-    view_state->data.form.range_value = form->range_value;
-    view_state->data.form.selection_start = form->selection_start;
-    view_state->data.form.selection_end = form->selection_end;
-    view_state->data.form.selection_direction = form->selection_direction;
+    if (should_seed_from_form) {
+        view_state->data.form.disabled = view_element_has_attr(view, "disabled") ? 1 : 0;
+        view_state->data.form.readonly = view_element_has_attr(view, "readonly") ? 1 : 0;
+        view_state->data.form.required = view_element_has_attr(view, "required") ? 1 : 0;
+        view_state->data.form.checked = view_element_has_attr(view, "checked") ? 1 : 0;
+        view_state->data.form.dropdown_open = 0;
+        view_state->data.form.selected_index = form_default_selected_index_from_tree(view);
+        view_state->data.form.hover_index = -1;
+        view_state->data.form.range_value = form_default_range_value(view, form);
+        view_state->data.form.selection_start = form->selection_start;
+        view_state->data.form.selection_end = form->selection_end;
+        view_state->data.form.selection_direction = form->selection_direction;
+    }
     return view_state;
 }
 
@@ -1387,6 +1594,37 @@ void doc_state_set_drag_state(DocState* state, View* target, bool dragging) {
     state->needs_repaint = true;
     state->version++;
     state_assert_after_mutation(state, "doc_state_set_drag_state");
+}
+
+DragDropState* doc_state_begin_drag_drop(DocState* state, View* source,
+                                         float start_x, float start_y,
+                                         const char* drag_data) {
+    if (!state || !source) return NULL;
+    if (!state->drag_drop) {
+        state->drag_drop = (DragDropState*)arena_alloc(state->arena, sizeof(DragDropState));
+    }
+    if (!state->drag_drop) return NULL;
+
+    DragDropState* drag_drop = state->drag_drop;
+    memset(drag_drop, 0, sizeof(DragDropState));
+    drag_drop->source_view = source;
+    drag_drop->start_x = start_x;
+    drag_drop->start_y = start_y;
+    drag_drop->current_x = start_x;
+    drag_drop->current_y = start_y;
+    drag_drop->pending = true;
+    drag_drop->drag_data = drag_data;
+
+    state->version++;
+    state_assert_after_mutation(state, "doc_state_begin_drag_drop");
+    return drag_drop;
+}
+
+void doc_state_clear_drag_drop(DocState* state) {
+    if (!state || !state->drag_drop) return;
+    memset(state->drag_drop, 0, sizeof(DragDropState));
+    state->version++;
+    state_assert_after_mutation(state, "doc_state_clear_drag_drop");
 }
 
 void doc_state_mark_dirty(DocState* state) {
@@ -1570,14 +1808,6 @@ bool form_control_get_checked(DocState* state, View* view) {
 
     ViewState* view_state = form_view_state_get(state, view);
     if (view_state) return view_state->data.form.checked != 0;
-
-    if (view->is_block()) {
-        ViewBlock* block = (ViewBlock*)view;
-        if (block->form) {
-            return block->form->checked != 0;
-        }
-    }
-
     return view_element_has_attr(view, "checked");
 }
 
@@ -1586,16 +1816,13 @@ void form_control_set_checked(DocState* state, View* view, bool checked) {
 
     FormControlProp* form = form_prop_for_view(view);
     ViewState* view_state = form_view_state_get_or_create(state, view, form);
-    bool old_value = view_state ? view_state->data.form.checked != 0 : form && form->checked != 0;
+    bool old_value = view_state ? view_state->data.form.checked != 0 : view_element_has_attr(view, "checked");
     if (view_state) {
         if (old_value == checked) return;
         view_state->data.form.checked = checked ? 1 : 0;
     }
 
-    if (form) {
-        form->state_ref = state;
-        form->checked = checked ? 1 : 0;
-    }
+    if (form) form->state_ref = state;
 
     view_state_log_bool_transition(state, view, "form.checked", old_value, checked);
     form_state_mark_dirty(state);
@@ -1809,9 +2036,6 @@ void form_control_set_value(DocState* state, View* view, const char* value, uint
         view_state->data.form.selection_start = block->form->selection_start;
         view_state->data.form.selection_end = block->form->selection_end;
         view_state->data.form.selection_direction = block->form->selection_direction;
-        view_state->data.form.range_value = block->form->range_value;
-        view_state->data.form.selected_index = block->form->selected_index;
-        view_state->data.form.hover_index = block->form->hover_index;
     }
 
     form_state_mark_dirty(state);
@@ -1894,26 +2118,13 @@ void form_control_sync_text_control_state(DocState* state, View* view) {
     view_state->data.form.selection_start = form->selection_start;
     view_state->data.form.selection_end = form->selection_end;
     view_state->data.form.selection_direction = form->selection_direction;
-    view_state->data.form.disabled = form->disabled;
-    view_state->data.form.readonly = form->readonly;
-    view_state->data.form.required = form->required;
-    view_state->data.form.checked = form->checked;
-    view_state->data.form.dropdown_open = form->dropdown_open;
-    view_state->data.form.selected_index = form->selected_index;
-    view_state->data.form.hover_index = form->hover_index;
-    view_state->data.form.range_value = form->range_value;
 }
 
 int form_control_get_selected_index(DocState* state, View* view) {
     ViewState* view_state = form_view_state_get(state, view);
     if (view_state) return view_state->data.form.selected_index;
 
-    if (!view || !view->is_block()) return -1;
-
-    ViewBlock* block = (ViewBlock*)view;
-    if (!block->form) return -1;
-
-    return block->form->selected_index;
+    return form_default_selected_index_from_tree(view);
 }
 
 void form_control_set_selected_index(DocState* state, View* view, int index) {
@@ -1930,13 +2141,12 @@ void form_control_set_selected_index(DocState* state, View* view, int index) {
     if (index >= form->option_count) index = form->option_count - 1;
 
     ViewState* view_state = form_view_state_get_or_create(state, view, form);
-    int old_index = view_state ? view_state->data.form.selected_index : form->selected_index;
+    int old_index = view_state ? view_state->data.form.selected_index : form_default_selected_index_from_tree(view);
     if (view_state) {
         if (old_index == index) return;
         view_state->data.form.selected_index = index;
     }
 
-    form->selected_index = index;
     view_state_log_int_transition(state, view, "form.selected_index", old_index, index);
     form_state_mark_dirty(state);
 }
@@ -1945,12 +2155,8 @@ float form_control_get_range_value(DocState* state, View* view) {
     ViewState* view_state = form_view_state_get(state, view);
     if (view_state) return view_state->data.form.range_value;
 
-    if (!view || !view->is_block()) return 0.5f;
-
-    ViewBlock* block = (ViewBlock*)view;
-    if (!block->form) return 0.5f;
-
-    return block->form->range_value;
+    FormControlProp* form = form_prop_for_view(view);
+    return form_default_range_value(view, form);
 }
 
 void form_control_set_range_value(DocState* state, View* view, float value) {
@@ -1967,13 +2173,12 @@ void form_control_set_range_value(DocState* state, View* view, float value) {
     if (value > 1.0f) value = 1.0f;
 
     ViewState* view_state = form_view_state_get_or_create(state, view, form);
-    float old_value = view_state ? view_state->data.form.range_value : form->range_value;
+    float old_value = view_state ? view_state->data.form.range_value : form_default_range_value(view, form);
     if (view_state) {
         if (old_value == value) return;
         view_state->data.form.range_value = value;
     }
 
-    form->range_value = value;
     view_state_log_float_transition(state, view, "form.range_value", old_value, value);
     form_state_mark_dirty(state);
 }
@@ -1987,12 +2192,7 @@ bool form_control_is_disabled(DocState* state, View* view) {
     if (view_state) return view_state->data.form.disabled != 0;
 
     if (!view) return false;
-    if (!view->is_block()) return view_element_has_attr(view, "disabled");
-
-    ViewBlock* block = (ViewBlock*)view;
-    if (!block->form) return view_element_has_attr(view, "disabled");
-
-    return block->form->disabled != 0;
+    return view_element_has_attr(view, "disabled");
 }
 
 void form_control_set_disabled(DocState* state, View* view, bool disabled) {
@@ -2004,12 +2204,11 @@ void form_control_set_disabled(DocState* state, View* view, bool disabled) {
     FormControlProp* form = block->form;
     form->state_ref = state;
     ViewState* view_state = form_view_state_get_or_create(state, view, form);
-    bool old_value = view_state ? view_state->data.form.disabled != 0 : form->disabled != 0;
+    bool old_value = view_state ? view_state->data.form.disabled != 0 : view_element_has_attr(view, "disabled");
     if (view_state) {
         if (old_value == disabled) return;
         view_state->data.form.disabled = disabled ? 1 : 0;
     }
-    form->disabled = disabled ? 1 : 0;
     view_state_log_bool_transition(state, view, "form.disabled", old_value, disabled);
     form_state_mark_dirty(state);
 }
@@ -2019,12 +2218,7 @@ bool form_control_is_readonly(DocState* state, View* view) {
     if (view_state) return view_state->data.form.readonly != 0;
 
     if (!view) return false;
-    if (!view->is_block()) return view_element_has_attr(view, "readonly");
-
-    ViewBlock* block = (ViewBlock*)view;
-    if (!block->form) return view_element_has_attr(view, "readonly");
-
-    return block->form->readonly != 0;
+    return view_element_has_attr(view, "readonly");
 }
 
 void form_control_set_readonly(DocState* state, View* view, bool readonly) {
@@ -2036,12 +2230,11 @@ void form_control_set_readonly(DocState* state, View* view, bool readonly) {
     FormControlProp* form = block->form;
     form->state_ref = state;
     ViewState* view_state = form_view_state_get_or_create(state, view, form);
-    bool old_value = view_state ? view_state->data.form.readonly != 0 : form->readonly != 0;
+    bool old_value = view_state ? view_state->data.form.readonly != 0 : view_element_has_attr(view, "readonly");
     if (view_state) {
         if (old_value == readonly) return;
         view_state->data.form.readonly = readonly ? 1 : 0;
     }
-    form->readonly = readonly ? 1 : 0;
     view_state_log_bool_transition(state, view, "form.readonly", old_value, readonly);
     form_state_mark_dirty(state);
 }
@@ -2051,12 +2244,7 @@ bool form_control_is_required(DocState* state, View* view) {
     if (view_state) return view_state->data.form.required != 0;
 
     if (!view) return false;
-    if (!view->is_block()) return view_element_has_attr(view, "required");
-
-    ViewBlock* block = (ViewBlock*)view;
-    if (!block->form) return view_element_has_attr(view, "required");
-
-    return block->form->required != 0;
+    return view_element_has_attr(view, "required");
 }
 
 void form_control_set_required(DocState* state, View* view, bool required) {
@@ -2068,12 +2256,11 @@ void form_control_set_required(DocState* state, View* view, bool required) {
     FormControlProp* form = block->form;
     form->state_ref = state;
     ViewState* view_state = form_view_state_get_or_create(state, view, form);
-    bool old_value = view_state ? view_state->data.form.required != 0 : form->required != 0;
+    bool old_value = view_state ? view_state->data.form.required != 0 : view_element_has_attr(view, "required");
     if (view_state) {
         if (old_value == required) return;
         view_state->data.form.required = required ? 1 : 0;
     }
-    form->required = required ? 1 : 0;
     view_state_log_bool_transition(state, view, "form.required", old_value, required);
     form_state_mark_dirty(state);
 }
@@ -2086,12 +2273,7 @@ bool form_control_is_dropdown_open(DocState* state, View* view) {
     ViewState* view_state = form_view_state_get(state, view);
     if (view_state) return view_state->data.form.dropdown_open != 0;
 
-    if (!view || !view->is_block()) return false;
-
-    ViewBlock* block = (ViewBlock*)view;
-    if (!block->form) return false;
-
-    return block->form->dropdown_open != 0;
+    return false;
 }
 
 void doc_state_open_dropdown(DocState* state, View* view) {
@@ -2225,16 +2407,15 @@ void form_control_open_dropdown(DocState* state, View* view) {
     FormControlProp* form = block->form;
     form->state_ref = state;
     ViewState* view_state = form_view_state_get_or_create(state, view, form);
-    bool old_open = view_state ? view_state->data.form.dropdown_open != 0 : form->dropdown_open != 0;
-    int old_hover = view_state ? view_state->data.form.hover_index : form->hover_index;
+    bool old_open = view_state ? view_state->data.form.dropdown_open != 0 : false;
+    int old_hover = view_state ? view_state->data.form.hover_index : -1;
+    int selected_index = view_state ? view_state->data.form.selected_index : form_default_selected_index_from_tree(view);
     if (view_state) {
         view_state->data.form.dropdown_open = 1;
-        view_state->data.form.hover_index = form->selected_index;
+        view_state->data.form.hover_index = selected_index;
     }
-    form->dropdown_open = 1;
-    form->hover_index = form->selected_index;  // Start with selected option highlighted
     view_state_log_bool_transition(state, view, "form.dropdown_open", old_open, true);
-    view_state_log_int_transition(state, view, "form.hover_index", old_hover, form->hover_index);
+    view_state_log_int_transition(state, view, "form.hover_index", old_hover, selected_index);
     form_state_mark_dirty(state);
 }
 
@@ -2247,14 +2428,12 @@ void form_control_close_dropdown(DocState* state, View* view) {
     FormControlProp* form = block->form;
     form->state_ref = state;
     ViewState* view_state = form_view_state_get_or_create(state, view, form);
-    bool old_open = view_state ? view_state->data.form.dropdown_open != 0 : form->dropdown_open != 0;
-    int old_hover = view_state ? view_state->data.form.hover_index : form->hover_index;
+    bool old_open = view_state ? view_state->data.form.dropdown_open != 0 : false;
+    int old_hover = view_state ? view_state->data.form.hover_index : -1;
     if (view_state) {
         view_state->data.form.dropdown_open = 0;
         view_state->data.form.hover_index = -1;
     }
-    form->dropdown_open = 0;
-    form->hover_index = -1;
     view_state_log_bool_transition(state, view, "form.dropdown_open", old_open, false);
     view_state_log_int_transition(state, view, "form.hover_index", old_hover, -1);
     form_state_mark_dirty(state);
@@ -2274,13 +2453,12 @@ void form_control_set_hover_index(DocState* state, View* view, int index) {
     if (index >= form->option_count) index = form->option_count - 1;
 
     ViewState* view_state = form_view_state_get_or_create(state, view, form);
-    int old_index = view_state ? view_state->data.form.hover_index : form->hover_index;
+    int old_index = view_state ? view_state->data.form.hover_index : -1;
     if (view_state) {
         if (old_index == index) return;
         view_state->data.form.hover_index = index;
     }
 
-    form->hover_index = index;
     view_state_log_int_transition(state, view, "form.hover_index", old_index, index);
     form_state_mark_dirty(state);
 }
@@ -2289,12 +2467,7 @@ int form_control_get_hover_index(DocState* state, View* view) {
     ViewState* view_state = form_view_state_get(state, view);
     if (view_state) return view_state->data.form.hover_index;
 
-    if (!view || !view->is_block()) return -1;
-
-    ViewBlock* block = (ViewBlock*)view;
-    if (!block->form) return -1;
-
-    return block->form->hover_index;
+    return -1;
 }
 
 void state_remove(DocState* state, void* node, const char* name) {

@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body { margin: 20px; font-family: sans-serif; font-size: 16px; }
+  input { margin-right: 8px; }
+  #jsbox:checked + label { color: rgb(0, 130, 0); font-weight: 700; }
+  #defaultbox:checked + label { color: rgb(0, 90, 180); font-weight: 700; }
+  button { margin: 8px 8px 8px 0; }
+</style>
+<script>
+  function setJsBox(value) {
+    var box = document.getElementById('jsbox');
+    box.checked = value;
+    document.getElementById('js-status').textContent = box.checked ? 'checked' : 'unchecked';
+  }
+
+  function setDefaultBox() {
+    var box = document.getElementById('defaultbox');
+    box.defaultChecked = true;
+    document.getElementById('default-status').textContent = box.checked ? 'checked' : 'unchecked';
+  }
+</script>
+</head>
+<body>
+  <input id="jsbox" type="checkbox"><label for="jsbox">JS checked box</label>
+  <div id="js-status">initial</div>
+  <button id="check-js" onclick="setJsBox(true)">Check via JS</button>
+  <button id="uncheck-js" onclick="setJsBox(false)">Uncheck via JS</button>
+
+  <input id="defaultbox" type="checkbox"><label for="defaultbox">Default checked box</label>
+  <div id="default-status">initial</div>
+  <button id="default-js" onclick="setDefaultBox()">Set defaultChecked</button>
+</body>
+</html>

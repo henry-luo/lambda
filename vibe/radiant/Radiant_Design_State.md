@@ -1179,12 +1179,10 @@ This section documents the actual implementation of the state change → style u
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                      DOM PSEUDO-STATE SYNC                                   │
-│  sync_pseudo_state(view, PSEUDO_STATE_*, set)                               │
-│  ├── dom_element_set_pseudo_state() / dom_element_clear_pseudo_state()      │
-│  │   └── Sets element->pseudo_state bitmask                                 │
-│  │   └── Sets element->needs_style_recompute = true                         │
-│  │   └── Increments element->style_version                                  │
+│                    STATESTORE VIEWSTATE UPDATE                               │
+│  view_state_set_* / form_control_set_* writer APIs                           │
+│  ├── Update canonical ViewState in DocState.view_state_map                  │
+│  ├── Refresh view->view_state_ref as a weak pointer only                    │
 │  ├── reflow_schedule(state, view, REFLOW_SUBTREE, CHANGE_PSEUDO_STATE)     │
 │  │   └── Adds ReflowRequest to scheduler->pending queue                     │
 │  │   └── Sets state->needs_reflow = true                                    │
@@ -1224,7 +1222,7 @@ This section documents the actual implementation of the state change → style u
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                      SELECTOR MATCHER                                        │
 │  selector_matcher_matches_pseudo_class(element, pseudo_class)               │
-│  ├── Checks element->pseudo_state bitmask                                   │
+│  ├── Resolves pseudo-state through StateStore/ViewState                     │
 │  ├── :hover  → PSEUDO_STATE_HOVER (1<<13)                                   │
 │  ├── :active → PSEUDO_STATE_ACTIVE (1<<14)                                  │
 │  ├── :focus  → PSEUDO_STATE_FOCUS (1<<15)                                   │

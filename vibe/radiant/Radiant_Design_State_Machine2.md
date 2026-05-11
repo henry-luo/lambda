@@ -1,6 +1,6 @@
 # Radiant State Machine Phase 5: DocState + ViewState + Per-Doc StateStore
 
-**Status**: Design
+**Status**: Implemented
 
 **Date**: 2026-05-11
 
@@ -235,10 +235,20 @@ Any local mirror update code that bypasses StateStore must be removed.
 - Scroll state bounds are normalized (`0 <= pos <= max`).
 - Pseudo-state values are resolved from canonical StateStore state or default values; no element-local pseudo-state mirror exists.
 
-## Deferred Work
+## Lifecycle Notes
 
-- Recycling/destroy lifecycle for orphaned ViewState when views are recycled can be added later.
-- Initial Phase 5 can retain simple lifetime semantics and defer reuse optimization.
+- Orphaned `ViewState` registry entries are pruned after DOM mutations and before debug interaction validation.
+- Explicit subtree detach cleanup clears weak `view->view_state_ref` pointers and doc-scoped transient owners for detached views.
+- `ViewState` memory remains arena-owned by `StateStore`; recycling removes registry ownership rather than freeing individual arena allocations.
+
+## Implementation Notes
+
+- `StateStore` owns the per-document `DocState` and lazy `ViewState` registry.
+- Dynamic pseudo-state and form/scroll interaction state resolve through StateStore/ViewState with static defaults when no `ViewState` exists.
+- `DomElement::pseudo_state` and non-text `FormControlProp` dynamic mirrors are not used as canonical state.
+- DOM detach lifecycle prunes orphaned `ViewState` entries so registry validation only sees live view ids.
+- `make check-state-store` guards against reintroducing element pseudo-state caches, non-text form mirror access, external scroll mirrors, external direct ViewState writes, and external direct DocState writes.
+- Event simulation includes `assert_state_store` for internal StateStore/ViewState assertions, including optional `view_state_count` checks.
 
 ## Success Criteria
 

@@ -338,7 +338,7 @@ Two arrows in Architecture §3 need symmetric implementations:
 - **DOM → source** (after pointer click, after browser-like contenteditable mutates the DOM): resolve the new `DomBoundary` via `render_map` reverse lookup → produce a `SourcePos` → set `state.selection` → fire `selectionchange`.
 - **Source → DOM** (after a transaction): for each surviving selection endpoint, find the result DOM node via `render_map`, then place the visual caret using existing `state_store` / `CaretState` machinery and emit a focus + selection paint.
 
-Both already half-exist for `<input>`/`<textarea>` (`tc_sync_legacy_to_form`, `tc_sync_form_to_legacy`); we generalise them to arbitrary editable subtrees by routing through `SourcePos` instead of byte offsets in a single string.
+The `<input>`/`<textarea>` projection now routes through StateStore-backed text-control selection/value helpers; richer editable subtrees should use the same direction by routing through `SourcePos` instead of byte offsets in a single string.
 
 ---
 

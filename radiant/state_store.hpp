@@ -203,6 +203,7 @@ typedef struct DocState {
     // Memory management
     Pool* pool;                    // underlying memory pool
     Arena* arena;                  // dedicated arena for state allocations
+    StateStore* owner_store;        // non-owning back-reference for validation/logging
     
     // State storage
     HashMap* state_map;            // map from StateKey -> StateEntry
@@ -401,6 +402,14 @@ ViewState* view_state_get(DocState* state, View* view);
 bool view_state_get_hovered(DocState* state, View* view);
 bool view_state_get_active(DocState* state, View* view);
 bool view_state_get_focused(DocState* state, View* view);
+
+/**
+ * Detach all ViewState entries owned by a DOM subtree that is being removed.
+ * Clears weak view->view_state_ref pointers and doc-scoped transient owners
+ * that point into the subtree. ViewState memory remains arena-owned.
+ */
+uint32_t view_state_detach_subtree(DocState* state, DomNode* root);
+uint32_t view_state_prune_orphans(DocState* state);
 
 /**
  * Read dynamic pseudo-state through canonical StateStore/ViewState data.
@@ -706,6 +715,10 @@ bool focus_within(DocState* state, View* view);
 void doc_state_set_hover_target(DocState* state, View* target);
 void doc_state_set_active_target(DocState* state, View* target);
 void doc_state_set_drag_state(DocState* state, View* target, bool dragging);
+DragDropState* doc_state_begin_drag_drop(DocState* state, View* source,
+                                         float start_x, float start_y,
+                                         const char* drag_data);
+void doc_state_clear_drag_drop(DocState* state);
 
 // ============================================================================
 // Doc-Level Scheduling / Viewport State API

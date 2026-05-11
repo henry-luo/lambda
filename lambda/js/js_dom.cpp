@@ -33,6 +33,7 @@
 #include "../input/css/selector_matcher.hpp"
 #include "../../radiant/view.hpp"
 #include "../../radiant/form_control.hpp"
+#include "../../radiant/state_store.hpp"
 #include "../../radiant/dom_range.hpp"
 #include "../input/html5/html5_parser.h"
 
@@ -116,10 +117,14 @@ extern "C" bool js_dom_current_is_main_document(void) {
 extern "C" bool js_doc_has_browsing_context(void* doc);
 extern "C" void js_doc_mark_has_browsing_context(void* doc);
 
+static inline DocState* js_dom_current_state();
+
 // Helper: increment DOM mutation counter on current document
 static inline void js_dom_mutation_notify() {
     if (_js_current_document) {
         _js_current_document->js_mutation_count++;
+        DocState* st = js_dom_current_state();
+        if (st) view_state_prune_orphans(st);
     }
 }
 
@@ -134,7 +139,9 @@ static inline DocState* js_dom_current_state() {
 }
 static inline void dom_pre_remove(DomNode* child) {
     DocState* st = js_dom_current_state();
-    if (st && child) dom_mutation_pre_remove(st, child);
+    if (st && child) {
+        dom_mutation_pre_remove(st, child);
+    }
 }
 static inline void dom_post_insert(DomNode* parent, DomNode* node) {
     DocState* st = js_dom_current_state();
@@ -227,11 +234,11 @@ static void expando_reset() {
 // ------------------------------------------------------------------
 // HTML form-control IDL helpers (Phase 4 click activation).
 // `checked` and `disabled` are boolean IDL attributes that must be
-// returned as real booleans (assert_true requires `=== true`). We
-// store the live "checkedness" in the expando map under
-// `__checked` (initialised from the `checked` content attribute on
-// first read). `disabled` is reflected directly to/from the
-// `disabled` content attribute.
+// returned as real booleans (assert_true requires `=== true`). Live
+// checkedness is owned by StateStore when a document DocState exists;
+// the expando fallback only serves detached/no-state DOM use.
+// `disabled` is reflected directly to/from the `disabled` content
+// attribute.
 // ------------------------------------------------------------------
 
 // Lowercase tag-name comparison helper. Returns true if elem->tag_name
@@ -261,9 +268,17 @@ static bool _is_checkbox_or_radio(DomElement* elem) {
     return strcmp(t, "checkbox") == 0 || strcmp(t, "radio") == 0;
 }
 
+static DocState* _state_for_element(DomElement* elem) {
+    if (elem && elem->doc && elem->doc->state) return elem->doc->state;
+    return js_dom_current_state();
+}
+
 // Read the live "checkedness" state. Initialised lazily from the
 // `checked` content attribute (HTML's defaultChecked) on first read.
 static bool _get_checkedness(DomElement* elem) {
+    DocState* state = _state_for_element(elem);
+    if (state) return form_control_get_checked(state, (View*)elem);
+
     Item exp = expando_get_map((DomNode*)elem);
     if (exp.item != ITEM_NULL) {
         Item key = (Item){.item = s2it(heap_create_name("__checked"))};
@@ -275,6 +290,12 @@ static bool _get_checkedness(DomElement* elem) {
 }
 
 static void _set_checkedness(DomElement* elem, bool v) {
+    DocState* state = _state_for_element(elem);
+    if (state) {
+        form_control_set_checked(state, (View*)elem, v);
+        return;
+    }
+
     Item exp = expando_get_or_create_map((DomNode*)elem);
     if (exp.item == ITEM_NULL) return;
     Item key = (Item){.item = s2it(heap_create_name("__checked"))};
@@ -3287,7 +3308,6 @@ static void _reset_form_control(DomElement* elem) {
             if (!dv) dv = "";
             tc_set_value(elem, dv, strlen(dv));
             _value_clear_dirty(elem);
-            if (DocState* st = js_dom_current_state()) tc_sync_form_to_legacy(elem, st);
         }
         return;
     }
@@ -3301,7 +3321,6 @@ static void _reset_form_control(DomElement* elem) {
             tc_set_value(elem, s, sb->length);
             _value_clear_dirty(elem);
             strbuf_free(sb);
-            if (DocState* st = js_dom_current_state()) tc_sync_form_to_legacy(elem, st);
         }
         return;
     }
@@ -4776,17 +4795,23 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
         }
         if (strcmp(prop, "selectionStart") == 0) {
             tc_ensure_init(elem);
-            return (Item){.item = i2it((int64_t)elem->form->selection_start)};
+            uint32_t start = 0;
+            form_control_get_selection(js_dom_current_state(), (View*)elem, &start, NULL, NULL);
+            return (Item){.item = i2it((int64_t)start)};
         }
         if (strcmp(prop, "selectionEnd") == 0) {
             tc_ensure_init(elem);
-            return (Item){.item = i2it((int64_t)elem->form->selection_end)};
+            uint32_t end = 0;
+            form_control_get_selection(js_dom_current_state(), (View*)elem, NULL, &end, NULL);
+            return (Item){.item = i2it((int64_t)end)};
         }
         if (strcmp(prop, "selectionDirection") == 0) {
             tc_ensure_init(elem);
             const char* d = "none";
-            if (elem->form->selection_direction == 1) d = "forward";
-            else if (elem->form->selection_direction == 2) d = "backward";
+            uint8_t direction = 0;
+            form_control_get_selection(js_dom_current_state(), (View*)elem, NULL, NULL, &direction);
+            if (direction == 1) d = "forward";
+            else if (direction == 2) d = "backward";
             return (Item){.item = s2it(heap_create_name(d))};
         }
         if (strcmp(prop, "textLength") == 0) {
@@ -5708,7 +5733,6 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
                             tc_set_value(elem, stripped, out);
                             free(stripped);
                             _value_mark_dirty(elem);
-                            if (tc_st) tc_sync_form_to_legacy(elem, tc_st);
                             return value;
                         }
                     }
@@ -5716,7 +5740,6 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
             }
             tc_set_value(elem, s, strlen(s));
             _value_mark_dirty(elem);
-            if (tc_st) tc_sync_form_to_legacy(elem, tc_st);
             return value;
         }
         if (strcmp(prop, "selectionStart") == 0) {
@@ -5724,10 +5747,11 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
             int64_t v = it2i(value);
             if (v < 0) v = 0;
             uint32_t start = (uint32_t)v;
-            uint32_t end = elem->form->selection_end;
+            uint32_t end = 0;
+            uint8_t direction = 0;
+            form_control_get_selection(tc_st, (View*)elem, NULL, &end, &direction);
             if (start > end) end = start;
-            tc_set_selection_range(elem, start, end, elem->form->selection_direction);
-            if (tc_st) tc_sync_form_to_legacy(elem, tc_st);
+            form_control_set_selection(tc_st, (View*)elem, start, end, direction);
             return value;
         }
         if (strcmp(prop, "selectionEnd") == 0) {
@@ -5735,10 +5759,11 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
             int64_t v = it2i(value);
             if (v < 0) v = 0;
             uint32_t end = (uint32_t)v;
-            uint32_t start = elem->form->selection_start;
+            uint32_t start = 0;
+            uint8_t direction = 0;
+            form_control_get_selection(tc_st, (View*)elem, &start, NULL, &direction);
             if (start > end) start = end;
-            tc_set_selection_range(elem, start, end, elem->form->selection_direction);
-            if (tc_st) tc_sync_form_to_legacy(elem, tc_st);
+            form_control_set_selection(tc_st, (View*)elem, start, end, direction);
             return value;
         }
         if (strcmp(prop, "selectionDirection") == 0) {
@@ -5749,8 +5774,10 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
                 if (strcmp(s, "forward") == 0) d = 1;
                 else if (strcmp(s, "backward") == 0) d = 2;
             }
-            elem->form->selection_direction = d;
-            if (tc_st) tc_sync_form_to_legacy(elem, tc_st);
+            uint32_t start = 0;
+            uint32_t end = 0;
+            form_control_get_selection(tc_st, (View*)elem, &start, &end, NULL);
+            form_control_set_selection(tc_st, (View*)elem, start, end, d);
             return value;
         }
         if (strcmp(prop, "defaultValue") == 0) {
@@ -5781,7 +5808,6 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
                 // Per spec: API value updates only when dirty flag is false.
                 if (!_value_is_dirty(elem)) {
                     tc_set_value(elem, s, strlen(s));
-                    if (tc_st) tc_sync_form_to_legacy(elem, tc_st);
                 }
                 js_dom_mutation_notify();
                 return value;
@@ -5790,7 +5816,6 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
             dom_element_set_attribute(elem, "value", s);
             if (!_value_is_dirty(elem)) {
                 tc_set_value(elem, s, strlen(s));
-                if (tc_st) tc_sync_form_to_legacy(elem, tc_st);
             }
             return value;
         }
@@ -6967,10 +6992,7 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
                 else if (strcmp(d, "backward") == 0) dir = 2;
             }
         }
-        tc_set_selection_range(elem, (uint32_t)s, (uint32_t)e, dir);
-        // Phase 6E: mirror to legacy CaretState/SelectionState so a focused
-        // input visibly moves its caret + highlights its selection.
-        if (DocState* st = js_dom_current_state()) tc_sync_form_to_legacy(elem, st);
+        form_control_set_selection(js_dom_current_state(), (View*)elem, (uint32_t)s, (uint32_t)e, dir);
         return make_js_undefined();
     }
 
@@ -6978,11 +7000,10 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
     if (strcmp(method, "select") == 0 && tc_is_text_control_elem(elem)) {
         tc_ensure_init(elem);
         FormControlProp* f = elem->form;
-        tc_set_selection_range(elem, 0, f->current_value_u16_len, 0);
+        form_control_set_selection(js_dom_current_state(), (View*)elem, 0, f->current_value_u16_len, 0);
         // Per HTML, select() implicitly focuses the control.
         _js_active_element = elem;
         _js_last_focused_text_control = elem;
-        if (DocState* st = js_dom_current_state()) tc_sync_form_to_legacy(elem, st);
         return make_js_undefined();
     }
 

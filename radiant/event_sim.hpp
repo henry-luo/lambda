@@ -34,6 +34,7 @@
  *     {"type": "assert_visible", "target": {"selector": ".modal"}, "visible": true},
  *     {"type": "assert_focus", "target": {"selector": "input#email"}},
  *     {"type": "assert_state", "target": {"selector": "button"}, "state": ":hover", "value": true},
+ *     {"type": "assert_state_store", "target": {"selector": "#pane"}, "view_state": true, "kind": "scroll"},
  *     {"type": "assert_scroll", "y": 500, "tolerance": 10},
  *     {"type": "check", "target": {"selector": "input#agree"}, "checked": true},
  *     {"type": "select_option", "target": {"selector": "select#country"}, "value": "us"},
@@ -111,6 +112,7 @@ enum SimEventType {
     SIM_EVENT_ASSERT_ELEMENT_AT, // verify element at given coordinates
     SIM_EVENT_ASSERT_ATTRIBUTE,  // verify HTML attribute value
     SIM_EVENT_ASSERT_COUNT,      // verify number of elements matching a selector
+    SIM_EVENT_ASSERT_STATE_STORE, // verify DocState/ViewState store invariants
     SIM_EVENT_ASSERT_SNAPSHOT,   // pixel-compare rendered surface against browser reference PNG
     // Mutation helpers
     SIM_EVENT_SCROLL_TO,         // scroll to absolute position or element
@@ -200,6 +202,22 @@ struct SimEvent {
     int assert_count_expected;   // exact expected count (-1 = not set)
     int assert_count_min;        // minimum expected count (-1 = not set)
     int assert_count_max;        // maximum expected count (-1 = not set)
+    // Phase 5 StateStore invariant assertions
+    bool has_expected_view_state;
+    bool expected_view_state_exists;
+    bool has_expected_view_state_count;
+    int expected_view_state_count;
+    char* expected_view_state_kind;
+    bool has_expected_weak_ref;
+    bool expected_weak_ref;
+    bool has_expected_doc_scroll_x;
+    bool has_expected_doc_scroll_y;
+    bool has_expected_view_scroll_x;
+    bool has_expected_view_scroll_y;
+    float expected_doc_scroll_x;
+    float expected_doc_scroll_y;
+    float expected_view_scroll_x;
+    float expected_view_scroll_y;
     // Phase 7: assert_snapshot fields
     char* snapshot_reference;    // path to reference PNG
     float snapshot_threshold;    // max mismatch %, default 1.0

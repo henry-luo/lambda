@@ -356,11 +356,6 @@ void tc_sync_legacy_to_form(DomElement* elem, DocState* state) {
     form_control_sync_text_control_state(state, (View*)elem);
 }
 
-void tc_sync_form_to_legacy(DomElement* elem, DocState* state) {
-    // No-op: projection fields are now derived from DomSelection.
-    (void)elem; (void)state;
-}
-
 // ---- public: focus tracker ---------------------------------------------
 
 void tc_set_active_element(DomElement* elem) { g_active_element = elem; }

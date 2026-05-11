@@ -1,0 +1,28 @@
+{
+  "name": "StateStore JS checkedness integration",
+  "html": "test/ui/test_state_store_js_checkedness.html",
+  "description": "JS .checked and .defaultChecked route live checkbox state through StateStore.",
+  "events": [
+    {"type": "assert_state_store"},
+    {"type": "assert_checked", "target": {"selector": "#jsbox"}, "checked": false},
+    {"type": "assert_state_store", "target": {"selector": "#jsbox"}, "view_state": false, "weak_ref": false},
+
+    {"type": "click", "target": {"selector": "#check-js"}},
+    {"type": "assert_text", "target": {"selector": "#js-status"}, "equals": "checked", "assert_timeout": 500},
+    {"type": "assert_checked", "target": {"selector": "#jsbox"}, "checked": true},
+    {"type": "assert_state", "target": {"selector": "#jsbox"}, "state": ":checked", "value": true},
+    {"type": "assert_style", "target": {"selector": "label[for=jsbox]"}, "property": "color", "equals": "rgb(0, 130, 0)"},
+    {"type": "assert_state_store", "target": {"selector": "#jsbox"}, "view_state": true, "kind": "form", "weak_ref": true},
+
+    {"type": "click", "target": {"selector": "#uncheck-js"}},
+    {"type": "assert_text", "target": {"selector": "#js-status"}, "equals": "unchecked", "assert_timeout": 500},
+    {"type": "assert_checked", "target": {"selector": "#jsbox"}, "checked": false},
+    {"type": "assert_state", "target": {"selector": "#jsbox"}, "state": ":checked", "value": false},
+
+    {"type": "click", "target": {"selector": "#default-js"}},
+    {"type": "assert_text", "target": {"selector": "#default-status"}, "equals": "checked", "assert_timeout": 500},
+    {"type": "assert_checked", "target": {"selector": "#defaultbox"}, "checked": true},
+    {"type": "assert_state", "target": {"selector": "#defaultbox"}, "state": ":checked", "value": true},
+    {"type": "assert_state_store", "target": {"selector": "#defaultbox"}, "view_state": true, "kind": "form", "weak_ref": true}
+  ]
+}

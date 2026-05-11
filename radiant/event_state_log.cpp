@@ -395,6 +395,10 @@ const char* event_state_log_path(EventStateLog* log) {
     return (log && log->path[0]) ? log->path : NULL;
 }
 
+const char* event_state_log_doc_id(EventStateLog* log) {
+    return event_state_log_enabled(log) ? log->doc_id : NULL;
+}
+
 uint64_t event_state_log_begin_cascade(EventStateLog* log, const char* cause) {
     if (!event_state_log_enabled(log)) return 0;
     uint64_t id = ++log->cascade_seq;

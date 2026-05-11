@@ -528,10 +528,13 @@ void te_validate(DomElement* elem) {
     FormControlProp* f = elem->form;
     if (!f) return;
     DocState* state = f->state_ref ? f->state_ref : (elem->doc ? (DocState*)elem->doc->state : nullptr);
+    bool required = form_control_is_required(state, (View*)elem);
+    bool readonly = form_control_is_readonly(state, (View*)elem);
+    bool disabled = form_control_is_disabled(state, (View*)elem);
 
-    state_set_bool(state, elem, STATE_REQUIRED, f->required != 0);
-    state_set_bool(state, elem, STATE_OPTIONAL, f->required == 0);
-    state_set_bool(state, elem, STATE_READONLY, (f->readonly || f->disabled) != 0);
+    state_set_bool(state, elem, STATE_REQUIRED, required);
+    state_set_bool(state, elem, STATE_OPTIONAL, !required);
+    state_set_bool(state, elem, STATE_READONLY, readonly || disabled);
 
     // Resolve current value bytes for content-based checks.
     const char* val = f->current_value
@@ -546,7 +549,7 @@ void te_validate(DomElement* elem) {
         valid = false;
     }
     // Required: empty value fails.
-    else if (f->required && vlen == 0) {
+    else if (required && vlen == 0) {
         valid = false;
     }
     // Type-driven content checks (only when non-empty).
@@ -572,7 +575,7 @@ uint32_t te_paste(DomElement* elem, DocState* state, void* target,
     if (!elem || !state || !target || !text || len == 0) return 0;
     if (!tc_is_text_control(elem)) return 0;
     FormControlProp* f = elem->form;
-    if (!f || f->readonly || f->disabled) return 0;
+    if (!f || form_control_is_readonly(state, (View*)elem) || form_control_is_disabled(state, (View*)elem)) return 0;
 
     bool is_single_line = (f->control_type == FORM_CONTROL_TEXT);
 
@@ -722,7 +725,7 @@ void te_ime_commit(DomElement* elem, DocState* state, void* target,
     // Read-only / disabled fields accept the IME session (preedit was
     // shown above and is now cleared) but reject the actual commit so
     // the underlying value is never mutated.
-    if (f->readonly || f->disabled) {
+    if (form_control_is_readonly(state, (View*)elem) || form_control_is_disabled(state, (View*)elem)) {
         log_debug("te_ime_commit: rejected on readonly/disabled control");
         char tmp_null = '\0';
         js_dom_queue_textcontrol_compositionend(elem,
@@ -782,22 +785,24 @@ void te_aria_reflect(DomElement* elem) {
     FormControlProp* f = elem->form;
     if (!f) return;
 
+    DocState* state = f->state_ref ? f->state_ref : (elem->doc ? (DocState*)elem->doc->state : nullptr);
+
     // Disabled / readonly / required map directly.
-    te_aria_set_or_clear(elem, "aria-disabled", f->disabled,  "true");
-    te_aria_set_or_clear(elem, "aria-readonly", f->readonly,  "true");
-    te_aria_set_or_clear(elem, "aria-required", f->required,  "true");
+    te_aria_set_or_clear(elem, "aria-disabled", form_control_is_disabled(state, (View*)elem), "true");
+    te_aria_set_or_clear(elem, "aria-readonly", form_control_is_readonly(state, (View*)elem), "true");
+    te_aria_set_or_clear(elem, "aria-required", form_control_is_required(state, (View*)elem), "true");
 
     // aria-invalid mirrors :invalid pseudo-state. Use "true"/"false"
     // rather than removing — assistive tech treats the explicit "false"
     // value as "validation has run and the control is currently OK".
-    DocState* state = f->state_ref ? f->state_ref : (elem->doc ? (DocState*)elem->doc->state : nullptr);
     bool invalid = state_get_pseudo_state(state, (View*)elem, PSEUDO_STATE_INVALID);
     dom_element_set_attribute(elem, "aria-invalid", invalid ? "true" : "false");
 
     // aria-valuenow / valuemin / valuemax for <input type="range">.
     if (f->control_type == FORM_CONTROL_RANGE) {
         char buf[32];
-        float val = f->range_min + (f->range_max - f->range_min) * f->range_value;
+        float range_value = form_control_get_range_value(state, (View*)elem);
+        float val = f->range_min + (f->range_max - f->range_min) * range_value;
         snprintf(buf, sizeof(buf), "%g", val);
         dom_element_set_attribute(elem, "aria-valuenow", buf);
         snprintf(buf, sizeof(buf), "%g", f->range_min);
