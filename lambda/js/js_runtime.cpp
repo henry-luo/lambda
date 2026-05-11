@@ -15501,6 +15501,21 @@ static Item js_array_index_key(int64_t index) {
     return (Item){.item = s2it(heap_create_name(buf, blen))};
 }
 
+static bool js_array_set_length_throw(Item object, Item len_key, int64_t new_len) {
+    if (get_type_id(object) == LMD_TYPE_MAP) {
+        JsAccessorPair* pair = NULL;
+        JsOwnDescKind dk = js_ordinary_get_own_descriptor(object, "length", 6, &pair, NULL);
+        if (dk == JS_DESC_ACCESSOR &&
+            (!pair || pair->setter.item == ItemNull.item ||
+             get_type_id(pair->setter) != LMD_TYPE_FUNC)) {
+            js_throw_type_error("Cannot set property length of object which has only a getter");
+            return false;
+        }
+    }
+    js_property_set(object, len_key, (Item){.item = i2it(new_len)});
+    return !js_exception_pending;
+}
+
 static Item js_array_generic_splice(Item object, Item* args, int argc) {
     Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
     int64_t len = js_array_to_length(js_property_get(object, len_key));
@@ -15586,8 +15601,8 @@ static Item js_array_generic_splice(Item object, Item* args, int argc) {
         js_property_set(object, js_array_index_key(actual_start + j), args[2 + j]);
         if (js_exception_pending) return ItemNull;
     }
-    js_property_set(object, len_key, (Item){.item = i2it(len - actual_delete_count + insert_count)});
-    if (js_exception_pending) return ItemNull;
+    if (!js_array_set_length_throw(object, len_key, len - actual_delete_count + insert_count))
+        return ItemNull;
     return deleted;
 }
 
@@ -16777,24 +16792,8 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             if (dc_d > old_len - start_d) dc_d = old_len - start_d;
             int insert_count = argc > 2 ? argc - 2 : 0;
             double new_len = old_len + (double)insert_count - dc_d;
-            // Check if length is getter-only accessor → Set throws TypeError per ES spec.
-            // Stage A1.5: route IS_ACCESSOR detection through js_ordinary_get_own_descriptor.
-            {
-                JsAccessorPair* pair = NULL;
-                JsOwnDescKind dk = js_ordinary_get_own_descriptor(
-                    cb_this, "length", 6, &pair, NULL);
-                if (dk == JS_DESC_ACCESSOR) {
-                    if (pair && pair->setter.item == ItemNull.item) {
-                        js_throw_type_error("Cannot set property length of object which has only a getter");
-                        return make_js_undefined();
-                    }
-                }
-                // Phase-5D: legacy __get_length/__set_length probe removed;
-                // js_ordinary_get_own_descriptor + IS_ACCESSOR shape flag covers it.
-            }
-            // Check non-writable length
-            js_property_set(cb_this, len_key, (Item){.item = i2it((int64_t)new_len)});
-            if (js_exception_pending) return make_js_undefined();
+            if (!js_array_set_length_throw(cb_this, len_key, (int64_t)new_len))
+                return make_js_undefined();
             return js_array_new(0);
         }
         if (arr_type != LMD_TYPE_ARRAY) return js_array_new(0);
@@ -18952,6 +18951,11 @@ static Item js_yield_delegate_next_result(Item iterator, Item input) {
         args[0] = input;
         Item result = js_call_function(next_fn, iterator, args, 1);
         if (js_check_exception()) return ItemNull;
+        TypeId result_tid = get_type_id(result);
+        if (result_tid != LMD_TYPE_MAP && result_tid != LMD_TYPE_ELEMENT && result_tid != LMD_TYPE_ARRAY) {
+            js_throw_type_error("iterator result is not an object");
+            return ItemNull;
+        }
         return result;
     }
 
@@ -19453,6 +19457,11 @@ extern "C" Item js_get_iterator(Item iterable) {
                 // User-defined Symbol.iterator — call it with the array as 'this'
                 Item iterator = js_call_function(sym_override, iterable, NULL, 0);
                 if (js_check_exception()) return ItemNull;
+                TypeId it_tid = get_type_id(iterator);
+                if (it_tid != LMD_TYPE_MAP && it_tid != LMD_TYPE_ELEMENT && it_tid != LMD_TYPE_ARRAY) {
+                    js_throw_type_error("iterator is not an object");
+                    return ItemNull;
+                }
                 return iterator;
             }
         }
@@ -19489,6 +19498,11 @@ extern "C" Item js_get_iterator(Item iterable) {
         if (get_type_id(iter_factory) == LMD_TYPE_FUNC) {
             Item iterator = js_call_function(iter_factory, iterable, NULL, 0);
             if (js_check_exception()) return ItemNull;
+            TypeId it_tid = get_type_id(iterator);
+            if (it_tid != LMD_TYPE_MAP && it_tid != LMD_TYPE_ELEMENT && it_tid != LMD_TYPE_ARRAY) {
+                js_throw_type_error("iterator is not an object");
+                return ItemNull;
+            }
             return iterator;
         }
 
@@ -19506,6 +19520,11 @@ extern "C" Item js_get_iterator(Item iterable) {
         if (get_type_id(iter_factory) == LMD_TYPE_FUNC) {
             Item iterator = js_call_function(iter_factory, iterable, NULL, 0);
             if (js_check_exception()) return ItemNull;
+            TypeId it_tid = get_type_id(iterator);
+            if (it_tid != LMD_TYPE_MAP && it_tid != LMD_TYPE_ELEMENT && it_tid != LMD_TYPE_ARRAY) {
+                js_throw_type_error("iterator is not an object");
+                return ItemNull;
+            }
             return iterator;
         }
     }

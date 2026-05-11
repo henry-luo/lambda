@@ -545,7 +545,7 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
             if ((int)id->name->len == (int)strlen(builtins[i]) &&
                 strncmp(id->name->chars, builtins[i], id->name->len) == 0) {
                 MIR_reg_t name_reg = jm_box_string_literal(mt, builtins[i], (int)strlen(builtins[i]));
-                return jm_call_1(mt, "js_get_global_property_strict", MIR_T_I64,
+                return jm_call_1(mt, "js_get_constructor", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg));
             }
         }
@@ -7867,7 +7867,14 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
     // P4: Direct property access for known class instances — avoids hash lookup.
     // For `let node = new Node(...)`, `node.val` emits js_get_shaped_slot(node, slot)
     // instead of js_property_access(node, "val").
-    if (!mem->computed && !mem->optional &&
+    bool p4_skip_constructor = false;
+    if (!mem->computed &&
+        mem->property && mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
+        JsIdentifierNode* p4_skip_prop = (JsIdentifierNode*)mem->property;
+        p4_skip_constructor = p4_skip_prop->name && p4_skip_prop->name->len == 11 &&
+            strncmp(p4_skip_prop->name->chars, "constructor", 11) == 0;
+    }
+    if (!p4_skip_constructor && !mem->computed && !mem->optional &&
         mem->object && mem->object->node_type == JS_AST_NODE_IDENTIFIER &&
         mem->property && mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
         JsIdentifierNode* p4_obj = (JsIdentifierNode*)mem->object;
@@ -9391,15 +9398,7 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
     }
     case JS_AST_NODE_MEMBER_EXPRESSION: {
         JsMemberNode* mem = (JsMemberNode*)expr;
-        MIR_reg_t r = jm_transpile_member(mt, mem);
-        if (!mem->computed && mem->property && mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
-            JsIdentifierNode* prop = (JsIdentifierNode*)mem->property;
-            if (prop->name && prop->name->len == 11 && strncmp(prop->name->chars, "constructor", 11) == 0) {
-                jm_scope_env_reload_vars(mt);
-                jm_env_reload_shared_captures(mt);
-            }
-        }
-        return r;
+        return jm_transpile_member(mt, mem);
     }
     case JS_AST_NODE_ARRAY_EXPRESSION:
         return jm_transpile_array(mt, (JsArrayNode*)expr);

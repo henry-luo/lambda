@@ -208,7 +208,19 @@ int jm_count_yields(JsAstNode* node) {
         JsArrayPatternNode* arrp = (JsArrayPatternNode*)node;
         int count = 0;
         JsAstNode* e = arrp->elements;
-        while (e) { count += jm_count_yields(e); e = e->next; }
+        while (e) {
+            int elem_count = jm_count_yields(e);
+            // array destructuring emits regular targets in both the iterator
+            // value path and the exhausted-iterator undefined path. A default
+            // initializer containing yield therefore needs two resume labels.
+            if (e->node_type != JS_AST_NODE_REST_ELEMENT &&
+                e->node_type != JS_AST_NODE_SPREAD_ELEMENT &&
+                e->node_type != JS_AST_NODE_NULL) {
+                elem_count *= 2;
+            }
+            count += elem_count;
+            e = e->next;
+        }
         return count;
     }
     case JS_AST_NODE_OBJECT_PATTERN: {
