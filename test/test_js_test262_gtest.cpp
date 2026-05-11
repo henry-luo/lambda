@@ -849,6 +849,7 @@ struct Test262Prepared {
     std::vector<std::string> includes; // harness includes (e.g. "propertyHelper.js")
     std::vector<std::string> features; // metadata feature tags
     bool is_strict;              // add "use strict" prefix
+    bool is_async = false;       // define $DONE for asyncHelpers.js when explicitly run
     Test262Result skip_result;   // T262_SKIP if test should be skipped
     std::string skip_message;
     bool is_negative;
@@ -910,6 +911,10 @@ static std::string assemble_test_source(const Test262Prepared& p) {
     // "use strict" must come FIRST (before includes) to act as a valid directive prologue
     if (p.is_strict) {
         combined += "\"use strict\";\n";
+    }
+
+    if (p.is_async) {
+        combined += "globalThis.$DONE = function(error) { if (error) throw error; };\n";
     }
 
     for (auto& inc : p.includes) {
@@ -1403,6 +1408,7 @@ static void prepare_all_tests(
             p.skip_result = T262_PASS; // not skipped by default
             p.is_negative = false;
             p.is_strict = false;
+            p.is_async = false;
             p.native_harness = false;
 
             // check test-specific skip list (by relative path)
@@ -3261,6 +3267,7 @@ int main(int argc, char** argv) {
                 p.is_negative = cm.flags & 32;
                 p.negative_type = cm.neg_type;
                 p.is_strict = cm.flags & 8;
+                p.is_async = cm.flags & 1;
                 p.includes = cm.includes;
                 p.features = cm.features;
                 p.native_harness = cm.native_harness;

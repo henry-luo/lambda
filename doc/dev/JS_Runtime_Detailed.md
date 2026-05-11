@@ -196,6 +196,14 @@ When compiling a class constructor, the transpiler:
 
 Closures use a **shared scope environment** model where all child closures of the same parent share a single `uint64_t[]` array, enabling mutable capture semantics.
 
+Module-level bindings are stored separately in the module-variable table, so
+capture analysis normally skips true module variables and emits reads through
+`js_get_module_var()`. This skip is deliberately bypassed when a local lexical
+binding shadows a module variable. The main cases are function parameters/local
+bindings in ancestor functions and lexical `for-in`/`for-of` heads. Those
+captures must be threaded through closure environments, otherwise an inner
+function would incorrectly read the outer module binding with the same name.
+
 ### 2.1 Capture Analysis (Phases 1.5–1.7)
 
 Three transpiler phases build the closure environment:
@@ -205,6 +213,15 @@ Three transpiler phases build the closure environment:
 2. **Phase 1.6 — Transitive propagation**: Fixed-point iteration propagates captures through nested functions. If `inner()` captures `x` from `outer()`, and `middle()` contains `inner()`, then `middle()` must also capture `x` to thread it through.
 
 3. **Phase 1.7 — Scope env computation**: For each function that has children with captures, allocates a scope env layout. Each captured variable gets a slot index in the parent's `scope_env[]` array.
+
+`JsCaptureEntry` carries additional binding metadata used during lowering:
+- `is_let_const` / `is_const` preserve TDZ and const-assignment behavior for captured lexical bindings.
+- `force_env_capture` marks a capture that has the same name as a module variable but must still be loaded from the closure environment because a nearer lexical binding shadows the module binding.
+
+Functions nested under lexical `for-in`/`for-of` heads record the loop-head bound
+names in `JsFunctionNode::lexical_for_head_capture_names`. During capture
+analysis, matching references set `force_env_capture`, and closure body lowering
+loads them from the env even if a `MCONST_MODVAR` entry exists.
 
 ### 2.2 Scope Environment Allocation
 
@@ -278,6 +295,10 @@ The transpiler copies the slot from parent env to child env at child function en
 ### 2.6 Interaction with Generators
 
 Generator functions store their entire env in the `JsGenerator.env` array. On yield, all env-backed locals are already in the env (no additional save needed). On resume, registers are reloaded from env slots.
+
+Generator, async, and normal function lowering all honor `force_env_capture` so
+lexical loop-head captures keep the same shadowing semantics across function
+kinds.
 
 ---
 
@@ -426,14 +447,15 @@ For each `yield expr`:
 ### 4.4 yield* Delegation
 
 - Returns `js_gen_yield_delegate_result(iterable, resume_state)` → 3-element array `[iterable, resume_state, 1]`
-- Runtime detects the flag, sets `gen->delegate`, recursively drains the delegate iterator
-- Non-generator iterables are eagerly materialized via `js_iterable_to_array()` for delegation (trade: lazy delegation for simplicity)
-- Generator-to-generator delegation is properly lazy
+- Runtime detects the flag, sets `gen->delegate`, and forwards `.next()`, `.return()`, and `.throw()` to the delegate according to the iterator protocol
+- Non-done delegate iterator result objects are preserved rather than collapsed to bare values
+- Missing/null delegate `return` is ignored, while missing/null delegate `throw` first closes the iterator and then raises TypeError
+- Delegate `return`/`throw` abrupt completions resume through the outer generator state machine so enclosing `finally` blocks run
 
 ### 4.5 Limitations
 
 - Max 64 yield points per generator (state machine caps at 63 resume labels)
-- `generator.return()` and `generator.throw()` set `done=true` and `state=-1` — no attempt to resume into try-finally blocks (generator cleanup code won't run)
+- `generator.return()` and `generator.throw()` re-enter started suspended generators through the state machine so active `finally` blocks run. Suspended-start `.return(value)` completes immediately with `{ value, done: true }` without executing the body
 - Fixed pool of 4096 generators; recycling on pool exhaustion
 
 ---
@@ -488,7 +510,12 @@ Returns the next value, or `JS_ITER_DONE_SENTINEL` when exhausted:
 2. `MAP_KIND_ITERATOR` fast path — direct memory access per sub-type
 3. Legacy synthetic iterators (`__arr__`/`__str__`/`__tarr__` properties) — backward compat
 4. Generator → `js_generator_next()`, unwraps `{done, value}`
-5. Generic iterator → calls `.next()`, unwraps `{done, value}`
+5. Generic iterator → calls `.next()`, verifies the result is an object, then unwraps `{done, value}`
+
+TypedArray iterators check `js_typed_array_is_out_of_bounds_item()` on each
+step. This is required for resizable ArrayBuffer behavior: shrinking the backing
+buffer mid-iteration makes the iterator throw TypeError instead of silently
+ending or reading stale memory.
 
 ### 5.5 For-of Compilation Pattern
 
@@ -524,7 +551,25 @@ l_forit_ret:                // return-from-loop → close, propagate
 **Design decisions**:
 - Synthetic try context wraps the body to intercept exceptions for IteratorClose (ES §13.7.5.13)
 - `for_of_iterators[32]` stack tracks nested iterators for cleanup on `return`
+- Labeled `break` / `continue` that exits an inner `for-of` closes intervening iterators before control transfers to the target label
 - Generator-aware: iterator and loop variable stored as env-backed variables (`_foriter_`, `_forlv_`) to survive yield
+- `using` and `await using` loop heads are parsed as lexical loop heads for the current explicit-resource-management test coverage. They share the `let`-style TDZ and fresh-binding behavior used by the for-of lowering.
+
+Lexical `for-in`/`for-of` heads have two separate scoping requirements:
+
+1. The loop-head names are in TDZ while the right-hand side iterable expression
+    is evaluated, so closures created in the RHS observe the loop-head TDZ rather
+    than an outer same-named binding.
+2. Each iteration initializes a fresh lexical binding. Closures created from the
+    head default initializers or body capture that per-iteration binding, not the
+    module variable with the same mangled name.
+
+For simple identifiers, the loop variable register is initialized to
+`ITEM_JS_TDZ` before RHS evaluation. For destructuring heads, all binding targets
+are pre-created as TDZ bindings before RHS evaluation; declaration destructuring
+then writes and clears TDZ without performing a read/check. Assignment-form heads
+such as `for ([x] of y)` or `for ({x} of y)` do not create bindings and remain in
+assignment mode.
 
 ---
 
@@ -567,7 +612,19 @@ skip:
 
 1. `js_require_object_coercible(src)` → TypeError if null/undefined
 2. For each property: extract key (literal or computed), call `js_property_get(src, key)`, recurse for nested patterns
-3. For rest element `{...rest}`: collect exclude keys into array, call `js_object_rest(src, exclude_keys, exclude_count)` which iterates own enumerable properties, skipping excluded keys and `__*` internal markers
+3. For rest element `{...rest}`: collect exclude keys into array, canonicalizing each computed key through `ToPropertyKey`, then call `js_object_rest(src, exclude_keys, exclude_count)`
+
+`js_object_rest()` copies via `Reflect.ownKeys` plus
+`Object.getOwnPropertyDescriptor` semantics. It preserves ES key ordering,
+symbols, accessors, and enumerability, and it skips excluded keys after both the
+source key and exclusion key are canonicalized with `ToPropertyKey`. String
+primitives are handled with `ToObject`-style indexed character copying. Internal
+marker properties are no longer filtered by broad `__*` string tests here;
+ordinary descriptor/enumerability checks decide what is copied.
+
+Destructuring assignment and declaration modes intentionally diverge:
+- Declaration mode creates/initializes local bindings and may clear TDZ on the first write.
+- Assignment mode writes existing bindings, module variables, or globals according to strict/sloppy semantics; unresolvable strict writes throw.
 
 ### 6.3 Spread in Call Arguments
 
@@ -639,6 +696,11 @@ Each `await expr` compiles to a yield point:
 3. Resume re-enters state machine at the next state label
 
 **Limits**: Max 256 async contexts, max 63 await points per function.
+
+Test262 focused `--batch-file` runs can explicitly execute async tests that the
+normal discovery pass would skip. In that path the harness marks cached async
+metadata and injects a minimal `$DONE(error)` shim before test source assembly so
+`asyncHelpers.js` can report failures correctly.
 
 ---
 
@@ -910,6 +972,11 @@ Try context stack (max 16 depth):
 - Subsequent test compilations inherit entries, start at index `N+1`
 - `js_batch_reset_to(N)` preserves harness vars, zeros test vars
 
+Capture analysis must distinguish module variables from same-named local lexical
+bindings. `MCONST_MODVAR` entries are skipped for true module reads, but they do
+not suppress capture propagation or closure-env loading when an ancestor
+parameter/local or lexical loop-head binding shadows that module variable.
+
 ### 18.3 Nested Require
 
 `js_save_module_vars()` / `js_restore_module_vars()` for nested `require()` calls.
@@ -1044,12 +1111,19 @@ Module resolution via `require()` / CommonJS pattern in `module_registry.cpp`.
 
 ## 22. File Layout (Current)
 
-| File | Lines | Purpose |
-|------|------:|---------|
-| `transpile_js_mir.cpp` | 29,035 | Core MIR transpiler: AST -> MIR IR, analysis, closures, classes, modules, eval, batch/preamble |
-| `js_runtime.cpp` | 25,575 | Runtime: coercion, operators, property access, prototypes, functions, generators, collections, typed arrays, batch reset |
-| `js_globals.cpp` | 12,739 | Built-ins and host globals: Object.*, JSON, Date, Symbol, Math, Reflect, constructors, `$262`, process/console pieces |
-| `build_js_ast.cpp` | 4,040 | AST builder: Tree-sitter JS CST -> typed JsAstNode tree |
+| File | Size | Purpose |
+|------|-----:|---------|
+| `transpile_js_mir.cpp` | large | Core MIR transpiler entry and older monolithic lowering paths: AST -> MIR IR, modules, eval, batch/preamble |
+| `js_mir_analysis.cpp` | split | Function/reference/capture analysis, including transitive capture propagation and loop-head capture metadata |
+| `js_mir_statement_lowering.cpp` | split | Statement lowering: loops, `for-in`/`for-of`, lexical head TDZ, IteratorClose control flow |
+| `js_mir_expression_lowering.cpp` | split | Expression lowering, destructuring, calls, property/key lowering, assignment-mode handling |
+| `js_mir_function_class_lowering.cpp` | split | Function, closure, generator/async, and class lowering; closure-env capture loads |
+| `js_mir_iterator.cpp` | split | Shared iterator lowering helpers for for-of/destructuring/iterable consumers |
+| `js_mir_completion.cpp` | split | Shared abrupt-completion lowering for break/continue/return/throw paths |
+| `js_runtime.cpp` | large | Runtime: coercion, operators, property access, prototypes, functions, generators, collections, typed arrays, batch reset |
+| `js_globals.cpp` | large | Built-ins and host globals: Object.*, JSON, Date, Symbol, Math, Reflect, constructors, `$262`, process/console pieces |
+| `build_js_ast.cpp` | medium | AST builder: Tree-sitter JS CST -> typed JsAstNode tree |
+| `js_ast.hpp` | split | JS AST node definitions, including function metadata used by MIR analysis |
 | `js_dom.cpp` | 333,639 bytes | DOM bridge: wraps Radiant DomElement as JS Maps |
 | `js_buffer.cpp` | 113,132 bytes | Node.js Buffer implementation |
 | `js_fs.cpp` | 72,367 bytes | Node.js fs module |

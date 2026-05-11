@@ -2402,7 +2402,13 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         loop_var = jm_new_reg(mt, "_destr_elem", MIR_T_I64);
     }
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, loop_var),
-        MIR_new_int_op(mt->ctx, ITEM_NULL_VAL)));
+        MIR_new_int_op(mt->ctx, (var_name && is_let_const_loop) ? (int64_t)ITEM_JS_TDZ : ITEM_NULL_VAL)));
+    if (var_name && is_let_const_loop) {
+        char vname[128];
+        snprintf(vname, sizeof(vname), "_js_%.*s", var_len, var_name);
+        JsMirVarEntry* ve = jm_find_var(mt, vname);
+        if (ve) ve->tdz_active = true;
+    }
 
     // Pre-create destructuring variable registers
     bool left_creates_bindings = left_is_decl || fo->kind == 1 || fo->kind == 2;
@@ -2420,12 +2426,15 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
                 if (!pexist || !pexist->reg) {
                     MIR_reg_t preg = jm_new_reg(mt, pvname, MIR_T_I64);
                     jm_set_var(mt, pvname, preg);
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, preg),
-                        MIR_new_int_op(mt->ctx, ITEM_NULL_VAL)));
                     if (is_let_const_loop) {
                         JsMirVarEntry* ve = jm_find_var(mt, pvname);
-                        if (ve) ve->is_let_const = true;
+                        if (ve) {
+                            ve->is_let_const = true;
+                            ve->tdz_active = true;
+                        }
                     }
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, preg),
+                        MIR_new_int_op(mt->ctx, is_let_const_loop ? (int64_t)ITEM_JS_TDZ : ITEM_NULL_VAL)));
                 }
             } else if (pe->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
                 // default value: [x = defaultVal, ...]
@@ -2434,21 +2443,19 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
                     JsIdentifierNode* pid = (JsIdentifierNode*)ap->left;
                     char pvname[128];
                     snprintf(pvname, sizeof(pvname), "_js_%.*s", (int)pid->name->len, pid->name->chars);
-                    // Only pre-create if not already a module var
-                    if (!jm_find_var(mt, pvname)) {
-                        bool is_modvar = false;
-                        if (mt->module_consts) {
-                            JsModuleConstEntry mclookup;
-                            snprintf(mclookup.name, sizeof(mclookup.name), "%s", pvname);
-                            JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
-                            if (mc && mc->const_type == MCONST_MODVAR) is_modvar = true;
+                    JsMirVarEntry* pexist = is_let_const_loop ? NULL : jm_find_var(mt, pvname);
+                    if (!pexist || !pexist->reg) {
+                        MIR_reg_t preg = jm_new_reg(mt, pvname, MIR_T_I64);
+                        jm_set_var(mt, pvname, preg);
+                        if (is_let_const_loop) {
+                            JsMirVarEntry* ve = jm_find_var(mt, pvname);
+                            if (ve) {
+                                ve->is_let_const = true;
+                                ve->tdz_active = true;
+                            }
                         }
-                        if (!is_modvar) {
-                            MIR_reg_t preg = jm_new_reg(mt, pvname, MIR_T_I64);
-                            jm_set_var(mt, pvname, preg);
-                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, preg),
-                                MIR_new_int_op(mt->ctx, ITEM_NULL_VAL)));
-                        }
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, preg),
+                            MIR_new_int_op(mt->ctx, is_let_const_loop ? (int64_t)ITEM_JS_TDZ : ITEM_NULL_VAL)));
                     }
                 }
             } else if (pe->node_type == JS_AST_NODE_OBJECT_PATTERN) {
@@ -2470,8 +2477,15 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
                             if (!pexist || !pexist->reg) {
                                 MIR_reg_t preg = jm_new_reg(mt, pvname, MIR_T_I64);
                                 jm_set_var(mt, pvname, preg);
+                                if (is_let_const_loop) {
+                                    JsMirVarEntry* ve = jm_find_var(mt, pvname);
+                                    if (ve) {
+                                        ve->is_let_const = true;
+                                        ve->tdz_active = true;
+                                    }
+                                }
                                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, preg),
-                                    MIR_new_int_op(mt->ctx, ITEM_NULL_VAL)));
+                                    MIR_new_int_op(mt->ctx, is_let_const_loop ? (int64_t)ITEM_JS_TDZ : ITEM_NULL_VAL)));
                             }
                         }
                     }
@@ -2487,8 +2501,15 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
                     if (!pexist || !pexist->reg) {
                         MIR_reg_t preg = jm_new_reg(mt, pvname, MIR_T_I64);
                         jm_set_var(mt, pvname, preg);
+                        if (is_let_const_loop) {
+                            JsMirVarEntry* ve = jm_find_var(mt, pvname);
+                            if (ve) {
+                                ve->is_let_const = true;
+                                ve->tdz_active = true;
+                            }
+                        }
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, preg),
-                            MIR_new_int_op(mt->ctx, ITEM_NULL_VAL)));
+                            MIR_new_int_op(mt->ctx, is_let_const_loop ? (int64_t)ITEM_JS_TDZ : ITEM_NULL_VAL)));
                     }
                 }
             }
@@ -2521,12 +2542,15 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
                     if (!pexist || !pexist->reg) {
                         MIR_reg_t preg = jm_new_reg(mt, pvname, MIR_T_I64);
                         jm_set_var(mt, pvname, preg);
-                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, preg),
-                            MIR_new_int_op(mt->ctx, ITEM_NULL_VAL)));
                         if (is_let_const_loop) {
                             JsMirVarEntry* ve = jm_find_var(mt, pvname);
-                            if (ve) ve->is_let_const = true;
+                            if (ve) {
+                                ve->is_let_const = true;
+                                ve->tdz_active = true;
+                            }
                         }
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, preg),
+                            MIR_new_int_op(mt->ctx, is_let_const_loop ? (int64_t)ITEM_JS_TDZ : ITEM_NULL_VAL)));
                     }
                 }
             }

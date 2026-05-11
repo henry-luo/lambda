@@ -1636,7 +1636,7 @@ void jm_bind_destructure_var(JsMirTranspiler* mt, const char* vname, MIR_reg_t v
         }
     }
 
-    bool local_shadows_module = false;
+    bool local_shadows_module = module_var && var && !mt->destructure_assignment_mode;
     if (module_var && var && mt->current_fc && mt->current_fc->node) {
         if (jm_func_has_param_named(mt->current_fc->node, js_name, js_name_len)) {
             local_shadows_module = true;
@@ -1749,6 +1749,22 @@ void jm_bind_destructure_var(JsMirTranspiler* mt, const char* vname, MIR_reg_t v
                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)js_name_len));
             return;
         }
+        if (var->tdz_active && !mt->destructure_assignment_mode) {
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, var->reg), MIR_new_reg_op(mt->ctx, val)));
+            if (var->from_env) {
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1),
+                    MIR_new_reg_op(mt->ctx, val)));
+            }
+            if (var->in_scope_env && var->scope_env_reg != 0) {
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1),
+                    MIR_new_reg_op(mt->ctx, val)));
+            }
+            var->tdz_active = false;
+            return;
+        }
         if (var->tdz_active) {
             jm_call_void_3(mt, "js_check_tdz",
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, var->reg),
@@ -1764,6 +1780,16 @@ void jm_bind_destructure_var(JsMirTranspiler* mt, const char* vname, MIR_reg_t v
             jm_emit_label(mt, l_write);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_reg_op(mt->ctx, var->reg), MIR_new_reg_op(mt->ctx, val)));
+            if (var->from_env) {
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1),
+                    MIR_new_reg_op(mt->ctx, val)));
+            }
+            if (var->in_scope_env && var->scope_env_reg != 0) {
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1),
+                    MIR_new_reg_op(mt->ctx, val)));
+            }
             jm_emit_label(mt, l_done);
             return;
         }
@@ -2326,20 +2352,24 @@ void jm_emit_object_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MI
                 while (pp && pp != prop) {
                     if (pp->node_type == JS_AST_NODE_PROPERTY) {
                         JsPropertyNode* ep = (JsPropertyNode*)pp;
-                        String* ek = NULL;
-                        if (ep->key && ep->key->node_type == JS_AST_NODE_IDENTIFIER)
-                            ek = ((JsIdentifierNode*)ep->key)->name;
-                        if (ek) {
-                            MIR_reg_t ki_item = jm_box_string_literal(mt, ek->chars, ek->len);
-                            MIR_reg_t offset = jm_new_reg(mt, "excl_off", MIR_T_I64);
-                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_ADD,
-                                MIR_new_reg_op(mt->ctx, offset),
-                                MIR_new_reg_op(mt->ctx, arr),
-                                MIR_new_int_op(mt->ctx, ki * 8)));
-                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                                MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, offset, 0, 1),
-                                MIR_new_reg_op(mt->ctx, ki_item)));
+                        MIR_reg_t ki_item = 0;
+                        if (!ep->computed && ep->key && ep->key->node_type == JS_AST_NODE_IDENTIFIER) {
+                            String* ek = ((JsIdentifierNode*)ep->key)->name;
+                            ki_item = jm_box_string_literal(mt, ek->chars, ek->len);
+                        } else if (ep->key) {
+                            MIR_reg_t raw_key = jm_transpile_box_item(mt, ep->key);
+                            ki_item = jm_call_1(mt, "js_to_property_key", MIR_T_I64,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, raw_key));
                         }
+                        if (!ki_item) ki_item = jm_emit_undefined(mt);
+                        MIR_reg_t offset = jm_new_reg(mt, "excl_off", MIR_T_I64);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_ADD,
+                            MIR_new_reg_op(mt->ctx, offset),
+                            MIR_new_reg_op(mt->ctx, arr),
+                            MIR_new_int_op(mt->ctx, ki * 8)));
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, offset, 0, 1),
+                            MIR_new_reg_op(mt->ctx, ki_item)));
                         ki++;
                     }
                     pp = pp->next;

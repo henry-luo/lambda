@@ -614,7 +614,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 JsModuleConstEntry mclookup;
                 snprintf(mclookup.name, sizeof(mclookup.name), "%s", fc->captures[ci].name);
                 JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
-                if (mc && mc->const_type == MCONST_MODVAR) {
+                if (mc && mc->const_type == MCONST_MODVAR && !fc->captures[ci].force_env_capture) {
                     continue;
                 }
             }
@@ -1024,7 +1024,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     JsModuleConstEntry mclookup;
                     snprintf(mclookup.name, sizeof(mclookup.name), "%s", fc->captures[ci].name);
                     JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
-                    if (mc && mc->const_type == MCONST_MODVAR) {
+                    if (mc && mc->const_type == MCONST_MODVAR && !fc->captures[ci].force_env_capture) {
                         continue;
                     }
                 }
@@ -1723,7 +1723,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                         JsModuleConstEntry mclookup;
                         snprintf(mclookup.name, sizeof(mclookup.name), "%s", fc->captures[i].name);
                         JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
-                        if (mc && mc->const_type == MCONST_MODVAR) {
+                        if (mc && mc->const_type == MCONST_MODVAR && !fc->captures[i].force_env_capture) {
                             continue;  // read via js_get_module_var at use site
                         }
                     }
