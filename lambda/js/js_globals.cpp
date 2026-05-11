@@ -11727,6 +11727,8 @@ extern "C" Item js_get_constructor(Item name_item);
 extern "C" Item js_get_global_this() {
     if (js_global_this_obj.item == 0) {
         js_global_this_obj = js_new_object();
+        extern void heap_register_gc_root(uint64_t* slot);
+        heap_register_gc_root(&js_global_this_obj.item);
         // populate standard globals
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("undefined", 9))}, make_js_undefined());
         // Legacy IE-style `window.event` — initially undefined, set to the

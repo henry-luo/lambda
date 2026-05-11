@@ -3803,6 +3803,10 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
 
         // Save with-scope depth so we can restore it if an exception escapes a 'with' block
         MIR_reg_t saved_with_depth = jm_call_0(mt, "js_with_save_depth", MIR_T_I64);
+        int saved_with_depth_spill = -1;
+        if (mt->in_generator) {
+            saved_with_depth_spill = jm_gen_spill_save(mt, saved_with_depth);
+        }
 
         // === Try body ===
         if (try_node->block && try_node->block->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
@@ -3842,6 +3846,9 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             jm_emit_label(mt, catch_label);
 
             // Restore with-scope depth (exception may have escaped a 'with' block)
+            if (saved_with_depth_spill >= 0) {
+                jm_gen_spill_load(mt, saved_with_depth, saved_with_depth_spill);
+            }
             jm_call_void_1(mt, "js_with_restore_depth", MIR_T_I64,
                 MIR_new_reg_op(mt->ctx, saved_with_depth));
 
@@ -3955,6 +3962,9 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             jm_emit_label(mt, finally_label);
 
             // Restore with-scope depth (exception or early exit may have escaped a 'with' block)
+            if (saved_with_depth_spill >= 0) {
+                jm_gen_spill_load(mt, saved_with_depth, saved_with_depth_spill);
+            }
             jm_call_void_1(mt, "js_with_restore_depth", MIR_T_I64,
                 MIR_new_reg_op(mt->ctx, saved_with_depth));
 

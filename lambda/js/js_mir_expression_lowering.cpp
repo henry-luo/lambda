@@ -279,6 +279,12 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)id->name->len));
             jm_emit_exc_propagate_check(mt);
         }
+        if (var->in_scope_env && var->scope_env_reg != 0 && var->mir_type == MIR_T_I64) {
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, var->reg),
+                MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                    var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1)));
+        }
         int param_index = jm_arguments_param_index(mt, vname);
         if (param_index >= 0) {
             return jm_call_3(mt, "js_arguments_mapped_get", MIR_T_I64,
@@ -545,7 +551,7 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
             if ((int)id->name->len == (int)strlen(builtins[i]) &&
                 strncmp(id->name->chars, builtins[i], id->name->len) == 0) {
                 MIR_reg_t name_reg = jm_box_string_literal(mt, builtins[i], (int)strlen(builtins[i]));
-                return jm_call_1(mt, "js_get_constructor", MIR_T_I64,
+                return jm_call_1(mt, "js_get_global_property_strict", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg));
             }
         }
@@ -1921,7 +1927,31 @@ void jm_emit_array_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MIR
             MIR_reg_t undef_val = jm_new_reg(mt, "undef", MIR_T_I64);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, undef_val),
                 MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
+            int undef_iterator_spill = -1;
+            int undef_iter_done_spill = -1;
+            bool undef_elem_has_yield = has_yields && mt->in_generator && jm_has_yield(elem);
+            if (undef_elem_has_yield) {
+                undef_iterator_spill = jm_gen_spill_save(mt, iterator);
+                undef_iter_done_spill = jm_gen_spill_save(mt, iter_done);
+                if (mt->gen_active_iterator_slot >= 0) {
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                            mt->gen_active_iterator_slot * (int)sizeof(uint64_t), mt->gen_env_reg, 0, 1),
+                        MIR_new_reg_op(mt->ctx, iterator)));
+                }
+            }
             jm_emit_destructure_target(mt, elem, undef_val);
+            if (undef_elem_has_yield) {
+                if (mt->gen_active_iterator_slot >= 0) {
+                    MIR_reg_t null_iter = jm_emit_null(mt);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                            mt->gen_active_iterator_slot * (int)sizeof(uint64_t), mt->gen_env_reg, 0, 1),
+                        MIR_new_reg_op(mt->ctx, null_iter)));
+                }
+                jm_gen_spill_load(mt, iterator, undef_iterator_spill);
+                jm_gen_spill_load(mt, iter_done, undef_iter_done_spill);
+            }
             jm_emit_label(mt, elem_end);
         }
         elem = elem->next;

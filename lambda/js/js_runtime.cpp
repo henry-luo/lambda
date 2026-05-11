@@ -1377,6 +1377,16 @@ static Item js_typed_array_default_species_from_buffer(Item exemplar, int defaul
     return result;
 }
 
+static Item js_typed_array_default_species_from_length(Item exemplar, int default_type, int length) {
+    Item result = js_typed_array_new(default_type, length);
+    if (get_type_id(result) == LMD_TYPE_MAP) {
+        Item proto = js_get_prototype(exemplar);
+        if (proto.item == ItemNull.item) proto = js_get_prototype_of(exemplar);
+        if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(result, proto);
+    }
+    return result;
+}
+
 // ES §22.2.4.7 TypedArraySpeciesCreate(exemplar, argumentList)
 // Creates a new TypedArray using the species constructor if available, otherwise
 // uses the default constructor for exemplar's element type.
@@ -1393,7 +1403,7 @@ extern "C" Item js_typed_array_species_create(Item exemplar, int length) {
 
     // If C is undefined, return default
     if (get_type_id(C) == LMD_TYPE_UNDEFINED) {
-        return js_typed_array_new(default_type, length);
+        return js_typed_array_default_species_from_length(exemplar, default_type, length);
     }
 
     // If Type(C) is not Object, throw TypeError
@@ -1422,7 +1432,7 @@ extern "C" Item js_typed_array_species_create(Item exemplar, int length) {
         if (get_type_id(C) == LMD_TYPE_MAP && js_resolve_ta_type_from_class_map(C) >= 0) {
             S = C;
         } else {
-            return js_typed_array_new(default_type, length);
+            return js_typed_array_default_species_from_length(exemplar, default_type, length);
         }
     }
 
