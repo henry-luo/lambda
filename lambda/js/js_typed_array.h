@@ -60,6 +60,18 @@ typedef struct JsTypedArray {
     bool is_buffer;                  // true only for Node Buffer instances backed by Uint8Array storage
 } JsTypedArray;
 
+typedef enum JsAtomicsOp {
+    JS_ATOMICS_OP_ADD,
+    JS_ATOMICS_OP_AND,
+    JS_ATOMICS_OP_COMPARE_EXCHANGE,
+    JS_ATOMICS_OP_EXCHANGE,
+    JS_ATOMICS_OP_LOAD,
+    JS_ATOMICS_OP_OR,
+    JS_ATOMICS_OP_STORE,
+    JS_ATOMICS_OP_SUB,
+    JS_ATOMICS_OP_XOR,
+} JsAtomicsOp;
+
 // Sentinel markers for identifying typed arrays, array buffers, data views
 extern char js_typed_array_marker;
 
@@ -86,6 +98,8 @@ Item js_arraybuffer_construct_resizable(Item length_arg, Item options_arg);
 Item js_arraybuffer_wrap(JsArrayBuffer* ab);
 bool js_is_arraybuffer(Item val);
 int  js_arraybuffer_byte_length(Item val);
+int  js_arraybuffer_max_byte_length(Item val);
+bool js_arraybuffer_is_resizable(Item val);
 Item js_arraybuffer_resize(Item val, Item new_length_item);
 Item js_arraybuffer_slice(Item val, int begin, int end);
 bool js_arraybuffer_is_view(Item val);
@@ -95,8 +109,15 @@ bool js_arraybuffer_is_detached(Item val);
 
 // SharedArrayBuffer
 Item js_sharedarraybuffer_construct(Item length_arg);
+Item js_sharedarraybuffer_construct_with_options(Item length_arg, Item options_arg);
 bool js_is_sharedarraybuffer(Item val);
 Item js_sharedarraybuffer_method(Item sab, Item method_name, Item* args, int argc);
+
+// Atomics operations on SharedArrayBuffer-backed integer typed arrays
+Item js_atomics_operation(int op, Item typed_array, Item index, Item value, Item replacement);
+Item js_atomics_wait(Item typed_array, Item index, Item expected, Item timeout);
+Item js_atomics_notify(Item typed_array, Item index, Item count);
+Item js_atomics_is_lock_free(Item size);
 
 // DataView operations
 Item js_dataview_new(Item buffer, Item offset_item, Item length_item);

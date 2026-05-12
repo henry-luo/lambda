@@ -331,6 +331,26 @@ const JsBuiltinMethodSpec JS_ARRAYBUFFER_PROTOTYPE_METHOD_SPECS[] = {
     {NULL, 0, 0, 0}
 };
 
+const JsBuiltinMethodSpec JS_ARRAYBUFFER_ACCESSOR_SPECS[] = {
+    {"byteLength", 10, JS_BUILTIN_ARRAYBUFFER_GET_BYTE_LENGTH, 0, "get byteLength"},
+    {"resizable", 9, JS_BUILTIN_ARRAYBUFFER_GET_RESIZABLE, 0, "get resizable"},
+    {"maxByteLength", 13, JS_BUILTIN_ARRAYBUFFER_GET_MAX_BYTE_LENGTH, 0, "get maxByteLength"},
+    {NULL, 0, 0, 0}
+};
+
+const JsBuiltinMethodSpec JS_SHAREDARRAYBUFFER_PROTOTYPE_METHOD_SPECS[] = {
+    {"slice", 5, JS_BUILTIN_SHAREDARRAYBUFFER_SLICE, 2},
+    {"grow", 4, JS_BUILTIN_SHAREDARRAYBUFFER_GROW, 1},
+    {NULL, 0, 0, 0}
+};
+
+const JsBuiltinMethodSpec JS_SHAREDARRAYBUFFER_ACCESSOR_SPECS[] = {
+    {"byteLength", 10, JS_BUILTIN_SHAREDARRAYBUFFER_GET_BYTE_LENGTH, 0, "get byteLength"},
+    {"growable", 8, JS_BUILTIN_SHAREDARRAYBUFFER_GET_GROWABLE, 0, "get growable"},
+    {"maxByteLength", 13, JS_BUILTIN_SHAREDARRAYBUFFER_GET_MAX_BYTE_LENGTH, 0, "get maxByteLength"},
+    {NULL, 0, 0, 0}
+};
+
 const JsBuiltinMethodSpec JS_DATAVIEW_PROTOTYPE_METHOD_SPECS[] = {
     {"getInt8", 7, -2, 1},
     {"getUint8", 8, -2, 1},
@@ -457,9 +477,10 @@ const JsBuiltinMethodSpec JS_ATOMICS_METHOD_SPECS[] = {
     {"load", 4, JS_BUILTIN_ATOMICS_LOAD, 2},
     {"notify", 6, JS_BUILTIN_ATOMICS_NOTIFY, 3},
     {"or", 2, JS_BUILTIN_ATOMICS_OR, 3},
+    {"pause", 5, JS_BUILTIN_ATOMICS_PAUSE, 0},
     {"store", 5, JS_BUILTIN_ATOMICS_STORE, 3},
     {"sub", 3, JS_BUILTIN_ATOMICS_SUB, 3},
-    {"wait", 4, JS_BUILTIN_ATOMICS_WAIT, 3},
+    {"wait", 4, JS_BUILTIN_ATOMICS_WAIT, 4},
     {"xor", 3, JS_BUILTIN_ATOMICS_XOR, 3},
     {NULL, 0, 0, 0}
 };
@@ -641,6 +662,7 @@ static const JsBuiltinMethodSpec* js_get_prototype_method_specs_for_ctor(const c
     if (ctor_len == 7 && strncmp(ctor_name, "WeakMap", 7) == 0) return JS_WEAKMAP_PROTOTYPE_METHOD_SPECS;
     if (ctor_len == 7 && strncmp(ctor_name, "WeakSet", 7) == 0) return JS_WEAKSET_PROTOTYPE_METHOD_SPECS;
     if (ctor_len == 11 && strncmp(ctor_name, "ArrayBuffer", 11) == 0) return JS_ARRAYBUFFER_PROTOTYPE_METHOD_SPECS;
+    if (ctor_len == 17 && strncmp(ctor_name, "SharedArrayBuffer", 17) == 0) return JS_SHAREDARRAYBUFFER_PROTOTYPE_METHOD_SPECS;
     if (ctor_len == 4 && strncmp(ctor_name, "Date", 4) == 0) return JS_DATE_PROTOTYPE_METHOD_SPECS;
     if (ctor_len == 6 && strncmp(ctor_name, "RegExp", 6) == 0) return JS_REGEXP_PROTOTYPE_METHOD_SPECS;
     return NULL;
@@ -742,6 +764,13 @@ extern "C" Item js_builtin_registry_prototype_method_descriptor(
                 spec, JS_FUNC_FLAG_DATA_VIEW_ACCESSOR | JS_FUNC_FLAG_STRICT);
         }
     }
+    if ((JsClass)js_class == JS_CLASS_ARRAY_BUFFER) {
+        spec = js_find_builtin_method_spec(JS_ARRAYBUFFER_ACCESSOR_SPECS, name, len);
+        if (spec) {
+            return js_builtin_registry_accessor_descriptor_from_spec(
+                spec, JS_FUNC_FLAG_STRICT);
+        }
+    }
     return make_js_undefined();
 }
 
@@ -765,12 +794,20 @@ extern "C" void js_append_builtin_method_names_for_class(
         js_append_builtin_method_spec_names(JS_TYPED_ARRAY_ACCESSOR_SPECS, result);
     } else if ((JsClass)js_class == JS_CLASS_DATA_VIEW) {
         js_append_builtin_method_spec_names(JS_DATAVIEW_ACCESSOR_SPECS, result);
+    } else if ((JsClass)js_class == JS_CLASS_ARRAY_BUFFER) {
+        js_append_builtin_method_spec_names(JS_ARRAYBUFFER_ACCESSOR_SPECS, result);
     }
 }
 
 void js_populate_builtin_prototype_methods(Item prototype, const char* ctor_name, int ctor_len) {
     const JsBuiltinMethodSpec* specs = js_get_prototype_method_specs_for_ctor(ctor_name, ctor_len);
     js_install_builtin_method_specs(prototype, specs);
+    if (ctor_len == 11 && strncmp(ctor_name, "ArrayBuffer", 11) == 0) {
+        js_install_builtin_accessor_specs(prototype, JS_ARRAYBUFFER_ACCESSOR_SPECS, JS_FUNC_FLAG_STRICT);
+    }
+    if (ctor_len == 17 && strncmp(ctor_name, "SharedArrayBuffer", 17) == 0) {
+        js_install_builtin_accessor_specs(prototype, JS_SHAREDARRAYBUFFER_ACCESSOR_SPECS, JS_FUNC_FLAG_STRICT);
+    }
 }
 
 static void js_append_builtin_method_spec_names(const JsBuiltinMethodSpec* specs, Item result) {

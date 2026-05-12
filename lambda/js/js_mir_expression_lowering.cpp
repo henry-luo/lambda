@@ -7558,10 +7558,10 @@ MIR_reg_t jm_transpile_typed_array_get(JsMirTranspiler* mt, MIR_reg_t arr_reg,
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, ta_ptr),
             MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, arr_reg, 0, 1)));
 
-        // Load ta->length (offset 4, int32 → sign-extend to i64)
-        ta_len = jm_new_reg(mt, "ta_len", MIR_T_I64);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, ta_len),
-            MIR_new_mem_op(mt->ctx, MIR_T_I32, 4, ta_ptr, 0, 1)));
+        // Use the runtime current-length helper so length-tracking views over
+        // ArrayBuffer/SharedArrayBuffer do not read the stale stored length.
+        ta_len = jm_call_1(mt, "js_typed_array_length", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_reg));
 
         // Load ta->data pointer (offset 16)
         data_ptr = jm_new_reg(mt, "ta_data", MIR_T_I64);
@@ -7793,10 +7793,10 @@ MIR_reg_t jm_transpile_typed_array_set(JsMirTranspiler* mt, MIR_reg_t arr_reg,
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, ta_ptr),
             MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, arr_reg, 0, 1)));
 
-        // Load ta->length (offset 4, int32)
-        ta_len = jm_new_reg(mt, "ta_len", MIR_T_I64);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, ta_len),
-            MIR_new_mem_op(mt->ctx, MIR_T_I32, 4, ta_ptr, 0, 1)));
+        // Use the runtime current-length helper so length-tracking views over
+        // ArrayBuffer/SharedArrayBuffer do not read the stale stored length.
+        ta_len = jm_call_1(mt, "js_typed_array_length", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_reg));
 
         // Load ta->data pointer (offset 16)
         data_ptr = jm_new_reg(mt, "ta_data", MIR_T_I64);
@@ -7919,47 +7919,9 @@ MIR_reg_t jm_transpile_typed_array_set(JsMirTranspiler* mt, MIR_reg_t arr_reg,
 
 // Emit inline typed array .length access: returns native int64
 MIR_reg_t jm_transpile_typed_array_length(JsMirTranspiler* mt, MIR_reg_t arr_reg) {
-    // Map.data (offset 16) → JsTypedArray*, then ta->length (offset 4, int32)
-    // With detached buffer check: ta->buffer (offset 24) → ab->detached (offset 12)
-    MIR_reg_t ta_ptr = jm_new_reg(mt, "ta_ptr", MIR_T_I64);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, ta_ptr),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, arr_reg, 0, 1)));
-
-    // result register
-    MIR_reg_t ta_len = jm_new_reg(mt, "ta_len", MIR_T_I64);
-
-    // load buffer pointer (offset 24 in JsTypedArray)
-    MIR_reg_t buf_ptr = jm_new_reg(mt, "ta_buf", MIR_T_I64);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, buf_ptr),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64, 24, ta_ptr, 0, 1)));
-
-    // if buffer == NULL, skip detach check (standalone typed array)
-    MIR_label_t l_no_buf = MIR_new_label(mt->ctx);
-    MIR_label_t l_end = MIR_new_label(mt->ctx);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_no_buf),
-        MIR_new_reg_op(mt->ctx, buf_ptr)));
-
-    // buffer exists: check detached flag (offset 12 in JsArrayBuffer, bool/1 byte)
-    MIR_reg_t detached = jm_new_reg(mt, "ta_det", MIR_T_I64);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, detached),
-        MIR_new_mem_op(mt->ctx, MIR_T_U8, 12, buf_ptr, 0, 1)));
-    MIR_label_t l_not_detached = MIR_new_label(mt->ctx);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_not_detached),
-        MIR_new_reg_op(mt->ctx, detached)));
-
-    // detached: return 0
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, ta_len),
-        MIR_new_int_op(mt->ctx, 0)));
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
-
-    // not detached or no buffer: read ta->length (offset 4)
-    jm_emit_label(mt, l_no_buf);
-    jm_emit_label(mt, l_not_detached);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, ta_len),
-        MIR_new_mem_op(mt->ctx, MIR_T_I32, 4, ta_ptr, 0, 1)));
-
-    jm_emit_label(mt, l_end);
-    return ta_len;
+    // The runtime helper handles detached and length-tracking buffers.
+    return jm_call_1(mt, "js_typed_array_length", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_reg));
 }
 
 // Member expression
@@ -8225,8 +8187,10 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_boxed),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, key_boxed));
             }
-            return jm_transpile_typed_array_get(mt, ta_var->reg, idx_native, ta_var->typed_array_type,
-                ta_var->hoisted_data_reg, ta_var->hoisted_len_reg);
+            MIR_reg_t idx_boxed = jm_box_int_reg(mt, idx_native);
+            return jm_call_2(mt, "js_typed_array_get", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, ta_var->reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_boxed));
         }
 
         // P9b: this.prop[idx] where prop is a known typed array from class fields

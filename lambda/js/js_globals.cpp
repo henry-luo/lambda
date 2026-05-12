@@ -5714,6 +5714,42 @@ extern "C" Item js_reflect_construct(Item target, Item args_array, Item new_targ
                     }
                 }
             }
+            // SharedArrayBuffer validates byteLength and maxByteLength before
+            // OrdinaryCreateFromConstructor reads NewTarget.prototype.
+            if (nl == 17 && strncmp(n, "SharedArrayBuffer", 17) == 0) {
+                Item length_arg = (argc > 0) ? args[0] : (Item){.item = ITEM_JS_UNDEFINED};
+                double byte_len = 0;
+                TypeId lt = get_type_id(length_arg);
+                if (lt != LMD_TYPE_UNDEFINED && lt != LMD_TYPE_NULL) {
+                    Item num = js_to_number(length_arg);
+                    if (js_check_exception()) return ItemNull;
+                    TypeId nt = get_type_id(num);
+                    byte_len = (nt == LMD_TYPE_FLOAT) ? it2d(num) : (double)it2i(num);
+                    if (byte_len != byte_len) byte_len = 0;
+                    byte_len = trunc(byte_len);
+                    if (byte_len < 0 || byte_len > 9007199254740991.0) {
+                        return js_throw_range_error("Invalid shared array buffer length");
+                    }
+                }
+                Item options = (argc > 1) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
+                if (get_type_id(options) == LMD_TYPE_MAP) {
+                    Item max_key = (Item){.item = s2it(heap_create_name("maxByteLength", 13))};
+                    Item max_item = js_property_get(options, max_key);
+                    if (js_check_exception()) return ItemNull;
+                    TypeId mt = get_type_id(max_item);
+                    if (mt != LMD_TYPE_UNDEFINED) {
+                        Item max_num = js_to_number(max_item);
+                        if (js_check_exception()) return ItemNull;
+                        TypeId mnt = get_type_id(max_num);
+                        double max_len = (mnt == LMD_TYPE_FLOAT) ? it2d(max_num) : (double)it2i(max_num);
+                        if (max_len != max_len) max_len = 0;
+                        max_len = trunc(max_len);
+                        if (max_len < 0 || max_len > 9007199254740991.0 || max_len < byte_len) {
+                            return js_throw_range_error("Invalid shared array buffer maxByteLength");
+                        }
+                    }
+                }
+            }
         }
     }
     extern void js_set_new_target(Item target);
@@ -5819,6 +5855,13 @@ extern "C" Item js_reflect_construct(Item target, Item args_array, Item new_targ
             if (nl == 11 && strncmp(n, "ArrayBuffer", 11) == 0) {
                 Item blen = (argc > 0) ? args[0] : ItemNull;
                 return fixup_proto(js_arraybuffer_construct(blen));
+            }
+
+            // SharedArrayBuffer
+            if (nl == 17 && strncmp(n, "SharedArrayBuffer", 17) == 0) {
+                Item blen = (argc > 0) ? args[0] : ItemNull;
+                Item options = (argc > 1) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
+                return fixup_proto(js_sharedarraybuffer_construct_with_options(blen, options));
             }
 
             // DataView
@@ -6394,6 +6437,7 @@ extern "C" bool js_func_is_builtin_ctor(Item fn) {
         (el == 7 && strncmp(en, "WeakSet", 7) == 0) ||
         (el == 7 && strncmp(en, "Promise", 7) == 0) ||
         (el == 11 && strncmp(en, "ArrayBuffer", 11) == 0) ||
+        (el == 17 && strncmp(en, "SharedArrayBuffer", 17) == 0) ||
         (el == 8 && strncmp(en, "DataView", 8) == 0) ||
         (el == 5 && strncmp(en, "Array", 5) == 0) ||
         (el == 7 && strncmp(en, "Boolean", 7) == 0) ||
@@ -12096,7 +12140,7 @@ extern "C" Item js_get_global_this() {
             {"URIError", 8}, {"EvalError", 9}, {"AggregateError", 14},
             {"RegExp", 6}, {"Date", 4}, {"Promise", 7},
             {"Map", 3}, {"Set", 3}, {"WeakMap", 7}, {"WeakSet", 7},
-            {"ArrayBuffer", 11}, {"DataView", 8},
+            {"ArrayBuffer", 11}, {"SharedArrayBuffer", 17}, {"DataView", 8},
             {"Int8Array", 9}, {"Uint8Array", 10}, {"Uint8ClampedArray", 17},
             {"Int16Array", 10}, {"Uint16Array", 11},
             {"Int32Array", 10}, {"Uint32Array", 11},
@@ -12745,6 +12789,7 @@ enum JsConstructorId {
     JS_CTOR_WEAKMAP,
     JS_CTOR_WEAKSET,
     JS_CTOR_ARRAY_BUFFER,
+    JS_CTOR_SHARED_ARRAY_BUFFER,
     JS_CTOR_DATAVIEW,
     JS_CTOR_INT8ARRAY,
     JS_CTOR_UINT8ARRAY,
@@ -13412,7 +13457,8 @@ static Item js_create_constructor(int ctor_id, const char* name, int param_count
     else if (ctor_id == JS_CTOR_POINTER_EVENT) fn->func_ptr = (void*)js_ctor_pointer_event_fn;
     else if (ctor_id == JS_CTOR_PROMISE || ctor_id == JS_CTOR_MAP || ctor_id == JS_CTOR_SET ||
              ctor_id == JS_CTOR_WEAKMAP || ctor_id == JS_CTOR_WEAKSET ||
-             ctor_id == JS_CTOR_ARRAY_BUFFER || ctor_id == JS_CTOR_DATAVIEW ||
+             ctor_id == JS_CTOR_ARRAY_BUFFER || ctor_id == JS_CTOR_SHARED_ARRAY_BUFFER ||
+             ctor_id == JS_CTOR_DATAVIEW ||
              ctor_id == JS_CTOR_PROXY ||
              (ctor_id >= JS_CTOR_INT8ARRAY && ctor_id <= JS_CTOR_BIGUINT64ARRAY))
         fn->func_ptr = (void*)js_ctor_requires_new;
@@ -13514,6 +13560,7 @@ extern "C" Item js_get_constructor(Item name_item) {
         {"WeakMap", 7, JS_CTOR_WEAKMAP, 0},
         {"WeakSet", 7, JS_CTOR_WEAKSET, 0},
         {"ArrayBuffer", 11, JS_CTOR_ARRAY_BUFFER, 1},
+        {"SharedArrayBuffer", 17, JS_CTOR_SHARED_ARRAY_BUFFER, 1},
         {"DataView", 8, JS_CTOR_DATAVIEW, 1},
         {"Int8Array", 9, JS_CTOR_INT8ARRAY, 3},
         {"Uint8Array", 10, JS_CTOR_UINT8ARRAY, 3},

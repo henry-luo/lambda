@@ -263,6 +263,273 @@ static bool js_to_index_int(Item value, int* out_index, const char* error_messag
     return true;
 }
 
+static bool js_atomics_is_integer_type(JsTypedArrayType type) {
+    switch (type) {
+    case JS_TYPED_INT8:
+    case JS_TYPED_UINT8:
+    case JS_TYPED_INT16:
+    case JS_TYPED_UINT16:
+    case JS_TYPED_INT32:
+    case JS_TYPED_UINT32:
+    case JS_TYPED_BIGINT64:
+    case JS_TYPED_BIGUINT64:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool js_atomics_is_bigint_type(JsTypedArrayType type) {
+    return type == JS_TYPED_BIGINT64 || type == JS_TYPED_BIGUINT64;
+}
+
+static JsTypedArray* js_validate_atomic_typed_array(Item typed_array, bool require_shared, bool waitable) {
+    if (!js_is_typed_array(typed_array)) {
+        js_throw_type_error("Atomics operation requires a TypedArray");
+        return NULL;
+    }
+    JsTypedArray* ta = js_get_typed_array_ptr(typed_array.map);
+    if (!ta) {
+        js_throw_type_error("Atomics operation requires a TypedArray");
+        return NULL;
+    }
+    if (require_shared && (!ta->buffer || !ta->buffer->is_shared)) {
+        js_throw_type_error("Atomics operation requires a SharedArrayBuffer-backed TypedArray");
+        return NULL;
+    }
+    if (ta->buffer && ta->buffer->detached) {
+        js_throw_type_error(require_shared ? "Atomics operation requires a non-detached SharedArrayBuffer" :
+                                           "Atomics operation requires a non-detached ArrayBuffer");
+        return NULL;
+    }
+    if (waitable) {
+        if (ta->element_type != JS_TYPED_INT32 && ta->element_type != JS_TYPED_BIGINT64) {
+            js_throw_type_error("Atomics.wait/notify requires an Int32Array or BigInt64Array");
+            return NULL;
+        }
+    } else if (!js_atomics_is_integer_type(ta->element_type)) {
+        js_throw_type_error("Atomics operation requires an integer TypedArray");
+        return NULL;
+    }
+    return ta;
+}
+
+static bool js_atomics_validate_index(JsTypedArray* ta, Item index_item, int* out_index) {
+    int length = js_typed_array_current_length(ta);
+    int index = 0;
+    if (!js_to_index_int(index_item, &index, "Invalid atomic access index")) return false;
+    if (index < 0 || index >= length) {
+        js_throw_range_error("Invalid atomic access index");
+        return false;
+    }
+    *out_index = index;
+    return true;
+}
+
+static Item js_atomics_number_to_integer_item(double number) {
+    if (std::isnan(number)) return (Item){.item = i2it(0)};
+    if (!std::isfinite(number)) {
+        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+        *fp = number;
+        return (Item){.item = d2it(fp)};
+    }
+    double integer = std::trunc(number);
+    if (integer >= (double)INT64_MIN && integer <= (double)INT64_MAX) {
+        return (Item){.item = i2it((int64_t)integer)};
+    }
+    double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+    *fp = integer;
+    return (Item){.item = d2it(fp)};
+}
+
+static bool js_atomics_to_number_bits(JsTypedArrayType type, Item value, uint64_t* out_bits, Item* out_store_value) {
+    double number = 0.0;
+    if (!js_dataview_to_number_value(value, &number)) return false;
+    if (out_store_value) *out_store_value = js_atomics_number_to_integer_item(number);
+    switch (type) {
+    case JS_TYPED_INT8:
+        *out_bits = (uint8_t)(int8_t)js_typed_array_to_int_n(number, 8, true);
+        return true;
+    case JS_TYPED_UINT8:
+        *out_bits = (uint8_t)js_typed_array_to_int_n(number, 8, false);
+        return true;
+    case JS_TYPED_INT16:
+        *out_bits = (uint16_t)(int16_t)js_typed_array_to_int_n(number, 16, true);
+        return true;
+    case JS_TYPED_UINT16:
+        *out_bits = (uint16_t)js_typed_array_to_int_n(number, 16, false);
+        return true;
+    case JS_TYPED_INT32:
+        *out_bits = (uint32_t)(int32_t)js_typed_array_to_int_n(number, 32, true);
+        return true;
+    case JS_TYPED_UINT32:
+        *out_bits = (uint32_t)js_typed_array_to_int_n(number, 32, false);
+        return true;
+    default:
+        js_throw_type_error("Atomics operation requires a Number typed array");
+        return false;
+    }
+}
+
+static bool js_atomics_to_bigint_bits(JsTypedArrayType type, Item value, uint64_t* out_bits, Item* out_store_value) {
+    Item bigint_item;
+    if (!js_dataview_to_bigint_value(value, &bigint_item)) return false;
+    if (out_store_value) *out_store_value = bigint_item;
+    Item wrapped;
+    if (type == JS_TYPED_BIGINT64) {
+        wrapped = js_bigint_as_int_n((Item){.item = i2it(64)}, bigint_item);
+    } else {
+        wrapped = js_bigint_as_uint_n((Item){.item = i2it(64)}, bigint_item);
+    }
+    if (js_check_exception()) return false;
+    *out_bits = js_dataview_bigint_to_uint64(wrapped);
+    return true;
+}
+
+static bool js_atomics_to_element_bits(JsTypedArrayType type, Item value, uint64_t* out_bits, Item* out_store_value) {
+    if (js_atomics_is_bigint_type(type)) return js_atomics_to_bigint_bits(type, value, out_bits, out_store_value);
+    return js_atomics_to_number_bits(type, value, out_bits, out_store_value);
+}
+
+static Item js_atomics_item_from_bits(JsTypedArrayType type, uint64_t bits) {
+    switch (type) {
+    case JS_TYPED_INT8:      return (Item){.item = i2it((int64_t)(int8_t)(uint8_t)bits)};
+    case JS_TYPED_UINT8:     return (Item){.item = i2it((int64_t)(uint8_t)bits)};
+    case JS_TYPED_INT16:     return (Item){.item = i2it((int64_t)(int16_t)(uint16_t)bits)};
+    case JS_TYPED_UINT16:    return (Item){.item = i2it((int64_t)(uint16_t)bits)};
+    case JS_TYPED_INT32:     return (Item){.item = i2it((int64_t)(int32_t)(uint32_t)bits)};
+    case JS_TYPED_UINT32:    return (Item){.item = i2it((int64_t)(uint32_t)bits)};
+    case JS_TYPED_BIGINT64:  return bigint_from_int64((int64_t)bits);
+    case JS_TYPED_BIGUINT64: return js_dataview_biguint64_item(bits);
+    default:                 return (Item){.item = ITEM_JS_UNDEFINED};
+    }
+}
+
+static Item js_atomics_wait_result(const char* value, int len) {
+    return (Item){.item = s2it(heap_strcpy((char*)value, len))};
+}
+
+#define JS_ATOMICS_APPLY_OPERATION(C_TYPE) do { \
+    C_TYPE* element_ptr = ((C_TYPE*)data) + index; \
+    C_TYPE converted_value = (C_TYPE)value_bits; \
+    C_TYPE old_value; \
+    switch ((JsAtomicsOp)op) { \
+    case JS_ATOMICS_OP_ADD: \
+        old_value = __atomic_fetch_add(element_ptr, converted_value, __ATOMIC_SEQ_CST); \
+        return js_atomics_item_from_bits(ta->element_type, (uint64_t)old_value); \
+    case JS_ATOMICS_OP_AND: \
+        old_value = __atomic_fetch_and(element_ptr, converted_value, __ATOMIC_SEQ_CST); \
+        return js_atomics_item_from_bits(ta->element_type, (uint64_t)old_value); \
+    case JS_ATOMICS_OP_EXCHANGE: \
+        old_value = __atomic_exchange_n(element_ptr, converted_value, __ATOMIC_SEQ_CST); \
+        return js_atomics_item_from_bits(ta->element_type, (uint64_t)old_value); \
+    case JS_ATOMICS_OP_LOAD: \
+        old_value = __atomic_load_n(element_ptr, __ATOMIC_SEQ_CST); \
+        return js_atomics_item_from_bits(ta->element_type, (uint64_t)old_value); \
+    case JS_ATOMICS_OP_OR: \
+        old_value = __atomic_fetch_or(element_ptr, converted_value, __ATOMIC_SEQ_CST); \
+        return js_atomics_item_from_bits(ta->element_type, (uint64_t)old_value); \
+    case JS_ATOMICS_OP_STORE: \
+        __atomic_store_n(element_ptr, converted_value, __ATOMIC_SEQ_CST); \
+        return store_return; \
+    case JS_ATOMICS_OP_SUB: \
+        old_value = __atomic_fetch_sub(element_ptr, converted_value, __ATOMIC_SEQ_CST); \
+        return js_atomics_item_from_bits(ta->element_type, (uint64_t)old_value); \
+    case JS_ATOMICS_OP_XOR: \
+        old_value = __atomic_fetch_xor(element_ptr, converted_value, __ATOMIC_SEQ_CST); \
+        return js_atomics_item_from_bits(ta->element_type, (uint64_t)old_value); \
+    case JS_ATOMICS_OP_COMPARE_EXCHANGE: { \
+        C_TYPE observed_value = (C_TYPE)value_bits; \
+        C_TYPE replacement_value = (C_TYPE)replacement_bits; \
+        __atomic_compare_exchange_n(element_ptr, &observed_value, replacement_value, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); \
+        return js_atomics_item_from_bits(ta->element_type, (uint64_t)observed_value); \
+    } \
+    } \
+} while (0)
+
+extern "C" Item js_atomics_operation(int op, Item typed_array, Item index_item, Item value, Item replacement) {
+    JsTypedArray* ta = js_validate_atomic_typed_array(typed_array, false, false);
+    if (!ta) return ItemNull;
+    int index = 0;
+    if (!js_atomics_validate_index(ta, index_item, &index)) return ItemNull;
+    void* data = js_typed_array_current_data(ta);
+    if (!data) return js_throw_range_error("Invalid atomic access index");
+
+    uint64_t value_bits = 0;
+    uint64_t replacement_bits = 0;
+    Item store_return = value;
+    if ((JsAtomicsOp)op != JS_ATOMICS_OP_LOAD) {
+        if (!js_atomics_to_element_bits(ta->element_type, value, &value_bits, &store_return)) return ItemNull;
+        if ((JsAtomicsOp)op == JS_ATOMICS_OP_COMPARE_EXCHANGE &&
+            !js_atomics_to_element_bits(ta->element_type, replacement, &replacement_bits, NULL)) return ItemNull;
+    }
+
+    switch (ta->element_type) {
+    case JS_TYPED_INT8:      JS_ATOMICS_APPLY_OPERATION(int8_t);
+    case JS_TYPED_UINT8:     JS_ATOMICS_APPLY_OPERATION(uint8_t);
+    case JS_TYPED_INT16:     JS_ATOMICS_APPLY_OPERATION(int16_t);
+    case JS_TYPED_UINT16:    JS_ATOMICS_APPLY_OPERATION(uint16_t);
+    case JS_TYPED_INT32:     JS_ATOMICS_APPLY_OPERATION(int32_t);
+    case JS_TYPED_UINT32:    JS_ATOMICS_APPLY_OPERATION(uint32_t);
+    case JS_TYPED_BIGINT64:  JS_ATOMICS_APPLY_OPERATION(int64_t);
+    case JS_TYPED_BIGUINT64: JS_ATOMICS_APPLY_OPERATION(uint64_t);
+    default:
+        return js_throw_type_error("Atomics operation requires an integer TypedArray");
+    }
+}
+
+#undef JS_ATOMICS_APPLY_OPERATION
+
+extern "C" Item js_atomics_wait(Item typed_array, Item index_item, Item expected, Item timeout) {
+    JsTypedArray* ta = js_validate_atomic_typed_array(typed_array, true, true);
+    if (!ta) return ItemNull;
+    int index = 0;
+    if (!js_atomics_validate_index(ta, index_item, &index)) return ItemNull;
+
+    uint64_t expected_bits = 0;
+    if (!js_atomics_to_element_bits(ta->element_type, expected, &expected_bits, NULL)) return ItemNull;
+    if (get_type_id(timeout) != LMD_TYPE_UNDEFINED) {
+        double timeout_number = 0.0;
+        js_dataview_to_number_value(timeout, &timeout_number);
+        if (js_check_exception()) return ItemNull;
+    }
+
+    void* data = js_typed_array_current_data(ta);
+    if (!data) return js_throw_range_error("Invalid atomic access index");
+    bool equal = false;
+    if (ta->element_type == JS_TYPED_INT32) {
+        int32_t current = __atomic_load_n(((int32_t*)data) + index, __ATOMIC_SEQ_CST);
+        equal = current == (int32_t)expected_bits;
+    } else {
+        int64_t current = __atomic_load_n(((int64_t*)data) + index, __ATOMIC_SEQ_CST);
+        equal = current == (int64_t)expected_bits;
+    }
+    return equal ? js_atomics_wait_result("timed-out", 9) : js_atomics_wait_result("not-equal", 9);
+}
+
+extern "C" Item js_atomics_notify(Item typed_array, Item index_item, Item count) {
+    JsTypedArray* ta = js_validate_atomic_typed_array(typed_array, false, true);
+    if (!ta) return ItemNull;
+    int index = 0;
+    if (!js_atomics_validate_index(ta, index_item, &index)) return ItemNull;
+    if (get_type_id(count) != LMD_TYPE_UNDEFINED) {
+        double count_number = 0.0;
+        if (!js_dataview_to_number_value(count, &count_number)) return ItemNull;
+    }
+    if (!ta->buffer || !ta->buffer->is_shared) {
+        return (Item){.item = i2it(0)};
+    }
+    return (Item){.item = i2it(0)};
+}
+
+extern "C" Item js_atomics_is_lock_free(Item size) {
+    double number = 0.0;
+    if (!js_dataview_to_number_value(size, &number)) return ItemNull;
+    if (std::isnan(number) || !std::isfinite(number)) number = 0.0;
+    int64_t int_size = (int64_t)std::trunc(number);
+    return (Item){.item = b2it(int_size == 1 || int_size == 2 || int_size == 4 || int_size == 8)};
+}
+
 // Returns the JS type name for a typed array element type (e.g. "Uint8Array")
 extern "C" const char* js_typed_array_type_name(Item val) {
     if (get_type_id(val) != LMD_TYPE_MAP) return NULL;
@@ -390,6 +657,19 @@ extern "C" int js_arraybuffer_byte_length(Item val) {
     return ab->byte_length;
 }
 
+extern "C" int js_arraybuffer_max_byte_length(Item val) {
+    if (!js_is_arraybuffer(val)) return 0;
+    JsArrayBuffer* ab = js_get_arraybuffer_ptr(val.map);
+    if (!ab) return 0;
+    return ab->max_byte_length;
+}
+
+extern "C" bool js_arraybuffer_is_resizable(Item val) {
+    if (!js_is_arraybuffer(val)) return false;
+    JsArrayBuffer* ab = js_get_arraybuffer_ptr(val.map);
+    return ab && ab->resizable;
+}
+
 extern "C" Item js_arraybuffer_resize(Item val, Item new_length_item) {
     if (!js_is_arraybuffer(val) || js_is_sharedarraybuffer(val)) {
         return js_throw_type_error("ArrayBuffer.prototype.resize requires a resizable ArrayBuffer receiver");
@@ -465,6 +745,10 @@ extern "C" bool js_arraybuffer_is_detached(Item val) {
 // ============================================================================
 
 extern "C" Item js_sharedarraybuffer_construct(Item length_arg) {
+    return js_sharedarraybuffer_construct_with_options(length_arg, (Item){.item = ITEM_JS_UNDEFINED});
+}
+
+extern "C" Item js_sharedarraybuffer_construct_with_options(Item length_arg, Item options_arg) {
     // ToIndex: undefined/null → 0
     TypeId type = get_type_id(length_arg);
     if (type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED) {
@@ -503,13 +787,25 @@ extern "C" Item js_sharedarraybuffer_construct(Item length_arg) {
     }
 
     int byte_length = (int)ival;
+    int max_byte_length = byte_length;
+    bool growable = false;
+    if (get_type_id(options_arg) == LMD_TYPE_MAP) {
+        Item max_key = (Item){.item = s2it(heap_create_name("maxByteLength"))};
+        Item max_item = js_property_get(options_arg, max_key);
+        if (get_type_id(max_item) != LMD_TYPE_UNDEFINED && max_item.item != ITEM_NULL) {
+            if (!js_to_index_int(max_item, &max_byte_length, "Invalid shared array buffer maxByteLength")) return ItemNull;
+            if (max_byte_length < byte_length) return js_throw_range_error("Invalid shared array buffer maxByteLength");
+            growable = true;
+        }
+    }
+
     JsArrayBuffer* ab = (JsArrayBuffer*)mem_alloc(sizeof(JsArrayBuffer), MEM_CAT_JS_RUNTIME);
     ab->byte_length = byte_length;
-    ab->max_byte_length = byte_length;
+    ab->max_byte_length = max_byte_length;
     ab->data = mem_calloc(1, byte_length > 0 ? byte_length : 1, MEM_CAT_JS_RUNTIME);
     ab->detached = false;
     ab->is_shared = true;
-    ab->resizable = false;
+    ab->resizable = growable;
 
     Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     m->type_id = LMD_TYPE_MAP;
@@ -518,7 +814,13 @@ extern "C" Item js_sharedarraybuffer_construct(Item length_arg) {
     m->data = ab;
     m->data_cap = 0;
 
-    return (Item){.map = m};
+    Item result = (Item){.map = m};
+    Item ctor = js_get_constructor((Item){.item = s2it(heap_create_name("SharedArrayBuffer"))});
+    if (get_type_id(ctor) == LMD_TYPE_FUNC) {
+        Item proto = js_property_get(ctor, (Item){.item = s2it(heap_create_name("prototype"))});
+        if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(result, proto);
+    }
+    return result;
 }
 
 extern "C" bool js_is_sharedarraybuffer(Item val) {
@@ -531,7 +833,7 @@ extern "C" bool js_is_sharedarraybuffer(Item val) {
 }
 
 extern "C" Item js_sharedarraybuffer_method(Item sab, Item method_name, Item* args, int argc) {
-    if (!js_is_sharedarraybuffer(sab)) return ItemNull;
+    if (!js_is_sharedarraybuffer(sab)) return js_throw_type_error("SharedArrayBuffer method requires a SharedArrayBuffer receiver");
     JsArrayBuffer* ab = js_get_arraybuffer_ptr(sab.map);
     if (!ab) return ItemNull;
 
@@ -560,14 +862,66 @@ extern "C" Item js_sharedarraybuffer_method(Item sab, Item method_name, Item* ar
         if (end < begin) end = begin;
         int new_len = end - begin;
 
-        // Create a new SharedArrayBuffer for the slice
-        Item result_item = js_sharedarraybuffer_construct((Item){.item = i2it(new_len)});
+        Item result_item = ItemNull;
+        Item ctor_key = (Item){.item = s2it(heap_create_name("constructor"))};
+        Item ctor = js_property_get(sab, ctor_key);
         if (js_check_exception()) return ItemNull;
+
+        bool use_default_ctor = get_type_id(ctor) == LMD_TYPE_UNDEFINED;
+        if (!use_default_ctor) {
+            TypeId ctor_type = get_type_id(ctor);
+            if (ctor_type != LMD_TYPE_MAP && ctor_type != LMD_TYPE_ARRAY &&
+                ctor_type != LMD_TYPE_FUNC && ctor_type != LMD_TYPE_ELEMENT) {
+                return js_throw_type_error("SharedArrayBuffer species constructor must be an object");
+            }
+            Item species_key = (Item){.item = s2it(heap_create_name("__sym_6"))};
+            Item species = js_property_get(ctor, species_key);
+            if (js_check_exception()) return ItemNull;
+            TypeId species_type = get_type_id(species);
+            if (species_type == LMD_TYPE_UNDEFINED || species_type == LMD_TYPE_NULL) {
+                use_default_ctor = true;
+            } else {
+                Item len_arg = (Item){.item = i2it(new_len)};
+                result_item = js_new_from_class_object(species, &len_arg, 1);
+                if (js_check_exception()) return ItemNull;
+            }
+        }
+        if (use_default_ctor) {
+            result_item = js_sharedarraybuffer_construct((Item){.item = i2it(new_len)});
+        }
+        if (js_check_exception()) return ItemNull;
+        if (!js_is_sharedarraybuffer(result_item)) {
+            return js_throw_type_error("SharedArrayBuffer species constructor did not return a SharedArrayBuffer");
+        }
+        if (result_item.item == sab.item) {
+            return js_throw_type_error("SharedArrayBuffer species constructor returned the same buffer");
+        }
         JsArrayBuffer* rab = js_get_arraybuffer_ptr(result_item.map);
+        if (!rab || rab->byte_length < new_len) {
+            return js_throw_type_error("SharedArrayBuffer species constructor returned a buffer that is too small");
+        }
         if (rab && new_len > 0) {
             memcpy(rab->data, (char*)ab->data + begin, new_len);
         }
         return result_item;
+    }
+
+    if (mname->len == 4 && strncmp(mname->chars, "grow", 4) == 0) {
+        if (!ab->resizable) return js_throw_type_error("SharedArrayBuffer is not growable");
+        Item new_length_item = argc > 0 ? args[0] : (Item){.item = ITEM_JS_UNDEFINED};
+        int new_length = 0;
+        if (!js_to_index_int(new_length_item, &new_length, "Invalid shared array buffer length")) return ItemNull;
+        if (new_length < ab->byte_length || new_length > ab->max_byte_length) {
+            return js_throw_range_error("Invalid shared array buffer length");
+        }
+        if (new_length != ab->byte_length) {
+            void* new_data = mem_calloc(1, new_length > 0 ? new_length : 1, MEM_CAT_JS_RUNTIME);
+            int copy_len = ab->byte_length < new_length ? ab->byte_length : new_length;
+            if (ab->data && copy_len > 0) memcpy(new_data, ab->data, copy_len);
+            ab->data = new_data;
+            ab->byte_length = new_length;
+        }
+        return (Item){.item = ITEM_JS_UNDEFINED};
     }
 
     return ItemNull;

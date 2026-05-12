@@ -1598,6 +1598,7 @@ JitImport jit_runtime_imports[] = {
     {"js_dataview_method", FPTR(js_dataview_method)},
     // SharedArrayBuffer
     {"js_sharedarraybuffer_construct", FPTR(js_sharedarraybuffer_construct)},
+    {"js_sharedarraybuffer_construct_with_options", FPTR(js_sharedarraybuffer_construct_with_options)},
     {"js_is_sharedarraybuffer", FPTR(js_is_sharedarraybuffer)},
     {"js_sharedarraybuffer_method", FPTR(js_sharedarraybuffer_method)},
     // module variable table

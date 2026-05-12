@@ -1032,7 +1032,8 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 js_pending_new_target = ItemNull;
                 js_has_pending_new_target = false;
                 Item blen_arg = (argc > 0 && args) ? args[0] : ItemNull;
-                return js_sharedarraybuffer_construct(blen_arg);
+                Item options_arg = (argc > 1 && args) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
+                return js_sharedarraybuffer_construct_with_options(blen_arg, options_arg);
             }
 
             // DataView
@@ -2093,21 +2094,22 @@ static bool js_try_exotic_property_get(Item object, Item key, Item* out_result) 
                 *out_result = (Item){.item = i2it(0)};
                 return true;
             }
-            if (object.map->data_cap > 0) {
-                Item own_result = map_get(object.map, key);
-                if (own_result.item != ITEM_NULL) {
-                    *out_result = own_result;
-                    return true;
-                }
-            }
-        }
-        Item ab_proto = js_get_prototype(object);
-        if (ab_proto.item != ITEM_NULL) {
-            Item result = js_property_get(ab_proto, key);
-            if (result.item != ITEM_NULL && get_type_id(result) != LMD_TYPE_UNDEFINED) {
-                *out_result = result;
+            Item own_result = ItemNull;
+            JsOwnGetStatus st = js_ordinary_get_own(object, key, object, &own_result);
+            if (st == JS_OWN_READY) {
+                *out_result = own_result;
                 return true;
             }
+            if (st == JS_OWN_DELETED) {
+                *out_result = make_js_undefined();
+                return true;
+            }
+        }
+        bool proto_found = false;
+        Item result = js_prototype_lookup_ex(object, key, &proto_found);
+        if (proto_found) {
+            *out_result = result;
+            return true;
         }
         *out_result = (Item){.item = ITEM_NULL};
         return true;
@@ -3174,6 +3176,18 @@ extern "C" Item js_property_get(Item object, Item key) {
                             // Symbol.toStringTag
                             Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
                             Item tag_val = (Item){.item = s2it(heap_create_name("ArrayBuffer", 11))};
+                            js_property_set(fn->prototype, tag_key, tag_val);
+                            js_mark_non_writable(fn->prototype, tag_key);
+                            js_mark_non_enumerable(fn->prototype, tag_key);
+                            js_populate_builtin_prototype_methods(fn->prototype, nm, nl);
+                        }
+                        // SharedArrayBuffer.prototype methods
+                        if (nl == 17 && strncmp(nm, "SharedArrayBuffer", 17) == 0) {
+                            Item cnk = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
+                            Item cnv = (Item){.item = s2it(heap_create_name("SharedArrayBuffer", 17))};
+                            js_property_set(fn->prototype, cnk, cnv);
+                            Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
+                            Item tag_val = (Item){.item = s2it(heap_create_name("SharedArrayBuffer", 17))};
                             js_property_set(fn->prototype, tag_key, tag_val);
                             js_mark_non_writable(fn->prototype, tag_key);
                             js_mark_non_enumerable(fn->prototype, tag_key);
@@ -7030,7 +7044,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             {"ReferenceError", 14}, {"SyntaxError", 11}, {"URIError", 8},
             {"EvalError", 9}, {"AggregateError", 14}, {"RegExp", 6},
             {"Date", 4}, {"Promise", 7}, {"Map", 3}, {"Set", 3},
-            {"WeakMap", 7}, {"WeakSet", 7}, {"ArrayBuffer", 11}, {"DataView", 8},
+            {"WeakMap", 7}, {"WeakSet", 7}, {"ArrayBuffer", 11}, {"SharedArrayBuffer", 17}, {"DataView", 8},
             {"Int8Array", 9}, {"Uint8Array", 10}, {"Uint8ClampedArray", 17},
             {"Int16Array", 10}, {"Uint16Array", 11}, {"Int32Array", 10},
             {"Uint32Array", 11}, {"Float32Array", 12}, {"Float64Array", 12},
@@ -8331,7 +8345,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         // ArrayBuffer.prototype.slice(begin, end)
         extern Item js_arraybuffer_slice(Item val, int begin, int end);
         Item obj = this_val;
-        if (get_type_id(obj) != LMD_TYPE_MAP) {
+        if (!js_is_arraybuffer(obj) || js_is_sharedarraybuffer(obj)) {
             return js_throw_type_error("ArrayBuffer.prototype.slice requires an ArrayBuffer as receiver");
         }
         int byte_length = 0;
@@ -8346,6 +8360,52 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     case JS_BUILTIN_ARRAYBUFFER_RESIZE: {
         extern Item js_arraybuffer_resize(Item val, Item new_length_item);
         return js_arraybuffer_resize(this_val, arg0);
+    }
+    case JS_BUILTIN_ARRAYBUFFER_GET_BYTE_LENGTH: {
+        if (!js_is_arraybuffer(this_val) || js_is_sharedarraybuffer(this_val)) {
+            return js_throw_type_error("ArrayBuffer.prototype.byteLength requires an ArrayBuffer receiver");
+        }
+        return (Item){.item = i2it(js_arraybuffer_byte_length(this_val))};
+    }
+    case JS_BUILTIN_ARRAYBUFFER_GET_RESIZABLE: {
+        if (!js_is_arraybuffer(this_val) || js_is_sharedarraybuffer(this_val)) {
+            return js_throw_type_error("ArrayBuffer.prototype.resizable requires an ArrayBuffer receiver");
+        }
+        return (Item){.item = b2it(js_arraybuffer_is_resizable(this_val))};
+    }
+    case JS_BUILTIN_ARRAYBUFFER_GET_MAX_BYTE_LENGTH: {
+        if (!js_is_arraybuffer(this_val) || js_is_sharedarraybuffer(this_val)) {
+            return js_throw_type_error("ArrayBuffer.prototype.maxByteLength requires an ArrayBuffer receiver");
+        }
+        return (Item){.item = i2it(js_arraybuffer_max_byte_length(this_val))};
+    }
+    case JS_BUILTIN_SHAREDARRAYBUFFER_SLICE: {
+        Item method_name = (Item){.item = s2it(heap_create_name("slice", 5))};
+        Item method_args[2] = { arg0, arg1 };
+        return js_sharedarraybuffer_method(this_val, method_name, method_args, arg_count > 1 ? 2 : (arg_count > 0 ? 1 : 0));
+    }
+    case JS_BUILTIN_SHAREDARRAYBUFFER_GROW: {
+        Item method_name = (Item){.item = s2it(heap_create_name("grow", 4))};
+        Item method_args[1] = { arg0 };
+        return js_sharedarraybuffer_method(this_val, method_name, method_args, arg_count > 0 ? 1 : 0);
+    }
+    case JS_BUILTIN_SHAREDARRAYBUFFER_GET_BYTE_LENGTH: {
+        if (!js_is_sharedarraybuffer(this_val)) {
+            return js_throw_type_error("SharedArrayBuffer.prototype.byteLength requires a SharedArrayBuffer receiver");
+        }
+        return (Item){.item = i2it(js_arraybuffer_byte_length(this_val))};
+    }
+    case JS_BUILTIN_SHAREDARRAYBUFFER_GET_GROWABLE: {
+        if (!js_is_sharedarraybuffer(this_val)) {
+            return js_throw_type_error("SharedArrayBuffer.prototype.growable requires a SharedArrayBuffer receiver");
+        }
+        return (Item){.item = b2it(js_arraybuffer_is_resizable(this_val))};
+    }
+    case JS_BUILTIN_SHAREDARRAYBUFFER_GET_MAX_BYTE_LENGTH: {
+        if (!js_is_sharedarraybuffer(this_val)) {
+            return js_throw_type_error("SharedArrayBuffer.prototype.maxByteLength requires a SharedArrayBuffer receiver");
+        }
+        return (Item){.item = i2it(js_arraybuffer_max_byte_length(this_val))};
     }
 
     // Reflect methods
@@ -8405,42 +8465,45 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             return js_throw_type_error("Generator.prototype.throw called on incompatible receiver");
         }
         return js_generator_throw(this_val, arg_count > 0 ? arg0 : make_js_undefined());
-    // Atomics methods — all operations require SharedArrayBuffer-backed TypedArrays.
-    // Since SharedArrayBuffer is not implemented, all operations throw TypeError.
     case JS_BUILTIN_ATOMICS_ADD:
+        return js_atomics_operation(JS_ATOMICS_OP_ADD, arg0, arg1, arg2, make_js_undefined());
     case JS_BUILTIN_ATOMICS_AND:
+        return js_atomics_operation(JS_ATOMICS_OP_AND, arg0, arg1, arg2, make_js_undefined());
     case JS_BUILTIN_ATOMICS_COMPAREEXCHANGE:
+        return js_atomics_operation(JS_ATOMICS_OP_COMPARE_EXCHANGE, arg0, arg1, arg2,
+                                   arg_count > 3 ? args[3] : make_js_undefined());
     case JS_BUILTIN_ATOMICS_EXCHANGE:
+        return js_atomics_operation(JS_ATOMICS_OP_EXCHANGE, arg0, arg1, arg2, make_js_undefined());
     case JS_BUILTIN_ATOMICS_LOAD:
+        return js_atomics_operation(JS_ATOMICS_OP_LOAD, arg0, arg1, make_js_undefined(), make_js_undefined());
     case JS_BUILTIN_ATOMICS_OR:
+        return js_atomics_operation(JS_ATOMICS_OP_OR, arg0, arg1, arg2, make_js_undefined());
+    case JS_BUILTIN_ATOMICS_PAUSE: {
+        if (arg_count > 0 && get_type_id(arg0) != LMD_TYPE_UNDEFINED) {
+            TypeId pause_arg_type = get_type_id(arg0);
+            if (pause_arg_type == LMD_TYPE_INT && it2i(arg0) > -(int64_t)JS_SYMBOL_BASE) return make_js_undefined();
+            if (pause_arg_type == LMD_TYPE_FLOAT) {
+                double pause_arg_value = it2d(arg0);
+                if (std::isfinite(pause_arg_value) && pause_arg_value == std::trunc(pause_arg_value)) {
+                    return make_js_undefined();
+                }
+            }
+            return js_throw_type_error("Atomics.pause requires an integral Number argument");
+        }
+        return make_js_undefined();
+    }
     case JS_BUILTIN_ATOMICS_STORE:
+        return js_atomics_operation(JS_ATOMICS_OP_STORE, arg0, arg1, arg2, make_js_undefined());
     case JS_BUILTIN_ATOMICS_SUB:
-    case JS_BUILTIN_ATOMICS_XOR: {
-        // Validate first arg is a TypedArray (throws TypeError if not)
-        if (!js_is_typed_array(arg0)) {
-            return js_throw_type_error("Atomics operation requires a TypedArray");
-        }
-        // All buffers are non-shared (SharedArrayBuffer not implemented)
-        return js_throw_type_error("Atomics operation requires a SharedArrayBuffer-backed TypedArray");
-    }
+        return js_atomics_operation(JS_ATOMICS_OP_SUB, arg0, arg1, arg2, make_js_undefined());
+    case JS_BUILTIN_ATOMICS_XOR:
+        return js_atomics_operation(JS_ATOMICS_OP_XOR, arg0, arg1, arg2, make_js_undefined());
     case JS_BUILTIN_ATOMICS_NOTIFY:
-    case JS_BUILTIN_ATOMICS_WAIT: {
-        // Atomics.wait/notify require Int32Array or BigInt64Array backed by SharedArrayBuffer
-        if (!js_is_typed_array(arg0)) {
-            return js_throw_type_error("Atomics operation requires a TypedArray");
-        }
-        // Check for Int32Array type
-        extern const char* js_typed_array_type_name(Item val);
-        const char* ta_name = js_typed_array_type_name(arg0);
-        if (!ta_name || (strcmp(ta_name, "Int32Array") != 0 && strcmp(ta_name, "BigInt64Array") != 0)) {
-            return js_throw_type_error("Atomics.wait/notify requires an Int32Array or BigInt64Array");
-        }
-        return js_throw_type_error("Atomics operation requires a SharedArrayBuffer-backed TypedArray");
-    }
+        return js_atomics_notify(arg0, arg1, arg2);
+    case JS_BUILTIN_ATOMICS_WAIT:
+        return js_atomics_wait(arg0, arg1, arg2, arg_count > 3 ? args[3] : make_js_undefined());
     case JS_BUILTIN_ATOMICS_ISLOCKFREE: {
-        // isLockFree(size) — returns true for 1, 2, 4 byte sizes
-        int64_t size = it2i(arg0);
-        return (Item){.item = b2it(size == 1 || size == 2 || size == 4)};
+        return js_atomics_is_lock_free(arg0);
     }
     case JS_BUILTIN_SET_INTERSECTION:
     case JS_BUILTIN_SET_UNION:
@@ -13151,6 +13214,10 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
     if (js_is_arraybuffer(obj)) {
         String* method = it2s(method_name);
         if (method) {
+            if (js_is_sharedarraybuffer(obj)) {
+                Item shared_result = js_sharedarraybuffer_method(obj, method_name, args, argc);
+                if (shared_result.item != ITEM_NULL || js_exception_pending) return shared_result;
+            }
             if (method->len == 5 && strncmp(method->chars, "slice", 5) == 0) {
                 int begin = argc > 0 ? (int)it2i(args[0]) : 0;
                 int end = argc > 1 ? (int)it2i(args[1]) : js_arraybuffer_byte_length(obj);
@@ -18024,7 +18091,41 @@ extern "C" Item js_get_console_object_value() {
 // test262 host object $262 — provides detachArrayBuffer for typed array tests
 static Item js_262_object = {.item = ITEM_NULL};
 static int64_t js_262_eval_script_active = 0;
-void js_reset_262_object() { js_262_object = (Item){.item = ITEM_NULL}; }
+
+#define JS_262_AGENT_MAX 16
+#define JS_262_AGENT_REPORT_MAX 64
+static Item js_262_agent_object = {.item = ITEM_NULL};
+static Item js_262_agent_callbacks[JS_262_AGENT_MAX];
+static Item js_262_agent_reports[JS_262_AGENT_REPORT_MAX];
+static int js_262_agent_callback_count = 0;
+static int js_262_agent_report_head = 0;
+static int js_262_agent_report_count = 0;
+static int js_262_agent_current_slot = -1;
+static bool js_262_agent_roots_registered = false;
+
+static void js_262_agent_register_roots() {
+    if (js_262_agent_roots_registered) return;
+    extern void heap_register_gc_root_range(uint64_t* base, int count);
+    heap_register_gc_root(&js_262_agent_object.item);
+    heap_register_gc_root_range((uint64_t*)js_262_agent_callbacks, JS_262_AGENT_MAX);
+    heap_register_gc_root_range((uint64_t*)js_262_agent_reports, JS_262_AGENT_REPORT_MAX);
+    js_262_agent_roots_registered = true;
+}
+
+static void js_262_agent_reset_state() {
+    js_262_agent_object = (Item){.item = ITEM_NULL};
+    for (int i = 0; i < JS_262_AGENT_MAX; i++) js_262_agent_callbacks[i] = ItemNull;
+    for (int i = 0; i < JS_262_AGENT_REPORT_MAX; i++) js_262_agent_reports[i] = ItemNull;
+    js_262_agent_callback_count = 0;
+    js_262_agent_report_head = 0;
+    js_262_agent_report_count = 0;
+    js_262_agent_current_slot = -1;
+}
+
+void js_reset_262_object() {
+    js_262_object = (Item){.item = ITEM_NULL};
+    js_262_agent_reset_state();
+}
 
 extern "C" Item js_builtin_eval(Item code_item, int64_t is_global_scope);
 
@@ -18040,6 +18141,98 @@ static Item js_262_eval_script(Item code) {
     return result;
 }
 
+static Item js_262_agent_start(Item code) {
+    js_262_agent_register_roots();
+    if (js_262_agent_callback_count >= JS_262_AGENT_MAX) {
+        return js_throw_type_error("$262.agent.start capacity exceeded");
+    }
+    int slot = js_262_agent_callback_count++;
+    js_262_agent_callbacks[slot] = ItemNull;
+    int saved_slot = js_262_agent_current_slot;
+    js_262_agent_current_slot = slot;
+    Item result = js_builtin_eval(code, 1);
+    js_262_agent_current_slot = saved_slot;
+    if (js_exception_pending) return ItemNull;
+    return get_type_id(result) == LMD_TYPE_UNDEFINED ? result : make_js_undefined();
+}
+
+static Item js_262_agent_receive_broadcast(Item callback) {
+    js_262_agent_register_roots();
+    if (js_262_agent_current_slot < 0 || js_262_agent_current_slot >= JS_262_AGENT_MAX) {
+        return make_js_undefined();
+    }
+    if (get_type_id(callback) != LMD_TYPE_FUNC) {
+        return js_throw_type_error("$262.agent.receiveBroadcast requires a function");
+    }
+    js_262_agent_callbacks[js_262_agent_current_slot] = callback;
+    return make_js_undefined();
+}
+
+static Item js_262_agent_broadcast(Item value) {
+    js_262_agent_register_roots();
+    for (int i = 0; i < js_262_agent_callback_count; i++) {
+        Item callback = js_262_agent_callbacks[i];
+        if (get_type_id(callback) != LMD_TYPE_FUNC) continue;
+        Item args[1] = { value };
+        js_call_function(callback, js_262_agent_object, args, 1);
+        if (js_exception_pending) return ItemNull;
+    }
+    return make_js_undefined();
+}
+
+static Item js_262_agent_report(Item value) {
+    js_262_agent_register_roots();
+    if (js_262_agent_report_count >= JS_262_AGENT_REPORT_MAX) {
+        return js_throw_type_error("$262.agent.report capacity exceeded");
+    }
+    Item report = js_to_string(value);
+    if (js_exception_pending) return ItemNull;
+    int tail = (js_262_agent_report_head + js_262_agent_report_count) % JS_262_AGENT_REPORT_MAX;
+    js_262_agent_reports[tail] = report;
+    js_262_agent_report_count++;
+    return make_js_undefined();
+}
+
+static Item js_262_agent_get_report() {
+    js_262_agent_register_roots();
+    if (js_262_agent_report_count <= 0) return ItemNull;
+    Item report = js_262_agent_reports[js_262_agent_report_head];
+    js_262_agent_reports[js_262_agent_report_head] = ItemNull;
+    js_262_agent_report_head = (js_262_agent_report_head + 1) % JS_262_AGENT_REPORT_MAX;
+    js_262_agent_report_count--;
+    return report;
+}
+
+static Item js_262_agent_noop() {
+    return make_js_undefined();
+}
+
+static Item js_262_agent_sleep(Item ms) {
+    (void)ms;
+    return make_js_undefined();
+}
+
+static Item js_262_get_agent_object() {
+    js_262_agent_register_roots();
+    if (js_262_agent_object.item != ITEM_NULL) return js_262_agent_object;
+    js_262_agent_object = js_new_object();
+    js_property_set(js_262_agent_object, (Item){.item = s2it(heap_create_name("start", 5))},
+        js_new_function((void*)js_262_agent_start, 1));
+    js_property_set(js_262_agent_object, (Item){.item = s2it(heap_create_name("receiveBroadcast", 16))},
+        js_new_function((void*)js_262_agent_receive_broadcast, 1));
+    js_property_set(js_262_agent_object, (Item){.item = s2it(heap_create_name("broadcast", 9))},
+        js_new_function((void*)js_262_agent_broadcast, 1));
+    js_property_set(js_262_agent_object, (Item){.item = s2it(heap_create_name("report", 6))},
+        js_new_function((void*)js_262_agent_report, 1));
+    js_property_set(js_262_agent_object, (Item){.item = s2it(heap_create_name("getReport", 9))},
+        js_new_function((void*)js_262_agent_get_report, 0));
+    js_property_set(js_262_agent_object, (Item){.item = s2it(heap_create_name("leaving", 7))},
+        js_new_function((void*)js_262_agent_noop, 0));
+    js_property_set(js_262_agent_object, (Item){.item = s2it(heap_create_name("sleep", 5))},
+        js_new_function((void*)js_262_agent_sleep, 1));
+    return js_262_agent_object;
+}
+
 extern "C" Item js_get_262_object_value() {
     if (js_262_object.item == ITEM_NULL) {
         js_262_object = js_object_create(ItemNull);
@@ -18053,6 +18246,7 @@ extern "C" Item js_get_262_object_value() {
         Item eval_script_key = (Item){.item = s2it(heap_create_name("evalScript", 10))};
         Item eval_script_fn = js_new_function((void*)js_262_eval_script, 1);
         js_property_set(js_262_object, eval_script_key, eval_script_fn);
+        js_property_set(js_262_object, (Item){.item = s2it(heap_create_name("agent", 5))}, js_262_get_agent_object());
     }
     return js_262_object;
 }
@@ -18095,6 +18289,8 @@ extern "C" Item js_get_atomics_object_value() {
         heap_register_gc_root(&js_atomics_object.item);
         Item tag_k = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
         js_property_set(js_atomics_object, tag_k, (Item){.item = s2it(heap_create_name("Atomics", 7))});
+        js_mark_non_writable(js_atomics_object, tag_k);
+        js_mark_non_enumerable(js_atomics_object, tag_k);
 
         js_install_builtin_method_specs(js_atomics_object, JS_ATOMICS_METHOD_SPECS);
     }

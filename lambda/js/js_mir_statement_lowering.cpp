@@ -1405,8 +1405,13 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     // new SharedArrayBuffer(byteLength)
     if (is_sharedarraybuffer) {
         MIR_reg_t len_arg = first_arg ? first_arg : jm_emit_undefined(mt);
-        return jm_call_1(mt, "js_sharedarraybuffer_construct", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, len_arg));
+        MIR_reg_t options_arg = 0;
+        JsAstNode* arg2 = call->arguments ? call->arguments->next : NULL;
+        if (arg2) options_arg = jm_transpile_box_item(mt, arg2);
+        else options_arg = jm_emit_undefined(mt);
+        return jm_call_2(mt, "js_sharedarraybuffer_construct_with_options", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, len_arg),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, options_arg));
     }
 
     // new DataView(buffer [, byteOffset [, byteLength]])
