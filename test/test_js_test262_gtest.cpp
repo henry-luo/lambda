@@ -900,6 +900,17 @@ static std::string get_source_path(const std::string& test_path) {
     return test_path;
 }
 
+static bool test262_has_metadata_flag(const Test262Prepared& p, const char* flag) {
+    std::string source = read_file_contents(p.test_path);
+    return source.find(flag) != std::string::npos;
+}
+
+static void append_host_flags(std::string& combined, const Test262Prepared& p) {
+    combined += "globalThis.__lambda_can_block = ";
+    combined += test262_has_metadata_flag(p, "CanBlockIsFalse") ? "false" : "true";
+    combined += ";\n";
+}
+
 // Assemble test source WITHOUT harness (for two-module split: harness sent separately)
 static std::string assemble_test_source(const Test262Prepared& p) {
     std::string source = read_file_contents(get_source_path(p.test_path));
@@ -916,6 +927,8 @@ static std::string assemble_test_source(const Test262Prepared& p) {
     if (p.is_async) {
         combined += "globalThis.$DONE = function(error) { if (error) throw error; };\n";
     }
+
+    append_host_flags(combined, p);
 
     for (auto& inc : p.includes) {
         // Skip includes already compiled into the preamble
@@ -941,12 +954,17 @@ static std::string assemble_native_test_source(const Test262Prepared& p) {
 
     if (p.is_strict) {
         std::string combined;
-        combined.reserve(source.size() + 20);
+        combined.reserve(source.size() + 80);
         combined += "\"use strict\";\n";
+        append_host_flags(combined, p);
         combined += source;
         return combined;
     }
-    return source;
+    std::string combined;
+    combined.reserve(source.size() + 60);
+    append_host_flags(combined, p);
+    combined += source;
+    return combined;
 }
 
 // Legacy: assemble combined source with harness included (for backward compatibility)

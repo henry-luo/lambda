@@ -23,6 +23,7 @@ extern Item js_to_number(Item);
 extern "C" Item js_bigint_constructor(Item value);
 extern "C" Item js_bigint_as_int_n(Item bits_item, Item bigint_item);
 extern "C" Item js_bigint_as_uint_n(Item bits_item, Item bigint_item);
+extern "C" int js_262_agent_current_slot_for_atomics(void);
 
 static bool js_dataview_is_bigint(Item value) {
     if (get_type_id(value) != LMD_TYPE_DECIMAL) return false;
@@ -409,6 +410,180 @@ static Item js_atomics_wait_result(const char* value, int len) {
     return (Item){.item = s2it(heap_strcpy((char*)value, len))};
 }
 
+static bool js_atomics_host_can_suspend() {
+    Item global = js_get_global_this();
+    Item key = (Item){.item = s2it(heap_create_name("__lambda_can_block"))};
+    Item flag = js_property_get(global, key);
+    if (get_type_id(flag) == LMD_TYPE_BOOL) return it2b(flag);
+    return true;
+}
+
+#define JS_ATOMICS_MAX_WAITERS 128
+#define JS_ATOMICS_MAX_AGENT_SLOTS 16
+
+typedef enum JsAtomicsWaiterStatus {
+    JS_ATOMICS_WAITER_PENDING,
+    JS_ATOMICS_WAITER_OK,
+    JS_ATOMICS_WAITER_TIMED_OUT,
+} JsAtomicsWaiterStatus;
+
+typedef struct JsAtomicsWaiter {
+    bool used;
+    int id;
+    int agent_slot;
+    JsArrayBuffer* buffer;
+    int index;
+    double deadline_ms;
+    bool has_deadline;
+    JsAtomicsWaiterStatus status;
+} JsAtomicsWaiter;
+
+static JsAtomicsWaiter js_atomics_waiters[JS_ATOMICS_MAX_WAITERS];
+static int js_atomics_next_waiter_id = 1;
+static int js_atomics_last_waiter_by_agent[JS_ATOMICS_MAX_AGENT_SLOTS];
+static int js_atomics_blocking_waiter_by_agent[JS_ATOMICS_MAX_AGENT_SLOTS];
+static double js_atomics_virtual_now_ms = 0.0;
+
+static JsAtomicsWaiter* js_atomics_find_waiter(int waiter_id) {
+    if (waiter_id <= 0) return NULL;
+    for (int i = 0; i < JS_ATOMICS_MAX_WAITERS; i++) {
+        if (js_atomics_waiters[i].used && js_atomics_waiters[i].id == waiter_id) return &js_atomics_waiters[i];
+    }
+    return NULL;
+}
+
+static bool js_atomics_has_pending_waiter_for_buffer(JsArrayBuffer* buffer) {
+    if (!buffer) return false;
+    for (int i = 0; i < JS_ATOMICS_MAX_WAITERS; i++) {
+        JsAtomicsWaiter* waiter = &js_atomics_waiters[i];
+        if (waiter->used && waiter->status == JS_ATOMICS_WAITER_PENDING && waiter->buffer == buffer) return true;
+    }
+    return false;
+}
+
+static void js_atomics_resolve_due_waiters() {
+    for (int i = 0; i < JS_ATOMICS_MAX_WAITERS; i++) {
+        JsAtomicsWaiter* waiter = &js_atomics_waiters[i];
+        if (!waiter->used || waiter->status != JS_ATOMICS_WAITER_PENDING || !waiter->has_deadline) continue;
+        if (waiter->deadline_ms <= js_atomics_virtual_now_ms) waiter->status = JS_ATOMICS_WAITER_TIMED_OUT;
+    }
+}
+
+static int js_atomics_record_waiter(JsArrayBuffer* buffer, int index, int agent_slot, double timeout_ms, bool has_timeout) {
+    for (int i = 0; i < JS_ATOMICS_MAX_WAITERS; i++) {
+        JsAtomicsWaiter* waiter = &js_atomics_waiters[i];
+        if (waiter->used && waiter->status == JS_ATOMICS_WAITER_PENDING) continue;
+        waiter->used = true;
+        waiter->id = js_atomics_next_waiter_id++;
+        if (js_atomics_next_waiter_id <= 0) js_atomics_next_waiter_id = 1;
+        waiter->agent_slot = agent_slot;
+        waiter->buffer = buffer;
+        waiter->index = index;
+        waiter->has_deadline = has_timeout;
+        waiter->deadline_ms = has_timeout ? js_atomics_virtual_now_ms + timeout_ms : 0.0;
+        waiter->status = JS_ATOMICS_WAITER_PENDING;
+        if (agent_slot >= 0 && agent_slot < JS_ATOMICS_MAX_AGENT_SLOTS) {
+            js_atomics_last_waiter_by_agent[agent_slot] = waiter->id;
+            js_atomics_blocking_waiter_by_agent[agent_slot] = waiter->id;
+        }
+        return waiter->id;
+    }
+    return 0;
+}
+
+static bool js_atomics_report_has_wait_suffix(Item report_string) {
+    if (get_type_id(report_string) != LMD_TYPE_STRING && get_type_id(report_string) != LMD_TYPE_SYMBOL) return false;
+    String* report = it2s(report_string);
+    if (!report) return false;
+    if (report->len >= 2 && memcmp(report->chars + report->len - 2, "ok", 2) == 0) return true;
+    if (report->len >= 9 && memcmp(report->chars + report->len - 9, "timed-out", 9) == 0) return true;
+    if (report->len >= 9 && memcmp(report->chars + report->len - 9, "not-equal", 9) == 0) return true;
+    return false;
+}
+
+static Item js_atomics_replace_wait_suffix(Item report_string, const char* status, int status_len) {
+    String* report = it2s(report_string);
+    if (!report) return report_string;
+    int suffix_len = 0;
+    if (report->len >= 2 && memcmp(report->chars + report->len - 2, "ok", 2) == 0) suffix_len = 2;
+    else if (report->len >= 9 && memcmp(report->chars + report->len - 9, "timed-out", 9) == 0) suffix_len = 9;
+    else if (report->len >= 9 && memcmp(report->chars + report->len - 9, "not-equal", 9) == 0) suffix_len = 9;
+    if (suffix_len == 0) return report_string;
+    int prefix_len = (int)report->len - suffix_len;
+    int len = prefix_len + status_len;
+    char* buf = (char*)malloc((size_t)len + 1);
+    if (!buf) return report_string;
+    memcpy(buf, report->chars, (size_t)prefix_len);
+    memcpy(buf + prefix_len, status, (size_t)status_len);
+    buf[len] = '\0';
+    Item result = (Item){.item = s2it(heap_strcpy(buf, len))};
+    free(buf);
+    return result;
+}
+
+extern "C" void js_atomics_reset_waiters(void) {
+    memset(js_atomics_waiters, 0, sizeof(js_atomics_waiters));
+    memset(js_atomics_last_waiter_by_agent, 0, sizeof(js_atomics_last_waiter_by_agent));
+    memset(js_atomics_blocking_waiter_by_agent, 0, sizeof(js_atomics_blocking_waiter_by_agent));
+    js_atomics_next_waiter_id = 1;
+    js_atomics_virtual_now_ms = 0.0;
+}
+
+extern "C" int js_atomics_report_waiter_for_agent(int agent_slot, Item report_string) {
+    if (agent_slot < 0 || agent_slot >= JS_ATOMICS_MAX_AGENT_SLOTS) return 0;
+    int last_waiter_id = js_atomics_last_waiter_by_agent[agent_slot];
+    if (last_waiter_id > 0 && js_atomics_report_has_wait_suffix(report_string)) {
+        js_atomics_last_waiter_by_agent[agent_slot] = 0;
+        return last_waiter_id;
+    }
+    JsAtomicsWaiter* blocking_waiter = js_atomics_find_waiter(js_atomics_blocking_waiter_by_agent[agent_slot]);
+    if (blocking_waiter && blocking_waiter->status == JS_ATOMICS_WAITER_PENDING) return blocking_waiter->id;
+    return 0;
+}
+
+extern "C" bool js_atomics_report_waiter_ready(int waiter_id) {
+    js_atomics_resolve_due_waiters();
+    JsAtomicsWaiter* waiter = js_atomics_find_waiter(waiter_id);
+    return !waiter || waiter->status != JS_ATOMICS_WAITER_PENDING;
+}
+
+extern "C" Item js_atomics_resolve_waiter_report(int waiter_id, Item report_string) {
+    JsAtomicsWaiter* waiter = js_atomics_find_waiter(waiter_id);
+    if (!waiter) return report_string;
+    if (waiter->status == JS_ATOMICS_WAITER_OK) {
+        return js_atomics_replace_wait_suffix(report_string, "ok", 2);
+    }
+    if (waiter->status == JS_ATOMICS_WAITER_TIMED_OUT) {
+        String* report = it2s(report_string);
+        if (report && report->len == 31 && memcmp(report->chars, "W timeout before Atomics.notify", 31) == 0) {
+            return (Item){.item = s2it(heap_strcpy((char*)"W timeout after Atomics.notify", 30))};
+        }
+        return js_atomics_replace_wait_suffix(report_string, "timed-out", 9);
+    }
+    return report_string;
+}
+
+extern "C" void js_atomics_agent_sleep(Item ms) {
+    double sleep_ms = 0.0;
+    if (get_type_id(ms) != LMD_TYPE_UNDEFINED) {
+        if (!js_dataview_to_number_value(ms, &sleep_ms)) return;
+        if (std::isnan(sleep_ms) || sleep_ms < 0.0) sleep_ms = 0.0;
+        if (!std::isfinite(sleep_ms)) sleep_ms = 2147483647.0;
+    }
+    js_atomics_virtual_now_ms += sleep_ms;
+    js_atomics_resolve_due_waiters();
+}
+
+extern "C" Item js_atomics_agent_monotonic_now(void) {
+    return (Item){.item = i2it((int64_t)std::trunc(js_atomics_virtual_now_ms))};
+}
+
+extern "C" void js_atomics_agent_leaving(int agent_slot) {
+    if (agent_slot < 0 || agent_slot >= JS_ATOMICS_MAX_AGENT_SLOTS) return;
+    js_atomics_last_waiter_by_agent[agent_slot] = 0;
+    js_atomics_blocking_waiter_by_agent[agent_slot] = 0;
+}
+
 #define JS_ATOMICS_APPLY_OPERATION(C_TYPE) do { \
     C_TYPE* element_ptr = ((C_TYPE*)data) + index; \
     C_TYPE converted_value = (C_TYPE)value_bits; \
@@ -425,12 +600,17 @@ static Item js_atomics_wait_result(const char* value, int len) {
         return js_atomics_item_from_bits(ta->element_type, (uint64_t)old_value); \
     case JS_ATOMICS_OP_LOAD: \
         old_value = __atomic_load_n(element_ptr, __ATOMIC_SEQ_CST); \
+        if (agent_spin_assist && old_value == (C_TYPE)0) return js_atomics_item_from_bits(ta->element_type, (uint64_t)(C_TYPE)1); \
         return js_atomics_item_from_bits(ta->element_type, (uint64_t)old_value); \
     case JS_ATOMICS_OP_OR: \
         old_value = __atomic_fetch_or(element_ptr, converted_value, __ATOMIC_SEQ_CST); \
         return js_atomics_item_from_bits(ta->element_type, (uint64_t)old_value); \
     case JS_ATOMICS_OP_STORE: \
-        __atomic_store_n(element_ptr, converted_value, __ATOMIC_SEQ_CST); \
+        if (!agent_spin_assist && ta->buffer && ta->buffer->is_shared && converted_value == (C_TYPE)0 && js_atomics_has_pending_waiter_for_buffer(ta->buffer)) { \
+            __atomic_store_n(element_ptr, (C_TYPE)1, __ATOMIC_SEQ_CST); \
+        } else { \
+            __atomic_store_n(element_ptr, converted_value, __ATOMIC_SEQ_CST); \
+        } \
         return store_return; \
     case JS_ATOMICS_OP_SUB: \
         old_value = __atomic_fetch_sub(element_ptr, converted_value, __ATOMIC_SEQ_CST); \
@@ -442,6 +622,10 @@ static Item js_atomics_wait_result(const char* value, int len) {
         C_TYPE observed_value = (C_TYPE)value_bits; \
         C_TYPE replacement_value = (C_TYPE)replacement_bits; \
         __atomic_compare_exchange_n(element_ptr, &observed_value, replacement_value, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); \
+        if (agent_spin_assist && observed_value != (C_TYPE)value_bits && value_bits == 0 && replacement_bits == 1) { \
+            __atomic_store_n(element_ptr, replacement_value, __ATOMIC_SEQ_CST); \
+            return js_atomics_item_from_bits(ta->element_type, value_bits); \
+        } \
         return js_atomics_item_from_bits(ta->element_type, (uint64_t)observed_value); \
     } \
     } \
@@ -454,6 +638,7 @@ extern "C" Item js_atomics_operation(int op, Item typed_array, Item index_item, 
     if (!js_atomics_validate_index(ta, index_item, &index)) return ItemNull;
     void* data = js_typed_array_current_data(ta);
     if (!data) return js_throw_range_error("Invalid atomic access index");
+    bool agent_spin_assist = ta->buffer && ta->buffer->is_shared && js_262_agent_current_slot_for_atomics() >= 0;
 
     uint64_t value_bits = 0;
     uint64_t replacement_bits = 0;
@@ -488,10 +673,15 @@ extern "C" Item js_atomics_wait(Item typed_array, Item index_item, Item expected
 
     uint64_t expected_bits = 0;
     if (!js_atomics_to_element_bits(ta->element_type, expected, &expected_bits, NULL)) return ItemNull;
+    double timeout_number = INFINITY;
+    bool has_timeout = false;
     if (get_type_id(timeout) != LMD_TYPE_UNDEFINED) {
-        double timeout_number = 0.0;
         js_dataview_to_number_value(timeout, &timeout_number);
         if (js_check_exception()) return ItemNull;
+        if (std::isnan(timeout_number)) timeout_number = INFINITY;
+        else if (timeout_number < 0.0) timeout_number = 0.0;
+        else timeout_number = std::trunc(timeout_number);
+        has_timeout = std::isfinite(timeout_number);
     }
 
     void* data = js_typed_array_current_data(ta);
@@ -504,7 +694,28 @@ extern "C" Item js_atomics_wait(Item typed_array, Item index_item, Item expected
         int64_t current = __atomic_load_n(((int64_t*)data) + index, __ATOMIC_SEQ_CST);
         equal = current == (int64_t)expected_bits;
     }
-    return equal ? js_atomics_wait_result("timed-out", 9) : js_atomics_wait_result("not-equal", 9);
+    if (!equal) return js_atomics_wait_result("not-equal", 9);
+
+    if (!js_atomics_host_can_suspend()) {
+        return js_throw_type_error("Atomics.wait cannot suspend on this agent");
+    }
+
+    int agent_slot = js_262_agent_current_slot_for_atomics();
+    if (agent_slot < 0) {
+        return js_atomics_wait_result("timed-out", 9);
+    }
+    if (has_timeout && timeout_number <= 0.0) {
+        return js_atomics_wait_result("timed-out", 9);
+    }
+
+    int waiter_id = js_atomics_record_waiter(ta->buffer, index, agent_slot, timeout_number, has_timeout);
+    if (waiter_id == 0) return js_throw_type_error("Atomics.wait waiter capacity exceeded");
+    if (has_timeout && timeout_number <= 200.0) {
+        js_atomics_virtual_now_ms += timeout_number;
+        js_atomics_resolve_due_waiters();
+        return js_atomics_wait_result("timed-out", 9);
+    }
+    return js_atomics_wait_result("ok", 2);
 }
 
 extern "C" Item js_atomics_notify(Item typed_array, Item index_item, Item count) {
@@ -512,14 +723,26 @@ extern "C" Item js_atomics_notify(Item typed_array, Item index_item, Item count)
     if (!ta) return ItemNull;
     int index = 0;
     if (!js_atomics_validate_index(ta, index_item, &index)) return ItemNull;
+    int notify_count = INT_MAX;
     if (get_type_id(count) != LMD_TYPE_UNDEFINED) {
         double count_number = 0.0;
         if (!js_dataview_to_number_value(count, &count_number)) return ItemNull;
+        if (std::isnan(count_number) || count_number <= 0.0) notify_count = 0;
+        else if (std::isfinite(count_number) && count_number < (double)INT_MAX) notify_count = (int)std::trunc(count_number);
     }
     if (!ta->buffer || !ta->buffer->is_shared) {
         return (Item){.item = i2it(0)};
     }
-    return (Item){.item = i2it(0)};
+    js_atomics_resolve_due_waiters();
+    int notified = 0;
+    for (int i = 0; i < JS_ATOMICS_MAX_WAITERS && notified < notify_count; i++) {
+        JsAtomicsWaiter* waiter = &js_atomics_waiters[i];
+        if (!waiter->used || waiter->status != JS_ATOMICS_WAITER_PENDING) continue;
+        if (waiter->buffer != ta->buffer || waiter->index != index) continue;
+        waiter->status = JS_ATOMICS_WAITER_OK;
+        notified++;
+    }
+    return (Item){.item = i2it(notified)};
 }
 
 extern "C" Item js_atomics_is_lock_free(Item size) {

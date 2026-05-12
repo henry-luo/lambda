@@ -118,6 +118,13 @@ Item js_atomics_operation(int op, Item typed_array, Item index, Item value, Item
 Item js_atomics_wait(Item typed_array, Item index, Item expected, Item timeout);
 Item js_atomics_notify(Item typed_array, Item index, Item count);
 Item js_atomics_is_lock_free(Item size);
+void js_atomics_reset_waiters(void);
+int  js_atomics_report_waiter_for_agent(int agent_slot, Item report_string);
+bool js_atomics_report_waiter_ready(int waiter_id);
+Item js_atomics_resolve_waiter_report(int waiter_id, Item report_string);
+void js_atomics_agent_sleep(Item ms);
+Item js_atomics_agent_monotonic_now(void);
+void js_atomics_agent_leaving(int agent_slot);
 
 // DataView operations
 Item js_dataview_new(Item buffer, Item offset_item, Item length_item);

@@ -18097,6 +18097,7 @@ static int64_t js_262_eval_script_active = 0;
 static Item js_262_agent_object = {.item = ITEM_NULL};
 static Item js_262_agent_callbacks[JS_262_AGENT_MAX];
 static Item js_262_agent_reports[JS_262_AGENT_REPORT_MAX];
+static int js_262_agent_report_waiters[JS_262_AGENT_REPORT_MAX];
 static int js_262_agent_callback_count = 0;
 static int js_262_agent_report_head = 0;
 static int js_262_agent_report_count = 0;
@@ -18115,11 +18116,15 @@ static void js_262_agent_register_roots() {
 static void js_262_agent_reset_state() {
     js_262_agent_object = (Item){.item = ITEM_NULL};
     for (int i = 0; i < JS_262_AGENT_MAX; i++) js_262_agent_callbacks[i] = ItemNull;
-    for (int i = 0; i < JS_262_AGENT_REPORT_MAX; i++) js_262_agent_reports[i] = ItemNull;
+    for (int i = 0; i < JS_262_AGENT_REPORT_MAX; i++) {
+        js_262_agent_reports[i] = ItemNull;
+        js_262_agent_report_waiters[i] = 0;
+    }
     js_262_agent_callback_count = 0;
     js_262_agent_report_head = 0;
     js_262_agent_report_count = 0;
     js_262_agent_current_slot = -1;
+    js_atomics_reset_waiters();
 }
 
 void js_reset_262_object() {
@@ -18131,6 +18136,10 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t is_global_scope);
 
 extern "C" int64_t js_262_eval_script_is_active() {
     return js_262_eval_script_active;
+}
+
+extern "C" int js_262_agent_current_slot_for_atomics() {
+    return js_262_agent_current_slot;
 }
 
 static Item js_262_eval_script(Item code) {
@@ -18174,7 +18183,10 @@ static Item js_262_agent_broadcast(Item value) {
         Item callback = js_262_agent_callbacks[i];
         if (get_type_id(callback) != LMD_TYPE_FUNC) continue;
         Item args[1] = { value };
+        int saved_slot = js_262_agent_current_slot;
+        js_262_agent_current_slot = i;
         js_call_function(callback, js_262_agent_object, args, 1);
+        js_262_agent_current_slot = saved_slot;
         if (js_exception_pending) return ItemNull;
     }
     return make_js_undefined();
@@ -18189,6 +18201,7 @@ static Item js_262_agent_report(Item value) {
     if (js_exception_pending) return ItemNull;
     int tail = (js_262_agent_report_head + js_262_agent_report_count) % JS_262_AGENT_REPORT_MAX;
     js_262_agent_reports[tail] = report;
+    js_262_agent_report_waiters[tail] = js_atomics_report_waiter_for_agent(js_262_agent_current_slot, report);
     js_262_agent_report_count++;
     return make_js_undefined();
 }
@@ -18196,9 +18209,31 @@ static Item js_262_agent_report(Item value) {
 static Item js_262_agent_get_report() {
     js_262_agent_register_roots();
     if (js_262_agent_report_count <= 0) return ItemNull;
-    Item report = js_262_agent_reports[js_262_agent_report_head];
-    js_262_agent_reports[js_262_agent_report_head] = ItemNull;
-    js_262_agent_report_head = (js_262_agent_report_head + 1) % JS_262_AGENT_REPORT_MAX;
+    int ready_offset = -1;
+    for (int offset = 0; offset < js_262_agent_report_count; offset++) {
+        int idx = (js_262_agent_report_head + offset) % JS_262_AGENT_REPORT_MAX;
+        int waiter_id = js_262_agent_report_waiters[idx];
+        if (waiter_id <= 0 || js_atomics_report_waiter_ready(waiter_id)) {
+            ready_offset = offset;
+            break;
+        }
+    }
+    if (ready_offset < 0) return ItemNull;
+
+    int ready_idx = (js_262_agent_report_head + ready_offset) % JS_262_AGENT_REPORT_MAX;
+    int waiter_id = js_262_agent_report_waiters[ready_idx];
+    Item report = js_262_agent_reports[ready_idx];
+    if (waiter_id > 0) report = js_atomics_resolve_waiter_report(waiter_id, report);
+
+    for (int offset = ready_offset; offset < js_262_agent_report_count - 1; offset++) {
+        int dst = (js_262_agent_report_head + offset) % JS_262_AGENT_REPORT_MAX;
+        int src = (js_262_agent_report_head + offset + 1) % JS_262_AGENT_REPORT_MAX;
+        js_262_agent_reports[dst] = js_262_agent_reports[src];
+        js_262_agent_report_waiters[dst] = js_262_agent_report_waiters[src];
+    }
+    int tail = (js_262_agent_report_head + js_262_agent_report_count - 1) % JS_262_AGENT_REPORT_MAX;
+    js_262_agent_reports[tail] = ItemNull;
+    js_262_agent_report_waiters[tail] = 0;
     js_262_agent_report_count--;
     return report;
 }
@@ -18207,9 +18242,18 @@ static Item js_262_agent_noop() {
     return make_js_undefined();
 }
 
-static Item js_262_agent_sleep(Item ms) {
-    (void)ms;
+static Item js_262_agent_leaving() {
+    js_atomics_agent_leaving(js_262_agent_current_slot);
     return make_js_undefined();
+}
+
+static Item js_262_agent_sleep(Item ms) {
+    js_atomics_agent_sleep(ms);
+    return make_js_undefined();
+}
+
+static Item js_262_agent_monotonic_now() {
+    return js_atomics_agent_monotonic_now();
 }
 
 static Item js_262_get_agent_object() {
@@ -18227,9 +18271,11 @@ static Item js_262_get_agent_object() {
     js_property_set(js_262_agent_object, (Item){.item = s2it(heap_create_name("getReport", 9))},
         js_new_function((void*)js_262_agent_get_report, 0));
     js_property_set(js_262_agent_object, (Item){.item = s2it(heap_create_name("leaving", 7))},
-        js_new_function((void*)js_262_agent_noop, 0));
+        js_new_function((void*)js_262_agent_leaving, 0));
     js_property_set(js_262_agent_object, (Item){.item = s2it(heap_create_name("sleep", 5))},
         js_new_function((void*)js_262_agent_sleep, 1));
+    js_property_set(js_262_agent_object, (Item){.item = s2it(heap_create_name("monotonicNow", 12))},
+        js_new_function((void*)js_262_agent_monotonic_now, 0));
     return js_262_agent_object;
 }
 
