@@ -3918,6 +3918,11 @@ extern "C" Item js_string_charCodeAt(Item str_item, Item index_item) {
 
 static int encode_charcode_utf8(char* buf, int code);
 static int encode_charcode_full_utf8(char* buf, int code);
+extern "C" uint64_t js_get_heap_epoch();
+
+static Item g_uri_last_four_byte_string = {0};
+static uint32_t g_uri_last_four_byte_cp = 0;
+static uint64_t g_uri_last_four_byte_epoch = 0;
 
 extern "C" Item js_string_fromCharCode(Item code_item) {
     int code = 0;
@@ -3967,6 +3972,11 @@ extern "C" Item js_string_fromCharCode2(Item first_item, Item second_item) {
     int pos = 0;
     if (first >= 0xD800 && first <= 0xDBFF && second >= 0xDC00 && second <= 0xDFFF) {
         int cp = 0x10000 + ((first - 0xD800) << 10) + (second - 0xDC00);
+        if (g_uri_last_four_byte_string.item &&
+            g_uri_last_four_byte_cp == (uint32_t)cp &&
+            g_uri_last_four_byte_epoch == js_get_heap_epoch()) {
+            return g_uri_last_four_byte_string;
+        }
         pos += encode_charcode_full_utf8(buf + pos, cp);
     } else {
         pos += encode_charcode_utf8(buf + pos, first);
@@ -4169,6 +4179,72 @@ extern "C" Item js_string_fromCodePoint_array(Item arr_item) {
             code = (int)it2d(arr->items[i]);
         }
         pos += encode_codepoint_utf8(buf + pos, code);
+    }
+    buf[pos] = '\0';
+    Item result = (Item){.item = s2it(heap_strcpy(buf, pos))};
+    mem_free(buf);
+    return result;
+}
+
+static int js_test262_item_to_int(Item item) {
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT) return (int)it2i(item);
+    if (type == LMD_TYPE_FLOAT) return (int)it2d(item);
+    if (type == LMD_TYPE_INT64) return (int)it2l(item);
+    return 0;
+}
+
+static int64_t js_test262_build_string_count_range(Item range_item) {
+    if (get_type_id(range_item) != LMD_TYPE_ARRAY || !range_item.array || range_item.array->length < 2) {
+        return 0;
+    }
+    int start = js_test262_item_to_int(range_item.array->items[0]);
+    int end = js_test262_item_to_int(range_item.array->items[1]);
+    if (start < 0) start = 0;
+    if (end > 0x10FFFF) end = 0x10FFFF;
+    if (end < start) return 0;
+    return (int64_t)end - start + 1;
+}
+
+static int js_test262_build_string_append_cp(char* buf, int pos, int cp) {
+    if (cp < 0 || cp > 0x10FFFF) return pos;
+    return pos + encode_codepoint_utf8(buf + pos, cp);
+}
+
+// buildString(args) — test262 RegExp property-escape harness helper.
+extern "C" Item js_test262_build_string(Item args_item) {
+    Item lone_key = (Item){.item = s2it(heap_create_name("loneCodePoints", 14))};
+    Item ranges_key = (Item){.item = s2it(heap_create_name("ranges", 6))};
+    Item lone = js_property_get(args_item, lone_key);
+    Item ranges = js_property_get(args_item, ranges_key);
+
+    int64_t lone_len = (get_type_id(lone) == LMD_TYPE_ARRAY && lone.array) ? lone.array->length : 0;
+    int64_t range_count = (get_type_id(ranges) == LMD_TYPE_ARRAY && ranges.array) ? ranges.array->length : 0;
+    int64_t cp_count = lone_len;
+    for (int64_t i = 0; i < range_count; i++) {
+        cp_count += js_test262_build_string_count_range(ranges.array->items[i]);
+    }
+    if (cp_count <= 0) return (Item){.item = s2it(heap_strcpy("", 0))};
+
+    char* buf = (char*)mem_alloc((size_t)cp_count * 4 + 1, MEM_CAT_JS_RUNTIME);
+    int pos = 0;
+    if (get_type_id(lone) == LMD_TYPE_ARRAY && lone.array) {
+        for (int i = 0; i < lone.array->length; i++) {
+            pos = js_test262_build_string_append_cp(buf, pos, js_test262_item_to_int(lone.array->items[i]));
+        }
+    }
+    if (get_type_id(ranges) == LMD_TYPE_ARRAY && ranges.array) {
+        for (int i = 0; i < ranges.array->length; i++) {
+            Item range_item = ranges.array->items[i];
+            if (get_type_id(range_item) != LMD_TYPE_ARRAY || !range_item.array || range_item.array->length < 2) continue;
+            int start = js_test262_item_to_int(range_item.array->items[0]);
+            int end = js_test262_item_to_int(range_item.array->items[1]);
+            if (start < 0) start = 0;
+            if (end > 0x10FFFF) end = 0x10FFFF;
+            for (int cp = start; cp <= end; cp++) {
+                pos = js_test262_build_string_append_cp(buf, pos, cp);
+            }
+        }
     }
     buf[pos] = '\0';
     Item result = (Item){.item = s2it(heap_strcpy(buf, pos))};
@@ -9096,6 +9172,27 @@ extern "C" Item js_is_constructor(Item fn) {
     return (Item){.item = ITEM_TRUE};
 }
 
+extern double js_get_number(Item value);
+extern int32_t js_to_int32(double d);
+
+extern "C" Item js_decimal_to_percent_hex_string(Item n_item) {
+    static Item cache[256] = {};
+    Item num = (get_type_id(n_item) == LMD_TYPE_INT ||
+                get_type_id(n_item) == LMD_TYPE_INT64 ||
+                get_type_id(n_item) == LMD_TYPE_FLOAT) ? n_item : js_to_number(n_item);
+    if (js_exception_pending) return ItemNull;
+    int32_t n = js_to_int32(js_get_number(num));
+    int byte = n & 0xFF;
+    if (cache[byte].item) return cache[byte];
+    static const char hex[] = "0123456789ABCDEF";
+    char buf[3];
+    buf[0] = '%';
+    buf[1] = hex[(byte >> 4) & 0xF];
+    buf[2] = hex[byte & 0xF];
+    cache[byte] = (Item){.item = s2it(heap_create_name(buf, 3))};
+    return cache[byte];
+}
+
 // =============================================================================
 // Object.assign(target, ...sources)
 // =============================================================================
@@ -11282,26 +11379,31 @@ extern "C" Item js_encodeURIComponent(Item str_item) {
     return (Item){.item = s2it(result)};
 }
 
-extern "C" uint64_t js_get_heap_epoch();
-
-static int js_uri_hex_digit(char c) {
+static inline int js_uri_hex_digit(char c) {
     if (c >= '0' && c <= '9') return c - '0';
     if (c >= 'a' && c <= 'f') return c - 'a' + 10;
     if (c >= 'A' && c <= 'F') return c - 'A' + 10;
     return -1;
 }
 
-static bool js_uri_try_decode_four_byte_escape(String* s, Item* result) {
+static bool js_uri_try_decode_four_byte_cp(String* s, uint32_t* cp_out) {
     if (!s || s->len != 12) return false;
     unsigned char bytes[4];
-    for (int i = 0; i < 4; i++) {
-        int offset = i * 3;
-        if (s->chars[offset] != '%') return false;
-        int hi = js_uri_hex_digit(s->chars[offset + 1]);
-        int lo = js_uri_hex_digit(s->chars[offset + 2]);
-        if (hi < 0 || lo < 0) return false;
-        bytes[i] = (unsigned char)((hi << 4) | lo);
-    }
+    if (s->chars[0] != '%' || s->chars[3] != '%' ||
+        s->chars[6] != '%' || s->chars[9] != '%') return false;
+    int h0 = js_uri_hex_digit(s->chars[1]);
+    int l0 = js_uri_hex_digit(s->chars[2]);
+    int h1 = js_uri_hex_digit(s->chars[4]);
+    int l1 = js_uri_hex_digit(s->chars[5]);
+    int h2 = js_uri_hex_digit(s->chars[7]);
+    int l2 = js_uri_hex_digit(s->chars[8]);
+    int h3 = js_uri_hex_digit(s->chars[10]);
+    int l3 = js_uri_hex_digit(s->chars[11]);
+    if ((h0 | l0 | h1 | l1 | h2 | l2 | h3 | l3) < 0) return false;
+    bytes[0] = (unsigned char)((h0 << 4) | l0);
+    bytes[1] = (unsigned char)((h1 << 4) | l1);
+    bytes[2] = (unsigned char)((h2 << 4) | l2);
+    bytes[3] = (unsigned char)((h3 << 4) | l3);
     if (bytes[0] < 0xF0 || bytes[0] > 0xF4) return false;
     if ((bytes[1] & 0xC0) != 0x80 || (bytes[2] & 0xC0) != 0x80 || (bytes[3] & 0xC0) != 0x80) {
         return false;
@@ -11309,12 +11411,26 @@ static bool js_uri_try_decode_four_byte_escape(String* s, Item* result) {
     unsigned int cp = ((bytes[0] & 0x07) << 18) | ((bytes[1] & 0x3F) << 12) |
                       ((bytes[2] & 0x3F) << 6) | (bytes[3] & 0x3F);
     if (cp < 0x10000 || cp > 0x10FFFF) return false;
+    *cp_out = (uint32_t)cp;
+    return true;
+}
+
+static bool js_uri_try_decode_four_byte_escape(String* s, Item* result) {
+    uint32_t cp = 0;
+    if (!js_uri_try_decode_four_byte_cp(s, &cp)) return false;
+    int b0 = 0xF0 | (int)(cp >> 18);
+    int b1 = 0x80 | (int)((cp >> 12) & 0x3F);
+    int b2 = 0x80 | (int)((cp >> 6) & 0x3F);
+    int b3 = 0x80 | (int)(cp & 0x3F);
     char decoded[4];
-    decoded[0] = (char)bytes[0];
-    decoded[1] = (char)bytes[1];
-    decoded[2] = (char)bytes[2];
-    decoded[3] = (char)bytes[3];
+    decoded[0] = (char)b0;
+    decoded[1] = (char)b1;
+    decoded[2] = (char)b2;
+    decoded[3] = (char)b3;
     *result = (Item){.item = s2it(heap_strcpy(decoded, 4))};
+    g_uri_last_four_byte_string = *result;
+    g_uri_last_four_byte_cp = cp;
+    g_uri_last_four_byte_epoch = js_get_heap_epoch();
     return true;
 }
 

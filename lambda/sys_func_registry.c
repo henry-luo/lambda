@@ -903,6 +903,8 @@ extern void js_assert_throws(Item expected_ctor, Item func, Item message);
 extern void js_assert_base(Item must_be_true, Item message);
 extern void js_donotevaluate(void);
 extern Item js_is_constructor(Item fn);
+extern Item js_decimal_to_percent_hex_string(Item n);
+extern Item js_test262_build_string(Item args);
 
 // always available: emitted unconditionally by JS class transpiler
 extern void js_private_field_init_begin(void);
@@ -1339,6 +1341,8 @@ JitImport jit_runtime_imports[] = {
     {"js_assert_base", FPTR(js_assert_base)},
     {"js_donotevaluate", FPTR(js_donotevaluate)},
     {"js_is_constructor", FPTR(js_is_constructor)},
+    {"js_decimal_to_percent_hex_string", FPTR(js_decimal_to_percent_hex_string)},
+    {"js_test262_build_string", FPTR(js_test262_build_string)},
     {"js_discard_value", FPTR(js_discard_value)},
     // always available: emitted unconditionally by JS class transpiler
     {"js_private_field_init_begin", FPTR(js_private_field_init_begin)},

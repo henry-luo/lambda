@@ -4993,6 +4993,20 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 return jm_call_1(mt, "js_is_constructor", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
             }
+            // decimalToPercentHexString(n) — test262 encoding harness helper
+            if (id->name->len == 25 && strncmp(id->name->chars, "decimalToPercentHexString", 25) == 0 && arg_count == 1) {
+                JsAstNode* a1 = call->arguments;
+                MIR_reg_t n_reg = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_undefined(mt);
+                return jm_call_1(mt, "js_decimal_to_percent_hex_string", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, n_reg));
+            }
+            // buildString(args) — test262 RegExp property-escape harness helper
+            if (id->name->len == 11 && strncmp(id->name->chars, "buildString", 11) == 0 && arg_count == 1) {
+                JsAstNode* a1 = call->arguments;
+                MIR_reg_t args_reg = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_undefined(mt);
+                return jm_call_1(mt, "js_test262_build_string", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, args_reg));
+            }
         }
     }
     // ClassName.staticMethod(args) → compile-time static method dispatch

@@ -9057,7 +9057,7 @@ struct JsRegexData {
     JsRegexCompiled* wrapper; // wrapper with post-filters (for patterns with lookaheads/backrefs)
     const char* literal_pattern; // simple literal pattern handled without RE2
     int literal_pattern_len;
-    int special_property_kind; // +/-: 1 Other, 2 Unassigned, 3 Unknown script, 4 Decimal_Number
+    int special_property_kind; // +/-: fast Unicode property-repeat kind
     bool global;              // 'g' flag
     bool ignore_case;         // 'i' flag
     bool multiline;           // 'm' flag
@@ -9079,6 +9079,10 @@ struct JsRegexCacheEntry {
 };
 
 static std::unordered_map<uint64_t, JsRegexCacheEntry> g_regex_compile_cache;
+static const char* g_regex_property_cache_chars = NULL;
+static int g_regex_property_cache_len = 0;
+static int g_regex_property_cache_mode = 0;
+static bool g_regex_property_cache_result = false;
 
 static inline uint64_t js_regex_cache_key(const char* pattern, const char* flags) {
     return (uint64_t)(uintptr_t)pattern ^ ((uint64_t)(uintptr_t)flags * 2654435761ULL);
@@ -9086,6 +9090,10 @@ static inline uint64_t js_regex_cache_key(const char* pattern, const char* flags
 
 void js_regex_cache_reset() {
     g_regex_compile_cache.clear();
+    g_regex_property_cache_chars = NULL;
+    g_regex_property_cache_len = 0;
+    g_regex_property_cache_mode = 0;
+    g_regex_property_cache_result = false;
 }
 
 static bool js_regex_unicode_is_other_category(utf8proc_category_t cat) {
@@ -9162,7 +9170,151 @@ static bool js_regex_match_property_name(const char* name, int len, const char* 
     return (int)strlen(target) == len && strncmp(name, target, len) == 0;
 }
 
+enum JsRegexSpecialPropertyKind {
+    JS_REGEX_PROP_OTHER = 1,
+    JS_REGEX_PROP_UNASSIGNED = 2,
+    JS_REGEX_PROP_UNKNOWN_SCRIPT = 3,
+    JS_REGEX_PROP_DECIMAL_NUMBER = 4,
+    JS_REGEX_PROP_OPEN_PUNCTUATION = 5,
+    JS_REGEX_PROP_LINE_SEPARATOR = 6,
+    JS_REGEX_PROP_MODIFIER_SYMBOL = 7,
+    JS_REGEX_PROP_LETTER_NUMBER = 8,
+    JS_REGEX_PROP_SPACE_SEPARATOR = 9,
+    JS_REGEX_PROP_SEPARATOR = 10,
+    JS_REGEX_PROP_FINAL_PUNCTUATION = 11,
+    JS_REGEX_PROP_ENCLOSING_MARK = 12,
+    JS_REGEX_PROP_PARAGRAPH_SEPARATOR = 13,
+    JS_REGEX_PROP_TITLECASE_LETTER = 14,
+    JS_REGEX_PROP_ASCII = 15,
+    JS_REGEX_PROP_ANY = 16,
+    JS_REGEX_PROP_ASCII_DIGIT = 17,
+    JS_REGEX_PROP_ASCII_WORD = 18,
+    JS_REGEX_PROP_JS_WHITESPACE = 19,
+    JS_REGEX_PROP_SCRIPT_BASE = 100,
+};
+
+#define JS_REGEX_PROP_SEARCH_MODE 10000
+
+struct JsRegexRange {
+    int first;
+    int last;
+};
+
+static bool js_regexp_is_han_cp(uint32_t cp);
+
+static bool js_regex_match_gc_alias(const char* name, int len, const char* long_name,
+                                    const char* short_name, const char* loose_name) {
+    char buf[96];
+    int n = snprintf(buf, sizeof(buf), "General_Category=%s", long_name);
+    if (n > 0 && n < (int)sizeof(buf) && js_regex_match_property_name(name, len, buf)) return true;
+    n = snprintf(buf, sizeof(buf), "gc=%s", long_name);
+    if (n > 0 && n < (int)sizeof(buf) && js_regex_match_property_name(name, len, buf)) return true;
+    n = snprintf(buf, sizeof(buf), "General_Category=%s", short_name);
+    if (n > 0 && n < (int)sizeof(buf) && js_regex_match_property_name(name, len, buf)) return true;
+    n = snprintf(buf, sizeof(buf), "gc=%s", short_name);
+    if (n > 0 && n < (int)sizeof(buf) && js_regex_match_property_name(name, len, buf)) return true;
+    if (js_regex_match_property_name(name, len, long_name)) return true;
+    if (js_regex_match_property_name(name, len, short_name)) return true;
+    return loose_name && js_regex_match_property_name(name, len, loose_name);
+}
+
+static bool js_regex_match_script_alias(const char* name, int len, const char* canonical,
+                                        const char* alias) {
+    char buf[96];
+    const char* values[2] = { canonical, alias };
+    for (int i = 0; i < 2; i++) {
+        const char* value = values[i];
+        if (!value) continue;
+        int n = snprintf(buf, sizeof(buf), "Script=%s", value);
+        if (n > 0 && n < (int)sizeof(buf) && js_regex_match_property_name(name, len, buf)) return true;
+        n = snprintf(buf, sizeof(buf), "sc=%s", value);
+        if (n > 0 && n < (int)sizeof(buf) && js_regex_match_property_name(name, len, buf)) return true;
+        n = snprintf(buf, sizeof(buf), "Script_Extensions=%s", value);
+        if (n > 0 && n < (int)sizeof(buf) && js_regex_match_property_name(name, len, buf)) return true;
+        n = snprintf(buf, sizeof(buf), "scx=%s", value);
+        if (n > 0 && n < (int)sizeof(buf) && js_regex_match_property_name(name, len, buf)) return true;
+        if (js_regex_match_property_name(name, len, value)) return true;
+    }
+    return false;
+}
+
+static bool js_regex_match_script_extension_alias(const char* name, int len, const char* canonical,
+                                                  const char* alias) {
+    char buf[96];
+    const char* values[2] = { canonical, alias };
+    for (int i = 0; i < 2; i++) {
+        const char* value = values[i];
+        if (!value) continue;
+        int n = snprintf(buf, sizeof(buf), "Script_Extensions=%s", value);
+        if (n > 0 && n < (int)sizeof(buf) && js_regex_match_property_name(name, len, buf)) return true;
+        n = snprintf(buf, sizeof(buf), "scx=%s", value);
+        if (n > 0 && n < (int)sizeof(buf) && js_regex_match_property_name(name, len, buf)) return true;
+    }
+    return false;
+}
+
+static int js_regex_property_kind_from_name(const char* name, int name_len) {
+    if (js_regex_match_property_name(name, name_len, "ASCII")) return JS_REGEX_PROP_ASCII;
+    if (js_regex_match_property_name(name, name_len, "Any")) return JS_REGEX_PROP_ANY;
+
+    if (js_regex_match_gc_alias(name, name_len, "Other", "C", NULL)) return JS_REGEX_PROP_OTHER;
+    if (js_regex_match_gc_alias(name, name_len, "Unassigned", "Cn", NULL)) return JS_REGEX_PROP_UNASSIGNED;
+    if (js_regex_match_gc_alias(name, name_len, "Decimal_Number", "Nd", "digit")) return JS_REGEX_PROP_DECIMAL_NUMBER;
+    if (js_regex_match_gc_alias(name, name_len, "Open_Punctuation", "Ps", NULL)) return JS_REGEX_PROP_OPEN_PUNCTUATION;
+    if (js_regex_match_gc_alias(name, name_len, "Line_Separator", "Zl", NULL)) return JS_REGEX_PROP_LINE_SEPARATOR;
+    if (js_regex_match_gc_alias(name, name_len, "Modifier_Symbol", "Sk", NULL)) return JS_REGEX_PROP_MODIFIER_SYMBOL;
+    if (js_regex_match_gc_alias(name, name_len, "Letter_Number", "Nl", NULL)) return JS_REGEX_PROP_LETTER_NUMBER;
+    if (js_regex_match_gc_alias(name, name_len, "Space_Separator", "Zs", NULL)) return JS_REGEX_PROP_SPACE_SEPARATOR;
+    if (js_regex_match_gc_alias(name, name_len, "Separator", "Z", NULL)) return JS_REGEX_PROP_SEPARATOR;
+    if (js_regex_match_gc_alias(name, name_len, "Final_Punctuation", "Pf", NULL)) return JS_REGEX_PROP_FINAL_PUNCTUATION;
+    if (js_regex_match_gc_alias(name, name_len, "Enclosing_Mark", "Me", NULL)) return JS_REGEX_PROP_ENCLOSING_MARK;
+    if (js_regex_match_gc_alias(name, name_len, "Paragraph_Separator", "Zp", NULL)) return JS_REGEX_PROP_PARAGRAPH_SEPARATOR;
+    if (js_regex_match_gc_alias(name, name_len, "Titlecase_Letter", "Lt", NULL)) return JS_REGEX_PROP_TITLECASE_LETTER;
+
+    if (js_regex_match_script_alias(name, name_len, "Unknown", "Zzzz")) return JS_REGEX_PROP_UNKNOWN_SCRIPT;
+    if (js_regex_match_script_extension_alias(name, name_len, "Greek", "Grek")) {
+        return JS_REGEX_PROP_SCRIPT_BASE + 22;
+    }
+    static const struct { const char* canonical; const char* alias; int id; } scripts[] = {
+        {"Bengali", "Beng", 1}, {"Bopomofo", "Bopo", 2}, {"Cham", NULL, 3},
+        {"Devanagari", "Deva", 4}, {"Ethiopic", "Ethi", 5}, {"Georgian", "Geor", 6},
+        {"Greek", "Grek", 7}, {"Gujarati", "Gujr", 8}, {"Gurmukhi", "Guru", 9},
+        {"Han", "Hani", 10}, {"Hiragana", "Hira", 11}, {"Inherited", "Zinh", 12},
+        {"Kannada", "Knda", 13}, {"Khmer", "Khmr", 14}, {"Sinhala", "Sinh", 15},
+        {"Tamil", "Taml", 16}, {"Telugu", "Telu", 17}, {"Thai", NULL, 18},
+        {"Tibetan", "Tibt", 19}, {"Toto", NULL, 20}, {"Ahom", NULL, 21},
+        {"Mongolian", "Mong", 23}, {"Malayalam", "Mlym", 24}, {"Lisu", NULL, 25},
+        {"Lao", "Laoo", 26}, {"Katakana", "Kana", 27}, {"Newa", NULL, 28},
+        {"Oriya", "Orya", 29}, {"Modi", NULL, 30},
+    };
+    for (int i = 0; i < (int)(sizeof(scripts) / sizeof(scripts[0])); i++) {
+        if (js_regex_match_script_alias(name, name_len, scripts[i].canonical, scripts[i].alias)) {
+            return JS_REGEX_PROP_SCRIPT_BASE + scripts[i].id;
+        }
+    }
+    return 0;
+}
+
+static bool js_regex_range_contains(const JsRegexRange* ranges, int count, int cp) {
+    for (int i = 0; i < count; i++) {
+        if (cp >= ranges[i].first && cp <= ranges[i].last) return true;
+    }
+    return false;
+}
+
 static int js_regex_detect_simple_property_repeat(const char* pattern, int pattern_len) {
+    if (pattern && pattern_len == 5 && pattern[0] == '^' && pattern[1] == '\\' &&
+        pattern[3] == '+' && pattern[4] == '$') {
+        switch (pattern[2]) {
+        case 'd': return JS_REGEX_PROP_ASCII_DIGIT;
+        case 'D': return -JS_REGEX_PROP_ASCII_DIGIT;
+        case 'w': return JS_REGEX_PROP_ASCII_WORD;
+        case 'W': return -JS_REGEX_PROP_ASCII_WORD;
+        case 's': return JS_REGEX_PROP_JS_WHITESPACE;
+        case 'S': return -JS_REGEX_PROP_JS_WHITESPACE;
+        default: break;
+        }
+    }
     if (!pattern || pattern_len < 9) return 0;
     if (pattern[0] != '^' || pattern[1] != '\\') return 0;
     char p = pattern[2];
@@ -9173,45 +9325,24 @@ static int js_regex_detect_simple_property_repeat(const char* pattern, int patte
     }
     const char* name = pattern + 4;
     int name_len = pattern_len - 7;
-    int kind = 0;
-    if (js_regex_match_property_name(name, name_len, "General_Category=Other") ||
-        js_regex_match_property_name(name, name_len, "gc=Other") ||
-        js_regex_match_property_name(name, name_len, "Other") ||
-        js_regex_match_property_name(name, name_len, "General_Category=C") ||
-        js_regex_match_property_name(name, name_len, "gc=C") ||
-        js_regex_match_property_name(name, name_len, "C")) {
-        kind = 1;
-    } else if (js_regex_match_property_name(name, name_len, "General_Category=Unassigned") ||
-               js_regex_match_property_name(name, name_len, "gc=Unassigned") ||
-               js_regex_match_property_name(name, name_len, "Unassigned") ||
-               js_regex_match_property_name(name, name_len, "General_Category=Cn") ||
-               js_regex_match_property_name(name, name_len, "gc=Cn") ||
-               js_regex_match_property_name(name, name_len, "Cn")) {
-        kind = 2;
-    } else if (js_regex_match_property_name(name, name_len, "General_Category=Decimal_Number") ||
-               js_regex_match_property_name(name, name_len, "gc=Decimal_Number") ||
-               js_regex_match_property_name(name, name_len, "Decimal_Number") ||
-               js_regex_match_property_name(name, name_len, "General_Category=digit") ||
-               js_regex_match_property_name(name, name_len, "gc=digit") ||
-               js_regex_match_property_name(name, name_len, "digit") ||
-               js_regex_match_property_name(name, name_len, "General_Category=Nd") ||
-               js_regex_match_property_name(name, name_len, "gc=Nd") ||
-               js_regex_match_property_name(name, name_len, "Nd")) {
-        kind = 4;
-    } else if (js_regex_match_property_name(name, name_len, "Script=Unknown") ||
-               js_regex_match_property_name(name, name_len, "Script_Extensions=Unknown") ||
-               js_regex_match_property_name(name, name_len, "sc=Unknown") ||
-               js_regex_match_property_name(name, name_len, "scx=Unknown") ||
-               js_regex_match_property_name(name, name_len, "Unknown") ||
-               js_regex_match_property_name(name, name_len, "Script=Zzzz") ||
-               js_regex_match_property_name(name, name_len, "Script_Extensions=Zzzz") ||
-               js_regex_match_property_name(name, name_len, "sc=Zzzz") ||
-               js_regex_match_property_name(name, name_len, "scx=Zzzz") ||
-               js_regex_match_property_name(name, name_len, "Zzzz")) {
-        kind = 3;
-    }
+    int kind = js_regex_property_kind_from_name(name, name_len);
     if (!kind) return 0;
     return p == 'P' ? -kind : kind;
+}
+
+static int js_regex_detect_simple_property_search(const char* pattern, int pattern_len) {
+    if (!pattern || pattern_len != 2 || pattern[0] != '\\') return 0;
+    int mode = 0;
+    switch (pattern[1]) {
+    case 'd': mode = JS_REGEX_PROP_ASCII_DIGIT; break;
+    case 'D': mode = -JS_REGEX_PROP_ASCII_DIGIT; break;
+    case 'w': mode = JS_REGEX_PROP_ASCII_WORD; break;
+    case 'W': mode = -JS_REGEX_PROP_ASCII_WORD; break;
+    case 's': mode = JS_REGEX_PROP_JS_WHITESPACE; break;
+    case 'S': mode = -JS_REGEX_PROP_JS_WHITESPACE; break;
+    default: return 0;
+    }
+    return mode < 0 ? mode - JS_REGEX_PROP_SEARCH_MODE : mode + JS_REGEX_PROP_SEARCH_MODE;
 }
 
 static bool js_regex_contains_text(const char* text, int text_len, const char* needle) {
@@ -9305,16 +9436,73 @@ static int js_regex_decode_utf8_permissive(const char* input, int input_len, int
     return cp;
 }
 
+static bool js_regex_is_js_whitespace_cp(uint32_t cp) {
+    switch (cp) {
+    case 0x0009: case 0x000A: case 0x000B: case 0x000C: case 0x000D: case 0x0020:
+    case 0x00A0: case 0x1680:
+    case 0x2000: case 0x2001: case 0x2002: case 0x2003: case 0x2004:
+    case 0x2005: case 0x2006: case 0x2007: case 0x2008: case 0x2009: case 0x200A:
+    case 0x2028: case 0x2029: case 0x202F: case 0x205F: case 0x3000: case 0xFEFF:
+        return true;
+    default:
+        return false;
+    }
+}
+
 static bool js_regex_special_property_contains(int kind, int cp) {
+    if (kind == JS_REGEX_PROP_ASCII) return cp >= 0 && cp <= 0x7F;
+    if (kind == JS_REGEX_PROP_ANY) return cp >= 0 && cp <= 0x10FFFF;
+    if (kind == JS_REGEX_PROP_ASCII_DIGIT) return cp >= '0' && cp <= '9';
+    if (kind == JS_REGEX_PROP_ASCII_WORD) {
+        return (cp >= '0' && cp <= '9') ||
+               (cp >= 'A' && cp <= 'Z') ||
+               (cp >= 'a' && cp <= 'z') ||
+               cp == '_';
+    }
+    if (kind == JS_REGEX_PROP_JS_WHITESPACE) return js_regex_is_js_whitespace_cp((uint32_t)cp);
+    if (kind == JS_REGEX_PROP_OPEN_PUNCTUATION) {
+        static const JsRegexRange ranges[] = {{0x28,0x28},{0x5B,0x5B},{0x7B,0x7B},{0xF3A,0xF3A},{0xF3C,0xF3C},{0x169B,0x169B},{0x201A,0x201A},{0x201E,0x201E},{0x2045,0x2045},{0x207D,0x207D},{0x208D,0x208D},{0x2308,0x2308},{0x230A,0x230A},{0x2329,0x2329},{0x2768,0x2768},{0x276A,0x276A},{0x276C,0x276C},{0x276E,0x276E},{0x2770,0x2770},{0x2772,0x2772},{0x2774,0x2774},{0x27C5,0x27C5},{0x27E6,0x27E6},{0x27E8,0x27E8},{0x27EA,0x27EA},{0x27EC,0x27EC},{0x27EE,0x27EE},{0x2983,0x2983},{0x2985,0x2985},{0x2987,0x2987},{0x2989,0x2989},{0x298B,0x298B},{0x298D,0x298D},{0x298F,0x298F},{0x2991,0x2991},{0x2993,0x2993},{0x2995,0x2995},{0x2997,0x2997},{0x29D8,0x29D8},{0x29DA,0x29DA},{0x29FC,0x29FC},{0x2E22,0x2E22},{0x2E24,0x2E24},{0x2E26,0x2E26},{0x2E28,0x2E28},{0x2E42,0x2E42},{0x2E55,0x2E55},{0x2E57,0x2E57},{0x2E59,0x2E59},{0x2E5B,0x2E5B},{0x3008,0x3008},{0x300A,0x300A},{0x300C,0x300C},{0x300E,0x300E},{0x3010,0x3010},{0x3014,0x3014},{0x3016,0x3016},{0x3018,0x3018},{0x301A,0x301A},{0x301D,0x301D},{0xFD3F,0xFD3F},{0xFE17,0xFE17},{0xFE35,0xFE35},{0xFE37,0xFE37},{0xFE39,0xFE39},{0xFE3B,0xFE3B},{0xFE3D,0xFE3D},{0xFE3F,0xFE3F},{0xFE41,0xFE41},{0xFE43,0xFE43},{0xFE47,0xFE47},{0xFE59,0xFE59},{0xFE5B,0xFE5B},{0xFE5D,0xFE5D},{0xFF08,0xFF08},{0xFF3B,0xFF3B},{0xFF5B,0xFF5B},{0xFF5F,0xFF5F},{0xFF62,0xFF62}};
+        return js_regex_range_contains(ranges, sizeof(ranges) / sizeof(ranges[0]), cp);
+    }
+    if (kind == JS_REGEX_PROP_LINE_SEPARATOR) return cp == 0x2028;
+    if (kind == JS_REGEX_PROP_MODIFIER_SYMBOL) {
+        static const JsRegexRange ranges[] = {{0x5E,0x5E},{0x60,0x60},{0xA8,0xA8},{0xAF,0xAF},{0xB4,0xB4},{0xB8,0xB8},{0x2ED,0x2ED},{0x375,0x375},{0x888,0x888},{0x1FBD,0x1FBD},{0xAB5B,0xAB5B},{0xFF3E,0xFF3E},{0xFF40,0xFF40},{0xFFE3,0xFFE3},{0x2C2,0x2C5},{0x2D2,0x2DF},{0x2E5,0x2EB},{0x2EF,0x2FF},{0x384,0x385},{0x1FBF,0x1FC1},{0x1FCD,0x1FCF},{0x1FDD,0x1FDF},{0x1FED,0x1FEF},{0x1FFD,0x1FFE},{0x309B,0x309C},{0xA700,0xA716},{0xA720,0xA721},{0xA789,0xA78A},{0xAB6A,0xAB6B},{0xFBB2,0xFBC2},{0x1F3FB,0x1F3FF}};
+        return js_regex_range_contains(ranges, sizeof(ranges) / sizeof(ranges[0]), cp);
+    }
+    if (kind == JS_REGEX_PROP_LETTER_NUMBER) {
+        static const JsRegexRange ranges[] = {{0x3007,0x3007},{0x10341,0x10341},{0x1034A,0x1034A},{0x16EE,0x16F0},{0x2160,0x2182},{0x2185,0x2188},{0x3021,0x3029},{0x3038,0x303A},{0xA6E6,0xA6EF},{0x10140,0x10174},{0x103D1,0x103D5},{0x12400,0x1246E}};
+        return js_regex_range_contains(ranges, sizeof(ranges) / sizeof(ranges[0]), cp);
+    }
+    if (kind == JS_REGEX_PROP_SPACE_SEPARATOR) {
+        static const JsRegexRange ranges[] = {{0x20,0x20},{0xA0,0xA0},{0x1680,0x1680},{0x202F,0x202F},{0x205F,0x205F},{0x3000,0x3000},{0x2000,0x200A}};
+        return js_regex_range_contains(ranges, sizeof(ranges) / sizeof(ranges[0]), cp);
+    }
+    if (kind == JS_REGEX_PROP_SEPARATOR) {
+        static const JsRegexRange ranges[] = {{0x20,0x20},{0xA0,0xA0},{0x1680,0x1680},{0x202F,0x202F},{0x205F,0x205F},{0x3000,0x3000},{0x2000,0x200A},{0x2028,0x2029}};
+        return js_regex_range_contains(ranges, sizeof(ranges) / sizeof(ranges[0]), cp);
+    }
+    if (kind == JS_REGEX_PROP_FINAL_PUNCTUATION) {
+        static const JsRegexRange ranges[] = {{0xBB,0xBB},{0x2019,0x2019},{0x201D,0x201D},{0x203A,0x203A},{0x2E03,0x2E03},{0x2E05,0x2E05},{0x2E0A,0x2E0A},{0x2E0D,0x2E0D},{0x2E1D,0x2E1D},{0x2E21,0x2E21}};
+        return js_regex_range_contains(ranges, sizeof(ranges) / sizeof(ranges[0]), cp);
+    }
+    if (kind == JS_REGEX_PROP_ENCLOSING_MARK) {
+        static const JsRegexRange ranges[] = {{0x1ABE,0x1ABE},{0x488,0x489},{0x20DD,0x20E0},{0x20E2,0x20E4},{0xA670,0xA672}};
+        return js_regex_range_contains(ranges, sizeof(ranges) / sizeof(ranges[0]), cp);
+    }
+    if (kind == JS_REGEX_PROP_PARAGRAPH_SEPARATOR) return cp == 0x2029;
+    if (kind == JS_REGEX_PROP_TITLECASE_LETTER) {
+        static const JsRegexRange ranges[] = {{0x1C5,0x1C5},{0x1C8,0x1C8},{0x1CB,0x1CB},{0x1F2,0x1F2},{0x1FBC,0x1FBC},{0x1FCC,0x1FCC},{0x1FFC,0x1FFC},{0x1F88,0x1F8F},{0x1F98,0x1F9F},{0x1FA8,0x1FAF}};
+        return js_regex_range_contains(ranges, sizeof(ranges) / sizeof(ranges[0]), cp);
+    }
     utf8proc_category_t cat = utf8proc_category((utf8proc_int32_t)cp);
-    if (kind == 1) return js_regex_unicode_is_other_category(cat);
-    if (kind == 2) return cat == UTF8PROC_CATEGORY_CN;
-    if (kind == 3) {
+    if (kind == JS_REGEX_PROP_OTHER) return js_regex_unicode_is_other_category(cat);
+    if (kind == JS_REGEX_PROP_UNASSIGNED) return cat == UTF8PROC_CATEGORY_CN;
+    if (kind == JS_REGEX_PROP_UNKNOWN_SCRIPT) {
         return cat == UTF8PROC_CATEGORY_CN ||
                cat == UTF8PROC_CATEGORY_CS ||
                cat == UTF8PROC_CATEGORY_CO;
     }
-    if (kind == 4) {
+    if (kind == JS_REGEX_PROP_DECIMAL_NUMBER) {
         static const struct { int first; int last; } nd_ranges[] = {
             {0x000030, 0x000039}, {0x000660, 0x000669}, {0x0006F0, 0x0006F9},
             {0x0007C0, 0x0007C9}, {0x000966, 0x00096F}, {0x0009E6, 0x0009EF},
@@ -9345,6 +9533,73 @@ static bool js_regex_special_property_contains(int kind, int cp) {
             if (cp >= nd_ranges[i].first && cp <= nd_ranges[i].last) return true;
         }
         return false;
+    }
+    if (kind >= JS_REGEX_PROP_SCRIPT_BASE) {
+        static const JsRegexRange bengali[] = {{0x9B2,0x9B2},{0x9D7,0x9D7},{0x980,0x983},{0x985,0x98C},{0x98F,0x990},{0x993,0x9A8},{0x9AA,0x9B0},{0x9B6,0x9B9},{0x9BC,0x9C4},{0x9C7,0x9C8},{0x9CB,0x9CE},{0x9DC,0x9DD},{0x9DF,0x9E3},{0x9E6,0x9FE}};
+        static const JsRegexRange bopomofo[] = {{0x2EA,0x2EB},{0x3105,0x312F},{0x31A0,0x31BF}};
+        static const JsRegexRange cham[] = {{0xAA00,0xAA36},{0xAA40,0xAA4D},{0xAA50,0xAA59},{0xAA5C,0xAA5F}};
+        static const JsRegexRange devanagari[] = {{0x900,0x950},{0x955,0x963},{0x966,0x97F},{0xA8E0,0xA8FF},{0x11B00,0x11B09}};
+        static const JsRegexRange ethiopic[] = {{0x1258,0x1258},{0x12C0,0x12C0},{0x1200,0x1248},{0x124A,0x124D},{0x1250,0x1256},{0x125A,0x125D},{0x1260,0x1288},{0x128A,0x128D},{0x1290,0x12B0},{0x12B2,0x12B5},{0x12B8,0x12BE},{0x12C2,0x12C5},{0x12C8,0x12D6},{0x12D8,0x1310},{0x1312,0x1315},{0x1318,0x135A},{0x135D,0x137C},{0x1380,0x1399},{0x2D80,0x2D96},{0x2DA0,0x2DA6},{0x2DA8,0x2DAE},{0x2DB0,0x2DB6},{0x2DB8,0x2DBE},{0x2DC0,0x2DC6},{0x2DC8,0x2DCE},{0x2DD0,0x2DD6},{0x2DD8,0x2DDE},{0xAB01,0xAB06},{0xAB09,0xAB0E},{0xAB11,0xAB16},{0xAB20,0xAB26},{0xAB28,0xAB2E},{0x1E7E0,0x1E7E6},{0x1E7E8,0x1E7EB},{0x1E7ED,0x1E7EE},{0x1E7F0,0x1E7FE}};
+        static const JsRegexRange georgian[] = {{0x10C7,0x10C7},{0x10CD,0x10CD},{0x2D27,0x2D27},{0x2D2D,0x2D2D},{0x10A0,0x10C5},{0x10D0,0x10FA},{0x10FC,0x10FF},{0x1C90,0x1CBA},{0x1CBD,0x1CBF},{0x2D00,0x2D25}};
+        static const JsRegexRange greek[] = {{0x37F,0x37F},{0x384,0x384},{0x386,0x386},{0x38C,0x38C},{0x1DBF,0x1DBF},{0x1F59,0x1F59},{0x1F5B,0x1F5B},{0x1F5D,0x1F5D},{0x2126,0x2126},{0xAB65,0xAB65},{0x101A0,0x101A0},{0x370,0x373},{0x375,0x377},{0x37A,0x37D},{0x388,0x38A},{0x38E,0x3A1},{0x3A3,0x3E1},{0x3F0,0x3FF},{0x1D26,0x1D2A},{0x1D5D,0x1D61},{0x1D66,0x1D6A},{0x1F00,0x1F15},{0x1F18,0x1F1D},{0x1F20,0x1F45},{0x1F48,0x1F4D},{0x1F50,0x1F57},{0x1F5F,0x1F7D},{0x1F80,0x1FB4},{0x1FB6,0x1FC4},{0x1FC6,0x1FD3},{0x1FD6,0x1FDB},{0x1FDD,0x1FEF},{0x1FF2,0x1FF4},{0x1FF6,0x1FFE},{0x10140,0x1018E},{0x1D200,0x1D245}};
+        static const JsRegexRange gujarati[] = {{0xAD0,0xAD0},{0xA81,0xA83},{0xA85,0xA8D},{0xA8F,0xA91},{0xA93,0xAA8},{0xAAA,0xAB0},{0xAB2,0xAB3},{0xAB5,0xAB9},{0xABC,0xAC5},{0xAC7,0xAC9},{0xACB,0xACD},{0xAE0,0xAE3},{0xAE6,0xAF1},{0xAF9,0xAFF}};
+        static const JsRegexRange gurmukhi[] = {{0xA3C,0xA3C},{0xA51,0xA51},{0xA5E,0xA5E},{0xA01,0xA03},{0xA05,0xA0A},{0xA0F,0xA10},{0xA13,0xA28},{0xA2A,0xA30},{0xA32,0xA33},{0xA35,0xA36},{0xA38,0xA39},{0xA3E,0xA42},{0xA47,0xA48},{0xA4B,0xA4D},{0xA59,0xA5C},{0xA66,0xA76}};
+        static const JsRegexRange hiragana[] = {{0x1B132,0x1B132},{0x1F200,0x1F200},{0x3041,0x3096},{0x309D,0x309F},{0x1B001,0x1B11F},{0x1B150,0x1B152}};
+        static const JsRegexRange inherited[] = {{0x670,0x670},{0x1CED,0x1CED},{0x1CF4,0x1CF4},{0x101FD,0x101FD},{0x102E0,0x102E0},{0x1133B,0x1133B},{0x300,0x36F},{0x485,0x486},{0x64B,0x655},{0x951,0x954},{0x1AB0,0x1ACE},{0x1CD0,0x1CD2},{0x1CD4,0x1CE0},{0x1CE2,0x1CE8},{0x1CF8,0x1CF9},{0x1DC0,0x1DFF},{0x200C,0x200D},{0x20D0,0x20F0},{0x302A,0x302D},{0x3099,0x309A},{0xFE00,0xFE0F},{0xFE20,0xFE2D},{0x1CF00,0x1CF2D},{0x1CF30,0x1CF46},{0x1D167,0x1D169},{0x1D17B,0x1D182},{0x1D185,0x1D18B},{0x1D1AA,0x1D1AD},{0xE0100,0xE01EF}};
+        static const JsRegexRange kannada[] = {{0xC80,0xC8C},{0xC8E,0xC90},{0xC92,0xCA8},{0xCAA,0xCB3},{0xCB5,0xCB9},{0xCBC,0xCC4},{0xCC6,0xCC8},{0xCCA,0xCCD},{0xCD5,0xCD6},{0xCDD,0xCDE},{0xCE0,0xCE3},{0xCE6,0xCEF},{0xCF1,0xCF3}};
+        static const JsRegexRange khmer[] = {{0x1780,0x17DD},{0x17E0,0x17E9},{0x17F0,0x17F9},{0x19E0,0x19FF}};
+        static const JsRegexRange sinhala[] = {{0xDBD,0xDBD},{0xDCA,0xDCA},{0xDD6,0xDD6},{0xD81,0xD83},{0xD85,0xD96},{0xD9A,0xDB1},{0xDB3,0xDBB},{0xDC0,0xDC6},{0xDCF,0xDD4},{0xDD8,0xDDF},{0xDE6,0xDEF},{0xDF2,0xDF4},{0x111E1,0x111F4}};
+        static const JsRegexRange tamil[] = {{0xB9C,0xB9C},{0xBD0,0xBD0},{0xBD7,0xBD7},{0x11FFF,0x11FFF},{0xB82,0xB83},{0xB85,0xB8A},{0xB8E,0xB90},{0xB92,0xB95},{0xB99,0xB9A},{0xB9E,0xB9F},{0xBA3,0xBA4},{0xBA8,0xBAA},{0xBAE,0xBB9},{0xBBE,0xBC2},{0xBC6,0xBC8},{0xBCA,0xBCD},{0xBE6,0xBFA},{0x11FC0,0x11FF1}};
+        static const JsRegexRange telugu[] = {{0xC5D,0xC5D},{0xC00,0xC0C},{0xC0E,0xC10},{0xC12,0xC28},{0xC2A,0xC39},{0xC3C,0xC44},{0xC46,0xC48},{0xC4A,0xC4D},{0xC55,0xC56},{0xC58,0xC5A},{0xC60,0xC63},{0xC66,0xC6F},{0xC77,0xC7F}};
+        static const JsRegexRange thai[] = {{0xE01,0xE3A},{0xE40,0xE5B}};
+        static const JsRegexRange tibetan[] = {{0xF00,0xF47},{0xF49,0xF6C},{0xF71,0xF97},{0xF99,0xFBC},{0xFBE,0xFCC},{0xFCE,0xFD4},{0xFD9,0xFDA}};
+        static const JsRegexRange toto[] = {{0x1E290,0x1E2AE}};
+        static const JsRegexRange ahom[] = {{0x11700,0x1171A},{0x1171D,0x1172B},{0x11730,0x11746}};
+        static const JsRegexRange greek_ext[] = {{0xB7,0xB7},{0x300,0x301},{0x304,0x304},{0x306,0x306},{0x308,0x308},{0x313,0x313},{0x342,0x342},{0x345,0x345},{0x374,0x374},{0x37F,0x37F},{0x384,0x384},{0x386,0x386},{0x38C,0x38C},{0x1F59,0x1F59},{0x1F5B,0x1F5B},{0x1F5D,0x1F5D},{0x205D,0x205D},{0x2126,0x2126},{0xAB65,0xAB65},{0x101A0,0x101A0},{0x370,0x377},{0x37A,0x37D},{0x388,0x38A},{0x38E,0x3A1},{0x3A3,0x3E1},{0x3F0,0x3FF},{0x1D26,0x1D2A},{0x1D5D,0x1D61},{0x1D66,0x1D6A},{0x1DBF,0x1DC1},{0x1F00,0x1F15},{0x1F18,0x1F1D},{0x1F20,0x1F45},{0x1F48,0x1F4D},{0x1F50,0x1F57},{0x1F5F,0x1F7D},{0x1F80,0x1FB4},{0x1FB6,0x1FC4},{0x1FC6,0x1FD3},{0x1FD6,0x1FDB},{0x1FDD,0x1FEF},{0x1FF2,0x1FF4},{0x1FF6,0x1FFE},{0x10140,0x1018E},{0x1D200,0x1D245}};
+        static const JsRegexRange mongolian[] = {{0x1804,0x1804},{0x1800,0x1801},{0x1806,0x1819},{0x1820,0x1878},{0x1880,0x18AA},{0x11660,0x1166C}};
+        static const JsRegexRange malayalam[] = {{0xD00,0xD0C},{0xD0E,0xD10},{0xD12,0xD44},{0xD46,0xD48},{0xD4A,0xD4F},{0xD54,0xD63},{0xD66,0xD7F}};
+        static const JsRegexRange lisu[] = {{0x11FB0,0x11FB0},{0xA4D0,0xA4FF}};
+        static const JsRegexRange lao[] = {{0xE84,0xE84},{0xEA5,0xEA5},{0xEC6,0xEC6},{0xE81,0xE82},{0xE86,0xE8A},{0xE8C,0xEA3},{0xEA7,0xEBD},{0xEC0,0xEC4},{0xEC8,0xECE},{0xED0,0xED9},{0xEDC,0xEDF}};
+        static const JsRegexRange katakana[] = {{0x1B000,0x1B000},{0x1B155,0x1B155},{0x30A1,0x30FA},{0x30FD,0x30FF},{0x31F0,0x31FF},{0x32D0,0x32FE},{0x3300,0x3357},{0xFF66,0xFF6F},{0xFF71,0xFF9D},{0x1AFF0,0x1AFF3},{0x1AFF5,0x1AFFB},{0x1AFFD,0x1AFFE},{0x1B120,0x1B122},{0x1B164,0x1B167}};
+        static const JsRegexRange newa[] = {{0x11400,0x1145B},{0x1145D,0x11461}};
+        static const JsRegexRange oriya[] = {{0xB01,0xB03},{0xB05,0xB0C},{0xB0F,0xB10},{0xB13,0xB28},{0xB2A,0xB30},{0xB32,0xB33},{0xB35,0xB39},{0xB3C,0xB44},{0xB47,0xB48},{0xB4B,0xB4D},{0xB55,0xB57},{0xB5C,0xB5D},{0xB5F,0xB63},{0xB66,0xB77}};
+        static const JsRegexRange modi[] = {{0x11600,0x11644},{0x11650,0x11659}};
+        const JsRegexRange* ranges = NULL;
+        int count = 0;
+        switch (kind - JS_REGEX_PROP_SCRIPT_BASE) {
+        case 1: ranges = bengali; count = sizeof(bengali) / sizeof(bengali[0]); break;
+        case 2: ranges = bopomofo; count = sizeof(bopomofo) / sizeof(bopomofo[0]); break;
+        case 3: ranges = cham; count = sizeof(cham) / sizeof(cham[0]); break;
+        case 4: ranges = devanagari; count = sizeof(devanagari) / sizeof(devanagari[0]); break;
+        case 5: ranges = ethiopic; count = sizeof(ethiopic) / sizeof(ethiopic[0]); break;
+        case 6: ranges = georgian; count = sizeof(georgian) / sizeof(georgian[0]); break;
+        case 7: ranges = greek; count = sizeof(greek) / sizeof(greek[0]); break;
+        case 8: ranges = gujarati; count = sizeof(gujarati) / sizeof(gujarati[0]); break;
+        case 9: ranges = gurmukhi; count = sizeof(gurmukhi) / sizeof(gurmukhi[0]); break;
+        case 10: return js_regexp_is_han_cp((uint32_t)cp);
+        case 11: ranges = hiragana; count = sizeof(hiragana) / sizeof(hiragana[0]); break;
+        case 12: ranges = inherited; count = sizeof(inherited) / sizeof(inherited[0]); break;
+        case 13: ranges = kannada; count = sizeof(kannada) / sizeof(kannada[0]); break;
+        case 14: ranges = khmer; count = sizeof(khmer) / sizeof(khmer[0]); break;
+        case 15: ranges = sinhala; count = sizeof(sinhala) / sizeof(sinhala[0]); break;
+        case 16: ranges = tamil; count = sizeof(tamil) / sizeof(tamil[0]); break;
+        case 17: ranges = telugu; count = sizeof(telugu) / sizeof(telugu[0]); break;
+        case 18: ranges = thai; count = sizeof(thai) / sizeof(thai[0]); break;
+        case 19: ranges = tibetan; count = sizeof(tibetan) / sizeof(tibetan[0]); break;
+        case 20: ranges = toto; count = sizeof(toto) / sizeof(toto[0]); break;
+        case 21: ranges = ahom; count = sizeof(ahom) / sizeof(ahom[0]); break;
+        case 22: ranges = greek_ext; count = sizeof(greek_ext) / sizeof(greek_ext[0]); break;
+        case 23: ranges = mongolian; count = sizeof(mongolian) / sizeof(mongolian[0]); break;
+        case 24: ranges = malayalam; count = sizeof(malayalam) / sizeof(malayalam[0]); break;
+        case 25: ranges = lisu; count = sizeof(lisu) / sizeof(lisu[0]); break;
+        case 26: ranges = lao; count = sizeof(lao) / sizeof(lao[0]); break;
+        case 27: ranges = katakana; count = sizeof(katakana) / sizeof(katakana[0]); break;
+        case 28: ranges = newa; count = sizeof(newa) / sizeof(newa[0]); break;
+        case 29: ranges = oriya; count = sizeof(oriya) / sizeof(oriya[0]); break;
+        case 30: ranges = modi; count = sizeof(modi) / sizeof(modi[0]); break;
+        default: return false;
+        }
+        return js_regex_range_contains(ranges, count, cp);
     }
     return false;
 }
@@ -9601,7 +9856,54 @@ static Item js_regex_build_object_from_cache(const JsRegexCacheEntry& ce) {
     return regex_obj;
 }
 
+static bool js_regex_parse_simple_fast_flags(const char* flags, int flags_len,
+                                             char* canonical_flags,
+                                             int* canonical_flags_len,
+                                             bool* has_unicode) {
+    bool seen_u = false;
+    bool seen_v = false;
+    for (int i = 0; i < flags_len; i++) {
+        if (flags[i] == 'u') {
+            if (seen_u) return false;
+            seen_u = true;
+        } else if (flags[i] == 'v') {
+            if (seen_v) return false;
+            seen_v = true;
+        } else {
+            return false;
+        }
+    }
+    if (seen_u && seen_v) return false;
+    int len = 0;
+    if (seen_u) canonical_flags[len++] = 'u';
+    if (seen_v) canonical_flags[len++] = 'v';
+    canonical_flags[len] = '\0';
+    *canonical_flags_len = len;
+    *has_unicode = seen_u || seen_v;
+    return true;
+}
+
 extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char* flags, int flags_len) {
+    char* literal_buf = NULL;
+    int literal_len = 0;
+    int special_property_kind = js_regex_detect_simple_property_repeat(pattern, pattern_len);
+    if (special_property_kind == 0) {
+        special_property_kind = js_regex_detect_property_repeat_loose(pattern, pattern_len);
+    }
+    if (special_property_kind != 0) {
+        char canonical_flags[4];
+        int canonical_flags_len = 0;
+        bool has_unicode = false;
+        if (js_regex_parse_simple_fast_flags(flags, flags_len, canonical_flags,
+                                             &canonical_flags_len, &has_unicode)) {
+            JsRegexData* rd = (JsRegexData*)pool_calloc(js_input->pool, sizeof(JsRegexData));
+            rd->special_property_kind = special_property_kind;
+            JsRegexCacheEntry ce = {rd, pattern, pattern_len, canonical_flags,
+                                    canonical_flags_len, false, has_unicode};
+            return js_regex_build_object_from_cache(ce);
+        }
+    }
+
     JsRegExpCompileInfo compile_info;
     if (!js_regexp_compile_frontend(pattern, pattern_len, flags, flags_len, &compile_info)) {
         Item m = (Item){.item = s2it(heap_create_name(compile_info.error, strlen(compile_info.error)))};
@@ -9609,12 +9911,6 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
         return ItemNull;
     }
 
-    char* literal_buf = NULL;
-    int literal_len = 0;
-    int special_property_kind = js_regex_detect_simple_property_repeat(pattern, pattern_len);
-    if (special_property_kind == 0) {
-        special_property_kind = js_regex_detect_property_repeat_loose(pattern, pattern_len);
-    }
     if (flags_len == 0 &&
         js_regex_try_make_literal_fast(pattern, pattern_len, flags, flags_len,
                                        &literal_buf, &literal_len)) {
@@ -10539,19 +10835,60 @@ static int js_regexp_property_all_mode(Item regex) {
     if (!source) return 0;
     int mode = js_regex_detect_simple_property_repeat(source->chars, (int)source->len);
     if (mode != 0) return mode;
+    mode = js_regex_detect_simple_property_search(source->chars, (int)source->len);
+    if (mode != 0) return mode;
     return js_regex_detect_property_repeat_loose(source->chars, (int)source->len);
 }
 
 static bool js_regexp_test_property_all(String* input, int mode) {
     if (!input || input->len == 0 || mode == 0) return false;
-    bool negate = mode < 0;
-    int kind = negate ? -mode : mode;
+    if (g_regex_property_cache_chars == input->chars &&
+        g_regex_property_cache_len == (int)input->len &&
+        g_regex_property_cache_mode == mode) {
+        return g_regex_property_cache_result;
+    }
+    bool search_mode = false;
+    int raw_mode = mode;
+    if (raw_mode >= JS_REGEX_PROP_SEARCH_MODE) {
+        search_mode = true;
+        raw_mode -= JS_REGEX_PROP_SEARCH_MODE;
+    } else if (raw_mode <= -JS_REGEX_PROP_SEARCH_MODE) {
+        search_mode = true;
+        raw_mode += JS_REGEX_PROP_SEARCH_MODE;
+    }
+    bool negate = raw_mode < 0;
+    int kind = negate ? -raw_mode : raw_mode;
     size_t pos = 0;
     while (pos < input->len) {
         uint32_t cp = js_decode_utf8(input->chars, input->len, &pos);
         bool contains = js_regex_special_property_contains(kind, (int)cp);
-        if (negate ? contains : !contains) return false;
+        if (search_mode && (negate ? !contains : contains)) {
+            g_regex_property_cache_chars = input->chars;
+            g_regex_property_cache_len = (int)input->len;
+            g_regex_property_cache_mode = mode;
+            g_regex_property_cache_result = true;
+            return true;
+        }
+        if (search_mode) continue;
+        if (negate ? contains : !contains) {
+            g_regex_property_cache_chars = input->chars;
+            g_regex_property_cache_len = (int)input->len;
+            g_regex_property_cache_mode = mode;
+            g_regex_property_cache_result = false;
+            return false;
+        }
     }
+    if (search_mode) {
+        g_regex_property_cache_chars = input->chars;
+        g_regex_property_cache_len = (int)input->len;
+        g_regex_property_cache_mode = mode;
+        g_regex_property_cache_result = false;
+        return false;
+    }
+    g_regex_property_cache_chars = input->chars;
+    g_regex_property_cache_len = (int)input->len;
+    g_regex_property_cache_mode = mode;
+    g_regex_property_cache_result = true;
     return true;
 }
 
@@ -16051,9 +16388,11 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             for (int64_t i64 = start; i64 < dense_limit; i64++) {
                 Item elem = a->items[i64];
                 if (elem.item == JS_DELETED_SENTINEL_VAL) continue;
-                if (elem.item == search_val.item || it2b(js_strict_equal(elem, search_val))) {
+                if (elem.item == search_val.item) {
                     return (Item){.item = i2it((int)i64)};
                 }
+                if (get_type_id(elem) == LMD_TYPE_INT && get_type_id(search_val) == LMD_TYPE_INT) continue;
+                if (it2b(js_strict_equal(elem, search_val))) return (Item){.item = i2it((int)i64)};
             }
             return (Item){.item = i2it(-1)};
         }
