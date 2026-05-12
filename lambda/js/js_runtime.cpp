@@ -4830,6 +4830,13 @@ extern "C" Item js_array_get(Item array, Item index) {
 }
 
 // P10e: Fast array access with native int index (no js_get_number overhead)
+extern "C" Item js_string_get_int(Item str_item, int64_t index) {
+    if (get_type_id(str_item) == LMD_TYPE_STRING && index >= 0) {
+        return item_at(str_item, index);
+    }
+    return js_property_access(str_item, (Item){.item = i2it((int)index)});
+}
+
 extern "C" Item js_array_get_int(Item array, int64_t index) {
     if (get_type_id(array) == LMD_TYPE_ARRAY) {
         Array* arr = array.array;
@@ -4897,6 +4904,9 @@ extern "C" Item js_array_get_int(Item array, int64_t index) {
     // fast path for typed arrays: avoid going through js_property_access
     if (js_is_typed_array(array)) {
         return js_typed_array_get(array, (Item){.item = i2it((int)index)});
+    }
+    if (get_type_id(array) == LMD_TYPE_STRING && index >= 0) {
+        return item_at(array, index);
     }
     // fall back to general property access for strings, maps, etc.
     return js_property_access(array, (Item){.item = i2it((int)index)});
@@ -8515,6 +8525,8 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         return js_atomics_notify(arg0, arg1, arg2);
     case JS_BUILTIN_ATOMICS_WAIT:
         return js_atomics_wait(arg0, arg1, arg2, arg_count > 3 ? args[3] : make_js_undefined());
+    case JS_BUILTIN_ATOMICS_WAIT_ASYNC:
+        return js_atomics_wait_async(arg0, arg1, arg2, arg_count > 3 ? args[3] : make_js_undefined());
     case JS_BUILTIN_ATOMICS_ISLOCKFREE: {
         return js_atomics_is_lock_free(arg0);
     }
@@ -13874,6 +13886,8 @@ static bool js_regexp_s_whitespace(int cp) {
            cp == 0x202F || cp == 0x205F || cp == 0x3000 || cp == 0xFEFF;
 }
 
+extern "C" int64_t js_string_last_fromCharCode_cp(Item str_item);
+
 static bool js_replacement_has_dollar_pattern(String* repl) {
     if (!repl) return false;
     for (int i = 0; i < (int)repl->len; i++) {
@@ -13900,6 +13914,10 @@ static Item js_try_fast_replace_non_whitespace(Item regex, Item str, Item replac
 
     String* s = it2s(str);
     if (!s) return str;
+    int64_t cached_cp = js_string_last_fromCharCode_cp(str);
+    if (cached_cp >= 0) {
+        return js_regexp_s_whitespace((int)cached_cp) ? str : replacement;
+    }
     int single_cp = 0;
     int single_width = js_utf8_decode_one_bmp(s->chars, (int)s->len, 0, &single_cp);
     if (single_width == (int)s->len && single_width > 0) {
@@ -13952,6 +13970,10 @@ extern "C" Item js_string_replace_nonws_global_fast(Item str, Item replacement) 
     String* s = it2s(str);
     String* repl = it2s(replacement);
     if (!s || !repl || js_replacement_has_dollar_pattern(repl)) return str;
+    int64_t cached_cp = js_string_last_fromCharCode_cp(str);
+    if (cached_cp >= 0) {
+        return js_regexp_s_whitespace((int)cached_cp) ? str : replacement;
+    }
     int single_cp = 0;
     int single_width = js_utf8_decode_one_bmp(s->chars, (int)s->len, 0, &single_cp);
     if (single_width == (int)s->len && single_width > 0) {
@@ -15959,6 +15981,52 @@ static bool js_array_has_element(Item arr, Array* a, int idx, Item* out, bool ch
     return false; // true hole — no property in chain
 }
 
+extern "C" Item js_array_indexOf_int(Item arr, int64_t search) {
+    if (get_type_id(arr) != LMD_TYPE_ARRAY) return (Item){.item = i2it(-1)};
+    Array* array = arr.array;
+    if (array->length == 0) return (Item){.item = i2it(-1)};
+    int64_t dense_limit = array->capacity < array->length ? array->capacity : array->length;
+    Item search_val = (Item){.item = i2it((int)search)};
+    bool check_proto = false;
+    bool checked_proto = false;
+    if (array->extra == 0) {
+        bool all_dense_int = true;
+        for (int64_t int_idx = 0; int_idx < dense_limit; int_idx++) {
+            Item elem = array->items[int_idx];
+            if (elem.item == JS_DELETED_SENTINEL_VAL || get_type_id(elem) != LMD_TYPE_INT) {
+                all_dense_int = false;
+                break;
+            }
+            if (elem.item == search_val.item) return (Item){.item = i2it((int)int_idx)};
+        }
+        if (all_dense_int) return (Item){.item = i2it(-1)};
+        for (int64_t int_idx = 0; int_idx < dense_limit; int_idx++) {
+            Item elem = array->items[int_idx];
+            if (elem.item == JS_DELETED_SENTINEL_VAL) {
+                if (!checked_proto) {
+                    check_proto = js_proto_chain_has_numeric_keys(arr);
+                    checked_proto = true;
+                }
+                if (!check_proto) continue;
+                if (!js_array_has_element(arr, array, (int)int_idx, &elem, true)) continue;
+            }
+            if (elem.item == search_val.item) return (Item){.item = i2it((int)int_idx)};
+            if (get_type_id(elem) == LMD_TYPE_INT) continue;
+            if (it2b(js_strict_equal(elem, search_val))) return (Item){.item = i2it((int)int_idx)};
+        }
+        return (Item){.item = i2it(-1)};
+    }
+    check_proto = js_proto_chain_has_numeric_keys(arr);
+    for (int64_t int_idx = 0; int_idx < dense_limit; int_idx++) {
+        Item elem;
+        if (!js_array_has_element(arr, array, (int)int_idx, &elem, check_proto)) continue;
+        if (elem.item == search_val.item) return (Item){.item = i2it((int)int_idx)};
+        if (get_type_id(elem) == LMD_TYPE_INT) continue;
+        if (it2b(js_strict_equal(elem, search_val))) return (Item){.item = i2it((int)int_idx)};
+    }
+    return (Item){.item = i2it(-1)};
+}
+
 // Wrapper for MIR-compiled direct array method calls: isolates js_array_method_real_this
 // so that an outer .call() context (e.g. slice.call(arrayLike)) doesn't leak into
 // nested array method calls (e.g. getCalls.push(0) inside a getter).
@@ -16462,12 +16530,34 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         // v24: ES spec - negative fromIndex means length + fromIndex
         if (start < 0) { start = a->length + start; if (start < 0) start = 0; }
         if (start >= a->length) return (Item){.item = i2it(-1)};
-        bool check_proto = js_proto_chain_has_numeric_keys(arr);
         int64_t dense_limit = a->capacity < a->length ? a->capacity : a->length;
-        if (!check_proto && a->extra == 0) {
+        bool check_proto = false;
+        bool checked_proto = false;
+        if (a->extra == 0) {
+            TypeId search_type = get_type_id(search_val);
+            if (search_type == LMD_TYPE_INT) {
+                bool all_dense_int = true;
+                for (int64_t int_idx = start; int_idx < dense_limit; int_idx++) {
+                    Item elem = a->items[int_idx];
+                    if (elem.item == JS_DELETED_SENTINEL_VAL || get_type_id(elem) != LMD_TYPE_INT) {
+                        all_dense_int = false;
+                        break;
+                    }
+                    if (elem.item == search_val.item) return (Item){.item = i2it((int)int_idx)};
+                }
+                if (all_dense_int) return (Item){.item = i2it(-1)};
+            }
             for (int64_t i64 = start; i64 < dense_limit; i64++) {
                 Item elem = a->items[i64];
-                if (elem.item == JS_DELETED_SENTINEL_VAL) continue;
+                if (elem.item == JS_DELETED_SENTINEL_VAL) {
+                    if (!checked_proto) {
+                        check_proto = js_proto_chain_has_numeric_keys(arr);
+                        checked_proto = true;
+                    }
+                    if (!check_proto) continue;
+                    int i = (int)i64;
+                    if (!js_array_has_element(arr, a, i, &elem, true)) continue;
+                }
                 if (elem.item == search_val.item) {
                     return (Item){.item = i2it((int)i64)};
                 }
@@ -16476,6 +16566,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             }
             return (Item){.item = i2it(-1)};
         }
+        check_proto = js_proto_chain_has_numeric_keys(arr);
         for (int64_t i64 = start; i64 < dense_limit; i64++) {
             // v37: ES spec — use HasProperty (checks prototype chain for holes)
             Item elem;
@@ -21193,6 +21284,18 @@ extern "C" Item js_promise_resolve(Item value) {
     if (!p) return ItemNull;
     js_promise_resolve_with_value(p, value);
     return js_promise_to_item(p);
+}
+
+extern "C" Item js_promise_create_pending(void) {
+    JsPromise* p = js_alloc_promise();
+    if (!p) return ItemNull;
+    return js_promise_to_item(p);
+}
+
+extern "C" void js_promise_fulfill_existing(Item promise, Item value) {
+    JsPromise* p = js_get_promise(promise);
+    if (!p) return;
+    js_promise_resolve_with_value(p, value);
 }
 
 extern "C" Item js_promise_reject(Item reason) {

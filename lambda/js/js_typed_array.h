@@ -116,6 +116,7 @@ Item js_sharedarraybuffer_method(Item sab, Item method_name, Item* args, int arg
 // Atomics operations on SharedArrayBuffer-backed integer typed arrays
 Item js_atomics_operation(int op, Item typed_array, Item index, Item value, Item replacement);
 Item js_atomics_wait(Item typed_array, Item index, Item expected, Item timeout);
+Item js_atomics_wait_async(Item typed_array, Item index, Item expected, Item timeout);
 Item js_atomics_notify(Item typed_array, Item index, Item count);
 Item js_atomics_is_lock_free(Item size);
 void js_atomics_reset_waiters(void);

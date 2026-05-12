@@ -1977,6 +1977,19 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             }
             if (!iife_fn || !iife_fn->body) { stmt = stmt->next; continue; }
 
+            bool self_referencing_named_iife = false;
+            if (iife_fn->name && iife_fn->name->chars) {
+                char self_name[128];
+                snprintf(self_name, sizeof(self_name), "_js_%.*s",
+                    (int)iife_fn->name->len, iife_fn->name->chars);
+                struct hashmap* iife_refs = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+                    jm_name_hash, jm_name_cmp, NULL, NULL);
+                jm_collect_body_refs(iife_fn->body, iife_refs);
+                self_referencing_named_iife = jm_name_set_has(iife_refs, self_name);
+                hashmap_free(iife_refs);
+            }
+            if (self_referencing_named_iife) { stmt = stmt->next; continue; }
+
             // Mark this IIFE body function so its var decls use module vars
             JsFuncCollected* iife_fc = jm_find_collected_func(mt, iife_fn);
             if (iife_fc) iife_fc->is_iife_body = true;

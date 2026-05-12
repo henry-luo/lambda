@@ -166,6 +166,9 @@ extern bool target_equal(Target* a, Target* b);
 #include "js/js_event_loop.h"
 #include "js/js_xhr.h"
 extern Item js_buffer_construct(Item arg, Item encoding);
+extern Item js_array_indexOf_int(Item arr, int64_t search);
+extern Item js_string_concat(Item left, Item right);
+extern Item js_string_get_int(Item str_item, int64_t index);
 extern Item js_string_replace_nonws_global_fast(Item str, Item replacement);
 extern Item js_string_fromCharCode2(Item first_item, Item second_item);
 extern void js_validate_native_function_source(Item source_item);
@@ -1382,6 +1385,9 @@ JitImport jit_runtime_imports[] = {
     {"js_get_slot_i", FPTR(js_get_slot_i)},
     {"js_set_slot_f", FPTR(js_set_slot_f)},
     {"js_set_slot_i", FPTR(js_set_slot_i)},
+    {"js_array_indexOf_int", FPTR(js_array_indexOf_int)},
+    {"js_string_concat", FPTR(js_string_concat)},
+    {"js_string_get_int", FPTR(js_string_get_int)},
     {"js_array_get_int", FPTR(js_array_get_int)},
     {"js_array_set_int", FPTR(js_array_set_int)},
     {"js_debug_check_callee", FPTR(js_debug_check_callee)},

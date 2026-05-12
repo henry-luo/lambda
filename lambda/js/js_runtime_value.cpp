@@ -826,6 +826,17 @@ extern "C" int64_t js_ge_raw(Item left, Item right) {
 }
 
 extern "C" int64_t js_eq_raw(Item left, Item right) {
+    if (left.item == right.item) {
+        TypeId type = get_type_id(left);
+        if (type == LMD_TYPE_FLOAT && isnan(it2d(left))) return 0;
+        return 1;
+    }
+    if (get_type_id(left) == LMD_TYPE_STRING && get_type_id(right) == LMD_TYPE_STRING) {
+        String* left_str = it2s(left);
+        String* right_str = it2s(right);
+        return left_str->len == right_str->len &&
+            memcmp(left_str->chars, right_str->chars, left_str->len) == 0;
+    }
     return (int64_t)it2b(js_strict_equal(left, right));
 }
 
@@ -1134,6 +1145,60 @@ static inline Item js_op_to_primitive(Item value, int hint) {
     return js_to_primitive(value, h);
 }
 
+static inline int js_upper_hex_digit_value(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+static inline Item js_try_concat_percent_hex(String* left, String* right) {
+    if (!left->is_ascii || !right->is_ascii || right->len != 1) return ItemNull;
+    char right_ch = right->chars[0];
+    int right_value = js_upper_hex_digit_value(right_ch);
+    if (right_value < 0) return ItemNull;
+    if (left->len == 1 && left->chars[0] == '%') {
+        static Item prefix_cache[16] = {0};
+        if (prefix_cache[right_value].item) return prefix_cache[right_value];
+        char buf[2];
+        buf[0] = '%';
+        buf[1] = right_ch;
+        prefix_cache[right_value] = (Item){.item = s2it(heap_create_name(buf, 2))};
+        return prefix_cache[right_value];
+    }
+    int left_value = left->len == 2 && left->chars[0] == '%' ? js_upper_hex_digit_value(left->chars[1]) : -1;
+    if (left_value >= 0) {
+        int byte_value = (left_value << 4) | right_value;
+        static Item byte_cache[256] = {0};
+        if (byte_cache[byte_value].item) return byte_cache[byte_value];
+        char buf[3];
+        buf[0] = '%';
+        buf[1] = left->chars[1];
+        buf[2] = right_ch;
+        byte_cache[byte_value] = (Item){.item = s2it(heap_create_name(buf, 3))};
+        return byte_cache[byte_value];
+    }
+    return ItemNull;
+}
+
+static inline Item js_concat_strings_fast(String* left, String* right) {
+    if (!left || !right) return ItemNull;
+    int64_t left_len = left->len;
+    int64_t right_len = right->len;
+    Item percent_hex = js_try_concat_percent_hex(left, right);
+    if (percent_hex.item != ItemNull.item) return percent_hex;
+    String* result = (String*)heap_alloc(sizeof(String) + left_len + right_len + 1, LMD_TYPE_STRING);
+    result->len = left_len + right_len;
+    result->is_ascii = left->is_ascii && right->is_ascii;
+    memcpy(result->chars, left->chars, left_len);
+    memcpy(result->chars + left_len, right->chars, right_len);
+    result->chars[result->len] = '\0';
+    return (Item){.item = s2it(result)};
+}
+
+extern "C" Item js_string_concat(Item left, Item right) {
+    return js_concat_strings_fast(it2s(left), it2s(right));
+}
+
 extern "C" Item js_add(Item left, Item right) {
     TypeId left_type = get_type_id(left);
     TypeId right_type = get_type_id(right);
@@ -1156,10 +1221,14 @@ extern "C" Item js_add(Item left, Item right) {
     }
 
     // String concatenation if either operand is a string
+    if (left_type == LMD_TYPE_STRING && right_type == LMD_TYPE_STRING) {
+        return js_concat_strings_fast(it2s(left), it2s(right));
+    }
     if (left_type == LMD_TYPE_STRING || right_type == LMD_TYPE_STRING) {
         Item left_str = js_to_string(left);
         Item right_str = js_to_string(right);
-        return fn_join(left_str, right_str);
+        if (js_exception_pending) return ItemNull;
+        return js_concat_strings_fast(it2s(left_str), it2s(right_str));
     }
 
     // Numeric addition — use double arithmetic for JS semantics

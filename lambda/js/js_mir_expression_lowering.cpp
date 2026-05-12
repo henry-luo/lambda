@@ -591,6 +591,14 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
     bool both_numeric = (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_FLOAT) &&
                         (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_FLOAT);
 
+    if (bin->op == JS_OP_ADD && left_type == LMD_TYPE_STRING && right_type == LMD_TYPE_STRING) {
+        MIR_reg_t left_reg = jm_transpile_box_item(mt, bin->left);
+        MIR_reg_t right_reg = jm_transpile_box_item(mt, bin->right);
+        return jm_call_2(mt, "js_string_concat", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, left_reg),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, right_reg));
+    }
+
     if (both_numeric) {
         bool use_float = (left_type == LMD_TYPE_FLOAT || right_type == LMD_TYPE_FLOAT);
         bool both_int  = (left_type == LMD_TYPE_INT && right_type == LMD_TYPE_INT);
@@ -6366,12 +6374,23 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 }
             }
 
-            MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
-            MIR_op_t args_op = args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0);
-
             // Phase 5: Type-aware method dispatch — when receiver type is known
             // at compile time, skip the runtime type cascade and call directly.
             TypeId recv_type = jm_get_effective_type(mt, m->object);
+
+            if (recv_type == LMD_TYPE_ARRAY && prop->name->len == 7 &&
+                strncmp(prop->name->chars, "indexOf", 7) == 0 &&
+                arg_count == 1 && call->arguments &&
+                jm_get_effective_type(mt, call->arguments) == LMD_TYPE_INT) {
+                MIR_reg_t recv_fast = jm_transpile_box_item(mt, m->object);
+                MIR_reg_t search_fast = jm_transpile_as_native(mt, call->arguments, LMD_TYPE_INT, LMD_TYPE_INT);
+                return jm_call_2(mt, "js_array_indexOf_int", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv_fast),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, search_fast));
+            }
+
+            MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
+            MIR_op_t args_op = args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0);
 
             // For receiver 'this' inside a class method, we know it's always a map
             bool recv_is_this = (m->object->node_type == JS_AST_NODE_IDENTIFIER &&
@@ -8237,6 +8256,13 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
         TypeId idx_type = jm_get_effective_type(mt, mem->property);
         if (idx_type == LMD_TYPE_INT && !mem->optional && !jm_has_optional_chain(mem->object)) {
             MIR_reg_t idx_native = jm_transpile_as_native(mt, mem->property, idx_type, LMD_TYPE_INT);
+            TypeId obj_type = jm_get_effective_type(mt, mem->object);
+            if (obj_type == LMD_TYPE_STRING) {
+                MIR_reg_t obj_reg = jm_transpile_box_item(mt, mem->object);
+                return jm_call_2(mt, "js_string_get_int", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_native));
+            }
             // A2: If object is a known array, use inline bounds check + indexed load
             JsMirVarEntry* arr_var = jm_get_js_array_var(mt, mem->object);
             if (arr_var) {

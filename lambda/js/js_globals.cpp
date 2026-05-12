@@ -3923,6 +3923,27 @@ extern "C" uint64_t js_get_heap_epoch();
 static Item g_uri_last_four_byte_string = {0};
 static uint32_t g_uri_last_four_byte_cp = 0;
 static uint64_t g_uri_last_four_byte_epoch = 0;
+static Item g_last_from_char_code_string = {0};
+static int g_last_from_char_code_cp = -1;
+static uint64_t g_last_from_char_code_epoch = 0;
+
+static inline Item js_uri_make_four_byte_string(char* decoded) {
+    String* result = (String*)heap_alloc(sizeof(String) + 5, LMD_TYPE_STRING);
+    result->len = 4;
+    result->is_ascii = false;
+    memcpy(result->chars, decoded, 4);
+    result->chars[4] = '\0';
+    return (Item){.item = s2it(result)};
+}
+
+static inline Item js_make_small_string(char* chars, int len, bool is_ascii) {
+    String* result = (String*)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_STRING);
+    result->len = len;
+    result->is_ascii = is_ascii;
+    memcpy(result->chars, chars, len);
+    result->chars[len] = '\0';
+    return (Item){.item = s2it(result)};
+}
 
 extern "C" Item js_string_fromCharCode(Item code_item) {
     int code = 0;
@@ -3952,7 +3973,19 @@ extern "C" Item js_string_fromCharCode(Item code_item) {
     }
     buf[len] = '\0';
 
-    return (Item){.item = s2it(heap_strcpy(buf, len))};
+    Item result = js_make_small_string(buf, len, code < 128);
+    g_last_from_char_code_string = result;
+    g_last_from_char_code_cp = code;
+    g_last_from_char_code_epoch = js_get_heap_epoch();
+    return result;
+}
+
+extern "C" int64_t js_string_last_fromCharCode_cp(Item str_item) {
+    if (str_item.item == g_last_from_char_code_string.item &&
+        g_last_from_char_code_epoch == js_get_heap_epoch()) {
+        return (int64_t)g_last_from_char_code_cp;
+    }
+    return -1;
 }
 
 extern "C" Item js_string_fromCharCode2(Item first_item, Item second_item) {
@@ -3982,7 +4015,7 @@ extern "C" Item js_string_fromCharCode2(Item first_item, Item second_item) {
         pos += encode_charcode_utf8(buf + pos, first);
         pos += encode_charcode_utf8(buf + pos, second);
     }
-    return (Item){.item = s2it(heap_strcpy(buf, pos))};
+    return js_make_small_string(buf, pos, first < 128 && second < 128);
 }
 
 // Helper: encode a UTF-16 code unit to UTF-8 into buf, return bytes written
@@ -11434,28 +11467,36 @@ static inline int js_uri_hex_digit(char c) {
 
 static bool js_uri_try_decode_four_byte_cp(String* s, uint32_t* cp_out) {
     if (!s || s->len != 12) return false;
-    unsigned char bytes[4];
     if (s->chars[0] != '%' || s->chars[3] != '%' ||
         s->chars[6] != '%' || s->chars[9] != '%') return false;
-    int h0 = js_uri_hex_digit(s->chars[1]);
-    int l0 = js_uri_hex_digit(s->chars[2]);
-    int h1 = js_uri_hex_digit(s->chars[4]);
-    int l1 = js_uri_hex_digit(s->chars[5]);
-    int h2 = js_uri_hex_digit(s->chars[7]);
-    int l2 = js_uri_hex_digit(s->chars[8]);
-    int h3 = js_uri_hex_digit(s->chars[10]);
-    int l3 = js_uri_hex_digit(s->chars[11]);
-    if ((h0 | l0 | h1 | l1 | h2 | l2 | h3 | l3) < 0) return false;
-    bytes[0] = (unsigned char)((h0 << 4) | l0);
-    bytes[1] = (unsigned char)((h1 << 4) | l1);
-    bytes[2] = (unsigned char)((h2 << 4) | l2);
-    bytes[3] = (unsigned char)((h3 << 4) | l3);
-    if (bytes[0] < 0xF0 || bytes[0] > 0xF4) return false;
-    if ((bytes[1] & 0xC0) != 0x80 || (bytes[2] & 0xC0) != 0x80 || (bytes[3] & 0xC0) != 0x80) {
+
+#define JS_URI_FAST_HEX_VALUE(ch) \
+    (((ch) >= '0' && (ch) <= '9') ? ((ch) - '0') : \
+    (((ch) >= 'A' && (ch) <= 'F') ? ((ch) - 'A' + 10) : \
+    (((ch) >= 'a' && (ch) <= 'f') ? ((ch) - 'a' + 10) : -1)))
+
+    int b0_high = JS_URI_FAST_HEX_VALUE(s->chars[1]);
+    int b0_low = JS_URI_FAST_HEX_VALUE(s->chars[2]);
+    int b1_high = JS_URI_FAST_HEX_VALUE(s->chars[4]);
+    int b1_low = JS_URI_FAST_HEX_VALUE(s->chars[5]);
+    int b2_high = JS_URI_FAST_HEX_VALUE(s->chars[7]);
+    int b2_low = JS_URI_FAST_HEX_VALUE(s->chars[8]);
+    int b3_high = JS_URI_FAST_HEX_VALUE(s->chars[10]);
+    int b3_low = JS_URI_FAST_HEX_VALUE(s->chars[11]);
+    if ((b0_high | b0_low | b1_high | b1_low | b2_high | b2_low | b3_high | b3_low) < 0) return false;
+    unsigned int byte0 = (unsigned int)((b0_high << 4) | b0_low);
+    unsigned int byte1 = (unsigned int)((b1_high << 4) | b1_low);
+    unsigned int byte2 = (unsigned int)((b2_high << 4) | b2_low);
+    unsigned int byte3 = (unsigned int)((b3_high << 4) | b3_low);
+
+#undef JS_URI_FAST_HEX_VALUE
+
+    if (byte0 < 0xF0 || byte0 > 0xF4) return false;
+    if ((byte1 & 0xC0) != 0x80 || (byte2 & 0xC0) != 0x80 || (byte3 & 0xC0) != 0x80) {
         return false;
     }
-    unsigned int cp = ((bytes[0] & 0x07) << 18) | ((bytes[1] & 0x3F) << 12) |
-                      ((bytes[2] & 0x3F) << 6) | (bytes[3] & 0x3F);
+    unsigned int cp = ((byte0 & 0x07) << 18) | ((byte1 & 0x3F) << 12) |
+                      ((byte2 & 0x3F) << 6) | (byte3 & 0x3F);
     if (cp < 0x10000 || cp > 0x10FFFF) return false;
     *cp_out = (uint32_t)cp;
     return true;
@@ -11473,7 +11514,7 @@ static bool js_uri_try_decode_four_byte_escape(String* s, Item* result) {
     decoded[1] = (char)b1;
     decoded[2] = (char)b2;
     decoded[3] = (char)b3;
-    *result = (Item){.item = s2it(heap_strcpy(decoded, 4))};
+    *result = js_uri_make_four_byte_string(decoded);
     g_uri_last_four_byte_string = *result;
     g_uri_last_four_byte_cp = cp;
     g_uri_last_four_byte_epoch = js_get_heap_epoch();

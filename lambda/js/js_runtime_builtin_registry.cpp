@@ -481,6 +481,7 @@ const JsBuiltinMethodSpec JS_ATOMICS_METHOD_SPECS[] = {
     {"store", 5, JS_BUILTIN_ATOMICS_STORE, 3},
     {"sub", 3, JS_BUILTIN_ATOMICS_SUB, 3},
     {"wait", 4, JS_BUILTIN_ATOMICS_WAIT, 4},
+    {"waitAsync", 9, JS_BUILTIN_ATOMICS_WAIT_ASYNC, 4},
     {"xor", 3, JS_BUILTIN_ATOMICS_XOR, 3},
     {NULL, 0, 0, 0}
 };
