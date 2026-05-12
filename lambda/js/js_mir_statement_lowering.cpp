@@ -1386,7 +1386,8 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
 
     // Only evaluate first arg eagerly for built-in types
     MIR_reg_t first_arg = 0;
-    if (is_builtin && call->arguments) {
+    if (is_builtin && call->arguments &&
+        !(ctor_len == 4 && strncmp(ctor_name, "Date", 4) == 0 && arg_count >= 2)) {
         first_arg = jm_transpile_box_item(mt, call->arguments);
     }
 

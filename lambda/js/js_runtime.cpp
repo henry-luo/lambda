@@ -1137,7 +1137,7 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 if (argc == 0) return js_date_new();
                 if (argc == 1) return js_date_new_from(args[0]);
                 // Multi-arg: pack into an array and call js_date_new_multi
-                Item arr = js_array_new(argc);
+                Item arr = js_array_new(0);
                 for (int i = 0; i < argc; i++) js_array_push(arr, args[i]);
                 return js_date_new_multi(arr);
             }
@@ -2912,6 +2912,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                             (nl == 6 && strncmp(nm, "String", 6) == 0) ||
                             (nl == 6 && strncmp(nm, "Number", 6) == 0) ||
                             (nl == 7 && strncmp(nm, "Boolean", 7) == 0) ||
+                            (nl == 6 && strncmp(nm, "BigInt", 6) == 0) ||
                             (nl == 6 && strncmp(nm, "Object", 6) == 0) ||
                             (nl == 8 && strncmp(nm, "Function", 8) == 0) ||
                             (nl == 4 && strncmp(nm, "Date", 4) == 0) ||
@@ -3039,6 +3040,13 @@ extern "C" Item js_property_get(Item object, Item key) {
                             js_property_set(fn->prototype, tag_key, tag_val);
                             js_mark_non_enumerable(fn->prototype, tag_key);
                         }
+                        if (nl == 6 && strncmp(nm, "BigInt", 6) == 0) {
+                            Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
+                            Item tag_val = (Item){.item = s2it(heap_create_name("BigInt", 6))};
+                            js_property_set(fn->prototype, tag_key, tag_val);
+                            js_mark_non_writable(fn->prototype, tag_key);
+                            js_mark_non_enumerable(fn->prototype, tag_key);
+                        }
                         // v41: Set Symbol.toStringTag on Map/Set/WeakMap/WeakSet prototypes
                         bool needs_tostring_tag =
                             (nl == 3 && strncmp(nm, "Map", 3) == 0) ||
@@ -3096,6 +3104,9 @@ extern "C" Item js_property_get(Item object, Item key) {
                         }
                         // v82b: Populate Number.prototype methods
                         if (nl == 6 && strncmp(nm, "Number", 6) == 0) {
+                            js_populate_builtin_prototype_methods(fn->prototype, nm, nl);
+                        }
+                        if (nl == 6 && strncmp(nm, "BigInt", 6) == 0) {
                             js_populate_builtin_prototype_methods(fn->prototype, nm, nl);
                         }
                         // v82c: Populate RegExp.prototype methods
@@ -3383,12 +3394,26 @@ extern "C" Item js_property_get(Item object, Item key) {
                 Item bool_name = (Item){.item = s2it(heap_create_name("Boolean", 7))};
                 return js_get_constructor(bool_name);
             }
+            if (type == LMD_TYPE_DECIMAL && js_is_bigint(object)) {
+                Item bigint_name = (Item){.item = s2it(heap_create_name("BigInt", 6))};
+                return js_get_constructor(bigint_name);
+            }
         }
-        // v83: __proto__ for number and boolean primitives
+        // v83: __proto__ for number, boolean, and BigInt primitives
         if (str_key->len == 9 && strncmp(str_key->chars, "__proto__", 9) == 0) {
             if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT ||
-                type == LMD_TYPE_BOOL) {
+                type == LMD_TYPE_BOOL || (type == LMD_TYPE_DECIMAL && js_is_bigint(object))) {
                 return js_get_prototype_of(object);
+            }
+        }
+        if (type == LMD_TYPE_DECIMAL && js_is_bigint(object)) {
+            Item proto = js_get_prototype_of(object);
+            if (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP) {
+                Item saved_receiver = js_proxy_receiver;
+                js_proxy_receiver = object;
+                Item result = js_property_get(proto, key);
+                js_proxy_receiver = saved_receiver;
+                if (get_type_id(result) != LMD_TYPE_UNDEFINED) return result;
             }
         }
         Item builtin = js_lookup_builtin_method(type, str_key->chars, str_key->len);
@@ -5674,6 +5699,10 @@ extern "C" Item js_json_parse(Item str_item);
 extern "C" Item js_json_parse_full(Item str_item, Item reviver);
 extern "C" Item js_json_stringify(Item value);
 extern "C" Item js_json_stringify_full(Item value, Item replacer, Item space);
+extern "C" Item js_json_raw_json(Item text);
+extern "C" Item js_json_is_raw_json_builtin(Item value);
+extern "C" Item js_bigint_as_int_n(Item bits_item, Item bigint_item);
+extern "C" Item js_bigint_as_uint_n(Item bits_item, Item bigint_item);
 extern "C" Item js_get_prototype(Item object);
 
 // Resolve typed array type ID from constructor function name
@@ -7079,7 +7108,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         Item global = js_new_object();
         static const struct { const char* name; int len; } ctor_names[] = {
             {"Object", 6}, {"Array", 5}, {"Function", 8},
-            {"String", 6}, {"Number", 6}, {"Boolean", 7}, {"Symbol", 6},
+            {"String", 6}, {"Number", 6}, {"Boolean", 7}, {"Symbol", 6}, {"BigInt", 6},
             {"Error", 5}, {"TypeError", 9}, {"RangeError", 10},
             {"ReferenceError", 14}, {"SyntaxError", 11}, {"URIError", 8},
             {"EvalError", 9}, {"AggregateError", 14}, {"RegExp", 6},
@@ -7392,6 +7421,39 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         return js_number_method(num_val, method_name, args, arg_count);
     }
 
+    case JS_BUILTIN_BIGINT_TO_STRING:
+    case JS_BUILTIN_BIGINT_VALUE_OF:
+    case JS_BUILTIN_BIGINT_TO_LOCALE_STRING: {
+        Item bigint_val = this_val;
+        TypeId tv_type = get_type_id(this_val);
+        if (tv_type == LMD_TYPE_MAP && js_class_id(this_val) == JS_CLASS_BIGINT) {
+            bool pv_own = false;
+            Item pv = js_map_get_fast(this_val.map, "__primitiveValue__", 18, &pv_own);
+            if (pv_own && js_is_bigint(pv)) {
+                bigint_val = pv;
+            } else {
+                return js_throw_type_error("BigInt.prototype method requires that 'this' be a BigInt");
+            }
+        } else if (!js_is_bigint(this_val)) {
+            return js_throw_type_error("BigInt.prototype method requires that 'this' be a BigInt");
+        }
+        const char* mname = "toString";
+        if (builtin_id == JS_BUILTIN_BIGINT_VALUE_OF) mname = "valueOf";
+        else if (builtin_id == JS_BUILTIN_BIGINT_TO_LOCALE_STRING) mname = "toLocaleString";
+        Item method_name = {.item = s2it(heap_create_name(mname, strlen(mname)))};
+        return js_number_method(bigint_val, method_name, args, arg_count);
+    }
+    case JS_BUILTIN_BIGINT_AS_INT_N: {
+        Item bits = (arg_count > 0) ? args[0] : undef;
+        Item value = (arg_count > 1) ? args[1] : undef;
+        return js_bigint_as_int_n(bits, value);
+    }
+    case JS_BUILTIN_BIGINT_AS_UINT_N: {
+        Item bits = (arg_count > 0) ? args[0] : undef;
+        Item value = (arg_count > 1) ? args[1] : undef;
+        return js_bigint_as_uint_n(bits, value);
+    }
+
     // Symbol.prototype.toString — handles both primitives and wrapper objects
     case JS_BUILTIN_SYM_TO_STRING: {
         Item sym = this_val;
@@ -7515,6 +7577,14 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             return js_json_stringify_full(arg0, replacer, space);
         }
         return js_json_stringify(arg0);
+    }
+    case JS_BUILTIN_JSON_RAW_JSON: {
+        Item arg0 = (arg_count > 0) ? args[0] : undef;
+        return js_json_raw_json(arg0);
+    }
+    case JS_BUILTIN_JSON_IS_RAW_JSON: {
+        Item arg0 = (arg_count > 0) ? args[0] : undef;
+        return js_json_is_raw_json_builtin(arg0);
     }
 
     // v45: Date.prototype methods — dispatch to js_date_method / js_date_setter
@@ -18920,6 +18990,8 @@ extern "C" void js_set_prototype(Item object, Item prototype) {
     }
     // P10d: use interned __proto__ key.
     Item key = js_get_proto_key();
+    js_property_set(object, (Item){.item = s2it(heap_create_name("__json_own_proto__", 18))},
+        (Item){.item = ITEM_FALSE});
     js_property_set(object, key, proto_to_store);
 }
 
@@ -19047,6 +19119,7 @@ extern "C" Item js_to_object(Item value) {
         js_property_set(obj, cn_key, cn_val);
         Item pv_key = (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))};
         js_property_set(obj, pv_key, value);
+        js_wrapper_set_proto(obj, "BigInt", 6);
         return obj;
     }
     // null and undefined throw TypeError in spec, but return empty object here for safety
@@ -19123,6 +19196,9 @@ extern "C" void js_link_base_prototype(Item proto_marker, Item base_ctor) {
 extern "C" Item js_get_prototype(Item object) {
     if (get_type_id(object) != LMD_TYPE_MAP) return ItemNull;
     Map* m = object.map;
+    bool json_own_proto = false;
+    Item json_own_proto_val = js_map_get_fast_ext(m, "__json_own_proto__", 18, &json_own_proto);
+    if (json_own_proto && js_is_truthy(json_own_proto_val)) return ItemNull;
     // ES [[GetPrototypeOf]] is an internal slot — independent of any user-
     // defined __proto__ accessor on Object.prototype. If the own __proto__
     // slot has been redefined via Object.defineProperty as an accessor (e.g.
