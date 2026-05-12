@@ -1013,8 +1013,8 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 js_pending_new_target = ItemNull;
                 js_has_pending_new_target = false;
                 Item arg = (argc > 0 && args) ? args[0] : ItemNull;
-                int off = (argc > 1 && args) ? (int)js_get_number(args[1]) : 0;
-                int tlen = (argc > 2 && args) ? (int)js_get_number(args[2]) : -1;
+                Item off = (argc > 1 && args) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
+                Item tlen = (argc > 2 && args) ? args[2] : (Item){.item = ITEM_JS_UNDEFINED};
                 return js_typed_array_construct(ta_type, arg, off, tlen, argc);
             }
 
@@ -1257,8 +1257,8 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
         int subclass_ta_type = js_resolve_ta_type_from_class_map(callee);
         if (subclass_ta_type >= 0) {
             Item arg = (argc > 0 && args) ? args[0] : ItemNull;
-            int off = (argc > 1 && args) ? (int)js_get_number(args[1]) : 0;
-            int tlen = (argc > 2 && args) ? (int)js_get_number(args[2]) : -1;
+            Item off = (argc > 1 && args) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
+            Item tlen = (argc > 2 && args) ? args[2] : (Item){.item = ITEM_JS_UNDEFINED};
             Item result = js_typed_array_construct(subclass_ta_type, arg, off, tlen, argc);
             if (get_type_id(result) == LMD_TYPE_MAP) {
                 js_set_prototype(result, instance_proto);

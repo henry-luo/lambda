@@ -5559,7 +5559,7 @@ extern Item js_weakset_new();
 extern Item js_promise_create(Item executor);
 extern Item js_arraybuffer_construct(Item length);
 extern Item js_dataview_new(Item buffer, Item offset, Item length);
-extern Item js_typed_array_construct(int type, Item arg, int offset, int len, int argc);
+extern Item js_typed_array_construct(int type, Item arg, Item offset, Item len, int argc);
 extern Item js_throw_type_error(const char* msg);
 
 // Check if a function value is a constructor (has [[Construct]] internal method).
@@ -5875,19 +5875,21 @@ extern "C" Item js_reflect_construct(Item target, Item args_array, Item new_targ
             // TypedArrays
             {
                 int ta_type = -1;
-                if      (nl == 9  && strncmp(n, "Int8Array", 9) == 0)           ta_type = 0;
-                else if (nl == 10 && strncmp(n, "Uint8Array", 10) == 0)         ta_type = 1;
-                else if (nl == 17 && strncmp(n, "Uint8ClampedArray", 17) == 0)  ta_type = 2;
-                else if (nl == 10 && strncmp(n, "Int16Array", 10) == 0)         ta_type = 3;
-                else if (nl == 11 && strncmp(n, "Uint16Array", 11) == 0)        ta_type = 4;
-                else if (nl == 10 && strncmp(n, "Int32Array", 10) == 0)         ta_type = 5;
-                else if (nl == 11 && strncmp(n, "Uint32Array", 11) == 0)        ta_type = 6;
-                else if (nl == 12 && strncmp(n, "Float32Array", 12) == 0)       ta_type = 7;
-                else if (nl == 12 && strncmp(n, "Float64Array", 12) == 0)       ta_type = 8;
+                if      (nl == 9  && strncmp(n, "Int8Array", 9) == 0)           ta_type = JS_TYPED_INT8;
+                else if (nl == 10 && strncmp(n, "Uint8Array", 10) == 0)         ta_type = JS_TYPED_UINT8;
+                else if (nl == 17 && strncmp(n, "Uint8ClampedArray", 17) == 0)  ta_type = JS_TYPED_UINT8_CLAMPED;
+                else if (nl == 10 && strncmp(n, "Int16Array", 10) == 0)         ta_type = JS_TYPED_INT16;
+                else if (nl == 11 && strncmp(n, "Uint16Array", 11) == 0)        ta_type = JS_TYPED_UINT16;
+                else if (nl == 10 && strncmp(n, "Int32Array", 10) == 0)         ta_type = JS_TYPED_INT32;
+                else if (nl == 11 && strncmp(n, "Uint32Array", 11) == 0)        ta_type = JS_TYPED_UINT32;
+                else if (nl == 12 && strncmp(n, "Float32Array", 12) == 0)       ta_type = JS_TYPED_FLOAT32;
+                else if (nl == 12 && strncmp(n, "Float64Array", 12) == 0)       ta_type = JS_TYPED_FLOAT64;
+                else if (nl == 13 && strncmp(n, "BigInt64Array", 13) == 0)      ta_type = JS_TYPED_BIGINT64;
+                else if (nl == 14 && strncmp(n, "BigUint64Array", 14) == 0)     ta_type = JS_TYPED_BIGUINT64;
                 if (ta_type >= 0) {
                     Item arg = (argc > 0) ? args[0] : ItemNull;
-                    int off = (argc > 1) ? (int)it2i(args[1]) : 0;
-                    int tlen = (argc > 2) ? (int)it2i(args[2]) : -1;
+                    Item off = (argc > 1) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
+                    Item tlen = (argc > 2) ? args[2] : (Item){.item = ITEM_JS_UNDEFINED};
                     return fixup_proto(js_typed_array_construct(ta_type, arg, off, tlen, argc));
                 }
             }
@@ -13353,9 +13355,14 @@ extern "C" Item js_get_typed_array_per_type_proto(int element_type) {
     Item bpe_val = (Item){.item = i2it(bytes_per)};
     js_property_set(per_type, bpe_key, bpe_val);
     js_mark_non_enumerable(per_type, bpe_key);
+    js_mark_non_writable(per_type, bpe_key);
+    js_mark_non_configurable(per_type, bpe_key);
 
     // Also set BYTES_PER_ELEMENT on the constructor itself (static property)
     js_func_init_property(ctor, bpe_key, bpe_val);
+    js_mark_non_enumerable(ctor, bpe_key);
+    js_mark_non_writable(ctor, bpe_key);
+    js_mark_non_configurable(ctor, bpe_key);
 
     // Set the constructor's .prototype to this per-type proto
     JsFunctionLayout* fn = (JsFunctionLayout*)ctor.function;

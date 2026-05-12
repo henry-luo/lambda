@@ -19,6 +19,8 @@ extern "C" int js_check_exception(void);
 extern "C" Item js_get_constructor(Item name_item);
 extern "C" Item js_property_get(Item object, Item key);
 extern "C" void js_set_prototype(Item object, Item prototype);
+extern "C" Item js_iterable_to_array(Item iterable);
+extern "C" bool js_is_generator(Item obj);
 extern Item js_to_number(Item);
 extern "C" Item js_bigint_constructor(Item value);
 extern "C" Item js_bigint_as_int_n(Item bits_item, Item bigint_item);
@@ -780,6 +782,8 @@ extern "C" const char* js_typed_array_type_name(Item val) {
 // ArrayBuffer
 // ============================================================================
 
+static JsArrayBuffer* js_get_arraybuffer_ptr(Map* m);
+
 static JsArrayBuffer* js_arraybuffer_alloc(int byte_length) {
     JsArrayBuffer* ab = (JsArrayBuffer*)mem_alloc(sizeof(JsArrayBuffer), MEM_CAT_JS_RUNTIME);
     ab->byte_length = byte_length;
@@ -789,6 +793,13 @@ static JsArrayBuffer* js_arraybuffer_alloc(int byte_length) {
     ab->is_shared = false;
     ab->resizable = false;
     return ab;
+}
+
+static void js_arraybuffer_link_prototype(Item buffer_item, bool is_shared) {
+    Item ctor = js_get_constructor((Item){.item = s2it(heap_create_name(is_shared ? "SharedArrayBuffer" : "ArrayBuffer"))});
+    if (get_type_id(ctor) != LMD_TYPE_FUNC) return;
+    Item proto = js_property_get(ctor, (Item){.item = s2it(heap_create_name("prototype"))});
+    if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(buffer_item, proto);
 }
 
 extern "C" Item js_arraybuffer_new(int byte_length) {
@@ -802,7 +813,9 @@ extern "C" Item js_arraybuffer_new(int byte_length) {
     m->data = ab;
     m->data_cap = 0;
 
-    return (Item){.map = m};
+    Item result = (Item){.map = m};
+    js_arraybuffer_link_prototype(result, ab->is_shared);
+    return result;
 }
 
 // ArrayBuffer constructor from JS: new ArrayBuffer(length)
@@ -831,7 +844,7 @@ extern "C" Item js_arraybuffer_construct_resizable(Item length_arg, Item options
 
     Item result = js_arraybuffer_new(byte_length);
     if (js_is_arraybuffer(result)) {
-        JsArrayBuffer* ab = (JsArrayBuffer*)result.map->data;
+        JsArrayBuffer* ab = js_get_arraybuffer_ptr(result.map);
         if (ab) {
             ab->max_byte_length = max_byte_length;
             ab->resizable = resizable;
@@ -867,10 +880,12 @@ extern "C" Item js_arraybuffer_wrap(JsArrayBuffer* ab) {
     Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     m->type_id = LMD_TYPE_MAP;
     m->map_kind = MAP_KIND_ARRAYBUFFER;
-    m->type = (void*)&js_arraybuffer_type_marker;
+    m->type = ab->is_shared ? (void*)&js_sharedarraybuffer_type_marker : (void*)&js_arraybuffer_type_marker;
     m->data = ab;
     m->data_cap = 0;
-    return (Item){.map = m};
+    Item result = (Item){.map = m};
+    js_arraybuffer_link_prototype(result, ab->is_shared);
+    return result;
 }
 
 extern "C" int js_arraybuffer_byte_length(Item val) {
@@ -1206,31 +1221,39 @@ extern "C" Item js_typed_array_new(int type_id, int length) {
 extern "C" Item js_typed_array_new_from_buffer(int type_id, Item buffer_item, int byte_offset, int length) {
     if (!js_is_arraybuffer(buffer_item)) {
         log_error("js_typed_array_new_from_buffer: argument is not an ArrayBuffer");
-        return js_typed_array_new(type_id, 0);
+        return js_throw_type_error("TypedArray buffer argument must be an ArrayBuffer");
     }
     JsArrayBuffer* ab = js_get_arraybuffer_ptr(buffer_item.map);
     JsTypedArrayType arr_type = (JsTypedArrayType)type_id;
     int elem_size = typed_array_element_size(arr_type);
 
-    if (byte_offset < 0) byte_offset = 0;
+    if (ab->detached) {
+        return js_throw_type_error("Cannot construct TypedArray from detached ArrayBuffer");
+    }
+    if (byte_offset < 0) {
+        return js_throw_range_error("Invalid typed array byteOffset");
+    }
     if (byte_offset % elem_size != 0) {
         log_error("js_typed_array_new_from_buffer: byte_offset %d not aligned to element size %d", byte_offset, elem_size);
-        byte_offset = (byte_offset / elem_size) * elem_size;
+        return js_throw_range_error("Invalid typed array byteOffset");
+    }
+    if (byte_offset > ab->byte_length) {
+        return js_throw_range_error("Invalid typed array byteOffset");
     }
 
     int available = ab->byte_length - byte_offset;
-    if (available < 0) available = 0;
 
     bool length_tracking = length < 0;
     if (length_tracking) {
-        // auto-compute length from remaining buffer
+        if (available % elem_size != 0) {
+            return js_throw_range_error("Invalid typed array byteLength");
+        }
         length = available / elem_size;
     }
     int byte_length = length * elem_size;
-    if (byte_offset + byte_length > ab->byte_length) {
+    if (length < 0 || byte_length < 0 || byte_offset + byte_length > ab->byte_length) {
         log_error("js_typed_array_new_from_buffer: view exceeds buffer bounds");
-        length = available / elem_size;
-        byte_length = length * elem_size;
+        return js_throw_range_error("Invalid typed array length");
     }
 
     JsTypedArray* ta = (JsTypedArray*)mem_alloc(sizeof(JsTypedArray), MEM_CAT_JS_RUNTIME);
@@ -1300,13 +1323,18 @@ extern "C" Item js_typed_array_new_from_array(int type_id, Item source) {
 }
 
 // Smart constructor: dispatches based on argument type
-extern "C" Item js_typed_array_construct(int type_id, Item arg, int byte_offset, int length, int argc) {
+extern "C" Item js_typed_array_construct(int type_id, Item arg, Item byte_offset_item, Item length_item, int argc) {
     if (argc == 0) {
         return js_typed_array_new(type_id, 0);
     }
 
     // Check if arg is an ArrayBuffer
     if (js_is_arraybuffer(arg)) {
+        int byte_offset = 0;
+        if (argc > 1 && !js_dataview_to_index(byte_offset_item, &byte_offset)) return ItemNull;
+        int length = -1;
+        if (argc > 2 && get_type_id(length_item) != LMD_TYPE_UNDEFINED &&
+            !js_dataview_to_index(length_item, &length)) return ItemNull;
         return js_typed_array_new_from_buffer(type_id, arg, byte_offset, length);
     }
 
@@ -1316,6 +1344,42 @@ extern "C" Item js_typed_array_construct(int type_id, Item arg, int byte_offset,
         return js_typed_array_new_from_array(type_id, arg);
     }
 
+    if (arg_type == LMD_TYPE_MAP || arg_type == LMD_TYPE_ELEMENT || arg_type == LMD_TYPE_FUNC || js_is_generator(arg)) {
+        Item iter_method = (Item){.item = ITEM_JS_UNDEFINED};
+        if (js_is_generator(arg)) {
+            Item values = js_iterable_to_array(arg);
+            if (js_check_exception()) return ItemNull;
+            return js_typed_array_new_from_array(type_id, values);
+        }
+        Item iter_key = (Item){.item = s2it(heap_create_name("__sym_1"))};
+        iter_method = js_property_get(arg, iter_key);
+        if (js_check_exception()) return ItemNull;
+        TypeId iter_type = get_type_id(iter_method);
+        bool has_iter = iter_type != LMD_TYPE_UNDEFINED && iter_type != LMD_TYPE_NULL && iter_method.item != ITEM_JS_UNDEFINED;
+        if (has_iter) {
+            if (iter_type != LMD_TYPE_FUNC) {
+                return js_throw_type_error("@@iterator is not callable");
+            }
+            Item values = js_iterable_to_array(arg);
+            if (js_check_exception()) return ItemNull;
+            return js_typed_array_new_from_array(type_id, values);
+        }
+
+        Item length_key = (Item){.item = s2it(heap_create_name("length"))};
+        Item length_value = js_property_get(arg, length_key);
+        if (js_check_exception()) return ItemNull;
+        int len = 0;
+        if (!js_dataview_to_index(length_value, &len)) return ItemNull;
+        Item result = js_typed_array_new(type_id, len);
+        for (int i = 0; i < len; i++) {
+            Item value = js_property_get(arg, (Item){.item = i2it(i)});
+            if (js_check_exception()) return ItemNull;
+            js_typed_array_set(result, (Item){.item = i2it(i)}, value);
+            if (js_check_exception()) return ItemNull;
+        }
+        return result;
+    }
+
     // Symbol/BigInt cannot be converted to number (ES spec: ToIndex → ToNumber throws)
     // JS symbols are encoded as negative ints (LMD_TYPE_INT with value <= -(1LL << 40))
     if (arg_type == LMD_TYPE_SYMBOL || 
@@ -1323,10 +1387,9 @@ extern "C" Item js_typed_array_construct(int type_id, Item arg, int byte_offset,
         return js_throw_type_error("Cannot convert a Symbol value to a number");
     }
 
-    // Number: create typed array with that length
-    if (arg_type == LMD_TYPE_INT || arg_type == LMD_TYPE_FLOAT) {
-        int len = (int)it2i(arg);
-        if (len < 0) len = 0;
+    if (arg_type != LMD_TYPE_MAP && arg_type != LMD_TYPE_ARRAY && arg_type != LMD_TYPE_FUNC) {
+        int len = 0;
+        if (!js_dataview_to_index(arg, &len)) return ItemNull;
         return js_typed_array_new(type_id, len);
     }
 
