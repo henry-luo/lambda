@@ -1064,17 +1064,51 @@ Item bigint_from_string(const char* str, int len) {
             mpd_del(sixteen); mpd_del(digit); mpd_del(temp);
         }
     } else if (len > 2 && buf[0] == '0' && (buf[1] == 'o' || buf[1] == 'O')) {
-        // octal
-        char* endptr;
-        unsigned long long uval = strtoull(buf + 2, &endptr, 8);
-        if (*endptr != '\0') { mpd_del(dec_val); return ItemError; }
-        mpd_set_u64(dec_val, uval, ctx);
+        const char* oct = buf + 2;
+        int oct_len = len - 2;
+        mpd_set_u32(dec_val, 0, ctx);
+        mpd_t* eight = mpd_new(ctx);
+        mpd_t* digit = mpd_new(ctx);
+        mpd_t* temp = mpd_new(ctx);
+        if (!eight || !digit || !temp) {
+            if (eight) mpd_del(eight);
+            if (digit) mpd_del(digit);
+            if (temp) mpd_del(temp);
+            mpd_del(dec_val);
+            return ItemError;
+        }
+        mpd_set_u32(eight, 8, ctx);
+        for (int i = 0; i < oct_len; i++) {
+            char c = oct[i];
+            if (c < '0' || c > '7') { mpd_del(eight); mpd_del(digit); mpd_del(temp); mpd_del(dec_val); return ItemError; }
+            mpd_mul(temp, dec_val, eight, ctx);
+            mpd_set_u32(digit, (uint32_t)(c - '0'), ctx);
+            mpd_add(dec_val, temp, digit, ctx);
+        }
+        mpd_del(eight); mpd_del(digit); mpd_del(temp);
     } else if (len > 2 && buf[0] == '0' && (buf[1] == 'b' || buf[1] == 'B')) {
-        // binary
-        char* endptr;
-        unsigned long long uval = strtoull(buf + 2, &endptr, 2);
-        if (*endptr != '\0') { mpd_del(dec_val); return ItemError; }
-        mpd_set_u64(dec_val, uval, ctx);
+        const char* bin = buf + 2;
+        int bin_len = len - 2;
+        mpd_set_u32(dec_val, 0, ctx);
+        mpd_t* two = mpd_new(ctx);
+        mpd_t* digit = mpd_new(ctx);
+        mpd_t* temp = mpd_new(ctx);
+        if (!two || !digit || !temp) {
+            if (two) mpd_del(two);
+            if (digit) mpd_del(digit);
+            if (temp) mpd_del(temp);
+            mpd_del(dec_val);
+            return ItemError;
+        }
+        mpd_set_u32(two, 2, ctx);
+        for (int i = 0; i < bin_len; i++) {
+            char c = bin[i];
+            if (c != '0' && c != '1') { mpd_del(two); mpd_del(digit); mpd_del(temp); mpd_del(dec_val); return ItemError; }
+            mpd_mul(temp, dec_val, two, ctx);
+            mpd_set_u32(digit, (uint32_t)(c - '0'), ctx);
+            mpd_add(dec_val, temp, digit, ctx);
+        }
+        mpd_del(two); mpd_del(digit); mpd_del(temp);
     } else {
         // decimal string — ES spec: only digits allowed (with optional leading +/-)
         // reject decimal points, exponents, Infinity, NaN

@@ -42,6 +42,12 @@ static inline bool result_is_object(TypeId rt) {
     return is_object_type(rt);
 }
 
+static inline bool js_coerce_is_bigint(Item value) {
+    if (get_type_id(value) != LMD_TYPE_DECIMAL) return false;
+    Decimal* dec = (Decimal*)(value.item & 0x00FFFFFFFFFFFFFF);
+    return dec && dec->unlimited == DECIMAL_BIGINT;
+}
+
 extern "C" Item js_to_primitive(Item value, JsHint hint) {
     TypeId vt = get_type_id(value);
     if (!is_object_type(vt)) return value;
@@ -58,7 +64,7 @@ extern "C" Item js_to_primitive(Item value, JsHint hint) {
     if (vt == LMD_TYPE_MAP) {
         bool own_pv = false;
         Item pv = js_map_get_fast_ext(value.map, "__primitiveValue__", 18, &own_pv);
-        if (own_pv) {
+        if (own_pv && !js_coerce_is_bigint(pv)) {
             bool has_vo = false, has_ts = false, has_tp = false;
             js_map_get_fast_ext(value.map, "valueOf", 7, &has_vo);
             js_map_get_fast_ext(value.map, "toString", 8, &has_ts);

@@ -487,12 +487,14 @@ extern "C" Item js_to_string(Item value) {
             // delegate to js_date_method(obj, 17=toString)
             return js_date_method(value, 17);
         }
+        bool bigint_wrapper = false;
         // Wrapper objects with __primitiveValue__ (e.g. new Number(42), new String("hi"))
         // Skip fast path if custom toString/valueOf/@@toPrimitive exists on the object
         {
             bool own_pv = false;
             Item pv = js_map_get_fast(value.map, "__primitiveValue__", 18, &own_pv);
-            if (own_pv) {
+            bigint_wrapper = own_pv && js_is_bigint(pv);
+            if (own_pv && !js_is_bigint(pv)) {
                 bool has_own_vo = false, has_own_ts = false, has_own_tp = false;
                 js_map_get_fast(value.map, "valueOf", 7, &has_own_vo);
                 js_map_get_fast(value.map, "toString", 8, &has_own_ts);
@@ -549,7 +551,7 @@ extern "C" Item js_to_string(Item value) {
             }
             // valueOf fallback — only when toString was found (own or prototype)
             // If toString wasn't found, prototype chain isn't set up — use default "[object Object]"
-            if (ts_found) {
+            if (ts_found || bigint_wrapper) {
                 bool vo_callable = false;
                 // v90: Use js_property_get for valueOf to handle getter-defined valueOf
                 // (e.g., {toString: null, get valueOf() { throw ... }})
@@ -1815,19 +1817,58 @@ extern "C" Item js_bigint_constructor(Item value) {
     return ItemNull;
 }
 
+static Item js_to_bigint_for_bigint_op(Item value) {
+    if (js_is_bigint(value)) return value;
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_FUNC || type == LMD_TYPE_ELEMENT) {
+        Item prim = js_to_primitive(value, JS_HINT_NUMBER);
+        if (js_check_exception()) return ItemNull;
+        return js_to_bigint_for_bigint_op(prim);
+    }
+    if (type == LMD_TYPE_BOOL) return bigint_from_int64(js_is_truthy(value) ? 1 : 0);
+    if (type == LMD_TYPE_STRING) {
+        String* s = it2s(value);
+        if (s) {
+            Item bi = bigint_from_string(s->chars, s->len);
+            if (bi.item != ItemError.item) return bi;
+        }
+        js_throw_syntax_error((Item){.item = s2it(heap_create_name("Cannot convert string to a BigInt"))});
+        return ItemNull;
+    }
+    js_throw_type_error("Cannot convert value to a BigInt");
+    return ItemNull;
+}
+
+static bool js_bigint_to_index(Item value, int64_t* out_bits) {
+    if (js_is_symbol(value)) {
+        js_throw_type_error("Cannot convert a Symbol value to a number");
+        return false;
+    }
+    Item num = js_to_number(value);
+    if (js_check_exception()) return false;
+    if (js_is_symbol(num)) {
+        js_throw_type_error("Cannot convert a Symbol value to a number");
+        return false;
+    }
+    double d = js_get_number(num);
+    double integer_index;
+    if (d != d || d == 0.0) integer_index = 0.0;
+    else if (d == INFINITY || d == -INFINITY) integer_index = d;
+    else integer_index = d < 0.0 ? ceil(d) : floor(d);
+    if (integer_index < 0.0 || integer_index > 9007199254740991.0 || integer_index == INFINITY) {
+        js_throw_range_error("Invalid value: not a valid index");
+        return false;
+    }
+    *out_bits = (int64_t)integer_index;
+    return true;
+}
+
 extern "C" Item js_bigint_as_int_n(Item bits_item, Item bigint_item) {
     // BigInt.asIntN(bits, bigintValue) — clamp to signed N-bit range
     // ES spec: mod = bigintValue mod 2^bits; if mod >= 2^(bits-1) return mod - 2^bits, else mod
-    Item bits_num = js_to_number(bits_item);
-    if (js_check_exception()) return ItemNull;
     int64_t bits = 0;
-    TypeId bt = get_type_id(bits_num);
-    if (bt == LMD_TYPE_INT) bits = it2i(bits_num);
-    else if (bt == LMD_TYPE_FLOAT) bits = (int64_t)it2d(bits_num);
-    if (bits < 0) {
-        return js_throw_range_error("Invalid value: not a non-negative integer");
-    }
-    Item bigint_val = js_bigint_constructor(bigint_item);
+    if (!js_bigint_to_index(bits_item, &bits)) return ItemNull;
+    Item bigint_val = js_to_bigint_for_bigint_op(bigint_item);
     if (js_check_exception()) return ItemNull;
     if (bits == 0) return bigint_from_int64(0);
     // 2^bits
@@ -1850,16 +1891,9 @@ extern "C" Item js_bigint_as_int_n(Item bits_item, Item bigint_item) {
 extern "C" Item js_bigint_as_uint_n(Item bits_item, Item bigint_item) {
     // BigInt.asUintN(bits, bigintValue) — clamp to unsigned N-bit range
     // ES spec: return bigintValue mod 2^bits
-    Item bits_num = js_to_number(bits_item);
-    if (js_check_exception()) return ItemNull;
     int64_t bits = 0;
-    TypeId bt = get_type_id(bits_num);
-    if (bt == LMD_TYPE_INT) bits = it2i(bits_num);
-    else if (bt == LMD_TYPE_FLOAT) bits = (int64_t)it2d(bits_num);
-    if (bits < 0) {
-        return js_throw_range_error("Invalid value: not a non-negative integer");
-    }
-    Item bigint_val = js_bigint_constructor(bigint_item);
+    if (!js_bigint_to_index(bits_item, &bits)) return ItemNull;
+    Item bigint_val = js_to_bigint_for_bigint_op(bigint_item);
     if (js_check_exception()) return ItemNull;
     if (bits == 0) return bigint_from_int64(0);
     Item two = bigint_from_int64(2);

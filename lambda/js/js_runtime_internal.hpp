@@ -248,6 +248,12 @@ enum JsBuiltinId {
     JS_BUILTIN_NUM_TO_FIXED,
     JS_BUILTIN_NUM_TO_PRECISION,
     JS_BUILTIN_NUM_TO_EXPONENTIAL,
+    // BigInt.prototype methods
+    JS_BUILTIN_BIGINT_TO_STRING,
+    JS_BUILTIN_BIGINT_VALUE_OF,
+    JS_BUILTIN_BIGINT_TO_LOCALE_STRING,
+    JS_BUILTIN_BIGINT_AS_INT_N,
+    JS_BUILTIN_BIGINT_AS_UINT_N,
     // Symbol.prototype methods
     JS_BUILTIN_SYM_TO_STRING,
     JS_BUILTIN_SYM_DESCRIPTION_GETTER,
@@ -296,6 +302,8 @@ enum JsBuiltinId {
     JS_BUILTIN_MATH_LOG1P,
     JS_BUILTIN_JSON_PARSE,
     JS_BUILTIN_JSON_STRINGIFY,
+    JS_BUILTIN_JSON_RAW_JSON,
+    JS_BUILTIN_JSON_IS_RAW_JSON,
     // String iterator
     JS_BUILTIN_STRING_ITER,      // String.prototype[Symbol.iterator]() — creates string iterator
     JS_BUILTIN_STRING_ITER_NEXT, // String iterator .next()
@@ -577,6 +585,7 @@ bool js_ta_proto_chain_set(Item object, Item key, Item value);
 bool js_array_ta_proto_numeric_set(Item array, Item key, bool* no_op);
 
 static inline bool js_is_symbol(Item v) {
+    if (get_type_id(v) == LMD_TYPE_SYMBOL) return true;
     if (get_type_id(v) != LMD_TYPE_INT) return false;
     return it2i(v) <= -(int64_t)JS_SYMBOL_BASE;
 }

@@ -218,6 +218,19 @@ const JsBuiltinMethodSpec JS_SYMBOL_PROTOTYPE_METHOD_SPECS[] = {
     {NULL, 0, 0, 0}
 };
 
+const JsBuiltinMethodSpec JS_BIGINT_PROTOTYPE_METHOD_SPECS[] = {
+    {"toString", 8, JS_BUILTIN_BIGINT_TO_STRING, 0},
+    {"valueOf", 7, JS_BUILTIN_BIGINT_VALUE_OF, 0},
+    {"toLocaleString", 14, JS_BUILTIN_BIGINT_TO_LOCALE_STRING, 0},
+    {NULL, 0, 0, 0}
+};
+
+const JsBuiltinMethodSpec JS_BIGINT_STATIC_METHOD_SPECS[] = {
+    {"asIntN", 6, JS_BUILTIN_BIGINT_AS_INT_N, 2},
+    {"asUintN", 7, JS_BUILTIN_BIGINT_AS_UINT_N, 2},
+    {NULL, 0, 0, 0}
+};
+
 const JsBuiltinMethodSpec JS_STRING_PROTOTYPE_METHOD_SPECS[] = {
     {"charAt", 6, JS_BUILTIN_STR_CHAR_AT, 1},
     {"charCodeAt", 10, JS_BUILTIN_STR_CHAR_CODE_AT, 1},
@@ -425,6 +438,7 @@ const JsBuiltinMethodSpec JS_DATE_PROTOTYPE_METHOD_SPECS[] = {
     {"toISOString", 11, JS_BUILTIN_DATE_TO_ISO_STRING, 0},
     {"toJSON", 6, JS_BUILTIN_DATE_TO_JSON, 1},
     {"toUTCString", 11, JS_BUILTIN_DATE_TO_UTC_STRING, 0},
+    {"toGMTString", 11, JS_BUILTIN_DATE_TO_UTC_STRING, 0},
     {"toDateString", 12, JS_BUILTIN_DATE_TO_DATE_STRING, 0},
     {"toTimeString", 12, JS_BUILTIN_DATE_TO_TIME_STRING, 0},
     {"toString", 8, JS_BUILTIN_DATE_TO_STRING, 0},
@@ -448,6 +462,8 @@ const JsBuiltinMethodSpec JS_REGEXP_PROTOTYPE_METHOD_SPECS[] = {
 const JsBuiltinMethodSpec JS_JSON_METHOD_SPECS[] = {
     {"parse", 5, JS_BUILTIN_JSON_PARSE, 2},
     {"stringify", 9, JS_BUILTIN_JSON_STRINGIFY, 3},
+    {"rawJSON", 7, JS_BUILTIN_JSON_RAW_JSON, 1},
+    {"isRawJSON", 9, JS_BUILTIN_JSON_IS_RAW_JSON, 1},
     {NULL, 0, 0, 0}
 };
 
@@ -642,6 +658,7 @@ static const JsBuiltinMethodSpec* js_get_constructor_static_method_specs(const c
     if (ctor_len == 4 && strncmp(ctor_name, "Date", 4) == 0) return JS_DATE_STATIC_METHOD_SPECS;
     if (ctor_len == 7 && strncmp(ctor_name, "Promise", 7) == 0) return JS_PROMISE_STATIC_METHOD_SPECS;
     if (ctor_len == 6 && strncmp(ctor_name, "Number", 6) == 0) return JS_NUMBER_STATIC_METHOD_SPECS;
+    if (ctor_len == 6 && strncmp(ctor_name, "BigInt", 6) == 0) return JS_BIGINT_STATIC_METHOD_SPECS;
     if (ctor_len == 3 && strncmp(ctor_name, "Map", 3) == 0) return JS_MAP_STATIC_METHOD_SPECS;
     if (ctor_len == 11 && strncmp(ctor_name, "ArrayBuffer", 11) == 0) return JS_ARRAYBUFFER_STATIC_METHOD_SPECS;
     if (ctor_len == 5 && strncmp(ctor_name, "Proxy", 5) == 0) return JS_PROXY_STATIC_METHOD_SPECS;
@@ -656,6 +673,7 @@ static const JsBuiltinMethodSpec* js_get_prototype_method_specs_for_ctor(const c
     if (ctor_len == 5 && strncmp(ctor_name, "Array", 5) == 0) return JS_ARRAY_PROTOTYPE_METHOD_SPECS;
     if (ctor_len == 8 && strncmp(ctor_name, "Function", 8) == 0) return JS_FUNCTION_PROTOTYPE_METHOD_SPECS;
     if (ctor_len == 6 && strncmp(ctor_name, "Number", 6) == 0) return JS_NUMBER_PROTOTYPE_METHOD_SPECS;
+    if (ctor_len == 6 && strncmp(ctor_name, "BigInt", 6) == 0) return JS_BIGINT_PROTOTYPE_METHOD_SPECS;
     if (ctor_len == 6 && strncmp(ctor_name, "String", 6) == 0) return JS_STRING_PROTOTYPE_METHOD_SPECS;
     if (ctor_len == 7 && strncmp(ctor_name, "Promise", 7) == 0) return JS_PROMISE_PROTOTYPE_METHOD_SPECS;
     if (ctor_len == 3 && strncmp(ctor_name, "Map", 3) == 0) return JS_MAP_PROTOTYPE_METHOD_SPECS;
@@ -673,6 +691,7 @@ static const JsBuiltinMethodSpec* js_get_prototype_method_specs_for_type(TypeId 
     if (type == LMD_TYPE_ARRAY) return JS_ARRAY_PROTOTYPE_METHOD_SPECS;
     if (type == LMD_TYPE_FUNC) return JS_FUNCTION_PROTOTYPE_METHOD_SPECS;
     if (type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT) return JS_NUMBER_PROTOTYPE_METHOD_SPECS;
+    if (type == LMD_TYPE_DECIMAL) return JS_BIGINT_PROTOTYPE_METHOD_SPECS;
     if (type == LMD_TYPE_STRING) return JS_STRING_PROTOTYPE_METHOD_SPECS;
     if (type == LMD_TYPE_BOOL) return JS_BOOLEAN_PROTOTYPE_METHOD_SPECS;
     return NULL;
@@ -687,6 +706,7 @@ static const JsBuiltinMethodSpec* js_get_prototype_method_specs_for_class_or_typ
     case JS_CLASS_FUNCTION: return JS_FUNCTION_PROTOTYPE_METHOD_SPECS;
     case JS_CLASS_BOOLEAN: return JS_BOOLEAN_PROTOTYPE_METHOD_SPECS;
     case JS_CLASS_NUMBER: return JS_NUMBER_PROTOTYPE_METHOD_SPECS;
+    case JS_CLASS_BIGINT: return JS_BIGINT_PROTOTYPE_METHOD_SPECS;
     case JS_CLASS_SYMBOL: return JS_SYMBOL_PROTOTYPE_METHOD_SPECS;
     case JS_CLASS_STRING: return JS_STRING_PROTOTYPE_METHOD_SPECS;
     case JS_CLASS_ARRAY: return JS_ARRAY_PROTOTYPE_METHOD_SPECS;
