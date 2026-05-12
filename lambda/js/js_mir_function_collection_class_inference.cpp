@@ -1450,6 +1450,32 @@ JsClassEntry* jm_find_class(JsMirTranspiler* mt, const char* name, int name_len)
 // evidence: array of evidence counters, one per parameter
 // param_count: number of parameters
 // self_name: function's own name for detecting recursive calls (NULL if none)
+static bool jm_expr_has_bigint_literal(JsAstNode* node) {
+    if (!node) return false;
+    switch (node->node_type) {
+    case JS_AST_NODE_LITERAL: {
+        JsLiteralNode* lit = (JsLiteralNode*)node;
+        return lit->literal_type == JS_LITERAL_NUMBER && lit->is_bigint;
+    }
+    case JS_AST_NODE_BINARY_EXPRESSION: {
+        JsBinaryNode* bin = (JsBinaryNode*)node;
+        return jm_expr_has_bigint_literal(bin->left) || jm_expr_has_bigint_literal(bin->right);
+    }
+    case JS_AST_NODE_UNARY_EXPRESSION: {
+        JsUnaryNode* un = (JsUnaryNode*)node;
+        return jm_expr_has_bigint_literal(un->operand);
+    }
+    case JS_AST_NODE_CONDITIONAL_EXPRESSION: {
+        JsConditionalNode* cond = (JsConditionalNode*)node;
+        return jm_expr_has_bigint_literal(cond->test) ||
+               jm_expr_has_bigint_literal(cond->consequent) ||
+               jm_expr_has_bigint_literal(cond->alternate);
+    }
+    default:
+        return false;
+    }
+}
+
 void jm_infer_walk(JsAstNode* node, const char param_names[][128],
                           JsParamEvidence* evidence, int param_count,
                           const char* self_name) {
@@ -1472,6 +1498,7 @@ void jm_infer_walk(JsAstNode* node, const char param_names[][128],
         if (!n || n->node_type != JS_AST_NODE_LITERAL) return false;
         JsLiteralNode* lit = (JsLiteralNode*)n;
         if (lit->literal_type != JS_LITERAL_NUMBER) return false;
+        if (lit->is_bigint) return false;
         if (lit->has_decimal) return false;  // 999999.0 is NOT an int literal
         double val = lit->value.number_value;
         return val == (double)(int64_t)val;
@@ -1480,6 +1507,7 @@ void jm_infer_walk(JsAstNode* node, const char param_names[][128],
         if (!n || n->node_type != JS_AST_NODE_LITERAL) return false;
         JsLiteralNode* lit = (JsLiteralNode*)n;
         if (lit->literal_type != JS_LITERAL_NUMBER) return false;
+        if (lit->is_bigint) return false;
         if (lit->has_decimal) return true;  // 999999.0 IS a float literal
         return lit->value.number_value != (double)(int64_t)lit->value.number_value;
     };
@@ -1501,6 +1529,8 @@ void jm_infer_walk(JsAstNode* node, const char param_names[][128],
                            bin->op == JS_OP_BIT_RSHIFT || bin->op == JS_OP_BIT_URSHIFT);
 
         if (is_arith) {
+            if (li >= 0 && jm_expr_has_bigint_literal(bin->right)) evidence[li].compared_with_non_numeric = true;
+            if (ri >= 0 && jm_expr_has_bigint_literal(bin->left))  evidence[ri].compared_with_non_numeric = true;
             // Parameter used in arithmetic with int literal → int evidence
             // NOTE: comparisons (< > == etc.) do NOT contribute type evidence,
             // because JS is dynamically typed — e.g. (x < 0) works for both int and float x.
@@ -1951,6 +1981,10 @@ void jm_infer_return_type_walk(JsAstNode* node, const char* self_name,
             JsLiteralNode* lit = (JsLiteralNode*)expr;
             switch (lit->literal_type) {
             case JS_LITERAL_NUMBER: {
+                if (lit->is_bigint) {
+                    t = LMD_TYPE_DECIMAL;
+                    break;
+                }
                 double val = lit->value.number_value;
                 t = (lit->has_decimal || val != (double)(int64_t)val) ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
                 break;
@@ -1971,15 +2005,19 @@ void jm_infer_return_type_walk(JsAstNode* node, const char* self_name,
                 t = LMD_TYPE_BOOL; break;
             case JS_OP_ADD:
                 // + is string concat when any operand is a string
-                if (jm_add_chain_has_string(bin->left) || jm_add_chain_has_string(bin->right))
+                if (jm_expr_has_bigint_literal(expr))
+                    t = LMD_TYPE_ANY;
+                else if (jm_add_chain_has_string(bin->left) || jm_add_chain_has_string(bin->right))
                     t = LMD_TYPE_STRING;
                 else
                     t = LMD_TYPE_INT;
                 break;
             case JS_OP_SUB: case JS_OP_MUL: case JS_OP_MOD:
-                t = LMD_TYPE_INT; break; // approximate — may be float
+                t = jm_expr_has_bigint_literal(expr) ? LMD_TYPE_ANY : LMD_TYPE_INT;
+                break; // approximate — may be float
             case JS_OP_DIV: case JS_OP_EXP:
-                t = LMD_TYPE_FLOAT; break;
+                t = jm_expr_has_bigint_literal(expr) ? LMD_TYPE_ANY : LMD_TYPE_FLOAT;
+                break;
             default: break;
             }
         } else if (expr->node_type == JS_AST_NODE_CALL_EXPRESSION) {
@@ -2076,6 +2114,10 @@ void jm_infer_return_type(JsFuncCollected* fc) {
         if (fn->body->node_type == JS_AST_NODE_LITERAL) {
             JsLiteralNode* lit = (JsLiteralNode*)fn->body;
             if (lit->literal_type == JS_LITERAL_NUMBER) {
+                if (lit->is_bigint) {
+                    fc->return_type = LMD_TYPE_DECIMAL;
+                    return;
+                }
                 double val = lit->value.number_value;
                 fc->return_type = (lit->has_decimal || val != (double)(int64_t)val) ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
             }

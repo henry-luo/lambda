@@ -947,6 +947,36 @@ static int js_resolve_ta_type_from_class_map(Item class_item) {
     return -1;
 }
 
+static Item js_typed_array_create_with_constructor(Item constructor, int length) {
+    int ta_type = js_resolve_ta_type_from_ctor(constructor);
+    if (ta_type >= 0) {
+        return js_typed_array_new(ta_type, length);
+    }
+
+    TypeId constructor_type = get_type_id(constructor);
+    if (constructor_type != LMD_TYPE_FUNC && constructor_type != LMD_TYPE_MAP) {
+        return js_throw_type_error("TypedArrayCreate requires a TypedArray constructor");
+    }
+    if (constructor_type == LMD_TYPE_FUNC) {
+        JsFunction* fn = (JsFunction*)constructor.function;
+        if ((fn->flags & (JS_FUNC_FLAG_ARROW | JS_FUNC_FLAG_METHOD | JS_FUNC_FLAG_GENERATOR | JS_FUNC_FLAG_TYPED_ARRAY_METHOD)) ||
+            fn->builtin_id > 0 || fn->builtin_id == -2) {
+            return js_throw_type_error("TypedArrayCreate requires a constructor");
+        }
+    }
+
+    Item len_arg = (Item){.item = i2it(length)};
+    Item result = js_new_from_class_object(constructor, &len_arg, 1);
+    if (js_check_exception()) return ItemNull;
+    if (!js_is_typed_array(result)) {
+        return js_throw_type_error("TypedArrayCreate constructor did not return a TypedArray");
+    }
+    if (js_typed_array_length(result) < length) {
+        return js_throw_type_error("TypedArrayCreate constructor returned a TypedArray that is too small");
+    }
+    return result;
+}
+
 extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
     // Proxy [[Construct]] trap
     if (js_is_proxy(callee)) {
@@ -7096,13 +7126,8 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             Item values = js_iterable_to_array(source);
             if (js_exception_pending) return ItemNull;
             int len = (get_type_id(values) == LMD_TYPE_ARRAY) ? values.array->length : 0;
-            // Resolve constructor type (deferred until after iteration to let source errors propagate first)
-            int ta_type = js_resolve_ta_type_from_ctor(this_val);
-            if (ta_type < 0) {
-                js_throw_type_error("%TypedArray%.from requires a TypedArray constructor");
-                return ItemNull;
-            }
-            Item result = js_typed_array_new(ta_type, len);
+            Item result = js_typed_array_create_with_constructor(this_val, len);
+            if (js_exception_pending) return ItemNull;
             for (int i = 0; i < len; i++) {
                 Item val = values.array->items[i];
                 if (has_mapfn) {
@@ -7121,15 +7146,13 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         int len = (int)js_get_number(js_to_number(len_item));
         if (js_exception_pending) return ItemNull;
         if (len < 0) len = 0;
-        // Resolve constructor type (deferred)
-        int ta_type = js_resolve_ta_type_from_ctor(this_val);
-        if (ta_type < 0) {
-            js_throw_type_error("%TypedArray%.from requires a TypedArray constructor");
-            return ItemNull;
-        }
-        Item result = js_typed_array_new(ta_type, len);
+        Item result = js_typed_array_create_with_constructor(this_val, len);
+        if (js_exception_pending) return ItemNull;
         for (int i = 0; i < len; i++) {
-            Item val = js_property_get(source, (Item){.item = i2it(i)});
+            char index_buf[32];
+            int index_len = snprintf(index_buf, sizeof(index_buf), "%d", i);
+            Item val = js_property_get(source, (Item){.item = s2it(heap_create_name(index_buf, index_len))});
+            if (js_exception_pending) return ItemNull;
             if (has_mapfn) {
                 Item map_args[2] = {val, (Item){.item = i2it(i)}};
                 val = js_call_function(mapfn, map_this, map_args, 2);
@@ -7141,18 +7164,8 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         return result;
     }
     case JS_BUILTIN_TYPED_ARRAY_OF: {
-        // %TypedArray%.of(...items) — creates typed array from arguments
-        // this_val is the constructor (e.g. Uint8Array)
-        if (get_type_id(this_val) != LMD_TYPE_FUNC) {
-            js_throw_type_error("%TypedArray%.of requires a constructor as this");
-            return ItemNull;
-        }
-        int ta_type = js_resolve_ta_type_from_ctor(this_val);
-        if (ta_type < 0) {
-            js_throw_type_error("%TypedArray%.of requires a TypedArray constructor");
-            return ItemNull;
-        }
-        Item result = js_typed_array_new(ta_type, arg_count);
+        Item result = js_typed_array_create_with_constructor(this_val, arg_count);
+        if (js_exception_pending) return ItemNull;
         for (int i = 0; i < arg_count; i++) {
             js_typed_array_set(result, (Item){.item = i2it(i)}, args[i]);
             if (js_exception_pending) return ItemNull;
