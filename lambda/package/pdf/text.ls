@@ -180,7 +180,7 @@ fn _move(st, tx, ty) {
 // Emission
 // ============================================================
 
-fn _emit_text(st, ctm, page_h, content) {
+fn _emit_text(st, ctm, page_h, content, run_advance) {
     if (content == "" or content == null) { null }
     else if (st.render_mode == 3) {
         // mode 3: invisible text — do not emit a paint, but keep state.
@@ -230,6 +230,7 @@ fn _emit_text(st, ctm, page_h, content) {
         // the baseline stays fixed. Skip when ~100 to keep markup tidy.
         let hs = st.hor_scale / 100.0
         let scaled = (util.fabs(hs - 1.0) > 0.001)
+        let text_len = util.fmt_num(run_advance)
         if (scaled and needs_stroke and needs_text_alpha) {
             <text x: "0", y: "0",
                   transform: "translate(" ++ util.fmt_num(x) ++ " " ++ util.fmt_num(y) ++ ") scale(" ++ util.fmt_num(hs) ++ " 1)",
@@ -285,6 +286,8 @@ fn _emit_text(st, ctm, page_h, content) {
                   'font-size':   util.fmt_num(eff_size),
                   'font-weight': weight,
                   'font-style':  style,
+                  textLength:    text_len,
+                  lengthAdjust:  "spacingAndGlyphs",
                   fill:          svg_fill,
                   stroke:        svg_stroke,
                   'fill-opacity': util.fmt_num(fill_alpha),
@@ -298,6 +301,8 @@ fn _emit_text(st, ctm, page_h, content) {
                   'font-size':   util.fmt_num(eff_size),
                   'font-weight': weight,
                   'font-style':  style,
+                  textLength:    text_len,
+                  lengthAdjust:  "spacingAndGlyphs",
                   fill:          svg_fill,
                   stroke:        svg_stroke;
                 content
@@ -309,6 +314,8 @@ fn _emit_text(st, ctm, page_h, content) {
                   'font-size':   util.fmt_num(eff_size),
                   'font-weight': weight,
                   'font-style':  style,
+                  textLength:    text_len,
+                  lengthAdjust:  "spacingAndGlyphs",
                   fill:          svg_fill,
                   'fill-opacity': util.fmt_num(fill_alpha);
                 content
@@ -320,6 +327,8 @@ fn _emit_text(st, ctm, page_h, content) {
                   'font-size':   util.fmt_num(eff_size),
                   'font-weight': weight,
                   'font-style':  style,
+                  textLength:    text_len,
+                  lengthAdjust:  "spacingAndGlyphs",
                   fill:          svg_fill;
                 content
             >
@@ -327,9 +336,14 @@ fn _emit_text(st, ctm, page_h, content) {
     }
 }
 
-fn _emit_one(st, ctm, page_h, txt) {
-    let el = _emit_text(st, ctm, page_h, txt)
+fn _emit_one(st, ctm, page_h, txt, run_advance) {
+    let el = _emit_text(st, ctm, page_h, txt, run_advance)
     if (el) { [el] } else { [] }
+}
+
+fn _run_advance_between(a, b) {
+    let dx = b.tm[4] - a.tm[4]
+    if (dx < 0.0) { 0.0 - dx } else { dx }
 }
 
 fn _effective_font_size(st, ctm) {
@@ -534,8 +548,9 @@ fn _op_Tr(st, ops) {
 fn _op_Tj(st, ctm, ops, page_h) {
     if (len(ops) >= 1) {
         let txt = _decode_operand(ops[0], st.font_info)
-        let s1 = if (txt == "") { st } else { _advance_text(st, _text_advance_for_operand(st, ctm, ops[0])) }
-        { state: s1, emit: _emit_one(st, ctm, page_h, txt) }
+        let adv = _text_advance_for_operand(st, ctm, ops[0])
+        let s1 = if (txt == "") { st } else { _advance_text(st, adv) }
+        { state: s1, emit: _emit_one(st, ctm, page_h, txt, adv) }
     }
     else { { state: st, emit: null } }
 }
@@ -568,7 +583,7 @@ pn _op_TJ(st, ctm, ops, page_h) {
             else if (it is int or it is float) {
                 let adj = util.num(it)
                 if (adj < -600.0 and has_seg) {
-                    let part = _emit_one(seg_st, ctm, page_h, seg_text)
+                    let part = _emit_one(seg_st, ctm, page_h, seg_text, _run_advance_between(seg_st, cur))
                     var k = 0
                     let m = len(part)
                     while (k < m) {
@@ -583,7 +598,7 @@ pn _op_TJ(st, ctm, ops, page_h) {
             i = i + 1
         }
         if (has_seg) {
-            let part = _emit_one(seg_st, ctm, page_h, seg_text)
+            let part = _emit_one(seg_st, ctm, page_h, seg_text, _run_advance_between(seg_st, cur))
             var k = 0
             let m = len(part)
             while (k < m) {
@@ -600,8 +615,9 @@ fn _op_quote(st, ctm, ops, page_h) {
     if (len(ops) >= 1) {
         let s1 = _move(st, 0.0, -st.leading)
         let txt = _decode_operand(ops[0], s1.font_info)
-        let s2 = if (txt == "") { s1 } else { _advance_text(s1, _text_advance_for_operand(s1, ctm, ops[0])) }
-        { state: s2, emit: _emit_one(s1, ctm, page_h, txt) }
+        let adv = _text_advance_for_operand(s1, ctm, ops[0])
+        let s2 = if (txt == "") { s1 } else { _advance_text(s1, adv) }
+        { state: s2, emit: _emit_one(s1, ctm, page_h, txt, adv) }
     }
     else { { state: st, emit: null } }
 }
@@ -611,8 +627,9 @@ fn _op_dquote(st, ctm, ops, page_h) {
         let s0 = set_char_space(set_word_space(st, util.num(ops[0])), util.num(ops[1]))
         let s1 = _move(s0, 0.0, -s0.leading)
         let txt = _decode_operand(ops[2], s1.font_info)
-        let s2 = if (txt == "") { s1 } else { _advance_text(s1, _text_advance_for_operand(s1, ctm, ops[2])) }
-        { state: s2, emit: _emit_one(s1, ctm, page_h, txt) }
+        let adv = _text_advance_for_operand(s1, ctm, ops[2])
+        let s2 = if (txt == "") { s1 } else { _advance_text(s1, adv) }
+        { state: s2, emit: _emit_one(s1, ctm, page_h, txt, adv) }
     }
     else { { state: st, emit: null } }
 }
