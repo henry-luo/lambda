@@ -150,6 +150,7 @@ pub pn from_basefont(name: string) {
         _contains(stripped, "Gelasio") or _contains(stripped, "gelasio") or
         _contains(stripped, "Garamond") or _contains(stripped, "garamond") or
         _contains(stripped, "Palatino") or _contains(stripped, "palatino") or
+        _contains(stripped, "Crimson") or _contains(stripped, "crimson") or
         _contains(stripped, "Effloresce") or _contains(stripped, "effloresce") or
         _contains(stripped, "Book") or _contains(stripped, "Minion")) {
         gen = "serif"

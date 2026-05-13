@@ -584,7 +584,7 @@ static void replay_draw_glyph(ImageSurface* surface, const DlDrawGlyph* g) {
     const Bound* clip = &g->clip;
 
     if (g->has_transform && !g->is_color_emoji) {
-        if (fabsf(g->transform.e12) > 0.001f && fabsf(g->transform.e21) <= 0.001f) {
+        {
             const RdtMatrix* m = &g->transform;
             float sx0 = (float)x;
             float sy0 = (float)y;
