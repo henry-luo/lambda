@@ -3983,6 +3983,12 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                         object, str_key->chars, (int)str_key->len, value, recv);
                     if (st == JS_SET_DISPATCHED) return value;
                     if (st == JS_SET_NO_SETTER) {
+                        if (str_key->len > 10 && strncmp(str_key->chars, "__private_", 10) == 0) {
+                            char msg[256];
+                            snprintf(msg, sizeof(msg), "'#%.*s' was defined without a setter",
+                                (int)str_key->len - 10, str_key->chars + 10);
+                            return js_throw_type_error(msg);
+                        }
                         // Accessor with no callable setter: strict TypeError, sloppy no-op.
                         js_strict_throw_property_error("set property which has only a getter on",
                                                        str_key->chars, (int)str_key->len);
@@ -3996,6 +4002,12 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                      (str_key->len == 6 && strncmp(str_key->chars, "length", 6) == 0));
                 if (!has_own_before_set && !class_intrinsic_define &&
                     js_proto_chain_has_nonwritable_data(object, str_key->chars, (int)str_key->len)) {
+                    if (str_key->len > 10 && strncmp(str_key->chars, "__private_", 10) == 0) {
+                        char msg[256];
+                        snprintf(msg, sizeof(msg), "Cannot assign to private method '#%.*s'",
+                            (int)str_key->len - 10, str_key->chars + 10);
+                        return js_throw_type_error(msg);
+                    }
                     js_strict_throw_property_error("assign to read only", str_key->chars, (int)str_key->len);
                     return value;
                 }
@@ -19425,6 +19437,8 @@ extern "C" Item js_array_slice_from(Item arr, Item start_item) {
 
 static const char PROTO_KEY[] = "__proto__";
 static const int PROTO_KEY_LEN = 9;
+static const char INTERNAL_PROTO_KEY[] = "__internal_proto__";
+static const int INTERNAL_PROTO_KEY_LEN = 18;
 
 // J39-7: ES B.3.7 PropertyDefinitionEvaluation for `__proto__: expr` in
 // object initializers. Spec: if propValue is Object or Null, perform
@@ -19503,11 +19517,33 @@ extern "C" void js_set_prototype(Item object, Item prototype) {
             depth++;
         }
     }
+    bool owns_proto_data = false;
+    Item owns_proto_data_val = js_map_get_fast_ext(object.map, "__json_own_proto__", 18, &owns_proto_data);
+    if (owns_proto_data && js_is_truthy(owns_proto_data_val)) {
+        js_property_set(object, (Item){.item = s2it(heap_create_name(INTERNAL_PROTO_KEY, INTERNAL_PROTO_KEY_LEN))},
+            proto_to_store);
+        return;
+    }
     // P10d: use interned __proto__ key.
     Item key = js_get_proto_key();
     js_property_set(object, (Item){.item = s2it(heap_create_name("__json_own_proto__", 18))},
         (Item){.item = ITEM_FALSE});
     js_property_set(object, key, proto_to_store);
+}
+
+extern "C" void js_mark_own_proto_property(Item object) {
+    if (get_type_id(object) != LMD_TYPE_MAP) return;
+    Map* m = object.map;
+    bool marker_found = false;
+    Item marker_val = js_map_get_fast_ext(m, "__json_own_proto__", 18, &marker_found);
+    bool raw_found = false;
+    Item raw_proto = js_map_get_fast_ext(m, PROTO_KEY, PROTO_KEY_LEN, &raw_found);
+    if ((!marker_found || !js_is_truthy(marker_val)) && raw_found && raw_proto.item != JS_DELETED_SENTINEL_VAL) {
+        js_property_set(object, (Item){.item = s2it(heap_create_name(INTERNAL_PROTO_KEY, INTERNAL_PROTO_KEY_LEN))},
+            raw_proto);
+    }
+    js_property_set(object, (Item){.item = s2it(heap_create_name("__json_own_proto__", 18))},
+        (Item){.item = ITEM_TRUE});
 }
 
 // Check if a function has a custom __proto__ set via Object.setPrototypeOf
@@ -19659,6 +19695,13 @@ extern "C" void js_mark_non_writable(Item object, Item name) {
     js_attr_set_writable(object, str->chars, (int)str->len, /*writable=*/false);
 }
 
+extern "C" void js_mark_private_method_non_writable(Item object, Item name) {
+    if (get_type_id(name) != LMD_TYPE_STRING) return;
+    String* str = it2s(name);
+    if (!str || str->len <= 10 || strncmp(str->chars, "__private_", 10) != 0) return;
+    js_mark_non_writable(object, name);
+}
+
 // Mark a property as non-configurable by setting __nc_<name> marker.
 // Stage A4: writer-side API symmetry with js_mark_non_writable /
 // js_mark_non_enumerable. Dual-write at js_property_set top mirrors the
@@ -19711,6 +19754,9 @@ extern "C" void js_link_base_prototype(Item proto_marker, Item base_ctor) {
 extern "C" Item js_get_prototype(Item object) {
     if (get_type_id(object) != LMD_TYPE_MAP) return ItemNull;
     Map* m = object.map;
+    bool internal_found = false;
+    Item internal_proto = js_map_get_fast_ext(m, INTERNAL_PROTO_KEY, INTERNAL_PROTO_KEY_LEN, &internal_found);
+    if (internal_found && internal_proto.item != JS_DELETED_SENTINEL_VAL) return internal_proto;
     bool json_own_proto = false;
     Item json_own_proto_val = js_map_get_fast_ext(m, "__json_own_proto__", 18, &json_own_proto);
     if (json_own_proto && js_is_truthy(json_own_proto_val)) return ItemNull;

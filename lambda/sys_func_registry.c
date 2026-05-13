@@ -832,7 +832,12 @@ extern void js_with_push(Item obj);
 extern void js_with_pop(void);
 extern int js_with_save_depth(void);
 extern void js_with_restore_depth(int depth);
+extern int64_t js_with_depth_active(void);
+extern Item js_get_with_binding_or_fallback(Item key, Item fallback);
+extern int64_t js_set_last_with_binding_if_valid(Item key, Item value, int64_t strict);
 extern void js_set_global_property(Item key, Item value);
+extern void js_set_global_property_strict(Item key, Item value);
+extern void js_mark_private_method_non_writable(Item object, Item name);
 extern void js_define_global_var_property(Item key, Item value);
 extern void js_evalscript_check_global_var_decl(Item key);
 extern void js_evalscript_check_global_function_decl(Item key);
@@ -1633,7 +1638,12 @@ JitImport jit_runtime_imports[] = {
     {"js_with_pop", FPTR(js_with_pop)},
     {"js_with_save_depth", FPTR(js_with_save_depth)},
     {"js_with_restore_depth", FPTR(js_with_restore_depth)},
+    {"js_with_depth_active", FPTR(js_with_depth_active)},
+    {"js_get_with_binding_or_fallback", FPTR(js_get_with_binding_or_fallback)},
+    {"js_set_last_with_binding_if_valid", FPTR(js_set_last_with_binding_if_valid)},
     {"js_set_global_property", FPTR(js_set_global_property)},
+    {"js_set_global_property_strict", FPTR(js_set_global_property_strict)},
+    {"js_mark_private_method_non_writable", FPTR(js_mark_private_method_non_writable)},
     {"js_define_global_var_property", FPTR(js_define_global_var_property)},
     {"js_evalscript_check_global_var_decl", FPTR(js_evalscript_check_global_var_decl)},
     {"js_evalscript_check_global_function_decl", FPTR(js_evalscript_check_global_function_decl)},

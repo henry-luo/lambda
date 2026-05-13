@@ -372,6 +372,9 @@ void jm_emit_install_method_or_accessor(JsMirTranspiler* mt,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
+        jm_call_void_2(mt, "js_mark_private_method_non_writable",
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
     }
 }
 

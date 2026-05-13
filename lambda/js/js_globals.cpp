@@ -878,6 +878,7 @@ extern "C" Item js_object_get_own_property_names(Item object);
 extern "C" Item js_object_get_own_property_symbols(Item object);
 extern "C" Item js_array_push(Item array, Item value);
 extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor);
+extern "C" void js_mark_own_proto_property(Item object);
 extern "C" Item js_object_prevent_extensions(Item obj);
 extern "C" Item js_get_generator_shared_proto(bool is_async);
 
@@ -2209,6 +2210,8 @@ extern "C" Item js_date_new_multi(Item args_array) {
     ms_val = js_date_time_clip(ms_val);
     *fp = ms_val;
     js_property_set(obj, time_key, (Item){.item = d2it(fp)});
+    js_class_stamp(obj, JS_CLASS_DATE);
+    js_date_set_instance_prototype(obj);
     return obj;
 }
 
@@ -7375,6 +7378,12 @@ extern "C" Item js_object_get_own_property_descriptors(Item obj) {
 }
 
 extern "C" Item js_create_data_property(Item obj, Item name, Item value) {
+    if (get_type_id(obj) == LMD_TYPE_MAP && get_type_id(name) == LMD_TYPE_STRING) {
+        String* name_str = it2s(name);
+        if (name_str && name_str->len == 9 && strncmp(name_str->chars, "__proto__", 9) == 0) {
+            js_mark_own_proto_property(obj);
+        }
+    }
     Item desc = js_new_object();
     js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, value);
     js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
@@ -10011,6 +10020,11 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
     if (!ks) return (Item){.item = b2it(false)};
     Map* m = obj.map;
     if (!m || !m->type) return (Item){.item = b2it(false)};
+    if (ks->len == 9 && strncmp(ks->chars, "__proto__", 9) == 0) {
+        bool own_proto_marker = false;
+        Item own_proto_val = js_map_get_fast_ext(m, "__json_own_proto__", 18, &own_proto_marker);
+        if (own_proto_marker && !js_is_truthy(own_proto_val)) return (Item){.item = b2it(false)};
+    }
     // Stage A1.8b (R4 routing): tri-state kernel chokepoint.
     //   PRESENT — own own slot, non-sentinel → property exists.
     //   DELETED — own slot is tombstoned; per spec the property does NOT
@@ -13207,6 +13221,8 @@ static Item js_last_with_binding_scope = {.item = ITEM_NULL};
 static Item js_last_with_binding_key = {.item = ITEM_NULL};
 static bool js_last_with_binding_valid = false;
 
+static void js_throw_binding_reference_error(Item key);
+
 static bool js_with_binding_key_same(Item a, Item b) {
     if (a.item == b.item) return true;
     if (get_type_id(a) != LMD_TYPE_STRING || get_type_id(b) != LMD_TYPE_STRING) return false;
@@ -13242,6 +13258,10 @@ extern "C" int js_with_save_depth() {
 
 extern "C" void js_with_restore_depth(int depth) {
     js_with_stack_depth = depth;
+}
+
+extern "C" int64_t js_with_depth_active(void) {
+    return js_with_stack_depth > 0 ? 1 : 0;
 }
 
 // Check with-scope stack for a property (most recent scope first)
@@ -13303,6 +13323,34 @@ static Item js_with_scope_lookup(Item key, bool* found) {
     return make_js_undefined();
 }
 
+extern "C" Item js_get_with_binding_or_fallback(Item key, Item fallback) {
+    if (js_with_stack_depth <= 0) return fallback;
+    bool found = false;
+    Item result = js_with_scope_lookup(key, &found);
+    return found ? result : fallback;
+}
+
+extern "C" int64_t js_set_last_with_binding_if_valid(Item key, Item value, int64_t strict) {
+    if (!js_last_with_binding_valid || !js_with_binding_key_same(js_last_with_binding_key, key)) {
+        return 0;
+    }
+    Item scope_obj = js_last_with_binding_scope;
+    js_last_with_binding_valid = false;
+    if (get_type_id(scope_obj) != LMD_TYPE_MAP) return 0;
+    if (it2b(js_in(key, scope_obj))) {
+        if (js_check_exception()) return 1;
+        js_property_set(scope_obj, key, value);
+        return 1;
+    }
+    if (js_check_exception()) return 1;
+    if (strict) {
+        js_throw_binding_reference_error(key);
+        return 1;
+    }
+    js_property_set(scope_obj, key, value);
+    return 1;
+}
+
 // js_get_global_property: look up a property on the global object by name string
 // Used as fallback for unresolved identifiers — implements browser-like named access
 extern "C" Item js_get_global_property(Item key) {
@@ -13346,9 +13394,18 @@ extern "C" Item js_get_global_property_strict(Item key) {
     return result;
 }
 
-// js_set_global_property: write a property to the global object by name string
-// Used for implicit global assignments (sloppy mode: assigning to undeclared variables)
-extern "C" void js_set_global_property(Item key, Item value) {
+static void js_throw_binding_reference_error(Item key) {
+    String* sk = it2s(key);
+    char msg[256];
+    if (sk) {
+        snprintf(msg, sizeof(msg), "%.*s is not defined", (int)sk->len, sk->chars);
+    } else {
+        snprintf(msg, sizeof(msg), "binding is not defined");
+    }
+    js_throw_reference_error((Item){.item = s2it(heap_create_name(msg, strlen(msg)))});
+}
+
+static void js_set_global_property_impl(Item key, Item value, bool strict) {
     // Check with-scope stack first — assignments inside 'with' resolve to scope object
     if (js_with_stack_depth > 0) {
         for (int i = js_with_stack_depth - 1; i >= 0; i--) {
@@ -13364,7 +13421,12 @@ extern "C" void js_set_global_property(Item key, Item value) {
                         return;
                     }
                     if (js_check_exception()) return;
-                    continue;
+                    if (strict) {
+                        js_throw_binding_reference_error(key);
+                        return;
+                    }
+                    js_property_set(scope_obj, key, value);
+                    return;
                 }
                 if (it2b(js_in(key, scope_obj))) {
                     if (js_check_exception()) return;
@@ -13392,7 +13454,23 @@ extern "C" void js_set_global_property(Item key, Item value) {
     }
     js_last_with_binding_valid = false;
     Item global = js_get_global_this();
+    if (strict && !it2b(js_in(key, global))) {
+        if (js_check_exception()) return;
+        js_throw_binding_reference_error(key);
+        return;
+    }
+    if (js_check_exception()) return;
     js_property_set(global, key, value);
+}
+
+// js_set_global_property: write a property to the global object by name string
+// Used for implicit global assignments (sloppy mode: assigning to undeclared variables)
+extern "C" void js_set_global_property(Item key, Item value) {
+    js_set_global_property_impl(key, value, false);
+}
+
+extern "C" void js_set_global_property_strict(Item key, Item value) {
+    js_set_global_property_impl(key, value, true);
 }
 extern "C" void js_define_global_var_property(Item key, Item value) {
     Item global = js_get_global_this();
