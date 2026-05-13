@@ -6013,7 +6013,9 @@ static bool js_func_has_own_prototype(Item func_item) {
     // Bound functions retain [[Construct]] when their target is constructable,
     // but they do not have a public own "prototype" property.
     if (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS_G) return false;
-    if (fn->flags & (JS_FUNC_FLAG_ARROW_G | JS_FUNC_FLAG_METHOD_G | JS_FUNC_FLAG_TYPED_ARRAY_METHOD_G)) return false;
+    if (fn->flags & JS_FUNC_FLAG_ARROW_G) return false;
+    if ((fn->flags & JS_FUNC_FLAG_METHOD_G) && !(fn->flags & JS_FUNC_FLAG_GENERATOR_G)) return false;
+    if (fn->flags & JS_FUNC_FLAG_TYPED_ARRAY_METHOD_G) return false;
     if (fn->builtin_id > 0) return false;
     if (fn->builtin_id == -2) return false;
     return true;

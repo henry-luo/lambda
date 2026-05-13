@@ -8909,33 +8909,32 @@ MIR_reg_t jm_transpile_object(JsMirTranspiler* mt, JsObjectNode* obj) {
                 // key itself contained yield (computed key case)
                 jm_gen_spill_load(mt, object, obj_spill_slot);
             }
+            bool is_proto_literal = false;
+            if (!p->computed && !p->method && !p->is_getter && !p->is_setter &&
+                !p->shorthand &&
+                p->key && p->value && p->key != p->value &&
+                p->key->node_type == JS_AST_NODE_IDENTIFIER) {
+                JsIdentifierNode* k_id = (JsIdentifierNode*)p->key;
+                if (k_id->name && k_id->name->len == 9 &&
+                    memcmp(k_id->name->chars, "__proto__", 9) == 0) {
+                    is_proto_literal = true;
+                }
+            }
             // function name inference from object property key
-            if (!p->computed && p->key && p->key->node_type == JS_AST_NODE_IDENTIFIER &&
-                p->value && (p->value->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
-                             p->value->node_type == JS_AST_NODE_ARROW_FUNCTION ||
-                             p->value->node_type == JS_AST_NODE_FUNCTION_DECLARATION)) {
-                JsIdentifierNode* key_id = (JsIdentifierNode*)p->key;
-                const char* raw = key_id->name->chars;
-                // getter/setter: key is "__get_foo" or "__set_foo", name should be "get foo" / "set foo"
-                if (strncmp(raw, "__get_", 6) == 0) {
-                    char buf[256];
-                    snprintf(buf, sizeof(buf), "get %s", raw + 6);
-                    jm_emit_set_function_name(mt, val, buf);
-                } else if (strncmp(raw, "__set_", 6) == 0) {
-                    char buf[256];
-                    snprintf(buf, sizeof(buf), "set %s", raw + 6);
-                    jm_emit_set_function_name(mt, val, buf);
-                } else if (key_id->name && key_id->name->len == 9 &&
-                           memcmp(raw, "__proto__", 9) == 0) {
-                    // J39-7: ES B.3.7 — when isProtoSetter is true the
-                    // NamedEvaluation step is skipped, so an anonymous
-                    // function value must NOT inherit "__proto__" as its
-                    // name. Leave default name (empty string).
-                } else {
-                    JsFunctionNode* fn_node = (JsFunctionNode*)p->value;
-                    if (!fn_node->name) {
-                        jm_emit_set_function_name(mt, val, raw);
-                    }
+            if (!is_proto_literal && p->value &&
+                (p->value->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
+                 p->value->node_type == JS_AST_NODE_ARROW_FUNCTION ||
+                 p->value->node_type == JS_AST_NODE_FUNCTION_DECLARATION ||
+                 p->value->node_type == JS_AST_NODE_CLASS_DECLARATION ||
+                 p->value->node_type == JS_AST_NODE_CLASS_EXPRESSION)) {
+                int64_t prefix_kind = p->is_getter ? 1 : (p->is_setter ? 2 : 0);
+                jm_call_void_3(mt, "js_set_function_name_from_property_key_if_anonymous",
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, val),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, prefix_kind));
+                if (p->method || p->is_getter || p->is_setter) {
+                    jm_call_void_1(mt, "js_mark_method_func",
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
                 }
             }
             if (p->is_getter || p->is_setter) {
@@ -8946,17 +8945,6 @@ MIR_reg_t jm_transpile_object(JsMirTranspiler* mt, JsObjectNode* obj) {
                 // literal sets [[Prototype]] (or no-ops for non-Object/Null) and
                 // does NOT create an own property. Computed `["__proto__"]:`,
                 // shorthand `{__proto__}`, and method shorthand do NOT trigger.
-                bool is_proto_literal = false;
-                if (!p->computed && !p->method && !p->is_getter && !p->is_setter &&
-                    !p->shorthand &&
-                    p->key && p->value && p->key != p->value &&
-                    p->key->node_type == JS_AST_NODE_IDENTIFIER) {
-                    JsIdentifierNode* k_id = (JsIdentifierNode*)p->key;
-                    if (k_id->name && k_id->name->len == 9 &&
-                        memcmp(k_id->name->chars, "__proto__", 9) == 0) {
-                        is_proto_literal = true;
-                    }
-                }
                 if (is_proto_literal) {
                     jm_call_void_2(mt, "js_object_proto_setter",
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, object),

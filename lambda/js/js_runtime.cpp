@@ -2937,9 +2937,11 @@ extern "C" Item js_property_get(Item object, Item key) {
                 // - builtin methods (builtin_id > 0): Array.prototype.map, etc.
                 // - arrow functions
                 // - class methods (concise methods are not constructors per ES spec)
+                // Generator methods are non-constructors but still expose .prototype.
                 // - Proxy (ES spec: Proxy has no prototype property)
                 if (fn->builtin_id == -2 || fn->builtin_id > 0 ||
-                    (fn->flags & (JS_FUNC_FLAG_ARROW | JS_FUNC_FLAG_METHOD)) ||
+                    (fn->flags & JS_FUNC_FLAG_ARROW) ||
+                    ((fn->flags & JS_FUNC_FLAG_METHOD) && !(fn->flags & JS_FUNC_FLAG_GENERATOR)) ||
                     (fn->name && fn->name->len == 5 && strncmp(fn->name->chars, "Proxy", 5) == 0)) return make_js_undefined();
                 if (fn->prototype.item == ItemNull.item) {
                     fn->prototype = js_new_object();

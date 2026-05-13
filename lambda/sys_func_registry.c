@@ -876,6 +876,7 @@ extern Item js_get_reflect_object_value();
 extern Item js_get_atomics_object_value();
 extern Item js_install_user_accessor(Item obj, Item name, Item fn, int is_setter);
 extern void js_set_function_name_if_anonymous(Item fn_item, Item name_item);
+extern void js_set_function_name_from_property_key_if_anonymous(Item fn_item, Item key_item, int64_t prefix_kind);
 extern void js_set_class_name(Item cls_item, Item name_item);
 extern void js_set_default_constructor_property(Item proto_item, Item cls_item);
 extern void js_prepare_class_prototype_property(Item cls_item);
@@ -1495,6 +1496,7 @@ JitImport jit_runtime_imports[] = {
     {"js_object_get_own_property_descriptors", FPTR(js_object_get_own_property_descriptors)},
     {"js_set_function_name", FPTR(js_set_function_name)},
     {"js_set_function_name_if_anonymous", FPTR(js_set_function_name_if_anonymous)},
+    {"js_set_function_name_from_property_key_if_anonymous", FPTR(js_set_function_name_from_property_key_if_anonymous)},
     {"js_set_class_name", FPTR(js_set_class_name)},
     {"js_set_default_constructor_property", FPTR(js_set_default_constructor_property)},
     {"js_prepare_class_prototype_property", FPTR(js_prepare_class_prototype_property)},

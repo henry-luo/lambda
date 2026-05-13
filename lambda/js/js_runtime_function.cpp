@@ -186,6 +186,61 @@ extern "C" void js_set_function_name_if_anonymous(Item fn_item, Item name_item) 
     }
 }
 
+extern "C" Item js_symbol_get_description(Item sym);
+
+static int js_function_name_from_symbol_key(String* key, char* out, int out_size) {
+    if (!key || key->len <= 6 || strncmp(key->chars, "__sym_", 6) != 0) return -1;
+    int64_t id = 0;
+    for (int i = 6; i < (int)key->len; i++) {
+        char c = key->chars[i];
+        if (c < '0' || c > '9') return -1;
+        id = id * 10 + (int64_t)(c - '0');
+    }
+    Item sym = (Item){.item = i2it(-(id + (int64_t)JS_SYMBOL_BASE))};
+    Item desc = js_symbol_get_description(sym);
+    if (get_type_id(desc) == LMD_TYPE_UNDEFINED) {
+        if (out_size > 0) out[0] = '\0';
+        return 0;
+    }
+    if (get_type_id(desc) != LMD_TYPE_STRING) return -1;
+    String* desc_str = it2s(desc);
+    if (!desc_str) return -1;
+    int len = snprintf(out, out_size, "[%.*s]", (int)desc_str->len, desc_str->chars);
+    if (len < 0) return -1;
+    if (len >= out_size) len = out_size - 1;
+    return len;
+}
+
+extern "C" void js_set_function_name_from_property_key_if_anonymous(Item fn_item, Item key_item, int64_t prefix_kind) {
+    Item prop_key = js_to_property_key(key_item);
+    if (get_type_id(prop_key) != LMD_TYPE_STRING) return;
+    String* key = it2s(prop_key);
+    if (!key) return;
+
+    char base[256];
+    int base_len = js_function_name_from_symbol_key(key, base, (int)sizeof(base));
+    if (base_len < 0) {
+        base_len = key->len < (int)sizeof(base) - 1 ? (int)key->len : (int)sizeof(base) - 1;
+        memcpy(base, key->chars, base_len);
+        base[base_len] = '\0';
+    }
+
+    char display[320];
+    if (prefix_kind == 1) {
+        snprintf(display, sizeof(display), "get %.*s", base_len, base);
+    } else if (prefix_kind == 2) {
+        snprintf(display, sizeof(display), "set %.*s", base_len, base);
+    } else {
+        snprintf(display, sizeof(display), "%.*s", base_len, base);
+    }
+    Item display_item = (Item){.item = s2it(heap_create_name(display, strlen(display)))};
+    if (prefix_kind == 1 || prefix_kind == 2) {
+        js_set_function_name(fn_item, display_item);
+    } else {
+        js_set_function_name_if_anonymous(fn_item, display_item);
+    }
+}
+
 extern "C" void js_set_class_name(Item cls_item, Item name_item) {
     if (get_type_id(cls_item) != LMD_TYPE_MAP) return;
     if (get_type_id(name_item) != LMD_TYPE_STRING) return;
