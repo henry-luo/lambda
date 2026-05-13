@@ -652,18 +652,9 @@ static void replay_draw_glyph(ImageSurface* surface, const DlDrawGlyph* g) {
             return;
         }
 
-        bool is_mono = (bitmap->pixel_mode == GLYPH_PIXEL_MONO);
         for (int i = 0; i < (int)bitmap->height; i++) {
             for (int j = 0; j < (int)bitmap->width; j++) {
-                uint32_t intensity;
-                if (is_mono) {
-                    int byte_index = j / 8;
-                    int bit_index = 7 - (j % 8);
-                    uint8_t byte_val = bitmap->buffer[i * bitmap->pitch + byte_index];
-                    intensity = (byte_val & (1 << bit_index)) ? 255 : 0;
-                } else {
-                    intensity = bitmap->buffer[i * bitmap->pitch + j];
-                }
+                uint32_t intensity = dl_glyph_sample_pixel(bitmap, i, j);
                 if (intensity == 0) continue;
 
                 float src_x = (float)(x + j) + 0.5f;
@@ -762,29 +753,19 @@ static void replay_draw_glyph(ImageSurface* surface, const DlDrawGlyph* g) {
         return;
     }
 
-    // grayscale / monochrome glyph
+    // grayscale / monochrome / LCD glyph
     int left   = std::max((int)clip->left,  x);
     int right  = std::min((int)clip->right,  x + (int)bitmap->width);
     int top    = std::max((int)clip->top,    y);
     int bottom = std::min((int)clip->bottom, y + (int)bitmap->height);
     if (left >= right || top >= bottom) return;
 
-    bool is_mono = (bitmap->pixel_mode == GLYPH_PIXEL_MONO);
-
     for (int i = top - y; i < bottom - y; i++) {
         uint8_t* row_pixels = (uint8_t*)surface->pixels + (y + i - surface->tile_offset_y) * surface->pitch;
         for (int j = left - x; j < right - x; j++) {
             if (x + j < 0 || x + j >= surface->width) continue;
 
-            uint32_t intensity;
-            if (is_mono) {
-                int byte_index = j / 8;
-                int bit_index = 7 - (j % 8);
-                uint8_t byte_val = bitmap->buffer[i * bitmap->pitch + byte_index];
-                intensity = (byte_val & (1 << bit_index)) ? 255 : 0;
-            } else {
-                intensity = bitmap->buffer[i * bitmap->pitch + j];
-            }
+            uint32_t intensity = dl_glyph_sample_pixel(bitmap, i, j);
 
             if (intensity > 0) {
                 uint8_t* p = (uint8_t*)(row_pixels + (x + j) * 4);

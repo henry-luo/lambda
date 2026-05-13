@@ -61,8 +61,6 @@ typedef enum {
     RDT_VIEW_TABLE_CELL,
     RDT_VIEW_TABLE_COLUMN_GROUP,  // Column group (colgroup) - CSS 2.1 §17.5.1 table layer
     RDT_VIEW_TABLE_COLUMN,        // Column (col) - CSS 2.1 §17.5.1 table layer
-    // TexNode rendering (unified TeX pipeline)
-    RDT_VIEW_TEXNODE,  // Direct TexNode tree rendering - TexNode IS the view tree
 } ViewType;
 
 typedef struct DomNode DomNode;

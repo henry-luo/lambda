@@ -781,19 +781,12 @@ static bool is_display_math_element(DomElement* elem) {
 /**
  * Layout a display math element.
  *
- * NOTE: The legacy MathLive pipeline has been removed. Math elements using
- * the old MathBox-based approach should migrate to RDT_VIEW_TEXNODE.
+ * NOTE: The legacy MathLive/MathBox pipeline has been removed.
  * For now, this function is a stub that logs a warning.
- *
- * To enable math rendering, use the unified TeX pipeline:
- *   1. Parse LaTeX with tex::typeset_latex_math()
- *   2. Set elem->view_type = RDT_VIEW_TEXNODE
- *   3. Set elem->tex_root = tex_node
  */
 static void layout_display_math_block(LayoutContext* lycon, DomElement* elem) {
-    log_debug("%s layout_display_math_block: MathLive pipeline removed - use RDT_VIEW_TEXNODE instead", elem->source_loc());
-    // TODO: Implement using unified TeX pipeline
-    // For now, skip math rendering
+     log_debug("%s layout_display_math_block: MathLive/MathBox pipeline removed", elem->source_loc());
+     // For now, skip math rendering.
     (void)lycon;
     (void)elem;
 }
