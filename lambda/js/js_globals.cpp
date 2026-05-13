@@ -22,6 +22,7 @@
 #include "../transpiler.hpp"
 
 extern "C" Item js_to_property_key(Item key);
+extern "C" Item js_bound_function_target(Item func_item);
 
 #define JS_FUNC_FLAG_HAS_BOUND_THIS_G 16
 
@@ -6145,16 +6146,27 @@ extern "C" Item js_reflect_construct(Item target, Item args_array, Item new_targ
     }
     extern void js_set_new_target(Item target);
     Item nt_val = (nt_type == LMD_TYPE_FUNC || js_is_proxy(new_target)) ? new_target : target;
+    if (get_type_id(target) == LMD_TYPE_FUNC) {
+        Item current = target;
+        int depth = 0;
+        while (get_type_id(current) == LMD_TYPE_FUNC && depth < 32) {
+            Item bound_target = js_bound_function_target(current);
+            if (bound_target.item == ItemNull.item) break;
+            if (nt_val.item == current.item) nt_val = bound_target;
+            current = bound_target;
+            depth++;
+        }
+    }
     js_set_new_target(nt_val);
 
     // ES spec: OrdinaryCreateFromConstructor accesses NewTarget.prototype BEFORE
     // the built-in constructor does any work. Eagerly resolve the prototype now
     // so that a throwing getter on .prototype fires at the correct time.
     Item resolved_nt_proto = ItemNull;
-    bool needs_fixup = (nt_type == LMD_TYPE_FUNC && new_target.item != target.item);
+    bool needs_fixup = (get_type_id(nt_val) == LMD_TYPE_FUNC && nt_val.item != target.item);
     if (needs_fixup) {
         Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
-        resolved_nt_proto = js_property_get(new_target, proto_key);
+        resolved_nt_proto = js_property_get(nt_val, proto_key);
         if (js_check_exception()) return ItemNull;
     }
 
@@ -6299,7 +6311,7 @@ extern "C" Item js_reflect_construct(Item target, Item args_array, Item new_targ
     }
 
     // User-defined constructor: create object and call function
-    Item proto_source = (nt_type == LMD_TYPE_FUNC) ? new_target : target;
+    Item proto_source = (get_type_id(nt_val) == LMD_TYPE_FUNC) ? nt_val : target;
     Item new_obj = js_constructor_create_object(proto_source);
     Item result = js_call_function(target, new_obj, args, argc);
     // ES spec: any non-primitive return value takes precedence

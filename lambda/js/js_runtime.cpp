@@ -10,7 +10,9 @@
 extern "C" Item js_to_property_key(Item key);
 extern "C" Item js_reflect_own_keys(Item obj);
 extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name);
+extern "C" Item js_has_own_property(Item obj, Item key);
 extern void js_double_to_string(double d, char* out, int out_size);
+Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_found);
 
 // =============================================================================
 // Object Functions
@@ -21,6 +23,30 @@ extern void js_double_to_string(double d, char* out, int out_size);
 // Tracks the .prototype of the generator function being called.
 // Set by js_call_function before invoking a generator function, read by js_generator_create.
 static Item js_generator_callee_proto = {0};
+
+static const char* JS_BOUND_TARGET_KEY = "__bound_target__";
+static const int JS_BOUND_TARGET_KEY_LEN = 16;
+
+extern "C" Item js_bound_function_target(Item func_item) {
+    if (get_type_id(func_item) != LMD_TYPE_FUNC) return ItemNull;
+    JsFunction* fn = (JsFunction*)func_item.function;
+    if (!fn || !(fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS)) return ItemNull;
+    if (fn->properties_map.item == 0 || get_type_id(fn->properties_map) != LMD_TYPE_MAP) return ItemNull;
+    bool found = false;
+    Item target = js_map_get_fast_ext(fn->properties_map.map, JS_BOUND_TARGET_KEY, JS_BOUND_TARGET_KEY_LEN, &found);
+    if (!found || get_type_id(target) != LMD_TYPE_FUNC) return ItemNull;
+    return target;
+}
+
+static Item js_bound_function_ultimate_target(Item func_item) {
+    Item current = func_item;
+    for (int depth = 0; depth < 32; depth++) {
+        Item target = js_bound_function_target(current);
+        if (target.item == ItemNull.item) return current;
+        current = target;
+    }
+    return current;
+}
 
 // v30: Helper to compute callback this value per ES spec OrdinaryCallBindThis.
 // thisArg_item is the explicit thisArg (or ITEM_JS_UNDEFINED if not provided).
@@ -824,6 +850,7 @@ extern "C" Item js_proxy_trap_construct(Item proxy, Item* args, int arg_count, I
 extern "C" Item js_constructor_create_object(Item callee) {
     Item obj = js_new_object();
     if (get_type_id(callee) == LMD_TYPE_FUNC) {
+        callee = js_bound_function_ultimate_target(callee);
         JsFunction* fn = (JsFunction*)callee.function;
         // Lazily create prototype if not yet initialized (ensures __proto__ is set
         // even when .prototype hasn't been explicitly accessed before new)
@@ -2799,6 +2826,7 @@ extern "C" Item js_property_get(Item object, Item key) {
         JsFunction* fn = (JsFunction*)object.function;
         if (get_type_id(key) == LMD_TYPE_STRING) {
             String* str_key = it2s(key);
+            bool deleted_length = false;
             // v23: Check properties_map FIRST for overridden/deleted .name/.length/.prototype
             // This enables Object.defineProperty and delete to work correctly on function
             // virtual properties. properties_map takes priority over struct-based values.
@@ -2824,8 +2852,11 @@ extern "C" Item js_property_get(Item object, Item key) {
                     // through to fn->prototype field" because js_property_set
                     // stores a sentinel when prototype is set to a MAP (to
                     // clear any previous non-MAP entry in properties_map).
-                    if (!(str_key->len == 9 && strncmp(str_key->chars, "prototype", 9) == 0))
+                    if (str_key->len == 6 && strncmp(str_key->chars, "length", 6) == 0) {
+                        deleted_length = true;
+                    } else if (!(str_key->len == 9 && strncmp(str_key->chars, "prototype", 9) == 0)) {
                         return make_js_undefined();
+                    }
                     // else: fall through to fn->prototype check below
                 }
                 // JS_OWN_NOT_FOUND: fall through to builtin fallbacks below.
@@ -3260,7 +3291,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                 return fn->prototype;
             }
             // .length — formal parameter count (ES spec: params before first default, excl rest)
-            if (str_key->len == 6 && strncmp(str_key->chars, "length", 6) == 0) {
+            if (!deleted_length && str_key->len == 6 && strncmp(str_key->chars, "length", 6) == 0) {
                 int len = (fn->formal_length >= 0) ? fn->formal_length : fn->param_count;
                 if (len < 0) len = -len - 1; // rest param: -N means N total, length = N-1
                 if (fn->bound_args) {
@@ -4112,6 +4143,11 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                 return value;
             }
         }
+        if (!js_skip_accessor_dispatch && (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS) && str_key &&
+            ((str_key->len == 6 && memcmp(str_key->chars, "caller", 6) == 0) ||
+             (str_key->len == 9 && memcmp(str_key->chars, "arguments", 9) == 0))) {
+            return js_throw_type_error("'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them");
+        }
         // v18: store arbitrary properties in backing map (e.g. assert._isSameValue = fn)
         if (!js_skip_accessor_dispatch && str_key && str_key->len > 0 && str_key->len < 200 &&
             !js_func_has_own_property_map_key(object, str_key->chars, (int)str_key->len)) {
@@ -4604,6 +4640,14 @@ extern "C" Item js_get_length_item(Item object) {
         return js_make_number((double)js_typed_array_length(object));
     }
     if (get_type_id(object) == LMD_TYPE_FUNC) {
+        JsFunction* fn = (JsFunction*)object.function;
+        if (fn && fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
+            Item key = (Item){.item = s2it(heap_create_name("length", 6))};
+            Item raw = ItemNull;
+            JsOwnGetStatus st = js_ordinary_get_own(fn->properties_map, key, object, &raw);
+            if (st == JS_OWN_READY) return raw;
+            if (st == JS_OWN_DELETED) return js_make_number(0);
+        }
         return js_make_number((double)js_get_length(object));
     }
     if (get_type_id(object) == LMD_TYPE_STRING) {
@@ -8990,6 +9034,13 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
             if (effective_this.item == ITEM_JS_UNDEFINED || effective_this.item == ITEM_NULL || effective_this.item == 0) {
                 extern Item js_get_global_this();
                 effective_this = js_get_global_this();
+            } else {
+                TypeId this_type = get_type_id(effective_this);
+                if (this_type != LMD_TYPE_MAP && this_type != LMD_TYPE_ARRAY &&
+                    this_type != LMD_TYPE_ELEMENT && this_type != LMD_TYPE_FUNC &&
+                    this_type != LMD_TYPE_OBJECT && this_type != LMD_TYPE_VMAP) {
+                    effective_this = js_to_object(effective_this);
+                }
             }
         }
         int total_argc = fn->bound_argc + arg_count;
@@ -9007,7 +9058,16 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         js_pending_args_callee = func_item;
         // Check for pending new.target (set by 'new' expression before this call)
         if (js_has_pending_new_target) {
+            Item current = func_item;
             js_new_target = js_pending_new_target;
+            int depth = 0;
+            while (get_type_id(current) == LMD_TYPE_FUNC && depth < 32) {
+                Item target = js_bound_function_target(current);
+                if (target.item == ItemNull.item) break;
+                if (js_new_target.item == current.item) js_new_target = target;
+                current = target;
+                depth++;
+            }
             js_has_pending_new_target = false;
         } else {
             js_new_target = make_js_undefined(); // regular call: new.target is undefined
@@ -9042,6 +9102,13 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         if (this_val.item == ITEM_JS_UNDEFINED || this_val.item == ITEM_NULL || this_val.item == 0) {
             extern Item js_get_global_this();
             this_val = js_get_global_this();
+        } else {
+            TypeId this_type = get_type_id(this_val);
+            if (this_type != LMD_TYPE_MAP && this_type != LMD_TYPE_ARRAY &&
+                this_type != LMD_TYPE_ELEMENT && this_type != LMD_TYPE_FUNC &&
+                this_type != LMD_TYPE_OBJECT && this_type != LMD_TYPE_VMAP) {
+                this_val = js_to_object(this_val);
+            }
         }
     }
     js_current_this = this_val;
@@ -9109,7 +9176,8 @@ extern "C" Item js_apply_function(Item func_item, Item this_val, Item args_array
                 args[i] = js_array_get(args_array, idx);
             }
         }
-    } else if (get_type_id(args_array) == LMD_TYPE_MAP) {
+    } else if (get_type_id(args_array) == LMD_TYPE_MAP || get_type_id(args_array) == LMD_TYPE_FUNC ||
+               get_type_id(args_array) == LMD_TYPE_ELEMENT) {
         // v20: Array-like objects with .length property
         Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
         Item len_val = js_property_get(args_array, len_key);
@@ -9126,6 +9194,8 @@ extern "C" Item js_apply_function(Item func_item, Item this_val, Item args_array
                 }
             }
         }
+    } else if (args_array.item != ITEM_NULL && args_array.item != ITEM_JS_UNDEFINED) {
+        return js_throw_type_error("CreateListFromArrayLike called on non-object");
     }
     return js_call_function(func_item, this_val, args, argc);
 }
@@ -9149,6 +9219,12 @@ extern "C" Item js_bind_function(Item func_item, Item bound_this, Item* bound_ar
     bound->flags = orig->flags; // preserve strict/arrow flags from original
     bound->flags |= JS_FUNC_FLAG_HAS_BOUND_THIS; // always mark as having bound this
     bound->bound_this = bound_this;
+    Item bound_item = (Item){.function = (Function*)bound};
+    {
+        Item target_key = (Item){.item = s2it(heap_create_name(JS_BOUND_TARGET_KEY, JS_BOUND_TARGET_KEY_LEN))};
+        js_func_init_property(bound_item, target_key, func_item);
+        js_mark_non_enumerable(bound_item, target_key);
+    }
     // Set name to "bound <original_name>" per ES spec
     // ES spec §20.2.3.2 step 12-13: Get(Target, "name") — must go through getter, may throw
     {
@@ -9173,7 +9249,37 @@ extern "C" Item js_bind_function(Item func_item, Item bound_this, Item* bound_ar
         }
         bound->bound_argc = bound_argc;
     }
-    return (Item){.function = (Function*)bound};
+    {
+        Item length_key = (Item){.item = s2it(heap_create_name("length", 6))};
+        double length_value = 0.0;
+        if (it2b(js_has_own_property(func_item, length_key))) {
+            Item target_length = js_property_get(func_item, length_key);
+            if (js_exception_pending) return make_js_undefined();
+            TypeId length_type = get_type_id(target_length);
+            if (length_type == LMD_TYPE_INT) length_value = (double)it2i(target_length);
+            else if (length_type == LMD_TYPE_INT64) {
+                int64_t raw_length = it2l(target_length);
+                length_value = (raw_length == INT64_MAX) ? INFINITY : (double)raw_length;
+            }
+            else if (length_type == LMD_TYPE_FLOAT) length_value = it2d(target_length);
+            if (isfinite(length_value) && length_value >= (double)INT64_MAX) length_value = INFINITY;
+            if (length_type == LMD_TYPE_INT || length_type == LMD_TYPE_INT64 || length_type == LMD_TYPE_FLOAT) {
+                if (length_value != length_value || length_value <= 0.0) {
+                    length_value = 0.0;
+                } else if (isfinite(length_value)) {
+                    length_value = floor(length_value) - (double)bound_argc;
+                    if (length_value < 0.0) length_value = 0.0;
+                }
+            } else {
+                length_value = 0.0;
+            }
+        }
+        Item length_item = js_make_number(length_value);
+        js_func_init_property(bound_item, length_key, length_item);
+        js_mark_non_writable(bound_item, length_key);
+        js_mark_non_enumerable(bound_item, length_key);
+    }
+    return bound_item;
 }
 
 // js_func_bind: safe version that checks type first.
@@ -11971,6 +12077,7 @@ static uint64_t js_collection_hash(const void *item, uint64_t seed0, uint64_t se
     if (tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64 || tid == LMD_TYPE_FLOAT) {
         double d;
         if (tid == LMD_TYPE_FLOAT) d = k.get_double();
+        else if (tid == LMD_TYPE_INT64) d = (double)it2l(k);
         else d = (double)it2i(k);
         // SameValueZero: -0 and +0 are the same → normalize to +0
         if (d == 0.0) d = 0.0;
@@ -11995,8 +12102,10 @@ static int js_collection_compare(const void *a, const void *b, void *udata) {
     if (a_num && b_num) {
         double da, db;
         if (ta == LMD_TYPE_FLOAT) da = ka.get_double();
+        else if (ta == LMD_TYPE_INT64) da = (double)it2l(ka);
         else da = (double)it2i(ka);
         if (tb == LMD_TYPE_FLOAT) db = kb.get_double();
+        else if (tb == LMD_TYPE_INT64) db = (double)it2l(kb);
         else db = (double)it2i(kb);
         // SameValueZero: NaN == NaN
         if (da != da && db != db) return 0;
@@ -12012,6 +12121,18 @@ static int js_collection_compare(const void *a, const void *b, void *udata) {
     }
     // reference equality for objects
     return (ka.item == kb.item) ? 0 : 1;
+}
+
+static Item js_collection_canonical_key(Item key) {
+    if (get_type_id(key) == LMD_TYPE_FLOAT) {
+        double value = it2d(key);
+        if (value == 0.0 && signbit(value)) {
+            double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+            *fp = 0.0;
+            return (Item){.item = d2it(fp)};
+        }
+    }
+    return key;
 }
 
 static JsCollectionData* js_get_collection_data(Item obj) {
@@ -12246,11 +12367,12 @@ extern "C" Item js_collection_method(Item obj, int method_id, Item arg1, Item ar
     switch (method_id) {
         case 0: { // set(key, value) for Map, add(value) for Set
             JsCollectionEntry entry;
+            Item key = js_collection_canonical_key(arg1);
             if (cd->type == JS_COLLECTION_SET) {
-                entry.key = arg1;
+                entry.key = key;
                 entry.value = (Item){.item = b2it(BOOL_TRUE)};
             } else {
-                entry.key = arg1;
+                entry.key = key;
                 entry.value = arg2;
             }
             hashmap_set(cd->hmap, &entry);
@@ -12260,20 +12382,21 @@ extern "C" Item js_collection_method(Item obj, int method_id, Item arg1, Item ar
             return obj; // return collection for chaining
         }
         case 1: { // get(key) — Map only
-            JsCollectionEntry probe = {.key = arg1};
+            JsCollectionEntry probe = {.key = js_collection_canonical_key(arg1)};
             const JsCollectionEntry* found = (const JsCollectionEntry*)hashmap_get(cd->hmap, &probe);
             if (found) return found->value;
             return make_js_undefined();
         }
         case 2: { // has(key)
-            JsCollectionEntry probe = {.key = arg1};
+            JsCollectionEntry probe = {.key = js_collection_canonical_key(arg1)};
             const JsCollectionEntry* found = (const JsCollectionEntry*)hashmap_get(cd->hmap, &probe);
             return (Item){.item = b2it(found ? BOOL_TRUE : BOOL_FALSE)};
         }
         case 3: { // delete(key)
-            JsCollectionEntry probe = {.key = arg1};
+            Item key = js_collection_canonical_key(arg1);
+            JsCollectionEntry probe = {.key = key};
             const JsCollectionEntry* found = (const JsCollectionEntry*)hashmap_delete(cd->hmap, &probe);
-            js_collection_order_remove(cd, arg1);
+            js_collection_order_remove(cd, key);
             js_collection_update_size(obj, cd);
             return (Item){.item = b2it(found ? BOOL_TRUE : BOOL_FALSE)};
         }
@@ -13390,13 +13513,22 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 else if (method->len == 6 && strncmp(method->chars, "values", 6) == 0) method_id = 7;
                 else if (method->len == 7 && strncmp(method->chars, "entries", 7) == 0) method_id = 8;
                 // ES2025 Set methods
-                // Helper: GetSetRecord validation per ES2025 spec:
-                // Check that `other` has a callable `size`, callable `has`, and callable `keys`.
-                // Returns false and throws TypeError if `keys` is not callable.
-                auto validate_set_record = [](Item other, double* out_size) -> bool {
+                struct JsSetRecordLocal {
+                    Item obj;
+                    double size;
+                    Item has_fn;
+                    Item keys_fn;
+                };
+
+                auto is_set_record_object = [](Item other) -> bool {
                     TypeId other_type = get_type_id(other);
-                    if (other_type != LMD_TYPE_MAP && other_type != LMD_TYPE_ARRAY &&
-                            other_type != LMD_TYPE_FUNC && other_type != LMD_TYPE_ELEMENT) {
+                    return other_type == LMD_TYPE_MAP || other_type == LMD_TYPE_ARRAY ||
+                        other_type == LMD_TYPE_FUNC || other_type == LMD_TYPE_ELEMENT ||
+                        other_type == LMD_TYPE_OBJECT || other_type == LMD_TYPE_VMAP;
+                };
+
+                auto get_set_record = [&](Item other, JsSetRecordLocal* rec) -> bool {
+                    if (!is_set_record_object(other)) {
                         js_throw_type_error("Set method argument must be an object");
                         return false;
                     }
@@ -13425,166 +13557,241 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                         js_throw_type_error("keys is not a function");
                         return false;
                     }
-                    if (out_size) *out_size = size;
+                    rec->obj = other;
+                    rec->size = size;
+                    rec->has_fn = has_fn;
+                    rec->keys_fn = keys_fn;
                     return true;
                 };
-                // Helper: check if a Set-like "other" contains key
-                // If other is a Set collection, use fast hashmap lookup
-                // Otherwise, call other.has(key) method
-                auto set_like_has = [](Item other, JsCollectionData* other_cd, Item key) -> bool {
-                    if (other_cd) {
-                        JsCollectionEntry probe = {.key = key};
-                        return hashmap_get(other_cd->hmap, &probe) != NULL;
-                    }
-                    // Set-like: call other.has(key)
-                    if (get_type_id(other) == LMD_TYPE_MAP) {
-                        String* has_name = heap_create_name("has", 3);
-                        Item has_fn = js_property_get(other, (Item){.item = s2it(has_name)});
-                        if (get_type_id(has_fn) == LMD_TYPE_FUNC) {
-                            Item fn_args[1] = {key};
-                            Item result = js_call_function(has_fn, other, fn_args, 1);
-                            return js_is_truthy(result);
-                        }
-                    }
-                    return false;
+
+                auto set_record_has = [](JsSetRecordLocal* rec, Item key) -> bool {
+                    Item fn_args[1] = {js_collection_canonical_key(key)};
+                    Item result = js_call_function(rec->has_fn, rec->obj, fn_args, 1);
+                    if (js_check_exception()) return false;
+                    return js_is_truthy(result);
                 };
-                // Helper: iterate Set-like "other" keys
-                auto set_like_keys = [](Item other, JsCollectionData* other_cd) -> Item {
-                    if (other_cd) {
-                        // drain to array
-                        Item arr = js_array_new(0);
-                        for (JsCollectionOrderNode* node = other_cd->order_head; node; node = node->next)
-                            js_array_push_item_direct(arr.array, node->key);
-                        return arr;
+
+                auto set_contains_key = [](JsCollectionData* set_cd, Item key) -> bool {
+                    JsCollectionEntry probe = {.key = js_collection_canonical_key(key)};
+                    return hashmap_get(set_cd->hmap, &probe) != NULL;
+                };
+
+                auto set_record_keys_iterator = [](JsSetRecordLocal* rec) -> Item {
+                    Item iter = js_call_function(rec->keys_fn, rec->obj, NULL, 0);
+                    if (js_check_exception()) return ItemNull;
+                    return js_get_iterator(iter);
+                };
+
+                auto close_iterator_for_return = [](Item iterator) -> bool {
+                    js_iterator_close(iterator);
+                    return !js_check_exception();
+                };
+
+                auto copy_set_to_result = [](Item result, JsCollectionData* source_cd) {
+                    for (JsCollectionOrderNode* node = source_cd->order_head; node; node = node->next) {
+                        if (!node->deleted) js_collection_method(result, 0, node->key, ItemNull);
                     }
-                    // Set-like: call other.keys() and drain to array
-                    if (get_type_id(other) == LMD_TYPE_MAP) {
-                        String* keys_name = heap_create_name("keys", 4);
-                        Item keys_fn = js_property_get(other, (Item){.item = s2it(keys_name)});
-                        if (get_type_id(keys_fn) == LMD_TYPE_FUNC) {
-                            Item iter = js_call_function(keys_fn, other, NULL, 0);
-                            return js_iterable_to_array(iter);
+                };
+
+                auto make_set_result = []() -> Item {
+                    Item result = js_collection_create(JS_COLLECTION_SET);
+                    js_collection_link_prototype(result, "Set", 3);
+                    return result;
+                };
+
+                auto add_keys_intersection = [&](Item result, JsSetRecordLocal* rec) -> Item {
+                    Item iterator = set_record_keys_iterator(rec);
+                    if (js_check_exception()) return ItemNull;
+                    while (true) {
+                        Item key = js_iterator_step(iterator);
+                        if (js_check_exception()) {
+                            js_iterator_close_preserve_exception(iterator);
+                            return ItemNull;
+                        }
+                        if (key.item == JS_ITER_DONE_SENTINEL) break;
+                        key = js_collection_canonical_key(key);
+                        if (set_contains_key(cd, key)) js_collection_method(result, 0, key, ItemNull);
+                    }
+                    return result;
+                };
+
+                auto delete_keys_from_result = [&](Item result, JsSetRecordLocal* rec) -> Item {
+                    Item iterator = set_record_keys_iterator(rec);
+                    if (js_check_exception()) return ItemNull;
+                    while (true) {
+                        Item key = js_iterator_step(iterator);
+                        if (js_check_exception()) {
+                            js_iterator_close_preserve_exception(iterator);
+                            return ItemNull;
+                        }
+                        if (key.item == JS_ITER_DONE_SENTINEL) break;
+                        key = js_collection_canonical_key(key);
+                        js_collection_method(result, 3, key, ItemNull);
+                    }
+                    return result;
+                };
+
+                auto add_union_keys = [&](Item result, JsSetRecordLocal* rec) -> Item {
+                    Item iterator = set_record_keys_iterator(rec);
+                    if (js_check_exception()) return ItemNull;
+                    while (true) {
+                        Item key = js_iterator_step(iterator);
+                        if (js_check_exception()) {
+                            js_iterator_close_preserve_exception(iterator);
+                            return ItemNull;
+                        }
+                        if (key.item == JS_ITER_DONE_SENTINEL) break;
+                        key = js_collection_canonical_key(key);
+                        js_collection_method(result, 0, key, ItemNull);
+                    }
+                    return result;
+                };
+
+                auto apply_symmetric_keys = [&](Item result, JsSetRecordLocal* rec) -> Item {
+                    JsCollectionData* result_cd = js_get_collection_data(result);
+                    if (!result_cd) return ItemNull;
+                    Item iterator = set_record_keys_iterator(rec);
+                    if (js_check_exception()) return ItemNull;
+                    while (true) {
+                        Item key = js_iterator_step(iterator);
+                        if (js_check_exception()) {
+                            js_iterator_close_preserve_exception(iterator);
+                            return ItemNull;
+                        }
+                        if (key.item == JS_ITER_DONE_SENTINEL) break;
+                        key = js_collection_canonical_key(key);
+                        bool in_receiver = set_contains_key(cd, key);
+                        if (set_contains_key(result_cd, key)) {
+                            if (in_receiver) js_collection_method(result, 3, key, ItemNull);
+                        } else if (!in_receiver) {
+                            js_collection_method(result, 0, key, ItemNull);
                         }
                     }
-                    return js_array_new(0);
+                    return result;
                 };
 
                 if (cd->type == JS_COLLECTION_SET && method->len == 12 && strncmp(method->chars, "intersection", 12) == 0) {
                     // Set.prototype.intersection(other)
                     Item other = argc > 0 ? args[0] : ItemNull;
-                    JsCollectionData* raw_other_cd = js_get_collection_data(other);
-                    JsCollectionData* other_cd = (raw_other_cd && !raw_other_cd->is_weak) ? raw_other_cd : NULL;
-                    double other_size = 0.0;
-                    if (other_cd) other_size = (double)hashmap_count(other_cd->hmap);
-                    else if (!validate_set_record(other, &other_size)) return ItemNull;
-                    Item result = js_collection_create(JS_COLLECTION_SET);
-                    js_collection_link_prototype(result, "Set", 3);
-                    for (JsCollectionOrderNode* node = cd->order_head; node; node = node->next) {
-                        if (set_like_has(other, other_cd, node->key))
-                            js_collection_method(result, 0, node->key, ItemNull);
+                    JsSetRecordLocal rec;
+                    if (!get_set_record(other, &rec)) return ItemNull;
+                    Item result = make_set_result();
+                    double this_size = (double)hashmap_count(cd->hmap);
+                    if (this_size <= rec.size) {
+                        for (JsCollectionOrderNode* node = cd->order_head; node; node = node->next) {
+                            if (node->deleted) continue;
+                            if (set_record_has(&rec, node->key)) js_collection_method(result, 0, node->key, ItemNull);
+                            if (js_check_exception()) return ItemNull;
+                        }
+                    } else {
+                        return add_keys_intersection(result, &rec);
                     }
                     return result;
                 }
                 else if (cd->type == JS_COLLECTION_SET && method->len == 5 && strncmp(method->chars, "union", 5) == 0) {
                     // Set.prototype.union(other)
                     Item other = argc > 0 ? args[0] : ItemNull;
-                    JsCollectionData* raw_other_cd = js_get_collection_data(other);
-                    JsCollectionData* other_cd = (raw_other_cd && !raw_other_cd->is_weak) ? raw_other_cd : NULL;
-                    double other_size = 0.0;
-                    if (other_cd) other_size = (double)hashmap_count(other_cd->hmap);
-                    else if (!validate_set_record(other, &other_size)) return ItemNull;
-                    Item result = js_collection_create(JS_COLLECTION_SET);
-                    js_collection_link_prototype(result, "Set", 3);
-                    for (JsCollectionOrderNode* node = cd->order_head; node; node = node->next)
-                        js_collection_method(result, 0, node->key, ItemNull);
-                    Item other_keys = set_like_keys(other, other_cd);
-                    int64_t ok_len = js_array_length(other_keys);
-                    for (int64_t i = 0; i < ok_len; i++) {
-                        Item k = js_array_get(other_keys, (Item){.item = i2it(i)});
-                        js_collection_method(result, 0, k, ItemNull);
-                    }
-                    return result;
+                    JsSetRecordLocal rec;
+                    if (!get_set_record(other, &rec)) return ItemNull;
+                    Item result = make_set_result();
+                    copy_set_to_result(result, cd);
+                    return add_union_keys(result, &rec);
                 }
                 else if (cd->type == JS_COLLECTION_SET && method->len == 10 && strncmp(method->chars, "difference", 10) == 0) {
                     // Set.prototype.difference(other)
                     Item other = argc > 0 ? args[0] : ItemNull;
-                    JsCollectionData* raw_other_cd = js_get_collection_data(other);
-                    JsCollectionData* other_cd = (raw_other_cd && !raw_other_cd->is_weak) ? raw_other_cd : NULL;
-                    double other_size = 0.0;
-                    if (other_cd) other_size = (double)hashmap_count(other_cd->hmap);
-                    else if (!validate_set_record(other, &other_size)) return ItemNull;
-                    Item result = js_collection_create(JS_COLLECTION_SET);
-                    js_collection_link_prototype(result, "Set", 3);
-                    for (JsCollectionOrderNode* node = cd->order_head; node; node = node->next) {
-                        if (!set_like_has(other, other_cd, node->key))
-                            js_collection_method(result, 0, node->key, ItemNull);
+                    JsSetRecordLocal rec;
+                    if (!get_set_record(other, &rec)) return ItemNull;
+                    Item result = make_set_result();
+                    double this_size = (double)hashmap_count(cd->hmap);
+                    if (this_size <= rec.size) {
+                        for (JsCollectionOrderNode* node = cd->order_head; node; node = node->next) {
+                            if (node->deleted) continue;
+                            if (!set_record_has(&rec, node->key))
+                                js_collection_method(result, 0, node->key, ItemNull);
+                            if (js_check_exception()) return ItemNull;
+                        }
+                    } else {
+                        copy_set_to_result(result, cd);
+                        return delete_keys_from_result(result, &rec);
                     }
                     return result;
                 }
                 else if (cd->type == JS_COLLECTION_SET && method->len == 19 && strncmp(method->chars, "symmetricDifference", 19) == 0) {
                     // Set.prototype.symmetricDifference(other)
                     Item other = argc > 0 ? args[0] : ItemNull;
-                    JsCollectionData* raw_other_cd = js_get_collection_data(other);
-                    JsCollectionData* other_cd = (raw_other_cd && !raw_other_cd->is_weak) ? raw_other_cd : NULL;
-                    double other_size = 0.0;
-                    if (other_cd) other_size = (double)hashmap_count(other_cd->hmap);
-                    else if (!validate_set_record(other, &other_size)) return ItemNull;
-                    Item result = js_collection_create(JS_COLLECTION_SET);
-                    js_collection_link_prototype(result, "Set", 3);
-                    for (JsCollectionOrderNode* node = cd->order_head; node; node = node->next) {
-                        if (!set_like_has(other, other_cd, node->key))
-                            js_collection_method(result, 0, node->key, ItemNull);
-                    }
-                    Item other_keys = set_like_keys(other, other_cd);
-                    int64_t ok_len = js_array_length(other_keys);
-                    for (int64_t i = 0; i < ok_len; i++) {
-                        Item k = js_array_get(other_keys, (Item){.item = i2it(i)});
-                        JsCollectionEntry probe = {.key = k};
-                        if (!hashmap_get(cd->hmap, &probe))
-                            js_collection_method(result, 0, k, ItemNull);
-                    }
-                    return result;
+                    JsSetRecordLocal rec;
+                    if (!get_set_record(other, &rec)) return ItemNull;
+                    Item result = make_set_result();
+                    copy_set_to_result(result, cd);
+                    return apply_symmetric_keys(result, &rec);
                 }
                 else if (cd->type == JS_COLLECTION_SET && method->len == 10 && strncmp(method->chars, "isSubsetOf", 10) == 0) {
                     // Set.prototype.isSubsetOf(other)
                     Item other = argc > 0 ? args[0] : ItemNull;
-                    JsCollectionData* raw_other_cd = js_get_collection_data(other);
-                    JsCollectionData* other_cd = (raw_other_cd && !raw_other_cd->is_weak) ? raw_other_cd : NULL;
-                    double other_size = 0.0;
-                    if (other_cd) other_size = (double)hashmap_count(other_cd->hmap);
-                    else if (!validate_set_record(other, &other_size)) return ItemNull;
+                    JsSetRecordLocal rec;
+                    if (!get_set_record(other, &rec)) return ItemNull;
+                    double this_size = (double)hashmap_count(cd->hmap);
+                    if (this_size > rec.size) return (Item){.item = ITEM_FALSE};
                     for (JsCollectionOrderNode* node = cd->order_head; node; node = node->next) {
-                        if (!set_like_has(other, other_cd, node->key)) return (Item){.item = ITEM_FALSE};
+                        if (node->deleted) continue;
+                        if (!set_record_has(&rec, node->key)) return (Item){.item = ITEM_FALSE};
+                        if (js_check_exception()) return ItemNull;
                     }
                     return (Item){.item = ITEM_TRUE};
                 }
                 else if (cd->type == JS_COLLECTION_SET && method->len == 12 && strncmp(method->chars, "isSupersetOf", 12) == 0) {
                     // Set.prototype.isSupersetOf(other)
                     Item other = argc > 0 ? args[0] : ItemNull;
-                    JsCollectionData* raw_other_cd = js_get_collection_data(other);
-                    JsCollectionData* other_cd = (raw_other_cd && !raw_other_cd->is_weak) ? raw_other_cd : NULL;
-                    double other_size = 0.0;
-                    if (other_cd) other_size = (double)hashmap_count(other_cd->hmap);
-                    else if (!validate_set_record(other, &other_size)) return ItemNull;
-                    Item other_keys = set_like_keys(other, other_cd);
-                    int64_t ok_len = js_array_length(other_keys);
-                    for (int64_t i = 0; i < ok_len; i++) {
-                        Item k = js_array_get(other_keys, (Item){.item = i2it(i)});
-                        JsCollectionEntry probe = {.key = k};
-                        if (!hashmap_get(cd->hmap, &probe)) return (Item){.item = ITEM_FALSE};
+                    JsSetRecordLocal rec;
+                    if (!get_set_record(other, &rec)) return ItemNull;
+                    double this_size = (double)hashmap_count(cd->hmap);
+                    if (this_size < rec.size) return (Item){.item = ITEM_FALSE};
+                    Item iterator = set_record_keys_iterator(&rec);
+                    if (js_check_exception()) return ItemNull;
+                    while (true) {
+                        Item key = js_iterator_step(iterator);
+                        if (js_check_exception()) {
+                            js_iterator_close_preserve_exception(iterator);
+                            return ItemNull;
+                        }
+                        if (key.item == JS_ITER_DONE_SENTINEL) break;
+                        key = js_collection_canonical_key(key);
+                        if (!set_contains_key(cd, key)) {
+                            if (!close_iterator_for_return(iterator)) return ItemNull;
+                            return (Item){.item = ITEM_FALSE};
+                        }
                     }
                     return (Item){.item = ITEM_TRUE};
                 }
                 else if (cd->type == JS_COLLECTION_SET && method->len == 14 && strncmp(method->chars, "isDisjointFrom", 14) == 0) {
                     // Set.prototype.isDisjointFrom(other)
                     Item other = argc > 0 ? args[0] : ItemNull;
-                    JsCollectionData* raw_other_cd = js_get_collection_data(other);
-                    JsCollectionData* other_cd = (raw_other_cd && !raw_other_cd->is_weak) ? raw_other_cd : NULL;
-                    double other_size = 0.0;
-                    if (other_cd) other_size = (double)hashmap_count(other_cd->hmap);
-                    else if (!validate_set_record(other, &other_size)) return ItemNull;
-                    for (JsCollectionOrderNode* node = cd->order_head; node; node = node->next) {
-                        if (set_like_has(other, other_cd, node->key)) return (Item){.item = ITEM_FALSE};
+                    JsSetRecordLocal rec;
+                    if (!get_set_record(other, &rec)) return ItemNull;
+                    double this_size = (double)hashmap_count(cd->hmap);
+                    if (this_size <= rec.size) {
+                        for (JsCollectionOrderNode* node = cd->order_head; node; node = node->next) {
+                            if (node->deleted) continue;
+                            if (set_record_has(&rec, node->key)) return (Item){.item = ITEM_FALSE};
+                            if (js_check_exception()) return ItemNull;
+                        }
+                    } else {
+                        Item iterator = set_record_keys_iterator(&rec);
+                        if (js_check_exception()) return ItemNull;
+                        while (true) {
+                            Item key = js_iterator_step(iterator);
+                            if (js_check_exception()) {
+                                js_iterator_close_preserve_exception(iterator);
+                                return ItemNull;
+                            }
+                            if (key.item == JS_ITER_DONE_SENTINEL) break;
+                            key = js_collection_canonical_key(key);
+                            if (set_contains_key(cd, key)) {
+                                if (!close_iterator_for_return(iterator)) return ItemNull;
+                                return (Item){.item = ITEM_FALSE};
+                            }
+                        }
                     }
                     return (Item){.item = ITEM_TRUE};
                 }
