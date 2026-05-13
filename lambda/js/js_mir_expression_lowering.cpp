@@ -1164,8 +1164,10 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                 }
             }
         }
-        // typeof must not throw ReferenceError for undeclared identifiers
-        mt->in_typeof = true;
+        // Only direct identifiers get typeof's unresolvable-reference escape;
+        // member/call operands still perform normal GetValue on their bases.
+        bool direct_identifier = un->operand && un->operand->node_type == JS_AST_NODE_IDENTIFIER;
+        mt->in_typeof = direct_identifier;
         MIR_reg_t operand_val = jm_transpile_box_item(mt, un->operand);
         mt->in_typeof = false;
         return jm_call_1(mt, "js_typeof", MIR_T_I64,
@@ -8591,6 +8593,7 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
 
     // General property access: js_property_access(obj, key)
     MIR_reg_t obj = jm_transpile_box_item(mt, mem->object);
+    jm_emit_exc_propagate_check(mt);
 
     // Generator spill: if computed key contains yield, obj reg will be stale after resume
     int mem_obj_spill = -1;

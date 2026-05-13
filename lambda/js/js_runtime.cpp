@@ -132,6 +132,29 @@ extern "C" Item js_proxy_get_target(Item obj) {
     return obj;
 }
 
+extern "C" bool js_proxy_has_callable_target(Item obj) {
+    int depth = 0;
+    while (js_is_proxy(obj) && depth < 32) {
+        JsProxyData* pd = js_get_proxy_data(obj);
+        if (!pd) return false;
+        obj = PD_TARGET(pd);
+        depth++;
+    }
+    TypeId type = get_type_id(obj);
+    if (type == LMD_TYPE_FUNC) return true;
+    if (type == LMD_TYPE_MAP) {
+        bool own_ip = false;
+        js_map_get_fast_ext(obj.map, "__instance_proto__", 18, &own_ip);
+        if (own_ip) return true;
+        if (js_class_id(obj) == JS_CLASS_FUNCTION) {
+            bool own_proto = false;
+            js_map_get_fast_ext(obj.map, "__is_proto__", 12, &own_proto);
+            if (own_proto) return true;
+        }
+    }
+    return false;
+}
+
 // helper: check if object is extensible (returns C bool)
 static bool js_is_extensible(Item obj) {
     return it2b(js_to_boolean(js_object_is_extensible(obj)));
@@ -3222,6 +3245,11 @@ extern "C" Item js_property_get(Item object, Item key) {
                         // v29: Populate String.prototype methods for test262 compliance
                         if (nl == 6 && strncmp(nm, "String", 6) == 0) {
                             js_populate_builtin_prototype_methods(fn->prototype, nm, nl);
+                            Item length_key = (Item){.item = s2it(heap_create_name("length", 6))};
+                            js_property_set(fn->prototype, length_key, (Item){.item = i2it(0)});
+                            js_mark_non_writable(fn->prototype, length_key);
+                            js_mark_non_enumerable(fn->prototype, length_key);
+                            js_mark_non_configurable(fn->prototype, length_key);
                             // Symbol.iterator
                             Item si_key = (Item){.item = s2it(heap_create_name("__sym_1", 7))};
                             Item si_fn = js_get_or_create_builtin(JS_BUILTIN_STRING_ITER, "[Symbol.iterator]", 0);
@@ -3452,6 +3480,12 @@ extern "C" Item js_property_get(Item object, Item key) {
                 if (str_key->len == 8 && strncmp(str_key->chars, "toString", 8) == 0) {
                     return js_get_or_create_builtin(JS_BUILTIN_SYM_TO_STRING, "toString", 0);
                 }
+                if (str_key->len == 7 && strncmp(str_key->chars, "valueOf", 7) == 0) {
+                    return js_get_or_create_builtin(JS_BUILTIN_OBJ_VALUE_OF, "valueOf", 0);
+                }
+                Item object_builtin = js_lookup_builtin_method(LMD_TYPE_MAP, str_key->chars, str_key->len);
+                if (object_builtin.item != ItemNull.item) return object_builtin;
+                return make_js_undefined();
             }
         }
 

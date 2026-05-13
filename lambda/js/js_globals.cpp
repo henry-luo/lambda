@@ -9790,7 +9790,7 @@ extern "C" Item js_object_assign(Item target, Item* sources, int count) {
 // Used for { ...source } in object literals
 extern "C" Item js_object_spread_into(Item target, Item source) {
     if (get_type_id(target) != LMD_TYPE_MAP) return target;
-    if (js_is_proxy(source)) {
+    if (js_is_proxy(source) || get_type_id(source) == LMD_TYPE_MAP) {
         Item keys = js_reflect_own_keys(source);
         if (js_check_exception() || get_type_id(keys) != LMD_TYPE_ARRAY) return target;
         int key_count = (int)js_array_length(keys);
@@ -9808,44 +9808,6 @@ extern "C" Item js_object_spread_into(Item target, Item source) {
         }
         return target;
     }
-    if (get_type_id(source) != LMD_TYPE_MAP) return target;
-    Map* m = source.map;
-    if (!m || !m->type) return target;
-    TypeMap* tm = (TypeMap*)m->type;
-    ShapeEntry* e = tm->shape;
-    while (e) {
-        if (e->name) {
-            const char* n = e->name->str;
-            int nlen = (int)e->name->length;
-            // v20: Skip internal marker properties (__ne_, __nw_, __nc_, __get_, __set_, __proto__, __class_name__, __sym_)
-            if (nlen >= 2 && n[0] == '_' && n[1] == '_') {
-                e = e->next;
-                continue;
-            }
-            // Stage A3: shape-flag-first non-enumerable check
-            if (!js_props_query_enumerable(m, e, n, nlen)) {
-                e = e->next;
-                continue;
-            }
-            Item val;
-            // Stage A1.7: route shape-iteration accessor dispatch through
-            // js_ordinary_resolve_shape_value. CopyDataProperties resolves
-            // setter-only accessors as undefined and copies them.
-            {
-                JsResolveFieldStatus rs = js_ordinary_resolve_shape_value(
-                    e, m, source, &val);
-                if (rs == JS_RESOLVE_DELETED) { e = e->next; continue; }
-                if (rs == JS_RESOLVE_THREW) return target;
-            }
-            {
-                Item key = (Item){.item = s2it(heap_create_name(n, nlen))};
-                js_property_set(target, key, val);
-            }
-        }
-        e = e->next;
-    }
-    // Second pass: detect accessor-only properties (__get_<name>)
-    // Phase-5D: legacy __get_<name>/__set_<name> pass-2 scan removed.
     return target;
 }
 

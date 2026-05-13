@@ -1166,12 +1166,15 @@ int bigint_cmp(Item a, Item b) {
 int bigint_cmp_double(Item bi, double d) {
     mpd_t* m = bigint_get_mpd(bi);
     if (!m) return 0;
+    if (isnan(d)) return 0;
+    if (d == INFINITY) return -1;
+    if (d == -INFINITY) return 1;
     // convert double to mpd for comparison
     mpd_context_t* ctx = bigint_context();
     mpd_t* d_mpd = mpd_new(ctx);
     if (!d_mpd) return 0;
-    char str_buf[64];
-    snprintf(str_buf, sizeof(str_buf), "%.17g", d);
+    char str_buf[1200];
+    snprintf(str_buf, sizeof(str_buf), "%.1074g", d);
     uint32_t status = 0;
     mpd_qset_string(d_mpd, str_buf, ctx, &status);
     if (status != 0) { mpd_del(d_mpd); return 0; }
