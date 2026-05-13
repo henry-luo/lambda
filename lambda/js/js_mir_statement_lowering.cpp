@@ -1179,9 +1179,17 @@ MIR_reg_t jm_build_closure_for_method(JsMirTranspiler* mt, JsFuncCollected* fc, 
     for (int ci = 0; ci < fc->capture_count; ci++) {
         JsMirVarEntry* var = jm_find_var(mt, fc->captures[ci].name);
         if (var) {
-            MIR_reg_t value_to_store = var->reg;
-            if (jm_is_native_type(var->type_id)) {
-                value_to_store = jm_box_native(mt, var->reg, var->type_id);
+            MIR_reg_t value_to_store;
+            if (var->in_scope_env && var->scope_env_reg != 0 && var->scope_env_slot >= 0) {
+                value_to_store = jm_new_reg(mt, "mcap_live", MIR_T_I64);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, value_to_store),
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1)));
+            } else {
+                value_to_store = var->reg;
+                if (jm_is_native_type(var->type_id)) {
+                    value_to_store = jm_box_native(mt, var->reg, var->type_id);
+                }
             }
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_mem_op(mt->ctx, MIR_T_I64, ci * (int)sizeof(uint64_t), env, 0, 1),
@@ -3186,7 +3194,16 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         if (mt->module_consts) {
             JsClassNode* cls_node = (JsClassNode*)stmt;
             if (cls_node->name && cls_node->name->chars) {
-                JsClassEntry* ce = jm_find_class(mt, cls_node->name->chars, (int)cls_node->name->len);
+                JsClassEntry* ce = NULL;
+                for (int ci = 0; ci < mt->class_count; ci++) {
+                    if (mt->class_entries[ci].node == cls_node) {
+                        ce = &mt->class_entries[ci];
+                        break;
+                    }
+                }
+                if (!ce) {
+                    ce = jm_find_class(mt, cls_node->name->chars, (int)cls_node->name->len);
+                }
                 if (ce) {
                     // TDZ: class x extends x {} → throw ReferenceError
                     if (ce->has_self_extends) {

@@ -10668,17 +10668,15 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
         // from the variable during collect phase.
         String* effective_name = cls_expr->name;
         JsClassEntry* ce = NULL;
-        if (effective_name) {
-            ce = jm_find_class(mt, effective_name->chars, (int)effective_name->len);
-        } else {
-            // Find class entry by node pointer
-            for (int ci = 0; ci < mt->class_count; ci++) {
-                if (mt->class_entries[ci].node == cls_expr) {
-                    ce = &mt->class_entries[ci];
-                    effective_name = ce->name;
-                    break;
-                }
+        for (int ci = 0; ci < mt->class_count; ci++) {
+            if (mt->class_entries[ci].node == cls_expr) {
+                ce = &mt->class_entries[ci];
+                effective_name = ce->name ? ce->name : effective_name;
+                break;
             }
+        }
+        if (!ce && effective_name) {
+            ce = jm_find_class(mt, effective_name->chars, (int)effective_name->len);
         }
         // TDZ: class x extends x {} → throw ReferenceError
         if (ce && ce->has_self_extends) {
@@ -11012,6 +11010,32 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                 // Mark all prototype methods as non-enumerable (ES spec)
                 jm_call_void_1(mt, "js_mark_all_non_enumerable",
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj));
+            } else {
+                MIR_reg_t proto_obj = jm_call_0(mt, "js_new_object", MIR_T_I64);
+                jm_call_void_2(mt, "js_set_default_constructor_property",
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
+                MIR_reg_t ip_key = jm_box_string_literal(mt, "__instance_proto__", 18);
+                jm_call_3(mt, "js_property_set", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, ip_key),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj));
+                MIR_reg_t pt_key = jm_box_string_literal(mt, "prototype", 9);
+                jm_call_void_1(mt, "js_prepare_class_prototype_property",
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
+                jm_call_3(mt, "js_property_set", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, pt_key),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj));
+                jm_call_void_2(mt, "js_mark_non_writable",
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, pt_key));
+                jm_call_void_2(mt, "js_mark_non_enumerable",
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, pt_key));
+                jm_call_void_2(mt, "js_mark_non_configurable",
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, pt_key));
             }
 
             // v18g: Set class .name property (ES spec §14.6.13 step 12)
