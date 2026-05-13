@@ -120,6 +120,7 @@ static inline size_t get_rss_bytes() { return 0; }
 extern "C" {
     char* read_text_file(const char *filename);
     void write_text_file(const char *filename, const char *content);
+    int write_binary_file(const char* filename, const char* data, size_t len);
     TSTree* lambda_parse_source(TSParser* parser, const char* source);
 }
 
@@ -2752,7 +2753,7 @@ int main(int argc, char *argv[]) {
                 String* html_str = format_html(script_result->pool, script_result->root);
                 if (html_str && html_str->chars) {
                     const char* temp_html = "./temp/lambda_view_pdf.html";
-                    write_text_file(temp_html, html_str->chars);
+                    write_binary_file(temp_html, html_str->chars, html_str->len);
                     pdf_temp_html = mem_strdup(temp_html, MEM_CAT_TEMP);
                     log_info("[view] PDF rendered to %s (%u bytes)",
                              temp_html, html_str->len);

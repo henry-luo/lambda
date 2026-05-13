@@ -383,7 +383,8 @@ static Item parse_pdf_object(InputContext& ctx, const char **pdf, int depth) {
             skip_pdf_whitespace_and_comments(pdf);
             if (strncmp(*pdf, "stream", 6) == 0) {
                 // Parse as stream with dictionary
-                Item stream = parse_pdf_stream(ctx, pdf, dict);
+                size_t remaining = *pdf < ctx.source_end() ? (size_t)(ctx.source_end() - *pdf) : 0;
+                Item stream = parse_pdf_stream(ctx, pdf, dict, remaining);
                 result = stream .item != ITEM_ERROR ? stream : (Item){.item = (uint64_t)dict};
             } else {
                 // Just a dictionary
@@ -607,7 +608,7 @@ static Item parse_pdf_stream(InputContext& ctx, const char **pdf, Map* dict, siz
     if (bytes_remaining > actual_remaining) {
         bytes_remaining = actual_remaining;
     }
-    size_t max_search = bytes_remaining > 100000 ? 100000 : bytes_remaining;
+    size_t max_search = bytes_remaining;
     for (size_t i = 0; i + 9 <= max_search; i++) {
         if (strncmp(search_start + i, "endstream", 9) == 0) {
             end_stream = search_start + i;

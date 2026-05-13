@@ -213,7 +213,9 @@ void format_html_string_safe(StringBuf* sb, String* str, bool is_attribute) {
     const char* s = str->chars;
     size_t len = str->len;
     const size_t max_html_string_len = 1024 * 1024;
-    if (len > max_html_string_len) {
+    const size_t max_html_attribute_len = 32 * 1024 * 1024;
+    bool large_attr = is_attribute && len <= max_html_attribute_len;
+    if (len > max_html_string_len && !large_attr) {
         log_error("html_string_guard: skipping suspicious HTML string len=%zu ptr=%p", len, (void*)s);
         return;
     }
