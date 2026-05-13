@@ -730,12 +730,66 @@ static void replace_string_field(Map* m, const char* field, String* new_val) {
     }
 }
 
+static bool is_image_stream_dict(Map* dict) {
+    if (!dict) return false;
+    String* type = item_as_pdf_name(map_lookup(dict, "Type"));
+    String* subtype = item_as_pdf_name(map_lookup(dict, "Subtype"));
+    return str_eq(type, "XObject") && str_eq(subtype, "Image");
+}
+
+static bool is_font_program_stream_dict(Map* dict) {
+    if (!dict) return false;
+    return map_lookup(dict, "Length1").item != ITEM_NULL ||
+           map_lookup(dict, "Length2").item != ITEM_NULL ||
+           map_lookup(dict, "Length3").item != ITEM_NULL;
+}
+
+static String* latin1_bytes_to_utf8_string(Input* input, String* src) {
+    if (!input || !src) return nullptr;
+    size_t out_len = 0;
+    bool is_ascii = true;
+    for (uint32_t i = 0; i < src->len; i++) {
+        unsigned char c = (unsigned char)src->chars[i];
+        if (c >= 0x80) is_ascii = false;
+        out_len += (c < 0x80) ? 1 : 2;
+    }
+    if (is_ascii) return src;
+    String* out = (String*)pool_calloc(input->pool, sizeof(String) + out_len + 1);
+    if (!out) return nullptr;
+    size_t j = 0;
+    for (uint32_t i = 0; i < src->len; i++) {
+        unsigned char c = (unsigned char)src->chars[i];
+        if (c < 0x80) {
+            out->chars[j++] = (char)c;
+        } else {
+            out->chars[j++] = (char)(0xC0 | (c >> 6));
+            out->chars[j++] = (char)(0x80 | (c & 0x3F));
+        }
+    }
+    out->chars[j] = '\0';
+    out->len = (uint32_t)out_len;
+    out->is_ascii = 0;
+    return out;
+}
+
 // Pass 3: walk every indirect_object content; if it's a stream Map with
 // a Filter, decompress in place. After this pass, the `data` field of
 // every stream object holds the plain (post-filter) byte payload, so
 // callers (e.g. content-stream tokenizer) need not re-implement filter
 // chains.
-static void decompress_streams(Input* input, Array* objects) {    if (!objects) return;
+static void add_text_data_to_stream(Input* input, MarkBuilder& builder, Map* sm) {
+    if (!input || !sm) return;
+    Map* dict = item_as_map(map_lookup(sm, "dictionary"));
+    if (is_image_stream_dict(dict)) return;
+    if (is_font_program_stream_dict(dict)) return;
+    String* data = item_as_string(map_lookup(sm, "data"));
+    if (!data || data->len == 0) return;
+    String* text_data = latin1_bytes_to_utf8_string(input, data);
+    if (!text_data) return;
+    builder.putToMap(sm, builder.createString("text_data"), {.item = s2it(text_data)});
+}
+
+static void decompress_streams(Input* input, MarkBuilder& builder, Array* objects) {    if (!objects) return;
     int decoded_count = 0;
     for (int i = 0; i < objects->length; i++) {
         Map* iobj = item_as_map(objects->items[i]);
@@ -748,7 +802,10 @@ static void decompress_streams(Input* input, Array* objects) {    if (!objects) 
         Map* dict = item_as_map(dict_it);
         if (!dict) continue;
         Item filter_it = map_lookup(dict, "Filter");
-        if (filter_it.item == ITEM_NULL) continue;
+        if (filter_it.item == ITEM_NULL) {
+            add_text_data_to_stream(input, builder, sm);
+            continue;
+        }
 
         size_t out_len = 0;
         bool needs_free = false;
@@ -770,6 +827,7 @@ static void decompress_streams(Input* input, Array* objects) {    if (!objects) 
         if (needs_free) mem_free((void*)dec);
 
         replace_string_field(sm, "data", new_data);
+        add_text_data_to_stream(input, builder, sm);
         decoded_count++;
     }
     log_info("pdf_postprocess: decompressed %d stream(s)", decoded_count);
@@ -1263,7 +1321,7 @@ void pdf_postprocess(Input* input) {
     walk_fonts(input, builder, objects, &table);
 
     // Pass 3: stream decompression (FlateDecode, ASCII85Decode, etc.)
-    decompress_streams(input, objects);
+    decompress_streams(input, builder, objects);
 
     // Pass 4: encode Image XObjects to PNG data URIs
     encode_image_xobjects(input, builder, objects, &table);

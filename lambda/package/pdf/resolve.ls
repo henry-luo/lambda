@@ -68,7 +68,8 @@ pub fn deref(pdf, it) {
 // ============================================================
 
 fn _stream_bytes(s) {
-    if (s and s.data) { s.data }
+    if (s and s.text_data) { s.text_data }
+    else if (s and s.data) { s.data }
     else if (s and s.stream_data != null) { s.stream_data }
     else { "" }
 }

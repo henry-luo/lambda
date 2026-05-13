@@ -62,13 +62,7 @@ fn octal_digit_value(c: string) {
 // ============================================================
 
 pn slice_str(s: string, a: int, b: int) {
-    var out = ""
-    var k = a
-    while (k < b) {
-        out = out ++ s[k]
-        k = k + 1
-    }
-    return out
+    return slice(s, a, b)
 }
 
 // ============================================================
@@ -107,6 +101,18 @@ pn read_name(s: string, i: int) {
 }
 
 pn clean_hex_string(raw: string) {
+    var needs_clean = false
+    var p = 0
+    while (p < len(raw)) {
+        let c = raw[p]
+        if (is_hex_ws(c) or not is_hex_digit_code(ord(c))) {
+            needs_clean = true
+            break
+        }
+        p = p + 1
+    }
+    if (not needs_clean) { return raw }
+
     var out = ""
     var k = 0
     while (k < len(raw)) {

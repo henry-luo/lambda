@@ -83,6 +83,11 @@ fn _stream_data(content, dict) {
     else { "" }
 }
 
+fn _stream_text_data(content, dict) {
+    if (content and content.text_data != null) { content.text_data }
+    else { _stream_data(content, dict) }
+}
+
 fn _form_matrix(m) {
     if (m is array and len(m) == 6) {
         [util.num(m[0]), util.num(m[1]), util.num(m[2]),
@@ -111,7 +116,7 @@ pub fn form_content(pdf, page, name) {
             let sub  = if (dict and dict.Subtype) dict.Subtype else null
             if (sub != "Form") { null }
             else {
-                let data = _stream_data(content, dict)
+                let data = _stream_text_data(content, dict)
                 let m = if (dict and dict.Matrix) dict.Matrix else null
                 { data: data, matrix: _form_matrix(m), dict: dict }
             }
