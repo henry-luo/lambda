@@ -191,6 +191,7 @@ fn _emit_text(st, ctm, page_h, content, run_advance) {
         let family = if (fi) fi.family else "sans-serif"
         let weight = if (fi) fi.weight else "normal"
         let style  = if (fi) fi.style  else "normal"
+        let raw_font = _raw_font_attr(fi)
         let fill_color   = if (st.fill) st.fill else "rgb(0,0,0)"
         let stroke_color = if (st.stroke) st.stroke else "rgb(0,0,0)"
         // PDF text-rendering matrix Trm = Tm × CTM. The text origin
@@ -228,16 +229,22 @@ fn _emit_text(st, ctm, page_h, content, run_advance) {
         // Tz — horizontal scale, percentage. 100 = no change. Apply via
         // a transform on the <text> origin so glyph widths scale but
         // the baseline stays fixed. Skip when ~100 to keep markup tidy.
-        let hs = st.hor_scale / 100.0
-        let scaled = (util.fabs(hs - 1.0) > 0.001)
+        let hs = _text_transform_hscale(st, ctm)
+        let skew_x = _text_transform_skew_x(st, ctm)
+        let scaled = ((util.fabs(hs - 1.0) > 0.001) or (util.fabs(skew_x) > 0.001))
         let text_len = util.fmt_num(run_advance)
+        let scaled_text_len = _scaled_text_length(run_advance, hs)
+        let text_xform = _text_transform_attr(x, y, hs, skew_x)
         if (scaled and needs_stroke and needs_text_alpha) {
             <text x: "0", y: "0",
-                  transform: "translate(" ++ util.fmt_num(x) ++ " " ++ util.fmt_num(y) ++ ") scale(" ++ util.fmt_num(hs) ++ " 1)",
+                  transform: text_xform,
                   'font-family': family,
                   'font-size':   util.fmt_num(eff_size),
                   'font-weight': weight,
                   'font-style':  style,
+                  'data-pdf-raw-font': raw_font,
+                  textLength:    scaled_text_len,
+                  lengthAdjust:  "spacingAndGlyphs",
                   fill:          svg_fill,
                   stroke:        svg_stroke,
                   'fill-opacity': util.fmt_num(fill_alpha),
@@ -247,11 +254,14 @@ fn _emit_text(st, ctm, page_h, content, run_advance) {
         }
         else if (scaled and needs_stroke) {
             <text x: "0", y: "0",
-                  transform: "translate(" ++ util.fmt_num(x) ++ " " ++ util.fmt_num(y) ++ ") scale(" ++ util.fmt_num(hs) ++ " 1)",
+                  transform: text_xform,
                   'font-family': family,
                   'font-size':   util.fmt_num(eff_size),
                   'font-weight': weight,
                   'font-style':  style,
+                  'data-pdf-raw-font': raw_font,
+                  textLength:    scaled_text_len,
+                  lengthAdjust:  "spacingAndGlyphs",
                   fill:          svg_fill,
                   stroke:        svg_stroke;
                 content
@@ -259,11 +269,14 @@ fn _emit_text(st, ctm, page_h, content, run_advance) {
         }
         else if (scaled and needs_text_alpha) {
             <text x: "0", y: "0",
-                  transform: "translate(" ++ util.fmt_num(x) ++ " " ++ util.fmt_num(y) ++ ") scale(" ++ util.fmt_num(hs) ++ " 1)",
+                  transform: text_xform,
                   'font-family': family,
                   'font-size':   util.fmt_num(eff_size),
                   'font-weight': weight,
                   'font-style':  style,
+                  'data-pdf-raw-font': raw_font,
+                  textLength:    scaled_text_len,
+                  lengthAdjust:  "spacingAndGlyphs",
                   fill:          svg_fill,
                   'fill-opacity': util.fmt_num(fill_alpha);
                 content
@@ -271,11 +284,14 @@ fn _emit_text(st, ctm, page_h, content, run_advance) {
         }
         else if (scaled) {
             <text x: "0", y: "0",
-                  transform: "translate(" ++ util.fmt_num(x) ++ " " ++ util.fmt_num(y) ++ ") scale(" ++ util.fmt_num(hs) ++ " 1)",
+                  transform: text_xform,
                   'font-family': family,
                   'font-size':   util.fmt_num(eff_size),
                   'font-weight': weight,
                   'font-style':  style,
+                  'data-pdf-raw-font': raw_font,
+                  textLength:    scaled_text_len,
+                  lengthAdjust:  "spacingAndGlyphs",
                   fill:          svg_fill;
                 content
             >
@@ -286,6 +302,7 @@ fn _emit_text(st, ctm, page_h, content, run_advance) {
                   'font-size':   util.fmt_num(eff_size),
                   'font-weight': weight,
                   'font-style':  style,
+                  'data-pdf-raw-font': raw_font,
                   textLength:    text_len,
                   lengthAdjust:  "spacingAndGlyphs",
                   fill:          svg_fill,
@@ -301,6 +318,7 @@ fn _emit_text(st, ctm, page_h, content, run_advance) {
                   'font-size':   util.fmt_num(eff_size),
                   'font-weight': weight,
                   'font-style':  style,
+                  'data-pdf-raw-font': raw_font,
                   textLength:    text_len,
                   lengthAdjust:  "spacingAndGlyphs",
                   fill:          svg_fill,
@@ -314,6 +332,7 @@ fn _emit_text(st, ctm, page_h, content, run_advance) {
                   'font-size':   util.fmt_num(eff_size),
                   'font-weight': weight,
                   'font-style':  style,
+                  'data-pdf-raw-font': raw_font,
                   textLength:    text_len,
                   lengthAdjust:  "spacingAndGlyphs",
                   fill:          svg_fill,
@@ -327,6 +346,7 @@ fn _emit_text(st, ctm, page_h, content, run_advance) {
                   'font-size':   util.fmt_num(eff_size),
                   'font-weight': weight,
                   'font-style':  style,
+                  'data-pdf-raw-font': raw_font,
                   textLength:    text_len,
                   lengthAdjust:  "spacingAndGlyphs",
                   fill:          svg_fill;
@@ -334,6 +354,11 @@ fn _emit_text(st, ctm, page_h, content, run_advance) {
             >
         }
     }
+}
+
+fn _raw_font_attr(fi) {
+    if (fi and fi.to_unicode == null) { "true" }
+    else { "false" }
 }
 
 fn _emit_one(st, ctm, page_h, txt, run_advance) {
@@ -347,11 +372,52 @@ fn _run_advance_between(a, b) {
 }
 
 fn _effective_font_size(st, ctm) {
-    let a = st.tm[0] * ctm[0] + st.tm[1] * ctm[2]
-    let b = st.tm[0] * ctm[1] + st.tm[1] * ctm[3]
-    let scale = math.sqrt(a * a + b * b)
+    let scale = _text_y_axis_scale(st, ctm)
     let size = st.font_size * scale
     if (size < 1.0) { 12.0 } else { size }
+}
+
+fn _text_x_axis_scale(st, ctm) {
+    let a = st.tm[0] * ctm[0] + st.tm[1] * ctm[2]
+    let b = st.tm[0] * ctm[1] + st.tm[1] * ctm[3]
+    math.sqrt(a * a + b * b)
+}
+
+fn _text_y_axis_scale(st, ctm) {
+    let a = st.tm[2] * ctm[0] + st.tm[3] * ctm[2]
+    let b = st.tm[2] * ctm[1] + st.tm[3] * ctm[3]
+    if (util.fabs(b) > 0.001) {
+        if (b < 0.0) { 0.0 - b } else { b }
+    }
+    else { math.sqrt(a * a + b * b) }
+}
+
+fn _text_transform_hscale(st, ctm) {
+    let ys = _text_y_axis_scale(st, ctm)
+    let xs = _text_x_axis_scale(st, ctm)
+    let axis_scale = if (ys > 0.0) { xs / ys } else { 1.0 }
+    axis_scale * (st.hor_scale / 100.0)
+}
+
+fn _text_transform_skew_x(st, ctm) {
+    let hx_y = st.tm[0] * ctm[1] + st.tm[1] * ctm[3]
+    if (util.fabs(hx_y) > 0.001) { 0.0 }
+    else {
+        let vx = st.tm[2] * ctm[0] + st.tm[3] * ctm[2]
+        let ys = _text_y_axis_scale(st, ctm)
+        if (ys > 0.0) { (0.0 - vx) / ys }
+        else { 0.0 }
+    }
+}
+
+fn _text_transform_attr(x, y, hs, skew_x) {
+    "matrix(" ++ util.fmt_num(hs) ++ " 0 " ++ util.fmt_num(skew_x) ++ " 1 " ++
+        util.fmt_num(x) ++ " " ++ util.fmt_num(y) ++ ")"
+}
+
+fn _scaled_text_length(run_advance, hs) {
+    if (hs > 0.0) { util.fmt_num(run_advance / hs) }
+    else { util.fmt_num(run_advance) }
 }
 
 fn _svg_text_y(st, ctm, page_h, py) {
@@ -377,7 +443,7 @@ fn _text_advance(st, ctm, txt) {
     let n = len(txt)
     let base = _text_width(st, ctm, txt)
     let spacing = ((st.char_space * float(n)) + (st.word_space * float(_space_count(txt)))) * _text_space_scale(st, ctm)
-    (base + spacing) * (st.hor_scale / 100.0)
+    (base + spacing) * _text_transform_hscale(st, ctm)
 }
 
 fn _text_advance_codes(st, ctm, codes) {
@@ -385,7 +451,7 @@ fn _text_advance_codes(st, ctm, codes) {
     let base = _codes_width_units(st.font_info, codes) / 1000.0 * _effective_font_size(st, ctm)
     let words = len(for (c in codes where c == 32) c)
     let spacing = ((st.char_space * float(n)) + (st.word_space * float(words))) * _text_space_scale(st, ctm)
-    (base + spacing) * (st.hor_scale / 100.0)
+    (base + spacing) * _text_transform_hscale(st, ctm)
 }
 
 fn _num_width(v) {

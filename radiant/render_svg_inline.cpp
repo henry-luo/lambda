@@ -1382,6 +1382,108 @@ static inline bool svg_same_point(float x1, float y1, float x2, float y2) {
     return fabsf(x1 - x2) < 0.0001f && fabsf(y1 - y2) < 0.0001f;
 }
 
+typedef struct SvgSimpleRectPath {
+    float x;
+    float y;
+    float width;
+    float height;
+} SvgSimpleRectPath;
+
+static bool svg_parse_simple_rect_path(const char* d, SvgSimpleRectPath* rect) {
+    if (!d || !rect) return false;
+    const char* p = d;
+    float xs[4] = {};
+    float ys[4] = {};
+
+    skip_wsp_comma(&p);
+    if (*p != 'M') return false;
+    p++;
+    xs[0] = parse_number(&p);
+    ys[0] = parse_number(&p);
+
+    for (size_t i = 1; i < 4; i++) {
+        skip_wsp_comma(&p);
+        if (*p != 'L') return false;
+        p++;
+        xs[i] = parse_number(&p);
+        ys[i] = parse_number(&p);
+    }
+
+    skip_wsp_comma(&p);
+    if (*p != 'Z') return false;
+    p++;
+    skip_wsp_comma(&p);
+    if (*p) return false;
+
+    float min_x = xs[0], max_x = xs[0];
+    float min_y = ys[0], max_y = ys[0];
+    for (size_t i = 1; i < 4; i++) {
+        if (xs[i] < min_x) min_x = xs[i];
+        if (xs[i] > max_x) max_x = xs[i];
+        if (ys[i] < min_y) min_y = ys[i];
+        if (ys[i] > max_y) max_y = ys[i];
+    }
+    if (max_x <= min_x || max_y <= min_y) return false;
+
+    for (size_t i = 0; i < 4; i++) {
+        bool x_ok = fabsf(xs[i] - min_x) < 0.0001f || fabsf(xs[i] - max_x) < 0.0001f;
+        bool y_ok = fabsf(ys[i] - min_y) < 0.0001f || fabsf(ys[i] - max_y) < 0.0001f;
+        if (!x_ok || !y_ok) return false;
+    }
+
+    rect->x = min_x;
+    rect->y = min_y;
+    rect->width = max_x - min_x;
+    rect->height = max_y - min_y;
+    return true;
+}
+
+static bool svg_path_is_fill_only(SvgRenderContext* ctx, Element* elem) {
+    char fill_buf[256];
+    char stroke_buf[256];
+    const char* fill = get_svg_attr_or_style(ctx, elem, "fill", fill_buf, sizeof(fill_buf));
+    if (fill && strcmp(fill, "none") == 0) return false;
+    if (!fill && ctx->fill_none) return false;
+
+    const char* stroke = get_svg_attr_or_style(ctx, elem, "stroke", stroke_buf, sizeof(stroke_buf));
+    if (stroke) return strcmp(stroke, "none") == 0;
+    return ctx->stroke_none;
+}
+
+static RdtPath* svg_make_stable_hairline_rect_path(const SvgSimpleRectPath* rect,
+                                                   const RdtMatrix* transform) {
+    if (!rect || !transform) return nullptr;
+    float x_scale = sqrtf(transform->e11 * transform->e11 + transform->e21 * transform->e21);
+    float y_scale = sqrtf(transform->e12 * transform->e12 + transform->e22 * transform->e22);
+    if (x_scale <= 0.0f || y_scale <= 0.0f) return nullptr;
+
+    float x = rect->x;
+    float y = rect->y;
+    float width = rect->width;
+    float height = rect->height;
+    float device_width = width * x_scale;
+    float device_height = height * y_scale;
+    bool adjusted = false;
+
+    if (device_height > 0.0f && device_height < 1.0f && device_width >= 4.0f) {
+        float stable_height = 1.0f / y_scale;
+        y -= (stable_height - height) * 0.5f;
+        height = stable_height;
+        adjusted = true;
+    }
+    if (device_width > 0.0f && device_width < 1.0f && device_height >= 4.0f) {
+        float stable_width = 1.0f / x_scale;
+        x -= (stable_width - width) * 0.5f;
+        width = stable_width;
+        adjusted = true;
+    }
+    if (!adjusted) return nullptr;
+
+    RdtPath* stable_path = rdt_path_new();
+    rdt_path_add_rect(stable_path, x, y, width, height, 0.0f, 0.0f);
+    return stable_path;
+}
+
 static inline void svg_emit_pending_move(RdtPath* path, bool* pending_move,
                                          float pending_x, float pending_y) {
     if (*pending_move) {
@@ -1787,7 +1889,16 @@ static void render_svg_path(SvgRenderContext* ctx, Element* elem) {
     if (!path) return;
 
     RdtMatrix m = compose_element_transform(ctx, elem);
-    draw_svg_fill_stroke(ctx, path, elem, &m, 0, 0, 0, 0);
+    RdtPath* draw_path = path;
+    SvgSimpleRectPath rect = {};
+    RdtPath* stable_path = nullptr;
+    if (svg_path_is_fill_only(ctx, elem) && svg_parse_simple_rect_path(d, &rect)) {
+        stable_path = svg_make_stable_hairline_rect_path(&rect, &m);
+        if (stable_path) draw_path = stable_path;
+    }
+
+    draw_svg_fill_stroke(ctx, draw_path, elem, &m, 0, 0, 0, 0);
+    if (stable_path) rdt_path_free(stable_path);
     rdt_path_free(path);
 
     log_debug("[SVG] path: d=%s", d);
@@ -1842,7 +1953,8 @@ static bool font_file_has_unicode_cmap(const char* path);
 
 static char* resolve_font_via_fontface(FontContext* font_ctx, const char* family,
                                         const char** out_font_name,
-                                        int weight, FontSlant slant) {
+                                        int weight, FontSlant slant,
+                                        bool allow_nonunicode_cmap = false) {
     if (!font_ctx || !family || !*family) return nullptr;
 
     FontWeight fw = (weight >= 100 && weight <= 900) ? (FontWeight)weight : FONT_WEIGHT_NORMAL;
@@ -1898,7 +2010,7 @@ static char* resolve_font_via_fontface(FontContext* font_ctx, const char* family
         if (fcheck) {
             fclose(fcheck);
             // reject if no Unicode cmap (PDF Identity / Mac Roman subsets)
-            if (!font_file_has_unicode_cmap(temp_path)) {
+            if (!allow_nonunicode_cmap && !font_file_has_unicode_cmap(temp_path)) {
                 log_debug("[SVG] @font-face %s has no Unicode cmap, falling back to system font", family);
                 return nullptr;
             }
@@ -1937,7 +2049,7 @@ static char* resolve_font_via_fontface(FontContext* font_ctx, const char* family
         // reject if no Unicode cmap (PDF Identity / Mac Roman subsets) — these
         // font subsets are GID-keyed via the PDF's ToUnicode CMap and can't
         // be used directly for Unicode-text SVG rendering.
-        if (!font_file_has_unicode_cmap(temp_path)) {
+        if (!allow_nonunicode_cmap && !font_file_has_unicode_cmap(temp_path)) {
             log_info("[SVG] @font-face %s has no Unicode cmap, falling back to system font", family);
             return nullptr;
         }
@@ -2001,7 +2113,8 @@ static bool font_file_has_unicode_cmap(const char* path) {
 
 static char* resolve_svg_font_path(const char* font_family, const char** out_font_name,
                                     FontContext* font_ctx = nullptr, int weight = 400,
-                                    FontSlant slant = FONT_SLANT_NORMAL) {
+                                    FontSlant slant = FONT_SLANT_NORMAL,
+                                    bool allow_nonunicode_fontface = false) {
     // default font name
     const char* used_font_name = font_family;
 
@@ -2069,7 +2182,8 @@ static char* resolve_svg_font_path(const char* font_family, const char** out_fon
         // PDFs with FontFile2/FontFile3 streams) live here and would otherwise
         // be invisible to platform/database lookups.
         if (font_ctx) {
-            char* p = resolve_font_via_fontface(font_ctx, fam, out_font_name, weight, slant);
+            char* p = resolve_font_via_fontface(font_ctx, fam, out_font_name, weight, slant,
+                                                allow_nonunicode_fontface);
             if (p) return p;
         }
         // weight-aware / slant-aware best match. Use it whenever bold or
@@ -2171,6 +2285,58 @@ static char* resolve_svg_font_path(const char* font_family, const char** out_fon
     log_debug("[SVG] no font found for: %s", font_family);
     if (out_font_name) *out_font_name = nullptr;
     return nullptr;
+}
+
+static const char* resolve_svg_radiant_font_family(const char* font_family,
+                                                   FontContext* font_ctx,
+                                                   int weight,
+                                                   FontSlant slant,
+                                                   const char* fallback_family,
+                                                   bool allow_embedded_font) {
+    if (!font_family || !font_ctx) return fallback_family ? fallback_family : font_family;
+    if (!allow_embedded_font) return fallback_family ? fallback_family : font_family;
+
+    char family_list[512];
+    strncpy(family_list, font_family, sizeof(family_list) - 1);
+    family_list[sizeof(family_list) - 1] = '\0';
+
+    FontWeight fw = (weight >= 100 && weight <= 900) ? (FontWeight)weight : FONT_WEIGHT_NORMAL;
+    char* cursor = family_list;
+    while (cursor && *cursor) {
+        while (*cursor == ' ' || *cursor == '\t') cursor++;
+        char quote = 0;
+        if (*cursor == '"' || *cursor == '\'') { quote = *cursor; cursor++; }
+
+        char* start = cursor;
+        char* end = nullptr;
+        if (quote) {
+            end = strchr(cursor, quote);
+            if (!end) end = cursor + strlen(cursor);
+            *end = '\0';
+            cursor = end + 1;
+            char* comma = strchr(cursor, ',');
+            cursor = comma ? comma + 1 : nullptr;
+        } else {
+            end = strchr(cursor, ',');
+            if (end) { *end = '\0'; cursor = end + 1; }
+            else { cursor = nullptr; }
+        }
+
+        char* tail = start + strlen(start);
+        while (tail > start && (tail[-1] == ' ' || tail[-1] == '\t')) tail--;
+        *tail = '\0';
+        if (!*start) continue;
+        if (strcasecmp(start, "serif") == 0 || strcasecmp(start, "sans-serif") == 0 ||
+            strcasecmp(start, "monospace") == 0 || strcasecmp(start, "cursive") == 0 ||
+            strcasecmp(start, "fantasy") == 0) {
+            continue;
+        }
+        if (font_face_find_internal(font_ctx, start, fw, slant)) {
+            return mem_strdup(start, MEM_CAT_RENDER);
+        }
+    }
+
+    return fallback_family ? fallback_family : font_family;
 }
 
 /**
@@ -2359,18 +2525,149 @@ static float measure_svg_text_width(const char* text, float font_size_px,
     return len * font_size_px * 0.55f;
 }
 
+static uint32_t glyph_sample_pixel(const GlyphBitmap* bitmap, int src_y, int src_x) {
+    if (!bitmap || !bitmap->buffer || src_y < 0 || src_y >= bitmap->height ||
+        src_x < 0 || src_x >= bitmap->width) return 0;
+    if (bitmap->pixel_mode == GLYPH_PIXEL_MONO) {
+        int byte_index = src_x / 8;
+        int bit_index = 7 - (src_x % 8);
+        uint8_t byte_val = bitmap->buffer[src_y * bitmap->pitch + byte_index];
+        return (byte_val & (1 << bit_index)) ? 255 : 0;
+    }
+    if (bitmap->pixel_mode == GLYPH_PIXEL_GRAY) {
+        return bitmap->buffer[src_y * bitmap->pitch + src_x];
+    }
+    if (bitmap->pixel_mode == GLYPH_PIXEL_LCD) {
+        const uint8_t* p = bitmap->buffer + src_y * bitmap->pitch + src_x * 3;
+        return ((uint32_t)p[0] + (uint32_t)p[1] + (uint32_t)p[2] + 1) / 3;
+    }
+    return 0;
+}
+
+static uint32_t glyph_sample_coverage(const GlyphBitmap* bitmap, float src_y, float src_x) {
+    if (!bitmap || !bitmap->buffer) return 0;
+    if (bitmap->pixel_mode == GLYPH_PIXEL_MONO) {
+        int sx = (int)floorf(src_x + 0.5f);
+        int sy = (int)floorf(src_y + 0.5f);
+        return glyph_sample_pixel(bitmap, sy, sx);
+    }
+    if (bitmap->pixel_mode != GLYPH_PIXEL_GRAY && bitmap->pixel_mode != GLYPH_PIXEL_LCD) return 0;
+
+    int sx0 = (int)floorf(src_x);
+    int sy0 = (int)floorf(src_y);
+    float tx = src_x - (float)sx0;
+    float ty = src_y - (float)sy0;
+    int sx1 = sx0 + 1;
+    int sy1 = sy0 + 1;
+    if (sx0 < 0) { sx0 = 0; tx = 0.0f; }
+    if (sy0 < 0) { sy0 = 0; ty = 0.0f; }
+    if (sx1 >= bitmap->width) sx1 = bitmap->width - 1;
+    if (sy1 >= bitmap->height) sy1 = bitmap->height - 1;
+    if (sx0 >= bitmap->width || sy0 >= bitmap->height) return 0;
+    float c00 = (float)glyph_sample_pixel(bitmap, sy0, sx0);
+    float c10 = (float)glyph_sample_pixel(bitmap, sy0, sx1);
+    float c01 = (float)glyph_sample_pixel(bitmap, sy1, sx0);
+    float c11 = (float)glyph_sample_pixel(bitmap, sy1, sx1);
+    float top = c00 * (1.0f - tx) + c10 * tx;
+    float bottom = c01 * (1.0f - tx) + c11 * tx;
+    return (uint32_t)(top * (1.0f - ty) + bottom * ty + 0.5f);
+}
+
+static void draw_glyph_affine(RenderContext* rdcon, GlyphBitmap* bitmap,
+                              float x, float y, float scale_x, float shear_x,
+                              float scale_y = 1.0f) {
+    if (!rdcon || !bitmap || scale_x <= 0.0f || scale_y <= 0.0f) return;
+    if ((fabsf(scale_x - 1.0f) <= 0.01f && fabsf(scale_y - 1.0f) <= 0.01f &&
+         fabsf(shear_x) <= 0.001f) ||
+        bitmap->pixel_mode == GLYPH_PIXEL_BGRA) {
+        draw_glyph(rdcon, bitmap, lroundf(x), lroundf(y));
+        return;
+    }
+
+    if (rdcon->dl) {
+        bool saved_has_transform = rdcon->has_transform;
+        RdtMatrix saved_transform = rdcon->transform;
+        RdtMatrix local = { scale_x, shear_x, x - scale_x * x - shear_x * y,
+                            0, scale_y, y - scale_y * y,
+                            0, 0, 1 };
+        rdcon->has_transform = true;
+        rdcon->transform = saved_has_transform ? rdt_matrix_multiply(&local, &saved_transform) : local;
+        draw_glyph(rdcon, bitmap, lroundf(x), lroundf(y));
+        rdcon->has_transform = saved_has_transform;
+        rdcon->transform = saved_transform;
+        return;
+    }
+
+    if (bitmap->height <= 0 || bitmap->width <= 0) return;
+
+    float x0 = x;
+    float y0 = y;
+    float x1 = x + scale_x * (float)bitmap->width;
+    float y1 = y;
+    float x2 = x + scale_x * (float)bitmap->width + shear_x * (float)bitmap->height;
+    float y2 = y + scale_y * (float)bitmap->height;
+    float x3 = x + shear_x * (float)bitmap->height;
+    float y3 = y + scale_y * (float)bitmap->height;
+    float min_x = fminf(fminf(x0, x1), fminf(x2, x3));
+    float max_x = fmaxf(fmaxf(x0, x1), fmaxf(x2, x3));
+    float min_y = fminf(fminf(y0, y1), fminf(y2, y3));
+    float max_y = fmaxf(fmaxf(y0, y1), fmaxf(y2, y3));
+
+    int left = (int)floorf(fmaxf(rdcon->block.clip.left, min_x));
+    int right = (int)ceilf(fminf(rdcon->block.clip.right, max_x));
+    int top = (int)floorf(fmaxf(rdcon->block.clip.top, min_y));
+    int bottom = (int)ceilf(fminf(rdcon->block.clip.bottom, max_y));
+    if (left >= right || top >= bottom) return;
+
+    ImageSurface* surface = rdcon->ui_context ? rdcon->ui_context->surface : nullptr;
+    if (!surface || !surface->pixels) return;
+
+    float inv_scale = 1.0f / scale_x;
+    for (int dst_y = top; dst_y < bottom; dst_y++) {
+        if (dst_y < surface->tile_offset_y || dst_y >= surface->tile_offset_y + surface->height) continue;
+        float local_y = ((float)dst_y + 0.5f - y) / scale_y;
+        if (local_y < 0.0f || local_y >= (float)bitmap->height) continue;
+        uint8_t* row_pixels = (uint8_t*)surface->pixels +
+            (dst_y - surface->tile_offset_y) * surface->pitch;
+        for (int dst_x = left; dst_x < right; dst_x++) {
+            if (dst_x < 0 || dst_x >= surface->width) continue;
+            float local_x = (float)dst_x + 0.5f - x - shear_x * local_y;
+            float src_x = local_x * inv_scale - 0.5f;
+            float src_y = local_y - 0.5f;
+            uint32_t intensity = glyph_sample_coverage(bitmap, src_y, src_x);
+            if (intensity == 0) continue;
+
+            uint8_t* p = row_pixels + dst_x * 4;
+            uint32_t v = 255 - intensity;
+            if (rdcon->color.c == 0xFF000000) {
+                p[0] = p[0] * v / 255;
+                p[1] = p[1] * v / 255;
+                p[2] = p[2] * v / 255;
+                p[3] = 0xFF;
+            } else {
+                p[0] = (p[0] * v + rdcon->color.r * intensity) / 255;
+                p[1] = (p[1] * v + rdcon->color.g * intensity) / 255;
+                p[2] = (p[2] * v + rdcon->color.b * intensity) / 255;
+                p[3] = 0xFF;
+            }
+        }
+    }
+}
+
 static bool render_svg_text_with_radiant_glyphs(SvgRenderContext* ctx, const char* text,
                                                 const char* font_family, float font_size,
                                                 int font_weight, FontSlant font_slant,
                                                 Color fill_color, const RdtMatrix* matrix,
-                                                float base_x, float base_y, float text_length) {
+                                                float base_x, float base_y, float text_length,
+                                                bool scale_glyphs_x) {
     RenderContext* rdcon = g_svg_active_rdcon;
     if (!rdcon || !ctx || !ctx->font_ctx || !text || !*text || !matrix) return false;
-    if (fabsf(matrix->e12) > 0.001f || fabsf(matrix->e21) > 0.001f) return false;
+    if (fabsf(matrix->e21) > 0.001f) return false;
 
     float sx = fabsf(matrix->e11);
     float sy = fabsf(matrix->e22);
     if (sx <= 0.0f || sy <= 0.0f) return false;
+    float shear_x = matrix->e12 / sy;
 
     float device_scale = rdcon->scale > 0.0f ? rdcon->scale : 1.0f;
     FontStyleDesc style = {};
@@ -2380,6 +2677,19 @@ static bool render_svg_text_with_radiant_glyphs(SvgRenderContext* ctx, const cha
     style.slant = font_slant;
     FontHandle* handle = font_resolve(ctx->font_ctx, &style);
     if (!handle) return false;
+
+    float oversample = fabsf(shear_x) > 0.001f ? 2.0f : 1.0f;
+    FontStyleDesc draw_style = style;
+    FontHandle* draw_handle = handle;
+    if (oversample > 1.0f) {
+        draw_style.size_px = style.size_px * oversample;
+        draw_handle = font_resolve(ctx->font_ctx, &draw_style);
+        if (!draw_handle) {
+            draw_handle = handle;
+            draw_style = style;
+            oversample = 1.0f;
+        }
+    }
 
     float natural_width = 0.0f;
     const unsigned char* cursor = (const unsigned char*)text;
@@ -2393,10 +2703,12 @@ static bool render_svg_text_with_radiant_glyphs(SvgRenderContext* ctx, const cha
         if (glyph) natural_width += glyph->advance_x;
     }
 
-    float advance_scale = 1.0f;
+    float advance_scale = sx;
+    float glyph_scale_x = sx;
     if (text_length > 0.0f && natural_width > 0.0f) {
         float target_width = text_length * sx;
         advance_scale = target_width / natural_width;
+        if (scale_glyphs_x) glyph_scale_x = advance_scale;
         log_debug("[SVG] Radiant textLength fit: '%s' target=%.3f measured=%.3f advance_scale=%.3f",
                   text, target_width, natural_width, advance_scale);
     }
@@ -2414,16 +2726,22 @@ static bool render_svg_text_with_radiant_glyphs(SvgRenderContext* ctx, const cha
         int bytes = str_utf8_decode((const char*)cursor, (size_t)(end - cursor), &codepoint);
         if (bytes <= 0) { cursor++; continue; }
         cursor += bytes;
-        LoadedGlyph* glyph = font_load_glyph(handle, &style, codepoint, true);
+        LoadedGlyph* glyph = font_load_glyph(handle, &style, codepoint, false);
         if (!glyph) continue;
-        float gx = pen_x + glyph->bitmap.bearing_x;
-        float gy = baseline_y - glyph->bitmap.bearing_y;
-        draw_glyph(rdcon, &glyph->bitmap, lroundf(gx), lroundf(gy));
-        pen_x += glyph->advance_x * advance_scale;
+        float glyph_advance = glyph->advance_x;
+        LoadedGlyph* draw_glyph = font_load_glyph(draw_handle, &draw_style, codepoint, true);
+        if (!draw_glyph) continue;
+        float gx = pen_x + draw_glyph->bitmap.bearing_x * glyph_scale_x / oversample;
+        float gy = baseline_y - draw_glyph->bitmap.bearing_y / oversample;
+        draw_glyph_affine(rdcon, &draw_glyph->bitmap, gx, gy,
+                  glyph_scale_x / oversample, shear_x / oversample,
+                  1.0f / oversample);
+        pen_x += glyph_advance * advance_scale;
     }
 
     rdcon->has_transform = saved_has_transform;
     rdcon->color = saved_color;
+    if (draw_handle != handle) font_handle_release(draw_handle);
     font_handle_release(handle);
     return true;
 }
@@ -2456,6 +2774,10 @@ static void render_svg_text(SvgRenderContext* ctx, Element* elem) {
     const char* text_length_str = get_svg_attr(elem, "textLength");
     if (!text_length_str) text_length_str = get_svg_attr(elem, "textlength");
     float text_length = text_length_str ? parse_svg_length(text_length_str, 0.0f) : 0.0f;
+    const char* length_adjust_str = get_svg_attr(elem, "lengthAdjust");
+    if (!length_adjust_str) length_adjust_str = get_svg_attr(elem, "lengthadjust");
+    bool spacing_and_glyphs = length_adjust_str &&
+        (strcmp(length_adjust_str, "spacingAndGlyphs") == 0 || strcmp(length_adjust_str, "spacingandglyphs") == 0);
 
     // parse text-anchor: start (default), middle, end
     const char* text_anchor_str = get_svg_attr(elem, "text-anchor");
@@ -2501,9 +2823,13 @@ static void render_svg_text(SvgRenderContext* ctx, Element* elem) {
         else if (strcmp(font_style_str, "oblique") == 0) font_slant = FONT_SLANT_OBLIQUE;
     }
 
+    const char* raw_font_attr = get_svg_attr(elem, "data-pdf-raw-font");
+    bool allow_embedded_font = raw_font_attr && strcmp(raw_font_attr, "true") == 0;
+
     // resolve font path and name
     const char* font_name = nullptr;
-    char* font_path = resolve_svg_font_path(font_family, &font_name, ctx->font_ctx, font_weight, font_slant);
+    char* font_path = resolve_svg_font_path(font_family, &font_name, ctx->font_ctx,
+                                           font_weight, font_slant, allow_embedded_font);
     if (!font_path) {
         log_debug("[SVG] <text> no font available for: %s", font_family ? font_family : "default");
         return;
@@ -2545,6 +2871,12 @@ static void render_svg_text(SvgRenderContext* ctx, Element* elem) {
     // ratio (e.g. Helvetica ~0.77) does not match the actually-drawn font.
     float font_ascent_ratio = 0.8f;  // fallback
     const char* metrics_family = font_name ? font_name : font_family;
+    const char* radiant_family = resolve_svg_radiant_font_family(font_family, ctx->font_ctx,
+                                                                 font_weight, font_slant,
+                                                                 metrics_family,
+                                                                 allow_embedded_font);
+    bool free_radiant_family = radiant_family && radiant_family != metrics_family && radiant_family != font_family;
+    metrics_family = radiant_family ? radiant_family : metrics_family;
     if (ctx->font_ctx && metrics_family) {
         FontStyleDesc style = {};
         style.family = metrics_family;
@@ -2594,17 +2926,29 @@ static void render_svg_text(SvgRenderContext* ctx, Element* elem) {
                               text_content, text_length, measured_width, text_scale_x);
                 }
             }
-            bool rendered_with_radiant = false;
-            if (anchor_x == 0.0f) {
+                bool rendered_with_radiant = false;
+                if (anchor_x == 0.0f) {
                 rendered_with_radiant = render_svg_text_with_radiant_glyphs(ctx, text_content,
                     metrics_family, font_size, font_weight, font_slant, default_fill, &m,
-                    base_x, base_y, text_length);
+                    base_x, base_y, text_length, spacing_and_glyphs && !allow_embedded_font);
             }
             Tvg_Paint text = nullptr;
             if (!rendered_with_radiant) {
                 text = create_text_segment(text_content, base_x, base_y,
                                            font_path, font_name, font_size, default_fill,
                                            anchor_x);
+                if (text && text_length > 0.0f) {
+                    float bounds_x = 0.0f;
+                    float bounds_y = 0.0f;
+                    float bounds_w = 0.0f;
+                    float bounds_h = 0.0f;
+                    if (tvg_paint_get_aabb(text, &bounds_x, &bounds_y, &bounds_w, &bounds_h) == TVG_RESULT_SUCCESS &&
+                        bounds_w > 0.0f) {
+                        text_scale_x = text_length / bounds_w;
+                        log_debug("[SVG] ThorVG textLength fit: '%s' target=%.3f bounds=%.3f scale_x=%.3f",
+                                  text_content, text_length, bounds_w, text_scale_x);
+                    }
+                }
             }
             mem_free((void*)text_content);
             if (!rendered_with_radiant) {
@@ -2612,6 +2956,7 @@ static void render_svg_text(SvgRenderContext* ctx, Element* elem) {
             }
         }
         mem_free(font_path);
+        if (free_radiant_family) mem_free((void*)radiant_family);
         return;
     }
 
@@ -2697,6 +3042,7 @@ static void render_svg_text(SvgRenderContext* ctx, Element* elem) {
     }
 
     mem_free(font_path);
+    if (free_radiant_family) mem_free((void*)radiant_family);
 
     log_debug("[SVG] <text> rendered with %d segments at base (%.1f, %.1f)",
               text_segments, base_x, base_y);
