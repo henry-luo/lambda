@@ -2729,17 +2729,17 @@ static bool render_svg_text_with_radiant_glyphs(SvgRenderContext* ctx, const cha
                                                 bool scale_glyphs_x) {
     RenderContext* rdcon = g_svg_active_rdcon;
     if (!rdcon || !ctx || !ctx->font_ctx || !text || !*text || !matrix) return false;
-    if (fabsf(matrix->e21) > 0.001f) return false;
 
-    float sx = fabsf(matrix->e11);
-    float sy = fabsf(matrix->e22);
+    float sx = sqrtf(matrix->e11 * matrix->e11 + matrix->e21 * matrix->e21);
+    float sy = sqrtf(matrix->e12 * matrix->e12 + matrix->e22 * matrix->e22);
     if (sx <= 0.0f || sy <= 0.0f) return false;
+    bool rotated_text = fabsf(matrix->e21) > 0.001f;
     float shear_x = matrix->e12 / sy;
 
     float device_scale = rdcon->scale > 0.0f ? rdcon->scale : 1.0f;
     FontStyleDesc style = {};
     style.family = font_family ? font_family : "Arial";
-    style.size_px = font_size * sy / device_scale;
+    style.size_px = font_size * (rotated_text ? 1.0f : sy) / device_scale;
     style.weight = (FontWeight)font_weight;
     style.slant = font_slant;
     FontHandle* handle = font_resolve(ctx->font_ctx, &style);
@@ -2773,7 +2773,7 @@ static bool render_svg_text_with_radiant_glyphs(SvgRenderContext* ctx, const cha
     float advance_scale = sx;
     float glyph_scale_x = sx;
     if (text_length > 0.0f && natural_width > 0.0f) {
-        float target_width = text_length * sx;
+        float target_width = rotated_text ? text_length : text_length * sx;
         advance_scale = target_width / natural_width;
         if (scale_glyphs_x) glyph_scale_x = advance_scale;
         log_debug("[SVG] Radiant textLength fit: '%s' target=%.3f measured=%.3f advance_scale=%.3f",
@@ -2782,6 +2782,7 @@ static bool render_svg_text_with_radiant_glyphs(SvgRenderContext* ctx, const cha
 
     float pen_x = matrix->e11 * base_x + matrix->e12 * base_y + matrix->e13;
     float baseline_y = matrix->e21 * base_x + matrix->e22 * base_y + matrix->e23;
+    float local_pen_x = base_x;
     Color saved_color = rdcon->color;
     bool saved_has_transform = rdcon->has_transform;
     rdcon->color = fill_color;
@@ -2796,14 +2797,29 @@ static bool render_svg_text_with_radiant_glyphs(SvgRenderContext* ctx, const cha
         LoadedGlyph* glyph = font_load_glyph(handle, &style, codepoint, false);
         if (!glyph) continue;
         float glyph_advance = glyph->advance_x;
-        LoadedGlyph* draw_glyph = font_load_glyph(draw_handle, &draw_style, codepoint, true);
-        if (!draw_glyph) continue;
-        float gx = pen_x + draw_glyph->bitmap.bearing_x * glyph_scale_x / oversample;
-        float gy = baseline_y - draw_glyph->bitmap.bearing_y / oversample;
-        draw_glyph_affine(rdcon, &draw_glyph->bitmap, gx, gy,
-                  glyph_scale_x / oversample, shear_x / oversample,
-                  1.0f / oversample);
+        LoadedGlyph* drawn_glyph = font_load_glyph(draw_handle, &draw_style, codepoint, true);
+        if (!drawn_glyph) continue;
+        if (rotated_text) {
+            float gx = local_pen_x + drawn_glyph->bitmap.bearing_x * glyph_scale_x / oversample;
+            float gy = base_y - drawn_glyph->bitmap.bearing_y / oversample;
+            RdtMatrix glyph_scale = {
+                glyph_scale_x / oversample, 0, gx - (glyph_scale_x / oversample) * gx,
+                0, 1.0f / oversample, gy - (1.0f / oversample) * gy,
+                0, 0, 1
+            };
+            RdtMatrix final_transform = rdt_matrix_multiply(matrix, &glyph_scale);
+            rdcon->has_transform = true;
+            rdcon->transform = final_transform;
+            draw_glyph(rdcon, &drawn_glyph->bitmap, lroundf(gx), lroundf(gy));
+        } else {
+            float gx = pen_x + drawn_glyph->bitmap.bearing_x * glyph_scale_x / oversample;
+            float gy = baseline_y - drawn_glyph->bitmap.bearing_y / oversample;
+            draw_glyph_affine(rdcon, &drawn_glyph->bitmap, gx, gy,
+                      glyph_scale_x / oversample, shear_x / oversample,
+                      1.0f / oversample);
+        }
         pen_x += glyph_advance * advance_scale;
+        local_pen_x += glyph_advance * advance_scale;
     }
 
     rdcon->has_transform = saved_has_transform;
@@ -3048,12 +3064,24 @@ static void render_svg_text(SvgRenderContext* ctx, Element* elem) {
                 }
                 char* text_copy = trim_whitespace(str->chars, str->len);
                 if (text_copy) {
-                    Tvg_Paint text_obj = create_text_segment(text_copy, cur_x, cur_y,
-                                                              font_path, font_name, font_size, default_fill);
-                    if (text_obj) {
-                        float w = measure_svg_text_width(text_copy, font_size, ctx->font_ctx, metrics_family, font_weight);
-                        draw_text_paint(text_obj, cur_x, cur_y, font_size);
+                    bool rendered_with_radiant = false;
+                    if (!has_tspan && anchor_x == 0.0f) {
+                        rendered_with_radiant = render_svg_text_with_radiant_glyphs(ctx, text_copy,
+                            metrics_family, font_size, font_weight, font_slant, default_fill, &m,
+                            cur_x, cur_y, text_length, spacing_and_glyphs && !allow_embedded_font);
+                    }
+                    if (rendered_with_radiant) {
+                        float w = text_length > 0.0f ? text_length :
+                            measure_svg_text_width(text_copy, font_size, ctx->font_ctx, metrics_family, font_weight);
                         cur_x += w;
+                    } else {
+                        Tvg_Paint text_obj = create_text_segment(text_copy, cur_x, cur_y,
+                                                                  font_path, font_name, font_size, default_fill);
+                        if (text_obj) {
+                            float w = measure_svg_text_width(text_copy, font_size, ctx->font_ctx, metrics_family, font_weight);
+                            draw_text_paint(text_obj, cur_x, cur_y, font_size);
+                            cur_x += w;
+                        }
                     }
                     mem_free(text_copy);
                 }
@@ -3095,12 +3123,24 @@ static void render_svg_text(SvgRenderContext* ctx, Element* elem) {
                 // get text content
                 const char* text_content = get_direct_text_content(child_elem);
                 if (text_content && *text_content) {
-                    Tvg_Paint text_obj = create_text_segment(text_content, cur_x, cur_y,
-                                                              font_path, font_name, tspan_font_size, fill);
-                    if (text_obj) {
-                        float w = measure_svg_text_width(text_content, tspan_font_size, ctx->font_ctx, metrics_family, font_weight);
-                        draw_text_paint(text_obj, cur_x, cur_y, tspan_font_size);
+                    bool rendered_with_radiant = false;
+                    if (anchor_x == 0.0f) {
+                        rendered_with_radiant = render_svg_text_with_radiant_glyphs(ctx, text_content,
+                            metrics_family, tspan_font_size, font_weight, font_slant, fill, &m,
+                            cur_x, cur_y, text_length, spacing_and_glyphs && !allow_embedded_font);
+                    }
+                    if (rendered_with_radiant) {
+                        float w = text_length > 0.0f ? text_length :
+                            measure_svg_text_width(text_content, tspan_font_size, ctx->font_ctx, metrics_family, font_weight);
                         cur_x += w;
+                    } else {
+                        Tvg_Paint text_obj = create_text_segment(text_content, cur_x, cur_y,
+                                                                  font_path, font_name, tspan_font_size, fill);
+                        if (text_obj) {
+                            float w = measure_svg_text_width(text_content, tspan_font_size, ctx->font_ctx, metrics_family, font_weight);
+                            draw_text_paint(text_obj, cur_x, cur_y, tspan_font_size);
+                            cur_x += w;
+                        }
                     }
                     mem_free((void*)text_content);
                 }

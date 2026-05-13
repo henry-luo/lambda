@@ -92,6 +92,15 @@ static inline bool str_eq(String* s, const char* lit) {
     return s->len == n && memcmp(s->chars, lit, n) == 0;
 }
 
+static inline String* item_as_pdf_name(Item it) {
+    if (String* s = item_as_string(it)) return s;
+    Map* m = item_as_map(it);
+    if (!m) return nullptr;
+    String* kind = item_as_string(map_lookup(m, "kind"));
+    if (!str_eq(kind, "name")) return nullptr;
+    return item_as_string(map_lookup(m, "value"));
+}
+
 // Read a numeric Item as int (handles d2it floats and packed ints).
 static inline int item_as_int(Item it, int dflt) {
     TypeId t = (TypeId)((it.item >> 56) & 0xFF);
@@ -600,10 +609,10 @@ static const char* get_decompressed_stream(Map* stream_map, size_t* out_len,
     int n_filters = 0;
     if (Array* fa = item_as_array(filter_it)) {
         for (int i = 0; i < fa->length && n_filters < 8; i++) {
-            String* fs = item_as_string(fa->items[i]);
+            String* fs = item_as_pdf_name(fa->items[i]);
             if (fs) filters_buf[n_filters++] = fs->chars;
         }
-    } else if (String* fs = item_as_string(filter_it)) {
+    } else if (String* fs = item_as_pdf_name(filter_it)) {
         filters_buf[n_filters++] = fs->chars;
     }
     if (n_filters == 0) {
@@ -793,7 +802,7 @@ static void decompress_streams(Input* input, Array* objects) {    if (!objects) 
 // Determine the number of colour components for a PDF colour space Item.
 // Returns 1 (gray), 3 (RGB) or 0 (unsupported).
 static int color_space_ncomp(Item cs, ObjTable* table) {
-    String* s = item_as_string(cs);
+    String* s = item_as_pdf_name(cs);
     if (s) {
         if (str_eq(s, "DeviceGray") || str_eq(s, "G")) return 1;
         if (str_eq(s, "DeviceRGB")  || str_eq(s, "RGB")) return 3;
@@ -801,7 +810,7 @@ static int color_space_ncomp(Item cs, ObjTable* table) {
     }
     Array* arr = item_as_array(cs);
     if (!arr || arr->length < 1) return 0;
-    String* head = item_as_string(arr->items[0]);
+    String* head = item_as_pdf_name(arr->items[0]);
     if (!head) return 0;
     if (str_eq(head, "ICCBased") && arr->length >= 2) {
         // ["ICCBased", indirect_ref-to-stream]. The stream's dictionary
@@ -963,7 +972,7 @@ static char* base64_alloc(const uint8_t* src, size_t n) {
 }
 
 static bool filter_item_has_name(Item filter_it, const char* name1, const char* name2) {
-    if (String* fs = item_as_string(filter_it)) {
+    if (String* fs = item_as_pdf_name(filter_it)) {
         return str_eq(fs, name1) || (name2 && str_eq(fs, name2));
     }
     if (Array* fa = item_as_array(filter_it)) {
@@ -1006,7 +1015,7 @@ static String* image_to_data_uri(Input* input, Map* stream_map,
     if (!dict) return nullptr;
 
     // Subtype must be Image
-    String* sub = item_as_string(map_lookup(dict, "Subtype"));
+    String* sub = item_as_pdf_name(map_lookup(dict, "Subtype"));
     if (!sub || !str_eq(sub, "Image")) return nullptr;
 
     int w   = item_as_int(map_lookup(dict, "Width"),  0);
@@ -1118,8 +1127,8 @@ static void encode_image_xobjects(Input* input, MarkBuilder& builder,
         Map* dict = item_as_map(dict_it);
         if (!dict) continue;
         // Only XObject Images
-        String* tystr  = item_as_string(map_lookup(dict, "Type"));
-        String* substr = item_as_string(map_lookup(dict, "Subtype"));
+        String* tystr  = item_as_pdf_name(map_lookup(dict, "Type"));
+        String* substr = item_as_pdf_name(map_lookup(dict, "Subtype"));
         if (!tystr || !str_eq(tystr, "XObject")) continue;
         if (!substr || !str_eq(substr, "Image")) continue;
         // Skip SMask streams themselves — they're consumed alongside their owners.
