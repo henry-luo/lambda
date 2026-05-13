@@ -328,6 +328,7 @@ enum JsBuiltinId {
     JS_BUILTIN_DATE_TO_TIME_STRING,
     JS_BUILTIN_DATE_TO_STRING,
     JS_BUILTIN_DATE_TO_LOCALE_DATE_STRING,
+    JS_BUILTIN_DATE_TO_LOCALE_TIME_STRING,
     JS_BUILTIN_DATE_VALUE_OF,
     JS_BUILTIN_DATE_TO_PRIMITIVE,
     JS_BUILTIN_DATE_GET_DAY,
@@ -404,6 +405,8 @@ enum JsBuiltinId {
     JS_BUILTIN_SET_IS_SUPERSET,  // Set.prototype.isSupersetOf(other)
     JS_BUILTIN_SET_IS_DISJOINT,  // Set.prototype.isDisjointFrom(other)
     JS_BUILTIN_COLL_SIZE_GETTER, // Map/Set.prototype size getter
+    JS_BUILTIN_MAP_SIZE_GETTER,  // get Map.prototype.size
+    JS_BUILTIN_SET_SIZE_GETTER,  // get Set.prototype.size
     // WeakMap/WeakSet prototype methods (accept is_weak collections)
     JS_BUILTIN_WEAKMAP_SET,      // WeakMap.prototype.set(key, value)
     JS_BUILTIN_WEAKMAP_GET,      // WeakMap.prototype.get(key)

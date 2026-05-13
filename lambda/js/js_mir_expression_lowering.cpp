@@ -6102,10 +6102,10 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     JsAstNode* a1 = a0 ? a0->next : NULL;
                     JsAstNode* a2 = a1 ? a1->next : NULL;
                     JsAstNode* a3 = a2 ? a2->next : NULL;
-                    MIR_reg_t r0 = a0 ? jm_transpile_box_item(mt, a0) : jm_emit_null(mt);
-                    MIR_reg_t r1 = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_null(mt);
-                    MIR_reg_t r2 = a2 ? jm_transpile_box_item(mt, a2) : jm_emit_null(mt);
-                    MIR_reg_t r3 = a3 ? jm_transpile_box_item(mt, a3) : jm_emit_null(mt);
+                    MIR_reg_t r0 = a0 ? jm_transpile_box_item(mt, a0) : jm_emit_undefined(mt);
+                    MIR_reg_t r1 = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_item_error(mt);
+                    MIR_reg_t r2 = a2 ? jm_transpile_box_item(mt, a2) : jm_emit_item_error(mt);
+                    MIR_reg_t r3 = a3 ? jm_transpile_box_item(mt, a3) : jm_emit_item_error(mt);
                     return jm_call_6(mt, "js_date_setter", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
                         MIR_T_I64, MIR_new_int_op(mt->ctx, date_setter_id),
@@ -7271,6 +7271,13 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
     bool fallback_has_spread = false;
     for (JsAstNode* chk = call->arguments; chk; chk = chk->next) {
         if (chk->node_type == JS_AST_NODE_SPREAD_ELEMENT) { fallback_has_spread = true; break; }
+    }
+
+    if (call->callee && call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
+        JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
+        if (id->name && id->name->len == 4 && strncmp(id->name->chars, "Date", 4) == 0) {
+            return jm_call_0(mt, "js_date_now_string", MIR_T_I64);
+        }
     }
 
     MIR_reg_t callee = jm_transpile_box_item(mt, call->callee);

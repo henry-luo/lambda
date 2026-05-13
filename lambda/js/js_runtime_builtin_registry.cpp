@@ -444,7 +444,7 @@ const JsBuiltinMethodSpec JS_DATE_PROTOTYPE_METHOD_SPECS[] = {
     {"toString", 8, JS_BUILTIN_DATE_TO_STRING, 0},
     {"toLocaleString", 14, JS_BUILTIN_OBJ_TO_LOCALE_STRING, 0},
     {"toLocaleDateString", 18, JS_BUILTIN_DATE_TO_LOCALE_DATE_STRING, 0},
-    {"toLocaleTimeString", 18, JS_BUILTIN_DATE_TO_LOCALE_DATE_STRING, 0},
+    {"toLocaleTimeString", 18, JS_BUILTIN_DATE_TO_LOCALE_TIME_STRING, 0},
     {"valueOf", 7, JS_BUILTIN_DATE_VALUE_OF, 0},
     {"getYear", 7, JS_BUILTIN_DATE_GET_YEAR, 0},
     {"setYear", 7, JS_BUILTIN_DATE_SET_YEAR, 1},
