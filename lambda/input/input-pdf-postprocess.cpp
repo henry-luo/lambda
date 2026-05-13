@@ -744,31 +744,85 @@ static bool is_font_program_stream_dict(Map* dict) {
            map_lookup(dict, "Length3").item != ITEM_NULL;
 }
 
-static String* latin1_bytes_to_utf8_string(Input* input, String* src) {
+static void append_octal_escape(char* out, size_t* pos, unsigned char c) {
+    out[(*pos)++] = '\\';
+    out[(*pos)++] = (char)('0' + ((c >> 6) & 7));
+    out[(*pos)++] = (char)('0' + ((c >> 3) & 7));
+    out[(*pos)++] = (char)('0' + (c & 7));
+}
+
+static String* content_bytes_to_token_text(Input* input, String* src) {
     if (!input || !src) return nullptr;
     size_t out_len = 0;
-    bool is_ascii = true;
+    bool changed = false;
+    bool in_literal = false;
+    bool escaped = false;
+    int literal_depth = 0;
     for (uint32_t i = 0; i < src->len; i++) {
         unsigned char c = (unsigned char)src->chars[i];
-        if (c >= 0x80) is_ascii = false;
-        out_len += (c < 0x80) ? 1 : 2;
+        if (in_literal && (c >= 0x80 || c == 0)) {
+            out_len += 4;
+            changed = true;
+        } else {
+            out_len++;
+        }
+        if (in_literal) {
+            if (escaped) {
+                escaped = false;
+            } else if (c == '\\') {
+                escaped = true;
+            } else if (c == '(') {
+                literal_depth++;
+            } else if (c == ')') {
+                literal_depth--;
+                if (literal_depth <= 0) {
+                    in_literal = false;
+                    literal_depth = 0;
+                }
+            }
+        } else if (c == '(') {
+            in_literal = true;
+            literal_depth = 1;
+            escaped = false;
+        }
     }
-    if (is_ascii) return src;
+    if (!changed) return src;
     String* out = (String*)pool_calloc(input->pool, sizeof(String) + out_len + 1);
     if (!out) return nullptr;
     size_t j = 0;
+    in_literal = false;
+    escaped = false;
+    literal_depth = 0;
     for (uint32_t i = 0; i < src->len; i++) {
         unsigned char c = (unsigned char)src->chars[i];
-        if (c < 0x80) {
-            out->chars[j++] = (char)c;
+        if (in_literal && (c >= 0x80 || c == 0)) {
+            append_octal_escape(out->chars, &j, c);
         } else {
-            out->chars[j++] = (char)(0xC0 | (c >> 6));
-            out->chars[j++] = (char)(0x80 | (c & 0x3F));
+            out->chars[j++] = (char)c;
+        }
+        if (in_literal) {
+            if (escaped) {
+                escaped = false;
+            } else if (c == '\\') {
+                escaped = true;
+            } else if (c == '(') {
+                literal_depth++;
+            } else if (c == ')') {
+                literal_depth--;
+                if (literal_depth <= 0) {
+                    in_literal = false;
+                    literal_depth = 0;
+                }
+            }
+        } else if (c == '(') {
+            in_literal = true;
+            literal_depth = 1;
+            escaped = false;
         }
     }
     out->chars[j] = '\0';
     out->len = (uint32_t)out_len;
-    out->is_ascii = 0;
+    out->is_ascii = 1;
     return out;
 }
 
@@ -784,7 +838,7 @@ static void add_text_data_to_stream(Input* input, MarkBuilder& builder, Map* sm)
     if (is_font_program_stream_dict(dict)) return;
     String* data = item_as_string(map_lookup(sm, "data"));
     if (!data || data->len == 0) return;
-    String* text_data = latin1_bytes_to_utf8_string(input, data);
+    String* text_data = content_bytes_to_token_text(input, data);
     if (!text_data) return;
     builder.putToMap(sm, builder.createString("text_data"), {.item = s2it(text_data)});
 }
