@@ -474,6 +474,113 @@ int run_script_file(Runtime *runtime, const char *script_path, bool use_mir, boo
     return 0;  // success
 }
 
+static char* lambda_string_literal_escape(const char* value) {
+    if (!value) return nullptr;
+    size_t out_len = 0;
+    for (const char* cursor = value; *cursor; cursor++) {
+        unsigned char ch = (unsigned char)*cursor;
+        if (ch == '\\' || ch == '"' || ch == '\n' || ch == '\r' || ch == '\t') {
+            out_len += 2;
+        } else {
+            out_len++;
+        }
+    }
+    char* out = (char*)mem_alloc(out_len + 1, MEM_CAT_TEMP);
+    if (!out) return nullptr;
+    size_t pos = 0;
+    for (const char* cursor = value; *cursor; cursor++) {
+        unsigned char ch = (unsigned char)*cursor;
+        if (ch == '\\') {
+            out[pos++] = '\\'; out[pos++] = '\\';
+        } else if (ch == '"') {
+            out[pos++] = '\\'; out[pos++] = '"';
+        } else if (ch == '\n') {
+            out[pos++] = '\\'; out[pos++] = 'n';
+        } else if (ch == '\r') {
+            out[pos++] = '\\'; out[pos++] = 'r';
+        } else if (ch == '\t') {
+            out[pos++] = '\\'; out[pos++] = 't';
+        } else {
+            out[pos++] = (char)ch;
+        }
+    }
+    out[pos] = '\0';
+    return out;
+}
+
+static char* convert_pdf_to_html_temp(const char* pdf_file, const char* tmp_script_path,
+                                      const char* temp_html, const char* opts_expr,
+                                      const char* log_prefix) {
+    char* escaped_pdf = lambda_string_literal_escape(pdf_file);
+    if (!escaped_pdf) {
+        log_error("[%s] PDF package: failed to escape input path", log_prefix);
+        return nullptr;
+    }
+
+    const char* opts = opts_expr ? opts_expr : "null";
+    int needed = snprintf(nullptr, 0,
+        "import pdf: .lambda.package.pdf.pdf\n"
+        "pn main() {\n"
+        "    let doc^err = input(\"%s\", 'pdf')\n"
+        "    return pdf.pdf_to_html(doc, %s)\n"
+        "}\n",
+        escaped_pdf, opts);
+    if (needed <= 0) {
+        mem_free(escaped_pdf);
+        log_error("[%s] PDF package: failed to size bridge script", log_prefix);
+        return nullptr;
+    }
+    char* script_buf = (char*)mem_alloc((size_t)needed + 1, MEM_CAT_TEMP);
+    if (!script_buf) {
+        mem_free(escaped_pdf);
+        log_error("[%s] PDF package: failed to allocate bridge script", log_prefix);
+        return nullptr;
+    }
+    snprintf(script_buf, (size_t)needed + 1,
+        "import pdf: .lambda.package.pdf.pdf\n"
+        "pn main() {\n"
+        "    let doc^err = input(\"%s\", 'pdf')\n"
+        "    return pdf.pdf_to_html(doc, %s)\n"
+        "}\n",
+        escaped_pdf, opts);
+    mem_free(escaped_pdf);
+
+    write_text_file(tmp_script_path, script_buf);
+    mem_free(script_buf);
+
+    Runtime pdf_runtime;
+    runtime_init(&pdf_runtime);
+    pdf_runtime.current_dir = const_cast<char*>("./");
+    pdf_runtime.import_base_dir = "./";
+
+    Input* script_result = run_script_mir(&pdf_runtime, nullptr,
+                                           (char*)tmp_script_path, true);
+
+    bool ok = (script_result && get_type_id(script_result->root) == LMD_TYPE_ELEMENT);
+    char* result_path = nullptr;
+    if (ok) {
+        String* html_str = format_html(script_result->pool, script_result->root);
+        if (html_str && html_str->chars) {
+            write_binary_file(temp_html, html_str->chars, html_str->len);
+            result_path = mem_strdup(temp_html, MEM_CAT_TEMP);
+            log_info("[%s] PDF rendered to %s (%u bytes)",
+                     log_prefix, temp_html, html_str->len);
+        } else {
+            log_error("[%s] PDF package: format_html returned null", log_prefix);
+            ok = false;
+        }
+    } else {
+        log_error("[%s] PDF package pipeline failed for %s", log_prefix, pdf_file);
+        if (script_result && get_type_id(script_result->root) == LMD_TYPE_ERROR) {
+            LambdaError* le = get_persistent_last_error();
+            if (le) { err_print(le); clear_persistent_last_error(); }
+        }
+    }
+
+    runtime_cleanup(&pdf_runtime);
+    return ok ? result_path : nullptr;
+}
+
 void run_assertions() {
 #ifdef __cplusplus
     static_assert(sizeof(bool) == 1, "bool size == 1 byte");
@@ -1999,13 +2106,14 @@ int main(int argc, char *argv[]) {
         // Check for help first
         if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
             printf("Lambda HTML Renderer v1.0\n\n");
-            printf("Usage: %s render <input.html|input.tex|input.ls> -o <output.svg|output.pdf|output.png|output.jpg> [options]\n", argv[0]);
+            printf("Usage: %s render <input.html|input.pdf|input.tex|input.ls> -o <output.svg|output.pdf|output.png|output.jpg> [options]\n", argv[0]);
             printf("\nDescription:\n");
-            printf("  The 'render' command layouts an HTML, LaTeX, or Lambda script file and renders the result as SVG, PDF, PNG, JPEG, or DVI.\n");
+            printf("  The 'render' command layouts an HTML, PDF, LaTeX, or Lambda script file and renders the result as SVG, PDF, PNG, JPEG, or DVI.\n");
             printf("  It parses the input (converting LaTeX to HTML or evaluating Lambda script if needed), applies CSS styles,\n");
             printf("  calculates layout, and generates output in the specified format based on file extension.\n");
             printf("\nSupported Input Formats:\n");
             printf("  .html, .htm    HTML documents\n");
+            printf("  .pdf           PDF documents (converted through Lambda PDF package)\n");
             printf("  .tex, .latex   LaTeX documents (converted to HTML for rendering)\n");
             printf("  .ls            Lambda scripts (evaluated and rendered)\n");
             printf("  .mmd           Mermaid diagrams (rendered via graph layout)\n");
@@ -2029,6 +2137,7 @@ int main(int argc, char *argv[]) {
             printf("  -h, --help               Show this help message\n");
             printf("\nExamples:\n");
             printf("  %s render index.html -o output.svg        # Auto-size to content\n", argv[0]);
+            printf("  %s render document.pdf -o output.svg      # Render PDF through Lambda PDF package\n", argv[0]);
             printf("  %s render script.ls -o output.pdf         # Render Lambda script result\n", argv[0]);
             printf("  %s render index.html -o output.pdf        # Auto-size to content\n", argv[0]);
             printf("  %s render index.html -o output.png        # Auto-size to content\n", argv[0]);
@@ -2145,8 +2254,8 @@ int main(int argc, char *argv[]) {
 
         // Validate required arguments
         if (!html_file) {
-            printf("Error: render command requires an HTML input file\n");
-            printf("Usage: %s render <input.html> -o <output.svg|output.pdf|output.png|output.jpg>\n", argv[0]);
+            printf("Error: render command requires an input file\n");
+            printf("Usage: %s render <input.html|input.pdf|input.tex|input.ls> -o <output.svg|output.pdf|output.png|output.jpg>\n", argv[0]);
             printf("Use '%s render --help' for more information\n", argv[0]);
             log_finish();
             return 1;
@@ -2154,7 +2263,7 @@ int main(int argc, char *argv[]) {
 
         if (!output_file) {
             printf("Error: render command requires an output file (-o option)\n");
-            printf("Usage: %s render <input.html> -o <output.svg|output.pdf|output.png|output.jpg>\n", argv[0]);
+            printf("Usage: %s render <input.html|input.pdf|input.tex|input.ls> -o <output.svg|output.pdf|output.png|output.jpg>\n", argv[0]);
             printf("Use '%s render --help' for more information\n", argv[0]);
             log_finish();
             return 1;
@@ -2306,12 +2415,44 @@ int main(int argc, char *argv[]) {
             }
         }
 
+        const char* output_ext = strrchr(output_file, '.');
+        char* render_pdf_temp_html = nullptr;
+        if (input_ext && strcmp(input_ext, ".pdf") == 0) {
+            if (output_ext && strcmp(output_ext, ".pdf") == 0) {
+                FileCopyOptions copy_opts = { true, false };
+                int copy_status = file_copy(html_file, output_file, &copy_opts);
+                if (copy_status == 0) {
+                    printf("PDF copied successfully to '%s'\n", output_file);
+                } else {
+                    printf("Error: Failed to write PDF output '%s'\n", output_file);
+                }
+                log_finish();
+                return copy_status == 0 ? 0 : 1;
+            }
+            log_info("[render] PDF detected — using Lambda PDF package pipeline");
+            render_pdf_temp_html = convert_pdf_to_html_temp(html_file,
+                                                            "temp/_render_pdf_bridge.ls",
+                                                            "./temp/lambda_render_pdf.html",
+                                                            "null",
+                                                            "render");
+            if (!render_pdf_temp_html) {
+                printf("Error: Failed to convert PDF '%s' via Lambda PDF package\n", html_file);
+                log_finish();
+                return 1;
+            }
+            html_file = render_pdf_temp_html;
+        }
+
         // Determine output format based on file extension
-        const char* ext = strrchr(output_file, '.');
+        const char* ext = output_ext;
         int exit_code;
 
         if (ext && strcmp(ext, ".dvi") == 0) {
             printf("Error: DVI output is no longer supported. Use .svg, .pdf, .png, or .jpg instead.\n");
+            if (render_pdf_temp_html) {
+                file_delete(render_pdf_temp_html);
+                mem_free(render_pdf_temp_html);
+            }
             log_finish();
             return 1;
         } else if (ext && strcmp(ext, ".pdf") == 0) {
@@ -2341,8 +2482,17 @@ int main(int argc, char *argv[]) {
         } else {
             printf("Error: Unsupported output format. Use .svg, .pdf, .png, .jpg, or .jpeg extension\n");
             printf("Supported formats: .svg (SVG), .pdf (PDF), .png (PNG), .jpg/.jpeg (JPEG)\n");
+            if (render_pdf_temp_html) {
+                file_delete(render_pdf_temp_html);
+                mem_free(render_pdf_temp_html);
+            }
             log_finish();
             return 1;
+        }
+
+        if (render_pdf_temp_html) {
+            file_delete(render_pdf_temp_html);
+            mem_free(render_pdf_temp_html);
         }
 
         log_debug("render completed with result: %d", exit_code);
@@ -2721,57 +2871,12 @@ int main(int argc, char *argv[]) {
         if (ext && strcmp(ext, ".pdf") == 0) {
             log_info("[view] PDF detected — using Lambda PDF package pipeline");
 
-            // Build a Lambda bridge script. pdf.pdf_to_html is `pn`, so
-            // we wrap it in main() and invoke run_script_mir with
-            // run_main=true. The script returns the <html> element,
-            // which we then serialize via format_html.
-            char script_buf[2048];
-            snprintf(script_buf, sizeof(script_buf),
-                "import pdf: .lambda.package.pdf.pdf\n"
-                "pn main() {\n"
-                "    let doc^err = input(\"%s\", 'pdf')\n"
-                "    return pdf.pdf_to_html(doc, null)\n"
-                "}\n",
-                filename);
-
-            const char* tmp_script_path = "temp/_view_pdf_bridge.ls";
-            write_text_file(tmp_script_path, script_buf);
-
-            Runtime pdf_runtime;
-            runtime_init(&pdf_runtime);
-            pdf_runtime.current_dir = const_cast<char*>("./");
-            pdf_runtime.import_base_dir = "./";  // resolve .lambda.* from project root
-
-            Input* script_result = run_script_mir(&pdf_runtime, nullptr,
-                                                   (char*)tmp_script_path, true);
-
-            bool ok = (script_result &&
-                       get_type_id(script_result->root) == LMD_TYPE_ELEMENT);
-            if (ok) {
-                // format_html preserves SVG/foreign element attributes while
-                // producing HTML5-friendly output for the viewer shell.
-                String* html_str = format_html(script_result->pool, script_result->root);
-                if (html_str && html_str->chars) {
-                    const char* temp_html = "./temp/lambda_view_pdf.html";
-                    write_binary_file(temp_html, html_str->chars, html_str->len);
-                    pdf_temp_html = mem_strdup(temp_html, MEM_CAT_TEMP);
-                    log_info("[view] PDF rendered to %s (%u bytes)",
-                             temp_html, html_str->len);
-                } else {
-                    log_error("[view] PDF package: format_html returned null");
-                    ok = false;
-                }
-            } else {
-                log_error("[view] PDF package pipeline failed for %s", filename);
-                if (script_result &&
-                    get_type_id(script_result->root) == LMD_TYPE_ERROR) {
-                    LambdaError* le = get_persistent_last_error();
-                    if (le) { err_print(le); clear_persistent_last_error(); }
-                }
-            }
-            runtime_cleanup(&pdf_runtime);
-
-            if (!ok) {
+            pdf_temp_html = convert_pdf_to_html_temp(filename,
+                                                     "temp/_view_pdf_bridge.ls",
+                                                     "./temp/lambda_view_pdf.html",
+                                                     "{max_pages: 48}",
+                                                     "view");
+            if (!pdf_temp_html) {
                 printf("Error: Failed to convert PDF '%s' via Lambda PDF package\n", filename);
                 if (temp_file_path) { file_delete(temp_file_path); mem_free(temp_file_path); }
                 log_finish();

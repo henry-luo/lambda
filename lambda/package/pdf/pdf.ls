@@ -137,18 +137,24 @@ pub pn pdf_to_svg(pdf, page_index, opts) {
 // Render the entire document as an HTML shell containing one <svg> per page.
 // Optional `opts` map: { title: string, css: string, background: string,
 //                        show_label: bool }
+fn _render_page_count(total, opts) {
+    let max_pages = if (opts and opts.max_pages and opts.max_pages > 0) int(opts.max_pages) else total
+    if (max_pages < total) max_pages else total
+}
+
 pub pn pdf_to_html(pdf, opts) {
     let n = resolve.page_count(pdf)
     if (n == 0) {
         return html.html_shell([render_empty_doc()], opts)
     }
+    let render_count = _render_page_count(n, opts)
     // While loop because `for` comprehensions cannot call `pn` helpers
     // without dragging the whole expression into a pn context (and even
     // then the body must be expression-shaped). Use a plain driver loop
     // for clarity and to keep behaviour predictable.
     var svgs = []
     var i = 0
-    while (i < n) {
+    while (i < render_count) {
         let page = resolve.page_at(pdf, i)
         let s = render_page(pdf, page, i, opts)
         svgs = svgs ++ [s]
@@ -157,7 +163,7 @@ pub pn pdf_to_html(pdf, opts) {
     // Inject @font-face rules for embedded fonts so the browser uses
     // the actual glyphs (not OS fallback). Done here — once per doc —
     // rather than per page so the rule appears once.
-    let faces = _collect_font_face_rules(pdf)
+    let faces = _collect_font_face_rules(pdf, render_count)
     let base_css = _base_css(opts)
     let css = _build_css(faces, base_css)
     let opts2 = _opts_with_css(opts, css)
@@ -224,8 +230,9 @@ pn _collect_one_page(pdf, page, seen_families, rules) {
     return { seen: s, rules: r }
 }
 
-pn _collect_font_face_rules(pdf) {
-    let n = resolve.page_count(pdf)
+pn _collect_font_face_rules(pdf, limit) {
+    let total = resolve.page_count(pdf)
+    let n = _bounded_count(total, limit)
     var seen = []
     var rules = []
     var i = 0
@@ -237,6 +244,10 @@ pn _collect_font_face_rules(pdf) {
         i = i + 1
     }
     return rules | join("")
+}
+
+fn _bounded_count(total, limit) {
+    if (limit < total) limit else total
 }
 
 // Build the final stylesheet: base page chrome first, then @font-face rules.
