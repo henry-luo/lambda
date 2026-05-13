@@ -282,6 +282,15 @@ fn _is_color_op(opr) {
         or (opr == "cs") or (opr == "CS"))
 }
 
+fn _pattern_name_from_ops(ops) {
+    if (len(ops) < 1) { null }
+    else {
+        let op0 = ops[len(ops) - 1]
+        if (op0 is map and op0.kind == "name") { op0.value }
+        else { null }
+    }
+}
+
 fn _apply_color(st, opr, ops, pdf, page) {
     if      (opr == "rg") { _op_rg(st, ops) }
     else if (opr == "RG") { _op_RG(st, ops) }
@@ -747,15 +756,10 @@ pn _run_ops_with_state(pdf, page, ops, init_ctm, fonts, page_h, clip_prefix, inh
             var pname = "unused"
             var has_pattern = 0
             if (opr == "scn" or opr == "SCN") {
-                let ds = string(operands)
-                let dp = index_of(ds, "value")
-                if (dp >= 0) {
-                    let dr = slice(ds, dp + 8, len(ds))
-                    let name_parts = split(dr, "\"")
-                    if (len(name_parts) >= 1) {
-                        pname = name_parts[0]
-                        has_pattern = 1
-                    }
+                let pn = _pattern_name_from_ops(operands)
+                if (pn != null) {
+                    pname = pn
+                    has_pattern = 1
                 }
             }
             if (has_pattern == 1) {

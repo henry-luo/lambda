@@ -18,6 +18,8 @@
 import util:    .util
 import resolve: .resolve
 import color:   .color
+import image:   .image
+import stream:  .stream
 
 fn _shading_dict(pdf, page, name) {
     let res = resolve.page_resources(pdf, page)
@@ -236,23 +238,141 @@ fn _pattern_dict(pdf, page, name) {
     else { resolve.deref(pdf, table[name]) }
 }
 
+fn _stream_dict(s) {
+    if (s != null and s.dictionary != null) { s.dictionary }
+    else { s }
+}
+
+fn _stream_data(s) {
+    if (s != null and s.data != null) { s.data }
+    else if (s != null and s.stream_data != null) { s.stream_data }
+    else { "" }
+}
+
+fn _page_media_box_value(page) {
+    if (page and page.dict and page.dict.MediaBox) { page.dict.MediaBox }
+    else if (page and page.MediaBox) { page.MediaBox }
+    else { null }
+}
+
+fn _pattern_page(pdf, page, d) {
+    let res = if (d != null and d.Resources != null) { resolve.deref(pdf, d.Resources) } else { resolve.page_resources(pdf, page) }
+    { dict: { Resources: res, MediaBox: _page_media_box_value(page) },
+      resources: res,
+      MediaBox: _page_media_box_value(page) }
+}
+
+fn _pattern_bbox(d) {
+    if (d != null and d.BBox is array and len(d.BBox) >= 4) { d.BBox }
+    else { [0.0, 0.0, 1.0, 1.0] }
+}
+
+fn _pattern_xstep(d, bbox) {
+    if (d != null and d.XStep != null) { util.num(d.XStep) }
+    else { util.num(bbox[2]) - util.num(bbox[0]) }
+}
+
+fn _pattern_ystep(d, bbox) {
+    if (d != null and d.YStep != null) { util.num(d.YStep) }
+    else { util.num(bbox[3]) - util.num(bbox[1]) }
+}
+
+fn _do_name_from_operands(ops) {
+    if (len(ops) < 1) { null }
+    else {
+        let op0 = ops[0]
+        if (op0 is map and op0.kind == "name") { op0.value }
+        else { null }
+    }
+}
+
+pn _tiling_pattern_children(pdf, page, ops) {
+    var ctm = util.IDENTITY
+    var stack = []
+    var out = []
+    var i = 0
+    let n = len(ops)
+    while (i < n) {
+        let op = ops[i]
+        let opr = op.op
+        let operands = op.operands
+        if (opr == "q") {
+            stack = stack ++ [ctm]
+        }
+        else if (opr == "Q") {
+            let m = len(stack)
+            if (m >= 1) {
+                ctm = stack[m - 1]
+                stack = (for (k, v in stack where k < (m - 1)) v)
+            }
+        }
+        else if (opr == "cm") {
+            if (len(operands) >= 6) {
+                let mtx = [util.num(operands[0]), util.num(operands[1]), util.num(operands[2]),
+                           util.num(operands[3]), util.num(operands[4]), util.num(operands[5])]
+                ctm = util.matrix_mul(mtx, ctm)
+            }
+        }
+        else if (opr == "Do" and _do_name_from_operands(operands) != null) {
+            let imgs = image.apply_do(pdf, page, ctm, operands)
+            var k = 0
+            let ni = len(imgs)
+            while (k < ni) {
+                out = out ++ [imgs[k]]
+                k = k + 1
+            }
+        }
+        else { ctm = ctm }
+        i = i + 1
+    }
+    return out
+}
+
+pub pn from_tiling_pattern_fill(pdf, page, p, id) {
+    let d = _stream_dict(p)
+    let bytes = _stream_data(p)
+    if (d == null or bytes == "") { return { defs: [], fill: color.BLACK } }
+    let bbox = _pattern_bbox(d)
+    let x = util.num(bbox[0])
+    let y = util.num(bbox[1])
+    let w = _pattern_xstep(d, bbox)
+    let h = _pattern_ystep(d, bbox)
+    if (w <= 0.0 or h <= 0.0) { return { defs: [], fill: color.BLACK } }
+    let m0 = _matrix_of(d)
+    let m = [m0[0], m0[1], m0[2], m0[3], m0[4], m0[5] - h]
+    let ppage = _pattern_page(pdf, page, d)
+    let ops = stream.parse_content_stream(bytes)
+    let kids = _tiling_pattern_children(pdf, ppage, ops)
+    if (len(kids) == 0) { return { defs: [], fill: color.BLACK } }
+    let pat = <pattern id: id,
+                       patternUnits: "userSpaceOnUse",
+                       x: util.fmt_num(x), y: util.fmt_num(y),
+                       width: util.fmt_num(w), height: util.fmt_num(h),
+                       patternTransform: util.fmt_matrix(m);
+                  for (kid in kids) kid
+              >
+    return { defs: [pat], fill: "url(#" ++ id ++ ")" }
+}
+
 pub fn pattern_shading(pdf, page, name) {
     let p = _pattern_dict(pdf, page, name)
     if (p != null and p.PatternType == 2 and p.Shading != null) { resolve.deref(pdf, p.Shading) }
     else { null }
 }
 
-pub fn from_pattern_fill(pdf, page, name, id, ctm) {
+pub pn from_pattern_fill(pdf, page, name, id, ctm) {
     let p = _pattern_dict(pdf, page, name)
     let d = if (p != null and p.PatternType == 2 and p.Shading != null) { resolve.deref(pdf, p.Shading) }
             else { null }
-    if (d == null) { { defs: [], fill: color.BLACK } }
+    let pd = _stream_dict(p)
+    if (p != null and pd != null and pd.PatternType == 1 and pd.PaintType == 1) { return from_tiling_pattern_fill(pdf, page, p, id) }
+    else if (d == null) { return { defs: [], fill: color.BLACK } }
     else {
         let xform = util.matrix_mul(_matrix_of(p), _matrix_inverse(ctm))
         let stype = if (d.ShadingType) d.ShadingType else 0
         let r = if (stype == 2) { _emit_axial_with_matrix(pdf, d, xform, id, 0.0, 0.0) }
                 else if (stype == 3) { _emit_radial_with_matrix(pdf, d, xform, id, 0.0, 0.0) }
                 else { { defs: [], emit: [] } }
-        { defs: r.defs, fill: "url(#" ++ id ++ ")" }
+        return { defs: r.defs, fill: "url(#" ++ id ++ ")" }
     }
 }

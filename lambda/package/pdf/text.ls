@@ -229,12 +229,13 @@ fn _emit_text(st, ctm, page_h, content, run_advance) {
         // Tz — horizontal scale, percentage. 100 = no change. Apply via
         // a transform on the <text> origin so glyph widths scale but
         // the baseline stays fixed. Skip when ~100 to keep markup tidy.
-        let hs = _text_transform_hscale(st, ctm)
-        let skew_x = _text_transform_skew_x(st, ctm)
-        let scaled = ((util.fabs(hs - 1.0) > 0.001) or (util.fabs(skew_x) > 0.001))
+        let tr = _text_transform_components(st, ctm, x, y)
+        let hs = tr.hscale
+        let skew_x = tr.skew_x
+        let scaled = tr.scaled
         let text_len = util.fmt_num(run_advance)
         let scaled_text_len = _scaled_text_length(run_advance, hs)
-        let text_xform = _text_transform_attr(x, y, hs, skew_x)
+        let text_xform = tr.attr
         if (scaled and needs_stroke and needs_text_alpha) {
             <text x: "0", y: "0",
                   transform: text_xform,
@@ -408,6 +409,40 @@ fn _text_transform_skew_x(st, ctm) {
         if (ys > 0.0) { (0.0 - vx) / ys }
         else { 0.0 }
     }
+}
+
+fn _text_transform_components(st, ctm, x, y) {
+    let ys = _text_y_axis_scale(st, ctm)
+    let hx0 = st.tm[0] * ctm[0] + st.tm[1] * ctm[2]
+    let hy0 = st.tm[0] * ctm[1] + st.tm[1] * ctm[3]
+    let vx0 = st.tm[2] * ctm[0] + st.tm[3] * ctm[2]
+    let vy0 = st.tm[2] * ctm[1] + st.tm[3] * ctm[3]
+    let hx = if (ys > 0.0) { hx0 / ys } else { 1.0 }
+    let hy = if (ys > 0.0) { (0.0 - hy0) / ys } else { 0.0 }
+    let vx = if (ys > 0.0) { (0.0 - vx0) / ys } else { 0.0 }
+    let vy = if (ys > 0.0) { (0.0 - vy0) / ys } else { 1.0 }
+    let rot = util.fabs(hy) > 0.001
+    let hscale = _text_transform_hscale(st, ctm)
+    let skew_x = _text_transform_skew_x(st, ctm)
+    if (rot) {
+        let hs = st.hor_scale / 100.0
+        { scaled: true,
+          hscale: if (hs > 0.0) { hs } else { 1.0 },
+          skew_x: 0.0,
+          attr: _text_full_transform_attr(hx * hs, hy * hs, vx, vy, x, y) }
+    }
+    else {
+        { scaled: ((util.fabs(hscale - 1.0) > 0.001) or (util.fabs(skew_x) > 0.001)),
+          hscale: hscale,
+          skew_x: skew_x,
+          attr: _text_transform_attr(x, y, hscale, skew_x) }
+    }
+}
+
+fn _text_full_transform_attr(a, b, c, d, x, y) {
+    "matrix(" ++ util.fmt_num(a) ++ " " ++ util.fmt_num(b) ++ " " ++
+        util.fmt_num(c) ++ " " ++ util.fmt_num(d) ++ " " ++
+        util.fmt_num(x) ++ " " ++ util.fmt_num(y) ++ ")"
 }
 
 fn _text_transform_attr(x, y, hs, skew_x) {
