@@ -5889,11 +5889,18 @@ extern "C" Item js_get_prototype_of(Item object) {
         if (raw_proto.item != ItemNull.item) return raw_proto;
     }
 
-    // v18g: If instance has a constructor with a .prototype property,
-    // AND the object is NOT that prototype itself, return constructor.prototype
+    // v18g: if instance has an own data constructor with a .prototype property,
+    // and the object is not that prototype itself, return constructor.prototype.
+    // this is an internal prototype inference path; it must not invoke a user
+    // `constructor` accessor while implementing [[GetPrototypeOf]].
     {
-        Item ctor_key = (Item){.item = s2it(heap_create_name("constructor", 11))};
-        Item ctor = js_property_get(object, ctor_key);
+        Item ctor = ItemNull;
+        ShapeEntry* ctor_se = js_find_shape_entry(object, "constructor", 11);
+        if (ctor_se && !jspd_is_accessor(ctor_se)) {
+            bool ctor_found = false;
+            ctor = js_map_get_fast_ext(object.map, "constructor", 11, &ctor_found);
+            if (!ctor_found || ctor.item == JS_DELETED_SENTINEL_VAL) ctor = ItemNull;
+        }
         if (get_type_id(ctor) == LMD_TYPE_MAP) {
             // user-defined class: read its "prototype" property
             Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
@@ -13728,22 +13735,20 @@ static Item js_ctor_regexp_fn(Item pattern, Item flags) {
         if (fid == LMD_TYPE_NULL || fid == LMD_TYPE_UNDEFINED) {
             bool has_rd = false;
             js_map_get_fast_ext(pattern.map, "__rd", 4, &has_rd);
-            if (has_rd) {
-                // IsRegExp: check pattern[@@match] — if defined, use ToBoolean of it.
-                bool ok = true;
-                Item sym_match_key = (Item){.item = s2it(heap_create_name("__sym_7", 7))};
-                Item sym_match = js_property_get(pattern, sym_match_key);
-                if (sym_match.item != ItemNull.item && get_type_id(sym_match) != LMD_TYPE_UNDEFINED) {
-                    if (!js_is_truthy(sym_match)) ok = false;
-                }
-                // Check pattern.constructor === RegExp
-                if (ok) {
-                    Item ctor_key = (Item){.item = s2it(heap_create_name("constructor", 11))};
-                    Item pat_ctor = js_property_get(pattern, ctor_key);
-                    Item regexp_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("RegExp", 6))});
-                    if (pat_ctor.item != regexp_ctor.item) ok = false;
-                }
-                if (ok) return pattern;
+            bool pattern_is_regexp = has_rd;
+            Item sym_match_key = (Item){.item = s2it(heap_create_name("__sym_7", 7))};
+            Item sym_match = js_property_get(pattern, sym_match_key);
+            if (js_exception_pending) return ItemNull;
+            TypeId match_tid = get_type_id(sym_match);
+            if (sym_match.item != ItemNull.item && match_tid != LMD_TYPE_UNDEFINED && match_tid != LMD_TYPE_NULL) {
+                pattern_is_regexp = js_is_truthy(sym_match);
+            }
+            if (pattern_is_regexp) {
+                Item ctor_key = (Item){.item = s2it(heap_create_name("constructor", 11))};
+                Item pat_ctor = js_property_get(pattern, ctor_key);
+                if (js_exception_pending) return ItemNull;
+                Item regexp_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("RegExp", 6))});
+                if (pat_ctor.item == regexp_ctor.item) return pattern;
             }
         }
     }

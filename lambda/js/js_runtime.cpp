@@ -8182,6 +8182,12 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             js_throw_type_error("RegExp.prototype.compile called on incompatible receiver");
             return make_js_undefined();
         }
+        bool this_has_rd = false;
+        js_map_get_fast(this_val.map, "__rd", 4, &this_has_rd);
+        if (!this_has_rd) {
+            js_throw_type_error("RegExp.prototype.compile called on incompatible receiver");
+            return make_js_undefined();
+        }
         // ES B.2.5.1 step 3: If pattern is a RegExp and flags is not undefined, throw TypeError
         if (get_type_id(arg0) == LMD_TYPE_MAP) {
             bool has_rd = false;
@@ -8257,10 +8263,21 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             Item fk = (Item){.item = s2it(heap_create_name(flag_props[fp]))};
             js_property_set(this_val, fk, js_property_get(new_regex, fk));
         }
-        // Reset lastIndex to 0
-        Item li_key = (Item){.item = s2it(heap_create_name("lastIndex", 9))};
-        js_property_set(this_val, li_key, (Item){.item = i2it(0)});
         js_skip_accessor_dispatch = _prev_skip_accessor_dispatch;
+        // Reset lastIndex to 0. RegExpInitialize uses Throw=true here, so this
+        // must fail even when the caller's source is sloppy mode.
+        Item li_key = (Item){.item = s2it(heap_create_name("lastIndex", 9))};
+        bool last_index_non_writable = js_prop_attrs_fast_path(this_val, "lastIndex", 9, JSPD_NON_WRITABLE) == 0;
+        if (!last_index_non_writable) {
+            bool nw_found = false;
+            Item nw_val = js_map_get_fast(this_val.map, "__nw_lastIndex", 14, &nw_found);
+            last_index_non_writable = nw_found && nw_val.item != JS_DELETED_SENTINEL_VAL && js_is_truthy(nw_val);
+        }
+        if (last_index_non_writable) {
+            js_throw_type_error("Cannot assign to read only property 'lastIndex' of object");
+            return make_js_undefined();
+        }
+        js_property_set(this_val, li_key, (Item){.item = i2it(0)});
         return this_val;
     }
 
@@ -10258,6 +10275,87 @@ static bool js_regex_parse_simple_fast_flags(const char* flags, int flags_len,
     return true;
 }
 
+static bool js_regex_is_re2_literal_meta(char ch, bool in_class) {
+    if (in_class) {
+        return ch == '\\' || ch == ']' || ch == '-' || ch == '^';
+    }
+    switch (ch) {
+    case '\\': case '.': case '^': case '$': case '|': case '(': case ')':
+    case '[': case ']': case '{': case '}': case '*': case '+': case '?':
+        return true;
+    default:
+        return false;
+    }
+}
+
+static void js_regex_append_literal_byte(std::string& out, unsigned char ch, bool in_class) {
+    if (ch < 0x80 && js_regex_is_re2_literal_meta((char)ch, in_class)) {
+        out += '\\';
+    }
+    out += (char)ch;
+}
+
+static int js_regex_utf8_sequence_len(unsigned char ch) {
+    if (ch < 0x80) return 1;
+    if ((ch & 0xE0) == 0xC0) return 2;
+    if ((ch & 0xF0) == 0xE0) return 3;
+    if ((ch & 0xF8) == 0xF0) return 4;
+    return 1;
+}
+
+static int js_regex_append_legacy_literal_escape(std::string& out, const char* pattern,
+        int pattern_len, int escaped_pos, bool in_class) {
+    if (escaped_pos >= pattern_len) return escaped_pos;
+    unsigned char first = (unsigned char)pattern[escaped_pos];
+    int len = js_regex_utf8_sequence_len(first);
+    if (escaped_pos + len > pattern_len) len = 1;
+    for (int j = 0; j < len; j++) {
+        js_regex_append_literal_byte(out, (unsigned char)pattern[escaped_pos + j], in_class);
+    }
+    return escaped_pos + len - 1;
+}
+
+static bool js_regex_is_legacy_identity_escape(char next) {
+    if (next == 'p' || next == 'P') return true;
+    if ((next >= 'A' && next <= 'Z') || (next >= 'a' && next <= 'z')) {
+        switch (next) {
+        case 'b': case 'B': case 'c': case 'd': case 'D': case 'f': case 'n':
+        case 'r': case 's': case 'S': case 't': case 'u': case 'v': case 'w':
+        case 'W': case 'x':
+            return false;
+        default:
+            return true;
+        }
+    }
+    return (unsigned char)next >= 0x80;
+}
+
+static int js_regex_count_capture_groups_before(const char* pattern, int pattern_len, int limit) {
+    int count = 0;
+    int bracket_depth = 0;
+    for (int pos = 0; pos < limit && pos < pattern_len; pos++) {
+        if (pattern[pos] == '\\' && pos + 1 < limit) { pos++; continue; }
+        if (pattern[pos] == '[') {
+            bracket_depth++;
+            continue;
+        }
+        if (pattern[pos] == ']' && bracket_depth > 0) {
+            bracket_depth--;
+            continue;
+        }
+        if (bracket_depth > 0 || pattern[pos] != '(' || pos + 1 >= limit) continue;
+        if (pattern[pos + 1] != '?') {
+            count++;
+        } else if (pos + 3 < limit && pattern[pos + 2] == '<' &&
+                   pattern[pos + 3] != '=' && pattern[pos + 3] != '!') {
+            count++;
+        } else if (pos + 4 < limit && pattern[pos + 2] == 'P' && pattern[pos + 3] == '<') {
+            count++;
+        }
+    }
+    return count;
+}
+
 extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char* flags, int flags_len) {
     char* literal_buf = NULL;
     int literal_len = 0;
@@ -10545,15 +10643,28 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
                 i++;
                 continue;
             }
+            bool legacy_non_unicode = !compile_info.unicode && !compile_info.unicode_sets;
             // Handle backreferences \1-\9: passed through for js_regex_wrapper to handle
             // The wrapper converts them to capture groups with post-filter equality checks
             // Annex B: \N is an identity escape if N > total capture groups
             if (next >= '1' && next <= '9' && bracket_depth == 0) {
                 int ref_num = next - '0';
                 if (ref_num > total_groups) {
-                    // identity escape: treat \N as literal character N
-                    processed_pattern += next;
+                    if (legacy_non_unicode && next <= '7') {
+                        char buf[10];
+                        snprintf(buf, sizeof(buf), "\\x{%c}", next);
+                        processed_pattern += buf;
+                    } else {
+                        // identity escape: treat \8/\9 as literal characters in legacy mode
+                        processed_pattern += next;
+                    }
                 } else {
+                    int groups_before_ref = js_regex_count_capture_groups_before(effective_pattern,
+                        effective_pattern_len, i);
+                    if (ref_num > groups_before_ref) {
+                        i++;
+                        continue;
+                    }
                     processed_pattern += '\\';
                     processed_pattern += next;
                 }
@@ -10565,14 +10676,26 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
             // RE2 doesn't support \c, so translate to \x{NN}.
             // Annex B §B.1.4: inside a character class, \cN where N is a decimal digit or '_'
             // is also accepted (yields N & 0x1F). For now, only handle the spec-mandated letter form.
-            if (next == 'c' && i + 2 < effective_pattern_len) {
-                char cl = effective_pattern[i + 2];
-                if ((cl >= 'A' && cl <= 'Z') || (cl >= 'a' && cl <= 'z')) {
+            if (next == 'c') {
+                char cl = (i + 2 < effective_pattern_len) ? effective_pattern[i + 2] : '\0';
+                if (i + 2 < effective_pattern_len &&
+                    ((cl >= 'A' && cl <= 'Z') || (cl >= 'a' && cl <= 'z'))) {
                     char buf[10];
                     int cp = cl & 0x1F;
                     snprintf(buf, sizeof(buf), "\\x{%X}", cp);
                     processed_pattern += buf;
                     i += 2; // consume \c and the letter (loop will i++)
+                    continue;
+                }
+                if (legacy_non_unicode) {
+                    js_regex_append_literal_byte(processed_pattern, '\\', bracket_depth > 0);
+                    js_regex_append_literal_byte(processed_pattern, 'c', bracket_depth > 0);
+                    if (i + 2 < effective_pattern_len && !(bracket_depth > 0 && effective_pattern[i + 2] == ']')) {
+                        i = js_regex_append_legacy_literal_escape(processed_pattern,
+                            effective_pattern, effective_pattern_len, i + 2, bracket_depth > 0);
+                    } else {
+                        i++;
+                    }
                     continue;
                 }
             }
@@ -10608,6 +10731,34 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
                         continue;
                     }
                 }
+                if (legacy_non_unicode) {
+                    js_regex_append_literal_byte(processed_pattern, 'u', bracket_depth > 0);
+                    i++;
+                    continue;
+                }
+            }
+            if (next == 'x') {
+                bool complete_hex = false;
+                if (i + 3 < effective_pattern_len) {
+                    complete_hex = true;
+                    for (int j = i + 2; j < i + 4; j++) {
+                        char c = effective_pattern[j];
+                        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) {
+                            complete_hex = false;
+                            break;
+                        }
+                    }
+                }
+                if (legacy_non_unicode && !complete_hex) {
+                    js_regex_append_literal_byte(processed_pattern, 'x', bracket_depth > 0);
+                    i++;
+                    continue;
+                }
+            }
+            if (legacy_non_unicode && js_regex_is_legacy_identity_escape(next)) {
+                i = js_regex_append_legacy_literal_escape(processed_pattern,
+                    effective_pattern, effective_pattern_len, i + 1, bracket_depth > 0);
+                continue;
             }
             processed_pattern += effective_pattern[i];
             processed_pattern += effective_pattern[i + 1];
@@ -10928,14 +11079,17 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     Item source_key = (Item){.item = s2it(heap_create_name("source"))};
     Item source_val = (Item){.item = s2it(heap_strcpy(src_buf, pattern_len))};
     js_property_set(regex_obj, source_key, source_val);
+    js_mark_non_writable(regex_obj, source_key);
     js_mark_non_enumerable(regex_obj, source_key);
     Item flags_key = (Item){.item = s2it(heap_create_name("flags"))};
     Item flags_val = (Item){.item = s2it(heap_create_name(flg_buf))};
     js_property_set(regex_obj, flags_key, flags_val);
+    js_mark_non_writable(regex_obj, flags_key);
     js_mark_non_enumerable(regex_obj, flags_key);
     Item global_key = (Item){.item = s2it(heap_create_name("global"))};
     Item global_val = (Item){.item = b2it(global ? BOOL_TRUE : BOOL_FALSE)};
     js_property_set(regex_obj, global_key, global_val);
+    js_mark_non_writable(regex_obj, global_key);
     js_mark_non_enumerable(regex_obj, global_key);
     // v18: expose all standard RegExp flag properties
     bool ignore_case = !opts.case_sensitive();
@@ -10944,18 +11098,23 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     bool has_unicode = compile_info.unicode || compile_info.unicode_sets;
     Item ic_key = (Item){.item = s2it(heap_create_name("ignoreCase"))};
     js_property_set(regex_obj, ic_key, (Item){.item = b2it(ignore_case ? BOOL_TRUE : BOOL_FALSE)});
+    js_mark_non_writable(regex_obj, ic_key);
     js_mark_non_enumerable(regex_obj, ic_key);
     Item ml_key = (Item){.item = s2it(heap_create_name("multiline"))};
     js_property_set(regex_obj, ml_key, (Item){.item = b2it(multiline ? BOOL_TRUE : BOOL_FALSE)});
+    js_mark_non_writable(regex_obj, ml_key);
     js_mark_non_enumerable(regex_obj, ml_key);
     Item da_key = (Item){.item = s2it(heap_create_name("dotAll"))};
     js_property_set(regex_obj, da_key, (Item){.item = b2it(dot_all ? BOOL_TRUE : BOOL_FALSE)});
+    js_mark_non_writable(regex_obj, da_key);
     js_mark_non_enumerable(regex_obj, da_key);
     Item uni_key = (Item){.item = s2it(heap_create_name("unicode"))};
     js_property_set(regex_obj, uni_key, (Item){.item = b2it(has_unicode ? BOOL_TRUE : BOOL_FALSE)});
+    js_mark_non_writable(regex_obj, uni_key);
     js_mark_non_enumerable(regex_obj, uni_key);
     Item sticky_key = (Item){.item = s2it(heap_create_name("sticky"))};
     js_property_set(regex_obj, sticky_key, (Item){.item = b2it(has_sticky ? BOOL_TRUE : BOOL_FALSE)});
+    js_mark_non_writable(regex_obj, sticky_key);
     js_mark_non_enumerable(regex_obj, sticky_key);
     Item li_key = (Item){.item = s2it(heap_create_name("lastIndex"))};
     js_property_set(regex_obj, li_key, (Item){.item = i2it(0)});
@@ -11035,64 +11194,49 @@ extern "C" Item js_regexp_construct(Item pattern_item, Item flags_item) {
     if (get_type_id(pattern_item) == LMD_TYPE_MAP) {
         bool has_rd = false;
         js_map_get_fast(pattern_item.map, "__rd", 4, &has_rd);
-        if (has_rd) {
-            bool own_src = false;
-            Item src_val = js_map_get_fast(pattern_item.map, "source", 6, &own_src);
-            if (own_src && get_type_id(src_val) == LMD_TYPE_STRING) {
-                String* ps = it2s(src_val);
+        // ES §22.2.3.1: IsRegExp(pattern) first reads @@match. This matters
+        // even for real RegExp objects because the getter can mutate `pattern`.
+        Item sym_match_key = (Item){.item = s2it(heap_create_name("__sym_7", 7))};
+        Item sym_match_val = js_property_get(pattern_item, sym_match_key);
+        if (js_exception_pending) return ItemNull;
+        bool pattern_is_regexp = false;
+        if (sym_match_val.item != ItemNull.item &&
+            get_type_id(sym_match_val) != LMD_TYPE_UNDEFINED &&
+            get_type_id(sym_match_val) != LMD_TYPE_NULL) {
+            pattern_is_regexp = it2b(js_to_boolean(sym_match_val));
+        } else {
+            pattern_is_regexp = has_rd;
+        }
+        if (pattern_is_regexp) {
+            Item src_key = (Item){.item = s2it(heap_create_name("source", 6))};
+            Item src_val = js_property_get(pattern_item, src_key);
+            if (js_exception_pending) return ItemNull;
+            Item src_str = (get_type_id(src_val) == LMD_TYPE_STRING) ? src_val : js_to_string(src_val);
+            if (js_exception_pending) return ItemNull;
+            if (get_type_id(src_str) == LMD_TYPE_STRING) {
+                String* ps = it2s(src_str);
                 if (ps) { pattern = ps->chars; pattern_len = (int)ps->len; }
             }
-            // If flags not explicitly provided, inherit from source regex
             if (!flags_provided) {
-                bool own_fl = false;
-                Item fl_val = js_map_get_fast(pattern_item.map, "flags", 5, &own_fl);
-                if (own_fl && get_type_id(fl_val) == LMD_TYPE_STRING) {
-                    String* fs = it2s(fl_val);
-                    if (fs) { flags = fs->chars; flags_len = (int)fs->len; }
+                Item fl_key = (Item){.item = s2it(heap_create_name("flags", 5))};
+                Item fl_val = js_property_get(pattern_item, fl_key);
+                if (js_exception_pending) return ItemNull;
+                if (get_type_id(fl_val) != LMD_TYPE_UNDEFINED && get_type_id(fl_val) != LMD_TYPE_NULL) {
+                    Item fl_str = (get_type_id(fl_val) == LMD_TYPE_STRING) ? fl_val : js_to_string(fl_val);
+                    if (js_exception_pending) return ItemNull;
+                    if (get_type_id(fl_str) == LMD_TYPE_STRING) {
+                        String* fs = it2s(fl_str);
+                        if (fs) { flags = fs->chars; flags_len = (int)fs->len; }
+                    }
                 }
             }
         } else {
-            // ES §22.2.3.1: IsRegExp(pattern) — check for Symbol.match override.
-            // If true, treat as regexp-like: read .source and (if flags not provided) .flags
-            // via the property getter chain.
-            Item sym_match_key = (Item){.item = s2it(heap_create_name("__sym_7", 7))};
-            Item sym_match_val = js_property_get(pattern_item, sym_match_key);
+            // Non-regexp object — convert to string
+            Item s = js_to_string(pattern_item);
             if (js_exception_pending) return ItemNull;
-            bool is_regexp_like = (sym_match_val.item != ItemNull.item
-                && get_type_id(sym_match_val) != LMD_TYPE_UNDEFINED
-                && get_type_id(sym_match_val) != LMD_TYPE_NULL
-                && it2b(js_to_boolean(sym_match_val)));
-            if (is_regexp_like) {
-                Item src_key = (Item){.item = s2it(heap_create_name("source", 6))};
-                Item src_val = js_property_get(pattern_item, src_key);
-                if (js_exception_pending) return ItemNull;
-                Item src_str = (get_type_id(src_val) == LMD_TYPE_STRING) ? src_val : js_to_string(src_val);
-                if (js_exception_pending) return ItemNull;
-                if (get_type_id(src_str) == LMD_TYPE_STRING) {
-                    String* ps = it2s(src_str);
-                    if (ps) { pattern = ps->chars; pattern_len = (int)ps->len; }
-                }
-                if (!flags_provided) {
-                    Item fl_key = (Item){.item = s2it(heap_create_name("flags", 5))};
-                    Item fl_val = js_property_get(pattern_item, fl_key);
-                    if (js_exception_pending) return ItemNull;
-                    if (get_type_id(fl_val) != LMD_TYPE_UNDEFINED && get_type_id(fl_val) != LMD_TYPE_NULL) {
-                        Item fl_str = (get_type_id(fl_val) == LMD_TYPE_STRING) ? fl_val : js_to_string(fl_val);
-                        if (js_exception_pending) return ItemNull;
-                        if (get_type_id(fl_str) == LMD_TYPE_STRING) {
-                            String* fs = it2s(fl_str);
-                            if (fs) { flags = fs->chars; flags_len = (int)fs->len; }
-                        }
-                    }
-                }
-            } else {
-                // Non-regexp object — convert to string
-                Item s = js_to_string(pattern_item);
-                if (js_exception_pending) return ItemNull;
-                if (get_type_id(s) == LMD_TYPE_STRING) {
-                    String* ps = it2s(s);
-                    if (ps) { pattern = ps->chars; pattern_len = (int)ps->len; }
-                }
+            if (get_type_id(s) == LMD_TYPE_STRING) {
+                String* ps = it2s(s);
+                if (ps) { pattern = ps->chars; pattern_len = (int)ps->len; }
             }
         }
     } else if (get_type_id(pattern_item) == LMD_TYPE_STRING) {
