@@ -574,6 +574,5 @@ int render_html_to_pdf(const char* html_file, const char* pdf_file, int viewport
 // ============================================================================
 // Math Rendering Functions for PDF
 // ============================================================================
-// NOTE: MathBox rendering has been removed. Use RDT_VIEW_TEXNODE for math rendering.
-// The old MathBox pipeline (RDT_VIEW_MATH) is deprecated.
+// NOTE: MathBox rendering has been removed.
 // ============================================================================

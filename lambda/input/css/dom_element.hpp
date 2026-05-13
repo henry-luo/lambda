@@ -40,9 +40,6 @@ typedef struct VectorPathProp VectorPathProp;  // From radiant/view.hpp
 typedef struct MultiColumnProp MultiColumnProp;  // From radiant/view.hpp
 typedef struct Runtime Runtime;  // From lambda/lambda.h
 
-// Forward declaration for TexNode (unified TeX pipeline)
-namespace tex { struct TexNode; }
-
 // ============================================================================
 // DOM Document
 // ============================================================================
@@ -312,11 +309,6 @@ struct DomElement : DomNode {
     // Stores up to 9 measurement results + 1 final layout result
     radiant::LayoutCache* layout_cache;
 
-    // TexNode tree for RDT_VIEW_TEXNODE rendering (unified TeX pipeline)
-    // When view_type == RDT_VIEW_TEXNODE, this points to the root of the TexNode tree
-    // The TexNode tree IS the view tree - no conversion needed
-    tex::TexNode* tex_root;
-
     // Intrinsic sizing cache for avoiding redundant measurement during layout
     float cached_min_content_width;
     float cached_max_content_width;
@@ -336,7 +328,7 @@ struct DomElement : DomNode {
         blk(nullptr), scroller(nullptr), embed(nullptr), position(nullptr),
         transform(nullptr), filter(nullptr), multicol(nullptr),
         layout_fragments(nullptr), layout_fragment_count(0), pseudo(nullptr),
-        vpath(nullptr), layout_cache(nullptr), tex_root(nullptr),
+        vpath(nullptr), layout_cache(nullptr),
         cached_min_content_width(0), cached_max_content_width(0),
         has_cached_intrinsic_widths(false), measuring_intrinsic_width(false) {}
 };

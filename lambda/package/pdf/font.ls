@@ -150,6 +150,7 @@ pub pn from_basefont(name: string) {
         _contains(stripped, "Gelasio") or _contains(stripped, "gelasio") or
         _contains(stripped, "Garamond") or _contains(stripped, "garamond") or
         _contains(stripped, "Palatino") or _contains(stripped, "palatino") or
+        _contains(stripped, "Effloresce") or _contains(stripped, "effloresce") or
         _contains(stripped, "Book") or _contains(stripped, "Minion")) {
         gen = "serif"
     }
@@ -160,7 +161,7 @@ pub pn from_basefont(name: string) {
     }
     let is_condensed = _contains(stripped, "Condensed") or _contains(stripped, "condensed") or
                        _contains(stripped, "Narrow")    or _contains(stripped, "narrow") or
-                       _contains(stripped, "Compressed")
+                       _contains(stripped, "Compressed") or _contains(stripped, "BlueHighway")
     return { family: _family_stack_with_stretch(stripped, gen, is_condensed),
              weight: weight, style: style }
 }

@@ -654,6 +654,25 @@ void draw_color_glyph(RenderContext* rdcon, GlyphBitmap *bitmap, int x, int y) {
     }
 }
 
+static uint32_t glyph_bitmap_sample_pixel(const GlyphBitmap* bitmap, int src_y, int src_x) {
+    if (!bitmap || !bitmap->buffer || src_y < 0 || src_y >= bitmap->height ||
+        src_x < 0 || src_x >= bitmap->width) return 0;
+    if (bitmap->pixel_mode == GLYPH_PIXEL_MONO) {
+        int byte_index = src_x / 8;
+        int bit_index = 7 - (src_x % 8);
+        uint8_t byte_val = bitmap->buffer[src_y * bitmap->pitch + byte_index];
+        return (byte_val & (1 << bit_index)) ? 255 : 0;
+    }
+    if (bitmap->pixel_mode == GLYPH_PIXEL_GRAY) {
+        return bitmap->buffer[src_y * bitmap->pitch + src_x];
+    }
+    if (bitmap->pixel_mode == GLYPH_PIXEL_LCD) {
+        const uint8_t* subpixel = bitmap->buffer + src_y * bitmap->pitch + src_x * 3;
+        return ((uint32_t)subpixel[0] + (uint32_t)subpixel[1] + (uint32_t)subpixel[2] + 1) / 3;
+    }
+    return 0;
+}
+
 // draw a glyph bitmap into the doc surface
 void draw_glyph(RenderContext* rdcon, GlyphBitmap *bitmap, int x, int y) {
     if (rdcon->dl) {
@@ -687,9 +706,6 @@ void draw_glyph(RenderContext* rdcon, GlyphBitmap *bitmap, int x, int y) {
             (float)left + 0.5f, (float)top + 0.5f,
             (float)(right - left - 1), (float)(bottom - top - 1));
 
-    // handle monochrome bitmaps (1 bit per pixel) - common for some system fonts like Monaco
-    bool is_mono = (bitmap->pixel_mode == GLYPH_PIXEL_MONO);
-
     for (int i = top - y; i < bottom - y; i++) {
         int j_start = left - x;
         int j_end = right - x;
@@ -706,17 +722,7 @@ void draw_glyph(RenderContext* rdcon, GlyphBitmap *bitmap, int x, int y) {
         for (int j = j_start; j < j_end; j++) {
             if (x + j < 0 || x + j >= surface->width) continue;
 
-            uint32_t intensity;
-            if (is_mono) {
-                // for monochrome: each byte contains 8 pixels, MSB first
-                int byte_index = j / 8;
-                int bit_index = 7 - (j % 8);  // MSB is leftmost pixel
-                uint8_t byte_val = bitmap->buffer[i * bitmap->pitch + byte_index];
-                intensity = (byte_val & (1 << bit_index)) ? 255 : 0;
-            } else {
-                // grayscale: 1 byte per pixel
-                intensity = bitmap->buffer[i * bitmap->pitch + j];
-            }
+            uint32_t intensity = glyph_bitmap_sample_pixel(bitmap, i, j);
 
             if (intensity > 0) {
                 // blend the pixel with the background

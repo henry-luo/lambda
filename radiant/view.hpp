@@ -1202,7 +1202,7 @@ typedef struct EmbedProp {
     struct RdtVideo* video;  // video playback context (NULL for non-video elements)
     ImageSurface* poster;    // poster image for <video> (displayed before playback starts)
     bool has_controls;       // true if <video controls> attribute present
-    // Math layout data (legacy - will be removed when migrating to RDT_VIEW_TEXNODE)
+    // Math layout data (legacy)
     void* math_box;              // legacy: was MathBox* - deprecated
     Item math_node;              // source Lambda math node
     bool math_is_display;        // display vs inline math

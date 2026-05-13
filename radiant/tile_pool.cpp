@@ -287,24 +287,34 @@ static inline bool bounds_intersect(const float item_bounds[4],
              iy >= ty + th || iy + ih <= ty);
 }
 
+static uint32_t tile_glyph_sample_pixel(const GlyphBitmap* bitmap, int src_y, int src_x) {
+    if (!bitmap || !bitmap->buffer || src_y < 0 || src_y >= bitmap->height ||
+        src_x < 0 || src_x >= bitmap->width) return 0;
+    if (bitmap->pixel_mode == GLYPH_PIXEL_MONO) {
+        int byte_index = src_x / 8;
+        int bit_index = 7 - (src_x % 8);
+        uint8_t byte_val = bitmap->buffer[src_y * bitmap->pitch + byte_index];
+        return (byte_val & (1 << bit_index)) ? 255 : 0;
+    }
+    if (bitmap->pixel_mode == GLYPH_PIXEL_GRAY) {
+        return bitmap->buffer[src_y * bitmap->pitch + src_x];
+    }
+    if (bitmap->pixel_mode == GLYPH_PIXEL_LCD) {
+        const uint8_t* subpixel = bitmap->buffer + src_y * bitmap->pitch + src_x * 3;
+        return ((uint32_t)subpixel[0] + (uint32_t)subpixel[1] + (uint32_t)subpixel[2] + 1) / 3;
+    }
+    return 0;
+}
+
 // Helper: translate a glyph to tile-local coordinates and render
 static void replay_tile_glyph(ImageSurface* tile_surface,
                                DlDrawGlyph* g, float tile_x, float tile_y) {
     GlyphBitmap* bitmap = &g->bitmap;
 
     if (g->has_transform && !g->is_color_emoji) {
-        bool is_mono = (bitmap->pixel_mode == GLYPH_PIXEL_MONO);
         for (int i = 0; i < (int)bitmap->height; i++) {
             for (int j = 0; j < (int)bitmap->width; j++) {
-                uint32_t intensity;
-                if (is_mono) {
-                    int byte_index = j / 8;
-                    int bit_index = 7 - (j % 8);
-                    uint8_t byte_val = bitmap->buffer[i * bitmap->pitch + byte_index];
-                    intensity = (byte_val & (1 << bit_index)) ? 255 : 0;
-                } else {
-                    intensity = bitmap->buffer[i * bitmap->pitch + j];
-                }
+                uint32_t intensity = tile_glyph_sample_pixel(bitmap, i, j);
                 if (intensity == 0) continue;
 
                 float src_x = (float)(g->x + j) + 0.5f;
@@ -423,29 +433,19 @@ static void replay_tile_glyph(ImageSurface* tile_surface,
         return;
     }
 
-    // grayscale / monochrome glyph
+    // grayscale / monochrome / LCD glyph
     int left   = std::max((int)clip.left,  x);
     int right  = std::min((int)clip.right,  x + (int)bitmap->width);
     int top    = std::max((int)clip.top,    y);
     int bottom = std::min((int)clip.bottom, y + (int)bitmap->height);
     if (left >= right || top >= bottom) return;
 
-    bool is_mono = (bitmap->pixel_mode == GLYPH_PIXEL_MONO);
-
     for (int i = top - y; i < bottom - y; i++) {
         uint8_t* row_pixels = (uint8_t*)tile_surface->pixels + (y + i) * tile_surface->pitch;
         for (int j = left - x; j < right - x; j++) {
             if (x + j < 0 || x + j >= tile_surface->width) continue;
 
-            uint32_t intensity;
-            if (is_mono) {
-                int byte_index = j / 8;
-                int bit_index = 7 - (j % 8);
-                uint8_t byte_val = bitmap->buffer[i * bitmap->pitch + byte_index];
-                intensity = (byte_val & (1 << bit_index)) ? 255 : 0;
-            } else {
-                intensity = bitmap->buffer[i * bitmap->pitch + j];
-            }
+            uint32_t intensity = tile_glyph_sample_pixel(bitmap, i, j);
 
             if (intensity > 0) {
                 uint8_t* p = (uint8_t*)(row_pixels + (x + j) * 4);

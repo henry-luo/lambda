@@ -1811,6 +1811,5 @@ static void escape_xml_text(const char* text, StrBuf* buf) {
 
 // Math Rendering Functions for SVG
 // ============================================================================
-// NOTE: MathBox rendering has been removed. Use RDT_VIEW_TEXNODE for math rendering.
-// The old MathBox pipeline (RDT_VIEW_MATH) is deprecated.
+// NOTE: MathBox rendering has been removed.
 // ============================================================================
