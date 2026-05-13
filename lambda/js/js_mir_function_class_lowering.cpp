@@ -1344,12 +1344,14 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     int saved_scope_env_slot_count = mt->scope_env_slot_count;
     int saved_func_index = mt->current_func_index;
     MIR_reg_t saved_eval_completion_reg = mt->eval_completion_reg;
+    MIR_reg_t saved_eval_local_frame_reg = mt->eval_local_frame_reg;
 
     // Set current function index for scope env lookups
     mt->current_func_index = (int)(fc - mt->func_entries);
     mt->scope_env_reg = 0;
     mt->scope_env_slot_count = 0;
     mt->eval_completion_reg = 0;  // disable completion tracking in function bodies
+    mt->eval_local_frame_reg = 0;
     mt->last_closure_has_env = false;  // clear stale closure env from previous function
 
     // Determine if this function is a class method and set current_class
@@ -1380,6 +1382,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     mt->func_except_label = 0;  // reset for this function
 
     jm_push_scope(mt);
+    mt->eval_local_frame_reg = jm_new_reg(mt, "eval_local_frame", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, mt->eval_local_frame_reg),
+        MIR_new_int_op(mt->ctx, 0)));
 
     {
         struct hashmap* dstr_param_names = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
@@ -2386,6 +2392,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     val = jm_call_1(mt, "js_promise_resolve", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
                 }
+                jm_emit_eval_local_pop_if_needed(mt);
                 jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, val)));
                 // Emit exception propagation landing pad if any exception checks
                 // were emitted during expression transpilation (e.g. runtime calls).
@@ -2406,6 +2413,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                         MIR_reg_t error = jm_call_0(mt, "js_clear_exception", MIR_T_I64);
                         MIR_reg_t rejected = jm_call_1(mt, "js_promise_reject", MIR_T_I64,
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, error));
+                        jm_emit_eval_local_pop_if_needed(mt);
                         jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, rejected)));
                     }
                     if (async_end_label) {
@@ -2445,6 +2453,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     MIR_new_label_op(mt->ctx, async_no_return_label),
                     MIR_new_reg_op(mt->ctx, async_has_return_reg)));
                 // Has return: value already wrapped in Promise.resolve by return handler
+                jm_emit_eval_local_pop_if_needed(mt);
                 jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1,
                     MIR_new_reg_op(mt->ctx, async_return_val_reg)));
 
@@ -2456,6 +2465,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
                 MIR_reg_t resolved = jm_call_1(mt, "js_promise_resolve", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, undef_val));
+                jm_emit_eval_local_pop_if_needed(mt);
                 jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, resolved)));
             }
 
@@ -2463,6 +2473,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         } else {
             // v18: Implicit return undefined (not null) at end of function
             MIR_reg_t undef_val = jm_emit_undefined(mt);
+            jm_emit_eval_local_pop_if_needed(mt);
             jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, undef_val)));
         }
     }
@@ -2473,6 +2484,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     if (mt->func_except_label != 0) {
         jm_emit_label(mt, mt->func_except_label);
         MIR_reg_t exc_ret = jm_emit_null(mt);
+        jm_emit_eval_local_pop_if_needed(mt);
         jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, exc_ret)));
     }
 
@@ -2492,6 +2504,7 @@ finish_boxed:
     mt->scope_env_slot_count = saved_scope_env_slot_count;
     mt->current_func_index = saved_func_index;
     mt->eval_completion_reg = saved_eval_completion_reg;
+    mt->eval_local_frame_reg = saved_eval_local_frame_reg;
 }
 
 // ============================================================================

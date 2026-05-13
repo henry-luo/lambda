@@ -848,6 +848,10 @@ extern int64_t js_eval_env_has_binding(Item key);
 extern int64_t js_eval_env_is_active(void);
 extern void js_eval_env_track_global_binding(Item key);
 extern void js_eval_env_pop_frame(void);
+extern void js_eval_local_push_frame(void);
+extern void js_eval_local_pop_frame(void);
+extern Item js_eval_local_get_binding_or_fallback(Item key, Item fallback);
+extern void js_eval_local_export_var(Item key, Item value);
 extern void js_check_unresolved_capture(Item value, const char* name, int64_t len);
 extern Item js_resolve_unresolved_binding(Item value, const char* name, int64_t len, int64_t in_typeof);
 extern int64_t js_262_eval_script_is_active(void);
@@ -1657,6 +1661,10 @@ JitImport jit_runtime_imports[] = {
     {"js_eval_env_is_active", FPTR(js_eval_env_is_active)},
     {"js_eval_env_track_global_binding", FPTR(js_eval_env_track_global_binding)},
     {"js_eval_env_pop_frame", FPTR(js_eval_env_pop_frame)},
+    {"js_eval_local_push_frame", FPTR(js_eval_local_push_frame)},
+    {"js_eval_local_pop_frame", FPTR(js_eval_local_pop_frame)},
+    {"js_eval_local_get_binding_or_fallback", FPTR(js_eval_local_get_binding_or_fallback)},
+    {"js_eval_local_export_var", FPTR(js_eval_local_export_var)},
     {"js_check_unresolved_capture", FPTR(js_check_unresolved_capture)},
     {"js_resolve_unresolved_binding", FPTR(js_resolve_unresolved_binding)},
     {"js_262_eval_script_is_active", FPTR(js_262_eval_script_is_active)},

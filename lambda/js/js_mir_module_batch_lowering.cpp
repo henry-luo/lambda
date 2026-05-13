@@ -4250,6 +4250,9 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             jm_call_void_2(mt, "js_set_global_property",
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, val_reg));
+            jm_call_void_2(mt, "js_eval_local_export_var",
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, val_reg));
             log_debug("js-mir: eval export var '%s' to globalThis", js_name);
         }
     }
