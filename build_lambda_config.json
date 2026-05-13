@@ -2309,6 +2309,27 @@
                         "icon": "📕"
                     },
                     {
+                        "source": "test_pdf_render_visual_gtest.cpp",
+                        "name": "PDF Render Visual Tests",
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc",
+                            "gif",
+                            "png",
+                            "turbojpeg",
+                            "zlib"
+                        ],
+                        "additional_sources": [
+                            "lib/image.c"
+                        ],
+                        "binary": "test_pdf_render_visual_gtest.exe",
+                        "icon": "📕"
+                    },
+                    {
                         "source": "test_yaml_suite_gtest.cpp",
                         "name": "YAML Test Suite Conformance",
                         "dependencies": [
