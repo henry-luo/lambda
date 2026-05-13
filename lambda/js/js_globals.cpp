@@ -13312,6 +13312,32 @@ extern "C" Item js_get_with_binding_or_fallback(Item key, Item fallback) {
     return found ? result : fallback;
 }
 
+extern "C" int64_t js_capture_with_binding(Item key) {
+    js_last_with_binding_valid = false;
+    if (js_with_stack_depth <= 0) return 0;
+    for (int i = js_with_stack_depth - 1; i >= 0; i--) {
+        Item scope_obj = js_with_stack[i];
+        if (get_type_id(scope_obj) != LMD_TYPE_MAP) continue;
+        if (it2b(js_in(key, scope_obj))) {
+            if (js_check_exception()) return 1;
+            Item unscopables_sym = (Item){.item = i2it(-(int64_t)(11 + JS_SYMBOL_BASE))};
+            Item unscopables = js_property_get(scope_obj, unscopables_sym);
+            if (js_check_exception()) return 1;
+            if (get_type_id(unscopables) == LMD_TYPE_MAP) {
+                Item blocked = js_property_get(unscopables, key);
+                if (js_check_exception()) return 1;
+                if (js_is_truthy(blocked)) continue;
+            }
+            js_last_with_binding_scope = scope_obj;
+            js_last_with_binding_key = key;
+            js_last_with_binding_valid = true;
+            return 1;
+        }
+        if (js_check_exception()) return 1;
+    }
+    return 0;
+}
+
 extern "C" int64_t js_set_last_with_binding_if_valid(Item key, Item value, int64_t strict) {
     if (!js_last_with_binding_valid || !js_with_binding_key_same(js_last_with_binding_key, key)) {
         return 0;
