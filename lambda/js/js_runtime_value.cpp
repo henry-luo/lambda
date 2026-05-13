@@ -258,7 +258,7 @@ extern "C" Item js_to_numeric(Item value) {
 // helper: apply ToNumeric only when operand is an object type
 static inline Item js_numeric_operand(Item val) {
     TypeId t = get_type_id(val);
-    if (t == LMD_TYPE_MAP || t == LMD_TYPE_ARRAY || t == LMD_TYPE_FUNC) return js_to_numeric(val);
+    if (t == LMD_TYPE_MAP || t == LMD_TYPE_ARRAY || t == LMD_TYPE_FUNC || t == LMD_TYPE_ELEMENT) return js_to_numeric(val);
     return val;
 }
 
@@ -1236,7 +1236,7 @@ extern "C" Item js_add(Item left, Item right) {
 
 extern "C" Item js_subtract(Item left, Item right) {
     left = js_numeric_operand(left); if (js_exception_pending) return ItemNull;
-    right = js_numeric_operand(right);
+    right = js_numeric_operand(right); if (js_exception_pending) return ItemNull;
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
@@ -1249,7 +1249,7 @@ extern "C" Item js_subtract(Item left, Item right) {
 
 extern "C" Item js_multiply(Item left, Item right) {
     left = js_numeric_operand(left); if (js_exception_pending) return ItemNull;
-    right = js_numeric_operand(right);
+    right = js_numeric_operand(right); if (js_exception_pending) return ItemNull;
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
@@ -1262,7 +1262,7 @@ extern "C" Item js_multiply(Item left, Item right) {
 
 extern "C" Item js_divide(Item left, Item right) {
     left = js_numeric_operand(left); if (js_exception_pending) return ItemNull;
-    right = js_numeric_operand(right);
+    right = js_numeric_operand(right); if (js_exception_pending) return ItemNull;
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
@@ -1276,7 +1276,7 @@ extern "C" Item js_divide(Item left, Item right) {
 
 extern "C" Item js_modulo(Item left, Item right) {
     left = js_numeric_operand(left); if (js_exception_pending) return ItemNull;
-    right = js_numeric_operand(right);
+    right = js_numeric_operand(right); if (js_exception_pending) return ItemNull;
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
@@ -1290,7 +1290,7 @@ extern "C" Item js_modulo(Item left, Item right) {
 
 extern "C" Item js_power(Item left, Item right) {
     left = js_numeric_operand(left); if (js_exception_pending) return ItemNull;
-    right = js_numeric_operand(right);
+    right = js_numeric_operand(right); if (js_exception_pending) return ItemNull;
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
@@ -1665,7 +1665,7 @@ extern "C" int64_t js_double_to_int32(double d) {
 
 extern "C" Item js_bitwise_and(Item left, Item right) {
     left = js_numeric_operand(left); if (js_exception_pending) return ItemNull;
-    right = js_numeric_operand(right);
+    right = js_numeric_operand(right); if (js_exception_pending) return ItemNull;
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
@@ -1678,7 +1678,7 @@ extern "C" Item js_bitwise_and(Item left, Item right) {
 
 extern "C" Item js_bitwise_or(Item left, Item right) {
     left = js_numeric_operand(left); if (js_exception_pending) return ItemNull;
-    right = js_numeric_operand(right);
+    right = js_numeric_operand(right); if (js_exception_pending) return ItemNull;
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
@@ -1691,7 +1691,7 @@ extern "C" Item js_bitwise_or(Item left, Item right) {
 
 extern "C" Item js_bitwise_xor(Item left, Item right) {
     left = js_numeric_operand(left); if (js_exception_pending) return ItemNull;
-    right = js_numeric_operand(right);
+    right = js_numeric_operand(right); if (js_exception_pending) return ItemNull;
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
@@ -1714,7 +1714,7 @@ extern "C" Item js_bitwise_not(Item operand) {
 
 extern "C" Item js_left_shift(Item left, Item right) {
     left = js_numeric_operand(left); if (js_exception_pending) return ItemNull;
-    right = js_numeric_operand(right);
+    right = js_numeric_operand(right); if (js_exception_pending) return ItemNull;
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
@@ -1727,7 +1727,7 @@ extern "C" Item js_left_shift(Item left, Item right) {
 
 extern "C" Item js_right_shift(Item left, Item right) {
     left = js_numeric_operand(left); if (js_exception_pending) return ItemNull;
-    right = js_numeric_operand(right);
+    right = js_numeric_operand(right); if (js_exception_pending) return ItemNull;
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
@@ -1739,6 +1739,8 @@ extern "C" Item js_right_shift(Item left, Item right) {
 }
 
 extern "C" Item js_unsigned_right_shift(Item left, Item right) {
+    left = js_numeric_operand(left); if (js_exception_pending) return ItemNull;
+    right = js_numeric_operand(right); if (js_exception_pending) return ItemNull;
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     // ES spec: BigInt does not support unsigned right shift (>>>)
     if (js_is_bigint(left) || js_is_bigint(right)) {

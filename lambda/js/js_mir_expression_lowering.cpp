@@ -22,6 +22,12 @@ static MIR_reg_t jm_emit_member_key(JsMirTranspiler* mt, JsMemberNode* mem) {
     return jm_transpile_box_item(mt, mem->property);
 }
 
+static MIR_reg_t jm_emit_current_this(JsMirTranspiler* mt) {
+    JsMirVarEntry* var = jm_find_var(mt, "_js_this");
+    if (var) return var->reg;
+    return jm_call_0(mt, "js_get_this", MIR_T_I64);
+}
+
 JsMirReference jm_emit_reference(JsMirTranspiler* mt, JsAstNode* node) {
     JsMirReference ref;
     ref.kind = JS_MIR_REF_INVALID;
@@ -43,7 +49,7 @@ JsMirReference jm_emit_reference(JsMirTranspiler* mt, JsAstNode* node) {
 
         if (is_super) {
             ref.kind = JS_MIR_REF_SUPER_PROPERTY;
-            ref.base_reg = jm_call_0(mt, "js_get_this", MIR_T_I64);
+            ref.base_reg = jm_emit_current_this(mt);
             ref.key_reg = jm_emit_member_key(mt, mem);
             return ref;
         }
@@ -209,15 +215,13 @@ MIR_reg_t jm_transpile_literal(JsMirTranspiler* mt, JsLiteralNode* lit) {
 MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
     // Handle 'this' keyword: use captured _js_this if in arrow function, else js_get_this()
     if (id->name->len == 4 && strncmp(id->name->chars, "this", 4) == 0) {
-        JsMirVarEntry* var = jm_find_var(mt, "_js_this");
-        if (var) return var->reg;  // arrow function captured 'this'
-        return jm_call_0(mt, "js_get_this", MIR_T_I64);
+        return jm_emit_current_this(mt);
     }
 
     // Handle 'super' keyword: returns current 'this' (super property access
     // is resolved through prototype chain at runtime via js_property_get)
     if (id->name->len == 5 && strncmp(id->name->chars, "super", 5) == 0) {
-        return jm_call_0(mt, "js_get_this", MIR_T_I64);
+        return jm_emit_current_this(mt);
     }
 
     // v18q: Handle 'arguments' keyword: return the function's arguments array-like object
@@ -797,11 +801,14 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
         case JS_OP_BIT_LSHIFT: {
             MIR_reg_t li = jm_transpile_as_native(mt, bin->left, left_type, LMD_TYPE_INT);
             MIR_reg_t ri = jm_transpile_as_native(mt, bin->right, right_type, LMD_TYPE_INT);
+            MIR_reg_t rcount = jm_new_reg(mt, "lsh_count", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
+                MIR_new_reg_op(mt->ctx, rcount), MIR_new_reg_op(mt->ctx, ri), MIR_new_int_op(mt->ctx, 0x1F)));
             // JS: ToInt32(li) << (ToUint32(ri) & 0x1F), result is signed 32-bit
             MIR_reg_t r = jm_new_reg(mt, "lsh", MIR_T_I64);
             MIR_reg_t r32 = jm_new_reg(mt, "lsh32", MIR_T_I64);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_LSH,
-                MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, li), MIR_new_reg_op(mt->ctx, ri)));
+                MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, li), MIR_new_reg_op(mt->ctx, rcount)));
             // Sign-extend result to 32-bit: (r << 32) >> 32
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_LSH,
                 MIR_new_reg_op(mt->ctx, r32), MIR_new_reg_op(mt->ctx, r), MIR_new_int_op(mt->ctx, 32)));
@@ -812,6 +819,9 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
         case JS_OP_BIT_RSHIFT: {
             MIR_reg_t li = jm_transpile_as_native(mt, bin->left, left_type, LMD_TYPE_INT);
             MIR_reg_t ri = jm_transpile_as_native(mt, bin->right, right_type, LMD_TYPE_INT);
+            MIR_reg_t rcount = jm_new_reg(mt, "rsh_count", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
+                MIR_new_reg_op(mt->ctx, rcount), MIR_new_reg_op(mt->ctx, ri), MIR_new_int_op(mt->ctx, 0x1F)));
             // JS: ToInt32(li) >> (ToUint32(ri) & 0x1F) — sign-extend li to 32-bit first
             MIR_reg_t li32 = jm_new_reg(mt, "rli32", MIR_T_I64);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_LSH,
@@ -820,12 +830,15 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
                 MIR_new_reg_op(mt->ctx, li32), MIR_new_reg_op(mt->ctx, li32), MIR_new_int_op(mt->ctx, 32)));
             MIR_reg_t r = jm_new_reg(mt, "rsh", MIR_T_I64);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_RSH,
-                MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, li32), MIR_new_reg_op(mt->ctx, ri)));
+                MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, li32), MIR_new_reg_op(mt->ctx, rcount)));
             return r;
         }
         case JS_OP_BIT_URSHIFT: {
             MIR_reg_t li = jm_transpile_as_native(mt, bin->left, left_type, LMD_TYPE_INT);
             MIR_reg_t ri = jm_transpile_as_native(mt, bin->right, right_type, LMD_TYPE_INT);
+            MIR_reg_t rcount = jm_new_reg(mt, "ursh_count", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
+                MIR_new_reg_op(mt->ctx, rcount), MIR_new_reg_op(mt->ctx, ri), MIR_new_int_op(mt->ctx, 0x1F)));
             // JS: ToUint32(li) >>> (ToUint32(ri) & 0x1F) — mask to 32-bit unsigned first
             MIR_reg_t li32 = jm_new_reg(mt, "uli32", MIR_T_I64);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
@@ -833,7 +846,7 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
                 MIR_new_int_op(mt->ctx, (int64_t)0xFFFFFFFFLL)));
             MIR_reg_t r = jm_new_reg(mt, "ursh", MIR_T_I64);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_URSH,
-                MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, li32), MIR_new_reg_op(mt->ctx, ri)));
+                MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, li32), MIR_new_reg_op(mt->ctx, rcount)));
             return r;
         }
         default:
@@ -1174,7 +1187,6 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
     case JS_OP_SUB: {
         TypeId op_type = jm_get_effective_type(mt, un->operand);
         if (op_type == LMD_TYPE_INT) {
-            // v18p: literal 0 must produce float -0.0 per ES spec
             if (un->operand && un->operand->node_type == JS_AST_NODE_LITERAL) {
                 JsLiteralNode* lit = (JsLiteralNode*)un->operand;
                 if (lit->literal_type == JS_LITERAL_NUMBER && lit->value.number_value == 0.0) {
@@ -1184,12 +1196,14 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                         MIR_new_double_op(mt->ctx, -0.0)));
                     return r;
                 }
+                MIR_reg_t val = jm_transpile_as_native(mt, un->operand, op_type, LMD_TYPE_INT);
+                MIR_reg_t r = jm_new_reg(mt, "neg", MIR_T_I64);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_NEG,
+                    MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, val)));
+                return r;
             }
-            MIR_reg_t val = jm_transpile_as_native(mt, un->operand, op_type, LMD_TYPE_INT);
-            MIR_reg_t r = jm_new_reg(mt, "neg", MIR_T_I64);
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_NEG,
-                MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, val)));
-            return r;
+            return jm_call_1(mt, "js_unary_minus", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, jm_transpile_box_item(mt, un->operand)));
         }
         if (op_type == LMD_TYPE_FLOAT) {
             MIR_reg_t val = jm_transpile_as_native(mt, un->operand, op_type, LMD_TYPE_FLOAT);
@@ -3446,7 +3460,7 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
         if (member->object && member->object->node_type == JS_AST_NODE_IDENTIFIER) {
             JsIdentifierNode* obj_id = (JsIdentifierNode*)member->object;
             if (obj_id->name && obj_id->name->len == 5 && strncmp(obj_id->name->chars, "super", 5) == 0) {
-                MIR_reg_t this_val = jm_call_0(mt, "js_get_this", MIR_T_I64);
+                MIR_reg_t this_val = jm_emit_current_this(mt);
                 MIR_reg_t key;
                 if (member->computed) {
                     key = jm_transpile_box_item(mt, member->property);
@@ -4764,7 +4778,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                         parent = parent->superclass;
                     }
                     if (found_method && found_method->fc && found_method->fc->func_item) {
-                        MIR_reg_t this_val = jm_call_0(mt, "js_get_this", MIR_T_I64);
+                        MIR_reg_t this_val = jm_emit_current_this(mt);
                         MIR_reg_t fn_item = jm_call_2(mt, "js_new_function", MIR_T_I64,
                             MIR_T_I64, MIR_new_ref_op(mt->ctx, found_method->fc->func_item),
                             MIR_T_I64, MIR_new_int_op(mt->ctx, found_method->param_count));
@@ -4781,7 +4795,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 }
                 // Fallback for dynamic class cases and object literal methods:
                 // resolve on the runtime prototype chain, then call with this as receiver.
-                MIR_reg_t this_val = jm_call_0(mt, "js_get_this", MIR_T_I64);
+                MIR_reg_t this_val = jm_emit_current_this(mt);
                 MIR_reg_t key_reg = jm_box_string_literal(mt, prop->name->chars, (int)prop->name->len);
                 MIR_reg_t fn_item = jm_call_2(mt, "js_super_property_get", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
@@ -4847,7 +4861,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                             parent = parent->superclass;
                         }
                         if (found_method && found_method->fc && found_method->fc->func_item) {
-                            MIR_reg_t this_val = jm_call_0(mt, "js_get_this", MIR_T_I64);
+                            MIR_reg_t this_val = jm_emit_current_this(mt);
                             MIR_reg_t fn_item = jm_call_2(mt, "js_new_function", MIR_T_I64,
                                 MIR_T_I64, MIR_new_ref_op(mt->ctx, found_method->fc->func_item),
                                 MIR_T_I64, MIR_new_int_op(mt->ctx, found_method->param_count));
@@ -4874,7 +4888,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 if (!super_computed_handled && mt->current_class && !mt->current_class->superclass) {
                     // Builtin parent: use 2-level prototype skip
                     log_debug("js-mir: super[computed]() — builtin parent, using js_super_instance_method_get");
-                    MIR_reg_t this_val = jm_call_0(mt, "js_get_this", MIR_T_I64);
+                    MIR_reg_t this_val = jm_emit_current_this(mt);
                     MIR_reg_t key_val = jm_transpile_box_item(mt, m->property);
                     MIR_reg_t fn_item = jm_call_2(mt, "js_super_instance_method_get", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
@@ -5897,7 +5911,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     strncmp(obj_id->name->chars, "super", 5) == 0;
             }
             if (is_super_computed_call) {
-                MIR_reg_t recv = jm_call_0(mt, "js_get_this", MIR_T_I64);
+                MIR_reg_t recv = jm_emit_current_this(mt);
                 int recv_key_spill = -1;
                 if (mt->in_generator && jm_has_yield(m->property)) {
                     recv_key_spill = jm_gen_spill_save(mt, recv);

@@ -1435,7 +1435,8 @@ Item bigint_left_shift(Item a, Item b) {
     uint32_t status = 0;
     mpd_ssize_t shift = mpd_qget_ssize(mb, &status);
     if (status & MPD_Invalid_operation) return ItemError;
-    if (shift < 0 || shift > 100000) return ItemError;
+    if (shift < 0) return bigint_right_shift(a, bigint_neg(b));
+    if (shift > 100000) return ItemError;
     // x << y = x * 2^y
     mpd_t* two = mpd_new(ctx);
     mpd_t* shift_mpd = mpd_new(ctx);
@@ -1462,7 +1463,8 @@ Item bigint_right_shift(Item a, Item b) {
     uint32_t status = 0;
     mpd_ssize_t shift = mpd_qget_ssize(mb, &status);
     if (status & MPD_Invalid_operation) return ItemError;
-    if (shift < 0 || shift > 100000) return ItemError;
+    if (shift < 0) return bigint_left_shift(a, bigint_neg(b));
+    if (shift > 100000) return ItemError;
     // x >> y = floor(x / 2^y)
     mpd_t* two = mpd_new(ctx);
     mpd_t* shift_mpd = mpd_new(ctx);
