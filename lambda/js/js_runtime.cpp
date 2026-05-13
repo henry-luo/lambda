@@ -132,6 +132,29 @@ extern "C" Item js_proxy_get_target(Item obj) {
     return obj;
 }
 
+extern "C" bool js_proxy_has_callable_target(Item obj) {
+    int depth = 0;
+    while (js_is_proxy(obj) && depth < 32) {
+        JsProxyData* pd = js_get_proxy_data(obj);
+        if (!pd) return false;
+        obj = PD_TARGET(pd);
+        depth++;
+    }
+    TypeId type = get_type_id(obj);
+    if (type == LMD_TYPE_FUNC) return true;
+    if (type == LMD_TYPE_MAP) {
+        bool own_ip = false;
+        js_map_get_fast_ext(obj.map, "__instance_proto__", 18, &own_ip);
+        if (own_ip) return true;
+        if (js_class_id(obj) == JS_CLASS_FUNCTION) {
+            bool own_proto = false;
+            js_map_get_fast_ext(obj.map, "__is_proto__", 12, &own_proto);
+            if (own_proto) return true;
+        }
+    }
+    return false;
+}
+
 // helper: check if object is extensible (returns C bool)
 static bool js_is_extensible(Item obj) {
     return it2b(js_to_boolean(js_object_is_extensible(obj)));
@@ -2937,9 +2960,11 @@ extern "C" Item js_property_get(Item object, Item key) {
                 // - builtin methods (builtin_id > 0): Array.prototype.map, etc.
                 // - arrow functions
                 // - class methods (concise methods are not constructors per ES spec)
+                // Generator methods are non-constructors but still expose .prototype.
                 // - Proxy (ES spec: Proxy has no prototype property)
                 if (fn->builtin_id == -2 || fn->builtin_id > 0 ||
-                    (fn->flags & (JS_FUNC_FLAG_ARROW | JS_FUNC_FLAG_METHOD)) ||
+                    (fn->flags & JS_FUNC_FLAG_ARROW) ||
+                    ((fn->flags & JS_FUNC_FLAG_METHOD) && !(fn->flags & JS_FUNC_FLAG_GENERATOR)) ||
                     (fn->name && fn->name->len == 5 && strncmp(fn->name->chars, "Proxy", 5) == 0)) return make_js_undefined();
                 if (fn->prototype.item == ItemNull.item) {
                     fn->prototype = js_new_object();
@@ -3220,6 +3245,11 @@ extern "C" Item js_property_get(Item object, Item key) {
                         // v29: Populate String.prototype methods for test262 compliance
                         if (nl == 6 && strncmp(nm, "String", 6) == 0) {
                             js_populate_builtin_prototype_methods(fn->prototype, nm, nl);
+                            Item length_key = (Item){.item = s2it(heap_create_name("length", 6))};
+                            js_property_set(fn->prototype, length_key, (Item){.item = i2it(0)});
+                            js_mark_non_writable(fn->prototype, length_key);
+                            js_mark_non_enumerable(fn->prototype, length_key);
+                            js_mark_non_configurable(fn->prototype, length_key);
                             // Symbol.iterator
                             Item si_key = (Item){.item = s2it(heap_create_name("__sym_1", 7))};
                             Item si_fn = js_get_or_create_builtin(JS_BUILTIN_STRING_ITER, "[Symbol.iterator]", 0);
@@ -3450,6 +3480,12 @@ extern "C" Item js_property_get(Item object, Item key) {
                 if (str_key->len == 8 && strncmp(str_key->chars, "toString", 8) == 0) {
                     return js_get_or_create_builtin(JS_BUILTIN_SYM_TO_STRING, "toString", 0);
                 }
+                if (str_key->len == 7 && strncmp(str_key->chars, "valueOf", 7) == 0) {
+                    return js_get_or_create_builtin(JS_BUILTIN_OBJ_VALUE_OF, "valueOf", 0);
+                }
+                Item object_builtin = js_lookup_builtin_method(LMD_TYPE_MAP, str_key->chars, str_key->len);
+                if (object_builtin.item != ItemNull.item) return object_builtin;
+                return make_js_undefined();
             }
         }
 
@@ -3983,6 +4019,12 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                         object, str_key->chars, (int)str_key->len, value, recv);
                     if (st == JS_SET_DISPATCHED) return value;
                     if (st == JS_SET_NO_SETTER) {
+                        if (str_key->len > 10 && strncmp(str_key->chars, "__private_", 10) == 0) {
+                            char msg[256];
+                            snprintf(msg, sizeof(msg), "'#%.*s' was defined without a setter",
+                                (int)str_key->len - 10, str_key->chars + 10);
+                            return js_throw_type_error(msg);
+                        }
                         // Accessor with no callable setter: strict TypeError, sloppy no-op.
                         js_strict_throw_property_error("set property which has only a getter on",
                                                        str_key->chars, (int)str_key->len);
@@ -3996,6 +4038,12 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                      (str_key->len == 6 && strncmp(str_key->chars, "length", 6) == 0));
                 if (!has_own_before_set && !class_intrinsic_define &&
                     js_proto_chain_has_nonwritable_data(object, str_key->chars, (int)str_key->len)) {
+                    if (str_key->len > 10 && strncmp(str_key->chars, "__private_", 10) == 0) {
+                        char msg[256];
+                        snprintf(msg, sizeof(msg), "Cannot assign to private method '#%.*s'",
+                            (int)str_key->len - 10, str_key->chars + 10);
+                        return js_throw_type_error(msg);
+                    }
                     js_strict_throw_property_error("assign to read only", str_key->chars, (int)str_key->len);
                     return value;
                 }
@@ -8182,6 +8230,12 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             js_throw_type_error("RegExp.prototype.compile called on incompatible receiver");
             return make_js_undefined();
         }
+        bool this_has_rd = false;
+        js_map_get_fast(this_val.map, "__rd", 4, &this_has_rd);
+        if (!this_has_rd) {
+            js_throw_type_error("RegExp.prototype.compile called on incompatible receiver");
+            return make_js_undefined();
+        }
         // ES B.2.5.1 step 3: If pattern is a RegExp and flags is not undefined, throw TypeError
         if (get_type_id(arg0) == LMD_TYPE_MAP) {
             bool has_rd = false;
@@ -8257,10 +8311,21 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             Item fk = (Item){.item = s2it(heap_create_name(flag_props[fp]))};
             js_property_set(this_val, fk, js_property_get(new_regex, fk));
         }
-        // Reset lastIndex to 0
-        Item li_key = (Item){.item = s2it(heap_create_name("lastIndex", 9))};
-        js_property_set(this_val, li_key, (Item){.item = i2it(0)});
         js_skip_accessor_dispatch = _prev_skip_accessor_dispatch;
+        // Reset lastIndex to 0. RegExpInitialize uses Throw=true here, so this
+        // must fail even when the caller's source is sloppy mode.
+        Item li_key = (Item){.item = s2it(heap_create_name("lastIndex", 9))};
+        bool last_index_non_writable = js_prop_attrs_fast_path(this_val, "lastIndex", 9, JSPD_NON_WRITABLE) == 0;
+        if (!last_index_non_writable) {
+            bool nw_found = false;
+            Item nw_val = js_map_get_fast(this_val.map, "__nw_lastIndex", 14, &nw_found);
+            last_index_non_writable = nw_found && nw_val.item != JS_DELETED_SENTINEL_VAL && js_is_truthy(nw_val);
+        }
+        if (last_index_non_writable) {
+            js_throw_type_error("Cannot assign to read only property 'lastIndex' of object");
+            return make_js_undefined();
+        }
+        js_property_set(this_val, li_key, (Item){.item = i2it(0)});
         return this_val;
     }
 
@@ -10258,6 +10323,87 @@ static bool js_regex_parse_simple_fast_flags(const char* flags, int flags_len,
     return true;
 }
 
+static bool js_regex_is_re2_literal_meta(char ch, bool in_class) {
+    if (in_class) {
+        return ch == '\\' || ch == ']' || ch == '-' || ch == '^';
+    }
+    switch (ch) {
+    case '\\': case '.': case '^': case '$': case '|': case '(': case ')':
+    case '[': case ']': case '{': case '}': case '*': case '+': case '?':
+        return true;
+    default:
+        return false;
+    }
+}
+
+static void js_regex_append_literal_byte(std::string& out, unsigned char ch, bool in_class) {
+    if (ch < 0x80 && js_regex_is_re2_literal_meta((char)ch, in_class)) {
+        out += '\\';
+    }
+    out += (char)ch;
+}
+
+static int js_regex_utf8_sequence_len(unsigned char ch) {
+    if (ch < 0x80) return 1;
+    if ((ch & 0xE0) == 0xC0) return 2;
+    if ((ch & 0xF0) == 0xE0) return 3;
+    if ((ch & 0xF8) == 0xF0) return 4;
+    return 1;
+}
+
+static int js_regex_append_legacy_literal_escape(std::string& out, const char* pattern,
+        int pattern_len, int escaped_pos, bool in_class) {
+    if (escaped_pos >= pattern_len) return escaped_pos;
+    unsigned char first = (unsigned char)pattern[escaped_pos];
+    int len = js_regex_utf8_sequence_len(first);
+    if (escaped_pos + len > pattern_len) len = 1;
+    for (int j = 0; j < len; j++) {
+        js_regex_append_literal_byte(out, (unsigned char)pattern[escaped_pos + j], in_class);
+    }
+    return escaped_pos + len - 1;
+}
+
+static bool js_regex_is_legacy_identity_escape(char next) {
+    if (next == 'p' || next == 'P') return true;
+    if ((next >= 'A' && next <= 'Z') || (next >= 'a' && next <= 'z')) {
+        switch (next) {
+        case 'b': case 'B': case 'c': case 'd': case 'D': case 'f': case 'n':
+        case 'r': case 's': case 'S': case 't': case 'u': case 'v': case 'w':
+        case 'W': case 'x':
+            return false;
+        default:
+            return true;
+        }
+    }
+    return (unsigned char)next >= 0x80;
+}
+
+static int js_regex_count_capture_groups_before(const char* pattern, int pattern_len, int limit) {
+    int count = 0;
+    int bracket_depth = 0;
+    for (int pos = 0; pos < limit && pos < pattern_len; pos++) {
+        if (pattern[pos] == '\\' && pos + 1 < limit) { pos++; continue; }
+        if (pattern[pos] == '[') {
+            bracket_depth++;
+            continue;
+        }
+        if (pattern[pos] == ']' && bracket_depth > 0) {
+            bracket_depth--;
+            continue;
+        }
+        if (bracket_depth > 0 || pattern[pos] != '(' || pos + 1 >= limit) continue;
+        if (pattern[pos + 1] != '?') {
+            count++;
+        } else if (pos + 3 < limit && pattern[pos + 2] == '<' &&
+                   pattern[pos + 3] != '=' && pattern[pos + 3] != '!') {
+            count++;
+        } else if (pos + 4 < limit && pattern[pos + 2] == 'P' && pattern[pos + 3] == '<') {
+            count++;
+        }
+    }
+    return count;
+}
+
 extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char* flags, int flags_len) {
     char* literal_buf = NULL;
     int literal_len = 0;
@@ -10545,15 +10691,28 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
                 i++;
                 continue;
             }
+            bool legacy_non_unicode = !compile_info.unicode && !compile_info.unicode_sets;
             // Handle backreferences \1-\9: passed through for js_regex_wrapper to handle
             // The wrapper converts them to capture groups with post-filter equality checks
             // Annex B: \N is an identity escape if N > total capture groups
             if (next >= '1' && next <= '9' && bracket_depth == 0) {
                 int ref_num = next - '0';
                 if (ref_num > total_groups) {
-                    // identity escape: treat \N as literal character N
-                    processed_pattern += next;
+                    if (legacy_non_unicode && next <= '7') {
+                        char buf[10];
+                        snprintf(buf, sizeof(buf), "\\x{%c}", next);
+                        processed_pattern += buf;
+                    } else {
+                        // identity escape: treat \8/\9 as literal characters in legacy mode
+                        processed_pattern += next;
+                    }
                 } else {
+                    int groups_before_ref = js_regex_count_capture_groups_before(effective_pattern,
+                        effective_pattern_len, i);
+                    if (ref_num > groups_before_ref) {
+                        i++;
+                        continue;
+                    }
                     processed_pattern += '\\';
                     processed_pattern += next;
                 }
@@ -10565,14 +10724,26 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
             // RE2 doesn't support \c, so translate to \x{NN}.
             // Annex B §B.1.4: inside a character class, \cN where N is a decimal digit or '_'
             // is also accepted (yields N & 0x1F). For now, only handle the spec-mandated letter form.
-            if (next == 'c' && i + 2 < effective_pattern_len) {
-                char cl = effective_pattern[i + 2];
-                if ((cl >= 'A' && cl <= 'Z') || (cl >= 'a' && cl <= 'z')) {
+            if (next == 'c') {
+                char cl = (i + 2 < effective_pattern_len) ? effective_pattern[i + 2] : '\0';
+                if (i + 2 < effective_pattern_len &&
+                    ((cl >= 'A' && cl <= 'Z') || (cl >= 'a' && cl <= 'z'))) {
                     char buf[10];
                     int cp = cl & 0x1F;
                     snprintf(buf, sizeof(buf), "\\x{%X}", cp);
                     processed_pattern += buf;
                     i += 2; // consume \c and the letter (loop will i++)
+                    continue;
+                }
+                if (legacy_non_unicode) {
+                    js_regex_append_literal_byte(processed_pattern, '\\', bracket_depth > 0);
+                    js_regex_append_literal_byte(processed_pattern, 'c', bracket_depth > 0);
+                    if (i + 2 < effective_pattern_len && !(bracket_depth > 0 && effective_pattern[i + 2] == ']')) {
+                        i = js_regex_append_legacy_literal_escape(processed_pattern,
+                            effective_pattern, effective_pattern_len, i + 2, bracket_depth > 0);
+                    } else {
+                        i++;
+                    }
                     continue;
                 }
             }
@@ -10608,6 +10779,34 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
                         continue;
                     }
                 }
+                if (legacy_non_unicode) {
+                    js_regex_append_literal_byte(processed_pattern, 'u', bracket_depth > 0);
+                    i++;
+                    continue;
+                }
+            }
+            if (next == 'x') {
+                bool complete_hex = false;
+                if (i + 3 < effective_pattern_len) {
+                    complete_hex = true;
+                    for (int j = i + 2; j < i + 4; j++) {
+                        char c = effective_pattern[j];
+                        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) {
+                            complete_hex = false;
+                            break;
+                        }
+                    }
+                }
+                if (legacy_non_unicode && !complete_hex) {
+                    js_regex_append_literal_byte(processed_pattern, 'x', bracket_depth > 0);
+                    i++;
+                    continue;
+                }
+            }
+            if (legacy_non_unicode && js_regex_is_legacy_identity_escape(next)) {
+                i = js_regex_append_legacy_literal_escape(processed_pattern,
+                    effective_pattern, effective_pattern_len, i + 1, bracket_depth > 0);
+                continue;
             }
             processed_pattern += effective_pattern[i];
             processed_pattern += effective_pattern[i + 1];
@@ -10928,14 +11127,17 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     Item source_key = (Item){.item = s2it(heap_create_name("source"))};
     Item source_val = (Item){.item = s2it(heap_strcpy(src_buf, pattern_len))};
     js_property_set(regex_obj, source_key, source_val);
+    js_mark_non_writable(regex_obj, source_key);
     js_mark_non_enumerable(regex_obj, source_key);
     Item flags_key = (Item){.item = s2it(heap_create_name("flags"))};
     Item flags_val = (Item){.item = s2it(heap_create_name(flg_buf))};
     js_property_set(regex_obj, flags_key, flags_val);
+    js_mark_non_writable(regex_obj, flags_key);
     js_mark_non_enumerable(regex_obj, flags_key);
     Item global_key = (Item){.item = s2it(heap_create_name("global"))};
     Item global_val = (Item){.item = b2it(global ? BOOL_TRUE : BOOL_FALSE)};
     js_property_set(regex_obj, global_key, global_val);
+    js_mark_non_writable(regex_obj, global_key);
     js_mark_non_enumerable(regex_obj, global_key);
     // v18: expose all standard RegExp flag properties
     bool ignore_case = !opts.case_sensitive();
@@ -10944,18 +11146,23 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     bool has_unicode = compile_info.unicode || compile_info.unicode_sets;
     Item ic_key = (Item){.item = s2it(heap_create_name("ignoreCase"))};
     js_property_set(regex_obj, ic_key, (Item){.item = b2it(ignore_case ? BOOL_TRUE : BOOL_FALSE)});
+    js_mark_non_writable(regex_obj, ic_key);
     js_mark_non_enumerable(regex_obj, ic_key);
     Item ml_key = (Item){.item = s2it(heap_create_name("multiline"))};
     js_property_set(regex_obj, ml_key, (Item){.item = b2it(multiline ? BOOL_TRUE : BOOL_FALSE)});
+    js_mark_non_writable(regex_obj, ml_key);
     js_mark_non_enumerable(regex_obj, ml_key);
     Item da_key = (Item){.item = s2it(heap_create_name("dotAll"))};
     js_property_set(regex_obj, da_key, (Item){.item = b2it(dot_all ? BOOL_TRUE : BOOL_FALSE)});
+    js_mark_non_writable(regex_obj, da_key);
     js_mark_non_enumerable(regex_obj, da_key);
     Item uni_key = (Item){.item = s2it(heap_create_name("unicode"))};
     js_property_set(regex_obj, uni_key, (Item){.item = b2it(has_unicode ? BOOL_TRUE : BOOL_FALSE)});
+    js_mark_non_writable(regex_obj, uni_key);
     js_mark_non_enumerable(regex_obj, uni_key);
     Item sticky_key = (Item){.item = s2it(heap_create_name("sticky"))};
     js_property_set(regex_obj, sticky_key, (Item){.item = b2it(has_sticky ? BOOL_TRUE : BOOL_FALSE)});
+    js_mark_non_writable(regex_obj, sticky_key);
     js_mark_non_enumerable(regex_obj, sticky_key);
     Item li_key = (Item){.item = s2it(heap_create_name("lastIndex"))};
     js_property_set(regex_obj, li_key, (Item){.item = i2it(0)});
@@ -11035,64 +11242,49 @@ extern "C" Item js_regexp_construct(Item pattern_item, Item flags_item) {
     if (get_type_id(pattern_item) == LMD_TYPE_MAP) {
         bool has_rd = false;
         js_map_get_fast(pattern_item.map, "__rd", 4, &has_rd);
-        if (has_rd) {
-            bool own_src = false;
-            Item src_val = js_map_get_fast(pattern_item.map, "source", 6, &own_src);
-            if (own_src && get_type_id(src_val) == LMD_TYPE_STRING) {
-                String* ps = it2s(src_val);
+        // ES §22.2.3.1: IsRegExp(pattern) first reads @@match. This matters
+        // even for real RegExp objects because the getter can mutate `pattern`.
+        Item sym_match_key = (Item){.item = s2it(heap_create_name("__sym_7", 7))};
+        Item sym_match_val = js_property_get(pattern_item, sym_match_key);
+        if (js_exception_pending) return ItemNull;
+        bool pattern_is_regexp = false;
+        if (sym_match_val.item != ItemNull.item &&
+            get_type_id(sym_match_val) != LMD_TYPE_UNDEFINED &&
+            get_type_id(sym_match_val) != LMD_TYPE_NULL) {
+            pattern_is_regexp = it2b(js_to_boolean(sym_match_val));
+        } else {
+            pattern_is_regexp = has_rd;
+        }
+        if (pattern_is_regexp) {
+            Item src_key = (Item){.item = s2it(heap_create_name("source", 6))};
+            Item src_val = js_property_get(pattern_item, src_key);
+            if (js_exception_pending) return ItemNull;
+            Item src_str = (get_type_id(src_val) == LMD_TYPE_STRING) ? src_val : js_to_string(src_val);
+            if (js_exception_pending) return ItemNull;
+            if (get_type_id(src_str) == LMD_TYPE_STRING) {
+                String* ps = it2s(src_str);
                 if (ps) { pattern = ps->chars; pattern_len = (int)ps->len; }
             }
-            // If flags not explicitly provided, inherit from source regex
             if (!flags_provided) {
-                bool own_fl = false;
-                Item fl_val = js_map_get_fast(pattern_item.map, "flags", 5, &own_fl);
-                if (own_fl && get_type_id(fl_val) == LMD_TYPE_STRING) {
-                    String* fs = it2s(fl_val);
-                    if (fs) { flags = fs->chars; flags_len = (int)fs->len; }
+                Item fl_key = (Item){.item = s2it(heap_create_name("flags", 5))};
+                Item fl_val = js_property_get(pattern_item, fl_key);
+                if (js_exception_pending) return ItemNull;
+                if (get_type_id(fl_val) != LMD_TYPE_UNDEFINED && get_type_id(fl_val) != LMD_TYPE_NULL) {
+                    Item fl_str = (get_type_id(fl_val) == LMD_TYPE_STRING) ? fl_val : js_to_string(fl_val);
+                    if (js_exception_pending) return ItemNull;
+                    if (get_type_id(fl_str) == LMD_TYPE_STRING) {
+                        String* fs = it2s(fl_str);
+                        if (fs) { flags = fs->chars; flags_len = (int)fs->len; }
+                    }
                 }
             }
         } else {
-            // ES §22.2.3.1: IsRegExp(pattern) — check for Symbol.match override.
-            // If true, treat as regexp-like: read .source and (if flags not provided) .flags
-            // via the property getter chain.
-            Item sym_match_key = (Item){.item = s2it(heap_create_name("__sym_7", 7))};
-            Item sym_match_val = js_property_get(pattern_item, sym_match_key);
+            // Non-regexp object — convert to string
+            Item s = js_to_string(pattern_item);
             if (js_exception_pending) return ItemNull;
-            bool is_regexp_like = (sym_match_val.item != ItemNull.item
-                && get_type_id(sym_match_val) != LMD_TYPE_UNDEFINED
-                && get_type_id(sym_match_val) != LMD_TYPE_NULL
-                && it2b(js_to_boolean(sym_match_val)));
-            if (is_regexp_like) {
-                Item src_key = (Item){.item = s2it(heap_create_name("source", 6))};
-                Item src_val = js_property_get(pattern_item, src_key);
-                if (js_exception_pending) return ItemNull;
-                Item src_str = (get_type_id(src_val) == LMD_TYPE_STRING) ? src_val : js_to_string(src_val);
-                if (js_exception_pending) return ItemNull;
-                if (get_type_id(src_str) == LMD_TYPE_STRING) {
-                    String* ps = it2s(src_str);
-                    if (ps) { pattern = ps->chars; pattern_len = (int)ps->len; }
-                }
-                if (!flags_provided) {
-                    Item fl_key = (Item){.item = s2it(heap_create_name("flags", 5))};
-                    Item fl_val = js_property_get(pattern_item, fl_key);
-                    if (js_exception_pending) return ItemNull;
-                    if (get_type_id(fl_val) != LMD_TYPE_UNDEFINED && get_type_id(fl_val) != LMD_TYPE_NULL) {
-                        Item fl_str = (get_type_id(fl_val) == LMD_TYPE_STRING) ? fl_val : js_to_string(fl_val);
-                        if (js_exception_pending) return ItemNull;
-                        if (get_type_id(fl_str) == LMD_TYPE_STRING) {
-                            String* fs = it2s(fl_str);
-                            if (fs) { flags = fs->chars; flags_len = (int)fs->len; }
-                        }
-                    }
-                }
-            } else {
-                // Non-regexp object — convert to string
-                Item s = js_to_string(pattern_item);
-                if (js_exception_pending) return ItemNull;
-                if (get_type_id(s) == LMD_TYPE_STRING) {
-                    String* ps = it2s(s);
-                    if (ps) { pattern = ps->chars; pattern_len = (int)ps->len; }
-                }
+            if (get_type_id(s) == LMD_TYPE_STRING) {
+                String* ps = it2s(s);
+                if (ps) { pattern = ps->chars; pattern_len = (int)ps->len; }
             }
         }
     } else if (get_type_id(pattern_item) == LMD_TYPE_STRING) {
@@ -19281,6 +19473,8 @@ extern "C" Item js_array_slice_from(Item arr, Item start_item) {
 
 static const char PROTO_KEY[] = "__proto__";
 static const int PROTO_KEY_LEN = 9;
+static const char INTERNAL_PROTO_KEY[] = "__internal_proto__";
+static const int INTERNAL_PROTO_KEY_LEN = 18;
 
 // J39-7: ES B.3.7 PropertyDefinitionEvaluation for `__proto__: expr` in
 // object initializers. Spec: if propValue is Object or Null, perform
@@ -19359,11 +19553,33 @@ extern "C" void js_set_prototype(Item object, Item prototype) {
             depth++;
         }
     }
+    bool owns_proto_data = false;
+    Item owns_proto_data_val = js_map_get_fast_ext(object.map, "__json_own_proto__", 18, &owns_proto_data);
+    if (owns_proto_data && js_is_truthy(owns_proto_data_val)) {
+        js_property_set(object, (Item){.item = s2it(heap_create_name(INTERNAL_PROTO_KEY, INTERNAL_PROTO_KEY_LEN))},
+            proto_to_store);
+        return;
+    }
     // P10d: use interned __proto__ key.
     Item key = js_get_proto_key();
     js_property_set(object, (Item){.item = s2it(heap_create_name("__json_own_proto__", 18))},
         (Item){.item = ITEM_FALSE});
     js_property_set(object, key, proto_to_store);
+}
+
+extern "C" void js_mark_own_proto_property(Item object) {
+    if (get_type_id(object) != LMD_TYPE_MAP) return;
+    Map* m = object.map;
+    bool marker_found = false;
+    Item marker_val = js_map_get_fast_ext(m, "__json_own_proto__", 18, &marker_found);
+    bool raw_found = false;
+    Item raw_proto = js_map_get_fast_ext(m, PROTO_KEY, PROTO_KEY_LEN, &raw_found);
+    if ((!marker_found || !js_is_truthy(marker_val)) && raw_found && raw_proto.item != JS_DELETED_SENTINEL_VAL) {
+        js_property_set(object, (Item){.item = s2it(heap_create_name(INTERNAL_PROTO_KEY, INTERNAL_PROTO_KEY_LEN))},
+            raw_proto);
+    }
+    js_property_set(object, (Item){.item = s2it(heap_create_name("__json_own_proto__", 18))},
+        (Item){.item = ITEM_TRUE});
 }
 
 // Check if a function has a custom __proto__ set via Object.setPrototypeOf
@@ -19515,6 +19731,13 @@ extern "C" void js_mark_non_writable(Item object, Item name) {
     js_attr_set_writable(object, str->chars, (int)str->len, /*writable=*/false);
 }
 
+extern "C" void js_mark_private_method_non_writable(Item object, Item name) {
+    if (get_type_id(name) != LMD_TYPE_STRING) return;
+    String* str = it2s(name);
+    if (!str || str->len <= 10 || strncmp(str->chars, "__private_", 10) != 0) return;
+    js_mark_non_writable(object, name);
+}
+
 // Mark a property as non-configurable by setting __nc_<name> marker.
 // Stage A4: writer-side API symmetry with js_mark_non_writable /
 // js_mark_non_enumerable. Dual-write at js_property_set top mirrors the
@@ -19567,6 +19790,9 @@ extern "C" void js_link_base_prototype(Item proto_marker, Item base_ctor) {
 extern "C" Item js_get_prototype(Item object) {
     if (get_type_id(object) != LMD_TYPE_MAP) return ItemNull;
     Map* m = object.map;
+    bool internal_found = false;
+    Item internal_proto = js_map_get_fast_ext(m, INTERNAL_PROTO_KEY, INTERNAL_PROTO_KEY_LEN, &internal_found);
+    if (internal_found && internal_proto.item != JS_DELETED_SENTINEL_VAL) return internal_proto;
     bool json_own_proto = false;
     Item json_own_proto_val = js_map_get_fast_ext(m, "__json_own_proto__", 18, &json_own_proto);
     if (json_own_proto && js_is_truthy(json_own_proto_val)) return ItemNull;

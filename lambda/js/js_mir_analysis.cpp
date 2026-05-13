@@ -178,7 +178,8 @@ int jm_count_yields(JsAstNode* node) {
     }
     case JS_AST_NODE_PROPERTY: {
         JsPropertyNode* prop = (JsPropertyNode*)node;
-        return jm_count_yields(prop->value);
+        int count = prop->computed ? jm_count_yields(prop->key) : 0;
+        return count + jm_count_yields(prop->value);
     }
     case JS_AST_NODE_SPREAD_ELEMENT: {
         JsSpreadElementNode* sp = (JsSpreadElementNode*)node;
@@ -442,7 +443,8 @@ int jm_count_awaits(JsAstNode* node) {
     }
     case JS_AST_NODE_PROPERTY: {
         JsPropertyNode* prop = (JsPropertyNode*)node;
-        return jm_count_awaits(prop->value);
+        int count = prop->computed ? jm_count_awaits(prop->key) : 0;
+        return count + jm_count_awaits(prop->value);
     }
     case JS_AST_NODE_SPREAD_ELEMENT: {
         JsSpreadElementNode* sp = (JsSpreadElementNode*)node;

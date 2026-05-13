@@ -1166,12 +1166,15 @@ int bigint_cmp(Item a, Item b) {
 int bigint_cmp_double(Item bi, double d) {
     mpd_t* m = bigint_get_mpd(bi);
     if (!m) return 0;
+    if (isnan(d)) return 0;
+    if (d == INFINITY) return -1;
+    if (d == -INFINITY) return 1;
     // convert double to mpd for comparison
     mpd_context_t* ctx = bigint_context();
     mpd_t* d_mpd = mpd_new(ctx);
     if (!d_mpd) return 0;
-    char str_buf[64];
-    snprintf(str_buf, sizeof(str_buf), "%.17g", d);
+    char str_buf[1200];
+    snprintf(str_buf, sizeof(str_buf), "%.1074g", d);
     uint32_t status = 0;
     mpd_qset_string(d_mpd, str_buf, ctx, &status);
     if (status != 0) { mpd_del(d_mpd); return 0; }
@@ -1435,7 +1438,8 @@ Item bigint_left_shift(Item a, Item b) {
     uint32_t status = 0;
     mpd_ssize_t shift = mpd_qget_ssize(mb, &status);
     if (status & MPD_Invalid_operation) return ItemError;
-    if (shift < 0 || shift > 100000) return ItemError;
+    if (shift < 0) return bigint_right_shift(a, bigint_neg(b));
+    if (shift > 100000) return ItemError;
     // x << y = x * 2^y
     mpd_t* two = mpd_new(ctx);
     mpd_t* shift_mpd = mpd_new(ctx);
@@ -1462,7 +1466,8 @@ Item bigint_right_shift(Item a, Item b) {
     uint32_t status = 0;
     mpd_ssize_t shift = mpd_qget_ssize(mb, &status);
     if (status & MPD_Invalid_operation) return ItemError;
-    if (shift < 0 || shift > 100000) return ItemError;
+    if (shift < 0) return bigint_left_shift(a, bigint_neg(b));
+    if (shift > 100000) return ItemError;
     // x >> y = floor(x / 2^y)
     mpd_t* two = mpd_new(ctx);
     mpd_t* shift_mpd = mpd_new(ctx);

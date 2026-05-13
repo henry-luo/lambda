@@ -878,6 +878,7 @@ extern "C" Item js_object_get_own_property_names(Item object);
 extern "C" Item js_object_get_own_property_symbols(Item object);
 extern "C" Item js_array_push(Item array, Item value);
 extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor);
+extern "C" void js_mark_own_proto_property(Item object);
 extern "C" Item js_object_prevent_extensions(Item obj);
 extern "C" Item js_get_generator_shared_proto(bool is_async);
 
@@ -2209,6 +2210,8 @@ extern "C" Item js_date_new_multi(Item args_array) {
     ms_val = js_date_time_clip(ms_val);
     *fp = ms_val;
     js_property_set(obj, time_key, (Item){.item = d2it(fp)});
+    js_class_stamp(obj, JS_CLASS_DATE);
+    js_date_set_instance_prototype(obj);
     return obj;
 }
 
@@ -5889,11 +5892,18 @@ extern "C" Item js_get_prototype_of(Item object) {
         if (raw_proto.item != ItemNull.item) return raw_proto;
     }
 
-    // v18g: If instance has a constructor with a .prototype property,
-    // AND the object is NOT that prototype itself, return constructor.prototype
+    // v18g: if instance has an own data constructor with a .prototype property,
+    // and the object is not that prototype itself, return constructor.prototype.
+    // this is an internal prototype inference path; it must not invoke a user
+    // `constructor` accessor while implementing [[GetPrototypeOf]].
     {
-        Item ctor_key = (Item){.item = s2it(heap_create_name("constructor", 11))};
-        Item ctor = js_property_get(object, ctor_key);
+        Item ctor = ItemNull;
+        ShapeEntry* ctor_se = js_find_shape_entry(object, "constructor", 11);
+        if (ctor_se && !jspd_is_accessor(ctor_se)) {
+            bool ctor_found = false;
+            ctor = js_map_get_fast_ext(object.map, "constructor", 11, &ctor_found);
+            if (!ctor_found || ctor.item == JS_DELETED_SENTINEL_VAL) ctor = ItemNull;
+        }
         if (get_type_id(ctor) == LMD_TYPE_MAP) {
             // user-defined class: read its "prototype" property
             Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
@@ -6003,7 +6013,9 @@ static bool js_func_has_own_prototype(Item func_item) {
     // Bound functions retain [[Construct]] when their target is constructable,
     // but they do not have a public own "prototype" property.
     if (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS_G) return false;
-    if (fn->flags & (JS_FUNC_FLAG_ARROW_G | JS_FUNC_FLAG_METHOD_G | JS_FUNC_FLAG_TYPED_ARRAY_METHOD_G)) return false;
+    if (fn->flags & JS_FUNC_FLAG_ARROW_G) return false;
+    if ((fn->flags & JS_FUNC_FLAG_METHOD_G) && !(fn->flags & JS_FUNC_FLAG_GENERATOR_G)) return false;
+    if (fn->flags & JS_FUNC_FLAG_TYPED_ARRAY_METHOD_G) return false;
     if (fn->builtin_id > 0) return false;
     if (fn->builtin_id == -2) return false;
     return true;
@@ -7368,6 +7380,12 @@ extern "C" Item js_object_get_own_property_descriptors(Item obj) {
 }
 
 extern "C" Item js_create_data_property(Item obj, Item name, Item value) {
+    if (get_type_id(obj) == LMD_TYPE_MAP && get_type_id(name) == LMD_TYPE_STRING) {
+        String* name_str = it2s(name);
+        if (name_str && name_str->len == 9 && strncmp(name_str->chars, "__proto__", 9) == 0) {
+            js_mark_own_proto_property(obj);
+        }
+    }
     Item desc = js_new_object();
     js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, value);
     js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
@@ -9772,44 +9790,24 @@ extern "C" Item js_object_assign(Item target, Item* sources, int count) {
 // Used for { ...source } in object literals
 extern "C" Item js_object_spread_into(Item target, Item source) {
     if (get_type_id(target) != LMD_TYPE_MAP) return target;
-    if (get_type_id(source) != LMD_TYPE_MAP) return target;
-    Map* m = source.map;
-    if (!m || !m->type) return target;
-    TypeMap* tm = (TypeMap*)m->type;
-    ShapeEntry* e = tm->shape;
-    while (e) {
-        if (e->name) {
-            const char* n = e->name->str;
-            int nlen = (int)e->name->length;
-            // v20: Skip internal marker properties (__ne_, __nw_, __nc_, __get_, __set_, __proto__, __class_name__, __sym_)
-            if (nlen >= 2 && n[0] == '_' && n[1] == '_') {
-                e = e->next;
-                continue;
-            }
-            // Stage A3: shape-flag-first non-enumerable check
-            if (!js_props_query_enumerable(m, e, n, nlen)) {
-                e = e->next;
-                continue;
-            }
-            Item val;
-            // Stage A1.7: route shape-iteration accessor dispatch through
-            // js_ordinary_resolve_shape_value. CopyDataProperties resolves
-            // setter-only accessors as undefined and copies them.
-            {
-                JsResolveFieldStatus rs = js_ordinary_resolve_shape_value(
-                    e, m, source, &val);
-                if (rs == JS_RESOLVE_DELETED) { e = e->next; continue; }
-                if (rs == JS_RESOLVE_THREW) return target;
-            }
-            {
-                Item key = (Item){.item = s2it(heap_create_name(n, nlen))};
-                js_property_set(target, key, val);
-            }
+    if (js_is_proxy(source) || get_type_id(source) == LMD_TYPE_MAP) {
+        Item keys = js_reflect_own_keys(source);
+        if (js_check_exception() || get_type_id(keys) != LMD_TYPE_ARRAY) return target;
+        int key_count = (int)js_array_length(keys);
+        for (int key_index = 0; key_index < key_count; key_index++) {
+            Item key = js_array_get(keys, (Item){.item = i2it(key_index)});
+            Item desc = js_object_get_own_property_descriptor(source, key);
+            if (js_check_exception()) return target;
+            if (get_type_id(desc) != LMD_TYPE_MAP) continue;
+            Item enumerable = js_property_get(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))});
+            if (!it2b(js_to_boolean(enumerable))) continue;
+            Item val = js_property_get(source, key);
+            if (js_check_exception()) return target;
+            js_create_data_property(target, key, val);
+            if (js_check_exception()) return target;
         }
-        e = e->next;
+        return target;
     }
-    // Second pass: detect accessor-only properties (__get_<name>)
-    // Phase-5D: legacy __get_<name>/__set_<name> pass-2 scan removed.
     return target;
 }
 
@@ -10004,6 +10002,11 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
     if (!ks) return (Item){.item = b2it(false)};
     Map* m = obj.map;
     if (!m || !m->type) return (Item){.item = b2it(false)};
+    if (ks->len == 9 && strncmp(ks->chars, "__proto__", 9) == 0) {
+        bool own_proto_marker = false;
+        Item own_proto_val = js_map_get_fast_ext(m, "__json_own_proto__", 18, &own_proto_marker);
+        if (own_proto_marker && !js_is_truthy(own_proto_val)) return (Item){.item = b2it(false)};
+    }
     // Stage A1.8b (R4 routing): tri-state kernel chokepoint.
     //   PRESENT — own own slot, non-sentinel → property exists.
     //   DELETED — own slot is tombstoned; per spec the property does NOT
@@ -13200,6 +13203,8 @@ static Item js_last_with_binding_scope = {.item = ITEM_NULL};
 static Item js_last_with_binding_key = {.item = ITEM_NULL};
 static bool js_last_with_binding_valid = false;
 
+static void js_throw_binding_reference_error(Item key);
+
 static bool js_with_binding_key_same(Item a, Item b) {
     if (a.item == b.item) return true;
     if (get_type_id(a) != LMD_TYPE_STRING || get_type_id(b) != LMD_TYPE_STRING) return false;
@@ -13235,6 +13240,10 @@ extern "C" int js_with_save_depth() {
 
 extern "C" void js_with_restore_depth(int depth) {
     js_with_stack_depth = depth;
+}
+
+extern "C" int64_t js_with_depth_active(void) {
+    return js_with_stack_depth > 0 ? 1 : 0;
 }
 
 // Check with-scope stack for a property (most recent scope first)
@@ -13296,6 +13305,34 @@ static Item js_with_scope_lookup(Item key, bool* found) {
     return make_js_undefined();
 }
 
+extern "C" Item js_get_with_binding_or_fallback(Item key, Item fallback) {
+    if (js_with_stack_depth <= 0) return fallback;
+    bool found = false;
+    Item result = js_with_scope_lookup(key, &found);
+    return found ? result : fallback;
+}
+
+extern "C" int64_t js_set_last_with_binding_if_valid(Item key, Item value, int64_t strict) {
+    if (!js_last_with_binding_valid || !js_with_binding_key_same(js_last_with_binding_key, key)) {
+        return 0;
+    }
+    Item scope_obj = js_last_with_binding_scope;
+    js_last_with_binding_valid = false;
+    if (get_type_id(scope_obj) != LMD_TYPE_MAP) return 0;
+    if (it2b(js_in(key, scope_obj))) {
+        if (js_check_exception()) return 1;
+        js_property_set(scope_obj, key, value);
+        return 1;
+    }
+    if (js_check_exception()) return 1;
+    if (strict) {
+        js_throw_binding_reference_error(key);
+        return 1;
+    }
+    js_property_set(scope_obj, key, value);
+    return 1;
+}
+
 // js_get_global_property: look up a property on the global object by name string
 // Used as fallback for unresolved identifiers — implements browser-like named access
 extern "C" Item js_get_global_property(Item key) {
@@ -13339,9 +13376,18 @@ extern "C" Item js_get_global_property_strict(Item key) {
     return result;
 }
 
-// js_set_global_property: write a property to the global object by name string
-// Used for implicit global assignments (sloppy mode: assigning to undeclared variables)
-extern "C" void js_set_global_property(Item key, Item value) {
+static void js_throw_binding_reference_error(Item key) {
+    String* sk = it2s(key);
+    char msg[256];
+    if (sk) {
+        snprintf(msg, sizeof(msg), "%.*s is not defined", (int)sk->len, sk->chars);
+    } else {
+        snprintf(msg, sizeof(msg), "binding is not defined");
+    }
+    js_throw_reference_error((Item){.item = s2it(heap_create_name(msg, strlen(msg)))});
+}
+
+static void js_set_global_property_impl(Item key, Item value, bool strict) {
     // Check with-scope stack first — assignments inside 'with' resolve to scope object
     if (js_with_stack_depth > 0) {
         for (int i = js_with_stack_depth - 1; i >= 0; i--) {
@@ -13357,7 +13403,12 @@ extern "C" void js_set_global_property(Item key, Item value) {
                         return;
                     }
                     if (js_check_exception()) return;
-                    continue;
+                    if (strict) {
+                        js_throw_binding_reference_error(key);
+                        return;
+                    }
+                    js_property_set(scope_obj, key, value);
+                    return;
                 }
                 if (it2b(js_in(key, scope_obj))) {
                     if (js_check_exception()) return;
@@ -13385,7 +13436,23 @@ extern "C" void js_set_global_property(Item key, Item value) {
     }
     js_last_with_binding_valid = false;
     Item global = js_get_global_this();
+    if (strict && !it2b(js_in(key, global))) {
+        if (js_check_exception()) return;
+        js_throw_binding_reference_error(key);
+        return;
+    }
+    if (js_check_exception()) return;
     js_property_set(global, key, value);
+}
+
+// js_set_global_property: write a property to the global object by name string
+// Used for implicit global assignments (sloppy mode: assigning to undeclared variables)
+extern "C" void js_set_global_property(Item key, Item value) {
+    js_set_global_property_impl(key, value, false);
+}
+
+extern "C" void js_set_global_property_strict(Item key, Item value) {
+    js_set_global_property_impl(key, value, true);
 }
 extern "C" void js_define_global_var_property(Item key, Item value) {
     Item global = js_get_global_this();
@@ -13728,22 +13795,20 @@ static Item js_ctor_regexp_fn(Item pattern, Item flags) {
         if (fid == LMD_TYPE_NULL || fid == LMD_TYPE_UNDEFINED) {
             bool has_rd = false;
             js_map_get_fast_ext(pattern.map, "__rd", 4, &has_rd);
-            if (has_rd) {
-                // IsRegExp: check pattern[@@match] — if defined, use ToBoolean of it.
-                bool ok = true;
-                Item sym_match_key = (Item){.item = s2it(heap_create_name("__sym_7", 7))};
-                Item sym_match = js_property_get(pattern, sym_match_key);
-                if (sym_match.item != ItemNull.item && get_type_id(sym_match) != LMD_TYPE_UNDEFINED) {
-                    if (!js_is_truthy(sym_match)) ok = false;
-                }
-                // Check pattern.constructor === RegExp
-                if (ok) {
-                    Item ctor_key = (Item){.item = s2it(heap_create_name("constructor", 11))};
-                    Item pat_ctor = js_property_get(pattern, ctor_key);
-                    Item regexp_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("RegExp", 6))});
-                    if (pat_ctor.item != regexp_ctor.item) ok = false;
-                }
-                if (ok) return pattern;
+            bool pattern_is_regexp = has_rd;
+            Item sym_match_key = (Item){.item = s2it(heap_create_name("__sym_7", 7))};
+            Item sym_match = js_property_get(pattern, sym_match_key);
+            if (js_exception_pending) return ItemNull;
+            TypeId match_tid = get_type_id(sym_match);
+            if (sym_match.item != ItemNull.item && match_tid != LMD_TYPE_UNDEFINED && match_tid != LMD_TYPE_NULL) {
+                pattern_is_regexp = js_is_truthy(sym_match);
+            }
+            if (pattern_is_regexp) {
+                Item ctor_key = (Item){.item = s2it(heap_create_name("constructor", 11))};
+                Item pat_ctor = js_property_get(pattern, ctor_key);
+                if (js_exception_pending) return ItemNull;
+                Item regexp_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("RegExp", 6))});
+                if (pat_ctor.item == regexp_ctor.item) return pattern;
             }
         }
     }

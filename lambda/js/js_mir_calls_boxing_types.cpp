@@ -372,6 +372,9 @@ void jm_emit_install_method_or_accessor(JsMirTranspiler* mt,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
+        jm_call_void_2(mt, "js_mark_private_method_non_writable",
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
     }
 }
 
@@ -808,13 +811,13 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
             TypeId t = jm_get_effective_type(mt, un->operand);
             if (t == LMD_TYPE_FLOAT) return LMD_TYPE_FLOAT;
             if (t == LMD_TYPE_INT) {
-                // v18p: -0 produces FLOAT (-0.0), not INT
                 if (un->operand && un->operand->node_type == JS_AST_NODE_LITERAL) {
                     JsLiteralNode* lit = (JsLiteralNode*)un->operand;
                     if (lit->literal_type == JS_LITERAL_NUMBER && lit->value.number_value == 0.0)
                         return LMD_TYPE_FLOAT;
+                    return LMD_TYPE_INT;
                 }
-                return LMD_TYPE_INT;
+                return LMD_TYPE_ANY;
             }
             return LMD_TYPE_ANY;
         }

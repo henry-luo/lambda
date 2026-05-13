@@ -785,15 +785,16 @@ JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node) {
                     else if (plen - i >= 4 && memcmp(pfx + i, "set", 3) == 0 && (pfx[i+3] == ' ' || pfx[i+3] == '\t' || pfx[i+3] == '\n')) is_setter = true;
                 }
             }
+            property->method = !is_getter && !is_setter;
             TSNode body_node = ts_node_child_by_field_name(property_node, "body", strlen("body"));
 
             if ((is_getter || is_setter) && !ts_node_is_null(name_node) && !ts_node_is_null(body_node)) {
+                property->is_getter = is_getter;
+                property->is_setter = is_setter;
                 const char* name_type = ts_node_type(name_node);
                 if (strcmp(name_type, "computed_property_name") == 0) {
                     // Computed getter/setter: { get [expr]() { }, set [expr](v) { } }
                     property->computed = true;
-                    property->is_getter = is_getter;
-                    property->is_setter = is_setter;
                     property->key = build_js_expression(tp, name_node);
                 } else {
                     // Static getter/setter: store as __get_<name> or __set_<name> key

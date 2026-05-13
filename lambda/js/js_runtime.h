@@ -554,8 +554,15 @@ Item js_get_global_this(void);
 Item js_get_global_object(void);
 Item js_get_global_property(Item key);
 Item js_get_global_property_strict(Item key);
+void js_set_global_property(Item key, Item value);
+void js_set_global_property_strict(Item key, Item value);
+void js_mark_private_method_non_writable(Item object, Item name);
+void js_set_function_name_from_property_key_if_anonymous(Item fn_item, Item key_item, int64_t prefix_kind);
 Item js_get_global_builtin_fn(Item name, Item param_count);
 void js_eval_env_push_frame(void);
+int64_t js_with_depth_active(void);
+Item js_get_with_binding_or_fallback(Item key, Item fallback);
+int64_t js_set_last_with_binding_if_valid(Item key, Item value, int64_t strict);
 void js_eval_env_bind(Item key, Item value);
 int64_t js_eval_env_has_binding(Item key);
 int64_t js_eval_env_is_active(void);
@@ -704,6 +711,7 @@ bool js_is_proxy(Item obj);
 JsProxyData* js_get_proxy_data(Item obj);
 // Get the ultimate non-proxy target (unwrap nested proxies)
 Item js_proxy_get_target(Item obj);
+bool js_proxy_has_callable_target(Item obj);
 
 // Proxy trap dispatch functions (called from js_globals.cpp)
 Item js_proxy_trap_has(Item proxy, Item key);

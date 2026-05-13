@@ -832,7 +832,12 @@ extern void js_with_push(Item obj);
 extern void js_with_pop(void);
 extern int js_with_save_depth(void);
 extern void js_with_restore_depth(int depth);
+extern int64_t js_with_depth_active(void);
+extern Item js_get_with_binding_or_fallback(Item key, Item fallback);
+extern int64_t js_set_last_with_binding_if_valid(Item key, Item value, int64_t strict);
 extern void js_set_global_property(Item key, Item value);
+extern void js_set_global_property_strict(Item key, Item value);
+extern void js_mark_private_method_non_writable(Item object, Item name);
 extern void js_define_global_var_property(Item key, Item value);
 extern void js_evalscript_check_global_var_decl(Item key);
 extern void js_evalscript_check_global_function_decl(Item key);
@@ -871,6 +876,7 @@ extern Item js_get_reflect_object_value();
 extern Item js_get_atomics_object_value();
 extern Item js_install_user_accessor(Item obj, Item name, Item fn, int is_setter);
 extern void js_set_function_name_if_anonymous(Item fn_item, Item name_item);
+extern void js_set_function_name_from_property_key_if_anonymous(Item fn_item, Item key_item, int64_t prefix_kind);
 extern void js_set_class_name(Item cls_item, Item name_item);
 extern void js_set_default_constructor_property(Item proto_item, Item cls_item);
 extern void js_prepare_class_prototype_property(Item cls_item);
@@ -1490,6 +1496,7 @@ JitImport jit_runtime_imports[] = {
     {"js_object_get_own_property_descriptors", FPTR(js_object_get_own_property_descriptors)},
     {"js_set_function_name", FPTR(js_set_function_name)},
     {"js_set_function_name_if_anonymous", FPTR(js_set_function_name_if_anonymous)},
+    {"js_set_function_name_from_property_key_if_anonymous", FPTR(js_set_function_name_from_property_key_if_anonymous)},
     {"js_set_class_name", FPTR(js_set_class_name)},
     {"js_set_default_constructor_property", FPTR(js_set_default_constructor_property)},
     {"js_prepare_class_prototype_property", FPTR(js_prepare_class_prototype_property)},
@@ -1633,7 +1640,12 @@ JitImport jit_runtime_imports[] = {
     {"js_with_pop", FPTR(js_with_pop)},
     {"js_with_save_depth", FPTR(js_with_save_depth)},
     {"js_with_restore_depth", FPTR(js_with_restore_depth)},
+    {"js_with_depth_active", FPTR(js_with_depth_active)},
+    {"js_get_with_binding_or_fallback", FPTR(js_get_with_binding_or_fallback)},
+    {"js_set_last_with_binding_if_valid", FPTR(js_set_last_with_binding_if_valid)},
     {"js_set_global_property", FPTR(js_set_global_property)},
+    {"js_set_global_property_strict", FPTR(js_set_global_property_strict)},
+    {"js_mark_private_method_non_writable", FPTR(js_mark_private_method_non_writable)},
     {"js_define_global_var_property", FPTR(js_define_global_var_property)},
     {"js_evalscript_check_global_var_decl", FPTR(js_evalscript_check_global_var_decl)},
     {"js_evalscript_check_global_function_decl", FPTR(js_evalscript_check_global_function_decl)},
