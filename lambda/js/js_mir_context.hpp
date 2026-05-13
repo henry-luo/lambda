@@ -452,6 +452,7 @@ struct JsMirTranspiler {
     // Used by js_main to capture the result of the last evaluated expression (even inside
     // control flow statements like for/while/if/switch), implementing ES spec §13.5.1.
     MIR_reg_t eval_completion_reg;           // 0 if not tracking completion values
+    MIR_reg_t eval_local_frame_reg;           // non-zero when direct eval pushed a caller-local frame
     bool in_typeof;                          // true when transpiling operand of typeof
     int with_depth;                           // nesting depth of 'with' statements (for break/continue/return cleanup)
     bool destructure_assignment_mode;         // true for assignment-pattern destructuring targets

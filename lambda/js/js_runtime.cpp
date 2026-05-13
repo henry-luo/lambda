@@ -3645,6 +3645,9 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
     js_dual_write_marker_flags(object, key, value);
 
     TypeId type = get_type_id(object);
+    if (object.item == ITEM_NULL || object.item == ITEM_JS_UNDEFINED) {
+        return js_throw_type_error("Cannot set property on null or undefined");
+    }
     if (js_ta_proto_chain_set(object, key, value)) return value;
 
     // v95: If __sym_1 (Symbol.iterator) is ever set on a map, note it for Array.prototype override detection
@@ -4221,15 +4224,18 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                     // has been removed.
                     ShapeEntry* _se = js_find_shape_entry(fn->properties_map, str_key->chars, (int)str_key->len);
                     if (!js_props_query_writable(fn->properties_map.map, _se, str_key->chars, (int)str_key->len)) {
+                        js_strict_throw_property_error("assign to read only", str_key->chars, (int)str_key->len);
                         return value; // non-writable, silently reject
                     }
                     // writable, fall through to store
                 } else {
                     // Virtual .name/.length — non-writable by default
+                    js_strict_throw_property_error("assign to read only", str_key->chars, (int)str_key->len);
                     return value;
                 }
             } else {
                 // No properties_map — virtual .name/.length — non-writable by default
+                js_strict_throw_property_error("assign to read only", str_key->chars, (int)str_key->len);
                 return value;
             }
         }
@@ -4396,6 +4402,11 @@ static bool js_is_class_instance_prototype(Item proto) {
 }
 
 static Item js_super_lookup_base(Item receiver) {
+    if (js_is_class_object_item(receiver)) {
+        Item static_proto = js_get_prototype_of(receiver);
+        return static_proto;
+    }
+
     Item proto = js_get_prototype(receiver);
     if (proto.item == ItemNull.item) {
         proto = js_get_prototype_of(receiver);
@@ -4506,7 +4517,9 @@ extern "C" Item js_super_instance_method_get(Item receiver, Item key) {
 // call setter with receiver as 'this'. If no setter, set on receiver.
 extern "C" Item js_super_property_set(Item receiver, Item key, Item value) {
     Item proto = js_super_lookup_base(receiver);
-    if (proto.item == ItemNull.item) return js_property_set(receiver, key, value);
+    if (proto.item == ItemNull.item) {
+        return js_throw_type_error("Cannot set property on null or undefined");
+    }
     TypeId type = get_type_id(proto);
     if (type != LMD_TYPE_MAP) return js_property_set(receiver, key, value);
 
@@ -18062,6 +18075,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
 
         // save deleted elements (use ArraySpeciesCreate per ES spec)
         Item deleted = js_array_species_create(arr, delete_count);
+        if (js_exception_pending) return make_js_undefined();
         bool del_is_plain_array = (get_type_id(deleted) == LMD_TYPE_ARRAY && deleted.array->extra == 0);
         if (del_is_plain_array) {
             Array* del_arr = deleted.array;

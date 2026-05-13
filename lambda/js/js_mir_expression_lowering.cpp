@@ -23,8 +23,11 @@ static MIR_reg_t jm_emit_member_key(JsMirTranspiler* mt, JsMemberNode* mem) {
 }
 
 static MIR_reg_t jm_emit_current_this(JsMirTranspiler* mt) {
-    JsMirVarEntry* var = jm_find_var(mt, "_js_this");
-    if (var) return var->reg;
+    if (mt && mt->current_fc && mt->current_fc->node &&
+        (mt->current_fc->node->is_arrow || mt->current_fc->node->is_generator)) {
+        JsMirVarEntry* var = jm_find_var(mt, "_js_this");
+        if (var) return var->reg;
+    }
     return jm_call_0(mt, "js_get_this", MIR_T_I64);
 }
 
@@ -280,9 +283,24 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int)id->name->len));
             jm_emit_exc_propagate_check(mt);
         }
+        MIR_reg_t var_read_reg = var->reg;
+        MIR_reg_t lookup_key = 0;
+        if (var->from_env && mt->eval_local_frame_reg != 0) {
+            lookup_key = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
+            var_read_reg = jm_call_2(mt, "js_eval_local_get_binding_or_fallback", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, lookup_key),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, var->reg));
+        }
+        if (mt->with_depth > 0) {
+            if (!lookup_key) lookup_key = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
+            var_read_reg = jm_call_2(mt, "js_get_with_binding_or_fallback", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, lookup_key),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, var_read_reg));
+            jm_emit_exc_propagate_check(mt);
+        }
         if (var->from_env) {
             jm_call_void_3(mt, "js_check_unresolved_capture",
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, var->reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, var_read_reg),
                 MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)id->name->chars),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)id->name->len));
             jm_emit_exc_propagate_check(mt);
@@ -300,7 +318,7 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
                 MIR_T_I64, MIR_new_int_op(mt->ctx, param_index),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, var->reg));
         }
-        return var->reg;
+        return var_read_reg;
     }
 
     // Check module-level constants (top-level const with literal value)
@@ -447,6 +465,13 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
                     MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)id->name->len),
                     MIR_T_I64, MIR_new_int_op(mt->ctx, mt->in_typeof ? 1 : 0));
                 jm_emit_exc_propagate_check(mt);
+                if (mt->with_depth > 0) {
+                    MIR_reg_t with_key = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
+                    mv = jm_call_2(mt, "js_get_with_binding_or_fallback", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, with_key),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, mv));
+                    jm_emit_exc_propagate_check(mt);
+                }
                 // v20 TDZ: check for let/const modvars
                 if (mc->var_kind == JS_VAR_LET || mc->var_kind == JS_VAR_CONST) {
                     jm_call_void_3(mt, "js_check_tdz",
@@ -584,6 +609,36 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
         }
         return result;
     }
+}
+
+void jm_emit_eval_local_ensure_frame(JsMirTranspiler* mt) {
+    if (!mt || mt->in_main || mt->eval_local_frame_reg == 0) return;
+    MIR_label_t push_label = jm_new_label(mt);
+    MIR_label_t done_label = jm_new_label(mt);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+        MIR_new_label_op(mt->ctx, push_label),
+        MIR_new_reg_op(mt->ctx, mt->eval_local_frame_reg)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+        MIR_new_label_op(mt->ctx, done_label)));
+    jm_emit_label(mt, push_label);
+    jm_call_void_0(mt, "js_eval_local_push_frame");
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, mt->eval_local_frame_reg),
+        MIR_new_int_op(mt->ctx, 1)));
+    jm_emit_label(mt, done_label);
+}
+
+void jm_emit_eval_local_pop_if_needed(JsMirTranspiler* mt) {
+    if (!mt || mt->in_main || mt->eval_local_frame_reg == 0) return;
+    MIR_label_t done_label = jm_new_label(mt);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+        MIR_new_label_op(mt->ctx, done_label),
+        MIR_new_reg_op(mt->ctx, mt->eval_local_frame_reg)));
+    jm_call_void_0(mt, "js_eval_local_pop_frame");
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, mt->eval_local_frame_reg),
+        MIR_new_int_op(mt->ctx, 0)));
+    jm_emit_label(mt, done_label);
 }
 
 // Binary expression: native arithmetic fast path + boxed fallback
@@ -1756,18 +1811,26 @@ MIR_reg_t jm_emit_destructure_default(JsMirTranspiler* mt, MIR_reg_t val, JsAstN
 
 static void jm_emit_destructure_put_reference(JsMirTranspiler* mt, const JsMirReference* ref, MIR_reg_t val) {
     if (!ref) return;
+    MIR_reg_t key_reg = ref->key_reg;
+    if (ref->kind == JS_MIR_REF_PROPERTY || ref->kind == JS_MIR_REF_SUPER_PROPERTY) {
+        key_reg = jm_call_1(mt, "js_to_property_key", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->key_reg));
+        jm_emit_exc_propagate_check(mt);
+    }
     switch (ref->kind) {
     case JS_MIR_REF_PROPERTY:
         jm_call_3(mt, "js_property_set", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->key_reg),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+        jm_emit_exc_propagate_check(mt);
         break;
     case JS_MIR_REF_SUPER_PROPERTY:
         jm_call_3(mt, "js_super_property_set", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->key_reg),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+        jm_emit_exc_propagate_check(mt);
         break;
     default:
         break;
@@ -2511,17 +2574,45 @@ void jm_emit_object_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MI
             MIR_reg_t key;
             if (p->computed) {
                 key = jm_transpile_box_item(mt, p->key);
+                key = jm_call_1(mt, "js_to_property_key", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+                jm_emit_exc_propagate_check(mt);
             } else if (p->key && p->key->node_type == JS_AST_NODE_IDENTIFIER) {
                 String* kn = ((JsIdentifierNode*)p->key)->name;
                 key = jm_box_string_literal(mt, kn->chars, kn->len);
             } else {
                 key = jm_transpile_box_item(mt, p->key);
+                key = jm_call_1(mt, "js_to_property_key", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+                jm_emit_exc_propagate_check(mt);
             }
+            JsAstNode* target = p->value ? p->value : p->key;
+            JsMirReference pre_ref;
+            pre_ref.kind = JS_MIR_REF_INVALID;
+            pre_ref.base_reg = 0;
+            pre_ref.key_reg = 0;
+            pre_ref.strict = false;
+            int pre_src_spill = -1;
+            int pre_key_spill = -1;
+            bool pre_ref_has_yield = mt->in_generator && jm_has_yield(target);
+            if (pre_ref_has_yield) {
+                pre_src_spill = jm_gen_spill_save(mt, src);
+                pre_key_spill = jm_gen_spill_save(mt, key);
+            }
+            bool has_pre_ref = jm_emit_destructure_pre_reference(mt, target, &pre_ref);
+            if (pre_ref_has_yield) {
+                jm_gen_spill_load(mt, src, pre_src_spill);
+                jm_gen_spill_load(mt, key, pre_key_spill);
+            }
+            if (has_pre_ref) jm_emit_exc_propagate_check(mt);
             MIR_reg_t val = jm_call_2(mt, "js_property_get", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, src),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
-            JsAstNode* target = p->value ? p->value : p->key;
-            jm_emit_destructure_target(mt, target, val);
+            if (has_pre_ref) {
+                jm_emit_destructure_bind_pre_reference(mt, target, &pre_ref, val);
+            } else {
+                jm_emit_destructure_target(mt, target, val);
+            }
         } else if (prop->node_type == JS_AST_NODE_REST_ELEMENT ||
                    prop->node_type == JS_AST_NODE_REST_PROPERTY ||
                    prop->node_type == JS_AST_NODE_SPREAD_ELEMENT) {
@@ -3714,24 +3805,31 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                 MIR_reg_t key;
                 if (member->computed) {
                     key = jm_transpile_box_item(mt, member->property);
+                    jm_emit_exc_propagate_check(mt);
                 } else if (member->property && member->property->node_type == JS_AST_NODE_IDENTIFIER) {
                     JsIdentifierNode* prop = (JsIdentifierNode*)member->property;
                     key = jm_box_string_literal(mt, prop->name->chars, (int)prop->name->len);
                 } else {
                     key = jm_transpile_box_item(mt, member->property);
+                    jm_emit_exc_propagate_check(mt);
                 }
                 MIR_reg_t new_val = jm_transpile_box_item(mt, asgn->right);
-                return jm_call_3(mt, "js_super_property_set", MIR_T_I64,
+                jm_emit_exc_propagate_check(mt);
+                MIR_reg_t super_set_result = jm_call_3(mt, "js_super_property_set", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, new_val));
+                jm_emit_exc_propagate_check(mt);
+                return super_set_result;
             }
         }
 
         JsMirReference ref = jm_emit_reference(mt, asgn->left);
+        jm_emit_exc_propagate_check(mt);
         MIR_reg_t new_val;
         if (asgn->op == JS_OP_ASSIGN) {
             new_val = jm_transpile_box_item(mt, asgn->right);
+            jm_emit_exc_propagate_check(mt);
         } else if (asgn->op == JS_OP_AND_ASSIGN || asgn->op == JS_OP_OR_ASSIGN ||
                    asgn->op == JS_OP_NULLISH_ASSIGN) {
             // Logical assignment with short-circuit for member expressions
@@ -7144,6 +7242,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_undefined(mt);
                 struct hashmap* eval_bridged = NULL;
                 if (!mt->in_main) {
+                    jm_emit_eval_local_ensure_frame(mt);
                     eval_bridged = jm_eval_env_push_bindings(mt);
                 }
                 MIR_reg_t eval_result = jm_call_2(mt, "js_builtin_eval", MIR_T_I64,

@@ -13548,12 +13548,68 @@ static int js_eval_env_binding_count = 0;
 static int js_eval_env_frame_stack[JS_EVAL_ENV_FRAME_MAX];
 static int js_eval_env_frame_depth = 0;
 
+#define JS_EVAL_LOCAL_BIND_MAX 512
+#define JS_EVAL_LOCAL_FRAME_MAX 64
+typedef struct JsEvalLocalBinding {
+    Item key;
+    Item value;
+} JsEvalLocalBinding;
+
+static JsEvalLocalBinding js_eval_local_bindings[JS_EVAL_LOCAL_BIND_MAX];
+static int js_eval_local_binding_count = 0;
+static int js_eval_local_frame_stack[JS_EVAL_LOCAL_FRAME_MAX];
+static int js_eval_local_frame_depth = 0;
+
 extern "C" void js_eval_env_push_frame(void) {
     if (js_eval_env_frame_depth >= JS_EVAL_ENV_FRAME_MAX) {
         log_error("js-eval-env: frame stack overflow");
         return;
     }
     js_eval_env_frame_stack[js_eval_env_frame_depth++] = js_eval_env_binding_count;
+}
+
+extern "C" void js_eval_local_push_frame(void) {
+    if (js_eval_local_frame_depth >= JS_EVAL_LOCAL_FRAME_MAX) {
+        log_error("js-eval-local: frame stack overflow");
+        return;
+    }
+    js_eval_local_frame_stack[js_eval_local_frame_depth++] = js_eval_local_binding_count;
+}
+
+extern "C" void js_eval_local_pop_frame(void) {
+    if (js_eval_local_frame_depth <= 0) return;
+    int frame_start = js_eval_local_frame_stack[--js_eval_local_frame_depth];
+    js_eval_local_binding_count = frame_start;
+}
+
+static int js_eval_local_find_binding(Item key) {
+    if (js_eval_local_frame_depth <= 0) return -1;
+    int frame_start = js_eval_local_frame_stack[js_eval_local_frame_depth - 1];
+    for (int i = js_eval_local_binding_count - 1; i >= frame_start; i--) {
+        if (js_with_binding_key_same(js_eval_local_bindings[i].key, key)) return i;
+    }
+    return -1;
+}
+
+extern "C" Item js_eval_local_get_binding_or_fallback(Item key, Item fallback) {
+    int idx = js_eval_local_find_binding(key);
+    return idx >= 0 ? js_eval_local_bindings[idx].value : fallback;
+}
+
+extern "C" void js_eval_local_export_var(Item key, Item value) {
+    if (js_eval_env_frame_depth <= 0 || js_eval_local_frame_depth <= 0) return;
+    int idx = js_eval_local_find_binding(key);
+    if (idx >= 0) {
+        js_eval_local_bindings[idx].value = value;
+        return;
+    }
+    if (js_eval_local_binding_count >= JS_EVAL_LOCAL_BIND_MAX) {
+        log_error("js-eval-local: binding stack overflow");
+        return;
+    }
+    JsEvalLocalBinding* binding = &js_eval_local_bindings[js_eval_local_binding_count++];
+    binding->key = key;
+    binding->value = value;
 }
 
 extern "C" void js_eval_env_bind(Item key, Item value) {

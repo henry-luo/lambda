@@ -3019,6 +3019,7 @@ void jm_transpile_return(JsMirTranspiler* mt, JsReturnNode* ret) {
             return;
         }
 
+        jm_emit_eval_local_pop_if_needed(mt);
         jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, val)));
         return;
     }
@@ -3035,6 +3036,7 @@ void jm_transpile_return(JsMirTranspiler* mt, JsReturnNode* ret) {
         MIR_reg_t done_result = jm_call_2(mt, "js_gen_yield_result", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, val),
             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)-1));
+        jm_emit_eval_local_pop_if_needed(mt);
         jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, done_result)));
         return;
     }
@@ -3062,6 +3064,7 @@ void jm_transpile_return(JsMirTranspiler* mt, JsReturnNode* ret) {
         return;
     }
 
+    jm_emit_eval_local_pop_if_needed(mt);
     jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, val)));
 }
 
