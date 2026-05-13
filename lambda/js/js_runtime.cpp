@@ -4404,6 +4404,7 @@ static bool js_is_class_instance_prototype(Item proto) {
 static Item js_super_lookup_base(Item receiver) {
     if (js_is_class_object_item(receiver)) {
         Item static_proto = js_get_prototype_of(receiver);
+        if (static_proto.item == ITEM_JS_UNDEFINED) return ItemNull;
         return static_proto;
     }
 
