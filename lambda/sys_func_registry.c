@@ -1559,6 +1559,7 @@ JitImport jit_runtime_imports[] = {
     // timing
     {"js_performance_now", FPTR(js_performance_now)},
     {"js_date_now", FPTR(js_date_now)},
+    {"js_date_now_string", FPTR(js_date_now_string)},
     {"js_date_new", FPTR(js_date_new)},
     {"js_date_new_from", FPTR(js_date_new_from)},
     {"js_date_utc", FPTR(js_date_utc)},

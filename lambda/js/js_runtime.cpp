@@ -3064,6 +3064,9 @@ extern "C" Item js_property_get(Item object, Item key) {
                         // v76: Populate Map/Set prototype methods for test262 compliance
                         if (nl == 3 && strncmp(nm, "Map", 3) == 0) {
                             js_populate_builtin_prototype_methods(fn->prototype, nm, nl);
+                            Item size_key = (Item){.item = s2it(heap_create_name("size", 4))};
+                            Item size_getter = js_get_or_create_builtin(JS_BUILTIN_MAP_SIZE_GETTER, "get size", 0);
+                            js_install_native_accessor(fn->prototype, size_key, size_getter, ItemNull, JSPD_NON_ENUMERABLE);
                             // Symbol.iterator = entries
                             Item si_key = (Item){.item = s2it(heap_create_name("__sym_1", 7))};
                             Item si_fn = js_get_or_create_builtin(JS_BUILTIN_MAP_ENTRIES, "[Symbol.iterator]", 0);
@@ -3072,6 +3075,9 @@ extern "C" Item js_property_get(Item object, Item key) {
                         }
                         if (nl == 3 && strncmp(nm, "Set", 3) == 0) {
                             js_populate_builtin_prototype_methods(fn->prototype, nm, nl);
+                            Item size_key = (Item){.item = s2it(heap_create_name("size", 4))};
+                            Item size_getter = js_get_or_create_builtin(JS_BUILTIN_SET_SIZE_GETTER, "get size", 0);
+                            js_install_native_accessor(fn->prototype, size_key, size_getter, ItemNull, JSPD_NON_ENUMERABLE);
                             // ES spec: Set.prototype.keys === Set.prototype.values
                             Item values_fn = js_get_or_create_builtin(JS_BUILTIN_SET_VALUES, "values", 0);
                             if (values_fn.item != ItemNull.item) {
@@ -3101,6 +3107,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                             Item tp_fn = js_get_or_create_builtin(JS_BUILTIN_DATE_TO_PRIMITIVE, "[Symbol.toPrimitive]", 1);
                             js_property_set(fn->prototype, tp_key, tp_fn);
                             js_mark_non_enumerable(fn->prototype, tp_key);
+                            js_mark_non_writable(fn->prototype, tp_key);
                         }
                         // v82b: Populate Number.prototype methods
                         if (nl == 6 && strncmp(nm, "Number", 6) == 0) {
@@ -7608,6 +7615,8 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         return js_date_method(this_val, 8);
     case JS_BUILTIN_DATE_TO_LOCALE_DATE_STRING:
         return js_date_method(this_val, 9);
+    case JS_BUILTIN_DATE_TO_LOCALE_TIME_STRING:
+        return js_date_setter(this_val, 47, ItemError, ItemError, ItemError, ItemError);
     case JS_BUILTIN_DATE_GET_UTC_FULL_YEAR:
         return js_date_method(this_val, 10);
     case JS_BUILTIN_DATE_GET_UTC_MONTH:
@@ -7687,63 +7696,63 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     case JS_BUILTIN_DATE_TO_TIME_STRING:
         return js_date_setter(this_val, 47, undef, undef, undef, undef);
     case JS_BUILTIN_DATE_SET_TIME:
-        return js_date_setter(this_val, 20, arg0, undef, undef, undef);
+        return js_date_setter(this_val, 20, arg0, ItemError, ItemError, ItemError);
     case JS_BUILTIN_DATE_SET_FULL_YEAR: {
-        Item a1 = (arg_count > 1) ? args[1] : undef;
-        Item a2 = (arg_count > 2) ? args[2] : undef;
-        return js_date_setter(this_val, 21, arg0, a1, a2, undef);
+        Item a1 = (arg_count > 1) ? args[1] : ItemError;
+        Item a2 = (arg_count > 2) ? args[2] : ItemError;
+        return js_date_setter(this_val, 21, arg0, a1, a2, ItemError);
     }
     case JS_BUILTIN_DATE_SET_MONTH: {
-        Item a1 = (arg_count > 1) ? args[1] : undef;
-        return js_date_setter(this_val, 22, arg0, a1, undef, undef);
+        Item a1 = (arg_count > 1) ? args[1] : ItemError;
+        return js_date_setter(this_val, 22, arg0, a1, ItemError, ItemError);
     }
     case JS_BUILTIN_DATE_SET_DATE:
-        return js_date_setter(this_val, 23, arg0, undef, undef, undef);
+        return js_date_setter(this_val, 23, arg0, ItemError, ItemError, ItemError);
     case JS_BUILTIN_DATE_SET_HOURS: {
-        Item a1 = (arg_count > 1) ? args[1] : undef;
-        Item a2 = (arg_count > 2) ? args[2] : undef;
-        Item a3 = (arg_count > 3) ? args[3] : undef;
+        Item a1 = (arg_count > 1) ? args[1] : ItemError;
+        Item a2 = (arg_count > 2) ? args[2] : ItemError;
+        Item a3 = (arg_count > 3) ? args[3] : ItemError;
         return js_date_setter(this_val, 24, arg0, a1, a2, a3);
     }
     case JS_BUILTIN_DATE_SET_MINUTES: {
-        Item a1 = (arg_count > 1) ? args[1] : undef;
-        Item a2 = (arg_count > 2) ? args[2] : undef;
-        return js_date_setter(this_val, 25, arg0, a1, a2, undef);
+        Item a1 = (arg_count > 1) ? args[1] : ItemError;
+        Item a2 = (arg_count > 2) ? args[2] : ItemError;
+        return js_date_setter(this_val, 25, arg0, a1, a2, ItemError);
     }
     case JS_BUILTIN_DATE_SET_SECONDS: {
-        Item a1 = (arg_count > 1) ? args[1] : undef;
-        return js_date_setter(this_val, 26, arg0, a1, undef, undef);
+        Item a1 = (arg_count > 1) ? args[1] : ItemError;
+        return js_date_setter(this_val, 26, arg0, a1, ItemError, ItemError);
     }
     case JS_BUILTIN_DATE_SET_MILLISECONDS:
-        return js_date_setter(this_val, 27, arg0, undef, undef, undef);
+        return js_date_setter(this_val, 27, arg0, ItemError, ItemError, ItemError);
     case JS_BUILTIN_DATE_SET_UTC_FULL_YEAR: {
-        Item a1 = (arg_count > 1) ? args[1] : undef;
-        Item a2 = (arg_count > 2) ? args[2] : undef;
-        return js_date_setter(this_val, 30, arg0, a1, a2, undef);
+        Item a1 = (arg_count > 1) ? args[1] : ItemError;
+        Item a2 = (arg_count > 2) ? args[2] : ItemError;
+        return js_date_setter(this_val, 30, arg0, a1, a2, ItemError);
     }
     case JS_BUILTIN_DATE_SET_UTC_MONTH: {
-        Item a1 = (arg_count > 1) ? args[1] : undef;
-        return js_date_setter(this_val, 31, arg0, a1, undef, undef);
+        Item a1 = (arg_count > 1) ? args[1] : ItemError;
+        return js_date_setter(this_val, 31, arg0, a1, ItemError, ItemError);
     }
     case JS_BUILTIN_DATE_SET_UTC_DATE:
-        return js_date_setter(this_val, 32, arg0, undef, undef, undef);
+        return js_date_setter(this_val, 32, arg0, ItemError, ItemError, ItemError);
     case JS_BUILTIN_DATE_SET_UTC_HOURS: {
-        Item a1 = (arg_count > 1) ? args[1] : undef;
-        Item a2 = (arg_count > 2) ? args[2] : undef;
-        Item a3 = (arg_count > 3) ? args[3] : undef;
+        Item a1 = (arg_count > 1) ? args[1] : ItemError;
+        Item a2 = (arg_count > 2) ? args[2] : ItemError;
+        Item a3 = (arg_count > 3) ? args[3] : ItemError;
         return js_date_setter(this_val, 33, arg0, a1, a2, a3);
     }
     case JS_BUILTIN_DATE_SET_UTC_MINUTES: {
-        Item a1 = (arg_count > 1) ? args[1] : undef;
-        Item a2 = (arg_count > 2) ? args[2] : undef;
-        return js_date_setter(this_val, 34, arg0, a1, a2, undef);
+        Item a1 = (arg_count > 1) ? args[1] : ItemError;
+        Item a2 = (arg_count > 2) ? args[2] : ItemError;
+        return js_date_setter(this_val, 34, arg0, a1, a2, ItemError);
     }
     case JS_BUILTIN_DATE_SET_UTC_SECONDS: {
-        Item a1 = (arg_count > 1) ? args[1] : undef;
-        return js_date_setter(this_val, 35, arg0, a1, undef, undef);
+        Item a1 = (arg_count > 1) ? args[1] : ItemError;
+        return js_date_setter(this_val, 35, arg0, a1, ItemError, ItemError);
     }
     case JS_BUILTIN_DATE_SET_UTC_MILLISECONDS:
-        return js_date_setter(this_val, 36, arg0, undef, undef, undef);
+        return js_date_setter(this_val, 36, arg0, ItemError, ItemError, ItemError);
     case JS_BUILTIN_DATE_GET_YEAR:
         return js_date_setter(this_val, 50, undef, undef, undef, undef);
     case JS_BUILTIN_DATE_SET_YEAR:
@@ -8215,7 +8224,12 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     case JS_BUILTIN_MAP_VALUES:  // Map.prototype.values()
     {
         JsCollectionData* cd = js_get_collection_data(this_val);
-        if (!cd) {
+        bool needs_map = builtin_id == JS_BUILTIN_MAP_ENTRIES || builtin_id == JS_BUILTIN_MAP_KEYS ||
+            builtin_id == JS_BUILTIN_MAP_VALUES;
+        bool needs_set = builtin_id == JS_BUILTIN_SET_VALUES || builtin_id == JS_BUILTIN_SET_KEYS ||
+            builtin_id == JS_BUILTIN_SET_ENTRIES;
+        if (!cd || cd->is_weak || (needs_map && cd->type != JS_COLLECTION_MAP) ||
+                (needs_set && cd->type != JS_COLLECTION_SET)) {
             Item tn = (Item){.item = s2it(heap_create_name("TypeError", 9))};
             Item msg = (Item){.item = s2it(heap_create_name("Method called on incompatible receiver"))};
             js_throw_value(js_new_error_with_name(tn, msg));
@@ -8427,7 +8441,21 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     }
     case JS_BUILTIN_COLL_SIZE_GETTER: {
         JsCollectionData* cd = js_get_collection_data(this_val);
-        if (!cd) return undef;
+        if (!cd || cd->is_weak) return js_throw_type_error("get size called on incompatible receiver");
+        return (Item){.item = i2it((int64_t)hashmap_count(cd->hmap))};
+    }
+    case JS_BUILTIN_MAP_SIZE_GETTER: {
+        JsCollectionData* cd = js_get_collection_data(this_val);
+        if (!cd || cd->type != JS_COLLECTION_MAP || cd->is_weak) {
+            return js_throw_type_error("get Map.prototype.size called on incompatible receiver");
+        }
+        return (Item){.item = i2it((int64_t)hashmap_count(cd->hmap))};
+    }
+    case JS_BUILTIN_SET_SIZE_GETTER: {
+        JsCollectionData* cd = js_get_collection_data(this_val);
+        if (!cd || cd->type != JS_COLLECTION_SET || cd->is_weak) {
+            return js_throw_type_error("get Set.prototype.size called on incompatible receiver");
+        }
         return (Item){.item = i2it((int64_t)hashmap_count(cd->hmap))};
     }
     case JS_BUILTIN_ARRAYBUFFER_ISVIEW: {
@@ -8765,6 +8793,11 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
     if (fn && fn->name) { _trace_last_fn = fn->name->chars; _trace_last_fn_len = (int)fn->name->len; }
     else if (fn) { _trace_last_fn = "(anon)"; _trace_last_fn_len = 6; }
     _trace_total_calls++;
+
+    if (fn && fn->name && fn->name->len == 4 && strncmp(fn->name->chars, "Date", 4) == 0) {
+        extern Item js_date_now_string(void);
+        return js_date_now_string();
+    }
 
     // Proxy revoke function: builtin_id == -3, env[0] holds JsProxyData*
     if (fn && fn->builtin_id == -3) {
@@ -12017,10 +12050,6 @@ static Item js_collection_create(int type) {
     Item cd_key = (Item){.item = s2it(heap_create_name(JS_COLLECTION_DATA_KEY))};
     Item cd_val = (Item){.item = i2it((int64_t)(uintptr_t)cd)};
     js_property_set(obj, cd_key, cd_val);
-    // set initial size property
-    Item size_key = (Item){.item = s2it(heap_create_name("size"))};
-    Item size_val = (Item){.item = i2it(0)};
-    js_property_set(obj, size_key, size_val);
     return obj;
 }
 
@@ -12080,9 +12109,8 @@ static void js_collection_order_remove(JsCollectionData* cd, Item key) {
 }
 
 static void js_collection_update_size(Item obj, JsCollectionData* cd) {
-    Item size_key = (Item){.item = s2it(heap_create_name("size"))};
-    Item size_val = (Item){.item = i2it((int64_t)hashmap_count(cd->hmap))};
-    js_property_set(obj, size_key, size_val);
+    (void)obj;
+    (void)cd;
 }
 
 extern "C" Item js_map_collection_new(void) {
@@ -12123,6 +12151,7 @@ extern "C" Item js_set_collection_new_from(Item iterable) {
 
     Item add_key = (Item){.item = s2it(heap_create_name("add", 3))};
     Item adder = js_property_get(set, add_key);
+    if (js_check_exception()) return ItemNull;
     if (get_type_id(adder) != LMD_TYPE_FUNC) {
         return js_throw_type_error("Set.prototype.add is not callable");
     }
@@ -12151,6 +12180,7 @@ extern "C" Item js_map_collection_new_from(Item iterable) {
 
     Item set_key = (Item){.item = s2it(heap_create_name("set", 3))};
     Item adder = js_property_get(map, set_key);
+    if (js_check_exception()) return ItemNull;
     if (get_type_id(adder) != LMD_TYPE_FUNC) {
         return js_throw_type_error("Map.prototype.set is not callable");
     }
@@ -12248,17 +12278,27 @@ extern "C" Item js_collection_method(Item obj, int method_id, Item arg1, Item ar
             return (Item){.item = b2it(found ? BOOL_TRUE : BOOL_FALSE)};
         }
         case 4: { // clear()
+            JsCollectionOrderNode* node = cd->order_head;
+            while (node) {
+                node->deleted = true;
+                node = node->next;
+            }
             hashmap_clear(cd->hmap, false);
-            cd->order_head = NULL;
-            cd->order_tail = NULL;
             js_collection_update_size(obj, cd);
             return make_js_undefined();
         }
         case 5: { // forEach(callback[, thisArg]) — insertion order
+            if (get_type_id(arg1) != LMD_TYPE_FUNC) {
+                return js_throw_type_error("Map/Set.prototype.forEach callback is not callable");
+            }
             // thisArg: use undefined if not provided (ItemNull means not passed)
             Item this_arg = (arg2.item && arg2.item != ItemNull.item) ? arg2 : make_js_undefined();
             JsCollectionOrderNode* node = cd->order_head;
             while (node) {
+                if (node->deleted) {
+                    node = node->next;
+                    continue;
+                }
                 if (cd->type == JS_COLLECTION_SET) {
                     // callback(value, value, set)
                     Item args[3] = {node->key, node->key, obj};
@@ -13353,14 +13393,39 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 // Helper: GetSetRecord validation per ES2025 spec:
                 // Check that `other` has a callable `size`, callable `has`, and callable `keys`.
                 // Returns false and throws TypeError if `keys` is not callable.
-                auto validate_set_record = [](Item other) -> bool {
-                    if (get_type_id(other) != LMD_TYPE_MAP) return true; // Set objects pass via other_cd
-                    // Check `keys` is callable (spec step 10)
+                auto validate_set_record = [](Item other, double* out_size) -> bool {
+                    TypeId other_type = get_type_id(other);
+                    if (other_type != LMD_TYPE_MAP && other_type != LMD_TYPE_ARRAY &&
+                            other_type != LMD_TYPE_FUNC && other_type != LMD_TYPE_ELEMENT) {
+                        js_throw_type_error("Set method argument must be an object");
+                        return false;
+                    }
+                    Item size_val = js_property_get(other, (Item){.item = s2it(heap_create_name("size", 4))});
+                    if (js_check_exception()) return false;
+                    Item size_num = js_to_number(size_val);
+                    if (js_check_exception()) return false;
+                    double size = NAN;
+                    TypeId size_type = get_type_id(size_num);
+                    if (size_type == LMD_TYPE_FLOAT) size = it2d(size_num);
+                    else if (size_type == LMD_TYPE_INT) size = (double)it2i(size_num);
+                    else if (size_type == LMD_TYPE_INT64) size = (double)it2l(size_num);
+                    if (isnan(size)) {
+                        js_throw_type_error("Set method argument size must be a number");
+                        return false;
+                    }
+                    Item has_fn = js_property_get(other, (Item){.item = s2it(heap_create_name("has", 3))});
+                    if (js_check_exception()) return false;
+                    if (get_type_id(has_fn) != LMD_TYPE_FUNC) {
+                        js_throw_type_error("has is not a function");
+                        return false;
+                    }
                     Item keys_fn = js_property_get(other, (Item){.item = s2it(heap_create_name("keys", 4))});
+                    if (js_check_exception()) return false;
                     if (get_type_id(keys_fn) != LMD_TYPE_FUNC) {
                         js_throw_type_error("keys is not a function");
                         return false;
                     }
+                    if (out_size) *out_size = size;
                     return true;
                 };
                 // Helper: check if a Set-like "other" contains key
@@ -13407,8 +13472,11 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 if (cd->type == JS_COLLECTION_SET && method->len == 12 && strncmp(method->chars, "intersection", 12) == 0) {
                     // Set.prototype.intersection(other)
                     Item other = argc > 0 ? args[0] : ItemNull;
-                    JsCollectionData* other_cd = js_get_collection_data(other);
-                    if (!other_cd && !validate_set_record(other)) return ItemNull;
+                    JsCollectionData* raw_other_cd = js_get_collection_data(other);
+                    JsCollectionData* other_cd = (raw_other_cd && !raw_other_cd->is_weak) ? raw_other_cd : NULL;
+                    double other_size = 0.0;
+                    if (other_cd) other_size = (double)hashmap_count(other_cd->hmap);
+                    else if (!validate_set_record(other, &other_size)) return ItemNull;
                     Item result = js_collection_create(JS_COLLECTION_SET);
                     js_collection_link_prototype(result, "Set", 3);
                     for (JsCollectionOrderNode* node = cd->order_head; node; node = node->next) {
@@ -13420,8 +13488,11 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 else if (cd->type == JS_COLLECTION_SET && method->len == 5 && strncmp(method->chars, "union", 5) == 0) {
                     // Set.prototype.union(other)
                     Item other = argc > 0 ? args[0] : ItemNull;
-                    JsCollectionData* other_cd = js_get_collection_data(other);
-                    if (!other_cd && !validate_set_record(other)) return ItemNull;
+                    JsCollectionData* raw_other_cd = js_get_collection_data(other);
+                    JsCollectionData* other_cd = (raw_other_cd && !raw_other_cd->is_weak) ? raw_other_cd : NULL;
+                    double other_size = 0.0;
+                    if (other_cd) other_size = (double)hashmap_count(other_cd->hmap);
+                    else if (!validate_set_record(other, &other_size)) return ItemNull;
                     Item result = js_collection_create(JS_COLLECTION_SET);
                     js_collection_link_prototype(result, "Set", 3);
                     for (JsCollectionOrderNode* node = cd->order_head; node; node = node->next)
@@ -13437,8 +13508,11 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 else if (cd->type == JS_COLLECTION_SET && method->len == 10 && strncmp(method->chars, "difference", 10) == 0) {
                     // Set.prototype.difference(other)
                     Item other = argc > 0 ? args[0] : ItemNull;
-                    JsCollectionData* other_cd = js_get_collection_data(other);
-                    if (!other_cd && !validate_set_record(other)) return ItemNull;
+                    JsCollectionData* raw_other_cd = js_get_collection_data(other);
+                    JsCollectionData* other_cd = (raw_other_cd && !raw_other_cd->is_weak) ? raw_other_cd : NULL;
+                    double other_size = 0.0;
+                    if (other_cd) other_size = (double)hashmap_count(other_cd->hmap);
+                    else if (!validate_set_record(other, &other_size)) return ItemNull;
                     Item result = js_collection_create(JS_COLLECTION_SET);
                     js_collection_link_prototype(result, "Set", 3);
                     for (JsCollectionOrderNode* node = cd->order_head; node; node = node->next) {
@@ -13450,8 +13524,11 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 else if (cd->type == JS_COLLECTION_SET && method->len == 19 && strncmp(method->chars, "symmetricDifference", 19) == 0) {
                     // Set.prototype.symmetricDifference(other)
                     Item other = argc > 0 ? args[0] : ItemNull;
-                    JsCollectionData* other_cd = js_get_collection_data(other);
-                    if (!other_cd && !validate_set_record(other)) return ItemNull;
+                    JsCollectionData* raw_other_cd = js_get_collection_data(other);
+                    JsCollectionData* other_cd = (raw_other_cd && !raw_other_cd->is_weak) ? raw_other_cd : NULL;
+                    double other_size = 0.0;
+                    if (other_cd) other_size = (double)hashmap_count(other_cd->hmap);
+                    else if (!validate_set_record(other, &other_size)) return ItemNull;
                     Item result = js_collection_create(JS_COLLECTION_SET);
                     js_collection_link_prototype(result, "Set", 3);
                     for (JsCollectionOrderNode* node = cd->order_head; node; node = node->next) {
@@ -13471,8 +13548,11 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 else if (cd->type == JS_COLLECTION_SET && method->len == 10 && strncmp(method->chars, "isSubsetOf", 10) == 0) {
                     // Set.prototype.isSubsetOf(other)
                     Item other = argc > 0 ? args[0] : ItemNull;
-                    JsCollectionData* other_cd = js_get_collection_data(other);
-                    if (!other_cd && !validate_set_record(other)) return ItemNull;
+                    JsCollectionData* raw_other_cd = js_get_collection_data(other);
+                    JsCollectionData* other_cd = (raw_other_cd && !raw_other_cd->is_weak) ? raw_other_cd : NULL;
+                    double other_size = 0.0;
+                    if (other_cd) other_size = (double)hashmap_count(other_cd->hmap);
+                    else if (!validate_set_record(other, &other_size)) return ItemNull;
                     for (JsCollectionOrderNode* node = cd->order_head; node; node = node->next) {
                         if (!set_like_has(other, other_cd, node->key)) return (Item){.item = ITEM_FALSE};
                     }
@@ -13481,8 +13561,11 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 else if (cd->type == JS_COLLECTION_SET && method->len == 12 && strncmp(method->chars, "isSupersetOf", 12) == 0) {
                     // Set.prototype.isSupersetOf(other)
                     Item other = argc > 0 ? args[0] : ItemNull;
-                    JsCollectionData* other_cd = js_get_collection_data(other);
-                    if (!other_cd && !validate_set_record(other)) return ItemNull;
+                    JsCollectionData* raw_other_cd = js_get_collection_data(other);
+                    JsCollectionData* other_cd = (raw_other_cd && !raw_other_cd->is_weak) ? raw_other_cd : NULL;
+                    double other_size = 0.0;
+                    if (other_cd) other_size = (double)hashmap_count(other_cd->hmap);
+                    else if (!validate_set_record(other, &other_size)) return ItemNull;
                     Item other_keys = set_like_keys(other, other_cd);
                     int64_t ok_len = js_array_length(other_keys);
                     for (int64_t i = 0; i < ok_len; i++) {
@@ -13495,8 +13578,11 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 else if (cd->type == JS_COLLECTION_SET && method->len == 14 && strncmp(method->chars, "isDisjointFrom", 14) == 0) {
                     // Set.prototype.isDisjointFrom(other)
                     Item other = argc > 0 ? args[0] : ItemNull;
-                    JsCollectionData* other_cd = js_get_collection_data(other);
-                    if (!other_cd && !validate_set_record(other)) return ItemNull;
+                    JsCollectionData* raw_other_cd = js_get_collection_data(other);
+                    JsCollectionData* other_cd = (raw_other_cd && !raw_other_cd->is_weak) ? raw_other_cd : NULL;
+                    double other_size = 0.0;
+                    if (other_cd) other_size = (double)hashmap_count(other_cd->hmap);
+                    else if (!validate_set_record(other, &other_size)) return ItemNull;
                     for (JsCollectionOrderNode* node = cd->order_head; node; node = node->next) {
                         if (set_like_has(other, other_cd, node->key)) return (Item){.item = ITEM_FALSE};
                     }

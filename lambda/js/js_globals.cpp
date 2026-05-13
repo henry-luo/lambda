@@ -1195,9 +1195,61 @@ extern "C" Item js_performance_now(void) {
 static double js_date_now_buf[64];
 static int js_date_now_idx = 0;
 
+static int64_t js_date_days_from_civil(int64_t year, unsigned month, unsigned day);
+
 static double js_date_time_clip(double value) {
     if (isnan(value) || isinf(value) || fabs(value) > 8.64e15) return NAN;
-    return value < 0 ? -floor(-value) : floor(value);
+    double clipped = value < 0 ? -floor(-value) : floor(value);
+    return clipped + 0.0;
+}
+
+static double js_date_number_to_double(Item value) {
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_FLOAT) return it2d(value);
+    if (type == LMD_TYPE_INT) return (double)it2i(value);
+    if (type == LMD_TYPE_INT64) return (double)it2l(value);
+    return NAN;
+}
+
+static double js_date_to_number_double(Item value) {
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_UNDEFINED || value.item == ITEM_JS_UNDEFINED) return NAN;
+    Item num = js_to_number(value);
+    if (js_check_exception()) return NAN;
+    return js_date_number_to_double(num);
+}
+
+static double js_date_to_integer(double value) {
+    if (isnan(value) || isinf(value) || value == 0.0) return value;
+    return value < 0.0 ? ceil(value) : floor(value);
+}
+
+static double js_date_make_day_double(double year, double month, double day) {
+    if (isnan(year) || isnan(month) || isnan(day) ||
+        isinf(year) || isinf(month) || isinf(day)) return NAN;
+    double year_delta = floor(month / 12.0);
+    double normalized_year = year + year_delta;
+    double normalized_month = month - year_delta * 12.0;
+    if (normalized_month < 0.0) {
+        normalized_month += 12.0;
+        normalized_year -= 1.0;
+    }
+    if (normalized_year < (double)INT64_MIN || normalized_year > (double)INT64_MAX) return NAN;
+    int64_t y = (int64_t)normalized_year;
+    unsigned m = (unsigned)normalized_month + 1;
+    return (double)js_date_days_from_civil(y, m, 1) + day - 1.0;
+}
+
+static double js_date_make_time_double(double hour, double min, double sec, double millis) {
+    if (isnan(hour) || isnan(min) || isnan(sec) || isnan(millis) ||
+        isinf(hour) || isinf(min) || isinf(sec) || isinf(millis)) return NAN;
+    return ((hour * 3600000.0 + min * 60000.0) + sec * 1000.0) + millis;
+}
+
+static double js_date_make_date_double(double day, double time) {
+    if (isnan(day) || isnan(time) || isinf(day) || isinf(time)) return NAN;
+    volatile double day_ms = day * 86400000.0;
+    return day_ms + time;
 }
 
 static time_t js_date_seconds_from_ms(double ms) {
@@ -1208,6 +1260,16 @@ static int js_date_millis_from_ms(double ms, time_t secs) {
     int millis = (int)(ms - (double)secs * 1000.0);
     if (millis < 0) millis += 1000;
     return millis;
+}
+
+static void js_date_localtime_minute(double ms, struct tm* out_tm) {
+    time_t secs = js_date_seconds_from_ms(ms);
+    struct tm offset_tm;
+    localtime_r(&secs, &offset_tm);
+    int offset_min = -(int)(get_tm_gmtoff(&offset_tm) / 60);
+    double local_civil_ms = ms - (double)offset_min * 60000.0;
+    time_t local_secs = js_date_seconds_from_ms(local_civil_ms);
+    gmtime_r(&local_secs, out_tm);
 }
 
 static int64_t js_date_floor_div(int64_t value, int64_t divisor) {
@@ -1273,8 +1335,124 @@ static double js_date_make_utc_ms_from_parts(int year, int month, int day,
 static double js_date_mktime_ms_or_fallback(struct tm* tm, int millis,
         int year, int month, int day, int hour, int minute, int second) {
     time_t secs = mktime(tm);
-    if (secs != (time_t)-1) return (double)secs * 1000.0 + (double)millis;
+    if (secs != (time_t)-1) {
+        struct tm local_tm;
+        localtime_r(&secs, &local_tm);
+        int offset_min = -(int)(get_tm_gmtoff(&local_tm) / 60);
+        double day_value = js_date_make_day_double((double)year, (double)month, (double)day);
+        double time_value = js_date_make_time_double((double)hour, (double)minute, (double)second, (double)millis);
+        return js_date_make_date_double(day_value, time_value) + (double)offset_min * 60000.0;
+    }
     return js_date_make_utc_ms_from_parts(year, month, day, hour, minute, second, millis, true);
+}
+
+static bool js_date_parse_fixed_digits(const char** cursor, const char* end, int count, int* out_value) {
+    const char* p = *cursor;
+    if (end - p < count) return false;
+    int value = 0;
+    for (int i = 0; i < count; i++) {
+        if (!isdigit((unsigned char)p[i])) return false;
+        value = value * 10 + (p[i] - '0');
+    }
+    *cursor = p + count;
+    *out_value = value;
+    return true;
+}
+
+static bool js_date_parse_iso_ms(String* s, double* out_ms) {
+    if (!s || !out_ms) return false;
+    const char* p = s->chars;
+    const char* end = s->chars + s->len;
+
+    int sign = 1;
+    int year_digits = 4;
+    if (p < end && (*p == '+' || *p == '-')) {
+        sign = (*p == '-') ? -1 : 1;
+        p++;
+        year_digits = 6;
+    }
+    int year_abs = 0;
+    if (!js_date_parse_fixed_digits(&p, end, year_digits, &year_abs)) return false;
+    if (sign < 0 && year_abs == 0) return false;
+    int year = sign * year_abs;
+
+    int month = 1;
+    int day = 1;
+    if (p < end) {
+        if (*p++ != '-') return false;
+        if (!js_date_parse_fixed_digits(&p, end, 2, &month)) return false;
+        if (p < end && *p == '-') {
+            p++;
+            if (!js_date_parse_fixed_digits(&p, end, 2, &day)) return false;
+        } else if (p < end && *p != 'T') {
+            return false;
+        }
+    }
+
+    bool has_time = false;
+    bool has_offset = false;
+    int hour = 0, minute = 0, second = 0, millis = 0;
+    int offset_sign = 1, offset_hour = 0, offset_minute = 0;
+    if (p < end && *p == 'T') {
+        has_time = true;
+        p++;
+        if (!js_date_parse_fixed_digits(&p, end, 2, &hour)) return false;
+        if (p >= end || *p++ != ':') return false;
+        if (!js_date_parse_fixed_digits(&p, end, 2, &minute)) return false;
+        if (p < end && *p == ':') {
+            p++;
+            if (!js_date_parse_fixed_digits(&p, end, 2, &second)) return false;
+            if (p < end && *p == '.') {
+                p++;
+                int digits = 0;
+                while (p < end && isdigit((unsigned char)*p)) {
+                    if (digits < 3) millis = millis * 10 + (*p - '0');
+                    digits++;
+                    p++;
+                }
+                if (digits == 0) return false;
+                while (digits < 3) { millis *= 10; digits++; }
+            }
+        }
+        if (p < end && *p == 'Z') {
+            has_offset = true;
+            p++;
+        } else if (p < end && (*p == '+' || *p == '-')) {
+            has_offset = true;
+            offset_sign = (*p == '-') ? -1 : 1;
+            p++;
+            if (!js_date_parse_fixed_digits(&p, end, 2, &offset_hour)) return false;
+            if (p < end && *p == ':') p++;
+            if (!js_date_parse_fixed_digits(&p, end, 2, &offset_minute)) return false;
+        }
+    }
+    if (p != end) return false;
+
+    double ms;
+    if (has_time && !has_offset) {
+        ms = js_date_make_utc_ms_from_parts(year, month - 1, day, hour, minute, second, millis, true);
+    } else {
+        double day_value = js_date_make_day_double((double)year, (double)(month - 1), (double)day);
+        double time_value = js_date_make_time_double((double)hour, (double)minute, (double)second, (double)millis);
+        ms = js_date_make_date_double(day_value, time_value);
+        if (has_offset) {
+            double offset_ms = (double)offset_sign * ((double)offset_hour * 60.0 + (double)offset_minute) * 60000.0;
+            ms -= offset_ms;
+        }
+    }
+    *out_ms = js_date_time_clip(ms);
+    return true;
+}
+
+static void js_date_format_year(char* buf, size_t size, int year) {
+    if (year < 0) snprintf(buf, size, "-%04d", -year);
+    else snprintf(buf, size, "%04d", year);
+}
+
+static void js_date_format_iso_year(char* buf, size_t size, int year) {
+    if (year >= 0 && year <= 9999) snprintf(buf, size, "%04d", year);
+    else if (year < 0) snprintf(buf, size, "-%06d", -year);
+    else snprintf(buf, size, "+%06d", year);
 }
 
 extern "C" Item js_date_now(void) {
@@ -1315,12 +1493,8 @@ extern "C" Item js_date_new(void) {
 
 // Date() without 'new' — returns a string representation of the current date/time
 extern "C" Item js_date_now_string(void) {
-    time_t now = time(NULL);
-    struct tm* tm_info = localtime(&now);
-    char buf[128];
-    // Match V8/SpiderMonkey format: "Thu Jan 01 1970 00:00:00 GMT+0000 (Timezone)"
-    strftime(buf, sizeof(buf), "%a %b %d %Y %H:%M:%S GMT%z", tm_info);
-    return (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
+    Item date = js_date_new();
+    return js_date_method(date, 17);
 }
 
 // new Date(value) — accepts a numeric timestamp (ms since epoch) or a date string
@@ -1331,7 +1505,7 @@ extern "C" Item js_date_new_from(Item value) {
 
     // helper: store ms with TimeClip validation (|v| > 8.64e15 → NaN)
     auto store_time = [&](double ms) {
-        if (isnan(ms) || isinf(ms) || ms > 8.64e15 || ms < -8.64e15) ms = NAN;
+        ms = js_date_time_clip(ms);
         static double date_buf[16];
         static int date_idx = 0;
         double* fp = &date_buf[date_idx++ % 16];
@@ -1351,6 +1525,11 @@ extern "C" Item js_date_new_from(Item value) {
         if (s && s->len >= 7 && memcmp(s->chars, "-000000", 7) == 0) {
             store_time(NAN);
         } else if (s) {
+            double iso_ms;
+            if (js_date_parse_iso_ms(s, &iso_ms)) {
+                store_time(iso_ms);
+                goto date_done;
+            }
             struct tm tm = {};
             char* rest = strptime(s->chars, "%Y-%m-%dT%H:%M:%S", &tm);
             if (!rest) rest = strptime(s->chars, "%a %b %d %Y %H:%M:%S", &tm);
@@ -1388,7 +1567,7 @@ extern "C" Item js_date_new_from(Item value) {
         bool has_time = false;
         Item other_time = js_map_get_fast_ext(value.map, "__time__", 8, &has_time);
         if (has_time && (get_type_id(other_time) == LMD_TYPE_FLOAT || get_type_id(other_time) == LMD_TYPE_INT || get_type_id(other_time) == LMD_TYPE_INT64)) {
-            double ms = (get_type_id(other_time) == LMD_TYPE_FLOAT) ? it2d(other_time) : (double)it2i(other_time);
+            double ms = js_date_number_to_double(other_time);
             store_time(ms);
         } else {
             // Non-Date object: ToPrimitive(value, default) per ES spec §21.4.2.
@@ -1412,8 +1591,10 @@ extern "C" Item js_date_new_from(Item value) {
                 TypeId nt = get_type_id(num);
                 if (nt == LMD_TYPE_FLOAT)
                     store_time(it2d(num));
-                else if (nt == LMD_TYPE_INT || nt == LMD_TYPE_INT64)
+                else if (nt == LMD_TYPE_INT)
                     store_time((double)it2i(num));
+                else if (nt == LMD_TYPE_INT64)
+                    store_time((double)it2l(num));
                 else
                     store_time(NAN);
             }
@@ -1424,7 +1605,8 @@ extern "C" Item js_date_new_from(Item value) {
         Item num = js_to_number(value);
         TypeId nt = get_type_id(num);
         if (nt == LMD_TYPE_FLOAT) store_time(it2d(num));
-        else if (nt == LMD_TYPE_INT || nt == LMD_TYPE_INT64) store_time((double)it2i(num));
+        else if (nt == LMD_TYPE_INT) store_time((double)it2i(num));
+        else if (nt == LMD_TYPE_INT64) store_time((double)it2l(num));
         else store_time(NAN);
     }
 date_done:
@@ -1436,37 +1618,33 @@ date_done:
 
 // Date.UTC(year, month[, day[, hour[, min[, sec[, ms]]]]]) — returns ms since epoch
 extern "C" Item js_date_utc(Item args_array) {
-    // args_array is a JS array
     int len = (int)js_array_length(args_array);
-    int year = 0, month = 0, day = 1, hour = 0, min = 0, sec = 0, millis = 0;
-    auto get_arg_int = [&](int idx) -> int {
-        Item val = js_array_get_int(args_array, idx);
-        TypeId t = get_type_id(val);
-        if (t == LMD_TYPE_INT) return (int)it2i(val);
-        if (t == LMD_TYPE_FLOAT) return (int)it2d(val);
-        return 0;
-    };
-    if (len > 0) year = get_arg_int(0);
-    if (len > 1) month = get_arg_int(1);
-    if (len > 2) day = get_arg_int(2);
-    if (len > 3) hour = get_arg_int(3);
-    if (len > 4) min = get_arg_int(4);
-    if (len > 5) sec = get_arg_int(5);
-    if (len > 6) millis = get_arg_int(6);
+    double parts[7] = {NAN, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0};
+    int count = len < 7 ? len : 7;
+    for (int i = 0; i < count; i++) {
+        Item num = js_to_number(js_array_get_int(args_array, i));
+        if (js_check_exception()) return ItemNull;
+        parts[i] = js_date_number_to_double(num);
+    }
 
-    struct tm tm = {};
-    tm.tm_year = year - 1900;
-    tm.tm_mon = month;       // 0-based
-    tm.tm_mday = day;
-    tm.tm_hour = hour;
-    tm.tm_min = min;
-    tm.tm_sec = sec;
-
-    time_t t = timegm(&tm);
-    double ms = (double)t * 1000.0 + (double)millis;
-    static double utc_buf[16];
-    static int utc_idx = 0;
-    double* fp = &utc_buf[utc_idx++ % 16];
+    double ms = NAN;
+    bool finite_parts = true;
+    for (int i = 0; i < 7; i++) {
+        if (isnan(parts[i]) || isinf(parts[i])) {
+            finite_parts = false;
+            break;
+        }
+        parts[i] = js_date_to_integer(parts[i]);
+    }
+    if (finite_parts) {
+        double year = parts[0];
+        if (year >= 0.0 && year <= 99.0) year += 1900.0;
+        double day = js_date_make_day_double(year, parts[1], parts[2]);
+        double time = js_date_make_time_double(parts[3], parts[4], parts[5], parts[6]);
+        ms = js_date_make_date_double(day, time);
+    }
+    ms = js_date_time_clip(ms);
+    double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
     *fp = ms;
     return (Item){.item = d2it(fp)};
 }
@@ -1506,7 +1684,7 @@ extern "C" Item js_date_method(Item date_obj, int method_id) {
     // NaN (Invalid Date) handling
     if (isnan(ms)) {
         if (method_id == 8) // toISOString: throw RangeError for Invalid Date
-            return js_throw_type_error("Invalid time value");
+            return js_throw_range_error("Invalid time value");
         if (method_id == 17 || method_id == 9) // toString, toLocaleDateString
             return (Item){.item = s2it(heap_create_name("Invalid Date", 12))};
         double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
@@ -1515,7 +1693,7 @@ extern "C" Item js_date_method(Item date_obj, int method_id) {
     }
     time_t secs = js_date_seconds_from_ms(ms);
     struct tm tm;
-    localtime_r(&secs, &tm);
+    js_date_localtime_minute(ms, &tm);
     switch (method_id) {
         case 1: return (Item){.item = i2it(tm.tm_year + 1900)}; // getFullYear
         case 2: return (Item){.item = i2it(tm.tm_mon)};         // getMonth (0-based)
@@ -1528,12 +1706,14 @@ extern "C" Item js_date_method(Item date_obj, int method_id) {
             return (Item){.item = i2it(millis)};
         }
         case 8: { // toISOString
-            char buf[32];
+            char buf[40];
+            char year_buf[16];
             struct tm utc;
             gmtime_r(&secs, &utc);
             int millis = js_date_millis_from_ms(ms, secs);
-            snprintf(buf, sizeof(buf), "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ",
-                utc.tm_year + 1900, utc.tm_mon + 1, utc.tm_mday,
+            js_date_format_iso_year(year_buf, sizeof(year_buf), utc.tm_year + 1900);
+            snprintf(buf, sizeof(buf), "%s-%02d-%02dT%02d:%02d:%02d.%03dZ",
+                year_buf, utc.tm_mon + 1, utc.tm_mday,
                 utc.tm_hour, utc.tm_min, utc.tm_sec, millis);
             return (Item){.item = s2it(heap_create_name(buf))};
         }
@@ -1571,12 +1751,37 @@ extern "C" Item js_date_method(Item date_obj, int method_id) {
         static const char* wday[] = {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
         static const char* mon[] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
         char buf[64];
-        snprintf(buf, sizeof(buf), "%s %s %02d %04d %02d:%02d:%02d GMT+0000",
+        char year_buf[16];
+        js_date_format_year(year_buf, sizeof(year_buf), utc.tm_year + 1900);
+        snprintf(buf, sizeof(buf), "%s %s %02d %s %02d:%02d:%02d GMT+0000",
             wday[utc.tm_wday], mon[utc.tm_mon], utc.tm_mday,
-            utc.tm_year + 1900, utc.tm_hour, utc.tm_min, utc.tm_sec);
+            year_buf, utc.tm_hour, utc.tm_min, utc.tm_sec);
         return (Item){.item = s2it(heap_create_name(buf))};
     }
     return ItemNull;
+}
+
+static Item js_date_to_json(Item this_val) {
+    TypeId this_type = get_type_id(this_val);
+    if (this_type == LMD_TYPE_NULL || this_type == LMD_TYPE_UNDEFINED ||
+        this_val.item == ITEM_JS_UNDEFINED) {
+        return js_throw_type_error("Date.prototype.toJSON called on null or undefined");
+    }
+    Item obj = js_to_object(this_val);
+    Item tv = js_to_primitive(obj, JS_HINT_NUMBER);
+    if (js_check_exception()) return ItemNull;
+    TypeId tv_type = get_type_id(tv);
+    if (tv_type == LMD_TYPE_INT || tv_type == LMD_TYPE_INT64 || tv_type == LMD_TYPE_FLOAT) {
+        double tv_num = js_date_number_to_double(tv);
+        if (isnan(tv_num) || isinf(tv_num)) return ItemNull;
+    }
+    Item iso_key = (Item){.item = s2it(heap_create_name("toISOString", 11))};
+    Item iso_fn = js_property_access(obj, iso_key);
+    if (js_check_exception()) return ItemNull;
+    if (get_type_id(iso_fn) != LMD_TYPE_FUNC) {
+        return js_throw_type_error("Date.prototype.toJSON toISOString is not callable");
+    }
+    return js_call_function(iso_fn, obj, NULL, 0);
 }
 
 // Process argv storage — C-level copy (safe before heap init)
@@ -1609,12 +1814,7 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
             return date_obj;
         }
         if (method_id == 44) { // toJSON — non-Date: check own/prototype toJSON first
-            Item tj_key = (Item){.item = s2it(heap_create_name("toJSON", 6))};
-            Item fn = js_property_access(date_obj, tj_key);
-            if (get_type_id(fn) == LMD_TYPE_FUNC) {
-                return js_call_function(fn, date_obj, nullptr, 0);
-            }
-            return ItemNull;
+            return js_date_to_json(date_obj);
         }
         return js_throw_type_error("this is not a Date object");
     }
@@ -1624,11 +1824,12 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
     auto to_double = [](Item v) -> double {
         TypeId t = get_type_id(v);
         if (t == LMD_TYPE_FLOAT) return it2d(v);
-        if (t == LMD_TYPE_INT || t == LMD_TYPE_INT64) return (double)it2i(v);
+        if (t == LMD_TYPE_INT) return (double)it2i(v);
+        if (t == LMD_TYPE_INT64) return (double)it2l(v);
         return NAN;
     };
     auto is_present = [](Item v) -> bool {
-        return v.item != ItemNull.item && get_type_id(v) != LMD_TYPE_UNDEFINED;
+        return v.item != ItemError.item;
     };
 
     auto store_ms = [&](double new_ms) -> Item {
@@ -1648,9 +1849,8 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
                 extern Item js_throw_type_error(const char* msg);
                 return js_throw_type_error("Cannot convert a Symbol value to a number");
             }
-            Item num = js_to_number(arg0);
+            double y = js_date_to_number_double(arg0);
             if (js_check_exception()) return ItemNull;
-            double y = to_double(num);
             if (isnan(y)) return store_ms(NAN);
             int iy = (int)y;
             // ES Annex B §B.2.4.1: if 0 ≤ y ≤ 99, year = y + 1900
@@ -1662,11 +1862,25 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
             int old_millis = js_date_millis_from_ms(base_ms, base_secs);
             struct tm tm;
             if (base_was_nan) gmtime_r(&base_secs, &tm);
-            else localtime_r(&base_secs, &tm);
+            else js_date_localtime_minute(base_ms, &tm);
             tm.tm_year = iy - 1900;
             tm.tm_isdst = -1;
-            double new_ms = js_date_mktime_ms_or_fallback(&tm, old_millis,
-                tm.tm_year + 1900, tm.tm_mon, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
+            int new_year = tm.tm_year + 1900;
+            int new_month = tm.tm_mon;
+            int new_day = tm.tm_mday;
+            int new_hour = tm.tm_hour;
+            int new_minute = tm.tm_min;
+            int new_second = tm.tm_sec;
+            double local_ms = js_date_mktime_ms_or_fallback(&tm, old_millis,
+                new_year, new_month, new_day, new_hour, new_minute, new_second);
+            time_t local_secs = js_date_seconds_from_ms(local_ms);
+            struct tm local_tm;
+            localtime_r(&local_secs, &local_tm);
+            int offset_min = -(int)(get_tm_gmtoff(&local_tm) / 60);
+            double day_value = js_date_make_day_double((double)new_year, (double)new_month, (double)new_day);
+            double time_value = js_date_make_time_double((double)new_hour, (double)new_minute,
+                (double)new_second, (double)old_millis);
+            double new_ms = js_date_make_date_double(day_value, time_value) + (double)offset_min * 60000.0;
             return store_ms(new_ms);
         }
         // NaN (Invalid Date) handling
@@ -1686,7 +1900,7 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
         }
         time_t secs = js_date_seconds_from_ms(ms);
         if (method_id == 40) { // getDay
-            struct tm tm; localtime_r(&secs, &tm);
+            struct tm tm; js_date_localtime_minute(ms, &tm);
             return (Item){.item = i2it(tm.tm_wday)};
         }
         if (method_id == 41) { // getUTCDay
@@ -1705,30 +1919,35 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
             return (Item){.item = d2it(fp)};
         }
         if (method_id == 44) { // toJSON — same as toISOString
-            return js_date_method(date_obj, 8);
+            return js_date_to_json(date_obj);
         }
         if (method_id == 45) { // toUTCString
             struct tm utc; gmtime_r(&secs, &utc);
             static const char* wday[] = {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
             static const char* mon[] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
             char buf[64];
-            snprintf(buf, sizeof(buf), "%s, %02d %s %04d %02d:%02d:%02d GMT",
+            char year_buf[16];
+            js_date_format_year(year_buf, sizeof(year_buf), utc.tm_year + 1900);
+            snprintf(buf, sizeof(buf), "%s, %02d %s %s %02d:%02d:%02d GMT",
                 wday[utc.tm_wday], utc.tm_mday, mon[utc.tm_mon],
-                utc.tm_year + 1900, utc.tm_hour, utc.tm_min, utc.tm_sec);
+                year_buf, utc.tm_hour, utc.tm_min, utc.tm_sec);
             return (Item){.item = s2it(heap_create_name(buf))};
         }
         if (method_id == 46) { // toDateString
-            struct tm tm; localtime_r(&secs, &tm);
+            struct tm tm; js_date_localtime_minute(ms, &tm);
             static const char* wday[] = {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
             static const char* mon[] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
             char buf[32];
-            snprintf(buf, sizeof(buf), "%s %s %02d %04d",
-                wday[tm.tm_wday], mon[tm.tm_mon], tm.tm_mday, tm.tm_year + 1900);
+            char year_buf[16];
+            js_date_format_year(year_buf, sizeof(year_buf), tm.tm_year + 1900);
+            snprintf(buf, sizeof(buf), "%s %s %02d %s",
+                wday[tm.tm_wday], mon[tm.tm_mon], tm.tm_mday, year_buf);
             return (Item){.item = s2it(heap_create_name(buf))};
         }
         if (method_id == 47) { // toTimeString
-            struct tm tm; localtime_r(&secs, &tm);
-            long gmtoff = get_tm_gmtoff(&tm);
+            struct tm tm; js_date_localtime_minute(ms, &tm);
+            struct tm offset_tm; localtime_r(&secs, &offset_tm);
+            long gmtoff = get_tm_gmtoff(&offset_tm);
             int h_off = (int)(gmtoff / 3600);
             int m_off = (int)((gmtoff % 3600) / 60);
             if (m_off < 0) m_off = -m_off;
@@ -1738,16 +1957,15 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
             return (Item){.item = s2it(heap_create_name(buf))};
         }
         if (method_id == 50) { // getYear — Annex B: returns year - 1900
-            struct tm tm; localtime_r(&secs, &tm);
+            struct tm tm; js_date_localtime_minute(ms, &tm);
             return (Item){.item = i2it(tm.tm_year)}; // tm_year is already year - 1900
         }
         return ItemNull;
     }
 
     if (method_id == 20) { // setTime
-        Item num = js_to_number(arg0);
+        double new_ms = js_date_to_number_double(arg0);
         if (js_check_exception()) return ItemNull;
-        double new_ms = to_double(num);
         return store_ms(new_ms);
     }
 
@@ -1756,27 +1974,23 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
     // then check NaN on date/args, then compute. This ensures valueOf/toString side effects
     // and Symbol TypeError throws happen in the correct order.
     if (method_id >= 21 && method_id <= 36) {
-        Item n0 = js_to_number(arg0);
+        double v0 = js_date_to_number_double(arg0);
         if (js_check_exception()) return ItemNull;
-        double v0 = to_double(n0);
 
         double v1 = NAN;
         if (is_present(arg1)) {
-            Item n1 = js_to_number(arg1);
+            v1 = js_date_to_number_double(arg1);
             if (js_check_exception()) return ItemNull;
-            v1 = to_double(n1);
         }
         double v2 = NAN;
         if (is_present(arg2)) {
-            Item n2 = js_to_number(arg2);
+            v2 = js_date_to_number_double(arg2);
             if (js_check_exception()) return ItemNull;
-            v2 = to_double(n2);
         }
         double v3 = NAN;
         if (is_present(arg3)) {
-            Item n3 = js_to_number(arg3);
+            v3 = js_date_to_number_double(arg3);
             if (js_check_exception()) return ItemNull;
-            v3 = to_double(n3);
         }
 
         // ES spec: if any required arg is NaN, result is NaN
@@ -1802,7 +2016,15 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
             int old_millis = js_date_millis_from_ms(ms, secs);
             struct tm tm;
             if (date_was_nan && method_id == 21) gmtime_r(&secs, &tm);
-            else localtime_r(&secs, &tm);
+            else {
+                struct tm offset_tm;
+                localtime_r(&secs, &offset_tm);
+                int offset_min = -(int)(get_tm_gmtoff(&offset_tm) / 60);
+                double local_civil_ms = ms - (double)offset_min * 60000.0;
+                time_t local_secs = js_date_seconds_from_ms(local_civil_ms);
+                old_millis = js_date_millis_from_ms(local_civil_ms, local_secs);
+                gmtime_r(&local_secs, &tm);
+            }
 
             switch (method_id) {
                 case 21: // setFullYear(year [, month, date])
@@ -1837,8 +2059,22 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
                     break;
             }
             tm.tm_isdst = -1;
-            double new_ms = js_date_mktime_ms_or_fallback(&tm, old_millis,
-                tm.tm_year + 1900, tm.tm_mon, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
+            int new_year = tm.tm_year + 1900;
+            int new_month = tm.tm_mon;
+            int new_day = tm.tm_mday;
+            int new_hour = tm.tm_hour;
+            int new_minute = tm.tm_min;
+            int new_second = tm.tm_sec;
+            double local_ms = js_date_mktime_ms_or_fallback(&tm, old_millis,
+                new_year, new_month, new_day, new_hour, new_minute, new_second);
+            time_t local_secs = js_date_seconds_from_ms(local_ms);
+            struct tm local_tm;
+            localtime_r(&local_secs, &local_tm);
+            int offset_min = -(int)(get_tm_gmtoff(&local_tm) / 60);
+            double day_value = js_date_make_day_double((double)new_year, (double)new_month, (double)new_day);
+            double time_value = js_date_make_time_double((double)new_hour, (double)new_minute,
+                (double)new_second, (double)old_millis);
+            double new_ms = js_date_make_date_double(day_value, time_value) + (double)offset_min * 60000.0;
             return store_ms(new_ms);
         }
 
@@ -1911,7 +2147,8 @@ extern "C" Item js_date_new_multi(Item args_array) {
         if (js_check_exception()) return 0.0;
         TypeId t = get_type_id(num);
         if (t == LMD_TYPE_FLOAT) return it2d(num);
-        if (t == LMD_TYPE_INT || t == LMD_TYPE_INT64) return (double)it2i(num);
+        if (t == LMD_TYPE_INT) return (double)it2i(num);
+        if (t == LMD_TYPE_INT64) return (double)it2l(num);
         return NAN;
     };
 
@@ -1946,18 +2183,29 @@ extern "C" Item js_date_new_multi(Item args_array) {
         int iy = (int)y;
         if (iy >= 0 && iy <= 99) iy += 1900;
 
+        double day_value = js_date_make_day_double((double)iy, js_date_to_integer(m), js_date_to_integer(d));
+        double time_value = js_date_make_time_double(js_date_to_integer(h), js_date_to_integer(mi),
+            js_date_to_integer(s), js_date_to_integer(ms));
+        double civil_ms = js_date_make_date_double(day_value, time_value);
+
         struct tm tm = {};
         tm.tm_year = iy - 1900;
-        tm.tm_mon = (int)m;
-        tm.tm_mday = (int)d;
-        tm.tm_hour = (int)h;
-        tm.tm_min = (int)mi;
-        tm.tm_sec = (int)s;
+        tm.tm_mon = (int)js_date_to_integer(m);
+        tm.tm_mday = (int)js_date_to_integer(d);
+        tm.tm_hour = (int)js_date_to_integer(h);
+        tm.tm_min = (int)js_date_to_integer(mi);
+        tm.tm_sec = (int)js_date_to_integer(s);
         tm.tm_isdst = -1;
-        ms_val = js_date_mktime_ms_or_fallback(&tm, (int)ms,
-            iy, (int)m, (int)d, (int)h, (int)mi, (int)s);
+        double local_ms = js_date_mktime_ms_or_fallback(&tm, (int)js_date_to_integer(ms),
+            iy, tm.tm_mon, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
+        time_t local_secs = js_date_seconds_from_ms(local_ms);
+        struct tm local_tm;
+        localtime_r(&local_secs, &local_tm);
+        int offset_min = -(int)(get_tm_gmtoff(&local_tm) / 60);
+        ms_val = civil_ms + (double)offset_min * 60000.0;
     }
     double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+    ms_val = js_date_time_clip(ms_val);
     *fp = ms_val;
     js_property_set(obj, time_key, (Item){.item = d2it(fp)});
     return obj;
@@ -1976,6 +2224,12 @@ extern "C" Item js_date_parse(Item str_item) {
     if (s->len >= 7 && memcmp(s->chars, "-000000", 7) == 0) {
         double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *fp = NAN;
+        return (Item){.item = d2it(fp)};
+    }
+    double iso_ms;
+    if (js_date_parse_iso_ms(s, &iso_ms)) {
+        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+        *fp = iso_ms;
         return (Item){.item = d2it(fp)};
     }
     struct tm tm = {};
@@ -13486,8 +13740,8 @@ static Item js_ctor_regexp_fn(Item pattern, Item flags) {
 
 // Date() without 'new' should return a date string (not a Date object)
 extern "C" Item js_date_now_string();
-static Item js_ctor_date_fn(Item arg) {
-    (void)arg;
+static Item js_ctor_date_fn(Item arg0, Item arg1, Item arg2, Item arg3, Item arg4, Item arg5, Item arg6) {
+    (void)arg0; (void)arg1; (void)arg2; (void)arg3; (void)arg4; (void)arg5; (void)arg6;
     return js_date_now_string();
 }
 

@@ -295,6 +295,7 @@ void js_append_builtin_method_names(TypeId type, Item result);
 Item js_array_is_array(Item value);
 Item js_performance_now(void);
 Item js_date_now(void);
+Item js_date_now_string(void);
 Item js_date_new(void);
 Item js_date_new_from(Item value);
 Item js_date_utc(Item args_array);

@@ -215,6 +215,13 @@ MIR_reg_t jm_emit_undefined(JsMirTranspiler* mt) {
     return r;
 }
 
+MIR_reg_t jm_emit_item_error(JsMirTranspiler* mt) {
+    MIR_reg_t r = jm_new_reg(mt, "item_error", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
+        MIR_new_int_op(mt->ctx, (int64_t)(((uint64_t)LMD_TYPE_ERROR) << 56))));
+    return r;
+}
+
 // ============================================================================
 // Boxing helpers
 // ============================================================================

@@ -163,6 +163,7 @@ void jm_call_void_5(JsMirTranspiler* mt, const char* fn_name,
     MIR_type_t a5t, MIR_op_t a5);
 MIR_reg_t jm_emit_null(JsMirTranspiler* mt);
 MIR_reg_t jm_emit_undefined(JsMirTranspiler* mt);
+MIR_reg_t jm_emit_item_error(JsMirTranspiler* mt);
 MIR_reg_t jm_box_int_const(JsMirTranspiler* mt, int64_t value);
 void jm_arguments_writeback_param(JsMirTranspiler* mt, int param_index, MIR_reg_t val_reg);
 MIR_reg_t jm_box_int_reg(JsMirTranspiler* mt, MIR_reg_t val);
