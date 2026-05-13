@@ -1,0 +1,1 @@
+{ has_doc_bg: true, has_page_border: true, has_doc_padding: true, has_page_margin: true, has_page_max_width: true, has_page_width: true, hides_label: true, opt_in_label: true}

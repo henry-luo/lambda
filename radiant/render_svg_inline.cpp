@@ -2403,8 +2403,6 @@ static bool render_svg_text_with_radiant_glyphs(SvgRenderContext* ctx, const cha
 
     float pen_x = matrix->e11 * base_x + matrix->e12 * base_y + matrix->e13;
     float baseline_y = matrix->e21 * base_x + matrix->e22 * base_y + matrix->e23;
-    float ascend = font_get_rendering_ascender(handle) * device_scale;
-
     Color saved_color = rdcon->color;
     bool saved_has_transform = rdcon->has_transform;
     rdcon->color = fill_color;
@@ -2419,7 +2417,7 @@ static bool render_svg_text_with_radiant_glyphs(SvgRenderContext* ctx, const cha
         LoadedGlyph* glyph = font_load_glyph(handle, &style, codepoint, true);
         if (!glyph) continue;
         float gx = pen_x + glyph->bitmap.bearing_x;
-        float gy = baseline_y + ascend - glyph->bitmap.bearing_y;
+        float gy = baseline_y - glyph->bitmap.bearing_y;
         draw_glyph(rdcon, &glyph->bitmap, lroundf(gx), lroundf(gy));
         pen_x += glyph->advance_x * advance_scale;
     }
