@@ -2,10 +2,12 @@
 #include "str.h"
 #include "string.h"
 #include <string.h>
+#include <stdint.h>
 #include <inttypes.h>
 #include "log.h"
 
 #define INITIAL_CAPACITY 32
+#define STRINGBUF_MAX_LENGTH ((size_t)UINT32_MAX - 1)
 
 StringBuf* stringbuf_new_cap(Pool *pool, size_t capacity) {
     if (!pool) return NULL;
@@ -90,9 +92,7 @@ bool stringbuf_ensure_cap(StringBuf *sb, size_t min_capacity) {
             new_capacity = required_capacity;
             break;
         }
-        size_t old_capacity = new_capacity;
         new_capacity *= 2;
-        // log_debug("doubling stringbuf new_capacity: %zu -> %zu", old_capacity, new_capacity);
     }
 
     String *new_str;
@@ -109,9 +109,6 @@ bool stringbuf_ensure_cap(StringBuf *sb, size_t min_capacity) {
         new_str->chars[0] = '\0';
     } else {
         // Realloc existing buffer - copy String header + actual string data
-        size_t string_header_size = sizeof(String);
-        size_t data_to_copy = string_header_size + sb->length + 1; // +1 for null terminator
-
         new_str = (String*)pool_realloc(sb->pool, sb->str, new_capacity);
         if (!new_str) {
             return false;
@@ -129,8 +126,7 @@ void stringbuf_append_str(StringBuf *sb, const char *str) {
     size_t str_len = strlen(str);
     size_t new_length = sb->length + str_len;
 
-    // Check for 22-bit len field overflow (max 4,194,303 chars)
-    if (new_length > 0x3FFFFF) {
+    if (new_length > STRINGBUF_MAX_LENGTH) {
         return; // Silently fail to prevent corruption
     }
 
@@ -147,8 +143,7 @@ void stringbuf_append_str_n(StringBuf *sb, const char *str, size_t len) {
 
     size_t new_length = sb->length + len;
 
-    // Check for 22-bit len field overflow (max 4,194,303 chars)
-    if (new_length > 0x3FFFFF) {
+    if (new_length > STRINGBUF_MAX_LENGTH) {
         return; // Silently fail to prevent corruption
     }
 
@@ -164,8 +159,7 @@ void stringbuf_append_char(StringBuf *sb, char c) {
 
     size_t new_length = sb->length + 1;
 
-    // Check for 22-bit len field overflow (max 4,194,303 chars)
-    if (new_length > 0x3FFFFF) {
+    if (new_length > STRINGBUF_MAX_LENGTH) {
         return; // Silently fail to prevent corruption
     }
 
@@ -182,8 +176,7 @@ void stringbuf_append_char_n(StringBuf *sb, char c, size_t n) {
 
     size_t new_length = sb->length + n;
 
-    // Check for 22-bit len field overflow (max 4,194,303 chars)
-    if (new_length > 0x3FFFFF) {
+    if (new_length > STRINGBUF_MAX_LENGTH) {
         return; // Silently fail to prevent corruption
     }
 
@@ -239,7 +232,7 @@ void stringbuf_vemit(StringBuf *sb, const char *fmt, va_list args) {
         }
         case 'S': {
             String *s = va_arg(args, String*);
-            if (s && s->chars && s->len > 0) {
+            if (s && s->len > 0) {
                 stringbuf_append_str_n(sb, s->chars, s->len);
             }
             break;
@@ -304,7 +297,7 @@ void stringbuf_vemit(StringBuf *sb, const char *fmt, va_list args) {
             // %Q — bare-quoted Lambda String*: same as %q but for String*.
             String* s = va_arg(args, String*);
             stringbuf_append_char(sb, '"');
-            if (s && s->chars && s->len > 0) {
+            if (s && s->len > 0) {
                 const char* p2 = s->chars;
                 const char* end = p2 + s->len;
                 while (p2 < end) {
@@ -380,8 +373,7 @@ void stringbuf_vappend_format(StringBuf *sb, const char *format, va_list args) {
 
     size_t new_length = sb->length + size;
 
-    // Check for 22-bit len field overflow (max 4,194,303 chars)
-    if (new_length > 0x3FFFFF) {
+    if (new_length > STRINGBUF_MAX_LENGTH) {
         return; // Silently fail to prevent corruption
     }
 
@@ -466,8 +458,7 @@ void stringbuf_append_ulong(StringBuf *sb, unsigned long value) {
     size_t num_digits = num_of_digits(value);
     size_t new_length = sb->length + num_digits;
 
-    // Check for 22-bit len field overflow (max 4,194,303 chars)
-    if (new_length > 0x3FFFFF) {
+    if (new_length > STRINGBUF_MAX_LENGTH) {
         return; // Silently fail to prevent corruption
     }
 
@@ -504,7 +495,7 @@ void stringbuf_append_long(StringBuf *sb, long value) {
 
     if (value < 0) {
         // Check if adding the minus sign would cause overflow
-        if (sb->length >= 0x3FFFFF) {
+        if (sb->length >= STRINGBUF_MAX_LENGTH) {
             return; // Silently fail to prevent corruption
         }
         stringbuf_append_char(sb, '-');

@@ -3180,6 +3180,53 @@ static bool svg_image_href_is_svg(const char* href) {
     return str_ieq_const(end - 4, 4, ".svg");
 }
 
+static bool svg_preserve_aspect_none(const char* value) {
+    if (!value) return false;
+    while (*value && isspace((unsigned char)*value)) value++;
+    return strncmp(value, "none", 4) == 0 &&
+           (value[4] == '\0' || isspace((unsigned char)value[4]));
+}
+
+static bool svg_raster_dimensions(const uint8_t* data, size_t len, float* out_w, float* out_h) {
+    if (!data || len < 8 || !out_w || !out_h) return false;
+
+    if (len >= 24 && data[0] == 0x89 && data[1] == 'P' && data[2] == 'N' && data[3] == 'G') {
+        uint32_t w = ((uint32_t)data[16] << 24) | ((uint32_t)data[17] << 16) |
+                     ((uint32_t)data[18] << 8) | (uint32_t)data[19];
+        uint32_t h = ((uint32_t)data[20] << 24) | ((uint32_t)data[21] << 16) |
+                     ((uint32_t)data[22] << 8) | (uint32_t)data[23];
+        if (w == 0 || h == 0) return false;
+        *out_w = (float)w;
+        *out_h = (float)h;
+        return true;
+    }
+
+    if (len < 4 || data[0] != 0xFF || data[1] != 0xD8) return false;
+    size_t i = 2;
+    while (i + 9 < len) {
+        while (i < len && data[i] != 0xFF) i++;
+        while (i < len && data[i] == 0xFF) i++;
+        if (i >= len) break;
+        uint8_t marker = data[i++];
+        if (marker == 0xD8 || marker == 0xD9 || (marker >= 0xD0 && marker <= 0xD7)) continue;
+        if (i + 2 > len) break;
+        uint16_t seg_len = ((uint16_t)data[i] << 8) | (uint16_t)data[i + 1];
+        if (seg_len < 2 || i + seg_len > len) break;
+        if ((marker >= 0xC0 && marker <= 0xC3) || (marker >= 0xC5 && marker <= 0xC7) ||
+            (marker >= 0xC9 && marker <= 0xCB) || (marker >= 0xCD && marker <= 0xCF)) {
+            if (seg_len < 7) return false;
+            uint16_t h = ((uint16_t)data[i + 3] << 8) | (uint16_t)data[i + 4];
+            uint16_t w = ((uint16_t)data[i + 5] << 8) | (uint16_t)data[i + 6];
+            if (w == 0 || h == 0) return false;
+            *out_w = (float)w;
+            *out_h = (float)h;
+            return true;
+        }
+        i += seg_len;
+    }
+    return false;
+}
+
 static char* svg_href_file_part(const char* href, const char** fragment_out) {
     if (fragment_out) *fragment_out = nullptr;
     if (!href || !*href) return nullptr;
@@ -3295,6 +3342,10 @@ static void render_svg_image(SvgRenderContext* ctx, Element* elem) {
         Tvg_Paint pic = tvg_picture_new();
         if (!pic) { mem_free(decoded); return; }
 
+        float intrinsic_w = 0;
+        float intrinsic_h = 0;
+        bool has_raster_dims = svg_raster_dimensions(decoded, decoded_len, &intrinsic_w, &intrinsic_h);
+
         // copy=true so ThorVG holds its own copy and we can free decoded
         Tvg_Result result = tvg_picture_load_data(pic, (const char*)decoded, (uint32_t)decoded_len,
                                                   mime_hint, NULL, true);
@@ -3306,10 +3357,25 @@ static void render_svg_image(SvgRenderContext* ctx, Element* elem) {
             return;
         }
 
+        RdtMatrix m = compose_element_transform(ctx, elem);
+        bool stretched = false;
         if (width > 0 && height > 0) {
-            tvg_picture_set_size(pic, width, height);
+            if (svg_preserve_aspect_none(get_svg_attr(elem, "preserveAspectRatio")) && has_raster_dims) {
+                float fit_h = width * intrinsic_h / intrinsic_w;
+                if (fit_h > 0.0f) {
+                    tvg_picture_set_size(pic, width, fit_h);
+                    RdtMatrix local = { 1, 0, x,  0, height / fit_h, y,  0, 0, 1 };
+                    m = rdt_matrix_multiply(&m, &local);
+                    stretched = true;
+                }
+            }
+            if (!stretched) {
+                tvg_picture_set_size(pic, width, height);
+            }
         }
-        tvg_paint_translate(pic, x, y);
+        if (!stretched) {
+            tvg_paint_translate(pic, x, y);
+        }
 
         uint8_t op = 255;
         const char* opacity = get_svg_attr(elem, "opacity");
@@ -3318,7 +3384,6 @@ static void render_svg_image(SvgRenderContext* ctx, Element* elem) {
             op = (uint8_t)(opf * 255);
         }
 
-        RdtMatrix m = compose_element_transform(ctx, elem);
         RdtPicture* rdt_pic = rdt_picture_take_tvg_paint(pic, 0, 0);
         if (rdt_pic) {
             svg_draw_picture(ctx, rdt_pic, op, &m);
