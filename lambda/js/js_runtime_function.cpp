@@ -151,6 +151,13 @@ extern "C" void js_mark_method_func(Item fn_item) {
     fn->flags |= JS_FUNC_FLAG_METHOD;
 }
 
+extern "C" void js_mark_eval_initializer_func_if_active(Item fn_item) {
+    if (!js_private_field_initializing && !js_eval_initializer_context) return;
+    if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
+    JsFunction* fn = (JsFunction*)fn_item.function;
+    fn->eval_initializer_context = true;
+}
+
 // Mark a function as strict mode (ES spec [[Strict]] internal slot)
 extern "C" void js_mark_strict_func(Item fn_item) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;

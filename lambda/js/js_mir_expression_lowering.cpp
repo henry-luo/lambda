@@ -7247,7 +7247,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 }
                 MIR_reg_t eval_result = jm_call_2(mt, "js_builtin_eval", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg),
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, 1));
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, 3));
                 if (!mt->in_main) {
                     jm_eval_env_writeback_bindings(mt, eval_bridged);
                     jm_call_void_0(mt, "js_eval_env_pop_frame");
@@ -9672,6 +9672,8 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
     const char* js_name = (fc->node && fc->node->name) ? fc->node->name->chars : NULL;
     jm_emit_set_function_name(mt, fn_reg, js_name, fc->formal_length);
     jm_emit_set_function_source(mt, fn_reg, fc->node);
+    jm_call_void_1(mt, "js_mark_eval_initializer_func_if_active",
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
     // v20: Mark generator functions so their prototype has no constructor
     if (fc->node && fc->node->is_generator) {
         if (fc->node->is_async) {
@@ -9927,6 +9929,8 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
     const char* js_name = fn->name ? fn->name->chars : NULL;
     jm_emit_set_function_name(mt, fn_reg, js_name, fc->formal_length);
     jm_emit_set_function_source(mt, fn_reg, fn);
+    jm_call_void_1(mt, "js_mark_eval_initializer_func_if_active",
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
     // v20: Mark generator functions so their prototype has no constructor
     if (fn->is_generator) {
         if (fn->is_async) {

@@ -83,6 +83,7 @@ struct JsFunction {
     int16_t formal_length; // ES spec .length: params before first default, excl rest (-1 = use param_count)
     Item* module_vars; // Per-module variable array (NULL for built-in functions)
     String* source_text; // v29: original source text for Function.prototype.toString
+    bool eval_initializer_context;
 };
 
 #define JS_FUNC_FLAG_GENERATOR 1

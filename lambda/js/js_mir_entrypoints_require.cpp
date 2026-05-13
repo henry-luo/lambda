@@ -855,17 +855,20 @@ extern "C" Item js_require(Item specifier) {
     return ns;
 }
 
+static Item js_dynamic_import_reject_type_error(const char* message) {
+    Item error_name = (Item){.item = s2it(heap_create_name("TypeError", 9))};
+    Item error_message = (Item){.item = s2it(heap_create_name(message, (int)strlen(message)))};
+    return js_promise_reject(js_new_error_with_name(error_name, error_message));
+}
+
 // dynamic import() — synchronous load, wrapped in a resolved Promise
 extern "C" Item js_dynamic_import(Item specifier) {
     if (get_type_id(specifier) != LMD_TYPE_STRING) {
-        // import() with non-string should reject
-        js_throw_type_error("import() requires a string specifier");
-        return js_promise_reject(ItemNull);
+        return js_dynamic_import_reject_type_error("import() requires a string specifier");
     }
     String* spec = it2s(specifier);
     if (!spec || spec->len == 0) {
-        js_throw_type_error("import() requires a non-empty specifier");
-        return js_promise_reject(ItemNull);
+        return js_dynamic_import_reject_type_error("import() requires a non-empty specifier");
     }
 
     // Reuse require() logic to load the module synchronously
@@ -873,8 +876,7 @@ extern "C" Item js_dynamic_import(Item specifier) {
     if (get_type_id(ns) == LMD_TYPE_NULL) {
         char msg[256];
         snprintf(msg, sizeof(msg), "Cannot find module '%.*s'", (int)spec->len, spec->chars);
-        js_throw_type_error(msg);
-        return js_promise_reject(ItemNull);
+        return js_dynamic_import_reject_type_error(msg);
     }
 
     // Wrap the namespace in a resolved Promise

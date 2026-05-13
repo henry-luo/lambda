@@ -1336,8 +1336,9 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 class_name = public_name;
             }
         }
-        // Only treat as constructable if it has class metadata
-        if (class_name.item == ItemNull.item && ctor.item == ItemNull.item && instance_proto.item == ItemNull.item) {
+        // Only treat maps as constructable when they carry constructor/prototype class metadata.
+        // Instances may also have __class_name__, but `new instance` must still throw.
+        if (ctor.item == ItemNull.item && instance_proto.item == ItemNull.item) {
             // Plain object — not a constructor
             js_pending_new_target = ItemNull;
             js_has_pending_new_target = false;
@@ -9210,6 +9211,8 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         }
         Item prev_this = js_current_this;
         Item prev_nt = js_new_target;
+        bool prev_eval_initializer_context = js_eval_initializer_context;
+        js_eval_initializer_context = prev_eval_initializer_context || fn->eval_initializer_context;
         js_current_this = effective_this;
         // v29: store callee for arguments.callee (used by js_build_arguments_object)
         js_pending_args_callee = func_item;
@@ -9248,12 +9251,15 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         js_active_module_vars = prev_modvars;
         js_current_this = prev_this;
         js_new_target = prev_nt;
+        js_eval_initializer_context = prev_eval_initializer_context;
         return result;
     }
 
     // Bind 'this' for the duration of this call
     Item prev_this = js_current_this;
     Item prev_nt = js_new_target;
+    bool prev_eval_initializer_context = js_eval_initializer_context;
+    js_eval_initializer_context = prev_eval_initializer_context || fn->eval_initializer_context;
     // OrdinaryCallBindThis: coerce undefined/null this → globalThis for non-strict functions
     if (!(fn->flags & JS_FUNC_FLAG_STRICT) && !(fn->flags & JS_FUNC_FLAG_ARROW)) {
         if (this_val.item == ITEM_JS_UNDEFINED || this_val.item == ITEM_NULL || this_val.item == 0) {
@@ -9299,6 +9305,7 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
     js_active_module_vars = prev_modvars;
     js_current_this = prev_this;
     js_new_target = prev_nt;
+    js_eval_initializer_context = prev_eval_initializer_context;
     return result;
 }
 

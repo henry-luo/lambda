@@ -44,6 +44,7 @@ struct JsRuntimeState {
     Map* cached_object_proto = NULL;
     bool resolving_object_proto = false;
     bool private_field_initializing = false;
+    bool eval_initializer_context = false;
     bool exception_pending = false;
     Item exception_value = {0};
     char exception_msg_buf[1024] = {};
@@ -84,6 +85,7 @@ static inline Item*& js_active_module_vars_ref() {
 #define js_cached_object_proto (js_runtime_state.cached_object_proto)
 #define js_resolving_object_proto (js_runtime_state.resolving_object_proto)
 #define js_private_field_initializing (js_runtime_state.private_field_initializing)
+#define js_eval_initializer_context (js_runtime_state.eval_initializer_context)
 #define js_exception_pending (js_runtime_state.exception_pending)
 #define js_exception_value (js_runtime_state.exception_value)
 #define js_exception_msg_buf (js_runtime_state.exception_msg_buf)
