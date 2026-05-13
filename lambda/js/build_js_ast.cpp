@@ -360,6 +360,45 @@ JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node) {
     return (JsAstNode*)literal;
 }
 
+static String* js_decode_identifier_name(JsTranspiler* tp, const char* source, int source_len) {
+    if (!source || source_len <= 0) return NULL;
+    if (memchr(source, '\\', source_len) == NULL) {
+        return name_pool_create_len(tp->name_pool, source, source_len);
+    }
+
+    char decoded_buf[512];
+    int oi = 0;
+    for (int i = 0; i < source_len && oi < (int)sizeof(decoded_buf) - 4; ) {
+        if (source[i] == '\\' && i + 1 < source_len && source[i + 1] == 'u') {
+            i += 2;
+            unsigned int cp = 0;
+            if (i < source_len && source[i] == '{') {
+                i++;
+                while (i < source_len && source[i] != '}') {
+                    char c = source[i++];
+                    cp <<= 4;
+                    if (c >= '0' && c <= '9') cp |= (c - '0');
+                    else if (c >= 'a' && c <= 'f') cp |= (c - 'a' + 10);
+                    else if (c >= 'A' && c <= 'F') cp |= (c - 'A' + 10);
+                }
+                if (i < source_len && source[i] == '}') i++;
+            } else {
+                for (int j = 0; j < 4 && i < source_len; j++, i++) {
+                    char c = source[i];
+                    cp <<= 4;
+                    if (c >= '0' && c <= '9') cp |= (c - '0');
+                    else if (c >= 'a' && c <= 'f') cp |= (c - 'a' + 10);
+                    else if (c >= 'A' && c <= 'F') cp |= (c - 'A' + 10);
+                }
+            }
+            oi += utf8_encode(cp, decoded_buf + oi);
+        } else {
+            decoded_buf[oi++] = source[i++];
+        }
+    }
+    return name_pool_create_len(tp->name_pool, decoded_buf, oi);
+}
+
 // Build JavaScript identifier node
 JsAstNode* build_js_identifier(JsTranspiler* tp, TSNode id_node) {
     if (ts_node_is_null(id_node)) {
@@ -378,58 +417,7 @@ JsAstNode* build_js_identifier(JsTranspiler* tp, TSNode id_node) {
         return NULL;
     }
 
-    // Create a null-terminated string for the identifier
-    char* temp_str = (char*)mem_alloc(source.length + 1, MEM_CAT_JS_RUNTIME);
-    if (!temp_str) {
-        log_error("Failed to allocate memory for identifier");
-        return NULL;
-    }
-    memcpy(temp_str, source.str, source.length);
-    temp_str[source.length] = '\0';
-
-    // Decode Unicode escapes (\uXXXX and \u{XXXX}) in identifier names
-    // Per ES spec, IdentifierName can contain UnicodeEscapeSequence
-    char* name_str = temp_str;
-    int name_len = (int)source.length;
-    char decoded_buf[512];
-    if (memchr(temp_str, '\\', source.length) != NULL) {
-        int oi = 0;
-        for (int i = 0; i < (int)source.length && oi < (int)sizeof(decoded_buf) - 4; ) {
-            if (temp_str[i] == '\\' && i + 1 < (int)source.length && temp_str[i+1] == 'u') {
-                i += 2; // skip \u
-                unsigned int cp = 0;
-                if (i < (int)source.length && temp_str[i] == '{') {
-                    i++; // skip {
-                    while (i < (int)source.length && temp_str[i] != '}') {
-                        char c = temp_str[i++];
-                        cp <<= 4;
-                        if (c >= '0' && c <= '9') cp |= (c - '0');
-                        else if (c >= 'a' && c <= 'f') cp |= (c - 'a' + 10);
-                        else if (c >= 'A' && c <= 'F') cp |= (c - 'A' + 10);
-                    }
-                    if (i < (int)source.length && temp_str[i] == '}') i++;
-                } else {
-                    for (int j = 0; j < 4 && i < (int)source.length; j++, i++) {
-                        char c = temp_str[i];
-                        cp <<= 4;
-                        if (c >= '0' && c <= '9') cp |= (c - '0');
-                        else if (c >= 'a' && c <= 'f') cp |= (c - 'a' + 10);
-                        else if (c >= 'A' && c <= 'F') cp |= (c - 'A' + 10);
-                    }
-                }
-                // encode as UTF-8
-                oi += utf8_encode(cp, decoded_buf + oi);
-            } else {
-                decoded_buf[oi++] = temp_str[i++];
-            }
-        }
-        decoded_buf[oi] = '\0';
-        name_str = decoded_buf;
-        name_len = oi;
-    }
-
-    identifier->name = name_pool_create_len(tp->name_pool, name_str, name_len);
-    mem_free(temp_str);
+    identifier->name = js_decode_identifier_name(tp, source.str, (int)source.length);
 
     if (!identifier->name) {
         log_error("Failed to create identifier name");
@@ -1122,7 +1110,7 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
     TSNode name_node = ts_node_child_by_field_name(func_node, "name", strlen("name"));
     if (!ts_node_is_null(name_node)) {
         StrView name_source = js_node_source(tp, name_node);
-        func->name = name_pool_create_strview(tp->name_pool, name_source);
+        func->name = js_decode_identifier_name(tp, name_source.str, (int)name_source.length);
     }
 
     // Get parameters - arrow functions can have "parameter" (singular) for single-param without parens

@@ -607,26 +607,15 @@ extern "C" Item js_to_string(Item value) {
     }
 
     case LMD_TYPE_FUNC: {
-        // Access function name via layout-compatible struct (JsFunction defined later)
-        struct { TypeId type_id; void* func_ptr; int param_count; Item* env; int env_size;
-                 Item prototype; Item bound_this; Item* bound_args; int bound_argc; String* name; } *fn_layout;
-        fn_layout = decltype(fn_layout)(value.function);
-        if (fn_layout->name && fn_layout->name->len > 0) {
-            // NativeFunction syntax allows only a single IdentifierName (no spaces).
-            // Bound functions have names like "bound f" — use only "bound" part.
-            int name_len = fn_layout->name->len;
-            for (int i = 0; i < fn_layout->name->len; i++) {
-                if (fn_layout->name->chars[i] == ' ') { name_len = i; break; }
-            }
-            StrBuf* sb = strbuf_new();
-            strbuf_append_str_n(sb, "function ", 9);
-            strbuf_append_str_n(sb, fn_layout->name->chars, name_len);
-            strbuf_append_str_n(sb, "() { [native code] }", 20);
-            String* result = heap_create_name(sb->str, sb->length);
-            strbuf_free(sb);
-            return (Item){.item = s2it(result)};
+        Item prim = js_to_primitive(value, JS_HINT_STRING);
+        if (js_check_exception()) return ItemNull;
+        TypeId prim_type = get_type_id(prim);
+        if (prim_type == LMD_TYPE_FUNC || prim_type == LMD_TYPE_MAP ||
+            prim_type == LMD_TYPE_ARRAY || prim_type == LMD_TYPE_ELEMENT) {
+            js_throw_type_error("Cannot convert object to primitive value");
+            return ItemNull;
         }
-        return (Item){.item = s2it(heap_create_name("function () { [native code] }", 29))};
+        return js_to_string(prim);
     }
     default:
         return (Item){.item = s2it(heap_create_name("[object Object]"))};

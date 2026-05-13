@@ -158,8 +158,14 @@ extern "C" void js_mark_strict_func(Item fn_item) {
     fn->flags |= JS_FUNC_FLAG_STRICT;
 }
 
+extern "C" void js_set_class_name(Item cls_item, Item name_item);
+
 // Set the name of a JsFunction (called from transpiler after js_new_function/js_new_closure)
 extern "C" void js_set_function_name(Item fn_item, Item name_item) {
+    if (get_type_id(fn_item) == LMD_TYPE_MAP) {
+        js_set_class_name(fn_item, name_item);
+        return;
+    }
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
     if (get_type_id(name_item) != LMD_TYPE_STRING) return;
     JsFunction* fn = (JsFunction*)fn_item.function;
@@ -168,6 +174,10 @@ extern "C" void js_set_function_name(Item fn_item, Item name_item) {
     }
 }
 extern "C" void js_set_function_name_if_anonymous(Item fn_item, Item name_item) {
+    if (get_type_id(fn_item) == LMD_TYPE_MAP) {
+        js_set_class_name(fn_item, name_item);
+        return;
+    }
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
     if (get_type_id(name_item) != LMD_TYPE_STRING) return;
     JsFunction* fn = (JsFunction*)fn_item.function;
@@ -181,8 +191,9 @@ extern "C" void js_set_class_name(Item cls_item, Item name_item) {
     if (get_type_id(name_item) != LMD_TYPE_STRING) return;
     ShapeEntry* existing = js_find_shape_entry(cls_item, "name", 4);
     if (existing && !jspd_is_deleted(existing)) return;
-    Item key = (Item){.item = s2it(heap_create_name("name", 4))};
-    js_property_set(cls_item, key, name_item);
+    String* name_key_str = heap_create_name("name", 4);
+    Item key = (Item){.item = s2it(name_key_str)};
+    map_put(cls_item.map, name_key_str, name_item, js_input);
     js_attr_set_writable(cls_item, "name", 4, false);
     js_attr_set_enumerable(cls_item, "name", 4, false);
     js_attr_set_configurable(cls_item, "name", 4, true);

@@ -3955,9 +3955,8 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         if (!has_static_name) {
                         MIR_reg_t name_key = jm_box_string_literal(mt, "name", 4);
                         MIR_reg_t name_val = jm_box_string_literal(mt, ce->name->chars, (int)ce->name->len);
-                        jm_call_3(mt, "js_property_set", MIR_T_I64,
+                        jm_call_void_2(mt, "js_set_class_name",
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, name_key),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, name_val));
                         // ES spec: class .name is non-writable, non-enumerable, configurable
                         jm_call_void_2(mt, "js_mark_non_writable",

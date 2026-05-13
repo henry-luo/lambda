@@ -1933,9 +1933,8 @@ void jm_emit_destructure_target(JsMirTranspiler* mt, JsAstNode* target, MIR_reg_
                     MIR_new_reg_op(mt->ctx, has_name),
                     MIR_new_int_op(mt->ctx, (int64_t)ITEM_FALSE)));
                 MIR_reg_t name_val = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
-                jm_call_3(mt, "js_property_set", MIR_T_I64,
+                jm_call_void_2(mt, "js_set_class_name",
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, resolved),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, name_key),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, name_val));
                 // class name must be non-enumerable, non-writable, configurable
                 jm_call_void_2(mt, "js_mark_non_enumerable",
@@ -8793,6 +8792,11 @@ MIR_reg_t jm_transpile_object(JsMirTranspiler* mt, JsObjectNode* obj) {
                 key_spill_slot = jm_gen_spill_save(mt, key);
             }
             MIR_reg_t val = jm_transpile_box_item(mt, p->value);
+            if (p->value && (p->value->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
+                             p->value->node_type == JS_AST_NODE_ARROW_FUNCTION ||
+                             p->value->node_type == JS_AST_NODE_FUNCTION_DECLARATION)) {
+                jm_emit_set_function_source(mt, val, (JsFunctionNode*)p->value);
+            }
             // Generator spill: restore object and key refs after yield-containing property value
             if (val_has_yield) {
                 jm_gen_spill_load(mt, object, obj_spill_slot);
@@ -10579,9 +10583,8 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                 if (!has_static_name) {
                 MIR_reg_t name_key = jm_box_string_literal(mt, "name", 4);
                 MIR_reg_t name_val = jm_box_string_literal(mt, effective_name->chars, (int)effective_name->len);
-                jm_call_3(mt, "js_property_set", MIR_T_I64,
+                jm_call_void_2(mt, "js_set_class_name",
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, name_key),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, name_val));
                 // ES spec: class .name is non-writable, non-enumerable, configurable
                 jm_call_void_2(mt, "js_mark_non_writable",

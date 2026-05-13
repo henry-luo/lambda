@@ -93,7 +93,7 @@ extern "C" Item js_to_property_key(Item key) {
         return (Item){.item = s2it(heap_create_name("null", 4))};
     if (kt == LMD_TYPE_UNDEFINED)
         return (Item){.item = s2it(heap_create_name("undefined", 9))};
-    if (kt == LMD_TYPE_MAP || kt == LMD_TYPE_ARRAY || kt == LMD_TYPE_ELEMENT) {
+    if (kt == LMD_TYPE_MAP || kt == LMD_TYPE_ARRAY || kt == LMD_TYPE_ELEMENT || kt == LMD_TYPE_FUNC) {
         key = js_to_primitive(key, JS_HINT_STRING);
         if (js_check_exception()) return ItemNull;
         if (js_key_is_symbol(key)) return js_symbol_to_key(key);

@@ -48,6 +48,13 @@ static Item js_bound_function_ultimate_target(Item func_item) {
     return current;
 }
 
+static bool js_is_function_prototype_map(Item item) {
+    if (get_type_id(item) != LMD_TYPE_MAP) return false;
+    bool is_proto = false;
+    js_map_get_fast_ext(item.map, "__is_proto__", 12, &is_proto);
+    return is_proto && js_class_id(item) == JS_CLASS_FUNCTION;
+}
+
 // v30: Helper to compute callback this value per ES spec OrdinaryCallBindThis.
 // thisArg_item is the explicit thisArg (or ITEM_JS_UNDEFINED if not provided).
 // For non-strict, non-arrow callbacks: undefined/null → globalThis.
@@ -1277,6 +1284,11 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
     }
     // Case 2: callee is a class object (MAP with __ctor__ or __instance_proto__)
     if (get_type_id(callee) == LMD_TYPE_MAP) {
+        if (js_is_function_prototype_map(callee)) {
+            js_pending_new_target = ItemNull;
+            js_has_pending_new_target = false;
+            return js_throw_type_error("Function.prototype is not a constructor");
+        }
         bool class_name_own = false;
         bool ctor_own = false;
         bool instance_proto_own = false;
@@ -2533,14 +2545,14 @@ extern "C" Item js_property_get(Item object, Item key) {
                         if (builtin.item != ItemNull.item) return builtin;
                     }
             }
-            // For class objects (MAPs with __instance_proto__), toString dispatches to
-            // Function.prototype.toString so they return "function ClassName() { [native code] }"
-            // instead of "[object Object]".
-            if (str_key->len == 8 && strncmp(str_key->chars, "toString", 8) == 0) {
+            // Class constructor maps are callable objects and inherit
+            // Function.prototype methods (apply/call/bind/toString/@@hasInstance).
+            {
                 bool own_ip_ts = false;
                 js_map_get_fast_ext(object.map, "__instance_proto__", 18, &own_ip_ts);
                 if (own_ip_ts) {
-                    return js_get_or_create_builtin(JS_BUILTIN_FUNC_TO_STRING, "toString", 0);
+                    builtin = js_lookup_builtin_method(LMD_TYPE_FUNC, str_key->chars, (int)str_key->len);
+                    if (builtin.item != ItemNull.item) return builtin;
                 }
             }
             // J39-7: null-proto objects (Object.create(null)) must NOT inherit
@@ -3220,7 +3232,26 @@ extern "C" Item js_property_get(Item object, Item key) {
                         }
                         // v29: Populate Function.prototype methods for test262 compliance
                         if (nl == 8 && strncmp(nm, "Function", 8) == 0) {
+                            Item length_key = (Item){.item = s2it(heap_create_name("length", 6))};
+                            js_property_set(fn->prototype, length_key, (Item){.item = i2it(0)});
+                            js_mark_non_writable(fn->prototype, length_key);
+                            js_mark_non_enumerable(fn->prototype, length_key);
+                            Item name_key = (Item){.item = s2it(heap_create_name("name", 4))};
+                            js_property_set(fn->prototype, name_key, (Item){.item = s2it(heap_create_name("", 0))});
+                            js_mark_non_writable(fn->prototype, name_key);
+                            js_mark_non_enumerable(fn->prototype, name_key);
                             js_populate_builtin_prototype_methods(fn->prototype, nm, nl);
+                            Item thrower = js_get_or_create_builtin(JS_BUILTIN_FUNC_THROW_TYPE_ERROR, "ThrowTypeError", 0);
+                            Item caller_key = (Item){.item = s2it(heap_create_name("caller", 6))};
+                            Item arguments_key = (Item){.item = s2it(heap_create_name("arguments", 9))};
+                            js_install_native_accessor(fn->prototype, caller_key, thrower, thrower, JSPD_NON_ENUMERABLE);
+                            js_install_native_accessor(fn->prototype, arguments_key, thrower, thrower, JSPD_NON_ENUMERABLE);
+                            Item has_instance_key = (Item){.item = s2it(heap_create_name("__sym_3", 7))};
+                            Item has_instance = js_get_or_create_builtin(JS_BUILTIN_FUNC_HAS_INSTANCE, "[Symbol.hasInstance]", 1);
+                            js_property_set(fn->prototype, has_instance_key, has_instance);
+                            js_mark_non_writable(fn->prototype, has_instance_key);
+                            js_mark_non_enumerable(fn->prototype, has_instance_key);
+                            js_mark_non_configurable(fn->prototype, has_instance_key);
                         }
                         {
                             extern Item js_get_typed_array_base_proto();
@@ -3536,6 +3567,13 @@ static bool js_proto_chain_has_nonwritable_data(Item object, const char* name, i
         depth++;
     }
     return false;
+}
+
+static bool js_is_class_constructor_map(Item object) {
+    if (get_type_id(object) != LMD_TYPE_MAP || !object.map) return false;
+    bool has_class_name = false;
+    js_map_get_fast_ext(object.map, "__class_name__", 14, &has_class_name);
+    return has_class_name;
 }
 
 static bool js_func_has_own_property_map_key(Item object, const char* name, int name_len) {
@@ -3952,7 +3990,11 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                     }
                     // JS_SET_NOT_FOUND: fall through to normal data write below.
                 }
-                if (!js_ordinary_has_own(object, str_key->chars, (int)str_key->len) &&
+                bool has_own_before_set = js_ordinary_has_own(object, str_key->chars, (int)str_key->len);
+                bool class_intrinsic_define = !has_own_before_set && js_is_class_constructor_map(object) &&
+                    ((str_key->len == 4 && strncmp(str_key->chars, "name", 4) == 0) ||
+                     (str_key->len == 6 && strncmp(str_key->chars, "length", 6) == 0));
+                if (!has_own_before_set && !class_intrinsic_define &&
                     js_proto_chain_has_nonwritable_data(object, str_key->chars, (int)str_key->len)) {
                     js_strict_throw_property_error("assign to read only", str_key->chars, (int)str_key->len);
                     return value;
@@ -5994,6 +6036,9 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                         else if (cl == 7 && strncmp(c, "Boolean", 7) == 0) {
                             tag = "Boolean"; tag_len = 7;
                         }
+                        else if (cl == 8 && strncmp(c, "Function", 8) == 0) {
+                            tag = "Function"; tag_len = 8;
+                        }
                         if (tag) {
                             char buf[256];
                             int blen = snprintf(buf, sizeof(buf), "[object %.*s]", tag_len, tag);
@@ -6114,6 +6159,8 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                             return (Item){.item = s2it(heap_create_name("[object Map]", 12))};
                         if (cnlen == 3 && memcmp(cnchars, "Set", 3) == 0)
                             return (Item){.item = s2it(heap_create_name("[object Set]", 12))};
+                        if (cnlen == 8 && memcmp(cnchars, "Function", 8) == 0)
+                            return (Item){.item = s2it(heap_create_name("[object Function]", 17))};
                 }
                 // Check for Math object
                 found = false;
@@ -6567,6 +6614,25 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     case JS_BUILTIN_FUNC_BIND:
         return js_func_bind(this_val, arg0, arg_count > 1 ? args + 1 : NULL, arg_count > 1 ? arg_count - 1 : 0);
     case JS_BUILTIN_FUNC_TO_STRING: {
+        bool callable_for_to_string = get_type_id(this_val) == LMD_TYPE_FUNC || js_is_function_prototype_map(this_val);
+        if (!callable_for_to_string && js_is_proxy(this_val)) {
+            Item proxy_target = js_proxy_get_target(this_val);
+            if (get_type_id(proxy_target) == LMD_TYPE_FUNC) {
+                callable_for_to_string = true;
+            } else if (get_type_id(proxy_target) == LMD_TYPE_MAP) {
+                bool own_ip_ts = false;
+                js_map_get_fast_ext(proxy_target.map, "__instance_proto__", 18, &own_ip_ts);
+                callable_for_to_string = own_ip_ts;
+            }
+        }
+        if (!callable_for_to_string && get_type_id(this_val) == LMD_TYPE_MAP) {
+            bool own_ip_ts = false;
+            js_map_get_fast_ext(this_val.map, "__instance_proto__", 18, &own_ip_ts);
+            callable_for_to_string = own_ip_ts;
+        }
+        if (!callable_for_to_string) {
+            return js_throw_type_error("Function.prototype.toString called on non-callable");
+        }
         // Handle class objects (MAPs with __instance_proto__): return original
         // class source text if available (per ES spec — Function.prototype.toString
         // on a class returns the class declaration source).
@@ -6610,9 +6676,16 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             // Proxy with non-callable target: throw TypeError
             if (js_is_proxy(this_val)) {
                 Item proxy_target = js_proxy_get_target(this_val);
-                if (get_type_id(proxy_target) != LMD_TYPE_FUNC) {
+                bool proxy_class_target = false;
+                if (get_type_id(proxy_target) == LMD_TYPE_MAP) {
+                    js_map_get_fast_ext(proxy_target.map, "__instance_proto__", 18, &proxy_class_target);
+                }
+                if (get_type_id(proxy_target) != LMD_TYPE_FUNC && !proxy_class_target) {
                     js_throw_type_error("Function.prototype.toString called on non-callable");
                     return ItemNull;
+                }
+                if (proxy_class_target) {
+                    return (Item){.item = s2it(heap_create_name("function () { [native code] }", 29))};
                 }
                 // proxy of function: use NativeFunction format (do not expose target source)
                 JsFunction* pfn = (JsFunction*)proxy_target.function;
@@ -6669,8 +6742,13 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     }
     case JS_BUILTIN_FUNC_HAS_INSTANCE: {
         // Function.prototype[@@hasInstance](V) — ES spec §19.2.3.6
+        if (get_type_id(this_val) != LMD_TYPE_FUNC && !js_is_proxy(this_val) && !js_is_function_prototype_map(this_val)) {
+            return (Item){.item = ITEM_FALSE};
+        }
         return js_ordinary_has_instance(arg0, this_val);
     }
+    case JS_BUILTIN_FUNC_THROW_TYPE_ERROR:
+        return js_throw_type_error("'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them");
 
     // String.prototype methods - delegate to js_string_method
     case JS_BUILTIN_STR_CHAR_AT:
