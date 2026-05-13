@@ -50,10 +50,10 @@ fn _label_layer(rect, page_index) {
 // `let x = if (c) [...] else [...]` returns null inside `pn`
 // (vibe/Lambda_Issues5.md #15).
 pn _label_children(rect, page_index, opts) {
-    let suppress = (opts and (opts.show_label == false))
+    let show = (opts and (opts.show_label == true))
     var out = []
-    if (suppress) { out = [] }
-    else { out = [_label_layer(rect, page_index)] }
+    if (show) { out = [_label_layer(rect, page_index)] }
+    else { out = [] }
     return out
 }
 
@@ -158,7 +158,7 @@ pub pn pdf_to_html(pdf, opts) {
     // the actual glyphs (not OS fallback). Done here — once per doc —
     // rather than per page so the rule appears once.
     let faces = _collect_font_face_rules(pdf)
-    let base_css = if (opts and opts.css) opts.css else html.DEFAULT_CSS
+    let base_css = _base_css(opts)
     let css = _build_css(faces, base_css)
     let opts2 = _opts_with_css(opts, css)
     return html.html_shell(svgs, opts2)
@@ -239,13 +239,18 @@ pn _collect_font_face_rules(pdf) {
     return rules | join("")
 }
 
-// Build the final stylesheet: @font-face block first, then base CSS.
+// Build the final stylesheet: base page chrome first, then @font-face rules.
 fn _build_css(face_rules: string, base_css: string) {
     if (face_rules == "") { base_css }
-    else { face_rules ++ base_css }
+    else { base_css ++ face_rules }
 }
 
 fn _opts_with_css(opts, css: string) {
     if (opts == null) { { css: css } }
     else              { { *: opts, css: css } }
+}
+
+fn _base_css(opts) {
+    if (opts and opts.css) { opts.css }
+    else { html.DEFAULT_CSS }
 }

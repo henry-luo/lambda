@@ -962,6 +962,40 @@ static char* base64_alloc(const uint8_t* src, size_t n) {
     return out;
 }
 
+static bool filter_item_has_name(Item filter_it, const char* name1, const char* name2) {
+    if (String* fs = item_as_string(filter_it)) {
+        return str_eq(fs, name1) || (name2 && str_eq(fs, name2));
+    }
+    if (Array* fa = item_as_array(filter_it)) {
+        for (int i = 0; i < fa->length; i++) {
+            if (filter_item_has_name(fa->items[i], name1, name2)) return true;
+        }
+    }
+    return false;
+}
+
+static String* bytes_to_data_uri(Input* input, const char* mime,
+                                 const uint8_t* data, size_t data_len) {
+    if (!input || !mime || !data || data_len == 0) return nullptr;
+
+    char* b64 = base64_alloc(data, data_len);
+    if (!b64) return nullptr;
+
+    size_t mime_len = strlen(mime);
+    size_t b64_len = strlen(b64);
+    size_t total = strlen("data:") + mime_len + strlen(";base64,") + b64_len;
+    String* out = (String*)pool_calloc(input->pool, sizeof(String) + total + 1);
+    if (!out) { free(b64); return nullptr; }
+
+    int n = snprintf(out->chars, total + 1, "data:%s;base64,%s", mime, b64);
+    free(b64);
+    if (n < 0 || (size_t)n != total) return nullptr;
+
+    out->len = (uint32_t)total;
+    out->is_ascii = 1;
+    return out;
+}
+
 // Build the RGBA buffer for one image and convert it to a
 // data:image/png;base64,... String*. Returns nullptr on failure /
 // unsupported configurations.
@@ -978,15 +1012,26 @@ static String* image_to_data_uri(Input* input, Map* stream_map,
     int w   = item_as_int(map_lookup(dict, "Width"),  0);
     int h   = item_as_int(map_lookup(dict, "Height"), 0);
     int bpc = item_as_int(map_lookup(dict, "BitsPerComponent"), 8);
+
+    Item data_it = map_lookup(stream_map, "data");
+    String* pix = item_as_string(data_it);
+    if (!pix) return nullptr;
+
+    Item filter_it = map_lookup(dict, "Filter");
+    if (filter_item_has_name(filter_it, "DCTDecode", "DCT")) {
+        const uint8_t* bytes = (const uint8_t*)pix->chars;
+        if (pix->len >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF) {
+            return bytes_to_data_uri(input, "image/jpeg", bytes, pix->len);
+        }
+        return nullptr;
+    }
+
     if (w <= 0 || h <= 0 || bpc != 8) return nullptr;
 
     int ncomp = color_space_ncomp(map_lookup(dict, "ColorSpace"), table);
     if (ncomp != 1 && ncomp != 3) return nullptr;
 
     // Pixel data must be plain (Pass 3 should have decompressed it).
-    Item data_it = map_lookup(stream_map, "data");
-    String* pix = item_as_string(data_it);
-    if (!pix) return nullptr;
     size_t expect = (size_t)w * (size_t)h * (size_t)ncomp;
     if ((size_t)pix->len < expect) return nullptr;
     const uint8_t* rgb = (const uint8_t*)pix->chars;
@@ -1085,7 +1130,7 @@ static void encode_image_xobjects(Input* input, MarkBuilder& builder,
                          {.item = s2it(uri)});
         encoded++;
     }
-    log_info("pdf_postprocess: encoded %d Image XObject(s) to PNG data URI", encoded);
+    log_info("pdf_postprocess: encoded %d Image XObject(s) to data URI", encoded);
 }
 
 // Build a `data:font/<fmt>;base64,...` URI from a stream Map's `data`

@@ -9,10 +9,12 @@
 // CSS for the multi-page document. Kept inline so the generated HTML is
 // self-contained.
 pub DEFAULT_CSS =
-    ".pdf-document { background: #525659; padding: 16px 0; margin: 0; }\n" ++
-    ".pdf-page { display: block; margin: 8px auto; " ++
-        "box-shadow: 0 2px 8px rgba(0,0,0,0.5); background: white; }\n" ++
-    ".pdf-page svg { display: block; }\n" ++
+    ".pdf-document { background: #f1f3f5; padding: 16px; margin: 0; }\n" ++
+    ".pdf-page { display: block; box-sizing: border-box; " ++
+        "max-width: 100%; margin: 0 auto 16px auto; padding: 0; " ++
+        "background: #fff; border: 1px solid #d9dee3; " ++
+        "box-shadow: 0 2px 10px rgba(15,23,42,0.08); }\n" ++
+    ".pdf-page svg { display: block; max-width: 100%; height: auto; background: #fff; }\n" ++
     ".pdf-page svg text { user-select: text; -webkit-user-select: text; " ++
         "cursor: text; }\n"
 
@@ -22,7 +24,8 @@ pub DEFAULT_CSS =
 
 // Wrap a single <svg> element in a <div class="pdf-page" data-page="n">.
 pub fn page_div(svg_el, page_num: int) {
-    <div class: "pdf-page", 'data-page': string(page_num);
+    let page_style = "width: " ++ svg_el.width ++ "px;"
+    <div class: "pdf-page", 'data-page': string(page_num), style: page_style;
         svg_el
     >
 }

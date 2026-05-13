@@ -30,6 +30,9 @@
 static const int SVG_RESOURCE_STACK_MAX = 32;
 static thread_local const char* g_svg_resource_stack[SVG_RESOURCE_STACK_MAX];
 static thread_local int g_svg_resource_stack_depth = 0;
+static thread_local RenderContext* g_svg_active_rdcon = nullptr;
+
+extern void draw_glyph(RenderContext* rdcon, GlyphBitmap* bitmap, int x, int y);
 
 static bool svg_resource_stack_contains(const char* path) {
     if (!path || !*path) return false;
@@ -68,9 +71,25 @@ static inline void svg_fill_path(SvgRenderContext* ctx, RdtPath* path, Color col
     if (ctx->dl) dl_fill_path(ctx->dl, path, color, rule, xform);
     else rdt_fill_path(ctx->vec, path, color, rule, xform);
 }
+
+static float svg_transform_stroke_scale(const RdtMatrix* xform) {
+    if (!xform) return 1.0f;
+    float sx = sqrtf(xform->e11 * xform->e11 + xform->e21 * xform->e21);
+    float sy = sqrtf(xform->e12 * xform->e12 + xform->e22 * xform->e22);
+    float scale = (sx + sy) * 0.5f;
+    return scale > 0.0f ? scale : 1.0f;
+}
+
 static inline void svg_stroke_path(SvgRenderContext* ctx, RdtPath* path, Color color, float width,
                                    RdtStrokeCap cap, RdtStrokeJoin join,
                                    const float* dash, int dash_count, const RdtMatrix* xform) {
+    if (width > 0.0f) {
+        float scale = svg_transform_stroke_scale(xform);
+        float device_width = width * scale;
+        if (device_width > 0.0f && device_width < 1.0f) {
+            width = 1.0f / scale;
+        }
+    }
     if (ctx->dl) dl_stroke_path(ctx->dl, path, color, width, cap, join, dash, dash_count, 0, xform);
     else rdt_stroke_path(ctx->vec, path, color, width, cap, join, dash, dash_count, 0, xform);
 }
@@ -2235,8 +2254,8 @@ static void collect_svg_style_rules(SvgRenderContext* ctx, Element* elem) {
 
 /**
  * Create a single ThorVG text object with specified properties
- * Note: font_size is in CSS pixels, but ThorVG uses points internally.
- * We convert: points = pixels * 72/96 = pixels * 0.75
+ * Note: font_size is in SVG/CSS user units. ThorVG's text size is used in
+ * the same coordinate space as the surrounding SVG transform.
  * anchor_x: horizontal anchor (0=start, 0.5=middle, 1=end) from SVG text-anchor
  */
 static Tvg_Paint create_text_segment(const char* text, float x, float y,
@@ -2245,10 +2264,7 @@ static Tvg_Paint create_text_segment(const char* text, float x, float y,
                                      float anchor_x = 0.0f) {
     if (!text || !*text || !font_path) return nullptr;
 
-    // convert CSS pixels to points for ThorVG
-    // 1 CSS pixel = 1/96 inch, 1 point = 1/72 inch
-    // points = pixels * 72 / 96 = pixels * 0.75
-    float font_size_pt = font_size_px * 0.75f;
+    float font_size_tvg = font_size_px;
 
     Tvg_Paint tvg_text = tvg_text_new();
     if (!tvg_text) return nullptr;
@@ -2279,7 +2295,7 @@ static Tvg_Paint create_text_segment(const char* text, float x, float y,
         log_debug("[SVG TEXT] successfully set font name: '%s'", font_name);
     }
 
-    result = tvg_text_set_size(tvg_text, font_size_pt);
+    result = tvg_text_set_size(tvg_text, font_size_tvg);
     if (result != TVG_RESULT_SUCCESS) {
         tvg_paint_unref(tvg_text, true);
         return nullptr;
@@ -2308,8 +2324,8 @@ static Tvg_Paint create_text_segment(const char* text, float x, float y,
     // by tvg_paint_set_transform in rdt_picture_draw. The caller composes
     // text position into the drawing transform matrix instead.
 
-    log_debug("[SVG] text segment: '%s' at (%.1f, %.1f) size=%.1fpx (%.1fpt) color=rgb(%d,%d,%d)",
-              text, x, y, font_size_px, font_size_pt, fill_color.r, fill_color.g, fill_color.b);
+    log_debug("[SVG] text segment: '%s' at (%.1f, %.1f) size=%.1f color=rgb(%d,%d,%d)",
+              text, x, y, font_size_tvg, fill_color.r, fill_color.g, fill_color.b);
 
     return tvg_text;
 }
@@ -2343,6 +2359,75 @@ static float measure_svg_text_width(const char* text, float font_size_px,
     return len * font_size_px * 0.55f;
 }
 
+static bool render_svg_text_with_radiant_glyphs(SvgRenderContext* ctx, const char* text,
+                                                const char* font_family, float font_size,
+                                                int font_weight, FontSlant font_slant,
+                                                Color fill_color, const RdtMatrix* matrix,
+                                                float base_x, float base_y, float text_length) {
+    RenderContext* rdcon = g_svg_active_rdcon;
+    if (!rdcon || !ctx || !ctx->font_ctx || !text || !*text || !matrix) return false;
+    if (fabsf(matrix->e12) > 0.001f || fabsf(matrix->e21) > 0.001f) return false;
+
+    float sx = fabsf(matrix->e11);
+    float sy = fabsf(matrix->e22);
+    if (sx <= 0.0f || sy <= 0.0f) return false;
+
+    float device_scale = rdcon->scale > 0.0f ? rdcon->scale : 1.0f;
+    FontStyleDesc style = {};
+    style.family = font_family ? font_family : "Arial";
+    style.size_px = font_size * sy / device_scale;
+    style.weight = (FontWeight)font_weight;
+    style.slant = font_slant;
+    FontHandle* handle = font_resolve(ctx->font_ctx, &style);
+    if (!handle) return false;
+
+    float natural_width = 0.0f;
+    const unsigned char* cursor = (const unsigned char*)text;
+    const unsigned char* end = cursor + strlen(text);
+    while (cursor < end) {
+        uint32_t codepoint;
+        int bytes = str_utf8_decode((const char*)cursor, (size_t)(end - cursor), &codepoint);
+        if (bytes <= 0) { cursor++; continue; }
+        cursor += bytes;
+        LoadedGlyph* glyph = font_load_glyph(handle, &style, codepoint, false);
+        if (glyph) natural_width += glyph->advance_x;
+    }
+
+    float advance_scale = 1.0f;
+    if (text_length > 0.0f && natural_width > 0.0f) {
+        float target_width = text_length * sx;
+        advance_scale = target_width / natural_width;
+        log_debug("[SVG] Radiant textLength fit: '%s' target=%.3f measured=%.3f advance_scale=%.3f",
+                  text, target_width, natural_width, advance_scale);
+    }
+
+    float pen_x = matrix->e11 * base_x + matrix->e12 * base_y + matrix->e13;
+    float baseline_y = matrix->e21 * base_x + matrix->e22 * base_y + matrix->e23;
+    Color saved_color = rdcon->color;
+    bool saved_has_transform = rdcon->has_transform;
+    rdcon->color = fill_color;
+    rdcon->has_transform = false;
+
+    cursor = (const unsigned char*)text;
+    while (cursor < end) {
+        uint32_t codepoint;
+        int bytes = str_utf8_decode((const char*)cursor, (size_t)(end - cursor), &codepoint);
+        if (bytes <= 0) { cursor++; continue; }
+        cursor += bytes;
+        LoadedGlyph* glyph = font_load_glyph(handle, &style, codepoint, true);
+        if (!glyph) continue;
+        float gx = pen_x + glyph->bitmap.bearing_x;
+        float gy = baseline_y - glyph->bitmap.bearing_y;
+        draw_glyph(rdcon, &glyph->bitmap, lroundf(gx), lroundf(gy));
+        pen_x += glyph->advance_x * advance_scale;
+    }
+
+    rdcon->has_transform = saved_has_transform;
+    rdcon->color = saved_color;
+    font_handle_release(handle);
+    return true;
+}
+
 /**
  * Render SVG <text> element with proper tspan support
  * Each tspan gets its own color and position
@@ -2365,6 +2450,12 @@ static void render_svg_text(SvgRenderContext* ctx, Element* elem) {
     } else {
         font_size = 16;
     }
+
+    // PDF-generated SVG uses textLength to preserve exact run advances when
+    // embedded PDF subset fonts fall back to metric-different system fonts.
+    const char* text_length_str = get_svg_attr(elem, "textLength");
+    if (!text_length_str) text_length_str = get_svg_attr(elem, "textlength");
+    float text_length = text_length_str ? parse_svg_length(text_length_str, 0.0f) : 0.0f;
 
     // parse text-anchor: start (default), middle, end
     const char* text_anchor_str = get_svg_attr(elem, "text-anchor");
@@ -2473,12 +2564,17 @@ static void render_svg_text(SvgRenderContext* ctx, Element* elem) {
     // helper lambda to wrap and draw a ThorVG text paint
     // text position (tx, ty) is composed into the transform since
     // tvg_paint_set_transform in rdt_picture_draw overwrites any prior tvg_paint_translate
-    auto draw_text_paint = [&](Tvg_Paint tvg_text, float tx, float ty, float fs_px) {
+    auto draw_text_paint = [&](Tvg_Paint tvg_text, float tx, float ty, float fs_px, float scale_x = 1.0f) {
         if (!tvg_text) return;
         float ascent = fs_px * font_ascent_ratio;
         float adj_y = ty - ascent;
         RdtMatrix pos = rdt_matrix_translate(tx, adj_y);
-        RdtMatrix final_m = rdt_matrix_multiply(&m, &pos);
+        RdtMatrix local = pos;
+        if (scale_x > 0.0f && fabsf(scale_x - 1.0f) > 0.001f) {
+            RdtMatrix scale = { scale_x, 0, 0,  0, 1, 0,  0, 0, 1 };
+            local = rdt_matrix_multiply(&pos, &scale);
+        }
+        RdtMatrix final_m = rdt_matrix_multiply(&m, &local);
         RdtPicture* pic = rdt_picture_take_tvg_paint(tvg_text, 0, 0);
         if (pic) {
             svg_draw_picture(ctx, pic, 255, &final_m);
@@ -2489,11 +2585,31 @@ static void render_svg_text(SvgRenderContext* ctx, Element* elem) {
     if (text_segments == 1 && !has_tspan) {
         const char* text_content = get_direct_text_content(elem);
         if (text_content) {
-            Tvg_Paint text = create_text_segment(text_content, base_x, base_y,
-                                                  font_path, font_name, font_size, default_fill,
-                                                  anchor_x);
+            float text_scale_x = 1.0f;
+            if (text_length > 0.0f) {
+                float measured_width = measure_svg_text_width(text_content, font_size, ctx->font_ctx, metrics_family, font_weight);
+                if (measured_width > 0.0f) {
+                    text_scale_x = text_length / measured_width;
+                    log_debug("[SVG] textLength fit: '%s' target=%.3f measured=%.3f scale_x=%.3f",
+                              text_content, text_length, measured_width, text_scale_x);
+                }
+            }
+            bool rendered_with_radiant = false;
+            if (anchor_x == 0.0f) {
+                rendered_with_radiant = render_svg_text_with_radiant_glyphs(ctx, text_content,
+                    metrics_family, font_size, font_weight, font_slant, default_fill, &m,
+                    base_x, base_y, text_length);
+            }
+            Tvg_Paint text = nullptr;
+            if (!rendered_with_radiant) {
+                text = create_text_segment(text_content, base_x, base_y,
+                                           font_path, font_name, font_size, default_fill,
+                                           anchor_x);
+            }
             mem_free((void*)text_content);
-            draw_text_paint(text, base_x, base_y, font_size);
+            if (!rendered_with_radiant) {
+                draw_text_paint(text, base_x, base_y, font_size, text_scale_x);
+            }
         }
         mem_free(font_path);
         return;
@@ -3600,9 +3716,12 @@ void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
         initial_fill_color = view->in_line->svg_fill_color;
         fill_color_ptr = &initial_fill_color;
     }
+    RenderContext* saved_svg_rdcon = g_svg_active_rdcon;
+    g_svg_active_rdcon = rdcon;
     render_svg_to_vec(&rdcon->vec, svg_elem, view->width, view->height,
                       rdcon->ui_context->document->pool, scale, font_ctx, &base_transform,
                       rdcon->dl, current_color_ptr, fill_color_ptr);
+    g_svg_active_rdcon = saved_svg_rdcon;
 
     if (has_clip) {
         rc_pop_clip(rdcon);
