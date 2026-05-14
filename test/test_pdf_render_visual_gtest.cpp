@@ -143,25 +143,6 @@ static CommandResult run_command_capture(const char* cmd) {
     return result;
 }
 
-static bool read_file_all(const char* path, char** out_data, size_t* out_len) {
-    *out_data = NULL;
-    *out_len = 0;
-    FILE* fp = fopen(path, "rb");
-    if (!fp) return false;
-    if (fseek(fp, 0, SEEK_END) != 0) { fclose(fp); return false; }
-    long size = ftell(fp);
-    if (size < 0) { fclose(fp); return false; }
-    if (fseek(fp, 0, SEEK_SET) != 0) { fclose(fp); return false; }
-    char* data = (char*)malloc((size_t)size + 1);
-    if (!data) { fclose(fp); return false; }
-    size_t nread = fread(data, 1, (size_t)size, fp);
-    fclose(fp);
-    data[nread] = '\0';
-    *out_data = data;
-    *out_len = nread;
-    return true;
-}
-
 static bool write_file_all(const char* path, const char* data, size_t len) {
     FILE* fp = fopen(path, "wb");
     if (!fp) return false;
@@ -246,89 +227,45 @@ static bool render_reference_page(const PdfFileInfo* pdf, int page, char* out_pn
     return true;
 }
 
-static bool render_lambda_svg_page(const PdfFileInfo* pdf, int page_index, const char* svg_path) {
-    char script_path[PATH_MAX];
-    char out_path_escaped[PATH_MAX * 2];
+static bool write_lambda_page_script(const PdfFileInfo* pdf, int page_index, int height, const char* script_path) {
     char pdf_path_escaped[PATH_MAX * 2];
     char script[4096];
-    char qscript[PATH_MAX + 8];
-    char cmd[PATH_MAX * 3];
 
-    snprintf(script_path, sizeof(script_path), "%s/%s_page_%02d.ls", PDF_TEMP_DIR, pdf->base, page_index + 1);
     lambda_string_escape(pdf->path, pdf_path_escaped, sizeof(pdf_path_escaped));
-    lambda_string_escape(svg_path, out_path_escaped, sizeof(out_path_escaped));
     snprintf(script, sizeof(script),
              "import pdf: lambda.package.pdf.pdf\n"
              "\n"
-             "pn main() {\n"
-             "    let doc^err = input(\"%s\", 'pdf')\n"
-             "    let svg = pdf.pdf_to_svg(doc, %d, {show_label: false})\n"
-             "    let out = format(svg, 'xml')\n"
-             "    output(out, \"%s\", 'text')^\n"
-             "}\n",
-             pdf_path_escaped, page_index, out_path_escaped);
+             "let doc^err = input(\"%s\", 'pdf')\n"
+             "let page = pdf.pdf_to_svg(doc, %d, {show_label: false})\n"
+             "<html;\n"
+             "  <head;\n"
+             "    <meta charset: \"utf-8\">\n"
+             "    <style; \"html,body{margin:0;padding:0;background:white;overflow:hidden;}svg{display:block;width:%dpx;height:%dpx;}\">\n"
+             "  >\n"
+             "  <body; page>\n"
+             ">\n",
+             pdf_path_escaped, page_index, RENDER_WIDTH, height);
 
-    if (!write_file_all(script_path, script, strlen(script))) return false;
-
-    shell_quote(script_path, qscript, sizeof(qscript));
-    snprintf(cmd, sizeof(cmd), "%s run %s > %s/%s_page_%02d_run.out 2> %s/%s_page_%02d_run.err",
-             LAMBDA_EXE, qscript, PDF_TEMP_DIR, pdf->base, page_index + 1,
-             PDF_TEMP_DIR, pdf->base, page_index + 1);
-    int status = system(cmd);
-    return status == 0 && file_exists(svg_path);
-}
-
-static bool write_svg_html_wrapper(const char* svg_path, const char* html_path, int height) {
-    char* svg = NULL;
-    size_t svg_len = 0;
-    if (!read_file_all(svg_path, &svg, &svg_len)) return false;
-
-    const char* head = "<!doctype html><html><head><meta charset=\"utf-8\"><style>html,body{margin:0;padding:0;background:white;overflow:hidden;}svg{display:block;width:600px;height:";
-    const char* mid = "px;}</style></head><body>";
-    const char* tail = "</body></html>";
-    char height_buf[32];
-    snprintf(height_buf, sizeof(height_buf), "%d", height);
-
-    size_t total = strlen(head) + strlen(height_buf) + strlen(mid) + svg_len + strlen(tail);
-    char* html = (char*)malloc(total + 1);
-    if (!html) { free(svg); return false; }
-    html[0] = '\0';
-    strcat(html, head);
-    strcat(html, height_buf);
-    strcat(html, mid);
-    size_t pos = strlen(html);
-    memcpy(html + pos, svg, svg_len);
-    pos += svg_len;
-    memcpy(html + pos, tail, strlen(tail));
-    pos += strlen(tail);
-    html[pos] = '\0';
-
-    bool ok = write_file_all(html_path, html, pos);
-    free(svg);
-    free(html);
-    return ok;
+    return write_file_all(script_path, script, strlen(script));
 }
 
 static bool render_lambda_png_page(const PdfFileInfo* pdf, int page_index, int height, char* out_png, size_t out_size) {
-    char svg_path[PATH_MAX];
-    char html_path[PATH_MAX];
-    char qhtml[PATH_MAX + 8];
+    char script_path[PATH_MAX];
+    char qscript[PATH_MAX + 8];
     char qpng[PATH_MAX + 8];
     char cmd[PATH_MAX * 3 + 256];
 
-    snprintf(svg_path, sizeof(svg_path), "%s/%s_page_%02d.svg", PDF_TEMP_DIR, pdf->base, page_index + 1);
-    snprintf(html_path, sizeof(html_path), "%s/%s_page_%02d.html", PDF_TEMP_DIR, pdf->base, page_index + 1);
+    snprintf(script_path, sizeof(script_path), "%s/%s_page_%02d.ls", PDF_TEMP_DIR, pdf->base, page_index + 1);
     snprintf(out_png, out_size, "%s/%s_page_%02d_lambda.png", PDF_TEMP_DIR, pdf->base, page_index + 1);
     unlink(out_png);
 
-    if (!render_lambda_svg_page(pdf, page_index, svg_path)) return false;
-    if (!write_svg_html_wrapper(svg_path, html_path, height)) return false;
+    if (!write_lambda_page_script(pdf, page_index, height, script_path)) return false;
 
-    shell_quote(html_path, qhtml, sizeof(qhtml));
+    shell_quote(script_path, qscript, sizeof(qscript));
     shell_quote(out_png, qpng, sizeof(qpng));
     snprintf(cmd, sizeof(cmd),
              "%s render %s -o %s -vw %d -vh %d --pixel-ratio 1 > %s/%s_page_%02d_render.out 2> %s/%s_page_%02d_render.err",
-             LAMBDA_EXE, qhtml, qpng, RENDER_WIDTH, height,
+             LAMBDA_EXE, qscript, qpng, RENDER_WIDTH, height,
              PDF_TEMP_DIR, pdf->base, page_index + 1,
              PDF_TEMP_DIR, pdf->base, page_index + 1);
     int status = system(cmd);
