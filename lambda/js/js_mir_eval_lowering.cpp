@@ -557,6 +557,54 @@ static bool js_eval_var_conflicts_lexical_program(JsAstNode* ast) {
     return js_eval_var_conflicts_lexical_statements(((JsProgramNode*)ast)->body);
 }
 
+static bool js_eval_source_assigns_immutable_binding(String* code_str) {
+    if (!code_str || !code_str->chars) return false;
+    extern int64_t js_eval_local_has_immutable_binding(Item key);
+    const char* source = code_str->chars;
+    size_t len = code_str->len;
+    size_t pos = 0;
+    while (pos < len) {
+        char ch = source[pos];
+        if (ch == '\'' || ch == '"' || ch == '`') {
+            char quote = ch;
+            pos++;
+            while (pos < len && source[pos] != quote) {
+                if (source[pos] == '\\' && pos + 1 < len) pos++;
+                pos++;
+            }
+            if (pos < len) pos++;
+            continue;
+        }
+        if (ch == '/' && pos + 1 < len && source[pos + 1] == '/') {
+            pos += 2;
+            while (pos < len && source[pos] != '\n' && source[pos] != '\r') pos++;
+            continue;
+        }
+        if (ch == '/' && pos + 1 < len && source[pos + 1] == '*') {
+            pos += 2;
+            while (pos + 1 < len && !(source[pos] == '*' && source[pos + 1] == '/')) pos++;
+            if (pos + 1 < len) pos += 2;
+            continue;
+        }
+        if (!((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_' || ch == '$')) {
+            pos++;
+            continue;
+        }
+        size_t start = pos++;
+        while (pos < len && js_eval_is_ident_char(source[pos])) pos++;
+        size_t after = js_eval_skip_space_and_comments(source, len, pos);
+        bool assigns = false;
+        if (after < len && source[after] == '=') {
+            assigns = (after + 1 >= len || (source[after + 1] != '=' && source[after + 1] != '>'));
+        }
+        if (assigns) {
+            Item key = (Item){.item = s2it(heap_create_name(source + start, pos - start))};
+            if (js_eval_local_has_immutable_binding(key)) return true;
+        }
+    }
+    return false;
+}
+
 // ============================================================================
 // eval(code) — dynamic evaluation of JavaScript source code
 // Wraps the code in an IIFE and compiles/executes via JIT.
@@ -645,6 +693,11 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
     extern Item js_call_function(Item func, Item this_val, Item* args, int argc);
     size_t code_len = code_str->len;
     Item fn_item = ItemNull;
+
+    if (is_direct_eval && inherited_strict && js_eval_source_assigns_immutable_binding(code_str)) {
+        js_throw_type_error("Assignment to constant variable");
+        return ItemNull;
+    }
 
     // v37: Phase A — try expression form for single-expression eval code.
     // Wraps as "return (code)\n" inside a function IIFE. This handles simple

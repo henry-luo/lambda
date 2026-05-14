@@ -573,6 +573,8 @@ Item js_eval_local_get_binding_or_fallback(Item key, Item fallback);
 void js_eval_local_export_var(Item key, Item value);
 void js_eval_local_note_lexical_binding(Item key);
 int64_t js_eval_local_has_lexical_binding(Item key);
+void js_eval_local_note_immutable_binding(Item key);
+int64_t js_eval_local_has_immutable_binding(Item key);
 int64_t js_with_depth_active(void);
 Item js_get_with_binding_or_fallback(Item key, Item fallback);
 int64_t js_capture_with_binding(Item key);
