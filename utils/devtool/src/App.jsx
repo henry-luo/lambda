@@ -81,6 +81,33 @@ function App() {
   const handleRunTest = async () => {
     if (!selectedTest || isRunning) return;
 
+    // PDF render test flow
+    if (selectedTest.testType === 'pdf-render') {
+      setIsRunning(true);
+      setTestResults(null);
+      setLambdaRenderPath(null);
+      setLambdaPixelRatio(1);
+      terminalRef.current?.clear();
+      terminalRef.current?.writeln(`Rendering PDF: ${selectedTest.testFile}`);
+      terminalRef.current?.writeln('');
+      try {
+        const result = await window.electronAPI.runPdfRenderTest(selectedTest.testFile, selectedTest.renderDir);
+        setLambdaRenderPath(result.output);
+        setLambdaPixelRatio(1);
+        setTestResults(result);
+        terminalRef.current?.writeln('');
+        terminalRef.current?.writeln(`\x1b[32m✓ PDF render completed: ${result.outputFile}\x1b[0m`);
+        terminalRef.current?.refreshViewTree();
+        terminalRef.current?.showTerminal?.();
+      } catch (error) {
+        console.error('PDF render test error:', error);
+        terminalRef.current?.writeln(`\x1b[31mError: ${error.message}\x1b[0m`);
+      } finally {
+        setIsRunning(false);
+      }
+      return;
+    }
+
     // Render test flow
     if (selectedTest.testType === 'render') {
       setIsRunning(true);
@@ -246,6 +273,12 @@ function App() {
     };
   }, []);
 
+  const selectedTestPath = selectedTest?.testType === 'render'
+    ? `test/render/${selectedTest.renderDir || 'page'}/${selectedTest.testFile}.html`
+    : selectedTest?.testType === 'pdf-render'
+      ? `test/pdf/${selectedTest.testFile}`
+      : selectedTest ? `test/layout/data/${selectedTest.category}/${selectedTest.testFile}` : null;
+
   return (
     <div className="app">
       <div className="menu-bar">
@@ -262,7 +295,7 @@ function App() {
           <span className="menu-item">Help</span>
         </div>
         <div className="toolbar">
-          {selectedTest?.testType !== 'render' && (
+          {(!selectedTest || selectedTest?.testType === 'layout') && (
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginRight: '12px' }}>
             <label style={{ fontSize: '13px', color: '#ccc' }}>Viewport:</label>
             <select 
@@ -360,10 +393,9 @@ function App() {
           <div className="bottom-panel" style={{ height: `${terminalHeight}px` }}>
             <BottomPanel
               ref={terminalRef}
-              testPath={selectedTest?.testType === 'render'
-                ? `test/render/${selectedTest.renderDir || 'page'}/${selectedTest.testFile}.html`
-                : selectedTest ? `test/layout/data/${selectedTest.category}/${selectedTest.testFile}` : null}
+              testPath={selectedTestPath}
               renderTest={selectedTest?.testType === 'render' ? selectedTest : null}
+              isPdfTest={selectedTest?.testType === 'pdf-render'}
             />
           </div>
         </div>
