@@ -1,0 +1,14 @@
+{
+  "name": "PDF text selection copies to clipboard",
+  "html": "test/pdf/example.pdf",
+  "viewport": {"width": 1200, "height": 900},
+  "default_timeout": 1000,
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".pdf-text-layer span"}, "min": 1},
+    {"type": "assert_text", "target": {"selector": ".pdf-text-layer"}, "contains": "USENIX"},
+    {"type": "mouse_drag", "target": {"text": "USENIX"}, "to_target": {"text": "Example"}, "button": 0},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+    {"type": "key_combo", "key": "c", "mods_str": "ctrl"},
+    {"type": "assert_clipboard", "contains": "USENIX"}
+  ]
+}

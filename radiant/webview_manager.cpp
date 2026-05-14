@@ -156,16 +156,16 @@ void webview_set_visible(WebViewHandle* handle, bool visible) {
 // ---------------------------------------------------------------------------
 
 // forward: check if tree contains any <webview> elements
-static bool tree_has_webview(ViewBlock* block) {
-    if (!block) return false;
-    if (block->tag_id == HTM_TAG_WEBVIEW && block->embed && block->embed->webview) {
+static bool tree_has_webview(View* view) {
+    ViewElement* elem = lam::view_as_element(view);
+    if (!elem) return false;
+    if (elem->tag_id == HTM_TAG_WEBVIEW && elem->embed && elem->embed->webview) {
         return true;
     }
-    DomNode* child = block->first_child;
+    DomNode* child = elem->first_child;
     while (child) {
         if (child->node_type == DOM_NODE_ELEMENT) {
-            ViewBlock* child_block = lam::view_require_block(child);
-            if (child_block->view_type && tree_has_webview(child_block)) {
+            if (child->view_type && tree_has_webview(child)) {
                 return true;
             }
         }
@@ -299,8 +299,8 @@ static void sync_walk(WebViewManager* mgr, ViewBlock* block,
     DomNode* child = block->first_child;
     while (child) {
         if (child->node_type == DOM_NODE_ELEMENT) {
-            ViewBlock* child_block = lam::view_require_block(child);
-            if (child_block->view_type) {
+            ViewBlock* child_block = lam::view_as_block(child);
+            if (child_block) {
                 sync_walk(mgr, child_block,
                           abs_x + scroll_dx, abs_y + scroll_dy, pixel_ratio);
             }
@@ -355,8 +355,8 @@ static bool poll_dirty_walk(ViewBlock* block) {
     DomNode* child = block->first_child;
     while (child) {
         if (child->node_type == DOM_NODE_ELEMENT) {
-            ViewBlock* cb = lam::view_require_block(child);
-            if (cb->view_type && poll_dirty_walk(cb)) any_dirty = true;
+            ViewBlock* cb = lam::view_as_block(child);
+            if (cb && poll_dirty_walk(cb)) any_dirty = true;
         }
         child = child->next_sibling;
     }
