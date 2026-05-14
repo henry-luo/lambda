@@ -732,6 +732,9 @@ void js_reset_transient_call_state() {
     js_new_target = (Item){0};
     js_pending_new_target = (Item){0};
     js_has_pending_new_target = false;
+    js_super_this_bound_depth = 0;
+    memset(js_super_this_bound_stack, 0, sizeof(js_runtime_state.super_this_bound_stack));
+    memset(js_super_this_value_stack, 0, sizeof(js_runtime_state.super_this_value_stack));
     js_pending_call_args = NULL;
     js_pending_call_argc = 0;
     js_pending_args_is_strict = 0;
@@ -782,6 +785,10 @@ void js_assert_batch_runtime_state_clear(const char* reset_name, bool include_he
         leak_count++;
         log_error("js-batch-state: %s left pending new.target item=%lld flag=%d",
             name, (long long)js_pending_new_target.item, js_has_pending_new_target ? 1 : 0);
+    }
+    if (js_super_this_bound_depth != 0) {
+        leak_count++;
+        log_error("js-batch-state: %s left super this binding depth=%d", name, js_super_this_bound_depth);
     }
     if (js_pending_call_args || js_pending_call_argc != 0) {
         leak_count++;

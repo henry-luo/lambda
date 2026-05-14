@@ -5994,6 +5994,14 @@ static bool js_func_is_constructor(Item func_item) {
         Item target = js_proxy_get_target(func_item);
         return js_func_is_constructor(target);
     }
+    if (get_type_id(func_item) == LMD_TYPE_MAP) {
+        bool own_instance_proto = false;
+        js_map_get_fast_ext(func_item.map, "__instance_proto__", 18, &own_instance_proto);
+        if (own_instance_proto) return true;
+        bool own_ctor = false;
+        Item ctor = js_map_get_fast_ext(func_item.map, "__ctor__", 8, &own_ctor);
+        return own_ctor && get_type_id(ctor) == LMD_TYPE_FUNC;
+    }
     if (get_type_id(func_item) != LMD_TYPE_FUNC) return false;
     JsFunctionLayout* fn = (JsFunctionLayout*)func_item.function;
     if (fn->flags & JS_FUNC_FLAG_ARROW_G) return false;
@@ -6053,6 +6061,11 @@ extern "C" Item js_reflect_construct(Item target, Item args_array, Item new_targ
                 args[i] = js_array_get(args_array, idx);
             }
         }
+    }
+    if (get_type_id(target) == LMD_TYPE_MAP) {
+        Item nt_val = (nt_type == LMD_TYPE_FUNC || get_type_id(new_target) == LMD_TYPE_MAP || js_is_proxy(new_target)) ? new_target : target;
+        js_set_new_target(nt_val);
+        return js_new_from_class_object(target, args, argc);
     }
     // For proxy targets, delegate to [[Construct]] trap
     if (js_is_proxy(target)) {

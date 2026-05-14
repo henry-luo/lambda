@@ -1291,6 +1291,10 @@ MIR_reg_t jm_build_closure_for_method(JsMirTranspiler* mt, JsFuncCollected* fc, 
         jm_call_void_1(mt, "js_mark_strict_func",
             MIR_T_I64, MIR_new_reg_op(mt->ctx, closure_reg));
     }
+    if (fc->is_derived_constructor) {
+        jm_call_void_1(mt, "js_mark_derived_constructor_func",
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, closure_reg));
+    }
     return closure_reg;
 }
 
@@ -2059,9 +2063,7 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
             if (active_ctor->fc->capture_count > 0) {
                 ctor_fn = jm_build_closure_for_method(mt, active_ctor->fc, active_ctor->param_count);
             } else {
-                ctor_fn = jm_call_2(mt, "js_new_function", MIR_T_I64,
-                    MIR_T_I64, MIR_new_ref_op(mt->ctx, active_ctor->fc->func_item),
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, active_ctor->param_count));
+                ctor_fn = jm_create_method_function(mt, active_ctor->fc, active_ctor->param_count);
             }
             MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
             // Set pending new.target to the class (picked up by js_call_function)
@@ -3376,9 +3378,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                             if (active_ctor->fc->capture_count > 0) {
                                 ctor_fn = jm_build_closure_for_method(mt, active_ctor->fc, active_ctor->param_count);
                             } else {
-                                ctor_fn = jm_call_2(mt, "js_new_function", MIR_T_I64,
-                                    MIR_T_I64, MIR_new_ref_op(mt->ctx, active_ctor->fc->func_item),
-                                    MIR_T_I64, MIR_new_int_op(mt->ctx, active_ctor->param_count));
+                                ctor_fn = jm_create_method_function(mt, active_ctor->fc, active_ctor->param_count);
                             }
                             MIR_reg_t ctor_key = jm_box_string_literal(mt, "__ctor__", 8);
                             jm_call_3(mt, "js_property_set", MIR_T_I64,

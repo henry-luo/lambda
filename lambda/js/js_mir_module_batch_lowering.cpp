@@ -3762,9 +3762,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             if (active_ctor->fc->capture_count > 0) {
                                 ctor_fn = jm_build_closure_for_method(mt, active_ctor->fc, active_ctor->param_count);
                             } else {
-                                ctor_fn = jm_call_2(mt, "js_new_function", MIR_T_I64,
-                                    MIR_T_I64, MIR_new_ref_op(mt->ctx, active_ctor->fc->func_item),
-                                    MIR_T_I64, MIR_new_int_op(mt->ctx, active_ctor->param_count));
+                                ctor_fn = jm_create_method_function(mt, active_ctor->fc, active_ctor->param_count);
                             }
                             MIR_reg_t ctor_key = jm_box_string_literal(mt, "__ctor__", 8);
                             jm_call_3(mt, "js_property_set", MIR_T_I64,

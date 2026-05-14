@@ -46,6 +46,9 @@ extern Item js_super_call_class(Item callee, Item this_val, Item* args, int argc
 // super() for native parent constructors: merges returned object's own props onto `this`
 extern Item js_super_call_native(Item callee, Item this_val, Item* args, int argc);
 extern Item js_super_apply_native(Item callee, Item this_val, Item args_array);
+extern Item js_super_bind_this(Item this_val, Item construct_result);
+extern Item js_get_super_constructor_from_receiver(Item receiver, Item fallback_ctor);
+extern void js_mark_derived_constructor_func(Item fn_item);
 
 // Symbol key check for typed array P9 guard (js_runtime.cpp)
 extern int64_t js_key_is_symbol_c(Item key);
@@ -1410,6 +1413,8 @@ JitImport jit_runtime_imports[] = {
     {"js_get_new_target", FPTR(js_get_new_target)},
     {"js_set_new_target", FPTR(js_set_new_target)},
     {"js_set_direct_new_target", FPTR(js_set_direct_new_target)},
+    {"js_super_bind_this", FPTR(js_super_bind_this)},
+    {"js_get_super_constructor_from_receiver", FPTR(js_get_super_constructor_from_receiver)},
     {"js_set_strict_mode", FPTR(js_set_strict_mode)},
     {"js_console_log", FPTR(js_console_log)},
     // exception handling
@@ -1519,6 +1524,7 @@ JitImport jit_runtime_imports[] = {
     {"js_mark_arrow_func", FPTR(js_mark_arrow_func)},
     {"js_mark_method_func", FPTR(js_mark_method_func)},
     {"js_mark_strict_func", FPTR(js_mark_strict_func)},
+    {"js_mark_derived_constructor_func", FPTR(js_mark_derived_constructor_func)},
     {"js_set_formal_length", FPTR(js_set_formal_length)},
     {"js_get_constructor", FPTR(js_get_constructor)},
     {"js_get_prototype_of", FPTR(js_get_prototype_of)},

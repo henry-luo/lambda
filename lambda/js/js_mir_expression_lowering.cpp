@@ -8,6 +8,10 @@ MIR_reg_t jm_create_method_function(JsMirTranspiler* mt, JsFuncCollected* fc, in
         jm_call_void_1(mt, "js_mark_strict_func",
             MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
     }
+    if (fc->is_derived_constructor) {
+        jm_call_void_1(mt, "js_mark_derived_constructor_func",
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
+    }
     return fn_item;
 }
 
@@ -114,7 +118,11 @@ JsMirReference jm_emit_reference(JsMirTranspiler* mt, JsAstNode* node) {
             ref.kind = JS_MIR_REF_SUPER_PROPERTY;
             ref.uninitialized_this = jm_super_reference_before_constructor_super_call(mt, node);
             ref.base_reg = jm_emit_current_this(mt);
-            ref.key_reg = jm_emit_member_key(mt, mem);
+            if (ref.uninitialized_this && mem->computed) {
+                ref.key_reg = jm_emit_undefined(mt);
+            } else {
+                ref.key_reg = jm_emit_member_key(mt, mem);
+            }
             return ref;
         }
 
@@ -3879,28 +3887,22 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
             }
         }
 
-        // super.x = val — use js_super_property_set for correct receiver binding
-        if (member->object && member->object->node_type == JS_AST_NODE_IDENTIFIER) {
+        // super.x = val — use shared Reference Record handling for correct
+        // receiver binding and derived-constructor this/key evaluation order.
+        if (asgn->op == JS_OP_ASSIGN && member->object && member->object->node_type == JS_AST_NODE_IDENTIFIER) {
             JsIdentifierNode* obj_id = (JsIdentifierNode*)member->object;
             if (obj_id->name && obj_id->name->len == 5 && strncmp(obj_id->name->chars, "super", 5) == 0) {
-                MIR_reg_t this_val = jm_emit_current_this(mt);
-                MIR_reg_t key;
-                if (member->computed) {
-                    key = jm_transpile_box_item(mt, member->property);
+                JsMirReference ref = jm_emit_reference(mt, asgn->left);
+                jm_emit_exc_propagate_check(mt);
+                if (ref.uninitialized_this) {
+                    MIR_reg_t undef = jm_emit_undefined(mt);
+                    jm_emit_put_value(mt, &ref, undef);
                     jm_emit_exc_propagate_check(mt);
-                } else if (member->property && member->property->node_type == JS_AST_NODE_IDENTIFIER) {
-                    JsIdentifierNode* prop = (JsIdentifierNode*)member->property;
-                    key = jm_box_string_literal(mt, prop->name->chars, (int)prop->name->len);
-                } else {
-                    key = jm_transpile_box_item(mt, member->property);
-                    jm_emit_exc_propagate_check(mt);
+                    return undef;
                 }
                 MIR_reg_t new_val = jm_transpile_box_item(mt, asgn->right);
                 jm_emit_exc_propagate_check(mt);
-                MIR_reg_t super_set_result = jm_call_3(mt, "js_super_property_set", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, new_val));
+                MIR_reg_t super_set_result = jm_emit_put_value(mt, &ref, new_val);
                 jm_emit_exc_propagate_check(mt);
                 return super_set_result;
             }
@@ -5005,9 +5007,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     if (parent->constructor->fc->capture_count > 0) {
                         ctor_fn = jm_build_closure_for_method(mt, parent->constructor->fc, parent->constructor->param_count);
                     } else {
-                        ctor_fn = jm_call_2(mt, "js_new_function", MIR_T_I64,
-                            MIR_T_I64, MIR_new_ref_op(mt->ctx, parent->constructor->fc->func_item),
-                            MIR_T_I64, MIR_new_int_op(mt->ctx, parent->constructor->param_count));
+                        ctor_fn = jm_create_method_function(mt, parent->constructor->fc, parent->constructor->param_count);
                     }
                     MIR_reg_t args_ptr;
                     bool super_has_spread = false;
@@ -5024,16 +5024,22 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     jm_call_void_1(mt, "js_set_new_target",
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, cur_nt));
                     if (super_has_spread) {
-                        return jm_call_3(mt, "js_apply_function", MIR_T_I64,
+                        MIR_reg_t super_result = jm_call_3(mt, "js_apply_function", MIR_T_I64,
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_fn),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, args_ptr));
+                        return jm_call_2(mt, "js_super_bind_this", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, super_result));
                     }
-                    return jm_call_4(mt, "js_call_function", MIR_T_I64,
+                    MIR_reg_t super_result = jm_call_4(mt, "js_call_function", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_fn),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
                         MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
                         MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                    return jm_call_2(mt, "js_super_bind_this", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, super_result));
                 } else {
                     // Parent class has no explicit constructor — walk up the superclass chain
                     // to find the nearest ancestor with a constructor (implicit default constructor
@@ -5046,9 +5052,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                             if (ancestor->constructor->fc->capture_count > 0) {
                                 ctor_fn = jm_build_closure_for_method(mt, ancestor->constructor->fc, ancestor->constructor->param_count);
                             } else {
-                                ctor_fn = jm_call_2(mt, "js_new_function", MIR_T_I64,
-                                    MIR_T_I64, MIR_new_ref_op(mt->ctx, ancestor->constructor->fc->func_item),
-                                    MIR_T_I64, MIR_new_int_op(mt->ctx, ancestor->constructor->param_count));
+                                ctor_fn = jm_create_method_function(mt, ancestor->constructor->fc, ancestor->constructor->param_count);
                             }
                             MIR_reg_t args_ptr;
                             bool anc_has_spread = false;
@@ -5065,22 +5069,31 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                             jm_call_void_1(mt, "js_set_new_target",
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, cur_nt2));
                             if (anc_has_spread) {
-                                return jm_call_3(mt, "js_apply_function", MIR_T_I64,
+                                MIR_reg_t super_result = jm_call_3(mt, "js_apply_function", MIR_T_I64,
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_fn),
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, args_ptr));
+                                return jm_call_2(mt, "js_super_bind_this", MIR_T_I64,
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, super_result));
                             }
-                            return jm_call_4(mt, "js_call_function", MIR_T_I64,
+                            MIR_reg_t super_result = jm_call_4(mt, "js_call_function", MIR_T_I64,
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_fn),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
                                 MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
                                 MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                            return jm_call_2(mt, "js_super_bind_this", MIR_T_I64,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, super_result));
                         }
                         ancestor = ancestor->superclass;
                     }
                     log_debug("js-mir: super() but no constructor found in class '%.*s' or its ancestors",
                         (int)parent->name->len, parent->name->chars);
-                    return jm_emit_null(mt);
+                    MIR_reg_t this_val = jm_call_0(mt, "js_get_this", MIR_T_I64);
+                    return jm_call_2(mt, "js_super_bind_this", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val));
                 }
             } else {
                 // No user-defined superclass — check for builtin parent class (Error, etc.)
@@ -5117,7 +5130,9 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, name_key),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, name_val));
                             log_debug("js-mir: super() for builtin Error class '%.*s'", slen, sname);
-                            return this_val;
+                            return jm_call_2(mt, "js_super_bind_this", MIR_T_I64,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val));
                         }
                         // Non-class, non-builtin superclass: resolve at runtime and call with this.
                         // Use js_super_call_native so that native parent ctors that return a fresh
@@ -5126,6 +5141,9 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                         {
                             MIR_reg_t parent_fn = jm_transpile_box_item(mt, mt->current_class->node->superclass);
                             MIR_reg_t this_val = jm_call_0(mt, "js_get_this", MIR_T_I64);
+                            parent_fn = jm_call_2(mt, "js_get_super_constructor_from_receiver", MIR_T_I64,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, parent_fn));
                             bool super_has_spread = false;
                             for (JsAstNode* chk = call->arguments; chk; chk = chk->next) {
                                 if (chk->node_type == JS_AST_NODE_SPREAD_ELEMENT) { super_has_spread = true; break; }
@@ -5138,19 +5156,27 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                             jm_call_void_1(mt, "js_set_new_target",
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, cur_nt3));
                             if (super_has_spread) {
-                                jm_call_3(mt, "js_super_apply_native", MIR_T_I64,
+                                MIR_reg_t super_result = jm_call_3(mt, "js_super_apply_native", MIR_T_I64,
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, parent_fn),
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, args_ptr));
+                                MIR_reg_t bound_this = jm_call_2(mt, "js_super_bind_this", MIR_T_I64,
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, super_result));
+                                log_debug("js-mir: super() resolved dynamically for non-class parent '%.*s'", slen, sname);
+                                return bound_this;
                             } else {
-                                jm_call_4(mt, "js_super_call_native", MIR_T_I64,
+                                MIR_reg_t super_result = jm_call_4(mt, "js_super_call_native", MIR_T_I64,
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, parent_fn),
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
                                     MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
                                     MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                                MIR_reg_t bound_this = jm_call_2(mt, "js_super_bind_this", MIR_T_I64,
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, super_result));
+                                log_debug("js-mir: super() resolved dynamically for non-class parent '%.*s'", slen, sname);
+                                return bound_this;
                             }
-                            log_debug("js-mir: super() resolved dynamically for non-class parent '%.*s'", slen, sname);
-                            return this_val;
                         }
                     }
                 }
@@ -5161,6 +5187,9 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     mt->current_class->node->superclass->node_type != JS_AST_NODE_IDENTIFIER) {
                     MIR_reg_t parent_fn = jm_transpile_box_item(mt, mt->current_class->node->superclass);
                     MIR_reg_t this_val = jm_call_0(mt, "js_get_this", MIR_T_I64);
+                    parent_fn = jm_call_2(mt, "js_get_super_constructor_from_receiver", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, parent_fn));
                     MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
                     MIR_reg_t cur_nt3 = jm_call_0(mt, "js_get_new_target", MIR_T_I64);
                     jm_call_void_1(mt, "js_set_new_target",
@@ -5168,13 +5197,15 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     // Use js_super_call_class: handles both FUNC and MAP (class expression) callee.
                     // An empty class {} produces a MAP with no __ctor__, which js_call_function
                     // would reject as "not a function". js_super_call_class treats that as a no-op.
-                    jm_call_4(mt, "js_super_call_class", MIR_T_I64,
+                    MIR_reg_t super_result = jm_call_4(mt, "js_super_call_class", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, parent_fn),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
                         MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
                         MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
                     log_debug("js-mir: super() resolved dynamically for member-expression parent");
-                    return this_val;
+                    return jm_call_2(mt, "js_super_bind_this", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, super_result));
                 }
                 log_debug("js-mir: super() called but no parent class context");
                 return jm_emit_null(mt);
@@ -10979,9 +11010,7 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                     if (active_ctor->fc->capture_count > 0) {
                         ctor_fn = jm_build_closure_for_method(mt, active_ctor->fc, active_ctor->param_count);
                     } else {
-                        ctor_fn = jm_call_2(mt, "js_new_function", MIR_T_I64,
-                            MIR_T_I64, MIR_new_ref_op(mt->ctx, active_ctor->fc->func_item),
-                            MIR_T_I64, MIR_new_int_op(mt->ctx, active_ctor->param_count));
+                        ctor_fn = jm_create_method_function(mt, active_ctor->fc, active_ctor->param_count);
                     }
                     MIR_reg_t ctor_key = jm_box_string_literal(mt, "__ctor__", 8);
                     jm_call_3(mt, "js_property_set", MIR_T_I64,

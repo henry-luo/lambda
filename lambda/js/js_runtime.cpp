@@ -1043,8 +1043,10 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
         return js_proxy_trap_construct(callee, args, argc, callee);
     }
 
-    // Set pending new.target (will be picked up by js_call_function)
-    js_pending_new_target = callee;
+    // Set pending new.target (will be picked up by js_call_function). If an
+    // outer Reflect.construct already supplied one, preserve it.
+    Item effective_new_target = js_has_pending_new_target ? js_pending_new_target : callee;
+    js_pending_new_target = effective_new_target;
     js_has_pending_new_target = true;
 
     // Case 1: callee is a function — standard constructor call
@@ -1415,7 +1417,7 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
         // Call the constructor (__ctor__ property on the class object)
         if (ctor.item != ItemNull.item && get_type_id(ctor) == LMD_TYPE_FUNC) {
             // Set pending new.target for the constructor call
-            js_pending_new_target = callee;
+            js_pending_new_target = effective_new_target;
             js_has_pending_new_target = true;
             Item result = js_call_function(ctor, obj, args, argc);
             // Per ES spec §9.2.2: if constructor returns an Object, use that instead
@@ -5570,6 +5572,12 @@ extern "C" Item js_generator_return(Item generator, Item value);
 extern "C" Item js_generator_throw(Item generator, Item error);
 extern "C" Item js_ordinary_has_instance(Item, Item);
 
+static bool js_is_object_constructor_result(Item value) {
+    TypeId type = get_type_id(value);
+    return type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_ELEMENT ||
+        type == LMD_TYPE_FUNC || type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP;
+}
+
 // Forward declarations for promise runtime
 struct JsPromise;
 static JsPromise* js_get_promise(Item promise_obj);
@@ -9026,6 +9034,83 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     }
 }
 
+static void js_super_this_binding_push(void) {
+    if (js_super_this_bound_depth >= 128) return;
+    js_super_this_bound_stack[js_super_this_bound_depth] = false;
+    js_super_this_value_stack[js_super_this_bound_depth] = (Item){0};
+    js_super_this_bound_depth++;
+}
+
+static Item js_super_this_binding_finish(Item result) {
+    if (js_super_this_bound_depth <= 0) return result;
+    int idx = js_super_this_bound_depth - 1;
+    bool initialized = js_super_this_bound_stack[idx];
+    Item bound_this = js_super_this_value_stack[idx];
+    js_super_this_bound_stack[idx] = false;
+    js_super_this_value_stack[idx] = (Item){0};
+    js_super_this_bound_depth--;
+
+    if (js_check_exception()) return result;
+    if (js_is_object_constructor_result(result)) return result;
+    if (get_type_id(result) != LMD_TYPE_UNDEFINED && result.item != 0 && result.item != ITEM_JS_UNDEFINED) {
+        return js_throw_type_error("Derived constructors may only return object or undefined");
+    }
+    if (!initialized) {
+        Item msg = (Item){.item = s2it(heap_create_name("Must call super constructor before accessing 'this'", 51))};
+        js_throw_reference_error(msg);
+        return make_js_undefined();
+    }
+    return bound_this;
+}
+
+extern "C" Item js_super_bind_this(Item this_val, Item construct_result) {
+    if (js_check_exception()) return make_js_undefined();
+    Item bound_this = js_is_object_constructor_result(construct_result) ? construct_result : this_val;
+    if (js_super_this_bound_depth > 0) {
+        int idx = js_super_this_bound_depth - 1;
+        if (js_super_this_bound_stack[idx]) {
+            Item msg = (Item){.item = s2it(heap_create_name("Super constructor may only be called once", 43))};
+            js_throw_reference_error(msg);
+            return make_js_undefined();
+        }
+        js_super_this_bound_stack[idx] = true;
+        js_super_this_value_stack[idx] = bound_this;
+    }
+    js_current_this = bound_this;
+    return bound_this;
+}
+
+extern "C" Item js_get_super_constructor_from_receiver(Item receiver, Item fallback_ctor) {
+    Item proto = js_get_prototype(receiver);
+    if (proto.item == ItemNull.item) proto = js_get_prototype_of(receiver);
+    if (get_type_id(proto) != LMD_TYPE_MAP) return fallback_ctor;
+
+    Item ctor_key = (Item){.item = s2it(heap_create_name("constructor", 11))};
+    Item ctor = js_property_get(proto, ctor_key);
+    if (js_check_exception()) return fallback_ctor;
+    TypeId ctor_type = get_type_id(ctor);
+    if (ctor_type != LMD_TYPE_FUNC && ctor_type != LMD_TYPE_MAP) return fallback_ctor;
+
+    Item super_ctor = js_get_prototype_of(ctor);
+    TypeId super_type = get_type_id(super_ctor);
+    if (super_ctor.item == ItemNull.item || super_type == LMD_TYPE_NULL || super_type == LMD_TYPE_UNDEFINED) {
+        return fallback_ctor;
+    }
+    return super_ctor;
+}
+
+static bool js_super_callee_is_constructor(Item callee) {
+    if (js_is_proxy(callee)) return js_proxy_has_callable_target(callee);
+    TypeId type = get_type_id(callee);
+    if (type == LMD_TYPE_MAP) return js_is_class_object_item(callee);
+    if (type != LMD_TYPE_FUNC) return false;
+    JsFunction* fn = (JsFunction*)callee.function;
+    if (!fn) return false;
+    if (fn->builtin_id > 0 || fn->builtin_id == -2) return false;
+    if (fn->flags & (JS_FUNC_FLAG_ARROW | JS_FUNC_FLAG_METHOD | JS_FUNC_FLAG_GENERATOR | JS_FUNC_FLAG_TYPED_ARRAY_METHOD)) return false;
+    return true;
+}
+
 // super() for class-expression superclasses: handle both FUNC and MAP (class object) callee.
 // If callee is a FUNC, call it directly. If callee is a MAP class object with __ctor__, call the
 // constructor with the given this. If neither (empty class, no ctor), return this as-is (no-op).
@@ -9051,6 +9136,9 @@ extern "C" Item js_super_call_class(Item callee, Item this_val, Item* args, int 
 // receiver the JIT already holds.
 extern "C" Item js_object_assign(Item target, Item* sources, int count);
 extern "C" Item js_super_call_native(Item callee, Item this_val, Item* args, int argc) {
+    if (!js_super_callee_is_constructor(callee)) {
+        return js_throw_type_error("Super constructor is not a constructor");
+    }
     int ta_type = js_resolve_ta_type_from_ctor(callee);
     if (ta_type < 0 && get_type_id(callee) == LMD_TYPE_MAP) {
         ta_type = js_resolve_ta_type_from_class_map(callee);
@@ -9060,9 +9148,14 @@ extern "C" Item js_super_call_native(Item callee, Item this_val, Item* args, int
     }
     Item result = js_call_function(callee, this_val, args, argc);
     if (js_check_exception()) return this_val;
+    if (get_type_id(callee) == LMD_TYPE_FUNC) {
+        JsFunction* fn = (JsFunction*)callee.function;
+        if (fn && fn->builtin_id == 0) {
+            return js_is_object_constructor_result(result) ? result : this_val;
+        }
+    }
     // If the parent returned the same receiver (or a non-object), nothing to merge.
-    TypeId rtid = get_type_id(result);
-    if (rtid != LMD_TYPE_MAP) return this_val;
+    if (!js_is_object_constructor_result(result)) return this_val;
     if (result.item == this_val.item) return this_val;
     // Only merge if `this_val` is itself a plain object — otherwise leave it alone.
     if (get_type_id(this_val) != LMD_TYPE_MAP) return this_val;
@@ -9380,7 +9473,10 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
             Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
             js_generator_callee_proto = js_property_get(func_item, proto_key);
         }
+        bool derived_ctor_call = (fn->flags & JS_FUNC_FLAG_DERIVED_CTOR) != 0;
+        if (derived_ctor_call) js_super_this_binding_push();
         Item result = js_invoke_fn(fn, merged_args, total_argc);
+        if (derived_ctor_call) result = js_super_this_binding_finish(result);
         js_generator_callee_proto = saved_gen_callee_proto_b;
         js_with_restore_depth(saved_with_depth);
         js_active_module_vars = prev_modvars;
@@ -9434,7 +9530,10 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
         js_generator_callee_proto = js_property_get(func_item, proto_key);
     }
+    bool derived_ctor_call = (fn->flags & JS_FUNC_FLAG_DERIVED_CTOR) != 0;
+    if (derived_ctor_call) js_super_this_binding_push();
     Item result = js_invoke_fn(fn, args, arg_count);
+    if (derived_ctor_call) result = js_super_this_binding_finish(result);
     js_generator_callee_proto = saved_gen_callee_proto;
     js_with_restore_depth(saved_with_depth);
     js_active_module_vars = prev_modvars;
