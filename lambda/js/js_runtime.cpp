@@ -424,6 +424,9 @@ extern "C" Item js_proxy_trap_delete(Item proxy, Item key) {
 static Item js_array_like_to_array(Item obj);
 static Item js_array_index_key(int64_t index);
 static Item js_array_generic_splice(Item object, Item* args, int argc);
+static bool js_array_parse_index_name(const char* name, int name_len, int64_t* out_index);
+static bool js_array_key_is_index(Item key, int64_t* out_index);
+static Item js_array_numeric_key_to_property_key(Item key);
 
 extern "C" Item js_proxy_trap_own_keys(Item proxy) {
     JsProxyData* pd = js_get_proxy_data(proxy);
@@ -2663,8 +2666,9 @@ extern "C" Item js_property_get(Item object, Item key) {
             if (str_key->len == 6 && strncmp(str_key->chars, "length", 6) == 0) {
                 return (Item){.item = i2it(object.array->length)};
             }
-            // Only allow numeric string keys for array index access
-            if (str_key->len == 0 || (str_key->chars[0] < '0' || str_key->chars[0] > '9')) {
+            // Only canonical array-index strings use dense/sparse array slots.
+            int64_t string_index = -1;
+            if (!js_array_parse_index_name(str_key->chars, (int)str_key->len, &string_index)) {
                 // v25: check companion map for custom properties first
                 if (object.array->extra != 0) {
                     Map* pm = (Map*)(uintptr_t)object.array->extra;
@@ -2749,6 +2753,26 @@ extern "C" Item js_property_get(Item object, Item key) {
                 }
                 return make_js_undefined();
             }
+        }
+        TypeId key_tid = get_type_id(key);
+        if (key_tid == LMD_TYPE_BOOL) {
+            const char* prop_name = it2b(key) ? "true" : "false";
+            int prop_len = it2b(key) ? 4 : 5;
+            Item prop_key = (Item){.item = s2it(heap_create_name(prop_name, prop_len))};
+            return js_property_get(object, prop_key);
+        }
+        if (key_tid == LMD_TYPE_NULL) {
+            Item prop_key = (Item){.item = s2it(heap_create_name("null", 4))};
+            return js_property_get(object, prop_key);
+        }
+        if (key_tid == LMD_TYPE_UNDEFINED) {
+            Item prop_key = (Item){.item = s2it(heap_create_name("undefined", 9))};
+            return js_property_get(object, prop_key);
+        }
+        if ((key_tid == LMD_TYPE_INT || key_tid == LMD_TYPE_FLOAT) && !js_key_is_symbol(key) &&
+            !js_array_key_is_index(key, NULL)) {
+            Item prop_key = js_array_numeric_key_to_property_key(key);
+            return js_property_get(object, prop_key);
         }
         // Numeric index access
         double idx_d = js_get_number(key);
@@ -3570,6 +3594,40 @@ static bool js_array_parse_index_name(const char* name, int name_len, int64_t* o
     return true;
 }
 
+static bool js_array_key_is_index(Item key, int64_t* out_index) {
+    TypeId kt = get_type_id(key);
+    if (kt == LMD_TYPE_INT) {
+        int64_t index = it2i(key);
+        if (index < 0 || index > 0xFFFFFFFELL) return false;
+        if (out_index) *out_index = index;
+        return true;
+    }
+    if (kt == LMD_TYPE_FLOAT) {
+        double index_d = it2d(key);
+        if (!isfinite(index_d) || index_d < 0.0 || floor(index_d) != index_d || index_d > 0xFFFFFFFEULL) return false;
+        int64_t index = (int64_t)index_d;
+        if ((double)index != index_d) return false;
+        if (out_index) *out_index = index;
+        return true;
+    }
+    if (kt == LMD_TYPE_STRING) {
+        String* sk = it2s(key);
+        return sk && js_array_parse_index_name(sk->chars, (int)sk->len, out_index);
+    }
+    return false;
+}
+
+static Item js_array_numeric_key_to_property_key(Item key) {
+    TypeId kt = get_type_id(key);
+    char buf[64];
+    if (kt == LMD_TYPE_INT) {
+        snprintf(buf, sizeof(buf), "%lld", (long long)it2i(key));
+    } else {
+        js_double_to_string(it2d(key), buf, sizeof(buf));
+    }
+    return (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
+}
+
 static void js_array_delete_sparse_indices_from(Array* arr, int64_t new_len) {
     if (!arr || arr->extra == 0) return;
     Map* pm = (Map*)(uintptr_t)arr->extra;
@@ -3719,9 +3777,8 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
         if (get_type_id(key) == LMD_TYPE_STRING) {
             String* sk = it2s(key);
             if (sk && sk->len > 0) {
-                // check if the key is a numeric array index
-                double idx_d = js_get_number(key);
-                if (idx_d != idx_d) { // NaN → not a valid numeric index
+                int64_t string_index = -1;
+                if (!js_array_parse_index_name(sk->chars, (int)sk->len, &string_index)) {
                     if (!js_skip_accessor_dispatch) {
                         Item lookup_root = js_get_prototype(object);
                         if (lookup_root.item == ItemNull.item) lookup_root = js_get_prototype_of(object);
@@ -3747,14 +3804,31 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                     js_property_set(map_item, key, value);
                     return value;
                 }
-                if (idx_d >= 0.0 && idx_d == floor(idx_d)) {
-                    int64_t idx = (int64_t)idx_d;
-                    if (idx > 0xFFFFFFFELL) {
-                        js_array_store_sparse_property(object, idx, value, false);
-                        return value;
-                    }
-                }
             }
+        }
+        TypeId key_tid = get_type_id(key);
+        if (key_tid == LMD_TYPE_BOOL) {
+            const char* prop_name = it2b(key) ? "true" : "false";
+            int prop_len = it2b(key) ? 4 : 5;
+            Item prop_key = (Item){.item = s2it(heap_create_name(prop_name, prop_len))};
+            js_property_set(object, prop_key, value);
+            return value;
+        }
+        if (key_tid == LMD_TYPE_NULL) {
+            Item prop_key = (Item){.item = s2it(heap_create_name("null", 4))};
+            js_property_set(object, prop_key, value);
+            return value;
+        }
+        if (key_tid == LMD_TYPE_UNDEFINED) {
+            Item prop_key = (Item){.item = s2it(heap_create_name("undefined", 9))};
+            js_property_set(object, prop_key, value);
+            return value;
+        }
+        if ((key_tid == LMD_TYPE_INT || key_tid == LMD_TYPE_FLOAT) && !js_key_is_symbol(key) &&
+            !js_array_key_is_index(key, NULL)) {
+            Item prop_key = js_array_numeric_key_to_property_key(key);
+            js_property_set(object, prop_key, value);
+            return value;
         }
         // check for setter accessor on numeric index before array set
         if (object.array->extra != 0) {
@@ -4967,6 +5041,13 @@ extern "C" Item js_array_get(Item array, Item index) {
         return found ? v : make_js_undefined();
     }
 
+    TypeId index_tid = get_type_id(index);
+    if ((index_tid == LMD_TYPE_STRING || index_tid == LMD_TYPE_INT || index_tid == LMD_TYPE_FLOAT) &&
+        !js_key_is_symbol(index) && !js_array_key_is_index(index, NULL)) {
+        Item prop_key = (index_tid == LMD_TYPE_STRING) ? index : js_array_numeric_key_to_property_key(index);
+        return js_property_get(array, prop_key);
+    }
+
     double idx_d = js_get_number(index);
     int64_t idx = (idx_d == idx_d) ? (int64_t)idx_d : -1;
     Array* arr = array.array;
@@ -5246,6 +5327,13 @@ extern "C" Item js_array_set(Item array, Item index, Item value) {
         int sl = it2b(index) ? 4 : 5;
         Item key = (Item){.item = s2it(heap_create_name(s, sl))};
         js_property_set(map_item, key, value);
+        return value;
+    }
+
+    if ((itid == LMD_TYPE_STRING || itid == LMD_TYPE_INT || itid == LMD_TYPE_FLOAT) &&
+        !js_key_is_symbol(index) && !js_array_key_is_index(index, NULL)) {
+        Item prop_key = (itid == LMD_TYPE_STRING) ? index : js_array_numeric_key_to_property_key(index);
+        js_property_set(array, prop_key, value);
         return value;
     }
 

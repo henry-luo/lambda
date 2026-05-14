@@ -6630,6 +6630,46 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             MIR_reg_t recv = jm_transpile_box_item(mt, m->object);
             MIR_reg_t method_name = jm_box_string_literal(mt, prop->name->chars, prop->name->len);
 
+            if (!m->optional && jm_has_optional_chain(m->object)) {
+                MIR_label_t l_opt_skip = jm_new_label(mt);
+                MIR_label_t l_opt_call = jm_new_label(mt);
+                MIR_label_t l_opt_end = jm_new_label(mt);
+                MIR_reg_t opt_result = jm_new_reg(mt, "optpmcr", MIR_T_I64);
+                MIR_reg_t opt_cmp = jm_new_reg(mt, "optpmck", MIR_T_I64);
+
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, opt_cmp),
+                    MIR_new_reg_op(mt->ctx, recv), MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL_VAL)));
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_opt_skip),
+                    MIR_new_reg_op(mt->ctx, opt_cmp)));
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, opt_cmp),
+                    MIR_new_reg_op(mt->ctx, recv), MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_opt_skip),
+                    MIR_new_reg_op(mt->ctx, opt_cmp)));
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_opt_call)));
+
+                jm_emit_label(mt, l_opt_skip);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, opt_result),
+                    MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_opt_end)));
+
+                jm_emit_label(mt, l_opt_call);
+                MIR_reg_t fn = jm_call_2(mt, "js_property_access", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name));
+                MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
+                MIR_op_t args_op = args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0);
+                MIR_reg_t call_result = jm_call_4(mt, "js_call_function", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, fn),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                    MIR_T_I64, args_op,
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, opt_result),
+                    MIR_new_reg_op(mt->ctx, call_result)));
+                jm_emit_label(mt, l_opt_end);
+                jm_readback_closure_env(mt);
+                return opt_result;
+            }
+
             // Optional chaining: obj?.method(args) → return undefined if obj is null/undefined
             if (m->optional) {
                 MIR_label_t l_opt_skip = jm_new_label(mt);

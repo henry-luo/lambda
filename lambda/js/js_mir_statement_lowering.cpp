@@ -2184,6 +2184,14 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
         if (fn) ctor_fc = jm_find_collected_func(mt, fn);
     }
 
+    if (!ctor_fc || ctor_fc->ctor_prop_count <= 0) {
+        MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
+        return jm_call_3(mt, "js_new_from_class_object", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
+            MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+    }
+
     MIR_reg_t obj;
     if (ctor_fc && ctor_fc->ctor_prop_count > 0) {
         // Emit static arrays of property name pointers and lengths.
@@ -2211,14 +2219,6 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
             MIR_T_I64, MIR_new_int_op(mt->ctx, ctor_fc->ctor_prop_count));
         log_debug("A5: new %.*s using pre-shaped object with %d props",
                   ctor_len, ctor_name, ctor_fc->ctor_prop_count);
-    } else {
-        // Use js_new_from_class_object which handles both function constructors
-        // and class objects (MAPs with __ctor__ and __instance_proto__).
-        MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
-        return jm_call_3(mt, "js_new_from_class_object", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
-            MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
     }
 
     MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
