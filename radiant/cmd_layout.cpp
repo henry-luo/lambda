@@ -4716,7 +4716,7 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
     render_map_set_path_recorder(&render_map_record_path);
 
     log_debug("[Lambda Script] Evaluating script (ui_mode=true, arena allocation)...");
-    // Use MIR Direct JIT to evaluate the Lambda script (functional scripts don't need a main() entry point)
+    // Use MIR Direct JIT to evaluate the Lambda script as a functional document result.
     Input* script_output = run_script_mir(runtime, nullptr, script_filepath, false);
 
     // After run_script_mir returns, the thread-local context points to a
@@ -5039,6 +5039,12 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
     // Register doc root for render map parent fixup during retransform
     Item html_item_root = {.element = html_elem};
     render_map_set_doc_root(html_item_root);
+
+    // The retained context above is stack-local and only exists to let the
+    // post-evaluation setup register Lambda roots. Event execution restores a
+    // fresh context from dom_doc->lambda_runtime, so clear the thread-local now.
+    context = nullptr;
+    input_context = nullptr;
 
     // Store the retained runtime on the document for event handler execution.
     // The GC heap, JIT code, and name pool remain live for the session.
@@ -5904,7 +5910,11 @@ static bool layout_single_file(
         event_state_log_document(event_log, "unload_start");
     }
 
+    bool needs_js_batch_cleanup = false;
     if (doc) {
+        needs_js_batch_cleanup = doc->js_runtime_heap || doc->js_runtime_pool ||
+            doc->js_runtime_nursery || doc->js_preamble_state || doc->js_event_registry;
+
         // Clean up retained JS state (MIR context, event registry, runtime heap)
         // before destroying the document that owns the pointers.
         script_runner_cleanup_js_state(doc);
@@ -5936,7 +5946,7 @@ static bool layout_single_file(
 
     pool_destroy(pool);
 
-    if (!script_runner_js_batch_cleanup_unsafe()) {
+    if (needs_js_batch_cleanup && !script_runner_js_batch_cleanup_unsafe()) {
         // Reset JS runtime state to avoid cross-document leakage in batch mode.
         // Must happen BEFORE script_runner_cleanup_heap: js_batch_reset clears
         // global Items (js_input, js_exception_value, etc.) that reference the

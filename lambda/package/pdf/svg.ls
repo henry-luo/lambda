@@ -18,6 +18,15 @@ pub fn svg_root(view_box: string, width, height, children) {
     >
 }
 
+pub fn svg_pdf_root(view_box: string, width, height, children, pdf) {
+    <svg xmlns: "http://www.w3.org/2000/svg",
+         viewBox: view_box,
+         width: util.fmt_num(width), height: util.fmt_num(height),
+         'data-pdf-root': pdf;
+        for (c in children) c
+    >
+}
+
 // ============================================================
 // Building blocks
 // ============================================================

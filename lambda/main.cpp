@@ -508,45 +508,49 @@ static char* lambda_string_literal_escape(const char* value) {
     return out;
 }
 
-static char* convert_pdf_to_html_temp(const char* pdf_file, const char* tmp_script_path,
-                                      const char* temp_html, const char* opts_expr,
-                                      const char* log_prefix) {
+static bool write_pdf_to_html_bridge_script(const char* pdf_file, const char* tmp_script_path,
+                                            const char* opts_expr, const char* log_prefix) {
     char* escaped_pdf = lambda_string_literal_escape(pdf_file);
     if (!escaped_pdf) {
         log_error("[%s] PDF package: failed to escape input path", log_prefix);
-        return nullptr;
+        return false;
     }
 
     const char* opts = opts_expr ? opts_expr : "null";
     int needed = snprintf(nullptr, 0,
-        "import pdf: .lambda.package.pdf.pdf\n"
-        "pn main() {\n"
-        "    let doc^err = input(\"%s\", 'pdf')\n"
-        "    return pdf.pdf_to_html(doc, %s)\n"
-        "}\n",
+        "import pdf: lambda.package.pdf.pdf\n"
+        "let doc^err = input(\"%s\", 'pdf')\n"
+        "pdf.pdf_to_html(doc, %s)\n",
         escaped_pdf, opts);
     if (needed <= 0) {
         mem_free(escaped_pdf);
         log_error("[%s] PDF package: failed to size bridge script", log_prefix);
-        return nullptr;
+        return false;
     }
     char* script_buf = (char*)mem_alloc((size_t)needed + 1, MEM_CAT_TEMP);
     if (!script_buf) {
         mem_free(escaped_pdf);
         log_error("[%s] PDF package: failed to allocate bridge script", log_prefix);
-        return nullptr;
+        return false;
     }
     snprintf(script_buf, (size_t)needed + 1,
-        "import pdf: .lambda.package.pdf.pdf\n"
-        "pn main() {\n"
-        "    let doc^err = input(\"%s\", 'pdf')\n"
-        "    return pdf.pdf_to_html(doc, %s)\n"
-        "}\n",
+        "import pdf: lambda.package.pdf.pdf\n"
+        "let doc^err = input(\"%s\", 'pdf')\n"
+        "pdf.pdf_to_html(doc, %s)\n",
         escaped_pdf, opts);
     mem_free(escaped_pdf);
 
     write_text_file(tmp_script_path, script_buf);
     mem_free(script_buf);
+    return true;
+}
+
+static char* convert_pdf_to_html_temp(const char* pdf_file, const char* tmp_script_path,
+                                      const char* temp_html, const char* opts_expr,
+                                      const char* log_prefix) {
+    if (!write_pdf_to_html_bridge_script(pdf_file, tmp_script_path, opts_expr, log_prefix)) {
+        return nullptr;
+    }
 
     Runtime pdf_runtime;
     runtime_init(&pdf_runtime);
@@ -554,7 +558,7 @@ static char* convert_pdf_to_html_temp(const char* pdf_file, const char* tmp_scri
     pdf_runtime.import_base_dir = "./";
 
     Input* script_result = run_script_mir(&pdf_runtime, nullptr,
-                                           (char*)tmp_script_path, true);
+                                           (char*)tmp_script_path, false);
 
     bool ok = (script_result && get_type_id(script_result->root) == LMD_TYPE_ELEMENT);
     char* result_path = nullptr;
@@ -2416,7 +2420,7 @@ int main(int argc, char *argv[]) {
         }
 
         const char* output_ext = strrchr(output_file, '.');
-        char* render_pdf_temp_html = nullptr;
+        char* render_pdf_temp_input = nullptr;
         if (input_ext && strcmp(input_ext, ".pdf") == 0) {
             if (output_ext && strcmp(output_ext, ".pdf") == 0) {
                 FileCopyOptions copy_opts = { true, false };
@@ -2429,18 +2433,21 @@ int main(int argc, char *argv[]) {
                 log_finish();
                 return copy_status == 0 ? 0 : 1;
             }
-            log_info("[render] PDF detected — using Lambda PDF package pipeline");
-            render_pdf_temp_html = convert_pdf_to_html_temp(html_file,
-                                                            "temp/_render_pdf_bridge.ls",
-                                                            "./temp/lambda_render_pdf.html",
-                                                            "null",
-                                                            "render");
-            if (!render_pdf_temp_html) {
-                printf("Error: Failed to convert PDF '%s' via Lambda PDF package\n", html_file);
+            log_info("[render] PDF detected — using Lambda PDF package in-memory element pipeline");
+            const char* render_pdf_bridge = "temp/_render_pdf_bridge.ls";
+            if (!write_pdf_to_html_bridge_script(html_file, render_pdf_bridge, "null", "render")) {
+                printf("Error: Failed to prepare PDF render bridge for '%s'\n", html_file);
                 log_finish();
                 return 1;
             }
-            html_file = render_pdf_temp_html;
+            render_pdf_temp_input = mem_strdup(render_pdf_bridge, MEM_CAT_TEMP);
+            if (!render_pdf_temp_input) {
+                printf("Error: Failed to allocate PDF render bridge path\n");
+                file_delete(render_pdf_bridge);
+                log_finish();
+                return 1;
+            }
+            html_file = render_pdf_temp_input;
         }
 
         // Determine output format based on file extension
@@ -2449,9 +2456,9 @@ int main(int argc, char *argv[]) {
 
         if (ext && strcmp(ext, ".dvi") == 0) {
             printf("Error: DVI output is no longer supported. Use .svg, .pdf, .png, or .jpg instead.\n");
-            if (render_pdf_temp_html) {
-                file_delete(render_pdf_temp_html);
-                mem_free(render_pdf_temp_html);
+            if (render_pdf_temp_input) {
+                file_delete(render_pdf_temp_input);
+                mem_free(render_pdf_temp_input);
             }
             log_finish();
             return 1;
@@ -2482,17 +2489,17 @@ int main(int argc, char *argv[]) {
         } else {
             printf("Error: Unsupported output format. Use .svg, .pdf, .png, .jpg, or .jpeg extension\n");
             printf("Supported formats: .svg (SVG), .pdf (PDF), .png (PNG), .jpg/.jpeg (JPEG)\n");
-            if (render_pdf_temp_html) {
-                file_delete(render_pdf_temp_html);
-                mem_free(render_pdf_temp_html);
+            if (render_pdf_temp_input) {
+                file_delete(render_pdf_temp_input);
+                mem_free(render_pdf_temp_input);
             }
             log_finish();
             return 1;
         }
 
-        if (render_pdf_temp_html) {
-            file_delete(render_pdf_temp_html);
-            mem_free(render_pdf_temp_html);
+        if (render_pdf_temp_input) {
+            file_delete(render_pdf_temp_input);
+            mem_free(render_pdf_temp_input);
         }
 
         log_debug("render completed with result: %d", exit_code);
@@ -2860,32 +2867,37 @@ int main(int argc, char *argv[]) {
         }
 
         // ============================================================
-        // PDF → HTML pre-conversion via the Lambda PDF package
+        // PDF → Lambda element-tree view via the Lambda PDF package
         // ============================================================
-        // The legacy C++ pipeline (load_pdf_doc → ViewTree) is bypassed:
-        // we run lambda/package/pdf to convert the PDF into an HTML
-        // document containing one <svg> per page, then hand that HTML
-        // off to view_doc_in_window_with_events. This mirrors the
-        // .mmd/.d2/.dot graph pre-conversion above.
-        char* pdf_temp_html = nullptr;
+        // The legacy C++ pipeline (load_pdf_doc → ViewTree) is bypassed.
+        // We hand a tiny Lambda bridge script to the normal .ls view loader;
+        // the script returns an <html> document containing one <svg> per page.
+        // Radiant then builds the DOM directly from that element tree.
+        char* pdf_temp_script = nullptr;
         if (ext && strcmp(ext, ".pdf") == 0) {
-            log_info("[view] PDF detected — using Lambda PDF package pipeline");
+            log_info("[view] PDF detected — using Lambda PDF package in-memory element pipeline");
 
-            pdf_temp_html = convert_pdf_to_html_temp(filename,
-                                                     "temp/_view_pdf_bridge.ls",
-                                                     "./temp/lambda_view_pdf.html",
-                                                     "{max_pages: 48}",
-                                                     "view");
-            if (!pdf_temp_html) {
-                printf("Error: Failed to convert PDF '%s' via Lambda PDF package\n", filename);
+            const char* view_pdf_bridge = "temp/_view_pdf_bridge.ls";
+            if (!write_pdf_to_html_bridge_script(filename, view_pdf_bridge, "{max_pages: 48}", "view")) {
+                printf("Error: Failed to prepare PDF view bridge for '%s'\n", filename);
                 if (temp_file_path) { file_delete(temp_file_path); mem_free(temp_file_path); }
                 log_finish();
                 return 1;
             }
 
-            // Swap filename/ext to the freshly produced HTML.
-            filename = pdf_temp_html;
-            ext = ".html";
+            // Hand the bridge script to the normal Lambda view loader. The
+            // script returns the constructed <html>/<svg> element tree, so
+            // Radiant builds the DOM directly without XML/HTML serialization.
+            pdf_temp_script = mem_strdup(view_pdf_bridge, MEM_CAT_TEMP);
+            if (!pdf_temp_script) {
+                printf("Error: Failed to allocate PDF view bridge path\n");
+                file_delete(view_pdf_bridge);
+                if (temp_file_path) { file_delete(temp_file_path); mem_free(temp_file_path); }
+                log_finish();
+                return 1;
+            }
+            filename = pdf_temp_script;
+            ext = ".ls";
         }
 
         if (ext && (strcmp(ext, ".pdf") == 0 ||
@@ -2919,10 +2931,10 @@ int main(int argc, char *argv[]) {
             file_delete(temp_file_path);
             mem_free(temp_file_path);
         }
-        // Cleanup temp HTML produced by PDF→HTML conversion
-        if (pdf_temp_html) {
-            file_delete(pdf_temp_html);
-            mem_free(pdf_temp_html);
+        // Cleanup temp Lambda bridge script produced for PDF view.
+        if (pdf_temp_script) {
+            file_delete(pdf_temp_script);
+            mem_free(pdf_temp_script);
         }
 
         fprintf(stderr, "view command completed with result: %d\n", exit_code);
