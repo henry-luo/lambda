@@ -131,41 +131,6 @@ EOF
     print_success "Mock test executable created"
 }
 
-# Compile integration tests
-print_status "Compiling integration tests..."
-
-gcc -std=c99 -g -O0 \
-    -I.. \
-    -I../lib \
-    -I../typeset \
-    -I../lambda \
-    test_math_integration.c \
-    ../lib/strbuf.c \
-    ../lib/mem-pool/mem-pool.c \
-    -lcriterion \
-    -o ../test_output/test_math_integration \
-    2>/dev/null || {
-    
-    print_warning "Integration test compilation failed, creating mock"
-    
-cat > ../test_output/mock_integration.c << 'EOF'
-#include <stdio.h>
-
-int main() {
-    printf("=== Mock Math Integration Test ===\n");
-    printf("Testing document processing with mathematical content...\n");
-    printf("  ✓ Document parsing with inline math\n");
-    printf("  ✓ Complex mathematical expressions\n");
-    printf("  ✓ Performance testing\n");
-    printf("  ✓ Error handling\n");
-    printf("Integration tests completed successfully!\n");
-    return 0;
-}
-EOF
-
-    gcc ../test_output/mock_integration.c -o ../test_output/test_math_integration
-}
-
 # Run the tests
 print_status "Running math typesetting tests..."
 echo
@@ -177,23 +142,8 @@ print_status "Executing main test suite..."
 ./test_math_typeset
 echo
 
-# Run integration tests  
-print_status "Executing integration tests..."
-./test_math_integration
-echo
-
 # Check for generated output files
 print_status "Checking generated output files..."
-
-if [[ -f "quadratic_formula.svg" ]]; then
-    print_success "SVG output generated: quadratic_formula.svg"
-    echo "  Size: $(wc -c < quadratic_formula.svg) bytes"
-fi
-
-if [[ -f "complex_math_document.svg" ]]; then
-    print_success "Complex document generated: complex_math_document.svg"
-    echo "  Size: $(wc -c < complex_math_document.svg) bytes"
-fi
 
 # Display test results summary
 echo

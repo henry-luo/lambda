@@ -112,7 +112,6 @@ if (!is_valid_pool_pointer(pool, ptr)) {
 
 ### **Testing Framework**
 - ✅ **Robustness test suite created** (`test/test_robustness.sh`)
-- ✅ **Memory safety test cases** (`test/security/test_memory_safety.cpp`)  
 - ✅ **Security enhancement plan** (`SECURITY_ENHANCEMENT_PLAN.md`)
 - ✅ **Safe utility functions** (`lambda/lambda-safety.cpp`)
 

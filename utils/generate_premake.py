@@ -1967,7 +1967,6 @@ class PremakeGenerator:
             # macOS paths (default)
             self.premake_content.extend([
                 '        "/opt/homebrew/lib",',
-                '        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",',
                 '        "/usr/local/lib",',
                 '        "build/lib",',
             ])
