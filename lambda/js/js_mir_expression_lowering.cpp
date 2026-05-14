@@ -9469,8 +9469,27 @@ MIR_reg_t jm_transpile_template_literal(JsMirTranspiler* mt, JsTemplateLiteralNo
 
 // Tagged template literal: tag`str0 ${expr0} str1 ${expr1} str2`
 MIR_reg_t jm_transpile_tagged_template(JsMirTranspiler* mt, JsTaggedTemplateNode* tt) {
-    // evaluate tag function
-    MIR_reg_t tag_fn = jm_transpile_box_item(mt, tt->tag);
+    MIR_reg_t tag_fn;
+    MIR_reg_t this_val = 0;
+    if (tt->tag && tt->tag->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+        JsMemberNode* mem = (JsMemberNode*)tt->tag;
+        this_val = jm_transpile_box_item(mt, mem->object);
+        MIR_reg_t key;
+        if (mem->computed) {
+            key = jm_transpile_box_item(mt, mem->property);
+        } else if (mem->property && mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
+            JsIdentifierNode* prop = (JsIdentifierNode*)mem->property;
+            key = jm_box_string_literal(mt, prop->name->chars, (int)prop->name->len);
+        } else {
+            key = jm_transpile_box_item(mt, mem->property);
+        }
+        tag_fn = jm_call_2(mt, "js_property_access", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+    } else {
+        tag_fn = jm_transpile_box_item(mt, tt->tag);
+        this_val = jm_emit_undefined(mt);
+    }
 
     JsTemplateLiteralNode* tmpl = tt->quasi;
     if (!tmpl) return jm_emit_undefined(mt);
@@ -9540,8 +9559,7 @@ MIR_reg_t jm_transpile_tagged_template(JsMirTranspiler* mt, JsTaggedTemplateNode
             MIR_new_reg_op(mt->ctx, val)));
     }
 
-    // call tag function: js_call_function(tag, undefined, args, argc)
-    MIR_reg_t this_val = jm_emit_undefined(mt);
+    // call tag function: js_call_function(tag, this, args, argc)
     return jm_call_4(mt, "js_call_function", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, tag_fn),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),

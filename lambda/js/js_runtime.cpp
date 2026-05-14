@@ -5359,36 +5359,23 @@ extern "C" Item js_array_push(Item array, Item value) {
 // =============================================================================
 
 extern "C" Item js_build_template_object(Item* cooked, Item* raw, int count) {
-    // build a JS object (map) that acts like an array with .raw property
-    // { "0": cooked[0], "1": cooked[1], ..., length: count, raw: [raw[0], raw[1], ...] }
-    Item obj = js_new_object();
-    char buf[24];
+    Item obj = js_array_new(count);
+    Item raw_arr = js_array_new(count);
     for (int i = 0; i < count; i++) {
-        snprintf(buf, sizeof(buf), "%d", i);
-        Item key = (Item){.item = s2it(heap_create_name(buf))};
-        js_property_set(obj, key, cooked[i]);
+        Item key = (Item){.item = i2it(i)};
+        js_array_set(obj, key, cooked[i]);
+        js_array_set(raw_arr, key, raw[i]);
     }
-    // set length
-    Item len_key = (Item){.item = s2it(heap_create_name("length"))};
-    js_property_set(obj, len_key, (Item){.item = i2it(count)});
-    // build raw array
-    Item raw_arr = js_new_object();
-    for (int i = 0; i < count; i++) {
-        snprintf(buf, sizeof(buf), "%d", i);
-        Item key = (Item){.item = s2it(heap_create_name(buf))};
-        js_property_set(raw_arr, key, raw[i]);
-    }
-    Item raw_len_key = (Item){.item = s2it(heap_create_name("length"))};
-    js_property_set(raw_arr, raw_len_key, (Item){.item = i2it(count)});
-    // freeze raw
-    js_object_freeze(raw_arr);
-    // set .raw on obj
-    Item raw_key = (Item){.item = s2it(heap_create_name("raw"))};
+    Item raw_key = (Item){.item = s2it(heap_create_name("raw", 3))};
     js_property_set(obj, raw_key, raw_arr);
-    // freeze obj
+    js_mark_non_enumerable(obj, raw_key);
+    js_mark_non_writable(obj, raw_key);
+    js_mark_non_configurable(obj, raw_key);
+    js_object_freeze(raw_arr);
     js_object_freeze(obj);
     return obj;
 }
+
 
 // =============================================================================
 // Console Functions
@@ -9362,6 +9349,41 @@ extern "C" Item js_apply_function(Item func_item, Item this_val, Item args_array
         return js_throw_type_error("CreateListFromArrayLike called on non-object");
     }
     return js_call_function(func_item, this_val, args, argc);
+}
+
+extern "C" Item js_apply_constructor(Item constructor, Item args_array) {
+    int argc = 0;
+    Item* args = NULL;
+    if (get_type_id(args_array) == LMD_TYPE_ARRAY) {
+        argc = (int)args_array.array->length;
+        if (argc > 0) {
+            args = (Item*)alloca(argc * sizeof(Item));
+            for (int i = 0; i < argc; i++) {
+                Item idx = {.item = i2it(i)};
+                args[i] = js_array_get(args_array, idx);
+            }
+        }
+    } else if (get_type_id(args_array) == LMD_TYPE_MAP || get_type_id(args_array) == LMD_TYPE_FUNC ||
+               get_type_id(args_array) == LMD_TYPE_ELEMENT) {
+        Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
+        Item len_val = js_property_get(args_array, len_key);
+        TypeId lt = get_type_id(len_val);
+        if (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT) {
+            argc = (lt == LMD_TYPE_INT) ? (int)it2i(len_val) : (int)it2d(len_val);
+            if (argc > 0) {
+                args = (Item*)alloca(argc * sizeof(Item));
+                for (int i = 0; i < argc; i++) {
+                    char idx_buf[16];
+                    snprintf(idx_buf, sizeof(idx_buf), "%d", i);
+                    Item idx_key = (Item){.item = s2it(heap_create_name(idx_buf, strlen(idx_buf)))};
+                    args[i] = js_property_get(args_array, idx_key);
+                }
+            }
+        }
+    } else if (args_array.item != ITEM_NULL && args_array.item != ITEM_JS_UNDEFINED) {
+        return js_throw_type_error("CreateListFromArrayLike called on non-object");
+    }
+    return js_new_from_class_object(constructor, args, argc);
 }
 
 // v11: Function.prototype.bind(thisArg, ...args)
