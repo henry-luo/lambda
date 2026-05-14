@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include <strings.h>  // for strcasecmp
+#include "../lib/tagged.hpp"
 #include "../lib/log.h"
 #include "../lib/str.h"
 #include "../lib/file.h"
@@ -323,20 +324,20 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
             if (key == GLFW_KEY_LEFT && session_can_go_back(session)) {
                 log_info("browse_nav: keyboard back");
                 // save scroll before leaving
-                ViewBlock* root = ui_context.document->view_tree ? (ViewBlock*)ui_context.document->view_tree->root : nullptr;
+                ViewBlock* root = ui_context.document->view_tree ? lam::view_require_block(ui_context.document->view_tree->root) : nullptr;
                 if (root && root->scroller && root->scroller->pane) {
                     float scroll_y = 0.0f;
-                    scroll_state_get_position_for_view(ui_context.document->state, (View*)root,
+                    scroll_state_get_position_for_view(ui_context.document->state, static_cast<View*>(root),
                         root->scroller->pane, NULL, &scroll_y, NULL, NULL);
                     session_save_scroll_position(session, scroll_y);
                 }
                 new_doc = session_go_back(session, &ui_context, css_vw, css_vh);
             } else if (key == GLFW_KEY_RIGHT && session_can_go_forward(session)) {
                 log_info("browse_nav: keyboard forward");
-                ViewBlock* root = ui_context.document->view_tree ? (ViewBlock*)ui_context.document->view_tree->root : nullptr;
+                ViewBlock* root = ui_context.document->view_tree ? lam::view_require_block(ui_context.document->view_tree->root) : nullptr;
                 if (root && root->scroller && root->scroller->pane) {
                     float scroll_y = 0.0f;
-                    scroll_state_get_position_for_view(ui_context.document->state, (View*)root,
+                    scroll_state_get_position_for_view(ui_context.document->state, static_cast<View*>(root),
                         root->scroller->pane, NULL, &scroll_y, NULL, NULL);
                     session_save_scroll_position(session, scroll_y);
                 }
@@ -344,13 +345,13 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
             }
             if (new_doc) {
                 // restore saved scroll position for this history entry
-                ViewBlock* root = new_doc->view_tree ? (ViewBlock*)new_doc->view_tree->root : nullptr;
+                ViewBlock* root = new_doc->view_tree ? lam::view_require_block(new_doc->view_tree->root) : nullptr;
                 if (root && root->scroller && root->scroller->pane) {
                     float saved_y = session_get_scroll_position(session);
                     float scroll_x = 0.0f;
-                    scroll_state_get_position_for_view((DocState*)new_doc->state, (View*)root,
+                    scroll_state_get_position_for_view((DocState*)new_doc->state, static_cast<View*>(root),
                         root->scroller->pane, &scroll_x, NULL, NULL, NULL);
-                    scroll_state_set_position_for_view((DocState*)new_doc->state, (View*)root,
+                    scroll_state_set_position_for_view((DocState*)new_doc->state, static_cast<View*>(root),
                         root->scroller->pane, scroll_x, saved_y, true);
                 }
                 // update title
@@ -1117,9 +1118,9 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
             // set viewport bounds so off-screen animations don't inflate dirty region
             float scroll_y = 0;
             if (ui_context.document && ui_context.document->view_tree && ui_context.document->view_tree->root) {
-                ViewBlock* root = (ViewBlock*)ui_context.document->view_tree->root;
+                ViewBlock* root = lam::view_require_block(ui_context.document->view_tree->root);
                 if (root->scroller && root->scroller->pane) {
-                    scroll_state_get_position_for_view(state, (View*)root, root->scroller->pane,
+                    scroll_state_get_position_for_view(state, static_cast<View*>(root), root->scroller->pane,
                         NULL, &scroll_y, NULL, NULL);
                 }
             }

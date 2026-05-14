@@ -7,6 +7,7 @@
  */
 
 #include "webdriver.hpp"
+#include "../../lib/tagged.hpp"
 #include "../../lambda/serve/serve_utils.hpp"
 #include "../../lambda/serve/http_request.hpp"
 #include "../../lambda/serve/http_response.hpp"
@@ -360,7 +361,7 @@ static void handle_find_elements(HttpRequest* req, HttpResponse* resp, void* use
     strbuf_append_str(buf, "[");
 
     for (int i = 0; i < count; i++) {
-        View* elem = (View*)results->data[i];
+        View* elem = static_cast<View*>(results->data[i]);
         const char* elem_id = element_registry_add(session->elements, elem, session->document_version);
         if (elem_id) {
             if (i > 0) strbuf_append_str(buf, ",");

@@ -149,6 +149,38 @@ inline const ViewBlock* view_require_block(const View* v) {
     return static_cast<const ViewBlock*>(v);
 }
 
+inline ViewText* view_require_text(View* v) {
+    return view_require<RDT_VIEW_TEXT>(v);
+}
+
+inline const ViewText* view_require_text(const View* v) {
+    return view_require<RDT_VIEW_TEXT>(v);
+}
+
+inline ViewTableCell* view_require_table_cell(View* v) {
+    return view_require<RDT_VIEW_TABLE_CELL>(v);
+}
+
+inline const ViewTableCell* view_require_table_cell(const View* v) {
+    return view_require<RDT_VIEW_TABLE_CELL>(v);
+}
+
+inline View* dom_view(DomNode* n) {
+    return static_cast<View*>(n);
+}
+
+inline const View* dom_view(const DomNode* n) {
+    return static_cast<const View*>(n);
+}
+
+inline DomNode* view_dom_node(View* v) {
+    return static_cast<DomNode*>(v);
+}
+
+inline const DomNode* view_dom_node(const View* v) {
+    return static_cast<const DomNode*>(v);
+}
+
 inline ViewBlock* unsafe_view_block_api_span(ViewSpan* span) {
     // Some legacy layout APIs accept ViewBlock* but only touch DomElement/ViewSpan
     // storage. ViewBlock adds no fields, so this preserves ABI layout while making
@@ -199,6 +231,22 @@ template<DomNodeType T>
 const typename DomNodeTagToType<T>::type* dom_require(const DomNode* n) {
     assert(n && n->node_type == T);
     return static_cast<const typename DomNodeTagToType<T>::type*>(n);
+}
+
+inline DomElement* dom_require_element(DomNode* n) {
+    return dom_require<DOM_NODE_ELEMENT>(n);
+}
+
+inline const DomElement* dom_require_element(const DomNode* n) {
+    return dom_require<DOM_NODE_ELEMENT>(n);
+}
+
+inline DomText* dom_require_text(DomNode* n) {
+    return dom_require<DOM_NODE_TEXT>(n);
+}
+
+inline const DomText* dom_require_text(const DomNode* n) {
+    return dom_require<DOM_NODE_TEXT>(n);
 }
 
 template<TypeId Tag> struct TagToType;

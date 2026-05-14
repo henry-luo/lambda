@@ -4,6 +4,7 @@
 #include "layout.hpp"
 #include "font_face.h"
 
+#include "../lib/tagged.hpp"
 #include "../lib/font/font.h"
 #include "../lib/utf.h"
 #include "../lambda/input/css/dom_element.hpp"
@@ -129,7 +130,7 @@ void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
     DomNode* parent = text->parent;
     while (parent) {
         if (parent->is_element()) {
-            DomElement* elem = (DomElement*)parent;
+            DomElement* elem = lam::dom_require_element(parent);
             CssEnum transform = get_text_transform_from_block(elem->blk);
             if (transform != CSS_VALUE_NONE) {
                 text_transform = transform;
@@ -429,7 +430,7 @@ HPDF_Doc render_view_tree_to_pdf(UiContext* uicon, View* root_view, float width,
     walk_state.ui_context = uicon;
 
     if (root_view->view_type == RDT_VIEW_BLOCK) {
-        render_walk_block(&backend, &walk_state, (ViewBlock*)root_view);
+        render_walk_block(&backend, &walk_state, lam::view_require_block(root_view));
     } else if (root_view->view_type >= RDT_VIEW_INLINE) {
         render_walk_children(&backend, &walk_state, root_view);
     }
