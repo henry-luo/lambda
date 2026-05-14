@@ -5452,6 +5452,25 @@ extern "C" Item js_array_push(Item array, Item value) {
 // Tagged Template Literals
 // =============================================================================
 
+struct JsTemplateRegistryEntry {
+    int64_t site_id;
+    int count;
+    Item object;
+    JsTemplateRegistryEntry* next;
+};
+
+static JsTemplateRegistryEntry* js_template_registry = NULL;
+
+extern "C" void js_reset_template_registry(void) {
+    JsTemplateRegistryEntry* entry = js_template_registry;
+    while (entry) {
+        JsTemplateRegistryEntry* next = entry->next;
+        free(entry);
+        entry = next;
+    }
+    js_template_registry = NULL;
+}
+
 extern "C" Item js_build_template_object(Item* cooked, Item* raw, int count) {
     Item obj = js_array_new(count);
     Item raw_arr = js_array_new(count);
@@ -5467,6 +5486,22 @@ extern "C" Item js_build_template_object(Item* cooked, Item* raw, int count) {
     js_mark_non_configurable(obj, raw_key);
     js_object_freeze(raw_arr);
     js_object_freeze(obj);
+    return obj;
+}
+
+extern "C" Item js_build_template_object_cached(Item* cooked, Item* raw, int count, int64_t site_id) {
+    for (JsTemplateRegistryEntry* entry = js_template_registry; entry; entry = entry->next) {
+        if (entry->site_id == site_id && entry->count == count) return entry->object;
+    }
+    Item obj = js_build_template_object(cooked, raw, count);
+    JsTemplateRegistryEntry* entry = (JsTemplateRegistryEntry*)calloc(1, sizeof(JsTemplateRegistryEntry));
+    if (entry) {
+        entry->site_id = site_id;
+        entry->count = count;
+        entry->object = obj;
+        entry->next = js_template_registry;
+        js_template_registry = entry;
+    }
     return obj;
 }
 
@@ -19854,7 +19889,7 @@ extern "C" Item js_to_object(Item value) {
 // Mark a property as non-enumerable by setting __ne_<name> marker
 extern "C" void js_mark_non_enumerable(Item object, Item name) {
     TypeId tid = get_type_id(object);
-    if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_FUNC) return;
+    if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_FUNC && tid != LMD_TYPE_ARRAY) return;
     if (get_type_id(name) != LMD_TYPE_STRING) return;
     String* str = it2s(name);
     js_attr_set_enumerable(object, str->chars, (int)str->len, /*enumerable=*/false);
@@ -19863,7 +19898,7 @@ extern "C" void js_mark_non_enumerable(Item object, Item name) {
 // Mark a property as non-writable by setting __nw_<name> marker
 extern "C" void js_mark_non_writable(Item object, Item name) {
     TypeId tid = get_type_id(object);
-    if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_FUNC) return;
+    if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_FUNC && tid != LMD_TYPE_ARRAY) return;
     if (get_type_id(name) != LMD_TYPE_STRING) return;
     String* str = it2s(name);
     js_attr_set_writable(object, str->chars, (int)str->len, /*writable=*/false);
@@ -19882,7 +19917,7 @@ extern "C" void js_mark_private_method_non_writable(Item object, Item name) {
 // JSPD_NON_CONFIGURABLE bit onto the ShapeEntry::flags.
 extern "C" void js_mark_non_configurable(Item object, Item name) {
     TypeId tid = get_type_id(object);
-    if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_FUNC) return;
+    if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_FUNC && tid != LMD_TYPE_ARRAY) return;
     if (get_type_id(name) != LMD_TYPE_STRING) return;
     String* str = it2s(name);
     js_attr_set_configurable(object, str->chars, (int)str->len, /*configurable=*/false);

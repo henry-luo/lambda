@@ -356,6 +356,8 @@ Item js_object_is_sealed(Item obj);
 
 // Tagged template literals
 Item js_build_template_object(Item* cooked, Item* raw, int count);
+Item js_build_template_object_cached(Item* cooked, Item* raw, int count, int64_t site_id);
+void js_reset_template_registry(void);
 Item js_new_check_constructor_return(Item obj, Item result);
 Item js_object_prevent_extensions(Item obj);
 Item js_object_is_extensible(Item obj);

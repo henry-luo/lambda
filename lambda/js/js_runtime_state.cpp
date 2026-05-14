@@ -260,6 +260,7 @@ extern "C" void js_path_reset();
 extern "C" void js_os_reset();
 extern "C" void js_url_module_reset();
 extern "C" void js_util_reset();
+extern "C" void js_reset_template_registry(void);
 
 extern "C" void js_batch_reset() {
     // increment epoch to invalidate cached heap objects
@@ -286,6 +287,7 @@ extern "C" void js_batch_reset() {
     js_reset_262_object();
     // reset interned __proto__ key (allocated in old pool)
     js_reset_proto_key();
+    js_reset_template_registry();
     // reset function pointer → JsFunction cache (JsFunction* in old pool)
     js_func_cache_reset();
     // reset builtin function cache (defined later in file, called via forward decl)
@@ -408,6 +410,7 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     js_reset_262_object();
     // reset interned __proto__ key
     js_reset_proto_key();
+    js_reset_template_registry();
     // reset function pointer → JsFunction cache
     js_func_cache_reset();
     js_builtin_cache_reset();

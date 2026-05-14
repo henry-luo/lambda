@@ -31,6 +31,26 @@ static MIR_reg_t jm_emit_current_this(JsMirTranspiler* mt) {
     return jm_call_0(mt, "js_get_this", MIR_T_I64);
 }
 
+static void jm_emit_named_evaluation_for_identifier(JsMirTranspiler* mt, JsAstNode* rhs_node, MIR_reg_t rhs, String* name) {
+    if (!rhs_node || !name || name->len <= 0) return;
+    if (rhs_node->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
+        rhs_node->node_type == JS_AST_NODE_ARROW_FUNCTION) {
+        JsFunctionNode* fn_node = (JsFunctionNode*)rhs_node;
+        if (!fn_node->name) {
+            jm_emit_set_function_name(mt, rhs, name->chars);
+        }
+    } else if (rhs_node->node_type == JS_AST_NODE_CLASS_EXPRESSION ||
+               rhs_node->node_type == JS_AST_NODE_CLASS_DECLARATION) {
+        JsClassNode* cls = (JsClassNode*)rhs_node;
+        if (!cls->name) {
+            MIR_reg_t name_reg = jm_box_string_literal(mt, name->chars, (int)name->len);
+            jm_call_void_2(mt, "js_set_class_name",
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, rhs),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg));
+        }
+    }
+}
+
 JsMirReference jm_emit_reference(JsMirTranspiler* mt, JsAstNode* node) {
     JsMirReference ref;
     ref.kind = JS_MIR_REF_INVALID;
@@ -2776,6 +2796,10 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                         // Assign path: evaluate RHS, store, return RHS
                         jm_emit_label(mt, l_assign);
                         MIR_reg_t rhs = jm_transpile_box_item(mt, asgn->right);
+                        jm_emit_exc_propagate_check(mt);
+                        if (!asgn->lhs_is_parenthesized) {
+                            jm_emit_named_evaluation_for_identifier(mt, asgn->right, rhs, id->name);
+                        }
                         jm_call_void_2(mt, "js_set_module_var",
                             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, rhs));
@@ -2951,6 +2975,10 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                     // Assign path: evaluate RHS, store, return RHS
                     jm_emit_label(mt, l_assign);
                     MIR_reg_t rhs = jm_transpile_box_item(mt, asgn->right);
+                    jm_emit_exc_propagate_check(mt);
+                    if (!asgn->lhs_is_parenthesized) {
+                        jm_emit_named_evaluation_for_identifier(mt, asgn->right, rhs, id->name);
+                    }
                     MIR_reg_t name_reg2 = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
                     jm_call_void_2(mt, set_global_fn,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg2),
@@ -3207,14 +3235,10 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
             // Evaluate RHS and assign
             jm_emit_label(mt, l_assign);
             rhs = jm_transpile_box_item(mt, asgn->right);
+            jm_emit_exc_propagate_check(mt);
 
-            // v18: function name inference for logical assignment
-            if (asgn->right && (asgn->right->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
-                                asgn->right->node_type == JS_AST_NODE_ARROW_FUNCTION)) {
-                JsFunctionNode* fn_node = (JsFunctionNode*)asgn->right;
-                if (!fn_node->name && id->name && id->name->chars) {
-                    jm_emit_set_function_name(mt, rhs, id->name->chars);
-                }
+            if (!asgn->lhs_is_parenthesized) {
+                jm_emit_named_evaluation_for_identifier(mt, asgn->right, rhs, id->name);
             }
 
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -9578,11 +9602,22 @@ MIR_reg_t jm_transpile_tagged_template(JsMirTranspiler* mt, JsTaggedTemplateNode
         }
     }
 
-    // call js_build_template_object(cooked, raw, count)
-    MIR_reg_t tmpl_obj = jm_call_3(mt, "js_build_template_object", MIR_T_I64,
+    uint64_t site_id = 14695981039346656037ULL;
+    if (tmpl) {
+        TSNode node = tmpl->base.node;
+        uint64_t source_part = (mt->tp && mt->tp->source) ? (uint64_t)(uintptr_t)mt->tp->source : 0;
+        uint64_t start_part = ts_node_is_null(node) ? 0 : (uint64_t)ts_node_start_byte(node);
+        uint64_t end_part = ts_node_is_null(node) ? 0 : (uint64_t)ts_node_end_byte(node);
+        site_id ^= source_part; site_id *= 1099511628211ULL;
+        site_id ^= start_part; site_id *= 1099511628211ULL;
+        site_id ^= end_part; site_id *= 1099511628211ULL;
+    }
+
+    MIR_reg_t tmpl_obj = jm_call_4(mt, "js_build_template_object_cached", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, cooked_arr),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, raw_arr),
-        MIR_T_I64, MIR_new_int_op(mt->ctx, quasi_count));
+        MIR_T_I64, MIR_new_int_op(mt->ctx, quasi_count),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)site_id));
 
     // build args array: [template_object, ...expressions]
     int total_argc = 1 + expr_count;
