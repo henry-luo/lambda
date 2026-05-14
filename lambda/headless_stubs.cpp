@@ -147,6 +147,15 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
     return 1;
 }
 
+extern "C" Item fn_pdf_register_svg_image_resolver(Item svg_item, Item pdf_item) {
+    (void)pdf_item;
+    return svg_item;
+}
+
+extern "C" void svg_unregister_image_resolvers_for_tree(Element* root) {
+    (void)root;
+}
+
 Element* get_html_root_element(Input* input) {
     (void)input;
     return nullptr;

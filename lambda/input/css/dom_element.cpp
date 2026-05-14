@@ -24,6 +24,7 @@ int counter_format(CounterContext* ctx, const char* name, uint32_t style,
                   char* buffer, size_t buffer_size);
 int counters_format(CounterContext* ctx, const char* name, const char* separator,
                    uint32_t style, char* buffer, size_t buffer_size);
+extern "C" void svg_unregister_image_resolvers_for_tree(Element* root);
 
 // Timing accumulators for cascade profiling
 static thread_local int64_t g_apply_decl_count = 0;
@@ -128,6 +129,10 @@ DomDocument* dom_document_create(Input* input) {
 void dom_document_destroy(DomDocument* document) {
     if (!document) {
         return;
+    }
+
+    if (document->html_root) {
+        svg_unregister_image_resolvers_for_tree(document->html_root);
     }
 
     // Note: root and all DOM nodes are allocated from arena,

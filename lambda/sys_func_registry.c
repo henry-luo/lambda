@@ -103,6 +103,7 @@ extern Item edit_array_delete(Item array, int64_t index);
 extern Item edit_array_append(Item array, Item value);
 extern Item pdf_parse_content_stream(Item bytes);
 extern Item fn_pdf_parse_content_stream(Item bytes);
+extern Item fn_pdf_register_svg_image_resolver(Item svg_item, Item pdf_item);
 extern int edit_commit(const char* description);
 extern bool edit_undo(void);
 extern bool edit_redo(void);
@@ -775,6 +776,10 @@ SysFuncInfo sys_func_defs[] = {
     // PDF package: native content stream tokenizer for dense vector pages
     {SYSFUNC_PDF_PARSE_CONTENT_STREAM, "pdf_parse_content_stream", 1, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_pdf_parse_content_stream", FPTR(fn_pdf_parse_content_stream), NULL, NULL, false, 0},
+
+    // PDF package: bind page SVG roots to their parsed PDF object tree for image handle resolution
+    {SYSFUNC_PDF_REGISTER_SVG_IMAGE_RESOLVER, "pdf_register_svg_image_resolver", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_pdf_register_svg_image_resolver", FPTR(fn_pdf_register_svg_image_resolver), NULL, NULL, false, 0},
 };
 
 // note: sizeof(sys_func_defs) may fail with incomplete type because the header
@@ -975,6 +980,7 @@ JitImport jit_runtime_imports[] = {
     {"item_spread", FPTR(item_spread)},
     {"pdf_parse_content_stream", FPTR(pdf_parse_content_stream)},
     {"fn_pdf_parse_content_stream", FPTR(fn_pdf_parse_content_stream)},
+    {"fn_pdf_register_svg_image_resolver", FPTR(fn_pdf_register_svg_image_resolver)},
     // typed array constructors
     {"array_float_new", FPTR(array_float_new)},
     {"array_float_set", FPTR(array_float_set)},
