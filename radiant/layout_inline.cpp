@@ -5,6 +5,7 @@
 #include "../lambda/input/input.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/font/font.h"
+#include "../lib/tagged.hpp"
 #include "../lib/strbuf.h"
 #include <cstring>
 
@@ -13,11 +14,47 @@ extern PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBl
 extern void generate_pseudo_element_content(LayoutContext* lycon, ViewBlock* block, bool is_before);
 extern void insert_pseudo_into_dom(DomElement* parent, DomElement* pseudo, bool is_before);
 
+static inline DomElement* layout_inline_as_element(DomNode* node) {
+    return lam::dom_as<DOM_NODE_ELEMENT>(node);
+}
+
+static inline DomText* layout_inline_as_text(DomNode* node) {
+    return lam::dom_as<DOM_NODE_TEXT>(node);
+}
+
+static inline ViewBlock* layout_inline_as_block_view(View* view) {
+    if (!view) return nullptr;
+    switch (view->view_type) {
+        case RDT_VIEW_INLINE_BLOCK: return lam::view_as_block<RDT_VIEW_INLINE_BLOCK>(view);
+        case RDT_VIEW_BLOCK: return lam::view_as_block<RDT_VIEW_BLOCK>(view);
+        case RDT_VIEW_LIST_ITEM: return lam::view_as_block<RDT_VIEW_LIST_ITEM>(view);
+        case RDT_VIEW_TABLE: return lam::view_as_block<RDT_VIEW_TABLE>(view);
+        case RDT_VIEW_TABLE_ROW_GROUP: return lam::view_as_block<RDT_VIEW_TABLE_ROW_GROUP>(view);
+        case RDT_VIEW_TABLE_ROW: return lam::view_as_block<RDT_VIEW_TABLE_ROW>(view);
+        case RDT_VIEW_TABLE_CELL: return lam::view_as_block<RDT_VIEW_TABLE_CELL>(view);
+        case RDT_VIEW_TABLE_COLUMN_GROUP: return lam::view_as_block<RDT_VIEW_TABLE_COLUMN_GROUP>(view);
+        case RDT_VIEW_TABLE_COLUMN: return lam::view_as_block<RDT_VIEW_TABLE_COLUMN>(view);
+        case RDT_VIEW_NONE:
+        case RDT_VIEW_TEXT:
+        case RDT_VIEW_BR:
+        case RDT_VIEW_MARKER:
+        case RDT_VIEW_INLINE:
+        case RDT_VIEW_MATH:
+            return nullptr;
+    }
+    return nullptr;
+}
+
+static inline ViewBlock* layout_inline_unsafe_block_api_span(ViewSpan* span) {
+    // ViewBlock currently adds no fields; these legacy layout APIs operate on
+    // DomElement/ViewSpan storage even when the runtime tag is RDT_VIEW_INLINE.
+    return static_cast<ViewBlock*>(span);
+}
+
 // Check if a view child is out of normal flow (absolute, fixed, or float)
 static inline bool is_out_of_flow_child(View* child) {
-    DomNode* node = (DomNode*)child;
-    if (node->is_element()) {
-        DomElement* elem = static_cast<DomElement*>(node);
+    DomNode* node = child;
+    if (DomElement* elem = layout_inline_as_element(node)) {
         if (elem->position) {
             if (elem->position->position == CSS_VALUE_ABSOLUTE ||
                 elem->position->position == CSS_VALUE_FIXED) {
@@ -142,15 +179,13 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
     // child->x is the border-box position (margin already added to the x coordinate),
     // so the outer-left = child->x - margin.left, outer-right = child->x + width + margin.right.
     auto get_child_outer_left = [](View* c) -> float {
-        if (c->view_type == RDT_VIEW_INLINE_BLOCK) {
-            ViewBlock* vb = (ViewBlock*)c;
+        if (ViewBlock* vb = lam::view_as_block<RDT_VIEW_INLINE_BLOCK>(c)) {
             if (vb->bound) return c->x - vb->bound->margin.left;
         }
         return c->x;
     };
     auto get_child_outer_right = [](View* c) -> float {
-        if (c->view_type == RDT_VIEW_INLINE_BLOCK) {
-            ViewBlock* vb = (ViewBlock*)c;
+        if (ViewBlock* vb = lam::view_as_block<RDT_VIEW_INLINE_BLOCK>(c)) {
             if (vb->bound) return c->x + c->width + vb->bound->margin.right;
         }
         return c->x + c->width;
@@ -169,16 +204,14 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
     // (block or inline), use their static (pre-offset) position when computing
     // the parent inline span's bounding box.
     auto get_child_static_y = [](View* c) -> float {
-        if (c->is_block()) {
-            ViewBlock* vb = (ViewBlock*)c;
+        if (ViewBlock* vb = layout_inline_as_block_view(c)) {
             if (vb->position && vb->position->position == CSS_VALUE_RELATIVE) {
                 float dy = 0;
                 if (vb->position->has_top) dy = vb->position->top;
                 else if (vb->position->has_bottom) dy = -vb->position->bottom;
                 return c->y - dy;
             }
-        } else if (c->view_type == RDT_VIEW_INLINE) {
-            DomElement* elem = (DomElement*)c;
+        } else if (ViewSpan* elem = lam::view_as<RDT_VIEW_INLINE>(c)) {
             if (elem->position && elem->position->position == CSS_VALUE_RELATIVE) {
                 float dy = 0;
                 if (elem->position->has_top) dy = elem->position->top;
@@ -190,8 +223,7 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
     };
 
     auto get_child_content_y = [&get_child_static_y](View* c) -> float {
-        if (c->view_type == RDT_VIEW_INLINE) {
-            ViewSpan* cs = (ViewSpan*)c;
+        if (ViewSpan* cs = lam::view_as<RDT_VIEW_INLINE>(c)) {
             float bt = 0, pt = 0;
             if (cs->bound) {
                 if (cs->bound->border) bt = cs->bound->border->width.top;
@@ -202,8 +234,7 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
         return get_child_static_y(c);
     };
     auto get_child_content_bottom = [&get_child_static_y](View* c) -> float {
-        if (c->view_type == RDT_VIEW_INLINE) {
-            ViewSpan* cs = (ViewSpan*)c;
+        if (ViewSpan* cs = lam::view_as<RDT_VIEW_INLINE>(c)) {
             float bb = 0, pb = 0;
             if (cs->bound) {
                 if (cs->bound->border) bb = cs->bound->border->width.bottom;
@@ -413,7 +444,7 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
         // the inline cursor (advance_x) as the static position (§10.3.7).
         bool child_is_abspos = false;
         if (child->is_element()) {
-            DomElement* ce = child->as_element();
+            DomElement* ce = layout_inline_as_element(child);
             if (ce->position &&
                 (ce->position->float_prop == CSS_VALUE_LEFT ||
                  ce->position->float_prop == CSS_VALUE_RIGHT)) {
@@ -505,15 +536,15 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
             // container that doesn't create a BFC and has no border/padding,
             // the block child's margins should collapse with the container.
             if (child->is_element()) {
-                DomElement* child_elem = child->as_element();
-                ViewBlock* child_block = child_elem->is_block() ? (ViewBlock*)child_elem : nullptr;
+                DomElement* child_elem = layout_inline_as_element(child);
+                ViewBlock* child_block = child_elem ? layout_inline_as_block_view(child_elem) : nullptr;
                 DomNode* container_node = inline_elem->parent;
                 if (child_block && child_block->bound && container_node &&
-                    container_node->is_element() && ((DomElement*)container_node)->is_block()) {
-                    ViewBlock* container = (ViewBlock*)container_node;
+                    container_node->is_element()) {
+                    ViewBlock* container = layout_inline_as_block_view(container_node);
                     // Only collapse when the container doesn't establish a BFC
                     // (table cells, overflow:hidden etc. prevent margin collapse)
-                    if (!block_context_establishes_bfc(container)) {
+                    if (container && !block_context_establishes_bfc(container)) {
                         float cont_bt = container->bound && container->bound->border
                             ? container->bound->border->width.top : 0;
                         float cont_pt = container->bound ? container->bound->padding.top : 0;
@@ -557,7 +588,7 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
                 }
             }
             had_block_child_before = true;
-            if (child->is_element()) last_block_child_elem = child->as_element();
+            if (child->is_element()) last_block_child_elem = layout_inline_as_element(child);
 
         } else {
             // Inline or text content - accumulate in anonymous inline box
@@ -592,12 +623,12 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
     // After all children are processed, if the last block child has a bottom
     // margin and the container has no bottom border/padding, collapse it.
     if (last_block_child_elem && !in_inline_sequence) {
-        ViewBlock* last_blk = last_block_child_elem->is_block() ? (ViewBlock*)last_block_child_elem : nullptr;
+        ViewBlock* last_blk = layout_inline_as_block_view(last_block_child_elem);
         DomNode* container_node = inline_elem->parent;
         if (last_blk && last_blk->bound && container_node &&
-            container_node->is_element() && ((DomElement*)container_node)->is_block()) {
-            ViewBlock* container = (ViewBlock*)container_node;
-            if (!block_context_establishes_bfc(container)) {
+            container_node->is_element()) {
+            ViewBlock* container = layout_inline_as_block_view(container_node);
+            if (container && !block_context_establishes_bfc(container)) {
                 float cont_bb = container->bound && container->bound->border
                     ? container->bound->border->width.bottom : 0;
                 float cont_pb = container->bound ? container->bound->padding.bottom : 0;
@@ -676,7 +707,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // It doesn't generate a box — browsers report (0,0,0,0) via getBoundingClientRect.
     // Equivalent to U+200B ZWSP per Unicode Line Breaking Algorithm.
     if (elmt->tag() == HTM_TAG_WBR) {
-        ViewSpan* wbr_span = (ViewSpan*)set_view(lycon, RDT_VIEW_INLINE, elmt);
+        ViewSpan* wbr_span = lam::view_require<RDT_VIEW_INLINE>(set_view(lycon, RDT_VIEW_INLINE, elmt));
         wbr_span->x = 0;
         wbr_span->y = 0;
         wbr_span->width = 0;
@@ -730,9 +761,9 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // CSS 2.1 §9.5.2: check if the <br> has a 'clear' property and apply float clearance.
         // Browsers treat <br style="clear:both"> as clearing floats at the line break point.
         if (elmt->is_element()) {
-            DomElement* br_elem = static_cast<DomElement*>(elmt);
+            DomElement* br_elem = layout_inline_as_element(elmt);
             CssEnum clear_value = CSS_VALUE_NONE;
-            if (br_elem->specified_style && br_elem->specified_style->tree) {
+            if (br_elem && br_elem->specified_style && br_elem->specified_style->tree) {
                 AvlNode* clear_node = avl_tree_search(br_elem->specified_style->tree, CSS_PROPERTY_CLEAR);
                 if (clear_node) {
                     StyleNode* sn = (StyleNode*)clear_node->declaration;
@@ -789,7 +820,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
     // check for math elements (class="math inline" or class="math display")
     if (elmt->is_element()) {
-        DomElement* elem = static_cast<DomElement*>(elmt);
+        DomElement* elem = layout_inline_as_element(elmt);
         // debug: check what classes this element has
         bool has_math = dom_element_has_class(elem, "math");
         bool has_inline = dom_element_has_class(elem, "inline");
@@ -810,7 +841,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     float pa_valign_offset = lycon->line.vertical_align_offset;
     lycon->elmt = elmt;
 
-    ViewSpan* span = (ViewSpan*)set_view(lycon, RDT_VIEW_INLINE, elmt);
+    ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(set_view(lycon, RDT_VIEW_INLINE, elmt));
     span->x = lycon->line.advance_x;  span->y = lycon->block.advance_y;
     span->width = 0;  span->height = 0;
     span->display = display;
@@ -822,10 +853,11 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // Push a new counter scope for this inline element so that counter-reset
     // creates a properly nested counter instance (not modifying the parent scope)
     bool pushed_counter_scope = false;
-    bool is_before_pseudo = elmt->is_element() && static_cast<DomElement*>(elmt)->tag_name &&
-        strcmp(static_cast<DomElement*>(elmt)->tag_name, "::before") == 0;
-    bool is_after_pseudo = elmt->is_element() && static_cast<DomElement*>(elmt)->tag_name &&
-        strcmp(static_cast<DomElement*>(elmt)->tag_name, "::after") == 0;
+    DomElement* elmt_elem = layout_inline_as_element(elmt);
+    bool is_before_pseudo = elmt_elem && elmt_elem->tag_name &&
+        strcmp(elmt_elem->tag_name, "::before") == 0;
+    bool is_after_pseudo = elmt_elem && elmt_elem->tag_name &&
+        strcmp(elmt_elem->tag_name, "::after") == 0;
     if (lycon->counter_context) {
         counter_push_scope(lycon->counter_context);
         pushed_counter_scope = true;
@@ -853,15 +885,15 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         }
 
         if (is_after_pseudo && elmt->parent && elmt->parent->is_element()) {
-            DomElement* origin = elmt->parent->as_element();
+            DomElement* origin = layout_inline_as_element(elmt->parent);
             const char* content = dom_element_get_pseudo_element_content_with_counters(
                 origin, 2, lycon->counter_context, lycon->doc->arena);
             if (!content) content = dom_element_get_pseudo_element_content(origin, 2);
             if (content && elmt->is_element()) {
-                DomElement* pseudo_elem = static_cast<DomElement*>(elmt);
+                DomElement* pseudo_elem = layout_inline_as_element(elmt);
                 DomNode* first = pseudo_elem->first_child;
                 if (first && first->is_text()) {
-                    DomText* text_node = first->as_text();
+                    DomText* text_node = layout_inline_as_text(first);
                     size_t content_len = strlen(content);
                     String* text_string = (String*)arena_alloc(pseudo_elem->doc->arena,
                         sizeof(String) + content_len + 1);
@@ -882,12 +914,13 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // Allocate pseudo-element content if ::before or ::after is present
     // Inline elements can have pseudo-elements too (e.g., <span>::before)
     if (elmt->is_element()) {
-        DomElement* elem = static_cast<DomElement*>(elmt);
-        elem->pseudo = alloc_pseudo_content_prop(lycon, (ViewBlock*)span);
+        DomElement* elem = layout_inline_as_element(elmt);
+        ViewBlock* block_api_span = layout_inline_unsafe_block_api_span(span);
+        elem->pseudo = alloc_pseudo_content_prop(lycon, block_api_span);
 
         // Generate pseudo-element content from CSS content property
-        generate_pseudo_element_content(lycon, (ViewBlock*)span, true);   // ::before
-        generate_pseudo_element_content(lycon, (ViewBlock*)span, false);  // ::after
+        generate_pseudo_element_content(lycon, block_api_span, true);   // ::before
+        generate_pseudo_element_content(lycon, block_api_span, false);  // ::after
 
         // Insert pseudo-elements into DOM tree for proper view tree linking
         if (elem->pseudo) {
@@ -921,7 +954,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // so each element must recompute: number × own font-size.
     bool has_own_line_height = false;
     if (elmt->is_element()) {
-        DomElement* dom_elmt = static_cast<DomElement*>(elmt);
+        DomElement* dom_elmt = layout_inline_as_element(elmt);
         if (dom_elmt->specified_style) {
             has_own_line_height =
                 style_tree_get_declaration(dom_elmt->specified_style, CSS_PROPERTY_LINE_HEIGHT) != nullptr ||
@@ -936,15 +969,16 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     bool font_size_changed = lycon->font.style && pa_font.style &&
         lycon->font.style->font_size != pa_font.style->font_size;
     if (has_own_line_height || font_size_changed) {
+        ViewBlock* block_api_span = layout_inline_unsafe_block_api_span(span);
         if (has_own_line_height) {
-            setup_line_height(lycon, (ViewBlock*)span);
+            setup_line_height(lycon, block_api_span);
         } else {
             // font-size changed: only re-resolve for number/normal line-height
-            CssValue inherited_lh = inherit_line_height(lycon, (ViewBlock*)span);
+            CssValue inherited_lh = inherit_line_height(lycon, block_api_span);
             if (inherited_lh.type == CSS_VALUE_TYPE_NUMBER ||
                 (inherited_lh.type == CSS_VALUE_TYPE_KEYWORD &&
                  inherited_lh.data.keyword == CSS_VALUE_NORMAL)) {
-                setup_line_height(lycon, (ViewBlock*)span);
+                setup_line_height(lycon, block_api_span);
             }
         }
         // Track if this inline's line-height exceeds the parent block's,
@@ -958,7 +992,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // layout inline content
     DomNode *child = nullptr;
     if (elmt->is_element()) {
-        child = static_cast<DomElement*>(elmt)->first_child;
+        child = elmt_elem ? elmt_elem->first_child : nullptr;
     }
 
     // CSS 2.1 §8.3: Inline elements' margin/border/padding push content inward.
@@ -1002,7 +1036,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 // CSS 2.1 §9.5, §9.6.1: Absolutely/fixed positioned and floated
                 // elements are out of flow and should not trigger block-in-inline
                 // splitting, even though their display is blockified per §9.7.
-                DomElement* child_elem = scan->as_element();
+                DomElement* child_elem = layout_inline_as_element(scan);
                 bool child_is_out_of_flow = false;
                 if (child_elem->position) {
                     if (child_elem->position->position == CSS_VALUE_ABSOLUTE ||
@@ -1051,8 +1085,8 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // CSS 2.1 §17.2.1: When only table-internal children exist (no block children),
     // wrap them in anonymous inline-table to participate in inline flow
     if (has_table_internal && !has_block_children) {
-        wrap_orphaned_table_children(lycon, static_cast<DomElement*>(elmt));
-        child = static_cast<DomElement*>(elmt)->first_child;
+        wrap_orphaned_table_children(lycon, elmt_elem);
+        child = elmt_elem ? elmt_elem->first_child : nullptr;
     }
 
     // If block children exist, table-internal children act as block-breaking
@@ -1068,7 +1102,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
         // Handle block-in-inline splitting
         float pre_split_advance_y = lycon->block.advance_y;
-        layout_inline_with_block_children(lycon, static_cast<DomElement*>(elmt), span, child);
+        layout_inline_with_block_children(lycon, elmt_elem, span, child);
 
         // Advance past the right border+padding
         lycon->line.advance_x += inline_right_edge;
@@ -1150,7 +1184,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 float last_block_bottom = -1;
                 View* scan_child = span->first_child;
                 while (scan_child) {
-                    if (scan_child->view_type == RDT_VIEW_BLOCK) {
+                    if (lam::view_as<RDT_VIEW_BLOCK>(scan_child)) {
                         float child_bottom = scan_child->y + scan_child->height;
                         if (child_bottom > last_block_bottom)
                             last_block_bottom = child_bottom;
@@ -1182,8 +1216,9 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
         // Override horizontal bounds to match the parent block's content area
         ViewElement* parent_block = span->parent_view();
-        if (parent_block && parent_block->is_block()) {
-            ViewBlock* pb = (ViewBlock*)parent_block;
+        if (parent_block) {
+            ViewBlock* pb = layout_inline_as_block_view(parent_block);
+            if (pb) {
             float pb_border_left = 0, pb_border_right = 0;
             float pb_pad_left = 0, pb_pad_right = 0;
             if (pb->bound) {
@@ -1201,14 +1236,15 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             span->width = content_width;
             log_debug("%s block-in-inline: span bounds set to parent content area: x=%.0f, w=%.0f (pb_w=%.0f, bl=%f, br=%f)", elmt->source_loc(),
                       span->x, span->width, pb->width, pb_border_left, pb_border_right);
+            }
         }
 
         // Apply CSS relative/sticky positioning after normal layout
         if (span->position && span->position->position == CSS_VALUE_RELATIVE) {
             log_debug("%s Applying relative positioning to inline span (with block children)", elmt->source_loc());
-            layout_relative_positioned(lycon, (ViewBlock*)span);
+            layout_relative_positioned(lycon, layout_inline_unsafe_block_api_span(span));
         } else if (span->position && span->position->position == CSS_VALUE_STICKY) {
-            layout_sticky_positioned(lycon, (ViewBlock*)span);
+            layout_sticky_positioned(lycon, layout_inline_unsafe_block_api_span(span));
         }
 
         lycon->font = pa_font;
@@ -1218,9 +1254,9 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         if (pushed_counter_scope) {
             // Propagate counter-reset counters for real elements (sibling visibility)
             // but not for pseudo-elements (their counter-reset stays scoped)
-            bool is_pseudo = elmt->is_element() &&
-                static_cast<DomElement*>(elmt)->tag_name &&
-                static_cast<DomElement*>(elmt)->tag_name[0] == ':';
+            bool is_pseudo = elmt_elem &&
+                elmt_elem->tag_name &&
+                elmt_elem->tag_name[0] == ':';
             counter_pop_scope_propagate(lycon->counter_context, !is_pseudo);
         }
         return;
@@ -1356,17 +1392,17 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     if (lycon->line.trailing_space_width > 0) {
         // Check if there's more inline content after this span on the same line
         bool has_following_inline = false;
-        DomNode* sib = ((DomNode*)span)->next_sibling;
+        DomNode* sib = span->next_sibling;
         while (sib) {
             if (sib->is_element()) {
-                DomElement* elem = sib->as_element();
+                DomElement* elem = layout_inline_as_element(sib);
                 DisplayValue dv = resolve_display_value(elem);
                 if (dv.outer == CSS_VALUE_INLINE) {
                     has_following_inline = true;
                 }
                 break;  // any element determines the answer
             } else if (sib->is_text()) {
-                DomText* tn = sib->as_text();
+                DomText* tn = layout_inline_as_text(sib);
                 if (tn && tn->text && tn->length > 0) {
                     // Check if it's all whitespace
                     bool all_ws = true;
@@ -1392,10 +1428,10 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // inline element. A nested inline at end-of-parent still has trailing space
         // visible if the parent inline has more content following.
         if (!has_following_inline) {
-            DomNode* ancestor = ((DomNode*)span)->parent;
+            DomNode* ancestor = span->parent;
             while (ancestor && !has_following_inline) {
                 if (!ancestor->is_element()) break;
-                DomElement* anc_elem = ancestor->as_element();
+                DomElement* anc_elem = layout_inline_as_element(ancestor);
                 if (!anc_elem) break;
                 // Stop at block-level or non-inline-flow ancestors
                 if (anc_elem->view_type >= RDT_VIEW_INLINE_BLOCK) break;
@@ -1404,14 +1440,14 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 DomNode* anc_sib = ancestor->next_sibling;
                 while (anc_sib) {
                     if (anc_sib->is_element()) {
-                        DomElement* se = anc_sib->as_element();
+                        DomElement* se = layout_inline_as_element(anc_sib);
                         DisplayValue sdv = resolve_display_value(se);
                         if (sdv.outer == CSS_VALUE_INLINE) {
                             has_following_inline = true;
                         }
                         break;
                     } else if (anc_sib->is_text()) {
-                        DomText* tn = anc_sib->as_text();
+                        DomText* tn = layout_inline_as_text(anc_sib);
                         if (tn && tn->text && tn->length > 0) {
                             bool all_ws = true;
                             for (size_t i = 0; i < tn->length; i++) {
@@ -1487,11 +1523,11 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 bool child_overflows = false;
                 View* ch = span->first_placed_child();
                 while (ch) {
-                    if (ch->view_type == RDT_VIEW_INLINE && ch->height > expected_height) {
+                    if (lam::view_as<RDT_VIEW_INLINE>(ch) && ch->height > expected_height) {
                         child_overflows = true;
                         break;
                     }
-                    ch = (View*)ch->next_sibling;
+                    ch = ch->next_sibling;
                 }
                 if (!child_overflows) {
                     span->height = expected_height;
@@ -1524,7 +1560,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     if (span->height == 0 && span->width == 0 && span->first_child) {
         // Check if all children are collapsed (RDT_VIEW_NONE)
         bool all_collapsed = true;
-        DomNode* chk = static_cast<DomElement*>(elmt)->first_child;
+        DomNode* chk = elmt_elem ? elmt_elem->first_child : nullptr;
         while (chk) {
             if (chk->view_type != RDT_VIEW_NONE) {
                 all_collapsed = false;
@@ -1549,9 +1585,9 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // CSS 2.1 §9.4.3: Relatively positioned inline elements are offset from their normal position
     if (span->position && span->position->position == CSS_VALUE_RELATIVE) {
         log_debug("%s Applying relative positioning to inline span", elmt->source_loc());
-        layout_relative_positioned(lycon, (ViewBlock*)span);
+        layout_relative_positioned(lycon, layout_inline_unsafe_block_api_span(span));
     } else if (span->position && span->position->position == CSS_VALUE_STICKY) {
-        layout_sticky_positioned(lycon, (ViewBlock*)span);
+        layout_sticky_positioned(lycon, layout_inline_unsafe_block_api_span(span));
     }
 
     lycon->font = pa_font;  lycon->line.vertical_align = pa_line_align;
@@ -1559,9 +1595,9 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     lycon->block.line_height = pa_line_height;
     lycon->block.line_height_is_normal = pa_line_height_is_normal;
     if (pushed_counter_scope) {
-        bool is_pseudo = elmt->is_element() &&
-            static_cast<DomElement*>(elmt)->tag_name &&
-            static_cast<DomElement*>(elmt)->tag_name[0] == ':';
+        bool is_pseudo = elmt_elem &&
+            elmt_elem->tag_name &&
+            elmt_elem->tag_name[0] == ':';
         counter_pop_scope_propagate(lycon->counter_context, !is_pseudo);
     }
     log_debug("%s inline span view: %d, child %p, x:%.0f, y:%.0f, wd:%.0f, hg:%.0f", elmt->source_loc(), span->view_type,

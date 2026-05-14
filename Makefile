@@ -461,7 +461,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild \
 	    test test-all test-all-baseline test-lambda-baseline test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-extended test-input run help \
-	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint check check-raw-alloc check-state-store docs intellisense analyze-binary \
+	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint check check-raw-alloc check-state-store check-radiant-casts docs intellisense analyze-binary \
 	    build-debug build-release clean-all distclean \
 	    tree-sitter-libs tree-sitter-core-libs \
 	    generate-premake clean-premake build-test build-test-linux build-jube-test test-jube run-radiant-baseline \
@@ -1958,6 +1958,34 @@ check-int-cast:
 		exit 1; \
 	else \
 		echo "✅ No unmarked (int) casts in Radiant layout files"; \
+	fi
+
+# Check for C-style pointer casts to View*/Dom* in migrated Radiant layout files.
+# Downcasts should go through lib/tagged.hpp helpers such as lam::view_as_*(),
+# lam::view_require_*(), lam::dom_as<>(), or lam::dom_require<>().
+check-radiant-casts:
+	@echo "Checking migrated Radiant layout files for C-style View*/Dom* casts..."
+	@VIOLATIONS=$$(grep -En '\([[:space:]]*(View|Dom)[A-Za-z0-9_]*[[:space:]]*\*[[:space:]]*\)[[:space:]]*([A-Za-z_&*]|\()' \
+		radiant/layout_alignment.cpp radiant/layout_inline.cpp \
+		radiant/layout_grid.cpp radiant/layout_grid_multipass.cpp \
+		radiant/layout_list.cpp radiant/layout_positioned.cpp \
+		radiant/layout_text.cpp radiant/layout_multicol.cpp \
+		radiant/layout_flex_measurement.cpp radiant/layout_flex_multipass.cpp \
+		radiant/layout_flex.cpp radiant/layout_block.cpp \
+		radiant/layout_table.cpp \
+		radiant/resolve_css_style.cpp \
+		| grep -v 'RADIANT_CAST_OK' \
+		|| true); \
+	if [ -n "$$VIOLATIONS" ]; then \
+		echo ""; \
+		echo "❌ Found C-style View*/Dom* casts in migrated Radiant files:"; \
+		echo "$$VIOLATIONS"; \
+		echo ""; \
+		VCOUNT=$$(echo "$$VIOLATIONS" | wc -l | tr -d ' '); \
+		echo "Total: $$VCOUNT cast(s)"; \
+		exit 1; \
+	else \
+		echo "✅ No C-style View*/Dom* casts in migrated Radiant files"; \
 	fi
 
 # Clang-tidy static analysis

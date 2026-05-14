@@ -840,7 +840,22 @@ class PremakeGenerator:
         # Handle both 'sources' (targets) and 'source_files' (libraries) field names
         source_files = lib.get('source_files', []) or lib.get('sources', [])
         source_patterns = lib.get('source_patterns', [])
-        dependencies = lib.get('libraries', [])
+        dependencies = list(lib.get('libraries', []))
+        platform_overrides = {}
+        if self.use_macos_config:
+            platform_overrides = lib.get('macos', {})
+        elif self.use_windows_config:
+            platform_overrides = lib.get('windows', {})
+        elif self.use_linux_config:
+            platform_overrides = lib.get('linux', {})
+
+        if platform_overrides:
+            for dep in platform_overrides.get('additional_libraries', []):
+                if dep not in dependencies:
+                    dependencies.append(dep)
+            exclude_deps = set(platform_overrides.get('exclude_libraries', []))
+            if exclude_deps:
+                dependencies = [dep for dep in dependencies if dep not in exclude_deps]
 
         # For lambda-lib, it's a meta-library that depends on other inline libraries
         if lib_name == 'lambda-lib':

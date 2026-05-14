@@ -153,6 +153,48 @@ static bool text_line_has_tab(const char* text, size_t length) {
     return false;
 }
 
+static bool text_node_is_ascii_whitespace(DomNode* node) {
+    if (!node || !node->is_text()) return false;
+    const char* text = (const char*)node->text_data();
+    if (!text) return true;
+    while (*text) {
+        unsigned char ch = (unsigned char)*text;
+        if (ch != ' ' && ch != '\t' && ch != '\n' && ch != '\r' && ch != '\f') {
+            return false;
+        }
+        text++;
+    }
+    return true;
+}
+
+static DomNode* previous_non_whitespace_sibling(DomNode* node) {
+    DomNode* sibling = node ? node->prev_sibling : nullptr;
+    while (sibling && text_node_is_ascii_whitespace(sibling)) {
+        sibling = sibling->prev_sibling;
+    }
+    return sibling;
+}
+
+static bool node_is_table_cell_like(DomNode* node) {
+    if (!node || !node->is_element()) return false;
+    DomElement* elem = node->as_element();
+    if (elem->view_type == RDT_VIEW_TABLE_CELL ||
+        elem->display.inner == CSS_VALUE_TABLE_CELL ||
+        elem->display.outer == CSS_VALUE_TABLE_CELL) {
+        return true;
+    }
+    if (elem->specified_style) {
+        CssDeclaration* display_decl = style_tree_get_declaration(
+            elem->specified_style, CSS_PROPERTY_DISPLAY);
+        if (display_decl && display_decl->value &&
+            display_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
+            display_decl->value->data.keyword == CSS_VALUE_TABLE_CELL) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static float measure_preserved_line_width_with_tabs(LayoutContext* lycon, const char* text,
                                                     size_t length, float start_offset,
                                                     CssEnum text_transform, CssEnum font_variant,
@@ -2186,6 +2228,48 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         }
     }
 
+    // CSS Generated Content §2: ::before participates as the first inline child.
+    // Account for it before measuring real children so following collapsible
+    // whitespace is preserved as inter-word spacing instead of trimmed as
+    // leading whitespace.
+    bool has_generated_inline_before = false;
+    if (dom_element_has_before_content(element) && element->before_styles && element->before_styles->tree) {
+        bool before_is_inline = true;
+        CssDeclaration* pd_decl = style_tree_get_declaration(element->before_styles, CSS_PROPERTY_DISPLAY);
+        if (pd_decl && pd_decl->value && pd_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+            CssEnum dv = pd_decl->value->data.keyword;
+            if (dv == CSS_VALUE_BLOCK || dv == CSS_VALUE_TABLE ||
+                dv == CSS_VALUE_LIST_ITEM || dv == CSS_VALUE_FLEX ||
+                dv == CSS_VALUE_GRID || dv == CSS_VALUE_NONE) {
+                before_is_inline = false;
+            }
+        }
+
+        const char* before_content = dom_element_get_pseudo_element_content(
+            element, 1 /*PSEUDO_ELEMENT_BEFORE*/);
+        if (before_is_inline && before_content && *before_content) {
+            TextIntrinsicWidths tw = measure_text_intrinsic_widths(
+                lycon, before_content, strlen(before_content));
+            float before_width = tw.max_content;
+            CssDeclaration* width_decl = style_tree_get_declaration(
+                element->before_styles, CSS_PROPERTY_WIDTH);
+            if (width_decl && width_decl->value && width_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                float explicit_width = resolve_length_value(lycon, CSS_PROPERTY_WIDTH, width_decl->value);
+                if (!isnan(explicit_width) && explicit_width >= 0) {
+                    before_width = fmax(before_width, explicit_width);
+                }
+            }
+            has_inline_content = true;
+            has_generated_inline_before = true;
+            inline_max_sum += before_width;
+            inline_min_sum = max(inline_min_sum, tw.min_content);
+            if (first_inline_child_min < 0) {
+                first_inline_child_min = tw.min_content;
+            }
+            log_debug("  pseudo ::before intrinsic width: %.1f added before children", before_width);
+        }
+    }
+
     // Track floated block-level children for intrinsic sizing
     // CSS Sizing 3 §5: At max-content, floats arrange side-by-side (infinite width),
     // so their max-content widths are summed. At min-content, each float wraps to its
@@ -2518,6 +2602,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 bool preserve_spaces = (ws == CSS_VALUE_PRE || ws == CSS_VALUE_PRE_WRAP ||
                                         ws == CSS_VALUE_BREAK_SPACES);
                 bool preserve_newlines = preserve_spaces || (ws == CSS_VALUE_PRE_LINE);
+                bool preserve_space_after_table_cell = false;
 
                 char normalized_buffer[2048];
                 size_t out_pos = 0;
@@ -2533,9 +2618,22 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     // Only trim leading whitespace if this is the first child or preceded only by whitespace.
                     // If there's inline content before this text node, leading whitespace should
                     // collapse to a single space (which contributes to intrinsic width).
-                    bool has_inline_before = (child->prev_sibling != nullptr &&
+                    bool has_inline_before = ((child->prev_sibling != nullptr ||
+                                               has_generated_inline_before) &&
                                               has_inline_content &&
                                               inline_max_sum > 0);
+                    if (node_is_table_cell_like(previous_non_whitespace_sibling(child))) {
+                        bool saw_ws = false;
+                        for (size_t i = 0; i < text_len; i++) {
+                            unsigned char c = (unsigned char)text[i];
+                            if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f') {
+                                saw_ws = true;
+                            } else {
+                                preserve_space_after_table_cell = saw_ws;
+                                break;
+                            }
+                        }
+                    }
                     bool in_whitespace = !has_inline_before;  // Only start as in_whitespace if no inline content before
                     for (size_t i = 0; i < text_len && out_pos < sizeof(normalized_buffer) - 1; i++) {
                         unsigned char ch = (unsigned char)text[i];
@@ -2583,6 +2681,12 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                         while (out_pos > 0 && normalized_buffer[out_pos - 1] == ' ') {
                             out_pos--;
                         }
+                    }
+                    if (out_pos == 1 && normalized_buffer[0] == ' ' &&
+                        node_is_table_cell_like(previous_non_whitespace_sibling(child))) {
+                        // CSS anonymous table layout discards whitespace following table-cell
+                        // boxes; intrinsic sizing must match the rendered inline run.
+                        out_pos = 0;
                     }
                 }
                 normalized_buffer[out_pos] = '\0';
@@ -2676,6 +2780,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     text_widths = measure_text_intrinsic_widths(
                         lycon, normalized_buffer, out_pos, text_transform, font_variant,
                         CSS_VALUE_NORMAL, ow, wb);
+                    if (preserve_space_after_table_cell &&
+                        (out_pos == 0 || normalized_buffer[0] != ' ')) {
+                        text_widths.max_content += measure_current_space_advance(
+                            lycon, lycon->font.font_handle, lycon->font.style);
+                    }
                     if (preserve_spaces && text_line_has_tab(normalized_buffer, out_pos)) {
                         text_widths.max_content = measure_preserved_line_width_with_tabs(
                             lycon, normalized_buffer, out_pos, inline_max_sum,
@@ -3282,7 +3391,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     // border + padding + margin) contributes to the element's intrinsic inline size.
     {
         float pseudo_extra_width = 0;
-        for (int pi = 0; pi < 2; pi++) {
+        for (int pi = 1; pi < 2; pi++) {
             bool is_before = (pi == 0);
             bool has_pseudo = is_before ? dom_element_has_before_content(element)
                                         : dom_element_has_after_content(element);
