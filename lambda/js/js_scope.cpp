@@ -297,6 +297,105 @@ static bool js_source_ident_char(char c) {
            (c >= '0' && c <= '9') || c == '_' || c == '$';
 }
 
+static bool js_source_hex_char(char c) {
+    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+}
+
+static bool js_source_prev_word_matches(const char* source, size_t start, size_t end,
+        const char* word) {
+    size_t word_len = strlen(word);
+    return end > start && end - start == word_len && memcmp(source + start, word, word_len) == 0;
+}
+
+static bool js_source_backtick_is_probably_tagged(const char* source, size_t pos) {
+    if (!source || pos == 0) return false;
+    size_t scan = pos;
+    while (scan > 0 && (source[scan - 1] == ' ' || source[scan - 1] == '\t' ||
+                        source[scan - 1] == '\n' || source[scan - 1] == '\r')) scan--;
+    if (scan == 0) return false;
+    char prev = source[scan - 1];
+    if (prev == ')' || prev == ']') return true;
+    if (!js_source_ident_char(prev)) return false;
+
+    size_t word_end = scan;
+    size_t word_start = word_end;
+    while (word_start > 0 && js_source_ident_char(source[word_start - 1])) word_start--;
+    if (js_source_prev_word_matches(source, word_start, word_end, "return") ||
+        js_source_prev_word_matches(source, word_start, word_end, "throw") ||
+        js_source_prev_word_matches(source, word_start, word_end, "yield") ||
+        js_source_prev_word_matches(source, word_start, word_end, "await") ||
+        js_source_prev_word_matches(source, word_start, word_end, "typeof") ||
+        js_source_prev_word_matches(source, word_start, word_end, "void") ||
+        js_source_prev_word_matches(source, word_start, word_end, "delete") ||
+        js_source_prev_word_matches(source, word_start, word_end, "new") ||
+        js_source_prev_word_matches(source, word_start, word_end, "case")) {
+        return false;
+    }
+    return true;
+}
+
+static bool js_source_invalid_template_escape_at(const char* source, size_t length, size_t pos) {
+    if (!source || pos + 1 >= length || source[pos] != '\\') return false;
+    char esc = source[pos + 1];
+    if (esc >= '1' && esc <= '9') return true;
+    if (esc == '0' && pos + 2 < length && source[pos + 2] >= '0' && source[pos + 2] <= '9') return true;
+    if (esc == 'x') {
+        return pos + 3 >= length || !js_source_hex_char(source[pos + 2]) || !js_source_hex_char(source[pos + 3]);
+    }
+    if (esc == 'u') {
+        if (pos + 2 < length && source[pos + 2] == '{') {
+            size_t hex_pos = pos + 3;
+            if (hex_pos >= length || !js_source_hex_char(source[hex_pos])) return true;
+            uint32_t codepoint = 0;
+            while (hex_pos < length && js_source_hex_char(source[hex_pos])) {
+                char hex = source[hex_pos];
+                uint32_t digit = (hex >= '0' && hex <= '9') ? (uint32_t)(hex - '0') :
+                    (hex >= 'a' && hex <= 'f') ? (uint32_t)(hex - 'a' + 10) : (uint32_t)(hex - 'A' + 10);
+                codepoint = (codepoint << 4) | digit;
+                hex_pos++;
+                if (codepoint > 0x10FFFF) return true;
+            }
+            return hex_pos >= length || source[hex_pos] != '}';
+        }
+        return pos + 5 >= length || !js_source_hex_char(source[pos + 2]) ||
+               !js_source_hex_char(source[pos + 3]) || !js_source_hex_char(source[pos + 4]) ||
+               !js_source_hex_char(source[pos + 5]);
+    }
+    return false;
+}
+
+static bool js_source_has_invalid_tagged_template_escape(const char* source, size_t length) {
+    if (!source || length < 3) return false;
+    bool in_template = false;
+    bool tagged_template = false;
+    bool escaped = false;
+    for (size_t pos = 0; pos < length; pos++) {
+        char c = source[pos];
+        if (!in_template) {
+            if (c == '`') {
+                in_template = true;
+                tagged_template = js_source_backtick_is_probably_tagged(source, pos);
+                escaped = false;
+            }
+            continue;
+        }
+        if (escaped) {
+            escaped = false;
+            continue;
+        }
+        if (c == '\\') {
+            if (tagged_template && js_source_invalid_template_escape_at(source, length, pos)) return true;
+            escaped = true;
+            continue;
+        }
+        if (c == '`') {
+            in_template = false;
+            tagged_template = false;
+        }
+    }
+    return false;
+}
+
 static size_t js_source_skip_ws_forward(const char* source, size_t length, size_t pos) {
     while (pos < length && (source[pos] == ' ' || source[pos] == '\t' || source[pos] == '\n' || source[pos] == '\r')) pos++;
     return pos;
@@ -347,6 +446,30 @@ static bool js_source_has_assignment_keyword(const char* source, size_t length) 
     return false;
 }
 
+static bool js_source_arrow_after_pos(const char* source, size_t length, size_t pos) {
+    size_t next = js_source_skip_ws_forward(source, length, pos);
+    return next + 1 < length && source[next] == '=' && source[next + 1] == '>';
+}
+
+static bool js_source_soft_yield_identifier_at(const char* source, size_t length, size_t pos) {
+    if (pos + 5 > length || memcmp(source + pos, "yield", 5) != 0) return false;
+    if (pos > 0 && js_source_ident_char(source[pos - 1])) return false;
+    if (pos + 5 < length && js_source_ident_char(source[pos + 5])) return false;
+
+    size_t next = js_source_skip_ws_forward(source, length, pos + 5);
+    if (next + 1 < length && source[next] == '=' && source[next + 1] == '>') return true;
+    if (next < length && source[next] == ')' && js_source_arrow_after_pos(source, length, next + 1)) return true;
+    return false;
+}
+
+static bool js_source_has_soft_yield_identifier(const char* source, size_t length) {
+    if (!source || length < 5) return false;
+    for (size_t i = 0; i < length; i++) {
+        if (js_source_soft_yield_identifier_at(source, length, i)) return true;
+    }
+    return false;
+}
+
 static bool js_source_soft_await_identifier_at(const char* source, size_t length, size_t pos) {
     if (!js_source_assignment_keyword_at(source, length, pos, "await", 5)) {
         if (pos + 5 > length || memcmp(source + pos, "await", 5) != 0) return false;
@@ -386,6 +509,8 @@ static char* js_normalize_source_for_parser(const char* source, size_t length) {
     bool has_nul = false;
     bool has_assignment_keyword = js_source_has_assignment_keyword(source, length);
     bool has_soft_await_identifier = js_source_has_soft_await_identifier(source, length);
+    bool has_soft_yield_identifier = js_source_has_soft_yield_identifier(source, length);
+    bool has_invalid_tagged_template_escape = js_source_has_invalid_tagged_template_escape(source, length);
     for (size_t i = 0; i + 3 < length; i++) {
         if (source[i] == '<' && source[i + 1] == '!' && source[i + 2] == '-' && source[i + 3] == '-') {
             has_html_open = true;
@@ -404,7 +529,9 @@ static char* js_normalize_source_for_parser(const char* source, size_t length) {
             break;
         }
     }
-    if (!has_html_open && !has_unicode_space && !has_nul && !has_assignment_keyword && !has_soft_await_identifier) return NULL;
+    if (!has_html_open && !has_unicode_space && !has_nul && !has_assignment_keyword &&
+        !has_soft_await_identifier && !has_soft_yield_identifier &&
+        !has_invalid_tagged_template_escape) return NULL;
 
     char* out = (char*)mem_alloc(length + 1, MEM_CAT_JS_RUNTIME);
     memcpy(out, source, length);
@@ -420,6 +547,7 @@ static char* js_normalize_source_for_parser(const char* source, size_t length) {
     } state = ST_DEFAULT;
 
     bool escaped = false;
+    bool tagged_template = false;
     for (size_t i = 0; i < length; i++) {
         char c = out[i];
         char n = (i + 1 < length) ? out[i + 1] : '\0';
@@ -496,10 +624,17 @@ static char* js_normalize_source_for_parser(const char* source, size_t length) {
                 continue;
             }
             if (c == '\\') {
+                if (tagged_template && js_source_invalid_template_escape_at(out, length, i)) {
+                    out[i] = '_';
+                    continue;
+                }
                 escaped = true;
                 continue;
             }
-            if (c == '`') state = ST_DEFAULT;
+            if (c == '`') {
+                state = ST_DEFAULT;
+                tagged_template = false;
+            }
             continue;
         }
 
@@ -523,6 +658,7 @@ static char* js_normalize_source_for_parser(const char* source, size_t length) {
         }
         if (c == '`') {
             state = ST_TPL;
+            tagged_template = js_source_backtick_is_probably_tagged(out, i);
             continue;
         }
 
@@ -532,6 +668,11 @@ static char* js_normalize_source_for_parser(const char* source, size_t length) {
         }
 
         if (js_source_soft_await_identifier_at(out, length, i)) {
+            out[i + 2] = '$';
+            i += 4;
+            continue;
+        }
+        if (js_source_soft_yield_identifier_at(out, length, i)) {
             out[i + 2] = '$';
             i += 4;
             continue;

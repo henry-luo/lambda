@@ -2412,6 +2412,14 @@ static bool js_try_exotic_property_set(Item object, Item key, Item* value, Item*
     }
 }
 
+static bool js_is_class_constructor_map(Item object);
+
+static bool js_is_restricted_function_property_name(String* str_key) {
+    return str_key &&
+        ((str_key->len == 6 && strncmp(str_key->chars, "caller", 6) == 0) ||
+         (str_key->len == 9 && strncmp(str_key->chars, "arguments", 9) == 0));
+}
+
 extern "C" Item js_property_get(Item object, Item key) {
     TypeId type = get_type_id(object);
     bool proxy_key = false;
@@ -2492,6 +2500,13 @@ extern "C" Item js_property_get(Item object, Item key) {
                 own_was_deleted_sentinel = true;
             }
             // JS_OWN_NOT_FOUND: own_found stays false; result stays ItemNull.
+        }
+
+        if (!own_found && get_type_id(key) == LMD_TYPE_STRING &&
+            js_is_class_constructor_map(object) &&
+            js_is_restricted_function_property_name(it2s(key))) {
+            js_throw_type_error("'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them");
+            return make_js_undefined();
         }
 
         // String wrapper indexed character access: new String("abc")[0] → "a"
@@ -3693,9 +3708,9 @@ static bool js_proto_chain_has_nonwritable_data(Item object, const char* name, i
 
 static bool js_is_class_constructor_map(Item object) {
     if (get_type_id(object) != LMD_TYPE_MAP || !object.map) return false;
-    bool has_class_name = false;
-    js_map_get_fast_ext(object.map, "__class_name__", 14, &has_class_name);
-    return has_class_name;
+    bool has_instance_proto = false;
+    js_map_get_fast_ext(object.map, "__instance_proto__", 18, &has_instance_proto);
+    return has_instance_proto;
 }
 
 static bool js_func_has_own_property_map_key(Item object, const char* name, int name_len) {
@@ -4229,6 +4244,11 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
         {
             if (get_type_id(key) == LMD_TYPE_STRING) {
                 String* sk = it2s(key);
+                if (!js_skip_accessor_dispatch && js_is_class_constructor_map(object) &&
+                    js_is_restricted_function_property_name(sk) &&
+                    !js_ordinary_has_own(object, sk->chars, (int)sk->len)) {
+                    return js_throw_type_error("'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them");
+                }
                 // skip internal properties (__ prefix)
                 bool internal_non_symbol = sk && sk->len >= 2 && sk->chars[0] == '_' && sk->chars[1] == '_' &&
                     !(sk->len > 6 && strncmp(sk->chars, "__sym_", 6) == 0);
