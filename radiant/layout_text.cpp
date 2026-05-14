@@ -1002,6 +1002,39 @@ static inline bool control_fallback_keeps_primary_line_metrics(uint32_t cp) {
     return cp == 0x0081 || cp == 0x0082 || cp == 0x0084;
 }
 
+static inline float c1_control_normal_line_height(uint32_t cp, FontProp* font) {
+    if (cp < 0x0080 || cp > 0x009F || !font || font->font_size <= 0 ||
+        control_fallback_keeps_primary_line_metrics(cp)) {
+        return 0.0f;
+    }
+
+    if (cp == 0x0080) {
+        return font->font_size * (79.0f / 64.0f);
+    }
+
+    // CSS Text requires C1 controls to render visibly, but browser engines use
+    // a bounded control-glyph line strut rather than arbitrary platform fallback
+    // font metrics. 45/32em matches the observed C1 control line box on macOS.
+    return font->font_size * (45.0f / 32.0f);
+}
+
+static inline void normalize_c1_control_fallback_metrics(uint32_t cp, FontProp* font,
+                                                         float* asc, float* desc,
+                                                         float* normal_line_height) {
+    float target = c1_control_normal_line_height(cp, font);
+    if (target <= 0) return;
+
+    float height = *asc + *desc;
+    if (height > 0) {
+        float scale = target / height;
+        *asc *= scale;
+        *desc *= scale;
+    }
+    if (normal_line_height) {
+        *normal_line_height = target;
+    }
+}
+
 /**
  * Check if whitespace should be collapsed according to white-space property.
  * Returns true for: normal, nowrap, pre-line
@@ -1318,6 +1351,9 @@ void line_reset(LayoutContext* lycon) {
     lycon->line.has_expanded_inline_lh = false;
     lycon->line.has_different_inline_font = false;
     lycon->line.max_normal_line_height = 0;
+    lycon->line.has_c1_control_text = false;
+    lycon->line.has_non_c1_text = false;
+    lycon->line.c1_control_line_height = 0;
     lycon->line.trailing_letter_spacing = 0;
     // CSS 2.1 §10.8.1: Initialize parent font metrics from block's init values.
     // These are the correct "parent" for top-level inline content.
@@ -1638,6 +1674,16 @@ void line_break(LayoutContext* lycon) {
     } else {
         // Uniform text-only content - use CSS line height as specified
         used_line_height = css_line_height;
+    }
+
+    // C1 control glyphs are rendered through platform fallback fonts, whose
+    // ascender/descender split varies by environment. For lines containing only
+    // visible C1 controls, use the browser-sized control strut directly instead
+    // of recombining primary and fallback font extrema.
+    if (lycon->block.line_height_is_normal &&
+        lycon->line.has_c1_control_text && !lycon->line.has_non_c1_text &&
+        lycon->line.c1_control_line_height > 0 && !lycon->line.has_replaced_content) {
+        used_line_height = max(css_line_height, lycon->line.c1_control_line_height);
     }
 
     // Chrome blends system CJK font metrics for lines containing CJK characters.
@@ -2582,6 +2628,9 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                         fb_asc += half_leading;
                         fb_desc += half_leading;
                     }
+                    float fb_normal_line_height = glyph->font_normal_line_height;
+                    normalize_c1_control_fallback_metrics(codepoint, lycon->font.style, &fb_asc, &fb_desc,
+                                                          &fb_normal_line_height);
                     // CSS 2.1 §10.8.1: vertical-align:top/bottom elements don't participate
                     // in first-pass baseline-relative line box height. Track separately.
                     if (lycon->line.vertical_align == CSS_VALUE_TOP) {
@@ -2601,10 +2650,35 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                             fb_desc, fb_asc, lycon->block.line_height_is_normal);
                     }
                     // Also track normal line-height from the fallback font for mixed-font lines
-                    if (lycon->block.line_height_is_normal && glyph->font_normal_line_height > 0) {
+                    if (lycon->block.line_height_is_normal && fb_normal_line_height > 0) {
                         lycon->line.max_normal_line_height = max(lycon->line.max_normal_line_height,
-                                                                  glyph->font_normal_line_height);
+                                                                  fb_normal_line_height);
                     }
+                }
+                float c1_normal_line_height = c1_control_normal_line_height(codepoint, lycon->font.style);
+                if (lycon->block.line_height_is_normal && c1_normal_line_height > 0) {
+                    lycon->line.has_c1_control_text = true;
+                    lycon->line.c1_control_line_height = max(lycon->line.c1_control_line_height,
+                                                              c1_normal_line_height);
+                    float c1_asc = 0.0f, c1_desc = 0.0f;
+                    if (lycon->font.font_handle) {
+                        font_get_normal_lh_split(lycon->font.font_handle, &c1_asc, &c1_desc);
+                    }
+                    float c1_height = c1_asc + c1_desc;
+                    if (c1_height > 0) {
+                        float c1_scale = c1_normal_line_height / c1_height;
+                        c1_asc *= c1_scale;
+                        c1_desc *= c1_scale;
+                    } else {
+                        c1_asc = c1_normal_line_height * 0.8f;
+                        c1_desc = c1_normal_line_height - c1_asc;
+                    }
+                    lycon->line.max_ascender = max(lycon->line.max_ascender, c1_asc);
+                    lycon->line.max_descender = max(lycon->line.max_descender, c1_desc);
+                    lycon->line.max_normal_line_height = max(lycon->line.max_normal_line_height,
+                                                              c1_normal_line_height);
+                } else {
+                    lycon->line.has_non_c1_text = true;
                 }
                 // Track CJK characters for line-height blending with system CJK font metrics
                 if (is_cjk_character(codepoint)) {

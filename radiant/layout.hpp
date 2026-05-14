@@ -219,6 +219,9 @@ typedef struct Linebox {
     bool has_inline_spans;          // true if line contains inline span elements (for bbox correction)
     bool has_different_inline_font; // true if any inline text uses a different font from the block's strut
     float max_normal_line_height;   // max normal line-height across all inline boxes on this line
+    bool has_c1_control_text;       // true when line contains visible C1 control glyphs
+    bool has_non_c1_text;           // true when line contains visible non-C1 text glyphs
+    float c1_control_line_height;   // browser-sized C1 control glyph line strut
     // CSS 2.1 §10.8.1: parent font metrics for vertical-align keywords (text-top, text-bottom, etc.)
     // Set by span_vertical_align before recursing into children; defaults to block init values.
     float parent_font_ascender;     // parent element's font ascender (pixels)
