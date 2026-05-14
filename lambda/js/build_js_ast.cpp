@@ -1482,8 +1482,11 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
         StrView source = js_node_source(tp, expr_node);
         // Skip the '#' prefix
         if (source.length > 1 && source.str[0] == '#') {
+            String* decoded = js_decode_identifier_name(tp, source.str + 1, (int)(source.length - 1));
             char buf[256];
-            int len = snprintf(buf, sizeof(buf), "__private_%.*s", (int)(source.length - 1), source.str + 1);
+            int len = snprintf(buf, sizeof(buf), "__private_%.*s",
+                decoded ? (int)decoded->len : 0,
+                decoded ? decoded->chars : "");
             JsIdentifierNode* identifier = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, expr_node, sizeof(JsIdentifierNode));
             identifier->name = name_pool_create_len(tp->name_pool, buf, len);
             identifier->entry = NULL;
