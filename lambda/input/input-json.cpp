@@ -251,6 +251,9 @@ static Item parse_object(InputContext& ctx, const char **json, int depth) {
 
         Item value = parse_value(ctx, json, depth + 1);
         map_builder.put(key, value);
+        if (key->len == 9 && strncmp(key->chars, "__proto__", 9) == 0) {
+            map_builder.put("__json_own_proto__", true);
+        }
 
         skip_whitespace(json);
         if (**json == '}') {

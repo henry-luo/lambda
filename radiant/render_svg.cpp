@@ -4,6 +4,7 @@
 #include "layout.hpp"
 #include "state_store.hpp"
 #include "font_face.h"
+#include "../lib/tagged.hpp"
 #include "../lib/font/font.h"
 #include "../lib/utf.h"
 #include "../lambda/input/css/dom_element.hpp"
@@ -26,6 +27,16 @@ void ui_context_cleanup(UiContext* uicon);
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
 void layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
 void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop);
+
+typedef const char* (*SvgImageResolverFn)(void* context, int image_id);
+extern "C" bool svg_get_registered_image_resolver(Element* svg_root,
+                                                   SvgImageResolverFn* out_resolver,
+                                                   void** out_context);
+
+struct SvgSerializeImageResolver {
+    SvgImageResolverFn resolver;
+    void* context;
+};
 
 typedef struct {
     StrBuf* svg_content;
@@ -73,7 +84,7 @@ void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     DomNode* parent = text->parent;
     while (parent) {
         if (parent->is_element()) {
-            DomElement* elem = (DomElement*)parent;
+            DomElement* elem = lam::dom_require_element(parent);
             text_transform = get_text_transform_from_block(elem->blk);
             if (text_transform != CSS_VALUE_NONE) break;
         }
@@ -974,11 +985,11 @@ void render_column_rules_svg(SvgRenderContext* ctx, ViewBlock* block) {
 
     // Ensure minimum rule height - compute from children if needed
     if (rule_height <= 0) {
-        View* child = (View*)block->first_child;
+        View* child = static_cast<View*>(block->first_child);
         float max_bottom = 0;
         while (child) {
             if (child->is_element()) {
-                ViewBlock* child_block = (ViewBlock*)child;
+                ViewBlock* child_block = lam::view_require_block(child);
                 float child_bottom = child_block->y + child_block->height;
                 if (child_bottom > max_bottom) max_bottom = child_bottom;
             }
@@ -1072,10 +1083,73 @@ static void svg_escape_attr(StrBuf* buf, const char* s, size_t len) {
     }
 }
 
+static bool svg_attr_name_equals(ShapeEntry* field, const char* name) {
+    if (!field || !field->name || !field->name->str || !name) return false;
+    size_t name_len = strlen(name);
+    return field->name->length == name_len && strncmp(field->name->str, name, name_len) == 0;
+}
+
+static int svg_pdf_image_id_from_href(const char* href) {
+    if (!href || strncmp(href, "img:", 4) != 0) return 0;
+    int value = 0;
+    const char* p = href + 4;
+    if (!*p) return 0;
+    while (*p) {
+        if (*p < '0' || *p > '9') return 0;
+        value = value * 10 + (*p - '0');
+        p++;
+    }
+    return value;
+}
+
+static bool svg_serialize_resolver_for_root(const Element* svg_root, SvgSerializeImageResolver* out) {
+    if (out) {
+        out->resolver = nullptr;
+        out->context = nullptr;
+    }
+    if (!svg_root || !out) return false;
+    return svg_get_registered_image_resolver((Element*)svg_root, &out->resolver, &out->context) && out->resolver;
+}
+
+static const char* svg_pdf_data_uri_for_image_id(const SvgSerializeImageResolver* resolver, int object_num) {
+    if (!resolver || !resolver->resolver || object_num <= 0) return nullptr;
+    return resolver->resolver(resolver->context, object_num);
+}
+
+static const char* svg_resolve_pdf_image_href(const SvgSerializeImageResolver* resolver, const char* href) {
+    int object_num = svg_pdf_image_id_from_href(href);
+    if (object_num <= 0) return href;
+    const char* data_uri = svg_pdf_data_uri_for_image_id(resolver, object_num);
+    if (data_uri) return data_uri;
+    log_debug("[SVG] PDF output image handle unresolved: %s", href);
+    return href;
+}
+
+static void serialize_image_href_attr(StrBuf* buf, const ElementReader& elem, const SvgSerializeImageResolver* resolver) {
+    ItemReader href_item = elem.get_attr("href");
+    if (!href_item.isString()) return;
+
+    const char* href = href_item.cstring();
+    if (!href) return;
+    const char* resolved = svg_resolve_pdf_image_href(resolver, href);
+    strbuf_append_str(buf, " href=\"");
+    svg_escape_attr(buf, resolved, strlen(resolved));
+    strbuf_append_char(buf, '"');
+}
+
 // recursively serialize a Lambda Element as SVG/XML markup
-static void serialize_svg_element(StrBuf* buf, const ElementReader& elem) {
+static void serialize_svg_element(StrBuf* buf, const ElementReader& elem, const SvgSerializeImageResolver* resolver) {
     const char* tag = elem.tagName();
     if (!tag) return;
+
+    const bool is_image = strcmp(tag, "image") == 0;
+    const bool is_svg = strcmp(tag, "svg") == 0;
+    SvgSerializeImageResolver local_resolver = resolver ? *resolver : SvgSerializeImageResolver{nullptr, nullptr};
+    SvgSerializeImageResolver registered_resolver;
+    if (is_svg && svg_serialize_resolver_for_root(elem.element(), &registered_resolver)) {
+        local_resolver = registered_resolver;
+    }
+    const SvgSerializeImageResolver* child_resolver = local_resolver.resolver ? &local_resolver : nullptr;
 
     // open tag
     strbuf_append_char(buf, '<');
@@ -1088,6 +1162,12 @@ static void serialize_svg_element(StrBuf* buf, const ElementReader& elem) {
         ShapeEntry* field = map_type->shape;
         while (field) {
             if (field->name && field->name->str && field->type) {
+                if (svg_attr_name_equals(field, "data-pdf-root") ||
+                    (is_image && (svg_attr_name_equals(field, "href") || svg_attr_name_equals(field, "xlink:href")))) {
+                    field = field->next;
+                    continue;
+                }
+
                 void* field_ptr = ((char*)e->data) + field->byte_offset;
                 TypeId ftype = field->type->type_id;
 
@@ -1116,6 +1196,12 @@ static void serialize_svg_element(StrBuf* buf, const ElementReader& elem) {
         }
     }
 
+    if (is_image) {
+        serialize_image_href_attr(buf, elem, child_resolver);
+    } else if (is_svg) {
+        // data-pdf-root is an in-memory rendering context, not an XML attribute.
+    }
+
     // check for children
     int64_t count = elem.childCount();
     if (count == 0) {
@@ -1136,7 +1222,7 @@ static void serialize_svg_element(StrBuf* buf, const ElementReader& elem) {
             }
         } else if (child.isElement()) {
             ElementReader child_elem(child.item());
-            serialize_svg_element(buf, child_elem);
+            serialize_svg_element(buf, child_elem, child_resolver);
         }
     }
 
@@ -1148,7 +1234,7 @@ static void serialize_svg_element(StrBuf* buf, const ElementReader& elem) {
 
 // serialize inline SVG block with position transform
 static void render_inline_svg_passthrough(SvgRenderContext* ctx, ViewBlock* block) {
-    DomElement* dom_elem = static_cast<DomElement*>(block);
+    DomElement* dom_elem = lam::dom_require_element(lam::view_dom_node(block));
     if (!dom_elem->native_element) return;
 
     float svg_x = ctx->block.x + block->x;
@@ -1159,7 +1245,7 @@ static void render_inline_svg_passthrough(SvgRenderContext* ctx, ViewBlock* bloc
         "<g transform=\"translate(%.2f,%.2f)\">\n", svg_x, svg_y);
 
     ElementReader reader(dom_elem->native_element);
-    serialize_svg_element(ctx->svg_content, reader);
+    serialize_svg_element(ctx->svg_content, reader, nullptr);
 
     strbuf_append_char(ctx->svg_content, '\n');
     svg_indent(ctx);
@@ -1380,7 +1466,7 @@ static void svg_cb_render_marker(void* vctx, ViewSpan* marker, float abs_x, floa
     if (!marker || !marker->is_element()) return;
     SvgRenderContext* ctx = (SvgRenderContext*)vctx;
 
-    DomElement* elem = (DomElement*)marker;
+    DomElement* elem = lam::dom_require_element(lam::view_dom_node(marker));
     MarkerProp* marker_prop = (MarkerProp*)elem->blk;
     if (!marker_prop) return;
 
@@ -1512,14 +1598,14 @@ void calculate_content_bounds(View* view, int* max_x, int* max_y) {
     if (!view) return;
 
     if (view->view_type == RDT_VIEW_BLOCK) {
-        ViewBlock* block = (ViewBlock*)view;
+        ViewBlock* block = lam::view_require_block(view);
         int right = block->x + block->width;
         int bottom = block->y + block->height;
         if (right > *max_x) *max_x = right;
         if (bottom > *max_y) *max_y = bottom;
     }
     else if (view->view_type == RDT_VIEW_TEXT) {
-        ViewText* text = (ViewText*)view;
+        ViewText* text = lam::view_require_text(view);
         int right = text->x + text->width;
         int bottom = text->y + text->height;
         if (right > *max_x) *max_x = right;
@@ -1528,7 +1614,7 @@ void calculate_content_bounds(View* view, int* max_x, int* max_y) {
 
     // Recursively check children
     if (view->view_type >= RDT_VIEW_INLINE) {
-        ViewElement* group = (ViewElement*)view;
+        ViewElement* group = lam::view_require_element(view);
         View* child = group->first_child;
         while (child) {
             calculate_content_bounds(child, max_x, max_y);
@@ -1557,8 +1643,9 @@ static void render_caret_svg(SvgRenderContext* ctx, DocState* state) {
     View* parent = view;
     while (parent) {
         if (parent->view_type == RDT_VIEW_BLOCK) {
-            x += ((ViewBlock*)parent)->x;
-            y += ((ViewBlock*)parent)->y;
+            ViewBlock* parent_block = lam::view_require_block(parent);
+            x += parent_block->x;
+            y += parent_block->y;
         }
         parent = parent->parent;
     }
@@ -1627,7 +1714,7 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int 
     walk_state.ui_context = uicon;
 
     if (root_view->view_type == RDT_VIEW_BLOCK) {
-        render_walk_block(&backend, &walk_state, (ViewBlock*)root_view);
+        render_walk_block(&backend, &walk_state, lam::view_require_block(root_view));
     } else {
         render_walk_children(&backend, &walk_state, root_view);
     }
@@ -1811,6 +1898,5 @@ static void escape_xml_text(const char* text, StrBuf* buf) {
 
 // Math Rendering Functions for SVG
 // ============================================================================
-// NOTE: MathBox rendering has been removed. Use RDT_VIEW_TEXNODE for math rendering.
-// The old MathBox pipeline (RDT_VIEW_MATH) is deprecated.
+// NOTE: MathBox rendering has been removed.
 // ============================================================================

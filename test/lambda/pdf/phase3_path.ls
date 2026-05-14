@@ -13,7 +13,7 @@
 import path:  lambda.package.pdf.path
 import color: lambda.package.pdf.color
 
-// helper to build an operand record matching stream.ls's shape
+// helper to build an operand record matching pdf_parse_content_stream's shape
 fn name(s)     { { kind: "name",   value: s } }
 fn arr(items)  { { kind: "array",  value: items } }
 

@@ -83,6 +83,11 @@ fn _stream_data(content, dict) {
     else { "" }
 }
 
+fn _stream_text_data(content, dict) {
+    if (content and content.text_data != null) { content.text_data }
+    else { _stream_data(content, dict) }
+}
+
 fn _form_matrix(m) {
     if (m is array and len(m) == 6) {
         [util.num(m[0]), util.num(m[1]), util.num(m[2]),
@@ -111,7 +116,7 @@ pub fn form_content(pdf, page, name) {
             let sub  = if (dict and dict.Subtype) dict.Subtype else null
             if (sub != "Form") { null }
             else {
-                let data = _stream_data(content, dict)
+                let data = _stream_text_data(content, dict)
                 let m = if (dict and dict.Matrix) dict.Matrix else null
                 { data: data, matrix: _form_matrix(m), dict: dict }
             }
@@ -128,14 +133,13 @@ fn _img_url(obj_num) {
 }
 
 // Emit a single <g><image/></g> for an Image XObject. obj_num=0 is dropped.
-// `href_url` is the URL to use for the SVG <image href="..."/>: a real
-// `data:image/png;base64,...` data URI when the C postprocess produced
-// one, otherwise the legacy `img:<num>` handle (which downstream
-// renderers may not resolve).
+// `href_url` is the fallback URL to use when no indirect object handle is
+// available. For normal Image XObjects, pass the `img:<num>` handle and let
+// Radiant resolve it through the direct PDF root carried on the SVG tree.
 fn _emit_image(ctm, obj_num, href_url) {
     if (obj_num == 0 and href_url == null) { [] }
     else {
-        let url = if (href_url != null) href_url else _img_url(obj_num)
+        let url = if (obj_num != 0) _img_url(obj_num) else href_url
         let outer = util.fmt_matrix(ctm)
         let elem =
             <g transform: outer;
@@ -233,12 +237,12 @@ fn _xobject_inline_info(pdf, page, dict, data) {
     }
 }
 
-pn _emit_xobject_image(pdf, page, ctm, xo) {
+fn _emit_xobject_image(pdf, page, ctm, xo) {
     let data = _xobject_data(xo)
     if (xo.data_uri == null and _is_raw_xobject(pdf, page, xo.dict, data)) {
-        return [svg.group(util.fmt_matrix(ctm), _emit_inline_pixels(_xobject_inline_info(pdf, page, xo.dict, data)))]
+        [svg.group(util.fmt_matrix(ctm), _emit_inline_pixels(_xobject_inline_info(pdf, page, xo.dict, data)))]
     }
-    else { return _emit_image(ctm, xo.obj_num, xo.data_uri) }
+    else { _emit_image(ctm, xo.obj_num, xo.data_uri) }
 }
 
 // Emit a placeholder for a Form XObject (deferred to Phase 6).
@@ -257,18 +261,18 @@ fn _emit_form_stub(ctm, obj_num) {
 // Public: handle a Do operator. Returns a (possibly empty) list of SVG
 // elements to append to the page's path layer (so they go inside the
 // outer y-flip group alongside vector paths).
-pub pn apply_do(pdf, page, ctm, ops) {
-    if (len(ops) == 0) { return [] }
+pub fn apply_do(pdf, page, ctm, ops) {
+    if (len(ops) == 0) { [] }
     else {
         let op0 = ops[0]
         if (op0 is map and op0.kind == "name") {
             let xo = lookup_xobject(pdf, page, op0.value)
-            if (xo == null) { return [] }
-            else if (xo.kind == "image") { return _emit_xobject_image(pdf, page, ctm, xo) }
-            else if (xo.kind == "form")  { return _emit_form_stub(ctm, xo.obj_num) }
-            else { return [] }
+            if (xo == null) { [] }
+            else if (xo.kind == "image") { _emit_xobject_image(pdf, page, ctm, xo) }
+            else if (xo.kind == "form")  { _emit_form_stub(ctm, xo.obj_num) }
+            else { [] }
         }
-        else { return [] }
+        else { [] }
     }
 }
 
@@ -499,77 +503,103 @@ fn _inline_pixel_fill(data, ncomp, bpc, w, pixel_index, cs) {
     }
 }
 
-pn _emit_inline_pixels(info) {
-    var w = 0
-    var h = 0
-    var bpc = 8
-    var ncomp = 3
-    var cs = "DeviceRGB"
-    var has_filter = 0
-    if ((info != null) and (info.dict is array)) {
-        var di = 0
-        let dn = len(info.dict)
-        while (di < dn) {
-            let p = info.dict[di]
-            if ((p.key == "W") or (p.key == "Width")) { w = util.int_or(p.value, 0) }
-            else if ((p.key == "H") or (p.key == "Height")) { h = util.int_or(p.value, 0) }
-            else if ((p.key == "BPC") or (p.key == "BitsPerComponent")) { bpc = util.int_or(p.value, 8) }
-            else if ((p.key == "CS") or (p.key == "ColorSpace")) {
-                cs = p.value
-                ncomp = _inline_ncomp(p.value)
-            }
-            else if (((p.key == "F") or (p.key == "Filter")) and _filter_name(p.value) != null) { has_filter = 1 }
-            di = di + 1
+fn _inline_defaults() {
+    { w: 0, h: 0, bpc: 8, ncomp: 3, cs: "DeviceRGB", has_filter: 0 }
+}
+
+fn _inline_params_loop(dict, di, dn, acc) {
+    if (di >= dn) { acc }
+    else {
+        let p = dict[di]
+        let next = if ((p.key == "W") or (p.key == "Width")) {
+            { *: acc, w: util.int_or(p.value, 0) }
         }
+        else if ((p.key == "H") or (p.key == "Height")) {
+            { *: acc, h: util.int_or(p.value, 0) }
+        }
+        else if ((p.key == "BPC") or (p.key == "BitsPerComponent")) {
+            { *: acc, bpc: util.int_or(p.value, 8) }
+        }
+        else if ((p.key == "CS") or (p.key == "ColorSpace")) {
+            { *: acc, cs: p.value, ncomp: _inline_ncomp(p.value) }
+        }
+        else if (((p.key == "F") or (p.key == "Filter")) and _filter_name(p.value) != null) {
+            { *: acc, has_filter: 1 }
+        }
+        else { acc }
+        _inline_params_loop(dict, di + 1, dn, next)
     }
-    var data = ""
-    if ((info != null) and (info.data != null)) { data = info.data }
+}
+
+fn _inline_params(info) {
+    let base = _inline_defaults()
+    if ((info != null) and (info.dict is array)) {
+        _inline_params_loop(info.dict, 0, len(info.dict), base)
+    }
+    else { base }
+}
+
+fn _inline_pixel_rect(data, ncomp, bpc, w, cs, rw, rh, x, y) {
+    let pix = y * w + x
+    <rect x: util.fmt_num(float(x) * rw),
+          y: util.fmt_num(float(y) * rh),
+          width: util.fmt_num(rw),
+          height: util.fmt_num(rh),
+          fill: _inline_pixel_fill(data, ncomp, bpc, w, pix, cs),
+          stroke: "none">
+}
+
+fn _emit_inline_pixels_cols(data, ncomp, bpc, w, h, cs, rw, rh, x, y, rects) {
+    if (x >= w) { rects }
+    else {
+        _emit_inline_pixels_cols(data, ncomp, bpc, w, h, cs, rw, rh, x + 1, y,
+            rects ++ [_inline_pixel_rect(data, ncomp, bpc, w, cs, rw, rh, x, y)])
+    }
+}
+
+fn _emit_inline_pixels_rows(data, ncomp, bpc, w, h, cs, rw, rh, y, rects) {
+    if (y >= h) { rects }
+    else {
+        let row = _emit_inline_pixels_cols(data, ncomp, bpc, w, h, cs, rw, rh, 0, y, rects)
+        _emit_inline_pixels_rows(data, ncomp, bpc, w, h, cs, rw, rh, y + 1, row)
+    }
+}
+
+fn _emit_inline_pixels(info) {
+    let p = _inline_params(info)
+    let w = p.w
+    let h = p.h
+    let bpc = p.bpc
+    let ncomp = p.ncomp
+    let cs = p.cs
+    let data = if ((info != null) and (info.data != null)) { info.data } else { "" }
     let bad_size = ((w <= 0) or (h <= 0))
     let bad_format = (((bpc != 8) and (bpc != 1) and (bpc != 4)) or (ncomp == 0) or (((bpc == 1) or (bpc == 4)) and (ncomp != 1)))
     let too_large = ((w * h) > 4096)
-    if (bad_size or bad_format or too_large or has_filter == 1) {
-        return _placeholder_inline()
+    if (bad_size or bad_format or too_large or p.has_filter == 1) {
+        _placeholder_inline()
     }
     else {
-        var rects = []
         let rw = 1.0 / float(w)
         let rh = 1.0 / float(h)
-        var y = 0
-        while (y < h) {
-            var x = 0
-            while (x < w) {
-                let pix = y * w + x
-                let elem =
-                    <rect x: util.fmt_num(float(x) * rw),
-                          y: util.fmt_num(float(y) * rh),
-                          width: util.fmt_num(rw),
-                          height: util.fmt_num(rh),
-                          fill: _inline_pixel_fill(data, ncomp, bpc, w, pix, cs),
-                          stroke: "none">
-                rects = rects ++ [elem]
-                x = x + 1
-            }
-            y = y + 1
-        }
-        return [svg.group("matrix(1 0 0 -1 0 1)", rects)]
+        [svg.group("matrix(1 0 0 -1 0 1)",
+            _emit_inline_pixels_rows(data, ncomp, bpc, w, h, cs, rw, rh, 0, []))]
     }
 }
 
-// Public: handle a synthetic `inline_image` op produced by stream.ls for a
+// Public: handle a synthetic `inline_image` op produced by pdf_parse_content_stream for a
 // BI..ID..EI segment. Supported unfiltered DeviceRGB/DeviceGray/DeviceCMYK images
 // are rendered as SVG pixel rects in the local image unit square; unsupported
 // inline images keep the visible placeholder.
-pub pn apply_inline(ctm, ops) {
-    var info = null
-    if (len(ops) > 0) { info = ops[0] }
-    if ((info is map) and (info.kind == "inline_image")) { return _emit_inline_pixels(info) }
-    else { return _placeholder_inline() }
+pub fn apply_inline(ctm, ops) {
+    let info = if (len(ops) > 0) { ops[0] } else { null }
+    if ((info is map) and (info.kind == "inline_image")) { _emit_inline_pixels(info) }
+    else { _placeholder_inline() }
 }
 
-pub pn apply_inline_with_page(pdf, page, ctm, ops) {
-    var info = null
-    if (len(ops) > 0) { info = ops[0] }
+pub fn apply_inline_with_page(pdf, page, ctm, ops) {
+    let info = if (len(ops) > 0) { ops[0] } else { null }
     let resolved = _inline_info_with_resources(pdf, page, info)
-    if ((resolved is map) and (resolved.kind == "inline_image")) { return _emit_inline_pixels(resolved) }
-    else { return _placeholder_inline() }
+    if ((resolved is map) and (resolved.kind == "inline_image")) { _emit_inline_pixels(resolved) }
+    else { _placeholder_inline() }
 }

@@ -2,11 +2,13 @@
 #include "layout.hpp"
 #include "intrinsic_sizing.hpp"
 #include "form_control.hpp"  // For FormDefaults (radio/checkbox margin constants)
+#include "retained_fields.hpp"
 #include "../lib/log.h"
 #include "../lib/strview.h"
 #include "../lib/arraylist.h"
 // str.h included via view.hpp
 #include "../lib/memtrack.h"
+#include "../lib/tagged.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
@@ -32,15 +34,20 @@
 // These methods provide unified traversal of table structure regardless of
 // whether elements have proper HTML structure or use anonymous box wrappers.
 
+static inline ViewBlock* table_array_view_block(ArrayList* list, int index) {
+    View* view = static_cast<View*>(list->data[index]);
+    return lam::view_require_block(view);
+}
+
 ViewTableRow* ViewTable::first_row() {
     // Direct children first (handles both normal rows and acts_as_tbody case)
-    for (ViewBlock* child = (ViewBlock*)first_child; child; child = (ViewBlock*)child->next_sibling) {
+    for (View* child = static_cast<View*>(first_child); child; child = static_cast<View*>(child->next_sibling)) {
         if (child->view_type == RDT_VIEW_TABLE_ROW) {
-            return (ViewTableRow*)child;
+            return lam::view_require<RDT_VIEW_TABLE_ROW>(child);
         }
         // Look inside row groups
         if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
-            ViewTableRow* row = ((ViewTableRowGroup*)child)->first_row();
+            ViewTableRow* row = lam::view_require<RDT_VIEW_TABLE_ROW_GROUP>(child)->first_row();
             if (row) return row;
         }
     }
@@ -51,8 +58,8 @@ ViewBlock* ViewTable::first_row_group() {
     // If table acts as tbody, return self; otherwise find first row group child
     if (acts_as_tbody()) return this;
 
-    for (ViewBlock* child = (ViewBlock*)first_child; child; child = (ViewBlock*)child->next_sibling) {
-        if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) return child;
+    for (View* child = static_cast<View*>(first_child); child; child = static_cast<View*>(child->next_sibling)) {
+        if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) return lam::view_require_block(child);
     }
     return nullptr;
 }
@@ -61,17 +68,17 @@ ViewTableRow* ViewTable::next_row(ViewTableRow* current) {
     if (!current) return nullptr;
 
     // Try next sibling first
-    for (ViewBlock* sibling = (ViewBlock*)current->next_sibling; sibling; sibling = (ViewBlock*)sibling->next_sibling) {
-        if (sibling->view_type == RDT_VIEW_TABLE_ROW) return (ViewTableRow*)sibling;
+    for (View* sibling = static_cast<View*>(current->next_sibling); sibling; sibling = static_cast<View*>(sibling->next_sibling)) {
+        if (sibling->view_type == RDT_VIEW_TABLE_ROW) return lam::view_require<RDT_VIEW_TABLE_ROW>(sibling);
     }
 
     // If in row group, try next row group
-    ViewBlock* parent = (ViewBlock*)current->parent;
+    ViewBlock* parent = lam::view_as_block(static_cast<View*>(current->parent));
     if (parent && parent->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
-        for (ViewBlock* next = (ViewBlock*)parent->next_sibling; next; next = (ViewBlock*)next->next_sibling) {
-            if (next->view_type == RDT_VIEW_TABLE_ROW) return (ViewTableRow*)next;
+        for (View* next = static_cast<View*>(parent->next_sibling); next; next = static_cast<View*>(next->next_sibling)) {
+            if (next->view_type == RDT_VIEW_TABLE_ROW) return lam::view_require<RDT_VIEW_TABLE_ROW>(next);
             if (next->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
-                ViewTableRow* row = ((ViewTableRowGroup*)next)->first_row();
+                ViewTableRow* row = lam::view_require<RDT_VIEW_TABLE_ROW_GROUP>(next)->first_row();
                 if (row) return row;
             }
         }
@@ -101,9 +108,9 @@ TableSectionType ViewTableRowGroup::get_section_type() const {
     // Default to TBODY for table-row-group and anonymous groups
     return TABLE_SECTION_TBODY;
 }ViewTableRow* ViewTableRowGroup::first_row() {
-    for (ViewBlock* child = (ViewBlock*)first_child; child; child = (ViewBlock*)child->next_sibling) {
+    for (View* child = static_cast<View*>(first_child); child; child = static_cast<View*>(child->next_sibling)) {
         if (child->view_type == RDT_VIEW_TABLE_ROW) {
-            return (ViewTableRow*)child;
+            return lam::view_require<RDT_VIEW_TABLE_ROW>(child);
         }
     }
     return nullptr;
@@ -112,18 +119,18 @@ TableSectionType ViewTableRowGroup::get_section_type() const {
 ViewTableRow* ViewTableRowGroup::next_row(ViewTableRow* current) {
     if (!current) return nullptr;
 
-    for (ViewBlock* sibling = (ViewBlock*)current->next_sibling; sibling; sibling = (ViewBlock*)sibling->next_sibling) {
+    for (View* sibling = static_cast<View*>(current->next_sibling); sibling; sibling = static_cast<View*>(sibling->next_sibling)) {
         if (sibling->view_type == RDT_VIEW_TABLE_ROW) {
-            return (ViewTableRow*)sibling;
+            return lam::view_require<RDT_VIEW_TABLE_ROW>(sibling);
         }
     }
     return nullptr;
 }
 
 ViewTableCell* ViewTableRow::first_cell() {
-    for (ViewBlock* child = (ViewBlock*)first_child; child; child = (ViewBlock*)child->next_sibling) {
+    for (View* child = static_cast<View*>(first_child); child; child = static_cast<View*>(child->next_sibling)) {
         if (child->view_type == RDT_VIEW_TABLE_CELL) {
-            return (ViewTableCell*)child;
+            return lam::view_require<RDT_VIEW_TABLE_CELL>(child);
         }
     }
     return nullptr;
@@ -132,16 +139,16 @@ ViewTableCell* ViewTableRow::first_cell() {
 ViewTableCell* ViewTableRow::next_cell(ViewTableCell* current) {
     if (!current) return nullptr;
 
-    for (ViewBlock* sibling = (ViewBlock*)current->next_sibling; sibling; sibling = (ViewBlock*)sibling->next_sibling) {
+    for (View* sibling = static_cast<View*>(current->next_sibling); sibling; sibling = static_cast<View*>(sibling->next_sibling)) {
         if (sibling->view_type == RDT_VIEW_TABLE_CELL) {
-            return (ViewTableCell*)sibling;
+            return lam::view_require<RDT_VIEW_TABLE_CELL>(sibling);
         }
     }
     return nullptr;
 }
 
 ViewBlock* ViewTableRow::parent_row_group() {
-    ViewBlock* parent = (ViewBlock*)this->parent;
+    ViewBlock* parent = lam::view_as_block(static_cast<View*>(this->parent));
     if (parent && (parent->view_type == RDT_VIEW_TABLE_ROW_GROUP || parent->view_type == RDT_VIEW_TABLE)) {
         return parent;
     }
@@ -152,9 +159,9 @@ ViewBlock* ViewTableRow::parent_row_group() {
 ViewTableCell* ViewTable::first_direct_cell() {
     if (!acts_as_row()) return nullptr;
 
-    for (ViewBlock* child = (ViewBlock*)first_child; child; child = (ViewBlock*)child->next_sibling) {
+    for (View* child = static_cast<View*>(first_child); child; child = static_cast<View*>(child->next_sibling)) {
         if (child->view_type == RDT_VIEW_TABLE_CELL) {
-            return (ViewTableCell*)child;
+            return lam::view_require<RDT_VIEW_TABLE_CELL>(child);
         }
     }
     return nullptr;
@@ -164,9 +171,9 @@ ViewTableCell* ViewTable::first_direct_cell() {
 ViewTableCell* ViewTable::next_direct_cell(ViewTableCell* current) {
     if (!current || !acts_as_row()) return nullptr;
 
-    for (ViewBlock* sibling = (ViewBlock*)current->next_sibling; sibling; sibling = (ViewBlock*)sibling->next_sibling) {
+    for (View* sibling = static_cast<View*>(current->next_sibling); sibling; sibling = static_cast<View*>(sibling->next_sibling)) {
         if (sibling->view_type == RDT_VIEW_TABLE_CELL) {
-            return (ViewTableCell*)sibling;
+            return lam::view_require<RDT_VIEW_TABLE_CELL>(sibling);
         }
     }
     return nullptr;
@@ -185,7 +192,7 @@ static ViewTable* get_parent_table(ViewTableCell* cell) {
     DomNode* parent = cell->parent;
     while (parent) {
         if (parent->view_type == RDT_VIEW_TABLE) {
-            return (ViewTable*)parent;
+            return lam::view_require<RDT_VIEW_TABLE>(static_cast<View*>(parent));
         }
         parent = parent->parent;
     }
@@ -294,11 +301,11 @@ static float get_explicit_css_height(LayoutContext* lycon, ViewBlock* element) {
 // (text nodes with only whitespace are considered empty when whitespace collapses,
 // but if white-space preserves whitespace (pre, pre-wrap, etc.), the cell is NOT empty)
 static bool is_cell_empty(ViewTableCell* cell) {
-    DomNode* child = ((DomElement*)cell)->first_child;
+    DomNode* child = lam::dom_require<DOM_NODE_ELEMENT>(cell)->first_child;
 
     // Check if whitespace is preserved for this cell (CSS 2.1 §17.6.1.1)
     bool ws_preserved = false;
-    DomElement* elem = ((DomElement*)cell);
+    DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(cell);
     if (elem->blk && elem->blk->white_space != 0) {
         CssEnum ws = elem->blk->white_space;
         if (ws == CSS_VALUE_PRE || ws == CSS_VALUE_PRE_WRAP ||
@@ -317,7 +324,7 @@ static bool is_cell_empty(ViewTableCell* cell) {
             // Unicode whitespace categories: Zs (space separator), Zl (line separator), Zp (paragraph separator)
             // Common whitespace: space (U+0020), tab (U+0009), LF (U+000A), CR (U+000D), NBSP (U+00A0),
             //                    em space (U+2003), thin space (U+2009), zero-width space (U+200B), etc.
-            const char* text = ((DomText*)child)->text;
+            const char* text = lam::dom_require<DOM_NODE_TEXT>(child)->text;
             if (text) {
                 // If white-space preserves whitespace, any text content = not empty
                 if (ws_preserved && strlen(text) > 0) {
@@ -390,7 +397,7 @@ static float find_descendant_float_max_y(ViewElement* parent, float y_offset) {
         if (!child->view_type) continue;
         if (child->view_type == RDT_VIEW_BLOCK ||
             child->view_type == RDT_VIEW_LIST_ITEM) {
-            ViewBlock* block = (ViewBlock*)child;
+            ViewBlock* block = lam::view_require_block(child);
             float abs_y = y_offset + child->y;
             // check if this child is a float
             if (block->position &&
@@ -401,7 +408,7 @@ static float find_descendant_float_max_y(ViewElement* parent, float y_offset) {
             }
             // recurse into block children to find nested floats
             if (block->is_element()) {
-                float nested = find_descendant_float_max_y((ViewElement*)block, abs_y);
+                float nested = find_descendant_float_max_y(lam::view_require_element(block), abs_y);
                 if (nested > max_y) max_y = nested;
             }
         }
@@ -433,9 +440,9 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
     lycon->font = saved_font;
     // block auto-restored by bscope destructor
 
-    for (View* child = ((ViewElement*)tcell)->first_child; child; child = child->next_sibling) {
+    for (View* child = lam::view_require_element(tcell)->first_child; child; child = child->next_sibling) {
         if (child->view_type == RDT_VIEW_TEXT) {
-            ViewText* text = (ViewText*)child;
+            ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
             // Track min/max Y for text content to handle multi-line cells with <br> elements
             // Each text node may be on a different line (e.g., y=0, y=20, y=40 for 3 lines)
             // CSS 2.1 §17.5.3: "The height of a cell box is the minimum height required by the content"
@@ -469,7 +476,7 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
                  child->view_type == RDT_VIEW_LIST_ITEM ||
                  child->view_type == RDT_VIEW_INLINE ||
                  child->view_type == RDT_VIEW_INLINE_BLOCK) {
-            ViewBlock* block = (ViewBlock*)child;
+            ViewElement* block = lam::view_require_element(child);
             // Use the actual rendered border-box height (block->height), not the CSS content height
             // which excludes child's border/padding. Children are already laid out at this point.
             float child_height = block->height;
@@ -525,7 +532,7 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
         }
         else if (child->view_type == RDT_VIEW_TABLE) {
             // Handle nested tables - use the table's computed height
-            ViewTable* nested_table = (ViewTable*)child;
+            ViewTable* nested_table = lam::view_require<RDT_VIEW_TABLE>(child);
             float table_height = nested_table->height;
             log_debug("%s measure_cell_content: nested table height=%.1f", tcell->source_loc(), table_height);
             // Treat nested tables like block content for extent tracking
@@ -567,7 +574,7 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
     // CSS 2.1 §10.6.3: BFC height includes float descendants.
     // Table cells are BFCs, so recursively find any float descendants whose
     // bottom edge extends beyond the measured direct-child content extent.
-    float float_max_y = find_descendant_float_max_y((ViewElement*)tcell, 0);
+    float float_max_y = find_descendant_float_max_y(lam::view_require_element(tcell), 0);
     if (float_max_y > 0) {
         if (!has_any || float_max_y > overall_max_y) {
             overall_max_y = float_max_y;
@@ -638,11 +645,11 @@ static float calculate_cell_height(LayoutContext* lycon, ViewTableCell* tcell, V
 // no line box and no in-flow table row, the baseline is the bottom of the content edge."
 // Returns distance from the view's top to the first text baseline, or -1 if none found.
 float find_first_baseline_recursive(LayoutContext* lycon, View* parent, float cumulative_y, bool use_normal_lh) {
-    for (View* child = ((ViewElement*)parent)->first_child; child; child = child->next_sibling) {
+    for (View* child = lam::view_require_element(parent)->first_child; child; child = child->next_sibling) {
         if (!child->view_type) continue;
 
         if (child->view_type == RDT_VIEW_TEXT) {
-            ViewText* text = (ViewText*)child;
+            ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
             // Get font ascent for this text node
             float ascent = 0;
             if (text->font) {
@@ -702,7 +709,7 @@ float find_first_baseline_recursive(LayoutContext* lycon, View* parent, float cu
 // CSS 2.1 §17.5.4: If no line box and no in-flow table row, the baseline is the
 // bottom of the content edge of the cell box.
 static float find_cell_baseline(LayoutContext* lycon, ViewTableCell* tcell) {
-    float baseline = find_first_baseline_recursive(lycon, (View*)tcell, 0);
+    float baseline = find_first_baseline_recursive(lycon, static_cast<View*>(tcell), 0);
     if (baseline < 0) {
         // No text found. Check if the cell has non-replaced inline children
         // that create a line box with a strut.
@@ -713,7 +720,7 @@ static float find_cell_baseline(LayoutContext* lycon, ViewTableCell* tcell) {
         // own baseline rules (bottom margin edge when empty), so we don't use the
         // strut for those — the content-edge-bottom fallback is more appropriate.
         bool has_line_box = false;
-        for (View* child = ((ViewElement*)tcell)->first_child; child; child = child->next_sibling) {
+        for (View* child = lam::view_require_element(tcell)->first_child; child; child = child->next_sibling) {
             if (child->view_type == RDT_VIEW_INLINE) {
                 has_line_box = true;
                 break;
@@ -806,12 +813,12 @@ static float apply_row_baseline_alignment(LayoutContext* lycon, ViewTableRow* tr
                 log_debug("%s   cell col=%d: baseline=%.1f, shift=%.1f", trow->source_loc(), tcell->td->col_index, cell_baseline, shift);
 
                 // Shift all children down
-                for (View* child = ((ViewElement*)tcell)->first_child; child; child = child->next_sibling) {
+                for (View* child = lam::view_require_element(tcell)->first_child; child; child = child->next_sibling) {
                     if (!child->view_type) continue;
                     child->y += shift;
                     // Also update TextRect positions for ViewText nodes
                     if (child->view_type == RDT_VIEW_TEXT) {
-                        ViewText* text = (ViewText*)child;
+                        ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
                         for (TextRect* rect = text->rect; rect; rect = rect->next) {
                             rect->y += shift;
                         }
@@ -927,13 +934,13 @@ static void apply_cell_vertical_align(ViewTableCell* tcell, float cell_height, f
     // adjustment is relative to the margin-box top, not the child's border-box position.
     // Skip children with view_type == 0 (uninitialized views, e.g. collapsed whitespace nodes).
     float current_content_top = 1e8f;
-    for (View* child = ((ViewElement*)tcell)->first_child; child; child = child->next_sibling) {
+    for (View* child = lam::view_require_element(tcell)->first_child; child; child = child->next_sibling) {
         if (!child->view_type) continue; // skip uninitialized view nodes
         float ct = child->y;
         if (child->view_type == RDT_VIEW_BLOCK ||
             child->view_type == RDT_VIEW_LIST_ITEM ||
             child->view_type == RDT_VIEW_INLINE_BLOCK) {
-            ViewBlock* block = (ViewBlock*)child;
+            ViewBlock* block = lam::view_require_block(child);
             if (block->bound) {
                 ct -= block->bound->margin.top;
             }
@@ -947,12 +954,12 @@ static void apply_cell_vertical_align(ViewTableCell* tcell, float cell_height, f
              target_y, current_content_top, y_adjustment);
 
     if (y_adjustment != 0) {
-        for (View* child = ((ViewElement*)tcell)->first_child; child; child = child->next_sibling) {
+        for (View* child = lam::view_require_element(tcell)->first_child; child; child = child->next_sibling) {
             if (!child->view_type) continue; // skip uninitialized view nodes
             child->y += y_adjustment;
             // Also update TextRect for ViewText nodes
             if (child->view_type == RDT_VIEW_TEXT) {
-                ViewText* text = (ViewText*)child;
+                ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
                 // Update ALL text rects in the chain (multi-line wrapped text has multiple rects)
                 for (TextRect* r = text->rect; r; r = r->next) {
                     r->y += y_adjustment;
@@ -972,7 +979,7 @@ static void position_cell_text_children(ViewTableCell* tcell) {
         content_y += tcell->bound->padding.top;
     }
 
-    for (View* child = ((ViewElement*)tcell)->first_child; child; child = child->next_sibling) {
+    for (View* child = lam::view_require_element(tcell)->first_child; child; child = child->next_sibling) {
         if (child->view_type == RDT_VIEW_TEXT) {
             child->x = content_x;
             child->y = content_y;
@@ -1000,7 +1007,7 @@ static float process_table_cell(LayoutContext* lycon, ViewTableCell* tcell, View
                                float* col_edge_max_border = nullptr,
                                bool* col_collapsed = nullptr,
                                float* col_original_widths = nullptr) {
-    ViewBlock* cell = (ViewBlock*)tcell;
+    ViewBlock* cell = lam::view_require_block(tcell);
 
     // CSS 2.1 §17.5.5: Detect if ALL columns this cell spans are collapsed.
     // If so, we lay out at the original (pre-collapse) width for correct height,
@@ -1021,7 +1028,7 @@ static float process_table_cell(LayoutContext* lycon, ViewTableCell* tcell, View
     // empty-cells is inherited, so check cell's own cascade first, then table.
     {
         bool empty_cells_hide = (table->tb->empty_cells == TableProp::EMPTY_CELLS_HIDE);
-        DomElement* cell_dom = (DomElement*)tcell;
+        DomElement* cell_dom = lam::dom_require<DOM_NODE_ELEMENT>(tcell);
         if (cell_dom->specified_style) {
             CssDeclaration* ec_decl = style_tree_get_declaration(
                 cell_dom->specified_style, CSS_PROPERTY_EMPTY_CELLS);
@@ -1167,7 +1174,9 @@ static void layout_column_elements(ViewTable* table, float* col_widths, float* c
     int current_col = 0;
 
     // Iterate through table children to find column groups and columns
-    for (ViewElement* child = (ViewElement*)table->first_child; child; child = (ViewElement*)child->next_sibling) {
+    for (View* child_view = static_cast<View*>(table->first_child); child_view; child_view = static_cast<View*>(child_view->next_sibling)) {
+        ViewElement* child = lam::view_as_element(child_view);
+        if (!child) continue;
         if (child->view_type == RDT_VIEW_TABLE_COLUMN_GROUP) {
             // Column group: spans multiple columns
             // Find the first and last column indices this group covers
@@ -1177,7 +1186,9 @@ static void layout_column_elements(ViewTable* table, float* col_widths, float* c
             // Count columns in this group by iterating its children
             // Each <col> may have a span attribute indicating multiple columns
             int col_count = 0;
-            for (ViewElement* col = (ViewElement*)child->first_child; col; col = (ViewElement*)col->next_sibling) {
+            for (View* col_view = static_cast<View*>(child->first_child); col_view; col_view = static_cast<View*>(col_view->next_sibling)) {
+                ViewElement* col = lam::view_as_element(col_view);
+                if (!col) continue;
                 if (col->view_type == RDT_VIEW_TABLE_COLUMN) {
                     const char* col_span_str = col->get_attribute("span");
                     int col_span = (col_span_str && *col_span_str) ? (int)str_to_int64_default(col_span_str, strlen(col_span_str), 0) : 1; // INT_CAST_OK: span count
@@ -1226,10 +1237,12 @@ static void layout_column_elements(ViewTable* table, float* col_widths, float* c
 
             // Now set dimensions for child column elements
             // Column x is relative to parent colgroup, not to table
-            float colgroup_x = child->x;  // Colgroup's x relative to table
-            int col_idx = first_col;
-            for (ViewElement* col = (ViewElement*)child->first_child; col; col = (ViewElement*)col->next_sibling) {
-                if (col->view_type == RDT_VIEW_TABLE_COLUMN && col_idx < columns) {
+	            float colgroup_x = child->x;  // Colgroup's x relative to table
+	            int col_idx = first_col;
+	            for (View* col_view = static_cast<View*>(child->first_child); col_view; col_view = static_cast<View*>(col_view->next_sibling)) {
+	                ViewElement* col = lam::view_as_element(col_view);
+	                if (!col) continue;
+	                if (col->view_type == RDT_VIEW_TABLE_COLUMN && col_idx < columns) {
                     // Check span attribute on col element
                     const char* col_span_str = col->get_attribute("span");
                     int col_span = (col_span_str && *col_span_str) ? (int)str_to_int64_default(col_span_str, strlen(col_span_str), 0) : 1; // INT_CAST_OK: span count
@@ -1608,16 +1621,16 @@ static CollapsedBorder get_rowgroup_border(ViewBlock* rg, int side) {
     return border;
 }
 
-// Find the row-group (ViewBlock*) that contains a given row index.
+// Find the row-group block that contains a given row index.
 // Also outputs the first and last row indices within that group.
 // Returns nullptr if no row-group found (e.g., table acts as tbody).
 static ViewBlock* find_rowgroup_for_row(ViewTable* table, int target_row,
                                         int* out_first_row_in_group, int* out_last_row_in_group) {
     int row_idx = 0;
-    for (ViewBlock* child = (ViewBlock*)table->first_child; child; child = (ViewBlock*)child->next_sibling) {
+    for (View* child = static_cast<View*>(table->first_child); child; child = static_cast<View*>(child->next_sibling)) {
         if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
             int first_in_group = row_idx;
-            ViewTableRowGroup* rg = (ViewTableRowGroup*)child;
+            ViewTableRowGroup* rg = lam::view_require<RDT_VIEW_TABLE_ROW_GROUP>(child);
             for (ViewTableRow* r = rg->first_row(); r; r = rg->next_row(r)) {
                 row_idx++;
             }
@@ -1625,7 +1638,7 @@ static ViewBlock* find_rowgroup_for_row(ViewTable* table, int target_row,
             if (target_row >= first_in_group && target_row <= last_in_group) {
                 if (out_first_row_in_group) *out_first_row_in_group = first_in_group;
                 if (out_last_row_in_group) *out_last_row_in_group = last_in_group;
-                return child;
+                return lam::view_require_block(child);
             }
         } else if (child->view_type == RDT_VIEW_TABLE_ROW) {
             if (row_idx == target_row) {
@@ -1677,11 +1690,15 @@ static CollapsedBorder get_column_border(ViewBlock* col, int side) {
 // Returns the ViewBlock for the <col> element, or NULL if not found
 static ViewBlock* find_column_element(ViewTable* table, int target_col) {
     int current_col = 0;
-    for (ViewElement* child = (ViewElement*)table->first_child; child; child = (ViewElement*)child->next_sibling) {
+    for (View* child_view = static_cast<View*>(table->first_child); child_view; child_view = static_cast<View*>(child_view->next_sibling)) {
+        ViewElement* child = lam::view_as_element(child_view);
+        if (!child) continue;
         if (child->view_type == RDT_VIEW_TABLE_COLUMN_GROUP) {
-            for (ViewElement* col = (ViewElement*)child->first_child; col; col = (ViewElement*)col->next_sibling) {
+            for (View* col_view = static_cast<View*>(child->first_child); col_view; col_view = static_cast<View*>(col_view->next_sibling)) {
+                ViewElement* col = lam::view_as_element(col_view);
+                if (!col) continue;
                 if (col->view_type == RDT_VIEW_TABLE_COLUMN) {
-                    if (current_col == target_col) return (ViewBlock*)col;
+                    if (current_col == target_col) return lam::view_require_block(col);
                     current_col++;
                 }
             }
@@ -1693,7 +1710,7 @@ static ViewBlock* find_column_element(ViewTable* table, int target_col) {
                 current_col += span;
             }
         } else if (child->view_type == RDT_VIEW_TABLE_COLUMN) {
-            if (current_col == target_col) return (ViewBlock*)child;
+            if (current_col == target_col) return lam::view_require_block(child);
             current_col++;
         }
     }
@@ -1704,11 +1721,15 @@ static ViewBlock* find_column_element(ViewTable* table, int target_col) {
 // Returns the ViewBlock for the <colgroup> element, or NULL if not found
 static ViewBlock* find_colgroup_element(ViewTable* table, int target_col) {
     int current_col = 0;
-    for (ViewElement* child = (ViewElement*)table->first_child; child; child = (ViewElement*)child->next_sibling) {
+    for (View* child_view = static_cast<View*>(table->first_child); child_view; child_view = static_cast<View*>(child_view->next_sibling)) {
+        ViewElement* child = lam::view_as_element(child_view);
+        if (!child) continue;
         if (child->view_type == RDT_VIEW_TABLE_COLUMN_GROUP) {
             int first_col = current_col;
             int col_count = 0;
-            for (ViewElement* col = (ViewElement*)child->first_child; col; col = (ViewElement*)col->next_sibling) {
+            for (View* col_view = static_cast<View*>(child->first_child); col_view; col_view = static_cast<View*>(col_view->next_sibling)) {
+                ViewElement* col = lam::view_as_element(col_view);
+                if (!col) continue;
                 if (col->view_type == RDT_VIEW_TABLE_COLUMN) col_count++;
             }
             if (col_count == 0) {
@@ -1717,7 +1738,7 @@ static ViewBlock* find_colgroup_element(ViewTable* table, int target_col) {
                 if (col_count <= 0) col_count = 1;
             }
             int last_col = first_col + col_count - 1;
-            if (target_col >= first_col && target_col <= last_col) return (ViewBlock*)child;
+            if (target_col >= first_col && target_col <= last_col) return lam::view_require_block(child);
             current_col = last_col + 1;
         } else if (child->view_type == RDT_VIEW_TABLE_COLUMN) {
             current_col++;
@@ -2812,12 +2833,12 @@ static DomElement* create_anonymous_table_element(LayoutContext* lycon, DomEleme
     if (!pool) return nullptr;
 
     // Allocate the anonymous element
-    DomElement* anon = (DomElement*)pool_calloc(pool, sizeof(DomElement));
+    DomElement* anon = lam::pool_alloc_dom_element(pool);
     if (!anon) return nullptr;
 
     // Initialize as element node
     anon->node_type = DOM_NODE_ELEMENT;
-    anon->tag_name = tag_name;
+    dom_element_retain_tag_name(anon, lam::borrow_const(lam::promote_to_pool(pool, tag_name)));
     anon->doc = parent->doc;
     anon->parent = parent;
     anon->first_child = nullptr;
@@ -2853,10 +2874,10 @@ static DomElement* create_anonymous_table_element(LayoutContext* lycon, DomEleme
     // called during anonymous box generation before child style resolution.
     // Font context propagation through lycon->font happens later in mark_table_node.
     if (parent->font) {
-        anon->font = (FontProp*)pool_calloc(pool, sizeof(FontProp));
+            anon->font = (FontProp*)pool_calloc(pool, sizeof(FontProp));
         if (anon->font) {
             // Copy only specified font properties, not derived/cached fields
-            anon->font->family = parent->font->family;  // Share the string
+            radiant_retain_font_family(anon->font, lam::PoolPtr<char>(parent->font->family));  // share the string
             anon->font->font_size = parent->font->font_size;
             anon->font->font_style = parent->font->font_style;
             anon->font->font_weight = parent->font->font_weight;
@@ -2880,6 +2901,7 @@ static DomElement* create_anonymous_table_element(LayoutContext* lycon, DomEleme
         if (anon->in_line) {
             // Only copy inheritable properties
             anon->in_line->color = parent->in_line->color;  // color is inherited
+            anon->in_line->has_color = parent->in_line->has_color;
             anon->in_line->cursor = CSS_VALUE_AUTO;  // cursor inherits, use auto as default
             anon->in_line->visibility = 0;  // visibility inherits, 0 = visible
             anon->in_line->opacity = 1.0f;  // opacity is not inherited, use initial
@@ -2951,7 +2973,7 @@ static void prepend_child_to_element(DomElement* parent, DomElement* child) {
 static void reparent_node(DomNode* node, DomElement* new_parent) {
     if (!node || !new_parent) return;
 
-    DomElement* old_parent = (DomElement*)node->parent;
+    DomElement* old_parent = lam::dom_as<DOM_NODE_ELEMENT>(node->parent);
 
     // Remove from old parent's child list
     if (old_parent) {
@@ -3044,7 +3066,7 @@ static DomNode* collect_consecutive_run(DomNode* start, DomElement* parent,
     }
 
     // Trim trailing non-element nodes
-    while (run->length > 0 && !((DomNode*)run->data[run->length - 1])->is_element()) {
+    while (run->length > 0 && !static_cast<DomNode*>(run->data[run->length - 1])->is_element()) {
         run->length--;
     }
 
@@ -3208,7 +3230,7 @@ static void wrap_run_in_cells(LayoutContext* lycon, ArrayList* run, DomElement* 
     DomElement* current_anon_td = nullptr;
 
     for (int i = 0; i < run->length; i++) {
-        DomNode* node = (DomNode*)run->data[i];
+        DomNode* node = static_cast<DomNode*>(run->data[i]);
 
         bool is_cell = false;
         if (node->is_element()) {
@@ -3270,14 +3292,14 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
     DomNode* insertion_point = nullptr;  // Where to insert wrapped elements
 
     for (int i = 0; i < children_to_process->length; ) {
-        DomNode* child = (DomNode*)children_to_process->data[i];
+        DomNode* child = static_cast<DomNode*>(children_to_process->data[i]);
 
         // Handle text nodes - they need to be wrapped in anonymous cells
         // CSS 2.1 Section 17.2.1: "Any content that is not a table-* element
         // will be wrapped in an anonymous table-cell box"
         if (child->is_text()) {
             // Check if this text node has non-whitespace content
-            const char* text = ((DomText*)child)->text;
+            const char* text = lam::dom_require<DOM_NODE_TEXT>(child)->text;
             bool has_content = false;
             if (text) {
                 for (const unsigned char* p = (const unsigned char*)text; *p; p++) {
@@ -3314,17 +3336,17 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
                     CSS_VALUE_TABLE_ROW, "::anon-tr");
                 append_child_to_element(anon_tbody, anon_tr);
                 wrap_run_in_cells(lycon, current_cell_run, anon_tr);
-                insert_node_before(table, (DomNode*)anon_tbody, child);
+                insert_node_before(table, static_cast<DomNode*>(anon_tbody), child);
                 arraylist_clear(current_cell_run);
             }
             if (current_row_run->length > 0) {
                 DomElement* anon_tbody = create_anonymous_table_element(lycon, table,
                     CSS_VALUE_TABLE_ROW_GROUP, "::anon-tbody");
                 for (int j = 0; j < current_row_run->length; j++) {
-                    DomNode* row_node = (DomNode*)current_row_run->data[j];
+                    DomNode* row_node = static_cast<DomNode*>(current_row_run->data[j]);
                     reparent_node(row_node, anon_tbody);
                 }
-                insert_node_before(table, (DomNode*)anon_tbody, child);
+                insert_node_before(table, static_cast<DomNode*>(anon_tbody), child);
                 arraylist_clear(current_row_run);
             }
             log_debug("%s [ANON-TABLE] Skipping out-of-flow element: %s", table->source_loc(),
@@ -3362,7 +3384,7 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
                 wrap_run_in_cells(lycon, current_cell_run, anon_tr);
 
                 // Insert at the position of the first cell
-                insert_node_before(table, (DomNode*)anon_tbody, child);
+                insert_node_before(table, static_cast<DomNode*>(anon_tbody), child);
                 arraylist_clear(current_cell_run);
             }
 
@@ -3376,12 +3398,12 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
 
                 // Move rows to anonymous tbody
                 for (int i = 0; i < current_row_run->length; i++) {
-                    DomNode* row_node = (DomNode*)current_row_run->data[i];
+                    DomNode* row_node = static_cast<DomNode*>(current_row_run->data[i]);
                     reparent_node(row_node, anon_tbody);
                 }
 
                 // Insert at the position of the first row
-                insert_node_before(table, (DomNode*)anon_tbody, child);
+                insert_node_before(table, static_cast<DomNode*>(anon_tbody), child);
                 arraylist_clear(current_row_run);
             }
 
@@ -3404,7 +3426,7 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
 
                 wrap_run_in_cells(lycon, current_cell_run, anon_tr);
 
-                insert_node_before(table, (DomNode*)anon_tbody, child);
+                insert_node_before(table, static_cast<DomNode*>(anon_tbody), child);
                 arraylist_clear(current_cell_run);
             }
 
@@ -3424,11 +3446,11 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
                     CSS_VALUE_TABLE_ROW_GROUP, "::anon-tbody");
 
                 for (int j = 0; j < current_row_run->length; j++) {
-                    DomNode* row_node = (DomNode*)current_row_run->data[j];
+                    DomNode* row_node = static_cast<DomNode*>(current_row_run->data[j]);
                     reparent_node(row_node, anon_tbody);
                 }
 
-                insert_node_before(table, (DomNode*)anon_tbody, child);
+                insert_node_before(table, static_cast<DomNode*>(anon_tbody), child);
                 arraylist_clear(current_row_run);
             }
 
@@ -3471,7 +3493,7 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
             CSS_VALUE_TABLE_ROW_GROUP, "::anon-tbody");
 
         for (int i = 0; i < current_row_run->length; i++) {
-            DomNode* row_node = (DomNode*)current_row_run->data[i];
+            DomNode* row_node = static_cast<DomNode*>(current_row_run->data[i]);
             reparent_node(row_node, anon_tbody);
         }
 
@@ -3511,7 +3533,7 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
         DomNode* first_cell_position = nullptr;
 
         for (int j = 0; j < group_children->length; j++) {
-            DomNode* gchild = (DomNode*)group_children->data[j];
+            DomNode* gchild = static_cast<DomNode*>(group_children->data[j]);
 
             if (!gchild->is_element()) {
                 // Text nodes need to be wrapped in cell -> row
@@ -3519,7 +3541,7 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
                 // wrapped in an anonymous table-cell box"
                 if (gchild->is_text()) {
                     // Check if this text node has non-whitespace content
-                    const char* text = ((DomText*)gchild)->text;
+                    const char* text = lam::dom_require<DOM_NODE_TEXT>(gchild)->text;
                     bool has_content = false;
                     if (text) {
                         for (const unsigned char* p = (const unsigned char*)text; *p; p++) {
@@ -3547,7 +3569,7 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
                     DomElement* anon_tr = create_anonymous_table_element(lycon, row_group,
                         CSS_VALUE_TABLE_ROW, "::anon-tr");
                     wrap_run_in_cells(lycon, cell_run, anon_tr);
-                    insert_node_before(row_group, (DomNode*)anon_tr, gchild);
+                    insert_node_before(row_group, static_cast<DomNode*>(anon_tr), gchild);
                     arraylist_clear(cell_run);
                     first_cell_position = nullptr;
                 }
@@ -3571,7 +3593,7 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
 
                     wrap_run_in_cells(lycon, cell_run, anon_tr);
 
-                    insert_node_before(row_group, (DomNode*)anon_tr, gchild);
+                    insert_node_before(row_group, static_cast<DomNode*>(anon_tr), gchild);
                     arraylist_clear(cell_run);
                     first_cell_position = nullptr;
                 }
@@ -3652,7 +3674,7 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
             ArrayList* non_cell_run = arraylist_new(8);
 
             for (int k = 0; k < row_children->length; k++) {
-                DomNode* rchild = (DomNode*)row_children->data[k];
+                DomNode* rchild = static_cast<DomNode*>(row_children->data[k]);
 
                 if (!rchild->is_element()) {
                     // Text nodes need to be wrapped in cells
@@ -3660,7 +3682,7 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
                     // wrapped in an anonymous table-cell box"
                     if (rchild->is_text()) {
                         // Check if this text node has non-whitespace content
-                        const char* text = ((DomText*)rchild)->text;
+                        const char* text = lam::dom_require<DOM_NODE_TEXT>(rchild)->text;
                         bool has_content = false;
                         if (text) {
                             for (const unsigned char* p = (const unsigned char*)text; *p; p++) {
@@ -3685,10 +3707,10 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
                         DomElement* anon_td = create_anonymous_table_element(lycon, row,
                             CSS_VALUE_TABLE_CELL, "::anon-td");
                         for (int m = 0; m < non_cell_run->length; m++) {
-                            DomNode* content_node = (DomNode*)non_cell_run->data[m];
+                            DomNode* content_node = static_cast<DomNode*>(non_cell_run->data[m]);
                             reparent_node(content_node, anon_td);
                         }
-                        insert_node_before(row, (DomNode*)anon_td, rchild);
+                        insert_node_before(row, static_cast<DomNode*>(anon_td), rchild);
                         arraylist_clear(non_cell_run);
                     }
                     continue;
@@ -3709,11 +3731,11 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
                             CSS_VALUE_TABLE_CELL, "::anon-td");
 
                         for (int m = 0; m < non_cell_run->length; m++) {
-                            DomNode* content_node = (DomNode*)non_cell_run->data[m];
+                            DomNode* content_node = static_cast<DomNode*>(non_cell_run->data[m]);
                             reparent_node(content_node, anon_td);
                         }
 
-                        insert_node_before(row, (DomNode*)anon_td, rchild);
+                        insert_node_before(row, static_cast<DomNode*>(anon_td), rchild);
                         arraylist_clear(non_cell_run);
                     }
                     continue;
@@ -3732,7 +3754,7 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
                     CSS_VALUE_TABLE_CELL, "::anon-td");
 
                 for (int m = 0; m < non_cell_run->length; m++) {
-                    DomNode* content_node = (DomNode*)non_cell_run->data[m];
+                    DomNode* content_node = static_cast<DomNode*>(non_cell_run->data[m]);
                     reparent_node(content_node, anon_td);
                 }
 
@@ -3764,8 +3786,8 @@ static void detect_anonymous_boxes(ViewTable* table) {
     bool has_direct_cell = false;
 
     // Scan immediate children to detect structure
-    for (ViewBlock* child = (ViewBlock*)table->first_child; child;
-         child = (ViewBlock*)child->next_sibling) {
+    for (View* child = static_cast<View*>(table->first_child); child;
+         child = static_cast<View*>(child->next_sibling)) {
         if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
             has_row_group = true;
         } else if (child->view_type == RDT_VIEW_TABLE_ROW) {
@@ -3791,13 +3813,13 @@ static void detect_anonymous_boxes(ViewTable* table) {
     }
 
     // Now check each row group for anonymous tr cases
-    for (ViewBlock* child = (ViewBlock*)table->first_child; child;
-         child = (ViewBlock*)child->next_sibling) {
+    for (View* child = static_cast<View*>(table->first_child); child;
+         child = static_cast<View*>(child->next_sibling)) {
         if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
             // Check if row group has direct cells (no rows)
             bool group_has_direct_cell = false;
-            for (ViewBlock* gchild = (ViewBlock*)child->first_child; gchild;
-                 gchild = (ViewBlock*)gchild->next_sibling) {
+            for (View* gchild = static_cast<View*>(lam::dom_require<DOM_NODE_ELEMENT>(child)->first_child); gchild;
+                 gchild = static_cast<View*>(gchild->next_sibling)) {
                 if (gchild->view_type == RDT_VIEW_TABLE_CELL) {
                     group_has_direct_cell = true;
                     break;
@@ -3806,10 +3828,10 @@ static void detect_anonymous_boxes(ViewTable* table) {
             if (group_has_direct_cell) {
                 // Mark the first direct cell as having is_annoy_tr
                 // (The group acts as anonymous row)
-                for (ViewBlock* gchild = (ViewBlock*)child->first_child; gchild;
-                     gchild = (ViewBlock*)gchild->next_sibling) {
+                for (View* gchild = static_cast<View*>(lam::dom_require<DOM_NODE_ELEMENT>(child)->first_child); gchild;
+                     gchild = static_cast<View*>(gchild->next_sibling)) {
                     if (gchild->view_type == RDT_VIEW_TABLE_CELL) {
-                        ViewTableCell* cell = (ViewTableCell*)gchild;
+                        ViewTableCell* cell = lam::view_require<RDT_VIEW_TABLE_CELL>(gchild);
                         if (cell->td) {
                             cell->td->is_annoy_tr = 1;
                             log_debug("%s Anonymous box: cell marked as wrapped in anonymous tr", table->source_loc());
@@ -3898,16 +3920,16 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
     // Mark node based on display type or HTML tag
     if (tag == HTM_TAG_CAPTION || display.inner == CSS_VALUE_TABLE_CAPTION) {
         // Caption - mark as block and layout content immediately
-        ViewBlock* caption = (ViewBlock*)set_view(lycon, RDT_VIEW_BLOCK, node);
+        ViewBlock* caption = lam::view_require_block(set_view(lycon, RDT_VIEW_BLOCK, node));
         if (caption) {
             caption->display.inner = CSS_VALUE_TABLE_CAPTION;
-            lycon->view = (View*)caption;
+            lycon->view = static_cast<View*>(caption);
             dom_node_resolve_style(node, lycon);  // Resolve caption styles
 
             // Read caption-side from caption element's style and store in table
-            DomElement* dom_elem = static_cast<DomElement*>(node);
+            DomElement* dom_elem = lam::dom_require_element(node);
             if (dom_elem->specified_style && parent && parent->view_type == RDT_VIEW_TABLE) {
-                ViewTable* table = (ViewTable*)parent;
+                ViewTable* table = lam::view_require<RDT_VIEW_TABLE>(parent);
                 if (table->tb) {
                     CssDeclaration* caption_decl = style_tree_get_declaration(
                         dom_elem->specified_style, CSS_PROPERTY_CAPTION_SIDE);
@@ -4007,7 +4029,7 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
 
             log_debug("%s Caption layout start: width=%d, advance_y=%.1f", node->source_loc(), caption_width, lycon->block.advance_y);
 
-            DomNode* child = static_cast<DomElement*>(node)->first_child;
+            DomNode* child = lam::dom_require_element(node)->first_child;
             for (; child; child = child->next_sibling) {
                 layout_flow_node(lycon, child);
             }
@@ -4072,28 +4094,28 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
              display.inner == CSS_VALUE_TABLE_FOOTER_GROUP) {
         // Row group - mark and recurse
         // NOTE: Section type is determined at runtime via get_section_type() method
-        ViewTableRowGroup* group = (ViewTableRowGroup*)set_view(lycon, RDT_VIEW_TABLE_ROW_GROUP, node);
+        ViewTableRowGroup* group = lam::view_require<RDT_VIEW_TABLE_ROW_GROUP>(set_view(lycon, RDT_VIEW_TABLE_ROW_GROUP, node));
         if (group) {
             group->display = display;  // preserve thead/tbody/tfoot display distinction
-            lycon->view = (View*)group;
+            lycon->view = static_cast<View*>(group);
             dom_node_resolve_style(node, lycon);  // Resolve styles for proper font inheritance
             // Propagate element font to layout context so children inherit correctly.
             // dom_node_resolve_style may skip pre-resolved elements, leaving lycon->font stale.
             if (group->font) {
                 setup_font(lycon->ui_context, &lycon->font, group->font);
             }
-            DomNode* child = static_cast<DomElement*>(node)->first_child;
+            DomNode* child = lam::dom_require_element(node)->first_child;
             for (; child; child = child->next_sibling) {
-                if (child->is_element()) mark_table_node(lycon, child, (ViewElement*)group);
+                if (child->is_element()) mark_table_node(lycon, child, lam::view_require_element(group));
             }
         }
     }
     else if (tag == HTM_TAG_TR || display.inner == CSS_VALUE_TABLE_ROW) {
         // Row - mark and recurse
-        ViewTableRow* row = (ViewTableRow*)set_view(lycon, RDT_VIEW_TABLE_ROW, node);
+        ViewTableRow* row = lam::view_require<RDT_VIEW_TABLE_ROW>(set_view(lycon, RDT_VIEW_TABLE_ROW, node));
         if (row) {
             row->display = display;
-            lycon->view = (View*)row;
+            lycon->view = static_cast<View*>(row);
             dom_node_resolve_style(node, lycon);  // Resolve styles for proper font inheritance
             // Propagate element font to layout context so children inherit correctly.
             if (row->font) {
@@ -4104,7 +4126,7 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
             // When pseudo-elements have display:table-cell, they become cell children of the row.
             // Otherwise, they need wrapping in an anonymous table-cell (CSS 2.1 §17.2.1).
             if (node->is_element()) {
-                row->pseudo = alloc_pseudo_content_prop(lycon, (ViewBlock*)row);
+                row->pseudo = alloc_pseudo_content_prop(lycon, lam::view_require_block(row));
                 if (row->pseudo) {
                     DomElement* row_elem = node->as_element();
                     // Helper lambda to insert pseudo and wrap in anon cell if needed
@@ -4136,18 +4158,18 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
                 }
             }
 
-            DomNode* child = static_cast<DomElement*>(node)->first_child;
+            DomNode* child = lam::dom_require_element(node)->first_child;
             for (; child; child = child->next_sibling) {
-                if (child->is_element()) mark_table_node(lycon, child, (ViewElement*)row);
+                if (child->is_element()) mark_table_node(lycon, child, lam::view_require_element(row));
             }
         }
     }
     else if (tag == HTM_TAG_TD || tag == HTM_TAG_TH || display.inner == CSS_VALUE_TABLE_CELL) {
         // Cell - mark with styles and attributes
-        ViewTableCell* cell = (ViewTableCell*)set_view(lycon, RDT_VIEW_TABLE_CELL, node);
+        ViewTableCell* cell = lam::view_require<RDT_VIEW_TABLE_CELL>(set_view(lycon, RDT_VIEW_TABLE_CELL, node));
         if (cell) {
             cell->display = display;
-            lycon->view = (View*)cell;
+            lycon->view = static_cast<View*>(cell);
             // save parent font context before cell resolution, so that em-based
             // font sizes in sibling cells resolve against the row/table font,
             // not the previously resolved cell's font (CSS 2.1 §4.3.2)
@@ -4160,10 +4182,10 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
     else if (tag == HTM_TAG_COLGROUP || display.inner == CSS_VALUE_TABLE_COLUMN_GROUP) {
         // Column group - mark with view type and recurse to handle child columns
         // CSS 2.1 §17.2.1: Column groups don't generate cells, only provide metadata
-        ViewBlock* colgroup = (ViewBlock*)set_view(lycon, RDT_VIEW_TABLE_COLUMN_GROUP, node);
+        ViewBlock* colgroup = lam::view_require_block(set_view(lycon, RDT_VIEW_TABLE_COLUMN_GROUP, node));
         if (colgroup) {
             colgroup->display = display;
-            lycon->view = (View*)colgroup;
+            lycon->view = static_cast<View*>(colgroup);
             // CSS 2.1 §17.3: Save font context before resolving column-group styles.
             // Column groups only influence border, background, width, visibility on cells.
             // Inherited text properties (word-spacing, letter-spacing, etc.) must not
@@ -4171,9 +4193,9 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
             FontBox saved_font = lycon->font;
             dom_node_resolve_style(node, lycon);  // Resolve styles (background, border, width)
             // Recurse to mark child column elements
-            DomNode* child = static_cast<DomElement*>(node)->first_child;
+            DomNode* child = lam::dom_require_element(node)->first_child;
             for (; child; child = child->next_sibling) {
-                if (child->is_element()) mark_table_node(lycon, child, (ViewElement*)colgroup);
+                if (child->is_element()) mark_table_node(lycon, child, lam::view_require_element(colgroup));
             }
             lycon->font = saved_font;
         }
@@ -4181,10 +4203,10 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
     else if (tag == HTM_TAG_COL || display.inner == CSS_VALUE_TABLE_COLUMN) {
         // Column - mark with view type
         // CSS 2.1 §17.2.1: Columns don't generate cells, only provide metadata
-        ViewBlock* col = (ViewBlock*)set_view(lycon, RDT_VIEW_TABLE_COLUMN, node);
+        ViewBlock* col = lam::view_require_block(set_view(lycon, RDT_VIEW_TABLE_COLUMN, node));
         if (col) {
             col->display = display;
-            lycon->view = (View*)col;
+            lycon->view = static_cast<View*>(col);
             // CSS 2.1 §17.3: Save font context — same rationale as column-group above
             FontBox saved_font = lycon->font;
             dom_node_resolve_style(node, lycon);  // Resolve styles (background, border, width)
@@ -4202,7 +4224,7 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
 
     // Use tableNode directly — lycon->view may not point to the table
     // (e.g., when table is an abs-positioned child of a grid container)
-    ViewTable* table = (ViewTable*)tableNode;
+    ViewTable* table = lam::view_require<RDT_VIEW_TABLE>(tableNode);
     dom_node_resolve_style(tableNode, lycon);
     resolve_table_properties(lycon, tableNode, table);
 
@@ -4214,10 +4236,10 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
 
     // Recursively mark all table children with correct view types
     if (tableNode->is_element()) {
-        DomNode* child = static_cast<DomElement*>(tableNode)->first_child;
+        DomNode* child = lam::dom_require_element(tableNode)->first_child;
         for (; child; child = child->next_sibling) {
             if (child->is_element()) {
-                mark_table_node(lycon, child, (ViewElement*)table);
+                mark_table_node(lycon, child, lam::view_require_element(table));
             }
         }
     }
@@ -4275,17 +4297,17 @@ static void apply_cell_vertical_alignment(LayoutContext* lycon, ViewTableCell* t
     bool has_content = false;
 
     // Find the bounding box of all child content
-    for (View* child = ((ViewElement*)tcell)->first_child; child; child = child->next_sibling) {
+    for (View* child = lam::view_require_element(tcell)->first_child; child; child = child->next_sibling) {
         if (child->view_type == RDT_VIEW_TEXT) {
-            ViewText* text = (ViewText*)child;
+            ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
             if (text->y < min_y) min_y = text->y;
             float child_bottom = text->y + text->height;
             if (child_bottom > max_y) max_y = child_bottom;
             has_content = true;
         } else if (child->view_type == RDT_VIEW_BLOCK || child->view_type == RDT_VIEW_LIST_ITEM || child->view_type == RDT_VIEW_INLINE) {
-            ViewBlock* block = (ViewBlock*)child;
-            if (block->y < min_y) min_y = block->y;
-            float child_bottom = block->y + block->height;
+            ViewElement* element = lam::view_require_element(child);
+            if (element->y < min_y) min_y = element->y;
+            float child_bottom = element->y + element->height;
             if (child_bottom > max_y) max_y = child_bottom;
             has_content = true;
         }
@@ -4329,15 +4351,15 @@ static void apply_cell_vertical_alignment(LayoutContext* lycon, ViewTableCell* t
 
     // Apply offset to all child content
     if (vertical_offset > 0) {
-        for (View* child = ((ViewElement*)tcell)->first_child; child; child = child->next_sibling) {
+        for (View* child = lam::view_require_element(tcell)->first_child; child; child = child->next_sibling) {
             if (child->view_type == RDT_VIEW_TEXT) {
-                ViewText* text = (ViewText*)child;
+                ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
                 text->y += vertical_offset;
                 log_debug("%s CSS vertical-align: adjusted text Y by +%.1fpx (align=%d)", tcell->source_loc(),
                          vertical_offset, (int)valign); // INT_CAST_OK: enum for log
             } else if (child->view_type == RDT_VIEW_BLOCK || child->view_type == RDT_VIEW_LIST_ITEM || child->view_type == RDT_VIEW_INLINE) {
-                ViewBlock* block = (ViewBlock*)child;
-                block->y += vertical_offset;
+                ViewElement* element = lam::view_require_element(child);
+                element->y += vertical_offset;
             }
         }
     }
@@ -4374,9 +4396,9 @@ static void reapply_rowspan_vertical_alignment(ViewTableCell* tcell) {
     float content_max_y = 0;
     bool has_content = false;
 
-    for (View* child = ((ViewElement*)tcell)->first_child; child; child = child->next_sibling) {
+    for (View* child = lam::view_require_element(tcell)->first_child; child; child = child->next_sibling) {
         if (child->view_type == RDT_VIEW_TEXT) {
-            ViewText* text = (ViewText*)child;
+            ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
             if (text->y < content_min_y) content_min_y = text->y;
             float child_bottom = text->y + text->height;
             if (child_bottom > content_max_y) content_max_y = child_bottom;
@@ -4384,7 +4406,7 @@ static void reapply_rowspan_vertical_alignment(ViewTableCell* tcell) {
         }
         // Handle other child types (ViewBlock, etc.)
         else if (child->view_type >= RDT_VIEW_BLOCK) {
-            ViewBlock* block = (ViewBlock*)child;
+            ViewBlock* block = lam::view_require_block(child);
             if (block->y < content_min_y) content_min_y = block->y;
             float child_bottom = block->y + block->height;
             if (child_bottom > content_max_y) content_max_y = child_bottom;
@@ -4419,16 +4441,16 @@ static void reapply_rowspan_vertical_alignment(ViewTableCell* tcell) {
               valign, content_min_y, new_offset, adjustment);
 
     if (adjustment != 0) {
-        for (View* child = ((ViewElement*)tcell)->first_child; child; child = child->next_sibling) {
+        for (View* child = lam::view_require_element(tcell)->first_child; child; child = child->next_sibling) {
             if (child->view_type == RDT_VIEW_TEXT) {
-                ViewText* text = (ViewText*)child;
+                ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
                 text->y += adjustment;
                 if (text->rect) {
                     text->rect->y += adjustment;
                 }
             }
             else if (child->view_type >= RDT_VIEW_BLOCK) {
-                ViewBlock* block = (ViewBlock*)child;
+                ViewBlock* block = lam::view_require_block(child);
                 block->y += adjustment;
             }
         }
@@ -4438,7 +4460,7 @@ static void reapply_rowspan_vertical_alignment(ViewTableCell* tcell) {
 // Layout cell content with correct parent width (after cell dimensions are set)
 // This is the ONLY place where cell content gets laid out (single pass)
 static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell, ViewBlock* table) {
-    ViewTableCell* tcell = static_cast<ViewTableCell*>(cell);
+    ViewTableCell* tcell = lam::view_require<RDT_VIEW_TABLE_CELL>(cell);
     if (!tcell) return;
 
     // No need to clear text rectangles - this is the first and only layout pass!
@@ -4681,16 +4703,16 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell, Vie
         generate_pseudo_element_content(lycon, tcell, false);  // ::after
         if (tcell->pseudo) {
             if (tcell->pseudo->before) {
-                insert_pseudo_into_dom((DomElement*)tcell, tcell->pseudo->before, true);
+                insert_pseudo_into_dom(lam::dom_require<DOM_NODE_ELEMENT>(tcell), tcell->pseudo->before, true);
             }
             if (tcell->pseudo->after) {
-                insert_pseudo_into_dom((DomElement*)tcell, tcell->pseudo->after, false);
+                insert_pseudo_into_dom(lam::dom_require<DOM_NODE_ELEMENT>(tcell), tcell->pseudo->after, false);
             }
         }
     }
 
     if (tcell->is_element()) {
-        DomNode* cc = static_cast<DomElement*>(tcell)->first_child;
+        DomNode* cc = lam::dom_require_element(tcell)->first_child;
         for (; cc; cc = cc->next_sibling) {
             uintptr_t child_tag = cc->tag();
             if (child_tag == HTM_TAG_IMG) {
@@ -4750,7 +4772,7 @@ static bool should_collapse_whitespace(ViewTableCell* cell) {
 
     // Fall back to get_white_space_value which walks up from parent
     // We pass the cell itself - get_white_space_value starts from node->parent
-    CssEnum ws_value = get_white_space_value((DomNode*)cell);
+    CssEnum ws_value = get_white_space_value(static_cast<DomNode*>(cell));
 
     // These values preserve whitespace (don't collapse)
     if (ws_value == CSS_VALUE_PRE ||
@@ -4777,7 +4799,7 @@ static bool should_prevent_wrapping(ViewTableCell* cell) {
     }
 
     // Fall back to inherited value
-    CssEnum ws_value = get_white_space_value((DomNode*)cell);
+    CssEnum ws_value = get_white_space_value(static_cast<DomNode*>(cell));
     return (ws_value == CSS_VALUE_NOWRAP || ws_value == CSS_VALUE_PRE);
 }
 
@@ -4977,10 +4999,10 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell,
     // CSS Text 3 §5.2: word-break: break-word behaves as overflow-wrap: anywhere
     CssEnum cell_overflow_wrap = CSS_VALUE_NORMAL;
     {
-        DomNode* n = (DomNode*)cell;
+        DomNode* n = static_cast<DomNode*>(cell);
         while (n) {
             if (n->is_element()) {
-                DomElement* el = (DomElement*)n;
+                DomElement* el = lam::dom_require<DOM_NODE_ELEMENT>(n);
                 if (el->blk) {
                     if (el->blk->overflow_wrap != 0) {
                         cell_overflow_wrap = el->blk->overflow_wrap;
@@ -5140,12 +5162,11 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell,
                 }
                 // CSS 2.1: inline element horizontal margins contribute to line box width
                 float inline_margin_h = 0;
-                ViewBlock* child_view_inline = (ViewBlock*)child_elem;
-                if (child_view_inline->bound) {
-                    if (child_view_inline->bound->margin.left_type != CSS_VALUE_AUTO)
-                        inline_margin_h += child_view_inline->bound->margin.left;
-                    if (child_view_inline->bound->margin.right_type != CSS_VALUE_AUTO)
-                        inline_margin_h += child_view_inline->bound->margin.right;
+                if (child_elem->bound) {
+                    if (child_elem->bound->margin.left_type != CSS_VALUE_AUTO)
+                        inline_margin_h += child_elem->bound->margin.left;
+                    if (child_elem->bound->margin.right_type != CSS_VALUE_AUTO)
+                        inline_margin_h += child_elem->bound->margin.right;
                 } else if (child_elem->specified_style) {
                     CssDeclaration* ml = style_tree_get_declaration(child_elem->specified_style, CSS_PROPERTY_MARGIN_LEFT);
                     if (ml && ml->value && ml->value->type == CSS_VALUE_TYPE_LENGTH)
@@ -5182,12 +5203,11 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell,
 
                 // Block element: account for horizontal margins (including negative)
                 float margin_h = 0;
-                ViewBlock* child_view = (ViewBlock*)child_elem;
-                if (child_view->bound) {
-                    if (child_view->bound->margin.left_type != CSS_VALUE_AUTO)
-                        margin_h += child_view->bound->margin.left;
-                    if (child_view->bound->margin.right_type != CSS_VALUE_AUTO)
-                        margin_h += child_view->bound->margin.right;
+                if (child_elem->bound) {
+                    if (child_elem->bound->margin.left_type != CSS_VALUE_AUTO)
+                        margin_h += child_elem->bound->margin.left;
+                    if (child_elem->bound->margin.right_type != CSS_VALUE_AUTO)
+                        margin_h += child_elem->bound->margin.right;
                 } else if (child_elem->specified_style) {
                     CssDeclaration* ml = style_tree_get_declaration(child_elem->specified_style, CSS_PROPERTY_MARGIN_LEFT);
                     if (ml && ml->value && ml->value->type == CSS_VALUE_TYPE_LENGTH)
@@ -5360,10 +5380,14 @@ static TableMetadata* analyze_table_structure(LayoutContext* lycon, ViewTable* t
     // CSS 2.1 §17.2.1: Column count is max(cells_per_row, col_element_count)
     {
         int col_count = 0;
-        for (ViewElement* child = (ViewElement*)table->first_child; child; child = (ViewElement*)child->next_sibling) {
+        for (View* child_view = static_cast<View*>(table->first_child); child_view; child_view = static_cast<View*>(child_view->next_sibling)) {
+            ViewElement* child = lam::view_as_element(child_view);
+            if (!child) continue;
             if (child->view_type == RDT_VIEW_TABLE_COLUMN_GROUP) {
                 bool has_col = false;
-                for (ViewElement* col = (ViewElement*)child->first_child; col; col = (ViewElement*)col->next_sibling) {
+                for (View* col_view = static_cast<View*>(child->first_child); col_view; col_view = static_cast<View*>(col_view->next_sibling)) {
+                    ViewElement* col = lam::view_as_element(col_view);
+                    if (!col) continue;
                     if (col->view_type == RDT_VIEW_TABLE_COLUMN) {
                         const char* span_str = col->get_attribute("span");
                         int span = (span_str && *span_str) ? (int)str_to_int64_default(span_str, strlen(span_str), 0) : 1; // INT_CAST_OK: span count
@@ -5448,7 +5472,7 @@ static TableMetadata* analyze_table_structure(LayoutContext* lycon, ViewTable* t
     for (ViewTableRow* row = table->first_row(); row; row = table->next_row(row)) {
         // Track visibility: collapse for this row
         // CSS 2.1 §17.5.5: Rows with visibility: collapse don't contribute to height
-        if (is_visibility_collapse((ViewBlock*)row)) {
+        if (is_visibility_collapse(lam::view_require_block(row))) {
             meta->row_collapsed[current_row] = true;
             log_debug("%s Row %d has visibility: collapse", table->source_loc(), current_row);
         }
@@ -5480,16 +5504,20 @@ static TableMetadata* analyze_table_structure(LayoutContext* lycon, ViewTable* t
     // Walk column/colgroup elements and check visibility on each column
     {
         int col_idx = 0;
-        for (ViewElement* child = (ViewElement*)table->first_child; child; child = (ViewElement*)child->next_sibling) {
+        for (View* child_view = static_cast<View*>(table->first_child); child_view; child_view = static_cast<View*>(child_view->next_sibling)) {
+            ViewElement* child = lam::view_as_element(child_view);
+            if (!child) continue;
             if (child->view_type == RDT_VIEW_TABLE_COLUMN_GROUP) {
                 // Check if the colgroup itself is collapsed
-                bool colgroup_collapsed = is_visibility_collapse((ViewBlock*)child);
+                bool colgroup_collapsed = is_visibility_collapse(lam::view_require_block(child));
                 bool has_col_children = false;
-                for (ViewElement* col = (ViewElement*)child->first_child; col; col = (ViewElement*)col->next_sibling) {
+                for (View* col_view = static_cast<View*>(child->first_child); col_view; col_view = static_cast<View*>(col_view->next_sibling)) {
+                    ViewElement* col = lam::view_as_element(col_view);
+                    if (!col) continue;
                     if (col->view_type == RDT_VIEW_TABLE_COLUMN) {
                         has_col_children = true;
                         if (col_idx < columns) {
-                            if (colgroup_collapsed || is_visibility_collapse((ViewBlock*)col)) {
+                            if (colgroup_collapsed || is_visibility_collapse(lam::view_require_block(col))) {
                                 meta->col_collapsed[col_idx] = true;
                                 log_debug("%s Column %d has visibility: collapse", table->source_loc(), col_idx);
                             }
@@ -5511,7 +5539,7 @@ static TableMetadata* analyze_table_structure(LayoutContext* lycon, ViewTable* t
                     }
                 }
             } else if (child->view_type == RDT_VIEW_TABLE_COLUMN) {
-                if (col_idx < columns && is_visibility_collapse((ViewBlock*)child)) {
+                if (col_idx < columns && is_visibility_collapse(lam::view_require_block(child))) {
                     meta->col_collapsed[col_idx] = true;
                     log_debug("%s Column %d has visibility: collapse", table->source_loc(), col_idx);
                 }
@@ -5526,14 +5554,14 @@ static TableMetadata* analyze_table_structure(LayoutContext* lycon, ViewTable* t
 // Helper: re-layout a single caption after its width changes.
 // Returns the updated caption height (including margins).
 static float relayout_caption(LayoutContext* lycon, ViewBlock* cap, float table_width) {
-    DomElement* dom_elem = static_cast<DomElement*>(cap);
+    DomElement* dom_elem = lam::dom_require_element(cap);
 
     // Reset child views before re-layout
     if (dom_elem) {
         for (DomNode* child = dom_elem->first_child; child; child = child->next_sibling) {
             if (child->is_text()) {
                 child->view_type = RDT_VIEW_NONE;
-                ViewText* text_view = (ViewText*)child;
+                ViewText* text_view = lam::unsafe_view_text_storage(lam::dom_require<DOM_NODE_TEXT>(child));
                 text_view->rect = nullptr;
                 text_view->width = 0;
                 text_view->height = 0;
@@ -5553,8 +5581,8 @@ static float relayout_caption(LayoutContext* lycon, ViewBlock* cap, float table_
     }
     content_width = max(content_width, 0.0f);
 
-    lycon->view = (View*)cap;
-    dom_node_resolve_style((DomNode*)cap, lycon);
+    lycon->view = static_cast<View*>(cap);
+    dom_node_resolve_style(static_cast<DomNode*>(cap), lycon);
 
     lycon->block.content_width = content_width;
     lycon->block.content_height = 10000;
@@ -5744,7 +5772,9 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     float caption_height = 0;
 
     // Find ALL captions - check both HTML tag and CSS display property
-    for (ViewBlock* child = (ViewBlock*)table->first_child;  child;  child = (ViewBlock*)child->next_sibling) {
+    for (View* child_view = static_cast<View*>(table->first_child); child_view; child_view = static_cast<View*>(child_view->next_sibling)) {
+        ViewBlock* child = lam::view_as_block(child_view);
+        if (!child) continue;
         // Check for HTML <caption> tag OR CSS display: table-caption
         DisplayValue child_display = resolve_display_value((void*)child);
         bool is_caption = (child->tag() == HTM_TAG_CAPTION) ||
@@ -5805,7 +5835,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             // Position caption: margin-left determines x offset within table wrapper
             float cap_y = 0;
             for (int ci = 0; ci < captions->length; ci++) {
-                ViewBlock* cap = (ViewBlock*)captions->data[ci];
+                ViewBlock* cap = table_array_view_block(captions, ci);
                 float cap_ml = (cap->bound && cap->bound->margin.left_type != CSS_VALUE_AUTO && cap->bound->margin.left > 0)
                                    ? cap->bound->margin.left : 0;
                 float cap_mt = (cap->bound && cap->bound->margin.top > 0) ? cap->bound->margin.top : 0;
@@ -5841,7 +5871,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             table->height = total_height;
             table->content_width = table_width;
             table->content_height = total_height;
-            ((ViewBlock*)table)->height = total_height;
+            lam::view_require_block(table)->height = total_height;
 
             log_debug("Caption-only table: width=%.1f (caption=%.1f), height=%.1f (caption=%.1f + grid=%.1f)",
                       table_width, caption_box_width, total_height, caption_height, grid_height);
@@ -5878,7 +5908,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 bool has_float_children = false;
                 for (View* ch = table->first_child; ch; ch = ch->next_sibling) {
                     if (ch->node_type != DOM_NODE_ELEMENT) continue;
-                    ViewBlock* vb = (ViewBlock*)ch;
+                    ViewBlock* vb = lam::view_require_block(ch);
                     if (vb->position &&
                         (vb->position->float_prop == CSS_VALUE_LEFT ||
                          vb->position->float_prop == CSS_VALUE_RIGHT)) {
@@ -5897,7 +5927,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     // Block-level table in normal flow with float children: use containing block width
                     float container_width = lycon->block.content_width;
                     if (container_width <= 0) {
-                        ViewBlock* parent = (ViewBlock*)table->parent;
+                        ViewBlock* parent = lam::view_as_block(static_cast<View*>(table->parent));
                         if (parent && parent->width > 0) {
                             container_width = parent->width;
                             if (parent->bound) {
@@ -5926,7 +5956,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     table->height = table->blk->given_height + bp_top + bp_bottom;
                 }
             }
-            ((ViewBlock*)table)->height = table->height;
+            lam::view_require_block(table)->height = table->height;
             log_debug("Empty table: width=%.0f, height=%.0f (bp: t=%.0f b=%.0f l=%.0f r=%.0f)",
                       table->width, table->height, bp_top, bp_bottom, bp_left, bp_right);
 
@@ -5936,7 +5966,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             // children, inheriting the table's width.
             for (View* tch = table->first_child; tch; tch = tch->next_sibling) {
                 if (!tch->view_type) continue;  // skip nil-views (text nodes)
-                ViewBlock* tblk = (ViewBlock*)tch;
+                ViewBlock* tblk = lam::view_require_block(tch);
                 bool is_row_group = (tblk->view_type == RDT_VIEW_TABLE_ROW_GROUP);
                 bool is_row = (tblk->view_type == RDT_VIEW_TABLE_ROW);
                 if (!is_row_group && !is_row) continue;
@@ -5948,7 +5978,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     float max_float_bottom = 0;
                     for (View* rch = tblk->first_child; rch; rch = rch->next_sibling) {
                         if (!rch->view_type || !rch->is_block()) continue;
-                        ViewBlock* rvb = (ViewBlock*)rch;
+                        ViewBlock* rvb = lam::view_require_block(rch);
                         if (rvb->position && (rvb->position->float_prop == CSS_VALUE_LEFT ||
                                               rvb->position->float_prop == CSS_VALUE_RIGHT)) {
                             float bottom = rvb->y + rvb->height;
@@ -5965,12 +5995,12 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     // Row group: process each child row
                     for (View* rch = tblk->first_child; rch; rch = rch->next_sibling) {
                         if (!rch->view_type) continue;
-                        ViewBlock* row = (ViewBlock*)rch;
+                        ViewBlock* row = lam::view_require_block(rch);
                         if (row->view_type != RDT_VIEW_TABLE_ROW) continue;
                         float max_float_bottom = 0;
                         for (View* cch = row->first_child; cch; cch = cch->next_sibling) {
                             if (!cch->view_type || !cch->is_block()) continue;
-                            ViewBlock* cvb = (ViewBlock*)cch;
+                            ViewBlock* cvb = lam::view_require_block(cch);
                             if (cvb->position && (cvb->position->float_prop == CSS_VALUE_LEFT ||
                                                   cvb->position->float_prop == CSS_VALUE_RIGHT)) {
                                 float bottom = cvb->y + cvb->height;
@@ -6465,14 +6495,18 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         float total_explicit = 0.0f;  int unspecified_cols = 0;
 
         // STEP 3a: Read explicit widths from <col>/<colgroup> elements first
-        {
-            int col_idx = 0;
-            for (ViewElement* child = (ViewElement*)table->first_child; child && col_idx < columns;
-                 child = (ViewElement*)child->next_sibling) {
-                if (child->view_type == RDT_VIEW_TABLE_COLUMN_GROUP) {
-                    for (ViewElement* col = (ViewElement*)child->first_child; col && col_idx < columns;
-                         col = (ViewElement*)col->next_sibling) {
-                        if (col->view_type == RDT_VIEW_TABLE_COLUMN) {
+	        {
+	            int col_idx = 0;
+	            for (View* child_view = static_cast<View*>(table->first_child); child_view && col_idx < columns;
+	                 child_view = static_cast<View*>(child_view->next_sibling)) {
+	                ViewElement* child = lam::view_as_element(child_view);
+	                if (!child) continue;
+	                if (child->view_type == RDT_VIEW_TABLE_COLUMN_GROUP) {
+	                    for (View* col_view = static_cast<View*>(child->first_child); col_view && col_idx < columns;
+	                         col_view = static_cast<View*>(col_view->next_sibling)) {
+	                        ViewElement* col = lam::view_as_element(col_view);
+	                        if (!col) continue;
+	                        if (col->view_type == RDT_VIEW_TABLE_COLUMN) {
                             const char* span_str = col->get_attribute("span");
                             int span = (span_str && *span_str) ? (int)str_to_int64_default(span_str, strlen(span_str), 0) : 1; // INT_CAST_OK: span count
                             if (span <= 0) span = 1;
@@ -6854,7 +6888,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
         // Fallback to parent element width
         if (container_width <= 0) {
-            ViewBlock* parent = (ViewBlock*)table->parent;
+            ViewBlock* parent = lam::view_as_block(static_cast<View*>(table->parent));
             if (parent && parent->width > 0) {
                 container_width = parent->width;
                 if (parent->bound) {
@@ -7290,7 +7324,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
     if (table->tb->border_collapse && table->first_child != nullptr) {
         // Simple safety check before traversing table structure
-        ViewBlock* first_child = (ViewBlock*)table->first_child;
+        ViewBlock* first_child = lam::view_as_block(static_cast<View*>(table->first_child));
         if ((uintptr_t)first_child >= 0x1000 && (uintptr_t)first_child <= 0x7FFFFFFFFFFF) {
             log_debug("Enhanced border precision: Attempting to calculate optimal border width");
 
@@ -7317,17 +7351,17 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             // Find the first actual table row
             while (sample_row && sample_row->view_type != RDT_VIEW_TABLE_ROW) {
                 if (sample_row->view_type == RDT_VIEW_TABLE_ROW_GROUP && sample_row->first_child) {
-                    sample_row = (ViewBlock*)sample_row->first_child;
+                    sample_row = lam::view_as_block(static_cast<View*>(sample_row->first_child));
                 } else {
-                    sample_row = (ViewBlock*)sample_row->next_sibling;
+                    sample_row = lam::view_as_block(static_cast<View*>(sample_row->next_sibling));
                 }
             }
 
             // Sample a few cells from the first row to get representative border width
             if (sample_row && sample_row->view_type == RDT_VIEW_TABLE_ROW) {
-                for (ViewBlock* cell = (ViewBlock*)sample_row->first_child;
+                for (ViewBlock* cell = lam::view_as_block(static_cast<View*>(sample_row->first_child));
                      cell && sampled_cells < 3;
-                     cell = (ViewBlock*)cell->next_sibling) {
+                     cell = lam::view_as_block(static_cast<View*>(cell->next_sibling))) {
                     if (cell->view_type == RDT_VIEW_TABLE_CELL && cell->bound && cell->bound->border) {
                         // Average horizontal borders for width calculation
                         float cell_h_border = (cell->bound->border->width.left +
@@ -7463,7 +7497,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         float cap_y = 0;
         caption_height = 0;  // recalculate from scratch during positioning
         for (int ci = 0; ci < captions->length; ci++) {
-            ViewBlock* cap = (ViewBlock*)captions->data[ci];
+            ViewBlock* cap = table_array_view_block(captions, ci);
             float cap_ml = (cap->bound && cap->bound->margin.left_type != CSS_VALUE_AUTO && cap->bound->margin.left > 0)
                                ? cap->bound->margin.left : 0;
             cap->x = cap_ml;
@@ -7494,7 +7528,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     if (caption_content_w < 0) caption_content_w = 0;
                     for (View* cchild = cap->first_child; cchild; cchild = cchild->next_sibling) {
                         if (cchild->view_type == RDT_VIEW_TEXT) {
-                            ViewText* text = (ViewText*)cchild;
+                            ViewText* text = lam::view_require<RDT_VIEW_TEXT>(cchild);
                             float text_width = text->width;
                             float offset = inner_left + (caption_content_w - text_width) / 2.0f;
                             if (offset > 0) {
@@ -7536,7 +7570,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         float max_float_bottom = 0;
         for (View* child = table->first_child; child; child = child->next_sibling) {
             if (!child->is_block()) continue;
-            ViewBlock* vb = (ViewBlock*)child;
+            ViewBlock* vb = lam::view_require_block(child);
             if (vb->position && (vb->position->float_prop == CSS_VALUE_LEFT ||
                                  vb->position->float_prop == CSS_VALUE_RIGHT)) {
                 float bottom = vb->y + vb->height;
@@ -7565,9 +7599,11 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     ViewBlock* footer_group = nullptr;
     ArrayList* body_groups = arraylist_new(8);  // tbody + extra thead/tfoot + direct rows
 
-    for (ViewBlock* child = (ViewBlock*)table->first_child; child; child = (ViewBlock*)child->next_sibling) {
+    for (View* child_view = static_cast<View*>(table->first_child); child_view; child_view = static_cast<View*>(child_view->next_sibling)) {
+        ViewBlock* child = lam::view_as_block(child_view);
+        if (!child) continue;
         if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
-            ViewTableRowGroup* group = (ViewTableRowGroup*)child;
+            ViewTableRowGroup* group = lam::view_require<RDT_VIEW_TABLE_ROW_GROUP>(child);
             int section = group->get_section_type();
             if (section == TABLE_SECTION_THEAD && !header_group) {
                 header_group = child;
@@ -7595,7 +7631,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
     // Process elements in visual order (THEAD groups → TBODY groups → direct rows → TFOOT groups)
     for (int _i = 0; _i < ordered_elements->length; _i++) {
-        ViewBlock* child = (ViewBlock*)ordered_elements->data[_i];
+        ViewBlock* child = table_array_view_block(ordered_elements, _i);
         log_info("%s Processing ordered element %d: view_type=%d", table->source_loc(), _i, child->view_type);
         if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
             float group_start_y = current_y;
@@ -7648,11 +7684,13 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             log_debug("%s Row group positioned at x=%.1f, y=%.1f, width=%.1f (tbody_content_width=%.1f, columns=%d)", table->source_loc(),
                    child->x, child->y, child->width, tbody_content_width, columns);
 
-            // Count rows in this group to identify the last row
-            int row_count = 0;
-            for (ViewBlock* count_row = (ViewBlock*)child->first_child; count_row; count_row = (ViewBlock*)count_row->next_sibling) {
-                if (count_row->view_type == RDT_VIEW_TABLE_ROW) row_count++;
-            }
+	            // Count rows in this group to identify the last row
+	            int row_count = 0;
+	            for (View* count_row_view = child->first_child; count_row_view; count_row_view = count_row_view->next_sibling) {
+	                ViewBlock* count_row = lam::view_as_block(count_row_view);
+	                if (!count_row) continue;
+	                if (count_row->view_type == RDT_VIEW_TABLE_ROW) row_count++;
+	            }
             int current_row_index = 0;
 
             // CSS 2.1 §17.5.3: Check row group height properties
@@ -7681,8 +7719,10 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 }
             }
 
-            for (ViewBlock* row = (ViewBlock*)child->first_child; row; row = (ViewBlock*)row->next_sibling) {
-                if (row->view_type == RDT_VIEW_TABLE_ROW) {
+	            for (View* row_view = child->first_child; row_view; row_view = row_view->next_sibling) {
+	                ViewBlock* row = lam::view_as_block(row_view);
+	                if (!row) continue;
+	                if (row->view_type == RDT_VIEW_TABLE_ROW) {
                     current_row_index++;
                     bool is_last_row = (current_row_index == row_count);
 
@@ -7705,10 +7745,10 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
                         // Still process cells for column width contribution
                         // but don't let them affect row height
-                        ViewTableRow* trow = (ViewTableRow*)row;
+                        ViewTableRow* trow = lam::view_require<RDT_VIEW_TABLE_ROW>(row);
                         for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
                             // Position cell but with zero height
-                            ViewBlock* cell = (ViewBlock*)tcell;
+                            ViewBlock* cell = lam::view_require_block(tcell);
                             cell->x = col_x_positions[tcell->td->col_index] - col_x_positions[0];
                             cell->y = 0;
                             cell->width = calculate_cell_width_from_columns(tcell, col_widths, columns);
@@ -7736,7 +7776,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
                     // Calculate row height and position cells
                     float row_height = 0.0f;
-                    ViewTableRow* trow = (ViewTableRow*)row;
+                    ViewTableRow* trow = lam::view_require<RDT_VIEW_TABLE_ROW>(row);
                     for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
                         float height_for_row = process_table_cell(lycon, tcell, table, col_widths, col_x_positions, columns, meta->col_edge_max_border, meta->col_collapsed, meta->col_original_widths);
                         if (height_for_row > row_height) {
@@ -7747,11 +7787,12 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     // CSS 2.1 §9.4.1: Tables establish a BFC. When a row contains
                     // floated children (blockified table-internal elements per §9.7),
                     // the row expands to contain them.
-                    for (DomNode* rchild = row->first_child; rchild; rchild = rchild->next_sibling) {
-                        if (!rchild->is_element()) continue;
-                        ViewBlock* rvb = (ViewBlock*)rchild;
-                        if (rvb->position && (rvb->position->float_prop == CSS_VALUE_LEFT ||
-                                              rvb->position->float_prop == CSS_VALUE_RIGHT)) {
+	                    for (DomNode* rchild = row->first_child; rchild; rchild = rchild->next_sibling) {
+	                        if (!rchild->is_element()) continue;
+	                        ViewBlock* rvb = lam::view_as_block(static_cast<View*>(rchild));
+	                        if (!rvb) continue;
+	                        if (rvb->position && (rvb->position->float_prop == CSS_VALUE_LEFT ||
+	                                              rvb->position->float_prop == CSS_VALUE_RIGHT)) {
                             float float_bottom = rvb->height;
                             if (float_bottom > row_height) {
                                 log_debug("%s Row float containment: expanding height %.1f -> %.1f for floated child", table->source_loc(),
@@ -7868,20 +7909,24 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
                 // Count eligible rows for distribution
                 int eligible_rows = 0;
-                for (ViewBlock* r = (ViewBlock*)child->first_child; r; r = (ViewBlock*)r->next_sibling) {
+                for (View* r_view = child->first_child; r_view; r_view = r_view->next_sibling) {
+                    ViewBlock* r = lam::view_as_block(r_view);
+                    if (!r) continue;
                     if (r->view_type == RDT_VIEW_TABLE_ROW && r->height > 0) eligible_rows++;
                 }
                 if (eligible_rows > 0) {
                     float extra_per_row = extra / eligible_rows;
                     float y_accum = 0;
-                    for (ViewBlock* r = (ViewBlock*)child->first_child; r; r = (ViewBlock*)r->next_sibling) {
+                    for (View* r_view = child->first_child; r_view; r_view = r_view->next_sibling) {
+                        ViewBlock* r = lam::view_as_block(r_view);
+                        if (!r) continue;
                         if (r->view_type == RDT_VIEW_TABLE_ROW && r->height > 0) {
                             r->y = y_accum;
                             r->height += extra_per_row;
                             log_debug("%s Row expanded to %.1fpx (added %.1fpx)", table->source_loc(), r->height, extra_per_row);
 
                             // Update row height in meta
-                            ViewTableRow* trow = (ViewTableRow*)r;
+                            ViewTableRow* trow = lam::view_require<RDT_VIEW_TABLE_ROW>(r);
                             ViewTableCell* first = trow->first_cell();
                             if (first && first->td->row_index >= 0 && first->td->row_index < meta->row_count) {
                                 meta->row_heights[first->td->row_index] = r->height;
@@ -7910,7 +7955,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         }
         else if (child->view_type == RDT_VIEW_TABLE_ROW) {
             // Handle direct table rows (part of implicit tbody, positioned with other tbody content)
-            ViewTableRow* trow = (ViewTableRow*)child;
+            ViewTableRow* trow = lam::view_require<RDT_VIEW_TABLE_ROW>(child);
 
             // CSS 2.1 §17.5.5: Check for visibility: collapse
             bool is_collapsed = (global_row_index < meta->row_count &&
@@ -7925,7 +7970,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
                 // Still process cells for column width but with zero height
                 for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
-                    ViewBlock* cell = (ViewBlock*)tcell;
+                    ViewBlock* cell = lam::view_require_block(tcell);
                     cell->x = col_x_positions[tcell->td->col_index] - col_x_positions[0];
                     cell->y = 0;
                     cell->width = calculate_cell_width_from_columns(tcell, col_widths, columns);
@@ -8054,11 +8099,15 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
     // After distribution, update actual row heights to match meta->row_heights
     // This ensures rows reflect the distributed heights
-    for (ViewBlock* child = (ViewBlock*)table->first_child; child; child = (ViewBlock*)child->next_sibling) {
+    for (View* child_view = table->first_child; child_view; child_view = child_view->next_sibling) {
+        if (!child_view->is_block()) continue;
+        ViewBlock* child = lam::view_require_block(child_view);
         if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
-            for (ViewBlock* row = (ViewBlock*)child->first_child; row; row = (ViewBlock*)row->next_sibling) {
+            for (View* row_view = child->first_child; row_view; row_view = row_view->next_sibling) {
+                if (!row_view->is_block()) continue;
+                ViewBlock* row = lam::view_require_block(row_view);
                 if (row->view_type == RDT_VIEW_TABLE_ROW) {
-                    ViewTableRow* trow = (ViewTableRow*)row;
+                    ViewTableRow* trow = lam::view_require<RDT_VIEW_TABLE_ROW>(row);
                     // Get row index from first cell
                     ViewTableCell* first_cell = trow->first_cell();
                     if (first_cell) {
@@ -8083,7 +8132,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 }
             }
         } else if (child->view_type == RDT_VIEW_TABLE_ROW) {
-            ViewTableRow* trow = (ViewTableRow*)child;
+            ViewTableRow* trow = lam::view_require<RDT_VIEW_TABLE_ROW>(child);
             ViewTableCell* first_cell = trow->first_cell();
             if (first_cell) {
                 int row_idx = first_cell->td->row_index;
@@ -8112,11 +8161,15 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     // the correct total height of their spanned rows, then re-apply vertical
     // alignment since the content was laid out with estimated height
     // =========================================================================
-    for (ViewBlock* child = (ViewBlock*)table->first_child; child; child = (ViewBlock*)child->next_sibling) {
+    for (View* child_view = table->first_child; child_view; child_view = child_view->next_sibling) {
+        if (!child_view->is_block()) continue;
+        ViewBlock* child = lam::view_require_block(child_view);
         if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
-            for (ViewBlock* row = (ViewBlock*)child->first_child; row; row = (ViewBlock*)row->next_sibling) {
+            for (View* row_view = child->first_child; row_view; row_view = row_view->next_sibling) {
+                if (!row_view->is_block()) continue;
+                ViewBlock* row = lam::view_require_block(row_view);
                 if (row->view_type == RDT_VIEW_TABLE_ROW) {
-                    ViewTableRow* trow = (ViewTableRow*)row;
+                    ViewTableRow* trow = lam::view_require<RDT_VIEW_TABLE_ROW>(row);
                     for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
                         if (tcell->td->row_span > 1) {
                             int start_row = tcell->td->row_index;
@@ -8145,7 +8198,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             }
         }
         else if (child->view_type == RDT_VIEW_TABLE_ROW) {
-            ViewTableRow* trow = (ViewTableRow*)child;
+            ViewTableRow* trow = lam::view_require<RDT_VIEW_TABLE_ROW>(child);
             for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
                 if (tcell->td->row_span > 1) {
                     int start_row = tcell->td->row_index;
@@ -8289,7 +8342,9 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             int section_count = 0;  // Count sections for inter-section spacing
 
             log_debug("%s Calculating natural heights for each section", table->source_loc());
-            for (ViewBlock* child = (ViewBlock*)table->first_child; child; child = (ViewBlock*)child->next_sibling) {
+            for (View* child_view = table->first_child; child_view; child_view = child_view->next_sibling) {
+                if (!child_view->is_block()) continue;
+                ViewBlock* child = lam::view_require_block(child_view);
                 // Check for caption (HTML tag or CSS display)
                 DisplayValue child_display = resolve_display_value((void*)child);
                 bool is_caption = (child->tag() == HTM_TAG_CAPTION) ||
@@ -8300,7 +8355,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     section_count++;
                     log_debug("%s   Caption height: %.1f", table->source_loc(), child->height);
                 } else if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
-                    ViewTableRowGroup* group = (ViewTableRowGroup*)child;
+                    ViewTableRowGroup* group = lam::view_require<RDT_VIEW_TABLE_ROW_GROUP>(child);
                     TableSectionType section_type = group->get_section_type();
                     bool is_body_group = (section_type == TABLE_SECTION_TBODY);
 
@@ -8371,9 +8426,11 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 // CSS 2.1 §17.5.3: Rows with percentage heights compute to auto and should
                 // not receive extra height. Only distribute to rows without percentage heights.
                 int eligible_row_count = 0;
-                for (ViewBlock* child = (ViewBlock*)table->first_child; child; child = (ViewBlock*)child->next_sibling) {
+                for (View* child_view = table->first_child; child_view; child_view = child_view->next_sibling) {
+                    if (!child_view->is_block()) continue;
+                    ViewBlock* child = lam::view_require_block(child_view);
                     if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
-                        ViewTableRowGroup* group = (ViewTableRowGroup*)child;
+                        ViewTableRowGroup* group = lam::view_require<RDT_VIEW_TABLE_ROW_GROUP>(child);
                         TableSectionType section_type = group->get_section_type();
                         bool is_body_group = (section_type == TABLE_SECTION_TBODY);
 
@@ -8403,9 +8460,11 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     int distributed_count = 0;
 
                     // First pass: update meta->row_heights for eligible body rows
-                    for (ViewBlock* child = (ViewBlock*)table->first_child; child; child = (ViewBlock*)child->next_sibling) {
+                    for (View* child_view = table->first_child; child_view; child_view = child_view->next_sibling) {
+                        if (!child_view->is_block()) continue;
+                        ViewBlock* child = lam::view_require_block(child_view);
                         if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
-                            ViewTableRowGroup* group = (ViewTableRowGroup*)child;
+                            ViewTableRowGroup* group = lam::view_require<RDT_VIEW_TABLE_ROW_GROUP>(child);
                             TableSectionType section_type = group->get_section_type();
                             bool is_body_group = (section_type == TABLE_SECTION_TBODY);
 
@@ -8493,15 +8552,19 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
             // Now update all row and cell views with new heights
             // Iterate through row groups and direct rows to update their dimensions
-            for (ViewBlock* child = (ViewBlock*)table->first_child; child; child = (ViewBlock*)child->next_sibling) {
+            for (View* child_view = table->first_child; child_view; child_view = child_view->next_sibling) {
+                if (!child_view->is_block()) continue;
+                ViewBlock* child = lam::view_require_block(child_view);
                 if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
                     // Track max extent within group for updating group height
                     float group_max_y = 0;
 
                     // Update rows within group
-                    for (ViewBlock* row = (ViewBlock*)child->first_child; row; row = (ViewBlock*)row->next_sibling) {
+                    for (View* row_view = child->first_child; row_view; row_view = row_view->next_sibling) {
+                        if (!row_view->is_block()) continue;
+                        ViewBlock* row = lam::view_require_block(row_view);
                         if (row->view_type == RDT_VIEW_TABLE_ROW) {
-                            ViewTableRow* trow = (ViewTableRow*)row;
+                            ViewTableRow* trow = lam::view_require<RDT_VIEW_TABLE_ROW>(row);
                             // Find row index and update
                             for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
                                 int row_idx = tcell->td->row_index;
@@ -8537,7 +8600,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                         log_debug("%s Updated row group height from %.1f to %.1f", table->source_loc(), old_group_height, child->height);
                     }
                 } else if (child->view_type == RDT_VIEW_TABLE_ROW) {
-                    ViewTableRow* trow = (ViewTableRow*)child;
+                    ViewTableRow* trow = lam::view_require<RDT_VIEW_TABLE_ROW>(child);
                     for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
                         int row_idx = tcell->td->row_index;
                         if (row_idx >= 0 && row_idx < meta->row_count) {
@@ -8569,7 +8632,9 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             // positions and group heights from the authoritative meta->row_y_positions.
             {
                 float group_y_accum = -1;
-                for (ViewBlock* child = (ViewBlock*)table->first_child; child; child = (ViewBlock*)child->next_sibling) {
+                for (View* child_view = table->first_child; child_view; child_view = child_view->next_sibling) {
+                    if (!child_view->is_block()) continue;
+                    ViewBlock* child = lam::view_require_block(child_view);
                     if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
                         if (group_y_accum >= 0) {
                             float old_y = child->y;
@@ -8585,9 +8650,11 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                         // Recalculate row positions within group relative to the (possibly updated) group y,
                         // and recompute group height from the corrected row extents.
                         float group_max_y = 0;
-                        for (ViewBlock* row = (ViewBlock*)child->first_child; row; row = (ViewBlock*)row->next_sibling) {
+                        for (View* row_view = child->first_child; row_view; row_view = row_view->next_sibling) {
+                            if (!row_view->is_block()) continue;
+                            ViewBlock* row = lam::view_require_block(row_view);
                             if (row->view_type == RDT_VIEW_TABLE_ROW) {
-                                ViewTableRow* trow = (ViewTableRow*)row;
+                                ViewTableRow* trow = lam::view_require<RDT_VIEW_TABLE_ROW>(row);
                                 for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
                                     int row_idx = tcell->td->row_index;
                                     if (row_idx >= 0 && row_idx < meta->row_count) {
@@ -8643,7 +8710,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         float cap_y = final_table_height;
         float total_bottom_caption_height = 0;
         for (int ci = 0; ci < captions->length; ci++) {
-            ViewBlock* cap = (ViewBlock*)captions->data[ci];
+            ViewBlock* cap = table_array_view_block(captions, ci);
             float cap_ml = (cap->bound && cap->bound->margin.left_type != CSS_VALUE_AUTO && cap->bound->margin.left > 0)
                                ? cap->bound->margin.left : 0;
             cap->x = cap_ml;
@@ -8721,14 +8788,18 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         float available_for_groups = final_table_height - content_area_top_y - bottom_overhead;
         if (available_for_groups > 0) {
             int row_group_count = 0;
-            for (ViewBlock* child = (ViewBlock*)table->first_child; child; child = (ViewBlock*)child->next_sibling) {
+            for (View* child_view = table->first_child; child_view; child_view = child_view->next_sibling) {
+                if (!child_view->is_block()) continue;
+                ViewBlock* child = lam::view_require_block(child_view);
                 if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) row_group_count++;
             }
             if (row_group_count > 0) {
                 float height_per_group = available_for_groups / row_group_count;
                 log_debug("%s No-row table: expanding %d row groups to %.1fpx each (available=%.1f)", table->source_loc(),
                          row_group_count, height_per_group, available_for_groups);
-                for (ViewBlock* child = (ViewBlock*)table->first_child; child; child = (ViewBlock*)child->next_sibling) {
+                for (View* child_view = table->first_child; child_view; child_view = child_view->next_sibling) {
+                    if (!child_view->is_block()) continue;
+                    ViewBlock* child = lam::view_require_block(child_view);
                     if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
                         if (height_per_group > child->height) {
                             child->height = height_per_group;
@@ -8834,7 +8905,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
     // CRITICAL: Also set ViewBlock height for block layout system integration
     // ViewTable inherits from ViewBlock, so block layout reads this field
-    ((ViewBlock*)table)->height = table->height;
+    lam::view_require_block(table)->height = table->height;
     log_debug("%s Set ViewBlock height to %.1fpx for block layout integration (table ptr=%p)", table->source_loc(), table->height, table);
 
     log_debug("%s Table dimensions calculated: width=%dpx, height=%dpx (ptr=%p, table->width=%.1f, table->height=%.1f)", table->source_loc(),
@@ -9035,10 +9106,10 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
             DisplayValue parent_display = resolve_display_value((void*)parent);
             bool parent_is_inline = (parent_display.outer == CSS_VALUE_INLINE);
 
-            table_wrapper = (DomElement*)pool_calloc(pool, sizeof(DomElement));
+            table_wrapper = lam::pool_alloc_dom_element(pool);
             if (table_wrapper) {
                 table_wrapper->node_type = DOM_NODE_ELEMENT;
-                table_wrapper->tag_name = "::anon-table";
+                dom_element_retain_tag_name(table_wrapper, lam::borrow_const(lam::promote_to_pool(pool, "::anon-table")));
                 table_wrapper->doc = parent->doc;
                 table_wrapper->display.outer = parent_is_inline ? CSS_VALUE_INLINE : CSS_VALUE_BLOCK;
                 table_wrapper->display.inner = CSS_VALUE_TABLE;  // Inner is table layout
@@ -9053,7 +9124,7 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
                     table_wrapper->font = (FontProp*)pool_calloc(pool, sizeof(FontProp));
                     if (table_wrapper->font) {
                         // Copy only specified font properties, not derived/cached fields
-                        table_wrapper->font->family = inherit_font->family;
+                        radiant_retain_font_family(table_wrapper->font, lam::PoolPtr<char>(inherit_font->family));
                         table_wrapper->font->font_size = inherit_font->font_size;
                         table_wrapper->font->font_style = inherit_font->font_style;
                         table_wrapper->font->font_weight = inherit_font->font_weight;
@@ -9077,6 +9148,7 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
                     table_wrapper->in_line = (InlineProp*)pool_calloc(pool, sizeof(InlineProp));
                     if (table_wrapper->in_line) {
                         table_wrapper->in_line->color = inherit_inline->color;
+                        table_wrapper->in_line->has_color = inherit_inline->has_color;
                         table_wrapper->in_line->visibility = inherit_inline->visibility;
                         table_wrapper->in_line->opacity = 1.0f;
                     }
@@ -9091,10 +9163,10 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
         // - cells-only: create anon-tr as sole child of anon-table
         // - mixed cells + rows/groups: create anon-tr for cells, rows/groups go directly in table
         if (has_cells && table_wrapper) {
-            row_wrapper = (DomElement*)pool_calloc(pool, sizeof(DomElement));
+            row_wrapper = lam::pool_alloc_dom_element(pool);
             if (row_wrapper) {
                 row_wrapper->node_type = DOM_NODE_ELEMENT;
-                row_wrapper->tag_name = "::anon-tr";
+                dom_element_retain_tag_name(row_wrapper, lam::borrow_const(lam::promote_to_pool(pool, "::anon-tr")));
                 row_wrapper->doc = parent->doc;
                 row_wrapper->parent = table_wrapper;
                 row_wrapper->display.outer = CSS_VALUE_BLOCK;
@@ -9104,7 +9176,7 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
                 if (table_wrapper->font) {
                     row_wrapper->font = (FontProp*)pool_calloc(pool, sizeof(FontProp));
                     if (row_wrapper->font) {
-                        row_wrapper->font->family = table_wrapper->font->family;
+                        radiant_retain_font_family(row_wrapper->font, lam::PoolPtr<char>(table_wrapper->font->family));
                         row_wrapper->font->font_size = table_wrapper->font->font_size;
                         row_wrapper->font->font_style = table_wrapper->font->font_style;
                         row_wrapper->font->font_weight = table_wrapper->font->font_weight;
@@ -9122,6 +9194,7 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
                     row_wrapper->in_line = (InlineProp*)pool_calloc(pool, sizeof(InlineProp));
                     if (row_wrapper->in_line) {
                         row_wrapper->in_line->color = table_wrapper->in_line->color;
+                        row_wrapper->in_line->has_color = table_wrapper->in_line->has_color;
                         row_wrapper->in_line->visibility = table_wrapper->in_line->visibility;
                         row_wrapper->in_line->opacity = 1.0f;
                     }
@@ -9262,12 +9335,12 @@ void layout_table_content(LayoutContext* lycon, DomNode* tableNode, DisplayValue
     // Without this, lycon->font.style would still point to the grandparent's font.
     // Use tableNode->font directly (safe) instead of casting lycon->view to ViewTable*
     // (which may not be a ViewTable yet — it's the parent's view at this point).
-    ViewBlock* table_block = tableNode->is_element() ? (ViewBlock*)tableNode->as_element() : nullptr;
-    if (table_block && table_block->font) {
-        log_debug("%s Table font context check: table_block=%p, font=%p, font_size=%.1f", tableNode->source_loc(),
-            (void*)table_block, (void*)table_block->font, table_block->font->font_size);
-        setup_font(lycon->ui_context, &lycon->font, table_block->font);
-        log_debug("%s Updated font context for table: font-size=%.1f", tableNode->source_loc(), table_block->font->font_size);
+    DomElement* table_element = tableNode->is_element() ? lam::dom_require<DOM_NODE_ELEMENT>(tableNode) : nullptr;
+    if (table_element && table_element->font) {
+        log_debug("%s Table font context check: table_element=%p, font=%p, font_size=%.1f", tableNode->source_loc(),
+            (void*)table_element, (void*)table_element->font, table_element->font->font_size);
+        setup_font(lycon->ui_context, &lycon->font, table_element->font);
+        log_debug("%s Updated font context for table: font-size=%.1f", tableNode->source_loc(), table_element->font->font_size);
     } else {
         log_debug("%s WARNING: table font is NULL, cannot update font context", tableNode->source_loc());
     }
@@ -9278,7 +9351,7 @@ void layout_table_content(LayoutContext* lycon, DomNode* tableNode, DisplayValue
     // item_prop_type=ITEM_PROP_GRID/FLEX without allocating TableProp.
     // We must allocate tb before build_table_tree accesses it.
     if (tableNode->is_element()) {
-        ViewTable* vtable = (ViewTable*)tableNode;
+        ViewTable* vtable = lam::unsafe_view_table_storage(tableNode);
         if (vtable->item_prop_type != DomElement::ITEM_PROP_TABLE) {
             vtable->tb = (TableProp*)alloc_prop(lycon, sizeof(TableProp));
             vtable->item_prop_type = DomElement::ITEM_PROP_TABLE;
@@ -9292,7 +9365,7 @@ void layout_table_content(LayoutContext* lycon, DomNode* tableNode, DisplayValue
             vtable->tb->is_annoy_colgroup = 0;
             vtable->view_type = RDT_VIEW_TABLE;
         }
-        lycon->view = (View*)vtable;
+        lycon->view = static_cast<View*>(vtable);
     }
 
     // Step 1: Build table structure from DOM
@@ -9343,26 +9416,29 @@ void layout_table_content(LayoutContext* lycon, DomNode* tableNode, DisplayValue
     // CSS Position 3 §3.4: Apply relative/sticky positioning to table sub-elements
     // (table cells, rows, row groups, captions) after all table layout is finalized.
     // Table-internal elements can be relatively positioned per CSS 2.1 §17.5.1.
-    for (ViewBlock* child = (ViewBlock*)table->first_child; child; child = (ViewBlock*)child->next_sibling) {
+    for (View* child_view = table->first_child; child_view; child_view = child_view->next_sibling) {
         // Skip non-block views (text nodes, br, inline, etc.) — they don't have position properties
-        if (!child->is_block()) continue;
+        if (!child_view->is_block()) continue;
+        ViewBlock* child = lam::view_require_block(child_view);
         if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
             if (child->position && child->position->position == CSS_VALUE_RELATIVE)
                 layout_relative_positioned(lycon, child);
             else if (child->position && child->position->position == CSS_VALUE_STICKY)
                 layout_sticky_positioned(lycon, child);
-            for (ViewBlock* row = (ViewBlock*)child->first_child; row; row = (ViewBlock*)row->next_sibling) {
+            for (View* row_view = child->first_child; row_view; row_view = row_view->next_sibling) {
+                if (!row_view->is_block()) continue;
+                ViewBlock* row = lam::view_require_block(row_view);
                 if (row->view_type == RDT_VIEW_TABLE_ROW) {
                     if (row->position && row->position->position == CSS_VALUE_RELATIVE)
                         layout_relative_positioned(lycon, row);
                     else if (row->position && row->position->position == CSS_VALUE_STICKY)
                         layout_sticky_positioned(lycon, row);
-                    ViewTableRow* trow = (ViewTableRow*)row;
+                    ViewTableRow* trow = lam::view_require<RDT_VIEW_TABLE_ROW>(row);
                     for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
                         if (tcell->position && tcell->position->position == CSS_VALUE_RELATIVE)
-                            layout_relative_positioned(lycon, (ViewBlock*)tcell);
+                            layout_relative_positioned(lycon, lam::view_require_block(tcell));
                         else if (tcell->position && tcell->position->position == CSS_VALUE_STICKY)
-                            layout_sticky_positioned(lycon, (ViewBlock*)tcell);
+                            layout_sticky_positioned(lycon, lam::view_require_block(tcell));
                     }
                 }
             }
@@ -9371,12 +9447,12 @@ void layout_table_content(LayoutContext* lycon, DomNode* tableNode, DisplayValue
                 layout_relative_positioned(lycon, child);
             else if (child->position && child->position->position == CSS_VALUE_STICKY)
                 layout_sticky_positioned(lycon, child);
-            ViewTableRow* trow = (ViewTableRow*)child;
+            ViewTableRow* trow = lam::view_require<RDT_VIEW_TABLE_ROW>(child);
             for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
                 if (tcell->position && tcell->position->position == CSS_VALUE_RELATIVE)
-                    layout_relative_positioned(lycon, (ViewBlock*)tcell);
+                    layout_relative_positioned(lycon, lam::view_require_block(tcell));
                 else if (tcell->position && tcell->position->position == CSS_VALUE_STICKY)
-                    layout_sticky_positioned(lycon, (ViewBlock*)tcell);
+                    layout_sticky_positioned(lycon, lam::view_require_block(tcell));
             }
         } else if (child->position && child->position->position == CSS_VALUE_RELATIVE) {
             layout_relative_positioned(lycon, child);

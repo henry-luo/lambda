@@ -8,6 +8,7 @@
 #include "text_control.hpp"
 #include "text_edit.hpp"
 #include "../lambda/input/css/dom_element.hpp"
+#include "../lib/tagged.hpp"
 #include "../lib/log.h"
 
 #include <stdlib.h>
@@ -41,22 +42,22 @@ static DomElement* ctx_menu_target_elem(DocState* state) {
     if (!state || !state->context_menu_target) return nullptr;
     View* v = state->context_menu_target;
     if (!v->is_element()) return nullptr;
-    DomElement* e = (DomElement*)v;
+    DomElement* e = lam::dom_require_element(v);
     return tc_is_text_control(e) ? e : nullptr;
 }
 
 static bool ctx_menu_has_selection(DocState* state, DomElement* elem) {
     if (!elem || !elem->form) return false;
     uint32_t start = 0, end = 0;
-    form_control_get_selection(state, (View*)elem, &start, &end, NULL);
+    form_control_get_selection(state, static_cast<View*>(elem), &start, &end, NULL);
     return start != end;
 }
 
 bool context_menu_item_enabled(DocState* state, int item) {
     DomElement* elem = ctx_menu_target_elem(state);
     if (!elem || !elem->form) return false;
-    bool readonly = form_control_is_readonly(state, (View*)elem);
-    bool disabled = form_control_is_disabled(state, (View*)elem);
+    bool readonly = form_control_is_readonly(state, static_cast<View*>(elem));
+    bool disabled = form_control_is_disabled(state, static_cast<View*>(elem));
     if (disabled) return false;
     bool has_sel  = ctx_menu_has_selection(state, elem);
     bool has_val  = elem->form->current_value_len > 0;
@@ -76,7 +77,7 @@ bool context_menu_item_enabled(DocState* state, int item) {
 void context_menu_open(DocState* state, View* target, float x, float y) {
     if (!state || !target) return;
     if (!target->is_element()) return;
-    DomElement* e = (DomElement*)target;
+    DomElement* e = lam::dom_require_element(target);
     if (!tc_is_text_control(e)) return;
 
     // Width/height are nominal CSS-px values; render scales them.
@@ -147,19 +148,19 @@ static void ctx_menu_exec_cut(DomElement* elem, DocState* state) {
     uint32_t a, b;
     if (!ctx_menu_selection_bytes(elem, &a, &b)) return;
     ctx_menu_exec_copy(elem);
-    te_replace_byte_range(elem, state, (View*)elem, a, b, nullptr, 0);
+    te_replace_byte_range(elem, state, static_cast<View*>(elem), a, b, nullptr, 0);
 }
 
 static void ctx_menu_exec_delete(DomElement* elem, DocState* state) {
     uint32_t a, b;
     if (!ctx_menu_selection_bytes(elem, &a, &b)) return;
-    te_replace_byte_range(elem, state, (View*)elem, a, b, nullptr, 0);
+    te_replace_byte_range(elem, state, static_cast<View*>(elem), a, b, nullptr, 0);
 }
 
 static void ctx_menu_exec_paste(DomElement* elem, DocState* state) {
     const char* clip = clipboard_get_text();
     if (!clip || !*clip) return;
-    te_paste(elem, state, (View*)elem, clip, (uint32_t)strlen(clip));
+    te_paste(elem, state, static_cast<View*>(elem), clip, (uint32_t)strlen(clip));
 }
 
 static void ctx_menu_exec_select_all(DomElement* elem) {
@@ -224,7 +225,7 @@ void context_menu_render(RenderContext* rdcon, DocState* state) {
     DomElement* elem = ctx_menu_target_elem(state);
     FontProp* font = nullptr;
     if (elem) {
-        ViewBlock* tblock = (ViewBlock*)elem;
+        ViewBlock* tblock = lam::view_require_block(static_cast<View*>(elem));
         font = tblock->font;
     }
     Color text_enabled  = ctx_make_color(0, 0, 0);

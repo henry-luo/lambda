@@ -60,6 +60,18 @@ typedef struct JsTypedArray {
     bool is_buffer;                  // true only for Node Buffer instances backed by Uint8Array storage
 } JsTypedArray;
 
+typedef enum JsAtomicsOp {
+    JS_ATOMICS_OP_ADD,
+    JS_ATOMICS_OP_AND,
+    JS_ATOMICS_OP_COMPARE_EXCHANGE,
+    JS_ATOMICS_OP_EXCHANGE,
+    JS_ATOMICS_OP_LOAD,
+    JS_ATOMICS_OP_OR,
+    JS_ATOMICS_OP_STORE,
+    JS_ATOMICS_OP_SUB,
+    JS_ATOMICS_OP_XOR,
+} JsAtomicsOp;
+
 // Sentinel markers for identifying typed arrays, array buffers, data views
 extern char js_typed_array_marker;
 
@@ -86,6 +98,8 @@ Item js_arraybuffer_construct_resizable(Item length_arg, Item options_arg);
 Item js_arraybuffer_wrap(JsArrayBuffer* ab);
 bool js_is_arraybuffer(Item val);
 int  js_arraybuffer_byte_length(Item val);
+int  js_arraybuffer_max_byte_length(Item val);
+bool js_arraybuffer_is_resizable(Item val);
 Item js_arraybuffer_resize(Item val, Item new_length_item);
 Item js_arraybuffer_slice(Item val, int begin, int end);
 bool js_arraybuffer_is_view(Item val);
@@ -95,8 +109,23 @@ bool js_arraybuffer_is_detached(Item val);
 
 // SharedArrayBuffer
 Item js_sharedarraybuffer_construct(Item length_arg);
+Item js_sharedarraybuffer_construct_with_options(Item length_arg, Item options_arg);
 bool js_is_sharedarraybuffer(Item val);
 Item js_sharedarraybuffer_method(Item sab, Item method_name, Item* args, int argc);
+
+// Atomics operations on SharedArrayBuffer-backed integer typed arrays
+Item js_atomics_operation(int op, Item typed_array, Item index, Item value, Item replacement);
+Item js_atomics_wait(Item typed_array, Item index, Item expected, Item timeout);
+Item js_atomics_wait_async(Item typed_array, Item index, Item expected, Item timeout);
+Item js_atomics_notify(Item typed_array, Item index, Item count);
+Item js_atomics_is_lock_free(Item size);
+void js_atomics_reset_waiters(void);
+int  js_atomics_report_waiter_for_agent(int agent_slot, Item report_string);
+bool js_atomics_report_waiter_ready(int waiter_id);
+Item js_atomics_resolve_waiter_report(int waiter_id, Item report_string);
+void js_atomics_agent_sleep(Item ms);
+Item js_atomics_agent_monotonic_now(void);
+void js_atomics_agent_leaving(int agent_slot);
 
 // DataView operations
 Item js_dataview_new(Item buffer, Item offset_item, Item length_item);
@@ -105,7 +134,7 @@ JsDataView* js_get_dataview_ptr(Item val);
 Item js_dataview_method(Item dv, Item method_name, Item* args, int argc);
 
 // Smart constructor: dispatches based on argument type (number, ArrayBuffer, TypedArray, Array)
-Item js_typed_array_construct(int type_id, Item arg, int byte_offset, int length, int argc);
+Item js_typed_array_construct(int type_id, Item arg, Item byte_offset, Item length, int argc);
 
 // Returns the JS type name (e.g. "Uint8Array"), or NULL if not a typed array
 const char* js_typed_array_type_name(Item val);

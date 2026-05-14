@@ -7,9 +7,11 @@
 #include "form_control.hpp"
 #include "state_store.hpp"
 #include "font_face.h"
+#include "retained_fields.hpp"
 #include "../lib/font/font.h"
 #include "css_animation.h"
 #include "webview.h"
+#include "../lib/tagged.hpp"
 
 #include <chrono>
 
@@ -431,7 +433,7 @@ CssValue inherit_line_height(LayoutContext* lycon, ViewBlock* block) {
         if (parent->blk && parent->blk->line_height) {
             if (parent->blk->line_height->type == CSS_VALUE_TYPE_KEYWORD &&
                 parent->blk->line_height->data.keyword == CSS_VALUE_INHERIT) {
-                block = (ViewBlock*)parent;
+                block = lam::unsafe_view_block_api_span(parent);
                 goto INHERIT;
             }
             CssValue value = *parent->blk->line_height;
@@ -475,7 +477,7 @@ CssValue inherit_line_height(LayoutContext* lycon, ViewBlock* block) {
             }
             return value;
         }
-        block = (ViewBlock*)parent;
+        block = lam::unsafe_view_block_api_span(parent);
         goto INHERIT;
     }
     else { // initial value - 'normal'
@@ -560,7 +562,7 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                 // layout_block resets lycon->block.given_width/height to -1 before
                 // calling us. When we skip resolution, these must be restored from
                 // the block properties that were populated in the first pass.
-                ViewBlock* block = (ViewBlock*)dom_elem;
+                ViewBlock* block = lam::unsafe_view_block_api_span(lam::view_require_element(static_cast<View*>(dom_elem)));
                 if (block->blk) {
                     if (block->blk->given_width >= 0) {
                         lycon->block.given_width = block->blk->given_width;
@@ -633,7 +635,7 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                     tag == HTM_TAG_PRE || tag == HTM_TAG_BLOCKQUOTE || tag == HTM_TAG_DL ||
                     (tag >= HTM_TAG_H1 && tag <= HTM_TAG_H6));
                 if (has_em_margins) {
-                    ViewSpan* span = (ViewSpan*)dom_elem;
+                    ViewSpan* span = lam::view_require_element(static_cast<View*>(dom_elem));
                     float css_font_size = (span->font && span->font->font_size > 0)
                                           ? span->font->font_size
                                           : lycon->font.style->font_size;
@@ -673,7 +675,7 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                 }
                 if (dom_elem->font) {
                     if (!dom_elem->font->family)
-                        dom_elem->font->family = lycon->font.style->family;
+                        radiant_retain_font_family(dom_elem->font, lam::PoolPtr<char>(lycon->font.style->family));
                     if (dom_elem->font->font_size <= 0)
                         dom_elem->font->font_size = lycon->font.style->font_size;
                     if (dom_elem->font->font_style == 0 && lycon->font.style->font_style != 0)
@@ -822,7 +824,7 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
     // CSS 2.1 §10.8.1: text-top/text-bottom/middle/super/sub use parent element's font.
     // parent_font_* fields in lycon->line are set by span_vertical_align before recursing.
     if (view->view_type == RDT_VIEW_TEXT) {
-        ViewText* text_view = (ViewText*)view;
+        ViewText* text_view = lam::view_require_text(view);
         TextRect* rect = text_view->rect;
         while (rect) {
             float item_height = rect->height;
@@ -843,7 +845,7 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         adjust_text_bounds(text_view);
     }
     else if (view->view_type == RDT_VIEW_INLINE_BLOCK) {
-        ViewBlock* block = (ViewBlock*)view;
+        ViewBlock* block = lam::view_require_block(view);
         float item_height = block->height + (block->bound ?
             block->bound->margin.top + block->bound->margin.bottom : 0);
         // CSS 2.1 §10.8.1: For inline-blocks, the baseline depends on content:
@@ -903,7 +905,7 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
     }
     else if (view->view_type == RDT_VIEW_INLINE) {
         // for inline elements, apply to all children
-        ViewSpan* span = (ViewSpan*)view;
+        ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(view);
         span_vertical_align(lycon, span);
         // CSS 2.1 §10.8.1: After vertical alignment adjusts children's positions,
         // recompute the span's bounding box. The bounding box was computed earlier
@@ -990,10 +992,10 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
 // CSS 2.1 §16.2: Shift current-line text rects inside a span that was laid out
 // on a previous line but has continuation content on the current line.
 static void shift_span_current_line_rects(float offset, float line_y, ViewSpan* span) {
-    View* child = (View*)span->first_child;
+    View* child = static_cast<View*>(span->first_child);
     while (child) {
         if (child->view_type == RDT_VIEW_TEXT) {
-            ViewText* text = (ViewText*)child;
+            ViewText* text = lam::view_require_text(child);
             TextRect* rect = text->rect;
             while (rect) {
                 if (rect->y >= line_y - 1.0f) {
@@ -1002,7 +1004,7 @@ static void shift_span_current_line_rects(float offset, float line_y, ViewSpan* 
                 rect = rect->next;
             }
         } else if (child->view_type == RDT_VIEW_INLINE) {
-            shift_span_current_line_rects(offset, line_y, (ViewSpan*)child);
+            shift_span_current_line_rects(offset, line_y, lam::view_require<RDT_VIEW_INLINE>(child));
         }
         child = child->next();
     }
@@ -1016,7 +1018,7 @@ void view_line_align(LayoutContext* lycon, float offset, View* view) {
         log_debug("view line align: %d", view->view_type);
         view->x += offset;
         if (view->view_type == RDT_VIEW_TEXT) {
-            ViewText* text = (ViewText*)view;
+            ViewText* text = lam::view_require_text(view);
             text->x += offset;
             TextRect* rect = text->rect;
             while (rect) {
@@ -1025,7 +1027,7 @@ void view_line_align(LayoutContext* lycon, float offset, View* view) {
             }
         }
         else if (view->view_type == RDT_VIEW_INLINE) {
-            ViewSpan* sp = (ViewSpan*)view;
+            ViewSpan* sp = lam::view_require<RDT_VIEW_INLINE>(view);
             if (sp->first_child) view_line_align(lycon, offset, sp->first_child);
         }
         view = view->next();
@@ -1038,7 +1040,7 @@ static int count_spaces_in_view(View* view, float line_y) {
     int count = 0;
     while (view) {
         if (view->view_type == RDT_VIEW_TEXT) {
-            ViewText* text = (ViewText*)view;
+            ViewText* text = lam::view_require_text(view);
             const char* text_data = (const char*)text->text_data();
             if (text_data) {
                 TextRect* rect = text->rect;
@@ -1054,7 +1056,7 @@ static int count_spaces_in_view(View* view, float line_y) {
             }
         }
         else if (view->view_type == RDT_VIEW_INLINE) {
-            ViewSpan* sp = (ViewSpan*)view;
+            ViewSpan* sp = lam::view_require<RDT_VIEW_INLINE>(view);
             if (sp->first_child) {
                 count += count_spaces_in_view(sp->first_child, line_y);
             }
@@ -1072,7 +1074,7 @@ static float view_line_justify_walk(LayoutContext* lycon, float space_per_gap, V
                                     View** last_view, TextRect** last_rect) {
     while (view) {
         if (view->view_type == RDT_VIEW_TEXT) {
-            ViewText* text = (ViewText*)view;
+            ViewText* text = lam::view_require_text(view);
             const char* text_data = (const char*)text->text_data();
             TextRect* rect = text->rect;
             bool any_on_line = false;
@@ -1106,7 +1108,7 @@ static float view_line_justify_walk(LayoutContext* lycon, float space_per_gap, V
             // shift inline span's x by accumulated offset (it sits on the current line)
             view->x += cumulative_offset;
             *last_view = view;
-            ViewSpan* sp = (ViewSpan*)view;
+            ViewSpan* sp = lam::view_require<RDT_VIEW_INLINE>(view);
             if (sp->first_child) {
                 // recurse into inline children, propagating cumulative_offset so
                 // child rects get shifted along with the parent span
@@ -1217,7 +1219,7 @@ void line_align(LayoutContext* lycon) {
         // indicate wrapping — it's normal for the first line where advance_y starts at 0.
         bool is_wrapped_continuation = false;
         if (view && view->view_type == RDT_VIEW_TEXT) {
-            ViewText* text = (ViewText*)view;
+            ViewText* text = lam::view_require_text(view);
             TextRect* first_rect = text->rect;
             if (first_rect && first_rect->y < lycon->block.advance_y - 1.0f) {
                 // Only consider this a wrapped continuation if the text actually wraps
@@ -1236,7 +1238,7 @@ void line_align(LayoutContext* lycon) {
         // Fallback: start_view is NULL but current view has wrapped text
         if (!is_wrapped_continuation && !view && lycon->view &&
             lycon->view->view_type == RDT_VIEW_TEXT) {
-            ViewText* text = (ViewText*)lycon->view;
+            ViewText* text = lam::view_require_text(lycon->view);
             TextRect* rect = text->rect;
             int rect_count = 0;
             while (rect && rect_count < 2) {
@@ -1277,7 +1279,7 @@ void line_align(LayoutContext* lycon) {
             (offset > 0 || (is_rtl && offset < 0))) {
             // For wrapped text continuation lines, only align current-line rects
             if (is_wrapped_continuation) {
-                ViewText* text = (ViewText*)view;
+                ViewText* text = lam::view_require_text(view);
                 float line_y = lycon->block.advance_y;
                 TextRect* rect = text->rect;
                 while (rect) {
@@ -1297,10 +1299,10 @@ void line_align(LayoutContext* lycon) {
                 // node wraps and a sibling inline element (e.g., <span>) follows on the same
                 // line — start_view points to the span, but the wrapped text rect precedes it.
                 float line_y = lycon->block.advance_y;
-                View* prev = (View*)((DomNode*)view)->prev_sibling;
+                View* prev = static_cast<View*>(static_cast<DomNode*>(view)->prev_sibling);
                 while (prev) {
                     if (prev->view_type == RDT_VIEW_TEXT) {
-                        ViewText* text = (ViewText*)prev;
+                        ViewText* text = lam::view_require_text(prev);
                         TextRect* rect = text->rect;
                         while (rect) {
                             if (rect->y >= line_y - 1.0f) {
@@ -1309,9 +1311,9 @@ void line_align(LayoutContext* lycon) {
                             rect = rect->next;
                         }
                     } else if (prev->view_type == RDT_VIEW_INLINE) {
-                        shift_span_current_line_rects(offset, line_y, (ViewSpan*)prev);
+                        shift_span_current_line_rects(offset, line_y, lam::view_require<RDT_VIEW_INLINE>(prev));
                     }
-                    prev = (View*)((DomNode*)prev)->prev_sibling;
+                    prev = static_cast<View*>(static_cast<DomNode*>(prev)->prev_sibling);
                 }
                 // Normal case: align all views in the line
                 view_line_align(lycon, offset, view);
@@ -1335,7 +1337,7 @@ void line_align(LayoutContext* lycon) {
                             if (is_wrapped_continuation) {
                                 float line_y = lycon->block.advance_y;
                                 if (view->view_type == RDT_VIEW_TEXT) {
-                                    ViewText* text = (ViewText*)view;
+                                    ViewText* text = lam::view_require_text(view);
                                     TextRect* rect = text->rect;
                                     while (rect) {
                                         if (rect->y >= line_y - 1.0f) {
@@ -1354,10 +1356,10 @@ void line_align(LayoutContext* lycon) {
                                 // CSS 2.1 §16.2: Also check preceding siblings for
                                 // text continuation rects on the current line.
                                 float line_y = lycon->block.advance_y;
-                                View* prev = (View*)((DomNode*)view)->prev_sibling;
+                                View* prev = static_cast<View*>(static_cast<DomNode*>(view)->prev_sibling);
                                 while (prev) {
                                     if (prev->view_type == RDT_VIEW_TEXT) {
-                                        ViewText* text = (ViewText*)prev;
+                                        ViewText* text = lam::view_require_text(prev);
                                         TextRect* rect = text->rect;
                                         while (rect) {
                                             if (rect->y >= line_y - 1.0f) {
@@ -1366,9 +1368,9 @@ void line_align(LayoutContext* lycon) {
                                             rect = rect->next;
                                         }
                                     } else if (prev->view_type == RDT_VIEW_INLINE) {
-                                        shift_span_current_line_rects(offset, line_y, (ViewSpan*)prev);
+                                        shift_span_current_line_rects(offset, line_y, lam::view_require<RDT_VIEW_INLINE>(prev));
                                     }
-                                    prev = (View*)((DomNode*)prev)->prev_sibling;
+                                    prev = static_cast<View*>(static_cast<DomNode*>(prev)->prev_sibling);
                                 }
                                 view_line_align(lycon, offset, view);
                             }
@@ -1383,7 +1385,7 @@ void line_align(LayoutContext* lycon) {
                 // (the current line's rect). This correctly handles wrapped text
                 // by not touching rects from previous lines.
                 if (view->view_type == RDT_VIEW_TEXT) {
-                    ViewText* text = (ViewText*)view;
+                    ViewText* text = lam::view_require_text(view);
                     TextRect* rect = text->rect;
                     TextRect* last_rect = rect;
                     while (rect) {
@@ -1504,7 +1506,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
             MarkerProp* marker_prop = (MarkerProp*)elem->blk;
             if (marker_prop) {
                 // Create inline view for the marker with fixed width
-                ViewSpan* marker_span = (ViewSpan*)set_view(lycon, RDT_VIEW_MARKER, elem);
+                ViewSpan* marker_span = lam::view_require_element(set_view(lycon, RDT_VIEW_MARKER, elem));
                 if (marker_span) {
                     // font metrics are in physical pixels, divide by pixel_ratio for CSS pixels
                     float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
@@ -1823,7 +1825,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     BlockContext saved_block = lycon->block;
     lycon->block.parent = &saved_block;
 
-    ViewBlock* html = (ViewBlock*)set_view(lycon, RDT_VIEW_BLOCK, elmt);
+    ViewBlock* html = lam::view_require_block(set_view(lycon, RDT_VIEW_BLOCK, elmt));
     html->width = lycon->block.content_width;
     // Don't pre-set html->height - let it be determined by content (auto height)
     // The viewport height will be used for scrollbar calculations via scroller->viewport_height
@@ -2038,10 +2040,10 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         generate_pseudo_element_content(lycon, html, false);  // ::after
         if (html->pseudo) {
             if (html->pseudo->before) {
-                insert_pseudo_into_dom((DomElement*)elmt, html->pseudo->before, true);
+                insert_pseudo_into_dom(lam::dom_require_element(elmt), html->pseudo->before, true);
             }
             if (html->pseudo->after) {
-                insert_pseudo_into_dom((DomElement*)elmt, html->pseudo->after, false);
+                insert_pseudo_into_dom(lam::dom_require_element(elmt), html->pseudo->after, false);
             }
         }
     }
@@ -2052,7 +2054,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     // sets head to display:none, so this only affects pages that override it.
     DomNode* child = nullptr;
     if (elmt->is_element()) {
-        child = static_cast<DomElement*>(elmt)->first_child;
+        child = lam::dom_require_element(elmt)->first_child;
     }
     while (child) {
         if (child->is_element()) {
@@ -2081,7 +2083,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         View* child = html->first_placed_child();
         while (child) {
             if (child->is_block()) {
-                ViewBlock* vb = (ViewBlock*)child;
+                ViewBlock* vb = lam::view_require_block(static_cast<View*>(child));
                 if (vb->tag() == HTM_TAG_BODY) {
                     body_view = vb;
                     break;
@@ -2146,7 +2148,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         View* vc = html->first_placed_child();
         while (vc) {
             if (vc->is_block()) {
-                ViewBlock* vb = (ViewBlock*)vc;
+                ViewBlock* vb = lam::view_require_block(vc);
                 if (vb->tag() == HTM_TAG_BODY) {
                     float body_margin_bottom = (vb->bound && vb->bound->margin.bottom > 0)
                         ? vb->bound->margin.bottom : 0;
@@ -2382,13 +2384,13 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     layout_html_root(&lycon, root_node);
 
     if (doc->view_tree && doc->view_tree->root && doc->view_tree->root->view_type == RDT_VIEW_BLOCK) {
-        ViewBlock* root_block = (ViewBlock*)doc->view_tree->root;
+        ViewBlock* root_block = lam::view_require_block(doc->view_tree->root);
         if (root_block->scroller && root_block->scroller->pane) {
             ScrollPane* pane = root_block->scroller->pane;
             float target_x = doc->pending_viewport_scroll_x;
             float target_y = doc->pending_viewport_scroll_y;
             DocState* state = (DocState*)doc->state;
-            scroll_state_set_position_for_view(state, (View*)root_block, pane, target_x, target_y, true);
+            scroll_state_set_position_for_view(state, static_cast<View*>(root_block), pane, target_x, target_y, true);
             scroll_state_get_position_for_view(state, (View*)root_block, pane,
                                                &target_x, &target_y, NULL, NULL);
             log_info("layout_html_doc: applied viewport scroll (%.1f, %.1f)",

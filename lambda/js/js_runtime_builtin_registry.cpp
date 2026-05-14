@@ -218,6 +218,19 @@ const JsBuiltinMethodSpec JS_SYMBOL_PROTOTYPE_METHOD_SPECS[] = {
     {NULL, 0, 0, 0}
 };
 
+const JsBuiltinMethodSpec JS_BIGINT_PROTOTYPE_METHOD_SPECS[] = {
+    {"toString", 8, JS_BUILTIN_BIGINT_TO_STRING, 0},
+    {"valueOf", 7, JS_BUILTIN_BIGINT_VALUE_OF, 0},
+    {"toLocaleString", 14, JS_BUILTIN_BIGINT_TO_LOCALE_STRING, 0},
+    {NULL, 0, 0, 0}
+};
+
+const JsBuiltinMethodSpec JS_BIGINT_STATIC_METHOD_SPECS[] = {
+    {"asIntN", 6, JS_BUILTIN_BIGINT_AS_INT_N, 2},
+    {"asUintN", 7, JS_BUILTIN_BIGINT_AS_UINT_N, 2},
+    {NULL, 0, 0, 0}
+};
+
 const JsBuiltinMethodSpec JS_STRING_PROTOTYPE_METHOD_SPECS[] = {
     {"charAt", 6, JS_BUILTIN_STR_CHAR_AT, 1},
     {"charCodeAt", 10, JS_BUILTIN_STR_CHAR_CODE_AT, 1},
@@ -331,6 +344,26 @@ const JsBuiltinMethodSpec JS_ARRAYBUFFER_PROTOTYPE_METHOD_SPECS[] = {
     {NULL, 0, 0, 0}
 };
 
+const JsBuiltinMethodSpec JS_ARRAYBUFFER_ACCESSOR_SPECS[] = {
+    {"byteLength", 10, JS_BUILTIN_ARRAYBUFFER_GET_BYTE_LENGTH, 0, "get byteLength"},
+    {"resizable", 9, JS_BUILTIN_ARRAYBUFFER_GET_RESIZABLE, 0, "get resizable"},
+    {"maxByteLength", 13, JS_BUILTIN_ARRAYBUFFER_GET_MAX_BYTE_LENGTH, 0, "get maxByteLength"},
+    {NULL, 0, 0, 0}
+};
+
+const JsBuiltinMethodSpec JS_SHAREDARRAYBUFFER_PROTOTYPE_METHOD_SPECS[] = {
+    {"slice", 5, JS_BUILTIN_SHAREDARRAYBUFFER_SLICE, 2},
+    {"grow", 4, JS_BUILTIN_SHAREDARRAYBUFFER_GROW, 1},
+    {NULL, 0, 0, 0}
+};
+
+const JsBuiltinMethodSpec JS_SHAREDARRAYBUFFER_ACCESSOR_SPECS[] = {
+    {"byteLength", 10, JS_BUILTIN_SHAREDARRAYBUFFER_GET_BYTE_LENGTH, 0, "get byteLength"},
+    {"growable", 8, JS_BUILTIN_SHAREDARRAYBUFFER_GET_GROWABLE, 0, "get growable"},
+    {"maxByteLength", 13, JS_BUILTIN_SHAREDARRAYBUFFER_GET_MAX_BYTE_LENGTH, 0, "get maxByteLength"},
+    {NULL, 0, 0, 0}
+};
+
 const JsBuiltinMethodSpec JS_DATAVIEW_PROTOTYPE_METHOD_SPECS[] = {
     {"getInt8", 7, -2, 1},
     {"getUint8", 8, -2, 1},
@@ -405,12 +438,13 @@ const JsBuiltinMethodSpec JS_DATE_PROTOTYPE_METHOD_SPECS[] = {
     {"toISOString", 11, JS_BUILTIN_DATE_TO_ISO_STRING, 0},
     {"toJSON", 6, JS_BUILTIN_DATE_TO_JSON, 1},
     {"toUTCString", 11, JS_BUILTIN_DATE_TO_UTC_STRING, 0},
+    {"toGMTString", 11, JS_BUILTIN_DATE_TO_UTC_STRING, 0},
     {"toDateString", 12, JS_BUILTIN_DATE_TO_DATE_STRING, 0},
     {"toTimeString", 12, JS_BUILTIN_DATE_TO_TIME_STRING, 0},
     {"toString", 8, JS_BUILTIN_DATE_TO_STRING, 0},
     {"toLocaleString", 14, JS_BUILTIN_OBJ_TO_LOCALE_STRING, 0},
     {"toLocaleDateString", 18, JS_BUILTIN_DATE_TO_LOCALE_DATE_STRING, 0},
-    {"toLocaleTimeString", 18, JS_BUILTIN_DATE_TO_LOCALE_DATE_STRING, 0},
+    {"toLocaleTimeString", 18, JS_BUILTIN_DATE_TO_LOCALE_TIME_STRING, 0},
     {"valueOf", 7, JS_BUILTIN_DATE_VALUE_OF, 0},
     {"getYear", 7, JS_BUILTIN_DATE_GET_YEAR, 0},
     {"setYear", 7, JS_BUILTIN_DATE_SET_YEAR, 1},
@@ -428,6 +462,8 @@ const JsBuiltinMethodSpec JS_REGEXP_PROTOTYPE_METHOD_SPECS[] = {
 const JsBuiltinMethodSpec JS_JSON_METHOD_SPECS[] = {
     {"parse", 5, JS_BUILTIN_JSON_PARSE, 2},
     {"stringify", 9, JS_BUILTIN_JSON_STRINGIFY, 3},
+    {"rawJSON", 7, JS_BUILTIN_JSON_RAW_JSON, 1},
+    {"isRawJSON", 9, JS_BUILTIN_JSON_IS_RAW_JSON, 1},
     {NULL, 0, 0, 0}
 };
 
@@ -457,9 +493,11 @@ const JsBuiltinMethodSpec JS_ATOMICS_METHOD_SPECS[] = {
     {"load", 4, JS_BUILTIN_ATOMICS_LOAD, 2},
     {"notify", 6, JS_BUILTIN_ATOMICS_NOTIFY, 3},
     {"or", 2, JS_BUILTIN_ATOMICS_OR, 3},
+    {"pause", 5, JS_BUILTIN_ATOMICS_PAUSE, 0},
     {"store", 5, JS_BUILTIN_ATOMICS_STORE, 3},
     {"sub", 3, JS_BUILTIN_ATOMICS_SUB, 3},
-    {"wait", 4, JS_BUILTIN_ATOMICS_WAIT, 3},
+    {"wait", 4, JS_BUILTIN_ATOMICS_WAIT, 4},
+    {"waitAsync", 9, JS_BUILTIN_ATOMICS_WAIT_ASYNC, 4},
     {"xor", 3, JS_BUILTIN_ATOMICS_XOR, 3},
     {NULL, 0, 0, 0}
 };
@@ -620,6 +658,7 @@ static const JsBuiltinMethodSpec* js_get_constructor_static_method_specs(const c
     if (ctor_len == 4 && strncmp(ctor_name, "Date", 4) == 0) return JS_DATE_STATIC_METHOD_SPECS;
     if (ctor_len == 7 && strncmp(ctor_name, "Promise", 7) == 0) return JS_PROMISE_STATIC_METHOD_SPECS;
     if (ctor_len == 6 && strncmp(ctor_name, "Number", 6) == 0) return JS_NUMBER_STATIC_METHOD_SPECS;
+    if (ctor_len == 6 && strncmp(ctor_name, "BigInt", 6) == 0) return JS_BIGINT_STATIC_METHOD_SPECS;
     if (ctor_len == 3 && strncmp(ctor_name, "Map", 3) == 0) return JS_MAP_STATIC_METHOD_SPECS;
     if (ctor_len == 11 && strncmp(ctor_name, "ArrayBuffer", 11) == 0) return JS_ARRAYBUFFER_STATIC_METHOD_SPECS;
     if (ctor_len == 5 && strncmp(ctor_name, "Proxy", 5) == 0) return JS_PROXY_STATIC_METHOD_SPECS;
@@ -634,6 +673,7 @@ static const JsBuiltinMethodSpec* js_get_prototype_method_specs_for_ctor(const c
     if (ctor_len == 5 && strncmp(ctor_name, "Array", 5) == 0) return JS_ARRAY_PROTOTYPE_METHOD_SPECS;
     if (ctor_len == 8 && strncmp(ctor_name, "Function", 8) == 0) return JS_FUNCTION_PROTOTYPE_METHOD_SPECS;
     if (ctor_len == 6 && strncmp(ctor_name, "Number", 6) == 0) return JS_NUMBER_PROTOTYPE_METHOD_SPECS;
+    if (ctor_len == 6 && strncmp(ctor_name, "BigInt", 6) == 0) return JS_BIGINT_PROTOTYPE_METHOD_SPECS;
     if (ctor_len == 6 && strncmp(ctor_name, "String", 6) == 0) return JS_STRING_PROTOTYPE_METHOD_SPECS;
     if (ctor_len == 7 && strncmp(ctor_name, "Promise", 7) == 0) return JS_PROMISE_PROTOTYPE_METHOD_SPECS;
     if (ctor_len == 3 && strncmp(ctor_name, "Map", 3) == 0) return JS_MAP_PROTOTYPE_METHOD_SPECS;
@@ -641,6 +681,7 @@ static const JsBuiltinMethodSpec* js_get_prototype_method_specs_for_ctor(const c
     if (ctor_len == 7 && strncmp(ctor_name, "WeakMap", 7) == 0) return JS_WEAKMAP_PROTOTYPE_METHOD_SPECS;
     if (ctor_len == 7 && strncmp(ctor_name, "WeakSet", 7) == 0) return JS_WEAKSET_PROTOTYPE_METHOD_SPECS;
     if (ctor_len == 11 && strncmp(ctor_name, "ArrayBuffer", 11) == 0) return JS_ARRAYBUFFER_PROTOTYPE_METHOD_SPECS;
+    if (ctor_len == 17 && strncmp(ctor_name, "SharedArrayBuffer", 17) == 0) return JS_SHAREDARRAYBUFFER_PROTOTYPE_METHOD_SPECS;
     if (ctor_len == 4 && strncmp(ctor_name, "Date", 4) == 0) return JS_DATE_PROTOTYPE_METHOD_SPECS;
     if (ctor_len == 6 && strncmp(ctor_name, "RegExp", 6) == 0) return JS_REGEXP_PROTOTYPE_METHOD_SPECS;
     return NULL;
@@ -650,6 +691,7 @@ static const JsBuiltinMethodSpec* js_get_prototype_method_specs_for_type(TypeId 
     if (type == LMD_TYPE_ARRAY) return JS_ARRAY_PROTOTYPE_METHOD_SPECS;
     if (type == LMD_TYPE_FUNC) return JS_FUNCTION_PROTOTYPE_METHOD_SPECS;
     if (type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT) return JS_NUMBER_PROTOTYPE_METHOD_SPECS;
+    if (type == LMD_TYPE_DECIMAL) return JS_BIGINT_PROTOTYPE_METHOD_SPECS;
     if (type == LMD_TYPE_STRING) return JS_STRING_PROTOTYPE_METHOD_SPECS;
     if (type == LMD_TYPE_BOOL) return JS_BOOLEAN_PROTOTYPE_METHOD_SPECS;
     return NULL;
@@ -664,6 +706,7 @@ static const JsBuiltinMethodSpec* js_get_prototype_method_specs_for_class_or_typ
     case JS_CLASS_FUNCTION: return JS_FUNCTION_PROTOTYPE_METHOD_SPECS;
     case JS_CLASS_BOOLEAN: return JS_BOOLEAN_PROTOTYPE_METHOD_SPECS;
     case JS_CLASS_NUMBER: return JS_NUMBER_PROTOTYPE_METHOD_SPECS;
+    case JS_CLASS_BIGINT: return JS_BIGINT_PROTOTYPE_METHOD_SPECS;
     case JS_CLASS_SYMBOL: return JS_SYMBOL_PROTOTYPE_METHOD_SPECS;
     case JS_CLASS_STRING: return JS_STRING_PROTOTYPE_METHOD_SPECS;
     case JS_CLASS_ARRAY: return JS_ARRAY_PROTOTYPE_METHOD_SPECS;
@@ -742,6 +785,13 @@ extern "C" Item js_builtin_registry_prototype_method_descriptor(
                 spec, JS_FUNC_FLAG_DATA_VIEW_ACCESSOR | JS_FUNC_FLAG_STRICT);
         }
     }
+    if ((JsClass)js_class == JS_CLASS_ARRAY_BUFFER) {
+        spec = js_find_builtin_method_spec(JS_ARRAYBUFFER_ACCESSOR_SPECS, name, len);
+        if (spec) {
+            return js_builtin_registry_accessor_descriptor_from_spec(
+                spec, JS_FUNC_FLAG_STRICT);
+        }
+    }
     return make_js_undefined();
 }
 
@@ -765,12 +815,20 @@ extern "C" void js_append_builtin_method_names_for_class(
         js_append_builtin_method_spec_names(JS_TYPED_ARRAY_ACCESSOR_SPECS, result);
     } else if ((JsClass)js_class == JS_CLASS_DATA_VIEW) {
         js_append_builtin_method_spec_names(JS_DATAVIEW_ACCESSOR_SPECS, result);
+    } else if ((JsClass)js_class == JS_CLASS_ARRAY_BUFFER) {
+        js_append_builtin_method_spec_names(JS_ARRAYBUFFER_ACCESSOR_SPECS, result);
     }
 }
 
 void js_populate_builtin_prototype_methods(Item prototype, const char* ctor_name, int ctor_len) {
     const JsBuiltinMethodSpec* specs = js_get_prototype_method_specs_for_ctor(ctor_name, ctor_len);
     js_install_builtin_method_specs(prototype, specs);
+    if (ctor_len == 11 && strncmp(ctor_name, "ArrayBuffer", 11) == 0) {
+        js_install_builtin_accessor_specs(prototype, JS_ARRAYBUFFER_ACCESSOR_SPECS, JS_FUNC_FLAG_STRICT);
+    }
+    if (ctor_len == 17 && strncmp(ctor_name, "SharedArrayBuffer", 17) == 0) {
+        js_install_builtin_accessor_specs(prototype, JS_SHAREDARRAYBUFFER_ACCESSOR_SPECS, JS_FUNC_FLAG_STRICT);
+    }
 }
 
 static void js_append_builtin_method_spec_names(const JsBuiltinMethodSpec* specs, Item result) {
@@ -951,13 +1009,13 @@ extern "C" Item js_lookup_builtin_method(TypeId type, const char* name, int len)
         return js_get_or_create_builtin(JS_BUILTIN_OBJ_HAS_OWN_PROPERTY, "hasOwnProperty", 1);
     if (len == 20 && strncmp(name, "propertyIsEnumerable", 20) == 0)
         return js_get_or_create_builtin(JS_BUILTIN_OBJ_PROPERTY_IS_ENUMERABLE, "propertyIsEnumerable", 1);
-    if (len == 8 && strncmp(name, "toString", 8) == 0 && type != LMD_TYPE_FUNC && type != LMD_TYPE_BOOL && type != LMD_TYPE_ARRAY && type != LMD_TYPE_STRING)
+    if (len == 8 && strncmp(name, "toString", 8) == 0 && type != LMD_TYPE_FUNC && type != LMD_TYPE_BOOL && type != LMD_TYPE_ARRAY && type != LMD_TYPE_STRING && type != LMD_TYPE_INT && type != LMD_TYPE_INT64 && type != LMD_TYPE_FLOAT && type != LMD_TYPE_DECIMAL)
         return js_get_or_create_builtin(JS_BUILTIN_OBJ_TO_STRING, "toString", 0);
     if (type == LMD_TYPE_BOOL) {
         Item method = js_lookup_builtin_method_spec(JS_BOOLEAN_PROTOTYPE_METHOD_SPECS, name, len);
         if (method.item != ItemNull.item) return method;
     }
-    if (len == 7 && strncmp(name, "valueOf", 7) == 0 && type != LMD_TYPE_FUNC)
+    if (len == 7 && strncmp(name, "valueOf", 7) == 0 && type != LMD_TYPE_FUNC && type != LMD_TYPE_INT && type != LMD_TYPE_INT64 && type != LMD_TYPE_FLOAT && type != LMD_TYPE_DECIMAL)
         return js_get_or_create_builtin(JS_BUILTIN_OBJ_VALUE_OF, "valueOf", 0);
     if (len == 13 && strncmp(name, "isPrototypeOf", 13) == 0)
         return js_get_or_create_builtin(JS_BUILTIN_OBJ_IS_PROTOTYPE_OF, "isPrototypeOf", 1);
@@ -991,7 +1049,7 @@ extern "C" Item js_lookup_builtin_method(TypeId type, const char* name, int len)
     }
 
     // Number.prototype methods
-    if (type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT) {
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
         Item method = js_lookup_builtin_method_spec(JS_NUMBER_PROTOTYPE_METHOD_SPECS, name, len);
         if (method.item != ItemNull.item) return method;
     }

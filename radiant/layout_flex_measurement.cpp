@@ -8,6 +8,7 @@
 #include "../lambda/input/css/selector_matcher.hpp"
 
 #include "../lib/log.h"
+#include "../lib/tagged.hpp"
 #include <float.h>
 #include <limits.h>
 
@@ -151,7 +152,7 @@ static float measure_content_height_recursive(DomNode* node, LayoutContext* lyco
     if (depth > MAX_MEASURE_DEPTH) return 0;
 
     // Check if the View is already set with an explicit height
-    ViewElement* elem = (ViewElement*)node->as_element();
+    ViewElement* elem = lam::view_require_element(node);
     if (elem) {
         log_debug("measure_content_height_recursive: checking elem %s, blk=%p height=%.1f",
                   elem->tag_name ? elem->tag_name : "(null)",
@@ -200,8 +201,8 @@ static float measure_content_height_recursive(DomNode* node, LayoutContext* lyco
     // Determine flex direction from CSS properties or resolved ViewBlock
     bool is_row = true;  // CSS default is row
     if (elem) {
-        ViewBlock* blk_view = (ViewBlock*)elem;
-        if (blk_view->embed && blk_view->embed->flex) {
+        ViewBlock* blk_view = lam::view_as_block(elem);
+        if (blk_view && blk_view->embed && blk_view->embed->flex) {
             int dir = blk_view->embed->flex->direction;
             is_row = (dir == CSS_VALUE_ROW || dir == CSS_VALUE_ROW_REVERSE);
         } else if (elem->specified_style) {
@@ -228,7 +229,7 @@ static float measure_content_height_recursive(DomNode* node, LayoutContext* lyco
 
             // If recursive measurement returned 0, try other measurement methods
             if (child_height == 0.0f && lycon) {
-                ViewElement* child_view = (ViewElement*)child->as_element();
+                ViewElement* child_view = lam::view_require_element(child);
                 if (child_view) {
                     // Check for explicit height first
                     if (child_view->blk && child_view->blk->given_height >= 0) {
@@ -391,7 +392,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
 
         // Check if this element is a row flex container
         // For row flex containers, we should use MAX of child heights, not SUM
-        ViewElement* elem_view = (ViewElement*)child->as_element();
+        ViewElement* elem_view = lam::view_require_element(child);
         bool is_row_flex = false;
         if (elem_view) {
             log_debug("measure_flex_child_content: elem_view=%p, view_type=%d, display.inner=%d (CSS_VALUE_FLEX=%d)",
@@ -399,8 +400,8 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
             // Check display property directly on the DOM element
             if (elem_view->display.inner == CSS_VALUE_FLEX) {
                 // It's a flex container - check direction
-                ViewBlock* block_view = (ViewBlock*)elem_view;
-                if (block_view->embed && block_view->embed->flex) {
+                ViewBlock* block_view = lam::view_as_block(elem_view);
+                if (block_view && block_view->embed && block_view->embed->flex) {
                     int dir = block_view->embed->flex->direction;
                     is_row_flex = (dir == CSS_VALUE_ROW || dir == CSS_VALUE_ROW_REVERSE);
                     log_debug("Element %s is%s a row flex container (direction=%d)",
@@ -422,7 +423,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
         DomElement* child_elem = child->as_element();
 
         // Get font-size from resolved styles (after init_flex_item_view resolved CSS)
-        ViewElement* view_elem = (ViewElement*)child_elem;
+        ViewElement* view_elem = lam::view_require_element(child_elem);
         float elem_font_size = 16;  // default fallback
         if (view_elem && view_elem->font && view_elem->font->font_size > 0) {
             elem_font_size = view_elem->font->font_size;
@@ -546,7 +547,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                         // In flex row, items are laid out horizontally so height = max(child heights)
                         bool is_list_flex_row = false;
                         if (elem) {
-                            ViewElement* list_view = (ViewElement*)elem;
+                            ViewElement* list_view = lam::view_require_element(elem);
                             if (list_view->display.inner == CSS_VALUE_FLEX) {
                                 is_list_flex_row = true;  // default direction is row
                             }
@@ -592,7 +593,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                         bool is_nested_flex = false;
 
                         // First check view's display.inner if already resolved
-                        ViewElement* nested_view = (ViewElement*)elem;
+                        ViewElement* nested_view = lam::view_require_element(elem);
                         if (nested_view && nested_view->display.inner == CSS_VALUE_FLEX) {
                             is_nested_flex = true;
                         }
@@ -662,7 +663,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                                 log_debug("Nested flex container: empty, height=0");
                             } else if (has_children_with_explicit_height) {
                                 // Children have explicit heights - use recursive measurement
-                                float content_height = measure_content_height_recursive((DomNode*)elem, lycon, 0);
+                                float content_height = measure_content_height_recursive(static_cast<DomNode*>(elem), lycon, 0);
                                 if (content_height > 0) {
                                     elem_height = content_height;
                                     has_explicit_height_css = true;  // Reliable measured height
@@ -676,7 +677,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                             } else {
                                 // Has content (text or elements) but no explicit heights
                                 // Try recursive measurement first for accurate sizing
-                                float recursive_height = measure_content_height_recursive((DomNode*)elem, lycon, 0);
+                                float recursive_height = measure_content_height_recursive(static_cast<DomNode*>(elem), lycon, 0);
                                 if (recursive_height > 0) {
                                     elem_height = recursive_height;
                                     has_explicit_height_css = true;  // Measured height is reliable
@@ -779,7 +780,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                             // (text_line_height is the font-metric "normal" line height,
                             //  but CSS line-height may differ, e.g. Bootstrap line-height:1.5)
                             float child_content_height = text_line_height;
-                            ViewElement* sub_view = (ViewElement*)elem;
+                            ViewElement* sub_view = lam::view_require_element(elem);
                             float child_fs = elem_font_size;
                             if (sub_view && sub_view->font && sub_view->font->font_size > 0) {
                                 child_fs = sub_view->font->font_size;
@@ -959,7 +960,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
         // Set measured dimensions
         // CRITICAL FIX: For elements without explicit width, measured_width should be based
         // on content, not container. Only use container_width if the element has explicit width.
-        ViewElement* elem = (ViewElement*)child->as_element();
+        ViewElement* elem = lam::view_require_element(child);
         bool has_explicit_width = (elem && elem->blk && elem->blk->given_width >= 0);
 
         if (has_explicit_width) {
@@ -1067,8 +1068,8 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                 while (tt_node) {
                     if (tt_node->is_element()) {
                         DomElement* tt_elem = tt_node->as_element();
-                        ViewBlock* tt_view = (ViewBlock*)tt_elem;
-                        if (tt_view->blk && tt_view->blk->text_transform != 0 &&
+                        ViewBlock* tt_view = lam::view_as_block(tt_elem);
+                        if (tt_view && tt_view->blk && tt_view->blk->text_transform != 0 &&
                             tt_view->blk->text_transform != CSS_VALUE_INHERIT) {
                             btn_text_transform = tt_view->blk->text_transform;
                             break;
@@ -1251,13 +1252,13 @@ bool requires_content_measurement(ViewBlock* flex_container) {
     // Check if any children have auto flex-basis or need intrinsic sizing
     DomNode* child = nullptr;
     if (flex_container->is_element()) {
-        child = ((DomElement*)flex_container)->first_child;
+        child = lam::dom_require<DOM_NODE_ELEMENT>(flex_container)->first_child;
     }
     while (child) {
         // If child has complex content or auto sizing, measurement is needed
         DomNode* child_first = nullptr;
         if (child->is_element()) {
-            child_first = static_cast<DomElement*>(child)->first_child;
+            child_first = lam::dom_require_element(child)->first_child;
         }
         if (child_first || child->is_text()) {
             return true;
@@ -1297,7 +1298,7 @@ void layout_flow_node_for_flex(LayoutContext* lycon, DomNode* node) {
     MeasurementCacheEntry* cached = get_from_measurement_cache(node);
 
     if (cached && node->view_type == RDT_VIEW_BLOCK) {
-        ViewBlock* view = (ViewBlock*)node;
+        ViewBlock* view = lam::view_require<RDT_VIEW_BLOCK>(node);
         if (view == node) {
             log_debug("Applying cached measurements to flex item: %.1fx%.1f",
                 cached->measured_width, cached->measured_height);
@@ -1367,11 +1368,11 @@ void init_flex_item_view(LayoutContext* lycon, DomNode* node) {
     display = blockify_display(display);
 
     // Create ViewBlock directly (similar to layout_block but without child processing)
-    ViewBlock* block = (ViewBlock*)set_view(lycon,
+    ViewBlock* block = lam::view_require_block(set_view(lycon,
         display.outer == CSS_VALUE_INLINE_BLOCK ? RDT_VIEW_INLINE_BLOCK :
         display.outer == CSS_VALUE_LIST_ITEM ? RDT_VIEW_LIST_ITEM :
         display.inner == CSS_VALUE_TABLE ? RDT_VIEW_TABLE : RDT_VIEW_BLOCK,
-        node);
+        node));
 
     if (!block) {
         log_error("Failed to allocate View for flex item: %s", node->node_name());
@@ -1656,9 +1657,9 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                 DomNode* tt_node = item;
                 while (tt_node) {
                     if (tt_node->is_element()) {
-                        DomElement* tt_elem = tt_node->as_element();
-                        ViewBlock* tt_view = (ViewBlock*)tt_elem;
-                        if (tt_view->blk && tt_view->blk->text_transform != 0 &&
+                        DomElement* tt_elem = lam::dom_require<DOM_NODE_ELEMENT>(tt_node);
+                        ViewBlock* tt_view = lam::view_as_block(tt_elem);
+                        if (tt_view && tt_view->blk && tt_view->blk->text_transform != 0 &&
                             tt_view->blk->text_transform != CSS_VALUE_INHERIT) {
                             text_transform = tt_view->blk->text_transform;
                             break;
@@ -1711,11 +1712,11 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                 DomNode* lh_node = item;
                 while (lh_node) {
                     if (lh_node->is_element()) {
-                        DomElement* lh_elem = lh_node->as_element();
-                        ViewBlock* lh_view = (ViewBlock*)lh_elem;
+                        DomElement* lh_elem = lam::dom_require<DOM_NODE_ELEMENT>(lh_node);
+                        ViewBlock* lh_view = lam::view_as_block(lh_elem);
 
                         // Check blk->line_height first (resolved CSS property)
-                        if (lh_view->blk && lh_view->blk->line_height) {
+                        if (lh_view && lh_view->blk && lh_view->blk->line_height) {
                             const CssValue* lh_val = lh_view->blk->line_height;
                             // Skip 'inherit' keyword - continue to parent
                             if (lh_val->type == CSS_VALUE_TYPE_KEYWORD &&
@@ -1808,7 +1809,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
         // Complex content - check measurement cache first
         // The measurement cache is populated during the first pass of multi-pass flex layout
         log_debug("calculate_item_intrinsic_sizes: checking cache for item %p", item);
-        MeasurementCacheEntry* cached = get_from_measurement_cache((DomNode*)item);
+        MeasurementCacheEntry* cached = get_from_measurement_cache(static_cast<DomNode*>(item));
         log_debug("calculate_item_intrinsic_sizes: cache lookup returned %p", cached);
         if (cached) {
             log_debug("calculate_item_intrinsic_sizes: cached entry - measured_width=%.1f, measured_height=%.1f",
@@ -1834,7 +1835,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
             is_flex_container = true;
             // Try to get direction from embed->flex if available
             if (item->view_type == RDT_VIEW_BLOCK || item->view_type == RDT_VIEW_INLINE_BLOCK) {
-                ViewBlock* block_view = (ViewBlock*)item;
+                ViewBlock* block_view = lam::view_as_block(item);
                 if (block_view->embed && block_view->embed->flex) {
                     is_row_flex_container = is_main_axis_horizontal(block_view->embed->flex);
                 } else {
@@ -1854,7 +1855,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
             log_debug("calculate_item_intrinsic_sizes: is_flex_container=1, is_row=%d (display.inner=flex)",
                       is_row_flex_container);
         } else if (item->view_type == RDT_VIEW_BLOCK || item->view_type == RDT_VIEW_INLINE_BLOCK) {
-            ViewBlock* block_view = (ViewBlock*)item;
+            ViewBlock* block_view = lam::view_as_block(item);
             if (block_view->embed && block_view->embed->flex) {
                 is_flex_container = true;
                 is_row_flex_container = is_main_axis_horizontal(block_view->embed->flex);
@@ -1874,8 +1875,8 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
         // specified_size_suggestion in resolve_flex_item_constraints).
         LayoutContext* lycon = flex_layout ? flex_layout->lycon : nullptr;
         if (!is_flex_container && lycon) {
-            IntrinsicSizes item_sizes = measure_element_intrinsic_widths(lycon, (DomElement*)item,
-                                                                         /*content_only=*/true);
+            IntrinsicSizes item_sizes = measure_element_intrinsic_widths(
+                lycon, lam::dom_require<DOM_NODE_ELEMENT>(item), /*content_only=*/true);
             min_width = item_sizes.min_content;
             max_width = item_sizes.max_content;
             // measure_element_intrinsic_widths returns border-box values (includes
@@ -1929,7 +1930,8 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                     }
                     if (available_width <= 0) available_width = 10000.0f;
                 }
-                min_height = max_height = calculate_max_content_height(lycon, (DomNode*)item, available_width);
+                min_height = max_height = calculate_max_content_height(
+                    lycon, static_cast<DomNode*>(item), available_width);
                 // calculate_max_content_height returns border-box values (includes the
                 // element's own padding+border). Convert back to content-box so all
                 // stored intrinsic sizes are content-box — resolve_flex_item_constraints
@@ -1958,7 +1960,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
         bool is_wrapping_flex = false;
         if (is_flex_container && is_row_flex_container) {
             if (item->view_type == RDT_VIEW_BLOCK || item->view_type == RDT_VIEW_INLINE_BLOCK) {
-                ViewBlock* block_view = (ViewBlock*)item;
+                ViewBlock* block_view = lam::view_as_block(item);
                 if (block_view->embed && block_view->embed->flex) {
                     int wrap = block_view->embed->flex->wrap;
                     is_wrapping_flex = (wrap == CSS_VALUE_WRAP || wrap == CSS_VALUE_WRAP_REVERSE);
@@ -2044,9 +2046,9 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                                 DomNode* tt_node = item;
                                 while (tt_node) {
                                     if (tt_node->is_element()) {
-                                        DomElement* tt_elem = tt_node->as_element();
-                                        ViewBlock* tt_view = (ViewBlock*)tt_elem;
-                                        if (tt_view->blk && tt_view->blk->text_transform != 0 &&
+                                        DomElement* tt_elem = lam::dom_require<DOM_NODE_ELEMENT>(tt_node);
+                                        ViewBlock* tt_view = lam::view_as_block(tt_elem);
+                                        if (tt_view && tt_view->blk && tt_view->blk->text_transform != 0 &&
                                             tt_view->blk->text_transform != CSS_VALUE_INHERIT) {
                                             text_transform = tt_view->blk->text_transform;
                                             break;
@@ -2105,7 +2107,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                         }
                     }
                 } else if (c->is_element()) {
-                    ViewElement* child_view = (ViewElement*)c->as_element();
+                    ViewElement* child_view = lam::view_require_element(c);
                     if (child_view) {
                         // CSS Flexbox §4.1: Absolutely positioned children and display:none
                         // elements are not flex items and should not contribute to intrinsic sizing.
@@ -2115,8 +2117,8 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                             continue;
                         }
                         // Check position:absolute/fixed — out-of-flow, not a flex item
-                        ViewBlock* child_block = (ViewBlock*)child_view;
-                        if (child_block->position && child_block->position->position &&
+                        ViewBlock* child_block = lam::view_as_block(child_view);
+                        if (child_block && child_block->position && child_block->position->position &&
                             (child_block->position->position == CSS_VALUE_ABSOLUTE ||
                              child_block->position->position == CSS_VALUE_FIXED)) {
                             c = c->next_sibling;
@@ -2200,7 +2202,8 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                                 child_font_changed = true;
                             }
 
-                            IntrinsicSizes child_sizes = measure_element_intrinsic_widths(lycon, (DomElement*)child_view);
+                            IntrinsicSizes child_sizes = measure_element_intrinsic_widths(
+                                lycon, lam::dom_require<DOM_NODE_ELEMENT>(child_view));
                             child_min_width = child_sizes.min_content;
                             child_max_width = child_sizes.max_content;
                             log_debug("Used measure_element_intrinsic_widths for child: min=%.1f, max=%.1f",
@@ -2235,7 +2238,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                             // Estimate each child's share of the row (assumes flex:1 equal split)
                             float gap = 0;
                             if (item->view_type == RDT_VIEW_BLOCK || item->view_type == RDT_VIEW_INLINE_BLOCK) {
-                                ViewBlock* bv = (ViewBlock*)item;
+                                ViewBlock* bv = lam::view_as_block(item);
                                 if (bv->embed && bv->embed->flex)
                                     gap = bv->embed->flex->column_gap;
                             }
@@ -2446,7 +2449,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                 // Get gap from the flex container properties
                 float gap = 0;
                 if (item->view_type == RDT_VIEW_BLOCK || item->view_type == RDT_VIEW_INLINE_BLOCK) {
-                    ViewBlock* block_view = (ViewBlock*)item;
+                    ViewBlock* block_view = lam::view_as_block(item);
                     if (block_view->embed && block_view->embed->flex) {
                         gap = block_view->embed->flex->column_gap;
                     }
@@ -2530,8 +2533,7 @@ store_results:
     // For vertical writing modes, swap intrinsic width/height because text measurement
     // always produces horizontal metrics, but in vertical-lr/rl the inline axis is vertical
     {
-        ViewBlock* block_view = (item->view_type == RDT_VIEW_BLOCK || item->view_type == RDT_VIEW_INLINE_BLOCK)
-                                ? (ViewBlock*)item : nullptr;
+        ViewBlock* block_view = lam::view_as_block(item);
         if (block_view && block_view->embed && block_view->embed->flex &&
             (block_view->embed->flex->writing_mode == WM_VERTICAL_LR ||
              block_view->embed->flex->writing_mode == WM_VERTICAL_RL)) {

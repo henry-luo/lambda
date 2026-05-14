@@ -531,25 +531,132 @@ void dl_webview_layer_placeholder(DisplayList* dl, void* surface,
 // Replay: glyph drawing (standalone, no RenderContext dependency)
 // ---------------------------------------------------------------------------
 
+static uint32_t dl_glyph_sample_pixel(const GlyphBitmap* bitmap, int src_y, int src_x) {
+    if (!bitmap || !bitmap->buffer || src_y < 0 || src_y >= bitmap->height ||
+        src_x < 0 || src_x >= bitmap->width) return 0;
+    if (bitmap->pixel_mode == GLYPH_PIXEL_MONO) {
+        int byte_index = src_x / 8;
+        int bit_index = 7 - (src_x % 8);
+        uint8_t byte_val = bitmap->buffer[src_y * bitmap->pitch + byte_index];
+        return (byte_val & (1 << bit_index)) ? 255 : 0;
+    }
+    if (bitmap->pixel_mode == GLYPH_PIXEL_GRAY) {
+        return bitmap->buffer[src_y * bitmap->pitch + src_x];
+    }
+    if (bitmap->pixel_mode == GLYPH_PIXEL_LCD) {
+        const uint8_t* p = bitmap->buffer + src_y * bitmap->pitch + src_x * 3;
+        return ((uint32_t)p[0] + (uint32_t)p[1] + (uint32_t)p[2] + 1) / 3;
+    }
+    return 0;
+}
+
+static uint32_t dl_glyph_sample_coverage(const GlyphBitmap* bitmap, float src_y, float src_x) {
+    if (!bitmap || !bitmap->buffer) return 0;
+    if (bitmap->pixel_mode == GLYPH_PIXEL_MONO) {
+        return dl_glyph_sample_pixel(bitmap, (int)floorf(src_y + 0.5f), (int)floorf(src_x + 0.5f));
+    }
+    if (bitmap->pixel_mode != GLYPH_PIXEL_GRAY && bitmap->pixel_mode != GLYPH_PIXEL_LCD) return 0;
+
+    int sx0 = (int)floorf(src_x);
+    int sy0 = (int)floorf(src_y);
+    float tx = src_x - (float)sx0;
+    float ty = src_y - (float)sy0;
+    int sx1 = sx0 + 1;
+    int sy1 = sy0 + 1;
+    if (sx0 < 0) { sx0 = 0; tx = 0.0f; }
+    if (sy0 < 0) { sy0 = 0; ty = 0.0f; }
+    if (sx1 >= bitmap->width) sx1 = bitmap->width - 1;
+    if (sy1 >= bitmap->height) sy1 = bitmap->height - 1;
+    if (sx0 >= bitmap->width || sy0 >= bitmap->height) return 0;
+    float c00 = (float)dl_glyph_sample_pixel(bitmap, sy0, sx0);
+    float c10 = (float)dl_glyph_sample_pixel(bitmap, sy0, sx1);
+    float c01 = (float)dl_glyph_sample_pixel(bitmap, sy1, sx0);
+    float c11 = (float)dl_glyph_sample_pixel(bitmap, sy1, sx1);
+    float top = c00 * (1.0f - tx) + c10 * tx;
+    float bottom = c01 * (1.0f - tx) + c11 * tx;
+    return (uint32_t)(top * (1.0f - ty) + bottom * ty + 0.5f);
+}
+
 static void replay_draw_glyph(ImageSurface* surface, const DlDrawGlyph* g) {
     GlyphBitmap* bitmap = (GlyphBitmap*)&g->bitmap;
     int x = g->x, y = g->y;
     Color color = g->color;
+    if (color.a == 0) return;
     const Bound* clip = &g->clip;
 
     if (g->has_transform && !g->is_color_emoji) {
-        bool is_mono = (bitmap->pixel_mode == GLYPH_PIXEL_MONO);
+        {
+            const RdtMatrix* m = &g->transform;
+            float sx0 = (float)x;
+            float sy0 = (float)y;
+            float sx1 = (float)(x + bitmap->width);
+            float sy1 = (float)(y + bitmap->height);
+            float px[4] = {
+                m->e11 * sx0 + m->e12 * sy0 + m->e13,
+                m->e11 * sx1 + m->e12 * sy0 + m->e13,
+                m->e11 * sx1 + m->e12 * sy1 + m->e13,
+                m->e11 * sx0 + m->e12 * sy1 + m->e13
+            };
+            float py[4] = {
+                m->e21 * sx0 + m->e22 * sy0 + m->e23,
+                m->e21 * sx1 + m->e22 * sy0 + m->e23,
+                m->e21 * sx1 + m->e22 * sy1 + m->e23,
+                m->e21 * sx0 + m->e22 * sy1 + m->e23
+            };
+            float min_x = std::min(std::min(px[0], px[1]), std::min(px[2], px[3]));
+            float max_x = std::max(std::max(px[0], px[1]), std::max(px[2], px[3]));
+            float min_y = std::min(std::min(py[0], py[1]), std::min(py[2], py[3]));
+            float max_y = std::max(std::max(py[0], py[1]), std::max(py[2], py[3]));
+
+            int left = std::max((int)clip->left, (int)floorf(min_x));
+            int right = std::min((int)clip->right, (int)ceilf(max_x));
+            int top = std::max((int)clip->top, (int)floorf(min_y));
+            int bottom = std::min((int)clip->bottom, (int)ceilf(max_y));
+            left = std::max(left, 0);
+            right = std::min(right, surface->width);
+            top = std::max(top, surface->tile_offset_y);
+            bottom = std::min(bottom, surface->tile_offset_y + surface->height);
+            if (left >= right || top >= bottom) return;
+
+            float det = m->e11 * m->e22 - m->e12 * m->e21;
+            if (fabsf(det) < 0.000001f) return;
+            float inv_det = 1.0f / det;
+
+            for (int dst_y = top; dst_y < bottom; dst_y++) {
+                uint8_t* row_pixels = (uint8_t*)surface->pixels +
+                    (dst_y - surface->tile_offset_y) * surface->pitch;
+                for (int dst_x = left; dst_x < right; dst_x++) {
+                    float dx = (float)dst_x + 0.5f - m->e13;
+                    float dy = (float)dst_y + 0.5f - m->e23;
+                    float src_abs_x = ( m->e22 * dx - m->e12 * dy) * inv_det;
+                    float src_abs_y = (-m->e21 * dx + m->e11 * dy) * inv_det;
+                    float local_x = src_abs_x - (float)x - 0.5f;
+                    float local_y = src_abs_y - (float)y - 0.5f;
+                    uint32_t intensity = dl_glyph_sample_coverage(bitmap, local_y, local_x);
+                    if (intensity == 0) continue;
+
+                    uint8_t* p = row_pixels + dst_x * 4;
+                    intensity = (intensity * color.a + 127) / 255;
+                    uint32_t v = 255 - intensity;
+                    if (color.c == 0xFF000000) {
+                        p[0] = p[0] * v / 255;
+                        p[1] = p[1] * v / 255;
+                        p[2] = p[2] * v / 255;
+                        p[3] = 0xFF;
+                    } else {
+                        p[0] = (p[0] * v + color.r * intensity) / 255;
+                        p[1] = (p[1] * v + color.g * intensity) / 255;
+                        p[2] = (p[2] * v + color.b * intensity) / 255;
+                        p[3] = 0xFF;
+                    }
+                }
+            }
+            return;
+        }
+
         for (int i = 0; i < (int)bitmap->height; i++) {
             for (int j = 0; j < (int)bitmap->width; j++) {
-                uint32_t intensity;
-                if (is_mono) {
-                    int byte_index = j / 8;
-                    int bit_index = 7 - (j % 8);
-                    uint8_t byte_val = bitmap->buffer[i * bitmap->pitch + byte_index];
-                    intensity = (byte_val & (1 << bit_index)) ? 255 : 0;
-                } else {
-                    intensity = bitmap->buffer[i * bitmap->pitch + j];
-                }
+                uint32_t intensity = dl_glyph_sample_pixel(bitmap, i, j);
                 if (intensity == 0) continue;
 
                 float src_x = (float)(x + j) + 0.5f;
@@ -566,6 +673,7 @@ static void replay_draw_glyph(ImageSurface* surface, const DlDrawGlyph* g) {
                 }
 
                 uint8_t* p = (uint8_t*)surface->pixels + (dst_y - surface->tile_offset_y) * surface->pitch + dst_x * 4;
+                intensity = (intensity * color.a + 127) / 255;
                 uint32_t v = 255 - intensity;
                 if (color.c == 0xFF000000) {
                     p[0] = p[0] * v / 255;
@@ -648,32 +756,23 @@ static void replay_draw_glyph(ImageSurface* surface, const DlDrawGlyph* g) {
         return;
     }
 
-    // grayscale / monochrome glyph
+    // grayscale / monochrome / LCD glyph
     int left   = std::max((int)clip->left,  x);
     int right  = std::min((int)clip->right,  x + (int)bitmap->width);
     int top    = std::max((int)clip->top,    y);
     int bottom = std::min((int)clip->bottom, y + (int)bitmap->height);
     if (left >= right || top >= bottom) return;
 
-    bool is_mono = (bitmap->pixel_mode == GLYPH_PIXEL_MONO);
-
     for (int i = top - y; i < bottom - y; i++) {
         uint8_t* row_pixels = (uint8_t*)surface->pixels + (y + i - surface->tile_offset_y) * surface->pitch;
         for (int j = left - x; j < right - x; j++) {
             if (x + j < 0 || x + j >= surface->width) continue;
 
-            uint32_t intensity;
-            if (is_mono) {
-                int byte_index = j / 8;
-                int bit_index = 7 - (j % 8);
-                uint8_t byte_val = bitmap->buffer[i * bitmap->pitch + byte_index];
-                intensity = (byte_val & (1 << bit_index)) ? 255 : 0;
-            } else {
-                intensity = bitmap->buffer[i * bitmap->pitch + j];
-            }
+            uint32_t intensity = dl_glyph_sample_pixel(bitmap, i, j);
 
             if (intensity > 0) {
                 uint8_t* p = (uint8_t*)(row_pixels + (x + j) * 4);
+                intensity = (intensity * color.a + 127) / 255;
                 uint32_t v = 255 - intensity;
                 if (color.c == 0xFF000000) {
                     p[0] = p[0] * v / 255;
@@ -885,9 +984,13 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
         case DL_APPLY_OPACITY: {
             DlApplyOpacity* r = &item->apply_opacity;
             if (surface && surface->pixels) {
-                for (int y = r->y0; y < r->y1; y++) {
+                int x0 = std::max(0, r->x0);
+                int y0 = std::max(0, r->y0);
+                int x1 = std::min(surface->width, r->x1);
+                int y1 = std::min(surface->height, r->y1);
+                for (int y = y0; y < y1; y++) {
                     uint8_t* row = (uint8_t*)surface->pixels + y * surface->pitch;
-                    for (int x = r->x0; x < r->x1; x++) {
+                    for (int x = x0; x < x1; x++) {
                         uint8_t* pixel = row + x * 4;
                         pixel[3] = (uint8_t)(pixel[3] * r->opacity + 0.5f);
                     }
@@ -901,43 +1004,45 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
             if (surface && surface->pixels && backdrop_sp > 0) {
                 backdrop_sp--;
                 uint32_t* backdrop = backdrop_stack[backdrop_sp];
-                int bx = backdrop_region[backdrop_sp][0];
-                int by = backdrop_region[backdrop_sp][1];
-                int bw = backdrop_region[backdrop_sp][2];
-                int bh = backdrop_region[backdrop_sp][3];
-                uint32_t* px = (uint32_t*)surface->pixels;
-                int pitch = surface->pitch / 4;
-                int opacity_i = (int)(r->opacity * 256 + 0.5f);
-                for (int row = 0; row < bh; row++) {
-                    for (int col = 0; col < bw; col++) {
-                        uint32_t src = px[(by + row) * pitch + (bx + col)];
-                        uint32_t dst = backdrop[row * bw + col];
-                        if (src == 0) {
-                            // source fully transparent — restore backdrop
-                            px[(by + row) * pitch + (bx + col)] = dst;
-                            continue;
+                if (backdrop) {
+                    int bx = backdrop_region[backdrop_sp][0];
+                    int by = backdrop_region[backdrop_sp][1];
+                    int bw = backdrop_region[backdrop_sp][2];
+                    int bh = backdrop_region[backdrop_sp][3];
+                    uint32_t* px = (uint32_t*)surface->pixels;
+                    int pitch = surface->pitch / 4;
+                    int opacity_i = (int)(r->opacity * 256 + 0.5f);
+                    for (int row = 0; row < bh; row++) {
+                        for (int col = 0; col < bw; col++) {
+                            uint32_t src = px[(by + row) * pitch + (bx + col)];
+                            uint32_t dst = backdrop[row * bw + col];
+                            if (src == 0) {
+                                // source fully transparent — restore backdrop
+                                px[(by + row) * pitch + (bx + col)] = dst;
+                                continue;
+                            }
+                            // scale source by opacity (premultiplied alpha)
+                            uint32_t sa = (((src >> 24) & 0xFF) * opacity_i + 128) >> 8;
+                            uint32_t sr = ((src & 0xFF) * opacity_i + 128) >> 8;
+                            uint32_t sg = (((src >> 8) & 0xFF) * opacity_i + 128) >> 8;
+                            uint32_t sb = (((src >> 16) & 0xFF) * opacity_i + 128) >> 8;
+                            // Porter-Duff source over: result = src' + dst * (1 - src'_a)
+                            uint32_t inv_sa = 255 - sa;
+                            uint32_t da = (dst >> 24) & 0xFF;
+                            uint32_t dr = dst & 0xFF;
+                            uint32_t dg = (dst >> 8) & 0xFF;
+                            uint32_t db = (dst >> 16) & 0xFF;
+                            uint32_t ra = sa + (da * inv_sa + 128) / 255;
+                            uint32_t rr = sr + (dr * inv_sa + 128) / 255;
+                            uint32_t rg = sg + (dg * inv_sa + 128) / 255;
+                            uint32_t rb = sb + (db * inv_sa + 128) / 255;
+                            if (ra > 255) ra = 255;
+                            if (rr > 255) rr = 255;
+                            if (rg > 255) rg = 255;
+                            if (rb > 255) rb = 255;
+                            px[(by + row) * pitch + (bx + col)] =
+                                (ra << 24) | (rb << 16) | (rg << 8) | rr;
                         }
-                        // scale source by opacity (premultiplied alpha)
-                        uint32_t sa = (((src >> 24) & 0xFF) * opacity_i + 128) >> 8;
-                        uint32_t sr = ((src & 0xFF) * opacity_i + 128) >> 8;
-                        uint32_t sg = (((src >> 8) & 0xFF) * opacity_i + 128) >> 8;
-                        uint32_t sb = (((src >> 16) & 0xFF) * opacity_i + 128) >> 8;
-                        // Porter-Duff source over: result = src' + dst * (1 - src'_a)
-                        uint32_t inv_sa = 255 - sa;
-                        uint32_t da = (dst >> 24) & 0xFF;
-                        uint32_t dr = dst & 0xFF;
-                        uint32_t dg = (dst >> 8) & 0xFF;
-                        uint32_t db = (dst >> 16) & 0xFF;
-                        uint32_t ra = sa + (da * inv_sa + 128) / 255;
-                        uint32_t rr = sr + (dr * inv_sa + 128) / 255;
-                        uint32_t rg = sg + (dg * inv_sa + 128) / 255;
-                        uint32_t rb = sb + (db * inv_sa + 128) / 255;
-                        if (ra > 255) ra = 255;
-                        if (rr > 255) rr = 255;
-                        if (rg > 255) rg = 255;
-                        if (rb > 255) rb = 255;
-                        px[(by + row) * pitch + (bx + col)] =
-                            (ra << 24) | (rb << 16) | (rg << 8) | rr;
                     }
                 }
             }
@@ -947,24 +1052,39 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
         case DL_SAVE_BACKDROP: {
             DlSaveBackdrop* r = &item->save_backdrop;
             if (surface && surface->pixels && backdrop_sp < DL_MAX_BACKDROP_DEPTH) {
+                int x0 = std::max(0, r->x0);
+                int y0 = std::max(0, r->y0);
+                int x1 = std::min(surface->width, r->x0 + r->w);
+                int y1 = std::min(surface->height, r->y0 + r->h);
+                int w = x1 - x0;
+                int h = y1 - y0;
+                if (w <= 0 || h <= 0) {
+                    backdrop_stack[backdrop_sp] = nullptr;
+                    backdrop_region[backdrop_sp][0] = 0;
+                    backdrop_region[backdrop_sp][1] = 0;
+                    backdrop_region[backdrop_sp][2] = 0;
+                    backdrop_region[backdrop_sp][3] = 0;
+                    backdrop_sp++;
+                    break;
+                }
                 int pitch = surface->pitch / 4;
-                int sz = r->w * r->h;
+                int sz = w * h;
                 uint32_t* buf = (uint32_t*)scratch_alloc(scratch, sz * sizeof(uint32_t));
                 uint32_t* px = (uint32_t*)surface->pixels;
-                for (int row = 0; row < r->h; row++) {
-                    memcpy(buf + row * r->w,
-                           px + (r->y0 + row) * pitch + r->x0,
-                           r->w * sizeof(uint32_t));
+                for (int row = 0; row < h; row++) {
+                    memcpy(buf + row * w,
+                           px + (y0 + row) * pitch + x0,
+                           w * sizeof(uint32_t));
                 }
                 // clear the region so children render on transparent
-                for (int row = 0; row < r->h; row++) {
-                    memset(px + (r->y0 + row) * pitch + r->x0, 0, r->w * sizeof(uint32_t));
+                for (int row = 0; row < h; row++) {
+                    memset(px + (y0 + row) * pitch + x0, 0, w * sizeof(uint32_t));
                 }
                 backdrop_stack[backdrop_sp] = buf;
-                backdrop_region[backdrop_sp][0] = r->x0;
-                backdrop_region[backdrop_sp][1] = r->y0;
-                backdrop_region[backdrop_sp][2] = r->w;
-                backdrop_region[backdrop_sp][3] = r->h;
+                backdrop_region[backdrop_sp][0] = x0;
+                backdrop_region[backdrop_sp][1] = y0;
+                backdrop_region[backdrop_sp][2] = w;
+                backdrop_region[backdrop_sp][3] = h;
                 backdrop_sp++;
             }
             break;
@@ -975,18 +1095,20 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
             if (surface && surface->pixels && backdrop_sp > 0) {
                 backdrop_sp--;
                 uint32_t* backdrop = backdrop_stack[backdrop_sp];
-                int bx = backdrop_region[backdrop_sp][0];
-                int by = backdrop_region[backdrop_sp][1];
-                int bw = backdrop_region[backdrop_sp][2];
-                int bh = backdrop_region[backdrop_sp][3];
-                uint32_t* px = (uint32_t*)surface->pixels;
-                int pitch = surface->pitch / 4;
-                for (int row = 0; row < bh; row++) {
-                    for (int col = 0; col < bw; col++) {
-                        uint32_t bd = backdrop[row * bw + col];
-                        uint32_t source = px[(by + row) * pitch + (bx + col)];
-                        px[(by + row) * pitch + (bx + col)] =
-                            composite_blend_pixel(bd, source, (CssEnum)r->blend_mode);
+                if (backdrop) {
+                    int bx = backdrop_region[backdrop_sp][0];
+                    int by = backdrop_region[backdrop_sp][1];
+                    int bw = backdrop_region[backdrop_sp][2];
+                    int bh = backdrop_region[backdrop_sp][3];
+                    uint32_t* px = (uint32_t*)surface->pixels;
+                    int pitch = surface->pitch / 4;
+                    for (int row = 0; row < bh; row++) {
+                        for (int col = 0; col < bw; col++) {
+                            uint32_t bd = backdrop[row * bw + col];
+                            uint32_t source = px[(by + row) * pitch + (bx + col)];
+                            px[(by + row) * pitch + (bx + col)] =
+                                composite_blend_pixel(bd, source, (CssEnum)r->blend_mode);
+                        }
                     }
                 }
             }

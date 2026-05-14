@@ -12,6 +12,7 @@
 #include "../lib/arena.h"
 #include "../lib/log.h"
 #include "../lib/strbuf.h"
+#include "../lib/tagged.hpp"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "view.hpp"  // For HTM_TAG_* constants
@@ -105,20 +106,19 @@ uint32_t dom_node_boundary_length(const DomNode* node) {
         return dom_text_utf16_length(node->as_text());
     }
     if (node->is_comment()) {
-        const char* s = dom_comment_get_content((DomComment*)node->as_comment());
+        const char* s = dom_comment_get_content(const_cast<DomComment*>(node->as_comment()));
         if (!s) return 0;
         // Phase 1: treat content as ASCII-equivalent (1 byte == 1 UTF-16 code unit).
         return (uint32_t)strlen(s);
     }
     if (node->is_element()) {
-        const DomElement* e = node->as_element();
-        if (tc_is_text_control((DomElement*)e)) {
-            DomElement* elem = (DomElement*)e;
+        DomElement* elem = lam::dom_require_element(const_cast<DomNode*>(node));
+        if (tc_is_text_control(elem)) {
             tc_ensure_init(elem);
             return elem->form ? elem->form->current_value_len : 0;
         }
         uint32_t n = 0;
-        for (DomNode* c = e->first_child; c; c = c->next_sibling) n++;
+        for (DomNode* c = elem->first_child; c; c = c->next_sibling) n++;
         return n;
     }
     return 0;
@@ -913,7 +913,7 @@ static void adjust_one_endpoint_for_remove(DomBoundary* b,
                                            uint32_t index) {
     if (!b || !b->node) return;
     if (is_inclusive_ancestor(child, b->node)) {
-        b->node = (DomNode*)parent;
+        b->node = const_cast<DomNode*>(parent);
         b->offset = index;
         return;
     }
@@ -970,7 +970,7 @@ void dom_mutation_text_replace_data(DocState* state, DomText* text,
     //   if range_offset > offset + count:                    range_offset += replacement_len - count
     //   else (range_offset <= offset):                       no change
     auto adjust = [&](DomBoundary* b) {
-        if (!b->node || b->node != (DomNode*)text) return;
+        if (!b->node || b->node != static_cast<DomNode*>(text)) return;
         uint32_t ro = b->offset;
         if (ro <= offset) return;                    // before the edit window
         if (ro <= offset + count) {                  // within deleted span
@@ -996,12 +996,12 @@ void dom_mutation_text_split(DocState* state, DomText* original,
     if (head) {
         // Step 1: move endpoints inside `original` past `offset` to `new_node`.
         for (DomRange* r = *head; r; r = r->next) {
-            if (r->start.node == (DomNode*)original && r->start.offset > offset) {
-                r->start.node   = (DomNode*)new_node;
+            if (r->start.node == static_cast<DomNode*>(original) && r->start.offset > offset) {
+                r->start.node   = static_cast<DomNode*>(new_node);
                 r->start.offset = r->start.offset - offset;
             }
-            if (r->end.node == (DomNode*)original && r->end.offset > offset) {
-                r->end.node   = (DomNode*)new_node;
+            if (r->end.node == static_cast<DomNode*>(original) && r->end.offset > offset) {
+                r->end.node   = static_cast<DomNode*>(new_node);
                 r->end.offset = r->end.offset - offset;
             }
             r->layout_valid = false;
@@ -1009,7 +1009,7 @@ void dom_mutation_text_split(DocState* state, DomText* original,
     }
     // Step 2: account for the inserted sibling.
     if (new_node->parent) {
-        dom_mutation_post_insert(state, new_node->parent, (DomNode*)new_node);
+        dom_mutation_post_insert(state, new_node->parent, static_cast<DomNode*>(new_node));
     } else {
         resync_selection_after_mutation(state);
     }
@@ -1021,12 +1021,12 @@ void dom_mutation_text_merge(DocState* state, DomText* prev,
     DomRange** head = dom_range_state_live_ranges_slot(state);
     if (head) {
         for (DomRange* r = *head; r; r = r->next) {
-            if (r->start.node == (DomNode*)next) {
-                r->start.node   = (DomNode*)prev;
+            if (r->start.node == static_cast<DomNode*>(next)) {
+                r->start.node   = static_cast<DomNode*>(prev);
                 r->start.offset = prev_u16_len + r->start.offset;
             }
-            if (r->end.node == (DomNode*)next) {
-                r->end.node   = (DomNode*)prev;
+            if (r->end.node == static_cast<DomNode*>(next)) {
+                r->end.node   = static_cast<DomNode*>(prev);
                 r->end.offset = prev_u16_len + r->end.offset;
             }
             r->layout_valid = false;
@@ -1090,23 +1090,23 @@ DomNode* dom_node_clone(DomNode* node, bool deep) {
     if (!doc) return nullptr;
     if (node->is_text()) {
         DomText* t = node->as_text();
-        return (DomNode*)dom_text_from_bytes(doc, t->text, t->length);
+        return static_cast<DomNode*>(dom_text_from_bytes(doc, t->text, t->length));
     }
     if (node->is_element()) {
         DomElement* e = node->as_element();
         DomElement* clone = dom_element_create(doc, e->tag_name, e->native_element);
         if (!clone) return nullptr;
-        clone->id          = e->id;
-        clone->class_names = e->class_names;
+        if (e->id) dom_element_retain_id(clone, lam::borrow_const(lam::promote_to_arena(doc->arena, e->id)));
+        if (e->class_names) dom_element_retain_class_names(clone, lam::PoolPtr<const char*>(e->class_names));
         clone->class_count = e->class_count;
         clone->tag_id      = e->tag_id;
         if (deep) {
             for (DomNode* c = e->first_child; c; c = c->next_sibling) {
                 DomNode* cc = dom_node_clone(c, true);
-                if (cc) ((DomNode*)clone)->append_child(cc);
+                if (cc) (static_cast<DomNode*>(clone))->append_child(cc);
             }
         }
-        return (DomNode*)clone;
+        return static_cast<DomNode*>(clone);
     }
     return nullptr;
 }
@@ -1115,7 +1115,7 @@ DomText* dom_text_split_at(DocState* state, DomText* original, uint32_t offset) 
     if (!original || !original->parent) return nullptr;
     uint32_t total = dom_text_utf16_length(original);
     if (offset > total) return nullptr;
-    DomDocument* doc = node_doc((DomNode*)original);
+    DomDocument* doc = node_doc(static_cast<DomNode*>(original));
     if (!doc) return nullptr;
 
     uint32_t u8_split = dom_text_utf16_to_utf8(original, offset);
@@ -1133,8 +1133,8 @@ DomText* dom_text_split_at(DocState* state, DomText* original, uint32_t offset) 
     // Insert right after original.
     DomNode* parent = original->parent;
     DomNode* after  = original->next_sibling;
-    if (after) parent->insert_before((DomNode*)right, after);
-    else       parent->append_child((DomNode*)right);
+    if (after) parent->insert_before(static_cast<DomNode*>(right), after);
+    else       parent->append_child(static_cast<DomNode*>(right));
 
     // Truncate original.
     original->native_string = left_str;
@@ -1167,7 +1167,7 @@ static void text_replace_data_str(DocState* st, DomText* t,
     if (suffix_len) memcpy(buf + prefix + repl_bytes, t->text + u8_end, suffix_len);
     buf[new_len] = '\0';
 
-    String* s = arena_make_string(node_doc((DomNode*)t), buf, new_len);
+    String* s = arena_make_string(node_doc(static_cast<DomNode*>(t)), buf, new_len);
     free(buf);
     if (!s) return;
 
@@ -1247,7 +1247,7 @@ static void process_partially_contained(DomRange* r, RangeOp op,
             DomDocument* doc = node_doc(partial);
             if (doc) {
                 DomText* clone = dom_text_from_bytes(doc, t->text + u8_s, u8_e - u8_s);
-                if (clone) ((DomNode*)fragment)->append_child((DomNode*)clone);
+                if (clone) (static_cast<DomNode*>(fragment))->append_child(static_cast<DomNode*>(clone));
             }
         }
         // For DELETE / EXTRACT, mutate the original text.
@@ -1260,7 +1260,7 @@ static void process_partially_contained(DomRange* r, RangeOp op,
     if (op == ROP_CLONE || op == ROP_EXTRACT) {
         DomNode* shallow = dom_node_clone(partial, /*deep=*/false);
         if (!shallow) return;
-        if (fragment) ((DomNode*)fragment)->append_child(shallow);
+        if (fragment) (static_cast<DomNode*>(fragment))->append_child(shallow);
         // Recursively build subfragment.
         const char* sub_exc = nullptr;
         DomElement* subfrag = range_process_contents(&sub, op, &sub_exc);
@@ -1268,8 +1268,8 @@ static void process_partially_contained(DomRange* r, RangeOp op,
             DomNode* c = subfrag->first_child;
             while (c) {
                 DomNode* next = c->next_sibling;
-                ((DomElement*)subfrag)->remove_child(c);
-                ((DomNode*)shallow)->append_child(c);
+                subfrag->remove_child(c);
+                (static_cast<DomNode*>(shallow))->append_child(c);
                 c = next;
             }
         }
@@ -1309,7 +1309,7 @@ static DomElement* range_process_contents(DomRange* r, RangeOp op,
             uint32_t u8_s = dom_text_utf16_to_utf8(t, so);
             uint32_t u8_e = dom_text_utf16_to_utf8(t, eo);
             DomText* clone = dom_text_from_bytes(doc, t->text + u8_s, u8_e - u8_s);
-            if (clone) ((DomNode*)fragment)->append_child((DomNode*)clone);
+            if (clone) (static_cast<DomNode*>(fragment))->append_child(static_cast<DomNode*>(clone));
         }
         if ((op == ROP_DELETE || op == ROP_EXTRACT) && take > 0) {
             text_replace_data_str(r->state, t, so, take, "", 0, 0);
@@ -1377,11 +1377,11 @@ static DomElement* range_process_contents(DomRange* r, RangeOp op,
             DomNode* c = contained[k];
             if (op == ROP_CLONE) {
                 DomNode* clone = dom_node_clone(c, /*deep=*/true);
-                if (clone && fragment) ((DomNode*)fragment)->append_child(clone);
+                if (clone && fragment) (static_cast<DomNode*>(fragment))->append_child(clone);
             } else if (op == ROP_EXTRACT) {
                 dom_mutation_pre_remove(r->state, c);
                 parent->remove_child(c);
-                if (fragment) ((DomNode*)fragment)->append_child(c);
+                if (fragment) (static_cast<DomNode*>(fragment))->append_child(c);
             } else {
                 dom_mutation_pre_remove(r->state, c);
                 parent->remove_child(c);
@@ -1556,8 +1556,8 @@ bool dom_range_surround_contents(DomRange* r, DomNode* node, const char** out_ex
         while (c) {
             DomNode* next = c->next_sibling;
             frag->remove_child(c);
-            ((DomNode*)node_el)->append_child(c);
-            dom_mutation_post_insert(r->state, (DomNode*)node_el, c);
+            (static_cast<DomNode*>(node_el))->append_child(c);
+            dom_mutation_post_insert(r->state, static_cast<DomNode*>(node_el), c);
             c = next;
         }
     }
@@ -1648,7 +1648,7 @@ static DomText* next_text_after_impl(DomNode* n) {
 static DomText* next_text_after(DomNode* n) {
     DomText* t = next_text_after_impl(n);
     while (t && is_in_non_selectable_subtree(t)) {
-        t = next_text_after_impl((DomNode*)t);
+        t = next_text_after_impl(static_cast<DomNode*>(t));
     }
     return t;
 }
@@ -1690,7 +1690,7 @@ static DomText* prev_text_before_impl(DomNode* n) {
 static DomText* prev_text_before(DomNode* n) {
     DomText* t = prev_text_before_impl(n);
     while (t && is_in_non_selectable_subtree(t)) {
-        t = prev_text_before_impl((DomNode*)t);
+        t = prev_text_before_impl(static_cast<DomNode*>(t));
     }
     return t;
 }
@@ -1833,9 +1833,9 @@ static bool node_is_br(DomNode* n) {
 // otherwise-inline-only block).
 static DomText* find_paragraph_text(DomText* start, int dir) {
     if (!start) return nullptr;
-    DomElement* start_block = nearest_block_ancestor_or_self((DomNode*)start);
+    DomElement* start_block = nearest_block_ancestor_or_self(static_cast<DomNode*>(start));
     bool br_crossed = false;
-    DomNode* cur = (DomNode*)start;
+    DomNode* cur = static_cast<DomNode*>(start);
     for (int safety = 0; safety < 100000; safety++) {
         cur = (dir > 0) ? next_node_in_doc_order(cur) : prev_node_in_doc_order(cur);
         if (!cur) return nullptr;
@@ -1907,7 +1907,7 @@ static CssEnum cascaded_keyword(const DomElement* e, CssPropertyId prop) {
                     CssSelector* sel = group->selectors[si];
                     if (!sel) continue;
                     MatchResult result;
-                    if (selector_matcher_matches(matcher, sel, (DomElement*)e, &result)) {
+                    if (selector_matcher_matches(matcher, sel, const_cast<DomElement*>(e), &result)) {
                         matched = true;
                         match_spec = result.specificity;
                         matched_pseudo = result.pseudo_element;
@@ -1916,7 +1916,7 @@ static CssEnum cascaded_keyword(const DomElement* e, CssPropertyId prop) {
                 }
             } else if (single_sel) {
                 MatchResult result;
-                if (selector_matcher_matches(matcher, single_sel, (DomElement*)e, &result)) {
+                if (selector_matcher_matches(matcher, single_sel, const_cast<DomElement*>(e), &result)) {
                     matched = true;
                     match_spec = result.specificity;
                     matched_pseudo = result.pseudo_element;
@@ -1961,7 +1961,7 @@ static bool elem_subtree_content_visibility_hidden(const DomElement* e) {
         // populated this, the test won't be hit and the function returns
         // false — that's the correct conservative fallback.
         if (e->native_element) {
-            const char* style = dom_element_get_attribute((DomElement*)e, "style");
+            const char* style = dom_element_get_attribute(const_cast<DomElement*>(e), "style");
             if (style) {
                 const char* p = style;
                 while ((p = strstr(p, "content-visibility")) != nullptr) {
@@ -2149,8 +2149,8 @@ char* dom_range_to_string_ex(const DomRange* r, DomStringifyMode mode) {
     }
 
     while (cur) {
-        DomBoundary t_start{ (DomNode*)cur, 0 };
-        DomBoundary t_end{ (DomNode*)cur, dom_text_utf16_length(cur) };
+        DomBoundary t_start{ static_cast<DomNode*>(cur), 0 };
+        DomBoundary t_end{ static_cast<DomNode*>(cur), dom_text_utf16_length(cur) };
         // Slice this text node by clamping to range bounds.
         DomBoundary slice_start = t_start;
         DomBoundary slice_end = t_end;
@@ -2171,9 +2171,9 @@ char* dom_range_to_string_ex(const DomRange* r, DomStringifyMode mode) {
             // a following ws-only text is treated as freshly-adjacent-to-skip.
             ws_streak = 0;
             prev_skipped = true;
-            if ((DomNode*)cur == r->end.node) break;
+            if (static_cast<DomNode*>(cur) == r->end.node) break;
             if (dom_boundary_compare(&t_end, &r->end) != DOM_BOUNDARY_BEFORE) break;
-            cur = next_text_after_any((DomNode*)cur);
+            cur = next_text_after_any(static_cast<DomNode*>(cur));
             continue;
         }
         // Layout-free block-boundary serialization. Each visible block
@@ -2187,8 +2187,8 @@ char* dom_range_to_string_ex(const DomRange* r, DomStringifyMode mode) {
         // real display:none element + ws would behave with prev_skipped
         // rollback). Whitespace immediately adjacent to a skipped subtree
         // is also consumed.
-        DomElement* this_block = nearest_block_ancestor_or_self((DomNode*)cur);
-        bool intermediate = ((DomNode*)cur != r->start.node && (DomNode*)cur != r->end.node);
+        DomElement* this_block = nearest_block_ancestor_or_self(static_cast<DomNode*>(cur));
+        bool intermediate = (static_cast<DomNode*>(cur) != r->start.node && static_cast<DomNode*>(cur) != r->end.node);
         bool ws_only = text_is_ws_only(cur);
         if (intermediate && ws_only) {
             if (!prev_skipped) {
@@ -2197,13 +2197,13 @@ char* dom_range_to_string_ex(const DomRange* r, DomStringifyMode mode) {
             // ws-adjacent-to-skipped is consumed; don't increment streak.
             prev_block = this_block;
             prev_skipped = false;
-            if ((DomNode*)cur == r->end.node) break;
+            if (static_cast<DomNode*>(cur) == r->end.node) break;
             if (dom_boundary_compare(&t_end, &r->end) != DOM_BOUNDARY_BEFORE) break;
-            cur = next_text_after_any((DomNode*)cur);
+            cur = next_text_after_any(static_cast<DomNode*>(cur));
             continue;
         }
         // Append the in-text portion (skip if slice fell outside this node).
-        if (slice_start.node == (DomNode*)cur && slice_end.node == (DomNode*)cur
+        if (slice_start.node == static_cast<DomNode*>(cur) && slice_end.node == static_cast<DomNode*>(cur)
             && slice_start.offset < slice_end.offset) {
             uint32_t b_start = dom_text_utf16_to_utf8(cur, slice_start.offset);
             uint32_t b_end = dom_text_utf16_to_utf8(cur, slice_end.offset);
@@ -2267,9 +2267,9 @@ char* dom_range_to_string_ex(const DomRange* r, DomStringifyMode mode) {
             }
         }
         // Stop once we've covered the end-position.
-        if ((DomNode*)cur == r->end.node) break;
+        if (static_cast<DomNode*>(cur) == r->end.node) break;
         if (dom_boundary_compare(&t_end, &r->end) != DOM_BOUNDARY_BEFORE) break;
-        cur = next_text_after_any((DomNode*)cur);
+        cur = next_text_after_any(static_cast<DomNode*>(cur));
     }
 
     // Build NUL-terminated copy.
@@ -2420,8 +2420,8 @@ static DomBoundary move_one_char(DomBoundary b, int dir) {
                 return b;
             }
             // step into next text node
-            DomText* nx = next_text_after((DomNode*)t);
-            if (nx) return DomBoundary{ (DomNode*)nx, 0 };
+            DomText* nx = next_text_after(static_cast<DomNode*>(t));
+            if (nx) return DomBoundary{ static_cast<DomNode*>(nx), 0 };
             return b;
         } else {
             if (b.offset > 0) {
@@ -2435,14 +2435,14 @@ static DomBoundary move_one_char(DomBoundary b, int dir) {
                 b.offset = newo;
                 return b;
             }
-            DomText* pv = prev_text_before((DomNode*)t);
-            if (pv) return DomBoundary{ (DomNode*)pv, dom_text_utf16_length(pv) };
+            DomText* pv = prev_text_before(static_cast<DomNode*>(t));
+            if (pv) return DomBoundary{ static_cast<DomNode*>(pv), dom_text_utf16_length(pv) };
             return b;
         }
     }
     // element node
     DomElement* e = b.node->as_element();
-    uint32_t childcount = (uint32_t)dom_node_boundary_length((DomNode*)e);
+    uint32_t childcount = (uint32_t)dom_node_boundary_length(static_cast<DomNode*>(e));
     if (dir > 0) {
         if (b.offset < childcount) {
             // descend into child at offset
@@ -2457,12 +2457,12 @@ static DomBoundary move_one_char(DomBoundary b, int dir) {
             if (next_child && next_child->is_text()) {
                 return DomBoundary{ next_child, 0 };
             }
-            return DomBoundary{ (DomNode*)e, new_off };
+            return DomBoundary{ static_cast<DomNode*>(e), new_off };
         }
         // ascend
         DomNode* p = e->parent;
         if (p) {
-            uint32_t idx = dom_node_child_index((DomNode*)e);
+            uint32_t idx = dom_node_child_index(static_cast<DomNode*>(e));
             if (idx != UINT32_MAX) return DomBoundary{ p, idx + 1 };
         }
         return b;
@@ -2483,11 +2483,11 @@ static DomBoundary move_one_char(DomBoundary b, int dir) {
                 if (pc && pc->is_text())
                     return DomBoundary{ pc, dom_text_utf16_length(pc->as_text()) };
             }
-            return DomBoundary{ (DomNode*)e, b.offset - 1 };
+            return DomBoundary{ static_cast<DomNode*>(e), b.offset - 1 };
         }
         DomNode* p = e->parent;
         if (p) {
-            uint32_t idx = dom_node_child_index((DomNode*)e);
+            uint32_t idx = dom_node_child_index(static_cast<DomNode*>(e));
             if (idx != UINT32_MAX) return DomBoundary{ p, idx };
         }
         return b;
@@ -2505,7 +2505,7 @@ static uint32_t cp_after(DomBoundary b) {
             uint32_t step = 1;
             return cp_at_u16(t, b.offset, &step);
         }
-        DomText* nx = next_text_after((DomNode*)t);
+        DomText* nx = next_text_after(static_cast<DomNode*>(t));
         if (!nx) return 0;
         uint32_t step = 1;
         return cp_at_u16(nx, 0, &step);
@@ -2529,7 +2529,7 @@ static uint32_t cp_before(DomBoundary b) {
             uint32_t step = 1;
             return cp_at_u16(t, b.offset - 1, &step);
         }
-        DomText* pv = prev_text_before((DomNode*)t);
+        DomText* pv = prev_text_before(static_cast<DomNode*>(t));
         if (!pv) return 0;
         uint32_t total = dom_text_utf16_length(pv);
         if (total == 0) return 0;
@@ -2715,11 +2715,11 @@ bool dom_selection_modify(DomSelection* s, const char* alter,
         // block-level (paragraph-like) ancestor of focus.
         DomElement* B = nearest_block_ancestor_or_self(focus.node);
         if (B) {
-            DomText* tx = (dir > 0) ? rightmost_text_in((DomNode*)B)
-                                    : leftmost_text_in((DomNode*)B);
+            DomText* tx = (dir > 0) ? rightmost_text_in(static_cast<DomNode*>(B))
+                                    : leftmost_text_in(static_cast<DomNode*>(B));
             if (tx) {
                 uint32_t off = (dir > 0) ? dom_text_utf16_length(tx) : 0;
-                new_focus = DomBoundary{ (DomNode*)tx, off };
+                new_focus = DomBoundary{ static_cast<DomNode*>(tx), off };
             } else {
                 new_focus = focus;
             }
@@ -2737,7 +2737,7 @@ bool dom_selection_modify(DomSelection* s, const char* alter,
         if (land) {
             uint32_t tlen = dom_text_utf16_length(land);
             uint32_t off = focus.offset > tlen ? tlen : focus.offset;
-            new_focus = DomBoundary{ (DomNode*)land, off };
+            new_focus = DomBoundary{ static_cast<DomNode*>(land), off };
         } else {
             new_focus = focus;
         }
@@ -2751,8 +2751,8 @@ bool dom_selection_modify(DomSelection* s, const char* alter,
             // siblings) so the visual "line" we land on contains real text.
             DomText* it = tx;
             while (true) {
-                it = (dir > 0) ? next_text_after((DomNode*)it)
-                               : prev_text_before((DomNode*)it);
+                it = (dir > 0) ? next_text_after(static_cast<DomNode*>(it))
+                               : prev_text_before(static_cast<DomNode*>(it));
                 if (!it) break;
                 bool ws_only = true;
                 if (it->text) {
@@ -2771,7 +2771,7 @@ bool dom_selection_modify(DomSelection* s, const char* alter,
         if (target) {
             uint32_t tlen = dom_text_utf16_length(target);
             uint32_t off = focus.offset > tlen ? tlen : focus.offset;
-            new_focus = DomBoundary{ (DomNode*)target, off };
+            new_focus = DomBoundary{ static_cast<DomNode*>(target), off };
         } else {
             new_focus = focus;
         }

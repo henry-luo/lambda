@@ -44,7 +44,6 @@
         "lambda/transpile-call.cpp",
         "radiant/radiant.cpp",
         "radiant/render_dvi.cpp",
-        "radiant/render_texnode.cpp",
         "radiant/rdt_vector_cg.mm",
         "lambda/format/format_latex_html_v2.cpp",
         "lambda/input/input-adoc.cpp",
@@ -456,6 +455,20 @@
                 "secur32",
                 "iphlpapi"
             ],
+            "macos": {
+                "exclude_libraries": [
+                    "ngtcp2_crypto_ossl",
+                    "ngtcp2",
+                    "nghttp3",
+                    "zstd",
+                    "ssh2",
+                    "idn2",
+                    "ssl",
+                    "crypto",
+                    "unistring",
+                    "iconv"
+                ]
+            },
             "defines": [
                 "SIMPLE_SCHEMA_PARSER",
                 "PATH_NO_ITERATION",
@@ -663,7 +676,6 @@
                 "lambda/transpile_shared.cpp",
                 "radiant/radiant.cpp",
                 "radiant/render_dvi.cpp",
-                "radiant/render_texnode.cpp",
                 "radiant/rdt_vector_cg.mm",
                 "lambda/format/format_latex_html_v2.cpp",
                 "lambda/input/input-adoc.cpp",
@@ -1725,6 +1737,20 @@
                         "icon": "🔍"
                     },
                     {
+                        "source": "test_own_tagged.cpp",
+                        "name": "Ownership and Tagged Dispatch Tests",
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_own_tagged.exe",
+                        "icon": "🧩"
+                    },
+                    {
                         "source": "test_npm_semver_gtest.cpp",
                         "name": "NPM Semver Tests",
                         "dependencies": [],
@@ -2039,7 +2065,7 @@
                             "gomp"
                         ],
                         "macos": {
-                            "exclude_libraries": ["gomp"]
+                            "exclude_libraries": ["webp", "gomp"]
                         },
                         "additional_sources": [
                             "radiant/animation.cpp",
@@ -2308,6 +2334,27 @@
                             "rpmalloc"
                         ],
                         "binary": "test_input_pdf_gtest.exe",
+                        "icon": "📕"
+                    },
+                    {
+                        "source": "test_pdf_render_visual_gtest.cpp",
+                        "name": "PDF Render Visual Tests",
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc",
+                            "gif",
+                            "png",
+                            "turbojpeg",
+                            "zlib"
+                        ],
+                        "additional_sources": [
+                            "lib/image.c"
+                        ],
+                        "binary": "test_pdf_render_visual_gtest.exe",
                         "icon": "📕"
                     },
                     {

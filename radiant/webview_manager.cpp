@@ -7,6 +7,7 @@
 #include "view.hpp"
 #include "state_store.hpp"
 #include "../lambda/input/css/dom_element.hpp"
+#include "../lib/tagged.hpp"
 #include "../lib/log.h"
 #include "../lib/mem.h"
 
@@ -155,16 +156,16 @@ void webview_set_visible(WebViewHandle* handle, bool visible) {
 // ---------------------------------------------------------------------------
 
 // forward: check if tree contains any <webview> elements
-static bool tree_has_webview(ViewBlock* block) {
-    if (!block) return false;
-    if (block->tag_id == HTM_TAG_WEBVIEW && block->embed && block->embed->webview) {
+static bool tree_has_webview(View* view) {
+    ViewElement* elem = lam::view_as_element(view);
+    if (!elem) return false;
+    if (elem->tag_id == HTM_TAG_WEBVIEW && elem->embed && elem->embed->webview) {
         return true;
     }
-    DomNode* child = block->first_child;
+    DomNode* child = elem->first_child;
     while (child) {
         if (child->node_type == DOM_NODE_ELEMENT) {
-            ViewBlock* child_block = (ViewBlock*)child;
-            if (child_block->view_type && tree_has_webview(child_block)) {
+            if (child->view_type && tree_has_webview(child)) {
                 return true;
             }
         }
@@ -185,7 +186,7 @@ static void sync_walk(WebViewManager* mgr, ViewBlock* block,
     if (block->scroller && block->scroller->pane) {
         DocState* state = block->doc ? block->doc->state : NULL;
         float scroll_x = 0.0f, scroll_y = 0.0f;
-        scroll_state_get_position_for_view(state, (View*)block, block->scroller->pane,
+        scroll_state_get_position_for_view(state, static_cast<View*>(block), block->scroller->pane,
                                            &scroll_x, &scroll_y, NULL, NULL);
         scroll_dx = -scroll_x;
         scroll_dy = -scroll_y;
@@ -298,8 +299,8 @@ static void sync_walk(WebViewManager* mgr, ViewBlock* block,
     DomNode* child = block->first_child;
     while (child) {
         if (child->node_type == DOM_NODE_ELEMENT) {
-            ViewBlock* child_block = (ViewBlock*)child;
-            if (child_block->view_type) {
+            ViewBlock* child_block = lam::view_as_block(child);
+            if (child_block) {
                 sync_walk(mgr, child_block,
                           abs_x + scroll_dx, abs_y + scroll_dy, pixel_ratio);
             }
@@ -311,7 +312,7 @@ static void sync_walk(WebViewManager* mgr, ViewBlock* block,
 void webview_manager_sync_layout(UiContext* uicon, ViewTree* tree) {
     if (!uicon || !tree || !tree->root) return;
 
-    ViewBlock* root = (ViewBlock*)tree->root;
+    ViewBlock* root = lam::view_require_block(tree->root);
 
     // lazy-init: create the manager only when the tree has <webview> elements
     if (!uicon->webview_mgr) {
@@ -354,8 +355,8 @@ static bool poll_dirty_walk(ViewBlock* block) {
     DomNode* child = block->first_child;
     while (child) {
         if (child->node_type == DOM_NODE_ELEMENT) {
-            ViewBlock* cb = (ViewBlock*)child;
-            if (cb->view_type && poll_dirty_walk(cb)) any_dirty = true;
+            ViewBlock* cb = lam::view_as_block(child);
+            if (cb && poll_dirty_walk(cb)) any_dirty = true;
         }
         child = child->next_sibling;
     }
@@ -364,7 +365,7 @@ static bool poll_dirty_walk(ViewBlock* block) {
 
 bool webview_manager_poll_dirty(UiContext* uicon, ViewTree* tree) {
     if (!uicon || !uicon->webview_mgr || !tree || !tree->root) return false;
-    ViewBlock* root = (ViewBlock*)tree->root;
+    ViewBlock* root = lam::view_require_block(tree->root);
     return poll_dirty_walk(root);
 }
 

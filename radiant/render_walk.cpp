@@ -1,6 +1,7 @@
 #include "render_backend.h"
 #include "view.hpp"
 #include "webview.h"
+#include "../lib/tagged.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 extern "C" {
 #include "../lib/log.h"
@@ -41,7 +42,7 @@ void render_walk_block(RenderBackend* backend, RenderWalkState* state, ViewBlock
     state->y = pa_y + block->y;
 
     // update inherited color
-    if (block->in_line && block->in_line->color.c) {
+    if (block->in_line && block->in_line->has_color) {
         state->color = block->in_line->color;
     }
 
@@ -127,7 +128,7 @@ void render_walk_inline(RenderBackend* backend, RenderWalkState* state, ViewSpan
         }
     }
 
-    if (span->in_line && span->in_line->color.c) {
+    if (span->in_line && span->in_line->has_color) {
         state->color = span->in_line->color;
     }
 
@@ -169,16 +170,16 @@ void render_walk_children(RenderBackend* backend, RenderWalkState* state, View* 
             case RDT_VIEW_TABLE_ROW:
             case RDT_VIEW_TABLE_CELL:
             case RDT_VIEW_LIST_ITEM:
-                render_walk_block(backend, state, (ViewBlock*)view);
+                render_walk_block(backend, state, lam::view_require_block(view));
                 break;
 
             case RDT_VIEW_INLINE:
-                render_walk_inline(backend, state, (ViewSpan*)view);
+                render_walk_inline(backend, state, lam::view_require_element(view));
                 break;
 
             case RDT_VIEW_TEXT:
                 if (backend->render_text) {
-                    backend->render_text(backend->ctx, (ViewText*)view,
+                    backend->render_text(backend->ctx, lam::view_require_text(view),
                                          state->x, state->y,
                                          &state->font, state->color);
                 }
@@ -186,7 +187,7 @@ void render_walk_children(RenderBackend* backend, RenderWalkState* state, View* 
 
             case RDT_VIEW_MARKER:
                 if (backend->render_marker) {
-                    backend->render_marker(backend->ctx, (ViewSpan*)view,
+                    backend->render_marker(backend->ctx, lam::view_require_element(view),
                                            state->x, state->y,
                                            &state->font, state->color);
                 }

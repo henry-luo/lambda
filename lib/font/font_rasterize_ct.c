@@ -243,8 +243,9 @@ GlyphBitmap* font_rasterize_ct_render(void* ct_font_ref, uint32_t codepoint,
         return bmp;
     }
 
-    // check if this is a color emoji glyph
-    bool is_color = (CTFontGetSymbolicTraits(font) & kCTFontTraitColorGlyphs) != 0;
+    CTFontSymbolicTraits traits = CTFontGetSymbolicTraits(font);
+    bool is_color = (traits & kCTFontTraitColorGlyphs) != 0;
+    bool is_italic = (traits & kCTFontTraitItalic) != 0;
 
     int bytes_per_pixel;
     CGColorSpaceRef color_space;
@@ -289,10 +290,11 @@ GlyphBitmap* font_rasterize_ct_render(void* ct_font_ref, uint32_t codepoint,
     // the same approach as Skia/Chrome: new_pixel = (pixel² + 128) / 255.
     // This preserves the thickened strokes while linearizing the tonal curve,
     // producing glyph weight within ~2% of Chrome/Safari.
+    bool use_font_smoothing = !is_italic;
     CGContextSetAllowsAntialiasing(cg_ctx, true);
     CGContextSetShouldAntialias(cg_ctx, true);
-    CGContextSetAllowsFontSmoothing(cg_ctx, true);
-    CGContextSetShouldSmoothFonts(cg_ctx, true);
+    CGContextSetAllowsFontSmoothing(cg_ctx, use_font_smoothing);
+    CGContextSetShouldSmoothFonts(cg_ctx, use_font_smoothing);
 
     if (!is_color) {
         // for grayscale, set white foreground on black background

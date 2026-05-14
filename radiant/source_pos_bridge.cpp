@@ -28,6 +28,7 @@
 #include <string.h>
 
 #include "../lib/hashmap.h"
+#include "../lib/tagged.hpp"
 #include "../lambda/render_map.h"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
@@ -235,7 +236,7 @@ bool source_pos_from_dom_boundary(const DomBoundary* boundary,
     uint32_t leaf_u8_offset = 0;
 
     if (is_text_leaf) {
-        DomText* tn = (DomText*)node;
+        DomText* tn = lam::dom_require_text(node);
         leaf_u8_offset = dom_text_utf16_to_utf8(tn, boundary->offset);
         leaf_child_index = source_child_index(node);
         node = node->parent;
@@ -246,7 +247,7 @@ bool source_pos_from_dom_boundary(const DomBoundary* boundary,
     Element* native = NULL;
     while (node) {
         if (node->node_type == DOM_NODE_ELEMENT) {
-            DomElement* de = (DomElement*)node;
+            DomElement* de = lam::dom_require_element(node);
             if (de->native_element) { native = de->native_element; break; }
         }
         node = node->parent;
@@ -331,9 +332,9 @@ static bool path_equals_prefix(const SourcePathC* path, int prefix_len,
 
 static DomText* first_text_descendant(DomNode* node) {
     if (!node) return NULL;
-    if (node->node_type == DOM_NODE_TEXT) return (DomText*)node;
+    if (node->node_type == DOM_NODE_TEXT) return lam::dom_require_text(node);
     if (node->node_type != DOM_NODE_ELEMENT) return NULL;
-    DomElement* el = (DomElement*)node;
+    DomElement* el = lam::dom_require_element(node);
     for (DomNode* c = el->first_child; c; c = c->next_sibling) {
         DomText* hit = first_text_descendant(c);
         if (hit) return hit;
@@ -356,15 +357,15 @@ static bool try_resolve_at_element(DomElement* de, const SourcePosC* pos,
     bool matched = false;
     if (pos->kind == SOURCE_POS_ELEMENT) {
         if (path_equals_prefix(&pos->path, pos->path.depth, &recorded)) {
-            out->node = (DomNode*)de;
+            out->node = static_cast<DomNode*>(de);
             out->offset = pos->offset;  // child index in source == DOM child index
             matched = true;
         }
     } else { // SOURCE_POS_TEXT
         if (source_path_equal(&pos->path, &recorded)) {
-            DomText* tn = first_text_descendant((DomNode*)de);
+            DomText* tn = first_text_descendant(static_cast<DomNode*>(de));
             if (tn) {
-                out->node = (DomNode*)tn;
+                out->node = static_cast<DomNode*>(tn);
                 out->offset = dom_text_utf8_to_utf16(tn, pos->offset);
                 matched = true;
             }
@@ -376,7 +377,7 @@ static bool try_resolve_at_element(DomElement* de, const SourcePosC* pos,
             if (child) {
                 DomText* tn = first_text_descendant(child);
                 if (tn) {
-                    out->node = (DomNode*)tn;
+                    out->node = static_cast<DomNode*>(tn);
                     out->offset = dom_text_utf8_to_utf16(tn, pos->offset);
                     matched = true;
                 }
@@ -392,7 +393,7 @@ static bool resolve_walk(DomNode* node, const SourcePosC* pos,
                          DomBoundary* out) {
     if (!node) return false;
     if (node->node_type == DOM_NODE_ELEMENT) {
-        DomElement* de = (DomElement*)node;
+        DomElement* de = lam::dom_require_element(node);
         if (try_resolve_at_element(de, pos, out)) return true;
         for (DomNode* c = de->first_child; c; c = c->next_sibling) {
             if (resolve_walk(c, pos, out)) return true;

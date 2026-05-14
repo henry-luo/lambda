@@ -86,6 +86,23 @@ extern "C" Item js_new_function(void* func_ptr, int param_count) {
     return (Item){.function = (Function*)fn};
 }
 
+extern "C" Item js_new_method_function(void* func_ptr, int param_count) {
+    if (!func_ptr) {
+        log_error("js_new_method_function: null func_ptr! param_count=%d", param_count);
+        return ItemNull;
+    }
+    JsFunction* fn = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
+    fn->type_id = LMD_TYPE_FUNC;
+    fn->func_ptr = func_ptr;
+    fn->param_count = param_count;
+    fn->formal_length = -1;
+    fn->env = NULL;
+    fn->env_size = 0;
+    fn->prototype = ItemNull;
+    fn->module_vars = js_active_module_vars;
+    return (Item){.function = (Function*)fn};
+}
+
 // Create a closure (function with captured environment)
 extern "C" Item js_new_closure(void* func_ptr, int param_count, Item* env, int env_size) {
     // Pool-allocate: closures stored in env arrays are unreachable from GC roots
@@ -138,6 +155,12 @@ extern "C" void js_mark_async_func(Item fn_item) {
     fn->flags |= JS_FUNC_FLAG_ASYNC;
 }
 
+extern "C" void js_mark_derived_constructor_func(Item fn_item) {
+    if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
+    JsFunction* fn = (JsFunction*)fn_item.function;
+    fn->flags |= JS_FUNC_FLAG_DERIVED_CTOR;
+}
+
 // Mark a function as an arrow function (non-constructable)
 extern "C" void js_mark_arrow_func(Item fn_item) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
@@ -151,6 +174,13 @@ extern "C" void js_mark_method_func(Item fn_item) {
     fn->flags |= JS_FUNC_FLAG_METHOD;
 }
 
+extern "C" void js_mark_eval_initializer_func_if_active(Item fn_item) {
+    if (!js_private_field_initializing && !js_eval_initializer_context) return;
+    if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
+    JsFunction* fn = (JsFunction*)fn_item.function;
+    fn->eval_initializer_context = true;
+}
+
 // Mark a function as strict mode (ES spec [[Strict]] internal slot)
 extern "C" void js_mark_strict_func(Item fn_item) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
@@ -158,8 +188,16 @@ extern "C" void js_mark_strict_func(Item fn_item) {
     fn->flags |= JS_FUNC_FLAG_STRICT;
 }
 
+extern "C" void js_set_class_name(Item cls_item, Item name_item);
+static Item js_private_display_name_item(Item name_item);
+
 // Set the name of a JsFunction (called from transpiler after js_new_function/js_new_closure)
 extern "C" void js_set_function_name(Item fn_item, Item name_item) {
+    name_item = js_private_display_name_item(name_item);
+    if (get_type_id(fn_item) == LMD_TYPE_MAP) {
+        js_set_class_name(fn_item, name_item);
+        return;
+    }
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
     if (get_type_id(name_item) != LMD_TYPE_STRING) return;
     JsFunction* fn = (JsFunction*)fn_item.function;
@@ -168,6 +206,11 @@ extern "C" void js_set_function_name(Item fn_item, Item name_item) {
     }
 }
 extern "C" void js_set_function_name_if_anonymous(Item fn_item, Item name_item) {
+    name_item = js_private_display_name_item(name_item);
+    if (get_type_id(fn_item) == LMD_TYPE_MAP) {
+        js_set_class_name(fn_item, name_item);
+        return;
+    }
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
     if (get_type_id(name_item) != LMD_TYPE_STRING) return;
     JsFunction* fn = (JsFunction*)fn_item.function;
@@ -176,13 +219,138 @@ extern "C" void js_set_function_name_if_anonymous(Item fn_item, Item name_item) 
     }
 }
 
+extern "C" Item js_symbol_get_description(Item sym);
+
+static const char* js_private_display_suffix(const char* name, int len) {
+    if (!name || len <= 10 || strncmp(name, "__private_", 10) != 0) return NULL;
+    const char* suffix = name + 10;
+    const char* end = name + len;
+    const char* p = suffix;
+    while (p < end && *p >= '0' && *p <= '9') p++;
+    if (p > suffix && p < end && *p == '_') suffix = p + 1;
+    return suffix;
+}
+
+static const char* js_hash_private_display_suffix(const char* name, int len) {
+    if (!name || len <= 3 || name[0] != '#') return NULL;
+    const char* suffix = name + 1;
+    const char* end = name + len;
+    const char* p = suffix;
+    while (p < end && *p >= '0' && *p <= '9') p++;
+    if (p > suffix && p < end && *p == '_') return p + 1;
+    return NULL;
+}
+
+static Item js_private_display_name_item(Item name_item) {
+    if (get_type_id(name_item) != LMD_TYPE_STRING) return name_item;
+    String* name = it2s(name_item);
+    if (!name) return name_item;
+
+    char display[320];
+    const char* suffix = js_private_display_suffix(name->chars, (int)name->len);
+    const char* hash_suffix = js_hash_private_display_suffix(name->chars, (int)name->len);
+    if (suffix) {
+        snprintf(display, sizeof(display), "#%s", suffix);
+    } else if (hash_suffix) {
+        snprintf(display, sizeof(display), "#%s", hash_suffix);
+    } else if (name->len > 14 && strncmp(name->chars, "get __private_", 14) == 0) {
+        suffix = js_private_display_suffix(name->chars + 4, (int)name->len - 4);
+        if (!suffix) return name_item;
+        snprintf(display, sizeof(display), "get #%s", suffix);
+    } else if (name->len > 14 && strncmp(name->chars, "set __private_", 14) == 0) {
+        suffix = js_private_display_suffix(name->chars + 4, (int)name->len - 4);
+        if (!suffix) return name_item;
+        snprintf(display, sizeof(display), "set #%s", suffix);
+    } else {
+        return name_item;
+    }
+    return (Item){.item = s2it(heap_create_name(display, strlen(display)))};
+}
+
+static int js_function_name_from_symbol_key(String* key, char* out, int out_size) {
+    if (!key || key->len <= 6 || strncmp(key->chars, "__sym_", 6) != 0) return -1;
+    int64_t id = 0;
+    for (int i = 6; i < (int)key->len; i++) {
+        char c = key->chars[i];
+        if (c < '0' || c > '9') return -1;
+        id = id * 10 + (int64_t)(c - '0');
+    }
+    Item sym = (Item){.item = i2it(-(id + (int64_t)JS_SYMBOL_BASE))};
+    Item desc = js_symbol_get_description(sym);
+    if (get_type_id(desc) == LMD_TYPE_UNDEFINED) {
+        if (out_size > 0) out[0] = '\0';
+        return 0;
+    }
+    if (get_type_id(desc) != LMD_TYPE_STRING) return -1;
+    String* desc_str = it2s(desc);
+    if (!desc_str) return -1;
+    int len = snprintf(out, out_size, "[%.*s]", (int)desc_str->len, desc_str->chars);
+    if (len < 0) return -1;
+    if (len >= out_size) len = out_size - 1;
+    return len;
+}
+
+extern "C" void js_set_function_name_from_property_key_if_anonymous(Item fn_item, Item key_item, int64_t prefix_kind) {
+    Item prop_key = js_to_property_key(key_item);
+    if (get_type_id(prop_key) != LMD_TYPE_STRING) return;
+    String* key = it2s(prop_key);
+    if (!key) return;
+
+    char base[256];
+    int base_len = js_function_name_from_symbol_key(key, base, (int)sizeof(base));
+    if (base_len < 0) {
+        const char* private_suffix = js_private_display_suffix(key->chars, (int)key->len);
+        if (private_suffix) {
+            base_len = snprintf(base, sizeof(base), "#%s", private_suffix);
+            if (base_len >= (int)sizeof(base)) base_len = (int)sizeof(base) - 1;
+        } else if ((private_suffix = js_hash_private_display_suffix(key->chars, (int)key->len)) != NULL) {
+            base_len = snprintf(base, sizeof(base), "#%s", private_suffix);
+            if (base_len >= (int)sizeof(base)) base_len = (int)sizeof(base) - 1;
+        } else {
+            base_len = key->len < (int)sizeof(base) - 1 ? (int)key->len : (int)sizeof(base) - 1;
+            memcpy(base, key->chars, base_len);
+        }
+        base[base_len] = '\0';
+    }
+
+    char display[320];
+    if (prefix_kind == 1) {
+        snprintf(display, sizeof(display), "get %.*s", base_len, base);
+    } else if (prefix_kind == 2) {
+        snprintf(display, sizeof(display), "set %.*s", base_len, base);
+    } else {
+        snprintf(display, sizeof(display), "%.*s", base_len, base);
+    }
+    Item display_item = (Item){.item = s2it(heap_create_name(display, strlen(display)))};
+    if (prefix_kind == 1 || prefix_kind == 2) {
+        js_set_function_name(fn_item, display_item);
+    } else {
+        js_set_function_name_if_anonymous(fn_item, display_item);
+    }
+}
+
 extern "C" void js_set_class_name(Item cls_item, Item name_item) {
     if (get_type_id(cls_item) != LMD_TYPE_MAP) return;
     if (get_type_id(name_item) != LMD_TYPE_STRING) return;
     ShapeEntry* existing = js_find_shape_entry(cls_item, "name", 4);
-    if (existing && !jspd_is_deleted(existing)) return;
-    Item key = (Item){.item = s2it(heap_create_name("name", 4))};
-    js_property_set(cls_item, key, name_item);
+    if (existing && !jspd_is_deleted(existing)) {
+        Item key = (Item){.item = s2it(heap_create_name("name", 4))};
+        Item current = js_property_get(cls_item, key);
+        if (get_type_id(current) == LMD_TYPE_STRING) {
+            String* current_name = it2s(current);
+            if (current_name && current_name->len == 0) {
+                String* name_key_str = heap_create_name("name", 4);
+                map_put(cls_item.map, name_key_str, name_item, js_input);
+                js_attr_set_writable(cls_item, "name", 4, false);
+                js_attr_set_enumerable(cls_item, "name", 4, false);
+                js_attr_set_configurable(cls_item, "name", 4, true);
+            }
+        }
+        return;
+    }
+    String* name_key_str = heap_create_name("name", 4);
+    Item key = (Item){.item = s2it(name_key_str)};
+    map_put(cls_item.map, name_key_str, name_item, js_input);
     js_attr_set_writable(cls_item, "name", 4, false);
     js_attr_set_enumerable(cls_item, "name", 4, false);
     js_attr_set_configurable(cls_item, "name", 4, true);

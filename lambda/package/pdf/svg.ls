@@ -18,6 +18,19 @@ pub fn svg_root(view_box: string, width, height, children) {
     >
 }
 
+pub fn svg_pdf_root(view_box: string, width, height, children, pdf) {
+    // keep the signature stable, but do not attach the parsed PDF tree to each page svg
+    // keep the parsed PDF tree in the native renderer registry instead of
+    // serializing it into SVG attributes.
+    let root =
+        <svg xmlns: "http://www.w3.org/2000/svg",
+             viewBox: view_box,
+             width: util.fmt_num(width), height: util.fmt_num(height);
+            for (c in children) c
+        >
+    pdf_register_svg_image_resolver(root, pdf)
+}
+
 // ============================================================
 // Building blocks
 // ============================================================

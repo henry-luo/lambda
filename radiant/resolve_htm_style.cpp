@@ -2,8 +2,10 @@
 #include "form_control.hpp"
 #include "rdt_video.h"
 #include "state_store.hpp"
+#include "retained_fields.hpp"
 #include "../lib/str.h"
 #include "../lib/memtrack.h"
+#include "../lib/tagged.hpp"
 #include <cstdlib>  // for strtol
 #include <new>      // for placement new
 
@@ -210,7 +212,8 @@ static CssEnum resolve_dir_auto(DomElement* elmt) {
 }
 
 void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
-    ViewSpan* span = (ViewSpan*)elmt;  ViewBlock* block = (ViewBlock*)elmt;
+    ViewSpan* span = lam::view_require_element(static_cast<View*>(elmt));
+    ViewBlock* block = lam::view_require_block(static_cast<View*>(elmt));
     float em_size = 0;  uintptr_t elmt_name = elmt->tag();
     switch (elmt_name) {
     case HTM_TAG_BODY: {
@@ -776,6 +779,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         if (color_attr) {
             if (!span->in_line) { span->in_line = alloc_inline_prop(lycon); }
             span->in_line->color = parse_html_color(color_attr);
+            span->in_line->has_color = true;
             log_debug("HTM_TAG_FONT color: %s -> rgb(%d,%d,%d)", color_attr,
                       span->in_line->color.r, span->in_line->color.g, span->in_line->color.b);
         }
@@ -832,7 +836,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         const char* face_attr = span->get_attribute("face");
         if (face_attr) {
             if (!span->font) { span->font = alloc_font_prop(lycon); }
-            span->font->family = (char*)face_attr;  // store font family name
+            radiant_retain_font_family(span->font, lam::PoolPtr<char>((char*)face_attr));  // store font family name
             log_debug("HTM_TAG_FONT face: %s", face_attr);
         }
         break;
@@ -859,7 +863,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     case HTM_TAG_CODE:  case HTM_TAG_KBD:  case HTM_TAG_SAMP:  case HTM_TAG_TT: {
         // monospace font family
         if (!span->font) { span->font = alloc_font_prop(lycon); }
-        span->font->family = (char*)"monospace";
+        radiant_retain_font_family(span->font, lam::GcPtr<char>((char*)"monospace"));
         // Browser quirk (Chromium CheckForGenericFamilyChange): when font-family
         // transitions to monospace and no explicit font-size on this element,
         // scale inherited size by 13/16. Only applies when the inherited font-size
@@ -917,6 +921,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     case HTM_TAG_Q:
         // inline quotation - browser adds quotes via CSS content, we just style italic
         if (!span->font) { span->font = alloc_font_prop(lycon); }
+        span->in_line->has_color = true;
         span->font->font_style = CSS_VALUE_ITALIC;
         break;
     case HTM_TAG_ABBR:  case HTM_TAG_ACRONYM:
@@ -929,7 +934,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     case HTM_TAG_PRE:  case HTM_TAG_LISTING:  case HTM_TAG_XMP: {
         // preformatted: monospace, preserve whitespace, margin 1em 0
         if (!block->font) { block->font = alloc_font_prop(lycon); }
-        block->font->family = (char*)"monospace";
+        radiant_retain_font_family(block->font, lam::GcPtr<char>((char*)"monospace"));
         // Browser quirk (Chromium CheckForGenericFamilyChange): when font-family
         // transitions to monospace and no explicit font-size on this element,
         // scale inherited size by 13/16. Only applies when the inherited font-size
@@ -1387,7 +1392,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // Chrome UA: font-size 13.3333px, font-family Arial for form controls
         if (!block->font) { block->font = alloc_font_prop(lycon); }
         block->font->font_size = 13.3333f;
-        block->font->family = (char*)"Arial";
+        radiant_retain_font_family(block->font, lam::GcPtr<char>((char*)"Arial"));
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
         block->bound->padding.top = block->bound->padding.bottom = FormDefaults::BUTTON_PADDING_V;
         block->bound->padding.left = block->bound->padding.right = FormDefaults::BUTTON_PADDING_H;
@@ -1451,7 +1456,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // Chrome UA: font-size 13.3333px, font-family Arial for all form controls
         if (!block->font) { block->font = alloc_font_prop(lycon); }
         block->font->font_size = 13.3333f;
-        block->font->family = (char*)"Arial";
+        radiant_retain_font_family(block->font, lam::GcPtr<char>((char*)"Arial"));
 
         switch (block->form->control_type) {
         case FORM_CONTROL_HIDDEN:
@@ -1620,7 +1625,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             DomNode* child = block->first_child;
             while (child) {
                 if (child->is_element()) {
-                    DomElement* child_elem = (DomElement*)child;
+                    DomElement* child_elem = lam::dom_require_element(child);
                     if (child_elem->tag() == HTM_TAG_OPTION) {
                         if (child_elem->has_attribute("selected") && selected_idx < 0) {
                             selected_idx = option_count;
@@ -1631,7 +1636,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                         DomNode* opt_child = child_elem->first_child;
                         while (opt_child) {
                             if (opt_child->is_element()) {
-                                DomElement* opt_elem = (DomElement*)opt_child;
+                                DomElement* opt_elem = lam::dom_require_element(opt_child);
                                 if (opt_elem->tag() == HTM_TAG_OPTION) {
                                     if (opt_elem->has_attribute("selected") && selected_idx < 0) {
                                         selected_idx = option_count;
@@ -1826,7 +1831,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             log_debug("[HTML] dir attribute: ltr");
         } else if (str_ieq_const(dir_attr, strlen(dir_attr), "auto")) {
             // HTML5 §14.3.4: dir="auto" — resolve direction from first strong character
-            CssEnum resolved = resolve_dir_auto(static_cast<DomElement*>(elmt));
+            CssEnum resolved = resolve_dir_auto(lam::dom_require_element(elmt));
             block->blk->direction = resolved;
             log_debug("[HTML] dir attribute: auto -> %s",
                       resolved == CSS_VALUE_RTL ? "rtl" : "ltr");

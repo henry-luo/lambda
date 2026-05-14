@@ -92,6 +92,15 @@ static inline bool str_eq(String* s, const char* lit) {
     return s->len == n && memcmp(s->chars, lit, n) == 0;
 }
 
+static inline String* item_as_pdf_name(Item it) {
+    if (String* s = item_as_string(it)) return s;
+    Map* m = item_as_map(it);
+    if (!m) return nullptr;
+    String* kind = item_as_string(map_lookup(m, "kind"));
+    if (!str_eq(kind, "name")) return nullptr;
+    return item_as_string(map_lookup(m, "value"));
+}
+
 // Read a numeric Item as int (handles d2it floats and packed ints).
 static inline int item_as_int(Item it, int dflt) {
     TypeId t = (TypeId)((it.item >> 56) & 0xFF);
@@ -115,6 +124,22 @@ static bool map_has_type(Map* m, const char* type_str) {
     Item ty = map_lookup(m, "type");
     String* s = item_as_string(ty);
     return str_eq(s, type_str);
+}
+
+static Map* stream_dictionary(Map* m) {
+    if (!m || !map_has_type(m, "stream")) return nullptr;
+    return item_as_map(map_lookup(m, "dictionary"));
+}
+
+static Map* pdf_dictionary_for_item(Item it) {
+    Map* m = item_as_map(it);
+    if (!m) return nullptr;
+    Map* dict = stream_dictionary(m);
+    return dict ? dict : m;
+}
+
+static bool pdf_dict_has_type(Map* m, const char* type_str) {
+    return str_eq(item_as_pdf_name(map_lookup(m, "Type")), type_str);
 }
 
 }  // anonymous namespace
@@ -209,6 +234,56 @@ static Item resolve_ref_deep(Item it, ObjTable* table) {
     return it;
 }
 
+static Map* find_catalog_from_objects(ObjTable* table) {
+    if (!table) return nullptr;
+    for (int i = 0; i < table->count; i++) {
+        Map* dict = pdf_dictionary_for_item(table->entries[i].content);
+        if (pdf_dict_has_type(dict, "Catalog")) return dict;
+    }
+    return nullptr;
+}
+
+static Map* find_catalog_from_xref_stream(ObjTable* table) {
+    if (!table) return nullptr;
+    for (int i = 0; i < table->count; i++) {
+        Map* dict = pdf_dictionary_for_item(table->entries[i].content);
+        if (!pdf_dict_has_type(dict, "XRef")) continue;
+        Item root = resolve_ref_deep(map_lookup(dict, "Root"), table);
+        Map* catalog = item_as_map(root);
+        if (pdf_dict_has_type(catalog, "Catalog")) return catalog;
+    }
+    return nullptr;
+}
+
+static Map* find_catalog(MarkBuilder& builder, Map* pdf_info, ObjTable* table) {
+    Item trailer_it = map_lookup(pdf_info, "trailer");
+    Map* trailer_wrap = item_as_map(trailer_it);
+    if (trailer_wrap) {
+        Item dict_it = map_lookup(trailer_wrap, "dictionary");
+        Map* trailer_dict = item_as_map(dict_it);
+        if (trailer_dict) {
+            Item root_it = resolve_ref_deep(map_lookup(trailer_dict, "Root"), table);
+            Map* catalog = item_as_map(root_it);
+            if (catalog) return catalog;
+        }
+    }
+
+    Map* catalog = find_catalog_from_xref_stream(table);
+    if (catalog) {
+        log_info("pdf_postprocess: found catalog through XRef stream /Root");
+    } else {
+        catalog = find_catalog_from_objects(table);
+        if (catalog) log_info("pdf_postprocess: found catalog by object scan");
+    }
+    if (catalog) {
+        builder.putToMap(pdf_info, builder.createString("catalog"),
+                         {.item = (uint64_t)catalog});
+    } else if (!trailer_wrap) {
+        log_info("pdf_postprocess: no trailer or catalog found");
+    }
+    return catalog;
+}
+
 }  // anonymous namespace
 
 // ---------------------------------------------------------------------------
@@ -285,39 +360,41 @@ static void flatten_page_node(Input* input, MarkBuilder& builder, Map* node,
     array_append(out_pages, {.item = (uint64_t)flat}, input->pool, input->arena);
 }
 
+static void flatten_page_objects(Input* input, MarkBuilder& builder,
+                                 ObjTable* table, Array* out_pages) {
+    if (!table || !out_pages) return;
+    for (int i = 0; i < table->count; i++) {
+        Map* dict = pdf_dictionary_for_item(table->entries[i].content);
+        if (!pdf_dict_has_type(dict, "Page")) continue;
+        flatten_page_node(input, builder, dict,
+                          {.item = ITEM_NULL}, {.item = ITEM_NULL},
+                          {.item = ITEM_NULL}, {.item = ITEM_NULL},
+                          table, out_pages, 0);
+    }
+}
+
 static void flatten_page_tree(Input* input, MarkBuilder& builder,
                               Map* pdf_info, ObjTable* table) {
-    Item trailer_it = map_lookup(pdf_info, "trailer");
-    Map* trailer_wrap = item_as_map(trailer_it);
-    if (!trailer_wrap) {
-        log_info("pdf_postprocess: no trailer found, skipping page-tree flatten");
-        return;
-    }
-    Item dict_it = map_lookup(trailer_wrap, "dictionary");
-    Map* trailer_dict = item_as_map(dict_it);
-    if (!trailer_dict) return;
-
-    Item root_it = resolve_ref_deep(map_lookup(trailer_dict, "Root"), table);
-    Map* catalog = item_as_map(root_it);
+    Map* catalog = find_catalog(builder, pdf_info, table);
     if (!catalog) {
-        log_info("pdf_postprocess: trailer has no resolvable /Root, skipping");
+        log_info("pdf_postprocess: no resolvable /Root catalog, skipping page-tree flatten");
         return;
     }
 
     Item pages_it = resolve_ref_deep(map_lookup(catalog, "Pages"), table);
     Map* pages_root = item_as_map(pages_it);
-    if (!pages_root) {
-        log_info("pdf_postprocess: catalog has no resolvable /Pages, skipping");
-        return;
-    }
-
     Array* out = array_pooled(input->pool);
     if (!out) return;
 
-    flatten_page_node(input, builder, pages_root,
-                      {.item = ITEM_NULL}, {.item = ITEM_NULL},
-                      {.item = ITEM_NULL}, {.item = ITEM_NULL},
-                      table, out, 0);
+    if (pages_root) {
+        flatten_page_node(input, builder, pages_root,
+                          {.item = ITEM_NULL}, {.item = ITEM_NULL},
+                          {.item = ITEM_NULL}, {.item = ITEM_NULL},
+                          table, out, 0);
+    } else {
+        log_info("pdf_postprocess: catalog has no resolvable /Pages, scanning page objects");
+        flatten_page_objects(input, builder, table, out);
+    }
 
     builder.putToMap(pdf_info, builder.createString("pages"),
                      {.item = (uint64_t)out});
@@ -600,10 +677,10 @@ static const char* get_decompressed_stream(Map* stream_map, size_t* out_len,
     int n_filters = 0;
     if (Array* fa = item_as_array(filter_it)) {
         for (int i = 0; i < fa->length && n_filters < 8; i++) {
-            String* fs = item_as_string(fa->items[i]);
+            String* fs = item_as_pdf_name(fa->items[i]);
             if (fs) filters_buf[n_filters++] = fs->chars;
         }
-    } else if (String* fs = item_as_string(filter_it)) {
+    } else if (String* fs = item_as_pdf_name(filter_it)) {
         filters_buf[n_filters++] = fs->chars;
     }
     if (n_filters == 0) {
@@ -620,6 +697,15 @@ static const char* get_decompressed_stream(Map* stream_map, size_t* out_len,
     }
     *needs_free = true;
     return decoded;
+}
+
+static bool stream_data_looks_cmap(String* data_s) {
+    if (!data_s || data_s->len == 0) return false;
+    const char* start = data_s->chars;
+    const char* end = data_s->chars + data_s->len;
+    return find_keyword(start, end, "beginbfchar") != nullptr ||
+           find_keyword(start, end, "beginbfrange") != nullptr ||
+           find_keyword(start, end, "begincmap") != nullptr;
 }
 
 // Process a single Font dict: locate /ToUnicode, decompress, parse, attach.
@@ -641,7 +727,14 @@ static void process_font_dict(Input* input, MarkBuilder& builder, Map* font,
 
     size_t dlen = 0;
     bool needs_free = false;
-    const char* dbuf = get_decompressed_stream(stream_map, &dlen, &needs_free);
+    String* raw_data = item_as_string(map_lookup(stream_map, "data"));
+    const char* dbuf = nullptr;
+    if (stream_data_looks_cmap(raw_data)) {
+        dbuf = raw_data->chars;
+        dlen = raw_data->len;
+    } else {
+        dbuf = get_decompressed_stream(stream_map, &dlen, &needs_free);
+    }
     if (!dbuf || dlen == 0) {
         if (needs_free && dbuf) mem_free((void*)dbuf);
         return;
@@ -721,12 +814,120 @@ static void replace_string_field(Map* m, const char* field, String* new_val) {
     }
 }
 
+static bool is_image_stream_dict(Map* dict) {
+    if (!dict) return false;
+    String* type = item_as_pdf_name(map_lookup(dict, "Type"));
+    String* subtype = item_as_pdf_name(map_lookup(dict, "Subtype"));
+    return str_eq(type, "XObject") && str_eq(subtype, "Image");
+}
+
+static bool is_font_program_stream_dict(Map* dict) {
+    if (!dict) return false;
+    return map_lookup(dict, "Length1").item != ITEM_NULL ||
+           map_lookup(dict, "Length2").item != ITEM_NULL ||
+           map_lookup(dict, "Length3").item != ITEM_NULL;
+}
+
+static void append_octal_escape(char* out, size_t* pos, unsigned char c) {
+    out[(*pos)++] = '\\';
+    out[(*pos)++] = (char)('0' + ((c >> 6) & 7));
+    out[(*pos)++] = (char)('0' + ((c >> 3) & 7));
+    out[(*pos)++] = (char)('0' + (c & 7));
+}
+
+static String* content_bytes_to_token_text(Input* input, String* src) {
+    if (!input || !src) return nullptr;
+    size_t out_len = 0;
+    bool changed = false;
+    bool in_literal = false;
+    bool escaped = false;
+    int literal_depth = 0;
+    for (uint32_t i = 0; i < src->len; i++) {
+        unsigned char c = (unsigned char)src->chars[i];
+        if (in_literal && (c >= 0x80 || c == 0)) {
+            out_len += 4;
+            changed = true;
+        } else {
+            out_len++;
+        }
+        if (in_literal) {
+            if (escaped) {
+                escaped = false;
+            } else if (c == '\\') {
+                escaped = true;
+            } else if (c == '(') {
+                literal_depth++;
+            } else if (c == ')') {
+                literal_depth--;
+                if (literal_depth <= 0) {
+                    in_literal = false;
+                    literal_depth = 0;
+                }
+            }
+        } else if (c == '(') {
+            in_literal = true;
+            literal_depth = 1;
+            escaped = false;
+        }
+    }
+    if (!changed) return src;
+    String* out = (String*)pool_calloc(input->pool, sizeof(String) + out_len + 1);
+    if (!out) return nullptr;
+    size_t j = 0;
+    in_literal = false;
+    escaped = false;
+    literal_depth = 0;
+    for (uint32_t i = 0; i < src->len; i++) {
+        unsigned char c = (unsigned char)src->chars[i];
+        if (in_literal && (c >= 0x80 || c == 0)) {
+            append_octal_escape(out->chars, &j, c);
+        } else {
+            out->chars[j++] = (char)c;
+        }
+        if (in_literal) {
+            if (escaped) {
+                escaped = false;
+            } else if (c == '\\') {
+                escaped = true;
+            } else if (c == '(') {
+                literal_depth++;
+            } else if (c == ')') {
+                literal_depth--;
+                if (literal_depth <= 0) {
+                    in_literal = false;
+                    literal_depth = 0;
+                }
+            }
+        } else if (c == '(') {
+            in_literal = true;
+            literal_depth = 1;
+            escaped = false;
+        }
+    }
+    out->chars[j] = '\0';
+    out->len = (uint32_t)out_len;
+    out->is_ascii = 1;
+    return out;
+}
+
 // Pass 3: walk every indirect_object content; if it's a stream Map with
 // a Filter, decompress in place. After this pass, the `data` field of
 // every stream object holds the plain (post-filter) byte payload, so
 // callers (e.g. content-stream tokenizer) need not re-implement filter
 // chains.
-static void decompress_streams(Input* input, Array* objects) {    if (!objects) return;
+static void add_text_data_to_stream(Input* input, MarkBuilder& builder, Map* sm) {
+    if (!input || !sm) return;
+    Map* dict = item_as_map(map_lookup(sm, "dictionary"));
+    if (is_image_stream_dict(dict)) return;
+    if (is_font_program_stream_dict(dict)) return;
+    String* data = item_as_string(map_lookup(sm, "data"));
+    if (!data || data->len == 0) return;
+    String* text_data = content_bytes_to_token_text(input, data);
+    if (!text_data) return;
+    builder.putToMap(sm, builder.createString("text_data"), {.item = s2it(text_data)});
+}
+
+static void decompress_streams(Input* input, MarkBuilder& builder, Array* objects) {    if (!objects) return;
     int decoded_count = 0;
     for (int i = 0; i < objects->length; i++) {
         Map* iobj = item_as_map(objects->items[i]);
@@ -739,7 +940,10 @@ static void decompress_streams(Input* input, Array* objects) {    if (!objects) 
         Map* dict = item_as_map(dict_it);
         if (!dict) continue;
         Item filter_it = map_lookup(dict, "Filter");
-        if (filter_it.item == ITEM_NULL) continue;
+        if (filter_it.item == ITEM_NULL) {
+            add_text_data_to_stream(input, builder, sm);
+            continue;
+        }
 
         size_t out_len = 0;
         bool needs_free = false;
@@ -761,13 +965,377 @@ static void decompress_streams(Input* input, Array* objects) {    if (!objects) 
         if (needs_free) mem_free((void*)dec);
 
         replace_string_field(sm, "data", new_data);
+        add_text_data_to_stream(input, builder, sm);
         decoded_count++;
     }
     log_info("pdf_postprocess: decompressed %d stream(s)", decoded_count);
 }
 
 // ---------------------------------------------------------------------------
-// Pass 4: Image XObject → data:image/png;base64,... URI
+// Pass 4: PDF object streams → regular indirect objects
+// ---------------------------------------------------------------------------
+//
+// PDF 1.5+ may store small indirect objects inside /Type /ObjStm streams.
+// Page resource dictionaries can then point at object numbers that never
+// appear as top-level `n 0 obj` records. Expanding those streams here keeps
+// the rest of the resolver model simple: every indirect reference can be
+// looked up in `pdf.objects`.
+
+struct ObjStreamParser {
+    Input* input;
+    MarkBuilder* builder;
+    const char* pos;
+    const char* end;
+};
+
+static void osp_skip_ws(ObjStreamParser* p) {
+    while (p->pos < p->end) {
+        unsigned char c = (unsigned char)*p->pos;
+        if (c == '%') {
+            while (p->pos < p->end && *p->pos != '\n' && *p->pos != '\r') p->pos++;
+            continue;
+        }
+        if (!isspace(c)) break;
+        p->pos++;
+    }
+}
+
+static bool osp_is_delim(char c) {
+    return isspace((unsigned char)c) || c == '/' || c == '(' || c == ')' ||
+           c == '<' || c == '>' || c == '[' || c == ']' || c == '{' ||
+           c == '}' || c == '%';
+}
+
+static int osp_hex_value(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+static String* osp_make_string(Input* input, const char* data, size_t len) {
+    String* s = (String*)pool_calloc(input->pool, sizeof(String) + len + 1);
+    if (!s) return nullptr;
+    if (len > 0) memcpy(s->chars, data, len);
+    s->chars[len] = '\0';
+    s->len = (uint32_t)len;
+    s->is_ascii = 1;
+    return s;
+}
+
+static String* osp_parse_name(ObjStreamParser* p) {
+    if (p->pos >= p->end || *p->pos != '/') return nullptr;
+    p->pos++;
+    size_t cap = (size_t)(p->end - p->pos) + 1;
+    char* buf = (char*)pool_calloc(p->input->pool, cap > 0 ? cap : 1);
+    if (!buf) return nullptr;
+    size_t len = 0;
+    while (p->pos < p->end && !osp_is_delim(*p->pos)) {
+        if (*p->pos == '#' && p->pos + 2 < p->end) {
+            int hi = osp_hex_value(p->pos[1]);
+            int lo = osp_hex_value(p->pos[2]);
+            if (hi >= 0 && lo >= 0) {
+                buf[len++] = (char)((hi << 4) | lo);
+                p->pos += 3;
+                continue;
+            }
+        }
+        buf[len++] = *p->pos++;
+    }
+    return osp_make_string(p->input, buf, len);
+}
+
+static String* osp_parse_literal_string(ObjStreamParser* p) {
+    if (p->pos >= p->end || *p->pos != '(') return nullptr;
+    p->pos++;
+    size_t cap = (size_t)(p->end - p->pos) + 1;
+    char* buf = (char*)pool_calloc(p->input->pool, cap > 0 ? cap : 1);
+    if (!buf) return nullptr;
+    size_t len = 0;
+    int depth = 1;
+    while (p->pos < p->end && depth > 0) {
+        char c = *p->pos++;
+        if (c == '\\' && p->pos < p->end) {
+            char e = *p->pos++;
+            switch (e) {
+                case 'n': buf[len++] = '\n'; break;
+                case 'r': buf[len++] = '\r'; break;
+                case 't': buf[len++] = '\t'; break;
+                case 'b': buf[len++] = '\b'; break;
+                case 'f': buf[len++] = '\f'; break;
+                case '(':
+                case ')':
+                case '\\': buf[len++] = e; break;
+                case '\n': break;
+                case '\r':
+                    if (p->pos < p->end && *p->pos == '\n') p->pos++;
+                    break;
+                default: buf[len++] = e; break;
+            }
+        } else if (c == '(') {
+            depth++;
+            buf[len++] = c;
+        } else if (c == ')') {
+            depth--;
+            if (depth > 0) buf[len++] = c;
+        } else {
+            buf[len++] = c;
+        }
+    }
+    return osp_make_string(p->input, buf, len);
+}
+
+static String* osp_parse_hex_string(ObjStreamParser* p) {
+    if (p->pos >= p->end || *p->pos != '<') return nullptr;
+    p->pos++;
+    size_t cap = (size_t)(p->end - p->pos + 1) / 2 + 1;
+    char* buf = (char*)pool_calloc(p->input->pool, cap > 0 ? cap : 1);
+    if (!buf) return nullptr;
+    size_t len = 0;
+    int hi = -1;
+    while (p->pos < p->end && *p->pos != '>') {
+        int v = osp_hex_value(*p->pos++);
+        if (v < 0) continue;
+        if (hi < 0) {
+            hi = v;
+        } else {
+            buf[len++] = (char)((hi << 4) | v);
+            hi = -1;
+        }
+    }
+    if (hi >= 0) buf[len++] = (char)(hi << 4);
+    if (p->pos < p->end && *p->pos == '>') p->pos++;
+    return osp_make_string(p->input, buf, len);
+}
+
+static Item osp_parse_object(ObjStreamParser* p, int depth);
+
+static Item osp_make_ref(ObjStreamParser* p, int obj_num, int gen_num) {
+    Map* ref = map_pooled(p->input->pool);
+    if (!ref) return {.item = ITEM_ERROR};
+    p->builder->putToMap(ref, p->builder->createString("type"),
+                         {.item = s2it(p->builder->createString("indirect_ref"))});
+    double* obj_val = (double*)pool_calloc(p->input->pool, sizeof(double));
+    double* gen_val = (double*)pool_calloc(p->input->pool, sizeof(double));
+    if (!obj_val || !gen_val) return {.item = ITEM_ERROR};
+    *obj_val = (double)obj_num;
+    *gen_val = (double)gen_num;
+    p->builder->putToMap(ref, p->builder->createString("object_num"), {.item = d2it(obj_val)});
+    p->builder->putToMap(ref, p->builder->createString("gen_num"), {.item = d2it(gen_val)});
+    return {.item = (uint64_t)ref};
+}
+
+static Item osp_parse_number_or_ref(ObjStreamParser* p) {
+    const char* saved = p->pos;
+    char* end = nullptr;
+    long obj_num = strtol(p->pos, &end, 10);
+    if (end != p->pos) {
+        const char* after_obj = end;
+        while (after_obj < p->end && isspace((unsigned char)*after_obj)) after_obj++;
+        if (after_obj < p->end && (*after_obj == '+' || *after_obj == '-' || isdigit((unsigned char)*after_obj))) {
+            char* gen_end = nullptr;
+            long gen_num = strtol(after_obj, &gen_end, 10);
+            const char* after_gen = gen_end;
+            while (after_gen < p->end && isspace((unsigned char)*after_gen)) after_gen++;
+            if (gen_end != after_obj && after_gen < p->end && *after_gen == 'R') {
+                p->pos = after_gen + 1;
+                return osp_make_ref(p, (int)obj_num, (int)gen_num);
+            }
+        }
+    }
+
+    p->pos = saved;
+    double* val = (double*)pool_calloc(p->input->pool, sizeof(double));
+    if (!val) return {.item = ITEM_ERROR};
+    *val = strtod(p->pos, &end);
+    if (end == p->pos) return {.item = ITEM_ERROR};
+    p->pos = end;
+    return {.item = d2it(val)};
+}
+
+static Array* osp_parse_array(ObjStreamParser* p, int depth) {
+    if (p->pos >= p->end || *p->pos != '[') return nullptr;
+    p->pos++;
+    Array* arr = array_pooled(p->input->pool);
+    if (!arr) return nullptr;
+    int count = 0;
+    while (p->pos < p->end && count < 10000) {
+        osp_skip_ws(p);
+        if (p->pos >= p->end) break;
+        if (*p->pos == ']') {
+            p->pos++;
+            break;
+        }
+        Item it = osp_parse_object(p, depth + 1);
+        if (it.item != ITEM_ERROR && it.item != ITEM_NULL) {
+            array_append(arr, it, p->input->pool, p->input->arena);
+            count++;
+        } else if (p->pos < p->end) {
+            p->pos++;
+        }
+    }
+    return arr;
+}
+
+static Map* osp_parse_dictionary(ObjStreamParser* p, int depth) {
+    if (p->pos + 1 >= p->end || p->pos[0] != '<' || p->pos[1] != '<') return nullptr;
+    p->pos += 2;
+    Map* dict = map_pooled(p->input->pool);
+    if (!dict) return nullptr;
+    int pairs = 0;
+    while (p->pos < p->end && pairs < 256) {
+        osp_skip_ws(p);
+        if (p->pos + 1 < p->end && p->pos[0] == '>' && p->pos[1] == '>') {
+            p->pos += 2;
+            break;
+        }
+        if (p->pos >= p->end || *p->pos != '/') {
+            if (p->pos < p->end) p->pos++;
+            continue;
+        }
+        String* key = osp_parse_name(p);
+        if (!key) break;
+        osp_skip_ws(p);
+        Item val = osp_parse_object(p, depth + 1);
+        if (val.item != ITEM_ERROR && val.item != ITEM_NULL) {
+            p->builder->putToMap(dict, key, val);
+            pairs++;
+        }
+    }
+    return dict;
+}
+
+static Item osp_parse_object(ObjStreamParser* p, int depth) {
+    if (depth > 32) return {.item = ITEM_NULL};
+    osp_skip_ws(p);
+    if (p->pos >= p->end) return {.item = ITEM_NULL};
+
+    if (p->pos + 4 <= p->end && memcmp(p->pos, "null", 4) == 0 &&
+        (p->pos + 4 == p->end || osp_is_delim(p->pos[4]))) {
+        p->pos += 4;
+        return {.item = ITEM_NULL};
+    }
+    if (p->pos + 4 <= p->end && memcmp(p->pos, "true", 4) == 0 &&
+        (p->pos + 4 == p->end || osp_is_delim(p->pos[4]))) {
+        p->pos += 4;
+        return {.item = b2it(true)};
+    }
+    if (p->pos + 5 <= p->end && memcmp(p->pos, "false", 5) == 0 &&
+        (p->pos + 5 == p->end || osp_is_delim(p->pos[5]))) {
+        p->pos += 5;
+        return {.item = b2it(false)};
+    }
+    if (*p->pos == '/') {
+        String* name = osp_parse_name(p);
+        return name ? (Item){.item = s2it(name)} : (Item){.item = ITEM_ERROR};
+    }
+    if (*p->pos == '(') {
+        String* s = osp_parse_literal_string(p);
+        return s ? (Item){.item = s2it(s)} : (Item){.item = ITEM_ERROR};
+    }
+    if (*p->pos == '<' && p->pos + 1 < p->end && p->pos[1] != '<') {
+        String* s = osp_parse_hex_string(p);
+        return s ? (Item){.item = s2it(s)} : (Item){.item = ITEM_ERROR};
+    }
+    if (*p->pos == '[') {
+        Array* arr = osp_parse_array(p, depth);
+        return arr ? (Item){.item = (uint64_t)arr} : (Item){.item = ITEM_ERROR};
+    }
+    if (*p->pos == '<' && p->pos + 1 < p->end && p->pos[1] == '<') {
+        Map* dict = osp_parse_dictionary(p, depth);
+        return dict ? (Item){.item = (uint64_t)dict} : (Item){.item = ITEM_ERROR};
+    }
+    if (*p->pos == '+' || *p->pos == '-' || *p->pos == '.' || isdigit((unsigned char)*p->pos)) {
+        return osp_parse_number_or_ref(p);
+    }
+    p->pos++;
+    return {.item = ITEM_NULL};
+}
+
+static Map* make_indirect_object(Input* input, MarkBuilder& builder, int obj_num, Item content) {
+    Map* obj = map_pooled(input->pool);
+    if (!obj) return nullptr;
+    builder.putToMap(obj, builder.createString("type"),
+                     {.item = s2it(builder.createString("indirect_object"))});
+    double* obj_val = (double*)pool_calloc(input->pool, sizeof(double));
+    double* gen_val = (double*)pool_calloc(input->pool, sizeof(double));
+    if (!obj_val || !gen_val) return nullptr;
+    *obj_val = (double)obj_num;
+    *gen_val = 0.0;
+    builder.putToMap(obj, builder.createString("object_num"), {.item = d2it(obj_val)});
+    builder.putToMap(obj, builder.createString("gen_num"), {.item = d2it(gen_val)});
+    if (content.item != ITEM_ERROR && content.item != ITEM_NULL) {
+        builder.putToMap(obj, builder.createString("content"), content);
+    }
+    return obj;
+}
+
+static int expand_object_stream(Input* input, MarkBuilder& builder, Array* objects,
+                                ObjTable* table, Map* stream_map) {
+    Map* dict = stream_dictionary(stream_map);
+    if (!pdf_dict_has_type(dict, "ObjStm")) return 0;
+    String* data = item_as_string(map_lookup(stream_map, "data"));
+    if (!data || data->len == 0) return 0;
+
+    int n = item_as_int(map_lookup(dict, "N"), 0);
+    int first = item_as_int(map_lookup(dict, "First"), -1);
+    if (n <= 0 || n > 10000 || first < 0 || first >= (int)data->len) return 0;
+
+    int* obj_nums = (int*)pool_calloc(input->pool, sizeof(int) * n);
+    int* offsets = (int*)pool_calloc(input->pool, sizeof(int) * n);
+    if (!obj_nums || !offsets) return 0;
+
+    const char* base = data->chars;
+    const char* end = data->chars + data->len;
+    const char* p = base;
+    for (int i = 0; i < n; i++) {
+        p = skip_ws(p, end);
+        if (p >= base + first) return 0;
+        char* after_num = nullptr;
+        obj_nums[i] = (int)strtol(p, &after_num, 10);
+        if (after_num == p) return 0;
+        p = skip_ws(after_num, end);
+        char* after_off = nullptr;
+        offsets[i] = (int)strtol(p, &after_off, 10);
+        if (after_off == p) return 0;
+        p = after_off;
+    }
+
+    int expanded = 0;
+    for (int i = 0; i < n; i++) {
+        int obj_num = obj_nums[i];
+        if (obj_num < 0 || obj_table_get(table, obj_num).item != ITEM_NULL) continue;
+        int start_off = first + offsets[i];
+        int end_off = (i + 1 < n) ? first + offsets[i + 1] : (int)data->len;
+        if (start_off < first || start_off >= (int)data->len || end_off <= start_off || end_off > (int)data->len) continue;
+
+        ObjStreamParser parser = {input, &builder, base + start_off, base + end_off};
+        Item content = osp_parse_object(&parser, 0);
+        if (content.item == ITEM_ERROR || content.item == ITEM_NULL) continue;
+        Map* wrapper = make_indirect_object(input, builder, obj_num, content);
+        if (!wrapper) continue;
+        array_append(objects, {.item = (uint64_t)wrapper}, input->pool, input->arena);
+        expanded++;
+    }
+    return expanded;
+}
+
+static void expand_object_streams(Input* input, MarkBuilder& builder, Array* objects, ObjTable* table) {
+    if (!objects || !table) return;
+    int original_len = objects->length;
+    int expanded = 0;
+    for (int i = 0; i < original_len; i++) {
+        Map* iobj = item_as_map(objects->items[i]);
+        if (!iobj || !map_has_type(iobj, "indirect_object")) continue;
+        Map* sm = item_as_map(map_lookup(iobj, "content"));
+        if (!sm || !map_has_type(sm, "stream")) continue;
+        expanded += expand_object_stream(input, builder, objects, table, sm);
+    }
+    log_info("pdf_postprocess: expanded %d object-stream object(s)", expanded);
+}
+
+// ---------------------------------------------------------------------------
+// Pass 5: Image XObject → data:image/png;base64,... URI
 // ---------------------------------------------------------------------------
 //
 // Walks every indirect_object content; if it's an Image XObject stream
@@ -793,7 +1361,7 @@ static void decompress_streams(Input* input, Array* objects) {    if (!objects) 
 // Determine the number of colour components for a PDF colour space Item.
 // Returns 1 (gray), 3 (RGB) or 0 (unsupported).
 static int color_space_ncomp(Item cs, ObjTable* table) {
-    String* s = item_as_string(cs);
+    String* s = item_as_pdf_name(cs);
     if (s) {
         if (str_eq(s, "DeviceGray") || str_eq(s, "G")) return 1;
         if (str_eq(s, "DeviceRGB")  || str_eq(s, "RGB")) return 3;
@@ -801,7 +1369,7 @@ static int color_space_ncomp(Item cs, ObjTable* table) {
     }
     Array* arr = item_as_array(cs);
     if (!arr || arr->length < 1) return 0;
-    String* head = item_as_string(arr->items[0]);
+    String* head = item_as_pdf_name(arr->items[0]);
     if (!head) return 0;
     if (str_eq(head, "ICCBased") && arr->length >= 2) {
         // ["ICCBased", indirect_ref-to-stream]. The stream's dictionary
@@ -962,6 +1530,40 @@ static char* base64_alloc(const uint8_t* src, size_t n) {
     return out;
 }
 
+static bool filter_item_has_name(Item filter_it, const char* name1, const char* name2) {
+    if (String* fs = item_as_pdf_name(filter_it)) {
+        return str_eq(fs, name1) || (name2 && str_eq(fs, name2));
+    }
+    if (Array* fa = item_as_array(filter_it)) {
+        for (int i = 0; i < fa->length; i++) {
+            if (filter_item_has_name(fa->items[i], name1, name2)) return true;
+        }
+    }
+    return false;
+}
+
+static String* bytes_to_data_uri(Input* input, const char* mime,
+                                 const uint8_t* data, size_t data_len) {
+    if (!input || !mime || !data || data_len == 0) return nullptr;
+
+    char* b64 = base64_alloc(data, data_len);
+    if (!b64) return nullptr;
+
+    size_t mime_len = strlen(mime);
+    size_t b64_len = strlen(b64);
+    size_t total = strlen("data:") + mime_len + strlen(";base64,") + b64_len;
+    String* out = (String*)pool_calloc(input->pool, sizeof(String) + total + 1);
+    if (!out) { free(b64); return nullptr; }
+
+    int n = snprintf(out->chars, total + 1, "data:%s;base64,%s", mime, b64);
+    free(b64);
+    if (n < 0 || (size_t)n != total) return nullptr;
+
+    out->len = (uint32_t)total;
+    out->is_ascii = 1;
+    return out;
+}
+
 // Build the RGBA buffer for one image and convert it to a
 // data:image/png;base64,... String*. Returns nullptr on failure /
 // unsupported configurations.
@@ -972,21 +1574,32 @@ static String* image_to_data_uri(Input* input, Map* stream_map,
     if (!dict) return nullptr;
 
     // Subtype must be Image
-    String* sub = item_as_string(map_lookup(dict, "Subtype"));
+    String* sub = item_as_pdf_name(map_lookup(dict, "Subtype"));
     if (!sub || !str_eq(sub, "Image")) return nullptr;
 
     int w   = item_as_int(map_lookup(dict, "Width"),  0);
     int h   = item_as_int(map_lookup(dict, "Height"), 0);
     int bpc = item_as_int(map_lookup(dict, "BitsPerComponent"), 8);
+
+    Item data_it = map_lookup(stream_map, "data");
+    String* pix = item_as_string(data_it);
+    if (!pix) return nullptr;
+
+    Item filter_it = map_lookup(dict, "Filter");
+    if (filter_item_has_name(filter_it, "DCTDecode", "DCT")) {
+        const uint8_t* bytes = (const uint8_t*)pix->chars;
+        if (pix->len >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF) {
+            return bytes_to_data_uri(input, "image/jpeg", bytes, pix->len);
+        }
+        return nullptr;
+    }
+
     if (w <= 0 || h <= 0 || bpc != 8) return nullptr;
 
     int ncomp = color_space_ncomp(map_lookup(dict, "ColorSpace"), table);
     if (ncomp != 1 && ncomp != 3) return nullptr;
 
     // Pixel data must be plain (Pass 3 should have decompressed it).
-    Item data_it = map_lookup(stream_map, "data");
-    String* pix = item_as_string(data_it);
-    if (!pix) return nullptr;
     size_t expect = (size_t)w * (size_t)h * (size_t)ncomp;
     if ((size_t)pix->len < expect) return nullptr;
     const uint8_t* rgb = (const uint8_t*)pix->chars;
@@ -1073,8 +1686,8 @@ static void encode_image_xobjects(Input* input, MarkBuilder& builder,
         Map* dict = item_as_map(dict_it);
         if (!dict) continue;
         // Only XObject Images
-        String* tystr  = item_as_string(map_lookup(dict, "Type"));
-        String* substr = item_as_string(map_lookup(dict, "Subtype"));
+        String* tystr  = item_as_pdf_name(map_lookup(dict, "Type"));
+        String* substr = item_as_pdf_name(map_lookup(dict, "Subtype"));
         if (!tystr || !str_eq(tystr, "XObject")) continue;
         if (!substr || !str_eq(substr, "Image")) continue;
         // Skip SMask streams themselves — they're consumed alongside their owners.
@@ -1085,7 +1698,7 @@ static void encode_image_xobjects(Input* input, MarkBuilder& builder,
                          {.item = s2it(uri)});
         encoded++;
     }
-    log_info("pdf_postprocess: encoded %d Image XObject(s) to PNG data URI", encoded);
+    log_info("pdf_postprocess: encoded %d Image XObject(s) to data URI", encoded);
 }
 
 // Build a `data:font/<fmt>;base64,...` URI from a stream Map's `data`
@@ -1202,20 +1815,25 @@ void pdf_postprocess(Input* input) {
 
     MarkBuilder builder(input);
 
-    // Pass 1: page-tree flattening
-    flatten_page_tree(input, builder, pdf_info, &table);
+    // Pass 1: stream decompression (FlateDecode, ASCII85Decode, etc.)
+    decompress_streams(input, builder, objects);
 
-    // Pass 2: ToUnicode CMap parsing
-    walk_fonts(input, builder, objects, &table);
+    // Pass 2: object stream expansion, then rebuild the reference table.
+    expand_object_streams(input, builder, objects, &table);
+    ObjTable expanded_table = {nullptr, 0, 0};
+    build_obj_table(objects, &expanded_table, pool);
 
-    // Pass 3: stream decompression (FlateDecode, ASCII85Decode, etc.)
-    decompress_streams(input, objects);
+    // Pass 3: page-tree flattening
+    flatten_page_tree(input, builder, pdf_info, &expanded_table);
 
-    // Pass 4: encode Image XObjects to PNG data URIs
-    encode_image_xobjects(input, builder, objects, &table);
+    // Pass 4: ToUnicode CMap parsing
+    walk_fonts(input, builder, objects, &expanded_table);
 
-    // Pass 5: encode embedded font programs to data URIs
-    encode_embedded_fonts(input, builder, objects, &table);
+    // Pass 5: encode Image XObjects to PNG data URIs
+    encode_image_xobjects(input, builder, objects, &expanded_table);
+
+    // Pass 6: encode embedded font programs to data URIs
+    encode_embedded_fonts(input, builder, objects, &expanded_table);
 
     g_post_pool = nullptr;
 }

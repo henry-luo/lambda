@@ -5,6 +5,7 @@
 #include "transform.hpp"
 #include "state_store.hpp"
 #include "../lambda/input/css/dom_node.hpp"
+#include "../lib/tagged.hpp"
 #include <time.h>
 #include <cmath>  // for INFINITY
 
@@ -33,7 +34,7 @@ const char* View::view_name() {
         case RDT_VIEW_TABLE: {
             // CSS 2.1 §17.2: distinguish table vs inline-table via outer display
             // Note: inline-table gets display.outer = CSS_VALUE_INLINE_BLOCK during layout routing
-            DomElement* elem = (DomElement*)this;
+            DomElement* elem = lam::dom_require_element(this);
             return (elem->display.outer == CSS_VALUE_INLINE || elem->display.outer == CSS_VALUE_INLINE_BLOCK) ? "inline-table" : "table";
         }
         case RDT_VIEW_TABLE_ROW_GROUP: return "table-row-group";
@@ -50,7 +51,7 @@ const char* View::view_name() {
 }
 
 View* set_view(LayoutContext* lycon, ViewType type, DomNode* node) {
-    View* view = (View*)node;
+    View* view = static_cast<View*>(node);
     switch (type) {
         case RDT_VIEW_BLOCK:  case RDT_VIEW_INLINE_BLOCK:  case RDT_VIEW_LIST_ITEM:
         case RDT_VIEW_TABLE_ROW_GROUP:  case RDT_VIEW_TABLE_ROW:
@@ -58,7 +59,7 @@ View* set_view(LayoutContext* lycon, ViewType type, DomNode* node) {
         case RDT_VIEW_MARKER:
             break;
         case RDT_VIEW_TABLE: {
-            ViewTable* table = (ViewTable*)node;
+            ViewTable* table = lam::unsafe_view_table_storage(node);
             table->tb = (TableProp*)alloc_prop(lycon, sizeof(TableProp));
             table->item_prop_type = DomElement::ITEM_PROP_TABLE;
             // Initialize defaults
@@ -76,7 +77,7 @@ View* set_view(LayoutContext* lycon, ViewType type, DomNode* node) {
         }
         case RDT_VIEW_TABLE_CELL: {
             // Initialize rowspan/colspan from DOM attributes (for Lambda CSS support)
-            ViewTableCell* cell = (ViewTableCell*)view;
+            ViewTableCell* cell = lam::unsafe_view_table_cell_storage(view);
             cell->td = (TableCellProp*)alloc_prop(lycon, sizeof(TableCellProp));
             cell->item_prop_type = DomElement::ITEM_PROP_CELL;
             // Read colspan attribute
@@ -128,14 +129,14 @@ View* set_view(LayoutContext* lycon, ViewType type, DomNode* node) {
 void free_view(ViewTree* tree, View* view) {
     log_debug("free view %p, type %s", view, view->node_name());
     if (view->view_type >= RDT_VIEW_INLINE) {
-        View* child = ((ViewElement*)view)->first_child;
+        View* child = (lam::view_require_element(view))->first_child;
         while (child) {
             View* next = child->next();
             free_view(tree, child);
             child = next;
         }
         // free view property groups
-        ViewSpan* span = (ViewSpan*)view;
+        ViewSpan* span = lam::view_require_element(view);
         if (span->font) {
             log_debug("free font prop");
             // font-family could be static and not from the pool
@@ -155,7 +156,7 @@ void free_view(ViewTree* tree, View* view) {
             pool_free(tree->pool, span->bound);
         }
         if (view->is_block()) {
-            ViewBlock* block = (ViewBlock*)view;
+            ViewBlock* block = lam::view_require_block(view);
             if (block->blk) {
                 log_debug("free block prop");
                 pool_free(tree->pool, block->blk);
@@ -376,7 +377,7 @@ void print_inline_props(ViewSpan* span, StrBuf* buf, int indent) {
             }
             strbuf_append_format(buf, "cursor:%s ", cursor);
         }
-        if (span->in_line->color.c) {
+        if (span->in_line->has_color) {
             strbuf_append_format(buf, "color:#%x ", span->in_line->color.c);
         }
         if (span->in_line->vertical_align) {
@@ -617,8 +618,8 @@ void print_view_block(ViewBlock* block, StrBuf* buf, int indent) {
 
     strbuf_append_str(buf, "\n");
     print_block_props(block, buf, indent + 2);
-    print_inline_props((ViewSpan*)block, buf, indent+2);
-    print_view_group((ViewElement*)block, buf, indent+2);
+    print_inline_props(lam::view_require_element(block), buf, indent+2);
+    print_view_group(lam::view_require_element(block), buf, indent+2);
     strbuf_append_char_n(buf, ' ', indent);
     strbuf_append_str(buf, "]\n");
 }
@@ -628,15 +629,15 @@ void print_view_group(ViewElement* view_group, StrBuf* buf, int indent) {
     if (view) {
         do {
             if (view->is_block()) {
-                print_view_block((ViewBlock*)view, buf, indent);
+                print_view_block(lam::view_require_block(view), buf, indent);
             }
             else if (view->view_type == RDT_VIEW_INLINE) {
                 strbuf_append_char_n(buf, ' ', indent);
-                ViewSpan* span = (ViewSpan*)view;
+                ViewSpan* span = lam::view_require_element(view);
                 strbuf_append_format(buf, "[view-inline:%s, x:%.1f, y:%.1f, wd:%.1f, hg:%.1f\n",
                     span->node_name(), (float)span->x, (float)span->y, (float)span->width, (float)span->height);
                 print_inline_props(span, buf, indent + 2);
-                print_view_group((ViewElement*)view, buf, indent + 2);
+                print_view_group(lam::view_require_element(view), buf, indent + 2);
                 strbuf_append_char_n(buf, ' ', indent);
                 strbuf_append_str(buf, "]\n");
             }
@@ -646,7 +647,7 @@ void print_view_group(ViewElement* view_group, StrBuf* buf, int indent) {
                     (float)view->x, (float)view->y, (float)view->width, (float)view->height);
             }
             else if (view->view_type == RDT_VIEW_TEXT) {
-                ViewText* text = (ViewText*)view;
+                ViewText* text = lam::view_require_text(view);
                 unsigned char* text_data = view->text_data();
                 strbuf_append_char_n(buf, ' ', indent);
                 strbuf_append_format(buf, "[text: {x:%.1f, y:%.1f, wd:%.1f, hg:%.1f}",
@@ -702,7 +703,7 @@ void write_string_to_file(const char *filename, const char *text) {
 
 void print_view_tree(ViewElement* view_root, Url* url, const char* output_path) {
     StrBuf* buf = strbuf_new_cap(1024);
-    print_view_block((ViewBlock*)view_root, buf, 0);
+    print_view_block(lam::view_require_block(view_root), buf, 0);
     log_debug("=================\nView tree:");
     log_debug("%s", buf->str);
     log_debug("=================\n");
@@ -775,7 +776,7 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
     bool is_absolute = false;
 
     if (view->is_block()) {
-        ViewBlock* block = (ViewBlock*)view;
+        ViewBlock* block = lam::view_require_block(view);
         if (block->position) {
             is_fixed = (block->position->position == CSS_VALUE_FIXED);
             is_absolute = (block->position->position == CSS_VALUE_ABSOLUTE);
@@ -800,7 +801,7 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
 
         while (ancestor) {
             if (ancestor->is_block()) {
-                ViewBlock* ancestor_block = (ViewBlock*)ancestor;
+                ViewBlock* ancestor_block = lam::view_require_block(ancestor);
                 if (ancestor_block->position &&
                     ancestor_block->position->position != CSS_VALUE_STATIC) {
                     cb = ancestor_block;
@@ -827,7 +828,7 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
 
                     while (cb_ancestor) {
                         if (cb_ancestor->is_block()) {
-                            ViewBlock* cb_ancestor_block = (ViewBlock*)cb_ancestor;
+                            ViewBlock* cb_ancestor_block = lam::view_require_block(cb_ancestor);
                             if (cb_ancestor_block->position &&
                                 cb_ancestor_block->position->position != CSS_VALUE_STATIC) {
                                 cb_cb = cb_ancestor_block;
@@ -878,7 +879,7 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
         ViewElement* parent = view->parent_view();
         while (parent) {
             if (parent->is_block()) {
-                ViewBlock* parent_block = (ViewBlock*)parent;
+                ViewBlock* parent_block = lam::view_require_block(parent);
                 abs_x += parent->x;  abs_y += parent->y;
 
                 // If parent is fixed, its position is relative to viewport (root at 0,0)
@@ -896,7 +897,7 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
                     ViewElement* ancestor = parent_block->parent_view();
                     while (ancestor) {
                         if (ancestor->is_block()) {
-                            ViewBlock* ancestor_block = (ViewBlock*)ancestor;
+                            ViewBlock* ancestor_block = lam::view_require_block(ancestor);
                             if (ancestor_block->position &&
                                 ancestor_block->position->position != CSS_VALUE_STATIC) {
                                 // This is the containing block - continue from here
@@ -921,11 +922,11 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
         ViewElement* parent = view->parent_view();
         while (parent) {
             if (parent->is_block()) {
-                ViewBlock* parent_block = (ViewBlock*)parent;
+                ViewBlock* parent_block = lam::view_require_block(parent);
                 if (parent_block->scroller && parent_block->scroller->pane) {
                     DocState* state = parent_block->doc ? parent_block->doc->state : NULL;
                     float scroll_x = 0.0f, scroll_y = 0.0f;
-                    scroll_state_get_position_for_view(state, (View*)parent_block,
+                    scroll_state_get_position_for_view(state, static_cast<View*>(parent_block),
                         parent_block->scroller->pane, &scroll_x, &scroll_y, NULL, NULL);
                     abs_x -= scroll_x;
                     abs_y -= scroll_y;
@@ -939,11 +940,11 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
         }
 
         if (view->is_block() && !view->parent_view()) {
-            ViewBlock* root_block = (ViewBlock*)view;
+            ViewBlock* root_block = lam::view_require_block(view);
             if (root_block->scroller && root_block->scroller->pane) {
                 DocState* state = root_block->doc ? root_block->doc->state : NULL;
                 float scroll_x = 0.0f, scroll_y = 0.0f;
-                scroll_state_get_position_for_view(state, (View*)root_block,
+                scroll_state_get_position_for_view(state, static_cast<View*>(root_block),
                     root_block->scroller->pane, &scroll_x, &scroll_y, NULL, NULL);
                 abs_x -= scroll_x;
                 abs_y -= scroll_y;
@@ -958,7 +959,7 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
 static bool get_transform_matrix_for_view(View* view, RdtMatrix* out_matrix) {
     if (!view || !view->is_block()) return false;
 
-    ViewBlock* block = (ViewBlock*)view;
+    ViewBlock* block = lam::view_require_block(view);
     if (!block->transform || !block->transform->functions) return false;
 
     float abs_x = 0.0f, abs_y = 0.0f;
@@ -1002,7 +1003,7 @@ static void apply_css_transforms_to_bounds(View* view, float* x, float* y, float
     int count = 0;
     ViewElement* ancestor = view->parent_view();
     while (ancestor && count < 256) {
-        chain[count++] = (View*)ancestor;
+        chain[count++] = static_cast<View*>(ancestor);
         ancestor = ancestor->parent_view();
     }
 
@@ -1023,7 +1024,7 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nul
     // CSS Display Level 3: display:contents elements don't generate a box
     // They report (0, 0, 0, 0) in getComputedStyle/getBoundingClientRect
     if (view->is_element()) {
-        DomElement* elem = (DomElement*)view;
+        DomElement* elem = lam::dom_require_element(view);
         // display:contents elements don't generate a box → (0,0,0,0)
         // option/optgroup in combo-box selects are not rendered → getBoundingClientRect returns (0,0,0,0)
         // In listbox mode, options have non-zero dimensions and are reported via normal path.
@@ -1056,7 +1057,7 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nul
     // to viewport size but browsers report the full content height.
     // Only use content_height when the root has no explicit CSS height (CSS 2.1 §10.6.4).
     if (!rect && view->is_element() && !view->parent) {
-        DomElement* elem = (DomElement*)view;
+        DomElement* elem = lam::dom_require_element(view);
         bool has_explicit_height = (elem->blk && elem->blk->given_height >= 0);
         if (!has_explicit_height && elem->content_height > css_height) {
             css_height = elem->content_height;
@@ -1133,7 +1134,7 @@ static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int ind
             strbuf_append_str(buf, "}");
         }
 
-        return (View*)first_text;  // Return this text node only
+        return static_cast<View*>(first_text);  // Return this text node only
     }
 
     // Collect all consecutive text nodes
@@ -1145,11 +1146,11 @@ static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int ind
     // Use a simple array for collecting text nodes (max 64 should be enough)
     TextNodeInfo text_nodes[64];
     int text_node_count = 0;
-    View* current = (View*)first_text;
+    View* current = static_cast<View*>(first_text);
 
     // Collect consecutive text nodes
     while (current && current->view_type == RDT_VIEW_TEXT && text_node_count < 64) {
-        ViewText* text = (ViewText*)current;
+        ViewText* text = lam::view_require_text(current);
         text_nodes[text_node_count].text = text;
         text_nodes[text_node_count].data = text->text_data();
         text_node_count++;
@@ -1287,7 +1288,7 @@ static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int ind
     }
 
     if (combined_len <= 0 || min_x == INFINITY) {
-        return (View*)text_nodes[text_node_count - 1].text;
+        return static_cast<View*>(text_nodes[text_node_count - 1].text);
     }
 
     // Output combined text node
@@ -1351,7 +1352,7 @@ static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int ind
     strbuf_append_str(buf, "}");
 
     // Return the last text node processed
-    return (View*)text_nodes[text_node_count - 1].text;
+    return static_cast<View*>(text_nodes[text_node_count - 1].text);
 }
 
 // Helper to check if an element is an anonymous table element (e.g., ::anon-tbody, ::anon-tr)
@@ -1388,7 +1389,7 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent);
 
 static void print_layout_fragments_json(ViewBlock* block, StrBuf* buf, int indent) {
     if (!block) return;
-    DomElement* elem = (DomElement*)block;
+    DomElement* elem = lam::dom_require_element(block);
     if (!elem->layout_fragments || elem->layout_fragment_count <= 0) return;
 
     strbuf_append_char_n(buf, ' ', indent + 4);
@@ -1446,7 +1447,7 @@ static void append_element_selector_json(ViewElement* elem, StrBuf* buf, const c
     if (parent) {
         int sibling_count = 0;
         int current_index = 0;
-        DomNode* sibling = parent->is_element() ? static_cast<DomElement*>(parent)->first_child : nullptr;
+        DomNode* sibling = parent->is_element() ? lam::dom_require_element(parent)->first_child : nullptr;
         while (sibling) {
             if (sibling->node_type == DOM_NODE_ELEMENT) {
                 const char* sibling_tag = sibling->node_name();
@@ -1520,7 +1521,7 @@ static void print_display_none_json(ViewElement* elem, StrBuf* buf, int indent) 
                 strbuf_append_str(buf, ",\n");
             }
             first_child = false;
-            print_display_none_json((ViewElement*)child, buf, indent + 4);
+            print_display_none_json(lam::view_require_element(child), buf, indent + 4);
         }
         child = child->next_sibling;
     }
@@ -1536,16 +1537,16 @@ static void print_display_none_json(ViewElement* elem, StrBuf* buf, int indent) 
 
 // Helper to print children, skipping anonymous wrapper elements
 static void print_children_json(ViewBlock* block, StrBuf* buf, int indent, bool* first_child) {
-    View* child = ((ViewElement*)block)->first_child;
+    View* child = (lam::view_require_element(block))->first_child;
     while (child) {
         if (child->view_type == RDT_VIEW_NONE) {
             if (child->is_element()) {
-                DomElement* elmt = (DomElement*)child;
+                DomElement* elmt = lam::dom_require_element(child);
                 const char* tag = child->node_name();
                 if (elmt->display.outer == CSS_VALUE_NONE && !should_skip_non_rendered_dom_tag(tag)) {
                     if (!*first_child) { strbuf_append_str(buf, ",\n"); }
                     *first_child = false;
-                    print_display_none_json((ViewElement*)elmt, buf, indent);
+                    print_display_none_json(lam::view_require_element(elmt), buf, indent);
                 }
             }
             child = child->next_sibling;
@@ -1554,7 +1555,7 @@ static void print_children_json(ViewBlock* block, StrBuf* buf, int indent, bool*
 
         // Skip display:none elements - they don't participate in layout or rendering
         if (child->is_element()) {
-            DomElement* elmt = (DomElement*)child;
+            DomElement* elmt = lam::dom_require_element(child);
             if (elmt->display.outer == CSS_VALUE_NONE) {
                 log_debug("JSON: Skipping display:none element %s", child->node_name());
                 child = child->next();
@@ -1575,16 +1576,16 @@ static void print_children_json(ViewBlock* block, StrBuf* buf, int indent, bool*
         // its children (text nodes) into the parent to match browser reference output.
         if (tag && strcmp(tag, "::first-letter") == 0) {
             log_debug("JSON: Unwrapping ::first-letter pseudo-element, outputting children directly");
-            View* fl_child = ((ViewElement*)child)->first_child;
+            View* fl_child = (lam::view_require_element(child))->first_child;
             while (fl_child) {
                 if (fl_child->view_type == RDT_VIEW_TEXT) {
-                    if (!text_has_visible_rect((ViewText*)fl_child)) {
+                    if (!text_has_visible_rect(lam::view_require_text(fl_child))) {
                         fl_child = fl_child->next_sibling;
                         continue;
                     }
                     if (!*first_child) { strbuf_append_str(buf, ",\n"); }
                     *first_child = false;
-                    View* last_text = print_combined_text_json((ViewText*)fl_child, buf, indent);
+                    View* last_text = print_combined_text_json(lam::view_require_text(fl_child), buf, indent);
                     fl_child = last_text->next_sibling;
                 } else {
                     fl_child = fl_child->next_sibling;
@@ -1602,14 +1603,14 @@ static void print_children_json(ViewBlock* block, StrBuf* buf, int indent, bool*
         }
 
         // For anonymous elements, skip the wrapper but process its children
-        if (child->is_block() && is_anonymous_element((ViewBlock*)child)) {
+        if (child->is_block() && is_anonymous_element(lam::view_require_block(child))) {
             log_debug("JSON: Skipping anonymous element %s, processing its children", child->node_name());
-            print_children_json((ViewBlock*)child, buf, indent, first_child);
+            print_children_json(lam::view_require_block(child), buf, indent, first_child);
             child = child->next();
             continue;
         }
 
-        if (child->view_type == RDT_VIEW_TEXT && !text_has_visible_rect((ViewText*)child)) {
+        if (child->view_type == RDT_VIEW_TEXT && !text_has_visible_rect(lam::view_require_text(child))) {
             child = child->next_sibling;
             continue;
         }
@@ -1618,18 +1619,18 @@ static void print_children_json(ViewBlock* block, StrBuf* buf, int indent, bool*
         *first_child = false;
 
         if (child->is_block()) {
-            print_block_json((ViewBlock*)child, buf, indent);
+            print_block_json(lam::view_require_block(child), buf, indent);
         }
         else if (child->view_type == RDT_VIEW_TEXT) {
             // Use combined text printing to merge consecutive text nodes
-            View* last_text = print_combined_text_json((ViewText*)child, buf, indent);
+            View* last_text = print_combined_text_json(lam::view_require_text(child), buf, indent);
             child = last_text;  // Skip to the last text node (loop will advance to next)
         }
         else if (child->view_type == RDT_VIEW_BR) {
             print_br_json(child, buf, indent);
         }
         else if (child->view_type == RDT_VIEW_INLINE) {
-            print_inline_json((ViewSpan*)child, buf, indent);
+            print_inline_json(lam::view_require_element(child), buf, indent);
         }
         else {
             // Handle other view types
@@ -1725,7 +1726,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent) {
         int current_index = 0;
         DomNode* sibling = nullptr;
         if (parent->is_element()) {
-            sibling = static_cast<DomElement*>(parent)->first_child;
+            sibling = lam::dom_require_element(parent)->first_child;
         }
 
         while (sibling) {
@@ -1768,7 +1769,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent) {
 
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"layout\": {\n");
-    DomElement* block_elem = (DomElement*)block;
+    DomElement* block_elem = lam::dom_require_element(block);
     bool has_fragments = block_elem->layout_fragments && block_elem->layout_fragment_count > 0;
     print_bounds_json(block, buf, indent, nullptr, has_fragments);
     if (has_fragments) {
@@ -2216,7 +2217,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent) {
 // JSON generation for text nodes
 static bool text_rect_is_collapsed_whitespace(ViewText* text, TextRect* rect) {
     if (!text || !rect || rect->width > 0 || rect->length <= 0) return false;
-    CssEnum white_space = get_white_space_value((DomNode*)text);
+    CssEnum white_space = get_white_space_value(static_cast<DomNode*>(text));
     if (white_space != CSS_VALUE_NORMAL &&
         white_space != CSS_VALUE_NOWRAP &&
         white_space != CSS_VALUE_PRE_LINE) {
@@ -2334,16 +2335,16 @@ static View* single_inline_child_for_rect(ViewSpan* span) {
     if (!parent || !parent->is_element() || parent->as_element()->tag() != HTM_TAG_BUTTON) {
         return nullptr;
     }
-    View* first = (View*)span->first_child;
+    View* first = static_cast<View*>(span->first_child);
     while (first && (first->view_type == RDT_VIEW_NONE ||
-        (first->view_type == RDT_VIEW_TEXT && !text_has_visible_rect((ViewText*)first)))) {
-        first = (View*)first->next_sibling;
+        (first->view_type == RDT_VIEW_TEXT && !text_has_visible_rect(lam::view_require_text(first))))) {
+        first = static_cast<View*>(first->next_sibling);
     }
     if (!first || first->view_type != RDT_VIEW_INLINE) return nullptr;
-    View* next = (View*)first->next_sibling;
+    View* next = static_cast<View*>(first->next_sibling);
     while (next && (next->view_type == RDT_VIEW_NONE ||
-        (next->view_type == RDT_VIEW_TEXT && !text_has_visible_rect((ViewText*)next)))) {
-        next = (View*)next->next_sibling;
+        (next->view_type == RDT_VIEW_TEXT && !text_has_visible_rect(lam::view_require_text(next))))) {
+        next = static_cast<View*>(next->next_sibling);
     }
     return next ? nullptr : first;
 }
@@ -2399,7 +2400,7 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent) {
         int current_index = 0;
         DomNode* sibling = nullptr;
         if (parent->is_element()) {
-            sibling = static_cast<DomElement*>(parent)->first_child;
+            sibling = lam::dom_require_element(parent)->first_child;
         }
 
         while (sibling) {
@@ -2431,7 +2432,7 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent) {
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"layout\": {\n");
     View* projected_bounds = single_inline_child_for_rect(span);
-    print_bounds_json(projected_bounds ? projected_bounds : (View*)span, buf, indent);
+    print_bounds_json(projected_bounds ? projected_bounds : static_cast<View*>(span), buf, indent);
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "},\n");
 
@@ -2459,7 +2460,7 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent) {
             strbuf_append_char_n(buf, ' ', indent + 4);
             strbuf_append_format(buf, "\"cursor\": \"%s\"", cursor);
         }
-        if (span->in_line->color.c) {
+        if (span->in_line->has_color) {
             strbuf_append_str(buf, ",\n");
             strbuf_append_char_n(buf, ' ', indent + 4);
             strbuf_append_format(buf, "\"color\": \"#%06x\"", span->in_line->color.c);
@@ -2513,7 +2514,7 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent) {
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"children\": [\n");
 
-    View* child = ((ViewElement*)span)->first_child;
+    View* child = (lam::view_require_element(span))->first_child;
     bool first_child = true;
     while (child) {
         if (child->view_type == RDT_VIEW_NONE) {
@@ -2536,7 +2537,7 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent) {
             continue;
         }
 
-        if (child->view_type == RDT_VIEW_TEXT && !text_has_visible_rect((ViewText*)child)) {
+        if (child->view_type == RDT_VIEW_TEXT && !text_has_visible_rect(lam::view_require_text(child))) {
             child = child->next_sibling;
             continue;
         }
@@ -2547,18 +2548,18 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent) {
         first_child = false;
 
         if (child->view_type == RDT_VIEW_TEXT) {
-            print_text_json((ViewText*)child, buf, indent + 4);
+            print_text_json(lam::view_require_text(child), buf, indent + 4);
         }
         else if (child->view_type == RDT_VIEW_BR) {
             print_br_json(child, buf, indent + 4);
         }
         else if (child->view_type == RDT_VIEW_INLINE) {
             // Nested inline elements
-            print_inline_json((ViewSpan*)child, buf, indent + 4);
+            print_inline_json(lam::view_require_element(child), buf, indent + 4);
         }
         else if (child->is_block()) {
             // Block inside inline (block-in-inline case per CSS 2.1 Section 9.2.1.1)
-            print_block_json((ViewBlock*)child, buf, indent + 4);
+            print_block_json(lam::view_require_block(child), buf, indent + 4);
         } else {
             // Handle other child types
             strbuf_append_char_n(buf, ' ', indent + 4);
@@ -2607,7 +2608,7 @@ void print_view_tree_json(ViewElement* view_root, Url* url, const char* output_p
 
     strbuf_append_str(json_buf, "  \"layout_tree\": ");
     if (view_root) {
-        print_block_json((ViewBlock*)view_root, json_buf, 2);
+        print_block_json(lam::view_require_block(view_root), json_buf, 2);
     } else {
         strbuf_append_str(json_buf, "null");
     }

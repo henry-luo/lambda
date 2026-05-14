@@ -75,28 +75,28 @@ pub fn standard14(name: string) {
 
 // Substring helpers (Lambda has no built-in `contains`).
 
-pn _starts_at(s: string, needle: string, i: int) {
-    let m = len(needle)
-    var k = 0
-    while (k < m) {
-        if (s[i + k] != needle[k]) { return false }
-        k = k + 1
-    }
-    return true
+fn _starts_at_loop(s: string, needle: string, i: int, k: int, m: int) {
+    if (k >= m) { true }
+    else if (s[i + k] != needle[k]) { false }
+    else { _starts_at_loop(s, needle, i, k + 1, m) }
 }
 
-pn _contains(s: string, needle: string) {
-    let n = len(s)
-    let m = len(needle)
-    if (m == 0) { return true }
-    if (n < m)  { return false }
-    var i = 0
-    let limit = n - m
-    while (i <= limit) {
-        if (_starts_at(s, needle, i)) { return true }
-        i = i + 1
-    }
-    return false
+fn _starts_at(s: string, needle: string, i: int) {
+    _starts_at_loop(s, needle, i, 0, int(len(needle)))
+}
+
+fn _contains_loop(s: string, needle: string, i: int, limit: int) {
+    if (i > limit) { false }
+    else if (_starts_at(s, needle, i)) { true }
+    else { _contains_loop(s, needle, i + 1, limit) }
+}
+
+fn _contains(s: string, needle: string) {
+    let n = int(len(s))
+    let m = int(len(needle))
+    if (m == 0) { true }
+    else if (n < m) { false }
+    else { _contains_loop(s, needle, 0, n - m) }
 }
 
 // Build a CSS font-family stack: actual font name first (so the OS
@@ -124,45 +124,45 @@ fn _family_stack_with_stretch(name: string, gen: string, condensed: bool) {
 // Infer family/weight/style from arbitrary BaseFont name (e.g.
 // "ABCDEF+TimesNewRomanPSMT-Bold"). The leading "ABCDEF+" subset prefix
 // is ignored.
-pub pn from_basefont(name: string) {
+pub fn from_basefont(name: string) {
     // strip subset prefix "XXXXXX+"
     let stripped = _strip_subset(name)
 
     // exact Standard-14 hit?
     let s14 = standard14(stripped)
-    if (s14.family != _UNKNOWN.family) { return s14 }
+    if (s14.family != _UNKNOWN.family) { s14 }
+    else {
 
-    let is_bold = _contains(stripped, "Bold") or _contains(stripped, "bold") or
-                   _contains(stripped, "_700wght") or _contains(stripped, "_800wght") or
-                   _contains(stripped, "_900wght") or _contains(stripped, "Black") or
-                   _contains(stripped, "Heavy")
-    let is_ital = _contains(stripped, "Italic") or _contains(stripped, "italic") or
-                   _contains(stripped, "Oblique") or _contains(stripped, "oblique")
-    let weight = if (is_bold) { "bold" } else { "normal" }
-    let style  = if (is_ital) { "italic" } else { "normal" }
-    // Generic-family inference from common name fragments. Anything not
-    // matched falls back to sans-serif (PDF gives us no flag here).
-    var gen = "sans-serif"
-    if (_contains(stripped, "Times") or _contains(stripped, "times") or
-        _contains(stripped, "Serif") or _contains(stripped, "serif") or
-        _contains(stripped, "Georgia") or _contains(stripped, "georgia") or
-        _contains(stripped, "Cambria") or _contains(stripped, "cambria") or
-        _contains(stripped, "Gelasio") or _contains(stripped, "gelasio") or
-        _contains(stripped, "Garamond") or _contains(stripped, "garamond") or
-        _contains(stripped, "Palatino") or _contains(stripped, "palatino") or
-        _contains(stripped, "Book") or _contains(stripped, "Minion")) {
-        gen = "serif"
+        let is_bold = _contains(stripped, "Bold") or _contains(stripped, "bold") or
+                       _contains(stripped, "_700wght") or _contains(stripped, "_800wght") or
+                       _contains(stripped, "_900wght") or _contains(stripped, "Black") or
+                       _contains(stripped, "Heavy")
+        let is_ital = _contains(stripped, "Italic") or _contains(stripped, "italic") or
+                       _contains(stripped, "Oblique") or _contains(stripped, "oblique")
+        let weight = if (is_bold) { "bold" } else { "normal" }
+        let style  = if (is_ital) { "italic" } else { "normal" }
+        // Generic-family inference from common name fragments. Anything not
+        // matched falls back to sans-serif (PDF gives us no flag here).
+        let gen = if (_contains(stripped, "Times") or _contains(stripped, "times") or
+            _contains(stripped, "Serif") or _contains(stripped, "serif") or
+            _contains(stripped, "Georgia") or _contains(stripped, "georgia") or
+            _contains(stripped, "Cambria") or _contains(stripped, "cambria") or
+            _contains(stripped, "Gelasio") or _contains(stripped, "gelasio") or
+            _contains(stripped, "Garamond") or _contains(stripped, "garamond") or
+            _contains(stripped, "Palatino") or _contains(stripped, "palatino") or
+            _contains(stripped, "Crimson") or _contains(stripped, "crimson") or
+            _contains(stripped, "Effloresce") or _contains(stripped, "effloresce") or
+            _contains(stripped, "Book") or _contains(stripped, "Minion")) { "serif" }
+            else if (_contains(stripped, "Courier") or _contains(stripped, "courier") or
+                 _contains(stripped, "Mono") or _contains(stripped, "mono") or
+                 _contains(stripped, "Consolas") or _contains(stripped, "consolas")) { "monospace" }
+            else { "sans-serif" }
+        let is_condensed = _contains(stripped, "Condensed") or _contains(stripped, "condensed") or
+                           _contains(stripped, "Narrow")    or _contains(stripped, "narrow") or
+                           _contains(stripped, "Compressed") or _contains(stripped, "BlueHighway")
+        { family: _family_stack_with_stretch(stripped, gen, is_condensed),
+          weight: weight, style: style }
     }
-    else if (_contains(stripped, "Courier") or _contains(stripped, "courier") or
-             _contains(stripped, "Mono") or _contains(stripped, "mono") or
-             _contains(stripped, "Consolas") or _contains(stripped, "consolas")) {
-        gen = "monospace"
-    }
-    let is_condensed = _contains(stripped, "Condensed") or _contains(stripped, "condensed") or
-                       _contains(stripped, "Narrow")    or _contains(stripped, "narrow") or
-                       _contains(stripped, "Compressed")
-    return { family: _family_stack_with_stretch(stripped, gen, is_condensed),
-             weight: weight, style: style }
 }
 
 // ============================================================
@@ -190,6 +190,60 @@ fn _widths_or_null(pdf, dict) {
         let w = resolve.deref(pdf, dict.Widths)
         if (w is array) { w } else { null }
     }
+}
+
+fn _num_width(v) {
+    if (v is int) { float(v) }
+    else if (v is float) { v }
+    else { 500.0 }
+}
+
+fn _first_descendant_font(pdf, dict) {
+    let descendants = if (dict.DescendantFonts) resolve.deref(pdf, dict.DescendantFonts) else null
+    if (descendants is array and len(descendants) > 0) { resolve.deref(pdf, descendants[0]) }
+    else { null }
+}
+
+fn _cid_width_array(first, widths, acc) {
+    acc ++ [{ first: first, widths: widths }]
+}
+
+fn _cid_width_range(first, last, width, acc) {
+    acc ++ [{ first: first, last: last, width: width }]
+}
+
+fn _cid_width_pairs_loop(w, i, n, acc) {
+    if (i >= n) { acc }
+    else if (i + 1 >= n) { acc }
+    else {
+        let first = util.int_or(w[i], -1)
+        let second = w[i + 1]
+        if (first < 0) { _cid_width_pairs_loop(w, i + 1, n, acc) }
+        else if (second is array) {
+            _cid_width_pairs_loop(w, i + 2, n,
+                _cid_width_array(first, second, acc))
+        }
+        else if (i + 2 < n) {
+            _cid_width_pairs_loop(w, i + 3, n,
+                _cid_width_range(first, util.int_or(second, first), _num_width(w[i + 2]), acc))
+        }
+        else { acc }
+    }
+}
+
+fn _cid_widths_or_null(pdf, dict) {
+    let desc = _first_descendant_font(pdf, dict)
+    let source = if (dict.W != null) { dict } else { desc }
+    let w = if (source and source.W != null) resolve.deref(pdf, source.W) else null
+    if (w is array) { _cid_width_pairs_loop(w, 0, len(w), []) }
+    else { null }
+}
+
+fn _default_width_or_500(pdf, dict) {
+    let desc = _first_descendant_font(pdf, dict)
+    if (dict.DW != null) { _num_width(dict.DW) }
+    else if (desc and desc.DW != null) { _num_width(desc.DW) }
+    else { 500.0 }
 }
 
 fn _first_char_or_zero(dict) {
@@ -222,24 +276,27 @@ fn _strip_subset(name: string) {
 // behave deterministically; calling pn helpers (from_basefont) from
 // inside `resolve_font` proved to silently lose the weight/style fields
 // when chained through let-bindings.
-fn _make_descriptor(name, info, to_uni, enc, widths, first_char, last_char) {
+fn _make_descriptor(name, info, to_uni, enc, widths, first_char, last_char, cid_widths, default_width) {
     { name: name, family: info.family, weight: info.weight,
         style: info.style, to_unicode: to_uni, encoding: enc,
     widths: widths, first_char: first_char, last_char: last_char,
+            cid_widths: cid_widths, default_width: default_width,
       font_data_uri: null, font_format: null, embedded_family: null }
 }
 
-fn _make_descriptor_embedded(name, info, to_uni, enc, widths, first_char, last_char, uri, fmt, emb_family) {
+fn _make_descriptor_embedded(name, info, to_uni, enc, widths, first_char, last_char, cid_widths, default_width, uri, fmt, emb_family) {
     { name: name, family: info.family, weight: info.weight,
         style: info.style, to_unicode: to_uni, encoding: enc,
     widths: widths, first_char: first_char, last_char: last_char,
+            cid_widths: cid_widths, default_width: default_width,
       font_data_uri: uri, font_format: fmt, embedded_family: emb_family }
 }
 
 fn _unknown_descriptor(name) {
     { name: name, family: _UNKNOWN.family, weight: _UNKNOWN.weight,
         style: _UNKNOWN.style, to_unicode: null, encoding: null,
-    widths: null, first_char: 0, last_char: 0,
+        widths: null, first_char: 0, last_char: 0,
+            cid_widths: null, default_width: 500.0,
       font_data_uri: null, font_format: null, embedded_family: null }
 }
 
@@ -299,7 +356,7 @@ fn _override_family_from_flags(pdf, stripped: string, dict, info) {
 }
 
 // Wraps the pick + flags-override into a single fn so it can be called
-// from `resolve_font` (pn) without hitting the `let x = if` → null
+// from `resolve_font` without hitting the `let x = if` → null
 // gotcha (vibe/Lambda_Issues5.md #15).
 fn _final_info(pdf, stripped, dict, s14, fb) {
     let info_pre = _pick_info(s14, fb)
@@ -345,37 +402,39 @@ fn _info_with_embedded(info, emb_family) {
       weight: info.weight, style: info.style }
 }
 
-pub pn resolve_font(pdf, page, name: string) {
+pub fn resolve_font(pdf, page, name: string) {
     let dict = resolve.page_font(pdf, page, name)
-    if (dict == null) { return _unknown_descriptor(name) }
-    let basefont = _basefont_or(name, dict)
-    // NOTE: calling from_basefont (pn) from within resolve_font (pn)
-    // returned a stale/default record (Lambda nested-pn corruption);
-    // workaround: try standard14 (fn) first, only fall back to the
-    // pn heuristic when needed.
-    let stripped = _strip_subset(basefont)
-    let s14 = standard14(stripped)
-    let fb = from_basefont(basefont)
-    // FontDescriptor.Flags can override the name-based generic-family
-    // guess (bit 1 = FixedPitch, bit 2 = Serif). Only applied when the
-    // basefont is non-Standard-14 (s14 hit means we already trust the
-    // canonical metrics).
-    let info0 = _final_info(pdf, stripped, dict, s14, fb)
-    let to_uni = _to_unicode_or_null(dict)
-    let enc = _implicit_encoding(stripped, _encoding_or_null(dict))
-    let widths = _widths_or_null(pdf, dict)
-    let first_char = _first_char_or_zero(dict)
-    let last_char = _last_char_or_zero(dict)
-    // Embedded font program?  Pull the data URI off the FontDescriptor
-    // and weave the unsubsetted family name into the CSS stack so the
-    // browser matches our @font-face declaration.
-    let emb = _embedded_font_info(pdf, dict)
-    if (emb == null) {
-        return _make_descriptor(name, info0, to_uni, enc, widths, first_char, last_char)
+    if (dict == null) { _unknown_descriptor(name) }
+    else {
+        let basefont = _basefont_or(name, dict)
+        let stripped = _strip_subset(basefont)
+        let s14 = standard14(stripped)
+        let fb = from_basefont(basefont)
+        // FontDescriptor.Flags can override the name-based generic-family
+        // guess (bit 1 = FixedPitch, bit 2 = Serif). Only applied when the
+        // basefont is non-Standard-14 (s14 hit means we already trust the
+        // canonical metrics).
+        let info0 = _final_info(pdf, stripped, dict, s14, fb)
+        let to_uni = _to_unicode_or_null(dict)
+        let enc = _implicit_encoding(stripped, _encoding_or_null(dict))
+        let widths = _widths_or_null(pdf, dict)
+        let cid_widths = _cid_widths_or_null(pdf, dict)
+        let default_width = _default_width_or_500(pdf, dict)
+        let first_char = _first_char_or_zero(dict)
+        let last_char = _last_char_or_zero(dict)
+        // Embedded font program?  Pull the data URI off the FontDescriptor
+        // and weave the unsubsetted family name into the CSS stack so the
+        // browser matches our @font-face declaration.
+        let emb = _embedded_font_info(pdf, dict)
+        if (emb == null) {
+            _make_descriptor(name, info0, to_uni, enc, widths, first_char, last_char, cid_widths, default_width)
+        }
+        else {
+            let info1 = _info_with_embedded(info0, stripped)
+            _make_descriptor_embedded(name, info1, to_uni, enc, widths, first_char, last_char, cid_widths, default_width,
+                                      emb.uri, emb.fmt, stripped)
+        }
     }
-    let info1 = _info_with_embedded(info0, stripped)
-    return _make_descriptor_embedded(name, info1, to_uni, enc, widths, first_char, last_char,
-                                     emb.uri, emb.fmt, stripped)
 }
 
 // ============================================================

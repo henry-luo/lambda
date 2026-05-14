@@ -12,6 +12,7 @@
 #include "text_edit.hpp"
 #include "view.hpp"
 #include "webview.h"
+#include "../lib/tagged.hpp"
 #include "../lib/log.h"
 #include "../lib/str.h"
 #include "../lib/strbuf.h"
@@ -223,12 +224,12 @@ static bool find_text_position_recursive(View* view, const char* target_text,
     // Only block views shift the coordinate origin; inline views don't
     DomElement* elem = view->as_element();
     if (elem) {
-        View* child = (View*)elem->first_child;
+        View* child = static_cast<View*>(elem->first_child);
         while (child) {
             if (find_text_position_recursive(child, target_text, child_block_abs_x, child_block_abs_y, out_x, out_y)) {
                 return true;
             }
-            child = (View*)child->next_sibling;
+            child = static_cast<View*>(child->next_sibling);
         }
     }
 
@@ -238,7 +239,7 @@ static bool find_text_position_recursive(View* view, const char* target_text,
 // Find position of text in document
 static bool find_text_position(DomDocument* doc, const char* target_text, float* out_x, float* out_y) {
     if (!doc || !doc->view_tree || !doc->view_tree->root) return false;
-    return find_text_position_recursive((View*)doc->view_tree->root, target_text, 0, 0, out_x, out_y);
+    return find_text_position_recursive(static_cast<View*>(doc->view_tree->root), target_text, 0, 0, out_x, out_y);
 }
 
 // ============================================================================
@@ -255,10 +256,10 @@ static bool sim_traverse_views(View* view, SimViewVisitor visitor, void* udata) 
     }
     DomElement* elem = view->as_element();
     if (elem) {
-        View* child = (View*)elem->first_child;
+        View* child = static_cast<View*>(elem->first_child);
         while (child) {
             if (!sim_traverse_views(child, visitor, udata)) return false;
-            child = (View*)child->next_sibling;
+            child = static_cast<View*>(child->next_sibling);
         }
     }
     return true;
@@ -275,7 +276,7 @@ typedef struct {
 static bool sim_selector_visitor(View* view, void* udata) {
     SimSelectorCtx* ctx = (SimSelectorCtx*)udata;
     if (!view->is_element()) return true;
-    DomElement* dom_elem = (DomElement*)view;
+    DomElement* dom_elem = lam::dom_require_element(view);
     if (selector_matcher_matches(ctx->matcher, ctx->selector, dom_elem, NULL)) {
         if (ctx->current_match == ctx->target_index) {
             ctx->result = view;
@@ -318,7 +319,7 @@ static View* find_element_by_selector(DomDocument* doc, const char* selector_tex
     ctx.target_index = index;
     ctx.current_match = 0;
 
-    sim_traverse_views((View*)doc->view_tree->root, sim_selector_visitor, &ctx);
+    sim_traverse_views(static_cast<View*>(doc->view_tree->root), sim_selector_visitor, &ctx);
     return ctx.result;
 }
 
@@ -332,7 +333,7 @@ typedef struct {
 static bool sim_count_visitor(View* view, void* udata) {
     SimCountCtx* ctx = (SimCountCtx*)udata;
     if (!view->is_element()) return true;
-    DomElement* dom_elem = (DomElement*)view;
+    DomElement* dom_elem = lam::dom_require_element(view);
     if (selector_matcher_matches(ctx->matcher, ctx->selector, dom_elem, NULL)) {
         ctx->count++;
     }
@@ -362,7 +363,7 @@ static int count_elements_by_selector(DomDocument* doc, const char* selector_tex
     ctx.matcher = matcher;
     ctx.count = 0;
 
-    sim_traverse_views((View*)doc->view_tree->root, sim_count_visitor, &ctx);
+    sim_traverse_views(static_cast<View*>(doc->view_tree->root), sim_count_visitor, &ctx);
     return ctx.count;
 }
 
@@ -374,7 +375,7 @@ static void get_element_center_abs(View* view, float* cx, float* cy) {
     while (current) {
         abs_x += current->x;
         abs_y += current->y;
-        current = (View*)current->parent;
+        current = static_cast<View*>(current->parent);
     }
     *cx = abs_x + view->width / 2;
     *cy = abs_y + view->height / 2;
@@ -388,7 +389,7 @@ static void get_element_rect_abs(View* view, float* out_x, float* out_y, float* 
     while (current) {
         abs_x += current->x;
         abs_y += current->y;
-        current = (View*)current->parent;
+        current = static_cast<View*>(current->parent);
     }
     *out_x = abs_x;
     *out_y = abs_y;
@@ -484,7 +485,7 @@ static bool get_computed_style(View* view, const char* property, StrBuf* buf) {
     }
     // color (text color)
     if (strcmp(property, "color") == 0) {
-        if (elem->in_line) {
+        if (elem->in_line && elem->in_line->has_color) {
             serialize_color(elem->in_line->color, buf);
         } else {
             strbuf_append_str(buf, "rgb(0, 0, 0)");
@@ -730,11 +731,11 @@ static View* find_element_at(View* root, float abs_x, float abs_y, float parent_
 
     // Search children in reverse order (last child is visually on top)
     if (root->is_element()) {
-        View* child = (View*)((DomElement*)root)->last_child;
+        View* child = static_cast<View*>(lam::dom_require_element(root)->last_child);
         while (child) {
             View* found = find_element_at(child, abs_x, abs_y, view_abs_x, view_abs_y);
             if (found && found->is_element()) return found;
-            child = (View*)child->prev_sibling;
+            child = static_cast<View*>(child->prev_sibling);
         }
     }
 
@@ -744,7 +745,7 @@ static View* find_element_at(View* root, float abs_x, float abs_y, float parent_
 // Check if an element is a checkbox/radio input
 static bool sim_is_checkbox_or_radio(View* view) {
     if (!view || !view->is_element()) return false;
-    ViewElement* elem = (ViewElement*)view;
+    ViewElement* elem = lam::view_require_element(view);
     if (elem->tag() != HTM_TAG_INPUT) return false;
     const char* type = elem->get_attribute("type");
     return type && (strcmp(type, "checkbox") == 0 || strcmp(type, "radio") == 0);
@@ -754,7 +755,7 @@ static bool sim_is_checkbox_or_radio(View* view) {
 // Used when event simulator clicks a selector-resolved form control.
 static void sim_toggle_checkbox_radio(View* input, DocState* state) {
     if (!input || !input->is_element()) return;
-    ViewElement* elem = (ViewElement*)input;
+    ViewElement* elem = lam::view_require_element(input);
     const char* type = elem->get_attribute("type");
     if (!type) return;
 
@@ -776,7 +777,7 @@ static void sim_toggle_checkbox_radio(View* input, DocState* state) {
                 View* search = root;
                 while (search) {
                     if (search != input && search->is_element()) {
-                        ViewElement* se = (ViewElement*)search;
+                        ViewElement* se = lam::view_require_element(search);
                         if (se->tag() == HTM_TAG_INPUT) {
                             const char* st = se->get_attribute("type");
                             const char* sn = se->get_attribute("name");
@@ -790,7 +791,7 @@ static void sim_toggle_checkbox_radio(View* input, DocState* state) {
                     // Depth-first traversal
                     if (search->is_element()) {
                         DomElement* de = search->as_element();
-                        if (de->first_child) { search = (View*)de->first_child; continue; }
+                        if (de->first_child) { search = static_cast<View*>(de->first_child); continue; }
                     }
                     if (search->next()) { search = search->next(); continue; }
                     search = search->parent;
@@ -817,7 +818,7 @@ static void sim_extract_text(View* view, StrBuf* buf) {
     if (elem) {
         DomNode* child = elem->first_child;
         while (child) {
-            sim_extract_text((View*)child, buf);
+            sim_extract_text(static_cast<View*>(child), buf);
             child = child->next_sibling;
         }
     }
@@ -2564,15 +2565,15 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             // Walk up to find the <select> element
             View* select_view = elem;
             while (select_view && select_view->is_element() &&
-                   ((ViewElement*)select_view)->tag() != HTM_TAG_SELECT) {
+                   (lam::view_require_element(select_view))->tag() != HTM_TAG_SELECT) {
                 select_view = select_view->parent;
             }
             if (!select_view || !select_view->is_element() ||
-                ((ViewElement*)select_view)->tag() != HTM_TAG_SELECT) {
+                (lam::view_require_element(select_view))->tag() != HTM_TAG_SELECT) {
                 log_error("event_sim: select_option - target is not a <select> element");
                 break;
             }
-            ViewBlock* select = (ViewBlock*)select_view;
+            ViewBlock* select = lam::view_require_block(select_view);
             if (!select->form) {
                 log_error("event_sim: select_option - select has no form control prop");
                 break;
@@ -2583,7 +2584,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             DomNode* child = select->first_child;
             while (child) {
                 if (child->is_element()) {
-                    DomElement* child_elem = (DomElement*)child;
+                    DomElement* child_elem = lam::dom_require_element(child);
                     if (child_elem->tag() == HTM_TAG_OPTION) {
                         if (ev->option_value) {
                             const char* val = dom_element_get_attribute(child_elem, "value");
@@ -2597,7 +2598,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                             DomNode* text_child = child_elem->first_child;
                             while (text_child) {
                                 if (text_child->is_text()) {
-                                    DomText* text = (DomText*)text_child;
+                                    DomText* text = lam::dom_require_text(text_child);
                                     if (text->text && strcmp(text->text, ev->option_label) == 0) {
                                         match_index = idx;
                                         break;
@@ -2613,7 +2614,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                         DomNode* opt_child = child_elem->first_child;
                         while (opt_child) {
                             if (opt_child->is_element()) {
-                                DomElement* opt_elem = (DomElement*)opt_child;
+                                DomElement* opt_elem = lam::dom_require_element(opt_child);
                                 if (opt_elem->tag() == HTM_TAG_OPTION) {
                                     if (ev->option_value) {
                                         const char* val = dom_element_get_attribute(opt_elem, "value");
@@ -2626,7 +2627,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                                         DomNode* text_child = opt_elem->first_child;
                                         while (text_child) {
                                             if (text_child->is_text()) {
-                                                DomText* text = (DomText*)text_child;
+                                                DomText* text = lam::dom_require_text(text_child);
                                                 if (text->text && strcmp(text->text, ev->option_label) == 0) {
                                                     match_index = idx;
                                                     break;
@@ -2653,11 +2654,11 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 break;
             }
             DocState* state = (DocState*)doc->state;
-            form_control_set_selected_index(state, (View*)select, match_index);
+            form_control_set_selected_index(state, static_cast<View*>(select), match_index);
             if (state) {
                 // Close dropdown if open
                 if (state->open_dropdown == select_view) {
-                    doc_state_close_dropdown(state, (View*)select);
+                    doc_state_close_dropdown(state, static_cast<View*>(select));
                 }
                 doc_state_request_repaint(state);
             }
@@ -2760,7 +2761,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 ctx->fail_count++;
                 break;
             }
-            DomElement* elem = (DomElement*)focused;
+            DomElement* elem = lam::dom_require_element(focused);
             if (!tc_is_text_control(elem)) {
                 log_error("event_sim: ime_compose - focused is not a text control");
                 ctx->fail_count++;
@@ -2811,7 +2812,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 ctx->fail_count++;
                 break;
             }
-            DomElement* dom_elem = (DomElement*)elem;
+            DomElement* dom_elem = lam::dom_require_element(elem);
             if (!tc_is_text_control(dom_elem)) {
                 log_error("event_sim: assert_preedit - target is not a text control");
                 ctx->fail_count++;
@@ -2908,7 +2909,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 ctx->fail_count++;
                 break;
             }
-            DomElement* dom_elem = (DomElement*)elem;
+            DomElement* dom_elem = lam::dom_require_element(elem);
             // Prefer live edit buffer (FormControlProp::current_value) when
             // present — the "value" attribute only carries the initial default
             // for HTML <input>/<textarea>. Falling back to the attribute keeps
@@ -3057,9 +3058,9 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             }
             // Read scroll position from root block's scroller (the actual scroll source)
             float actual_x = 0, actual_y = 0;
-            ViewBlock* root_block = (ViewBlock*)doc->view_tree->root;
+            ViewBlock* root_block = lam::view_require_block(doc->view_tree->root);
             if (root_block && root_block->scroller && root_block->scroller->pane) {
-                scroll_state_get_position_for_view((DocState*)doc->state, (View*)root_block,
+                scroll_state_get_position_for_view((DocState*)doc->state, static_cast<View*>(root_block),
                     root_block->scroller->pane, &actual_x, &actual_y, NULL, NULL);
             }
             float tol = ev->scroll_tolerance;
@@ -3279,7 +3280,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 ctx->fail_count++;
                 break;
             }
-            View* root = (View*)doc->view_tree->root;
+            View* root = static_cast<View*>(doc->view_tree->root);
             View* found = find_element_at(root, (float)ev->at_x, (float)ev->at_y, 0, 0);
             if (!found) {
                 log_error("event_sim: assert_element_at FAIL - no element found at (%d, %d)", ev->at_x, ev->at_y);
@@ -3550,7 +3551,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                     log_error("event_sim: assert_state_store FAIL - scroll target is not a block view");
                     passed = false;
                 } else {
-                    ViewBlock* block = (ViewBlock*)elem;
+                    ViewBlock* block = lam::view_require_block(elem);
                     float actual_x = 0.0f, actual_y = 0.0f;
                     void* pane = block->scroller ? (void*)block->scroller->pane : NULL;
                     scroll_state_get_position_for_view(state, elem, pane, &actual_x, &actual_y, NULL, NULL);
@@ -3635,13 +3636,13 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             }
             log_info("event_sim: scroll_to (%.1f, %.1f)", target_x, target_y);
             // Set scroll position through centralized API
-            ViewBlock* root_block = (ViewBlock*)doc->view_tree->root;
+            ViewBlock* root_block = lam::view_require_block(doc->view_tree->root);
             if (root_block && root_block->scroller && root_block->scroller->pane) {
                 ScrollPane* pane = root_block->scroller->pane;
                 DocState* state = (DocState*)doc->state;
-                scroll_state_set_position_for_view(state, (View*)root_block, pane,
+                scroll_state_set_position_for_view(state, static_cast<View*>(root_block), pane,
                                                    target_x, target_y, true);
-                scroll_state_get_position_for_view(state, (View*)root_block, pane,
+                scroll_state_get_position_for_view(state, static_cast<View*>(root_block), pane,
                                                    &target_x, &target_y, NULL, NULL);
                 doc_state_sync_viewport_scroll(state, doc, target_x, target_y);
             }
@@ -3755,7 +3756,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 ctx->fail_count++;
                 break;
             }
-            DomElement* iframe_elem = (DomElement*)iframe_view;
+            DomElement* iframe_elem = lam::dom_require_element(iframe_view);
             if (!iframe_elem->embed || !iframe_elem->embed->doc) {
                 log_error("event_sim: switch_frame - '%s' has no embedded document", ev->frame_selector);
                 ctx->fail_count++;
@@ -3820,7 +3821,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 log_warn("event_sim: webview_eval_js - element '%s' not found (skipped)", ev->target_selector);
                 break;
             }
-            ViewBlock* block = (ViewBlock*)view;
+            ViewBlock* block = lam::view_require_block(view);
             if (block->tag_id != HTM_TAG_WEBVIEW || !block->embed || !block->embed->webview || !block->embed->webview->handle) {
                 log_warn("event_sim: webview_eval_js - '%s' has no active webview handle (headless?), skipped", ev->target_selector);
                 break;
@@ -3839,7 +3840,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 log_warn("event_sim: webview_wait_load - element '%s' not found (skipped)", ev->target_selector);
                 break;
             }
-            ViewBlock* block = (ViewBlock*)view;
+            ViewBlock* block = lam::view_require_block(view);
             if (block->tag_id != HTM_TAG_WEBVIEW || !block->embed || !block->embed->webview) {
                 log_warn("event_sim: webview_wait_load - '%s' has no active webview (headless?), skipped", ev->target_selector);
                 break;
@@ -3939,7 +3940,7 @@ static void replay_check_final_state(EventSimContext* ctx, UiContext* uicon) {
     char expected[64];
     char actual[64];
     View* focus = focus_get(state);
-    int actual_focus_id = focus ? (int)((DomNode*)focus)->id : 0;
+    int actual_focus_id = focus ? (int)(static_cast<DomNode*>(focus))->id : 0;
     if (ctx->replay_expected_focus_id >= 0 && actual_focus_id != ctx->replay_expected_focus_id) {
         snprintf(expected, sizeof(expected), "%d", ctx->replay_expected_focus_id);
         snprintf(actual, sizeof(actual), "%d", actual_focus_id);
@@ -3947,7 +3948,7 @@ static void replay_check_final_state(EventSimContext* ctx, UiContext* uicon) {
     }
 
     View* caret = caret_get_view(state);
-    int actual_caret_id = caret ? (int)((DomNode*)caret)->id : 0;
+    int actual_caret_id = caret ? (int)(static_cast<DomNode*>(caret))->id : 0;
     if (ctx->replay_expected_caret_id >= 0 && actual_caret_id != ctx->replay_expected_caret_id) {
         snprintf(expected, sizeof(expected), "%d", ctx->replay_expected_caret_id);
         snprintf(actual, sizeof(actual), "%d", actual_caret_id);

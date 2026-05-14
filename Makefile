@@ -460,11 +460,11 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild \
-	    test test-all test-all-baseline test-lambda-baseline test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-extended test-input run help \
-	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint check check-raw-alloc check-state-store docs intellisense analyze-binary \
+	    test test-all test-all-baseline test-lambda-baseline test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-pdf-render test-extended test-input run help \
+	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint check check-raw-alloc check-state-store check-radiant-casts check-radiant-ownership docs intellisense analyze-binary \
 	    build-debug build-release clean-all distclean \
 	    tree-sitter-libs tree-sitter-core-libs \
-	    generate-premake clean-premake build-test build-test-linux build-jube-test test-jube run-radiant-baseline \
+	    generate-premake clean-premake build-test build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline \
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc tidy-printf benchmark bench-compile \
 	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick test-c2mir type-chart build-mir \
 	    test-ui-automation test-reactive-ui test-redex-baseline \
@@ -501,6 +501,7 @@ help:
 	@echo "  generate-premake - Generate premake5.lua from build_lambda_config.json"
 	@echo "  clean-premake - Clean Premake build artifacts and generated files"
 	@echo "  build-test    - Build all test executables using Premake"
+	@echo "  build-pdf-render-test - Build PDF render visual gtest executable using Premake"
 	@echo "  build-jube-test - Build lambda-jube and all test executables"
 	@echo ""
 	@echo "Grammar & Parser:"
@@ -519,6 +520,7 @@ help:
 	@echo "  test-radiant-baseline - Run RADIANT layout baseline (baseline, wpt-css-text, pretext, form, text_flow, wpt-css-multicol, puppertino) + render visual + other checks"
 	@echo "  test-reactive-ui     - Run Reactive UI event simulation tests (todo toggle/delete)"
 	@echo "  test-redex-baseline  - Run Redex formal semantics baseline verification"
+	@echo "  test-pdf-render - Run PDF render visual gtest suite"
 	@echo "  layout-snapshot       - Save page suite snapshot: make layout-snapshot suite=page"
 	@echo "  test-extended - Run EXTENDED test suites only (HTTP/HTTPS, ongoing features)"
 	@echo "  test-library  - Run library tests only"
@@ -1297,6 +1299,24 @@ test-page-load: build-test
 		exit 1; \
 	fi
 
+build-pdf-render-test: build-lambda-input
+	@echo "Building PDF render visual gtest executable using Premake5..."
+	@mkdir -p build/premake
+	$(MAKE) generate-premake
+	cd build/premake && PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=../../$(PREMAKE_FILE)
+	PATH="/clang64/bin:$$PATH" $(MAKE) -C build/premake config=debug_native -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)" \
+		test_pdf_render_visual_gtest
+
+test-pdf-render: build-pdf-render-test
+	@echo "Running PDF render visual gtest suite..."
+	@echo "=============================================================="
+	@if [ -f "test/test_pdf_render_visual_gtest.exe" ]; then \
+		./test/test_pdf_render_visual_gtest.exe $(ARGS); \
+	else \
+		echo "Error: test/test_pdf_render_visual_gtest.exe not found - run 'make build-pdf-render-test' first"; \
+		exit 1; \
+	fi
+
 test-reactive-ui: build
 	@echo "Running Reactive UI test suite..."
 	@echo "=============================================================="
@@ -1960,6 +1980,92 @@ check-int-cast:
 		echo "✅ No unmarked (int) casts in Radiant layout files"; \
 	fi
 
+# Check for unsafe pointer casts in migrated Radiant files.
+# Downcasts should go through lib/tagged.hpp helpers such as lam::view_as_*(),
+# lam::view_require_*(), lam::dom_as<>(), or lam::dom_require<>().
+check-radiant-casts:
+	@echo "Checking migrated Radiant files for unsafe View*/Dom* casts..."
+	@VIOLATIONS=$$({ grep -En '\([[:space:]]*(View|Dom)[A-Za-z0-9_]*[[:space:]]*\*[[:space:]]*\)[[:space:]]*([A-Za-z_&*]|\()' \
+		radiant/layout_alignment.cpp radiant/layout_inline.cpp \
+		radiant/layout_grid.cpp radiant/layout_grid_multipass.cpp \
+		radiant/layout_list.cpp radiant/layout_positioned.cpp \
+		radiant/layout_text.cpp radiant/layout_multicol.cpp \
+		radiant/layout_flex_measurement.cpp radiant/layout_flex_multipass.cpp \
+		radiant/layout_flex.cpp radiant/layout_block.cpp \
+		radiant/layout_table.cpp radiant/grid_baseline.hpp \
+		radiant/resolve_css_style.cpp; \
+		grep -En 'static_cast<[[:space:]]*View(Block|Text|Span|Element|Table|TableRow|TableCell|TableRowGroup|Marker)[[:space:]]*\*[[:space:]]*>' \
+		radiant/layout_alignment.cpp radiant/layout_inline.cpp \
+		radiant/layout_grid.cpp radiant/layout_grid_multipass.cpp \
+		radiant/layout_list.cpp radiant/layout_positioned.cpp \
+		radiant/layout_text.cpp radiant/layout_multicol.cpp \
+		radiant/layout_flex_measurement.cpp radiant/layout_flex_multipass.cpp \
+		radiant/layout_flex.cpp radiant/layout_block.cpp \
+		radiant/layout_table.cpp radiant/grid_baseline.hpp \
+		radiant/resolve_css_style.cpp; \
+		grep -En '\([[:space:]]*(View(Block|Text|Span|Element|Table|TableRow|TableCell|TableRowGroup|Marker)|Dom(Node|Element|Text|Comment))[[:space:]]*\*[[:space:]]*\)[[:space:]]*([A-Za-z_&*]|\()' \
+		radiant/render.cpp radiant/render_form.cpp radiant/render_img.cpp \
+		radiant/render_pdf.cpp radiant/render_svg.cpp radiant/render_svg_inline.cpp \
+		radiant/render_walk.cpp radiant/event.cpp radiant/event_sim.cpp \
+		radiant/view_pool.cpp radiant/state_store.cpp radiant/dom_range_resolver.cpp \
+		radiant/source_pos_bridge.cpp \
+		radiant/state_machine.cpp radiant/dom_range.cpp radiant/context_menu.cpp \
+		radiant/css_animation.cpp radiant/ui_context.cpp radiant/script_runner.cpp \
+		radiant/block_context.cpp radiant/resolve_htm_style.cpp radiant/grid_positioning.cpp \
+		radiant/intrinsic_sizing.cpp radiant/cmd_layout.cpp \
+		radiant/window.cpp radiant/webview_manager.cpp radiant/ime_mac.mm radiant/ime_win.cpp \
+		radiant/webdriver/webdriver_actions.cpp radiant/webdriver/webdriver_locator.cpp \
+		radiant/webdriver/webdriver_server.cpp; \
+		grep -En 'static_cast<[[:space:]]*(View(Block|Text|Span|Element|Table|TableRow|TableCell|TableRowGroup|Marker)|Dom(Element|Text|Comment))[[:space:]]*\*[[:space:]]*>' \
+		radiant/render.cpp radiant/render_form.cpp radiant/render_img.cpp \
+		radiant/render_pdf.cpp radiant/render_svg.cpp radiant/render_svg_inline.cpp \
+		radiant/render_walk.cpp radiant/event.cpp radiant/event_sim.cpp \
+		radiant/view_pool.cpp radiant/state_store.cpp radiant/dom_range_resolver.cpp \
+		radiant/source_pos_bridge.cpp \
+		radiant/state_machine.cpp radiant/dom_range.cpp radiant/context_menu.cpp \
+		radiant/css_animation.cpp radiant/ui_context.cpp radiant/script_runner.cpp \
+		radiant/block_context.cpp radiant/resolve_htm_style.cpp radiant/grid_positioning.cpp \
+		radiant/intrinsic_sizing.cpp radiant/cmd_layout.cpp \
+		radiant/window.cpp radiant/webview_manager.cpp radiant/ime_mac.mm radiant/ime_win.cpp \
+		radiant/webdriver/webdriver_actions.cpp radiant/webdriver/webdriver_locator.cpp \
+		radiant/webdriver/webdriver_server.cpp; } \
+		| grep -v 'RADIANT_CAST_OK' \
+		|| true); \
+	if [ -n "$$VIOLATIONS" ]; then \
+		echo ""; \
+		echo "❌ Found unsafe View*/Dom* casts in migrated Radiant files:"; \
+		echo "$$VIOLATIONS"; \
+		echo ""; \
+		VCOUNT=$$(echo "$$VIOLATIONS" | wc -l | tr -d ' '); \
+		echo "Total: $$VCOUNT cast(s)"; \
+		exit 1; \
+	else \
+		echo "✅ No unsafe View*/Dom* casts in migrated Radiant files"; \
+	fi
+
+# Check retained Radiant fields are written through ownership helpers.
+# This keeps lifetime-sensitive pointers grepable and blocks accidental
+# pool/arena/long-lived fields from retaining layout-session allocations.
+check-radiant-ownership:
+	@echo "Checking retained Radiant field assignments..."
+	@VIOLATIONS=$$(grep -REn -- '->(tag_name|class_names|family|image|text_content|source_path|source_data)[[:space:]]*=' \
+		radiant/*.cpp radiant/*.hpp lambda/input/css/dom_element.cpp lambda/input/css/dom_element.hpp \
+		| grep -v 'radiant/retained_fields.hpp' \
+		| grep -v 'lambda/input/css/dom_element.hpp:.*PersistentFieldRef' \
+		| grep -v 'lambda/input/css/dom_element.cpp:.*comment_node->tag_name' \
+		| grep -v 'radiant/render_svg_inline.cpp:.*source_path' \
+		| grep -v 'radiant/rdt_vector_tvg.cpp:.*source_path' \
+		|| true); \
+	if [ -n "$$VIOLATIONS" ]; then \
+		echo ""; \
+		echo "❌ Found direct writes to retained Radiant fields:"; \
+		echo "$$VIOLATIONS"; \
+		echo ""; \
+		exit 1; \
+	else \
+		echo "✅ Retained Radiant fields use ownership helpers"; \
+	fi
+
 # Clang-tidy static analysis
 tidy:
 	@echo "Running clang-tidy analysis..."
@@ -2315,6 +2421,17 @@ capture-layout:
 test-layout:
 	@echo "🎨 Running Lambda CSS Layout Engine Tests"
 	@echo "=========================================="
+	@STALE_FILE=""; \
+	if [ ! -x "$(LAMBDA_EXE)" ]; then \
+		echo "🔧 $(LAMBDA_EXE) missing; building before layout tests"; \
+		$(MAKE) build; \
+	else \
+		STALE_FILE=$$(find radiant lambda lib -type f \( -name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.cxx' -o -name '*.h' -o -name '*.hpp' -o -name '*.m' -o -name '*.mm' \) -newer "$(LAMBDA_EXE)" -print -quit 2>/dev/null); \
+		if [ -n "$$STALE_FILE" ]; then \
+			echo "🔧 $(LAMBDA_EXE) is older than $$STALE_FILE; rebuilding before layout tests"; \
+			$(MAKE) build; \
+		fi; \
+	fi
 	@if [ -f "test/layout/test_radiant_layout.js" ]; then \
 		TEST_VAR="$(or $(test),$(TEST))"; \
 		PATTERN_VAR="$(or $(pattern),$(PATTERN))"; \

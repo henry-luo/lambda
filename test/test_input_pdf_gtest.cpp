@@ -54,6 +54,7 @@ static void ensure_temp_dir(void) {
 // Static fixture paths (PDFs that already contain indirect objects).
 static const char* PDF_FIXTURE_SIMPLE   = "test/input/test.pdf";
 static const char* PDF_FIXTURE_ADVANCED = "test/input/advanced_test.pdf";
+static const char* PDF_FIXTURE_SMALLPDF = "test/pdf/Get_Started_With_Smallpdf.pdf";
 
 // Generated fixture path (3-page PDF written in SetUp).
 static const char* PDF_GEN_3PAGE        = "temp/test_input_pdf_3page.pdf";
@@ -96,6 +97,24 @@ static Input* parse_pdf_file(const char* path) {
     parse_pdf(input, src, len);
     free(src);
     return input;
+}
+
+static MapReader find_indirect_object(ArrayReader objs, int64_t object_num) {
+    for (int64_t i = 0; i < objs.length(); i++) {
+        ItemReader entry = objs.get(i);
+        if (!entry.isMap()) continue;
+        MapReader em = entry.asMap();
+        if (!em.has("object_num") || !em.has("content")) continue;
+        ItemReader num = em.get("object_num");
+        int64_t num_value = -1;
+        if (num.isInt()) num_value = num.asInt();
+        else if (num.isFloat()) num_value = (int64_t)num.asFloat();
+        if (num_value != object_num) continue;
+        ItemReader content = em.get("content");
+        if (!content.isMap()) return MapReader();
+        return content.asMap();
+    }
+    return MapReader();
 }
 
 /** Build a 3-page PDF with text on each page using libharu. The text
@@ -234,6 +253,41 @@ TEST_F(InputPdfTest, AdvancedFixtureHasManyIndirectObjects) {
     // advanced_test.pdf has Catalog + Pages + 2× Page + fonts + content
     // streams = 18 indirect objects in the captured trace.
     EXPECT_GE(objs.length(), 10);
+}
+
+TEST_F(InputPdfTest, ObjectStreamsExpandFontDictionaries) {
+    Input* input = parse_pdf_file(PDF_FIXTURE_SMALLPDF);
+    ASSERT_NE(input, nullptr);
+    MapReader root = MapReader::fromItem(input->root);
+    ASSERT_TRUE(root.has("objects"));
+    ArrayReader objs = root.get("objects").asArray();
+
+    MapReader type0_font = find_indirect_object(objs, 17);
+    ASSERT_TRUE(type0_font.isValid()) << "object stream font 17 must be materialized";
+    ASSERT_TRUE(type0_font.has("Type"));
+    EXPECT_STREQ(type0_font.get("Type").cstring(), "Font");
+    ASSERT_TRUE(type0_font.has("BaseFont"));
+    EXPECT_STREQ(type0_font.get("BaseFont").cstring(), "JFGNNE+SourceSansPro-Regular");
+    EXPECT_TRUE(type0_font.has("ToUnicode"));
+    EXPECT_TRUE(type0_font.has("to_unicode"));
+
+    MapReader bold_font = find_indirect_object(objs, 18);
+    ASSERT_TRUE(bold_font.isValid()) << "object stream font 18 must be materialized";
+    ASSERT_TRUE(bold_font.has("Type"));
+    EXPECT_STREQ(bold_font.get("Type").cstring(), "Font");
+    ASSERT_TRUE(bold_font.has("BaseFont"));
+    EXPECT_STREQ(bold_font.get("BaseFont").cstring(), "JFGNNE+SourceSansPro-Bold");
+    EXPECT_TRUE(bold_font.has("ToUnicode"));
+    EXPECT_TRUE(bold_font.has("to_unicode"));
+
+    MapReader regular_font = find_indirect_object(objs, 19);
+    ASSERT_TRUE(regular_font.isValid()) << "object stream font 19 must be materialized";
+    ASSERT_TRUE(regular_font.has("Type"));
+    EXPECT_STREQ(regular_font.get("Type").cstring(), "Font");
+    ASSERT_TRUE(regular_font.has("BaseFont"));
+    EXPECT_STREQ(regular_font.get("BaseFont").cstring(), "JFGNNE+SourceSansPro-Regular");
+    EXPECT_TRUE(regular_font.has("ToUnicode"));
+    EXPECT_TRUE(regular_font.has("to_unicode"));
 }
 
 /* ══════════════════════════════════════════════════════════════════════

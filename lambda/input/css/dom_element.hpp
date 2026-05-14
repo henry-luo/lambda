@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include "../../../lib/avl_tree.h"
 #include "../../../lib/arena.h"
+#include "../../../lib/ownership.hpp"
 #include "../../../lib/strbuf.h"
 #include "css_style.hpp"
 #include "css_style_node.hpp"
@@ -39,9 +40,6 @@ typedef struct Url Url;  // From lib/url.h
 typedef struct VectorPathProp VectorPathProp;  // From radiant/view.hpp
 typedef struct MultiColumnProp MultiColumnProp;  // From radiant/view.hpp
 typedef struct Runtime Runtime;  // From lambda/lambda.h
-
-// Forward declaration for TexNode (unified TeX pipeline)
-namespace tex { struct TexNode; }
 
 // ============================================================================
 // DOM Document
@@ -312,11 +310,6 @@ struct DomElement : DomNode {
     // Stores up to 9 measurement results + 1 final layout result
     radiant::LayoutCache* layout_cache;
 
-    // TexNode tree for RDT_VIEW_TEXNODE rendering (unified TeX pipeline)
-    // When view_type == RDT_VIEW_TEXNODE, this points to the root of the TexNode tree
-    // The TexNode tree IS the view tree - no conversion needed
-    tex::TexNode* tex_root;
-
     // Intrinsic sizing cache for avoiding redundant measurement during layout
     float cached_min_content_width;
     float cached_max_content_width;
@@ -336,7 +329,7 @@ struct DomElement : DomNode {
         blk(nullptr), scroller(nullptr), embed(nullptr), position(nullptr),
         transform(nullptr), filter(nullptr), multicol(nullptr),
         layout_fragments(nullptr), layout_fragment_count(0), pseudo(nullptr),
-        vpath(nullptr), layout_cache(nullptr), tex_root(nullptr),
+        vpath(nullptr), layout_cache(nullptr),
         cached_min_content_width(0), cached_max_content_width(0),
         has_cached_intrinsic_widths(false), measuring_intrinsic_width(false) {}
 };
@@ -365,6 +358,39 @@ inline const DomElement* element_to_dom_element(const Element* e) {
 // DomElement* ↔ DomNode*: same address (DomNode is at offset 0 via inheritance)
 inline DomNode* dom_element_to_node(DomElement* de) { return static_cast<DomNode*>(de); }
 inline DomElement* node_to_dom_element(DomNode* dn) { return static_cast<DomElement*>(dn); }
+
+inline void dom_element_retain_tag_name(DomElement* element, lam::PoolPtr<const char> tag_name) {
+    lam::PersistentFieldRef<const char, lam::PoolDomain> field(element->tag_name);
+    field.set(tag_name);
+}
+
+inline void dom_element_retain_tag_name(DomElement* element, lam::PoolPtr<char> tag_name) {
+    dom_element_retain_tag_name(element, lam::borrow_const(tag_name));
+}
+
+inline void dom_element_retain_id(DomElement* element, lam::PoolPtr<const char> id) {
+    lam::PersistentFieldRef<const char, lam::PoolDomain> field(element->id);
+    field.set(id);
+}
+
+inline void dom_element_retain_id(DomElement* element, lam::PoolPtr<char> id) {
+    dom_element_retain_id(element, lam::borrow_const(id));
+}
+
+inline void dom_element_clear_id(DomElement* element) {
+    lam::PersistentFieldRef<const char, lam::PoolDomain> field(element->id);
+    field.clear();
+}
+
+inline void dom_element_retain_class_names(DomElement* element, lam::PoolPtr<const char*> class_names) {
+    lam::PersistentFieldRef<const char*, lam::PoolDomain> field(element->class_names);
+    field.set(class_names);
+}
+
+inline void dom_element_clear_class_names(DomElement* element) {
+    lam::PersistentFieldRef<const char*, lam::PoolDomain> field(element->class_names);
+    field.clear();
+}
 
 // Ensure embedded Element is 8-byte aligned (required for pointer fields in Element)
 static_assert(offsetof(DomElement, elmt) % 8 == 0,

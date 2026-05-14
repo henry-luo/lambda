@@ -360,6 +360,45 @@ JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node) {
     return (JsAstNode*)literal;
 }
 
+static String* js_decode_identifier_name(JsTranspiler* tp, const char* source, int source_len) {
+    if (!source || source_len <= 0) return NULL;
+    if (memchr(source, '\\', source_len) == NULL) {
+        return name_pool_create_len(tp->name_pool, source, source_len);
+    }
+
+    char decoded_buf[512];
+    int oi = 0;
+    for (int i = 0; i < source_len && oi < (int)sizeof(decoded_buf) - 4; ) {
+        if (source[i] == '\\' && i + 1 < source_len && source[i + 1] == 'u') {
+            i += 2;
+            unsigned int cp = 0;
+            if (i < source_len && source[i] == '{') {
+                i++;
+                while (i < source_len && source[i] != '}') {
+                    char c = source[i++];
+                    cp <<= 4;
+                    if (c >= '0' && c <= '9') cp |= (c - '0');
+                    else if (c >= 'a' && c <= 'f') cp |= (c - 'a' + 10);
+                    else if (c >= 'A' && c <= 'F') cp |= (c - 'A' + 10);
+                }
+                if (i < source_len && source[i] == '}') i++;
+            } else {
+                for (int j = 0; j < 4 && i < source_len; j++, i++) {
+                    char c = source[i];
+                    cp <<= 4;
+                    if (c >= '0' && c <= '9') cp |= (c - '0');
+                    else if (c >= 'a' && c <= 'f') cp |= (c - 'a' + 10);
+                    else if (c >= 'A' && c <= 'F') cp |= (c - 'A' + 10);
+                }
+            }
+            oi += utf8_encode(cp, decoded_buf + oi);
+        } else {
+            decoded_buf[oi++] = source[i++];
+        }
+    }
+    return name_pool_create_len(tp->name_pool, decoded_buf, oi);
+}
+
 // Build JavaScript identifier node
 JsAstNode* build_js_identifier(JsTranspiler* tp, TSNode id_node) {
     if (ts_node_is_null(id_node)) {
@@ -378,58 +417,7 @@ JsAstNode* build_js_identifier(JsTranspiler* tp, TSNode id_node) {
         return NULL;
     }
 
-    // Create a null-terminated string for the identifier
-    char* temp_str = (char*)mem_alloc(source.length + 1, MEM_CAT_JS_RUNTIME);
-    if (!temp_str) {
-        log_error("Failed to allocate memory for identifier");
-        return NULL;
-    }
-    memcpy(temp_str, source.str, source.length);
-    temp_str[source.length] = '\0';
-
-    // Decode Unicode escapes (\uXXXX and \u{XXXX}) in identifier names
-    // Per ES spec, IdentifierName can contain UnicodeEscapeSequence
-    char* name_str = temp_str;
-    int name_len = (int)source.length;
-    char decoded_buf[512];
-    if (memchr(temp_str, '\\', source.length) != NULL) {
-        int oi = 0;
-        for (int i = 0; i < (int)source.length && oi < (int)sizeof(decoded_buf) - 4; ) {
-            if (temp_str[i] == '\\' && i + 1 < (int)source.length && temp_str[i+1] == 'u') {
-                i += 2; // skip \u
-                unsigned int cp = 0;
-                if (i < (int)source.length && temp_str[i] == '{') {
-                    i++; // skip {
-                    while (i < (int)source.length && temp_str[i] != '}') {
-                        char c = temp_str[i++];
-                        cp <<= 4;
-                        if (c >= '0' && c <= '9') cp |= (c - '0');
-                        else if (c >= 'a' && c <= 'f') cp |= (c - 'a' + 10);
-                        else if (c >= 'A' && c <= 'F') cp |= (c - 'A' + 10);
-                    }
-                    if (i < (int)source.length && temp_str[i] == '}') i++;
-                } else {
-                    for (int j = 0; j < 4 && i < (int)source.length; j++, i++) {
-                        char c = temp_str[i];
-                        cp <<= 4;
-                        if (c >= '0' && c <= '9') cp |= (c - '0');
-                        else if (c >= 'a' && c <= 'f') cp |= (c - 'a' + 10);
-                        else if (c >= 'A' && c <= 'F') cp |= (c - 'A' + 10);
-                    }
-                }
-                // encode as UTF-8
-                oi += utf8_encode(cp, decoded_buf + oi);
-            } else {
-                decoded_buf[oi++] = temp_str[i++];
-            }
-        }
-        decoded_buf[oi] = '\0';
-        name_str = decoded_buf;
-        name_len = oi;
-    }
-
-    identifier->name = name_pool_create_len(tp->name_pool, name_str, name_len);
-    mem_free(temp_str);
+    identifier->name = js_decode_identifier_name(tp, source.str, (int)source.length);
 
     if (!identifier->name) {
         log_error("Failed to create identifier name");
@@ -451,6 +439,49 @@ JsAstNode* build_js_identifier(JsTranspiler* tp, TSNode id_node) {
     }
 
     return (JsAstNode*)identifier;
+}
+
+static JsAstNode* make_js_identifier_name(JsTranspiler* tp, TSNode node, const char* name, int len) {
+    JsIdentifierNode* identifier = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, node, sizeof(JsIdentifierNode));
+    identifier->name = name_pool_create_len(tp->name_pool, name, len);
+    identifier->entry = js_scope_lookup(tp, identifier->name);
+    identifier->base.type = identifier->entry ? identifier->entry->node->type : &TYPE_ANY;
+    return (JsAstNode*)identifier;
+}
+
+static bool js_await_expression_looks_like_call(JsTranspiler* tp, TSNode await_node) {
+    uint32_t start = ts_node_start_byte(await_node);
+    if (start + 5 > tp->source_length || memcmp(tp->source + start, "await", 5) != 0) return false;
+    uint32_t i = start + 5;
+    while (i < tp->source_length) {
+        char c = tp->source[i];
+        if (c != ' ' && c != '\t' && c != '\n' && c != '\r') break;
+        i++;
+    }
+    return i < tp->source_length && tp->source[i] == '(';
+}
+
+static JsAstNode* build_js_non_async_await_call(JsTranspiler* tp, TSNode await_node) {
+    JsCallNode* call = (JsCallNode*)alloc_js_ast_node(tp, JS_AST_NODE_CALL_EXPRESSION, await_node, sizeof(JsCallNode));
+    call->callee = make_js_identifier_name(tp, await_node, "await", 5);
+
+    TSNode args_node = ts_node_named_child(await_node, 0);
+    if (!ts_node_is_null(args_node)) {
+        uint32_t arg_count = ts_node_named_child_count(args_node);
+        JsAstNode* prev_arg = NULL;
+        for (uint32_t i = 0; i < arg_count; i++) {
+            TSNode arg_node = ts_node_named_child(args_node, i);
+            JsAstNode* arg = build_js_expression(tp, arg_node);
+            if (!arg) continue;
+            if (!prev_arg) call->arguments = arg;
+            else prev_arg->next = arg;
+            prev_arg = arg;
+        }
+    }
+
+    call->optional = false;
+    call->base.type = &TYPE_ANY;
+    return (JsAstNode*)call;
 }
 
 // Build JavaScript binary expression node
@@ -797,15 +828,16 @@ JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node) {
                     else if (plen - i >= 4 && memcmp(pfx + i, "set", 3) == 0 && (pfx[i+3] == ' ' || pfx[i+3] == '\t' || pfx[i+3] == '\n')) is_setter = true;
                 }
             }
+            property->method = !is_getter && !is_setter;
             TSNode body_node = ts_node_child_by_field_name(property_node, "body", strlen("body"));
 
             if ((is_getter || is_setter) && !ts_node_is_null(name_node) && !ts_node_is_null(body_node)) {
+                property->is_getter = is_getter;
+                property->is_setter = is_setter;
                 const char* name_type = ts_node_type(name_node);
                 if (strcmp(name_type, "computed_property_name") == 0) {
                     // Computed getter/setter: { get [expr]() { }, set [expr](v) { } }
                     property->computed = true;
-                    property->is_getter = is_getter;
-                    property->is_setter = is_setter;
                     property->key = build_js_expression(tp, name_node);
                 } else {
                     // Static getter/setter: store as __get_<name> or __set_<name> key
@@ -1118,11 +1150,14 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
         }
     }
 
+    bool saved_in_async_function = tp->in_async_function;
+    tp->in_async_function = func->is_async;
+
     // Get function name (optional for expressions)
     TSNode name_node = ts_node_child_by_field_name(func_node, "name", strlen("name"));
     if (!ts_node_is_null(name_node)) {
         StrView name_source = js_node_source(tp, name_node);
-        func->name = name_pool_create_strview(tp->name_pool, name_source);
+        func->name = js_decode_identifier_name(tp, name_source.str, (int)name_source.length);
     }
 
     // Get parameters - arrow functions can have "parameter" (singular) for single-param without parens
@@ -1225,6 +1260,7 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
             uint32_t start = ts_node_start_byte(body_node);
             StrView body_src = js_node_source(tp, body_node);
             log_error("Failed to build function body (body_type=%s, start=%u, src=%.*s)", body_type, start, (int)(body_src.length > 60 ? 60 : body_src.length), body_src.str);
+            tp->in_async_function = saved_in_async_function;
             return NULL;
         }
     }
@@ -1237,6 +1273,8 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
     if (func->name && !is_method_def) {
         js_scope_define(tp, func->name, (JsAstNode*)func, JS_VAR_VAR);
     }
+
+    tp->in_async_function = saved_in_async_function;
 
     return (JsAstNode*)func;
 }
@@ -1493,8 +1531,11 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
         StrView source = js_node_source(tp, expr_node);
         // Skip the '#' prefix
         if (source.length > 1 && source.str[0] == '#') {
+            String* decoded = js_decode_identifier_name(tp, source.str + 1, (int)(source.length - 1));
             char buf[256];
-            int len = snprintf(buf, sizeof(buf), "__private_%.*s", (int)(source.length - 1), source.str + 1);
+            int len = snprintf(buf, sizeof(buf), "__private_%.*s",
+                decoded ? (int)decoded->len : 0,
+                decoded ? decoded->chars : "");
             JsIdentifierNode* identifier = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, expr_node, sizeof(JsIdentifierNode));
             identifier->name = name_pool_create_len(tp->name_pool, buf, len);
             identifier->entry = NULL;
@@ -1523,10 +1564,23 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
         return (JsAstNode*)import_node;
     } else if (strcmp(node_type, "meta_property") == 0) {
         // Handle new.target and import.meta
-        // Tree-sitter produces: meta_property -> "new" "." "target" or "import" "." "meta"
-        uint32_t text_len = ts_node_end_byte(expr_node) - ts_node_start_byte(expr_node);
-        const char* text = tp->source + ts_node_start_byte(expr_node);
-        if (text_len >= 10 && strncmp(text, "new.target", 10) == 0) {
+        bool is_new_target = false;
+        uint32_t child_count = ts_node_child_count(expr_node);
+        for (uint32_t i = 0; i < child_count; i++) {
+            TSNode child = ts_node_child(expr_node, i);
+            const char* child_type = ts_node_type(child);
+            if (strcmp(child_type, "new") == 0) {
+                for (uint32_t j = i + 1; j < child_count; j++) {
+                    TSNode next = ts_node_child(expr_node, j);
+                    if (strcmp(ts_node_type(next), "target") == 0) {
+                        is_new_target = true;
+                        break;
+                    }
+                }
+                break;
+            }
+        }
+        if (is_new_target) {
             JsIdentifierNode* nt_node = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, expr_node, sizeof(JsIdentifierNode));
             nt_node->name = name_pool_create_len(tp->name_pool, "new.target", 10);
             nt_node->base.type = &TYPE_ANY;
@@ -1605,6 +1659,9 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
         yield_node->base.type = &TYPE_ANY;
         return (JsAstNode*)yield_node;
     } else if (strcmp(node_type, "await_expression") == 0) {
+        if (!tp->in_async_function && js_await_expression_looks_like_call(tp, expr_node)) {
+            return build_js_non_async_await_call(tp, expr_node);
+        }
         JsAwaitNode* await_node = (JsAwaitNode*)alloc_js_ast_node(tp, JS_AST_NODE_AWAIT_EXPRESSION, expr_node, sizeof(JsAwaitNode));
         if (ts_node_named_child_count(expr_node) > 0) {
             TSNode arg = ts_node_named_child(expr_node, 0);
@@ -2363,6 +2420,48 @@ static char js_decode_escape_char(char c) {
     }
 }
 
+static bool js_template_hex_char(char c) {
+    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+}
+
+static bool js_template_invalid_escape_at(const char* source, size_t length, size_t pos) {
+    if (!source || pos + 1 >= length || source[pos] != '\\') return false;
+    char esc = source[pos + 1];
+    if (esc >= '1' && esc <= '9') return true;
+    if (esc == '0' && pos + 2 < length && source[pos + 2] >= '0' && source[pos + 2] <= '9') return true;
+    if (esc == 'x') {
+        return pos + 3 >= length || !js_template_hex_char(source[pos + 2]) || !js_template_hex_char(source[pos + 3]);
+    }
+    if (esc == 'u') {
+        if (pos + 2 < length && source[pos + 2] == '{') {
+            size_t hex_pos = pos + 3;
+            if (hex_pos >= length || !js_template_hex_char(source[hex_pos])) return true;
+            uint32_t codepoint = 0;
+            while (hex_pos < length && js_template_hex_char(source[hex_pos])) {
+                char hex = source[hex_pos];
+                uint32_t digit = (hex >= '0' && hex <= '9') ? (uint32_t)(hex - '0') :
+                    (hex >= 'a' && hex <= 'f') ? (uint32_t)(hex - 'a' + 10) : (uint32_t)(hex - 'A' + 10);
+                codepoint = (codepoint << 4) | digit;
+                hex_pos++;
+                if (codepoint > 0x10FFFF) return true;
+            }
+            return hex_pos >= length || source[hex_pos] != '}';
+        }
+        return pos + 5 >= length || !js_template_hex_char(source[pos + 2]) ||
+               !js_template_hex_char(source[pos + 3]) || !js_template_hex_char(source[pos + 4]) ||
+               !js_template_hex_char(source[pos + 5]);
+    }
+    return false;
+}
+
+static bool js_template_has_invalid_escape(const char* source, size_t length) {
+    if (!source) return false;
+    for (size_t pos = 0; pos < length; pos++) {
+        if (js_template_invalid_escape_at(source, length, pos)) return true;
+    }
+    return false;
+}
+
 // Build JavaScript template literal node
 // Handles interleaving of quasis (text parts) and expressions (substitutions).
 // Escape sequences (e.g., \t, \n) are merged into adjacent quasi text.
@@ -2380,12 +2479,13 @@ JsAstNode* build_js_template_literal(JsTranspiler* tp, TSNode template_node) {
     int quasi_len = 0;
     char raw_buf[4096];  // raw text (escape sequences unprocessed)
     int raw_len = 0;
+    bool quasi_invalid_escape = false;
 
     // Helper: flush accumulated quasi text into a quasi node
     #define FLUSH_QUASI() do { \
         JsTemplateElementNode* element = (JsTemplateElementNode*)alloc_js_ast_node( \
             tp, JS_AST_NODE_TEMPLATE_ELEMENT, template_node, sizeof(JsTemplateElementNode)); \
-        element->cooked = name_pool_create_len(tp->name_pool, quasi_buf, quasi_len); \
+        element->cooked = quasi_invalid_escape ? NULL : name_pool_create_len(tp->name_pool, quasi_buf, quasi_len); \
         element->raw = name_pool_create_len(tp->name_pool, raw_buf, raw_len); \
         element->tail = false; \
         element->base.type = &TYPE_STRING; \
@@ -2394,6 +2494,7 @@ JsAstNode* build_js_template_literal(JsTranspiler* tp, TSNode template_node) {
         prev_quasi = (JsAstNode*)element; \
         quasi_len = 0; \
         raw_len = 0; \
+        quasi_invalid_escape = false; \
     } while(0)
 
     for (uint32_t i = 0; i < child_count; i++) {
@@ -2411,6 +2512,9 @@ JsAstNode* build_js_template_literal(JsTranspiler* tp, TSNode template_node) {
                 memcpy(quasi_buf + quasi_len, source.str, copy_len);
                 quasi_len += copy_len;
             }
+            if (js_template_has_invalid_escape(source.str, source.length)) {
+                quasi_invalid_escape = true;
+            }
             // Also append to raw buffer (same content for plain text)
             int raw_copy = (int)source.length;
             if (raw_len + raw_copy > (int)sizeof(raw_buf) - 1)
@@ -2423,6 +2527,9 @@ JsAstNode* build_js_template_literal(JsTranspiler* tp, TSNode template_node) {
             // Decode escape sequence and append to current quasi buffer (cooked)
             // Append raw source text to raw buffer (unprocessed)
             StrView source = js_node_source(tp, child);
+            if (js_template_has_invalid_escape(source.str, source.length)) {
+                quasi_invalid_escape = true;
+            }
             // raw: append literal source
             int raw_copy = (int)source.length;
             if (raw_len + raw_copy > (int)sizeof(raw_buf) - 1)
@@ -2434,6 +2541,13 @@ JsAstNode* build_js_template_literal(JsTranspiler* tp, TSNode template_node) {
             // cooked: decode escape sequence
             if (source.length >= 2 && source.str[0] == '\\') {
                 char esc = source.str[1];
+                if (esc == '\n' || esc == '\r') {
+                    // line continuation has empty cooked value
+                } else if ((unsigned char)esc == 0xE2 && source.length >= 4 &&
+                           (unsigned char)source.str[2] == 0x80 &&
+                           ((unsigned char)source.str[3] == 0xA8 || (unsigned char)source.str[3] == 0xA9)) {
+                    // U+2028/U+2029 line continuation also has empty cooked value
+                } else
                 if (esc == 'u' && source.length >= 6 && source.str[2] != '{') {
                     // \uXXXX — 4-hex-digit Unicode escape, encode as WTF-8 (allows surrogates)
                     char hex[5] = {source.str[2], source.str[3], source.str[4], source.str[5], 0};
@@ -3675,6 +3789,9 @@ static JsAstNode* build_ts_function_u(JsTranspiler* tp, TSNode func_node) {
         }
     }
 
+    bool saved_in_async_function = tp->in_async_function;
+    tp->in_async_function = func->is_async;
+
     // function name
     TSNode name_node = ts_node_child_by_field_name(func_node, "name", 4);
     if (!ts_node_is_null(name_node)) {
@@ -3751,6 +3868,8 @@ static JsAstNode* build_ts_function_u(JsTranspiler* tp, TSNode func_node) {
     if (func->name && !is_method_def) {
         js_scope_define(tp, func->name, (JsAstNode*)func, JS_VAR_VAR);
     }
+
+    tp->in_async_function = saved_in_async_function;
 
     return (JsAstNode*)func;
 }

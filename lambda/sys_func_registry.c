@@ -39,13 +39,18 @@ extern Item fn_replace(Item str, Item old_str, Item new_str); // JIT name: fn_re
 extern Item js_super_property_get(Item receiver, Item key);
 extern Item js_super_instance_method_get(Item receiver, Item key);
 extern Item js_super_property_set(Item receiver, Item key, Item value);
+extern Item js_super_property_set_non_strict(Item receiver, Item key, Item value);
 extern Item js_create_data_property(Item obj, Item name, Item value);
 
 // super() for class-expression superclasses: handles FUNC and MAP (class object) callee
 extern Item js_super_call_class(Item callee, Item this_val, Item* args, int argc);
+extern void js_check_class_heritage_constructor(Item superclass);
 // super() for native parent constructors: merges returned object's own props onto `this`
 extern Item js_super_call_native(Item callee, Item this_val, Item* args, int argc);
 extern Item js_super_apply_native(Item callee, Item this_val, Item args_array);
+extern Item js_super_bind_this(Item this_val, Item construct_result);
+extern Item js_get_super_constructor_from_receiver(Item receiver, Item fallback_ctor);
+extern void js_mark_derived_constructor_func(Item fn_item);
 
 // Symbol key check for typed array P9 guard (js_runtime.cpp)
 extern int64_t js_key_is_symbol_c(Item key);
@@ -97,6 +102,9 @@ extern Item edit_array_set(Item array, int64_t index, Item value);
 extern Item edit_array_insert(Item array, int64_t index, Item value);
 extern Item edit_array_delete(Item array, int64_t index);
 extern Item edit_array_append(Item array, Item value);
+extern Item pdf_parse_content_stream(Item bytes);
+extern Item fn_pdf_parse_content_stream(Item bytes);
+extern Item fn_pdf_register_svg_image_resolver(Item svg_item, Item pdf_item);
 extern int edit_commit(const char* description);
 extern bool edit_undo(void);
 extern bool edit_redo(void);
@@ -166,6 +174,9 @@ extern bool target_equal(Target* a, Target* b);
 #include "js/js_event_loop.h"
 #include "js/js_xhr.h"
 extern Item js_buffer_construct(Item arg, Item encoding);
+extern Item js_array_indexOf_int(Item arr, int64_t search);
+extern Item js_string_concat(Item left, Item right);
+extern Item js_string_get_int(Item str_item, int64_t index);
 extern Item js_string_replace_nonws_global_fast(Item str, Item replacement);
 extern Item js_string_fromCharCode2(Item first_item, Item second_item);
 extern void js_validate_native_function_source(Item source_item);
@@ -762,6 +773,14 @@ SysFuncInfo sys_func_defs[] = {
     // editor: push SourceSelection back to live DomSelection (Phase R4 §7.4)
     {SYSPROC_SET_SELECTION, "set_selection", 1, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "pn_set_selection", FPTR(pn_set_selection), NULL, NULL, false, 0},
+
+    // PDF package: native content stream tokenizer for dense vector pages
+    {SYSFUNC_PDF_PARSE_CONTENT_STREAM, "pdf_parse_content_stream", 1, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_pdf_parse_content_stream", FPTR(fn_pdf_parse_content_stream), NULL, NULL, false, 0},
+
+    // PDF package: bind page SVG roots to their parsed PDF object tree for image handle resolution
+    {SYSFUNC_PDF_REGISTER_SVG_IMAGE_RESOLVER, "pdf_register_svg_image_resolver", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_pdf_register_svg_image_resolver", FPTR(fn_pdf_register_svg_image_resolver), NULL, NULL, false, 0},
 };
 
 // note: sizeof(sys_func_defs) may fail with incomplete type because the header
@@ -829,8 +848,18 @@ extern void js_with_push(Item obj);
 extern void js_with_pop(void);
 extern int js_with_save_depth(void);
 extern void js_with_restore_depth(int depth);
+extern int64_t js_with_depth_active(void);
+extern Item js_get_with_binding_or_fallback(Item key, Item fallback);
+extern int64_t js_capture_with_binding(Item key);
+extern int64_t js_set_last_with_binding_if_valid(Item key, Item value, int64_t strict);
+extern Item js_delete_identifier_with_binding(Item key, int64_t declared_binding);
 extern void js_set_global_property(Item key, Item value);
+extern void js_set_global_property_strict(Item key, Item value);
+extern void js_mark_private_method_non_writable(Item object, Item name);
+extern void js_set_method_home_from_target(Item target, Item fn_item);
+extern void js_init_class_instance_fields(Item callee, Item object);
 extern void js_define_global_var_property(Item key, Item value);
+extern void js_define_global_eval_var_property(Item key, Item value);
 extern void js_evalscript_check_global_var_decl(Item key);
 extern void js_evalscript_check_global_function_decl(Item key);
 extern void js_eval_env_push_frame(void);
@@ -839,6 +868,14 @@ extern int64_t js_eval_env_has_binding(Item key);
 extern int64_t js_eval_env_is_active(void);
 extern void js_eval_env_track_global_binding(Item key);
 extern void js_eval_env_pop_frame(void);
+extern void js_eval_local_push_frame(void);
+extern void js_eval_local_pop_frame(void);
+extern void js_eval_private_push_frame(void);
+extern void js_eval_private_pop_frame(void);
+extern void js_eval_private_bind(Item unscoped_key, Item scoped_key);
+extern Item js_eval_private_resolve(Item unscoped_key);
+extern Item js_eval_local_get_binding_or_fallback(Item key, Item fallback);
+extern void js_eval_local_export_var(Item key, Item value);
 extern void js_check_unresolved_capture(Item value, const char* name, int64_t len);
 extern Item js_resolve_unresolved_binding(Item value, const char* name, int64_t len, int64_t in_typeof);
 extern int64_t js_262_eval_script_is_active(void);
@@ -868,6 +905,7 @@ extern Item js_get_reflect_object_value();
 extern Item js_get_atomics_object_value();
 extern Item js_install_user_accessor(Item obj, Item name, Item fn, int is_setter);
 extern void js_set_function_name_if_anonymous(Item fn_item, Item name_item);
+extern void js_set_function_name_from_property_key_if_anonymous(Item fn_item, Item key_item, int64_t prefix_kind);
 extern void js_set_class_name(Item cls_item, Item name_item);
 extern void js_set_default_constructor_property(Item proto_item, Item cls_item);
 extern void js_prepare_class_prototype_property(Item cls_item);
@@ -948,6 +986,9 @@ JitImport jit_runtime_imports[] = {
     {"array_push_spread_all", FPTR(array_push_spread_all)},
     {"array_end", FPTR(array_end)},
     {"item_spread", FPTR(item_spread)},
+    {"pdf_parse_content_stream", FPTR(pdf_parse_content_stream)},
+    {"fn_pdf_parse_content_stream", FPTR(fn_pdf_parse_content_stream)},
+    {"fn_pdf_register_svg_image_resolver", FPTR(fn_pdf_register_svg_image_resolver)},
     // typed array constructors
     {"array_float_new", FPTR(array_float_new)},
     {"array_float_set", FPTR(array_float_set)},
@@ -1318,7 +1359,9 @@ JitImport jit_runtime_imports[] = {
     {"js_super_property_get", FPTR(js_super_property_get)},
     {"js_super_instance_method_get", FPTR(js_super_instance_method_get)},
     {"js_super_property_set", FPTR(js_super_property_set)},
+    {"js_super_property_set_non_strict", FPTR(js_super_property_set_non_strict)},
     {"js_super_call_class", FPTR(js_super_call_class)},
+    {"js_check_class_heritage_constructor", FPTR(js_check_class_heritage_constructor)},
     {"js_super_call_native", FPTR(js_super_call_native)},
     {"js_super_apply_native", FPTR(js_super_apply_native)},
     {"js_property_get_str", FPTR(js_property_get_str)},
@@ -1328,6 +1371,7 @@ JitImport jit_runtime_imports[] = {
     {"js_set_arguments_info", FPTR(js_set_arguments_info)},
     {"js_create_arguments", FPTR(js_create_arguments)},
     {"js_build_template_object", FPTR(js_build_template_object)},
+    {"js_build_template_object_cached", FPTR(js_build_template_object_cached)},
     {"js_new_check_constructor_return", FPTR(js_new_check_constructor_return)},
     {"js_check_tdz", FPTR(js_check_tdz)},
     {"js_throw_const_assign", FPTR(js_throw_const_assign)},
@@ -1352,11 +1396,13 @@ JitImport jit_runtime_imports[] = {
     {"js_array_length", FPTR(js_array_length)},
     {"js_array_push", FPTR(js_array_push)},
     {"js_new_function", FPTR(js_new_function)},
+    {"js_new_method_function", FPTR(js_new_method_function)},
     {"js_new_closure", FPTR(js_new_closure)},
     {"js_alloc_env", FPTR(js_alloc_env)},
     {"js_call_function", FPTR(js_call_function)},
     {"js_function_get_ptr", FPTR(js_function_get_ptr)},
     {"js_apply_function", FPTR(js_apply_function)},
+    {"js_apply_constructor", FPTR(js_apply_constructor)},
     {"js_bind_function", FPTR(js_bind_function)},
     {"js_func_bind", FPTR(js_func_bind)},
     {"js_new_function_from_string", FPTR(js_new_function_from_string)},
@@ -1382,6 +1428,9 @@ JitImport jit_runtime_imports[] = {
     {"js_get_slot_i", FPTR(js_get_slot_i)},
     {"js_set_slot_f", FPTR(js_set_slot_f)},
     {"js_set_slot_i", FPTR(js_set_slot_i)},
+    {"js_array_indexOf_int", FPTR(js_array_indexOf_int)},
+    {"js_string_concat", FPTR(js_string_concat)},
+    {"js_string_get_int", FPTR(js_string_get_int)},
     {"js_array_get_int", FPTR(js_array_get_int)},
     {"js_array_set_int", FPTR(js_array_set_int)},
     {"js_debug_check_callee", FPTR(js_debug_check_callee)},
@@ -1390,6 +1439,8 @@ JitImport jit_runtime_imports[] = {
     {"js_get_new_target", FPTR(js_get_new_target)},
     {"js_set_new_target", FPTR(js_set_new_target)},
     {"js_set_direct_new_target", FPTR(js_set_direct_new_target)},
+    {"js_super_bind_this", FPTR(js_super_bind_this)},
+    {"js_get_super_constructor_from_receiver", FPTR(js_get_super_constructor_from_receiver)},
     {"js_set_strict_mode", FPTR(js_set_strict_mode)},
     {"js_console_log", FPTR(js_console_log)},
     // exception handling
@@ -1484,6 +1535,7 @@ JitImport jit_runtime_imports[] = {
     {"js_object_get_own_property_descriptors", FPTR(js_object_get_own_property_descriptors)},
     {"js_set_function_name", FPTR(js_set_function_name)},
     {"js_set_function_name_if_anonymous", FPTR(js_set_function_name_if_anonymous)},
+    {"js_set_function_name_from_property_key_if_anonymous", FPTR(js_set_function_name_from_property_key_if_anonymous)},
     {"js_set_class_name", FPTR(js_set_class_name)},
     {"js_set_default_constructor_property", FPTR(js_set_default_constructor_property)},
     {"js_prepare_class_prototype_property", FPTR(js_prepare_class_prototype_property)},
@@ -1494,9 +1546,12 @@ JitImport jit_runtime_imports[] = {
     {"js_mark_generator_func", FPTR(js_mark_generator_func)},
     {"js_mark_async_generator_func", FPTR(js_mark_async_generator_func)},
     {"js_mark_async_func", FPTR(js_mark_async_func)},
+    {"js_mark_eval_initializer_func_if_active", FPTR(js_mark_eval_initializer_func_if_active)},
     {"js_mark_arrow_func", FPTR(js_mark_arrow_func)},
     {"js_mark_method_func", FPTR(js_mark_method_func)},
+    {"js_set_method_home_from_target", FPTR(js_set_method_home_from_target)},
     {"js_mark_strict_func", FPTR(js_mark_strict_func)},
+    {"js_mark_derived_constructor_func", FPTR(js_mark_derived_constructor_func)},
     {"js_set_formal_length", FPTR(js_set_formal_length)},
     {"js_get_constructor", FPTR(js_get_constructor)},
     {"js_get_prototype_of", FPTR(js_get_prototype_of)},
@@ -1553,6 +1608,7 @@ JitImport jit_runtime_imports[] = {
     // timing
     {"js_performance_now", FPTR(js_performance_now)},
     {"js_date_now", FPTR(js_date_now)},
+    {"js_date_now_string", FPTR(js_date_now_string)},
     {"js_date_new", FPTR(js_date_new)},
     {"js_date_new_from", FPTR(js_date_new_from)},
     {"js_date_utc", FPTR(js_date_utc)},
@@ -1598,6 +1654,7 @@ JitImport jit_runtime_imports[] = {
     {"js_dataview_method", FPTR(js_dataview_method)},
     // SharedArrayBuffer
     {"js_sharedarraybuffer_construct", FPTR(js_sharedarraybuffer_construct)},
+    {"js_sharedarraybuffer_construct_with_options", FPTR(js_sharedarraybuffer_construct_with_options)},
     {"js_is_sharedarraybuffer", FPTR(js_is_sharedarraybuffer)},
     {"js_sharedarraybuffer_method", FPTR(js_sharedarraybuffer_method)},
     // module variable table
@@ -1625,8 +1682,17 @@ JitImport jit_runtime_imports[] = {
     {"js_with_pop", FPTR(js_with_pop)},
     {"js_with_save_depth", FPTR(js_with_save_depth)},
     {"js_with_restore_depth", FPTR(js_with_restore_depth)},
+    {"js_with_depth_active", FPTR(js_with_depth_active)},
+    {"js_get_with_binding_or_fallback", FPTR(js_get_with_binding_or_fallback)},
+    {"js_capture_with_binding", FPTR(js_capture_with_binding)},
+    {"js_set_last_with_binding_if_valid", FPTR(js_set_last_with_binding_if_valid)},
+    {"js_delete_identifier_with_binding", FPTR(js_delete_identifier_with_binding)},
     {"js_set_global_property", FPTR(js_set_global_property)},
+    {"js_set_global_property_strict", FPTR(js_set_global_property_strict)},
+    {"js_mark_private_method_non_writable", FPTR(js_mark_private_method_non_writable)},
+    {"js_init_class_instance_fields", FPTR(js_init_class_instance_fields)},
     {"js_define_global_var_property", FPTR(js_define_global_var_property)},
+    {"js_define_global_eval_var_property", FPTR(js_define_global_eval_var_property)},
     {"js_evalscript_check_global_var_decl", FPTR(js_evalscript_check_global_var_decl)},
     {"js_evalscript_check_global_function_decl", FPTR(js_evalscript_check_global_function_decl)},
     {"js_eval_env_push_frame", FPTR(js_eval_env_push_frame)},
@@ -1635,6 +1701,18 @@ JitImport jit_runtime_imports[] = {
     {"js_eval_env_is_active", FPTR(js_eval_env_is_active)},
     {"js_eval_env_track_global_binding", FPTR(js_eval_env_track_global_binding)},
     {"js_eval_env_pop_frame", FPTR(js_eval_env_pop_frame)},
+    {"js_eval_local_push_frame", FPTR(js_eval_local_push_frame)},
+    {"js_eval_local_pop_frame", FPTR(js_eval_local_pop_frame)},
+    {"js_eval_private_push_frame", FPTR(js_eval_private_push_frame)},
+    {"js_eval_private_pop_frame", FPTR(js_eval_private_pop_frame)},
+    {"js_eval_private_bind", FPTR(js_eval_private_bind)},
+    {"js_eval_private_resolve", FPTR(js_eval_private_resolve)},
+    {"js_eval_local_get_binding_or_fallback", FPTR(js_eval_local_get_binding_or_fallback)},
+    {"js_eval_local_export_var", FPTR(js_eval_local_export_var)},
+    {"js_eval_local_note_lexical_binding", FPTR(js_eval_local_note_lexical_binding)},
+    {"js_eval_local_has_lexical_binding", FPTR(js_eval_local_has_lexical_binding)},
+    {"js_eval_local_note_immutable_binding", FPTR(js_eval_local_note_immutable_binding)},
+    {"js_eval_local_has_immutable_binding", FPTR(js_eval_local_has_immutable_binding)},
     {"js_check_unresolved_capture", FPTR(js_check_unresolved_capture)},
     {"js_resolve_unresolved_binding", FPTR(js_resolve_unresolved_binding)},
     {"js_262_eval_script_is_active", FPTR(js_262_eval_script_is_active)},

@@ -584,7 +584,9 @@ void font_context_add_scan_directory(FontContext* ctx, const char* directory) {
         ctx->database->scan_directories = arraylist_new(0);
     }
     char* dir_copy = arena_strdup(ctx->arena, directory);
-    arraylist_append(ctx->database->scan_directories, dir_copy);
+    // explicit document/test font directories must be scanned before broad
+    // platform directories, otherwise the discovery cap can be reached first.
+    arraylist_prepend(ctx->database->scan_directories, dir_copy);
 }
 
 // ============================================================================

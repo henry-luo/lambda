@@ -258,7 +258,7 @@ extern "C" Item js_to_numeric(Item value) {
 // helper: apply ToNumeric only when operand is an object type
 static inline Item js_numeric_operand(Item val) {
     TypeId t = get_type_id(val);
-    if (t == LMD_TYPE_MAP || t == LMD_TYPE_ARRAY || t == LMD_TYPE_FUNC) return js_to_numeric(val);
+    if (t == LMD_TYPE_MAP || t == LMD_TYPE_ARRAY || t == LMD_TYPE_FUNC || t == LMD_TYPE_ELEMENT) return js_to_numeric(val);
     return val;
 }
 
@@ -268,6 +268,19 @@ static inline Item js_numeric_operand(Item val) {
 // - No scientific notation for exponents in [-6, 20]
 // - Scientific notation uses 'e+' or 'e-' (no leading zeros in exponent)
 void js_double_to_string(double d, char* out, int out_size) {
+    if (isnan(d)) {
+        snprintf(out, out_size, "NaN");
+        return;
+    }
+    if (isinf(d)) {
+        snprintf(out, out_size, "%sInfinity", d < 0 ? "-" : "");
+        return;
+    }
+    if (d == 0.0) {
+        snprintf(out, out_size, "0");
+        return;
+    }
+
     // Handle negative numbers
     int neg = 0;
     if (d < 0) { neg = 1; d = -d; }
@@ -487,12 +500,14 @@ extern "C" Item js_to_string(Item value) {
             // delegate to js_date_method(obj, 17=toString)
             return js_date_method(value, 17);
         }
+        bool bigint_wrapper = false;
         // Wrapper objects with __primitiveValue__ (e.g. new Number(42), new String("hi"))
         // Skip fast path if custom toString/valueOf/@@toPrimitive exists on the object
         {
             bool own_pv = false;
             Item pv = js_map_get_fast(value.map, "__primitiveValue__", 18, &own_pv);
-            if (own_pv) {
+            bigint_wrapper = own_pv && js_is_bigint(pv);
+            if (own_pv && !js_is_bigint(pv)) {
                 bool has_own_vo = false, has_own_ts = false, has_own_tp = false;
                 js_map_get_fast(value.map, "valueOf", 7, &has_own_vo);
                 js_map_get_fast(value.map, "toString", 8, &has_own_ts);
@@ -549,7 +564,7 @@ extern "C" Item js_to_string(Item value) {
             }
             // valueOf fallback — only when toString was found (own or prototype)
             // If toString wasn't found, prototype chain isn't set up — use default "[object Object]"
-            if (ts_found) {
+            if (ts_found || bigint_wrapper) {
                 bool vo_callable = false;
                 // v90: Use js_property_get for valueOf to handle getter-defined valueOf
                 // (e.g., {toString: null, get valueOf() { throw ... }})
@@ -605,26 +620,15 @@ extern "C" Item js_to_string(Item value) {
     }
 
     case LMD_TYPE_FUNC: {
-        // Access function name via layout-compatible struct (JsFunction defined later)
-        struct { TypeId type_id; void* func_ptr; int param_count; Item* env; int env_size;
-                 Item prototype; Item bound_this; Item* bound_args; int bound_argc; String* name; } *fn_layout;
-        fn_layout = decltype(fn_layout)(value.function);
-        if (fn_layout->name && fn_layout->name->len > 0) {
-            // NativeFunction syntax allows only a single IdentifierName (no spaces).
-            // Bound functions have names like "bound f" — use only "bound" part.
-            int name_len = fn_layout->name->len;
-            for (int i = 0; i < fn_layout->name->len; i++) {
-                if (fn_layout->name->chars[i] == ' ') { name_len = i; break; }
-            }
-            StrBuf* sb = strbuf_new();
-            strbuf_append_str_n(sb, "function ", 9);
-            strbuf_append_str_n(sb, fn_layout->name->chars, name_len);
-            strbuf_append_str_n(sb, "() { [native code] }", 20);
-            String* result = heap_create_name(sb->str, sb->length);
-            strbuf_free(sb);
-            return (Item){.item = s2it(result)};
+        Item prim = js_to_primitive(value, JS_HINT_STRING);
+        if (js_check_exception()) return ItemNull;
+        TypeId prim_type = get_type_id(prim);
+        if (prim_type == LMD_TYPE_FUNC || prim_type == LMD_TYPE_MAP ||
+            prim_type == LMD_TYPE_ARRAY || prim_type == LMD_TYPE_ELEMENT) {
+            js_throw_type_error("Cannot convert object to primitive value");
+            return ItemNull;
         }
-        return (Item){.item = s2it(heap_create_name("function () { [native code] }", 29))};
+        return js_to_string(prim);
     }
     default:
         return (Item){.item = s2it(heap_create_name("[object Object]"))};
@@ -826,6 +830,17 @@ extern "C" int64_t js_ge_raw(Item left, Item right) {
 }
 
 extern "C" int64_t js_eq_raw(Item left, Item right) {
+    if (left.item == right.item) {
+        TypeId type = get_type_id(left);
+        if (type == LMD_TYPE_FLOAT && isnan(it2d(left))) return 0;
+        return 1;
+    }
+    if (get_type_id(left) == LMD_TYPE_STRING && get_type_id(right) == LMD_TYPE_STRING) {
+        String* left_str = it2s(left);
+        String* right_str = it2s(right);
+        return left_str->len == right_str->len &&
+            memcmp(left_str->chars, right_str->chars, left_str->len) == 0;
+    }
     return (int64_t)it2b(js_strict_equal(left, right));
 }
 
@@ -1134,6 +1149,60 @@ static inline Item js_op_to_primitive(Item value, int hint) {
     return js_to_primitive(value, h);
 }
 
+static inline int js_upper_hex_digit_value(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+static inline Item js_try_concat_percent_hex(String* left, String* right) {
+    if (!left->is_ascii || !right->is_ascii || right->len != 1) return ItemNull;
+    char right_ch = right->chars[0];
+    int right_value = js_upper_hex_digit_value(right_ch);
+    if (right_value < 0) return ItemNull;
+    if (left->len == 1 && left->chars[0] == '%') {
+        static Item prefix_cache[16] = {0};
+        if (prefix_cache[right_value].item) return prefix_cache[right_value];
+        char buf[2];
+        buf[0] = '%';
+        buf[1] = right_ch;
+        prefix_cache[right_value] = (Item){.item = s2it(heap_create_name(buf, 2))};
+        return prefix_cache[right_value];
+    }
+    int left_value = left->len == 2 && left->chars[0] == '%' ? js_upper_hex_digit_value(left->chars[1]) : -1;
+    if (left_value >= 0) {
+        int byte_value = (left_value << 4) | right_value;
+        static Item byte_cache[256] = {0};
+        if (byte_cache[byte_value].item) return byte_cache[byte_value];
+        char buf[3];
+        buf[0] = '%';
+        buf[1] = left->chars[1];
+        buf[2] = right_ch;
+        byte_cache[byte_value] = (Item){.item = s2it(heap_create_name(buf, 3))};
+        return byte_cache[byte_value];
+    }
+    return ItemNull;
+}
+
+static inline Item js_concat_strings_fast(String* left, String* right) {
+    if (!left || !right) return ItemNull;
+    int64_t left_len = left->len;
+    int64_t right_len = right->len;
+    Item percent_hex = js_try_concat_percent_hex(left, right);
+    if (percent_hex.item != ItemNull.item) return percent_hex;
+    String* result = (String*)heap_alloc(sizeof(String) + left_len + right_len + 1, LMD_TYPE_STRING);
+    result->len = left_len + right_len;
+    result->is_ascii = left->is_ascii && right->is_ascii;
+    memcpy(result->chars, left->chars, left_len);
+    memcpy(result->chars + left_len, right->chars, right_len);
+    result->chars[result->len] = '\0';
+    return (Item){.item = s2it(result)};
+}
+
+extern "C" Item js_string_concat(Item left, Item right) {
+    return js_concat_strings_fast(it2s(left), it2s(right));
+}
+
 extern "C" Item js_add(Item left, Item right) {
     TypeId left_type = get_type_id(left);
     TypeId right_type = get_type_id(right);
@@ -1156,10 +1225,14 @@ extern "C" Item js_add(Item left, Item right) {
     }
 
     // String concatenation if either operand is a string
+    if (left_type == LMD_TYPE_STRING && right_type == LMD_TYPE_STRING) {
+        return js_concat_strings_fast(it2s(left), it2s(right));
+    }
     if (left_type == LMD_TYPE_STRING || right_type == LMD_TYPE_STRING) {
         Item left_str = js_to_string(left);
         Item right_str = js_to_string(right);
-        return fn_join(left_str, right_str);
+        if (js_exception_pending) return ItemNull;
+        return js_concat_strings_fast(it2s(left_str), it2s(right_str));
     }
 
     // Numeric addition — use double arithmetic for JS semantics
@@ -1176,7 +1249,7 @@ extern "C" Item js_add(Item left, Item right) {
 
 extern "C" Item js_subtract(Item left, Item right) {
     left = js_numeric_operand(left); if (js_exception_pending) return ItemNull;
-    right = js_numeric_operand(right);
+    right = js_numeric_operand(right); if (js_exception_pending) return ItemNull;
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
@@ -1189,7 +1262,7 @@ extern "C" Item js_subtract(Item left, Item right) {
 
 extern "C" Item js_multiply(Item left, Item right) {
     left = js_numeric_operand(left); if (js_exception_pending) return ItemNull;
-    right = js_numeric_operand(right);
+    right = js_numeric_operand(right); if (js_exception_pending) return ItemNull;
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
@@ -1202,7 +1275,7 @@ extern "C" Item js_multiply(Item left, Item right) {
 
 extern "C" Item js_divide(Item left, Item right) {
     left = js_numeric_operand(left); if (js_exception_pending) return ItemNull;
-    right = js_numeric_operand(right);
+    right = js_numeric_operand(right); if (js_exception_pending) return ItemNull;
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
@@ -1216,7 +1289,7 @@ extern "C" Item js_divide(Item left, Item right) {
 
 extern "C" Item js_modulo(Item left, Item right) {
     left = js_numeric_operand(left); if (js_exception_pending) return ItemNull;
-    right = js_numeric_operand(right);
+    right = js_numeric_operand(right); if (js_exception_pending) return ItemNull;
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
@@ -1230,7 +1303,7 @@ extern "C" Item js_modulo(Item left, Item right) {
 
 extern "C" Item js_power(Item left, Item right) {
     left = js_numeric_operand(left); if (js_exception_pending) return ItemNull;
-    right = js_numeric_operand(right);
+    right = js_numeric_operand(right); if (js_exception_pending) return ItemNull;
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
@@ -1428,6 +1501,73 @@ extern "C" Item js_strict_not_equal(Item left, Item right) {
 // Returns true, false, or undefined (for NaN)
 // leftFirst=true: left arg is the source-left operand (used for < and >=), check exception after it
 // leftFirst=false: args are swapped by caller (used for > and <=), no early check after left arg
+typedef struct JsUtf16Iter {
+    const unsigned char* data;
+    int64_t len;
+    int64_t pos;
+    int pending_low_surrogate;
+} JsUtf16Iter;
+
+static uint32_t js_next_utf8_codepoint(JsUtf16Iter* iter) {
+    if (iter->pos >= iter->len) return 0;
+    unsigned char lead = iter->data[iter->pos++];
+    if (lead < 0x80) return lead;
+    if ((lead & 0xE0) == 0xC0 && iter->pos < iter->len) {
+        unsigned char second = iter->data[iter->pos++];
+        return ((uint32_t)(lead & 0x1F) << 6) | (uint32_t)(second & 0x3F);
+    }
+    if ((lead & 0xF0) == 0xE0 && iter->pos + 1 < iter->len) {
+        unsigned char second = iter->data[iter->pos++];
+        unsigned char third = iter->data[iter->pos++];
+        return ((uint32_t)(lead & 0x0F) << 12) |
+               ((uint32_t)(second & 0x3F) << 6) |
+               (uint32_t)(third & 0x3F);
+    }
+    if ((lead & 0xF8) == 0xF0 && iter->pos + 2 < iter->len) {
+        unsigned char second = iter->data[iter->pos++];
+        unsigned char third = iter->data[iter->pos++];
+        unsigned char fourth = iter->data[iter->pos++];
+        return ((uint32_t)(lead & 0x07) << 18) |
+               ((uint32_t)(second & 0x3F) << 12) |
+               ((uint32_t)(third & 0x3F) << 6) |
+               (uint32_t)(fourth & 0x3F);
+    }
+    return lead;
+}
+
+static bool js_next_utf16_code_unit(JsUtf16Iter* iter, uint16_t* out_unit) {
+    if (iter->pending_low_surrogate >= 0) {
+        *out_unit = (uint16_t)iter->pending_low_surrogate;
+        iter->pending_low_surrogate = -1;
+        return true;
+    }
+    if (iter->pos >= iter->len) return false;
+    uint32_t codepoint = js_next_utf8_codepoint(iter);
+    if (codepoint > 0xFFFF) {
+        uint32_t pair_value = codepoint - 0x10000;
+        *out_unit = (uint16_t)(0xD800 + (pair_value >> 10));
+        iter->pending_low_surrogate = (int)(0xDC00 + (pair_value & 0x3FF));
+        return true;
+    }
+    *out_unit = (uint16_t)codepoint;
+    return true;
+}
+
+static int js_compare_strings_utf16(String* left, String* right) {
+    JsUtf16Iter left_iter = {(const unsigned char*)left->chars, left->len, 0, -1};
+    JsUtf16Iter right_iter = {(const unsigned char*)right->chars, right->len, 0, -1};
+    uint16_t left_unit = 0, right_unit = 0;
+    while (true) {
+        bool has_left = js_next_utf16_code_unit(&left_iter, &left_unit);
+        bool has_right = js_next_utf16_code_unit(&right_iter, &right_unit);
+        if (!has_left && !has_right) return 0;
+        if (!has_left) return -1;
+        if (!has_right) return 1;
+        if (left_unit < right_unit) return -1;
+        if (left_unit > right_unit) return 1;
+    }
+}
+
 static Item js_abstract_relational_lt(Item left, Item right, bool leftFirst) {
     TypeId left_type = get_type_id(left);
     TypeId right_type = get_type_id(right);
@@ -1472,11 +1612,7 @@ static Item js_abstract_relational_lt(Item left, Item right, bool leftFirst) {
     if (left_type == LMD_TYPE_STRING && right_type == LMD_TYPE_STRING) {
         String* l_str = it2s(left);
         String* r_str = it2s(right);
-        int cmp = memcmp(l_str->chars, r_str->chars,
-                        l_str->len < r_str->len ? l_str->len : r_str->len);
-        if (cmp == 0) {
-            return (Item){.item = b2it(l_str->len < r_str->len)};
-        }
+        int cmp = js_compare_strings_utf16(l_str, r_str);
         return (Item){.item = b2it(cmp < 0)};
     }
 
@@ -1604,8 +1740,8 @@ extern "C" int64_t js_double_to_int32(double d) {
 }
 
 extern "C" Item js_bitwise_and(Item left, Item right) {
-    left = js_numeric_operand(left); if (js_exception_pending) return ItemNull;
-    right = js_numeric_operand(right);
+    left = js_to_numeric(left); if (js_exception_pending) return ItemNull;
+    right = js_to_numeric(right); if (js_exception_pending) return ItemNull;
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
@@ -1617,8 +1753,8 @@ extern "C" Item js_bitwise_and(Item left, Item right) {
 }
 
 extern "C" Item js_bitwise_or(Item left, Item right) {
-    left = js_numeric_operand(left); if (js_exception_pending) return ItemNull;
-    right = js_numeric_operand(right);
+    left = js_to_numeric(left); if (js_exception_pending) return ItemNull;
+    right = js_to_numeric(right); if (js_exception_pending) return ItemNull;
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
@@ -1630,8 +1766,8 @@ extern "C" Item js_bitwise_or(Item left, Item right) {
 }
 
 extern "C" Item js_bitwise_xor(Item left, Item right) {
-    left = js_numeric_operand(left); if (js_exception_pending) return ItemNull;
-    right = js_numeric_operand(right);
+    left = js_to_numeric(left); if (js_exception_pending) return ItemNull;
+    right = js_to_numeric(right); if (js_exception_pending) return ItemNull;
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
@@ -1654,7 +1790,7 @@ extern "C" Item js_bitwise_not(Item operand) {
 
 extern "C" Item js_left_shift(Item left, Item right) {
     left = js_numeric_operand(left); if (js_exception_pending) return ItemNull;
-    right = js_numeric_operand(right);
+    right = js_numeric_operand(right); if (js_exception_pending) return ItemNull;
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
@@ -1667,7 +1803,7 @@ extern "C" Item js_left_shift(Item left, Item right) {
 
 extern "C" Item js_right_shift(Item left, Item right) {
     left = js_numeric_operand(left); if (js_exception_pending) return ItemNull;
-    right = js_numeric_operand(right);
+    right = js_numeric_operand(right); if (js_exception_pending) return ItemNull;
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
@@ -1679,6 +1815,8 @@ extern "C" Item js_right_shift(Item left, Item right) {
 }
 
 extern "C" Item js_unsigned_right_shift(Item left, Item right) {
+    left = js_numeric_operand(left); if (js_exception_pending) return ItemNull;
+    right = js_numeric_operand(right); if (js_exception_pending) return ItemNull;
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     // ES spec: BigInt does not support unsigned right shift (>>>)
     if (js_is_bigint(left) || js_is_bigint(right)) {
@@ -1746,19 +1884,58 @@ extern "C" Item js_bigint_constructor(Item value) {
     return ItemNull;
 }
 
+static Item js_to_bigint_for_bigint_op(Item value) {
+    if (js_is_bigint(value)) return value;
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_FUNC || type == LMD_TYPE_ELEMENT) {
+        Item prim = js_to_primitive(value, JS_HINT_NUMBER);
+        if (js_check_exception()) return ItemNull;
+        return js_to_bigint_for_bigint_op(prim);
+    }
+    if (type == LMD_TYPE_BOOL) return bigint_from_int64(js_is_truthy(value) ? 1 : 0);
+    if (type == LMD_TYPE_STRING) {
+        String* s = it2s(value);
+        if (s) {
+            Item bi = bigint_from_string(s->chars, s->len);
+            if (bi.item != ItemError.item) return bi;
+        }
+        js_throw_syntax_error((Item){.item = s2it(heap_create_name("Cannot convert string to a BigInt"))});
+        return ItemNull;
+    }
+    js_throw_type_error("Cannot convert value to a BigInt");
+    return ItemNull;
+}
+
+static bool js_bigint_to_index(Item value, int64_t* out_bits) {
+    if (js_is_symbol(value)) {
+        js_throw_type_error("Cannot convert a Symbol value to a number");
+        return false;
+    }
+    Item num = js_to_number(value);
+    if (js_check_exception()) return false;
+    if (js_is_symbol(num)) {
+        js_throw_type_error("Cannot convert a Symbol value to a number");
+        return false;
+    }
+    double d = js_get_number(num);
+    double integer_index;
+    if (d != d || d == 0.0) integer_index = 0.0;
+    else if (d == INFINITY || d == -INFINITY) integer_index = d;
+    else integer_index = d < 0.0 ? ceil(d) : floor(d);
+    if (integer_index < 0.0 || integer_index > 9007199254740991.0 || integer_index == INFINITY) {
+        js_throw_range_error("Invalid value: not a valid index");
+        return false;
+    }
+    *out_bits = (int64_t)integer_index;
+    return true;
+}
+
 extern "C" Item js_bigint_as_int_n(Item bits_item, Item bigint_item) {
     // BigInt.asIntN(bits, bigintValue) — clamp to signed N-bit range
     // ES spec: mod = bigintValue mod 2^bits; if mod >= 2^(bits-1) return mod - 2^bits, else mod
-    Item bits_num = js_to_number(bits_item);
-    if (js_check_exception()) return ItemNull;
     int64_t bits = 0;
-    TypeId bt = get_type_id(bits_num);
-    if (bt == LMD_TYPE_INT) bits = it2i(bits_num);
-    else if (bt == LMD_TYPE_FLOAT) bits = (int64_t)it2d(bits_num);
-    if (bits < 0) {
-        return js_throw_range_error("Invalid value: not a non-negative integer");
-    }
-    Item bigint_val = js_bigint_constructor(bigint_item);
+    if (!js_bigint_to_index(bits_item, &bits)) return ItemNull;
+    Item bigint_val = js_to_bigint_for_bigint_op(bigint_item);
     if (js_check_exception()) return ItemNull;
     if (bits == 0) return bigint_from_int64(0);
     // 2^bits
@@ -1781,16 +1958,9 @@ extern "C" Item js_bigint_as_int_n(Item bits_item, Item bigint_item) {
 extern "C" Item js_bigint_as_uint_n(Item bits_item, Item bigint_item) {
     // BigInt.asUintN(bits, bigintValue) — clamp to unsigned N-bit range
     // ES spec: return bigintValue mod 2^bits
-    Item bits_num = js_to_number(bits_item);
-    if (js_check_exception()) return ItemNull;
     int64_t bits = 0;
-    TypeId bt = get_type_id(bits_num);
-    if (bt == LMD_TYPE_INT) bits = it2i(bits_num);
-    else if (bt == LMD_TYPE_FLOAT) bits = (int64_t)it2d(bits_num);
-    if (bits < 0) {
-        return js_throw_range_error("Invalid value: not a non-negative integer");
-    }
-    Item bigint_val = js_bigint_constructor(bigint_item);
+    if (!js_bigint_to_index(bits_item, &bits)) return ItemNull;
+    Item bigint_val = js_to_bigint_for_bigint_op(bigint_item);
     if (js_check_exception()) return ItemNull;
     if (bits == 0) return bigint_from_int64(0);
     Item two = bigint_from_int64(2);
@@ -1876,22 +2046,7 @@ extern "C" Item js_typeof(Item value) {
     case LMD_TYPE_MAP: {
         // Proxy: typeof is "function" if target is callable
         if (js_is_proxy(value)) {
-            Item target = js_proxy_get_target(value);
-            TypeId tt = get_type_id(target);
-            if (tt == LMD_TYPE_FUNC) {
-                result = "function";
-                goto done;
-            }
-            if (js_is_proxy(target)) {
-                // Recursive: typeof of nested proxy
-                Item inner_typeof = js_typeof(target);
-                String* its = it2s(inner_typeof);
-                if (its && its->len == 8 && memcmp(its->chars, "function", 8) == 0) {
-                    result = "function";
-                    goto done;
-                }
-            }
-            result = "object";
+            result = js_proxy_has_callable_target(value) ? "function" : "object";
             goto done;
         }
         // v18h: class objects (MAPs with __instance_proto__) should return "function"

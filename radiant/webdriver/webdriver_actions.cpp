@@ -10,6 +10,7 @@
 #include "../state_store.hpp"
 #include "../layout.hpp"
 #include "../render_img.hpp"
+#include "../../lib/tagged.hpp"
 #include "../../lib/log.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/file.h"
@@ -108,11 +109,11 @@ static void get_element_center(View* view, float* cx, float* cy) {
     // Get element dimensions
     float width = 0, height = 0;
     if (view->is_block()) {
-        ViewBlock* block = (ViewBlock*)view;
+        ViewBlock* block = lam::view_require_block(view);
         width = block->width;
         height = block->height;
     } else if (view->view_type == RDT_VIEW_INLINE) {
-        ViewSpan* span = (ViewSpan*)view;
+        ViewSpan* span = lam::view_require_element(view);
         width = span->width;
         height = span->height;
     }
@@ -155,7 +156,7 @@ WebDriverError webdriver_element_clear(WebDriverSession* session, View* element)
     // Check if element is editable (input, textarea, contenteditable)
     if (!element->is_element()) return WD_ERROR_INVALID_ELEMENT_STATE;
     
-    ViewElement* elem = (ViewElement*)element;
+    ViewElement* elem = lam::view_require_element(element);
     uintptr_t tag = elem->tag();
     
     if (tag != HTM_TAG_INPUT && tag != HTM_TAG_TEXTAREA) {
@@ -261,7 +262,7 @@ const char* webdriver_element_get_attribute(WebDriverSession* session, View* ele
     if (!session || !element || !name) return NULL;
     if (!element->is_element()) return NULL;
     
-    ViewElement* elem = (ViewElement*)element;
+    ViewElement* elem = lam::view_require_element(element);
     return elem->get_attribute(name);
 }
 
@@ -293,11 +294,11 @@ void webdriver_element_get_rect(WebDriverSession* session, View* element,
     *y = abs_y;
     
     if (element->is_block()) {
-        ViewBlock* block = (ViewBlock*)element;
+        ViewBlock* block = lam::view_require_block(element);
         *width = block->width;
         *height = block->height;
     } else if (element->view_type == RDT_VIEW_INLINE) {
-        ViewSpan* span = (ViewSpan*)element;
+        ViewSpan* span = lam::view_require_element(element);
         *width = span->width;
         *height = span->height;
     } else {
@@ -317,7 +318,7 @@ bool webdriver_element_is_enabled(WebDriverSession* session, View* element) {
     }
     
     // Check disabled attribute
-    ViewElement* elem = (ViewElement*)element;
+    ViewElement* elem = lam::view_require_element(element);
     const char* disabled = elem->get_attribute("disabled");
     if (disabled) {
         return false;
@@ -331,7 +332,7 @@ bool webdriver_element_is_displayed(WebDriverSession* session, View* element) {
     
     // Check if element has dimensions
     if (element->is_block()) {
-        ViewBlock* block = (ViewBlock*)element;
+        ViewBlock* block = lam::view_require_block(element);
         if (block->width <= 0 || block->height <= 0) {
             return false;
         }
@@ -343,7 +344,7 @@ bool webdriver_element_is_displayed(WebDriverSession* session, View* element) {
         
         // Check visibility: hidden
         if (element->is_element()) {
-            DomElement* dom = (DomElement*)element;
+            DomElement* dom = lam::dom_require_element(lam::view_dom_node(element));
             // TODO: Check computed visibility property
         }
     }
@@ -363,7 +364,7 @@ bool webdriver_element_is_selected(WebDriverSession* session, View* element) {
     }
     
     // Check selected attribute (for option elements)
-    ViewElement* elem = (ViewElement*)element;
+    ViewElement* elem = lam::view_require_element(element);
     const char* selected = elem->get_attribute("selected");
     if (selected) {
         return true;

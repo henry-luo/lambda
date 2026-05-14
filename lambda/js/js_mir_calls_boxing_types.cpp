@@ -215,6 +215,13 @@ MIR_reg_t jm_emit_undefined(JsMirTranspiler* mt) {
     return r;
 }
 
+MIR_reg_t jm_emit_item_error(JsMirTranspiler* mt) {
+    MIR_reg_t r = jm_new_reg(mt, "item_error", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
+        MIR_new_int_op(mt->ctx, (int64_t)(((uint64_t)LMD_TYPE_ERROR) << 56))));
+    return r;
+}
+
 // ============================================================================
 // Boxing helpers
 // ============================================================================
@@ -350,6 +357,9 @@ void jm_emit_install_method_or_accessor(JsMirTranspiler* mt,
     bool is_getter, bool is_setter) {
     key = jm_call_1(mt, "js_to_property_key", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+    jm_call_void_2(mt, "js_set_method_home_from_target",
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
     if (is_getter || is_setter) {
         MIR_reg_t is_set = jm_new_reg(mt, "is_set", MIR_T_I64);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -361,29 +371,50 @@ void jm_emit_install_method_or_accessor(JsMirTranspiler* mt,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, is_set));
     } else {
+        jm_call_void_0(mt, "js_private_field_init_begin");
         jm_call_3(mt, "js_property_set", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
+        jm_call_void_0(mt, "js_private_field_init_end");
+        jm_call_void_2(mt, "js_mark_private_method_non_writable",
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
     }
+}
+
+static const char* jm_private_display_suffix_from_name(const char* name) {
+    if (!name) return name;
+    const char* suffix = name;
+    if (strncmp(name, "__private_", 10) == 0) {
+        suffix = name + 10;
+    } else if (strncmp(name, "get __private_", 14) == 0 ||
+               strncmp(name, "set __private_", 14) == 0) {
+        suffix = name + 14;
+    } else {
+        return name;
+    }
+    const char* p = suffix;
+    while (*p >= '0' && *p <= '9') p++;
+    if (p > suffix && *p == '_') suffix = p + 1;
+    return suffix;
 }
 
 // Helper: emit js_set_function_name call if name is non-empty, and formal_length if needed
 void jm_emit_set_function_name(JsMirTranspiler* mt, MIR_reg_t fn_reg, const char* name, int formal_length ) {
     if (name && name[0]) {
-        // Convert __private_X back to #X for ES spec compliance
         char priv_buf[256];
         const char* display_name = name;
         if (strncmp(name, "__private_", 10) == 0) {
-            int len = snprintf(priv_buf, sizeof(priv_buf), "#%s", name + 10);
+            int len = snprintf(priv_buf, sizeof(priv_buf), "#%s", jm_private_display_suffix_from_name(name));
             display_name = priv_buf;
             (void)len;
         } else if (strncmp(name, "get __private_", 14) == 0) {
-            int len = snprintf(priv_buf, sizeof(priv_buf), "get #%s", name + 14);
+            int len = snprintf(priv_buf, sizeof(priv_buf), "get #%s", jm_private_display_suffix_from_name(name));
             display_name = priv_buf;
             (void)len;
         } else if (strncmp(name, "set __private_", 14) == 0) {
-            int len = snprintf(priv_buf, sizeof(priv_buf), "set #%s", name + 14);
+            int len = snprintf(priv_buf, sizeof(priv_buf), "set #%s", jm_private_display_suffix_from_name(name));
             display_name = priv_buf;
             (void)len;
         }
@@ -801,13 +832,13 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
             TypeId t = jm_get_effective_type(mt, un->operand);
             if (t == LMD_TYPE_FLOAT) return LMD_TYPE_FLOAT;
             if (t == LMD_TYPE_INT) {
-                // v18p: -0 produces FLOAT (-0.0), not INT
                 if (un->operand && un->operand->node_type == JS_AST_NODE_LITERAL) {
                     JsLiteralNode* lit = (JsLiteralNode*)un->operand;
                     if (lit->literal_type == JS_LITERAL_NUMBER && lit->value.number_value == 0.0)
                         return LMD_TYPE_FLOAT;
+                    return LMD_TYPE_INT;
                 }
-                return LMD_TYPE_INT;
+                return LMD_TYPE_ANY;
             }
             return LMD_TYPE_ANY;
         }

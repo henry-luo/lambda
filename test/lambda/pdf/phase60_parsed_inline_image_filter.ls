@@ -1,6 +1,5 @@
 // Phase 60 - parsed BI/EI inline image filters are preserved and gated.
 
-import stream: lambda.package.pdf.stream
 import interp: lambda.package.pdf.interp
 
 fn has(s: string, needle: string) { (index_of(s, needle) >= 0) }
@@ -12,7 +11,7 @@ pn main() {
      ++ "ABC\n"
      ++ "EI\n"
      ++ "Q\n")
-    let ops = stream.parse_content_stream(cs)
+    let ops = pdf_parse_content_stream(cs)
     let doc = { objects: [], pages: [] }
     let page = { dict: { Resources: {} } }
     let r = interp.render_page(doc, page, ops, 100.0)

@@ -180,7 +180,7 @@ fn _move(st, tx, ty) {
 // Emission
 // ============================================================
 
-fn _emit_text(st, ctm, page_h, content) {
+fn _emit_text(st, ctm, page_h, content, run_advance) {
     if (content == "" or content == null) { null }
     else if (st.render_mode == 3) {
         // mode 3: invisible text — do not emit a paint, but keep state.
@@ -191,6 +191,7 @@ fn _emit_text(st, ctm, page_h, content) {
         let family = if (fi) fi.family else "sans-serif"
         let weight = if (fi) fi.weight else "normal"
         let style  = if (fi) fi.style  else "normal"
+        let raw_font = _raw_font_attr(fi)
         let fill_color   = if (st.fill) st.fill else "rgb(0,0,0)"
         let stroke_color = if (st.stroke) st.stroke else "rgb(0,0,0)"
         // PDF text-rendering matrix Trm = Tm × CTM. The text origin
@@ -228,15 +229,27 @@ fn _emit_text(st, ctm, page_h, content) {
         // Tz — horizontal scale, percentage. 100 = no change. Apply via
         // a transform on the <text> origin so glyph widths scale but
         // the baseline stays fixed. Skip when ~100 to keep markup tidy.
-        let hs = st.hor_scale / 100.0
-        let scaled = (util.fabs(hs - 1.0) > 0.001)
+        let tr = _text_transform_components(st, ctm, x, y)
+        let hs = tr.hscale
+        let skew_x = tr.skew_x
+        let scaled = tr.scaled
+        let text_len = util.fmt_num(run_advance)
+        let scaled_text_len = _scaled_text_length(run_advance, hs)
+        let text_xform = tr.attr
         if (scaled and needs_stroke and needs_text_alpha) {
             <text x: "0", y: "0",
-                  transform: "translate(" ++ util.fmt_num(x) ++ " " ++ util.fmt_num(y) ++ ") scale(" ++ util.fmt_num(hs) ++ " 1)",
+                  transform: text_xform,
                   'font-family': family,
                   'font-size':   util.fmt_num(eff_size),
                   'font-weight': weight,
                   'font-style':  style,
+                  'data-pdf-raw-font': raw_font,
+                  'data-pdf-x': util.fmt_num(x),
+                  'data-pdf-y': util.fmt_num(y),
+                  'data-pdf-size': util.fmt_num(eff_size),
+                  'data-pdf-width': util.fmt_num(run_advance),
+                  textLength:    scaled_text_len,
+                  lengthAdjust:  "spacingAndGlyphs",
                   fill:          svg_fill,
                   stroke:        svg_stroke,
                   'fill-opacity': util.fmt_num(fill_alpha),
@@ -246,11 +259,18 @@ fn _emit_text(st, ctm, page_h, content) {
         }
         else if (scaled and needs_stroke) {
             <text x: "0", y: "0",
-                  transform: "translate(" ++ util.fmt_num(x) ++ " " ++ util.fmt_num(y) ++ ") scale(" ++ util.fmt_num(hs) ++ " 1)",
+                  transform: text_xform,
                   'font-family': family,
                   'font-size':   util.fmt_num(eff_size),
                   'font-weight': weight,
                   'font-style':  style,
+                  'data-pdf-raw-font': raw_font,
+                  'data-pdf-x': util.fmt_num(x),
+                  'data-pdf-y': util.fmt_num(y),
+                  'data-pdf-size': util.fmt_num(eff_size),
+                  'data-pdf-width': util.fmt_num(run_advance),
+                  textLength:    scaled_text_len,
+                  lengthAdjust:  "spacingAndGlyphs",
                   fill:          svg_fill,
                   stroke:        svg_stroke;
                 content
@@ -258,11 +278,14 @@ fn _emit_text(st, ctm, page_h, content) {
         }
         else if (scaled and needs_text_alpha) {
             <text x: "0", y: "0",
-                  transform: "translate(" ++ util.fmt_num(x) ++ " " ++ util.fmt_num(y) ++ ") scale(" ++ util.fmt_num(hs) ++ " 1)",
+                  transform: text_xform,
                   'font-family': family,
                   'font-size':   util.fmt_num(eff_size),
                   'font-weight': weight,
                   'font-style':  style,
+                  'data-pdf-raw-font': raw_font,
+                  textLength:    scaled_text_len,
+                  lengthAdjust:  "spacingAndGlyphs",
                   fill:          svg_fill,
                   'fill-opacity': util.fmt_num(fill_alpha);
                 content
@@ -270,11 +293,18 @@ fn _emit_text(st, ctm, page_h, content) {
         }
         else if (scaled) {
             <text x: "0", y: "0",
-                  transform: "translate(" ++ util.fmt_num(x) ++ " " ++ util.fmt_num(y) ++ ") scale(" ++ util.fmt_num(hs) ++ " 1)",
+                  transform: text_xform,
                   'font-family': family,
                   'font-size':   util.fmt_num(eff_size),
                   'font-weight': weight,
                   'font-style':  style,
+                  'data-pdf-raw-font': raw_font,
+                  'data-pdf-x': util.fmt_num(x),
+                  'data-pdf-y': util.fmt_num(y),
+                  'data-pdf-size': util.fmt_num(eff_size),
+                  'data-pdf-width': util.fmt_num(run_advance),
+                  textLength:    scaled_text_len,
+                  lengthAdjust:  "spacingAndGlyphs",
                   fill:          svg_fill;
                 content
             >
@@ -285,6 +315,13 @@ fn _emit_text(st, ctm, page_h, content) {
                   'font-size':   util.fmt_num(eff_size),
                   'font-weight': weight,
                   'font-style':  style,
+                  'data-pdf-raw-font': raw_font,
+                  'data-pdf-x': util.fmt_num(x),
+                  'data-pdf-y': util.fmt_num(y),
+                  'data-pdf-size': util.fmt_num(eff_size),
+                  'data-pdf-width': util.fmt_num(run_advance),
+                  textLength:    text_len,
+                  lengthAdjust:  "spacingAndGlyphs",
                   fill:          svg_fill,
                   stroke:        svg_stroke,
                   'fill-opacity': util.fmt_num(fill_alpha),
@@ -298,6 +335,13 @@ fn _emit_text(st, ctm, page_h, content) {
                   'font-size':   util.fmt_num(eff_size),
                   'font-weight': weight,
                   'font-style':  style,
+                  'data-pdf-raw-font': raw_font,
+                  'data-pdf-x': util.fmt_num(x),
+                  'data-pdf-y': util.fmt_num(y),
+                  'data-pdf-size': util.fmt_num(eff_size),
+                  'data-pdf-width': util.fmt_num(run_advance),
+                  textLength:    text_len,
+                  lengthAdjust:  "spacingAndGlyphs",
                   fill:          svg_fill,
                   stroke:        svg_stroke;
                 content
@@ -309,6 +353,13 @@ fn _emit_text(st, ctm, page_h, content) {
                   'font-size':   util.fmt_num(eff_size),
                   'font-weight': weight,
                   'font-style':  style,
+                  'data-pdf-raw-font': raw_font,
+                  'data-pdf-x': util.fmt_num(x),
+                  'data-pdf-y': util.fmt_num(y),
+                  'data-pdf-size': util.fmt_num(eff_size),
+                  'data-pdf-width': util.fmt_num(run_advance),
+                  textLength:    text_len,
+                  lengthAdjust:  "spacingAndGlyphs",
                   fill:          svg_fill,
                   'fill-opacity': util.fmt_num(fill_alpha);
                 content
@@ -320,6 +371,13 @@ fn _emit_text(st, ctm, page_h, content) {
                   'font-size':   util.fmt_num(eff_size),
                   'font-weight': weight,
                   'font-style':  style,
+                  'data-pdf-raw-font': raw_font,
+                  'data-pdf-x': util.fmt_num(x),
+                  'data-pdf-y': util.fmt_num(y),
+                  'data-pdf-size': util.fmt_num(eff_size),
+                  'data-pdf-width': util.fmt_num(run_advance),
+                  textLength:    text_len,
+                  lengthAdjust:  "spacingAndGlyphs",
                   fill:          svg_fill;
                 content
             >
@@ -327,17 +385,102 @@ fn _emit_text(st, ctm, page_h, content) {
     }
 }
 
-fn _emit_one(st, ctm, page_h, txt) {
-    let el = _emit_text(st, ctm, page_h, txt)
+fn _raw_font_attr(fi) {
+    if (fi and fi.to_unicode == null) { "true" }
+    else { "false" }
+}
+
+fn _emit_one(st, ctm, page_h, txt, run_advance) {
+    let el = _emit_text(st, ctm, page_h, txt, run_advance)
     if (el) { [el] } else { [] }
 }
 
+fn _run_advance_between(a, b) {
+    let dx = b.tm[4] - a.tm[4]
+    if (dx < 0.0) { 0.0 - dx } else { dx }
+}
+
 fn _effective_font_size(st, ctm) {
-    let a = st.tm[0] * ctm[0] + st.tm[1] * ctm[2]
-    let b = st.tm[0] * ctm[1] + st.tm[1] * ctm[3]
-    let scale = math.sqrt(a * a + b * b)
+    let scale = _text_y_axis_scale(st, ctm)
     let size = st.font_size * scale
     if (size < 1.0) { 12.0 } else { size }
+}
+
+fn _text_x_axis_scale(st, ctm) {
+    let a = st.tm[0] * ctm[0] + st.tm[1] * ctm[2]
+    let b = st.tm[0] * ctm[1] + st.tm[1] * ctm[3]
+    math.sqrt(a * a + b * b)
+}
+
+fn _text_y_axis_scale(st, ctm) {
+    let a = st.tm[2] * ctm[0] + st.tm[3] * ctm[2]
+    let b = st.tm[2] * ctm[1] + st.tm[3] * ctm[3]
+    if (util.fabs(b) > 0.001) {
+        if (b < 0.0) { 0.0 - b } else { b }
+    }
+    else { math.sqrt(a * a + b * b) }
+}
+
+fn _text_transform_hscale(st, ctm) {
+    let ys = _text_y_axis_scale(st, ctm)
+    let xs = _text_x_axis_scale(st, ctm)
+    let axis_scale = if (ys > 0.0) { xs / ys } else { 1.0 }
+    axis_scale * (st.hor_scale / 100.0)
+}
+
+fn _text_transform_skew_x(st, ctm) {
+    let hx_y = st.tm[0] * ctm[1] + st.tm[1] * ctm[3]
+    if (util.fabs(hx_y) > 0.001) { 0.0 }
+    else {
+        let vx = st.tm[2] * ctm[0] + st.tm[3] * ctm[2]
+        let ys = _text_y_axis_scale(st, ctm)
+        if (ys > 0.0) { (0.0 - vx) / ys }
+        else { 0.0 }
+    }
+}
+
+fn _text_transform_components(st, ctm, x, y) {
+    let ys = _text_y_axis_scale(st, ctm)
+    let hx0 = st.tm[0] * ctm[0] + st.tm[1] * ctm[2]
+    let hy0 = st.tm[0] * ctm[1] + st.tm[1] * ctm[3]
+    let vx0 = st.tm[2] * ctm[0] + st.tm[3] * ctm[2]
+    let vy0 = st.tm[2] * ctm[1] + st.tm[3] * ctm[3]
+    let hx = if (ys > 0.0) { hx0 / ys } else { 1.0 }
+    let hy = if (ys > 0.0) { (0.0 - hy0) / ys } else { 0.0 }
+    let vx = if (ys > 0.0) { (0.0 - vx0) / ys } else { 0.0 }
+    let vy = if (ys > 0.0) { (0.0 - vy0) / ys } else { 1.0 }
+    let rot = util.fabs(hy) > 0.001
+    let hscale = _text_transform_hscale(st, ctm)
+    let skew_x = _text_transform_skew_x(st, ctm)
+    if (rot) {
+        let hs = st.hor_scale / 100.0
+        { scaled: true,
+          hscale: if (hs > 0.0) { hs } else { 1.0 },
+          skew_x: 0.0,
+          attr: _text_full_transform_attr(hx * hs, hy * hs, vx, vy, x, y) }
+    }
+    else {
+        { scaled: ((util.fabs(hscale - 1.0) > 0.001) or (util.fabs(skew_x) > 0.001)),
+          hscale: hscale,
+          skew_x: skew_x,
+          attr: _text_transform_attr(x, y, hscale, skew_x) }
+    }
+}
+
+fn _text_full_transform_attr(a, b, c, d, x, y) {
+    "matrix(" ++ util.fmt_num(a) ++ " " ++ util.fmt_num(b) ++ " " ++
+        util.fmt_num(c) ++ " " ++ util.fmt_num(d) ++ " " ++
+        util.fmt_num(x) ++ " " ++ util.fmt_num(y) ++ ")"
+}
+
+fn _text_transform_attr(x, y, hs, skew_x) {
+    "matrix(" ++ util.fmt_num(hs) ++ " 0 " ++ util.fmt_num(skew_x) ++ " 1 " ++
+        util.fmt_num(x) ++ " " ++ util.fmt_num(y) ++ ")"
+}
+
+fn _scaled_text_length(run_advance, hs) {
+    if (hs > 0.0) { util.fmt_num(run_advance / hs) }
+    else { util.fmt_num(run_advance) }
 }
 
 fn _svg_text_y(st, ctm, page_h, py) {
@@ -363,7 +506,7 @@ fn _text_advance(st, ctm, txt) {
     let n = len(txt)
     let base = _text_width(st, ctm, txt)
     let spacing = ((st.char_space * float(n)) + (st.word_space * float(_space_count(txt)))) * _text_space_scale(st, ctm)
-    (base + spacing) * (st.hor_scale / 100.0)
+    (base + spacing) * _text_transform_hscale(st, ctm)
 }
 
 fn _text_advance_codes(st, ctm, codes) {
@@ -371,7 +514,7 @@ fn _text_advance_codes(st, ctm, codes) {
     let base = _codes_width_units(st.font_info, codes) / 1000.0 * _effective_font_size(st, ctm)
     let words = len(for (c in codes where c == 32) c)
     let spacing = ((st.char_space * float(n)) + (st.word_space * float(words))) * _text_space_scale(st, ctm)
-    (base + spacing) * (st.hor_scale / 100.0)
+    (base + spacing) * _text_transform_hscale(st, ctm)
 }
 
 fn _num_width(v) {
@@ -380,8 +523,34 @@ fn _num_width(v) {
     else { 500.0 }
 }
 
+fn _cid_width_segment_value(seg, code) {
+    if (seg.widths is array and code >= seg.first and code < seg.first + len(seg.widths)) {
+        _num_width(seg.widths[code - seg.first])
+    }
+    else if (seg.width != null and code >= seg.first and code <= seg.last) { _num_width(seg.width) }
+    else { null }
+}
+
+fn _cid_width_lookup_loop(segments, code, i, n) {
+    if (i >= n) { null }
+    else {
+        let hit = _cid_width_segment_value(segments[i], code)
+        if (hit != null) { hit } else { _cid_width_lookup_loop(segments, code, i + 1, n) }
+    }
+}
+
+fn _cid_width_units(fi, code) {
+    if (fi and fi.cid_widths is array) {
+        let hit = _cid_width_lookup_loop(fi.cid_widths, code, 0, len(fi.cid_widths))
+        if (hit != null) { hit } else { _num_width(fi.default_width) }
+    }
+    else { null }
+}
+
 fn _glyph_width_units(fi, code) {
-    if (fi and fi.widths is array and code >= fi.first_char and code <= fi.last_char) {
+    let cid_width = _cid_width_units(fi, code)
+    if (cid_width != null) { cid_width }
+    else if (fi and fi.widths is array and code >= fi.first_char and code <= fi.last_char) {
         let idx = code - fi.first_char
         if (idx >= 0 and idx < len(fi.widths)) { _num_width(fi.widths[idx]) }
         else { 500.0 }
@@ -534,74 +703,73 @@ fn _op_Tr(st, ops) {
 fn _op_Tj(st, ctm, ops, page_h) {
     if (len(ops) >= 1) {
         let txt = _decode_operand(ops[0], st.font_info)
-        let s1 = if (txt == "") { st } else { _advance_text(st, _text_advance_for_operand(st, ctm, ops[0])) }
-        { state: s1, emit: _emit_one(st, ctm, page_h, txt) }
+        let adv = _text_advance_for_operand(st, ctm, ops[0])
+        let s1 = if (txt == "") { st } else { _advance_text(st, adv) }
+        { state: s1, emit: _emit_one(st, ctm, page_h, txt, adv) }
     }
     else { { state: st, emit: null } }
 }
 
-pn _op_TJ(st, ctm, ops, page_h) {
-    var op0 = null
-    if (len(ops) >= 1) { op0 = ops[0] }
-    if (op0 is map and op0.kind == "array") {
-        var cur = st
-        var seg_text = ""
-        var seg_st = st
-        var has_seg = false
-        var emits = []
-        var i = 0
-        let items = op0.value
-        let n = len(items)
-        while (i < n) {
-            let it = items[i]
-            if (it is map and (it.kind == "string" or it.kind == "hex")) {
-                let txt = _tj_text(it, cur.font_info)
-                if (txt != "") {
-                    if (not has_seg) {
-                        seg_st = cur
-                        has_seg = true
-                    }
-                    seg_text = seg_text ++ txt
-                    cur = _advance_text(cur, _text_advance_for_operand(cur, ctm, it))
-                }
-            }
-            else if (it is int or it is float) {
-                let adj = util.num(it)
-                if (adj < -600.0 and has_seg) {
-                    let part = _emit_one(seg_st, ctm, page_h, seg_text)
-                    var k = 0
-                    let m = len(part)
-                    while (k < m) {
-                        emits = emits ++ [part[k]]
-                        k = k + 1
-                    }
-                    seg_text = ""
-                    has_seg = false
-                }
-                cur = _advance_text(cur, _tj_adjustment(cur, ctm, adj))
-            }
-            i = i + 1
-        }
-        if (has_seg) {
-            let part = _emit_one(seg_st, ctm, page_h, seg_text)
-            var k = 0
-            let m = len(part)
-            while (k < m) {
-                emits = emits ++ [part[k]]
-                k = k + 1
-            }
-        }
-        return { state: cur, emit: emits }
+fn _append_emit(out, part) {
+    if (part == null) { out }
+    else { out ++ (for (p in part) p) }
+}
+
+fn _op_TJ_flush(cur, ctm, page_h, seg_text, seg_st, has_seg, emits) {
+    if (has_seg) {
+        _append_emit(emits, _emit_one(seg_st, ctm, page_h, seg_text, _run_advance_between(seg_st, cur)))
     }
-    else { return { state: st, emit: null } }
+    else { emits }
+}
+
+fn _op_TJ_loop(items, i, n, cur, ctm, page_h, seg_text, seg_st, has_seg, emits) {
+    if (i >= n) {
+        { state: cur, emit: _op_TJ_flush(cur, ctm, page_h, seg_text, seg_st, has_seg, emits) }
+    }
+    else {
+        let it = items[i]
+        if (it is map and (it.kind == "string" or it.kind == "hex")) {
+            let txt = _tj_text(it, cur.font_info)
+            if (txt != "") {
+                let next_seg_st = if (has_seg) { seg_st } else { cur }
+                let next_cur = _advance_text(cur, _text_advance_for_operand(cur, ctm, it))
+                _op_TJ_loop(items, i + 1, n, next_cur, ctm, page_h,
+                            seg_text ++ txt, next_seg_st, true, emits)
+            }
+            else { _op_TJ_loop(items, i + 1, n, cur, ctm, page_h, seg_text, seg_st, has_seg, emits) }
+        }
+        else if (it is int or it is float) {
+            let adj = util.num(it)
+            let next_emits = if (adj < -600.0 and has_seg) {
+                _append_emit(emits, _emit_one(seg_st, ctm, page_h, seg_text, _run_advance_between(seg_st, cur)))
+            }
+            else { emits }
+            let next_seg_text = if (adj < -600.0 and has_seg) { "" } else { seg_text }
+            let next_has_seg = if (adj < -600.0 and has_seg) { false } else { has_seg }
+            let next_cur = _advance_text(cur, _tj_adjustment(cur, ctm, adj))
+            _op_TJ_loop(items, i + 1, n, next_cur, ctm, page_h,
+                        next_seg_text, seg_st, next_has_seg, next_emits)
+        }
+        else { _op_TJ_loop(items, i + 1, n, cur, ctm, page_h, seg_text, seg_st, has_seg, emits) }
+    }
+}
+
+fn _op_TJ(st, ctm, ops, page_h) {
+    let op0 = if (len(ops) >= 1) { ops[0] } else { null }
+    if (op0 is map and op0.kind == "array") {
+        let items = op0.value
+        _op_TJ_loop(items, 0, len(items), st, ctm, page_h, "", st, false, [])
+    }
+    else { { state: st, emit: null } }
 }
 
 fn _op_quote(st, ctm, ops, page_h) {
     if (len(ops) >= 1) {
         let s1 = _move(st, 0.0, -st.leading)
         let txt = _decode_operand(ops[0], s1.font_info)
-        let s2 = if (txt == "") { s1 } else { _advance_text(s1, _text_advance_for_operand(s1, ctm, ops[0])) }
-        { state: s2, emit: _emit_one(s1, ctm, page_h, txt) }
+        let adv = _text_advance_for_operand(s1, ctm, ops[0])
+        let s2 = if (txt == "") { s1 } else { _advance_text(s1, adv) }
+        { state: s2, emit: _emit_one(s1, ctm, page_h, txt, adv) }
     }
     else { { state: st, emit: null } }
 }
@@ -611,8 +779,9 @@ fn _op_dquote(st, ctm, ops, page_h) {
         let s0 = set_char_space(set_word_space(st, util.num(ops[0])), util.num(ops[1]))
         let s1 = _move(s0, 0.0, -s0.leading)
         let txt = _decode_operand(ops[2], s1.font_info)
-        let s2 = if (txt == "") { s1 } else { _advance_text(s1, _text_advance_for_operand(s1, ctm, ops[2])) }
-        { state: s2, emit: _emit_one(s1, ctm, page_h, txt) }
+        let adv = _text_advance_for_operand(s1, ctm, ops[2])
+        let s2 = if (txt == "") { s1 } else { _advance_text(s1, adv) }
+        { state: s2, emit: _emit_one(s1, ctm, page_h, txt, adv) }
     }
     else { { state: st, emit: null } }
 }
@@ -621,51 +790,42 @@ fn _op_dquote(st, ctm, ops, page_h) {
 // Top dispatcher
 // ============================================================
 
-pub pn apply_op(st, ctm, opr, ops, page_h) {
+pub fn apply_op(st, ctm, opr, ops, page_h) {
     let base = _base_state(st)
-    if      (opr == "BT") { return _op_BT(base) }
-    else if (opr == "ET") { return _op_ET(base) }
-    else if (opr == "Tf") { return _op_Tf(base, ops) }
-    else if (opr == "Tm") { return _op_Tm(base, ops) }
-    else if (opr == "Td") { return _op_Td(base, ops) }
-    else if (opr == "TD") { return _op_TD(base, ops) }
-    else if (opr == "T*") { return _op_Tstar(base) }
-    else if (opr == "TL") { return _op_TL(base, ops) }
-    else if (opr == "Tc") { return _op_Tc(base, ops) }
-    else if (opr == "Tw") { return _op_Tw(base, ops) }
-    else if (opr == "Tz") { return _op_Tz(base, ops) }
-    else if (opr == "Ts") { return _op_Ts(base, ops) }
-    else if (opr == "Tr") { return _op_Tr(base, ops) }
-    else if (opr == "Tj") { return _op_Tj(base, ctm, ops, page_h) }
-    else if (opr == "TJ") { return _op_TJ(base, ctm, ops, page_h) }
-    else if (opr == "'")  { return _op_quote(base, ctm, ops, page_h) }
-    else if (opr == "\"") { return _op_dquote(base, ctm, ops, page_h) }
-    else                  { return { state: base, emit: null } }
+    if      (opr == "BT") { _op_BT(base) }
+    else if (opr == "ET") { _op_ET(base) }
+    else if (opr == "Tf") { _op_Tf(base, ops) }
+    else if (opr == "Tm") { _op_Tm(base, ops) }
+    else if (opr == "Td") { _op_Td(base, ops) }
+    else if (opr == "TD") { _op_TD(base, ops) }
+    else if (opr == "T*") { _op_Tstar(base) }
+    else if (opr == "TL") { _op_TL(base, ops) }
+    else if (opr == "Tc") { _op_Tc(base, ops) }
+    else if (opr == "Tw") { _op_Tw(base, ops) }
+    else if (opr == "Tz") { _op_Tz(base, ops) }
+    else if (opr == "Ts") { _op_Ts(base, ops) }
+    else if (opr == "Tr") { _op_Tr(base, ops) }
+    else if (opr == "Tj") { _op_Tj(base, ctm, ops, page_h) }
+    else if (opr == "TJ") { _op_TJ(base, ctm, ops, page_h) }
+    else if (opr == "'")  { _op_quote(base, ctm, ops, page_h) }
+    else if (opr == "\"") { _op_dquote(base, ctm, ops, page_h) }
+    else                  { { state: base, emit: null } }
 }
 
 // ============================================================
 // Driver — only mutation point
 // ============================================================
 
-pub pn render_text_ops(ops, fonts, page_h) {
-    var st = new_state(fonts)
-    var out = []
-    var i = 0
-    let n = len(ops)
-    while (i < n) {
+fn _render_text_ops_loop(ops, i, n, st, out, page_h) {
+    if (i >= n) { out }
+    else {
         let r = apply_op(st, util.IDENTITY, ops[i].op, ops[i].operands, page_h)
-        st = r.state
-        if (r.emit != null) {
-            var k = 0
-            let m = len(r.emit)
-            while (k < m) {
-                out = out ++ [r.emit[k]]
-                k = k + 1
-            }
-        }
-        i = i + 1
+        _render_text_ops_loop(ops, i + 1, n, r.state, _append_emit(out, r.emit), page_h)
     }
-    return out
+}
+
+pub fn render_text_ops(ops, fonts, page_h) {
+    _render_text_ops_loop(ops, 0, len(ops), new_state(fonts), [], page_h)
 }
 
 // ============================================================
@@ -712,20 +872,17 @@ fn _is_overprint_dup(prev, cur) {
     }
 }
 
-pub pn dedupe_overprints(texts) {
-    var out = []
-    var i = 0
-    let n = len(texts)
-    while (i < n) {
+fn _dedupe_overprints_loop(texts, i, n, out) {
+    if (i >= n) { out }
+    else {
         let cur = texts[i]
-        var dup = false
         let ol = len(out)
-        if (ol > 0) {
-            let prev = out[ol - 1]
-            dup = _is_overprint_dup(prev, cur)
-        }
-        if (not dup) { out = out ++ [cur] }
-        i = i + 1
+        let dup = if (ol > 0) { _is_overprint_dup(out[ol - 1], cur) } else { false }
+        let next_out = if (dup) { out } else { out ++ [cur] }
+        _dedupe_overprints_loop(texts, i + 1, n, next_out)
     }
-    return out
+}
+
+pub fn dedupe_overprints(texts) {
+    _dedupe_overprints_loop(texts, 0, len(texts), [])
 }

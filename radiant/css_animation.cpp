@@ -11,6 +11,7 @@ extern "C" {
 
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
+#include "../lib/tagged.hpp"
 
 #include <string.h>
 #include <stdlib.h>
@@ -703,7 +704,7 @@ static TransformFunction* interpolate_transform_list(TransformFunction* a, Trans
 // when the element has no static opacity/color declaration)
 static InlineProp* ensure_inline_prop(ViewSpan* span) {
     if (!span->in_line) {
-        DomElement* el = (DomElement*)span;
+        DomElement* el = lam::dom_require_element(span);
         if (el->doc && el->doc->view_tree && el->doc->view_tree->pool) {
             span->in_line = (InlineProp*)pool_calloc(el->doc->view_tree->pool, sizeof(InlineProp));
             if (span->in_line) span->in_line->opacity = 1.0f;
@@ -715,7 +716,7 @@ static InlineProp* ensure_inline_prop(ViewSpan* span) {
 // Lazily ensure BoundaryProp + BackgroundProp exist (needed for background-color
 // animation when the element has no static background declaration)
 static BackgroundProp* ensure_background_prop(ViewSpan* span) {
-    DomElement* el = (DomElement*)span;
+    DomElement* el = lam::dom_require_element(span);
     Pool* pool = (el->doc && el->doc->view_tree) ? el->doc->view_tree->pool : NULL;
     if (!pool) return NULL;
     if (!span->bound) {
@@ -729,7 +730,7 @@ static BackgroundProp* ensure_background_prop(ViewSpan* span) {
 
 // Apply an interpolated property value to a DomElement
 static void apply_animated_value(DomElement* element, CssAnimatedProp* prop) {
-    ViewSpan* span = (ViewSpan*)element;
+    ViewSpan* span = lam::view_require_element(static_cast<View*>(element));
 
     switch (prop->property_id) {
         case CSS_PROPERTY_OPACITY: {
@@ -761,7 +762,10 @@ static void apply_animated_value(DomElement* element, CssAnimatedProp* prop) {
         }
         case CSS_PROPERTY_COLOR: {
             InlineProp* il = ensure_inline_prop(span);
-            if (il) il->color = prop->value.color;
+            if (il) {
+                il->color = prop->value.color;
+                il->has_color = true;
+            }
             break;
         }
         default:
@@ -846,7 +850,7 @@ void css_animation_tick(AnimationInstance* anim, float t) {
     // update bounds from element's current layout position (may have been
     // zero at creation time because css_animation_create runs before layout)
     // use absolute coordinates (walk parent chain) for correct dirty-region marking
-    View* span = (View*)anim->target;
+    View* span = static_cast<View*>(anim->target);
     float abs_x = span->x, abs_y = span->y;
     ViewElement* p = span->parent_view();
     while (p) { abs_x += p->x; abs_y += p->y; p = p->parent_view(); }
@@ -859,7 +863,7 @@ void css_animation_tick(AnimationInstance* anim, float t) {
     // element's actual visual position (not expanded to include both static
     // and transformed positions — the previous-bounds tracking in
     // animation_scheduler_tick handles the old position separately)
-    ViewSpan* vs = (ViewSpan*)anim->target;
+    ViewSpan* vs = lam::view_require_element(span);
     if (vs->transform && vs->transform->functions) {
         TransformFunction* tf = vs->transform->functions;
         while (tf) {
@@ -931,7 +935,7 @@ AnimationInstance* css_animation_create(AnimationScheduler* scheduler,
     inst->on_finish = css_animation_finish;
 
     // set bounds from element's layout (absolute coordinates for dirty-region marking)
-    View* span = (View*)element;
+    View* span = static_cast<View*>(element);
     float abs_x = span->x, abs_y = span->y;
     ViewElement* pe = span->parent_view();
     while (pe) { abs_x += pe->x; abs_y += pe->y; pe = pe->parent_view(); }

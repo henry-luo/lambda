@@ -120,6 +120,7 @@ static inline size_t get_rss_bytes() { return 0; }
 extern "C" {
     char* read_text_file(const char *filename);
     void write_text_file(const char *filename, const char *content);
+    int write_binary_file(const char* filename, const char* data, size_t len);
     TSTree* lambda_parse_source(TSParser* parser, const char* source);
 }
 
@@ -471,6 +472,117 @@ int run_script_file(Runtime *runtime, const char *script_path, bool use_mir, boo
     // The pool is shared with the Script, which is managed by the Runtime
     // Also do NOT delete output_input - it was allocated from the pool
     return 0;  // success
+}
+
+static char* lambda_string_literal_escape(const char* value) {
+    if (!value) return nullptr;
+    size_t out_len = 0;
+    for (const char* cursor = value; *cursor; cursor++) {
+        unsigned char ch = (unsigned char)*cursor;
+        if (ch == '\\' || ch == '"' || ch == '\n' || ch == '\r' || ch == '\t') {
+            out_len += 2;
+        } else {
+            out_len++;
+        }
+    }
+    char* out = (char*)mem_alloc(out_len + 1, MEM_CAT_TEMP);
+    if (!out) return nullptr;
+    size_t pos = 0;
+    for (const char* cursor = value; *cursor; cursor++) {
+        unsigned char ch = (unsigned char)*cursor;
+        if (ch == '\\') {
+            out[pos++] = '\\'; out[pos++] = '\\';
+        } else if (ch == '"') {
+            out[pos++] = '\\'; out[pos++] = '"';
+        } else if (ch == '\n') {
+            out[pos++] = '\\'; out[pos++] = 'n';
+        } else if (ch == '\r') {
+            out[pos++] = '\\'; out[pos++] = 'r';
+        } else if (ch == '\t') {
+            out[pos++] = '\\'; out[pos++] = 't';
+        } else {
+            out[pos++] = (char)ch;
+        }
+    }
+    out[pos] = '\0';
+    return out;
+}
+
+static bool write_pdf_to_html_bridge_script(const char* pdf_file, const char* tmp_script_path,
+                                            const char* opts_expr, const char* log_prefix) {
+    char* escaped_pdf = lambda_string_literal_escape(pdf_file);
+    if (!escaped_pdf) {
+        log_error("[%s] PDF package: failed to escape input path", log_prefix);
+        return false;
+    }
+
+    const char* opts = opts_expr ? opts_expr : "null";
+    int needed = snprintf(nullptr, 0,
+        "import pdf: lambda.package.pdf.pdf\n"
+        "let doc^err = input(\"%s\", 'pdf')\n"
+        "pdf.pdf_to_html(doc, %s)\n",
+        escaped_pdf, opts);
+    if (needed <= 0) {
+        mem_free(escaped_pdf);
+        log_error("[%s] PDF package: failed to size bridge script", log_prefix);
+        return false;
+    }
+    char* script_buf = (char*)mem_alloc((size_t)needed + 1, MEM_CAT_TEMP);
+    if (!script_buf) {
+        mem_free(escaped_pdf);
+        log_error("[%s] PDF package: failed to allocate bridge script", log_prefix);
+        return false;
+    }
+    snprintf(script_buf, (size_t)needed + 1,
+        "import pdf: lambda.package.pdf.pdf\n"
+        "let doc^err = input(\"%s\", 'pdf')\n"
+        "pdf.pdf_to_html(doc, %s)\n",
+        escaped_pdf, opts);
+    mem_free(escaped_pdf);
+
+    write_text_file(tmp_script_path, script_buf);
+    mem_free(script_buf);
+    return true;
+}
+
+static char* convert_pdf_to_html_temp(const char* pdf_file, const char* tmp_script_path,
+                                      const char* temp_html, const char* opts_expr,
+                                      const char* log_prefix) {
+    if (!write_pdf_to_html_bridge_script(pdf_file, tmp_script_path, opts_expr, log_prefix)) {
+        return nullptr;
+    }
+
+    Runtime pdf_runtime;
+    runtime_init(&pdf_runtime);
+    pdf_runtime.current_dir = const_cast<char*>("./");
+    pdf_runtime.import_base_dir = "./";
+
+    Input* script_result = run_script_mir(&pdf_runtime, nullptr,
+                                           (char*)tmp_script_path, false);
+
+    bool ok = (script_result && get_type_id(script_result->root) == LMD_TYPE_ELEMENT);
+    char* result_path = nullptr;
+    if (ok) {
+        String* html_str = format_html(script_result->pool, script_result->root);
+        if (html_str && html_str->chars) {
+            write_binary_file(temp_html, html_str->chars, html_str->len);
+            result_path = mem_strdup(temp_html, MEM_CAT_TEMP);
+            log_info("[%s] PDF rendered to %s (%u bytes)",
+                     log_prefix, temp_html, html_str->len);
+        } else {
+            log_error("[%s] PDF package: format_html returned null", log_prefix);
+            ok = false;
+        }
+    } else {
+        log_error("[%s] PDF package pipeline failed for %s", log_prefix, pdf_file);
+        if (script_result && get_type_id(script_result->root) == LMD_TYPE_ERROR) {
+            LambdaError* le = get_persistent_last_error();
+            if (le) { err_print(le); clear_persistent_last_error(); }
+        }
+    }
+
+    runtime_cleanup(&pdf_runtime);
+    return ok ? result_path : nullptr;
 }
 
 void run_assertions() {
@@ -1392,7 +1504,8 @@ int main(int argc, char *argv[]) {
             }
             if (!js_file) js_file = argv[2];  // fallback
 
-            char* js_source = read_text_file(js_file);
+            size_t js_source_len = 0;
+            char* js_source = read_binary_file(js_file, &js_source_len);
             if (!js_source) {
                 printf("Error: Could not read file '%s'\n", js_file);
                 runtime_cleanup(&runtime);
@@ -1491,7 +1604,7 @@ int main(int argc, char *argv[]) {
                 js_store_process_argv(js_argc_store, js_argv_store);
             }
 
-            Item result = transpile_js_to_mir(&runtime, js_source, js_file);
+            Item result = transpile_js_to_mir_len(&runtime, js_source, js_source_len, js_file);
 
             // JS mode: no REPL printing of last expression value
             // (JS spec: scripts don't print their completion value)
@@ -1998,13 +2111,14 @@ int main(int argc, char *argv[]) {
         // Check for help first
         if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
             printf("Lambda HTML Renderer v1.0\n\n");
-            printf("Usage: %s render <input.html|input.tex|input.ls> -o <output.svg|output.pdf|output.png|output.jpg> [options]\n", argv[0]);
+            printf("Usage: %s render <input.html|input.pdf|input.tex|input.ls> -o <output.svg|output.pdf|output.png|output.jpg> [options]\n", argv[0]);
             printf("\nDescription:\n");
-            printf("  The 'render' command layouts an HTML, LaTeX, or Lambda script file and renders the result as SVG, PDF, PNG, JPEG, or DVI.\n");
+            printf("  The 'render' command layouts an HTML, PDF, LaTeX, or Lambda script file and renders the result as SVG, PDF, PNG, JPEG, or DVI.\n");
             printf("  It parses the input (converting LaTeX to HTML or evaluating Lambda script if needed), applies CSS styles,\n");
             printf("  calculates layout, and generates output in the specified format based on file extension.\n");
             printf("\nSupported Input Formats:\n");
             printf("  .html, .htm    HTML documents\n");
+            printf("  .pdf           PDF documents (converted through Lambda PDF package)\n");
             printf("  .tex, .latex   LaTeX documents (converted to HTML for rendering)\n");
             printf("  .ls            Lambda scripts (evaluated and rendered)\n");
             printf("  .mmd           Mermaid diagrams (rendered via graph layout)\n");
@@ -2028,6 +2142,7 @@ int main(int argc, char *argv[]) {
             printf("  -h, --help               Show this help message\n");
             printf("\nExamples:\n");
             printf("  %s render index.html -o output.svg        # Auto-size to content\n", argv[0]);
+            printf("  %s render document.pdf -o output.svg      # Render PDF through Lambda PDF package\n", argv[0]);
             printf("  %s render script.ls -o output.pdf         # Render Lambda script result\n", argv[0]);
             printf("  %s render index.html -o output.pdf        # Auto-size to content\n", argv[0]);
             printf("  %s render index.html -o output.png        # Auto-size to content\n", argv[0]);
@@ -2144,8 +2259,8 @@ int main(int argc, char *argv[]) {
 
         // Validate required arguments
         if (!html_file) {
-            printf("Error: render command requires an HTML input file\n");
-            printf("Usage: %s render <input.html> -o <output.svg|output.pdf|output.png|output.jpg>\n", argv[0]);
+            printf("Error: render command requires an input file\n");
+            printf("Usage: %s render <input.html|input.pdf|input.tex|input.ls> -o <output.svg|output.pdf|output.png|output.jpg>\n", argv[0]);
             printf("Use '%s render --help' for more information\n", argv[0]);
             log_finish();
             return 1;
@@ -2153,7 +2268,7 @@ int main(int argc, char *argv[]) {
 
         if (!output_file) {
             printf("Error: render command requires an output file (-o option)\n");
-            printf("Usage: %s render <input.html> -o <output.svg|output.pdf|output.png|output.jpg>\n", argv[0]);
+            printf("Usage: %s render <input.html|input.pdf|input.tex|input.ls> -o <output.svg|output.pdf|output.png|output.jpg>\n", argv[0]);
             printf("Use '%s render --help' for more information\n", argv[0]);
             log_finish();
             return 1;
@@ -2305,12 +2420,47 @@ int main(int argc, char *argv[]) {
             }
         }
 
+        const char* output_ext = strrchr(output_file, '.');
+        char* render_pdf_temp_input = nullptr;
+        if (input_ext && strcmp(input_ext, ".pdf") == 0) {
+            if (output_ext && strcmp(output_ext, ".pdf") == 0) {
+                FileCopyOptions copy_opts = { true, false };
+                int copy_status = file_copy(html_file, output_file, &copy_opts);
+                if (copy_status == 0) {
+                    printf("PDF copied successfully to '%s'\n", output_file);
+                } else {
+                    printf("Error: Failed to write PDF output '%s'\n", output_file);
+                }
+                log_finish();
+                return copy_status == 0 ? 0 : 1;
+            }
+            log_info("[render] PDF detected — using Lambda PDF package in-memory element pipeline");
+            const char* render_pdf_bridge = "temp/_render_pdf_bridge.ls";
+            if (!write_pdf_to_html_bridge_script(html_file, render_pdf_bridge, "null", "render")) {
+                printf("Error: Failed to prepare PDF render bridge for '%s'\n", html_file);
+                log_finish();
+                return 1;
+            }
+            render_pdf_temp_input = mem_strdup(render_pdf_bridge, MEM_CAT_TEMP);
+            if (!render_pdf_temp_input) {
+                printf("Error: Failed to allocate PDF render bridge path\n");
+                file_delete(render_pdf_bridge);
+                log_finish();
+                return 1;
+            }
+            html_file = render_pdf_temp_input;
+        }
+
         // Determine output format based on file extension
-        const char* ext = strrchr(output_file, '.');
+        const char* ext = output_ext;
         int exit_code;
 
         if (ext && strcmp(ext, ".dvi") == 0) {
             printf("Error: DVI output is no longer supported. Use .svg, .pdf, .png, or .jpg instead.\n");
+            if (render_pdf_temp_input) {
+                file_delete(render_pdf_temp_input);
+                mem_free(render_pdf_temp_input);
+            }
             log_finish();
             return 1;
         } else if (ext && strcmp(ext, ".pdf") == 0) {
@@ -2340,8 +2490,17 @@ int main(int argc, char *argv[]) {
         } else {
             printf("Error: Unsupported output format. Use .svg, .pdf, .png, .jpg, or .jpeg extension\n");
             printf("Supported formats: .svg (SVG), .pdf (PDF), .png (PNG), .jpg/.jpeg (JPEG)\n");
+            if (render_pdf_temp_input) {
+                file_delete(render_pdf_temp_input);
+                mem_free(render_pdf_temp_input);
+            }
             log_finish();
             return 1;
+        }
+
+        if (render_pdf_temp_input) {
+            file_delete(render_pdf_temp_input);
+            mem_free(render_pdf_temp_input);
         }
 
         log_debug("render completed with result: %d", exit_code);
@@ -2709,77 +2868,37 @@ int main(int argc, char *argv[]) {
         }
 
         // ============================================================
-        // PDF → HTML pre-conversion via the Lambda PDF package
+        // PDF → Lambda element-tree view via the Lambda PDF package
         // ============================================================
-        // The legacy C++ pipeline (load_pdf_doc → ViewTree) is bypassed:
-        // we run lambda/package/pdf to convert the PDF into an HTML
-        // document containing one <svg> per page, then hand that HTML
-        // off to view_doc_in_window_with_events. This mirrors the
-        // .mmd/.d2/.dot graph pre-conversion above.
-        char* pdf_temp_html = nullptr;
+        // The legacy C++ pipeline (load_pdf_doc → ViewTree) is bypassed.
+        // We hand a tiny Lambda bridge script to the normal .ls view loader;
+        // the script returns an <html> document containing one <svg> per page.
+        // Radiant then builds the DOM directly from that element tree.
+        char* pdf_temp_script = nullptr;
         if (ext && strcmp(ext, ".pdf") == 0) {
-            log_info("[view] PDF detected — using Lambda PDF package pipeline");
+            log_info("[view] PDF detected — using Lambda PDF package in-memory element pipeline");
 
-            // Build a Lambda bridge script. pdf.pdf_to_html is `pn`, so
-            // we wrap it in main() and invoke run_script_mir with
-            // run_main=true. The script returns the <html> element,
-            // which we then serialize via format_html.
-            char script_buf[2048];
-            snprintf(script_buf, sizeof(script_buf),
-                "import pdf: .lambda.package.pdf.pdf\n"
-                "pn main() {\n"
-                "    let doc^err = input(\"%s\", 'pdf')\n"
-                "    return pdf.pdf_to_html(doc, null)\n"
-                "}\n",
-                filename);
-
-            const char* tmp_script_path = "temp/_view_pdf_bridge.ls";
-            write_text_file(tmp_script_path, script_buf);
-
-            Runtime pdf_runtime;
-            runtime_init(&pdf_runtime);
-            pdf_runtime.current_dir = const_cast<char*>("./");
-            pdf_runtime.import_base_dir = "./";  // resolve .lambda.* from project root
-
-            Input* script_result = run_script_mir(&pdf_runtime, nullptr,
-                                                   (char*)tmp_script_path, true);
-
-            bool ok = (script_result &&
-                       get_type_id(script_result->root) == LMD_TYPE_ELEMENT);
-            if (ok) {
-                // format_html preserves SVG/foreign element attributes while
-                // producing HTML5-friendly output for the viewer shell.
-                String* html_str = format_html(script_result->pool, script_result->root);
-                if (html_str && html_str->chars) {
-                    const char* temp_html = "./temp/lambda_view_pdf.html";
-                    write_text_file(temp_html, html_str->chars);
-                    pdf_temp_html = mem_strdup(temp_html, MEM_CAT_TEMP);
-                    log_info("[view] PDF rendered to %s (%u bytes)",
-                             temp_html, html_str->len);
-                } else {
-                    log_error("[view] PDF package: format_html returned null");
-                    ok = false;
-                }
-            } else {
-                log_error("[view] PDF package pipeline failed for %s", filename);
-                if (script_result &&
-                    get_type_id(script_result->root) == LMD_TYPE_ERROR) {
-                    LambdaError* le = get_persistent_last_error();
-                    if (le) { err_print(le); clear_persistent_last_error(); }
-                }
-            }
-            runtime_cleanup(&pdf_runtime);
-
-            if (!ok) {
-                printf("Error: Failed to convert PDF '%s' via Lambda PDF package\n", filename);
+            const char* view_pdf_bridge = "temp/_view_pdf_bridge.ls";
+            if (!write_pdf_to_html_bridge_script(filename, view_pdf_bridge, "{max_pages: 48}", "view")) {
+                printf("Error: Failed to prepare PDF view bridge for '%s'\n", filename);
                 if (temp_file_path) { file_delete(temp_file_path); mem_free(temp_file_path); }
                 log_finish();
                 return 1;
             }
 
-            // Swap filename/ext to the freshly produced HTML.
-            filename = pdf_temp_html;
-            ext = ".html";
+            // Hand the bridge script to the normal Lambda view loader. The
+            // script returns the constructed <html>/<svg> element tree, so
+            // Radiant builds the DOM directly without XML/HTML serialization.
+            pdf_temp_script = mem_strdup(view_pdf_bridge, MEM_CAT_TEMP);
+            if (!pdf_temp_script) {
+                printf("Error: Failed to allocate PDF view bridge path\n");
+                file_delete(view_pdf_bridge);
+                if (temp_file_path) { file_delete(temp_file_path); mem_free(temp_file_path); }
+                log_finish();
+                return 1;
+            }
+            filename = pdf_temp_script;
+            ext = ".ls";
         }
 
         if (ext && (strcmp(ext, ".pdf") == 0 ||
@@ -2813,10 +2932,10 @@ int main(int argc, char *argv[]) {
             file_delete(temp_file_path);
             mem_free(temp_file_path);
         }
-        // Cleanup temp HTML produced by PDF→HTML conversion
-        if (pdf_temp_html) {
-            file_delete(pdf_temp_html);
-            mem_free(pdf_temp_html);
+        // Cleanup temp Lambda bridge script produced for PDF view.
+        if (pdf_temp_script) {
+            file_delete(pdf_temp_script);
+            mem_free(pdf_temp_script);
         }
 
         fprintf(stderr, "view command completed with result: %d\n", exit_code);
@@ -3277,6 +3396,7 @@ int main(int argc, char *argv[]) {
         int batch_test_count = 0;  // diagnostic: track how many tests processed
         bool batch_in_test = false; // true between BATCH_START and BATCH_END (for crash recovery)
         char* saved_harness_src = NULL;  // kept for recompilation after crash recovery
+        size_t saved_harness_len = 0;
 
 #ifndef _WIN32
         // Install signal handlers ONCE for the entire batch loop.
@@ -3325,11 +3445,12 @@ int main(int argc, char *argv[]) {
                 }
 
                 memset(&preamble, 0, sizeof(preamble));
-                Item pres = transpile_js_to_mir_preamble(&runtime, harness_src, "<harness>", &preamble);
+                Item pres = transpile_js_to_mir_preamble_len(&runtime, harness_src, total_read, "<harness>", &preamble);
 
                 // Save harness source for recompilation after crash recovery
                 if (saved_harness_src) mem_free(saved_harness_src);
                 saved_harness_src = harness_src;  // take ownership instead of freeing
+                saved_harness_len = total_read;
 
                 if (preamble.mir_ctx) {
                     has_preamble = true;
@@ -3349,6 +3470,7 @@ int main(int argc, char *argv[]) {
             // support inline source protocol: source:<name>:<length>
             // reads <length> bytes of JS source directly from stdin
             char* js_source = NULL;
+            size_t js_source_len = 0;
             bool inline_source = false;
             if (strncmp(line, "source:", 7) == 0) {
                 // parse source:<name>:<length>
@@ -3368,6 +3490,7 @@ int main(int argc, char *argv[]) {
                     total_read += n;
                 }
                 js_source[total_read] = '\0';
+                js_source_len = total_read;
                 // consume trailing newline after source blob
                 int ch = fgetc(stdin);
                 if (ch != '\n' && ch != EOF) ungetc(ch, stdin);
@@ -3391,7 +3514,7 @@ int main(int argc, char *argv[]) {
                     continue;
                 }
 
-                js_source = read_text_file(script_path);
+                js_source = read_binary_file(script_path, &js_source_len);
                 if (!js_source) {
                     fprintf(stderr, "Error: Could not read file '%s'\n", script_path);
                     printf("\x01" "BATCH_END 1 0\n");
@@ -3437,8 +3560,8 @@ int main(int argc, char *argv[]) {
                     if (sigsetjmp(batch_timeout_jmp, 1) == 0) {
                         alarm(batch_timeout);
                         Item res = has_preamble
-                            ? transpile_js_to_mir_with_preamble(&runtime, js_source, script_path, &preamble)
-                            : transpile_js_to_mir(&runtime, js_source, script_path);
+                            ? transpile_js_to_mir_with_preamble_len(&runtime, js_source, js_source_len, script_path, &preamble)
+                            : transpile_js_to_mir_len(&runtime, js_source, js_source_len, script_path);
                         alarm(0);
                         batch_timeout_active = 0;
                         mir_error_active = 0;
@@ -3462,8 +3585,8 @@ int main(int argc, char *argv[]) {
                 mir_error_active = 1;
                 if (setjmp(mir_error_jmp) == 0) {
                     Item res = has_preamble
-                        ? transpile_js_to_mir_with_preamble(&runtime, js_source, script_path, &preamble)
-                        : transpile_js_to_mir(&runtime, js_source, script_path);
+                        ? transpile_js_to_mir_with_preamble_len(&runtime, js_source, js_source_len, script_path, &preamble)
+                        : transpile_js_to_mir_len(&runtime, js_source, js_source_len, script_path);
                     mir_error_active = 0;
                     if (res.item == ITEM_ERROR || js_check_exception()) {
                         result = 1;
@@ -3475,8 +3598,8 @@ int main(int argc, char *argv[]) {
             }
 #else
             Item res = has_preamble
-                ? transpile_js_to_mir_with_preamble(&runtime, js_source, script_path, &preamble)
-                : transpile_js_to_mir(&runtime, js_source, script_path);
+                ? transpile_js_to_mir_with_preamble_len(&runtime, js_source, js_source_len, script_path, &preamble)
+                : transpile_js_to_mir_len(&runtime, js_source, js_source_len, script_path);
             if (res.item == ITEM_ERROR || js_check_exception()) {
                 result = 1;
             }
@@ -3555,7 +3678,7 @@ int main(int argc, char *argv[]) {
                     }
                     if (saved_harness_src) {
                         memset(&preamble, 0, sizeof(preamble));
-                        Item pres = transpile_js_to_mir_preamble(&runtime, saved_harness_src, "<harness>", &preamble);
+                        Item pres = transpile_js_to_mir_preamble_len(&runtime, saved_harness_src, saved_harness_len, "<harness>", &preamble);
                         if (pres.item != ITEM_ERROR) {
                             has_preamble = true;
                             preamble_var_checkpoint = preamble.module_var_count;
@@ -3592,7 +3715,7 @@ int main(int argc, char *argv[]) {
                     }
                     if (saved_harness_src) {
                         memset(&preamble, 0, sizeof(preamble));
-                        Item pres = transpile_js_to_mir_preamble(&runtime, saved_harness_src, "<harness>", &preamble);
+                        Item pres = transpile_js_to_mir_preamble_len(&runtime, saved_harness_src, saved_harness_len, "<harness>", &preamble);
                         if (pres.item != ITEM_ERROR) {
                             has_preamble = true;
                             preamble_var_checkpoint = preamble.module_var_count;

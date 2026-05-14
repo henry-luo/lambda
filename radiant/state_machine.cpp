@@ -8,6 +8,7 @@
 #include "text_control.hpp"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
+#include "../lib/tagged.hpp"
 #include "../lib/log.h"
 
 #ifndef NDEBUG
@@ -246,7 +247,7 @@ static DomNode* boundary_root(const DomBoundary* boundary) {
 static int boundary_legacy_offset(const DomBoundary* boundary) {
     if (!boundary || !boundary->node) return 0;
     if (boundary->node->is_text()) {
-        return (int)dom_text_utf16_to_utf8((DomText*)boundary->node, boundary->offset);
+        return (int)dom_text_utf16_to_utf8(lam::dom_require_text(boundary->node), boundary->offset);
     }
     return (int)boundary->offset;
 }
@@ -254,7 +255,7 @@ static int boundary_legacy_offset(const DomBoundary* boundary) {
 static View* focus_validation_root(View* view) {
     View* root = view;
     while (root && root->parent) {
-        root = (View*)root->parent;
+        root = static_cast<View*>(root->parent);
     }
     return root;
 }
@@ -263,7 +264,7 @@ static bool focus_path_contains(View* focused, View* candidate) {
     View* node = focused;
     while (node) {
         if (node == candidate) return true;
-        node = (View*)node->parent;
+        node = static_cast<View*>(node->parent);
     }
     return false;
 }
@@ -272,7 +273,7 @@ static bool view_path_contains(View* target, View* candidate) {
     View* node = target;
     while (node) {
         if (node == candidate) return true;
-        node = (View*)node->parent;
+        node = static_cast<View*>(node->parent);
     }
     return false;
 }
@@ -285,13 +286,13 @@ static bool view_has_document_root(View* view) {
 
 static uint32_t legacy_view_offset_limit(View* view) {
     if (!view) return 0;
-    DomNode* node = (DomNode*)view;
+    DomNode* node = static_cast<DomNode*>(view);
     if (node->is_text()) {
-        DomText* text = (DomText*)node;
+        DomText* text = lam::dom_require_text(node);
         return dom_text_utf16_to_utf8(text, dom_text_utf16_length(text));
     }
     if (node->is_element()) {
-        DomElement* elem = (DomElement*)node;
+        DomElement* elem = lam::dom_require_element(node);
         if (tc_is_text_control(elem)) {
             tc_ensure_init(elem);
             if (elem->form) return elem->form->current_value_len;
@@ -311,7 +312,7 @@ static void validate_text_control_form_state(DocState* state, DomElement* elem,
     }
     uint32_t selection_start = 0, selection_end = 0;
     uint8_t selection_direction = 0;
-    form_control_get_selection(state, (View*)elem, &selection_start, &selection_end, &selection_direction);
+    form_control_get_selection(state, static_cast<View*>(elem), &selection_start, &selection_end, &selection_direction);
     if (selection_start > form->current_value_u16_len ||
         selection_end > form->current_value_u16_len) {
         report_fail(report, "text-control selection exceeds value length");
@@ -337,10 +338,10 @@ static void validate_transient_ui_target(View* view, const char* name,
 
 static View* find_live_view_by_id(DomNode* node, uint32_t view_id) {
     if (!node || view_id == 0) return NULL;
-    View* view = (View*)node;
+    View* view = static_cast<View*>(node);
     if (view->id == view_id) return view;
     if (node->is_element()) {
-        DomElement* element = (DomElement*)node;
+        DomElement* element = lam::dom_require_element(node);
         DomNode* child = element->first_child;
         while (child) {
             View* found = find_live_view_by_id(child, view_id);
@@ -354,7 +355,7 @@ static View* find_live_view_by_id(DomNode* node, uint32_t view_id) {
 static View* find_doc_live_view_by_id(DocState* state, uint32_t view_id) {
     if (!state || !state->owner_store || !state->owner_store->document || view_id == 0) return NULL;
     DomDocument* doc = state->owner_store->document;
-    DomNode* root = doc->root ? (DomNode*)doc->root : (DomNode*)doc->html_root;
+    DomNode* root = doc->root ? static_cast<DomNode*>(doc->root) : NULL;
     return find_live_view_by_id(root, view_id);
 }
 
@@ -383,10 +384,10 @@ static void validate_focus_node(DocState* state, View* node, View* focused,
     }
 
     if (node->is_element()) {
-        DomElement* element = (DomElement*)node;
+        DomElement* element = lam::dom_require_element(node);
         DomNode* child = element->first_child;
         while (child) {
-            validate_focus_node(state, (View*)child, focused, report, focus_count);
+            validate_focus_node(state, static_cast<View*>(child), focused, report, focus_count);
             child = child->next_sibling;
         }
     }
@@ -426,10 +427,10 @@ static void validate_hover_node(DocState* state, View* node, View* hovered,
     }
 
     if (node->is_element()) {
-        DomElement* element = (DomElement*)node;
+        DomElement* element = lam::dom_require_element(node);
         DomNode* child = element->first_child;
         while (child) {
-            validate_hover_node(state, (View*)child, hovered, report, hover_count);
+            validate_hover_node(state, static_cast<View*>(child), hovered, report, hover_count);
             child = child->next_sibling;
         }
     }
@@ -447,7 +448,7 @@ static void validate_hover_invariants(DocState* state,
     View* root = NULL;
     if (state->owner_store && state->owner_store->document) {
         DomDocument* doc = state->owner_store->document;
-        root = doc->root ? (View*)doc->root : (View*)doc->html_root;
+        root = doc->root ? static_cast<View*>(doc->root) : NULL;
     }
     if (!root) root = focus_validation_root(hovered);
     if (!root) return;
@@ -472,10 +473,10 @@ static void validate_active_node(DocState* state, View* node, View* active,
     }
 
     if (node->is_element()) {
-        DomElement* element = (DomElement*)node;
+        DomElement* element = lam::dom_require_element(node);
         DomNode* child = element->first_child;
         while (child) {
-            validate_active_node(state, (View*)child, active, report, active_count);
+            validate_active_node(state, static_cast<View*>(child), active, report, active_count);
             child = child->next_sibling;
         }
     }
@@ -493,7 +494,7 @@ static void validate_active_invariants(DocState* state,
     View* root = NULL;
     if (state->owner_store && state->owner_store->document) {
         DomDocument* doc = state->owner_store->document;
-        root = doc->root ? (View*)doc->root : (View*)doc->html_root;
+        root = doc->root ? static_cast<View*>(doc->root) : NULL;
     }
     if (!root) root = focus_validation_root(active);
     if (!root) return;
@@ -602,8 +603,8 @@ static void validate_selection_invariants(DocState* state,
 
     if (state->selection) {
         SelectionState* legacy = state->selection;
-        if ((DomNode*)legacy->anchor_view != selection->anchor.node ||
-            (DomNode*)legacy->focus_view != selection->focus.node ||
+        if (static_cast<DomNode*>(legacy->anchor_view) != selection->anchor.node ||
+            static_cast<DomNode*>(legacy->focus_view) != selection->focus.node ||
             legacy->anchor_offset != boundary_legacy_offset(&selection->anchor) ||
             legacy->focus_offset != boundary_legacy_offset(&selection->focus) ||
             legacy->is_collapsed != selection->is_collapsed) {
@@ -615,7 +616,7 @@ static void validate_selection_invariants(DocState* state,
     }
 
     if (state->caret && selection->is_collapsed) {
-        if ((DomNode*)state->caret->view != selection->focus.node ||
+        if (static_cast<DomNode*>(state->caret->view) != selection->focus.node ||
             state->caret->char_offset != boundary_legacy_offset(&selection->focus)) {
             report_fail(report, "legacy caret projection is stale");
         }
@@ -665,10 +666,11 @@ static void validate_view_state_registry(DocState* state,
                     report_fail(report, "view form state has invalid index");
                 }
                 if (live_view) {
-                    if (!live_view->is_element() || !((DomElement*)live_view)->form) {
+                    DomElement* live_element = live_view->is_element() ? lam::dom_require_element(live_view) : NULL;
+                    if (!live_element || !live_element->form) {
                         report_fail(report, "view form state is not attached to a form control");
                     } else {
-                        FormControlProp* form = ((DomElement*)live_view)->form;
+                        FormControlProp* form = live_element->form;
                         if (form->option_count >= 0) {
                             if (view_state->data.form.selected_index >= form->option_count) {
                                 report_fail(report, "view form state selected index exceeds option count");
@@ -712,7 +714,7 @@ bool radiant_state_validate_interaction(DocState* state,
             report_fail(report, "focused target is not focusable");
         }
         if (state->focus->current->is_element()) {
-            validate_text_control_form_state(state, (DomElement*)state->focus->current, report);
+            validate_text_control_form_state(state, lam::dom_require_element(state->focus->current), report);
         }
     }
 
@@ -739,7 +741,7 @@ bool radiant_state_validate_interaction(DocState* state,
             report_fail(report, "caret target differs from focus target");
         }
         if (state->caret->view && state->caret->view->is_element()) {
-            DomElement* elem = (DomElement*)state->caret->view;
+            DomElement* elem = lam::dom_require_element(state->caret->view);
             if (!tc_is_text_control(elem) && state->caret->visible) {
                 report_fail(report, "visible element caret target is not editable");
             }
@@ -774,8 +776,9 @@ bool radiant_state_validate_interaction(DocState* state,
 
     DomElement* active_text_control = tc_get_active_element(state);
     View* focused = state->focus ? state->focus->current : NULL;
-    if (focused && focused->is_element() && tc_is_text_control((DomElement*)focused)) {
-        if (active_text_control && active_text_control != (DomElement*)focused) {
+    DomElement* focused_element = focused && focused->is_element() ? lam::dom_require_element(focused) : NULL;
+    if (focused_element && tc_is_text_control(focused_element)) {
+        if (active_text_control && active_text_control != focused_element) {
             report_fail(report, "active text control differs from focus target");
         }
     } else if (active_text_control) {
@@ -787,7 +790,7 @@ bool radiant_state_validate_interaction(DocState* state,
         if (!state->open_dropdown->is_element()) {
             report_fail(report, "open dropdown target is not an element");
         } else {
-            DomElement* elem = (DomElement*)state->open_dropdown;
+            DomElement* elem = lam::dom_require_element(state->open_dropdown);
             if (!elem->form || !form_control_is_dropdown_open(state, state->open_dropdown)) {
                 report_fail(report, "open dropdown state disagrees with form control");
             }
@@ -800,7 +803,7 @@ bool radiant_state_validate_interaction(DocState* state,
     if (state->context_menu_target) {
         validate_transient_ui_target(state->context_menu_target, "context menu target is detached", report);
         if (!state->context_menu_target->is_element() ||
-            !tc_is_text_control((DomElement*)state->context_menu_target)) {
+            !tc_is_text_control(lam::dom_require_element(state->context_menu_target))) {
             report_fail(report, "context menu target is not a text control");
         }
         if (state->context_menu_width < 0 || state->context_menu_height < 0) {

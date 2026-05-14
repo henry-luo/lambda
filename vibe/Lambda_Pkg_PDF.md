@@ -182,8 +182,8 @@ For accessibility (screen readers), emit `<title>` inside each line's `<text>` c
 │   │                                     │
 │   ├─→ resolve.ls   (indirect refs,      │
 │   │                 page tree walk)     │
-│   ├─→ stream.ls    (content-stream      │
-│   │                 operator tokenize)  │
+│   ├─→ native pdf_parse_content_stream   │
+│   │                 (operator tokenize) │
 │   ├─→ interp.ls    (graphics state      │
 │   │                 stack, CTM, color)  │
 │   ├─→ text.ls      (Tj/TJ/Tm → glyphs)  │
@@ -213,7 +213,6 @@ For accessibility (screen readers), emit `<title>` inside each line's `<text>` c
 lambda/package/pdf/
 ├── pdf.ls          // public API: pdf_to_html(tree), pdf_to_svg(tree, page_idx)
 ├── resolve.ls      // indirect-ref dereferencing, page-tree walk, get_page(n)
-├── stream.ls       // content-stream → list of (op, operands) tuples
 ├── interp.ls       // operator dispatch via match; graphics state stack
 ├── text.ls         // text-mode operators (BT/ET/Tj/TJ/Tf/Tm/Td/TD/T*)
 ├── path.ls         // path-construction operators (m/l/c/v/y/re/h) + paint (S/s/f/B/b/n)
@@ -378,7 +377,7 @@ Lambda interpreter produces:
 
 | PDF.js technique | Adopted in Lambda PDF package |
 |------------------|-------------------------------|
-| Operator-list intermediate representation | `stream.ls` produces `[Op]` list before interpretation |
+| Operator-list intermediate representation | native `pdf_parse_content_stream` produces `[Op]` list before interpretation |
 | Line-clustering of text runs (used by PDF.js to build its text layer) | Same heuristic, but applied to SVG `<text>` directly — see §2.6 |
 | Standard 14 font CSS fallback table | `font.ls` table mapping (Helvetica → "Arial, sans-serif", etc.) |
 | Per-page lazy rendering | `pdf_to_svg(pdf, n)` is page-scoped; consumer can render on demand |
@@ -399,7 +398,7 @@ PDF.js techniques **not** adopted:
 
 | Phase | Deliverable | Lines (est.) |
 |-------|-------------|--------------|
-| **Phase 1: Skeleton** | `pdf.ls`, `resolve.ls`, `stream.ls`; emit empty `<svg>` per page with correct viewBox | ~600 |
+| **Phase 1: Skeleton** | `pdf.ls`, `resolve.ls`, native content-stream tokenizer; emit empty `<svg>` per page with correct viewBox | ~600 |
 | **Phase 2: Text** | `interp.ls`, `text.ls`, `font.ls`; render text-only PDFs (e.g., simple academic papers) | +1,000 |
 | **Phase 3: Paths & Color** | `path.ls`, `color.ls`; render vector graphics, charts, line art | +800 |
 | **Phase 4: Images** | `image.ls`; embed raster images via data URI (decoding stays in C) | +400 |

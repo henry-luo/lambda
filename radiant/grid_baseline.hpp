@@ -20,6 +20,7 @@
 
 #include "view.hpp"
 #include "grid.hpp"
+#include "../lib/tagged.hpp"
 
 namespace radiant {
 namespace grid {
@@ -118,7 +119,7 @@ inline float compute_item_first_baseline(ViewBlock* view) {
         DomNode* child = view->first_child;
         while (child) {
             if (child->is_element()) {
-                ViewBlock* child_view = (ViewBlock*)child->as_element();
+                ViewBlock* child_view = lam::unsafe_view_block_element_storage(child->as_element());
                 float child_baseline = compute_item_first_baseline(child_view);
                 if (child_baseline >= 0) {
                     return child_view->y + child_baseline;

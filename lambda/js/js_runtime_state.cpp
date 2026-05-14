@@ -93,7 +93,7 @@ extern "C" Item js_to_property_key(Item key) {
         return (Item){.item = s2it(heap_create_name("null", 4))};
     if (kt == LMD_TYPE_UNDEFINED)
         return (Item){.item = s2it(heap_create_name("undefined", 9))};
-    if (kt == LMD_TYPE_MAP || kt == LMD_TYPE_ARRAY || kt == LMD_TYPE_ELEMENT) {
+    if (kt == LMD_TYPE_MAP || kt == LMD_TYPE_ARRAY || kt == LMD_TYPE_ELEMENT || kt == LMD_TYPE_FUNC) {
         key = js_to_primitive(key, JS_HINT_STRING);
         if (js_check_exception()) return ItemNull;
         if (js_key_is_symbol(key)) return js_symbol_to_key(key);
@@ -260,6 +260,7 @@ extern "C" void js_path_reset();
 extern "C" void js_os_reset();
 extern "C" void js_url_module_reset();
 extern "C" void js_util_reset();
+extern "C" void js_reset_template_registry(void);
 
 extern "C" void js_batch_reset() {
     // increment epoch to invalidate cached heap objects
@@ -286,6 +287,7 @@ extern "C" void js_batch_reset() {
     js_reset_262_object();
     // reset interned __proto__ key (allocated in old pool)
     js_reset_proto_key();
+    js_reset_template_registry();
     // reset function pointer → JsFunction cache (JsFunction* in old pool)
     js_func_cache_reset();
     // reset builtin function cache (defined later in file, called via forward decl)
@@ -408,6 +410,7 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     js_reset_262_object();
     // reset interned __proto__ key
     js_reset_proto_key();
+    js_reset_template_registry();
     // reset function pointer → JsFunction cache
     js_func_cache_reset();
     js_builtin_cache_reset();
@@ -729,6 +732,9 @@ void js_reset_transient_call_state() {
     js_new_target = (Item){0};
     js_pending_new_target = (Item){0};
     js_has_pending_new_target = false;
+    js_super_this_bound_depth = 0;
+    memset(js_super_this_bound_stack, 0, sizeof(js_runtime_state.super_this_bound_stack));
+    memset(js_super_this_value_stack, 0, sizeof(js_runtime_state.super_this_value_stack));
     js_pending_call_args = NULL;
     js_pending_call_argc = 0;
     js_pending_args_is_strict = 0;
@@ -779,6 +785,10 @@ void js_assert_batch_runtime_state_clear(const char* reset_name, bool include_he
         leak_count++;
         log_error("js-batch-state: %s left pending new.target item=%lld flag=%d",
             name, (long long)js_pending_new_target.item, js_has_pending_new_target ? 1 : 0);
+    }
+    if (js_super_this_bound_depth != 0) {
+        leak_count++;
+        log_error("js-batch-state: %s left super this binding depth=%d", name, js_super_this_bound_depth);
     }
     if (js_pending_call_args || js_pending_call_argc != 0) {
         leak_count++;

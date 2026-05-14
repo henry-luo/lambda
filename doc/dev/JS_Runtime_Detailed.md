@@ -673,6 +673,11 @@ PromiseJobs are routed through `js_job_queue.{h,cpp}`:
 
 The Promise Resolution Procedure now assimilates native promises and generic thenables. Reactions, missing-handler pass-through, executor throws, `.finally()` cleanup promises, and `await` thenables all flow through PromiseJobs. Resolver pairs share an `AlreadyResolved` guard, combinator element callbacks share per-element guards, and static Promise methods use a `NewPromiseCapability`-style constructor path for custom Promise constructors.
 
+Runtime helpers can also allocate and settle pending promises directly. This is
+used by host-backed asynchronous APIs such as `Atomics.waitAsync`: the runtime
+creates a pending Promise object, stores it in a rooted native waiter record, and
+later fulfills it with the final status string.
+
 **Limitations**: Max 1024 promises per run and max 8 chained handlers per promise.
 
 ---
@@ -753,19 +758,24 @@ Max 16 post-filters and 16 capture groups per regex.
 
 ```c
 struct JsTypedArray {
-    int element_type;    // Int8..Float64 (9 types)
-    int length;
-    int byte_length;
-    int byte_offset;
-    void* data;          // raw C buffer
-    JsArrayBuffer* buffer;
+    JsTypedArrayType element_type;  // Int8..BigUint64
+    int length;                     // element count
+    int byte_length;                // total visible bytes
+    int byte_offset;                // offset into backing buffer
+    void* data;                     // direct pointer to first visible element
+    JsArrayBuffer* buffer;          // backing ArrayBuffer/SAB
+    uint64_t buffer_item;           // identity-preserving .buffer item
+    bool length_tracking;           // true for length-tracking buffer views
+    bool is_buffer;                 // true for Node Buffer-backed Uint8Array
 };
 
 struct JsArrayBuffer {
     void* data;
     int byte_length;
+    int max_byte_length;
     bool detached;
     bool is_shared;
+    bool resizable;
 };
 ```
 
@@ -775,11 +785,92 @@ TypedArrays are Map objects with `map_kind = MAP_KIND_TYPED_ARRAY`. The `JsTyped
 
 ### 10.3 Supported Types
 
-Int8Array, Uint8Array, Uint8ClampedArray, Int16Array, Uint16Array, Int32Array, Uint32Array, Float32Array, Float64Array (9 types). BigInt64Array/BigUint64Array are not yet implemented.
+TypedArray support includes Int8Array, Uint8Array, Uint8ClampedArray,
+Int16Array, Uint16Array, Int32Array, Uint32Array, Float32Array, Float64Array,
+BigInt64Array, and BigUint64Array.
+
+BigInt typed arrays store 64-bit lanes in the same backing buffer model as the
+numeric typed arrays, but element conversion is BigInt-specific:
+- BigInt64Array writes use signed 64-bit wrapping.
+- BigUint64Array writes use unsigned 64-bit wrapping and can materialize values
+    above `INT64_MAX` through decimal BigInt construction.
+- Number values are rejected for BigInt typed arrays, and BigInt values are
+    rejected for Number typed arrays.
+- `%TypedArray%.from` and `%TypedArray%.of` preserve BigInt callback results;
+    native Number specialization must not be selected when BigInt literals or
+    BigInt typed-array lanes participate in arithmetic.
 
 ### 10.4 DataView
 
-`JsDataView` struct with `buffer`, `byte_offset`, `byte_length`. Map objects with `map_kind = MAP_KIND_DATAVIEW`. Methods: `getInt8`..`getFloat64`, `setInt8`..`setFloat64`, with endianness parameter.
+`JsDataView` struct with `buffer`, `byte_offset`, `byte_length`, and
+`buffer_item`. Map objects with `map_kind = MAP_KIND_DATAVIEW`. Methods:
+`getInt8`..`getFloat64`, `getBigInt64`, `getBigUint64`, and matching setters,
+with the endianness parameter honored for multi-byte accesses.
+
+### 10.5 ArrayBuffer, SharedArrayBuffer, and Resizable Views
+
+ArrayBuffer and SharedArrayBuffer share `JsArrayBuffer`. `is_shared` selects SAB
+semantics, while `resizable` and `max_byte_length` support resizable
+ArrayBuffer behavior. TypedArray views preserve the original buffer item in
+`buffer_item` so `.buffer` returns the same JS object identity rather than a new
+wrapper around the same native storage.
+
+Length-tracking TypedArrays are represented by `length_tracking=true` and compute
+their current visible length from the backing buffer on demand. Fixed-length
+views keep their original `length`/`byte_length`, and out-of-bounds checks route
+through the typed-array helpers before element access. TypedArray iterators also
+perform out-of-bounds checks on every step so a resized buffer cannot produce
+stale reads.
+
+SharedArrayBuffer uses the same raw byte storage with `is_shared=true`; it is not
+detached and is the required backing store for Atomics operations.
+
+### 10.6 Atomics and Waiter Simulation
+
+Atomics are implemented in `js_typed_array.cpp` over SharedArrayBuffer-backed
+integer typed arrays. Supported atomic element views are Int32Array and
+BigInt64Array for `wait`/`waitAsync`, and the integer/BigInt integer views for
+load/store/read-modify-write operations. Numeric operations use compiler atomic
+builtins with sequential consistency.
+
+`Atomics.wait` and `Atomics.waitAsync` use a fixed waiter table:
+
+```c
+struct JsAtomicsWaiter {
+    bool used;
+    int id;
+    int agent_slot;
+    JsArrayBuffer* buffer;
+    int index;
+    Item promise;          // pending waitAsync promise outside $262.agent
+    double deadline_ms;
+    bool has_deadline;
+    JsAtomicsWaiterStatus status;
+};
+```
+
+Waiters are keyed by backing buffer, element index, and simulated `$262.agent`
+slot. The waiter table stores Promise objects as GC roots so pending
+`waitAsync` results survive until `Atomics.notify` or timeout settlement.
+
+`Atomics.waitAsync` returns the spec result object:
+- `{ async: false, value: "not-equal" }` when the observed lane differs.
+- `{ async: false, value: "timed-out" }` for zero/negative finite timeout.
+- `{ async: true, value: promise }` outside `$262.agent` when a real pending
+    asynchronous wait is represented.
+
+Finite non-agent `waitAsync` timeouts are scheduled through `js_setTimeout()` so
+the Promise resolves asynchronously. `Atomics.notify` settles matching pending
+waiters with `"ok"`; virtual time advancement through `$262.agent.sleep()`
+settles expired waiters with `"timed-out"`.
+
+The test262 `$262.agent` implementation is cooperative, not threaded. Agent
+callbacks run synchronously, and reports are queued with an associated waiter id.
+`$262.agent.getReport()` returns a report only when the associated waiter is no
+longer pending, then rewrites the final wait-status suffix (`ok`, `timed-out`,
+or `not-equal`) as needed. This report-gated path avoids resuming a JIT async
+state machine from inside the simulated agent callback while preserving the
+test262 observable ordering for wait/notify tests.
 
 ---
 
@@ -983,6 +1074,14 @@ bindings. `MCONST_MODVAR` entries are skipped for true module reads, but they do
 not suppress capture propagation or closure-env loading when an ancestor
 parameter/local or lexical loop-head binding shadows that module variable.
 
+IIFE module-var promotion is intentionally conservative. Locals inside a normal
+top-level IIFE can be promoted to module vars because the function body is used
+as one-shot module initialization. A named function-expression IIFE that
+references its own name is different: the function value can escape and be
+called later, so its locals must stay per-call locals. Promoting those locals to
+module vars can preserve a TDZ sentinel from the first invocation and make a
+later self-call fail with a false `Cannot access '<name>' before initialization`.
+
 ### 18.3 Nested Require
 
 `js_save_module_vars()` / `js_restore_module_vars()` for nested `require()` calls.
@@ -1056,6 +1155,23 @@ Worker responses:
 - **File**: `test/js262/test262_baseline.txt`
 - **Update gate**: 0 regressions, 0 batch-lost, 0 crash-exits, count ≥ `STABLE_BASELINE_MIN` (21824)
 - **Partial list**: `test/js262/t262_partial.txt` with tags: `CRASH_N`, `SLOW_N`, `BATCH_KILL`, `TIMEOUT_N`
+
+### 19.7 Focused J42-9 Gates
+
+Recent Shared Memory / Atomics / BigInt typed-array work was validated with
+small focused manifests under `temp/` before running broader gates:
+- `temp/js42_atomics_waitasync.txt`: focused `Atomics.waitAsync` slice.
+- `temp/js42_atomics_all.txt`: full Atomics gate.
+- `temp/js42_sab_all.txt`: SharedArrayBuffer gate.
+- `temp/js42_bigint_ta_all.txt`: BigInt typed-array constructors and methods.
+- `temp/js42_retrieve_length_probe.txt`: regression probe for typed-array length
+    retrieval in constructor/method paths.
+
+For JIT-only failures, compare with `lambda.exe js-test-batch --mir-interp` on a
+small direct manifest. During the waitAsync agent work, the MIR interpreter
+passed the NaN-timeout agent case while JIT crashed, which pointed the final
+solution toward `$262.agent` report gating instead of direct async callback
+resume from the simulated agent.
 
 ---
 

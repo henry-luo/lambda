@@ -57,6 +57,7 @@ typedef struct JsTranspiler {
     int temp_var_counter;           // Counter for temporary variables
     int label_counter;              // Counter for labels
     bool in_expression;             // True when transpiling inside an expression (for function expressions)
+    bool in_async_function;         // True while building an async function body/parameters
     
     // Error handling
     bool has_errors;                // Error flag
@@ -135,6 +136,7 @@ bool js_transpiler_parse(JsTranspiler* tp, const char* source, size_t length);
 
 // Direct MIR transpilation entry point
 Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* filename);
+Item transpile_js_to_mir_len(Runtime* runtime, const char* js_source, size_t js_source_len, const char* filename);
 
 // Batch mode preamble support (two-module MIR split)
 struct JsModuleConstEntry;  // defined in transpile_js_mir.cpp
@@ -150,8 +152,12 @@ struct JsPreambleState {
 };
 Item transpile_js_to_mir_preamble(Runtime* runtime, const char* js_source, const char* filename,
                                    JsPreambleState* out_state);
+Item transpile_js_to_mir_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,
+                                      const char* filename, JsPreambleState* out_state);
 Item transpile_js_to_mir_with_preamble(Runtime* runtime, const char* js_source, const char* filename,
                                         const JsPreambleState* preamble);
+Item transpile_js_to_mir_with_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,
+                                           const char* filename, const JsPreambleState* preamble);
 void preamble_state_destroy(JsPreambleState* state);
 
 // Clean up all deferred MIR contexts (call at batch end or after heap_destroy on crash)

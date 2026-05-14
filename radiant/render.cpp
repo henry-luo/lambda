@@ -16,6 +16,7 @@
 #include "context_menu.hpp"
 #include "event_state_log.hpp"
 
+#include "../lib/tagged.hpp"
 #include "../lib/log.h"
 #include "../lib/font/font.h"
 #include "../lib/avl_tree.h"
@@ -654,8 +655,28 @@ void draw_color_glyph(RenderContext* rdcon, GlyphBitmap *bitmap, int x, int y) {
     }
 }
 
+static uint32_t glyph_bitmap_sample_pixel(const GlyphBitmap* bitmap, int src_y, int src_x) {
+    if (!bitmap || !bitmap->buffer || src_y < 0 || src_y >= bitmap->height ||
+        src_x < 0 || src_x >= bitmap->width) return 0;
+    if (bitmap->pixel_mode == GLYPH_PIXEL_MONO) {
+        int byte_index = src_x / 8;
+        int bit_index = 7 - (src_x % 8);
+        uint8_t byte_val = bitmap->buffer[src_y * bitmap->pitch + byte_index];
+        return (byte_val & (1 << bit_index)) ? 255 : 0;
+    }
+    if (bitmap->pixel_mode == GLYPH_PIXEL_GRAY) {
+        return bitmap->buffer[src_y * bitmap->pitch + src_x];
+    }
+    if (bitmap->pixel_mode == GLYPH_PIXEL_LCD) {
+        const uint8_t* subpixel = bitmap->buffer + src_y * bitmap->pitch + src_x * 3;
+        return ((uint32_t)subpixel[0] + (uint32_t)subpixel[1] + (uint32_t)subpixel[2] + 1) / 3;
+    }
+    return 0;
+}
+
 // draw a glyph bitmap into the doc surface
 void draw_glyph(RenderContext* rdcon, GlyphBitmap *bitmap, int x, int y) {
+    if (rdcon->color.a == 0) return;
     if (rdcon->dl) {
         bool is_color = (bitmap->pixel_mode == GLYPH_PIXEL_BGRA);
         dl_draw_glyph(rdcon->dl, bitmap, x, y, rdcon->color, is_color, &rdcon->block.clip,
@@ -687,9 +708,6 @@ void draw_glyph(RenderContext* rdcon, GlyphBitmap *bitmap, int x, int y) {
             (float)left + 0.5f, (float)top + 0.5f,
             (float)(right - left - 1), (float)(bottom - top - 1));
 
-    // handle monochrome bitmaps (1 bit per pixel) - common for some system fonts like Monaco
-    bool is_mono = (bitmap->pixel_mode == GLYPH_PIXEL_MONO);
-
     for (int i = top - y; i < bottom - y; i++) {
         int j_start = left - x;
         int j_end = right - x;
@@ -706,23 +724,14 @@ void draw_glyph(RenderContext* rdcon, GlyphBitmap *bitmap, int x, int y) {
         for (int j = j_start; j < j_end; j++) {
             if (x + j < 0 || x + j >= surface->width) continue;
 
-            uint32_t intensity;
-            if (is_mono) {
-                // for monochrome: each byte contains 8 pixels, MSB first
-                int byte_index = j / 8;
-                int bit_index = 7 - (j % 8);  // MSB is leftmost pixel
-                uint8_t byte_val = bitmap->buffer[i * bitmap->pitch + byte_index];
-                intensity = (byte_val & (1 << bit_index)) ? 255 : 0;
-            } else {
-                // grayscale: 1 byte per pixel
-                intensity = bitmap->buffer[i * bitmap->pitch + j];
-            }
+            uint32_t intensity = glyph_bitmap_sample_pixel(bitmap, i, j);
 
             if (intensity > 0) {
                 // blend the pixel with the background
                 uint8_t* p = (uint8_t*)(row_pixels + (x + j) * 4);
 
                 // important to use 32bit int for computation below
+                intensity = (intensity * rdcon->color.a + 127) / 255;
                 uint32_t v = 255 - intensity;
                 // can further optimize if background is a fixed color
                 if (rdcon->color.c == 0xFF000000) { // black text color (ABGR: alpha=FF, b=00, g=00, r=00)
@@ -792,7 +801,7 @@ static int compare_view_order(View* view_a, View* view_b) {
     View* child_b = chain_b[j];
 
     // Walk through siblings to find which comes first
-    for (View* sib = child_a; sib; sib = (View*)sib->next_sibling) {
+    for (View* sib = child_a; sib; sib = static_cast<View*>(sib->next_sibling)) {
         if (sib == child_b) {
             return -1;  // child_a comes before child_b
         }
@@ -964,7 +973,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
 
     // CSS 2.1 §11.2: text inherits visibility from parent element
     if (text_view->parent && text_view->parent->is_element()) {
-        DomElement* parent_elem = (DomElement*)text_view->parent;
+        DomElement* parent_elem = lam::dom_require_element(text_view->parent);
         if (parent_elem->in_line && parent_elem->in_line->visibility == VIS_HIDDEN) {
             log_debug("text hidden by parent visibility:hidden");
             return;
@@ -1027,7 +1036,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
     DomNode* parent = text_view->parent;
     while (parent) {
         if (parent->is_element()) {
-            DomElement* elem = (DomElement*)parent;
+            DomElement* elem = lam::dom_require_element(parent);
             CssEnum transform = get_text_transform_from_block(elem->blk);
             if (transform != CSS_VALUE_NONE) {
                 text_transform = transform;
@@ -1680,7 +1689,7 @@ void formatListNumber(StrBuf* buf, int num, CssEnum list_style) {
 void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
     if (!marker || !marker->is_element()) return;
 
-    DomElement* elem = (DomElement*)marker;
+    DomElement* elem = lam::dom_require_element(lam::view_dom_node(marker));
     MarkerProp* marker_prop = (MarkerProp*)elem->blk;
     if (!marker_prop) {
         log_debug("[MARKER RENDER] No marker_prop found");
@@ -2022,7 +2031,7 @@ void render_litem_view(RenderContext* rdcon, ViewBlock* list_item) {
 }
 
 void render_list_view(RenderContext* rdcon, ViewBlock* view) {
-    ViewBlock* list = (ViewBlock*)view;
+    ViewBlock* list = lam::view_require_block(view);
     log_debug("view list:%s", list->node_name());
     ListBlot pa_list = rdcon->list;
     rdcon->list.item_index = 0;  rdcon->list.list_style_type = list->blk->list_style_type;
@@ -2076,11 +2085,11 @@ void render_column_rules(RenderContext* rdcon, ViewBlock* block) {
     // Ensure minimum rule height
     if (rule_height <= 0) {
         // Fall back to using the block's content height by iterating children
-        View* child = (View*)block->first_child;
+        View* child = static_cast<View*>(block->first_child);
         float max_bottom = 0;
         while (child) {
             if (child->is_element()) {
-                ViewBlock* child_block = (ViewBlock*)child;
+                ViewBlock* child_block = lam::view_require_block(child);
                 float child_bottom = child_block->y + child_block->height;
                 if (child_bottom > max_bottom) max_bottom = child_bottom;
             }
@@ -2171,7 +2180,7 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
         CollapsedBorder* resolved_left = nullptr;
 
         if (view->view_type == RDT_VIEW_TABLE_CELL) {
-            ViewTableCell* cell = (ViewTableCell*)view;
+            ViewTableCell* cell = lam::view_require_table_cell(view);
             if (cell->td && cell->td->top_resolved) {
                 use_resolved = true;
                 resolved_top = cell->td->top_resolved;
@@ -2318,7 +2327,7 @@ void setup_scroller(RenderContext* rdcon, ViewBlock* block) {
     if (block->scroller->pane) {
         DocState* state = block->doc ? block->doc->state : NULL;
         float scroll_x = 0.0f, scroll_y = 0.0f;
-        scroll_state_get_position_for_view(state, (View*)block, block->scroller->pane,
+        scroll_state_get_position_for_view(state, static_cast<View*>(block), block->scroller->pane,
                                            &scroll_x, &scroll_y, NULL, NULL);
         rdcon->block.x -= scroll_x * s;
         rdcon->block.y -= scroll_y * s;
@@ -2342,7 +2351,7 @@ void render_scroller(RenderContext* rdcon, ViewBlock* block, BlockBlot* pa_block
             DocState* state = block->doc ? block->doc->state : NULL;
             scrollpane_render(&rdcon->vec, block->scroller->pane, &rect,
                 block->content_width * s, block->content_height * s, &rdcon->block.clip, s,
-                state, (View*)block,
+                state, static_cast<View*>(block),
                 block->scroller->has_hz_scroll, block->scroller->has_vt_scroll);
         } else {
             log_error("scroller has no scroll pane");
@@ -2440,7 +2449,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
     // Skip legacy render_list_bullet when a ::marker pseudo-element exists,
     // since render_marker_view will handle it during child traversal.
     if (!self_hidden && block->view_type == RDT_VIEW_LIST_ITEM) {
-        DomElement* li_elem = (DomElement*)block;
+        DomElement* li_elem = lam::dom_require_element(lam::view_dom_node(block));
         if (!li_elem->pseudo || !li_elem->pseudo->marker) {
             render_list_bullet(rdcon, block);
         }
@@ -2449,7 +2458,8 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
     ClipShape* css_clip_shape = nullptr;
     bool has_css_clip = false;
     {
-        CssDeclaration* clip_decl = dom_element_get_specified_value((DomElement*)block, CSS_PROPERTY_CLIP_PATH);
+        CssDeclaration* clip_decl = dom_element_get_specified_value(
+            lam::dom_require_element(lam::view_dom_node(block)), CSS_PROPERTY_CLIP_PATH);
         if (clip_decl && clip_decl->value_text && clip_decl->value_text_len > 0) {
             const char* clip_str = clip_decl->value_text;
             if (clip_str && strncmp(clip_str, "none", 4) != 0) {
@@ -2647,7 +2657,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
         // CSS 2.1 Section 17.6.1: empty-cells: hide suppresses borders/backgrounds
         bool skip_bound = false;
         if (block->view_type == RDT_VIEW_TABLE_CELL) {
-            ViewTableCell* cell = (ViewTableCell*)block;
+            ViewTableCell* cell = lam::view_require_table_cell(block);
             if (cell->td && cell->td->hide_empty) {
                 skip_bound = true;
                 log_debug("Skipping bound for empty cell (empty-cells: hide)");
@@ -2683,7 +2693,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
     View* view = block->first_child;
     auto rc_start = std::chrono::high_resolution_clock::now();
     if (view) {
-        if (block->in_line && block->in_line->color.c) {
+        if (block->in_line && block->in_line->has_color) {
             log_debug("[RENDER COLOR] element=%s setting color: #%02x%02x%02x (was #%02x%02x%02x) color.c=0x%08x",
                       block->node_name(),
                       block->in_line->color.r, block->in_line->color.g, block->in_line->color.b,
@@ -2782,13 +2792,14 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
         // children and render their outlines on top of everything.
         View* outline_view = block->first_child;
         while (outline_view) {
-            if ((outline_view->view_type == RDT_VIEW_BLOCK ||
-                 outline_view->view_type == RDT_VIEW_INLINE_BLOCK) &&
-                ((ViewBlock*)outline_view)->bound &&
-                ((ViewBlock*)outline_view)->bound->outline) {
-                render_outline_deferred(rdcon, (ViewBlock*)outline_view);
+            if (outline_view->view_type == RDT_VIEW_BLOCK ||
+                outline_view->view_type == RDT_VIEW_INLINE_BLOCK) {
+                ViewBlock* outline_block = lam::view_require_block(outline_view);
+                if (outline_block->bound && outline_block->bound->outline) {
+                    render_outline_deferred(rdcon, outline_block);
+                }
             }
-            outline_view = (View*)outline_view->next_sibling;
+            outline_view = static_cast<View*>(outline_view->next_sibling);
         }
     }
     else {
@@ -3141,7 +3152,7 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view) {
     // Render blue selection overlay if image is within a cross-view selection
     DocState* state = rdcon->ui_context && rdcon->ui_context->document
         ? rdcon->ui_context->document->state : NULL;
-    if (is_view_in_selection(state, (View*)view)) {
+    if (is_view_in_selection(state, static_cast<View*>(view))) {
         // Semi-transparent blue overlay (same color as text selection)
         uint32_t sel_bg_color = 0x80FF9933;  // ABGR format: semi-transparent blue
         rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &rect, sel_bg_color, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
@@ -3154,7 +3165,7 @@ void render_image_view(RenderContext* rdcon, ViewBlock* view) {
     log_debug("render image view");
     log_enter();
     // render border and background, etc.
-    render_block_view(rdcon, (ViewBlock*)view);
+    render_block_view(rdcon, view);
     // render the image content (using parent coordinates restored by render_block_view)
     render_image_content(rdcon, view);
     log_debug("end of image render");
@@ -3269,7 +3280,7 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
                 log_debug("render_init default font: %s, html version: %d", default_font->family, doc->view_tree->html_version);
                 setup_font(rdcon->ui_context, &rdcon->font, default_font);
 
-                ViewBlock* root_block = (ViewBlock*)root_view;
+                ViewBlock* root_block = lam::view_require_block(root_view);
 
                 // Per CSS 2.1 §14.2: the iframe's viewport is its own canvas.
                 // Propagate the body background (or html background) to fill the
@@ -3289,7 +3300,7 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
                         View* c = root_block->first_child;
                         while (c) {
                             if (c->view_type == RDT_VIEW_BLOCK) {
-                                ViewBlock* cb = (ViewBlock*)c;
+                                ViewBlock* cb = lam::view_require_block(c);
                                 const char* nm = cb->node_name();
                                 if (nm && str_ieq_const(nm, strlen(nm), "body")) {
                                     if (cb->bound && cb->bound->background &&
@@ -3299,7 +3310,7 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
                                     break;
                                 }
                             }
-                            c = (View*)c->next_sibling;
+                            c = static_cast<View*>(c->next_sibling);
                         }
                     }
                     if (canvas_bg.a > 0) {
@@ -3354,7 +3365,7 @@ void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
     if (!self_hidden && view_span->bound) {
         BackgroundProp* saved_bg = view_span->bound->background;
         view_span->bound->background = nullptr;
-        render_bound(rdcon, (ViewBlock*)view_span);
+        render_bound(rdcon, lam::unsafe_view_block_api_span(view_span));
         view_span->bound->background = saved_bg;
     }
 
@@ -3363,7 +3374,7 @@ void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
         if (view_span->font) {
             setup_font(rdcon->ui_context, &rdcon->font, view_span->font);
         }
-        if (view_span->in_line && view_span->in_line->color.c) {
+        if (view_span->in_line && view_span->in_line->has_color) {
             log_debug("[RENDER COLOR INLINE] element=%s setting color: #%02x%02x%02x (was #%02x%02x%02x) color.c=0x%08x",
                       view_span->node_name(),
                       view_span->in_line->color.r, view_span->in_line->color.g, view_span->in_line->color.b,
@@ -3390,7 +3401,7 @@ void render_children(RenderContext* rdcon, View* view) {
         if (view->view_type == RDT_VIEW_BLOCK || view->view_type == RDT_VIEW_INLINE_BLOCK ||
             view->view_type == RDT_VIEW_TABLE || view->view_type == RDT_VIEW_TABLE_ROW_GROUP ||
             view->view_type == RDT_VIEW_TABLE_ROW || view->view_type == RDT_VIEW_TABLE_CELL) {
-            ViewBlock* block = (ViewBlock*)view;
+            ViewBlock* block = lam::view_require_block(view);
             log_debug("[RENDER DISPATCH] view_type=%d, embed=%p, img=%p, width=%.0f, height=%.0f",
                       view->view_type, block->embed,
                       block->embed ? block->embed->img : NULL, block->width, block->height);
@@ -3457,17 +3468,17 @@ void render_children(RenderContext* rdcon, View* view) {
             }
         }
         else if (view->view_type == RDT_VIEW_LIST_ITEM) {
-            render_litem_view(rdcon, (ViewBlock*)view);
+            render_litem_view(rdcon, lam::view_require_block(view));
         }
         else if (view->view_type == RDT_VIEW_INLINE) {
-            ViewSpan* span = (ViewSpan*)view;
+            ViewSpan* span = lam::view_require_element(view);
             auto tiv1 = std::chrono::high_resolution_clock::now();
             render_inline_view(rdcon, span);
             auto tiv2 = std::chrono::high_resolution_clock::now();
             g_render_inline_time += std::chrono::duration<double, std::milli>(tiv2 - tiv1).count();
         }
         else if (view->view_type == RDT_VIEW_TEXT) {
-            ViewText* text = (ViewText*)view;
+            ViewText* text = lam::view_require_text(view);
             auto tt1 = std::chrono::high_resolution_clock::now();
             render_text_view(rdcon, text);
             auto tt2 = std::chrono::high_resolution_clock::now();
@@ -3476,7 +3487,7 @@ void render_children(RenderContext* rdcon, View* view) {
         }
         else if (view->view_type == RDT_VIEW_MARKER) {
             // List marker (bullet/number) with fixed width and vector graphics
-            ViewSpan* marker = (ViewSpan*)view;
+            ViewSpan* marker = lam::view_require_element(view);
             render_marker_view(rdcon, marker);
         }
         else {
@@ -3501,7 +3512,7 @@ void render_focus_outline(RenderContext* rdcon, DocState* state) {
     if (!focused) return;
     if (focused->view_type != RDT_VIEW_BLOCK) return;
 
-    ViewBlock* block = (ViewBlock*)focused;
+    ViewBlock* block = lam::view_require_block(focused);
     float s = rdcon->scale;
 
     // Calculate absolute position of the focused element (in CSS pixels)
@@ -3514,8 +3525,9 @@ void render_focus_outline(RenderContext* rdcon, DocState* state) {
     View* parent = block->parent;
     while (parent) {
         if (parent->view_type == RDT_VIEW_BLOCK) {
-            x += ((ViewBlock*)parent)->x;
-            y += ((ViewBlock*)parent)->y;
+            ViewBlock* parent_block = lam::view_require_block(parent);
+            x += parent_block->x;
+            y += parent_block->y;
         }
         parent = parent->parent;
     }
@@ -3561,7 +3573,7 @@ void render_caret(RenderContext* rdcon, DocState* state) {
 
     // Form controls draw their own caret in render_text_input() / render_textarea()
     if (view->is_element()) {
-        DomElement* elem = (DomElement*)view;
+        DomElement* elem = lam::dom_require_element(lam::view_dom_node(view));
         if (elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
             elem->form &&
             (elem->form->control_type == FORM_CONTROL_TEXT ||
@@ -3584,13 +3596,13 @@ void render_caret(RenderContext* rdcon, DocState* state) {
     DomDocument* doc = rdcon && rdcon->ui_context ? rdcon->ui_context->document : nullptr;
     ViewBlock* root_block = nullptr;
     if (doc && doc->view_tree && doc->view_tree->root && doc->view_tree->root->view_type == RDT_VIEW_BLOCK) {
-        root_block = (ViewBlock*)doc->view_tree->root;
+        root_block = lam::view_require_block(doc->view_tree->root);
     }
     float root_scroll_x = 0.0f;
     float root_scroll_y = 0.0f;
     if (root_block && root_block->scroller && root_block->scroller->pane) {
         DocState* root_state = root_block->doc ? root_block->doc->state : NULL;
-        scroll_state_get_position_for_view(root_state, (View*)root_block, root_block->scroller->pane,
+        scroll_state_get_position_for_view(root_state, static_cast<View*>(root_block), root_block->scroller->pane,
                                            &root_scroll_x, &root_scroll_y, NULL, NULL);
     }
     bool offset_covers_root_scroll_x = fabsf(iframe_offset_x + root_scroll_x) < 0.5f;
@@ -3599,14 +3611,14 @@ void render_caret(RenderContext* rdcon, DocState* state) {
         if (parent->view_type == RDT_VIEW_BLOCK ||
             parent->view_type == RDT_VIEW_INLINE_BLOCK ||
             parent->view_type == RDT_VIEW_LIST_ITEM) {
-            ViewBlock* block = (ViewBlock*)parent;
+            ViewBlock* block = lam::view_require_block(parent);
             x += block->x;
             y += block->y;
             // Account for scroll offset (same as render traversal does)
             if (block->scroller && block->scroller->pane) {
                 DocState* block_state = block->doc ? block->doc->state : NULL;
                 float scroll_x = 0.0f, scroll_y = 0.0f;
-                scroll_state_get_position_for_view(block_state, (View*)block, block->scroller->pane,
+                scroll_state_get_position_for_view(block_state, static_cast<View*>(block), block->scroller->pane,
                                                    &scroll_x, &scroll_y, NULL, NULL);
                 if (!(block == root_block && offset_covers_root_scroll_x)) {
                     x -= scroll_x;
@@ -3678,10 +3690,10 @@ static void selection_paint_rect_cb(float x, float y, float w, float h, void* ud
     float scroll_y = 0.0f;
     DomDocument* doc = ctx->rdcon && ctx->rdcon->ui_context ? ctx->rdcon->ui_context->document : nullptr;
     if (doc && doc->view_tree && doc->view_tree->root && doc->view_tree->root->view_type == RDT_VIEW_BLOCK) {
-        ViewBlock* root = (ViewBlock*)doc->view_tree->root;
+        ViewBlock* root = lam::view_require_block(doc->view_tree->root);
         if (root->scroller && root->scroller->pane) {
             DocState* root_state = root->doc ? root->doc->state : NULL;
-            scroll_state_get_position_for_view(root_state, (View*)root, root->scroller->pane,
+            scroll_state_get_position_for_view(root_state, static_cast<View*>(root), root->scroller->pane,
                                                &scroll_x, &scroll_y, NULL, NULL);
         }
     }
@@ -3732,7 +3744,7 @@ static DomRange* selection_paint_range_for_current_tree(RenderContext* rdcon,
         return range;
     }
 
-    DomNode* root = (DomNode*)rdcon->ui_context->document->view_tree->root;
+    DomNode* root = lam::view_dom_node(rdcon->ui_context->document->view_tree->root);
     DomBoundary rebound_start = range->start;
     DomBoundary rebound_end = range->end;
     bool rebound_any = false;
@@ -3808,7 +3820,7 @@ void render_ui_overlays(RenderContext* rdcon, DocState* state) {
 
     // Render open dropdown popup (above content)
     if (state->open_dropdown) {
-        ViewBlock* select = (ViewBlock*)state->open_dropdown;
+        ViewBlock* select = lam::view_require_block(state->open_dropdown);
         render_select_dropdown(rdcon, select, state);
     }
 
@@ -3822,13 +3834,14 @@ void render_ui_overlays(RenderContext* rdcon, DocState* state) {
 
         // Highlight the current drop target with a blue border
         if (dd->drop_target && dd->drop_target->view_type == RDT_VIEW_BLOCK) {
-            ViewBlock* dt = (ViewBlock*)dd->drop_target;
+            ViewBlock* dt = lam::view_require_block(dd->drop_target);
             float dx = dt->x, dy = dt->y;
             View* par = dt->parent;
             while (par) {
                 if (par->view_type == RDT_VIEW_BLOCK) {
-                    dx += ((ViewBlock*)par)->x;
-                    dy += ((ViewBlock*)par)->y;
+                    ViewBlock* parent_block = lam::view_require_block(par);
+                    dx += parent_block->x;
+                    dy += parent_block->y;
                 }
                 par = par->parent;
             }
@@ -3912,7 +3925,7 @@ static uint32_t get_canvas_background(View* root_view) {
         return 0xFFFFFFFF;  // default white
     }
 
-    ViewBlock* html_block = (ViewBlock*)root_view;
+    ViewBlock* html_block = lam::view_require_block(root_view);
 
     // Check if html element has a background color
     bool html_has_bg = html_block->bound && html_block->bound->background &&
@@ -3928,7 +3941,7 @@ static uint32_t get_canvas_background(View* root_view) {
     View* child = html_block->first_child;
     while (child) {
         if (child->view_type == RDT_VIEW_BLOCK) {
-            ViewBlock* child_block = (ViewBlock*)child;
+            ViewBlock* child_block = lam::view_require_block(child);
             const char* name = child_block->node_name();
             if (name && str_ieq_const(name, strlen(name), "body")) {
                 // Found body element
@@ -3941,7 +3954,7 @@ static uint32_t get_canvas_background(View* root_view) {
                 break;
             }
         }
-        child = (View*)child->next_sibling;
+        child = static_cast<View*>(child->next_sibling);
     }
 
     return 0xFFFFFFFF;  // default white
@@ -4005,16 +4018,16 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
     View* root_view = view_tree->root;
     if (root_view && root_view->view_type == RDT_VIEW_BLOCK) {
         log_debug("Render root view");
-        ViewBlock* root_block = (ViewBlock*)root_view;
+        ViewBlock* root_block = lam::view_require_block(root_view);
         if (root_block->embed && root_block->embed->img) {
             render_image_view(&rdcon, root_block);
         } else {
             render_block_view(&rdcon, root_block);
         }
         // render positioned children
-        if (((ViewBlock*)root_view)->position) {
+        if (root_block->position) {
             log_debug("render absolute/fixed positioned children of root view");
-            ViewBlock* child_block = ((ViewBlock*)root_view)->position->first_abs_child;
+            ViewBlock* child_block = root_block->position->first_abs_child;
             while (child_block) {
                 render_block_view(&rdcon, child_block);
                 child_block = child_block->position->next_abs_sibling;
@@ -4238,7 +4251,7 @@ void render_html_doc_tiled(UiContext* uicon, ViewTree* view_tree,
         reset_render_stats();
         View* root_view = view_tree->root;
         if (root_view && root_view->view_type == RDT_VIEW_BLOCK) {
-            ViewBlock* root_block = (ViewBlock*)root_view;
+            ViewBlock* root_block = lam::view_require_block(root_view);
             if (root_block->embed && root_block->embed->img) {
                 render_image_view(&rdcon, root_block);
             } else {

@@ -11,6 +11,7 @@
 #include "rdt_video.h"
 #include "webview.h"
 #include "dom_range_resolver.hpp"
+#include "../lib/tagged.hpp"
 #include "../lib/font/font.h"
 
 #include "../lib/log.h"
@@ -187,11 +188,11 @@ static void sync_viewport_scroll_state(EventContext* evcon) {
         return;
     }
 
-    ViewBlock* root_block = (ViewBlock*)doc->view_tree->root;
+    ViewBlock* root_block = lam::view_require_block(doc->view_tree->root);
     if (!root_block->scroller || !root_block->scroller->pane) return;
 
     float scroll_x = 0.0f, scroll_y = 0.0f;
-    scroll_state_get_position_for_view(state, (View*)root_block, root_block->scroller->pane,
+    scroll_state_get_position_for_view(state, static_cast<View*>(root_block), root_block->scroller->pane,
                                        &scroll_x, &scroll_y, NULL, NULL);
 
     // Keep viewport scroll in the centralized state store and the document
@@ -202,7 +203,7 @@ static void sync_viewport_scroll_state(EventContext* evcon) {
 void target_children(EventContext* evcon, View* view) {
     do {
         if (view->is_block()) {
-            ViewBlock* block = (ViewBlock*)view;
+            ViewBlock* block = lam::view_require_block(view);
             if (block->position &&
                 (block->position->position == CSS_VALUE_ABSOLUTE ||
                  block->position->position == CSS_VALUE_FIXED)) {
@@ -212,11 +213,11 @@ void target_children(EventContext* evcon, View* view) {
             }
         }
         else if (view->view_type == RDT_VIEW_INLINE) {
-            ViewSpan* span = (ViewSpan*)view;
+            ViewSpan* span = lam::view_require_element(view);
             target_inline_view(evcon, span);
         }
         else if (view->view_type == RDT_VIEW_TEXT) {
-            ViewText* text = (ViewText*)view;
+            ViewText* text = lam::view_require_text(view);
             target_text_view(evcon, text);
         }
         view = view->next();
@@ -260,10 +261,10 @@ typedef struct EditableMarginTextHit {
 } EditableMarginTextHit;
 
 static bool is_in_rich_editable_subtree(View* view) {
-    DomNode* node = (DomNode*)view;
+    DomNode* node = static_cast<DomNode*>(view);
     while (node) {
         if (node->node_type == DOM_NODE_ELEMENT) {
-            DomElement* elem = (DomElement*)node;
+            DomElement* elem = lam::dom_require_element(node);
             if (elem->has_attribute("data-editable")) return true;
             const char* ce = elem->get_attribute("contenteditable");
             if (ce && strcmp(ce, "false") != 0) return true;
@@ -275,7 +276,7 @@ static bool is_in_rich_editable_subtree(View* view) {
 
 static bool is_rich_editable_host(View* view) {
     if (!view || !view->is_element()) return false;
-    DomElement* elem = (DomElement*)view;
+    DomElement* elem = lam::dom_require_element(view);
     if (elem->has_attribute("data-editable")) return true;
     const char* ce = elem->get_attribute("contenteditable");
     return ce && strcmp(ce, "false") != 0;
@@ -283,12 +284,12 @@ static bool is_rich_editable_host(View* view) {
 
 static bool text_target_allows_caret(View* target) {
     if (!target) return false;
-    DomNode* node = (DomNode*)target;
+    DomNode* node = static_cast<DomNode*>(target);
     while (node) {
         if (node->node_type == DOM_NODE_ELEMENT) {
-            DomElement* elem = (DomElement*)node;
+            DomElement* elem = lam::dom_require_element(node);
             if (elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
-                elem->form && form_control_is_disabled(elem->doc ? elem->doc->state : NULL, (View*)elem)) {
+                elem->form && form_control_is_disabled(elem->doc ? elem->doc->state : NULL, static_cast<View*>(elem))) {
                 return false;
             }
             if (elem->has_attribute("data-editable")) return true;
@@ -316,7 +317,7 @@ static void find_editable_margin_text_hit(EventContext* evcon, View* view,
     MousePositionEvent* event = &evcon->event.mouse_position;
 
     if (view->view_type == RDT_VIEW_TEXT) {
-        ViewText* text = (ViewText*)view;
+        ViewText* text = lam::view_require_text(view);
         for (TextRect* rect = text->rect; rect; rect = rect->next) {
             if (rect->height <= 0) continue;
             float rect_x = block_x + rect->x;
@@ -360,9 +361,9 @@ static void find_editable_margin_text_hit(EventContext* evcon, View* view,
         child_block_y += view->y;
     }
 
-    DomElement* elem = (DomElement*)view;
+    DomElement* elem = lam::dom_require_element(view);
     for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
-        View* child_view = (View*)child;
+        View* child_view = static_cast<View*>(child);
         if (!child_view->view_type) continue;
         find_editable_margin_text_hit(evcon, child_view, child_block_x, child_block_y, hit,
                           include_vertical_gap);
@@ -395,7 +396,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
         hover = scrollpane_target(evcon, block);
         if (hover) {
             log_debug("hit on block scroll: %s", block->node_name());
-            evcon->target = (View*)block;
+            evcon->target = static_cast<View*>(block);
             evcon->offset_x = event->x - evcon->block.x;
             evcon->offset_y = event->y - evcon->block.y;
             goto RETURN;
@@ -407,7 +408,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
         DocState* state = evcon && evcon->ui_context && evcon->ui_context->document
             ? evcon->ui_context->document->state : NULL;
         float scroll_x = 0.0f, scroll_y = 0.0f;
-        scroll_state_get_position_for_view(state, (View*)block, block->scroller->pane,
+        scroll_state_get_position_for_view(state, static_cast<View*>(block), block->scroller->pane,
                                            &scroll_x, &scroll_y, NULL, NULL);
         evcon->block.x -= scroll_x;
         evcon->block.y -= scroll_y;
@@ -423,7 +424,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
         if (bx <= mev->x && mev->x < bx + block->width &&
             by <= mev->y && mev->y < by + block->height) {
             log_debug("hit on webview (child-window mode), stopping: %s", block->node_name());
-            evcon->target = (View*)block;
+            evcon->target = static_cast<View*>(block);
             evcon->offset_x = mev->x - bx;
             evcon->offset_y = mev->y - by;
             goto RETURN;
@@ -440,7 +441,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
         if (bx <= mev->x && mev->x < bx + block->width &&
             by <= mev->y && mev->y < by + block->height) {
             log_debug("hit on webview (layer mode), forwarding event: %s", block->node_name());
-            evcon->target = (View*)block;
+            evcon->target = static_cast<View*>(block);
             evcon->offset_x = mev->x - bx;
             evcon->offset_y = mev->y - by;
 
@@ -464,7 +465,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
         if (bx <= mev->x && mev->x < bx + block->width &&
             by <= mev->y && mev->y < by + block->height) {
             log_debug("hit on webview (layer mode), forwarding event: %s", block->node_name());
-            evcon->target = (View*)block;
+            evcon->target = static_cast<View*>(block);
             evcon->offset_x = mev->x - bx;
             evcon->offset_y = mev->y - by;
 
@@ -496,10 +497,10 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
             // If we found a target inside the iframe, we're done
             if (evcon->target && evcon->target != prev_target) {
                 log_debug("found target inside iframe: %s",
-                    evcon->target->is_element() ? ((ViewElement*)evcon->target)->node_name() : "text");
+                    evcon->target->is_element() ? (lam::view_require_element(evcon->target))->node_name() : "text");
                 // Record the iframe block so events can propagate across
                 // the iframe boundary back into the parent document
-                evcon->iframe_container = (View*)block;
+                evcon->iframe_container = static_cast<View*>(block);
                 goto RETURN;
             }
 
@@ -526,17 +527,17 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
             setup_font(evcon->ui_context, &evcon->font, block->font);
         }
         target_children(evcon, view);
-        if (!evcon->target && is_in_rich_editable_subtree((View*)block) &&
-            (is_rich_editable_host((View*)block) || event_inside_block(evcon, block))) {
+        if (!evcon->target && is_in_rich_editable_subtree(static_cast<View*>(block)) &&
+            (is_rich_editable_host(static_cast<View*>(block)) || event_inside_block(evcon, block))) {
             EditableMarginTextHit margin_hit = { NULL, NULL, 0, 0.0f, 0.0f, -1.0f };
-            bool include_vertical_gap = is_rich_editable_host((View*)block);
+            bool include_vertical_gap = is_rich_editable_host(static_cast<View*>(block));
             for (View* child = view; child; child = child->next()) {
                 if (!child->view_type) continue;
                 find_editable_margin_text_hit(evcon, child, evcon->block.x, evcon->block.y,
                                               &margin_hit, include_vertical_gap);
             }
             if (margin_hit.text && margin_hit.rect) {
-                evcon->target = (View*)margin_hit.text;
+                evcon->target = static_cast<View*>(margin_hit.text);
                 evcon->target_text_rect = margin_hit.rect;
                 evcon->target_text_offset_valid = true;
                 evcon->target_text_offset = margin_hit.offset;
@@ -559,14 +560,14 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     evcon->font = pa_font;
 
     if (!evcon->target &&
-        !(is_in_rich_editable_subtree((View*)block) && !is_rich_editable_host((View*)block))) { // check the block itself
+        !(is_in_rich_editable_subtree(static_cast<View*>(block)) && !is_rich_editable_host(static_cast<View*>(block)))) { // check the block itself
         // use the block's own accumulated position (parent + block offset),
         // not the restored parent position
         float x = evcon->block.x + block->x, y = evcon->block.y + block->y;
         if (x <= event->x && event->x < x + block->width &&
             y <= event->y && event->y < y + block->height) {
             log_debug("hit on block: %s", block->node_name());
-            evcon->target = (View*)block;
+            evcon->target = static_cast<View*>(block);
             evcon->offset_x = event->x - x;
             evcon->offset_y = event->y - y;
         }
@@ -586,7 +587,7 @@ void target_html_doc(EventContext* evcon, ViewTree* view_tree) {
         FontProp* default_font = view_tree->html_version == HTML5 ? &evcon->ui_context->default_font : &evcon->ui_context->legacy_default_font;
         log_debug("target_html_doc default font: %s, html version: %d", default_font->family, view_tree->html_version);
         setup_font(evcon->ui_context, &evcon->font, default_font);
-        target_block_view(evcon, (ViewBlock*)root_view);
+        target_block_view(evcon, lam::view_require_block(root_view));
         evcon->font = pa_font;
     }
     else {
@@ -598,7 +599,7 @@ ArrayList* build_view_stack(EventContext* evcon, View* view) {
     ArrayList* list = arraylist_new(100);
     while (view) {
         arraylist_prepend(list, view);
-        view = (View*)view->parent;
+        view = static_cast<View*>(view->parent);
     }
     return list;
 }
@@ -651,20 +652,20 @@ void fire_inline_event(EventContext* evcon, ViewSpan* span) {
 void fire_block_event(EventContext* evcon, ViewBlock* block) {
     log_debug("fire block event");
     // fire as inline view first
-    fire_inline_event(evcon, (ViewSpan*)block);
+    fire_inline_event(evcon, lam::view_require_element(block));
     if (block->scroller && block->scroller->pane) {
         if (evcon->event.type == RDT_EVENT_SCROLL) {
             scrollpane_scroll(evcon, block, block->scroller->pane);
         }
         else if (evcon->event.type == RDT_EVENT_MOUSE_DOWN &&
-            scroll_state_is_hovered_for_view(evcon->ui_context->document->state, (View*)block)) {
+            scroll_state_is_hovered_for_view(evcon->ui_context->document->state, static_cast<View*>(block))) {
             scrollpane_mouse_down(evcon, block);
         }
         else if (evcon->event.type == RDT_EVENT_MOUSE_UP) {
             scrollpane_mouse_up(evcon, block);
         }
         else if (evcon->event.type == RDT_EVENT_MOUSE_DRAG &&
-            scroll_state_is_dragging_for_view(evcon->ui_context->document->state, (View*)block)) {
+            scroll_state_is_dragging_for_view(evcon->ui_context->document->state, static_cast<View*>(block))) {
             scrollpane_drag(evcon, block);
         }
     }
@@ -674,16 +675,16 @@ void fire_events(EventContext* evcon, ArrayList* target_list) {
     int stack_size = target_list->length;
     for (int i = 0; i < stack_size; i++) {
         log_debug("fire event to view no. %d", i);
-        View* view = (View*)target_list->data[i];
+        View* view = static_cast<View*>(target_list->data[i]);
         if (view->view_type == RDT_VIEW_BLOCK || view->view_type == RDT_VIEW_INLINE_BLOCK ||
             view->view_type == RDT_VIEW_LIST_ITEM) {
-            fire_block_event(evcon, (ViewBlock*)view);
+            fire_block_event(evcon, lam::view_require_block(view));
         }
         else if (view->view_type == RDT_VIEW_INLINE) {
-            fire_inline_event(evcon, (ViewSpan*)view);
+            fire_inline_event(evcon, lam::view_require_element(view));
         }
         else if (view->view_type == RDT_VIEW_TEXT) {
-            fire_text_event(evcon, (ViewText*)view);
+            fire_text_event(evcon, lam::view_require_text(view));
         }
         else {
             log_error("Invalid fire view type: %d", view->view_type);
@@ -904,15 +905,15 @@ static bool input_intent_from_composition_event(const CompositionEvent* comp_eve
 
 static DomElement* rich_editable_from_target(View* target) {
     if (!target) return nullptr;
-    DomNode* node = (DomNode*)target;
+    DomNode* node = static_cast<DomNode*>(target);
     while (node && node->node_type != DOM_NODE_ELEMENT) node = node->parent;
     if (node && node->node_type == DOM_NODE_ELEMENT) {
-        DomElement* first = (DomElement*)node;
+        DomElement* first = lam::dom_require_element(node);
         if (tc_is_text_control(first)) return nullptr;
     }
     while (node) {
         if (node->node_type == DOM_NODE_ELEMENT) {
-            DomElement* elem = (DomElement*)node;
+            DomElement* elem = lam::dom_require_element(node);
             if (elem->has_attribute("data-editable")) return elem;
             const char* ce = elem->get_attribute("contenteditable");
             if (ce && strcmp(ce, "false") != 0) return elem;
@@ -1000,14 +1001,14 @@ static Item build_lambda_event_map(DomDocument* doc, View* target,
     }
 
     // extract target element's class and tag from the innermost DomElement target
-    DomNode* tgt_node = (DomNode*)target;
+    DomNode* tgt_node = static_cast<DomNode*>(target);
     if (tgt_node) {
         // walk up to find the nearest DomElement (target might be a text node)
         while (tgt_node && tgt_node->node_type != DOM_NODE_ELEMENT) {
             tgt_node = tgt_node->parent;
         }
         if (tgt_node && tgt_node->node_type == DOM_NODE_ELEMENT) {
-            DomElement* tgt_elem = (DomElement*)tgt_node;
+            DomElement* tgt_elem = lam::dom_require_element(tgt_node);
             if (tgt_elem->tag_name) {
                 mb.put("target_tag", tgt_elem->tag_name);
             }
@@ -1067,7 +1068,7 @@ static Item build_lambda_event_map(DomDocument* doc, View* target,
             const char* val = nullptr;
             int val_len = 0;
             if (target && target->is_element()) {
-                DomElement* el = (DomElement*)target;
+                DomElement* el = lam::dom_require_element(target);
                 if (el->item_prop_type == DomElement::ITEM_PROP_FORM && el->form) {
                     val = el->form->value;
                     val_len = val ? (int)strlen(val) : 0;
@@ -1166,11 +1167,11 @@ static Item build_lambda_event_map(DomDocument* doc, View* target,
         if (has_mouse_pos) {
             DomBoundary hit = { NULL, 0 };
             if (evcon->target_text_offset_valid && evcon->target && evcon->target->view_type == RDT_VIEW_TEXT) {
-                DomText* hit_text = (DomText*)evcon->target;
-                hit.node = (DomNode*)hit_text;
+                DomText* hit_text = lam::dom_require_text(evcon->target);
+                hit.node = static_cast<DomNode*>(hit_text);
                 hit.offset = dom_text_utf8_to_utf16(hit_text, (uint32_t)evcon->target_text_offset);
             } else {
-                hit = dom_hit_test_to_boundary((View*)doc->view_tree->root, (float)event_x, (float)event_y);
+                hit = dom_hit_test_to_boundary(static_cast<View*>(doc->view_tree->root), (float)event_x, (float)event_y);
             }
             SourcePosC hit_pos;
             if (hit.node && source_pos_from_dom_boundary(&hit, &hit_pos)) {
@@ -1190,7 +1191,7 @@ static Item build_lambda_event_map(DomDocument* doc, View* target,
         if (strcmp(event_name, "drop") == 0 && st && st->drag_drop && st->drag_drop->drop_target) {
             View* dt = st->drag_drop->drop_target;
             if (dt->is_element()) {
-                DomElement* dte = (DomElement*)dt;
+                DomElement* dte = lam::dom_require_element(dt);
                 if (dte->class_count > 0 && dte->class_names) {
                     mb.put("drop_target_class", dte->class_names[0]);
                 }
@@ -1230,7 +1231,7 @@ static bool apply_source_selection_to_doc(UiContext* uicon, DomDocument* doc, It
     if (!doc || !doc->root) return false;
     DocState* state = (DocState*)doc->state;
     if (!state || !state->dom_selection) return false;
-    if (!dom_selection_apply_source_selection(state->dom_selection, (DomNode*)doc->root, selection)) {
+    if (!dom_selection_apply_source_selection(state->dom_selection, static_cast<DomNode*>(doc->root), selection)) {
         return false;
     }
     update_caret_visual_position(uicon, state);
@@ -1278,12 +1279,12 @@ extern "C" Item dispatch_emit(Item event_name_item, Item event_data) {
 
     // find the DomElement whose native_element matches result_node.element
     // by walking from the original click target upward
-    DomNode* node = (DomNode*)g_emit_handler_ctx->target;
+    DomNode* node = static_cast<DomNode*>(g_emit_handler_ctx->target);
     bool found_self = false;
 
     while (node) {
         if (node->node_type == DOM_NODE_ELEMENT) {
-            DomElement* dom_elem = (DomElement*)node;
+            DomElement* dom_elem = lam::dom_require_element(node);
             if (dom_elem->native_element) {
                 Item item;
                 item.element = dom_elem->native_element;
@@ -1385,11 +1386,11 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
              event_name, g_template_registry->count);
 
     // walk up from target through DomNode ancestry
-    DomNode* node = (DomNode*)target;
+    DomNode* node = static_cast<DomNode*>(target);
     int depth = 0;
     while (node) {
         if (node->node_type == DOM_NODE_ELEMENT) {
-            DomElement* dom_elem = (DomElement*)node;
+            DomElement* dom_elem = lam::dom_require_element(node);
             if (dom_elem->native_element) {
                 // construct Item from native element pointer
                 Item result_item;
@@ -1641,7 +1642,7 @@ static JsEventHandler* find_html_event_handler(JsEventRegistry* registry,
 static void clear_dom_view_pool_pointers(DomNode* node) {
     while (node) {
         if (node->node_type == DOM_NODE_ELEMENT) {
-            DomElement* elem = (DomElement*)node;
+            DomElement* elem = lam::dom_require_element(node);
             elem->font = nullptr;
             elem->bound = nullptr;
             elem->in_line = nullptr;
@@ -1668,7 +1669,7 @@ static void clear_dom_view_pool_pointers(DomNode* node) {
                 clear_dom_view_pool_pointers(elem->first_child);
             }
         } else if (node->node_type == DOM_NODE_TEXT) {
-            DomText* text = (DomText*)node;
+            DomText* text = lam::dom_require_text(node);
             text->rect = nullptr;
             text->font = nullptr;
             text->view_type = RDT_VIEW_NONE;
@@ -1751,7 +1752,7 @@ static void post_html_handler_rebuild(EventContext* evcon,
 
     // Clear dangling view-pool pointers from DOM tree nodes before relayout
     if (doc->root) {
-        clear_dom_view_pool_pointers((DomNode*)doc->root);
+        clear_dom_view_pool_pointers(static_cast<DomNode*>(doc->root));
     }
 
     layout_html_doc(evcon->ui_context, doc, false);
@@ -1792,11 +1793,11 @@ static bool dispatch_html_event_handler(EventContext* evcon, View* target, const
     JsEventRegistry* registry = (JsEventRegistry*)doc->js_event_registry;
 
     // walk up from target DomElement, checking each for a handler (event bubbling)
-    DomNode* node = (DomNode*)target;
+    DomNode* node = static_cast<DomNode*>(target);
     int depth = 0;
     while (node && depth < 100) {
         if (node->node_type == DOM_NODE_ELEMENT) {
-            DomElement* elem = (DomElement*)node;
+            DomElement* elem = lam::dom_require_element(node);
             JsEventHandler* handler = find_html_event_handler(registry, elem, event_type);
 
             if (handler && handler->compiled_func) {
@@ -1922,11 +1923,11 @@ static bool dispatch_html_event_handler(EventContext* evcon, View* target, const
  * to their containing element for event-target purposes.
  */
 static DomElement* radiant_view_to_dom_element(View* v) {
-    DomNode* node = (DomNode*)v;
+    DomNode* node = static_cast<DomNode*>(v);
     int depth = 0;
     while (node && depth < 200) {
         if (node->node_type == DOM_NODE_ELEMENT) {
-            return (DomElement*)node;
+            return lam::dom_require_element(node);
         }
         node = node->parent;
         depth++;
@@ -2120,7 +2121,7 @@ void event_context_cleanup(EventContext* evcon) {
 static void clear_cascaded_styles_recursive(DomNode* node) {
     if (!node) return;
     if (node->is_element()) {
-        DomElement* e = (DomElement*)node;
+        DomElement* e = lam::dom_require_element(node);
         dom_element_clear(e);
         e->styles_resolved = false;
         for (DomNode* c = e->first_child; c; c = c->next_sibling) {
@@ -2137,7 +2138,7 @@ static void sync_pseudo_state(View* view, uint32_t pseudo_flag, bool set) {
     (void)set;
     if (!view || !view->is_element()) return;
 
-    DomElement* element = (DomElement*)view;
+    DomElement* element = lam::dom_require_element(view);
     if (element->doc && element->doc->state) {
         DocState* state = (DocState*)element->doc->state;
         DomDocument* doc = element->doc;
@@ -2155,7 +2156,7 @@ static void sync_pseudo_state(View* view, uint32_t pseudo_flag, bool set) {
             // declarations applied while :hover matched (with higher specificity)
             // would remain in `specified_style` after the pointer leaves and the
             // base styles would never be restored.
-            clear_cascaded_styles_recursive((DomNode*)doc->root);
+            clear_cascaded_styles_recursive(static_cast<DomNode*>(doc->root));
 
             SelectorMatcher* matcher = selector_matcher_create(pool);
             state_configure_selector_matcher(state, matcher);
@@ -2184,7 +2185,7 @@ void update_hover_state(EventContext* evcon, View* new_target) {
     DocState* state = (DocState*)evcon->ui_context->document->state;
     if (!state) return;
 
-    View* prev_hover = (View*)state->hover_target;
+    View* prev_hover = static_cast<View*>(state->hover_target);
 
     if (prev_hover == new_target) return;  // no change
 
@@ -2194,14 +2195,14 @@ void update_hover_state(EventContext* evcon, View* new_target) {
     View* node = prev_hover;
     while (node) {
         sync_pseudo_state(node, PSEUDO_STATE_HOVER, false);
-        node = (View*)node->parent;
+        node = static_cast<View*>(node->parent);
     }
     if (prev_hover) log_debug("update_hover_state: cleared hover on %p", prev_hover);
 
     node = new_target;
     while (node) {
         sync_pseudo_state(node, PSEUDO_STATE_HOVER, true);
-        node = (View*)node->parent;
+        node = static_cast<View*>(node->parent);
     }
 
     if (new_target) {
@@ -2233,18 +2234,18 @@ void update_active_state(EventContext* evcon, View* target, bool is_active) {
         View* node = target;
         while (node) {
             sync_pseudo_state(node, PSEUDO_STATE_ACTIVE, true);
-            node = (View*)node->parent;
+            node = static_cast<View*>(node->parent);
         }
         log_debug("update_active_state: set active on %p", target);
     } else {
-        View* prev_active = (View*)state->active_target;
+        View* prev_active = static_cast<View*>(state->active_target);
         ActiveTransitionArgs active_args = { .target = NULL };
         active_transition(state, ACTIVE_TRANSITION_SET_TARGET, &active_args);
         if (prev_active) {
             View* node = prev_active;
             while (node) {
                 sync_pseudo_state(node, PSEUDO_STATE_ACTIVE, false);
-                node = (View*)node->parent;
+                node = static_cast<View*>(node->parent);
             }
         }
         log_debug("update_active_state: cleared active");
@@ -2260,7 +2261,7 @@ void update_active_state(EventContext* evcon, View* target, bool is_active) {
  */
 static bool is_checkbox(View* view) {
     if (!view || !view->is_element()) return false;
-    ViewElement* elem = (ViewElement*)view;
+    ViewElement* elem = lam::view_require_element(view);
     if (elem->tag() != HTM_TAG_INPUT) return false;
     const char* type = elem->get_attribute("type");
     return type && strcmp(type, "checkbox") == 0;
@@ -2271,7 +2272,7 @@ static bool is_checkbox(View* view) {
  */
 static bool is_radio(View* view) {
     if (!view || !view->is_element()) return false;
-    ViewElement* elem = (ViewElement*)view;
+    ViewElement* elem = lam::view_require_element(view);
     if (elem->tag() != HTM_TAG_INPUT) return false;
     const char* type = elem->get_attribute("type");
     return type && strcmp(type, "radio") == 0;
@@ -2290,7 +2291,7 @@ static void uncheck_radio_group(View* root, const char* name, View* exclude, Doc
     View* current = root;
     while (current) {
         if (current != exclude && is_radio(current)) {
-            ViewElement* elem = (ViewElement*)current;
+            ViewElement* elem = lam::view_require_element(current);
             const char* elem_name = elem->get_attribute("name");
             if (elem_name && strcmp(elem_name, name) == 0) {
                 // Uncheck this radio button
@@ -2306,9 +2307,9 @@ static void uncheck_radio_group(View* root, const char* name, View* exclude, Doc
         // not just block children — radio inputs are commonly nested in
         // inline <label> wrappers which would otherwise be skipped).
         if (current->is_element()) {
-            ViewElement* ce = (ViewElement*)current;
+            ViewElement* ce = lam::view_require_element(current);
             if (ce->first_child) {
-                current = (View*)ce->first_child;
+                current = static_cast<View*>(ce->first_child);
                 continue;
             }
         }
@@ -2352,7 +2353,7 @@ static View* find_checkbox_radio_input(View* target) {
     View* label_element = nullptr;
     while (current) {
         if (current->is_element()) {
-            ViewElement* elem = (ViewElement*)current;
+            ViewElement* elem = lam::view_require_element(current);
             log_debug("find_checkbox_radio_input: checking element tag=%d (%s)", elem->tag(), elem->node_name());
             if (elem->tag() == HTM_TAG_LABEL) {
                 label_element = current;
@@ -2373,7 +2374,7 @@ static View* find_checkbox_radio_input(View* target) {
         return nullptr;
     }
 
-    ViewElement* label = (ViewElement*)label_element;
+    ViewElement* label = lam::view_require_element(label_element);
 
     // Check for "for" attribute pointing to an input id
     const char* for_attr = label->get_attribute("for");
@@ -2388,7 +2389,7 @@ static View* find_checkbox_radio_input(View* target) {
         View* search = root;
         while (search) {
             if (search->is_element()) {
-                ViewElement* elem = (ViewElement*)search;
+                ViewElement* elem = lam::view_require_element(search);
                 const char* id = elem->get_attribute("id");
                 if (id && strcmp(id, for_attr) == 0) {
                     if (is_checkbox(search) || is_radio(search)) {
@@ -2398,7 +2399,7 @@ static View* find_checkbox_radio_input(View* target) {
             }
             // Depth-first traversal
             if (search->is_block()) {
-                ViewBlock* block = (ViewBlock*)search;
+                ViewBlock* block = lam::view_require_block(search);
                 if (block->first_child) {
                     search = block->first_child;
                     continue;
@@ -2424,7 +2425,7 @@ static View* find_checkbox_radio_input(View* target) {
         }
         // Check children recursively
         if (child->is_block()) {
-            ViewBlock* block = (ViewBlock*)child;
+            ViewBlock* block = lam::view_require_block(child);
             View* nested = block->first_child;
             while (nested) {
                 if (is_checkbox(nested) || is_radio(nested)) {
@@ -2451,7 +2452,7 @@ static bool handle_checkbox_radio_click(EventContext* evcon, View* target) {
     DocState* state = (DocState*)evcon->ui_context->document->state;
     if (!state) return false;
 
-    ViewElement* elem = (ViewElement*)input;
+    ViewElement* elem = lam::view_require_element(input);
 
     // Check if disabled
     if (state_get_pseudo_state(state, input, PSEUDO_STATE_DISABLED)) {
@@ -2513,7 +2514,7 @@ static bool handle_checkbox_radio_click(EventContext* evcon, View* target) {
  */
 static bool is_select(View* view) {
     if (!view || !view->is_element()) return false;
-    ViewElement* elem = (ViewElement*)view;
+    ViewElement* elem = lam::view_require_element(view);
     return elem->tag() == HTM_TAG_SELECT;
 }
 
@@ -2542,7 +2543,7 @@ static DomElement* get_option_at_index(ViewBlock* select, int index) {
     DomNode* child = select->first_child;
     while (child) {
         if (child->is_element()) {
-            DomElement* child_elem = (DomElement*)child;
+            DomElement* child_elem = lam::dom_require_element(child);
             if (child_elem->tag() == HTM_TAG_OPTION) {
                 if (current_idx == index) return child_elem;
                 current_idx++;
@@ -2551,7 +2552,7 @@ static DomElement* get_option_at_index(ViewBlock* select, int index) {
                 DomNode* opt_child = child_elem->first_child;
                 while (opt_child) {
                     if (opt_child->is_element()) {
-                        DomElement* opt_elem = (DomElement*)opt_child;
+                        DomElement* opt_elem = lam::dom_require_element(opt_child);
                         if (opt_elem->tag() == HTM_TAG_OPTION) {
                             if (current_idx == index) return opt_elem;
                             current_idx++;
@@ -2580,7 +2581,7 @@ static const char* get_option_text(DomElement* option) {
     DomNode* child = option->first_child;
     while (child) {
         if (child->is_text()) {
-            DomText* text = (DomText*)child;
+            DomText* text = lam::dom_require_text(child);
             return text->text;
         }
         child = child->next_sibling;
@@ -2594,8 +2595,8 @@ static const char* get_option_text(DomElement* option) {
 static const char* get_selected_option_text(ViewBlock* select) {
     if (!select || !select->form) return nullptr;
 
-    DocState* state = ((DomElement*)select)->doc ? ((DomElement*)select)->doc->state : NULL;
-    DomElement* option = get_option_at_index(select, form_control_get_selected_index(state, (View*)select));
+    DocState* state = (lam::dom_require_element(select))->doc ? (lam::dom_require_element(select))->doc->state : NULL;
+    DomElement* option = get_option_at_index(select, form_control_get_selected_index(state, static_cast<View*>(select)));
     return get_option_text(option);
 }
 
@@ -2625,7 +2626,7 @@ static void calculate_dropdown_dimensions(ViewBlock* select, DocState* state, fl
  */
 static bool handle_select_click(EventContext* evcon, View* target) {
     log_debug("handle_select_click: target=%p, target_tag=%d", (void*)target,
-        (target && target->is_element()) ? ((ViewElement*)target)->tag() : -1);
+        (target && target->is_element()) ? (lam::view_require_element(target))->tag() : -1);
 
     View* select_view = find_select_element(target);
     log_debug("handle_select_click: select_view=%p", (void*)select_view);
@@ -2634,8 +2635,8 @@ static bool handle_select_click(EventContext* evcon, View* target) {
     DocState* state = (DocState*)evcon->ui_context->document->state;
     if (!state) return false;
 
-    ViewBlock* select = (ViewBlock*)select_view;
-    bool disabled = !select->form || form_control_is_disabled(state, (View*)select);
+    ViewBlock* select = lam::view_require_block(select_view);
+    bool disabled = !select->form || form_control_is_disabled(state, static_cast<View*>(select));
     log_debug("handle_select_click: select->form=%p, disabled=%d",
         (void*)select->form, disabled ? 1 : 0);
     if (disabled) return false;
@@ -2645,7 +2646,7 @@ static bool handle_select_click(EventContext* evcon, View* target) {
     if (state->open_dropdown == select_view) {
         // Close the dropdown
         log_debug("handle_select_click: closing dropdown");
-        doc_state_close_dropdown(state, (View*)select);
+        doc_state_close_dropdown(state, static_cast<View*>(select));
         return true;
     }
 
@@ -2656,7 +2657,7 @@ static bool handle_select_click(EventContext* evcon, View* target) {
 
     // Open this dropdown
     log_debug("handle_select_click: opening dropdown with %d options", select->form->option_count);
-    doc_state_open_dropdown(state, (View*)select);
+    doc_state_open_dropdown(state, static_cast<View*>(select));
 
     // Calculate position (below the select, in absolute screen coords)
     // Walk up parent chain to get absolute position
@@ -2665,7 +2666,7 @@ static bool handle_select_click(EventContext* evcon, View* target) {
     View* parent = select->parent;
     while (parent) {
         if (parent->is_block()) {
-            ViewBlock* pblock = (ViewBlock*)parent;
+            ViewBlock* pblock = lam::view_require_block(parent);
             abs_x += pblock->x;
             abs_y += pblock->y;
         }
@@ -2687,7 +2688,7 @@ static bool handle_dropdown_option_click(EventContext* evcon, float mouse_x, flo
     DocState* state = (DocState*)evcon->ui_context->document->state;
     if (!state || !state->open_dropdown) return false;
 
-    ViewBlock* select = (ViewBlock*)state->open_dropdown;
+    ViewBlock* select = lam::view_require_block(state->open_dropdown);
     if (!select->form) return false;
 
     float scale = evcon->ui_context->pixel_ratio > 0 ? evcon->ui_context->pixel_ratio : 1.0f;
@@ -2715,10 +2716,10 @@ static bool handle_dropdown_option_click(EventContext* evcon, float mouse_x, flo
 
     if (clicked_index >= 0 && clicked_index < select->form->option_count) {
         log_debug("handle_dropdown_option_click: selecting option %d", clicked_index);
-        form_control_set_selected_index(state, (View*)select, clicked_index);
+        form_control_set_selected_index(state, static_cast<View*>(select), clicked_index);
 
         // Close dropdown
-        doc_state_close_dropdown(state, (View*)select);
+        doc_state_close_dropdown(state, static_cast<View*>(select));
         return true;
     }
 
@@ -2733,7 +2734,7 @@ static void update_dropdown_hover(EventContext* evcon, float mouse_x, float mous
     DocState* state = (DocState*)evcon->ui_context->document->state;
     if (!state || !state->open_dropdown) return;
 
-    ViewBlock* select = (ViewBlock*)state->open_dropdown;
+    ViewBlock* select = lam::view_require_block(state->open_dropdown);
     if (!select->form) return;
 
     float scale = evcon->ui_context->pixel_ratio > 0 ? evcon->ui_context->pixel_ratio : 1.0f;
@@ -2741,8 +2742,8 @@ static void update_dropdown_hover(EventContext* evcon, float mouse_x, float mous
     // Check if mouse is within dropdown popup
     if (mouse_x < state->dropdown_x || mouse_x > state->dropdown_x + state->dropdown_width ||
         mouse_y < state->dropdown_y || mouse_y > state->dropdown_y + state->dropdown_height) {
-        if (form_control_get_hover_index(state, (View*)select) != -1) {
-            form_control_set_hover_index(state, (View*)select, -1);
+        if (form_control_get_hover_index(state, static_cast<View*>(select)) != -1) {
+            form_control_set_hover_index(state, static_cast<View*>(select), -1);
         }
         return;
     }
@@ -2752,8 +2753,8 @@ static void update_dropdown_hover(EventContext* evcon, float mouse_x, float mous
     int hover_index = (int)((mouse_y - state->dropdown_y) / option_height);
 
     if (hover_index >= 0 && hover_index < select->form->option_count) {
-        if (form_control_get_hover_index(state, (View*)select) != hover_index) {
-            form_control_set_hover_index(state, (View*)select, hover_index);
+        if (form_control_get_hover_index(state, static_cast<View*>(select)) != hover_index) {
+            form_control_set_hover_index(state, static_cast<View*>(select), hover_index);
         }
     }
 }
@@ -2765,34 +2766,34 @@ static bool handle_dropdown_key(EventContext* evcon, int key) {
     DocState* state = (DocState*)evcon->ui_context->document->state;
     if (!state || !state->open_dropdown) return false;
 
-    ViewBlock* select = (ViewBlock*)state->open_dropdown;
+    ViewBlock* select = lam::view_require_block(state->open_dropdown);
     if (!select->form) return false;
 
-    int hover = form_control_get_hover_index(state, (View*)select);
+    int hover = form_control_get_hover_index(state, static_cast<View*>(select));
     int count = select->form->option_count;
 
     switch (key) {
     case RDT_KEY_UP:
         if (hover > 0) {
-            form_control_set_hover_index(state, (View*)select, hover - 1);
+            form_control_set_hover_index(state, static_cast<View*>(select), hover - 1);
         }
         return true;
 
     case RDT_KEY_DOWN:
         if (hover < count - 1) {
-            form_control_set_hover_index(state, (View*)select, hover + 1);
+            form_control_set_hover_index(state, static_cast<View*>(select), hover + 1);
         }
         return true;
 
     case RDT_KEY_ENTER:
         if (hover >= 0 && hover < count) {
-            form_control_set_selected_index(state, (View*)select, hover);
-            doc_state_close_dropdown(state, (View*)select);
+            form_control_set_selected_index(state, static_cast<View*>(select), hover);
+            doc_state_close_dropdown(state, static_cast<View*>(select));
         }
         return true;
 
     case RDT_KEY_ESCAPE:
-        doc_state_close_dropdown(state, (View*)select);
+        doc_state_close_dropdown(state, static_cast<View*>(select));
         return true;
     }
 
@@ -2806,7 +2807,7 @@ static void close_dropdown_if_outside(EventContext* evcon, float mouse_x, float 
     DocState* state = (DocState*)evcon->ui_context->document->state;
     if (!state || !state->open_dropdown) return;
 
-    ViewBlock* select = (ViewBlock*)state->open_dropdown;
+    ViewBlock* select = lam::view_require_block(state->open_dropdown);
     if (!select->form) return;
 
     float scale = evcon->ui_context->pixel_ratio > 0 ? evcon->ui_context->pixel_ratio : 1.0f;
@@ -2817,7 +2818,7 @@ static void close_dropdown_if_outside(EventContext* evcon, float mouse_x, float 
     View* parent = select->parent;
     while (parent) {
         if (parent->is_block()) {
-            ViewBlock* pblock = (ViewBlock*)parent;
+            ViewBlock* pblock = lam::view_require_block(parent);
             select_abs_x += pblock->x;
             select_abs_y += pblock->y;
         }
@@ -2842,7 +2843,7 @@ static void close_dropdown_if_outside(EventContext* evcon, float mouse_x, float 
 
     // Click outside - close dropdown
     log_debug("close_dropdown_if_outside: closing dropdown");
-    doc_state_close_dropdown(state, (View*)select);
+    doc_state_close_dropdown(state, static_cast<View*>(select));
 }
 
 /**
@@ -2860,16 +2861,16 @@ bool is_view_focusable(View* view) {
     // - elements with tabindex >= 0
 
     if (view->is_element()) {
-        ViewElement* elem = (ViewElement*)view;
+        ViewElement* elem = lam::view_require_element(view);
         uint32_t tag = elem->tag();
 
         // F8 (Radiant_Design_Form_Input.md §4): a disabled form control
         // is not part of the tabbing order. The HTML/ARIA spec says
         // disabled form elements are inert.
-        DomElement* delem = (DomElement*)view;
+        DomElement* delem = lam::dom_require_element(view);
         DocState* state = delem->doc ? (DocState*)delem->doc->state : NULL;
         if (delem->item_prop_type == DomElement::ITEM_PROP_FORM &&
-            delem->form && form_control_is_disabled(state, (View*)delem)) {
+            delem->form && form_control_is_disabled(state, static_cast<View*>(delem))) {
             return false;
         }
 
@@ -2922,7 +2923,7 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
             // is a text control whose value differs from the focus-time
             // snapshot, dispatch `change` before `blur` (HTML §4.10.5.5).
             if (prev_focus->is_element()) {
-                DomElement* prev_elem = (DomElement*)prev_focus;
+                DomElement* prev_elem = lam::dom_require_element(prev_focus);
                 if (te_blur_should_dispatch_change(prev_elem)) {
                     dispatch_lambda_handler   (evcon, prev_focus, "change");
                     dispatch_html_event_handler(evcon, prev_focus, "change");
@@ -2945,7 +2946,7 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
         // F1 (Radiant_Design_Form_Input.md §3.1): snapshot the value at
         // focus time so a later blur can decide whether to fire `change`.
         if (new_focus->is_element()) {
-            te_focus_capture_value((DomElement*)new_focus);
+            te_focus_capture_value(lam::dom_require_element(new_focus));
         }
 
         log_debug("update_focus_state: set focus on %p (keyboard=%d, focus-visible=%d)",
@@ -2956,7 +2957,7 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
         if (prev_focus) {
             // F1: same `change` dispatch on focus-cleared path.
             if (prev_focus->is_element()) {
-                DomElement* prev_elem = (DomElement*)prev_focus;
+                DomElement* prev_elem = lam::dom_require_element(prev_focus);
                 if (te_blur_should_dispatch_change(prev_elem)) {
                     dispatch_lambda_handler   (evcon, prev_focus, "change");
                     dispatch_html_event_handler(evcon, prev_focus, "change");
@@ -3057,7 +3058,7 @@ View* find_view(View* view, DomNode* node) {
     if (view == node) { return view; }
 
     if (view->is_group()) {
-        ViewElement* group = (ViewElement*)view;
+        ViewElement* group = lam::view_require_element(view);
         View* child = group->first_child;
         while (child) {
             View* found = find_view(child, node);
@@ -3105,8 +3106,8 @@ void view_to_absolute_position(View* view, float rel_x, float rel_y,
         if (parent->view_type == RDT_VIEW_BLOCK ||
             parent->view_type == RDT_VIEW_INLINE_BLOCK ||
             parent->view_type == RDT_VIEW_LIST_ITEM) {
-            abs_x += ((ViewBlock*)parent)->x;
-            abs_y += ((ViewBlock*)parent)->y;
+            abs_x += (lam::view_require_block(parent))->x;
+            abs_y += (lam::view_require_block(parent))->y;
         }
         parent = parent->parent;
     }
@@ -3440,9 +3441,9 @@ static bool text_point_inside_existing_selection(DocState* state, View* view, in
     DomSelection* selection = state->dom_selection;
     if (selection->range_count == 0 || selection->is_collapsed || !selection->ranges[0]) return false;
 
-    DomText* text = (DomText*)view;
+    DomText* text = lam::dom_require_text(view);
     uint32_t offset = char_offset < 0 ? 0 : dom_text_utf8_to_utf16(text, (uint32_t)char_offset);
-    DomNode* node = (DomNode*)text;
+    DomNode* node = static_cast<DomNode*>(text);
     if (dom_range_is_point_in_range(selection->ranges[0], node, offset)) return true;
 
     uint32_t boundary_len = dom_node_boundary_length(node);
@@ -3484,7 +3485,7 @@ void update_caret_visual_position(UiContext* uicon, DocState* state) {
 
     // Handle different view types
     if (view->is_text()) {
-        ViewText* text = (ViewText*)view;
+        ViewText* text = lam::view_require_text(view);
         if (!text->rect) {
             log_debug("[CARET-VISUAL] Text view has no rect");
             return;
@@ -3521,7 +3522,7 @@ void update_caret_visual_position(UiContext* uicon, DocState* state) {
 
     } else if (view->view_type == RDT_VIEW_MARKER) {
         // For markers: caret is at left edge (offset 0) or right edge (offset 1)
-        ViewMarker* marker = (ViewMarker*)view;
+        ViewMarker* marker = lam::view_require<RDT_VIEW_MARKER>(view);
         if (caret_offset == 0) {
             caret_x = view->x;
         } else {
@@ -3645,13 +3646,13 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 // find drop target: walk up from hit-test target to find element with dropzone attr
                 View* new_drop_target = nullptr;
                 if (evcon.target) {
-                    DomNode* node = (DomNode*)evcon.target;
+                    DomNode* node = static_cast<DomNode*>(evcon.target);
                     while (node) {
                         if (node->node_type == DOM_NODE_ELEMENT) {
-                            DomElement* elem = (DomElement*)node;
+                            DomElement* elem = lam::dom_require_element(node);
                             const char* dropzone = dom_element_get_attribute(elem, "dropzone");
                             if (dropzone && *dropzone) {
-                                new_drop_target = (View*)elem;
+                                new_drop_target = static_cast<View*>(elem);
                                 break;
                             }
                         }
@@ -3691,11 +3692,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
             // Handle textarea form control drag selection
             if (anchor_view && anchor_view->is_element()) {
-                DomElement* anchor_elem = (DomElement*)anchor_view;
+                DomElement* anchor_elem = lam::dom_require_element(anchor_view);
                 if (anchor_elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
                     anchor_elem->form &&
                     anchor_elem->form->control_type == FORM_CONTROL_TEXTAREA) {
-                    ViewBlock* ta_block = (ViewBlock*)anchor_elem;
+                    ViewBlock* ta_block = lam::view_require_block(anchor_elem);
                     const char* value = anchor_elem->form->value;
                     int value_len = value ? (int)strlen(value) : 0;
 
@@ -3715,11 +3716,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     // line 0.
                     float ta_abs_x = 0, ta_abs_y = 0;
                     {
-                        View* p = (View*)ta_block;
+                        View* p = static_cast<View*>(ta_block);
                         while (p) {
                             ta_abs_x += p->x;
                             ta_abs_y += p->y;
-                            p = (View*)p->parent;
+                            p = static_cast<View*>(p->parent);
                         }
                     }
 
@@ -3811,7 +3812,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 if (anchor_elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
                     anchor_elem->form &&
                     anchor_elem->form->control_type == FORM_CONTROL_TEXT) {
-                    ViewBlock* in_block = (ViewBlock*)anchor_elem;
+                    ViewBlock* in_block = lam::view_require_block(anchor_elem);
                     const char* value = anchor_elem->form->value;
                     int value_len = value ? (int)strlen(value) : 0;
 
@@ -3824,11 +3825,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     // branch above for why we sum every ancestor's x/y.
                     float in_abs_x = 0, in_abs_y = 0;
                     {
-                        View* p = (View*)in_block;
+                        View* p = static_cast<View*>(in_block);
                         while (p) {
                             in_abs_x += p->x;
                             in_abs_y += p->y;
-                            p = (View*)p->parent;
+                            p = static_cast<View*>(p->parent);
                         }
                     }
 
@@ -3876,7 +3877,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     // render_form shows the live drag highlight.
                     tc_sync_legacy_to_form(anchor_elem, state);
                     uint32_t sel_start = 0, sel_end = 0;
-                    form_control_get_selection(state, (View*)anchor_elem, &sel_start, &sel_end, NULL);
+                    form_control_get_selection(state, static_cast<View*>(anchor_elem), &sel_start, &sel_end, NULL);
                     log_debug("[INPUT DRAG SEL] char_offset=%d sel_u16=[%u..%u] tc_init=%d",
                               char_offset,
                               sel_start,
@@ -3902,11 +3903,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 drag_target_view = current_target;
             } else if (anchor_view && anchor_view->view_type == RDT_VIEW_TEXT &&
                        doc && doc->view_tree && doc->view_tree->root) {
-                DomBoundary hit = dom_hit_test_to_boundary((View*)doc->view_tree->root,
+                DomBoundary hit = dom_hit_test_to_boundary(static_cast<View*>(doc->view_tree->root),
                     (float)motion->x, (float)motion->y);
                 if (hit.node && hit.node->node_type == DOM_NODE_TEXT) {
-                    DomText* hit_text = (DomText*)hit.node;
-                    drag_target_view = (View*)hit_text;
+                    DomText* hit_text = lam::dom_require_text(hit.node);
+                    drag_target_view = static_cast<View*>(hit_text);
                     drag_hit_offset = (int)dom_text_utf16_to_utf8(hit_text, hit.offset); // INT_CAST_OK: editor selection offsets are byte-index ints
                 }
             } else if (selection_focus_view &&
@@ -3925,7 +3926,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             }
 
             if (drag_target_view && drag_target_view->view_type == RDT_VIEW_TEXT) {
-                ViewText* text = (ViewText*)drag_target_view;
+                ViewText* text = lam::view_require_text(drag_target_view);
                 TextRect* rect = text->rect;
 
                 // Setup font from text view (critical for correct glyph advance calculation)
@@ -3942,8 +3943,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     if (parent->view_type == RDT_VIEW_BLOCK ||
                         parent->view_type == RDT_VIEW_INLINE_BLOCK ||
                         parent->view_type == RDT_VIEW_LIST_ITEM) {
-                        sel_block_x += ((ViewBlock*)parent)->x;
-                        sel_block_y += ((ViewBlock*)parent)->y;
+                        sel_block_x += (lam::view_require_block(parent))->x;
+                        sel_block_y += (lam::view_require_block(parent))->y;
                     }
                     parent = parent->parent;
                 }
@@ -4071,7 +4072,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
         if (state && state->drag_target) {
             log_debug("Dragging in progress");
-            ArrayList* target_list = build_view_stack(&evcon, (View*)state->drag_target);
+            ArrayList* target_list = build_view_stack(&evcon, static_cast<View*>(state->drag_target));
             evcon.event.type = RDT_EVENT_MOUSE_DRAG;  // deliver as drag event
             fire_events(&evcon, target_list);
             arraylist_free(target_list);
@@ -4106,7 +4107,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
         // Forward mouse button events to layer-mode webview
         if (evcon.target && evcon.target->is_element()) {
-            ViewBlock* tblock = (ViewBlock*)evcon.target;
+            ViewBlock* tblock = lam::view_require_block(evcon.target);
             if (tblock->embed && tblock->embed->webview &&
                 tblock->embed->webview->mode == WEBVIEW_MODE_LAYER &&
                 tblock->embed->webview->handle) {
@@ -4144,7 +4145,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         if (event->type == RDT_EVENT_MOUSE_DOWN &&
             btn_event->button == GLFW_MOUSE_BUTTON_RIGHT &&
             state && evcon.target && evcon.target->is_element()) {
-            DomElement* hit = (DomElement*)evcon.target;
+            DomElement* hit = lam::dom_require_element(evcon.target);
             if (tc_is_text_control(hit)) {
                 context_menu_open(state, evcon.target,
                     (float)btn_event->x, (float)btn_event->y);
@@ -4194,7 +4195,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             // leave the existing text-control selection intact.
             if (!evcon.default_prevented && evcon.target->view_type == RDT_VIEW_TEXT &&
                 evcon.target_text_rect && text_target_allows_caret(evcon.target)) {
-                ViewText* text = (ViewText*)evcon.target;
+                ViewText* text = lam::view_require_text(evcon.target);
                 TextRect* rect = evcon.target_text_rect;
                 // Setup font from text view (critical for correct glyph advance calculation)
                 FontBox saved_font = evcon.font;
@@ -4230,7 +4231,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 calculate_position_from_char_offset(&evcon, text, rect, char_offset,
                     &caret_x, &caret_y, &caret_height);
 
-                caret_project_visual_from_block(state, (View*)text, caret_x, caret_y, caret_height,
+                caret_project_visual_from_block(state, static_cast<View*>(text), caret_x, caret_y, caret_height,
                                                 evcon.block.x, evcon.block.y);
                 float caret_iframe_offset_x = 0, caret_iframe_offset_y = 0;
                 if (caret_get_visual_snapshot(state, NULL, NULL, NULL,
@@ -4295,15 +4296,15 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 evcon.font = saved_font;
                 evcon.need_repaint = true;
             } else if (!evcon.default_prevented && evcon.target->is_element()) {
-                DomElement* target_elem = (DomElement*)evcon.target;
+                DomElement* target_elem = lam::dom_require_element(evcon.target);
 
                 // Text input form controls: place caret inside the input
                 if (target_elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
                     target_elem->form &&
                     target_elem->form->control_type == FORM_CONTROL_TEXT &&
-                    !form_control_is_disabled(state, (View*)target_elem)) {
+                    !form_control_is_disabled(state, static_cast<View*>(target_elem))) {
 
-                    ViewBlock* input_block = (ViewBlock*)target_elem;
+                    ViewBlock* input_block = lam::view_require_block(target_elem);
                     const char* value = target_elem->form->value;
                     int value_len = value ? (int)strlen(value) : 0;
 
@@ -4411,9 +4412,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 } else if (target_elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
                            target_elem->form &&
                            target_elem->form->control_type == FORM_CONTROL_TEXTAREA &&
-                           !form_control_is_disabled(state, (View*)target_elem)) {
+                           !form_control_is_disabled(state, static_cast<View*>(target_elem))) {
                     // Textarea form controls: click-to-position caret
-                    ViewBlock* ta_block = (ViewBlock*)target_elem;
+                    ViewBlock* ta_block = lam::view_require_block(target_elem);
                     const char* value = target_elem->form->value;
                     int value_len = value ? (int)strlen(value) : 0;
 
@@ -4533,11 +4534,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         // Check for draggable element on MOUSE_DOWN — initiate pending drag
         if (event->type == RDT_EVENT_MOUSE_DOWN && evcon.target && state) {
             // walk up from target to find element with draggable="true"
-            DomNode* node = (DomNode*)evcon.target;
+            DomNode* node = static_cast<DomNode*>(evcon.target);
             DomElement* draggable_elem = nullptr;
             while (node) {
                 if (node->node_type == DOM_NODE_ELEMENT) {
-                    DomElement* elem = (DomElement*)node;
+                    DomElement* elem = lam::dom_require_element(node);
                     const char* draggable = dom_element_get_attribute(elem, "draggable");
                     if (draggable && strcmp(draggable, "true") == 0) {
                         draggable_elem = elem;
@@ -4549,7 +4550,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             if (draggable_elem) {
                 const char* drag_data = dom_element_get_attribute(draggable_elem, "dragdata");
                 DragTransitionArgs drag_args = {
-                    .source = (View*)draggable_elem,
+                    .source = static_cast<View*>(draggable_elem),
                     .x = (float)btn_event->x,
                     .y = (float)btn_event->y,
                     .drag_data = drag_data
@@ -4595,7 +4596,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             int collapse_offset = 0;
             if (selection_press_in_range_pending(state, &collapse_view, &collapse_offset)) {
                 if (evcon.target && evcon.target->view_type == RDT_VIEW_TEXT && evcon.target_text_rect) {
-                    ViewText* text = (ViewText*)evcon.target;
+                    ViewText* text = lam::view_require_text(evcon.target);
                     FontBox saved_font = evcon.font;
                     if (text->font) {
                         setup_font(evcon.ui_context, &evcon.font, text->font);
@@ -4667,29 +4668,29 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     // walk up to find a block with embed->video
                     while (v) {
                         if (v->view_type == RDT_VIEW_BLOCK) {
-                            ViewBlock* blk = (ViewBlock*)v;
+                            ViewBlock* blk = lam::view_require_block(v);
                             if (blk->embed && blk->embed->video) {
                                 RdtVideo* video = (RdtVideo*)blk->embed->video;
                                 bool has_controls = blk->embed->has_controls;
 
                                 // compute absolute viewport position by walking parent chain
                                 float vid_x = 0, vid_y = 0;
-                                View* walk = (View*)blk;
+                                View* walk = static_cast<View*>(blk);
                                 while (walk) {
                                     if (walk->view_type == RDT_VIEW_BLOCK) {
-                                        ViewBlock* wb = (ViewBlock*)walk;
+                                        ViewBlock* wb = lam::view_require_block(walk);
                                         vid_x += wb->x;
                                         vid_y += wb->y;
                                         if (wb->scroller && wb->scroller->pane) {
                                             DocState* scroll_state = wb->doc ? wb->doc->state : NULL;
                                             float scroll_x = 0.0f, scroll_y = 0.0f;
-                                            scroll_state_get_position_for_view(scroll_state, (View*)wb,
+                                            scroll_state_get_position_for_view(scroll_state, static_cast<View*>(wb),
                                                 wb->scroller->pane, &scroll_x, &scroll_y, NULL, NULL);
                                             vid_x -= scroll_x;
                                             vid_y -= scroll_y;
                                         }
                                     }
-                                    walk = (View*)walk->parent;
+                                    walk = static_cast<View*>(walk->parent);
                                 }
 
                                 float vid_w = blk->width;
@@ -4759,7 +4760,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                                 break;
                             }
                         }
-                        v = (View*)v->parent;
+                        v = static_cast<View*>(v->parent);
                     }
                 }
 
@@ -4803,7 +4804,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         // fire drag event if dragging in progress
         if (evcon.event.type == RDT_EVENT_MOUSE_UP && state && state->drag_target) {
             log_debug("mouse up in dragging");
-            ArrayList* target_list = build_view_stack(&evcon, (View*)state->drag_target);
+            ArrayList* target_list = build_view_stack(&evcon, static_cast<View*>(state->drag_target));
             fire_events(&evcon, target_list);
             arraylist_free(target_list);
             update_drag_state(&evcon, NULL, false);
@@ -4819,20 +4820,20 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 log_info("browse_nav: fragment navigation to #%s", fragment_id);
                 DomElement* target_elem = find_element_by_id(doc->root, fragment_id);
                 if (target_elem) {
-                    View* target_view = find_view(doc->view_tree->root, (DomNode*)target_elem);
+                    View* target_view = find_view(doc->view_tree->root, static_cast<DomNode*>(target_elem));
                     if (target_view) {
                         // get root scroller and scroll to element's y position
-                        ViewBlock* root_block = (ViewBlock*)doc->view_tree->root;
+                        ViewBlock* root_block = lam::view_require_block(doc->view_tree->root);
                         if (root_block && root_block->scroller && root_block->scroller->pane) {
                             ScrollPane* pane = root_block->scroller->pane;
                             float target_y = target_view->y;
                             DocState* scroll_state = (DocState*)uicon->document->state;
                             float scroll_x = 0.0f, scroll_y = 0.0f;
-                            scroll_state_get_position_for_view(scroll_state, (View*)root_block, pane,
+                            scroll_state_get_position_for_view(scroll_state, static_cast<View*>(root_block), pane,
                                                                &scroll_x, &scroll_y, NULL, NULL);
-                            scroll_state_set_position_for_view(scroll_state, (View*)root_block,
+                            scroll_state_set_position_for_view(scroll_state, static_cast<View*>(root_block),
                                                                pane, scroll_x, target_y, true);
-                            scroll_state_get_position_for_view(scroll_state, (View*)root_block, pane,
+                            scroll_state_get_position_for_view(scroll_state, static_cast<View*>(root_block), pane,
                                                                NULL, &scroll_y, NULL, NULL);
                             log_info("browse_nav: scrolled to #%s at y=%.0f", fragment_id,
                                      scroll_y);
@@ -4855,9 +4856,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 View* iframe = find_view(doc->view_tree->root, elmt);
                 if (iframe) {
                     log_debug("found iframe view");
-                    if ((iframe->view_type == RDT_VIEW_BLOCK || iframe->view_type == RDT_VIEW_INLINE_BLOCK) && ((ViewBlock*)iframe)->embed) {
+                    if ((iframe->view_type == RDT_VIEW_BLOCK || iframe->view_type == RDT_VIEW_INLINE_BLOCK) && (lam::view_require_block(iframe))->embed) {
                         log_debug("updating doc of iframe view");
-                        ViewBlock* block = (ViewBlock*)iframe;
+                        ViewBlock* block = lam::view_require_block(iframe);
                         // reset scroll position
                         if (block->scroller && block->scroller->pane) {
                             block->scroller->pane->reset();
@@ -4904,7 +4905,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             }
                             // For pre-laid-out documents, view_tree is already set
                             if (new_doc->view_tree && new_doc->view_tree->root) {
-                                ViewBlock* root = (ViewBlock*)new_doc->view_tree->root;
+                                ViewBlock* root = lam::view_require_block(new_doc->view_tree->root);
                                 // Disable inner doc's viewport scroller — iframe container handles scrolling
                                 if (root->scroller) {
                                     if (root->content_height > root->height) {
@@ -4936,10 +4937,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 DomDocument* new_doc = nullptr;
                 if (session) {
                     // save current scroll position in history
-                    ViewBlock* root_block = doc->view_tree ? (ViewBlock*)doc->view_tree->root : nullptr;
+                    ViewBlock* root_block = doc->view_tree ? lam::view_require_block(doc->view_tree->root) : nullptr;
                     if (root_block && root_block->scroller && root_block->scroller->pane) {
                         float scroll_y = 0.0f;
-                        scroll_state_get_position_for_view(state, (View*)root_block, root_block->scroller->pane,
+                        scroll_state_get_position_for_view(state, static_cast<View*>(root_block), root_block->scroller->pane,
                                                            NULL, &scroll_y, NULL, NULL);
                         session_save_scroll_position(session, scroll_y);
                     }
@@ -4971,7 +4972,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             DocState* tc_state = (DocState*)evcon.ui_context->document->state;
             View* tc_focused = tc_state ? focus_get(tc_state) : nullptr;
             if (tc_focused && tc_focused->is_element()) {
-                DomElement* tc_elem = (DomElement*)tc_focused;
+                DomElement* tc_elem = lam::dom_require_element(tc_focused);
                 if (tc_is_text_control(tc_elem)) {
                     tc_sync_legacy_to_form(tc_elem, tc_state);
                     tc_set_active_element(state, tc_elem);
@@ -4990,7 +4991,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
         // Forward scroll to layer-mode webview
         if (evcon.target && evcon.target->is_element()) {
-            ViewBlock* tblock = (ViewBlock*)evcon.target;
+            ViewBlock* tblock = lam::view_require_block(evcon.target);
             if (tblock->embed && tblock->embed->webview &&
                 tblock->embed->webview->mode == WEBVIEW_MODE_LAYER &&
                 tblock->embed->webview->handle) {
@@ -5061,7 +5062,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
         // Forward key events to layer-mode webview if it has focus
         if (focused && focused->is_element()) {
-            ViewBlock* fblock = (ViewBlock*)focused;
+            ViewBlock* fblock = lam::view_require_block(focused);
             if (fblock->embed && fblock->embed->webview &&
                 fblock->embed->webview->mode == WEBVIEW_MODE_LAYER &&
                 fblock->embed->webview->handle) {
@@ -5090,7 +5091,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         if (focused && focused->is_element()
             && (key_event->key == RDT_KEY_SPACE || key_event->key == RDT_KEY_ENTER)
             && !(key_event->mods & (RDT_MOD_CTRL | RDT_MOD_SUPER | RDT_MOD_ALT))) {
-            ViewElement* fe = (ViewElement*)focused;
+            ViewElement* fe = lam::view_require_element(focused);
             uint32_t tag = fe->tag();
             bool handled = false;
             if (tag == HTM_TAG_INPUT && key_event->key == RDT_KEY_SPACE) {
@@ -5103,9 +5104,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 }
             } else if (tag == HTM_TAG_BUTTON) {
                 // Disabled buttons are inert.
-                DomElement* delem = (DomElement*)focused;
+                DomElement* delem = lam::dom_require_element(focused);
                 bool disabled = delem->item_prop_type == DomElement::ITEM_PROP_FORM
-                    && delem->form && form_control_is_disabled(state, (View*)delem);
+                    && delem->form && form_control_is_disabled(state, static_cast<View*>(delem));
                 if (!disabled) {
                     dispatch_html_event_handler(&evcon, focused, "click");
                     radiant_dispatch_mouse_event(&evcon, focused, "click",
@@ -5115,9 +5116,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             } else if (tag == HTM_TAG_SELECT) {
                 // Space / Enter on a focused <select> opens (or toggles)
                 // the dropdown popup, matching native browser behavior.
-                DomElement* delem = (DomElement*)focused;
+                DomElement* delem = lam::dom_require_element(focused);
                 bool disabled = delem->item_prop_type == DomElement::ITEM_PROP_FORM
-                    && delem->form && form_control_is_disabled(state, (View*)delem);
+                    && delem->form && form_control_is_disabled(state, static_cast<View*>(delem));
                 if (!disabled) {
                     handled = handle_select_click(&evcon, focused);
                 }
@@ -5187,7 +5188,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         // Handle arrow keys and caret adjustment for text input form controls
         int form_caret_offset = 0;
         if (focused && focused->is_element() && caret_get_offset(state, &form_caret_offset)) {
-            DomElement* focus_elem = (DomElement*)focused;
+            DomElement* focus_elem = lam::dom_require_element(focused);
             if (focus_elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
                 focus_elem->form &&
                 focus_elem->form->control_type == FORM_CONTROL_TEXT) {
@@ -5243,7 +5244,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         evcon.paste_text = nullptr;
                         focused = focus_get(state);
                         if (focused && focused->is_element()) {
-                            DomElement* fe = (DomElement*)focused;
+                            DomElement* fe = lam::dom_require_element(focused);
                             if (tc_is_text_control(fe)) {
                                 te_paste(fe, state, focused, clip,
                                          (uint32_t)strlen(clip));
@@ -5351,8 +5352,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     evcon.need_repaint = true;
                     break;
                 } else if (key_event->key == RDT_KEY_BACKSPACE) {
-                    bool editable = !form_control_is_readonly(state, (View*)focus_elem) &&
-                        !form_control_is_disabled(state, (View*)focus_elem);
+                    bool editable = !form_control_is_readonly(state, static_cast<View*>(focus_elem)) &&
+                        !form_control_is_disabled(state, static_cast<View*>(focus_elem));
                     if (had_lambda_keydown) {
                         // Lambda handler deleted char before caret; move caret back by 1 char
                         int base_off = had_keydown_caret ? keydown_caret_offset : cur;
@@ -5387,8 +5388,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     evcon.need_repaint = true;
                     break;
                 } else if (key_event->key == RDT_KEY_DELETE) {
-                    bool editable = !form_control_is_readonly(state, (View*)focus_elem) &&
-                        !form_control_is_disabled(state, (View*)focus_elem);
+                    bool editable = !form_control_is_readonly(state, static_cast<View*>(focus_elem)) &&
+                        !form_control_is_disabled(state, static_cast<View*>(focus_elem));
                     if (!had_lambda_keydown && editable) {
                         uint32_t a, b;
                         if (had_keydown_selection) {
@@ -5417,7 +5418,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         // Handle arrow keys and caret adjustment for textarea form controls
         int textarea_caret_offset = 0;
         if (focused && focused->is_element() && caret_get_offset(state, &textarea_caret_offset)) {
-            DomElement* focus_elem = (DomElement*)focused;
+            DomElement* focus_elem = lam::dom_require_element(focused);
             if (focus_elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
                 focus_elem->form &&
                 focus_elem->form->control_type == FORM_CONTROL_TEXTAREA) {
@@ -5522,7 +5523,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             if (focused) caret_set(state, focused, s);
                             selection_clear(state);
                             if (focused && focused->is_element()) {
-                                DomElement* fe = (DomElement*)focused;
+                                DomElement* fe = lam::dom_require_element(focused);
                                 if (fe->form && fe->form->value) {
                                     int new_len = (int)strlen(fe->form->value);
                                     int caret_offset = 0;
@@ -5548,7 +5549,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         evcon.paste_text = nullptr;
                         focused = focus_get(state);
                         if (focused && focused->is_element()) {
-                            DomElement* fe = (DomElement*)focused;
+                            DomElement* fe = lam::dom_require_element(focused);
                             if (tc_is_text_control(fe)) {
                                 uint32_t inserted = te_paste(fe, state, focused,
                                                              clip,
@@ -5767,8 +5768,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     evcon.need_repaint = true;
                     break;
                 } else if (key_event->key == RDT_KEY_BACKSPACE) {
-                    bool editable = !form_control_is_readonly(state, (View*)focus_elem) &&
-                        !form_control_is_disabled(state, (View*)focus_elem);
+                    bool editable = !form_control_is_readonly(state, static_cast<View*>(focus_elem)) &&
+                        !form_control_is_disabled(state, static_cast<View*>(focus_elem));
                     if (had_lambda_keydown) {
                         // Lambda handler already processed the delete; adjust caret
                         if (had_keydown_selection) {
@@ -5807,8 +5808,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     }
                     evcon.need_repaint = true;
                 } else if (key_event->key == RDT_KEY_DELETE) {
-                    bool editable = !form_control_is_readonly(state, (View*)focus_elem) &&
-                        !form_control_is_disabled(state, (View*)focus_elem);
+                    bool editable = !form_control_is_readonly(state, static_cast<View*>(focus_elem)) &&
+                        !form_control_is_disabled(state, static_cast<View*>(focus_elem));
                     if (!had_lambda_keydown && editable) {
                         uint32_t a, b;
                         if (had_keydown_selection) {
@@ -5830,8 +5831,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     }
                     evcon.need_repaint = true;
                 } else if (key_event->key == RDT_KEY_ENTER) {
-                    bool editable = !form_control_is_readonly(state, (View*)focus_elem) &&
-                        !form_control_is_disabled(state, (View*)focus_elem);
+                    bool editable = !form_control_is_readonly(state, static_cast<View*>(focus_elem)) &&
+                        !form_control_is_disabled(state, static_cast<View*>(focus_elem));
                     if (had_lambda_keydown) {
                         // Lambda handler processed the enter; adjust caret
                         if (had_keydown_selection) {
@@ -5876,7 +5877,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             // Get text data for UTF-8 aware navigation
             unsigned char* text_data = nullptr;
             if (caret_view->is_text()) {
-                text_data = ((ViewText*)caret_view)->text_data();
+                text_data = (lam::view_require_text(caret_view))->text_data();
             }
 
             switch (key_event->key) {
@@ -6029,7 +6030,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             DocState* tc_state = (DocState*)evcon.ui_context->document->state;
             View* tc_focused = tc_state ? focus_get(tc_state) : nullptr;
             if (tc_focused && tc_focused->is_element()) {
-                DomElement* tc_elem = (DomElement*)tc_focused;
+                DomElement* tc_elem = lam::dom_require_element(tc_focused);
                 if (tc_is_text_control(tc_elem)) {
                     tc_sync_legacy_to_form(tc_elem, tc_state);
                 }
@@ -6046,7 +6047,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 View* focused = focus_get(state);
                 event_log_focused_target(cascade_log, cascade_id, focused);
                 if (focused && focused->is_element()) {
-                    ViewBlock* fblock = (ViewBlock*)focused;
+                    ViewBlock* fblock = lam::view_require_block(focused);
                     if (fblock->embed && fblock->embed->webview &&
                         fblock->embed->webview->mode == WEBVIEW_MODE_LAYER &&
                         fblock->embed->webview->handle) {
@@ -6093,7 +6094,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
         // Forward text input to layer-mode webview if focused
         if (focused && focused->is_element()) {
-            ViewBlock* fblock = (ViewBlock*)focused;
+            ViewBlock* fblock = lam::view_require_block(focused);
             if (fblock->embed && fblock->embed->webview &&
                 fblock->embed->webview->mode == WEBVIEW_MODE_LAYER &&
                 fblock->embed->webview->handle) {
@@ -6152,14 +6153,14 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         // the value the Lambda handler already produced.
         bool is_form_input = false;
         if (focused && focused->is_element()) {
-            DomElement* elem = (DomElement*)focused;
+            DomElement* elem = lam::dom_require_element(focused);
             if (elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
                 elem->form &&
                 (elem->form->control_type == FORM_CONTROL_TEXT ||
                  elem->form->control_type == FORM_CONTROL_TEXTAREA)) {
                 is_form_input = true;
-                bool editable = !form_control_is_readonly(state, (View*)elem) &&
-                    !form_control_is_disabled(state, (View*)elem);
+                bool editable = !form_control_is_readonly(state, static_cast<View*>(elem)) &&
+                    !form_control_is_disabled(state, static_cast<View*>(elem));
                 int caret_offset = 0;
                 if (had_lambda_handler) {
                     // legacy path: handler mutated value; just advance caret.

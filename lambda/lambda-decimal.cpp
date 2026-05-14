@@ -1064,17 +1064,51 @@ Item bigint_from_string(const char* str, int len) {
             mpd_del(sixteen); mpd_del(digit); mpd_del(temp);
         }
     } else if (len > 2 && buf[0] == '0' && (buf[1] == 'o' || buf[1] == 'O')) {
-        // octal
-        char* endptr;
-        unsigned long long uval = strtoull(buf + 2, &endptr, 8);
-        if (*endptr != '\0') { mpd_del(dec_val); return ItemError; }
-        mpd_set_u64(dec_val, uval, ctx);
+        const char* oct = buf + 2;
+        int oct_len = len - 2;
+        mpd_set_u32(dec_val, 0, ctx);
+        mpd_t* eight = mpd_new(ctx);
+        mpd_t* digit = mpd_new(ctx);
+        mpd_t* temp = mpd_new(ctx);
+        if (!eight || !digit || !temp) {
+            if (eight) mpd_del(eight);
+            if (digit) mpd_del(digit);
+            if (temp) mpd_del(temp);
+            mpd_del(dec_val);
+            return ItemError;
+        }
+        mpd_set_u32(eight, 8, ctx);
+        for (int i = 0; i < oct_len; i++) {
+            char c = oct[i];
+            if (c < '0' || c > '7') { mpd_del(eight); mpd_del(digit); mpd_del(temp); mpd_del(dec_val); return ItemError; }
+            mpd_mul(temp, dec_val, eight, ctx);
+            mpd_set_u32(digit, (uint32_t)(c - '0'), ctx);
+            mpd_add(dec_val, temp, digit, ctx);
+        }
+        mpd_del(eight); mpd_del(digit); mpd_del(temp);
     } else if (len > 2 && buf[0] == '0' && (buf[1] == 'b' || buf[1] == 'B')) {
-        // binary
-        char* endptr;
-        unsigned long long uval = strtoull(buf + 2, &endptr, 2);
-        if (*endptr != '\0') { mpd_del(dec_val); return ItemError; }
-        mpd_set_u64(dec_val, uval, ctx);
+        const char* bin = buf + 2;
+        int bin_len = len - 2;
+        mpd_set_u32(dec_val, 0, ctx);
+        mpd_t* two = mpd_new(ctx);
+        mpd_t* digit = mpd_new(ctx);
+        mpd_t* temp = mpd_new(ctx);
+        if (!two || !digit || !temp) {
+            if (two) mpd_del(two);
+            if (digit) mpd_del(digit);
+            if (temp) mpd_del(temp);
+            mpd_del(dec_val);
+            return ItemError;
+        }
+        mpd_set_u32(two, 2, ctx);
+        for (int i = 0; i < bin_len; i++) {
+            char c = bin[i];
+            if (c != '0' && c != '1') { mpd_del(two); mpd_del(digit); mpd_del(temp); mpd_del(dec_val); return ItemError; }
+            mpd_mul(temp, dec_val, two, ctx);
+            mpd_set_u32(digit, (uint32_t)(c - '0'), ctx);
+            mpd_add(dec_val, temp, digit, ctx);
+        }
+        mpd_del(two); mpd_del(digit); mpd_del(temp);
     } else {
         // decimal string — ES spec: only digits allowed (with optional leading +/-)
         // reject decimal points, exponents, Infinity, NaN
@@ -1132,12 +1166,15 @@ int bigint_cmp(Item a, Item b) {
 int bigint_cmp_double(Item bi, double d) {
     mpd_t* m = bigint_get_mpd(bi);
     if (!m) return 0;
+    if (isnan(d)) return 0;
+    if (d == INFINITY) return -1;
+    if (d == -INFINITY) return 1;
     // convert double to mpd for comparison
     mpd_context_t* ctx = bigint_context();
     mpd_t* d_mpd = mpd_new(ctx);
     if (!d_mpd) return 0;
-    char str_buf[64];
-    snprintf(str_buf, sizeof(str_buf), "%.17g", d);
+    char str_buf[1200];
+    snprintf(str_buf, sizeof(str_buf), "%.1074g", d);
     uint32_t status = 0;
     mpd_qset_string(d_mpd, str_buf, ctx, &status);
     if (status != 0) { mpd_del(d_mpd); return 0; }
@@ -1401,7 +1438,8 @@ Item bigint_left_shift(Item a, Item b) {
     uint32_t status = 0;
     mpd_ssize_t shift = mpd_qget_ssize(mb, &status);
     if (status & MPD_Invalid_operation) return ItemError;
-    if (shift < 0 || shift > 100000) return ItemError;
+    if (shift < 0) return bigint_right_shift(a, bigint_neg(b));
+    if (shift > 100000) return ItemError;
     // x << y = x * 2^y
     mpd_t* two = mpd_new(ctx);
     mpd_t* shift_mpd = mpd_new(ctx);
@@ -1428,7 +1466,8 @@ Item bigint_right_shift(Item a, Item b) {
     uint32_t status = 0;
     mpd_ssize_t shift = mpd_qget_ssize(mb, &status);
     if (status & MPD_Invalid_operation) return ItemError;
-    if (shift < 0 || shift > 100000) return ItemError;
+    if (shift < 0) return bigint_left_shift(a, bigint_neg(b));
+    if (shift > 100000) return ItemError;
     // x >> y = floor(x / 2^y)
     mpd_t* two = mpd_new(ctx);
     mpd_t* shift_mpd = mpd_new(ctx);

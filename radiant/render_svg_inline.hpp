@@ -18,6 +18,8 @@
 
 struct FontContext;  // forward declaration from lib/font/font.h
 
+typedef const char* (*SvgImageResolverFn)(void* context, int image_id);
+
 // ============================================================================
 // SVG ViewBox Structure
 // ============================================================================
@@ -51,6 +53,8 @@ struct SvgRenderContext {
     RdtVector* vec;              // target vector renderer for direct drawing
     DisplayList* dl;             // display list for deferred rendering (Phase 1, may be nullptr)
     const char* source_path;      // source SVG path for resolving nested resources
+    SvgImageResolverFn image_resolver;  // optional resolver for document-owned image handles
+    void* image_resolver_context;
     RdtMatrix transform;         // accumulated transform from root (viewBox × group × element)
     
     // pixel ratio for text sizing - text font sizes need to be divided by this
@@ -91,6 +95,12 @@ struct SvgRenderContext {
     int style_rule_count;
     int style_rule_capacity;
 };
+
+extern "C" void svg_register_pdf_image_resolver(Element* svg_root, Item pdf_root);
+extern "C" void svg_unregister_image_resolvers_for_tree(Element* root);
+extern "C" bool svg_get_registered_image_resolver(Element* svg_root,
+                                                   SvgImageResolverFn* out_resolver,
+                                                   void** out_context);
 
 // ============================================================================
 // Public API

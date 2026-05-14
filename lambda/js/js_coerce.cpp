@@ -42,6 +42,37 @@ static inline bool result_is_object(TypeId rt) {
     return is_object_type(rt);
 }
 
+static inline bool js_coerce_is_bigint(Item value) {
+    if (get_type_id(value) != LMD_TYPE_DECIMAL) return false;
+    Decimal* dec = (Decimal*)(value.item & 0x00FFFFFFFFFFFFFF);
+    return dec && dec->unlimited == DECIMAL_BIGINT;
+}
+
+static bool js_proxy_has_get_trap(Item value) {
+    JsProxyData* pd = js_get_proxy_data(value);
+    if (!pd) return true;
+    Item handler = (Item){.item = pd->handler};
+    Item get_key = (Item){.item = s2it(heap_create_name("get", 3))};
+    Item trap = js_property_get(handler, get_key);
+    if (js_check_exception()) return true;
+    TypeId trap_type = get_type_id(trap);
+    return trap.item != ItemNull.item && trap_type != LMD_TYPE_UNDEFINED && trap_type != LMD_TYPE_NULL;
+}
+
+static bool js_is_class_constructor_map_for_coerce(Item value) {
+    if (get_type_id(value) != LMD_TYPE_MAP || !value.map) return false;
+    bool has_instance_proto = false;
+    js_map_get_fast_ext(value.map, "__instance_proto__", 18, &has_instance_proto);
+    if (has_instance_proto) return true;
+    bool has_class_name = false;
+    js_map_get_fast_ext(value.map, "__class_name__", 14, &has_class_name);
+    return has_class_name;
+}
+
+static bool js_is_callable_proxy_target_for_coerce(Item value) {
+    return get_type_id(value) == LMD_TYPE_FUNC || js_is_class_constructor_map_for_coerce(value);
+}
+
 extern "C" Item js_to_primitive(Item value, JsHint hint) {
     TypeId vt = get_type_id(value);
     if (!is_object_type(vt)) return value;
@@ -58,7 +89,7 @@ extern "C" Item js_to_primitive(Item value, JsHint hint) {
     if (vt == LMD_TYPE_MAP) {
         bool own_pv = false;
         Item pv = js_map_get_fast_ext(value.map, "__primitiveValue__", 18, &own_pv);
-        if (own_pv) {
+        if (own_pv && !js_coerce_is_bigint(pv)) {
             bool has_vo = false, has_ts = false, has_tp = false;
             js_map_get_fast_ext(value.map, "valueOf", 7, &has_vo);
             js_map_get_fast_ext(value.map, "toString", 8, &has_ts);
@@ -94,6 +125,18 @@ extern "C" Item js_to_primitive(Item value, JsHint hint) {
             return ItemNull;
         }
         return result;
+    }
+
+    if (vt == LMD_TYPE_MAP && js_is_proxy(value) && !js_proxy_has_get_trap(value)) {
+        Item target = js_proxy_get_target(value);
+        if (js_is_callable_proxy_target_for_coerce(target)) {
+            Item fn = js_lookup_builtin_method(LMD_TYPE_FUNC, "toString", 8);
+            if (fn.item != ItemNull.item && get_type_id(fn) == LMD_TYPE_FUNC) {
+                Item result = js_call_function(fn, value, NULL, 0);
+                if (js_check_exception()) return ItemNull;
+                if (!result_is_object(get_type_id(result))) return result;
+            }
+        }
     }
 
     // Step 3: OrdinaryToPrimitive — method order depends on hint.

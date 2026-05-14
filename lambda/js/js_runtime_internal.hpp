@@ -79,10 +79,11 @@ struct JsFunction {
     String* name;    // Function name (NULL if anonymous)
     int builtin_id;  // >0 for built-in method dispatch (0 = user function)
     Item properties_map; // v18: backing map for arbitrary properties (0 if none)
-    uint8_t flags;   // v20: bit 0 = is_generator
+    uint16_t flags;   // v20: JS_FUNC_FLAG_* bits
     int16_t formal_length; // ES spec .length: params before first default, excl rest (-1 = use param_count)
     Item* module_vars; // Per-module variable array (NULL for built-in functions)
     String* source_text; // v29: original source text for Function.prototype.toString
+    bool eval_initializer_context;
 };
 
 #define JS_FUNC_FLAG_GENERATOR 1
@@ -93,6 +94,7 @@ struct JsFunction {
 #define JS_FUNC_FLAG_METHOD    32
 #define JS_FUNC_FLAG_ASYNC_GEN 64  // async generator function (sets is_async in js_generator_create)
 #define JS_FUNC_FLAG_ASYNC     128 // async (non-generator) function: changes [[Prototype]] to %AsyncFunction%.prototype
+#define JS_FUNC_FLAG_DERIVED_CTOR 256
 #define JS_FUNC_FLAG_DATA_VIEW_ACCESSOR JS_FUNC_FLAG_METHOD
 
 extern "C" Item js_get_generator_shared_proto(bool is_async);
@@ -155,6 +157,7 @@ enum JsBuiltinId {
     JS_BUILTIN_FUNC_BIND,
     JS_BUILTIN_FUNC_TO_STRING,
     JS_BUILTIN_FUNC_HAS_INSTANCE,
+    JS_BUILTIN_FUNC_THROW_TYPE_ERROR,
     // String.prototype
     JS_BUILTIN_STR_CHAR_AT,
     JS_BUILTIN_STR_CHAR_CODE_AT,
@@ -248,6 +251,12 @@ enum JsBuiltinId {
     JS_BUILTIN_NUM_TO_FIXED,
     JS_BUILTIN_NUM_TO_PRECISION,
     JS_BUILTIN_NUM_TO_EXPONENTIAL,
+    // BigInt.prototype methods
+    JS_BUILTIN_BIGINT_TO_STRING,
+    JS_BUILTIN_BIGINT_VALUE_OF,
+    JS_BUILTIN_BIGINT_TO_LOCALE_STRING,
+    JS_BUILTIN_BIGINT_AS_INT_N,
+    JS_BUILTIN_BIGINT_AS_UINT_N,
     // Symbol.prototype methods
     JS_BUILTIN_SYM_TO_STRING,
     JS_BUILTIN_SYM_DESCRIPTION_GETTER,
@@ -296,6 +305,8 @@ enum JsBuiltinId {
     JS_BUILTIN_MATH_LOG1P,
     JS_BUILTIN_JSON_PARSE,
     JS_BUILTIN_JSON_STRINGIFY,
+    JS_BUILTIN_JSON_RAW_JSON,
+    JS_BUILTIN_JSON_IS_RAW_JSON,
     // String iterator
     JS_BUILTIN_STRING_ITER,      // String.prototype[Symbol.iterator]() — creates string iterator
     JS_BUILTIN_STRING_ITER_NEXT, // String iterator .next()
@@ -320,6 +331,7 @@ enum JsBuiltinId {
     JS_BUILTIN_DATE_TO_TIME_STRING,
     JS_BUILTIN_DATE_TO_STRING,
     JS_BUILTIN_DATE_TO_LOCALE_DATE_STRING,
+    JS_BUILTIN_DATE_TO_LOCALE_TIME_STRING,
     JS_BUILTIN_DATE_VALUE_OF,
     JS_BUILTIN_DATE_TO_PRIMITIVE,
     JS_BUILTIN_DATE_GET_DAY,
@@ -396,6 +408,8 @@ enum JsBuiltinId {
     JS_BUILTIN_SET_IS_SUPERSET,  // Set.prototype.isSupersetOf(other)
     JS_BUILTIN_SET_IS_DISJOINT,  // Set.prototype.isDisjointFrom(other)
     JS_BUILTIN_COLL_SIZE_GETTER, // Map/Set.prototype size getter
+    JS_BUILTIN_MAP_SIZE_GETTER,  // get Map.prototype.size
+    JS_BUILTIN_SET_SIZE_GETTER,  // get Set.prototype.size
     // WeakMap/WeakSet prototype methods (accept is_weak collections)
     JS_BUILTIN_WEAKMAP_SET,      // WeakMap.prototype.set(key, value)
     JS_BUILTIN_WEAKMAP_GET,      // WeakMap.prototype.get(key)
@@ -453,6 +467,14 @@ enum JsBuiltinId {
     JS_BUILTIN_REGEXP_GET_HASINDICES,
     JS_BUILTIN_ARRAYBUFFER_SLICE,    // ArrayBuffer.prototype.slice
     JS_BUILTIN_ARRAYBUFFER_RESIZE,   // ArrayBuffer.prototype.resize
+    JS_BUILTIN_ARRAYBUFFER_GET_BYTE_LENGTH,
+    JS_BUILTIN_ARRAYBUFFER_GET_RESIZABLE,
+    JS_BUILTIN_ARRAYBUFFER_GET_MAX_BYTE_LENGTH,
+    JS_BUILTIN_SHAREDARRAYBUFFER_SLICE,
+    JS_BUILTIN_SHAREDARRAYBUFFER_GROW, // SharedArrayBuffer.prototype.grow
+    JS_BUILTIN_SHAREDARRAYBUFFER_GET_BYTE_LENGTH,
+    JS_BUILTIN_SHAREDARRAYBUFFER_GET_GROWABLE,
+    JS_BUILTIN_SHAREDARRAYBUFFER_GET_MAX_BYTE_LENGTH,
     // Atomics methods
     JS_BUILTIN_ATOMICS_ADD,
     JS_BUILTIN_ATOMICS_AND,
@@ -462,9 +484,11 @@ enum JsBuiltinId {
     JS_BUILTIN_ATOMICS_LOAD,
     JS_BUILTIN_ATOMICS_NOTIFY,
     JS_BUILTIN_ATOMICS_OR,
+    JS_BUILTIN_ATOMICS_PAUSE,
     JS_BUILTIN_ATOMICS_STORE,
     JS_BUILTIN_ATOMICS_SUB,
     JS_BUILTIN_ATOMICS_WAIT,
+    JS_BUILTIN_ATOMICS_WAIT_ASYNC,
     JS_BUILTIN_ATOMICS_XOR,
     // CSS namespace methods
     JS_BUILTIN_CSS_SUPPORTS,
@@ -567,6 +591,7 @@ bool js_ta_proto_chain_set(Item object, Item key, Item value);
 bool js_array_ta_proto_numeric_set(Item array, Item key, bool* no_op);
 
 static inline bool js_is_symbol(Item v) {
+    if (get_type_id(v) == LMD_TYPE_SYMBOL) return true;
     if (get_type_id(v) != LMD_TYPE_INT) return false;
     return it2i(v) <= -(int64_t)JS_SYMBOL_BASE;
 }

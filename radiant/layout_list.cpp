@@ -11,8 +11,10 @@
 
 #include "layout_list.hpp"
 #include "layout_counters.hpp"
+#include "retained_fields.hpp"
 #include "../lib/log.h"
 #include "../lib/strbuf.h"
+#include "../lib/tagged.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 
@@ -156,7 +158,7 @@ static bool sum_reversed_counter_incs(DomElement* parent, const char* counter_na
                                       int* total, int* last_nonzero, int* set_value) {
     for (DomNode* child = parent->first_child; child; child = child->next_sibling) {
         if (!child->is_element()) continue;
-        DomElement* elem = (DomElement*)child;
+        DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(child);
 
         // skip subtree if this element resets the same counter (new scope)
         if (element_resets_counter(elem, counter_name)) continue;
@@ -338,7 +340,7 @@ void setup_list_container_counters(LayoutContext* lycon, ViewBlock* block, DomEl
         // LIs without explicit counter-increment get implicit -1 (reversed)
         for (DomNode* child = dom_elem->first_child; child; child = child->next_sibling) {
             if (!child->is_element()) continue;
-            DomElement* child_elem = (DomElement*)child;
+            DomElement* child_elem = lam::dom_require<DOM_NODE_ELEMENT>(child);
             // skip subtree if it resets list-item (new scope)
             if (element_resets_counter(child_elem, "list-item")) continue;
             // check explicit counter-increment
@@ -451,30 +453,16 @@ static DomElement* create_marker_element(LayoutContext* lycon, DomElement* paren
 
     // CSS 2.1 §12.5: list-style-image overrides list-style-type when image loads successfully
     if (image_url && strcmp(image_url, "none") != 0) {
-        size_t url_len = strlen(image_url);
-        marker_prop->image_url = (char*)arena_alloc(parent_elem->doc->arena, url_len + 1);
-        if (marker_prop->image_url) {
-            memcpy(marker_prop->image_url, image_url, url_len + 1);
-        }
+        marker_prop->image_url = lam::promote_to_arena(parent_elem->doc->arena, image_url).get();
     }
 
     if (marker_css_content) {
         // ::marker { content: ... } overrides list-style-type
-        size_t slen = strlen(marker_css_content);
-        char* text_copy = (char*)arena_alloc(parent_elem->doc->arena, slen + 1);
-        if (text_copy) {
-            memcpy(text_copy, marker_css_content, slen + 1);
-            marker_prop->text_content = text_copy;
-        }
+        radiant_retain_marker_text_content(marker_prop, lam::promote_to_arena(parent_elem->doc->arena, marker_css_content));
         marker_prop->marker_type = CSS_VALUE_DECIMAL;  // force text rendering
     } else if (is_string_marker) {
         // CSS Lists 3 §4.1: use the string directly as marker content
-        size_t slen = strlen(string_marker);
-        char* text_copy = (char*)arena_alloc(parent_elem->doc->arena, slen + 1);
-        if (text_copy) {
-            memcpy(text_copy, string_marker, slen + 1);
-            marker_prop->text_content = text_copy;
-        }
+        radiant_retain_marker_text_content(marker_prop, lam::promote_to_arena(parent_elem->doc->arena, string_marker));
     } else if (!is_bullet_marker) {
         char marker_text[64];
         int marker_len = counter_format(lycon->counter_context, "list-item", marker_style, marker_text, sizeof(marker_text));
@@ -484,11 +472,7 @@ static DomElement* create_marker_element(LayoutContext* lycon, DomElement* paren
             marker_text[marker_len + 2] = '\0';
             marker_len += 2;
 
-            char* text_copy = (char*)arena_alloc(parent_elem->doc->arena, marker_len + 1);
-            if (text_copy) {
-                memcpy(text_copy, marker_text, marker_len + 1);
-                marker_prop->text_content = text_copy;
-            }
+            radiant_retain_marker_text_content(marker_prop, lam::promote_to_arena(parent_elem->doc->arena, marker_text));
         }
     }
 
@@ -596,7 +580,7 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
 
     // Check for ::marker { content: ... } CSS override
     const char* marker_css_content = nullptr;
-    DomElement* list_elem = (DomElement*)elmt;
+    DomElement* list_elem = lam::dom_require<DOM_NODE_ELEMENT>(elmt);
     if (list_elem->marker_styles) {
         CssDeclaration* content_decl = style_tree_get_declaration(
             list_elem->marker_styles, CSS_PROPERTY_CONTENT);
@@ -656,7 +640,7 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
             }
         }
 
-        DomElement* parent_elem = (DomElement*)elmt;
+        DomElement* parent_elem = lam::dom_require<DOM_NODE_ELEMENT>(elmt);
         DomElement* marker_elem = create_marker_element(
             lycon, parent_elem, marker_style, font_size,
             is_bullet_marker, is_outside_position,

@@ -15,6 +15,7 @@
 #include "dom_range_resolver.hpp"
 #include "dom_range.hpp"
 #include "view.hpp"
+#include "../lib/tagged.hpp"
 #include "../lib/log.h"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
@@ -70,8 +71,8 @@ static void rel_to_abs(View* view, float rel_x, float rel_y,
         if (p->view_type == RDT_VIEW_BLOCK ||
             p->view_type == RDT_VIEW_INLINE_BLOCK ||
             p->view_type == RDT_VIEW_LIST_ITEM) {
-            x += ((ViewBlock*)p)->x;
-            y += ((ViewBlock*)p)->y;
+            x += (lam::view_require_block(p))->x;
+            y += (lam::view_require_block(p))->y;
         }
         p = p->parent;
     }
@@ -117,34 +118,34 @@ static bool resolve_boundary(const DomBoundary* b,
     int byte_off = 0;
 
     if (n->is_text()) {
-        text = (DomText*)n;
+        text = lam::dom_require_text(n);
         byte_off = (int)dom_text_utf16_to_utf8(text, b->offset);
     } else if (n->is_element()) {
         // Element boundary: child index `b->offset`. Map to either the
         // *Nth child's* leading edge (if it's text, point at byte 0; if
         // it's an element, descend to its first text descendant) or the
         // trailing edge of the (offset-1)th child when offset == child_count.
-        DomElement* el = (DomElement*)n;
-        DomNode* c = (DomNode*)el->first_child;
+        DomElement* el = lam::dom_require_element(n);
+        DomNode* c = static_cast<DomNode*>(el->first_child);
         uint32_t i = 0;
         while (c && i < b->offset) { c = c->next_sibling; ++i; }
         if (c && c->is_text()) {
-            text = (DomText*)c;
+            text = lam::dom_require_text(c);
             byte_off = 0;
         } else if (c && c->is_element()) {
             // Walk left-most descendants to first text node.
             DomNode* d = c;
             while (d && d->is_element()) {
-                DomElement* de = (DomElement*)d;
-                d = (DomNode*)de->first_child;
+                DomElement* de = lam::dom_require_element(d);
+                d = static_cast<DomNode*>(de->first_child);
             }
-            if (d && d->is_text()) { text = (DomText*)d; byte_off = 0; }
+            if (d && d->is_text()) { text = lam::dom_require_text(d); byte_off = 0; }
         }
         if (!text) {
             // Empty element / past-last-child: fall back to element's own box.
             float ax, ay;
-            rel_to_abs((View*)n, n->x, n->y, &ax, &ay);
-            if (out_view) *out_view = (View*)n;
+            rel_to_abs(static_cast<View*>(n), n->x, n->y, &ax, &ay);
+            if (out_view) *out_view = static_cast<View*>(n);
             if (out_byte) *out_byte = 0;
             if (out_x) *out_x = ax;
             if (out_y) *out_y = ay;
@@ -162,8 +163,8 @@ static bool resolve_boundary(const DomBoundary* b,
     }
     float local_x = interp_x_in_rect(r, byte_off);
     float ax, ay;
-    rel_to_abs((View*)text, local_x, r->y, &ax, &ay);
-    if (out_view) *out_view = (View*)text;
+    rel_to_abs(static_cast<View*>(text), local_x, r->y, &ax, &ay);
+    if (out_view) *out_view = static_cast<View*>(text);
     if (out_byte) *out_byte = byte_off;
     if (out_x) *out_x = ax;
     if (out_y) *out_y = ay;
@@ -226,7 +227,7 @@ static DomText* hit_test_text_at(View* node, float vx, float vy,
     DomText* found = NULL;
 
     if (node->is_text()) {
-        DomText* t = (DomText*)node;
+        DomText* t = lam::dom_require_text(node);
         for (TextRect* r = t->rect; r; r = r->next) {
             float rx = abs_x + r->x;
             float ry = abs_y + r->y;
@@ -242,7 +243,7 @@ static DomText* hit_test_text_at(View* node, float vx, float vy,
 
     // Element: descend into children, accumulating block offsets.
     if (node->is_element()) {
-        DomElement* el = (DomElement*)node;
+        DomElement* el = lam::dom_require_element(node);
         float cx = abs_x, cy = abs_y;
         if (node->view_type == RDT_VIEW_BLOCK ||
             node->view_type == RDT_VIEW_INLINE_BLOCK ||
@@ -250,8 +251,8 @@ static DomText* hit_test_text_at(View* node, float vx, float vy,
             cx += node->x;
             cy += node->y;
         }
-        for (DomNode* c = (DomNode*)el->first_child; c; c = c->next_sibling) {
-            DomText* t = hit_test_text_at((View*)c, vx, vy, cx, cy,
+        for (DomNode* c = static_cast<DomNode*>(el->first_child); c; c = c->next_sibling) {
+            DomText* t = hit_test_text_at(static_cast<View*>(c), vx, vy, cx, cy,
                                           out_rect, out_local_x);
             if (t) { found = t; break; }
         }
@@ -268,7 +269,7 @@ typedef struct EditableBoundaryHit {
 
 static bool is_rich_editable_host(View* view) {
     if (!view || !view->is_element()) return false;
-    DomElement* elem = (DomElement*)view;
+    DomElement* elem = lam::dom_require_element(view);
     if (elem->has_attribute("data-editable")) return true;
     const char* ce = elem->get_attribute("contenteditable");
     return ce && strcmp(ce, "false") != 0;
@@ -282,7 +283,7 @@ static void find_editable_boundary_hit(View* node, float vx, float vy,
 
     if (node->is_text()) {
         if (!inside_editable) return;
-        DomText* text = (DomText*)node;
+        DomText* text = lam::dom_require_text(node);
         for (TextRect* rect = text->rect; rect; rect = rect->next) {
             if (rect->height <= 0) continue;
             float rect_x = abs_x + rect->x;
@@ -324,9 +325,9 @@ static void find_editable_boundary_hit(View* node, float vx, float vy,
         cy += node->y;
     }
 
-    DomElement* el = (DomElement*)node;
+    DomElement* el = lam::dom_require_element(node);
     for (DomNode* c = el->first_child; c; c = c->next_sibling) {
-        View* child_view = (View*)c;
+        View* child_view = static_cast<View*>(c);
         if (!child_view->view_type) continue;
         find_editable_boundary_hit(child_view, vx, vy, cx, cy,
                                    child_inside_editable, hit);
@@ -360,7 +361,7 @@ extern "C" DomBoundary dom_hit_test_to_boundary(View* root_view, float vx, float
     }
     if (!t || !rect) return b;
     int bo = byte_offset_for_x(rect, local_x);
-    b.node = (DomNode*)t;
+    b.node = static_cast<DomNode*>(t);
     b.offset = dom_text_utf8_to_utf16(t, (uint32_t)bo);
     return b;
 }
@@ -374,8 +375,8 @@ extern "C" void dom_range_for_each_rect(DomRange* range, UiContext* uicon,
     if (!range || !cb) return;
     if (!range->layout_valid && !dom_range_resolve_layout(range)) return;
 
-    View* sv = (View*)range->start_view;
-    View* ev = (View*)range->end_view;
+    View* sv = static_cast<View*>(range->start_view);
+    View* ev = static_cast<View*>(range->end_view);
     if (!sv || !ev) return;
 
     // Glyph-precise X for `bo` within `r` of text node `t`. Falls back to
@@ -384,14 +385,14 @@ extern "C" void dom_range_for_each_rect(DomRange* range, UiContext* uicon,
     // binaries that don't link event.cpp).
     auto glyph_x = [&](DomText* t, TextRect* r, int bo) -> float {
         if (uicon && g_glyph_x_resolver) {
-            return g_glyph_x_resolver(uicon, (ViewText*)t, r, bo);
+            return g_glyph_x_resolver(uicon, lam::view_require_text(t), r, bo);
         }
         return interp_x_in_rect(r, bo);
     };
 
     // Same-text-node, single TextRect (the common case): one rectangle.
     if (sv == ev && sv->is_text()) {
-        DomText* t = (DomText*)sv;
+        DomText* t = lam::dom_require_text(sv);
         TextRect* sr = rect_for_byte_offset(t, range->start_byte_offset);
         TextRect* er = rect_for_byte_offset(t, range->end_byte_offset);
         if (!sr || !er) return;
@@ -401,7 +402,7 @@ extern "C" void dom_range_for_each_rect(DomRange* range, UiContext* uicon,
             float lx0 = (r == sr) ? glyph_x(t, r, range->start_byte_offset) : r->x;
             float lx1 = (r == er) ? glyph_x(t, r, range->end_byte_offset)   : r->x + r->width;
             float ax, ay;
-            rel_to_abs((View*)t, lx0, r->y, &ax, &ay);
+            rel_to_abs(static_cast<View*>(t), lx0, r->y, &ax, &ay);
             cb(ax, ay, lx1 - lx0, r->height, userdata);
             if (r == er) break;
         }
@@ -422,7 +423,7 @@ extern "C" void dom_range_for_each_rect(DomRange* range, UiContext* uicon,
             float lx0 = glyph_x(t, r, lo);
             float lx1 = glyph_x(t, r, hi);
             float ax, ay;
-            rel_to_abs((View*)t, lx0, r->y, &ax, &ay);
+            rel_to_abs(static_cast<View*>(t), lx0, r->y, &ax, &ay);
             cb(ax, ay, lx1 - lx0, r->height, userdata);
         }
     };
@@ -435,33 +436,33 @@ extern "C" void dom_range_for_each_rect(DomRange* range, UiContext* uicon,
         while (cur) {
             DomElement* el = cur->as_element();
             if (el && el->first_child) {
-                cur = (DomNode*)el->first_child;
+                cur = static_cast<DomNode*>(el->first_child);
             } else if (cur->next_sibling) {
                 cur = cur->next_sibling;
             } else {
                 while (cur && !cur->next_sibling) cur = cur->parent;
                 if (cur) cur = cur->next_sibling;
             }
-            if (cur && cur->is_text()) return (DomText*)cur;
+            if (cur && cur->is_text()) return lam::dom_require_text(cur);
         }
         return NULL;
     };
 
     if (sv->is_text()) {
-        DomText* t = (DomText*)sv;
+        DomText* t = lam::dom_require_text(sv);
         emit_text_node(t, range->start_byte_offset,
                        (int)(t->length > 0 ? t->length : 0));
     }
 
-    DomText* cur = sv->is_text() ? next_text((DomNode*)sv) : NULL;
+    DomText* cur = sv->is_text() ? next_text(static_cast<DomNode*>(sv)) : NULL;
     int safety = 100000;
-    while (cur && (View*)cur != ev && --safety > 0) {
+    while (cur && static_cast<View*>(cur) != ev && --safety > 0) {
         emit_text_node(cur, 0, (int)(cur->length > 0 ? cur->length : 0));
-        cur = next_text((DomNode*)cur);
+        cur = next_text(static_cast<DomNode*>(cur));
     }
 
     if (ev->is_text()) {
-        DomText* t = (DomText*)ev;
+        DomText* t = lam::dom_require_text(ev);
         emit_text_node(t, 0, range->end_byte_offset);
     }
 }
@@ -497,21 +498,21 @@ extern "C" void dom_range_for_each_rect_in_text_rect(DomRange* range,
     if (!range || !cb || !target_text) return;
     if (!range->layout_valid && !dom_range_resolve_layout(range)) return;
 
-    View* sv = (View*)range->start_view;
-    View* ev = (View*)range->end_view;
+    View* sv = static_cast<View*>(range->start_view);
+    View* ev = static_cast<View*>(range->end_view);
     if (!sv || !ev) return;
 
     int bo_lo = 0;
     int bo_hi = (target_text->length > 0) ? (int)target_text->length : 0;
     bool include = false;
-    if ((View*)target_text == sv && (View*)target_text == ev) {
+    if (static_cast<View*>(target_text) == sv && static_cast<View*>(target_text) == ev) {
         bo_lo = range->start_byte_offset;
         bo_hi = range->end_byte_offset;
         include = true;
-    } else if ((View*)target_text == sv) {
+    } else if (static_cast<View*>(target_text) == sv) {
         bo_lo = range->start_byte_offset;
         include = true;
-    } else if ((View*)target_text == ev) {
+    } else if (static_cast<View*>(target_text) == ev) {
         bo_hi = range->end_byte_offset;
         include = true;
     } else if (sv == ev) {
@@ -522,28 +523,28 @@ extern "C" void dom_range_for_each_rect_in_text_rect(DomRange* range,
             DomNode* cur = n;
             while (cur) {
                 DomElement* el = cur->as_element();
-                if (el && el->first_child) cur = (DomNode*)el->first_child;
+                if (el && el->first_child) cur = static_cast<DomNode*>(el->first_child);
                 else if (cur->next_sibling) cur = cur->next_sibling;
                 else {
                     while (cur && !cur->next_sibling) cur = cur->parent;
                     if (cur) cur = cur->next_sibling;
                 }
-                if (cur && cur->is_text()) return (DomText*)cur;
+                if (cur && cur->is_text()) return lam::dom_require_text(cur);
             }
             return NULL;
         };
-        DomText* cur = sv->is_text() ? next_text((DomNode*)sv) : NULL;
+        DomText* cur = sv->is_text() ? next_text(static_cast<DomNode*>(sv)) : NULL;
         int safety = 100000;
-        while (cur && (View*)cur != ev && --safety > 0) {
+        while (cur && static_cast<View*>(cur) != ev && --safety > 0) {
             if (cur == target_text) { include = true; break; }
-            cur = next_text((DomNode*)cur);
+            cur = next_text(static_cast<DomNode*>(cur));
         }
     }
     if (!include || bo_lo >= bo_hi) return;
 
     auto glyph_x = [&](DomText* t, TextRect* r, int bo) -> float {
         if (uicon && g_glyph_x_resolver) {
-            return g_glyph_x_resolver(uicon, (ViewText*)t, r, bo);
+            return g_glyph_x_resolver(uicon, lam::view_require_text(t), r, bo);
         }
         return interp_x_in_rect(r, bo);
     };
@@ -558,7 +559,7 @@ extern "C" void dom_range_for_each_rect_in_text_rect(DomRange* range,
         float lx0 = glyph_x(target_text, r, lo);
         float lx1 = glyph_x(target_text, r, hi);
         float ax, ay;
-        rel_to_abs((View*)target_text, lx0, r->y, &ax, &ay);
+        rel_to_abs(static_cast<View*>(target_text), lx0, r->y, &ax, &ay);
         cb(ax, ay, lx1 - lx0, r->height, userdata);
         if (target_rect) break;
     }

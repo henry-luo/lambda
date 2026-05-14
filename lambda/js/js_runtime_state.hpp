@@ -38,12 +38,16 @@ struct JsRuntimeState {
     Item new_target = {0};
     Item pending_new_target = {0};
     bool has_pending_new_target = false;
+    bool super_this_bound_stack[128] = {};
+    Item super_this_value_stack[128] = {};
+    int super_this_bound_depth = 0;
     Item* pending_call_args = NULL;
     int pending_call_argc = 0;
     Item array_method_real_this = {0};
     Map* cached_object_proto = NULL;
     bool resolving_object_proto = false;
     bool private_field_initializing = false;
+    bool eval_initializer_context = false;
     bool exception_pending = false;
     Item exception_value = {0};
     char exception_msg_buf[1024] = {};
@@ -78,12 +82,16 @@ static inline Item*& js_active_module_vars_ref() {
 #define js_new_target (js_runtime_state.new_target)
 #define js_pending_new_target (js_runtime_state.pending_new_target)
 #define js_has_pending_new_target (js_runtime_state.has_pending_new_target)
+#define js_super_this_bound_stack (js_runtime_state.super_this_bound_stack)
+#define js_super_this_value_stack (js_runtime_state.super_this_value_stack)
+#define js_super_this_bound_depth (js_runtime_state.super_this_bound_depth)
 #define js_pending_call_args (js_runtime_state.pending_call_args)
 #define js_pending_call_argc (js_runtime_state.pending_call_argc)
 #define js_array_method_real_this (js_runtime_state.array_method_real_this)
 #define js_cached_object_proto (js_runtime_state.cached_object_proto)
 #define js_resolving_object_proto (js_runtime_state.resolving_object_proto)
 #define js_private_field_initializing (js_runtime_state.private_field_initializing)
+#define js_eval_initializer_context (js_runtime_state.eval_initializer_context)
 #define js_exception_pending (js_runtime_state.exception_pending)
 #define js_exception_value (js_runtime_state.exception_value)
 #define js_exception_msg_buf (js_runtime_state.exception_msg_buf)

@@ -3,6 +3,7 @@
 #include "available_space.hpp"
 #include "intrinsic_sizing.hpp"
 #include "form_control.hpp"
+#include "../lib/tagged.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/input/css/css_style.hpp"
 #include <stdlib.h>
@@ -89,8 +90,8 @@ static float get_preferred_aspect_ratio_for_positioned(ViewBlock* block) {
 
 static bool view_tree_has_table_flow(View* view) {
     if (!view || !view->is_element()) return false;
-    ViewElement* element = (ViewElement*)view;
-    ViewBlock* block = view->is_block() ? (ViewBlock*)view : nullptr;
+    ViewElement* element = lam::view_require_element(view);
+    ViewBlock* block = lam::view_as_block(view);
     if (block && block->display.inner == CSS_VALUE_TABLE) return true;
     for (View* child = element->first_child; child; child = child->next_sibling) {
         if (view_tree_has_table_flow(child)) return true;
@@ -162,7 +163,7 @@ static void offset_children_recursive(ViewElement* elem, float offset_x, float o
 
         // For text nodes, also offset all TextRect positions
         if (child->view_type == RDT_VIEW_TEXT) {
-            ViewText* text = (ViewText*)child;
+            ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
             TextRect* rect = text->rect;
             while (rect) {
                 rect->x += offset_x;
@@ -175,7 +176,7 @@ static void offset_children_recursive(ViewElement* elem, float offset_x, float o
         // Block children have their own coordinate system - their internal content
         // positions are relative to the block, not to the inline span
         if (child->is_element() && child->view_type != RDT_VIEW_BLOCK) {
-            offset_children_recursive((ViewElement*)child, offset_x, offset_y);
+            offset_children_recursive(lam::view_require_element(child), offset_x, offset_y);
         }
         child = child->next();
     }
@@ -194,7 +195,7 @@ void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
     TextDirection parent_direction = TD_LTR;  // default to LTR
     ViewElement* parent = block->parent_view();
     if (parent && parent->is_element()) {
-        DomElement* parent_elem = (DomElement*)parent;
+        DomElement* parent_elem = lam::dom_require<DOM_NODE_ELEMENT>(parent);
         // Use the computed direction from BlockProp if available (set during CSS resolution)
         if (parent_elem->blk && parent_elem->blk->direction == CSS_VALUE_RTL) {
             parent_direction = TD_RTL;
@@ -205,7 +206,7 @@ void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
                 parent_elem->specified_style,
                 CSS_PROPERTY_DIRECTION,
                 parent_elem->parent && parent_elem->parent->is_element() ?
-                    ((DomElement*)parent_elem->parent)->specified_style : NULL
+                    lam::dom_require<DOM_NODE_ELEMENT>(parent_elem->parent)->specified_style : NULL
             );
 
             if (direction_value && direction_value->type == CSS_VALUE_TYPE_KEYWORD &&
@@ -231,7 +232,7 @@ void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
         cb_parent = cb_parent->parent_view();
     }
     if (cb_parent && cb_parent->is_block()) {
-        ViewBlock* parent_block = (ViewBlock*)cb_parent;
+        ViewBlock* parent_block = lam::view_require_block(cb_parent);
         // Compute content-box width from border-box width
         float pad_border_h = 0;
         if (parent_block->bound) {
@@ -319,7 +320,7 @@ void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
     // so we must also offset all descendants to move with the inline box
     if (block->view_type == RDT_VIEW_INLINE && (offset_x != 0 || offset_y != 0)) {
         log_debug("Offsetting inline children by (%.1f, %.1f)", offset_x, offset_y);
-        offset_children_recursive((ViewElement*)block, offset_x, offset_y);
+        offset_children_recursive(lam::view_require_element(block), offset_x, offset_y);
     }
 
     // todo: add to chain of positioned elements for z-index stacking
@@ -347,7 +348,7 @@ void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block) {
     ViewElement* scroll_ancestor = NULL;
     for (ViewElement* p = block->parent_view(); p; p = p->parent_view()) {
         if (!p->is_block()) continue;
-        ViewBlock* pb = (ViewBlock*)p;
+        ViewBlock* pb = lam::view_require_block(p);
         if (pb->scroller &&
             (pb->scroller->overflow_x != CSS_VALUE_VISIBLE ||
              pb->scroller->overflow_y != CSS_VALUE_VISIBLE)) {
@@ -361,7 +362,7 @@ void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block) {
         return;
     }
 
-    ViewBlock* scroller = (ViewBlock*)scroll_ancestor;
+    ViewBlock* scroller = lam::view_require_block(scroll_ancestor);
 
     // Scrollport: scroller's content box at (0, 0) in scroller content coordinates.
     // At scroll position 0, the visible area starts at the content box origin.
@@ -386,7 +387,7 @@ void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block) {
     float offset_to_scroller_x = 0;
     for (ViewElement* p = block->parent_view(); p && p != scroll_ancestor; p = p->parent_view()) {
         if (p->is_block()) {
-            ViewBlock* pb = (ViewBlock*)p;
+            ViewBlock* pb = lam::view_require_block(p);
             offset_to_scroller_y += (float)pb->y;
             offset_to_scroller_x += (float)pb->x;
             if (pb->bound) {
@@ -457,7 +458,7 @@ void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block) {
     // Use parent content coordinates (element's y=0 is parent content top).
     ViewElement* parent = block->parent_view();
     if (parent && parent->is_block() && (offset_x != 0 || offset_y != 0)) {
-        ViewBlock* cb = (ViewBlock*)parent;
+        ViewBlock* cb = lam::view_require_block(parent);
         // containing block content area in parent-relative coordinates: [0, content_height]
         float cb_content_top = 0;
         float cb_content_left = 0;
@@ -498,7 +499,7 @@ void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block) {
         log_debug("sticky: applied offset (%.1f, %.1f), new position (%.0f, %.0f)", offset_x, offset_y, block->x, block->y);
 
         if (block->view_type == RDT_VIEW_INLINE) {
-            offset_children_recursive((ViewElement*)block, offset_x, offset_y);
+            offset_children_recursive(lam::view_require_element(block), offset_x, offset_y);
         }
     } else {
         log_debug("sticky: no offset needed, element at static position");
@@ -511,15 +512,21 @@ void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block) {
  * For absolute: nearest positioned ancestor or initial containing block
  * For fixed: viewport (initial containing block)
  */
+static ViewBlock* find_initial_containing_block(ViewBlock* element) {
+    if (!element) return nullptr;
+    ViewBlock* root = element;
+    for (ViewElement* ancestor = element->parent_view(); ancestor; ancestor = ancestor->parent_view()) {
+        ViewBlock* ancestor_block = lam::view_as_block(ancestor);
+        if (ancestor_block) root = ancestor_block;
+    }
+    return root;
+}
+
 ViewBlock* find_containing_block(ViewBlock* element, CssEnum position_type) {
     if (position_type == CSS_VALUE_FIXED) {
         // Fixed positioning uses viewport as containing block
         // For now, return the root block (will be enhanced for viewport support)
-        ViewBlock* root = element;
-        while (root->parent) {
-            root = (ViewBlock*)root->parent;
-        }
-        return root;
+        return find_initial_containing_block(element);
     }
 
     if (position_type == CSS_VALUE_ABSOLUTE) {
@@ -527,7 +534,7 @@ ViewBlock* find_containing_block(ViewBlock* element, CssEnum position_type) {
         ViewElement* ancestor = element->parent_view();
         while (ancestor) {
             if (ancestor->is_block()) {
-                ViewBlock* ancestor_block = (ViewBlock*)ancestor;
+                ViewBlock* ancestor_block = lam::view_require_block(ancestor);
                 // Check if ancestor is positioned
                 if (ancestor_block->position && ancestor_block->position->position != CSS_VALUE_STATIC) {
                     return ancestor_block;
@@ -537,18 +544,14 @@ ViewBlock* find_containing_block(ViewBlock* element, CssEnum position_type) {
         }
 
         // No positioned ancestor found, use initial containing block (root)
-        ViewBlock* root = element;
-        while (root->parent_view()) {
-            root = (ViewBlock*)root->parent_view();
-        }
-        return root;
+        return find_initial_containing_block(element);
     }
 
     // For relative positioning, use nearest block container
     ViewElement* ancestor = element->parent_view();
     while (ancestor) {
         if (ancestor->is_block()) {
-            return (ViewBlock*)ancestor;
+            return lam::view_require_block(ancestor);
         }
         ancestor = ancestor->parent_view();
     }
@@ -566,7 +569,7 @@ static void calculate_parent_to_cb_offset(ViewBlock* block, ViewBlock* containin
     }
 
     if (walk_start && walk_start->is_block()) {
-        ViewBlock* p = (ViewBlock*)walk_start;
+        ViewBlock* p = lam::view_require_block(walk_start);
         while (p && p != containing_block) {
             parent_to_cb_offset_x += p->x;
             parent_to_cb_offset_y += p->y;
@@ -579,7 +582,7 @@ static void calculate_parent_to_cb_offset(ViewBlock* block, ViewBlock* containin
                 ViewBlock* p_cb = nullptr;
                 while (ancestor) {
                     if (ancestor->is_block()) {
-                        ViewBlock* ab = (ViewBlock*)ancestor;
+                        ViewBlock* ab = lam::view_require_block(ancestor);
                         if (ab->position && ab->position->position != CSS_VALUE_STATIC) {
                             p_cb = ab;
                             break;
@@ -599,7 +602,7 @@ static void calculate_parent_to_cb_offset(ViewBlock* block, ViewBlock* containin
                 gp = gp->parent_view();
             }
             if (gp && gp->is_block()) {
-                p = (ViewBlock*)gp;
+                p = lam::view_require_block(gp);
             } else {
                 break;
             }
@@ -621,14 +624,14 @@ static void calculate_parent_to_cb_offset(ViewBlock* block, ViewBlock* containin
 static TextDirection get_static_position_direction(ViewElement* parent) {
     TextDirection static_direction = TD_LTR;
     if (parent && parent->is_element()) {
-        DomElement* parent_elem = (DomElement*)parent;
+        DomElement* parent_elem = lam::dom_require<DOM_NODE_ELEMENT>(parent);
         if (parent_elem->blk && parent_elem->blk->direction == CSS_VALUE_RTL) {
             static_direction = TD_RTL;
         } else if (parent_elem->specified_style) {
             CssValue* dir_val = (CssValue*)style_tree_get_computed_value(
                 parent_elem->specified_style, CSS_PROPERTY_DIRECTION,
                 parent_elem->parent && parent_elem->parent->is_element() ?
-                    ((DomElement*)parent_elem->parent)->specified_style : NULL);
+                    lam::dom_require<DOM_NODE_ELEMENT>(parent_elem->parent)->specified_style : NULL);
             if (dir_val && dir_val->type == CSS_VALUE_TYPE_KEYWORD &&
                 dir_val->data.keyword == CSS_VALUE_RTL) {
                 static_direction = TD_RTL;
@@ -810,7 +813,7 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         CssValue* dir_val = (CssValue*)style_tree_get_computed_value(
             containing_block->specified_style, CSS_PROPERTY_DIRECTION,
             containing_block->parent && containing_block->parent->is_element() ?
-                ((DomElement*)containing_block->parent)->specified_style : NULL);
+                lam::dom_require<DOM_NODE_ELEMENT>(containing_block->parent)->specified_style : NULL);
         if (dir_val && dir_val->type == CSS_VALUE_TYPE_KEYWORD &&
             dir_val->data.keyword == CSS_VALUE_RTL) {
             cb_direction = TD_RTL;
@@ -823,7 +826,7 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     ViewElement* parent = block->parent_view();
     TextDirection static_direction = get_static_position_direction(parent);
     bool was_inline = false;
-    was_inline = was_specified_inline((DomElement*)block);
+    was_inline = was_specified_inline(lam::dom_require<DOM_NODE_ELEMENT>(block));
     float parent_to_cb_offset_x = 0;
     float parent_to_cb_offset_y = 0;
     calculate_parent_to_cb_offset(block, containing_block, &parent_to_cb_offset_x, &parent_to_cb_offset_y);
@@ -910,7 +913,8 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         }
 
         // Measure intrinsic widths (returns border-box sizes including element's padding+border)
-        IntrinsicSizes intrinsic = measure_element_intrinsic_widths(lycon, (DomElement*)block);
+        IntrinsicSizes intrinsic = measure_element_intrinsic_widths(
+            lycon, lam::dom_require<DOM_NODE_ELEMENT>(block));
         float preferred_minimum = intrinsic.min_content;  // min-content width (border-box)
         float preferred = intrinsic.max_content;          // max-content width (border-box)
 
@@ -1443,7 +1447,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
                         CssValue* dir_val = (CssValue*)style_tree_get_computed_value(
                             cb->specified_style, CSS_PROPERTY_DIRECTION,
                             cb->parent && cb->parent->is_element() ?
-                                ((DomElement*)cb->parent)->specified_style : NULL);
+                                lam::dom_require<DOM_NODE_ELEMENT>(cb->parent)->specified_style : NULL);
                         if (dir_val && dir_val->type == CSS_VALUE_TYPE_KEYWORD &&
                             dir_val->data.keyword == CSS_VALUE_RTL) {
                             cb_dir = TD_RTL;
@@ -1516,14 +1520,14 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     // The direction determines whether the static position is for 'left' (LTR) or 'right' (RTL).
     TextDirection static_direction = TD_LTR;
     if (parent && parent->is_element()) {
-        DomElement* parent_elem = (DomElement*)parent;
+        DomElement* parent_elem = lam::dom_require<DOM_NODE_ELEMENT>(parent);
         if (parent_elem->blk && parent_elem->blk->direction == CSS_VALUE_RTL) {
             static_direction = TD_RTL;
         } else if (parent_elem->specified_style) {
             CssValue* dir_val = (CssValue*)style_tree_get_computed_value(
                 parent_elem->specified_style, CSS_PROPERTY_DIRECTION,
                 parent_elem->parent && parent_elem->parent->is_element() ?
-                    ((DomElement*)parent_elem->parent)->specified_style : NULL);
+                    lam::dom_require<DOM_NODE_ELEMENT>(parent_elem->parent)->specified_style : NULL);
             if (dir_val && dir_val->type == CSS_VALUE_TYPE_KEYWORD &&
                 dir_val->data.keyword == CSS_VALUE_RTL) {
                 static_direction = TD_RTL;
@@ -1733,7 +1737,8 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
             bool has_table_flow_child = false;
             for (View* ch = block->first_child; ch; ch = ch->next_sibling) {
                 if (!ch->is_element()) continue;
-                ViewBlock* child_block = (ViewBlock*)ch;
+                ViewBlock* child_block = lam::view_as_block(ch);
+                if (!child_block) continue;
                 if (child_block->blk && !isnan(child_block->blk->given_width_percent)) {
                     has_child_pct_width = true;
                 }
@@ -1797,7 +1802,8 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
                 bool has_child_pct_width = false;
                 for (View* ch = block->first_child; ch; ch = ch->next_sibling) {
                     if (ch->is_element()) {
-                        ViewBlock* cb = (ViewBlock*)ch;
+                        ViewBlock* cb = lam::view_as_block(ch);
+                        if (!cb) continue;
                         if (cb->blk && !isnan(cb->blk->given_width_percent)) {
                             has_child_pct_width = true;
                             break;
@@ -1826,7 +1832,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
                 View* child = block->first_child;
                 while (child) {
                     if (child->view_type == RDT_VIEW_TEXT) {
-                        ViewText* text = (ViewText*)child;
+                        ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
                         TextRect* rect = text->rect;
                         while (rect) {
                             float line_width = rect->width;
@@ -2075,7 +2081,7 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
     float content_offset_x = 0;
     float content_offset_y = 0;
     if (parent_view && parent_view->is_block()) {
-        ViewBlock* parent_block = (ViewBlock*)parent_view;
+        ViewBlock* parent_block = lam::view_require_block(parent_view);
         if (parent_block->bound) {
             if (parent_block->bound->border) {
                 content_offset_x += parent_block->bound->border->width.left;
@@ -2388,7 +2394,12 @@ void adjust_line_for_floats(LayoutContext* lycon) {
 
     // Check if we're inside a floated element - if so, skip adjustment
     // (lines inside floats don't adjust for parent's float context)
-    ViewElement* ancestor = (ViewElement*)current_view;
+    ViewElement* ancestor = current_view->is_element()
+        ? lam::view_require_element(current_view)
+        : lam::view_as_element(static_cast<View*>(current_view->parent));
+    if (!ancestor) {
+        return;
+    }
     ViewBlock* container = bfc->establishing_element;
     bool found_container = false;
     while (ancestor) {
@@ -2397,7 +2408,7 @@ void adjust_line_for_floats(LayoutContext* lycon) {
             break;
         }
         if (ancestor->is_block()) {
-            ViewBlock* block = (ViewBlock*)ancestor;
+            ViewBlock* block = lam::view_require_block(ancestor);
             if (block->position && element_has_float(block)) {
                 log_debug("Skipping float adjustment: inside floated element %s",
                           block->node_name());

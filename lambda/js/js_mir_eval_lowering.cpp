@@ -1,8 +1,11 @@
 #include "js_mir_internal.hpp"
+#include "js_runtime_state.hpp"
 
 JsModuleConstEntry* g_eval_preamble_entries = NULL;
 int g_eval_preamble_entry_count = 0;
 int g_eval_preamble_var_count = 0;
+
+static bool js_source_contains_import_meta(const char* source, size_t len);
 
 // ============================================================================
 // new Function(param1, param2, ..., body) — dynamic function compilation
@@ -32,6 +35,11 @@ extern "C" Item js_new_function_from_string(Item* args, int argc) {
             ps = it2s(str_item);
         }
         if (ps && ps->len > 0) {
+            if (js_source_contains_import_meta(ps->chars, ps->len)) {
+                strbuf_free(sb);
+                js_throw_syntax_error((Item){.item = s2it(heap_create_name("Cannot use import.meta outside a module", 39))});
+                return ItemNull;
+            }
             strbuf_append_str_n(sb, ps->chars, (int)ps->len);
         }
     }
@@ -45,6 +53,11 @@ extern "C" Item js_new_function_from_string(Item* args, int argc) {
         body = it2s(str_item);
     }
     if (body && body->len > 0) {
+        if (js_source_contains_import_meta(body->chars, body->len)) {
+            strbuf_free(sb);
+            js_throw_syntax_error((Item){.item = s2it(heap_create_name("Cannot use import.meta outside a module", 39))});
+            return ItemNull;
+        }
         strbuf_append_str(sb, "\n");
         strbuf_append_str_n(sb, body->chars, (int)body->len);
         strbuf_append_str(sb, "\n");
@@ -294,11 +307,311 @@ char* eval_try_insert_return(const char* code, size_t len) {
 }
 
 // ============================================================================
+static bool js_eval_is_ident_char(char ch) {
+    return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+        (ch >= '0' && ch <= '9') || ch == '_' || ch == '$';
+}
+
+static bool js_eval_at_word(const char* source, size_t len, size_t pos, const char* word, size_t word_len) {
+    if (pos + word_len > len) return false;
+    if (memcmp(source + pos, word, word_len) != 0) return false;
+    if (pos > 0 && js_eval_is_ident_char(source[pos - 1])) return false;
+    if (pos + word_len < len && js_eval_is_ident_char(source[pos + word_len])) return false;
+    return true;
+}
+
+static size_t js_eval_skip_space_and_comments(const char* source, size_t len, size_t pos) {
+    while (pos < len) {
+        char ch = source[pos];
+        if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') { pos++; continue; }
+        if (ch == '/' && pos + 1 < len && source[pos + 1] == '/') {
+            pos += 2;
+            while (pos < len && source[pos] != '\n') pos++;
+            continue;
+        }
+        if (ch == '/' && pos + 1 < len && source[pos + 1] == '*') {
+            pos += 2;
+            while (pos + 1 < len && !(source[pos] == '*' && source[pos + 1] == '/')) pos++;
+            if (pos + 1 < len) pos += 2;
+            continue;
+        }
+        break;
+    }
+    return pos;
+}
+
+static bool js_source_contains_import_meta(const char* source, size_t len) {
+    for (size_t pos = 0; pos < len; pos++) {
+        char ch = source[pos];
+        if (ch == '\'' || ch == '"' || ch == '`') {
+            char quote = ch;
+            pos++;
+            while (pos < len) {
+                if (source[pos] == '\\' && pos + 1 < len) { pos += 2; continue; }
+                if (source[pos] == quote) break;
+                pos++;
+            }
+            continue;
+        }
+        if (ch == '/' && pos + 1 < len && source[pos + 1] == '/') {
+            pos += 2;
+            while (pos < len && source[pos] != '\n') pos++;
+            continue;
+        }
+        if (ch == '/' && pos + 1 < len && source[pos + 1] == '*') {
+            pos += 2;
+            while (pos + 1 < len && !(source[pos] == '*' && source[pos + 1] == '/')) pos++;
+            if (pos + 1 < len) pos++;
+            continue;
+        }
+        if (js_eval_at_word(source, len, pos, "import", 6)) {
+            size_t member_pos = js_eval_skip_space_and_comments(source, len, pos + 6);
+            if (member_pos + 5 <= len && memcmp(source + member_pos, ".meta", 5) == 0 &&
+                (member_pos + 5 == len || !js_eval_is_ident_char(source[member_pos + 5]))) {
+                return true;
+            }
+            pos += 5;
+        }
+    }
+    return false;
+}
+
+typedef struct JsEvalInitializerScan {
+    bool contains_arguments;
+    bool contains_new_target;
+    bool contains_super_call;
+    bool contains_super_property;
+} JsEvalInitializerScan;
+
+static JsEvalInitializerScan js_eval_scan_initializer_source(const char* source, size_t len) {
+    JsEvalInitializerScan scan = {false, false, false, false};
+    for (size_t pos = 0; pos < len; pos++) {
+        char ch = source[pos];
+        if (ch == '\'' || ch == '"' || ch == '`') {
+            char quote = ch;
+            pos++;
+            while (pos < len) {
+                if (source[pos] == '\\' && pos + 1 < len) { pos += 2; continue; }
+                if (source[pos] == quote) break;
+                pos++;
+            }
+            continue;
+        }
+        if (ch == '/' && pos + 1 < len && source[pos + 1] == '/') {
+            pos += 2;
+            while (pos < len && source[pos] != '\n') pos++;
+            continue;
+        }
+        if (ch == '/' && pos + 1 < len && source[pos + 1] == '*') {
+            pos += 2;
+            while (pos + 1 < len && !(source[pos] == '*' && source[pos + 1] == '/')) pos++;
+            if (pos + 1 < len) pos++;
+            continue;
+        }
+        if (js_eval_at_word(source, len, pos, "arguments", 9)) {
+            scan.contains_arguments = true;
+            pos += 8;
+            continue;
+        }
+        if (js_eval_at_word(source, len, pos, "new", 3)) {
+            size_t member_pos = js_eval_skip_space_and_comments(source, len, pos + 3);
+            if (member_pos + 7 <= len && memcmp(source + member_pos, ".target", 7) == 0 &&
+                (member_pos + 7 == len || !js_eval_is_ident_char(source[member_pos + 7]))) {
+                scan.contains_new_target = true;
+            }
+            pos += 2;
+            continue;
+        }
+        if (js_eval_at_word(source, len, pos, "super", 5)) {
+            size_t member_pos = js_eval_skip_space_and_comments(source, len, pos + 5);
+            if (member_pos < len && source[member_pos] == '(') scan.contains_super_call = true;
+            else if (member_pos < len && (source[member_pos] == '.' || source[member_pos] == '[')) scan.contains_super_property = true;
+            pos += 4;
+            continue;
+        }
+    }
+    return scan;
+}
+
+static bool js_eval_initializer_early_error(String* code_str, bool is_direct_eval) {
+    if ((!js_private_field_initializing && !js_eval_initializer_context) || !code_str) return false;
+    JsEvalInitializerScan scan = js_eval_scan_initializer_source(code_str->chars, code_str->len);
+    if ((is_direct_eval && scan.contains_arguments) || (!is_direct_eval && scan.contains_new_target) ||
+        scan.contains_super_call || (!is_direct_eval && scan.contains_super_property)) {
+        js_throw_syntax_error((Item){.item = s2it(heap_create_name("Invalid eval in class field initializer", 39))});
+        return true;
+    }
+    return false;
+}
+
+static bool js_eval_var_conflicts_lexical_name(String* name) {
+    if (!name || name->len <= 0) return false;
+    extern int64_t js_eval_local_has_lexical_binding(Item key);
+    Item key = (Item){.item = s2it(heap_create_name(name->chars, name->len))};
+    if (!js_eval_local_has_lexical_binding(key)) return false;
+    js_throw_syntax_error((Item){.item = s2it(heap_create_name("Eval var conflicts with lexical declaration", 43))});
+    return true;
+}
+
+static bool js_eval_var_conflicts_lexical_pattern(JsAstNode* node) {
+    if (!node) return false;
+    switch (node->node_type) {
+        case JS_AST_NODE_IDENTIFIER:
+            return js_eval_var_conflicts_lexical_name(((JsIdentifierNode*)node)->name);
+        case JS_AST_NODE_ASSIGNMENT_PATTERN:
+            return js_eval_var_conflicts_lexical_pattern(((JsAssignmentPatternNode*)node)->left);
+        case JS_AST_NODE_REST_ELEMENT:
+        case JS_AST_NODE_REST_PROPERTY:
+            return js_eval_var_conflicts_lexical_pattern(((JsSpreadElementNode*)node)->argument);
+        case JS_AST_NODE_ARRAY_PATTERN:
+            for (JsAstNode* e = ((JsArrayPatternNode*)node)->elements; e; e = e->next) {
+                if (js_eval_var_conflicts_lexical_pattern(e)) return true;
+            }
+            break;
+        case JS_AST_NODE_OBJECT_PATTERN:
+            for (JsAstNode* p = ((JsObjectPatternNode*)node)->properties; p; p = p->next) {
+                if (p->node_type == JS_AST_NODE_PROPERTY) {
+                    if (js_eval_var_conflicts_lexical_pattern(((JsPropertyNode*)p)->value)) return true;
+                } else if (js_eval_var_conflicts_lexical_pattern(p)) {
+                    return true;
+                }
+            }
+            break;
+        default:
+            break;
+    }
+    return false;
+}
+
+static bool js_eval_var_conflicts_lexical_statement(JsAstNode* node);
+
+static bool js_eval_var_conflicts_lexical_statements(JsAstNode* stmt) {
+    for (; stmt; stmt = stmt->next) {
+        if (js_eval_var_conflicts_lexical_statement(stmt)) return true;
+    }
+    return false;
+}
+
+static bool js_eval_var_conflicts_lexical_statement(JsAstNode* node) {
+    if (!node) return false;
+    switch (node->node_type) {
+        case JS_AST_NODE_VARIABLE_DECLARATION: {
+            JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)node;
+            if (vd->kind != JS_VAR_VAR) return false;
+            for (JsAstNode* d = vd->declarations; d; d = d->next) {
+                if (d->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
+                if (js_eval_var_conflicts_lexical_pattern(((JsVariableDeclaratorNode*)d)->id)) return true;
+            }
+            break;
+        }
+        case JS_AST_NODE_FUNCTION_DECLARATION:
+            return js_eval_var_conflicts_lexical_name(((JsFunctionNode*)node)->name);
+        case JS_AST_NODE_BLOCK_STATEMENT:
+            return js_eval_var_conflicts_lexical_statements(((JsBlockNode*)node)->statements);
+        case JS_AST_NODE_IF_STATEMENT: {
+            JsIfNode* in = (JsIfNode*)node;
+            return js_eval_var_conflicts_lexical_statement(in->consequent) ||
+                js_eval_var_conflicts_lexical_statement(in->alternate);
+        }
+        case JS_AST_NODE_WHILE_STATEMENT:
+            return js_eval_var_conflicts_lexical_statement(((JsWhileNode*)node)->body);
+        case JS_AST_NODE_DO_WHILE_STATEMENT:
+            return js_eval_var_conflicts_lexical_statement(((JsDoWhileNode*)node)->body);
+        case JS_AST_NODE_FOR_STATEMENT: {
+            JsForNode* fn = (JsForNode*)node;
+            return js_eval_var_conflicts_lexical_statement(fn->init) ||
+                js_eval_var_conflicts_lexical_statement(fn->body);
+        }
+        case JS_AST_NODE_FOR_IN_STATEMENT:
+        case JS_AST_NODE_FOR_OF_STATEMENT: {
+            JsForOfNode* fo = (JsForOfNode*)node;
+            return js_eval_var_conflicts_lexical_statement(fo->left) ||
+                js_eval_var_conflicts_lexical_statement(fo->body);
+        }
+        case JS_AST_NODE_SWITCH_STATEMENT: {
+            JsSwitchNode* sw = (JsSwitchNode*)node;
+            for (JsAstNode* c = sw->cases; c; c = c->next) {
+                if (c->node_type != JS_AST_NODE_SWITCH_CASE) continue;
+                if (js_eval_var_conflicts_lexical_statements(((JsSwitchCaseNode*)c)->consequent)) return true;
+            }
+            break;
+        }
+        case JS_AST_NODE_TRY_STATEMENT: {
+            JsTryNode* tn = (JsTryNode*)node;
+            return js_eval_var_conflicts_lexical_statement(tn->block) ||
+                js_eval_var_conflicts_lexical_statement(tn->handler) ||
+                js_eval_var_conflicts_lexical_statement(tn->finalizer);
+        }
+        case JS_AST_NODE_CATCH_CLAUSE:
+            return js_eval_var_conflicts_lexical_statement(((JsCatchNode*)node)->body);
+        case JS_AST_NODE_LABELED_STATEMENT:
+            return js_eval_var_conflicts_lexical_statement(((JsLabeledStatementNode*)node)->body);
+        default:
+            break;
+    }
+    return false;
+}
+
+static bool js_eval_var_conflicts_lexical_program(JsAstNode* ast) {
+    if (!ast || ast->node_type != JS_AST_NODE_PROGRAM) return false;
+    return js_eval_var_conflicts_lexical_statements(((JsProgramNode*)ast)->body);
+}
+
+static bool js_eval_source_assigns_immutable_binding(String* code_str) {
+    if (!code_str || !code_str->chars) return false;
+    extern int64_t js_eval_local_has_immutable_binding(Item key);
+    const char* source = code_str->chars;
+    size_t len = code_str->len;
+    size_t pos = 0;
+    while (pos < len) {
+        char ch = source[pos];
+        if (ch == '\'' || ch == '"' || ch == '`') {
+            char quote = ch;
+            pos++;
+            while (pos < len && source[pos] != quote) {
+                if (source[pos] == '\\' && pos + 1 < len) pos++;
+                pos++;
+            }
+            if (pos < len) pos++;
+            continue;
+        }
+        if (ch == '/' && pos + 1 < len && source[pos + 1] == '/') {
+            pos += 2;
+            while (pos < len && source[pos] != '\n' && source[pos] != '\r') pos++;
+            continue;
+        }
+        if (ch == '/' && pos + 1 < len && source[pos + 1] == '*') {
+            pos += 2;
+            while (pos + 1 < len && !(source[pos] == '*' && source[pos + 1] == '/')) pos++;
+            if (pos + 1 < len) pos += 2;
+            continue;
+        }
+        if (!((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_' || ch == '$')) {
+            pos++;
+            continue;
+        }
+        size_t start = pos++;
+        while (pos < len && js_eval_is_ident_char(source[pos])) pos++;
+        size_t after = js_eval_skip_space_and_comments(source, len, pos);
+        bool assigns = false;
+        if (after < len && source[after] == '=') {
+            assigns = (after + 1 >= len || (source[after + 1] != '=' && source[after + 1] != '>'));
+        }
+        if (assigns) {
+            Item key = (Item){.item = s2it(heap_create_name(source + start, pos - start))};
+            if (js_eval_local_has_immutable_binding(key)) return true;
+        }
+    }
+    return false;
+}
+
+// ============================================================================
 // eval(code) — dynamic evaluation of JavaScript source code
 // Wraps the code in an IIFE and compiles/executes via JIT.
-// is_global_scope: 1 = called at global level, 0 = called inside a function
+// eval_flags bit 0: evaluate as global/direct script; bit 1: syntactic direct eval;
+// bit 2: inherit strictness from the direct eval caller.
 // ============================================================================
-extern "C" Item js_builtin_eval(Item code_item, int64_t is_global_scope) {
+extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
     if (!js_source_runtime) {
         log_error("js-eval: no runtime context for dynamic evaluation");
         return ItemNull;
@@ -309,6 +622,13 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t is_global_scope) {
     }
     String* code_str = it2s(code_item);
     if (!code_str || code_str->len == 0) return ItemNull;
+    bool is_direct_eval = (eval_flags & 2) != 0;
+    bool is_global_scope = (eval_flags & 1) != 0;
+    bool inherited_strict = (eval_flags & 4) != 0;
+
+    if (js_eval_initializer_early_error(code_str, is_direct_eval)) {
+        return ItemNull;
+    }
 
     // Check for whitespace/comment-only code — should return undefined
     {
@@ -374,6 +694,11 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t is_global_scope) {
     size_t code_len = code_str->len;
     Item fn_item = ItemNull;
 
+    if (is_direct_eval && inherited_strict && js_eval_source_assigns_immutable_binding(code_str)) {
+        js_throw_type_error("Assignment to constant variable");
+        return ItemNull;
+    }
+
     // v37: Phase A — try expression form for single-expression eval code.
     // Wraps as "return (code)\n" inside a function IIFE. This handles simple
     // cases like eval("1+2"), eval("new.target"), etc. and preserves function
@@ -418,6 +743,9 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t is_global_scope) {
                 skip_expr_form = true;
             else if (slen - i >= 5 && memcmp(s + i, "while", 5) == 0 &&
                 (i + 5 >= slen || s[i+5] == ' ' || s[i+5] == '('))
+                skip_expr_form = true;
+            else if (slen - i >= 4 && memcmp(s + i, "with", 4) == 0 &&
+                (i + 4 >= slen || s[i+4] == ' ' || s[i+4] == '('))
                 skip_expr_form = true;
             else if (slen - i >= 6 && memcmp(s + i, "switch", 6) == 0 &&
                 (i + 6 >= slen || s[i+6] == ' ' || s[i+6] == '('))
@@ -503,6 +831,7 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t is_global_scope) {
             log_error("js-eval: failed to create transpiler for direct script");
             return ItemNull;
         }
+        tp->strict_mode = inherited_strict;
 
         if (!js_transpiler_parse(tp, source, source_len)) {
             log_error("js-eval: parse failed for direct script");
@@ -514,6 +843,17 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t is_global_scope) {
         JsAstNode* js_ast = build_js_ast(tp, root);
         if (!js_ast) {
             log_error("js-eval: AST build failed for direct script");
+            js_transpiler_destroy(tp);
+            return ItemNull;
+        }
+
+        int early_errors = js_check_early_errors(tp, js_ast);
+        if (early_errors > 0) {
+            js_transpiler_destroy(tp);
+            js_throw_syntax_error((Item){.item = s2it(heap_create_name("Invalid eval source", 19))});
+            return ItemNull;
+        }
+        if (is_direct_eval && !inherited_strict && js_eval_var_conflicts_lexical_program(js_ast)) {
             js_transpiler_destroy(tp);
             return ItemNull;
         }
@@ -537,7 +877,7 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t is_global_scope) {
             js_transpiler_destroy(tp);
             return ItemNull;
         }
-        mt->is_eval_direct = (is_global_scope != 0);  // sloppy-mode eval: export vars to globalThis
+        mt->is_eval_direct = is_global_scope;  // sloppy-mode eval: export vars to globalThis
 
         // Inherit outer script's module_consts so eval() can resolve var declarations
         if (g_eval_preamble_entries && g_eval_preamble_entry_count > 0) {

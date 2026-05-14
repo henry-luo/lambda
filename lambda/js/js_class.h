@@ -112,6 +112,7 @@ enum JsClass : uint8_t {
     JS_CLASS_ASYNC_FUNCTION,
     JS_CLASS_ARGUMENTS,
     JS_CLASS_CLIPBOARD_ITEM,
+    JS_CLASS_RAW_JSON,
     JS_CLASS__COUNT  // sentinel
 };
 

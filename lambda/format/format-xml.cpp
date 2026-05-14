@@ -10,7 +10,7 @@ void print_named_items(StringBuf *strbuf, TypeMap *map_type, void* map_data);
 
 static void format_item_reader(XmlContext& ctx, const ItemReader& item, const char* tag_name);
 
-static void format_xml_string(XmlContext& ctx, String* str) {
+static void format_xml_string(XmlContext& ctx, String* str, bool is_attribute = false) {
     if (!str) return;
 
     if (((uintptr_t)str & 0x7) != 0) {
@@ -23,7 +23,9 @@ static void format_xml_string(XmlContext& ctx, String* str) {
     const char* s = str->chars;
     size_t len = str->len;
     const size_t max_xml_string_len = 1024 * 1024;
-    if (!s || len > max_xml_string_len) {
+    const size_t max_xml_attribute_len = 32 * 1024 * 1024;
+    bool large_attr = is_attribute && len <= max_xml_attribute_len;
+    if (!s || (len > max_xml_string_len && !large_attr)) {
         log_error("xml_string_guard: skipping suspicious XML string len=%zu ptr=%p", len, (void*)s);
         return;
     }
@@ -99,7 +101,7 @@ static void format_map_attributes(XmlContext& ctx, const MapReader& map_reader) 
             if (value.isString()) {
                 String* str = value.asString();
                 if (str) {
-                    format_xml_string(ctx, str);
+                    format_xml_string(ctx, str, true);
                 }
             } else if (value.isInt()) {
                 int64_t int_val = value.asInt();
@@ -269,7 +271,7 @@ static void format_item_reader(XmlContext& ctx, const ItemReader& item, const ch
                 if (value.isString()) {
                     String* str = value.asString();
                     if (str) {
-                        format_xml_string(ctx, str);
+                        format_xml_string(ctx, str, true);
                     }
                 } else if (value.isInt()) {
                     stringbuf_append_format(ctx.output(), "%lld", (long long)value.asInt());

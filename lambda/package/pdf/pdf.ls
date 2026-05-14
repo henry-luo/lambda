@@ -5,7 +5,7 @@
 // has the correct viewBox + page-number label.
 //
 // Phase 2: wire the content-stream pipeline:
-//   raw bytes → stream.parse_content_stream → interp.render_page → SVG
+//   raw bytes → pdf_parse_content_stream → interp.render_page → SVG
 // to render real text from each page's content stream.
 //
 //   input(path, 'pdf')           → Map { version, objects, pages, … }
@@ -17,7 +17,6 @@ import coords:  .coords
 import svg:     .svg
 import html:    .html
 import resolve: .resolve
-import stream:  .stream
 import interp:  .interp
 import font:    .font
 
@@ -46,40 +45,36 @@ fn _label_layer(rect, page_index) {
     svg.text_run(label_xform, "Helvetica", 12.0, "rgb(80,80,80)", txt)
 }
 
-// Build label group as a (possibly empty) list. Done in `fn` because
-// `let x = if (c) [...] else [...]` returns null inside `pn`
-// (vibe/Lambda_Issues5.md #15).
-pn _label_children(rect, page_index, opts) {
-    let suppress = (opts and (opts.show_label == false))
-    var out = []
-    if (suppress) { out = [] }
-    else { out = [_label_layer(rect, page_index)] }
-    return out
+// Build label group as a (possibly empty) list.
+fn _label_children(rect, page_index, opts) {
+    let show = (opts and (opts.show_label == true))
+    if (show) { [_label_layer(rect, page_index)] }
+    else { [] }
 }
 
 // Build the y-flip wrapper holding only PDF-space content (paths).
 // The page label sits OUTSIDE the flip group (in SVG space) to avoid
 // being mirrored by the y-flip matrix.
-pn _flip_group_list(rect, paths) {
-    var out = []
-    if (len(paths) == 0) { out = [] }
+fn _flip_group_list(rect, paths) {
+    if (len(paths) == 0) { [] }
     else {
         let flip_xform = coords.y_flip_transform(rect.y + rect.h)
-        out = [svg.group(flip_xform, paths)]
+        [svg.group(flip_xform, paths)]
     }
-    return out
 }
 
 // Tokenize + interpret a page's content stream. Empty content yields
 // { texts: [], paths: [] }.
-pn _content_elements(pdf, page, page_h) {
+fn _content_elements(pdf, page, page_h) {
     let raw_bytes = resolve.page_content_bytes(pdf, page)
     if (raw_bytes == null) {
-        return { texts: [], paths: [] }
+        { texts: [], paths: [] }
     }
-    let fonts = interp.resolve_page_fonts(pdf, page)
-    let ops = stream.parse_content_stream(raw_bytes)
-    return interp.render_page_with_fonts(pdf, page, ops, page_h, fonts)
+    else {
+        let fonts = interp.resolve_page_fonts(pdf, page)
+        let ops = pdf_parse_content_stream(raw_bytes)
+        interp.render_page_with_fonts(pdf, page, ops, page_h, fonts)
+    }
 }
 
 // Resolve the page background color from opts; pulled into `fn`
@@ -90,7 +85,7 @@ fn _resolve_bg(opts) {
     else { "white" }
 }
 
-pn render_page(pdf, page, page_index, opts) {
+fn _render_page_parts(pdf, page, page_index, opts) {
     let rect = coords.media_box_rect(page)
     let view_box = coords.view_box_attr(page)
     let bg = _resolve_bg(opts)
@@ -106,7 +101,18 @@ pn render_page(pdf, page, page_index, opts) {
                     for (t in texts) t,
                     for (l in label_kids) l]
 
-    return svg.svg_root(view_box, rect.w, rect.h, children)
+    { svg: svg.svg_pdf_root(view_box, rect.w, rect.h, children, pdf),
+      texts: texts,
+      rect: rect }
+}
+
+fn render_page(pdf, page, page_index, opts) {
+    _render_page_parts(pdf, page, page_index, opts).svg
+}
+
+fn render_page_div(pdf, page, page_index, opts) {
+    let parts = _render_page_parts(pdf, page, page_index, opts)
+    html.page_div_with_text_layer(parts.svg, parts.texts, page_index + 1)
 }
 
 fn render_missing(page_index: int) {
@@ -128,40 +134,37 @@ fn render_empty_doc() {
 // ============================================================
 
 // Render a single page as a standalone <svg> element. `page_index` is 0-based.
-pub pn pdf_to_svg(pdf, page_index, opts) {
+pub fn pdf_to_svg(pdf, page_index, opts) {
     let page = resolve.page_at(pdf, page_index)
-    if (page == null) { return render_missing(page_index) }
-    return render_page(pdf, page, page_index, opts)
+    if (page == null) { render_missing(page_index) }
+    else { render_page(pdf, page, page_index, opts) }
 }
 
 // Render the entire document as an HTML shell containing one <svg> per page.
 // Optional `opts` map: { title: string, css: string, background: string,
 //                        show_label: bool }
-pub pn pdf_to_html(pdf, opts) {
+fn _render_page_count(total, opts) {
+    let max_pages = if (opts and opts.max_pages and opts.max_pages > 0) int(opts.max_pages) else total
+    if (max_pages < total) max_pages else total
+}
+
+pub fn pdf_to_html(pdf, opts) {
     let n = resolve.page_count(pdf)
     if (n == 0) {
-        return html.html_shell([render_empty_doc()], opts)
+        html.html_shell([render_empty_doc()], opts)
     }
-    // While loop because `for` comprehensions cannot call `pn` helpers
-    // without dragging the whole expression into a pn context (and even
-    // then the body must be expression-shaped). Use a plain driver loop
-    // for clarity and to keep behaviour predictable.
-    var svgs = []
-    var i = 0
-    while (i < n) {
-        let page = resolve.page_at(pdf, i)
-        let s = render_page(pdf, page, i, opts)
-        svgs = svgs ++ [s]
-        i = i + 1
+    else {
+        let render_count = _render_page_count(n, opts)
+        let pages = [for (i in 0 to (render_count - 1)) render_page_div(pdf, resolve.page_at(pdf, i), i, opts)]
+        // Inject @font-face rules for embedded fonts so the browser uses
+        // the actual glyphs (not OS fallback). Done here — once per doc —
+        // rather than per page so the rule appears once.
+        let faces = _collect_font_face_rules(pdf, render_count)
+        let base_css = _base_css(opts)
+        let css = _build_css(faces, base_css)
+        let opts2 = _opts_with_css(opts, css)
+        html.html_shell_pages(pages, opts2)
     }
-    // Inject @font-face rules for embedded fonts so the browser uses
-    // the actual glyphs (not OS fallback). Done here — once per doc —
-    // rather than per page so the rule appears once.
-    let faces = _collect_font_face_rules(pdf)
-    let base_css = if (opts and opts.css) opts.css else html.DEFAULT_CSS
-    let css = _build_css(faces, base_css)
-    let opts2 = _opts_with_css(opts, css)
-    return html.html_shell(svgs, opts2)
 }
 
 // Number of pages in the document.
@@ -192,60 +195,70 @@ fn _page_font_names(pdf, page) {
     let fonts = if (res and res.Font) resolve.deref(pdf, res.Font) else null
     if (fonts == null) { [] }
     else {
-        let names = for (k, v in fonts) string(k);
+        let names = [for (k, v in fonts) string(k)];
         names
     }
 }
 
 // Build a single @font-face CSS rule.
-fn _font_face_rule(family: string, fmt: string, uri: string) {
+fn _font_face_rule(family: string, fmt: string, uri: string, weight, style) {
+    let face_weight = if (weight == null) "normal" else weight
+    let face_style = if (style == null) "normal" else style
     "@font-face { font-family: '" ++ family ++ "'; " ++
         "src: url(\"" ++ uri ++ "\") format('" ++ fmt ++ "'); " ++
-        "font-weight: normal; font-style: normal; " ++
+        "font-weight: " ++ face_weight ++ "; font-style: " ++ face_style ++ "; " ++
         "font-display: block; }\n"
 }
 
-pn _collect_one_page(pdf, page, seen_families, rules) {
-    var s = seen_families
-    var r = rules
-    let names = _page_font_names(pdf, page)
-    var i = 0
-    let n = len(names)
-    while (i < n) {
+fn _collect_one_page_loop(pdf, page, names, i, seen_families, rules) {
+    if (i >= len(names)) { { seen: seen_families, rules: rules } }
+    else {
         let info = font.resolve_font(pdf, page, names[i])
         let fam = info.embedded_family
-        if (fam != null and not contains(s, fam)) {
-            s = s ++ [fam]
-            r = r ++ [_font_face_rule(fam, info.font_format,
-                                       info.font_data_uri)]
+        if (fam != null and not contains(seen_families, fam)) {
+            _collect_one_page_loop(pdf, page, names, i + 1,
+                seen_families ++ [fam],
+                rules ++ [_font_face_rule(fam, info.font_format, info.font_data_uri, info.weight, info.style)])
         }
-        i = i + 1
+        else { _collect_one_page_loop(pdf, page, names, i + 1, seen_families, rules) }
     }
-    return { seen: s, rules: r }
 }
 
-pn _collect_font_face_rules(pdf) {
-    let n = resolve.page_count(pdf)
-    var seen = []
-    var rules = []
-    var i = 0
-    while (i < n) {
+fn _collect_one_page(pdf, page, seen_families, rules) {
+    _collect_one_page_loop(pdf, page, _page_font_names(pdf, page), 0, seen_families, rules)
+}
+
+fn _collect_font_face_loop(pdf, i, n, seen, rules) {
+    if (i >= n) { rules }
+    else {
         let page = resolve.page_at(pdf, i)
         let r = _collect_one_page(pdf, page, seen, rules)
-        seen = r.seen
-        rules = r.rules
-        i = i + 1
+        _collect_font_face_loop(pdf, i + 1, n, r.seen, r.rules)
     }
-    return rules | join("")
 }
 
-// Build the final stylesheet: @font-face block first, then base CSS.
+fn _collect_font_face_rules(pdf, limit) {
+    let total = resolve.page_count(pdf)
+    let n = _bounded_count(total, limit)
+    _collect_font_face_loop(pdf, 0, n, [], []) | join("")
+}
+
+fn _bounded_count(total, limit) {
+    if (limit < total) limit else total
+}
+
+// Build the final stylesheet: base page chrome first, then @font-face rules.
 fn _build_css(face_rules: string, base_css: string) {
     if (face_rules == "") { base_css }
-    else { face_rules ++ base_css }
+    else { base_css ++ face_rules }
 }
 
 fn _opts_with_css(opts, css: string) {
     if (opts == null) { { css: css } }
     else              { { *: opts, css: css } }
+}
+
+fn _base_css(opts) {
+    if (opts and opts.css) { opts.css }
+    else { html.DEFAULT_CSS }
 }

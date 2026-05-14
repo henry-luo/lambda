@@ -1,5 +1,105 @@
 #include "js_mir_internal.hpp"
 
+static bool jm_function_inside_class_syntax(JsFunctionNode* fn) {
+    if (!fn || ts_node_is_null(fn->base.node)) return false;
+    TSNode node = ts_node_parent(fn->base.node);
+    while (!ts_node_is_null(node)) {
+        const char* node_type = ts_node_type(node);
+        if (node_type &&
+            (strncmp(node_type, "class", 5) == 0 ||
+             strcmp(node_type, "class_body") == 0)) {
+            return true;
+        }
+        node = ts_node_parent(node);
+    }
+    return false;
+}
+
+static bool jm_node_has_direct_eval_call(JsAstNode* node) {
+    if (!node) return false;
+    switch (node->node_type) {
+    case JS_AST_NODE_CALL_EXPRESSION: {
+        JsCallNode* call = (JsCallNode*)node;
+        if (call->callee && call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
+            JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
+            if (id->name && id->name->len == 4 && strncmp(id->name->chars, "eval", 4) == 0) return true;
+        }
+        for (JsAstNode* arg = call->arguments; arg; arg = arg->next) {
+            if (jm_node_has_direct_eval_call(arg)) return true;
+        }
+        return false;
+    }
+    case JS_AST_NODE_FUNCTION_DECLARATION:
+    case JS_AST_NODE_FUNCTION_EXPRESSION:
+    case JS_AST_NODE_ARROW_FUNCTION:
+    case JS_AST_NODE_CLASS_DECLARATION:
+    case JS_AST_NODE_CLASS_EXPRESSION:
+        return false;
+    case JS_AST_NODE_BLOCK_STATEMENT: {
+        JsBlockNode* blk = (JsBlockNode*)node;
+        for (JsAstNode* stmt = blk->statements; stmt; stmt = stmt->next) {
+            if (jm_node_has_direct_eval_call(stmt)) return true;
+        }
+        return false;
+    }
+    case JS_AST_NODE_EXPRESSION_STATEMENT:
+        return jm_node_has_direct_eval_call(((JsExpressionStatementNode*)node)->expression);
+    case JS_AST_NODE_VARIABLE_DECLARATION: {
+        JsVariableDeclarationNode* decl = (JsVariableDeclarationNode*)node;
+        for (JsAstNode* d = decl->declarations; d; d = d->next) {
+            if (jm_node_has_direct_eval_call(d)) return true;
+        }
+        return false;
+    }
+    case JS_AST_NODE_VARIABLE_DECLARATOR:
+        return jm_node_has_direct_eval_call(((JsVariableDeclaratorNode*)node)->init);
+    case JS_AST_NODE_RETURN_STATEMENT:
+        return jm_node_has_direct_eval_call(((JsReturnNode*)node)->argument);
+    case JS_AST_NODE_IF_STATEMENT: {
+        JsIfNode* n = (JsIfNode*)node;
+        return jm_node_has_direct_eval_call(n->test) || jm_node_has_direct_eval_call(n->consequent) ||
+            jm_node_has_direct_eval_call(n->alternate);
+    }
+    case JS_AST_NODE_BINARY_EXPRESSION: {
+        JsBinaryNode* n = (JsBinaryNode*)node;
+        return jm_node_has_direct_eval_call(n->left) || jm_node_has_direct_eval_call(n->right);
+    }
+    case JS_AST_NODE_UNARY_EXPRESSION:
+        return jm_node_has_direct_eval_call(((JsUnaryNode*)node)->operand);
+    case JS_AST_NODE_ASSIGNMENT_EXPRESSION: {
+        JsAssignmentNode* n = (JsAssignmentNode*)node;
+        return jm_node_has_direct_eval_call(n->left) || jm_node_has_direct_eval_call(n->right);
+    }
+    case JS_AST_NODE_MEMBER_EXPRESSION: {
+        JsMemberNode* n = (JsMemberNode*)node;
+        return jm_node_has_direct_eval_call(n->object) || (n->computed && jm_node_has_direct_eval_call(n->property));
+    }
+    case JS_AST_NODE_NEW_EXPRESSION: {
+        JsCallNode* call = (JsCallNode*)node;
+        for (JsAstNode* arg = call->arguments; arg; arg = arg->next) {
+            if (jm_node_has_direct_eval_call(arg)) return true;
+        }
+        return false;
+    }
+    case JS_AST_NODE_SEQUENCE_EXPRESSION: {
+        JsSequenceNode* seq = (JsSequenceNode*)node;
+        for (JsAstNode* expr = seq->expressions; expr; expr = expr->next) {
+            if (jm_node_has_direct_eval_call(expr)) return true;
+        }
+        return false;
+    }
+    case JS_AST_NODE_SPREAD_ELEMENT:
+    case JS_AST_NODE_REST_ELEMENT:
+        return jm_node_has_direct_eval_call(((JsSpreadElementNode*)node)->argument);
+    case JS_AST_NODE_YIELD_EXPRESSION:
+        return jm_node_has_direct_eval_call(((JsYieldNode*)node)->argument);
+    case JS_AST_NODE_AWAIT_EXPRESSION:
+        return jm_node_has_direct_eval_call(((JsAwaitNode*)node)->argument);
+    default:
+        return false;
+    }
+}
+
 // ============================================================================
 // Phase 4: Native call resolution
 // ============================================================================
@@ -325,6 +425,8 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
             jm_make_fn_name(e->name, sizeof(e->name), fn, mt);
             e->func_item = NULL; // set during creation
             e->parent_index = -1; // top-level until set by parent
+            e->is_strict = jm_function_inside_class_syntax(fn);
+            e->has_direct_eval = jm_node_has_direct_eval_call(fn->body);
             mt->func_count++;
             // Set parent_index for DIRECT children: functions collected during our body
             // recursion that don't already have a parent assigned by a deeper enclosing
@@ -459,6 +561,19 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
         JsAssignmentNode* n = (JsAssignmentNode*)node;
         jm_collect_functions(mt, n->left);
         jm_collect_functions(mt, n->right);
+        if (n->right && n->right->node_type == JS_AST_NODE_CLASS_DECLARATION &&
+            n->left && n->left->node_type == JS_AST_NODE_IDENTIFIER) {
+            JsClassNode* cls = (JsClassNode*)n->right;
+            JsIdentifierNode* lhs_id = (JsIdentifierNode*)n->left;
+            if (lhs_id->name) {
+                for (int i = mt->class_count - 1; i >= 0; i--) {
+                    JsClassEntry* ce = &mt->class_entries[i];
+                    if (ce->node != cls) continue;
+                    if (!ce->alias_name) ce->alias_name = lhs_id->name;
+                    break;
+                }
+            }
+        }
         break;
     }
     case JS_AST_NODE_MEMBER_EXPRESSION: {
@@ -558,6 +673,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
     }
     case JS_AST_NODE_CLASS_DECLARATION: {
         JsClassNode* cls = (JsClassNode*)node;
+        if (cls->superclass) jm_collect_functions(mt, cls->superclass);
         if (cls->body && cls->body->node_type == JS_AST_NODE_BLOCK_STATEMENT && mt->class_count < 512) {
             JsClassEntry* ce = &mt->class_entries[mt->class_count];
             mt->class_count++; // reserve slot before recursion into methods/fields
@@ -581,7 +697,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                         sf->computed = fd->computed;
                         sf->key_expr = fd->key;
                         if (!fd->computed && fd->key->node_type == JS_AST_NODE_IDENTIFIER) {
-                            sf->name = ((JsIdentifierNode*)fd->key)->name;
+                            sf->name = jm_class_private_name(mt, ce, ((JsIdentifierNode*)fd->key)->name);
                         } else {
                             sf->name = NULL;
                         }
@@ -601,7 +717,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                         inf->computed = fd->computed;
                         inf->key_expr = fd->key;
                         if (!fd->computed && fd->key->node_type == JS_AST_NODE_IDENTIFIER) {
-                            inf->name = ((JsIdentifierNode*)fd->key)->name;
+                            inf->name = jm_class_private_name(mt, ce, ((JsIdentifierNode*)fd->key)->name);
                         } else {
                             inf->name = NULL;
                         }
@@ -651,7 +767,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                             // Name: ClassName_methodName
                             String* method_name = NULL;
                             if (md->key && md->key->node_type == JS_AST_NODE_IDENTIFIER) {
-                                method_name = ((JsIdentifierNode*)md->key)->name;
+                                method_name = jm_class_private_name(mt, ce, ((JsIdentifierNode*)md->key)->name);
                             } else if (md->key && md->key->node_type == JS_AST_NODE_LITERAL) {
                                 JsLiteralNode* lit = (JsLiteralNode*)md->key;
                                 if (lit->literal_type == JS_LITERAL_STRING) {
@@ -697,6 +813,8 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                             }
                             fc->func_item = NULL;
                             fc->capture_count = 0;
+                            fc->is_strict = true;
+                            fc->has_direct_eval = jm_node_has_direct_eval_call(fn->body);
                             mt->func_count++;
 
                             // Set parent_index for inner functions collected during method body
@@ -730,12 +848,13 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                                 me->computed = md->computed;
                                 me->key_expr = md->key;
                                 // Detect constructor by name
-                                me->is_constructor = (!me->computed && method_name &&
+                                me->is_constructor = (!me->is_static && !me->computed && method_name &&
                                     method_name->len == 11 &&
                                     strncmp(method_name->chars, "constructor", 11) == 0);
                                 if (me->is_constructor) {
                                     ce->constructor = me;
                                     fc->is_constructor = true;  // P3: mark fc for direct slot stores
+                                    fc->is_derived_constructor = (cls->superclass != NULL);
                                     // A5: Scan constructor for this.prop = expr
                                     if (fn->body) jm_scan_ctor_props(fc, fn->body);
                                 }
@@ -790,7 +909,8 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
         if (ap->right) jm_collect_functions(mt, ap->right);
         break;
     }
-    case JS_AST_NODE_SPREAD_ELEMENT: {
+    case JS_AST_NODE_SPREAD_ELEMENT:
+    case JS_AST_NODE_REST_ELEMENT: {
         JsSpreadElementNode* sp = (JsSpreadElementNode*)node;
         if (sp->argument) jm_collect_functions(mt, sp->argument);
         break;
@@ -1450,6 +1570,32 @@ JsClassEntry* jm_find_class(JsMirTranspiler* mt, const char* name, int name_len)
 // evidence: array of evidence counters, one per parameter
 // param_count: number of parameters
 // self_name: function's own name for detecting recursive calls (NULL if none)
+static bool jm_expr_has_bigint_literal(JsAstNode* node) {
+    if (!node) return false;
+    switch (node->node_type) {
+    case JS_AST_NODE_LITERAL: {
+        JsLiteralNode* lit = (JsLiteralNode*)node;
+        return lit->literal_type == JS_LITERAL_NUMBER && lit->is_bigint;
+    }
+    case JS_AST_NODE_BINARY_EXPRESSION: {
+        JsBinaryNode* bin = (JsBinaryNode*)node;
+        return jm_expr_has_bigint_literal(bin->left) || jm_expr_has_bigint_literal(bin->right);
+    }
+    case JS_AST_NODE_UNARY_EXPRESSION: {
+        JsUnaryNode* un = (JsUnaryNode*)node;
+        return jm_expr_has_bigint_literal(un->operand);
+    }
+    case JS_AST_NODE_CONDITIONAL_EXPRESSION: {
+        JsConditionalNode* cond = (JsConditionalNode*)node;
+        return jm_expr_has_bigint_literal(cond->test) ||
+               jm_expr_has_bigint_literal(cond->consequent) ||
+               jm_expr_has_bigint_literal(cond->alternate);
+    }
+    default:
+        return false;
+    }
+}
+
 void jm_infer_walk(JsAstNode* node, const char param_names[][128],
                           JsParamEvidence* evidence, int param_count,
                           const char* self_name) {
@@ -1472,6 +1618,7 @@ void jm_infer_walk(JsAstNode* node, const char param_names[][128],
         if (!n || n->node_type != JS_AST_NODE_LITERAL) return false;
         JsLiteralNode* lit = (JsLiteralNode*)n;
         if (lit->literal_type != JS_LITERAL_NUMBER) return false;
+        if (lit->is_bigint) return false;
         if (lit->has_decimal) return false;  // 999999.0 is NOT an int literal
         double val = lit->value.number_value;
         return val == (double)(int64_t)val;
@@ -1480,6 +1627,7 @@ void jm_infer_walk(JsAstNode* node, const char param_names[][128],
         if (!n || n->node_type != JS_AST_NODE_LITERAL) return false;
         JsLiteralNode* lit = (JsLiteralNode*)n;
         if (lit->literal_type != JS_LITERAL_NUMBER) return false;
+        if (lit->is_bigint) return false;
         if (lit->has_decimal) return true;  // 999999.0 IS a float literal
         return lit->value.number_value != (double)(int64_t)lit->value.number_value;
     };
@@ -1501,6 +1649,8 @@ void jm_infer_walk(JsAstNode* node, const char param_names[][128],
                            bin->op == JS_OP_BIT_RSHIFT || bin->op == JS_OP_BIT_URSHIFT);
 
         if (is_arith) {
+            if (li >= 0 && jm_expr_has_bigint_literal(bin->right)) evidence[li].compared_with_non_numeric = true;
+            if (ri >= 0 && jm_expr_has_bigint_literal(bin->left))  evidence[ri].compared_with_non_numeric = true;
             // Parameter used in arithmetic with int literal → int evidence
             // NOTE: comparisons (< > == etc.) do NOT contribute type evidence,
             // because JS is dynamically typed — e.g. (x < 0) works for both int and float x.
@@ -1951,6 +2101,10 @@ void jm_infer_return_type_walk(JsAstNode* node, const char* self_name,
             JsLiteralNode* lit = (JsLiteralNode*)expr;
             switch (lit->literal_type) {
             case JS_LITERAL_NUMBER: {
+                if (lit->is_bigint) {
+                    t = LMD_TYPE_DECIMAL;
+                    break;
+                }
                 double val = lit->value.number_value;
                 t = (lit->has_decimal || val != (double)(int64_t)val) ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
                 break;
@@ -1971,15 +2125,19 @@ void jm_infer_return_type_walk(JsAstNode* node, const char* self_name,
                 t = LMD_TYPE_BOOL; break;
             case JS_OP_ADD:
                 // + is string concat when any operand is a string
-                if (jm_add_chain_has_string(bin->left) || jm_add_chain_has_string(bin->right))
+                if (jm_expr_has_bigint_literal(expr))
+                    t = LMD_TYPE_ANY;
+                else if (jm_add_chain_has_string(bin->left) || jm_add_chain_has_string(bin->right))
                     t = LMD_TYPE_STRING;
                 else
                     t = LMD_TYPE_INT;
                 break;
             case JS_OP_SUB: case JS_OP_MUL: case JS_OP_MOD:
-                t = LMD_TYPE_INT; break; // approximate — may be float
+                t = jm_expr_has_bigint_literal(expr) ? LMD_TYPE_ANY : LMD_TYPE_INT;
+                break; // approximate — may be float
             case JS_OP_DIV: case JS_OP_EXP:
-                t = LMD_TYPE_FLOAT; break;
+                t = jm_expr_has_bigint_literal(expr) ? LMD_TYPE_ANY : LMD_TYPE_FLOAT;
+                break;
             default: break;
             }
         } else if (expr->node_type == JS_AST_NODE_CALL_EXPRESSION) {
@@ -2076,6 +2234,10 @@ void jm_infer_return_type(JsFuncCollected* fc) {
         if (fn->body->node_type == JS_AST_NODE_LITERAL) {
             JsLiteralNode* lit = (JsLiteralNode*)fn->body;
             if (lit->literal_type == JS_LITERAL_NUMBER) {
+                if (lit->is_bigint) {
+                    fc->return_type = LMD_TYPE_DECIMAL;
+                    return;
+                }
                 double val = lit->value.number_value;
                 fc->return_type = (lit->has_decimal || val != (double)(int64_t)val) ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
             }
