@@ -863,6 +863,9 @@ extern "C" Item js_proxy_trap_construct(Item proxy, Item* args, int arg_count, I
         if (js_is_proxy(target)) {
             return js_proxy_trap_construct(target, args, arg_count, new_target.item != ItemNull.item ? new_target : proxy);
         }
+        if (new_target.item != ItemNull.item) {
+            js_set_new_target(new_target);
+        }
         return js_new_from_class_object(target, args, arg_count);
     }
     // build args array
@@ -2706,6 +2709,14 @@ extern "C" Item js_property_get(Item object, Item key) {
             String* str_key = it2s(key);
             // Check for "length" property
             if (str_key->len == 6 && strncmp(str_key->chars, "length", 6) == 0) {
+                if (object.array->is_content == 1 && object.array->extra != 0) {
+                    Item pm_item = (Item){.map = (Map*)(uintptr_t)object.array->extra};
+                    Item length_key = (Item){.item = s2it(heap_create_name("length", 6))};
+                    Item own_value = ItemNull;
+                    JsOwnGetStatus own_status = js_ordinary_get_own(pm_item, length_key, object, &own_value);
+                    if (own_status == JS_OWN_READY) return own_value;
+                    if (own_status == JS_OWN_DELETED) return make_js_undefined();
+                }
                 return (Item){.item = i2it(object.array->length)};
             }
             // Only canonical array-index strings use dense/sparse array slots.
@@ -4653,7 +4664,7 @@ extern "C" Item js_super_instance_method_get(Item receiver, Item key) {
 
 // super.x = val: look up setter on [[GetPrototypeOf]](receiver),
 // call setter with receiver as 'this'. If no setter, set on receiver.
-extern "C" Item js_super_property_set(Item receiver, Item key, Item value) {
+static Item js_super_property_set_impl(Item receiver, Item key, Item value, bool strict_reference) {
     Item proto = js_super_lookup_base(receiver);
     if (proto.item == ItemNull.item) {
         return js_throw_type_error("Cannot set property on null or undefined");
@@ -4692,9 +4703,9 @@ extern "C" Item js_super_property_set(Item receiver, Item key, Item value) {
     }
 
     // no setter found — set data property on receiver (ES spec: super.x = v sets own prop)
-    // Super property references are strict references because class bodies are strict.
-    // Enforce receiver write failure before calling the generic setter, which may
-    // otherwise silently reject writes when global strict mode is not active.
+    // Class-body super references are strict; object-literal methods can be sloppy.
+    // Enforce strict write failures before calling the generic setter, and silently
+    // ignore the failed write for sloppy references.
     if (get_type_id(key) == LMD_TYPE_STRING) {
         String* str_key = it2s(key);
         if (str_key && str_key->len > 0) {
@@ -4702,14 +4713,24 @@ extern "C" Item js_super_property_set(Item receiver, Item key, Item value) {
             if (has_own) {
                 int fp = js_prop_attrs_fast_path(receiver, str_key->chars, (int)str_key->len, JSPD_NON_WRITABLE);
                 if (fp == 0) {
+                    if (!strict_reference) return value;
                     return js_throw_type_error("Cannot assign to read only super property");
                 }
             } else if (!js_is_truthy(js_object_is_extensible(receiver))) {
+                if (!strict_reference) return value;
                 return js_throw_type_error("Cannot add super property to non-extensible object");
             }
         }
     }
     return js_property_set(receiver, key, value);
+}
+
+extern "C" Item js_super_property_set(Item receiver, Item key, Item value) {
+    return js_super_property_set_impl(receiver, key, value, true);
+}
+
+extern "C" Item js_super_property_set_non_strict(Item receiver, Item key, Item value) {
+    return js_super_property_set_impl(receiver, key, value, false);
 }
 
 // v23: Property access with raw C-string key — avoids heap string allocation.
@@ -5121,6 +5142,12 @@ extern "C" Item js_array_get(Item array, Item index) {
     }
 
     TypeId index_tid = get_type_id(index);
+    if (index_tid == LMD_TYPE_MAP || index_tid == LMD_TYPE_ARRAY ||
+        index_tid == LMD_TYPE_ELEMENT || index_tid == LMD_TYPE_FUNC) {
+        index = js_to_property_key(index);
+        if (js_check_exception()) return make_js_undefined();
+        index_tid = get_type_id(index);
+    }
     if ((index_tid == LMD_TYPE_STRING || index_tid == LMD_TYPE_INT || index_tid == LMD_TYPE_FLOAT) &&
         !js_key_is_symbol(index) && !js_array_key_is_index(index, NULL)) {
         Item prop_key = (index_tid == LMD_TYPE_STRING) ? index : js_array_numeric_key_to_property_key(index);
@@ -5407,6 +5434,13 @@ extern "C" Item js_array_set(Item array, Item index, Item value) {
         Item key = (Item){.item = s2it(heap_create_name(s, sl))};
         js_property_set(map_item, key, value);
         return value;
+    }
+
+    if (itid == LMD_TYPE_MAP || itid == LMD_TYPE_ARRAY ||
+        itid == LMD_TYPE_ELEMENT || itid == LMD_TYPE_FUNC) {
+        index = js_to_property_key(index);
+        if (js_check_exception()) return value;
+        itid = get_type_id(index);
     }
 
     if ((itid == LMD_TYPE_STRING || itid == LMD_TYPE_INT || itid == LMD_TYPE_FLOAT) &&
