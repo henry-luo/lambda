@@ -79,6 +79,10 @@
   background: white;
 }
 
+.pdf-webview {
+  display: flex;
+}
+
 /* Lambda render image - display at 200% scale */
 .lambda-render {
   display: block;
@@ -87,6 +91,14 @@
   image-rendering: pixelated;
   image-rendering: -moz-crisp-edges;
   image-rendering: crisp-edges;
+}
+
+.pdf-render-output {
+  background: #f1f3f5;
+}
+
+.pdf-render-image {
+  max-width: none;
 }
 
 /* Gutter for resizing */

@@ -10,6 +10,7 @@ class LayoutDevTool {
     this.projectRoot = path.resolve(__dirname, '../..');
     this.testDataDir = path.join(this.projectRoot, 'test/layout/data');
     this.referenceDir = path.join(this.projectRoot, 'test/layout/reference');
+    this.pdfTestDir = path.join(this.projectRoot, 'test/pdf');
     this.lambdaExe = path.join(this.projectRoot, 'lambda.exe');
     this.recentTests = [];
 
@@ -37,7 +38,9 @@ class LayoutDevTool {
         nodeIntegration: false,
         contextIsolation: true,
         preload: path.join(__dirname, 'preload.js'),
-        webSecurity: false  // Allow loading local files for test viewing
+        webSecurity: false,  // Allow loading local files for test viewing
+        plugins: true,
+        webviewTag: true
       },
       title: 'Layout DevTool'
     });
@@ -136,9 +139,19 @@ class LayoutDevTool {
       return await this.loadRenderTests();
     });
 
+    // Load PDF render test list
+    ipcMain.handle('load-pdf-render-tests', async () => {
+      return await this.loadPdfRenderTests();
+    });
+
     // Run a render test (re-capture radiant snapshot + compute diff)
     ipcMain.handle('run-render-test', async (event, testName, renderDir) => {
       return await this.runRenderTest(testName, renderDir);
+    });
+
+    // Render a selected PDF through Radiant
+    ipcMain.handle('run-pdf-render-test', async (event, testName, renderDir) => {
+      return await this.runPdfRenderTest(testName, renderDir);
     });
 
     // Get render test images (reference, output, diff)
@@ -493,6 +506,126 @@ class LayoutDevTool {
       console.error('Failed to load render tests:', error);
     }
     return result.sort((a, b) => a.dir.localeCompare(b.dir));
+  }
+
+  async loadPdfRenderTests() {
+    const result = [];
+    try {
+      const files = await fs.readdir(this.pdfTestDir);
+      const pdfTests = files
+        .filter(f => f.toLowerCase().endsWith('.pdf') && !f.startsWith('.'))
+        .sort((a, b) => a.localeCompare(b));
+      if (pdfTests.length > 0) {
+        result.push({ dir: 'page', tests: pdfTests });
+      }
+    } catch (error) {
+      console.error('Failed to load PDF render tests:', error);
+    }
+    return result;
+  }
+
+  async runPdfRenderTest(testName, renderDir = 'page') {
+    const pdfFile = path.join(this.pdfTestDir, testName);
+    const outputDir = path.join(this.projectRoot, 'temp/devtool/pdf-render');
+    const outputBase = path.basename(testName, path.extname(testName)).replace(/[^a-zA-Z0-9_.-]/g, '_');
+    const outputPng = path.join(outputDir, `${outputBase}.png`);
+
+    await fs.mkdir(outputDir, { recursive: true });
+
+    const viewportWidth = await this.measurePdfRenderViewportWidth(pdfFile, outputDir, outputBase);
+    if (viewportWidth) {
+      this.mainWindow?.webContents.send('terminal-output', `PDF viewport width: ${viewportWidth}px\n`);
+    }
+
+    await new Promise((resolve, reject) => {
+      const args = ['render', pdfFile, '-o', outputPng];
+      if (viewportWidth) {
+        args.push('-vw', String(viewportWidth));
+      }
+      const proc = spawn(this.lambdaExe, args, { cwd: this.projectRoot });
+      let stderr = '';
+      proc.stdout.on('data', (data) => {
+        this.mainWindow?.webContents.send('terminal-output', data.toString());
+      });
+      proc.stderr.on('data', (data) => {
+        const text = data.toString();
+        stderr += text;
+        this.mainWindow?.webContents.send('terminal-output', text);
+      });
+      proc.on('close', async (code) => {
+        if (code === 0 || code === null) {
+          try {
+            await fs.access(outputPng);
+            resolve();
+          } catch {
+            reject(new Error(`PDF render output was not created: ${outputPng}`));
+          }
+        } else {
+          reject(new Error(`PDF render failed (exit ${code}): ${stderr.trim()}`));
+        }
+      });
+      proc.on('error', reject);
+    });
+
+    const ts = Date.now();
+    return {
+      output: `file://${outputPng}?t=${ts}`,
+      outputFile: outputPng,
+      sourceFile: pdfFile,
+      renderDir
+    };
+  }
+
+  escapeLambdaString(value) {
+    return String(value)
+      .replace(/\\/g, '\\\\')
+      .replace(/"/g, '\\"')
+      .replace(/\n/g, '\\n')
+      .replace(/\r/g, '\\r')
+      .replace(/\t/g, '\\t');
+  }
+
+  async measurePdfRenderViewportWidth(pdfFile, outputDir, outputBase) {
+    const scriptPath = path.join(outputDir, `${outputBase}_measure_width.ls`);
+    const escapedPdf = this.escapeLambdaString(pdfFile);
+    const script =
+      'import coords: lambda.package.pdf.coords\n' +
+      `let doc^err = input("${escapedPdf}", 'pdf')\n` +
+      'fn max_width(pages, i, n, cur) {\n' +
+      '    if (i >= n) { cur }\n' +
+      '    else {\n' +
+      '        let r = coords.media_box_rect(pages[i])\n' +
+      '        let next = if (r.w > cur) { r.w } else { cur }\n' +
+      '        max_width(pages, i + 1, n, next)\n' +
+      '    }\n' +
+      '}\n' +
+      'int(max_width(doc.pages, 0, len(doc.pages), 0.0) + 32.0)\n';
+
+    try {
+      await fs.writeFile(scriptPath, script, 'utf8');
+      const output = await new Promise((resolve, reject) => {
+        const proc = spawn(this.lambdaExe, ['--no-log', scriptPath], { cwd: this.projectRoot });
+        let combined = '';
+        proc.stdout.on('data', (data) => { combined += data.toString(); });
+        proc.stderr.on('data', (data) => { combined += data.toString(); });
+        proc.on('close', (code) => {
+          if (code === 0) resolve(combined);
+          else reject(new Error(`PDF width measurement failed (exit ${code}): ${combined.trim()}`));
+        });
+        proc.on('error', reject);
+      });
+
+      const matches = output.match(/\d+(?:\.\d+)?/g);
+      if (!matches || matches.length === 0) return null;
+      const width = Math.ceil(Number(matches[matches.length - 1]));
+      return Number.isFinite(width) && width > 0 ? Math.max(width, 64) : null;
+    } catch (error) {
+      console.error('Failed to measure PDF viewport width:', error);
+      this.mainWindow?.webContents.send('terminal-output', `PDF width measurement failed; using default viewport: ${error.message}\n`);
+      return null;
+    } finally {
+      try { await fs.unlink(scriptPath); } catch {}
+    }
   }
 
   async getRenderTestImages(testName, renderDir = 'page') {
