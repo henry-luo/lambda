@@ -286,72 +286,77 @@ fn _do_name_from_operands(ops) {
     }
 }
 
-pn _tiling_pattern_children(pdf, page, ops) {
-    var ctm = util.IDENTITY
-    var stack = []
-    var out = []
-    var i = 0
-    let n = len(ops)
-    while (i < n) {
+fn _pop_ctm(stack, fallback) {
+    let m = len(stack)
+    if (m >= 1) {
+        { ctm: stack[m - 1], stack: (for (k, v in stack where k < (m - 1)) v) }
+    }
+    else { { ctm: fallback, stack: stack } }
+}
+
+fn _tiling_pattern_children_loop(pdf, page, ops, i, n, ctm, stack, out) {
+    if (i >= n) { out }
+    else {
         let op = ops[i]
         let opr = op.op
         let operands = op.operands
         if (opr == "q") {
-            stack = stack ++ [ctm]
+            _tiling_pattern_children_loop(pdf, page, ops, i + 1, n, ctm, stack ++ [ctm], out)
         }
         else if (opr == "Q") {
-            let m = len(stack)
-            if (m >= 1) {
-                ctm = stack[m - 1]
-                stack = (for (k, v in stack where k < (m - 1)) v)
-            }
+            let popped = _pop_ctm(stack, ctm)
+            _tiling_pattern_children_loop(pdf, page, ops, i + 1, n, popped.ctm, popped.stack, out)
         }
         else if (opr == "cm") {
             if (len(operands) >= 6) {
                 let mtx = [util.num(operands[0]), util.num(operands[1]), util.num(operands[2]),
                            util.num(operands[3]), util.num(operands[4]), util.num(operands[5])]
-                ctm = util.matrix_mul(mtx, ctm)
+                _tiling_pattern_children_loop(pdf, page, ops, i + 1, n, util.matrix_mul(mtx, ctm), stack, out)
             }
+            else { _tiling_pattern_children_loop(pdf, page, ops, i + 1, n, ctm, stack, out) }
         }
         else if (opr == "Do" and _do_name_from_operands(operands) != null) {
             let imgs = image.apply_do(pdf, page, ctm, operands)
-            var k = 0
-            let ni = len(imgs)
-            while (k < ni) {
-                out = out ++ [imgs[k]]
-                k = k + 1
-            }
+            _tiling_pattern_children_loop(pdf, page, ops, i + 1, n, ctm, stack, out ++ (for (img in imgs) img))
         }
-        else { ctm = ctm }
-        i = i + 1
+        else { _tiling_pattern_children_loop(pdf, page, ops, i + 1, n, ctm, stack, out) }
     }
-    return out
 }
 
-pub pn from_tiling_pattern_fill(pdf, page, p, id) {
+fn _tiling_pattern_children(pdf, page, ops) {
+    _tiling_pattern_children_loop(pdf, page, ops, 0, len(ops), util.IDENTITY, [], [])
+}
+
+pub fn from_tiling_pattern_fill(pdf, page, p, id) {
     let d = _stream_dict(p)
     let bytes = _stream_data(p)
-    if (d == null or bytes == "") { return { defs: [], fill: color.BLACK } }
-    let bbox = _pattern_bbox(d)
-    let x = util.num(bbox[0])
-    let y = util.num(bbox[1])
-    let w = _pattern_xstep(d, bbox)
-    let h = _pattern_ystep(d, bbox)
-    if (w <= 0.0 or h <= 0.0) { return { defs: [], fill: color.BLACK } }
-    let m0 = _matrix_of(d)
-    let m = [m0[0], m0[1], m0[2], m0[3], m0[4], m0[5] - h]
-    let ppage = _pattern_page(pdf, page, d)
-    let ops = stream.parse_content_stream(bytes)
-    let kids = _tiling_pattern_children(pdf, ppage, ops)
-    if (len(kids) == 0) { return { defs: [], fill: color.BLACK } }
-    let pat = <pattern id: id,
-                       patternUnits: "userSpaceOnUse",
-                       x: util.fmt_num(x), y: util.fmt_num(y),
-                       width: util.fmt_num(w), height: util.fmt_num(h),
-                       patternTransform: util.fmt_matrix(m);
-                  for (kid in kids) kid
-              >
-    return { defs: [pat], fill: "url(#" ++ id ++ ")" }
+    if (d == null or bytes == "") { { defs: [], fill: color.BLACK } }
+    else {
+        let bbox = _pattern_bbox(d)
+        let x = util.num(bbox[0])
+        let y = util.num(bbox[1])
+        let w = _pattern_xstep(d, bbox)
+        let h = _pattern_ystep(d, bbox)
+        if (w <= 0.0 or h <= 0.0) { { defs: [], fill: color.BLACK } }
+        else {
+            let m0 = _matrix_of(d)
+            let m = [m0[0], m0[1], m0[2], m0[3], m0[4], m0[5] - h]
+            let ppage = _pattern_page(pdf, page, d)
+            let ops = stream.parse_content_stream(bytes)
+            let kids = _tiling_pattern_children(pdf, ppage, ops)
+            if (len(kids) == 0) { { defs: [], fill: color.BLACK } }
+            else {
+                let pat = <pattern id: id,
+                                   patternUnits: "userSpaceOnUse",
+                                   x: util.fmt_num(x), y: util.fmt_num(y),
+                                   width: util.fmt_num(w), height: util.fmt_num(h),
+                                   patternTransform: util.fmt_matrix(m);
+                              for (kid in kids) kid
+                          >
+                { defs: [pat], fill: "url(#" ++ id ++ ")" }
+            }
+        }
+    }
 }
 
 pub fn pattern_shading(pdf, page, name) {
@@ -360,19 +365,19 @@ pub fn pattern_shading(pdf, page, name) {
     else { null }
 }
 
-pub pn from_pattern_fill(pdf, page, name, id, ctm) {
+pub fn from_pattern_fill(pdf, page, name, id, ctm) {
     let p = _pattern_dict(pdf, page, name)
     let d = if (p != null and p.PatternType == 2 and p.Shading != null) { resolve.deref(pdf, p.Shading) }
             else { null }
     let pd = _stream_dict(p)
-    if (p != null and pd != null and pd.PatternType == 1 and pd.PaintType == 1) { return from_tiling_pattern_fill(pdf, page, p, id) }
-    else if (d == null) { return { defs: [], fill: color.BLACK } }
+    if (p != null and pd != null and pd.PatternType == 1 and pd.PaintType == 1) { from_tiling_pattern_fill(pdf, page, p, id) }
+    else if (d == null) { { defs: [], fill: color.BLACK } }
     else {
         let xform = util.matrix_mul(_matrix_of(p), _matrix_inverse(ctm))
         let stype = if (d.ShadingType) d.ShadingType else 0
         let r = if (stype == 2) { _emit_axial_with_matrix(pdf, d, xform, id, 0.0, 0.0) }
                 else if (stype == 3) { _emit_radial_with_matrix(pdf, d, xform, id, 0.0, 0.0) }
                 else { { defs: [], emit: [] } }
-        return { defs: r.defs, fill: "url(#" ++ id ++ ")" }
+        { defs: r.defs, fill: "url(#" ++ id ++ ")" }
     }
 }

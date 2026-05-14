@@ -1072,10 +1072,91 @@ static void svg_escape_attr(StrBuf* buf, const char* s, size_t len) {
     }
 }
 
+static bool svg_attr_name_equals(ShapeEntry* field, const char* name) {
+    if (!field || !field->name || !field->name->str || !name) return false;
+    size_t name_len = strlen(name);
+    return field->name->length == name_len && strncmp(field->name->str, name, name_len) == 0;
+}
+
+static int svg_pdf_image_id_from_href(const char* href) {
+    if (!href || strncmp(href, "img:", 4) != 0) return 0;
+    int value = 0;
+    const char* p = href + 4;
+    if (!*p) return 0;
+    while (*p) {
+        if (*p < '0' || *p > '9') return 0;
+        value = value * 10 + (*p - '0');
+        p++;
+    }
+    return value;
+}
+
+static bool svg_item_number_equals(ItemReader item, int value) {
+    if (item.isInt()) return item.asInt() == value;
+    if (item.isFloat()) return fabs(item.asFloat() - (double)value) < 0.0001;
+    return false;
+}
+
+static const char* svg_pdf_data_uri_for_image_id(const Element* pdf_svg_root, int object_num) {
+    if (!pdf_svg_root || object_num <= 0) return nullptr;
+
+    ElementReader root_reader(pdf_svg_root);
+    ItemReader pdf_root_attr = root_reader.get_attr("data-pdf-root");
+    MapReader pdf_root = MapReader::fromItem(pdf_root_attr.item());
+    if (!pdf_root.isValid()) return nullptr;
+
+    ItemReader objects_item = pdf_root.get("objects");
+    if (!objects_item.isArray()) return nullptr;
+
+    ArrayReader objects = objects_item.asArray();
+    int64_t count = objects.length();
+    for (int64_t i = 0; i < count; i++) {
+        ItemReader obj_item = objects.get(i);
+        MapReader obj = MapReader::fromItem(obj_item.item());
+        if (!obj.isValid()) continue;
+        ItemReader num_item = obj.get("object_num");
+        if (!svg_item_number_equals(num_item, object_num)) continue;
+
+        ItemReader content_item = obj.get("content");
+        MapReader content = MapReader::fromItem(content_item.item());
+        if (!content.isValid()) return nullptr;
+        ItemReader data_uri = content.get("data_uri");
+        return data_uri.isString() ? data_uri.cstring() : nullptr;
+    }
+
+    return nullptr;
+}
+
+static const char* svg_resolve_pdf_image_href(const Element* pdf_svg_root, const char* href) {
+    int object_num = svg_pdf_image_id_from_href(href);
+    if (object_num <= 0) return href;
+    const char* data_uri = svg_pdf_data_uri_for_image_id(pdf_svg_root, object_num);
+    if (data_uri) return data_uri;
+    log_debug("[SVG] PDF output image handle unresolved: %s", href);
+    return href;
+}
+
+static void serialize_image_href_attr(StrBuf* buf, const ElementReader& elem, const Element* pdf_svg_root) {
+    ItemReader href_item = elem.get_attr("href");
+    if (!href_item.isString()) return;
+
+    const char* href = href_item.cstring();
+    if (!href) return;
+    const char* resolved = svg_resolve_pdf_image_href(pdf_svg_root, href);
+    strbuf_append_str(buf, " href=\"");
+    svg_escape_attr(buf, resolved, strlen(resolved));
+    strbuf_append_char(buf, '"');
+}
+
 // recursively serialize a Lambda Element as SVG/XML markup
-static void serialize_svg_element(StrBuf* buf, const ElementReader& elem) {
+static void serialize_svg_element(StrBuf* buf, const ElementReader& elem, const Element* pdf_svg_root) {
     const char* tag = elem.tagName();
     if (!tag) return;
+
+    const bool is_image = strcmp(tag, "image") == 0;
+    const bool is_svg = strcmp(tag, "svg") == 0;
+    ItemReader pdf_root_attr = elem.get_attr("data-pdf-root");
+    const Element* child_pdf_svg_root = MapReader::fromItem(pdf_root_attr.item()).isValid() ? elem.element() : pdf_svg_root;
 
     // open tag
     strbuf_append_char(buf, '<');
@@ -1088,6 +1169,12 @@ static void serialize_svg_element(StrBuf* buf, const ElementReader& elem) {
         ShapeEntry* field = map_type->shape;
         while (field) {
             if (field->name && field->name->str && field->type) {
+                if (svg_attr_name_equals(field, "data-pdf-root") ||
+                    (is_image && (svg_attr_name_equals(field, "href") || svg_attr_name_equals(field, "xlink:href")))) {
+                    field = field->next;
+                    continue;
+                }
+
                 void* field_ptr = ((char*)e->data) + field->byte_offset;
                 TypeId ftype = field->type->type_id;
 
@@ -1116,6 +1203,12 @@ static void serialize_svg_element(StrBuf* buf, const ElementReader& elem) {
         }
     }
 
+    if (is_image) {
+        serialize_image_href_attr(buf, elem, child_pdf_svg_root);
+    } else if (is_svg) {
+        // data-pdf-root is an in-memory rendering context, not an XML attribute.
+    }
+
     // check for children
     int64_t count = elem.childCount();
     if (count == 0) {
@@ -1136,7 +1229,7 @@ static void serialize_svg_element(StrBuf* buf, const ElementReader& elem) {
             }
         } else if (child.isElement()) {
             ElementReader child_elem(child.item());
-            serialize_svg_element(buf, child_elem);
+            serialize_svg_element(buf, child_elem, child_pdf_svg_root);
         }
     }
 
@@ -1159,7 +1252,7 @@ static void render_inline_svg_passthrough(SvgRenderContext* ctx, ViewBlock* bloc
         "<g transform=\"translate(%.2f,%.2f)\">\n", svg_x, svg_y);
 
     ElementReader reader(dom_elem->native_element);
-    serialize_svg_element(ctx->svg_content, reader);
+    serialize_svg_element(ctx->svg_content, reader, nullptr);
 
     strbuf_append_char(ctx->svg_content, '\n');
     svg_indent(ctx);

@@ -656,60 +656,57 @@ fn _op_Tj(st, ctm, ops, page_h) {
     else { { state: st, emit: null } }
 }
 
-pn _op_TJ(st, ctm, ops, page_h) {
-    var op0 = null
-    if (len(ops) >= 1) { op0 = ops[0] }
-    if (op0 is map and op0.kind == "array") {
-        var cur = st
-        var seg_text = ""
-        var seg_st = st
-        var has_seg = false
-        var emits = []
-        var i = 0
-        let items = op0.value
-        let n = len(items)
-        while (i < n) {
-            let it = items[i]
-            if (it is map and (it.kind == "string" or it.kind == "hex")) {
-                let txt = _tj_text(it, cur.font_info)
-                if (txt != "") {
-                    if (not has_seg) {
-                        seg_st = cur
-                        has_seg = true
-                    }
-                    seg_text = seg_text ++ txt
-                    cur = _advance_text(cur, _text_advance_for_operand(cur, ctm, it))
-                }
-            }
-            else if (it is int or it is float) {
-                let adj = util.num(it)
-                if (adj < -600.0 and has_seg) {
-                    let part = _emit_one(seg_st, ctm, page_h, seg_text, _run_advance_between(seg_st, cur))
-                    var k = 0
-                    let m = len(part)
-                    while (k < m) {
-                        emits = emits ++ [part[k]]
-                        k = k + 1
-                    }
-                    seg_text = ""
-                    has_seg = false
-                }
-                cur = _advance_text(cur, _tj_adjustment(cur, ctm, adj))
-            }
-            i = i + 1
-        }
-        if (has_seg) {
-            let part = _emit_one(seg_st, ctm, page_h, seg_text, _run_advance_between(seg_st, cur))
-            var k = 0
-            let m = len(part)
-            while (k < m) {
-                emits = emits ++ [part[k]]
-                k = k + 1
-            }
-        }
-        return { state: cur, emit: emits }
+fn _append_emit(out, part) {
+    if (part == null) { out }
+    else { out ++ (for (p in part) p) }
+}
+
+fn _op_TJ_flush(cur, ctm, page_h, seg_text, seg_st, has_seg, emits) {
+    if (has_seg) {
+        _append_emit(emits, _emit_one(seg_st, ctm, page_h, seg_text, _run_advance_between(seg_st, cur)))
     }
-    else { return { state: st, emit: null } }
+    else { emits }
+}
+
+fn _op_TJ_loop(items, i, n, cur, ctm, page_h, seg_text, seg_st, has_seg, emits) {
+    if (i >= n) {
+        { state: cur, emit: _op_TJ_flush(cur, ctm, page_h, seg_text, seg_st, has_seg, emits) }
+    }
+    else {
+        let it = items[i]
+        if (it is map and (it.kind == "string" or it.kind == "hex")) {
+            let txt = _tj_text(it, cur.font_info)
+            if (txt != "") {
+                let next_seg_st = if (has_seg) { seg_st } else { cur }
+                let next_cur = _advance_text(cur, _text_advance_for_operand(cur, ctm, it))
+                _op_TJ_loop(items, i + 1, n, next_cur, ctm, page_h,
+                            seg_text ++ txt, next_seg_st, true, emits)
+            }
+            else { _op_TJ_loop(items, i + 1, n, cur, ctm, page_h, seg_text, seg_st, has_seg, emits) }
+        }
+        else if (it is int or it is float) {
+            let adj = util.num(it)
+            let next_emits = if (adj < -600.0 and has_seg) {
+                _append_emit(emits, _emit_one(seg_st, ctm, page_h, seg_text, _run_advance_between(seg_st, cur)))
+            }
+            else { emits }
+            let next_seg_text = if (adj < -600.0 and has_seg) { "" } else { seg_text }
+            let next_has_seg = if (adj < -600.0 and has_seg) { false } else { has_seg }
+            let next_cur = _advance_text(cur, _tj_adjustment(cur, ctm, adj))
+            _op_TJ_loop(items, i + 1, n, next_cur, ctm, page_h,
+                        next_seg_text, seg_st, next_has_seg, next_emits)
+        }
+        else { _op_TJ_loop(items, i + 1, n, cur, ctm, page_h, seg_text, seg_st, has_seg, emits) }
+    }
+}
+
+fn _op_TJ(st, ctm, ops, page_h) {
+    let op0 = if (len(ops) >= 1) { ops[0] } else { null }
+    if (op0 is map and op0.kind == "array") {
+        let items = op0.value
+        _op_TJ_loop(items, 0, len(items), st, ctm, page_h, "", st, false, [])
+    }
+    else { { state: st, emit: null } }
 }
 
 fn _op_quote(st, ctm, ops, page_h) {
@@ -739,51 +736,42 @@ fn _op_dquote(st, ctm, ops, page_h) {
 // Top dispatcher
 // ============================================================
 
-pub pn apply_op(st, ctm, opr, ops, page_h) {
+pub fn apply_op(st, ctm, opr, ops, page_h) {
     let base = _base_state(st)
-    if      (opr == "BT") { return _op_BT(base) }
-    else if (opr == "ET") { return _op_ET(base) }
-    else if (opr == "Tf") { return _op_Tf(base, ops) }
-    else if (opr == "Tm") { return _op_Tm(base, ops) }
-    else if (opr == "Td") { return _op_Td(base, ops) }
-    else if (opr == "TD") { return _op_TD(base, ops) }
-    else if (opr == "T*") { return _op_Tstar(base) }
-    else if (opr == "TL") { return _op_TL(base, ops) }
-    else if (opr == "Tc") { return _op_Tc(base, ops) }
-    else if (opr == "Tw") { return _op_Tw(base, ops) }
-    else if (opr == "Tz") { return _op_Tz(base, ops) }
-    else if (opr == "Ts") { return _op_Ts(base, ops) }
-    else if (opr == "Tr") { return _op_Tr(base, ops) }
-    else if (opr == "Tj") { return _op_Tj(base, ctm, ops, page_h) }
-    else if (opr == "TJ") { return _op_TJ(base, ctm, ops, page_h) }
-    else if (opr == "'")  { return _op_quote(base, ctm, ops, page_h) }
-    else if (opr == "\"") { return _op_dquote(base, ctm, ops, page_h) }
-    else                  { return { state: base, emit: null } }
+    if      (opr == "BT") { _op_BT(base) }
+    else if (opr == "ET") { _op_ET(base) }
+    else if (opr == "Tf") { _op_Tf(base, ops) }
+    else if (opr == "Tm") { _op_Tm(base, ops) }
+    else if (opr == "Td") { _op_Td(base, ops) }
+    else if (opr == "TD") { _op_TD(base, ops) }
+    else if (opr == "T*") { _op_Tstar(base) }
+    else if (opr == "TL") { _op_TL(base, ops) }
+    else if (opr == "Tc") { _op_Tc(base, ops) }
+    else if (opr == "Tw") { _op_Tw(base, ops) }
+    else if (opr == "Tz") { _op_Tz(base, ops) }
+    else if (opr == "Ts") { _op_Ts(base, ops) }
+    else if (opr == "Tr") { _op_Tr(base, ops) }
+    else if (opr == "Tj") { _op_Tj(base, ctm, ops, page_h) }
+    else if (opr == "TJ") { _op_TJ(base, ctm, ops, page_h) }
+    else if (opr == "'")  { _op_quote(base, ctm, ops, page_h) }
+    else if (opr == "\"") { _op_dquote(base, ctm, ops, page_h) }
+    else                  { { state: base, emit: null } }
 }
 
 // ============================================================
 // Driver — only mutation point
 // ============================================================
 
-pub pn render_text_ops(ops, fonts, page_h) {
-    var st = new_state(fonts)
-    var out = []
-    var i = 0
-    let n = len(ops)
-    while (i < n) {
+fn _render_text_ops_loop(ops, i, n, st, out, page_h) {
+    if (i >= n) { out }
+    else {
         let r = apply_op(st, util.IDENTITY, ops[i].op, ops[i].operands, page_h)
-        st = r.state
-        if (r.emit != null) {
-            var k = 0
-            let m = len(r.emit)
-            while (k < m) {
-                out = out ++ [r.emit[k]]
-                k = k + 1
-            }
-        }
-        i = i + 1
+        _render_text_ops_loop(ops, i + 1, n, r.state, _append_emit(out, r.emit), page_h)
     }
-    return out
+}
+
+pub fn render_text_ops(ops, fonts, page_h) {
+    _render_text_ops_loop(ops, 0, len(ops), new_state(fonts), [], page_h)
 }
 
 // ============================================================
@@ -830,20 +818,17 @@ fn _is_overprint_dup(prev, cur) {
     }
 }
 
-pub pn dedupe_overprints(texts) {
-    var out = []
-    var i = 0
-    let n = len(texts)
-    while (i < n) {
+fn _dedupe_overprints_loop(texts, i, n, out) {
+    if (i >= n) { out }
+    else {
         let cur = texts[i]
-        var dup = false
         let ol = len(out)
-        if (ol > 0) {
-            let prev = out[ol - 1]
-            dup = _is_overprint_dup(prev, cur)
-        }
-        if (not dup) { out = out ++ [cur] }
-        i = i + 1
+        let dup = if (ol > 0) { _is_overprint_dup(out[ol - 1], cur) } else { false }
+        let next_out = if (dup) { out } else { out ++ [cur] }
+        _dedupe_overprints_loop(texts, i + 1, n, next_out)
     }
-    return out
+}
+
+pub fn dedupe_overprints(texts) {
+    _dedupe_overprints_loop(texts, 0, len(texts), [])
 }

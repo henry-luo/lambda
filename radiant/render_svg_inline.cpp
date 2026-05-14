@@ -140,33 +140,10 @@ static void process_svg_defs(SvgRenderContext* ctx, Element* defs);
 
 static const char* extract_element_attribute(Element* element, const char* attr_name, Arena* arena) {
     (void)arena;  // not used in this implementation
-    if (!element || !element->data || !attr_name) return nullptr;
-
-    TypeElmt* elem_type = (TypeElmt*)element->type;
-    if (!elem_type) return nullptr;
-
-    // cast the element type to TypeMap to access attributes
-    TypeMap* map_type = (TypeMap*)elem_type;
-    if (!map_type->shape) return nullptr;
-
-    // search through element fields for the attribute
-    ShapeEntry* field = map_type->shape;
-    size_t attr_len = strlen(attr_name);
-    for (int i = 0; i < map_type->length && field; i++) {
-        if (field->name && field->name->str &&
-            field->name->length == attr_len &&
-            strncmp(field->name->str, attr_name, field->name->length) == 0) {
-
-            if (field->type && field->type->type_id == LMD_TYPE_STRING) {
-                void* data = ((char*)element->data) + field->byte_offset;
-                String* str_val = *(String**)data;
-                return str_val ? str_val->chars : nullptr;
-            }
-        }
-        field = field->next;
-    }
-
-    return nullptr;
+    if (!element || !attr_name) return nullptr;
+    ConstItem attr_value = element->get_attr(attr_name);
+    String* string_value = attr_value.string();
+    return string_value ? string_value->chars : nullptr;
 }
 
 // ============================================================================
@@ -3254,6 +3231,65 @@ static char* svg_resolve_resource_path(SvgRenderContext* ctx, const char* href_n
     return path;
 }
 
+static int svg_pdf_image_id_from_href(const char* href) {
+    if (!href || strncmp(href, "img:", 4) != 0) return 0;
+    const char* p = href + 4;
+    if (!*p) return 0;
+    int value = 0;
+    while (*p) {
+        if (*p < '0' || *p > '9') return 0;
+        value = value * 10 + (*p - '0');
+        p++;
+    }
+    return value;
+}
+
+static bool svg_item_number_equals(ItemReader item, int value) {
+    if (item.isInt()) return item.asInt() == value;
+    if (item.isFloat()) return fabs(item.asFloat() - (double)value) < 0.0001;
+    return false;
+}
+
+static const char* svg_pdf_data_uri_for_image_id(SvgRenderContext* ctx, int object_num) {
+    if (!ctx || !ctx->svg_root || object_num <= 0) return nullptr;
+
+    ItemReader pdf_root_attr(ctx->svg_root->get_attr("data-pdf-root"));
+    MapReader pdf_root = MapReader::fromItem(pdf_root_attr.item());
+    if (!pdf_root.isValid()) return nullptr;
+    ItemReader objects_item = pdf_root.get("objects");
+    if (!objects_item.isArray()) return nullptr;
+
+    ArrayReader objects = objects_item.asArray();
+    int64_t count = objects.length();
+    for (int64_t i = 0; i < count; i++) {
+        ItemReader obj_item = objects.get(i);
+        MapReader obj = MapReader::fromItem(obj_item.item());
+        if (!obj.isValid()) continue;
+        ItemReader num_item = obj.get("object_num");
+        if (!svg_item_number_equals(num_item, object_num)) continue;
+
+        ItemReader content_item = obj.get("content");
+        MapReader content = MapReader::fromItem(content_item.item());
+        if (!content.isValid()) return nullptr;
+        ItemReader data_uri = content.get("data_uri");
+        return data_uri.isString() ? data_uri.cstring() : nullptr;
+    }
+
+    return nullptr;
+}
+
+static const char* svg_resolve_pdf_image_href(SvgRenderContext* ctx, const char* href) {
+    int object_num = svg_pdf_image_id_from_href(href);
+    if (object_num <= 0) return href;
+    const char* data_uri = svg_pdf_data_uri_for_image_id(ctx, object_num);
+    if (data_uri && *data_uri) {
+        log_debug("[SVG] resolved PDF image handle img:%d", object_num);
+        return data_uri;
+    }
+    log_debug("[SVG] PDF image handle unresolved: img:%d", object_num);
+    return href;
+}
+
 static void render_svg_image(SvgRenderContext* ctx, Element* elem) {
     if (!elem) return;
 
@@ -3264,6 +3300,9 @@ static void render_svg_image(SvgRenderContext* ctx, Element* elem) {
         log_debug("[SVG] <image> missing href attribute");
         return;
     }
+
+    const char* display_href = href;
+    href = svg_resolve_pdf_image_href(ctx, href);
 
     // parse position and size
     float x = parse_svg_length(get_svg_attr(elem, "x"), 0);
@@ -3389,7 +3428,7 @@ static void render_svg_image(SvgRenderContext* ctx, Element* elem) {
             svg_draw_picture(ctx, rdt_pic, op, &m);
         }
 
-        log_debug("[SVG] <image> loaded: %s at (%.1f, %.1f) size %.1fx%.1f", href, x, y, width, height);
+        log_debug("[SVG] <image> loaded: %s at (%.1f, %.1f) size %.1fx%.1f", display_href, x, y, width, height);
         return;
     } else if (href_is_svg) {
         char* href_file = svg_href_file_part(href, nullptr);
@@ -3435,7 +3474,7 @@ static void render_svg_image(SvgRenderContext* ctx, Element* elem) {
         if (href_file) mem_free(href_file);
         Tvg_Result result = tvg_picture_load(pic, resolved_href ? resolved_href : href);
         if (result != TVG_RESULT_SUCCESS) {
-            log_debug("[SVG] <image> failed to load: %s", href);
+            log_debug("[SVG] <image> failed to load: %s", display_href);
             if (resolved_href) mem_free(resolved_href);
             tvg_paint_unref(pic, true);
             return;
