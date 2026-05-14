@@ -2,6 +2,7 @@
 #include "view.hpp"
 #include "layout.hpp"
 #include "font_face.h"
+#include "../lib/tagged.hpp"
 extern "C" {
 #include "../lib/url.h"
 #include "../lib/mempool.h"
@@ -296,7 +297,7 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
         // This must happen for both tiled and normal paths.
         View* root_view = doc->view_tree->root;
         if (root_view && root_view->view_type == RDT_VIEW_BLOCK) {
-            ViewBlock* root_block = (ViewBlock*)root_view;
+            ViewBlock* root_block = lam::view_require_block(root_view);
             if (root_block->scroller && root_block->scroller->has_clip) {
                 if (auto_width)  root_block->scroller->clip.right  = (float)content_max_x;
                 if (auto_height) root_block->scroller->clip.bottom = (float)content_max_y;
@@ -600,7 +601,7 @@ static bool render_batch_single(
 
         View* root_view = doc->view_tree->root;
         if (root_view && root_view->view_type == RDT_VIEW_BLOCK) {
-            ViewBlock* root_block = (ViewBlock*)root_view;
+            ViewBlock* root_block = lam::view_require_block(root_view);
             if (root_block->scroller && root_block->scroller->has_clip) {
                 if (auto_width)  root_block->scroller->clip.right  = (float)content_max_x;
                 if (auto_height) root_block->scroller->clip.bottom = (float)content_max_y;

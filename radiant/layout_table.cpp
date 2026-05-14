@@ -2,6 +2,7 @@
 #include "layout.hpp"
 #include "intrinsic_sizing.hpp"
 #include "form_control.hpp"  // For FormDefaults (radio/checkbox margin constants)
+#include "retained_fields.hpp"
 #include "../lib/log.h"
 #include "../lib/strview.h"
 #include "../lib/arraylist.h"
@@ -32,6 +33,11 @@
 // =============================================================================
 // These methods provide unified traversal of table structure regardless of
 // whether elements have proper HTML structure or use anonymous box wrappers.
+
+static inline ViewBlock* table_array_view_block(ArrayList* list, int index) {
+    View* view = static_cast<View*>(list->data[index]);
+    return lam::view_require_block(view);
+}
 
 ViewTableRow* ViewTable::first_row() {
     // Direct children first (handles both normal rows and acts_as_tbody case)
@@ -2868,10 +2874,10 @@ static DomElement* create_anonymous_table_element(LayoutContext* lycon, DomEleme
     // called during anonymous box generation before child style resolution.
     // Font context propagation through lycon->font happens later in mark_table_node.
     if (parent->font) {
-        anon->font = (FontProp*)pool_calloc(pool, sizeof(FontProp));
+            anon->font = (FontProp*)pool_calloc(pool, sizeof(FontProp));
         if (anon->font) {
             // Copy only specified font properties, not derived/cached fields
-            anon->font->family = parent->font->family;  // Share the string
+            radiant_retain_font_family(anon->font, lam::PoolPtr<char>(parent->font->family));  // share the string
             anon->font->font_size = parent->font->font_size;
             anon->font->font_style = parent->font->font_style;
             anon->font->font_weight = parent->font->font_weight;
@@ -4453,7 +4459,7 @@ static void reapply_rowspan_vertical_alignment(ViewTableCell* tcell) {
 // Layout cell content with correct parent width (after cell dimensions are set)
 // This is the ONLY place where cell content gets laid out (single pass)
 static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell, ViewBlock* table) {
-    ViewTableCell* tcell = static_cast<ViewTableCell*>(cell);
+    ViewTableCell* tcell = lam::view_require<RDT_VIEW_TABLE_CELL>(cell);
     if (!tcell) return;
 
     // No need to clear text rectangles - this is the first and only layout pass!
@@ -5554,7 +5560,7 @@ static float relayout_caption(LayoutContext* lycon, ViewBlock* cap, float table_
         for (DomNode* child = dom_elem->first_child; child; child = child->next_sibling) {
             if (child->is_text()) {
                 child->view_type = RDT_VIEW_NONE;
-                ViewText* text_view = static_cast<ViewText*>(lam::dom_require<DOM_NODE_TEXT>(child));
+                ViewText* text_view = lam::unsafe_view_text_storage(lam::dom_require<DOM_NODE_TEXT>(child));
                 text_view->rect = nullptr;
                 text_view->width = 0;
                 text_view->height = 0;
@@ -5828,7 +5834,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             // Position caption: margin-left determines x offset within table wrapper
             float cap_y = 0;
             for (int ci = 0; ci < captions->length; ci++) {
-                ViewBlock* cap = static_cast<ViewBlock*>(captions->data[ci]);
+                ViewBlock* cap = table_array_view_block(captions, ci);
                 float cap_ml = (cap->bound && cap->bound->margin.left_type != CSS_VALUE_AUTO && cap->bound->margin.left > 0)
                                    ? cap->bound->margin.left : 0;
                 float cap_mt = (cap->bound && cap->bound->margin.top > 0) ? cap->bound->margin.top : 0;
@@ -7490,7 +7496,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         float cap_y = 0;
         caption_height = 0;  // recalculate from scratch during positioning
         for (int ci = 0; ci < captions->length; ci++) {
-            ViewBlock* cap = static_cast<ViewBlock*>(captions->data[ci]);
+            ViewBlock* cap = table_array_view_block(captions, ci);
             float cap_ml = (cap->bound && cap->bound->margin.left_type != CSS_VALUE_AUTO && cap->bound->margin.left > 0)
                                ? cap->bound->margin.left : 0;
             cap->x = cap_ml;
@@ -7624,7 +7630,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
     // Process elements in visual order (THEAD groups → TBODY groups → direct rows → TFOOT groups)
     for (int _i = 0; _i < ordered_elements->length; _i++) {
-        ViewBlock* child = static_cast<ViewBlock*>(ordered_elements->data[_i]);
+        ViewBlock* child = table_array_view_block(ordered_elements, _i);
         log_info("%s Processing ordered element %d: view_type=%d", table->source_loc(), _i, child->view_type);
         if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
             float group_start_y = current_y;
@@ -8703,7 +8709,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         float cap_y = final_table_height;
         float total_bottom_caption_height = 0;
         for (int ci = 0; ci < captions->length; ci++) {
-            ViewBlock* cap = static_cast<ViewBlock*>(captions->data[ci]);
+            ViewBlock* cap = table_array_view_block(captions, ci);
             float cap_ml = (cap->bound && cap->bound->margin.left_type != CSS_VALUE_AUTO && cap->bound->margin.left > 0)
                                ? cap->bound->margin.left : 0;
             cap->x = cap_ml;
@@ -9117,7 +9123,7 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
                     table_wrapper->font = (FontProp*)pool_calloc(pool, sizeof(FontProp));
                     if (table_wrapper->font) {
                         // Copy only specified font properties, not derived/cached fields
-                        table_wrapper->font->family = inherit_font->family;
+                        radiant_retain_font_family(table_wrapper->font, lam::PoolPtr<char>(inherit_font->family));
                         table_wrapper->font->font_size = inherit_font->font_size;
                         table_wrapper->font->font_style = inherit_font->font_style;
                         table_wrapper->font->font_weight = inherit_font->font_weight;
@@ -9168,7 +9174,7 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
                 if (table_wrapper->font) {
                     row_wrapper->font = (FontProp*)pool_calloc(pool, sizeof(FontProp));
                     if (row_wrapper->font) {
-                        row_wrapper->font->family = table_wrapper->font->family;
+                        radiant_retain_font_family(row_wrapper->font, lam::PoolPtr<char>(table_wrapper->font->family));
                         row_wrapper->font->font_size = table_wrapper->font->font_size;
                         row_wrapper->font->font_style = table_wrapper->font->font_style;
                         row_wrapper->font->font_weight = table_wrapper->font->font_weight;
@@ -9342,7 +9348,7 @@ void layout_table_content(LayoutContext* lycon, DomNode* tableNode, DisplayValue
     // item_prop_type=ITEM_PROP_GRID/FLEX without allocating TableProp.
     // We must allocate tb before build_table_tree accesses it.
     if (tableNode->is_element()) {
-        ViewTable* vtable = static_cast<ViewTable*>(tableNode);
+        ViewTable* vtable = lam::unsafe_view_table_storage(tableNode);
         if (vtable->item_prop_type != DomElement::ITEM_PROP_TABLE) {
             vtable->tb = (TableProp*)alloc_prop(lycon, sizeof(TableProp));
             vtable->item_prop_type = DomElement::ITEM_PROP_TABLE;

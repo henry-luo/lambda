@@ -10,6 +10,7 @@
 #include "render.hpp"
 #include "../lambda/mark_reader.hpp"
 #include "../lambda/input/css/dom_element.hpp"
+#include "../lib/tagged.hpp"
 #include "../lib/log.h"
 #include "../lib/font/font.h"
 #include "../lib/font/font_internal.h"
@@ -4309,8 +4310,7 @@ void render_svg_to_vec(RdtVector* vec, Element* svg_element, float viewport_widt
 void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
     if (!rdcon || !view) return;
 
-    // ViewBlock inherits from DomElement, so we can cast directly
-    DomElement* dom_elem = static_cast<DomElement*>(view);
+    DomElement* dom_elem = lam::dom_require_element(lam::view_dom_node(view));
     if (!dom_elem->native_element) {
         log_debug("[SVG] render_inline_svg: no native element");
         return;

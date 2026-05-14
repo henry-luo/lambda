@@ -3,6 +3,7 @@
 #include "form_control.hpp"
 #include "state_store.hpp"
 #include "text_control.hpp"
+#include "../lib/tagged.hpp"
 #include "../lib/font/font.h"
 
 #include "../lib/log.h"
@@ -325,7 +326,7 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
     DocState* state = rdcon->ui_context && rdcon->ui_context->document
         ? (DocState*)rdcon->ui_context->document->state : nullptr;
     uint32_t selection_start = 0, selection_end = 0;
-    form_control_get_selection(state, (View*)block, &selection_start, &selection_end, NULL);
+    form_control_get_selection(state, static_cast<View*>(block), &selection_start, &selection_end, NULL);
     uint32_t preedit_start = 0;
     uint32_t preedit_end = 0;
     uint32_t preedit_caret_byte = 0;
@@ -364,7 +365,7 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
     // F4: compute caret X (logical, before scroll) so we can clamp scroll_x
     // to keep the caret inside the content box. Done up-front so the same
     // scroll offset is applied to text, selection and caret rendering.
-    bool focused_here = state && focus_get(state) == (View*)block;
+    bool focused_here = state && focus_get(state) == static_cast<View*>(block);
     float caret_x_logical = 0.0f;
     int caret_byte = 0;
     if (focused_here && !is_placeholder && text && block->font &&
@@ -484,8 +485,8 @@ void render_checkbox(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
 
     DocState* state = rdcon->ui_context && rdcon->ui_context->document
         ? (DocState*)rdcon->ui_context->document->state : nullptr;
-    bool disabled = form_control_is_disabled(state, (View*)block);
-    bool checked = form_control_get_checked(state, (View*)block);
+    bool disabled = form_control_is_disabled(state, static_cast<View*>(block));
+    bool checked = form_control_get_checked(state, static_cast<View*>(block));
 
     // Background
     Color bg = disabled ? make_color(224, 224, 224) : make_color(255, 255, 255);
@@ -517,7 +518,7 @@ void render_checkbox(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
 
     // Focus ring — a 2px outset blue rectangle (matches our text-input
     // focus indicator and gives Tab navigation a visible target).
-    if (state && focus_get(state) == (View*)block) {
+    if (state && focus_get(state) == static_cast<View*>(block)) {
         float ring = 2.0f * s;
         Color ring_color = make_color(0x1A, 0x73, 0xE8, 0xFF);
         float rx = x - ring, ry = y - ring;
@@ -553,8 +554,8 @@ void render_radio(RenderContext* rdcon, ViewBlock* block, FormControlProp* form)
 
     DocState* state = rdcon->ui_context && rdcon->ui_context->document
         ? (DocState*)rdcon->ui_context->document->state : nullptr;
-    bool disabled = form_control_is_disabled(state, (View*)block);
-    bool checked = form_control_get_checked(state, (View*)block);
+    bool disabled = form_control_is_disabled(state, static_cast<View*>(block));
+    bool checked = form_control_get_checked(state, static_cast<View*>(block));
 
     // Background circle
     Color bg = disabled ? make_color(224, 224, 224) : make_color(255, 255, 255);
@@ -573,7 +574,7 @@ void render_radio(RenderContext* rdcon, ViewBlock* block, FormControlProp* form)
     }
 
     // Focus ring (see render_checkbox).
-    if (state && focus_get(state) == (View*)block) {
+    if (state && focus_get(state) == static_cast<View*>(block)) {
         float ring = 2.0f * s;
         Color ring_color = make_color(0x1A, 0x73, 0xE8, 0xFF);
         stroke_circle(rdcon, cx, cy, radius + ring, ring_color, ring);
@@ -603,7 +604,7 @@ void render_button(RenderContext* rdcon, ViewBlock* block, FormControlProp* form
          block->bound->border->width.bottom > 0 || block->bound->border->width.left > 0);
     DocState* state = rdcon->ui_context && rdcon->ui_context->document
         ? (DocState*)rdcon->ui_context->document->state : nullptr;
-    bool disabled = form_control_is_disabled(state, (View*)block);
+    bool disabled = form_control_is_disabled(state, static_cast<View*>(block));
 
     if (!has_css_background) {
         // No CSS background - render default button appearance
@@ -657,7 +658,7 @@ void render_button(RenderContext* rdcon, ViewBlock* block, FormControlProp* form
     }
 
     // Focus ring (Tab navigation indicator).
-    if (state && focus_get(state) == (View*)block) {
+    if (state && focus_get(state) == static_cast<View*>(block)) {
         float ring = 2.0f * s;
         Color ring_color = make_color(0x1A, 0x73, 0xE8, 0xFF);
         float rx = x - ring, ry = y - ring;
@@ -700,8 +701,8 @@ void render_select(RenderContext* rdcon, ViewBlock* block, FormControlProp* form
          block->bound->border->width.bottom > 0 || block->bound->border->width.left > 0);
     DocState* state = rdcon->ui_context && rdcon->ui_context->document
         ? (DocState*)rdcon->ui_context->document->state : nullptr;
-    bool disabled = form_control_is_disabled(state, (View*)block);
-    int selected_index = form_control_get_selected_index(state, (View*)block);
+    bool disabled = form_control_is_disabled(state, static_cast<View*>(block));
+    int selected_index = form_control_get_selected_index(state, static_cast<View*>(block));
 
     float bw = 1 * s;
     if (!has_css_background) {
@@ -810,14 +811,14 @@ static const char* get_option_text_at_index(ViewBlock* select, int index) {
     DomNode* child = select->first_child;
     while (child) {
         if (child->is_element()) {
-            DomElement* child_elem = (DomElement*)child;
+            DomElement* child_elem = lam::dom_require_element(child);
             if (child_elem->tag() == HTM_TAG_OPTION) {
                 if (current_idx == index) {
                     // Find first text node child
                     DomNode* text_child = child_elem->first_child;
                     while (text_child) {
                         if (text_child->is_text()) {
-                            DomText* text = (DomText*)text_child;
+                            DomText* text = lam::dom_require_text(text_child);
                             return text->text;
                         }
                         text_child = text_child->next_sibling;
@@ -830,13 +831,13 @@ static const char* get_option_text_at_index(ViewBlock* select, int index) {
                 DomNode* opt_child = child_elem->first_child;
                 while (opt_child) {
                     if (opt_child->is_element()) {
-                        DomElement* opt_elem = (DomElement*)opt_child;
+                        DomElement* opt_elem = lam::dom_require_element(opt_child);
                         if (opt_elem->tag() == HTM_TAG_OPTION) {
                             if (current_idx == index) {
                                 DomNode* text_child = opt_elem->first_child;
                                 while (text_child) {
                                     if (text_child->is_text()) {
-                                        DomText* text = (DomText*)text_child;
+                                        DomText* text = lam::dom_require_text(text_child);
                                         return text->text;
                                     }
                                     text_child = text_child->next_sibling;
@@ -861,12 +862,12 @@ static const char* get_option_text_at_index(ViewBlock* select, int index) {
  */
 void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, DocState* state) {
     if (!state) return;
-    if (!select || !select->form || !form_control_is_dropdown_open(state, (View*)select)) return;
+    if (!select || !select->form || !form_control_is_dropdown_open(state, static_cast<View*>(select))) return;
 
     float s = rdcon->scale;
     FormControlProp* form = select->form;
-    int selected_index = form_control_get_selected_index(state, (View*)select);
-    int hover_index = form_control_get_hover_index(state, (View*)select);
+    int selected_index = form_control_get_selected_index(state, static_cast<View*>(select));
+    int hover_index = form_control_get_hover_index(state, static_cast<View*>(select));
 
     // Calculate dropdown position relative to the select element
     // Walk up parent chain to get absolute position, then apply scale
@@ -875,14 +876,14 @@ void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, DocState* s
     View* parent = select->parent;
     while (parent) {
         if (parent->is_block()) {
-            ViewBlock* pblock = (ViewBlock*)parent;
+            ViewBlock* pblock = lam::view_require_block(parent);
             abs_x += pblock->x;
             abs_y += pblock->y;
             // Account for scroll in parent containers
             if (pblock->scroller && pblock->scroller->pane) {
                 DocState* scroll_state = pblock->doc ? pblock->doc->state : NULL;
                 float scroll_x = 0.0f, scroll_y = 0.0f;
-                scroll_state_get_position_for_view(scroll_state, (View*)pblock,
+                scroll_state_get_position_for_view(scroll_state, static_cast<View*>(pblock),
                     pblock->scroller->pane, &scroll_x, &scroll_y, NULL, NULL);
                 abs_y -= scroll_y;
                 abs_x -= scroll_x;
@@ -1099,7 +1100,7 @@ void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
     DocState* state = rdcon->ui_context && rdcon->ui_context->document
         ? (DocState*)rdcon->ui_context->document->state : nullptr;
     uint32_t selection_start = 0, selection_end = 0;
-    form_control_get_selection(state, (View*)block, &selection_start, &selection_end, NULL);
+    form_control_get_selection(state, static_cast<View*>(block), &selection_start, &selection_end, NULL);
     uint32_t preedit_start = 0;
     uint32_t preedit_end = 0;
     uint32_t preedit_caret_byte = 0;
@@ -1203,7 +1204,7 @@ void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
     if (state && !is_placeholder) {
         View* focused = focus_get(state);
         int sel_start = 0, sel_end = 0;
-        if (!has_preedit && focused == (View*)block && selection_get_anchor_range(state, focused, &sel_start, &sel_end)) {
+        if (!has_preedit && focused == static_cast<View*>(block) && selection_get_anchor_range(state, focused, &sel_start, &sel_end)) {
             const char* value = form->value;
             int val_len = value ? (int)strlen(value) : 0;
             if (sel_start < 0) sel_start = 0;
@@ -1295,7 +1296,7 @@ void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
     if (state) {
         View* focused = focus_get(state);
         int caret_off = 0;
-        if (focused == (View*)block && caret_is_visible(state) &&
+        if (focused == static_cast<View*>(block) && caret_is_visible(state) &&
             (has_preedit || caret_get_offset(state, &caret_off))) {
             const char* value = text;
             int val_len = value ? (int)strlen(value) : 0;
@@ -1349,7 +1350,7 @@ void render_range(RenderContext* rdcon, ViewBlock* block, FormControlProp* form)
     float h = block->height * s;
     DocState* state = rdcon->ui_context && rdcon->ui_context->document
         ? (DocState*)rdcon->ui_context->document->state : nullptr;
-    float range_value = form_control_get_range_value(state, (View*)block);
+    float range_value = form_control_get_range_value(state, static_cast<View*>(block));
 
     // Track
     float track_height = FormDefaults::RANGE_TRACK_HEIGHT * s;

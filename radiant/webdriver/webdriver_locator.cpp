@@ -6,6 +6,7 @@
 #include "webdriver.hpp"
 #include "../view.hpp"
 #include "../state_store.hpp"
+#include "../../lib/tagged.hpp"
 #include "../../lambda/input/css/dom_element.hpp"
 #include "../../lambda/input/css/selector_matcher.hpp"
 #include "../../lambda/input/css/css_parser.hpp"
@@ -54,10 +55,10 @@ static void extract_text_recursive(View* view, StrBuf* buf) {
 
     // For elements, traverse children
     if (view->is_element()) {
-        ViewElement* elem = (ViewElement*)view;
+        ViewElement* elem = lam::view_require_element(view);
         DomNode* child = elem->first_child;
         while (child) {
-            extract_text_recursive((View*)child, buf);
+            extract_text_recursive(lam::dom_view(child), buf);
             child = child->next_sibling;
         }
     }
@@ -96,7 +97,7 @@ static bool traverse_views(View* view, ViewVisitor visitor, void* udata) {
 
     // Visit children
     if (view->is_block()) {
-        ViewBlock* block = (ViewBlock*)view;
+        ViewBlock* block = lam::view_require_block(view);
         View* child = block->first_child;
         while (child) {
             if (!traverse_views(child, visitor, udata)) {
@@ -105,7 +106,7 @@ static bool traverse_views(View* view, ViewVisitor visitor, void* udata) {
             child = child->next();
         }
     } else if (view->view_type == RDT_VIEW_INLINE) {
-        ViewSpan* span = (ViewSpan*)view;
+        ViewSpan* span = lam::view_require_element(view);
         View* child = span->first_child;
         while (child) {
             if (!traverse_views(child, visitor, udata)) {
@@ -152,8 +153,8 @@ static bool css_find_visitor(View* view, void* udata) {
 
     if (!view->is_element()) return true;
 
-    ViewElement* elem = (ViewElement*)view;
-    DomElement* dom_elem = (DomElement*)elem;
+    ViewElement* elem = lam::view_require_element(view);
+    DomElement* dom_elem = lam::dom_require_element(lam::view_dom_node(elem));
 
     // Match against selector
     if (selector_matcher_matches(ctx->matcher, ctx->selector, dom_elem, NULL)) {
@@ -249,7 +250,7 @@ static bool link_text_visitor(View* view, void* udata) {
 
     if (!view->is_element()) return true;
 
-    ViewElement* elem = (ViewElement*)view;
+    ViewElement* elem = lam::view_require_element(view);
 
     // Check if this is an anchor tag
     if (elem->tag() != HTM_TAG_A) return true;
@@ -310,7 +311,7 @@ static bool tag_name_visitor(View* view, void* udata) {
 
     if (!view->is_element()) return true;
 
-    ViewElement* elem = (ViewElement*)view;
+    ViewElement* elem = lam::view_require_element(view);
     const char* name = elem->node_name();
 
     if (name && str_ieq(name, strlen(name), ctx->tag_name, strlen(ctx->tag_name))) {

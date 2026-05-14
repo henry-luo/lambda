@@ -461,7 +461,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild \
 	    test test-all test-all-baseline test-lambda-baseline test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-pdf-render test-extended test-input run help \
-	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint check check-raw-alloc check-state-store check-radiant-casts docs intellisense analyze-binary \
+	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint check check-raw-alloc check-state-store check-radiant-casts check-radiant-ownership docs intellisense analyze-binary \
 	    build-debug build-release clean-all distclean \
 	    tree-sitter-libs tree-sitter-core-libs \
 	    generate-premake clean-premake build-test build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline \
@@ -1980,12 +1980,12 @@ check-int-cast:
 		echo "✅ No unmarked (int) casts in Radiant layout files"; \
 	fi
 
-# Check for C-style pointer casts to View*/Dom* in migrated Radiant layout files.
+# Check for unsafe pointer casts in migrated Radiant files.
 # Downcasts should go through lib/tagged.hpp helpers such as lam::view_as_*(),
 # lam::view_require_*(), lam::dom_as<>(), or lam::dom_require<>().
 check-radiant-casts:
-	@echo "Checking migrated Radiant layout files for C-style View*/Dom* casts..."
-	@VIOLATIONS=$$(grep -En '\([[:space:]]*(View|Dom)[A-Za-z0-9_]*[[:space:]]*\*[[:space:]]*\)[[:space:]]*([A-Za-z_&*]|\()' \
+	@echo "Checking migrated Radiant files for unsafe View*/Dom* casts..."
+	@VIOLATIONS=$$({ grep -En '\([[:space:]]*(View|Dom)[A-Za-z0-9_]*[[:space:]]*\*[[:space:]]*\)[[:space:]]*([A-Za-z_&*]|\()' \
 		radiant/layout_alignment.cpp radiant/layout_inline.cpp \
 		radiant/layout_grid.cpp radiant/layout_grid_multipass.cpp \
 		radiant/layout_list.cpp radiant/layout_positioned.cpp \
@@ -1993,19 +1993,65 @@ check-radiant-casts:
 		radiant/layout_flex_measurement.cpp radiant/layout_flex_multipass.cpp \
 		radiant/layout_flex.cpp radiant/layout_block.cpp \
 		radiant/layout_table.cpp \
-		radiant/resolve_css_style.cpp \
+		radiant/resolve_css_style.cpp; \
+		grep -En 'static_cast<[[:space:]]*View(Block|Text|Span|Element|Table|TableRow|TableCell|TableRowGroup|Marker)[[:space:]]*\*[[:space:]]*>' \
+		radiant/layout_alignment.cpp radiant/layout_inline.cpp \
+		radiant/layout_grid.cpp radiant/layout_grid_multipass.cpp \
+		radiant/layout_list.cpp radiant/layout_positioned.cpp \
+		radiant/layout_text.cpp radiant/layout_multicol.cpp \
+		radiant/layout_flex_measurement.cpp radiant/layout_flex_multipass.cpp \
+		radiant/layout_flex.cpp radiant/layout_block.cpp \
+		radiant/layout_table.cpp \
+		radiant/resolve_css_style.cpp; \
+		grep -En '\([[:space:]]*(View(Block|Text|Span|Element|Table|TableRow|TableCell|TableRowGroup|Marker)|Dom(Node|Element|Text|Comment))[[:space:]]*\*[[:space:]]*\)[[:space:]]*([A-Za-z_&*]|\()' \
+		radiant/render.cpp radiant/render_form.cpp radiant/render_img.cpp \
+		radiant/render_pdf.cpp radiant/render_svg.cpp radiant/render_svg_inline.cpp \
+		radiant/render_walk.cpp radiant/event.cpp radiant/event_sim.cpp \
+		radiant/window.cpp radiant/webview_manager.cpp \
+		radiant/webdriver/webdriver_actions.cpp radiant/webdriver/webdriver_locator.cpp \
+		radiant/webdriver/webdriver_server.cpp; \
+		grep -En 'static_cast<[[:space:]]*(View(Block|Text|Span|Element|Table|TableRow|TableCell|TableRowGroup|Marker)|Dom(Element|Text|Comment))[[:space:]]*\*[[:space:]]*>' \
+		radiant/render.cpp radiant/render_form.cpp radiant/render_img.cpp \
+		radiant/render_pdf.cpp radiant/render_svg.cpp radiant/render_svg_inline.cpp \
+		radiant/render_walk.cpp radiant/event.cpp radiant/event_sim.cpp \
+		radiant/window.cpp radiant/webview_manager.cpp \
+		radiant/webdriver/webdriver_actions.cpp radiant/webdriver/webdriver_locator.cpp \
+		radiant/webdriver/webdriver_server.cpp; } \
 		| grep -v 'RADIANT_CAST_OK' \
 		|| true); \
 	if [ -n "$$VIOLATIONS" ]; then \
 		echo ""; \
-		echo "❌ Found C-style View*/Dom* casts in migrated Radiant files:"; \
+		echo "❌ Found unsafe View*/Dom* casts in migrated Radiant files:"; \
 		echo "$$VIOLATIONS"; \
 		echo ""; \
 		VCOUNT=$$(echo "$$VIOLATIONS" | wc -l | tr -d ' '); \
 		echo "Total: $$VCOUNT cast(s)"; \
 		exit 1; \
 	else \
-		echo "✅ No C-style View*/Dom* casts in migrated Radiant files"; \
+		echo "✅ No unsafe View*/Dom* casts in migrated Radiant files"; \
+	fi
+
+# Check retained Radiant fields are written through ownership helpers.
+# This keeps lifetime-sensitive pointers grepable and blocks accidental
+# pool/arena/long-lived fields from retaining layout-session allocations.
+check-radiant-ownership:
+	@echo "Checking retained Radiant field assignments..."
+	@VIOLATIONS=$$(grep -REn -- '->(tag_name|class_names|family|image|text_content|source_path|source_data)[[:space:]]*=' \
+		radiant/*.cpp radiant/*.hpp lambda/input/css/dom_element.cpp lambda/input/css/dom_element.hpp \
+		| grep -v 'radiant/retained_fields.hpp' \
+		| grep -v 'lambda/input/css/dom_element.hpp:.*PersistentFieldRef' \
+		| grep -v 'lambda/input/css/dom_element.cpp:.*comment_node->tag_name' \
+		| grep -v 'radiant/render_svg_inline.cpp:.*source_path' \
+		| grep -v 'radiant/rdt_vector_tvg.cpp:.*source_path' \
+		|| true); \
+	if [ -n "$$VIOLATIONS" ]; then \
+		echo ""; \
+		echo "❌ Found direct writes to retained Radiant fields:"; \
+		echo "$$VIOLATIONS"; \
+		echo ""; \
+		exit 1; \
+	else \
+		echo "✅ Retained Radiant fields use ownership helpers"; \
 	fi
 
 # Clang-tidy static analysis

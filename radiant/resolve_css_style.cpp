@@ -3147,7 +3147,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                     span->font = alloc_font_prop(lycon);
                 }
                 // Copy font-family from parent's computed font
-                span->font->family = ancestor->font->family;
+                radiant_retain_font_family(span->font, lam::PoolPtr<char>(ancestor->font->family));
                 continue;  // Move to next property
             }
 
@@ -3606,7 +3606,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     // CSS 2.1 §15.8: System font keywords set all font sub-properties.
                     // Map to platform system font. On macOS/Linux, system UI fonts
                     // typically resolve to a sans-serif family.
-                    span->font->family = (char*)"Arial";
+                    radiant_retain_font_family(span->font, lam::GcPtr<char>((char*)"Arial"));
                     span->font->font_size = 13.333f;  // typical system font size (browser default)
                     span->font->font_size_from_medium = false;
                     span->font->font_weight = CSS_VALUE_NORMAL;
@@ -3823,14 +3823,15 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 if (family_value) {
                     log_debug("[CSS] Font shorthand: applying font-family, value type=%d", family_value->type);
                     if (family_value->type == CSS_VALUE_TYPE_STRING) {
-                        span->font->family = (char*)family_value->data.string;
+                        radiant_retain_font_family(span->font, lam::PoolPtr<char>((char*)family_value->data.string));
                         log_debug("[CSS] Font shorthand: set font-family from STRING = '%s'", span->font->family);
                     } else if (family_value->type == CSS_VALUE_TYPE_KEYWORD) {
                         const CssEnumInfo* info = css_enum_info(family_value->data.keyword);
-                        span->font->family = info ? (char*)info->name : nullptr;
+                        if (info) radiant_retain_font_family(span->font, lam::PoolPtr<char>((char*)info->name));
+                        else radiant_clear_font_family(span->font);
                         log_debug("[CSS] Font shorthand: set font-family from KEYWORD = '%s'", span->font->family);
                     } else if (family_value->type == CSS_VALUE_TYPE_CUSTOM && family_value->data.custom_property.name) {
-                        span->font->family = (char*)family_value->data.custom_property.name;
+                        radiant_retain_font_family(span->font, lam::PoolPtr<char>((char*)family_value->data.custom_property.name));
                         log_debug("[CSS] Font shorthand: set font-family from CUSTOM = '%s'", span->font->family);
                     }
 
@@ -4062,18 +4063,19 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
             if (value->type == CSS_VALUE_TYPE_STRING) {
                 // Font family name as string (quotes already stripped during parsing)
-                span->font->family = (char*)value->data.string;
+                radiant_retain_font_family(span->font, lam::PoolPtr<char>((char*)value->data.string));
                 log_debug("[CSS] Set font-family from STRING: '%s'", span->font->family);
             }
             else if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
                 // Custom identifier font family (e.g., "ahem" without quotes)
-                span->font->family = (char*)value->data.custom_property.name;
+                radiant_retain_font_family(span->font, lam::PoolPtr<char>((char*)value->data.custom_property.name));
                 log_debug("[CSS] Set font-family from CUSTOM: '%s'", span->font->family);
             }
             else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // Keyword font family - check if generic or specific
                 const CssEnumInfo* info = css_enum_info(value->data.keyword);
-                span->font->family = info ? (char*)info->name : NULL;
+                if (info) radiant_retain_font_family(span->font, lam::PoolPtr<char>((char*)info->name));
+                else radiant_clear_font_family(span->font);
                 log_debug("[CSS] Set font-family from KEYWORD: '%s'", span->font->family);
             }
             else if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
@@ -4100,7 +4102,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     if (family) {
                         // Check if this font is available
                         if (is_font_available(family)) {
-                            span->font->family = (char*)family;
+                            radiant_retain_font_family(span->font, lam::PoolPtr<char>((char*)family));
                             log_debug("[CSS] Font family from list[%zu]: %s (available)", i, family);
                             break;
                         } else {
@@ -4113,12 +4115,13 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     CssValue* last = value->data.list.values[value->data.list.count - 1];
                     if (last) {
                         if (last->type == CSS_VALUE_TYPE_STRING) {
-                            span->font->family = (char*)last->data.string;
+                            radiant_retain_font_family(span->font, lam::PoolPtr<char>((char*)last->data.string));
                         } else if (last->type == CSS_VALUE_TYPE_KEYWORD) {
                             const CssEnumInfo* info = css_enum_info(last->data.keyword);
-                            span->font->family = info ? (char*)info->name : NULL;
+                            if (info) radiant_retain_font_family(span->font, lam::PoolPtr<char>((char*)info->name));
+                            else radiant_clear_font_family(span->font);
                         } else if (last->type == CSS_VALUE_TYPE_CUSTOM) {
-                            span->font->family = (char*)last->data.custom_property.name;
+                            radiant_retain_font_family(span->font, lam::PoolPtr<char>((char*)last->data.custom_property.name));
                         }
                         log_debug("[CSS] Using last font in list as fallback: %s", span->font->family);
                     }
