@@ -2363,6 +2363,17 @@ capture-layout:
 test-layout:
 	@echo "🎨 Running Lambda CSS Layout Engine Tests"
 	@echo "=========================================="
+	@STALE_FILE=""; \
+	if [ ! -x "$(LAMBDA_EXE)" ]; then \
+		echo "🔧 $(LAMBDA_EXE) missing; building before layout tests"; \
+		$(MAKE) build; \
+	else \
+		STALE_FILE=$$(find radiant lambda lib -type f \( -name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.cxx' -o -name '*.h' -o -name '*.hpp' -o -name '*.m' -o -name '*.mm' \) -newer "$(LAMBDA_EXE)" -print -quit 2>/dev/null); \
+		if [ -n "$$STALE_FILE" ]; then \
+			echo "🔧 $(LAMBDA_EXE) is older than $$STALE_FILE; rebuilding before layout tests"; \
+			$(MAKE) build; \
+		fi; \
+	fi
 	@if [ -f "test/layout/test_radiant_layout.js" ]; then \
 		TEST_VAR="$(or $(test),$(TEST))"; \
 		PATTERN_VAR="$(or $(pattern),$(PATTERN))"; \
