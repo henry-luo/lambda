@@ -11,6 +11,7 @@ extern "C" Item js_to_property_key(Item key);
 extern "C" Item js_reflect_own_keys(Item obj);
 extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name);
 extern "C" Item js_has_own_property(Item obj, Item key);
+extern "C" Item js_property_set(Item object, Item key, Item value);
 extern void js_double_to_string(double d, char* out, int out_size);
 Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_found);
 
@@ -23,9 +24,22 @@ Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_fou
 // Tracks the .prototype of the generator function being called.
 // Set by js_call_function before invoking a generator function, read by js_generator_create.
 static Item js_generator_callee_proto = {0};
+static Item js_current_private_home_class = {0};
+
+static const char* JS_HOME_CLASS_KEY = "__home_class__";
+static const int JS_HOME_CLASS_KEY_LEN = 14;
 
 static const char* JS_BOUND_TARGET_KEY = "__bound_target__";
 static const int JS_BOUND_TARGET_KEY_LEN = 16;
+
+static Item js_function_home_class(Item func_item) {
+    if (get_type_id(func_item) != LMD_TYPE_FUNC) return ItemNull;
+    JsFunction* fn = (JsFunction*)func_item.function;
+    if (!fn || fn->properties_map.item == 0 || get_type_id(fn->properties_map) != LMD_TYPE_MAP) return ItemNull;
+    bool found = false;
+    Item home = js_map_get_fast_ext(fn->properties_map.map, JS_HOME_CLASS_KEY, JS_HOME_CLASS_KEY_LEN, &found);
+    return found ? home : ItemNull;
+}
 
 extern "C" Item js_bound_function_target(Item func_item) {
     if (get_type_id(func_item) != LMD_TYPE_FUNC) return ItemNull;
@@ -46,6 +60,27 @@ static Item js_bound_function_ultimate_target(Item func_item) {
         current = target;
     }
     return current;
+}
+
+extern "C" void js_set_method_home_from_target(Item target, Item fn_item) {
+    if (get_type_id(fn_item) != LMD_TYPE_FUNC || get_type_id(target) != LMD_TYPE_MAP) return;
+    Item home = ItemNull;
+    bool class_proto_found = false;
+    Item class_proto = js_map_get_fast(target.map, "__instance_proto__", 18, &class_proto_found);
+    if (class_proto_found && class_proto.item != ItemNull.item) {
+        home = target;
+    } else {
+        bool ctor_found = false;
+        Item ctor = js_map_get_fast(target.map, "constructor", 11, &ctor_found);
+        if (ctor_found && get_type_id(ctor) == LMD_TYPE_MAP) {
+            bool ctor_proto_found = false;
+            Item ctor_proto = js_map_get_fast(ctor.map, "__instance_proto__", 18, &ctor_proto_found);
+            if (ctor_proto_found && ctor_proto.item != ItemNull.item) home = ctor;
+        }
+    }
+    if (home.item == ItemNull.item || home.item == 0) return;
+    Item home_key = (Item){.item = s2it(heap_create_name(JS_HOME_CLASS_KEY, JS_HOME_CLASS_KEY_LEN))};
+    js_property_set(fn_item, home_key, home);
 }
 
 static bool js_is_function_prototype_map(Item item) {
@@ -1040,6 +1075,47 @@ static Item js_typed_array_create_with_constructor(Item constructor, int length)
     return result;
 }
 
+extern "C" void js_init_class_instance_fields(Item callee, Item object) {
+    if (get_type_id(callee) != LMD_TYPE_MAP) return;
+    TypeId object_type = get_type_id(object);
+    if (object_type != LMD_TYPE_MAP && object_type != LMD_TYPE_ARRAY && object_type != LMD_TYPE_FUNC &&
+        object_type != LMD_TYPE_ELEMENT && object_type != LMD_TYPE_OBJECT && object_type != LMD_TYPE_VMAP) return;
+
+    bool field_count_found = false;
+    Item field_count_item = js_map_get_fast(callee.map, "__if_count__", 12, &field_count_found);
+    if (!field_count_found || get_type_id(field_count_item) != LMD_TYPE_INT) return;
+    int64_t field_count = it2i(field_count_item);
+    if (field_count > 32) field_count = 32;
+    bool saved_private_init = js_private_field_initializing;
+    js_private_field_initializing = true;
+    for (int64_t field_index = 0; field_index < field_count; field_index++) {
+        char key_slot[32];
+        int key_slot_len = snprintf(key_slot, sizeof(key_slot), "__if_key_%lld", (long long)field_index);
+        bool key_found = false;
+        Item field_key = js_map_get_fast(callee.map, key_slot, key_slot_len, &key_found);
+        if (!key_found || get_type_id(field_key) != LMD_TYPE_STRING) continue;
+
+        char val_slot[32];
+        int val_slot_len = snprintf(val_slot, sizeof(val_slot), "__if_val_%lld", (long long)field_index);
+        bool val_found = false;
+        Item field_val = js_map_get_fast(callee.map, val_slot, val_slot_len, &val_found);
+        if (!val_found) field_val = make_js_undefined();
+        js_property_set(object, field_key, field_val);
+        String* field_key_str = it2s(field_key);
+        if (field_key_str && field_key_str->len > 10 && strncmp(field_key_str->chars, "__private_", 10) == 0) {
+            char brand_key[512];
+            int brand_key_len = snprintf(brand_key, sizeof(brand_key), "__brand_%.*s",
+                (int)field_key_str->len, field_key_str->chars);
+            if (brand_key_len > 0) {
+                if (brand_key_len >= (int)sizeof(brand_key)) brand_key_len = (int)sizeof(brand_key) - 1;
+                Item brand_key_item = (Item){.item = s2it(heap_create_name(brand_key, brand_key_len))};
+                js_property_set(object, brand_key_item, callee);
+            }
+        }
+    }
+    js_private_field_initializing = saved_private_init;
+}
+
 extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
     // Proxy [[Construct]] trap
     if (js_is_proxy(callee)) {
@@ -1417,31 +1493,7 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
         if (instance_proto.item != ItemNull.item && get_type_id(instance_proto) == LMD_TYPE_MAP) {
             js_set_prototype(obj, instance_proto);
         }
-        {
-            bool field_count_found = false;
-            Item field_count_item = js_map_get_fast(callee.map, "__if_count__", 12, &field_count_found);
-            if (field_count_found && get_type_id(field_count_item) == LMD_TYPE_INT) {
-                int64_t field_count = it2i(field_count_item);
-                if (field_count > 32) field_count = 32;
-                bool saved_private_init = js_private_field_initializing;
-                js_private_field_initializing = true;
-                for (int64_t field_index = 0; field_index < field_count; field_index++) {
-                    char key_slot[32];
-                    int key_slot_len = snprintf(key_slot, sizeof(key_slot), "__if_key_%lld", (long long)field_index);
-                    bool key_found = false;
-                    Item field_key = js_map_get_fast(callee.map, key_slot, key_slot_len, &key_found);
-                    if (!key_found || get_type_id(field_key) != LMD_TYPE_STRING) continue;
-
-                    char val_slot[32];
-                    int val_slot_len = snprintf(val_slot, sizeof(val_slot), "__if_val_%lld", (long long)field_index);
-                    bool val_found = false;
-                    Item field_val = js_map_get_fast(callee.map, val_slot, val_slot_len, &val_found);
-                    if (!val_found) field_val = make_js_undefined();
-                    js_property_set(obj, field_key, field_val);
-                }
-                js_private_field_initializing = saved_private_init;
-            }
-        }
+        js_init_class_instance_fields(callee, obj);
         // Call the constructor (__ctor__ property on the class object)
         if (ctor.item != ItemNull.item && get_type_id(ctor) == LMD_TYPE_FUNC) {
             // Set pending new.target for the constructor call
@@ -1452,6 +1504,7 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
             TypeId rt = get_type_id(result);
             if (rt == LMD_TYPE_MAP || rt == LMD_TYPE_ARRAY || rt == LMD_TYPE_ELEMENT ||
                 rt == LMD_TYPE_FUNC || rt == LMD_TYPE_OBJECT || rt == LMD_TYPE_VMAP) {
+                js_init_class_instance_fields(callee, result);
                 return result;
             }
         }
@@ -2423,6 +2476,73 @@ static bool js_is_restricted_function_property_name(String* str_key) {
          (str_key->len == 9 && strncmp(str_key->chars, "arguments", 9) == 0));
 }
 
+static bool js_private_key_is_unscoped(String* key) {
+    if (!key || key->len <= 10 || strncmp(key->chars, "__private_", 10) != 0) return false;
+    char first = key->chars[10];
+    return first < '0' || first > '9';
+}
+
+static bool js_private_scoped_key_matches_suffix(StrView* candidate, const char* suffix, int suffix_len) {
+    if (!candidate || !candidate->str || !suffix || suffix_len <= 0) return false;
+    const char* chars = candidate->str;
+    int len = (int)candidate->length;
+    if (len <= 11 + suffix_len || strncmp(chars, "__private_", 10) != 0) return false;
+    int pos = 10;
+    if (chars[pos] < '0' || chars[pos] > '9') return false;
+    while (pos < len && chars[pos] >= '0' && chars[pos] <= '9') pos++;
+    if (pos >= len || chars[pos] != '_') return false;
+    pos++;
+    return len - pos == suffix_len && memcmp(chars + pos, suffix, suffix_len) == 0;
+}
+
+extern "C" Item js_get_prototype(Item object);
+
+static Item js_private_find_scoped_key_on_map(Map* map, const char* suffix, int suffix_len) {
+    if (!map || !map->type) return ItemNull;
+    TypeMap* map_type = (TypeMap*)map->type;
+    for (ShapeEntry* entry = map_type->shape; entry; entry = entry->next) {
+        if (!js_private_scoped_key_matches_suffix(entry->name, suffix, suffix_len)) continue;
+        return (Item){.item = s2it(heap_create_name(entry->name->str, (int)entry->name->length))};
+    }
+    return ItemNull;
+}
+
+static Item js_private_find_scoped_key_on_object_chain(Item object, const char* suffix, int suffix_len) {
+    Item current = object;
+    int depth = 0;
+    while (get_type_id(current) == LMD_TYPE_MAP && depth < 32) {
+        Item key = js_private_find_scoped_key_on_map(current.map, suffix, suffix_len);
+        if (key.item != ItemNull.item) return key;
+        current = js_get_prototype(current);
+        depth++;
+    }
+    return ItemNull;
+}
+
+static bool js_private_brand_mismatch(Item object, String* private_key) {
+    if (js_current_private_home_class.item == 0 || js_current_private_home_class.item == ItemNull.item ||
+        !private_key || get_type_id(object) != LMD_TYPE_MAP) return false;
+    if (private_key->len <= 10 || strncmp(private_key->chars, "__private_", 10) != 0) return false;
+    char brand_key[512];
+    int brand_key_len = snprintf(brand_key, sizeof(brand_key), "__brand_%.*s",
+        (int)private_key->len, private_key->chars);
+    if (brand_key_len <= 0) return false;
+    if (brand_key_len >= (int)sizeof(brand_key)) brand_key_len = (int)sizeof(brand_key) - 1;
+    bool found = false;
+    Item brand = js_map_get_fast(object.map, brand_key, brand_key_len, &found);
+    return found && brand.item != js_current_private_home_class.item;
+}
+
+static Item js_eval_initializer_resolve_private_key(Item object, String* key) {
+    if ((!js_private_field_initializing && !js_eval_initializer_context) ||
+        !js_private_key_is_unscoped(key) || get_type_id(object) != LMD_TYPE_MAP) {
+        return ItemNull;
+    }
+    const char* suffix = key->chars + 10;
+    int suffix_len = (int)key->len - 10;
+    return js_private_find_scoped_key_on_object_chain(object, suffix, suffix_len);
+}
+
 extern "C" Item js_property_get(Item object, Item key) {
     TypeId type = get_type_id(object);
     bool proxy_key = false;
@@ -2497,7 +2617,19 @@ extern "C" Item js_property_get(Item object, Item key) {
             Item ord_val = ItemNull;
             Item recv = js_proxy_receiver;
             JsOwnGetStatus st = js_ordinary_get_own(object, key, recv, &ord_val);
-            if (st == JS_OWN_READY) return ord_val;
+            if (st == JS_OWN_READY) {
+                if (get_type_id(key) == LMD_TYPE_STRING) {
+                    String* private_key = it2s(key);
+                    if (private_key && private_key->len > 10 && strncmp(private_key->chars, "__private_", 10) == 0 &&
+                        js_private_brand_mismatch(object, private_key)) {
+                        char msg[256];
+                        snprintf(msg, sizeof(msg), "Cannot read private member #%.*s from an object whose class did not declare it",
+                            (int)(private_key->len - 10), private_key->chars + 10);
+                        return js_throw_type_error(msg);
+                    }
+                }
+                return ord_val;
+            }
             if (st == JS_OWN_DELETED) {
                 own_found = true;
                 own_was_deleted_sentinel = true;
@@ -2694,6 +2826,10 @@ extern "C" Item js_property_get(Item object, Item key) {
         if (get_type_id(key) == LMD_TYPE_STRING) {
             String* pk = it2s(key);
             if (pk && pk->len > 10 && strncmp(pk->chars, "__private_", 10) == 0) {
+                Item resolved_private_key = js_eval_initializer_resolve_private_key(object, pk);
+                if (resolved_private_key.item != ItemNull.item) {
+                    return js_property_get(object, resolved_private_key);
+                }
                 char msg[256];
                 snprintf(msg, sizeof(msg), "Cannot read private member #%.*s from an object whose class did not declare it",
                          (int)(pk->len - 10), pk->chars + 10);
@@ -2940,6 +3076,10 @@ extern "C" Item js_property_get(Item object, Item key) {
         if (get_type_id(key) == LMD_TYPE_STRING) {
             String* str_key = it2s(key);
             bool deleted_length = false;
+            if ((fn->flags & JS_FUNC_FLAG_STRICT) && js_is_restricted_function_property_name(str_key)) {
+                js_throw_type_error("'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them");
+                return make_js_undefined();
+            }
             // v23: Check properties_map FIRST for overridden/deleted .name/.length/.prototype
             // This enables Object.defineProperty and delete to work correctly on function
             // virtual properties. properties_map takes priority over struct-based values.
@@ -3759,6 +3899,11 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
     TypeId type = get_type_id(object);
     if (object.item == ITEM_NULL || object.item == ITEM_JS_UNDEFINED) {
         return js_throw_type_error("Cannot set property on null or undefined");
+    }
+    if (type == LMD_TYPE_MAP && get_type_id(key) == LMD_TYPE_STRING) {
+        String* private_key = it2s(key);
+        Item resolved_private_key = js_eval_initializer_resolve_private_key(object, private_key);
+        if (resolved_private_key.item != ItemNull.item) key = resolved_private_key;
     }
     if (js_ta_proto_chain_set(object, key, value)) return value;
 
@@ -9120,10 +9265,10 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     }
 }
 
-static void js_super_this_binding_push(void) {
+static void js_super_this_binding_push(Item initial_this) {
     if (js_super_this_bound_depth >= 128) return;
     js_super_this_bound_stack[js_super_this_bound_depth] = false;
-    js_super_this_value_stack[js_super_this_bound_depth] = (Item){0};
+    js_super_this_value_stack[js_super_this_bound_depth] = initial_this;
     js_super_this_bound_depth++;
 }
 
@@ -9159,6 +9304,11 @@ extern "C" Item js_super_bind_this(Item this_val, Item construct_result) {
             js_throw_reference_error(msg);
             return make_js_undefined();
         }
+        if (!js_is_object_constructor_result(bound_this) &&
+            (bound_this.item == 0 || bound_this.item == ITEM_JS_UNDEFINED || bound_this.item == ITEM_NULL) &&
+            js_is_object_constructor_result(js_super_this_value_stack[idx])) {
+            bound_this = js_super_this_value_stack[idx];
+        }
         js_super_this_bound_stack[idx] = true;
         js_super_this_value_stack[idx] = bound_this;
     }
@@ -9167,6 +9317,11 @@ extern "C" Item js_super_bind_this(Item this_val, Item construct_result) {
 }
 
 extern "C" Item js_get_super_constructor_from_receiver(Item receiver, Item fallback_ctor) {
+    TypeId receiver_type = get_type_id(receiver);
+    if (receiver.item == 0 || receiver.item == ITEM_JS_UNDEFINED || receiver_type == LMD_TYPE_NULL ||
+        receiver_type == LMD_TYPE_UNDEFINED) {
+        return fallback_ctor;
+    }
     Item proto = js_get_prototype(receiver);
     if (proto.item == ItemNull.item) proto = js_get_prototype_of(receiver);
     if (get_type_id(proto) != LMD_TYPE_MAP) return fallback_ctor;
@@ -9568,8 +9723,15 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
             js_generator_callee_proto = js_property_get(func_item, proto_key);
         }
         bool derived_ctor_call = (fn->flags & JS_FUNC_FLAG_DERIVED_CTOR) != 0;
-        if (derived_ctor_call) js_super_this_binding_push();
+        if (derived_ctor_call) js_super_this_binding_push(effective_this);
+        Item prev_private_home_class = js_current_private_home_class;
+        Item method_home_class = js_function_home_class(func_item);
+        if (method_home_class.item != ItemNull.item && method_home_class.item != 0 &&
+            get_type_id(method_home_class) != LMD_TYPE_UNDEFINED) {
+            js_current_private_home_class = method_home_class;
+        }
         Item result = js_invoke_fn(fn, merged_args, total_argc);
+        js_current_private_home_class = prev_private_home_class;
         if (derived_ctor_call) result = js_super_this_binding_finish(result);
         js_generator_callee_proto = saved_gen_callee_proto_b;
         js_with_restore_depth(saved_with_depth);
@@ -9625,8 +9787,15 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         js_generator_callee_proto = js_property_get(func_item, proto_key);
     }
     bool derived_ctor_call = (fn->flags & JS_FUNC_FLAG_DERIVED_CTOR) != 0;
-    if (derived_ctor_call) js_super_this_binding_push();
+    if (derived_ctor_call) js_super_this_binding_push(this_val);
+    Item prev_private_home_class = js_current_private_home_class;
+    Item method_home_class = js_function_home_class(func_item);
+    if (method_home_class.item != ItemNull.item && method_home_class.item != 0 &&
+        get_type_id(method_home_class) != LMD_TYPE_UNDEFINED) {
+        js_current_private_home_class = method_home_class;
+    }
     Item result = js_invoke_fn(fn, args, arg_count);
+    js_current_private_home_class = prev_private_home_class;
     if (derived_ctor_call) result = js_super_this_binding_finish(result);
     js_generator_callee_proto = saved_gen_callee_proto;
     js_with_restore_depth(saved_with_depth);
