@@ -676,6 +676,7 @@ static uint32_t glyph_bitmap_sample_pixel(const GlyphBitmap* bitmap, int src_y, 
 
 // draw a glyph bitmap into the doc surface
 void draw_glyph(RenderContext* rdcon, GlyphBitmap *bitmap, int x, int y) {
+    if (rdcon->color.a == 0) return;
     if (rdcon->dl) {
         bool is_color = (bitmap->pixel_mode == GLYPH_PIXEL_BGRA);
         dl_draw_glyph(rdcon->dl, bitmap, x, y, rdcon->color, is_color, &rdcon->block.clip,
@@ -730,6 +731,7 @@ void draw_glyph(RenderContext* rdcon, GlyphBitmap *bitmap, int x, int y) {
                 uint8_t* p = (uint8_t*)(row_pixels + (x + j) * 4);
 
                 // important to use 32bit int for computation below
+                intensity = (intensity * rdcon->color.a + 127) / 255;
                 uint32_t v = 255 - intensity;
                 // can further optimize if background is a fixed color
                 if (rdcon->color.c == 0xFF000000) { // black text color (ABGR: alpha=FF, b=00, g=00, r=00)
@@ -2691,7 +2693,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
     View* view = block->first_child;
     auto rc_start = std::chrono::high_resolution_clock::now();
     if (view) {
-        if (block->in_line && block->in_line->color.c) {
+        if (block->in_line && block->in_line->has_color) {
             log_debug("[RENDER COLOR] element=%s setting color: #%02x%02x%02x (was #%02x%02x%02x) color.c=0x%08x",
                       block->node_name(),
                       block->in_line->color.r, block->in_line->color.g, block->in_line->color.b,
@@ -3372,7 +3374,7 @@ void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
         if (view_span->font) {
             setup_font(rdcon->ui_context, &rdcon->font, view_span->font);
         }
-        if (view_span->in_line && view_span->in_line->color.c) {
+        if (view_span->in_line && view_span->in_line->has_color) {
             log_debug("[RENDER COLOR INLINE] element=%s setting color: #%02x%02x%02x (was #%02x%02x%02x) color.c=0x%08x",
                       view_span->node_name(),
                       view_span->in_line->color.r, view_span->in_line->color.g, view_span->in_line->color.b,

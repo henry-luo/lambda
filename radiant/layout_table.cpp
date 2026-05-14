@@ -2901,6 +2901,7 @@ static DomElement* create_anonymous_table_element(LayoutContext* lycon, DomEleme
         if (anon->in_line) {
             // Only copy inheritable properties
             anon->in_line->color = parent->in_line->color;  // color is inherited
+            anon->in_line->has_color = parent->in_line->has_color;
             anon->in_line->cursor = CSS_VALUE_AUTO;  // cursor inherits, use auto as default
             anon->in_line->visibility = 0;  // visibility inherits, 0 = visible
             anon->in_line->opacity = 1.0f;  // opacity is not inherited, use initial
@@ -9147,6 +9148,7 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
                     table_wrapper->in_line = (InlineProp*)pool_calloc(pool, sizeof(InlineProp));
                     if (table_wrapper->in_line) {
                         table_wrapper->in_line->color = inherit_inline->color;
+                        table_wrapper->in_line->has_color = inherit_inline->has_color;
                         table_wrapper->in_line->visibility = inherit_inline->visibility;
                         table_wrapper->in_line->opacity = 1.0f;
                     }
@@ -9192,6 +9194,7 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
                     row_wrapper->in_line = (InlineProp*)pool_calloc(pool, sizeof(InlineProp));
                     if (row_wrapper->in_line) {
                         row_wrapper->in_line->color = table_wrapper->in_line->color;
+                        row_wrapper->in_line->has_color = table_wrapper->in_line->has_color;
                         row_wrapper->in_line->visibility = table_wrapper->in_line->visibility;
                         row_wrapper->in_line->opacity = 1.0f;
                     }

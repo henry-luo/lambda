@@ -8,7 +8,6 @@
 //   - the stroked rectangle keeps the line-width set by `w`
 
 import resolve: lambda.package.pdf.resolve
-import stream:  lambda.package.pdf.stream
 import interp:  lambda.package.pdf.interp
 import coords:  lambda.package.pdf.coords
 
@@ -17,7 +16,7 @@ pn main() {
     let page = resolve.page_at(doc, 0)
     let rect = coords.media_box_rect(page)
     let bytes = resolve.page_content_bytes(doc, page)
-    let ops = stream.parse_content_stream(bytes)
+    let ops = pdf_parse_content_stream(bytes)
     let r = interp.render_page(doc, page, ops, rect.h)
 
     var path_xml = []

@@ -4361,7 +4361,7 @@ void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
     Color initial_fill_color = {};
     Color* current_color_ptr = nullptr;
     Color* fill_color_ptr = nullptr;
-    if (view->in_line && view->in_line->color.c != 0) {
+    if (view->in_line && view->in_line->has_color) {
         initial_current_color = view->in_line->color;
         current_color_ptr = &initial_current_color;
     }

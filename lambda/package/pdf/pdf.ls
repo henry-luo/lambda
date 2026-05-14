@@ -5,7 +5,7 @@
 // has the correct viewBox + page-number label.
 //
 // Phase 2: wire the content-stream pipeline:
-//   raw bytes → stream.parse_content_stream → interp.render_page → SVG
+//   raw bytes → pdf_parse_content_stream → interp.render_page → SVG
 // to render real text from each page's content stream.
 //
 //   input(path, 'pdf')           → Map { version, objects, pages, … }
@@ -17,7 +17,6 @@ import coords:  .coords
 import svg:     .svg
 import html:    .html
 import resolve: .resolve
-import stream:  .stream
 import interp:  .interp
 import font:    .font
 
@@ -73,7 +72,7 @@ fn _content_elements(pdf, page, page_h) {
     }
     else {
         let fonts = interp.resolve_page_fonts(pdf, page)
-        let ops = stream.parse_content_stream(raw_bytes)
+        let ops = pdf_parse_content_stream(raw_bytes)
         interp.render_page_with_fonts(pdf, page, ops, page_h, fonts)
     }
 }
@@ -86,7 +85,7 @@ fn _resolve_bg(opts) {
     else { "white" }
 }
 
-fn render_page(pdf, page, page_index, opts) {
+fn _render_page_parts(pdf, page, page_index, opts) {
     let rect = coords.media_box_rect(page)
     let view_box = coords.view_box_attr(page)
     let bg = _resolve_bg(opts)
@@ -102,7 +101,18 @@ fn render_page(pdf, page, page_index, opts) {
                     for (t in texts) t,
                     for (l in label_kids) l]
 
-    svg.svg_pdf_root(view_box, rect.w, rect.h, children, pdf)
+    { svg: svg.svg_pdf_root(view_box, rect.w, rect.h, children, pdf),
+      texts: texts,
+      rect: rect }
+}
+
+fn render_page(pdf, page, page_index, opts) {
+    _render_page_parts(pdf, page, page_index, opts).svg
+}
+
+fn render_page_div(pdf, page, page_index, opts) {
+    let parts = _render_page_parts(pdf, page, page_index, opts)
+    html.page_div_with_text_layer(parts.svg, parts.texts, page_index + 1)
 }
 
 fn render_missing(page_index: int) {
@@ -145,7 +155,7 @@ pub fn pdf_to_html(pdf, opts) {
     }
     else {
         let render_count = _render_page_count(n, opts)
-        let svgs = [for (i in 0 to (render_count - 1)) render_page(pdf, resolve.page_at(pdf, i), i, opts)]
+        let pages = [for (i in 0 to (render_count - 1)) render_page_div(pdf, resolve.page_at(pdf, i), i, opts)]
         // Inject @font-face rules for embedded fonts so the browser uses
         // the actual glyphs (not OS fallback). Done here — once per doc —
         // rather than per page so the rule appears once.
@@ -153,7 +163,7 @@ pub fn pdf_to_html(pdf, opts) {
         let base_css = _base_css(opts)
         let css = _build_css(faces, base_css)
         let opts2 = _opts_with_css(opts, css)
-        html.html_shell(svgs, opts2)
+        html.html_shell_pages(pages, opts2)
     }
 }
 

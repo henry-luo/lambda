@@ -779,6 +779,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         if (color_attr) {
             if (!span->in_line) { span->in_line = alloc_inline_prop(lycon); }
             span->in_line->color = parse_html_color(color_attr);
+            span->in_line->has_color = true;
             log_debug("HTM_TAG_FONT color: %s -> rgb(%d,%d,%d)", color_attr,
                       span->in_line->color.r, span->in_line->color.g, span->in_line->color.b);
         }
@@ -920,6 +921,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     case HTM_TAG_Q:
         // inline quotation - browser adds quotes via CSS content, we just style italic
         if (!span->font) { span->font = alloc_font_prop(lycon); }
+        span->in_line->has_color = true;
         span->font->font_style = CSS_VALUE_ITALIC;
         break;
     case HTM_TAG_ABBR:  case HTM_TAG_ACRONYM:

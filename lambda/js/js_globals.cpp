@@ -13712,6 +13712,17 @@ static int js_eval_immutable_binding_count = 0;
 static int js_eval_immutable_frame_stack[JS_EVAL_LOCAL_FRAME_MAX];
 static int js_eval_immutable_frame_depth = 0;
 
+#define JS_EVAL_PRIVATE_BIND_MAX 256
+typedef struct JsEvalPrivateBinding {
+    Item unscoped_key;
+    Item scoped_key;
+} JsEvalPrivateBinding;
+
+static JsEvalPrivateBinding js_eval_private_bindings[JS_EVAL_PRIVATE_BIND_MAX];
+static int js_eval_private_binding_count = 0;
+static int js_eval_private_frame_stack[JS_EVAL_LOCAL_FRAME_MAX];
+static int js_eval_private_frame_depth = 0;
+
 extern "C" void js_eval_env_push_frame(void) {
     if (js_eval_env_frame_depth >= JS_EVAL_ENV_FRAME_MAX) {
         log_error("js-eval-env: frame stack overflow");
@@ -13742,6 +13753,43 @@ extern "C" void js_eval_local_pop_frame(void) {
         int immutable_frame_start = js_eval_immutable_frame_stack[--js_eval_immutable_frame_depth];
         js_eval_immutable_binding_count = immutable_frame_start;
     }
+}
+
+extern "C" void js_eval_private_push_frame(void) {
+    if (js_eval_private_frame_depth >= JS_EVAL_LOCAL_FRAME_MAX) {
+        log_error("js-eval-private: frame stack overflow");
+        return;
+    }
+    js_eval_private_frame_stack[js_eval_private_frame_depth++] = js_eval_private_binding_count;
+}
+
+extern "C" void js_eval_private_pop_frame(void) {
+    if (js_eval_private_frame_depth <= 0) return;
+    int frame_start = js_eval_private_frame_stack[--js_eval_private_frame_depth];
+    js_eval_private_binding_count = frame_start;
+}
+
+extern "C" void js_eval_private_bind(Item unscoped_key, Item scoped_key) {
+    if (js_eval_private_frame_depth <= 0) return;
+    if (get_type_id(unscoped_key) != LMD_TYPE_STRING || get_type_id(scoped_key) != LMD_TYPE_STRING) return;
+    if (js_eval_private_binding_count >= JS_EVAL_PRIVATE_BIND_MAX) {
+        log_error("js-eval-private: binding stack overflow");
+        return;
+    }
+    JsEvalPrivateBinding* binding = &js_eval_private_bindings[js_eval_private_binding_count++];
+    binding->unscoped_key = unscoped_key;
+    binding->scoped_key = scoped_key;
+}
+
+extern "C" Item js_eval_private_resolve(Item unscoped_key) {
+    if (js_eval_private_frame_depth <= 0 || get_type_id(unscoped_key) != LMD_TYPE_STRING) return ItemNull;
+    int frame_start = js_eval_private_frame_stack[js_eval_private_frame_depth - 1];
+    for (int i = js_eval_private_binding_count - 1; i >= frame_start; i--) {
+        if (js_with_binding_key_same(js_eval_private_bindings[i].unscoped_key, unscoped_key)) {
+            return js_eval_private_bindings[i].scoped_key;
+        }
+    }
+    return ItemNull;
 }
 
 static int js_eval_local_find_binding(Item key) {

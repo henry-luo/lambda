@@ -427,7 +427,7 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
         Color text_color;
         if (is_placeholder) {
             text_color = make_color(117, 117, 117);
-        } else if (block->in_line) {
+        } else if (block->in_line && block->in_line->has_color) {
             text_color.r = block->in_line->color.r;
             text_color.g = block->in_line->color.g;
             text_color.b = block->in_line->color.b;
@@ -623,7 +623,7 @@ void render_button(RenderContext* rdcon, ViewBlock* block, FormControlProp* form
     // (child content rendering only works for <button>text</button> style elements)
     if (!block->first_child && form->value && *form->value && block->font) {
         Color text_color = make_color(0, 0, 0);
-        if (block->in_line) {
+        if (block->in_line && block->in_line->has_color) {
             text_color.r = block->in_line->color.r;
             text_color.g = block->in_line->color.g;
             text_color.b = block->in_line->color.b;
@@ -775,7 +775,7 @@ void render_select(RenderContext* rdcon, ViewBlock* block, FormControlProp* form
             Color text_color;
             if (disabled) {
                 text_color = make_color(109, 109, 109);
-            } else if (block->in_line) {
+            } else if (block->in_line && block->in_line->has_color) {
                 text_color.r = block->in_line->color.r;
                 text_color.g = block->in_line->color.g;
                 text_color.b = block->in_line->color.b;
@@ -1133,7 +1133,7 @@ void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
         Color text_color;
         if (is_placeholder) {
             text_color = make_color(117, 117, 117);
-        } else if (block->in_line) {
+        } else if (block->in_line && block->in_line->has_color) {
             text_color.r = block->in_line->color.r;
             text_color.g = block->in_line->color.g;
             text_color.b = block->in_line->color.b;

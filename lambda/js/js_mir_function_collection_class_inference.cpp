@@ -1,5 +1,105 @@
 #include "js_mir_internal.hpp"
 
+static bool jm_function_inside_class_syntax(JsFunctionNode* fn) {
+    if (!fn || ts_node_is_null(fn->base.node)) return false;
+    TSNode node = ts_node_parent(fn->base.node);
+    while (!ts_node_is_null(node)) {
+        const char* node_type = ts_node_type(node);
+        if (node_type &&
+            (strncmp(node_type, "class", 5) == 0 ||
+             strcmp(node_type, "class_body") == 0)) {
+            return true;
+        }
+        node = ts_node_parent(node);
+    }
+    return false;
+}
+
+static bool jm_node_has_direct_eval_call(JsAstNode* node) {
+    if (!node) return false;
+    switch (node->node_type) {
+    case JS_AST_NODE_CALL_EXPRESSION: {
+        JsCallNode* call = (JsCallNode*)node;
+        if (call->callee && call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
+            JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
+            if (id->name && id->name->len == 4 && strncmp(id->name->chars, "eval", 4) == 0) return true;
+        }
+        for (JsAstNode* arg = call->arguments; arg; arg = arg->next) {
+            if (jm_node_has_direct_eval_call(arg)) return true;
+        }
+        return false;
+    }
+    case JS_AST_NODE_FUNCTION_DECLARATION:
+    case JS_AST_NODE_FUNCTION_EXPRESSION:
+    case JS_AST_NODE_ARROW_FUNCTION:
+    case JS_AST_NODE_CLASS_DECLARATION:
+    case JS_AST_NODE_CLASS_EXPRESSION:
+        return false;
+    case JS_AST_NODE_BLOCK_STATEMENT: {
+        JsBlockNode* blk = (JsBlockNode*)node;
+        for (JsAstNode* stmt = blk->statements; stmt; stmt = stmt->next) {
+            if (jm_node_has_direct_eval_call(stmt)) return true;
+        }
+        return false;
+    }
+    case JS_AST_NODE_EXPRESSION_STATEMENT:
+        return jm_node_has_direct_eval_call(((JsExpressionStatementNode*)node)->expression);
+    case JS_AST_NODE_VARIABLE_DECLARATION: {
+        JsVariableDeclarationNode* decl = (JsVariableDeclarationNode*)node;
+        for (JsAstNode* d = decl->declarations; d; d = d->next) {
+            if (jm_node_has_direct_eval_call(d)) return true;
+        }
+        return false;
+    }
+    case JS_AST_NODE_VARIABLE_DECLARATOR:
+        return jm_node_has_direct_eval_call(((JsVariableDeclaratorNode*)node)->init);
+    case JS_AST_NODE_RETURN_STATEMENT:
+        return jm_node_has_direct_eval_call(((JsReturnNode*)node)->argument);
+    case JS_AST_NODE_IF_STATEMENT: {
+        JsIfNode* n = (JsIfNode*)node;
+        return jm_node_has_direct_eval_call(n->test) || jm_node_has_direct_eval_call(n->consequent) ||
+            jm_node_has_direct_eval_call(n->alternate);
+    }
+    case JS_AST_NODE_BINARY_EXPRESSION: {
+        JsBinaryNode* n = (JsBinaryNode*)node;
+        return jm_node_has_direct_eval_call(n->left) || jm_node_has_direct_eval_call(n->right);
+    }
+    case JS_AST_NODE_UNARY_EXPRESSION:
+        return jm_node_has_direct_eval_call(((JsUnaryNode*)node)->operand);
+    case JS_AST_NODE_ASSIGNMENT_EXPRESSION: {
+        JsAssignmentNode* n = (JsAssignmentNode*)node;
+        return jm_node_has_direct_eval_call(n->left) || jm_node_has_direct_eval_call(n->right);
+    }
+    case JS_AST_NODE_MEMBER_EXPRESSION: {
+        JsMemberNode* n = (JsMemberNode*)node;
+        return jm_node_has_direct_eval_call(n->object) || (n->computed && jm_node_has_direct_eval_call(n->property));
+    }
+    case JS_AST_NODE_NEW_EXPRESSION: {
+        JsCallNode* call = (JsCallNode*)node;
+        for (JsAstNode* arg = call->arguments; arg; arg = arg->next) {
+            if (jm_node_has_direct_eval_call(arg)) return true;
+        }
+        return false;
+    }
+    case JS_AST_NODE_SEQUENCE_EXPRESSION: {
+        JsSequenceNode* seq = (JsSequenceNode*)node;
+        for (JsAstNode* expr = seq->expressions; expr; expr = expr->next) {
+            if (jm_node_has_direct_eval_call(expr)) return true;
+        }
+        return false;
+    }
+    case JS_AST_NODE_SPREAD_ELEMENT:
+    case JS_AST_NODE_REST_ELEMENT:
+        return jm_node_has_direct_eval_call(((JsSpreadElementNode*)node)->argument);
+    case JS_AST_NODE_YIELD_EXPRESSION:
+        return jm_node_has_direct_eval_call(((JsYieldNode*)node)->argument);
+    case JS_AST_NODE_AWAIT_EXPRESSION:
+        return jm_node_has_direct_eval_call(((JsAwaitNode*)node)->argument);
+    default:
+        return false;
+    }
+}
+
 // ============================================================================
 // Phase 4: Native call resolution
 // ============================================================================
@@ -325,6 +425,8 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
             jm_make_fn_name(e->name, sizeof(e->name), fn, mt);
             e->func_item = NULL; // set during creation
             e->parent_index = -1; // top-level until set by parent
+            e->is_strict = jm_function_inside_class_syntax(fn);
+            e->has_direct_eval = jm_node_has_direct_eval_call(fn->body);
             mt->func_count++;
             // Set parent_index for DIRECT children: functions collected during our body
             // recursion that don't already have a parent assigned by a deeper enclosing
@@ -711,6 +813,8 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                             }
                             fc->func_item = NULL;
                             fc->capture_count = 0;
+                            fc->is_strict = true;
+                            fc->has_direct_eval = jm_node_has_direct_eval_call(fn->body);
                             mt->func_count++;
 
                             // Set parent_index for inner functions collected during method body

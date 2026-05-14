@@ -42,7 +42,7 @@ void render_walk_block(RenderBackend* backend, RenderWalkState* state, ViewBlock
     state->y = pa_y + block->y;
 
     // update inherited color
-    if (block->in_line && block->in_line->color.c) {
+    if (block->in_line && block->in_line->has_color) {
         state->color = block->in_line->color;
     }
 
@@ -128,7 +128,7 @@ void render_walk_inline(RenderBackend* backend, RenderWalkState* state, ViewSpan
         }
     }
 
-    if (span->in_line && span->in_line->color.c) {
+    if (span->in_line && span->in_line->has_color) {
         state->color = span->in_line->color;
     }
 

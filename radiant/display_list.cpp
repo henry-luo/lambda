@@ -581,6 +581,7 @@ static void replay_draw_glyph(ImageSurface* surface, const DlDrawGlyph* g) {
     GlyphBitmap* bitmap = (GlyphBitmap*)&g->bitmap;
     int x = g->x, y = g->y;
     Color color = g->color;
+    if (color.a == 0) return;
     const Bound* clip = &g->clip;
 
     if (g->has_transform && !g->is_color_emoji) {
@@ -635,6 +636,7 @@ static void replay_draw_glyph(ImageSurface* surface, const DlDrawGlyph* g) {
                     if (intensity == 0) continue;
 
                     uint8_t* p = row_pixels + dst_x * 4;
+                    intensity = (intensity * color.a + 127) / 255;
                     uint32_t v = 255 - intensity;
                     if (color.c == 0xFF000000) {
                         p[0] = p[0] * v / 255;
@@ -671,6 +673,7 @@ static void replay_draw_glyph(ImageSurface* surface, const DlDrawGlyph* g) {
                 }
 
                 uint8_t* p = (uint8_t*)surface->pixels + (dst_y - surface->tile_offset_y) * surface->pitch + dst_x * 4;
+                intensity = (intensity * color.a + 127) / 255;
                 uint32_t v = 255 - intensity;
                 if (color.c == 0xFF000000) {
                     p[0] = p[0] * v / 255;
@@ -769,6 +772,7 @@ static void replay_draw_glyph(ImageSurface* surface, const DlDrawGlyph* g) {
 
             if (intensity > 0) {
                 uint8_t* p = (uint8_t*)(row_pixels + (x + j) * 4);
+                intensity = (intensity * color.a + 127) / 255;
                 uint32_t v = 255 - intensity;
                 if (color.c == 0xFF000000) {
                     p[0] = p[0] * v / 255;
@@ -980,9 +984,13 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
         case DL_APPLY_OPACITY: {
             DlApplyOpacity* r = &item->apply_opacity;
             if (surface && surface->pixels) {
-                for (int y = r->y0; y < r->y1; y++) {
+                int x0 = std::max(0, r->x0);
+                int y0 = std::max(0, r->y0);
+                int x1 = std::min(surface->width, r->x1);
+                int y1 = std::min(surface->height, r->y1);
+                for (int y = y0; y < y1; y++) {
                     uint8_t* row = (uint8_t*)surface->pixels + y * surface->pitch;
-                    for (int x = r->x0; x < r->x1; x++) {
+                    for (int x = x0; x < x1; x++) {
                         uint8_t* pixel = row + x * 4;
                         pixel[3] = (uint8_t)(pixel[3] * r->opacity + 0.5f);
                     }
@@ -996,43 +1004,45 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
             if (surface && surface->pixels && backdrop_sp > 0) {
                 backdrop_sp--;
                 uint32_t* backdrop = backdrop_stack[backdrop_sp];
-                int bx = backdrop_region[backdrop_sp][0];
-                int by = backdrop_region[backdrop_sp][1];
-                int bw = backdrop_region[backdrop_sp][2];
-                int bh = backdrop_region[backdrop_sp][3];
-                uint32_t* px = (uint32_t*)surface->pixels;
-                int pitch = surface->pitch / 4;
-                int opacity_i = (int)(r->opacity * 256 + 0.5f);
-                for (int row = 0; row < bh; row++) {
-                    for (int col = 0; col < bw; col++) {
-                        uint32_t src = px[(by + row) * pitch + (bx + col)];
-                        uint32_t dst = backdrop[row * bw + col];
-                        if (src == 0) {
-                            // source fully transparent — restore backdrop
-                            px[(by + row) * pitch + (bx + col)] = dst;
-                            continue;
+                if (backdrop) {
+                    int bx = backdrop_region[backdrop_sp][0];
+                    int by = backdrop_region[backdrop_sp][1];
+                    int bw = backdrop_region[backdrop_sp][2];
+                    int bh = backdrop_region[backdrop_sp][3];
+                    uint32_t* px = (uint32_t*)surface->pixels;
+                    int pitch = surface->pitch / 4;
+                    int opacity_i = (int)(r->opacity * 256 + 0.5f);
+                    for (int row = 0; row < bh; row++) {
+                        for (int col = 0; col < bw; col++) {
+                            uint32_t src = px[(by + row) * pitch + (bx + col)];
+                            uint32_t dst = backdrop[row * bw + col];
+                            if (src == 0) {
+                                // source fully transparent — restore backdrop
+                                px[(by + row) * pitch + (bx + col)] = dst;
+                                continue;
+                            }
+                            // scale source by opacity (premultiplied alpha)
+                            uint32_t sa = (((src >> 24) & 0xFF) * opacity_i + 128) >> 8;
+                            uint32_t sr = ((src & 0xFF) * opacity_i + 128) >> 8;
+                            uint32_t sg = (((src >> 8) & 0xFF) * opacity_i + 128) >> 8;
+                            uint32_t sb = (((src >> 16) & 0xFF) * opacity_i + 128) >> 8;
+                            // Porter-Duff source over: result = src' + dst * (1 - src'_a)
+                            uint32_t inv_sa = 255 - sa;
+                            uint32_t da = (dst >> 24) & 0xFF;
+                            uint32_t dr = dst & 0xFF;
+                            uint32_t dg = (dst >> 8) & 0xFF;
+                            uint32_t db = (dst >> 16) & 0xFF;
+                            uint32_t ra = sa + (da * inv_sa + 128) / 255;
+                            uint32_t rr = sr + (dr * inv_sa + 128) / 255;
+                            uint32_t rg = sg + (dg * inv_sa + 128) / 255;
+                            uint32_t rb = sb + (db * inv_sa + 128) / 255;
+                            if (ra > 255) ra = 255;
+                            if (rr > 255) rr = 255;
+                            if (rg > 255) rg = 255;
+                            if (rb > 255) rb = 255;
+                            px[(by + row) * pitch + (bx + col)] =
+                                (ra << 24) | (rb << 16) | (rg << 8) | rr;
                         }
-                        // scale source by opacity (premultiplied alpha)
-                        uint32_t sa = (((src >> 24) & 0xFF) * opacity_i + 128) >> 8;
-                        uint32_t sr = ((src & 0xFF) * opacity_i + 128) >> 8;
-                        uint32_t sg = (((src >> 8) & 0xFF) * opacity_i + 128) >> 8;
-                        uint32_t sb = (((src >> 16) & 0xFF) * opacity_i + 128) >> 8;
-                        // Porter-Duff source over: result = src' + dst * (1 - src'_a)
-                        uint32_t inv_sa = 255 - sa;
-                        uint32_t da = (dst >> 24) & 0xFF;
-                        uint32_t dr = dst & 0xFF;
-                        uint32_t dg = (dst >> 8) & 0xFF;
-                        uint32_t db = (dst >> 16) & 0xFF;
-                        uint32_t ra = sa + (da * inv_sa + 128) / 255;
-                        uint32_t rr = sr + (dr * inv_sa + 128) / 255;
-                        uint32_t rg = sg + (dg * inv_sa + 128) / 255;
-                        uint32_t rb = sb + (db * inv_sa + 128) / 255;
-                        if (ra > 255) ra = 255;
-                        if (rr > 255) rr = 255;
-                        if (rg > 255) rg = 255;
-                        if (rb > 255) rb = 255;
-                        px[(by + row) * pitch + (bx + col)] =
-                            (ra << 24) | (rb << 16) | (rg << 8) | rr;
                     }
                 }
             }
@@ -1042,24 +1052,39 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
         case DL_SAVE_BACKDROP: {
             DlSaveBackdrop* r = &item->save_backdrop;
             if (surface && surface->pixels && backdrop_sp < DL_MAX_BACKDROP_DEPTH) {
+                int x0 = std::max(0, r->x0);
+                int y0 = std::max(0, r->y0);
+                int x1 = std::min(surface->width, r->x0 + r->w);
+                int y1 = std::min(surface->height, r->y0 + r->h);
+                int w = x1 - x0;
+                int h = y1 - y0;
+                if (w <= 0 || h <= 0) {
+                    backdrop_stack[backdrop_sp] = nullptr;
+                    backdrop_region[backdrop_sp][0] = 0;
+                    backdrop_region[backdrop_sp][1] = 0;
+                    backdrop_region[backdrop_sp][2] = 0;
+                    backdrop_region[backdrop_sp][3] = 0;
+                    backdrop_sp++;
+                    break;
+                }
                 int pitch = surface->pitch / 4;
-                int sz = r->w * r->h;
+                int sz = w * h;
                 uint32_t* buf = (uint32_t*)scratch_alloc(scratch, sz * sizeof(uint32_t));
                 uint32_t* px = (uint32_t*)surface->pixels;
-                for (int row = 0; row < r->h; row++) {
-                    memcpy(buf + row * r->w,
-                           px + (r->y0 + row) * pitch + r->x0,
-                           r->w * sizeof(uint32_t));
+                for (int row = 0; row < h; row++) {
+                    memcpy(buf + row * w,
+                           px + (y0 + row) * pitch + x0,
+                           w * sizeof(uint32_t));
                 }
                 // clear the region so children render on transparent
-                for (int row = 0; row < r->h; row++) {
-                    memset(px + (r->y0 + row) * pitch + r->x0, 0, r->w * sizeof(uint32_t));
+                for (int row = 0; row < h; row++) {
+                    memset(px + (y0 + row) * pitch + x0, 0, w * sizeof(uint32_t));
                 }
                 backdrop_stack[backdrop_sp] = buf;
-                backdrop_region[backdrop_sp][0] = r->x0;
-                backdrop_region[backdrop_sp][1] = r->y0;
-                backdrop_region[backdrop_sp][2] = r->w;
-                backdrop_region[backdrop_sp][3] = r->h;
+                backdrop_region[backdrop_sp][0] = x0;
+                backdrop_region[backdrop_sp][1] = y0;
+                backdrop_region[backdrop_sp][2] = w;
+                backdrop_region[backdrop_sp][3] = h;
                 backdrop_sp++;
             }
             break;
@@ -1070,18 +1095,20 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
             if (surface && surface->pixels && backdrop_sp > 0) {
                 backdrop_sp--;
                 uint32_t* backdrop = backdrop_stack[backdrop_sp];
-                int bx = backdrop_region[backdrop_sp][0];
-                int by = backdrop_region[backdrop_sp][1];
-                int bw = backdrop_region[backdrop_sp][2];
-                int bh = backdrop_region[backdrop_sp][3];
-                uint32_t* px = (uint32_t*)surface->pixels;
-                int pitch = surface->pitch / 4;
-                for (int row = 0; row < bh; row++) {
-                    for (int col = 0; col < bw; col++) {
-                        uint32_t bd = backdrop[row * bw + col];
-                        uint32_t source = px[(by + row) * pitch + (bx + col)];
-                        px[(by + row) * pitch + (bx + col)] =
-                            composite_blend_pixel(bd, source, (CssEnum)r->blend_mode);
+                if (backdrop) {
+                    int bx = backdrop_region[backdrop_sp][0];
+                    int by = backdrop_region[backdrop_sp][1];
+                    int bw = backdrop_region[backdrop_sp][2];
+                    int bh = backdrop_region[backdrop_sp][3];
+                    uint32_t* px = (uint32_t*)surface->pixels;
+                    int pitch = surface->pitch / 4;
+                    for (int row = 0; row < bh; row++) {
+                        for (int col = 0; col < bw; col++) {
+                            uint32_t bd = backdrop[row * bw + col];
+                            uint32_t source = px[(by + row) * pitch + (bx + col)];
+                            px[(by + row) * pitch + (bx + col)] =
+                                composite_blend_pixel(bd, source, (CssEnum)r->blend_mode);
+                        }
                     }
                 }
             }

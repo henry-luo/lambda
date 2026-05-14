@@ -1,13 +1,11 @@
 // Phase 7 — inline image (BI..ID..EI) skip + synthetic op emission.
 //
-// Verifies that stream.parse_content_stream:
+// Verifies that pdf_parse_content_stream:
 //   - Detects "BI" as the start of an inline image.
 //   - Skips the binary payload between "ID" and "EI".
 //   - Emits a synthetic { op: "inline_image", operands: [...] } record
 //     in place of the binary segment.
 //   - Continues parsing the next operator after EI normally.
-
-import stream: lambda.package.pdf.stream
 
 pn main() {
     // Build a tiny content stream containing one BI..EI block sandwiched
@@ -19,7 +17,7 @@ pn main() {
      ++ "@@@@@@@@@@\n"
      ++ "EI\n"
      ++ "Q\n")
-    let ops = stream.parse_content_stream(cs)
+    let ops = pdf_parse_content_stream(cs)
     var names = []
     var i = 0
     let n = len(ops)

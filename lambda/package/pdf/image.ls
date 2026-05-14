@@ -587,7 +587,7 @@ fn _emit_inline_pixels(info) {
     }
 }
 
-// Public: handle a synthetic `inline_image` op produced by stream.ls for a
+// Public: handle a synthetic `inline_image` op produced by pdf_parse_content_stream for a
 // BI..ID..EI segment. Supported unfiltered DeviceRGB/DeviceGray/DeviceCMYK images
 // are rendered as SVG pixel rects in the local image unit square; unsupported
 // inline images keep the visible placeholder.

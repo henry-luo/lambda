@@ -7,7 +7,7 @@
 //     page-level y-flip group alongside vector paths
 //
 // Operator stream synthesized directly (no content-stream tokenizer call)
-// so we don't depend on stream.parse_content_stream operand shapes here;
+// so we don't depend on pdf_parse_content_stream operand shapes here;
 // that path is already covered by phase2/phase3 tests.
 
 import interp: lambda.package.pdf.interp

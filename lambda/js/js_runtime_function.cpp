@@ -86,6 +86,23 @@ extern "C" Item js_new_function(void* func_ptr, int param_count) {
     return (Item){.function = (Function*)fn};
 }
 
+extern "C" Item js_new_method_function(void* func_ptr, int param_count) {
+    if (!func_ptr) {
+        log_error("js_new_method_function: null func_ptr! param_count=%d", param_count);
+        return ItemNull;
+    }
+    JsFunction* fn = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
+    fn->type_id = LMD_TYPE_FUNC;
+    fn->func_ptr = func_ptr;
+    fn->param_count = param_count;
+    fn->formal_length = -1;
+    fn->env = NULL;
+    fn->env_size = 0;
+    fn->prototype = ItemNull;
+    fn->module_vars = js_active_module_vars;
+    return (Item){.function = (Function*)fn};
+}
+
 // Create a closure (function with captured environment)
 extern "C" Item js_new_closure(void* func_ptr, int param_count, Item* env, int env_size) {
     // Pool-allocate: closures stored in env arrays are unreachable from GC roots

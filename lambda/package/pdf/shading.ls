@@ -19,7 +19,6 @@ import util:    .util
 import resolve: .resolve
 import color:   .color
 import image:   .image
-import stream:  .stream
 
 fn _shading_dict(pdf, page, name) {
     let res = resolve.page_resources(pdf, page)
@@ -497,7 +496,7 @@ pub fn from_tiling_pattern_fill(pdf, page, p, id) {
             let m0 = _matrix_of(d)
             let m = [m0[0], m0[1], m0[2], m0[3], m0[4], m0[5] - h]
             let ppage = _pattern_page(pdf, page, d)
-            let ops = stream.parse_content_stream(bytes)
+            let ops = pdf_parse_content_stream(bytes)
             let extra_defs = _tiling_pattern_defs(pdf, ppage, ops, id)
             let kids = _tiling_pattern_children(pdf, ppage, ops, id)
             if (len(kids) == 0) { { defs: [], fill: color.BLACK } }
