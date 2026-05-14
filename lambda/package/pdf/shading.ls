@@ -103,9 +103,31 @@ fn _stop_offset(v) {
     util.fmt_num(float(v) * 100.0) ++ "%"
 }
 
+fn _clamp_unit(v) {
+    if (v < 0.0) { 0.0 }
+    else if (v > 1.0) { 1.0 }
+    else { v }
+}
+
+fn _alpha_at(alpha_mask, offset) {
+    if (alpha_mask == null) { 1.0 }
+    else { _clamp_unit(alpha_mask.a0 + ((alpha_mask.a1 - alpha_mask.a0) * offset)) }
+}
+
+fn _stop_elements(stops, alpha_mask) {
+    if (alpha_mask == null) {
+        for (s in stops) <stop offset: s.offset, 'stop-color': s.color>
+    }
+    else {
+        for (s in stops) <stop offset: s.offset, 'stop-color': s.color,
+                              'stop-opacity': util.fmt_num(_alpha_at(alpha_mask, s.value))>
+    }
+}
+
 fn _stitch_stop(pdf, func, ncomp, offset, use_end) {
     {
         offset: _stop_offset(offset),
+        value: offset,
         color: if (use_end) { _function_end_color(pdf, func, ncomp) }
                else { _function_start_color(pdf, func, ncomp) }
     }
@@ -138,7 +160,8 @@ fn _function_stops(pdf, func, ncomp) {
     }
     else {
         let endpoints = _endpoint_colors(pdf, func, ncomp)
-        [{ offset: "0%", color: endpoints[0] }, { offset: "100%", color: endpoints[1] }]
+        [{ offset: "0%", value: 0.0, color: endpoints[0] },
+         { offset: "100%", value: 1.0, color: endpoints[1] }]
     }
 }
 
@@ -176,6 +199,26 @@ fn _ncomp_for_cs(cs_name) {
     else { 1 }
 }
 
+fn _component_count(vals) {
+    if (vals is array and len(vals) >= 1) { len(vals) }
+    else { 0 }
+}
+
+fn _infer_ncomp_from_function(pdf, func, fallback) {
+    let f = resolve.deref(pdf, func)
+    let d = _stream_dict(f)
+    if (d == null) { fallback }
+    else {
+        let c0n = _component_count(d.C0)
+        let c1n = _component_count(d.C1)
+        let n = if (c0n > 0) { c0n }
+                else if (c1n > 0) { c1n }
+                else { fallback }
+        if (n == 1 or n == 3 or n == 4) { n }
+        else { fallback }
+    }
+}
+
 fn _cs_name(d) {
     let cs = if (d) d.ColorSpace else null
     if (cs is map and cs.kind == "name") { cs.value }
@@ -187,16 +230,17 @@ fn _cs_name(d) {
 // Build an <linearGradient> for a Type 2 shading, plus a covering <rect>
 // painted with that gradient. The rect spans the page MediaBox in the
 // caller's CTM; downstream the y-flip group inverts it.
-fn _emit_axial_with_matrix(pdf, d, xform, id, page_w, page_h) {
+fn _emit_axial_with_alpha_matrix(pdf, d, xform, id, page_w, page_h, alpha_mask) {
     let coords = if (d.Coords) d.Coords else [0.0, 0.0, 1.0, 0.0]
     let p0 = _matrix_point(xform, float(coords[0]), float(coords[1]))
     let p1 = _matrix_point(xform, float(coords[2]), float(coords[3]))
     let x0 = p0[0]; let y0 = p0[1]
     let x1 = p1[0]; let y1 = p1[1]
     let func  = if (d.Function) d.Function else null
-    let ncomp = _ncomp_for_cs(_cs_name(d))
+    let cs_ncomp = _ncomp_for_cs(_cs_name(d))
+    let ncomp = _infer_ncomp_from_function(pdf, func, cs_ncomp)
     let stops = _function_stops(pdf, func, ncomp)
-    let stop_els = for (s in stops) <stop offset: s.offset, 'stop-color': s.color>
+    let stop_els = _stop_elements(stops, alpha_mask)
     let grad = <linearGradient id: id, gradientUnits: "userSpaceOnUse",
                                x1: util.fmt_num(x0), y1: util.fmt_num(y0),
                                x2: util.fmt_num(x1), y2: util.fmt_num(y1);
@@ -209,11 +253,15 @@ fn _emit_axial_with_matrix(pdf, d, xform, id, page_w, page_h) {
     { defs: [grad], emit: [cover] }
 }
 
+fn _emit_axial_with_matrix(pdf, d, xform, id, page_w, page_h) {
+    _emit_axial_with_alpha_matrix(pdf, d, xform, id, page_w, page_h, null)
+}
+
 fn _emit_axial(pdf, d, ctm, id, page_w, page_h) {
     _emit_axial_with_matrix(pdf, d, util.IDENTITY, id, page_w, page_h)
 }
 
-fn _emit_radial_with_matrix(pdf, d, xform, id, page_w, page_h) {
+fn _emit_radial_with_alpha_matrix(pdf, d, xform, id, page_w, page_h, alpha_mask) {
     let coords = if (d.Coords) d.Coords else [0.0, 0.0, 0.0, 0.0, 0.0, 1.0]
     let p0 = _matrix_point(xform, float(coords[0]), float(coords[1]))
     let p1 = _matrix_point(xform, float(coords[3]), float(coords[4]))
@@ -222,9 +270,10 @@ fn _emit_radial_with_matrix(pdf, d, xform, id, page_w, page_h) {
     let cx0 = p0[0]; let cy0 = p0[1]; let r0 = float(coords[2]) * scale
     let cx1 = p1[0]; let cy1 = p1[1]; let r1 = float(coords[5]) * scale
     let func  = if (d.Function) d.Function else null
-    let ncomp = _ncomp_for_cs(_cs_name(d))
+    let cs_ncomp = _ncomp_for_cs(_cs_name(d))
+    let ncomp = _infer_ncomp_from_function(pdf, func, cs_ncomp)
     let stops = _function_stops(pdf, func, ncomp)
-    let stop_els = for (s in stops) <stop offset: s.offset, 'stop-color': s.color>
+    let stop_els = _stop_elements(stops, alpha_mask)
     let grad = <radialGradient id: id, gradientUnits: "userSpaceOnUse",
                                fx: util.fmt_num(cx0), fy: util.fmt_num(cy0),
                                cx: util.fmt_num(cx1), cy: util.fmt_num(cy1),
@@ -236,6 +285,10 @@ fn _emit_radial_with_matrix(pdf, d, xform, id, page_w, page_h) {
                       height: util.fmt_num(page_h),
                       fill: "url(#" ++ id ++ ")">
     { defs: [grad], emit: [cover] }
+}
+
+fn _emit_radial_with_matrix(pdf, d, xform, id, page_w, page_h) {
+    _emit_radial_with_alpha_matrix(pdf, d, xform, id, page_w, page_h, null)
 }
 
 fn _emit_radial(pdf, d, ctm, id, page_w, page_h) {
@@ -480,6 +533,23 @@ pub fn from_pattern_fill(pdf, page, name, id, ctm) {
         let stype = if (d.ShadingType) d.ShadingType else 0
         let r = if (stype == 2) { _emit_axial_with_matrix(pdf, d, xform, id, 0.0, 0.0) }
                 else if (stype == 3) { _emit_radial_with_matrix(pdf, d, xform, id, 0.0, 0.0) }
+                else { { defs: [], emit: [] } }
+        { defs: r.defs, fill: "url(#" ++ id ++ ")" }
+    }
+}
+
+pub fn from_pattern_fill_with_alpha(pdf, page, name, id, ctm, alpha_mask) {
+    let p = _pattern_dict(pdf, page, name)
+    let d = if (p != null and p.PatternType == 2 and p.Shading != null) { resolve.deref(pdf, p.Shading) }
+            else { null }
+    let pd = _stream_dict(p)
+    if (p != null and pd != null and pd.PatternType == 1 and pd.PaintType == 1) { from_tiling_pattern_fill(pdf, page, p, id) }
+    else if (d == null) { { defs: [], fill: color.BLACK } }
+    else {
+        let xform = util.matrix_mul(_matrix_of(p), _matrix_inverse(ctm))
+        let stype = if (d.ShadingType) d.ShadingType else 0
+        let r = if (stype == 2) { _emit_axial_with_alpha_matrix(pdf, d, xform, id, 0.0, 0.0, alpha_mask) }
+                else if (stype == 3) { _emit_radial_with_alpha_matrix(pdf, d, xform, id, 0.0, 0.0, alpha_mask) }
                 else { { defs: [], emit: [] } }
         { defs: r.defs, fill: "url(#" ++ id ++ ")" }
     }

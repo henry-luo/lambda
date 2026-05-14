@@ -24,7 +24,10 @@ int counter_format(CounterContext* ctx, const char* name, uint32_t style,
                   char* buffer, size_t buffer_size);
 int counters_format(CounterContext* ctx, const char* name, const char* separator,
                    uint32_t style, char* buffer, size_t buffer_size);
-extern "C" void svg_unregister_image_resolvers_for_tree(Element* root);
+
+extern "C" __attribute__((weak)) void svg_unregister_image_resolvers_for_tree(Element* root) {
+    (void)root;
+}
 
 // Timing accumulators for cascade profiling
 static thread_local int64_t g_apply_decl_count = 0;
