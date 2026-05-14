@@ -1762,7 +1762,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         // Functions are collected in post-order (children before parents), so children have
         // lower indices than parents. A single-pass approach would check ancestors before
         // their decl sets are built.
-        struct hashmap** func_decl_sets = (struct hashmap**)calloc(mt->func_count, sizeof(struct hashmap*));
+        struct hashmap** func_decl_sets = (struct hashmap**)mem_calloc(mt->func_count, sizeof(struct hashmap*), MEM_CAT_JS_RUNTIME);
 
         // Pass 1: build declaration sets for all functions
         for (int fi = 0; fi < mt->func_count; fi++) {
@@ -1883,7 +1883,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         for (int fi = 0; fi < mt->func_count; fi++) {
             if (func_decl_sets[fi]) hashmap_free(func_decl_sets[fi]);
         }
-        free(func_decl_sets);
+        mem_free(func_decl_sets);
         hashmap_free(implicit_globals);
     }
 
@@ -2660,7 +2660,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
 
             if (total_needed > 0) {
                 // Allocate scope_env_names (+2 for potential __parent_env__ and safety)
-                parent_fc->scope_env_names = (char(*)[64])calloc(total_needed + 2, 64);
+                parent_fc->scope_env_names = (char(*)[64])mem_calloc(total_needed + 2, 64, MEM_CAT_JS_RUNTIME);
 
                 // Re-iterate children in original order to fill names deterministically
                 int fill_idx = 0;
@@ -3029,8 +3029,8 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     // narrow to INT/FLOAT when ALL call sites pass compatible types.
     if (mt->func_count > 0) {
         // allocate evidence per function per param (max 16 params)
-        P6NarrowEvidence (*evi)[16] = (P6NarrowEvidence (*)[16])calloc(
-            mt->func_count * 16, sizeof(P6NarrowEvidence));
+        P6NarrowEvidence (*evi)[16] = (P6NarrowEvidence (*)[16])mem_calloc(
+            mt->func_count * 16, sizeof(P6NarrowEvidence), MEM_CAT_JS_RUNTIME);
         // walk program body (top-level calls)
         jm_p6_narrow_walk(mt, (JsAstNode*)program->body, evi);
         // walk all function bodies
@@ -3098,7 +3098,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 }
             }
         }
-        free(evi);
+        mem_free(evi);
     }
 
     // Phase 1.78: P4b constructor call-site type propagation.
@@ -3119,8 +3119,8 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             }
         }
         if (needs_scan) {
-            P4bCtorEvidence* cevi = (P4bCtorEvidence*)calloc(
-                mt->class_count * 16, sizeof(P4bCtorEvidence));
+            P4bCtorEvidence* cevi = (P4bCtorEvidence*)mem_calloc(
+                mt->class_count * 16, sizeof(P4bCtorEvidence), MEM_CAT_JS_RUNTIME);
             // walk program body
             jm_p4b_ctor_walk(mt, (JsAstNode*)program->body, cevi);
             // walk all function bodies
@@ -3153,7 +3153,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         param_idx, total, e->int_count, e->float_count);
                 }
             }
-            free(cevi);
+            mem_free(cevi);
         }
     }
 

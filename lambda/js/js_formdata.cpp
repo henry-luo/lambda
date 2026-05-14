@@ -28,6 +28,7 @@
 #include "../../radiant/form_control.hpp"
 #include "../../radiant/text_control.hpp"
 #include "../../lib/log.h"
+#include "../../lib/mem.h"
 #include <cstring>
 #include <cctype>
 #include <cinttypes>
@@ -439,7 +440,7 @@ static Item fd_normalize_surrogates(const char* s) {
     }
     if (!has_surrogate) return make_str(s);
     // same-length replacement (3 bytes → 3 bytes), copy then patch in-place
-    char* buf = (char*)malloc(len + 1);
+    char* buf = (char*)mem_alloc(len + 1, MEM_CAT_JS_RUNTIME);
     if (!buf) return make_str(s);
     memcpy(buf, s, len + 1);
     for (size_t i = 0; i + 2 < len; i++) {
@@ -452,7 +453,7 @@ static Item fd_normalize_surrogates(const char* s) {
         }
     }
     Item result = make_str(buf);
-    free(buf);
+    mem_free(buf);
     return result;
 }
 
@@ -467,7 +468,7 @@ static Item fd_normalize_newlines(const char* s) {
 
     // Normalize: \r\n → \n, \r → \n
     size_t len = strlen(s);
-    char* buf = (char*)malloc(len + 1);
+    char* buf = (char*)mem_alloc(len + 1, MEM_CAT_JS_RUNTIME);
     if (!buf) return make_str(s);
     size_t out = 0;
     for (size_t i = 0; i < len; i++) {
@@ -480,7 +481,7 @@ static Item fd_normalize_newlines(const char* s) {
     }
     buf[out] = '\0';
     Item result = make_str(buf);
-    free(buf);
+    mem_free(buf);
     return result;
 }
 

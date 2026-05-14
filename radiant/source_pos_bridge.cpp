@@ -28,6 +28,7 @@
 #include <string.h>
 
 #include "../lib/hashmap.h"
+#include "../lib/memtrack.h"
 #include "../lib/tagged.hpp"
 #include "../lambda/render_map.h"
 #include "../lambda/input/css/dom_node.hpp"
@@ -48,7 +49,7 @@ void source_path_init(SourcePathC* p) {
 
 void source_path_free(SourcePathC* p) {
     if (!p) return;
-    free(p->indices);
+    mem_free(p->indices);
     p->indices = NULL;
     p->depth = 0;
 }
@@ -56,7 +57,7 @@ void source_path_free(SourcePathC* p) {
 SourcePathC source_path_clone(const SourcePathC* p) {
     SourcePathC out = { NULL, 0 };
     if (!p || p->depth == 0 || !p->indices) return out;
-    out.indices = (int*)malloc(sizeof(int) * (size_t)p->depth);
+    out.indices = (int*)mem_alloc(sizeof(int) * (size_t)p->depth, MEM_CAT_RENDER);
     if (!out.indices) return out;
     memcpy(out.indices, p->indices, sizeof(int) * (size_t)p->depth);
     out.depth = p->depth;
@@ -148,7 +149,7 @@ void render_map_record_path(Item source_item, const char* template_ref,
     e.source_item_bits = source_item.item;
     e.template_ref = template_ref;
     if (depth > 0 && path_indices) {
-        e.path.indices = (int*)malloc(sizeof(int) * (size_t)depth);
+        e.path.indices = (int*)mem_alloc(sizeof(int) * (size_t)depth, MEM_CAT_RENDER);
         if (e.path.indices) {
             memcpy(e.path.indices, path_indices, sizeof(int) * (size_t)depth);
             e.path.depth = depth;
@@ -273,7 +274,7 @@ bool source_pos_from_dom_boundary(const DomBoundary* boundary,
     }
 
     int total = base.depth + extra;
-    int* combined = (int*)malloc(sizeof(int) * (size_t)(total > 0 ? total : 1));
+    int* combined = (int*)mem_alloc(sizeof(int) * (size_t)(total > 0 ? total : 1), MEM_CAT_RENDER);
     if (!combined) { source_path_free(&base); return false; }
     if (base.depth) memcpy(combined, base.indices, sizeof(int) * (size_t)base.depth);
     for (int i = 0; i < extra; i++) combined[base.depth + i] = extra_indices[i];
@@ -488,7 +489,7 @@ bool source_pos_from_item(Item pos_item, SourcePosC* out) {
     ArrayReader arr = path.asArray();
     int depth = (int)arr.length();
     if (depth <= 0) return true;
-    out->path.indices = (int*)malloc(sizeof(int) * (size_t)depth);
+    out->path.indices = (int*)mem_alloc(sizeof(int) * (size_t)depth, MEM_CAT_RENDER);
     if (!out->path.indices) return false;
     out->path.depth = depth;
     for (int i = 0; i < depth; i++) {
@@ -505,7 +506,7 @@ bool source_path_from_item(Item path_item, SourcePathC* out) {
     if (!arr.isValid()) return false;
     int depth = (int)arr.length();
     if (depth <= 0) return true;
-    out->indices = (int*)malloc(sizeof(int) * (size_t)depth);
+    out->indices = (int*)mem_alloc(sizeof(int) * (size_t)depth, MEM_CAT_RENDER);
     if (!out->indices) return false;
     out->depth = depth;
     for (int i = 0; i < depth; i++) {

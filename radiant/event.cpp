@@ -756,8 +756,8 @@ typedef struct InputIntent {
 
 static void input_intent_dispose(InputIntent* intent) {
     if (!intent) return;
-    free(intent->owned_data);
-    free(intent->owned_html_data);
+    mem_free(intent->owned_data);
+    mem_free(intent->owned_html_data);
     intent->owned_data = nullptr;
     intent->owned_html_data = nullptr;
     intent->data = nullptr;
@@ -825,13 +825,13 @@ static bool input_intent_from_key_event(const KeyEvent* key_event, InputIntent* 
     if (primary && key_event->key == RDT_KEY_V) {
         const char* html = clipboard_store_read_mime("text/html");
         if (html && html[0]) {
-            out->owned_html_data = strdup(html);
+            out->owned_html_data = mem_strdup(html, MEM_CAT_TEMP);
             out->html_data = out->owned_html_data;
         }
         const char* clip = clipboard_get_text();
         if ((!clip || !clip[0]) && (!html || !html[0])) return false;
         out->type = INPUT_INTENT_INSERT_FROM_PASTE;
-        out->owned_data = strdup(clip ? clip : "");
+        out->owned_data = mem_strdup(clip ? clip : "", MEM_CAT_TEMP);
         out->data = out->owned_data;
         out->data_mime = (out->html_data && out->html_data[0]) ? "text/html" : "text/plain";
         return true;

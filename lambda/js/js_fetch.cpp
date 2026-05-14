@@ -26,19 +26,19 @@ static char* g_fetch_base_dir = NULL;
 
 extern "C" void js_fetch_set_base_path(const char* dir_path) {
     if (g_fetch_base_dir) {
-        free(g_fetch_base_dir);
+        mem_free(g_fetch_base_dir);
         g_fetch_base_dir = NULL;
     }
     if (!dir_path || !*dir_path) return;
     // Find the directory portion of dir_path; if it's a file, drop the basename.
     struct stat st;
-    char* dup = strdup(dir_path);
+    char* dup = mem_strdup(dir_path, MEM_CAT_JS_RUNTIME);
     if (!dup) return;
     if (stat(dup, &st) == 0 && S_ISREG(st.st_mode)) {
         // strip basename
         char* slash = strrchr(dup, '/');
         if (slash) *slash = '\0';
-        else { free(dup); dup = strdup("."); }
+        else { mem_free(dup); dup = mem_strdup(".", MEM_CAT_JS_RUNTIME); }
     }
     g_fetch_base_dir = dup;
 }
@@ -303,8 +303,8 @@ static Item build_response_object(JsFetchWork* fw) {
         response_bodies[body_idx] = fw->response_buf;
         response_body_lens[body_idx] = (int)fw->response_len;
         // Cache an inferred MIME for blob().type. Owned: strdup.
-        if (response_types[body_idx]) { free(response_types[body_idx]); response_types[body_idx] = NULL; }
-        response_types[body_idx] = strdup(mime_from_url(fw->url));
+        if (response_types[body_idx]) { mem_free(response_types[body_idx]); response_types[body_idx] = NULL; }
+        response_types[body_idx] = mem_strdup(mime_from_url(fw->url), MEM_CAT_JS_RUNTIME);
         fw->response_buf = NULL; // ownership transferred
     }
 
@@ -577,7 +577,7 @@ extern "C" void js_fetch_reset(void) {
             response_bodies[i] = NULL;
         }
         if (response_types[i]) {
-            free(response_types[i]);
+            mem_free(response_types[i]);
             response_types[i] = NULL;
         }
     }

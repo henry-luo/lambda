@@ -333,13 +333,13 @@ extern "C" Item js_util_inspect(Item obj_item, Item options_item) {
         if (!s) return make_string_item("''");
         // build 'value' with single quotes
         int len = (int)s->len;
-        char* buf = (char*)malloc(len + 3);
+        char* buf = (char*)mem_alloc(len + 3, MEM_CAT_JS_RUNTIME);
         buf[0] = '\'';
         memcpy(buf + 1, s->chars, len);
         buf[len + 1] = '\'';
         buf[len + 2] = '\0';
         Item result = make_string_item(buf, len + 2);
-        free(buf);
+        mem_free(buf);
         return result;
     }
 
@@ -368,7 +368,7 @@ extern "C" Item js_util_inspect(Item obj_item, Item options_item) {
         // build "{ key1: val1, key2: val2 }"
         // estimate buffer size
         int cap = 256;
-        char* buf = (char*)malloc(cap);
+        char* buf = (char*)mem_alloc(cap, MEM_CAT_JS_RUNTIME);
         int pos = 0;
         buf[pos++] = '{';
         buf[pos++] = ' ';
@@ -385,7 +385,7 @@ extern "C" Item js_util_inspect(Item obj_item, Item options_item) {
             int need = pos + (ks ? (int)ks->len : 0) + 2 + (vs ? (int)vs->len : 0) + 4;
             if (need >= cap) {
                 cap = need * 2;
-                buf = (char*)realloc(buf, cap);
+                buf = (char*)mem_realloc(buf, cap, MEM_CAT_JS_RUNTIME);
             }
             if (ks) { memcpy(buf + pos, ks->chars, ks->len); pos += (int)ks->len; }
             buf[pos++] = ':';
@@ -396,7 +396,7 @@ extern "C" Item js_util_inspect(Item obj_item, Item options_item) {
         buf[pos++] = '}';
         buf[pos] = '\0';
         Item r = make_string_item(buf, pos);
-        free(buf);
+        mem_free(buf);
         return r;
     }
 
@@ -405,7 +405,7 @@ extern "C" Item js_util_inspect(Item obj_item, Item options_item) {
         int64_t alen = js_array_length(obj_item);
         if (alen == 0) return make_string_item("[]");
         int cap = 256;
-        char* buf = (char*)malloc(cap);
+        char* buf = (char*)mem_alloc(cap, MEM_CAT_JS_RUNTIME);
         int pos = 0;
         buf[pos++] = '[';
         buf[pos++] = ' ';
@@ -420,7 +420,7 @@ extern "C" Item js_util_inspect(Item obj_item, Item options_item) {
             int need = pos + (vs ? (int)vs->len : 0) + 6;
             if (need >= cap) {
                 cap = need * 2;
-                buf = (char*)realloc(buf, cap);
+                buf = (char*)mem_realloc(buf, cap, MEM_CAT_JS_RUNTIME);
             }
             if (vs) { memcpy(buf + pos, vs->chars, vs->len); pos += (int)vs->len; }
         }
@@ -428,7 +428,7 @@ extern "C" Item js_util_inspect(Item obj_item, Item options_item) {
         buf[pos++] = ']';
         buf[pos] = '\0';
         Item r = make_string_item(buf, pos);
-        free(buf);
+        mem_free(buf);
         return r;
     }
 

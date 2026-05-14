@@ -232,11 +232,11 @@ struct JsFuncCollected {
 static void jm_free_scope_env_names(JsFuncCollected* func_entries, int func_count) {
     for (int i = 0; i < func_count; i++) {
         if (func_entries[i].scope_env_names) {
-            free(func_entries[i].scope_env_names);
+            mem_free(func_entries[i].scope_env_names);
             func_entries[i].scope_env_names = NULL;
         }
         if (func_entries[i].captures) {
-            free(func_entries[i].captures);
+            mem_free(func_entries[i].captures);
             func_entries[i].captures = NULL;
         }
     }
@@ -246,11 +246,11 @@ static void jm_free_scope_env_names(JsFuncCollected* func_entries, int func_coun
 static void jm_ensure_captures_capacity(JsFuncCollected* fc) {
     if (fc->capture_count >= fc->captures_capacity) {
         int new_cap = fc->captures_capacity == 0 ? 16 : fc->captures_capacity * 2;
-        JsCaptureEntry* new_arr = (JsCaptureEntry*)calloc(new_cap, sizeof(JsCaptureEntry));
+        JsCaptureEntry* new_arr = (JsCaptureEntry*)mem_calloc(new_cap, sizeof(JsCaptureEntry), MEM_CAT_JS_RUNTIME);
         if (fc->captures && fc->capture_count > 0) {
             memcpy(new_arr, fc->captures, fc->capture_count * sizeof(JsCaptureEntry));
         }
-        free(fc->captures);
+        mem_free(fc->captures);
         fc->captures = new_arr;
         fc->captures_capacity = new_cap;
     }

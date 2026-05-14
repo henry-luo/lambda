@@ -23,6 +23,7 @@
 #include <string.h>
 
 #include "../lib/log.h"
+#include "../lib/memtrack.h"
 
 // Opaque types — see ime_mac.mm comment.
 struct UiContext;
@@ -64,24 +65,24 @@ DocState* ime_state() {
     return radiant_ui_get_state(g_ime_uicon);
 }
 
-// Read GCS_COMPSTR or GCS_RESULTSTR as UTF-8. Returns malloc'd buffer
-// (caller frees) or NULL. Sets *out_len to byte length.
+// Read GCS_COMPSTR or GCS_RESULTSTR as UTF-8. Returns mem_alloc'd buffer
+// (caller mem_free()s) or NULL. Sets *out_len to byte length.
 char* ime_read_string(HIMC himc, DWORD flag, uint32_t* out_len) {
     LONG wide_bytes = ImmGetCompositionStringW(himc, flag, NULL, 0);
     if (wide_bytes <= 0) { *out_len = 0; return nullptr; }
     int wide_chars = (int)(wide_bytes / (LONG)sizeof(WCHAR));
-    WCHAR* wbuf = (WCHAR*)malloc((size_t)(wide_chars + 1) * sizeof(WCHAR));
+    WCHAR* wbuf = (WCHAR*)mem_alloc((size_t)(wide_chars + 1) * sizeof(WCHAR), MEM_CAT_TEMP);
     if (!wbuf) { *out_len = 0; return nullptr; }
     ImmGetCompositionStringW(himc, flag, wbuf, (DWORD)wide_bytes);
     wbuf[wide_chars] = 0;
     int u8_bytes = WideCharToMultiByte(CP_UTF8, 0, wbuf, wide_chars,
                                        NULL, 0, NULL, NULL);
-    if (u8_bytes <= 0) { free(wbuf); *out_len = 0; return nullptr; }
-    char* u8 = (char*)malloc((size_t)u8_bytes + 1);
-    if (!u8) { free(wbuf); *out_len = 0; return nullptr; }
+    if (u8_bytes <= 0) { mem_free(wbuf); *out_len = 0; return nullptr; }
+    char* u8 = (char*)mem_alloc((size_t)u8_bytes + 1, MEM_CAT_TEMP);
+    if (!u8) { mem_free(wbuf); *out_len = 0; return nullptr; }
     WideCharToMultiByte(CP_UTF8, 0, wbuf, wide_chars, u8, u8_bytes, NULL, NULL);
     u8[u8_bytes] = 0;
-    free(wbuf);
+    mem_free(wbuf);
     *out_len = (uint32_t)u8_bytes;
     return u8;
 }
@@ -112,7 +113,7 @@ LRESULT CALLBACK ime_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     te_ime_commit(e, state, (void*)e, u8, len);
                     log_debug("[IME win] commit '%s'", u8);
                 }
-                free(u8);
+                mem_free(u8);
             }
             if (lp & GCS_COMPSTR) {
                 uint32_t len = 0;
@@ -123,7 +124,7 @@ LRESULT CALLBACK ime_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     te_ime_update(e, u8, len, caret);
                     log_debug("[IME win] update '%s' caret=%u", u8, caret);
                 }
-                free(u8);
+                mem_free(u8);
             }
             ImmReleaseContext(hwnd, himc);
             return 0;

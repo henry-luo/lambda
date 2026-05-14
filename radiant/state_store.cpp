@@ -2303,9 +2303,9 @@ void form_control_set_value(DocState* state, View* view, const char* value, uint
         // of text editing and validation history that tc_set_value provides.)
         FormControlProp* form = block->form;
         if (form->current_value) {
-            free(form->current_value);
+            mem_free(form->current_value);
         }
-        form->current_value = (char*)malloc(len + 1);
+        form->current_value = (char*)mem_alloc(len + 1, MEM_CAT_DOM);
         memcpy(form->current_value, value, len);
         form->current_value[len] = '\0';
         form->current_value_len = len;

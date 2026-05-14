@@ -1,7 +1,7 @@
 #pragma once
 #include "../lambda/input/css/css_value.hpp"
+#include "../lib/memtrack.h"
 #include <string.h>      // strcmp used by inline get_input_control_type
-#include <stdlib.h>      // free used in destructor
 
 struct DomElement;
 
@@ -256,11 +256,11 @@ struct FormControlProp {
         preedit_utf8(nullptr), preedit_len(0), preedit_caret(0) {}
 
     ~FormControlProp() {
-        if (current_value) { free(current_value); current_value = nullptr; }
-        if (custom_validity_msg) { free(custom_validity_msg); custom_validity_msg = nullptr; }
-        if (value_at_focus) { free(value_at_focus); value_at_focus = nullptr; }
+        if (current_value) { mem_free(current_value); current_value = nullptr; }
+        if (custom_validity_msg) { mem_free(custom_validity_msg); custom_validity_msg = nullptr; }
+        if (value_at_focus) { mem_free(value_at_focus); value_at_focus = nullptr; }
         if (history) { te_history_free((EditHistory*)history); history = nullptr; }
-        if (preedit_utf8) { free(preedit_utf8); preedit_utf8 = nullptr; }
+        if (preedit_utf8) { mem_free(preedit_utf8); preedit_utf8 = nullptr; }
     }
 };
 
