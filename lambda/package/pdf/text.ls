@@ -495,8 +495,34 @@ fn _num_width(v) {
     else { 500.0 }
 }
 
+fn _cid_width_segment_value(seg, code) {
+    if (seg.widths is array and code >= seg.first and code < seg.first + len(seg.widths)) {
+        _num_width(seg.widths[code - seg.first])
+    }
+    else if (seg.width != null and code >= seg.first and code <= seg.last) { _num_width(seg.width) }
+    else { null }
+}
+
+fn _cid_width_lookup_loop(segments, code, i, n) {
+    if (i >= n) { null }
+    else {
+        let hit = _cid_width_segment_value(segments[i], code)
+        if (hit != null) { hit } else { _cid_width_lookup_loop(segments, code, i + 1, n) }
+    }
+}
+
+fn _cid_width_units(fi, code) {
+    if (fi and fi.cid_widths is array) {
+        let hit = _cid_width_lookup_loop(fi.cid_widths, code, 0, len(fi.cid_widths))
+        if (hit != null) { hit } else { _num_width(fi.default_width) }
+    }
+    else { null }
+}
+
 fn _glyph_width_units(fi, code) {
-    if (fi and fi.widths is array and code >= fi.first_char and code <= fi.last_char) {
+    let cid_width = _cid_width_units(fi, code)
+    if (cid_width != null) { cid_width }
+    else if (fi and fi.widths is array and code >= fi.first_char and code <= fi.last_char) {
         let idx = code - fi.first_char
         if (idx >= 0 and idx < len(fi.widths)) { _num_width(fi.widths[idx]) }
         else { 500.0 }

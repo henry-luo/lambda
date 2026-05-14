@@ -800,9 +800,9 @@ bool is_inline_svg_element(DomElement* elem) {
 // SVG Defs: Gradient definitions and element refs
 // ============================================================================
 
-#define SVG_MAX_GRAD_DEFS  64
+#define SVG_MAX_GRAD_DEFS  4096
 #define SVG_MAX_GRAD_STOPS 64
-#define SVG_MAX_ELEM_DEFS  64
+#define SVG_MAX_ELEM_DEFS  4096
 
 struct SvgGradStop {
     float   offset;
@@ -1067,12 +1067,16 @@ static bool draw_pattern_fill(SvgRenderContext* ctx, RdtPath* path, Element* pat
 
     svg_push_clip(ctx, path, transform);
 
-    float start_x = x;
+    float pattern_tx = pattern_matrix.e13;
+    float pattern_ty = pattern_matrix.e23;
+    float start_x = x + pattern_tx;
     while (start_x + w > bx) start_x -= w;
     while (start_x + w <= bx) start_x += w;
-    float start_y = y;
+    start_x -= pattern_tx;
+    float start_y = y + pattern_ty;
     while (start_y + h > by) start_y -= h;
     while (start_y + h <= by) start_y += h;
+    start_y -= pattern_ty;
 
     float tile_y = start_y;
     while (tile_y < by + bh + h) {
