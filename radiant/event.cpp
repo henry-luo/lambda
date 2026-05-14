@@ -16,6 +16,7 @@
 
 #include "../lib/log.h"
 #include "../lib/utf.h"
+#include "../lib/str.h"
 // str.h included via view.hpp
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
@@ -33,6 +34,7 @@
 #include "../lib/hashmap.h"           // hashmap for event handler registry lookup
 #include "../lib/memtrack.h"          // mem_free
 #include <chrono>       // timing for reactive event dispatch
+#include <string.h>
 
 // thread-local eval context used by heap allocation functions
 extern __thread EvalContext* context;
@@ -200,6 +202,45 @@ static void sync_viewport_scroll_state(EventContext* evcon) {
     doc_state_sync_viewport_scroll(state, doc, scroll_x, scroll_y);
 }
 
+static bool pdf_text_run_metrics(ViewText* text, float* out_width, bool* out_copy_space) {
+    if (out_width) *out_width = 0.0f;
+    if (out_copy_space) *out_copy_space = false;
+    if (!text || !text->parent || !text->parent->is_element()) return false;
+
+    DomElement* elem = lam::dom_require_element(text->parent);
+    const char* cls = elem->get_attribute("class");
+    if (!cls || !strstr(cls, "pdf-text-run")) return false;
+
+    const char* width_attr = elem->get_attribute("data-pdf-width");
+    float width = width_attr ? (float)str_to_double_default(width_attr, strlen(width_attr), 0.0) : 0.0f;
+    if (width <= 0.0f) return false;
+
+    const char* copy_attr = elem->get_attribute("data-pdf-copy-space");
+    if (out_width) *out_width = width;
+    if (out_copy_space) *out_copy_space = copy_attr && strcmp(copy_attr, "1") == 0;
+    return true;
+}
+
+static int pdf_visible_end_offset(ViewText* text, TextRect* rect, bool copy_space) {
+    int end_offset = rect ? rect->start_index + max(rect->length, 0) : 0;
+    if (!copy_space || !text || !rect || end_offset <= rect->start_index) return end_offset;
+    unsigned char* data = text->text_data();
+    if (data && data[end_offset - 1] == ' ') return end_offset - 1;
+    return end_offset;
+}
+
+static float pdf_text_run_visible_natural_width(FontBox* font, TextRect* rect, bool copy_space) {
+    float width = rect ? rect->width : 0.0f;
+    if (copy_space && font && font->style) {
+        width -= font->style->space_width;
+    }
+    return width > 0.0f ? width : (rect ? rect->width : 0.0f);
+}
+
+static float pdf_text_run_visible_natural_width(EventContext* evcon, TextRect* rect, bool copy_space) {
+    return pdf_text_run_visible_natural_width(evcon ? &evcon->font : NULL, rect, copy_space);
+}
+
 void target_children(EventContext* evcon, View* view) {
     do {
         if (view->is_block()) {
@@ -231,7 +272,13 @@ void target_text_view(EventContext* evcon, ViewText* text) {
 
     NEXT_RECT:
     float x = evcon->block.x + text_rect->x, y = evcon->block.y + text_rect->y;
-    float rect_right = x + text_rect->width;
+    float pdf_width = 0.0f;
+    bool pdf_copy_space = false;
+    float rect_width = text_rect->width;
+    if (pdf_text_run_metrics(text, &pdf_width, &pdf_copy_space)) {
+        rect_width = pdf_width;
+    }
+    float rect_right = x + rect_width;
     float rect_bottom = y + text_rect->height;
 
     log_debug("target text:'%t' start:%d, len:%d, x:%d, y:%d, wd:%d, hg:%d, blk_x:%d",
@@ -3128,10 +3175,13 @@ int calculate_char_offset_from_position(EventContext* evcon, ViewText* text,
     TextRect* rect, int mouse_x, int mouse_y) {
     unsigned char* str = text->text_data();
     float x = evcon->block.x + rect->x;
-    float y = evcon->block.y + rect->y;
 
     unsigned char* p = str + rect->start_index;
-    unsigned char* end = p + max(rect->length, 0);
+    float pdf_width = 0.0f;
+    bool pdf_copy_space = false;
+    bool is_pdf_text_run = pdf_text_run_metrics(text, &pdf_width, &pdf_copy_space);
+    int visible_end_offset = pdf_visible_end_offset(text, rect, pdf_copy_space);
+    unsigned char* end = str + (is_pdf_text_run ? visible_end_offset : rect->start_index + max(rect->length, 0));
     int byte_offset = rect->start_index;  // track byte offset for return value
 
     float pixel_ratio = (evcon->ui_context && evcon->ui_context->pixel_ratio > 0)
@@ -3142,7 +3192,16 @@ int calculate_char_offset_from_position(EventContext* evcon, ViewText* text,
     float word_spacing = evcon->font.style ? evcon->font.style->word_spacing : 0.0f;
 
     bool has_space = false;
-    float prev_x = x;
+
+    if (is_pdf_text_run && pdf_width > 0.0f) {
+        float visible_width = pdf_text_run_visible_natural_width(evcon, rect, pdf_copy_space);
+        if (visible_width > 0.0f) {
+            float local_pdf_x = (float)mouse_x - x;
+            if (local_pdf_x <= 0.0f) return rect->start_index;
+            if (local_pdf_x >= pdf_width) return visible_end_offset;
+            mouse_x = (int)(x + (local_pdf_x * visible_width / pdf_width)); // INT_CAST_OK: event mouse coordinate API is integer-based
+        }
+    }
 
     log_debug("calculate_char_offset: mouse_x=%d, start x=%.1f, rect.width=%.1f, rect.length=%d, block.x=%.1f, rect.x=%.1f",
               mouse_x, x, rect->width, rect->length, evcon->block.x, rect->x);
@@ -3210,7 +3269,6 @@ int calculate_char_offset_from_position(EventContext* evcon, ViewText* text,
             return byte_offset;
         }
 
-        prev_x = x;
         x += wd;
         p += bytes;
         byte_offset += bytes;
@@ -3234,7 +3292,11 @@ void calculate_position_from_char_offset(EventContext* evcon, ViewText* text,
     float y = rect->y;
 
     unsigned char* p = str + rect->start_index;
-    unsigned char* end = p + max(rect->length, 0);
+    float pdf_width = 0.0f;
+    bool pdf_copy_space = false;
+    bool is_pdf_text_run = pdf_text_run_metrics(text, &pdf_width, &pdf_copy_space);
+    int visible_end_offset = pdf_visible_end_offset(text, rect, pdf_copy_space);
+    unsigned char* end = str + (is_pdf_text_run ? visible_end_offset : rect->start_index + max(rect->length, 0));
     int byte_offset = rect->start_index;  // track byte offset
     float pixel_ratio = (evcon->ui_context && evcon->ui_context->pixel_ratio > 0)
         ? evcon->ui_context->pixel_ratio : 1.0f;
@@ -3287,6 +3349,16 @@ void calculate_position_from_char_offset(EventContext* evcon, ViewText* text,
         p += bytes;
         byte_offset += bytes;
     }
+    if (is_pdf_text_run && pdf_width > 0.0f) {
+        float visible_width = pdf_text_run_visible_natural_width(evcon, rect, pdf_copy_space);
+        if (visible_width > 0.0f) {
+            if (target_offset >= visible_end_offset) {
+                x = rect->x + pdf_width;
+            } else {
+                x = rect->x + (x - rect->x) * pdf_width / visible_width;
+            }
+        }
+    }
     log_debug("[CALC-POS] final x=%.1f for target_offset=%d", x, target_offset);
 
     *out_x = x;
@@ -3306,8 +3378,13 @@ static float event_glyph_x_resolver(UiContext* uicon, ViewText* text,
     if (!text || !rect) return rect ? rect->x : 0.0f;
     if (byte_offset <= rect->start_index) return rect->x;
     if (rect->length <= 0) return rect->x;
-    if (byte_offset >= rect->start_index + rect->length) {
-        return rect->x + rect->width;
+    float pdf_width = 0.0f;
+    bool pdf_copy_space = false;
+    bool is_pdf_text_run = pdf_text_run_metrics(text, &pdf_width, &pdf_copy_space);
+    int visible_end_offset = pdf_visible_end_offset(text, rect, pdf_copy_space);
+    int rect_end_offset = is_pdf_text_run ? visible_end_offset : rect->start_index + rect->length;
+    if (byte_offset >= rect_end_offset) {
+        return rect->x + (is_pdf_text_run ? pdf_width : rect->width);
     }
 
     // Mirror calculate_position_from_char_offset, but build a temporary
@@ -3319,7 +3396,7 @@ static float event_glyph_x_resolver(UiContext* uicon, ViewText* text,
 
     unsigned char* str = text->text_data();
     unsigned char* p = str + rect->start_index;
-    unsigned char* end = p + rect->length;
+    unsigned char* end = str + rect_end_offset;
     int byte_off = rect->start_index;
     float x = rect->x;
     bool has_space = false;
@@ -3344,6 +3421,15 @@ static float event_glyph_x_resolver(UiContext* uicon, ViewText* text,
         p += bytes;
         byte_off += bytes;
     }
+    if (is_pdf_text_run && pdf_width > 0.0f) {
+        float visible_width = pdf_text_run_visible_natural_width(&fbox, rect, pdf_copy_space);
+        if (visible_width > 0.0f) {
+            if (byte_offset >= visible_end_offset) {
+                return rect->x + pdf_width;
+            }
+            return rect->x + (x - rect->x) * pdf_width / visible_width;
+        }
+    }
     return x;
 }
 
@@ -3363,7 +3449,15 @@ static int event_byte_offset_for_x_resolver(UiContext* uicon, ViewText* text,
     if (!text || !rect) return rect ? rect->start_index : 0;
     if (rect->length <= 0) return rect->start_index;
     if (target_local_x <= rect->x) return rect->start_index;
-    if (target_local_x >= rect->x + rect->width) {
+    float pdf_width = 0.0f;
+    bool pdf_copy_space = false;
+    bool is_pdf_text_run = pdf_text_run_metrics(text, &pdf_width, &pdf_copy_space);
+    int visible_end_offset = pdf_visible_end_offset(text, rect, pdf_copy_space);
+    float target_x = target_local_x;
+
+    if (is_pdf_text_run && pdf_width > 0.0f) {
+        if (target_x >= rect->x + pdf_width) return visible_end_offset;
+    } else if (target_x >= rect->x + rect->width) {
         return rect->start_index + rect->length;
     }
 
@@ -3374,10 +3468,17 @@ static int event_byte_offset_for_x_resolver(UiContext* uicon, ViewText* text,
 
     unsigned char* str = text->text_data();
     unsigned char* p = str + rect->start_index;
-    unsigned char* end = p + rect->length;
+    unsigned char* end = str + (is_pdf_text_run ? visible_end_offset : rect->start_index + rect->length);
     int byte_off = rect->start_index;
     float x = rect->x;
     bool has_space = false;
+
+    if (is_pdf_text_run && pdf_width > 0.0f) {
+        float visible_width = pdf_text_run_visible_natural_width(&fbox, rect, pdf_copy_space);
+        if (visible_width > 0.0f) {
+            target_x = rect->x + (target_x - rect->x) * visible_width / pdf_width;
+        }
+    }
 
     while (p < end) {
         float wd = 0;
@@ -3396,12 +3497,12 @@ static int event_byte_offset_for_x_resolver(UiContext* uicon, ViewText* text,
             wd = ginfo.advance_x;
         }
         // Caret goes BEFORE this glyph if target_local_x is left of the midpoint.
-        if (target_local_x < x + wd / 2.0f) return byte_off;
+        if (target_x < x + wd / 2.0f) return byte_off;
         x += wd;
         p += bytes;
         byte_off += bytes;
     }
-    return rect->start_index + rect->length;
+    return is_pdf_text_run ? visible_end_offset : rect->start_index + rect->length;
 }
 
 __attribute__((constructor))
@@ -3975,9 +4076,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 // through that gap directly below the anchor x and the
                 // recomputed offset would equal the anchor offset -> selection
                 // visually disappears for one frame.
-                float pixel_ratio = (evcon.ui_context && evcon.ui_context->pixel_ratio > 0)
-                    ? evcon.ui_context->pixel_ratio : 1.0f;
-                float rel_y = (motion->y / pixel_ratio) - sel_block_y;
+                float rel_y = motion->y - sel_block_y;
                 TextRect* picked = rect;
                 bool in_gap = false;
                 int gap_offset = -1;
