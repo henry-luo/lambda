@@ -809,7 +809,17 @@ void jm_collect_body_refs(JsAstNode* node, struct hashmap* refs) {
     }
     case JS_AST_NODE_MEMBER_EXPRESSION: {
         JsMemberNode* m = (JsMemberNode*)node;
-        jm_collect_body_refs(m->object, refs);
+        bool is_super = false;
+        if (m->object && m->object->node_type == JS_AST_NODE_IDENTIFIER) {
+            JsIdentifierNode* obj_id = (JsIdentifierNode*)m->object;
+            is_super = obj_id->name && obj_id->name->len == 5 &&
+                strncmp(obj_id->name->chars, "super", 5) == 0;
+        }
+        if (is_super) {
+            jm_name_set_add(refs, "_js_this");
+        } else {
+            jm_collect_body_refs(m->object, refs);
+        }
         if (m->computed) jm_collect_body_refs(m->property, refs);
         break;
     }

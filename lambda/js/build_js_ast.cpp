@@ -1512,10 +1512,23 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
         return (JsAstNode*)import_node;
     } else if (strcmp(node_type, "meta_property") == 0) {
         // Handle new.target and import.meta
-        // Tree-sitter produces: meta_property -> "new" "." "target" or "import" "." "meta"
-        uint32_t text_len = ts_node_end_byte(expr_node) - ts_node_start_byte(expr_node);
-        const char* text = tp->source + ts_node_start_byte(expr_node);
-        if (text_len >= 10 && strncmp(text, "new.target", 10) == 0) {
+        bool is_new_target = false;
+        uint32_t child_count = ts_node_child_count(expr_node);
+        for (uint32_t i = 0; i < child_count; i++) {
+            TSNode child = ts_node_child(expr_node, i);
+            const char* child_type = ts_node_type(child);
+            if (strcmp(child_type, "new") == 0) {
+                for (uint32_t j = i + 1; j < child_count; j++) {
+                    TSNode next = ts_node_child(expr_node, j);
+                    if (strcmp(ts_node_type(next), "target") == 0) {
+                        is_new_target = true;
+                        break;
+                    }
+                }
+                break;
+            }
+        }
+        if (is_new_target) {
             JsIdentifierNode* nt_node = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, expr_node, sizeof(JsIdentifierNode));
             nt_node->name = name_pool_create_len(tp->name_pool, "new.target", 10);
             nt_node->base.type = &TYPE_ANY;
@@ -2423,6 +2436,13 @@ JsAstNode* build_js_template_literal(JsTranspiler* tp, TSNode template_node) {
             // cooked: decode escape sequence
             if (source.length >= 2 && source.str[0] == '\\') {
                 char esc = source.str[1];
+                if (esc == '\n' || esc == '\r') {
+                    // line continuation has empty cooked value
+                } else if ((unsigned char)esc == 0xE2 && source.length >= 4 &&
+                           (unsigned char)source.str[2] == 0x80 &&
+                           ((unsigned char)source.str[3] == 0xA8 || (unsigned char)source.str[3] == 0xA9)) {
+                    // U+2028/U+2029 line continuation also has empty cooked value
+                } else
                 if (esc == 'u' && source.length >= 6 && source.str[2] != '{') {
                     // \uXXXX — 4-hex-digit Unicode escape, encode as WTF-8 (allows surrogates)
                     char hex[5] = {source.str[2], source.str[3], source.str[4], source.str[5], 0};

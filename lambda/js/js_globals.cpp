@@ -5994,6 +5994,14 @@ static bool js_func_is_constructor(Item func_item) {
         Item target = js_proxy_get_target(func_item);
         return js_func_is_constructor(target);
     }
+    if (get_type_id(func_item) == LMD_TYPE_MAP) {
+        bool own_instance_proto = false;
+        js_map_get_fast_ext(func_item.map, "__instance_proto__", 18, &own_instance_proto);
+        if (own_instance_proto) return true;
+        bool own_ctor = false;
+        Item ctor = js_map_get_fast_ext(func_item.map, "__ctor__", 8, &own_ctor);
+        return own_ctor && get_type_id(ctor) == LMD_TYPE_FUNC;
+    }
     if (get_type_id(func_item) != LMD_TYPE_FUNC) return false;
     JsFunctionLayout* fn = (JsFunctionLayout*)func_item.function;
     if (fn->flags & JS_FUNC_FLAG_ARROW_G) return false;
@@ -6053,6 +6061,11 @@ extern "C" Item js_reflect_construct(Item target, Item args_array, Item new_targ
                 args[i] = js_array_get(args_array, idx);
             }
         }
+    }
+    if (get_type_id(target) == LMD_TYPE_MAP) {
+        Item nt_val = (nt_type == LMD_TYPE_FUNC || get_type_id(new_target) == LMD_TYPE_MAP || js_is_proxy(new_target)) ? new_target : target;
+        js_set_new_target(nt_val);
+        return js_new_from_class_object(target, args, argc);
     }
     // For proxy targets, delegate to [[Construct]] trap
     if (js_is_proxy(target)) {
@@ -11756,6 +11769,15 @@ extern "C" Item js_delete_property(Item obj, Item key) {
     // v25: Handle array element deletion — set element to sentinel to create "hole"
     if (get_type_id(obj) == LMD_TYPE_ARRAY) {
         Array* arr = obj.array;
+        if (get_type_id(key) == LMD_TYPE_STRING) {
+            String* sk = it2s(key);
+            if (sk && sk->len == 6 && strncmp(sk->chars, "length", 6) == 0) {
+                if (js_strict_mode) {
+                    js_throw_type_error("Cannot delete non-configurable property");
+                }
+                return (Item){.item = b2it(false)};
+            }
+        }
         // Convert key to numeric index
         int64_t idx = -1;
         if (get_type_id(key) == LMD_TYPE_INT) {
@@ -13359,6 +13381,31 @@ extern "C" int64_t js_set_last_with_binding_if_valid(Item key, Item value, int64
     return 1;
 }
 
+extern "C" Item js_delete_identifier_with_binding(Item key, int64_t declared_binding) {
+    if (js_with_stack_depth > 0) {
+        for (int i = js_with_stack_depth - 1; i >= 0; i--) {
+            Item scope_obj = js_with_stack[i];
+            if (get_type_id(scope_obj) != LMD_TYPE_MAP) continue;
+            if (it2b(js_in(key, scope_obj))) {
+                if (js_check_exception()) return (Item){.item = b2it(false)};
+                Item unscopables_sym = (Item){.item = i2it(-(int64_t)(11 + JS_SYMBOL_BASE))};
+                Item unscopables = js_property_get(scope_obj, unscopables_sym);
+                if (js_check_exception()) return (Item){.item = b2it(false)};
+                if (get_type_id(unscopables) == LMD_TYPE_MAP) {
+                    Item blocked = js_property_get(unscopables, key);
+                    if (js_check_exception()) return (Item){.item = b2it(false)};
+                    if (js_is_truthy(blocked)) continue;
+                }
+                return js_delete_property(scope_obj, key);
+            }
+            if (js_check_exception()) return (Item){.item = b2it(false)};
+        }
+    }
+    if (declared_binding) return (Item){.item = b2it(false)};
+    Item global = js_get_global_this();
+    return js_delete_property(global, key);
+}
+
 // js_get_global_property: look up a property on the global object by name string
 // Used as fallback for unresolved identifiers — implements browser-like named access
 extern "C" Item js_get_global_property(Item key) {
@@ -13490,7 +13537,7 @@ extern "C" void js_define_global_var_property(Item key, Item value) {
     memset(&pd, 0, sizeof(pd));
     pd.flags = JS_PD_HAS_VALUE | JS_PD_HAS_WRITABLE | JS_PD_HAS_ENUMERABLE |
         JS_PD_HAS_CONFIGURABLE | JS_PD_WRITABLE | JS_PD_ENUMERABLE;
-    js_pd_set_configurable(&pd, true);
+    js_pd_set_configurable(&pd, false);
     pd.value = value;
     bool is_new_property = !it2b(js_has_own_property(global, key));
     if (!is_new_property) return;

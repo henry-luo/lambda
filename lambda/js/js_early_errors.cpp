@@ -233,6 +233,15 @@ static void check_identifier_reserved(EarlyErrorCtx* ctx, JsAstNode* node) {
         return;
     }
 
+    if (ctx->in_async && strcmp(name, "await") == 0) {
+        ee_error(ctx, node, "'await' cannot be used as an identifier in async functions");
+        return;
+    }
+    if (ctx->in_generator && strcmp(name, "yield") == 0) {
+        ee_error(ctx, node, "'yield' cannot be used as an identifier in generator functions");
+        return;
+    }
+
     // v17: eval/arguments as binding names in strict mode
     if (ctx->in_strict) {
         if (strcmp(name, "eval") == 0 || strcmp(name, "arguments") == 0) {

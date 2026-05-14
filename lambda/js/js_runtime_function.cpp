@@ -138,6 +138,12 @@ extern "C" void js_mark_async_func(Item fn_item) {
     fn->flags |= JS_FUNC_FLAG_ASYNC;
 }
 
+extern "C" void js_mark_derived_constructor_func(Item fn_item) {
+    if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
+    JsFunction* fn = (JsFunction*)fn_item.function;
+    fn->flags |= JS_FUNC_FLAG_DERIVED_CTOR;
+}
+
 // Mark a function as an arrow function (non-constructable)
 extern "C" void js_mark_arrow_func(Item fn_item) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;

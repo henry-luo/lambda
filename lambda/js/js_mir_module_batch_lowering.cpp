@@ -3762,9 +3762,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             if (active_ctor->fc->capture_count > 0) {
                                 ctor_fn = jm_build_closure_for_method(mt, active_ctor->fc, active_ctor->param_count);
                             } else {
-                                ctor_fn = jm_call_2(mt, "js_new_function", MIR_T_I64,
-                                    MIR_T_I64, MIR_new_ref_op(mt->ctx, active_ctor->fc->func_item),
-                                    MIR_T_I64, MIR_new_int_op(mt->ctx, active_ctor->param_count));
+                                ctor_fn = jm_create_method_function(mt, active_ctor->fc, active_ctor->param_count);
                             }
                             MIR_reg_t ctor_key = jm_box_string_literal(mt, "__ctor__", 8);
                             jm_call_3(mt, "js_property_set", MIR_T_I64,
@@ -3855,7 +3853,10 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             }
                             // v21: Handle member-expression superclass in class expressions
                             if (!ce->superclass && ce->node && ce->node->superclass &&
-                                ce->node->superclass->node_type != JS_AST_NODE_IDENTIFIER) {
+                                ce->node->superclass->node_type != JS_AST_NODE_IDENTIFIER &&
+                                                                ce->node->superclass->node_type != JS_AST_NODE_NULL &&
+                                                                !(ce->node->superclass->node_type == JS_AST_NODE_LITERAL &&
+                                                                    ((JsLiteralNode*)ce->node->superclass)->literal_type == JS_LITERAL_NULL)) {
                                 MIR_reg_t super_val = jm_transpile_box_item(mt, ce->node->superclass);
                                 MIR_reg_t sp_key = jm_box_string_literal(mt, "prototype", 9);
                                 MIR_reg_t sp_proto = jm_call_2(mt, "js_property_get", MIR_T_I64,
@@ -3865,6 +3866,22 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, last_proto),
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_proto));
                                 ctor_super_val = super_val;
+                            }
+                            JsAstNode* heritage = cls_node->superclass ? cls_node->superclass :
+                                ((ce->node && ce->node->superclass) ? ce->node->superclass : NULL);
+                            bool heritage_is_null = heritage && (heritage->node_type == JS_AST_NODE_NULL ||
+                                (heritage->node_type == JS_AST_NODE_LITERAL &&
+                                 ((JsLiteralNode*)heritage)->literal_type == JS_LITERAL_NULL));
+                            if (!heritage_is_null && heritage && heritage->node_type == JS_AST_NODE_IDENTIFIER) {
+                                JsIdentifierNode* heritage_id = (JsIdentifierNode*)heritage;
+                                heritage_is_null = heritage_id->name && heritage_id->name->len == 4 &&
+                                    strncmp(heritage_id->name->chars, "null", 4) == 0;
+                            }
+                            if (heritage_is_null) {
+                                MIR_reg_t null_proto = jm_emit_null(mt);
+                                jm_call_void_2(mt, "js_set_prototype",
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, last_proto),
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, null_proto));
                             }
                         }
                         // Add own instance methods

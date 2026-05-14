@@ -143,6 +143,7 @@ void js_set_function_source(Item fn_item, Item source_item);
 void js_mark_generator_func(Item fn_item);
 void js_mark_async_generator_func(Item fn_item);
 void js_mark_async_func(Item fn_item);
+void js_mark_derived_constructor_func(Item fn_item);
 void js_mark_eval_initializer_func_if_active(Item fn_item);
 Item js_get_constructor(Item name_item);
 Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
@@ -163,6 +164,8 @@ void js_set_this(Item this_val);
 Item js_get_new_target();
 void js_set_new_target(Item target);
 void js_set_direct_new_target(Item target);
+Item js_super_bind_this(Item this_val, Item construct_result);
+Item js_get_super_constructor_from_receiver(Item receiver, Item fallback_ctor);
 Item js_build_arguments_object(void);
 void js_set_arguments_info(int64_t is_strict);
 
@@ -356,6 +359,8 @@ Item js_object_is_sealed(Item obj);
 
 // Tagged template literals
 Item js_build_template_object(Item* cooked, Item* raw, int count);
+Item js_build_template_object_cached(Item* cooked, Item* raw, int count, int64_t site_id);
+void js_reset_template_registry(void);
 Item js_new_check_constructor_return(Item obj, Item result);
 Item js_object_prevent_extensions(Item obj);
 Item js_object_is_extensible(Item obj);

@@ -1291,6 +1291,10 @@ MIR_reg_t jm_build_closure_for_method(JsMirTranspiler* mt, JsFuncCollected* fc, 
         jm_call_void_1(mt, "js_mark_strict_func",
             MIR_T_I64, MIR_new_reg_op(mt->ctx, closure_reg));
     }
+    if (fc->is_derived_constructor) {
+        jm_call_void_1(mt, "js_mark_derived_constructor_func",
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, closure_reg));
+    }
     return closure_reg;
 }
 
@@ -1317,7 +1321,11 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     if (!ctor_name) {
         // Non-identifier callee (e.g., new (expr)(), new obj.method(), etc.)
         // Use dynamic dispatch which handles type checking and TypeError for non-constructors
-        MIR_reg_t callee = jm_transpile_box_item(mt, call->callee);
+        MIR_reg_t callee_value = jm_transpile_box_item(mt, call->callee);
+        MIR_reg_t callee = jm_new_reg(mt, "new_callee", MIR_T_I64);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, callee),
+            MIR_new_reg_op(mt->ctx, callee_value)));
         int arg_count = jm_count_args(call->arguments);
         bool has_spread = false;
         for (JsAstNode* chk = call->arguments; chk; chk = chk->next) {
@@ -2055,9 +2063,7 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
             if (active_ctor->fc->capture_count > 0) {
                 ctor_fn = jm_build_closure_for_method(mt, active_ctor->fc, active_ctor->param_count);
             } else {
-                ctor_fn = jm_call_2(mt, "js_new_function", MIR_T_I64,
-                    MIR_T_I64, MIR_new_ref_op(mt->ctx, active_ctor->fc->func_item),
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, active_ctor->param_count));
+                ctor_fn = jm_create_method_function(mt, active_ctor->fc, active_ctor->param_count);
             }
             MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
             // Set pending new.target to the class (picked up by js_call_function)
@@ -2164,7 +2170,11 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     // For constructors, always use the actual variable value (jm_transpile_box_item)
     // rather than creating a fresh js_new_function wrapper. This preserves
     // .prototype that was set on the function object (e.g., Foo.prototype = {...}).
-    MIR_reg_t callee = jm_transpile_box_item(mt, call->callee);
+    MIR_reg_t callee_value = jm_transpile_box_item(mt, call->callee);
+    MIR_reg_t callee = jm_new_reg(mt, "new_callee", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, callee),
+        MIR_new_reg_op(mt->ctx, callee_value)));
 
     // Create object with prototype chain: obj.__proto__ = callee.prototype
     // A5: If the constructor has known this.prop patterns, use pre-shaped object.
@@ -2182,6 +2192,14 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
                 fn = (JsFunctionNode*)decl->init;
         }
         if (fn) ctor_fc = jm_find_collected_func(mt, fn);
+    }
+
+    if (!ctor_fc || ctor_fc->ctor_prop_count <= 0) {
+        MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
+        return jm_call_3(mt, "js_new_from_class_object", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
+            MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
     }
 
     MIR_reg_t obj;
@@ -2211,14 +2229,6 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
             MIR_T_I64, MIR_new_int_op(mt->ctx, ctor_fc->ctor_prop_count));
         log_debug("A5: new %.*s using pre-shaped object with %d props",
                   ctor_len, ctor_name, ctor_fc->ctor_prop_count);
-    } else {
-        // Use js_new_from_class_object which handles both function constructors
-        // and class objects (MAPs with __ctor__ and __instance_proto__).
-        MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
-        return jm_call_3(mt, "js_new_from_class_object", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
-            MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
     }
 
     MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
@@ -3368,9 +3378,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                             if (active_ctor->fc->capture_count > 0) {
                                 ctor_fn = jm_build_closure_for_method(mt, active_ctor->fc, active_ctor->param_count);
                             } else {
-                                ctor_fn = jm_call_2(mt, "js_new_function", MIR_T_I64,
-                                    MIR_T_I64, MIR_new_ref_op(mt->ctx, active_ctor->fc->func_item),
-                                    MIR_T_I64, MIR_new_int_op(mt->ctx, active_ctor->param_count));
+                                ctor_fn = jm_create_method_function(mt, active_ctor->fc, active_ctor->param_count);
                             }
                             MIR_reg_t ctor_key = jm_box_string_literal(mt, "__ctor__", 8);
                             jm_call_3(mt, "js_property_set", MIR_T_I64,
@@ -3411,6 +3419,22 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, last_proto),
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_obj));
                                 ctor_super_val = super_val;
+                            }
+                            JsAstNode* heritage = cls_node->superclass ? cls_node->superclass :
+                                ((ce->node && ce->node->superclass) ? ce->node->superclass : NULL);
+                            bool heritage_is_null = heritage && (heritage->node_type == JS_AST_NODE_NULL ||
+                                (heritage->node_type == JS_AST_NODE_LITERAL &&
+                                 ((JsLiteralNode*)heritage)->literal_type == JS_LITERAL_NULL));
+                            if (!heritage_is_null && heritage && heritage->node_type == JS_AST_NODE_IDENTIFIER) {
+                                JsIdentifierNode* heritage_id = (JsIdentifierNode*)heritage;
+                                heritage_is_null = heritage_id->name && heritage_id->name->len == 4 &&
+                                    strncmp(heritage_id->name->chars, "null", 4) == 0;
+                            }
+                            if (heritage_is_null) {
+                                MIR_reg_t null_proto = jm_emit_null(mt);
+                                jm_call_void_2(mt, "js_set_prototype",
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, last_proto),
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, null_proto));
                             }
                         }
                         // Own instance methods

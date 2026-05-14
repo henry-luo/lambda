@@ -268,6 +268,19 @@ static inline Item js_numeric_operand(Item val) {
 // - No scientific notation for exponents in [-6, 20]
 // - Scientific notation uses 'e+' or 'e-' (no leading zeros in exponent)
 void js_double_to_string(double d, char* out, int out_size) {
+    if (isnan(d)) {
+        snprintf(out, out_size, "NaN");
+        return;
+    }
+    if (isinf(d)) {
+        snprintf(out, out_size, "%sInfinity", d < 0 ? "-" : "");
+        return;
+    }
+    if (d == 0.0) {
+        snprintf(out, out_size, "0");
+        return;
+    }
+
     // Handle negative numbers
     int neg = 0;
     if (d < 0) { neg = 1; d = -d; }
@@ -1727,8 +1740,8 @@ extern "C" int64_t js_double_to_int32(double d) {
 }
 
 extern "C" Item js_bitwise_and(Item left, Item right) {
-    left = js_numeric_operand(left); if (js_exception_pending) return ItemNull;
-    right = js_numeric_operand(right); if (js_exception_pending) return ItemNull;
+    left = js_to_numeric(left); if (js_exception_pending) return ItemNull;
+    right = js_to_numeric(right); if (js_exception_pending) return ItemNull;
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
@@ -1740,8 +1753,8 @@ extern "C" Item js_bitwise_and(Item left, Item right) {
 }
 
 extern "C" Item js_bitwise_or(Item left, Item right) {
-    left = js_numeric_operand(left); if (js_exception_pending) return ItemNull;
-    right = js_numeric_operand(right); if (js_exception_pending) return ItemNull;
+    left = js_to_numeric(left); if (js_exception_pending) return ItemNull;
+    right = js_to_numeric(right); if (js_exception_pending) return ItemNull;
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
@@ -1753,8 +1766,8 @@ extern "C" Item js_bitwise_or(Item left, Item right) {
 }
 
 extern "C" Item js_bitwise_xor(Item left, Item right) {
-    left = js_numeric_operand(left); if (js_exception_pending) return ItemNull;
-    right = js_numeric_operand(right); if (js_exception_pending) return ItemNull;
+    left = js_to_numeric(left); if (js_exception_pending) return ItemNull;
+    right = js_to_numeric(right); if (js_exception_pending) return ItemNull;
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;

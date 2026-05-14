@@ -50,6 +50,7 @@ typedef struct JsMirReference {
     MIR_reg_t base_reg;
     MIR_reg_t key_reg;
     bool strict;
+    bool uninitialized_this;
 } JsMirReference;
 
 // internal function declarations
@@ -379,11 +380,17 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t is_global_scope);
 Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast, const char* filename);
 void js_normalize_path_separators(char* path);
 Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, const char* filename);
+Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_t js_source_len, const char* filename);
 Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* filename);
+Item transpile_js_to_mir_len(Runtime* runtime, const char* js_source, size_t js_source_len, const char* filename);
 Item transpile_js_to_mir_preamble(Runtime* runtime, const char* js_source, const char* filename,
                                    JsPreambleState* out_state);
+Item transpile_js_to_mir_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,
+                                      const char* filename, JsPreambleState* out_state);
 Item transpile_js_to_mir_with_preamble(Runtime* runtime, const char* js_source, const char* filename,
                                         const JsPreambleState* preamble);
+Item transpile_js_to_mir_with_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,
+                                           const char* filename, const JsPreambleState* preamble);
 void preamble_state_destroy(JsPreambleState* state);
 Item load_js_module(Runtime* runtime, const char* js_path);
 bool js_is_cjs_file(const char* path);

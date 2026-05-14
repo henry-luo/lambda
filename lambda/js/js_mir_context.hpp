@@ -210,6 +210,7 @@ struct JsFuncCollected {
     bool is_iife_body;              // true if this function is a top-level IIFE body
     // P3: Constructor flag (set for class constructor methods only)
     bool is_constructor;            // true if this function is a class constructor
+    bool is_derived_constructor;    // true if class constructor has [[ConstructorKind]] derived
     bool has_rest_param;            // true if last param is ...rest
     bool uses_arguments;            // v18q: true if function body references 'arguments'
     bool has_non_simple_params;      // v20: true if function has default/rest/destructuring params (no arguments aliasing)

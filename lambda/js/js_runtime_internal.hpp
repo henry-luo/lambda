@@ -79,7 +79,7 @@ struct JsFunction {
     String* name;    // Function name (NULL if anonymous)
     int builtin_id;  // >0 for built-in method dispatch (0 = user function)
     Item properties_map; // v18: backing map for arbitrary properties (0 if none)
-    uint8_t flags;   // v20: bit 0 = is_generator
+    uint16_t flags;   // v20: JS_FUNC_FLAG_* bits
     int16_t formal_length; // ES spec .length: params before first default, excl rest (-1 = use param_count)
     Item* module_vars; // Per-module variable array (NULL for built-in functions)
     String* source_text; // v29: original source text for Function.prototype.toString
@@ -94,6 +94,7 @@ struct JsFunction {
 #define JS_FUNC_FLAG_METHOD    32
 #define JS_FUNC_FLAG_ASYNC_GEN 64  // async generator function (sets is_async in js_generator_create)
 #define JS_FUNC_FLAG_ASYNC     128 // async (non-generator) function: changes [[Prototype]] to %AsyncFunction%.prototype
+#define JS_FUNC_FLAG_DERIVED_CTOR 256
 #define JS_FUNC_FLAG_DATA_VIEW_ACCESSOR JS_FUNC_FLAG_METHOD
 
 extern "C" Item js_get_generator_shared_proto(bool is_async);

@@ -736,6 +736,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                                 if (me->is_constructor) {
                                     ce->constructor = me;
                                     fc->is_constructor = true;  // P3: mark fc for direct slot stores
+                                    fc->is_derived_constructor = (cls->superclass != NULL);
                                     // A5: Scan constructor for this.prop = expr
                                     if (fn->body) jm_scan_ctor_props(fc, fn->body);
                                 }
