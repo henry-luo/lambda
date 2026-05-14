@@ -81,7 +81,7 @@ static uint64_t js_dataview_bigint_to_uint64(Item value) {
     char* value_str = bigint_to_cstring_radix(value, 10);
     if (!value_str) return 0;
     unsigned long long raw_value = strtoull(value_str, NULL, 10);
-    decimal_free_string(value_str);
+    mem_free(value_str);
     return (uint64_t)raw_value;
 }
 
@@ -572,13 +572,13 @@ static Item js_atomics_replace_wait_suffix(Item report_string, const char* statu
     if (suffix_len == 0) return report_string;
     int prefix_len = (int)report->len - suffix_len;
     int len = prefix_len + status_len;
-    char* buf = (char*)malloc((size_t)len + 1);
+    char* buf = (char*)mem_alloc((size_t)len + 1, MEM_CAT_JS_RUNTIME);
     if (!buf) return report_string;
     memcpy(buf, report->chars, (size_t)prefix_len);
     memcpy(buf + prefix_len, status, (size_t)status_len);
     buf[len] = '\0';
     Item result = (Item){.item = s2it(heap_strcpy(buf, len))};
-    free(buf);
+    mem_free(buf);
     return result;
 }
 
@@ -1421,7 +1421,7 @@ extern "C" Item js_typed_array_new_from_array(int type_id, Item source) {
         Array* arr = source.array;
         int len = (int)arr->length;
         Item result = js_typed_array_new(type_id, len);
-        Item* values = len > 0 ? (Item*)malloc(sizeof(Item) * len) : NULL;
+        Item* values = len > 0 ? (Item*)mem_alloc(sizeof(Item) * len, MEM_CAT_JS_RUNTIME) : NULL;
         for (int i = 0; i < len; i++) values[i] = arr->items[i];
         for (int i = 0; i < len; i++) {
             Item idx = (Item){.item = i2it(i)};
@@ -1429,7 +1429,7 @@ extern "C" Item js_typed_array_new_from_array(int type_id, Item source) {
             if (val.item == JS_DELETED_SENTINEL_VAL) val = (Item){.item = ITEM_JS_UNDEFINED};
             js_typed_array_set(result, idx, val);
         }
-        if (values) free(values);
+        if (values) mem_free(values);
         return result;
     }
 

@@ -422,7 +422,7 @@ char* webdriver_screenshot(WebDriverSession* session) {
     if (!session || !session->uicon) return NULL;
     
     // Render to temporary file
-    const char* tmp_file = "/tmp/radiant_screenshot.png";
+    const char* tmp_file = "./temp/radiant_screenshot.png";
     
     if (render_uicontext_to_png(session->uicon, tmp_file) != 0) {
         log_error("webdriver: screenshot failed");

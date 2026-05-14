@@ -27,6 +27,7 @@
 #include "../input/css/dom_element.hpp"
 #include "../../lib/arraylist.h"
 #include "../../lib/log.h"
+#include "../../lib/memtrack.h"
 
 #include "../../radiant/dom_range.hpp"
 #include "../../radiant/state_store.hpp"
@@ -442,7 +443,7 @@ extern "C" Item js_range_to_string(void) {
     char* s = dom_range_to_string(r);
     if (!s) return make_str("");
     Item it = make_str(s);
-    free(s);
+    mem_free(s);
     return it;
 }
 
@@ -841,7 +842,7 @@ extern "C" Item js_selection_to_string(void) {
     char* out = dom_range_to_string_ex(r, DOM_STRINGIFY_RENDERED);
     if (!out) return make_str("");
     Item it = make_str(out);
-    free(out);
+    mem_free(out);
     return it;
 }
 

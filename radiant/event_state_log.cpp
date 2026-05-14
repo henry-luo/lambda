@@ -6,6 +6,7 @@
 
 #include "event_state_log.hpp"
 #include "../lib/log.h"
+#include "../lib/memtrack.h"
 #include "../lambda/input/css/dom_element.hpp"
 
 #include <ctype.h>
@@ -213,7 +214,7 @@ struct EventStateLog {
     log_category_t* category;
     char     path[EVENT_LOG_PATH_BUFSZ];
     char     doc_id[EVENT_LOG_DOC_ID_BUFSZ];
-    char*    doc_url;        /* malloc'd; logged once in session_start */
+    char*    doc_url;        /* mem_alloc'd; logged once in session_start */
     uint64_t seq;
     uint64_t cascade_seq;
     uint64_t mono_start_ns;  /* monotonic clock origin for this session */
@@ -318,7 +319,7 @@ static void write_envelope(EventStateLog* log, JsonWriter* w,
 EventStateLog* event_state_log_open(const char* doc_name, const char* doc_url) {
     make_temp_dir();
 
-    EventStateLog* log = (EventStateLog*)calloc(1, sizeof(EventStateLog));
+    EventStateLog* log = (EventStateLog*)mem_calloc(1, sizeof(EventStateLog), MEM_CAT_SYSTEM);
     if (!log) return NULL;
 
     log->pid = (int)getpid();
@@ -337,7 +338,7 @@ EventStateLog* event_state_log_open(const char* doc_name, const char* doc_url) {
     if (!log->out) {
         log_error("event_state_log: failed to open %s: %s",
                    log->path, strerror(errno));
-        free(log);
+        mem_free(log);
         return NULL;
     }
 
@@ -349,7 +350,7 @@ EventStateLog* event_state_log_open(const char* doc_name, const char* doc_url) {
     if (!log->category || strcmp(log->category->name, category_name) != 0) {
         log_error("event_state_log: failed to create log category %s", category_name);
         fclose(log->out);
-        free(log);
+        mem_free(log);
         return NULL;
     }
     log->category->enabled = 1;
@@ -361,7 +362,7 @@ EventStateLog* event_state_log_open(const char* doc_name, const char* doc_url) {
 
     if (doc_url && *doc_url) {
         size_t n = strlen(doc_url);
-        log->doc_url = (char*)malloc(n + 1);
+        log->doc_url = (char*)mem_alloc(n + 1, MEM_CAT_SYSTEM);
         if (log->doc_url) memcpy(log->doc_url, doc_url, n + 1);
     }
 
@@ -383,8 +384,8 @@ void event_state_log_close(EventStateLog* log) {
         fflush(log->out);
         fclose(log->out);
     }
-    free(log->doc_url);
-    free(log);
+    mem_free(log->doc_url);
+    mem_free(log);
 }
 
 bool event_state_log_enabled(EventStateLog* log) {

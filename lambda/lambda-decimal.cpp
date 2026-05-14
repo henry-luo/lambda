@@ -6,6 +6,7 @@
 #include "lambda-decimal.hpp"
 #include "lambda-data.hpp"
 #include "../lib/log.h"
+#include "../lib/mem.h"
 #include "../lib/strbuf.h"
 #include <mpdecimal.h>  // only included here
 
@@ -1498,7 +1499,7 @@ Item bigint_right_shift(Item a, Item b) {
 
 // ─── String Conversion ───────────────────────────────────────────────
 
-// returns malloc'd string - caller must free with mpd_free() or free()
+// returns mem_alloc'd string - caller must mem_free()
 char* bigint_to_cstring_radix(Item bi, int radix) {
     mpd_t* m = bigint_get_mpd(bi);
     if (!m) return NULL;
@@ -1519,9 +1520,11 @@ char* bigint_to_cstring_radix(Item bi, int radix) {
             char buf[32];
             snprintf(buf, sizeof(buf), "%lld", (long long)v);
             mpd_free(str);
-            return strdup(buf);
+            return mem_strdup(buf, MEM_CAT_STRING);
         }
-        return str; // caller frees with mpd_free()
+        char* owned = mem_strdup(str, MEM_CAT_STRING);
+        mpd_free(str);
+        return owned;
     }
 
     // non-10 radix: extract int64 and do manual conversion
@@ -1543,5 +1546,5 @@ char* bigint_to_cstring_radix(Item bi, int radix) {
     }
     if (negative) buf[--pos] = '-';
 
-    return strdup(buf + pos);
+    return mem_strdup(buf + pos, MEM_CAT_STRING);
 }

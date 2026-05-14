@@ -55,7 +55,7 @@ static uint64_t* jit_gc_root_snapshot_active(int* out_count) {
     }
     if (count <= 0) return NULL;
 
-    uint64_t* roots = (uint64_t*)malloc((size_t)count * sizeof(uint64_t));
+    uint64_t* roots = (uint64_t*)mem_alloc((size_t)count * sizeof(uint64_t), MEM_CAT_EVAL);
     if (!roots) return NULL;
     int idx = 0;
     frame = jit_gc_root_frame_top;
@@ -175,7 +175,7 @@ extern "C" void heap_gc_collect(void) {
     int jit_root_count = 0;
     uint64_t* jit_roots = jit_gc_root_snapshot_active(&jit_root_count);
     gc_collect(gc, jit_roots, jit_root_count, stack_base, stack_current);
-    free(jit_roots);
+    mem_free(jit_roots);
 }
 
 // register an external root slot (e.g., BSS global address)
@@ -185,7 +185,7 @@ extern "C" void heap_register_gc_root(uint64_t* slot) {
 }
 
 extern "C" uint64_t* heap_gc_root_slot_new(uint64_t value) {
-    uint64_t* slot = (uint64_t*)malloc(sizeof(uint64_t));
+    uint64_t* slot = (uint64_t*)mem_alloc(sizeof(uint64_t), MEM_CAT_EVAL);
     if (!slot) return NULL;
     *slot = value;
     heap_register_gc_root(slot);
@@ -208,7 +208,7 @@ static JitGcRootBlock* jit_gc_root_frame_get_block(JitGcRootFrame* frame, int64_
     }
     if (!create) return NULL;
 
-    block = (JitGcRootBlock*)calloc(1, sizeof(JitGcRootBlock));
+    block = (JitGcRootBlock*)mem_calloc(1, sizeof(JitGcRootBlock), MEM_CAT_EVAL);
     if (!block) {
         log_error("jit_gc_root_frame: failed to allocate block for index %lld", (long long)index);
         return NULL;
@@ -223,7 +223,7 @@ static JitGcRootBlock* jit_gc_root_frame_get_block(JitGcRootFrame* frame, int64_
 }
 
 extern "C" void heap_jit_gc_root_frame_enter() {
-    JitGcRootFrame* frame = (JitGcRootFrame*)calloc(1, sizeof(JitGcRootFrame));
+    JitGcRootFrame* frame = (JitGcRootFrame*)mem_calloc(1, sizeof(JitGcRootFrame), MEM_CAT_EVAL);
     if (!frame) {
         log_error("jit_gc_root_frame_enter: failed to allocate frame");
         return;
@@ -258,10 +258,10 @@ extern "C" void heap_jit_gc_root_frame_exit() {
         if (context && context->heap && context->heap->gc) {
             gc_unregister_root_range(context->heap->gc, block->slots);
         }
-        free(block);
+        mem_free(block);
         block = next;
     }
-    free(frame);
+    mem_free(frame);
 }
 
 // unregister an external root slot

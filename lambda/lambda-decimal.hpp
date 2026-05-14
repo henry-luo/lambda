@@ -258,7 +258,7 @@ Item bigint_left_shift(Item a, Item b);
 Item bigint_right_shift(Item a, Item b);
 
 // String conversion
-char* bigint_to_cstring_radix(Item bi, int radix);  // returns malloc'd string, caller frees
+char* bigint_to_cstring_radix(Item bi, int radix);  // returns mem_alloc'd string, caller mem_free()s
 
 // Get the mpd_t* from a BigInt Item (for advanced use)
 mpd_t* bigint_get_mpd(Item bi);

@@ -22,6 +22,7 @@
 #include "../mark_builder.hpp"
 #include "../mark_reader.hpp"
 #include "../../lib/log.h"
+#include "../../lib/mem.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/mempool.h"
 #include "../../lib/url.h"
@@ -3044,7 +3045,7 @@ static char* _option_text(DomElement* opt) {
     while (out->length > 0 && out->str[out->length - 1] == ' ') {
         out->str[--out->length] = '\0';
     }
-    char* result = strdup(out->str ? out->str : "");
+    char* result = mem_strdup(out->str ? out->str : "", MEM_CAT_JS_RUNTIME);
     strbuf_free(sb);
     strbuf_free(out);
     return result;
@@ -3133,10 +3134,10 @@ static DomElement* _option_owner_select(DomElement* opt) {
 }
 
 // Return the option's effective value (`value` attribute, or text content
-// if absent). Heap-allocated cstring caller must free.
+// if absent). Heap-allocated cstring caller must mem_free.
 static char* _option_value(DomElement* opt) {
     const char* v = dom_element_get_attribute(opt, "value");
-    if (v) return strdup(v);
+    if (v) return mem_strdup(v, MEM_CAT_JS_RUNTIME);
     return _option_text(opt);
 }
 
@@ -3235,7 +3236,7 @@ static bool _select_value_missing(DomElement* sel) {
                 if (!v || !*v) {
                     char* t = _option_text(ce);
                     bool empty_text = !t || !*t;
-                    free(t);
+                    mem_free(t);
                     if (empty_text) placeholder = ce;
                 }
                 break;
@@ -3673,11 +3674,11 @@ static Item _build_validity_state(DomElement* elem) {
                 // HTML pattern anchors the whole value (^(?:pattern)$)
                 // Build anchored pattern
                 size_t plen = strlen(pattern);
-                char* full_pattern = (char*)malloc(plen + 8);
+                char* full_pattern = (char*)mem_alloc(plen + 8, MEM_CAT_JS_RUNTIME);
                 if (full_pattern) {
                     snprintf(full_pattern, plen + 8, "^(?:%s)$", pattern);
                     Item re = js_create_regex(full_pattern, (int)strlen(full_pattern), "", 0);
-                    free(full_pattern);
+                    mem_free(full_pattern);
                     Item val_item = (Item){.item = s2it(heap_create_name(val))};
                     Item result = js_regex_test(re, val_item);
                     // pattern mismatch if regex does NOT match
@@ -4656,7 +4657,7 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
                 if (_get_selectedness(opt)) {
                     char* v = _option_value(opt);
                     String* s = heap_create_name(v ? v : "");
-                    free(v);
+                    mem_free(v);
                     return (Item){.item = s2it(s)};
                 }
                 if (first_non_disabled < 0 && !dom_element_has_attribute(opt, "disabled"))
@@ -4671,7 +4672,7 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
                 if (opt) {
                     char* v = _option_value(opt);
                     String* s = heap_create_name(v ? v : "");
-                    free(v);
+                    mem_free(v);
                     return (Item){.item = s2it(s)};
                 }
             }
@@ -4689,7 +4690,7 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
         if (strcmp(prop, "value") == 0) {
             char* v = _option_value(elem);
             String* s = heap_create_name(v ? v : "");
-            free(v);
+            mem_free(v);
             return (Item){.item = s2it(s)};
         }
         if (strcmp(prop, "text") == 0 || strcmp(prop, "label") == 0) {
@@ -4700,7 +4701,7 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
             }
             char* t = _option_text(elem);
             String* s = heap_create_name(t ? t : "");
-            free(t);
+            mem_free(t);
             return (Item){.item = s2it(s)};
         }
         if (strcmp(prop, "selected") == 0) {
@@ -5531,7 +5532,7 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
                 if (!opt) continue;
                 char* v = _option_value(opt);
                 bool match = v && strcmp(v, sv) == 0;
-                free(v);
+                mem_free(v);
                 if (match) { found = (int)i; break; } // INT_CAST_OK: option index
             }
             // Per spec, set selectedness of all options accordingly.
@@ -5721,7 +5722,7 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
                     bool has_newline = false;
                     for (size_t k = 0; k < slen; k++) { if (s[k] == '\r' || s[k] == '\n') { has_newline = true; break; } }
                     if (has_newline) {
-                        char* stripped = (char*)malloc(slen + 1);
+                        char* stripped = (char*)mem_alloc(slen + 1, MEM_CAT_JS_RUNTIME);
                         if (stripped) {
                             size_t out = 0;
                             for (size_t k = 0; k < slen; k++) {
@@ -5729,7 +5730,7 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
                             }
                             stripped[out] = '\0';
                             tc_set_value(elem, stripped, out);
-                            free(stripped);
+                            mem_free(stripped);
                             _value_mark_dirty(elem);
                             return value;
                         }
@@ -7015,8 +7016,8 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         FormControlProp* f = tc_get_or_create_form(elem);
         const char* msg = (argc > 0) ? fn_to_cstr(args[0]) : "";
         if (!msg) msg = "";
-        if (f->custom_validity_msg) { free(f->custom_validity_msg); }
-        f->custom_validity_msg = strdup(msg);
+        if (f->custom_validity_msg) { mem_free(f->custom_validity_msg); }
+        f->custom_validity_msg = mem_strdup(msg, MEM_CAT_DOM);
         return make_js_undefined();
     }
 

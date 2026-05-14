@@ -10,8 +10,8 @@
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/tagged.hpp"
 #include "../lib/log.h"
+#include "../lib/memtrack.h"
 
-#include <stdlib.h>
 #include <string.h>
 
 // External: defined in render_form.cpp (un-staticed for F8).
@@ -136,12 +136,12 @@ static bool ctx_menu_selection_bytes(DomElement* elem, uint32_t* out_a, uint32_t
 static void ctx_menu_exec_copy(DomElement* elem) {
     uint32_t a, b;
     if (!ctx_menu_selection_bytes(elem, &a, &b)) return;
-    char* tmp = (char*)malloc((size_t)(b - a) + 1);
+    char* tmp = (char*)mem_alloc((size_t)(b - a) + 1, MEM_CAT_TEMP);
     if (!tmp) return;
     memcpy(tmp, elem->form->current_value + a, b - a);
     tmp[b - a] = '\0';
     clipboard_copy_text(tmp);
-    free(tmp);
+    mem_free(tmp);
 }
 
 static void ctx_menu_exec_cut(DomElement* elem, DocState* state) {

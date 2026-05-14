@@ -11,6 +11,7 @@
 #include "dom_range.hpp"
 #include "../lib/arena.h"
 #include "../lib/log.h"
+#include "../lib/memtrack.h"
 #include "../lib/strbuf.h"
 #include "../lib/tagged.hpp"
 #include "../lambda/input/css/dom_node.hpp"
@@ -1160,7 +1161,7 @@ static void text_replace_data_str(DocState* st, DomText* t,
     size_t suffix_len = (t->length > u8_end) ? (t->length - u8_end) : 0;
     size_t new_len    = prefix + repl_bytes + suffix_len;
 
-    char* buf = (char*)malloc(new_len + 1);
+    char* buf = (char*)mem_alloc(new_len + 1, MEM_CAT_TEMP);
     if (!buf) return;
     if (prefix)     memcpy(buf,                      t->text,         prefix);
     if (repl_bytes) memcpy(buf + prefix,             repl_chars,      repl_bytes);
@@ -1168,7 +1169,7 @@ static void text_replace_data_str(DocState* st, DomText* t,
     buf[new_len] = '\0';
 
     String* s = arena_make_string(node_doc(static_cast<DomNode*>(t)), buf, new_len);
-    free(buf);
+    mem_free(buf);
     if (!s) return;
 
     t->native_string = s;
@@ -2107,7 +2108,7 @@ static void append_collapsed(StrBuf* sb, const char* buf, size_t len,
 
 char* dom_range_to_string_ex(const DomRange* r, DomStringifyMode mode) {
     if (!r || !r->start.node || !r->end.node) {
-        char* empty = (char*)malloc(1);
+        char* empty = (char*)mem_alloc(1, MEM_CAT_DOM);
         if (empty) empty[0] = '\0';
         return empty;
     }
@@ -2293,7 +2294,7 @@ char* dom_range_to_string_ex(const DomRange* r, DomStringifyMode mode) {
         }
     }
     size_t out_len = len - off;
-    char* out = (char*)malloc(out_len + 1);
+    char* out = (char*)mem_alloc(out_len + 1, MEM_CAT_DOM);
     if (out) {
         if (out_len > 0 && sb->str) memcpy(out, sb->str + off, out_len);
         out[out_len] = '\0';

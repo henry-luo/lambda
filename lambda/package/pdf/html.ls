@@ -59,6 +59,10 @@ fn _copy_content(el) {
     if (_ends_with_space(text)) { text } else { text ++ " " }
 }
 
+fn _copy_space_attr(el) {
+    if (_ends_with_space(_text_content(el))) { "0" } else { "1" }
+}
+
 fn _text_span_style(t) {
     let x = _attr_num(t, "data-pdf-x", _attr_num(t, "x", 0.0))
     let y = _attr_num(t, "data-pdf-y", _attr_num(t, "y", 0.0))
@@ -75,7 +79,9 @@ fn _text_span_style(t) {
 }
 
 fn _text_span(t) {
-    <span class: "pdf-text-run", style: _text_span_style(t); _copy_content(t)>
+    let width = _attr_num(t, "data-pdf-width", _attr_num(t, "textLength", 0.0))
+    <span class: "pdf-text-run", 'data-pdf-width': util.fmt_num(width),
+        'data-pdf-copy-space': _copy_space_attr(t), style: _text_span_style(t); _copy_content(t)>
 }
 
 pub fn text_layer(texts, width, height) {

@@ -447,7 +447,7 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
         int orig_idx = 0;
         int total_re2_groups = count_capture_groups(result);
         int remap_size = out->original_group_count + 1;
-        out->group_remap = (int*)calloc(remap_size, sizeof(int));
+        out->group_remap = (int*)mem_calloc(remap_size, sizeof(int), MEM_CAT_JS_RUNTIME);
         out->group_remap_count = remap_size;
         out->group_remap[0] = 0; // group 0 always maps to itself
 
@@ -815,11 +815,11 @@ JsRegexCompiled* js_regex_wrapper_compile(const char* pattern, int pattern_len,
         for (int i = 0; i < rw.filter_count; i++) {
             if (rw.filters[i].reject_pattern) delete rw.filters[i].reject_pattern;
         }
-        if (rw.group_remap) free(rw.group_remap);
+        if (rw.group_remap) mem_free(rw.group_remap);
         return nullptr;
     }
 
-    JsRegexCompiled* result = (JsRegexCompiled*)calloc(1, sizeof(JsRegexCompiled));
+    JsRegexCompiled* result = (JsRegexCompiled*)mem_calloc(1, sizeof(JsRegexCompiled), MEM_CAT_JS_RUNTIME);
     result->re2 = compiled;
     result->filter_count = rw.filter_count;
     result->has_filters = (rw.filter_count > 0);
@@ -1117,6 +1117,6 @@ void js_regex_compiled_free(JsRegexCompiled* compiled) {
             delete compiled->filters[i].reject_pattern;
         }
     }
-    if (compiled->group_remap) free(compiled->group_remap);
-    free(compiled);
+    if (compiled->group_remap) mem_free(compiled->group_remap);
+    mem_free(compiled);
 }
