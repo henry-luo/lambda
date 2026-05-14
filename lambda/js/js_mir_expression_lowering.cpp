@@ -1299,11 +1299,15 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
         left = jm_transpile_box_item(mt, bin->left);
     }
 
-    // Special case: instanceof — always use name-based check when possible.
-    // This handles builtin classes (Error, TypeError, etc.), user-defined classes,
-    // class aliases (var MyError = _MyError), and unresolved identifiers.
-    // Name-based check is more reliable than runtime variable lookup because class
-    // objects may not exist at runtime (e.g., class declarations inside function bodies).
+    int left_spill_slot = -1;
+    if (mt->in_generator && jm_has_yield(bin->right)) {
+        left_spill_slot = jm_gen_spill_save(mt, left);
+    }
+
+    // Special case: instanceof against Error-family builtins can use the
+    // runtime classname helper because thrown Error objects carry class names.
+    // Other identifiers must go through normal GetValue so unresolved bindings
+    // throw ReferenceError and aliases/global assignments observe runtime values.
     if (bin->op == JS_OP_INSTANCEOF && bin->right &&
         bin->right->node_type == JS_AST_NODE_IDENTIFIER) {
         JsIdentifierNode* rid = (JsIdentifierNode*)bin->right;
@@ -1319,31 +1323,6 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
                 (rlen == 11 && strncmp(rname, "SyntaxError", 11) == 0) ||
                 (rlen == 14 && strncmp(rname, "ReferenceError", 14) == 0) ||
                 (rlen == 14 && strncmp(rname, "AggregateError", 14) == 0);
-            // Known non-constructor namespace objects must NOT use name-based instanceof
-            // — they are not callable constructors and must throw TypeError per ES spec
-            // 'this' also bypasses name-based check since its type is only known at runtime
-            bool is_known_non_constructor =
-                (rlen == 4 && strncmp(rname, "Math", 4) == 0) ||
-                (rlen == 4 && strncmp(rname, "JSON", 4) == 0) ||
-                (rlen == 4 && strncmp(rname, "this", 4) == 0) ||
-                (rlen == 7 && strncmp(rname, "Atomics", 7) == 0) ||
-                (rlen == 7 && strncmp(rname, "Reflect", 7) == 0) ||
-                (rlen == 7 && strncmp(rname, "console", 7) == 0);
-            // Also check if the right side is an unresolved identifier
-            if (!is_builtin_class && !is_known_non_constructor) {
-                char rv_name[128];
-                snprintf(rv_name, sizeof(rv_name), "_js_%.*s", rlen, rname);
-                JsMirVarEntry* rv = jm_find_var(mt, rv_name);
-                if (!rv) {
-                    JsModuleConstEntry mclookup;
-                    snprintf(mclookup.name, sizeof(mclookup.name), "_js_%.*s", rlen, rname);
-                    JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
-                    if (!mc) {
-                        // Unresolved identifier — treat as name-based instanceof
-                        is_builtin_class = true;
-                    }
-                }
-            }
             if (is_builtin_class) {
                 MIR_reg_t classname = jm_box_string_literal(mt, rname, rlen);
                 return jm_call_2(mt, "js_instanceof_classname", MIR_T_I64,
@@ -1354,6 +1333,9 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
     }
 
     MIR_reg_t right = jm_transpile_box_item(mt, bin->right);
+    if (left_spill_slot >= 0) {
+        jm_gen_spill_load(mt, left, left_spill_slot);
+    }
     MIR_reg_t result = jm_call_2(mt, fn_name, MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, left),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, right));

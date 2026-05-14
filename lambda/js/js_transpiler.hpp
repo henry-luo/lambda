@@ -57,6 +57,7 @@ typedef struct JsTranspiler {
     int temp_var_counter;           // Counter for temporary variables
     int label_counter;              // Counter for labels
     bool in_expression;             // True when transpiling inside an expression (for function expressions)
+    bool in_async_function;         // True while building an async function body/parameters
     
     // Error handling
     bool has_errors;                // Error flag

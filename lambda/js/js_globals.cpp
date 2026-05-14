@@ -5027,6 +5027,13 @@ struct JsFuncName {
 static Item js_instanceof_impl(Item left, Item right, bool skip_symbol);
 extern "C" Item js_array_get_custom_proto(Item arr);
 
+static bool js_is_function_prototype_map_for_instanceof(Item item) {
+    if (get_type_id(item) != LMD_TYPE_MAP) return false;
+    bool is_proto = false;
+    js_map_get_fast_ext(item.map, "__is_proto__", 12, &is_proto);
+    return is_proto && js_class_id(item) == JS_CLASS_FUNCTION;
+}
+
 extern "C" Item js_instanceof(Item left, Item right) {
     return js_instanceof_impl(left, right, false);
 }
@@ -5137,11 +5144,69 @@ static Item js_instanceof_impl(Item left, Item right, bool skip_symbol) {
 
     if (right_type != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
 
+    if (js_is_function_prototype_map_for_instanceof(right)) {
+        Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
+        Item func_proto = js_property_get(right, proto_key);
+        if (js_check_exception()) return ItemNull;
+        TypeId fp_type = get_type_id(func_proto);
+        if (fp_type != LMD_TYPE_MAP && fp_type != LMD_TYPE_ARRAY && fp_type != LMD_TYPE_FUNC) {
+            js_throw_type_error("Function has non-object prototype in instanceof check");
+            return (Item){.item = b2it(false)};
+        }
+        Item obj = js_get_prototype_of(left);
+        int depth = 0;
+        while (obj.item != 0 && obj.item != ItemNull.item && depth < 32) {
+            TypeId ot = get_type_id(obj);
+            if (ot == LMD_TYPE_MAP && fp_type == LMD_TYPE_MAP && obj.map == func_proto.map) {
+                return (Item){.item = b2it(true)};
+            }
+            if (ot == LMD_TYPE_ARRAY && fp_type == LMD_TYPE_ARRAY && obj.array == func_proto.array) {
+                return (Item){.item = b2it(true)};
+            }
+            if (ot == LMD_TYPE_FUNC && fp_type == LMD_TYPE_FUNC && obj.function == func_proto.function) {
+                return (Item){.item = b2it(true)};
+            }
+            obj = js_get_prototype_of(obj);
+            depth++;
+        }
+        return (Item){.item = b2it(false)};
+    }
+
     // Get the class name from right (constructor's __class_name__)
     Item class_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
     Item right_name = map_get(right.map, class_key);
     if (right_name.item == 0 || get_type_id(right_name) != LMD_TYPE_STRING)
         return (Item){.item = b2it(false)};
+
+    bool has_instance_proto = false;
+    js_map_get_fast_ext(right.map, "__instance_proto__", 18, &has_instance_proto);
+    if (has_instance_proto) {
+        Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
+        Item ctor_proto = js_property_get(right, proto_key);
+        if (js_check_exception()) return ItemNull;
+        TypeId cp_type = get_type_id(ctor_proto);
+        if (cp_type != LMD_TYPE_MAP && cp_type != LMD_TYPE_ARRAY && cp_type != LMD_TYPE_FUNC) {
+            js_throw_type_error("Function has non-object prototype in instanceof check");
+            return (Item){.item = b2it(false)};
+        }
+        Item obj = js_get_prototype_of(left);
+        int depth = 0;
+        while (obj.item != 0 && obj.item != ItemNull.item && depth < 32) {
+            TypeId ot = get_type_id(obj);
+            if (ot == LMD_TYPE_MAP && cp_type == LMD_TYPE_MAP && obj.map == ctor_proto.map) {
+                return (Item){.item = b2it(true)};
+            }
+            if (ot == LMD_TYPE_ARRAY && cp_type == LMD_TYPE_ARRAY && obj.array == ctor_proto.array) {
+                return (Item){.item = b2it(true)};
+            }
+            if (ot == LMD_TYPE_FUNC && cp_type == LMD_TYPE_FUNC && obj.function == ctor_proto.function) {
+                return (Item){.item = b2it(true)};
+            }
+            obj = js_get_prototype_of(obj);
+            depth++;
+        }
+        return (Item){.item = b2it(false)};
+    }
 
     // Delegate to name-based check
     return js_instanceof_classname(left, right_name);
