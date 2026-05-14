@@ -563,6 +563,7 @@ Item js_get_global_property(Item key);
 Item js_get_global_property_strict(Item key);
 void js_set_global_property(Item key, Item value);
 void js_set_global_property_strict(Item key, Item value);
+void js_define_global_eval_var_property(Item key, Item value);
 void js_mark_private_method_non_writable(Item object, Item name);
 void js_set_function_name_from_property_key_if_anonymous(Item fn_item, Item key_item, int64_t prefix_kind);
 Item js_get_global_builtin_fn(Item name, Item param_count);

@@ -4,6 +4,7 @@
 #include "layout.hpp"
 #include "state_store.hpp"
 #include "font_face.h"
+#include "../lib/tagged.hpp"
 #include "../lib/font/font.h"
 #include "../lib/utf.h"
 #include "../lambda/input/css/dom_element.hpp"
@@ -83,7 +84,7 @@ void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     DomNode* parent = text->parent;
     while (parent) {
         if (parent->is_element()) {
-            DomElement* elem = (DomElement*)parent;
+            DomElement* elem = lam::dom_require_element(parent);
             text_transform = get_text_transform_from_block(elem->blk);
             if (text_transform != CSS_VALUE_NONE) break;
         }
@@ -984,11 +985,11 @@ void render_column_rules_svg(SvgRenderContext* ctx, ViewBlock* block) {
 
     // Ensure minimum rule height - compute from children if needed
     if (rule_height <= 0) {
-        View* child = (View*)block->first_child;
+        View* child = static_cast<View*>(block->first_child);
         float max_bottom = 0;
         while (child) {
             if (child->is_element()) {
-                ViewBlock* child_block = (ViewBlock*)child;
+                ViewBlock* child_block = lam::view_require_block(child);
                 float child_bottom = child_block->y + child_block->height;
                 if (child_bottom > max_bottom) max_bottom = child_bottom;
             }
@@ -1233,7 +1234,7 @@ static void serialize_svg_element(StrBuf* buf, const ElementReader& elem, const 
 
 // serialize inline SVG block with position transform
 static void render_inline_svg_passthrough(SvgRenderContext* ctx, ViewBlock* block) {
-    DomElement* dom_elem = static_cast<DomElement*>(block);
+    DomElement* dom_elem = lam::dom_require_element(lam::view_dom_node(block));
     if (!dom_elem->native_element) return;
 
     float svg_x = ctx->block.x + block->x;
@@ -1465,7 +1466,7 @@ static void svg_cb_render_marker(void* vctx, ViewSpan* marker, float abs_x, floa
     if (!marker || !marker->is_element()) return;
     SvgRenderContext* ctx = (SvgRenderContext*)vctx;
 
-    DomElement* elem = (DomElement*)marker;
+    DomElement* elem = lam::dom_require_element(lam::view_dom_node(marker));
     MarkerProp* marker_prop = (MarkerProp*)elem->blk;
     if (!marker_prop) return;
 
@@ -1597,14 +1598,14 @@ void calculate_content_bounds(View* view, int* max_x, int* max_y) {
     if (!view) return;
 
     if (view->view_type == RDT_VIEW_BLOCK) {
-        ViewBlock* block = (ViewBlock*)view;
+        ViewBlock* block = lam::view_require_block(view);
         int right = block->x + block->width;
         int bottom = block->y + block->height;
         if (right > *max_x) *max_x = right;
         if (bottom > *max_y) *max_y = bottom;
     }
     else if (view->view_type == RDT_VIEW_TEXT) {
-        ViewText* text = (ViewText*)view;
+        ViewText* text = lam::view_require_text(view);
         int right = text->x + text->width;
         int bottom = text->y + text->height;
         if (right > *max_x) *max_x = right;
@@ -1613,7 +1614,7 @@ void calculate_content_bounds(View* view, int* max_x, int* max_y) {
 
     // Recursively check children
     if (view->view_type >= RDT_VIEW_INLINE) {
-        ViewElement* group = (ViewElement*)view;
+        ViewElement* group = lam::view_require_element(view);
         View* child = group->first_child;
         while (child) {
             calculate_content_bounds(child, max_x, max_y);
@@ -1642,8 +1643,9 @@ static void render_caret_svg(SvgRenderContext* ctx, DocState* state) {
     View* parent = view;
     while (parent) {
         if (parent->view_type == RDT_VIEW_BLOCK) {
-            x += ((ViewBlock*)parent)->x;
-            y += ((ViewBlock*)parent)->y;
+            ViewBlock* parent_block = lam::view_require_block(parent);
+            x += parent_block->x;
+            y += parent_block->y;
         }
         parent = parent->parent;
     }
@@ -1712,7 +1714,7 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int 
     walk_state.ui_context = uicon;
 
     if (root_view->view_type == RDT_VIEW_BLOCK) {
-        render_walk_block(&backend, &walk_state, (ViewBlock*)root_view);
+        render_walk_block(&backend, &walk_state, lam::view_require_block(root_view));
     } else {
         render_walk_children(&backend, &walk_state, root_view);
     }

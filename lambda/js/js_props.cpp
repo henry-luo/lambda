@@ -597,26 +597,6 @@ extern "C" void js_define_own_property_from_descriptor(Item object,
             (get_type_id(object) == LMD_TYPE_MAP && object.map &&
              object.map->map_kind == MAP_KIND_ARRAY_PROPS);
 
-        // For converting data→accessor on existing slot, tombstone the data
-        // slot first.
-        if (get_type_id(object) == LMD_TYPE_MAP && !is_new_property && !is_array_exotic) {
-            bool data_found = false;
-            js_map_get_fast_ext(object.map, name, name_len, &data_found);
-            if (data_found) {
-                ShapeEntry* se = js_find_shape_entry(object, name, name_len);
-                if (!(se && jspd_is_accessor(se))) {
-                    Item del = (Item){.item = JS_DELETED_SENTINEL_VAL};
-                    js_property_set(object, name_item, del);
-                    // A2-T8c: NOT dual-writing JSPD_DELETED here. This is a
-                    // transient data→accessor conversion; the accessor install
-                    // immediately below overwrites the slot with a JsAccessorPair*
-                    // and sets JSPD_IS_ACCESSOR. Stamping DELETED would require
-                    // a paired clear, and a missed clear would resurrect the
-                    // tombstone over a live accessor.
-                }
-            }
-        }
-
         if (is_array_exotic) {
             // Numeric (index) array properties: use legacy __get_<idx>/__set_<idx>
             // markers in the companion map. Index slots can't carry IS_ACCESSOR

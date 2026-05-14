@@ -39,6 +39,7 @@ extern Item fn_replace(Item str, Item old_str, Item new_str); // JIT name: fn_re
 extern Item js_super_property_get(Item receiver, Item key);
 extern Item js_super_instance_method_get(Item receiver, Item key);
 extern Item js_super_property_set(Item receiver, Item key, Item value);
+extern Item js_super_property_set_non_strict(Item receiver, Item key, Item value);
 extern Item js_create_data_property(Item obj, Item name, Item value);
 
 // super() for class-expression superclasses: handles FUNC and MAP (class object) callee
@@ -856,6 +857,7 @@ extern void js_set_global_property(Item key, Item value);
 extern void js_set_global_property_strict(Item key, Item value);
 extern void js_mark_private_method_non_writable(Item object, Item name);
 extern void js_define_global_var_property(Item key, Item value);
+extern void js_define_global_eval_var_property(Item key, Item value);
 extern void js_evalscript_check_global_var_decl(Item key);
 extern void js_evalscript_check_global_function_decl(Item key);
 extern void js_eval_env_push_frame(void);
@@ -1351,6 +1353,7 @@ JitImport jit_runtime_imports[] = {
     {"js_super_property_get", FPTR(js_super_property_get)},
     {"js_super_instance_method_get", FPTR(js_super_instance_method_get)},
     {"js_super_property_set", FPTR(js_super_property_set)},
+    {"js_super_property_set_non_strict", FPTR(js_super_property_set_non_strict)},
     {"js_super_call_class", FPTR(js_super_call_class)},
     {"js_check_class_heritage_constructor", FPTR(js_check_class_heritage_constructor)},
     {"js_super_call_native", FPTR(js_super_call_native)},
@@ -1680,6 +1683,7 @@ JitImport jit_runtime_imports[] = {
     {"js_set_global_property_strict", FPTR(js_set_global_property_strict)},
     {"js_mark_private_method_non_writable", FPTR(js_mark_private_method_non_writable)},
     {"js_define_global_var_property", FPTR(js_define_global_var_property)},
+    {"js_define_global_eval_var_property", FPTR(js_define_global_eval_var_property)},
     {"js_evalscript_check_global_var_decl", FPTR(js_evalscript_check_global_var_decl)},
     {"js_evalscript_check_global_function_decl", FPTR(js_evalscript_check_global_function_decl)},
     {"js_eval_env_push_frame", FPTR(js_eval_env_push_frame)},

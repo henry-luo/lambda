@@ -380,22 +380,38 @@ void jm_emit_install_method_or_accessor(JsMirTranspiler* mt,
     }
 }
 
+static const char* jm_private_display_suffix_from_name(const char* name) {
+    if (!name) return name;
+    const char* suffix = name;
+    if (strncmp(name, "__private_", 10) == 0) {
+        suffix = name + 10;
+    } else if (strncmp(name, "get __private_", 14) == 0 ||
+               strncmp(name, "set __private_", 14) == 0) {
+        suffix = name + 14;
+    } else {
+        return name;
+    }
+    const char* p = suffix;
+    while (*p >= '0' && *p <= '9') p++;
+    if (p > suffix && *p == '_') suffix = p + 1;
+    return suffix;
+}
+
 // Helper: emit js_set_function_name call if name is non-empty, and formal_length if needed
 void jm_emit_set_function_name(JsMirTranspiler* mt, MIR_reg_t fn_reg, const char* name, int formal_length ) {
     if (name && name[0]) {
-        // Convert __private_X back to #X for ES spec compliance
         char priv_buf[256];
         const char* display_name = name;
         if (strncmp(name, "__private_", 10) == 0) {
-            int len = snprintf(priv_buf, sizeof(priv_buf), "#%s", name + 10);
+            int len = snprintf(priv_buf, sizeof(priv_buf), "#%s", jm_private_display_suffix_from_name(name));
             display_name = priv_buf;
             (void)len;
         } else if (strncmp(name, "get __private_", 14) == 0) {
-            int len = snprintf(priv_buf, sizeof(priv_buf), "get #%s", name + 14);
+            int len = snprintf(priv_buf, sizeof(priv_buf), "get #%s", jm_private_display_suffix_from_name(name));
             display_name = priv_buf;
             (void)len;
         } else if (strncmp(name, "set __private_", 14) == 0) {
-            int len = snprintf(priv_buf, sizeof(priv_buf), "set #%s", name + 14);
+            int len = snprintf(priv_buf, sizeof(priv_buf), "set #%s", jm_private_display_suffix_from_name(name));
             display_name = priv_buf;
             (void)len;
         }

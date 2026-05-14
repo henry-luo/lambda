@@ -6127,15 +6127,15 @@ extern "C" Item js_reflect_construct(Item target, Item args_array, Item new_targ
             }
         }
     }
-    if (get_type_id(target) == LMD_TYPE_MAP) {
-        Item nt_val = (nt_type == LMD_TYPE_FUNC || get_type_id(new_target) == LMD_TYPE_MAP || js_is_proxy(new_target)) ? new_target : target;
-        js_set_new_target(nt_val);
-        return js_new_from_class_object(target, args, argc);
-    }
     // For proxy targets, delegate to [[Construct]] trap
     if (js_is_proxy(target)) {
         return js_proxy_trap_construct(target, args, argc, 
             (nt_type == LMD_TYPE_FUNC || js_is_proxy(new_target)) ? new_target : target);
+    }
+    if (get_type_id(target) == LMD_TYPE_MAP) {
+        Item nt_val = (nt_type == LMD_TYPE_FUNC || get_type_id(new_target) == LMD_TYPE_MAP || js_is_proxy(new_target)) ? new_target : target;
+        js_set_new_target(nt_val);
+        return js_new_from_class_object(target, args, argc);
     }
     // ES spec: built-in constructors validate arguments BEFORE OrdinaryCreateFromConstructor
     // (which accesses NewTarget.prototype). Perform those checks here to ensure the correct
@@ -11837,6 +11837,13 @@ extern "C" Item js_delete_property(Item obj, Item key) {
         if (get_type_id(key) == LMD_TYPE_STRING) {
             String* sk = it2s(key);
             if (sk && sk->len == 6 && strncmp(sk->chars, "length", 6) == 0) {
+                if (arr->is_content == 1 && arr->extra != 0) {
+                    Item pm_item = (Item){.item = (uint64_t)(uintptr_t)arr->extra | ((uint64_t)LMD_TYPE_MAP << 56)};
+                    Item length_key = (Item){.item = s2it(heap_create_name("length", 6))};
+                    js_property_set(pm_item, length_key, (Item){.item = JS_DELETED_SENTINEL_VAL});
+                    js_shape_entry_set_deleted(pm_item, "length", 6, /*is_deleted=*/true);
+                    return (Item){.item = b2it(true)};
+                }
                 if (js_strict_mode) {
                     js_throw_type_error("Cannot delete non-configurable property");
                 }
@@ -13603,6 +13610,27 @@ extern "C" void js_define_global_var_property(Item key, Item value) {
     pd.flags = JS_PD_HAS_VALUE | JS_PD_HAS_WRITABLE | JS_PD_HAS_ENUMERABLE |
         JS_PD_HAS_CONFIGURABLE | JS_PD_WRITABLE | JS_PD_ENUMERABLE;
     js_pd_set_configurable(&pd, false);
+    pd.value = value;
+    bool is_new_property = !it2b(js_has_own_property(global, key));
+    if (!is_new_property) return;
+    if (is_new_property && get_type_id(value) == LMD_TYPE_UNDEFINED && get_type_id(global) == LMD_TYPE_MAP) {
+        map_put(global.map, str, value, js_input);
+        is_new_property = false;
+    }
+    js_define_own_property_from_descriptor(global, str->chars, (int)str->len, &pd, is_new_property);
+}
+
+extern "C" void js_define_global_eval_var_property(Item key, Item value) {
+    Item global = js_get_global_this();
+    Item name = js_to_string(key);
+    if (get_type_id(name) != LMD_TYPE_STRING) return;
+    String* str = it2s(name);
+    if (!str || str->len <= 0 || str->len >= 200) return;
+    JsPropertyDescriptor pd;
+    memset(&pd, 0, sizeof(pd));
+    pd.flags = JS_PD_HAS_VALUE | JS_PD_HAS_WRITABLE | JS_PD_HAS_ENUMERABLE |
+        JS_PD_HAS_CONFIGURABLE | JS_PD_WRITABLE | JS_PD_ENUMERABLE;
+    js_pd_set_configurable(&pd, true);
     pd.value = value;
     bool is_new_property = !it2b(js_has_own_property(global, key));
     if (!is_new_property) return;

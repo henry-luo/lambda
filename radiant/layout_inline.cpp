@@ -46,9 +46,7 @@ static inline ViewBlock* layout_inline_as_block_view(View* view) {
 }
 
 static inline ViewBlock* layout_inline_unsafe_block_api_span(ViewSpan* span) {
-    // ViewBlock currently adds no fields; these legacy layout APIs operate on
-    // DomElement/ViewSpan storage even when the runtime tag is RDT_VIEW_INLINE.
-    return static_cast<ViewBlock*>(span);
+    return lam::unsafe_view_block_api_span(span);
 }
 
 // Check if a view child is out of normal flow (absolute, fixed, or float)

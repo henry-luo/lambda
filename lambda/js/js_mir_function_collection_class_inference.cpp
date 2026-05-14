@@ -805,7 +805,8 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
         if (ap->right) jm_collect_functions(mt, ap->right);
         break;
     }
-    case JS_AST_NODE_SPREAD_ELEMENT: {
+    case JS_AST_NODE_SPREAD_ELEMENT:
+    case JS_AST_NODE_REST_ELEMENT: {
         JsSpreadElementNode* sp = (JsSpreadElementNode*)node;
         if (sp->argument) jm_collect_functions(mt, sp->argument);
         break;
