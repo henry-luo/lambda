@@ -1,8 +1,11 @@
 #include "js_mir_internal.hpp"
+#include "js_runtime_state.hpp"
 
 JsModuleConstEntry* g_eval_preamble_entries = NULL;
 int g_eval_preamble_entry_count = 0;
 int g_eval_preamble_var_count = 0;
+
+static bool js_source_contains_import_meta(const char* source, size_t len);
 
 // ============================================================================
 // new Function(param1, param2, ..., body) — dynamic function compilation
@@ -32,6 +35,11 @@ extern "C" Item js_new_function_from_string(Item* args, int argc) {
             ps = it2s(str_item);
         }
         if (ps && ps->len > 0) {
+            if (js_source_contains_import_meta(ps->chars, ps->len)) {
+                strbuf_free(sb);
+                js_throw_syntax_error((Item){.item = s2it(heap_create_name("Cannot use import.meta outside a module", 39))});
+                return ItemNull;
+            }
             strbuf_append_str_n(sb, ps->chars, (int)ps->len);
         }
     }
@@ -45,6 +53,11 @@ extern "C" Item js_new_function_from_string(Item* args, int argc) {
         body = it2s(str_item);
     }
     if (body && body->len > 0) {
+        if (js_source_contains_import_meta(body->chars, body->len)) {
+            strbuf_free(sb);
+            js_throw_syntax_error((Item){.item = s2it(heap_create_name("Cannot use import.meta outside a module", 39))});
+            return ItemNull;
+        }
         strbuf_append_str(sb, "\n");
         strbuf_append_str_n(sb, body->chars, (int)body->len);
         strbuf_append_str(sb, "\n");
@@ -294,11 +307,149 @@ char* eval_try_insert_return(const char* code, size_t len) {
 }
 
 // ============================================================================
+static bool js_eval_is_ident_char(char ch) {
+    return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+        (ch >= '0' && ch <= '9') || ch == '_' || ch == '$';
+}
+
+static bool js_eval_at_word(const char* source, size_t len, size_t pos, const char* word, size_t word_len) {
+    if (pos + word_len > len) return false;
+    if (memcmp(source + pos, word, word_len) != 0) return false;
+    if (pos > 0 && js_eval_is_ident_char(source[pos - 1])) return false;
+    if (pos + word_len < len && js_eval_is_ident_char(source[pos + word_len])) return false;
+    return true;
+}
+
+static size_t js_eval_skip_space_and_comments(const char* source, size_t len, size_t pos) {
+    while (pos < len) {
+        char ch = source[pos];
+        if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') { pos++; continue; }
+        if (ch == '/' && pos + 1 < len && source[pos + 1] == '/') {
+            pos += 2;
+            while (pos < len && source[pos] != '\n') pos++;
+            continue;
+        }
+        if (ch == '/' && pos + 1 < len && source[pos + 1] == '*') {
+            pos += 2;
+            while (pos + 1 < len && !(source[pos] == '*' && source[pos + 1] == '/')) pos++;
+            if (pos + 1 < len) pos += 2;
+            continue;
+        }
+        break;
+    }
+    return pos;
+}
+
+static bool js_source_contains_import_meta(const char* source, size_t len) {
+    for (size_t pos = 0; pos < len; pos++) {
+        char ch = source[pos];
+        if (ch == '\'' || ch == '"' || ch == '`') {
+            char quote = ch;
+            pos++;
+            while (pos < len) {
+                if (source[pos] == '\\' && pos + 1 < len) { pos += 2; continue; }
+                if (source[pos] == quote) break;
+                pos++;
+            }
+            continue;
+        }
+        if (ch == '/' && pos + 1 < len && source[pos + 1] == '/') {
+            pos += 2;
+            while (pos < len && source[pos] != '\n') pos++;
+            continue;
+        }
+        if (ch == '/' && pos + 1 < len && source[pos + 1] == '*') {
+            pos += 2;
+            while (pos + 1 < len && !(source[pos] == '*' && source[pos + 1] == '/')) pos++;
+            if (pos + 1 < len) pos++;
+            continue;
+        }
+        if (js_eval_at_word(source, len, pos, "import", 6)) {
+            size_t member_pos = js_eval_skip_space_and_comments(source, len, pos + 6);
+            if (member_pos + 5 <= len && memcmp(source + member_pos, ".meta", 5) == 0 &&
+                (member_pos + 5 == len || !js_eval_is_ident_char(source[member_pos + 5]))) {
+                return true;
+            }
+            pos += 5;
+        }
+    }
+    return false;
+}
+
+typedef struct JsEvalInitializerScan {
+    bool contains_arguments;
+    bool contains_new_target;
+    bool contains_super_call;
+    bool contains_super_property;
+} JsEvalInitializerScan;
+
+static JsEvalInitializerScan js_eval_scan_initializer_source(const char* source, size_t len) {
+    JsEvalInitializerScan scan = {false, false, false, false};
+    for (size_t pos = 0; pos < len; pos++) {
+        char ch = source[pos];
+        if (ch == '\'' || ch == '"' || ch == '`') {
+            char quote = ch;
+            pos++;
+            while (pos < len) {
+                if (source[pos] == '\\' && pos + 1 < len) { pos += 2; continue; }
+                if (source[pos] == quote) break;
+                pos++;
+            }
+            continue;
+        }
+        if (ch == '/' && pos + 1 < len && source[pos + 1] == '/') {
+            pos += 2;
+            while (pos < len && source[pos] != '\n') pos++;
+            continue;
+        }
+        if (ch == '/' && pos + 1 < len && source[pos + 1] == '*') {
+            pos += 2;
+            while (pos + 1 < len && !(source[pos] == '*' && source[pos + 1] == '/')) pos++;
+            if (pos + 1 < len) pos++;
+            continue;
+        }
+        if (js_eval_at_word(source, len, pos, "arguments", 9)) {
+            scan.contains_arguments = true;
+            pos += 8;
+            continue;
+        }
+        if (js_eval_at_word(source, len, pos, "new", 3)) {
+            size_t member_pos = js_eval_skip_space_and_comments(source, len, pos + 3);
+            if (member_pos + 7 <= len && memcmp(source + member_pos, ".target", 7) == 0 &&
+                (member_pos + 7 == len || !js_eval_is_ident_char(source[member_pos + 7]))) {
+                scan.contains_new_target = true;
+            }
+            pos += 2;
+            continue;
+        }
+        if (js_eval_at_word(source, len, pos, "super", 5)) {
+            size_t member_pos = js_eval_skip_space_and_comments(source, len, pos + 5);
+            if (member_pos < len && source[member_pos] == '(') scan.contains_super_call = true;
+            else if (member_pos < len && (source[member_pos] == '.' || source[member_pos] == '[')) scan.contains_super_property = true;
+            pos += 4;
+            continue;
+        }
+    }
+    return scan;
+}
+
+static bool js_eval_initializer_early_error(String* code_str, bool is_direct_eval) {
+    if ((!js_private_field_initializing && !js_eval_initializer_context) || !code_str) return false;
+    JsEvalInitializerScan scan = js_eval_scan_initializer_source(code_str->chars, code_str->len);
+    if ((is_direct_eval && scan.contains_arguments) || (!is_direct_eval && scan.contains_new_target) ||
+        scan.contains_super_call || (!is_direct_eval && scan.contains_super_property)) {
+        js_throw_syntax_error((Item){.item = s2it(heap_create_name("Invalid eval in class field initializer", 39))});
+        return true;
+    }
+    return false;
+}
+
+// ============================================================================
 // eval(code) — dynamic evaluation of JavaScript source code
 // Wraps the code in an IIFE and compiles/executes via JIT.
-// is_global_scope: 1 = called at global level, 0 = called inside a function
+// eval_flags bit 0: evaluate as global/direct script; bit 1: syntactic direct eval.
 // ============================================================================
-extern "C" Item js_builtin_eval(Item code_item, int64_t is_global_scope) {
+extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
     if (!js_source_runtime) {
         log_error("js-eval: no runtime context for dynamic evaluation");
         return ItemNull;
@@ -309,6 +460,12 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t is_global_scope) {
     }
     String* code_str = it2s(code_item);
     if (!code_str || code_str->len == 0) return ItemNull;
+    bool is_direct_eval = (eval_flags & 2) != 0;
+    bool is_global_scope = (eval_flags & 1) != 0;
+
+    if (js_eval_initializer_early_error(code_str, is_direct_eval)) {
+        return ItemNull;
+    }
 
     // Check for whitespace/comment-only code — should return undefined
     {
@@ -537,7 +694,7 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t is_global_scope) {
             js_transpiler_destroy(tp);
             return ItemNull;
         }
-        mt->is_eval_direct = (is_global_scope != 0);  // sloppy-mode eval: export vars to globalThis
+        mt->is_eval_direct = is_global_scope;  // sloppy-mode eval: export vars to globalThis
 
         // Inherit outer script's module_consts so eval() can resolve var declarations
         if (g_eval_preamble_entries && g_eval_preamble_entry_count > 0) {

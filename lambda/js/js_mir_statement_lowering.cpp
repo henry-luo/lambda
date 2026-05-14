@@ -1319,6 +1319,16 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
         // Use dynamic dispatch which handles type checking and TypeError for non-constructors
         MIR_reg_t callee = jm_transpile_box_item(mt, call->callee);
         int arg_count = jm_count_args(call->arguments);
+        bool has_spread = false;
+        for (JsAstNode* chk = call->arguments; chk; chk = chk->next) {
+            if (chk->node_type == JS_AST_NODE_SPREAD_ELEMENT) { has_spread = true; break; }
+        }
+        if (has_spread) {
+            MIR_reg_t args_arr = jm_build_spread_args_array(mt, call->arguments);
+            return jm_call_2(mt, "js_apply_constructor", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, args_arr));
+        }
         MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
         return jm_call_3(mt, "js_new_from_class_object", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
@@ -1328,6 +1338,18 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
 
     // Count arguments (but DON'T evaluate yet — evaluation happens in the specific path)
     int arg_count = jm_count_args(call->arguments);
+    bool new_has_spread = false;
+    for (JsAstNode* chk = call->arguments; chk; chk = chk->next) {
+        if (chk->node_type == JS_AST_NODE_SPREAD_ELEMENT) { new_has_spread = true; break; }
+    }
+
+    if (new_has_spread && call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
+        MIR_reg_t callee = jm_transpile_box_item(mt, call->callee);
+        MIR_reg_t args_arr = jm_build_spread_args_array(mt, call->arguments);
+        return jm_call_2(mt, "js_apply_constructor", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, args_arr));
+    }
 
     // Check if it's a built-in type that needs early first-arg evaluation
     bool is_builtin = false;

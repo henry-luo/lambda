@@ -1492,6 +1492,77 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
     // --- v15: Generator wrapper (creates generator object instead of running body) ---
     if (fn->is_generator && gen_sm_func_item) {
+        bool gen_has_default_params = false;
+        for (JsAstNode* gp_check = fn->params; gp_check; gp_check = gp_check->next) {
+            if (gp_check->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
+                gen_has_default_params = true;
+                break;
+            }
+        }
+        if (gen_has_default_params) {
+            JsAstNode* seed_param = fn->params;
+            for (int pi = 0; pi < param_count; pi++) {
+                if (seed_param) {
+                    JsAstNode* seed_binding = seed_param;
+                    if (seed_binding->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN)
+                        seed_binding = ((JsAssignmentPatternNode*)seed_binding)->left;
+                    if (seed_binding && seed_binding->node_type == JS_AST_NODE_IDENTIFIER) {
+                        char seed_vname[128];
+                        jm_get_param_name(seed_param, pi, seed_vname, sizeof(seed_vname));
+                        MIR_reg_t seed_reg = jm_new_reg(mt, seed_vname, MIR_T_I64);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, seed_reg),
+                            MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_TDZ)));
+                        jm_set_var(mt, seed_vname, seed_reg);
+                        JsMirVarEntry* seed_var = jm_find_var(mt, seed_vname);
+                        if (seed_var) seed_var->tdz_active = true;
+                    }
+                }
+                seed_param = seed_param ? seed_param->next : NULL;
+            }
+            if (fc->uses_arguments) {
+                jm_call_void_1(mt, "js_set_arguments_info",
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, 1));
+                MIR_reg_t args_obj = jm_call_0(mt, "js_build_arguments_object", MIR_T_I64);
+                jm_set_var(mt, "_js_arguments", args_obj);
+            }
+            JsAstNode* gen_param = fn->params;
+            for (int pi = 0; pi < param_count; pi++) {
+                if (gen_param) {
+                    char gen_vname[128];
+                    jm_get_param_name(gen_param, pi, gen_vname, sizeof(gen_vname));
+                    MIR_reg_t preg = MIR_reg(mt->ctx, gen_vname, func);
+                    JsAstNode* param_binding = gen_param;
+                    if (param_binding->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN)
+                        param_binding = ((JsAssignmentPatternNode*)param_binding)->left;
+                    if (gen_param->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
+                        JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)gen_param;
+                        if (ap->right) {
+                            MIR_label_t skip_label = jm_new_label(mt);
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE,
+                                MIR_new_label_op(mt->ctx, skip_label),
+                                MIR_new_reg_op(mt->ctx, preg),
+                                MIR_new_uint_op(mt->ctx, (uint64_t)ITEM_JS_UNDEFINED)));
+                            MIR_reg_t def_val = jm_transpile_box_item(mt, ap->right);
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, preg),
+                                MIR_new_reg_op(mt->ctx, def_val)));
+                            jm_emit_label(mt, skip_label);
+                        }
+                    }
+                    if (param_binding && param_binding->node_type == JS_AST_NODE_IDENTIFIER) {
+                        JsMirVarEntry* pvar = jm_find_var(mt, gen_vname);
+                        if (pvar) {
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, pvar->reg),
+                                MIR_new_reg_op(mt->ctx, preg)));
+                            pvar->tdz_active = false;
+                        }
+                    }
+                }
+                gen_param = gen_param ? gen_param->next : NULL;
+            }
+        }
         // Allocate env array for the generator's state machine
         MIR_reg_t gen_env = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
             MIR_T_I64, MIR_new_int_op(mt->ctx, gen_env_total_slots));
@@ -1889,6 +1960,49 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             }
         }
 
+        bool has_default_params = false;
+        for (JsAstNode* dp_node = fn->params; dp_node; dp_node = dp_node->next) {
+            if (dp_node->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
+                has_default_params = true;
+                break;
+            }
+        }
+
+        bool arguments_object_materialized = false;
+        if (has_default_params && fc->uses_arguments) {
+            bool args_aliased = false;
+            jm_call_void_1(mt, "js_set_arguments_info",
+                MIR_T_I64, MIR_new_int_op(mt->ctx, args_aliased ? 0 : 1));
+            MIR_reg_t args_arr = jm_call_0(mt, "js_build_arguments_object", MIR_T_I64);
+            jm_set_var(mt, "_js_arguments", args_arr);
+            arguments_object_materialized = true;
+            mt->arguments_reg = 0;
+            mt->arguments_param_count = 0;
+        }
+
+        if (has_default_params) {
+            JsAstNode* seed_param = fn->params;
+            for (int pi = 0; pi < param_count; pi++) {
+                if (seed_param) {
+                    JsAstNode* seed_binding = seed_param;
+                    if (seed_binding->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN)
+                        seed_binding = ((JsAssignmentPatternNode*)seed_binding)->left;
+                    if (seed_binding && seed_binding->node_type == JS_AST_NODE_IDENTIFIER) {
+                        char seed_vname[128];
+                        jm_get_param_name(seed_param, pi, seed_vname, sizeof(seed_vname));
+                        MIR_reg_t seed_reg = jm_new_reg(mt, seed_vname, MIR_T_I64);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, seed_reg),
+                            MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_TDZ)));
+                        jm_set_var(mt, seed_vname, seed_reg);
+                        JsMirVarEntry* seed_var = jm_find_var(mt, seed_vname);
+                        if (seed_var) seed_var->tdz_active = true;
+                    }
+                }
+                seed_param = seed_param ? seed_param->next : NULL;
+            }
+        }
+
         // Register parameter variables
         param_node = fn->params;
         for (int i = 0; i < param_count; i++) {
@@ -1896,7 +2010,12 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 char vname[128];
                 jm_get_param_name(param_node, i, vname, sizeof(vname));
                 MIR_reg_t preg = MIR_reg(mt->ctx, vname, func);
+                bool is_default_param = (param_node->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN);
+                JsAstNode* param_binding = param_node;
+                if (is_default_param) param_binding = ((JsAssignmentPatternNode*)param_node)->left;
+                if (!(has_default_params && param_binding && param_binding->node_type == JS_AST_NODE_IDENTIFIER)) {
                 jm_set_var(mt, vname, preg);
+                }
 
                 // Phase 3.4: if param has a TypeMap TS annotation, set full_type so member
                 // access on this param can resolve field types via jm_get_effective_type.
@@ -1917,7 +2036,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 }
 
                 // For default params (ASSIGNMENT_PATTERN): if the arg is undefined, eval and assign default
-                if (param_node->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
+                if (is_default_param) {
                     JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)param_node;
                     if (ap->right) {
                         // emit: if (preg != undefined) goto skip_default;
@@ -1935,6 +2054,16 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                             MIR_new_reg_op(mt->ctx, preg),
                             MIR_new_reg_op(mt->ctx, def_val)));
                         jm_emit_label(mt, skip_label);
+                    }
+                }
+
+                if (has_default_params && param_binding && param_binding->node_type == JS_AST_NODE_IDENTIFIER) {
+                    JsMirVarEntry* pvar = jm_find_var(mt, vname);
+                    if (pvar) {
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, pvar->reg),
+                            MIR_new_reg_op(mt->ctx, preg)));
+                        pvar->tdz_active = false;
                     }
                 }
 
@@ -2083,8 +2212,6 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             }
             hashmap_free(let_consts);
         }
-
-        bool arguments_object_materialized = false;
 
         // The scope env is a single heap-allocated Item array shared by all child closures,
         // enabling mutable capture semantics (JS captures by reference, not by value).

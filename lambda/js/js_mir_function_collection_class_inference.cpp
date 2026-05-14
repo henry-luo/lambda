@@ -730,7 +730,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                                 me->computed = md->computed;
                                 me->key_expr = md->key;
                                 // Detect constructor by name
-                                me->is_constructor = (!me->computed && method_name &&
+                                me->is_constructor = (!me->is_static && !me->computed && method_name &&
                                     method_name->len == 11 &&
                                     strncmp(method_name->chars, "constructor", 11) == 0);
                                 if (me->is_constructor) {
