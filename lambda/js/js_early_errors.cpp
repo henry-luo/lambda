@@ -471,6 +471,45 @@ static void check_duplicate_params(EarlyErrorCtx* ctx, JsFunctionNode* func) {
     }
 }
 
+static void check_binding_pattern_reserved(EarlyErrorCtx* ctx, JsAstNode* node) {
+    if (!node) return;
+    switch (node->node_type) {
+        case JS_AST_NODE_IDENTIFIER:
+            check_identifier_reserved(ctx, node);
+            break;
+        case JS_AST_NODE_ASSIGNMENT_PATTERN:
+            check_binding_pattern_reserved(ctx, ((JsAssignmentPatternNode*)node)->left);
+            break;
+        case JS_AST_NODE_REST_ELEMENT:
+        case JS_AST_NODE_REST_PROPERTY:
+            check_binding_pattern_reserved(ctx, ((JsSpreadElementNode*)node)->argument);
+            break;
+        case JS_AST_NODE_ARRAY_PATTERN:
+            for (JsAstNode* e = ((JsArrayPatternNode*)node)->elements; e; e = e->next)
+                check_binding_pattern_reserved(ctx, e);
+            break;
+        case JS_AST_NODE_OBJECT_PATTERN:
+            for (JsAstNode* p = ((JsObjectPatternNode*)node)->properties; p; p = p->next) {
+                if (p->node_type == JS_AST_NODE_PROPERTY) {
+                    check_binding_pattern_reserved(ctx, ((JsPropertyNode*)p)->value);
+                } else {
+                    check_binding_pattern_reserved(ctx, p);
+                }
+            }
+            break;
+        default:
+            break;
+    }
+}
+
+static void check_function_name_reserved(EarlyErrorCtx* ctx, JsFunctionNode* func) {
+    if (!ctx->in_strict || !func || !func->name) return;
+    const char* name = func->name->chars;
+    if (strcmp(name, "eval") == 0 || strcmp(name, "arguments") == 0) {
+        ee_error(ctx, (JsAstNode*)func, "'%s' cannot be used as a function name in strict mode", name);
+    }
+}
+
 // ---- recursive AST walker --------------------------------------------------
 
 static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node);
@@ -655,9 +694,11 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
             }
 
             check_duplicate_params(ctx, fn);
+            check_function_name_reserved(ctx, fn);
 
             // walk params
             for (JsAstNode* p = fn->params; p; p = p->next) {
+                check_binding_pattern_reserved(ctx, p);
                 walk_expression(ctx, p);
             }
 
@@ -920,8 +961,10 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
             }
 
             check_duplicate_params(ctx, fn);
+            check_function_name_reserved(ctx, fn);
 
             for (JsAstNode* p = fn->params; p; p = p->next) {
+                check_binding_pattern_reserved(ctx, p);
                 walk_expression(ctx, p);
             }
             walk_statement(ctx, fn->body);

@@ -1256,7 +1256,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
 
     // v20: Detect program-level "use strict" directive
     // Scan first few statements (var declarations may be hoisted before it)
-    mt->is_global_strict = false;
+    mt->is_global_strict = mt->tp && mt->tp->strict_mode;
     {
         JsAstNode* n = program->body;
         for (int i = 0; i < 10 && n; i++, n = n->next) {

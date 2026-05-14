@@ -1686,6 +1686,8 @@ JitImport jit_runtime_imports[] = {
     {"js_eval_local_pop_frame", FPTR(js_eval_local_pop_frame)},
     {"js_eval_local_get_binding_or_fallback", FPTR(js_eval_local_get_binding_or_fallback)},
     {"js_eval_local_export_var", FPTR(js_eval_local_export_var)},
+    {"js_eval_local_note_lexical_binding", FPTR(js_eval_local_note_lexical_binding)},
+    {"js_eval_local_has_lexical_binding", FPTR(js_eval_local_has_lexical_binding)},
     {"js_check_unresolved_capture", FPTR(js_check_unresolved_capture)},
     {"js_resolve_unresolved_binding", FPTR(js_resolve_unresolved_binding)},
     {"js_262_eval_script_is_active", FPTR(js_262_eval_script_is_active)},

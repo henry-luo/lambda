@@ -4996,6 +4996,24 @@ static struct hashmap* jm_eval_env_push_bindings(JsMirTranspiler* mt) {
     return bridged;
 }
 
+static void jm_eval_local_note_lexical_bindings(JsMirTranspiler* mt) {
+    if (!mt || mt->in_main || mt->eval_local_frame_reg == 0) return;
+    for (int depth = mt->scope_depth; depth >= 0; depth--) {
+        if (!mt->var_scopes[depth]) continue;
+        size_t iter = 0; void* item;
+        while (hashmap_iter(mt->var_scopes[depth], &iter, &item)) {
+            JsVarScopeEntry* entry = (JsVarScopeEntry*)item;
+            if (!entry->var.is_let_const && !entry->var.is_const) continue;
+            if (strncmp(entry->name, "_js_", 4) != 0) continue;
+            if (strcmp(entry->name, "_js_this") == 0 || strcmp(entry->name, "_js_new.target") == 0) continue;
+            const char* js_name = entry->name + 4;
+            MIR_reg_t key_reg = jm_box_string_literal(mt, js_name, (int)strlen(js_name));
+            jm_call_void_1(mt, "js_eval_local_note_lexical_binding",
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
+        }
+    }
+}
+
 static void jm_eval_env_writeback_bindings(JsMirTranspiler* mt, struct hashmap* bridged) {
     if (!bridged) return;
     size_t iter = 0; void* item;
@@ -7510,13 +7528,18 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             if (nl == 4 && strncmp(n, "eval", 4) == 0 && !jm_find_var(mt, "_js_eval")) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_undefined(mt);
                 struct hashmap* eval_bridged = NULL;
+                int64_t eval_flags = 3;
+                if (mt->is_global_strict || mt->is_module || (mt->current_fc && mt->current_fc->is_strict)) {
+                    eval_flags |= 4;
+                }
                 if (!mt->in_main) {
                     jm_emit_eval_local_ensure_frame(mt);
+                    jm_eval_local_note_lexical_bindings(mt);
                     eval_bridged = jm_eval_env_push_bindings(mt);
                 }
                 MIR_reg_t eval_result = jm_call_2(mt, "js_builtin_eval", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg),
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, 3));
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, eval_flags));
                 if (!mt->in_main) {
                     jm_eval_env_writeback_bindings(mt, eval_bridged);
                     jm_call_void_0(mt, "js_eval_env_pop_frame");
@@ -10681,12 +10704,14 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                 MIR_reg_t result = jm_call_2(mt, "js_gen_yield_delegate_result", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, val),
                     MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)next_state));
+                jm_emit_eval_local_pop_if_needed(mt);
                 jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, result)));
             } else {
                 // Regular yield: return [yield_val, next_state]
                 MIR_reg_t result = jm_call_2(mt, "js_gen_yield_result", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, val),
                     MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)next_state));
+                jm_emit_eval_local_pop_if_needed(mt);
                 jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, result)));
             }
 
