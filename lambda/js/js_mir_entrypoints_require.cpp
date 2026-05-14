@@ -182,7 +182,17 @@ void js_normalize_path_separators(char* path) {
 // Public entry point for JS transpilation via direct MIR generation
 // ============================================================================
 
-Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, const char* filename) {
+static bool js_source_contains_ascii(const char* source, size_t source_len, const char* needle) {
+    if (!source || !needle) return false;
+    size_t needle_len = strlen(needle);
+    if (needle_len == 0 || source_len < needle_len) return false;
+    for (size_t i = 0; i + needle_len <= source_len; i++) {
+        if (memcmp(source + i, needle, needle_len) == 0) return true;
+    }
+    return false;
+}
+
+Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_t js_source_len, const char* filename) {
     log_debug("js-mir: starting direct MIR transpilation for '%s'", filename ? filename : "<string>");
     log_mem_stage("js-core: enter");
 
@@ -191,7 +201,7 @@ Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, const cha
     // doesn't already declare them (e.g., CJS-wrapped require'd modules).
     char* injected_source = NULL;
     if (filename && filename[0] != '<' &&
-        !strstr(js_source, "var __filename")) {
+        !js_source_contains_ascii(js_source, js_source_len, "var __filename")) {
         // resolve to absolute path
         char abs_path[2048];
         if (filename[0] == '/') {
@@ -216,14 +226,15 @@ Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, const cha
         int dir_len = last_slash ? (int)(last_slash - abs_path) : 1;
         const char* dir_str = last_slash ? abs_path : ".";
 
-        size_t src_len = strlen(js_source);
         size_t prefix_size = strlen(abs_path) + dir_len + 80;
-        injected_source = (char*)mem_alloc(prefix_size + src_len + 1, MEM_CAT_JS_RUNTIME);
+        injected_source = (char*)mem_alloc(prefix_size + js_source_len + 1, MEM_CAT_JS_RUNTIME);
         int off = snprintf(injected_source, prefix_size,
             "var __filename = \"%s\";\nvar __dirname = \"%.*s\";\n",
             abs_path, dir_len, dir_str);
-        memcpy(injected_source + off, js_source, src_len + 1);
+        memcpy(injected_source + off, js_source, js_source_len);
+        injected_source[off + js_source_len] = '\0';
         js_source = injected_source;
+        js_source_len += (size_t)off;
     }
 
     // Check env var for interpreter mode (once, as fallback for CLI --mir-interp)
@@ -252,7 +263,7 @@ Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, const cha
     }
 
     // Parse JavaScript source
-    if (!js_transpiler_parse(tp, js_source, strlen(js_source))) {
+    if (!js_transpiler_parse(tp, js_source, js_source_len)) {
         log_error("js-mir: parse failed");
         js_transpiler_destroy(tp);
         return (Item){.item = ITEM_ERROR};
@@ -316,7 +327,8 @@ Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, const cha
     // then executes serially.  jm_load_imports() below will skip already-loaded modules.
 #ifndef _WIN32
     // fast-path: skip import precompile for scripts with no imports
-    if (strstr(js_source, "import ") != NULL || strstr(js_source, "import{") != NULL) {
+    if (js_source_contains_ascii(js_source, js_source_len, "import ") ||
+        js_source_contains_ascii(js_source, js_source_len, "import{")) {
         jm_precompile_js_imports(runtime, js_source, filename);
     }
 #endif
@@ -630,26 +642,39 @@ Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, const cha
     return final_result;
 }
 
+Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, const char* filename) {
+    return transpile_js_to_mir_core_len(runtime, js_source, strlen(js_source), filename);
+}
+
 // ============================================================================
 // Public API wrappers for preamble support
 // ============================================================================
 
 Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* filename) {
+    return transpile_js_to_mir_len(runtime, js_source, strlen(js_source), filename);
+}
+
+Item transpile_js_to_mir_len(Runtime* runtime, const char* js_source, size_t js_source_len, const char* filename) {
     g_jm_preamble_mode = false;
     g_jm_preamble_out = NULL;
     g_jm_preamble_in = NULL;
-    return transpile_js_to_mir_core(runtime, js_source, filename);
+    return transpile_js_to_mir_core_len(runtime, js_source, js_source_len, filename);
 }
 
 Item transpile_js_to_mir_preamble(Runtime* runtime, const char* js_source, const char* filename,
                                    JsPreambleState* out_state) {
+    return transpile_js_to_mir_preamble_len(runtime, js_source, strlen(js_source), filename, out_state);
+}
+
+Item transpile_js_to_mir_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,
+                                      const char* filename, JsPreambleState* out_state) {
     g_jm_preamble_mode = true;
     g_jm_preamble_out = out_state;
     g_jm_preamble_in = NULL;
     // Preamble (harness) always compiled at -O3 for best runtime performance
     unsigned int saved_level = g_js_mir_optimize_level;
     g_js_mir_optimize_level = 3;
-    Item result = transpile_js_to_mir_core(runtime, js_source, filename);
+    Item result = transpile_js_to_mir_core_len(runtime, js_source, js_source_len, filename);
     g_js_mir_optimize_level = saved_level;
     g_jm_preamble_mode = false;
     g_jm_preamble_out = NULL;
@@ -658,10 +683,15 @@ Item transpile_js_to_mir_preamble(Runtime* runtime, const char* js_source, const
 
 Item transpile_js_to_mir_with_preamble(Runtime* runtime, const char* js_source, const char* filename,
                                         const JsPreambleState* preamble) {
+    return transpile_js_to_mir_with_preamble_len(runtime, js_source, strlen(js_source), filename, preamble);
+}
+
+Item transpile_js_to_mir_with_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,
+                                           const char* filename, const JsPreambleState* preamble) {
     g_jm_preamble_mode = false;
     g_jm_preamble_out = NULL;
     g_jm_preamble_in = preamble;
-    Item result = transpile_js_to_mir_core(runtime, js_source, filename);
+    Item result = transpile_js_to_mir_core_len(runtime, js_source, js_source_len, filename);
     g_jm_preamble_in = NULL;
     return result;
 }

@@ -1758,6 +1758,12 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                     snprintf(mclookup.name, sizeof(mclookup.name), "%s", vname);
                     if (hashmap_get(mt->module_consts, &mclookup)) del_is_declared = true;
                 }
+                if (mt->with_depth > 0) {
+                    MIR_reg_t key = jm_box_string_literal(mt, del_name, (int)del_id->name->len);
+                    return jm_call_2(mt, "js_delete_identifier_with_binding", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, del_is_declared ? 1 : 0));
+                }
                 if (del_is_declared) {
                     // declared variable (local, arg, catch, closure, module-level) — can't delete; return false
                     MIR_reg_t r = jm_new_reg(mt, "dfalse", MIR_T_I64);
@@ -9441,14 +9447,10 @@ MIR_reg_t jm_transpile_template_literal(JsMirTranspiler* mt, JsTemplateLiteralNo
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_reg_op(mt->ctx, str_ptr),
                     MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)interned->chars)));
-                // stringbuf_append_str(sb, str)
-                MIR_var_t app_args[2] = {{MIR_T_I64, "a", 0}, {MIR_T_I64, "b", 0}};
-                JsMirImportEntry* app_ie = jm_ensure_import(mt, "stringbuf_append_str", MIR_T_I64, 2, app_args, 0);
-                jm_emit(mt, MIR_new_call_insn(mt->ctx, 4,
-                    MIR_new_ref_op(mt->ctx, app_ie->proto),
-                    MIR_new_ref_op(mt->ctx, app_ie->import),
-                    MIR_new_reg_op(mt->ctx, sb),
-                    MIR_new_reg_op(mt->ctx, str_ptr)));
+                jm_call_void_3(mt, "stringbuf_append_str_n",
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, sb),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, str_ptr),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, interned->len));
             }
         }
 

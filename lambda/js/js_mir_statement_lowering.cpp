@@ -1317,7 +1317,11 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     if (!ctor_name) {
         // Non-identifier callee (e.g., new (expr)(), new obj.method(), etc.)
         // Use dynamic dispatch which handles type checking and TypeError for non-constructors
-        MIR_reg_t callee = jm_transpile_box_item(mt, call->callee);
+        MIR_reg_t callee_value = jm_transpile_box_item(mt, call->callee);
+        MIR_reg_t callee = jm_new_reg(mt, "new_callee", MIR_T_I64);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, callee),
+            MIR_new_reg_op(mt->ctx, callee_value)));
         int arg_count = jm_count_args(call->arguments);
         bool has_spread = false;
         for (JsAstNode* chk = call->arguments; chk; chk = chk->next) {
@@ -2164,7 +2168,11 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     // For constructors, always use the actual variable value (jm_transpile_box_item)
     // rather than creating a fresh js_new_function wrapper. This preserves
     // .prototype that was set on the function object (e.g., Foo.prototype = {...}).
-    MIR_reg_t callee = jm_transpile_box_item(mt, call->callee);
+    MIR_reg_t callee_value = jm_transpile_box_item(mt, call->callee);
+    MIR_reg_t callee = jm_new_reg(mt, "new_callee", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, callee),
+        MIR_new_reg_op(mt->ctx, callee_value)));
 
     // Create object with prototype chain: obj.__proto__ = callee.prototype
     // A5: If the constructor has known this.prop patterns, use pre-shaped object.

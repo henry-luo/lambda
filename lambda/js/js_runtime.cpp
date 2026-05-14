@@ -4163,6 +4163,12 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                     if (m->data) {
                         Item cur = _map_read_field(found_entry, m->data);
                         if (js_is_deleted_sentinel(cur)) {
+                            bool internal_non_symbol = str_key->len >= 2 && str_key->chars[0] == '_' && str_key->chars[1] == '_' &&
+                                !(str_key->len > 6 && strncmp(str_key->chars, "__sym_", 6) == 0);
+                            if (!internal_non_symbol && !js_is_extensible(object)) {
+                                js_strict_throw_property_error("add property", str_key->chars, (int)str_key->len);
+                                return value;
+                            }
                             // Unlink from current position
                             ShapeEntry* prev = NULL;
                             ShapeEntry* scan = map_type->shape;

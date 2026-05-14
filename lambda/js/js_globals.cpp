@@ -11756,6 +11756,15 @@ extern "C" Item js_delete_property(Item obj, Item key) {
     // v25: Handle array element deletion — set element to sentinel to create "hole"
     if (get_type_id(obj) == LMD_TYPE_ARRAY) {
         Array* arr = obj.array;
+        if (get_type_id(key) == LMD_TYPE_STRING) {
+            String* sk = it2s(key);
+            if (sk && sk->len == 6 && strncmp(sk->chars, "length", 6) == 0) {
+                if (js_strict_mode) {
+                    js_throw_type_error("Cannot delete non-configurable property");
+                }
+                return (Item){.item = b2it(false)};
+            }
+        }
         // Convert key to numeric index
         int64_t idx = -1;
         if (get_type_id(key) == LMD_TYPE_INT) {
@@ -13359,6 +13368,31 @@ extern "C" int64_t js_set_last_with_binding_if_valid(Item key, Item value, int64
     return 1;
 }
 
+extern "C" Item js_delete_identifier_with_binding(Item key, int64_t declared_binding) {
+    if (js_with_stack_depth > 0) {
+        for (int i = js_with_stack_depth - 1; i >= 0; i--) {
+            Item scope_obj = js_with_stack[i];
+            if (get_type_id(scope_obj) != LMD_TYPE_MAP) continue;
+            if (it2b(js_in(key, scope_obj))) {
+                if (js_check_exception()) return (Item){.item = b2it(false)};
+                Item unscopables_sym = (Item){.item = i2it(-(int64_t)(11 + JS_SYMBOL_BASE))};
+                Item unscopables = js_property_get(scope_obj, unscopables_sym);
+                if (js_check_exception()) return (Item){.item = b2it(false)};
+                if (get_type_id(unscopables) == LMD_TYPE_MAP) {
+                    Item blocked = js_property_get(unscopables, key);
+                    if (js_check_exception()) return (Item){.item = b2it(false)};
+                    if (js_is_truthy(blocked)) continue;
+                }
+                return js_delete_property(scope_obj, key);
+            }
+            if (js_check_exception()) return (Item){.item = b2it(false)};
+        }
+    }
+    if (declared_binding) return (Item){.item = b2it(false)};
+    Item global = js_get_global_this();
+    return js_delete_property(global, key);
+}
+
 // js_get_global_property: look up a property on the global object by name string
 // Used as fallback for unresolved identifiers — implements browser-like named access
 extern "C" Item js_get_global_property(Item key) {
@@ -13490,7 +13524,7 @@ extern "C" void js_define_global_var_property(Item key, Item value) {
     memset(&pd, 0, sizeof(pd));
     pd.flags = JS_PD_HAS_VALUE | JS_PD_HAS_WRITABLE | JS_PD_HAS_ENUMERABLE |
         JS_PD_HAS_CONFIGURABLE | JS_PD_WRITABLE | JS_PD_ENUMERABLE;
-    js_pd_set_configurable(&pd, true);
+    js_pd_set_configurable(&pd, false);
     pd.value = value;
     bool is_new_property = !it2b(js_has_own_property(global, key));
     if (!is_new_property) return;

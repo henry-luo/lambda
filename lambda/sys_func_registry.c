@@ -836,6 +836,7 @@ extern int64_t js_with_depth_active(void);
 extern Item js_get_with_binding_or_fallback(Item key, Item fallback);
 extern int64_t js_capture_with_binding(Item key);
 extern int64_t js_set_last_with_binding_if_valid(Item key, Item value, int64_t strict);
+extern Item js_delete_identifier_with_binding(Item key, int64_t declared_binding);
 extern void js_set_global_property(Item key, Item value);
 extern void js_set_global_property_strict(Item key, Item value);
 extern void js_mark_private_method_non_writable(Item object, Item name);
@@ -1651,6 +1652,7 @@ JitImport jit_runtime_imports[] = {
     {"js_get_with_binding_or_fallback", FPTR(js_get_with_binding_or_fallback)},
     {"js_capture_with_binding", FPTR(js_capture_with_binding)},
     {"js_set_last_with_binding_if_valid", FPTR(js_set_last_with_binding_if_valid)},
+    {"js_delete_identifier_with_binding", FPTR(js_delete_identifier_with_binding)},
     {"js_set_global_property", FPTR(js_set_global_property)},
     {"js_set_global_property_strict", FPTR(js_set_global_property_strict)},
     {"js_mark_private_method_non_writable", FPTR(js_mark_private_method_non_writable)},

@@ -1504,7 +1504,8 @@ int main(int argc, char *argv[]) {
             }
             if (!js_file) js_file = argv[2];  // fallback
 
-            char* js_source = read_text_file(js_file);
+            size_t js_source_len = 0;
+            char* js_source = read_binary_file(js_file, &js_source_len);
             if (!js_source) {
                 printf("Error: Could not read file '%s'\n", js_file);
                 runtime_cleanup(&runtime);
@@ -1603,7 +1604,7 @@ int main(int argc, char *argv[]) {
                 js_store_process_argv(js_argc_store, js_argv_store);
             }
 
-            Item result = transpile_js_to_mir(&runtime, js_source, js_file);
+            Item result = transpile_js_to_mir_len(&runtime, js_source, js_source_len, js_file);
 
             // JS mode: no REPL printing of last expression value
             // (JS spec: scripts don't print their completion value)
@@ -3395,6 +3396,7 @@ int main(int argc, char *argv[]) {
         int batch_test_count = 0;  // diagnostic: track how many tests processed
         bool batch_in_test = false; // true between BATCH_START and BATCH_END (for crash recovery)
         char* saved_harness_src = NULL;  // kept for recompilation after crash recovery
+        size_t saved_harness_len = 0;
 
 #ifndef _WIN32
         // Install signal handlers ONCE for the entire batch loop.
@@ -3443,11 +3445,12 @@ int main(int argc, char *argv[]) {
                 }
 
                 memset(&preamble, 0, sizeof(preamble));
-                Item pres = transpile_js_to_mir_preamble(&runtime, harness_src, "<harness>", &preamble);
+                Item pres = transpile_js_to_mir_preamble_len(&runtime, harness_src, total_read, "<harness>", &preamble);
 
                 // Save harness source for recompilation after crash recovery
                 if (saved_harness_src) mem_free(saved_harness_src);
                 saved_harness_src = harness_src;  // take ownership instead of freeing
+                saved_harness_len = total_read;
 
                 if (preamble.mir_ctx) {
                     has_preamble = true;
@@ -3467,6 +3470,7 @@ int main(int argc, char *argv[]) {
             // support inline source protocol: source:<name>:<length>
             // reads <length> bytes of JS source directly from stdin
             char* js_source = NULL;
+            size_t js_source_len = 0;
             bool inline_source = false;
             if (strncmp(line, "source:", 7) == 0) {
                 // parse source:<name>:<length>
@@ -3486,6 +3490,7 @@ int main(int argc, char *argv[]) {
                     total_read += n;
                 }
                 js_source[total_read] = '\0';
+                js_source_len = total_read;
                 // consume trailing newline after source blob
                 int ch = fgetc(stdin);
                 if (ch != '\n' && ch != EOF) ungetc(ch, stdin);
@@ -3509,7 +3514,7 @@ int main(int argc, char *argv[]) {
                     continue;
                 }
 
-                js_source = read_text_file(script_path);
+                js_source = read_binary_file(script_path, &js_source_len);
                 if (!js_source) {
                     fprintf(stderr, "Error: Could not read file '%s'\n", script_path);
                     printf("\x01" "BATCH_END 1 0\n");
@@ -3555,8 +3560,8 @@ int main(int argc, char *argv[]) {
                     if (sigsetjmp(batch_timeout_jmp, 1) == 0) {
                         alarm(batch_timeout);
                         Item res = has_preamble
-                            ? transpile_js_to_mir_with_preamble(&runtime, js_source, script_path, &preamble)
-                            : transpile_js_to_mir(&runtime, js_source, script_path);
+                            ? transpile_js_to_mir_with_preamble_len(&runtime, js_source, js_source_len, script_path, &preamble)
+                            : transpile_js_to_mir_len(&runtime, js_source, js_source_len, script_path);
                         alarm(0);
                         batch_timeout_active = 0;
                         mir_error_active = 0;
@@ -3580,8 +3585,8 @@ int main(int argc, char *argv[]) {
                 mir_error_active = 1;
                 if (setjmp(mir_error_jmp) == 0) {
                     Item res = has_preamble
-                        ? transpile_js_to_mir_with_preamble(&runtime, js_source, script_path, &preamble)
-                        : transpile_js_to_mir(&runtime, js_source, script_path);
+                        ? transpile_js_to_mir_with_preamble_len(&runtime, js_source, js_source_len, script_path, &preamble)
+                        : transpile_js_to_mir_len(&runtime, js_source, js_source_len, script_path);
                     mir_error_active = 0;
                     if (res.item == ITEM_ERROR || js_check_exception()) {
                         result = 1;
@@ -3593,8 +3598,8 @@ int main(int argc, char *argv[]) {
             }
 #else
             Item res = has_preamble
-                ? transpile_js_to_mir_with_preamble(&runtime, js_source, script_path, &preamble)
-                : transpile_js_to_mir(&runtime, js_source, script_path);
+                ? transpile_js_to_mir_with_preamble_len(&runtime, js_source, js_source_len, script_path, &preamble)
+                : transpile_js_to_mir_len(&runtime, js_source, js_source_len, script_path);
             if (res.item == ITEM_ERROR || js_check_exception()) {
                 result = 1;
             }
@@ -3673,7 +3678,7 @@ int main(int argc, char *argv[]) {
                     }
                     if (saved_harness_src) {
                         memset(&preamble, 0, sizeof(preamble));
-                        Item pres = transpile_js_to_mir_preamble(&runtime, saved_harness_src, "<harness>", &preamble);
+                        Item pres = transpile_js_to_mir_preamble_len(&runtime, saved_harness_src, saved_harness_len, "<harness>", &preamble);
                         if (pres.item != ITEM_ERROR) {
                             has_preamble = true;
                             preamble_var_checkpoint = preamble.module_var_count;
@@ -3710,7 +3715,7 @@ int main(int argc, char *argv[]) {
                     }
                     if (saved_harness_src) {
                         memset(&preamble, 0, sizeof(preamble));
-                        Item pres = transpile_js_to_mir_preamble(&runtime, saved_harness_src, "<harness>", &preamble);
+                        Item pres = transpile_js_to_mir_preamble_len(&runtime, saved_harness_src, saved_harness_len, "<harness>", &preamble);
                         if (pres.item != ITEM_ERROR) {
                             has_preamble = true;
                             preamble_var_checkpoint = preamble.module_var_count;
