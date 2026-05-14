@@ -8,6 +8,7 @@
 #include "layout_mode.hpp"
 #include "layout_cache.hpp"
 #include "grid_baseline.hpp"
+#include "../lib/tagged.hpp"
 
 extern "C" {
 #include "../lib/log.h"
@@ -42,7 +43,7 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
     // CACHE LOOKUP: Check if we have a cached result for these constraints
     // This avoids redundant layout for repeated measurements with same inputs
     // =========================================================================
-    DomElement* dom_elem = (DomElement*)grid_container;
+    DomElement* dom_elem = lam::dom_require<DOM_NODE_ELEMENT>(grid_container);
     radiant::LayoutCache* cache = dom_elem ? dom_elem->layout_cache : nullptr;
 
     // Build known dimensions from current constraints
@@ -595,7 +596,7 @@ void init_grid_item_view(LayoutContext* lycon, DomNode* child) {
     // CRITICAL: Set lycon->view to this element so style resolution
     // applies properties to this element, not some other view
     View* saved_view = lycon->view;
-    lycon->view = (View*)elem;
+    lycon->view = static_cast<View*>(elem);
 
     // Resolve styles for this element (CSS cascade, inheritance, etc.)
     // This will now correctly apply padding/margin/border to elem->bound
@@ -619,14 +620,14 @@ void measure_grid_items(LayoutContext* lycon, GridContainerLayout* grid_layout) 
     log_debug("Measuring intrinsic sizes for grid items");
 
     // Iterate through all grid items and measure their content
-    ViewBlock* container = (ViewBlock*)lycon->elmt;
+    ViewBlock* container = lam::view_as_block(lycon->elmt);
     DomNode* child = container ? container->first_child : nullptr;
     log_debug("measure_grid_items: lycon->elmt=%p (container), grid_container via lycon->elmt width=%d",
               lycon->elmt, container ? container->width : -1);
 
     while (child) {
         if (child->is_element()) {
-            ViewBlock* item = (ViewBlock*)child->as_element();
+            ViewBlock* item = lam::view_require_block(child);
 
             // Skip absolute positioned and display:none items
             bool is_absolute = item->position &&
@@ -679,7 +680,7 @@ void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
     log_debug("Measuring intrinsic sizes for grid item %s", item->node_name());
 
     // Check measurement cache first (shared with flex layout)
-    MeasurementCacheEntry* cached = get_from_measurement_cache((DomNode*)item);
+    MeasurementCacheEntry* cached = get_from_measurement_cache(static_cast<DomNode*>(item));
     if (cached) {
         *min_width = cached->content_width;
         *max_width = cached->measured_width;
@@ -733,7 +734,8 @@ void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
     // Use unified intrinsic sizing API (same as flex layout)
     // This uses the shared font backend for accurate text measurement
     if (!has_explicit_width) {
-        IntrinsicSizes item_sizes = measure_element_intrinsic_widths(lycon, (DomElement*)item);
+        IntrinsicSizes item_sizes = measure_element_intrinsic_widths(
+            lycon, lam::dom_require<DOM_NODE_ELEMENT>(item));
         *min_width = item_sizes.min_content;
         *max_width = item_sizes.max_content;
     }
@@ -758,7 +760,7 @@ void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
         }
 
         // For block containers, min-content height == max-content height
-        float content_height = calculate_max_content_height(lycon, (DomNode*)item, width_for_height);
+        float content_height = calculate_max_content_height(lycon, static_cast<DomNode*>(item), width_for_height);
         *min_height = content_height;
         *max_height = content_height;
     }
@@ -769,7 +771,7 @@ void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
     // Do NOT add padding/border again here to avoid double-counting
 
     // Store in cache
-    store_in_measurement_cache((DomNode*)item, *max_width, *max_height,
+    store_in_measurement_cache(static_cast<DomNode*>(item), *max_width, *max_height,
                                *min_width, *min_height);
 
     log_debug("Grid item %s measured: min=%.1fx%.1f, max=%.1fx%.1f",
@@ -867,7 +869,7 @@ static void layout_grid_item_final_content_multipass(LayoutContext* lycon, ViewB
     lycon->block.given_height = -1;  // Auto height
     lycon->block.advance_y = content_y_offset;  // Start after padding/border top
     lycon->block.max_width = 0;
-    lycon->elmt = (DomNode*)grid_item;
+    lycon->elmt = static_cast<DomNode*>(grid_item);
 
     // Inherit text alignment from grid item if specified
     if (grid_item->blk) {
@@ -1114,7 +1116,7 @@ void layout_grid_absolute_children(LayoutContext* lycon, ViewBlock* container) {
     while (child) {
         child_count++;
         if (child->is_element()) {
-            ViewBlock* child_block = (ViewBlock*)child->as_element();
+            ViewBlock* child_block = lam::view_require_block(child);
             log_debug("Checking child %d: tag=%s, has_position=%d, position_type=%d",
                       child_count, child->node_name(),
                       child_block->position != nullptr,

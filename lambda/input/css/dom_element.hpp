@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include "../../../lib/avl_tree.h"
 #include "../../../lib/arena.h"
+#include "../../../lib/ownership.hpp"
 #include "../../../lib/strbuf.h"
 #include "css_style.hpp"
 #include "css_style_node.hpp"
@@ -357,6 +358,39 @@ inline const DomElement* element_to_dom_element(const Element* e) {
 // DomElement* ↔ DomNode*: same address (DomNode is at offset 0 via inheritance)
 inline DomNode* dom_element_to_node(DomElement* de) { return static_cast<DomNode*>(de); }
 inline DomElement* node_to_dom_element(DomNode* dn) { return static_cast<DomElement*>(dn); }
+
+inline void dom_element_retain_tag_name(DomElement* element, lam::PoolPtr<const char> tag_name) {
+    lam::PersistentFieldRef<const char, lam::PoolDomain> field(element->tag_name);
+    field.set(tag_name);
+}
+
+inline void dom_element_retain_tag_name(DomElement* element, lam::PoolPtr<char> tag_name) {
+    dom_element_retain_tag_name(element, lam::borrow_const(tag_name));
+}
+
+inline void dom_element_retain_id(DomElement* element, lam::PoolPtr<const char> id) {
+    lam::PersistentFieldRef<const char, lam::PoolDomain> field(element->id);
+    field.set(id);
+}
+
+inline void dom_element_retain_id(DomElement* element, lam::PoolPtr<char> id) {
+    dom_element_retain_id(element, lam::borrow_const(id));
+}
+
+inline void dom_element_clear_id(DomElement* element) {
+    lam::PersistentFieldRef<const char, lam::PoolDomain> field(element->id);
+    field.clear();
+}
+
+inline void dom_element_retain_class_names(DomElement* element, lam::PoolPtr<const char*> class_names) {
+    lam::PersistentFieldRef<const char*, lam::PoolDomain> field(element->class_names);
+    field.set(class_names);
+}
+
+inline void dom_element_clear_class_names(DomElement* element) {
+    lam::PersistentFieldRef<const char*, lam::PoolDomain> field(element->class_names);
+    field.clear();
+}
 
 // Ensure embedded Element is 8-byte aligned (required for pointer fields in Element)
 static_assert(offsetof(DomElement, elmt) % 8 == 0,

@@ -217,14 +217,12 @@ bool dom_element_init(DomElement* element, DomDocument* doc, const char* tag_nam
     element->display = {CSS_VALUE__UNDEF, CSS_VALUE__UNDEF};
     element->styles_resolved = false;
 
-    // Copy tag name
-    size_t tag_len = strlen(tag_name);
-    char* tag_copy = (char*)arena_alloc(doc->arena, tag_len + 1);
+    // Copy tag name into document arena before retaining on the DOM element.
+    lam::PoolPtr<char> tag_copy = lam::promote_to_arena(doc->arena, tag_name);
     if (!tag_copy) {
         return false;
     }
-    str_copy(tag_copy, tag_len + 1, tag_name, tag_len);
-    element->tag_name = tag_copy;
+    dom_element_retain_tag_name(element, tag_copy);
 
     // Convert tag name to Lexbor tag ID for fast comparison
     element->tag_id = DomNode::tag_name_to_id(tag_name);
@@ -240,7 +238,7 @@ bool dom_element_init(DomElement* element, DomDocument* doc, const char* tag_nam
     element->needs_style_recompute = true;
 
     // Initialize arrays
-    element->class_names = NULL;
+    dom_element_clear_class_names(element);
     element->class_count = 0;
 
     // Initialize cached attribute fields from native element (if exists)
@@ -248,7 +246,12 @@ bool dom_element_init(DomElement* element, DomDocument* doc, const char* tag_nam
         ElementReader reader(native_element);
 
         // Cache ID attribute
-        element->id = reader.get_attr_string("id");
+        const char* id_attr = reader.get_attr_string("id");
+        if (id_attr) {
+            dom_element_retain_id(element, lam::promote_to_arena(doc->arena, id_attr));
+        } else {
+            dom_element_clear_id(element);
+        }
 
         // Parse class attribute into array
         const char* class_str = reader.get_attr_string("class");
@@ -260,8 +263,9 @@ bool dom_element_init(DomElement* element, DomDocument* doc, const char* tag_nam
             }
 
             // Allocate array from arena
-            element->class_names = (const char**)arena_alloc(doc->arena, count * sizeof(const char*));
-            if (element->class_names) {
+            const char** class_names = (const char**)arena_alloc(doc->arena, count * sizeof(const char*));
+            if (class_names) {
+                dom_element_retain_class_names(element, lam::PoolPtr<const char*>(class_names));
                 // Parse classes - make a copy for strtok
                 char* class_copy = (char*)arena_alloc(doc->arena, strlen(class_str) + 1);
                 if (class_copy) {
@@ -275,7 +279,7 @@ bool dom_element_init(DomElement* element, DomDocument* doc, const char* tag_nam
                         char* class_perm = (char*)arena_alloc(doc->arena, token_len + 1);
                         if (class_perm) {
                             str_copy(class_perm, token_len + 1, token, token_len);
-                            element->class_names[index++] = class_perm;
+                            class_names[index++] = class_perm;
                         }
                         token = strtok(NULL, " \t\n\r");
                     }
@@ -316,8 +320,8 @@ void dom_element_destroy(DomElement* element) {
     }
 
     // Clear cached fields (but don't free - owned by pool/element)
-    element->id = NULL;
-    element->class_names = NULL;
+    dom_element_clear_id(element);
+    dom_element_clear_class_names(element);
     element->class_count = 0;
 
     // Note: native_element is not freed here - managed by Input/Arena
@@ -373,12 +377,17 @@ bool dom_element_set_attribute(DomElement* element, const char* name, const char
             if (strcmp(lower_name, "id") == 0) {
                 // Cache ID for fast access
                 ElementReader reader(element->native_element);
-                element->id = reader.get_attr_string("id");
+                const char* id_attr = reader.get_attr_string("id");
+                if (id_attr) {
+                    dom_element_retain_id(element, lam::promote_to_arena(element->doc->arena, id_attr));
+                } else {
+                    dom_element_clear_id(element);
+                }
             } else if (strcmp(lower_name, "class") == 0) {
                 // Parse space-separated classes
                 // First, clear existing classes
                 element->class_count = 0;
-                element->class_names = nullptr;
+                dom_element_clear_class_names(element);
 
                 // Parse and add each class
                 if (value && strlen(value) > 0) {
@@ -473,7 +482,10 @@ bool dom_element_remove_attribute(DomElement* element, const char* name) {
 
             // Clear cached fields
             if (strcmp(lower_name, "id") == 0) {
-                element->id = nullptr;
+                dom_element_clear_id(element);
+            } else if (strcmp(lower_name, "class") == 0) {
+                element->class_count = 0;
+                dom_element_clear_class_names(element);
             }
 
             // Invalidate style cache
@@ -584,7 +596,7 @@ bool dom_element_add_class(DomElement* element, const char* class_name) {
     str_copy(class_copy, class_len + 1, class_name, class_len);
 
     new_classes[element->class_count] = class_copy;
-    element->class_names = new_classes;
+    dom_element_retain_class_names(element, lam::PoolPtr<const char*>(new_classes));
     element->class_count = new_count;
 
     return true;
@@ -2806,7 +2818,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
     // Cache id attribute from native element (if present)
     const char* id_value = extract_element_attribute(elem, "id", doc->arena);
     if (id_value) {
-        dom_elem->id = id_value;  // Cache ID for fast access
+        dom_element_retain_id(dom_elem, lam::promote_to_arena(doc->arena, id_value));
     }
 
     const char* class_value = extract_element_attribute(elem, "class", doc->arena);
