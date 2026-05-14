@@ -372,5 +372,5 @@ fn _parse_content_loop(bytes: string, i: int, n: int, ops, stack) {
 }
 
 pub fn parse_content_stream(bytes: string) {
-    _parse_content_loop(bytes, 0, int(len(bytes)), [], [])
+    pdf_parse_content_stream(bytes)
 }

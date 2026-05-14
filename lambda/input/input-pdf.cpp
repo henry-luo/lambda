@@ -5,6 +5,7 @@
 #include "input-context.hpp"
 #include "source_tracker.hpp"
 #include "lib/log.h"
+#include <stdlib.h>
 
 using namespace lambda;
 
@@ -21,6 +22,7 @@ static Item parse_pdf_font_descriptor(Input *input, Map* font_dict);
 static Item extract_pdf_page_info(Input *input, Map* page_dict);
 static bool is_valid_pdf_header(const char *pdf_content);
 static void advance_safely(const char **pdf, int max_advance);
+extern __thread EvalContext* context;
 
 // PDF object types
 typedef enum {
@@ -41,6 +43,333 @@ typedef struct {
     int obj_num;
     int gen_num;
 } IndirectObjectRef;
+
+typedef struct PdfCsReadResult {
+    Item value;
+    const char* end;
+    bool has_value;
+} PdfCsReadResult;
+
+static inline bool pdf_cs_is_ws(char c) {
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f';
+}
+
+static inline bool pdf_cs_is_digit(char c) {
+    return c >= '0' && c <= '9';
+}
+
+static inline bool pdf_cs_is_alpha(char c) {
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+}
+
+static inline bool pdf_cs_is_op_char(char c) {
+    return pdf_cs_is_alpha(c) || c == '*' || c == '\'' || c == '"';
+}
+
+static inline bool pdf_cs_is_num_start(char c) {
+    return pdf_cs_is_digit(c) || c == '+' || c == '-' || c == '.';
+}
+
+static inline bool pdf_cs_is_hex_digit(char c) {
+    return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f');
+}
+
+static inline bool pdf_cs_is_octal(char c) {
+    return c >= '0' && c <= '7';
+}
+
+static const char* pdf_cs_skip_ws(const char* p, const char* end) {
+    while (p < end && pdf_cs_is_ws(*p)) p++;
+    return p;
+}
+
+static const char* pdf_cs_skip_comment(const char* p, const char* end) {
+    while (p < end && *p != '\n' && *p != '\r') p++;
+    return p;
+}
+
+static Item pdf_cs_string_item(MarkBuilder& builder, const char* start, size_t len) {
+    return builder.createStringItem(start, len);
+}
+
+static Item pdf_cs_kind_value(MarkBuilder& builder, const char* kind, const char* start, size_t len) {
+    MapBuilder map = builder.map();
+    map.put("kind", kind);
+    map.put("value", pdf_cs_string_item(builder, start, len));
+    return map.final();
+}
+
+static PdfCsReadResult pdf_cs_read_operand(MarkBuilder& builder, const char* p, const char* end);
+
+static Item pdf_cs_empty_dict(MarkBuilder& builder) {
+    MapBuilder empty = builder.map();
+    MapBuilder dict = builder.map();
+    dict.put("kind", "dict");
+    dict.put("value", empty.final());
+    return dict.final();
+}
+
+static PdfCsReadResult pdf_cs_read_number(MarkBuilder& builder, const char* p, const char* end) {
+    const char* q = p;
+    if (q < end && (*q == '+' || *q == '-')) q++;
+    bool has_digit = false;
+    bool has_dot = false;
+    while (q < end) {
+        if (*q == '.') {
+            if (has_dot) break;
+            has_dot = true;
+            q++;
+        }
+        else if (pdf_cs_is_digit(*q)) {
+            has_digit = true;
+            q++;
+        }
+        else break;
+    }
+    if (!has_digit) return {ItemNull, p + 1, false};
+
+    size_t len = (size_t)(q - p);
+    char buf[128];
+    if (len >= sizeof(buf)) len = sizeof(buf) - 1;
+    memcpy(buf, p, len);
+    buf[len] = '\0';
+    if (has_dot) return {builder.createFloat(strtod(buf, nullptr)), q, true};
+    return {builder.createInt(strtoll(buf, nullptr, 10)), q, true};
+}
+
+static PdfCsReadResult pdf_cs_read_name(MarkBuilder& builder, const char* p, const char* end) {
+    const char* q = p + 1;
+    while (q < end) {
+        char c = *q;
+        if (pdf_cs_is_ws(c) || c == '/' || c == '[' || c == ']' ||
+            c == '(' || c == ')' || c == '<' || c == '>') break;
+        q++;
+    }
+    return {pdf_cs_kind_value(builder, "name", p + 1, (size_t)(q - (p + 1))), q, true};
+}
+
+static const char* pdf_cs_skip_dict(const char* p, const char* end) {
+    const char* q = p + 2;
+    while (q + 1 < end) {
+        if (q[0] == '>' && q[1] == '>') return q + 2;
+        q++;
+    }
+    return end;
+}
+
+static PdfCsReadResult pdf_cs_read_hex_string(MarkBuilder& builder, const char* p, const char* end) {
+    const char* q = p + 1;
+    while (q < end && *q != '>') q++;
+    StrBuf* buf = strbuf_new_cap((size_t)(q - (p + 1)) + 1);
+    if (!buf) return {pdf_cs_kind_value(builder, "hex", "", 0), q < end ? q + 1 : q, true};
+    for (const char* r = p + 1; r < q; r++) {
+        if (!pdf_cs_is_ws(*r) && pdf_cs_is_hex_digit(*r)) strbuf_append_char(buf, *r);
+    }
+    Item value = pdf_cs_kind_value(builder, "hex", buf->str ? buf->str : "", buf->length);
+    strbuf_free(buf);
+    return {value, q < end ? q + 1 : q, true};
+}
+
+static char pdf_cs_octal_char(const char** pp, const char* end, char first) {
+    int val = first - '0';
+    int count = 1;
+    const char* p = *pp;
+    while (count < 3 && p < end && pdf_cs_is_octal(*p)) {
+        val = (val * 8) + (*p - '0');
+        p++;
+        count++;
+    }
+    *pp = p;
+    return (char)val;
+}
+
+static PdfCsReadResult pdf_cs_read_lit_string(MarkBuilder& builder, const char* p, const char* end) {
+    StrBuf* buf = strbuf_new();
+    if (!buf) return {pdf_cs_kind_value(builder, "string", "", 0), p + 1, true};
+    const char* q = p + 1;
+    int depth = 1;
+    while (q < end && depth > 0) {
+        char c = *q++;
+        if (c == '\\') {
+            if (q >= end) break;
+            char esc = *q++;
+            if (pdf_cs_is_octal(esc)) strbuf_append_char(buf, pdf_cs_octal_char(&q, end, esc));
+            else if (esc == 'n') strbuf_append_char(buf, '\n');
+            else if (esc == 'r') strbuf_append_char(buf, '\r');
+            else if (esc == 't') strbuf_append_char(buf, '\t');
+            else if (esc == 'b') strbuf_append_char(buf, '\b');
+            else if (esc == 'f') strbuf_append_char(buf, '\f');
+            else strbuf_append_char(buf, esc);
+        }
+        else if (c == '(') {
+            depth++;
+            strbuf_append_char(buf, c);
+        }
+        else if (c == ')') {
+            depth--;
+            if (depth > 0) strbuf_append_char(buf, c);
+        }
+        else strbuf_append_char(buf, c);
+    }
+    Item value = pdf_cs_kind_value(builder, "string", buf->str ? buf->str : "", buf->length);
+    strbuf_free(buf);
+    return {value, q, true};
+}
+
+static PdfCsReadResult pdf_cs_read_array(MarkBuilder& builder, const char* p, const char* end) {
+    ArrayBuilder items = builder.array();
+    const char* q = p + 1;
+    while (q < end) {
+        q = pdf_cs_skip_ws(q, end);
+        if (q >= end) break;
+        if (*q == ']') {
+            MapBuilder map = builder.map();
+            map.put("kind", "array");
+            map.put("value", items.final());
+            return {map.final(), q + 1, true};
+        }
+        PdfCsReadResult r = pdf_cs_read_operand(builder, q, end);
+        if (r.has_value) items.append(r.value);
+        q = r.end > q ? r.end : q + 1;
+    }
+    MapBuilder map = builder.map();
+    map.put("kind", "array");
+    map.put("value", items.final());
+    return {map.final(), q, true};
+}
+
+static PdfCsReadResult pdf_cs_read_operand(MarkBuilder& builder, const char* p, const char* end) {
+    if (p >= end) return {ItemNull, p, false};
+    char c = *p;
+    if (c == '/') return pdf_cs_read_name(builder, p, end);
+    if (c == '(') return pdf_cs_read_lit_string(builder, p, end);
+    if (c == '[') return pdf_cs_read_array(builder, p, end);
+    if (c == '<') {
+        if (p + 1 < end && p[1] == '<') return {pdf_cs_empty_dict(builder), pdf_cs_skip_dict(p, end), true};
+        return pdf_cs_read_hex_string(builder, p, end);
+    }
+    if (pdf_cs_is_num_start(c)) return pdf_cs_read_number(builder, p, end);
+    return {ItemNull, p + 1, false};
+}
+
+static const char* pdf_cs_read_op(const char* p, const char* end, const char** op_start, size_t* op_len) {
+    const char* q = p;
+    while (q < end && pdf_cs_is_op_char(*q)) q++;
+    *op_start = p;
+    *op_len = (size_t)(q - p);
+    return q;
+}
+
+static bool pdf_cs_is_inline_id(const char* p, const char* end) {
+    return p + 2 <= end && p[0] == 'I' && p[1] == 'D' && (p + 2 == end || pdf_cs_is_ws(p[2]));
+}
+
+static bool pdf_cs_is_inline_ei(const char* p, const char* end) {
+    return p + 3 <= end && pdf_cs_is_ws(p[0]) && p[1] == 'E' && p[2] == 'I' &&
+        (p + 3 == end || pdf_cs_is_ws(p[3]) || p[3] == '/' || p[3] == '<' || p[3] == '(');
+}
+
+static Item pdf_cs_inline_info(MarkBuilder& builder, const char* p, const char* end, const char** out_end) {
+    ArrayBuilder pairs = builder.array();
+    const char* q = p;
+    while (q < end) {
+        q = pdf_cs_skip_ws(q, end);
+        if (q >= end) break;
+        if (pdf_cs_is_inline_id(q, end)) {
+            const char* data_start = q + 3;
+            const char* k = data_start;
+            while (k < end && !pdf_cs_is_inline_ei(k, end)) k++;
+            const char* data_end = k < end ? k : end;
+            *out_end = k < end ? k + 3 : end;
+            MapBuilder info = builder.map();
+            info.put("kind", "inline_image");
+            info.put("dict", pairs.final());
+            info.put("data", pdf_cs_string_item(builder, data_start, (size_t)(data_end - data_start)));
+            return info.final();
+        }
+        if (*q == '/') {
+            const char* key_start = q + 1;
+            const char* key_end = key_start;
+            while (key_end < end && !pdf_cs_is_ws(*key_end) && *key_end != '/') key_end++;
+            const char* val_start = pdf_cs_skip_ws(key_end, end);
+            PdfCsReadResult val = pdf_cs_read_operand(builder, val_start, end);
+            MapBuilder pair = builder.map();
+            pair.put("key", pdf_cs_string_item(builder, key_start, (size_t)(key_end - key_start)));
+            pair.put("value", val.value);
+            pairs.append(pair.final());
+            q = val.end > q ? val.end : q + 1;
+        }
+        else q++;
+    }
+    *out_end = end;
+    MapBuilder info = builder.map();
+    info.put("kind", "inline_image");
+    info.put("dict", pairs.final());
+    info.put("data", "");
+    return info.final();
+}
+
+static Item pdf_cs_operand_array(MarkBuilder& builder, Array* stack) {
+    ArrayBuilder operands = builder.array();
+    for (int64_t i = 0; stack && i < stack->length; i++) operands.append(stack->items[i]);
+    return operands.final();
+}
+
+static Item pdf_cs_op_record(MarkBuilder& builder, const char* op, size_t op_len, Item operands) {
+    MapBuilder rec = builder.map();
+    rec.put("op", pdf_cs_string_item(builder, op, op_len));
+    rec.put("operands", operands);
+    return rec.final();
+}
+
+extern "C" Item pdf_parse_content_stream(Item bytes_item) {
+    TypeId type = get_type_id(bytes_item);
+    if (type != LMD_TYPE_STRING && type != LMD_TYPE_BINARY) return ItemNull;
+    String* bytes = bytes_item.get_string();
+    if (!bytes || !bytes->chars || !context || !context->pool) return ItemNull;
+
+    Input* input = Input::create(context->pool, nullptr, nullptr);
+    if (!input) return ItemNull;
+    MarkBuilder builder(input);
+    ArrayBuilder ops = builder.array();
+    Array* stack = array_pooled(input->pool);
+    const char* p = bytes->chars;
+    const char* end = bytes->chars + bytes->len;
+
+    while (p < end) {
+        char c = *p;
+        if (pdf_cs_is_ws(c)) { p++; continue; }
+        if (c == '%') { p = pdf_cs_skip_comment(p, end); continue; }
+        if (pdf_cs_is_op_char(c)) {
+            const char* op_start = nullptr;
+            size_t op_len = 0;
+            const char* op_end = pdf_cs_read_op(p, end, &op_start, &op_len);
+            if (op_len == 2 && op_start[0] == 'B' && op_start[1] == 'I') {
+                const char* inline_end = op_end;
+                Item info = pdf_cs_inline_info(builder, op_end, end, &inline_end);
+                ArrayBuilder operands = builder.array();
+                operands.append(info);
+                ops.append(pdf_cs_op_record(builder, "inline_image", 12, operands.final()));
+                stack->length = 0;
+                p = inline_end;
+            }
+            else {
+                ops.append(pdf_cs_op_record(builder, op_start, op_len, pdf_cs_operand_array(builder, stack)));
+                stack->length = 0;
+                p = op_end;
+            }
+            continue;
+        }
+        PdfCsReadResult r = pdf_cs_read_operand(builder, p, end);
+        if (r.has_value) array_append(stack, r.value, input->pool, input->arena);
+        p = r.end > p ? r.end : p + 1;
+    }
+    return ops.final();
+}
+
+extern "C" Item fn_pdf_parse_content_stream(Item bytes_item) {
+    return pdf_parse_content_stream(bytes_item);
+}
 
 typedef struct {
     Map* dict;
@@ -135,8 +464,8 @@ static Map* parse_pdf_dictionary(InputContext& ctx, const char **pdf) {
     Map* dict = map_pooled(ctx.input()->pool);
     if (!dict) return NULL;
 
-    int pair_count = 0;
-    while (**pdf && !(**pdf == '>' && *(*pdf + 1) == '>') && pair_count < 100) { // allow up to 100 key-value pairs
+    while (**pdf && !(**pdf == '>' && *(*pdf + 1) == '>')) {
+        const char* entry_start = *pdf;
         // parse key (should be a name)
         if (**pdf != '/') {
             // skip non-name, might be malformed
@@ -153,10 +482,13 @@ static Map* parse_pdf_dictionary(InputContext& ctx, const char **pdf) {
         Item value = parse_pdf_object(ctx, pdf, 1);
         if (value .item != ITEM_ERROR && value .item != ITEM_NULL) {
             ctx.builder.putToMap(dict, key, value);
-            pair_count++;
         }
 
         skip_pdf_whitespace_and_comments(pdf);
+        if (*pdf == entry_start) {
+            (*pdf)++;
+            skip_pdf_whitespace_and_comments(pdf);
+        }
     }
 
     if (**pdf == '>' && *(*pdf + 1) == '>') {

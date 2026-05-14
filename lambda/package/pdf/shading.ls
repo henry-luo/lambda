@@ -35,23 +35,57 @@ fn _component_color(vals, ncomp) {
     else { color.BLACK }
 }
 
+fn _sample_count(d) {
+    if (d != null and d.Size is array and len(d.Size) >= 1) { util.int_or(d.Size[0], 0) }
+    else { 0 }
+}
+
+fn _sample_range_value(d, comp, raw) {
+    let r = if (d != null and d.Range is array) d.Range else null
+    let lo = if (r != null and len(r) > (comp * 2)) { util.num(r[comp * 2]) } else { 0.0 }
+    let hi = if (r != null and len(r) > (comp * 2 + 1)) { util.num(r[comp * 2 + 1]) } else { 1.0 }
+    lo + ((hi - lo) * (float(raw) / 255.0))
+}
+
+fn _sampled_values(f, d, ncomp, sample_index) {
+    let data = _stream_data(f)
+    let off = sample_index * ncomp
+    if (data == null or data == "") { [] }
+    else {
+        for (i in 0 to (ncomp - 1)) _sample_range_value(d, i, util.byte_at(data, off + i))
+    }
+}
+
+fn _sampled_color(f, d, ncomp, sample_index) {
+    _component_color(_sampled_values(f, d, ncomp, sample_index), ncomp)
+}
+
 fn _function_start_color(pdf, func, ncomp) {
     let f = resolve.deref(pdf, func)
+    let d = _stream_dict(f)
     if (f == null) { color.BLACK }
-    else if (f.FunctionType == 3 and f.Functions and len(f.Functions) >= 1) {
-        _function_start_color(pdf, f.Functions[0], ncomp)
+    else if (d.FunctionType == 3 and d.Functions and len(d.Functions) >= 1) {
+        _function_start_color(pdf, d.Functions[0], ncomp)
     }
-    else { _component_color(f.C0, ncomp) }
+    else if (d.FunctionType == 0 and d.BitsPerSample == 8) {
+        _sampled_color(f, d, ncomp, 0)
+    }
+    else { _component_color(d.C0, ncomp) }
 }
 
 fn _function_end_color(pdf, func, ncomp) {
     let f = resolve.deref(pdf, func)
+    let d = _stream_dict(f)
     if (f == null) { color.BLACK }
-    else if (f.FunctionType == 3 and f.Functions and len(f.Functions) >= 1) {
-        _function_end_color(pdf, f.Functions[len(f.Functions) - 1], ncomp)
+    else if (d.FunctionType == 3 and d.Functions and len(d.Functions) >= 1) {
+        _function_end_color(pdf, d.Functions[len(d.Functions) - 1], ncomp)
+    }
+    else if (d.FunctionType == 0 and d.BitsPerSample == 8) {
+        let samples = _sample_count(d)
+        _sampled_color(f, d, ncomp, if (samples > 0) samples - 1 else 0)
     }
     else {
-        let c = if (f.C1 != null) f.C1 else f.C0
+        let c = if (d.C1 != null) d.C1 else d.C0
         _component_color(c, ncomp)
     }
 }
@@ -79,9 +113,10 @@ fn _stitch_stop(pdf, func, ncomp, offset, use_end) {
 
 fn _function_stops(pdf, func, ncomp) {
     let f = resolve.deref(pdf, func)
-    if (f != null and f.FunctionType == 3 and f.Functions and len(f.Functions) >= 1) {
-        let fs = f.Functions
-        let bs = f.Bounds
+    let d = _stream_dict(f)
+    if (f != null and d.FunctionType == 3 and d.Functions and len(d.Functions) >= 1) {
+        let fs = d.Functions
+        let bs = d.Bounds
         if (len(fs) == 2 and len(bs) >= 1) {
             [_stitch_stop(pdf, fs[0], ncomp, 0.0, false), _stitch_stop(pdf, fs[0], ncomp, bs[0], true),
              _stitch_stop(pdf, fs[1], ncomp, bs[0], false), _stitch_stop(pdf, fs[1], ncomp, 1.0, true)]
@@ -228,7 +263,9 @@ pub fn from_sh_op(pdf, page, ctm, ops, page_w, page_h, ctr) {
 
 fn _pattern_table(pdf, page) {
     let res = resolve.page_resources(pdf, page)
-    if (res.Pattern != null) { resolve.deref(pdf, res.Pattern) }
+    let raw = res["Pattern"]
+    if (raw is map and raw.type == "indirect_ref") { resolve.deref(pdf, raw) }
+    else if (raw != null) { raw }
     else { null }
 }
 
@@ -256,7 +293,10 @@ fn _page_media_box_value(page) {
 }
 
 fn _pattern_page(pdf, page, d) {
-    let res = if (d != null and d.Resources != null) { resolve.deref(pdf, d.Resources) } else { resolve.page_resources(pdf, page) }
+        let raw_res = if (d != null and d.Resources != null) { d.Resources } else { null }
+        let res = if (raw_res is map and raw_res.type == "indirect_ref") { resolve.deref(pdf, raw_res) }
+                            else if (raw_res != null) { raw_res }
+                            else { resolve.page_resources(pdf, page) }
     { dict: { Resources: res, MediaBox: _page_media_box_value(page) },
       resources: res,
       MediaBox: _page_media_box_value(page) }
@@ -294,37 +334,99 @@ fn _pop_ctm(stack, fallback) {
     else { { ctm: fallback, stack: stack } }
 }
 
-fn _tiling_pattern_children_loop(pdf, page, ops, i, n, ctm, stack, out) {
+fn _rect_child(rect, fill, ctm) {
+    let el = <rect x: util.fmt_num(rect.x), y: util.fmt_num(rect.y),
+                   width: util.fmt_num(rect.w), height: util.fmt_num(rect.h),
+                   fill: fill>
+    <g transform: util.fmt_matrix(ctm); el>
+}
+
+fn _pattern_color_from_ops(pdf, page, operands, id, ctm, fallback) {
+    let nm = _do_name_from_operands(operands)
+    if (nm == null) { { defs: [], fill: fallback } }
+    else { from_pattern_fill(pdf, page, nm, id, ctm) }
+}
+
+fn _tiling_pattern_children_loop(pdf, page, ops, i, n, ctm, stack, fill, defs, rect, out, id) {
     if (i >= n) { out }
     else {
         let op = ops[i]
         let opr = op.op
         let operands = op.operands
         if (opr == "q") {
-            _tiling_pattern_children_loop(pdf, page, ops, i + 1, n, ctm, stack ++ [ctm], out)
+            _tiling_pattern_children_loop(pdf, page, ops, i + 1, n, ctm, stack ++ [ctm], fill, defs, rect, out, id)
         }
         else if (opr == "Q") {
             let popped = _pop_ctm(stack, ctm)
-            _tiling_pattern_children_loop(pdf, page, ops, i + 1, n, popped.ctm, popped.stack, out)
+            _tiling_pattern_children_loop(pdf, page, ops, i + 1, n, popped.ctm, popped.stack, fill, defs, rect, out, id)
         }
         else if (opr == "cm") {
             if (len(operands) >= 6) {
                 let mtx = [util.num(operands[0]), util.num(operands[1]), util.num(operands[2]),
                            util.num(operands[3]), util.num(operands[4]), util.num(operands[5])]
-                _tiling_pattern_children_loop(pdf, page, ops, i + 1, n, util.matrix_mul(mtx, ctm), stack, out)
+                _tiling_pattern_children_loop(pdf, page, ops, i + 1, n, util.matrix_mul(mtx, ctm), stack, fill, defs, rect, out, id)
             }
-            else { _tiling_pattern_children_loop(pdf, page, ops, i + 1, n, ctm, stack, out) }
+            else { _tiling_pattern_children_loop(pdf, page, ops, i + 1, n, ctm, stack, fill, defs, rect, out, id) }
+        }
+        else if (opr == "g" and len(operands) >= 1) {
+            _tiling_pattern_children_loop(pdf, page, ops, i + 1, n, ctm, stack, color.from_g_ops(operands), defs, rect, out, id)
+        }
+        else if (opr == "rg" and len(operands) >= 3) {
+            _tiling_pattern_children_loop(pdf, page, ops, i + 1, n, ctm, stack, color.from_rg_ops(operands), defs, rect, out, id)
+        }
+        else if (opr == "k" and len(operands) >= 4) {
+            _tiling_pattern_children_loop(pdf, page, ops, i + 1, n, ctm, stack, color.from_k_ops(operands), defs, rect, out, id)
+        }
+        else if (opr == "sc" or opr == "scn") {
+            let pc = _pattern_color_from_ops(pdf, page, operands, id ++ "_nested" ++ string(i), ctm, color.from_sc_ops(operands))
+            _tiling_pattern_children_loop(pdf, page, ops, i + 1, n, ctm, stack, pc.fill, defs ++ pc.defs, rect, out, id)
+        }
+        else if (opr == "re" and len(operands) >= 4) {
+            let r = { x: util.num(operands[0]), y: util.num(operands[1]),
+                      w: util.num(operands[2]), h: util.num(operands[3]) }
+            _tiling_pattern_children_loop(pdf, page, ops, i + 1, n, ctm, stack, fill, defs, r, out, id)
+        }
+        else if ((opr == "f" or opr == "F" or opr == "f*") and rect != null) {
+            _tiling_pattern_children_loop(pdf, page, ops, i + 1, n, ctm, stack, fill, defs, null, out ++ [_rect_child(rect, fill, ctm)], id)
         }
         else if (opr == "Do" and _do_name_from_operands(operands) != null) {
             let imgs = image.apply_do(pdf, page, ctm, operands)
-            _tiling_pattern_children_loop(pdf, page, ops, i + 1, n, ctm, stack, out ++ (for (img in imgs) img))
+            _tiling_pattern_children_loop(pdf, page, ops, i + 1, n, ctm, stack, fill, defs, rect, out ++ (for (img in imgs) img), id)
         }
-        else { _tiling_pattern_children_loop(pdf, page, ops, i + 1, n, ctm, stack, out) }
+        else { _tiling_pattern_children_loop(pdf, page, ops, i + 1, n, ctm, stack, fill, defs, rect, out, id) }
     }
 }
 
-fn _tiling_pattern_children(pdf, page, ops) {
-    _tiling_pattern_children_loop(pdf, page, ops, 0, len(ops), util.IDENTITY, [], [])
+fn _tiling_pattern_children(pdf, page, ops, id) {
+    _tiling_pattern_children_loop(pdf, page, ops, 0, len(ops), util.IDENTITY, [], color.BLACK, [], null, [], id)
+}
+
+fn _tiling_pattern_defs_loop(pdf, page, ops, i, n, ctm, stack, fill, defs, id) {
+    if (i >= n) { defs }
+    else {
+        let op = ops[i]
+        let opr = op.op
+        let operands = op.operands
+        if (opr == "q") { _tiling_pattern_defs_loop(pdf, page, ops, i + 1, n, ctm, stack ++ [ctm], fill, defs, id) }
+        else if (opr == "Q") {
+            let popped = _pop_ctm(stack, ctm)
+            _tiling_pattern_defs_loop(pdf, page, ops, i + 1, n, popped.ctm, popped.stack, fill, defs, id)
+        }
+        else if (opr == "cm" and len(operands) >= 6) {
+            let mtx = [util.num(operands[0]), util.num(operands[1]), util.num(operands[2]),
+                       util.num(operands[3]), util.num(operands[4]), util.num(operands[5])]
+            _tiling_pattern_defs_loop(pdf, page, ops, i + 1, n, util.matrix_mul(mtx, ctm), stack, fill, defs, id)
+        }
+        else if (opr == "scn") {
+            let pc = _pattern_color_from_ops(pdf, page, operands, id ++ "_nested" ++ string(i), ctm, fill)
+            _tiling_pattern_defs_loop(pdf, page, ops, i + 1, n, ctm, stack, pc.fill, defs ++ pc.defs, id)
+        }
+        else { _tiling_pattern_defs_loop(pdf, page, ops, i + 1, n, ctm, stack, fill, defs, id) }
+    }
+}
+
+fn _tiling_pattern_defs(pdf, page, ops, id) {
+    _tiling_pattern_defs_loop(pdf, page, ops, 0, len(ops), util.IDENTITY, [], color.BLACK, [], id)
 }
 
 pub fn from_tiling_pattern_fill(pdf, page, p, id) {
@@ -343,7 +445,8 @@ pub fn from_tiling_pattern_fill(pdf, page, p, id) {
             let m = [m0[0], m0[1], m0[2], m0[3], m0[4], m0[5] - h]
             let ppage = _pattern_page(pdf, page, d)
             let ops = stream.parse_content_stream(bytes)
-            let kids = _tiling_pattern_children(pdf, ppage, ops)
+            let extra_defs = _tiling_pattern_defs(pdf, ppage, ops, id)
+            let kids = _tiling_pattern_children(pdf, ppage, ops, id)
             if (len(kids) == 0) { { defs: [], fill: color.BLACK } }
             else {
                 let pat = <pattern id: id,
@@ -353,7 +456,7 @@ pub fn from_tiling_pattern_fill(pdf, page, p, id) {
                                    patternTransform: util.fmt_matrix(m);
                               for (kid in kids) kid
                           >
-                { defs: [pat], fill: "url(#" ++ id ++ ")" }
+                { defs: extra_defs ++ [pat], fill: "url(#" ++ id ++ ")" }
             }
         }
     }
