@@ -218,6 +218,7 @@ struct JsFuncCollected {
     bool has_non_simple_params;      // v20: true if function has default/rest/destructuring params (no arguments aliasing)
     bool is_reassigned;              // function name is an assignment target somewhere in the module
     bool is_strict;                  // v30: true if function is strict mode (own directive, inherits, or class method)
+    bool has_direct_eval;            // true if own function body contains syntactic eval(...)
     // A5: Constructor shape pre-allocation
     int ctor_prop_count;            // number of this.xxx = yyy properties found
     const char* ctor_prop_ptrs[16]; // pointers to pool-stable property name strings

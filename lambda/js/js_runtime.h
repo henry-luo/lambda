@@ -136,6 +136,7 @@ Item js_get_length_item(Item object);
 // =============================================================================
 
 Item js_new_function(void* func_ptr, int param_count);
+Item js_new_method_function(void* func_ptr, int param_count);
 Item js_new_closure(void* func_ptr, int param_count, Item* env, int env_size);
 Item* js_alloc_env(int count);
 void js_set_function_name(Item fn_item, Item name_item);
@@ -153,6 +154,10 @@ Item js_bind_function(Item func_item, Item bound_this, Item* bound_args, int bou
 Item js_func_bind(Item func_item, Item bound_this, Item* bound_args, int bound_argc);
 Item js_new_function_from_string(Item* args, int argc);
 Item js_builtin_eval(Item code_item, int64_t is_global_scope);
+void js_eval_private_push_frame(void);
+void js_eval_private_pop_frame(void);
+void js_eval_private_bind(Item unscoped_key, Item scoped_key);
+Item js_eval_private_resolve(Item unscoped_key);
 int64_t js_262_eval_script_is_active(void);
 Item js_create_regex(const char* pattern, int pattern_len, const char* flags, int flags_len);
 Item js_regexp_construct(Item pattern_item, Item flags_item);
@@ -565,11 +570,17 @@ void js_set_global_property(Item key, Item value);
 void js_set_global_property_strict(Item key, Item value);
 void js_define_global_eval_var_property(Item key, Item value);
 void js_mark_private_method_non_writable(Item object, Item name);
+void js_set_method_home_from_target(Item target, Item fn_item);
+void js_init_class_instance_fields(Item callee, Item object);
 void js_set_function_name_from_property_key_if_anonymous(Item fn_item, Item key_item, int64_t prefix_kind);
 Item js_get_global_builtin_fn(Item name, Item param_count);
 void js_eval_env_push_frame(void);
 void js_eval_local_push_frame(void);
 void js_eval_local_pop_frame(void);
+void js_eval_private_push_frame(void);
+void js_eval_private_pop_frame(void);
+void js_eval_private_bind(Item unscoped_key, Item scoped_key);
+Item js_eval_private_resolve(Item unscoped_key);
 Item js_eval_local_get_binding_or_fallback(Item key, Item fallback);
 void js_eval_local_export_var(Item key, Item value);
 void js_eval_local_note_lexical_binding(Item key);

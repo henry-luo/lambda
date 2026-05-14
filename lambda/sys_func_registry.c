@@ -856,6 +856,8 @@ extern Item js_delete_identifier_with_binding(Item key, int64_t declared_binding
 extern void js_set_global_property(Item key, Item value);
 extern void js_set_global_property_strict(Item key, Item value);
 extern void js_mark_private_method_non_writable(Item object, Item name);
+extern void js_set_method_home_from_target(Item target, Item fn_item);
+extern void js_init_class_instance_fields(Item callee, Item object);
 extern void js_define_global_var_property(Item key, Item value);
 extern void js_define_global_eval_var_property(Item key, Item value);
 extern void js_evalscript_check_global_var_decl(Item key);
@@ -868,6 +870,10 @@ extern void js_eval_env_track_global_binding(Item key);
 extern void js_eval_env_pop_frame(void);
 extern void js_eval_local_push_frame(void);
 extern void js_eval_local_pop_frame(void);
+extern void js_eval_private_push_frame(void);
+extern void js_eval_private_pop_frame(void);
+extern void js_eval_private_bind(Item unscoped_key, Item scoped_key);
+extern Item js_eval_private_resolve(Item unscoped_key);
 extern Item js_eval_local_get_binding_or_fallback(Item key, Item fallback);
 extern void js_eval_local_export_var(Item key, Item value);
 extern void js_check_unresolved_capture(Item value, const char* name, int64_t len);
@@ -1390,6 +1396,7 @@ JitImport jit_runtime_imports[] = {
     {"js_array_length", FPTR(js_array_length)},
     {"js_array_push", FPTR(js_array_push)},
     {"js_new_function", FPTR(js_new_function)},
+    {"js_new_method_function", FPTR(js_new_method_function)},
     {"js_new_closure", FPTR(js_new_closure)},
     {"js_alloc_env", FPTR(js_alloc_env)},
     {"js_call_function", FPTR(js_call_function)},
@@ -1542,6 +1549,7 @@ JitImport jit_runtime_imports[] = {
     {"js_mark_eval_initializer_func_if_active", FPTR(js_mark_eval_initializer_func_if_active)},
     {"js_mark_arrow_func", FPTR(js_mark_arrow_func)},
     {"js_mark_method_func", FPTR(js_mark_method_func)},
+    {"js_set_method_home_from_target", FPTR(js_set_method_home_from_target)},
     {"js_mark_strict_func", FPTR(js_mark_strict_func)},
     {"js_mark_derived_constructor_func", FPTR(js_mark_derived_constructor_func)},
     {"js_set_formal_length", FPTR(js_set_formal_length)},
@@ -1682,6 +1690,7 @@ JitImport jit_runtime_imports[] = {
     {"js_set_global_property", FPTR(js_set_global_property)},
     {"js_set_global_property_strict", FPTR(js_set_global_property_strict)},
     {"js_mark_private_method_non_writable", FPTR(js_mark_private_method_non_writable)},
+    {"js_init_class_instance_fields", FPTR(js_init_class_instance_fields)},
     {"js_define_global_var_property", FPTR(js_define_global_var_property)},
     {"js_define_global_eval_var_property", FPTR(js_define_global_eval_var_property)},
     {"js_evalscript_check_global_var_decl", FPTR(js_evalscript_check_global_var_decl)},
@@ -1694,6 +1703,10 @@ JitImport jit_runtime_imports[] = {
     {"js_eval_env_pop_frame", FPTR(js_eval_env_pop_frame)},
     {"js_eval_local_push_frame", FPTR(js_eval_local_push_frame)},
     {"js_eval_local_pop_frame", FPTR(js_eval_local_pop_frame)},
+    {"js_eval_private_push_frame", FPTR(js_eval_private_push_frame)},
+    {"js_eval_private_pop_frame", FPTR(js_eval_private_pop_frame)},
+    {"js_eval_private_bind", FPTR(js_eval_private_bind)},
+    {"js_eval_private_resolve", FPTR(js_eval_private_resolve)},
     {"js_eval_local_get_binding_or_fallback", FPTR(js_eval_local_get_binding_or_fallback)},
     {"js_eval_local_export_var", FPTR(js_eval_local_export_var)},
     {"js_eval_local_note_lexical_binding", FPTR(js_eval_local_note_lexical_binding)},

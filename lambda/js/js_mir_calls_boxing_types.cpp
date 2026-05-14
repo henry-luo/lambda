@@ -357,6 +357,9 @@ void jm_emit_install_method_or_accessor(JsMirTranspiler* mt,
     bool is_getter, bool is_setter) {
     key = jm_call_1(mt, "js_to_property_key", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+    jm_call_void_2(mt, "js_set_method_home_from_target",
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
     if (is_getter || is_setter) {
         MIR_reg_t is_set = jm_new_reg(mt, "is_set", MIR_T_I64);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
