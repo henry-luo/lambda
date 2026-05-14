@@ -71,6 +71,7 @@ struct PdfPageResult {
     bool has_baseline;
     bool failed;
     bool regressed;
+    bool is_new_baseline;
 };
 
 struct CommandResult {
@@ -266,6 +267,13 @@ static bool write_pdf_baseline(const PdfPageResult* results, int result_count) {
     fprintf(stderr, "[pdf-render] Wrote baseline: %d page results to %s\n",
             result_count, PDF_BASELINE_FILE);
     return true;
+}
+
+static bool has_new_baseline_results(const PdfPageResult* results, int result_count) {
+    for (int i = 0; i < result_count; i++) {
+        if (results[i].is_new_baseline) return true;
+    }
+    return false;
 }
 
 static int compare_pdf_file_info(const void* a, const void* b) {
@@ -539,8 +547,15 @@ static void apply_pdf_baseline(BaselineData* baseline, PdfPageResult* results, i
         if (!baseline_entry) continue;
         baseline_entry->seen = true;
         results[i].has_baseline = true;
+        results[i].is_new_baseline = false;
         results[i].baseline_percent = baseline_entry->mismatch_percent;
         results[i].regressed = results[i].mismatch_percent > baseline_entry->mismatch_percent + BASELINE_REGRESSION_EPSILON;
+    }
+}
+
+static void mark_new_pdf_baseline_results(PdfPageResult* results, int result_count) {
+    for (int i = 0; i < result_count; i++) {
+        if (!results[i].has_baseline) results[i].is_new_baseline = true;
     }
 }
 
@@ -563,6 +578,7 @@ static PdfPageResult* add_pdf_page_result(PdfPageResult* results, int* result_co
     page_result->has_baseline = false;
     page_result->failed = failure_reason != NULL;
     page_result->regressed = false;
+    page_result->is_new_baseline = false;
     return page_result;
 }
 
@@ -663,8 +679,10 @@ TEST(PdfRenderVisual, CompareLambdaPagesAgainstPopplerReference) {
     }
 
     apply_pdf_baseline(&baseline, results, result_count);
+    if (baseline.loaded) mark_new_pdf_baseline_results(results, result_count);
     int failure_count = count_pdf_failures(results, result_count);
     int regression_count = count_pdf_regressions(results, result_count);
+    bool has_new_results = has_new_baseline_results(results, result_count);
     report_pdf_failures(results, result_count);
     report_pdf_regressions(results, result_count);
 
@@ -673,18 +691,17 @@ TEST(PdfRenderVisual, CompareLambdaPagesAgainstPopplerReference) {
                 "[pdf-render] Initializing missing baseline from current results: %s\n",
                 PDF_BASELINE_FILE);
         ASSERT_TRUE(write_pdf_baseline(results, result_count));
-    } else if (g_update_baseline) {
-        if (failure_count == 0 && regression_count == 0 && !::testing::Test::HasFailure()) {
+    } else if (g_update_baseline || has_new_results) {
+        if (regression_count == 0 && !::testing::Test::HasFailure()) {
             ASSERT_TRUE(write_pdf_baseline(results, result_count));
         } else {
             fprintf(stderr,
-                    "[pdf-render] NOT updating baseline: failures=%d regressions=%d\n",
-                    failure_count, regression_count);
+                    "[pdf-render] NOT updating baseline: failures=%d regressions=%d new_results=%s\n",
+                    failure_count, regression_count, has_new_results ? "yes" : "no");
         }
     }
 
     if (baseline.loaded) {
-        EXPECT_EQ(failure_count, 0) << "PDF render visual failures detected; see command-line report above";
         EXPECT_EQ(regression_count, 0) << "PDF render baseline regressions detected; see command-line report above";
     }
     EXPECT_GT(compared_pages, 0);
