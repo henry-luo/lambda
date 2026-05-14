@@ -5,6 +5,7 @@
 #include "layout_alignment.hpp"
 #include "layout.hpp"
 #include "view.hpp"
+#include "../lib/tagged.hpp"
 #include "../lambda/input/css/css_value.hpp"
 
 namespace radiant {
@@ -216,11 +217,11 @@ float compute_element_first_baseline(
     // For block boxes with no in-flow content, use the bottom content edge (= height).
 
     // Try to find the first in-flow child with a baseline
-    View* child = (View*)element->first_placed_child();
-    if (child && child->view_type >= RDT_VIEW_INLINE_BLOCK) {
+    View* child = element->first_placed_child();
+    if (ViewBlock* child_block = lam::view_as_block(child)) {
         // Recurse into the first block-level child
         float child_baseline = compute_element_first_baseline(
-            lycon, (ViewBlock*)child, is_row_direction);
+            lycon, child_block, is_row_direction);
         if (child_baseline >= 0) {
             return child->y + child_baseline;
         }

@@ -5,6 +5,7 @@
 #include "../lambda/input/css/css_style.hpp"
 #include "../lib/avl_tree.h"
 #include "../lib/font/font.h"
+#include "../lib/tagged.hpp"
 #include "../lib/utf.h"
 
 #include "../lib/log.h"
@@ -45,7 +46,7 @@ static inline bool has_small_caps(LayoutContext* lycon) {
     DomNode* node = lycon->elmt ? lycon->elmt : lycon->view;
     while (node) {
         if (node->is_element()) {
-            DomElement* elem = (DomElement*)node;
+            DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(node);
             if (elem->font && elem->font->font_variant == CSS_VALUE_SMALL_CAPS) {
                 return true;
             }
@@ -340,7 +341,7 @@ static inline CssEnum get_text_transform(LayoutContext* lycon) {
     DomNode* node = lycon->elmt ? lycon->elmt : lycon->view;
     while (node) {
         if (node->is_element()) {
-            DomElement* elem = (DomElement*)node;
+            DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(node);
             CssEnum transform = get_text_transform_from_block(elem->blk);
             if (transform != CSS_VALUE_NONE) {
                 return transform;
@@ -360,7 +361,7 @@ static inline CssEnum get_word_break(LayoutContext* lycon) {
     DomNode* node = lycon->elmt ? lycon->elmt : lycon->view;
     while (node) {
         if (node->is_element()) {
-            DomElement* elem = (DomElement*)node;
+            DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(node);
             if (elem->blk && elem->blk->word_break != 0) {
                 return elem->blk->word_break;
             }
@@ -378,7 +379,7 @@ static inline CssEnum get_line_break(LayoutContext* lycon) {
     DomNode* node = lycon->elmt ? lycon->elmt : lycon->view;
     while (node) {
         if (node->is_element()) {
-            DomElement* elem = (DomElement*)node;
+            DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(node);
             if (elem->blk && elem->blk->line_break != 0) {
                 return elem->blk->line_break;
             }
@@ -396,7 +397,7 @@ static inline CssEnum get_overflow_wrap(LayoutContext* lycon) {
     DomNode* node = lycon->elmt ? lycon->elmt : lycon->view;
     while (node) {
         if (node->is_element()) {
-            DomElement* elem = (DomElement*)node;
+            DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(node);
             if (elem->blk && elem->blk->overflow_wrap != 0) {
                 return elem->blk->overflow_wrap;
             }
@@ -792,7 +793,7 @@ static uint32_t first_text_codepoint_in_subtree(DomNode* node) {
         } else if (node->is_element()) {
             CssEnum outer_display = resolve_display_value(node).outer;
             if (outer_display == CSS_VALUE_INLINE) {
-                DomElement* elmt = (DomElement*)node;
+                DomElement* elmt = lam::dom_require<DOM_NODE_ELEMENT>(node);
                 if (elmt->first_child) {
                     uint32_t cp = first_text_codepoint_in_subtree(elmt->first_child);
                     if (cp) return cp;
@@ -933,7 +934,7 @@ static void record_soft_hyphen_inline_fragment(DomNode* text_node, LayoutContext
         if (ancestor->view_type != RDT_VIEW_INLINE) {
             break;
         }
-        ViewSpan* span = (ViewSpan*)ancestor;
+        ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(ancestor);
         if (!span->has_inline_fragment_union) {
             span->has_inline_fragment_union = true;
             span->inline_fragment_min_x = fragment_min_x;
@@ -993,6 +994,45 @@ static inline bool is_typographic_letter_unit(uint32_t cp) {
     utf8proc_category_t cat = utf8proc_category(cp);
     return (cat >= UTF8PROC_CATEGORY_LU && cat <= UTF8PROC_CATEGORY_LO) ||  // L*: letters
            (cat >= UTF8PROC_CATEGORY_ND && cat <= UTF8PROC_CATEGORY_NO);    // N*: numbers
+}
+
+static inline bool control_fallback_keeps_primary_line_metrics(uint32_t cp) {
+    // macOS browser references keep the primary Times line strut for these C1
+    // controls even though a visible fallback glyph is rendered.
+    return cp == 0x0081 || cp == 0x0082 || cp == 0x0084;
+}
+
+static inline float c1_control_normal_line_height(uint32_t cp, FontProp* font) {
+    if (cp < 0x0080 || cp > 0x009F || !font || font->font_size <= 0 ||
+        control_fallback_keeps_primary_line_metrics(cp)) {
+        return 0.0f;
+    }
+
+    if (cp == 0x0080) {
+        return font->font_size * (79.0f / 64.0f);
+    }
+
+    // CSS Text requires C1 controls to render visibly, but browser engines use
+    // a bounded control-glyph line strut rather than arbitrary platform fallback
+    // font metrics. 45/32em matches the observed C1 control line box on macOS.
+    return font->font_size * (45.0f / 32.0f);
+}
+
+static inline void normalize_c1_control_fallback_metrics(uint32_t cp, FontProp* font,
+                                                         float* asc, float* desc,
+                                                         float* normal_line_height) {
+    float target = c1_control_normal_line_height(cp, font);
+    if (target <= 0) return;
+
+    float height = *asc + *desc;
+    if (height > 0) {
+        float scale = target / height;
+        *asc *= scale;
+        *desc *= scale;
+    }
+    if (normal_line_height) {
+        *normal_line_height = target;
+    }
 }
 
 /**
@@ -1151,8 +1191,8 @@ void update_line_for_bfc_floats(LayoutContext* lycon, float query_height) {
     }
 
     // Get current view
-    ViewBlock* current_view = (ViewBlock*)lycon->view;
-    if (!current_view || !current_view->is_block()) {
+    ViewBlock* current_view = lam::view_as_block(lycon->view);
+    if (!current_view) {
         lycon->line.effective_left = lycon->line.left;
         lycon->line.effective_right = lycon->line.right;
         lycon->line.has_float_intrusion = false;
@@ -1311,6 +1351,9 @@ void line_reset(LayoutContext* lycon) {
     lycon->line.has_expanded_inline_lh = false;
     lycon->line.has_different_inline_font = false;
     lycon->line.max_normal_line_height = 0;
+    lycon->line.has_c1_control_text = false;
+    lycon->line.has_non_c1_text = false;
+    lycon->line.c1_control_line_height = 0;
     lycon->line.trailing_letter_spacing = 0;
     // CSS 2.1 §10.8.1: Initialize parent font metrics from block's init values.
     // These are the correct "parent" for top-level inline content.
@@ -1397,13 +1440,13 @@ static void fixup_collapsed_inline_spans(ViewSpan* span) {
     View* child = span->first_child;
     while (child) {
         if (child->view_type == RDT_VIEW_INLINE) {
-            fixup_collapsed_inline_spans((ViewSpan*)child);
+            fixup_collapsed_inline_spans(lam::view_require<RDT_VIEW_INLINE>(child));
         }
         child = child->next();
     }
     // fix this span if collapsed
     if (span->height == 0) {
-        DomElement* elem = static_cast<DomElement*>((DomNode*)span);
+        DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(span);
         if (elem->content_height > 0) {
             span->height = elem->content_height;
         }
@@ -1633,6 +1676,16 @@ void line_break(LayoutContext* lycon) {
         used_line_height = css_line_height;
     }
 
+    // C1 control glyphs are rendered through platform fallback fonts, whose
+    // ascender/descender split varies by environment. For lines containing only
+    // visible C1 controls, use the browser-sized control strut directly instead
+    // of recombining primary and fallback font extrema.
+    if (lycon->block.line_height_is_normal &&
+        lycon->line.has_c1_control_text && !lycon->line.has_non_c1_text &&
+        lycon->line.c1_control_line_height > 0 && !lycon->line.has_replaced_content) {
+        used_line_height = max(css_line_height, lycon->line.c1_control_line_height);
+    }
+
     // Chrome blends system CJK font metrics for lines containing CJK characters.
     // When the primary font's normal line-height is smaller than the CJK system
     // font's line-height (e.g., Ahem@16px→16 vs PingFang SC@16px→22), Chrome uses
@@ -1656,14 +1709,14 @@ void line_break(LayoutContext* lycon) {
     // only fix when used_line_height > 0 (line has actual visible content).
     if (used_line_height > 0 && lycon->line.start_view) {
         View* v = lycon->line.start_view;
-        DomNode* line_parent = ((DomNode*)v)->parent;
+        DomNode* line_parent = v->parent;
         while (v) {
             if (v->view_type == RDT_VIEW_INLINE) {
-                fixup_collapsed_inline_spans((ViewSpan*)v);
+                fixup_collapsed_inline_spans(lam::view_require<RDT_VIEW_INLINE>(v));
             }
-            DomNode* next = ((DomNode*)v)->next_sibling;
-            if (!next || ((DomNode*)v)->parent != line_parent) break;
-            v = (View*)next;
+            DomNode* next = v->next_sibling;
+            if (!next || v->parent != line_parent) break;
+            v = next;
         }
     }
 
@@ -1936,7 +1989,7 @@ LineFillStatus view_has_line_filled(LayoutContext* lycon, View* view) {
         if (result) { return result; }
     }
     // check at parent level
-    view = (View*)view->parent;
+    view = view->parent;
     if (view) {
         if (view->view_type == RDT_VIEW_BLOCK) { return RDT_LINE_NOT_FILLED; }
         else if (view->view_type == RDT_VIEW_INLINE) {
@@ -1944,7 +1997,7 @@ LineFillStatus view_has_line_filled(LayoutContext* lycon, View* view) {
             // inline span, account for the span's right margin+border+padding.
             // These will be added to advance_x after the span's content is done,
             // so the lookahead must include them to avoid greedy over-placement.
-            ViewSpan* sp = (ViewSpan*)view;
+            ViewSpan* sp = lam::view_require<RDT_VIEW_INLINE>(view);
             float right_edge = 0;
             if (sp->bound) {
                 right_edge += sp->bound->margin.right;
@@ -2121,7 +2174,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     // Clear any existing text rects from previous layout passes (e.g., table measurement)
     // This prevents accumulation of duplicate rects when the same node is laid out multiple times
     if (text_node->view_type == RDT_VIEW_TEXT) {
-        ViewText* existing_view = (ViewText*)text_node;
+        ViewText* existing_view = lam::view_require<RDT_VIEW_TEXT>(text_node);
         if (existing_view->rect) {
             log_debug("clearing existing text rects for re-layout");
             existing_view->rect = nullptr;  // pool memory will be reused
@@ -2256,7 +2309,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         }
     }
     if (!text_view) {
-        text_view = (ViewText*)set_view(lycon, RDT_VIEW_TEXT, text_node);
+        text_view = lam::view_require<RDT_VIEW_TEXT>(set_view(lycon, RDT_VIEW_TEXT, text_node));
         text_view->font = lycon->font.style;
     }
 
@@ -2559,7 +2612,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 // When a glyph comes from a fallback font with taller metrics,
                 // update the line ascender/descender (but NOT the text rect height,
                 // which uses primary font metrics per browser behavior)
-                if (glyph && glyph->font_ascender > 0) {
+                if (glyph && glyph->font_ascender > 0 &&
+                    !control_fallback_keeps_primary_line_metrics(codepoint)) {
                     float fb_asc, fb_desc;
                     if (lycon->block.line_height_is_normal) {
                         // normal line-height: use platform-aware split from glyph
@@ -2574,6 +2628,9 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                         fb_asc += half_leading;
                         fb_desc += half_leading;
                     }
+                    float fb_normal_line_height = glyph->font_normal_line_height;
+                    normalize_c1_control_fallback_metrics(codepoint, lycon->font.style, &fb_asc, &fb_desc,
+                                                          &fb_normal_line_height);
                     // CSS 2.1 §10.8.1: vertical-align:top/bottom elements don't participate
                     // in first-pass baseline-relative line box height. Track separately.
                     if (lycon->line.vertical_align == CSS_VALUE_TOP) {
@@ -2593,10 +2650,35 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                             fb_desc, fb_asc, lycon->block.line_height_is_normal);
                     }
                     // Also track normal line-height from the fallback font for mixed-font lines
-                    if (lycon->block.line_height_is_normal && glyph->font_normal_line_height > 0) {
+                    if (lycon->block.line_height_is_normal && fb_normal_line_height > 0) {
                         lycon->line.max_normal_line_height = max(lycon->line.max_normal_line_height,
-                                                                  glyph->font_normal_line_height);
+                                                                  fb_normal_line_height);
                     }
+                }
+                float c1_normal_line_height = c1_control_normal_line_height(codepoint, lycon->font.style);
+                if (lycon->block.line_height_is_normal && c1_normal_line_height > 0) {
+                    lycon->line.has_c1_control_text = true;
+                    lycon->line.c1_control_line_height = max(lycon->line.c1_control_line_height,
+                                                              c1_normal_line_height);
+                    float c1_asc = 0.0f, c1_desc = 0.0f;
+                    if (lycon->font.font_handle) {
+                        font_get_normal_lh_split(lycon->font.font_handle, &c1_asc, &c1_desc);
+                    }
+                    float c1_height = c1_asc + c1_desc;
+                    if (c1_height > 0) {
+                        float c1_scale = c1_normal_line_height / c1_height;
+                        c1_asc *= c1_scale;
+                        c1_desc *= c1_scale;
+                    } else {
+                        c1_asc = c1_normal_line_height * 0.8f;
+                        c1_desc = c1_normal_line_height - c1_asc;
+                    }
+                    lycon->line.max_ascender = max(lycon->line.max_ascender, c1_asc);
+                    lycon->line.max_descender = max(lycon->line.max_descender, c1_desc);
+                    lycon->line.max_normal_line_height = max(lycon->line.max_normal_line_height,
+                                                              c1_normal_line_height);
+                } else {
+                    lycon->line.has_non_c1_text = true;
                 }
                 // Track CJK characters for line-height blending with system CJK font metrics
                 if (is_cjk_character(codepoint)) {

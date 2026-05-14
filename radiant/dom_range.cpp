@@ -1096,8 +1096,8 @@ DomNode* dom_node_clone(DomNode* node, bool deep) {
         DomElement* e = node->as_element();
         DomElement* clone = dom_element_create(doc, e->tag_name, e->native_element);
         if (!clone) return nullptr;
-        clone->id          = e->id;
-        clone->class_names = e->class_names;
+        if (e->id) dom_element_retain_id(clone, lam::borrow_const(lam::promote_to_arena(doc->arena, e->id)));
+        if (e->class_names) dom_element_retain_class_names(clone, lam::PoolPtr<const char*>(e->class_names));
         clone->class_count = e->class_count;
         clone->tag_id      = e->tag_id;
         if (deep) {

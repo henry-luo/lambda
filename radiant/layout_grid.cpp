@@ -3,6 +3,7 @@
 #include "view.hpp"
 #include "grid_enhanced_adapter.hpp"  // Enhanced grid integration
 #include "intrinsic_sizing.hpp"       // measure_text_intrinsic_widths
+#include "../lib/tagged.hpp"
 
 extern "C" {
 #include <stdlib.h>
@@ -59,7 +60,7 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
 
     // Initialize dynamic arrays
     grid->allocated_items = 8;
-    grid->grid_items = (ViewBlock**)mem_calloc(grid->allocated_items, sizeof(ViewBlock*), MEM_CAT_LAYOUT);
+    grid->grid_items = static_cast<ViewBlock**>(mem_calloc(grid->allocated_items, sizeof(ViewBlock*), MEM_CAT_LAYOUT));
 
     // Only allocate new areas array if not already copied from embed->grid
     if (!grid->grid_areas || grid->area_count == 0) {
@@ -682,7 +683,7 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
             continue;
         }
 
-        ViewBlock* child = (ViewBlock*)child_node;
+        ViewBlock* child = lam::view_require_block(child_node);
         // Filter out absolutely positioned, hidden, and display:none items
         bool is_absolute = child->position &&
                           (child->position->position == CSS_VALUE_ABSOLUTE ||
@@ -705,8 +706,8 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
     // Ensure we have enough space in the grid items array
     if (count > grid_layout->allocated_items) {
         grid_layout->allocated_items = count * 2;
-        grid_layout->grid_items = (ViewBlock**)mem_realloc(
-            grid_layout->grid_items, grid_layout->allocated_items * sizeof(ViewBlock*), MEM_CAT_LAYOUT);
+        grid_layout->grid_items = static_cast<ViewBlock**>(mem_realloc(
+            grid_layout->grid_items, grid_layout->allocated_items * sizeof(ViewBlock*), MEM_CAT_LAYOUT));
     }
 
     // Collect items - ONLY collect element nodes, skip text nodes
@@ -719,7 +720,7 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
             continue;
         }
 
-        ViewBlock* child = (ViewBlock*)child_node;
+        ViewBlock* child = lam::view_require_block(child_node);
         // Filter out absolutely positioned, hidden, and display:none items
         bool is_absolute = child->position &&
                           (child->position->position == CSS_VALUE_ABSOLUTE ||
@@ -1198,7 +1199,8 @@ bool is_valid_grid_item(ViewBlock* item) {
 bool is_grid_item(ViewBlock* block) {
     if (!block || !block->parent) return false;
 
-    ViewBlock* parent = (ViewBlock*)block->parent;
+    ViewBlock* parent = lam::view_as_block(block->parent);
+    if (!parent) return false;
     bool is_absolute = block->position &&
                       (block->position->position == CSS_VALUE_ABSOLUTE ||
                        block->position->position == CSS_VALUE_FIXED);

@@ -101,14 +101,13 @@ const ComparisonPanel = forwardRef(function ComparisonPanel({ test, lambdaRender
 
   async function loadViews(test) {
     try {
-      // Get absolute path for the test file
-      // The path is relative to the project root where main.js resolves it
-      const testPath = `test/layout/data/${test.category}/${test.testFile}`;
+      const isPdfRender = test.testType === 'pdf-render';
+      const testPath = isPdfRender
+        ? `test/pdf/${test.testFile}`
+        : `test/layout/data/${test.category}/${test.testFile}`;
 
-      // Use the custom testfile:// protocol to avoid cross-origin issues
-      // This protocol is registered in main.js and serves local files
       const absolutePath = await getAbsolutePath(testPath);
-      setBrowserView(`testfile://${absolutePath}`);
+      setBrowserView(isPdfRender ? toFileUrl(absolutePath) : `testfile://${absolutePath}`);
     } catch (error) {
       console.error('Failed to load views:', error);
     }
@@ -118,6 +117,10 @@ const ComparisonPanel = forwardRef(function ComparisonPanel({ test, lambdaRender
     // Get the project root from the main process
     const projectRoot = await window.electronAPI.getProjectRoot();
     return `${projectRoot}/${relativePath}`;
+  }
+
+  function toFileUrl(absolutePath) {
+    return encodeURI(`file://${absolutePath}`);
   }
 
   function handleMouseDown(e) {
@@ -151,15 +154,24 @@ const ComparisonPanel = forwardRef(function ComparisonPanel({ test, lambdaRender
     );
   }
 
+  const isPdfRender = test.testType === 'pdf-render';
+
   return (
     <div className="comparison-panel" ref={containerRef}>
       <div className="panel left-panel" ref={leftPanelRef} style={{ width: `${splitPos}%` }}>
         <div className="panel-header">
-          <span>Browser View</span>
+          <span>{isPdfRender ? 'PDF Preview' : 'Browser View'}</span>
           <span className="panel-info">{test.testFile}</span>
         </div>
         <div className="panel-content">
-          {browserView ? (
+          {browserView && isPdfRender ? (
+            <webview
+              src={browserView}
+              title="PDF Preview"
+              className="browser-iframe pdf-webview"
+              plugins="true"
+            />
+          ) : browserView ? (
             <iframe
               ref={iframeRef}
               src={browserView}
@@ -183,15 +195,15 @@ const ComparisonPanel = forwardRef(function ComparisonPanel({ test, lambdaRender
 
       <div className="panel right-panel" style={{ width: `${100 - splitPos}%` }}>
         <div className="panel-header">
-          <span>Lambda View</span>
+          <span>{isPdfRender ? 'Radiant Output' : 'Lambda View'}</span>
           <span className="panel-info">Rendered Output</span>
         </div>
-        <div className="panel-content">
+        <div className={`panel-content ${isPdfRender ? 'pdf-render-output' : ''}`}>
           {lambdaRenderPath ? (
             <img
               src={lambdaRenderPath}
               alt="Lambda Render"
-              className="lambda-render"
+              className={`lambda-render ${isPdfRender ? 'pdf-render-image' : ''}`}
               style={{
                 transform: `scale(${1 / lambdaPixelRatio})`,
                 transformOrigin: 'top left'
@@ -199,7 +211,7 @@ const ComparisonPanel = forwardRef(function ComparisonPanel({ test, lambdaRender
             />
           ) : (
             <div className="empty-state">
-              <p>Run test to see Lambda output</p>
+              <p>Run test to see {isPdfRender ? 'Radiant' : 'Lambda'} output</p>
             </div>
           )}
         </div>

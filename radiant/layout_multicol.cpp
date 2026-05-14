@@ -1,6 +1,7 @@
 #include "layout_multicol.hpp"
 #include "layout.hpp"
 #include "../lib/log.h"
+#include "../lib/tagged.hpp"
 #include <math.h>
 
 // Max number of blocks that can be distributed in multicol layout
@@ -286,8 +287,10 @@ static bool multicol_has_direct_spanner_child(ViewBlock* child) {
 
     View* descendant = child->first_placed_child();
     while (descendant) {
-        if (descendant->is_block() && multicol_is_spanner_block((ViewBlock*)descendant)) {
-            return true;
+        if (ViewBlock* descendant_block = lam::view_as_block(descendant)) {
+            if (multicol_is_spanner_block(descendant_block)) {
+                return true;
+            }
         }
         descendant = descendant->next();
     }
@@ -309,12 +312,12 @@ static void multicol_project_view_subtree(View* view, float dx, float dy) {
     view->y += dy;
 
     if (view->view_type == RDT_VIEW_TEXT) {
-        multicol_project_text_rect(((ViewText*)view)->rect, dx, dy);
+        multicol_project_text_rect(lam::view_require<RDT_VIEW_TEXT>(view)->rect, dx, dy);
         return;
     }
 
     if (view->is_group()) {
-        View* child = ((ViewElement*)view)->first_placed_child();
+        View* child = lam::view_require_element(view)->first_placed_child();
         while (child) {
             multicol_project_view_subtree(child, dx, dy);
             child = child->next();
@@ -383,7 +386,7 @@ static void multicol_reanchor_text_descendants(View* view, float target_x, float
     if (!view) return;
 
     if (view->node_type == DOM_NODE_TEXT) {
-        ViewText* text = (ViewText*)view;
+        ViewText* text = lam::view_require<RDT_VIEW_TEXT>(view);
         float min_x = 1e9f;
         float min_y = 1e9f;
         TextRect* rect = text->rect;
@@ -402,10 +405,10 @@ static void multicol_reanchor_text_descendants(View* view, float target_x, float
     }
 
     if (view->node_type == DOM_NODE_ELEMENT) {
-        View* child = (View*)((DomElement*)view)->first_child;
+        View* child = lam::dom_require<DOM_NODE_ELEMENT>(view)->first_child;
         while (child) {
             multicol_reanchor_text_descendants(child, target_x, target_y);
-            child = (View*)child->next_sibling;
+            child = child->next_sibling;
         }
     }
 }
@@ -414,7 +417,7 @@ static void multicol_finalize_text_for_fragmented_block(View* view, ViewBlock* f
     if (!view || !fragment_owner) return;
 
     if (view->node_type == DOM_NODE_TEXT) {
-        ViewText* text = (ViewText*)view;
+        ViewText* text = lam::view_require<RDT_VIEW_TEXT>(view);
         TextRect* rect = text->rect;
         while (rect) {
             rect->x = 0;
@@ -428,10 +431,10 @@ static void multicol_finalize_text_for_fragmented_block(View* view, ViewBlock* f
     }
 
     if (view->node_type == DOM_NODE_ELEMENT) {
-        View* child = (View*)((DomElement*)view)->first_child;
+        View* child = lam::dom_require<DOM_NODE_ELEMENT>(view)->first_child;
         while (child) {
             multicol_finalize_text_for_fragmented_block(child, fragment_owner);
-            child = (View*)child->next_sibling;
+            child = child->next_sibling;
         }
     }
 }
@@ -440,34 +443,34 @@ static void multicol_reanchor_direct_text(ViewBlock* block, float content_offset
     if (!block) return;
     (void)content_offset_y;
 
-    DomElement* elem = (DomElement*)block;
+    DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(block);
     if (elem->layout_fragments && elem->layout_fragment_count > 1) {
-        multicol_finalize_text_for_fragmented_block((View*)block, block);
+        multicol_finalize_text_for_fragmented_block(static_cast<View*>(block), block);
         return;
     }
 
-    View* child = (View*)elem->first_child;
+    View* child = elem->first_child;
     while (child) {
         if (child->node_type == DOM_NODE_TEXT || child->node_type == DOM_NODE_ELEMENT) {
             multicol_reanchor_text_descendants(child, 0, 0);
         }
-        child = (View*)child->next_sibling;
+        child = child->next_sibling;
     }
 }
 
 static void multicol_finalize_fragmented_inline_continuations(View* view) {
     if (!view || view->node_type != DOM_NODE_ELEMENT) return;
 
-    DomElement* elem = (DomElement*)view;
+    DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(view);
     bool has_fragments = elem->layout_fragments && elem->layout_fragment_count > 1 && view->is_block();
     if (has_fragments) {
-        multicol_finalize_text_for_fragmented_block(view, (ViewBlock*)view);
+        multicol_finalize_text_for_fragmented_block(view, lam::view_require_block(view));
     }
 
-    View* child = (View*)elem->first_child;
+    View* child = elem->first_child;
     while (child) {
         multicol_finalize_fragmented_inline_continuations(child);
-        child = (View*)child->next_sibling;
+        child = child->next_sibling;
     }
 }
 
@@ -475,7 +478,7 @@ static ViewBlock* multicol_next_in_flow_block_sibling(View* start) {
     View* sibling = start ? start->next_sibling : nullptr;
     while (sibling) {
         if (sibling->is_element() && sibling->is_block()) {
-            ViewBlock* block = (ViewBlock*)sibling;
+            ViewBlock* block = lam::view_require_block(sibling);
             if (!multicol_is_out_of_flow(block)) {
                 return block;
             }
@@ -489,7 +492,7 @@ static ViewBlock* multicol_prev_in_flow_block_sibling(View* start) {
     View* sibling = start ? start->prev_sibling : nullptr;
     while (sibling) {
         if (sibling->is_element() && sibling->is_block()) {
-            ViewBlock* block = (ViewBlock*)sibling;
+            ViewBlock* block = lam::view_require_block(sibling);
             if (!multicol_is_out_of_flow(block)) {
                 return block;
             }
@@ -507,7 +510,7 @@ static void multicol_absolute_normal_origin(ViewBlock* block, float* out_x, floa
     ViewElement* parent = block->parent_view();
     while (parent) {
         if (parent->is_block()) {
-            ViewBlock* parent_block = (ViewBlock*)parent;
+            ViewBlock* parent_block = lam::view_require_block(parent);
             abs_x += parent_block->x;
             abs_y += parent_block->y;
             if (parent_block->position &&
@@ -529,7 +532,7 @@ static void multicol_absolute_normal_origin(ViewBlock* block, float* out_x, floa
 static LayoutFragmentBox* multicol_last_layout_fragment(ViewBlock* block) {
     if (!block || !block->is_element()) return nullptr;
 
-    DomElement* elem = (DomElement*)block;
+    DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(block);
     LayoutFragmentBox* fragment = elem->layout_fragments;
     LayoutFragmentBox* last = nullptr;
     while (fragment) {
@@ -543,10 +546,10 @@ static void multicol_apply_static_fragment_anchor(ViewBlock* multicol, ViewBlock
     if (!multicol || !oof || !multicol_is_out_of_flow(oof)) return;
     if (!multicol_uses_static_x(oof) && !multicol_uses_static_y(oof)) return;
 
-    ViewBlock* anchor = multicol_next_in_flow_block_sibling((View*)oof);
+    ViewBlock* anchor = multicol_next_in_flow_block_sibling(static_cast<View*>(oof));
     bool anchor_is_next = anchor != nullptr;
     if (!anchor) {
-        anchor = multicol_prev_in_flow_block_sibling((View*)oof);
+        anchor = multicol_prev_in_flow_block_sibling(static_cast<View*>(oof));
     }
     if (!anchor) return;
 
@@ -554,7 +557,7 @@ static void multicol_apply_static_fragment_anchor(ViewBlock* multicol, ViewBlock
     float anchor_origin_y = 0;
     ViewElement* parent = oof->parent_view();
     if (parent && parent->is_block()) {
-        multicol_absolute_normal_origin((ViewBlock*)parent, &anchor_origin_x, &anchor_origin_y);
+        multicol_absolute_normal_origin(lam::view_require_block(parent), &anchor_origin_x, &anchor_origin_y);
     } else {
         multicol_absolute_normal_origin(multicol, &anchor_origin_x, &anchor_origin_y);
     }
@@ -590,8 +593,10 @@ static bool multicol_has_spanner_ancestor(ViewBlock* multicol, ViewBlock* block)
 
     ViewElement* ancestor = block->parent_view();
     while (ancestor && ancestor != multicol) {
-        if (ancestor->is_block() && multicol_is_spanner_block((ViewBlock*)ancestor)) {
-            return true;
+        if (ViewBlock* ancestor_block = lam::view_as_block(ancestor)) {
+            if (multicol_is_spanner_block(ancestor_block)) {
+                return true;
+            }
         }
         ancestor = ancestor->parent_view();
     }
@@ -604,7 +609,7 @@ static ViewBlock* multicol_nearest_positioned_ancestor(ViewBlock* block) {
     ViewElement* ancestor = block->parent_view();
     while (ancestor) {
         if (ancestor->is_block()) {
-            ViewBlock* ancestor_block = (ViewBlock*)ancestor;
+            ViewBlock* ancestor_block = lam::view_require_block(ancestor);
             if (ancestor_block->position &&
                 ancestor_block->position->position != CSS_VALUE_STATIC) {
                 return ancestor_block;
@@ -628,7 +633,7 @@ static void multicol_viewport_size(LayoutContext* lycon, ViewBlock* multicol, fl
     if ((viewport_width <= 0 || viewport_height <= 0) && multicol) {
         ViewBlock* root = multicol;
         while (root->parent_view() && root->parent_view()->is_block()) {
-            root = (ViewBlock*)root->parent_view();
+            root = lam::view_require_block(root->parent_view());
         }
         if (viewport_width <= 0) viewport_width = root->width;
         if (viewport_height <= 0) viewport_height = root->height;
@@ -689,7 +694,7 @@ static void multicol_apply_positioned_fragment_anchors_in_subtree(
     if (!view || !multicol) return;
 
     if (view->is_element() && view->is_block()) {
-        ViewBlock* block = (ViewBlock*)view;
+        ViewBlock* block = lam::view_require_block(view);
         if (multicol_is_out_of_flow(block)) {
             multicol_apply_spanner_containing_block_anchor(lycon, multicol, block);
             multicol_apply_static_fragment_anchor(multicol, block);
@@ -699,7 +704,7 @@ static void multicol_apply_positioned_fragment_anchors_in_subtree(
 
     if (!view->is_element()) return;
 
-    View* child = (View*)((DomElement*)view)->first_child;
+    View* child = lam::dom_require<DOM_NODE_ELEMENT>(view)->first_child;
     while (child) {
         multicol_apply_positioned_fragment_anchors_in_subtree(lycon, multicol, child);
         child = child->next_sibling;
@@ -709,21 +714,21 @@ static void multicol_apply_positioned_fragment_anchors_in_subtree(
 static void multicol_apply_positioned_fragment_anchors(LayoutContext* lycon, ViewBlock* multicol) {
     if (!multicol || !multicol->multicol) return;
 
-    multicol_apply_positioned_fragment_anchors_in_subtree(lycon, multicol, (View*)multicol);
+    multicol_apply_positioned_fragment_anchors_in_subtree(lycon, multicol, static_cast<View*>(multicol));
 }
 
 static float multicol_first_text_height(View* view) {
     if (!view) return 0;
     if (view->node_type == DOM_NODE_TEXT) {
-        ViewText* text = (ViewText*)view;
+        ViewText* text = lam::view_require<RDT_VIEW_TEXT>(view);
         return text->height > 0 ? text->height : 0;
     }
     if (view->node_type == DOM_NODE_ELEMENT) {
-        View* child = (View*)((DomElement*)view)->first_child;
+        View* child = lam::dom_require<DOM_NODE_ELEMENT>(view)->first_child;
         while (child) {
             float height = multicol_first_text_height(child);
             if (height > 0) return height;
-            child = (View*)child->next_sibling;
+            child = child->next_sibling;
         }
     }
     return 0;
@@ -768,7 +773,7 @@ static bool multicol_project_fragmented_inline_descendants(
     View* descendant = child->first_placed_child();
     while (descendant && item_count < 2048) {
         if (descendant->view_type == RDT_VIEW_TEXT) {
-            ViewText* text = (ViewText*)descendant;
+            ViewText* text = lam::view_require<RDT_VIEW_TEXT>(descendant);
             TextRect* rect = text->rect;
             while (rect && item_count < 2048) {
                 if (rect->width <= 0 && rect->length > 0) {
@@ -866,7 +871,7 @@ static bool multicol_project_fragmented_inline_descendants(
     descendant = child->first_placed_child();
     while (descendant) {
         if (descendant->view_type == RDT_VIEW_TEXT) {
-            multicol_update_text_bounds((ViewText*)descendant);
+            multicol_update_text_bounds(lam::view_require<RDT_VIEW_TEXT>(descendant));
         }
         descendant = descendant->next();
     }
@@ -887,7 +892,7 @@ static void multicol_project_fragmented_descendants(
     if (!child || fragment_height <= 0 || column_count <= 0) return;
     if (block_split_height <= 0) block_split_height = fragment_height;
 
-    float row_gap = multicol_row_gap((ViewBlock*)child->parent);
+    float row_gap = multicol_row_gap(lam::view_require_block(child->parent));
     if (row_gap < 0) row_gap = 0;
 
     bool projected_inline = multicol_project_fragmented_inline_descendants(
@@ -908,14 +913,16 @@ static void multicol_project_fragmented_descendants(
     float subslot_flow_y = 0;
     while (descendant) {
         View* next = descendant->next();
-        if (descendant->is_block() && multicol_is_out_of_flow((ViewBlock*)descendant)) {
-            descendant = next;
-            continue;
+        if (ViewBlock* descendant_block = lam::view_as_block(descendant)) {
+            if (multicol_is_out_of_flow(descendant_block)) {
+                descendant = next;
+                continue;
+            }
         }
 
         if (descendant->view_type == RDT_VIEW_TEXT) {
             if (!projected_inline) {
-                multicol_project_fragmented_text_rects((ViewText*)descendant,
+                multicol_project_fragmented_text_rects(lam::view_require<RDT_VIEW_TEXT>(descendant),
                     child->y, fragment_height, column_count, column_width, column_gap, row_gap);
             }
             descendant = next;
@@ -934,7 +941,7 @@ static void multicol_project_fragmented_descendants(
             descendant->is_block();
         float descendant_flow_height = 0;
         if (use_subslot_flow) {
-            ViewBlock* descendant_block = (ViewBlock*)descendant;
+            ViewBlock* descendant_block = lam::view_require_block(descendant);
             descendant_flow_height = descendant_block->height;
             if (descendant_block->bound) {
                 descendant_flow_height += descendant_block->bound->margin.top +
@@ -965,7 +972,7 @@ static void multicol_project_fragmented_descendants(
             new_y = child->y + parent_row_index * (fragment_height + row_gap) + local_y;
 
             if (descendant->is_block()) {
-                ViewBlock* descendant_block = (ViewBlock*)descendant;
+                ViewBlock* descendant_block = lam::view_require_block(descendant);
                 if (descendant_block->height > block_split_height) {
                     int total_column_slots = column_count * inner_column_count;
                     int descendant_fragment_count = (int)ceilf(descendant_block->height / block_split_height); // INT_CAST_OK: fragment count from positive heights
@@ -1009,7 +1016,7 @@ static void multicol_project_fragmented_descendants(
         }
 
         if (!descendant_fragmented && descendant->is_block()) {
-            ViewBlock* descendant_block = (ViewBlock*)descendant;
+            ViewBlock* descendant_block = lam::view_require_block(descendant);
             if (descendant_block->height > block_split_height) {
                 int descendant_fragment_count = (int)ceilf(descendant_block->height / block_split_height); // INT_CAST_OK: fragment count from positive heights
                 if (descendant_fragment_count < 1) descendant_fragment_count = 1;
@@ -1078,7 +1085,7 @@ static bool multicol_should_fragment_monolithic_child(
 
 static void multicol_clear_layout_fragments(ViewBlock* block) {
     if (!block) return;
-    DomElement* elem = (DomElement*)block;
+    DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(block);
     elem->layout_fragments = nullptr;
     elem->layout_fragment_count = 0;
 }
@@ -1098,7 +1105,7 @@ static void multicol_store_layout_fragments(
         return;
     }
 
-    DomElement* elem = (DomElement*)child;
+    DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(child);
     elem->layout_fragments = nullptr;
     elem->layout_fragment_count = 0;
 
@@ -1208,7 +1215,7 @@ static float multicol_split_child_around_spanners(
     View* descendant = child->first_placed_child();
     while (descendant && child_count < MAX_MULTICOL_BLOCKS) {
         if (descendant->is_block()) {
-            ViewBlock* descendant_block = (ViewBlock*)descendant;
+            ViewBlock* descendant_block = lam::view_require_block(descendant);
             if (!multicol_is_out_of_flow(descendant_block)) {
                 float descendant_height = descendant_block->height;
                 if (descendant_block->bound) {
@@ -1369,16 +1376,16 @@ static float multicol_split_child_around_spanners(
             text_offset_y = leading_fragment_border_height;
             final_leading_text_consumed = true;
         }
-        DomElement* block_elem = (DomElement*)children[k].block;
+        DomElement* block_elem = lam::dom_require<DOM_NODE_ELEMENT>(children[k].block);
         if (block_elem->layout_fragments && block_elem->layout_fragment_count > 1) {
             if (text_offset_y > 0) {
-                float target_y = text_offset_y + multicol_first_text_height((View*)children[k].block);
-                View* text_child = (View*)block_elem->first_child;
+                float target_y = text_offset_y + multicol_first_text_height(static_cast<View*>(children[k].block));
+                View* text_child = block_elem->first_child;
                 while (text_child) {
                     if (text_child->node_type == DOM_NODE_TEXT || text_child->node_type == DOM_NODE_ELEMENT) {
                         multicol_reanchor_text_descendants(text_child, 0, target_y);
                     }
-                    text_child = (View*)text_child->next_sibling;
+                    text_child = text_child->next_sibling;
                 }
             }
         } else {
@@ -1411,7 +1418,7 @@ static float multicol_split_child_around_spanners(
         container->width : column_count * column_width + (column_count - 1) * column_gap;
     if (full_width > union_width) union_width = full_width;
     if (non_spanner_count == 0 && spanner_extent > 0) {
-        multicol_project_view_subtree((View*)child, 0, -flow_height);
+        multicol_project_view_subtree(static_cast<View*>(child), 0, -flow_height);
         child->y = child_origin_y + flow_height;
         child->width = column_width;
         child->height = 0;
@@ -1719,7 +1726,7 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
         View* placed = block->first_placed_child();
         while (placed) {
             if (placed->is_block()) {
-                ViewBlock* child_block = (ViewBlock*)placed;
+                ViewBlock* child_block = lam::view_require_block(placed);
                 multicol_clear_layout_fragments(child_block);
                 if (!multicol_is_out_of_flow(child_block) &&
                     multicol_has_direct_spanner_child(child_block)) {
@@ -1809,12 +1816,12 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
     child = block->first_child;
     while (child) {
         if (child->is_element()) {
-            DomElement* child_elem = (DomElement*)child;
-            ViewBlock* child_block = (ViewBlock*)child_elem;
+            DomElement* child_elem = lam::dom_require<DOM_NODE_ELEMENT>(child);
+            ViewBlock* child_block = lam::view_as_block(child);
 
-            if (child_block->view_type == RDT_VIEW_BLOCK ||
+            if (child_block && (child_block->view_type == RDT_VIEW_BLOCK ||
                 child_block->view_type == RDT_VIEW_INLINE_BLOCK ||
-                child_block->view_type == RDT_VIEW_TEXT) {
+                child_block->view_type == RDT_VIEW_TEXT)) {
 
                 multicol_clear_layout_fragments(child_block);
 
@@ -1871,7 +1878,7 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
         child = block->first_child;
         while (child) {
             if (child->node_type == DOM_NODE_TEXT) {
-                DomText* tnode = (DomText*)child;
+                DomText* tnode = lam::dom_require<DOM_NODE_TEXT>(child);
                 TextRect* tr = tnode->rect;
                 while (tr && line_count < 512) {
                     lines[line_count].rect = tr;
@@ -1950,7 +1957,7 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
         child = block->first_child;
         while (child) {
             if (child->node_type == DOM_NODE_TEXT) {
-                DomText* tnode = (DomText*)child;
+                DomText* tnode = lam::dom_require<DOM_NODE_TEXT>(child);
                 // Recalculate text node bounding box from its rects
                 float min_x = 1e9f, min_y = 1e9f, max_x = 0, max_y_val = 0;
                 TextRect* tr = tnode->rect;
@@ -2179,7 +2186,7 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
     block->height = total_height;
     block->content_height = max_column_height + (block->bound ? block->bound->padding.bottom : 0);
     multicol_apply_positioned_fragment_anchors(lycon, block);
-    multicol_finalize_fragmented_inline_continuations((View*)block);
+    multicol_finalize_fragmented_inline_continuations(static_cast<View*>(block));
 
     // Update layout context's advance_y to reflect actual height
     lycon->block.advance_y = content_start_y + max_column_height;

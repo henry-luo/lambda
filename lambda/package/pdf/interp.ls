@@ -46,33 +46,39 @@ fn new_state(fonts_resolved) {
         path:  path.new_state(),
                 fonts: fonts_resolved,
                 fill_cs: "DeviceRGB",
-                stroke_cs: "DeviceRGB"
+                stroke_cs: "DeviceRGB",
+                soft_mask: null
     }
 }
 
 fn _with_text(st, t) {
         { ctm: st.ctm, text: t, path: st.path, fonts: st.fonts,
-            fill_cs: st.fill_cs, stroke_cs: st.stroke_cs }
+            fill_cs: st.fill_cs, stroke_cs: st.stroke_cs, soft_mask: st.soft_mask }
 }
 
 fn _with_path(st, p) {
         { ctm: st.ctm, text: st.text, path: p, fonts: st.fonts,
-            fill_cs: st.fill_cs, stroke_cs: st.stroke_cs }
+            fill_cs: st.fill_cs, stroke_cs: st.stroke_cs, soft_mask: st.soft_mask }
 }
 
 fn _with_ctm(st, m) {
         { ctm: m, text: st.text, path: st.path, fonts: st.fonts,
-            fill_cs: st.fill_cs, stroke_cs: st.stroke_cs }
+            fill_cs: st.fill_cs, stroke_cs: st.stroke_cs, soft_mask: st.soft_mask }
 }
 
 fn _with_fill_cs(st, cs) {
         { ctm: st.ctm, text: st.text, path: st.path, fonts: st.fonts,
-            fill_cs: cs, stroke_cs: st.stroke_cs }
+            fill_cs: cs, stroke_cs: st.stroke_cs, soft_mask: st.soft_mask }
 }
 
 fn _with_stroke_cs(st, cs) {
         { ctm: st.ctm, text: st.text, path: st.path, fonts: st.fonts,
-            fill_cs: st.fill_cs, stroke_cs: cs }
+            fill_cs: st.fill_cs, stroke_cs: cs, soft_mask: st.soft_mask }
+}
+
+fn _with_soft_mask(st, soft_mask) {
+    { ctm: st.ctm, text: st.text, path: st.path, fonts: st.fonts,
+      fill_cs: st.fill_cs, stroke_cs: st.stroke_cs, soft_mask: soft_mask }
 }
 
 fn _with_clip(st, id) {
@@ -88,7 +94,8 @@ fn _initial_run_state(fonts, init_ctm, inherited_st) {
             path:  path.clear_current_path(inherited_st.path),
             fonts: fonts,
             fill_cs: inherited_st.fill_cs,
-            stroke_cs: inherited_st.stroke_cs
+            stroke_cs: inherited_st.stroke_cs,
+            soft_mask: inherited_st.soft_mask
         }
     }
 }
@@ -105,7 +112,8 @@ fn _restore_state(saved) {
         path:  saved.path,
         fonts: saved.fonts,
         fill_cs: saved.fill_cs,
-        stroke_cs: saved.stroke_cs
+        stroke_cs: saved.stroke_cs,
+        soft_mask: saved.soft_mask
     }
 }
 
@@ -331,6 +339,121 @@ fn _alpha_of(d, key, fallback) {
     else { fallback }
 }
 
+fn _clamp_unit(v) {
+    if (v < 0.0) { 0.0 }
+    else if (v > 1.0) { 1.0 }
+    else { v }
+}
+
+fn _first_component(v, fallback) {
+    if (v is array and len(v) >= 1) { util.num(v[0]) }
+    else if (v is int or v is float) { util.num(v) }
+    else { fallback }
+}
+
+fn _function_mid_gray(pdf, fn_ref) {
+    let func = resolve.deref(pdf, fn_ref)
+    if (func == null) { 1.0 }
+    else {
+        let c0 = _first_component(func.C0, 0.0)
+        let c1 = _first_component(func.C1, 1.0)
+        _clamp_unit((c0 + c1) / 2.0)
+    }
+}
+
+fn _first_shading_name_loop(ops, i, n) {
+    if (i >= n) { null }
+    else {
+        let op = ops[i]
+        if (op.op == "sh" and len(op.operands) >= 1 and
+                op.operands[0] is map and op.operands[0].kind == "name") {
+            op.operands[0].value
+        }
+        else { _first_shading_name_loop(ops, i + 1, n) }
+    }
+}
+
+fn _first_shading_name(bytes) {
+    let ops = stream.parse_content_stream(bytes)
+    _first_shading_name_loop(ops, 0, len(ops))
+}
+
+fn _soft_mask_group_opacity(pdf, group) {
+    let dict = if (group and group.dictionary) { group.dictionary } else { group }
+    let bytes = if (group and group.text_data != null) { group.text_data }
+                else if (group and group.data != null) { group.data }
+                else { "" }
+    let nm = _first_shading_name(bytes)
+    let table = if (dict and dict.Resources and dict.Resources.Shading) { dict.Resources.Shading } else { null }
+    let sh = if (nm != null and table != null) { resolve.deref(pdf, table[nm]) } else { null }
+    if (sh != null and sh.Function != null) { _function_mid_gray(pdf, sh.Function) }
+    else { 1.0 }
+}
+
+fn _soft_mask_group_linear(pdf, group) {
+    let dict = if (group and group.dictionary) { group.dictionary } else { group }
+    let bytes = if (group and group.text_data != null) { group.text_data }
+                else if (group and group.data != null) { group.data }
+                else { "" }
+    let nm = _first_shading_name(bytes)
+    let table = if (dict and dict.Resources and dict.Resources.Shading) { dict.Resources.Shading } else { null }
+    let sh = if (nm != null and table != null) { resolve.deref(pdf, table[nm]) } else { null }
+    if (sh != null and sh.ShadingType == 2 and sh.Function != null and sh.Coords is array and len(sh.Coords) >= 4) {
+        let func = resolve.deref(pdf, sh.Function)
+        if (func != null) {
+            {
+                kind: "axial_gray",
+                x0: util.num(sh.Coords[0]),
+                y0: util.num(sh.Coords[1]),
+                x1: util.num(sh.Coords[2]),
+                y1: util.num(sh.Coords[3]),
+                a0: _clamp_unit(_first_component(func.C0, 0.0)),
+                a1: _clamp_unit(_first_component(func.C1, 1.0))
+            }
+        }
+        else { null }
+    }
+    else { null }
+}
+
+fn _soft_mask_raw(pdf, d) {
+    if (d) { d.SMask } else { null }
+}
+
+fn _soft_mask_linear(pdf, d) {
+    let raw = _soft_mask_raw(pdf, d)
+    if (raw == null or (raw is string and raw == "None")) { null }
+    else {
+        let sm = resolve.deref(pdf, raw)
+        if (sm == null) { null }
+        else {
+            let subtype = if (sm.S != null) { string(sm.S) } else { "" }
+            let group = if (sm.G != null) { resolve.deref(pdf, sm.G) } else { null }
+            if ((subtype == "Luminosity" or subtype == "Alpha") and group != null) {
+                _soft_mask_group_linear(pdf, group)
+            }
+            else { null }
+        }
+    }
+}
+
+fn _soft_mask_opacity(pdf, d) {
+    let raw = _soft_mask_raw(pdf, d)
+    if (raw == null or (raw is string and raw == "None")) { 1.0 }
+    else {
+        let sm = resolve.deref(pdf, raw)
+        if (sm == null) { 1.0 }
+        else {
+            let subtype = if (sm.S != null) { string(sm.S) } else { "" }
+            let group = if (sm.G != null) { resolve.deref(pdf, sm.G) } else { null }
+            if ((subtype == "Luminosity" or subtype == "Alpha") and group != null) {
+                _soft_mask_group_opacity(pdf, group)
+            }
+            else { 1.0 }
+        }
+    }
+}
+
 fn _num_of(d, key, fallback) {
     let v = if (d) d[key] else null
     if (v is float) { v }
@@ -380,11 +503,13 @@ fn _apply_gs(st, ops, pdf, page) {
         let d = _ext_gstate_dict(pdf, page, nm)
         if (d == null) { st }
         else {
-            let fa = _alpha_of(d, "ca", st.path.fill_opacity)
-            let sa = _alpha_of(d, "CA", st.path.stroke_opacity)
+            let sm = _soft_mask_linear(pdf, d)
+            let ma = if (sm != null) { 1.0 } else { _soft_mask_opacity(pdf, d) }
+            let fa = _clamp_unit(_alpha_of(d, "ca", st.path.fill_opacity) * ma)
+            let sa = _clamp_unit(_alpha_of(d, "CA", st.path.stroke_opacity) * ma)
             let p1 = path.set_opacity(st.path, fa, sa)
             let p2 = _apply_gs_line_state(p1, d)
-            let st1 = _with_path(st, p2)
+            let st1 = _with_soft_mask(_with_path(st, p2), sm)
             _with_text(st1, text.set_opacity(st1.text, fa, sa))
         }
     }
@@ -870,7 +995,10 @@ fn _clip_element(cid, pending_clip_rule, pending_clip_d, clip_xform) {
 
 fn _step_path_emit_pattern(ctx, pdf, page) {
     if (ctx.has_fill_pattern == 1 and ctx.fill_pattern_emitted == 0 and not _list_contains(ctx.emitted_pattern_ids, ctx.fill_pattern_id)) {
-        let pat = shading.from_pattern_fill(pdf, page, ctx.fill_pattern_name, ctx.fill_pattern_id, ctx.st.ctm)
+        let pat = if (ctx.st.soft_mask != null and ctx.st.soft_mask.kind == "axial_gray") {
+            shading.from_pattern_fill_with_alpha(pdf, page, ctx.fill_pattern_name, ctx.fill_pattern_id, ctx.st.ctm, ctx.st.soft_mask)
+        }
+        else { shading.from_pattern_fill(pdf, page, ctx.fill_pattern_name, ctx.fill_pattern_id, ctx.st.ctm) }
         let st1 = _set_pattern_fill(ctx.st, pat)
            _ctx(st1, ctx.stack, ctx.texts, _append_all(ctx.paths, pat.defs),
                ctx.pending_clip_d, ctx.pending_clip_rule, ctx.has_pending_clip,
@@ -903,7 +1031,8 @@ fn _step_path(ctx, opr, operands, pdf, page, clip_prefix) {
     }
     else { ctx1 }
     if (len(pr.emit) > 0) {
-        _ctx_with_paths(ctx2, ctx2.paths ++ _wrap_emit_with_ctm(pr.emit, ctx2.st.ctm, ctx2.active_clip_ids))
+        let base_emit = _wrap_emit_with_ctm(pr.emit, ctx2.st.ctm, ctx2.active_clip_ids)
+        _ctx_with_paths(ctx2, ctx2.paths ++ base_emit)
     }
     else { ctx2 }
 }

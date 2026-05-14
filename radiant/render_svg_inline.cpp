@@ -22,6 +22,7 @@
 #include <ctype.h>
 #include <math.h>
 #include <stdio.h>
+#include <strings.h>
 
 #ifndef LAMBDA_HEADLESS
 #include <thorvg_capi.h>  // needed for SVG text rendering (tvg_text_* API)
@@ -1077,8 +1078,11 @@ static void opacity_bounds_from_rect(const RdtMatrix* transform, float x, float 
 
 static void draw_gradient_fill(SvgRenderContext* ctx, RdtPath* path, SvgGradDef* def,
                                float bx, float by, float bw, float bh,
-                               const RdtMatrix* transform, RdtFillRule fill_rule) {
+                               const RdtMatrix* transform, RdtFillRule fill_rule,
+                               float opacity) {
     if (!path || !def || def->stop_count < 2) return;
+    if (opacity < 0.0f) opacity = 0.0f;
+    if (opacity > 1.0f) opacity = 1.0f;
 
     RdtGradientStop stops[SVG_MAX_GRAD_STOPS];
     for (int i = 0; i < def->stop_count; i++) {
@@ -1086,7 +1090,7 @@ static void draw_gradient_fill(SvgRenderContext* ctx, RdtPath* path, SvgGradDef*
         stops[i].r = def->stops[i].color.r;
         stops[i].g = def->stops[i].color.g;
         stops[i].b = def->stops[i].color.b;
-        stops[i].a = def->stops[i].color.a;
+        stops[i].a = (uint8_t)((float)def->stops[i].color.a * opacity);
     }
 
     if (def->is_radial) {
@@ -1197,6 +1201,11 @@ static void draw_svg_fill_stroke(SvgRenderContext* ctx, RdtPath* path, Element* 
     char linecap_buf[64];
     char linejoin_buf[64];
     const char* fill = get_svg_attr_or_style(ctx, elem, "fill", fill_buf, sizeof(fill_buf));
+    const char* fill_opacity_attr = get_svg_attr_or_style(ctx, elem, "fill-opacity", fill_opacity_buf, sizeof(fill_opacity_buf));
+    const char* opacity_attr = get_svg_attr_or_style(ctx, elem, "opacity", opacity_buf, sizeof(opacity_buf));
+    float fill_opacity = fill_opacity_attr ? strtof(fill_opacity_attr, nullptr) : 1.0f;
+    float element_opacity = opacity_attr ? strtof(opacity_attr, nullptr) : 1.0f;
+    float fill_alpha = fill_opacity * element_opacity * ctx->opacity;
     Color fc;
     bool has_fill = true;
     bool gradient_applied = false;
@@ -1219,7 +1228,7 @@ static void draw_svg_fill_stroke(SvgRenderContext* ctx, RdtPath* path, Element* 
                     memcpy(id_buf, id_start, id_len);
                     SvgGradDef* def = lookup_grad_def((SvgDefTable*)ctx->defs, id_buf);
                     if (def && def->stop_count >= 2) {
-                        draw_gradient_fill(ctx, path, def, bx, by, bw, bh, transform, fill_rule);
+                        draw_gradient_fill(ctx, path, def, bx, by, bw, bh, transform, fill_rule, fill_alpha);
                         gradient_applied = true;
                         has_fill = false;
                     } else {
@@ -1249,20 +1258,7 @@ static void draw_svg_fill_stroke(SvgRenderContext* ctx, RdtPath* path, Element* 
     }
 
     if (has_fill) {
-        const char* fill_opacity = get_svg_attr_or_style(ctx, elem, "fill-opacity", fill_opacity_buf, sizeof(fill_opacity_buf));
-        if (fill_opacity) {
-            float opacity = strtof(fill_opacity, nullptr);
-            fc.a = (uint8_t)(fc.a * opacity);
-        }
-        const char* opacity = get_svg_attr_or_style(ctx, elem, "opacity", opacity_buf, sizeof(opacity_buf));
-        if (opacity) {
-            float op = strtof(opacity, nullptr);
-            fc.a = (uint8_t)(fc.a * op);
-        }
-        // apply inherited group opacity
-        if (ctx->opacity < 1.0f) {
-            fc.a = (uint8_t)(fc.a * ctx->opacity);
-        }
+        fc.a = (uint8_t)((float)fc.a * fill_alpha);
         svg_fill_path(ctx, path, fc, fill_rule, transform);
     }
 
@@ -1293,6 +1289,9 @@ static void draw_svg_fill_stroke(SvgRenderContext* ctx, RdtPath* path, Element* 
         if (stroke_opacity) {
             float opacity = strtof(stroke_opacity, nullptr);
             sc.a = (uint8_t)(sc.a * opacity);
+        }
+        if (opacity_attr) {
+            sc.a = (uint8_t)((float)sc.a * element_opacity);
         }
         // apply inherited group opacity
         if (ctx->opacity < 1.0f) {

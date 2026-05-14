@@ -1,4 +1,4 @@
-import React, { useState, forwardRef, useRef, useImperativeHandle } from 'react';
+import React, { useState, useEffect, forwardRef, useRef, useImperativeHandle } from 'react';
 import TerminalPanel from './TerminalPanel';
 import LogViewer from './LogViewer';
 import ViewTreeViewer from './ViewTreeViewer';
@@ -6,7 +6,7 @@ import HtmlSourceViewer from './HtmlSourceViewer';
 import HtmlTreeViewer from './HtmlTreeViewer';
 import PixelDiffViewer from './PixelDiffViewer';
 
-const BottomPanel = forwardRef(({ testPath, renderTest }, ref) => {
+const BottomPanel = forwardRef(({ testPath, renderTest, isPdfTest = false }, ref) => {
   const [activeTab, setActiveTab] = useState('htmlsource');
   const terminalRef = useRef(null);
   const viewTreeRef = useRef(null);
@@ -23,26 +23,37 @@ const BottomPanel = forwardRef(({ testPath, renderTest }, ref) => {
     refreshHtmlSource: () => htmlSourceRef.current?.refresh(),
     refreshHtmlTree: () => htmlTreeRef.current?.refresh(),
     updatePixelDiff: (result) => pixelDiffRef.current?.updateDiff(result),
+    showTerminal: () => setActiveTab('terminal'),
     showPixelDiff: () => setActiveTab('pixeldiff')
   }));
 
   const isRenderTest = renderTest?.testType === 'render';
 
+  useEffect(() => {
+    if (isPdfTest && (activeTab === 'htmlsource' || activeTab === 'htmltree')) {
+      setActiveTab('terminal');
+    }
+  }, [isPdfTest, activeTab]);
+
   return (
     <div className="bottom-panel-container">
       <div className="bottom-panel-tabs">
-        <button
-          className={`tab-button ${activeTab === 'htmlsource' ? 'active' : ''}`}
-          onClick={() => setActiveTab('htmlsource')}
-        >
-          Html Source
-        </button>
-        <button
-          className={`tab-button ${activeTab === 'htmltree' ? 'active' : ''}`}
-          onClick={() => setActiveTab('htmltree')}
-        >
-          Html Tree
-        </button>
+        {!isPdfTest && (
+          <button
+            className={`tab-button ${activeTab === 'htmlsource' ? 'active' : ''}`}
+            onClick={() => setActiveTab('htmlsource')}
+          >
+            Html Source
+          </button>
+        )}
+        {!isPdfTest && (
+          <button
+            className={`tab-button ${activeTab === 'htmltree' ? 'active' : ''}`}
+            onClick={() => setActiveTab('htmltree')}
+          >
+            Html Tree
+          </button>
+        )}
         <button
           className={`tab-button ${activeTab === 'terminal' ? 'active' : ''}`}
           onClick={() => setActiveTab('terminal')}
@@ -71,12 +82,16 @@ const BottomPanel = forwardRef(({ testPath, renderTest }, ref) => {
         )}
       </div>
       <div className="bottom-panel-content">
-        <div className={`tab-content ${activeTab === 'htmlsource' ? 'active' : ''}`}>
-          <HtmlSourceViewer ref={htmlSourceRef} testPath={testPath} />
-        </div>
-        <div className={`tab-content ${activeTab === 'htmltree' ? 'active' : ''}`}>
-          <HtmlTreeViewer ref={htmlTreeRef} />
-        </div>
+        {!isPdfTest && (
+          <div className={`tab-content ${activeTab === 'htmlsource' ? 'active' : ''}`}>
+            <HtmlSourceViewer ref={htmlSourceRef} testPath={testPath} />
+          </div>
+        )}
+        {!isPdfTest && (
+          <div className={`tab-content ${activeTab === 'htmltree' ? 'active' : ''}`}>
+            <HtmlTreeViewer ref={htmlTreeRef} />
+          </div>
+        )}
         <div className={`tab-content ${activeTab === 'terminal' ? 'active' : ''}`}>
           <TerminalPanel ref={terminalRef} />
         </div>

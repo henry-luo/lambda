@@ -461,7 +461,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild \
 	    test test-all test-all-baseline test-lambda-baseline test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-pdf-render test-extended test-input run help \
-	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint check check-raw-alloc check-state-store docs intellisense analyze-binary \
+	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint check check-raw-alloc check-state-store check-radiant-casts docs intellisense analyze-binary \
 	    build-debug build-release clean-all distclean \
 	    tree-sitter-libs tree-sitter-core-libs \
 	    generate-premake clean-premake build-test build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline \
@@ -1311,7 +1311,7 @@ test-pdf-render: build-pdf-render-test
 	@echo "Running PDF render visual gtest suite..."
 	@echo "=============================================================="
 	@if [ -f "test/test_pdf_render_visual_gtest.exe" ]; then \
-		./test/test_pdf_render_visual_gtest.exe; \
+		./test/test_pdf_render_visual_gtest.exe $(ARGS); \
 	else \
 		echo "Error: test/test_pdf_render_visual_gtest.exe not found - run 'make build-pdf-render-test' first"; \
 		exit 1; \
@@ -1980,6 +1980,34 @@ check-int-cast:
 		echo "✅ No unmarked (int) casts in Radiant layout files"; \
 	fi
 
+# Check for C-style pointer casts to View*/Dom* in migrated Radiant layout files.
+# Downcasts should go through lib/tagged.hpp helpers such as lam::view_as_*(),
+# lam::view_require_*(), lam::dom_as<>(), or lam::dom_require<>().
+check-radiant-casts:
+	@echo "Checking migrated Radiant layout files for C-style View*/Dom* casts..."
+	@VIOLATIONS=$$(grep -En '\([[:space:]]*(View|Dom)[A-Za-z0-9_]*[[:space:]]*\*[[:space:]]*\)[[:space:]]*([A-Za-z_&*]|\()' \
+		radiant/layout_alignment.cpp radiant/layout_inline.cpp \
+		radiant/layout_grid.cpp radiant/layout_grid_multipass.cpp \
+		radiant/layout_list.cpp radiant/layout_positioned.cpp \
+		radiant/layout_text.cpp radiant/layout_multicol.cpp \
+		radiant/layout_flex_measurement.cpp radiant/layout_flex_multipass.cpp \
+		radiant/layout_flex.cpp radiant/layout_block.cpp \
+		radiant/layout_table.cpp \
+		radiant/resolve_css_style.cpp \
+		| grep -v 'RADIANT_CAST_OK' \
+		|| true); \
+	if [ -n "$$VIOLATIONS" ]; then \
+		echo ""; \
+		echo "❌ Found C-style View*/Dom* casts in migrated Radiant files:"; \
+		echo "$$VIOLATIONS"; \
+		echo ""; \
+		VCOUNT=$$(echo "$$VIOLATIONS" | wc -l | tr -d ' '); \
+		echo "Total: $$VCOUNT cast(s)"; \
+		exit 1; \
+	else \
+		echo "✅ No C-style View*/Dom* casts in migrated Radiant files"; \
+	fi
+
 # Clang-tidy static analysis
 tidy:
 	@echo "Running clang-tidy analysis..."
@@ -2335,6 +2363,17 @@ capture-layout:
 test-layout:
 	@echo "🎨 Running Lambda CSS Layout Engine Tests"
 	@echo "=========================================="
+	@STALE_FILE=""; \
+	if [ ! -x "$(LAMBDA_EXE)" ]; then \
+		echo "🔧 $(LAMBDA_EXE) missing; building before layout tests"; \
+		$(MAKE) build; \
+	else \
+		STALE_FILE=$$(find radiant lambda lib -type f \( -name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.cxx' -o -name '*.h' -o -name '*.hpp' -o -name '*.m' -o -name '*.mm' \) -newer "$(LAMBDA_EXE)" -print -quit 2>/dev/null); \
+		if [ -n "$$STALE_FILE" ]; then \
+			echo "🔧 $(LAMBDA_EXE) is older than $$STALE_FILE; rebuilding before layout tests"; \
+			$(MAKE) build; \
+		fi; \
+	fi
 	@if [ -f "test/layout/test_radiant_layout.js" ]; then \
 		TEST_VAR="$(or $(test),$(TEST))"; \
 		PATTERN_VAR="$(or $(pattern),$(PATTERN))"; \

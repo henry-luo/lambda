@@ -3,7 +3,8 @@ import React, { useState, useEffect } from 'react';
 function TestTree({ onTestSelect, selectedTest }) {
   const [layoutCategories, setLayoutCategories] = useState([]);
   const [renderDirs, setRenderDirs] = useState([]);  // [{ dir: 'page', tests: [...] }, ...]
-  const [expandedSections, setExpandedSections] = useState(new Set(['layout', 'render']));
+  const [pdfRenderDirs, setPdfRenderDirs] = useState([]);  // [{ dir: 'page', tests: [...] }, ...]
+  const [expandedSections, setExpandedSections] = useState(new Set(['layout', 'render', 'pdf-render']));
   const [expandedCategories, setExpandedCategories] = useState(new Set());
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -13,12 +14,14 @@ function TestTree({ onTestSelect, selectedTest }) {
 
   async function loadTests() {
     try {
-      const [layoutData, renderData] = await Promise.all([
+      const [layoutData, renderData, pdfRenderData] = await Promise.all([
         window.electronAPI.loadTestTree(),
-        window.electronAPI.loadRenderTests()
+        window.electronAPI.loadRenderTests(),
+        window.electronAPI.loadPdfRenderTests()
       ]);
       setLayoutCategories(layoutData);
       setRenderDirs(renderData);
+      setPdfRenderDirs(pdfRenderData);
     } catch (error) {
       console.error('Failed to load tests:', error);
     }
@@ -46,8 +49,10 @@ function TestTree({ onTestSelect, selectedTest }) {
     onTestSelect({ category, testFile, testType: testType || 'layout', renderDir });
   }
 
-  function isSelected(category, testFile) {
-    return selectedTest?.category === category && selectedTest?.testFile === testFile;
+  function isSelected(category, testFile, testType) {
+    return selectedTest?.category === category &&
+      selectedTest?.testFile === testFile &&
+      selectedTest?.testType === testType;
   }
 
   const filteredLayoutCategories = layoutCategories.map(cat => {
@@ -66,7 +71,16 @@ function TestTree({ onTestSelect, selectedTest }) {
     return { ...d, tests: filteredTests };
   }).filter(d => d.tests.length > 0);
 
+  const filteredPdfRenderDirs = pdfRenderDirs.map(d => {
+    if (!searchQuery) return d;
+    const filteredTests = d.tests.filter(test =>
+      test.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+    return { ...d, tests: filteredTests };
+  }).filter(d => d.tests.length > 0);
+
   const totalRenderTests = filteredRenderDirs.reduce((sum, d) => sum + d.tests.length, 0);
+  const totalPdfRenderTests = filteredPdfRenderDirs.reduce((sum, d) => sum + d.tests.length, 0);
 
   return (
     <div className="test-tree">
@@ -114,8 +128,54 @@ function TestTree({ onTestSelect, selectedTest }) {
                     {d.tests.map(test => (
                       <div
                         key={test}
-                        className={`test-item ${isSelected('render', test) ? 'selected' : ''}`}
+                        className={`test-item ${isSelected('render', test, 'render') ? 'selected' : ''}`}
                         onClick={() => handleTestSelect('render', test, 'render', d.dir)}
+                      >
+                        <span className="status-icon">⚪</span>
+                        <span className="test-name">{test}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* PDF Render Tests Section */}
+        {totalPdfRenderTests > 0 && (
+          <div className="section">
+            <div
+              className="section-header"
+              onClick={() => toggleSection('pdf-render')}
+            >
+              <span className="expand-icon">
+                {expandedSections.has('pdf-render') ? '▼' : '▶'}
+              </span>
+              <span className="section-name">PDF Render Tests</span>
+              <span className="test-count">({totalPdfRenderTests})</span>
+            </div>
+
+            {expandedSections.has('pdf-render') && filteredPdfRenderDirs.map(d => (
+              <div key={d.dir} className="category">
+                <div
+                  className="category-header"
+                  onClick={() => toggleCategory(`pdf-render:${d.dir}`)}
+                >
+                  <span className="expand-icon">
+                    {expandedCategories.has(`pdf-render:${d.dir}`) ? '▼' : '▶'}
+                  </span>
+                  <span className="category-name">{d.dir}</span>
+                  <span className="test-count">({d.tests.length})</span>
+                </div>
+
+                {expandedCategories.has(`pdf-render:${d.dir}`) && (
+                  <div className="test-list">
+                    {d.tests.map(test => (
+                      <div
+                        key={test}
+                        className={`test-item ${isSelected('pdf-render', test, 'pdf-render') ? 'selected' : ''}`}
+                        onClick={() => handleTestSelect('pdf-render', test, 'pdf-render', d.dir)}
                       >
                         <span className="status-icon">⚪</span>
                         <span className="test-name">{test}</span>
@@ -162,7 +222,7 @@ function TestTree({ onTestSelect, selectedTest }) {
                     {cat.tests.map(test => (
                       <div
                         key={test}
-                        className={`test-item ${isSelected(cat.name, test) ? 'selected' : ''}`}
+                        className={`test-item ${isSelected(cat.name, test, 'layout') ? 'selected' : ''}`}
                         onClick={() => handleTestSelect(cat.name, test, 'layout')}
                       >
                         <span className="status-icon">⚪</span>

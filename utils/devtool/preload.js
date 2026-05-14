@@ -44,6 +44,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   runRenderTest: (testName, renderDir) => ipcRenderer.invoke('run-render-test', testName, renderDir),
   getRenderTestImages: (testName, renderDir) => ipcRenderer.invoke('get-render-test-images', testName, renderDir),
 
+  // PDF render test APIs
+  loadPdfRenderTests: () => ipcRenderer.invoke('load-pdf-render-tests'),
+  runPdfRenderTest: (testName, renderDir) => ipcRenderer.invoke('run-pdf-render-test', testName, renderDir),
+
   // Terminal output listener
   onTerminalOutput: (callback) => {
     ipcRenderer.on('terminal-output', (event, data) => callback(data));
