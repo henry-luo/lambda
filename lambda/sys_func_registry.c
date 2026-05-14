@@ -101,6 +101,8 @@ extern Item edit_array_set(Item array, int64_t index, Item value);
 extern Item edit_array_insert(Item array, int64_t index, Item value);
 extern Item edit_array_delete(Item array, int64_t index);
 extern Item edit_array_append(Item array, Item value);
+extern Item pdf_parse_content_stream(Item bytes);
+extern Item fn_pdf_parse_content_stream(Item bytes);
 extern int edit_commit(const char* description);
 extern bool edit_undo(void);
 extern bool edit_redo(void);
@@ -769,6 +771,10 @@ SysFuncInfo sys_func_defs[] = {
     // editor: push SourceSelection back to live DomSelection (Phase R4 §7.4)
     {SYSPROC_SET_SELECTION, "set_selection", 1, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "pn_set_selection", FPTR(pn_set_selection), NULL, NULL, false, 0},
+
+    // PDF package: native content stream tokenizer for dense vector pages
+    {SYSFUNC_PDF_PARSE_CONTENT_STREAM, "pdf_parse_content_stream", 1, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_pdf_parse_content_stream", FPTR(fn_pdf_parse_content_stream), NULL, NULL, false, 0},
 };
 
 // note: sizeof(sys_func_defs) may fail with incomplete type because the header
@@ -967,6 +973,8 @@ JitImport jit_runtime_imports[] = {
     {"array_push_spread_all", FPTR(array_push_spread_all)},
     {"array_end", FPTR(array_end)},
     {"item_spread", FPTR(item_spread)},
+    {"pdf_parse_content_stream", FPTR(pdf_parse_content_stream)},
+    {"fn_pdf_parse_content_stream", FPTR(fn_pdf_parse_content_stream)},
     // typed array constructors
     {"array_float_new", FPTR(array_float_new)},
     {"array_float_set", FPTR(array_float_set)},

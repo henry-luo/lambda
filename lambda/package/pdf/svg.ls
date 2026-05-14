@@ -19,10 +19,10 @@ pub fn svg_root(view_box: string, width, height, children) {
 }
 
 pub fn svg_pdf_root(view_box: string, width, height, children, pdf) {
+    // keep the signature stable, but do not attach the parsed PDF tree to each page svg
     <svg xmlns: "http://www.w3.org/2000/svg",
          viewBox: view_box,
-         width: util.fmt_num(width), height: util.fmt_num(height),
-         'data-pdf-root': pdf;
+         width: util.fmt_num(width), height: util.fmt_num(height);
         for (c in children) c
     >
 }

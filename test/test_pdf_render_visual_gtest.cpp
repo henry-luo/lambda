@@ -143,6 +143,14 @@ static CommandResult run_command_capture(const char* cmd) {
     return result;
 }
 
+static bool running_full_gtest_suite() {
+    return strcmp(::testing::GTEST_FLAG(filter).c_str(), "*") == 0;
+}
+
+static const char* lambda_no_log_arg() {
+    return running_full_gtest_suite() ? "--no-log " : "";
+}
+
 static bool write_file_all(const char* path, const char* data, size_t len) {
     FILE* fp = fopen(path, "wb");
     if (!fp) return false;
@@ -264,8 +272,8 @@ static bool render_lambda_png_page(const PdfFileInfo* pdf, int page_index, int h
     shell_quote(script_path, qscript, sizeof(qscript));
     shell_quote(out_png, qpng, sizeof(qpng));
     snprintf(cmd, sizeof(cmd),
-             "%s render %s -o %s -vw %d -vh %d --pixel-ratio 1 > %s/%s_page_%02d_render.out 2> %s/%s_page_%02d_render.err",
-             LAMBDA_EXE, qscript, qpng, RENDER_WIDTH, height,
+             "%s render %s%s -o %s -vw %d -vh %d --pixel-ratio 1 > %s/%s_page_%02d_render.out 2> %s/%s_page_%02d_render.err",
+             LAMBDA_EXE, lambda_no_log_arg(), qscript, qpng, RENDER_WIDTH, height,
              PDF_TEMP_DIR, pdf->base, page_index + 1,
              PDF_TEMP_DIR, pdf->base, page_index + 1);
     int status = system(cmd);
