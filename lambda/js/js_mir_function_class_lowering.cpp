@@ -96,6 +96,97 @@ static bool jm_default_param_has_conflicting_direct_eval(JsFunctionNode* fn, JsA
     return false;
 }
 
+static void jm_collect_lexical_decl_names(JsAstNode* node, struct hashmap* names);
+
+static void jm_collect_lexical_decl_statements(JsAstNode* stmt, struct hashmap* names) {
+    for (; stmt; stmt = stmt->next) {
+        jm_collect_lexical_decl_names(stmt, names);
+    }
+}
+
+static void jm_collect_lexical_decl_names(JsAstNode* node, struct hashmap* names) {
+    if (!node || !names) return;
+    switch (node->node_type) {
+    case JS_AST_NODE_VARIABLE_DECLARATION: {
+        JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)node;
+        if (vd->kind != JS_VAR_LET && vd->kind != JS_VAR_CONST) return;
+        for (JsAstNode* decl = vd->declarations; decl; decl = decl->next) {
+            if (decl->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
+            jm_collect_pattern_names(((JsVariableDeclaratorNode*)decl)->id, names);
+        }
+        break;
+    }
+    case JS_AST_NODE_BLOCK_STATEMENT:
+        jm_collect_lexical_decl_statements(((JsBlockNode*)node)->statements, names);
+        break;
+    case JS_AST_NODE_IF_STATEMENT: {
+        JsIfNode* in = (JsIfNode*)node;
+        jm_collect_lexical_decl_names(in->consequent, names);
+        jm_collect_lexical_decl_names(in->alternate, names);
+        break;
+    }
+    case JS_AST_NODE_WHILE_STATEMENT:
+        jm_collect_lexical_decl_names(((JsWhileNode*)node)->body, names);
+        break;
+    case JS_AST_NODE_DO_WHILE_STATEMENT:
+        jm_collect_lexical_decl_names(((JsDoWhileNode*)node)->body, names);
+        break;
+    case JS_AST_NODE_FOR_STATEMENT: {
+        JsForNode* fn = (JsForNode*)node;
+        jm_collect_lexical_decl_names(fn->init, names);
+        jm_collect_lexical_decl_names(fn->body, names);
+        break;
+    }
+    case JS_AST_NODE_FOR_IN_STATEMENT:
+    case JS_AST_NODE_FOR_OF_STATEMENT: {
+        JsForOfNode* fo = (JsForOfNode*)node;
+        jm_collect_lexical_decl_names(fo->left, names);
+        jm_collect_lexical_decl_names(fo->body, names);
+        break;
+    }
+    case JS_AST_NODE_SWITCH_STATEMENT: {
+        JsSwitchNode* sw = (JsSwitchNode*)node;
+        for (JsAstNode* c = sw->cases; c; c = c->next) {
+            if (c->node_type == JS_AST_NODE_SWITCH_CASE) {
+                jm_collect_lexical_decl_statements(((JsSwitchCaseNode*)c)->consequent, names);
+            }
+        }
+        break;
+    }
+    case JS_AST_NODE_TRY_STATEMENT: {
+        JsTryNode* tn = (JsTryNode*)node;
+        jm_collect_lexical_decl_names(tn->block, names);
+        jm_collect_lexical_decl_names(tn->handler, names);
+        jm_collect_lexical_decl_names(tn->finalizer, names);
+        break;
+    }
+    case JS_AST_NODE_CATCH_CLAUSE:
+        jm_collect_lexical_decl_names(((JsCatchNode*)node)->body, names);
+        break;
+    case JS_AST_NODE_LABELED_STATEMENT:
+        jm_collect_lexical_decl_names(((JsLabeledStatementNode*)node)->body, names);
+        break;
+    default:
+        break;
+    }
+}
+
+static bool jm_capture_is_nfe_binding(JsMirTranspiler* mt, JsFuncCollected* fc, const char* name) {
+    if (!mt || !fc || !name) return false;
+    int idx = (int)(fc - mt->func_entries);
+    while (idx >= 0 && idx < mt->func_count) {
+        JsFuncCollected* cur = &mt->func_entries[idx];
+        JsFunctionNode* fn = cur->node;
+        if (fn && fn->base.node_type == JS_AST_NODE_FUNCTION_EXPRESSION && fn->name && fn->name->chars) {
+            char self_name[128];
+            snprintf(self_name, sizeof(self_name), "_js_%.*s", (int)fn->name->len, fn->name->chars);
+            if (strcmp(name, self_name) == 0) return true;
+        }
+        idx = cur->parent_index;
+    }
+    return false;
+}
+
 static MIR_reg_t jm_transpile_default_param_value(JsMirTranspiler* mt, JsFunctionNode* fn, JsAstNode* expr) {
     if (jm_default_param_has_conflicting_direct_eval(fn, expr)) {
         MIR_reg_t msg = jm_box_string_literal(mt, "Invalid direct eval var declaration in parameter initializer", 56);
@@ -412,6 +503,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         struct hashmap* gen_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
             jm_name_hash, jm_name_cmp, NULL, NULL);
         if (fn->body) jm_collect_body_locals(fn->body, gen_locals);  // generators need all locals for state machine
+        struct hashmap* gen_lexicals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+            jm_name_hash, jm_name_cmp, NULL, NULL);
+        if (fn->body) jm_collect_lexical_decl_names(fn->body, gen_lexicals);
 
         // Also collect destructured param variable names so they get env slots.
         // These variables are created during param destructuring in state 0 and
@@ -478,6 +572,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         MIR_reg_t saved_scope_env_reg_sm = mt->scope_env_reg;
         int saved_scope_env_slot_sm = mt->scope_env_slot_count;
         int saved_func_index_sm = mt->current_func_index;
+        MIR_reg_t saved_eval_local_frame_reg_sm = mt->eval_local_frame_reg;
         bool saved_in_generator = mt->in_generator;
 
         if (jm_has_use_strict_directive(fn)) {
@@ -497,6 +592,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->scope_env_slot_count = 0;
         mt->current_func_index = (int)(fc - mt->func_entries);
         mt->func_except_label = 0;  // reset for generator state machine
+        mt->eval_local_frame_reg = 0;
 
         // Set up generator state
         mt->in_generator = true;
@@ -510,6 +606,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->gen_active_iterator_slot = gen_active_iterator_slot;
 
         jm_push_scope(mt);
+        mt->eval_local_frame_reg = jm_new_reg(mt, "eval_local_frame", MIR_T_I64);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, mt->eval_local_frame_reg),
+            MIR_new_int_op(mt->ctx, 0)));
 
         // Get parameters from function signature
         mt->gen_env_reg = MIR_reg(mt->ctx, "gen_env", sm_func);
@@ -683,6 +783,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             MIR_reg_t pb_result = jm_call_2(mt, "js_gen_yield_result", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, pundef),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)1));
+            jm_emit_eval_local_pop_if_needed(mt);
             jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, pb_result)));
 
             // State 1 label: body execution starts here (on first .next() call)
@@ -742,6 +843,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             entry.var.env_slot = cap_offset + ci;
             entry.var.env_reg = mt->gen_env_reg;
             entry.var.typed_array_type = -1;
+            entry.var.is_nfe_binding = fc->captures[ci].is_nfe_binding ||
+                jm_capture_is_nfe_binding(mt, fc, fc->captures[ci].name);
             if (fc->captures[ci].is_let_const) {
                 entry.var.tdz_active = true;
                 entry.var.is_let_const = true;
@@ -809,6 +912,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     entry.var.env_reg = mt->gen_env_reg;
                     entry.var.typed_array_type = -1;
                     entry.var.from_hoist = true;
+                    if (hashmap_get(gen_lexicals, ns)) {
+                        entry.var.is_let_const = true;
+                    }
                     hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
                     li++;
                 }
@@ -890,13 +996,18 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             if (fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
                 JsBlockNode* blk = (JsBlockNode*)fn->body;
                 JsAstNode* s = blk->statements;
-                while (s) { jm_transpile_statement(mt, s); s = s->next; }
+                while (s) {
+                    jm_transpile_statement(mt, s);
+                    jm_emit_exc_propagate_check(mt);
+                    s = s->next;
+                }
             } else {
                 MIR_reg_t val = jm_transpile_box_item(mt, fn->body);
                 // Arrow-body generator (unusual, but handle it)
                 MIR_reg_t done_result = jm_call_2(mt, "js_gen_yield_result", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, val),
                     MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)-1));
+                jm_emit_eval_local_pop_if_needed(mt);
                 jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, done_result)));
                 goto gen_sm_finish;
             }
@@ -916,6 +1027,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             MIR_reg_t done_result = jm_call_2(mt, "js_gen_yield_result", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, undef_val),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)-1));
+            jm_emit_eval_local_pop_if_needed(mt);
             jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, done_result)));
         }
 
@@ -924,6 +1036,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         if (mt->func_except_label) {
             jm_emit_label(mt, mt->func_except_label);
             MIR_reg_t exc_ret = jm_emit_null(mt);
+            jm_emit_eval_local_pop_if_needed(mt);
             jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, exc_ret)));
         }
         jm_pop_scope(mt);
@@ -940,8 +1053,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->scope_env_reg = saved_scope_env_reg_sm;
         mt->scope_env_slot_count = saved_scope_env_slot_sm;
         mt->current_func_index = saved_func_index_sm;
+        mt->eval_local_frame_reg = saved_eval_local_frame_reg_sm;
         mt->in_generator = saved_in_generator;
 
+        hashmap_free(gen_lexicals);
         hashmap_free(gen_locals);
 
         log_debug("js-mir: generated generator state machine %s (yields: %d, env slots: %d)",
@@ -2068,6 +2183,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     entry.var.env_reg = env_reg;
                 }
                 entry.var.typed_array_type = -1;  // not a typed array by default
+                entry.var.is_nfe_binding = fc->captures[i].is_nfe_binding ||
+                    jm_capture_is_nfe_binding(mt, fc, fc->captures[i].name);
                 // v29 TDZ: Mark captured let/const variables so js_check_tdz is
                 // emitted when reading them. The TDZ sentinel may be in the env
                 // if the variable hasn't been initialized yet.

@@ -46,33 +46,39 @@ fn new_state(fonts_resolved) {
         path:  path.new_state(),
                 fonts: fonts_resolved,
                 fill_cs: "DeviceRGB",
-                stroke_cs: "DeviceRGB"
+                stroke_cs: "DeviceRGB",
+                soft_mask: null
     }
 }
 
 fn _with_text(st, t) {
         { ctm: st.ctm, text: t, path: st.path, fonts: st.fonts,
-            fill_cs: st.fill_cs, stroke_cs: st.stroke_cs }
+            fill_cs: st.fill_cs, stroke_cs: st.stroke_cs, soft_mask: st.soft_mask }
 }
 
 fn _with_path(st, p) {
         { ctm: st.ctm, text: st.text, path: p, fonts: st.fonts,
-            fill_cs: st.fill_cs, stroke_cs: st.stroke_cs }
+            fill_cs: st.fill_cs, stroke_cs: st.stroke_cs, soft_mask: st.soft_mask }
 }
 
 fn _with_ctm(st, m) {
         { ctm: m, text: st.text, path: st.path, fonts: st.fonts,
-            fill_cs: st.fill_cs, stroke_cs: st.stroke_cs }
+            fill_cs: st.fill_cs, stroke_cs: st.stroke_cs, soft_mask: st.soft_mask }
 }
 
 fn _with_fill_cs(st, cs) {
         { ctm: st.ctm, text: st.text, path: st.path, fonts: st.fonts,
-            fill_cs: cs, stroke_cs: st.stroke_cs }
+            fill_cs: cs, stroke_cs: st.stroke_cs, soft_mask: st.soft_mask }
 }
 
 fn _with_stroke_cs(st, cs) {
         { ctm: st.ctm, text: st.text, path: st.path, fonts: st.fonts,
-            fill_cs: st.fill_cs, stroke_cs: cs }
+            fill_cs: st.fill_cs, stroke_cs: cs, soft_mask: st.soft_mask }
+}
+
+fn _with_soft_mask(st, soft_mask) {
+    { ctm: st.ctm, text: st.text, path: st.path, fonts: st.fonts,
+      fill_cs: st.fill_cs, stroke_cs: st.stroke_cs, soft_mask: soft_mask }
 }
 
 fn _with_clip(st, id) {
@@ -88,7 +94,8 @@ fn _initial_run_state(fonts, init_ctm, inherited_st) {
             path:  path.clear_current_path(inherited_st.path),
             fonts: fonts,
             fill_cs: inherited_st.fill_cs,
-            stroke_cs: inherited_st.stroke_cs
+            stroke_cs: inherited_st.stroke_cs,
+            soft_mask: inherited_st.soft_mask
         }
     }
 }
@@ -105,7 +112,8 @@ fn _restore_state(saved) {
         path:  saved.path,
         fonts: saved.fonts,
         fill_cs: saved.fill_cs,
-        stroke_cs: saved.stroke_cs
+        stroke_cs: saved.stroke_cs,
+        soft_mask: saved.soft_mask
     }
 }
 
@@ -160,7 +168,9 @@ fn _runtime_font_info(info) {
             encoding:   info.encoding,
             widths:     info.widths,
             first_char: info.first_char,
-            last_char:  info.last_char
+            last_char:  info.last_char,
+            cid_widths: info.cid_widths,
+            default_width: info.default_width
         }
     }
 }
@@ -329,6 +339,121 @@ fn _alpha_of(d, key, fallback) {
     else { fallback }
 }
 
+fn _clamp_unit(v) {
+    if (v < 0.0) { 0.0 }
+    else if (v > 1.0) { 1.0 }
+    else { v }
+}
+
+fn _first_component(v, fallback) {
+    if (v is array and len(v) >= 1) { util.num(v[0]) }
+    else if (v is int or v is float) { util.num(v) }
+    else { fallback }
+}
+
+fn _function_mid_gray(pdf, fn_ref) {
+    let func = resolve.deref(pdf, fn_ref)
+    if (func == null) { 1.0 }
+    else {
+        let c0 = _first_component(func.C0, 0.0)
+        let c1 = _first_component(func.C1, 1.0)
+        _clamp_unit((c0 + c1) / 2.0)
+    }
+}
+
+fn _first_shading_name_loop(ops, i, n) {
+    if (i >= n) { null }
+    else {
+        let op = ops[i]
+        if (op.op == "sh" and len(op.operands) >= 1 and
+                op.operands[0] is map and op.operands[0].kind == "name") {
+            op.operands[0].value
+        }
+        else { _first_shading_name_loop(ops, i + 1, n) }
+    }
+}
+
+fn _first_shading_name(bytes) {
+    let ops = stream.parse_content_stream(bytes)
+    _first_shading_name_loop(ops, 0, len(ops))
+}
+
+fn _soft_mask_group_opacity(pdf, group) {
+    let dict = if (group and group.dictionary) { group.dictionary } else { group }
+    let bytes = if (group and group.text_data != null) { group.text_data }
+                else if (group and group.data != null) { group.data }
+                else { "" }
+    let nm = _first_shading_name(bytes)
+    let table = if (dict and dict.Resources and dict.Resources.Shading) { dict.Resources.Shading } else { null }
+    let sh = if (nm != null and table != null) { resolve.deref(pdf, table[nm]) } else { null }
+    if (sh != null and sh.Function != null) { _function_mid_gray(pdf, sh.Function) }
+    else { 1.0 }
+}
+
+fn _soft_mask_group_linear(pdf, group) {
+    let dict = if (group and group.dictionary) { group.dictionary } else { group }
+    let bytes = if (group and group.text_data != null) { group.text_data }
+                else if (group and group.data != null) { group.data }
+                else { "" }
+    let nm = _first_shading_name(bytes)
+    let table = if (dict and dict.Resources and dict.Resources.Shading) { dict.Resources.Shading } else { null }
+    let sh = if (nm != null and table != null) { resolve.deref(pdf, table[nm]) } else { null }
+    if (sh != null and sh.ShadingType == 2 and sh.Function != null and sh.Coords is array and len(sh.Coords) >= 4) {
+        let func = resolve.deref(pdf, sh.Function)
+        if (func != null) {
+            {
+                kind: "axial_gray",
+                x0: util.num(sh.Coords[0]),
+                y0: util.num(sh.Coords[1]),
+                x1: util.num(sh.Coords[2]),
+                y1: util.num(sh.Coords[3]),
+                a0: _clamp_unit(_first_component(func.C0, 0.0)),
+                a1: _clamp_unit(_first_component(func.C1, 1.0))
+            }
+        }
+        else { null }
+    }
+    else { null }
+}
+
+fn _soft_mask_raw(pdf, d) {
+    if (d) { d.SMask } else { null }
+}
+
+fn _soft_mask_linear(pdf, d) {
+    let raw = _soft_mask_raw(pdf, d)
+    if (raw == null or (raw is string and raw == "None")) { null }
+    else {
+        let sm = resolve.deref(pdf, raw)
+        if (sm == null) { null }
+        else {
+            let subtype = if (sm.S != null) { string(sm.S) } else { "" }
+            let group = if (sm.G != null) { resolve.deref(pdf, sm.G) } else { null }
+            if ((subtype == "Luminosity" or subtype == "Alpha") and group != null) {
+                _soft_mask_group_linear(pdf, group)
+            }
+            else { null }
+        }
+    }
+}
+
+fn _soft_mask_opacity(pdf, d) {
+    let raw = _soft_mask_raw(pdf, d)
+    if (raw == null or (raw is string and raw == "None")) { 1.0 }
+    else {
+        let sm = resolve.deref(pdf, raw)
+        if (sm == null) { 1.0 }
+        else {
+            let subtype = if (sm.S != null) { string(sm.S) } else { "" }
+            let group = if (sm.G != null) { resolve.deref(pdf, sm.G) } else { null }
+            if ((subtype == "Luminosity" or subtype == "Alpha") and group != null) {
+                _soft_mask_group_opacity(pdf, group)
+            }
+            else { 1.0 }
+        }
+    }
+}
+
 fn _num_of(d, key, fallback) {
     let v = if (d) d[key] else null
     if (v is float) { v }
@@ -378,11 +503,13 @@ fn _apply_gs(st, ops, pdf, page) {
         let d = _ext_gstate_dict(pdf, page, nm)
         if (d == null) { st }
         else {
-            let fa = _alpha_of(d, "ca", st.path.fill_opacity)
-            let sa = _alpha_of(d, "CA", st.path.stroke_opacity)
+            let sm = _soft_mask_linear(pdf, d)
+            let ma = if (sm != null) { 1.0 } else { _soft_mask_opacity(pdf, d) }
+            let fa = _clamp_unit(_alpha_of(d, "ca", st.path.fill_opacity) * ma)
+            let sa = _clamp_unit(_alpha_of(d, "CA", st.path.stroke_opacity) * ma)
             let p1 = path.set_opacity(st.path, fa, sa)
             let p2 = _apply_gs_line_state(p1, d)
-            let st1 = _with_path(st, p2)
+            let st1 = _with_soft_mask(_with_path(st, p2), sm)
             _with_text(st1, text.set_opacity(st1.text, fa, sa))
         }
     }
@@ -550,13 +677,19 @@ fn _is_clip_def(el) {
     else { string(name(el)) == "clipPath" }
 }
 
-fn _is_transparency_group(fc) {
-    if (fc == null or fc.dict == null or fc.dict.Group == null) { false }
-    else { fc.dict.Group.S == "Transparency" }
+fn _form_group_dict(pdf, fc) {
+    if (fc == null or fc.dict == null or fc.dict.Group == null) { null }
+    else { resolve.deref(pdf, fc.dict.Group) }
 }
 
-fn _form_group_opacity(st, fc) {
-    if (not _is_transparency_group(fc)) { 1.0 }
+fn _is_transparency_group(pdf, fc) {
+    let g = _form_group_dict(pdf, fc)
+    if (g == null) { false }
+    else { g.S == "Transparency" }
+}
+
+fn _form_group_opacity(pdf, st, fc) {
+    if (not _is_transparency_group(pdf, fc)) { 1.0 }
     else if (st.path.fill_opacity < 1.0) { st.path.fill_opacity }
     else if (st.path.stroke_opacity < 1.0) { st.path.stroke_opacity }
     else { 1.0 }
@@ -593,8 +726,8 @@ fn _form_page(page, fc) {
     }
 }
 
-fn _form_child_state(st, fc) {
-    if (_form_group_opacity(st, fc) < 1.0) {
+fn _form_child_state(pdf, st, fc) {
+    if (_form_group_opacity(pdf, st, fc) < 1.0) {
         _with_path(st, path.set_opacity(st.path, 1.0, 1.0))
     }
     else { st }
@@ -666,27 +799,57 @@ fn _append_all(a, b) {
 }
 
 fn _initial_ctx(fonts, init_ctm, inherited_st) {
+    _ctx(_initial_run_state(fonts, init_ctm, inherited_st), [], [], [], " ", "nonzero", 0, [],
+         " ", " ", 0, 0, 0, [])
+}
+
+fn _ctx(st, stack, texts, paths, pending_clip_d, pending_clip_rule, has_pending_clip,
+        active_clip_ids, fill_pattern_name, fill_pattern_id, has_fill_pattern,
+        fill_pattern_emitted, def_ctr, emitted_pattern_ids) {
     {
-        st: _initial_run_state(fonts, init_ctm, inherited_st),
-        stack: [],
-        texts: [],
-        paths: [],
-        pending_clip_d: " ",
-        pending_clip_rule: "nonzero",
-        has_pending_clip: 0,
-        active_clip_ids: [],
-        fill_pattern_name: " ",
-        fill_pattern_id: " ",
-        has_fill_pattern: 0,
-        fill_pattern_emitted: 0,
-        def_ctr: 0,
-        emitted_pattern_ids: []
+        st: st,
+        stack: stack,
+        texts: texts,
+        paths: paths,
+        pending_clip_d: pending_clip_d,
+        pending_clip_rule: pending_clip_rule,
+        has_pending_clip: has_pending_clip,
+        active_clip_ids: active_clip_ids,
+        fill_pattern_name: fill_pattern_name,
+        fill_pattern_id: fill_pattern_id,
+        has_fill_pattern: has_fill_pattern,
+        fill_pattern_emitted: fill_pattern_emitted,
+        def_ctr: def_ctr,
+        emitted_pattern_ids: emitted_pattern_ids
     }
 }
 
+fn _ctx_with_st(ctx, st) {
+    _ctx(st, ctx.stack, ctx.texts, ctx.paths, ctx.pending_clip_d, ctx.pending_clip_rule,
+         ctx.has_pending_clip, ctx.active_clip_ids, ctx.fill_pattern_name, ctx.fill_pattern_id,
+         ctx.has_fill_pattern, ctx.fill_pattern_emitted, ctx.def_ctr, ctx.emitted_pattern_ids)
+}
+
+fn _ctx_with_texts(ctx, st, texts) {
+    _ctx(st, ctx.stack, texts, ctx.paths, ctx.pending_clip_d, ctx.pending_clip_rule,
+         ctx.has_pending_clip, ctx.active_clip_ids, ctx.fill_pattern_name, ctx.fill_pattern_id,
+         ctx.has_fill_pattern, ctx.fill_pattern_emitted, ctx.def_ctr, ctx.emitted_pattern_ids)
+}
+
+fn _ctx_with_paths(ctx, paths) {
+    _ctx(ctx.st, ctx.stack, ctx.texts, paths, ctx.pending_clip_d, ctx.pending_clip_rule,
+         ctx.has_pending_clip, ctx.active_clip_ids, ctx.fill_pattern_name, ctx.fill_pattern_id,
+         ctx.has_fill_pattern, ctx.fill_pattern_emitted, ctx.def_ctr, ctx.emitted_pattern_ids)
+}
+
+fn _ctx_with_stack(ctx, stack) {
+    _ctx(ctx.st, stack, ctx.texts, ctx.paths, ctx.pending_clip_d, ctx.pending_clip_rule,
+         ctx.has_pending_clip, ctx.active_clip_ids, ctx.fill_pattern_name, ctx.fill_pattern_id,
+         ctx.has_fill_pattern, ctx.fill_pattern_emitted, ctx.def_ctr, ctx.emitted_pattern_ids)
+}
+
 fn _push_graphics_state(ctx) {
-    { *: ctx,
-      stack: ctx.stack ++ [{
+    _ctx_with_stack(ctx, ctx.stack ++ [{
           st: ctx.st,
           pending_clip_d: ctx.pending_clip_d,
           pending_clip_rule: ctx.pending_clip_rule,
@@ -698,7 +861,7 @@ fn _push_graphics_state(ctx) {
           fill_pattern_emitted: ctx.fill_pattern_emitted,
           fill_cs: ctx.st.fill_cs,
           stroke_cs: ctx.st.stroke_cs
-      }] }
+      }])
 }
 
 fn _pop_graphics_state(ctx) {
@@ -709,17 +872,10 @@ fn _pop_graphics_state(ctx) {
         let restored0 = _restore_state(saved.st)
         let restored1 = _with_fill_cs(restored0, saved.fill_cs)
         let restored2 = _with_stroke_cs(restored1, saved.stroke_cs)
-        { *: ctx,
-          st: restored2,
-          stack: (for (k, v in ctx.stack where k < (m - 1)) v),
-          pending_clip_d: saved.pending_clip_d,
-          pending_clip_rule: saved.pending_clip_rule,
-          has_pending_clip: saved.has_pending_clip,
-          active_clip_ids: saved.active_clip_ids,
-          fill_pattern_name: saved.fill_pattern_name,
-          fill_pattern_id: saved.fill_pattern_id,
-          has_fill_pattern: saved.has_fill_pattern,
-          fill_pattern_emitted: saved.fill_pattern_emitted }
+           _ctx(restored2, (for (k, v in ctx.stack where k < (m - 1)) v), ctx.texts, ctx.paths,
+               saved.pending_clip_d, saved.pending_clip_rule, saved.has_pending_clip,
+               saved.active_clip_ids, saved.fill_pattern_name, saved.fill_pattern_id,
+               saved.has_fill_pattern, saved.fill_pattern_emitted, ctx.def_ctr, ctx.emitted_pattern_ids)
     }
 }
 
@@ -729,31 +885,37 @@ fn _step_color(ctx, opr, operands, pdf, page, clip_prefix) {
         let pid = clip_prefix ++ "pat" ++ string(ctx.def_ctr)
         let pat = { defs: [], fill: "url(#" ++ pid ++ ")" }
         if (opr == "scn") {
-            { *: ctx,
-              st: _set_pattern_fill(ctx.st, pat),
-              def_ctr: ctx.def_ctr + 1,
-              fill_pattern_name: pattern_nm,
-              fill_pattern_id: pid,
-              has_fill_pattern: 1,
-              fill_pattern_emitted: 0 }
+            _ctx(_set_pattern_fill(ctx.st, pat), ctx.stack, ctx.texts, ctx.paths,
+                 ctx.pending_clip_d, ctx.pending_clip_rule, ctx.has_pending_clip,
+                 ctx.active_clip_ids, pattern_nm, pid, 1, 0, ctx.def_ctr + 1,
+                 ctx.emitted_pattern_ids)
         }
         else {
-            { *: ctx, st: _set_pattern_stroke(ctx.st, pat), def_ctr: ctx.def_ctr + 1 }
+            _ctx(_set_pattern_stroke(ctx.st, pat), ctx.stack, ctx.texts, ctx.paths,
+                 ctx.pending_clip_d, ctx.pending_clip_rule, ctx.has_pending_clip,
+                 ctx.active_clip_ids, ctx.fill_pattern_name, ctx.fill_pattern_id,
+                 ctx.has_fill_pattern, ctx.fill_pattern_emitted, ctx.def_ctr + 1,
+                 ctx.emitted_pattern_ids)
         }
     }
     else {
         let next_st = _apply_color(ctx.st, opr, operands, pdf, page)
         if (opr == "rg" or opr == "g" or opr == "k" or opr == "sc") {
-            { *: ctx, st: next_st, has_fill_pattern: 0, fill_pattern_emitted: 0 }
+            _ctx(next_st, ctx.stack, ctx.texts, ctx.paths, ctx.pending_clip_d,
+                 ctx.pending_clip_rule, ctx.has_pending_clip, ctx.active_clip_ids,
+                 ctx.fill_pattern_name, ctx.fill_pattern_id, 0, 0, ctx.def_ctr,
+                 ctx.emitted_pattern_ids)
         }
-        else { { *: ctx, st: next_st } }
+        else { _ctx_with_st(ctx, next_st) }
     }
 }
 
 fn _step_pending_clip(ctx, rule) {
     let d = path.current_path_d(ctx.st.path)
     if (d != "" and len(d) > 0) {
-        { *: ctx, pending_clip_d: d, pending_clip_rule: rule, has_pending_clip: 1 }
+        _ctx(ctx.st, ctx.stack, ctx.texts, ctx.paths, d, rule, 1, ctx.active_clip_ids,
+             ctx.fill_pattern_name, ctx.fill_pattern_id, ctx.has_fill_pattern,
+             ctx.fill_pattern_emitted, ctx.def_ctr, ctx.emitted_pattern_ids)
     }
     else { ctx }
 }
@@ -764,7 +926,9 @@ fn _step_shading(ctx, operands, pdf, page) {
     let paths1 = _append_all(ctx.paths, s.defs)
     let paths2 = if (len(s.emit) > 0) { paths1 ++ _wrap_emit_with_ctm(s.emit, ctx.st.ctm, ctx.active_clip_ids) }
                  else { paths1 }
-    { *: ctx, paths: paths2, def_ctr: ctx.def_ctr + 1 }
+    _ctx(ctx.st, ctx.stack, ctx.texts, paths2, ctx.pending_clip_d, ctx.pending_clip_rule,
+         ctx.has_pending_clip, ctx.active_clip_ids, ctx.fill_pattern_name, ctx.fill_pattern_id,
+         ctx.has_fill_pattern, ctx.fill_pattern_emitted, ctx.def_ctr + 1, ctx.emitted_pattern_ids)
 }
 
 fn _partition_defs(paths, i, n, defs, draws) {
@@ -791,8 +955,8 @@ fn _step_do(ctx, operands, i, pdf, page, fonts, page_h, clip_prefix) {
         let form_page = _form_page(page, fc)
         let form_fonts = _resolve_fonts(pdf, form_page, form_ops) ++ fonts
         let sub_prefix = _clip_prefix_for_do(clip_prefix, operands, i)
-        let group_opacity = _form_group_opacity(ctx.st, fc)
-        let child_st = _form_child_state(ctx.st, fc)
+        let group_opacity = _form_group_opacity(pdf, ctx.st, fc)
+        let child_st = _form_child_state(pdf, ctx.st, fc)
         let sub = _run_ops_with_state(pdf, form_page, form_ops, form_ctm, form_fonts, page_h, sub_prefix, child_st)
         let parts = _partition_defs(sub.paths, 0, len(sub.paths), [], [])
         let paths1 = _append_all(ctx.paths, parts.defs)
@@ -801,13 +965,16 @@ fn _step_do(ctx, operands, i, pdf, page, fonts, page_h, clip_prefix) {
             paths1 ++ _wrap_emit_with_ctm([grouped], util.IDENTITY, ctx.active_clip_ids)
         }
         else { paths1 }
-        { *: ctx, texts: _append_all(ctx.texts, sub.texts), paths: paths2 }
+           _ctx(ctx.st, ctx.stack, _append_all(ctx.texts, sub.texts), paths2,
+               ctx.pending_clip_d, ctx.pending_clip_rule, ctx.has_pending_clip,
+               ctx.active_clip_ids, ctx.fill_pattern_name, ctx.fill_pattern_id,
+               ctx.has_fill_pattern, ctx.fill_pattern_emitted, ctx.def_ctr,
+               ctx.emitted_pattern_ids)
     }
     else {
         let imgs = image.apply_do(pdf, page, ctx.st.ctm, operands)
         if (len(imgs) > 0) {
-            { *: ctx,
-              paths: _append_image_wraps(ctx.paths, imgs, 0, len(imgs), ctx.st.path.fill_opacity, ctx.active_clip_ids) }
+                        _ctx_with_paths(ctx, _append_image_wraps(ctx.paths, imgs, 0, len(imgs), ctx.st.path.fill_opacity, ctx.active_clip_ids))
         }
         else { ctx }
     }
@@ -828,33 +995,44 @@ fn _clip_element(cid, pending_clip_rule, pending_clip_d, clip_xform) {
 
 fn _step_path_emit_pattern(ctx, pdf, page) {
     if (ctx.has_fill_pattern == 1 and ctx.fill_pattern_emitted == 0 and not _list_contains(ctx.emitted_pattern_ids, ctx.fill_pattern_id)) {
-        let pat = shading.from_pattern_fill(pdf, page, ctx.fill_pattern_name, ctx.fill_pattern_id, ctx.st.ctm)
-        { *: ctx,
-          paths: _append_all(ctx.paths, pat.defs),
-          emitted_pattern_ids: ctx.emitted_pattern_ids ++ [ctx.fill_pattern_id],
-          fill_pattern_emitted: 1 }
+        let pat = if (ctx.st.soft_mask != null and ctx.st.soft_mask.kind == "axial_gray") {
+            shading.from_pattern_fill_with_alpha(pdf, page, ctx.fill_pattern_name, ctx.fill_pattern_id, ctx.st.ctm, ctx.st.soft_mask)
+        }
+        else { shading.from_pattern_fill(pdf, page, ctx.fill_pattern_name, ctx.fill_pattern_id, ctx.st.ctm) }
+        let st1 = _set_pattern_fill(ctx.st, pat)
+           _ctx(st1, ctx.stack, ctx.texts, _append_all(ctx.paths, pat.defs),
+               ctx.pending_clip_d, ctx.pending_clip_rule, ctx.has_pending_clip,
+               ctx.active_clip_ids, ctx.fill_pattern_name, ctx.fill_pattern_id,
+               ctx.has_fill_pattern, 1, ctx.def_ctr,
+               ctx.emitted_pattern_ids ++ [ctx.fill_pattern_id])
     }
     else { ctx }
 }
 
+fn _path_uses_fill(opr) {
+    ((opr == "f") or (opr == "F") or (opr == "f*") or
+     (opr == "B") or (opr == "B*") or (opr == "b") or (opr == "b*"))
+}
+
 fn _step_path(ctx, opr, operands, pdf, page, clip_prefix) {
-    let pr = path.apply_op(ctx.st.path, opr, operands)
-    let st1 = _with_path(ctx.st, pr.state)
+    let ctx0 = if (_path_uses_fill(opr)) { _step_path_emit_pattern(ctx, pdf, page) } else { ctx }
+    let pr = path.apply_op(ctx0.st.path, opr, operands)
+    let st1 = _with_path(ctx0.st, pr.state)
     let did_paint = (len(pr.emit) > 0) or (opr == "n")
-    let ctx1 = { *: ctx, st: st1 }
-    let ctx2 = if (did_paint and ctx.has_pending_clip == 1) {
-        let cid = clip_prefix ++ string(ctx.def_ctr)
+    let ctx1 = _ctx_with_st(ctx0, st1)
+    let ctx2 = if (did_paint and ctx0.has_pending_clip == 1) {
+        let cid = clip_prefix ++ string(ctx0.def_ctr)
         let cp = _clip_element(cid, ctx.pending_clip_rule, ctx.pending_clip_d, util.fmt_matrix(st1.ctm))
-        { *: ctx1,
-          paths: ctx1.paths ++ [cp],
-          active_clip_ids: ctx.active_clip_ids ++ [cid],
-          has_pending_clip: 0,
-          def_ctr: ctx.def_ctr + 1 }
+        _ctx(ctx1.st, ctx1.stack, ctx1.texts, ctx1.paths ++ [cp],
+             ctx1.pending_clip_d, ctx1.pending_clip_rule, 0,
+             ctx0.active_clip_ids ++ [cid], ctx1.fill_pattern_name, ctx1.fill_pattern_id,
+             ctx1.has_fill_pattern, ctx1.fill_pattern_emitted, ctx0.def_ctr + 1,
+             ctx1.emitted_pattern_ids)
     }
     else { ctx1 }
     if (len(pr.emit) > 0) {
-        let ctx3 = _step_path_emit_pattern(ctx2, pdf, page)
-        { *: ctx3, paths: ctx3.paths ++ _wrap_emit_with_ctm(pr.emit, ctx3.st.ctm, ctx3.active_clip_ids) }
+        let base_emit = _wrap_emit_with_ctm(pr.emit, ctx2.st.ctm, ctx2.active_clip_ids)
+        _ctx_with_paths(ctx2, ctx2.paths ++ base_emit)
     }
     else { ctx2 }
 }
@@ -864,14 +1042,14 @@ fn _run_ops_step(ctx, op, i, pdf, page, fonts, page_h, clip_prefix) {
     let operands = op.operands
     if (opr == "q") { _push_graphics_state(ctx) }
     else if (opr == "Q") { _pop_graphics_state(ctx) }
-    else if (opr == "cm") { { *: ctx, st: _op_cm(ctx.st, operands) } }
-    else if (opr == "Tf") { { *: ctx, st: _op_Tf(ctx.st, operands) } }
+    else if (opr == "cm") { _ctx_with_st(ctx, _op_cm(ctx.st, operands)) }
+    else if (opr == "Tf") { _ctx_with_st(ctx, _op_Tf(ctx.st, operands)) }
     else if (_is_text_op(opr)) {
         let tr = text.apply_op(ctx.st.text, ctx.st.ctm, opr, operands, page_h)
-        { *: ctx, st: _with_text(ctx.st, tr.state), texts: _append_all(ctx.texts, if (tr.emit == null) [] else tr.emit) }
+        _ctx_with_texts(ctx, _with_text(ctx.st, tr.state), _append_all(ctx.texts, if (tr.emit == null) [] else tr.emit))
     }
     else if (_is_color_op(opr)) { _step_color(ctx, opr, operands, pdf, page, clip_prefix) }
-    else if (opr == "gs") { { *: ctx, st: _apply_gs(ctx.st, operands, pdf, page) } }
+    else if (opr == "gs") { _ctx_with_st(ctx, _apply_gs(ctx.st, operands, pdf, page)) }
     else if (opr == "W") { _step_pending_clip(ctx, "nonzero") }
     else if (opr == "W*") { _step_pending_clip(ctx, "evenodd") }
     else if (opr == "sh") { _step_shading(ctx, operands, pdf, page) }
@@ -881,7 +1059,7 @@ fn _run_ops_step(ctx, op, i, pdf, page, fonts, page_h, clip_prefix) {
         let imgs = image.apply_inline_with_page(pdf, page, ctx.st.ctm, operands)
         if (len(imgs) > 0) {
             let img_emit = _image_opacity_group(imgs, ctx.st.path.fill_opacity)
-            { *: ctx, paths: ctx.paths ++ _wrap_emit_with_ctm(img_emit, ctx.st.ctm, ctx.active_clip_ids) }
+            _ctx_with_paths(ctx, ctx.paths ++ _wrap_emit_with_ctm(img_emit, ctx.st.ctm, ctx.active_clip_ids))
         }
         else { ctx }
     }

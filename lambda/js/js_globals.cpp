@@ -5027,6 +5027,13 @@ struct JsFuncName {
 static Item js_instanceof_impl(Item left, Item right, bool skip_symbol);
 extern "C" Item js_array_get_custom_proto(Item arr);
 
+static bool js_is_function_prototype_map_for_instanceof(Item item) {
+    if (get_type_id(item) != LMD_TYPE_MAP) return false;
+    bool is_proto = false;
+    js_map_get_fast_ext(item.map, "__is_proto__", 12, &is_proto);
+    return is_proto && js_class_id(item) == JS_CLASS_FUNCTION;
+}
+
 extern "C" Item js_instanceof(Item left, Item right) {
     return js_instanceof_impl(left, right, false);
 }
@@ -5137,11 +5144,69 @@ static Item js_instanceof_impl(Item left, Item right, bool skip_symbol) {
 
     if (right_type != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
 
+    if (js_is_function_prototype_map_for_instanceof(right)) {
+        Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
+        Item func_proto = js_property_get(right, proto_key);
+        if (js_check_exception()) return ItemNull;
+        TypeId fp_type = get_type_id(func_proto);
+        if (fp_type != LMD_TYPE_MAP && fp_type != LMD_TYPE_ARRAY && fp_type != LMD_TYPE_FUNC) {
+            js_throw_type_error("Function has non-object prototype in instanceof check");
+            return (Item){.item = b2it(false)};
+        }
+        Item obj = js_get_prototype_of(left);
+        int depth = 0;
+        while (obj.item != 0 && obj.item != ItemNull.item && depth < 32) {
+            TypeId ot = get_type_id(obj);
+            if (ot == LMD_TYPE_MAP && fp_type == LMD_TYPE_MAP && obj.map == func_proto.map) {
+                return (Item){.item = b2it(true)};
+            }
+            if (ot == LMD_TYPE_ARRAY && fp_type == LMD_TYPE_ARRAY && obj.array == func_proto.array) {
+                return (Item){.item = b2it(true)};
+            }
+            if (ot == LMD_TYPE_FUNC && fp_type == LMD_TYPE_FUNC && obj.function == func_proto.function) {
+                return (Item){.item = b2it(true)};
+            }
+            obj = js_get_prototype_of(obj);
+            depth++;
+        }
+        return (Item){.item = b2it(false)};
+    }
+
     // Get the class name from right (constructor's __class_name__)
     Item class_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
     Item right_name = map_get(right.map, class_key);
     if (right_name.item == 0 || get_type_id(right_name) != LMD_TYPE_STRING)
         return (Item){.item = b2it(false)};
+
+    bool has_instance_proto = false;
+    js_map_get_fast_ext(right.map, "__instance_proto__", 18, &has_instance_proto);
+    if (has_instance_proto) {
+        Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
+        Item ctor_proto = js_property_get(right, proto_key);
+        if (js_check_exception()) return ItemNull;
+        TypeId cp_type = get_type_id(ctor_proto);
+        if (cp_type != LMD_TYPE_MAP && cp_type != LMD_TYPE_ARRAY && cp_type != LMD_TYPE_FUNC) {
+            js_throw_type_error("Function has non-object prototype in instanceof check");
+            return (Item){.item = b2it(false)};
+        }
+        Item obj = js_get_prototype_of(left);
+        int depth = 0;
+        while (obj.item != 0 && obj.item != ItemNull.item && depth < 32) {
+            TypeId ot = get_type_id(obj);
+            if (ot == LMD_TYPE_MAP && cp_type == LMD_TYPE_MAP && obj.map == ctor_proto.map) {
+                return (Item){.item = b2it(true)};
+            }
+            if (ot == LMD_TYPE_ARRAY && cp_type == LMD_TYPE_ARRAY && obj.array == ctor_proto.array) {
+                return (Item){.item = b2it(true)};
+            }
+            if (ot == LMD_TYPE_FUNC && cp_type == LMD_TYPE_FUNC && obj.function == ctor_proto.function) {
+                return (Item){.item = b2it(true)};
+            }
+            obj = js_get_prototype_of(obj);
+            depth++;
+        }
+        return (Item){.item = b2it(false)};
+    }
 
     // Delegate to name-based check
     return js_instanceof_classname(left, right_name);
@@ -5994,6 +6059,14 @@ static bool js_func_is_constructor(Item func_item) {
         Item target = js_proxy_get_target(func_item);
         return js_func_is_constructor(target);
     }
+    if (get_type_id(func_item) == LMD_TYPE_MAP) {
+        bool own_instance_proto = false;
+        js_map_get_fast_ext(func_item.map, "__instance_proto__", 18, &own_instance_proto);
+        if (own_instance_proto) return true;
+        bool own_ctor = false;
+        Item ctor = js_map_get_fast_ext(func_item.map, "__ctor__", 8, &own_ctor);
+        return own_ctor && get_type_id(ctor) == LMD_TYPE_FUNC;
+    }
     if (get_type_id(func_item) != LMD_TYPE_FUNC) return false;
     JsFunctionLayout* fn = (JsFunctionLayout*)func_item.function;
     if (fn->flags & JS_FUNC_FLAG_ARROW_G) return false;
@@ -6053,6 +6126,11 @@ extern "C" Item js_reflect_construct(Item target, Item args_array, Item new_targ
                 args[i] = js_array_get(args_array, idx);
             }
         }
+    }
+    if (get_type_id(target) == LMD_TYPE_MAP) {
+        Item nt_val = (nt_type == LMD_TYPE_FUNC || get_type_id(new_target) == LMD_TYPE_MAP || js_is_proxy(new_target)) ? new_target : target;
+        js_set_new_target(nt_val);
+        return js_new_from_class_object(target, args, argc);
     }
     // For proxy targets, delegate to [[Construct]] trap
     if (js_is_proxy(target)) {
@@ -13594,6 +13672,18 @@ static int js_eval_local_binding_count = 0;
 static int js_eval_local_frame_stack[JS_EVAL_LOCAL_FRAME_MAX];
 static int js_eval_local_frame_depth = 0;
 
+#define JS_EVAL_LEXICAL_BIND_MAX 512
+static Item js_eval_lexical_bindings[JS_EVAL_LEXICAL_BIND_MAX];
+static int js_eval_lexical_binding_count = 0;
+static int js_eval_lexical_frame_stack[JS_EVAL_LOCAL_FRAME_MAX];
+static int js_eval_lexical_frame_depth = 0;
+
+#define JS_EVAL_IMMUTABLE_BIND_MAX 512
+static Item js_eval_immutable_bindings[JS_EVAL_IMMUTABLE_BIND_MAX];
+static int js_eval_immutable_binding_count = 0;
+static int js_eval_immutable_frame_stack[JS_EVAL_LOCAL_FRAME_MAX];
+static int js_eval_immutable_frame_depth = 0;
+
 extern "C" void js_eval_env_push_frame(void) {
     if (js_eval_env_frame_depth >= JS_EVAL_ENV_FRAME_MAX) {
         log_error("js-eval-env: frame stack overflow");
@@ -13608,12 +13698,22 @@ extern "C" void js_eval_local_push_frame(void) {
         return;
     }
     js_eval_local_frame_stack[js_eval_local_frame_depth++] = js_eval_local_binding_count;
+    js_eval_lexical_frame_stack[js_eval_lexical_frame_depth++] = js_eval_lexical_binding_count;
+    js_eval_immutable_frame_stack[js_eval_immutable_frame_depth++] = js_eval_immutable_binding_count;
 }
 
 extern "C" void js_eval_local_pop_frame(void) {
     if (js_eval_local_frame_depth <= 0) return;
     int frame_start = js_eval_local_frame_stack[--js_eval_local_frame_depth];
     js_eval_local_binding_count = frame_start;
+    if (js_eval_lexical_frame_depth > 0) {
+        int lexical_frame_start = js_eval_lexical_frame_stack[--js_eval_lexical_frame_depth];
+        js_eval_lexical_binding_count = lexical_frame_start;
+    }
+    if (js_eval_immutable_frame_depth > 0) {
+        int immutable_frame_start = js_eval_immutable_frame_stack[--js_eval_immutable_frame_depth];
+        js_eval_immutable_binding_count = immutable_frame_start;
+    }
 }
 
 static int js_eval_local_find_binding(Item key) {
@@ -13644,6 +13744,50 @@ extern "C" void js_eval_local_export_var(Item key, Item value) {
     JsEvalLocalBinding* binding = &js_eval_local_bindings[js_eval_local_binding_count++];
     binding->key = key;
     binding->value = value;
+}
+
+extern "C" void js_eval_local_note_lexical_binding(Item key) {
+    if (js_eval_lexical_frame_depth <= 0) return;
+    int frame_start = js_eval_lexical_frame_stack[js_eval_lexical_frame_depth - 1];
+    for (int i = js_eval_lexical_binding_count - 1; i >= frame_start; i--) {
+        if (js_with_binding_key_same(js_eval_lexical_bindings[i], key)) return;
+    }
+    if (js_eval_lexical_binding_count >= JS_EVAL_LEXICAL_BIND_MAX) {
+        log_error("js-eval-lexical: binding stack overflow");
+        return;
+    }
+    js_eval_lexical_bindings[js_eval_lexical_binding_count++] = key;
+}
+
+extern "C" int64_t js_eval_local_has_lexical_binding(Item key) {
+    if (js_eval_lexical_frame_depth <= 0) return 0;
+    int frame_start = js_eval_lexical_frame_stack[js_eval_lexical_frame_depth - 1];
+    for (int i = js_eval_lexical_binding_count - 1; i >= frame_start; i--) {
+        if (js_with_binding_key_same(js_eval_lexical_bindings[i], key)) return 1;
+    }
+    return 0;
+}
+
+extern "C" void js_eval_local_note_immutable_binding(Item key) {
+    if (js_eval_immutable_frame_depth <= 0) return;
+    int frame_start = js_eval_immutable_frame_stack[js_eval_immutable_frame_depth - 1];
+    for (int i = js_eval_immutable_binding_count - 1; i >= frame_start; i--) {
+        if (js_with_binding_key_same(js_eval_immutable_bindings[i], key)) return;
+    }
+    if (js_eval_immutable_binding_count >= JS_EVAL_IMMUTABLE_BIND_MAX) {
+        log_error("js-eval-immutable: binding stack overflow");
+        return;
+    }
+    js_eval_immutable_bindings[js_eval_immutable_binding_count++] = key;
+}
+
+extern "C" int64_t js_eval_local_has_immutable_binding(Item key) {
+    if (js_eval_immutable_frame_depth <= 0) return 0;
+    int frame_start = js_eval_immutable_frame_stack[js_eval_immutable_frame_depth - 1];
+    for (int i = js_eval_immutable_binding_count - 1; i >= frame_start; i--) {
+        if (js_with_binding_key_same(js_eval_immutable_bindings[i], key)) return 1;
+    }
+    return 0;
 }
 
 extern "C" void js_eval_env_bind(Item key, Item value) {

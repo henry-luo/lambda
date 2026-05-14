@@ -809,7 +809,17 @@ void jm_collect_body_refs(JsAstNode* node, struct hashmap* refs) {
     }
     case JS_AST_NODE_MEMBER_EXPRESSION: {
         JsMemberNode* m = (JsMemberNode*)node;
-        jm_collect_body_refs(m->object, refs);
+        bool is_super = false;
+        if (m->object && m->object->node_type == JS_AST_NODE_IDENTIFIER) {
+            JsIdentifierNode* obj_id = (JsIdentifierNode*)m->object;
+            is_super = obj_id->name && obj_id->name->len == 5 &&
+                strncmp(obj_id->name->chars, "super", 5) == 0;
+        }
+        if (is_super) {
+            jm_name_set_add(refs, "_js_this");
+        } else {
+            jm_collect_body_refs(m->object, refs);
+        }
         if (m->computed) jm_collect_body_refs(m->property, refs);
         break;
     }
@@ -1483,6 +1493,7 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
             fc->captures[fc->capture_count].grandparent_slot = -1;
             fc->captures[fc->capture_count].is_let_const = false;
             fc->captures[fc->capture_count].is_const = false;
+            fc->captures[fc->capture_count].is_nfe_binding = false;
             fc->captures[fc->capture_count].force_env_capture = false;
             for (int li = 0; li < fn->lexical_for_head_capture_count; li++) {
                 if (strcmp(fn->lexical_for_head_capture_names[li], ref->name) == 0) {
@@ -1514,6 +1525,7 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
         fc->captures[fc->capture_count].grandparent_slot = -1;
         fc->captures[fc->capture_count].is_let_const = false;
         fc->captures[fc->capture_count].is_const = false;
+        fc->captures[fc->capture_count].is_nfe_binding = is_func_expr;
         fc->captures[fc->capture_count].force_env_capture = false;
         fc->capture_count++;
         log_debug("js-mir: self-capture '%s' in closure '%s'", self_name, fc->name);
@@ -1526,6 +1538,7 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
         snprintf(fc->captures[fc->capture_count].name, 128, "_js_this");
         fc->captures[fc->capture_count].scope_env_slot = -1;
         fc->captures[fc->capture_count].grandparent_slot = -1;
+        fc->captures[fc->capture_count].is_nfe_binding = false;
         fc->captures[fc->capture_count].force_env_capture = false;
         fc->capture_count++;
         log_debug("js-mir: arrow capture '_js_this' in function '%s'", fc->name);
@@ -1538,6 +1551,7 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
         fc->captures[fc->capture_count].grandparent_slot = -1;
         fc->captures[fc->capture_count].is_let_const = false;
         fc->captures[fc->capture_count].is_const = false;
+        fc->captures[fc->capture_count].is_nfe_binding = false;
         fc->captures[fc->capture_count].force_env_capture = false;
         fc->capture_count++;
         log_debug("js-mir: arrow capture '_js_arguments' in function '%s'", fc->name);

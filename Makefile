@@ -460,11 +460,11 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild \
-	    test test-all test-all-baseline test-lambda-baseline test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-extended test-input run help \
+	    test test-all test-all-baseline test-lambda-baseline test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-pdf-render test-extended test-input run help \
 	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint check check-raw-alloc check-state-store check-radiant-casts docs intellisense analyze-binary \
 	    build-debug build-release clean-all distclean \
 	    tree-sitter-libs tree-sitter-core-libs \
-	    generate-premake clean-premake build-test build-test-linux build-jube-test test-jube run-radiant-baseline \
+	    generate-premake clean-premake build-test build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline \
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc tidy-printf benchmark bench-compile \
 	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick test-c2mir type-chart build-mir \
 	    test-ui-automation test-reactive-ui test-redex-baseline \
@@ -501,6 +501,7 @@ help:
 	@echo "  generate-premake - Generate premake5.lua from build_lambda_config.json"
 	@echo "  clean-premake - Clean Premake build artifacts and generated files"
 	@echo "  build-test    - Build all test executables using Premake"
+	@echo "  build-pdf-render-test - Build PDF render visual gtest executable using Premake"
 	@echo "  build-jube-test - Build lambda-jube and all test executables"
 	@echo ""
 	@echo "Grammar & Parser:"
@@ -519,6 +520,7 @@ help:
 	@echo "  test-radiant-baseline - Run RADIANT layout baseline (baseline, wpt-css-text, pretext, form, text_flow, wpt-css-multicol, puppertino) + render visual + other checks"
 	@echo "  test-reactive-ui     - Run Reactive UI event simulation tests (todo toggle/delete)"
 	@echo "  test-redex-baseline  - Run Redex formal semantics baseline verification"
+	@echo "  test-pdf-render - Run PDF render visual gtest suite"
 	@echo "  layout-snapshot       - Save page suite snapshot: make layout-snapshot suite=page"
 	@echo "  test-extended - Run EXTENDED test suites only (HTTP/HTTPS, ongoing features)"
 	@echo "  test-library  - Run library tests only"
@@ -1294,6 +1296,24 @@ test-page-load: build-test
 		./test/test_page_load_gtest.exe; \
 	else \
 		echo "Error: test/test_page_load_gtest.exe not found - run 'make build-test' first"; \
+		exit 1; \
+	fi
+
+build-pdf-render-test: build-lambda-input
+	@echo "Building PDF render visual gtest executable using Premake5..."
+	@mkdir -p build/premake
+	$(MAKE) generate-premake
+	cd build/premake && PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=../../$(PREMAKE_FILE)
+	PATH="/clang64/bin:$$PATH" $(MAKE) -C build/premake config=debug_native -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)" \
+		test_pdf_render_visual_gtest
+
+test-pdf-render: build-pdf-render-test
+	@echo "Running PDF render visual gtest suite..."
+	@echo "=============================================================="
+	@if [ -f "test/test_pdf_render_visual_gtest.exe" ]; then \
+		./test/test_pdf_render_visual_gtest.exe; \
+	else \
+		echo "Error: test/test_pdf_render_visual_gtest.exe not found - run 'make build-pdf-render-test' first"; \
 		exit 1; \
 	fi
 

@@ -192,6 +192,60 @@ fn _widths_or_null(pdf, dict) {
     }
 }
 
+fn _num_width(v) {
+    if (v is int) { float(v) }
+    else if (v is float) { v }
+    else { 500.0 }
+}
+
+fn _first_descendant_font(pdf, dict) {
+    let descendants = if (dict.DescendantFonts) resolve.deref(pdf, dict.DescendantFonts) else null
+    if (descendants is array and len(descendants) > 0) { resolve.deref(pdf, descendants[0]) }
+    else { null }
+}
+
+fn _cid_width_array(first, widths, acc) {
+    acc ++ [{ first: first, widths: widths }]
+}
+
+fn _cid_width_range(first, last, width, acc) {
+    acc ++ [{ first: first, last: last, width: width }]
+}
+
+fn _cid_width_pairs_loop(w, i, n, acc) {
+    if (i >= n) { acc }
+    else if (i + 1 >= n) { acc }
+    else {
+        let first = util.int_or(w[i], -1)
+        let second = w[i + 1]
+        if (first < 0) { _cid_width_pairs_loop(w, i + 1, n, acc) }
+        else if (second is array) {
+            _cid_width_pairs_loop(w, i + 2, n,
+                _cid_width_array(first, second, acc))
+        }
+        else if (i + 2 < n) {
+            _cid_width_pairs_loop(w, i + 3, n,
+                _cid_width_range(first, util.int_or(second, first), _num_width(w[i + 2]), acc))
+        }
+        else { acc }
+    }
+}
+
+fn _cid_widths_or_null(pdf, dict) {
+    let desc = _first_descendant_font(pdf, dict)
+    let source = if (dict.W != null) { dict } else { desc }
+    let w = if (source and source.W != null) resolve.deref(pdf, source.W) else null
+    if (w is array) { _cid_width_pairs_loop(w, 0, len(w), []) }
+    else { null }
+}
+
+fn _default_width_or_500(pdf, dict) {
+    let desc = _first_descendant_font(pdf, dict)
+    if (dict.DW != null) { _num_width(dict.DW) }
+    else if (desc and desc.DW != null) { _num_width(desc.DW) }
+    else { 500.0 }
+}
+
 fn _first_char_or_zero(dict) {
     util.int_or(dict.FirstChar, 0)
 }
@@ -222,24 +276,27 @@ fn _strip_subset(name: string) {
 // behave deterministically; calling pn helpers (from_basefont) from
 // inside `resolve_font` proved to silently lose the weight/style fields
 // when chained through let-bindings.
-fn _make_descriptor(name, info, to_uni, enc, widths, first_char, last_char) {
+fn _make_descriptor(name, info, to_uni, enc, widths, first_char, last_char, cid_widths, default_width) {
     { name: name, family: info.family, weight: info.weight,
         style: info.style, to_unicode: to_uni, encoding: enc,
     widths: widths, first_char: first_char, last_char: last_char,
+            cid_widths: cid_widths, default_width: default_width,
       font_data_uri: null, font_format: null, embedded_family: null }
 }
 
-fn _make_descriptor_embedded(name, info, to_uni, enc, widths, first_char, last_char, uri, fmt, emb_family) {
+fn _make_descriptor_embedded(name, info, to_uni, enc, widths, first_char, last_char, cid_widths, default_width, uri, fmt, emb_family) {
     { name: name, family: info.family, weight: info.weight,
         style: info.style, to_unicode: to_uni, encoding: enc,
     widths: widths, first_char: first_char, last_char: last_char,
+            cid_widths: cid_widths, default_width: default_width,
       font_data_uri: uri, font_format: fmt, embedded_family: emb_family }
 }
 
 fn _unknown_descriptor(name) {
     { name: name, family: _UNKNOWN.family, weight: _UNKNOWN.weight,
         style: _UNKNOWN.style, to_unicode: null, encoding: null,
-    widths: null, first_char: 0, last_char: 0,
+        widths: null, first_char: 0, last_char: 0,
+            cid_widths: null, default_width: 500.0,
       font_data_uri: null, font_format: null, embedded_family: null }
 }
 
@@ -361,6 +418,8 @@ pub fn resolve_font(pdf, page, name: string) {
         let to_uni = _to_unicode_or_null(dict)
         let enc = _implicit_encoding(stripped, _encoding_or_null(dict))
         let widths = _widths_or_null(pdf, dict)
+        let cid_widths = _cid_widths_or_null(pdf, dict)
+        let default_width = _default_width_or_500(pdf, dict)
         let first_char = _first_char_or_zero(dict)
         let last_char = _last_char_or_zero(dict)
         // Embedded font program?  Pull the data URI off the FontDescriptor
@@ -368,11 +427,11 @@ pub fn resolve_font(pdf, page, name: string) {
         // browser matches our @font-face declaration.
         let emb = _embedded_font_info(pdf, dict)
         if (emb == null) {
-            _make_descriptor(name, info0, to_uni, enc, widths, first_char, last_char)
+            _make_descriptor(name, info0, to_uni, enc, widths, first_char, last_char, cid_widths, default_width)
         }
         else {
             let info1 = _info_with_embedded(info0, stripped)
-            _make_descriptor_embedded(name, info1, to_uni, enc, widths, first_char, last_char,
+            _make_descriptor_embedded(name, info1, to_uni, enc, widths, first_char, last_char, cid_widths, default_width,
                                       emb.uri, emb.fmt, stripped)
         }
     }

@@ -27,6 +27,16 @@ void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_heig
 void layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
 void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop);
 
+typedef const char* (*SvgImageResolverFn)(void* context, int image_id);
+extern "C" bool svg_get_registered_image_resolver(Element* svg_root,
+                                                   SvgImageResolverFn* out_resolver,
+                                                   void** out_context);
+
+struct SvgSerializeImageResolver {
+    SvgImageResolverFn resolver;
+    void* context;
+};
+
 typedef struct {
     StrBuf* svg_content;
     int indent_level;
@@ -1091,72 +1101,54 @@ static int svg_pdf_image_id_from_href(const char* href) {
     return value;
 }
 
-static bool svg_item_number_equals(ItemReader item, int value) {
-    if (item.isInt()) return item.asInt() == value;
-    if (item.isFloat()) return fabs(item.asFloat() - (double)value) < 0.0001;
-    return false;
-}
-
-static const char* svg_pdf_data_uri_for_image_id(const Element* pdf_svg_root, int object_num) {
-    if (!pdf_svg_root || object_num <= 0) return nullptr;
-
-    ElementReader root_reader(pdf_svg_root);
-    ItemReader pdf_root_attr = root_reader.get_attr("data-pdf-root");
-    MapReader pdf_root = MapReader::fromItem(pdf_root_attr.item());
-    if (!pdf_root.isValid()) return nullptr;
-
-    ItemReader objects_item = pdf_root.get("objects");
-    if (!objects_item.isArray()) return nullptr;
-
-    ArrayReader objects = objects_item.asArray();
-    int64_t count = objects.length();
-    for (int64_t i = 0; i < count; i++) {
-        ItemReader obj_item = objects.get(i);
-        MapReader obj = MapReader::fromItem(obj_item.item());
-        if (!obj.isValid()) continue;
-        ItemReader num_item = obj.get("object_num");
-        if (!svg_item_number_equals(num_item, object_num)) continue;
-
-        ItemReader content_item = obj.get("content");
-        MapReader content = MapReader::fromItem(content_item.item());
-        if (!content.isValid()) return nullptr;
-        ItemReader data_uri = content.get("data_uri");
-        return data_uri.isString() ? data_uri.cstring() : nullptr;
+static bool svg_serialize_resolver_for_root(const Element* svg_root, SvgSerializeImageResolver* out) {
+    if (out) {
+        out->resolver = nullptr;
+        out->context = nullptr;
     }
-
-    return nullptr;
+    if (!svg_root || !out) return false;
+    return svg_get_registered_image_resolver((Element*)svg_root, &out->resolver, &out->context) && out->resolver;
 }
 
-static const char* svg_resolve_pdf_image_href(const Element* pdf_svg_root, const char* href) {
+static const char* svg_pdf_data_uri_for_image_id(const SvgSerializeImageResolver* resolver, int object_num) {
+    if (!resolver || !resolver->resolver || object_num <= 0) return nullptr;
+    return resolver->resolver(resolver->context, object_num);
+}
+
+static const char* svg_resolve_pdf_image_href(const SvgSerializeImageResolver* resolver, const char* href) {
     int object_num = svg_pdf_image_id_from_href(href);
     if (object_num <= 0) return href;
-    const char* data_uri = svg_pdf_data_uri_for_image_id(pdf_svg_root, object_num);
+    const char* data_uri = svg_pdf_data_uri_for_image_id(resolver, object_num);
     if (data_uri) return data_uri;
     log_debug("[SVG] PDF output image handle unresolved: %s", href);
     return href;
 }
 
-static void serialize_image_href_attr(StrBuf* buf, const ElementReader& elem, const Element* pdf_svg_root) {
+static void serialize_image_href_attr(StrBuf* buf, const ElementReader& elem, const SvgSerializeImageResolver* resolver) {
     ItemReader href_item = elem.get_attr("href");
     if (!href_item.isString()) return;
 
     const char* href = href_item.cstring();
     if (!href) return;
-    const char* resolved = svg_resolve_pdf_image_href(pdf_svg_root, href);
+    const char* resolved = svg_resolve_pdf_image_href(resolver, href);
     strbuf_append_str(buf, " href=\"");
     svg_escape_attr(buf, resolved, strlen(resolved));
     strbuf_append_char(buf, '"');
 }
 
 // recursively serialize a Lambda Element as SVG/XML markup
-static void serialize_svg_element(StrBuf* buf, const ElementReader& elem, const Element* pdf_svg_root) {
+static void serialize_svg_element(StrBuf* buf, const ElementReader& elem, const SvgSerializeImageResolver* resolver) {
     const char* tag = elem.tagName();
     if (!tag) return;
 
     const bool is_image = strcmp(tag, "image") == 0;
     const bool is_svg = strcmp(tag, "svg") == 0;
-    ItemReader pdf_root_attr = elem.get_attr("data-pdf-root");
-    const Element* child_pdf_svg_root = MapReader::fromItem(pdf_root_attr.item()).isValid() ? elem.element() : pdf_svg_root;
+    SvgSerializeImageResolver local_resolver = resolver ? *resolver : SvgSerializeImageResolver{nullptr, nullptr};
+    SvgSerializeImageResolver registered_resolver;
+    if (is_svg && svg_serialize_resolver_for_root(elem.element(), &registered_resolver)) {
+        local_resolver = registered_resolver;
+    }
+    const SvgSerializeImageResolver* child_resolver = local_resolver.resolver ? &local_resolver : nullptr;
 
     // open tag
     strbuf_append_char(buf, '<');
@@ -1204,7 +1196,7 @@ static void serialize_svg_element(StrBuf* buf, const ElementReader& elem, const 
     }
 
     if (is_image) {
-        serialize_image_href_attr(buf, elem, child_pdf_svg_root);
+        serialize_image_href_attr(buf, elem, child_resolver);
     } else if (is_svg) {
         // data-pdf-root is an in-memory rendering context, not an XML attribute.
     }
@@ -1229,7 +1221,7 @@ static void serialize_svg_element(StrBuf* buf, const ElementReader& elem, const 
             }
         } else if (child.isElement()) {
             ElementReader child_elem(child.item());
-            serialize_svg_element(buf, child_elem, child_pdf_svg_root);
+            serialize_svg_element(buf, child_elem, child_resolver);
         }
     }
 

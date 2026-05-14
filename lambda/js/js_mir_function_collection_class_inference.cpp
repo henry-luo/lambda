@@ -459,6 +459,19 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
         JsAssignmentNode* n = (JsAssignmentNode*)node;
         jm_collect_functions(mt, n->left);
         jm_collect_functions(mt, n->right);
+        if (n->right && n->right->node_type == JS_AST_NODE_CLASS_DECLARATION &&
+            n->left && n->left->node_type == JS_AST_NODE_IDENTIFIER) {
+            JsClassNode* cls = (JsClassNode*)n->right;
+            JsIdentifierNode* lhs_id = (JsIdentifierNode*)n->left;
+            if (lhs_id->name) {
+                for (int i = mt->class_count - 1; i >= 0; i--) {
+                    JsClassEntry* ce = &mt->class_entries[i];
+                    if (ce->node != cls) continue;
+                    if (!ce->alias_name) ce->alias_name = lhs_id->name;
+                    break;
+                }
+            }
+        }
         break;
     }
     case JS_AST_NODE_MEMBER_EXPRESSION: {
@@ -558,6 +571,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
     }
     case JS_AST_NODE_CLASS_DECLARATION: {
         JsClassNode* cls = (JsClassNode*)node;
+        if (cls->superclass) jm_collect_functions(mt, cls->superclass);
         if (cls->body && cls->body->node_type == JS_AST_NODE_BLOCK_STATEMENT && mt->class_count < 512) {
             JsClassEntry* ce = &mt->class_entries[mt->class_count];
             mt->class_count++; // reserve slot before recursion into methods/fields
@@ -581,7 +595,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                         sf->computed = fd->computed;
                         sf->key_expr = fd->key;
                         if (!fd->computed && fd->key->node_type == JS_AST_NODE_IDENTIFIER) {
-                            sf->name = ((JsIdentifierNode*)fd->key)->name;
+                            sf->name = jm_class_private_name(mt, ce, ((JsIdentifierNode*)fd->key)->name);
                         } else {
                             sf->name = NULL;
                         }
@@ -601,7 +615,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                         inf->computed = fd->computed;
                         inf->key_expr = fd->key;
                         if (!fd->computed && fd->key->node_type == JS_AST_NODE_IDENTIFIER) {
-                            inf->name = ((JsIdentifierNode*)fd->key)->name;
+                            inf->name = jm_class_private_name(mt, ce, ((JsIdentifierNode*)fd->key)->name);
                         } else {
                             inf->name = NULL;
                         }
@@ -651,7 +665,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                             // Name: ClassName_methodName
                             String* method_name = NULL;
                             if (md->key && md->key->node_type == JS_AST_NODE_IDENTIFIER) {
-                                method_name = ((JsIdentifierNode*)md->key)->name;
+                                method_name = jm_class_private_name(mt, ce, ((JsIdentifierNode*)md->key)->name);
                             } else if (md->key && md->key->node_type == JS_AST_NODE_LITERAL) {
                                 JsLiteralNode* lit = (JsLiteralNode*)md->key;
                                 if (lit->literal_type == JS_LITERAL_STRING) {
@@ -736,6 +750,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                                 if (me->is_constructor) {
                                     ce->constructor = me;
                                     fc->is_constructor = true;  // P3: mark fc for direct slot stores
+                                    fc->is_derived_constructor = (cls->superclass != NULL);
                                     // A5: Scan constructor for this.prop = expr
                                     if (fn->body) jm_scan_ctor_props(fc, fn->body);
                                 }

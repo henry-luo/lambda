@@ -440,6 +440,8 @@ typedef enum SysFunc {
     // reactive UI event dispatch
     SYSPROC_EMIT,            // emit(event_name, data) - dispatch event to parent template handler
     SYSPROC_SET_SELECTION,   // set_selection(sel) - push editor selection back to DomSelection (Phase R4 §7.4)
+    SYSFUNC_PDF_PARSE_CONTENT_STREAM,  // pdf_parse_content_stream(bytes) - fast PDF content tokenizer
+    SYSFUNC_PDF_REGISTER_SVG_IMAGE_RESOLVER,  // pdf_register_svg_image_resolver(svg, pdf) - bind PDF image handles to SVG root
 } SysFunc;
 
 typedef struct Type {

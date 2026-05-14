@@ -43,9 +43,13 @@ extern Item js_create_data_property(Item obj, Item name, Item value);
 
 // super() for class-expression superclasses: handles FUNC and MAP (class object) callee
 extern Item js_super_call_class(Item callee, Item this_val, Item* args, int argc);
+extern void js_check_class_heritage_constructor(Item superclass);
 // super() for native parent constructors: merges returned object's own props onto `this`
 extern Item js_super_call_native(Item callee, Item this_val, Item* args, int argc);
 extern Item js_super_apply_native(Item callee, Item this_val, Item args_array);
+extern Item js_super_bind_this(Item this_val, Item construct_result);
+extern Item js_get_super_constructor_from_receiver(Item receiver, Item fallback_ctor);
+extern void js_mark_derived_constructor_func(Item fn_item);
 
 // Symbol key check for typed array P9 guard (js_runtime.cpp)
 extern int64_t js_key_is_symbol_c(Item key);
@@ -97,6 +101,9 @@ extern Item edit_array_set(Item array, int64_t index, Item value);
 extern Item edit_array_insert(Item array, int64_t index, Item value);
 extern Item edit_array_delete(Item array, int64_t index);
 extern Item edit_array_append(Item array, Item value);
+extern Item pdf_parse_content_stream(Item bytes);
+extern Item fn_pdf_parse_content_stream(Item bytes);
+extern Item fn_pdf_register_svg_image_resolver(Item svg_item, Item pdf_item);
 extern int edit_commit(const char* description);
 extern bool edit_undo(void);
 extern bool edit_redo(void);
@@ -765,6 +772,14 @@ SysFuncInfo sys_func_defs[] = {
     // editor: push SourceSelection back to live DomSelection (Phase R4 §7.4)
     {SYSPROC_SET_SELECTION, "set_selection", 1, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "pn_set_selection", FPTR(pn_set_selection), NULL, NULL, false, 0},
+
+    // PDF package: native content stream tokenizer for dense vector pages
+    {SYSFUNC_PDF_PARSE_CONTENT_STREAM, "pdf_parse_content_stream", 1, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_pdf_parse_content_stream", FPTR(fn_pdf_parse_content_stream), NULL, NULL, false, 0},
+
+    // PDF package: bind page SVG roots to their parsed PDF object tree for image handle resolution
+    {SYSFUNC_PDF_REGISTER_SVG_IMAGE_RESOLVER, "pdf_register_svg_image_resolver", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_pdf_register_svg_image_resolver", FPTR(fn_pdf_register_svg_image_resolver), NULL, NULL, false, 0},
 };
 
 // note: sizeof(sys_func_defs) may fail with incomplete type because the header
@@ -963,6 +978,9 @@ JitImport jit_runtime_imports[] = {
     {"array_push_spread_all", FPTR(array_push_spread_all)},
     {"array_end", FPTR(array_end)},
     {"item_spread", FPTR(item_spread)},
+    {"pdf_parse_content_stream", FPTR(pdf_parse_content_stream)},
+    {"fn_pdf_parse_content_stream", FPTR(fn_pdf_parse_content_stream)},
+    {"fn_pdf_register_svg_image_resolver", FPTR(fn_pdf_register_svg_image_resolver)},
     // typed array constructors
     {"array_float_new", FPTR(array_float_new)},
     {"array_float_set", FPTR(array_float_set)},
@@ -1334,6 +1352,7 @@ JitImport jit_runtime_imports[] = {
     {"js_super_instance_method_get", FPTR(js_super_instance_method_get)},
     {"js_super_property_set", FPTR(js_super_property_set)},
     {"js_super_call_class", FPTR(js_super_call_class)},
+    {"js_check_class_heritage_constructor", FPTR(js_check_class_heritage_constructor)},
     {"js_super_call_native", FPTR(js_super_call_native)},
     {"js_super_apply_native", FPTR(js_super_apply_native)},
     {"js_property_get_str", FPTR(js_property_get_str)},
@@ -1410,6 +1429,8 @@ JitImport jit_runtime_imports[] = {
     {"js_get_new_target", FPTR(js_get_new_target)},
     {"js_set_new_target", FPTR(js_set_new_target)},
     {"js_set_direct_new_target", FPTR(js_set_direct_new_target)},
+    {"js_super_bind_this", FPTR(js_super_bind_this)},
+    {"js_get_super_constructor_from_receiver", FPTR(js_get_super_constructor_from_receiver)},
     {"js_set_strict_mode", FPTR(js_set_strict_mode)},
     {"js_console_log", FPTR(js_console_log)},
     // exception handling
@@ -1519,6 +1540,7 @@ JitImport jit_runtime_imports[] = {
     {"js_mark_arrow_func", FPTR(js_mark_arrow_func)},
     {"js_mark_method_func", FPTR(js_mark_method_func)},
     {"js_mark_strict_func", FPTR(js_mark_strict_func)},
+    {"js_mark_derived_constructor_func", FPTR(js_mark_derived_constructor_func)},
     {"js_set_formal_length", FPTR(js_set_formal_length)},
     {"js_get_constructor", FPTR(js_get_constructor)},
     {"js_get_prototype_of", FPTR(js_get_prototype_of)},
@@ -1670,6 +1692,10 @@ JitImport jit_runtime_imports[] = {
     {"js_eval_local_pop_frame", FPTR(js_eval_local_pop_frame)},
     {"js_eval_local_get_binding_or_fallback", FPTR(js_eval_local_get_binding_or_fallback)},
     {"js_eval_local_export_var", FPTR(js_eval_local_export_var)},
+    {"js_eval_local_note_lexical_binding", FPTR(js_eval_local_note_lexical_binding)},
+    {"js_eval_local_has_lexical_binding", FPTR(js_eval_local_has_lexical_binding)},
+    {"js_eval_local_note_immutable_binding", FPTR(js_eval_local_note_immutable_binding)},
+    {"js_eval_local_has_immutable_binding", FPTR(js_eval_local_has_immutable_binding)},
     {"js_check_unresolved_capture", FPTR(js_check_unresolved_capture)},
     {"js_resolve_unresolved_binding", FPTR(js_resolve_unresolved_binding)},
     {"js_262_eval_script_is_active", FPTR(js_262_eval_script_is_active)},

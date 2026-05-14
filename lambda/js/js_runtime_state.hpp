@@ -38,6 +38,9 @@ struct JsRuntimeState {
     Item new_target = {0};
     Item pending_new_target = {0};
     bool has_pending_new_target = false;
+    bool super_this_bound_stack[128] = {};
+    Item super_this_value_stack[128] = {};
+    int super_this_bound_depth = 0;
     Item* pending_call_args = NULL;
     int pending_call_argc = 0;
     Item array_method_real_this = {0};
@@ -79,6 +82,9 @@ static inline Item*& js_active_module_vars_ref() {
 #define js_new_target (js_runtime_state.new_target)
 #define js_pending_new_target (js_runtime_state.pending_new_target)
 #define js_has_pending_new_target (js_runtime_state.has_pending_new_target)
+#define js_super_this_bound_stack (js_runtime_state.super_this_bound_stack)
+#define js_super_this_value_stack (js_runtime_state.super_this_value_stack)
+#define js_super_this_bound_depth (js_runtime_state.super_this_bound_depth)
 #define js_pending_call_args (js_runtime_state.pending_call_args)
 #define js_pending_call_argc (js_runtime_state.pending_call_argc)
 #define js_array_method_real_this (js_runtime_state.array_method_real_this)

@@ -22,6 +22,7 @@
 #include <ctype.h>
 #include <math.h>
 #include <stdio.h>
+#include <strings.h>
 
 #ifndef LAMBDA_HEADLESS
 #include <thorvg_capi.h>  // needed for SVG text rendering (tvg_text_* API)
@@ -31,6 +32,87 @@ static const int SVG_RESOURCE_STACK_MAX = 32;
 static thread_local const char* g_svg_resource_stack[SVG_RESOURCE_STACK_MAX];
 static thread_local int g_svg_resource_stack_depth = 0;
 static thread_local RenderContext* g_svg_active_rdcon = nullptr;
+
+struct SvgImageResolverEntry {
+    Element* svg_root;
+    Item pdf_root;
+    SvgImageResolverEntry* next;
+};
+
+static SvgImageResolverEntry* g_svg_image_resolvers = nullptr;
+
+static bool svg_item_number_equals(ItemReader item, int value);
+static const char* svg_pdf_registered_image_resolver(void* context, int object_num);
+
+static SvgImageResolverEntry* svg_find_image_resolver_entry(Element* svg_root) {
+    for (SvgImageResolverEntry* entry = g_svg_image_resolvers; entry; entry = entry->next) {
+        if (entry->svg_root == svg_root) return entry;
+    }
+    return nullptr;
+}
+
+extern "C" void svg_register_pdf_image_resolver(Element* svg_root, Item pdf_root) {
+    if (!svg_root || get_type_id(pdf_root) != LMD_TYPE_MAP) return;
+
+    SvgImageResolverEntry* entry = svg_find_image_resolver_entry(svg_root);
+    if (!entry) {
+        entry = (SvgImageResolverEntry*)mem_calloc(1, sizeof(SvgImageResolverEntry), MEM_CAT_RENDER);
+        if (!entry) return;
+        entry->svg_root = svg_root;
+        entry->next = g_svg_image_resolvers;
+        g_svg_image_resolvers = entry;
+    }
+    entry->pdf_root = pdf_root;
+}
+
+static bool svg_element_tree_contains(Element* root, Element* needle) {
+    if (!root || !needle) return false;
+    if (root == needle) return true;
+    for (int64_t i = 0; i < root->length; i++) {
+        Item child = root->items[i];
+        if (get_type_id(child) == LMD_TYPE_ELEMENT && svg_element_tree_contains(child.element, needle)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+extern "C" void svg_unregister_image_resolvers_for_tree(Element* root) {
+    if (!root) return;
+    SvgImageResolverEntry** link = &g_svg_image_resolvers;
+    while (*link) {
+        SvgImageResolverEntry* entry = *link;
+        if (svg_element_tree_contains(root, entry->svg_root)) {
+            *link = entry->next;
+            mem_free(entry);
+        } else {
+            link = &entry->next;
+        }
+    }
+}
+
+extern "C" bool svg_get_registered_image_resolver(Element* svg_root,
+                                                   SvgImageResolverFn* out_resolver,
+                                                   void** out_context) {
+    if (out_resolver) *out_resolver = nullptr;
+    if (out_context) *out_context = nullptr;
+    SvgImageResolverEntry* entry = svg_find_image_resolver_entry(svg_root);
+    if (!entry) return false;
+    if (out_resolver) *out_resolver = svg_pdf_registered_image_resolver;
+    if (out_context) *out_context = entry;
+    return true;
+}
+
+extern "C" Item pdf_register_svg_image_resolver(Item svg_item, Item pdf_item) {
+    if (get_type_id(svg_item) == LMD_TYPE_ELEMENT) {
+        svg_register_pdf_image_resolver(svg_item.element, pdf_item);
+    }
+    return svg_item;
+}
+
+extern "C" Item fn_pdf_register_svg_image_resolver(Item svg_item, Item pdf_item) {
+    return pdf_register_svg_image_resolver(svg_item, pdf_item);
+}
 
 extern void draw_glyph(RenderContext* rdcon, GlyphBitmap* bitmap, int x, int y);
 
@@ -800,9 +882,9 @@ bool is_inline_svg_element(DomElement* elem) {
 // SVG Defs: Gradient definitions and element refs
 // ============================================================================
 
-#define SVG_MAX_GRAD_DEFS  64
+#define SVG_MAX_GRAD_DEFS  4096
 #define SVG_MAX_GRAD_STOPS 64
-#define SVG_MAX_ELEM_DEFS  64
+#define SVG_MAX_ELEM_DEFS  4096
 
 struct SvgGradStop {
     float   offset;
@@ -996,8 +1078,11 @@ static void opacity_bounds_from_rect(const RdtMatrix* transform, float x, float 
 
 static void draw_gradient_fill(SvgRenderContext* ctx, RdtPath* path, SvgGradDef* def,
                                float bx, float by, float bw, float bh,
-                               const RdtMatrix* transform, RdtFillRule fill_rule) {
+                               const RdtMatrix* transform, RdtFillRule fill_rule,
+                               float opacity) {
     if (!path || !def || def->stop_count < 2) return;
+    if (opacity < 0.0f) opacity = 0.0f;
+    if (opacity > 1.0f) opacity = 1.0f;
 
     RdtGradientStop stops[SVG_MAX_GRAD_STOPS];
     for (int i = 0; i < def->stop_count; i++) {
@@ -1005,7 +1090,7 @@ static void draw_gradient_fill(SvgRenderContext* ctx, RdtPath* path, SvgGradDef*
         stops[i].r = def->stops[i].color.r;
         stops[i].g = def->stops[i].color.g;
         stops[i].b = def->stops[i].color.b;
-        stops[i].a = def->stops[i].color.a;
+        stops[i].a = (uint8_t)((float)def->stops[i].color.a * opacity);
     }
 
     if (def->is_radial) {
@@ -1067,12 +1152,16 @@ static bool draw_pattern_fill(SvgRenderContext* ctx, RdtPath* path, Element* pat
 
     svg_push_clip(ctx, path, transform);
 
-    float start_x = x;
+    float pattern_tx = pattern_matrix.e13;
+    float pattern_ty = pattern_matrix.e23;
+    float start_x = x + pattern_tx;
     while (start_x + w > bx) start_x -= w;
     while (start_x + w <= bx) start_x += w;
-    float start_y = y;
+    start_x -= pattern_tx;
+    float start_y = y + pattern_ty;
     while (start_y + h > by) start_y -= h;
     while (start_y + h <= by) start_y += h;
+    start_y -= pattern_ty;
 
     float tile_y = start_y;
     while (tile_y < by + bh + h) {
@@ -1112,6 +1201,11 @@ static void draw_svg_fill_stroke(SvgRenderContext* ctx, RdtPath* path, Element* 
     char linecap_buf[64];
     char linejoin_buf[64];
     const char* fill = get_svg_attr_or_style(ctx, elem, "fill", fill_buf, sizeof(fill_buf));
+    const char* fill_opacity_attr = get_svg_attr_or_style(ctx, elem, "fill-opacity", fill_opacity_buf, sizeof(fill_opacity_buf));
+    const char* opacity_attr = get_svg_attr_or_style(ctx, elem, "opacity", opacity_buf, sizeof(opacity_buf));
+    float fill_opacity = fill_opacity_attr ? strtof(fill_opacity_attr, nullptr) : 1.0f;
+    float element_opacity = opacity_attr ? strtof(opacity_attr, nullptr) : 1.0f;
+    float fill_alpha = fill_opacity * element_opacity * ctx->opacity;
     Color fc;
     bool has_fill = true;
     bool gradient_applied = false;
@@ -1134,7 +1228,7 @@ static void draw_svg_fill_stroke(SvgRenderContext* ctx, RdtPath* path, Element* 
                     memcpy(id_buf, id_start, id_len);
                     SvgGradDef* def = lookup_grad_def((SvgDefTable*)ctx->defs, id_buf);
                     if (def && def->stop_count >= 2) {
-                        draw_gradient_fill(ctx, path, def, bx, by, bw, bh, transform, fill_rule);
+                        draw_gradient_fill(ctx, path, def, bx, by, bw, bh, transform, fill_rule, fill_alpha);
                         gradient_applied = true;
                         has_fill = false;
                     } else {
@@ -1164,20 +1258,7 @@ static void draw_svg_fill_stroke(SvgRenderContext* ctx, RdtPath* path, Element* 
     }
 
     if (has_fill) {
-        const char* fill_opacity = get_svg_attr_or_style(ctx, elem, "fill-opacity", fill_opacity_buf, sizeof(fill_opacity_buf));
-        if (fill_opacity) {
-            float opacity = strtof(fill_opacity, nullptr);
-            fc.a = (uint8_t)(fc.a * opacity);
-        }
-        const char* opacity = get_svg_attr_or_style(ctx, elem, "opacity", opacity_buf, sizeof(opacity_buf));
-        if (opacity) {
-            float op = strtof(opacity, nullptr);
-            fc.a = (uint8_t)(fc.a * op);
-        }
-        // apply inherited group opacity
-        if (ctx->opacity < 1.0f) {
-            fc.a = (uint8_t)(fc.a * ctx->opacity);
-        }
+        fc.a = (uint8_t)((float)fc.a * fill_alpha);
         svg_fill_path(ctx, path, fc, fill_rule, transform);
     }
 
@@ -1208,6 +1289,9 @@ static void draw_svg_fill_stroke(SvgRenderContext* ctx, RdtPath* path, Element* 
         if (stroke_opacity) {
             float opacity = strtof(stroke_opacity, nullptr);
             sc.a = (uint8_t)(sc.a * opacity);
+        }
+        if (opacity_attr) {
+            sc.a = (uint8_t)((float)sc.a * element_opacity);
         }
         // apply inherited group opacity
         if (ctx->opacity < 1.0f) {
@@ -3250,11 +3334,11 @@ static bool svg_item_number_equals(ItemReader item, int value) {
     return false;
 }
 
-static const char* svg_pdf_data_uri_for_image_id(SvgRenderContext* ctx, int object_num) {
-    if (!ctx || !ctx->svg_root || object_num <= 0) return nullptr;
+static const char* svg_pdf_registered_image_resolver(void* context, int object_num) {
+    SvgImageResolverEntry* entry = (SvgImageResolverEntry*)context;
+    if (!entry || object_num <= 0) return nullptr;
 
-    ItemReader pdf_root_attr(ctx->svg_root->get_attr("data-pdf-root"));
-    MapReader pdf_root = MapReader::fromItem(pdf_root_attr.item());
+    MapReader pdf_root = MapReader::fromItem(entry->pdf_root);
     if (!pdf_root.isValid()) return nullptr;
     ItemReader objects_item = pdf_root.get("objects");
     if (!objects_item.isArray()) return nullptr;
@@ -3276,6 +3360,11 @@ static const char* svg_pdf_data_uri_for_image_id(SvgRenderContext* ctx, int obje
     }
 
     return nullptr;
+}
+
+static const char* svg_pdf_data_uri_for_image_id(SvgRenderContext* ctx, int object_num) {
+    if (!ctx || !ctx->image_resolver || object_num <= 0) return nullptr;
+    return ctx->image_resolver(ctx->image_resolver_context, object_num);
 }
 
 static const char* svg_resolve_pdf_image_href(SvgRenderContext* ctx, const char* href) {
@@ -4106,6 +4195,7 @@ void render_svg_to_vec(RdtVector* vec, Element* svg_element, float viewport_widt
     ctx.vec = vec;
     ctx.dl = dl;
     ctx.source_path = source_path;
+    svg_get_registered_image_resolver(svg_element, &ctx.image_resolver, &ctx.image_resolver_context);
     ctx.pixel_ratio = (pixel_ratio > 0) ? pixel_ratio : 1.0f;
     ctx.fill_color.r = 0; ctx.fill_color.g = 0; ctx.fill_color.b = 0; ctx.fill_color.a = 255;  // default black
     ctx.stroke_color.r = 0; ctx.stroke_color.g = 0; ctx.stroke_color.b = 0; ctx.stroke_color.a = 0;  // default none

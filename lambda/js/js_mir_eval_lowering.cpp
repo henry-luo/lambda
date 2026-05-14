@@ -444,10 +444,172 @@ static bool js_eval_initializer_early_error(String* code_str, bool is_direct_eva
     return false;
 }
 
+static bool js_eval_var_conflicts_lexical_name(String* name) {
+    if (!name || name->len <= 0) return false;
+    extern int64_t js_eval_local_has_lexical_binding(Item key);
+    Item key = (Item){.item = s2it(heap_create_name(name->chars, name->len))};
+    if (!js_eval_local_has_lexical_binding(key)) return false;
+    js_throw_syntax_error((Item){.item = s2it(heap_create_name("Eval var conflicts with lexical declaration", 43))});
+    return true;
+}
+
+static bool js_eval_var_conflicts_lexical_pattern(JsAstNode* node) {
+    if (!node) return false;
+    switch (node->node_type) {
+        case JS_AST_NODE_IDENTIFIER:
+            return js_eval_var_conflicts_lexical_name(((JsIdentifierNode*)node)->name);
+        case JS_AST_NODE_ASSIGNMENT_PATTERN:
+            return js_eval_var_conflicts_lexical_pattern(((JsAssignmentPatternNode*)node)->left);
+        case JS_AST_NODE_REST_ELEMENT:
+        case JS_AST_NODE_REST_PROPERTY:
+            return js_eval_var_conflicts_lexical_pattern(((JsSpreadElementNode*)node)->argument);
+        case JS_AST_NODE_ARRAY_PATTERN:
+            for (JsAstNode* e = ((JsArrayPatternNode*)node)->elements; e; e = e->next) {
+                if (js_eval_var_conflicts_lexical_pattern(e)) return true;
+            }
+            break;
+        case JS_AST_NODE_OBJECT_PATTERN:
+            for (JsAstNode* p = ((JsObjectPatternNode*)node)->properties; p; p = p->next) {
+                if (p->node_type == JS_AST_NODE_PROPERTY) {
+                    if (js_eval_var_conflicts_lexical_pattern(((JsPropertyNode*)p)->value)) return true;
+                } else if (js_eval_var_conflicts_lexical_pattern(p)) {
+                    return true;
+                }
+            }
+            break;
+        default:
+            break;
+    }
+    return false;
+}
+
+static bool js_eval_var_conflicts_lexical_statement(JsAstNode* node);
+
+static bool js_eval_var_conflicts_lexical_statements(JsAstNode* stmt) {
+    for (; stmt; stmt = stmt->next) {
+        if (js_eval_var_conflicts_lexical_statement(stmt)) return true;
+    }
+    return false;
+}
+
+static bool js_eval_var_conflicts_lexical_statement(JsAstNode* node) {
+    if (!node) return false;
+    switch (node->node_type) {
+        case JS_AST_NODE_VARIABLE_DECLARATION: {
+            JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)node;
+            if (vd->kind != JS_VAR_VAR) return false;
+            for (JsAstNode* d = vd->declarations; d; d = d->next) {
+                if (d->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
+                if (js_eval_var_conflicts_lexical_pattern(((JsVariableDeclaratorNode*)d)->id)) return true;
+            }
+            break;
+        }
+        case JS_AST_NODE_FUNCTION_DECLARATION:
+            return js_eval_var_conflicts_lexical_name(((JsFunctionNode*)node)->name);
+        case JS_AST_NODE_BLOCK_STATEMENT:
+            return js_eval_var_conflicts_lexical_statements(((JsBlockNode*)node)->statements);
+        case JS_AST_NODE_IF_STATEMENT: {
+            JsIfNode* in = (JsIfNode*)node;
+            return js_eval_var_conflicts_lexical_statement(in->consequent) ||
+                js_eval_var_conflicts_lexical_statement(in->alternate);
+        }
+        case JS_AST_NODE_WHILE_STATEMENT:
+            return js_eval_var_conflicts_lexical_statement(((JsWhileNode*)node)->body);
+        case JS_AST_NODE_DO_WHILE_STATEMENT:
+            return js_eval_var_conflicts_lexical_statement(((JsDoWhileNode*)node)->body);
+        case JS_AST_NODE_FOR_STATEMENT: {
+            JsForNode* fn = (JsForNode*)node;
+            return js_eval_var_conflicts_lexical_statement(fn->init) ||
+                js_eval_var_conflicts_lexical_statement(fn->body);
+        }
+        case JS_AST_NODE_FOR_IN_STATEMENT:
+        case JS_AST_NODE_FOR_OF_STATEMENT: {
+            JsForOfNode* fo = (JsForOfNode*)node;
+            return js_eval_var_conflicts_lexical_statement(fo->left) ||
+                js_eval_var_conflicts_lexical_statement(fo->body);
+        }
+        case JS_AST_NODE_SWITCH_STATEMENT: {
+            JsSwitchNode* sw = (JsSwitchNode*)node;
+            for (JsAstNode* c = sw->cases; c; c = c->next) {
+                if (c->node_type != JS_AST_NODE_SWITCH_CASE) continue;
+                if (js_eval_var_conflicts_lexical_statements(((JsSwitchCaseNode*)c)->consequent)) return true;
+            }
+            break;
+        }
+        case JS_AST_NODE_TRY_STATEMENT: {
+            JsTryNode* tn = (JsTryNode*)node;
+            return js_eval_var_conflicts_lexical_statement(tn->block) ||
+                js_eval_var_conflicts_lexical_statement(tn->handler) ||
+                js_eval_var_conflicts_lexical_statement(tn->finalizer);
+        }
+        case JS_AST_NODE_CATCH_CLAUSE:
+            return js_eval_var_conflicts_lexical_statement(((JsCatchNode*)node)->body);
+        case JS_AST_NODE_LABELED_STATEMENT:
+            return js_eval_var_conflicts_lexical_statement(((JsLabeledStatementNode*)node)->body);
+        default:
+            break;
+    }
+    return false;
+}
+
+static bool js_eval_var_conflicts_lexical_program(JsAstNode* ast) {
+    if (!ast || ast->node_type != JS_AST_NODE_PROGRAM) return false;
+    return js_eval_var_conflicts_lexical_statements(((JsProgramNode*)ast)->body);
+}
+
+static bool js_eval_source_assigns_immutable_binding(String* code_str) {
+    if (!code_str || !code_str->chars) return false;
+    extern int64_t js_eval_local_has_immutable_binding(Item key);
+    const char* source = code_str->chars;
+    size_t len = code_str->len;
+    size_t pos = 0;
+    while (pos < len) {
+        char ch = source[pos];
+        if (ch == '\'' || ch == '"' || ch == '`') {
+            char quote = ch;
+            pos++;
+            while (pos < len && source[pos] != quote) {
+                if (source[pos] == '\\' && pos + 1 < len) pos++;
+                pos++;
+            }
+            if (pos < len) pos++;
+            continue;
+        }
+        if (ch == '/' && pos + 1 < len && source[pos + 1] == '/') {
+            pos += 2;
+            while (pos < len && source[pos] != '\n' && source[pos] != '\r') pos++;
+            continue;
+        }
+        if (ch == '/' && pos + 1 < len && source[pos + 1] == '*') {
+            pos += 2;
+            while (pos + 1 < len && !(source[pos] == '*' && source[pos + 1] == '/')) pos++;
+            if (pos + 1 < len) pos += 2;
+            continue;
+        }
+        if (!((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_' || ch == '$')) {
+            pos++;
+            continue;
+        }
+        size_t start = pos++;
+        while (pos < len && js_eval_is_ident_char(source[pos])) pos++;
+        size_t after = js_eval_skip_space_and_comments(source, len, pos);
+        bool assigns = false;
+        if (after < len && source[after] == '=') {
+            assigns = (after + 1 >= len || (source[after + 1] != '=' && source[after + 1] != '>'));
+        }
+        if (assigns) {
+            Item key = (Item){.item = s2it(heap_create_name(source + start, pos - start))};
+            if (js_eval_local_has_immutable_binding(key)) return true;
+        }
+    }
+    return false;
+}
+
 // ============================================================================
 // eval(code) — dynamic evaluation of JavaScript source code
 // Wraps the code in an IIFE and compiles/executes via JIT.
-// eval_flags bit 0: evaluate as global/direct script; bit 1: syntactic direct eval.
+// eval_flags bit 0: evaluate as global/direct script; bit 1: syntactic direct eval;
+// bit 2: inherit strictness from the direct eval caller.
 // ============================================================================
 extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
     if (!js_source_runtime) {
@@ -462,6 +624,7 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
     if (!code_str || code_str->len == 0) return ItemNull;
     bool is_direct_eval = (eval_flags & 2) != 0;
     bool is_global_scope = (eval_flags & 1) != 0;
+    bool inherited_strict = (eval_flags & 4) != 0;
 
     if (js_eval_initializer_early_error(code_str, is_direct_eval)) {
         return ItemNull;
@@ -531,6 +694,11 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
     size_t code_len = code_str->len;
     Item fn_item = ItemNull;
 
+    if (is_direct_eval && inherited_strict && js_eval_source_assigns_immutable_binding(code_str)) {
+        js_throw_type_error("Assignment to constant variable");
+        return ItemNull;
+    }
+
     // v37: Phase A — try expression form for single-expression eval code.
     // Wraps as "return (code)\n" inside a function IIFE. This handles simple
     // cases like eval("1+2"), eval("new.target"), etc. and preserves function
@@ -575,6 +743,9 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
                 skip_expr_form = true;
             else if (slen - i >= 5 && memcmp(s + i, "while", 5) == 0 &&
                 (i + 5 >= slen || s[i+5] == ' ' || s[i+5] == '('))
+                skip_expr_form = true;
+            else if (slen - i >= 4 && memcmp(s + i, "with", 4) == 0 &&
+                (i + 4 >= slen || s[i+4] == ' ' || s[i+4] == '('))
                 skip_expr_form = true;
             else if (slen - i >= 6 && memcmp(s + i, "switch", 6) == 0 &&
                 (i + 6 >= slen || s[i+6] == ' ' || s[i+6] == '('))
@@ -660,6 +831,7 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
             log_error("js-eval: failed to create transpiler for direct script");
             return ItemNull;
         }
+        tp->strict_mode = inherited_strict;
 
         if (!js_transpiler_parse(tp, source, source_len)) {
             log_error("js-eval: parse failed for direct script");
@@ -671,6 +843,17 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
         JsAstNode* js_ast = build_js_ast(tp, root);
         if (!js_ast) {
             log_error("js-eval: AST build failed for direct script");
+            js_transpiler_destroy(tp);
+            return ItemNull;
+        }
+
+        int early_errors = js_check_early_errors(tp, js_ast);
+        if (early_errors > 0) {
+            js_transpiler_destroy(tp);
+            js_throw_syntax_error((Item){.item = s2it(heap_create_name("Invalid eval source", 19))});
+            return ItemNull;
+        }
+        if (is_direct_eval && !inherited_strict && js_eval_var_conflicts_lexical_program(js_ast)) {
             js_transpiler_destroy(tp);
             return ItemNull;
         }

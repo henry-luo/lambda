@@ -1256,7 +1256,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
 
     // v20: Detect program-level "use strict" directive
     // Scan first few statements (var declarations may be hoisted before it)
-    mt->is_global_strict = false;
+    mt->is_global_strict = mt->tp && mt->tp->strict_mode;
     {
         JsAstNode* n = program->body;
         for (int i = 0; i < 10 && n; i++, n = n->next) {
@@ -2518,6 +2518,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         parent->captures[parent->capture_count].grandparent_slot = -1;
                         parent->captures[parent->capture_count].is_let_const = child->captures[ci].is_let_const;
                         parent->captures[parent->capture_count].is_const = child->captures[ci].is_const;
+                        parent->captures[parent->capture_count].is_nfe_binding = child->captures[ci].is_nfe_binding;
                         parent->captures[parent->capture_count].force_env_capture = child->captures[ci].force_env_capture;
                         parent->capture_count++;
                         changed = true;
@@ -3762,9 +3763,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             if (active_ctor->fc->capture_count > 0) {
                                 ctor_fn = jm_build_closure_for_method(mt, active_ctor->fc, active_ctor->param_count);
                             } else {
-                                ctor_fn = jm_call_2(mt, "js_new_function", MIR_T_I64,
-                                    MIR_T_I64, MIR_new_ref_op(mt->ctx, active_ctor->fc->func_item),
-                                    MIR_T_I64, MIR_new_int_op(mt->ctx, active_ctor->param_count));
+                                ctor_fn = jm_create_method_function(mt, active_ctor->fc, active_ctor->param_count);
                             }
                             MIR_reg_t ctor_key = jm_box_string_literal(mt, "__ctor__", 8);
                             jm_call_3(mt, "js_property_set", MIR_T_I64,
@@ -3860,6 +3859,9 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                                                 !(ce->node->superclass->node_type == JS_AST_NODE_LITERAL &&
                                                                     ((JsLiteralNode*)ce->node->superclass)->literal_type == JS_LITERAL_NULL)) {
                                 MIR_reg_t super_val = jm_transpile_box_item(mt, ce->node->superclass);
+                                jm_call_void_1(mt, "js_check_class_heritage_constructor",
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, super_val));
+                                jm_emit_exc_propagate_check(mt);
                                 MIR_reg_t sp_key = jm_box_string_literal(mt, "prototype", 9);
                                 MIR_reg_t sp_proto = jm_call_2(mt, "js_property_get", MIR_T_I64,
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, super_val),
@@ -4093,7 +4095,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             jm_call_void_2(mt, "js_set_function_name_if_anonymous",
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, val),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
-                            jm_call_3(mt, "js_property_set", MIR_T_I64,
+                            jm_call_3(mt, "js_create_data_property", MIR_T_I64,
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
@@ -4126,7 +4128,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                 MIR_reg_t key = jm_box_string_literal(mt, sf->name->chars, (int)sf->name->len);
                                 jm_call_void_1(mt, "js_check_class_static_field_key",
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
-                                jm_call_3(mt, "js_property_set", MIR_T_I64,
+                                jm_call_3(mt, "js_create_data_property", MIR_T_I64,
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
@@ -4154,7 +4156,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             jm_call_void_2(mt, "js_set_function_name_if_anonymous",
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, val),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
-                            jm_call_3(mt, "js_property_set", MIR_T_I64,
+                            jm_call_3(mt, "js_create_data_property", MIR_T_I64,
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, val));

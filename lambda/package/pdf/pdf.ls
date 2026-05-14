@@ -191,10 +191,12 @@ fn _page_font_names(pdf, page) {
 }
 
 // Build a single @font-face CSS rule.
-fn _font_face_rule(family: string, fmt: string, uri: string) {
+fn _font_face_rule(family: string, fmt: string, uri: string, weight, style) {
+    let face_weight = if (weight == null) "normal" else weight
+    let face_style = if (style == null) "normal" else style
     "@font-face { font-family: '" ++ family ++ "'; " ++
         "src: url(\"" ++ uri ++ "\") format('" ++ fmt ++ "'); " ++
-        "font-weight: normal; font-style: normal; " ++
+        "font-weight: " ++ face_weight ++ "; font-style: " ++ face_style ++ "; " ++
         "font-display: block; }\n"
 }
 
@@ -206,7 +208,7 @@ fn _collect_one_page_loop(pdf, page, names, i, seen_families, rules) {
         if (fam != null and not contains(seen_families, fam)) {
             _collect_one_page_loop(pdf, page, names, i + 1,
                 seen_families ++ [fam],
-                rules ++ [_font_face_rule(fam, info.font_format, info.font_data_uri)])
+                rules ++ [_font_face_rule(fam, info.font_format, info.font_data_uri, info.weight, info.style)])
         }
         else { _collect_one_page_loop(pdf, page, names, i + 1, seen_families, rules) }
     }

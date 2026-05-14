@@ -144,6 +144,7 @@ struct JsMirVarEntry {
     Type* full_type;         // P3.4: full Type* (e.g. TypeMap for interface vars; NULL otherwise)
     bool is_let_const;       // v20: true if declared with let/const (TDZ enforcement)
     bool is_const;           // true if declared with const (prevents reassignment)
+    bool is_nfe_binding;     // true for named function expression self-binding
     bool tdz_active;         // v20: true if still in temporal dead zone (before declaration)
     MIR_reg_t hoisted_data_reg;  // P4h: hoisted items/data pointer for loop optimization (0 = not active)
     MIR_reg_t hoisted_len_reg;   // P4h: hoisted length register for loop optimization (0 = not active)
@@ -177,6 +178,7 @@ struct JsCaptureEntry {
                           // grandparent env (stored in parent env slot 0). -1 if not transitive.
     bool is_let_const;   // v29 TDZ: true if captured variable is let/const (needs TDZ check)
     bool is_const;       // true if captured variable is const (assignment throws)
+    bool is_nfe_binding; // named function expression self-binding
     bool force_env_capture; // true when a lexical loop head shadows a module var
 };
 
@@ -210,6 +212,7 @@ struct JsFuncCollected {
     bool is_iife_body;              // true if this function is a top-level IIFE body
     // P3: Constructor flag (set for class constructor methods only)
     bool is_constructor;            // true if this function is a class constructor
+    bool is_derived_constructor;    // true if class constructor has [[ConstructorKind]] derived
     bool has_rest_param;            // true if last param is ...rest
     bool uses_arguments;            // v18q: true if function body references 'arguments'
     bool has_non_simple_params;      // v20: true if function has default/rest/destructuring params (no arguments aliasing)
