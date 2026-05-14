@@ -17,6 +17,7 @@
 #include "view.hpp"
 #include "../lib/tagged.hpp"
 #include "../lib/log.h"
+#include "../lib/str.h"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 
@@ -80,6 +81,40 @@ static void rel_to_abs(View* view, float rel_x, float rel_y,
     if (out_abs_y) *out_abs_y = y;
 }
 
+static bool pdf_text_run_metrics(DomText* text, float* out_width, bool* out_copy_space) {
+    if (out_width) *out_width = 0.0f;
+    if (out_copy_space) *out_copy_space = false;
+    if (!text || !text->parent || !text->parent->is_element()) return false;
+
+    DomElement* elem = lam::dom_require_element(text->parent);
+    const char* cls = elem->get_attribute("class");
+    if (!cls || !strstr(cls, "pdf-text-run")) return false;
+
+    const char* width_attr = elem->get_attribute("data-pdf-width");
+    float width = width_attr ? (float)str_to_double_default(width_attr, strlen(width_attr), 0.0) : 0.0f;
+    if (width <= 0.0f) return false;
+
+    const char* copy_attr = elem->get_attribute("data-pdf-copy-space");
+    if (out_width) *out_width = width;
+    if (out_copy_space) *out_copy_space = copy_attr && strcmp(copy_attr, "1") == 0;
+    return true;
+}
+
+static int pdf_visible_end_offset(DomText* text, TextRect* rect, bool copy_space) {
+    int end_offset = rect ? rect->start_index + (rect->length > 0 ? rect->length : 0) : 0;
+    if (!copy_space || !text || !rect || end_offset <= rect->start_index) return end_offset;
+    unsigned char* data = text->text_data();
+    if (data && data[end_offset - 1] == ' ') return end_offset - 1;
+    return end_offset;
+}
+
+static float text_rect_effective_width(DomText* text, TextRect* rect) {
+    float pdf_width = 0.0f;
+    bool copy_space = false;
+    if (pdf_text_run_metrics(text, &pdf_width, &copy_space)) return pdf_width;
+    return rect ? rect->width : 0.0f;
+}
+
 // Find the TextRect within `text` that contains UTF-8 byte offset `bo`.
 // Returns the last rect if `bo` is past the end. Returns NULL if `text`
 // has no rects (i.e. layout has not been performed).
@@ -103,6 +138,21 @@ static float interp_x_in_rect(const TextRect* rect, int bo) {
     if (local <= 0) return rect->x;
     if (local >= rect->length) return rect->x + rect->width;
     return rect->x + ((float)local / (float)rect->length) * rect->width;
+}
+
+static float interp_x_in_text_rect(DomText* text, TextRect* rect, int bo) {
+    if (!text || !rect || rect->length <= 0) return rect ? rect->x : 0.0f;
+    float pdf_width = 0.0f;
+    bool copy_space = false;
+    if (!pdf_text_run_metrics(text, &pdf_width, &copy_space)) return interp_x_in_rect(rect, bo);
+
+    int visible_end = pdf_visible_end_offset(text, rect, copy_space);
+    int visible_len = visible_end - rect->start_index;
+    if (visible_len <= 0) return rect->x;
+    int local = bo - rect->start_index;
+    if (local <= 0) return rect->x;
+    if (bo >= visible_end) return rect->x + pdf_width;
+    return rect->x + ((float)local / (float)visible_len) * pdf_width;
 }
 
 // Map a (DomNode, UTF-16 offset) boundary to (View*, byte_offset, x, y, h)
@@ -161,7 +211,7 @@ static bool resolve_boundary(const DomBoundary* b,
         // No layout yet — return false so caller knows to skip.
         return false;
     }
-    float local_x = interp_x_in_rect(r, byte_off);
+    float local_x = interp_x_in_text_rect(text, r, byte_off);
     float ax, ay;
     rel_to_abs(static_cast<View*>(text), local_x, r->y, &ax, &ay);
     if (out_view) *out_view = static_cast<View*>(text);
@@ -231,7 +281,8 @@ static DomText* hit_test_text_at(View* node, float vx, float vy,
         for (TextRect* r = t->rect; r; r = r->next) {
             float rx = abs_x + r->x;
             float ry = abs_y + r->y;
-            if (vx >= rx && vx <= rx + r->width &&
+            float rect_width = text_rect_effective_width(t, r);
+            if (vx >= rx && vx <= rx + rect_width &&
                 vy >= ry && vy <= ry + r->height) {
                 if (out_rect) *out_rect = r;
                 if (out_local_x) *out_local_x = vx - rx;
@@ -288,17 +339,18 @@ static void find_editable_boundary_hit(View* node, float vx, float vy,
             if (rect->height <= 0) continue;
             float rect_x = abs_x + rect->x;
             float rect_y = abs_y + rect->y;
-            float rect_right = rect_x + rect->width;
+            float rect_width = text_rect_effective_width(text, rect);
+            float rect_right = rect_x + rect_width;
             float rect_bottom = rect_y + rect->height;
 
             float score = -1.0f;
             float local_x = 0.0f;
             if (rect_y <= vy && vy < rect_bottom && vx >= rect_right) {
                 score = vx - rect_right;
-                local_x = rect->width;
+                local_x = rect_width;
             } else if (vy >= rect_bottom) {
                 score = (vy - rect_bottom) + 10000.0f;
-                local_x = rect->width;
+                local_x = rect_width;
             } else if (vy < rect_y) {
                 score = (rect_y - vy) + 20000.0f;
                 local_x = 0.0f;
@@ -335,14 +387,23 @@ static void find_editable_boundary_hit(View* node, float vx, float vy,
 }
 
 // Linear-search byte offset within a TextRect for a local x position.
-static int byte_offset_for_x(const TextRect* r, float local_x) {
+static int byte_offset_for_x(DomText* text, const TextRect* r, float local_x) {
     if (!r || r->length <= 0) return r ? r->start_index : 0;
     if (local_x <= 0) return r->start_index;
-    if (local_x >= r->width) return r->start_index + r->length;
-    float frac = local_x / r->width;
-    int local = (int)floorf(frac * (float)r->length + 0.5f);
+    float width = r->width;
+    int length = r->length;
+    float pdf_width = 0.0f;
+    bool copy_space = false;
+    if (pdf_text_run_metrics(text, &pdf_width, &copy_space)) {
+        width = pdf_width;
+        int visible_end = pdf_visible_end_offset(text, const_cast<TextRect*>(r), copy_space);
+        length = visible_end - r->start_index;
+    }
+    if (local_x >= width) return r->start_index + length;
+    float frac = width > 0.0f ? local_x / width : 0.0f;
+    int local = (int)floorf(frac * (float)length + 0.5f);
     if (local < 0) local = 0;
-    if (local > r->length) local = r->length;
+    if (local > length) local = length;
     return r->start_index + local;
 }
 
@@ -360,7 +421,7 @@ extern "C" DomBoundary dom_hit_test_to_boundary(View* root_view, float vx, float
         local_x = hit.local_x;
     }
     if (!t || !rect) return b;
-    int bo = byte_offset_for_x(rect, local_x);
+    int bo = byte_offset_for_x(t, rect, local_x);
     b.node = static_cast<DomNode*>(t);
     b.offset = dom_text_utf8_to_utf16(t, (uint32_t)bo);
     return b;
@@ -387,7 +448,7 @@ extern "C" void dom_range_for_each_rect(DomRange* range, UiContext* uicon,
         if (uicon && g_glyph_x_resolver) {
             return g_glyph_x_resolver(uicon, lam::view_require_text(t), r, bo);
         }
-        return interp_x_in_rect(r, bo);
+        return interp_x_in_text_rect(t, r, bo);
     };
 
     // Same-text-node, single TextRect (the common case): one rectangle.
