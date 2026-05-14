@@ -761,7 +761,10 @@ static void apply_animated_value(DomElement* element, CssAnimatedProp* prop) {
         }
         case CSS_PROPERTY_COLOR: {
             InlineProp* il = ensure_inline_prop(span);
-            if (il) il->color = prop->value.color;
+            if (il) {
+                il->color = prop->value.color;
+                il->has_color = true;
+            }
             break;
         }
         default:

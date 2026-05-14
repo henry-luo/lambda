@@ -2,7 +2,6 @@
 
 import font:   lambda.package.pdf.font
 import interp: lambda.package.pdf.interp
-import stream: lambda.package.pdf.stream
 
 fn has(s: string, needle: string) { (index_of(s, needle) >= 0) }
 
@@ -13,7 +12,7 @@ pn main() {
     let cid_hex = font.decode_hex("00010002", cmap)
     let greedy_hex = font.decode_hex("0102", cmap)
 
-    let tokens = stream.parse_content_stream("/Trim) <41 42> Tj")
+    let tokens = pdf_parse_content_stream("/Trim) <41 42> Tj")
     let name_ok = tokens[0].operands[0].value == "Trim"
     let hex_ok = tokens[0].operands[1].value == "4142"
 

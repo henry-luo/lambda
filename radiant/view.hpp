@@ -557,6 +557,7 @@ typedef struct FlexItemProp {
 struct InlineProp {
     CssEnum cursor;
     Color color;
+    bool has_color;
     Color svg_fill_color;
     CssEnum vertical_align;
     float vertical_align_offset;  // length/percentage vertical-align offset (px), positive = raise

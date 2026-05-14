@@ -581,6 +581,7 @@ static void replay_draw_glyph(ImageSurface* surface, const DlDrawGlyph* g) {
     GlyphBitmap* bitmap = (GlyphBitmap*)&g->bitmap;
     int x = g->x, y = g->y;
     Color color = g->color;
+    if (color.a == 0) return;
     const Bound* clip = &g->clip;
 
     if (g->has_transform && !g->is_color_emoji) {
@@ -635,6 +636,7 @@ static void replay_draw_glyph(ImageSurface* surface, const DlDrawGlyph* g) {
                     if (intensity == 0) continue;
 
                     uint8_t* p = row_pixels + dst_x * 4;
+                    intensity = (intensity * color.a + 127) / 255;
                     uint32_t v = 255 - intensity;
                     if (color.c == 0xFF000000) {
                         p[0] = p[0] * v / 255;
@@ -671,6 +673,7 @@ static void replay_draw_glyph(ImageSurface* surface, const DlDrawGlyph* g) {
                 }
 
                 uint8_t* p = (uint8_t*)surface->pixels + (dst_y - surface->tile_offset_y) * surface->pitch + dst_x * 4;
+                intensity = (intensity * color.a + 127) / 255;
                 uint32_t v = 255 - intensity;
                 if (color.c == 0xFF000000) {
                     p[0] = p[0] * v / 255;
@@ -769,6 +772,7 @@ static void replay_draw_glyph(ImageSurface* surface, const DlDrawGlyph* g) {
 
             if (intensity > 0) {
                 uint8_t* p = (uint8_t*)(row_pixels + (x + j) * 4);
+                intensity = (intensity * color.a + 127) / 255;
                 uint32_t v = 255 - intensity;
                 if (color.c == 0xFF000000) {
                     p[0] = p[0] * v / 255;

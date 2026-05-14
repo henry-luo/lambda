@@ -5,7 +5,7 @@
 // has the correct viewBox + page-number label.
 //
 // Phase 2: wire the content-stream pipeline:
-//   raw bytes → stream.parse_content_stream → interp.render_page → SVG
+//   raw bytes → pdf_parse_content_stream → interp.render_page → SVG
 // to render real text from each page's content stream.
 //
 //   input(path, 'pdf')           → Map { version, objects, pages, … }
@@ -17,7 +17,6 @@ import coords:  .coords
 import svg:     .svg
 import html:    .html
 import resolve: .resolve
-import stream:  .stream
 import interp:  .interp
 import font:    .font
 
@@ -73,7 +72,7 @@ fn _content_elements(pdf, page, page_h) {
     }
     else {
         let fonts = interp.resolve_page_fonts(pdf, page)
-        let ops = stream.parse_content_stream(raw_bytes)
+        let ops = pdf_parse_content_stream(raw_bytes)
         interp.render_page_with_fonts(pdf, page, ops, page_h, fonts)
     }
 }

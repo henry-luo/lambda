@@ -26,7 +26,6 @@ import image:   .image
 import shading: .shading
 import coords:  .coords
 import svg:     .svg
-import stream:  .stream
 
 // ============================================================
 // State
@@ -374,7 +373,7 @@ fn _first_shading_name_loop(ops, i, n) {
 }
 
 fn _first_shading_name(bytes) {
-    let ops = stream.parse_content_stream(bytes)
+    let ops = pdf_parse_content_stream(bytes)
     _first_shading_name_loop(ops, 0, len(ops))
 }
 
@@ -950,7 +949,7 @@ fn _step_do(ctx, operands, i, pdf, page, fonts, page_h, clip_prefix) {
     let fc = _form_content_for_do(pdf, page, operands)
     let has_form = (fc != null and fc.data != "")
     if (has_form) {
-        let form_ops = stream.parse_content_stream(fc.data)
+        let form_ops = pdf_parse_content_stream(fc.data)
         let form_ctm = util.matrix_mul(fc.matrix, ctx.st.ctm)
         let form_page = _form_page(page, fc)
         let form_fonts = _resolve_fonts(pdf, form_page, form_ops) ++ fonts

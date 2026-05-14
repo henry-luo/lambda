@@ -4,7 +4,6 @@
 // interpreter path. Supported 8-bit RGB inline images should render as
 // SVG pixel rects instead of the older placeholder rectangle.
 
-import stream: lambda.package.pdf.stream
 import interp: lambda.package.pdf.interp
 
 fn has(s: string, needle: string) { (index_of(s, needle) >= 0) }
@@ -17,7 +16,7 @@ pn main() {
      ++ "ABCDEF\n"
      ++ "EI\n"
      ++ "Q\n")
-    let ops = stream.parse_content_stream(cs)
+    let ops = pdf_parse_content_stream(cs)
     let doc = { objects: [], pages: [] }
     let page = { dict: { Resources: {} } }
     let r = interp.render_page(doc, page, ops, 100.0)

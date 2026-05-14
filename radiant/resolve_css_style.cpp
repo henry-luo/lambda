@@ -538,6 +538,9 @@ Color resolve_color_value(LayoutContext* lycon, const CssValue* value) {
         case CSS_COLOR_CURRENTCOLOR:
             result = get_current_color(lycon);
             break;
+        case CSS_COLOR_TRANSPARENT:
+            result = (Color){ .r = 0, .g = 0, .b = 0, .a = 0 };
+            break;
         default:
             break;
         }
@@ -712,14 +715,14 @@ Color resolve_color_value(LayoutContext* lycon, const CssValue* value) {
 // are processed before color in AVL tree order), walk up the parent chain.
 static Color get_current_color(LayoutContext* lycon) {
     ViewSpan* span = lam::view_as_element(lycon->view);
-    if (span && span->in_line && span->in_line->color.c != 0) {
+    if (span && span->in_line && span->in_line->has_color) {
         return span->in_line->color;
     }
     DomNode* p = span ? span->parent : nullptr;
     while (p) {
         if (p->is_element()) {
             DomElement* pe = lam::dom_require<DOM_NODE_ELEMENT>(p);
-            if (pe->in_line && pe->in_line->color.c != 0) {
+            if (pe->in_line && pe->in_line->has_color) {
                 return pe->in_line->color;
             }
         }
@@ -3574,6 +3577,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->in_line = alloc_inline_prop(lycon);
             }
             span->in_line->color = resolve_color_value(lycon, value);
+            span->in_line->has_color = true;
             break;
         }
 

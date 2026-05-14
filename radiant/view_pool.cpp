@@ -376,7 +376,7 @@ void print_inline_props(ViewSpan* span, StrBuf* buf, int indent) {
             }
             strbuf_append_format(buf, "cursor:%s ", cursor);
         }
-        if (span->in_line->color.c) {
+        if (span->in_line->has_color) {
             strbuf_append_format(buf, "color:#%x ", span->in_line->color.c);
         }
         if (span->in_line->vertical_align) {
@@ -2459,7 +2459,7 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent) {
             strbuf_append_char_n(buf, ' ', indent + 4);
             strbuf_append_format(buf, "\"cursor\": \"%s\"", cursor);
         }
-        if (span->in_line->color.c) {
+        if (span->in_line->has_color) {
             strbuf_append_str(buf, ",\n");
             strbuf_append_char_n(buf, ' ', indent + 4);
             strbuf_append_format(buf, "\"color\": \"#%06x\"", span->in_line->color.c);

@@ -485,7 +485,7 @@ static bool get_computed_style(View* view, const char* property, StrBuf* buf) {
     }
     // color (text color)
     if (strcmp(property, "color") == 0) {
-        if (elem->in_line) {
+        if (elem->in_line && elem->in_line->has_color) {
             serialize_color(elem->in_line->color, buf);
         } else {
             strbuf_append_str(buf, "rgb(0, 0, 0)");
