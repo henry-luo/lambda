@@ -1311,7 +1311,7 @@ test-pdf-render: build-pdf-render-test
 	@echo "Running PDF render visual gtest suite..."
 	@echo "=============================================================="
 	@if [ -f "test/test_pdf_render_visual_gtest.exe" ]; then \
-		./test/test_pdf_render_visual_gtest.exe; \
+		./test/test_pdf_render_visual_gtest.exe $(ARGS); \
 	else \
 		echo "Error: test/test_pdf_render_visual_gtest.exe not found - run 'make build-pdf-render-test' first"; \
 		exit 1; \

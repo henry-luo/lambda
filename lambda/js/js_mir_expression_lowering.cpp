@@ -312,7 +312,7 @@ MIR_reg_t jm_emit_put_value(JsMirTranspiler* mt, const JsMirReference* ref, MIR_
             result = value;
             break;
         }
-        result = jm_call_3(mt, "js_super_property_set", MIR_T_I64,
+        result = jm_call_3(mt, ref->strict ? "js_super_property_set" : "js_super_property_set_non_strict", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->key_reg),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
@@ -824,7 +824,7 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
 }
 
 void jm_emit_eval_local_ensure_frame(JsMirTranspiler* mt) {
-    if (!mt || mt->in_main || mt->eval_local_frame_reg == 0) return;
+    if (!mt || mt->eval_local_frame_reg == 0) return;
     MIR_label_t push_label = jm_new_label(mt);
     MIR_label_t done_label = jm_new_label(mt);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
@@ -841,7 +841,7 @@ void jm_emit_eval_local_ensure_frame(JsMirTranspiler* mt) {
 }
 
 void jm_emit_eval_local_pop_if_needed(JsMirTranspiler* mt) {
-    if (!mt || mt->in_main || mt->eval_local_frame_reg == 0) return;
+    if (!mt || mt->eval_local_frame_reg == 0) return;
     MIR_label_t done_label = jm_new_label(mt);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
         MIR_new_label_op(mt->ctx, done_label),
@@ -2027,11 +2027,11 @@ static void jm_emit_destructure_put_reference(JsMirTranspiler* mt, const JsMirRe
         jm_emit_exc_propagate_check(mt);
         break;
     case JS_MIR_REF_SUPER_PROPERTY:
-        jm_call_3(mt, "js_super_property_set", MIR_T_I64,
+        jm_call_3(mt, ref->strict ? "js_super_property_set" : "js_super_property_set_non_strict", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
-        jm_emit_exc_propagate_check(mt);
+        if (ref->strict) jm_emit_exc_propagate_check(mt);
         break;
     default:
         break;
@@ -2349,35 +2349,18 @@ void jm_emit_destructure_target(JsMirTranspiler* mt, JsAstNode* target, MIR_reg_
             } else if (ap->right->node_type == JS_AST_NODE_FUNCTION_EXPRESSION) {
                 JsFunctionNode* fn = (JsFunctionNode*)ap->right;
                 is_anon_func = (fn->name == NULL);
-            } else if (ap->right->node_type == JS_AST_NODE_CLASS_DECLARATION) {
+            } else if (ap->right->node_type == JS_AST_NODE_CLASS_EXPRESSION ||
+                       ap->right->node_type == JS_AST_NODE_CLASS_DECLARATION) {
                 JsClassNode* cls = (JsClassNode*)ap->right;
                 is_anon_class = (cls->name == NULL);
             }
             if (is_anon_func && id->name && id->name->chars) {
                 jm_emit_set_function_name(mt, resolved, id->name->chars);
             } else if (is_anon_class && id->name && id->name->chars) {
-                // ES spec: only set name if class doesn't already have own 'name'
-                // (e.g. class { static name() {} } has own 'name' from the static method)
-                MIR_reg_t name_key = jm_box_string_literal(mt, "name", 4);
-                MIR_reg_t has_name = jm_call_2(mt, "js_has_own_property", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, resolved),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, name_key));
-                MIR_label_t skip_name = jm_new_label(mt);
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, skip_name),
-                    MIR_new_reg_op(mt->ctx, has_name),
-                    MIR_new_int_op(mt->ctx, (int64_t)ITEM_FALSE)));
                 MIR_reg_t name_val = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
                 jm_call_void_2(mt, "js_set_class_name",
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, resolved),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, name_val));
-                // class name must be non-enumerable, non-writable, configurable
-                jm_call_void_2(mt, "js_mark_non_enumerable",
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, resolved),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, name_key));
-                jm_call_void_2(mt, "js_mark_non_writable",
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, resolved),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, name_key));
-                jm_emit_label(mt, skip_name);
             }
         }
         jm_emit_destructure_target(mt, ap->left, resolved);
@@ -5012,7 +4995,7 @@ static struct hashmap* jm_eval_env_push_bindings(JsMirTranspiler* mt) {
 }
 
 static void jm_eval_local_note_lexical_bindings(JsMirTranspiler* mt) {
-    if (!mt || mt->in_main || mt->eval_local_frame_reg == 0) return;
+    if (!mt || mt->eval_local_frame_reg == 0) return;
     for (int depth = mt->scope_depth; depth >= 0; depth--) {
         if (!mt->var_scopes[depth]) continue;
         size_t iter = 0; void* item;
@@ -5030,7 +5013,7 @@ static void jm_eval_local_note_lexical_bindings(JsMirTranspiler* mt) {
 }
 
 static void jm_eval_local_note_immutable_bindings(JsMirTranspiler* mt) {
-    if (!mt || mt->in_main || mt->eval_local_frame_reg == 0) return;
+    if (!mt || mt->eval_local_frame_reg == 0) return;
     for (int depth = mt->scope_depth; depth >= 0; depth--) {
         if (!mt->var_scopes[depth]) continue;
         size_t iter = 0; void* item;
@@ -7593,7 +7576,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 if (mt->is_global_strict || mt->is_module || (mt->current_fc && mt->current_fc->is_strict)) {
                     eval_flags |= 4;
                 }
-                if (!mt->in_main) {
+                if (mt->eval_local_frame_reg != 0) {
                     jm_emit_eval_local_ensure_frame(mt);
                     jm_eval_local_note_lexical_bindings(mt);
                     jm_eval_local_note_immutable_bindings(mt);
@@ -7602,7 +7585,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 MIR_reg_t eval_result = jm_call_2(mt, "js_builtin_eval", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg),
                     MIR_T_I64, MIR_new_int_op(mt->ctx, eval_flags));
-                if (!mt->in_main) {
+                if (mt->eval_local_frame_reg != 0) {
                     jm_eval_env_writeback_bindings(mt, eval_bridged);
                     jm_call_void_0(mt, "js_eval_env_pop_frame");
                 }

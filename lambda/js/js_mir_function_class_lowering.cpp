@@ -516,6 +516,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 JsAstNode* pat = dp;
                 if (pat->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN)
                     pat = ((JsAssignmentPatternNode*)pat)->left;
+                if (pat->node_type == JS_AST_NODE_REST_ELEMENT ||
+                    pat->node_type == JS_AST_NODE_SPREAD_ELEMENT)
+                    pat = ((JsSpreadElementNode*)pat)->argument;
                 if (pat->node_type == JS_AST_NODE_OBJECT_PATTERN ||
                     pat->node_type == JS_AST_NODE_ARRAY_PATTERN) {
                     jm_collect_pattern_names(pat, gen_locals);
@@ -654,6 +657,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 JsAstNode* pat = dp;
                 if (pat->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN)
                     pat = ((JsAssignmentPatternNode*)pat)->left;
+                if (pat->node_type == JS_AST_NODE_REST_ELEMENT ||
+                    pat->node_type == JS_AST_NODE_SPREAD_ELEMENT)
+                    pat = ((JsSpreadElementNode*)pat)->argument;
                 if (pat->node_type == JS_AST_NODE_OBJECT_PATTERN ||
                     pat->node_type == JS_AST_NODE_ARRAY_PATTERN) {
                     jm_collect_pattern_names(pat, dstr_names);
@@ -729,6 +735,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 JsAstNode* destr_pat = sm_param_node;
                 if (destr_pat->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN)
                     destr_pat = ((JsAssignmentPatternNode*)destr_pat)->left;
+                if (destr_pat->node_type == JS_AST_NODE_REST_ELEMENT ||
+                    destr_pat->node_type == JS_AST_NODE_SPREAD_ELEMENT)
+                    destr_pat = ((JsSpreadElementNode*)destr_pat)->argument;
 
                 // Object destructuring with RequireObjectCoercible check
                 if (destr_pat->node_type == JS_AST_NODE_OBJECT_PATTERN) {
@@ -1224,6 +1233,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     JsAstNode* destr_pat = sm_param_node;
                     if (destr_pat->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN)
                         destr_pat = ((JsAssignmentPatternNode*)destr_pat)->left;
+                    if (destr_pat->node_type == JS_AST_NODE_REST_ELEMENT ||
+                        destr_pat->node_type == JS_AST_NODE_SPREAD_ELEMENT)
+                        destr_pat = ((JsSpreadElementNode*)destr_pat)->argument;
 
                     // Object destructuring with RequireObjectCoercible check
                     if (destr_pat->node_type == JS_AST_NODE_OBJECT_PATTERN) {
@@ -1630,6 +1642,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             JsAstNode* pat = dstr_param;
             if (pat->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN)
                 pat = ((JsAssignmentPatternNode*)pat)->left;
+            if (pat->node_type == JS_AST_NODE_REST_ELEMENT ||
+                pat->node_type == JS_AST_NODE_SPREAD_ELEMENT)
+                pat = ((JsSpreadElementNode*)pat)->argument;
             if (pat->node_type == JS_AST_NODE_OBJECT_PATTERN ||
                 pat->node_type == JS_AST_NODE_ARRAY_PATTERN) {
                 jm_collect_pattern_names(pat, dstr_param_names);
@@ -1902,6 +1917,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             bool args_aliased = !fc->has_non_simple_params &&
                                 !mt->is_module &&
                                 !mt->is_global_strict &&
+                                !fc->is_strict &&
                                 !jm_has_use_strict_directive(fn);
             jm_call_void_1(mt, "js_set_arguments_info",
                 MIR_T_I64, MIR_new_int_op(mt->ctx, args_aliased ? 0 : 1));
@@ -2309,6 +2325,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 JsAstNode* destr_pat = param_node;
                 if (destr_pat->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN)
                     destr_pat = ((JsAssignmentPatternNode*)destr_pat)->left;
+                if (destr_pat->node_type == JS_AST_NODE_REST_ELEMENT ||
+                    destr_pat->node_type == JS_AST_NODE_SPREAD_ELEMENT)
+                    destr_pat = ((JsSpreadElementNode*)destr_pat)->argument;
 
                 // For object-destructured params: function f({ a, b = 0 }) → extract a, b from preg
                 if (destr_pat->node_type == JS_AST_NODE_OBJECT_PATTERN) {
