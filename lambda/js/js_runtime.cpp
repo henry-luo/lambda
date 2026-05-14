@@ -1414,6 +1414,31 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
         if (instance_proto.item != ItemNull.item && get_type_id(instance_proto) == LMD_TYPE_MAP) {
             js_set_prototype(obj, instance_proto);
         }
+        {
+            bool field_count_found = false;
+            Item field_count_item = js_map_get_fast(callee.map, "__if_count__", 12, &field_count_found);
+            if (field_count_found && get_type_id(field_count_item) == LMD_TYPE_INT) {
+                int64_t field_count = it2i(field_count_item);
+                if (field_count > 32) field_count = 32;
+                bool saved_private_init = js_private_field_initializing;
+                js_private_field_initializing = true;
+                for (int64_t field_index = 0; field_index < field_count; field_index++) {
+                    char key_slot[32];
+                    int key_slot_len = snprintf(key_slot, sizeof(key_slot), "__if_key_%lld", (long long)field_index);
+                    bool key_found = false;
+                    Item field_key = js_map_get_fast(callee.map, key_slot, key_slot_len, &key_found);
+                    if (!key_found || get_type_id(field_key) != LMD_TYPE_STRING) continue;
+
+                    char val_slot[32];
+                    int val_slot_len = snprintf(val_slot, sizeof(val_slot), "__if_val_%lld", (long long)field_index);
+                    bool val_found = false;
+                    Item field_val = js_map_get_fast(callee.map, val_slot, val_slot_len, &val_found);
+                    if (!val_found) field_val = make_js_undefined();
+                    js_property_set(obj, field_key, field_val);
+                }
+                js_private_field_initializing = saved_private_init;
+            }
+        }
         // Call the constructor (__ctor__ property on the class object)
         if (ctor.item != ItemNull.item && get_type_id(ctor) == LMD_TYPE_FUNC) {
             // Set pending new.target for the constructor call
@@ -4126,6 +4151,13 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                     }
                     js_strict_throw_property_error("assign to read only", str_key->chars, (int)str_key->len);
                     return value;
+                }
+                if (!has_own_before_set && !js_private_field_initializing &&
+                    str_key->len > 10 && strncmp(str_key->chars, "__private_", 10) == 0) {
+                    char msg[256];
+                    snprintf(msg, sizeof(msg), "Cannot write private member '#%.*s' to an object whose class did not declare it",
+                        (int)str_key->len - 10, str_key->chars + 10);
+                    return js_throw_type_error(msg);
                 }
                 // Phase 5: legacy __get_X / __set_X probe block removed. Phase 4
                 // intercept routes all transpiled accessor writes through
