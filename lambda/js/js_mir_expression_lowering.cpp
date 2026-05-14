@@ -31,6 +31,45 @@ static MIR_reg_t jm_emit_current_this(JsMirTranspiler* mt) {
     return jm_call_0(mt, "js_get_this", MIR_T_I64);
 }
 
+static bool jm_ts_find_first_super_call(TSNode node, uint32_t* first_start) {
+    if (ts_node_is_null(node)) return false;
+    const char* type = ts_node_type(node);
+    if (type && strcmp(type, "call_expression") == 0) {
+        TSNode callee = ts_node_named_child(node, 0);
+        if (!ts_node_is_null(callee) && strcmp(ts_node_type(callee), "super") == 0) {
+            uint32_t start = ts_node_start_byte(node);
+            if (*first_start == UINT32_MAX || start < *first_start) *first_start = start;
+            return true;
+        }
+    }
+    bool found = false;
+    uint32_t count = ts_node_named_child_count(node);
+    for (uint32_t i = 0; i < count; i++) {
+        TSNode child = ts_node_named_child(node, i);
+        const char* child_type = ts_node_type(child);
+        if (child_type && strcmp(child_type, "function_declaration") == 0) continue;
+        if (child_type && strcmp(child_type, "function") == 0) continue;
+        if (child_type && strcmp(child_type, "arrow_function") == 0) continue;
+        if (child_type && strcmp(child_type, "class_declaration") == 0) continue;
+        if (child_type && strcmp(child_type, "class") == 0) continue;
+        if (jm_ts_find_first_super_call(child, first_start)) found = true;
+    }
+    return found;
+}
+
+static bool jm_super_reference_before_constructor_super_call(JsMirTranspiler* mt, JsAstNode* super_ref_node) {
+    if (!mt || !super_ref_node || !mt->current_fc || !mt->current_class) return false;
+    if (!mt->current_fc->is_constructor) return false;
+    if (!mt->current_class->node || !mt->current_class->node->superclass) return false;
+    uint32_t ref_start = ts_node_start_byte(super_ref_node->node);
+    uint32_t first_super_start = UINT32_MAX;
+    bool has_super_call = false;
+    if (mt->current_fc->node) {
+        has_super_call = jm_ts_find_first_super_call(mt->current_fc->node->base.node, &first_super_start);
+    }
+    return !has_super_call || ref_start < first_super_start;
+}
+
 static void jm_emit_named_evaluation_for_identifier(JsMirTranspiler* mt, JsAstNode* rhs_node, MIR_reg_t rhs, String* name) {
     if (!rhs_node || !name || name->len <= 0) return;
     if (rhs_node->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
@@ -58,6 +97,7 @@ JsMirReference jm_emit_reference(JsMirTranspiler* mt, JsAstNode* node) {
     ref.key_reg = 0;
     ref.strict = mt->is_global_strict || mt->is_module ||
         (mt->current_fc && mt->current_fc->is_strict);
+    ref.uninitialized_this = false;
 
     if (!node) return ref;
 
@@ -72,6 +112,7 @@ JsMirReference jm_emit_reference(JsMirTranspiler* mt, JsAstNode* node) {
 
         if (is_super) {
             ref.kind = JS_MIR_REF_SUPER_PROPERTY;
+            ref.uninitialized_this = jm_super_reference_before_constructor_super_call(mt, node);
             ref.base_reg = jm_emit_current_this(mt);
             ref.key_reg = jm_emit_member_key(mt, mem);
             return ref;
@@ -101,6 +142,11 @@ MIR_reg_t jm_emit_get_value(JsMirTranspiler* mt, const JsMirReference* ref) {
             MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->key_reg));
     case JS_MIR_REF_SUPER_PROPERTY:
+        if (ref->uninitialized_this) {
+            MIR_reg_t msg = jm_box_string_literal(mt, "Must call super constructor before accessing 'this'", 51);
+            jm_call_void_1(mt, "js_throw_reference_error", MIR_T_I64, MIR_new_reg_op(mt->ctx, msg));
+            return jm_emit_undefined(mt);
+        }
         return jm_call_2(mt, "js_super_property_get", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->key_reg));
@@ -120,6 +166,12 @@ MIR_reg_t jm_emit_put_value(JsMirTranspiler* mt, const JsMirReference* ref, MIR_
             MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
         break;
     case JS_MIR_REF_SUPER_PROPERTY:
+        if (ref->uninitialized_this) {
+            MIR_reg_t msg = jm_box_string_literal(mt, "Must call super constructor before accessing 'this'", 51);
+            jm_call_void_1(mt, "js_throw_reference_error", MIR_T_I64, MIR_new_reg_op(mt->ctx, msg));
+            result = value;
+            break;
+        }
         result = jm_call_3(mt, "js_super_property_set", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->key_reg),
@@ -11020,7 +11072,10 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                     // v21: Handle member-expression / general-expression superclass
                     // e.g. class Foo extends obj.Bar, class Foo extends require('events').EventEmitter
                     if (!ce->superclass && ce->node && ce->node->superclass &&
-                        ce->node->superclass->node_type != JS_AST_NODE_IDENTIFIER) {
+                        ce->node->superclass->node_type != JS_AST_NODE_IDENTIFIER &&
+                                                ce->node->superclass->node_type != JS_AST_NODE_NULL &&
+                                                !(ce->node->superclass->node_type == JS_AST_NODE_LITERAL &&
+                                                    ((JsLiteralNode*)ce->node->superclass)->literal_type == JS_LITERAL_NULL)) {
                         MIR_reg_t super_val = jm_transpile_box_item(mt, ce->node->superclass);
                         MIR_reg_t sp_key = jm_box_string_literal(mt, "prototype", 9);
                         MIR_reg_t sp_proto = jm_call_2(mt, "js_property_get", MIR_T_I64,
@@ -11030,6 +11085,22 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, last_proto),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_proto));
                         ctor_super_val = super_val;
+                    }
+                    JsAstNode* heritage = cls_expr->superclass ? cls_expr->superclass :
+                        ((ce->node && ce->node->superclass) ? ce->node->superclass : NULL);
+                    bool heritage_is_null = heritage && (heritage->node_type == JS_AST_NODE_NULL ||
+                        (heritage->node_type == JS_AST_NODE_LITERAL &&
+                         ((JsLiteralNode*)heritage)->literal_type == JS_LITERAL_NULL));
+                    if (!heritage_is_null && heritage && heritage->node_type == JS_AST_NODE_IDENTIFIER) {
+                        JsIdentifierNode* heritage_id = (JsIdentifierNode*)heritage;
+                        heritage_is_null = heritage_id->name && heritage_id->name->len == 4 &&
+                            strncmp(heritage_id->name->chars, "null", 4) == 0;
+                    }
+                    if (heritage_is_null) {
+                        MIR_reg_t null_proto = jm_emit_null(mt);
+                        jm_call_void_2(mt, "js_set_prototype",
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, last_proto),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, null_proto));
                     }
                 }
                 // Add own instance methods (overrides parents)

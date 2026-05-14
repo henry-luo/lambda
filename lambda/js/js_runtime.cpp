@@ -4511,7 +4511,9 @@ static Item js_super_lookup_base(Item receiver) {
 // but call getters with receiver as 'this'. Implements ES spec super reference [[Get]].
 extern "C" Item js_super_property_get(Item receiver, Item key) {
     Item proto = js_super_lookup_base(receiver);
-    if (proto.item == ItemNull.item) return make_js_undefined();
+    if (proto.item == ItemNull.item || proto.item == ITEM_JS_UNDEFINED) {
+        return js_throw_type_error("Cannot read super property of null or undefined");
+    }
     TypeId type = get_type_id(proto);
     if (type != LMD_TYPE_MAP) return js_property_get(proto, key);
 
@@ -4636,6 +4638,23 @@ extern "C" Item js_super_property_set(Item receiver, Item key, Item value) {
     }
 
     // no setter found — set data property on receiver (ES spec: super.x = v sets own prop)
+    // Super property references are strict references because class bodies are strict.
+    // Enforce receiver write failure before calling the generic setter, which may
+    // otherwise silently reject writes when global strict mode is not active.
+    if (get_type_id(key) == LMD_TYPE_STRING) {
+        String* str_key = it2s(key);
+        if (str_key && str_key->len > 0) {
+            bool has_own = js_ordinary_has_own(receiver, str_key->chars, (int)str_key->len);
+            if (has_own) {
+                int fp = js_prop_attrs_fast_path(receiver, str_key->chars, (int)str_key->len, JSPD_NON_WRITABLE);
+                if (fp == 0) {
+                    return js_throw_type_error("Cannot assign to read only super property");
+                }
+            } else if (!js_is_truthy(js_object_is_extensible(receiver))) {
+                return js_throw_type_error("Cannot add super property to non-extensible object");
+            }
+        }
+    }
     return js_property_set(receiver, key, value);
 }
 

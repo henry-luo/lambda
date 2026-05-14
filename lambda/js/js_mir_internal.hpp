@@ -50,6 +50,7 @@ typedef struct JsMirReference {
     MIR_reg_t base_reg;
     MIR_reg_t key_reg;
     bool strict;
+    bool uninitialized_this;
 } JsMirReference;
 
 // internal function declarations

@@ -3420,6 +3420,22 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_obj));
                                 ctor_super_val = super_val;
                             }
+                            JsAstNode* heritage = cls_node->superclass ? cls_node->superclass :
+                                ((ce->node && ce->node->superclass) ? ce->node->superclass : NULL);
+                            bool heritage_is_null = heritage && (heritage->node_type == JS_AST_NODE_NULL ||
+                                (heritage->node_type == JS_AST_NODE_LITERAL &&
+                                 ((JsLiteralNode*)heritage)->literal_type == JS_LITERAL_NULL));
+                            if (!heritage_is_null && heritage && heritage->node_type == JS_AST_NODE_IDENTIFIER) {
+                                JsIdentifierNode* heritage_id = (JsIdentifierNode*)heritage;
+                                heritage_is_null = heritage_id->name && heritage_id->name->len == 4 &&
+                                    strncmp(heritage_id->name->chars, "null", 4) == 0;
+                            }
+                            if (heritage_is_null) {
+                                MIR_reg_t null_proto = jm_emit_null(mt);
+                                jm_call_void_2(mt, "js_set_prototype",
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, last_proto),
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, null_proto));
+                            }
                         }
                         // Own instance methods
                         for (int mi = 0; mi < ce->method_count; mi++) {
