@@ -4,6 +4,7 @@
 #include "gif_player.h"
 #include "lottie_player.h"
 #include "state_store.hpp"
+#include "retained_fields.hpp"
 
 #include "../lib/image.h"
 #include "../lib/log.h"
@@ -449,8 +450,11 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
                 surface = (ImageSurface*)mem_calloc(1, sizeof(ImageSurface), MEM_CAT_IMAGE);
                 surface->width = width;
                 surface->height = height;
-                surface->source_data = downloaded_data;
-                surface->source_data_len = downloaded_size;
+                {
+                    lam::SessionPtr<unsigned char> source_data = lam::take_ownership(downloaded_data);
+                    radiant_take_image_source_data(surface, source_data, downloaded_size);
+                }
+                downloaded_data = nullptr;
                 // pixels stays NULL — decoded on demand
                 log_debug("[image] Lazy load HTTP image: %dx%d (%zu bytes)", width, height, downloaded_size);
             } else {
@@ -471,7 +475,10 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
                 surface = (ImageSurface*)mem_calloc(1, sizeof(ImageSurface), MEM_CAT_IMAGE);
                 surface->width = width;
                 surface->height = height;
-                surface->source_path = mem_strdup(file_path, MEM_CAT_IMAGE);
+                {
+                    lam::SessionPtr<char> source_path = lam::session_strdup(file_path, MEM_CAT_IMAGE);
+                    radiant_take_image_source_path(surface, source_path);
+                }
                 // pixels stays NULL — decoded on demand
                 log_debug("[image] Lazy load local image: %dx%d from %s", width, height, file_path);
             } else {
@@ -961,7 +968,7 @@ void image_surface_ensure_decoded(ImageSurface* img, int target_w, int target_h)
             log_error("[image] Failed to decode local image: %s", img->source_path);
         }
         mem_free(img->source_path);
-        img->source_path = NULL;
+        radiant_clear_image_source_path(img);
     } else if (img->source_data) {
         // decode from memory buffer
         int width, height, channels;
@@ -978,7 +985,6 @@ void image_surface_ensure_decoded(ImageSurface* img, int target_w, int target_h)
             log_error("[image] Failed to decode HTTP image from memory");
         }
         mem_free(img->source_data);
-        img->source_data = NULL;
-        img->source_data_len = 0;
+        radiant_clear_image_source_data(img);
     }
 }

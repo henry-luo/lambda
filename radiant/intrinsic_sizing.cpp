@@ -10,6 +10,7 @@
 #include "grid.hpp"         // For GridTrackList
 #include "form_control.hpp" // For FormDefaults
 #include "rdt_video.h"
+#include "retained_fields.hpp"
 #include "../lib/font/font.h"
 #include "../lib/utf.h"
 #include "../lib/strbuf.h"
@@ -1099,7 +1100,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 if (css_family) need_font_setup = true;
             }
             if (css_family) {
-                temp_font_prop->family = (char*)css_family;
+                radiant_retain_font_family(temp_font_prop, lam::PoolPtr<char>((char*)css_family));
             }
         }
 
@@ -1140,7 +1141,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             if (longhand_family) {
                 css_family = longhand_family;
                 if (css_family != lycon->font.style->family) {
-                    temp_font_prop->family = (char*)css_family;
+                    radiant_retain_font_family(temp_font_prop, lam::PoolPtr<char>((char*)css_family));
                     need_font_setup = true;
                 }
             }
@@ -1215,7 +1216,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         if (need_font_setup) {
             // Ensure font-family is set (use parent's if not changed)
             if (!temp_font_prop->family && lycon->font.style) {
-                temp_font_prop->family = lycon->font.style->family;
+                radiant_retain_font_family(temp_font_prop, lam::PoolPtr<char>(lycon->font.style->family));
             }
             // Carry over font-size if not changed (needed for correct font loading)
             if (temp_font_prop->font_size <= 0 && lycon->font.style) {
@@ -1249,10 +1250,10 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                    tag == HTM_TAG_TT || tag == HTM_TAG_PRE || tag == HTM_TAG_LISTING ||
                    tag == HTM_TAG_XMP) {
             ua_font = alloc_font_prop(lycon);
-            ua_font->family = (char*)"monospace";
+            radiant_retain_font_family(ua_font, lam::GcPtr<char>((char*)"monospace"));
         }
         if (ua_font) {
-            if (!ua_font->family) ua_font->family = lycon->font.style->family;
+            if (!ua_font->family) radiant_retain_font_family(ua_font, lam::PoolPtr<char>(lycon->font.style->family));
             if (ua_font->font_size <= 0) ua_font->font_size = lycon->font.style->font_size;
             setup_font(lycon->ui_context, &lycon->font, ua_font);
             font_changed = true;
@@ -4047,7 +4048,9 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             if (resolved_size > 0 && fabsf(resolved_size - lycon->font.style->font_size) > 0.1f) {
                 FontProp* tfp = alloc_font_prop(lycon);
                 if (tfp) {
-                    tfp->family = lycon->font.style ? lycon->font.style->family : nullptr;
+                    if (lycon->font.style) {
+                        radiant_retain_font_family(tfp, lam::PoolPtr<char>(lycon->font.style->family));
+                    }
                     tfp->font_size = resolved_size;
                     setup_font(lycon->ui_context, &lycon->font, tfp);
                     height_font_changed = true;

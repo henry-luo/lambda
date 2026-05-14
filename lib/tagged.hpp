@@ -149,6 +149,28 @@ inline const ViewBlock* view_require_block(const View* v) {
     return static_cast<const ViewBlock*>(v);
 }
 
+inline ViewBlock* unsafe_view_block_api_span(ViewSpan* span) {
+    // Some legacy layout APIs accept ViewBlock* but only touch DomElement/ViewSpan
+    // storage. ViewBlock adds no fields, so this preserves ABI layout while making
+    // the exceptional conversion grepable.
+    return reinterpret_cast<ViewBlock*>(span);
+}
+
+inline ViewText* unsafe_view_text_storage(DomText* text) {
+    // DomText and ViewText share storage; ViewText currently adds no fields.
+    return reinterpret_cast<ViewText*>(text);
+}
+
+inline ViewTable* unsafe_view_table_storage(ViewBlock* block) {
+    // ViewTable currently adds table helper methods only. Some setup paths need
+    // table storage before the runtime view tag has been switched to TABLE.
+    return reinterpret_cast<ViewTable*>(block);
+}
+
+inline ViewTable* unsafe_view_table_storage(DomNode* node) {
+    return reinterpret_cast<ViewTable*>(node);
+}
+
 template<DomNodeType T> struct DomNodeTagToType;
 template<> struct DomNodeTagToType<DOM_NODE_ELEMENT> { typedef DomElement type; };
 template<> struct DomNodeTagToType<DOM_NODE_TEXT> { typedef DomText type; };

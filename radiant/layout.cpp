@@ -7,6 +7,7 @@
 #include "form_control.hpp"
 #include "state_store.hpp"
 #include "font_face.h"
+#include "retained_fields.hpp"
 #include "../lib/font/font.h"
 #include "css_animation.h"
 #include "webview.h"
@@ -673,7 +674,7 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                 }
                 if (dom_elem->font) {
                     if (!dom_elem->font->family)
-                        dom_elem->font->family = lycon->font.style->family;
+                        radiant_retain_font_family(dom_elem->font, lam::PoolPtr<char>(lycon->font.style->family));
                     if (dom_elem->font->font_size <= 0)
                         dom_elem->font->font_size = lycon->font.style->font_size;
                     if (dom_elem->font->font_style == 0 && lycon->font.style->font_style != 0)
