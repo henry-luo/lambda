@@ -9,10 +9,10 @@
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/strbuf.h"
 #include "../lib/log.h"
+#include "../lib/memtrack.h"
 #include <new>          // placement new
 #include <strings.h>    // strcasecmp
 #include <string.h>
-#include <stdlib.h>
 
 // dom_element_get_attribute is declared with C++ linkage in dom_element.hpp.
 
@@ -131,7 +131,7 @@ static char* tc_initial_value(DomElement* elem, uint32_t* out_len) {
         StrBuf* sb = strbuf_new_cap(64);
         tc_collect_text((DomNode*)elem, sb);
         size_t len = sb->str ? strlen(sb->str) : 0;
-        char* out = (char*)malloc(len + 1);
+        char* out = (char*)mem_alloc(len + 1, MEM_CAT_DOM);
         if (sb->str) memcpy(out, sb->str, len);
         out[len] = '\0';
         strbuf_free(sb);
@@ -141,7 +141,7 @@ static char* tc_initial_value(DomElement* elem, uint32_t* out_len) {
     const char* v = dom_element_get_attribute(elem, "value");
     if (!v) v = "";
     size_t len = strlen(v);
-    char* out = (char*)malloc(len + 1);
+    char* out = (char*)mem_alloc(len + 1, MEM_CAT_DOM);
     memcpy(out, v, len);
     out[len] = '\0';
     *out_len = (uint32_t)len;
@@ -234,8 +234,8 @@ void tc_set_value(DomElement* elem, const char* new_val, size_t new_len) {
     uint32_t old_end = f->selection_end;
     uint8_t  old_dir = f->selection_direction;
     bool was_initialized = f->tc_initialized;
-    if (f->current_value) free(f->current_value);
-    char* buf = (char*)malloc(new_len + 1);
+    if (f->current_value) mem_free(f->current_value);
+    char* buf = (char*)mem_alloc(new_len + 1, MEM_CAT_DOM);
     if (new_val && new_len) memcpy(buf, new_val, new_len);
     buf[new_len] = '\0';
     f->current_value = buf;
@@ -310,8 +310,8 @@ void tc_sync_legacy_to_form(DomElement* elem, DocState* state) {
     uint32_t blen = (uint32_t)strlen(val);
     // Always keep current_value in sync with value pointer
     if (val != f->current_value) {
-        if (f->current_value) free(f->current_value);
-        f->current_value = (char*)malloc(blen + 1);
+        if (f->current_value) mem_free(f->current_value);
+        f->current_value = (char*)mem_alloc(blen + 1, MEM_CAT_DOM);
         memcpy(f->current_value, val, blen);
         f->current_value[blen] = '\0';
         f->current_value_len = blen;

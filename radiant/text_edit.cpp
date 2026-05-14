@@ -11,9 +11,9 @@
 #include "view.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/log.h"
+#include "../lib/memtrack.h"
 
 #include <stdint.h>
-#include <stdlib.h>
 #include <string.h>
 #include <strings.h>    // strcasecmp (F5 input type checks)
 
@@ -235,7 +235,7 @@ bool te_replace_byte_range(DomElement* elem, DocState* state, void* target,
 
     // Build new buffer: old[0..start) + repl[0..repl_len) + old[end..old_len)
     uint32_t new_len = (old_len - (end - start)) + repl_len;
-    char* nbuf = (char*)malloc((size_t)new_len + 1);
+    char* nbuf = (char*)mem_alloc((size_t)new_len + 1, MEM_CAT_TEMP);
     if (!nbuf) return false;
     if (start > 0)            memcpy(nbuf,             old_buf,           start);
     if (repl_len > 0 && repl) memcpy(nbuf + start,     repl,              repl_len);
@@ -245,7 +245,7 @@ bool te_replace_byte_range(DomElement* elem, DocState* state, void* target,
     nbuf[new_len] = '\0';
 
     tc_set_value(elem, nbuf, new_len);
-    free(nbuf);
+    mem_free(nbuf);
 
     // F5: dispatch `input` after the mutation is committed.
     te_dispatch_input(elem);
@@ -278,10 +278,10 @@ void te_focus_capture_value(DomElement* elem) {
     const char* buf = tc_buffer(f, &blen);
 
     // Free previous snapshot (if any) and replace with a fresh copy.
-    if (f->value_at_focus) { free(f->value_at_focus); f->value_at_focus = nullptr; }
+    if (f->value_at_focus) { mem_free(f->value_at_focus); f->value_at_focus = nullptr; }
     f->value_at_focus_len = 0;
     if (buf) {
-        f->value_at_focus = (char*)malloc((size_t)blen + 1);
+        f->value_at_focus = (char*)mem_alloc((size_t)blen + 1, MEM_CAT_DOM);
         if (f->value_at_focus) {
             if (blen) memcpy(f->value_at_focus, buf, blen);
             f->value_at_focus[blen] = '\0';
@@ -318,7 +318,7 @@ bool te_blur_should_dispatch_change(DomElement* elem) {
     }
 
     // Always clear the snapshot; the next focus will re-capture.
-    if (f->value_at_focus) { free(f->value_at_focus); f->value_at_focus = nullptr; }
+    if (f->value_at_focus) { mem_free(f->value_at_focus); f->value_at_focus = nullptr; }
     f->value_at_focus_len = 0;
 
     log_debug("text_edit: blur_should_dispatch_change elem=%p changed=%d",
@@ -330,10 +330,10 @@ bool te_blur_should_dispatch_change(DomElement* elem) {
 
 EditHistory* te_history_new(uint16_t cap) {
     if (cap == 0) cap = TE_HISTORY_DEFAULT_CAP;
-    EditHistory* h = (EditHistory*)calloc(1, sizeof(EditHistory));
+    EditHistory* h = (EditHistory*)mem_calloc(1, sizeof(EditHistory), MEM_CAT_DOM);
     if (!h) return nullptr;
-    h->ring = (EditHistoryEntry*)calloc(cap, sizeof(EditHistoryEntry));
-    if (!h->ring) { free(h); return nullptr; }
+    h->ring = (EditHistoryEntry*)mem_calloc(cap, sizeof(EditHistoryEntry), MEM_CAT_DOM);
+    if (!h->ring) { mem_free(h); return nullptr; }
     h->cap = cap;
     return h;
 }
@@ -342,11 +342,11 @@ void te_history_free(EditHistory* h) {
     if (!h) return;
     if (h->ring) {
         for (uint16_t i = 0; i < h->cap; i++) {
-            if (h->ring[i].snapshot) free(h->ring[i].snapshot);
+            if (h->ring[i].snapshot) mem_free(h->ring[i].snapshot);
         }
-        free(h->ring);
+        mem_free(h->ring);
     }
-    free(h);
+    mem_free(h);
 }
 
 static EditHistory* tc_get_or_create_history(FormControlProp* f) {
@@ -386,9 +386,9 @@ void te_history_push(DomElement* elem) {
     }
 
     EditHistoryEntry* slot = &h->ring[h->head];
-    if (slot->snapshot) { free(slot->snapshot); slot->snapshot = nullptr; }
+    if (slot->snapshot) { mem_free(slot->snapshot); slot->snapshot = nullptr; }
     slot->length = blen;
-    slot->snapshot = (char*)malloc((size_t)blen + 1);
+    slot->snapshot = (char*)mem_alloc((size_t)blen + 1, MEM_CAT_DOM);
     if (!slot->snapshot) return;
     if (blen) memcpy(slot->snapshot, buf, blen);
     slot->snapshot[blen] = '\0';
@@ -583,7 +583,7 @@ uint32_t te_paste(DomElement* elem, DocState* state, void* target,
     // collapse CRLF/CR/LF into a single U+0020. For <textarea> we drop
     // bare CR and \r\n -> \n (HTML normalization). Worst case the buffer
     // size equals `len`.
-    char* sanitized = (char*)malloc((size_t)len + 1);
+    char* sanitized = (char*)mem_alloc((size_t)len + 1, MEM_CAT_TEMP);
     if (!sanitized) return 0;
     uint32_t s_len = 0;
     for (uint32_t i = 0; i < len; i++) {
@@ -618,7 +618,7 @@ uint32_t te_paste(DomElement* elem, DocState* state, void* target,
         uint32_t post_cp = (cur_cp >= sel_cp) ? (cur_cp - sel_cp) : 0;
         if (post_cp >= (uint32_t)f->maxlength) {
             // No room left.
-            free(sanitized);
+            mem_free(sanitized);
             return 0;
         }
         uint32_t budget = (uint32_t)f->maxlength - post_cp;
@@ -640,13 +640,13 @@ uint32_t te_paste(DomElement* elem, DocState* state, void* target,
         }
     }
 
-    if (s_len == 0) { free(sanitized); return 0; }
+    if (s_len == 0) { mem_free(sanitized); return 0; }
 
     // Step 3: replace [sel_a, sel_b) with sanitized. te_replace_byte_range
     // dispatches beforeinput/input and pushes an undo entry.
     bool ok = te_replace_byte_range(elem, state, target,
                                     sel_a, sel_b, sanitized, s_len);
-    free(sanitized);
+    mem_free(sanitized);
     return ok ? s_len : 0;
 }
 
@@ -663,7 +663,7 @@ extern "C" __attribute__((weak)) void js_dom_queue_textcontrol_compositionend(Do
 
 static void te_clear_preedit(FormControlProp* f) {
     if (!f) return;
-    if (f->preedit_utf8) { free(f->preedit_utf8); f->preedit_utf8 = nullptr; }
+    if (f->preedit_utf8) { mem_free(f->preedit_utf8); f->preedit_utf8 = nullptr; }
     f->preedit_len = 0;
     f->preedit_caret = 0;
 }
@@ -697,11 +697,11 @@ void te_ime_update(DomElement* elem, const char* preedit, uint32_t len,
     if (len == 0 || !preedit) {
         te_clear_preedit(f);
     } else {
-        char* buf = (char*)malloc((size_t)len + 1);
+        char* buf = (char*)mem_alloc((size_t)len + 1, MEM_CAT_DOM);
         if (!buf) return;
         memcpy(buf, preedit, len);
         buf[len] = '\0';
-        if (f->preedit_utf8) free(f->preedit_utf8);
+        if (f->preedit_utf8) mem_free(f->preedit_utf8);
         f->preedit_utf8 = buf;
         f->preedit_len = len;
         f->preedit_caret = caret_cp;

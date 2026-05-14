@@ -1,6 +1,7 @@
 #include "js_regexp_compile.h"
 #include "js_regex_wrapper.h"
 #include "../../lib/log.h"
+#include "../../lib/mem.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -291,7 +292,7 @@ char* js_regexp_rewrite_named_backrefs(const char* pattern, int pattern_len,
     }
     if (!has_named_backref) return NULL;
 
-    char* rewritten = (char*)malloc((size_t)pattern_len + 1);
+    char* rewritten = (char*)mem_alloc((size_t)pattern_len + 1, MEM_CAT_JS_RUNTIME);
     if (!rewritten) return NULL;
     int out_pos = 0;
     in_class = false;
@@ -360,7 +361,7 @@ static char* js_regexp_replace_all_owned(char* pattern, int* pattern_len,
     if (count == 0) return pattern;
 
     int new_len = *pattern_len + count * (to_len - from_len);
-    char* replaced = (char*)malloc((size_t)new_len + 1);
+    char* replaced = (char*)mem_alloc((size_t)new_len + 1, MEM_CAT_JS_RUNTIME);
     if (!replaced) return pattern;
 
     int in_pos = 0;
@@ -376,7 +377,7 @@ static char* js_regexp_replace_all_owned(char* pattern, int* pattern_len,
         }
     }
     replaced[out_pos] = '\0';
-    free(pattern);
+    mem_free(pattern);
     *pattern_len = out_pos;
     return replaced;
 }
@@ -412,7 +413,7 @@ static void js_regexp_replace_property_escape(char** pattern, int* pattern_len,
     *pattern = js_regexp_replace_all_owned(*pattern, pattern_len, from, replacement);
     snprintf(from, sizeof(from), "\\P{%s=%s}", key, value);
     int replacement_len = (int)strlen(replacement);
-    char* negated = (char*)malloc((size_t)replacement_len + 3);
+    char* negated = (char*)mem_alloc((size_t)replacement_len + 3, MEM_CAT_JS_RUNTIME);
     if (!negated) return;
     negated[0] = '[';
     negated[1] = '^';
@@ -423,14 +424,14 @@ static void js_regexp_replace_property_escape(char** pattern, int* pattern_len,
         memcpy(negated + 2, replacement, (size_t)replacement_len + 1);
     }
     *pattern = js_regexp_replace_all_owned(*pattern, pattern_len, from, negated);
-    free(negated);
+    mem_free(negated);
 }
 
 char* js_regexp_canonicalize_property_escapes(const char* pattern, int pattern_len,
     int* out_len) {
     if (out_len) *out_len = pattern_len;
     if (!pattern || pattern_len < 0) return NULL;
-    char* result = (char*)malloc((size_t)pattern_len + 1);
+    char* result = (char*)mem_alloc((size_t)pattern_len + 1, MEM_CAT_JS_RUNTIME);
     if (!result) return NULL;
     memcpy(result, pattern, (size_t)pattern_len);
     result[pattern_len] = '\0';

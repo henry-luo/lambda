@@ -24,6 +24,7 @@
 #include "../mark_builder.hpp"
 #include "../mark_reader.hpp"
 #include "lib/log.h"
+#include "lib/mem.h"
 #include <ctype.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -1390,7 +1391,7 @@ static int color_space_ncomp(Item cs, ObjTable* table) {
     return 0;
 }
 
-// Growable byte buffer for PNG assembly. Backed by malloc; explicit free.
+// Growable byte buffer for PNG assembly. Backed by mem_alloc; explicit mem_free.
 struct ByteBuf {
     uint8_t* data;
     size_t   len;
@@ -1398,14 +1399,14 @@ struct ByteBuf {
 };
 
 static bool bb_init(ByteBuf* b, size_t cap) {
-    b->data = (uint8_t*)malloc(cap > 0 ? cap : 1);
+    b->data = (uint8_t*)mem_alloc(cap > 0 ? cap : 1, MEM_CAT_INPUT_PDF);
     b->len = 0;
     b->cap = b->data ? cap : 0;
     return b->data != nullptr;
 }
 
 static void bb_free(ByteBuf* b) {
-    if (b->data) free(b->data);
+    if (b->data) mem_free(b->data);
     b->data = nullptr; b->len = 0; b->cap = 0;
 }
 
@@ -1413,7 +1414,7 @@ static bool bb_reserve(ByteBuf* b, size_t want) {
     if (b->len + want <= b->cap) return true;
     size_t newcap = b->cap ? b->cap : 64;
     while (newcap < b->len + want) newcap *= 2;
-    uint8_t* p = (uint8_t*)realloc(b->data, newcap);
+    uint8_t* p = (uint8_t*)mem_realloc(b->data, newcap, MEM_CAT_INPUT_PDF);
     if (!p) return false;
     b->data = p; b->cap = newcap;
     return true;
@@ -1448,8 +1449,8 @@ static bool png_chunk(ByteBuf* out, const char type[4],
 }
 
 // Encode RGBA pixels (width*height*4 bytes, top-down, 8-bit per channel)
-// to a PNG byte stream. Returns malloc'd buffer in *out_data and length
-// in *out_len. Caller must free(). Returns false on allocation/zlib errors.
+// to a PNG byte stream. Returns mem_alloc'd buffer in *out_data and length
+// in *out_len. Caller must mem_free(). Returns false on allocation/zlib errors.
 static bool encode_png_rgba(const uint8_t* pixels, int width, int height,
                             uint8_t** out_data, size_t* out_len) {
     if (!pixels || width <= 0 || height <= 0) return false;
@@ -1474,7 +1475,7 @@ static bool encode_png_rgba(const uint8_t* pixels, int width, int height,
     // bytes of pixel data.
     size_t row_bytes = (size_t)width * 4;
     size_t raw_len = (row_bytes + 1) * (size_t)height;
-    uint8_t* raw = (uint8_t*)malloc(raw_len);
+    uint8_t* raw = (uint8_t*)mem_alloc(raw_len, MEM_CAT_INPUT_PDF);
     if (!raw) { bb_free(&png); return false; }
     for (int y = 0; y < height; y++) {
         raw[y * (row_bytes + 1)] = 0;  // no filter
@@ -1484,13 +1485,13 @@ static bool encode_png_rgba(const uint8_t* pixels, int width, int height,
 
     // Deflate (zlib wrapper) into IDAT
     uLongf zlen = compressBound((uLong)raw_len);
-    uint8_t* zbuf = (uint8_t*)malloc(zlen);
-    if (!zbuf) { free(raw); bb_free(&png); return false; }
+    uint8_t* zbuf = (uint8_t*)mem_alloc(zlen, MEM_CAT_INPUT_PDF);
+    if (!zbuf) { mem_free(raw); bb_free(&png); return false; }
     int zr = compress2(zbuf, &zlen, raw, (uLong)raw_len, Z_DEFAULT_COMPRESSION);
-    free(raw);
-    if (zr != Z_OK) { free(zbuf); bb_free(&png); return false; }
+    mem_free(raw);
+    if (zr != Z_OK) { mem_free(zbuf); bb_free(&png); return false; }
     bool ok = png_chunk(&png, "IDAT", zbuf, (size_t)zlen);
-    free(zbuf);
+    mem_free(zbuf);
     if (!ok) { bb_free(&png); return false; }
 
     // IEND
@@ -1501,13 +1502,13 @@ static bool encode_png_rgba(const uint8_t* pixels, int width, int height,
     return true;
 }
 
-// Base64 encoder (no line breaks) — RFC 4648. Returns malloc'd
-// nul-terminated string; caller frees().
+// Base64 encoder (no line breaks) — RFC 4648. Returns mem_alloc'd
+// nul-terminated string; caller mem_free()s.
 static char* base64_alloc(const uint8_t* src, size_t n) {
     static const char tbl[] =
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     size_t out_len = ((n + 2) / 3) * 4;
-    char* out = (char*)malloc(out_len + 1);
+    char* out = (char*)mem_alloc(out_len + 1, MEM_CAT_INPUT_PDF);
     if (!out) return nullptr;
     size_t i = 0, j = 0;
     while (i + 2 < n) {
@@ -1553,10 +1554,10 @@ static String* bytes_to_data_uri(Input* input, const char* mime,
     size_t b64_len = strlen(b64);
     size_t total = strlen("data:") + mime_len + strlen(";base64,") + b64_len;
     String* out = (String*)pool_calloc(input->pool, sizeof(String) + total + 1);
-    if (!out) { free(b64); return nullptr; }
+    if (!out) { mem_free(b64); return nullptr; }
 
     int n = snprintf(out->chars, total + 1, "data:%s;base64,%s", mime, b64);
-    free(b64);
+    mem_free(b64);
     if (n < 0 || (size_t)n != total) return nullptr;
 
     out->len = (uint32_t)total;
@@ -1628,7 +1629,7 @@ static String* image_to_data_uri(Input* input, Map* stream_map,
     // in the pixel buffer — the SVG <image> sits inside the page-level
     // y-flip group).
     size_t rgba_len = (size_t)w * (size_t)h * 4;
-    uint8_t* rgba = (uint8_t*)malloc(rgba_len);
+    uint8_t* rgba = (uint8_t*)mem_alloc(rgba_len, MEM_CAT_INPUT_PDF);
     if (!rgba) return nullptr;
     for (int y = 0; y < h; y++) {
         for (int x = 0; x < w; x++) {
@@ -1648,11 +1649,11 @@ static String* image_to_data_uri(Input* input, Map* stream_map,
 
     uint8_t* png_buf = nullptr; size_t png_len = 0;
     bool ok = encode_png_rgba(rgba, w, h, &png_buf, &png_len);
-    free(rgba);
+    mem_free(rgba);
     if (!ok) return nullptr;
 
     char* b64 = base64_alloc(png_buf, png_len);
-    free(png_buf);
+    mem_free(png_buf);
     if (!b64) return nullptr;
 
     static const char prefix[] = "data:image/png;base64,";
@@ -1660,13 +1661,13 @@ static String* image_to_data_uri(Input* input, Map* stream_map,
     size_t blen = strlen(b64);
     size_t total = plen + blen;
     String* out = (String*)pool_calloc(input->pool, sizeof(String) + total + 1);
-    if (!out) { free(b64); return nullptr; }
+    if (!out) { mem_free(b64); return nullptr; }
     memcpy(out->chars, prefix, plen);
     memcpy(out->chars + plen, b64, blen);
     out->chars[total] = '\0';
     out->len = (uint32_t)total;
     out->is_ascii = 1;
-    free(b64);
+    mem_free(b64);
     return out;
 }
 
@@ -1715,12 +1716,12 @@ static String* font_stream_to_data_uri(Input* input, Map* sm,
     size_t prefix_len = strlen("data:") + strlen(mime) + strlen(";base64,");
     size_t total = prefix_len + b64_len;
     String* out = (String*)pool_calloc(input->pool, sizeof(String) + total + 1);
-    if (!out) { free(b64); return nullptr; }
+    if (!out) { mem_free(b64); return nullptr; }
     int n = snprintf(out->chars, total + 1, "data:%s;base64,%s", mime, b64);
-    if (n < 0 || (size_t)n != total) { free(b64); return nullptr; }
+    if (n < 0 || (size_t)n != total) { mem_free(b64); return nullptr; }
     out->len = (uint32_t)total;
     out->is_ascii = 1;
-    free(b64);
+    mem_free(b64);
     return out;
 }
 

@@ -403,7 +403,7 @@ void process_script_resource(NetworkResource* res, struct DomDocument* doc) {
     char* content = read_file_to_string(res->local_path, &content_size);
     if (!content || content_size == 0) {
         log_warn("network: failed to read cached script: %s", res->local_path);
-        if (content) free(content);
+        if (content) mem_free(content);
         return;
     }
 
@@ -412,7 +412,7 @@ void process_script_resource(NetworkResource* res, struct DomDocument* doc) {
     // The script content is available in the cache file for later execution
     // via flush_layout_updates() or a future incremental script runner pass.
     log_info("network: script cached for deferred execution: %s (%zu bytes)", res->url, content_size);
-    free(content);
+    mem_free(content);
 
     // Schedule reflow so the main thread can pick up and execute this script
     if (res->manager && doc->root) {

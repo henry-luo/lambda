@@ -4,7 +4,7 @@
 // On Windows: rdt_video_mf.cpp (Media Foundation) — not yet implemented, using stubs
 
 #include "rdt_video.h"
-#include <stdlib.h>
+#include "../lib/memtrack.h"
 
 struct RdtVideo {
     RdtVideoState state;
@@ -14,13 +14,13 @@ extern "C" {
 
 RdtVideo* rdt_video_create(const RdtVideoCallbacks* cb, void* userdata) {
     (void)cb; (void)userdata;
-    RdtVideo* v = (RdtVideo*)calloc(1, sizeof(RdtVideo));
+    RdtVideo* v = (RdtVideo*)mem_calloc(1, sizeof(RdtVideo), MEM_CAT_RENDER);
     if (v) v->state = RDT_VIDEO_STATE_IDLE;
     return v;
 }
 
 void rdt_video_destroy(RdtVideo* video) {
-    free(video);
+    mem_free(video);
 }
 
 int rdt_video_open_file(RdtVideo* video, const char* file_path) {

@@ -3931,7 +3931,7 @@ extern "C" Item js_number_method(Item num, Item method_name, Item* args, int arg
                 char* s = bigint_to_cstring_radix(num, radix);
                 if (!s) return ItemNull;
                 Item result = (Item){.item = s2it(heap_create_name(s))};
-                free(s);
+                mem_free(s);
                 return result;
             }
             if (method->len == 7 && strncmp(method->chars, "valueOf", 7) == 0) {
@@ -6444,7 +6444,7 @@ extern "C" Item js_reflect_own_keys(Item obj) {
     Item result = js_array_new(0);
     if (get_type_id(names) == LMD_TYPE_ARRAY) {
         int n = (int)js_array_length(names);
-        int64_t* idx_pairs = n > 0 ? (int64_t*)malloc(sizeof(int64_t) * 2 * n) : NULL;
+        int64_t* idx_pairs = n > 0 ? (int64_t*)mem_alloc(sizeof(int64_t) * 2 * n, MEM_CAT_JS_RUNTIME) : NULL;
         int idx_count = 0;
         for (int i = 0; i < n; i++) {
             Item k = js_array_get(names, (Item){.item = i2it(i)});
@@ -6472,7 +6472,7 @@ extern "C" Item js_reflect_own_keys(Item obj) {
             }
             js_array_push(result, k);
         }
-        if (idx_pairs) free(idx_pairs);
+        if (idx_pairs) mem_free(idx_pairs);
     }
     // Symbols last, in insertion order.
     if (get_type_id(symbols) == LMD_TYPE_ARRAY) {
@@ -7656,18 +7656,18 @@ extern "C" Item js_object_define_properties(Item obj, Item props) {
     //     validate via ToPropertyDescriptor — collect into descriptors list.
     //   Phase 2 (step 5): for each (key, desc), DefinePropertyOrThrow.
     // If any ToPropertyDescriptor throws in phase 1, no defines happen.
-    Item* desc_keys = (Item*)malloc(sizeof(Item) * n);
-    Item* desc_objs = (Item*)malloc(sizeof(Item) * n);
+    Item* desc_keys = (Item*)mem_alloc(sizeof(Item) * n, MEM_CAT_JS_RUNTIME);
+    Item* desc_objs = (Item*)mem_alloc(sizeof(Item) * n, MEM_CAT_JS_RUNTIME);
     if (!desc_keys || !desc_objs) {
-        if (desc_keys) free(desc_keys);
-        if (desc_objs) free(desc_objs);
+        if (desc_keys) mem_free(desc_keys);
+        if (desc_objs) mem_free(desc_objs);
         return obj;
     }
     int desc_count = 0;
     for (int i = 0; i < n; i++) {
         Item key = keys.array->items[i];
         Item prop_desc = js_object_get_own_property_descriptor(props, key);
-        if (js_check_exception()) { free(desc_keys); free(desc_objs); return obj; }
+        if (js_check_exception()) { mem_free(desc_keys); mem_free(desc_objs); return obj; }
         if (get_type_id(prop_desc) == LMD_TYPE_UNDEFINED || get_type_id(prop_desc) == LMD_TYPE_NULL) {
             continue;
         }
@@ -7679,11 +7679,11 @@ extern "C" Item js_object_define_properties(Item obj, Item props) {
         }
         if (!enumerable) continue;
         Item desc = js_property_get(props, key);
-        if (js_check_exception()) { free(desc_keys); free(desc_objs); return obj; }
+        if (js_check_exception()) { mem_free(desc_keys); mem_free(desc_objs); return obj; }
         JsPropertyDescriptor tmp;
         if (!js_descriptor_from_object(desc, &tmp)) {
-            free(desc_keys);
-            free(desc_objs);
+            mem_free(desc_keys);
+            mem_free(desc_objs);
             return obj; // ToPropertyDescriptor threw — abort before any define
         }
         desc_keys[desc_count] = key;
@@ -7695,8 +7695,8 @@ extern "C" Item js_object_define_properties(Item obj, Item props) {
         js_object_define_property(obj, key, desc_objs[i]);
         if (js_check_exception()) break; // DefinePropertyOrThrow failure
     }
-    free(desc_keys);
-    free(desc_objs);
+    mem_free(desc_keys);
+    mem_free(desc_objs);
     return obj;
 }
 
@@ -7944,7 +7944,7 @@ extern "C" Item js_object_get_own_property_names(Item object) {
     is_class_ctor = has_class_name_marker && has_class_prototype;
     int entry_count = 0;
     for (ShapeEntry* count_entry = tm->shape; count_entry; count_entry = count_entry->next) entry_count++;
-    int64_t* idx_pairs = entry_count > 0 ? (int64_t*)malloc(sizeof(int64_t) * 2 * entry_count) : NULL;
+    int64_t* idx_pairs = entry_count > 0 ? (int64_t*)mem_alloc(sizeof(int64_t) * 2 * entry_count, MEM_CAT_JS_RUNTIME) : NULL;
     int idx_count = 0;
     ShapeEntry* e = tm->shape;
     while (e) {
@@ -8018,7 +8018,7 @@ extern "C" Item js_object_get_own_property_names(Item object) {
         }
         e = e->next;
     }
-    if (idx_pairs) free(idx_pairs);
+    if (idx_pairs) mem_free(idx_pairs);
     // Phase-5D: legacy __get_<name>/__set_<name> pass-2 scan removed.
     // Accessor properties now use IS_ACCESSOR shape flag with bare-name
     // shape entries — pass 1 above already enumerates them.
@@ -10957,7 +10957,7 @@ static void js_json_scan_number_token(const char** p) {
 static void js_json_source_list_add(JsJsonSourceList* list, const char* start, int len) {
     if (list->count >= list->capacity) {
         int new_capacity = list->capacity ? list->capacity * 2 : 16;
-        Item* new_items = (Item*)realloc(list->items, sizeof(Item) * (size_t)new_capacity);
+        Item* new_items = (Item*)mem_realloc(list->items, sizeof(Item) * (size_t)new_capacity, MEM_CAT_JS_RUNTIME);
         if (!new_items) return;
         list->items = new_items;
         list->capacity = new_capacity;
@@ -11039,8 +11039,8 @@ static void js_json_source_entry_add(JsJsonReviveState* state, Item holder, Item
     if (!state) return;
     if (state->entry_count >= state->entry_capacity) {
         int new_capacity = state->entry_capacity ? state->entry_capacity * 2 : 16;
-        JsJsonSourceEntry* new_entries = (JsJsonSourceEntry*)realloc(state->entries,
-            sizeof(JsJsonSourceEntry) * (size_t)new_capacity);
+        JsJsonSourceEntry* new_entries = (JsJsonSourceEntry*)mem_realloc(state->entries,
+            sizeof(JsJsonSourceEntry) * (size_t)new_capacity, MEM_CAT_JS_RUNTIME);
         if (!new_entries) return;
         state->entries = new_entries;
         state->entry_capacity = new_capacity;
@@ -11225,8 +11225,8 @@ extern "C" Item js_json_parse_full(Item str_item, Item reviver) {
         int source_index = 0;
         js_json_build_source_entries(&state, wrapper, empty_key, result, &source_index);
         result = js_json_revive(wrapper, empty_key, reviver, &state);
-        if (state.entries) free(state.entries);
-        if (sources.items) free(sources.items);
+        if (state.entries) mem_free(state.entries);
+        if (sources.items) mem_free(sources.items);
     }
     return result;
 }

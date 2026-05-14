@@ -29,6 +29,7 @@
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
+#include "../../lib/mem.h"
 #include "../../radiant/clipboard.hpp"
 #include <string.h>
 #include <stdlib.h>
@@ -1009,7 +1010,7 @@ static void strip_html_script_style(StrBuf* out, const char* src, size_t n) {
     }
 }
 
-// Read a Blob-like's text into a malloc'd C string (caller frees). Returns
+// Read a Blob-like's text into a mem_alloc'd C string (caller mem_free()s). Returns
 // NULL if the blob has no extractable bytes. Handles native Blob `_text`
 // directly. For foreign Blob-likes, returns the result of calling .text(),
 // but only if it is already a fulfilled Promise<string> or a string (we cannot
@@ -1018,7 +1019,7 @@ static char* blob_like_get_text(Item blob, size_t* out_len) {
     if (get_type_id(blob) == LMD_TYPE_STRING) {
         String* s = it2s(blob);
         if (!s) return NULL;
-        char* buf = (char*)malloc(s->len + 1);
+        char* buf = (char*)mem_alloc(s->len + 1, MEM_CAT_JS_RUNTIME);
         memcpy(buf, s->chars, s->len);
         buf[s->len] = '\0';
         if (out_len) *out_len = s->len;
@@ -1027,7 +1028,7 @@ static char* blob_like_get_text(Item blob, size_t* out_len) {
     size_t n = 0;
     const char* t = str_prop_get(blob, "_text", &n);
     if (t) {
-        char* buf = (char*)malloc(n + 1);
+        char* buf = (char*)mem_alloc(n + 1, MEM_CAT_JS_RUNTIME);
         memcpy(buf, t, n);
         buf[n] = '\0';
         if (out_len) *out_len = n;
@@ -1075,7 +1076,7 @@ static Item js_clipboard_materialise(Item items_array, Item resolved_values) {
 
             size_t tlen = 0;
             char* tbuf = blob_like_get_text(v, &tlen);
-            if (!tbuf) { tbuf = (char*)malloc(1); tbuf[0] = '\0'; tlen = 0; }
+            if (!tbuf) { tbuf = (char*)mem_alloc(1, MEM_CAT_JS_RUNTIME); tbuf[0] = '\0'; tlen = 0; }
 
             // Sanitise text/html (sanitised standard format only; "web text/html"
             // custom-format is preserved verbatim by virtue of having a
@@ -1083,8 +1084,8 @@ static Item js_clipboard_materialise(Item items_array, Item resolved_values) {
             if (strcmp(ks->chars, "text/html") == 0) {
                 StrBuf* sb = strbuf_new();
                 strip_html_script_style(sb, tbuf, tlen);
-                free(tbuf);
-                tbuf = (char*)malloc(sb->length + 1);
+                mem_free(tbuf);
+                tbuf = (char*)mem_alloc(sb->length + 1, MEM_CAT_JS_RUNTIME);
                 memcpy(tbuf, sb->str ? sb->str : "", sb->length);
                 tbuf[sb->length] = '\0';
                 tlen = sb->length;
@@ -1092,7 +1093,7 @@ static Item js_clipboard_materialise(Item items_array, Item resolved_values) {
             }
 
             js_property_set(rec, k, make_str_n(tbuf, tlen));
-            free(tbuf);
+            mem_free(tbuf);
         }
         js_array_push(records, rec);
     }
@@ -1358,13 +1359,13 @@ static void free_items_snapshot(ArrayList* items) {
             for (int j = 0; j < it->entries->length; j++) {
                 ClipboardEntry* e = (ClipboardEntry*)it->entries->data[j];
                 if (!e) continue;
-                free(e->mime);
-                free(e->data);
-                free(e);
+                mem_free(e->mime);
+                mem_free(e->data);
+                mem_free(e);
             }
             arraylist_free(it->entries);
         }
-        free(it);
+        mem_free(it);
     }
     arraylist_free(items);
 }
@@ -1382,7 +1383,7 @@ extern "C" Item js_lambda_clipboard_write_records(Item arr) {
         Item rec = js_array_get_int(arr, i);
         if (get_type_id(rec) != LMD_TYPE_MAP) continue;
 
-        ClipboardItem* citem = (ClipboardItem*)calloc(1, sizeof(ClipboardItem));
+        ClipboardItem* citem = (ClipboardItem*)mem_calloc(1, sizeof(ClipboardItem), MEM_CAT_JS_RUNTIME);
         if (!citem) continue;
         citem->entries = arraylist_new(4);
         citem->is_unsanitized = 0;
@@ -1399,13 +1400,13 @@ extern "C" Item js_lambda_clipboard_write_records(Item arr) {
             String* vs = it2s(v);
             if (!vs) continue;
 
-            ClipboardEntry* ce = (ClipboardEntry*)calloc(1, sizeof(ClipboardEntry));
+            ClipboardEntry* ce = (ClipboardEntry*)mem_calloc(1, sizeof(ClipboardEntry), MEM_CAT_JS_RUNTIME);
             if (!ce) continue;
-            ce->mime = (char*)malloc(ks->len + 1);
+            ce->mime = (char*)mem_alloc(ks->len + 1, MEM_CAT_JS_RUNTIME);
             memcpy(ce->mime, ks->chars, ks->len);
             ce->mime[ks->len] = '\0';
             ce->data_len = vs->len;
-            ce->data = (char*)malloc(vs->len + 1);
+            ce->data = (char*)mem_alloc(vs->len + 1, MEM_CAT_JS_RUNTIME);
             memcpy(ce->data, vs->chars, vs->len);
             ce->data[vs->len] = '\0';
             arraylist_append(citem->entries, ce);

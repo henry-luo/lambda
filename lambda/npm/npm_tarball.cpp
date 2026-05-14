@@ -186,7 +186,7 @@ int npm_extract_tarball(const char* tgz_path, const char* dest_dir) {
                 char* dir = file_path_dirname(full_path);
                 if (dir) {
                     file_ensure_dir(dir);
-                    free(dir);
+                    mem_free(dir);
                 }
 
                 // extract file data
@@ -211,7 +211,7 @@ int npm_extract_tarball(const char* tgz_path, const char* dest_dir) {
                 char* dir = file_path_dirname(full_path);
                 if (dir) {
                     file_ensure_dir(dir);
-                    free(dir);
+                    mem_free(dir);
                 }
                 file_symlink(link_target, full_path);
                 break;

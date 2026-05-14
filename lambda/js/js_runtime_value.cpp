@@ -415,7 +415,7 @@ extern "C" Item js_to_string(Item value) {
             char* s = bigint_to_cstring_radix(value, 10);
             if (!s) return ItemNull;
             Item result = (Item){.item = s2it(heap_create_name(s))};
-            free(s);
+            mem_free(s);
             return result;
         }
         // regular decimal

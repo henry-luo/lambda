@@ -5717,7 +5717,7 @@ extern "C" void js_reset_template_registry(void) {
     JsTemplateRegistryEntry* entry = js_template_registry;
     while (entry) {
         JsTemplateRegistryEntry* next = entry->next;
-        free(entry);
+        mem_free(entry);
         entry = next;
     }
     js_template_registry = NULL;
@@ -5746,7 +5746,7 @@ extern "C" Item js_build_template_object_cached(Item* cooked, Item* raw, int cou
         if (entry->site_id == site_id && entry->count == count) return entry->object;
     }
     Item obj = js_build_template_object(cooked, raw, count);
-    JsTemplateRegistryEntry* entry = (JsTemplateRegistryEntry*)calloc(1, sizeof(JsTemplateRegistryEntry));
+    JsTemplateRegistryEntry* entry = (JsTemplateRegistryEntry*)mem_calloc(1, sizeof(JsTemplateRegistryEntry), MEM_CAT_JS_RUNTIME);
     if (entry) {
         entry->site_id = site_id;
         entry->count = count;
@@ -11178,7 +11178,7 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
             effective_pattern, effective_pattern_len, &rewritten_len);
         if (rewritten) {
             named_backref_processed.assign(rewritten, rewritten_len);
-            free(rewritten);
+            mem_free(rewritten);
             effective_pattern = named_backref_processed.c_str();
             effective_pattern_len = (int)named_backref_processed.size();
         }
@@ -11424,7 +11424,7 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
             processed_pattern.c_str(), (int)processed_pattern.size(), &canonical_len);
         if (canonicalized) {
             processed_pattern.assign(canonicalized, canonical_len);
-            free(canonicalized);
+            mem_free(canonicalized);
         }
 
         // Short alias expansion: \p{Ideo} → \p{Ideographic}, etc.

@@ -21,6 +21,7 @@
 #include "../lib/log.h"
 #include "../lib/arena.h"
 #include "../lib/arraylist.h"
+#include "../lib/memtrack.h"
 #include "../lib/strbuf.h"
 
 // GLFW backend is opt-in: define RADIANT_CLIPBOARD_GLFW when linking GLFW.
@@ -53,12 +54,12 @@ static ClipboardStoreState g_store = { NULL, NULL, NULL,
 // ---------------------------------------------------------------------------
 
 static ClipboardEntry* entry_new(const char* mime, const char* data, size_t data_len) {
-    ClipboardEntry* e = (ClipboardEntry*)calloc(1, sizeof(ClipboardEntry));
+    ClipboardEntry* e = (ClipboardEntry*)mem_calloc(1, sizeof(ClipboardEntry), MEM_CAT_SYSTEM);
     if (!e) return NULL;
-    e->mime = mime ? strdup(mime) : strdup("");
+    e->mime = mem_strdup(mime ? mime : "", MEM_CAT_SYSTEM);
     // always allocate one extra byte and null-terminate so text/* is safe to
     // read as a C string; binary callers use data_len.
-    e->data = (char*)malloc(data_len + 1);
+    e->data = (char*)mem_alloc(data_len + 1, MEM_CAT_SYSTEM);
     if (e->data) {
         if (data && data_len) memcpy(e->data, data, data_len);
         e->data[data_len] = '\0';
@@ -69,13 +70,13 @@ static ClipboardEntry* entry_new(const char* mime, const char* data, size_t data
 
 static void entry_free(ClipboardEntry* e) {
     if (!e) return;
-    free(e->mime);
-    free(e->data);
-    free(e);
+    mem_free(e->mime);
+    mem_free(e->data);
+    mem_free(e);
 }
 
 static ClipboardItem* item_new(void) {
-    ClipboardItem* it = (ClipboardItem*)calloc(1, sizeof(ClipboardItem));
+    ClipboardItem* it = (ClipboardItem*)mem_calloc(1, sizeof(ClipboardItem), MEM_CAT_SYSTEM);
     if (!it) return NULL;
     it->entries = arraylist_new(2);
     return it;
@@ -89,7 +90,7 @@ static void item_free(ClipboardItem* it) {
         }
         arraylist_free(it->entries);
     }
-    free(it);
+    mem_free(it);
 }
 
 static void items_free(ArrayList* items) {
@@ -167,8 +168,8 @@ static ClipboardBackend* g_inmem_backend = NULL;
 
 ClipboardBackend* clipboard_backend_inmemory(void) {
     if (g_inmem_backend) return g_inmem_backend;
-    g_inmem_backend = (ClipboardBackend*)calloc(1, sizeof(ClipboardBackend));
-    g_inmem_backend->opaque = calloc(1, sizeof(InMemoryBackendState));
+    g_inmem_backend = (ClipboardBackend*)mem_calloc(1, sizeof(ClipboardBackend), MEM_CAT_SYSTEM);
+    g_inmem_backend->opaque = mem_calloc(1, sizeof(InMemoryBackendState), MEM_CAT_SYSTEM);
     g_inmem_backend->write_items = inmem_write_items;
     g_inmem_backend->read_items  = inmem_read_items;
     g_inmem_backend->clear       = inmem_clear;
@@ -234,7 +235,7 @@ void clipboard_store_init(void) {
 
 void clipboard_store_shutdown(void) {
     if (g_store.items) { items_free(g_store.items); g_store.items = NULL; }
-    free(g_store.cached_text);
+    mem_free(g_store.cached_text);
     g_store.cached_text = NULL;
 }
 
@@ -246,7 +247,7 @@ void clipboard_store_clear(void) {
     if (!g_store.items) clipboard_store_init();
     items_free(g_store.items);
     g_store.items = arraylist_new(2);
-    free(g_store.cached_text);
+    mem_free(g_store.cached_text);
     g_store.cached_text = NULL;
     if (g_store.backend && g_store.backend->clear) g_store.backend->clear(g_store.backend);
 }

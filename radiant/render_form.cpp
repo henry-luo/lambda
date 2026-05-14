@@ -4,6 +4,7 @@
 #include "state_store.hpp"
 #include "text_control.hpp"
 #include "../lib/tagged.hpp"
+#include "../lib/memtrack.h"
 #include "../lib/font/font.h"
 
 #include "../lib/log.h"
@@ -171,7 +172,7 @@ static float measure_input_text_width(RenderContext* rdcon, FontProp* font,
 /**
  * F4 helper: build a heap-allocated masked copy of `src` where every
  * Unicode codepoint is replaced with U+25CF (BLACK CIRCLE, 3 UTF-8 bytes
- * "\xE2\x97\x8F"). Caller owns the returned buffer (free()). Length is
+ * "\xE2\x97\x8F"). Caller owns the returned buffer (mem_free()). Length is
  * codepoint_count * 3; nul-terminated. Returns nullptr on OOM.
  *
  * Also writes the substituted byte count for an arbitrary input byte
@@ -191,7 +192,7 @@ static char* build_password_mask(const char* src, int src_len) {
         p += bytes;
         cp++;
     }
-    char* out = (char*)malloc((size_t)cp * 3 + 1);
+    char* out = (char*)mem_alloc((size_t)cp * 3 + 1, MEM_CAT_RENDER);
     if (!out) return nullptr;
     for (int i = 0; i < cp; i++) {
         out[i*3 + 0] = (char)0xE2;
@@ -260,7 +261,7 @@ static char* build_preedit_display_text(FormControlProp* form,
     uint32_t caret_in_preedit = utf8_byte_offset_for_codepoints(
         form->preedit_utf8, form->preedit_len, form->preedit_caret);
     uint32_t display_len = start + form->preedit_len + (value_len - end);
-    char* display = (char*)malloc((size_t)display_len + 1);
+    char* display = (char*)mem_alloc((size_t)display_len + 1, MEM_CAT_RENDER);
     if (!display) return nullptr;
 
     if (start > 0) memcpy(display, value, start);
@@ -468,8 +469,8 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
         }
     }
 
-    if (mask_buf) free(mask_buf);
-    if (preedit_display) free(preedit_display);
+    if (mask_buf) mem_free(mask_buf);
+    if (preedit_display) mem_free(preedit_display);
     log_debug("[FORM] render_text_input at (%.1f, %.1f) size %.1fx%.1f", x, y, w, h);
 }
 
@@ -1333,7 +1334,7 @@ void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
         }
     }
 
-    if (preedit_display) free(preedit_display);
+    if (preedit_display) mem_free(preedit_display);
 
     log_debug("[FORM] render_textarea at (%.1f, %.1f) size %.1fx%.1f", x, y, w, h);
 }
