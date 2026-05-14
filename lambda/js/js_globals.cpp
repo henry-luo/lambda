@@ -13678,6 +13678,12 @@ static int js_eval_lexical_binding_count = 0;
 static int js_eval_lexical_frame_stack[JS_EVAL_LOCAL_FRAME_MAX];
 static int js_eval_lexical_frame_depth = 0;
 
+#define JS_EVAL_IMMUTABLE_BIND_MAX 512
+static Item js_eval_immutable_bindings[JS_EVAL_IMMUTABLE_BIND_MAX];
+static int js_eval_immutable_binding_count = 0;
+static int js_eval_immutable_frame_stack[JS_EVAL_LOCAL_FRAME_MAX];
+static int js_eval_immutable_frame_depth = 0;
+
 extern "C" void js_eval_env_push_frame(void) {
     if (js_eval_env_frame_depth >= JS_EVAL_ENV_FRAME_MAX) {
         log_error("js-eval-env: frame stack overflow");
@@ -13693,6 +13699,7 @@ extern "C" void js_eval_local_push_frame(void) {
     }
     js_eval_local_frame_stack[js_eval_local_frame_depth++] = js_eval_local_binding_count;
     js_eval_lexical_frame_stack[js_eval_lexical_frame_depth++] = js_eval_lexical_binding_count;
+    js_eval_immutable_frame_stack[js_eval_immutable_frame_depth++] = js_eval_immutable_binding_count;
 }
 
 extern "C" void js_eval_local_pop_frame(void) {
@@ -13702,6 +13709,10 @@ extern "C" void js_eval_local_pop_frame(void) {
     if (js_eval_lexical_frame_depth > 0) {
         int lexical_frame_start = js_eval_lexical_frame_stack[--js_eval_lexical_frame_depth];
         js_eval_lexical_binding_count = lexical_frame_start;
+    }
+    if (js_eval_immutable_frame_depth > 0) {
+        int immutable_frame_start = js_eval_immutable_frame_stack[--js_eval_immutable_frame_depth];
+        js_eval_immutable_binding_count = immutable_frame_start;
     }
 }
 
@@ -13753,6 +13764,28 @@ extern "C" int64_t js_eval_local_has_lexical_binding(Item key) {
     int frame_start = js_eval_lexical_frame_stack[js_eval_lexical_frame_depth - 1];
     for (int i = js_eval_lexical_binding_count - 1; i >= frame_start; i--) {
         if (js_with_binding_key_same(js_eval_lexical_bindings[i], key)) return 1;
+    }
+    return 0;
+}
+
+extern "C" void js_eval_local_note_immutable_binding(Item key) {
+    if (js_eval_immutable_frame_depth <= 0) return;
+    int frame_start = js_eval_immutable_frame_stack[js_eval_immutable_frame_depth - 1];
+    for (int i = js_eval_immutable_binding_count - 1; i >= frame_start; i--) {
+        if (js_with_binding_key_same(js_eval_immutable_bindings[i], key)) return;
+    }
+    if (js_eval_immutable_binding_count >= JS_EVAL_IMMUTABLE_BIND_MAX) {
+        log_error("js-eval-immutable: binding stack overflow");
+        return;
+    }
+    js_eval_immutable_bindings[js_eval_immutable_binding_count++] = key;
+}
+
+extern "C" int64_t js_eval_local_has_immutable_binding(Item key) {
+    if (js_eval_immutable_frame_depth <= 0) return 0;
+    int frame_start = js_eval_immutable_frame_stack[js_eval_immutable_frame_depth - 1];
+    for (int i = js_eval_immutable_binding_count - 1; i >= frame_start; i--) {
+        if (js_with_binding_key_same(js_eval_immutable_bindings[i], key)) return 1;
     }
     return 0;
 }

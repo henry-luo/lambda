@@ -2518,6 +2518,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         parent->captures[parent->capture_count].grandparent_slot = -1;
                         parent->captures[parent->capture_count].is_let_const = child->captures[ci].is_let_const;
                         parent->captures[parent->capture_count].is_const = child->captures[ci].is_const;
+                        parent->captures[parent->capture_count].is_nfe_binding = child->captures[ci].is_nfe_binding;
                         parent->captures[parent->capture_count].force_env_capture = child->captures[ci].force_env_capture;
                         parent->capture_count++;
                         changed = true;
