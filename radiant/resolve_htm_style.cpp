@@ -5,6 +5,7 @@
 #include "retained_fields.hpp"
 #include "../lib/str.h"
 #include "../lib/memtrack.h"
+#include "../lib/tagged.hpp"
 #include <cstdlib>  // for strtol
 #include <new>      // for placement new
 
@@ -211,7 +212,8 @@ static CssEnum resolve_dir_auto(DomElement* elmt) {
 }
 
 void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
-    ViewSpan* span = (ViewSpan*)elmt;  ViewBlock* block = (ViewBlock*)elmt;
+    ViewSpan* span = lam::view_require_element(static_cast<View*>(elmt));
+    ViewBlock* block = lam::view_require_block(static_cast<View*>(elmt));
     float em_size = 0;  uintptr_t elmt_name = elmt->tag();
     switch (elmt_name) {
     case HTM_TAG_BODY: {
@@ -1621,7 +1623,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             DomNode* child = block->first_child;
             while (child) {
                 if (child->is_element()) {
-                    DomElement* child_elem = (DomElement*)child;
+                    DomElement* child_elem = lam::dom_require_element(child);
                     if (child_elem->tag() == HTM_TAG_OPTION) {
                         if (child_elem->has_attribute("selected") && selected_idx < 0) {
                             selected_idx = option_count;
@@ -1632,7 +1634,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                         DomNode* opt_child = child_elem->first_child;
                         while (opt_child) {
                             if (opt_child->is_element()) {
-                                DomElement* opt_elem = (DomElement*)opt_child;
+                                DomElement* opt_elem = lam::dom_require_element(opt_child);
                                 if (opt_elem->tag() == HTM_TAG_OPTION) {
                                     if (opt_elem->has_attribute("selected") && selected_idx < 0) {
                                         selected_idx = option_count;
@@ -1827,7 +1829,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             log_debug("[HTML] dir attribute: ltr");
         } else if (str_ieq_const(dir_attr, strlen(dir_attr), "auto")) {
             // HTML5 §14.3.4: dir="auto" — resolve direction from first strong character
-            CssEnum resolved = resolve_dir_auto(static_cast<DomElement*>(elmt));
+            CssEnum resolved = resolve_dir_auto(lam::dom_require_element(elmt));
             block->blk->direction = resolved;
             log_debug("[HTML] dir attribute: auto -> %s",
                       resolved == CSS_VALUE_RTL ? "rtl" : "ltr");

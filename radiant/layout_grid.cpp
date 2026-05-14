@@ -18,6 +18,16 @@ void expand_auto_repeat_tracks(GridContainerLayout* grid_layout);
 void collapse_empty_auto_fit_tracks(GridContainerLayout* grid_layout);
 extern bool is_only_whitespace(const char* str);
 
+typedef ViewBlock* GridItemPtr;
+
+static ViewBlock** grid_item_array_alloc(int count) {
+    return reinterpret_cast<ViewBlock**>(mem_calloc(count, sizeof(GridItemPtr), MEM_CAT_LAYOUT));
+}
+
+static ViewBlock** grid_item_array_realloc(ViewBlock** items, int count) {
+    return reinterpret_cast<ViewBlock**>(mem_realloc(items, count * sizeof(GridItemPtr), MEM_CAT_LAYOUT));
+}
+
 // Initialize grid container layout state
 void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
     if (!container) return;
@@ -60,7 +70,7 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
 
     // Initialize dynamic arrays
     grid->allocated_items = 8;
-    grid->grid_items = static_cast<ViewBlock**>(mem_calloc(grid->allocated_items, sizeof(ViewBlock*), MEM_CAT_LAYOUT));
+    grid->grid_items = grid_item_array_alloc(grid->allocated_items);
 
     // Only allocate new areas array if not already copied from embed->grid
     if (!grid->grid_areas || grid->area_count == 0) {
@@ -706,8 +716,8 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
     // Ensure we have enough space in the grid items array
     if (count > grid_layout->allocated_items) {
         grid_layout->allocated_items = count * 2;
-        grid_layout->grid_items = static_cast<ViewBlock**>(mem_realloc(
-            grid_layout->grid_items, grid_layout->allocated_items * sizeof(ViewBlock*), MEM_CAT_LAYOUT));
+        grid_layout->grid_items = grid_item_array_realloc(
+            grid_layout->grid_items, grid_layout->allocated_items);
     }
 
     // Collect items - ONLY collect element nodes, skip text nodes

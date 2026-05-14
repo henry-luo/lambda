@@ -13,6 +13,7 @@
 #include "../lib/mempool.h"
 #include "../lib/arena.h"
 #include "../lib/memtrack.h"
+#include "../lib/tagged.hpp"
 #include "../lambda/input/css/dom_element.hpp"  // For dom_document_destroy
 #include "../radiant/script_runner.h"  // For script_runner_cleanup_js_state
 
@@ -203,7 +204,7 @@ extern "C" void radiant_state_request_repaint(DocState* state) {
 static void destroy_video_in_view(View* view) {
     if (!view) return;
     if (view->view_type >= RDT_VIEW_INLINE_BLOCK && view->is_element()) {
-        ViewBlock* blk = (ViewBlock*)view;
+        ViewBlock* blk = lam::view_require_block(view);
         if (blk->embed && blk->embed->video) {
             rdt_video_destroy((RdtVideo*)blk->embed->video);
             blk->embed->video = nullptr;

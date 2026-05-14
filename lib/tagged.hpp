@@ -188,6 +188,36 @@ inline ViewBlock* unsafe_view_block_api_span(ViewSpan* span) {
     return reinterpret_cast<ViewBlock*>(span);
 }
 
+inline ViewBlock* unsafe_view_block_element_storage(DomElement* element) {
+    // ViewBlock adds no fields beyond DomElement/ViewSpan. Intrinsic sizing still
+    // uses ViewBlock* for shared element storage while measuring inline/block/table
+    // elements before every view tag has necessarily been finalized.
+    return reinterpret_cast<ViewBlock*>(element);
+}
+
+inline ViewBlock* pool_alloc_view_block(Pool* pool) {
+    return reinterpret_cast<ViewBlock*>(pool_calloc(pool, sizeof(ViewBlock)));
+}
+
+inline ViewTree* pool_alloc_view_tree(Pool* pool) {
+    return reinterpret_cast<ViewTree*>(pool_calloc(pool, sizeof(ViewTree)));
+}
+
+inline DomElement* pool_alloc_dom_element(Pool* pool) {
+    return reinterpret_cast<DomElement*>(pool_calloc(pool, sizeof(DomElement)));
+}
+
+inline DomText* pool_alloc_dom_text(Pool* pool) {
+    return reinterpret_cast<DomText*>(pool_calloc(pool, sizeof(DomText)));
+}
+
+inline ViewElement* unsafe_view_element_storage(View* view) {
+    // Some synthetic document roots are initialized as bare ViewBlock storage
+    // without a DOM element tag. Legacy printers consume the shared ViewElement
+    // storage directly for those roots.
+    return reinterpret_cast<ViewElement*>(view);
+}
+
 inline ViewText* unsafe_view_text_storage(DomText* text) {
     // DomText and ViewText share storage; ViewText currently adds no fields.
     return reinterpret_cast<ViewText*>(text);
@@ -201,6 +231,13 @@ inline ViewTable* unsafe_view_table_storage(ViewBlock* block) {
 
 inline ViewTable* unsafe_view_table_storage(DomNode* node) {
     return reinterpret_cast<ViewTable*>(node);
+}
+
+inline ViewTableCell* unsafe_view_table_cell_storage(View* view) {
+    // set_view() initializes table-cell storage before assigning the runtime
+    // view tag. ViewTableCell only extends the shared ViewBlock/DomElement
+    // storage with helper methods.
+    return reinterpret_cast<ViewTableCell*>(view);
 }
 
 template<DomNodeType T> struct DomNodeTagToType;

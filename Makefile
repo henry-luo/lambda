@@ -1992,7 +1992,7 @@ check-radiant-casts:
 		radiant/layout_text.cpp radiant/layout_multicol.cpp \
 		radiant/layout_flex_measurement.cpp radiant/layout_flex_multipass.cpp \
 		radiant/layout_flex.cpp radiant/layout_block.cpp \
-		radiant/layout_table.cpp \
+		radiant/layout_table.cpp radiant/grid_baseline.hpp \
 		radiant/resolve_css_style.cpp; \
 		grep -En 'static_cast<[[:space:]]*View(Block|Text|Span|Element|Table|TableRow|TableCell|TableRowGroup|Marker)[[:space:]]*\*[[:space:]]*>' \
 		radiant/layout_alignment.cpp radiant/layout_inline.cpp \
@@ -2001,20 +2001,32 @@ check-radiant-casts:
 		radiant/layout_text.cpp radiant/layout_multicol.cpp \
 		radiant/layout_flex_measurement.cpp radiant/layout_flex_multipass.cpp \
 		radiant/layout_flex.cpp radiant/layout_block.cpp \
-		radiant/layout_table.cpp \
+		radiant/layout_table.cpp radiant/grid_baseline.hpp \
 		radiant/resolve_css_style.cpp; \
 		grep -En '\([[:space:]]*(View(Block|Text|Span|Element|Table|TableRow|TableCell|TableRowGroup|Marker)|Dom(Node|Element|Text|Comment))[[:space:]]*\*[[:space:]]*\)[[:space:]]*([A-Za-z_&*]|\()' \
 		radiant/render.cpp radiant/render_form.cpp radiant/render_img.cpp \
 		radiant/render_pdf.cpp radiant/render_svg.cpp radiant/render_svg_inline.cpp \
 		radiant/render_walk.cpp radiant/event.cpp radiant/event_sim.cpp \
-		radiant/window.cpp radiant/webview_manager.cpp \
+		radiant/view_pool.cpp radiant/state_store.cpp radiant/dom_range_resolver.cpp \
+		radiant/source_pos_bridge.cpp \
+		radiant/state_machine.cpp radiant/dom_range.cpp radiant/context_menu.cpp \
+		radiant/css_animation.cpp radiant/ui_context.cpp radiant/script_runner.cpp \
+		radiant/block_context.cpp radiant/resolve_htm_style.cpp radiant/grid_positioning.cpp \
+		radiant/intrinsic_sizing.cpp radiant/cmd_layout.cpp \
+		radiant/window.cpp radiant/webview_manager.cpp radiant/ime_mac.mm radiant/ime_win.cpp \
 		radiant/webdriver/webdriver_actions.cpp radiant/webdriver/webdriver_locator.cpp \
 		radiant/webdriver/webdriver_server.cpp; \
 		grep -En 'static_cast<[[:space:]]*(View(Block|Text|Span|Element|Table|TableRow|TableCell|TableRowGroup|Marker)|Dom(Element|Text|Comment))[[:space:]]*\*[[:space:]]*>' \
 		radiant/render.cpp radiant/render_form.cpp radiant/render_img.cpp \
 		radiant/render_pdf.cpp radiant/render_svg.cpp radiant/render_svg_inline.cpp \
 		radiant/render_walk.cpp radiant/event.cpp radiant/event_sim.cpp \
-		radiant/window.cpp radiant/webview_manager.cpp \
+		radiant/view_pool.cpp radiant/state_store.cpp radiant/dom_range_resolver.cpp \
+		radiant/source_pos_bridge.cpp \
+		radiant/state_machine.cpp radiant/dom_range.cpp radiant/context_menu.cpp \
+		radiant/css_animation.cpp radiant/ui_context.cpp radiant/script_runner.cpp \
+		radiant/block_context.cpp radiant/resolve_htm_style.cpp radiant/grid_positioning.cpp \
+		radiant/intrinsic_sizing.cpp radiant/cmd_layout.cpp \
+		radiant/window.cpp radiant/webview_manager.cpp radiant/ime_mac.mm radiant/ime_win.cpp \
 		radiant/webdriver/webdriver_actions.cpp radiant/webdriver/webdriver_locator.cpp \
 		radiant/webdriver/webdriver_server.cpp; } \
 		| grep -v 'RADIANT_CAST_OK' \

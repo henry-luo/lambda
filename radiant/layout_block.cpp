@@ -1263,7 +1263,7 @@ static void create_first_letter_pseudo(LayoutContext* lycon, ViewBlock* block) {
     if (!pool) return;
 
     // Create the ::first-letter pseudo-element
-    DomElement* fl_elem = static_cast<DomElement*>(pool_calloc(pool, sizeof(DomElement)));
+    DomElement* fl_elem = lam::pool_alloc_dom_element(pool);
     if (!fl_elem) return;
 
     fl_elem->node_type = DOM_NODE_ELEMENT;
@@ -1316,7 +1316,7 @@ static void create_first_letter_pseudo(LayoutContext* lycon, ViewBlock* block) {
     memcpy(fl_text, p, boundary);
     fl_text[boundary] = '\0';
 
-    DomText* fl_text_node = static_cast<DomText*>(pool_calloc(pool, sizeof(DomText)));
+    DomText* fl_text_node = lam::pool_alloc_dom_text(pool);
     if (!fl_text_node) return;
     fl_text_node->node_type = DOM_NODE_TEXT;
     fl_text_node->parent = fl_elem;
@@ -3008,7 +3008,7 @@ void layout_inline_svg(LayoutContext* lycon, ViewBlock* block) {
     log_debug("%s layout inline SVG element", block->source_loc());
 
     // Get intrinsic size from SVG attributes
-    Element* native_elem = static_cast<DomElement*>(block)->native_element;
+    Element* native_elem = lam::dom_require_element(block)->native_element;
     if (!native_elem) {
         log_debug("%s inline SVG has no native element, using default size", block->source_loc());
         block->width = 300;  // HTML default for SVG
@@ -6337,7 +6337,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
     // check for display math elements (class="math display")
     if (elmt->is_element()) {
-        DomElement* elem = static_cast<DomElement*>(elmt);
+        DomElement* elem = lam::dom_require_element(elmt);
         if (is_display_math_element(elem)) {
             // ensure line break before display math
             if (!lycon->line.is_line_start) { line_break(lycon); }
@@ -6727,7 +6727,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             bool parent_nowrap = false;
             for (DomNode* cur = block->parent; cur; cur = cur->parent) {
                 if (!cur->is_element()) break;
-                DomElement* elem = static_cast<DomElement*>(cur);
+                DomElement* elem = lam::dom_require_element(cur);
                 if (elem->blk && elem->blk->white_space != 0) {
                     CssEnum ws = elem->blk->white_space;
                     parent_nowrap = (ws == CSS_VALUE_NOWRAP || ws == CSS_VALUE_PRE);
@@ -6792,7 +6792,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                                     bool oof = false;
                                     DomNode* fn = static_cast<DomNode*>(fc);
                                     if (fn->is_element()) {
-                                        DomElement* fe = static_cast<DomElement*>(fn);
+                                        DomElement* fe = lam::dom_require_element(fn);
                                         if (fe->position &&
                                             (fe->position->position == CSS_VALUE_ABSOLUTE ||
                                              fe->position->position == CSS_VALUE_FIXED ||

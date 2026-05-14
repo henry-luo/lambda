@@ -13,6 +13,7 @@
 #include "layout.hpp"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
+#include "../lib/tagged.hpp"
 #include <cmath>
 #include <cfloat>
 
@@ -191,7 +192,7 @@ bool block_context_establishes_bfc(ViewBlock* block) {
     // CSS Flexbox §4.2: "a flex item establishes an independent formatting context"
     // CSS Grid §6.1: "a grid item establishes an independent formatting context"
     if (block->parent && block->parent->is_block()) {
-        ViewBlock* parent_block = (ViewBlock*)block->parent;
+        ViewBlock* parent_block = lam::view_require_block(block->parent);
         if (parent_block->display.inner == CSS_VALUE_FLEX ||
             parent_block->display.inner == CSS_VALUE_GRID) {
             return true;

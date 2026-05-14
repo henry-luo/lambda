@@ -55,7 +55,7 @@ DomElement* ime_focused_text_control() {
     if (!state) return nullptr;
     View* v = focus_get(state);
     if (!v) return nullptr;
-    DomElement* e = (DomElement*)v;
+    DomElement* e = (DomElement*)v;  // RADIANT_CAST_OK: native IME bridge keeps View/DomElement opaque across Windows headers
     return tc_is_text_control(e) ? e : nullptr;
 }
 

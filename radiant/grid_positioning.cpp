@@ -2,6 +2,7 @@
 #include "view.hpp"
 #include "layout_alignment.hpp"
 #include "../lib/scratch_arena.h"
+#include "../lib/tagged.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 
 extern "C" {
@@ -438,7 +439,8 @@ void align_grid_items(GridContainerLayout* grid_layout) {
             // Get container padding/border offset
             float content_top_offset = 0;
             if (grid_layout->item_count > 0 && grid_layout->grid_items[0]) {
-                ViewBlock* container = (ViewBlock*)((View*)grid_layout->grid_items[0])->parent;
+                View* first_item = static_cast<View*>(grid_layout->grid_items[0]);
+                ViewBlock* container = first_item->parent ? lam::view_as_block(first_item->parent) : NULL;
                 if (container) {
                     if (container->bound) {
                         content_top_offset += container->bound->padding.top;
@@ -536,7 +538,7 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
 
     // CSS Box 4 §3.2 margin-trim for grid containers: trim margins of items
     // adjacent to the container edges.
-    ViewBlock* grid_container = item->parent->is_block() ? (ViewBlock*)item->parent : NULL;
+    ViewBlock* grid_container = item->parent && item->parent->is_block() ? lam::view_require_block(item->parent) : NULL;
     uint8_t grid_margin_trim = (grid_container && grid_container->blk) ? grid_container->blk->margin_trim : 0;
     if (grid_margin_trim) {
         int row_start = item->gi->computed_grid_row_start - 1;

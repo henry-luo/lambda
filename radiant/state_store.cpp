@@ -14,6 +14,7 @@
 #include "state_machine.hpp"
 // str.h included via view.hpp
 #include "view.hpp"
+#include "../lib/tagged.hpp"
 #include "../lib/arraylist.h"
 
 #include <string.h>
@@ -391,12 +392,12 @@ static void selection_log_transition(DocState* state, const char* transition,
 }
 
 static bool selection_is_text_control_view(View* view) {
-    return view && view->is_element() && tc_is_text_control((DomElement*)view);
+    return view && view->is_element() && tc_is_text_control(lam::dom_require_element(view));
 }
 
 static void text_control_sync_selection(DocState* state, View* view) {
     if (!state || !selection_is_text_control_view(view)) return;
-    tc_sync_legacy_to_form((DomElement*)view, state);
+    tc_sync_legacy_to_form(lam::dom_require_element(view), state);
 }
 
 // Called from `dom_selection_create` (in dom_range.cpp) immediately after the
@@ -426,9 +427,9 @@ extern "C" void dom_selection_attach_legacy_storage(DomSelection* s,
 static DomBoundary boundary_from_legacy(View* view, int byte_offset) {
     DomBoundary b = { NULL, 0 };
     if (!view) return b;
-    DomNode* n = (DomNode*)view;
+    DomNode* n = static_cast<DomNode*>(view);
     if (n->is_text()) {
-        DomText* t = (DomText*)n;
+        DomText* t = lam::dom_require_text(n);
         uint32_t bo = byte_offset < 0 ? 0 : (uint32_t)byte_offset;
         b.node = n;
         b.offset = dom_text_utf8_to_utf16(t, bo);
@@ -573,7 +574,7 @@ static void caret_local_from_absolute(View* view, float abs_x, float abs_y,
         if (parent->view_type == RDT_VIEW_BLOCK ||
             parent->view_type == RDT_VIEW_INLINE_BLOCK ||
             parent->view_type == RDT_VIEW_LIST_ITEM) {
-            ViewBlock* block = (ViewBlock*)parent;
+            ViewBlock* block = lam::view_require_block(parent);
             x -= block->x;
             y -= block->y;
             if (block->scroller && block->scroller->pane) {
@@ -628,9 +629,9 @@ extern "C" void legacy_sync_from_dom_selection(DocState* state) {
     auto to_legacy = [](const DomBoundary& b, View** out_view, int* out_off) {
         DomNode* n = b.node;
         if (!n) { *out_view = NULL; *out_off = 0; return; }
-        *out_view = (View*)n;
+        *out_view = static_cast<View*>(n);
         if (n->is_text()) {
-            DomText* t = (DomText*)n;
+            DomText* t = lam::dom_require_text(n);
             *out_off = (int)dom_text_utf16_to_utf8(t, b.offset);
         } else {
             *out_off = (int)b.offset;  // element child-index
@@ -811,7 +812,7 @@ static void state_assert_after_mutation(DocState* state, const char* context);
 
 bool state_get_bool(DocState* state, void* node, const char* name) {
     if (state && node && name) {
-        View* view = (View*)node;
+        View* view = static_cast<View*>(node);
         if (strcmp(name, STATE_HOVER) == 0) return view_state_get_hovered(state, view);
         if (strcmp(name, STATE_ACTIVE) == 0) return view_state_get_active(state, view);
         if (strcmp(name, STATE_FOCUS) == 0) return view_state_get_focused(state, view);
@@ -913,7 +914,7 @@ bool state_resolve_selector_pseudo_state(void* context, DomElement* element, uin
     if (!state && element->doc) {
         state = (DocState*)element->doc->state;
     }
-    return state_get_pseudo_state(state, (View*)element, pseudo_state);
+    return state_get_pseudo_state(state, static_cast<View*>(element), pseudo_state);
 }
 
 void state_configure_selector_matcher(DocState* state, SelectorMatcher* matcher) {
@@ -925,7 +926,7 @@ static uint32_t view_state_resolve_id(View* view) {
     if (!view) return 0;
     if (view->id != 0) return view->id;
     if (view->is_element()) {
-        DomElement* elem = (DomElement*)view;
+        DomElement* elem = lam::dom_require_element(view);
         if (elem->doc) {
             view->id = elem->doc->next_node_id++;
             return view->id;
@@ -1020,7 +1021,7 @@ static void doc_state_detach_transient_owner(DocState* state, View* view) {
         }
     }
     if (view->is_element()) {
-        DomElement* elem = (DomElement*)view;
+        DomElement* elem = lam::dom_require_element(view);
         if (state->active_text_control == elem) state->active_text_control = NULL;
         if (state->last_focused_text_control == elem) state->last_focused_text_control = NULL;
     }
@@ -1030,7 +1031,7 @@ static uint32_t view_state_detach_node(DocState* state, DomNode* node) {
     if (!state || !node) return 0;
 
     uint32_t removed = 0;
-    View* view = (View*)node;
+    View* view = static_cast<View*>(node);
     uint32_t view_id = view->id;
     doc_state_detach_transient_owner(state, view);
     if (view_id != 0 && state->view_state_map) {
@@ -1042,7 +1043,7 @@ static uint32_t view_state_detach_node(DocState* state, DomNode* node) {
     view->view_state_ref = NULL;
 
     if (node->is_element()) {
-        DomElement* element = (DomElement*)node;
+        DomElement* element = lam::dom_require_element(node);
         DomNode* child = element->first_child;
         while (child) {
             removed += view_state_detach_node(state, child);
@@ -1054,9 +1055,9 @@ static uint32_t view_state_detach_node(DocState* state, DomNode* node) {
 
 static View* view_state_find_live_id(DomNode* node, uint32_t view_id) {
     if (!node || view_id == 0) return NULL;
-    if (node->id == view_id) return (View*)node;
+    if (node->id == view_id) return static_cast<View*>(node);
     if (node->is_element()) {
-        DomElement* element = (DomElement*)node;
+        DomElement* element = lam::dom_require_element(node);
         for (DomNode* child = element->first_child; child; child = child->next_sibling) {
             View* found = view_state_find_live_id(child, view_id);
             if (found) return found;
@@ -1067,9 +1068,9 @@ static View* view_state_find_live_id(DomNode* node, uint32_t view_id) {
 
 static bool view_state_tree_contains_view(DomNode* node, View* view) {
     if (!node || !view) return false;
-    if ((View*)node == view) return true;
+    if (static_cast<View*>(node) == view) return true;
     if (node->is_element()) {
-        DomElement* element = (DomElement*)node;
+        DomElement* element = lam::dom_require_element(node);
         for (DomNode* child = element->first_child; child; child = child->next_sibling) {
             if (view_state_tree_contains_view(child, view)) return true;
         }
@@ -1144,11 +1145,11 @@ static uint32_t doc_state_prune_stale_transient_owners(DocState* state, DomNode*
             changed++;
         }
     }
-    if (state->active_text_control && !view_state_tree_contains_view(root, (View*)state->active_text_control)) {
+    if (state->active_text_control && !view_state_tree_contains_view(root, static_cast<View*>(state->active_text_control))) {
         state->active_text_control = NULL;
         changed++;
     }
-    if (state->last_focused_text_control && !view_state_tree_contains_view(root, (View*)state->last_focused_text_control)) {
+    if (state->last_focused_text_control && !view_state_tree_contains_view(root, static_cast<View*>(state->last_focused_text_control))) {
         state->last_focused_text_control = NULL;
         changed++;
     }
@@ -1160,7 +1161,7 @@ uint32_t view_state_prune_orphans(DocState* state) {
     if (!state || !state->view_state_map || !state->owner_store || !state->owner_store->document) return 0;
 
     DomDocument* doc = state->owner_store->document;
-    DomNode* root = doc->root ? (DomNode*)doc->root : (DomNode*)doc->html_root;
+    DomNode* root = doc->root ? static_cast<DomNode*>(doc->root) : nullptr;
     uint32_t removed = 0;
     uint32_t owner_changes = doc_state_prune_stale_transient_owners(state, root);
     bool found_orphan = true;
@@ -1495,19 +1496,19 @@ bool view_state_get_focused(DocState* state, View* view) {
 
 static FormControlProp* form_prop_for_view(View* view) {
     if (!view || !view->is_block()) return NULL;
-    ViewBlock* block = (ViewBlock*)view;
+    ViewBlock* block = lam::view_require_block(view);
     return block->form;
 }
 
 static bool view_element_has_attr(View* view, const char* attr_name) {
     if (!view || !view->is_element() || !attr_name) return false;
-    ViewElement* elem = (ViewElement*)view;
+    ViewElement* elem = lam::view_require_element(view);
     return elem->get_attribute(attr_name) != NULL;
 }
 
 static int form_default_selected_index_from_tree(View* view) {
     if (!view || !view->is_element()) return -1;
-    DomElement* element = (DomElement*)view;
+    DomElement* element = lam::dom_require_element(view);
     if (element->tag() != HTM_TAG_SELECT) return -1;
 
     int option_count = 0;
@@ -1515,7 +1516,7 @@ static int form_default_selected_index_from_tree(View* view) {
     DomNode* child = element->first_child;
     while (child) {
         if (child->is_element()) {
-            DomElement* child_elem = (DomElement*)child;
+            DomElement* child_elem = lam::dom_require_element(child);
             if (child_elem->tag() == HTM_TAG_OPTION) {
                 if (child_elem->has_attribute("selected") && selected_index < 0) {
                     selected_index = option_count;
@@ -1525,7 +1526,7 @@ static int form_default_selected_index_from_tree(View* view) {
                 DomNode* opt_child = child_elem->first_child;
                 while (opt_child) {
                     if (opt_child->is_element()) {
-                        DomElement* opt_elem = (DomElement*)opt_child;
+                        DomElement* opt_elem = lam::dom_require_element(opt_child);
                         if (opt_elem->tag() == HTM_TAG_OPTION) {
                             if (opt_elem->has_attribute("selected") && selected_index < 0) {
                                 selected_index = option_count;
@@ -1545,7 +1546,7 @@ static int form_default_selected_index_from_tree(View* view) {
 
 static float form_default_range_value(View* view, FormControlProp* form) {
     if (!form || form->control_type != FORM_CONTROL_RANGE || !view || !view->is_element()) return 0.5f;
-    ViewElement* elem = (ViewElement*)view;
+    ViewElement* elem = lam::view_require_element(view);
     const char* value_attr = elem->get_attribute("value");
     if (!value_attr) return 0.5f;
 
@@ -1672,13 +1673,13 @@ void doc_state_set_hover_target(DocState* state, View* target) {
     View* node = old_target;
     while (node) {
         view_state_set_hovered_internal(state, node, false, false);
-        node = (View*)node->parent;
+        node = static_cast<View*>(node->parent);
     }
 
     node = target;
     while (node) {
         view_state_set_hovered_internal(state, node, true, false);
-        node = (View*)node->parent;
+        node = static_cast<View*>(node->parent);
     }
 
     state->hover_target = target;
@@ -1697,13 +1698,13 @@ void doc_state_set_active_target(DocState* state, View* target) {
     View* node = old_target;
     while (node) {
         view_state_set_active_internal(state, node, false, false);
-        node = (View*)node->parent;
+        node = static_cast<View*>(node->parent);
     }
 
     node = target;
     while (node) {
         view_state_set_active_internal(state, node, true, false);
-        node = (View*)node->parent;
+        node = static_cast<View*>(node->parent);
     }
 
     state->active_target = target;
@@ -1879,7 +1880,7 @@ bool state_has(DocState* state, void* node, const char* name) {
         strcmp(name, STATE_DISABLED) == 0 ||
         strcmp(name, STATE_READONLY) == 0 ||
         strcmp(name, STATE_REQUIRED) == 0) {
-        return view_state_get(state, (View*)node) != NULL;
+        return view_state_get(state, static_cast<View*>(node)) != NULL;
     }
 
     const char* interned = intern_state_name(name);
@@ -1940,7 +1941,7 @@ void state_set(DocState* state, void* node, const char* name, Item value) {
 
 void state_set_bool(DocState* state, void* node, const char* name, bool value) {
     if (state && node && name) {
-        View* view = (View*)node;
+        View* view = static_cast<View*>(node);
         if (strcmp(name, STATE_HOVER) == 0) {
             view_state_set_hovered(state, view, value);
             return;
@@ -2275,7 +2276,7 @@ const char* form_control_get_value(DocState* state, View* view, uint32_t* out_le
     if (out_len) *out_len = 0;
     if (!view || !view->is_block()) return nullptr;
 
-    ViewBlock* block = (ViewBlock*)view;
+    ViewBlock* block = lam::view_require_block(view);
     if (!block->form) return nullptr;
 
     FormControlProp* form = block->form;
@@ -2286,10 +2287,10 @@ const char* form_control_get_value(DocState* state, View* view, uint32_t* out_le
 void form_control_set_value(DocState* state, View* view, const char* value, uint32_t len) {
     if (!view || !view->is_block()) return;
 
-    ViewBlock* block = (ViewBlock*)view;
+    ViewBlock* block = lam::view_require_block(view);
     if (!block->form) return;
 
-    DomElement* elem = (DomElement*)block;
+    DomElement* elem = lam::dom_require_element(block);
     block->form->state_ref = state;
 
     // For text controls (input text, textarea), route through tc_set_value
@@ -2342,7 +2343,7 @@ void form_control_get_selection(DocState* state, View* view,
 
     if (!view || !view->is_block()) return;
 
-    ViewBlock* block = (ViewBlock*)view;
+    ViewBlock* block = lam::view_require_block(view);
     if (!block->form) return;
 
     FormControlProp* form = block->form;
@@ -2355,10 +2356,10 @@ void form_control_set_selection(DocState* state, View* view,
                                 uint32_t start, uint32_t end, uint8_t direction) {
     if (!view || !view->is_block()) return;
 
-    ViewBlock* block = (ViewBlock*)view;
+    ViewBlock* block = lam::view_require_block(view);
     if (!block->form) return;
 
-    DomElement* elem = (DomElement*)block;
+    DomElement* elem = lam::dom_require_element(block);
     FormControlProp* form = block->form;
     form->state_ref = state;
 
@@ -2393,7 +2394,7 @@ void form_control_set_selection(DocState* state, View* view,
 
 void form_control_sync_text_control_state(DocState* state, View* view) {
     if (!state || !view || !view->is_block()) return;
-    ViewBlock* block = (ViewBlock*)view;
+    ViewBlock* block = lam::view_require_block(view);
     FormControlProp* form = block->form;
     if (!form) return;
 
@@ -2415,7 +2416,7 @@ int form_control_get_selected_index(DocState* state, View* view) {
 void form_control_set_selected_index(DocState* state, View* view, int index) {
     if (!view || !view->is_block()) return;
 
-    ViewBlock* block = (ViewBlock*)view;
+    ViewBlock* block = lam::view_require_block(view);
     if (!block->form) return;
 
     FormControlProp* form = block->form;
@@ -2447,7 +2448,7 @@ float form_control_get_range_value(DocState* state, View* view) {
 void form_control_set_range_value(DocState* state, View* view, float value) {
     if (!view || !view->is_block()) return;
 
-    ViewBlock* block = (ViewBlock*)view;
+    ViewBlock* block = lam::view_require_block(view);
     if (!block->form) return;
 
     FormControlProp* form = block->form;
@@ -2483,7 +2484,7 @@ bool form_control_is_disabled(DocState* state, View* view) {
 void form_control_set_disabled(DocState* state, View* view, bool disabled) {
     if (!view || !view->is_block()) return;
 
-    ViewBlock* block = (ViewBlock*)view;
+    ViewBlock* block = lam::view_require_block(view);
     if (!block->form) return;
 
     FormControlProp* form = block->form;
@@ -2509,7 +2510,7 @@ bool form_control_is_readonly(DocState* state, View* view) {
 void form_control_set_readonly(DocState* state, View* view, bool readonly) {
     if (!view || !view->is_block()) return;
 
-    ViewBlock* block = (ViewBlock*)view;
+    ViewBlock* block = lam::view_require_block(view);
     if (!block->form) return;
 
     FormControlProp* form = block->form;
@@ -2535,7 +2536,7 @@ bool form_control_is_required(DocState* state, View* view) {
 void form_control_set_required(DocState* state, View* view, bool required) {
     if (!view || !view->is_block()) return;
 
-    ViewBlock* block = (ViewBlock*)view;
+    ViewBlock* block = lam::view_require_block(view);
     if (!block->form) return;
 
     FormControlProp* form = block->form;
@@ -2686,7 +2687,7 @@ void doc_state_set_context_menu_hover(DocState* state, int hover_index) {
 void form_control_open_dropdown(DocState* state, View* view) {
     if (!view || !view->is_block()) return;
 
-    ViewBlock* block = (ViewBlock*)view;
+    ViewBlock* block = lam::view_require_block(view);
     if (!block->form) return;
 
     FormControlProp* form = block->form;
@@ -2707,7 +2708,7 @@ void form_control_open_dropdown(DocState* state, View* view) {
 void form_control_close_dropdown(DocState* state, View* view) {
     if (!view || !view->is_block()) return;
 
-    ViewBlock* block = (ViewBlock*)view;
+    ViewBlock* block = lam::view_require_block(view);
     if (!block->form) return;
 
     FormControlProp* form = block->form;
@@ -2727,7 +2728,7 @@ void form_control_close_dropdown(DocState* state, View* view) {
 void form_control_set_hover_index(DocState* state, View* view, int index) {
     if (!view || !view->is_block()) return;
 
-    ViewBlock* block = (ViewBlock*)view;
+    ViewBlock* block = lam::view_require_block(view);
     if (!block->form) return;
 
     FormControlProp* form = block->form;
@@ -3008,7 +3009,7 @@ void dirty_mark_rect(DirtyTracker* tracker, float x, float y, float width, float
 void dirty_mark_element(DocState* state, void* view_ptr) {
     if (!state || !view_ptr) return;
 
-    View* view = (View*)view_ptr;
+    View* view = static_cast<View*>(view_ptr);
 
     // Get element's absolute bounds
     float abs_x = view->x, abs_y = view->y;
@@ -3103,13 +3104,13 @@ static ReflowScope get_max_reflow_scope(ReflowScheduler* scheduler) {
 static void mark_for_style_recompute(View* view, ReflowScope scope) {
     if (!view || !view->is_element()) return;
 
-    DomElement* element = (DomElement*)view;
+    DomElement* element = lam::dom_require_element(view);
     element->needs_style_recompute = true;
     element->styles_resolved = false;
 
     // For REFLOW_SUBTREE, mark all descendants
     if (scope >= REFLOW_SUBTREE) {
-        View* child = view->is_block() ? ((ViewBlock*)view)->first_child : nullptr;
+        View* child = view->is_block() ? (lam::view_require_block(view))->first_child : nullptr;
         while (child) {
             mark_for_style_recompute(child, REFLOW_SUBTREE);
             child = child->next();
@@ -3121,7 +3122,7 @@ static void mark_for_style_recompute(View* view, ReflowScope scope) {
         View* parent = view->parent;
         while (parent) {
             if (parent->is_element()) {
-                DomElement* pe = (DomElement*)parent;
+                DomElement* pe = lam::dom_require_element(parent);
                 pe->needs_style_recompute = true;
                 pe->styles_resolved = false;
             }
@@ -3149,7 +3150,7 @@ void reflow_process_pending(DocState* state) {
         log_debug("reflow_process: node=%p, scope=%d, reason=0x%x", req->node, req->scope, req->reason);
 
         // Mark element for style recompute
-        View* view = (View*)req->node;
+        View* view = static_cast<View*>(req->node);
         mark_for_style_recompute(view, req->scope);
 
         req = req->next;
@@ -3360,7 +3361,7 @@ static int get_view_content_length(View* view) {
     if (!view) return 0;
 
     if (view->is_text()) {
-        ViewText* text = (ViewText*)view;
+        ViewText* text = lam::view_require_text(view);
         if (text->text) {
             return strlen(text->text);
         }
@@ -3384,8 +3385,8 @@ static View* find_first_navigable_in_subtree(View* root) {
     if (is_view_navigable(root)) return root;
 
     if (root->is_element()) {
-        DomElement* elem = (DomElement*)root;
-        View* child = (View*)elem->first_child;
+        DomElement* elem = lam::dom_require_element(root);
+        View* child = static_cast<View*>(elem->first_child);
         while (child) {
             View* found = find_first_navigable_in_subtree(child);
             if (found) return found;
@@ -3404,10 +3405,10 @@ static View* find_last_navigable_in_subtree(View* root) {
 
     // First check children (rightmost first)
     if (root->is_element()) {
-        DomElement* elem = (DomElement*)root;
+        DomElement* elem = lam::dom_require_element(root);
         if (elem->first_child) {
             // Find last child
-            View* child = (View*)elem->first_child;
+            View* child = static_cast<View*>(elem->first_child);
             View* last_child = child;
             while (child) {
                 last_child = child;
@@ -3541,7 +3542,7 @@ static bool has_meaningful_content(View* view) {
     if (!view) return false;
 
     if (view->is_text()) {
-        ViewText* text = (ViewText*)view;
+        ViewText* text = lam::view_require_text(view);
         unsigned char* str = text->text_data();
         if (!str || *str == '\0') {
             log_debug("has_meaningful_content: view %p - empty string", view);
@@ -3585,7 +3586,7 @@ static bool should_preserve_whitespace(View* view) {
     View* parent = view->parent;
     while (parent) {
         if (parent->is_element()) {
-            DomElement* elem = (DomElement*)parent;
+            DomElement* elem = lam::dom_require_element(parent);
             if (elem->blk) {
                 CssEnum ws = elem->blk->white_space;
                 // CSS_VALUE_PRE, CSS_VALUE_PRE_WRAP, CSS_VALUE_PRE_LINE preserve whitespace
@@ -3676,7 +3677,7 @@ void caret_move(DocState* state, int delta) {
 
     // For text views, we need to properly handle UTF-8 character boundaries
     if (view->is_text()) {
-        ViewText* text_view = (ViewText*)view;
+        ViewText* text_view = lam::view_require_text(view);
         unsigned char* str = text_view->text_data();
         int text_length = str ? strlen((char*)str) : 0;
 
@@ -3706,7 +3707,7 @@ void caret_move(DocState* state, int delta) {
                     caret->view = next_view;
                     // Skip leading whitespace in new view (when crossing view boundary, treat as if we passed whitespace)
                     if (next_view->is_text()) {
-                        ViewText* next_text = (ViewText*)next_view;
+                        ViewText* next_text = lam::view_require_text(next_view);
                         unsigned char* next_str = next_text->text_data();
                         int next_len = next_str ? strlen((char*)next_str) : 0;
                         bool next_preserve_ws = should_preserve_whitespace(next_view);
@@ -3755,7 +3756,7 @@ void caret_move(DocState* state, int delta) {
                     // Position at end of prev view, skipping trailing whitespace (when crossing view boundary)
                     int prev_length = get_view_content_length(prev_view);
                     if (prev_view->is_text()) {
-                        ViewText* prev_text = (ViewText*)prev_view;
+                        ViewText* prev_text = lam::view_require_text(prev_view);
                         unsigned char* prev_str = prev_text->text_data();
                         bool prev_preserve_ws = should_preserve_whitespace(prev_view);
                         // Skip all trailing whitespace when crossing view boundary
@@ -3856,7 +3857,7 @@ void caret_move_to(DocState* state, int where) {
 
     // Handle text views with proper line/offset calculation
     if (view->is_text()) {
-        ViewText* text = (ViewText*)view;
+        ViewText* text = lam::view_require_text(view);
         TextRect* rect = text->rect;
 
         switch (where) {
@@ -4101,7 +4102,7 @@ static float get_caret_visual_y(View* view, int char_offset) {
     if (!view) return 0;
 
     if (view->is_text()) {
-        ViewText* text = (ViewText*)view;
+        ViewText* text = lam::view_require_text(view);
         TextRect* rect = text->rect;
         while (rect) {
             int rect_end = rect->start_index + rect->length;
@@ -4184,7 +4185,7 @@ static View* find_view_at_different_y(View* current_view, int current_offset,
         bool found_current_in_view = false;
 
         if (view->is_text()) {
-            ViewText* text = (ViewText*)view;
+            ViewText* text = lam::view_require_text(view);
             TextRect* rect = text->rect;
             while (rect) {
                 int rect_end = rect->start_index + rect->length;
@@ -4210,7 +4211,7 @@ static View* find_view_at_different_y(View* current_view, int current_offset,
         View* next = find_next_navigable_view(view);
         while (next) {
             if (next->is_text()) {
-                ViewText* next_text = (ViewText*)next;
+                ViewText* next_text = lam::view_require_text(next);
                 TextRect* rect = next_text->rect;
                 while (rect) {
                     float rect_y = get_rect_absolute_y(next, rect);
@@ -4244,7 +4245,7 @@ done_down: ;
         View* view = current_view;
 
         if (view->is_text()) {
-            ViewText* text = (ViewText*)view;
+            ViewText* text = lam::view_require_text(view);
             TextRect* rect = text->rect;
             // Collect rects with Y < current_y; we want the highest such Y (closest to current).
             // First pass: find max rect_y satisfying rect_y < current_y - tol, restricted to
@@ -4282,7 +4283,7 @@ done_down: ;
                 float prev_max_y = -1e9f;
                 bool prev_any = false;
                 if (prev->is_text()) {
-                    ViewText* pt = (ViewText*)prev;
+                    ViewText* pt = lam::view_require_text(prev);
                     for (TextRect* r = pt->rect; r; r = r->next) {
                         float r_y = get_rect_absolute_y(prev, r);
                         if (r_y < current_y - Y_TOLERANCE) {
@@ -4297,7 +4298,7 @@ done_down: ;
                     if (!best_view) line_y = prev_max_y;
                     // Collect rects on this line from prev.
                     if (prev->is_text()) {
-                        ViewText* pt = (ViewText*)prev;
+                        ViewText* pt = lam::view_require_text(prev);
                         for (TextRect* r = pt->rect; r; r = r->next) {
                             float r_y = get_rect_absolute_y(prev, r);
                             if (fabsf(r_y - line_y) <= Y_TOLERANCE) consider_rect(prev, r);
@@ -4310,7 +4311,7 @@ done_down: ;
                     while (prev) {
                         bool any_on_line = false;
                         if (prev->is_text()) {
-                            ViewText* pt = (ViewText*)prev;
+                            ViewText* pt = lam::view_require_text(prev);
                             for (TextRect* r = pt->rect; r; r = r->next) {
                                 float r_y = get_rect_absolute_y(prev, r);
                                 if (fabsf(r_y - line_y) <= Y_TOLERANCE) {
@@ -4369,7 +4370,7 @@ void caret_move_line(DocState* state, int delta, struct UiContext* uicon) {
             float new_parent_abs_x = (new_view->parent ? get_absolute_x(new_view->parent) : 0);
             float target_local_x = current_abs_x - new_parent_abs_x;
             new_offset = dom_range_byte_offset_for_x(uicon,
-                (ViewText*)new_view, new_rect, target_local_x);
+                lam::view_require_text(new_view), new_rect, target_local_x);
         }
         caret->view = new_view;
         caret->char_offset = new_offset;
@@ -4410,7 +4411,7 @@ static void projection_chain_offset(View* view, float* out_x, float* out_y) {
         if (parent->view_type == RDT_VIEW_BLOCK ||
             parent->view_type == RDT_VIEW_INLINE_BLOCK ||
             parent->view_type == RDT_VIEW_LIST_ITEM) {
-            ViewBlock* block = (ViewBlock*)parent;
+            ViewBlock* block = lam::view_require_block(parent);
             chain_x += block->x;
             chain_y += block->y;
         }
@@ -4877,7 +4878,7 @@ void selection_select_all(DocState* state) {
     SelectionState* sel = state->selection;
     if (selection_is_text_control_view(sel->view)) {
         // Canonical: update DomSelection only, then sync projections.
-        DomElement* elem = (DomElement*)sel->view;
+        DomElement* elem = lam::dom_require_element(sel->view);
         tc_ensure_init(elem);
         uint32_t len = 0;
         if (elem->form && elem->form->current_value) {
@@ -4885,15 +4886,15 @@ void selection_select_all(DocState* state) {
         } else if (elem->form && elem->form->value) {
             len = (uint32_t)strlen(elem->form->value);
         }
-        DomBoundary anchor = boundary_from_legacy((View*)elem, 0);
-        DomBoundary focus = boundary_from_legacy((View*)elem, (int)len);
+        DomBoundary anchor = boundary_from_legacy(static_cast<View*>(elem), 0);
+        DomBoundary focus = boundary_from_legacy(static_cast<View*>(elem), (int)len);
         const char* exc = NULL;
         if (!anchor.node || !focus.node) return;
         if (!dom_selection_set_base_and_extent(selection, anchor.node, anchor.offset, focus.node, focus.offset, &exc)) {
             log_debug("selection_select_all: text-control set_base_and_extent rejected: %s", exc ? exc : "?");
             return;
         }
-        text_control_sync_selection(state, (View*)elem);
+        text_control_sync_selection(state, static_cast<View*>(elem));
         state->selection_layout_dirty = true;
         state->needs_repaint = true;
         selection_log_transition(state, "select_text_control_all",
@@ -4902,7 +4903,7 @@ void selection_select_all(DocState* state) {
         return;
     }
 
-    DomNode* node = (DomNode*)sel->view;
+    DomNode* node = static_cast<DomNode*>(sel->view);
     const char* exc = NULL;
     bool ok = false;
     if (node->is_text()) {
@@ -5203,7 +5204,7 @@ static void focus_set_within_chain(DocState* state, View* view, bool set) {
     while (node) {
         focus_set_pseudo(state, node, STATE_FOCUS_WITHIN,
                          PSEUDO_STATE_FOCUS_WITHIN, set);
-        node = (View*)node->parent;
+        node = static_cast<View*>(node->parent);
     }
 }
 
@@ -5236,8 +5237,8 @@ static void focus_log_transition(DocState* state, const char* transition,
 static void focus_sync_text_control_state(DocState* state, View* view) {
     if (!state) return;
 
-    if (view && view->is_element() && tc_is_text_control((DomElement*)view)) {
-        DomElement* elem = (DomElement*)view;
+    if (view && view->is_element() && tc_is_text_control(lam::dom_require_element(view))) {
+        DomElement* elem = lam::dom_require_element(view);
         tc_ensure_init(elem);
         FormControlProp* form = elem->form;
         tc_set_active_element(state, elem);
@@ -5286,7 +5287,7 @@ void focus_set(DocState* state, View* view, bool from_keyboard) {
     View* old_focus = focus->current;
 
     if (old_focus && old_focus != view && old_focus->is_element() &&
-        tc_is_text_control((DomElement*)old_focus)) {
+        tc_is_text_control(lam::dom_require_element(old_focus))) {
         tc_set_active_element(state, NULL);
     }
 
@@ -5346,7 +5347,7 @@ void focus_clear(DocState* state) {
 
     View* old_focus = focus->current;
     if (old_focus && old_focus->is_element() &&
-        tc_is_text_control((DomElement*)old_focus)) {
+        tc_is_text_control(lam::dom_require_element(old_focus))) {
         tc_set_active_element(state, NULL);
     }
     focus->previous = focus->current;
@@ -5374,10 +5375,10 @@ static void collect_focusable(View* view, ArrayList* list) {
     }
     // recurse into children (only element nodes have children)
     if (view->is_element()) {
-        DomElement* elem = (DomElement*)view;
+        DomElement* elem = lam::dom_require_element(view);
         DomNode* child = elem->first_child;
         while (child) {
-            collect_focusable((View*)child, list);
+            collect_focusable(static_cast<View*>(child), list);
             child = child->next_sibling;
         }
     }
@@ -5410,7 +5411,7 @@ bool focus_move(DocState* state, View* root, bool forward) {
     View* current = state->focus ? state->focus->current : NULL;
     int current_idx = -1;
     for (int i = 0; i < focusable->length; i++) {
-        if ((View*)focusable->data[i] == current) {
+        if (static_cast<View*>(focusable->data[i]) == current) {
             current_idx = i;
             break;
         }
@@ -5427,7 +5428,7 @@ bool focus_move(DocState* state, View* root, bool forward) {
         next_idx = (current_idx - 1 + focusable->length) % focusable->length;
     }
 
-    View* next_view = (View*)focusable->data[next_idx];
+    View* next_view = static_cast<View*>(focusable->data[next_idx]);
     focus_set(state, next_view, true);  // from_keyboard=true
 
     log_debug("focus_move: %s to index %d/%d", forward ? "forward" : "backward",
@@ -5471,7 +5472,7 @@ bool focus_within(DocState* state, View* view) {
     View* node = focused;
     while (node) {
         if (node == view) return true;
-        node = (View*)node->parent;
+        node = static_cast<View*>(node->parent);
     }
 
     return false;
@@ -5491,7 +5492,7 @@ static void extract_text_recursive(View* view, StrBuf* sb) {
     if (!view) return;
 
     if (view->view_type == RDT_VIEW_TEXT) {
-        ViewText* text = (ViewText*)view;
+        ViewText* text = lam::view_require_text(view);
         const char* text_data = (const char*)text->text_data();
         if (text_data) {
             // Extract text from all TextRects
@@ -5506,7 +5507,7 @@ static void extract_text_recursive(View* view, StrBuf* sb) {
     }
 
     // Recurse into children
-    View* child = view->is_element() ? ((ViewElement*)view)->first_child : nullptr;
+    View* child = view->is_element() ? (lam::view_require_element(view))->first_child : nullptr;
     while (child) {
         extract_text_recursive(child, sb);
 
@@ -5587,8 +5588,8 @@ static void append_open_tag_for_clipboard(StrBuf* sb, DomElement* element) {
     strbuf_append_char(sb, '<');
     strbuf_append_str(sb, element->tag_name);
     if (strcmp(element->tag_name, "a") == 0) {
-        const char* href = ((DomNode*)element)->get_attribute("href");
-        const char* title = ((DomNode*)element)->get_attribute("title");
+        const char* href = (static_cast<DomNode*>(element))->get_attribute("href");
+        const char* title = (static_cast<DomNode*>(element))->get_attribute("title");
         if (href) {
             strbuf_append_str(sb, " href=\"");
             append_html_attr_escaped(sb, href);
@@ -5698,20 +5699,20 @@ static char* extract_dom_range_text_to_arena(DomRange* range, Arena* arena) {
     if (!sb) return NULL;
     DomText* text = first_text_in_range_for_clipboard(range);
     while (text) {
-        DomBoundary text_start{ (DomNode*)text, 0 };
-        DomBoundary text_end{ (DomNode*)text, dom_text_utf16_length(text) };
+        DomBoundary text_start{ static_cast<DomNode*>(text), 0 };
+        DomBoundary text_end{ static_cast<DomNode*>(text), dom_text_utf16_length(text) };
         if (!boundary_before_or_equal(&text_start, &range->end)) break;
 
         DomBoundary slice_start = text_start;
         DomBoundary slice_end = text_end;
         if (dom_boundary_compare(&slice_start, &range->start) == DOM_BOUNDARY_BEFORE) slice_start = range->start;
         if (dom_boundary_compare(&slice_end, &range->end) == DOM_BOUNDARY_AFTER) slice_end = range->end;
-        if (slice_start.node == (DomNode*)text && slice_end.node == (DomNode*)text &&
+        if (slice_start.node == static_cast<DomNode*>(text) && slice_end.node == static_cast<DomNode*>(text) &&
             slice_start.offset < slice_end.offset) {
             append_selected_text_plain(sb, text, slice_start.offset, slice_end.offset);
         }
         if (!boundary_before_or_equal(&text_end, &range->end) || text_end.node == range->end.node) break;
-        text = next_text_after_for_clipboard((DomNode*)text);
+        text = next_text_after_for_clipboard(static_cast<DomNode*>(text));
     }
     char* result = sb->length > 0 ? arena_copy_cstr(arena, sb->str) : NULL;
     strbuf_free(sb);
@@ -5725,7 +5726,7 @@ static void extract_html_recursive(View* view, StrBuf* sb) {
     if (!view) return;
 
     if (view->view_type == RDT_VIEW_TEXT) {
-        ViewText* text = (ViewText*)view;
+        ViewText* text = lam::view_require_text(view);
         const char* text_data = (const char*)text->text_data();
         if (text_data) {
             TextRect* rect = text->rect;
@@ -5749,7 +5750,7 @@ static void extract_html_recursive(View* view, StrBuf* sb) {
             }
         }
     } else if (view->is_element()) {
-        ViewElement* element = (ViewElement*)view;
+        ViewElement* element = lam::view_require_element(view);
 
         // Opening tag
         const char* tag_name = element->tag_name;
@@ -5817,7 +5818,7 @@ char* extract_selected_text(DocState* state, Arena* arena) {
         return NULL;
     }
 
-    ViewText* text = (ViewText*)view;
+    ViewText* text = lam::view_require_text(view);
     const char* text_data = (const char*)text->text_data();
     if (!text_data) return NULL;
 
@@ -5849,20 +5850,20 @@ char* extract_selected_html(DocState* state, Arena* arena) {
         if (!sb) return NULL;
         DomText* text = first_text_in_range_for_clipboard(range);
         while (text) {
-            DomBoundary text_start{ (DomNode*)text, 0 };
-            DomBoundary text_end{ (DomNode*)text, dom_text_utf16_length(text) };
+            DomBoundary text_start{ static_cast<DomNode*>(text), 0 };
+            DomBoundary text_end{ static_cast<DomNode*>(text), dom_text_utf16_length(text) };
             if (!boundary_before_or_equal(&text_start, &range->end)) break;
 
             DomBoundary slice_start = text_start;
             DomBoundary slice_end = text_end;
             if (dom_boundary_compare(&slice_start, &range->start) == DOM_BOUNDARY_BEFORE) slice_start = range->start;
             if (dom_boundary_compare(&slice_end, &range->end) == DOM_BOUNDARY_AFTER) slice_end = range->end;
-            if (slice_start.node == (DomNode*)text && slice_end.node == (DomNode*)text &&
+            if (slice_start.node == static_cast<DomNode*>(text) && slice_end.node == static_cast<DomNode*>(text) &&
                 slice_start.offset < slice_end.offset) {
                 append_selected_text_html(sb, text, slice_start.offset, slice_end.offset);
             }
             if (!boundary_before_or_equal(&text_end, &range->end) || text_end.node == range->end.node) break;
-            text = next_text_after_for_clipboard((DomNode*)text);
+            text = next_text_after_for_clipboard(static_cast<DomNode*>(text));
         }
         char* result = sb->length > 0 ? arena_copy_cstr(arena, sb->str) : NULL;
         strbuf_free(sb);

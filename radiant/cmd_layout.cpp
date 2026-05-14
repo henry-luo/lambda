@@ -78,6 +78,7 @@ void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 #include "../radiant/source_pos_bridge.hpp"
 #include "../radiant/event_state_log.hpp"
 #include "../radiant/state_machine.hpp"
+#include "../lib/tagged.hpp"
 #include "../lambda/render_map.h"
 #include "../lambda/template_state.h"
 
@@ -464,7 +465,7 @@ void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool*
                 break;
             }
 
-            DomElement* dom_child_elem = (DomElement*)dom_child;
+            DomElement* dom_child_elem = lam::dom_require_element(dom_child);
 
             // Recursively apply to this child
             apply_inline_styles_to_tree(dom_child_elem, html_child, pool, depth + 1);
@@ -803,7 +804,7 @@ void extract_body_transform_scale(DomElement* root, DomDocument* doc) {
         // Search in children
         for (DomNode* child = root->first_child; child; child = child->next_sibling) {
             if (child->node_type == DOM_NODE_ELEMENT) {
-                DomElement* child_elem = static_cast<DomElement*>(child);
+                DomElement* child_elem = lam::dom_require_element(child);
                 if (child_elem->tag_name && str_ieq_const(child_elem->tag_name, strlen(child_elem->tag_name), "body")) {
                     body_elem = child_elem;
                     break;
@@ -811,7 +812,7 @@ void extract_body_transform_scale(DomElement* root, DomDocument* doc) {
                 // Also check one level deeper (html > head, body)
                 for (DomNode* grandchild = child_elem->first_child; grandchild; grandchild = grandchild->next_sibling) {
                     if (grandchild->node_type == DOM_NODE_ELEMENT) {
-                        DomElement* grandchild_elem = static_cast<DomElement*>(grandchild);
+                        DomElement* grandchild_elem = lam::dom_require_element(grandchild);
                         if (grandchild_elem->tag_name && str_ieq_const(grandchild_elem->tag_name, strlen(grandchild_elem->tag_name), "body")) {
                             body_elem = grandchild_elem;
                             break;
@@ -1581,7 +1582,7 @@ void collect_inline_styles_from_dom(DomElement* elem, CssEngine* engine, Pool* p
                 DomNode* child = elem->first_child;
                 while (child) {
                     if (child->node_type == DOM_NODE_TEXT) {
-                        DomText* text_node = (DomText*)child;
+                        DomText* text_node = lam::dom_require_text(child);
                         if (text_node->text && text_node->length > 0) {
                             CssStylesheet* stylesheet = css_parse_stylesheet(engine, text_node->text, "<inline-style>");
                             annotate_css_stylesheet_source_file(stylesheet, "<inline-style>");
@@ -1604,7 +1605,7 @@ void collect_inline_styles_from_dom(DomElement* elem, CssEngine* engine, Pool* p
     DomNode* child = elem->first_child;
     while (child) {
         if (child->node_type == DOM_NODE_ELEMENT) {
-            collect_inline_styles_from_dom((DomElement*)child, engine, pool, stylesheets, count, depth + 1);
+            collect_inline_styles_from_dom(lam::dom_require_element(child), engine, pool, stylesheets, count, depth + 1);
         }
         child = child->next_sibling;
     }
@@ -2275,7 +2276,7 @@ void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, S
     DomNode* child = root->first_child;
     while (child) {
         if (child->is_element()) {
-            DomElement* child_elem = (DomElement*)child;
+            DomElement* child_elem = lam::dom_require_element(child);
             apply_stylesheet_to_dom_tree(child_elem, stylesheet, matcher, pool, engine, depth + 1);
         }
         child = child->next_sibling;
@@ -2315,7 +2316,7 @@ static void apply_stylesheet_to_dom_tree_indexed(DomElement* root, SelectorIndex
     DomNode* child = root->first_child;
     while (child) {
         if (child->is_element()) {
-            DomElement* child_elem = (DomElement*)child;
+            DomElement* child_elem = lam::dom_require_element(child);
             apply_stylesheet_to_dom_tree_indexed(child_elem, index, matcher, pool, engine, depth + 1);
         }
         child = child->next_sibling;
@@ -3236,7 +3237,7 @@ DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height,
     float scaled_height = svg_height * pixel_ratio;
 
     // Create ViewTree
-    ViewTree* view_tree = (ViewTree*)pool_calloc(view_pool, sizeof(ViewTree));
+    ViewTree* view_tree = lam::pool_alloc_view_tree(view_pool);
     if (!view_tree) {
         log_error("Failed to allocate view tree for SVG");
         rdt_picture_free(pic);
@@ -3247,7 +3248,7 @@ DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height,
     view_tree->html_version = HTML5;
 
     // Create root ViewBlock to hold the SVG
-    ViewBlock* root_view = (ViewBlock*)pool_calloc(view_pool, sizeof(ViewBlock));
+    ViewBlock* root_view = lam::pool_alloc_view_block(view_pool);
     if (!root_view) {
         log_error("Failed to allocate root view for SVG");
         rdt_picture_free(pic);
@@ -3282,7 +3283,7 @@ DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height,
         }
     }
 
-    view_tree->root = (View*)root_view;
+    view_tree->root = static_cast<View*>(root_view);
 
     // Create DomDocument
     DomDocument* dom_doc = dom_document_create(input);
@@ -3388,7 +3389,7 @@ DomDocument* load_image_doc(Url* img_url, int viewport_width, int viewport_heigh
     float scaled_height = (float)img_height * pixel_ratio;
 
     // Create ViewTree
-    ViewTree* view_tree = (ViewTree*)pool_calloc(view_pool, sizeof(ViewTree));
+    ViewTree* view_tree = lam::pool_alloc_view_tree(view_pool);
     if (!view_tree) {
         log_error("Failed to allocate view tree for image");
         image_surface_destroy(img_surface);
@@ -3399,7 +3400,7 @@ DomDocument* load_image_doc(Url* img_url, int viewport_width, int viewport_heigh
     view_tree->html_version = HTML5;
 
     // Create root ViewBlock to hold the image
-    ViewBlock* root_view = (ViewBlock*)pool_calloc(view_pool, sizeof(ViewBlock));
+    ViewBlock* root_view = lam::pool_alloc_view_block(view_pool);
     if (!root_view) {
         log_error("Failed to allocate root view for image");
         image_surface_destroy(img_surface);
@@ -3422,7 +3423,7 @@ DomDocument* load_image_doc(Url* img_url, int viewport_width, int viewport_heigh
         root_view->embed = embed;
     }
 
-    view_tree->root = (View*)root_view;
+    view_tree->root = static_cast<View*>(root_view);
 
     // Create DomDocument
     DomDocument* dom_doc = dom_document_create(input);
@@ -4597,13 +4598,13 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
     }
 
     // Wire up the tree structure: html > body > xml_dom
-    html_elem->first_child = (DomNode*)body_elem;
-    html_elem->last_child = (DomNode*)body_elem;
-    body_elem->parent = (DomNode*)html_elem;
+    html_elem->first_child = static_cast<DomNode*>(body_elem);
+    html_elem->last_child = static_cast<DomNode*>(body_elem);
+    body_elem->parent = static_cast<DomNode*>(html_elem);
 
-    body_elem->first_child = (DomNode*)xml_dom;
-    body_elem->last_child = (DomNode*)xml_dom;
-    xml_dom->parent = (DomNode*)body_elem;
+    body_elem->first_child = static_cast<DomNode*>(xml_dom);
+    body_elem->last_child = static_cast<DomNode*>(xml_dom);
+    xml_dom->parent = static_cast<DomNode*>(body_elem);
 
     log_debug("[Lambda XML] Built DOM tree: html > body > %s", xml_dom->tag_name);
 
@@ -5077,7 +5078,7 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
 static View* find_matching_input(View* root, const char* match_tag, const char* match_class) {
     if (!root) return nullptr;
     if (root->is_element()) {
-        DomElement* elem = (DomElement*)root;
+        DomElement* elem = lam::dom_require_element(root);
         if (elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
             elem->form &&
             elem->form->control_type == FORM_CONTROL_TEXT) {
@@ -5098,7 +5099,7 @@ static View* find_matching_input(View* root, const char* match_tag, const char* 
         DomNode* child = elem->first_child;
         while (child) {
             if (child->node_type == DOM_NODE_ELEMENT) {
-                View* found = find_matching_input((View*)child, match_tag, match_class);
+                View* found = find_matching_input(static_cast<View*>(child), match_tag, match_class);
                 if (found) return found;
             }
             child = child->next_sibling;
@@ -5142,7 +5143,7 @@ void rebuild_lambda_doc(UiContext* uicon) {
     if (state && focus_has_current(state)) {
         View* focused = focus_get(state);
         if (focused->is_element()) {
-            DomElement* felem = (DomElement*)focused;
+            DomElement* felem = lam::dom_require_element(focused);
             focus_tag = felem->tag_name;
             if (felem->class_count > 0 && felem->class_names)
                 focus_class = felem->class_names[0];
@@ -5214,7 +5215,7 @@ void rebuild_lambda_doc(UiContext* uicon) {
     // Restore focus to matching element in new view tree
     if (had_focus && state && doc->view_tree && doc->view_tree->root) {
         View* new_focused = find_matching_input(
-            (View*)doc->view_tree->root, focus_tag, focus_class);
+            doc->view_tree->root, focus_tag, focus_class);
         if (new_focused) {
             focus_set(state, new_focused, false);
             log_debug("rebuild_lambda_doc: restored focus to new view %p (tag=%s class=%s)",
@@ -5228,9 +5229,9 @@ void rebuild_lambda_doc(UiContext* uicon) {
     // autofocus — if no focus was restored, scan the new tree for an autofocus input
     if (state && !focus_has_current(state) &&
         doc->view_tree && doc->view_tree->root) {
-        View* af = find_matching_input((View*)doc->view_tree->root, "input", nullptr);
+        View* af = find_matching_input(doc->view_tree->root, "input", nullptr);
         if (af && af->is_element()) {
-            DomElement* af_elem = (DomElement*)af;
+            DomElement* af_elem = lam::dom_require_element(af);
             if (af_elem->has_attribute("autofocus")) {
                 focus_set(state, af, false);
                 caret_set(state, af, 0);
@@ -5317,7 +5318,7 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
                 break;
             }
             // Verify parent DOM is still valid (not GC-collected)
-            DomElement* parent_dom = (DomElement*)old_dom->parent;
+            DomElement* parent_dom = lam::dom_require_element(old_dom->parent);
             if (parent_dom->node_type != DOM_NODE_ELEMENT || !parent_dom->tag_name) {
                 can_incremental = false;
                 break;
@@ -5349,7 +5350,7 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
             DomNode* n = stack[--top];
             n->layout_dirty = true;
             if (n->is_element()) {
-                DomNode* c = ((DomElement*)n)->first_child;
+                DomNode* c = lam::dom_require_element(n)->first_child;
                 while (c && top < 255) {
                     stack[top++] = c;
                     c = c->next_sibling;
@@ -5368,7 +5369,7 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
             DomNode* n = stack[--top];
             n->layout_dirty = false;
             if (n->is_element()) {
-                DomNode* c = ((DomElement*)n)->first_child;
+                DomNode* c = lam::dom_require_element(n)->first_child;
                 while (c && top < 255) {
                     stack[top++] = c;
                     c = c->next_sibling;
@@ -5388,7 +5389,7 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
     if (state && focus_has_current(state)) {
         View* focused = focus_get(state);
         if (focused->is_element()) {
-            DomElement* felem = (DomElement*)focused;
+            DomElement* felem = lam::dom_require_element(focused);
             focus_tag = felem->tag_name;
             if (felem->class_count > 0 && felem->class_names)
                 focus_class = felem->class_names[0];
@@ -5412,7 +5413,7 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
         Element* old_elem = results[i].old_result.element;
         DomElement* old_dom = element_dom_map_lookup(doc->element_dom_map, old_elem);
         if (old_dom) {
-            compute_absolute_bounds((DomNode*)old_dom,
+            compute_absolute_bounds(static_cast<DomNode*>(old_dom),
                 &old_bounds[i].x, &old_bounds[i].y, &old_bounds[i].w, &old_bounds[i].h);
         }
     }
@@ -5427,7 +5428,7 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
             log_debug("rebuild_lambda_doc_incremental: entry %d has no DOM parent, skipping", i);
             continue;
         }
-        DomElement* parent_dom = (DomElement*)old_dom->parent;
+        DomElement* parent_dom = lam::dom_require_element(old_dom->parent);
 
         // Build new DOM subtree from the new Lambda element (not linked to parent yet)
         DomElement* new_dom = build_dom_tree_from_element(new_elem, doc, nullptr);
@@ -5438,18 +5439,18 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
         }
 
         // Replace old DOM child with new subtree in parent's linked list
-        bool replaced = dom_node_replace_in_parent(parent_dom, (DomNode*)old_dom, (DomNode*)new_dom);
+        bool replaced = dom_node_replace_in_parent(parent_dom, static_cast<DomNode*>(old_dom), static_cast<DomNode*>(new_dom));
         if (i < 16) new_doms[i] = new_dom;
 
         // Phase 16: Mark new subtree as layout_dirty
-        mark_dirty_subtree((DomNode*)new_dom);
+        mark_dirty_subtree(static_cast<DomNode*>(new_dom));
 
         // Phase 15: Invalidate ancestor styles only (new subtree nodes already have styles_resolved=false)
         // Phase 16: Mark ancestors as layout_dirty for incremental layout
-        DomNode* ancestor = (DomNode*)parent_dom;
+        DomNode* ancestor = static_cast<DomNode*>(parent_dom);
         while (ancestor) {
             if (ancestor->is_element()) {
-                ((DomElement*)ancestor)->styles_resolved = false;
+                (lam::dom_require_element(ancestor))->styles_resolved = false;
             }
             ancestor->layout_dirty = true;
             ancestor = ancestor->parent;
@@ -5483,7 +5484,7 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
         doc->skip_style_reset = false;
         doc->incremental_layout = false;
         // Phase 16: Clear layout_dirty flags for next pass
-        if (doc->root) clear_dirty_subtree((DomNode*)doc->root);
+        if (doc->root) clear_dirty_subtree(static_cast<DomNode*>(doc->root));
     } else {
         layout_html_doc(uicon, doc, false);
     }
@@ -5502,7 +5503,7 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
     // Restore focus
     if (had_focus && state && doc->view_tree && doc->view_tree->root) {
         View* new_focused = find_matching_input(
-            (View*)doc->view_tree->root, focus_tag, focus_class);
+            doc->view_tree->root, focus_tag, focus_class);
         if (new_focused) {
             focus_set(state, new_focused, false);
             log_debug("rebuild_lambda_doc_incremental: restored focus");
@@ -5517,9 +5518,9 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
     if (state && !focus_has_current(state)) {
         for (int i = 0; i < result_count; i++) {
             if (new_doms[i]) {
-                View* af = find_matching_input((View*)new_doms[i], "input", nullptr);
+                View* af = find_matching_input(static_cast<View*>(new_doms[i]), "input", nullptr);
                 if (af && af->is_element()) {
-                    DomElement* af_elem = (DomElement*)af;
+                    DomElement* af_elem = lam::dom_require_element(af);
                     if (af_elem->has_attribute("autofocus")) {
                         focus_set(state, af, false);
                         caret_set(state, af, 0);
@@ -5886,7 +5887,7 @@ static bool layout_single_file(
             set_combine_text_nodes(false);
         }
 
-        print_view_tree((ViewElement*)doc->view_tree->root, doc->url, output_path);
+        print_view_tree(lam::unsafe_view_element_storage(doc->view_tree->root), doc->url, output_path);
         log_debug("[Layout] Layout tree written to %s", output_path ? output_path : "/tmp/view_tree.json");
 
         if (is_pdf || is_svg) {

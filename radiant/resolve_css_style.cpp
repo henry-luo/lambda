@@ -19,6 +19,10 @@
 // Forward declaration for CSS variable lookup
 static const CssValue* lookup_css_variable(LayoutContext* lycon, const char* var_name);
 
+static DomElement* dom_parent_element(DomElement* element) {
+    return (element && element->parent) ? lam::dom_require_element(element->parent) : nullptr;
+}
+
 /**
  * Look up a CSS custom property (variable) value
  * Searches current element and ancestors (CSS variables inherit)
@@ -3037,7 +3041,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
     static const size_t num_inheritable = sizeof(inheritable_props) / sizeof(inheritable_props[0]);
 
     // Get parent's style tree for inheritance
-    DomElement* parent = dom_elem->parent ? static_cast<DomElement*>(dom_elem->parent) : nullptr;
+    DomElement* parent = dom_parent_element(dom_elem);
     StyleTree* parent_tree = (parent && parent->specified_style)
                              ? parent->specified_style : NULL;
 
@@ -3064,12 +3068,12 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
             //   table { text-align: end }   -> th: end (non-initial, inherit wins)
             // Explicit author rules on <th> itself are handled above by the 'existing' check.
             if (prop_id == CSS_PROPERTY_TEXT_ALIGN) {
-                DomElement* cur_elem = static_cast<DomElement*>(lycon->view);
+                DomElement* cur_elem = lam::dom_require_element(lycon->view);
                 if (cur_elem && cur_elem->tag_name && strcmp(cur_elem->tag_name, "th") == 0) {
                     // Peek at what ancestor would be inherited
                     bool inherited_is_noninitial = false;
-                    for (DomElement* p = dom_elem->parent ? static_cast<DomElement*>(dom_elem->parent) : nullptr;
-                         p; p = p->parent ? static_cast<DomElement*>(p->parent) : nullptr) {
+                    for (DomElement* p = dom_parent_element(dom_elem);
+                         p; p = dom_parent_element(p)) {
                         // Check computed value first
                         if (p->blk && p->blk->text_align != CSS_VALUE__UNDEF &&
                             p->blk->text_align != CSS_VALUE_INHERIT &&
@@ -3132,7 +3136,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
 
             // Property not set, check parent chain for inherited declaration
             // Walk up the parent chain until we find a declaration
-            DomElement* ancestor = dom_elem->parent ? static_cast<DomElement*>(dom_elem->parent) : nullptr;
+            DomElement* ancestor = dom_parent_element(dom_elem);
             CssDeclaration* inherited_decl = NULL;
 
             // Special handling for font-family: also check ancestor's computed font->family
@@ -3243,7 +3247,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                     }
                 }
                 // BUG FIX: Was using dom_elem->parent instead of ancestor->parent!
-                ancestor = ancestor->parent ? static_cast<DomElement*>(ancestor->parent) : nullptr;
+                ancestor = dom_parent_element(ancestor);
             }
 
             if (inherited_decl && inherited_decl->value) {
@@ -4164,8 +4168,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     // Find parent's computed text-align value
                     // Check computed blk->text_align first (handles HTML align attribute and
                     // CSS values set through any path), then fall back to specified_style
-                    DomElement* dom_elem = static_cast<DomElement*>(lycon->view);
-                    DomElement* parent = dom_elem->parent ? static_cast<DomElement*>(dom_elem->parent) : nullptr;
+                    DomElement* dom_elem = lam::dom_require_element(lycon->view);
+                    DomElement* parent = dom_parent_element(dom_elem);
                     bool resolved = false;
 
                     while (parent) {
@@ -4192,7 +4196,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                                 }
                             }
                         }
-                        parent = parent->parent ? static_cast<DomElement*>(parent->parent) : nullptr;
+                        parent = dom_parent_element(parent);
                     }
 
                     if (!resolved) {
@@ -4205,12 +4209,12 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     // CSS Text 3 §7.1: Logical keywords (start/end) are inherited
                     // without resolution — the layout code resolves them against
                     // the element's own direction at layout time (line_align()).
-                    DomElement* dom_elem = static_cast<DomElement*>(lycon->view);
-                    DomElement* parent = dom_elem->parent ? static_cast<DomElement*>(dom_elem->parent) : nullptr;
+                    DomElement* dom_elem = lam::dom_require_element(lycon->view);
+                    DomElement* parent = dom_parent_element(dom_elem);
                     CssEnum inherited_align = CSS_VALUE_START;
 
                     // Find parent's computed text-align
-                    for (DomElement* p = parent; p; p = p->parent ? static_cast<DomElement*>(p->parent) : nullptr) {
+                    for (DomElement* p = parent; p; p = dom_parent_element(p)) {
                         if (p->blk && p->blk->text_align != CSS_VALUE__UNDEF &&
                             p->blk->text_align != CSS_VALUE_INHERIT &&
                             p->blk->text_align != CSS_VALUE_MATCH_PARENT) {
@@ -4254,8 +4258,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 // Handle 'inherit' keyword
                 if (dir_value == CSS_VALUE_INHERIT) {
                     // Walk up parents to find computed direction
-                    DomElement* dom_elem = static_cast<DomElement*>(lycon->view);
-                    DomElement* parent = dom_elem->parent ? static_cast<DomElement*>(dom_elem->parent) : nullptr;
+                    DomElement* dom_elem = lam::dom_require_element(lycon->view);
+                    DomElement* parent = dom_parent_element(dom_elem);
                     bool resolved = false;
                     while (parent) {
                         if (parent->blk && parent->blk->direction != CSS_VALUE__UNDEF &&
@@ -4266,7 +4270,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                             resolved = true;
                             break;
                         }
-                        parent = parent->parent ? static_cast<DomElement*>(parent->parent) : nullptr;
+                        parent = dom_parent_element(parent);
                     }
                     if (!resolved) {
                         block->blk->direction = CSS_VALUE_LTR;
@@ -4321,8 +4325,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             }
             else if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
                 // Handle inherit - get parent's text-indent
-                DomElement* dom_elem = static_cast<DomElement*>(lycon->view);
-                DomElement* parent = dom_elem->parent ? static_cast<DomElement*>(dom_elem->parent) : nullptr;
+                DomElement* dom_elem = lam::dom_require_element(lycon->view);
+                DomElement* parent = dom_parent_element(dom_elem);
                 if (parent && parent->blk) {
                     block->blk->text_indent = parent->blk->text_indent;
                     block->blk->text_indent_percent = parent->blk->text_indent_percent;
@@ -8785,7 +8789,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 CssEnum val = value->data.keyword;
                 if (val == CSS_VALUE_INHERIT) {
                     // inherit from parent
-                    DomElement* ancestor = static_cast<DomElement*>(lycon->view);
+                    DomElement* ancestor = lam::dom_require_element(lycon->view);
                     if (ancestor && ancestor->font) {
                         span->font->font_variant = ancestor->font->font_variant;
                     }
@@ -10837,7 +10841,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
             // Handle 'inherit' keyword: copy all three list-style sub-properties from parent
             if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
-                DomElement* dom_elem = static_cast<DomElement*>(lycon->view);
+                DomElement* dom_elem = lam::dom_require_element(lycon->view);
                 DomElement* parent = dom_elem->parent ? dom_elem->parent->as_element() : nullptr;
                 while (parent) {
                     if (parent->blk) {

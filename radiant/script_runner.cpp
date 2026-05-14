@@ -32,6 +32,7 @@
 #include "../lib/url.h"
 #include "../lib/file.h"
 #include "../lib/hashmap.h"
+#include "../lib/tagged.hpp"
 #include "../lambda/js/js_event_loop.h"
 
 extern "C" void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
@@ -774,7 +775,7 @@ static void collect_handlers_recursive(DomElement* elem, JsEventRegistry* regist
     DomNode* child = elem->first_child;
     while (child) {
         if (child->node_type == DOM_NODE_ELEMENT) {
-            collect_handlers_recursive((DomElement*)child, registry, compile_buf, handler_id, depth + 1);
+            collect_handlers_recursive(lam::dom_require_element(child), registry, compile_buf, handler_id, depth + 1);
         }
         child = child->next_sibling;
     }

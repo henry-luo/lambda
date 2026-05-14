@@ -1095,7 +1095,7 @@ CssEnum get_white_space_value(DomNode* node) {
             // Return default white-space value
             return CSS_VALUE_NORMAL;
         }
-        DomElement* elem = static_cast<DomElement*>(current);
+        DomElement* elem = lam::dom_require_element(current);
         // Check resolved BlockProp first (fastest path for blocks)
         if (elem->blk && elem->blk->white_space != 0) {
             CssEnum ws = elem->blk->white_space;
@@ -1257,7 +1257,7 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node);
 LineFillStatus span_has_line_filled(LayoutContext* lycon, DomNode* span) {
     DomNode* node = nullptr;
     if (span->is_element()) {
-        node = static_cast<DomElement*>(span)->first_child;
+        node = lam::dom_require_element(span)->first_child;
     }
     if (node) {
         LineFillStatus result = node_has_line_filled(lycon, node);
@@ -2461,7 +2461,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 ViewElement* ancestor = lycon->view->parent_view();
                 while (ancestor) {
                     if (ancestor->is_element()) {
-                        DomElement* elem = static_cast<DomElement*>(ancestor);
+                        DomElement* elem = lam::dom_require_element(ancestor);
                         if (elem->blk && elem->blk->tab_size >= 0) {
                             ts = elem->blk->tab_size;
                             break;

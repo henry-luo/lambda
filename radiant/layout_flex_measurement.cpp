@@ -1258,7 +1258,7 @@ bool requires_content_measurement(ViewBlock* flex_container) {
         // If child has complex content or auto sizing, measurement is needed
         DomNode* child_first = nullptr;
         if (child->is_element()) {
-            child_first = static_cast<DomElement*>(child)->first_child;
+            child_first = lam::dom_require_element(child)->first_child;
         }
         if (child_first || child->is_text()) {
             return true;

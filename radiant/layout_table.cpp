@@ -2833,7 +2833,7 @@ static DomElement* create_anonymous_table_element(LayoutContext* lycon, DomEleme
     if (!pool) return nullptr;
 
     // Allocate the anonymous element
-    DomElement* anon = static_cast<DomElement*>(pool_calloc(pool, sizeof(DomElement)));
+    DomElement* anon = lam::pool_alloc_dom_element(pool);
     if (!anon) return nullptr;
 
     // Initialize as element node
@@ -3926,7 +3926,7 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
             dom_node_resolve_style(node, lycon);  // Resolve caption styles
 
             // Read caption-side from caption element's style and store in table
-            DomElement* dom_elem = static_cast<DomElement*>(node);
+            DomElement* dom_elem = lam::dom_require_element(node);
             if (dom_elem->specified_style && parent && parent->view_type == RDT_VIEW_TABLE) {
                 ViewTable* table = lam::view_require<RDT_VIEW_TABLE>(parent);
                 if (table->tb) {
@@ -4028,7 +4028,7 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
 
             log_debug("%s Caption layout start: width=%d, advance_y=%.1f", node->source_loc(), caption_width, lycon->block.advance_y);
 
-            DomNode* child = static_cast<DomElement*>(node)->first_child;
+            DomNode* child = lam::dom_require_element(node)->first_child;
             for (; child; child = child->next_sibling) {
                 layout_flow_node(lycon, child);
             }
@@ -4103,7 +4103,7 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
             if (group->font) {
                 setup_font(lycon->ui_context, &lycon->font, group->font);
             }
-            DomNode* child = static_cast<DomElement*>(node)->first_child;
+            DomNode* child = lam::dom_require_element(node)->first_child;
             for (; child; child = child->next_sibling) {
                 if (child->is_element()) mark_table_node(lycon, child, lam::view_require_element(group));
             }
@@ -4157,7 +4157,7 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
                 }
             }
 
-            DomNode* child = static_cast<DomElement*>(node)->first_child;
+            DomNode* child = lam::dom_require_element(node)->first_child;
             for (; child; child = child->next_sibling) {
                 if (child->is_element()) mark_table_node(lycon, child, lam::view_require_element(row));
             }
@@ -4192,7 +4192,7 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
             FontBox saved_font = lycon->font;
             dom_node_resolve_style(node, lycon);  // Resolve styles (background, border, width)
             // Recurse to mark child column elements
-            DomNode* child = static_cast<DomElement*>(node)->first_child;
+            DomNode* child = lam::dom_require_element(node)->first_child;
             for (; child; child = child->next_sibling) {
                 if (child->is_element()) mark_table_node(lycon, child, lam::view_require_element(colgroup));
             }
@@ -4235,7 +4235,7 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
 
     // Recursively mark all table children with correct view types
     if (tableNode->is_element()) {
-        DomNode* child = static_cast<DomElement*>(tableNode)->first_child;
+        DomNode* child = lam::dom_require_element(tableNode)->first_child;
         for (; child; child = child->next_sibling) {
             if (child->is_element()) {
                 mark_table_node(lycon, child, lam::view_require_element(table));
@@ -4711,7 +4711,7 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell, Vie
     }
 
     if (tcell->is_element()) {
-        DomNode* cc = static_cast<DomElement*>(tcell)->first_child;
+        DomNode* cc = lam::dom_require_element(tcell)->first_child;
         for (; cc; cc = cc->next_sibling) {
             uintptr_t child_tag = cc->tag();
             if (child_tag == HTM_TAG_IMG) {
@@ -5553,7 +5553,7 @@ static TableMetadata* analyze_table_structure(LayoutContext* lycon, ViewTable* t
 // Helper: re-layout a single caption after its width changes.
 // Returns the updated caption height (including margins).
 static float relayout_caption(LayoutContext* lycon, ViewBlock* cap, float table_width) {
-    DomElement* dom_elem = static_cast<DomElement*>(cap);
+    DomElement* dom_elem = lam::dom_require_element(cap);
 
     // Reset child views before re-layout
     if (dom_elem) {
@@ -9105,7 +9105,7 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
             DisplayValue parent_display = resolve_display_value((void*)parent);
             bool parent_is_inline = (parent_display.outer == CSS_VALUE_INLINE);
 
-            table_wrapper = static_cast<DomElement*>(pool_calloc(pool, sizeof(DomElement)));
+            table_wrapper = lam::pool_alloc_dom_element(pool);
             if (table_wrapper) {
                 table_wrapper->node_type = DOM_NODE_ELEMENT;
                 dom_element_retain_tag_name(table_wrapper, lam::borrow_const(lam::promote_to_pool(pool, "::anon-table")));
@@ -9161,7 +9161,7 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
         // - cells-only: create anon-tr as sole child of anon-table
         // - mixed cells + rows/groups: create anon-tr for cells, rows/groups go directly in table
         if (has_cells && table_wrapper) {
-            row_wrapper = static_cast<DomElement*>(pool_calloc(pool, sizeof(DomElement)));
+            row_wrapper = lam::pool_alloc_dom_element(pool);
             if (row_wrapper) {
                 row_wrapper->node_type = DOM_NODE_ELEMENT;
                 dom_element_retain_tag_name(row_wrapper, lam::borrow_const(lam::promote_to_pool(pool, "::anon-tr")));
