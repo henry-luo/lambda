@@ -9143,6 +9143,14 @@ static bool js_super_callee_is_constructor(Item callee) {
     return true;
 }
 
+extern "C" void js_check_class_heritage_constructor(Item superclass) {
+    TypeId type = get_type_id(superclass);
+    if (type == LMD_TYPE_NULL) return;
+    if (!js_super_callee_is_constructor(superclass)) {
+        js_throw_type_error("Class extends value is not a constructor or null");
+    }
+}
+
 // super() for class-expression superclasses: handle both FUNC and MAP (class object) callee.
 // If callee is a FUNC, call it directly. If callee is a MAP class object with __ctor__, call the
 // constructor with the given this. If neither (empty class, no ctor), return this as-is (no-op).

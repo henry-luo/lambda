@@ -43,6 +43,7 @@ extern Item js_create_data_property(Item obj, Item name, Item value);
 
 // super() for class-expression superclasses: handles FUNC and MAP (class object) callee
 extern Item js_super_call_class(Item callee, Item this_val, Item* args, int argc);
+extern void js_check_class_heritage_constructor(Item superclass);
 // super() for native parent constructors: merges returned object's own props onto `this`
 extern Item js_super_call_native(Item callee, Item this_val, Item* args, int argc);
 extern Item js_super_apply_native(Item callee, Item this_val, Item args_array);
@@ -1337,6 +1338,7 @@ JitImport jit_runtime_imports[] = {
     {"js_super_instance_method_get", FPTR(js_super_instance_method_get)},
     {"js_super_property_set", FPTR(js_super_property_set)},
     {"js_super_call_class", FPTR(js_super_call_class)},
+    {"js_check_class_heritage_constructor", FPTR(js_check_class_heritage_constructor)},
     {"js_super_call_native", FPTR(js_super_call_native)},
     {"js_super_apply_native", FPTR(js_super_apply_native)},
     {"js_property_get_str", FPTR(js_property_get_str)},

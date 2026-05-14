@@ -571,6 +571,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
     }
     case JS_AST_NODE_CLASS_DECLARATION: {
         JsClassNode* cls = (JsClassNode*)node;
+        if (cls->superclass) jm_collect_functions(mt, cls->superclass);
         if (cls->body && cls->body->node_type == JS_AST_NODE_BLOCK_STATEMENT && mt->class_count < 512) {
             JsClassEntry* ce = &mt->class_entries[mt->class_count];
             mt->class_count++; // reserve slot before recursion into methods/fields

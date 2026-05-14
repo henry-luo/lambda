@@ -3658,7 +3658,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                             jm_call_void_2(mt, "js_set_function_name_if_anonymous",
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, val),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
-                            jm_call_3(mt, "js_property_set", MIR_T_I64,
+                            jm_call_3(mt, "js_create_data_property", MIR_T_I64,
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
@@ -3691,7 +3691,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                                 MIR_reg_t key = jm_box_string_literal(mt, sf->name->chars, (int)sf->name->len);
                                 jm_call_void_1(mt, "js_check_class_static_field_key",
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
-                                jm_call_3(mt, "js_property_set", MIR_T_I64,
+                                jm_call_3(mt, "js_create_data_property", MIR_T_I64,
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
@@ -3714,7 +3714,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                             jm_call_void_2(mt, "js_set_function_name_if_anonymous",
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, val),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
-                            jm_call_3(mt, "js_property_set", MIR_T_I64,
+                            jm_call_3(mt, "js_create_data_property", MIR_T_I64,
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
