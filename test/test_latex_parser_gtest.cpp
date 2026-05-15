@@ -71,7 +71,7 @@ static int count_elements_by_tag(Item item, const char* tag_name) {
             count += count_elements_by_tag(list->items[i], tag_name);
         }
     } else if (type == LMD_TYPE_ARRAY) {
-        List* list = item.list;
+        List* list = item.array;
         if (list) {
             for (int64_t i = 0; i < list->length; i++) {
                 count += count_elements_by_tag(list->items[i], tag_name);

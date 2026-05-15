@@ -199,7 +199,7 @@ TEST_F(ValidatorFeaturesTest, ValidateEmptyArray) {
     list->capacity = 0;
 
     Item item_mut;
-    item_mut.list = list;
+    item_mut.array = list;
     ConstItem item = item_mut.to_const();
 
     ValidationResult* result = validate_against_type(validator, item, (Type*)array_type);

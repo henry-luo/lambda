@@ -65,7 +65,7 @@ static int64_t vector_length(Item item) {
     TypeId type = get_type_id(item);
     switch (type) {
         case LMD_TYPE_ARRAY_NUM:   return item.array_num->length;
-        case LMD_TYPE_ARRAY:        return item.list->length;
+        case LMD_TYPE_ARRAY:        return item.array->length;
         case LMD_TYPE_RANGE:       return item.range->length;
         default:                   return -1;
     }
@@ -85,7 +85,7 @@ static Item vector_get(Item item, int64_t index) {
             }
         }
         case LMD_TYPE_ARRAY:
-            return item.list->items[index];
+            return item.array->items[index];
         case LMD_TYPE_RANGE:
             return { .item = i2it(item.range->start + index) };
         default:
@@ -1015,8 +1015,8 @@ Item fn_min1(Item item_a) {
             return { .item = i2it(min_val) };
         }
     }
-    else if (type_id == LMD_TYPE_ARRAY || type_id == LMD_TYPE_ARRAY) {
-        List* arr = item_a.list;
+    else if (type_id == LMD_TYPE_ARRAY) {
+        List* arr = item_a.array;
         if (!arr || arr->length == 0) {
             return ItemError; // Empty array has no minimum
         }
@@ -1213,7 +1213,7 @@ Item fn_max1(Item item_a) {
             return { .item = i2it(max_val) };
         }
     }
-    else if (type_id == LMD_TYPE_ARRAY || type_id == LMD_TYPE_ARRAY) {
+    else if (type_id == LMD_TYPE_ARRAY) {
         Array* arr = item_a.array;
         if (!arr || arr->length == 0) {
             return ItemError; // Empty array has no maximum
@@ -1357,7 +1357,7 @@ Item fn_sum(Item item) {
         }
     }
     else if (type_id == LMD_TYPE_ARRAY) {
-        List* list = item.list;
+        List* list = item.array;
         if (!list || list->length == 0) {
             return (Item) { .item = i2it(0) };  // Empty list sums to 0
         }
@@ -1462,7 +1462,7 @@ Item fn_avg(Item item) {
         return push_d(sum / (double)arr->length);
     }
     else if (type_id == LMD_TYPE_ARRAY) {
-        List* list = item.list;
+        List* list = item.array;
         if (!list || list->length == 0) {
             return ItemError;
         }

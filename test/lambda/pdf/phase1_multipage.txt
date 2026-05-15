@@ -1,1 +1,1 @@
-{ page_count: 2, pages: [{ has_svg: true, has_background: true, path_count: 6, text_count: 28}, { has_svg: true, has_background: true, path_count: 105, text_count: 21}]}
+{ page_count: 2, pages: [{ has_svg: true, has_background: true, path_count: 6, text_count: 27}, { has_svg: true, has_background: true, path_count: 105, text_count: 20}]}

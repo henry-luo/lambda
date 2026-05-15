@@ -9,6 +9,16 @@
 #define INITIAL_CAPACITY 32
 #define STRINGBUF_MAX_LENGTH ((size_t)UINT32_MAX - 1)
 
+static bool stringbuf_can_append(StringBuf *sb, size_t extra, size_t *out_length) {
+    if (!sb) return false;
+    if (extra > STRINGBUF_MAX_LENGTH) return false;
+    if (sb->length > STRINGBUF_MAX_LENGTH - extra) return false;
+    if (out_length) {
+        *out_length = sb->length + extra;
+    }
+    return true;
+}
+
 StringBuf* stringbuf_new_cap(Pool *pool, size_t capacity) {
     if (!pool) return NULL;
 
@@ -124,11 +134,8 @@ void stringbuf_append_str(StringBuf *sb, const char *str) {
     if (!sb || !str) return;
 
     size_t str_len = strlen(str);
-    size_t new_length = sb->length + str_len;
-
-    if (new_length > STRINGBUF_MAX_LENGTH) {
-        return; // Silently fail to prevent corruption
-    }
+    size_t new_length;
+    if (!stringbuf_can_append(sb, str_len, &new_length)) return;
 
     if (!stringbuf_ensure_cap(sb, new_length + 1)) return;
 
@@ -141,11 +148,8 @@ void stringbuf_append_str(StringBuf *sb, const char *str) {
 void stringbuf_append_str_n(StringBuf *sb, const char *str, size_t len) {
     if (!sb || !str) return;
 
-    size_t new_length = sb->length + len;
-
-    if (new_length > STRINGBUF_MAX_LENGTH) {
-        return; // Silently fail to prevent corruption
-    }
+    size_t new_length;
+    if (!stringbuf_can_append(sb, len, &new_length)) return;
 
     if (!stringbuf_ensure_cap(sb, new_length + 1)) return;
 
@@ -157,11 +161,8 @@ void stringbuf_append_str_n(StringBuf *sb, const char *str, size_t len) {
 void stringbuf_append_char(StringBuf *sb, char c) {
     if (!sb) return;
 
-    size_t new_length = sb->length + 1;
-
-    if (new_length > STRINGBUF_MAX_LENGTH) {
-        return; // Silently fail to prevent corruption
-    }
+    size_t new_length;
+    if (!stringbuf_can_append(sb, 1, &new_length)) return;
 
     if (!stringbuf_ensure_cap(sb, new_length + 1)) return;
 
@@ -174,11 +175,8 @@ void stringbuf_append_char(StringBuf *sb, char c) {
 void stringbuf_append_char_n(StringBuf *sb, char c, size_t n) {
     if (!sb) return;
 
-    size_t new_length = sb->length + n;
-
-    if (new_length > STRINGBUF_MAX_LENGTH) {
-        return; // Silently fail to prevent corruption
-    }
+    size_t new_length;
+    if (!stringbuf_can_append(sb, n, &new_length)) return;
 
     if (!stringbuf_ensure_cap(sb, new_length + 1)) return;
 
@@ -371,11 +369,8 @@ void stringbuf_vappend_format(StringBuf *sb, const char *format, va_list args) {
 
     if (size < 0) return;
 
-    size_t new_length = sb->length + size;
-
-    if (new_length > STRINGBUF_MAX_LENGTH) {
-        return; // Silently fail to prevent corruption
-    }
+    size_t new_length;
+    if (!stringbuf_can_append(sb, (size_t)size, &new_length)) return;
 
     if (!stringbuf_ensure_cap(sb, new_length + 1)) return;
 
@@ -456,11 +451,8 @@ void stringbuf_append_ulong(StringBuf *sb, unsigned long value) {
         "8081828384858687888990919293949596979899";
 
     size_t num_digits = num_of_digits(value);
-    size_t new_length = sb->length + num_digits;
-
-    if (new_length > STRINGBUF_MAX_LENGTH) {
-        return; // Silently fail to prevent corruption
-    }
+    size_t new_length;
+    if (!stringbuf_can_append(sb, num_digits, &new_length)) return;
 
     if (!stringbuf_ensure_cap(sb, new_length + 1)) return;
 
@@ -512,7 +504,9 @@ bool stringbuf_append_file(StringBuf *sb, FILE *file) {
     fseek(file, 0, SEEK_SET);
 
     if (size < 0) return false;
-    if (!stringbuf_ensure_cap(sb, sb->length + size + 1)) return false;
+    size_t new_length;
+    if (!stringbuf_can_append(sb, (size_t)size, &new_length)) return false;
+    if (!stringbuf_ensure_cap(sb, new_length + 1)) return false;
 
     size_t read = fread(sb->str->chars + sb->length, 1, size, file);
     sb->length += read;
@@ -524,7 +518,9 @@ bool stringbuf_append_file(StringBuf *sb, FILE *file) {
 bool stringbuf_append_file_head(StringBuf *sb, FILE *file, size_t n) {
     if (!sb || !file) return false;
 
-    if (!stringbuf_ensure_cap(sb, sb->length + n + 1)) return false;
+    size_t new_length;
+    if (!stringbuf_can_append(sb, n, &new_length)) return false;
+    if (!stringbuf_ensure_cap(sb, new_length + 1)) return false;
 
     size_t read = fread(sb->str->chars + sb->length, 1, n, file);
     sb->length += read;

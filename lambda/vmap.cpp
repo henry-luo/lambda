@@ -203,12 +203,12 @@ static int64_t hashmap_vmap_count(void* data) {
     return hd->count;
 }
 
-// return keys as ArrayList<Symbol*> for compatibility with item_keys() / for-loop
+// return keys as SymbolKeyList for compatibility with item_keys() / for-loop
 // string/symbol keys → create a symbol from the key string
 // other keys → synthetic symbol "__v<index>"
-static ArrayList* hashmap_vmap_keys(void* data) {
+static SymbolKeyList* hashmap_vmap_keys(void* data) {
     HashMapData* hd = (HashMapData*)data;
-    ArrayList* keys = arraylist_new(hd->count > 0 ? (int)hd->count : 4);
+    SymbolKeyList* keys = symbol_key_list_new(hd->count > 0 ? hd->count : 4);
     for (int i = 0; i < hd->key_order->length; i++) {
         Item key = *(Item*)&hd->key_order->data[i];
         TypeId kt = get_type_id(key);
@@ -216,20 +216,20 @@ static ArrayList* hashmap_vmap_keys(void* data) {
             String* s = key.get_safe_string();
             if (s) {
                 Symbol* sym = heap_create_symbol(s->chars, s->len);
-                arraylist_append(keys, (void*)sym);
+                symbol_key_list_append(keys, sym);
             }
         } else if (kt == LMD_TYPE_SYMBOL) {
             Symbol* s = key.get_safe_symbol();
             if (s) {
                 Symbol* sym = heap_create_symbol(s->chars, s->len);
-                arraylist_append(keys, (void*)sym);
+                symbol_key_list_append(keys, sym);
             }
         } else {
             // synthetic key: "__v<index>"
             char buf[32];
             snprintf(buf, sizeof(buf), "__v%d", i);
             Symbol* sym = heap_create_symbol(buf, (int)strlen(buf));
-            arraylist_append(keys, (void*)sym);
+            symbol_key_list_append(keys, sym);
         }
     }
     return keys;
@@ -292,7 +292,7 @@ extern "C" Item vmap_from_array(Item array_item) {
         return ItemNull;
     }
     // Array is typedef for List — both have items[] and length
-    List* list = array_item.list;
+    List* list = array_item.array;
     if (!list) return ItemNull;
     int64_t len = list->length;
     if (len % 2 != 0) {

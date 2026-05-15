@@ -3123,7 +3123,7 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
         }
     }
     else if (ast_node->op == OPERATOR_ADD) {
-        if (left_type == right_type && (left_type == LMD_TYPE_ARRAY || left_type == LMD_TYPE_ARRAY)) {
+        if (left_type == right_type && left_type == LMD_TYPE_ARRAY) {
             type_id = left_type;
         }
         else if (LMD_TYPE_INT <= left_type && left_type <= LMD_TYPE_FLOAT &&
@@ -5634,7 +5634,7 @@ AstNode* build_loop_expr(Transpiler* tp, TSNode loop_node) {
 
     // determine the type of the loop variable
     Type* expr_type = ast_node->as->type;
-    if (expr_type->type_id == LMD_TYPE_ARRAY || expr_type->type_id == LMD_TYPE_ARRAY) {
+    if (expr_type->type_id == LMD_TYPE_ARRAY) {
         TypeArray* array_type = (TypeArray*)expr_type;
         if (array_type && array_type->nested && (uintptr_t)array_type->nested > 0x1000) {
             ast_node->type = array_type->nested;
@@ -7637,7 +7637,7 @@ void declare_module_import(Transpiler* tp, AstImportNode* import_node) {
                         TypeType* tt = (TypeType*)dec_node->type;
                         Type* inner = tt->type;
                         if (inner && (inner->type_id == LMD_TYPE_MAP || inner->type_id == LMD_TYPE_OBJECT
-                            || inner->type_id == LMD_TYPE_ARRAY || inner->type_id == LMD_TYPE_ARRAY)) {
+                            || inner->type_id == LMD_TYPE_ARRAY)) {
                             arraylist_append(tp->type_list, (void*)tt);
                             ((TypeMap*)inner)->type_index = tp->type_list->length - 1;
                             log_debug("registered imported type alias '%.*s' at local index %d",

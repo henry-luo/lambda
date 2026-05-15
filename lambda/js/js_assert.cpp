@@ -304,7 +304,7 @@ extern "C" Item js_assert_module_throws(Item fn, Item error_expected, Item messa
         Item keys = js_object_keys(error_expected);
         if (get_type_id(keys) == LMD_TYPE_ARRAY) {
             for (int64_t i = 0; i < keys.array->length; i++) {
-                Item key = list_get(keys.list, (int)i);
+                Item key = list_get(keys.array, (int)i);
                 Item expected_val = js_property_get(error_expected, key);
                 Item actual_val = js_property_get(thrown, key);
 
@@ -518,7 +518,7 @@ static bool validate_rejection(Item thrown, Item error_expected, Item message) {
         Item keys = js_object_keys(error_expected);
         if (get_type_id(keys) == LMD_TYPE_ARRAY) {
             for (int64_t i = 0; i < keys.array->length; i++) {
-                Item key = list_get(keys.list, (int)i);
+                Item key = list_get(keys.array, (int)i);
                 Item expected_val = js_property_get(error_expected, key);
                 Item actual_val = js_property_get(thrown, key);
 

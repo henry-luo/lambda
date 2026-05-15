@@ -160,11 +160,11 @@ ValidationResult* validate_against_base_type(SchemaValidator* validator, ConstIt
         }
         return validate_against_element_type(validator, item, (TypeElmt*)base_type);
     }
-    if (base_type->type_id == LMD_TYPE_ARRAY || base_type->type_id == LMD_TYPE_ARRAY) {
+    if (base_type->type_id == LMD_TYPE_ARRAY) {
         extern Type TYPE_LIST;
         if (base_type == (Type*)&TYPE_ARRAY) {
             // Generic array type - just check if item is an array/list
-            if (item.type_id() == LMD_TYPE_ARRAY || item.type_id() == LMD_TYPE_ARRAY ||
+            if (item.type_id() == LMD_TYPE_ARRAY ||
                 item.type_id() == LMD_TYPE_ARRAY_NUM) {
                 result->valid = true;
             } else {

@@ -2163,7 +2163,7 @@ void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node, bool is_globa
         TypeId rhs_tid = asn_node->as->type ? asn_node->as->type->type_id : LMD_TYPE_ANY;
         // only coerce when RHS is dynamic/generic (not already the correct typed array)
         bool needs_coerce = (rhs_tid == LMD_TYPE_ANY || rhs_tid == LMD_TYPE_NULL ||
-                             rhs_tid == LMD_TYPE_ARRAY || rhs_tid == LMD_TYPE_ARRAY);
+                             rhs_tid == LMD_TYPE_ARRAY);
         if (needs_coerce && operand) {
             TypeId elem_tid = operand->type_id;
             if (elem_tid == LMD_TYPE_NUM_SIZED) {
@@ -2478,25 +2478,25 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
             else if (is_known_keyed && key_filter != LOOP_KEY_INT) {
                 strbuf_append_str(tp->code_buf, " Item it=");
                 transpile_box_item(tp, loop_node->as);
-                strbuf_append_str(tp->code_buf, ";\n ArrayList* attr_keys=item_keys(it);\n");
-                strbuf_append_str(tp->code_buf, " for (int ki=0; attr_keys && ki<attr_keys->length; ki++) {\n");
+                strbuf_append_str(tp->code_buf, ";\n SymbolKeyList* attr_keys=item_keys(it);\n");
+                strbuf_append_str(tp->code_buf, " for (int64_t ki=0, kn=symbol_key_list_len(attr_keys); ki<kn; ki++) {\n");
 
                 if (has_index) {
                     // k = key symbol
                     strbuf_append_str(tp->code_buf, "  Item _");
                     strbuf_append_str_n(tp->code_buf, loop_node->index_name->chars, loop_node->index_name->len);
-                    strbuf_append_str(tp->code_buf, "=y2it((Symbol*)attr_keys->data[ki]);\n");
+                    strbuf_append_str(tp->code_buf, "=y2it(symbol_key_list_at(attr_keys, ki));\n");
                 }
                 // v = value
                 strbuf_append_str(tp->code_buf, "  Item _");
                 strbuf_append_str_n(tp->code_buf, loop_node->name->chars, loop_node->name->len);
-                strbuf_append_str(tp->code_buf, "=item_attr(it, ((Symbol*)attr_keys->data[ki])->chars);\n");
+                strbuf_append_str(tp->code_buf, "=item_attr(it, symbol_key_list_at(attr_keys, ki)->chars);\n");
             }
             // Generic path: unknown type or element => use unified runtime helpers
             else {
                 strbuf_append_str(tp->code_buf, " Item it=");
                 transpile_box_item(tp, loop_node->as);
-                strbuf_append_str(tp->code_buf, ";\n ArrayList* iter_keys=item_keys(it);\n");
+                strbuf_append_str(tp->code_buf, ";\n SymbolKeyList* iter_keys=item_keys(it);\n");
                 char filter_str[4];
                 snprintf(filter_str, sizeof(filter_str), "%d", (int)key_filter);
                 strbuf_append_str(tp->code_buf, " int64_t iter_n=iter_len(it, iter_keys, ");
@@ -2769,16 +2769,16 @@ void transpile_pipe_expr(Transpiler* tp, AstPipeNode *pipe_node) {
     strbuf_append_str(tp->code_buf, "  Array* pipe_result = array();\n");
 
     // Check if collection type - if not, apply to single item
-    strbuf_append_str(tp->code_buf, "  if (pipe_type == LMD_TYPE_ARRAY || pipe_type == LMD_TYPE_ARRAY || ");
+    strbuf_append_str(tp->code_buf, "  if (pipe_type == LMD_TYPE_ARRAY || ");
     strbuf_append_str(tp->code_buf, "pipe_type == LMD_TYPE_RANGE || pipe_type == LMD_TYPE_MAP || ");
     strbuf_append_str(tp->code_buf, "pipe_type == LMD_TYPE_ARRAY_NUM || pipe_type == LMD_TYPE_ELEMENT || pipe_type == LMD_TYPE_OBJECT) {\n");
 
     // Map case - iterate over key-value pairs
     strbuf_append_str(tp->code_buf, "    if (pipe_type == LMD_TYPE_MAP || pipe_type == LMD_TYPE_OBJECT) {\n");
-    strbuf_append_str(tp->code_buf, "      ArrayList* pipe_keys = item_keys(pipe_collection);\n");
+    strbuf_append_str(tp->code_buf, "      SymbolKeyList* pipe_keys = item_keys(pipe_collection);\n");
     strbuf_append_str(tp->code_buf, "      if (pipe_keys) {\n");
-    strbuf_append_str(tp->code_buf, "        for (int64_t pipe_i = 0; pipe_i < pipe_keys->length; pipe_i++) {\n");
-    strbuf_append_str(tp->code_buf, "          Symbol* key_sym = (Symbol*)pipe_keys->data[pipe_i];\n");
+    strbuf_append_str(tp->code_buf, "        for (int64_t pipe_i = 0, pipe_n = symbol_key_list_len(pipe_keys); pipe_i < pipe_n; pipe_i++) {\n");
+    strbuf_append_str(tp->code_buf, "          Symbol* key_sym = symbol_key_list_at(pipe_keys, pipe_i);\n");
     strbuf_append_str(tp->code_buf, "          Item pipe_index = y2it(key_sym);\n");
     strbuf_append_str(tp->code_buf, "          Item pipe_item = item_attr(pipe_collection, key_sym->chars);\n");
 
@@ -2796,7 +2796,7 @@ void transpile_pipe_expr(Transpiler* tp, AstPipeNode *pipe_node) {
         strbuf_append_str(tp->code_buf, ");\n");
     }
     strbuf_append_str(tp->code_buf, "        }\n");
-    strbuf_append_str(tp->code_buf, "        // Note: pipe_keys memory managed by heap GC\n");
+    strbuf_append_str(tp->code_buf, "        symbol_key_list_free(pipe_keys);\n");
     strbuf_append_str(tp->code_buf, "      }\n");
     strbuf_append_str(tp->code_buf, "    } else {\n");
 

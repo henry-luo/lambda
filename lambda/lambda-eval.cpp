@@ -162,7 +162,7 @@ Item v2it(List* list) {
     if (!list) { return ItemNull; }
     if (list->length == 0) { return ItemNull; }
     if (list->length == 1) { return list->items[0]; }
-    return {.list = list};
+    return {.array = list};
 }
 
 String *fn_strcat(String *left, String *right) {
@@ -1048,7 +1048,7 @@ static Bool cross_array_eq(Item a_item, Item b_item, int depth) {
 // helper: get element at index from any sequence type (list, array, range)
 static inline Item seq_get_element(Item item, TypeId tid, int64_t i) {
     switch (tid) {
-    case LMD_TYPE_ARRAY:        return item.list->items[i];
+    case LMD_TYPE_ARRAY:        return item.array->items[i];
     case LMD_TYPE_ARRAY_NUM:   return array_num_get(item.array_num, i);
     case LMD_TYPE_RANGE:       return {.item = i2it(item.range->start + i)};
     default:                   return ItemNull;
@@ -1058,7 +1058,7 @@ static inline Item seq_get_element(Item item, TypeId tid, int64_t i) {
 // helper: get length from any sequence type
 static inline int64_t seq_get_length(Item item, TypeId tid) {
     switch (tid) {
-    case LMD_TYPE_ARRAY:        return item.list->length;
+    case LMD_TYPE_ARRAY:        return item.array->length;
     case LMD_TYPE_ARRAY_NUM:   return item.array_num->length;
     case LMD_TYPE_RANGE:       return item.range->length;
     default:                   return -1;
@@ -1119,9 +1119,9 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
         // all represent ordered sequences and can be compared element-wise
         TypeId a_tid = (a_item._type_id == LMD_TYPE_RAW_POINTER) ? get_type_id(a_item) : (TypeId)a_item._type_id;
         TypeId b_tid = (b_item._type_id == LMD_TYPE_RAW_POINTER) ? get_type_id(b_item) : (TypeId)b_item._type_id;
-        bool a_is_seq = (a_tid == LMD_TYPE_ARRAY || a_tid == LMD_TYPE_ARRAY ||
+        bool a_is_seq = (a_tid == LMD_TYPE_ARRAY ||
                          a_tid == LMD_TYPE_ARRAY_NUM || a_tid == LMD_TYPE_RANGE);
-        bool b_is_seq = (b_tid == LMD_TYPE_ARRAY || b_tid == LMD_TYPE_ARRAY ||
+        bool b_is_seq = (b_tid == LMD_TYPE_ARRAY ||
                          b_tid == LMD_TYPE_ARRAY_NUM || b_tid == LMD_TYPE_RANGE);
         if (a_is_seq && b_is_seq) {
             return cross_seq_eq(a_item, a_tid, b_item, b_tid, depth);
@@ -1196,9 +1196,9 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
         // structural equality for container types requires same resolved type
         if (a_tid != b_tid) {
             // cross-type sequence comparison (array[int] vs array[float], list vs range, etc.)
-            bool a_is_seq = (a_tid == LMD_TYPE_ARRAY || a_tid == LMD_TYPE_ARRAY ||
+            bool a_is_seq = (a_tid == LMD_TYPE_ARRAY ||
                              a_tid == LMD_TYPE_ARRAY_NUM || a_tid == LMD_TYPE_RANGE);
-            bool b_is_seq = (b_tid == LMD_TYPE_ARRAY || b_tid == LMD_TYPE_ARRAY ||
+            bool b_is_seq = (b_tid == LMD_TYPE_ARRAY ||
                              b_tid == LMD_TYPE_ARRAY_NUM || b_tid == LMD_TYPE_RANGE);
             if (a_is_seq && b_is_seq) {
                 return cross_seq_eq(a_item, a_tid, b_item, b_tid, depth);
@@ -1208,7 +1208,7 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
 
         // list structural equality
         if (a_tid == LMD_TYPE_ARRAY) {
-            return list_eq(a_item.list, b_item.list, depth);
+            return list_eq(a_item.array, b_item.array, depth);
         }
         // generic array (array of Items) structural equality
         if (a_tid == LMD_TYPE_ARRAY) {
@@ -1516,7 +1516,7 @@ static void query_collect(Item data, Item type_val, bool self_inclusive, Array* 
             field = field->next;
         }
     } else if (type_id == LMD_TYPE_ARRAY) {
-        List* lst = data.list;
+        List* lst = data.array;
         for (int64_t i = 0; i < lst->length; i++) {
             query_collect(lst->items[i], type_val, true, result, depth + 1);
         }
@@ -1603,7 +1603,7 @@ static void child_query_collect(Item data, Item type_val, Array* result) {
             }
         }
     } else if (type_id == LMD_TYPE_ARRAY) {
-        List* lst = data.list;
+        List* lst = data.array;
         for (int64_t i = 0; i < lst->length; i++) {
             Item child = lst->items[i];
             if (child.item && fn_is(child, type_val) == BOOL_TRUE) {
@@ -1640,7 +1640,7 @@ Bool fn_in(Item a_item, Item b_item) {
     else { // b is container
         TypeId b_type = b_item.container->type_id;
         if (b_type == LMD_TYPE_ARRAY) {
-            List *list = b_item.list;
+            List *list = b_item.array;
             for (int i = 0; i < list->length; i++) {
                 if (fn_eq(list->items[i], a_item) == BOOL_TRUE) {
                     return true;
@@ -2813,7 +2813,7 @@ Item fn_member(Item item, Item key) {
         if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
             const char* k = key.get_chars();
             if (k && strcmp(k, "length") == 0) {
-                List *list = item.list;
+                List *list = item.array;
                 return {.item = i2it(list->length)};
             }
         }
@@ -3051,7 +3051,7 @@ Bool fn_contains(Item str_item, Item substr_item) {
 
     // --- List/Array: check if any element equals the item ---
     if (coll_type == LMD_TYPE_ARRAY) {
-        List* list = str_item.list;
+        List* list = str_item.array;
         if (!list) return BOOL_FALSE;
         for (int64_t i = 0; i < list->length; i++) {
             if (fn_eq(list->items[i], substr_item) == BOOL_TRUE) {
@@ -3217,7 +3217,7 @@ int64_t fn_index_of(Item str_item, Item sub_item) {
 
     // --- List/Array: find first matching element ---
     if (coll_type == LMD_TYPE_ARRAY) {
-        List* list = str_item.list;
+        List* list = str_item.array;
         if (!list) return -1;
         for (int64_t i = 0; i < list->length; i++) {
             if (fn_eq(list->items[i], sub_item) == BOOL_TRUE) {
@@ -3302,7 +3302,7 @@ int64_t fn_last_index_of(Item str_item, Item sub_item) {
 
     // --- List/Array: find last matching element ---
     if (coll_type == LMD_TYPE_ARRAY) {
-        List* list = str_item.list;
+        List* list = str_item.array;
         if (!list) return -1;
         for (int64_t i = list->length - 1; i >= 0; i--) {
             if (fn_eq(list->items[i], sub_item) == BOOL_TRUE) {
@@ -3710,7 +3710,7 @@ Item fn_split(Item str_item, Item sep_item) {
     TypeId sep_type = get_type_id(sep_item);
 
     // null string splits to empty list
-    if (str_type == LMD_TYPE_NULL) { List* e = list(); e->is_content = 1; return {.list = e}; }
+    if (str_type == LMD_TYPE_NULL) { List* e = list(); e->is_content = 1; return {.array = e}; }
 
     // null separator means split on whitespace (Python convention)
     bool null_sep = (sep_type == LMD_TYPE_NULL);
@@ -3728,7 +3728,7 @@ Item fn_split(Item str_item, Item sep_item) {
             uint32_t str_len = str_item.get_len();
             List* ps = pattern_split(pattern, str_chars, str_len, false);
             if (ps) ps->is_content = 1;
-            return {.list = ps};
+            return {.array = ps};
         }
     }
 
@@ -3755,7 +3755,7 @@ Item fn_split(Item str_item, Item sep_item) {
 
     if (!str_chars || str_len == 0) {
         if (context) { context->disable_string_merging = saved_merging; }
-        return {.list = result};  // empty list for empty string
+        return {.array = result};  // empty list for empty string
     }
 
     if (null_sep) {
@@ -3783,7 +3783,7 @@ Item fn_split(Item str_item, Item sep_item) {
             list_push(result, {.item = s2it(part)});
         }
         if (context) { context->disable_string_merging = saved_merging; }
-        return {.list = result};
+        return {.array = result};
     }
 
     if (!sep_chars || sep_len == 0) {
@@ -3804,7 +3804,7 @@ Item fn_split(Item str_item, Item sep_item) {
             p += char_len;
         }
         if (context) { context->disable_string_merging = saved_merging; }
-        return {.list = result};
+        return {.array = result};
     }
 
     // split by separator
@@ -3842,7 +3842,7 @@ Item fn_split(Item str_item, Item sep_item) {
     list_push(result, {.item = s2it(part)});
 
     if (context) { context->disable_string_merging = saved_merging; }
-    return {.list = result};
+    return {.array = result};
 }
 
 // split(str, sep, keep_delim) - 3-arg version with keep_delim boolean
@@ -3855,7 +3855,7 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
     bool keep_delim = (keep_type == LMD_TYPE_BOOL && it2b(keep_item));
 
     // null string splits to empty list
-    if (str_type == LMD_TYPE_NULL) { List* e = list(); e->is_content = 1; return {.list = e}; }
+    if (str_type == LMD_TYPE_NULL) { List* e = list(); e->is_content = 1; return {.array = e}; }
 
     // pattern-based split with keep_delim
     if (sep_type == LMD_TYPE_TYPE) {
@@ -3870,7 +3870,7 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
             uint32_t str_len = str_item.get_len();
             List* ps = pattern_split(pattern, str_chars, str_len, keep_delim);
             if (ps) ps->is_content = 1;
-            return {.list = ps};
+            return {.array = ps};
         }
     }
 
@@ -3902,7 +3902,7 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
     result->is_content = 1;
     if (!str_chars || str_len == 0 || !sep_chars || sep_len == 0) {
         if (context) { context->disable_string_merging = saved_merging; }
-        return {.list = result};
+        return {.array = result};
     }
 
     const char* start = str_chars;
@@ -3945,7 +3945,7 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
     list_push(result, {.item = s2it(part)});
 
     if (context) { context->disable_string_merging = saved_merging; }
-    return {.list = result};
+    return {.array = result};
 }
 
 // ord(str) - return Unicode code point of first character
@@ -4041,7 +4041,7 @@ Item fn_join2(Item list_item, Item sep_item) {
     int64_t count = 0;
 
     if (list_type == LMD_TYPE_ARRAY) {
-        List* lst = list_item.list;
+        List* lst = list_item.array;
         count = lst->length;
         for (int64_t i = 0; i < count; i++) {
             Item item = lst->items[i];
@@ -4075,7 +4075,7 @@ Item fn_join2(Item list_item, Item sep_item) {
     char* p = result->chars;
 
     if (list_type == LMD_TYPE_ARRAY) {
-        List* lst = list_item.list;
+        List* lst = list_item.array;
         for (int64_t i = 0; i < count; i++) {
             if (i > 0 && sep_len > 0) {
                 memcpy(p, sep_chars, sep_len);
@@ -4274,7 +4274,7 @@ Item fn_find2(Item source_item, Item pattern_item) {
     TypeId pattern_type = get_type_id(pattern_item);
 
     // null source -> empty list
-    if (source_type == LMD_TYPE_NULL) { List* e = list(); e->is_content = 1; return {.list = e}; }
+    if (source_type == LMD_TYPE_NULL) { List* e = list(); e->is_content = 1; return {.array = e}; }
 
     if (source_type != LMD_TYPE_STRING && source_type != LMD_TYPE_SYMBOL) {
         log_debug("fn_find: first argument must be a string or symbol");
@@ -4284,7 +4284,7 @@ Item fn_find2(Item source_item, Item pattern_item) {
     const char* str_chars = source_item.get_chars();
     uint32_t str_len = source_item.get_len();
 
-    if (!str_chars || str_len == 0) { List* e = list(); e->is_content = 1; return {.list = e}; }
+    if (!str_chars || str_len == 0) { List* e = list(); e->is_content = 1; return {.array = e}; }
 
     // pattern argument: check if it's a TypePattern
     if (pattern_type == LMD_TYPE_TYPE) {
@@ -4293,7 +4293,7 @@ Item fn_find2(Item source_item, Item pattern_item) {
             TypePattern* pattern = (TypePattern*)type;
             List* r = pattern_find_all(pattern, str_chars, str_len);
             if (r) r->is_content = 1;
-            return {.list = r};
+            return {.array = r};
         }
     }
 
@@ -4308,7 +4308,7 @@ Item fn_find2(Item source_item, Item pattern_item) {
 
     List* result = list();
     result->is_content = 1;
-    if (!needle || needle_len == 0) return {.list = result};
+    if (!needle || needle_len == 0) return {.array = result};
 
     // find all non-overlapping occurrences of the literal substring
     const char* p = str_chars;
@@ -4324,7 +4324,7 @@ Item fn_find2(Item source_item, Item pattern_item) {
         }
     }
 
-    return {.list = result};
+    return {.array = result};
 }
 
 // find(str, pattern, options) -> [{value, index}, ...]
@@ -4635,9 +4635,9 @@ Item fn_varg0() {
         empty->length = 0;
         empty->capacity = 0;
         empty->items = NULL;
-        return {.list = empty};
+        return {.array = empty};
     }
-    return {.list = current_vargs};
+    return {.array = current_vargs};
 }
 
 // varg(n) - returns the nth variadic argument
