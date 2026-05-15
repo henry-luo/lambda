@@ -50,10 +50,20 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                     // var redeclaration without initializer (e.g. `var x;` when x already exists)
                     // is a no-op in JS — do NOT reset to undefined.
                     if (d->init) {
+                        const char* saved_assign_target = mt->assign_target_vname;
+                        mt->assign_target_vname = vname;
                         MIR_reg_t boxed_val = jm_transpile_box_item(mt, d->init);
+                        mt->assign_target_vname = saved_assign_target;
                         jm_call_void_2(mt, "js_set_module_var",
                             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)modvar_index),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_val));
+                        JsMirVarEntry* existing_modvar_local = jm_find_var(mt, vname);
+                        if (existing_modvar_local && existing_modvar_local->reg &&
+                            existing_modvar_local->mir_type == MIR_T_I64) {
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, existing_modvar_local->reg),
+                                MIR_new_reg_op(mt->ctx, boxed_val)));
+                        }
                         if (var->kind == JS_VAR_VAR && mt->in_main) {
                             MIR_reg_t key_reg = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
                             jm_call_void_2(mt, "js_define_global_var_property",
@@ -3322,6 +3332,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                         MIR_reg_t msg_reg = jm_box_string_literal(mt, msg, (int)strlen(msg));
                         jm_call_void_1(mt, "js_throw_reference_error",
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, msg_reg));
+                        jm_emit_exc_propagate_check(mt);
                     }
                     // Create class object with __class_name__ property
                     MIR_reg_t cls_obj = jm_call_0(mt, "js_new_object", MIR_T_I64);
@@ -3341,6 +3352,11 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                     if (mc && mc->const_type == MCONST_CLASS) {
                         jm_call_void_2(mt, "js_set_module_var",
                             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
+                    }
+                    if (ce->inner_module_var_index >= 0) {
+                        jm_call_void_2(mt, "js_set_module_var",
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)ce->inner_module_var_index),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
                     }
                     // Inherit static methods from parent classes (base-first, then own overrides)
@@ -3656,6 +3672,14 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                     // Mark all static methods on class object as non-enumerable (ES spec)
                     jm_call_void_1(mt, "js_mark_all_non_enumerable",
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
+
+                    if (ctor_super_val) {
+                        MIR_reg_t super_key = jm_box_string_literal(mt, "__super_class__", 15);
+                        jm_call_3(mt, "js_property_set", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, super_key),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_super_val));
+                    }
 
                     if (ce->node && ce->node->body && ce->node->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
                         JsBlockNode* body = (JsBlockNode*)ce->node->body;

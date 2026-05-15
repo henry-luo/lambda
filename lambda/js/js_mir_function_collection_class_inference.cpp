@@ -677,11 +677,17 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
         if (cls->body && cls->body->node_type == JS_AST_NODE_BLOCK_STATEMENT && mt->class_count < 512) {
             JsClassEntry* ce = &mt->class_entries[mt->class_count];
             mt->class_count++; // reserve slot before recursion into methods/fields
+            memset(ce, 0, sizeof(JsClassEntry));
             ce->node = cls;
             ce->name = cls->name;
             ce->alias_name = NULL;
             ce->method_count = 0;
             ce->constructor = NULL;
+            {
+                const char* class_node_type = ts_node_type(cls->base.node);
+                ce->is_declaration = class_node_type && strcmp(class_node_type, "class_declaration") == 0;
+            }
+            ce->inner_module_var_index = -1;
 
             JsBlockNode* body = (JsBlockNode*)cls->body;
             JsAstNode* m = body->statements;

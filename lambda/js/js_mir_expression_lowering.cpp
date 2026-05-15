@@ -83,6 +83,22 @@ static JsClassEntry* jm_find_innermost_class_for_node(JsMirTranspiler* mt, JsAst
     return best;
 }
 
+static bool jm_class_name_matches(JsClassEntry* ce, String* name) {
+    return ce && ce->name && name &&
+        ce->name->len == name->len &&
+        strncmp(ce->name->chars, name->chars, name->len) == 0;
+}
+
+static JsClassEntry* jm_current_inner_class_binding(JsMirTranspiler* mt, String* name) {
+    if (!mt || !name) return NULL;
+    if (jm_class_name_matches(mt->current_class, name)) return mt->current_class;
+    if (mt->current_fc && mt->current_fc->node) {
+        JsClassEntry* ce = jm_find_innermost_class_for_node(mt, (JsAstNode*)mt->current_fc->node);
+        if (jm_class_name_matches(ce, name)) return ce;
+    }
+    return NULL;
+}
+
 static String* jm_resolve_private_name(JsMirTranspiler* mt, JsAstNode* access_node, String* name) {
     if (!jm_is_private_name(name) || !mt) return name;
     const char* suffix = NULL; int suffix_len = 0;
@@ -515,6 +531,17 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
     // Build variable name: _js_<name>
     char vname[128];
     snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+
+    // Class name inside its own class scope is a distinct immutable binding.
+    // Check this before ordinary locals/captures so a named class expression
+    // like `var Cv = class C { m() { return C; } }` does not read a stale
+    // outer/unresolved binding named C.
+    JsClassEntry* inner_class_binding = jm_current_inner_class_binding(mt, id->name);
+    if (inner_class_binding && inner_class_binding->inner_module_var_index >= 0) {
+        return jm_call_1(mt, "js_get_module_var", MIR_T_I64,
+            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)inner_class_binding->inner_module_var_index));
+    }
+
     JsMirVarEntry* var = jm_find_var(mt, vname);
     if (var) {
         // v20 TDZ: emit runtime check for let/const variables before their declaration
@@ -595,10 +622,17 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
                     MIR_new_reg_op(mt->ctx, r), MIR_new_int_op(mt->ctx, (int64_t)bval)));
                 return r;
             }
-            case MCONST_CLASS:
-                // Class names used as identifiers: return the class object from module var
+            case MCONST_CLASS: {
+                // Inside a class's own scope, the class name is an immutable inner binding.
+                JsClassEntry* inner_ce = jm_current_inner_class_binding(mt, id->name);
+                if (inner_ce && inner_ce->inner_module_var_index >= 0) {
+                    return jm_call_1(mt, "js_get_module_var", MIR_T_I64,
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)inner_ce->inner_module_var_index));
+                }
+                // Outside the class scope, class declarations use the surrounding binding.
                 return jm_call_1(mt, "js_get_module_var", MIR_T_I64,
                     MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val));
+            }
             case MCONST_FUNC: {
                 // Function declaration: create function object from func_item
                 int fi = (int)mc->int_val;
@@ -1522,7 +1556,8 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
     case JS_OP_ADD: {
         TypeId op_type = jm_get_effective_type(mt, un->operand);
         if (op_type == LMD_TYPE_FLOAT) {
-            return jm_transpile_as_native(mt, un->operand, op_type, LMD_TYPE_FLOAT);
+            MIR_reg_t native = jm_transpile_as_native(mt, un->operand, op_type, LMD_TYPE_FLOAT);
+            return jm_box_float(mt, native);
         }
         return jm_call_1(mt, "js_unary_plus", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, jm_transpile_box_item(mt, un->operand)));
@@ -2963,9 +2998,17 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                 JsModuleConstEntry lookup;
                 snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
                 JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
-                if (mc && mc->const_type == MCONST_MODVAR) {
+                JsClassEntry* inner_ce = jm_current_inner_class_binding(mt, id->name);
+                if (inner_ce) {
+                    jm_call_void_2(mt, "js_throw_const_assign",
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)id->name->chars),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)id->name->len));
+                    jm_emit_exc_propagate_check(mt);
+                    return jm_emit_undefined(mt);
+                }
+                if (mc && (mc->const_type == MCONST_MODVAR || mc->const_type == MCONST_CLASS)) {
                     // const module var: throw TypeError on assignment
-                    if (mc->var_kind == 2) {
+                    if (mc->const_type == MCONST_MODVAR && mc->var_kind == 2) {
                         jm_call_void_2(mt, "js_throw_const_assign",
                             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)id->name->chars),
                             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)id->name->len));
@@ -5952,11 +5995,12 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                         snprintf(cls_lookup.name, sizeof(cls_lookup.name), "_js_<anon>");
                     }
                     JsModuleConstEntry* cls_mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &cls_lookup);
-                    if (cls_mc && cls_mc->const_type == MCONST_CLASS) {
+                    if (cls_mc && (cls_mc->const_type == MCONST_CLASS ||
+                                   cls_mc->const_type == MCONST_MODVAR)) {
                         class_this = jm_call_1(mt, "js_get_module_var", MIR_T_I64,
                             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)cls_mc->int_val));
                     } else {
-                        class_this = jm_emit_null(mt);
+                        class_this = jm_transpile_box_item(mt, m->object);
                     }
 
                     if (has_spread) {
@@ -10549,7 +10593,6 @@ MIR_reg_t jm_transpile_box_item(JsMirTranspiler* mt, JsAstNode* item) {
             TypeId op_type = jm_get_effective_type(mt, un->operand);
             bool op_numeric = (op_type == LMD_TYPE_INT || op_type == LMD_TYPE_FLOAT);
             switch (un->op) {
-            case JS_OP_PLUS: case JS_OP_ADD:
             case JS_OP_MINUS: case JS_OP_SUB:
                 native_unary = op_numeric;
                 break;
@@ -10602,6 +10645,8 @@ MIR_reg_t jm_transpile_box_item(JsMirTranspiler* mt, JsAstNode* item) {
     case JS_AST_NODE_OBJECT_EXPRESSION:
     case JS_AST_NODE_FUNCTION_EXPRESSION:
     case JS_AST_NODE_ARROW_FUNCTION:
+    case JS_AST_NODE_CLASS_EXPRESSION:
+    case JS_AST_NODE_CLASS_DECLARATION:
     case JS_AST_NODE_TEMPLATE_LITERAL:
     case JS_AST_NODE_TAGGED_TEMPLATE:
         return jm_ensure_boxed(mt, jm_transpile_expression(mt, item));
@@ -11202,7 +11247,8 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
             MIR_T_I64, MIR_new_reg_op(mt->ctx, promise_val));
         return result;
     }
-    case JS_AST_NODE_CLASS_DECLARATION: {
+    case JS_AST_NODE_CLASS_DECLARATION:
+    case JS_AST_NODE_CLASS_EXPRESSION: {
         // Class expression: var X = class Y {} or var X = class {}
         // Return an object with __class_name__ for instanceof support.
         JsClassNode* cls_expr = (JsClassNode*)expr;
@@ -11224,6 +11270,15 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
         if (!ce && effective_name) {
             ce = jm_find_class(mt, effective_name->chars, (int)effective_name->len);
         }
+        if (!ce && !effective_name && mt->assign_target_vname &&
+            strncmp(mt->assign_target_vname, "_js_", 4) == 0) {
+            const char* target_name = mt->assign_target_vname + 4;
+            int target_len = (int)strlen(target_name);
+            if (target_len > 0) {
+                ce = jm_find_class(mt, target_name, target_len);
+                if (ce) effective_name = ce->name;
+            }
+        }
         // TDZ: class x extends x {} → throw ReferenceError
         if (ce && ce->has_self_extends) {
             char msg[256];
@@ -11232,6 +11287,7 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
             MIR_reg_t msg_reg = jm_box_string_literal(mt, msg, (int)strlen(msg));
             jm_call_void_1(mt, "js_throw_reference_error",
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, msg_reg));
+            jm_emit_exc_propagate_check(mt);
         }
         MIR_reg_t checked_heritage_val = 0;
         if (cls_expr->superclass &&
@@ -11696,15 +11752,23 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, len_key));
             }
 
-            // Mark all static methods on class object as non-enumerable (ES spec)
-            if (ce) {
-                jm_call_void_1(mt, "js_mark_all_non_enumerable",
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
-            }
+                // Mark all static methods on class object as non-enumerable (ES spec)
+                if (ce) {
+                    jm_call_void_1(mt, "js_mark_all_non_enumerable",
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
+                }
 
-            // For class expressions with an inner name (var X = class Y { ... }),
-            // store the class object into Y's module var so that methods referencing
-            // Y can access the fully-initialized class object (with static methods).
+                if (ctor_super_val) {
+                    MIR_reg_t super_key = jm_box_string_literal(mt, "__super_class__", 15);
+                    jm_call_3(mt, "js_property_set", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, super_key),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_super_val));
+                }
+
+                // For class expressions with an inner name (var X = class Y { ... }),
+                // store the class object into Y's module var so that methods referencing
+                // Y can access the fully-initialized class object (with static methods).
             if (ce && effective_name && mt->module_consts) {
                 char inner_vname[128];
                 snprintf(inner_vname, sizeof(inner_vname), "_js_%.*s",
@@ -11718,6 +11782,11 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
                     log_debug("js-mir: class expression inner name '%s' → module_var[%d]",
                         inner_vname, (int)inner_mc->int_val);
+                }
+                if (ce->inner_module_var_index >= 0) {
+                    jm_call_void_2(mt, "js_set_module_var",
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)ce->inner_module_var_index),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
                 }
             }
 
