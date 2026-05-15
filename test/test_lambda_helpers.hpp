@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <thread>
 #include <atomic>
+#include <mutex>
 #include <unordered_map>
 
 #ifdef _WIN32
@@ -459,7 +460,10 @@ inline void run_sub_batch(
     size_t start, size_t end,
     bool use_mir,
     int batch_id,
-    std::unordered_map<std::string, BatchResult>& results)
+    std::unordered_map<std::string, BatchResult>& results,
+    std::atomic<size_t>& completed_scripts,
+    std::mutex& progress_mutex,
+    size_t total_scripts)
 {
     // Write manifest for this chunk (include PID to avoid race between parallel shards)
     char manifest_path[128];
@@ -507,6 +511,17 @@ inline void run_sub_batch(
             } else if (strncmp(buffer + 1, "BATCH_END ", 10) == 0) {
                 int status = atoi(buffer + 11);
                 results[current_script] = {current_output, status};
+                size_t done = completed_scripts.fetch_add(1, std::memory_order_relaxed) + 1;
+                {
+                    std::lock_guard<std::mutex> lock(progress_mutex);
+                    printf("  [batch %d] [%zu/%zu] %s finished",
+                           batch_id, done, total_scripts, current_script.c_str());
+                    if (status != 0) {
+                        printf(" (status=%d)", status);
+                    }
+                    printf("\n");
+                    fflush(stdout);
+                }
                 in_script = false;
             }
         } else if (in_script) {
@@ -549,6 +564,8 @@ inline std::unordered_map<std::string, BatchResult> execute_lambda_batch(
     // Run sub-batches in parallel with limited concurrency (work-stealing pattern)
     std::vector<std::unordered_map<std::string, BatchResult>> thread_results(batches.size());
     std::atomic<size_t> next_batch{0};
+    std::atomic<size_t> completed_scripts{0};
+    std::mutex progress_mutex;
     size_t num_workers = std::min(MAX_PARALLEL_LAMBDA_BATCHES, batches.size());
     std::vector<std::thread> threads;
     for (size_t w = 0; w < num_workers; w++) {
@@ -558,7 +575,8 @@ inline std::unordered_map<std::string, BatchResult> execute_lambda_batch(
                 if (i >= batches.size()) break;
                 run_sub_batch(scripts, is_procedural,
                               batches[i].start, batches[i].end,
-                              use_mir, batches[i].id, thread_results[i]);
+                              use_mir, batches[i].id, thread_results[i],
+                              completed_scripts, progress_mutex, scripts.size());
             }
         });
     }

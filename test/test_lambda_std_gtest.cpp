@@ -14,6 +14,8 @@
 #include <vector>
 #include <algorithm>
 #include <thread>
+#include <atomic>
+#include <mutex>
 #ifdef _WIN32
 #include <process.h>
 #define getpid _getpid
@@ -242,7 +244,10 @@ static void run_std_sub_batch(
     const std::vector<StdTestInfo>& tests,
     size_t start, size_t end,
     int batch_id,
-    std::unordered_map<std::string, StdBatchResult>& results)
+    std::unordered_map<std::string, StdBatchResult>& results,
+    std::atomic<size_t>& completed_tests,
+    std::mutex& progress_mutex,
+    size_t total_tests)
 {
     char manifest_path[128];
     snprintf(manifest_path, sizeof(manifest_path), "./temp/batch_std_%d_%d.txt", (int)getpid(), batch_id);
@@ -288,6 +293,17 @@ static void run_std_sub_batch(
             } else if (strncmp(buffer + 1, "BATCH_END ", 10) == 0) {
                 int status = atoi(buffer + 11);
                 results[current_script] = {current_output, status};
+                size_t done = completed_tests.fetch_add(1, std::memory_order_relaxed) + 1;
+                {
+                    std::lock_guard<std::mutex> lock(progress_mutex);
+                    printf("  [std-batch %d] [%zu/%zu] %s finished",
+                           batch_id, done, total_tests, current_script.c_str());
+                    if (status != 0) {
+                        printf(" (status=%d)", status);
+                    }
+                    printf("\n");
+                    fflush(stdout);
+                }
                 in_script = false;
             }
         } else if (in_script) {
@@ -316,11 +332,14 @@ static std::unordered_map<std::string, StdBatchResult> execute_std_batch(
 
     // Run sub-batches in parallel — each thread gets its own result map
     std::vector<std::unordered_map<std::string, StdBatchResult>> thread_results(batches.size());
+    std::atomic<size_t> completed_tests{0};
+    std::mutex progress_mutex;
     std::vector<std::thread> threads;
     for (size_t i = 0; i < batches.size(); i++) {
         threads.emplace_back([&, i]() {
             run_std_sub_batch(tests, batches[i].start, batches[i].end,
-                              batches[i].id, thread_results[i]);
+                              batches[i].id, thread_results[i],
+                              completed_tests, progress_mutex, tests.size());
         });
     }
     for (auto& t : threads) t.join();

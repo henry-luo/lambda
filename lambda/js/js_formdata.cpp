@@ -79,6 +79,91 @@ static inline void prop_set(Item obj, const char* key, Item val) {
     js_property_set(obj, make_key(key), val);
 }
 
+static bool fd_input_supports_dirname(const char* itype) {
+    if (!itype) return false;
+    return strcmp(itype, "hidden") == 0 ||
+           strcmp(itype, "text") == 0 ||
+           strcmp(itype, "search") == 0 ||
+           strcmp(itype, "tel") == 0 ||
+           strcmp(itype, "url") == 0 ||
+           strcmp(itype, "email") == 0 ||
+           strcmp(itype, "password") == 0 ||
+           strcmp(itype, "submit") == 0;
+}
+
+static bool fd_utf8_decode_one(const char* s, uint32_t* out_cp, int* out_len) {
+    if (!s || !*s) return false;
+    unsigned char b0 = (unsigned char)s[0];
+    if (b0 < 0x80) {
+        *out_cp = b0;
+        *out_len = 1;
+        return true;
+    }
+    if ((b0 & 0xE0) == 0xC0 &&
+        (s[1] && (((unsigned char)s[1] & 0xC0) == 0x80))) {
+        *out_cp = ((uint32_t)(b0 & 0x1F) << 6) |
+                  (uint32_t)((unsigned char)s[1] & 0x3F);
+        *out_len = 2;
+        return true;
+    }
+    if ((b0 & 0xF0) == 0xE0 &&
+        (s[1] && (((unsigned char)s[1] & 0xC0) == 0x80)) &&
+        (s[2] && (((unsigned char)s[2] & 0xC0) == 0x80))) {
+        *out_cp = ((uint32_t)(b0 & 0x0F) << 12) |
+                  ((uint32_t)((unsigned char)s[1] & 0x3F) << 6) |
+                  (uint32_t)((unsigned char)s[2] & 0x3F);
+        *out_len = 3;
+        return true;
+    }
+    if ((b0 & 0xF8) == 0xF0 &&
+        (s[1] && (((unsigned char)s[1] & 0xC0) == 0x80)) &&
+        (s[2] && (((unsigned char)s[2] & 0xC0) == 0x80)) &&
+        (s[3] && (((unsigned char)s[3] & 0xC0) == 0x80))) {
+        *out_cp = ((uint32_t)(b0 & 0x07) << 18) |
+                  ((uint32_t)((unsigned char)s[1] & 0x3F) << 12) |
+                  ((uint32_t)((unsigned char)s[2] & 0x3F) << 6) |
+                  (uint32_t)((unsigned char)s[3] & 0x3F);
+        *out_len = 4;
+        return true;
+    }
+    return false;
+}
+
+static bool fd_codepoint_is_rtl(uint32_t cp) {
+    return (cp >= 0x0590 && cp <= 0x08FF) ||
+           (cp >= 0xFB1D && cp <= 0xFDFF) ||
+           (cp >= 0xFE70 && cp <= 0xFEFF);
+}
+
+static const char* fd_direction_from_auto_value(const char* value) {
+    if (!value) return "ltr";
+    for (const char* p = value; *p; ) {
+        uint32_t cp = 0;
+        int cp_len = 0;
+        if (!fd_utf8_decode_one(p, &cp, &cp_len)) {
+            p++;
+            continue;
+        }
+        if ((cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z')) return "ltr";
+        if (fd_codepoint_is_rtl(cp)) return "rtl";
+        p += cp_len;
+    }
+    return "ltr";
+}
+
+static const char* fd_compute_dirname_direction(DomElement* elem, const char* value_hint) {
+    for (DomNode* cur = (DomNode*)elem; cur; cur = cur->parent) {
+        if (!cur->is_element()) continue;
+        DomElement* cur_elem = (DomElement*)cur;
+        const char* dir = dom_element_get_attribute(cur_elem, "dir");
+        if (!dir || !*dir) continue;
+        if (strcasecmp(dir, "rtl") == 0) return "rtl";
+        if (strcasecmp(dir, "ltr") == 0) return "ltr";
+        if (strcasecmp(dir, "auto") == 0) return fd_direction_from_auto_value(value_hint);
+    }
+    return "ltr";
+}
+
 // Symbol.iterator key: "__sym_1" (Symbol.iterator = ID 1 in this engine)
 static inline Item make_sym_iterator_key() {
     return make_str("__sym_1");
@@ -601,11 +686,12 @@ static void fd_walk_form_controls(Item entries, DomNode* node) {
                         js_array_push(entries, pair);
                         // dirname: if the control has a dirname attribute, add a directionality entry
                         const char* dirname = dom_element_get_attribute(elem, "dirname");
-                        if (dirname && *dirname) {
+                        if (dirname && *dirname && fd_input_supports_dirname(itype)) {
                             // per spec: always "ltr" in headless (no bidi algorithm)
                             Item dir_pair = js_array_new(0);
                             js_array_push(dir_pair, make_str(dirname));
-                            js_array_push(dir_pair, make_str("ltr"));
+                            js_array_push(dir_pair,
+                                make_str(fd_compute_dirname_direction(elem, val)));
                             js_array_push(entries, dir_pair);
                         }
                     }
@@ -624,6 +710,14 @@ static void fd_walk_form_controls(Item entries, DomNode* node) {
                 js_array_push(pair, fd_normalize_surrogates(name));
                 js_array_push(pair, fd_normalize_surrogates(nl_str ? nl_str : ""));
                 js_array_push(entries, pair);
+                const char* dirname = dom_element_get_attribute(elem, "dirname");
+                if (dirname && *dirname) {
+                    Item dir_pair = js_array_new(0);
+                    js_array_push(dir_pair, make_str(dirname));
+                    js_array_push(dir_pair,
+                        make_str(fd_compute_dirname_direction(elem, val)));
+                    js_array_push(entries, dir_pair);
+                }
             }
         } else if (strcasecmp(tag, "select") == 0) {
             if (!js_dom_is_disabled(elem)) {
@@ -811,8 +905,47 @@ static Item fd_make_file_stub() {
     return obj;
 }
 
-// Constructor: new FormData([form])
-static Item js_formdata_construct(Item first) {
+static void fd_append_submitter_entry(Item entries, DomElement* elem) {
+    if (!elem || js_dom_is_disabled(elem)) return;
+
+    const char* tag = elem->tag_name ? elem->tag_name : "";
+    const char* name = dom_element_get_attribute(elem, "name");
+    if (!name || !*name) return;
+
+    if (strcasecmp(tag, "input") == 0) {
+        const char* itype = js_dom_input_type_lower(elem);
+        if (strcmp(itype, "submit") != 0) return;
+        const char* val = dom_element_get_attribute(elem, "value");
+        if (!val) val = "";
+        Item pair = js_array_new(0);
+        js_array_push(pair, fd_normalize_surrogates(name));
+        js_array_push(pair, fd_normalize_surrogates(val));
+        js_array_push(entries, pair);
+        const char* dirname = dom_element_get_attribute(elem, "dirname");
+        if (dirname && *dirname && fd_input_supports_dirname(itype)) {
+            Item dir_pair = js_array_new(0);
+            js_array_push(dir_pair, make_str(dirname));
+            js_array_push(dir_pair,
+                make_str(fd_compute_dirname_direction(elem, val)));
+            js_array_push(entries, dir_pair);
+        }
+        return;
+    }
+
+    if (strcasecmp(tag, "button") == 0) {
+        const char* type = dom_element_get_attribute(elem, "type");
+        if (type && *type && strcasecmp(type, "submit") != 0) return;
+        const char* val = dom_element_get_attribute(elem, "value");
+        if (!val) val = "";
+        Item pair = js_array_new(0);
+        js_array_push(pair, fd_normalize_surrogates(name));
+        js_array_push(pair, fd_normalize_surrogates(val));
+        js_array_push(entries, pair);
+    }
+}
+
+// Constructor: new FormData([form[, submitter]])
+static Item js_formdata_construct(Item first, Item submitter) {
     // Per WebIDL: new FormData() is fine; new FormData(nonFormElement) throws TypeError.
     // undefined is treated the same as no argument (the optional argument is absent).
     TypeId ft = get_type_id(first);
@@ -851,6 +984,13 @@ static Item js_formdata_construct(Item first) {
         if (node && node->is_element()) {
             DomElement* form_elem = (DomElement*)node;
             fd_walk_form_controls(entries, form_elem->first_child);
+            if (get_type_id(submitter) == LMD_TYPE_MAP) {
+                void* submitter_raw = js_dom_unwrap_element(submitter);
+                DomNode* submitter_node = (DomNode*)submitter_raw;
+                if (submitter_node && submitter_node->is_element()) {
+                    fd_append_submitter_entry(entries, (DomElement*)submitter_node);
+                }
+            }
             log_debug("js_formdata_construct: populated from <form>, entries=%lld",
                       (long long)js_array_length(entries));
         }
@@ -860,13 +1000,29 @@ static Item js_formdata_construct(Item first) {
     return fd_obj;
 }
 
+extern "C" Item js_formdata_collect_form_entries(void* form_elem, void* submitter_elem) {
+    Item entries = js_array_new(0);
+    DomNode* form_node = (DomNode*)form_elem;
+    if (!form_node || !form_node->is_element()) return entries;
+
+    DomElement* form_dom = (DomElement*)form_node;
+    fd_walk_form_controls(entries, form_dom->first_child);
+    if (submitter_elem) {
+        DomNode* submitter_node = (DomNode*)submitter_elem;
+        if (submitter_node->is_element()) {
+            fd_append_submitter_entry(entries, (DomElement*)submitter_node);
+        }
+    }
+    return entries;
+}
+
 // ============================================================================
 // Global installation
 // ============================================================================
 
 extern "C" void js_formdata_install_globals(void) {
     Item global = js_get_global_this();
-    Item ctor_fn = js_new_function((void*)js_formdata_construct, 1);
+    Item ctor_fn = js_new_function((void*)js_formdata_construct, 2);
     prop_set(global, "FormData", ctor_fn);
 
     // Install Blob constructor: new Blob(parts, options)

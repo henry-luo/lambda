@@ -16,6 +16,8 @@
 #include "../lambda.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
+#include "../../lib/strbuf.h"
+#include "../../lib/url.h"
 #include "../input/css/dom_node.hpp"
 #include "../input/css/dom_element.hpp"
 
@@ -45,10 +47,100 @@ extern "C" const char* js_dom_input_type_lower(void* dom_elem);
 extern "C" const char* js_dom_tag_name_raw(void* dom_elem);
 extern "C" bool js_dom_is_disabled(void* dom_elem);
 extern "C" bool js_dom_is_connected(void* dom_elem);
+extern "C" Item js_formdata_collect_form_entries(void* form_elem, void* submitter_elem);
+extern "C" bool js_dom_navigate_submit_target(const char* target_name, const char* url);
+extern "C" int64_t js_array_length(Item array);
+extern "C" Item js_array_get_int(Item array, int64_t index);
 static inline Item event_make_double(double v) {
     double* p = (double*)heap_calloc(sizeof(double), LMD_TYPE_FLOAT);
     *p = v;
     return (Item){.item = d2it(p)};
+}
+
+static char* js_dom_build_submit_query(Item entries) {
+    if (get_type_id(entries) != LMD_TYPE_ARRAY) {
+        return mem_strdup("", MEM_CAT_JS_RUNTIME);
+    }
+
+    StrBuf* sb = strbuf_new_cap(128);
+    int64_t len = js_array_length(entries);
+    for (int64_t i = 0; i < len; i++) {
+        Item pair = js_array_get_int(entries, i);
+        if (get_type_id(pair) != LMD_TYPE_ARRAY || js_array_length(pair) < 2) continue;
+
+        const char* key = fn_to_cstr(js_array_get_int(pair, 0));
+        const char* val = fn_to_cstr(js_array_get_int(pair, 1));
+        if (!key) continue;
+        if (!val) val = "";
+
+        char* key_enc = url_encode_component(key, strlen(key));
+        char* val_enc = url_encode_component(val, strlen(val));
+        if (sb->length > 0) strbuf_append_char(sb, '&');
+        if (key_enc) strbuf_append_str(sb, key_enc);
+        strbuf_append_char(sb, '=');
+        if (val_enc) strbuf_append_str(sb, val_enc);
+        if (key_enc) mem_free(key_enc);
+        if (val_enc) mem_free(val_enc);
+    }
+
+    char* query = mem_strdup(sb->str ? sb->str : "", MEM_CAT_JS_RUNTIME);
+    strbuf_free(sb);
+    return query;
+}
+
+static const char* js_dom_pick_submit_attr(DomElement* submitter, DomElement* form,
+                                           const char* submitter_attr,
+                                           const char* form_attr) {
+    if (submitter) {
+        const char* submitter_val = dom_element_get_attribute(submitter, submitter_attr);
+        if (submitter_val && *submitter_val) return submitter_val;
+    }
+    if (form) {
+        const char* form_val = dom_element_get_attribute(form, form_attr);
+        if (form_val && *form_val) return form_val;
+    }
+    return "";
+}
+
+static void js_dom_run_form_submit_navigation(DomElement* form, DomElement* submitter) {
+    if (!form) return;
+
+    const char* method = js_dom_pick_submit_attr(submitter, form, "formmethod", "method");
+    if (!method || !*method) method = "get";
+
+    const char* target = js_dom_pick_submit_attr(submitter, form, "formtarget", "target");
+    const char* action = js_dom_pick_submit_attr(submitter, form, "formaction", "action");
+    if ((!action || !*action) && form->doc && form->doc->url) {
+        action = url_get_href(form->doc->url);
+    }
+    if (!action || !*action) return;
+
+    char* nav_url = nullptr;
+    if (strcasecmp(method, "get") == 0) {
+        Item entries = js_formdata_collect_form_entries(form, submitter);
+        char* query = js_dom_build_submit_query(entries);
+        size_t action_len = strlen(action);
+        size_t query_len = strlen(query);
+        bool has_query = strchr(action, '?') != nullptr;
+        size_t extra = query_len > 0 ? 1 : 0;
+        nav_url = (char*)mem_alloc(action_len + extra + query_len + 1, MEM_CAT_JS_RUNTIME);
+        memcpy(nav_url, action, action_len);
+        size_t pos = action_len;
+        if (query_len > 0) {
+            nav_url[pos++] = has_query ? '&' : '?';
+            memcpy(nav_url + pos, query, query_len);
+            pos += query_len;
+        }
+        nav_url[pos] = '\0';
+        mem_free(query);
+    } else {
+        nav_url = mem_strdup(action, MEM_CAT_JS_RUNTIME);
+    }
+
+    if (nav_url) {
+        js_dom_navigate_submit_target(target, nav_url);
+        mem_free(nav_url);
+    }
 }
 
 static void event_apply_new_target_prototype(Item event) {
@@ -1646,7 +1738,10 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
                 if (pe->tag_name && strcasecmp(pe->tag_name, "form") == 0) {
                     Item form_item = js_dom_wrap_element(pe);
                     Item submit_ev = js_create_event("submit", true, true);
-                    js_dom_dispatch_event(form_item, submit_ev);
+                    Item submit_ok = js_dom_dispatch_event(form_item, submit_ev);
+                    if (submit_ok.item != ITEM_FALSE) {
+                        js_dom_run_form_submit_navigation(pe, el);
+                    }
                     break;
                 }
                 p = p->parent;
