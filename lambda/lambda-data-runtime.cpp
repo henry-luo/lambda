@@ -819,7 +819,7 @@ Element* elmt_with_tl(int64_t type_index, void* type_list_ptr) {
 // Returns the new String* (embedded in [DomText][String][chars]) on the arena.
 // Called by list_push() when adding a string to an element's content list in ui_mode.
 Item ui_copy_string_to_arena(Arena* arena, Item str_item) {
-    String* src = str_item.get_string();
+    String* src = str_item.get_safe_string();
     if (!src) return str_item;
     size_t total = sizeof(DomText) + sizeof(String) + src->len + 1;
     DomText* dt = (DomText*)arena_calloc(arena, total);
@@ -1044,10 +1044,15 @@ Item item_at(Item data, int64_t index) {
         const char* chars = data.get_chars();
         uint32_t byte_len = data.get_len();
         if (index < 0) { return ItemNull; }
-        String* str = data.get_string();
+        bool is_ascii = true;
+        if (type_id == LMD_TYPE_STRING) {
+            String* str = data.get_safe_string();
+            if (!str) { return ItemNull; }
+            is_ascii = str->is_ascii != 0;
+        }
 
         // ASCII fast-path: byte index == char index, O(1)
-        if (str->is_ascii) {
+        if (is_ascii) {
             if ((uint32_t)index >= byte_len) { return ItemNull; }
             if (type_id == LMD_TYPE_SYMBOL) {
                 Symbol* ch_sym = heap_create_symbol(chars + index, 1);

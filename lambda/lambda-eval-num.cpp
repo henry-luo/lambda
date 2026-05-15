@@ -1914,11 +1914,11 @@ extern "C" Symbol* fn_symbol(Item item) {
         return NULL;
     }
     if (item._type_id == LMD_TYPE_SYMBOL) {
-        return item.get_symbol();  // Already a symbol
+        return item.get_safe_symbol();  // Already a symbol
     }
     else if (item._type_id == LMD_TYPE_STRING) {
         // Convert string to symbol
-        String* str = item.get_string();
+        String* str = item.get_safe_string();
         if (!str) {
             log_debug("Cannot convert null string to symbol");
             return NULL;
@@ -2004,7 +2004,7 @@ extern "C" Item fn_symbol2(Item name_item, Item url_item) {
     size_t name_len = 0;
 
     if (name_item._type_id == LMD_TYPE_STRING) {
-        String* str = name_item.get_string();
+        String* str = name_item.get_safe_string();
         if (!str) {
             log_error("fn_symbol2: null name string");
             return ItemError;
@@ -2013,7 +2013,7 @@ extern "C" Item fn_symbol2(Item name_item, Item url_item) {
         name_len = str->len;
     }
     else if (name_item._type_id == LMD_TYPE_SYMBOL) {
-        Symbol* sym = name_item.get_symbol();
+        Symbol* sym = name_item.get_safe_symbol();
         if (!sym) {
             log_error("fn_symbol2: null name symbol");
             return ItemError;

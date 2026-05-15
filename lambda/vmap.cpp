@@ -44,12 +44,12 @@ static uint64_t vmap_hash_item(const void* entry, uint64_t seed0, uint64_t seed1
 
     switch (type_id) {
     case LMD_TYPE_STRING: {
-        String* s = key.get_string();
+        String* s = key.get_safe_string();
         if (s) return hashmap_sip(s->chars, s->len, seed0, seed1);
         return hashmap_sip(&key.item, sizeof(uint64_t), seed0, seed1);
     }
     case LMD_TYPE_SYMBOL: {
-        Symbol* s = key.get_symbol();
+        Symbol* s = key.get_safe_symbol();
         if (s) return hashmap_sip(s->chars, s->len, seed0, seed1);
         return hashmap_sip(&key.item, sizeof(uint64_t), seed0, seed1);
     }
@@ -69,16 +69,16 @@ static int vmap_compare_item(const void* a, const void* b, void* udata) {
 
     switch (ta) {
     case LMD_TYPE_STRING: {
-        String* sa = ka.get_string();
-        String* sb = kb.get_string();
+        String* sa = ka.get_safe_string();
+        String* sb = kb.get_safe_string();
         if (sa == sb) return 0;
         if (!sa || !sb) return 1;
         if (sa->len != sb->len) return 1;
         return memcmp(sa->chars, sb->chars, sa->len);
     }
     case LMD_TYPE_SYMBOL: {
-        Symbol* sa = ka.get_symbol();
-        Symbol* sb = kb.get_symbol();
+        Symbol* sa = ka.get_safe_symbol();
+        Symbol* sb = kb.get_safe_symbol();
         if (sa == sb) return 0;
         if (!sa || !sb) return 1;
         if (sa->len != sb->len) return 1;
@@ -213,13 +213,13 @@ static ArrayList* hashmap_vmap_keys(void* data) {
         Item key = *(Item*)&hd->key_order->data[i];
         TypeId kt = get_type_id(key);
         if (kt == LMD_TYPE_STRING) {
-            String* s = key.get_string();
+            String* s = key.get_safe_string();
             if (s) {
                 Symbol* sym = heap_create_symbol(s->chars, s->len);
                 arraylist_append(keys, (void*)sym);
             }
         } else if (kt == LMD_TYPE_SYMBOL) {
-            Symbol* s = key.get_symbol();
+            Symbol* s = key.get_safe_symbol();
             if (s) {
                 Symbol* sym = heap_create_symbol(s->chars, s->len);
                 arraylist_append(keys, (void*)sym);

@@ -528,7 +528,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         break;
     }
     case LMD_TYPE_STRING: {
-        String *string = item.get_string();
+        String *string = item.get_safe_string();
         if (string && string->chars) {
             // Safety check: validate string length before assertion
             size_t actual_len = strlen(string->chars);
@@ -546,7 +546,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         break;
     }
     case LMD_TYPE_SYMBOL: {
-        Symbol *symbol = item.get_symbol();
+        Symbol *symbol = item.get_safe_symbol();
         if (symbol && symbol->chars) {
             // Safety check: validate string length before assertion
             size_t actual_len = strlen(symbol->chars);
@@ -576,7 +576,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         break;
     }
     case LMD_TYPE_BINARY: {
-        String *string = item.get_string();
+        String *string = item.get_safe_binary();
         if (string && string->chars) strbuf_append_format(strbuf, "b'%s'", string->chars);
         else strbuf_append_str(strbuf, "b''");
         break;
@@ -652,7 +652,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
             // print key
             TypeId kt = get_type_id(key);
             if (kt == LMD_TYPE_STRING) {
-                String* s = key.get_string();
+                String* s = key.get_safe_string();
                 if (s) strbuf_append_str_n(strbuf, s->chars, s->len);
             } else {
                 print_item(strbuf, key, depth + 1, indent);

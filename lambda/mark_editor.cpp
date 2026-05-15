@@ -84,7 +84,7 @@ void MarkEditor::dom_relink_children(Element* parent_elem) {
             DomElement* ce = element_to_dom_element(child.element);
             node = static_cast<DomNode*>(ce);
         } else if (tid == LMD_TYPE_STRING) {
-            String* s = child.get_string();
+            String* s = child.get_safe_string();
             if (s) {
                 DomText* dt = string_to_dom_text(s);
                 // safety: verify this is a fat DomText-String allocation
@@ -314,11 +314,16 @@ void MarkEditor::store_value_at_offset(void* field_ptr, Item value, TypeId type_
     case LMD_TYPE_DTIME:
         *(DateTime*)field_ptr = value.get_datetime();
         break;
-    case LMD_TYPE_STRING:
-    case LMD_TYPE_SYMBOL:
+    case LMD_TYPE_STRING: {
+        *(String**)field_ptr = value.get_safe_string();
+        break;
+    }
+    case LMD_TYPE_SYMBOL: {
+        *(Symbol**)field_ptr = value.get_safe_symbol();
+        break;
+    }
     case LMD_TYPE_BINARY: {
-        String* str = value.get_string();
-        *(String**)field_ptr = str;
+        *(String**)field_ptr = value.get_safe_binary();
         break;
     }
     case LMD_TYPE_ARRAY:
