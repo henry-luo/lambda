@@ -160,6 +160,8 @@ static Item build_range_object(DomRange* r);
 static Item build_selection_object(DomSelection* s);
 static inline void range_sync_props(Item, DomRange*);
 static inline void selection_sync_props(Item, DomSelection*);
+extern "C" Item js_dom_range_to_string_value(Item obj);
+extern "C" Item js_dom_selection_to_string_value(Item obj);
 
 // Identity / unwrap ----------------------------------------------------------
 
@@ -185,6 +187,32 @@ static inline DomSelection* selection_from(Item obj) {
 }
 static inline DomRange*     range_from_this()     { return range_from(js_get_this()); }
 static inline DomSelection* selection_from_this() { return selection_from(js_get_this()); }
+
+static void set_wrapper_prototype(Item obj, const char* ctor_name) {
+    Item global = js_get_global_this();
+    Item ctor = js_property_get(global, make_key(ctor_name));
+    if (get_type_id(ctor) != LMD_TYPE_FUNC) return;
+    Item proto = js_property_get(ctor, make_key("prototype"));
+    if (get_type_id(proto) == LMD_TYPE_MAP) {
+        js_set_prototype(obj, proto);
+    }
+}
+
+static Item get_dom_constructor_prototype(const char* ctor_name) {
+    Item global = js_get_global_this();
+    Item ctor = js_property_get(global, make_key(ctor_name));
+    if (get_type_id(ctor) != LMD_TYPE_FUNC) return ItemNull;
+    Item proto = js_property_get(ctor, make_key("prototype"));
+    return get_type_id(proto) == LMD_TYPE_MAP ? proto : ItemNull;
+}
+
+extern "C" Item js_dom_range_get_prototype_value(void) {
+    return get_dom_constructor_prototype("Range");
+}
+
+extern "C" Item js_dom_selection_get_prototype_value(void) {
+    return get_dom_constructor_prototype("Selection");
+}
 
 // Reuse cached JS wrapper if the native object already has one; else build.
 static Item js_object_for_range(DomRange* r) {
@@ -442,7 +470,11 @@ extern "C" Item js_range_detach(void) {
 }
 
 extern "C" Item js_range_to_string(void) {
-    DomRange* r = range_from_this();
+    return js_dom_range_to_string_value(js_get_this());
+}
+
+extern "C" Item js_dom_range_to_string_value(Item obj) {
+    DomRange* r = range_from(obj);
     if (!r) return make_str("");
     char* s = dom_range_to_string(r);
     if (!s) return make_str("");
@@ -516,6 +548,7 @@ static Item build_range_object(DomRange* r) {
     m->data     = r;
     m->data_cap = 0;
     Item obj = (Item){ .map = m };
+    set_wrapper_prototype(obj, "Range");
     r->host_wrapper = m;
     dom_range_retain(r);  // released in js_dom_selection_reset
     return obj;
@@ -829,7 +862,11 @@ extern "C" Item js_selection_delete_from_document(void) {
 }
 
 extern "C" Item js_selection_to_string(void) {
-    DomSelection* s = selection_from_this();
+    return js_dom_selection_to_string_value(js_get_this());
+}
+
+extern "C" Item js_dom_selection_to_string_value(Item obj) {
+    DomSelection* s = selection_from(obj);
     // Per WPT stringifier_editable_element.tentative.html: when a focused
     // text control has a non-empty selection, getSelection().toString()
     // returns the visible selected substring of the control — even when
@@ -893,6 +930,7 @@ static Item build_selection_object(DomSelection* s) {
     m->data     = s;
     m->data_cap = 0;
     Item obj = (Item){ .map = m };
+    set_wrapper_prototype(obj, "Selection");
     s->host_wrapper = m;
     return obj;
 }

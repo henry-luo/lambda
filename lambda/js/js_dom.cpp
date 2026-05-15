@@ -2842,7 +2842,12 @@ extern "C" Item js_document_get_property(Item prop_name) {
 
     // activeElement — currently focused element, or <body> as default per spec.
     if (strcmp(prop, "activeElement") == 0) {
-        DomElement* active_element = tc_get_active_element(js_dom_current_state());
+        DocState* state = js_dom_current_state();
+        View* focused = focus_get(state);
+        if (focused && focused->is_element()) {
+            return js_dom_wrap_element(((DomNode*)focused)->as_element());
+        }
+        DomElement* active_element = tc_get_active_element(state);
         if (active_element) return js_dom_wrap_element(active_element);
         // default to <body> if available
         DomNode* child = root ? root->first_child : nullptr;
@@ -2891,6 +2896,40 @@ extern "C" String* js_dom_active_text_control_selected_text(void) {
     const char* sel = tc_active_selected_text(js_dom_current_state(), &blen);
     if (!sel || !blen) return nullptr;
     return heap_strcpy((char*)sel, (int64_t)blen);
+}
+
+static uint8_t text_control_direction_from_item(Item value) {
+    const char* d = fn_to_cstr(value);
+    if (!d) return 0;
+    if (strcmp(d, "forward") == 0) return 1;
+    if (strcmp(d, "backward") == 0) return 2;
+    return 0;
+}
+
+static Item js_text_control_set_selection_range(Item start_arg, Item end_arg, Item dir_arg) {
+    Item self = js_get_this();
+    DomElement* elem = (DomElement*)js_dom_unwrap_element(self);
+    if (!elem || !tc_is_text_control_elem(elem)) return make_js_undefined();
+
+    int64_t s = it2i(start_arg);
+    int64_t e = it2i(end_arg);
+    if (s < 0) s = 0;
+    if (e < 0) e = 0;
+    uint8_t dir = text_control_direction_from_item(dir_arg);
+    form_control_set_selection(js_dom_current_state(), (View*)elem, (uint32_t)s, (uint32_t)e, dir);
+    return make_js_undefined();
+}
+
+static Item js_text_control_select(void) {
+    Item self = js_get_this();
+    DomElement* elem = (DomElement*)js_dom_unwrap_element(self);
+    if (!elem || !tc_is_text_control_elem(elem)) return make_js_undefined();
+
+    tc_ensure_init(elem);
+    FormControlProp* f = elem->form;
+    focus_set(js_dom_current_state(), (View*)elem, false);
+    form_control_set_selection(js_dom_current_state(), (View*)elem, 0, f->current_value_u16_len, 0);
+    return make_js_undefined();
 }
 
 // ============================================================================
@@ -4874,13 +4913,12 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
             tc_ensure_init(elem);
             return (Item){.item = i2it((int64_t)elem->form->current_value_u16_len)};
         }
-        // Methods: return ITEM_TRUE so feature-detection works and method
-        // dispatch routes through js_dom_element_method below.
-        if (strcmp(prop, "setSelectionRange") == 0 ||
-            strcmp(prop, "select") == 0 ||
-            strcmp(prop, "setRangeText") == 0) {
+        if (strcmp(prop, "setSelectionRange") == 0)
+            return js_new_function((void*)js_text_control_set_selection_range, 3);
+        if (strcmp(prop, "select") == 0)
+            return js_new_function((void*)js_text_control_select, 0);
+        if (strcmp(prop, "setRangeText") == 0)
             return (Item){.item = ITEM_TRUE};
-        }
     }
 
     // ------------------------------------------------------------------
@@ -6985,16 +7023,11 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
 
     // focus() / blur() — stubs for headless mode
     if (strcmp(method, "focus") == 0 || strcmp(method, "blur") == 0) {
+        DocState* state = js_dom_current_state();
         if (strcmp(method, "focus") == 0) {
-            tc_set_active_element(js_dom_current_state(), elem);
-            if (tc_is_text_control_elem(elem)) {
-                tc_ensure_init(elem);
-                tc_set_last_focused_text_control(js_dom_current_state(), elem);
-            }
+            focus_set(state, (View*)elem, false);
         } else {
-            // blur: clear activeElement only if it points to us.
-            DocState* state = js_dom_current_state();
-            if (tc_get_active_element(state) == elem) tc_set_active_element(state, nullptr);
+            if (focus_get(state) == (View*)elem) focus_clear(state);
         }
         return make_js_undefined();
     }
@@ -7057,10 +7090,9 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
     if (strcmp(method, "select") == 0 && tc_is_text_control_elem(elem)) {
         tc_ensure_init(elem);
         FormControlProp* f = elem->form;
-        form_control_set_selection(js_dom_current_state(), (View*)elem, 0, f->current_value_u16_len, 0);
         // Per HTML, select() implicitly focuses the control.
-        tc_set_active_element(js_dom_current_state(), elem);
-        tc_set_last_focused_text_control(js_dom_current_state(), elem);
+        focus_set(js_dom_current_state(), (View*)elem, false);
+        form_control_set_selection(js_dom_current_state(), (View*)elem, 0, f->current_value_u16_len, 0);
         return make_js_undefined();
     }
 

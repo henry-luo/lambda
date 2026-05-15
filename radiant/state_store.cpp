@@ -2333,6 +2333,19 @@ void form_control_get_selection(DocState* state, View* view,
     if (out_end) *out_end = 0;
     if (out_direction) *out_direction = 0;
 
+    if (view && view->is_element()) {
+        DomElement* elem = lam::dom_require_element(view);
+        if (elem && tc_is_text_control(elem)) {
+            tc_ensure_init(elem);
+            FormControlProp* form = elem->form;
+            if (!form) return;
+            if (out_start) *out_start = form->selection_start;
+            if (out_end) *out_end = form->selection_end;
+            if (out_direction) *out_direction = form->selection_direction;
+            return;
+        }
+    }
+
     ViewState* view_state = form_view_state_get(state, view);
     if (view_state) {
         if (out_start) *out_start = view_state->data.form.selection_start;
@@ -2354,7 +2367,28 @@ void form_control_get_selection(DocState* state, View* view,
 
 void form_control_set_selection(DocState* state, View* view,
                                 uint32_t start, uint32_t end, uint8_t direction) {
-    if (!view || !view->is_block()) return;
+    if (!view) return;
+
+    if (view->is_element()) {
+        DomElement* elem = lam::dom_require_element(view);
+        if (elem && tc_is_text_control(elem)) {
+            tc_ensure_init(elem);
+            FormControlProp* form = elem->form;
+            if (!form) return;
+            form->state_ref = state;
+            tc_set_selection_range(elem, start, end, direction);
+            ViewState* view_state = form_view_state_get_or_create(state, view, form);
+            if (view_state) {
+                view_state->data.form.selection_start = form->selection_start;
+                view_state->data.form.selection_end = form->selection_end;
+                view_state->data.form.selection_direction = form->selection_direction;
+            }
+            form_state_mark_dirty(state);
+            return;
+        }
+    }
+
+    if (!view->is_block()) return;
 
     ViewBlock* block = lam::view_require_block(view);
     if (!block->form) return;
@@ -5266,6 +5300,7 @@ static void focus_sync_text_control_state(DocState* state, View* view) {
 
 void focus_set(DocState* state, View* view, bool from_keyboard) {
     if (!state) return;
+    if (view && !is_view_focusable(view)) return;
 
     if (state->transition_depth == 0) {
         FocusTransitionArgs args = { .target = view, .from_keyboard = from_keyboard };

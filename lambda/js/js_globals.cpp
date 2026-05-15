@@ -23,6 +23,10 @@
 
 extern "C" Item js_to_property_key(Item key);
 extern "C" Item js_bound_function_target(Item func_item);
+extern "C" bool js_dom_item_is_range(Item item);
+extern "C" bool js_dom_item_is_selection(Item item);
+extern "C" Item js_dom_range_get_prototype_value(void);
+extern "C" Item js_dom_selection_get_prototype_value(void);
 extern double js_get_number(Item value);
 
 #define JS_FUNC_FLAG_HAS_BOUND_THIS_G 16
@@ -5875,6 +5879,8 @@ extern "C" Item js_get_prototype_of(Item object) {
         return js_property_get(ctor, (Item){.item = s2it(heap_create_name("prototype", 9))});
     }
     if (!js_require_object_type(object, "getPrototypeOf")) return ItemNull;
+    if (js_dom_item_is_selection(object)) return js_dom_selection_get_prototype_value();
+    if (js_dom_item_is_range(object)) return js_dom_range_get_prototype_value();
     // v18g: Arrays → return Array.prototype (or custom if set via Object.setPrototypeOf)
     if (get_type_id(object) == LMD_TYPE_ARRAY) {
         Item custom_proto = js_array_get_custom_proto(object);
