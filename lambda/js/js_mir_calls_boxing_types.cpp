@@ -826,7 +826,8 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
         case JS_OP_BIT_NOT: return LMD_TYPE_INT;
         case JS_OP_PLUS: case JS_OP_ADD: {
             TypeId t = jm_get_effective_type(mt, un->operand);
-            return (t == LMD_TYPE_FLOAT) ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
+            if (t == LMD_TYPE_FLOAT || t == LMD_TYPE_INT) return t;
+            return LMD_TYPE_ANY;
         }
         case JS_OP_MINUS: case JS_OP_SUB: {
             TypeId t = jm_get_effective_type(mt, un->operand);
@@ -878,9 +879,14 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
     }
 
     case JS_AST_NODE_CALL_EXPRESSION: {
+        JsCallNode* call = (JsCallNode*)node;
+        if (call->callee && call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
+            JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
+            if (id->name && id->name->len == 6 && strncmp(id->name->chars, "String", 6) == 0)
+                return LMD_TYPE_STRING;
+        }
         // Phase 4: If callee resolves to a function with a native version
         // and all arg types match, the call returns the function's return type
-        JsCallNode* call = (JsCallNode*)node;
         JsFuncCollected* fc = jm_resolve_native_call(mt, call);
         if (fc) return fc->return_type;
         // Phase 5: If callee is Math.xxx(), resolve return type at compile time

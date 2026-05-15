@@ -3503,6 +3503,20 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                                 heritage_is_null = heritage_id->name && heritage_id->name->len == 4 &&
                                     strncmp(heritage_id->name->chars, "null", 4) == 0;
                             }
+                            if (!sc && heritage && !heritage_is_null) {
+                                MIR_reg_t super_val = jm_transpile_box_item(mt, heritage);
+                                jm_call_void_1(mt, "js_check_class_heritage_constructor",
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, super_val));
+                                jm_emit_exc_propagate_check(mt);
+                                MIR_reg_t sp_key = jm_box_string_literal(mt, "prototype", 9);
+                                MIR_reg_t sp_obj = jm_call_2(mt, "js_property_get", MIR_T_I64,
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, super_val),
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_key));
+                                jm_call_void_2(mt, "js_set_prototype",
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, last_proto),
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_obj));
+                                ctor_super_val = super_val;
+                            }
                             if (heritage_is_null) {
                                 MIR_reg_t null_proto = jm_emit_null(mt);
                                 jm_call_void_2(mt, "js_set_prototype",

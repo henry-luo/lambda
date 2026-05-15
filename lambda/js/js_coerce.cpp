@@ -89,7 +89,8 @@ extern "C" Item js_to_primitive(Item value, JsHint hint) {
     if (vt == LMD_TYPE_MAP) {
         bool own_pv = false;
         Item pv = js_map_get_fast_ext(value.map, "__primitiveValue__", 18, &own_pv);
-        if (own_pv && !js_coerce_is_bigint(pv)) {
+        bool pv_is_symbol = get_type_id(pv) == LMD_TYPE_INT && it2i(pv) <= -(int64_t)JS_SYMBOL_BASE;
+        if (own_pv && !js_coerce_is_bigint(pv) && !pv_is_symbol) {
             bool has_vo = false, has_ts = false, has_tp = false;
             js_map_get_fast_ext(value.map, "valueOf", 7, &has_vo);
             js_map_get_fast_ext(value.map, "toString", 8, &has_ts);

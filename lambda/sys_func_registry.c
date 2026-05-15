@@ -1584,6 +1584,8 @@ JitImport jit_runtime_imports[] = {
     {"js_object_assign", FPTR(js_object_assign)},
     {"js_object_spread_into", FPTR(js_object_spread_into)},
     {"js_has_own_property", FPTR(js_has_own_property)},
+    {"js_object_has_own", FPTR(js_object_has_own)},
+    {"js_object_prototype_has_own_property", FPTR(js_object_prototype_has_own_property)},
     {"js_object_freeze", FPTR(js_object_freeze)},
     {"js_object_is_frozen", FPTR(js_object_is_frozen)},
     {"js_object_seal", FPTR(js_object_seal)},

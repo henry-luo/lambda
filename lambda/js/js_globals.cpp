@@ -23,6 +23,7 @@
 
 extern "C" Item js_to_property_key(Item key);
 extern "C" Item js_bound_function_target(Item func_item);
+extern double js_get_number(Item value);
 
 #define JS_FUNC_FLAG_HAS_BOUND_THIS_G 16
 
@@ -1799,6 +1800,14 @@ static int js_process_argc_raw = 0;
 // 40=getDay, 41=getUTCDay, 42=getTimezoneOffset, 43=valueOf, 44=toJSON,
 // 45=toUTCString, 46=toDateString, 47=toTimeString
 extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg1, Item arg2, Item arg3) {
+    if (method_id == 43 && get_type_id(date_obj) == LMD_TYPE_MAP) {
+        bool own_value_of = false;
+        Item fn = js_map_get_fast_ext(date_obj.map, "valueOf", 7, &own_value_of);
+        if (own_value_of && get_type_id(fn) == LMD_TYPE_FUNC) {
+            return js_call_function(fn, date_obj, nullptr, 0);
+        }
+    }
+
     Item key = (Item){.item = s2it(heap_create_name("__time__"))};
     Item time_val = js_property_get(date_obj, key);
 
@@ -4537,13 +4546,13 @@ static int encode_codepoint_utf8(char* buf, int code) {
 
 // String.fromCodePoint(cp) — single code point
 extern "C" Item js_string_fromCodePoint(Item code_item) {
-    int code = 0;
-    TypeId type = get_type_id(code_item);
-    if (type == LMD_TYPE_INT) {
-        code = (int)it2i(code_item);
-    } else if (type == LMD_TYPE_FLOAT) {
-        code = (int)it2d(code_item);
+    Item num_item = js_to_number(code_item);
+    if (js_exception_pending) return ItemNull;
+    double code_num = js_get_number(num_item);
+    if (!isfinite(code_num) || floor(code_num) != code_num || code_num < 0 || code_num > 0x10FFFF) {
+        return js_throw_range_error("Invalid code point");
     }
+    int code = (int)code_num;
     char buf[5];
     int len = encode_codepoint_utf8(buf, code);
     buf[len] = '\0';
@@ -4562,13 +4571,14 @@ extern "C" Item js_string_fromCodePoint_array(Item arr_item) {
     char* buf = (char*)mem_alloc(len * 4 + 1, MEM_CAT_JS_RUNTIME);
     int pos = 0;
     for (int i = 0; i < len; i++) {
-        int code = 0;
-        TypeId itype = get_type_id(arr->items[i]);
-        if (itype == LMD_TYPE_INT) {
-            code = (int)it2i(arr->items[i]);
-        } else if (itype == LMD_TYPE_FLOAT) {
-            code = (int)it2d(arr->items[i]);
+        Item num_item = js_to_number(arr->items[i]);
+        if (js_exception_pending) { mem_free(buf); return ItemNull; }
+        double code_num = js_get_number(num_item);
+        if (!isfinite(code_num) || floor(code_num) != code_num || code_num < 0 || code_num > 0x10FFFF) {
+            mem_free(buf);
+            return js_throw_range_error("Invalid code point");
         }
+        int code = (int)code_num;
         pos += encode_codepoint_utf8(buf + pos, code);
     }
     buf[pos] = '\0';
@@ -5848,6 +5858,10 @@ extern "C" Item js_get_prototype_of(Item object) {
     TypeId ot = get_type_id(object);
     if (ot == LMD_TYPE_STRING) {
         Item ctor = js_get_constructor((Item){.item = s2it(heap_create_name("String", 6))});
+        return js_property_get(ctor, (Item){.item = s2it(heap_create_name("prototype", 9))});
+    }
+    if (ot == LMD_TYPE_INT && it2i(object) <= -(int64_t)JS_SYMBOL_BASE) {
+        Item ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Symbol", 6))});
         return js_property_get(ctor, (Item){.item = s2it(heap_create_name("prototype", 9))});
     }
     if (ot == LMD_TYPE_INT || ot == LMD_TYPE_FLOAT) {
@@ -9928,6 +9942,8 @@ static bool js_map_has_builtin_method(Map* m, const char* name, int len) {
 // =============================================================================
 
 extern "C" Item js_has_own_property(Item obj, Item key) {
+    key = js_to_property_key(key);
+    if (js_check_exception()) return ItemNull;
     // Proxy: forward to getOwnPropertyDescriptor trap
     if (js_is_proxy(obj)) {
         Item desc = js_proxy_trap_get_own_property_descriptor(obj, key);
@@ -10122,6 +10138,28 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
         }
         return (Item){.item = b2it(false)};
     }
+}
+
+extern "C" Item js_object_has_own(Item obj, Item key) {
+    TypeId obj_type = get_type_id(obj);
+    if (obj.item == ITEM_JS_UNDEFINED || obj_type == LMD_TYPE_UNDEFINED || obj_type == LMD_TYPE_NULL) {
+        return js_throw_type_error("Cannot convert undefined or null to object");
+    }
+    Item object = js_to_object(obj);
+    Item prop_key = js_to_property_key(key);
+    if (js_check_exception()) return ItemNull;
+    return js_has_own_property(object, prop_key);
+}
+
+extern "C" Item js_object_prototype_has_own_property(Item this_val, Item key) {
+    Item prop_key = js_to_property_key(key);
+    if (js_check_exception()) return ItemNull;
+    TypeId this_type = get_type_id(this_val);
+    if (this_val.item == ITEM_JS_UNDEFINED || this_type == LMD_TYPE_UNDEFINED || this_type == LMD_TYPE_NULL) {
+        return js_throw_type_error("Cannot convert undefined or null to object");
+    }
+    Item object = js_to_object(this_val);
+    return js_has_own_property(object, prop_key);
 }
 
 // =============================================================================

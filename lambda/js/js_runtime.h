@@ -357,6 +357,8 @@ Item js_object_is(Item left, Item right);
 Item js_object_assign(Item target, Item* sources, int count);
 Item js_object_spread_into(Item target, Item source);
 Item js_has_own_property(Item obj, Item key);
+Item js_object_has_own(Item obj, Item key);
+Item js_object_prototype_has_own_property(Item this_val, Item key);
 Item js_object_freeze(Item obj);
 Item js_object_is_frozen(Item obj);
 Item js_object_seal(Item obj);

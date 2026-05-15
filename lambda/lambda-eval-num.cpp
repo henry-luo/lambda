@@ -2251,7 +2251,9 @@ extern "C" int64_t fn_sign_f(double x) {
 // Math.round(-0.5) -> 0, Math.round(0.5) -> 1
 extern "C" double js_math_round(double x) {
     // ES spec: if x in [-0.5, -0], return -0
+    if (x != x || !isfinite(x) || x == 0.0) return x;
     if (x >= -0.5 && x < 0.0) return -0.0;
+    if (fabs(x) >= 4503599627370496.0) return x;
     return floor(x + 0.5);
 }
 
@@ -2335,6 +2337,7 @@ extern "C" Item js_math_round_item(Item x) {
     if (t == LMD_TYPE_FLOAT) {
         double d = it2d(x);
         if (d != d || !isfinite(d) || d == 0.0) return push_d(d);
+        if (fabs(d) >= 4503599627370496.0) return push_d(d);
         double r = floor(d + 0.5);
         if (r == 0.0 && d < 0.0) return push_d(-0.0);
         return push_d(r);

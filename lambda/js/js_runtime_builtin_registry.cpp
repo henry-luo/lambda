@@ -214,7 +214,7 @@ const JsBuiltinMethodSpec JS_NUMBER_PROTOTYPE_METHOD_SPECS[] = {
 
 const JsBuiltinMethodSpec JS_SYMBOL_PROTOTYPE_METHOD_SPECS[] = {
     {"toString", 8, JS_BUILTIN_SYM_TO_STRING, 0},
-    {"valueOf", 7, JS_BUILTIN_OBJ_VALUE_OF, 0},
+    {"valueOf", 7, JS_BUILTIN_SYM_VALUE_OF, 0},
     {NULL, 0, 0, 0}
 };
 
