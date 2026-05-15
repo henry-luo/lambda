@@ -13559,6 +13559,19 @@ extern "C" Item js_get_global_property_strict(Item key) {
     return result;
 }
 
+extern "C" int64_t js_global_binding_exists(Item key) {
+    if (js_with_stack_depth > 0) {
+        bool found = false;
+        js_with_scope_lookup(key, &found);
+        if (found) return 1;
+        if (js_check_exception()) return 0;
+    }
+    Item global = js_get_global_this();
+    Item exists = js_in(key, global);
+    if (js_check_exception()) return 0;
+    return it2b(exists) ? 1 : 0;
+}
+
 static void js_throw_binding_reference_error(Item key) {
     String* sk = it2s(key);
     char msg[256];
@@ -13635,6 +13648,14 @@ extern "C" void js_set_global_property(Item key, Item value) {
 }
 
 extern "C" void js_set_global_property_strict(Item key, Item value) {
+    js_set_global_property_impl(key, value, true);
+}
+
+extern "C" void js_set_global_property_strict_prechecked(Item key, Item value, int64_t binding_exists_at_lhs) {
+    if (!binding_exists_at_lhs) {
+        js_throw_binding_reference_error(key);
+        return;
+    }
     js_set_global_property_impl(key, value, true);
 }
 extern "C" void js_define_global_var_property(Item key, Item value) {

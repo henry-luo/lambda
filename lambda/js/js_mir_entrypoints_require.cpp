@@ -192,6 +192,102 @@ static bool js_source_contains_ascii(const char* source, size_t source_len, cons
     return false;
 }
 
+static bool js_is_line_terminator(char ch) {
+    return ch == '\n' || ch == '\r';
+}
+
+static bool js_is_trivia_char(char ch) {
+    return ch == ' ' || ch == '\t' || ch == '\v' || ch == '\f' || js_is_line_terminator(ch);
+}
+
+static size_t js_skip_trivia(const char* source, size_t source_len, size_t offset,
+                             bool allow_hashbang, bool* saw_line_terminator) {
+    size_t i = offset;
+    if (i == 0 && source_len >= 3 &&
+        (unsigned char)source[0] == 0xEF && (unsigned char)source[1] == 0xBB &&
+        (unsigned char)source[2] == 0xBF) {
+        i = 3;
+    }
+    if (allow_hashbang && i + 1 < source_len && source[i] == '#' && source[i + 1] == '!') {
+        i += 2;
+        while (i < source_len && !js_is_line_terminator(source[i])) i++;
+    }
+    while (i < source_len) {
+        char ch = source[i];
+        if (js_is_trivia_char(ch)) {
+            if (js_is_line_terminator(ch) && saw_line_terminator) *saw_line_terminator = true;
+            i++;
+            continue;
+        }
+        if (i + 1 < source_len && source[i] == '/' && source[i + 1] == '/') {
+            i += 2;
+            while (i < source_len && !js_is_line_terminator(source[i])) i++;
+            continue;
+        }
+        if (i + 1 < source_len && source[i] == '/' && source[i + 1] == '*') {
+            i += 2;
+            while (i + 1 < source_len) {
+                if (js_is_line_terminator(source[i]) && saw_line_terminator) *saw_line_terminator = true;
+                if (source[i] == '*' && source[i + 1] == '/') {
+                    i += 2;
+                    break;
+                }
+                i++;
+            }
+            continue;
+        }
+        break;
+    }
+    return i;
+}
+
+static bool js_scan_string_literal(const char* source, size_t source_len, size_t offset, size_t* end_offset) {
+    if (offset >= source_len) return false;
+    char quote = source[offset];
+    if (quote != '\'' && quote != '"') return false;
+    size_t i = offset + 1;
+    while (i < source_len) {
+        char ch = source[i];
+        if (ch == quote) {
+            *end_offset = i + 1;
+            return true;
+        }
+        if (js_is_line_terminator(ch)) return false;
+        if (ch == '\\') {
+            i++;
+            if (i < source_len) {
+                if (source[i] == '\r' && i + 1 < source_len && source[i + 1] == '\n') i++;
+                i++;
+            }
+            continue;
+        }
+        i++;
+    }
+    return false;
+}
+
+static size_t js_commonjs_injection_offset(const char* source, size_t source_len) {
+    size_t i = js_skip_trivia(source, source_len, 0, true, NULL);
+    while (i < source_len) {
+        size_t stmt_start = i;
+        size_t literal_end = 0;
+        if (!js_scan_string_literal(source, source_len, i, &literal_end)) break;
+
+        bool saw_line_terminator = false;
+        size_t after_literal = js_skip_trivia(source, source_len, literal_end, false, &saw_line_terminator);
+        if (after_literal < source_len && source[after_literal] == ';') {
+            i = js_skip_trivia(source, source_len, after_literal + 1, false, NULL);
+            continue;
+        }
+        if (after_literal >= source_len || saw_line_terminator) {
+            i = after_literal;
+            continue;
+        }
+        return stmt_start;
+    }
+    return i;
+}
+
 Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_t js_source_len, const char* filename) {
     log_debug("js-mir: starting direct MIR transpilation for '%s'", filename ? filename : "<string>");
     log_mem_stage("js-core: enter");
@@ -226,13 +322,17 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
         int dir_len = last_slash ? (int)(last_slash - abs_path) : 1;
         const char* dir_str = last_slash ? abs_path : ".";
 
-        size_t prefix_size = strlen(abs_path) + dir_len + 80;
-        injected_source = (char*)mem_alloc(prefix_size + js_source_len + 1, MEM_CAT_JS_RUNTIME);
-        int off = snprintf(injected_source, prefix_size,
+        char commonjs_header[4096];
+        int off = snprintf(commonjs_header, sizeof(commonjs_header),
             "var __filename = \"%s\";\nvar __dirname = \"%.*s\";\n",
             abs_path, dir_len, dir_str);
-        memcpy(injected_source + off, js_source, js_source_len);
-        injected_source[off + js_source_len] = '\0';
+        if (off < 0 || (size_t)off >= sizeof(commonjs_header)) off = 0;
+        size_t insert_at = js_commonjs_injection_offset(js_source, js_source_len);
+        injected_source = (char*)mem_alloc(js_source_len + (size_t)off + 1, MEM_CAT_JS_RUNTIME);
+        memcpy(injected_source, js_source, insert_at);
+        memcpy(injected_source + insert_at, commonjs_header, (size_t)off);
+        memcpy(injected_source + insert_at + (size_t)off, js_source + insert_at, js_source_len - insert_at);
+        injected_source[js_source_len + (size_t)off] = '\0';
         js_source = injected_source;
         js_source_len += (size_t)off;
     }
