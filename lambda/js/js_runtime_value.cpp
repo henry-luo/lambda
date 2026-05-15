@@ -1,5 +1,7 @@
 #include "js_runtime_internal.hpp"
 
+extern "C" bool js_ordinary_has_property(Item object, const char* name, int name_len);
+
 // =============================================================================
 // Type Conversion Functions
 // =============================================================================
@@ -182,9 +184,10 @@ extern "C" Item js_to_number(Item value) {
     }
 
     case LMD_TYPE_INT:
-        // Already a number (int). JS symbols are also encoded as negative ints,
-        // but we don't throw here to avoid breaking internal callers.
-        // User-facing functions (isFinite, isNaN, Number()) check separately.
+        if (it2i(value) <= -(int64_t)JS_SYMBOL_BASE) {
+            js_throw_type_error("Cannot convert a Symbol value to a number");
+            return ItemNull;
+        }
         return value;
 
     case LMD_TYPE_DECIMAL: {
@@ -474,7 +477,7 @@ extern "C" Item js_to_string(Item value) {
             Item to_prim = js_property_get(value, sym_key);
             if (js_check_exception()) return (Item){.item = s2it(heap_create_name(""))};
             TypeId tp_type = get_type_id(to_prim);
-            bool tp_present = (to_prim.item != ItemNull.item && tp_type != LMD_TYPE_UNDEFINED);
+            bool tp_present = (to_prim.item != ItemNull.item && tp_type != LMD_TYPE_UNDEFINED && tp_type != LMD_TYPE_NULL);
             // ES spec §7.1.1 step 2.b.i: If exoticToPrim is not undefined AND not callable, throw TypeError.
             if (tp_present && tp_type != LMD_TYPE_FUNC) {
                 js_throw_type_error("@@toPrimitive is not a function");
@@ -507,7 +510,7 @@ extern "C" Item js_to_string(Item value) {
             bool own_pv = false;
             Item pv = js_map_get_fast(value.map, "__primitiveValue__", 18, &own_pv);
             bigint_wrapper = own_pv && js_is_bigint(pv);
-            if (own_pv && !js_is_bigint(pv)) {
+            if (own_pv && !js_is_bigint(pv) && !js_is_symbol(pv)) {
                 bool has_own_vo = false, has_own_ts = false, has_own_tp = false;
                 js_map_get_fast(value.map, "valueOf", 7, &has_own_vo);
                 js_map_get_fast(value.map, "toString", 8, &has_own_ts);
@@ -541,20 +544,17 @@ extern "C" Item js_to_string(Item value) {
         // ES spec ToPrimitive with hint "string": try toString first, then valueOf
         // toString
         {
-            bool ts_callable = false;
             Item ts_fn = ItemNull;
             // Track ownership for valueOf gating, but always route through
             // js_property_get so that accessor (getter) toString is invoked,
             // not the raw JsAccessorPair* slot value.
             bool own_ts = false;
             (void)js_map_get_fast(value.map, "toString", 8, &own_ts);
+            bool ts_found = own_ts || js_ordinary_has_property(value, "toString", 8);
             Item ts_key = (Item){.item = s2it(heap_create_name("toString", 8))};
             ts_fn = js_property_get(value, ts_key);
             if (js_check_exception()) return (Item){.item = s2it(heap_create_name(""))};
-            bool ts_found = own_ts ||
-                (ts_fn.item != ItemNull.item && get_type_id(ts_fn) != LMD_TYPE_UNDEFINED);
             if (ts_fn.item != ItemNull.item && get_type_id(ts_fn) == LMD_TYPE_FUNC) {
-                ts_callable = true;
                 Item result = js_call_function(ts_fn, value, NULL, 0);
                 if (js_check_exception()) return (Item){.item = s2it(heap_create_name(""))};
                 TypeId rt = get_type_id(result);
@@ -564,15 +564,14 @@ extern "C" Item js_to_string(Item value) {
             }
             // valueOf fallback — only when toString was found (own or prototype)
             // If toString wasn't found, prototype chain isn't set up — use default "[object Object]"
-            if (ts_found || bigint_wrapper) {
-                bool vo_callable = false;
+            bool vo_found = js_ordinary_has_property(value, "valueOf", 7);
+            if (ts_found || vo_found || bigint_wrapper) {
                 // v90: Use js_property_get for valueOf to handle getter-defined valueOf
                 // (e.g., {toString: null, get valueOf() { throw ... }})
                 Item vo_key = (Item){.item = s2it(heap_create_name("valueOf", 7))};
                 Item vo_fn = js_property_get(value, vo_key);
                 if (js_check_exception()) return (Item){.item = s2it(heap_create_name(""))};
                 if (vo_fn.item != ItemNull.item && get_type_id(vo_fn) == LMD_TYPE_FUNC) {
-                    vo_callable = true;
                     Item result = js_call_function(vo_fn, value, NULL, 0);
                     if (js_check_exception()) return (Item){.item = s2it(heap_create_name(""))};
                     TypeId rt = get_type_id(result);
@@ -1012,65 +1011,13 @@ double js_get_number(Item value) {
     case LMD_TYPE_UNDEFINED:
         return NAN;
     case LMD_TYPE_STRING: {
-        String* str = it2s(value);
-        if (!str || str->len == 0) return 0.0;
-        // trim ES spec whitespace (WhiteSpace + LineTerminator) including Unicode Zs
-        const char* s = str->chars;
-        int len = (int)str->len;
-        // trim leading whitespace (UTF-8 aware)
-        while (len > 0) {
-            unsigned char c = (unsigned char)s[0];
-            if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v') {
-                s++; len--;
-            } else if (c == 0xC2 && len >= 2 && (unsigned char)s[1] == 0xA0) {
-                s += 2; len -= 2; // U+00A0 NBSP
-            } else if (c == 0xE1 && len >= 3 && (unsigned char)s[1] == 0x9A && (unsigned char)s[2] == 0x80) {
-                s += 3; len -= 3; // U+1680
-            } else if (c == 0xE2 && len >= 3) {
-                unsigned char b1 = (unsigned char)s[1], b2 = (unsigned char)s[2];
-                if ((b1 == 0x80 && b2 >= 0x80 && b2 <= 0x8A) || // U+2000-U+200A
-                    (b1 == 0x80 && (b2 == 0xA8 || b2 == 0xA9)) || // U+2028-U+2029
-                    (b1 == 0x80 && b2 == 0xAF) || // U+202F
-                    (b1 == 0x81 && b2 == 0x9F) || // U+205F
-                    false) {
-                    s += 3; len -= 3;
-                } else break;
-            } else if (c == 0xE3 && len >= 3 && (unsigned char)s[1] == 0x80 && (unsigned char)s[2] == 0x80) {
-                s += 3; len -= 3; // U+3000
-            } else if (c == 0xEF && len >= 3 && (unsigned char)s[1] == 0xBB && (unsigned char)s[2] == 0xBF) {
-                s += 3; len -= 3; // U+FEFF BOM
-            } else break;
-        }
-        // trim trailing whitespace (UTF-8 aware)
-        while (len > 0) {
-            unsigned char c = (unsigned char)s[len - 1];
-            if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v') {
-                len--;
-            } else if (len >= 2 && (unsigned char)s[len - 2] == 0xC2 && c == 0xA0) {
-                len -= 2; // U+00A0 NBSP
-            } else if (len >= 3) {
-                unsigned char b0 = (unsigned char)s[len - 3], b1 = (unsigned char)s[len - 2];
-                if (b0 == 0xE1 && b1 == 0x9A && c == 0x80) { len -= 3; } // U+1680
-                else if (b0 == 0xE2 && b1 == 0x80 && c >= 0x80 && c <= 0x8A) { len -= 3; } // U+2000-U+200A
-                else if (b0 == 0xE2 && b1 == 0x80 && (c == 0xA8 || c == 0xA9)) { len -= 3; } // U+2028-U+2029
-                else if (b0 == 0xE2 && b1 == 0x80 && c == 0xAF) { len -= 3; } // U+202F
-                else if (b0 == 0xE2 && b1 == 0x81 && c == 0x9F) { len -= 3; } // U+205F
-                else if (b0 == 0xE3 && b1 == 0x80 && c == 0x80) { len -= 3; } // U+3000
-                else if (b0 == 0xEF && b1 == 0xBB && c == 0xBF) { len -= 3; } // U+FEFF BOM
-                else break;
-            } else break;
-        }
-        if (len == 0) return 0.0;
-        // handle hex/octal/binary
-        if (len > 2 && s[0] == '0') {
-            if (s[1] == 'x' || s[1] == 'X') return (double)strtoull(s, NULL, 16);
-            if (s[1] == 'o' || s[1] == 'O') return (double)strtoull(s + 2, NULL, 8);
-            if (s[1] == 'b' || s[1] == 'B') return (double)strtoull(s + 2, NULL, 2);
-        }
-        char* endptr;
-        double num = strtod(s, &endptr);
-        if (endptr == s) return NAN;
-        return num;
+        Item num = js_to_number(value);
+        if (js_check_exception()) return NAN;
+        TypeId num_type = get_type_id(num);
+        if (num_type == LMD_TYPE_INT) return (double)it2i(num);
+        if (num_type == LMD_TYPE_INT64) return (double)it2l(num);
+        if (num_type == LMD_TYPE_FLOAT) return it2d(num);
+        return NAN;
     }
     case LMD_TYPE_MAP:
     case LMD_TYPE_ELEMENT:
@@ -1079,6 +1026,10 @@ double js_get_number(Item value) {
         // J39-1b: route through unified js_to_primitive (ES §7.1.1, hint number).
         Item prim = js_to_primitive(value, JS_HINT_NUMBER);
         if (js_check_exception()) return NAN;
+        if (js_is_symbol(prim)) {
+            js_throw_type_error("Cannot convert a Symbol value to a number");
+            return NAN;
+        }
         return js_get_number(prim);
     }
     default:
@@ -1607,6 +1558,11 @@ static Item js_abstract_relational_lt(Item left, Item right, bool leftFirst) {
     }
     // Propagate any pending exception before performing comparison
     if (js_exception_pending) return ItemNull;
+
+    if (js_is_symbol(left) || js_is_symbol(right)) {
+        js_throw_type_error("Cannot convert a Symbol value to a number");
+        return ItemNull;
+    }
 
     // String comparison
     if (left_type == LMD_TYPE_STRING && right_type == LMD_TYPE_STRING) {

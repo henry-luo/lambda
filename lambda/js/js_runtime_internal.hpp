@@ -259,6 +259,8 @@ enum JsBuiltinId {
     JS_BUILTIN_BIGINT_AS_UINT_N,
     // Symbol.prototype methods
     JS_BUILTIN_SYM_TO_STRING,
+    JS_BUILTIN_SYM_VALUE_OF,
+    JS_BUILTIN_SYM_TO_PRIMITIVE,
     JS_BUILTIN_SYM_DESCRIPTION_GETTER,
     // Symbol static methods
     JS_BUILTIN_SYMBOL_FOR,
@@ -583,6 +585,8 @@ extern "C" Item js_number_function(Item value);
 extern "C" bool js_typed_array_is_out_of_bounds_item(Item ta_item);
 extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor);
 extern "C" Item js_has_own_property(Item obj, Item key);
+extern "C" Item js_object_has_own(Item obj, Item key);
+extern "C" Item js_object_prototype_has_own_property(Item this_val, Item key);
 
 void js_double_to_string(double d, char* out, int out_size);
 bool js_ta_key_canonical_numeric(Item key, double* numeric_index, bool* is_negative_zero);

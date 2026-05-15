@@ -1521,9 +1521,6 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
     case JS_OP_PLUS:
     case JS_OP_ADD: {
         TypeId op_type = jm_get_effective_type(mt, un->operand);
-        if (op_type == LMD_TYPE_INT) {
-            return jm_transpile_as_native(mt, un->operand, op_type, LMD_TYPE_INT);
-        }
         if (op_type == LMD_TYPE_FLOAT) {
             return jm_transpile_as_native(mt, un->operand, op_type, LMD_TYPE_FLOAT);
         }
@@ -6127,7 +6124,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 JsAstNode* a2 = a1 ? a1->next : NULL;
                 MIR_reg_t obj_arg = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_null(mt);
                 MIR_reg_t key_arg = a2 ? jm_transpile_box_item(mt, a2) : jm_emit_null(mt);
-                return jm_call_2(mt, "js_has_own_property", MIR_T_I64,
+                return jm_call_2(mt, "js_object_has_own", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_arg),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, key_arg));
             }
@@ -6550,8 +6547,10 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 // Count arguments
                 int argc = 0;
                 for (JsAstNode* a = call->arguments; a; a = a->next) argc++;
-                if (argc <= 1) {
-                    MIR_reg_t code = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_box_int_const(mt, 0);
+                if (argc == 0) {
+                    return jm_box_string_literal(mt, "", 0);
+                } else if (argc == 1) {
+                    MIR_reg_t code = jm_transpile_box_item(mt, call->arguments);
                     return jm_call_1(mt, "js_string_fromCharCode", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, code));
                 } else if (argc == 2) {
@@ -6581,8 +6580,10 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 prop->name && prop->name->len == 13 && strncmp(prop->name->chars, "fromCodePoint", 13) == 0) {
                 int argc = 0;
                 for (JsAstNode* a = call->arguments; a; a = a->next) argc++;
-                if (argc <= 1) {
-                    MIR_reg_t code = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_box_int_const(mt, 0);
+                if (argc == 0) {
+                    return jm_box_string_literal(mt, "", 0);
+                } else if (argc == 1) {
+                    MIR_reg_t code = jm_transpile_box_item(mt, call->arguments);
                     return jm_call_1(mt, "js_string_fromCodePoint", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, code));
                 } else {
@@ -7629,13 +7630,13 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
 #endif
             // unescape(str) — legacy percent-decoding
             if (nl == 8 && strncmp(n, "unescape", 8) == 0 && !jm_find_var(mt, "_js_unescape")) {
-                MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_undefined(mt);
                 return jm_call_1(mt, "js_unescape", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
             // escape(str) — legacy percent-encoding
             if (nl == 6 && strncmp(n, "escape", 6) == 0 && !jm_find_var(mt, "_js_escape")) {
-                MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_undefined(mt);
                 return jm_call_1(mt, "js_escape", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }

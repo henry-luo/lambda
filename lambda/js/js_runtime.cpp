@@ -2738,6 +2738,13 @@ extern "C" Item js_property_get(Item object, Item key) {
                         if (str_key->len == 7 && strncmp(str_key->chars, "__sym_2", 7) == 0) {
                             return js_get_or_create_builtin(JS_BUILTIN_DATE_TO_PRIMITIVE, "[Symbol.toPrimitive]", 1);
                         }
+                    } else if (cls == JS_CLASS_SYMBOL) {
+                        if (str_key->len == 8 && strncmp(str_key->chars, "toString", 8) == 0) {
+                            return js_get_or_create_builtin(JS_BUILTIN_SYM_TO_STRING, "toString", 0);
+                        }
+                        if (str_key->len == 7 && strncmp(str_key->chars, "valueOf", 7) == 0) {
+                            return js_get_or_create_builtin(JS_BUILTIN_SYM_VALUE_OF, "valueOf", 0);
+                        }
                     } else if (cls == JS_CLASS_REGEXP) {
                         Item regexp_method = js_lookup_builtin_prototype_method_for_class(JS_CLASS_REGEXP, str_key->chars, (int)str_key->len);
                         if (regexp_method.item != ItemNull.item) return regexp_method;
@@ -3327,10 +3334,20 @@ extern "C" Item js_property_get(Item object, Item key) {
                             Item ts_fn = js_get_or_create_builtin(JS_BUILTIN_SYM_TO_STRING, "toString", 0);
                             js_property_set(fn->prototype, ts_key, ts_fn);
                             js_mark_non_enumerable(fn->prototype, ts_key);
+                            Item vo_key = (Item){.item = s2it(heap_create_name("valueOf", 7))};
+                            Item vo_fn = js_get_or_create_builtin(JS_BUILTIN_SYM_VALUE_OF, "valueOf", 0);
+                            js_property_set(fn->prototype, vo_key, vo_fn);
+                            js_mark_non_enumerable(fn->prototype, vo_key);
+                            Item tp_key = (Item){.item = s2it(heap_create_name("__sym_2", 7))};
+                            Item tp_fn = js_get_or_create_builtin(JS_BUILTIN_SYM_TO_PRIMITIVE, "[Symbol.toPrimitive]", 1);
+                            js_property_set(fn->prototype, tp_key, tp_fn);
+                            js_mark_non_enumerable(fn->prototype, tp_key);
+                            js_mark_non_writable(fn->prototype, tp_key);
                             // Symbol.toStringTag = "Symbol"
                             Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
                             Item tag_val = (Item){.item = s2it(heap_create_name("Symbol", 6))};
                             js_property_set(fn->prototype, tag_key, tag_val);
+                            js_mark_non_writable(fn->prototype, tag_key);
                             js_mark_non_enumerable(fn->prototype, tag_key);
                         }
                         if (nl == 6 && strncmp(nm, "BigInt", 6) == 0) {
@@ -3705,8 +3722,11 @@ extern "C" Item js_property_get(Item object, Item key) {
                 if (str_key->len == 8 && strncmp(str_key->chars, "toString", 8) == 0) {
                     return js_get_or_create_builtin(JS_BUILTIN_SYM_TO_STRING, "toString", 0);
                 }
+                if (str_key->len == 7 && strncmp(str_key->chars, "__sym_2", 7) == 0) {
+                    return js_get_or_create_builtin(JS_BUILTIN_SYM_TO_PRIMITIVE, "[Symbol.toPrimitive]", 1);
+                }
                 if (str_key->len == 7 && strncmp(str_key->chars, "valueOf", 7) == 0) {
-                    return js_get_or_create_builtin(JS_BUILTIN_OBJ_VALUE_OF, "valueOf", 0);
+                    return js_get_or_create_builtin(JS_BUILTIN_SYM_VALUE_OF, "valueOf", 0);
                 }
                 Item object_builtin = js_lookup_builtin_method(LMD_TYPE_MAP, str_key->chars, str_key->len);
                 if (object_builtin.item != ItemNull.item) return object_builtin;
@@ -3906,6 +3926,19 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
     TypeId type = get_type_id(object);
     if (object.item == ITEM_NULL || object.item == ITEM_JS_UNDEFINED) {
         return js_throw_type_error("Cannot set property on null or undefined");
+    }
+    if (js_is_symbol(object)) {
+        if (js_strict_mode) {
+            const char* prop_name = NULL;
+            int prop_len = 0;
+            if (get_type_id(key) == LMD_TYPE_STRING) {
+                String* sk = it2s(key);
+                prop_name = sk ? sk->chars : NULL;
+                prop_len = sk ? (int)sk->len : 0;
+            }
+            js_strict_throw_property_error("add property", prop_name, prop_len);
+        }
+        return value;
     }
     if (type == LMD_TYPE_MAP && get_type_id(key) == LMD_TYPE_STRING) {
         String* private_key = it2s(key);
@@ -4934,6 +4967,23 @@ static int js_utf16_idx_to_byte(const char* chars, int str_len, int64_t utf16_id
     return pos;
 }
 
+static int js_encode_utf16_unit_wtf8(char* buf, uint32_t code_unit) {
+    code_unit &= 0xFFFF;
+    if (code_unit < 0x80) {
+        buf[0] = (char)code_unit;
+        return 1;
+    }
+    if (code_unit < 0x800) {
+        buf[0] = (char)(0xC0 | (code_unit >> 6));
+        buf[1] = (char)(0x80 | (code_unit & 0x3F));
+        return 2;
+    }
+    buf[0] = (char)(0xE0 | (code_unit >> 12));
+    buf[1] = (char)(0x80 | ((code_unit >> 6) & 0x3F));
+    buf[2] = (char)(0x80 | (code_unit & 0x3F));
+    return 3;
+}
+
 // JS-aware substring: indices are UTF-16 code unit indices (not codepoints).
 // Handles negative indices like JS substring (clamp to 0) or slice (count from end).
 // use_slice_semantics: true = slice (negative counts from end), false = substring (clamp to 0).
@@ -4956,16 +5006,53 @@ static Item js_str_substring_utf16(Item str_item, int64_t start, int64_t end) {
         result->chars[rlen] = '\0';
         return (Item){.item = s2it(result)};
     }
-    // Non-ASCII: convert UTF-16 unit indices to byte offsets
-    int byte_start = js_utf16_idx_to_byte(s->chars, (int)s->len, start);
-    int byte_end   = js_utf16_idx_to_byte(s->chars, (int)s->len, end);
-    if (byte_start >= byte_end) return (Item){.item = s2it(heap_create_name("", 0))};
-    int rlen = byte_end - byte_start;
-    String* result = (String*)heap_alloc(sizeof(String) + rlen + 1, LMD_TYPE_STRING);
-    result->len = rlen;
-    result->is_ascii = 0;
-    memcpy(result->chars, s->chars + byte_start, rlen);
-    result->chars[rlen] = '\0';
+    StrBuf* buf = strbuf_new_cap((size_t)((end - start) * 4 + 1));
+    int pos = 0;
+    int64_t cu = 0;
+    while (pos < (int)s->len && cu < end) {
+        int byte_start = pos;
+        unsigned char b = (unsigned char)s->chars[pos];
+        int bytes;
+        uint32_t cp;
+        if (b < 0x80) { cp = b; bytes = 1; }
+        else if ((b & 0xE0) == 0xC0) { cp = b & 0x1F; bytes = 2; }
+        else if ((b & 0xF0) == 0xE0) { cp = b & 0x0F; bytes = 3; }
+        else if ((b & 0xF8) == 0xF0) { cp = b & 0x07; bytes = 4; }
+        else { cp = b; bytes = 1; }
+        for (int i = 1; i < bytes && pos + i < (int)s->len; i++)
+            cp = (cp << 6) | ((unsigned char)s->chars[pos + i] & 0x3F);
+
+        if (cp > 0xFFFF) {
+            uint32_t pair_value = cp - 0x10000;
+            uint32_t high = 0xD800 + (pair_value >> 10);
+            uint32_t low = 0xDC00 + (pair_value & 0x3FF);
+            bool include_high = (cu >= start && cu < end);
+            bool include_low = (cu + 1 >= start && cu + 1 < end);
+            if (include_high && include_low) {
+                strbuf_append_str_n(buf, s->chars + byte_start, (size_t)bytes);
+            } else {
+                char out[3];
+                if (include_high) {
+                    int out_len = js_encode_utf16_unit_wtf8(out, high);
+                    strbuf_append_str_n(buf, out, (size_t)out_len);
+                }
+                if (include_low) {
+                    int out_len = js_encode_utf16_unit_wtf8(out, low);
+                    strbuf_append_str_n(buf, out, (size_t)out_len);
+                }
+            }
+            cu += 2;
+        } else {
+            if (cu >= start && cu < end) {
+                strbuf_append_str_n(buf, s->chars + byte_start, (size_t)bytes);
+            }
+            cu++;
+        }
+        pos += bytes;
+    }
+    if (buf->length == 0) { strbuf_free(buf); return (Item){.item = s2it(heap_create_name("", 0))}; }
+    String* result = heap_strcpy(buf->str, (int)buf->length);
+    strbuf_free(buf);
     return (Item){.item = s2it(result)};
 }
 
@@ -6273,7 +6360,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     switch (builtin_id) {
     // Object.prototype methods
     case JS_BUILTIN_OBJ_HAS_OWN_PROPERTY:
-        return js_has_own_property(this_val, arg0);
+        return js_object_prototype_has_own_property(this_val, arg0);
     case JS_BUILTIN_OBJ_PROPERTY_IS_ENUMERABLE: {
         // Proxy: check GOPD trap result for enumerable
         if (js_is_proxy(this_val)) {
@@ -7529,7 +7616,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     case JS_BUILTIN_OBJECT_IS:
         return js_object_is(arg0, arg1);
     case JS_BUILTIN_OBJECT_HAS_OWN:
-        return js_has_own_property(arg0, arg1);
+        return js_object_has_own(arg0, arg1);
     case JS_BUILTIN_OBJECT_GROUP_BY:
         return js_object_group_by(arg0, arg1);
     case JS_BUILTIN_MAP_GROUP_BY:
@@ -8042,6 +8129,28 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         return js_symbol_to_string(sym);
     }
 
+    case JS_BUILTIN_SYM_VALUE_OF:
+    case JS_BUILTIN_SYM_TO_PRIMITIVE: {
+        if (get_type_id(this_val) == LMD_TYPE_INT && it2i(this_val) <= -(int64_t)JS_SYMBOL_BASE) {
+            return this_val;
+        }
+        if (get_type_id(this_val) == LMD_TYPE_MAP) {
+            Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
+            Item cn = js_property_get(this_val, cn_key);
+            if (get_type_id(cn) == LMD_TYPE_STRING && it2s(cn)->len == 6 && strncmp(it2s(cn)->chars, "Symbol", 6) == 0) {
+                Item pv_key = (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))};
+                Item pv = js_property_get(this_val, pv_key);
+                if (get_type_id(pv) == LMD_TYPE_INT && it2i(pv) <= -(int64_t)JS_SYMBOL_BASE) return pv;
+            }
+        }
+        if (builtin_id == JS_BUILTIN_SYM_VALUE_OF) {
+            js_throw_type_error("Symbol.prototype.valueOf requires that 'this' be a Symbol");
+        } else {
+            js_throw_type_error("Symbol.prototype[Symbol.toPrimitive] requires that 'this' be a Symbol");
+        }
+        return ItemNull;
+    }
+
     // Symbol.prototype.description getter (ES2019)
     case JS_BUILTIN_SYM_DESCRIPTION_GETTER: {
         // thisSymbolValue: accept symbol primitive or Symbol wrapper object
@@ -8080,10 +8189,10 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     }
     case JS_BUILTIN_STRING_FROM_CHAR_CODE: {
         if (arg_count == 0) return (Item){.item = s2it(heap_create_name("", 0))};
-        if (arg_count == 1) return js_string_fromCodePoint(arg0); // fromCharCode is same for BMP
+        if (arg_count == 1) return js_string_fromCharCode(arg0);
         Item arr = js_array_new(arg_count);
         for (int i = 0; i < arg_count; i++) arr.array->items[i] = args[i];
-        return js_string_fromCodePoint_array(arr);
+        return js_string_fromCharCode_array(arr);
     }
 
     // Math methods called as first-class function values
@@ -15208,9 +15317,9 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 // Built-in hasOwnProperty: delegate to comprehensive implementation
                 // which handles accessor properties (__get_/__set_), arrays, functions, etc.
                 if (argc > 0) {
-                    return js_has_own_property(obj, args[0]);
+                    return js_object_prototype_has_own_property(obj, args[0]);
                 }
-                return (Item){.item = ITEM_FALSE};
+                return js_object_prototype_has_own_property(obj, make_js_undefined());
             }
         }
     }
@@ -16297,12 +16406,14 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         if (argc < 1) return str;
         String* s = it2s(str);
         int64_t slen = s ? js_utf16_len(s->chars, (int)s->len, (bool)s->is_ascii) : 0;
-        double dstart = js_get_number(args[0]);
+        double dstart = js_get_number(js_to_number(args[0]));
+        if (js_exception_pending) return ItemNull;
         int64_t start = isnan(dstart) ? 0 : (int64_t)dstart;
         if (start < 0) { start = slen + start; if (start < 0) start = 0; }
         int64_t length;
         if (argc > 1 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) {
-            double dlength = js_get_number(args[1]);
+            double dlength = js_get_number(js_to_number(args[1]));
+            if (js_exception_pending) return ItemNull;
             length = isnan(dlength) ? 0 : (isinf(dlength) && dlength > 0) ? slen : (int64_t)dlength;
             if (length < 0) length = 0;
         } else {
@@ -20100,6 +20211,7 @@ extern "C" Item js_math_method(Item method_name, Item* args, int argc) {
         if (t == LMD_TYPE_FLOAT) {
             double v = num.get_double();
             if (v != v || !isfinite(v) || v == 0.0) return js_make_number(v);
+            if (fabs(v) >= 4503599627370496.0) return js_make_number(v);
             double r = floor(v + 0.5);
             // round(-0.5) → -0 in JS (floor(-0.5 + 0.5) = floor(0.0) = 0, but should be -0)
             if (r == 0.0 && v < 0.0) return js_make_number(-0.0);
@@ -20857,6 +20969,8 @@ static Item js_proto_class_dispatch_for_class(JsClass cls, const char* key_str, 
         return js_lookup_builtin_method(LMD_TYPE_ARRAY, key_str, key_len);
     case JS_CLASS_NUMBER:
         return js_lookup_builtin_prototype_method_for_class(JS_CLASS_NUMBER, key_str, key_len);
+    case JS_CLASS_SYMBOL:
+        return js_lookup_builtin_prototype_method_for_class(JS_CLASS_SYMBOL, key_str, key_len);
     case JS_CLASS_DATE: {
         Item date_method = js_lookup_builtin_prototype_method_for_class(JS_CLASS_DATE, key_str, key_len);
         if (date_method.item != ItemNull.item) return date_method;
@@ -20942,6 +21056,19 @@ extern "C" Item js_prototype_lookup_ex(Item object, Item property, bool* out_fou
     while (proto.item != ItemNull.item && depth < 32) {
         TypeId pt = get_type_id(proto);
         if (pt == LMD_TYPE_FUNC) {
+            JsFunction* proto_fn = (JsFunction*)proto.function;
+            if (proto_fn->properties_map.item != 0 && get_type_id(proto_fn->properties_map) == LMD_TYPE_MAP) {
+                Item ord_val = ItemNull;
+                JsOwnGetStatus st = js_ordinary_get_own(proto_fn->properties_map, property, object, &ord_val);
+                if (st == JS_OWN_READY) {
+                    if (out_found) *out_found = true;
+                    return ord_val;
+                }
+                if (st == JS_OWN_DELETED) {
+                    if (out_found) *out_found = true;
+                    return make_js_undefined();
+                }
+            }
             // FUNC in prototype chain: resolve Function.prototype builtins (apply, call, bind, toString)
             if (key_str) {
                 Item builtin = js_lookup_builtin_method(LMD_TYPE_FUNC, key_str, key_len);

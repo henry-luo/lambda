@@ -2066,12 +2066,20 @@ void jm_infer_param_types(JsFuncCollected* fc) {
         pc > 3 ? ",..." : "");
 }
 
-// check if a + expression chain contains a string literal operand
+// check if a + expression chain contains an operand known to produce a string
 bool jm_add_chain_has_string(JsAstNode* expr) {
     if (!expr) return false;
     if (expr->node_type == JS_AST_NODE_LITERAL)
         return ((JsLiteralNode*)expr)->literal_type == JS_LITERAL_STRING;
     if (expr->node_type == JS_AST_NODE_TEMPLATE_LITERAL) return true;
+    if (expr->node_type == JS_AST_NODE_CALL_EXPRESSION) {
+        JsCallNode* call = (JsCallNode*)expr;
+        if (call->callee && call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
+            JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
+            if (id->name && id->name->len == 6 && strncmp(id->name->chars, "String", 6) == 0)
+                return true;
+        }
+    }
     if (expr->node_type == JS_AST_NODE_BINARY_EXPRESSION) {
         JsBinaryNode* bin = (JsBinaryNode*)expr;
         if (bin->op == JS_OP_ADD)
