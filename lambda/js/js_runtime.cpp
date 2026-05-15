@@ -5144,6 +5144,89 @@ static int64_t js_utf16_len(const char* chars, int str_len, bool is_ascii) {
     return units;
 }
 
+static int js_utf16_code_unit_at(const char* chars, int str_len, bool is_ascii, int64_t index) {
+    if (!chars || index < 0) return -1;
+    if (is_ascii) return index < str_len ? (unsigned char)chars[index] : -1;
+    int64_t cu = 0;
+    int pos = 0;
+    while (pos < str_len) {
+        unsigned char b = (unsigned char)chars[pos];
+        int bytes;
+        uint32_t cp;
+        if (b < 0x80)            { cp = b;        bytes = 1; }
+        else if ((b & 0xE0) == 0xC0) { cp = b & 0x1F; bytes = 2; }
+        else if ((b & 0xF0) == 0xE0) { cp = b & 0x0F; bytes = 3; }
+        else if ((b & 0xF8) == 0xF0) { cp = b & 0x07; bytes = 4; }
+        else { cp = b; bytes = 1; }
+        for (int i = 1; i < bytes && pos + i < str_len; i++)
+            cp = (cp << 6) | ((unsigned char)chars[pos + i] & 0x3F);
+        if (cp >= 0x10000) {
+            uint32_t pair_value = cp - 0x10000;
+            if (cu == index) return (int)(0xD800 + (pair_value >> 10));
+            if (cu + 1 == index) return (int)(0xDC00 + (pair_value & 0x3FF));
+            cu += 2;
+        } else {
+            if (cu == index) return (int)cp;
+            cu++;
+        }
+        pos += bytes;
+    }
+    return -1;
+}
+
+static int64_t js_regex_advance_string_index_units(String* s, int64_t index, bool full_unicode) {
+    if (!s || index < 0) return index + 1;
+    if (!full_unicode) return index + 1;
+    int first = js_utf16_code_unit_at(s->chars, (int)s->len, (bool)s->is_ascii, index);
+    if (first >= 0xD800 && first <= 0xDBFF) {
+        int second = js_utf16_code_unit_at(s->chars, (int)s->len, (bool)s->is_ascii, index + 1);
+        if (second >= 0xDC00 && second <= 0xDFFF) return index + 2;
+    }
+    return index + 1;
+}
+
+static String* js_string_expand_utf16_subject(String* s) {
+    if (!s) return heap_create_name("", 0);
+    if (s->is_ascii) return s;
+    StrBuf* buf = strbuf_new_cap((size_t)s->len + 8);
+    int pos = 0;
+    while (pos < (int)s->len) {
+        int byte_start = pos;
+        unsigned char b = (unsigned char)s->chars[pos];
+        int bytes;
+        uint32_t cp;
+        if (b < 0x80)            { cp = b;        bytes = 1; }
+        else if ((b & 0xE0) == 0xC0) { cp = b & 0x1F; bytes = 2; }
+        else if ((b & 0xF0) == 0xE0) { cp = b & 0x0F; bytes = 3; }
+        else if ((b & 0xF8) == 0xF0) { cp = b & 0x07; bytes = 4; }
+        else { cp = b; bytes = 1; }
+        for (int i = 1; i < bytes && pos + i < (int)s->len; i++)
+            cp = (cp << 6) | ((unsigned char)s->chars[pos + i] & 0x3F);
+        if (cp > 0xFFFF) {
+            uint32_t pair_value = cp - 0x10000;
+            uint32_t high = 0xD800 + (pair_value >> 10);
+            uint32_t low = 0xDC00 + (pair_value & 0x3FF);
+            char out[3];
+            int out_len = js_encode_utf16_unit_wtf8(out, high);
+            strbuf_append_str_n(buf, out, (size_t)out_len);
+            out_len = js_encode_utf16_unit_wtf8(out, low);
+            strbuf_append_str_n(buf, out, (size_t)out_len);
+        } else {
+            strbuf_append_str_n(buf, s->chars + byte_start, (size_t)bytes);
+        }
+        pos += bytes;
+    }
+    String* result = heap_strcpy(buf->str, (int)buf->length);
+    strbuf_free(buf);
+    return result;
+}
+
+static int64_t js_utf16_index_from_byte(const char* chars, int str_len, int byte_pos) {
+    if (byte_pos <= 0) return 0;
+    if (byte_pos > str_len) byte_pos = str_len;
+    return js_utf16_len(chars, byte_pos, false);
+}
+
 // Get the length of any JS value. Handles typed arrays specially (Map-based),
 // and delegates to fn_len for all standard Lambda types (array, list, string, etc.)
 extern "C" int64_t js_get_length(Item object) {
@@ -6216,6 +6299,7 @@ static Item js_regexp_symbol_match(Item this_val, Item arg0);
 static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement);
 static Item js_regexp_symbol_search(Item this_val, Item arg0);
 static Item js_regexp_symbol_split(Item this_val, Item str, Item limit);
+static Item js_string_matchall_get_flags(Item rx);
 static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_replace_all);
 // v18k: Forward declarations for Object/Array/Number static methods (js_globals.cpp)
 extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor);
@@ -8670,22 +8754,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         Item str_arg = js_to_string(arg0);
         if (js_exception_pending) return make_js_undefined();
 
-        // Step 2: IsRegExp(R) — access [Symbol.match] to check; may throw
-        bool r_is_regexp = false;
-        {
-            Item match_key = (Item){.item = s2it(heap_create_name("__sym_7", 7))};
-            Item match_val = js_property_get(this_val, match_key);
-            if (js_exception_pending) return make_js_undefined();
-            if (match_val.item != ItemNull.item && get_type_id(match_val) != LMD_TYPE_UNDEFINED
-                && get_type_id(match_val) != LMD_TYPE_NULL) {
-                r_is_regexp = it2b(js_to_boolean(match_val));
-            } else {
-                // Check for internal regex data
-                bool has_rd = false;
-                js_map_get_fast(this_val.map, "__rd", 4, &has_rd);
-                r_is_regexp = has_rd;
-            }
-        }
+        bool r_is_regexp = true;
 
         Item cloned_regex;
         const char* fl = "g";
@@ -8733,14 +8802,8 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                 cloned_regex = js_call_function(species_ctor, make_js_undefined(), sp_args, 2);
                 if (js_exception_pending) return make_js_undefined();
             } else {
-                Item source_val = js_property_get(this_val, (Item){.item = s2it(heap_create_name("source", 6))});
-                const char* pattern = "";
-                int pattern_len = 0;
-                if (get_type_id(source_val) == LMD_TYPE_STRING) {
-                    pattern = it2s(source_val)->chars;
-                    pattern_len = (int)it2s(source_val)->len;
-                }
-                cloned_regex = js_create_regex(pattern, pattern_len, fl, fl_len);
+                cloned_regex = js_regexp_construct(this_val, flags_str_item);
+                if (js_exception_pending) return make_js_undefined();
             }
         } else {
             // Step 3: Not a regexp — RegExpCreate(R, "g")
@@ -10283,10 +10346,16 @@ struct JsRegexData {
     const char* literal_pattern; // simple literal pattern handled without RE2
     int literal_pattern_len;
     int special_property_kind; // +/-: fast Unicode property-repeat kind
+    char** named_alias_re2_names;
+    int* named_alias_re2_lens;
+    char** named_alias_js_names;
+    int* named_alias_js_lens;
+    int named_alias_count;
     bool global;              // 'g' flag
     bool ignore_case;         // 'i' flag
     bool multiline;           // 'm' flag
     bool sticky;              // 'y' flag (v46)
+    bool needs_utf16_subject; // legacy surrogate escapes match UTF-16 code units
     bool literal_fast;
 };
 
@@ -11357,6 +11426,92 @@ static bool js_regex_try_make_literal_fast(const char* pattern, int pattern_len,
     return true;
 }
 
+static bool js_regex_re2_group_name_needs_alias(const char* name, int name_len) {
+    if (!name || name_len <= 0) return true;
+    unsigned char first = (unsigned char)name[0];
+    if (first < 0x80 && !((first >= 'A' && first <= 'Z') ||
+                          (first >= 'a' && first <= 'z') ||
+                          first == '_')) {
+        return true;
+    }
+    for (int i = 0; i < name_len; i++) {
+        unsigned char ch = (unsigned char)name[i];
+        if (ch < 0x80 && !((ch >= 'A' && ch <= 'Z') ||
+                           (ch >= 'a' && ch <= 'z') ||
+                           (ch >= '0' && ch <= '9') ||
+                           ch == '_')) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool js_regex_pattern_has_re2_name_alias(const char* pattern, int pattern_len) {
+    if (!pattern || pattern_len <= 0) return false;
+    bool in_class = false;
+    for (int i = 0; i + 3 < pattern_len; i++) {
+        unsigned char ch = (unsigned char)pattern[i];
+        if (ch == '\\') { i++; continue; }
+        if (ch == '[') { in_class = true; continue; }
+        if (ch == ']' && in_class) { in_class = false; continue; }
+        if (in_class || ch != '(' || pattern[i + 1] != '?' || pattern[i + 2] != '<') continue;
+        if (pattern[i + 3] == '=' || pattern[i + 3] == '!') continue;
+        int name_start = i + 3;
+        int name_end = name_start;
+        while (name_end < pattern_len && pattern[name_end] != '>') name_end++;
+        if (name_end >= pattern_len) return false;
+        if (js_regex_re2_group_name_needs_alias(pattern + name_start, name_end - name_start)) return true;
+        i = name_end;
+    }
+    return false;
+}
+
+static int js_regex_hex_value(char ch) {
+    if (ch >= '0' && ch <= '9') return ch - '0';
+    if (ch >= 'a' && ch <= 'f') return 10 + ch - 'a';
+    if (ch >= 'A' && ch <= 'F') return 10 + ch - 'A';
+    return -1;
+}
+
+static bool js_regex_pattern_has_surrogate_unit(const char* pattern, int pattern_len) {
+    if (!pattern || pattern_len <= 0) return false;
+    for (int i = 0; i < pattern_len; i++) {
+        unsigned char ch = (unsigned char)pattern[i];
+        if (ch == 0xED && i + 2 < pattern_len) {
+            unsigned char b1 = (unsigned char)pattern[i + 1];
+            unsigned char b2 = (unsigned char)pattern[i + 2];
+            if (b1 >= 0xA0 && b1 <= 0xBF && b2 >= 0x80 && b2 <= 0xBF) return true;
+        }
+        if (ch != '\\') continue;
+        if (i + 1 < pattern_len && pattern[i + 1] == '\\') { i++; continue; }
+        if (i + 5 >= pattern_len || pattern[i + 1] != 'u') continue;
+        int value = 0;
+        bool all_hex = true;
+        for (int j = i + 2; j < i + 6; j++) {
+            int hv = js_regex_hex_value(pattern[j]);
+            if (hv < 0) { all_hex = false; break; }
+            value = (value << 4) | hv;
+        }
+        if (all_hex && value >= 0xD800 && value <= 0xDFFF) return true;
+        i++;
+    }
+    return false;
+}
+
+static const char* js_regex_original_group_name(JsRegexData* rd, const char* re2_name,
+                                                int re2_len, int* out_len) {
+    if (out_len) *out_len = re2_len;
+    if (!rd || !re2_name || rd->named_alias_count <= 0) return re2_name;
+    for (int i = 0; i < rd->named_alias_count; i++) {
+        if (rd->named_alias_re2_lens[i] == re2_len &&
+            memcmp(rd->named_alias_re2_names[i], re2_name, re2_len) == 0) {
+            if (out_len) *out_len = rd->named_alias_js_lens[i];
+            return rd->named_alias_js_names[i];
+        }
+    }
+    return re2_name;
+}
+
 static bool js_regex_needs_wrapper(const char* pattern, int pattern_len) {
     bool in_class = false;
     for (int i = 0; i < pattern_len; i++) {
@@ -11386,6 +11541,7 @@ static bool js_regex_needs_wrapper(const char* pattern, int pattern_len) {
 
 static Item js_try_fast_replace_non_whitespace(Item regex, Item str, Item replacement,
                                                JsRegexData* rd, bool replacement_is_func);
+static String* js_regex_escape_source(const char* source, int source_len);
 
 // v90: Get RegExp.prototype for setting __proto__ on regex instances
 static Item js_get_regexp_prototype() {
@@ -11411,7 +11567,7 @@ static Item js_regex_build_object_from_cache(const JsRegexCacheEntry& ce) {
     Item rd_val = (Item){.item = i2it((int64_t)(uintptr_t)rd)};
     js_regex_put_fresh(regex_obj, JS_REGEX_DATA_KEY, 4, rd_val);
     Item source_key = (Item){.item = s2it(heap_create_name("source"))};
-    Item source_val = (Item){.item = s2it(heap_strcpy((char*)ce.source, ce.source_len))};
+    Item source_val = (Item){.item = s2it(js_regex_escape_source(ce.source, ce.source_len))};
     js_regex_put_fresh(regex_obj, "source", 6, source_val);
     js_mark_non_enumerable(regex_obj, source_key);
     Item flags_key = (Item){.item = s2it(heap_create_name("flags"))};
@@ -11519,6 +11675,36 @@ static int js_regex_append_legacy_literal_escape(std::string& out, const char* p
         js_regex_append_literal_byte(out, (unsigned char)pattern[escaped_pos + j], in_class);
     }
     return escaped_pos + len - 1;
+}
+
+static String* js_regex_escape_source(const char* source, int source_len) {
+    if (!source || source_len == 0) return heap_create_name("(?:)", 4);
+    StrBuf* buf = strbuf_new_cap((size_t)source_len + 8);
+    for (int i = 0; i < source_len; i++) {
+        unsigned char ch = (unsigned char)source[i];
+        if (ch == '/') {
+            strbuf_append_str_n(buf, "\\/", 2);
+        } else if (ch == '\n') {
+            strbuf_append_str_n(buf, "\\n", 2);
+        } else if (ch == '\r') {
+            strbuf_append_str_n(buf, "\\r", 2);
+        } else if (ch == 0xE2 && i + 2 < source_len &&
+                   (unsigned char)source[i + 1] == 0x80 &&
+                   (unsigned char)source[i + 2] == 0xA8) {
+            strbuf_append_str_n(buf, "\\u2028", 6);
+            i += 2;
+        } else if (ch == 0xE2 && i + 2 < source_len &&
+                   (unsigned char)source[i + 1] == 0x80 &&
+                   (unsigned char)source[i + 2] == 0xA9) {
+            strbuf_append_str_n(buf, "\\u2029", 6);
+            i += 2;
+        } else {
+            strbuf_append_char(buf, source[i]);
+        }
+    }
+    String* escaped = heap_strcpy(buf->str, (int)buf->length);
+    strbuf_free(buf);
+    return escaped;
 }
 
 static bool js_regex_is_legacy_identity_escape(char next) {
@@ -11629,10 +11815,14 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     }
 
     uint64_t cache_key = js_regex_cache_key(pattern, flags);
+    bool has_re2_name_alias = js_regex_pattern_has_re2_name_alias(pattern, pattern_len);
+    bool has_unicode = compile_info.unicode || compile_info.unicode_sets;
+    bool needs_utf16_subject = !has_unicode &&
+        js_regex_pattern_has_surrogate_unit(pattern, pattern_len);
 
     // Check permanent RE2 cache — survives pool resets, avoids recompiling huge regex literals between tests
     uint64_t perm_key = js_regex_content_hash(pattern, pattern_len, flags, flags_len);
-    if (special_property_kind == 0) {
+    if (special_property_kind == 0 && !has_re2_name_alias && !needs_utf16_subject) {
         auto perm_it = g_re2_permanent_cache.find(perm_key);
         if (perm_it != g_re2_permanent_cache.end()) {
             auto& pe = perm_it->second;
@@ -11667,6 +11857,18 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     std::string v_processed;
     const char* effective_pattern = pattern;
     int effective_pattern_len = pattern_len;
+    const int max_named_aliases = 96;
+    char* named_alias_re2_names[96];
+    int named_alias_re2_lens[96];
+    char* named_alias_js_names[96];
+    int named_alias_js_lens[96];
+    int named_alias_count = 0;
+    for (int ai = 0; ai < max_named_aliases; ai++) {
+        named_alias_re2_names[ai] = NULL;
+        named_alias_re2_lens[ai] = 0;
+        named_alias_js_names[ai] = NULL;
+        named_alias_js_lens[ai] = 0;
+    }
     if (compile_info.unicode_sets) {
         v_processed.reserve(pattern_len + 128);
         int i = 0;
@@ -11978,14 +12180,37 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
                 }
                 // \uXXXX form (exactly 4 hex digits)
                 if (i + 5 < effective_pattern_len) {
+                    int value = 0;
                     bool all_hex = true;
                     for (int j = i + 2; j < i + 6; j++) {
-                        char c = effective_pattern[j];
-                        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) {
+                        int hv = js_regex_hex_value(effective_pattern[j]);
+                        if (hv < 0) {
                             all_hex = false; break;
                         }
+                        value = (value << 4) | hv;
                     }
                     if (all_hex) {
+                        bool unicode_mode = compile_info.unicode || compile_info.unicode_sets;
+                        if (unicode_mode && value >= 0xD800 && value <= 0xDBFF &&
+                            i + 11 < effective_pattern_len &&
+                            effective_pattern[i + 6] == '\\' &&
+                            effective_pattern[i + 7] == 'u') {
+                            int low = 0;
+                            bool low_hex = true;
+                            for (int j = i + 8; j < i + 12; j++) {
+                                int hv = js_regex_hex_value(effective_pattern[j]);
+                                if (hv < 0) { low_hex = false; break; }
+                                low = (low << 4) | hv;
+                            }
+                            if (low_hex && low >= 0xDC00 && low <= 0xDFFF) {
+                                int cp = 0x10000 + ((value - 0xD800) << 10) + (low - 0xDC00);
+                                char buf[16];
+                                snprintf(buf, sizeof(buf), "\\x{%X}", cp);
+                                processed_pattern += buf;
+                                i += 11;
+                                continue;
+                            }
+                        }
                         processed_pattern += "\\x{";
                         processed_pattern.append(effective_pattern + i + 2, 4);
                         processed_pattern += '}';
@@ -12264,8 +12489,37 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
                 continue;
             }
             // it's a named group (?<name>...) — insert 'P' to make (?P<name>...)
-            processed_pattern.insert(pos + 2, "P");
-            pos += 4; // skip past (?P<
+            // RE2 group names are narrower than ECMAScript IdentifierName. When JS
+            // permits a name such as "$<astral>", compile under a safe alias and map it
+            // back while building the public `groups` object.
+            size_t name_end = processed_pattern.find(">", after);
+            if (name_end == std::string::npos) {
+                pos++;
+                continue;
+            }
+            int name_len = (int)(name_end - after);
+            if (js_regex_re2_group_name_needs_alias(processed_pattern.c_str() + after, name_len) &&
+                named_alias_count < max_named_aliases) {
+                char alias_buf[32];
+                int alias_len = snprintf(alias_buf, sizeof(alias_buf), "JsCap%d", named_alias_count + 1);
+                char* re2_copy = (char*)pool_calloc(js_input->pool, alias_len + 1);
+                memcpy(re2_copy, alias_buf, alias_len);
+                re2_copy[alias_len] = '\0';
+                char* js_copy = (char*)pool_calloc(js_input->pool, name_len + 1);
+                memcpy(js_copy, processed_pattern.c_str() + after, name_len);
+                js_copy[name_len] = '\0';
+                named_alias_re2_names[named_alias_count] = re2_copy;
+                named_alias_re2_lens[named_alias_count] = alias_len;
+                named_alias_js_names[named_alias_count] = js_copy;
+                named_alias_js_lens[named_alias_count] = name_len;
+                named_alias_count++;
+                processed_pattern.replace(after, name_len, alias_buf, alias_len);
+                processed_pattern.insert(pos + 2, "P");
+                pos = pos + 4 + alias_len + 1;
+            } else {
+                processed_pattern.insert(pos + 2, "P");
+                pos += 4; // skip past (?P<
+            }
         }
     }
 
@@ -12335,8 +12589,22 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     rd->ignore_case = !opts.case_sensitive();
     rd->multiline = multiline;
     rd->sticky = sticky;
+    rd->needs_utf16_subject = needs_utf16_subject;
     rd->literal_fast = literal_fast;
     rd->special_property_kind = special_property_kind;
+    if (named_alias_count > 0) {
+        rd->named_alias_re2_names = (char**)pool_calloc(js_input->pool, sizeof(char*) * named_alias_count);
+        rd->named_alias_re2_lens = (int*)pool_calloc(js_input->pool, sizeof(int) * named_alias_count);
+        rd->named_alias_js_names = (char**)pool_calloc(js_input->pool, sizeof(char*) * named_alias_count);
+        rd->named_alias_js_lens = (int*)pool_calloc(js_input->pool, sizeof(int) * named_alias_count);
+        rd->named_alias_count = named_alias_count;
+        for (int ai = 0; ai < named_alias_count; ai++) {
+            rd->named_alias_re2_names[ai] = named_alias_re2_names[ai];
+            rd->named_alias_re2_lens[ai] = named_alias_re2_lens[ai];
+            rd->named_alias_js_names[ai] = named_alias_js_names[ai];
+            rd->named_alias_js_lens[ai] = named_alias_js_lens[ai];
+        }
+    }
     if (literal_fast) {
         rd->literal_pattern = literal_buf;
         rd->literal_pattern_len = literal_len;
@@ -12360,7 +12628,7 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     }
     // set visible properties — use heap_strcpy with explicit length to handle NUL bytes
     Item source_key = (Item){.item = s2it(heap_create_name("source"))};
-    Item source_val = (Item){.item = s2it(heap_strcpy(src_buf, pattern_len))};
+    Item source_val = (Item){.item = s2it(js_regex_escape_source(src_buf, pattern_len))};
     js_property_set(regex_obj, source_key, source_val);
     js_mark_non_writable(regex_obj, source_key);
     js_mark_non_enumerable(regex_obj, source_key);
@@ -12378,7 +12646,6 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     bool ignore_case = !opts.case_sensitive();
     bool dot_all = opts.dot_nl();
     bool has_sticky = compile_info.sticky;
-    bool has_unicode = compile_info.unicode || compile_info.unicode_sets;
     Item ic_key = (Item){.item = s2it(heap_create_name("ignoreCase"))};
     js_property_set(regex_obj, ic_key, (Item){.item = b2it(ignore_case ? BOOL_TRUE : BOOL_FALSE)});
     js_mark_non_writable(regex_obj, ic_key);
@@ -12416,7 +12683,8 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     }
     // Store in permanent RE2 cache if no complex wrapper — survives batch resets for cross-test reuse.
     // Even pass-through wrappers (has_filters=false) are cached here since re2 is safe to reuse.
-    if (special_property_kind == 0 && !literal_fast && (!wrapper || !wrapper->has_filters)) {
+    if (special_property_kind == 0 && !literal_fast && named_alias_count == 0 &&
+        !needs_utf16_subject && (!wrapper || !wrapper->has_filters)) {
         re2::RE2* perm_re2 = re2; // re2 points to either wrapper->re2 or directly-compiled re2
         char* perm_flags = new char[flags_len + 1];
         memcpy(perm_flags, flg_buf, flags_len + 1);
@@ -12562,6 +12830,10 @@ static JsRegexData* js_get_regex_data(Item obj) {
 static bool js_regex_set_lastindex_strict(Item regex, Item li_key, int64_t value);
 static uint32_t js_decode_utf8(const char* s, size_t len, size_t* i);
 
+static bool js_regexp_is_undefined(Item value) {
+    return value.item == ITEM_JS_UNDEFINED || get_type_id(value) == LMD_TYPE_UNDEFINED;
+}
+
 static bool js_regexp_is_han_cp(uint32_t cp) {
     return cp == 0x003005 || cp == 0x003007 ||
            (cp >= 0x002E80 && cp <= 0x002E99) ||
@@ -12706,6 +12978,17 @@ extern "C" Item js_regex_test(Item regex, Item str) {
     String* input_s = it2s(str);
     const char* chars = input_s ? input_s->chars : "";
     int len = input_s ? (int)input_s->len : 0;
+    String* match_s = input_s;
+    const char* match_chars = chars;
+    int match_len = len;
+    int64_t subject_units = len;
+    bool utf16_subject = rd->needs_utf16_subject;
+    if (utf16_subject) {
+        subject_units = input_s ? js_utf16_len(input_s->chars, (int)input_s->len, (bool)input_s->is_ascii) : 0;
+        match_s = js_string_expand_utf16_subject(input_s);
+        match_chars = match_s ? match_s->chars : "";
+        match_len = match_s ? (int)match_s->len : 0;
+    }
 
     int property_mode = (!rd->global && !rd->sticky) ? js_regexp_property_all_mode(regex) : 0;
     if (property_mode != 0) {
@@ -12740,7 +13023,8 @@ extern "C" Item js_regex_test(Item regex, Item str) {
             double d = li_val.get_double();
             start_pos = (d != d) ? 0 : (int)d;
         }
-        if (start_pos < 0 || start_pos > len) {
+        int64_t limit = utf16_subject ? subject_units : len;
+        if (start_pos < 0 || start_pos > limit) {
             if (!js_regex_set_lastindex_strict(regex, li_key, 0)) return ItemNull;
             return (Item){.item = b2it(BOOL_FALSE)};
         }
@@ -12750,7 +13034,10 @@ extern "C" Item js_regex_test(Item regex, Item str) {
     if (num_groups > 16) num_groups = 16;
     re2::StringPiece matches[16];
     re2::RE2::Anchor anchor = rd->sticky ? re2::RE2::ANCHOR_START : re2::RE2::UNANCHORED;
-    bool matched = js_regex_match_internal(rd, chars, len, start_pos, anchor, matches, num_groups);
+    int match_start_pos = utf16_subject ?
+        js_utf16_idx_to_byte(match_chars, match_len, start_pos) : start_pos;
+    bool matched = js_regex_match_internal(rd, match_chars, match_len, match_start_pos,
+        anchor, matches, num_groups);
     if (!matched) {
         if (uses_last_index) {
             if (!js_regex_set_lastindex_strict(regex, li_key, 0)) return ItemNull;
@@ -12759,31 +13046,74 @@ extern "C" Item js_regex_test(Item regex, Item str) {
     }
 
     if (uses_last_index) {
-        int match_end = (int)(matches[0].data() - chars) + (int)matches[0].size();
+        int match_end = (int)(matches[0].data() - match_chars) + (int)matches[0].size();
+        if (utf16_subject) match_end = (int)js_utf16_index_from_byte(match_chars, match_len, match_end);
         if (!js_regex_set_lastindex_strict(regex, li_key, match_end)) return ItemNull;
     }
-    js_regexp_update_last_match(input_s, matches, num_groups);
+    js_regexp_update_last_match(utf16_subject ? match_s : input_s, matches, num_groups);
     return (Item){.item = b2it(matched ? BOOL_TRUE : BOOL_FALSE)};
 }
 
 // Spec-internal Set(rx, "lastIndex", v, Throw=true): always throws TypeError on non-writable.
 // Returns true on success, false if exception was thrown (caller should propagate).
-static bool js_regex_set_lastindex_strict(Item regex, Item li_key, int64_t value) {
+static bool js_regex_set_lastindex_item_strict(Item regex, Item li_key, Item value) {
     if (get_type_id(regex) == LMD_TYPE_MAP) {
         Map* m = regex.map;
         // A2-T5: shape-flag-first non-writable check (was marker-only).
         // `js_attr_set_writable(false)` may now set only the JSPD_NON_WRITABLE
         // shape bit, without writing the legacy `__nw_lastIndex` marker.
         ShapeEntry* _se = js_find_shape_entry(regex, "lastIndex", 9);
+        JsSetterDispatchStatus setter_status = js_ordinary_set_via_accessor(regex, "lastIndex", 9, value, regex);
+        if (setter_status == JS_SET_DISPATCHED) return !js_exception_pending;
+        if (setter_status == JS_SET_NO_SETTER) {
+            js_throw_type_error("Cannot set property lastIndex which has only a getter");
+            return false;
+        }
         if (!js_props_query_writable(m, _se, "lastIndex", 9)) {
             Item err_name = (Item){.item = s2it(heap_create_name("TypeError", 9))};
             Item err_msg = (Item){.item = s2it(heap_create_name("Cannot assign to read only property 'lastIndex' of object", 56))};
             js_throw_value(js_new_error_with_name(err_name, err_msg));
             return false;
         }
+        if (!_se && js_proto_chain_has_nonwritable_data(regex, "lastIndex", 9)) {
+            Item err_name = (Item){.item = s2it(heap_create_name("TypeError", 9))};
+            Item err_msg = (Item){.item = s2it(heap_create_name("Cannot assign to read only property 'lastIndex' of object", 56))};
+            js_throw_value(js_new_error_with_name(err_name, err_msg));
+            return false;
+        }
+        if (!_se && !js_is_truthy(js_object_is_extensible(regex))) {
+            js_throw_type_error("Cannot add property 'lastIndex' to non-extensible object");
+            return false;
+        }
     }
-    js_property_set(regex, li_key, (Item){.item = i2it(value)});
+    js_property_set(regex, li_key, value);
     return !js_exception_pending;
+}
+
+static bool js_regex_set_lastindex_strict(Item regex, Item li_key, int64_t value) {
+    return js_regex_set_lastindex_item_strict(regex, li_key, (Item){.item = i2it(value)});
+}
+
+static int64_t js_regex_advance_string_index_bytes(String* s, int64_t index, bool full_unicode) {
+    if (!full_unicode || !s || index < 0 || index >= (int64_t)s->len) return index + 1;
+    const unsigned char* chars = (const unsigned char*)s->chars;
+    int64_t len = (int64_t)s->len;
+    unsigned char b0 = chars[index];
+    if (b0 < 0x80) return index + 1;
+    if ((b0 & 0xE0) == 0xC0) return (index + 2 <= len) ? index + 2 : index + 1;
+    if ((b0 & 0xF0) == 0xE0) {
+        if (index + 6 <= len && b0 == 0xED) {
+            unsigned char b1 = chars[index + 1];
+            unsigned char n0 = chars[index + 3];
+            unsigned char n1 = chars[index + 4];
+            bool high_surrogate = (b1 >= 0xA0 && b1 <= 0xAF);
+            bool low_surrogate = (n0 == 0xED && n1 >= 0xB0 && n1 <= 0xBF);
+            if (high_surrogate && low_surrogate) return index + 6;
+        }
+        return (index + 3 <= len) ? index + 3 : index + 1;
+    }
+    if ((b0 & 0xF8) == 0xF0) return (index + 4 <= len) ? index + 4 : index + 1;
+    return index + 1;
 }
 
 extern "C" Item js_regex_exec(Item regex, Item str) {
@@ -12799,6 +13129,17 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     String* input_s = it2s(str);
     const char* chars = input_s ? input_s->chars : "";
     int len = input_s ? (int)input_s->len : 0;
+    String* match_s = input_s;
+    const char* match_chars = chars;
+    int match_len = len;
+    int64_t subject_units = len;
+    bool utf16_subject = rd->needs_utf16_subject;
+    if (utf16_subject) {
+        subject_units = input_s ? js_utf16_len(input_s->chars, (int)input_s->len, (bool)input_s->is_ascii) : 0;
+        match_s = js_string_expand_utf16_subject(input_s);
+        match_chars = match_s ? match_s->chars : "";
+        match_len = match_s ? (int)match_s->len : 0;
+    }
 
     // for global/sticky regexes, read lastIndex to start search from there
     int start_pos = 0;
@@ -12817,7 +13158,8 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
             if (d != d) start_pos = 0; // NaN → 0
             else start_pos = (int)d;
         }
-        if (start_pos < 0 || start_pos > len) {
+        int64_t limit = utf16_subject ? subject_units : len;
+        if (start_pos < 0 || start_pos > limit) {
             if (!js_regex_set_lastindex_strict(regex, li_key, 0)) return ItemNull;
             return ItemNull;
         }
@@ -12829,7 +13171,10 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     re2::StringPiece matches[16];
     // sticky: must match at exactly start_pos (ANCHOR_START from start_pos)
     re2::RE2::Anchor anchor = rd->sticky ? re2::RE2::ANCHOR_START : re2::RE2::UNANCHORED;
-    bool matched = js_regex_match_internal(rd, chars, len, start_pos, anchor, matches, num_groups);
+    int match_start_pos = utf16_subject ?
+        js_utf16_idx_to_byte(match_chars, match_len, start_pos) : start_pos;
+    bool matched = js_regex_match_internal(rd, match_chars, match_len, match_start_pos,
+        anchor, matches, num_groups);
     if (!matched) {
         if (uses_last_index) {
             if (!js_regex_set_lastindex_strict(regex, li_key, 0)) return ItemNull;
@@ -12841,12 +13186,13 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     // Set R.lastIndex = e). Do NOT auto-advance on zero-length matches — that's
     // the responsibility of callers (e.g. @@split, @@match) which use AdvanceStringIndex.
     if (uses_last_index) {
-        int match_end = (int)(matches[0].data() - chars) + (int)matches[0].size();
+        int match_end = (int)(matches[0].data() - match_chars) + (int)matches[0].size();
+        if (utf16_subject) match_end = (int)js_utf16_index_from_byte(match_chars, match_len, match_end);
         if (!js_regex_set_lastindex_strict(regex, li_key, match_end)) return ItemNull;
     }
 
     // update legacy RegExp static properties ($1-$9, input, lastMatch, etc.)
-    js_regexp_update_last_match(input_s, matches, num_groups);
+    js_regexp_update_last_match(utf16_subject ? match_s : input_s, matches, num_groups);
 
     // build result as an Array with .index, .input, .groups properties (per ES spec)
     Item result = js_array_new(num_groups);
@@ -12858,7 +13204,16 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     for (int i = 0; i < num_groups; i++) {
         if (matches[i].data()) {
             int mlen = (int)matches[i].size();
-            Item s = (Item){.item = s2it(heap_strcpy((char*)matches[i].data(), mlen))};
+            Item s;
+            if (utf16_subject) {
+                int start_units = (int)js_utf16_index_from_byte(match_chars, match_len,
+                    (int)(matches[i].data() - match_chars));
+                int end_units = (int)js_utf16_index_from_byte(match_chars, match_len,
+                    (int)(matches[i].data() - match_chars) + mlen);
+                s = js_str_substring_utf16(str, start_units, end_units);
+            } else {
+                s = (Item){.item = s2it(heap_strcpy((char*)matches[i].data(), mlen))};
+            }
             js_array_set_int(result, i, s);
         } else {
             // unmatched group → undefined
@@ -12867,7 +13222,8 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     }
     js_skip_accessor_dispatch = _prev_skip_replace;
     // Set named properties (index, input, groups) via companion map
-    int match_index = (int)(matches[0].data() - chars);
+    int match_index = (int)(matches[0].data() - match_chars);
+    if (utf16_subject) match_index = (int)js_utf16_index_from_byte(match_chars, match_len, match_index);
     Item index_key = (Item){.item = s2it(heap_create_name("index", 5))};
     js_property_set(result, index_key, (Item){.item = i2it(match_index)});
     // v46: add input property (the original string passed to exec)
@@ -12897,9 +13253,20 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
             Item val = make_js_undefined();
             if (idx < num_groups && matches[idx].data()) {
                 int mlen = (int)matches[idx].size();
-                val = (Item){.item = s2it(heap_strcpy((char*)matches[idx].data(), mlen))};
+                if (utf16_subject) {
+                    int start_units = (int)js_utf16_index_from_byte(match_chars, match_len,
+                        (int)(matches[idx].data() - match_chars));
+                    int end_units = (int)js_utf16_index_from_byte(match_chars, match_len,
+                        (int)(matches[idx].data() - match_chars) + mlen);
+                    val = js_str_substring_utf16(str, start_units, end_units);
+                } else {
+                    val = (Item){.item = s2it(heap_strcpy((char*)matches[idx].data(), mlen))};
+                }
             }
-            Item key = (Item){.item = s2it(heap_create_name(pair.first.c_str(), pair.first.size()))};
+            int js_name_len = (int)pair.first.size();
+            const char* js_name = js_regex_original_group_name(rd, pair.first.c_str(),
+                (int)pair.first.size(), &js_name_len);
+            Item key = (Item){.item = s2it(heap_create_name(js_name, js_name_len))};
             js_property_set(groups_obj, key, val);
         }
         js_property_set(result, groups_key, groups_obj);
@@ -12962,9 +13329,7 @@ static void js_apply_replacement_from_items(StrBuf* buf, const char* repl, int r
             if (after < src_len) strbuf_append_str_n(buf, src + after, src_len - after); i++;
         } else if (next == '<') {
             // $<name> — named capture group reference (ES2018+)
-            TypeId gtid = get_type_id(groups_obj);
-            bool has_groups = (groups_obj.item != ItemNull.item &&
-                gtid != LMD_TYPE_UNDEFINED && gtid != LMD_TYPE_NULL);
+            bool has_groups = !js_regexp_is_undefined(groups_obj);
             if (!has_groups) { strbuf_append_char(buf, '$'); continue; }
             int name_start = i + 2, name_end = name_start;
             while (name_end < repl_len && repl[name_end] != '>') name_end++;
@@ -12973,7 +13338,7 @@ static void js_apply_replacement_from_items(StrBuf* buf, const char* repl, int r
             Item name_key = (Item){.item = s2it(heap_create_name(repl + name_start, name_len))};
             Item val = js_property_get(groups_obj, name_key);
             if (!js_exception_pending &&
-                get_type_id(val) != LMD_TYPE_UNDEFINED && val.item != ItemNull.item) {
+                !js_regexp_is_undefined(val)) {
                 Item val_str = js_to_string(val);
                 String* vs = it2s(val_str);
                 if (vs) strbuf_append_str_n(buf, vs->chars, vs->len);
@@ -13023,8 +13388,7 @@ static Item js_regexp_symbol_match(Item this_val, Item arg0) {
     Item str = (get_type_id(arg0) == LMD_TYPE_STRING) ? arg0 : js_to_string(arg0);
     if (js_exception_pending) return ItemNull;
     // Steps 4-5: get flags for error propagation, then read global directly (coerce-global.js)
-    Item flags_key = (Item){.item = s2it(heap_create_name("flags", 5))};
-    Item flags_val = js_property_get(this_val, flags_key);
+    Item flags_val = js_string_matchall_get_flags(this_val);
     if (js_exception_pending) return ItemNull;
     Item flags_str = js_to_string(flags_val);
     if (js_exception_pending) return ItemNull;
@@ -13035,10 +13399,15 @@ static Item js_regexp_symbol_match(Item this_val, Item arg0) {
     bool global = it2b(js_to_boolean(global_val));
     // Step 6: If global is false, return RegExpExec(rx, S)
     if (!global) return js_regexp_exec_dispatch(this_val, str);
+    Item unicode_key_item = (Item){.item = s2it(heap_create_name("unicode", 7))};
+    Item unicode_val = js_property_get(this_val, unicode_key_item);
+    if (js_exception_pending) return ItemNull;
+    bool full_unicode = it2b(js_to_boolean(unicode_val));
     // Step 7: Set rx.lastIndex = 0 (Throw=true)
     Item li_key = (Item){.item = s2it(heap_create_name("lastIndex", 9))};
     if (!js_regex_set_lastindex_strict(this_val, li_key, 0)) return ItemNull;
     // Step 8: Loop collecting matches
+    JsRegexData* match_rd = js_get_regex_data(this_val);
     Item results = js_array_new(0);
     int match_count = 0;
     for (int safety = 0; safety < 1000000; safety++) {
@@ -13070,7 +13439,11 @@ static Item js_regexp_symbol_match(Item this_val, Item arg0) {
                 if (!isnan(d) && d >= 0)
                     idx = d > 9007199254740991.0 ? (int64_t)9007199254740991LL : (int64_t)d;
             }
-            if (!js_regex_set_lastindex_strict(this_val, li_key, idx + 1)) return ItemNull;
+            String* input_s = it2s(str);
+            int64_t next_idx = (match_rd && match_rd->needs_utf16_subject) ?
+                js_regex_advance_string_index_units(input_s, idx, full_unicode) :
+                js_regex_advance_string_index_bytes(input_s, idx, full_unicode);
+            if (!js_regex_set_lastindex_strict(this_val, li_key, next_idx)) return ItemNull;
         }
     }
     return match_count == 0 ? ItemNull : results;
@@ -13102,7 +13475,10 @@ static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) 
         if (js_exception_pending) return ItemNull;
     }
     JsRegexData* fast_rd = js_get_regex_data(this_val);
-    if (fast_rd && fast_rd->global && !functional_replace) {
+    bool utf16_replace = fast_rd && fast_rd->needs_utf16_subject;
+    int64_t source_units = utf16_replace && S ?
+        js_utf16_len(S->chars, (int)S->len, (bool)S->is_ascii) : lengthS;
+    if (fast_rd && !fast_rd->needs_utf16_subject && fast_rd->global && !functional_replace) {
         bool own_global_fast = false;
         Item own_global_val = js_map_get_fast_ext(this_val.map, "global", 6, &own_global_fast);
         bool own_flags_fast = false;
@@ -13119,8 +13495,7 @@ static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) 
     // Step 6.a.i (ES2021): if not functionalReplace, read Get(rx,"flags") to propagate getter errors
     // (test: get-flags-err.js, flags-tostring-error.js). We don't use the result for global detection.
     if (!functional_replace) {
-        Item flags_key = (Item){.item = s2it(heap_create_name("flags", 5))};
-        Item flags_val = js_property_get(this_val, flags_key);
+        Item flags_val = js_string_matchall_get_flags(this_val);
         if (js_exception_pending) return ItemNull;
         Item flags_str_item = js_to_string(flags_val);
         if (js_exception_pending) return ItemNull;
@@ -13132,12 +13507,19 @@ static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) 
     if (js_exception_pending) return ItemNull;
     bool global = it2b(js_to_boolean(global_val));
     Item li_key = (Item){.item = s2it(heap_create_name("lastIndex", 9))};
+    bool full_unicode = false;
     if (global) {
+        Item unicode_key_item = (Item){.item = s2it(heap_create_name("unicode", 7))};
+        Item unicode_val = js_property_get(this_val, unicode_key_item);
+        if (js_exception_pending) return ItemNull;
+        full_unicode = it2b(js_to_boolean(unicode_val));
         // Step 8: Set rx.lastIndex = 0 (Throw=true)
         if (!js_regex_set_lastindex_strict(this_val, li_key, 0)) return ItemNull;
     }
-    Item fast = js_try_fast_replace_non_whitespace(this_val, str, replacement, fast_rd, functional_replace);
-    if (fast.item != ItemNull.item || js_exception_pending) return fast;
+    if (!utf16_replace) {
+        Item fast = js_try_fast_replace_non_whitespace(this_val, str, replacement, fast_rd, functional_replace);
+        if (fast.item != ItemNull.item || js_exception_pending) return fast;
+    }
     // Steps 9-11: collect all RegExpExec results
     Item results_array = js_array_new(0);
     for (int safety = 0; safety < 2000000; safety++) {
@@ -13171,8 +13553,10 @@ static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) 
                 else if (isinf(d) || d > 9007199254740991.0) idx = (int64_t)9007199254740991LL;
                 else idx = (int64_t)d;
             }
-            // AdvanceStringIndex: +1 (simplified; for full Unicode surrogates use +2)
-            if (!js_regex_set_lastindex_strict(this_val, li_key, idx + 1)) return ItemNull;
+            int64_t next_idx = utf16_replace ?
+                js_regex_advance_string_index_units(S, idx, full_unicode) :
+                js_regex_advance_string_index_bytes(S, idx, full_unicode);
+            if (!js_regex_set_lastindex_strict(this_val, li_key, next_idx)) return ItemNull;
         }
     }
     // Steps 12-15: build result string
@@ -13231,7 +13615,8 @@ static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) 
             }
         }
         if (position < 0) position = 0;
-        if (position > lengthS) position = lengthS;
+        int64_t position_limit = utf16_replace ? source_units : lengthS;
+        if (position > position_limit) position = (int)position_limit;
         // Step 14g-h: captures = [result[1], ..., result[nCaptures]]
         for (int n = 1; n <= n_captures; n++) {
             char idx_buf[8];
@@ -13255,9 +13640,7 @@ static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) 
         Item replacement_str;
         if (functional_replace) {
             // replacerArgs = [matched, cap1, ..., capN, position, S, groups?]
-            bool has_groups = (get_type_id(named_captures) != LMD_TYPE_UNDEFINED &&
-                               get_type_id(named_captures) != LMD_TYPE_NULL &&
-                               named_captures.item != ItemNull.item);
+            bool has_groups = !js_regexp_is_undefined(named_captures);
             int fn_argc = 1 + n_captures + 2 + (has_groups ? 1 : 0);
             int ai = 0;
             fn_args_buf[ai++] = matched;
@@ -13270,6 +13653,15 @@ static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) 
             replacement_str = js_to_string(replValue);
             if (js_exception_pending) { strbuf_free(buf); return ItemNull; }
         } else {
+            if (!js_regexp_is_undefined(named_captures)) {
+                TypeId nctid = get_type_id(named_captures);
+                if (named_captures.item == ItemNull.item || nctid == LMD_TYPE_NULL) {
+                    strbuf_free(buf);
+                    return js_throw_type_error("RegExp replace groups cannot be null");
+                }
+                named_captures = js_to_object(named_captures);
+                if (js_exception_pending) { strbuf_free(buf); return ItemNull; }
+            }
             // GetSubstitution: apply $-patterns in replacement string
             String* rs = it2s(replacement);
             if (rs && rs->len > 0) {
@@ -13287,16 +13679,36 @@ static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) 
         }
         // Step 14l: if position >= nextSourcePosition, append prefix + replacement
         if (position >= next_source_pos && S) {
-            if (position > next_source_pos)
-                strbuf_append_str_n(buf, S->chars + next_source_pos, position - next_source_pos);
+            if (position > next_source_pos) {
+                if (utf16_replace) {
+                    Item prefix = js_str_substring_utf16(str, next_source_pos, position);
+                    String* ps = it2s(prefix);
+                    if (ps) strbuf_append_str_n(buf, ps->chars, ps->len);
+                } else {
+                    strbuf_append_str_n(buf, S->chars + next_source_pos, position - next_source_pos);
+                }
+            }
             String* rs = it2s(replacement_str);
             if (rs) strbuf_append_str_n(buf, rs->chars, rs->len);
-            next_source_pos = position + matched_len;
+            if (utf16_replace) {
+                int64_t matched_units = matched_s ?
+                    js_utf16_len(matched_s->chars, (int)matched_s->len, (bool)matched_s->is_ascii) : 0;
+                next_source_pos = (int)(position + matched_units);
+            } else {
+                next_source_pos = position + matched_len;
+            }
         }
     }
     // Step 15: append remaining string
-    if (S && next_source_pos < lengthS)
-        strbuf_append_str_n(buf, S->chars + next_source_pos, lengthS - next_source_pos);
+    if (S && next_source_pos < (utf16_replace ? source_units : lengthS)) {
+        if (utf16_replace) {
+            Item suffix = js_str_substring_utf16(str, next_source_pos, source_units);
+            String* ss = it2s(suffix);
+            if (ss) strbuf_append_str_n(buf, ss->chars, ss->len);
+        } else {
+            strbuf_append_str_n(buf, S->chars + next_source_pos, lengthS - next_source_pos);
+        }
+    }
     String* result_str = heap_strcpy(buf->str, buf->length);
     strbuf_free(buf);
     return (Item){.item = s2it(result_str)};
@@ -13320,12 +13732,7 @@ static Item js_regexp_symbol_search(Item this_val, Item arg0) {
     Item li_key = (Item){.item = s2it(heap_create_name("lastIndex", 9))};
     Item prev_li = js_property_get(this_val, li_key);
     if (js_exception_pending) return (Item){.item = i2it(-1)};
-    bool prev_is_zero = false;
-    {
-        TypeId pt = get_type_id(prev_li);
-        if (pt == LMD_TYPE_INT && it2i(prev_li) == 0) prev_is_zero = true;
-        else if (pt == LMD_TYPE_FLOAT && it2d(prev_li) == 0.0) prev_is_zero = true;
-    }
+    bool prev_is_zero = it2b(js_object_is(prev_li, (Item){.item = i2it(0)}));
     if (!prev_is_zero) {
         if (!js_regex_set_lastindex_strict(this_val, li_key, 0)) return (Item){.item = i2it(-1)};
     }
@@ -13339,18 +13746,9 @@ static Item js_regexp_symbol_search(Item this_val, Item arg0) {
     //                   Set(rx, "lastIndex", previousLastIndex, true).
     Item cur_li = js_property_get(this_val, li_key);
     if (js_exception_pending) return (Item){.item = i2it(-1)};
-    bool same;
-    {
-        TypeId pt = get_type_id(prev_li), ct = get_type_id(cur_li);
-        if (pt == ct) {
-            if (pt == LMD_TYPE_INT) same = (it2i(prev_li) == it2i(cur_li));
-            else if (pt == LMD_TYPE_FLOAT) same = (it2d(prev_li) == it2d(cur_li));
-            else same = (prev_li.item == cur_li.item);
-        } else { same = false; }
-    }
+    bool same = it2b(js_object_is(cur_li, prev_li));
     if (!same) {
-        js_property_set(this_val, li_key, prev_li);
-        if (js_exception_pending) return (Item){.item = i2it(-1)};
+        if (!js_regex_set_lastindex_item_strict(this_val, li_key, prev_li)) return (Item){.item = i2it(-1)};
     }
 
     // ES spec step 10-11: If result is null, return -1; else return ? Get(result, "index").
@@ -15776,7 +16174,10 @@ static Item js_build_groups_object(JsRegexData* rd, re2::StringPiece* matches, i
             int mlen = (int)matches[idx].size();
             val = (Item){.item = s2it(heap_strcpy((char*)matches[idx].data(), mlen))};
         }
-        Item key = (Item){.item = s2it(heap_create_name(pair.first.c_str(), pair.first.size()))};
+        int js_name_len = (int)pair.first.size();
+        const char* js_name = js_regex_original_group_name(rd, pair.first.c_str(),
+            (int)pair.first.size(), &js_name_len);
+        Item key = (Item){.item = s2it(heap_create_name(js_name, js_name_len))};
         js_property_set(groups_obj, key, val);
     }
     return groups_obj;
@@ -16193,6 +16594,77 @@ static bool js_string_protocol_arg_is_object(Item value) {
            type == LMD_TYPE_FUNC || type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP;
 }
 
+static bool js_string_to_integer_or_infinity(Item value, double default_value, double* out) {
+    if (value.item == ITEM_JS_UNDEFINED || get_type_id(value) == LMD_TYPE_UNDEFINED) {
+        *out = default_value;
+        return true;
+    }
+    Item num = js_to_number(value);
+    if (js_exception_pending) return false;
+    double d = js_get_number(num);
+    if (js_exception_pending) return false;
+    if (isnan(d) || d == 0.0) {
+        *out = 0.0;
+    } else if (isinf(d)) {
+        *out = d;
+    } else {
+        *out = d < 0.0 ? ceil(d) : floor(d);
+    }
+    return true;
+}
+
+static int64_t js_string_clamp_integer(double value, int64_t length) {
+    if (value <= 0.0 || (isinf(value) && value < 0.0)) return 0;
+    if (value >= (double)length || (isinf(value) && value > 0.0)) return length;
+    return (int64_t)value;
+}
+
+static bool js_string_is_regexp(Item value, bool* out) {
+    *out = false;
+    if (!js_string_protocol_arg_is_object(value)) return true;
+
+    Item match_key = (Item){.item = s2it(heap_create_name("__sym_7", 7))};
+    Item match_val = js_property_get(value, match_key);
+    if (js_exception_pending) return false;
+    if (match_val.item != ITEM_JS_UNDEFINED && get_type_id(match_val) != LMD_TYPE_UNDEFINED) {
+        *out = it2b(js_to_boolean(match_val));
+        return true;
+    }
+
+    *out = js_class_id(value) == JS_CLASS_REGEXP;
+    return true;
+}
+
+static Item js_string_matchall_get_flags(Item rx) {
+    Item flags_key = (Item){.item = s2it(heap_create_name("flags", 5))};
+    Item flags_val = js_property_get(rx, flags_key);
+    if (js_exception_pending) return ItemNull;
+    if (get_type_id(rx) == LMD_TYPE_MAP && js_class_id(rx) == JS_CLASS_REGEXP &&
+        get_type_id(flags_val) == LMD_TYPE_STRING) {
+        Item proto = js_get_regexp_prototype();
+        if (get_type_id(proto) == LMD_TYPE_MAP) {
+            Item desc = js_object_get_own_property_descriptor(proto, flags_key);
+            if (get_type_id(desc) == LMD_TYPE_MAP) {
+                bool getter_found = false;
+                Item getter = js_map_get_fast(desc.map, "get", 3, &getter_found);
+                if (getter_found) {
+                    if (getter.item == ItemNull.item || getter.item == ITEM_JS_UNDEFINED ||
+                        get_type_id(getter) == LMD_TYPE_UNDEFINED || get_type_id(getter) == LMD_TYPE_NULL) {
+                        return make_js_undefined();
+                    }
+                    if (get_type_id(getter) == LMD_TYPE_FUNC) {
+                        return js_call_function(getter, rx, NULL, 0);
+                    }
+                }
+                bool value_found = false;
+                Item value = js_map_get_fast(desc.map, "value", 5, &value_found);
+                if (value_found) return value;
+            }
+        }
+    }
+    return flags_val;
+}
+
 // =============================================================================
 // String Method Dispatcher
 // =============================================================================
@@ -16248,19 +16720,19 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
     // match method name and delegate to Lambda fn_* functions
     if (method->len == 7 && strncmp(method->chars, "indexOf", 7) == 0) {
         Item search_val = js_to_string((argc >= 1) ? args[0] : make_js_undefined());
+        if (js_exception_pending) return ItemNull;
         if (argc < 2) return (Item){.item = i2it(fn_index_of(str, search_val))};
         // indexOf with start position
-        double dpos = js_get_number(args[1]);
-        int start_pos = isnan(dpos) ? 0 : (int)dpos;
+        double dpos = 0.0;
+        if (!js_string_to_integer_or_infinity(args[1], 0.0, &dpos)) return ItemNull;
         String* s = it2s(str);
         String* sub = it2s(search_val);
         if (!s || !sub) return (Item){.item = i2it(-1)};
-        if (start_pos < 0) start_pos = 0;
+        int64_t str_char_len = s->is_ascii ? (int64_t)s->len : str_utf8_count(s->chars, s->len);
+        int64_t start_pos = js_string_clamp_integer(dpos, str_char_len);
         // ES spec: empty search string returns min(start_pos, string_length)
         if (sub->len == 0) {
-            size_t str_char_len = s->is_ascii ? s->len : str_utf8_count(s->chars, s->len);
-            int64_t result = (start_pos <= (int)str_char_len) ? start_pos : (int64_t)str_char_len;
-            return (Item){.item = i2it(result)};
+            return (Item){.item = i2it(start_pos)};
         }
         size_t byte_start;
         if (s->is_ascii) {
@@ -16311,20 +16783,24 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         return (Item){.item = i2it(-1)};
     }
     if (method->len == 8 && strncmp(method->chars, "includes", 8) == 0) {
-        if (argc >= 1 && js_class_id(args[0]) == JS_CLASS_REGEXP)
+        bool is_regexp = false;
+        if (argc >= 1 && !js_string_is_regexp(args[0], &is_regexp)) return ItemNull;
+        if (is_regexp)
             return js_throw_type_error("First argument to String.prototype.includes must not be a regular expression");
         if (argc < 1) return (Item){.item = b2it(false)};
         String* s = it2s(str);
-        String* search_str = it2s(js_to_string(args[0]));
+        Item search_item = js_to_string(args[0]);
+        if (js_exception_pending) return ItemNull;
+        String* search_str = it2s(search_item);
         if (!s || !search_str) return (Item){.item = b2it(false)};
-        if (search_str->len == 0) return (Item){.item = b2it(true)};
-        int pos = 0;
+        int64_t str_char_len = s->is_ascii ? (int64_t)s->len : str_utf8_count(s->chars, s->len);
+        int64_t pos = 0;
         if (argc >= 2) {
-            double dpos = js_get_number(args[1]);
-            if (isnan(dpos)) dpos = 0;
-            pos = (int)dpos;
-            if (pos < 0) pos = 0;
+            double dpos = 0.0;
+            if (!js_string_to_integer_or_infinity(args[1], 0.0, &dpos)) return ItemNull;
+            pos = js_string_clamp_integer(dpos, str_char_len);
         }
+        if (search_str->len == 0) return (Item){.item = b2it(true)};
         size_t byte_start;
         if (s->is_ascii) {
             byte_start = (size_t)pos;
@@ -16342,20 +16818,24 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         return (Item){.item = b2it(false)};
     }
     if (method->len == 10 && strncmp(method->chars, "startsWith", 10) == 0) {
-        if (argc >= 1 && js_class_id(args[0]) == JS_CLASS_REGEXP)
+        bool is_regexp = false;
+        if (argc >= 1 && !js_string_is_regexp(args[0], &is_regexp)) return ItemNull;
+        if (is_regexp)
             return js_throw_type_error("First argument to String.prototype.startsWith must not be a regular expression");
         if (argc < 1) return (Item){.item = b2it(false)};
         String* s = it2s(str);
-        String* search_str = it2s(js_to_string(args[0]));
+        Item search_item = js_to_string(args[0]);
+        if (js_exception_pending) return ItemNull;
+        String* search_str = it2s(search_item);
         if (!s || !search_str) return (Item){.item = b2it(false)};
-        if (search_str->len == 0) return (Item){.item = b2it(true)};
-        int pos = 0;
+        int64_t str_char_len = s->is_ascii ? (int64_t)s->len : str_utf8_count(s->chars, s->len);
+        int64_t pos = 0;
         if (argc >= 2 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) {
-            double dpos = js_get_number(args[1]);
-            if (isnan(dpos)) dpos = 0;
-            pos = (int)dpos;
-            if (pos < 0) pos = 0;
+            double dpos = 0.0;
+            if (!js_string_to_integer_or_infinity(args[1], 0.0, &dpos)) return ItemNull;
+            pos = js_string_clamp_integer(dpos, str_char_len);
         }
+        if (search_str->len == 0) return (Item){.item = b2it(true)};
         size_t byte_start;
         if (s->is_ascii) {
             byte_start = (size_t)pos;
@@ -16368,20 +16848,22 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         return (Item){.item = b2it(memcmp(s->chars + byte_start, search_str->chars, search_str->len) == 0)};
     }
     if (method->len == 8 && strncmp(method->chars, "endsWith", 8) == 0) {
-        if (argc >= 1 && js_class_id(args[0]) == JS_CLASS_REGEXP)
+        bool is_regexp = false;
+        if (argc >= 1 && !js_string_is_regexp(args[0], &is_regexp)) return ItemNull;
+        if (is_regexp)
             return js_throw_type_error("First argument to String.prototype.endsWith must not be a regular expression");
         if (argc < 1) return (Item){.item = b2it(false)};
         String* s = it2s(str);
-        String* search_str = it2s(js_to_string(args[0]));
+        Item search_item = js_to_string(args[0]);
+        if (js_exception_pending) return ItemNull;
+        String* search_str = it2s(search_item);
         if (!s || !search_str) return (Item){.item = b2it(false)};
         size_t str_char_len = s->is_ascii ? s->len : str_utf8_count(s->chars, s->len);
         size_t end_pos = str_char_len;
         if (argc >= 2 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) {
-            double dpos = js_get_number(args[1]);
-            if (isnan(dpos)) dpos = 0;
-            int ipos = (int)dpos;
-            if (ipos < 0) ipos = 0;
-            if ((size_t)ipos < end_pos) end_pos = (size_t)ipos;
+            double dpos = 0.0;
+            if (!js_string_to_integer_or_infinity(args[1], (double)str_char_len, &dpos)) return ItemNull;
+            end_pos = (size_t)js_string_clamp_integer(dpos, (int64_t)str_char_len);
         }
         if (search_str->len == 0) return (Item){.item = b2it(true)};
         size_t search_char_len = search_str->is_ascii ? search_str->len : str_utf8_count(search_str->chars, search_str->len);
@@ -16688,15 +17170,20 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         return js_str_substring_utf16(str, start, end);
     }
     if (method->len == 7 && strncmp(method->chars, "replace", 7) == 0) {
-        if (argc < 2) return str;
+        if (argc < 1) return str;
         // ES spec §21.1.3.14: check [Symbol.replace] on searchValue
         if (args[0].item != ItemNull.item && get_type_id(args[0]) != LMD_TYPE_UNDEFINED
             && get_type_id(args[0]) != LMD_TYPE_NULL && js_string_protocol_arg_is_object(args[0])) {
             Item sym_key = (Item){.item = s2it(heap_create_name("__sym_8", 7))};
             Item sym_fn = js_property_get(args[0], sym_key);
+            if (js_exception_pending) return ItemNull;
             if (sym_fn.item != ItemNull.item && get_type_id(sym_fn) != LMD_TYPE_UNDEFINED
-                && get_type_id(sym_fn) == LMD_TYPE_FUNC) {
-                Item call_args[2] = { str, args[1] };
+                && sym_fn.item != ITEM_JS_UNDEFINED && get_type_id(sym_fn) != LMD_TYPE_NULL) {
+                if (get_type_id(sym_fn) != LMD_TYPE_FUNC) {
+                    return js_throw_type_error("Symbol.replace is not callable");
+                }
+                Item replace_value = (argc >= 2) ? args[1] : make_js_undefined();
+                Item call_args[2] = { str, replace_value };
                 return js_call_function(sym_fn, args[0], call_args, 2);
             }
         }
@@ -16987,11 +17474,13 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
     if (method->len == 2 && strncmp(method->chars, "at", 2) == 0) {
         String* s = it2s(str);
         if (!s || s->len == 0) return make_js_undefined();
-        int idx = (argc < 1) ? 0 : (int)js_get_number(args[0]);
-        if (idx < 0) idx = (int)s->len + idx;
-        if (idx < 0 || idx >= (int)s->len) return make_js_undefined();
-        String* ch = heap_strcpy(&s->chars[idx], 1);
-        return (Item){.item = s2it(ch)};
+        double didx = 0.0;
+        if (argc >= 1 && !js_string_to_integer_or_infinity(args[0], 0.0, &didx)) return ItemNull;
+        int64_t len = js_utf16_len(s->chars, (int)s->len, (bool)s->is_ascii);
+        if (didx >= (double)len || didx < -(double)len || isinf(didx)) return make_js_undefined();
+        int64_t idx = didx < 0.0 ? len + (int64_t)didx : (int64_t)didx;
+        if (idx < 0 || idx >= len) return make_js_undefined();
+        return js_str_substring_utf16(str, idx, idx + 1);
     }
     // search(pattern) — return index of first match
     if (method->len == 6 && strncmp(method->chars, "search", 6) == 0) {
@@ -17002,8 +17491,12 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
             && get_type_id(args[0]) != LMD_TYPE_NULL && js_string_protocol_arg_is_object(args[0])) {
             Item sym_key = (Item){.item = s2it(heap_create_name("__sym_9", 7))};
             Item sym_fn = js_property_get(args[0], sym_key);
+            if (js_exception_pending) return ItemNull;
             if (sym_fn.item != ItemNull.item && get_type_id(sym_fn) != LMD_TYPE_UNDEFINED
-                && get_type_id(sym_fn) == LMD_TYPE_FUNC) {
+                && sym_fn.item != ITEM_JS_UNDEFINED && get_type_id(sym_fn) != LMD_TYPE_NULL) {
+                if (get_type_id(sym_fn) != LMD_TYPE_FUNC) {
+                    return js_throw_type_error("Symbol.search is not callable");
+                }
                 Item call_args[1] = { str };
                 return js_call_function(sym_fn, args[0], call_args, 1);
             }
@@ -17028,15 +17521,16 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
             String* pat = it2s(arg_str);
             if (pat) {
                 Item regex = js_create_regex(pat->chars, (int)pat->len, "", 0);
-                JsRegexData* rd = js_get_regex_data(regex);
-                if (rd) {
-                    String* s = it2s(str);
-                    if (!s) return (Item){.item = i2it(-1)};
-                    re2::StringPiece match;
-                    if (js_regex_match_internal(rd, s->chars, (int)s->len, 0,
-                                       re2::RE2::UNANCHORED, &match, 1)) {
-                        return (Item){.item = i2it((int)(match.data() - s->chars))};
+                Item sym_key = (Item){.item = s2it(heap_create_name("__sym_9", 7))};
+                Item sym_fn = js_property_get(regex, sym_key);
+                if (js_exception_pending) return ItemNull;
+                if (sym_fn.item != ItemNull.item && sym_fn.item != ITEM_JS_UNDEFINED
+                    && get_type_id(sym_fn) != LMD_TYPE_UNDEFINED && get_type_id(sym_fn) != LMD_TYPE_NULL) {
+                    if (get_type_id(sym_fn) != LMD_TYPE_FUNC) {
+                        return js_throw_type_error("Symbol.search is not callable");
                     }
+                    Item call_args[1] = { str };
+                    return js_call_function(sym_fn, regex, call_args, 1);
                 }
             }
             return (Item){.item = i2it(-1)};
@@ -17057,8 +17551,12 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
             // ES spec §21.1.3.11: check [Symbol.match] on regexp
             Item sym_key = (Item){.item = s2it(heap_create_name("__sym_7", 7))};
             Item sym_fn = js_property_get(args[0], sym_key);
+            if (js_exception_pending) return ItemNull;
             if (sym_fn.item != ItemNull.item && get_type_id(sym_fn) != LMD_TYPE_UNDEFINED
-                && get_type_id(sym_fn) == LMD_TYPE_FUNC) {
+                && sym_fn.item != ITEM_JS_UNDEFINED && get_type_id(sym_fn) != LMD_TYPE_NULL) {
+                if (get_type_id(sym_fn) != LMD_TYPE_FUNC) {
+                    return js_throw_type_error("Symbol.match is not callable");
+                }
                 Item call_args[1] = { str };
                 return js_call_function(sym_fn, args[0], call_args, 1);
             }
@@ -17115,6 +17613,17 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
             String* pat = it2s(arg_str);
             if (pat) {
                 Item regex = js_create_regex(pat->chars, (int)pat->len, "", 0);
+                Item sym_key = (Item){.item = s2it(heap_create_name("__sym_7", 7))};
+                Item sym_fn = js_property_get(regex, sym_key);
+                if (js_exception_pending) return ItemNull;
+                if (sym_fn.item != ItemNull.item && sym_fn.item != ITEM_JS_UNDEFINED
+                    && get_type_id(sym_fn) != LMD_TYPE_UNDEFINED && get_type_id(sym_fn) != LMD_TYPE_NULL) {
+                    if (get_type_id(sym_fn) != LMD_TYPE_FUNC) {
+                        return js_throw_type_error("Symbol.match is not callable");
+                    }
+                    Item call_args[1] = { str };
+                    return js_call_function(sym_fn, regex, call_args, 1);
+                }
                 return js_regex_exec(regex, str);
             }
         }
@@ -17143,9 +17652,10 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
             }
             // Step 2b: If isRegExp, check that 'g' flag is present
             if (is_regexp) {
-                Item flags_val = js_property_get(args[0], (Item){.item = s2it(heap_create_name("flags", 5))});
+                Item flags_val = js_string_matchall_get_flags(args[0]);
+                if (js_exception_pending) return ItemNull;
                 // RequireObjectCoercible(flags) — throws TypeError for null/undefined
-                if (flags_val.item == ItemNull.item || get_type_id(flags_val) == LMD_TYPE_NULL
+                if (flags_val.item == ItemNull.item || flags_val.item == ITEM_JS_UNDEFINED || get_type_id(flags_val) == LMD_TYPE_NULL
                     || get_type_id(flags_val) == LMD_TYPE_UNDEFINED) {
                     return js_throw_type_error("String.prototype.matchAll called with a non-global RegExp argument");
                 }
@@ -17180,8 +17690,7 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         Item regex = ItemNull;
         const char* pat = "";
         int pat_len = 0;
-        if (argc >= 1 && get_type_id(args[0]) != LMD_TYPE_UNDEFINED
-            && args[0].item != ItemNull.item && get_type_id(args[0]) != LMD_TYPE_NULL) {
+        if (argc >= 1 && args[0].item != ITEM_JS_UNDEFINED && get_type_id(args[0]) != LMD_TYPE_UNDEFINED) {
             Item arg_str = js_to_string(args[0]);
             if (js_exception_pending) return make_js_undefined();
             String* ps = it2s(arg_str);
