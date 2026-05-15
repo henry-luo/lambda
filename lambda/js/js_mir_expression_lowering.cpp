@@ -346,7 +346,7 @@ MIR_reg_t jm_emit_put_value(JsMirTranspiler* mt, const JsMirReference* ref, MIR_
     MIR_reg_t result = value;
     switch (ref->kind) {
     case JS_MIR_REF_PROPERTY:
-        result = jm_call_3(mt, "js_property_set", MIR_T_I64,
+        result = jm_call_3(mt, ref->strict ? "js_property_set_strict" : "js_property_set", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->key_reg),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
@@ -3840,9 +3840,14 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
             }
             skip_ta_write:
 
-            // A4: Regular array write fast path — when index is known INT, use js_array_set_int
+            // A4: Regular array write fast path — when index is known INT, use js_array_set_int.
+            // Strict mode must keep the full Reference [[Set]] path because the
+            // base may be a Proxy or another exotic object even when the key is
+            // an integer literal.
             TypeId idx_type = jm_get_effective_type(mt, member->property);
-            if (idx_type == LMD_TYPE_INT) {
+            bool strict_member_set = mt->is_global_strict || mt->is_module ||
+                (mt->current_fc && mt->current_fc->is_strict);
+            if (idx_type == LMD_TYPE_INT && !strict_member_set) {
                 MIR_reg_t obj_reg = jm_transpile_box_item(mt, member->object);
                 MIR_reg_t idx_native = jm_transpile_as_native(mt, member->property, idx_type, LMD_TYPE_INT);
                 MIR_reg_t new_val;

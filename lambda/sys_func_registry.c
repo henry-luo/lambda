@@ -1352,6 +1352,7 @@ JitImport jit_runtime_imports[] = {
     {"js_arguments_mapped_get", FPTR(js_arguments_mapped_get)},
     {"js_arguments_mapped_param_writeback", FPTR(js_arguments_mapped_param_writeback)},
     {"js_property_set", FPTR(js_property_set)},
+    {"js_property_set_strict", FPTR(js_property_set_strict)},
     {"js_create_data_property", FPTR(js_create_data_property)},
     {"js_property_access", FPTR(js_property_access)},
     {"js_key_is_symbol_c", FPTR(js_key_is_symbol_c)},

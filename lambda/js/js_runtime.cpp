@@ -10,9 +10,11 @@
 
 extern "C" Item js_to_property_key(Item key);
 extern "C" Item js_reflect_own_keys(Item obj);
+extern "C" Item js_reflect_set(Item target, Item key, Item value, Item receiver);
 extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name);
 extern "C" Item js_has_own_property(Item obj, Item key);
 extern "C" Item js_property_set(Item object, Item key, Item value);
+extern "C" Item js_property_set_strict(Item object, Item key, Item value);
 extern void js_double_to_string(double d, char* out, int out_size);
 Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_found);
 
@@ -337,21 +339,27 @@ static Item js_proxy_trap_get(Item proxy, Item key) {
     return trap_result;
 }
 
+static Item js_proxy_trap_set_failure(Item key) {
+    if (js_strict_mode && get_type_id(key) == LMD_TYPE_STRING) {
+        String* sk = it2s(key);
+        js_strict_throw_property_error("set", sk ? sk->chars : NULL, sk ? (int)sk->len : 0);
+    } else if (js_strict_mode) {
+        js_strict_throw_property_error("set", NULL, 0);
+    }
+    return (Item){.item = b2it(false)};
+}
+
 // Proxy [[Set]](key, value, receiver)
-static Item js_proxy_trap_set(Item proxy, Item key, Item value) {
+extern "C" Item js_proxy_trap_set_with_receiver(Item proxy, Item key, Item value, Item receiver) {
     JsProxyData* pd = js_get_proxy_data(proxy);
-    if (!pd) return value;
+    if (!pd) return (Item){.item = b2it(false)};
     Item trap = js_proxy_get_trap(pd, "set", 3);
     if (js_exception_pending) return ItemNull;
     if (trap.item == ItemNull.item) {
-        // no trap — forward to target with receiver for setter this-binding.
-        // Stage D: RAII guard preserves any pre-existing receiver (e.g. from
-        // prototype chain lookup) or sets the proxy as receiver if absent.
-        ScopedProxyReceiver _recv_guard(proxy);
-        return js_property_set(PD_TARGET(pd), key, value);
+        return js_reflect_set(PD_TARGET(pd), key, value, receiver);
     }
     // call trap(target, property, value, receiver)
-    Item args[4] = { PD_TARGET(pd), key, value, proxy };
+    Item args[4] = { PD_TARGET(pd), key, value, receiver };
     Item result = js_call_function(trap, PD_HANDLER(pd), args, 4);
     if (js_exception_pending) return ItemNull;
     bool bool_result = it2b(js_to_boolean(result));
@@ -389,6 +397,14 @@ static Item js_proxy_trap_set(Item proxy, Item key, Item value) {
             }
         }
     }
+    return (Item){.item = b2it(true)};
+}
+
+static Item js_proxy_trap_set(Item proxy, Item key, Item value) {
+    Item receiver = js_proxy_receiver.item ? js_proxy_receiver : proxy;
+    Item result = js_proxy_trap_set_with_receiver(proxy, key, value, receiver);
+    if (js_exception_pending) return ItemNull;
+    if (result.item == (uint64_t)b2it(false)) return js_proxy_trap_set_failure(key);
     return value;
 }
 
@@ -465,6 +481,7 @@ extern "C" Item js_proxy_trap_delete(Item proxy, Item key) {
 // Proxy [[OwnKeys]]()
 static Item js_array_like_to_array(Item obj);
 static Item js_array_index_key(int64_t index);
+static Item js_array_generic_includes(Item object, Item* args, int argc);
 static Item js_array_generic_splice(Item object, Item* args, int argc);
 static bool js_array_parse_index_name(const char* name, int name_len, int64_t* out_index);
 static bool js_array_key_is_index(Item key, int64_t* out_index);
@@ -675,7 +692,7 @@ extern "C" Item js_proxy_trap_define_property(Item proxy, Item key, Item desc) {
     Item trap = js_proxy_get_trap(pd, "defineProperty", 14);
     if (js_exception_pending) return ItemNull;
     if (trap.item == ItemNull.item) {
-        return js_object_define_property(PD_TARGET(pd), key, desc);
+        return js_reflect_define_property(PD_TARGET(pd), key, desc);
     }
     Item args[3] = { PD_TARGET(pd), key, desc };
     Item result = js_call_function(trap, PD_HANDLER(pd), args, 3);
@@ -805,8 +822,7 @@ extern "C" Item js_proxy_trap_set_prototype_of(Item proxy, Item proto) {
     Item trap = js_proxy_get_trap(pd, "setPrototypeOf", 14);
     if (js_exception_pending) return ItemNull;
     if (trap.item == ItemNull.item) {
-        js_set_prototype(PD_TARGET(pd), proto);
-        return (Item){.item = b2it(true)};
+        return js_reflect_set_prototype_of(PD_TARGET(pd), proto);
     }
     Item args[2] = { PD_TARGET(pd), proto };
     Item result = js_call_function(trap, PD_HANDLER(pd), args, 2);
@@ -4684,6 +4700,22 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
     return value;
 }
 
+extern "C" Item js_property_set_strict(Item object, Item key, Item value) {
+    bool saved_strict = js_strict_mode;
+    js_strict_mode = true;
+    Item result = js_property_set(object, key, value);
+    if (!js_exception_pending && js_is_proxy(object) && result.item == (uint64_t)b2it(false)) {
+        if (get_type_id(key) == LMD_TYPE_STRING) {
+            String* sk = it2s(key);
+            js_strict_throw_property_error("set", sk ? sk->chars : NULL, sk ? (int)sk->len : 0);
+        } else {
+            js_strict_throw_property_error("set", NULL, 0);
+        }
+    }
+    js_strict_mode = saved_strict;
+    return result;
+}
+
 // v23: Force-store a property on a function's properties_map, bypassing writability checks.
 // Used by class initialization (transpiler) and Object.defineProperty.
 extern "C" void js_func_init_property(Item fn_item, Item key, Item value) {
@@ -7177,6 +7209,9 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             if (builtin_id == JS_BUILTIN_ARR_REVERSE) {
                 return js_array_generic_reverse(this_val);
             }
+            if (builtin_id == JS_BUILTIN_ARR_INCLUDES) {
+                return js_array_generic_includes(this_val, args, arg_count);
+            }
             // Plain Map: treat as array-like object (has length + numeric indices)
             // For indexOf/lastIndexOf: iterate directly to respect getter side-effects
             // (ES spec accesses each element directly during the search loop)
@@ -7315,6 +7350,11 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             // For strings, use the raw primitive for array-like conversion
             // since js_property_get on strings supports indexed char access
             Item source = (this_type == LMD_TYPE_STRING) ? this_val : wrapped;
+            if (builtin_id == JS_BUILTIN_ARR_INCLUDES) {
+                Item result = js_array_generic_includes(source, args, arg_count);
+                js_array_method_real_this = (Item){0};
+                return result;
+            }
             Item temp_arr = js_array_like_to_array(source);
             if (js_check_exception()) { js_array_method_real_this = (Item){0}; return ItemNull; }
             Item result = js_array_method(temp_arr, method_name, args, arg_count);
@@ -8658,16 +8698,16 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         return js_promise_reject_with_constructor(this_val, arg0);
     }
     case JS_BUILTIN_PROMISE_ALL:
-        if (js_promise_is_builtin_promise_constructor(this_val)) return js_promise_all(arg0);
+        if (js_promise_is_builtin_promise_constructor(this_val) && get_type_id(arg0) == LMD_TYPE_ARRAY) return js_promise_all(arg0);
         return js_promise_all_with_constructor(this_val, arg0);
     case JS_BUILTIN_PROMISE_ALL_SETTLED:
-        if (js_promise_is_builtin_promise_constructor(this_val)) return js_promise_all_settled(arg0);
+        if (js_promise_is_builtin_promise_constructor(this_val) && get_type_id(arg0) == LMD_TYPE_ARRAY) return js_promise_all_settled(arg0);
         return js_promise_all_settled_with_constructor(this_val, arg0);
     case JS_BUILTIN_PROMISE_ANY:
-        if (js_promise_is_builtin_promise_constructor(this_val)) return js_promise_any(arg0);
+        if (js_promise_is_builtin_promise_constructor(this_val) && get_type_id(arg0) == LMD_TYPE_ARRAY) return js_promise_any(arg0);
         return js_promise_any_with_constructor(this_val, arg0);
     case JS_BUILTIN_PROMISE_RACE:
-        if (js_promise_is_builtin_promise_constructor(this_val)) return js_promise_race(arg0);
+        if (js_promise_is_builtin_promise_constructor(this_val) && get_type_id(arg0) == LMD_TYPE_ARRAY) return js_promise_race(arg0);
         return js_promise_race_with_constructor(this_val, arg0);
 
     // Promise.prototype.then/catch/finally (this_val is the promise instance)
@@ -10355,6 +10395,7 @@ struct JsRegexData {
     bool ignore_case;         // 'i' flag
     bool multiline;           // 'm' flag
     bool sticky;              // 'y' flag (v46)
+    bool unicode;             // 'u' or 'v' flag: indices are reported as UTF-16 code units
     bool needs_utf16_subject; // legacy surrogate escapes match UTF-16 code units
     bool literal_fast;
 };
@@ -11562,6 +11603,7 @@ static void js_regex_put_fresh(Item obj, const char* key, int key_len, Item valu
 // Build a JS RegExp Map object from a cached regex entry, reusing compiled JsRegexData.
 static Item js_regex_build_object_from_cache(const JsRegexCacheEntry& ce) {
     JsRegexData* rd = ce.rd;
+    rd->unicode = ce.has_unicode;
     Item regex_obj = js_new_object();
     Item rd_key = (Item){.item = s2it(heap_create_name(JS_REGEX_DATA_KEY))};
     Item rd_val = (Item){.item = i2it((int64_t)(uintptr_t)rd)};
@@ -11835,6 +11877,7 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
                 rd->ignore_case = pe.ignore_case;
                 rd->multiline = pe.multiline;
                 rd->sticky = pe.sticky;
+                rd->unicode = pe.has_unicode;
                 JsRegexCacheEntry ce = {rd, pattern, pattern_len, pe.canonical_flags, pe.canonical_flags_len, pe.dot_all, pe.has_unicode};
                 g_regex_compile_cache[cache_key] = ce;
                 return js_regex_build_object_from_cache(ce);
@@ -12589,6 +12632,7 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     rd->ignore_case = !opts.case_sensitive();
     rd->multiline = multiline;
     rd->sticky = sticky;
+    rd->unicode = has_unicode;
     rd->needs_utf16_subject = needs_utf16_subject;
     rd->literal_fast = literal_fast;
     rd->special_property_kind = special_property_kind;
@@ -13134,6 +13178,7 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     int match_len = len;
     int64_t subject_units = len;
     bool utf16_subject = rd->needs_utf16_subject;
+    bool full_unicode = rd->unicode;
     if (utf16_subject) {
         subject_units = input_s ? js_utf16_len(input_s->chars, (int)input_s->len, (bool)input_s->is_ascii) : 0;
         match_s = js_string_expand_utf16_subject(input_s);
@@ -13158,7 +13203,9 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
             if (d != d) start_pos = 0; // NaN → 0
             else start_pos = (int)d;
         }
-        int64_t limit = utf16_subject ? subject_units : len;
+        int64_t limit = (utf16_subject || full_unicode)
+            ? (input_s ? js_utf16_len(input_s->chars, (int)input_s->len, (bool)input_s->is_ascii) : 0)
+            : len;
         if (start_pos < 0 || start_pos > limit) {
             if (!js_regex_set_lastindex_strict(regex, li_key, 0)) return ItemNull;
             return ItemNull;
@@ -13171,7 +13218,7 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     re2::StringPiece matches[16];
     // sticky: must match at exactly start_pos (ANCHOR_START from start_pos)
     re2::RE2::Anchor anchor = rd->sticky ? re2::RE2::ANCHOR_START : re2::RE2::UNANCHORED;
-    int match_start_pos = utf16_subject ?
+    int match_start_pos = (utf16_subject || full_unicode) ?
         js_utf16_idx_to_byte(match_chars, match_len, start_pos) : start_pos;
     bool matched = js_regex_match_internal(rd, match_chars, match_len, match_start_pos,
         anchor, matches, num_groups);
@@ -13188,6 +13235,7 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     if (uses_last_index) {
         int match_end = (int)(matches[0].data() - match_chars) + (int)matches[0].size();
         if (utf16_subject) match_end = (int)js_utf16_index_from_byte(match_chars, match_len, match_end);
+        else if (full_unicode) match_end = (int)js_utf16_index_from_byte(chars, len, match_end);
         if (!js_regex_set_lastindex_strict(regex, li_key, match_end)) return ItemNull;
     }
 
@@ -13211,6 +13259,12 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
                 int end_units = (int)js_utf16_index_from_byte(match_chars, match_len,
                     (int)(matches[i].data() - match_chars) + mlen);
                 s = js_str_substring_utf16(str, start_units, end_units);
+            } else if (full_unicode) {
+                int start_units = (int)js_utf16_index_from_byte(chars, len,
+                    (int)(matches[i].data() - match_chars));
+                int end_units = (int)js_utf16_index_from_byte(chars, len,
+                    (int)(matches[i].data() - match_chars) + mlen);
+                s = js_str_substring_utf16(str, start_units, end_units);
             } else {
                 s = (Item){.item = s2it(heap_strcpy((char*)matches[i].data(), mlen))};
             }
@@ -13224,6 +13278,7 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     // Set named properties (index, input, groups) via companion map
     int match_index = (int)(matches[0].data() - match_chars);
     if (utf16_subject) match_index = (int)js_utf16_index_from_byte(match_chars, match_len, match_index);
+    else if (full_unicode) match_index = (int)js_utf16_index_from_byte(chars, len, match_index);
     Item index_key = (Item){.item = s2it(heap_create_name("index", 5))};
     js_property_set(result, index_key, (Item){.item = i2it(match_index)});
     // v46: add input property (the original string passed to exec)
@@ -13257,6 +13312,12 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
                     int start_units = (int)js_utf16_index_from_byte(match_chars, match_len,
                         (int)(matches[idx].data() - match_chars));
                     int end_units = (int)js_utf16_index_from_byte(match_chars, match_len,
+                        (int)(matches[idx].data() - match_chars) + mlen);
+                    val = js_str_substring_utf16(str, start_units, end_units);
+                } else if (full_unicode) {
+                    int start_units = (int)js_utf16_index_from_byte(chars, len,
+                        (int)(matches[idx].data() - match_chars));
+                    int end_units = (int)js_utf16_index_from_byte(chars, len,
                         (int)(matches[idx].data() - match_chars) + mlen);
                     val = js_str_substring_utf16(str, start_units, end_units);
                 } else {
@@ -13780,7 +13841,7 @@ static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
     if (get_type_id(str) != LMD_TYPE_STRING) str = js_to_string(str);
     if (js_exception_pending) return js_array_new(0);
     String* s_str = it2s(str);
-    int size = s_str ? (int)s_str->len : 0;
+    int byte_size = s_str ? (int)s_str->len : 0;
 
     // Step 4: C = SpeciesConstructor(rx, %RegExp%)
     Item ctor_key = (Item){.item = s2it(heap_create_name("constructor", 11))};
@@ -13825,6 +13886,9 @@ static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
         if (fl[i] == 'u') unicode_matching = true;
         if (fl[i] == 'y') has_y = true;
     }
+    int size = unicode_matching
+        ? (int)(s_str ? js_utf16_len(s_str->chars, (int)s_str->len, (bool)s_str->is_ascii) : 0)
+        : byte_size;
     // Step 7: newFlags = has_y ? flags : flags + "y"
     Item new_flags_item;
     if (has_y) {
@@ -13890,8 +13954,7 @@ static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
         if (js_exception_pending) return js_array_new(0);
         // c. If z is null, q = AdvanceStringIndex(S, q, unicode)
         if (get_type_id(z) == LMD_TYPE_NULL || z.item == ItemNull.item) {
-            // AdvanceStringIndex: simplified to q+1 (unicode surrogate pair handling deferred)
-            q = q + 1;
+            q = (int)js_regex_advance_string_index_units(s_str, q, unicode_matching);
         } else {
             // d. e = ? ToLength(? Get(splitter, "lastIndex"))
             Item li_val = js_property_get(splitter, li_key);
@@ -13907,12 +13970,14 @@ static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
             int e = (e_int > size) ? size : (int)e_int;
             // f. If e == p, q = AdvanceStringIndex(S, q, unicode)
             if (e == p) {
-                q = q + 1;
+                q = (int)js_regex_advance_string_index_units(s_str, q, unicode_matching);
             } else {
                 // i. T = substring(S, p, q)
                 int t_len = q - p;
                 Item T = (t_len > 0)
-                    ? (Item){.item = s2it(heap_strcpy((char*)(chars + p), t_len))}
+                    ? (unicode_matching
+                        ? js_str_substring_utf16(str, p, q)
+                        : (Item){.item = s2it(heap_strcpy((char*)(chars + p), t_len))})
                     : (Item){.item = s2it(heap_create_name("", 0))};
                 // ii. Append T to A; lengthA++; if lengthA == lim, return A
                 js_array_push(A, T); lengthA++;
@@ -13949,7 +14014,9 @@ static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
     // Step 17-18: T = substring(S, p, size); append T
     int t_len = size - p;
     Item T = (t_len > 0)
-        ? (Item){.item = s2it(heap_strcpy((char*)(chars + p), t_len))}
+        ? (unicode_matching
+            ? js_str_substring_utf16(str, p, size)
+            : (Item){.item = s2it(heap_strcpy((char*)(chars + p), t_len))})
         : (Item){.item = s2it(heap_create_name("", 0))};
     js_array_push(A, T);
     return A;
@@ -18566,6 +18633,23 @@ static int64_t js_array_to_length(Item value) {
     return (int64_t)n;
 }
 
+static bool js_same_value_zero(Item left, Item right) {
+    TypeId left_type = get_type_id(left);
+    TypeId right_type = get_type_id(right);
+    bool left_is_num = left_type == LMD_TYPE_INT || left_type == LMD_TYPE_INT64 ||
+        left_type == LMD_TYPE_FLOAT;
+    bool right_is_num = right_type == LMD_TYPE_INT || right_type == LMD_TYPE_INT64 ||
+        right_type == LMD_TYPE_FLOAT;
+    if (left_is_num && right_is_num) {
+        double l = js_get_number(left);
+        double r = js_get_number(right);
+        if (l != l && r != r) return true;
+        return l == r;
+    }
+    extern Item js_strict_equal(Item a, Item b);
+    return it2b(js_strict_equal(left, right));
+}
+
 static int64_t js_array_relative_index(Item value, int64_t len, int64_t default_value) {
     if (get_type_id(value) == LMD_TYPE_UNDEFINED || value.item == ITEM_JS_UNDEFINED) {
         return default_value;
@@ -18784,6 +18868,29 @@ static Item js_array_generic_reverse(Item object) {
         lower++;
     }
     return object;
+}
+
+static Item js_array_generic_includes(Item object, Item* args, int argc) {
+    Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
+    int64_t len = js_array_to_length(js_property_get(object, len_key));
+    if (js_exception_pending) return ItemNull;
+    if (len == 0) return (Item){.item = b2it(false)};
+
+    Item search_val = argc >= 1 ? args[0] : make_js_undefined();
+    int64_t k = 0;
+    if (argc >= 2) {
+        k = js_array_relative_index(args[1], len, 0);
+        if (js_exception_pending) return ItemNull;
+    }
+    while (k < len) {
+        Item elem = js_property_get(object, js_array_index_key(k));
+        if (js_exception_pending) return ItemNull;
+        if (js_same_value_zero(elem, search_val)) {
+            return (Item){.item = b2it(true)};
+        }
+        k++;
+    }
+    return (Item){.item = b2it(false)};
 }
 
 extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc) {
@@ -23525,8 +23632,20 @@ static Item js_resolve_callback(Item promise_idx_item, Item value);
 static Item js_reject_callback(Item promise_idx_item, Item reason);
 static void js_promise_enqueue_handler(Item handler, Item result, Item next_promise_item);
 static void js_promise_enqueue_passthrough(Item next_promise_item, JsPromiseState state, Item result);
+static Item js_all_resolve_element(Item counter_obj, Item index_item, Item result_item, Item value);
+static Item js_all_reject_element(Item counter_obj, Item index_item, Item result_item, Item reason);
+static Item js_any_fulfill_element(Item counter_obj, Item index_item, Item result_item, Item value);
+static Item js_any_reject_element(Item counter_obj, Item index_item, Item result_item, Item reason);
+static Item js_settled_fulfill_element(Item counter_obj, Item index_item, Item result_item, Item value);
+static Item js_settled_reject_element(Item counter_obj, Item index_item, Item result_item, Item reason);
+static bool js_invoke_promise_then(Item elem, Item resolve_fn, Item reject_fn);
 static bool js_promise_materialize_iterable(Item iterable, Item* out_array, Item* out_rejection);
 static Item js_promise_make_aggregate_error(Item errors);
+static Item js_promise_all_iterable(Item iterable);
+static Item js_promise_race_iterable(Item iterable);
+static Item js_promise_any_iterable(Item iterable);
+static Item js_promise_all_settled_iterable(Item iterable);
+extern "C" Item js_get_constructor(Item name_item);
 extern "C" Item js_promise_all(Item iterable);
 extern "C" Item js_promise_race(Item iterable);
 extern "C" Item js_promise_any(Item iterable);
@@ -24026,11 +24145,148 @@ static bool js_promise_resolve_elements_with_constructor(Item constructor, Item 
     return true;
 }
 
+static Item js_promise_combinator_iterable_with_constructor(
+    Item constructor, Item iterable, int kind, Item promise, Item resolve, Item reject) {
+    Item resolve_method = js_property_get(constructor, (Item){.item = s2it(heap_create_name("resolve", 7))});
+    if (js_check_exception()) {
+        Item error = js_clear_exception();
+        js_promise_call_capability_reject(reject, error);
+        return promise;
+    }
+    if (get_type_id(resolve_method) != LMD_TYPE_FUNC) {
+        Item error = js_promise_make_type_error("Promise resolve is not callable", 31);
+        js_promise_call_capability_reject(reject, error);
+        return promise;
+    }
+
+    Item iterator = js_get_iterator(iterable);
+    if (js_check_exception()) {
+        Item error = js_clear_exception();
+        js_promise_call_capability_reject(reject, error);
+        return promise;
+    }
+
+    JsPromise* native_result = js_alloc_promise();
+    if (!native_result) return promise;
+    Item native_item = js_promise_to_item(native_result);
+    js_promise_forward_native_to_capability(native_item, resolve, reject);
+
+    Item resolving_state = ItemNull;
+    Item native_resolve_fn = ItemNull;
+    Item native_reject_fn = ItemNull;
+    if (kind == 3) {
+        resolving_state = js_promise_make_resolving_state(native_result);
+        Item resolve_base = js_new_function((void*)js_resolve_callback, 2);
+        Item reject_base = js_new_function((void*)js_reject_callback, 2);
+        native_resolve_fn = js_bind_function(resolve_base, ItemNull, &resolving_state, 1);
+        native_reject_fn = js_bind_function(reject_base, ItemNull, &resolving_state, 1);
+    }
+
+    Item counter = ItemNull;
+    Item values_arr = ItemNull;
+    Item called_arr = ItemNull;
+    if (kind != 3) {
+        counter = js_new_object();
+        js_property_set(counter, (Item){.item = s2it(heap_create_name("remaining", 9))}, (Item){.item = i2it(1)});
+        values_arr = js_array_new(0);
+        called_arr = js_array_new(0);
+        const char* values_name = (kind == 2) ? "errors" : "results";
+        int values_len = (kind == 2) ? 6 : 7;
+        js_property_set(counter, (Item){.item = s2it(heap_create_name(values_name, values_len))}, values_arr);
+        js_property_set(counter, (Item){.item = s2it(heap_create_name("called", 6))}, called_arr);
+    }
+
+    int index = 0;
+    while (true) {
+        Item elem = js_iterator_step(iterator);
+        if (js_check_exception()) {
+            Item error = js_clear_exception();
+            js_promise_call_capability_reject(reject, error);
+            return promise;
+        }
+        if (elem.item == JS_ITER_DONE_SENTINEL) break;
+
+        Item args[1] = {elem};
+        Item next_promise = js_call_function(resolve_method, constructor, args, 1);
+        if (js_check_exception()) {
+            Item error = js_clear_exception();
+            js_iterator_close(iterator);
+            if (js_check_exception()) js_clear_exception();
+            js_promise_call_capability_reject(reject, error);
+            return promise;
+        }
+
+        if (kind == 3) {
+            if (!js_invoke_promise_then(next_promise, native_resolve_fn, native_reject_fn)) {
+                js_iterator_close(iterator);
+                if (js_check_exception()) js_clear_exception();
+                return promise;
+            }
+            continue;
+        }
+
+        js_array_push_item_direct(values_arr.array, make_js_undefined());
+        js_array_push_item_direct(called_arr.array, (Item){.item = ITEM_FALSE});
+        int remaining = (int)it2i(js_property_get(counter, (Item){.item = s2it(heap_create_name("remaining", 9))}));
+        js_property_set(counter, (Item){.item = s2it(heap_create_name("remaining", 9))}, (Item){.item = i2it(remaining + 1)});
+
+        Item fulfill_fn = ItemNull;
+        Item reject_fn = ItemNull;
+        if (kind == 0) {
+            Item fulfill_handler = js_new_function((void*)js_all_resolve_element, 4);
+            Item fulfill_args[3] = {counter, (Item){.item = i2it(index)}, native_item};
+            fulfill_fn = js_bind_function(fulfill_handler, ItemNull, fulfill_args, 3);
+
+            Item reject_handler = js_new_function((void*)js_all_reject_element, 4);
+            Item reject_args[3] = {counter, (Item){.item = i2it(index)}, native_item};
+            reject_fn = js_bind_function(reject_handler, ItemNull, reject_args, 3);
+        } else if (kind == 1) {
+            Item fulfill_handler = js_new_function((void*)js_settled_fulfill_element, 4);
+            Item fulfill_args[3] = {counter, (Item){.item = i2it(index)}, native_item};
+            fulfill_fn = js_bind_function(fulfill_handler, ItemNull, fulfill_args, 3);
+
+            Item reject_handler = js_new_function((void*)js_settled_reject_element, 4);
+            Item reject_args[3] = {counter, (Item){.item = i2it(index)}, native_item};
+            reject_fn = js_bind_function(reject_handler, ItemNull, reject_args, 3);
+        } else {
+            Item fulfill_handler = js_new_function((void*)js_any_fulfill_element, 4);
+            Item fulfill_args[3] = {counter, (Item){.item = i2it(index)}, native_item};
+            fulfill_fn = js_bind_function(fulfill_handler, ItemNull, fulfill_args, 3);
+
+            Item reject_handler = js_new_function((void*)js_any_reject_element, 4);
+            Item reject_args[3] = {counter, (Item){.item = i2it(index)}, native_item};
+            reject_fn = js_bind_function(reject_handler, ItemNull, reject_args, 3);
+        }
+
+        if (!js_invoke_promise_then(next_promise, fulfill_fn, reject_fn)) {
+            js_iterator_close(iterator);
+            if (js_check_exception()) js_clear_exception();
+            return promise;
+        }
+        index++;
+    }
+
+    if (kind != 3) {
+        int remaining = (int)it2i(js_property_get(counter, (Item){.item = s2it(heap_create_name("remaining", 9))})) - 1;
+        js_property_set(counter, (Item){.item = s2it(heap_create_name("remaining", 9))}, (Item){.item = i2it(remaining)});
+        if (remaining == 0) {
+            if (kind == 2) js_promise_settle(native_result, JS_PROMISE_REJECTED, js_promise_make_aggregate_error(values_arr));
+            else js_promise_settle(native_result, JS_PROMISE_FULFILLED, values_arr);
+        }
+    }
+
+    return promise;
+}
+
 static Item js_promise_combinator_with_constructor(Item constructor, Item iterable, int kind) {
     Item resolve = ItemNull;
     Item reject = ItemNull;
     Item promise = js_promise_new_capability(constructor, &resolve, &reject);
     if (js_check_exception()) return ItemNull;
+
+    if (get_type_id(iterable) != LMD_TYPE_ARRAY) {
+        return js_promise_combinator_iterable_with_constructor(constructor, iterable, kind, promise, resolve, reject);
+    }
 
     Item arr_item = ItemNull;
     Item rejection = ItemNull;
@@ -24524,14 +24780,15 @@ static Item js_settled_reject_element(Item counter_obj, Item index_item, Item re
 // Helper: invoke the user-visible .then method on a promise element.
 // Per ES spec, Promise.all/race/any/allSettled must call Invoke(nextPromise, "then", ...)
 // so that user-overridden .then methods are respected.
-static void js_invoke_promise_then(Item elem, Item resolve_fn, Item reject_fn) {
+static bool js_invoke_promise_then(Item elem, Item resolve_fn, Item reject_fn) {
     Item then_key = (Item){.item = s2it(heap_create_name("then", 4))};
     Item then_fn = js_property_get(elem, then_key);
     if (js_check_exception()) {
         Item error = js_clear_exception();
         Item args[1] = {error};
         js_call_function(reject_fn, ItemNull, args, 1);
-        return;
+        if (js_check_exception()) js_clear_exception();
+        return false;
     }
     if (get_type_id(then_fn) == LMD_TYPE_FUNC) {
         Item call_args[2] = {resolve_fn, reject_fn};
@@ -24540,11 +24797,14 @@ static void js_invoke_promise_then(Item elem, Item resolve_fn, Item reject_fn) {
             Item error = js_clear_exception();
             Item args[1] = {error};
             js_call_function(reject_fn, ItemNull, args, 1);
+            if (js_check_exception()) js_clear_exception();
+            return false;
         }
     } else {
         // fallback: use internal then for non-standard promise objects
         js_promise_then(elem, resolve_fn, reject_fn);
     }
+    return true;
 }
 
 static bool js_promise_materialize_iterable(Item iterable, Item* out_array, Item* out_rejection) {
@@ -24566,7 +24826,22 @@ static bool js_promise_materialize_iterable(Item iterable, Item* out_array, Item
     return true;
 }
 
+static bool js_promise_builtin_constructor_resolve(Item value, Item* out_promise) {
+    Item ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Promise", 7))});
+    Item resolve_method = js_property_get(ctor, (Item){.item = s2it(heap_create_name("resolve", 7))});
+    if (js_check_exception()) return false;
+    if (get_type_id(resolve_method) != LMD_TYPE_FUNC) {
+        js_throw_type_error("Promise resolve is not callable");
+        return false;
+    }
+    Item args[1] = {value};
+    *out_promise = js_call_function(resolve_method, ctor, args, 1);
+    return !js_check_exception();
+}
+
 extern "C" Item js_promise_all(Item iterable) {
+    if (get_type_id(iterable) != LMD_TYPE_ARRAY) return js_promise_all_iterable(iterable);
+
     Item arr_item = ItemNull;
     Item rejection = ItemNull;
     if (!js_promise_materialize_iterable(iterable, &arr_item, &rejection)) {
@@ -24597,8 +24872,11 @@ extern "C" Item js_promise_all(Item iterable) {
 
     for (int i = 0; i < count; i++) {
         Item elem = arr->items[i];
-        JsPromise* p = js_get_promise(elem);
-        if (!p) elem = js_promise_resolve(elem);
+        if (!js_promise_builtin_constructor_resolve(elem, &elem)) {
+            Item error = js_clear_exception();
+            js_promise_settle(result, JS_PROMISE_REJECTED, error);
+            return result_item;
+        }
 
         Item resolve_handler = js_new_function((void*)js_all_resolve_element, 4);
         Item resolve_args[3] = {counter, (Item){.item = i2it(i)}, result_item};
@@ -24614,7 +24892,69 @@ extern "C" Item js_promise_all(Item iterable) {
     return result_item;
 }
 
+static Item js_promise_all_iterable(Item iterable) {
+    Item iterator = js_get_iterator(iterable);
+    if (js_check_exception()) return js_promise_reject(js_clear_exception());
+
+    JsPromise* result = js_alloc_promise();
+    if (!result) return ItemNull;
+    Item result_item = js_promise_to_item(result);
+
+    Item counter = js_new_object();
+    js_property_set(counter, (Item){.item = s2it(heap_create_name("remaining", 9))}, (Item){.item = i2it(1)});
+    Item results_arr = js_array_new(0);
+    js_property_set(counter, (Item){.item = s2it(heap_create_name("results", 7))}, results_arr);
+    Item called_arr = js_array_new(0);
+    js_property_set(counter, (Item){.item = s2it(heap_create_name("called", 6))}, called_arr);
+
+    int index = 0;
+    while (true) {
+        Item elem = js_iterator_step(iterator);
+        if (js_check_exception()) {
+            Item error = js_clear_exception();
+            js_promise_settle(result, JS_PROMISE_REJECTED, error);
+            return result_item;
+        }
+        if (elem.item == JS_ITER_DONE_SENTINEL) break;
+
+        js_array_push_item_direct(results_arr.array, make_js_undefined());
+        js_array_push_item_direct(called_arr.array, (Item){.item = ITEM_FALSE});
+        int remaining = (int)it2i(js_property_get(counter, (Item){.item = s2it(heap_create_name("remaining", 9))}));
+        js_property_set(counter, (Item){.item = s2it(heap_create_name("remaining", 9))}, (Item){.item = i2it(remaining + 1)});
+
+        if (!js_promise_builtin_constructor_resolve(elem, &elem)) {
+            Item error = js_clear_exception();
+            js_iterator_close(iterator);
+            if (js_check_exception()) js_clear_exception();
+            js_promise_settle(result, JS_PROMISE_REJECTED, error);
+            return result_item;
+        }
+
+        Item resolve_handler = js_new_function((void*)js_all_resolve_element, 4);
+        Item resolve_args[3] = {counter, (Item){.item = i2it(index)}, result_item};
+        Item resolve_fn = js_bind_function(resolve_handler, ItemNull, resolve_args, 3);
+
+        Item reject_handler = js_new_function((void*)js_all_reject_element, 4);
+        Item reject_args[3] = {counter, (Item){.item = i2it(index)}, result_item};
+        Item reject_fn = js_bind_function(reject_handler, ItemNull, reject_args, 3);
+
+        if (!js_invoke_promise_then(elem, resolve_fn, reject_fn)) {
+            js_iterator_close(iterator);
+            if (js_check_exception()) js_clear_exception();
+            return result_item;
+        }
+        index++;
+    }
+
+    int remaining = (int)it2i(js_property_get(counter, (Item){.item = s2it(heap_create_name("remaining", 9))})) - 1;
+    js_property_set(counter, (Item){.item = s2it(heap_create_name("remaining", 9))}, (Item){.item = i2it(remaining)});
+    if (remaining == 0) js_promise_settle(result, JS_PROMISE_FULFILLED, results_arr);
+    return result_item;
+}
+
 extern "C" Item js_promise_race(Item iterable) {
+    if (get_type_id(iterable) != LMD_TYPE_ARRAY) return js_promise_race_iterable(iterable);
+
     Item arr_item = ItemNull;
     Item rejection = ItemNull;
     if (!js_promise_materialize_iterable(iterable, &arr_item, &rejection)) {
@@ -24638,15 +24978,59 @@ extern "C" Item js_promise_race(Item iterable) {
 
     for (int i = 0; i < arr->length; i++) {
         Item elem = arr->items[i];
-        JsPromise* p = js_get_promise(elem);
-        if (!p) elem = js_promise_resolve(elem);
+        if (!js_promise_builtin_constructor_resolve(elem, &elem)) {
+            Item error = js_clear_exception();
+            js_promise_settle(result, JS_PROMISE_REJECTED, error);
+            return result_item;
+        }
         js_invoke_promise_then(elem, resolve_fn, reject_fn);
     }
 
     return result_item;
 }
 
+static Item js_promise_race_iterable(Item iterable) {
+    Item iterator = js_get_iterator(iterable);
+    if (js_check_exception()) return js_promise_reject(js_clear_exception());
+
+    JsPromise* result = js_alloc_promise();
+    if (!result) return ItemNull;
+    Item result_item = js_promise_to_item(result);
+
+    Item resolving_state = js_promise_make_resolving_state(result);
+    Item resolve_base = js_new_function((void*)js_resolve_callback, 2);
+    Item reject_base = js_new_function((void*)js_reject_callback, 2);
+    Item resolve_fn = js_bind_function(resolve_base, ItemNull, &resolving_state, 1);
+    Item reject_fn = js_bind_function(reject_base, ItemNull, &resolving_state, 1);
+
+    while (true) {
+        Item elem = js_iterator_step(iterator);
+        if (js_check_exception()) {
+            Item error = js_clear_exception();
+            js_promise_settle(result, JS_PROMISE_REJECTED, error);
+            return result_item;
+        }
+        if (elem.item == JS_ITER_DONE_SENTINEL) break;
+        if (!js_promise_builtin_constructor_resolve(elem, &elem)) {
+            Item error = js_clear_exception();
+            js_iterator_close(iterator);
+            if (js_check_exception()) js_clear_exception();
+            js_promise_settle(result, JS_PROMISE_REJECTED, error);
+            return result_item;
+        }
+        if (!js_invoke_promise_then(elem, resolve_fn, reject_fn)) {
+            js_iterator_close(iterator);
+            if (js_check_exception()) js_clear_exception();
+            return result_item;
+        }
+    }
+
+    return result_item;
+}
+
 extern "C" Item js_promise_any(Item iterable) {
+    if (get_type_id(iterable) != LMD_TYPE_ARRAY) return js_promise_any_iterable(iterable);
+
     Item arr_item = ItemNull;
     Item rejection = ItemNull;
     if (!js_promise_materialize_iterable(iterable, &arr_item, &rejection)) {
@@ -24677,8 +25061,11 @@ extern "C" Item js_promise_any(Item iterable) {
 
     for (int i = 0; i < count; i++) {
         Item elem = arr->items[i];
-        JsPromise* p = js_get_promise(elem);
-        if (!p) elem = js_promise_resolve(elem);
+        if (!js_promise_builtin_constructor_resolve(elem, &elem)) {
+            Item error = js_clear_exception();
+            js_promise_settle(result_p, JS_PROMISE_REJECTED, error);
+            return result_item;
+        }
 
         Item fulfill_handler = js_new_function((void*)js_any_fulfill_element, 4);
         Item fulfill_args[3] = {counter, (Item){.item = i2it(i)}, result_item};
@@ -24694,7 +25081,71 @@ extern "C" Item js_promise_any(Item iterable) {
     return result_item;
 }
 
+static Item js_promise_any_iterable(Item iterable) {
+    Item iterator = js_get_iterator(iterable);
+    if (js_check_exception()) return js_promise_reject(js_clear_exception());
+
+    JsPromise* result_p = js_alloc_promise();
+    if (!result_p) return ItemNull;
+    Item result_item = js_promise_to_item(result_p);
+
+    Item counter = js_new_object();
+    js_property_set(counter, (Item){.item = s2it(heap_create_name("remaining", 9))}, (Item){.item = i2it(1)});
+    Item errors_arr = js_array_new(0);
+    js_property_set(counter, (Item){.item = s2it(heap_create_name("errors", 6))}, errors_arr);
+    Item called_arr = js_array_new(0);
+    js_property_set(counter, (Item){.item = s2it(heap_create_name("called", 6))}, called_arr);
+
+    int index = 0;
+    while (true) {
+        Item elem = js_iterator_step(iterator);
+        if (js_check_exception()) {
+            Item error = js_clear_exception();
+            js_promise_settle(result_p, JS_PROMISE_REJECTED, error);
+            return result_item;
+        }
+        if (elem.item == JS_ITER_DONE_SENTINEL) break;
+
+        js_array_push_item_direct(errors_arr.array, make_js_undefined());
+        js_array_push_item_direct(called_arr.array, (Item){.item = ITEM_FALSE});
+        int remaining = (int)it2i(js_property_get(counter, (Item){.item = s2it(heap_create_name("remaining", 9))}));
+        js_property_set(counter, (Item){.item = s2it(heap_create_name("remaining", 9))}, (Item){.item = i2it(remaining + 1)});
+
+        if (!js_promise_builtin_constructor_resolve(elem, &elem)) {
+            Item error = js_clear_exception();
+            js_iterator_close(iterator);
+            if (js_check_exception()) js_clear_exception();
+            js_promise_settle(result_p, JS_PROMISE_REJECTED, error);
+            return result_item;
+        }
+
+        Item fulfill_handler = js_new_function((void*)js_any_fulfill_element, 4);
+        Item fulfill_args[3] = {counter, (Item){.item = i2it(index)}, result_item};
+        Item resolve_fn = js_bind_function(fulfill_handler, ItemNull, fulfill_args, 3);
+
+        Item reject_handler = js_new_function((void*)js_any_reject_element, 4);
+        Item reject_args[3] = {counter, (Item){.item = i2it(index)}, result_item};
+        Item reject_fn = js_bind_function(reject_handler, ItemNull, reject_args, 3);
+
+        if (!js_invoke_promise_then(elem, resolve_fn, reject_fn)) {
+            js_iterator_close(iterator);
+            if (js_check_exception()) js_clear_exception();
+            return result_item;
+        }
+        index++;
+    }
+
+    int remaining = (int)it2i(js_property_get(counter, (Item){.item = s2it(heap_create_name("remaining", 9))})) - 1;
+    js_property_set(counter, (Item){.item = s2it(heap_create_name("remaining", 9))}, (Item){.item = i2it(remaining)});
+    if (remaining == 0) {
+        js_promise_settle(result_p, JS_PROMISE_REJECTED, js_promise_make_aggregate_error(errors_arr));
+    }
+    return result_item;
+}
+
 extern "C" Item js_promise_all_settled(Item iterable) {
+    if (get_type_id(iterable) != LMD_TYPE_ARRAY) return js_promise_all_settled_iterable(iterable);
+
     Item arr_item = ItemNull;
     Item rejection = ItemNull;
     if (!js_promise_materialize_iterable(iterable, &arr_item, &rejection)) {
@@ -24724,8 +25175,11 @@ extern "C" Item js_promise_all_settled(Item iterable) {
 
     for (int i = 0; i < count; i++) {
         Item elem = arr->items[i];
-        JsPromise* p = js_get_promise(elem);
-        if (!p) elem = js_promise_resolve(elem);
+        if (!js_promise_builtin_constructor_resolve(elem, &elem)) {
+            Item error = js_clear_exception();
+            js_promise_settle(result, JS_PROMISE_REJECTED, error);
+            return result_item;
+        }
 
         Item fulfill_args[3] = {counter, (Item){.item = i2it(i)}, result_item};
 
@@ -24740,6 +25194,66 @@ extern "C" Item js_promise_all_settled(Item iterable) {
         js_invoke_promise_then(elem, fulfill_fn, reject_fn);
     }
 
+    return result_item;
+}
+
+static Item js_promise_all_settled_iterable(Item iterable) {
+    Item iterator = js_get_iterator(iterable);
+    if (js_check_exception()) return js_promise_reject(js_clear_exception());
+
+    JsPromise* result = js_alloc_promise();
+    if (!result) return ItemNull;
+    Item result_item = js_promise_to_item(result);
+
+    Item counter = js_new_object();
+    js_property_set(counter, (Item){.item = s2it(heap_create_name("remaining", 9))}, (Item){.item = i2it(1)});
+    Item results_arr = js_array_new(0);
+    js_property_set(counter, (Item){.item = s2it(heap_create_name("results", 7))}, results_arr);
+    Item called_arr = js_array_new(0);
+    js_property_set(counter, (Item){.item = s2it(heap_create_name("called", 6))}, called_arr);
+
+    int index = 0;
+    while (true) {
+        Item elem = js_iterator_step(iterator);
+        if (js_check_exception()) {
+            Item error = js_clear_exception();
+            js_promise_settle(result, JS_PROMISE_REJECTED, error);
+            return result_item;
+        }
+        if (elem.item == JS_ITER_DONE_SENTINEL) break;
+
+        js_array_push_item_direct(results_arr.array, make_js_undefined());
+        js_array_push_item_direct(called_arr.array, (Item){.item = ITEM_FALSE});
+        int remaining = (int)it2i(js_property_get(counter, (Item){.item = s2it(heap_create_name("remaining", 9))}));
+        js_property_set(counter, (Item){.item = s2it(heap_create_name("remaining", 9))}, (Item){.item = i2it(remaining + 1)});
+
+        if (!js_promise_builtin_constructor_resolve(elem, &elem)) {
+            Item error = js_clear_exception();
+            js_iterator_close(iterator);
+            if (js_check_exception()) js_clear_exception();
+            js_promise_settle(result, JS_PROMISE_REJECTED, error);
+            return result_item;
+        }
+
+        Item fulfill_args[3] = {counter, (Item){.item = i2it(index)}, result_item};
+        Item fulfill_handler = js_new_function((void*)js_settled_fulfill_element, 4);
+        Item fulfill_fn = js_bind_function(fulfill_handler, ItemNull, fulfill_args, 3);
+
+        Item reject_args[3] = {counter, (Item){.item = i2it(index)}, result_item};
+        Item reject_handler = js_new_function((void*)js_settled_reject_element, 4);
+        Item reject_fn = js_bind_function(reject_handler, ItemNull, reject_args, 3);
+
+        if (!js_invoke_promise_then(elem, fulfill_fn, reject_fn)) {
+            js_iterator_close(iterator);
+            if (js_check_exception()) js_clear_exception();
+            return result_item;
+        }
+        index++;
+    }
+
+    int remaining = (int)it2i(js_property_get(counter, (Item){.item = s2it(heap_create_name("remaining", 9))})) - 1;
+    js_property_set(counter, (Item){.item = s2it(heap_create_name("remaining", 9))}, (Item){.item = i2it(remaining)});
+    if (remaining == 0) js_promise_settle(result, JS_PROMISE_FULFILLED, results_arr);
     return result_item;
 }
 

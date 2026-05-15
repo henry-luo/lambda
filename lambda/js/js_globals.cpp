@@ -23,7 +23,9 @@
 #include "../transpiler.hpp"
 
 extern "C" Item js_to_property_key(Item key);
+extern "C" int64_t js_key_is_symbol_c(Item key);
 extern "C" Item js_bound_function_target(Item func_item);
+extern "C" Item js_proxy_trap_set_with_receiver(Item proxy, Item key, Item value, Item receiver);
 extern "C" bool js_dom_item_is_range(Item item);
 extern "C" bool js_dom_item_is_selection(Item item);
 extern "C" Item js_dom_range_get_prototype_value(void);
@@ -6555,9 +6557,7 @@ extern "C" Item js_reflect_set(Item target, Item key, Item value, Item receiver)
     // Proxy/TypedArray fast paths BEFORE ToPropertyKey: integer index dispatch
     // in js_property_set requires the original int key, not stringified.
     if (js_is_proxy(target)) {
-        Item r = js_property_set(target, key, value);
-        if (r.item == (uint64_t)b2it(false)) return (Item){.item = b2it(false)};
-        return (Item){.item = b2it(true)};
+        return js_proxy_trap_set_with_receiver(target, key, value, receiver);
     }
     if (get_type_id(target) == LMD_TYPE_MAP &&
         target.map && target.map->map_kind == MAP_KIND_TYPED_ARRAY) {
@@ -6746,9 +6746,9 @@ extern "C" Item js_reflect_define_property(Item obj, Item key, Item desc) {
         bool ta_define_ok = js_ta_define_own_numeric_index(obj, key, desc, &ta_define_handled);
         if (js_check_exception()) return ItemNull;
         if (ta_define_handled) return (Item){.item = b2it(ta_define_ok)};
-        if (!js_is_truthy(js_object_is_extensible(obj)) && !it2b(js_has_own_property(obj, key))) {
-            return (Item){.item = b2it(false)};
-        }
+    }
+    if (!js_is_truthy(js_object_is_extensible(obj)) && !it2b(js_has_own_property(obj, key))) {
+        return (Item){.item = b2it(false)};
     }
     js_object_define_property(obj, key, desc);
     if (js_check_exception()) return ItemNull;
@@ -6865,8 +6865,10 @@ extern "C" Item js_reflect_get(Item target, Item key) {
 // Reflect.has(target, key) — ES §28.1.9
 extern "C" Item js_reflect_has(Item target, Item key) {
     if (!js_require_object_type(target, "has")) return ItemNull;
-    key = js_to_property_key(key);
-    if (js_check_exception()) return ItemNull;
+    if (!js_key_is_symbol_c(key)) {
+        key = js_to_property_key(key);
+        if (js_check_exception()) return ItemNull;
+    }
     return js_in(key, target);
 }
 
@@ -8834,50 +8836,63 @@ extern "C" Item js_object_entries(Item object) {
 // Object.fromEntries(iterable) — create object from [key, value] pairs
 // =============================================================================
 
-extern "C" Item js_iterable_to_array(Item iterable);
+static bool js_object_from_entries_entry_is_object(Item entry) {
+    TypeId tid = get_type_id(entry);
+    return tid == LMD_TYPE_MAP || tid == LMD_TYPE_ARRAY ||
+           tid == LMD_TYPE_FUNC || tid == LMD_TYPE_ELEMENT;
+}
+
+static void js_object_from_entries_close_preserve_exception(Item iterator) {
+    Item original = js_clear_exception();
+    js_iterator_close(iterator);
+    js_throw_value(original);
+}
 
 extern "C" Item js_object_from_entries(Item iterable) {
-    TypeId type = get_type_id(iterable);
-    // Convert non-array iterables (Map, generator, etc.) to array first
-    Item arr = iterable;
-    if (type != LMD_TYPE_ARRAY) {
-        arr = js_iterable_to_array(iterable);
-        if (js_check_exception()) return ItemNull; // propagate iterator errors
-        if (get_type_id(arr) != LMD_TYPE_ARRAY) return js_new_object();
-    }
-
     Item result = js_new_object();
-    int64_t len = js_array_length(arr);
-    for (int64_t i = 0; i < len; i++) {
-        Item pair = js_array_get(arr, (Item){.item = i2it(i)});
-        TypeId ptid = get_type_id(pair);
-        // Spec: entry must be an object. Accept arrays, maps (including string/number wrappers).
-        // Primitive strings are NOT objects — they should throw TypeError.
-        if (ptid != LMD_TYPE_ARRAY && ptid != LMD_TYPE_MAP) {
-            extern Item js_new_error_with_name(Item type_name, Item message);
-            extern void js_throw_value(Item error);
+
+    Item iterator = js_get_iterator(iterable);
+    if (js_check_exception()) return ItemNull;
+
+    Item key0 = (Item){.item = s2it(heap_create_name("0", 1))};
+    Item key1 = (Item){.item = s2it(heap_create_name("1", 1))};
+
+    while (true) {
+        Item entry = js_iterator_step(iterator);
+        if (js_check_exception()) return ItemNull;
+        if (entry.item == JS_ITER_DONE_SENTINEL) break;
+
+        if (!js_object_from_entries_entry_is_object(entry)) {
             Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
             Item msg = (Item){.item = s2it(heap_create_name("Iterator value is not an entry object"))};
             js_throw_value(js_new_error_with_name(tn, msg));
+            js_object_from_entries_close_preserve_exception(iterator);
             return ItemNull;
         }
-        Item key, val;
-        if (ptid == LMD_TYPE_ARRAY) {
-            key = js_array_get(pair, (Item){.item = i2it(0)});
-            val = js_array_get(pair, (Item){.item = i2it(1)});
-        } else {
-            // MAP or String: access [0] and [1] via property_get with string keys
-            Item k0 = (Item){.item = s2it(heap_create_name("0", 1))};
-            Item k1 = (Item){.item = s2it(heap_create_name("1", 1))};
-            key = js_property_get(pair, k0);
-            val = js_property_get(pair, k1);
+
+        Item key = js_property_get(entry, key0);
+        if (js_check_exception()) {
+            js_object_from_entries_close_preserve_exception(iterator);
+            return ItemNull;
         }
-        // Use ToPropertyKey: preserves Symbol keys, converts others to string
-        extern Item js_to_property_key(Item key);
+
+        Item val = js_property_get(entry, key1);
+        if (js_check_exception()) {
+            js_object_from_entries_close_preserve_exception(iterator);
+            return ItemNull;
+        }
+
         Item prop_key = js_to_property_key(key);
-        if (js_check_exception()) return ItemNull;
+        if (js_check_exception()) {
+            js_object_from_entries_close_preserve_exception(iterator);
+            return ItemNull;
+        }
+
         js_create_data_property(result, prop_key, val);
-        if (js_check_exception()) return ItemNull;
+        if (js_check_exception()) {
+            js_object_from_entries_close_preserve_exception(iterator);
+            return ItemNull;
+        }
     }
     return result;
 }
