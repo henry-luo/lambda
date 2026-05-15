@@ -380,6 +380,11 @@ void js_dom_register_named_elements(DomElement* root) {
 extern "C" void js_dom_set_document(void* dom_doc) {
     _js_current_document = (DomDocument*)dom_doc;
     _js_main_document = (DomDocument*)dom_doc;
+    if (js_document_proxy_item.item != ITEM_NULL &&
+        get_type_id(js_document_proxy_item) == LMD_TYPE_MAP &&
+        js_document_proxy_item.map) {
+        js_document_proxy_item.map->data = dom_doc;
+    }
     if (dom_doc) {
         js_doc_mark_has_browsing_context(dom_doc);
         DomDocument* doc = (DomDocument*)dom_doc;
@@ -474,7 +479,7 @@ extern "C" void* js_dom_get_or_create_doc_node(void* doc_v) {
 // or ItemNull if none is registered.
 static Item doc_to_proxy_item(DomDocument* doc) {
     if (!doc) return ItemNull;
-    if (doc == _js_current_document) {
+    if (doc == _js_main_document) {
         return js_get_document_object_value();
     }
     return lookup_foreign_doc_wrapper(doc);
@@ -566,10 +571,12 @@ extern "C" void* js_dom_unwrap_element(Item item) {
     }
     // document proxy / foreign-doc wrapper → return the doc-stub DomElement
     // (lazy-create) so JS Range/Selection APIs accept `document` as a container.
-    if (m->map_kind == MAP_KIND_DOC_PROXY && m->type == (void*)&js_document_proxy_marker) {
-        return js_dom_get_or_create_doc_node(_js_current_document);
+    if (m->map_kind == MAP_KIND_DOC_PROXY) {
+        DomDocument* doc = (DomDocument*)(m->data ? m->data : (void*)_js_main_document);
+        if (!doc) doc = _js_current_document;
+        return js_dom_get_or_create_doc_node(doc);
     }
-    if (m->map_kind == MAP_KIND_FOREIGN_DOC && m->type == (void*)&js_foreign_doc_marker) {
+    if (m->map_kind == MAP_KIND_FOREIGN_DOC) {
         return js_dom_get_or_create_doc_node(m->data);
     }
     return nullptr;
@@ -612,12 +619,18 @@ extern "C" bool js_is_dom_implementation(Item item) {
 }
 
 extern "C" Item js_get_document_object_value() {
-    if (js_document_proxy_item.item != ITEM_NULL) return js_document_proxy_item;
+    if (js_document_proxy_item.item != ITEM_NULL) {
+        if (get_type_id(js_document_proxy_item) == LMD_TYPE_MAP &&
+            js_document_proxy_item.map && !js_document_proxy_item.map->data) {
+            js_document_proxy_item.map->data = _js_main_document;
+        }
+        return js_document_proxy_item;
+    }
     Map* wrapper = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     wrapper->type_id = LMD_TYPE_MAP;
     wrapper->map_kind = MAP_KIND_DOC_PROXY;
     wrapper->type = (void*)&js_document_proxy_marker;
-    wrapper->data = nullptr;
+    wrapper->data = _js_main_document;
     wrapper->data_cap = 0;
     js_document_proxy_item = (Item){.map = wrapper};
     heap_register_gc_root(&js_document_proxy_item.item);
