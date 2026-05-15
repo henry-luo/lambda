@@ -51,6 +51,20 @@ static inline Item event_make_double(double v) {
     return (Item){.item = d2it(p)};
 }
 
+static void event_apply_new_target_prototype(Item event) {
+    Item new_target = js_get_new_target();
+    TypeId nt_type = get_type_id(new_target);
+    if (nt_type != LMD_TYPE_MAP && nt_type != LMD_TYPE_FUNC) return;
+
+    Item proto = js_property_get(new_target,
+        (Item){.item = s2it(heap_create_name("prototype"))});
+    TypeId proto_type = get_type_id(proto);
+    if (proto_type == LMD_TYPE_MAP || proto_type == LMD_TYPE_FUNC ||
+        proto_type == LMD_TYPE_ARRAY || proto_type == LMD_TYPE_ELEMENT) {
+        js_set_prototype(event, proto);
+    }
+}
+
 // High-resolution monotonic ms with the SAME time origin as
 // performance.now() (no origin subtraction; counts since boot on macOS,
 // since CLOCK_MONOTONIC origin on Linux). Spec requires that an event's
@@ -760,6 +774,7 @@ Item js_create_event_init(const char* type, bool bubbles, bool cancelable, bool 
     // string write retired). `event instanceof Event` resolves via the byte
     // path (or the suffix-string fallback for any subclass not in the enum).
     js_class_stamp(event, JS_CLASS_EVENT);  // A3-T3b
+    event_apply_new_target_prototype(event);
 
     return event;
 }

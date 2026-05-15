@@ -60,10 +60,6 @@ static inline Item make_str(const char* s) {
 
 static inline Item make_key(const char* s) { return make_str(s); }
 
-static inline void prop_set(Item obj, const char* key, Item val) {
-    js_property_set(obj, make_key(key), val);
-}
-
 struct JsDocRuntimeScope {
     EvalContext runtime_ctx;
     EvalContext* saved_context;
@@ -101,10 +97,6 @@ static void js_doc_runtime_exit(JsDocRuntimeScope* scope) {
         scope->type_list = nullptr;
     }
     scope->active = false;
-}
-
-static inline Item prop_get(Item obj, const char* key) {
-    return js_property_get(obj, make_key(key));
 }
 
 static int item_to_int(Item v) {
@@ -212,6 +204,18 @@ static Item js_object_for_selection(DomSelection* s) {
 
 static DomNode* node_arg(Item v) {
     void* p = js_dom_unwrap_element(v);
+    if (!p) {
+        Item doc_obj = js_get_document_object_value();
+        if (v.item == doc_obj.item) {
+            p = js_dom_unwrap_element(doc_obj);
+        }
+    }
+    if (!p) {
+        Item node_type = js_property_access(v, make_key("nodeType"));
+        if (item_to_int(node_type) == 9) {
+            p = js_dom_unwrap_element(js_get_document_object_value());
+        }
+    }
     return (DomNode*)p;
 }
 
@@ -1160,24 +1164,19 @@ static Item _wpt_selectionchange_fire(Item this_val, Item* args, int argc) {
 extern "C" void js_dom_queue_selectionchange(DomSelection* sel) {
     if (!sel || !sel->state) return;
     if (!js_input || !js_input->pool) return;
+    DocState* state = sel->state;
+    // Coalesce before touching the document runtime. In tight DOM-only loops
+    // (e.g. WPT collapse), repeated js_dom_set_document() dominates runtime.
+    if (state->dom_selection_sync_depth > 0) return;
+    state->selection_mutation_seq++;
+    if (state->selectionchange_pending) return;
+
     DomDocument* doc = nullptr;
     if (sel->anchor.node) doc = node_owning_doc(sel->anchor.node);
     if (!doc && sel->focus.node) doc = node_owning_doc(sel->focus.node);
     if (!doc) doc = (DomDocument*)js_dom_get_document();
     JsDocRuntimeScope scope;
     if (!js_doc_runtime_enter_if_needed(doc, &scope)) return;
-    DocState* state = sel->state;
-    // Suppress while the legacy↔DOM mirror is running so a single user
-    // mutation doesn't ping-pong into multiple events.
-    if (state->dom_selection_sync_depth > 0) {
-        js_doc_runtime_exit(&scope);
-        return;
-    }
-    state->selection_mutation_seq++;
-    if (state->selectionchange_pending) {
-        js_doc_runtime_exit(&scope);
-        return;
-    }
     state->selectionchange_pending = true;
     Item cb = js_new_function((void*)_wpt_selectionchange_fire, 0);
     js_setTimeout(cb, (Item){.item = i2it(0)});

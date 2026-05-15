@@ -13985,6 +13985,9 @@ extern "C" Item js_generator_return(Item generator, Item value);
 extern "C" Item js_generator_throw(Item generator, Item error);
 
 // Map method dispatcher: handles collection methods, falls back to property access
+extern "C" bool js_dom_item_is_range(Item item);
+extern "C" bool js_dom_item_is_selection(Item item);
+
 extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) {
     // OffscreenCanvas / CanvasRenderingContext2D methods (js_canvas.cpp)
     {
@@ -15519,6 +15522,14 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
     }
 
     // Fallback: property access + call
+    // Range/Selection are MAP_KIND_DOM host objects but not DOM nodes. Dispatch
+    // through their property accessors so ordinary range.setStart(...) keeps
+    // the Range receiver instead of falling into element-only method dispatch.
+    if (js_dom_item_is_range(obj) || js_dom_item_is_selection(obj)) {
+        Item fn = js_property_access(obj, method_name);
+        if (js_check_exception()) return ItemNull;
+        return js_call_function(fn, obj, args, argc);
+    }
     // DOM element methods: dispatch to js_dom_element_method before property fallback
     if (get_type_id(obj) == LMD_TYPE_MAP && obj.map &&
         (obj.map->map_kind == MAP_KIND_DOM || obj.map->map_kind == MAP_KIND_FOREIGN_DOC)) {
