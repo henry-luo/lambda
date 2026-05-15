@@ -2,7 +2,6 @@
 
 #include <assert.h>
 
-#include "item_tagged.hpp"
 #include "../radiant/view.hpp"
 
 namespace lam {

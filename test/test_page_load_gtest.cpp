@@ -382,12 +382,35 @@ static void run_page_tests_parallel(int jobs) {
 
     int num_threads = std::min(jobs, (int)n);
     std::atomic<size_t> next_idx{0};
+    std::atomic<size_t> completed{0};
+    std::mutex progress_mutex;
 
     auto worker = [&]() {
         while (true) {
             size_t idx = next_idx.fetch_add(1);
             if (idx >= n) break;
             g_page_results[idx] = run_page_test(g_page_tests[idx]);
+
+            const PageTestResult& result = g_page_results[idx];
+            size_t done = completed.fetch_add(1) + 1;
+
+            std::lock_guard<std::mutex> lock(progress_mutex);
+            std::cout << "  [" << done << "/" << n << "] "
+                      << g_page_tests[idx].test_name
+                      << " finished in " << (int)result.elapsed_ms << "ms";
+            if (result.layout_ms >= 0 || result.render_ms >= 0) {
+                std::cout << " (layout="
+                          << (int)(result.layout_ms >= 0 ? result.layout_ms : 0.0)
+                          << "ms, render="
+                          << (int)(result.render_ms >= 0 ? result.render_ms : 0.0)
+                          << "ms)";
+            }
+            if (result.timed_out) {
+                std::cout << " (TIMEOUT)";
+            } else if (result.exit_code != 0) {
+                std::cout << " (exit " << result.exit_code << ")";
+            }
+            std::cout << std::endl;
         }
     };
 

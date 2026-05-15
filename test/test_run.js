@@ -44,7 +44,8 @@ for (let i = 0; i < args.length; i++) {
   --help               Show this help message
 
 Environment variables:
-  LAMBDA_TEST_IDLE_TIMEOUT   Override idle timeout in seconds (default: auto-scaled by CPU count)
+  LAMBDA_TEST_IDLE_TIMEOUT   Override idle timeout in seconds (default: auto-scaled by CPU count/load)
+  LAMBDA_TEST_HEAVY_LOAD     Set to 1 to bias idle timeout upward for full-suite parallel runs
   LAMBDA_USE_C2MIR           Set to 1 for legacy C2MIR JIT path`);
         process.exit(0);
     } else {
@@ -61,18 +62,54 @@ const TEST_OUTPUT_DIR = path.join(ROOT_DIR, 'test_output');
 const IS_WINDOWS = process.platform === 'win32';
 
 // Idle timeout: if a test produces no output for this long, it's stuck.
-// Scale by CPU count — slower machines get more headroom.
-function getIdleTimeoutMs() {
+// Scale by CPU count first, then add extra headroom for suite-wide parallel
+// runs and already-busy machines so quiet but still-progressing tests do not
+// get killed under contention.
+function getIdleTimeoutConfig() {
     const envOverride = process.env.LAMBDA_TEST_IDLE_TIMEOUT;
-    if (envOverride) return parseInt(envOverride, 10) * 1000;
+    if (envOverride) {
+        return {
+            timeoutMs: parseInt(envOverride, 10) * 1000,
+            source: `env override (${envOverride}s)`,
+        };
+    }
 
     const cpus = os.cpus().length;
-    if (cpus >= 8)  return 120 * 1000;  // 2 min
-    if (cpus >= 4)  return 180 * 1000;  // 3 min
-    return 240 * 1000;                  // 4 min
+    let baseMs = 240 * 1000;            // 4 min
+    if (cpus >= 8) baseMs = 120 * 1000; // 2 min
+    else if (cpus >= 4) baseMs = 180 * 1000; // 3 min
+
+    const load1 = os.loadavg ? os.loadavg()[0] : 0;
+    const loadRatio = cpus > 0 ? load1 / cpus : 0;
+    const heavyLoadRequested = process.env.LAMBDA_TEST_HEAVY_LOAD === '1';
+
+    let multiplier = 1.0;
+    let reason = `cpu-scaled base (${cpus} CPUs)`;
+
+    if (heavyLoadRequested) {
+        multiplier = Math.max(multiplier, 1.5);
+        reason = 'heavy-load suite mode';
+    }
+    if (loadRatio >= 1.5) {
+        multiplier = Math.max(multiplier, 3.0);
+        reason = `system load ${load1.toFixed(2)} on ${cpus} CPUs`;
+    } else if (loadRatio >= 1.0) {
+        multiplier = Math.max(multiplier, 2.0);
+        reason = `system load ${load1.toFixed(2)} on ${cpus} CPUs`;
+    } else if (loadRatio >= 0.75) {
+        multiplier = Math.max(multiplier, 1.5);
+        reason = `system load ${load1.toFixed(2)} on ${cpus} CPUs`;
+    }
+
+    const timeoutMs = Math.round(baseMs * multiplier);
+    return {
+        timeoutMs,
+        source: multiplier > 1.0 ? `${reason}, x${multiplier.toFixed(1)}` : reason,
+    };
 }
 
-const IDLE_TIMEOUT_MS = getIdleTimeoutMs();
+const IDLE_TIMEOUT = getIdleTimeoutConfig();
+const IDLE_TIMEOUT_MS = IDLE_TIMEOUT.timeoutMs;
 
 // Max concurrent tests: scale to CPU count, leave 1 core free (min 1).
 function getMaxConcurrent() {
@@ -698,7 +735,7 @@ async function main() {
     console.log('==============================================================');
     console.log('🧪 Lambda Test Suite Runner (Node.js)');
     console.log('==============================================================');
-    console.log(`Platform: ${os.platform()} | CPUs: ${os.cpus().length} | Idle timeout: ${IDLE_TIMEOUT_MS / 1000}s`);
+    console.log(`Platform: ${os.platform()} | CPUs: ${os.cpus().length} | Idle timeout: ${IDLE_TIMEOUT_MS / 1000}s (${IDLE_TIMEOUT.source})`);
     if (parallelExecution) {
         console.log(`⚡ Parallel Execution: max ${MAX_CONCURRENT} concurrent`);
     } else {
