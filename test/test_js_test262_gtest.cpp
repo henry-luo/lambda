@@ -888,6 +888,12 @@ static std::string get_source_path(const std::string& test_path) {
         if (test_path.find("/Function/prototype/toString/") != std::string::npos) {
             return test_path;
         }
+        // The language/comments suites assert syntactic effects of comments
+        // themselves (for example ASI after a multiline comment with LS/PS).
+        // Stripping comments changes those tests' source semantics.
+        if (test_path.find("/language/comments/") != std::string::npos) {
+            return test_path;
+        }
         // ref/test262/test/... -> test/js262/test/...
         std::string stripped = std::string(TEST262_SOURCE_DIR) +
                                test_path.substr(strlen(TEST262_ROOT));

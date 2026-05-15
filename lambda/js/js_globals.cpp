@@ -4253,6 +4253,11 @@ extern "C" Item js_number_method(Item num, Item method_name, Item* args, int arg
         return js_to_string(num);
     }
 
+    Item fn = js_property_get(num, method_name);
+    if (get_type_id(fn) == LMD_TYPE_FUNC) {
+        return js_call_function(fn, num, args, argc);
+    }
+
     log_debug("js_number_method: unknown method '%.*s'", (int)method->len, method->chars);
     return ItemNull;
 }
@@ -4312,17 +4317,18 @@ static inline Item js_make_small_string(char* chars, int len, bool is_ascii) {
     return (Item){.item = s2it(result)};
 }
 
-extern "C" Item js_string_fromCharCode(Item code_item) {
-    int code = 0;
-    TypeId type = get_type_id(code_item);
-    if (type == LMD_TYPE_INT) {
-        code = (int)it2i(code_item);
-    } else if (type == LMD_TYPE_FLOAT) {
-        code = (int)it2d(code_item);
-    }
-    // JS fromCharCode uses UTF-16 code units (truncate to 16-bit)
-    code &= 0xFFFF;
+static int js_from_char_code_to_uint16(Item code_item) {
+    Item num_item = js_to_number(code_item);
+    double d = js_get_number(num_item);
+    if (isnan(d) || isinf(d) || d == 0) return 0;
+    double integral = d < 0 ? ceil(d) : floor(d);
+    double mod = fmod(integral, 65536.0);
+    if (mod < 0) mod += 65536.0;
+    return ((int)mod) & 0xFFFF;
+}
 
+extern "C" Item js_string_fromCharCode(Item code_item) {
+    int code = js_from_char_code_to_uint16(code_item);
     char buf[5]; // max 4 bytes for UTF-8 + null
     int len = 0;
     if (code < 128) {
@@ -4356,17 +4362,8 @@ extern "C" int64_t js_string_last_fromCharCode_cp(Item str_item) {
 }
 
 extern "C" Item js_string_fromCharCode2(Item first_item, Item second_item) {
-    int first = 0;
-    TypeId first_type = get_type_id(first_item);
-    if (first_type == LMD_TYPE_INT) first = (int)it2i(first_item);
-    else if (first_type == LMD_TYPE_FLOAT) first = (int)it2d(first_item);
-    first &= 0xFFFF;
-
-    int second = 0;
-    TypeId second_type = get_type_id(second_item);
-    if (second_type == LMD_TYPE_INT) second = (int)it2i(second_item);
-    else if (second_type == LMD_TYPE_FLOAT) second = (int)it2d(second_item);
-    second &= 0xFFFF;
+    int first = js_from_char_code_to_uint16(first_item);
+    int second = js_from_char_code_to_uint16(second_item);
 
     char buf[8];
     int pos = 0;
@@ -4440,32 +4437,32 @@ extern "C" Item js_string_fromCharCode_array(Item arr_item) {
         char* buf = (char*)mem_alloc(len * 4 + 1, MEM_CAT_JS_RUNTIME);
         int pos = 0;
         for (int i = 0; i < len; i++) {
-            int code = 0;
+            Item code_item = (Item){0};
             switch (ta->element_type) {
-            case JS_TYPED_UINT8:   code = ((uint8_t*)ta->data)[i]; break;
-            case JS_TYPED_INT8:    code = ((int8_t*)ta->data)[i]; break;
-            case JS_TYPED_UINT16:  code = ((uint16_t*)ta->data)[i]; break;
-            case JS_TYPED_INT16:   code = ((int16_t*)ta->data)[i]; break;
-            case JS_TYPED_UINT32:  code = (int)((uint32_t*)ta->data)[i]; break;
-            case JS_TYPED_INT32:   code = ((int32_t*)ta->data)[i]; break;
-            case JS_TYPED_FLOAT32: code = (int)((float*)ta->data)[i]; break;
-            case JS_TYPED_FLOAT64: code = (int)((double*)ta->data)[i]; break;
+            case JS_TYPED_UINT8:   code_item = (Item){.item = i2it(((uint8_t*)ta->data)[i])}; break;
+            case JS_TYPED_INT8:    code_item = (Item){.item = i2it(((int8_t*)ta->data)[i])}; break;
+            case JS_TYPED_UINT16:  code_item = (Item){.item = i2it(((uint16_t*)ta->data)[i])}; break;
+            case JS_TYPED_INT16:   code_item = (Item){.item = i2it(((int16_t*)ta->data)[i])}; break;
+            case JS_TYPED_UINT32:  code_item = (Item){.item = i2it((int64_t)((uint32_t*)ta->data)[i])}; break;
+            case JS_TYPED_INT32:   code_item = (Item){.item = i2it(((int32_t*)ta->data)[i])}; break;
+            case JS_TYPED_FLOAT32: code_item = push_d((double)((float*)ta->data)[i]); break;
+            case JS_TYPED_FLOAT64: code_item = push_d(((double*)ta->data)[i]); break;
             }
-            code &= 0xFFFF;
+            int code = js_from_char_code_to_uint16(code_item);
             // combine adjacent surrogate pairs into a single supplementary codepoint
             if (code >= 0xD800 && code <= 0xDBFF && i + 1 < len) {
-                int lo = 0;
+                Item lo_item = (Item){0};
                 switch (ta->element_type) {
-                case JS_TYPED_UINT8:   lo = ((uint8_t*)ta->data)[i+1]; break;
-                case JS_TYPED_INT8:    lo = ((int8_t*)ta->data)[i+1]; break;
-                case JS_TYPED_UINT16:  lo = ((uint16_t*)ta->data)[i+1]; break;
-                case JS_TYPED_INT16:   lo = ((int16_t*)ta->data)[i+1]; break;
-                case JS_TYPED_UINT32:  lo = (int)((uint32_t*)ta->data)[i+1]; break;
-                case JS_TYPED_INT32:   lo = ((int32_t*)ta->data)[i+1]; break;
-                case JS_TYPED_FLOAT32: lo = (int)((float*)ta->data)[i+1]; break;
-                case JS_TYPED_FLOAT64: lo = (int)((double*)ta->data)[i+1]; break;
+                case JS_TYPED_UINT8:   lo_item = (Item){.item = i2it(((uint8_t*)ta->data)[i+1])}; break;
+                case JS_TYPED_INT8:    lo_item = (Item){.item = i2it(((int8_t*)ta->data)[i+1])}; break;
+                case JS_TYPED_UINT16:  lo_item = (Item){.item = i2it(((uint16_t*)ta->data)[i+1])}; break;
+                case JS_TYPED_INT16:   lo_item = (Item){.item = i2it(((int16_t*)ta->data)[i+1])}; break;
+                case JS_TYPED_UINT32:  lo_item = (Item){.item = i2it((int64_t)((uint32_t*)ta->data)[i+1])}; break;
+                case JS_TYPED_INT32:   lo_item = (Item){.item = i2it(((int32_t*)ta->data)[i+1])}; break;
+                case JS_TYPED_FLOAT32: lo_item = push_d((double)((float*)ta->data)[i+1]); break;
+                case JS_TYPED_FLOAT64: lo_item = push_d(((double*)ta->data)[i+1]); break;
                 }
-                lo &= 0xFFFF;
+                int lo = js_from_char_code_to_uint16(lo_item);
                 if (lo >= 0xDC00 && lo <= 0xDFFF) {
                     int cp = 0x10000 + ((code - 0xD800) << 10) + (lo - 0xDC00);
                     pos += encode_charcode_full_utf8(buf + pos, cp);
@@ -4490,21 +4487,10 @@ extern "C" Item js_string_fromCharCode_array(Item arr_item) {
     char* buf = (char*)mem_alloc(len * 4 + 1, MEM_CAT_JS_RUNTIME);
     int pos = 0;
     for (int i = 0; i < len; i++) {
-        int code = 0;
-        TypeId itype = get_type_id(arr->items[i]);
-        if (itype == LMD_TYPE_INT) {
-            code = (int)it2i(arr->items[i]);
-        } else if (itype == LMD_TYPE_FLOAT) {
-            code = (int)it2d(arr->items[i]);
-        }
-        code &= 0xFFFF;
+        int code = js_from_char_code_to_uint16(arr->items[i]);
         // combine adjacent surrogate pairs into a single supplementary codepoint
         if (code >= 0xD800 && code <= 0xDBFF && i + 1 < len) {
-            int lo = 0;
-            TypeId lo_type = get_type_id(arr->items[i + 1]);
-            if (lo_type == LMD_TYPE_INT) lo = (int)it2i(arr->items[i + 1]);
-            else if (lo_type == LMD_TYPE_FLOAT) lo = (int)it2d(arr->items[i + 1]);
-            lo &= 0xFFFF;
+            int lo = js_from_char_code_to_uint16(arr->items[i + 1]);
             if (lo >= 0xDC00 && lo <= 0xDFFF) {
                 int cp = 0x10000 + ((code - 0xD800) << 10) + (lo - 0xDC00);
                 pos += encode_charcode_full_utf8(buf + pos, cp);
@@ -4659,20 +4645,32 @@ extern "C" Item js_string_raw(Item* args, int argc) {
     if (argc < 1) return (Item){.item = s2it(heap_strcpy("", 0))};
 
     Item template_obj = args[0];
+    if (template_obj.item == ItemNull.item || get_type_id(template_obj) == LMD_TYPE_NULL ||
+        get_type_id(template_obj) == LMD_TYPE_UNDEFINED) {
+        return js_throw_type_error("Cannot convert undefined or null to object");
+    }
     // Get template.raw
     Item raw_key = (Item){.item = s2it(heap_create_name("raw", 3))};
     Item raw = js_property_access(template_obj, raw_key);
-    if (raw.item == ITEM_NULL || raw.item == ITEM_JS_UNDEFINED) {
-        return (Item){.item = s2it(heap_strcpy("", 0))};
+    if (raw.item == ITEM_NULL || raw.item == ITEM_JS_UNDEFINED ||
+        get_type_id(raw) == LMD_TYPE_NULL || get_type_id(raw) == LMD_TYPE_UNDEFINED) {
+        return js_throw_type_error("Cannot convert undefined or null to object");
     }
 
     // Get raw.length (may be a MAP with numeric keys + length property)
     Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
     Item len_item = js_property_access(raw, len_key);
+    if (js_key_is_symbol_c(len_item)) {
+        return js_throw_type_error("Cannot convert a Symbol value to a number");
+    }
+    Item len_num = js_to_number(len_item);
+    if (js_exception_pending) return ItemNull;
+    double len_d = js_get_number(len_num);
     int raw_len = 0;
-    TypeId len_type = get_type_id(len_item);
-    if (len_type == LMD_TYPE_INT) raw_len = (int)it2i(len_item);
-    else if (len_type == LMD_TYPE_FLOAT) raw_len = (int)it2d(len_item);
+    if (!isnan(len_d) && len_d > 0) {
+        if (isinf(len_d) || len_d > 2147483647.0) raw_len = 2147483647;
+        else raw_len = (int)floor(len_d);
+    }
     if (raw_len <= 0) return (Item){.item = s2it(heap_strcpy("", 0))};
 
     StrBuf* buf = strbuf_new();
@@ -4687,7 +4685,7 @@ extern "C" Item js_string_raw(Item* args, int argc) {
         if (s && s->len > 0) strbuf_append_str_n(buf, s->chars, s->len);
 
         // Interleave substitution if present (i+1 in args because args[0] is template)
-        if (i < argc - 1) {
+        if (i < raw_len - 1 && i < argc - 1) {
             Item sub_str = js_to_string(args[i + 1]);
             String* sub_s = it2s(sub_str);
             if (sub_s && sub_s->len > 0) strbuf_append_str_n(buf, sub_s->chars, sub_s->len);
@@ -8620,7 +8618,12 @@ extern "C" Item js_object_get_own_property_symbols(Item object) {
     // Returns an array of all own Symbol keys of an object.
     // In our engine, symbols are stored as string keys "__sym_<N>" in the shape.
     // Walk shape entries, find __sym_* keys, convert back to symbol items.
-    if (get_type_id(object) != LMD_TYPE_MAP) return js_array_new(0);
+    TypeId object_type = get_type_id(object);
+    if (object_type == LMD_TYPE_NULL || object_type == LMD_TYPE_UNDEFINED ||
+        object.item == ITEM_NULL || object.item == ITEM_JS_UNDEFINED) {
+        return js_throw_type_error("Cannot convert undefined or null to object");
+    }
+    if (object_type != LMD_TYPE_MAP) return js_array_new(0);
     Map* m = object.map;
     if (!m || !m->type) return js_array_new(0);
     TypeMap* tm = (TypeMap*)m->type;

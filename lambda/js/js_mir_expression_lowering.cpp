@@ -6201,8 +6201,8 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 prop->name && prop->name->len == 2 && strncmp(prop->name->chars, "is", 2) == 0) {
                 JsAstNode* a1 = call->arguments;
                 JsAstNode* a2 = a1 ? a1->next : NULL;
-                MIR_reg_t left = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_null(mt);
-                MIR_reg_t right = a2 ? jm_transpile_box_item(mt, a2) : jm_emit_null(mt);
+                MIR_reg_t left = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_undefined(mt);
+                MIR_reg_t right = a2 ? jm_transpile_box_item(mt, a2) : jm_emit_undefined(mt);
                 return jm_call_2(mt, "js_object_is", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, left),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, right));
