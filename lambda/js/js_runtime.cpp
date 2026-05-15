@@ -6,6 +6,7 @@
  */
 #include "js_runtime_internal.hpp"
 #include "js_job_queue.h"
+#include "js_state_guards.h"
 
 extern "C" Item js_to_property_key(Item key);
 extern "C" Item js_reflect_own_keys(Item obj);
@@ -98,6 +99,12 @@ static Item js_compute_callback_this(JsFunction* fn, Item thisArg_item) {
         if (thisArg_item.item == ITEM_JS_UNDEFINED || thisArg_item.item == ITEM_NULL || thisArg_item.item == 0) {
             extern Item js_get_global_this();
             return js_get_global_this();
+        }
+        TypeId this_type = get_type_id(thisArg_item);
+        if (this_type != LMD_TYPE_MAP && this_type != LMD_TYPE_ARRAY &&
+            this_type != LMD_TYPE_ELEMENT && this_type != LMD_TYPE_FUNC &&
+            this_type != LMD_TYPE_OBJECT && this_type != LMD_TYPE_VMAP) {
+            return js_to_object(thisArg_item);
         }
     }
     return thisArg_item;
@@ -2283,22 +2290,24 @@ static bool js_try_exotic_property_get(Item object, Item key, Item* out_result) 
     case MAP_KIND_ARRAYBUFFER: {
         if (get_type_id(key) == LMD_TYPE_STRING) {
             String* str_key = it2s(key);
+            if (object.map->data_cap > 0) {
+                Item own_result = ItemNull;
+                JsOwnGetStatus st = js_ordinary_get_own(object, key, object, &own_result);
+                if (st == JS_OWN_READY) {
+                    *out_result = own_result;
+                    return true;
+                }
+                if (st == JS_OWN_DELETED) {
+                    *out_result = make_js_undefined();
+                    return true;
+                }
+            }
             if (str_key->len == 10 && strncmp(str_key->chars, "byteLength", 10) == 0) {
                 *out_result = (Item){.item = i2it(js_arraybuffer_byte_length(object))};
                 return true;
             }
             if (str_key->len == 6 && strncmp(str_key->chars, "length", 6) == 0) {
                 *out_result = (Item){.item = i2it(0)};
-                return true;
-            }
-            Item own_result = ItemNull;
-            JsOwnGetStatus st = js_ordinary_get_own(object, key, object, &own_result);
-            if (st == JS_OWN_READY) {
-                *out_result = own_result;
-                return true;
-            }
-            if (st == JS_OWN_DELETED) {
-                *out_result = make_js_undefined();
                 return true;
             }
         }
@@ -3320,6 +3329,22 @@ extern "C" Item js_property_get(Item object, Item key) {
                             Item pvk = (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))};
                             js_property_set(fn->prototype, pvk, (Item){.item = s2it(heap_create_name("", 0))});
                         }
+                        // Annex B Object.prototype.__proto__ accessor.
+                        if (nl == 6 && strncmp(nm, "Object", 6) == 0) {
+                            Item proto_desc = js_new_object();
+                            Item get_key = (Item){.item = s2it(heap_create_name("get", 3))};
+                            Item set_key = (Item){.item = s2it(heap_create_name("set", 3))};
+                            Item enum_key = (Item){.item = s2it(heap_create_name("enumerable", 10))};
+                            Item conf_key = (Item){.item = s2it(heap_create_name("configurable", 12))};
+                            Item get_fn = js_get_or_create_builtin(JS_BUILTIN_OBJ_PROTO_GETTER, "get __proto__", 0);
+                            Item set_fn = js_get_or_create_builtin(JS_BUILTIN_OBJ_PROTO_SETTER, "set __proto__", 1);
+                            js_property_set(proto_desc, get_key, get_fn);
+                            js_property_set(proto_desc, set_key, set_fn);
+                            js_property_set(proto_desc, enum_key, (Item){.item = ITEM_FALSE});
+                            js_property_set(proto_desc, conf_key, (Item){.item = ITEM_TRUE});
+                            Item proto_key = (Item){.item = s2it(heap_create_name("__proto__", 9))};
+                            js_object_define_property(fn->prototype, proto_key, proto_desc);
+                        }
                         // v18g: For error constructors, set name and message on prototype
                         bool is_error = (nl == 5 && strncmp(nm, "Error", 5) == 0) ||
                             (nl == 9 && strncmp(nm, "TypeError", 9) == 0) ||
@@ -3616,7 +3641,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                 // Skip for generator functions — generator prototypes have no constructor
                 if (!(fn->flags & JS_FUNC_FLAG_GENERATOR)) {
                     Item ctor_key = (Item){.item = s2it(heap_create_name("constructor", 11))};
-                    js_property_set(fn->prototype, ctor_key, object);
+                    js_create_data_property(fn->prototype, ctor_key, object);
                     js_mark_non_enumerable(fn->prototype, ctor_key);
                 } else {
                     // Generator function's .prototype inherits from %AsyncGeneratorPrototype%
@@ -4329,17 +4354,14 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
             if (js_try_exotic_property_set(object, key, &value, &exotic_result)) return exotic_result;
         }
         // Setter property dispatch: check for __set_<propName> on object or prototype
-        // Skip setter check only for __get_/__set_ keys (to prevent infinite recursion)
-        // v37: Also skip for __proto__ — it's an internal slot, not an accessor property.
-        // Setting [[Prototype]] must bypass user-defined setters on Object.prototype.
+        // Skip setter check only for __get_/__set_ keys (to prevent infinite recursion).
         // Also skip when writing the deleted sentinel (used by js_delete_property to
         // tombstone a slot — must not trigger accessor / TypeError-on-no-setter logic).
         if (!js_skip_accessor_dispatch && !js_is_deleted_sentinel(value) && get_type_id(key) == LMD_TYPE_STRING) {
             String* str_key = it2s(key);
             if (str_key && str_key->len < 64 &&
                 !(str_key->len > 6 && (strncmp(str_key->chars, "__get_", 6) == 0 ||
-                                        strncmp(str_key->chars, "__set_", 6) == 0)) &&
-                !(str_key->len == 9 && strncmp(str_key->chars, "__proto__", 9) == 0)) {
+                                        strncmp(str_key->chars, "__set_", 6) == 0))) {
                 // ES §9.5.9: Proxy in prototype chain forwards [[Set]] through
                 // the proxy's set trap with the original receiver. Without this,
                 // setter dispatch silently bypasses the proxy.
@@ -6879,6 +6901,36 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         }
         return make_js_undefined();
     }
+    case JS_BUILTIN_OBJ_PROTO_GETTER: {
+        TypeId this_type = get_type_id(this_val);
+        if (this_type == LMD_TYPE_NULL || this_type == LMD_TYPE_UNDEFINED ||
+            this_val.item == ITEM_NULL || this_val.item == ITEM_JS_UNDEFINED) {
+            return js_throw_type_error("Cannot convert undefined or null to object");
+        }
+        return js_get_prototype_of(this_val);
+    }
+    case JS_BUILTIN_OBJ_PROTO_SETTER: {
+        TypeId this_type = get_type_id(this_val);
+        if (this_type == LMD_TYPE_NULL || this_type == LMD_TYPE_UNDEFINED ||
+            this_val.item == ITEM_NULL || this_val.item == ITEM_JS_UNDEFINED) {
+            return js_throw_type_error("Cannot convert undefined or null to object");
+        }
+        TypeId proto_type = get_type_id(arg0);
+        bool proto_is_object = proto_type == LMD_TYPE_MAP || proto_type == LMD_TYPE_ARRAY ||
+            proto_type == LMD_TYPE_FUNC || proto_type == LMD_TYPE_ELEMENT ||
+            proto_type == LMD_TYPE_OBJECT || proto_type == LMD_TYPE_VMAP;
+        if (!proto_is_object && arg0.item != ITEM_NULL) return make_js_undefined();
+        bool this_is_object = this_type == LMD_TYPE_MAP || this_type == LMD_TYPE_ARRAY ||
+            this_type == LMD_TYPE_FUNC || this_type == LMD_TYPE_ELEMENT ||
+            this_type == LMD_TYPE_OBJECT || this_type == LMD_TYPE_VMAP;
+        if (!this_is_object) return make_js_undefined();
+        Item ok = js_reflect_set_prototype_of(this_val, arg0);
+        if (js_exception_pending) return ItemNull;
+        if (!it2b(js_to_boolean(ok))) {
+            return js_throw_type_error("Object prototype may only be an Object or null");
+        }
+        return make_js_undefined();
+    }
 
     // Array.prototype methods - delegate to js_map_method which handles arrays
     case JS_BUILTIN_ARR_PUSH:
@@ -9227,19 +9279,12 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     }
     case JS_BUILTIN_ARRAYBUFFER_SLICE: {
         // ArrayBuffer.prototype.slice(begin, end)
-        extern Item js_arraybuffer_slice(Item val, int begin, int end);
+        extern Item js_arraybuffer_slice_items(Item val, Item begin_item, Item end_item, int argc);
         Item obj = this_val;
         if (!js_is_arraybuffer(obj) || js_is_sharedarraybuffer(obj)) {
             return js_throw_type_error("ArrayBuffer.prototype.slice requires an ArrayBuffer as receiver");
         }
-        int byte_length = 0;
-        Item bl_key = (Item){.item = s2it(heap_create_name("byteLength", 10))};
-        Item bl_val = map_get(obj.map, bl_key);
-        if (bl_val.item != ItemNull.item) byte_length = (int)js_get_number(bl_val);
-        int begin = 0, end = byte_length;
-        if (arg0.item != ItemNull.item && get_type_id(arg0) != LMD_TYPE_NULL) begin = (int)js_get_number(arg0);
-        if (arg1.item != ItemNull.item && get_type_id(arg1) != LMD_TYPE_NULL) end = (int)js_get_number(arg1);
-        return js_arraybuffer_slice(obj, begin, end);
+        return js_arraybuffer_slice_items(obj, arg0, arg1, arg_count);
     }
     case JS_BUILTIN_ARRAYBUFFER_RESIZE: {
         extern Item js_arraybuffer_resize(Item val, Item new_length_item);
@@ -13595,6 +13640,20 @@ static Item js_collection_canonical_key(Item key) {
     return key;
 }
 
+static bool js_can_be_held_weakly(Item key) {
+    TypeId kt = get_type_id(key);
+    if (kt == LMD_TYPE_MAP || kt == LMD_TYPE_ARRAY ||
+        kt == LMD_TYPE_FUNC || kt == LMD_TYPE_ELEMENT) {
+        return true;
+    }
+    if (kt == LMD_TYPE_INT && it2i(key) <= -(int64_t)JS_SYMBOL_BASE) {
+        extern Item js_symbol_key_for(Item sym);
+        Item registered_key = js_symbol_key_for(key);
+        return get_type_id(registered_key) == LMD_TYPE_UNDEFINED;
+    }
+    return false;
+}
+
 static JsCollectionData* js_get_collection_data(Item obj) {
     if (get_type_id(obj) != LMD_TYPE_MAP) return NULL;
     // Use js_map_get_fast (direct map lookup) instead of js_property_get to avoid
@@ -13826,6 +13885,9 @@ extern "C" Item js_collection_method(Item obj, int method_id, Item arg1, Item ar
 
     switch (method_id) {
         case 0: { // set(key, value) for Map, add(value) for Set
+            if (cd->is_weak && !js_can_be_held_weakly(arg1)) {
+                return js_throw_type_error("Invalid value used as weak collection key");
+            }
             JsCollectionEntry entry;
             Item key = js_collection_canonical_key(arg1);
             if (cd->type == JS_COLLECTION_SET) {
@@ -14937,9 +14999,9 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 if (shared_result.item != ITEM_NULL || js_exception_pending) return shared_result;
             }
             if (method->len == 5 && strncmp(method->chars, "slice", 5) == 0) {
-                int begin = argc > 0 ? (int)it2i(args[0]) : 0;
-                int end = argc > 1 ? (int)it2i(args[1]) : js_arraybuffer_byte_length(obj);
-                return js_arraybuffer_slice(obj, begin, end);
+                Item begin_item = argc > 0 ? args[0] : (Item){.item = ITEM_JS_UNDEFINED};
+                Item end_item = argc > 1 ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
+                return js_arraybuffer_slice_items(obj, begin_item, end_item, argc);
             }
             if (method->len == 6 && strncmp(method->chars, "resize", 6) == 0) {
                 Item new_length = argc > 0 ? args[0] : (Item){.item = ITEM_JS_UNDEFINED};
@@ -16081,6 +16143,12 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
     return str;
 }
 
+static bool js_string_protocol_arg_is_object(Item value) {
+    TypeId type = get_type_id(value);
+    return type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_ELEMENT ||
+           type == LMD_TYPE_FUNC || type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP;
+}
+
 // =============================================================================
 // String Method Dispatcher
 // =============================================================================
@@ -16374,7 +16442,7 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
     if (method->len == 5 && strncmp(method->chars, "split", 5) == 0) {
         // ES spec §21.1.3.21: check [Symbol.split] on separator
         if (argc >= 1 && args[0].item != ItemNull.item && get_type_id(args[0]) != LMD_TYPE_UNDEFINED
-            && get_type_id(args[0]) != LMD_TYPE_NULL) {
+            && get_type_id(args[0]) != LMD_TYPE_NULL && js_string_protocol_arg_is_object(args[0])) {
             Item sym_key = (Item){.item = s2it(heap_create_name("__sym_10", 8))};
             Item sym_fn = js_property_get(args[0], sym_key);
             if (js_exception_pending) return ItemNull;
@@ -16579,7 +16647,7 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         if (argc < 2) return str;
         // ES spec §21.1.3.14: check [Symbol.replace] on searchValue
         if (args[0].item != ItemNull.item && get_type_id(args[0]) != LMD_TYPE_UNDEFINED
-            && get_type_id(args[0]) != LMD_TYPE_NULL) {
+            && get_type_id(args[0]) != LMD_TYPE_NULL && js_string_protocol_arg_is_object(args[0])) {
             Item sym_key = (Item){.item = s2it(heap_create_name("__sym_8", 7))};
             Item sym_fn = js_property_get(args[0], sym_key);
             if (sym_fn.item != ItemNull.item && get_type_id(sym_fn) != LMD_TYPE_UNDEFINED
@@ -16725,7 +16793,7 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         // ES2023 §22.1.3.19: String.prototype.replaceAll(searchValue, replaceValue)
         // Step 2: If searchValue is not undefined and not null...
         if (argc >= 1 && args[0].item != ItemNull.item && get_type_id(args[0]) != LMD_TYPE_UNDEFINED
-            && get_type_id(args[0]) != LMD_TYPE_NULL) {
+            && get_type_id(args[0]) != LMD_TYPE_NULL && js_string_protocol_arg_is_object(args[0])) {
             // Step 2a: IsRegExp(searchValue) check — accesses [Symbol.match]
             bool is_regexp = false;
             if (get_type_id(args[0]) == LMD_TYPE_MAP) {
@@ -16887,7 +16955,7 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         if (argc < 1 || args[0].item == ITEM_JS_UNDEFINED) return (Item){.item = i2it(0)};
         // ES spec §21.1.3.15: check [Symbol.search] on regexp
         if (args[0].item != ItemNull.item && get_type_id(args[0]) != LMD_TYPE_UNDEFINED
-            && get_type_id(args[0]) != LMD_TYPE_NULL) {
+            && get_type_id(args[0]) != LMD_TYPE_NULL && js_string_protocol_arg_is_object(args[0])) {
             Item sym_key = (Item){.item = s2it(heap_create_name("__sym_9", 7))};
             Item sym_fn = js_property_get(args[0], sym_key);
             if (sym_fn.item != ItemNull.item && get_type_id(sym_fn) != LMD_TYPE_UNDEFINED
@@ -16940,7 +17008,8 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         // No args or undefined → match empty regex, returns [""] with index 0
         if (argc < 1 || args[0].item == ITEM_JS_UNDEFINED) {
             // fall through to default behavior
-        } else if (args[0].item != ItemNull.item && get_type_id(args[0]) != LMD_TYPE_NULL) {
+        } else if (args[0].item != ItemNull.item && get_type_id(args[0]) != LMD_TYPE_NULL &&
+                   js_string_protocol_arg_is_object(args[0])) {
             // ES spec §21.1.3.11: check [Symbol.match] on regexp
             Item sym_key = (Item){.item = s2it(heap_create_name("__sym_7", 7))};
             Item sym_fn = js_property_get(args[0], sym_key);
@@ -17013,7 +17082,7 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         // Step 1: O = RequireObjectCoercible(this) — already handled by caller
         // Step 2: If regexp is neither undefined nor null
         if (argc >= 1 && args[0].item != ItemNull.item && get_type_id(args[0]) != LMD_TYPE_NULL
-            && get_type_id(args[0]) != LMD_TYPE_UNDEFINED) {
+            && get_type_id(args[0]) != LMD_TYPE_UNDEFINED && js_string_protocol_arg_is_object(args[0])) {
             // Step 2a: isRegExp check (only for objects)
             bool is_regexp = false;
             if (get_type_id(args[0]) == LMD_TYPE_MAP) {
@@ -17578,6 +17647,7 @@ static void js_create_data_property_or_throw(Item object, int64_t index, Item va
     TypeId type = get_type_id(object);
     if (js_is_proxy(object)) {
         Item desc = js_new_object();
+        js_set_prototype(desc, ItemNull);
         js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, value);
         js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
         js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(true)});
@@ -20738,6 +20808,7 @@ extern "C" void js_object_proto_setter(Item object, Item value) {
         // "no __proto__ slot set".
         TypeId ot = get_type_id(object);
         if (ot == LMD_TYPE_MAP) {
+            ScopedSkipAccessorDispatch _skip_guard;
             Item key = (Item){.item = s2it(heap_create_name("__proto__", 9))};
             Item undef = (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
             js_property_set(object, key, undef);
@@ -20769,12 +20840,14 @@ extern "C" void js_set_prototype(Item object, Item prototype) {
             heap_register_gc_root(&fn->properties_map.item);
         }
         Item key = js_get_proto_key();
+        ScopedSkipAccessorDispatch _skip_guard;
         js_property_set(fn->properties_map, key, proto_to_store);
         return;
     }
     // Handle arrays: store __proto__ in companion map (arr->extra)
     if (ot == LMD_TYPE_ARRAY) {
         Item key = js_get_proto_key();
+        ScopedSkipAccessorDispatch _skip_guard;
         js_property_set(object, key, proto_to_store);
         return;
     }
@@ -20800,12 +20873,14 @@ extern "C" void js_set_prototype(Item object, Item prototype) {
     bool owns_proto_data = false;
     Item owns_proto_data_val = js_map_get_fast_ext(object.map, "__json_own_proto__", 18, &owns_proto_data);
     if (owns_proto_data && js_is_truthy(owns_proto_data_val)) {
+        ScopedSkipAccessorDispatch _skip_guard;
         js_property_set(object, (Item){.item = s2it(heap_create_name(INTERNAL_PROTO_KEY, INTERNAL_PROTO_KEY_LEN))},
             proto_to_store);
         return;
     }
     // P10d: use interned __proto__ key.
     Item key = js_get_proto_key();
+    ScopedSkipAccessorDispatch _skip_guard;
     js_property_set(object, (Item){.item = s2it(heap_create_name("__json_own_proto__", 18))},
         (Item){.item = ITEM_FALSE});
     js_property_set(object, key, proto_to_store);
@@ -20819,9 +20894,11 @@ extern "C" void js_mark_own_proto_property(Item object) {
     bool raw_found = false;
     Item raw_proto = js_map_get_fast_ext(m, PROTO_KEY, PROTO_KEY_LEN, &raw_found);
     if ((!marker_found || !js_is_truthy(marker_val)) && raw_found && raw_proto.item != JS_DELETED_SENTINEL_VAL) {
+        ScopedSkipAccessorDispatch _skip_guard;
         js_property_set(object, (Item){.item = s2it(heap_create_name(INTERNAL_PROTO_KEY, INTERNAL_PROTO_KEY_LEN))},
             raw_proto);
     }
+    ScopedSkipAccessorDispatch _skip_guard;
     js_property_set(object, (Item){.item = s2it(heap_create_name("__json_own_proto__", 18))},
         (Item){.item = ITEM_TRUE});
 }
@@ -25848,6 +25925,7 @@ extern "C" Item js_weakmap_new_with_iter(Item iterable) {
 
     Item set_key = (Item){.item = s2it(heap_create_name("set", 3))};
     Item adder = js_property_get(obj, set_key);
+    if (js_check_exception()) return ItemNull;
     if (get_type_id(adder) != LMD_TYPE_FUNC) {
         return js_throw_type_error("WeakMap.prototype.set is not callable");
     }
@@ -25889,6 +25967,7 @@ extern "C" Item js_weakset_new_with_iter(Item iterable) {
     if (tid == LMD_TYPE_NULL || iterable.item == ITEM_JS_UNDEFINED) return obj;
     Item add_key = (Item){.item = s2it(heap_create_name("add", 3))};
     Item adder = js_property_get(obj, add_key);
+    if (js_check_exception()) return ItemNull;
     if (get_type_id(adder) != LMD_TYPE_FUNC) {
         return js_throw_type_error("WeakSet.prototype.add is not callable");
     }

@@ -1592,7 +1592,7 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
 
     // new Error(message, options) — built-in Error constructor with compile-time stack trace
     if (ctor_len == 5 && strncmp(ctor_name, "Error", 5) == 0) {
-        MIR_reg_t msg_arg = first_arg ? first_arg : jm_emit_null(mt);
+        MIR_reg_t msg_arg = first_arg ? first_arg : jm_emit_undefined(mt);
         MIR_reg_t stack_arg = jm_build_error_stack_string(mt, "Error");
         MIR_reg_t err = jm_call_2(mt, "js_new_error_with_stack", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, msg_arg),
@@ -1615,7 +1615,7 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
         (ctor_len == 8 && strncmp(ctor_name, "URIError", 8) == 0) ||
         (ctor_len == 9 && strncmp(ctor_name, "EvalError", 9) == 0)) {
         MIR_reg_t name_arg = jm_box_string_literal(mt, ctor_name, ctor_len);
-        MIR_reg_t msg_arg = first_arg ? first_arg : jm_emit_null(mt);
+        MIR_reg_t msg_arg = first_arg ? first_arg : jm_emit_undefined(mt);
         MIR_reg_t stack_arg = jm_build_error_stack_string(mt, ctor_name);
         MIR_reg_t err = jm_call_3(mt, "js_new_error_with_name_stack", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, name_arg),

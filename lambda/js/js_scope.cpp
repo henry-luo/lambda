@@ -506,6 +506,7 @@ static char* js_normalize_source_for_parser(const char* source, size_t length) {
 
     bool has_html_open = false;
     bool has_unicode_space = false;
+    bool has_ascii_cr = false;
     bool has_nul = false;
     bool has_assignment_keyword = js_source_has_assignment_keyword(source, length);
     bool has_soft_await_identifier = js_source_has_soft_await_identifier(source, length);
@@ -518,6 +519,10 @@ static char* js_normalize_source_for_parser(const char* source, size_t length) {
         }
     }
     for (size_t i = 0; i < length; i++) {
+        if (source[i] == '\r') {
+            has_ascii_cr = true;
+            break;
+        }
         if (source[i] == '\0') {
             has_nul = true;
             break;
@@ -529,7 +534,7 @@ static char* js_normalize_source_for_parser(const char* source, size_t length) {
             break;
         }
     }
-    if (!has_html_open && !has_unicode_space && !has_nul && !has_assignment_keyword &&
+    if (!has_html_open && !has_unicode_space && !has_ascii_cr && !has_nul && !has_assignment_keyword &&
         !has_soft_await_identifier && !has_soft_yield_identifier &&
         !has_invalid_tagged_template_escape) return NULL;
 
@@ -559,6 +564,15 @@ static char* js_normalize_source_for_parser(const char* source, size_t length) {
                 out[i] = ' ';
                 continue;
             }
+            if (c == '\r') {
+                out[i] = '\n';
+                if (n == '\n') {
+                    out[i + 1] = ' ';
+                    i++;
+                }
+                state = ST_DEFAULT;
+                continue;
+            }
             size_t width = 0;
             bool line_terminator = false;
             if (js_source_utf8_whitespace_at(out, length, i, &width, &line_terminator) && line_terminator) {
@@ -574,6 +588,22 @@ static char* js_normalize_source_for_parser(const char* source, size_t length) {
         if (state == ST_BLOCK_COMMENT) {
             if (c == '\0') {
                 out[i] = ' ';
+                continue;
+            }
+            if (c == '\r') {
+                out[i] = '\n';
+                if (n == '\n') {
+                    out[i + 1] = ' ';
+                    i++;
+                }
+                continue;
+            }
+            size_t width = 0;
+            bool line_terminator = false;
+            if (js_source_utf8_whitespace_at(out, length, i, &width, &line_terminator) && line_terminator) {
+                out[i] = '\n';
+                for (size_t j = 1; j < width; j++) out[i + j] = ' ';
+                i += width - 1;
                 continue;
             }
             if (c == '*' && n == '/') {
@@ -680,6 +710,15 @@ static char* js_normalize_source_for_parser(const char* source, size_t length) {
         if (js_source_assignment_keyword_at(out, length, i, "yield", 5)) {
             out[i + 2] = '$';
             i += 4;
+            continue;
+        }
+
+        if (c == '\r') {
+            out[i] = '\n';
+            if (n == '\n') {
+                out[i + 1] = ' ';
+                i++;
+            }
             continue;
         }
 

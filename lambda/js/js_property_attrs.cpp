@@ -636,6 +636,7 @@ extern "C" bool js_intercept_accessor_marker(Item obj, Item key, Item value) {
 }
 
 extern "C" Item js_get_prototype(Item object);
+extern "C" Item js_get_prototype_of(Item object);
 
 extern "C" JsAccessorPair* js_find_accessor_pair_inheritable(Item obj,
                                                               const char* name,
@@ -662,7 +663,7 @@ extern "C" JsAccessorPair* js_find_accessor_pair_inheritable(Item obj,
             return nullptr;
         }
         if (get_type_id(cur) != LMD_TYPE_MAP) break;
-        Item proto = js_get_prototype(cur);
+        Item proto = js_get_prototype_of(cur);
         if (proto.item == ItemNull.item ||
             get_type_id(proto) == LMD_TYPE_UNDEFINED ||
             get_type_id(proto) == LMD_TYPE_NULL) break;

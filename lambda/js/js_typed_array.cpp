@@ -1066,6 +1066,89 @@ extern "C" Item js_arraybuffer_slice(Item val, int begin, int end) {
     return result;
 }
 
+static bool js_arraybuffer_slice_index(Item value, int len, int* out_index) {
+    Item num = js_to_number(value);
+    if (js_check_exception()) return false;
+    TypeId nt = get_type_id(num);
+    double n = (nt == LMD_TYPE_FLOAT) ? it2d(num) : (double)it2i(num);
+    if (std::isnan(n)) n = 0;
+    n = std::trunc(n);
+    if (n < 0) {
+        n = (double)len + n;
+        if (n < 0) n = 0;
+    } else if (n > len) {
+        n = len;
+    }
+    *out_index = (int)n;
+    return true;
+}
+
+extern "C" Item js_arraybuffer_slice_items(Item val, Item begin_item, Item end_item, int argc) {
+    if (!js_is_arraybuffer(val)) return (Item){.item = ITEM_NULL};
+    if (js_is_sharedarraybuffer(val)) {
+        return js_throw_type_error("ArrayBuffer.prototype.slice requires that |this| not be a SharedArrayBuffer");
+    }
+    JsArrayBuffer* ab = js_get_arraybuffer_ptr(val.map);
+    if (!ab) return (Item){.item = ITEM_NULL};
+
+    int begin = 0;
+    int end = ab->byte_length;
+    if (argc > 0) {
+        if (!js_arraybuffer_slice_index(begin_item, ab->byte_length, &begin)) return ItemNull;
+    }
+    if (argc > 1 && get_type_id(end_item) != LMD_TYPE_UNDEFINED) {
+        if (!js_arraybuffer_slice_index(end_item, ab->byte_length, &end)) return ItemNull;
+    }
+    if (end < begin) end = begin;
+    int new_len = end - begin;
+
+    Item result_item = ItemNull;
+    Item ctor_key = (Item){.item = s2it(heap_create_name("constructor"))};
+    Item ctor = js_property_get(val, ctor_key);
+    if (js_check_exception()) return ItemNull;
+
+    bool use_default_ctor = get_type_id(ctor) == LMD_TYPE_UNDEFINED;
+    if (!use_default_ctor) {
+        TypeId ctor_type = get_type_id(ctor);
+        if (ctor_type != LMD_TYPE_MAP && ctor_type != LMD_TYPE_ARRAY &&
+            ctor_type != LMD_TYPE_FUNC && ctor_type != LMD_TYPE_ELEMENT) {
+            return js_throw_type_error("ArrayBuffer species constructor must be an object");
+        }
+        Item species_key = (Item){.item = s2it(heap_create_name("__sym_6"))};
+        Item species = js_property_get(ctor, species_key);
+        if (js_check_exception()) return ItemNull;
+        TypeId species_type = get_type_id(species);
+        if (species_type == LMD_TYPE_UNDEFINED || species_type == LMD_TYPE_NULL) {
+            use_default_ctor = true;
+        } else {
+            if (species_type != LMD_TYPE_FUNC && !js_is_proxy(species)) {
+                return js_throw_type_error("ArrayBuffer species is not a constructor");
+            }
+            Item len_arg = (Item){.item = i2it(new_len)};
+            result_item = js_new_from_class_object(species, &len_arg, 1);
+            if (js_check_exception()) return ItemNull;
+        }
+    }
+    if (use_default_ctor) {
+        result_item = js_arraybuffer_construct((Item){.item = i2it(new_len)});
+    }
+    if (js_check_exception()) return ItemNull;
+    if (!js_is_arraybuffer(result_item) || js_is_sharedarraybuffer(result_item)) {
+        return js_throw_type_error("ArrayBuffer species constructor did not return an ArrayBuffer");
+    }
+    if (result_item.item == val.item) {
+        return js_throw_type_error("ArrayBuffer species constructor returned the same buffer");
+    }
+    JsArrayBuffer* rab = js_get_arraybuffer_ptr(result_item.map);
+    if (!rab || rab->byte_length < new_len) {
+        return js_throw_type_error("ArrayBuffer species constructor returned a buffer that is too small");
+    }
+    if (new_len > 0) {
+        memcpy(rab->data, (char*)ab->data + begin, new_len);
+    }
+    return result_item;
+}
+
 extern "C" bool js_arraybuffer_is_view(Item val) {
     return js_is_typed_array(val) || js_is_dataview(val);
 }
