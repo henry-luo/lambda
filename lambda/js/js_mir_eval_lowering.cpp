@@ -6,6 +6,14 @@ int g_eval_preamble_entry_count = 0;
 int g_eval_preamble_var_count = 0;
 
 static bool js_source_contains_import_meta(const char* source, size_t len);
+static bool js_dynamic_function_source_has_hashbang(const char* source, size_t len);
+static bool js_dynamic_function_param_has_invalid_html_close_comment(const char* source, size_t len);
+static bool js_eval_at_line_terminator(const char* source, size_t len, size_t pos, size_t* width);
+
+static Item js_dynamic_function_throw_syntax_error(const char* message) {
+    js_throw_syntax_error((Item){.item = s2it(heap_create_name(message, (int)strlen(message)))});
+    return ItemNull;
+}
 
 // ============================================================================
 // new Function(param1, param2, ..., body) — dynamic function compilation
@@ -37,8 +45,15 @@ extern "C" Item js_new_function_from_string(Item* args, int argc) {
         if (ps && ps->len > 0) {
             if (js_source_contains_import_meta(ps->chars, ps->len)) {
                 strbuf_free(sb);
-                js_throw_syntax_error((Item){.item = s2it(heap_create_name("Cannot use import.meta outside a module", 39))});
-                return ItemNull;
+                return js_dynamic_function_throw_syntax_error("Cannot use import.meta outside a module");
+            }
+            if (js_dynamic_function_source_has_hashbang(ps->chars, ps->len)) {
+                strbuf_free(sb);
+                return js_dynamic_function_throw_syntax_error("Hashbang is not allowed here");
+            }
+            if (js_dynamic_function_param_has_invalid_html_close_comment(ps->chars, ps->len)) {
+                strbuf_free(sb);
+                return js_dynamic_function_throw_syntax_error("Unexpected token '-->'");
             }
             strbuf_append_str_n(sb, ps->chars, (int)ps->len);
         }
@@ -55,8 +70,11 @@ extern "C" Item js_new_function_from_string(Item* args, int argc) {
     if (body && body->len > 0) {
         if (js_source_contains_import_meta(body->chars, body->len)) {
             strbuf_free(sb);
-            js_throw_syntax_error((Item){.item = s2it(heap_create_name("Cannot use import.meta outside a module", 39))});
-            return ItemNull;
+            return js_dynamic_function_throw_syntax_error("Cannot use import.meta outside a module");
+        }
+        if (js_dynamic_function_source_has_hashbang(body->chars, body->len)) {
+            strbuf_free(sb);
+            return js_dynamic_function_throw_syntax_error("Hashbang is not allowed here");
         }
         strbuf_append_str(sb, "\n");
         strbuf_append_str_n(sb, body->chars, (int)body->len);
@@ -230,7 +248,11 @@ char* eval_try_insert_return(const char* code, size_t len) {
         char c = code[i];
         char n = (i + 1 < len) ? code[i + 1] : 0;
 
-        if (in_line_cmt)  { if (c == '\n') in_line_cmt = false; continue; }
+        if (in_line_cmt)  {
+            size_t lt_width = 0;
+            if (js_eval_at_line_terminator(code, len, i, &lt_width)) in_line_cmt = false;
+            continue;
+        }
         if (in_block_cmt) { if (c == '*' && n == '/') { in_block_cmt = false; i++; } continue; }
 
         if (!in_sq && !in_dq && !in_tpl) {
@@ -254,7 +276,7 @@ char* eval_try_insert_return(const char* code, size_t len) {
         if (c == ';' && brace == 0 && paren == 0 && bracket == 0) {
             size_t nxt = i + 1;
             while (nxt < len && (code[nxt] == ' ' || code[nxt] == '\t' ||
-                                 code[nxt] == '\n' || code[nxt] == '\r'))
+                                 js_eval_at_line_terminator(code, len, nxt, NULL)))
                 nxt++;
             if (nxt < len) last_stmt_start = nxt;
         }
@@ -263,7 +285,7 @@ char* eval_try_insert_return(const char* code, size_t len) {
     // Skip leading whitespace of last statement
     size_t ls = last_stmt_start;
     while (ls < len && (code[ls] == ' ' || code[ls] == '\t' ||
-                        code[ls] == '\n' || code[ls] == '\r'))
+                        js_eval_at_line_terminator(code, len, ls, NULL)))
         ls++;
     if (ls >= len) return NULL;
 
@@ -320,13 +342,34 @@ static bool js_eval_at_word(const char* source, size_t len, size_t pos, const ch
     return true;
 }
 
+static bool js_eval_at_line_terminator(const char* source, size_t len, size_t pos, size_t* width) {
+    if (!source || pos >= len) return false;
+    unsigned char ch = (unsigned char)source[pos];
+    if (ch == '\n') {
+        if (width) *width = 1;
+        return true;
+    }
+    if (ch == '\r') {
+        if (width) *width = (pos + 1 < len && source[pos + 1] == '\n') ? 2 : 1;
+        return true;
+    }
+    if (pos + 2 < len && ch == 0xE2 && (unsigned char)source[pos + 1] == 0x80 &&
+        ((unsigned char)source[pos + 2] == 0xA8 || (unsigned char)source[pos + 2] == 0xA9)) {
+        if (width) *width = 3;
+        return true;
+    }
+    return false;
+}
+
 static size_t js_eval_skip_space_and_comments(const char* source, size_t len, size_t pos) {
     while (pos < len) {
         char ch = source[pos];
-        if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') { pos++; continue; }
+        size_t lt_width = 0;
+        if (ch == ' ' || ch == '\t') { pos++; continue; }
+        if (js_eval_at_line_terminator(source, len, pos, &lt_width)) { pos += lt_width; continue; }
         if (ch == '/' && pos + 1 < len && source[pos + 1] == '/') {
             pos += 2;
-            while (pos < len && source[pos] != '\n') pos++;
+            while (pos < len && !js_eval_at_line_terminator(source, len, pos, NULL)) pos++;
             continue;
         }
         if (ch == '/' && pos + 1 < len && source[pos + 1] == '*') {
@@ -355,7 +398,7 @@ static bool js_source_contains_import_meta(const char* source, size_t len) {
         }
         if (ch == '/' && pos + 1 < len && source[pos + 1] == '/') {
             pos += 2;
-            while (pos < len && source[pos] != '\n') pos++;
+            while (pos < len && !js_eval_at_line_terminator(source, len, pos, NULL)) pos++;
             continue;
         }
         if (ch == '/' && pos + 1 < len && source[pos + 1] == '*') {
@@ -373,6 +416,52 @@ static bool js_source_contains_import_meta(const char* source, size_t len) {
             pos += 5;
         }
     }
+    return false;
+}
+
+static bool js_dynamic_function_source_has_hashbang(const char* source, size_t len) {
+    return source && len >= 2 && source[0] == '#' && source[1] == '!';
+}
+
+static bool js_dynamic_function_param_has_line_terminator_before(const char* source, size_t pos) {
+    for (size_t i = 0; i < pos; i++) {
+        if (source[i] == '\n' || source[i] == '\r') return true;
+    }
+    return false;
+}
+
+static bool js_dynamic_function_param_has_invalid_html_close_comment(const char* source, size_t len) {
+    if (!source || len < 3) return false;
+
+    for (size_t pos = 0; pos < len; pos++) {
+        char ch = source[pos];
+        if (ch == '\'' || ch == '"' || ch == '`') {
+            char quote = ch;
+            pos++;
+            while (pos < len) {
+                if (source[pos] == '\\' && pos + 1 < len) { pos += 2; continue; }
+                if (source[pos] == quote) break;
+                pos++;
+            }
+            continue;
+        }
+        if (ch == '/' && pos + 1 < len && source[pos + 1] == '/') {
+            pos += 2;
+            while (pos < len && !js_eval_at_line_terminator(source, len, pos, NULL)) pos++;
+            continue;
+        }
+        if (ch == '/' && pos + 1 < len && source[pos + 1] == '*') {
+            pos += 2;
+            while (pos + 1 < len && !(source[pos] == '*' && source[pos + 1] == '/')) pos++;
+            if (pos + 1 < len) pos++;
+            continue;
+        }
+        if (ch == '-' && pos + 2 < len && source[pos + 1] == '-' && source[pos + 2] == '>') {
+            if (!js_dynamic_function_param_has_line_terminator_before(source, pos)) return true;
+            pos += 2;
+        }
+    }
+
     return false;
 }
 
@@ -399,7 +488,7 @@ static JsEvalInitializerScan js_eval_scan_initializer_source(const char* source,
         }
         if (ch == '/' && pos + 1 < len && source[pos + 1] == '/') {
             pos += 2;
-            while (pos < len && source[pos] != '\n') pos++;
+            while (pos < len && !js_eval_at_line_terminator(source, len, pos, NULL)) pos++;
             continue;
         }
         if (ch == '/' && pos + 1 < len && source[pos + 1] == '*') {
@@ -577,7 +666,7 @@ static bool js_eval_source_assigns_immutable_binding(String* code_str) {
         }
         if (ch == '/' && pos + 1 < len && source[pos + 1] == '/') {
             pos += 2;
-            while (pos < len && source[pos] != '\n' && source[pos] != '\r') pos++;
+            while (pos < len && !js_eval_at_line_terminator(source, len, pos, NULL)) pos++;
             continue;
         }
         if (ch == '/' && pos + 1 < len && source[pos + 1] == '*') {
@@ -639,11 +728,13 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
         while (i < slen) {
             char c = s[i];
             // skip whitespace
-            if (c == ' ' || c == '\t' || c == '\n' || c == '\r') { i++; continue; }
+            size_t lt_width = 0;
+            if (c == ' ' || c == '\t') { i++; continue; }
+            if (js_eval_at_line_terminator(s, slen, i, &lt_width)) { i += lt_width; continue; }
             // skip line comments
             if (c == '/' && i + 1 < slen && s[i+1] == '/') {
                 i += 2;
-                while (i < slen && s[i] != '\n') i++;
+                while (i < slen && !js_eval_at_line_terminator(s, slen, i, NULL)) i++;
                 continue;
             }
             // skip block comments
@@ -711,8 +802,15 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
         size_t slen = code_str->len;
         // Skip leading whitespace
         size_t i = 0;
-        while (i < slen && (s[i] == ' ' || s[i] == '\t' || s[i] == '\n' || s[i] == '\r')) i++;
+        while (i < slen) {
+            size_t lt_width = 0;
+            if (s[i] == ' ' || s[i] == '\t') { i++; continue; }
+            if (js_eval_at_line_terminator(s, slen, i, &lt_width)) { i += lt_width; continue; }
+            break;
+        }
         if (i < slen) {
+            if (s[i] == '/' && i + 1 < slen && (s[i + 1] == '/' || s[i + 1] == '*'))
+                skip_expr_form = true;
             if (slen - i >= 8 && memcmp(s + i, "function", 8) == 0 &&
                 (i + 8 >= slen || s[i+8] == ' ' || s[i+8] == '*' || s[i+8] == '('))
                 skip_expr_form = true;

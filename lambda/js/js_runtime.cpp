@@ -3790,6 +3790,16 @@ extern "C" Item js_property_get(Item object, Item key) {
                 return js_get_prototype_of(object);
             }
         }
+        if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT || type == LMD_TYPE_BOOL) {
+            Item proto = js_get_prototype_of(object);
+            if (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP) {
+                Item saved_receiver = js_proxy_receiver;
+                js_proxy_receiver = object;
+                Item result = js_property_get(proto, key);
+                js_proxy_receiver = saved_receiver;
+                if (get_type_id(result) != LMD_TYPE_UNDEFINED) return result;
+            }
+        }
         if (type == LMD_TYPE_DECIMAL && js_is_bigint(object)) {
             Item proto = js_get_prototype_of(object);
             if (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP) {
@@ -6396,9 +6406,16 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     case JS_BUILTIN_OBJ_HAS_OWN_PROPERTY:
         return js_object_prototype_has_own_property(this_val, arg0);
     case JS_BUILTIN_OBJ_PROPERTY_IS_ENUMERABLE: {
+        TypeId this_type = get_type_id(this_val);
+        if (this_type == LMD_TYPE_NULL || this_type == LMD_TYPE_UNDEFINED ||
+            this_val.item == ITEM_NULL || this_val.item == ITEM_JS_UNDEFINED) {
+            return js_throw_type_error("Cannot convert undefined or null to object");
+        }
+        Item property_object = js_to_object(this_val);
+        if (js_exception_pending) return ItemNull;
         // Proxy: check GOPD trap result for enumerable
-        if (js_is_proxy(this_val)) {
-            Item desc = js_proxy_trap_get_own_property_descriptor(this_val, arg0);
+        if (js_is_proxy(property_object)) {
+            Item desc = js_proxy_trap_get_own_property_descriptor(property_object, arg0);
             if (js_exception_pending) return (Item){.item = ITEM_FALSE};
             if (desc.item == ItemNull.item || get_type_id(desc) == LMD_TYPE_UNDEFINED)
                 return (Item){.item = ITEM_FALSE};
@@ -6411,8 +6428,8 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         }
         // Check if the property exists and is enumerable
         // v27: Handle arrays — check __ne_ marker from companion map
-        if (get_type_id(this_val) == LMD_TYPE_ARRAY) {
-            if (!it2b(js_has_own_property(this_val, arg0))) return (Item){.item = ITEM_FALSE};
+        if (get_type_id(property_object) == LMD_TYPE_ARRAY) {
+            if (!it2b(js_has_own_property(property_object, arg0))) return (Item){.item = ITEM_FALSE};
             Item k;
             // Symbol keys → __sym_N format (must check before js_to_string)
             if (get_type_id(arg0) == LMD_TYPE_INT && it2i(arg0) <= -(int64_t)JS_SYMBOL_BASE) {
@@ -6428,12 +6445,12 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                 // "length" is always non-enumerable for arrays
                 if (ks && ks->len == 6 && strncmp(ks->chars, "length", 6) == 0)
                     return (Item){.item = ITEM_FALSE};
-                if (ks && this_val.array->extra != 0) {
+                if (ks && property_object.array->extra != 0) {
                     // Phase 2c fast path: consult ShapeEntry::flags first.
-                    int fp = js_prop_attrs_fast_path(this_val, ks->chars, (int)ks->len, JSPD_NON_ENUMERABLE);
+                    int fp = js_prop_attrs_fast_path(property_object, ks->chars, (int)ks->len, JSPD_NON_ENUMERABLE);
                     if (fp == 0) return (Item){.item = ITEM_FALSE};
                     if (fp == -1) {
-                        Map* pm = (Map*)(uintptr_t)this_val.array->extra;
+                        Map* pm = (Map*)(uintptr_t)property_object.array->extra;
                         char ne_buf[256];
                         snprintf(ne_buf, sizeof(ne_buf), "__ne_%.*s", (int)ks->len, ks->chars);
                         bool ne_found = false;
@@ -6445,13 +6462,13 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             return (Item){.item = ITEM_TRUE};
         }
         // v20: Virtual builtin methods are non-enumerable — check map shape directly
-        if (get_type_id(this_val) == LMD_TYPE_MAP) {
+        if (get_type_id(property_object) == LMD_TYPE_MAP) {
             // Symbol keys: use __sym_N key for property lookup (not js_to_string which throws)
             Item k = js_to_property_key(arg0);
             if (js_exception_pending) return (Item){.item = ITEM_FALSE};
             if (get_type_id(k) == LMD_TYPE_STRING) {
                 String* ks = it2s(k);
-                Map* m = this_val.map;
+                Map* m = property_object.map;
                 if (m && m->type) {
                     // Check if property exists in actual map shape
                     bool found_in_shape = false;
@@ -6475,7 +6492,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                     // but propertyIsEnumerable on those goes through a different path.
                     if (!found_in_shape) return (Item){.item = ITEM_FALSE};
                     // Phase 2c fast path: consult ShapeEntry::flags first.
-                    int fp = js_prop_attrs_fast_path(this_val, ks->chars, (int)ks->len, JSPD_NON_ENUMERABLE);
+                    int fp = js_prop_attrs_fast_path(property_object, ks->chars, (int)ks->len, JSPD_NON_ENUMERABLE);
                     if (fp == 0) return (Item){.item = ITEM_FALSE};
                     if (fp == -1) {
                         char ne_buf[256];
@@ -6489,7 +6506,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             }
         }
         // Function objects: name, length, prototype, arguments, caller are non-enumerable
-        if (get_type_id(this_val) == LMD_TYPE_FUNC) {
+        if (get_type_id(property_object) == LMD_TYPE_FUNC) {
             Item k = js_to_property_key(arg0);
             if (js_exception_pending) return (Item){.item = ITEM_FALSE};
             if (get_type_id(k) == LMD_TYPE_STRING) {
@@ -6502,7 +6519,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                     return (Item){.item = ITEM_FALSE};
                 }
                 // Check __ne_ marker in properties_map for custom properties
-                JsFunction* fn = (JsFunction*)this_val.function;
+                JsFunction* fn = (JsFunction*)property_object.function;
                 if (fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
                     // First check if property exists in properties_map
                     bool has_key = false;
@@ -6523,7 +6540,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                 }
             }
         }
-        Item has = js_has_own_property(this_val, arg0);
+        Item has = js_has_own_property(property_object, arg0);
         if (!it2b(has)) return (Item){.item = ITEM_FALSE};
         return (Item){.item = ITEM_TRUE};
     }
@@ -6756,24 +6773,33 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         return (Item){.item = s2it(heap_create_name("[object Object]", 15))};
     }
     case JS_BUILTIN_OBJ_VALUE_OF: {
-        // Wrapper objects return their __primitiveValue__
-        if (get_type_id(this_val) == LMD_TYPE_MAP) {
-            bool own_pv = false;
-            Item pv = js_map_get_fast(this_val.map, "__primitiveValue__", 18, &own_pv);
-            if (own_pv) return pv;
+        TypeId tid = get_type_id(this_val);
+        if (tid == LMD_TYPE_NULL || tid == LMD_TYPE_UNDEFINED ||
+            this_val.item == ITEM_NULL || this_val.item == ITEM_JS_UNDEFINED) {
+            return js_throw_type_error("Cannot convert undefined or null to object");
         }
-        return this_val;
+        return js_to_object(this_val);
     }
     case JS_BUILTIN_OBJ_IS_PROTOTYPE_OF: {
-        // v18g: Check if this_val is in the prototype chain of arg0
-        // this_val.isPrototypeOf(obj) → walks obj's prototype chain looking for this_val
         if (arg_count < 1) return (Item){.item = ITEM_FALSE};
         Item target = args[0];
-        // Walk the prototype chain of target
+        TypeId target_type = get_type_id(target);
+        bool target_is_object = target_type == LMD_TYPE_MAP || target_type == LMD_TYPE_ARRAY ||
+            target_type == LMD_TYPE_FUNC || target_type == LMD_TYPE_ELEMENT ||
+            target_type == LMD_TYPE_OBJECT || target_type == LMD_TYPE_VMAP;
+        if (!target_is_object) return (Item){.item = ITEM_FALSE};
+        TypeId this_type = get_type_id(this_val);
+        if (this_type == LMD_TYPE_NULL || this_type == LMD_TYPE_UNDEFINED ||
+            this_val.item == ITEM_NULL || this_val.item == ITEM_JS_UNDEFINED) {
+            return js_throw_type_error("Cannot convert undefined or null to object");
+        }
+        Item object = js_to_object(this_val);
+        if (js_exception_pending) return ItemNull;
+        // Walk the prototype chain of target.
         for (int depth = 0; depth < 32; depth++) {
             Item proto = js_get_prototype_of(target);
             if (proto.item == ItemNull.item || get_type_id(proto) == LMD_TYPE_NULL) break;
-            if (proto.item == this_val.item) return (Item){.item = ITEM_TRUE};
+            if (proto.item == object.item) return (Item){.item = ITEM_TRUE};
             // For next iteration, we need to get proto's proto
             // But js_get_prototype_of on a prototype object may not work the same way
             // Use raw __proto__ from here
@@ -6782,30 +6808,29 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         return (Item){.item = ITEM_FALSE};
     }
     case JS_BUILTIN_OBJ_TO_LOCALE_STRING: {
-        // Object.prototype.toLocaleString() — per spec: Invoke(this, "toString")
-        // Step 1: Throw TypeError if this is null or undefined
+        // Object.prototype.toLocaleString() — invoke this.toString().
         TypeId tid = get_type_id(this_val);
         if (tid == LMD_TYPE_NULL || tid == LMD_TYPE_UNDEFINED ||
             this_val.item == ITEM_NULL || this_val.item == ITEM_JS_UNDEFINED) {
-            Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
-            Item msg = (Item){.item = s2it(heap_create_name("Cannot convert undefined or null to object"))};
-            js_throw_value(js_new_error_with_name(tn, msg));
-            return ItemNull;
+            return js_throw_type_error("Cannot convert undefined or null to object");
         }
-        if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_ELEMENT) {
-            Item ts_key = (Item){.item = s2it(heap_create_name("toString", 8))};
-            Item ts_fn = js_property_get(this_val, ts_key);
-            if (get_type_id(ts_fn) == LMD_TYPE_FUNC) {
-                return js_call_function(ts_fn, this_val, nullptr, 0);
-            }
+        Item ts_key = (Item){.item = s2it(heap_create_name("toString", 8))};
+        Item ts_fn = js_property_get(this_val, ts_key);
+        if (get_type_id(ts_fn) == LMD_TYPE_FUNC) {
+            return js_call_function(ts_fn, this_val, nullptr, 0);
         }
-        return js_to_string(this_val);
+        return js_throw_type_error("toString is not a function");
     }
 
     // Annex B: Object.prototype.__defineGetter__/__defineSetter__/__lookupGetter__/__lookupSetter__
     case JS_BUILTIN_OBJ_DEFINE_GETTER:
     case JS_BUILTIN_OBJ_DEFINE_SETTER: {
         // __defineGetter__(prop, fn) / __defineSetter__(prop, fn)
+        TypeId this_type = get_type_id(this_val);
+        if (this_type == LMD_TYPE_NULL || this_type == LMD_TYPE_UNDEFINED ||
+            this_val.item == ITEM_NULL || this_val.item == ITEM_JS_UNDEFINED) {
+            return js_throw_type_error("Cannot convert undefined or null to object");
+        }
         if (get_type_id(arg1) != LMD_TYPE_FUNC) {
             return js_throw_type_error("getter/setter must be a function");
         }
@@ -6830,6 +6855,11 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     case JS_BUILTIN_OBJ_LOOKUP_SETTER: {
         // __lookupGetter__(prop) / __lookupSetter__(prop)
         extern Item js_object_get_own_property_descriptor(Item obj, Item name);
+        TypeId this_type = get_type_id(this_val);
+        if (this_type == LMD_TYPE_NULL || this_type == LMD_TYPE_UNDEFINED ||
+            this_val.item == ITEM_NULL || this_val.item == ITEM_JS_UNDEFINED) {
+            return js_throw_type_error("Cannot convert undefined or null to object");
+        }
         Item key = js_to_string(arg0);
         Item obj = js_to_object(this_val);
         const char* field = (builtin_id == JS_BUILTIN_OBJ_LOOKUP_GETTER) ? "get" : "set";
@@ -7989,6 +8019,13 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         // 4. If name is "", return msg
         // 5. If msg is "", return name
         // 6. Return name + ": " + msg
+        TypeId this_type = get_type_id(this_val);
+        bool this_is_object = this_type == LMD_TYPE_MAP || this_type == LMD_TYPE_ARRAY ||
+            this_type == LMD_TYPE_FUNC || this_type == LMD_TYPE_ELEMENT ||
+            this_type == LMD_TYPE_OBJECT || this_type == LMD_TYPE_VMAP;
+        if (!this_is_object) {
+            return js_throw_type_error("Error.prototype.toString called on incompatible receiver");
+        }
         Item name_key = (Item){.item = s2it(heap_create_name("name", 4))};
         Item msg_key = (Item){.item = s2it(heap_create_name("message", 7))};
         Item name_val = js_property_get(this_val, name_key);
@@ -16566,7 +16603,12 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
     if (method->len == 10 && strncmp(method->chars, "charCodeAt", 10) == 0) {
         String* s = it2s(str);
         if (!s || s->len == 0) return js_make_number(NAN);
-        double didx = (argc >= 1) ? js_get_number(args[0]) : 0;
+        double didx = 0;
+        if (argc >= 1) {
+            Item idx_num = js_to_number(args[0]);
+            if (js_exception_pending) return ItemNull;
+            didx = js_get_number(idx_num);
+        }
         int target_idx = isnan(didx) ? 0 : (int)didx;
         if (target_idx < 0) return js_make_number(NAN);
         // walk UTF-8 bytes, counting UTF-16 code units
@@ -16606,7 +16648,9 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         if (argc < 1) return make_js_undefined();
         String* s = it2s(str);
         if (!s || s->len == 0) return make_js_undefined();
-        double didx = js_get_number(args[0]);
+        Item idx_num = js_to_number(args[0]);
+        if (js_exception_pending) return ItemNull;
+        double didx = js_get_number(idx_num);
         int target_idx = isnan(didx) ? 0 : (int)didx;
         if (target_idx < 0) return make_js_undefined();
         // walk UTF-8, counting UTF-16 code units to find the right position
@@ -16622,9 +16666,20 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
             else if ((b & 0xF8) == 0xF0) { cp = b & 0x07; bytes = 4; }
             for (int i = 1; i < bytes && byte_pos + i < (int)s->len; i++)
                 cp = (cp << 6) | ((unsigned char)s->chars[byte_pos + i] & 0x3F);
-            if (utf16_idx == target_idx)
-                return (Item){.item = i2it((int64_t)cp)};
-            utf16_idx += (cp >= 0x10000) ? 2 : 1;
+            if (cp >= 0x10000) {
+                if (utf16_idx == target_idx) {
+                    return (Item){.item = i2it((int64_t)cp)};
+                }
+                if (utf16_idx + 1 == target_idx) {
+                    uint32_t lo = 0xDC00 + ((cp - 0x10000) & 0x3FF);
+                    return (Item){.item = i2it((int64_t)lo)};
+                }
+                utf16_idx += 2;
+            } else {
+                if (utf16_idx == target_idx)
+                    return (Item){.item = i2it((int64_t)cp)};
+                utf16_idx++;
+            }
             byte_pos += bytes;
         }
         return make_js_undefined();
@@ -16743,19 +16798,35 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         if (argc < 1) return str;
         String* s = it2s(str);
         if (!s) return str;
-        int target = (int)js_get_number(args[0]);
-        if ((int)s->len >= target) return str;
+        Item target_num = js_to_number(args[0]);
+        if (js_exception_pending) return ItemNull;
+        double target_d = js_get_number(target_num);
+        if (isnan(target_d) || target_d <= 0) return str;
+        if (isinf(target_d) && target_d > 0) return js_throw_range_error("Invalid string length");
+        int64_t target = (int64_t)floor(target_d);
+        int64_t str_len = js_utf16_len(s->chars, (int)s->len, (bool)s->is_ascii);
+        if (str_len >= target) return str;
         String* pad = NULL;
         if (argc > 1 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED)
             pad = it2s(js_to_string(args[1]));
         const char* pad_chars = pad ? pad->chars : " ";
         int pad_len = pad ? (int)pad->len : 1;
         if (pad_len == 0) return str;
-        int needed = target - (int)s->len;
+        int64_t needed = target - str_len;
+        int64_t pad_units = pad ? js_utf16_len(pad->chars, (int)pad->len, (bool)pad->is_ascii) : 1;
+        if (pad_units <= 0) return str;
         StrBuf* buf = strbuf_new();
-        for (int i = 0; i < needed; i++) {
-            strbuf_append_char(buf, pad_chars[i % pad_len]);
+        int64_t units_written = 0;
+        while (units_written < needed) {
+            strbuf_append_str_n(buf, pad_chars, (size_t)pad_len);
+            units_written += pad_units;
         }
+        Item filler = (Item){.item = s2it(heap_strcpy(buf->str, (int)buf->length))};
+        strbuf_free(buf);
+        filler = js_str_substring_utf16(filler, 0, needed);
+        String* filler_s = it2s(filler);
+        buf = strbuf_new();
+        if (filler_s && filler_s->len > 0) strbuf_append_str_n(buf, filler_s->chars, filler_s->len);
         strbuf_append_str_n(buf, s->chars, s->len);
         String* result = heap_strcpy(buf->str, buf->length);
         strbuf_free(buf);
@@ -16766,20 +16837,36 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         if (argc < 1) return str;
         String* s = it2s(str);
         if (!s) return str;
-        int target = (int)js_get_number(args[0]);
-        if ((int)s->len >= target) return str;
+        Item target_num = js_to_number(args[0]);
+        if (js_exception_pending) return ItemNull;
+        double target_d = js_get_number(target_num);
+        if (isnan(target_d) || target_d <= 0) return str;
+        if (isinf(target_d) && target_d > 0) return js_throw_range_error("Invalid string length");
+        int64_t target = (int64_t)floor(target_d);
+        int64_t str_len = js_utf16_len(s->chars, (int)s->len, (bool)s->is_ascii);
+        if (str_len >= target) return str;
         String* pad = NULL;
         if (argc > 1 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED)
             pad = it2s(js_to_string(args[1]));
         const char* pad_chars = pad ? pad->chars : " ";
         int pad_len = pad ? (int)pad->len : 1;
         if (pad_len == 0) return str;
-        int needed = target - (int)s->len;
+        int64_t needed = target - str_len;
+        int64_t pad_units = pad ? js_utf16_len(pad->chars, (int)pad->len, (bool)pad->is_ascii) : 1;
+        if (pad_units <= 0) return str;
         StrBuf* buf = strbuf_new();
         strbuf_append_str_n(buf, s->chars, s->len);
-        for (int i = 0; i < needed; i++) {
-            strbuf_append_char(buf, pad_chars[i % pad_len]);
+        StrBuf* pad_buf = strbuf_new();
+        int64_t units_written = 0;
+        while (units_written < needed) {
+            strbuf_append_str_n(pad_buf, pad_chars, (size_t)pad_len);
+            units_written += pad_units;
         }
+        Item filler = (Item){.item = s2it(heap_strcpy(pad_buf->str, (int)pad_buf->length))};
+        strbuf_free(pad_buf);
+        filler = js_str_substring_utf16(filler, 0, needed);
+        String* filler_s = it2s(filler);
+        if (filler_s && filler_s->len > 0) strbuf_append_str_n(buf, filler_s->chars, filler_s->len);
         String* result = heap_strcpy(buf->str, buf->length);
         strbuf_free(buf);
         return (Item){.item = s2it(result)};
