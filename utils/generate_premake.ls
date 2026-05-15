@@ -153,7 +153,7 @@ fn get_test_libdirs(platform) {
     } else if (platform == "linux") {
         ["/usr/local/lib", "/usr/local/lib/aarch64-linux-gnu", "/usr/lib/aarch64-linux-gnu", "build/lib"]
     } else {
-        ["/opt/homebrew/lib", "/opt/homebrew/Cellar/criterion/2.4.2_2/lib", "/usr/local/lib", "build/lib"]
+        ["/opt/homebrew/lib", "/usr/local/lib", "build/lib"]
     }
 }
 

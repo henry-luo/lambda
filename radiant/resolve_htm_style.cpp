@@ -213,7 +213,11 @@ static CssEnum resolve_dir_auto(DomElement* elmt) {
 
 void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     ViewSpan* span = lam::view_require_element(static_cast<View*>(elmt));
-    ViewBlock* block = lam::view_require_block(static_cast<View*>(elmt));
+    // Default-style resolution runs for both block and inline elements,
+    // including generated pseudo-elements like ::after with display:inline.
+    // Use the shared element storage view so inline elements can still receive
+    // boundary/font defaults without asserting on their current view tag.
+    ViewBlock* block = lam::unsafe_view_block_api_span(span);
     float em_size = 0;  uintptr_t elmt_name = elmt->tag();
     switch (elmt_name) {
     case HTM_TAG_BODY: {
@@ -921,7 +925,6 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     case HTM_TAG_Q:
         // inline quotation - browser adds quotes via CSS content, we just style italic
         if (!span->font) { span->font = alloc_font_prop(lycon); }
-        span->in_line->has_color = true;
         span->font->font_style = CSS_VALUE_ITALIC;
         break;
     case HTM_TAG_ABBR:  case HTM_TAG_ACRONYM:

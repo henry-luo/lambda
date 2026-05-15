@@ -10183,6 +10183,57 @@ enum JsRegexSpecialPropertyKind {
     JS_REGEX_PROP_ASCII_DIGIT = 17,
     JS_REGEX_PROP_ASCII_WORD = 18,
     JS_REGEX_PROP_JS_WHITESPACE = 19,
+    JS_REGEX_PROP_ASCII_HEX_DIGIT = 20,
+    JS_REGEX_PROP_HEX_DIGIT = 21,
+    JS_REGEX_PROP_WHITE_SPACE = 22,
+    JS_REGEX_PROP_PATTERN_WHITE_SPACE = 23,
+    JS_REGEX_PROP_REGIONAL_INDICATOR = 24,
+    JS_REGEX_PROP_EMOJI_MODIFIER = 25,
+    JS_REGEX_PROP_JOIN_CONTROL = 26,
+    JS_REGEX_PROP_IDS_TRINARY_OPERATOR = 27,
+    JS_REGEX_PROP_IDS_BINARY_OPERATOR = 28,
+    JS_REGEX_PROP_RADICAL = 29,
+    JS_REGEX_PROP_BIDI_CONTROL = 30,
+    JS_REGEX_PROP_VARIATION_SELECTOR = 31,
+    JS_REGEX_PROP_LOGICAL_ORDER_EXCEPTION = 32,
+    JS_REGEX_PROP_DEPRECATED = 33,
+    JS_REGEX_PROP_LETTER = 34,
+    JS_REGEX_PROP_CASED_LETTER = 35,
+    JS_REGEX_PROP_UPPERCASE_LETTER = 36,
+    JS_REGEX_PROP_LOWERCASE_LETTER = 37,
+    JS_REGEX_PROP_MODIFIER_LETTER = 38,
+    JS_REGEX_PROP_OTHER_LETTER = 39,
+    JS_REGEX_PROP_MARK = 40,
+    JS_REGEX_PROP_NONSPACING_MARK = 41,
+    JS_REGEX_PROP_SPACING_MARK = 42,
+    JS_REGEX_PROP_NUMBER = 43,
+    JS_REGEX_PROP_OTHER_NUMBER = 44,
+    JS_REGEX_PROP_PUNCTUATION = 45,
+    JS_REGEX_PROP_CONNECTOR_PUNCTUATION = 46,
+    JS_REGEX_PROP_DASH_PUNCTUATION = 47,
+    JS_REGEX_PROP_CLOSE_PUNCTUATION = 48,
+    JS_REGEX_PROP_INITIAL_PUNCTUATION = 49,
+    JS_REGEX_PROP_OTHER_PUNCTUATION = 50,
+    JS_REGEX_PROP_SYMBOL = 51,
+    JS_REGEX_PROP_MATH_SYMBOL = 52,
+    JS_REGEX_PROP_CURRENCY_SYMBOL = 53,
+    JS_REGEX_PROP_OTHER_SYMBOL = 54,
+    JS_REGEX_PROP_FORMAT = 55,
+    JS_REGEX_PROP_CONTROL = 56,
+    JS_REGEX_PROP_SURROGATE = 57,
+    JS_REGEX_PROP_PRIVATE_USE = 58,
+    JS_REGEX_PROP_BIDI_MIRRORED = 59,
+    JS_REGEX_PROP_CASED = 60,
+    JS_REGEX_PROP_CHANGES_WHEN_CASEFOLDED = 61,
+    JS_REGEX_PROP_CHANGES_WHEN_CASEMAPPED = 62,
+    JS_REGEX_PROP_CHANGES_WHEN_LOWERCASED = 63,
+    JS_REGEX_PROP_CHANGES_WHEN_TITLECASED = 64,
+    JS_REGEX_PROP_CHANGES_WHEN_UPPERCASED = 65,
+    JS_REGEX_PROP_DEFAULT_IGNORABLE_CODE_POINT = 66,
+    JS_REGEX_PROP_LOWERCASE = 67,
+    JS_REGEX_PROP_NONCHARACTER_CODE_POINT = 68,
+    JS_REGEX_PROP_UPPERCASE = 69,
+    JS_REGEX_PROP_ASSIGNED = 70,
     JS_REGEX_PROP_SCRIPT_BASE = 100,
 };
 
@@ -10194,6 +10245,8 @@ struct JsRegexRange {
 };
 
 static bool js_regexp_is_han_cp(uint32_t cp);
+static int js_regex_generated_property_kind_from_name(const char* name, int name_len);
+static bool js_regex_generated_property_contains(int kind, int cp);
 
 static bool js_regex_match_gc_alias(const char* name, int len, const char* long_name,
                                     const char* short_name, const char* loose_name) {
@@ -10249,12 +10302,65 @@ static bool js_regex_match_script_extension_alias(const char* name, int len, con
 static int js_regex_property_kind_from_name(const char* name, int name_len) {
     if (js_regex_match_property_name(name, name_len, "ASCII")) return JS_REGEX_PROP_ASCII;
     if (js_regex_match_property_name(name, name_len, "Any")) return JS_REGEX_PROP_ANY;
+    if (js_regex_match_property_name(name, name_len, "ASCII_Hex_Digit") ||
+        js_regex_match_property_name(name, name_len, "AHex")) return JS_REGEX_PROP_ASCII_HEX_DIGIT;
+    if (js_regex_match_property_name(name, name_len, "Hex_Digit") ||
+        js_regex_match_property_name(name, name_len, "Hex")) return JS_REGEX_PROP_HEX_DIGIT;
+    if (js_regex_match_property_name(name, name_len, "White_Space") ||
+        js_regex_match_property_name(name, name_len, "space")) return JS_REGEX_PROP_WHITE_SPACE;
+    if (js_regex_match_property_name(name, name_len, "Pattern_White_Space") ||
+        js_regex_match_property_name(name, name_len, "Pat_WS")) return JS_REGEX_PROP_PATTERN_WHITE_SPACE;
 
+    int generated_kind = js_regex_generated_property_kind_from_name(name, name_len);
+    if (generated_kind) return generated_kind;
+
+    if (js_regex_match_property_name(name, name_len, "Regional_Indicator") ||
+        js_regex_match_property_name(name, name_len, "RI")) return JS_REGEX_PROP_REGIONAL_INDICATOR;
+    if (js_regex_match_property_name(name, name_len, "Emoji_Modifier") ||
+        js_regex_match_property_name(name, name_len, "EMod")) return JS_REGEX_PROP_EMOJI_MODIFIER;
+    if (js_regex_match_property_name(name, name_len, "Join_Control") ||
+        js_regex_match_property_name(name, name_len, "Join_C")) return JS_REGEX_PROP_JOIN_CONTROL;
+    if (js_regex_match_property_name(name, name_len, "IDS_Trinary_Operator") ||
+        js_regex_match_property_name(name, name_len, "IDST")) return JS_REGEX_PROP_IDS_TRINARY_OPERATOR;
+    if (js_regex_match_property_name(name, name_len, "IDS_Binary_Operator") ||
+        js_regex_match_property_name(name, name_len, "IDSB")) return JS_REGEX_PROP_IDS_BINARY_OPERATOR;
+    if (js_regex_match_property_name(name, name_len, "Radical")) return JS_REGEX_PROP_RADICAL;
+    if (js_regex_match_property_name(name, name_len, "Bidi_Control") ||
+        js_regex_match_property_name(name, name_len, "Bidi_C")) return JS_REGEX_PROP_BIDI_CONTROL;
+    if (js_regex_match_property_name(name, name_len, "Variation_Selector") ||
+        js_regex_match_property_name(name, name_len, "VS")) return JS_REGEX_PROP_VARIATION_SELECTOR;
+    if (js_regex_match_property_name(name, name_len, "Logical_Order_Exception") ||
+        js_regex_match_property_name(name, name_len, "LOE")) return JS_REGEX_PROP_LOGICAL_ORDER_EXCEPTION;
+    if (js_regex_match_property_name(name, name_len, "Deprecated") ||
+        js_regex_match_property_name(name, name_len, "Dep")) return JS_REGEX_PROP_DEPRECATED;
+    if (js_regex_match_property_name(name, name_len, "Bidi_Mirrored") ||
+        js_regex_match_property_name(name, name_len, "Bidi_M")) return JS_REGEX_PROP_BIDI_MIRRORED;
+    if (js_regex_match_property_name(name, name_len, "Default_Ignorable_Code_Point") ||
+        js_regex_match_property_name(name, name_len, "DI")) return JS_REGEX_PROP_DEFAULT_IGNORABLE_CODE_POINT;
+    if (js_regex_match_property_name(name, name_len, "Noncharacter_Code_Point") ||
+        js_regex_match_property_name(name, name_len, "NChar")) return JS_REGEX_PROP_NONCHARACTER_CODE_POINT;
     if (js_regex_match_gc_alias(name, name_len, "Other", "C", NULL)) return JS_REGEX_PROP_OTHER;
     if (js_regex_match_gc_alias(name, name_len, "Unassigned", "Cn", NULL)) return JS_REGEX_PROP_UNASSIGNED;
+    if (js_regex_match_gc_alias(name, name_len, "Letter", "L", NULL)) return JS_REGEX_PROP_LETTER;
+    if (js_regex_match_gc_alias(name, name_len, "Cased_Letter", "LC", "L&")) return JS_REGEX_PROP_CASED_LETTER;
+    if (js_regex_match_gc_alias(name, name_len, "Uppercase_Letter", "Lu", NULL)) return JS_REGEX_PROP_UPPERCASE_LETTER;
+    if (js_regex_match_gc_alias(name, name_len, "Lowercase_Letter", "Ll", NULL)) return JS_REGEX_PROP_LOWERCASE_LETTER;
+    if (js_regex_match_gc_alias(name, name_len, "Modifier_Letter", "Lm", NULL)) return JS_REGEX_PROP_MODIFIER_LETTER;
+    if (js_regex_match_gc_alias(name, name_len, "Other_Letter", "Lo", NULL)) return JS_REGEX_PROP_OTHER_LETTER;
+    if (js_regex_match_gc_alias(name, name_len, "Mark", "M", "Combining_Mark")) return JS_REGEX_PROP_MARK;
+    if (js_regex_match_gc_alias(name, name_len, "Nonspacing_Mark", "Mn", NULL)) return JS_REGEX_PROP_NONSPACING_MARK;
+    if (js_regex_match_gc_alias(name, name_len, "Spacing_Mark", "Mc", NULL)) return JS_REGEX_PROP_SPACING_MARK;
     if (js_regex_match_gc_alias(name, name_len, "Decimal_Number", "Nd", "digit")) return JS_REGEX_PROP_DECIMAL_NUMBER;
+    if (js_regex_match_gc_alias(name, name_len, "Number", "N", NULL)) return JS_REGEX_PROP_NUMBER;
+    if (js_regex_match_gc_alias(name, name_len, "Other_Number", "No", NULL)) return JS_REGEX_PROP_OTHER_NUMBER;
+    if (js_regex_match_gc_alias(name, name_len, "Punctuation", "P", "punct")) return JS_REGEX_PROP_PUNCTUATION;
+    if (js_regex_match_gc_alias(name, name_len, "Connector_Punctuation", "Pc", NULL)) return JS_REGEX_PROP_CONNECTOR_PUNCTUATION;
+    if (js_regex_match_gc_alias(name, name_len, "Dash_Punctuation", "Pd", NULL)) return JS_REGEX_PROP_DASH_PUNCTUATION;
     if (js_regex_match_gc_alias(name, name_len, "Open_Punctuation", "Ps", NULL)) return JS_REGEX_PROP_OPEN_PUNCTUATION;
+    if (js_regex_match_gc_alias(name, name_len, "Close_Punctuation", "Pe", NULL)) return JS_REGEX_PROP_CLOSE_PUNCTUATION;
+    if (js_regex_match_gc_alias(name, name_len, "Initial_Punctuation", "Pi", NULL)) return JS_REGEX_PROP_INITIAL_PUNCTUATION;
     if (js_regex_match_gc_alias(name, name_len, "Line_Separator", "Zl", NULL)) return JS_REGEX_PROP_LINE_SEPARATOR;
+    if (js_regex_match_gc_alias(name, name_len, "Control", "Cc", "cntrl")) return JS_REGEX_PROP_CONTROL;
     if (js_regex_match_gc_alias(name, name_len, "Modifier_Symbol", "Sk", NULL)) return JS_REGEX_PROP_MODIFIER_SYMBOL;
     if (js_regex_match_gc_alias(name, name_len, "Letter_Number", "Nl", NULL)) return JS_REGEX_PROP_LETTER_NUMBER;
     if (js_regex_match_gc_alias(name, name_len, "Space_Separator", "Zs", NULL)) return JS_REGEX_PROP_SPACE_SEPARATOR;
@@ -10263,6 +10369,14 @@ static int js_regex_property_kind_from_name(const char* name, int name_len) {
     if (js_regex_match_gc_alias(name, name_len, "Enclosing_Mark", "Me", NULL)) return JS_REGEX_PROP_ENCLOSING_MARK;
     if (js_regex_match_gc_alias(name, name_len, "Paragraph_Separator", "Zp", NULL)) return JS_REGEX_PROP_PARAGRAPH_SEPARATOR;
     if (js_regex_match_gc_alias(name, name_len, "Titlecase_Letter", "Lt", NULL)) return JS_REGEX_PROP_TITLECASE_LETTER;
+    if (js_regex_match_gc_alias(name, name_len, "Other_Punctuation", "Po", NULL)) return JS_REGEX_PROP_OTHER_PUNCTUATION;
+    if (js_regex_match_gc_alias(name, name_len, "Symbol", "S", NULL)) return JS_REGEX_PROP_SYMBOL;
+    if (js_regex_match_gc_alias(name, name_len, "Math_Symbol", "Sm", NULL)) return JS_REGEX_PROP_MATH_SYMBOL;
+    if (js_regex_match_gc_alias(name, name_len, "Currency_Symbol", "Sc", NULL)) return JS_REGEX_PROP_CURRENCY_SYMBOL;
+    if (js_regex_match_gc_alias(name, name_len, "Other_Symbol", "So", NULL)) return JS_REGEX_PROP_OTHER_SYMBOL;
+    if (js_regex_match_gc_alias(name, name_len, "Format", "Cf", NULL)) return JS_REGEX_PROP_FORMAT;
+    if (js_regex_match_gc_alias(name, name_len, "Surrogate", "Cs", NULL)) return JS_REGEX_PROP_SURROGATE;
+    if (js_regex_match_gc_alias(name, name_len, "Private_Use", "Co", NULL)) return JS_REGEX_PROP_PRIVATE_USE;
 
     if (js_regex_match_script_alias(name, name_len, "Unknown", "Zzzz")) return JS_REGEX_PROP_UNKNOWN_SCRIPT;
     if (js_regex_match_script_extension_alias(name, name_len, "Greek", "Grek")) {
@@ -10295,6 +10409,24 @@ static bool js_regex_range_contains(const JsRegexRange* ranges, int count, int c
     return false;
 }
 
+static bool js_regex_sorted_range_contains(const JsRegexRange* ranges, int count, int cp) {
+    int lo = 0;
+    int hi = count - 1;
+    while (lo <= hi) {
+        int mid = lo + ((hi - lo) / 2);
+        if (cp < ranges[mid].first) {
+            hi = mid - 1;
+        } else if (cp > ranges[mid].last) {
+            lo = mid + 1;
+        } else {
+            return true;
+        }
+    }
+    return false;
+}
+
+#include "js_regex_generated_property_tables.inc"
+
 static int js_regex_detect_simple_property_repeat(const char* pattern, int pattern_len) {
     if (pattern && pattern_len == 5 && pattern[0] == '^' && pattern[1] == '\\' &&
         pattern[3] == '+' && pattern[4] == '$') {
@@ -10308,7 +10440,7 @@ static int js_regex_detect_simple_property_repeat(const char* pattern, int patte
         default: break;
         }
     }
-    if (!pattern || pattern_len < 9) return 0;
+    if (!pattern || pattern_len < 8) return 0;
     if (pattern[0] != '^' || pattern[1] != '\\') return 0;
     char p = pattern[2];
     if (p != 'p' && p != 'P') return 0;
@@ -10442,10 +10574,125 @@ static bool js_regex_is_js_whitespace_cp(uint32_t cp) {
     }
 }
 
+static bool js_regex_is_noncharacter_cp(int cp) {
+    return (cp >= 0xFDD0 && cp <= 0xFDEF) ||
+           (cp >= 0 && cp <= 0x10FFFF && (cp & 0xFFFE) == 0xFFFE);
+}
+
+static bool js_regex_append_hex_property_class(std::string& out, int kind, bool negate) {
+    const char* inner = NULL;
+    const char* complement = NULL;
+    if (kind == JS_REGEX_PROP_ASCII_HEX_DIGIT) {
+        inner = "\\x{30}-\\x{39}\\x{41}-\\x{46}\\x{61}-\\x{66}";
+        complement = "\\x{00}-\\x{2F}\\x{3A}-\\x{40}\\x{47}-\\x{60}\\x{67}-\\x{10FFFF}";
+    } else if (kind == JS_REGEX_PROP_HEX_DIGIT) {
+        inner = "\\x{30}-\\x{39}\\x{41}-\\x{46}\\x{61}-\\x{66}"
+                "\\x{FF10}-\\x{FF19}\\x{FF21}-\\x{FF26}\\x{FF41}-\\x{FF46}";
+        complement = "\\x{00}-\\x{2F}\\x{3A}-\\x{40}\\x{47}-\\x{60}\\x{67}-\\x{FF0F}"
+                     "\\x{FF1A}-\\x{FF20}\\x{FF27}-\\x{FF40}\\x{FF47}-\\x{10FFFF}";
+    } else {
+        return false;
+    }
+    out += negate ? complement : inner;
+    return true;
+}
+
+static bool js_regex_append_property_class_escape(std::string& out, const char* name,
+                                                  int name_len, bool negate,
+                                                  bool in_class) {
+    int kind = js_regex_property_kind_from_name(name, name_len);
+    if (!kind) return false;
+    if (in_class) return js_regex_append_hex_property_class(out, kind, negate);
+    std::string inner;
+    if (!js_regex_append_hex_property_class(inner, kind, false)) return false;
+    out += negate ? "[^" : "[";
+    out += inner;
+    out += "]";
+    return true;
+}
+
 static bool js_regex_special_property_contains(int kind, int cp) {
     if (kind == JS_REGEX_PROP_ASCII) return cp >= 0 && cp <= 0x7F;
     if (kind == JS_REGEX_PROP_ANY) return cp >= 0 && cp <= 0x10FFFF;
+    if (kind >= JS_REGEX_PROP_GENERATED_BASE) return js_regex_generated_property_contains(kind, cp);
     if (kind == JS_REGEX_PROP_ASCII_DIGIT) return cp >= '0' && cp <= '9';
+    if (kind == JS_REGEX_PROP_ASCII_HEX_DIGIT) {
+        return (cp >= '0' && cp <= '9') ||
+               (cp >= 'A' && cp <= 'F') ||
+               (cp >= 'a' && cp <= 'f');
+    }
+    if (kind == JS_REGEX_PROP_HEX_DIGIT) {
+        static const JsRegexRange ranges[] = {
+            {0x000030,0x000039},{0x000041,0x000046},{0x000061,0x000066},
+            {0x00FF10,0x00FF19},{0x00FF21,0x00FF26},{0x00FF41,0x00FF46}
+        };
+        return js_regex_range_contains(ranges, sizeof(ranges) / sizeof(ranges[0]), cp);
+    }
+    if (kind == JS_REGEX_PROP_WHITE_SPACE) {
+        static const JsRegexRange ranges[] = {
+            {0x000020,0x000020},{0x000085,0x000085},{0x0000A0,0x0000A0},
+            {0x001680,0x001680},{0x00202F,0x00202F},{0x00205F,0x00205F},
+            {0x003000,0x003000},{0x000009,0x00000D},{0x002000,0x00200A},
+            {0x002028,0x002029}
+        };
+        return js_regex_range_contains(ranges, sizeof(ranges) / sizeof(ranges[0]), cp);
+    }
+    if (kind == JS_REGEX_PROP_PATTERN_WHITE_SPACE) {
+        static const JsRegexRange ranges[] = {
+            {0x000020,0x000020},{0x000085,0x000085},{0x000009,0x00000D},
+            {0x00200E,0x00200F},{0x002028,0x002029}
+        };
+        return js_regex_range_contains(ranges, sizeof(ranges) / sizeof(ranges[0]), cp);
+    }
+    if (kind == JS_REGEX_PROP_REGIONAL_INDICATOR) return cp >= 0x01F1E6 && cp <= 0x01F1FF;
+    if (kind == JS_REGEX_PROP_EMOJI_MODIFIER) return cp >= 0x01F3FB && cp <= 0x01F3FF;
+    if (kind == JS_REGEX_PROP_JOIN_CONTROL) return cp == 0x00200C || cp == 0x00200D;
+    if (kind == JS_REGEX_PROP_IDS_TRINARY_OPERATOR) return cp >= 0x002FF2 && cp <= 0x002FF3;
+    if (kind == JS_REGEX_PROP_IDS_BINARY_OPERATOR) {
+        static const JsRegexRange ranges[] = {{0x0031EF,0x0031EF},{0x002FF0,0x002FF1},{0x002FF4,0x002FFD}};
+        return js_regex_range_contains(ranges, sizeof(ranges) / sizeof(ranges[0]), cp);
+    }
+    if (kind == JS_REGEX_PROP_RADICAL) {
+        static const JsRegexRange ranges[] = {{0x002E80,0x002E99},{0x002E9B,0x002EF3},{0x002F00,0x002FD5}};
+        return js_regex_range_contains(ranges, sizeof(ranges) / sizeof(ranges[0]), cp);
+    }
+    if (kind == JS_REGEX_PROP_BIDI_CONTROL) {
+        static const JsRegexRange ranges[] = {{0x00061C,0x00061C},{0x00200E,0x00200F},{0x00202A,0x00202E},{0x002066,0x002069}};
+        return js_regex_range_contains(ranges, sizeof(ranges) / sizeof(ranges[0]), cp);
+    }
+    if (kind == JS_REGEX_PROP_VARIATION_SELECTOR) {
+        static const JsRegexRange ranges[] = {{0x00180F,0x00180F},{0x00180B,0x00180D},{0x00FE00,0x00FE0F},{0x0E0100,0x0E01EF}};
+        return js_regex_range_contains(ranges, sizeof(ranges) / sizeof(ranges[0]), cp);
+    }
+    if (kind == JS_REGEX_PROP_LOGICAL_ORDER_EXCEPTION) {
+        static const JsRegexRange ranges[] = {
+            {0x0019BA,0x0019BA},{0x00AAB9,0x00AAB9},{0x000E40,0x000E44},
+            {0x000EC0,0x000EC4},{0x0019B5,0x0019B7},{0x00AAB5,0x00AAB6},
+            {0x00AABB,0x00AABC}
+        };
+        return js_regex_range_contains(ranges, sizeof(ranges) / sizeof(ranges[0]), cp);
+    }
+    if (kind == JS_REGEX_PROP_DEPRECATED) {
+        static const JsRegexRange ranges[] = {
+            {0x000149,0x000149},{0x000673,0x000673},{0x000F77,0x000F77},
+            {0x000F79,0x000F79},{0x0E0001,0x0E0001},{0x0017A3,0x0017A4},
+            {0x00206A,0x00206F},{0x002329,0x00232A}
+        };
+        return js_regex_range_contains(ranges, sizeof(ranges) / sizeof(ranges[0]), cp);
+    }
+    if (kind == JS_REGEX_PROP_DEFAULT_IGNORABLE_CODE_POINT) {
+        static const JsRegexRange ranges[] = {
+            {0x0000AD,0x0000AD},{0x00034F,0x00034F},{0x00061C,0x00061C},
+            {0x00115F,0x001160},{0x0017B4,0x0017B5},{0x00180B,0x00180F},
+            {0x00200B,0x00200F},{0x00202A,0x00202E},{0x002060,0x00206F},
+            {0x003164,0x003164},{0x00FE00,0x00FE0F},{0x00FEFF,0x00FEFF},
+            {0x00FFA0,0x00FFA0},{0x00FFF0,0x00FFF8},{0x01BCA0,0x01BCA3},
+            {0x01D173,0x01D17A},{0x0E0000,0x0E0000},{0x0E0002,0x0E001F},
+            {0x0E0080,0x0E00FF},{0x0E0100,0x0E0FFF}
+        };
+        return js_regex_range_contains(ranges, sizeof(ranges) / sizeof(ranges[0]), cp);
+    }
+    if (kind == JS_REGEX_PROP_NONCHARACTER_CODE_POINT) return js_regex_is_noncharacter_cp(cp);
     if (kind == JS_REGEX_PROP_ASCII_WORD) {
         return (cp >= '0' && cp <= '9') ||
                (cp >= 'A' && cp <= 'Z') ||
@@ -10487,7 +10734,88 @@ static bool js_regex_special_property_contains(int kind, int cp) {
         static const JsRegexRange ranges[] = {{0x1C5,0x1C5},{0x1C8,0x1C8},{0x1CB,0x1CB},{0x1F2,0x1F2},{0x1FBC,0x1FBC},{0x1FCC,0x1FCC},{0x1FFC,0x1FFC},{0x1F88,0x1F8F},{0x1F98,0x1F9F},{0x1FA8,0x1FAF}};
         return js_regex_range_contains(ranges, sizeof(ranges) / sizeof(ranges[0]), cp);
     }
+    if (kind == JS_REGEX_PROP_SPACING_MARK) {
+        static const JsRegexRange ranges[] = {
+            {0x0903,0x0903},{0x093b,0x093b},{0x093e,0x0940},{0x0949,0x094c},
+            {0x094e,0x094f},{0x0982,0x0983},{0x09be,0x09c0},{0x09c7,0x09c8},
+            {0x09cb,0x09cc},{0x09d7,0x09d7},{0x0a03,0x0a03},{0x0a3e,0x0a40},
+            {0x0a83,0x0a83},{0x0abe,0x0ac0},{0x0ac9,0x0ac9},{0x0acb,0x0acc},
+            {0x0b02,0x0b03},{0x0b3e,0x0b3e},{0x0b40,0x0b40},{0x0b47,0x0b48},
+            {0x0b4b,0x0b4c},{0x0b57,0x0b57},{0x0bbe,0x0bbf},{0x0bc1,0x0bc2},
+            {0x0bc6,0x0bc8},{0x0bca,0x0bcc},{0x0bd7,0x0bd7},{0x0c01,0x0c03},
+            {0x0c41,0x0c44},{0x0c82,0x0c83},{0x0cbe,0x0cbe},{0x0cc0,0x0cc4},
+            {0x0cc7,0x0cc8},{0x0cca,0x0ccb},{0x0cd5,0x0cd6},{0x0cf3,0x0cf3},
+            {0x0d02,0x0d03},{0x0d3e,0x0d40},{0x0d46,0x0d48},{0x0d4a,0x0d4c},
+            {0x0d57,0x0d57},{0x0d82,0x0d83},{0x0dcf,0x0dd1},{0x0dd8,0x0ddf},
+            {0x0df2,0x0df3},{0x0f3e,0x0f3f},{0x0f7f,0x0f7f},{0x102b,0x102c},
+            {0x1031,0x1031},{0x1038,0x1038},{0x103b,0x103c},{0x1056,0x1057},
+            {0x1062,0x1064},{0x1067,0x106d},{0x1083,0x1084},{0x1087,0x108c},
+            {0x108f,0x108f},{0x109a,0x109c},{0x1715,0x1715},{0x1734,0x1734},
+            {0x17b6,0x17b6},{0x17be,0x17c5},{0x17c7,0x17c8},{0x1923,0x1926},
+            {0x1929,0x192b},{0x1930,0x1931},{0x1933,0x1938},{0x1a19,0x1a1a},
+            {0x1a55,0x1a55},{0x1a57,0x1a57},{0x1a61,0x1a61},{0x1a63,0x1a64},
+            {0x1a6d,0x1a72},{0x1b04,0x1b04},{0x1b35,0x1b35},{0x1b3b,0x1b3b},
+            {0x1b3d,0x1b41},{0x1b43,0x1b44},{0x1b82,0x1b82},{0x1ba1,0x1ba1},
+            {0x1ba6,0x1ba7},{0x1baa,0x1baa},{0x1be7,0x1be7},{0x1bea,0x1bec},
+            {0x1bee,0x1bee},{0x1bf2,0x1bf3},{0x1c24,0x1c2b},{0x1c34,0x1c35},
+            {0x1ce1,0x1ce1},{0x1cf7,0x1cf7},{0x302e,0x302f},{0xa823,0xa824},
+            {0xa827,0xa827},{0xa880,0xa881},{0xa8b4,0xa8c3},{0xa952,0xa953},
+            {0xa983,0xa983},{0xa9b4,0xa9b5},{0xa9ba,0xa9bb},{0xa9be,0xa9c0},
+            {0xaa2f,0xaa30},{0xaa33,0xaa34},{0xaa4d,0xaa4d},{0xaa7b,0xaa7b},
+            {0xaa7d,0xaa7d},{0xaaeb,0xaaeb},{0xaaee,0xaaef},{0xaaf5,0xaaf5},
+            {0xabe3,0xabe4},{0xabe6,0xabe7},{0xabe9,0xabea},{0xabec,0xabec},
+            {0x11000,0x11000},{0x11002,0x11002},{0x11082,0x11082},{0x110b0,0x110b2},
+            {0x110b7,0x110b8},{0x1112c,0x1112c},{0x11145,0x11146},{0x11182,0x11182},
+            {0x111b3,0x111b5},{0x111bf,0x111c0},{0x111ce,0x111ce},{0x1122c,0x1122e},
+            {0x11232,0x11233},{0x11235,0x11235},{0x112e0,0x112e2},{0x11302,0x11303},
+            {0x1133e,0x1133f},{0x11341,0x11344},{0x11347,0x11348},{0x1134b,0x1134d},
+            {0x11357,0x11357},{0x11362,0x11363},{0x113b8,0x113ba},{0x113c2,0x113c2},
+            {0x113c5,0x113c5},{0x113c7,0x113ca},{0x113cc,0x113cd},{0x113cf,0x113cf},
+            {0x11435,0x11437},{0x11440,0x11441},{0x11445,0x11445},{0x114b0,0x114b2},
+            {0x114b9,0x114b9},{0x114bb,0x114be},{0x114c1,0x114c1},{0x115af,0x115b1},
+            {0x115b8,0x115bb},{0x115be,0x115be},{0x11630,0x11632},{0x1163b,0x1163c},
+            {0x1163e,0x1163e},{0x116ac,0x116ac},{0x116ae,0x116af},{0x116b6,0x116b6},
+            {0x1171e,0x1171e},{0x11720,0x11721},{0x11726,0x11726},{0x1182c,0x1182e},
+            {0x11838,0x11838},{0x11930,0x11935},{0x11937,0x11938},{0x1193d,0x1193d},
+            {0x11940,0x11940},{0x11942,0x11942},{0x119d1,0x119d3},{0x119dc,0x119df},
+            {0x119e4,0x119e4},{0x11a39,0x11a39},{0x11a57,0x11a58},{0x11a97,0x11a97},
+            {0x11c2f,0x11c2f},{0x11c3e,0x11c3e},{0x11ca9,0x11ca9},{0x11cb1,0x11cb1},
+            {0x11cb4,0x11cb4},{0x11d8a,0x11d8e},{0x11d93,0x11d94},{0x11d96,0x11d96},
+            {0x11ef5,0x11ef6},{0x11f03,0x11f03},{0x11f34,0x11f35},{0x11f3e,0x11f3f},
+            {0x11f41,0x11f41},{0x1612a,0x1612c},{0x16f51,0x16f87},{0x16ff0,0x16ff1},
+            {0x1d165,0x1d166},{0x1d16d,0x1d172}
+        };
+        return js_regex_sorted_range_contains(ranges, sizeof(ranges) / sizeof(ranges[0]), cp);
+    }
+    const utf8proc_property_t* prop = utf8proc_get_property((utf8proc_int32_t)cp);
     utf8proc_category_t cat = utf8proc_category((utf8proc_int32_t)cp);
+    if (kind == JS_REGEX_PROP_ASSIGNED) return cat != UTF8PROC_CATEGORY_CN;
+    if (kind == JS_REGEX_PROP_BIDI_MIRRORED) return prop && prop->bidi_mirrored;
+    if (kind == JS_REGEX_PROP_CASED) {
+        return utf8proc_islower((utf8proc_int32_t)cp) ||
+               utf8proc_isupper((utf8proc_int32_t)cp) ||
+               cat == UTF8PROC_CATEGORY_LT;
+    }
+    if (kind == JS_REGEX_PROP_CHANGES_WHEN_CASEFOLDED) {
+        return prop && prop->casefold_seqindex != UINT16_MAX;
+    }
+    if (kind == JS_REGEX_PROP_CHANGES_WHEN_LOWERCASED) {
+        return utf8proc_tolower((utf8proc_int32_t)cp) != cp;
+    }
+    if (kind == JS_REGEX_PROP_CHANGES_WHEN_TITLECASED) {
+        return utf8proc_totitle((utf8proc_int32_t)cp) != cp;
+    }
+    if (kind == JS_REGEX_PROP_CHANGES_WHEN_UPPERCASED) {
+        return utf8proc_toupper((utf8proc_int32_t)cp) != cp;
+    }
+    if (kind == JS_REGEX_PROP_CHANGES_WHEN_CASEMAPPED) {
+        return utf8proc_tolower((utf8proc_int32_t)cp) != cp ||
+               utf8proc_toupper((utf8proc_int32_t)cp) != cp ||
+               utf8proc_totitle((utf8proc_int32_t)cp) != cp;
+    }
+    if (kind == JS_REGEX_PROP_DEFAULT_IGNORABLE_CODE_POINT) return prop && prop->ignorable;
+    if (kind == JS_REGEX_PROP_LOWERCASE) return utf8proc_islower((utf8proc_int32_t)cp);
+    if (kind == JS_REGEX_PROP_UPPERCASE) return utf8proc_isupper((utf8proc_int32_t)cp);
     if (kind == JS_REGEX_PROP_OTHER) return js_regex_unicode_is_other_category(cat);
     if (kind == JS_REGEX_PROP_UNASSIGNED) return cat == UTF8PROC_CATEGORY_CN;
     if (kind == JS_REGEX_PROP_UNKNOWN_SCRIPT) {
@@ -10495,6 +10823,51 @@ static bool js_regex_special_property_contains(int kind, int cp) {
                cat == UTF8PROC_CATEGORY_CS ||
                cat == UTF8PROC_CATEGORY_CO;
     }
+    if (kind == JS_REGEX_PROP_LETTER) {
+        return cat == UTF8PROC_CATEGORY_LU || cat == UTF8PROC_CATEGORY_LL ||
+               cat == UTF8PROC_CATEGORY_LT || cat == UTF8PROC_CATEGORY_LM ||
+               cat == UTF8PROC_CATEGORY_LO;
+    }
+    if (kind == JS_REGEX_PROP_CASED_LETTER) {
+        return cat == UTF8PROC_CATEGORY_LU || cat == UTF8PROC_CATEGORY_LL ||
+               cat == UTF8PROC_CATEGORY_LT;
+    }
+    if (kind == JS_REGEX_PROP_UPPERCASE_LETTER) return cat == UTF8PROC_CATEGORY_LU;
+    if (kind == JS_REGEX_PROP_LOWERCASE_LETTER) return cat == UTF8PROC_CATEGORY_LL;
+    if (kind == JS_REGEX_PROP_MODIFIER_LETTER) return cat == UTF8PROC_CATEGORY_LM;
+    if (kind == JS_REGEX_PROP_OTHER_LETTER) return cat == UTF8PROC_CATEGORY_LO;
+    if (kind == JS_REGEX_PROP_MARK) {
+        return cat == UTF8PROC_CATEGORY_MN || cat == UTF8PROC_CATEGORY_MC ||
+               cat == UTF8PROC_CATEGORY_ME;
+    }
+    if (kind == JS_REGEX_PROP_NONSPACING_MARK) return cat == UTF8PROC_CATEGORY_MN;
+    if (kind == JS_REGEX_PROP_NUMBER) {
+        return cat == UTF8PROC_CATEGORY_ND || cat == UTF8PROC_CATEGORY_NL ||
+               cat == UTF8PROC_CATEGORY_NO;
+    }
+    if (kind == JS_REGEX_PROP_OTHER_NUMBER) return cat == UTF8PROC_CATEGORY_NO;
+    if (kind == JS_REGEX_PROP_PUNCTUATION) {
+        return cat == UTF8PROC_CATEGORY_PC || cat == UTF8PROC_CATEGORY_PD ||
+               cat == UTF8PROC_CATEGORY_PS || cat == UTF8PROC_CATEGORY_PE ||
+               cat == UTF8PROC_CATEGORY_PI || cat == UTF8PROC_CATEGORY_PF ||
+               cat == UTF8PROC_CATEGORY_PO;
+    }
+    if (kind == JS_REGEX_PROP_CONNECTOR_PUNCTUATION) return cat == UTF8PROC_CATEGORY_PC;
+    if (kind == JS_REGEX_PROP_DASH_PUNCTUATION) return cat == UTF8PROC_CATEGORY_PD;
+    if (kind == JS_REGEX_PROP_CLOSE_PUNCTUATION) return cat == UTF8PROC_CATEGORY_PE;
+    if (kind == JS_REGEX_PROP_INITIAL_PUNCTUATION) return cat == UTF8PROC_CATEGORY_PI;
+    if (kind == JS_REGEX_PROP_OTHER_PUNCTUATION) return cat == UTF8PROC_CATEGORY_PO;
+    if (kind == JS_REGEX_PROP_SYMBOL) {
+        return cat == UTF8PROC_CATEGORY_SM || cat == UTF8PROC_CATEGORY_SC ||
+               cat == UTF8PROC_CATEGORY_SK || cat == UTF8PROC_CATEGORY_SO;
+    }
+    if (kind == JS_REGEX_PROP_MATH_SYMBOL) return cat == UTF8PROC_CATEGORY_SM;
+    if (kind == JS_REGEX_PROP_CURRENCY_SYMBOL) return cat == UTF8PROC_CATEGORY_SC;
+    if (kind == JS_REGEX_PROP_OTHER_SYMBOL) return cat == UTF8PROC_CATEGORY_SO;
+    if (kind == JS_REGEX_PROP_FORMAT) return cat == UTF8PROC_CATEGORY_CF;
+    if (kind == JS_REGEX_PROP_CONTROL) return cat == UTF8PROC_CATEGORY_CC;
+    if (kind == JS_REGEX_PROP_SURROGATE) return cat == UTF8PROC_CATEGORY_CS;
+    if (kind == JS_REGEX_PROP_PRIVATE_USE) return cat == UTF8PROC_CATEGORY_CO;
     if (kind == JS_REGEX_PROP_DECIMAL_NUMBER) {
         static const struct { int first; int last; } nd_ranges[] = {
             {0x000030, 0x000039}, {0x000660, 0x000669}, {0x0006F0, 0x0006F9},
@@ -11217,6 +11590,22 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     for (int i = 0; i < effective_pattern_len; i++) {
         if (effective_pattern[i] == '\\' && i + 1 < effective_pattern_len) {
             char next = effective_pattern[i + 1];
+            if ((next == 'p' || next == 'P') && i + 2 < effective_pattern_len &&
+                effective_pattern[i + 2] == '{') {
+                int close = i + 3;
+                while (close < effective_pattern_len && effective_pattern[close] != '}') close++;
+                if (close < effective_pattern_len) {
+                    bool negate_property = next == 'P';
+                    std::string property_class;
+                    if (js_regex_append_property_class_escape(property_class,
+                            effective_pattern + i + 3, close - (i + 3),
+                            negate_property, bracket_depth > 0)) {
+                        processed_pattern += property_class;
+                        i = close;
+                        continue;
+                    }
+                }
+            }
             // Inside a JS character class, \b is a backspace character, not a
             // word-boundary assertion. RE2 treats \b as an assertion, so make
             // the character semantics explicit before compiling.
