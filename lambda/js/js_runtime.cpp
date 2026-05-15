@@ -10,9 +10,11 @@
 
 extern "C" Item js_to_property_key(Item key);
 extern "C" Item js_reflect_own_keys(Item obj);
+extern "C" Item js_reflect_set(Item target, Item key, Item value, Item receiver);
 extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name);
 extern "C" Item js_has_own_property(Item obj, Item key);
 extern "C" Item js_property_set(Item object, Item key, Item value);
+extern "C" Item js_property_set_strict(Item object, Item key, Item value);
 extern void js_double_to_string(double d, char* out, int out_size);
 Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_found);
 
@@ -337,21 +339,27 @@ static Item js_proxy_trap_get(Item proxy, Item key) {
     return trap_result;
 }
 
+static Item js_proxy_trap_set_failure(Item key) {
+    if (js_strict_mode && get_type_id(key) == LMD_TYPE_STRING) {
+        String* sk = it2s(key);
+        js_strict_throw_property_error("set", sk ? sk->chars : NULL, sk ? (int)sk->len : 0);
+    } else if (js_strict_mode) {
+        js_strict_throw_property_error("set", NULL, 0);
+    }
+    return (Item){.item = b2it(false)};
+}
+
 // Proxy [[Set]](key, value, receiver)
-static Item js_proxy_trap_set(Item proxy, Item key, Item value) {
+extern "C" Item js_proxy_trap_set_with_receiver(Item proxy, Item key, Item value, Item receiver) {
     JsProxyData* pd = js_get_proxy_data(proxy);
-    if (!pd) return value;
+    if (!pd) return (Item){.item = b2it(false)};
     Item trap = js_proxy_get_trap(pd, "set", 3);
     if (js_exception_pending) return ItemNull;
     if (trap.item == ItemNull.item) {
-        // no trap — forward to target with receiver for setter this-binding.
-        // Stage D: RAII guard preserves any pre-existing receiver (e.g. from
-        // prototype chain lookup) or sets the proxy as receiver if absent.
-        ScopedProxyReceiver _recv_guard(proxy);
-        return js_property_set(PD_TARGET(pd), key, value);
+        return js_reflect_set(PD_TARGET(pd), key, value, receiver);
     }
     // call trap(target, property, value, receiver)
-    Item args[4] = { PD_TARGET(pd), key, value, proxy };
+    Item args[4] = { PD_TARGET(pd), key, value, receiver };
     Item result = js_call_function(trap, PD_HANDLER(pd), args, 4);
     if (js_exception_pending) return ItemNull;
     bool bool_result = it2b(js_to_boolean(result));
@@ -389,6 +397,14 @@ static Item js_proxy_trap_set(Item proxy, Item key, Item value) {
             }
         }
     }
+    return (Item){.item = b2it(true)};
+}
+
+static Item js_proxy_trap_set(Item proxy, Item key, Item value) {
+    Item receiver = js_proxy_receiver.item ? js_proxy_receiver : proxy;
+    Item result = js_proxy_trap_set_with_receiver(proxy, key, value, receiver);
+    if (js_exception_pending) return ItemNull;
+    if (result.item == (uint64_t)b2it(false)) return js_proxy_trap_set_failure(key);
     return value;
 }
 
@@ -675,7 +691,7 @@ extern "C" Item js_proxy_trap_define_property(Item proxy, Item key, Item desc) {
     Item trap = js_proxy_get_trap(pd, "defineProperty", 14);
     if (js_exception_pending) return ItemNull;
     if (trap.item == ItemNull.item) {
-        return js_object_define_property(PD_TARGET(pd), key, desc);
+        return js_reflect_define_property(PD_TARGET(pd), key, desc);
     }
     Item args[3] = { PD_TARGET(pd), key, desc };
     Item result = js_call_function(trap, PD_HANDLER(pd), args, 3);
@@ -805,8 +821,7 @@ extern "C" Item js_proxy_trap_set_prototype_of(Item proxy, Item proto) {
     Item trap = js_proxy_get_trap(pd, "setPrototypeOf", 14);
     if (js_exception_pending) return ItemNull;
     if (trap.item == ItemNull.item) {
-        js_set_prototype(PD_TARGET(pd), proto);
-        return (Item){.item = b2it(true)};
+        return js_reflect_set_prototype_of(PD_TARGET(pd), proto);
     }
     Item args[2] = { PD_TARGET(pd), proto };
     Item result = js_call_function(trap, PD_HANDLER(pd), args, 2);
@@ -4682,6 +4697,22 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
     }
 
     return value;
+}
+
+extern "C" Item js_property_set_strict(Item object, Item key, Item value) {
+    bool saved_strict = js_strict_mode;
+    js_strict_mode = true;
+    Item result = js_property_set(object, key, value);
+    if (!js_exception_pending && result.item == (uint64_t)b2it(false)) {
+        if (get_type_id(key) == LMD_TYPE_STRING) {
+            String* sk = it2s(key);
+            js_strict_throw_property_error("set", sk ? sk->chars : NULL, sk ? (int)sk->len : 0);
+        } else {
+            js_strict_throw_property_error("set", NULL, 0);
+        }
+    }
+    js_strict_mode = saved_strict;
+    return result;
 }
 
 // v23: Force-store a property on a function's properties_map, bypassing writability checks.
@@ -10355,6 +10386,7 @@ struct JsRegexData {
     bool ignore_case;         // 'i' flag
     bool multiline;           // 'm' flag
     bool sticky;              // 'y' flag (v46)
+    bool unicode;             // 'u' or 'v' flag: indices are reported as UTF-16 code units
     bool needs_utf16_subject; // legacy surrogate escapes match UTF-16 code units
     bool literal_fast;
 };
@@ -11562,6 +11594,7 @@ static void js_regex_put_fresh(Item obj, const char* key, int key_len, Item valu
 // Build a JS RegExp Map object from a cached regex entry, reusing compiled JsRegexData.
 static Item js_regex_build_object_from_cache(const JsRegexCacheEntry& ce) {
     JsRegexData* rd = ce.rd;
+    rd->unicode = ce.has_unicode;
     Item regex_obj = js_new_object();
     Item rd_key = (Item){.item = s2it(heap_create_name(JS_REGEX_DATA_KEY))};
     Item rd_val = (Item){.item = i2it((int64_t)(uintptr_t)rd)};
@@ -11835,6 +11868,7 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
                 rd->ignore_case = pe.ignore_case;
                 rd->multiline = pe.multiline;
                 rd->sticky = pe.sticky;
+                rd->unicode = pe.has_unicode;
                 JsRegexCacheEntry ce = {rd, pattern, pattern_len, pe.canonical_flags, pe.canonical_flags_len, pe.dot_all, pe.has_unicode};
                 g_regex_compile_cache[cache_key] = ce;
                 return js_regex_build_object_from_cache(ce);
@@ -12589,6 +12623,7 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     rd->ignore_case = !opts.case_sensitive();
     rd->multiline = multiline;
     rd->sticky = sticky;
+    rd->unicode = has_unicode;
     rd->needs_utf16_subject = needs_utf16_subject;
     rd->literal_fast = literal_fast;
     rd->special_property_kind = special_property_kind;
@@ -13134,6 +13169,7 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     int match_len = len;
     int64_t subject_units = len;
     bool utf16_subject = rd->needs_utf16_subject;
+    bool full_unicode = rd->unicode;
     if (utf16_subject) {
         subject_units = input_s ? js_utf16_len(input_s->chars, (int)input_s->len, (bool)input_s->is_ascii) : 0;
         match_s = js_string_expand_utf16_subject(input_s);
@@ -13158,7 +13194,9 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
             if (d != d) start_pos = 0; // NaN → 0
             else start_pos = (int)d;
         }
-        int64_t limit = utf16_subject ? subject_units : len;
+        int64_t limit = (utf16_subject || full_unicode)
+            ? (input_s ? js_utf16_len(input_s->chars, (int)input_s->len, (bool)input_s->is_ascii) : 0)
+            : len;
         if (start_pos < 0 || start_pos > limit) {
             if (!js_regex_set_lastindex_strict(regex, li_key, 0)) return ItemNull;
             return ItemNull;
@@ -13171,7 +13209,7 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     re2::StringPiece matches[16];
     // sticky: must match at exactly start_pos (ANCHOR_START from start_pos)
     re2::RE2::Anchor anchor = rd->sticky ? re2::RE2::ANCHOR_START : re2::RE2::UNANCHORED;
-    int match_start_pos = utf16_subject ?
+    int match_start_pos = (utf16_subject || full_unicode) ?
         js_utf16_idx_to_byte(match_chars, match_len, start_pos) : start_pos;
     bool matched = js_regex_match_internal(rd, match_chars, match_len, match_start_pos,
         anchor, matches, num_groups);
@@ -13188,6 +13226,7 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     if (uses_last_index) {
         int match_end = (int)(matches[0].data() - match_chars) + (int)matches[0].size();
         if (utf16_subject) match_end = (int)js_utf16_index_from_byte(match_chars, match_len, match_end);
+        else if (full_unicode) match_end = (int)js_utf16_index_from_byte(chars, len, match_end);
         if (!js_regex_set_lastindex_strict(regex, li_key, match_end)) return ItemNull;
     }
 
@@ -13211,6 +13250,14 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
                 int end_units = (int)js_utf16_index_from_byte(match_chars, match_len,
                     (int)(matches[i].data() - match_chars) + mlen);
                 s = js_str_substring_utf16(str, start_units, end_units);
+            } else if (full_unicode) {
+                int start_units = (int)js_utf16_index_from_byte(chars, len,
+                    (int)(matches[i].data() - match_chars));
+                int end_units = (int)js_utf16_index_from_byte(chars, len,
+                    (int)(matches[i].data() - match_chars) + mlen);
+                Item sub = js_str_substring_utf16(str, start_units, end_units);
+                String* sub_s = it2s(sub);
+                s = sub_s ? (Item){.item = s2it(js_string_expand_utf16_subject(sub_s))} : sub;
             } else {
                 s = (Item){.item = s2it(heap_strcpy((char*)matches[i].data(), mlen))};
             }
@@ -13224,6 +13271,7 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     // Set named properties (index, input, groups) via companion map
     int match_index = (int)(matches[0].data() - match_chars);
     if (utf16_subject) match_index = (int)js_utf16_index_from_byte(match_chars, match_len, match_index);
+    else if (full_unicode) match_index = (int)js_utf16_index_from_byte(chars, len, match_index);
     Item index_key = (Item){.item = s2it(heap_create_name("index", 5))};
     js_property_set(result, index_key, (Item){.item = i2it(match_index)});
     // v46: add input property (the original string passed to exec)
@@ -13259,6 +13307,14 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
                     int end_units = (int)js_utf16_index_from_byte(match_chars, match_len,
                         (int)(matches[idx].data() - match_chars) + mlen);
                     val = js_str_substring_utf16(str, start_units, end_units);
+                } else if (full_unicode) {
+                    int start_units = (int)js_utf16_index_from_byte(chars, len,
+                        (int)(matches[idx].data() - match_chars));
+                    int end_units = (int)js_utf16_index_from_byte(chars, len,
+                        (int)(matches[idx].data() - match_chars) + mlen);
+                    Item sub = js_str_substring_utf16(str, start_units, end_units);
+                    String* sub_s = it2s(sub);
+                    val = sub_s ? (Item){.item = s2it(js_string_expand_utf16_subject(sub_s))} : sub;
                 } else {
                     val = (Item){.item = s2it(heap_strcpy((char*)matches[idx].data(), mlen))};
                 }

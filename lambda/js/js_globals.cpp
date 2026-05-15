@@ -24,6 +24,7 @@
 
 extern "C" Item js_to_property_key(Item key);
 extern "C" Item js_bound_function_target(Item func_item);
+extern "C" Item js_proxy_trap_set_with_receiver(Item proxy, Item key, Item value, Item receiver);
 extern "C" bool js_dom_item_is_range(Item item);
 extern "C" bool js_dom_item_is_selection(Item item);
 extern "C" Item js_dom_range_get_prototype_value(void);
@@ -6555,9 +6556,7 @@ extern "C" Item js_reflect_set(Item target, Item key, Item value, Item receiver)
     // Proxy/TypedArray fast paths BEFORE ToPropertyKey: integer index dispatch
     // in js_property_set requires the original int key, not stringified.
     if (js_is_proxy(target)) {
-        Item r = js_property_set(target, key, value);
-        if (r.item == (uint64_t)b2it(false)) return (Item){.item = b2it(false)};
-        return (Item){.item = b2it(true)};
+        return js_proxy_trap_set_with_receiver(target, key, value, receiver);
     }
     if (get_type_id(target) == LMD_TYPE_MAP &&
         target.map && target.map->map_kind == MAP_KIND_TYPED_ARRAY) {
@@ -6746,9 +6745,9 @@ extern "C" Item js_reflect_define_property(Item obj, Item key, Item desc) {
         bool ta_define_ok = js_ta_define_own_numeric_index(obj, key, desc, &ta_define_handled);
         if (js_check_exception()) return ItemNull;
         if (ta_define_handled) return (Item){.item = b2it(ta_define_ok)};
-        if (!js_is_truthy(js_object_is_extensible(obj)) && !it2b(js_has_own_property(obj, key))) {
-            return (Item){.item = b2it(false)};
-        }
+    }
+    if (!js_is_truthy(js_object_is_extensible(obj)) && !it2b(js_has_own_property(obj, key))) {
+        return (Item){.item = b2it(false)};
     }
     js_object_define_property(obj, key, desc);
     if (js_check_exception()) return ItemNull;
