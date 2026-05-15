@@ -16,6 +16,7 @@
 #include "js_class.h"
 #include "js_coerce.h"
 #include "js_runtime_state.hpp"
+#include "js_state_guards.h"
 #include "../lambda-data.hpp"
 #include "../lambda-decimal.hpp"
 #include "../lambda.hpp"
@@ -1804,6 +1805,9 @@ static int js_process_argc_raw = 0;
 // 40=getDay, 41=getUTCDay, 42=getTimezoneOffset, 43=valueOf, 44=toJSON,
 // 45=toUTCString, 46=toDateString, 47=toTimeString
 extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg1, Item arg2, Item arg3) {
+    if (method_id == 43 && get_type_id(date_obj) == LMD_TYPE_STRING) {
+        return date_obj;
+    }
     if (method_id == 43 && get_type_id(date_obj) == LMD_TYPE_MAP) {
         bool own_value_of = false;
         Item fn = js_map_get_fast_ext(date_obj.map, "valueOf", 7, &own_value_of);
@@ -4656,6 +4660,7 @@ extern "C" Item js_string_raw(Item* args, int argc) {
     // Get template.raw
     Item raw_key = (Item){.item = s2it(heap_create_name("raw", 3))};
     Item raw = js_property_access(template_obj, raw_key);
+    if (js_check_exception()) return ItemNull;
     if (raw.item == ITEM_NULL || raw.item == ITEM_JS_UNDEFINED ||
         get_type_id(raw) == LMD_TYPE_NULL || get_type_id(raw) == LMD_TYPE_UNDEFINED) {
         return js_throw_type_error("Cannot convert undefined or null to object");
@@ -4664,6 +4669,7 @@ extern "C" Item js_string_raw(Item* args, int argc) {
     // Get raw.length (may be a MAP with numeric keys + length property)
     Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
     Item len_item = js_property_access(raw, len_key);
+    if (js_check_exception()) return ItemNull;
     if (js_key_is_symbol_c(len_item)) {
         return js_throw_type_error("Cannot convert a Symbol value to a number");
     }
@@ -5711,6 +5717,7 @@ extern "C" Item js_object_create(Item proto) {
     } else if (is_null) {
         // Object.create(null): mark explicitly as no prototype
         // Use JS undefined as sentinel — distinguished from "no __proto__ key"
+        ScopedSkipAccessorDispatch _skip_guard;
         Item key = (Item){.item = s2it(heap_create_name("__proto__", 9))};
         js_property_set(obj, key, make_js_undefined());
     }
@@ -6271,7 +6278,8 @@ extern "C" Item js_reflect_construct(Item target, Item args_array, Item new_targ
     // the built-in constructor does any work. Eagerly resolve the prototype now
     // so that a throwing getter on .prototype fires at the correct time.
     Item resolved_nt_proto = ItemNull;
-    bool needs_fixup = (get_type_id(nt_val) == LMD_TYPE_FUNC && nt_val.item != target.item);
+    bool needs_fixup = ((get_type_id(nt_val) == LMD_TYPE_FUNC || js_is_proxy(nt_val)) &&
+        nt_val.item != target.item);
     if (needs_fixup) {
         Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
         resolved_nt_proto = js_property_get(nt_val, proto_key);
@@ -6281,8 +6289,7 @@ extern "C" Item js_reflect_construct(Item target, Item args_array, Item new_targ
     // Helper: apply the pre-resolved prototype to a newly constructed built-in object
     auto fixup_proto = [&](Item result) -> Item {
         if (needs_fixup && get_type_id(resolved_nt_proto) == LMD_TYPE_MAP) {
-            Item proto_set_key = (Item){.item = s2it(heap_create_name("__proto__", 9))};
-            js_property_set(result, proto_set_key, resolved_nt_proto);
+            js_set_prototype(result, resolved_nt_proto);
         }
         return result;
     };
@@ -6331,7 +6338,26 @@ extern "C" Item js_reflect_construct(Item target, Item args_array, Item new_targ
                 (nl == 9 && strncmp(n, "EvalError", 9) == 0)) {
                 Item tn = (Item){.item = s2it(heap_create_name(n, nl))};
                 Item msg = (argc > 0) ? args[0] : make_js_undefined();
-                return fixup_proto(js_new_error_with_name(tn, msg));
+                Item err = js_new_error_with_name(tn, msg);
+                if (argc >= 2) {
+                    extern Item js_error_set_cause(Item error, Item options);
+                    err = js_error_set_cause(err, args[1]);
+                    if (js_check_exception()) return ItemNull;
+                }
+                return fixup_proto(err);
+            }
+
+            // AggregateError(errors, message)
+            if (nl == 14 && strncmp(n, "AggregateError", 14) == 0) {
+                Item errors = (argc > 0) ? args[0] : js_array_new(0);
+                Item msg = (argc > 1) ? args[1] : make_js_undefined();
+                Item err = js_new_aggregate_error(errors, msg);
+                if (argc >= 3) {
+                    extern Item js_error_set_cause(Item error, Item options);
+                    err = js_error_set_cause(err, args[2]);
+                    if (js_check_exception()) return ItemNull;
+                }
+                return fixup_proto(err);
             }
 
             // Map
@@ -6944,6 +6970,7 @@ extern "C" bool js_func_is_builtin_ctor(Item fn) {
         (el == 11 && strncmp(en, "SyntaxError", 11) == 0) ||
         (el == 8 && strncmp(en, "URIError", 8) == 0) ||
         (el == 9 && strncmp(en, "EvalError", 9) == 0) ||
+        (el == 14 && strncmp(en, "AggregateError", 14) == 0) ||
         (el == 3 && strncmp(en, "Map", 3) == 0) ||
         (el == 3 && strncmp(en, "Set", 3) == 0) ||
         (el == 7 && strncmp(en, "WeakMap", 7) == 0) ||
@@ -7483,6 +7510,7 @@ extern "C" Item js_create_data_property(Item obj, Item name, Item value) {
         }
     }
     Item desc = js_new_object();
+    js_set_prototype(desc, ItemNull);
     js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, value);
     js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
     js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(true)});
@@ -8847,7 +8875,9 @@ extern "C" Item js_object_from_entries(Item iterable) {
         // Use ToPropertyKey: preserves Symbol keys, converts others to string
         extern Item js_to_property_key(Item key);
         Item prop_key = js_to_property_key(key);
-        js_property_set(result, prop_key, val);
+        if (js_check_exception()) return ItemNull;
+        js_create_data_property(result, prop_key, val);
+        if (js_check_exception()) return ItemNull;
     }
     return result;
 }
@@ -10579,7 +10609,7 @@ static Item js_array_from_iter_mapped(Item iterable, Item mapFn, Item this_arg) 
 // Returns true if `iterable` exposes a callable Symbol.iterator (`__sym_1`).
 static bool js_has_sym_iterator(Item iterable) {
     TypeId tid = get_type_id(iterable);
-    if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_ELEMENT) return false;
+    if (tid == LMD_TYPE_NULL || iterable.item == ITEM_JS_UNDEFINED) return false;
     Item key = (Item){.item = s2it(heap_create_name("__sym_1", 7))};
     Item iter_factory = js_property_get(iterable, key);
     if (js_check_exception()) return false;
@@ -10660,16 +10690,19 @@ extern "C" Item js_array_from_with_constructor(Item ctor, Item iterable, Item ma
         return ItemNull;
     }
 
-    Item result = js_new_from_class_object(ctor, NULL, 0);
-    if (js_check_exception()) return ItemNull;
-
     if (!js_has_sym_iterator(iterable)) {
         if (js_check_exception()) return ItemNull;
         int64_t len = js_array_from_array_like_length(iterable);
         if (js_check_exception()) return ItemNull;
+        Item len_arg = (Item){.item = i2it(len)};
+        Item result = js_new_from_class_object(ctor, &len_arg, 1);
+        if (js_check_exception()) return ItemNull;
         js_array_from_array_like_into(result, iterable, len, mapFn, this_arg, mapping);
         return js_check_exception() ? ItemNull : result;
     }
+
+    Item result = js_new_from_class_object(ctor, NULL, 0);
+    if (js_check_exception()) return ItemNull;
 
     Item iterator = js_get_iterator(iterable);
     if (js_check_exception()) return ItemNull;
@@ -11268,7 +11301,8 @@ extern "C" Item js_json_parse_full(Item str_item, Item reviver) {
         // Create a wrapper object {"": result} as the root holder
         Item wrapper = js_new_object();
         Item empty_key = (Item){.item = s2it(heap_create_name("", 0))};
-        js_property_set(wrapper, empty_key, result);
+        js_create_data_property(wrapper, empty_key, result);
+        if (js_check_exception()) return ItemNull;
         int source_index = 0;
         js_json_build_source_entries(&state, wrapper, empty_key, result, &source_index);
         result = js_json_revive(wrapper, empty_key, reviver, &state);
@@ -11775,7 +11809,11 @@ extern "C" Item js_json_stringify_full(Item value, Item replacer, Item space) {
     StrBuf* sb = strbuf_new();
     Item empty_key = (Item){.item = s2it(heap_create_name("", 0))};
     Item holder = js_new_object();
-    js_property_set(holder, empty_key, value);
+    js_create_data_property(holder, empty_key, value);
+    if (js_check_exception()) {
+        strbuf_free(sb);
+        return make_js_undefined();
+    }
     void* visited_stack[JSON_STRINGIFY_MAX_DEPTH];
 
     // Call SerializeJSONProperty — it handles toJSON, replacer, unwrap, and undefined check
@@ -14255,6 +14293,9 @@ static Item js_ctor_eval_error_fn(Item msg) {
     Item tn = (Item){.item = s2it(heap_create_name("EvalError", 9))};
     return js_new_error_with_name(tn, msg);
 }
+static Item js_ctor_aggregate_error_fn(Item errors, Item msg) {
+    return js_new_aggregate_error(errors, msg);
+}
 
 // Event(type, init) / CustomEvent(type, init) -- called without 'new' too.
 // Honours EventInitDict {bubbles, cancelable, composed [, detail]} per spec.
@@ -14755,6 +14796,7 @@ static Item js_create_constructor(int ctor_id, const char* name, int param_count
     else if (ctor_id == JS_CTOR_SYNTAX_ERROR) fn->func_ptr = (void*)js_ctor_syntax_error_fn;
     else if (ctor_id == JS_CTOR_URI_ERROR) fn->func_ptr = (void*)js_ctor_uri_error_fn;
     else if (ctor_id == JS_CTOR_EVAL_ERROR) fn->func_ptr = (void*)js_ctor_eval_error_fn;
+    else if (ctor_id == JS_CTOR_AGGREGATE_ERROR) fn->func_ptr = (void*)js_ctor_aggregate_error_fn;
     else if (ctor_id == JS_CTOR_EVENT) fn->func_ptr = (void*)js_ctor_event_fn;
     else if (ctor_id == JS_CTOR_CUSTOM_EVENT) fn->func_ptr = (void*)js_ctor_custom_event_fn;
     else if (ctor_id == JS_CTOR_EVENT_TARGET) fn->func_ptr = (void*)js_ctor_event_target_fn;

@@ -72,39 +72,39 @@ ItemReader::ItemReader(ConstItem item)
 }
 
 bool ItemReader::isNull() const {
-    return cached_type_ == LMD_TYPE_NULL;
+    return is<LMD_TYPE_NULL>();
 }
 
 bool ItemReader::isString() const {
-    return cached_type_ == LMD_TYPE_STRING;
+    return is<LMD_TYPE_STRING>();
 }
 
 bool ItemReader::isSymbol() const {
-    return cached_type_ == LMD_TYPE_SYMBOL;
+    return is<LMD_TYPE_SYMBOL>();
 }
 
 bool ItemReader::isInt() const {
-    return cached_type_ == LMD_TYPE_INT || cached_type_ == LMD_TYPE_INT64;
+    return is<LMD_TYPE_INT>() || is<LMD_TYPE_INT64>();
 }
 
 bool ItemReader::isFloat() const {
-    return cached_type_ == LMD_TYPE_FLOAT;
+    return is<LMD_TYPE_FLOAT>();
 }
 
 bool ItemReader::isBool() const {
-    return cached_type_ == LMD_TYPE_BOOL;
+    return is<LMD_TYPE_BOOL>();
 }
 
 bool ItemReader::isElement() const {
-    return cached_type_ == LMD_TYPE_ELEMENT;
+    return is<LMD_TYPE_ELEMENT>();
 }
 
 bool ItemReader::isMap() const {
-    return cached_type_ == LMD_TYPE_MAP;
+    return is<LMD_TYPE_MAP>();
 }
 
 bool ItemReader::isArray() const {
-    return cached_type_ == LMD_TYPE_ARRAY;
+    return is<LMD_TYPE_ARRAY>();
 }
 
 bool ItemReader::isList() const {
@@ -112,53 +112,51 @@ bool ItemReader::isList() const {
 }
 
 bool ItemReader::isDatetime() const {
-    return cached_type_ == LMD_TYPE_DTIME;
+    return is<LMD_TYPE_DTIME>();
 }
 
 String* ItemReader::asString() const {
-    if (isString()) { return item_.get_string(); }
+    if (auto str = asItem<LMD_TYPE_STRING>()) { return str.ptr(); }
     return nullptr;
 }
 
 Symbol* ItemReader::asSymbol() const {
-    if (isSymbol()) { return item_.get_symbol(); }
+    if (auto sym = asItem<LMD_TYPE_SYMBOL>()) { return sym.ptr(); }
     return nullptr;
 }
 
 int64_t ItemReader::asInt() const {
-    if (cached_type_ == LMD_TYPE_INT) {
-        return item_.get_int56();
-    } else if (cached_type_ == LMD_TYPE_INT64) {
-        return item_.get_int64();
+    if (auto val = asItem<LMD_TYPE_INT>()) {
+        return val.value();
+    } else if (auto long_val = asItem<LMD_TYPE_INT64>()) {
+        return *long_val.ptr();
     }
     return 0;
 }
 
 int32_t ItemReader::asInt32() const {
-    if (cached_type_ == LMD_TYPE_INT) {
-        return (int32_t)item_.get_int56();  // Truncate to 32-bit
-    } else if (cached_type_ == LMD_TYPE_INT64) {
-        int64_t val = item_.get_int64();
+    if (auto val = asItem<LMD_TYPE_INT>()) {
+        return (int32_t)val.value();  // INT_CAST_OK: API explicitly returns int32_t
+    } else if (auto long_val = asItem<LMD_TYPE_INT64>()) {
+        int64_t val = *long_val.ptr();
         return (int32_t)val;  // Truncate to 32-bit
     }
     return 0;
 }
 
 double ItemReader::asFloat() const {
-    if (isFloat()) { return item_.get_double(); }
+    if (auto val = asItem<LMD_TYPE_FLOAT>()) { return *val.ptr(); }
     return NAN;
 }
 
 bool ItemReader::asBool() const {
-    if (isBool()) {
-        return item_.bool_val;
-    }
+    if (auto val = asItem<LMD_TYPE_BOOL>()) { return val.value(); }
     return false;
 }
 
 DateTime ItemReader::asDatetime() const {
-    if (isDatetime()) {
-        return item_.get_datetime();
+    if (auto dt = asItem<LMD_TYPE_DTIME>()) {
+        return *dt.ptr();
     }
     DateTime empty;
     memset(&empty, 0, sizeof(DateTime));
@@ -166,22 +164,24 @@ DateTime ItemReader::asDatetime() const {
 }
 
 ElementReader ItemReader::asElement() const {
-    if (isElement()) {
-        return ElementReader(item_.element);
+    if (auto elem = asItem<LMD_TYPE_ELEMENT>()) {
+        return ElementReader(*elem);
     }
     return ElementReader();  // Invalid element
 }
 
 MapReader ItemReader::asMap() const {
-    if (isMap()) {
-        return MapReader(item_.map);
+    if (auto map = asItem<LMD_TYPE_MAP>()) {
+        return MapReader(*map);
+    } else if (auto object = asItem<LMD_TYPE_OBJECT>()) {
+        return MapReader(*object);
     }
     return MapReader();  // Invalid map
 }
 
 ArrayReader ItemReader::asArray() const {
-    if (isArray() || isList()) {
-        return ArrayReader(item_.array);
+    if (auto arr = asItem<LMD_TYPE_ARRAY>()) {
+        return ArrayReader(*arr);
     }
     return ArrayReader();  // Invalid array
 }
@@ -210,10 +210,19 @@ MapReader::MapReader(Map* map)
     }
 }
 
+MapReader::MapReader(lam::ItemOf<LMD_TYPE_MAP> map)
+    : MapReader(map.ptr()) {
+}
+
+MapReader::MapReader(lam::ItemOf<LMD_TYPE_OBJECT> object)
+    : MapReader(lam::as_map(object)) {
+}
+
 MapReader MapReader::fromItem(Item item) {
-    TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT) {
-        return MapReader(item.map);
+    if (auto map = lam::as<LMD_TYPE_MAP>(item)) {
+        return MapReader(*map);
+    } else if (auto object = lam::as<LMD_TYPE_OBJECT>(item)) {
+        return MapReader(*object);
     }
     return MapReader();  // Invalid
 }
@@ -345,10 +354,13 @@ ArrayReader::ArrayReader(Array* array)
     : array_(array) {
 }
 
+ArrayReader::ArrayReader(lam::ItemOf<LMD_TYPE_ARRAY> array)
+    : ArrayReader(array.ptr()) {
+}
+
 ArrayReader ArrayReader::fromItem(Item item) {
-    TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_ARRAY) {
-        return ArrayReader(item.array);
+    if (auto array = lam::as<LMD_TYPE_ARRAY>(item)) {
+        return ArrayReader(*array);
     }
     return ArrayReader();  // Invalid
 }
@@ -399,9 +411,13 @@ ElementReader::ElementReader(const Element* element)
     , element_type_(element ? (const TypeElmt*)element->type : nullptr) {
 }
 
+ElementReader::ElementReader(lam::ItemOf<LMD_TYPE_ELEMENT> element)
+    : ElementReader(element.ptr()) {
+}
+
 ElementReader::ElementReader(Item item) {
-    if (get_type_id(item) == LMD_TYPE_ELEMENT) {
-        *this = ElementReader(item.element);
+    if (auto element = lam::as<LMD_TYPE_ELEMENT>(item)) {
+        *this = ElementReader(*element);
     } else {
         *this = ElementReader();
     }
@@ -420,16 +436,15 @@ bool ElementReader::isEmpty() const {
     if (list->length == 0) return true;
     for (int64_t i = 0; i < list->length; i++) {
         Item child = list->items[i];
-        TypeId type = get_type_id(child);
 
-        if (type == LMD_TYPE_ELEMENT) {
+        if (lam::as<LMD_TYPE_ELEMENT>(child)) {
             return false; // has child elements
-        } else if (type == LMD_TYPE_STRING) {
-            String* str = child.get_string();
+        } else if (auto str_item = lam::as<LMD_TYPE_STRING>(child)) {
+            String* str = str_item.ptr();
             if (str && str->len > 0) {
                 return false; // has non-empty text
             }
-        } else if (type != LMD_TYPE_NULL) {
+        } else if (!lam::as<LMD_TYPE_NULL>(child)) {
             return false; // has other content
         }
     }
@@ -444,9 +459,8 @@ bool ElementReader::isTextOnly() const {
     if (list->length == 0) return false;
     for (int64_t i = 0; i < list->length; i++) {
         Item child = list->items[i];
-        TypeId type = get_type_id(child);
 
-        if (type == LMD_TYPE_ELEMENT) {
+        if (lam::as<LMD_TYPE_ELEMENT>(child)) {
             return false; // has child elements
         }
     }
@@ -471,8 +485,8 @@ ItemReader ElementReader::findChild(const char* tag_name) const {
     for (int64_t i = 0; i < list->length; i++) {
         Item child = list->items[i];
 
-        if (get_type_id(child) == LMD_TYPE_ELEMENT) {
-            Element* child_elem = child.element;
+        if (auto child_item = lam::as<LMD_TYPE_ELEMENT>(child)) {
+            Element* child_elem = child_item.ptr();
             TypeElmt* child_type = (TypeElmt*)child_elem->type;
 
             if (child_type && child_type->name.str &&
@@ -500,8 +514,8 @@ ElementReader ElementReader::findChildElement(const char* tag_name) const {
     for (int64_t i = 0; i < list->length; i++) {
         Item child = list->items[i];
 
-        if (get_type_id(child) == LMD_TYPE_ELEMENT) {
-            Element* child_elem = child.element;
+        if (auto child_item = lam::as<LMD_TYPE_ELEMENT>(child)) {
+            Element* child_elem = child_item.ptr();
             TypeElmt* child_type = (TypeElmt*)child_elem->type;
 
             if (child_type && child_type->name.str &&
@@ -520,7 +534,7 @@ bool ElementReader::hasChildElements() const {
     const List* list = (const List*)element_;
     for (int64_t i = 0; i < list->length; i++) {
         Item child = list->items[i];
-        if (get_type_id(child) == LMD_TYPE_ELEMENT) {
+        if (lam::as<LMD_TYPE_ELEMENT>(child)) {
             return true;
         }
     }
@@ -613,16 +627,15 @@ static void _extract_text_recursive_inline(const Element* element, StringBuf* sb
     const List* list = (const List*)element;
     for (int64_t i = 0; i < list->length; i++) {
         Item child = list->items[i];
-        TypeId type = get_type_id(child);
 
-        if (type == LMD_TYPE_STRING) {
-            String* str = child.get_string();
+        if (auto str_item = lam::as<LMD_TYPE_STRING>(child)) {
+            String* str = str_item.ptr();
             if (str && str->len > 0) {
                 stringbuf_append_str_n(sb, str->chars, str->len);
             }
-        } else if (type == LMD_TYPE_ELEMENT) {
+        } else if (auto elem = lam::as<LMD_TYPE_ELEMENT>(child)) {
             // Recursively extract text from child elements
-            _extract_text_recursive_inline(child.element, sb);
+            _extract_text_recursive_inline(elem.ptr(), sb);
         }
     }
 }
@@ -658,8 +671,8 @@ bool ElementReader::ElementChildIterator::next(ElementReader* elem) {
     const List* list = (const List*)reader_->element_;
     while (index_ < reader_->childCount()) {
         Item child = list->items[index_++];
-        if (get_type_id(child) == LMD_TYPE_ELEMENT) {
-            *elem = ElementReader(child.element);
+        if (auto child_elem = lam::as<LMD_TYPE_ELEMENT>(child)) {
+            *elem = ElementReader(*child_elem);
             return true;
         }
     }

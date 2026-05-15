@@ -31,6 +31,7 @@ Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found);
 extern "C" void js_mark_non_enumerable(Item object, Item name);
 extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor);
 extern "C" void js_set_prototype(Item object, Item prototype);
+extern "C" Item js_in(Item key, Item object);
 extern "C" Item js_get_current_this(void) { return js_current_this; }
 
 static void js_runtime_make_non_enumerable(Item object, Item name) {
@@ -499,8 +500,7 @@ extern "C" Item js_new_error_with_stack(Item message, Item stack_str) {
     // Per spec: 'name' is inherited from Error.prototype, NOT set as own property
     // Only set 'message' when it is explicitly provided (not undefined/null)
     Item msg_key = (Item){.item = s2it(heap_create_name("message"))};
-    if (message.item != ItemNull.item && message.item != ITEM_JS_UNDEFINED &&
-        get_type_id(message) != LMD_TYPE_NULL && get_type_id(message) != LMD_TYPE_UNDEFINED) {
+    if (message.item != ITEM_JS_UNDEFINED && get_type_id(message) != LMD_TYPE_UNDEFINED) {
         if (get_type_id(message) != LMD_TYPE_STRING) {
             Item str_msg = js_to_string(message);
             js_property_set(obj, msg_key, str_msg);
@@ -562,8 +562,7 @@ extern "C" Item js_new_error_with_name_stack(Item error_name, Item message, Item
     // Per spec: 'name' is inherited from the prototype, NOT set as own property
     // Only set 'message' when it is explicitly provided (not undefined/null)
     Item msg_key = (Item){.item = s2it(heap_create_name("message"))};
-    if (message.item != ItemNull.item && message.item != ITEM_JS_UNDEFINED &&
-        get_type_id(message) != LMD_TYPE_NULL && get_type_id(message) != LMD_TYPE_UNDEFINED) {
+    if (message.item != ITEM_JS_UNDEFINED && get_type_id(message) != LMD_TYPE_UNDEFINED) {
         if (get_type_id(message) != LMD_TYPE_STRING) {
             Item str_msg = js_to_string(message);
             js_property_set(obj, msg_key, str_msg);
@@ -647,15 +646,20 @@ extern "C" Item js_new_error_with_name_stack(Item error_name, Item message, Item
 
 // ES2022: Extract cause from options object and set on error
 extern "C" Item js_error_set_cause(Item error, Item options) {
-    if (get_type_id(options) != LMD_TYPE_MAP) return error;
+    TypeId opt_type = get_type_id(options);
+    if (opt_type != LMD_TYPE_MAP && opt_type != LMD_TYPE_ARRAY &&
+        opt_type != LMD_TYPE_FUNC && opt_type != LMD_TYPE_ELEMENT) {
+        return error;
+    }
     Item cause_key = (Item){.item = s2it(heap_create_name("cause"))};
-    bool found = false;
-    Item cause_val = js_map_get_fast(options.map, "cause", 5, &found);
-    if (found) {
+    Item has_cause = js_in(cause_key, options);
+    if (js_exception_pending) return ItemNull;
+    if (js_is_truthy(has_cause)) {
+        Item cause_val = js_property_get(options, cause_key);
+        if (js_exception_pending) return ItemNull;
         js_property_set(error, cause_key, cause_val);
         // mark cause as non-enumerable per spec §20.5.8.1
-        Item ne_cause = (Item){.item = s2it(heap_create_name("__ne_cause", 10))};
-        js_property_set(error, ne_cause, (Item){.item = b2it(true)});
+        js_mark_non_enumerable(error, cause_key);
     }
     return error;
 }

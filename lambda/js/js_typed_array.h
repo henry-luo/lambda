@@ -102,6 +102,7 @@ int  js_arraybuffer_max_byte_length(Item val);
 bool js_arraybuffer_is_resizable(Item val);
 Item js_arraybuffer_resize(Item val, Item new_length_item);
 Item js_arraybuffer_slice(Item val, int begin, int end);
+Item js_arraybuffer_slice_items(Item val, Item begin_item, Item end_item, int argc);
 bool js_arraybuffer_is_view(Item val);
 Item js_arraybuffer_is_view_item(Item val);
 void js_arraybuffer_detach(Item val);

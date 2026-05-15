@@ -110,6 +110,17 @@ TEST_F(MarkReaderTest, ItemReaderTypeMismatch) {
     EXPECT_FALSE(reader.asBool());
 }
 
+TEST_F(MarkReaderTest, ItemReaderTypedWitnessAccessors) {
+    Item str_item = builder->createStringItem("typed");
+    ItemReader reader(str_item.to_const());
+
+    auto str = reader.asItem<LMD_TYPE_STRING>();
+    ASSERT_TRUE((bool)str);
+    EXPECT_EQ(str.ptr(), reader.asString());
+    EXPECT_TRUE(reader.is<LMD_TYPE_STRING>());
+    EXPECT_FALSE(reader.is<LMD_TYPE_ARRAY>());
+}
+
 // ==============================================================================
 // ArrayReader Tests
 // ==============================================================================
@@ -138,6 +149,21 @@ TEST_F(MarkReaderTest, ArrayReaderBasic) {
 
     ItemReader third = arr.get(2);
     EXPECT_EQ(third.asInt(), 3);
+}
+
+TEST_F(MarkReaderTest, ArrayReaderAcceptsTypedWitness) {
+    Item array_item = builder->array()
+        .append((int64_t)7)
+        .append((int64_t)8)
+        .final();
+
+    auto array = lam::as<LMD_TYPE_ARRAY>(array_item);
+    ASSERT_TRUE((bool)array);
+
+    ArrayReader arr(*array);
+    EXPECT_TRUE(arr.isValid());
+    EXPECT_EQ(arr.length(), 2);
+    EXPECT_EQ(arr.get(1).asInt(), 8);
 }
 
 TEST_F(MarkReaderTest, ArrayReaderEmpty) {
@@ -252,6 +278,20 @@ TEST_F(MarkReaderTest, MapReaderBasic) {
     ItemReader active = map.get("active");
     EXPECT_TRUE(active.isBool());
     EXPECT_TRUE(active.asBool());
+}
+
+TEST_F(MarkReaderTest, MapReaderAcceptsTypedWitness) {
+    Item map_item = builder->map()
+        .put("kind", "typed")
+        .final();
+
+    auto map = lam::as<LMD_TYPE_MAP>(map_item);
+    ASSERT_TRUE((bool)map);
+
+    MapReader reader(*map);
+    EXPECT_TRUE(reader.isValid());
+    EXPECT_TRUE(reader.has("kind"));
+    EXPECT_STREQ(reader.get("kind").cstring(), "typed");
 }
 
 TEST_F(MarkReaderTest, MapReaderEmpty) {
@@ -390,6 +430,22 @@ TEST_F(MarkReaderTest, ElementReaderBasic) {
 
     EXPECT_GT(elem.childCount(), 0);
     EXPECT_FALSE(elem.isEmpty());
+}
+
+TEST_F(MarkReaderTest, ElementReaderAcceptsTypedWitness) {
+    Item elem_item = builder->element("section")
+        .attr("id", "typed")
+        .text("body")
+        .final();
+
+    auto elem = lam::as<LMD_TYPE_ELEMENT>(elem_item);
+    ASSERT_TRUE((bool)elem);
+
+    ElementReader reader(*elem);
+    EXPECT_TRUE(reader.isValid());
+    EXPECT_TRUE(reader.hasTag("section"));
+    EXPECT_STREQ(reader.get_attr_string("id"), "typed");
+    EXPECT_EQ(reader.childCount(), 1);
 }
 
 TEST_F(MarkReaderTest, ElementReaderChildren) {

@@ -1,5 +1,6 @@
 #include "lambda-data.hpp"
 #include "lambda-decimal.hpp"
+#include "../lib/lambda_typed.hpp"
 #include "../lib/log.h"
 #include <math.h>
 #include <inttypes.h>  // for PRId64
@@ -475,60 +476,62 @@ void print_typeditem(StrBuf *strbuf, TypedItem *titem, int depth, char* indent) 
     }
 }
 
-void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
-    // limit depth to prevent infinite recursion
-    if (depth > MAX_DEPTH) { strbuf_append_str(strbuf, "[MAX_DEPTH_REACHED]");  return; }
-    if (!item.item) {
-        log_debug("TRACE: print_item - item is NULL, appending null");
-        strbuf_append_str(strbuf, "null");
-        return;
+struct PrintItemVisitor {
+    StrBuf* strbuf;
+    int depth;
+    char* indent;
+
+    void unknown(TypeId type_id) const {
+        strbuf_append_format(strbuf, "[unknown type %s!!]", get_type_name(type_id));
     }
 
-    TypeId type_id = get_type_id(item);
-    switch (type_id) { // packed value
-    case LMD_TYPE_NULL:
-        strbuf_append_str(strbuf, "null");
-        break;
-    case LMD_TYPE_BOOL:
-        strbuf_append_str(strbuf, item.bool_val ? "true" : "false");
-        break;
-    case LMD_TYPE_INT: {
-        int64_t int_val = item.get_int56();
-        strbuf_append_format(strbuf, "%" PRId64, int_val);
-        break;
+    void operator()(lam::ItemOf<LMD_TYPE_RAW_POINTER> item) const {
+        unknown(item.tag());
     }
-    case LMD_TYPE_INT64: {
-        int64_t long_val = item.get_int64();
+
+    void operator()(lam::ItemOf<LMD_TYPE_NULL> item) const {
+        (void)item;
+        strbuf_append_str(strbuf, "null");
+    }
+
+    void operator()(lam::ItemOf<LMD_TYPE_BOOL> item) const {
+        strbuf_append_str(strbuf, item.value() ? "true" : "false");
+    }
+
+    void operator()(lam::ItemOf<LMD_TYPE_INT> item) const {
+        strbuf_append_format(strbuf, "%" PRId64, item.value());
+    }
+
+    void operator()(lam::ItemOf<LMD_TYPE_INT64> item) const {
+        int64_t long_val = *item.ptr();
         log_debug("print int64: %" PRId64, long_val);
         strbuf_append_format(strbuf, "%" PRId64, long_val);
-        break;
     }
-    case LMD_TYPE_FLOAT: {
-        double num = item.get_double();
-        print_double(strbuf, num);
-        break;
+
+    void operator()(lam::ItemOf<LMD_TYPE_FLOAT> item) const {
+        print_double(strbuf, *item.ptr());
     }
-    case LMD_TYPE_NUM_SIZED: {
-        NumSizedType st = item.get_num_type();
+
+    void operator()(lam::ItemOf<LMD_TYPE_NUM_SIZED> item) const {
+        Item raw = item.raw();
+        NumSizedType st = raw.get_num_type();
         if (st == NUM_FLOAT16 || st == NUM_FLOAT32) {
-            print_double(strbuf, item.get_num_sized_as_double());
+            print_double(strbuf, raw.get_num_sized_as_double());
         } else {
-            strbuf_append_format(strbuf, "%" PRId64, item.get_num_sized_as_int64());
+            strbuf_append_format(strbuf, "%" PRId64, raw.get_num_sized_as_int64());
         }
-        break;
     }
-    case LMD_TYPE_UINT64: {
-        uint64_t val = item.get_uint64();
-        strbuf_append_format(strbuf, "%" PRIu64, val);
-        break;
+
+    void operator()(lam::ItemOf<LMD_TYPE_UINT64> item) const {
+        strbuf_append_format(strbuf, "%" PRIu64, *item.ptr());
     }
-    case LMD_TYPE_DECIMAL: {
-        Decimal *decimal = item.get_decimal();
-        print_decimal(strbuf, decimal);
-        break;
+
+    void operator()(lam::ItemOf<LMD_TYPE_DECIMAL> item) const {
+        print_decimal(strbuf, item.ptr());
     }
-    case LMD_TYPE_STRING: {
-        String *string = item.get_safe_string();
+
+    void operator()(lam::ItemOf<LMD_TYPE_STRING> item) const {
+        String* string = item.ptr();
         if (string && string->chars) {
             // Safety check: validate string length before assertion
             size_t actual_len = strlen(string->chars);
@@ -543,10 +546,10 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         } else {
             strbuf_append_str(strbuf, "\"\"");
         }
-        break;
     }
-    case LMD_TYPE_SYMBOL: {
-        Symbol *symbol = item.get_safe_symbol();
+
+    void operator()(lam::ItemOf<LMD_TYPE_SYMBOL> item) const {
+        Symbol* symbol = item.ptr();
         if (symbol && symbol->chars) {
             // Safety check: validate string length before assertion
             size_t actual_len = strlen(symbol->chars);
@@ -561,10 +564,10 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         } else {
             strbuf_append_str(strbuf, "''");
         }
-        break;
     }
-    case LMD_TYPE_DTIME: {
-        DateTime *dt = (DateTime*)item.datetime_ptr;
+
+    void operator()(lam::ItemOf<LMD_TYPE_DTIME> item) const {
+        DateTime* dt = item.ptr();
         if (dt) {
             strbuf_append_str(strbuf, "t'");
             datetime_format_lambda(strbuf, dt);
@@ -573,16 +576,16 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         else {
             strbuf_append_str(strbuf, "[null datetime]");
         }
-        break;
     }
-    case LMD_TYPE_BINARY: {
-        String *string = item.get_safe_binary();
+
+    void operator()(lam::ItemOf<LMD_TYPE_BINARY> item) const {
+        String* string = item.ptr();
         if (string && string->chars) strbuf_append_format(strbuf, "b'%s'", string->chars);
         else strbuf_append_str(strbuf, "b''");
-        break;
     }
-    case LMD_TYPE_RANGE: {
-        Range *range = item.range;
+
+    void operator()(lam::ItemOf<LMD_TYPE_RANGE> item) const {
+        Range* range = item.ptr();
         log_debug("print range: %p, start: %ld, end: %ld", range, range->start, range->end);
         strbuf_append_char(strbuf, '[');
         for (int i = range->start; i <= range->end; i++) {
@@ -590,10 +593,10 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
             strbuf_append_int(strbuf, i);
         }
         strbuf_append_char(strbuf, ']');
-        break;
     }
-    case LMD_TYPE_ARRAY: {
-        Array *array = item.array;
+
+    void operator()(lam::ItemOf<LMD_TYPE_ARRAY> item) const {
+        Array* array = item.ptr();
         log_debug("print array: %p, length: %ld", array, array->length);
         strbuf_append_char(strbuf, '[');
         for (int i = 0; i < array->length; i++) {
@@ -601,11 +604,11 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
             print_item(strbuf, array->items[i], depth + 1, indent);
         }
         strbuf_append_char(strbuf, ']');
-        break;
     }
-    case LMD_TYPE_ARRAY_NUM: {
+
+    void operator()(lam::ItemOf<LMD_TYPE_ARRAY_NUM> item) const {
         strbuf_append_char(strbuf, '[');
-        ArrayNum *array = item.array_num;
+        ArrayNum* array = item.ptr();
         ArrayNumElemType et = array->get_elem_type();
         if (et == ELEM_FLOAT || et == ELEM_FLOAT64) {
             for (int i = 0; i < array->length; i++) {
@@ -626,11 +629,11 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
             }
         }
         strbuf_append_str(strbuf, "]");
-        break;
     }
-    case LMD_TYPE_MAP: {
-        Map *map = item.map;
-        TypeMap *map_type = (TypeMap*)map->type;
+
+    void operator()(lam::ItemOf<LMD_TYPE_MAP> item) const {
+        Map* map = item.ptr();
+        TypeMap* map_type = (TypeMap*)map->type;
         strbuf_append_char(strbuf, '{');
         print_named_items(strbuf, map_type, map->data, depth + 1, indent);
         // add closing indentation if we have nested structures
@@ -639,20 +642,18 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
             for (int i = 0; i < depth; i++) strbuf_append_str(strbuf, indent);
         }
         strbuf_append_char(strbuf, '}');
-        break;
     }
-    case LMD_TYPE_VMAP: {
-        VMap *vm = item.vmap;
+
+    void operator()(lam::ItemOf<LMD_TYPE_VMAP> item) const {
+        VMap* vm = item.ptr();
         int64_t count = vm->vtable->count(vm->data);
         strbuf_append_char(strbuf, '{');
         for (int64_t i = 0; i < count; i++) {
             if (i > 0) strbuf_append_str(strbuf, ", ");
             Item key = vm->vtable->key_at(vm->data, i);
             Item value = vm->vtable->value_at(vm->data, i);
-            // print key
-            TypeId kt = get_type_id(key);
-            if (kt == LMD_TYPE_STRING) {
-                String* s = key.get_safe_string();
+            if (auto key_str = lam::as<LMD_TYPE_STRING>(key)) {
+                String* s = key_str.ptr();
                 if (s) strbuf_append_str_n(strbuf, s->chars, s->len);
             } else {
                 print_item(strbuf, key, depth + 1, indent);
@@ -661,13 +662,12 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
             print_item(strbuf, value, depth + 1, indent);
         }
         strbuf_append_char(strbuf, '}');
-        break;
     }
-    case LMD_TYPE_OBJECT: {
-        Object *obj = item.object;
-        TypeObject *obj_type = (TypeObject*)obj->type;
+
+    void operator()(lam::ItemOf<LMD_TYPE_OBJECT> item) const {
+        Object* obj = item.ptr();
+        TypeObject* obj_type = (TypeObject*)obj->type;
         strbuf_append_char(strbuf, '{');
-        // print type name first
         if (obj_type->type_name.str) {
             strbuf_append_str_n(strbuf, obj_type->type_name.str, obj_type->type_name.length);
             if (obj_type->length > 0) strbuf_append_char(strbuf, ' ');
@@ -678,18 +678,16 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
             for (int i = 0; i < depth; i++) strbuf_append_str(strbuf, indent);
         }
         strbuf_append_char(strbuf, '}');
-        break;
     }
-    case LMD_TYPE_ELEMENT: {
-        Element *element = item.element;
-        TypeElmt *elmt_type = (TypeElmt*)element->type;
+
+    void operator()(lam::ItemOf<LMD_TYPE_ELEMENT> item) const {
+        Element* element = item.ptr();
+        TypeElmt* elmt_type = (TypeElmt*)element->type;
         strbuf_append_format(strbuf, "<%.*s", (int)elmt_type->name.length, elmt_type->name.str);
 
-        // print attributes
         if (elmt_type->length) {
             print_named_items(strbuf, (TypeMap*)elmt_type, element->data, depth + 1, indent, true);
         }
-        // print content
         if (element->length) {
             strbuf_append_str(strbuf, indent ? "\n": (elmt_type->length ? "; ":" "));
             for (long i = 0; i < element->length; i++) {
@@ -698,62 +696,77 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
                 print_item(strbuf, element->items[i], depth + 1, indent);
             }
         }
-        // no indentation for closing '>'
         strbuf_append_char(strbuf, '>');
-        break;
     }
-    case LMD_TYPE_FUNC: {
-        Function *func = item.function;
-        // TypeFunc *func_type = (TypeFunc*)func->fn;
-        strbuf_append_format(strbuf, "[fn %p]", func);  // (int)func->name.length, func->name.str);
-        break;
+
+    void operator()(lam::ItemOf<LMD_TYPE_FUNC> item) const {
+        Function* func = item.ptr();
+        strbuf_append_format(strbuf, "[fn %p]", func);
     }
-    case LMD_TYPE_TYPE: {
-        TypeType *type = (TypeType*)item.type;
+
+    void operator()(lam::ItemOf<LMD_TYPE_TYPE> item) const {
+        TypeType* type = (TypeType*)item.ptr();
         if (type->type->type_id == LMD_TYPE_NUM_SIZED) {
-            // print specific sub-type name (i8, i16, f32, etc.)
             strbuf_append_str(strbuf, get_num_sized_type_name((NumSizedType)type->type->kind));
-            break;
+            return;
         }
-        // Check if inner type is a TypeBinary (union/intersection)
         if (type->type->kind == TYPE_KIND_BINARY) {
-            strbuf_append_str(strbuf, "type");  // union types print as "type"
-            break;
+            strbuf_append_str(strbuf, "type");
+            return;
         }
         char* type_name = type_info[type->type->type_id].name;
         if (type->type->type_id == LMD_TYPE_NULL) {
-            // print as "type.null"
             strbuf_append_format(strbuf, "type.%s", type_name);
         } else {
             strbuf_append_str(strbuf, type_name);
         }
-        break;
     }
-    case LMD_TYPE_PATH: {
-        Path* path = (Path*)item.item;
-        // For sys:// paths, print the resolved content instead of the path
+
+    void operator()(lam::ItemOf<LMD_TYPE_PATH> item) const {
+        Path* path = item.ptr();
         if (path_get_scheme(path) == PATH_SCHEME_SYS) {
             if (path->result != 0) {
-                // Already resolved - print the resolved content
                 print_item(strbuf, {.item = path->result}, depth, indent);
-                break;
+                return;
             }
-            // Not resolved - just print path (resolution happens during execution)
         }
-        // Fall through for non-sys paths or unresolved sys paths
         path_to_string(path, strbuf);
-        break;
     }
-    case LMD_TYPE_ERROR: {
+
+    void operator()(lam::ItemOf<LMD_TYPE_ERROR> item) const {
+        (void)item;
         strbuf_append_str(strbuf, "error");
-        break;
     }
-    case LMD_TYPE_ANY:
+
+    void operator()(lam::ItemOf<LMD_TYPE_ANY> item) const {
+        (void)item;
         strbuf_append_str(strbuf, "any");
-        break;
-    default:
-        strbuf_append_format(strbuf, "[unknown type %s!!]", get_type_name(type_id));
     }
+
+    void operator()(lam::ItemOf<LMD_TYPE_NUMBER> item) const {
+        unknown(item.tag());
+    }
+
+    void operator()(lam::ItemOf<LMD_TYPE_UNDEFINED> item) const {
+        unknown(item.tag());
+    }
+
+    void operator()(Item item) const {
+        unknown(get_type_id(item));
+    }
+};
+
+void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
+    // limit depth to prevent infinite recursion
+    if (depth > MAX_DEPTH) { strbuf_append_str(strbuf, "[MAX_DEPTH_REACHED]");  return; }
+    if (!item.item) {
+        log_debug("TRACE: print_item - item is NULL, appending null");
+        strbuf_append_str(strbuf, "null");
+        return;
+    }
+
+    PrintItemVisitor visitor = {strbuf, depth, indent};
+    lam::visit(item, visitor);
 }
 
 void print_root_item(StrBuf *strbuf, Item item, char* indent) {

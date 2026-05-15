@@ -22,6 +22,7 @@
 #include "lambda-data.hpp"
 #include "lambda.h"  // for it2l, it2s, it2b, it2i, it2d, etc.
 #include "mark_reader.hpp"  // for ArrayReader
+#include "../lib/lambda_typed.hpp"
 #include "../lib/str.h"
 #include "input/input.hpp"
 #include "input/css/dom_node.hpp"      // for DomText, dom_text_to_string
@@ -412,9 +413,10 @@ ElementBuilder& ElementBuilder::attr(String* key, bool value) {
 //------------------------------------------------------------------------------
 
 ElementBuilder& ElementBuilder::child(Item item) {
-    if (builder_->ui_mode() && get_type_id(item) == LMD_TYPE_STRING) {
+    if (builder_->ui_mode()) {
         // ui_mode: convert plain String to fat [DomText][String][chars] for unified DOM tree
-        String* s = (String*)item.item;
+        auto str_item = lam::as<LMD_TYPE_STRING>(item);
+        String* s = str_item ? str_item.ptr() : nullptr;
         if (s && s->len > 0) {
             String* fat_s = builder_->createDomTextString(s->chars, s->len);
             if (fat_s) {
