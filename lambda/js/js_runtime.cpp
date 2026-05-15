@@ -10245,6 +10245,8 @@ struct JsRegexRange {
 };
 
 static bool js_regexp_is_han_cp(uint32_t cp);
+static int js_regex_generated_property_kind_from_name(const char* name, int name_len);
+static bool js_regex_generated_property_contains(int kind, int cp);
 
 static bool js_regex_match_gc_alias(const char* name, int len, const char* long_name,
                                     const char* short_name, const char* loose_name) {
@@ -10308,6 +10310,10 @@ static int js_regex_property_kind_from_name(const char* name, int name_len) {
         js_regex_match_property_name(name, name_len, "space")) return JS_REGEX_PROP_WHITE_SPACE;
     if (js_regex_match_property_name(name, name_len, "Pattern_White_Space") ||
         js_regex_match_property_name(name, name_len, "Pat_WS")) return JS_REGEX_PROP_PATTERN_WHITE_SPACE;
+
+    int generated_kind = js_regex_generated_property_kind_from_name(name, name_len);
+    if (generated_kind) return generated_kind;
+
     if (js_regex_match_property_name(name, name_len, "Regional_Indicator") ||
         js_regex_match_property_name(name, name_len, "RI")) return JS_REGEX_PROP_REGIONAL_INDICATOR;
     if (js_regex_match_property_name(name, name_len, "Emoji_Modifier") ||
@@ -10333,7 +10339,6 @@ static int js_regex_property_kind_from_name(const char* name, int name_len) {
         js_regex_match_property_name(name, name_len, "DI")) return JS_REGEX_PROP_DEFAULT_IGNORABLE_CODE_POINT;
     if (js_regex_match_property_name(name, name_len, "Noncharacter_Code_Point") ||
         js_regex_match_property_name(name, name_len, "NChar")) return JS_REGEX_PROP_NONCHARACTER_CODE_POINT;
-
     if (js_regex_match_gc_alias(name, name_len, "Other", "C", NULL)) return JS_REGEX_PROP_OTHER;
     if (js_regex_match_gc_alias(name, name_len, "Unassigned", "Cn", NULL)) return JS_REGEX_PROP_UNASSIGNED;
     if (js_regex_match_gc_alias(name, name_len, "Letter", "L", NULL)) return JS_REGEX_PROP_LETTER;
@@ -10420,6 +10425,8 @@ static bool js_regex_sorted_range_contains(const JsRegexRange* ranges, int count
     return false;
 }
 
+#include "js_regex_generated_property_tables.inc"
+
 static int js_regex_detect_simple_property_repeat(const char* pattern, int pattern_len) {
     if (pattern && pattern_len == 5 && pattern[0] == '^' && pattern[1] == '\\' &&
         pattern[3] == '+' && pattern[4] == '$') {
@@ -10433,7 +10440,7 @@ static int js_regex_detect_simple_property_repeat(const char* pattern, int patte
         default: break;
         }
     }
-    if (!pattern || pattern_len < 9) return 0;
+    if (!pattern || pattern_len < 8) return 0;
     if (pattern[0] != '^' || pattern[1] != '\\') return 0;
     char p = pattern[2];
     if (p != 'p' && p != 'P') return 0;
@@ -10607,6 +10614,7 @@ static bool js_regex_append_property_class_escape(std::string& out, const char* 
 static bool js_regex_special_property_contains(int kind, int cp) {
     if (kind == JS_REGEX_PROP_ASCII) return cp >= 0 && cp <= 0x7F;
     if (kind == JS_REGEX_PROP_ANY) return cp >= 0 && cp <= 0x10FFFF;
+    if (kind >= JS_REGEX_PROP_GENERATED_BASE) return js_regex_generated_property_contains(kind, cp);
     if (kind == JS_REGEX_PROP_ASCII_DIGIT) return cp >= '0' && cp <= '9';
     if (kind == JS_REGEX_PROP_ASCII_HEX_DIGIT) {
         return (cp >= '0' && cp <= '9') ||
@@ -10679,7 +10687,8 @@ static bool js_regex_special_property_contains(int kind, int cp) {
             {0x00200B,0x00200F},{0x00202A,0x00202E},{0x002060,0x00206F},
             {0x003164,0x003164},{0x00FE00,0x00FE0F},{0x00FEFF,0x00FEFF},
             {0x00FFA0,0x00FFA0},{0x00FFF0,0x00FFF8},{0x01BCA0,0x01BCA3},
-            {0x01D173,0x01D17A},{0x0E0000,0x0E0FFF}
+            {0x01D173,0x01D17A},{0x0E0000,0x0E0000},{0x0E0002,0x0E001F},
+            {0x0E0080,0x0E00FF},{0x0E0100,0x0E0FFF}
         };
         return js_regex_range_contains(ranges, sizeof(ranges) / sizeof(ranges[0]), cp);
     }
