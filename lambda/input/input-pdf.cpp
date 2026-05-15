@@ -323,9 +323,9 @@ static Item pdf_cs_op_record(MarkBuilder& builder, const char* op, size_t op_len
 }
 
 extern "C" Item pdf_parse_content_stream(Item bytes_item) {
-    TypeId type = get_type_id(bytes_item);
-    if (type != LMD_TYPE_STRING && type != LMD_TYPE_BINARY) return ItemNull;
-    String* bytes = bytes_item.get_string();
+    String* bytes = bytes_item.get_safe_string();
+    if (!bytes) bytes = bytes_item.get_safe_binary();
+    if (!bytes) return ItemNull;
     if (!bytes || !bytes->chars || !context || !context->pool) return ItemNull;
 
     Input* input = Input::create(context->pool, nullptr, nullptr);

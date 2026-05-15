@@ -120,8 +120,14 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
     case LMD_TYPE_DECIMAL:
         *(Decimal**)field_ptr = value.get_decimal();
         break;
-    case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY:
-        *(String**)field_ptr = value.get_string();
+    case LMD_TYPE_STRING:
+        *(String**)field_ptr = value.get_safe_string();
+        break;
+    case LMD_TYPE_SYMBOL:
+        *(Symbol**)field_ptr = value.get_safe_symbol();
+        break;
+    case LMD_TYPE_BINARY:
+        *(String**)field_ptr = value.get_safe_binary();
         break;
     case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_RANGE:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT:
@@ -153,11 +159,15 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
             titem.double_val = item.get_double();  break;
         case LMD_TYPE_DTIME:
             titem.datetime_val = item.get_datetime();  break;
-        case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY: {
-            String *str = item.get_string();
-            titem.string = str;
+        case LMD_TYPE_STRING:
+            titem.string = item.get_safe_string();
             break;
-        }
+        case LMD_TYPE_SYMBOL:
+            titem.symbol = item.get_safe_symbol();
+            break;
+        case LMD_TYPE_BINARY:
+            titem.string = item.get_safe_binary();
+            break;
         case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
         case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
             Container *container = item.container;
@@ -240,8 +250,14 @@ void elmt_put(Element* elmt, String* key, Item value, Pool* pool) {
     case LMD_TYPE_DECIMAL:
         *(Decimal**)field_ptr = value.get_decimal();
         break;
-    case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY:
-        *(String**)field_ptr = value.get_string();
+    case LMD_TYPE_STRING:
+        *(String**)field_ptr = value.get_safe_string();
+        break;
+    case LMD_TYPE_SYMBOL:
+        *(Symbol**)field_ptr = value.get_safe_symbol();
+        break;
+    case LMD_TYPE_BINARY:
+        *(String**)field_ptr = value.get_safe_binary();
         break;
     case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_RANGE:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {

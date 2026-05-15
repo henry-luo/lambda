@@ -208,13 +208,13 @@ Item fn_join(Item left, Item right) {
 
         if (right_type == LMD_TYPE_STRING) {
             // path ++ string: add string as new segment
-            String* right_str = right.get_string();
+            String* right_str = right.get_safe_string();
             Path* result = path_extend(pool, left_path, right_str->chars);
             return {.path = result};
         }
         else if (right_type == LMD_TYPE_SYMBOL) {
             // path ++ symbol: add symbol name as new segment
-            Symbol* right_sym = right.get_symbol();
+            Symbol* right_sym = right.get_safe_symbol();
             Path* result = path_extend(pool, left_path, right_sym->chars);
             return {.path = result};
         }
@@ -350,7 +350,7 @@ Item fn_normalize(Item str_item, Item type_item) {
         return ItemError;
     }
 
-    String* str = str_item.get_string();
+    String* str = str_item.get_safe_string();
     if (!str || str->len == 0) {
         return str_item;  // Return empty string as-is
     }
@@ -359,7 +359,7 @@ Item fn_normalize(Item str_item, Item type_item) {
     int options = UTF8PROC_STABLE | UTF8PROC_COMPOSE;
 
     if (type_item._type_id == LMD_TYPE_STRING) {
-        String* type_str = type_item.get_string();
+        String* type_str = type_item.get_safe_string();
         if (type_str && type_str->len > 0) {
             if (strncmp(type_str->chars, "nfd", 3) == 0) {
                 options = UTF8PROC_STABLE | UTF8PROC_DECOMPOSE;
@@ -1632,7 +1632,8 @@ Item fn_child_query(Item data, Item type_val) {
 Bool fn_in(Item a_item, Item b_item) {
     if (b_item._type_id) { // b is scalar
         if (b_item._type_id == LMD_TYPE_STRING && a_item._type_id == LMD_TYPE_STRING) {
-            String *str_a = a_item.get_string();  String *str_b = b_item.get_string();
+            String *str_a = a_item.get_safe_string();
+            String *str_b = b_item.get_safe_string();
             return str_a->len <= str_b->len && strstr(str_b->chars, str_a->chars) != NULL;
         }
     }
@@ -1753,11 +1754,13 @@ String* fn_string(Item itm) {
         return &STR_NULL;
     case LMD_TYPE_BOOL:
         return itm.bool_val ? &STR_TRUE : &STR_FALSE;
-    case LMD_TYPE_STRING:  case LMD_TYPE_BINARY:
-        return itm.get_string();
+    case LMD_TYPE_STRING:
+        return itm.get_safe_string();
+    case LMD_TYPE_BINARY:
+        return itm.get_safe_binary();
     case LMD_TYPE_SYMBOL: {
         // Symbol has different layout than String; create a String from symbol chars
-        Symbol* sym = itm.get_symbol();
+        Symbol* sym = itm.get_safe_symbol();
         if (!sym) return &STR_NULL;
         return heap_strcpy(sym->chars, sym->len);
     }
@@ -2203,7 +2206,7 @@ RetItem fn_parse2(Item str_item, Item type) {
         log_error("parse: 1st argument must be a string, got type: %s", get_type_name(str_type));
         return item_to_ri(ItemError);
     }
-    String* str = str_item.get_string();
+    String* str = str_item.get_safe_string();
     if (!str || !str->chars) return ri_ok(ItemNull);
 
     // parse the 2nd argument (format symbol or options map) - same logic as fn_input2
@@ -2266,7 +2269,7 @@ Item fn_parse_html_fragment1(Item str_item) {
         return ItemNull;
     }
 
-    String* str = str_item.get_string();
+    String* str = str_item.get_safe_string();
     if (!str || !str->chars) return ItemNull;
 
     Url* dummy_url = url_parse("parse://html-fragment");
@@ -2573,9 +2576,8 @@ Item fn_member(Item item, Item key) {
 
             // path metadata and structural property access
             if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
-                String* key_str = key.get_string();
-                if (key_str) {
-                    const char* k = key_str->chars;
+                const char* k = key.get_chars();
+                if (k) {
 
                     // structural properties (always available)
                     if (strcmp(k, "name") == 0) {
@@ -2860,8 +2862,15 @@ int64_t fn_len(Item item) {
         // todo: binary length
         const char* chars = item.get_chars();
         if (!chars) { size = 0; break; }
-        String* str = item.get_string();
-        size = str->is_ascii ? (int64_t)str->len : (int64_t)str_utf8_count(chars, str->len);
+        bool is_ascii = false;
+        uint32_t len = item.get_len();
+        if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_BINARY) {
+            String* str = type_id == LMD_TYPE_STRING
+                ? item.get_safe_string()
+                : item.get_safe_binary();
+            is_ascii = str->is_ascii != 0;
+        }
+        size = is_ascii ? (int64_t)len : (int64_t)str_utf8_count(chars, len);
         break;
     }
     case LMD_TYPE_PATH: {

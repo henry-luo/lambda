@@ -157,7 +157,7 @@ typedef struct Item {
         Path* path;
     };
 
-    inline TypeId type_id() {
+    inline TypeId type_id() const {
         if (this->_type_id) {
             return this->_type_id;
         }
@@ -179,6 +179,11 @@ typedef struct Item {
     inline String* get_string() const { return (String*)this->string_ptr; }
     inline Symbol* get_symbol() const { return (Symbol*)this->symbol_ptr; }
     inline String* get_binary() const{ return (String*)this->binary_ptr; }
+    inline String* get_safe_string() const { return type_id() == LMD_TYPE_STRING ? get_string() : nullptr; }
+    inline Symbol* get_safe_symbol() const { return type_id() == LMD_TYPE_SYMBOL ? get_symbol() : nullptr; }
+    inline String* get_safe_binary() const { return type_id() == LMD_TYPE_BINARY ? get_binary() : nullptr; }
+    inline Array* get_safe_array() const { return type_id() == LMD_TYPE_ARRAY ? array : nullptr; }
+    inline Map* get_safe_map() const { return type_id() == LMD_TYPE_MAP ? map : nullptr; }
 
     // sized numeric getters (NUM_SIZED)
     inline NumSizedType get_num_type() const { return this->num_type; }
