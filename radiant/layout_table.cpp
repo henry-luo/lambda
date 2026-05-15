@@ -6,6 +6,7 @@
 #include "../lib/log.h"
 #include "../lib/strview.h"
 #include "../lib/arraylist.h"
+#include "../lib/arraylist.hpp"
 // str.h included via view.hpp
 #include "../lib/memtrack.h"
 #include "../lib/tagged.hpp"
@@ -1686,6 +1687,28 @@ static CollapsedBorder get_column_border(ViewBlock* col, int side) {
     return border;
 }
 
+typedef lam::ArrayOwnedList<CollapsedBorder, lam::LayoutSessionDomain> CollapsedBorderList;
+
+static void append_collapsed_border_candidate(CollapsedBorderList& candidates,
+                                              const CollapsedBorder& value) {
+    lam::SessionPtr<CollapsedBorder> border = lam::session_make<CollapsedBorder>(MEM_CAT_LAYOUT);
+    if (!border) {
+        log_error("append_collapsed_border_candidate_alloc_failed");
+        return;
+    }
+    *border = value;
+    if (!candidates.append(static_cast<lam::SessionPtr<CollapsedBorder>&&>(border))) {
+        log_error("append_collapsed_border_candidate_append_failed: count=%zu", candidates.size());
+    }
+}
+
+static void append_visible_collapsed_border_candidate(CollapsedBorderList& candidates,
+                                                      const CollapsedBorder& value) {
+    if (value.style != CSS_VALUE_NONE) {
+        append_collapsed_border_candidate(candidates, value);
+    }
+}
+
 // Find column element at a given column index
 // Returns the ViewBlock for the <col> element, or NULL if not found
 static ViewBlock* find_column_element(ViewTable* table, int target_col) {
@@ -1780,36 +1803,28 @@ static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, Ta
     for (int row = 0; row <= meta->row_count; row++) {
         for (int col = 0; col < meta->column_count; col++) {
             // Collect candidate borders for this horizontal edge
-            ArrayList* candidates = arraylist_new(4);
+            CollapsedBorderList candidates(MEM_CAT_LAYOUT, 4);
 
             // Border from cell above (bottom border)
             if (row > 0) {
                 ViewTableCell* cell_above = find_cell_at(table, row - 1, col);
                 if (cell_above) {
-                    CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
-                    *border = get_cell_border(cell_above, 2); // bottom
-                    arraylist_append(candidates, border);
+                    append_collapsed_border_candidate(candidates, get_cell_border(cell_above, 2)); // bottom
                 }
             } else {
                 // Top edge of table
-                CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
-                *border = get_table_border(table, 0); // top
-                arraylist_append(candidates, border);
+                append_collapsed_border_candidate(candidates, get_table_border(table, 0)); // top
             }
 
             // Border from cell below (top border)
             if (row < meta->row_count) {
                 ViewTableCell* cell_below = find_cell_at(table, row, col);
                 if (cell_below) {
-                    CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
-                    *border = get_cell_border(cell_below, 0); // top
-                    arraylist_append(candidates, border);
+                    append_collapsed_border_candidate(candidates, get_cell_border(cell_below, 0)); // top
                 }
             } else {
                 // Bottom edge of table
-                CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
-                *border = get_table_border(table, 2); // bottom
-                arraylist_append(candidates, border);
+                append_collapsed_border_candidate(candidates, get_table_border(table, 2)); // bottom
             }
 
             // Row borders (if row elements have borders)
@@ -1818,13 +1833,7 @@ static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, Ta
                 int curr = 0;
                 for (ViewTableRow* r = table->first_row(); r; r = table->next_row(r)) {
                     if (curr == row - 1) {
-                        CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
-                        *border = get_row_border(r, 2); // bottom of row above
-                        if (border->style != CSS_VALUE_NONE) {
-                            arraylist_append(candidates, border);
-                        } else {
-                            mem_free(border);
-                        }
+                        append_visible_collapsed_border_candidate(candidates, get_row_border(r, 2)); // bottom of row above
                         break;
                     }
                     curr++;
@@ -1836,13 +1845,7 @@ static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, Ta
                 int curr = 0;
                 for (ViewTableRow* r = table->first_row(); r; r = table->next_row(r)) {
                     if (curr == row) {
-                        CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
-                        *border = get_row_border(r, 0); // top of row below
-                        if (border->style != CSS_VALUE_NONE) {
-                            arraylist_append(candidates, border);
-                        } else {
-                            mem_free(border);
-                        }
+                        append_visible_collapsed_border_candidate(candidates, get_row_border(r, 0)); // top of row below
                         break;
                     }
                     curr++;
@@ -1857,9 +1860,7 @@ static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, Ta
                 if (rg && row == first_in_group) {
                     CollapsedBorder cb = get_rowgroup_border(rg, 0); // top
                     if (cb.style != CSS_VALUE_NONE) {
-                        CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
-                        *border = cb;
-                        arraylist_append(candidates, border);
+                        append_collapsed_border_candidate(candidates, cb);
                     }
                 }
             }
@@ -1870,9 +1871,7 @@ static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, Ta
                 if (rg && (row - 1) == last_in_group) {
                     CollapsedBorder cb = get_rowgroup_border(rg, 2); // bottom
                     if (cb.style != CSS_VALUE_NONE) {
-                        CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
-                        *border = cb;
-                        arraylist_append(candidates, border);
+                        append_collapsed_border_candidate(candidates, cb);
                     }
                 }
             }
@@ -1884,9 +1883,7 @@ static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, Ta
                     int side = (row == 0) ? 0 : 2; // top or bottom
                     CollapsedBorder cb = get_column_border(col_elem, side);
                     if (cb.style != CSS_VALUE_NONE) {
-                        CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
-                        *border = cb;
-                        arraylist_append(candidates, border);
+                        append_collapsed_border_candidate(candidates, cb);
                     }
                 }
                 ViewBlock* cg = find_colgroup_element(table, col);
@@ -1894,18 +1891,16 @@ static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, Ta
                     int side = (row == 0) ? 0 : 2;
                     CollapsedBorder cb = get_column_border(cg, side);
                     if (cb.style != CSS_VALUE_NONE) {
-                        CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
-                        *border = cb;
-                        arraylist_append(candidates, border);
+                        append_collapsed_border_candidate(candidates, cb);
                     }
                 }
             }
 
             // Select winner from all candidates
-            if (candidates->length > 0) {
-                CollapsedBorder* winner = (CollapsedBorder*)candidates->data[0];
-                for (int i = 1; i < candidates->length; i++) {
-                    CollapsedBorder* candidate = (CollapsedBorder*)candidates->data[i];
+            if (candidates.size() > 0) {
+                lam::BorrowedPtr<CollapsedBorder, lam::LayoutSessionDomain> winner = candidates[0];
+                for (size_t i = 1; i < candidates.size(); i++) {
+                    lam::BorrowedPtr<CollapsedBorder, lam::LayoutSessionDomain> candidate = candidates[i];
                     CollapsedBorder result = select_winning_border(*winner, *candidate);
                     *winner = result;
                 }
@@ -1926,11 +1921,6 @@ static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, Ta
                 }
             }
 
-            // Cleanup
-            for (int i = 0; i < candidates->length; i++) {
-                mem_free(candidates->data[i]);
-            }
-            arraylist_free(candidates);
         }
     }
 
@@ -1939,36 +1929,28 @@ static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, Ta
     for (int row = 0; row < meta->row_count; row++) {
         for (int col = 0; col <= meta->column_count; col++) {
             // Collect candidate borders for this vertical edge
-            ArrayList* candidates = arraylist_new(4);
+            CollapsedBorderList candidates(MEM_CAT_LAYOUT, 4);
 
             // Border from cell to left (right border)
             if (col > 0) {
                 ViewTableCell* cell_left = find_cell_at(table, row, col - 1);
                 if (cell_left) {
-                    CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
-                    *border = get_cell_border(cell_left, 1); // right
-                    arraylist_append(candidates, border);
+                    append_collapsed_border_candidate(candidates, get_cell_border(cell_left, 1)); // right
                 }
             } else {
                 // Left edge of table
-                CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
-                *border = get_table_border(table, 3); // left
-                arraylist_append(candidates, border);
+                append_collapsed_border_candidate(candidates, get_table_border(table, 3)); // left
             }
 
             // Border from cell to right (left border)
             if (col < meta->column_count) {
                 ViewTableCell* cell_right = find_cell_at(table, row, col);
                 if (cell_right) {
-                    CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
-                    *border = get_cell_border(cell_right, 3); // left
-                    arraylist_append(candidates, border);
+                    append_collapsed_border_candidate(candidates, get_cell_border(cell_right, 3)); // left
                 }
             } else {
                 // Right edge of table
-                CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
-                *border = get_table_border(table, 1); // right
-                arraylist_append(candidates, border);
+                append_collapsed_border_candidate(candidates, get_table_border(table, 1)); // right
             }
 
             // Row borders at left and right edges (CSS 2.1 §17.6.2: rows can have borders)
@@ -1978,13 +1960,7 @@ static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, Ta
                 for (ViewTableRow* r = table->first_row(); r; r = table->next_row(r)) {
                     if (curr == row) {
                         int side = (col == 0) ? 3 : 1; // left or right
-                        CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
-                        *border = get_row_border(r, side);
-                        if (border->style != CSS_VALUE_NONE) {
-                            arraylist_append(candidates, border);
-                        } else {
-                            mem_free(border);
-                        }
+                        append_visible_collapsed_border_candidate(candidates, get_row_border(r, side));
                         break;
                     }
                     curr++;
@@ -1999,9 +1975,7 @@ static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, Ta
                     int side = (col == 0) ? 3 : 1; // left or right
                     CollapsedBorder cb = get_rowgroup_border(rg, side);
                     if (cb.style != CSS_VALUE_NONE) {
-                        CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
-                        *border = cb;
-                        arraylist_append(candidates, border);
+                        append_collapsed_border_candidate(candidates, cb);
                     }
                 }
             }
@@ -2013,9 +1987,7 @@ static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, Ta
                 if (col_elem) {
                     CollapsedBorder cb = get_column_border(col_elem, 1); // right border
                     if (cb.style != CSS_VALUE_NONE) {
-                        CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
-                        *border = cb;
-                        arraylist_append(candidates, border);
+                        append_collapsed_border_candidate(candidates, cb);
                     }
                 }
             }
@@ -2025,9 +1997,7 @@ static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, Ta
                 if (col_elem) {
                     CollapsedBorder cb = get_column_border(col_elem, 3); // left border
                     if (cb.style != CSS_VALUE_NONE) {
-                        CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
-                        *border = cb;
-                        arraylist_append(candidates, border);
+                        append_collapsed_border_candidate(candidates, cb);
                     }
                 }
             }
@@ -2040,44 +2010,36 @@ static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, Ta
                 if (cg_left && cg_left != cg_right) {
                     CollapsedBorder cb = get_column_border(cg_left, 1); // right
                     if (cb.style != CSS_VALUE_NONE) {
-                        CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
-                        *border = cb;
-                        arraylist_append(candidates, border);
+                        append_collapsed_border_candidate(candidates, cb);
                     }
                 }
                 // Add left border of right colgroup if column is at the left edge of that group
                 if (cg_right && cg_right != cg_left) {
                     CollapsedBorder cb = get_column_border(cg_right, 3); // left
                     if (cb.style != CSS_VALUE_NONE) {
-                        CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
-                        *border = cb;
-                        arraylist_append(candidates, border);
+                        append_collapsed_border_candidate(candidates, cb);
                     }
                 }
                 // At table edges, add the colgroup border at that edge
                 if (col == 0 && cg_right) {
                     CollapsedBorder cb = get_column_border(cg_right, 3); // left edge
                     if (cb.style != CSS_VALUE_NONE) {
-                        CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
-                        *border = cb;
-                        arraylist_append(candidates, border);
+                        append_collapsed_border_candidate(candidates, cb);
                     }
                 }
                 if (col == meta->column_count && cg_left) {
                     CollapsedBorder cb = get_column_border(cg_left, 1); // right edge
                     if (cb.style != CSS_VALUE_NONE) {
-                        CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
-                        *border = cb;
-                        arraylist_append(candidates, border);
+                        append_collapsed_border_candidate(candidates, cb);
                     }
                 }
             }
 
             // Select winner from all candidates
-            if (candidates->length > 0) {
-                CollapsedBorder* winner = (CollapsedBorder*)candidates->data[0];
-                for (int i = 1; i < candidates->length; i++) {
-                    CollapsedBorder* candidate = (CollapsedBorder*)candidates->data[i];
+            if (candidates.size() > 0) {
+                lam::BorrowedPtr<CollapsedBorder, lam::LayoutSessionDomain> winner = candidates[0];
+                for (size_t i = 1; i < candidates.size(); i++) {
+                    lam::BorrowedPtr<CollapsedBorder, lam::LayoutSessionDomain> candidate = candidates[i];
                     CollapsedBorder result = select_winning_border(*winner, *candidate);
                     *winner = result;
                 }
@@ -2098,11 +2060,6 @@ static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, Ta
                 }
             }
 
-            // Cleanup
-            for (int i = 0; i < candidates->length; i++) {
-                mem_free(candidates->data[i]);
-            }
-            arraylist_free(candidates);
         }
     }
 

@@ -18,8 +18,8 @@
 static void detect_back_edges_dfs(LayoutNode* node, LayoutGraph* graph, 
                                   int* dfs_state, int* node_indices) {
     int node_idx = -1;
-    for (int i = 0; i < graph->nodes->length; i++) {
-        if ((LayoutNode*)graph->nodes->data[i] == node) {
+    for (size_t i = 0; i < graph->nodes->get().size(); i++) {
+        if (graph->nodes->get()[i].get() == node) {
             node_idx = i;
             break;
         }
@@ -32,13 +32,13 @@ static void detect_back_edges_dfs(LayoutNode* node, LayoutGraph* graph,
     dfs_state[node_idx] = DFS_GRAY;
     
     // visit all successors
-    for (int i = 0; i < node->out_edges->length; i++) {
-        LayoutEdge* edge = (LayoutEdge*)node->out_edges->data[i];
+    for (size_t i = 0; i < node->out_edges->size(); i++) {
+        LayoutEdge* edge = (*node->out_edges)[i];
         LayoutNode* to_node = edge->to_node;
         
         int to_idx = -1;
-        for (int j = 0; j < graph->nodes->length; j++) {
-            if ((LayoutNode*)graph->nodes->data[j] == to_node) {
+        for (size_t j = 0; j < graph->nodes->get().size(); j++) {
+            if (graph->nodes->get()[j].get() == to_node) {
                 to_idx = j;
                 break;
             }
@@ -60,20 +60,20 @@ static void detect_back_edges_dfs(LayoutNode* node, LayoutGraph* graph,
 }
 
 static void detect_and_mark_back_edges(LayoutGraph* graph) {
-    int n = graph->nodes->length;
+    size_t n = graph->nodes->get().size();
     int* dfs_state = (int*)mem_calloc(n, sizeof(int), MEM_CAT_LAYOUT);
     int* node_indices = (int*)mem_calloc(n, sizeof(int), MEM_CAT_LAYOUT);
     
     // initialize all edges as non-back edges
-    for (int i = 0; i < graph->edges->length; i++) {
-        LayoutEdge* edge = (LayoutEdge*)graph->edges->data[i];
+    for (size_t i = 0; i < graph->edges->get().size(); i++) {
+        LayoutEdge* edge = graph->edges->get()[i].get();
         edge->is_back_edge = false;
     }
     
     // run DFS from each unvisited node
-    for (int i = 0; i < n; i++) {
+    for (size_t i = 0; i < n; i++) {
         if (dfs_state[i] == DFS_WHITE) {
-            LayoutNode* node = (LayoutNode*)graph->nodes->data[i];
+            LayoutNode* node = graph->nodes->get()[i].get();
             detect_back_edges_dfs(node, graph, dfs_state, node_indices);
         }
     }
@@ -90,8 +90,8 @@ static void detect_and_mark_back_edges(LayoutGraph* graph) {
 static void compute_rank_dfs(LayoutNode* node, LayoutGraph* graph, int* visited_flags) {
     // find node index
     int node_idx = -1;
-    for (int i = 0; i < graph->nodes->length; i++) {
-        if ((LayoutNode*)graph->nodes->data[i] == node) {
+    for (size_t i = 0; i < graph->nodes->get().size(); i++) {
+        if (graph->nodes->get()[i].get() == node) {
             node_idx = i;
             break;
         }
@@ -105,8 +105,8 @@ static void compute_rank_dfs(LayoutNode* node, LayoutGraph* graph, int* visited_
     int max_predecessor_rank = -1;
     
     // visit all predecessors first (ignoring back edges)
-    for (int i = 0; i < node->in_edges->length; i++) {
-        LayoutEdge* edge = (LayoutEdge*)node->in_edges->data[i];
+    for (size_t i = 0; i < node->in_edges->size(); i++) {
+        LayoutEdge* edge = (*node->in_edges)[i];
         
         // skip back edges - they point "backwards" in the graph
         if (edge->is_back_edge) {
@@ -131,22 +131,23 @@ void dagre_assign_ranks(LayoutGraph* graph) {
     // first, detect and mark back edges
     detect_and_mark_back_edges(graph);
     
-    int* visited_flags = (int*)mem_calloc(graph->nodes->length, sizeof(int), MEM_CAT_LAYOUT);
+    size_t node_count = graph->nodes->get().size();
+    int* visited_flags = (int*)mem_calloc(node_count, sizeof(int), MEM_CAT_LAYOUT);
     
     // initialize all ranks to 0
-    for (int i = 0; i < graph->nodes->length; i++) {
-        LayoutNode* node = (LayoutNode*)graph->nodes->data[i];
+    for (size_t i = 0; i < node_count; i++) {
+        LayoutNode* node = graph->nodes->get()[i].get();
         node->rank = 0;
     }
     
     // find root nodes (no non-back incoming edges) and start DFS
-    for (int i = 0; i < graph->nodes->length; i++) {
-        LayoutNode* node = (LayoutNode*)graph->nodes->data[i];
+    for (size_t i = 0; i < node_count; i++) {
+        LayoutNode* node = graph->nodes->get()[i].get();
         
         // count non-back incoming edges
         int non_back_in_edges = 0;
-        for (int j = 0; j < node->in_edges->length; j++) {
-            LayoutEdge* edge = (LayoutEdge*)node->in_edges->data[j];
+        for (size_t j = 0; j < node->in_edges->size(); j++) {
+            LayoutEdge* edge = (*node->in_edges)[j];
             if (!edge->is_back_edge) {
                 non_back_in_edges++;
             }
@@ -158,8 +159,8 @@ void dagre_assign_ranks(LayoutGraph* graph) {
     }
     
     // handle nodes not reachable from roots (disconnected components)
-    for (int i = 0; i < graph->nodes->length; i++) {
-        LayoutNode* node = (LayoutNode*)graph->nodes->data[i];
+    for (size_t i = 0; i < node_count; i++) {
+        LayoutNode* node = graph->nodes->get()[i].get();
         if (!visited_flags[i]) {
             compute_rank_dfs(node, graph, visited_flags);
         }
@@ -179,8 +180,8 @@ void dagre_create_layers(LayoutGraph* graph) {
     
     // find max rank
     int max_rank = 0;
-    for (int i = 0; i < graph->nodes->length; i++) {
-        LayoutNode* node = (LayoutNode*)graph->nodes->data[i];
+    for (size_t i = 0; i < graph->nodes->get().size(); i++) {
+        LayoutNode* node = graph->nodes->get()[i].get();
         if (node->rank > max_rank) {
             max_rank = node->rank;
         }
@@ -188,18 +189,22 @@ void dagre_create_layers(LayoutGraph* graph) {
     
     // create layers
     for (int r = 0; r <= max_rank; r++) {
-        LayoutLayer* layer = (LayoutLayer*)mem_calloc(1, sizeof(LayoutLayer), MEM_CAT_LAYOUT);
+        lam::SessionPtr<LayoutLayer> layer = lam::session_make<LayoutLayer>(MEM_CAT_LAYOUT);
+        if (!layer) {
+            log_error("dagre_layer_alloc_failed: rank=%d", r);
+            continue;
+        }
         layer->rank = r;
-        layer->nodes = arraylist_new(8);
-        arraylist_append(graph->layers, layer);
+        layer->nodes = graph_list_new<LayoutNodeRefList>(8);
+        graph->layers->get().append(static_cast<lam::SessionPtr<LayoutLayer>&&>(layer));
     }
     
     // assign nodes to layers
-    for (int i = 0; i < graph->nodes->length; i++) {
-        LayoutNode* node = (LayoutNode*)graph->nodes->data[i];
-        LayoutLayer* layer = (LayoutLayer*)graph->layers->data[node->rank];
-        arraylist_append(layer->nodes, node);
-        node->order = layer->nodes->length - 1;
+    for (size_t i = 0; i < graph->nodes->get().size(); i++) {
+        LayoutNode* node = graph->nodes->get()[i].get();
+        LayoutLayer* layer = graph->layers->get()[node->rank].get();
+        layer->nodes->append(node);
+        node->order = layer->nodes->size() - 1;
     }
     
     log_debug("dagre: created %d layers", max_rank + 1);
@@ -211,39 +216,39 @@ void dagre_create_layers(LayoutGraph* graph) {
 
 // compute barycenter (average position of neighbors)
 static float compute_barycenter(LayoutNode* node, bool use_predecessors) {
-    ArrayList* edges = use_predecessors ? node->in_edges : node->out_edges;
+    LayoutEdgeRefList* edges = use_predecessors ? node->in_edges : node->out_edges;
     
-    if (edges->length == 0) {
+    if (edges->size() == 0) {
         return (float)node->order;
     }
     
     float sum = 0.0f;
-    for (int i = 0; i < edges->length; i++) {
-        LayoutEdge* edge = (LayoutEdge*)edges->data[i];
+    for (size_t i = 0; i < edges->size(); i++) {
+        LayoutEdge* edge = (*edges)[i];
         LayoutNode* neighbor = use_predecessors ? edge->from_node : edge->to_node;
         sum += (float)neighbor->order;
     }
     
-    return sum / (float)edges->length;
+    return sum / (float)edges->size();
 }
 
 // count crossings between two adjacent layers
 static int count_crossings_between_layers(LayoutLayer* layer1, LayoutLayer* layer2) {
     int crossings = 0;
     
-    for (int i = 0; i < layer1->nodes->length; i++) {
-        LayoutNode* node_i = (LayoutNode*)layer1->nodes->data[i];
+    for (size_t i = 0; i < layer1->nodes->size(); i++) {
+        LayoutNode* node_i = (*layer1->nodes)[i];
         
-        for (int j = i + 1; j < layer1->nodes->length; j++) {
-            LayoutNode* node_j = (LayoutNode*)layer1->nodes->data[j];
+        for (size_t j = i + 1; j < layer1->nodes->size(); j++) {
+            LayoutNode* node_j = (*layer1->nodes)[j];
             
             // check all edge pairs between these nodes and layer2
-            for (int ei = 0; ei < node_i->out_edges->length; ei++) {
-                LayoutEdge* edge_i = (LayoutEdge*)node_i->out_edges->data[ei];
+            for (size_t ei = 0; ei < node_i->out_edges->size(); ei++) {
+                LayoutEdge* edge_i = (*node_i->out_edges)[ei];
                 if (edge_i->to_node->rank != layer2->rank) continue;
                 
-                for (int ej = 0; ej < node_j->out_edges->length; ej++) {
-                    LayoutEdge* edge_j = (LayoutEdge*)node_j->out_edges->data[ej];
+                for (size_t ej = 0; ej < node_j->out_edges->size(); ej++) {
+                    LayoutEdge* edge_j = (*node_j->out_edges)[ej];
                     if (edge_j->to_node->rank != layer2->rank) continue;
                     
                     // check if edges cross
@@ -276,14 +281,14 @@ static int compare_by_barycenter(const void* a, const void* b) {
 void dagre_reduce_crossings(LayoutGraph* graph, int max_iterations) {
     log_debug("dagre: reducing crossings (barycenter heuristic)");
     
-    if (graph->layers->length < 2) {
+    if (graph->layers->get().size() < 2) {
         return; // no crossings possible
     }
     
     int initial_crossings = 0;
-    for (int i = 0; i < graph->layers->length - 1; i++) {
-        LayoutLayer* layer1 = (LayoutLayer*)graph->layers->data[i];
-        LayoutLayer* layer2 = (LayoutLayer*)graph->layers->data[i + 1];
+    for (size_t i = 0; i + 1 < graph->layers->get().size(); i++) {
+        LayoutLayer* layer1 = graph->layers->get()[i].get();
+        LayoutLayer* layer2 = graph->layers->get()[i + 1].get();
         initial_crossings += count_crossings_between_layers(layer1, layer2);
     }
     
@@ -296,18 +301,18 @@ void dagre_reduce_crossings(LayoutGraph* graph, int max_iterations) {
         bool improved = false;
         
         // sweep down: order each layer by barycenter of predecessors
-        for (int i = 1; i < graph->layers->length; i++) {
-            LayoutLayer* layer = (LayoutLayer*)graph->layers->data[i];
+        for (size_t i = 1; i < graph->layers->get().size(); i++) {
+            LayoutLayer* layer = graph->layers->get()[i].get();
             
-            int node_count = layer->nodes->length;
+            size_t node_count = layer->nodes->size();
             if (node_count == 0) continue;
             
             // compute barycenters
             NodeWithBarycenter* nodes_with_bc = (NodeWithBarycenter*)mem_alloc(
                 node_count * sizeof(NodeWithBarycenter), MEM_CAT_LAYOUT);
             
-            for (int j = 0; j < node_count; j++) {
-                LayoutNode* node = (LayoutNode*)layer->nodes->data[j];
+            for (size_t j = 0; j < node_count; j++) {
+                LayoutNode* node = (*layer->nodes)[j];
                 nodes_with_bc[j].node = node;
                 nodes_with_bc[j].barycenter = compute_barycenter(node, true);
             }
@@ -317,11 +322,11 @@ void dagre_reduce_crossings(LayoutGraph* graph, int max_iterations) {
                   compare_by_barycenter);
             
             // update layer and node orders
-            arraylist_clear(layer->nodes);
-            for (int j = 0; j < node_count; j++) {
+            layer->nodes->clear();
+            for (size_t j = 0; j < node_count; j++) {
                 LayoutNode* node = nodes_with_bc[j].node;
                 node->order = j;
-                arraylist_append(layer->nodes, node);
+                layer->nodes->append(node);
             }
             
             mem_free(nodes_with_bc);
@@ -329,9 +334,9 @@ void dagre_reduce_crossings(LayoutGraph* graph, int max_iterations) {
         
         // count crossings after down sweep
         int crossings = 0;
-        for (int i = 0; i < graph->layers->length - 1; i++) {
-            LayoutLayer* layer1 = (LayoutLayer*)graph->layers->data[i];
-            LayoutLayer* layer2 = (LayoutLayer*)graph->layers->data[i + 1];
+        for (size_t i = 0; i + 1 < graph->layers->get().size(); i++) {
+            LayoutLayer* layer1 = graph->layers->get()[i].get();
+            LayoutLayer* layer2 = graph->layers->get()[i + 1].get();
             crossings += count_crossings_between_layers(layer1, layer2);
         }
         
@@ -341,17 +346,17 @@ void dagre_reduce_crossings(LayoutGraph* graph, int max_iterations) {
         }
         
         // sweep up: order each layer by barycenter of successors
-        for (int i = (int)graph->layers->length - 2; i >= 0; i--) {
-            LayoutLayer* layer = (LayoutLayer*)graph->layers->data[i];
+        for (size_t i = graph->layers->get().size() - 1; i > 0; i--) {
+            LayoutLayer* layer = graph->layers->get()[i - 1].get();
             
-            int node_count = layer->nodes->length;
+            size_t node_count = layer->nodes->size();
             if (node_count == 0) continue;
             
             NodeWithBarycenter* nodes_with_bc = (NodeWithBarycenter*)mem_alloc(
                 node_count * sizeof(NodeWithBarycenter), MEM_CAT_LAYOUT);
             
-            for (int j = 0; j < node_count; j++) {
-                LayoutNode* node = (LayoutNode*)layer->nodes->data[j];
+            for (size_t j = 0; j < node_count; j++) {
+                LayoutNode* node = (*layer->nodes)[j];
                 nodes_with_bc[j].node = node;
                 nodes_with_bc[j].barycenter = compute_barycenter(node, false);
             }
@@ -359,11 +364,11 @@ void dagre_reduce_crossings(LayoutGraph* graph, int max_iterations) {
             qsort(nodes_with_bc, node_count, sizeof(NodeWithBarycenter),
                   compare_by_barycenter);
             
-            arraylist_clear(layer->nodes);
-            for (int j = 0; j < node_count; j++) {
+            layer->nodes->clear();
+            for (size_t j = 0; j < node_count; j++) {
                 LayoutNode* node = nodes_with_bc[j].node;
                 node->order = j;
-                arraylist_append(layer->nodes, node);
+                layer->nodes->append(node);
             }
             
             mem_free(nodes_with_bc);
@@ -371,9 +376,9 @@ void dagre_reduce_crossings(LayoutGraph* graph, int max_iterations) {
         
         // count crossings after up sweep
         crossings = 0;
-        for (int i = 0; i < graph->layers->length - 1; i++) {
-            LayoutLayer* layer1 = (LayoutLayer*)graph->layers->data[i];
-            LayoutLayer* layer2 = (LayoutLayer*)graph->layers->data[i + 1];
+        for (size_t i = 0; i + 1 < graph->layers->get().size(); i++) {
+            LayoutLayer* layer1 = graph->layers->get()[i].get();
+            LayoutLayer* layer2 = graph->layers->get()[i + 1].get();
             crossings += count_crossings_between_layers(layer1, layer2);
         }
         
@@ -405,14 +410,14 @@ void dagre_assign_coordinates(LayoutGraph* graph, GraphLayoutOptions* opts) {
     float node_sep = opts->node_sep;
     
     // assign y coordinates based on rank
-    for (int i = 0; i < graph->layers->length; i++) {
-        LayoutLayer* layer = (LayoutLayer*)graph->layers->data[i];
+    for (size_t i = 0; i < graph->layers->get().size(); i++) {
+        LayoutLayer* layer = graph->layers->get()[i].get();
         float y = layer->rank * rank_sep;
         
         // compute total width needed for this layer
         float total_width = 0.0f;
-        for (int j = 0; j < layer->nodes->length; j++) {
-            LayoutNode* node = (LayoutNode*)layer->nodes->data[j];
+        for (size_t j = 0; j < layer->nodes->size(); j++) {
+            LayoutNode* node = (*layer->nodes)[j];
             total_width += node->width;
             if (j > 0) total_width += node_sep;
         }
@@ -421,8 +426,8 @@ void dagre_assign_coordinates(LayoutGraph* graph, GraphLayoutOptions* opts) {
         float x = -total_width / 2.0f;
         
         // assign x coordinates
-        for (int j = 0; j < layer->nodes->length; j++) {
-            LayoutNode* node = (LayoutNode*)layer->nodes->data[j];
+        for (size_t j = 0; j < layer->nodes->size(); j++) {
+            LayoutNode* node = (*layer->nodes)[j];
             
             node->x = x + node->width / 2.0f;
             node->y = y;
@@ -437,8 +442,8 @@ void dagre_assign_coordinates(LayoutGraph* graph, GraphLayoutOptions* opts) {
     graph->max_x = -FLT_MAX;
     graph->max_y = -FLT_MAX;
     
-    for (int i = 0; i < graph->nodes->length; i++) {
-        LayoutNode* node = (LayoutNode*)graph->nodes->data[i];
+    for (size_t i = 0; i < graph->nodes->get().size(); i++) {
+        LayoutNode* node = graph->nodes->get()[i].get();
         
         float left = node->x - node->width / 2.0f;
         float right = node->x + node->width / 2.0f;
@@ -455,8 +460,8 @@ void dagre_assign_coordinates(LayoutGraph* graph, GraphLayoutOptions* opts) {
     float offset_x = -graph->min_x;
     float offset_y = -graph->min_y;
     
-    for (int i = 0; i < graph->nodes->length; i++) {
-        LayoutNode* node = (LayoutNode*)graph->nodes->data[i];
+    for (size_t i = 0; i < graph->nodes->get().size(); i++) {
+        LayoutNode* node = graph->nodes->get()[i].get();
         node->x += offset_x;
         node->y += offset_y;
     }
@@ -500,8 +505,8 @@ static void clip_to_node_boundary(float cx, float cy, float tx, float ty,
 void dagre_route_edges(LayoutGraph* graph, bool use_splines) {
     log_debug("dagre: routing edges (straight lines with boundary clipping)");
     
-    for (int i = 0; i < graph->edges->length; i++) {
-        LayoutEdge* edge = (LayoutEdge*)graph->edges->data[i];
+    for (size_t i = 0; i < graph->edges->get().size(); i++) {
+        LayoutEdge* edge = graph->edges->get()[i].get();
         
         LayoutNode* from = edge->from_node;
         LayoutNode* to = edge->to_node;
@@ -518,16 +523,16 @@ void dagre_route_edges(LayoutGraph* graph, bool use_splines) {
                               to->width / 2.0f, to->height / 2.0f,
                               &end_x, &end_y);
         
-        Point2D* start = (Point2D*)mem_calloc(1, sizeof(Point2D), MEM_CAT_LAYOUT);
-        start->x = start_x;
-        start->y = start_y;
-        
-        Point2D* end = (Point2D*)mem_calloc(1, sizeof(Point2D), MEM_CAT_LAYOUT);
-        end->x = end_x;
-        end->y = end_y;
-        
-        arraylist_append(edge->path_points, start);
-        arraylist_append(edge->path_points, end);
+        Point2D start;
+        start.x = start_x;
+        start.y = start_y;
+
+        Point2D end;
+        end.x = end_x;
+        end.y = end_y;
+
+        point2d_list_append(edge->path_points, start);
+        point2d_list_append(edge->path_points, end);
     }
     
     log_debug("dagre: edge routing complete");

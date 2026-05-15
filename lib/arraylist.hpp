@@ -318,6 +318,9 @@ class ArrayOwnedList {
                   "ArrayOwnedList<T, Domain> cannot own BorrowedPtr; use pointee type T");
 
 public:
+    typedef T value_type;
+    typedef Domain domain;
+
     explicit ArrayOwnedList(MemCategory category = MEM_CAT_CONTAINER, size_t initial_capacity = 16)
         : data_(nullptr), count_(0), capacity_(0), category_(category) {
         if (initial_capacity > 0) {
@@ -525,6 +528,30 @@ private:
         capacity_ = new_capacity;
         return true;
     }
+};
+
+template<typename List, typename StorageDomain>
+class PersistentList {
+    static_assert(DomainOutlives<typename List::domain, StorageDomain>::value,
+                  "PersistentList: list pointee domain does not outlive storage domain");
+
+public:
+    typedef List list_type;
+    typedef StorageDomain storage_domain;
+
+    template<typename... Args>
+    explicit PersistentList(Args&&... args)
+        : list_(static_cast<Args&&>(args)...) {
+    }
+
+    List& get() { return list_; }
+    const List& get() const { return list_; }
+
+    List* operator->() { return &list_; }
+    const List* operator->() const { return &list_; }
+
+private:
+    List list_;
 };
 
 } // namespace lam

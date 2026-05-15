@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 #include "../lib/hashmap.h"
-#include "../lib/arraylist.h"
+#include "../lib/arraylist.hpp"
 
 /**
  * CSS Counter System for CSS 2.1 Section 12.4
@@ -34,7 +34,7 @@ typedef struct CounterScope {
 typedef struct CounterContext {
     Arena* arena;         // Memory arena for allocations
     CounterScope* current_scope;  // Current counter scope
-    ArrayList* scope_stack;       // Stack of scopes for tree traversal
+    lam::ArrayList<CounterScope*>* scope_stack; // Stack of arena-owned scopes
 } CounterContext;
 
 // ============================================================================
