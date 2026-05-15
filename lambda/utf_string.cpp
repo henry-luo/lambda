@@ -164,8 +164,8 @@ bool string_equal_unicode(const char* str1, int len1, const char* str2, int len2
 // Lambda Script comparison functions
 Bool equal_comp_unicode(Item a_item, Item b_item) {
     log_debug("equal_comp_unicode");
-    String* a_str = a_item.get_string();
-    String* b_str = b_item.get_string();
+    String* a_str = a_item.get_safe_string();
+    String* b_str = b_item.get_safe_string();
 
     if (!a_str || !b_str) { return BOOL_ERROR; }
 
@@ -183,8 +183,8 @@ Bool equal_comp_unicode(Item a_item, Item b_item) {
 }
 
 Bool less_comp_unicode(Item a_item, Item b_item) {
-    String* a_str = a_item.get_string();
-    String* b_str = b_item.get_string();
+    String* a_str = a_item.get_safe_string();
+    String* b_str = b_item.get_safe_string();
 
     if (!a_str || !b_str) { return BOOL_ERROR; }
 
@@ -200,8 +200,8 @@ Bool less_comp_unicode(Item a_item, Item b_item) {
 }
 
 Bool greater_comp_unicode(Item a_item, Item b_item) {
-    String* a_str = a_item.get_string();
-    String* b_str = b_item.get_string();
+    String* a_str = a_item.get_safe_string();
+    String* b_str = b_item.get_safe_string();
 
     if (!a_str || !b_str) { return BOOL_ERROR; }
 
@@ -217,8 +217,8 @@ Bool greater_comp_unicode(Item a_item, Item b_item) {
 }
 
 Bool less_equal_comp_unicode(Item a_item, Item b_item) {
-    String* a_str = a_item.get_string();
-    String* b_str = b_item.get_string();
+    String* a_str = a_item.get_safe_string();
+    String* b_str = b_item.get_safe_string();
 
     if (!a_str || !b_str) { return BOOL_ERROR; }
 
@@ -234,8 +234,8 @@ Bool less_equal_comp_unicode(Item a_item, Item b_item) {
 }
 
 Bool greater_equal_comp_unicode(Item a_item, Item b_item) {
-    String* a_str = a_item.get_string();
-    String* b_str = b_item.get_string();
+    String* a_str = a_item.get_safe_string();
+    String* b_str = b_item.get_safe_string();
     if (!a_str || !b_str) { return BOOL_ERROR; }
 
     // Use byte comparison for identical strings

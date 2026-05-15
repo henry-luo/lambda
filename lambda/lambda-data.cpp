@@ -336,7 +336,7 @@ bool it2b(Item itm) {
         return !isnan(d) && d != 0.0;
     }
     else if (itm._type_id == LMD_TYPE_STRING) {
-        String* str = itm.get_string();
+        String* str = itm.get_safe_string();
         return str && str->len > 0;
     }
     // Objects are truthy
@@ -386,7 +386,7 @@ int64_t it2l(Item itm) {
 
 String* it2s(Item itm) {
     if (itm._type_id == LMD_TYPE_STRING) {
-        return itm.get_string();
+        return itm.get_safe_string();
     }
     if (itm._type_id == LMD_TYPE_ERROR) {
         static struct { uint32_t len; uint8_t is_ascii; char chars[8]; } str_err_buf = {7, 1, "<error>"};
@@ -532,11 +532,11 @@ void array_set(Array* arr, int64_t index, Item itm) {
         break;
     }
     case LMD_TYPE_STRING:  case LMD_TYPE_BINARY: {
-        String *str = itm.get_string();
+        String *str = type_id == LMD_TYPE_STRING ? itm.get_safe_string() : itm.get_safe_binary();
         break;
     }
     case LMD_TYPE_SYMBOL: {
-        Symbol *sym = itm.get_symbol();
+        Symbol *sym = itm.get_safe_symbol();
         break;
     }
     default:
@@ -614,31 +614,33 @@ void list_push(List *list, Item item) {
         if (should_merge) {
             Item prev_item = list->items[list->length - 1];
             if (get_type_id(prev_item) == LMD_TYPE_STRING) {
-                String *prev_str = prev_item.get_string();
-                String *new_str = item.get_string();
+                String *prev_str = prev_item.get_safe_string();
+                String *new_str = item.get_safe_string();
+                if (prev_str && new_str) {
 #ifndef LAMBDA_STATIC
-                if (is_ui) {
-                    // ui_mode: merge into a new fat DomText on the arena
-                    list->items[list->length - 1] = ui_merge_strings_to_arena(
-                        input_context->arena, prev_str, new_str);
+                    if (is_ui) {
+                        // ui_mode: merge into a new fat DomText on the arena
+                        list->items[list->length - 1] = ui_merge_strings_to_arena(
+                            input_context->arena, prev_str, new_str);
+                        return;
+                    }
+#endif
+                    // merge the two strings
+                    size_t new_len = prev_str->len + new_str->len;
+                    String *merged_str;
+                    if (input_context->consts) { // dynamic runtime context
+                        merged_str = (String *)input_context->context_alloc(sizeof(String) + new_len + 1, LMD_TYPE_STRING);
+                    } else {  // static (input) context
+                        merged_str = (String*)pool_calloc(input_context->pool, sizeof(String) + new_len + 1);
+                    }
+                    memcpy(merged_str->chars, prev_str->chars, prev_str->len);
+                    memcpy(merged_str->chars + prev_str->len, new_str->chars, new_str->len);
+                    merged_str->chars[new_len] = '\0';  merged_str->len = new_len;
+                    // replace previous string with new merged string, in the list directly,
+                    // assuming the list is still being constructed/mutable
+                    list->items[list->length - 1] = (Item){.item = s2it(merged_str)};
                     return;
                 }
-#endif
-                // merge the two strings
-                size_t new_len = prev_str->len + new_str->len;
-                String *merged_str;
-                if (input_context->consts) { // dynamic runtime context
-                    merged_str = (String *)input_context->context_alloc(sizeof(String) + new_len + 1, LMD_TYPE_STRING);
-                } else {  // static (input) context
-                    merged_str = (String*)pool_calloc(input_context->pool, sizeof(String) + new_len + 1);
-                }
-                memcpy(merged_str->chars, prev_str->chars, prev_str->len);
-                memcpy(merged_str->chars + prev_str->len, new_str->chars, new_str->len);
-                merged_str->chars[new_len] = '\0';  merged_str->len = new_len;
-                // replace previous string with new merged string, in the list directly,
-                // assuming the list is still being constructed/mutable
-                list->items[list->length - 1] = (Item){.item = s2it(merged_str)};
-                return;
             }
         }
     }
@@ -660,11 +662,11 @@ void list_push(List *list, Item item) {
     list->items[list->length++] = item;
     switch (item._type_id) {
     case LMD_TYPE_STRING:  case LMD_TYPE_BINARY: {
-        String *str = (String*)item.get_string();
+        String *str = item._type_id == LMD_TYPE_STRING ? item.get_safe_string() : item.get_safe_binary();
         break;
     }
     case LMD_TYPE_SYMBOL: {
-        Symbol *sym = item.get_symbol();
+        Symbol *sym = item.get_safe_symbol();
         break;
     }
     case LMD_TYPE_DECIMAL: {
@@ -837,12 +839,12 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 break;
             }
             case LMD_TYPE_STRING:  case LMD_TYPE_BINARY: {
-                String *str = item.get_string();
+                String *str = item._type_id == LMD_TYPE_STRING ? item.get_safe_string() : item.get_safe_binary();
                 *(String**)field_ptr = str;
                 break;
             }
             case LMD_TYPE_SYMBOL: {
-                Symbol *sym = item.get_symbol();
+                Symbol *sym = item.get_safe_symbol();
                 *(Symbol**)field_ptr = sym;
                 break;
             }
@@ -897,16 +899,15 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                     titem.double_val = item.get_double();  break;
                 case LMD_TYPE_DTIME:
                     titem.datetime_val = item.get_datetime();  break;
-                case LMD_TYPE_STRING:  case LMD_TYPE_BINARY: {
-                    String *str = item.get_string();
-                    titem.string = str;
+                case LMD_TYPE_STRING:
+                    titem.string = item.get_safe_string();
                     break;
-                }
-                case LMD_TYPE_SYMBOL: {
-                    Symbol *sym = item.get_symbol();
-                    titem.symbol = sym;
+                case LMD_TYPE_BINARY:
+                    titem.string = item.get_safe_binary();
                     break;
-                }
+                case LMD_TYPE_SYMBOL:
+                    titem.symbol = item.get_safe_symbol();
+                    break;
                 case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
                 case LMD_TYPE_MAP:  case LMD_TYPE_VMAP:
                 case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
@@ -1245,16 +1246,16 @@ bool item_deep_equal(Item a, Item b) {
         case LMD_TYPE_FLOAT:
             return a.get_double() == b.get_double();
         case LMD_TYPE_STRING: {
-            String* sa = a.get_string();
-            String* sb = b.get_string();
+            String* sa = a.get_safe_string();
+            String* sb = b.get_safe_string();
             if (sa == sb) return true;
             if (!sa || !sb) return false;
             if (sa->len != sb->len) return false;
             return memcmp(sa->chars, sb->chars, sa->len) == 0;
         }
         case LMD_TYPE_SYMBOL: {
-            Symbol* sa = a.get_symbol();
-            Symbol* sb = b.get_symbol();
+            Symbol* sa = a.get_safe_symbol();
+            Symbol* sb = b.get_safe_symbol();
             if (sa == sb) return true;
             if (!sa || !sb) return false;
             if (sa->len != sb->len) return false;

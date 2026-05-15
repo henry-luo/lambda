@@ -2129,6 +2129,10 @@ bool dom_text_set_content(DomText* text_node, const char* new_content) {
 
     // Update text_node fields to point to new String (backward compat for callers)
     text_node->native_string = new_string_item.get_string();
+    if (!text_node->native_string) {
+        log_error("dom_text_set_content: replacement string disappeared");
+        return false;
+    }
     text_node->text = text_node->native_string->chars;
     text_node->length = text_node->native_string->len;
 
@@ -2272,9 +2276,13 @@ DomText* dom_element_append_text(DomElement* parent, const char* text_content) {
     }
 
     DomText* text_node;
+    String* string_value = string_item.get_string();
+    if (!string_value) {
+        log_error("dom_element_append_text: failed to read string item");
+        return nullptr;
+    }
     if (parent->doc->input->ui_mode) {
         // Check if DomText is embedded before the String (arena-allocated)
-        String* string_value = string_item.get_string();
         DomText* candidate = dom_text_from_fat_string(parent->doc, string_value);
         if (candidate) {
             text_node = candidate;
@@ -2284,7 +2292,7 @@ DomText* dom_element_append_text(DomElement* parent, const char* text_content) {
         }
     } else {
         // Create separate DomText wrapper with Lambda backing
-        text_node = dom_text_create(string_item.get_string(), parent);
+        text_node = dom_text_create(string_value, parent);
         if (!text_node) {
             log_error("dom_element_append_text: failed to create DomText");
             return nullptr;
@@ -2357,8 +2365,10 @@ DomComment* dom_comment_create(Element* native_element, DomElement* parent_eleme
         Item first_item = native_element->items[0];
         if (get_type_id(first_item) == LMD_TYPE_STRING) {
             String* content_str = first_item.get_string();
-            comment_node->content = content_str->chars;  // Reference, not copy
-            comment_node->length = content_str->len;
+            if (content_str) {
+                comment_node->content = content_str->chars;  // Reference, not copy
+                comment_node->length = content_str->len;
+            }
         }
     }
 
@@ -2418,8 +2428,10 @@ DomComment* dom_comment_create_detached(Element* native_element, DomDocument* do
         Item first_item = native_element->items[0];
         if (get_type_id(first_item) == LMD_TYPE_STRING) {
             String* content_str = first_item.get_string();
-            comment_node->content = content_str->chars;
-            comment_node->length = content_str->len;
+            if (content_str) {
+                comment_node->content = content_str->chars;
+                comment_node->length = content_str->len;
+            }
         }
     }
 
@@ -2531,6 +2543,10 @@ bool dom_comment_set_content(DomComment* comment_node, const char* new_content) 
     // Update DomComment to point to new String
     comment_node->native_element = result.element;
     String* new_string = new_string_item.get_string();
+    if (!new_string) {
+        log_error("dom_comment_set_content: replacement string disappeared");
+        return false;
+    }
     comment_node->content = new_string->chars;
     comment_node->length = new_string->len;
     log_debug("dom_comment_set_content: updated content to '%s'", new_content);

@@ -257,9 +257,8 @@ Item fn_apply2(Item target, Item options) {
         Item mode_item = item_attr(options, "mode");
         TypeId mode_tid = get_type_id(mode_item);
         if (mode_tid == LMD_TYPE_SYMBOL || mode_tid == LMD_TYPE_STRING) {
-            String* mode_str = mode_item.get_string();
-            if (mode_str && mode_str->chars &&
-                strncmp(mode_str->chars, "edit", 4) == 0) {
+            const char* mode_chars = mode_item.get_chars();
+            if (mode_chars && strncmp(mode_chars, "edit", 4) == 0) {
                 edit_mode = true;
             }
         }

@@ -2053,7 +2053,7 @@ Symbol* fn_name(Item item) {
     }
     case LMD_TYPE_SYMBOL: {
         // for symbols, just return the symbol itself (it's already a name)
-        return item.get_symbol();
+        return item.get_safe_symbol();
     }
     default:
         return nullptr;
@@ -2966,7 +2966,9 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
     // is_ascii only exists on String, not Symbol; symbols use UTF-8 path
     bool is_ascii = false;
     if (!is_symbol) {
-        is_ascii = str_item.get_string()->is_ascii;
+        String* str = str_item.get_safe_string();
+        if (!str) return ItemNull;
+        is_ascii = str->is_ascii != 0;
     }
 
     int64_t start = it2l(start_item);
@@ -3107,8 +3109,8 @@ Bool fn_contains(Item str_item, Item substr_item) {
         return BOOL_ERROR;
     }
 
-    String* str = str_item.get_string();
-    String* substr = substr_item.get_string();
+    String* str = str_item.get_safe_string();
+    String* substr = substr_item.get_safe_string();
 
     if (!str || !substr) {
         return BOOL_FALSE;
@@ -3268,7 +3270,16 @@ int64_t fn_index_of(Item str_item, Item sub_item) {
     }
 
     // byte-based search, then convert byte offset to char offset
-    bool is_ascii = str_item.get_string()->is_ascii;
+    bool is_ascii = false;
+    if (coll_type == LMD_TYPE_STRING) {
+        String* str = str_item.get_safe_string();
+        if (!str) {
+            return -1;
+        }
+        is_ascii = str->is_ascii != 0;
+    } else {
+        is_ascii = str_is_ascii(str_chars, str_len);
+    }
     for (size_t i = 0; i <= str_len - sub_len; i++) {
         if (memcmp(str_chars + i, sub_chars, sub_len) == 0) {
             // convert byte offset to character offset
@@ -3337,8 +3348,17 @@ int64_t fn_last_index_of(Item str_item, Item sub_item) {
 
     if (sub_len == 0) {
         // empty substring is at the end
-        String* str = str_item.get_string();
-        int64_t char_len = str->is_ascii ? (int64_t)str->len : (int64_t)str_utf8_count(str_chars, str_len);
+        bool is_ascii = false;
+        if (coll_type == LMD_TYPE_STRING) {
+            String* str = str_item.get_safe_string();
+            if (!str) {
+                return -1;
+            }
+            is_ascii = str->is_ascii != 0;
+        } else {
+            is_ascii = str_is_ascii(str_chars, str_len);
+        }
+        int64_t char_len = is_ascii ? (int64_t)str_len : (int64_t)str_utf8_count(str_chars, str_len);
         return char_len;
     }
 
@@ -3347,7 +3367,16 @@ int64_t fn_last_index_of(Item str_item, Item sub_item) {
     }
 
     // search from end to beginning
-    bool is_ascii = str_item.get_string()->is_ascii;
+    bool is_ascii = false;
+    if (coll_type == LMD_TYPE_STRING) {
+        String* str = str_item.get_safe_string();
+        if (!str) {
+            return -1;
+        }
+        is_ascii = str->is_ascii != 0;
+    } else {
+        is_ascii = str_is_ascii(str_chars, str_len);
+    }
     for (size_t i = str_len - sub_len + 1; i > 0; i--) {
         size_t pos = i - 1;
         if (memcmp(str_chars + pos, sub_chars, sub_len) == 0) {
@@ -3552,7 +3581,8 @@ Item fn_lower(Item str_item) {
 
     String* result = (String *)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_STRING);
     result->len = len;
-    result->is_ascii = str_item.get_string()->is_ascii;  // case conversion preserves ASCII status
+    String* src = str_item.get_safe_string();
+    result->is_ascii = src ? src->is_ascii : 0;  // case conversion preserves ASCII status
     for (uint32_t i = 0; i < len; i++) {
         char c = chars[i];
         result->chars[i] = (c >= 'A' && c <= 'Z') ? (c + 32) : c;
@@ -3608,7 +3638,8 @@ Item fn_upper(Item str_item) {
 
     String* result = (String *)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_STRING);
     result->len = len;
-    result->is_ascii = str_item.get_string()->is_ascii;  // case conversion preserves ASCII status
+    String* src = str_item.get_safe_string();
+    result->is_ascii = src ? src->is_ascii : 0;  // case conversion preserves ASCII status
     for (uint32_t i = 0; i < len; i++) {
         char c = chars[i];
         result->chars[i] = (c >= 'a' && c <= 'z') ? (c - 32) : c;
@@ -4205,9 +4236,9 @@ Item fn_replace(Item str_item, Item old_item, Item new_item) {
     // pure-ASCII content stream.
     {
         bool src_ascii = (str_type == LMD_TYPE_STRING)
-            ? (str_item.get_string()->is_ascii != 0) : true;
+            ? (str_item.get_safe_string() && str_item.get_safe_string()->is_ascii != 0) : true;
         bool repl_ascii = (new_is_null || new_type != LMD_TYPE_STRING)
-            ? true : (new_item.get_string()->is_ascii != 0);
+            ? true : (new_item.get_safe_string() && new_item.get_safe_string()->is_ascii != 0);
         result->is_ascii = (src_ascii && repl_ascii) ? 1 : 0;
     }
 
@@ -4803,9 +4834,16 @@ static void map_field_store(void* field_ptr, Item value, TypeId value_type) {
     case LMD_TYPE_INT64: *(int64_t*)field_ptr = value.get_int64(); break;
     case LMD_TYPE_FLOAT: *(double*)field_ptr = value.get_double(); break;
     case LMD_TYPE_DTIME: *(DateTime*)field_ptr = value.get_datetime(); break;
-    case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL: case LMD_TYPE_BINARY: {
-        String* s = value.get_string();
-        *(String**)field_ptr = s;
+    case LMD_TYPE_STRING: {
+        *(String**)field_ptr = value.get_safe_string();
+        break;
+    }
+    case LMD_TYPE_SYMBOL: {
+        *(Symbol**)field_ptr = value.get_safe_symbol();
+        break;
+    }
+    case LMD_TYPE_BINARY: {
+        *(String**)field_ptr = value.get_safe_binary();
         break;
     }
     case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM: case LMD_TYPE_RANGE:
@@ -5075,10 +5113,10 @@ void fn_map_set(Item map_item, Item key, Item value) {
     const char* key_cstr = NULL;
     TypeId key_type = get_type_id(key);
     if (key_type == LMD_TYPE_STRING) {
-        String* s = key.get_string();
+        String* s = key.get_safe_string();
         key_cstr = s ? s->chars : NULL;
     } else if (key_type == LMD_TYPE_SYMBOL) {
-        Symbol* sym = key.get_symbol();
+        Symbol* sym = key.get_safe_symbol();
         key_cstr = sym ? sym->chars : NULL;
     } else {
         log_error("fn_map_set: key must be string or symbol");

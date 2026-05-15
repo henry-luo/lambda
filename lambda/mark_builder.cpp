@@ -650,7 +650,7 @@ bool MarkBuilder::is_in_arena(Item item) const {
         return is_pointer_in_arena_chain((void*)item.string_ptr);
 
     case LMD_TYPE_SYMBOL: {
-        Symbol* sym = item.get_symbol();
+        Symbol* sym = item.get_safe_symbol();
         if (!sym) return true;
 
         // Check if in NamePool chain by chars (Symbol is no longer String)
@@ -779,18 +779,21 @@ Item MarkBuilder::deep_copy_internal(Item item) {
         return createFloat(item.get_double());
 
     case LMD_TYPE_SYMBOL: {
-        Symbol* sym = item.get_symbol();
+        Symbol* sym = item.get_safe_symbol();
+        if (!sym) return createNull();
         Symbol* copied_sym = createSymbol(sym->chars, sym->len);
         return {.item = y2it(copied_sym)};
     }
 
     case LMD_TYPE_STRING: {
-        String* str = item.get_string();
+        String* str = item.get_safe_string();
+        if (!str) return createNull();
         return createStringItem(str->chars, str->len);
     }
 
     case LMD_TYPE_BINARY: {
-        String* bin = item.get_string();
+        String* bin = item.get_safe_binary();
+        if (!bin) return createNull();
         // Binary data is stored like String but with different type_id
         String* copied = createString(bin->chars, bin->len);
         if (!copied) return createNull();
@@ -904,7 +907,7 @@ Item MarkBuilder::deep_copy_internal(Item item) {
                 String* str = *(String**)dst_ptr;
                 if (str) {
                     Item copied = createStringItem(str->chars, str->len);
-                    *(String**)dst_ptr = copied.get_string();
+                    *(String**)dst_ptr = copied.get_safe_string();
                 }
                 break;
             }
