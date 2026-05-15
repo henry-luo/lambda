@@ -14385,8 +14385,41 @@ extern "C" Item js_generator_throw(Item generator, Item error);
 // Map method dispatcher: handles collection methods, falls back to property access
 extern "C" bool js_dom_item_is_range(Item item);
 extern "C" bool js_dom_item_is_selection(Item item);
+extern "C" Item js_dom_range_get_prototype_value(void);
+extern "C" Item js_dom_selection_get_prototype_value(void);
 
 extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) {
+    // Document proxy methods (getElementById, querySelector, createElement, ...).
+    // Foreign documents use MAP_KIND_FOREIGN_DOC, so they must be handled before
+    // the generic DOM host-object dispatch below.
+    if (js_is_document_proxy(obj)) {
+        void* foreign = js_get_foreign_doc(obj);
+        if (foreign) {
+            void* prev = js_dom_swap_active_document(foreign);
+            Item r = js_document_proxy_method(method_name, args, argc);
+            js_dom_restore_active_document(prev);
+            return r;
+        }
+        return js_document_proxy_method(method_name, args, argc);
+    }
+    // document.implementation singleton methods
+    if (js_is_dom_implementation(obj)) {
+        Item out;
+        if (js_dom_implementation_method(method_name, args, argc, &out)) return out;
+        return ItemNull;
+    }
+
+    if (get_type_id(obj) == LMD_TYPE_MAP && obj.map &&
+        (obj.map->map_kind == MAP_KIND_DOM || obj.map->map_kind == MAP_KIND_FOREIGN_DOC)) {
+        if (js_dom_item_is_range(obj) || js_dom_item_is_selection(obj)) {
+            Item fn = js_property_access(obj, method_name);
+            if (js_check_exception()) return ItemNull;
+            return js_call_function(fn, obj, args, argc);
+        }
+        extern Item js_dom_element_method(Item elem, Item method_name, Item* args, int argc);
+        return js_dom_element_method(obj, method_name, args, argc);
+    }
+
     // OffscreenCanvas / CanvasRenderingContext2D methods (js_canvas.cpp)
     {
         Item canvas_result;
@@ -21630,6 +21663,8 @@ extern "C" void js_link_base_prototype(Item proto_marker, Item base_ctor) {
 // P10d: uses interned key + first-match lookup (no heap allocation per call)
 extern "C" Item js_get_prototype(Item object) {
     if (get_type_id(object) != LMD_TYPE_MAP) return ItemNull;
+    if (js_dom_item_is_selection(object)) return js_dom_selection_get_prototype_value();
+    if (js_dom_item_is_range(object)) return js_dom_range_get_prototype_value();
     Map* m = object.map;
     bool internal_found = false;
     Item internal_proto = js_map_get_fast_ext(m, INTERNAL_PROTO_KEY, INTERNAL_PROTO_KEY_LEN, &internal_found);
