@@ -38,6 +38,8 @@
 #include "../../radiant/dom_range.hpp"
 #include "../input/html5/html5_parser.h"
 
+extern "C" void heap_unregister_gc_root(uint64_t* slot);
+
 #include <cstring>
 #include <cctype>
 #include <cmath>
@@ -159,11 +161,13 @@ static inline void dom_text_replace_data(DomText* text, uint32_t off,
  * document pointer so next file starts fresh.
  */
 static void expando_reset(); // forward declaration
+static void reset_dom_wrapper_cache(); // forward declaration
 // Phase 6E: text-control helpers are shared with Radiant event/render paths.
 #include "../../radiant/text_control.hpp"
 #define tc_is_text_control_elem(e)      tc_is_text_control(e)
 extern "C" void js_dom_batch_reset() {
     DocState* state = js_dom_current_state();
+    reset_dom_wrapper_cache();
     js_document_proxy_item = (Item){.item = ITEM_NULL};
     js_document_default_view = (Item){.item = ITEM_NULL};
     js_document_title_value = (Item){.item = ITEM_NULL};
@@ -480,10 +484,48 @@ static Item doc_to_proxy_item(DomDocument* doc) {
 // DOM Wrapping / Unwrapping
 // ============================================================================
 
+static const int DOM_WRAPPER_CACHE_SIZE = 4096;
+struct DomWrapperCacheEntry {
+    DomNode* node;
+    uint64_t item;
+};
+static __thread DomWrapperCacheEntry s_dom_wrapper_cache[DOM_WRAPPER_CACHE_SIZE] = {};
+static __thread int s_dom_wrapper_cache_count = 0;
+
+static Item lookup_dom_wrapper(DomNode* node) {
+    for (int i = 0; i < s_dom_wrapper_cache_count; i++) {
+        if (s_dom_wrapper_cache[i].node == node) {
+            return (Item){.item = s_dom_wrapper_cache[i].item};
+        }
+    }
+    return ItemNull;
+}
+
+static void cache_dom_wrapper(DomNode* node, Item wrapper) {
+    if (!node || wrapper.item == ITEM_NULL) return;
+    if (s_dom_wrapper_cache_count >= DOM_WRAPPER_CACHE_SIZE) return;
+    s_dom_wrapper_cache[s_dom_wrapper_cache_count].node = node;
+    s_dom_wrapper_cache[s_dom_wrapper_cache_count].item = wrapper.item;
+    heap_register_gc_root(&s_dom_wrapper_cache[s_dom_wrapper_cache_count].item);
+    s_dom_wrapper_cache_count++;
+}
+
+static void reset_dom_wrapper_cache() {
+    for (int i = 0; i < s_dom_wrapper_cache_count; i++) {
+        heap_unregister_gc_root(&s_dom_wrapper_cache[i].item);
+        s_dom_wrapper_cache[i].node = nullptr;
+        s_dom_wrapper_cache[i].item = 0;
+    }
+    s_dom_wrapper_cache_count = 0;
+}
+
 extern "C" Item js_dom_wrap_element(void* dom_elem) {
     if (!dom_elem) return ItemNull;
 
     DomNode* node = (DomNode*)dom_elem;
+    Item cached = lookup_dom_wrapper(node);
+    if (cached.item != ITEM_NULL) return cached;
+
     // If this DomNode is a document stub, return the document proxy / foreign
     // doc wrapper instead so identity comparisons in JS (e.g. `r.startContainer
     // === document`) work.
@@ -509,7 +551,9 @@ extern "C" Item js_dom_wrap_element(void* dom_elem) {
         log_debug("js_dom_wrap_element: wrapped DomText as Map=%p", (void*)wrapper);
     }
 
-    return (Item){.map = wrapper};
+    Item wrapped = (Item){.map = wrapper};
+    cache_dom_wrapper(node, wrapped);
+    return wrapped;
 }
 
 extern "C" void* js_dom_unwrap_element(Item item) {
