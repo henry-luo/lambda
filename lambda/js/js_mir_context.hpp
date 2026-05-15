@@ -298,6 +298,8 @@ struct JsClassEntry {
     JsClassMethodEntry* constructor;     // points into methods[] or NULL
     JsClassEntry* superclass;            // resolved parent class entry or NULL
     bool has_self_extends;               // class x extends x {} — TDZ violation
+    bool is_declaration;                 // true for class declarations, false for class expressions
+    int inner_module_var_index;          // immutable class-name binding inside class scope
     JsStaticFieldEntry static_fields[16]; // static field definitions
     int static_field_count;
     JsInstanceFieldEntry instance_fields[32]; // instance field definitions

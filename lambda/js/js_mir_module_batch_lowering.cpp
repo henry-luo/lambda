@@ -2133,22 +2133,27 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             memset(&mce, 0, sizeof(mce));
             snprintf(mce.name, sizeof(mce.name), "_js_%.*s",
                 (int)ce->name->len, ce->name->chars);
-            // Check if this class name already has a MCONST_MODVAR (iife_var) entry.
-            // If so, reuse the same module_var index so the static getter 'this' lookup
-            // reads from the same slot that the variable assignment writes to.
-            JsModuleConstEntry* existing = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mce);
-            if (existing && existing->const_type == MCONST_MODVAR) {
-                int reused_index = (int)existing->int_val;
-                mce.const_type = MCONST_CLASS;
-                mce.int_val = reused_index;
-                hashmap_set(mt->module_consts, &mce);
-                log_debug("js-mir: module class '%s' reusing module_var[%d] from iife_var", mce.name, reused_index);
-            } else {
-                mce.const_type = MCONST_CLASS;
-                mce.int_val = mt->module_var_count++;
-                hashmap_set(mt->module_consts, &mce);
-                log_debug("js-mir: module class '%s' module_var[%d]", mce.name, (int)mce.int_val);
+            if (ce->is_declaration) {
+                // Check if this class name already has a MCONST_MODVAR (iife_var) entry.
+                // If so, reuse the same module_var index so the static getter 'this' lookup
+                // reads from the same slot that the variable assignment writes to.
+                JsModuleConstEntry* existing = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mce);
+                if (existing && existing->const_type == MCONST_MODVAR) {
+                    int reused_index = (int)existing->int_val;
+                    mce.const_type = MCONST_CLASS;
+                    mce.int_val = reused_index;
+                    hashmap_set(mt->module_consts, &mce);
+                    log_debug("js-mir: module class '%s' reusing module_var[%d] from iife_var", mce.name, reused_index);
+                } else {
+                    mce.const_type = MCONST_CLASS;
+                    mce.int_val = mt->module_var_count++;
+                    hashmap_set(mt->module_consts, &mce);
+                    log_debug("js-mir: module class '%s' module_var[%d]", mce.name, (int)mce.int_val);
+                }
             }
+            ce->inner_module_var_index = mt->module_var_count++;
+            log_debug("js-mir: class inner binding '%s' module_var[%d]",
+                mce.name, ce->inner_module_var_index);
         }
     }
 
@@ -3744,6 +3749,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         MIR_reg_t msg_reg = jm_box_string_literal(mt, msg, (int)strlen(msg));
                         jm_call_void_1(mt, "js_throw_reference_error",
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, msg_reg));
+                        jm_emit_exc_propagate_check(mt);
                     }
                     // Create class object with __class_name__ property
                     MIR_reg_t cls_obj = jm_call_0(mt, "js_new_object", MIR_T_I64);
@@ -3770,6 +3776,11 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     if (mc && mc->const_type == MCONST_CLASS) {
                         jm_call_void_2(mt, "js_set_module_var",
                             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
+                    }
+                    if (ce->inner_module_var_index >= 0) {
+                        jm_call_void_2(mt, "js_set_module_var",
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)ce->inner_module_var_index),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
                     }
                     // Inherit static methods from parent classes (base-first, then own overrides)
@@ -4150,6 +4161,14 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     // Mark all static methods on class object as non-enumerable (ES spec)
                     jm_call_void_1(mt, "js_mark_all_non_enumerable",
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
+
+                    if (ctor_super_val) {
+                        MIR_reg_t super_key = jm_box_string_literal(mt, "__super_class__", 15);
+                        jm_call_3(mt, "js_property_set", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, super_key),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_super_val));
+                    }
 
                     jm_emit_class_instance_field_metadata_for_decl(mt, cls_obj, ce);
 

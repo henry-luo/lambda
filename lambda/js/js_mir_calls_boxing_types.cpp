@@ -1204,7 +1204,6 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
             TypeId op_type = jm_get_effective_type(mt, un->operand);
             bool op_numeric = (op_type == LMD_TYPE_INT || op_type == LMD_TYPE_FLOAT);
             switch (un->op) {
-            case JS_OP_PLUS: case JS_OP_ADD:
             case JS_OP_MINUS: case JS_OP_SUB:
                 native_unary = op_numeric;
                 break;

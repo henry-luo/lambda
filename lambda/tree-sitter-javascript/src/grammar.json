@@ -3712,6 +3712,10 @@
       "members": [
         {
           "type": "SYMBOL",
+          "name": "call_expression"
+        },
+        {
+          "type": "SYMBOL",
           "name": "member_expression"
         },
         {
@@ -3778,6 +3782,10 @@
     "_augmented_assignment_lhs": {
       "type": "CHOICE",
       "members": [
+        {
+          "type": "SYMBOL",
+          "name": "call_expression"
+        },
         {
           "type": "SYMBOL",
           "name": "member_expression"

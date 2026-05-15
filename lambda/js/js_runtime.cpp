@@ -1075,19 +1075,24 @@ static Item js_typed_array_create_with_constructor(Item constructor, int length)
     return result;
 }
 
-extern "C" void js_init_class_instance_fields(Item callee, Item object) {
+static void js_init_class_instance_fields_inner(Item callee, Item object, int depth) {
+    if (depth > 32) return;
     if (get_type_id(callee) != LMD_TYPE_MAP) return;
     TypeId object_type = get_type_id(object);
     if (object_type != LMD_TYPE_MAP && object_type != LMD_TYPE_ARRAY && object_type != LMD_TYPE_FUNC &&
         object_type != LMD_TYPE_ELEMENT && object_type != LMD_TYPE_OBJECT && object_type != LMD_TYPE_VMAP) return;
+
+    bool super_found = false;
+    Item super_class = js_map_get_fast(callee.map, "__super_class__", 15, &super_found);
+    if (super_found && get_type_id(super_class) == LMD_TYPE_MAP) {
+        js_init_class_instance_fields_inner(super_class, object, depth + 1);
+    }
 
     bool field_count_found = false;
     Item field_count_item = js_map_get_fast(callee.map, "__if_count__", 12, &field_count_found);
     if (!field_count_found || get_type_id(field_count_item) != LMD_TYPE_INT) return;
     int64_t field_count = it2i(field_count_item);
     if (field_count > 32) field_count = 32;
-    bool saved_private_init = js_private_field_initializing;
-    js_private_field_initializing = true;
     for (int64_t field_index = 0; field_index < field_count; field_index++) {
         char key_slot[32];
         int key_slot_len = snprintf(key_slot, sizeof(key_slot), "__if_key_%lld", (long long)field_index);
@@ -1113,6 +1118,12 @@ extern "C" void js_init_class_instance_fields(Item callee, Item object) {
             }
         }
     }
+}
+
+extern "C" void js_init_class_instance_fields(Item callee, Item object) {
+    bool saved_private_init = js_private_field_initializing;
+    js_private_field_initializing = true;
+    js_init_class_instance_fields_inner(callee, object, 0);
     js_private_field_initializing = saved_private_init;
 }
 
@@ -2526,10 +2537,33 @@ static Item js_private_find_scoped_key_on_object_chain(Item object, const char* 
     return ItemNull;
 }
 
+static bool js_class_metadata_declares_private_key(Item class_obj, String* private_key) {
+    if (get_type_id(class_obj) != LMD_TYPE_MAP || !private_key) return false;
+    bool count_found = false;
+    Item count_item = js_map_get_fast(class_obj.map, "__if_count__", 12, &count_found);
+    if (!count_found || get_type_id(count_item) != LMD_TYPE_INT) return false;
+    int64_t count = it2i(count_item);
+    if (count > 32) count = 32;
+    for (int64_t i = 0; i < count; i++) {
+        char key_slot[32];
+        int key_slot_len = snprintf(key_slot, sizeof(key_slot), "__if_key_%lld", (long long)i);
+        bool key_found = false;
+        Item key_item = js_map_get_fast(class_obj.map, key_slot, key_slot_len, &key_found);
+        if (!key_found || get_type_id(key_item) != LMD_TYPE_STRING) continue;
+        String* declared_key = it2s(key_item);
+        if (declared_key && declared_key->len == private_key->len &&
+            memcmp(declared_key->chars, private_key->chars, (size_t)private_key->len) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool js_private_brand_mismatch(Item object, String* private_key) {
     if (js_current_private_home_class.item == 0 || js_current_private_home_class.item == ItemNull.item ||
         !private_key || get_type_id(object) != LMD_TYPE_MAP) return false;
     if (private_key->len <= 10 || strncmp(private_key->chars, "__private_", 10) != 0) return false;
+    if (!js_class_metadata_declares_private_key(js_current_private_home_class, private_key)) return false;
     char brand_key[512];
     int brand_key_len = snprintf(brand_key, sizeof(brand_key), "__brand_%.*s",
         (int)private_key->len, private_key->chars);
@@ -11446,6 +11480,32 @@ static int js_regex_count_capture_groups_before(const char* pattern, int pattern
     return count;
 }
 
+static bool js_regex_is_class_escape_shorthand(char ch) {
+    return ch == 'd' || ch == 'D' || ch == 's' || ch == 'S' || ch == 'w' || ch == 'W';
+}
+
+static int js_regex_append_legacy_octal_escape(std::string& out, const char* pattern,
+        int pattern_len, int digit_pos) {
+    if (digit_pos >= pattern_len) return digit_pos;
+    char first = pattern[digit_pos];
+    if (first < '0' || first > '7') return digit_pos;
+
+    int value = first - '0';
+    int last = digit_pos;
+    int max_extra = (first >= '0' && first <= '3') ? 2 : 1;
+    for (int k = 0; k < max_extra && last + 1 < pattern_len; k++) {
+        char ch = pattern[last + 1];
+        if (ch < '0' || ch > '7') break;
+        value = (value << 3) + (ch - '0');
+        last++;
+    }
+
+    char buf[16];
+    snprintf(buf, sizeof(buf), "\\x{%X}", value);
+    out += buf;
+    return last;
+}
+
 extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char* flags, int flags_len) {
     char* literal_buf = NULL;
     int literal_len = 0;
@@ -11753,16 +11813,21 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
             // Handle backreferences \1-\9: passed through for js_regex_wrapper to handle
             // The wrapper converts them to capture groups with post-filter equality checks
             // Annex B: \N is an identity escape if N > total capture groups
+            if (next == '0' && bracket_depth == 0 && legacy_non_unicode) {
+                i = js_regex_append_legacy_octal_escape(processed_pattern,
+                    effective_pattern, effective_pattern_len, i + 1);
+                continue;
+            }
             if (next >= '1' && next <= '9' && bracket_depth == 0) {
                 int ref_num = next - '0';
                 if (ref_num > total_groups) {
                     if (legacy_non_unicode && next <= '7') {
-                        char buf[10];
-                        snprintf(buf, sizeof(buf), "\\x{%c}", next);
-                        processed_pattern += buf;
+                        i = js_regex_append_legacy_octal_escape(processed_pattern,
+                            effective_pattern, effective_pattern_len, i + 1);
                     } else {
                         // identity escape: treat \8/\9 as literal characters in legacy mode
                         processed_pattern += next;
+                        i++;
                     }
                 } else {
                     int groups_before_ref = js_regex_count_capture_groups_before(effective_pattern,
@@ -11773,15 +11838,15 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
                     }
                     processed_pattern += '\\';
                     processed_pattern += next;
+                    i++;
                 }
-                i++;
                 continue;
             }
             // ES spec §22.2.1.10 ControlEscape: \c followed by ASCII letter [A-Za-z]
             // yields the character with code point (letter & 0x1F).
             // RE2 doesn't support \c, so translate to \x{NN}.
-            // Annex B §B.1.4: inside a character class, \cN where N is a decimal digit or '_'
-            // is also accepted (yields N & 0x1F). For now, only handle the spec-mandated letter form.
+            // Annex B §B.1.4: inside a non-unicode character class, \cN where
+            // N is a decimal digit or '_' is also accepted (yields N & 0x1F).
             if (next == 'c') {
                 char cl = (i + 2 < effective_pattern_len) ? effective_pattern[i + 2] : '\0';
                 if (i + 2 < effective_pattern_len &&
@@ -11791,6 +11856,15 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
                     snprintf(buf, sizeof(buf), "\\x{%X}", cp);
                     processed_pattern += buf;
                     i += 2; // consume \c and the letter (loop will i++)
+                    continue;
+                }
+                if (legacy_non_unicode && bracket_depth > 0 && i + 2 < effective_pattern_len &&
+                    ((cl >= '0' && cl <= '9') || cl == '_')) {
+                    char buf[10];
+                    int cp = cl & 0x1F;
+                    snprintf(buf, sizeof(buf), "\\x{%X}", cp);
+                    processed_pattern += buf;
+                    i += 2; // consume \c and the class-control character
                     continue;
                 }
                 if (legacy_non_unicode) {
@@ -11890,6 +11964,27 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
             bracket_depth++;
         } else if (effective_pattern[i] == ']') {
             if (bracket_depth > 0) bracket_depth--;
+        }
+        if (bracket_depth > 0 && !compile_info.unicode && !compile_info.unicode_sets &&
+            effective_pattern[i] == '-' && i + 3 < effective_pattern_len &&
+            effective_pattern[i + 1] == '-' && effective_pattern[i + 2] == '\\') {
+            char esc = effective_pattern[i + 3];
+            if (js_regex_is_class_escape_shorthand(esc)) {
+                processed_pattern += '-';
+                i++;
+                continue;
+            }
+        }
+        if (bracket_depth > 0 && !compile_info.unicode && !compile_info.unicode_sets &&
+            effective_pattern[i] == '-') {
+            bool prev_is_shorthand = i >= 2 && effective_pattern[i - 2] == '\\' &&
+                js_regex_is_class_escape_shorthand(effective_pattern[i - 1]);
+            bool next_is_shorthand = i + 2 < effective_pattern_len && effective_pattern[i + 1] == '\\' &&
+                js_regex_is_class_escape_shorthand(effective_pattern[i + 2]);
+            if (prev_is_shorthand || next_is_shorthand) {
+                processed_pattern += "\\-";
+                continue;
+            }
         }
         processed_pattern += effective_pattern[i];
     }

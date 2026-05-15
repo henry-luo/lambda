@@ -164,6 +164,8 @@ static bool is_valid_assignment_target(JsAstNode* node, bool strict) {
         }
         case JS_AST_NODE_MEMBER_EXPRESSION:
             return true;
+        case JS_AST_NODE_CALL_EXPRESSION:
+            return !strict;
         case JS_AST_NODE_ARRAY_PATTERN:
         case JS_AST_NODE_OBJECT_PATTERN:
             return true;
@@ -185,7 +187,8 @@ static void check_assignment_target(EarlyErrorCtx* ctx, JsAstNode* node) {
     if (is_compound) {
         // compound: only identifier or member expression
         if (lhs->node_type != JS_AST_NODE_IDENTIFIER &&
-            lhs->node_type != JS_AST_NODE_MEMBER_EXPRESSION) {
+            lhs->node_type != JS_AST_NODE_MEMBER_EXPRESSION &&
+            (ctx->in_strict || lhs->node_type != JS_AST_NODE_CALL_EXPRESSION)) {
             ee_error(ctx, node, "Invalid left-hand side in compound assignment");
         }
     } else {
@@ -203,7 +206,8 @@ static void check_update_target(EarlyErrorCtx* ctx, JsAstNode* node) {
     if (!operand) return;
 
     if (operand->node_type != JS_AST_NODE_IDENTIFIER &&
-        operand->node_type != JS_AST_NODE_MEMBER_EXPRESSION) {
+        operand->node_type != JS_AST_NODE_MEMBER_EXPRESSION &&
+        (ctx->in_strict || operand->node_type != JS_AST_NODE_CALL_EXPRESSION)) {
         ee_error(ctx, node, "Invalid left-hand side in prefix/postfix operation");
     } else if (operand->node_type == JS_AST_NODE_IDENTIFIER) {
         JsIdentifierNode* id = (JsIdentifierNode*)operand;
