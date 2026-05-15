@@ -734,7 +734,7 @@ build-jube-test: build-jube build-test
 # Run jube-specific tests only (Python, Bash, Ruby)
 test-jube: build-jube-test
 	@echo "Running jube-specific test suites (Python, Bash, Ruby)..."
-	@node test/test_run.js --target=jube --parallel
+	@LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js --target=jube --parallel
 
 # Force rebuild (clean + build)
 rebuild: clean-all
@@ -872,25 +872,25 @@ test: build-test
 	@echo "Clearing HTTP cache for clean test runs..."
 	@rm -rf temp/cache
 	@echo "Running lambda (core) test suites (excluding jube)..."
-	@node test/test_run.js --exclude-target=jube --parallel
+	@LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js --exclude-target=jube --parallel
 
 test-all: build-test
 	@echo "Clearing HTTP cache for clean test runs..."
 	@rm -rf temp/cache
 	@echo "Running ALL test suites (baseline + extended)..."
-	@node test/test_run.js --parallel
+	@LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js --parallel
 
 test-all-baseline: build-test
 	@echo "Clearing HTTP cache for clean test runs..."
 	@rm -rf temp/cache
 	@echo "Running BASELINE test suites only..."
-	@node test/test_run.js --category=baseline --parallel
+	@LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js --category=baseline --parallel
 
 test-lambda-baseline: build-test test-input-baseline
 	@echo "Clearing HTTP cache for clean test runs..."
 	@rm -rf temp/cache
 	@echo "Running LAMBDA baseline test suite..."
-	@node test/test_run.js --target=lambda --category=baseline --parallel --input-results=test_output/input_baseline_results.json
+	@LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js --target=lambda --category=baseline --parallel --input-results=test_output/input_baseline_results.json
 
 test-redex-baseline: build
 	@echo "Running Redex formal semantics baseline verification..."
@@ -904,7 +904,7 @@ test-c2mir: build-test
 	@echo "Clearing HTTP cache for clean test runs..."
 	@rm -rf temp/cache
 	@echo "Running LAMBDA baseline tests with C2MIR (legacy JIT path)..."
-	@LAMBDA_USE_C2MIR=1 node test/test_run.js --target=lambda --category=baseline --parallel
+	@LAMBDA_USE_C2MIR=1 LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js --target=lambda --category=baseline --parallel
 
 # test262 baseline: run only tests in baseline, must pass 100%
 test262-baseline:
@@ -1414,7 +1414,7 @@ test-extended: build-test
 	@echo "Clearing HTTP cache for clean test runs..."
 	@rm -rf temp/cache
 	@echo "Running EXTENDED test suites only..."
-	@node test/test_run.js --category=extended --parallel
+	@LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js --category=extended --parallel
 
 test-library: build
 	@echo "Running library test suite..."

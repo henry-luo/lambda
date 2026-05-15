@@ -131,8 +131,14 @@ static char* tc_initial_value(DomElement* elem, uint32_t* out_len) {
         StrBuf* sb = strbuf_new_cap(64);
         tc_collect_text((DomNode*)elem, sb);
         size_t len = sb->str ? strlen(sb->str) : 0;
+        const char* attr_value = nullptr;
+        if (len == 0) {
+            attr_value = dom_element_get_attribute(elem, "value");
+            if (attr_value) len = strlen(attr_value);
+        }
         char* out = (char*)mem_alloc(len + 1, MEM_CAT_DOM);
-        if (sb->str) memcpy(out, sb->str, len);
+        if (attr_value) memcpy(out, attr_value, len);
+        else if (sb->str) memcpy(out, sb->str, len);
         out[len] = '\0';
         strbuf_free(sb);
         *out_len = (uint32_t)len;

@@ -57,6 +57,13 @@ static double get_monotonic_time() {
 #endif
 }
 
+static void sim_input_turn_yield() {
+    struct timespec ts;
+    ts.tv_sec = 0;
+    ts.tv_nsec = 16 * 1000 * 1000L;
+    nanosleep(&ts, NULL);
+}
+
 // Forward declarations for callbacks (defined in window.cpp)
 extern void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event);
 
@@ -1856,6 +1863,7 @@ static void sim_mouse_move(UiContext* uicon, int x, int y) {
     event.mouse_position.x = x;
     event.mouse_position.y = y;
     handle_event(uicon, uicon->document, &event);
+    sim_input_turn_yield();
 }
 
 // Simulate a mouse button event
@@ -1873,6 +1881,7 @@ static void sim_mouse_button(UiContext* uicon, int x, int y, int button, int mod
     event.mouse_button.clicks = 1;
     event.mouse_button.mods = mods;
     handle_event(uicon, uicon->document, &event);
+    sim_input_turn_yield();
 }
 
 // Simulate a key event
@@ -1884,6 +1893,7 @@ static void sim_key(UiContext* uicon, int key, int mods, bool is_down) {
     event.key.scancode = 0;
     event.key.mods = mods;
     handle_event(uicon, uicon->document, &event);
+    sim_input_turn_yield();
 }
 
 // Simulate a scroll event
@@ -1905,6 +1915,7 @@ static void sim_text_input(UiContext* uicon, uint32_t codepoint) {
     event.text_input.timestamp = get_monotonic_time();
     event.text_input.codepoint = codepoint;
     handle_event(uicon, uicon->document, &event);
+    sim_input_turn_yield();
 }
 
 static void sim_replay_input(UiContext* uicon, SimEvent* ev) {
@@ -2241,6 +2252,12 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
     switch (ev->type) {
         case SIM_EVENT_WAIT:
             log_info("event_sim: wait %d ms", ev->wait_ms);
+            if (ev->wait_ms > 0) {
+                struct timespec ts;
+                ts.tv_sec = ev->wait_ms / 1000;
+                ts.tv_nsec = (ev->wait_ms % 1000) * 1000000L;
+                nanosleep(&ts, NULL);
+            }
             break;
 
         case SIM_EVENT_MOUSE_MOVE: {
@@ -2428,6 +2445,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             int x, y;
             if (!resolve_target(ev, uicon->document, &x, &y)) break;
             log_info("event_sim: click at (%d, %d) button=%d", x, y, ev->button);
+            sim_mouse_move(uicon, x, y);
             sim_mouse_button(uicon, x, y, ev->button, ev->mods, true);
             sim_mouse_button(uicon, x, y, ev->button, ev->mods, false);
 

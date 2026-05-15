@@ -334,6 +334,8 @@ static void run_ui_tests_parallel(const std::vector<size_t>& indices, int jobs) 
 
     int num_threads = std::min(jobs, (int)indices.size());
     std::atomic<size_t> next_idx{0};
+    std::atomic<size_t> completed{0};
+    std::mutex progress_mutex;
 
     auto worker = [&]() {
         while (true) {
@@ -341,6 +343,24 @@ static void run_ui_tests_parallel(const std::vector<size_t>& indices, int jobs) 
             if (idx >= indices.size()) break;
             size_t test_idx = indices[idx];
             g_ui_results[test_idx] = run_ui_test(g_ui_tests[test_idx]);
+
+            const UiTestResult& result = g_ui_results[test_idx];
+            int total_assertions = result.assertions_passed + result.assertions_failed;
+            size_t done = completed.fetch_add(1) + 1;
+
+            std::lock_guard<std::mutex> lock(progress_mutex);
+            std::cout << "  [" << done << "/" << indices.size() << "] "
+                      << g_ui_tests[test_idx].test_name << " finished";
+            if (total_assertions > 0) {
+                std::cout << " (" << result.assertions_passed << "/" << total_assertions
+                          << " assertions passed)";
+            } else {
+                std::cout << " (0 assertions)";
+            }
+            if (result.exit_code != 0) {
+                std::cout << " (exit " << result.exit_code << ")";
+            }
+            std::cout << std::endl;
         }
     };
 
