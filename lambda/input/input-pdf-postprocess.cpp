@@ -55,35 +55,16 @@ static inline Item map_lookup(Map* m, const char* key) {
     return val.item();
 }
 
-// Treat any Item as a Container* and read its leading TypeId byte.
-static inline TypeId item_container_type(Item it) {
-    if (!it.item || it.item == ITEM_NULL || it.item == ITEM_ERROR) {
-        return LMD_TYPE_NULL;
-    }
-    TypeId tag = (TypeId)((it.item >> 56) & 0xFF);
-    // Containers have a zero high byte and the type sits at offset 0 of the
-    // pointed-to struct.
-    if (tag == 0) {
-        Container* c = (Container*)it.item;
-        return c->type_id;
-    }
-    return tag;
-}
-
 static inline Map* item_as_map(Item it) {
-    return item_container_type(it) == LMD_TYPE_MAP ? (Map*)it.item : nullptr;
+    return it.get_safe_map();
 }
 
 static inline Array* item_as_array(Item it) {
-    return item_container_type(it) == LMD_TYPE_ARRAY ? (Array*)it.item : nullptr;
+    return it.get_safe_array();
 }
 
 static inline String* item_as_string(Item it) {
-    TypeId t = (TypeId)((it.item >> 56) & 0xFF);
-    if (t == LMD_TYPE_STRING || t == LMD_TYPE_SYMBOL) {
-        return (String*)(it.item & 0x00FFFFFFFFFFFFFFULL);
-    }
-    return nullptr;
+    return it.get_safe_string();
 }
 
 // Compare a String*'s chars to a literal.

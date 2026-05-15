@@ -385,7 +385,7 @@ static void multicol_update_text_bounds(ViewText* text) {
 static void multicol_reanchor_text_descendants(View* view, float target_x, float target_y) {
     if (!view) return;
 
-    if (view->node_type == DOM_NODE_TEXT) {
+    if (view->view_type == RDT_VIEW_TEXT) {
         ViewText* text = lam::view_require<RDT_VIEW_TEXT>(view);
         float min_x = 1e9f;
         float min_y = 1e9f;
@@ -416,7 +416,7 @@ static void multicol_reanchor_text_descendants(View* view, float target_x, float
 static void multicol_finalize_text_for_fragmented_block(View* view, ViewBlock* fragment_owner) {
     if (!view || !fragment_owner) return;
 
-    if (view->node_type == DOM_NODE_TEXT) {
+    if (view->view_type == RDT_VIEW_TEXT) {
         ViewText* text = lam::view_require<RDT_VIEW_TEXT>(view);
         TextRect* rect = text->rect;
         while (rect) {
@@ -719,7 +719,7 @@ static void multicol_apply_positioned_fragment_anchors(LayoutContext* lycon, Vie
 
 static float multicol_first_text_height(View* view) {
     if (!view) return 0;
-    if (view->node_type == DOM_NODE_TEXT) {
+    if (view->view_type == RDT_VIEW_TEXT) {
         ViewText* text = lam::view_require<RDT_VIEW_TEXT>(view);
         return text->height > 0 ? text->height : 0;
     }

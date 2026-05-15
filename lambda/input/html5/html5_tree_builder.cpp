@@ -1048,8 +1048,8 @@ static void html5_process_in_text_mode(Html5Parser* parser, Html5Token* token) {
                     // find the text child (string) and parse it as JSON
                     if (current->length > 0) {
                         Item last_child = current->items[current->length - 1];
-                        if (get_type_id(last_child) == LMD_TYPE_STRING) {
-                            String* json_str = last_child.get_string();
+                        String* json_str = last_child.get_safe_string();
+                        if (json_str) {
                             const char* json_text = json_str->chars;
                             log_debug("html5: parsing JSON-LD content (%zu bytes)", (size_t)json_str->len);
                             Item parsed = parse_json_to_item(parser->input, json_text);

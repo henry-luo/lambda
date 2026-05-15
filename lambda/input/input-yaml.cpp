@@ -233,9 +233,8 @@ static Item make_empty_string(YamlParser* p) {
 // put a key-value pair into a map, using composite key encoding for non-string keys.
 // non-string keys (null, int, bool, etc.) are encoded as: {"?": {"key": key_item, "value": value_item}}
 static void put_key_value(YamlParser* p, MapBuilder& map, Item key_item, Item value_item) {
-    TypeId ktid = get_type_id(key_item);
-    if (ktid == LMD_TYPE_STRING) {
-        String* s = (String*)(key_item.item & 0x00FFFFFFFFFFFFFFULL);
+    String* s = key_item.get_safe_string();
+    if (s) {
         if (s->len > 0) {
             map.put(p->ctx->builder.createName(s->chars), value_item);
         } else {
