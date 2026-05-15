@@ -3220,6 +3220,8 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                 bool strict_put = mt->is_global_strict || mt->is_module ||
                     (mt->current_fc && mt->current_fc->is_strict);
                 const char* set_global_fn = strict_put ? "js_set_global_property_strict" : "js_set_global_property";
+                MIR_reg_t strict_lhs_key = 0;
+                MIR_reg_t strict_lhs_exists = 0;
                 if (asgn->op == JS_OP_AND_ASSIGN || asgn->op == JS_OP_OR_ASSIGN ||
                     asgn->op == JS_OP_NULLISH_ASSIGN) {
                     // Logical assignment with short-circuit for global vars
@@ -3279,6 +3281,13 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, simple_with_key));
                     jm_emit_exc_propagate_check(mt);
                 }
+                if (strict_put && asgn->op == JS_OP_ASSIGN) {
+                    strict_lhs_key = simple_with_key ? simple_with_key :
+                        jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
+                    strict_lhs_exists = jm_call_1(mt, "js_global_binding_exists", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, strict_lhs_key));
+                    jm_emit_exc_propagate_check(mt);
+                }
                 MIR_reg_t rhs = jm_transpile_box_item(mt, asgn->right);
                 jm_emit_set_class_assignment_name(mt, asgn, rhs, id->name);
                 if (asgn->op != JS_OP_ASSIGN) {
@@ -3308,9 +3317,16 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, rhs));
                 }
                 MIR_reg_t name_reg = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
-                jm_call_void_2(mt, set_global_fn,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, rhs));
+                if (strict_lhs_exists) {
+                    jm_call_void_3(mt, "js_set_global_property_strict_prechecked",
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, strict_lhs_key ? strict_lhs_key : name_reg),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, rhs),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, strict_lhs_exists));
+                } else {
+                    jm_call_void_2(mt, set_global_fn,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, rhs));
+                }
                 if (strict_put) jm_emit_exc_propagate_check(mt);
                 return rhs;
             }
