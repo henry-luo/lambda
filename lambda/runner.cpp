@@ -1240,8 +1240,8 @@ void resolve_sys_paths_recursive(Item item) {
         if (path && path_get_scheme(path) == PATH_SCHEME_SYS && path->result == 0) {
             path_resolve_for_iteration(path);
         }
-    } else if (type_id == LMD_TYPE_ARRAY || type_id == LMD_TYPE_ARRAY) {
-        List* list = item.list;
+    } else if (type_id == LMD_TYPE_ARRAY) {
+        List* list = item.array;
         for (int64_t i = 0; i < list->length; i++) {
             resolve_sys_paths_recursive(list->items[i]);
         }

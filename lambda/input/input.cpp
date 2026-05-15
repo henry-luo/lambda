@@ -1108,7 +1108,7 @@ extern "C" Element* input_get_html_fragment_element(Input* input, const char* or
         return elem;
     }
     else if (root_type == LMD_TYPE_ARRAY) {
-        List* root_list = input->root.list;
+        List* root_list = input->root.array;
         for (int64_t i = 0; i < root_list->length; i++) {
             Item item = root_list->items[i];
             if (item.type_id() == LMD_TYPE_ELEMENT) {

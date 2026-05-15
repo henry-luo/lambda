@@ -673,7 +673,7 @@ bool MarkBuilder::is_in_arena(Item item) const {
         return is_pointer_in_arena_chain(item.array);
 
     case LMD_TYPE_ARRAY: {
-        List* list = item.list;
+        List* list = item.array;
         if (!list) return true;  // Null list
 
         // Phase 5a: For lists, check BOTH struct ownership AND content ownership

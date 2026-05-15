@@ -817,8 +817,8 @@ String* format_cmd_args(String* cmd, Item args) {
     if (args_type == LMD_TYPE_NULL) {
         // No arguments
     }
-    else if (args_type == LMD_TYPE_ARRAY || args_type == LMD_TYPE_ARRAY) {
-        List* arg_list = args.list;
+    else if (args_type == LMD_TYPE_ARRAY) {
+        List* arg_list = args.array;
         for (int i = 0; i < arg_list->length; i++) {
             Item arg_item = arg_list->items[i];
             String* arg_str = fn_string(arg_item);

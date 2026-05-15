@@ -253,7 +253,7 @@ protected:
         }
         // Fallback: handle old parser format (list of elements)
         else if (input->root.type_id() == LMD_TYPE_ARRAY) {
-            List* root_list = input->root.list;
+            List* root_list = input->root.array;
             for (int64_t i = 0; i < root_list->length; i++) {
                 Item item = root_list->items[i];
                 if (item.type_id() == LMD_TYPE_ELEMENT) {

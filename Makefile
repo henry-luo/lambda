@@ -461,7 +461,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild \
 	    test test-all test-all-baseline test-lambda-baseline test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-pdf-render test-extended test-input run help \
-	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint check check-raw-alloc check-state-store check-radiant-casts check-radiant-ownership docs intellisense analyze-binary \
+	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint check check-tag-or check-raw-alloc check-state-store check-radiant-casts check-radiant-ownership docs intellisense analyze-binary \
 	    build-debug build-release clean-all distclean \
 	    tree-sitter-libs tree-sitter-core-libs \
 	    generate-premake clean-premake build-test build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline \
@@ -980,6 +980,7 @@ ensure-yaml-submodule:
 test-input-baseline: build-test ensure-yaml-submodule
 	@echo "Clearing HTTP cache for clean test runs..."
 	@rm -rf temp/cache
+	@mkdir -p test_output
 	@echo "=============================================================="
 	@echo "🧪 Running INPUT baseline tests"
 	@echo "=============================================================="
@@ -1766,6 +1767,19 @@ check:
 	@echo "Checking for common issues in source files..."
 	@find lambda -name "*.c" -o -name "*.cpp" -o -name "*.h" | xargs -I {} sh -c 'echo "Checking: {}"; grep -n "TODO\|FIXME\|XXX" {} || true' 2>/dev/null
 	@echo "Basic checks complete."
+
+check-tag-or:
+	@echo "Checking for duplicate array TypeId OR conditions..."
+	@VIOLATIONS=$$(find lambda \( -name "*.c" -o -name "*.cpp" -o -name "*.h" -o -name "*.hpp" \) -print0 \
+		| xargs -0 perl -ne 'while (/([A-Za-z_][A-Za-z0-9_]*(?:(?:->|\.|::)[A-Za-z_][A-Za-z0-9_]*)?(?:\(\))?)\s*==\s*LMD_TYPE_ARRAY\b\s*\|\|\s*\1\s*==\s*LMD_TYPE_ARRAY\b/g) { print "$$ARGV:$$.: duplicate $$1 == LMD_TYPE_ARRAY\n"; }' \
+		|| true); \
+	if [ -n "$$VIOLATIONS" ]; then \
+		echo "❌ Duplicate array TypeId OR checks found:"; \
+		echo "$$VIOLATIONS"; \
+		exit 1; \
+	else \
+		echo "✅ No duplicate array TypeId OR checks"; \
+	fi
 
 format:
 	@echo "Formatting source code..."

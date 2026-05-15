@@ -3583,7 +3583,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                 // call ensure_typed_array to convert at runtime.
                 if (declare->type && declare->type->kind == TYPE_KIND_UNARY) {
                     bool needs_coerce = (expr_tid == LMD_TYPE_ANY || expr_tid == LMD_TYPE_NULL ||
-                                         expr_tid == LMD_TYPE_ARRAY || expr_tid == LMD_TYPE_ARRAY ||
+                                         expr_tid == LMD_TYPE_ARRAY ||
                                          expr_tid == LMD_TYPE_ARRAY_NUM);
                     if (needs_coerce) {
                         // extract element type from TypeUnary operand
@@ -8222,7 +8222,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
         if (obj_tid == LMD_TYPE_ANY || obj_tid == LMD_TYPE_NULL) {
             arr_ptr = emit_unbox_container(mt, obj);
         } else if (obj_tid == LMD_TYPE_ARRAY_NUM ||
-                   obj_tid == LMD_TYPE_ARRAY || obj_tid == LMD_TYPE_ARRAY) {
+                   obj_tid == LMD_TYPE_ARRAY) {
             // Container variable: stored as tagged Item, strip tag to get pointer
             arr_ptr = emit_unbox_container(mt, obj);
         } else {

@@ -30,7 +30,7 @@ void print_tree(Item item, int depth) {
             printf("\"\n");
         }
     } else if (type == LMD_TYPE_ARRAY) {
-        List* list = item.list;
+        List* list = item.array;
         printf("%sList: %lld items\n", indent.c_str(), list->length);
         for (int64_t i = 0; i < list->length; i++) {
             print_tree(list->items[i], depth + 1);

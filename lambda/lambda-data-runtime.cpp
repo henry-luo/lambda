@@ -2,6 +2,7 @@
 #include "transpiler.hpp"
 #include "../lib/log.h"
 #include "../lib/str.h"
+#include "../lib/arraylist.hpp"
 #include "input/css/dom_element.hpp"  // DomElement, dom_element_to_element, element_to_dom_element
 #include "input/css/dom_node.hpp"     // DomText, dom_text_to_string, string_to_dom_text
 
@@ -26,6 +27,48 @@ extern "C" String* get_ascii_char_string(unsigned char ch);
 // VMap access helpers (implemented in vmap.cpp)
 Item vmap_get_by_str(VMap* vm, const char* key);
 Item vmap_get_by_item(VMap* vm, Item key);
+
+struct LambdaSymbolKeyList {
+    lam::ArrayList<Symbol*> keys;
+
+    explicit LambdaSymbolKeyList(size_t initial_capacity)
+        : keys(MEM_CAT_CONTAINER, initial_capacity) {
+    }
+};
+
+extern "C" SymbolKeyList* symbol_key_list_new(int64_t initial_capacity) {
+    if (initial_capacity < 0) initial_capacity = 0;
+    void* raw = mem_alloc(sizeof(LambdaSymbolKeyList), MEM_CAT_CONTAINER);
+    if (!raw) return nullptr;
+    return new (raw) LambdaSymbolKeyList((size_t)initial_capacity);
+}
+
+extern "C" bool symbol_key_list_append(SymbolKeyList* keys_ptr, Symbol* symbol) {
+    if (!keys_ptr || !symbol) return false;
+    LambdaSymbolKeyList* keys = (LambdaSymbolKeyList*)keys_ptr;
+    return keys->keys.append(symbol);
+}
+
+extern "C" int64_t symbol_key_list_len(void* keys_ptr) {
+    if (!keys_ptr) return 0;
+    LambdaSymbolKeyList* keys = (LambdaSymbolKeyList*)keys_ptr;
+    return (int64_t)keys->keys.size();
+}
+
+extern "C" Symbol* symbol_key_list_at(void* keys_ptr, int64_t index) {
+    if (!keys_ptr || index < 0) return nullptr;
+    LambdaSymbolKeyList* keys = (LambdaSymbolKeyList*)keys_ptr;
+    size_t key_index = (size_t)index;
+    Symbol** symbol = keys->keys.try_get(key_index);
+    return symbol ? *symbol : nullptr;
+}
+
+extern "C" void symbol_key_list_free(void* keys_ptr) {
+    if (!keys_ptr) return;
+    LambdaSymbolKeyList* keys = (LambdaSymbolKeyList*)keys_ptr;
+    keys->~LambdaSymbolKeyList();
+    mem_free(keys);
+}
 
 // Internal helper: resolve path content and cache it
 // Uses the new path_resolve_for_iteration which handles directories and files properly
@@ -63,7 +106,7 @@ Array* array_fill(Array* arr, int count, ...) {
         }
         va_end(args);
     }
-    log_item({.list = arr}, "array_filled");
+    log_item({.array = arr}, "array_filled");
     return arr;
 }
 
@@ -449,8 +492,8 @@ List* list() {
 Item list_end(List *list) {
     log_leave();
     if (list->type_id == LMD_TYPE_ELEMENT) {
-        log_item({.list = list}, "elmt_end");
-        return {.list = list};
+        log_item({.array = list}, "elmt_end");
+        return {.array = list};
     }
     else {
         if (list->length == 0) {
@@ -461,7 +504,7 @@ Item list_end(List *list) {
             return list->items[0];
         } else {
             list->is_content = 1;
-            return {.list = list};
+            return {.array = list};
         }
     }
 }
@@ -526,7 +569,7 @@ void array_push_spread(Array* arr, Item item) {
     }
     // check if this is a spreadable list
     if (type_id == LMD_TYPE_ARRAY) {
-        List* inner = item.list;
+        List* inner = item.array;
         if (inner && inner->is_spreadable) {
             for (int i = 0; i < inner->length; i++) {
                 array_push(arr, inner->items[i]);
@@ -580,7 +623,7 @@ Item item_spread(Item item) {
         Array* arr = item.array;
         if (arr) arr->is_spreadable = true;
     } else if (type_id == LMD_TYPE_ARRAY) {
-        List* list = item.list;
+        List* list = item.array;
         if (list) list->is_spreadable = true;
     } else if (type_id == LMD_TYPE_ARRAY_NUM) {
         ArrayNum* arr = item.array_num;
@@ -1206,7 +1249,7 @@ Item item_attr(Item data, const char* key) {
 }
 
 // Get list of attribute/field names from an Item
-ArrayList* item_keys(Item data) {
+SymbolKeyList* item_keys(Item data) {
     if (!data.item) { return NULL; }
     TypeId type_id = get_type_id(data);
 
@@ -1228,14 +1271,14 @@ ArrayList* item_keys(Item data) {
     case LMD_TYPE_MAP: {
         Map* map = data.map;
         TypeMap* map_type = (TypeMap*)map->type;
-        ArrayList* keys = arraylist_new(8);
+        SymbolKeyList* keys = symbol_key_list_new(8);
         ShapeEntry* field = map_type->shape;
         while (field) {
             if (field->name) {
                 // Convert StrView to Symbol for the transpiled code
                 StrView* sv = field->name;
                 Symbol* sym = heap_create_symbol(sv->str, sv->length);
-                arraylist_append(keys, (void*)sym);
+                symbol_key_list_append(keys, sym);
             }
             field = field->next;
         }
@@ -1251,14 +1294,14 @@ ArrayList* item_keys(Item data) {
     case LMD_TYPE_ELEMENT: {
         Element* elmt = data.element;
         TypeMap* elmt_type = (TypeMap*)elmt->type;
-        ArrayList* keys = arraylist_new(8);
+        SymbolKeyList* keys = symbol_key_list_new(8);
         ShapeEntry* field = elmt_type->shape;
         while (field) {
             if (field->name) {
                 // Convert StrView to Symbol for the transpiled code
                 StrView* sv = field->name;
                 Symbol* sym = heap_create_symbol(sv->str, sv->length);
-                arraylist_append(keys, (void*)sym);
+                symbol_key_list_append(keys, sym);
             }
             field = field->next;
         }
@@ -1278,8 +1321,7 @@ ArrayList* item_keys(Item data) {
 int64_t iter_len(Item data, void* keys_ptr, int key_filter) {
     TypeId type_id = get_type_id(data);
     if (type_id == LMD_TYPE_ERROR || type_id == LMD_TYPE_NULL) return 0;
-    ArrayList* keys = (ArrayList*)keys_ptr;
-    int64_t key_count = keys ? (int64_t)keys->length : 0;
+    int64_t key_count = symbol_key_list_len(keys_ptr);
 
     if (type_id == LMD_TYPE_ELEMENT) {
         int64_t child_count = (int64_t)data.element->length;
@@ -1300,14 +1342,13 @@ int64_t iter_len(Item data, void* keys_ptr, int key_filter) {
 // Returns: int (boxed) for indexed entries, symbol string (boxed) for keyed entries
 Item iter_key_at(Item data, void* keys_ptr, int64_t idx, int key_filter) {
     TypeId type_id = get_type_id(data);
-    ArrayList* keys = (ArrayList*)keys_ptr;
-    int64_t key_count = keys ? (int64_t)keys->length : 0;
+    int64_t key_count = symbol_key_list_len(keys_ptr);
 
     if (type_id == LMD_TYPE_ELEMENT) {
         if (key_filter == 2) {
             // SYMBOL: attrs only
             if (idx < key_count) {
-                Symbol* key_sym = (Symbol*)keys->data[idx];
+                Symbol* key_sym = symbol_key_list_at(keys_ptr, idx);
                 return {.item = y2it(key_sym)};
             }
             return ItemNull;
@@ -1318,14 +1359,14 @@ Item iter_key_at(Item data, void* keys_ptr, int64_t idx, int key_filter) {
         }
         // ALL: attrs first, then children
         if (idx < key_count) {
-            Symbol* key_sym = (Symbol*)keys->data[idx];
+            Symbol* key_sym = symbol_key_list_at(keys_ptr, idx);
             return {.item = y2it(key_sym)};
         }
         return {.item = i2it(idx - key_count)};
     }
     if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_VMAP || type_id == LMD_TYPE_OBJECT) {
         if (idx < key_count) {
-            Symbol* key_sym = (Symbol*)keys->data[idx];
+            Symbol* key_sym = symbol_key_list_at(keys_ptr, idx);
             return {.item = y2it(key_sym)};
         }
         return ItemNull;
@@ -1337,14 +1378,13 @@ Item iter_key_at(Item data, void* keys_ptr, int64_t idx, int key_filter) {
 // Get value at iteration index for unified for-loop
 Item iter_val_at(Item data, void* keys_ptr, int64_t idx, int key_filter) {
     TypeId type_id = get_type_id(data);
-    ArrayList* keys = (ArrayList*)keys_ptr;
-    int64_t key_count = keys ? (int64_t)keys->length : 0;
+    int64_t key_count = symbol_key_list_len(keys_ptr);
 
     if (type_id == LMD_TYPE_ELEMENT) {
         if (key_filter == 2) {
             // SYMBOL: attrs only
             if (idx < key_count) {
-                Symbol* key_sym = (Symbol*)keys->data[idx];
+                Symbol* key_sym = symbol_key_list_at(keys_ptr, idx);
                 return item_attr(data, key_sym->chars);
             }
             return ItemNull;
@@ -1355,14 +1395,14 @@ Item iter_val_at(Item data, void* keys_ptr, int64_t idx, int key_filter) {
         }
         // ALL: attrs first, then children
         if (idx < key_count) {
-            Symbol* key_sym = (Symbol*)keys->data[idx];
+            Symbol* key_sym = symbol_key_list_at(keys_ptr, idx);
             return item_attr(data, key_sym->chars);
         }
         return list_get(data.element, idx - key_count);
     }
     if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_VMAP || type_id == LMD_TYPE_OBJECT) {
         if (idx < key_count) {
-            Symbol* key_sym = (Symbol*)keys->data[idx];
+            Symbol* key_sym = symbol_key_list_at(keys_ptr, idx);
             return item_attr(data, key_sym->chars);
         }
         return ItemNull;
@@ -1439,7 +1479,7 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
     }
 
     // convert generic Array/List to typed array (Array and List are the same struct)
-    if (item_tid == LMD_TYPE_ARRAY || item_tid == LMD_TYPE_ARRAY) {
+    if (item_tid == LMD_TYPE_ARRAY) {
         Array* arr = item.array;
         Item* items = arr->items;
         int64_t length = arr->length;

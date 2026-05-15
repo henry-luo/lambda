@@ -498,6 +498,7 @@ typedef struct Symbol {
     char chars[];       // symbol name characters
 } Symbol;
 typedef String Binary;  // Binary is just a String
+typedef struct LambdaSymbolKeyList SymbolKeyList;
 
 // MapKind: discriminates exotic Map sub-types so js_property_get can
 // skip 9 cascading sentinel-pointer checks for plain JS objects.
@@ -1123,7 +1124,12 @@ extern "C" {
     void object_type_set_constraint(int64_t type_index, fn_ptr constraint_func);
     Item item_at(Item data, int64_t index);
     Item item_attr(Item data, const char* key);  // get attribute by name
-    struct _ArrayList* item_keys(Item data);     // get list of attribute names
+    SymbolKeyList* item_keys(Item data);     // get typed list of Symbol* attribute names
+    SymbolKeyList* symbol_key_list_new(int64_t initial_capacity);
+    bool symbol_key_list_append(SymbolKeyList* keys_ptr, Symbol* symbol);
+    int64_t symbol_key_list_len(void* keys_ptr);
+    Symbol* symbol_key_list_at(void* keys_ptr, int64_t index);
+    void symbol_key_list_free(void* keys_ptr);
 
     // Unified for-loop iteration helpers (key_filter: 0=ALL, 1=INT, 2=SYMBOL)
     int64_t iter_len(Item data, void* keys_ptr, int key_filter);

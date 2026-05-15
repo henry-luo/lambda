@@ -107,7 +107,7 @@ TEST_F(InputDirTest, ListCurrentDirectory) {
     TypeId root_type = get_type_id(input->root);
     ASSERT_EQ(root_type, LMD_TYPE_ARRAY) << "Root is not a list (got type " << root_type << ", expected " << LMD_TYPE_ARRAY << ")";
 
-    List* root = (List*)input->root.list;
+    List* root = (List*)input->root.array;
     ASSERT_NE(root, nullptr) << "Root list is NULL";
 
     // Verify list contains Path items
@@ -122,7 +122,7 @@ TEST_F(InputDirTest, ListTestDirectory) {
     TypeId root_type = get_type_id(input->root);
     ASSERT_EQ(root_type, LMD_TYPE_ARRAY) << "Root is not a list (got type " << root_type << ", expected " << LMD_TYPE_ARRAY << ")";
 
-    List* root = (List*)input->root.list;
+    List* root = (List*)input->root.array;
     ASSERT_NE(root, nullptr) << "Root list is NULL";
 
     // Test directory has: file1.txt, empty.txt, subdir1, subdir2 = 4 items
@@ -143,7 +143,7 @@ TEST_F(InputDirTest, RecursiveDirectoryListing) {
     Input* input = input_from_directory(test_dir_name, test_dir_name, true, 2);
     ASSERT_NE(input, nullptr) << "input_from_directory returned NULL for recursive listing";
 
-    List* root = (List*)input->root.list;
+    List* root = (List*)input->root.array;
     ASSERT_NE(root, nullptr) << "Root list is NULL";
 
     // Basic test that listing works without crashing
@@ -156,7 +156,7 @@ TEST_F(InputDirTest, DepthLimitedTraversal) {
     Input* input = input_from_directory(test_dir_name, test_dir_name, true, 1);
     ASSERT_NE(input, nullptr) << "input_from_directory returned NULL for depth-limited listing";
 
-    List* root = (List*)input->root.list;
+    List* root = (List*)input->root.array;
     ASSERT_NE(root, nullptr) << "Root list is NULL";
 
     SUCCEED() << "Depth limiting test completed successfully";
@@ -167,7 +167,7 @@ TEST_F(InputDirTest, NonRecursiveListing) {
     Input* input = input_from_directory(test_dir_name, test_dir_name, false, 0);
     ASSERT_NE(input, nullptr) << "input_from_directory returned NULL for non-recursive listing";
 
-    List* root = (List*)input->root.list;
+    List* root = (List*)input->root.array;
     ASSERT_NE(root, nullptr) << "Root list is NULL";
 
     SUCCEED() << "Non-recursive directory listing completed successfully";
@@ -229,7 +229,7 @@ TEST_F(InputDirTestSimple, EmptyDirectoryHandling) {
     Input* input = input_from_directory("test_empty_dir", "test_empty_dir", false, 1);
     ASSERT_NE(input, nullptr) << "input_from_directory should handle empty directories";
 
-    List* root = (List*)input->root.list;
+    List* root = (List*)input->root.array;
     ASSERT_NE(root, nullptr) << "Root list should exist for empty directory";
     ASSERT_EQ(root->length, 0) << "Empty directory should have 0 items";
 

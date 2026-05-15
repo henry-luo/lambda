@@ -557,7 +557,7 @@ void array_append(Array* arr, Item itm, Pool *pool, Arena* arena) {
 void array_push(Array* arr, Item item) {
     TypeId type_id = get_type_id(item);
     if (type_id == LMD_TYPE_ARRAY) { // flatten only content lists (from list_end)
-        List *nest_list = item.list;
+        List *nest_list = item.array;
         if (nest_list && nest_list->is_content) {
             for (int i = 0; i < nest_list->length; i++) {
                 Item nest_item = nest_list->items[i];
@@ -578,7 +578,7 @@ void list_push(List *list, Item item) {
 
     // 2. nest content list is flattened (only arrays with is_content flag from list_end)
     if (type_id == LMD_TYPE_ARRAY) {
-        List *nest_list = item.list;
+        List *nest_list = item.array;
         if (nest_list && (uintptr_t)nest_list >= 0x1000 && nest_list->is_content) {
             // content list: flatten by copying over the items
             if (nest_list->items == NULL) {
@@ -699,7 +699,7 @@ void list_push(List *list, Item item) {
         break;
     }
     }
-    // log_item({.list = list}, "list_after_push");
+    // log_item({.array = list}, "list_after_push");
 }
 
 // push item to list, spreading spreadable arrays or lists inline
@@ -722,7 +722,7 @@ void list_push_spread(List *list, Item item) {
     }
     // check if this is a spreadable list
     if (type_id == LMD_TYPE_ARRAY) {
-        List* inner = item.list;
+        List* inner = item.array;
         if (inner && inner->is_spreadable) {
             for (int i = 0; i < inner->length; i++) {
                 list_push(list, inner->items[i]);

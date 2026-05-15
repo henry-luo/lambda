@@ -293,7 +293,7 @@ protected:
 
         // Check if it's a List (may contain DOCTYPE, comments, and HTML element)
         if (root_type == LMD_TYPE_ARRAY) {
-            List* potential_list = input->root.list;
+            List* potential_list = input->root.array;
             // Search for the first REAL Element (skip DOCTYPE, comments, etc.)
             for (int64_t i = 0; i < potential_list->length; i++) {
                 Item item = potential_list->items[i];

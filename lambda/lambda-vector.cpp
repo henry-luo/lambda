@@ -44,7 +44,7 @@ static int64_t vector_length(Item item) {
     TypeId type = get_type_id(item);
     switch (type) {
         case LMD_TYPE_ARRAY_NUM:   return item.array_num->length;
-        case LMD_TYPE_ARRAY:        return item.list->length;
+        case LMD_TYPE_ARRAY:        return item.array->length;
         case LMD_TYPE_RANGE:       return item.range->length;
         default:                   return -1;
     }
@@ -79,7 +79,7 @@ static Item vector_get(Item item, int64_t index) {
             }
         }
         case LMD_TYPE_ARRAY:
-            return item.list->items[index];
+            return item.array->items[index];
         case LMD_TYPE_RANGE:
             return { .item = i2it(item.range->start + index) };
         default:
@@ -159,7 +159,7 @@ static Item vec_scalar_op(Item vec, Item scalar, int op, bool scalar_first) {
         if (is_array_type(vec_type)) {
             return { .array = array() };
         }
-        return { .list = list() };
+        return { .array = list() };
     }
 
     TypeId scalar_type = get_type_id(scalar);
@@ -309,7 +309,7 @@ static Item vec_scalar_op(Item vec, Item scalar, int op, bool scalar_first) {
         else list_push(list_result, res_item);
     }
     if (!return_array && list_result) list_result->is_content = 1;
-    return return_array ? Item{ .array = arr_result } : Item{ .list = list_result };
+    return return_array ? Item{ .array = arr_result } : Item{ .array = list_result };
 }
 
 //==============================================================================
@@ -329,7 +329,7 @@ static Item vec_vec_op(Item vec_a, Item vec_b, int op) {
         if (is_array_type(type_a) || is_array_type(type_b)) {
             return { .array = array() };
         }
-        return { .list = list() };
+        return { .array = list() };
     }
 
     // single-element broadcasting
@@ -495,7 +495,7 @@ static Item vec_vec_op(Item vec_a, Item vec_b, int op) {
         else list_push(list_result, res_item);
     }
     if (!return_array && list_result) list_result->is_content = 1;
-    return return_array ? Item{ .array = arr_result } : Item{ .list = list_result };
+    return return_array ? Item{ .array = arr_result } : Item{ .array = list_result };
 }
 
 //==============================================================================
@@ -647,8 +647,8 @@ Item fn_math_prod(Item item) {
             return push_l(prod);
         }
     }
-    else if (type == LMD_TYPE_ARRAY || type == LMD_TYPE_ARRAY) {
-        List* lst = item.list;
+    else if (type == LMD_TYPE_ARRAY) {
+        List* lst = item.array;
         if (!lst || lst->length == 0) return { .item = i2it(1) };
         double prod = 1.0;
         bool has_float = false;
@@ -687,7 +687,7 @@ Item fn_math_cumsum(Item item) {
     if (len == 0) {
         List* result = list();
         result->is_content = 1;
-        return { .list = result };
+        return { .array = result };
     }
 
     TypeId type = get_type_id(item);
@@ -755,7 +755,7 @@ Item fn_math_cumprod(Item item) {
     if (len == 0) {
         List* result = list();
         result->is_content = 1;
-        return { .list = result };
+        return { .array = result };
     }
 
     TypeId type = get_type_id(item);
@@ -1139,7 +1139,7 @@ Item fn_pipe_map(Item collection, PipeMapFn transform) {
     TypeId type = get_type_id(collection);
 
     // scalar case: apply transform directly
-    if (type != LMD_TYPE_ARRAY && type != LMD_TYPE_ARRAY &&
+    if (type != LMD_TYPE_ARRAY &&
         type != LMD_TYPE_RANGE && type != LMD_TYPE_MAP &&
         type != LMD_TYPE_ARRAY_NUM && type != LMD_TYPE_ELEMENT &&
         type != LMD_TYPE_OBJECT) {
@@ -1152,19 +1152,20 @@ Item fn_pipe_map(Item collection, PipeMapFn transform) {
         List* result = list();
 
         // use item_keys to get the list of keys
-        ArrayList* keys = item_keys(collection);
+        SymbolKeyList* keys = item_keys(collection);
         if (keys) {
-            for (int64_t i = 0; i < keys->length; i++) {
-                Symbol* key_sym = (Symbol*)keys->data[i];
+            int64_t key_count = symbol_key_list_len(keys);
+            for (int64_t i = 0; i < key_count; i++) {
+                Symbol* key_sym = symbol_key_list_at(keys, i);
                 Item key_item = { .item = y2it(key_sym) };
                 Item value = map_get(mp, key_item);
                 Item transformed = transform(value, key_item);
                 list_push(result, transformed);
             }
-            arraylist_free(keys);
+            symbol_key_list_free(keys);
         }
         result->is_content = 1;
-        return { .list = result };
+        return { .array = result };
     }
 
     // element case: iterate over children (content items, not attributes)
@@ -1180,7 +1181,7 @@ Item fn_pipe_map(Item collection, PipeMapFn transform) {
             list_push(result, transformed);
         }
         result->is_content = 1;
-        return { .list = result };
+        return { .array = result };
     }
 
     // collection case: iterate with index
@@ -1195,7 +1196,7 @@ Item fn_pipe_map(Item collection, PipeMapFn transform) {
         list_push(result, transformed);
     }
     result->is_content = 1;
-    return { .list = result };
+    return { .array = result };
 }
 
 // fn_pipe_where: filter elements where predicate is truthy
@@ -1203,7 +1204,7 @@ Item fn_pipe_where(Item collection, PipeMapFn predicate) {
     TypeId type = get_type_id(collection);
 
     // scalar case: return collection if truthy, else null
-    if (type != LMD_TYPE_ARRAY && type != LMD_TYPE_ARRAY &&
+    if (type != LMD_TYPE_ARRAY &&
         type != LMD_TYPE_RANGE && type != LMD_TYPE_MAP &&
         type != LMD_TYPE_ARRAY_NUM && type != LMD_TYPE_ELEMENT &&
         type != LMD_TYPE_OBJECT) {
@@ -1219,10 +1220,11 @@ Item fn_pipe_where(Item collection, PipeMapFn predicate) {
         Map* mp = collection.map;
         List* result = list();
 
-        ArrayList* keys = item_keys(collection);
+        SymbolKeyList* keys = item_keys(collection);
         if (keys) {
-            for (int64_t i = 0; i < keys->length; i++) {
-                Symbol* key_sym = (Symbol*)keys->data[i];
+            int64_t key_count = symbol_key_list_len(keys);
+            for (int64_t i = 0; i < key_count; i++) {
+                Symbol* key_sym = symbol_key_list_at(keys, i);
                 Item key_item = { .item = y2it(key_sym) };
                 Item value = map_get(mp, key_item);
                 Item pred_result = predicate(value, key_item);
@@ -1230,10 +1232,10 @@ Item fn_pipe_where(Item collection, PipeMapFn predicate) {
                     list_push(result, value);
                 }
             }
-            arraylist_free(keys);
+            symbol_key_list_free(keys);
         }
         result->is_content = 1;
-        return { .list = result };
+        return { .array = result };
     }
 
     // element case: filter children (content items, not attributes)
@@ -1250,7 +1252,7 @@ Item fn_pipe_where(Item collection, PipeMapFn predicate) {
             }
         }
         result->is_content = 1;
-        return { .list = result };
+        return { .array = result };
     }
 
     // collection case
@@ -1267,7 +1269,7 @@ Item fn_pipe_where(Item collection, PipeMapFn predicate) {
         }
     }
     result->is_content = 1;
-    return { .list = result };
+    return { .array = result };
 }
 
 // fn_pipe_call: pass collection as first argument to a function
@@ -1621,7 +1623,7 @@ Item fn_math_random(Item seed_item) {
     List* result = list();
     list_push(result, push_d(value));
     list_push(result, push_l((int64_t)state));
-    return { .list = result };
+    return { .array = result };
 }
 
 //==============================================================================
@@ -1639,7 +1641,7 @@ Item fn_reverse(Item item) {
     if (len == 0) {
         List* result = list();
         result->is_content = 1;
-        return { .list = result };
+        return { .array = result };
     }
 
     if (type == LMD_TYPE_ARRAY_NUM) {
@@ -1650,7 +1652,7 @@ Item fn_reverse(Item item) {
             for (int64_t i = len - 1; i >= 0; i--)
                 list_push(result, vector_get(item, i));
             result->is_content = 1;
-            return { .list = result };
+            return { .array = result };
         } else if (arr->get_elem_type() == ELEM_FLOAT) {
             ArrayNum* result = array_float_new(len);
             for (int64_t i = 0; i < len; i++)
@@ -1669,7 +1671,7 @@ Item fn_reverse(Item item) {
             list_push(result, vector_get(item, i));
         }
         result->is_content = 1;
-        return { .list = result };
+        return { .array = result };
     }
 }
 
@@ -1684,7 +1686,7 @@ Item fn_sort1(Item item) {
     if (len == 0) {
         List* result = list();
         result->is_content = 1;
-        return { .list = result };
+        return { .array = result };
     }
 
     if (type == LMD_TYPE_ARRAY_NUM) {
@@ -1803,7 +1805,7 @@ Item fn_sort2(Item item, Item dir_item) {
     if (len == 0) {
         List* result = list();
         result->is_content = 1;
-        return { .list = result };
+        return { .array = result };
     }
 
     // Parse the 2nd argument: direction, key function, or options map
@@ -2098,7 +2100,7 @@ Item fn_take(Item vec, Item n_item) {
             List* result = list();
             for (int64_t i = 0; i < n; i++) list_push(result, vector_get(vec, i));
             result->is_content = 1;
-            return { .list = result };
+            return { .array = result };
         } else if (arr->get_elem_type() == ELEM_FLOAT) {
             ArrayNum* result = array_float_new(n);
             for (int64_t i = 0; i < n; i++) result->float_items[i] = arr->float_items[i];
@@ -2113,7 +2115,7 @@ Item fn_take(Item vec, Item n_item) {
         List* result = list();
         for (int64_t i = 0; i < n; i++) list_push(result, vector_get(vec, i));
         result->is_content = 1;
-        return { .list = result };
+        return { .array = result };
     }
 }
 
@@ -2152,7 +2154,7 @@ Item fn_drop(Item vec, Item n_item) {
             List* result = list();
             for (int64_t i = n; i < len; i++) list_push(result, vector_get(vec, i));
             result->is_content = 1;
-            return { .list = result };
+            return { .array = result };
         } else if (arr->get_elem_type() == ELEM_FLOAT) {
             ArrayNum* result = array_float_new(new_len);
             for (int64_t i = 0; i < new_len; i++) result->float_items[i] = arr->float_items[n + i];
@@ -2167,7 +2169,7 @@ Item fn_drop(Item vec, Item n_item) {
         List* result = list();
         for (int64_t i = n; i < len; i++) list_push(result, vector_get(vec, i));
         result->is_content = 1;
-        return { .list = result };
+        return { .array = result };
     }
 }
 
@@ -2217,7 +2219,7 @@ Item fn_slice(Item vec, Item start_item, Item end_item) {
             List* result = list();
             for (int64_t i = start; i < end; i++) list_push(result, vector_get(vec, i));
             result->is_content = 1;
-            return { .list = result };
+            return { .array = result };
         } else if (arr->get_elem_type() == ELEM_FLOAT) {
             ArrayNum* result = array_float_new(new_len);
             for (int64_t i = 0; i < new_len; i++) result->float_items[i] = arr->float_items[start + i];
@@ -2232,7 +2234,7 @@ Item fn_slice(Item vec, Item start_item, Item end_item) {
         List* result = list();
         for (int64_t i = start; i < end; i++) list_push(result, vector_get(vec, i));
         result->is_content = 1;
-        return { .list = result };
+        return { .array = result };
     }
 }
 
@@ -2251,10 +2253,10 @@ Item fn_zip(Item a, Item b) {
         List* pair = list();
         list_push(pair, vector_get(a, i));
         list_push(pair, vector_get(b, i));
-        list_push(result, { .list = pair });
+        list_push(result, { .array = pair });
     }
     result->is_content = 1;
-    return { .list = result };
+    return { .array = result };
 }
 
 // range(start, end, step) - generate range with step

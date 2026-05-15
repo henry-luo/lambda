@@ -135,7 +135,6 @@ typedef struct TypedItem {
         Container* container;
         Range* range;
         Array* array;
-        List* list;
         Map* map;
         Element* element;
         Object* object;

@@ -142,7 +142,6 @@ typedef struct Item {
         // direct pointers to the container types
         Container* container;
         Range* range;
-        List* list;
         Array* array;
         ArrayNum* array_num;
         ArrayNum* array_int;      // compat alias (elem_type == ELEM_INT)
@@ -258,7 +257,6 @@ struct ConstItem {
         // direct pointers to the container types
         const Container* container;
         const Range* range;
-        const List* list;
         const Array* array;
         const ArrayNum* array_num;
         const ArrayNum* array_int;      // compat alias
@@ -395,7 +393,7 @@ struct VMapVtable {
     Item    (*get)(void* data, Item key);                    // map[key]
     void    (*set)(void* data, Item key, Item value);        // in-place mutation (pn context)
     int64_t (*count)(void* data);                            // len(map)
-    ArrayList* (*keys)(void* data);                          // item_keys() → ArrayList<String*>
+    SymbolKeyList* (*keys)(void* data);                      // item_keys() → SymbolKeyList
     Item    (*key_at)(void* data, int64_t index);            // original key at insertion index
     Item    (*value_at)(void* data, int64_t index);          // value at insertion index
     void    (*destroy)(void* data);                          // free backing store
@@ -428,7 +426,7 @@ struct Object : Container {
 // so just return the typed union field.
 
 static inline Map*     it2map(Item item)   { return item.map; }
-static inline List*    it2list(Item item)   { return item.list; }
+static inline List*    it2list(Item item)   { return item.array; }
 static inline Element* it2elmt(Item item)   { return item.element; }
 static inline Object*  it2obj(Item item)    { return item.object; }
 static inline Array*   it2arr(Item item)    { return item.array; }

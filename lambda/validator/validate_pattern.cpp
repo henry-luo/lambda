@@ -225,7 +225,7 @@ ValidationResult* validate_occurrence_type(
     }
 
     // Handle generic List/Array
-    return validate_list_occurrence(validator, item.list, type_unary);
+    return validate_list_occurrence(validator, item.array, type_unary);
 }
 
 // ==================== Union Type Validation ====================

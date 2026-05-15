@@ -1753,7 +1753,7 @@ Item MarkEditor::array_set(Item array, int64_t index, Item value) {
 Item MarkEditor::array_insert(Item array, int64_t index, Item value) {
     TypeId array_type = get_type_id(array);
 
-    if (array_type == LMD_TYPE_ARRAY || array_type == LMD_TYPE_ELEMENT || array_type == LMD_TYPE_ARRAY) {
+    if (array_type == LMD_TYPE_ARRAY || array_type == LMD_TYPE_ELEMENT) {
         // All these types share the same memory layout for items/length/capacity
         Array* arr = array.array;  // Works for List and Element too since they share layout
 

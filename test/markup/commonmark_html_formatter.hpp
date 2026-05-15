@@ -599,7 +599,7 @@ static void format_cm_item(CommonMarkHtmlContext& ctx, const ItemReader& item) {
     else if (item.isList()) {
         // Access list directly from Item
         Item raw_item = item.item();
-        List* list = raw_item.list;
+        List* list = raw_item.array;
         if (list && list->items) {
             for (int64_t i = 0; i < list->length; i++) {
                 ItemReader child(list->items[i].to_const());
