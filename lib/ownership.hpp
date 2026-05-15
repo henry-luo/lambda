@@ -13,6 +13,7 @@ namespace lam {
 struct GcHeapDomain {};
 struct PoolDomain {};
 struct LayoutSessionDomain {};
+struct InputScratchDomain {};
 
 template<bool Value>
 struct BoolConstant {
@@ -39,6 +40,9 @@ template<> struct DomainOutlives<LayoutSessionDomain, LayoutSessionDomain> : Tru
 template<> struct DomainOutlives<PoolDomain, LayoutSessionDomain> : TrueType {};
 template<> struct DomainOutlives<GcHeapDomain, LayoutSessionDomain> : TrueType {};
 template<> struct DomainOutlives<GcHeapDomain, PoolDomain> : TrueType {};
+template<> struct DomainOutlives<InputScratchDomain, InputScratchDomain> : TrueType {};
+template<> struct DomainOutlives<GcHeapDomain, InputScratchDomain> : TrueType {};
+template<> struct DomainOutlives<PoolDomain, InputScratchDomain> : TrueType {};
 
 template<class Domain> struct DomainTraits;
 
@@ -62,6 +66,12 @@ struct DomainTraits<LayoutSessionDomain> {
         p->~T();
         mem_free(p);
     }
+};
+
+template<>
+struct DomainTraits<InputScratchDomain> {
+    template<class T>
+    static void destroy(T*) {}
 };
 
 template<class T, class Domain>

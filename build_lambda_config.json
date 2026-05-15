@@ -1751,6 +1751,20 @@
                         "icon": "🧩"
                     },
                     {
+                        "source": "test_lambda_typed.cpp",
+                        "name": "Lambda Typed Item Tests",
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_lambda_typed.exe",
+                        "icon": "🧩"
+                    },
+                    {
                         "source": "test_npm_semver_gtest.cpp",
                         "name": "NPM Semver Tests",
                         "dependencies": [],
