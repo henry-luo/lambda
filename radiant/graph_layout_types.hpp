@@ -2,20 +2,96 @@
 #define RADIANT_GRAPH_LAYOUT_TYPES_HPP
 
 #include "../lib/hashmap.h"
-#include "../lib/arraylist.h"
+#include "../lib/arraylist.hpp"
 
 // Forward declaration for theme support
 struct DiagramTheme;
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+typedef struct NodePosition NodePosition;
+typedef struct EdgePath EdgePath;
+typedef struct SubgraphPosition SubgraphPosition;
+typedef struct LayoutNode LayoutNode;
+typedef struct LayoutEdge LayoutEdge;
+typedef struct LayoutLayer LayoutLayer;
+typedef struct LayoutSubgraph LayoutSubgraph;
+
+typedef lam::ArrayOwnedList<NodePosition, lam::LayoutSessionDomain> NodePositionList;
+typedef lam::ArrayOwnedList<EdgePath, lam::LayoutSessionDomain> EdgePathList;
+typedef lam::ArrayOwnedList<SubgraphPosition, lam::LayoutSessionDomain> SubgraphPositionList;
+typedef lam::ArrayOwnedList<LayoutNode, lam::LayoutSessionDomain> LayoutNodeList;
+typedef lam::ArrayOwnedList<LayoutEdge, lam::LayoutSessionDomain> LayoutEdgeList;
+typedef lam::ArrayOwnedList<LayoutLayer, lam::LayoutSessionDomain> LayoutLayerList;
+typedef lam::ArrayOwnedList<LayoutSubgraph, lam::LayoutSessionDomain> LayoutSubgraphList;
+typedef lam::ArrayList<LayoutNode*> LayoutNodeRefList;
+typedef lam::ArrayList<LayoutEdge*> LayoutEdgeRefList;
+typedef lam::ArrayList<LayoutSubgraph*> LayoutSubgraphRefList;
+typedef lam::ArrayList<const char*> GraphNodeIdList;
+
+typedef lam::PersistentList<NodePositionList, lam::LayoutSessionDomain> PersistentNodePositionList;
+typedef lam::PersistentList<EdgePathList, lam::LayoutSessionDomain> PersistentEdgePathList;
+typedef lam::PersistentList<SubgraphPositionList, lam::LayoutSessionDomain> PersistentSubgraphPositionList;
+typedef lam::PersistentList<LayoutNodeList, lam::LayoutSessionDomain> PersistentLayoutNodeList;
+typedef lam::PersistentList<LayoutEdgeList, lam::LayoutSessionDomain> PersistentLayoutEdgeList;
+typedef lam::PersistentList<LayoutLayerList, lam::LayoutSessionDomain> PersistentLayoutLayerList;
+typedef lam::PersistentList<LayoutSubgraphList, lam::LayoutSessionDomain> PersistentLayoutSubgraphList;
+
+template<typename List>
+static inline List* graph_list_new(size_t initial_capacity) {
+    void* raw = mem_alloc(sizeof(List), MEM_CAT_LAYOUT);
+    if (!raw) return nullptr;
+    return new (raw) List(MEM_CAT_LAYOUT, initial_capacity);
+}
+
+template<typename List>
+static inline void graph_list_free(List* list) {
+    if (!list) return;
+    list->~List();
+    mem_free(list);
+}
 
 // 2D point for coordinates and paths
 typedef struct Point2D {
     float x;
     float y;
 } Point2D;
+
+typedef lam::ArrayOwnedList<Point2D, lam::LayoutSessionDomain> Point2DList;
+typedef lam::PersistentList<Point2DList, lam::LayoutSessionDomain> PersistentPoint2DList;
+
+static inline PersistentPoint2DList* point2d_list_new(size_t initial_capacity) {
+    void* raw = mem_alloc(sizeof(PersistentPoint2DList), MEM_CAT_LAYOUT);
+    if (!raw) return nullptr;
+    return new (raw) PersistentPoint2DList(MEM_CAT_LAYOUT, initial_capacity);
+}
+
+static inline void point2d_list_free(PersistentPoint2DList* list) {
+    if (!list) return;
+    list->~PersistentPoint2DList();
+    mem_free(list);
+}
+
+static inline bool point2d_list_append(PersistentPoint2DList* list, const Point2D& point) {
+    if (!list) return false;
+    lam::SessionPtr<Point2D> owned = lam::session_make<Point2D>(MEM_CAT_LAYOUT);
+    if (!owned) {
+        log_error("point2d_list_append_alloc_failed");
+        return false;
+    }
+    *owned = point;
+    return list->get().append(static_cast<lam::SessionPtr<Point2D>&&>(owned));
+}
+
+static inline Point2D* point2d_list_at(PersistentPoint2DList* list, size_t index) {
+    return list ? list->get()[index].get() : nullptr;
+}
+
+static inline const Point2D* point2d_list_at(const PersistentPoint2DList* list, size_t index) {
+    return list ? list->get()[index].get() : nullptr;
+}
+
+static inline size_t point2d_list_size(const PersistentPoint2DList* list) {
+    return list ? list->get().size() : 0;
+}
 
 // Node position after layout
 typedef struct NodePosition {
@@ -30,7 +106,7 @@ typedef struct NodePosition {
 typedef struct EdgePath {
     const char* from_id;    // Source node ID
     const char* to_id;      // Target node ID
-    ArrayList* points;      // Array of Point2D
+    PersistentPoint2DList* points; // Owned Point2D path points
     bool is_bezier;         // True for spline curves
     bool directed;          // True for directed edge (arrow at end)
     const char* edge_style; // Edge style: "solid", "dotted", "thick"
@@ -52,9 +128,9 @@ typedef struct GraphLayout {
     float graph_width;      // Total graph width
     float graph_height;     // Total graph height
 
-    ArrayList* node_positions;      // Array of NodePosition*
-    ArrayList* edge_paths;          // Array of EdgePath*
-    ArrayList* subgraph_positions;  // Array of SubgraphPosition*
+    PersistentNodePositionList* node_positions;      // Owned NodePosition results
+    PersistentEdgePathList* edge_paths;              // Owned EdgePath results
+    PersistentSubgraphPositionList* subgraph_positions; // Owned SubgraphPosition results
 
     // Layout parameters
     float node_spacing_x;   // Horizontal spacing between nodes
@@ -107,8 +183,8 @@ typedef struct LayoutNode {
     int order;              // Position within layer
 
     // Algorithm internals
-    ArrayList* in_edges;    // Incoming edges
-    ArrayList* out_edges;   // Outgoing edges
+    LayoutEdgeRefList* in_edges;    // Borrowed incoming edges
+    LayoutEdgeRefList* out_edges;   // Borrowed outgoing edges
 
     // Styling (simplified)
     const char* fill;
@@ -130,7 +206,7 @@ typedef struct LayoutEdge {
     bool arrow_end;         // true to draw arrow at end
 
     // Layout computed values
-    ArrayList* path_points;  // Array of Point2D
+    PersistentPoint2DList* path_points; // Owned Point2D path points
 
     // Attributes - simplified, don't need hashmap
     const char* style;      // "solid", "dotted", "thick"
@@ -139,7 +215,7 @@ typedef struct LayoutEdge {
 // Internal: Layer in hierarchical layout
 typedef struct LayoutLayer {
     int rank;               // Layer index
-    ArrayList* nodes;       // Array of LayoutNode*
+    LayoutNodeRefList* nodes; // Borrowed LayoutNode refs
 } LayoutLayer;
 
 // Internal: Subgraph/cluster in layout graph
@@ -148,8 +224,8 @@ typedef struct LayoutSubgraph {
     const char* label;      // Display label
     const char* direction;  // Direction override ("TB", "LR", "BT", "RL", or NULL for inherit)
 
-    ArrayList* node_ids;    // Array of const char* - IDs of nodes in this subgraph
-    ArrayList* subgraphs;   // Array of LayoutSubgraph* - nested subgraphs
+    GraphNodeIdList* node_ids;          // Borrowed node ID strings
+    LayoutSubgraphRefList* subgraphs;   // Borrowed nested subgraphs
 
     // Layout computed values
     float x, y;             // Top-left position
@@ -164,10 +240,10 @@ typedef struct LayoutSubgraph {
 
 // Internal: Graph structure for layout algorithms
 typedef struct LayoutGraph {
-    ArrayList* nodes;       // Array of LayoutNode*
-    ArrayList* edges;       // Array of LayoutEdge*
-    ArrayList* layers;      // Array of LayoutLayer* (for hierarchical layouts)
-    ArrayList* subgraphs;   // Array of LayoutSubgraph* (clusters/groups)
+    PersistentLayoutNodeList* nodes;        // Owned LayoutNode objects
+    PersistentLayoutEdgeList* edges;        // Owned LayoutEdge objects
+    PersistentLayoutLayerList* layers;      // Owned LayoutLayer objects
+    PersistentLayoutSubgraphList* subgraphs; // Owned LayoutSubgraph objects
 
     // Graph properties
     bool is_directed;
@@ -177,9 +253,5 @@ typedef struct LayoutGraph {
     float min_x, min_y;
     float max_x, max_y;
 } LayoutGraph;
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // RADIANT_GRAPH_LAYOUT_TYPES_HPP

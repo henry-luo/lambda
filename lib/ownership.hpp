@@ -14,6 +14,32 @@ struct GcHeapDomain {};
 struct PoolDomain {};
 struct LayoutSessionDomain {};
 
+template<bool Value>
+struct BoolConstant {
+    static const bool value = Value;
+};
+
+typedef BoolConstant<true> TrueType;
+typedef BoolConstant<false> FalseType;
+
+template<bool Condition, class T = void>
+struct OwnershipEnableIf {};
+
+template<class T>
+struct OwnershipEnableIf<true, T> {
+    typedef T type;
+};
+
+template<class SourceDomain, class StorageDomain>
+struct DomainOutlives : FalseType {};
+
+template<> struct DomainOutlives<PoolDomain, PoolDomain> : TrueType {};
+template<> struct DomainOutlives<GcHeapDomain, GcHeapDomain> : TrueType {};
+template<> struct DomainOutlives<LayoutSessionDomain, LayoutSessionDomain> : TrueType {};
+template<> struct DomainOutlives<PoolDomain, LayoutSessionDomain> : TrueType {};
+template<> struct DomainOutlives<GcHeapDomain, LayoutSessionDomain> : TrueType {};
+template<> struct DomainOutlives<GcHeapDomain, PoolDomain> : TrueType {};
+
 template<class Domain> struct DomainTraits;
 
 template<>
@@ -135,14 +161,18 @@ class PersistentField {
 public:
     PersistentField() : p_(nullptr) {}
 
-    void set(BorrowedPtr<T, Domain> b) { p_ = b.get(); }
-    void set(BorrowedPtr<T, GcHeapDomain> b) { p_ = b.get(); }
+    template<class SourceDomain>
+    typename OwnershipEnableIf<DomainOutlives<SourceDomain, Domain>::value>::type
+    set(BorrowedPtr<T, SourceDomain> b) {
+        p_ = b.get();
+    }
 
     template<class S>
     void set(OwnedPtr<T, S>&&) = delete;
 
     template<class S>
-    void set(BorrowedPtr<T, S>) = delete;
+    typename OwnershipEnableIf<!DomainOutlives<S, Domain>::value>::type
+    set(BorrowedPtr<T, S>) = delete;
 
     T* get() const { return p_; }
 };
@@ -154,15 +184,20 @@ class PersistentFieldRef {
 public:
     explicit PersistentFieldRef(T*& p) : p_(p) {}
 
-    void set(BorrowedPtr<T, Domain> b) { p_ = b.get(); }
-    void set(BorrowedPtr<T, GcHeapDomain> b) { p_ = b.get(); }
+    template<class SourceDomain>
+    typename OwnershipEnableIf<DomainOutlives<SourceDomain, Domain>::value>::type
+    set(BorrowedPtr<T, SourceDomain> b) {
+        p_ = b.get();
+    }
+
     void clear() { p_ = nullptr; }
 
     template<class S>
     void set(OwnedPtr<T, S>&&) = delete;
 
     template<class S>
-    void set(BorrowedPtr<T, S>) = delete;
+    typename OwnershipEnableIf<!DomainOutlives<S, Domain>::value>::type
+    set(BorrowedPtr<T, S>) = delete;
 
     T* get() const { return p_; }
 };

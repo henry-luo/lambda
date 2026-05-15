@@ -8,63 +8,53 @@
 // Orthogonal Snapping
 // ============================================================================
 
-void snap_to_orthogonal(ArrayList* points, bool vertical_first) {
-    if (!points || points->length < 2) return;
+void snap_to_orthogonal(PersistentPoint2DList* points, bool vertical_first) {
+    size_t point_count = point2d_list_size(points);
+    if (!points || point_count < 2) return;
 
-    ArrayList* result = arraylist_new(points->length * 2);
+    PersistentPoint2DList* result = point2d_list_new(point_count * 2);
+    if (!result) return;
 
     // copy first point
-    Point2D* first = (Point2D*)points->data[0];
-    Point2D* first_copy = (Point2D*)mem_calloc(1, sizeof(Point2D), MEM_CAT_LAYOUT);
-    first_copy->x = first->x;
-    first_copy->y = first->y;
-    arraylist_append(result, first_copy);
+    Point2D* first = point2d_list_at(points, 0);
+    if (first) point2d_list_append(result, *first);
 
-    for (int i = 1; i < points->length; i++) {
-        Point2D* prev = (Point2D*)result->data[result->length - 1];
-        Point2D* curr = (Point2D*)points->data[i];
+    for (size_t i = 1; i < point_count; i++) {
+        Point2D* prev = point2d_list_at(result, point2d_list_size(result) - 1);
+        Point2D* curr = point2d_list_at(points, i);
+        if (!prev || !curr) continue;
 
         float dx = fabsf(curr->x - prev->x);
         float dy = fabsf(curr->y - prev->y);
 
         // Already axis-aligned (or close enough)
         if (dx < 1.0f || dy < 1.0f) {
-            Point2D* curr_copy = (Point2D*)mem_calloc(1, sizeof(Point2D), MEM_CAT_LAYOUT);
-            curr_copy->x = curr->x;
-            curr_copy->y = curr->y;
-            arraylist_append(result, curr_copy);
+            point2d_list_append(result, *curr);
             continue;
         }
 
         // Insert L-bend
         // TD/BT layouts: vertical first — edge drops along the rank axis, then adjusts
         // LR/RL layouts: horizontal first — edge moves along the rank axis, then adjusts
-        Point2D* bend = (Point2D*)mem_calloc(1, sizeof(Point2D), MEM_CAT_LAYOUT);
+        Point2D bend;
         if (vertical_first) {
-            bend->x = prev->x;
-            bend->y = curr->y;
+            bend.x = prev->x;
+            bend.y = curr->y;
         } else {
-            bend->x = curr->x;
-            bend->y = prev->y;
+            bend.x = curr->x;
+            bend.y = prev->y;
         }
-        arraylist_append(result, bend);
+        point2d_list_append(result, bend);
 
-        Point2D* curr_copy = (Point2D*)mem_calloc(1, sizeof(Point2D), MEM_CAT_LAYOUT);
-        curr_copy->x = curr->x;
-        curr_copy->y = curr->y;
-        arraylist_append(result, curr_copy);
+        point2d_list_append(result, *curr);
     }
 
     // Replace original points with result
-    for (int i = 0; i < points->length; i++) {
-        mem_free(points->data[i]);
+    points->get().clear();
+    while (!result->get().empty()) {
+        points->get().append(result->get().remove_owned(0));
     }
-    arraylist_clear(points);
-
-    for (int i = 0; i < result->length; i++) {
-        arraylist_append(points, result->data[i]);
-    }
-    arraylist_free(result);
+    point2d_list_free(result);
 
     // Remove collinear points after orthogonalization
     remove_collinear_points(points);
@@ -74,41 +64,45 @@ void snap_to_orthogonal(ArrayList* points, bool vertical_first) {
 // Collinear Point Removal
 // ============================================================================
 
-void remove_collinear_points(ArrayList* points) {
-    if (!points || points->length < 3) return;
+void remove_collinear_points(PersistentPoint2DList* points) {
+    size_t point_count = point2d_list_size(points);
+    if (!points || point_count < 3) return;
 
-    ArrayList* result = arraylist_new(points->length);
+    PersistentPoint2DList* result = point2d_list_new(point_count);
+    if (!result) return;
 
     // Always keep first point
-    arraylist_append(result, points->data[0]);
+    Point2D* first = point2d_list_at(points, 0);
+    if (first) point2d_list_append(result, *first);
 
-    for (int i = 1; i < points->length - 1; i++) {
-        Point2D* a = (Point2D*)result->data[result->length - 1];
-        Point2D* b = (Point2D*)points->data[i];
-        Point2D* c = (Point2D*)points->data[i + 1];
+    for (size_t i = 1; i < point_count - 1; i++) {
+        Point2D* a = point2d_list_at(result, point2d_list_size(result) - 1);
+        Point2D* b = point2d_list_at(points, i);
+        Point2D* c = point2d_list_at(points, i + 1);
+        if (!a || !b || !c) continue;
 
         // Check if a-b-c are collinear (on same horizontal or vertical line)
         bool same_x = fabsf(a->x - b->x) < 1.0f && fabsf(b->x - c->x) < 1.0f;
         bool same_y = fabsf(a->y - b->y) < 1.0f && fabsf(b->y - c->y) < 1.0f;
 
         if (same_x || same_y) {
-            // Skip redundant middle point - free it
-            mem_free(points->data[i]);
+            // Skip redundant middle point.
             continue;
         }
 
-        arraylist_append(result, points->data[i]);
+        point2d_list_append(result, *b);
     }
 
     // Always keep last point
-    arraylist_append(result, points->data[points->length - 1]);
+    Point2D* last = point2d_list_at(points, point_count - 1);
+    if (last) point2d_list_append(result, *last);
 
     // Replace original array
-    arraylist_clear(points);
-    for (int i = 0; i < result->length; i++) {
-        arraylist_append(points, result->data[i]);
+    points->get().clear();
+    while (!result->get().empty()) {
+        points->get().append(result->get().remove_owned(0));
     }
-    arraylist_free(result);
+    point2d_list_free(result);
 }
 
 // ============================================================================
@@ -359,10 +353,11 @@ void post_process_edges(LayoutGraph* graph, const char* direction) {
     log_debug("post-processing edges: direction=%s, vertical_first=%d",
               direction ? direction : "TB", vertical_first);
 
-    for (int i = 0; i < graph->edges->length; i++) {
-        LayoutEdge* edge = (LayoutEdge*)graph->edges->data[i];
+    for (size_t i = 0; i < graph->edges->get().size(); i++) {
+        LayoutEdge* edge = graph->edges->get()[i].get();
 
-        if (!edge->path_points || edge->path_points->length < 2) {
+        size_t point_count = point2d_list_size(edge->path_points);
+        if (!edge->path_points || point_count < 2) {
             continue;
         }
 
@@ -371,15 +366,14 @@ void post_process_edges(LayoutGraph* graph, const char* direction) {
         LayoutNode* to_node = edge->to_node;
 
         if (from_node && shape_needs_special_clipping(from_node->shape)) {
-            Point2D* start_pt = (Point2D*)edge->path_points->data[0];
+            Point2D* start_pt = point2d_list_at(edge->path_points, 0);
             Point2D clipped = clip_endpoint_to_shape(*start_pt, from_node);
             start_pt->x = clipped.x;
             start_pt->y = clipped.y;
         }
 
         if (to_node && shape_needs_special_clipping(to_node->shape)) {
-            int last_idx = edge->path_points->length - 1;
-            Point2D* end_pt = (Point2D*)edge->path_points->data[last_idx];
+            Point2D* end_pt = point2d_list_at(edge->path_points, point_count - 1);
             Point2D clipped = clip_endpoint_to_shape(*end_pt, to_node);
             end_pt->x = clipped.x;
             end_pt->y = clipped.y;
@@ -390,16 +384,16 @@ void post_process_edges(LayoutGraph* graph, const char* direction) {
 
         // Step 3: Re-clip endpoints after orthogonalization if needed
         // The orthogonal snapping may have changed the first/last segment direction
+        point_count = point2d_list_size(edge->path_points);
         if (from_node && shape_needs_special_clipping(from_node->shape)) {
-            Point2D* start_pt = (Point2D*)edge->path_points->data[0];
+            Point2D* start_pt = point2d_list_at(edge->path_points, 0);
             Point2D clipped = clip_endpoint_to_shape(*start_pt, from_node);
             start_pt->x = clipped.x;
             start_pt->y = clipped.y;
         }
 
         if (to_node && shape_needs_special_clipping(to_node->shape)) {
-            int last_idx = edge->path_points->length - 1;
-            Point2D* end_pt = (Point2D*)edge->path_points->data[last_idx];
+            Point2D* end_pt = point2d_list_at(edge->path_points, point_count - 1);
             Point2D clipped = clip_endpoint_to_shape(*end_pt, to_node);
             end_pt->x = clipped.x;
             end_pt->y = clipped.y;

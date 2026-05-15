@@ -1,7 +1,6 @@
 #include "layout_counters.hpp"
 #include "../lib/arena.h"
 #include "../lib/hashmap.h"
-#include "../lib/arraylist.h"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include "../lib/str.h"
@@ -41,7 +40,9 @@ CounterContext* counter_context_create(Arena* arena) {
 
     ctx->arena = arena;
     ctx->current_scope = nullptr;
-    ctx->scope_stack = arraylist_new(16);
+    void* stack_mem = mem_alloc(sizeof(lam::ArrayList<CounterScope*>), MEM_CAT_LAYOUT);
+    if (!stack_mem) return nullptr;
+    ctx->scope_stack = new (stack_mem) lam::ArrayList<CounterScope*>(MEM_CAT_LAYOUT, 16);
 
     // Create root scope
     counter_push_scope(ctx);
@@ -55,13 +56,14 @@ void counter_context_destroy(CounterContext* ctx) {
 
     // Free hash maps in each scope
     if (ctx->scope_stack) {
-        for (int i = 0; i < ctx->scope_stack->length; i++) {
-            CounterScope* scope = (CounterScope*)ctx->scope_stack->data[i];
+        for (size_t i = 0; i < ctx->scope_stack->size(); i++) {
+            CounterScope* scope = (*ctx->scope_stack)[i];
             if (scope && scope->counters) {
                 hashmap_free(scope->counters);
             }
         }
-        arraylist_free(ctx->scope_stack);
+        ctx->scope_stack->~ArrayList<CounterScope*>();
+        mem_free(ctx->scope_stack);
     }
 
     log_debug("[Counters] Destroyed counter context");
@@ -81,7 +83,7 @@ void counter_push_scope(CounterContext* ctx) {
 
     // Push onto stack
     if (ctx->scope_stack) {
-        arraylist_append(ctx->scope_stack, scope);
+        ctx->scope_stack->append(scope);
     }
 
     ctx->current_scope = scope;
@@ -90,24 +92,24 @@ void counter_push_scope(CounterContext* ctx) {
 void counter_pop_scope(CounterContext* ctx) {
     if (!ctx || !ctx->scope_stack) return;
 
-    int size = ctx->scope_stack->length;
+    size_t size = ctx->scope_stack->size();
     if (size <= 1) {
         // Don't pop root scope
         return;
     }
 
     // Free the hash map before removing
-    CounterScope* scope = (CounterScope*)ctx->scope_stack->data[size - 1];
+    CounterScope* scope = (*ctx->scope_stack)[size - 1];
     if (scope && scope->counters) {
         hashmap_free(scope->counters);
     }
 
     // Pop from stack
-    arraylist_remove(ctx->scope_stack, size - 1);
+    ctx->scope_stack->remove(size - 1);
 
     // Update current scope to parent
     if (size > 1) {
-        ctx->current_scope = (CounterScope*)ctx->scope_stack->data[size - 2];
+        ctx->current_scope = (*ctx->scope_stack)[size - 2];
     } else {
         ctx->current_scope = nullptr;
     }
@@ -116,11 +118,11 @@ void counter_pop_scope(CounterContext* ctx) {
 void counter_pop_scope_propagate(CounterContext* ctx, bool propagate_resets) {
     if (!ctx || !ctx->scope_stack) return;
 
-    int size = ctx->scope_stack->length;
+    size_t size = ctx->scope_stack->size();
     if (size <= 1) return;
 
-    CounterScope* scope = (CounterScope*)ctx->scope_stack->data[size - 1];
-    CounterScope* parent = (size > 1) ? (CounterScope*)ctx->scope_stack->data[size - 2] : nullptr;
+    CounterScope* scope = (*ctx->scope_stack)[size - 1];
+    CounterScope* parent = (size > 1) ? (*ctx->scope_stack)[size - 2] : nullptr;
 
     // Propagate counters from popped scope to parent.
     // CSS 2.1 §12.4.1: "The scope of a counter starts at the first element in the
@@ -168,8 +170,8 @@ void counter_pop_scope_propagate(CounterContext* ctx, bool propagate_resets) {
                 // created a nested scope and shouldn't propagate upward.
                 if (cv->created_by_reset) {
                     bool ancestor_has_counter = false;
-                    for (int si = size - 3; si >= 0; si--) {
-                        CounterScope* ancestor = (CounterScope*)ctx->scope_stack->data[si];
+                    for (size_t si = size - 2; si > 0; si--) {
+                        CounterScope* ancestor = (*ctx->scope_stack)[si - 1];
                         if (ancestor && ancestor->counters) {
                             CounterValue* anc_cv = (CounterValue*)hashmap_get(ancestor->counters, &search_key);
                             if (anc_cv) {
@@ -201,11 +203,11 @@ void counter_pop_scope_propagate(CounterContext* ctx, bool propagate_resets) {
     }
 
     // Pop from stack
-    arraylist_remove(ctx->scope_stack, size - 1);
+    ctx->scope_stack->remove(size - 1);
 
     // Update current scope to parent
     if (size > 1) {
-        ctx->current_scope = (CounterScope*)ctx->scope_stack->data[size - 2];
+        ctx->current_scope = (*ctx->scope_stack)[size - 2];
     } else {
         ctx->current_scope = nullptr;
     }

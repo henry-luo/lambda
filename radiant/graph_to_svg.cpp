@@ -465,7 +465,8 @@ static Item render_arrowhead(MarkBuilder& builder, float x, float y, float angle
 // Helper: render edge path with style support
 static Item render_edge_path(MarkBuilder& builder, Pool* pool, EdgePath* path,
                              const char* stroke, float stroke_width) {
-    if (!path->points || path->points->length < 2) {
+    size_t point_count = point2d_list_size(path->points);
+    if (!path->points || point_count < 2) {
         return ItemNull;
     }
 
@@ -479,22 +480,22 @@ static Item render_edge_path(MarkBuilder& builder, Pool* pool, EdgePath* path,
     // build path data string
     StringBuf* sb = stringbuf_new(pool);
 
-    Point2D* first = (Point2D*)path->points->data[0];
+    const Point2D* first = point2d_list_at(path->points, 0);
     stringbuf_append_format(sb, "M %.1f,%.1f", first->x, first->y);
 
-    if (path->is_bezier && path->points->length >= 4) {
+    if (path->is_bezier && point_count >= 4) {
         // use cubic bezier curves
-        for (int i = 1; i + 2 < path->points->length; i += 3) {
-            Point2D* cp1 = (Point2D*)path->points->data[i];
-            Point2D* cp2 = (Point2D*)path->points->data[i + 1];
-            Point2D* end = (Point2D*)path->points->data[i + 2];
+        for (size_t i = 1; i + 2 < point_count; i += 3) {
+            const Point2D* cp1 = point2d_list_at(path->points, i);
+            const Point2D* cp2 = point2d_list_at(path->points, i + 1);
+            const Point2D* end = point2d_list_at(path->points, i + 2);
             stringbuf_append_format(sb, " C %.1f,%.1f %.1f,%.1f %.1f,%.1f",
                             cp1->x, cp1->y, cp2->x, cp2->y, end->x, end->y);
         }
     } else {
         // straight lines
-        for (int i = 1; i < path->points->length; i++) {
-            Point2D* pt = (Point2D*)path->points->data[i];
+        for (size_t i = 1; i < point_count; i++) {
+            const Point2D* pt = point2d_list_at(path->points, i);
             stringbuf_append_format(sb, " L %.1f,%.1f", pt->x, pt->y);
         }
     }
@@ -517,14 +518,14 @@ static Item render_edge_path(MarkBuilder& builder, Pool* pool, EdgePath* path,
     bool need_arrow_end = path->directed || path->arrow_end;
     bool need_arrow_start = path->arrow_start;
 
-    if ((need_arrow_end || need_arrow_start) && path->points->length >= 2) {
+    if ((need_arrow_end || need_arrow_start) && point_count >= 2) {
         ElementBuilder group_builder = builder.element("g");
         group_builder.child(path_item);
 
         // arrow at end
         if (need_arrow_end) {
-            Point2D* prev = (Point2D*)path->points->data[path->points->length - 2];
-            Point2D* last = (Point2D*)path->points->data[path->points->length - 1];
+            const Point2D* prev = point2d_list_at(path->points, point_count - 2);
+            const Point2D* last = point2d_list_at(path->points, point_count - 1);
 
             float dx = last->x - prev->x;
             float dy = last->y - prev->y;
@@ -536,8 +537,8 @@ static Item render_edge_path(MarkBuilder& builder, Pool* pool, EdgePath* path,
 
         // arrow at start (for bidirectional edges)
         if (need_arrow_start) {
-            Point2D* first_pt = (Point2D*)path->points->data[0];
-            Point2D* second = (Point2D*)path->points->data[1];
+            const Point2D* first_pt = point2d_list_at(path->points, 0);
+            const Point2D* second = point2d_list_at(path->points, 1);
 
             float dx = first_pt->x - second->x;
             float dy = first_pt->y - second->y;
@@ -617,8 +618,8 @@ Item graph_to_svg_with_options(Element* graph, GraphLayout* layout,
     ElementBuilder edges_group_builder = builder.element("g");
     edges_group_builder.attr("class", "edges");
 
-    for (int i = 0; i < layout->edge_paths->length; i++) {
-        EdgePath* edge_path = (EdgePath*)layout->edge_paths->data[i];
+    for (size_t i = 0; i < layout->edge_paths->get().size(); i++) {
+        EdgePath* edge_path = layout->edge_paths->get()[i].get();
         Item path_item = render_edge_path(builder, pool, edge_path,
                                           line_color,
                                           opts->default_stroke_width);
@@ -638,8 +639,8 @@ Item graph_to_svg_with_options(Element* graph, GraphLayout* layout,
     const char* subgraph_text_color = get_themed_text_secondary_color(opts);
 
     if (layout->subgraph_positions) {
-        for (int i = 0; i < layout->subgraph_positions->length; i++) {
-            SubgraphPosition* sgpos = (SubgraphPosition*)layout->subgraph_positions->data[i];
+        for (size_t i = 0; i < layout->subgraph_positions->get().size(); i++) {
+            SubgraphPosition* sgpos = layout->subgraph_positions->get()[i].get();
 
             // create subgraph group
             ElementBuilder sg_builder = builder.element("g");
@@ -699,8 +700,8 @@ Item graph_to_svg_with_options(Element* graph, GraphLayout* layout,
     ElementBuilder nodes_group_builder = builder.element("g");
     nodes_group_builder.attr("class", "nodes");
 
-    for (int i = 0; i < layout->node_positions->length; i++) {
-        NodePosition* pos = (NodePosition*)layout->node_positions->data[i];
+    for (size_t i = 0; i < layout->node_positions->get().size(); i++) {
+        NodePosition* pos = layout->node_positions->get()[i].get();
         const char* node_id = pos->node_id;
 
         // get node attributes from original graph

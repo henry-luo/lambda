@@ -13,11 +13,11 @@ extern "C" {
  * Dagre may produce edges with diagonal segments. This function converts
  * them into L-shaped orthogonal paths for a cleaner, more professional look.
  *
- * @param points Array of Point2D* - modified in place
+ * @param points Owned Point2D list - modified in place
  * @param vertical_first If true, prefer vertical-then-horizontal bends (for TB/BT layouts)
  *                       If false, prefer horizontal-then-vertical bends (for LR/RL layouts)
  */
-void snap_to_orthogonal(ArrayList* points, bool vertical_first);
+void snap_to_orthogonal(PersistentPoint2DList* points, bool vertical_first);
 
 /**
  * Clip edge endpoint to diamond shape boundary.
@@ -86,9 +86,9 @@ Point2D clip_to_hexagon_boundary(Point2D point, float cx, float cy, float r);
  * If three consecutive points lie on the same horizontal or vertical line,
  * the middle point is redundant and can cause visual artifacts.
  *
- * @param points Array of Point2D* - modified in place
+ * @param points Owned Point2D list - modified in place
  */
-void remove_collinear_points(ArrayList* points);
+void remove_collinear_points(PersistentPoint2DList* points);
 
 /**
  * Apply all edge post-processing steps based on node shapes.

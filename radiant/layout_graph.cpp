@@ -61,10 +61,14 @@ static void extract_edges_recursive(ElementReader& reader, LayoutGraph* lg);
 static void extract_subgraphs_recursive(ElementReader& reader, LayoutGraph* lg);
 
 // Helper to extract a single node from an element reader
-static LayoutNode* extract_single_node(ElementReader& child_reader) {
-    LayoutNode* node = (LayoutNode*)mem_calloc(1, sizeof(LayoutNode), MEM_CAT_LAYOUT);
-    node->in_edges = arraylist_new(4);
-    node->out_edges = arraylist_new(4);
+static lam::SessionPtr<LayoutNode> extract_single_node(ElementReader& child_reader) {
+    lam::SessionPtr<LayoutNode> node = lam::session_make<LayoutNode>(MEM_CAT_LAYOUT);
+    if (!node) {
+        log_error("graph_extract_node_alloc_failed");
+        return lam::SessionPtr<LayoutNode>();
+    }
+    node->in_edges = graph_list_new<LayoutEdgeRefList>(4);
+    node->out_edges = graph_list_new<LayoutEdgeRefList>(4);
 
     // extract node properties
     ItemReader id_reader = child_reader.get_attr("id");
@@ -86,7 +90,7 @@ static LayoutNode* extract_single_node(ElementReader& child_reader) {
     node->width = 80.0f;
     node->height = 40.0f;
 
-    return node;
+    return static_cast<lam::SessionPtr<LayoutNode>&&>(node);
 }
 
 // Recursively extract nodes from element and its subgraphs
@@ -102,8 +106,10 @@ static void extract_nodes_recursive(ElementReader& reader, LayoutGraph* lg) {
         if (!tag) continue;
 
         if (strcmp(tag, "node") == 0) {
-            LayoutNode* node = extract_single_node(child_reader);
-            arraylist_append(lg->nodes, node);
+            lam::SessionPtr<LayoutNode> node = extract_single_node(child_reader);
+            if (node) {
+                lg->nodes->get().append(static_cast<lam::SessionPtr<LayoutNode>&&>(node));
+            }
         } else if (strcmp(tag, "subgraph") == 0) {
             // recurse into subgraph to extract its nodes
             extract_nodes_recursive(child_reader, lg);
@@ -124,8 +130,12 @@ static void extract_edges_recursive(ElementReader& reader, LayoutGraph* lg) {
         if (!tag) continue;
 
         if (strcmp(tag, "edge") == 0) {
-            LayoutEdge* edge = (LayoutEdge*)mem_calloc(1, sizeof(LayoutEdge), MEM_CAT_LAYOUT);
-            edge->path_points = arraylist_new(4);
+            lam::SessionPtr<LayoutEdge> edge = lam::session_make<LayoutEdge>(MEM_CAT_LAYOUT);
+            if (!edge) {
+                log_error("graph_extract_edge_alloc_failed");
+                continue;
+            }
+            edge->path_points = point2d_list_new(4);
 
             ItemReader from_reader = child_reader.get_attr("from");
             edge->from_id = from_reader.isString() ? from_reader.cstring() : "";
@@ -150,8 +160,8 @@ static void extract_edges_recursive(ElementReader& reader, LayoutGraph* lg) {
             // link to nodes (linear search)
             edge->from_node = nullptr;
             edge->to_node = nullptr;
-            for (int j = 0; j < lg->nodes->length; j++) {
-                LayoutNode* n = (LayoutNode*)lg->nodes->data[j];
+            for (size_t j = 0; j < lg->nodes->get().size(); j++) {
+                LayoutNode* n = lg->nodes->get()[j].get();
                 if (strcmp(n->id, edge->from_id) == 0) {
                     edge->from_node = n;
                 }
@@ -161,14 +171,15 @@ static void extract_edges_recursive(ElementReader& reader, LayoutGraph* lg) {
             }
 
             if (edge->from_node && edge->to_node) {
-                arraylist_append(edge->from_node->out_edges, edge);
-                arraylist_append(edge->to_node->in_edges, edge);
-                arraylist_append(lg->edges, edge);
+                LayoutEdge* edge_ref = edge.get();
+                edge->from_node->out_edges->append(edge_ref);
+                edge->to_node->in_edges->append(edge_ref);
+                lg->edges->get().append(static_cast<lam::SessionPtr<LayoutEdge>&&>(edge));
             } else {
                 log_warn("edge references non-existent nodes: %s -> %s",
                         edge->from_id, edge->to_id);
-                arraylist_free(edge->path_points);
-                mem_free(edge);
+                point2d_list_free(edge->path_points);
+                edge->path_points = nullptr;
             }
         } else if (strcmp(tag, "subgraph") == 0) {
             // recurse into subgraph to extract its edges
@@ -178,10 +189,10 @@ static void extract_edges_recursive(ElementReader& reader, LayoutGraph* lg) {
 }
 
 // Forward declaration for recursive node ID collection
-static void collect_node_ids_recursive(ElementReader& reader, ArrayList* node_ids);
+static void collect_node_ids_recursive(ElementReader& reader, GraphNodeIdList* node_ids);
 
 // Collect node IDs recursively from element and nested subgraphs
-static void collect_node_ids_recursive(ElementReader& reader, ArrayList* node_ids) {
+static void collect_node_ids_recursive(ElementReader& reader, GraphNodeIdList* node_ids) {
     ElementReader::ChildIterator children = reader.children();
     ItemReader child_item;
 
@@ -195,7 +206,7 @@ static void collect_node_ids_recursive(ElementReader& reader, ArrayList* node_id
         if (strcmp(tag, "node") == 0) {
             ItemReader id_reader = child_reader.get_attr("id");
             if (id_reader.isString()) {
-                arraylist_append(node_ids, (void*)id_reader.cstring());
+                node_ids->append(id_reader.cstring());
             }
         } else if (strcmp(tag, "subgraph") == 0) {
             // recurse into nested subgraph
@@ -216,9 +227,13 @@ static void extract_subgraphs_recursive(ElementReader& reader, LayoutGraph* lg) 
         const char* tag = child_reader.tagName();
         if (!tag || strcmp(tag, "subgraph") != 0) continue;
 
-        LayoutSubgraph* sg = (LayoutSubgraph*)mem_calloc(1, sizeof(LayoutSubgraph), MEM_CAT_LAYOUT);
-        sg->node_ids = arraylist_new(8);
-        sg->subgraphs = arraylist_new(2);
+        lam::SessionPtr<LayoutSubgraph> sg = lam::session_make<LayoutSubgraph>(MEM_CAT_LAYOUT);
+        if (!sg) {
+            log_error("graph_extract_subgraph_alloc_failed");
+            continue;
+        }
+        sg->node_ids = graph_list_new<GraphNodeIdList>(8);
+        sg->subgraphs = graph_list_new<LayoutSubgraphRefList>(2);
 
         ItemReader id_reader = child_reader.get_attr("id");
         sg->id = id_reader.isString() ? id_reader.cstring() : "";
@@ -237,8 +252,8 @@ static void extract_subgraphs_recursive(ElementReader& reader, LayoutGraph* lg) 
         // collect node IDs recursively (including from nested subgraphs)
         collect_node_ids_recursive(child_reader, sg->node_ids);
 
-        arraylist_append(lg->subgraphs, sg);
-        log_debug("extracted subgraph '%s' with %d nodes", sg->id, sg->node_ids->length);
+        log_debug("extracted subgraph '%s' with %zu nodes", sg->id, sg->node_ids->size());
+        lg->subgraphs->get().append(static_cast<lam::SessionPtr<LayoutSubgraph>&&>(sg));
 
         // also recurse to extract nested subgraphs as separate entries
         extract_subgraphs_recursive(child_reader, lg);
@@ -248,10 +263,10 @@ static void extract_subgraphs_recursive(ElementReader& reader, LayoutGraph* lg) 
 // Build internal LayoutGraph from Lambda graph Element
 static LayoutGraph* build_layout_graph(Element* graph) {
     LayoutGraph* lg = (LayoutGraph*)mem_calloc(1, sizeof(LayoutGraph), MEM_CAT_LAYOUT);
-    lg->nodes = arraylist_new(32);
-    lg->edges = arraylist_new(32);
-    lg->layers = arraylist_new(10);
-    lg->subgraphs = arraylist_new(4);
+    lg->nodes = graph_list_new<PersistentLayoutNodeList>(32);
+    lg->edges = graph_list_new<PersistentLayoutEdgeList>(32);
+    lg->layers = graph_list_new<PersistentLayoutLayerList>(10);
+    lg->subgraphs = graph_list_new<PersistentLayoutSubgraphList>(4);
 
     // determine if directed
     const char* directed_str = get_string_attr(graph, "directed", "true");
@@ -270,8 +285,8 @@ static LayoutGraph* build_layout_graph(Element* graph) {
     // extract subgraph definitions
     extract_subgraphs_recursive(graph_reader, lg);
 
-    log_info("built layout graph: %d nodes, %d edges, %d subgraphs",
-             lg->nodes->length, lg->edges->length, lg->subgraphs->length);
+    log_info("built layout graph: %zu nodes, %zu edges, %zu subgraphs",
+             lg->nodes->get().size(), lg->edges->get().size(), lg->subgraphs->get().size());
 
     return lg;
 }
@@ -281,45 +296,36 @@ static void free_layout_graph_internal(LayoutGraph* lg) {
     if (!lg) return;
 
     // free nodes
-    for (int i = 0; i < lg->nodes->length; i++) {
-        LayoutNode* node = (LayoutNode*)lg->nodes->data[i];
-        arraylist_free(node->in_edges);
-        arraylist_free(node->out_edges);
-        mem_free(node);
+    for (size_t i = 0; i < lg->nodes->get().size(); i++) {
+        LayoutNode* node = lg->nodes->get()[i].get();
+        graph_list_free(node->in_edges);
+        graph_list_free(node->out_edges);
     }
-    arraylist_free(lg->nodes);
+    graph_list_free(lg->nodes);
 
     // free edges
-    for (int i = 0; i < lg->edges->length; i++) {
-        LayoutEdge* edge = (LayoutEdge*)lg->edges->data[i];
+    for (size_t i = 0; i < lg->edges->get().size(); i++) {
+        LayoutEdge* edge = lg->edges->get()[i].get();
 
-        // free path points
-        for (int j = 0; j < edge->path_points->length; j++) {
-            Point2D* pt = (Point2D*)edge->path_points->data[j];
-            mem_free(pt);
-        }
-        arraylist_free(edge->path_points);
-        mem_free(edge);
+        point2d_list_free(edge->path_points);
     }
-    arraylist_free(lg->edges);
+    graph_list_free(lg->edges);
 
     // free layers
-    for (int i = 0; i < lg->layers->length; i++) {
-        LayoutLayer* layer = (LayoutLayer*)lg->layers->data[i];
-        arraylist_free(layer->nodes);
-        mem_free(layer);
+    for (size_t i = 0; i < lg->layers->get().size(); i++) {
+        LayoutLayer* layer = lg->layers->get()[i].get();
+        graph_list_free(layer->nodes);
     }
-    arraylist_free(lg->layers);
+    graph_list_free(lg->layers);
 
     // free subgraphs
     if (lg->subgraphs) {
-        for (int i = 0; i < lg->subgraphs->length; i++) {
-            LayoutSubgraph* sg = (LayoutSubgraph*)lg->subgraphs->data[i];
-            if (sg->node_ids) arraylist_free(sg->node_ids);
-            if (sg->subgraphs) arraylist_free(sg->subgraphs);
-            mem_free(sg);
+        for (size_t i = 0; i < lg->subgraphs->get().size(); i++) {
+            LayoutSubgraph* sg = lg->subgraphs->get()[i].get();
+            graph_list_free(sg->node_ids);
+            graph_list_free(sg->subgraphs);
         }
-        arraylist_free(lg->subgraphs);
+        graph_list_free(lg->subgraphs);
     }
 
     mem_free(lg);
@@ -328,9 +334,12 @@ static void free_layout_graph_internal(LayoutGraph* lg) {
 // Convert internal LayoutGraph to GraphLayout result
 static GraphLayout* extract_graph_layout(LayoutGraph* lg, GraphLayoutOptions* opts) {
     GraphLayout* layout = (GraphLayout*)mem_calloc(1, sizeof(GraphLayout), MEM_CAT_LAYOUT);
-    layout->node_positions = arraylist_new(lg->nodes->length > 0 ? lg->nodes->length : 1);
-    layout->edge_paths = arraylist_new(lg->edges->length > 0 ? lg->edges->length : 1);
-    layout->subgraph_positions = arraylist_new(lg->subgraphs->length > 0 ? lg->subgraphs->length : 1);
+    size_t node_count = lg->nodes->get().size();
+    size_t edge_count = lg->edges->get().size();
+    size_t subgraph_count = lg->subgraphs->get().size();
+    layout->node_positions = graph_list_new<PersistentNodePositionList>(node_count > 0 ? node_count : 1);
+    layout->edge_paths = graph_list_new<PersistentEdgePathList>(edge_count > 0 ? edge_count : 1);
+    layout->subgraph_positions = graph_list_new<PersistentSubgraphPositionList>(subgraph_count > 0 ? subgraph_count : 1);
 
     layout->node_spacing_x = opts->node_sep;
     layout->node_spacing_y = opts->rank_sep;
@@ -339,10 +348,14 @@ static GraphLayout* extract_graph_layout(LayoutGraph* lg, GraphLayoutOptions* op
     layout->direction = opts->direction;
 
     // extract node positions
-    for (int i = 0; i < lg->nodes->length; i++) {
-        LayoutNode* node = (LayoutNode*)lg->nodes->data[i];
+    for (size_t i = 0; i < node_count; i++) {
+        LayoutNode* node = lg->nodes->get()[i].get();
 
-        NodePosition* pos = (NodePosition*)mem_calloc(1, sizeof(NodePosition), MEM_CAT_LAYOUT);
+        lam::SessionPtr<NodePosition> pos = lam::session_make<NodePosition>(MEM_CAT_LAYOUT);
+        if (!pos) {
+            log_error("graph_node_position_alloc_failed");
+            continue;
+        }
         pos->node_id = node->id;
         pos->x = node->x;
         pos->y = node->y;
@@ -351,17 +364,22 @@ static GraphLayout* extract_graph_layout(LayoutGraph* lg, GraphLayoutOptions* op
         pos->rank = node->rank;
         pos->order = node->order;
 
-        arraylist_append(layout->node_positions, pos);
+        layout->node_positions->get().append(static_cast<lam::SessionPtr<NodePosition>&&>(pos));
     }
 
     // extract edge paths
-    for (int i = 0; i < lg->edges->length; i++) {
-        LayoutEdge* edge = (LayoutEdge*)lg->edges->data[i];
+    for (size_t i = 0; i < edge_count; i++) {
+        LayoutEdge* edge = lg->edges->get()[i].get();
 
-        EdgePath* path = (EdgePath*)mem_calloc(1, sizeof(EdgePath), MEM_CAT_LAYOUT);
+        lam::SessionPtr<EdgePath> path = lam::session_make<EdgePath>(MEM_CAT_LAYOUT);
+        if (!path) {
+            log_error("graph_edge_path_alloc_failed");
+            continue;
+        }
         path->from_id = edge->from_id;
         path->to_id = edge->to_id;
-        path->points = arraylist_new(edge->path_points->length > 0 ? edge->path_points->length : 1);
+        size_t edge_point_count = point2d_list_size(edge->path_points);
+        path->points = point2d_list_new(edge_point_count > 0 ? edge_point_count : 1);
         path->is_bezier = opts->use_splines;
         path->directed = edge->directed;
         path->edge_style = edge->style ? edge->style : "solid";
@@ -369,31 +387,30 @@ static GraphLayout* extract_graph_layout(LayoutGraph* lg, GraphLayoutOptions* op
         path->arrow_end = edge->arrow_end;
 
         // copy points
-        for (int j = 0; j < edge->path_points->length; j++) {
-            Point2D* src_pt = (Point2D*)edge->path_points->data[j];
-            Point2D* dst_pt = (Point2D*)mem_calloc(1, sizeof(Point2D), MEM_CAT_LAYOUT);
-            dst_pt->x = src_pt->x;
-            dst_pt->y = src_pt->y;
-            arraylist_append(path->points, dst_pt);
+        for (size_t j = 0; j < edge_point_count; j++) {
+            Point2D* src_pt = point2d_list_at(edge->path_points, j);
+            if (src_pt) {
+                point2d_list_append(path->points, *src_pt);
+            }
         }
 
-        arraylist_append(layout->edge_paths, path);
+        layout->edge_paths->get().append(static_cast<lam::SessionPtr<EdgePath>&&>(path));
     }
 
     // extract subgraph positions - compute bounds from member nodes
-    for (int i = 0; i < lg->subgraphs->length; i++) {
-        LayoutSubgraph* sg = (LayoutSubgraph*)lg->subgraphs->data[i];
+    for (size_t i = 0; i < subgraph_count; i++) {
+        LayoutSubgraph* sg = lg->subgraphs->get()[i].get();
 
         // compute bounding box from member nodes
         float min_x = 1e9f, min_y = 1e9f, max_x = -1e9f, max_y = -1e9f;
         bool has_nodes = false;
 
-        for (int j = 0; j < sg->node_ids->length; j++) {
-            const char* node_id = (const char*)sg->node_ids->data[j];
+        for (size_t j = 0; j < sg->node_ids->size(); j++) {
+            const char* node_id = (*sg->node_ids)[j];
 
             // find node position
-            for (int k = 0; k < lg->nodes->length; k++) {
-                LayoutNode* node = (LayoutNode*)lg->nodes->data[k];
+            for (size_t k = 0; k < node_count; k++) {
+                LayoutNode* node = lg->nodes->get()[k].get();
                 if (strcmp(node->id, node_id) == 0) {
                     float nx1 = node->x - node->width / 2.0f;
                     float ny1 = node->y - node->height / 2.0f;
@@ -419,7 +436,11 @@ static GraphLayout* extract_graph_layout(LayoutGraph* lg, GraphLayoutOptions* op
         float padding = sg->padding;
         float label_height = sg->label_height;
 
-        SubgraphPosition* sgpos = (SubgraphPosition*)mem_calloc(1, sizeof(SubgraphPosition), MEM_CAT_LAYOUT);
+        lam::SessionPtr<SubgraphPosition> sgpos = lam::session_make<SubgraphPosition>(MEM_CAT_LAYOUT);
+        if (!sgpos) {
+            log_error("graph_subgraph_position_alloc_failed");
+            continue;
+        }
         sgpos->subgraph_id = sg->id;
         sgpos->label = sg->label;
         sgpos->x = min_x - padding;
@@ -428,7 +449,7 @@ static GraphLayout* extract_graph_layout(LayoutGraph* lg, GraphLayoutOptions* op
         sgpos->height = (max_y - min_y) + 2 * padding + label_height;
         sgpos->label_height = label_height;
 
-        arraylist_append(layout->subgraph_positions, sgpos);
+        layout->subgraph_positions->get().append(static_cast<lam::SessionPtr<SubgraphPosition>&&>(sgpos));
     }
 
     // compute graph bounds
@@ -494,33 +515,18 @@ void free_graph_layout(GraphLayout* layout) {
     if (!layout) return;
 
     // free node positions
-    for (int i = 0; i < layout->node_positions->length; i++) {
-        NodePosition* pos = (NodePosition*)layout->node_positions->data[i];
-        mem_free(pos);
-    }
-    arraylist_free(layout->node_positions);
+    graph_list_free(layout->node_positions);
 
     // free edge paths
-    for (int i = 0; i < layout->edge_paths->length; i++) {
-        EdgePath* path = (EdgePath*)layout->edge_paths->data[i];
+    for (size_t i = 0; i < layout->edge_paths->get().size(); i++) {
+        EdgePath* path = layout->edge_paths->get()[i].get();
 
-        for (int j = 0; j < path->points->length; j++) {
-            Point2D* pt = (Point2D*)path->points->data[j];
-            mem_free(pt);
-        }
-        arraylist_free(path->points);
-        mem_free(path);
+        point2d_list_free(path->points);
     }
-    arraylist_free(layout->edge_paths);
+    graph_list_free(layout->edge_paths);
 
     // free subgraph positions
-    if (layout->subgraph_positions) {
-        for (int i = 0; i < layout->subgraph_positions->length; i++) {
-            SubgraphPosition* sgpos = (SubgraphPosition*)layout->subgraph_positions->data[i];
-            mem_free(sgpos);
-        }
-        arraylist_free(layout->subgraph_positions);
-    }
+    graph_list_free(layout->subgraph_positions);
 
     mem_free(layout);
 }
