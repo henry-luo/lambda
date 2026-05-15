@@ -1977,6 +1977,42 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     // All named function declarations inside the IIFE need to be reachable as module consts
     // so that class methods defined inside the IIFE can capture them.
     {
+        auto top_level_declares_name = [&](const char* candidate, JsAstNode* ignored_stmt) -> bool {
+            if (!candidate) return false;
+            JsAstNode* top = program->body;
+            while (top) {
+                if (top == ignored_stmt) { top = top->next; continue; }
+                if (top->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+                    JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)top;
+                    for (JsAstNode* d = vd->declarations; d; d = d->next) {
+                        if (d->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
+                        JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)d;
+                        if (!decl->id || decl->id->node_type != JS_AST_NODE_IDENTIFIER) continue;
+                        JsIdentifierNode* id = (JsIdentifierNode*)decl->id;
+                        char top_name[128];
+                        snprintf(top_name, sizeof(top_name), "_js_%.*s", (int)id->name->len, id->name->chars);
+                        if (strcmp(top_name, candidate) == 0) return true;
+                    }
+                } else if (top->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
+                    JsFunctionNode* fn = (JsFunctionNode*)top;
+                    if (fn->name && fn->name->chars) {
+                        char top_name[128];
+                        snprintf(top_name, sizeof(top_name), "_js_%.*s", (int)fn->name->len, fn->name->chars);
+                        if (strcmp(top_name, candidate) == 0) return true;
+                    }
+                } else if (top->node_type == JS_AST_NODE_CLASS_DECLARATION) {
+                    JsClassNode* cls = (JsClassNode*)top;
+                    if (cls->name && cls->name->chars) {
+                        char top_name[128];
+                        snprintf(top_name, sizeof(top_name), "_js_%.*s", (int)cls->name->len, cls->name->chars);
+                        if (strcmp(top_name, candidate) == 0) return true;
+                    }
+                }
+                top = top->next;
+            }
+            return false;
+        };
+
         auto register_fn_as_module_const = [&](JsFunctionNode* fn) {
             if (!fn->name || !fn->name->chars) return;
             JsFuncCollected* fc = jm_find_collected_func(mt, fn);
@@ -2059,6 +2095,10 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                     char vname[128];
                                     snprintf(vname, sizeof(vname), "_js_%.*s",
                                         (int)vid->name->len, vid->name->chars);
+                                    if (top_level_declares_name(vname, stmt)) {
+                                        d = d->next;
+                                        continue;
+                                    }
                                     JsModuleConstEntry lookup;
                                     snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
                                     if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < 2048) {

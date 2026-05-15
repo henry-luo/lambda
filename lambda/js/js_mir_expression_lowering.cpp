@@ -2379,16 +2379,19 @@ void jm_bind_destructure_var(JsMirTranspiler* mt, const char* vname, MIR_reg_t v
     // body whose locals were promoted to module vars. In a nested function, a
     // local declaration that shadows a module var name (e.g. `const {x: n} = e`
     // where `n` is also a top-level const) must NOT clobber the module slot.
-    bool at_module_scope = mt->in_main || (mt->current_fc && mt->current_fc->is_iife_body);
     bool is_local_let_const = (var && var->is_let_const);
-    if (at_module_scope && !is_local_let_const && mt->module_consts) {
+    if (!is_local_let_const && mt->module_consts) {
         JsModuleConstEntry lookup;
         snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
         JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
+        bool at_module_scope = mt->in_main ||
+            (mc && mc->is_iife_var && mt->current_fc && mt->current_fc->is_iife_body);
         if (mc && mc->const_type == MCONST_MODVAR) {
-            jm_call_void_2(mt, "js_set_module_var",
-                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, reg));
+            if (at_module_scope) {
+                jm_call_void_2(mt, "js_set_module_var",
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, reg));
+            }
         }
     }
 }
@@ -3174,6 +3177,35 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                             jm_emit_label(mt, module_done_label);
                             return module_result;
                         }
+                    }
+                    if (mt->is_eval_direct) {
+                        MIR_reg_t eval_key = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
+                        MIR_reg_t has_bridge = jm_call_1(mt, "js_eval_env_has_binding", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, eval_key));
+                        MIR_label_t module_store = jm_new_label(mt);
+                        MIR_label_t store_done = jm_new_label(mt);
+                        MIR_reg_t store_result = jm_new_reg(mt, "eval_mva_res", MIR_T_I64);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+                            MIR_new_label_op(mt->ctx, module_store),
+                            MIR_new_reg_op(mt->ctx, has_bridge)));
+                        jm_call_void_2(mt, "js_set_global_property",
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, eval_key),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, rhs));
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, store_result),
+                            MIR_new_reg_op(mt->ctx, rhs)));
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                            MIR_new_label_op(mt->ctx, store_done)));
+                        jm_emit_label(mt, module_store);
+                        jm_call_void_2(mt, "js_set_module_var",
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, rhs));
+                        jm_scope_env_mark_and_writeback(mt, vname, rhs);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, store_result),
+                            MIR_new_reg_op(mt->ctx, rhs)));
+                        jm_emit_label(mt, store_done);
+                        return store_result;
                     }
                     jm_call_void_2(mt, "js_set_module_var",
                         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),

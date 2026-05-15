@@ -352,9 +352,6 @@ JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node) {
     } else if (strcmp(node_type, "null") == 0) {
         literal->literal_type = JS_LITERAL_NULL;
         literal->base.type = &TYPE_NULL;
-    } else if (strcmp(node_type, "undefined") == 0) {
-        literal->literal_type = JS_LITERAL_UNDEFINED;
-        literal->base.type = &TYPE_NULL; // Map undefined to null in Lambda
     }
 
     return (JsAstNode*)literal;
@@ -1593,8 +1590,10 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
         return (JsAstNode*)meta_node;
     } else if (strcmp(node_type, "number") == 0 || strcmp(node_type, "string") == 0 ||
                strcmp(node_type, "true") == 0 || strcmp(node_type, "false") == 0 ||
-               strcmp(node_type, "null") == 0 || strcmp(node_type, "undefined") == 0) {
+                             strcmp(node_type, "null") == 0) {
         return build_js_literal(tp, expr_node);
+        } else if (strcmp(node_type, "undefined") == 0) {
+                return build_js_identifier(tp, expr_node);
     } else if (strcmp(node_type, "binary_expression") == 0) {
         return build_js_binary_expression(tp, expr_node);
     } else if (strcmp(node_type, "unary_expression") == 0) {
@@ -2012,12 +2011,12 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
             else if (source.length >= 5 && strncmp(source.str, "false", 5) == 0) {
                 return build_js_literal(tp, expr_node);
             }
-            // Check if it's null or undefined
+            // Check if it's null
             else if (source.length >= 4 && strncmp(source.str, "null", 4) == 0) {
                 return build_js_literal(tp, expr_node);
             }
             else if (source.length >= 9 && strncmp(source.str, "undefined", 9) == 0) {
-                return build_js_literal(tp, expr_node);
+                return build_js_identifier(tp, expr_node);
             }
             // Check if it's an identifier (starts with letter, $, or _)
             else if ((first_char >= 'a' && first_char <= 'z') ||

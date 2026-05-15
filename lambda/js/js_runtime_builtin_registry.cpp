@@ -11,6 +11,8 @@
 static Item js_builtin_cache[JS_BUILTIN_MAX];
 static bool js_builtin_cache_init = false;
 
+extern "C" void js_func_init_property(Item fn_item, Item key, Item value);
+
 static const char* js_builtin_method_spec_display_name(const JsBuiltinMethodSpec* spec) {
     return spec->display_name ? spec->display_name : spec->name;
 }
@@ -867,12 +869,34 @@ Item js_get_or_create_builtin(int builtin_id, const char* name, int param_count)
     fn->param_count = param_count;
     fn->formal_length = -1; // -1 = use param_count for .length
     fn->builtin_id = builtin_id;
-    fn->name = heap_create_name(name, strlen(name));
+    if (builtin_id == JS_BUILTIN_FUNC_THROW_TYPE_ERROR) {
+        fn->name = heap_create_name("", 0);
+    } else {
+        fn->name = heap_create_name(name, strlen(name));
+    }
     fn->prototype = ItemNull;
     // NOTE: bound_this left as 0 (from pool_calloc). Do NOT set to ItemNull
     // because ItemNull.item is non-zero (0x100000000000000) and the bound
     // function check uses `fn->bound_this.item` as a boolean test.
     Item result = {.function = (Function*)fn};
+    if (builtin_id == JS_BUILTIN_FUNC_THROW_TYPE_ERROR) {
+        Item length_key = (Item){.item = s2it(heap_create_name("length", 6))};
+        js_func_init_property(result, length_key, (Item){.item = i2it(0)});
+        js_attr_set_writable(result, "length", 6, false);
+        js_attr_set_enumerable(result, "length", 6, false);
+        js_attr_set_configurable(result, "length", 6, false);
+
+        Item name_key = (Item){.item = s2it(heap_create_name("name", 4))};
+        js_func_init_property(result, name_key, (Item){.item = s2it(heap_create_name("", 0))});
+        js_attr_set_writable(result, "name", 4, false);
+        js_attr_set_enumerable(result, "name", 4, false);
+        js_attr_set_configurable(result, "name", 4, false);
+
+        Item non_ext_key = (Item){.item = s2it(heap_create_name("__non_extensible__", 17))};
+        js_func_init_property(result, non_ext_key, (Item){.item = b2it(true)});
+        Item frozen_key = (Item){.item = s2it(heap_create_name("__frozen__", 10))};
+        js_func_init_property(result, frozen_key, (Item){.item = b2it(true)});
+    }
     js_builtin_cache[builtin_id] = result;
     return result;
 }

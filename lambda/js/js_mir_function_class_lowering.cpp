@@ -250,6 +250,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         int saved_scope_depth = mt->scope_depth;
         int saved_loop_depth = mt->loop_depth;
         bool saved_in_native = mt->in_native_func;
+        bool saved_in_main = mt->in_main;
         JsFuncCollected* saved_fc = mt->current_fc;
         JsClassEntry* saved_class_n = mt->current_class;
         MIR_reg_t saved_eval_completion_n = mt->eval_completion_reg;
@@ -272,6 +273,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->pending_label_name = NULL;
         mt->pending_label_len = 0;
         mt->in_native_func = true;
+        mt->in_main = false;
         mt->current_fc = fc;
         mt->eval_completion_reg = 0;  // disable in native functions
         mt->tco_func = NULL;
@@ -469,6 +471,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->scope_depth = saved_scope_depth;
         mt->loop_depth = saved_loop_depth;
         mt->in_native_func = saved_in_native;
+        mt->in_main = saved_in_main;
         mt->current_fc = saved_fc;
         mt->current_class = saved_class_n;
         mt->eval_completion_reg = saved_eval_completion_n;
@@ -570,6 +573,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         int saved_scope_depth_sm = mt->scope_depth;
         int saved_loop_depth_sm = mt->loop_depth;
         bool saved_in_native_sm = mt->in_native_func;
+        bool saved_in_main_sm = mt->in_main;
         JsFuncCollected* saved_fc_sm = mt->current_fc;
         JsClassEntry* saved_class_sm = mt->current_class;
         MIR_reg_t saved_scope_env_reg_sm = mt->scope_env_reg;
@@ -589,6 +593,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->pending_label_name = NULL;
         mt->pending_label_len = 0;
         mt->in_native_func = false;
+        mt->in_main = false;
         mt->current_fc = fc;
         mt->current_class = NULL;
         mt->scope_env_reg = 0;
@@ -1057,6 +1062,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->scope_depth = saved_scope_depth_sm;
         mt->loop_depth = saved_loop_depth_sm;
         mt->in_native_func = saved_in_native_sm;
+        mt->in_main = saved_in_main_sm;
         mt->current_fc = saved_fc_sm;
         mt->current_class = saved_class_sm;
         mt->scope_env_reg = saved_scope_env_reg_sm;
@@ -1125,6 +1131,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             int saved_scope_depth_sm = mt->scope_depth;
             int saved_loop_depth_sm = mt->loop_depth;
             bool saved_in_native_sm = mt->in_native_func;
+            bool saved_in_main_sm = mt->in_main;
             JsFuncCollected* saved_fc_sm = mt->current_fc;
             JsClassEntry* saved_class_sm = mt->current_class;
             MIR_reg_t saved_scope_env_reg_sm = mt->scope_env_reg;
@@ -1144,6 +1151,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             mt->pending_label_name = NULL;
             mt->pending_label_len = 0;
             mt->in_native_func = false;
+            mt->in_main = false;
             mt->current_fc = fc;
             mt->current_class = NULL;
             mt->scope_env_reg = 0;
@@ -1518,6 +1526,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             mt->scope_depth = saved_scope_depth_sm;
             mt->loop_depth = saved_loop_depth_sm;
             mt->in_native_func = saved_in_native_sm;
+            mt->in_main = saved_in_main_sm;
             mt->current_fc = saved_fc_sm;
             mt->current_class = saved_class_sm;
             mt->scope_env_reg = saved_scope_env_reg_sm;
@@ -1585,6 +1594,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     int saved_scope_depth = mt->scope_depth;
     int saved_loop_depth = mt->loop_depth;
     bool saved_in_native = mt->in_native_func;
+    bool saved_in_main = mt->in_main;
     JsFuncCollected* saved_fc = mt->current_fc;
     JsClassEntry* saved_class = mt->current_class;
     MIR_reg_t saved_scope_env_reg = mt->scope_env_reg;
@@ -1625,6 +1635,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     mt->pending_label_name = NULL;
     mt->pending_label_len = 0;
     mt->in_native_func = false;
+    mt->in_main = false;
     mt->current_fc = fc;
     mt->func_except_label = 0;  // reset for this function
 
@@ -2884,6 +2895,7 @@ finish_boxed:
     mt->scope_depth = saved_scope_depth;
     mt->loop_depth = saved_loop_depth;
     mt->in_native_func = saved_in_native;
+    mt->in_main = saved_in_main;
     mt->current_fc = saved_fc;
     mt->current_class = saved_class;
     mt->scope_env_reg = saved_scope_env_reg;

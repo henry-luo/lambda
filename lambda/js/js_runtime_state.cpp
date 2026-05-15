@@ -858,8 +858,10 @@ extern "C" Item js_build_arguments_object() {
 
     // v29: Set callee property (non-strict only; strict mode throws TypeError on access)
     if (is_strict) {
-        // Mark as strict arguments — property_get on companion will check this
-        // and throw TypeError for callee/caller access (ES5 §10.6 step 14)
+        Item thrower = js_get_or_create_builtin(JS_BUILTIN_FUNC_THROW_TYPE_ERROR, "ThrowTypeError", 0);
+        Item callee_key = (Item){.item = s2it(heap_create_name("callee", 6))};
+        js_install_native_accessor(companion, callee_key, thrower, thrower,
+                                   JSPD_NON_ENUMERABLE | JSPD_NON_CONFIGURABLE);
         js_property_set(companion, (Item){.item = s2it(heap_create_name("__strict_arguments__", 20))},
                         (Item){.item = b2it(true)});
     } else {

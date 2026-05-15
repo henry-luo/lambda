@@ -419,14 +419,14 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                 // Same shadowing rule as the is_modvar branch above: only the top-level
                 // declaration writes to the module var slot. Nested let/const shadows
                 // must keep the module var slot intact.
-                bool in_modvar_scope = mt->in_main ||
-                    (mt->current_fc && mt->current_fc->is_iife_body);
                 bool at_top_for_writeback = (mt->scope_depth <= 1) || (var->kind == JS_VAR_VAR);
-                if (!is_modvar && in_modvar_scope && at_top_for_writeback && mt->module_consts) {
+                if (!is_modvar && at_top_for_writeback && mt->module_consts) {
                     JsModuleConstEntry mclookup;
                     snprintf(mclookup.name, sizeof(mclookup.name), "%s", vname);
                     JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
-                    if (mc && mc->const_type == MCONST_MODVAR) {
+                    bool in_modvar_scope = mt->in_main ||
+                        (mc && mc->is_iife_var && mt->current_fc && mt->current_fc->is_iife_body);
+                    if (in_modvar_scope && mc && mc->const_type == MCONST_MODVAR) {
                         JsMirVarEntry* ve = jm_find_var(mt, vname);
                         if (ve) {
                             MIR_reg_t boxed_val = ve->reg;
@@ -439,7 +439,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                         }
                     }
                     // Store class object to module var so closures/methods can access it
-                    if (mc && mc->const_type == MCONST_CLASS) {
+                    if (in_modvar_scope && mc && mc->const_type == MCONST_CLASS) {
                         JsMirVarEntry* ve = jm_find_var(mt, vname);
                         if (ve) {
                             jm_call_void_2(mt, "js_set_module_var",
@@ -487,7 +487,9 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                         JsModuleConstEntry mlookup;
                         snprintf(mlookup.name, sizeof(mlookup.name), "%s", ne->name);
                         JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mlookup);
-                        if (mc && mc->const_type == MCONST_MODVAR) {
+                        bool in_modvar_scope = mt->in_main ||
+                            (mc && mc->is_iife_var && mt->current_fc && mt->current_fc->is_iife_body);
+                        if (in_modvar_scope && mc && mc->const_type == MCONST_MODVAR) {
                             JsMirVarEntry* ve = jm_find_var(mt, ne->name);
                             if (ve) {
                                 jm_call_void_2(mt, "js_set_module_var",
@@ -541,7 +543,9 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                         JsModuleConstEntry mlookup;
                         snprintf(mlookup.name, sizeof(mlookup.name), "%s", ne->name);
                         JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mlookup);
-                        if (mc && mc->const_type == MCONST_MODVAR) {
+                        bool in_modvar_scope = mt->in_main ||
+                            (mc && mc->is_iife_var && mt->current_fc && mt->current_fc->is_iife_body);
+                        if (in_modvar_scope && mc && mc->const_type == MCONST_MODVAR) {
                             JsMirVarEntry* ve = jm_find_var(mt, ne->name);
                             if (ve) {
                                 jm_call_void_2(mt, "js_set_module_var",
