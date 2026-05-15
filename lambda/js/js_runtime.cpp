@@ -2241,6 +2241,17 @@ static bool js_try_exotic_property_get(Item object, Item key, Item* out_result) 
                     return true;
                 }
             }
+            JsTypedArray* ta = js_get_typed_array_ptr(object.map);
+            if (ta && ta->element_type == JS_TYPED_UINT8 && ta->is_buffer) {
+                Item buf_proto = js_get_buffer_prototype();
+                if (buf_proto.item != ITEM_NULL) {
+                    Item result = map_get(buf_proto.map, key);
+                    if (result.item != ITEM_NULL) {
+                        *out_result = result;
+                        return true;
+                    }
+                }
+            }
             Item ta_proto = js_get_prototype(object);
             if (ta_proto.item == ITEM_NULL) {
                 ta_proto = js_get_typed_array_base_proto();
@@ -2250,17 +2261,6 @@ static bool js_try_exotic_property_get(Item object, Item key, Item* out_result) 
                 if (result.item != ITEM_NULL) {
                     *out_result = result;
                     return true;
-                }
-            }
-            JsTypedArray* ta = js_get_typed_array_ptr(object.map);
-            if (ta && ta->element_type == JS_TYPED_UINT8) {
-                Item buf_proto = js_get_buffer_prototype();
-                if (buf_proto.item != ITEM_NULL) {
-                    Item result = map_get(buf_proto.map, key);
-                    if (result.item != ITEM_NULL) {
-                        *out_result = result;
-                        return true;
-                    }
                 }
             }
             *out_result = make_js_undefined();

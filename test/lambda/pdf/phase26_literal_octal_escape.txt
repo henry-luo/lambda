@@ -1,1 +1,1 @@
-{ parsed: "A B", parsed_ok: true, text_count: 1, rendered: true, xml: "<text x="10" y="80" font-family="sans-serif" font-size="10" font-weight="normal" font-style="normal" fill="rgb(0,0,0)">A B</text>"}
+{ parsed: "A B", parsed_ok: true, text_count: 1, rendered: true, xml: "<text x="10" y="80" font-family="sans-serif" font-size="10" font-weight="normal" font-style="normal" data-pdf-raw-font="true" data-pdf-x="10" data-pdf-y="80" data-pdf-size="10" data-pdf-width="15" textLength="15" lengthAdjust="spacingAndGlyphs" fill="rgb(0,0,0)">A B</text>"}

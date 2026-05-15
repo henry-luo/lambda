@@ -25,7 +25,7 @@ static Item make_string_item(const char* str) {
 // extract buffer data from Uint8Array or string
 static bool get_input_buffer(Item input, const uint8_t** out, int* out_len) {
     if (js_is_typed_array(input)) {
-        JsTypedArray* ta = (JsTypedArray*)input.map->data;
+        JsTypedArray* ta = js_get_typed_array_ptr(input.map);
         if (ta && ta->data) {
             *out = (const uint8_t*)ta->data;
             *out_len = ta->length;
@@ -44,8 +44,11 @@ static bool get_input_buffer(Item input, const uint8_t** out, int* out_len) {
 // create Uint8Array result from raw bytes
 static Item make_buffer_result(const uint8_t* data, int len) {
     Item result = js_typed_array_new(JS_TYPED_UINT8, len);
-    JsTypedArray* ta = (JsTypedArray*)result.map->data;
-    if (ta && ta->data) memcpy(ta->data, data, (size_t)len);
+    JsTypedArray* ta = js_get_typed_array_ptr(result.map);
+    if (ta) {
+        ta->is_buffer = true;
+        if (ta->data) memcpy(ta->data, data, (size_t)len);
+    }
     return result;
 }
 
