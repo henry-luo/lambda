@@ -502,3 +502,101 @@ These are all low blast-radius and complement the template work:
 
 No existing production call sites change in step 1 or 2. Ergonomics are
 evaluated on the chosen TU in step 3 before broader rollout.
+
+---
+
+## 11. Progress / Status (2026-05-15)
+
+### Landed
+
+1. **Core Lambda typed item layer**
+   - Added `lib/lambda_typed.hpp`.
+   - Provides `ItemTagToType<Tag>`, `ItemOf<Tag>`, `ItemMatch<Tag>`,
+     `as<Tag>()`, `require<Tag>()`, `visit()`, group traits, and typed helper
+     accessors.
+   - Keeps ABI impact at zero: witnesses remain raw `Item` sized, pointer
+     wrappers remain raw pointer sized, and MIR-facing C ABI surfaces remain
+     unchanged.
+
+2. **Ownership domain extension**
+   - Extended `lib/ownership.hpp` with `InputScratchDomain`.
+   - Added outlives relationships for scratch, pool, and GC-backed data so
+     later MarkBuilder/input lifetime checks have a domain vocabulary.
+
+3. **First exhaustive runtime dispatch migration**
+   - Migrated `lambda/print.cpp` from a raw `switch (get_type_id(item))`
+     dispatch body to `lam::visit()` with branch-local `ItemOf<Tag>` witnesses.
+   - Preserved legacy output behavior for currently unsupported tags.
+
+4. **MarkReader / MarkBuilder boundary migration**
+   - Added `ItemReader::asItem<Tag>()` and `ItemReader::is<Tag>()`.
+   - Added typed witness constructors for `MapReader`, `ArrayReader`, and
+     `ElementReader`.
+   - Converted MarkReader internals from raw tag checks and direct union access
+     to `lam::as<>` where the tag refinement is local.
+   - Updated the MarkBuilder `ui_mode` string-child path to use a typed string
+     witness.
+
+5. **Tests**
+   - Added `test/test_lambda_typed.cpp` and registered it in
+     `build_lambda_config.json`.
+   - Added focused MarkReader tests for typed witnesses and typed reader
+     constructors.
+
+### Important Adjustment From The Original Design
+
+The doc originally describes `Element` as layout-compatible with both `Map`
+and `Array`. The implementation does **not** treat `Element*` as a valid
+`Map*` cast: in the actual C++ layout, `Element` extends `List`, then stores
+attribute `type` / `data` fields after the list fields. The migration therefore
+keeps `Element` as map-like in the trait sense, but only exposes safe helpers
+that match the real storage layout.
+
+Concretely:
+
+- `as_array(ItemOf<LMD_TYPE_ELEMENT>)` is allowed because `Element` has a
+  `List`/`Array` prefix.
+- `as_map(ItemOf<LMD_TYPE_ELEMENT>)` is intentionally **not** provided, because
+  reinterpreting `Element*` as `Map*` would read the wrong fields.
+- Element attribute access should go through `Element*` / `ElementReader` /
+  element-specific helpers.
+
+### Verified
+
+The focused build and regression checks passed:
+
+```bash
+make -C build/premake config=debug_native lambda-input-full-cpp -j1 CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib"
+make -C build/premake config=debug_native test_lambda_typed -j1 CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib"
+./test/test_lambda_typed.exe
+
+make -C build/premake config=debug_native test_own_tagged -j1 CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib"
+./test/test_own_tagged.exe
+
+make -C build/premake config=debug_native test_mark_reader_gtest -j1 CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib"
+./test/test_mark_reader_gtest.exe
+
+make -C build/premake config=debug_native test_mark_builder_deepcopy_gtest -j1 CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib"
+./test/test_mark_builder_deepcopy_gtest.exe
+```
+
+Results:
+
+- `test_lambda_typed`: 6 / 6 passed
+- `test_own_tagged`: 6 / 6 passed
+- `test_mark_reader_gtest`: 38 / 38 passed
+- `test_mark_builder_deepcopy_gtest`: 32 / 32 passed
+
+### Next Recommended Phase
+
+1. Convert `MarkBuilder::deep_copy()` / `deep_copy_internal()` from raw
+   `switch (get_type_id(item))` to `lam::visit()` with small typed helper
+   functions per tag family.
+2. Add typed builder outputs for low-risk constructors:
+   `createArrayTyped()`, `createMapTyped()`, `createElementTyped()`, or a
+   naming pattern that fits the existing API.
+3. Start replacing internal C++ helper parameters from raw `Array*` / `Map*`
+   with `GcPtr<T>` / `PoolPtr<T>` where no ABI boundary is involved.
+4. Add a `check-item-cast` lint pass after enough call sites have migrated, so
+   raw item-to-container casts can be restricted to the typed layer and legacy
+   bridge code.

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "lambda-data.hpp"
+#include "../lib/lambda_typed.hpp"
 #include <cstdint>
 #include <functional>
 
@@ -124,6 +125,12 @@ public:
     // Type checking
     TypeId getType() const { return cached_type_; }
 
+    template<TypeId Tag>
+    lam::ItemMatch<Tag> asItem() const { return lam::as<Tag>(item_); }
+
+    template<TypeId Tag>
+    bool is() const { return (bool)asItem<Tag>(); }
+
     bool isNull() const;
     bool isString() const;
     bool isSymbol() const;
@@ -172,6 +179,8 @@ public:
     // Lifecycle (value type semantics)
     MapReader();  // Default constructor for null map
     explicit MapReader(Map* map);
+    explicit MapReader(lam::ItemOf<LMD_TYPE_MAP> map);
+    explicit MapReader(lam::ItemOf<LMD_TYPE_OBJECT> object);
 
     // Create from Item with type validation
     static MapReader fromItem(Item item);
@@ -245,6 +254,7 @@ public:
     // Lifecycle (value type semantics)
     ArrayReader();  // Default constructor for null array
     explicit ArrayReader(Array* array);
+    explicit ArrayReader(lam::ItemOf<LMD_TYPE_ARRAY> array);
 
     // Create from Item with type validation
     static ArrayReader fromItem(Item item);
@@ -295,6 +305,7 @@ public:
     // Lifecycle
     ElementReader();  // Default constructor for invalid element
     explicit ElementReader(const Element* element);
+    explicit ElementReader(lam::ItemOf<LMD_TYPE_ELEMENT> element);
     explicit ElementReader(Item item);
 
     ~ElementReader() = default;
