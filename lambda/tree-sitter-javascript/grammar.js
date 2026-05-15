@@ -832,6 +832,7 @@ module.exports = grammar({
     )),
 
     _lhs_expression: $ => choice(
+      $.call_expression,
       $.member_expression,
       $.subscript_expression,
       $._identifier,
@@ -846,6 +847,7 @@ module.exports = grammar({
     )),
 
     _augmented_assignment_lhs: $ => choice(
+      $.call_expression,
       $.member_expression,
       $.subscript_expression,
       alias($._reserved_identifier, $.identifier),

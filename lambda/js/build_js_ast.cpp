@@ -121,6 +121,8 @@ JsAstNode* build_js_do_while_statement(JsTranspiler* tp, TSNode do_node);
 JsAstNode* build_js_for_in_statement(JsTranspiler* tp, TSNode for_node);
 JsAstNode* build_js_import_statement(JsTranspiler* tp, TSNode import_node);
 JsAstNode* build_js_export_statement(JsTranspiler* tp, TSNode export_node);
+static bool js_is_octal_digit(char c);
+static size_t js_decode_legacy_octal_escape(const char* src, size_t content_len, size_t start, uint32_t* out_code);
 
 // TS-specific builders (used when !tp->strict_js — unified JS/TS AST builder)
 static const char* ts_node_text_util(JsTranspiler* tp, TSNode node, int* out_len);
@@ -322,6 +324,15 @@ JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node) {
                                 if (i + 1 < content_len && src[i + 1] == '\n') {
                                     i++; // also skip <LF> in \<CR><LF>
                                 }
+                            } else if (js_is_octal_digit(next)) {
+                                uint32_t code = 0;
+                                size_t end_pos = js_decode_legacy_octal_escape(src, content_len, i, &code);
+                                if (code <= 0x7F) {
+                                    temp_str[out++] = (char)code;
+                                } else if (out + 2 < content_len + 1) {
+                                    out += utf8_encode(code, temp_str + out);
+                                }
+                                i = end_pos;
                             } else {
                                 temp_str[out++] = js_decode_escape_char(next);
                                 i++; // skip the escaped char
@@ -2417,6 +2428,33 @@ static char js_decode_escape_char(char c) {
     case 'v': return '\v';
     default: return c;
     }
+}
+
+static bool js_is_octal_digit(char c) {
+    return c >= '0' && c <= '7';
+}
+
+static size_t js_decode_legacy_octal_escape(const char* src, size_t content_len, size_t start, uint32_t* out_code) {
+    if (!src || start + 1 >= content_len || src[start] != '\\' || !js_is_octal_digit(src[start + 1])) {
+        if (out_code) *out_code = 0;
+        return start;
+    }
+
+    size_t digit_pos = start + 1;
+    uint32_t value = (uint32_t)(src[digit_pos] - '0');
+    int max_digits = src[digit_pos] <= '3' ? 3 : 2;
+    int digit_count = 1;
+
+    while (digit_count < max_digits &&
+           digit_pos + 1 < content_len &&
+           js_is_octal_digit(src[digit_pos + 1])) {
+        digit_pos++;
+        value = (value << 3) | (uint32_t)(src[digit_pos] - '0');
+        digit_count++;
+    }
+
+    if (out_code) *out_code = value;
+    return digit_pos;
 }
 
 static bool js_template_hex_char(char c) {

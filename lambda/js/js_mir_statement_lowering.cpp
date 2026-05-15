@@ -2408,6 +2408,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     JsArrayPatternNode* destr_pattern = NULL;
     JsObjectPatternNode* obj_destr_pattern = NULL;
     JsAstNode* lhs_ref_node = NULL;
+    bool lhs_call_target = false;
     const char* var_name = NULL;
     int var_len = 0;
 
@@ -2439,9 +2440,11 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         obj_destr_pattern = (JsObjectPatternNode*)fo->left;
     } else if (fo->left && fo->left->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
         lhs_ref_node = fo->left;
+    } else if (fo->left && fo->left->node_type == JS_AST_NODE_CALL_EXPRESSION) {
+        lhs_call_target = true;
     }
 
-    if (!var_name && !destr_pattern && !obj_destr_pattern && !lhs_ref_node) {
+    if (!var_name && !destr_pattern && !obj_destr_pattern && !lhs_ref_node && !lhs_call_target) {
         log_error("js-mir: for-of/for-in missing loop variable");
         jm_pop_scope(mt);
         return;
@@ -2679,8 +2682,17 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         MIR_reg_t elem = jm_call_2(mt, "js_property_access", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, collection),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_item));
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_reg_op(mt->ctx, loop_var), MIR_new_reg_op(mt->ctx, elem)));
+        if (lhs_call_target) {
+            jm_transpile_box_item(mt, fo->left);
+            jm_emit_exc_propagate_check(mt);
+            MIR_reg_t msg = jm_box_string_literal(mt, "Invalid left-hand side in assignment", 36);
+            jm_call_void_1(mt, "js_throw_reference_error",
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, msg));
+            jm_emit_exc_propagate_check(mt);
+        } else {
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, loop_var), MIR_new_reg_op(mt->ctx, elem)));
+        }
 
         // Write-back loop variable to module var / global property / scope_env
         if (var_name && !is_let_const_loop) {
@@ -2874,8 +2886,21 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         MIR_new_reg_op(mt->ctx, is_done)));
 
     // Assign current value to loop variable
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, loop_var), MIR_new_reg_op(mt->ctx, step_result)));
+    if (lhs_call_target) {
+        jm_transpile_box_item(mt, fo->left);
+        MIR_reg_t lhs_call_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_iter_exc),
+            MIR_new_reg_op(mt->ctx, lhs_call_exc)));
+        MIR_reg_t msg = jm_box_string_literal(mt, "Invalid left-hand side in assignment", 36);
+        jm_call_void_1(mt, "js_throw_reference_error",
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, msg));
+        MIR_reg_t lhs_ref_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_iter_exc),
+            MIR_new_reg_op(mt->ctx, lhs_ref_exc)));
+    } else {
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, loop_var), MIR_new_reg_op(mt->ctx, step_result)));
+    }
 
     // Write-back loop variable to module var / global property / scope_env
     if (var_name && !is_let_const_loop) {

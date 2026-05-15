@@ -400,6 +400,12 @@ MIR_reg_t jm_emit_delete_reference(JsMirTranspiler* mt, const JsMirReference* re
     }
 }
 
+static void jm_emit_invalid_assignment_target_reference_error(JsMirTranspiler* mt) {
+    MIR_reg_t msg = jm_box_string_literal(mt, "Invalid left-hand side in assignment", 36);
+    jm_call_void_1(mt, "js_throw_reference_error",
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, msg));
+}
+
 static const char* jm_compound_assign_fn(JsOperator op) {
     switch (op) {
     case JS_OP_ADD_ASSIGN: return "js_add";
@@ -1595,6 +1601,13 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
             MIR_T_I64, MIR_new_reg_op(mt->ctx, jm_transpile_box_item(mt, un->operand)));
     }
     case JS_OP_INCREMENT: {
+        if (un->operand && un->operand->node_type == JS_AST_NODE_CALL_EXPRESSION) {
+            jm_transpile_box_item(mt, un->operand);
+            jm_emit_exc_propagate_check(mt);
+            jm_emit_invalid_assignment_target_reference_error(mt);
+            jm_emit_exc_propagate_check(mt);
+            return jm_emit_undefined(mt);
+        }
         // ++var or var++ — native fast path for typed variables
         if (un->operand && un->operand->node_type == JS_AST_NODE_IDENTIFIER) {
             JsIdentifierNode* id = (JsIdentifierNode*)un->operand;
@@ -1817,6 +1830,13 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
         return un->prefix ? result : num_operand;
     }
     case JS_OP_DECREMENT: {
+        if (un->operand && un->operand->node_type == JS_AST_NODE_CALL_EXPRESSION) {
+            jm_transpile_box_item(mt, un->operand);
+            jm_emit_exc_propagate_check(mt);
+            jm_emit_invalid_assignment_target_reference_error(mt);
+            jm_emit_exc_propagate_check(mt);
+            return jm_emit_undefined(mt);
+        }
         // --var or var-- — native fast path for typed variables
         if (un->operand && un->operand->node_type == JS_AST_NODE_IDENTIFIER) {
             JsIdentifierNode* id = (JsIdentifierNode*)un->operand;
@@ -2985,6 +3005,14 @@ void jm_emit_object_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MI
 // Assignment expression
 MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
     if (!asgn->left || !asgn->right) return jm_emit_null(mt);
+
+    if (asgn->left->node_type == JS_AST_NODE_CALL_EXPRESSION) {
+        jm_transpile_box_item(mt, asgn->left);
+        jm_emit_exc_propagate_check(mt);
+        jm_emit_invalid_assignment_target_reference_error(mt);
+        jm_emit_exc_propagate_check(mt);
+        return jm_emit_undefined(mt);
+    }
 
     // Simple variable assignment: x = expr
     if (asgn->left->node_type == JS_AST_NODE_IDENTIFIER) {

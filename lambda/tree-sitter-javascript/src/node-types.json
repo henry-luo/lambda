@@ -88,6 +88,10 @@
         "named": true
       },
       {
+        "type": "call_expression",
+        "named": true
+      },
+      {
         "type": "identifier",
         "named": true
       },
@@ -403,6 +407,10 @@
             "named": true
           },
           {
+            "type": "call_expression",
+            "named": true
+          },
+          {
             "type": "identifier",
             "named": true
           },
@@ -474,6 +482,10 @@
         "multiple": false,
         "required": true,
         "types": [
+          {
+            "type": "call_expression",
+            "named": true
+          },
           {
             "type": "identifier",
             "named": true
@@ -1305,6 +1317,10 @@
         "types": [
           {
             "type": "array_pattern",
+            "named": true
+          },
+          {
+            "type": "call_expression",
             "named": true
           },
           {
@@ -2478,6 +2494,10 @@
           "named": true
         },
         {
+          "type": "call_expression",
+          "named": true
+        },
+        {
           "type": "identifier",
           "named": true
         },
@@ -3301,8 +3321,7 @@
   },
   {
     "type": "comment",
-    "named": true,
-    "extra": true
+    "named": true
   },
   {
     "type": "const",
@@ -3378,8 +3397,7 @@
   },
   {
     "type": "html_comment",
-    "named": true,
-    "extra": true
+    "named": true
   },
   {
     "type": "identifier",
