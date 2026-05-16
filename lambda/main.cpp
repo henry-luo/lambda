@@ -1555,6 +1555,9 @@ int main(int argc, char *argv[]) {
                     if (html_root) {
                         DomDocument* dom_doc = dom_document_create(input);
                         if (dom_doc) {
+                            Url* cwd = get_current_dir();
+                            dom_doc->url = parse_url(cwd, html_file);
+                            if (cwd) url_destroy(cwd);
                             dom_doc->document_charset = doc_charset;
                             // init CSS property system before building DOM tree
                             // so inline style parsing resolves property IDs correctly

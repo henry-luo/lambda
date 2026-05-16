@@ -857,6 +857,12 @@ void form_control_set_selection(DocState* state, View* view,
 void form_control_sync_text_control_state(DocState* state, View* view);
 
 /**
+ * When script mutates a focused text control, rebuild the live caret /
+ * selection projection from the control's mirrored selection fields.
+ */
+void form_control_sync_text_control_focus_state(DocState* state, View* view);
+
+/**
  * Get the selected option index for a select control (-1 if none selected).
  */
 int form_control_get_selected_index(DocState* state, View* view);

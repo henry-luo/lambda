@@ -55,6 +55,10 @@ static inline bool is_js_undefined(Item val) {
     return get_type_id(val) == LMD_TYPE_UNDEFINED;
 }
 
+static inline Item js_string_key(const char* s) {
+    return (Item){.item = s2it(heap_create_name(s))};
+}
+
 // Forward declarations
 extern "C" void heap_register_gc_root(uint64_t* slot);
 static void js_camel_to_css_prop(const char* js_prop, char* css_buf, size_t buf_size);
@@ -111,6 +115,7 @@ static __thread DomDocument* _js_current_document = nullptr;
 // HTML spec, even when the foreign-doc dispatcher temporarily swaps them in
 // as _js_current_document.
 static __thread DomDocument* _js_main_document = nullptr;
+static void js_dom_install_window_location_history_globals(void);
 
 extern "C" bool js_dom_current_is_main_document(void) {
     return _js_current_document != nullptr && _js_current_document == _js_main_document;
@@ -119,6 +124,8 @@ extern "C" bool js_dom_current_is_main_document(void) {
 // Forward decls (defined further down in the foreign-doc / iframe section).
 extern "C" bool js_doc_has_browsing_context(void* doc);
 extern "C" void js_doc_mark_has_browsing_context(void* doc);
+extern "C" void* js_get_foreign_doc(Item item);
+static Url* js_dom_make_fallback_url(const char* raw_url);
 
 static inline DocState* js_dom_current_state();
 
@@ -140,9 +147,44 @@ static inline void js_dom_mutation_notify() {
 static inline DocState* js_dom_current_state() {
     return _js_current_document ? _js_current_document->state : nullptr;
 }
+
+static bool js_dom_node_contains(DomNode* ancestor, DomNode* node) {
+    for (DomNode* cur = node; cur; cur = cur->parent) {
+        if (cur == ancestor) return true;
+    }
+    return false;
+}
+
+static bool js_dom_node_is_connected(DomNode* node) {
+    if (!node) return false;
+    DomDocument* doc = _js_current_document;
+    if (!doc || !doc->root) return false;
+
+    DomNode* root = node;
+    while (root->parent) root = root->parent;
+    return root == static_cast<DomNode*>(doc->root);
+}
+
 static inline void dom_pre_remove(DomNode* child) {
     DocState* st = js_dom_current_state();
     if (st && child) {
+        View* focused = focus_get(st);
+        if (focused && js_dom_node_contains(child, (DomNode*)focused)) {
+            focus_clear(st);
+        } else {
+            View* caret_view = caret_get_view(st);
+            if (caret_view && js_dom_node_contains(child, (DomNode*)caret_view)) {
+                caret_clear(st);
+            }
+
+            View* anchor_view = nullptr;
+            View* focus_view = nullptr;
+            if (selection_get_extent_views(st, &anchor_view, &focus_view) &&
+                ((anchor_view && js_dom_node_contains(child, (DomNode*)anchor_view)) ||
+                 (focus_view && js_dom_node_contains(child, (DomNode*)focus_view)))) {
+                selection_clear(st);
+            }
+        }
         dom_mutation_pre_remove(st, child);
     }
 }
@@ -408,6 +450,7 @@ extern "C" void js_dom_set_document(void* dom_doc) {
         // F-5: install HTMLOptionElement Option() constructor.
         extern void js_dom_install_option_constructor(void);
         js_dom_install_option_constructor();
+        js_dom_install_window_location_history_globals();
     }
     log_debug("js_dom_set_document: set document=%p", dom_doc);
 }
@@ -925,6 +968,65 @@ static void _schedule_iframe_load(DomElement* iframe) {
         Item cb = js_new_function((void*)_iframe_load_drain, 0);
         js_setTimeout(cb, (Item){.item = i2it(0)});
     }
+}
+
+static DomElement* js_dom_find_iframe_by_name(DomNode* node, const char* target_name) {
+    while (node) {
+        if (node->is_element()) {
+            DomElement* elem = node->as_element();
+            if (elem->tag_name && strcasecmp(elem->tag_name, "iframe") == 0) {
+                const char* name = dom_element_get_attribute(elem, "name");
+                if (name && strcmp(name, target_name) == 0) {
+                    return elem;
+                }
+            }
+            DomElement* found = js_dom_find_iframe_by_name(elem->first_child, target_name);
+            if (found) return found;
+        }
+        node = node->next_sibling;
+    }
+    return nullptr;
+}
+
+extern "C" bool js_dom_navigate_submit_target(const char* target_name, const char* url) {
+    DomDocument* doc = _js_current_document ? _js_current_document : _js_main_document;
+    if (!doc || !url || !url[0]) return false;
+
+    Url* resolved = doc->url ? url_parse_with_base(url, doc->url) : url_parse(url);
+    if (!resolved || !url_is_valid(resolved)) {
+        if (resolved) url_destroy(resolved);
+        resolved = js_dom_make_fallback_url(url);
+        if (!resolved) return false;
+    }
+
+    if (!target_name || !target_name[0] || strcmp(target_name, "_self") == 0) {
+        if (doc->url) url_destroy(doc->url);
+        doc->url = resolved;
+        return true;
+    }
+
+    if (!doc->root) {
+        url_destroy(resolved);
+        return false;
+    }
+
+    DomElement* iframe = js_dom_find_iframe_by_name((DomNode*)doc->root, target_name);
+    if (!iframe) {
+        url_destroy(resolved);
+        return false;
+    }
+
+    Item frame_doc_item = js_iframe_get_content_document(iframe);
+    DomDocument* frame_doc = (DomDocument*)js_get_foreign_doc(frame_doc_item);
+    if (!frame_doc) {
+        url_destroy(resolved);
+        return false;
+    }
+
+    if (frame_doc->url) url_destroy(frame_doc->url);
+    frame_doc->url = resolved;
+    _schedule_iframe_load(iframe);
+    return true;
 }
 
 // ----------------------------------------------------------------------------
@@ -2651,6 +2753,48 @@ extern "C" Item js_document_get_property(Item prop_name) {
             if (href) return (Item){.item = s2it(heap_create_name(href))};
         }
         return (Item){.item = s2it(heap_create_name(""))};
+    }
+
+    // location-style URL access. We model document.location and bare
+    // location as aliases of the document/window proxy itself.
+    if (strcmp(prop, "location") == 0 || strcmp(prop, "document") == 0) {
+        return doc_to_proxy_item(doc);
+    }
+    if (strcmp(prop, "href") == 0) {
+        const char* href = (doc->url && url_get_href(doc->url)) ? url_get_href(doc->url) : "";
+        return (Item){.item = s2it(heap_create_name(href))};
+    }
+    if (strcmp(prop, "protocol") == 0) {
+        const char* protocol = (doc->url && url_get_protocol(doc->url)) ? url_get_protocol(doc->url) : "";
+        return (Item){.item = s2it(heap_create_name(protocol))};
+    }
+    if (strcmp(prop, "hostname") == 0) {
+        const char* hostname = (doc->url && url_get_hostname(doc->url)) ? url_get_hostname(doc->url) : "";
+        return (Item){.item = s2it(heap_create_name(hostname))};
+    }
+    if (strcmp(prop, "port") == 0) {
+        const char* port = (doc->url && url_get_port(doc->url)) ? url_get_port(doc->url) : "";
+        return (Item){.item = s2it(heap_create_name(port))};
+    }
+    if (strcmp(prop, "pathname") == 0) {
+        const char* pathname = (doc->url && url_get_pathname(doc->url)) ? url_get_pathname(doc->url) : "";
+        return (Item){.item = s2it(heap_create_name(pathname))};
+    }
+    if (strcmp(prop, "search") == 0) {
+        const char* search = (doc->url && url_get_search(doc->url)) ? url_get_search(doc->url) : "";
+        return (Item){.item = s2it(heap_create_name(search))};
+    }
+    if (strcmp(prop, "hash") == 0) {
+        const char* hash = (doc->url && url_get_hash(doc->url)) ? url_get_hash(doc->url) : "";
+        return (Item){.item = s2it(heap_create_name(hash))};
+    }
+    if (strcmp(prop, "host") == 0) {
+        const char* host = (doc->url && url_get_host(doc->url)) ? url_get_host(doc->url) : "";
+        return (Item){.item = s2it(heap_create_name(host))};
+    }
+    if (strcmp(prop, "origin") == 0) {
+        const char* origin = (doc->url && url_get_origin(doc->url)) ? url_get_origin(doc->url) : "";
+        return (Item){.item = s2it(heap_create_name(origin))};
     }
 
     // readyState — always "complete" since scripts run after parse
@@ -7025,7 +7169,9 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
     if (strcmp(method, "focus") == 0 || strcmp(method, "blur") == 0) {
         DocState* state = js_dom_current_state();
         if (strcmp(method, "focus") == 0) {
-            focus_set(state, (View*)elem, false);
+            if (js_dom_node_is_connected((DomNode*)elem)) {
+                focus_set(state, (View*)elem, false);
+            }
         } else {
             if (focus_get(state) == (View*)elem) focus_clear(state);
         }
@@ -7609,6 +7755,103 @@ extern "C" Item js_location_get_property(Item prop_name) {
 
     log_debug("js_location_get_property: unknown property '%s'", prop);
     return (Item){.item = s2it(heap_create_name(""))};
+}
+
+static Url* js_dom_make_fallback_url(const char* raw_url) {
+    if (!raw_url) return nullptr;
+
+    Url* url = url_create();
+    if (!url) return nullptr;
+
+    const char* query = strchr(raw_url, '?');
+    const char* hash = strchr(raw_url, '#');
+    const char* end = raw_url + strlen(raw_url);
+    const char* path_end = end;
+    if (query && (!hash || query < hash)) path_end = query;
+    else if (hash) path_end = hash;
+
+    size_t pathname_len = (size_t)(path_end - raw_url);
+    char* pathname = (char*)mem_alloc(pathname_len + 1, MEM_CAT_DOM);
+    memcpy(pathname, raw_url, pathname_len);
+    pathname[pathname_len] = '\0';
+
+    url->href = url_create_string(raw_url);
+    url->pathname = url_create_string(pathname);
+    url->search = url_create_string(query ? query : "");
+    url->hash = url_create_string(hash ? hash : "");
+    url->protocol = url_create_string("");
+    url->origin = url_create_string("");
+    url->host = url_create_string("");
+    url->hostname = url_create_string("");
+    url->port = url_create_string("");
+    url->is_valid = true;
+
+    mem_free(pathname);
+    return url;
+}
+
+static Item js_history_apply_url(Item url_item) {
+    if (get_type_id(url_item) == LMD_TYPE_UNDEFINED || is_js_undefined(url_item)) {
+        return make_js_undefined();
+    }
+
+    const char* next_url = fn_to_cstr(url_item);
+    DomDocument* doc = _js_current_document ? _js_current_document : _js_main_document;
+    if (!doc || !next_url || !next_url[0]) return make_js_undefined();
+
+    Url* resolved = doc->url ? url_parse_with_base(next_url, doc->url) : url_parse(next_url);
+    if (!resolved || !url_is_valid(resolved)) {
+        if (resolved) url_destroy(resolved);
+        resolved = js_dom_make_fallback_url(next_url);
+        if (!resolved) return make_js_undefined();
+    }
+
+    if (doc->url) url_destroy(doc->url);
+    doc->url = resolved;
+    return make_js_undefined();
+}
+
+extern "C" Item js_history_push_state(Item state, Item title, Item url_item) {
+    (void)state;
+    (void)title;
+    return js_history_apply_url(url_item);
+}
+
+extern "C" Item js_history_replace_state(Item state, Item title, Item url_item) {
+    (void)state;
+    (void)title;
+    return js_history_apply_url(url_item);
+}
+
+static Item js_history_noop(Item arg) {
+    (void)arg;
+    return make_js_undefined();
+}
+
+static void js_dom_install_window_location_history_globals(void) {
+    Item global = js_get_global_this();
+    Item doc_proxy = js_get_document_object_value();
+    js_property_set(global, js_string_key("location"), doc_proxy);
+
+    Item history = js_new_object();
+    js_property_set(history, js_string_key("pushState"),
+        js_new_function((void*)js_history_push_state, 3));
+    js_property_set(history, js_string_key("replaceState"),
+        js_new_function((void*)js_history_replace_state, 3));
+    js_property_set(history, js_string_key("back"),
+        js_new_function((void*)js_history_noop, 1));
+    js_property_set(history, js_string_key("forward"),
+        js_new_function((void*)js_history_noop, 1));
+    js_property_set(history, js_string_key("go"),
+        js_new_function((void*)js_history_noop, 1));
+    js_property_set(history, js_string_key("length"), (Item){.item = i2it(1)});
+    js_property_set(global, js_string_key("history"), history);
+
+    Item window = js_property_get(global, js_string_key("window"));
+    if (get_type_id(window) == LMD_TYPE_MAP) {
+        js_property_set(window, js_string_key("location"), doc_proxy);
+        js_property_set(window, js_string_key("history"), history);
+    }
 }
 
 // ============================================================================

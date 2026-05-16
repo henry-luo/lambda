@@ -23,6 +23,8 @@
 // Declared in event.cpp
 extern bool is_view_focusable(View* view);
 
+static void focus_sync_text_control_state(DocState* state, View* view);
+
 // ============================================================================
 // Hash and Compare Functions for StateKey
 // ============================================================================
@@ -2438,6 +2440,33 @@ void form_control_sync_text_control_state(DocState* state, View* view) {
     view_state->data.form.selection_start = form->selection_start;
     view_state->data.form.selection_end = form->selection_end;
     view_state->data.form.selection_direction = form->selection_direction;
+}
+
+void form_control_sync_text_control_focus_state(DocState* state, View* view) {
+    if (!state || !view || !view->is_element()) return;
+
+    DomElement* elem = lam::dom_require_element(view);
+    if (!tc_is_text_control(elem)) return;
+
+    bool should_sync = false;
+    if (state->focus && state->focus->current == view) {
+        should_sync = true;
+    }
+    if (!should_sync && state->caret && state->caret->view == view) {
+        should_sync = true;
+    }
+    if (!should_sync && state->selection &&
+        (state->selection->view == view ||
+         state->selection->anchor_view == view ||
+         state->selection->focus_view == view)) {
+        should_sync = true;
+    }
+    if (!should_sync && state->active_text_control == elem) {
+        should_sync = true;
+    }
+    if (!should_sync) return;
+
+    focus_sync_text_control_state(state, view);
 }
 
 int form_control_get_selected_index(DocState* state, View* view) {

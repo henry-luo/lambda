@@ -211,6 +211,7 @@ extern "C" void tc_history_guard_exit () { if (g_tc_history_guard > 0) g_tc_hist
 void tc_set_value(DomElement* elem, const char* new_val, size_t new_len) {
     if (!tc_is_text_control(elem)) return;
     FormControlProp* f = tc_get_or_create_form(elem);
+    DocState* state = f->state_ref ? f->state_ref : (elem && elem->doc ? (DocState*)elem->doc->state : nullptr);
 
     // F4: enforce HTML `maxlength` on every value mutation. The attribute
     // counts UTF-16 code units in the spec; we approximate with codepoints
@@ -252,7 +253,8 @@ void tc_set_value(DomElement* elem, const char* new_val, size_t new_len) {
     f->selection_direction = 0;
     f->tc_initialized = 1;
     f->value = buf;
-    form_control_sync_text_control_state(f->state_ref, (View*)elem);
+    form_control_sync_text_control_state(state, (View*)elem);
+    form_control_sync_text_control_focus_state(state, (View*)elem);
     // Notify if value-setter caused the selection to move (e.g. previous
     // selection was past the new length and got clamped). Suppress on
     // initial init so parsing-time setup doesn't fire spurious events.
@@ -283,6 +285,7 @@ void tc_set_selection_range(DomElement* elem,
                             uint8_t dir) {
     tc_ensure_init(elem);
     FormControlProp* f = tc_get_or_create_form(elem);
+    DocState* state = f->state_ref ? f->state_ref : (elem && elem->doc ? (DocState*)elem->doc->state : nullptr);
     uint32_t n = f->current_value_u16_len;
     if (start > n) start = n;
     if (end > n) end = n;
@@ -293,7 +296,8 @@ void tc_set_selection_range(DomElement* elem,
     f->selection_start = start;
     f->selection_end = end;
     f->selection_direction = dir;
-    form_control_sync_text_control_state(f->state_ref, (View*)elem);
+    form_control_sync_text_control_state(state, (View*)elem);
+    form_control_sync_text_control_focus_state(state, (View*)elem);
     if (start != old_start || end != old_end || dir != old_dir) {
         tc_notify_selection_changed(elem);
     }
