@@ -45,6 +45,19 @@ extern double js_get_number(Item value);
 #include <cstdlib>
 #include <time.h>
 
+static bool js_reflect_define_property_mode = false;
+static bool js_reflect_define_property_failed = false;
+
+static void js_define_property_reject_false_type_error(const char* message) {
+    if (js_reflect_define_property_mode) {
+        js_reflect_define_property_failed = true;
+        return;
+    }
+    Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
+    Item msg = (Item){.item = s2it(heap_create_name(message, (int)strlen(message)))};
+    js_throw_value(js_new_error_with_name(tn, msg));
+}
+
 static bool js_global_is_bigint(Item value) {
     if (get_type_id(value) != LMD_TYPE_DECIMAL) return false;
     Decimal* dec = (Decimal*)(value.item & 0x00FFFFFFFFFFFFFF);
@@ -315,22 +328,28 @@ static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descrip
             Item val_k = (Item){.item = s2it(heap_create_name("value", 5))};
             if (it2b(js_in(val_k, descriptor))) {
                 Item len_val = js_property_get(descriptor, val_k);
-                // ToUint32(Desc.[[Value]]) must equal ToNumber(Desc.[[Value]]) per ES §15.4.5.1
-                Item num_item = js_to_number(len_val);
-                // If js_to_number threw (e.g. ToPrimitive fails) let that exception propagate
+                // ArraySetLength performs ToUint32(value), then a separate
+                // ToNumber(value). Both conversions are observable.
+                Item u32_item = js_to_number(len_val);
                 extern int js_check_exception(void);
+                if (js_check_exception()) return obj;
+                TypeId u32_nt = get_type_id(u32_item);
+                double u32_d = (u32_nt == LMD_TYPE_FLOAT) ? it2d(u32_item) :
+                               (u32_nt == LMD_TYPE_INT) ? (double)it2i(u32_item) :
+                               (u32_nt == LMD_TYPE_INT64) ? (double)it2l(u32_item) : NAN;
+                uint32_t u32 = 0;
+                if (isfinite(u32_d)) {
+                    double u32_mod = fmod(u32_d, 4294967296.0);
+                    if (u32_mod < 0.0) u32_mod += 4294967296.0;
+                    u32 = (uint32_t)u32_mod;
+                }
+
+                Item num_item = js_to_number(len_val);
                 if (js_check_exception()) return obj;
                 TypeId nt = get_type_id(num_item);
                 double d = (nt == LMD_TYPE_FLOAT) ? it2d(num_item) :
-                           (nt == LMD_TYPE_INT) ? (double)it2i(num_item) : NAN;
-                // NaN means ToPrimitive returned a non-numeric non-convertible value → TypeError
-                if (isnan(d)) {
-                    Item tn = (Item){.item = s2it(heap_create_name("RangeError"))};
-                    Item msg = (Item){.item = s2it(heap_create_name("Invalid array length"))};
-                    js_throw_value(js_new_error_with_name(tn, msg));
-                    return obj;
-                }
-                uint32_t u32 = (uint32_t)d;
+                           (nt == LMD_TYPE_INT) ? (double)it2i(num_item) :
+                           (nt == LMD_TYPE_INT64) ? (double)it2l(num_item) : NAN;
                 if ((double)u32 != d) {
                     Item tn = (Item){.item = s2it(heap_create_name("RangeError"))};
                     Item msg = (Item){.item = s2it(heap_create_name("Invalid array length"))};
@@ -349,9 +368,7 @@ static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descrip
                     if (_nw_found && _nwv.item != JS_DELETED_SENTINEL_VAL && js_is_truthy(_nwv)) _nw_len = true;
                 }
                 if (_nw_len && (uint32_t)obj.array->length != u32) {
-                    Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
-                    Item msg = (Item){.item = s2it(heap_create_name("Cannot redefine property: length"))};
-                    js_throw_value(js_new_error_with_name(tn, msg));
+                    js_define_property_reject_false_type_error("Cannot redefine property: length");
                     return obj;
                 }
                 if (obj.array && (int64_t)u32 < obj.array->length &&
@@ -368,24 +385,18 @@ static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descrip
             }
             Item cfg_key = (Item){.item = s2it(heap_create_name("configurable", 12))};
             if (it2b(js_in(cfg_key, descriptor)) && js_is_truthy(js_property_get(descriptor, cfg_key))) {
-                Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
-                Item msg = (Item){.item = s2it(heap_create_name("Cannot redefine property: length configurable"))};
-                js_throw_value(js_new_error_with_name(tn, msg));
+                js_define_property_reject_false_type_error("Cannot redefine property: length configurable");
                 return obj;
             }
             Item enum_key = (Item){.item = s2it(heap_create_name("enumerable", 10))};
             if (it2b(js_in(enum_key, descriptor)) && js_is_truthy(js_property_get(descriptor, enum_key))) {
-                Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
-                Item msg = (Item){.item = s2it(heap_create_name("Cannot redefine property: length enumerable"))};
-                js_throw_value(js_new_error_with_name(tn, msg));
+                js_define_property_reject_false_type_error("Cannot redefine property: length enumerable");
                 return obj;
             }
             Item get_key = (Item){.item = s2it(heap_create_name("get", 3))};
             Item set_key = (Item){.item = s2it(heap_create_name("set", 3))};
             if (it2b(js_in(get_key, descriptor)) || it2b(js_in(set_key, descriptor))) {
-                Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
-                Item msg = (Item){.item = s2it(heap_create_name("Cannot redefine property: length accessor"))};
-                js_throw_value(js_new_error_with_name(tn, msg));
+                js_define_property_reject_false_type_error("Cannot redefine property: length accessor");
                 return obj;
             }
             Item wri_key = (Item){.item = s2it(heap_create_name("writable", 8))};
@@ -398,9 +409,7 @@ static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descrip
                     if (_nw_found && _nwv.item != JS_DELETED_SENTINEL_VAL && js_is_truthy(_nwv)) _nw_len = true;
                 }
                 if (_nw_len) {
-                    Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
-                    Item msg = (Item){.item = s2it(heap_create_name("Cannot redefine property: length writable"))};
-                    js_throw_value(js_new_error_with_name(tn, msg));
+                    js_define_property_reject_false_type_error("Cannot redefine property: length writable");
                     return obj;
                 }
             }
@@ -6658,6 +6667,43 @@ extern "C" Item js_reflect_set(Item target, Item key, Item value, Item receiver)
     }
     key = js_to_property_key(key);
     if (js_check_exception()) return ItemNull;
+    if (receiver.item == target.item && get_type_id(target) == LMD_TYPE_ARRAY &&
+        get_type_id(key) == LMD_TYPE_STRING) {
+        String* set_key = it2s(key);
+        if (set_key && set_key->len == 6 && strncmp(set_key->chars, "length", 6) == 0) {
+            double u32_num = js_get_number(value);
+            if (js_check_exception()) return ItemNull;
+            uint32_t u32_len = 0;
+            if (isfinite(u32_num)) {
+                double u32_mod = fmod(u32_num, 4294967296.0);
+                if (u32_mod < 0.0) u32_mod += 4294967296.0;
+                u32_len = (uint32_t)u32_mod;
+            }
+            double number_len = js_get_number(value);
+            if (js_check_exception()) return ItemNull;
+            if ((double)u32_len != number_len) {
+                Item tn = (Item){.item = s2it(heap_create_name("RangeError"))};
+                Item msg = (Item){.item = s2it(heap_create_name("Invalid array length"))};
+                js_throw_value(js_new_error_with_name(tn, msg));
+                return ItemNull;
+            }
+            bool nw_len = false;
+            if (target.array && target.array->extra != 0) {
+                Map* pm = (Map*)(uintptr_t)target.array->extra;
+                bool found = false;
+                Item marker = js_map_get_fast_ext(pm, "__nw_length", 11, &found);
+                if (found && marker.item != JS_DELETED_SENTINEL_VAL && js_is_truthy(marker)) {
+                    nw_len = true;
+                }
+            }
+            if (nw_len && target.array && (uint32_t)target.array->length != u32_len) {
+                return (Item){.item = b2it(false)};
+            }
+            js_property_set(target, key, (Item){.item = i2it((int64_t)u32_len)});
+            if (js_check_exception()) return ItemNull;
+            return (Item){.item = b2it(true)};
+        }
+    }
     // If receiver != target, fall back to OrdinarySetWithOwnDescriptor below.
     // If receiver == target and target is plain Array/Map without indexed
     // accessor traps, the legacy fast path is correct and preserves prior
@@ -6804,7 +6850,15 @@ extern "C" Item js_reflect_define_property(Item obj, Item key, Item desc) {
     if (!js_is_truthy(js_object_is_extensible(obj)) && !it2b(js_has_own_property(obj, key))) {
         return (Item){.item = b2it(false)};
     }
+    bool prev_reflect_mode = js_reflect_define_property_mode;
+    bool prev_reflect_failed = js_reflect_define_property_failed;
+    js_reflect_define_property_mode = true;
+    js_reflect_define_property_failed = false;
     js_object_define_property(obj, key, desc);
+    bool define_failed = js_reflect_define_property_failed;
+    js_reflect_define_property_mode = prev_reflect_mode;
+    js_reflect_define_property_failed = prev_reflect_failed;
+    if (define_failed) return (Item){.item = b2it(false)};
     if (js_check_exception()) return ItemNull;
     return (Item){.item = b2it(true)};
 }
@@ -7817,15 +7871,45 @@ extern "C" Item js_object_create_define_properties(Item obj, Item props) {
 // Array.isArray — check if value is an array
 // =============================================================================
 
+static bool js_array_is_arguments_exotic(Item value) {
+    if (get_type_id(value) != LMD_TYPE_ARRAY || value.array->is_content != 1 ||
+        value.array->extra == 0) {
+        return false;
+    }
+    Map* props = (Map*)(uintptr_t)value.array->extra;
+    bool found = false;
+    Item tag = js_map_get_fast_ext(props, "__sym_4", 7, &found);
+    if (!found || get_type_id(tag) != LMD_TYPE_STRING) return false;
+    String* str = it2s(tag);
+    return str && str->len == 9 && strncmp(str->chars, "Arguments", 9) == 0;
+}
+
 extern "C" Item js_array_is_array(Item value) {
-    // ES spec §7.2.2: unwrap Proxy recursively
-    if (js_is_proxy(value)) {
-        value = js_proxy_get_target(value);
-        if (value.item == ItemNull.item) return (Item){.item = ITEM_FALSE}; // revoked proxy
+    int depth = 0;
+    while (js_is_proxy(value) && depth < 32) {
+        JsProxyData* pd = js_get_proxy_data(value);
+        if (!pd || pd->revoked) {
+            return js_throw_type_error("Cannot perform operation on a revoked proxy");
+        }
+        value = (Item){.item = pd->target};
+        depth++;
     }
     TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_MAP) {
+        bool is_proto = false;
+        Item proto_flag = js_map_get_fast_ext(value.map, "__is_proto__", 12, &is_proto);
+        bool has_class = false;
+        Item class_name = js_map_get_fast_ext(value.map, "__class_name__", 14, &has_class);
+        if (is_proto && js_is_truthy(proto_flag) && has_class &&
+            get_type_id(class_name) == LMD_TYPE_STRING) {
+            String* str = it2s(class_name);
+            if (str && str->len == 5 && strncmp(str->chars, "Array", 5) == 0) {
+                return (Item){.item = ITEM_TRUE};
+            }
+        }
+    }
     // Arguments exotic objects use LMD_TYPE_ARRAY internally but are not arrays per spec
-    if (type == LMD_TYPE_ARRAY && value.array->is_content == 1) return (Item){.item = ITEM_FALSE};
+    if (type == LMD_TYPE_ARRAY && js_array_is_arguments_exotic(value)) return (Item){.item = ITEM_FALSE};
     return (Item){.item = (type == LMD_TYPE_ARRAY) ? ITEM_TRUE : ITEM_FALSE};
 }
 
