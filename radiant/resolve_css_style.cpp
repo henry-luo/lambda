@@ -3136,6 +3136,22 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                 }
             }
 
+            // heading font-size comes from the HTML UA stylesheet. It is already
+            // resolved by apply_element_default_style() against the parent font
+            // size, so inheritance must not overwrite it with the parent's
+            // computed font-size unless author CSS explicitly set font-size.
+            if (prop_id == CSS_PROPERTY_FONT_SIZE) {
+                uintptr_t tag = dom_elem->tag();
+                if (tag >= HTM_TAG_H1 && tag <= HTM_TAG_H6) {
+                    ViewSpan* span = lam::view_require_element(lycon->view);
+                    if (span->font && span->font->font_size > 0) {
+                        log_debug("[FONT INHERIT] Heading keeps UA font-size %.1f",
+                            span->font->font_size);
+                        continue;
+                    }
+                }
+            }
+
             // Property not set, check parent chain for inherited declaration
             // Walk up the parent chain until we find a declaration
             DomElement* ancestor = dom_parent_element(dom_elem);

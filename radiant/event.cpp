@@ -43,6 +43,9 @@ DomDocument* show_html_doc(Url *base, char* doc_filename, int viewport_width, in
 View* layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
 void view_pool_destroy(ViewTree* tree);
 extern "C" void process_document_font_faces(UiContext* uicon, DomDocument* doc);
+extern "C" int js_check_exception(void);
+extern "C" Item js_clear_exception(void);
+extern "C" const char* js_get_exception_message(void);
 void to_repaint();
 void update_window_title(const char* title);
 void rebuild_lambda_doc(UiContext* uicon);
@@ -346,6 +349,50 @@ static bool text_target_allows_caret(View* target) {
         node = node->parent;
     }
     return true;
+}
+
+static bool target_inside_click_control(View* target) {
+    DomNode* node = static_cast<DomNode*>(target);
+    while (node) {
+        if (node->node_type == DOM_NODE_ELEMENT) {
+            DomElement* elem = lam::dom_require_element(node);
+            switch (elem->tag()) {
+                case HTM_TAG_A:
+                case HTM_TAG_BUTTON:
+                case HTM_TAG_INPUT:
+                case HTM_TAG_SELECT:
+                case HTM_TAG_TEXTAREA:
+                    return true;
+                default:
+                    break;
+            }
+        }
+        node = node->parent;
+    }
+    return false;
+}
+
+static bool mouseup_target_can_finish_text_selection(EventContext* evcon) {
+    if (!evcon || !evcon->target) return false;
+    View* target = evcon->target;
+
+    // A preserved editor selection must not make toolbar/link/button clicks
+    // look like text-selection drags. Only suppress click dispatch when the
+    // mouseup actually lands on selectable text/editing surfaces.
+    if (target_inside_click_control(target)) {
+        return target->is_element() &&
+            tc_is_text_control(lam::dom_require_element(target));
+    }
+
+    if (target->view_type == RDT_VIEW_TEXT) {
+        return text_target_allows_caret(target);
+    }
+
+    if (target->is_element()) {
+        return is_rich_editable_host(target);
+    }
+
+    return false;
 }
 
 static bool event_inside_block(EventContext* evcon, ViewBlock* block) {
@@ -1929,6 +1976,14 @@ static bool dispatch_html_event_handler(EventContext* evcon, View* target, const
                 typedef Item (*js_handler_fn)(void);
                 js_handler_fn fn = (js_handler_fn)handler->compiled_func;
                 Item handler_result = fn();
+                if (js_check_exception()) {
+                    const char* msg = js_get_exception_message();
+                    log_error("[HTML_HANDLER] %s handler on <%s> threw: %s",
+                              event_type, elem->tag_name ? elem->tag_name : "?",
+                              msg ? msg : "(unknown)");
+                    (void)js_clear_exception();
+                    handler_result.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56);
+                }
                 bool handler_prevented = false;
                 if (window_event_set && js_event_is_default_prevented(synth_ev)) {
                     handler_prevented = true;
@@ -4791,7 +4846,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 evcon.need_repaint = true;
             }
 
-            bool text_selection_drag_handled = selection_is_pointer_range_active(state);
+            bool text_selection_drag_handled = selection_is_pointer_range_active(state) &&
+                mouseup_target_can_finish_text_selection(&evcon);
 
             // Handle select dropdown click FIRST (before other click handling)
             // If a dropdown is open, handle clicks on it before anything else

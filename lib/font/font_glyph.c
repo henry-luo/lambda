@@ -21,6 +21,17 @@
 // maximum entries per-handle advance cache before eviction
 #define ADVANCE_CACHE_MAX_ENTRIES 4096
 
+#ifdef __APPLE__
+static bool should_use_ct_advance_override(FontHandle* handle) {
+    if (!handle || !handle->ct_font_ref) return false;
+    // document fonts are created from exact @font-face data. A separate
+    // CoreText catalog lookup can resolve to a fallback/non-exact face, so keep
+    // the raster/table advance from the loaded font file for layout.
+    if (handle->is_document_font) return false;
+    return true;
+}
+#endif
+
 static uint64_t advance_hash(const void* item, uint64_t seed0, uint64_t seed1) {
     const GlyphAdvanceEntry* entry = (const GlyphAdvanceEntry*)item;
     return hashmap_xxhash3(&entry->codepoint, sizeof(uint32_t), seed0, seed1);
@@ -246,7 +257,7 @@ apply_overrides:
     // CoreText advances instead of table-only metrics. We create the CTFont at CSS_size so
     // CoreText selects the same optical-size instance as Chrome.  The returned
     // advance is already in CSS pixels - no pixel_ratio division needed.
-    if (handle->ct_font_ref) {
+    if (should_use_ct_advance_override(handle)) {
         float table_adv = info.advance_x;
         float ct_adv = font_platform_get_glyph_advance(handle->ct_font_ref, codepoint);
         if (ct_adv >= 0.0f) {
@@ -710,7 +721,7 @@ LoadedGlyph* font_load_glyph(FontHandle* handle, const FontStyleDesc* style,
         // the CSS-matched face for layout advances (for example Arial Bold
         // for font-weight:600). Keep bitmap rendering and line metrics from
         // the loaded face, but use the CSS-matched CoreText advance for layout.
-        if (handle->ct_font_ref) {
+        if (should_use_ct_advance_override(handle)) {
             float pixel_ratio = (ctx && ctx->config.pixel_ratio > 0)
                                     ? ctx->config.pixel_ratio : 1.0f;
             float ct_adv = font_platform_get_glyph_advance(handle->ct_font_ref, codepoint);
@@ -730,7 +741,7 @@ LoadedGlyph* font_load_glyph(FontHandle* handle, const FontStyleDesc* style,
         if (result) {
             fill_loaded_glyph_font_metrics(handle);
             // override advance with ct_font_ref advance for consistency
-            if (handle->ct_font_ref) {
+            if (should_use_ct_advance_override(handle)) {
                 float pixel_ratio = (ctx && ctx->config.pixel_ratio > 0)
                                         ? ctx->config.pixel_ratio : 1.0f;
                 float ct_adv = font_platform_get_glyph_advance(handle->ct_font_ref, codepoint);
