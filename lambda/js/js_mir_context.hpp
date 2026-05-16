@@ -145,6 +145,8 @@ struct JsMirVarEntry {
     bool is_let_const;       // v20: true if declared with let/const (TDZ enforcement)
     bool is_const;           // true if declared with const (prevents reassignment)
     bool is_nfe_binding;     // true for named function expression self-binding
+    bool from_block_func_decl; // true for lexical block function declaration binding
+    bool from_catch_param;   // true for simple catch parameter binding
     bool tdz_active;         // v20: true if still in temporal dead zone (before declaration)
     MIR_reg_t hoisted_data_reg;  // P4h: hoisted items/data pointer for loop optimization (0 = not active)
     MIR_reg_t hoisted_len_reg;   // P4h: hoisted length register for loop optimization (0 = not active)

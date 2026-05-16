@@ -32,6 +32,18 @@ void js_func_cache_reset() {
     js_func_cache_count = 0;
 }
 
+extern "C" int64_t js_with_depth_active(void);
+extern "C" Item* js_with_capture_stack(int* out_depth);
+
+static void js_function_capture_with_env(JsFunction* fn) {
+    if (!fn || !js_with_depth_active()) return;
+    int depth = 0;
+    Item* stack = js_with_capture_stack(&depth);
+    if (stack && depth > 0) {
+        fn->with_env = stack;
+        fn->with_env_depth = depth;
+    }
+}
 
 extern "C" void* js_function_get_ptr(Item fn_item) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return NULL;
@@ -68,7 +80,8 @@ extern "C" Item js_new_function(void* func_ptr, int param_count) {
     }
     // Return cached wrapper if the same MIR function was already wrapped.
     // This ensures Foo.prototype = {...} and (new Foo()) share the same JsFunction*.
-    JsFunction* cached = js_func_cache_lookup(func_ptr);
+    bool has_with_env = js_with_depth_active() != 0;
+    JsFunction* cached = has_with_env ? NULL : js_func_cache_lookup(func_ptr);
     if (cached) return (Item){.function = (Function*)cached};
 
     // Pool-allocate: JS functions are module-lifetime objects that must not be
@@ -82,7 +95,8 @@ extern "C" Item js_new_function(void* func_ptr, int param_count) {
     fn->env_size = 0;
     fn->prototype = ItemNull;
     fn->module_vars = js_active_module_vars; // bind to creating module's vars
-    js_func_cache_insert(func_ptr, fn);
+    js_function_capture_with_env(fn);
+    if (!has_with_env) js_func_cache_insert(func_ptr, fn);
     return (Item){.function = (Function*)fn};
 }
 
@@ -100,6 +114,7 @@ extern "C" Item js_new_method_function(void* func_ptr, int param_count) {
     fn->env_size = 0;
     fn->prototype = ItemNull;
     fn->module_vars = js_active_module_vars;
+    js_function_capture_with_env(fn);
     return (Item){.function = (Function*)fn};
 }
 
@@ -116,6 +131,7 @@ extern "C" Item js_new_closure(void* func_ptr, int param_count, Item* env, int e
     fn->env_size = env_size;
     fn->prototype = ItemNull;
     fn->module_vars = js_active_module_vars; // bind to creating module's vars
+    js_function_capture_with_env(fn);
     return (Item){.function = (Function*)fn};
 }
 
@@ -390,4 +406,3 @@ extern "C" void js_set_function_source(Item fn_item, Item source_item) {
         fn->source_text = it2s(source_item);
     }
 }
-

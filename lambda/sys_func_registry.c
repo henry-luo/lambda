@@ -861,6 +861,7 @@ extern void js_define_global_var_property(Item key, Item value);
 extern void js_define_global_eval_var_property(Item key, Item value);
 extern void js_evalscript_check_global_var_decl(Item key);
 extern void js_evalscript_check_global_function_decl(Item key);
+extern void js_evalscript_check_global_lex_decl(Item key);
 extern void js_eval_env_push_frame(void);
 extern void js_eval_env_bind(Item key, Item value);
 extern int64_t js_eval_env_has_binding(Item key);
@@ -1679,6 +1680,7 @@ JitImport jit_runtime_imports[] = {
     {"js_get_global_object", FPTR(js_get_global_object)},
     {"js_get_global_property", FPTR(js_get_global_property)},
     {"js_get_global_property_strict", FPTR(js_get_global_property_strict)},
+    {"js_get_global_property_reference", FPTR(js_get_global_property_reference)},
     {"js_get_global_builtin_fn", FPTR(js_get_global_builtin_fn)},
     {"js_with_push", FPTR(js_with_push)},
     {"js_with_pop", FPTR(js_with_pop)},
@@ -1699,6 +1701,7 @@ JitImport jit_runtime_imports[] = {
     {"js_define_global_eval_var_property", FPTR(js_define_global_eval_var_property)},
     {"js_evalscript_check_global_var_decl", FPTR(js_evalscript_check_global_var_decl)},
     {"js_evalscript_check_global_function_decl", FPTR(js_evalscript_check_global_function_decl)},
+    {"js_evalscript_check_global_lex_decl", FPTR(js_evalscript_check_global_lex_decl)},
     {"js_eval_env_push_frame", FPTR(js_eval_env_push_frame)},
     {"js_eval_env_bind", FPTR(js_eval_env_bind)},
     {"js_eval_env_has_binding", FPTR(js_eval_env_has_binding)},

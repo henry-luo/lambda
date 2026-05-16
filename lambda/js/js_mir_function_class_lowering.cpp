@@ -341,10 +341,26 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         if (fn->body && fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
             struct hashmap* body_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
                 jm_name_hash, jm_name_cmp, NULL, NULL);
+            struct hashmap* annexb_lex_collisions = NULL;
+            if (fc && !fc->is_strict) {
+                annexb_lex_collisions = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+                    jm_name_hash, jm_name_cmp, NULL, NULL);
+                jm_collect_all_let_const_names_recursive(fn->body, annexb_lex_collisions);
+            }
             jm_collect_body_locals(fn->body, body_locals, true);  // var_only: only hoist var declarations
             size_t viter = 0; void* vitem;
             while (hashmap_iter(body_locals, &viter, &vitem)) {
                 JsNameSetEntry* e = (JsNameSetEntry*)vitem;
+                if (e->from_func_decl && annexb_lex_collisions &&
+                    jm_name_set_has(annexb_lex_collisions, e->name)) {
+                    log_debug("js-mir: AnnexB skip function hoist '%s' (lexical collision)", e->name);
+                    continue;
+                }
+                if (e->from_func_decl && fc && fc->uses_arguments &&
+                    strcmp(e->name, "_js_arguments") == 0) {
+                    log_debug("js-mir: AnnexB skip function hoist '%s' (arguments binding)", e->name);
+                    continue;
+                }
                 if (!jm_find_var(mt, e->name)) {
                     // Skip hoisting vars that are module vars in IIFE body functions
                     // — these are accessed via js_get/set_module_var, not local registers
@@ -366,6 +382,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     }
                 }
             }
+            if (annexb_lex_collisions) hashmap_free(annexb_lex_collisions);
             hashmap_free(body_locals);
 
             // v20 TDZ: Reinitialize let/const variables to TDZ sentinel
@@ -2430,10 +2447,26 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         if (fn->body && fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
             struct hashmap* body_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
                 jm_name_hash, jm_name_cmp, NULL, NULL);
+            struct hashmap* annexb_lex_collisions = NULL;
+            if (fc && !fc->is_strict) {
+                annexb_lex_collisions = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+                    jm_name_hash, jm_name_cmp, NULL, NULL);
+                jm_collect_all_let_const_names_recursive(fn->body, annexb_lex_collisions);
+            }
             jm_collect_body_locals(fn->body, body_locals, true);  // var_only: only hoist var declarations
             size_t viter = 0; void* vitem;
             while (hashmap_iter(body_locals, &viter, &vitem)) {
                 JsNameSetEntry* e = (JsNameSetEntry*)vitem;
+                if (e->from_func_decl && annexb_lex_collisions &&
+                    jm_name_set_has(annexb_lex_collisions, e->name)) {
+                    log_debug("js-mir: AnnexB skip function hoist '%s' (lexical collision)", e->name);
+                    continue;
+                }
+                if (e->from_func_decl && fc && fc->uses_arguments &&
+                    strcmp(e->name, "_js_arguments") == 0) {
+                    log_debug("js-mir: AnnexB skip function hoist '%s' (arguments binding)", e->name);
+                    continue;
+                }
                 if (!jm_find_var(mt, e->name)) {
                     // Skip hoisting vars that are module vars in IIFE body functions
                     if (mt->current_fc && mt->current_fc->is_iife_body && mt->module_consts) {
@@ -2454,6 +2487,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     }
                 }
             }
+            if (annexb_lex_collisions) hashmap_free(annexb_lex_collisions);
             hashmap_free(body_locals);
 
             // v20 TDZ: Reinitialize let/const variables to TDZ sentinel

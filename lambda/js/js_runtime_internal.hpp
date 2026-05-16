@@ -84,6 +84,8 @@ struct JsFunction {
     Item* module_vars; // Per-module variable array (NULL for built-in functions)
     String* source_text; // v29: original source text for Function.prototype.toString
     bool eval_initializer_context;
+    Item* with_env; // captured with-object environment stack, if any
+    int with_env_depth;
 };
 
 #define JS_FUNC_FLAG_GENERATOR 1

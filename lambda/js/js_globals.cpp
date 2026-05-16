@@ -6076,8 +6076,13 @@ struct JsFunctionLayout {
     String* name;
     int builtin_id;
     Item properties_map;
-    uint8_t flags;
+    uint16_t flags;
     int16_t formal_length;
+    Item* module_vars;
+    String* source_text;
+    bool eval_initializer_context;
+    Item* with_env;
+    int with_env_depth;
 };
 
 static bool js_func_is_constructor(Item func_item) {
@@ -13415,6 +13420,15 @@ extern "C" void js_with_batch_reset(void) {
 }
 
 extern "C" void js_with_push(Item obj) {
+    TypeId type = get_type_id(obj);
+    if (type == LMD_TYPE_NULL || obj.item == ITEM_JS_UNDEFINED) {
+        js_throw_type_error("Cannot convert undefined or null to object");
+        return;
+    }
+    if (type != LMD_TYPE_MAP && type != LMD_TYPE_ARRAY && type != LMD_TYPE_FUNC) {
+        obj = js_to_object(obj);
+        if (js_check_exception()) return;
+    }
     if (js_with_stack_depth < JS_WITH_STACK_MAX) {
         js_last_with_binding_valid = false;
         js_with_stack[js_with_stack_depth++] = obj;
@@ -13434,6 +13448,38 @@ extern "C" int js_with_save_depth() {
 
 extern "C" void js_with_restore_depth(int depth) {
     js_with_stack_depth = depth;
+    js_last_with_binding_valid = false;
+}
+
+extern "C" int js_with_save_stack(Item* out_stack, int max_depth) {
+    int depth = js_with_stack_depth;
+    if (out_stack && max_depth > 0) {
+        int copy_depth = depth < max_depth ? depth : max_depth;
+        for (int i = 0; i < copy_depth; i++) {
+            out_stack[i] = js_with_stack[i];
+        }
+    }
+    return depth;
+}
+
+extern "C" void js_with_set_stack(Item* stack, int depth) {
+    if (depth < 0) depth = 0;
+    if (depth > JS_WITH_STACK_MAX) depth = JS_WITH_STACK_MAX;
+    for (int i = 0; i < depth; i++) {
+        js_with_stack[i] = stack ? stack[i] : ItemNull;
+    }
+    js_with_stack_depth = depth;
+    js_last_with_binding_valid = false;
+}
+
+extern "C" Item* js_with_capture_stack(int* out_depth) {
+    if (out_depth) *out_depth = js_with_stack_depth;
+    if (js_with_stack_depth <= 0) return NULL;
+    Item* captured = (Item*)pool_calloc(js_input->pool, sizeof(Item) * js_with_stack_depth);
+    for (int i = 0; i < js_with_stack_depth; i++) {
+        captured[i] = js_with_stack[i];
+    }
+    return captured;
 }
 
 extern "C" int64_t js_with_depth_active(void) {
@@ -13441,7 +13487,7 @@ extern "C" int64_t js_with_depth_active(void) {
 }
 
 // Check with-scope stack for a property (most recent scope first)
-static Item js_with_scope_lookup(Item key, bool* found) {
+static Item js_with_scope_lookup(Item key, bool* found, bool strict_get) {
     extern int js_check_exception(void);
     *found = false;
     for (int i = js_with_stack_depth - 1; i >= 0; i--) {
@@ -13478,6 +13524,10 @@ static Item js_with_scope_lookup(Item key, bool* found) {
                     }
                     *found = true;
                     js_last_with_binding_valid = false;
+                    if (strict_get) {
+                        js_throw_binding_reference_error(key);
+                        return ItemNull;
+                    }
                     return make_js_undefined();
                 }
                 if (js_check_exception()) {
@@ -13485,10 +13535,14 @@ static Item js_with_scope_lookup(Item key, bool* found) {
                     return ItemNull;
                 }
                 *found = true;
+                Item value = js_property_get(scope_obj, key);
+                if (js_check_exception()) {
+                    return ItemNull;
+                }
                 js_last_with_binding_scope = scope_obj;
                 js_last_with_binding_key = key;
                 js_last_with_binding_valid = true;
-                return js_property_get(scope_obj, key);
+                return value;
             }
             if (js_check_exception()) {
                 *found = true;
@@ -13502,7 +13556,7 @@ static Item js_with_scope_lookup(Item key, bool* found) {
 extern "C" Item js_get_with_binding_or_fallback(Item key, Item fallback) {
     if (js_with_stack_depth <= 0) return fallback;
     bool found = false;
-    Item result = js_with_scope_lookup(key, &found);
+    Item result = js_with_scope_lookup(key, &found, false);
     return found ? result : fallback;
 }
 
@@ -13584,7 +13638,7 @@ extern "C" Item js_get_global_property(Item key) {
     // Check with-scope stack first
     if (js_with_stack_depth > 0) {
         bool found = false;
-        Item result = js_with_scope_lookup(key, &found);
+        Item result = js_with_scope_lookup(key, &found, false);
         if (found) return result;
     }
     Item global = js_get_global_this();
@@ -13598,7 +13652,7 @@ extern "C" Item js_get_global_property_strict(Item key) {
     // Check with-scope stack first
     if (js_with_stack_depth > 0) {
         bool found = false;
-        Item result = js_with_scope_lookup(key, &found);
+        Item result = js_with_scope_lookup(key, &found, true);
         if (found) return result;
     }
     Item global = js_get_global_this();
@@ -13621,10 +13675,21 @@ extern "C" Item js_get_global_property_strict(Item key) {
     return result;
 }
 
+extern "C" Item js_get_global_property_reference(Item key, int64_t strict_reference) {
+    // Identifier reads always throw for truly unresolvable names, but with-object
+    // GetBindingValue uses the Reference's strictness for deleted bindings.
+    if (js_with_stack_depth > 0) {
+        bool found = false;
+        Item result = js_with_scope_lookup(key, &found, strict_reference != 0);
+        if (found) return result;
+    }
+    return js_get_global_property_strict(key);
+}
+
 extern "C" int64_t js_global_binding_exists(Item key) {
     if (js_with_stack_depth > 0) {
         bool found = false;
-        js_with_scope_lookup(key, &found);
+        js_with_scope_lookup(key, &found, false);
         if (found) return 1;
         if (js_check_exception()) return 0;
     }
@@ -13792,6 +13857,25 @@ extern "C" void js_evalscript_check_global_function_decl(Item key) {
         (desc.flags & JS_PD_WRITABLE) &&
         (desc.flags & JS_PD_ENUMERABLE)) return;
     js_throw_type_error("Cannot declare global function over incompatible global property");
+}
+
+extern "C" void js_evalscript_check_global_lex_decl(Item key) {
+    if (!js_262_eval_script_is_active()) return;
+    key = js_to_property_key(key);
+    if (js_check_exception()) return;
+    Item global = js_get_global_this();
+    if (!it2b(js_has_own_property(global, key))) return;
+    Item name = js_to_string(key);
+    if (get_type_id(name) != LMD_TYPE_STRING) return;
+    String* str = it2s(name);
+    JsPropertyDescriptor desc;
+    if (js_get_own_property_descriptor(global, str->chars, (int)str->len, &desc) &&
+        js_pd_is_configurable(&desc)) {
+        return;
+    }
+    const char* msg_str = "Lexical declaration conflicts with existing global var declaration";
+    Item msg = (Item){.item = s2it(heap_create_name(msg_str, strlen(msg_str)))};
+    js_throw_syntax_error(msg);
 }
 
 // Direct eval bridge: function-scope eval code is compiled as a small script,
@@ -14374,10 +14458,13 @@ struct JsCtor {
     String* name;
     int builtin_id;
     Item properties_map; // v18: must match JsFunction layout
-    uint8_t flags;       // must match JsFunction layout (generator, arrow flags)
+    uint16_t flags;      // must match JsFunction layout (generator, arrow flags)
     int16_t formal_length; // must match JsFunction layout
     Item* module_vars;   // must match JsFunction layout
     String* source_text; // must match JsFunction layout (v29)
+    bool eval_initializer_context;
+    Item* with_env;
+    int with_env_depth;
 };
 
 // Reset constructor prototype objects between batch tests.

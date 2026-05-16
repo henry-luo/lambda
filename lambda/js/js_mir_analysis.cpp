@@ -1147,28 +1147,6 @@ void jm_collect_let_const_names(JsAstNode* block, struct hashmap* names) {
                 }
             }
         }
-        // also scan for-statement inits (for (let x = ...; ...))
-        if (stmt->node_type == JS_AST_NODE_FOR_STATEMENT) {
-            JsForNode* f = (JsForNode*)stmt;
-            if (f->init && f->init->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
-                JsVariableDeclarationNode* v = (JsVariableDeclarationNode*)f->init;
-                if (v->kind == JS_VAR_LET || v->kind == JS_VAR_CONST) {
-                    JsAstNode* d = v->declarations;
-                    while (d) {
-                        if (d->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
-                            JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)d;
-                            if (decl->id && decl->id->node_type == JS_AST_NODE_IDENTIFIER) {
-                                JsIdentifierNode* id = (JsIdentifierNode*)decl->id;
-                                char name[128];
-                                snprintf(name, sizeof(name), "_js_%.*s", (int)id->name->len, id->name->chars);
-                                jm_name_set_add_kind(names, name, (int)v->kind);
-                            }
-                        }
-                        d = d->next;
-                    }
-                }
-            }
-        }
         stmt = stmt->next;
     }
 }
@@ -1325,6 +1303,27 @@ void jm_init_block_tdz(JsMirTranspiler* mt, JsAstNode* block) {
         jm_scope_env_mark_and_writeback(mt, e->name, tdz_reg);
     }
     hashmap_free(let_consts);
+
+    JsBlockNode* blk = (JsBlockNode*)block;
+    JsAstNode* stmt = blk->statements;
+    while (stmt) {
+        if (stmt->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
+            JsFunctionNode* fn = (JsFunctionNode*)stmt;
+            if (fn->name && fn->name->chars) {
+                JsFuncCollected* fc = jm_find_collected_func(mt, fn);
+                if (fc && fc->func_item) {
+                    char vname[128];
+                    snprintf(vname, sizeof(vname), "_js_%.*s",
+                        (int)fn->name->len, fn->name->chars);
+                    MIR_reg_t fn_reg = jm_create_func_or_closure(mt, fc);
+                    jm_set_var(mt, vname, fn_reg);
+                    JsMirVarEntry* ve = jm_find_var(mt, vname);
+                    if (ve) ve->from_block_func_decl = true;
+                }
+            }
+        }
+        stmt = stmt->next;
+    }
 }
 
 // Analyze captures for a function: find identifiers referenced but not locally declared

@@ -1,0 +1,678 @@
+# Transpile_Js43 - Plan For The Remaining js262 Failure Clusters
+
+Date: 2026-05-16
+
+This proposal follows the Js42 work. Js42 materially changed the shape of the
+problem: the runner can now emit machine-readable failure manifests, the
+baseline has grown substantially, and the remaining failures are no longer a
+single large structural wall. They are a smaller set of repeated semantic gaps.
+
+Primary evidence for this proposal:
+
+- `temp/js42_full_run_partial_after_fixes_failures.tsv`
+- `temp/js42_full_run_partial_after_fixes_failures_by_path.tsv`
+- `temp/js42_full_run_partial_after_fixes_failures_by_feature.tsv`
+- `test/js262/test262_baseline.txt`
+- `test/js262/t262_partial.txt`
+
+The latest manifest contains 1,003 failed tests. The current baseline file has
+32,857 passing non-comment entries. The remaining partial list has 46 tracked
+slow or batch-kill entries. The practical next goal for Js43 should be to
+retire the largest repeated failure families while preserving the Js42 baseline
+gate.
+
+## 1. Current Failure Shape
+
+### 1.1 Failures by top-level path
+
+| Area | Failures | Main theme |
+|---|---:|---|
+| `language/statements` | 224 | class semantics, `with`, try/finally completion, Annex B-adjacent declaration behavior |
+| `built_ins/Array` | 190 | array prototype algorithms, mutation side effects, species/unscopables, length/index descriptors |
+| `built_ins/TypedArray` | 92 | integer-indexed exotic `set`, `join`, `sort`, `with`, `toLocaleString` |
+| `language/expressions` | 60 | class private brand/eval cases, generators, call/reference semantics |
+| `annexB/language/function-code` | 58 | sloppy block function declaration instantiation |
+| `annexB/language/global-code` | 57 | global sloppy block function declaration instantiation |
+| `built_ins/RegExp` | 54 | named groups, lookbehind, regexp literal/prototype protocol edges |
+| `built_ins/Object` | 46 | prototype helpers, `assign`, symbols, `fromEntries` |
+| `built_ins/Promise` | 41 | iterator-close and combinator slow/failure cases |
+| `built_ins/String` | 33 | string prototype protocol/coercion details |
+| `built_ins/Proxy` | 20 | trap invariants and receiver semantics |
+| `language/function-code` | 19 | declaration/eval binding details |
+| `language/global-code` | 16 | global declaration instantiation |
+| `built_ins/Function` | 14 | constructor/prototype restricted behavior |
+| `language/literals` | 13 | regexp and string literal edge cases |
+
+Everything else is single-digit or low-teens cleanup.
+
+### 1.2 Larger path clusters
+
+Grouping one level deeper shows where the repeated work is:
+
+| Cluster | Failures | Notes |
+|---|---:|---|
+| `built-ins/Array/prototype` | 166 | mostly ordinary algorithm and side-effect order issues |
+| `language/statements/class` | 91 | class elements, subclassing, static blocks |
+| `built-ins/TypedArray/prototype` | 91 | typed-array exotic operations |
+| `annexB/language/function-code` | 58 | same family of sloppy block function tests |
+| `annexB/language/global-code` | 57 | same family at global scope |
+| `language/statements/with` | 53 | `with` object environment record support |
+| `language/expressions/class` | 43 | private names and multiple-evaluation/eval cases |
+| `built-ins/String/prototype` | 23 | protocol dispatch and borrowed-method coercions |
+| `language/statements/try` | 22 | completion/finally propagation |
+| `built-ins/Object/prototype` | 21 | `__defineGetter__`, `__lookupGetter__`, descriptors |
+| `built-ins/RegExp/named-groups` | 16 | named capture support |
+| `built-ins/RegExp/lookBehind` | 16 | lookbehind support and errors |
+
+### 1.3 Feature tags
+
+The feature summary is less complete because 534 failures carry no feature tag,
+but the tagged failures still point to the same roots:
+
+| Feature | Failures |
+|---|---:|
+| `TypedArray` | 96 |
+| `class` | 93 |
+| `Proxy` | 64 |
+| `BigInt` | 48 |
+| `Symbol` | 33 |
+| `generators` | 32 |
+| `Reflect` | 26 |
+| `change-array-by-copy` | 23 |
+| `class-methods-private` | 33 |
+| `class-fields-private` | 19 |
+| `class-fields-public` | 18 |
+| `async-iteration` | 17 |
+| `regexp-lookbehind` | 17 |
+| `regexp-named-groups` | 16 |
+| `exponentiation` | 16 |
+
+## 2. Diagnosis
+
+### 2.1 Annex B block functions are the highest-leverage language fix
+
+The most obvious repeated diagnostic is:
+
+```text
+An initialized binding is not created prior to evaluation Expected a ReferenceError to be thrown but no exception was thrown at all
+```
+
+This appears 88 times and is concentrated in:
+
+- `annexB/language/function-code`
+- `annexB/language/global-code`
+- related `language/function-code` and `language/global-code` declaration tests
+
+The current implementation is close enough to create some bindings, but it does
+not model the split between lexical binding creation, var/global binding
+instantiation, and Annex B.3.3 runtime replacement precisely. The failures are
+not isolated syntax bugs; they point to declaration-instantiation order and
+sloppy block function semantics.
+
+### 2.2 `with` needs a real object environment record
+
+`language/statements/with` still has 53 failures. These are unlikely to be
+fixed by adding individual lookup cases. `with` changes identifier resolution
+through an object environment record and must respect:
+
+- property lookup through the object and prototype chain;
+- `Symbol.unscopables`;
+- assignment target resolution;
+- deletion and ReferenceError behavior;
+- interaction with `let`, `const`, `var`, function declarations, and eval.
+
+This is a good Js43 target because it is relatively contained and it unlocks a
+large language/statements cluster without touching every built-in.
+
+### 2.3 Array and TypedArray share abstract-operation gaps
+
+Array prototype failures are spread across many methods:
+
+| Method | Failures |
+|---|---:|
+| `sort` | 21 |
+| `concat` | 18 |
+| `reduceRight` | 17 |
+| `push` / `unshift` | 18 |
+| `shift` / `pop` | 13 |
+| `reduce` | 8 |
+| change-by-copy methods (`toSpliced`, `with`, `toReversed`, `toSorted`) | 18 |
+| callback methods (`some`, `map`, `forEach`, `filter`, `every`) | 19 |
+| search/index methods | 7 |
+
+TypedArray prototype failures are even more concentrated:
+
+| Method | Failures |
+|---|---:|
+| `set` | 44 |
+| `toLocaleString` | 22 |
+| `join` | 11 |
+| `sort` | 8 |
+| `with` | 5 |
+
+The common theme is algorithm conformance around property access order,
+observable side effects, integer-indexed exotic behavior, detach checks,
+species/constructor lookup, and abrupt completion. Js43 should not hand-fix
+each method independently. It should add a small set of reusable operation
+helpers and then port the high-count methods.
+
+### 2.4 Class failures are now mostly private-name and subclass edges
+
+Class failures fell far enough that the remaining set is crisp:
+
+- `language/statements/class/elements`: 37
+- `language/statements/class/subclass`: 30
+- `language/statements/class/definition`: 13
+- `language/expressions/class`: 43, mostly private static/private method brand
+  checks across direct eval, indirect eval, factory, and function constructor
+  multiple-evaluation cases
+
+The repeated diagnostic:
+
+```text
+invalid access of c1 private method Expected a TypeError to be thrown but no exception was thrown at all
+```
+
+appears 15 times. That points to private name allocation/brand identity being
+too broad or being reused across class evaluations.
+
+### 2.5 RegExp is smaller but still structurally special
+
+RegExp failures are no longer dominated by broad property-escape tables in the
+current manifest. The remaining high-count sets are:
+
+- named groups: 16
+- lookbehind: 16
+- regexp literals: 10
+- regexp prototype protocol: 10
+
+This is a good bounded phase if Js43 wants a built-in win without reopening the
+entire RegExp subsystem. Named captures and lookbehind validation/execution
+should remain behind the existing RegExp front-end path, not patched in string
+methods.
+
+### 2.6 Promise failures are split between correctness and speed
+
+`built_ins/Promise` has 41 current failures, and the partial list still includes
+many slow Promise combinator iterator-close tests:
+
+- `Promise.all`
+- `Promise.allSettled`
+- `Promise.any`
+- `Promise.race`
+
+The slow entries are mostly iterator-close paths where resolve/then retrieval
+throws or returns a bad value. The fix should make Promise combinators share one
+iterator loop with early-close and job-queue behavior. A local speed patch is
+unlikely to stay correct.
+
+## 3. Js43 Target
+
+The recommended Js43 target is:
+
+```text
+Current known failures: 1,003
+Target remaining failures after Js43: 500-650
+Baseline target: 33,200+ fully passing tests
+Regression target: 0
+Crash/batch-lost target: 0
+Partial-list target: below 30 entries
+```
+
+The plan deliberately avoids trying to close every remaining failure. The best
+return is to retire repeated families and leave the long tail for Js44.
+
+## 4. Proposed Phases
+
+### J43-1 - Annex B Declaration Instantiation
+
+Goal: correctly implement sloppy block function declaration behavior in
+function and global code.
+
+Scope:
+
+- `annexB/language/function-code`: 58 failures
+- `annexB/language/global-code`: 57 failures
+- collateral in `language/function-code` and `language/global-code`
+
+Work:
+
+- Add an explicit collection pass for Annex B.3.3 block function declarations.
+- Separate lexical declaration creation from var/global object binding updates.
+- For function code, implement the conditional runtime update from the block
+  function binding to the var binding only when the Annex B rules allow it.
+- For global code, route updates through global environment operations so
+  property creation and descriptor checks are observable.
+- Preserve early TDZ behavior for the `skip-early-err-*` tests.
+- Add focused manifests for the two Annex B directories and the related
+  non-Annex global/function declaration directories.
+
+Gate:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-file=temp/js43_annexb_decl_batch.txt --js-timeout=30 --write-failures=temp/js43_annexb_decl_failures.tsv
+./test/test_js_test262_gtest.exe --batch-only --write-failures=temp/js43_baseline_after_annexb_failures.tsv
+```
+
+Expected impact:
+
+- 100-150 passing tests.
+
+Status 2026-05-16:
+
+- Completed the first Annex B declaration-instantiation slice against the
+  failure-derived batch `temp/js43_annex_from_failures.txt`.
+- Fixed sloppy block function binding split for function/global code, including
+  suppressed early-error cases, `arguments` binding collisions, nested block
+  function replacement guards, and visible-scope capture filtering.
+- Fixed adjacent Annex B stragglers surfaced by the focused batch:
+  non-strict `for-in` initializers, catch-parameter `var` initializer scoping,
+  `$262.evalScript` global lexical collisions, and arguments-object
+  `toString`.
+- Verification: `make build-test` passed, and
+  `./test/test_js_test262_gtest.exe --batch-file=temp/js43_annex_from_failures.txt --js-timeout=30 --write-failures=temp/js43_annex_from_failures_failures.tsv`
+  passed `118/118`.
+
+### J43-2 - Object Environment Records For `with`
+
+Goal: implement `with` identifier resolution through a proper object
+environment record.
+
+Scope:
+
+- `language/statements/with`: 53 failures
+- collateral in `Symbol.unscopables`, assignment/reference tests, and eval
+  declaration tests
+
+Work:
+
+- Add a runtime environment-record variant for object environments.
+- Implement `HasBinding` using `HasProperty` plus `@@unscopables` checks.
+- Route identifier get/set/delete inside `with` through Reference Records.
+- Ensure `var` declarations still target the variable environment, not the
+  object environment.
+- Verify nested `with`, prototype-chain lookup, accessor properties, deletion,
+  strict/sloppy assignment, and eval interactions.
+
+Gate:
+
+```bash
+find test/js262/test/language/statements/with -type f -name '*.js' | sed 's#^test/js262/test/##; s#/#_#g; s#[-.]#_#g' | sort > temp/js43_with_batch.txt
+./test/test_js_test262_gtest.exe --batch-file=temp/js43_with_batch.txt --js-timeout=30 --write-failures=temp/js43_with_failures.tsv
+./test/test_js_test262_gtest.exe --batch-only --write-failures=temp/js43_baseline_after_with_failures.tsv
+```
+
+Expected impact:
+
+- 45-70 passing tests.
+
+Status 2026-05-16:
+
+- Completed the first `with` object-environment slice against
+  `temp/js43_with_batch.txt`.
+- Fixed `with(null)` / `with(undefined)` to throw TypeError before entering the
+  body, and routed the exception through MIR propagation.
+- Made global-ish identifier reads inside `with` consult the object
+  environment before falling back to intrinsic/global values. This covers
+  `undefined`, `NaN`, `Infinity`, `globalThis`, namespace objects, global
+  builtin functions, and constructor/global-property reads while preserving the
+  existing with-aware global lookup path to avoid duplicate proxy traps.
+- Fixed legacy `var` initializer assignment inside `with`: the `var` binding
+  is still hoisted to the variable environment, but the initializer writes to
+  the active object environment when `HasBinding` succeeds.
+- Fixed `with` statement completion for empty normal/abrupt bodies by resetting
+  eval completion before evaluating the body.
+- Enabled early-error checking for dynamic `Function(...)` sources so strict
+  functions containing `with` throw SyntaxError.
+- Verification: `make build-test` passed, and
+  `./test/test_js_test262_gtest.exe --batch-file=temp/js43_with_batch.txt --js-timeout=30 --write-failures=temp/js43_with_after_cleanup.tsv`
+  improved the focused batch from `128/181` to `157/181`.
+- Follow-up slice: function objects now capture the active `with` object stack
+  when created inside a `with` body, and compiled JS calls enter their callee
+  lexical `with` stack before restoring the caller stack. This fixes escaped
+  closure cases such as `12.10-0-3`.
+- Fixed a crash-class regression by aligning the `JsCtor` and
+  `JsFunctionLayout` mirrors in `js_globals.cpp` with the shared `JsFunction`
+  layout after adding captured `with` fields. This also keeps builtin
+  constructors safe when called through the new call-entry environment restore.
+- Verification: `make build-test` passed, the local proxy repros under
+  `temp/js43_proxy_repro*.js` no longer segfault, and
+  `./test/test_js_test262_gtest.exe --batch-file=temp/js43_proxy_crash_batch.txt --js-timeout=30 --write-failures=temp/js43_proxy_after_layout_fix.tsv`
+  now passes the two proxy call tests that previously crashed. The full focused
+  batch remains `157/181` with zero crashes:
+  `temp/js43_with_after_layout_fix.tsv`.
+- Fixed the proxy compound-assignment duplicate-trap case by only caching the
+  last resolved `with` binding after the final `[[Get]]` completes. This keeps
+  proxy getter calls from invalidating the cache mid-lookup and forcing the
+  subsequent write through the slower global fallback path.
+- Split identifier global lookup from object-environment strictness for
+  `GetBindingValue`. Bare identifier reads still throw for truly unresolvable
+  names, but a binding deleted during `@@unscopables` lookup now returns
+  `undefined` in sloppy code and throws ReferenceError in strict code.
+- Verification: `make build-test` passed;
+  `./test/test_js_test262_gtest.exe --batch-file=temp/js43_proxy_crash_batch.txt --js-timeout=30 --write-failures=temp/js43_proxy_after_cache_after_get.tsv`
+  passed `3/3`; `./test/test_js_test262_gtest.exe --batch-file=temp/js43_with_deleted_unscopables_batch.txt --js-timeout=30 --write-failures=temp/js43_with_deleted_unscopables_after_registry.tsv`
+  passed `2/2`; and
+  `./test/test_js_test262_gtest.exe --batch-file=temp/js43_with_batch.txt --js-timeout=30 --write-failures=temp/js43_with_after_reference_lookup.tsv`
+  improved the focused batch to `159/181` with zero crashes.
+- Fixed captured-runtime-`with` identifier deletion by always routing
+  identifier `delete` through `js_delete_identifier_with_binding`. This lets a
+  function compiled with no lexical `with_depth`, but invoked through a
+  captured object environment, delete object-environment bindings before
+  declared/global fallback.
+- Fixed special global fast-path reads (`parseInt`, `NaN`, `Infinity`, `eval`,
+  etc.) to consult `js_get_with_binding_or_fallback` regardless of compile-time
+  `with_depth`. The runtime helper returns the original fast-path value when no
+  object environment is active.
+- Fixed direct-call optimization across `with` boundaries. Calls whose call
+  site, target function, or current function is lexically connected to a
+  `with` statement now fall back to `js_call_function`, so the callee wrapper
+  can install its captured `with` stack instead of leaking or dropping the
+  caller environment.
+- Fixed module/top-level binding reads inside escaped `with` functions by
+  applying the same runtime object-environment fallback to module constants,
+  functions, classes, and modvars. This covers the A3.12 `return value` /
+  `throw value` cases where the object environment shadows a top-level
+  binding after the `with` body has exited.
+- Verification: `make build-test` passed, and
+  `./test/test_js_test262_gtest.exe --batch-file=temp/js43_with_batch.txt --js-timeout=30 --write-failures=temp/js43_with_after_module_with_reads.tsv`
+  passed `181/181`.
+- Broad gate note: `./test/test_js_test262_gtest.exe --batch-only --write-failures=temp/js43_baseline_after_with_green.tsv`
+  completed with `33271/34145` fully passing, `487` improvements, and `72`
+  reported regressions versus the checked-in baseline. The reported regressions
+  are outside `language/statements/with` and should be triaged separately before
+  using the broad gate as the final Js43 acceptance signal.
+
+### J43-3 - Array Algorithm Spine
+
+Goal: make high-count Array prototype methods use common abstract-operation
+helpers instead of local method-specific shortcuts.
+
+Scope:
+
+- `built-ins/Array/prototype`: 166 failures
+- `Array` length and constructor edge cases: about 20 more failures
+
+Work:
+
+- Add or harden helpers for `LengthOfArrayLike`, `ToLength`, `HasProperty`,
+  `Get`, `Set`, `DeletePropertyOrThrow`, `CreateDataPropertyOrThrow`, and
+  `ArraySpeciesCreate`.
+- Port the highest-count methods first:
+  `sort`, `concat`, `reduceRight`, `push`, `unshift`, `shift`, `pop`,
+  `reduce`.
+- Then port the change-by-copy family:
+  `toSpliced`, `with`, `toReversed`, `toSorted`.
+- Verify callback method ordering and abrupt completion:
+  `some`, `map`, `forEach`, `filter`, `every`.
+- Treat sparse arrays, holes, prototype accessors, non-writable length, and
+  self-mutating callbacks as first-class tests.
+
+Gate:
+
+```bash
+./test/test_js_test262_gtest.exe --gtest_filter='*built_ins_Array_prototype*' --write-failures=temp/js43_array_proto_failures.tsv
+./test/test_js_array_gtest.exe
+./test/test_js_test262_gtest.exe --batch-only --write-failures=temp/js43_baseline_after_array_failures.tsv
+```
+
+Expected impact:
+
+- 100-170 passing tests.
+
+### J43-4 - TypedArray Integer-Indexed Exotic Operations
+
+Goal: make TypedArray prototype algorithms share detach, bounds, conversion,
+and integer-indexed exotic semantics.
+
+Scope:
+
+- `built-ins/TypedArray/prototype`: 91 failures
+- `TypedArray` feature-tagged failures: 96
+- BigInt typed-array collateral: up to 48 tagged failures
+
+Work:
+
+- Centralize `ValidateTypedArray`, detach checks, length/bounds checks, and
+  element conversion.
+- Make `TypedArray.prototype.set` handle overlap, source coercion, abrupt
+  completion, detached buffers, and BigInt/Number separation.
+- Port `join`, `toLocaleString`, `sort`, and `with` to the shared helpers.
+- Ensure descriptor behavior for integer-indexed properties matches exotic
+  objects: impossible deletion, define failures, canonical numeric index
+  strings, and receiver behavior.
+
+Gate:
+
+```bash
+./test/test_js_test262_gtest.exe --gtest_filter='*built_ins_TypedArray_prototype*' --write-failures=temp/js43_typedarray_proto_failures.tsv
+./test/test_js_test262_gtest.exe --batch-only --write-failures=temp/js43_baseline_after_typedarray_failures.tsv
+```
+
+Expected impact:
+
+- 70-120 passing tests.
+
+### J43-5 - Private Name Brand Identity And Class Evaluation
+
+Goal: make every class evaluation allocate distinct private names and enforce
+brand checks correctly.
+
+Scope:
+
+- `language/statements/class`: 91 failures
+- `language/expressions/class`: 43 failures
+- private field/method/static feature-tagged failures
+
+Work:
+
+- Audit private name storage so private names are records allocated per class
+  evaluation, not reused by source name alone.
+- Ensure direct eval, indirect eval, function constructor, and factory-created
+  classes each allocate distinct private brand records.
+- Fix private getter/setter/method static and instance brand checks to throw
+  TypeError on wrong receiver.
+- Recheck subclass constructor initialization order, `super`, static blocks,
+  `new.target`, and computed property name evaluation order.
+
+Gate:
+
+```bash
+./test/test_js_test262_gtest.exe --gtest_filter='*language_statements_class*:*language_expressions_class*' --write-failures=temp/js43_class_failures.tsv
+./test/test_js_test262_gtest.exe --batch-only --write-failures=temp/js43_baseline_after_class_failures.tsv
+```
+
+Expected impact:
+
+- 70-130 passing tests.
+
+### J43-6 - RegExp Named Groups And Lookbehind
+
+Goal: close the current RegExp cluster without broadening into unsupported
+future RegExp features.
+
+Scope:
+
+- `built-ins/RegExp/named-groups`: 16 failures
+- `built-ins/RegExp/lookBehind`: 16 failures
+- `language/literals/regexp`: 10 failures
+- `built-ins/RegExp/prototype`: 10 failures
+
+Work:
+
+- Keep all pattern validation in the RegExp compile/front-end path.
+- Implement named capture group parsing, duplicate-name validation, named
+  backreference lookup, and match result `groups` materialization.
+- Implement lookbehind validation and backend execution strategy for fixed
+  length cases, with correct SyntaxError paths for invalid patterns.
+- Recheck `lastIndex`, sticky/global, `exec`, `test`, `@@match`,
+  `@@replace`, `@@search`, and `@@split` protocol behavior for named groups.
+
+Gate:
+
+```bash
+./test/test_js_test262_gtest.exe --gtest_filter='*built_ins_RegExp_named_groups*:*built_ins_RegExp_lookBehind*:*language_literals_regexp*' --write-failures=temp/js43_regexp_failures.tsv
+./test/test_js_test262_gtest.exe --batch-only --write-failures=temp/js43_baseline_after_regexp_failures.tsv
+```
+
+Expected impact:
+
+- 35-60 passing tests.
+
+### J43-7 - Promise Combinator Iterator Close
+
+Goal: make Promise combinators correct and fast on abrupt iterator paths.
+
+Scope:
+
+- `built-ins/Promise`: 41 failures
+- many remaining `SLOW_*` partial-list entries
+
+Work:
+
+- Route `Promise.all`, `allSettled`, `any`, and `race` through one iterator
+  consumption helper.
+- Implement correct `IteratorClose` when resolving functions, `then` getters,
+  or iterator methods throw.
+- Cache only spec-safe operations; do not skip observable property reads.
+- Use the job queue consistently for thenable assimilation and reaction jobs.
+- Re-run the partial list after each optimization because many failures are
+  time-threshold failures rather than direct assertions.
+
+Gate:
+
+```bash
+./test/test_js_test262_gtest.exe --gtest_filter='*built_ins_Promise_all*:*built_ins_Promise_allSettled*:*built_ins_Promise_any*:*built_ins_Promise_race*' --run-partial --js-timeout=30 --write-failures=temp/js43_promise_failures.tsv
+./test/test_js_test262_gtest.exe --run-partial --update-baseline --js-timeout=30 --write-failures=temp/js43_after_promise_failures.tsv
+```
+
+Expected impact:
+
+- 25-50 passing tests.
+- Reduce partial-list slow entries by 10-20 if performance remains below the
+  slow threshold.
+
+### J43-8 - Object/String/Proxy Long-Tail Batch
+
+Goal: clean the smaller built-in clusters once the property/reference helpers
+from earlier phases are stable.
+
+Scope:
+
+- `built-ins/Object`: 46 failures
+- `built-ins/String`: 33 failures
+- `built-ins/Proxy`: 20 failures
+- `built-ins/Reflect`: 9 failures
+
+Work:
+
+- Object:
+  `Object.prototype` getter/setter helpers, `assign`, `fromEntries`,
+  `getOwnPropertySymbols`, descriptor edge cases.
+- String:
+  borrowed-method coercions, `Symbol.split`, `toStringTag`, regexp protocol
+  handoff, surrogate/Unicode edge cases.
+- Proxy/Reflect:
+  `get`, `set`, `has`, `defineProperty`, `deleteProperty`, `construct`, and
+  receiver/invariant enforcement.
+- Keep Proxy/Reflect tests together because a passing Reflect path often
+  exposes a Proxy invariant failure.
+
+Gate:
+
+```bash
+./test/test_js_test262_gtest.exe --gtest_filter='*built_ins_Object*:*built_ins_String*:*built_ins_Proxy*:*built_ins_Reflect*' --write-failures=temp/js43_builtin_tail_failures.tsv
+./test/test_js_test262_gtest.exe --batch-only --write-failures=temp/js43_baseline_after_builtin_tail_failures.tsv
+```
+
+Expected impact:
+
+- 60-100 passing tests.
+
+## 5. Verification Discipline
+
+Every phase should follow the same loop:
+
+1. Build the focused failure manifest from the current source of truth.
+2. Add one or more LambdaJS unit tests for the root semantic issue.
+3. Run the focused js262 batch.
+4. Run the baseline gate.
+5. Only update `test262_baseline.txt` when there are zero regressions, zero
+   crash exits, and zero batch-lost tests.
+6. Re-run `--run-partial` before touching `t262_partial.txt`.
+
+Recommended end-of-Js43 verification:
+
+```bash
+make build-test
+./test/test_js_test262_gtest.exe --batch-only --write-failures=temp/js43_final_baseline_failures.tsv
+./test/test_js_test262_gtest.exe --run-partial --update-baseline --js-timeout=30 --write-failures=temp/js43_final_partial_failures.tsv
+make test262-baseline
+```
+
+## 6. Recommended Order
+
+1. J43-1 Annex B declaration instantiation.
+2. J43-2 `with` object environment records.
+3. J43-3 Array algorithm spine.
+4. J43-4 TypedArray integer-indexed operations.
+5. J43-5 private names and class evaluation.
+6. J43-7 Promise iterator close and partial-list cleanup.
+7. J43-6 RegExp named groups/lookbehind.
+8. J43-8 Object/String/Proxy/Reflect long tail.
+
+This order puts the environment/reference model first, then high-count array
+algorithms, then class identity, then the slower built-in/protocol work. It also
+keeps the riskiest areas away from the final baseline update until the shared
+semantics have settled.
+
+## 7. Non-Goals
+
+- Do not unlock broad skipped ES2021+ feature sets in Js43.
+- Do not add new skips for currently in-scope failures.
+- Do not patch individual test names without first identifying the shared
+  operation being violated.
+- Do not manually edit generated parser files or build Lua files.
+- Do not optimize Promise or Array paths in a way that removes observable
+  `Get`, `Set`, `HasProperty`, `then`, `constructor`, or `@@species` lookups.
+
+## 8. Success Criteria
+
+Js43 is successful if:
+
+- known failures drop from 1,003 to roughly 500-650;
+- the fully passing baseline grows past 33,200;
+- `make test262-baseline` passes with 0 regressions;
+- `t262_partial.txt` shrinks or at least does not grow;
+- no new crash, timeout, or batch-kill family is introduced;
+- the fix areas are backed by reusable semantic helpers, not one-off test
+  branches.
+
+## 9. Regression Fix Status
+
+Status on 2026-05-16:
+
+- Fixed the 72 reported broad-batch regressions.
+- Root causes addressed:
+  - closure capture analysis missed enclosing block, catch, and loop lexical
+    scopes for nested functions;
+  - object-literal methods inside `for (let/const ... of/in ...)` did not see
+    the loop-head binding form stored as `left + kind`;
+  - sloppy direct-eval Annex B globals were treated as non-configurable
+    restricted globals during `$262.evalScript` lexical prechecks.
+- Focused representative gate:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-file=temp/js43_regression_representatives.txt --js-timeout=30 --write-failures=temp/js43_regression_representatives_after_forof_kind.tsv
+```
+
+Result: 5 / 5 passed.
+
+- Broad gate:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-only --write-failures=temp/js43_after_regression_fixes.tsv
+```
+
+Result: 33,346 / 34,145 fully passing, 799 failing, 0 non-fully-passing,
+489 improvements, and 0 regressions versus baseline.
