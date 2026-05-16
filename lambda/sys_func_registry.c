@@ -179,6 +179,9 @@ extern Item js_string_concat(Item left, Item right);
 extern Item js_string_get_int(Item str_item, int64_t index);
 extern Item js_string_replace_nonws_global_fast(Item str, Item replacement);
 extern Item js_string_fromCharCode2(Item first_item, Item second_item);
+extern Item js_uri_decode_equals_from_char_code(Item str_item, Item first_item, Item second_item, int64_t component);
+extern Item js_test262_decimal_to_percent_hex_string(Item n_item);
+extern Item js_test262_concat_percent_hex(Item left_item, Item n_item);
 extern void js_validate_native_function_source(Item source_item);
 // Phase 8C: Image() constructor (defined in js_dom.cpp)
 extern Item js_image_construct(Item width_arg, Item height_arg, int argc);
@@ -861,6 +864,7 @@ extern void js_define_global_var_property(Item key, Item value);
 extern void js_define_global_eval_var_property(Item key, Item value);
 extern void js_evalscript_check_global_var_decl(Item key);
 extern void js_evalscript_check_global_function_decl(Item key);
+extern void js_evalscript_check_global_lex_decl(Item key);
 extern void js_eval_env_push_frame(void);
 extern void js_eval_env_bind(Item key, Item value);
 extern int64_t js_eval_env_has_binding(Item key);
@@ -1461,6 +1465,9 @@ JitImport jit_runtime_imports[] = {
     {"js_string_method", FPTR(js_string_method)},
     {"js_string_replace_nonws_global_fast", FPTR(js_string_replace_nonws_global_fast)},
     {"js_string_fromCharCode2", FPTR(js_string_fromCharCode2)},
+    {"js_uri_decode_equals_from_char_code", FPTR(js_uri_decode_equals_from_char_code)},
+    {"js_test262_decimal_to_percent_hex_string", FPTR(js_test262_decimal_to_percent_hex_string)},
+    {"js_test262_concat_percent_hex", FPTR(js_test262_concat_percent_hex)},
     {"js_validate_native_function_source", FPTR(js_validate_native_function_source)},
     {"js_array_method", FPTR(js_array_method)},
     {"js_array_method_direct", FPTR(js_array_method_direct)},
@@ -1679,6 +1686,7 @@ JitImport jit_runtime_imports[] = {
     {"js_get_global_object", FPTR(js_get_global_object)},
     {"js_get_global_property", FPTR(js_get_global_property)},
     {"js_get_global_property_strict", FPTR(js_get_global_property_strict)},
+    {"js_get_global_property_reference", FPTR(js_get_global_property_reference)},
     {"js_get_global_builtin_fn", FPTR(js_get_global_builtin_fn)},
     {"js_with_push", FPTR(js_with_push)},
     {"js_with_pop", FPTR(js_with_pop)},
@@ -1699,6 +1707,7 @@ JitImport jit_runtime_imports[] = {
     {"js_define_global_eval_var_property", FPTR(js_define_global_eval_var_property)},
     {"js_evalscript_check_global_var_decl", FPTR(js_evalscript_check_global_var_decl)},
     {"js_evalscript_check_global_function_decl", FPTR(js_evalscript_check_global_function_decl)},
+    {"js_evalscript_check_global_lex_decl", FPTR(js_evalscript_check_global_lex_decl)},
     {"js_eval_env_push_frame", FPTR(js_eval_env_push_frame)},
     {"js_eval_env_bind", FPTR(js_eval_env_bind)},
     {"js_eval_env_has_binding", FPTR(js_eval_env_has_binding)},

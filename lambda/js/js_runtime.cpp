@@ -2966,6 +2966,18 @@ extern "C" Item js_property_get(Item object, Item key) {
                     }
                 }
                 // v18c: .constructor for arrays → Array constructor
+                if (object.array->is_content == 1) {
+                    if (str_key->len == 11 && strncmp(str_key->chars, "constructor", 11) == 0) {
+                        Item obj_name = (Item){.item = s2it(heap_create_name("Object", 6))};
+                        return js_get_constructor(obj_name);
+                    }
+                    if (str_key->len == 9 && strncmp(str_key->chars, "__proto__", 9) == 0) {
+                        return js_get_prototype_of(object);
+                    }
+                    Item object_builtin = js_lookup_builtin_method(LMD_TYPE_MAP, str_key->chars, str_key->len);
+                    if (object_builtin.item != ItemNull.item) return object_builtin;
+                }
+                // v18c: .constructor for arrays → Array constructor
                 if (str_key->len == 11 && strncmp(str_key->chars, "constructor", 11) == 0) {
                     Item arr_name = (Item){.item = s2it(heap_create_name("Array", 5))};
                     return js_get_constructor(arr_name);
@@ -10047,10 +10059,14 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         Item* prev_modvars = js_active_module_vars;
         if (fn->module_vars && fn->module_vars != js_active_module_vars)
             js_active_module_vars = fn->module_vars;
-        // save with-scope depth (in case function returns from inside a 'with' block)
-        extern int js_with_save_depth(void);
-        extern void js_with_restore_depth(int);
-        int saved_with_depth = js_with_save_depth();
+        // Enter the callee's lexical with-environment, then restore caller state.
+        extern int js_with_save_stack(Item* out_stack, int max_depth);
+        extern void js_with_set_stack(Item* stack, int depth);
+        Item saved_with_stack[16];
+        int saved_with_depth = js_with_save_stack(saved_with_stack, 16);
+        if (fn->func_ptr || fn->with_env_depth > 0) {
+            js_with_set_stack(fn->with_env, fn->with_env_depth);
+        }
         // For generator functions: set up callee proto
         Item saved_gen_callee_proto_b = js_generator_callee_proto;
         if (fn->flags & JS_FUNC_FLAG_GENERATOR) {
@@ -10069,7 +10085,7 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         js_current_private_home_class = prev_private_home_class;
         if (derived_ctor_call) result = js_super_this_binding_finish(result);
         js_generator_callee_proto = saved_gen_callee_proto_b;
-        js_with_restore_depth(saved_with_depth);
+        js_with_set_stack(saved_with_stack, saved_with_depth);
         js_active_module_vars = prev_modvars;
         js_current_this = prev_this;
         js_new_target = prev_nt;
@@ -10110,10 +10126,14 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
     Item* prev_modvars = js_active_module_vars;
     if (fn->module_vars && fn->module_vars != js_active_module_vars)
         js_active_module_vars = fn->module_vars;
-    // save with-scope depth (in case function returns from inside a 'with' block)
-    extern int js_with_save_depth(void);
-    extern void js_with_restore_depth(int);
-    int saved_with_depth = js_with_save_depth();
+    // Enter the callee's lexical with-environment, then restore caller state.
+    extern int js_with_save_stack(Item* out_stack, int max_depth);
+    extern void js_with_set_stack(Item* stack, int depth);
+    Item saved_with_stack[16];
+    int saved_with_depth = js_with_save_stack(saved_with_stack, 16);
+    if (fn->func_ptr || fn->with_env_depth > 0) {
+        js_with_set_stack(fn->with_env, fn->with_env_depth);
+    }
     // For generator functions: set up callee proto so js_generator_create uses fn.prototype
     // If fn.prototype is not an object, js_generator_create falls back to depth-2.
     Item saved_gen_callee_proto = js_generator_callee_proto;
@@ -10133,7 +10153,7 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
     js_current_private_home_class = prev_private_home_class;
     if (derived_ctor_call) result = js_super_this_binding_finish(result);
     js_generator_callee_proto = saved_gen_callee_proto;
-    js_with_restore_depth(saved_with_depth);
+    js_with_set_stack(saved_with_stack, saved_with_depth);
     js_active_module_vars = prev_modvars;
     js_current_this = prev_this;
     js_new_target = prev_nt;
@@ -10245,6 +10265,8 @@ extern "C" Item js_bind_function(Item func_item, Item bound_this, Item* bound_ar
     bound->formal_length = orig->formal_length; // preserve formal_length from original
     bound->env = orig->env;
     bound->env_size = orig->env_size;
+    bound->with_env = orig->with_env;
+    bound->with_env_depth = orig->with_env_depth;
     bound->prototype = orig->prototype; // ES spec: bound functions use target's prototype for [[Construct]]
     bound->builtin_id = orig->builtin_id;
     bound->flags = orig->flags; // preserve strict/arrow flags from original
@@ -20479,6 +20501,9 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
     // toString — join elements with comma
     if (method->len == 8 && strncmp(method->chars, "toString", 8) == 0) {
         if (arr_type != LMD_TYPE_ARRAY) return js_to_string(arr);
+        if (arr.array->is_content == 1) {
+            return js_dispatch_builtin(JS_BUILTIN_OBJ_TO_STRING, arr, args, argc);
+        }
         Array* a = arr.array;
         StrBuf* buf = strbuf_new();
         for (int i = 0; i < a->length; i++) {

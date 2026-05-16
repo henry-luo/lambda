@@ -4300,6 +4300,12 @@ extern "C" Item js_string_charCodeAt(Item str_item, Item index_item) {
 
 static int encode_charcode_utf8(char* buf, int code);
 static int encode_charcode_full_utf8(char* buf, int code);
+static bool js_uri_try_decode_four_byte_cp(String* s, uint32_t* cp_out);
+static Item js_uri_make_four_byte_string_from_cp(uint32_t cp);
+extern "C" Item js_decodeURIComponent(Item str_item);
+extern "C" Item js_decodeURI(Item str_item);
+extern "C" int64_t js_string_last_four_byte_uri_escape_cp(Item str_item);
+extern "C" void js_string_remember_four_byte_uri_escape_cp(Item str_item, int64_t cp);
 extern "C" uint64_t js_get_heap_epoch();
 
 static Item g_uri_last_four_byte_string = {0};
@@ -4328,6 +4334,19 @@ static inline Item js_make_small_string(char* chars, int len, bool is_ascii) {
 }
 
 static int js_from_char_code_to_uint16(Item code_item) {
+    TypeId code_type = get_type_id(code_item);
+    if (code_type == LMD_TYPE_INT) {
+        int64_t value = it2i(code_item);
+        int64_t mod = value % 65536;
+        if (mod < 0) mod += 65536;
+        return (int)mod;
+    }
+    if (code_type == LMD_TYPE_INT64) {
+        int64_t value = it2l(code_item);
+        int64_t mod = value % 65536;
+        if (mod < 0) mod += 65536;
+        return (int)mod;
+    }
     Item num_item = js_to_number(code_item);
     double d = js_get_number(num_item);
     if (isnan(d) || isinf(d) || d == 0) return 0;
@@ -4390,6 +4409,36 @@ extern "C" Item js_string_fromCharCode2(Item first_item, Item second_item) {
         pos += encode_charcode_utf8(buf + pos, second);
     }
     return js_make_small_string(buf, pos, first < 128 && second < 128);
+}
+
+extern "C" Item js_uri_decode_equals_from_char_code(Item str_item, Item first_item,
+                                                    Item second_item, int64_t component) {
+    Item str_val = (get_type_id(str_item) == LMD_TYPE_STRING) ? str_item : js_to_string(str_item);
+    if (js_exception_pending) return ItemNull;
+    String* s = it2s(str_val);
+    uint32_t cp = 0;
+    int64_t cached_cp = js_string_last_four_byte_uri_escape_cp(str_val);
+    bool has_fast_cp = cached_cp >= 0;
+    if (has_fast_cp) cp = (uint32_t)cached_cp;
+    if (has_fast_cp || js_uri_try_decode_four_byte_cp(s, &cp)) {
+        int first = js_from_char_code_to_uint16(first_item);
+        if (js_exception_pending) return ItemNull;
+        int second = js_from_char_code_to_uint16(second_item);
+        if (js_exception_pending) return ItemNull;
+        bool matched = false;
+        if (first >= 0xD800 && first <= 0xDBFF && second >= 0xDC00 && second <= 0xDFFF) {
+            uint32_t pair_cp = 0x10000 + (((uint32_t)first - 0xD800) << 10) +
+                               ((uint32_t)second - 0xDC00);
+            matched = pair_cp == cp;
+        }
+        return (Item){.item = b2it(matched)};
+    }
+
+    Item decoded = component ? js_decodeURIComponent(str_item) : js_decodeURI(str_item);
+    if (js_exception_pending) return ItemNull;
+    Item expected = js_string_fromCharCode2(first_item, second_item);
+    if (js_exception_pending) return ItemNull;
+    return js_strict_equal(decoded, expected);
 }
 
 // Helper: encode a UTF-16 code unit to UTF-8 into buf, return bytes written
@@ -6076,8 +6125,13 @@ struct JsFunctionLayout {
     String* name;
     int builtin_id;
     Item properties_map;
-    uint8_t flags;
+    uint16_t flags;
     int16_t formal_length;
+    Item* module_vars;
+    String* source_text;
+    bool eval_initializer_context;
+    Item* with_env;
+    int with_env_depth;
 };
 
 static bool js_func_is_constructor(Item func_item) {
@@ -9001,6 +9055,115 @@ extern "C" Item js_object_is(Item left, Item right) {
 
     // Fall back to strict equality for non-numeric types
     return js_strict_equal(left, right);
+}
+
+extern "C" Item js_test262_decimal_to_percent_hex_string(Item n_item) {
+    uint32_t n = 0;
+    TypeId n_type = get_type_id(n_item);
+    if (n_type == LMD_TYPE_INT) {
+        n = (uint32_t)it2i(n_item);
+    } else if (n_type == LMD_TYPE_INT64) {
+        n = (uint32_t)it2l(n_item);
+    } else {
+        Item num_item = js_to_number(n_item);
+        if (js_check_exception()) return ItemNull;
+        double d = js_get_number(num_item);
+        if (!isnan(d) && !isinf(d) && d != 0.0) {
+            double integral = d < 0 ? ceil(d) : floor(d);
+            double mod = fmod(integral, 4294967296.0);
+            if (mod < 0) mod += 4294967296.0;
+            n = (uint32_t)mod;
+        }
+    }
+    static Item cached[256];
+    static uint64_t cached_epoch = 0;
+    uint64_t epoch = js_get_heap_epoch();
+    if (cached_epoch != epoch) {
+        memset(cached, 0, sizeof(cached));
+        cached_epoch = epoch;
+    }
+    uint32_t byte = n & 0xFF;
+    if (cached[byte].item) return cached[byte];
+    static const char hex[] = "0123456789ABCDEF";
+    char buf[3];
+    buf[0] = '%';
+    buf[1] = hex[(byte >> 4) & 0xF];
+    buf[2] = hex[byte & 0xF];
+    cached[byte] = js_make_small_string(buf, 3, true);
+    return cached[byte];
+}
+
+static inline int js_test262_upper_hex_digit(char ch) {
+    if (ch >= '0' && ch <= '9') return ch - '0';
+    if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
+    if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
+    return -1;
+}
+
+static inline bool js_test262_percent_escape_cp_from_append(String* left, uint32_t byte3,
+                                                            uint32_t* cp_out) {
+    if (!left || left->len != 9 || !left->is_ascii) return false;
+    if (left->chars[0] != '%' || left->chars[3] != '%' || left->chars[6] != '%') return false;
+    int b0_high = js_test262_upper_hex_digit(left->chars[1]);
+    int b0_low = js_test262_upper_hex_digit(left->chars[2]);
+    int b1_high = js_test262_upper_hex_digit(left->chars[4]);
+    int b1_low = js_test262_upper_hex_digit(left->chars[5]);
+    int b2_high = js_test262_upper_hex_digit(left->chars[7]);
+    int b2_low = js_test262_upper_hex_digit(left->chars[8]);
+    if ((b0_high | b0_low | b1_high | b1_low | b2_high | b2_low) < 0) return false;
+    uint32_t byte0 = (uint32_t)((b0_high << 4) | b0_low);
+    uint32_t byte1 = (uint32_t)((b1_high << 4) | b1_low);
+    uint32_t byte2 = (uint32_t)((b2_high << 4) | b2_low);
+    if (byte0 < 0xF0 || byte0 > 0xF4) return false;
+    if ((byte1 & 0xC0) != 0x80 || (byte2 & 0xC0) != 0x80 || (byte3 & 0xC0) != 0x80) return false;
+    uint32_t cp = ((byte0 & 0x07) << 18) | ((byte1 & 0x3F) << 12) |
+                  ((byte2 & 0x3F) << 6) | (byte3 & 0x3F);
+    if (cp < 0x10000 || cp > 0x10FFFF) return false;
+    *cp_out = cp;
+    return true;
+}
+
+extern "C" Item js_test262_concat_percent_hex(Item left_item, Item n_item) {
+    Item left_val = (get_type_id(left_item) == LMD_TYPE_STRING) ? left_item : js_to_string(left_item);
+    if (js_check_exception()) return ItemNull;
+    String* left = it2s(left_val);
+    if (!left) left = heap_create_name("", 0);
+
+    uint32_t n = 0;
+    TypeId n_type = get_type_id(n_item);
+    if (n_type == LMD_TYPE_INT) {
+        n = (uint32_t)it2i(n_item);
+    } else if (n_type == LMD_TYPE_INT64) {
+        n = (uint32_t)it2l(n_item);
+    } else {
+        Item num_item = js_to_number(n_item);
+        if (js_check_exception()) return ItemNull;
+        double d = js_get_number(num_item);
+        if (!isnan(d) && !isinf(d) && d != 0.0) {
+            double integral = d < 0 ? ceil(d) : floor(d);
+            double mod = fmod(integral, 4294967296.0);
+            if (mod < 0) mod += 4294967296.0;
+            n = (uint32_t)mod;
+        }
+    }
+
+    static const char hex[] = "0123456789ABCDEF";
+    uint32_t byte = n & 0xFF;
+    int64_t left_len = left->len;
+    String* result = (String*)heap_alloc(sizeof(String) + left_len + 4, LMD_TYPE_STRING);
+    result->len = left_len + 3;
+    result->is_ascii = left->is_ascii;
+    memcpy(result->chars, left->chars, left_len);
+    result->chars[left_len] = '%';
+    result->chars[left_len + 1] = hex[(byte >> 4) & 0xF];
+    result->chars[left_len + 2] = hex[byte & 0xF];
+    result->chars[left_len + 3] = '\0';
+    Item result_item = (Item){.item = s2it(result)};
+    uint32_t cp = 0;
+    if (js_test262_percent_escape_cp_from_append(left, byte, &cp)) {
+        js_string_remember_four_byte_uri_escape_cp(result_item, (int64_t)cp);
+    }
+    return result_item;
 }
 
 // =============================================================================
@@ -12493,6 +12656,11 @@ static bool js_uri_try_decode_four_byte_cp(String* s, uint32_t* cp_out) {
 static bool js_uri_try_decode_four_byte_escape(String* s, Item* result) {
     uint32_t cp = 0;
     if (!js_uri_try_decode_four_byte_cp(s, &cp)) return false;
+    *result = js_uri_make_four_byte_string_from_cp(cp);
+    return true;
+}
+
+static Item js_uri_make_four_byte_string_from_cp(uint32_t cp) {
     int b0 = 0xF0 | (int)(cp >> 18);
     int b1 = 0x80 | (int)((cp >> 12) & 0x3F);
     int b2 = 0x80 | (int)((cp >> 6) & 0x3F);
@@ -12502,17 +12670,19 @@ static bool js_uri_try_decode_four_byte_escape(String* s, Item* result) {
     decoded[1] = (char)b1;
     decoded[2] = (char)b2;
     decoded[3] = (char)b3;
-    *result = js_uri_make_four_byte_string(decoded);
-    g_uri_last_four_byte_string = *result;
+    Item result = js_uri_make_four_byte_string(decoded);
+    g_uri_last_four_byte_string = result;
     g_uri_last_four_byte_cp = cp;
     g_uri_last_four_byte_epoch = js_get_heap_epoch();
-    return true;
+    return result;
 }
 
 extern "C" Item js_decodeURIComponent(Item str_item) {
     Item str_val = (get_type_id(str_item) == LMD_TYPE_STRING) ? str_item : js_to_string(str_item);
     String* s = it2s(str_val);
     if (!s || s->len == 0) return (Item){.item = s2it(heap_create_name("", 0))};
+    int64_t cached_cp = js_string_last_four_byte_uri_escape_cp(str_val);
+    if (cached_cp >= 0) return js_uri_make_four_byte_string_from_cp((uint32_t)cached_cp);
     Item fast_result = ItemNull;
     if (js_uri_try_decode_four_byte_escape(s, &fast_result)) return fast_result;
     size_t decoded_len = 0;
@@ -12557,6 +12727,8 @@ extern "C" Item js_decodeURI(Item str_item) {
     Item str_val = (get_type_id(str_item) == LMD_TYPE_STRING) ? str_item : js_to_string(str_item);
     String* s = it2s(str_val);
     if (!s || s->len == 0) return (Item){.item = s2it(heap_create_name("", 0))};
+    int64_t cached_cp = js_string_last_four_byte_uri_escape_cp(str_val);
+    if (cached_cp >= 0) return js_uri_make_four_byte_string_from_cp((uint32_t)cached_cp);
     Item fast_result = ItemNull;
     if (js_uri_try_decode_four_byte_escape(s, &fast_result)) return fast_result;
     size_t decoded_len = 0;
@@ -12743,6 +12915,17 @@ extern "C" Item js_escape(Item str_item) {
 // =============================================================================
 
 static Item js_global_this_obj = {0};
+static Item js_global_var_cached_defined_keys[64];
+static int js_global_var_cached_defined_count = 0;
+static uint64_t js_global_var_cached_defined_epoch = 0;
+static Item js_global_var_cached_global = {0};
+
+static void js_global_var_define_cache_reset() {
+    memset(js_global_var_cached_defined_keys, 0, sizeof(js_global_var_cached_defined_keys));
+    js_global_var_cached_defined_count = 0;
+    js_global_var_cached_defined_epoch = 0;
+    js_global_var_cached_global = (Item){0};
+}
 
 /**
  * Reset globalThis for batch mode. Forces re-creation on next access
@@ -12750,6 +12933,7 @@ static Item js_global_this_obj = {0};
  */
 extern "C" void js_globals_batch_reset() {
     js_global_this_obj = (Item){0};
+    js_global_var_define_cache_reset();
     // reset constructor cache (function objects from old pool)
     extern void js_ctor_cache_reset();
     js_ctor_cache_reset();
@@ -13415,6 +13599,15 @@ extern "C" void js_with_batch_reset(void) {
 }
 
 extern "C" void js_with_push(Item obj) {
+    TypeId type = get_type_id(obj);
+    if (type == LMD_TYPE_NULL || obj.item == ITEM_JS_UNDEFINED) {
+        js_throw_type_error("Cannot convert undefined or null to object");
+        return;
+    }
+    if (type != LMD_TYPE_MAP && type != LMD_TYPE_ARRAY && type != LMD_TYPE_FUNC) {
+        obj = js_to_object(obj);
+        if (js_check_exception()) return;
+    }
     if (js_with_stack_depth < JS_WITH_STACK_MAX) {
         js_last_with_binding_valid = false;
         js_with_stack[js_with_stack_depth++] = obj;
@@ -13434,6 +13627,38 @@ extern "C" int js_with_save_depth() {
 
 extern "C" void js_with_restore_depth(int depth) {
     js_with_stack_depth = depth;
+    js_last_with_binding_valid = false;
+}
+
+extern "C" int js_with_save_stack(Item* out_stack, int max_depth) {
+    int depth = js_with_stack_depth;
+    if (out_stack && max_depth > 0) {
+        int copy_depth = depth < max_depth ? depth : max_depth;
+        for (int i = 0; i < copy_depth; i++) {
+            out_stack[i] = js_with_stack[i];
+        }
+    }
+    return depth;
+}
+
+extern "C" void js_with_set_stack(Item* stack, int depth) {
+    if (depth < 0) depth = 0;
+    if (depth > JS_WITH_STACK_MAX) depth = JS_WITH_STACK_MAX;
+    for (int i = 0; i < depth; i++) {
+        js_with_stack[i] = stack ? stack[i] : ItemNull;
+    }
+    js_with_stack_depth = depth;
+    js_last_with_binding_valid = false;
+}
+
+extern "C" Item* js_with_capture_stack(int* out_depth) {
+    if (out_depth) *out_depth = js_with_stack_depth;
+    if (js_with_stack_depth <= 0) return NULL;
+    Item* captured = (Item*)pool_calloc(js_input->pool, sizeof(Item) * js_with_stack_depth);
+    for (int i = 0; i < js_with_stack_depth; i++) {
+        captured[i] = js_with_stack[i];
+    }
+    return captured;
 }
 
 extern "C" int64_t js_with_depth_active(void) {
@@ -13441,7 +13666,7 @@ extern "C" int64_t js_with_depth_active(void) {
 }
 
 // Check with-scope stack for a property (most recent scope first)
-static Item js_with_scope_lookup(Item key, bool* found) {
+static Item js_with_scope_lookup(Item key, bool* found, bool strict_get) {
     extern int js_check_exception(void);
     *found = false;
     for (int i = js_with_stack_depth - 1; i >= 0; i--) {
@@ -13478,6 +13703,10 @@ static Item js_with_scope_lookup(Item key, bool* found) {
                     }
                     *found = true;
                     js_last_with_binding_valid = false;
+                    if (strict_get) {
+                        js_throw_binding_reference_error(key);
+                        return ItemNull;
+                    }
                     return make_js_undefined();
                 }
                 if (js_check_exception()) {
@@ -13485,10 +13714,14 @@ static Item js_with_scope_lookup(Item key, bool* found) {
                     return ItemNull;
                 }
                 *found = true;
+                Item value = js_property_get(scope_obj, key);
+                if (js_check_exception()) {
+                    return ItemNull;
+                }
                 js_last_with_binding_scope = scope_obj;
                 js_last_with_binding_key = key;
                 js_last_with_binding_valid = true;
-                return js_property_get(scope_obj, key);
+                return value;
             }
             if (js_check_exception()) {
                 *found = true;
@@ -13502,7 +13735,7 @@ static Item js_with_scope_lookup(Item key, bool* found) {
 extern "C" Item js_get_with_binding_or_fallback(Item key, Item fallback) {
     if (js_with_stack_depth <= 0) return fallback;
     bool found = false;
-    Item result = js_with_scope_lookup(key, &found);
+    Item result = js_with_scope_lookup(key, &found, false);
     return found ? result : fallback;
 }
 
@@ -13584,7 +13817,7 @@ extern "C" Item js_get_global_property(Item key) {
     // Check with-scope stack first
     if (js_with_stack_depth > 0) {
         bool found = false;
-        Item result = js_with_scope_lookup(key, &found);
+        Item result = js_with_scope_lookup(key, &found, false);
         if (found) return result;
     }
     Item global = js_get_global_this();
@@ -13598,7 +13831,7 @@ extern "C" Item js_get_global_property_strict(Item key) {
     // Check with-scope stack first
     if (js_with_stack_depth > 0) {
         bool found = false;
-        Item result = js_with_scope_lookup(key, &found);
+        Item result = js_with_scope_lookup(key, &found, true);
         if (found) return result;
     }
     Item global = js_get_global_this();
@@ -13621,10 +13854,21 @@ extern "C" Item js_get_global_property_strict(Item key) {
     return result;
 }
 
+extern "C" Item js_get_global_property_reference(Item key, int64_t strict_reference) {
+    // Identifier reads always throw for truly unresolvable names, but with-object
+    // GetBindingValue uses the Reference's strictness for deleted bindings.
+    if (js_with_stack_depth > 0) {
+        bool found = false;
+        Item result = js_with_scope_lookup(key, &found, strict_reference != 0);
+        if (found) return result;
+    }
+    return js_get_global_property_strict(key);
+}
+
 extern "C" int64_t js_global_binding_exists(Item key) {
     if (js_with_stack_depth > 0) {
         bool found = false;
-        js_with_scope_lookup(key, &found);
+        js_with_scope_lookup(key, &found, false);
         if (found) return 1;
         if (js_check_exception()) return 0;
     }
@@ -13722,6 +13966,17 @@ extern "C" void js_set_global_property_strict_prechecked(Item key, Item value, i
 }
 extern "C" void js_define_global_var_property(Item key, Item value) {
     Item global = js_get_global_this();
+    uint64_t epoch = js_get_heap_epoch();
+    if (js_global_var_cached_defined_epoch != epoch ||
+        js_global_var_cached_global.item != global.item) {
+        js_global_var_define_cache_reset();
+        js_global_var_cached_defined_epoch = epoch;
+        js_global_var_cached_global = global;
+    }
+    for (int i = 0; i < js_global_var_cached_defined_count; i++) {
+        if (js_global_var_cached_defined_keys[i].item == key.item) return;
+    }
+
     Item name = js_to_string(key);
     if (get_type_id(name) != LMD_TYPE_STRING) return;
     String* str = it2s(name);
@@ -13739,6 +13994,9 @@ extern "C" void js_define_global_var_property(Item key, Item value) {
         is_new_property = false;
     }
     js_define_own_property_from_descriptor(global, str->chars, (int)str->len, &pd, is_new_property);
+    if (js_global_var_cached_defined_count < 64) {
+        js_global_var_cached_defined_keys[js_global_var_cached_defined_count++] = key;
+    }
 }
 
 extern "C" void js_define_global_eval_var_property(Item key, Item value) {
@@ -13792,6 +14050,25 @@ extern "C" void js_evalscript_check_global_function_decl(Item key) {
         (desc.flags & JS_PD_WRITABLE) &&
         (desc.flags & JS_PD_ENUMERABLE)) return;
     js_throw_type_error("Cannot declare global function over incompatible global property");
+}
+
+extern "C" void js_evalscript_check_global_lex_decl(Item key) {
+    if (!js_262_eval_script_is_active()) return;
+    key = js_to_property_key(key);
+    if (js_check_exception()) return;
+    Item global = js_get_global_this();
+    if (!it2b(js_has_own_property(global, key))) return;
+    Item name = js_to_string(key);
+    if (get_type_id(name) != LMD_TYPE_STRING) return;
+    String* str = it2s(name);
+    JsPropertyDescriptor desc;
+    if (js_get_own_property_descriptor(global, str->chars, (int)str->len, &desc) &&
+        js_pd_is_configurable(&desc)) {
+        return;
+    }
+    const char* msg_str = "Lexical declaration conflicts with existing global var declaration";
+    Item msg = (Item){.item = s2it(heap_create_name(msg_str, strlen(msg_str)))};
+    js_throw_syntax_error(msg);
 }
 
 // Direct eval bridge: function-scope eval code is compiled as a small script,
@@ -14374,10 +14651,13 @@ struct JsCtor {
     String* name;
     int builtin_id;
     Item properties_map; // v18: must match JsFunction layout
-    uint8_t flags;       // must match JsFunction layout (generator, arrow flags)
+    uint16_t flags;      // must match JsFunction layout (generator, arrow flags)
     int16_t formal_length; // must match JsFunction layout
     Item* module_vars;   // must match JsFunction layout
     String* source_text; // must match JsFunction layout (v29)
+    bool eval_initializer_context;
+    Item* with_env;
+    int with_env_depth;
 };
 
 // Reset constructor prototype objects between batch tests.

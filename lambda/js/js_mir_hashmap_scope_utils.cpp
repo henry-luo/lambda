@@ -229,6 +229,9 @@ void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
             if (existing->is_let_const) {
                 entry.var.is_let_const = true;
             }
+            if (existing->from_catch_param) {
+                entry.var.from_catch_param = true;
+            }
         }
     }
 

@@ -67,6 +67,341 @@ static void jm_emit_class_instance_field_metadata_for_decl(JsMirTranspiler* mt, 
     }
 }
 
+static void jm_collect_direct_statement_let_const_names(JsAstNode* stmt, struct hashmap* names) {
+    if (!stmt || !names) return;
+    if (stmt->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+        JsVariableDeclarationNode* v = (JsVariableDeclarationNode*)stmt;
+        if (v->kind == JS_VAR_LET || v->kind == JS_VAR_CONST) {
+            JsAstNode* d = v->declarations;
+            while (d) {
+                if (d->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
+                    JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)d;
+                    if (decl->id) jm_collect_pattern_names(decl->id, names);
+                }
+                d = d->next;
+            }
+        }
+        return;
+    }
+}
+
+static struct hashmap* jm_collect_annexb_suppressed_names(JsAstNode* body, bool is_strict) {
+    if (!body || is_strict) return NULL;
+    struct hashmap* body_hoists = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+        jm_name_hash, jm_name_cmp, NULL, NULL);
+    struct hashmap* lex_collisions = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+        jm_name_hash, jm_name_cmp, NULL, NULL);
+    struct hashmap* suppressed = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+        jm_name_hash, jm_name_cmp, NULL, NULL);
+
+    jm_collect_body_locals(body, body_hoists, true);
+    jm_collect_all_let_const_names_recursive(body, lex_collisions);
+
+    size_t iter = 0;
+    void* item;
+    while (hashmap_iter(body_hoists, &iter, &item)) {
+        JsNameSetEntry* e = (JsNameSetEntry*)item;
+        if (e->from_func_decl && jm_name_set_has(lex_collisions, e->name)) {
+            jm_name_set_add(suppressed, e->name);
+        }
+    }
+
+    hashmap_free(body_hoists);
+    hashmap_free(lex_collisions);
+    if (hashmap_count(suppressed) == 0) {
+        hashmap_free(suppressed);
+        return NULL;
+    }
+    return suppressed;
+}
+
+static void jm_collect_visible_function_scope_names(JsAstNode* body, bool is_strict,
+        struct hashmap* names, bool include_direct_lexicals) {
+    if (!body || !names) return;
+    struct hashmap* hoists = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+        jm_name_hash, jm_name_cmp, NULL, NULL);
+    struct hashmap* suppressed = jm_collect_annexb_suppressed_names(body, is_strict);
+
+    jm_collect_body_locals(body, hoists, true);
+    size_t iter = 0;
+    void* item;
+    while (hashmap_iter(hoists, &iter, &item)) {
+        JsNameSetEntry* e = (JsNameSetEntry*)item;
+        if (suppressed && jm_name_set_has(suppressed, e->name)) continue;
+        jm_name_set_add(names, e->name);
+    }
+
+    if (include_direct_lexicals && body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
+        jm_collect_let_const_names(body, names);
+    }
+
+    if (suppressed) hashmap_free(suppressed);
+    hashmap_free(hoists);
+}
+
+static bool jm_ast_node_contains_target(JsAstNode* node, JsAstNode* target) {
+    if (!node || !target || ts_node_is_null(node->node) || ts_node_is_null(target->node)) return false;
+    uint32_t ns = ts_node_start_byte(node->node);
+    uint32_t ne = ts_node_end_byte(node->node);
+    uint32_t ts = ts_node_start_byte(target->node);
+    uint32_t te = ts_node_end_byte(target->node);
+    return ns <= ts && te <= ne;
+}
+
+static void jm_collect_pattern_names_kind(JsAstNode* pat, struct hashmap* names, int var_kind) {
+    if (!pat || !names) return;
+    struct hashmap* tmp = hashmap_new(sizeof(JsNameSetEntry), 8, 0, 0,
+        jm_name_hash, jm_name_cmp, NULL, NULL);
+    jm_collect_pattern_names(pat, tmp);
+    size_t iter = 0;
+    void* item = NULL;
+    while (hashmap_iter(tmp, &iter, &item)) {
+        JsNameSetEntry* e = (JsNameSetEntry*)item;
+        jm_name_set_add_kind(names, e->name, var_kind);
+    }
+    hashmap_free(tmp);
+}
+
+static void jm_collect_var_decl_names_kind(JsVariableDeclarationNode* var, struct hashmap* names) {
+    if (!var || !names || (var->kind != JS_VAR_LET && var->kind != JS_VAR_CONST)) return;
+    JsAstNode* decl_node = var->declarations;
+    while (decl_node) {
+        if (decl_node->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
+            JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)decl_node;
+            jm_collect_pattern_names_kind(decl->id, names, (int)var->kind);
+        }
+        decl_node = decl_node->next;
+    }
+}
+
+static void jm_collect_enclosing_lexicals_for_target(JsAstNode* node,
+        JsAstNode* target, struct hashmap* names) {
+    if (!node || !target || !names) return;
+    if (node == target) return;
+    if (!jm_ast_node_contains_target(node, target)) return;
+
+    switch (node->node_type) {
+    case JS_AST_NODE_PROGRAM: {
+        JsProgramNode* prog = (JsProgramNode*)node;
+        for (JsAstNode* s = prog->body; s; s = s->next)
+            jm_collect_enclosing_lexicals_for_target(s, target, names);
+        break;
+    }
+    case JS_AST_NODE_BLOCK_STATEMENT: {
+        jm_collect_let_const_names(node, names);
+        JsBlockNode* block = (JsBlockNode*)node;
+        for (JsAstNode* s = block->statements; s; s = s->next)
+            jm_collect_enclosing_lexicals_for_target(s, target, names);
+        break;
+    }
+    case JS_AST_NODE_VARIABLE_DECLARATION: {
+        JsVariableDeclarationNode* var = (JsVariableDeclarationNode*)node;
+        for (JsAstNode* d = var->declarations; d; d = d->next)
+            jm_collect_enclosing_lexicals_for_target(d, target, names);
+        break;
+    }
+    case JS_AST_NODE_VARIABLE_DECLARATOR: {
+        JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)node;
+        jm_collect_enclosing_lexicals_for_target(decl->init, target, names);
+        break;
+    }
+    case JS_AST_NODE_EXPRESSION_STATEMENT: {
+        JsExpressionStatementNode* expr = (JsExpressionStatementNode*)node;
+        jm_collect_enclosing_lexicals_for_target(expr->expression, target, names);
+        break;
+    }
+    case JS_AST_NODE_RETURN_STATEMENT: {
+        JsReturnNode* ret = (JsReturnNode*)node;
+        jm_collect_enclosing_lexicals_for_target(ret->argument, target, names);
+        break;
+    }
+    case JS_AST_NODE_ARRAY_EXPRESSION:
+    case JS_AST_NODE_ARRAY_PATTERN: {
+        JsArrayNode* arr = (JsArrayNode*)node;
+        for (JsAstNode* e = arr->elements; e; e = e->next)
+            jm_collect_enclosing_lexicals_for_target(e, target, names);
+        break;
+    }
+    case JS_AST_NODE_OBJECT_EXPRESSION:
+    case JS_AST_NODE_OBJECT_PATTERN: {
+        JsObjectNode* obj = (JsObjectNode*)node;
+        for (JsAstNode* p = obj->properties; p; p = p->next)
+            jm_collect_enclosing_lexicals_for_target(p, target, names);
+        break;
+    }
+    case JS_AST_NODE_PROPERTY: {
+        JsPropertyNode* prop = (JsPropertyNode*)node;
+        if (prop->computed) jm_collect_enclosing_lexicals_for_target(prop->key, target, names);
+        jm_collect_enclosing_lexicals_for_target(prop->value, target, names);
+        break;
+    }
+    case JS_AST_NODE_SPREAD_ELEMENT:
+    case JS_AST_NODE_REST_ELEMENT:
+    case JS_AST_NODE_REST_PROPERTY: {
+        JsSpreadElementNode* spread = (JsSpreadElementNode*)node;
+        jm_collect_enclosing_lexicals_for_target(spread->argument, target, names);
+        break;
+    }
+    case JS_AST_NODE_ASSIGNMENT_PATTERN: {
+        JsAssignmentPatternNode* pat = (JsAssignmentPatternNode*)node;
+        jm_collect_enclosing_lexicals_for_target(pat->left, target, names);
+        jm_collect_enclosing_lexicals_for_target(pat->right, target, names);
+        break;
+    }
+    case JS_AST_NODE_BINARY_EXPRESSION: {
+        JsBinaryNode* bin = (JsBinaryNode*)node;
+        jm_collect_enclosing_lexicals_for_target(bin->left, target, names);
+        jm_collect_enclosing_lexicals_for_target(bin->right, target, names);
+        break;
+    }
+    case JS_AST_NODE_UNARY_EXPRESSION: {
+        JsUnaryNode* un = (JsUnaryNode*)node;
+        jm_collect_enclosing_lexicals_for_target(un->operand, target, names);
+        break;
+    }
+    case JS_AST_NODE_ASSIGNMENT_EXPRESSION: {
+        JsAssignmentNode* assign = (JsAssignmentNode*)node;
+        jm_collect_enclosing_lexicals_for_target(assign->left, target, names);
+        jm_collect_enclosing_lexicals_for_target(assign->right, target, names);
+        break;
+    }
+    case JS_AST_NODE_CALL_EXPRESSION:
+    case JS_AST_NODE_NEW_EXPRESSION: {
+        JsCallNode* call = (JsCallNode*)node;
+        jm_collect_enclosing_lexicals_for_target(call->callee, target, names);
+        for (JsAstNode* arg = call->arguments; arg; arg = arg->next)
+            jm_collect_enclosing_lexicals_for_target(arg, target, names);
+        break;
+    }
+    case JS_AST_NODE_MEMBER_EXPRESSION: {
+        JsMemberNode* member = (JsMemberNode*)node;
+        jm_collect_enclosing_lexicals_for_target(member->object, target, names);
+        if (member->computed)
+            jm_collect_enclosing_lexicals_for_target(member->property, target, names);
+        break;
+    }
+    case JS_AST_NODE_CONDITIONAL_EXPRESSION: {
+        JsConditionalNode* cond = (JsConditionalNode*)node;
+        jm_collect_enclosing_lexicals_for_target(cond->test, target, names);
+        jm_collect_enclosing_lexicals_for_target(cond->consequent, target, names);
+        jm_collect_enclosing_lexicals_for_target(cond->alternate, target, names);
+        break;
+    }
+    case JS_AST_NODE_SEQUENCE_EXPRESSION: {
+        JsSequenceNode* seq = (JsSequenceNode*)node;
+        for (JsAstNode* e = seq->expressions; e; e = e->next)
+            jm_collect_enclosing_lexicals_for_target(e, target, names);
+        break;
+    }
+    case JS_AST_NODE_TEMPLATE_LITERAL: {
+        JsTemplateLiteralNode* tmpl = (JsTemplateLiteralNode*)node;
+        for (JsAstNode* e = tmpl->expressions; e; e = e->next)
+            jm_collect_enclosing_lexicals_for_target(e, target, names);
+        break;
+    }
+    case JS_AST_NODE_TAGGED_TEMPLATE: {
+        JsTaggedTemplateNode* tag = (JsTaggedTemplateNode*)node;
+        jm_collect_enclosing_lexicals_for_target(tag->tag, target, names);
+        jm_collect_enclosing_lexicals_for_target((JsAstNode*)tag->quasi, target, names);
+        break;
+    }
+    case JS_AST_NODE_YIELD_EXPRESSION: {
+        JsYieldNode* yield_node = (JsYieldNode*)node;
+        jm_collect_enclosing_lexicals_for_target(yield_node->argument, target, names);
+        break;
+    }
+    case JS_AST_NODE_AWAIT_EXPRESSION: {
+        JsAwaitNode* await_node = (JsAwaitNode*)node;
+        jm_collect_enclosing_lexicals_for_target(await_node->argument, target, names);
+        break;
+    }
+    case JS_AST_NODE_IF_STATEMENT: {
+        JsIfNode* ifn = (JsIfNode*)node;
+        jm_collect_enclosing_lexicals_for_target(ifn->test, target, names);
+        jm_collect_enclosing_lexicals_for_target(ifn->consequent, target, names);
+        jm_collect_enclosing_lexicals_for_target(ifn->alternate, target, names);
+        break;
+    }
+    case JS_AST_NODE_FOR_STATEMENT: {
+        JsForNode* for_node = (JsForNode*)node;
+        if (for_node->init && for_node->init->node_type == JS_AST_NODE_VARIABLE_DECLARATION)
+            jm_collect_var_decl_names_kind((JsVariableDeclarationNode*)for_node->init, names);
+        jm_collect_enclosing_lexicals_for_target(for_node->init, target, names);
+        jm_collect_enclosing_lexicals_for_target(for_node->test, target, names);
+        jm_collect_enclosing_lexicals_for_target(for_node->update, target, names);
+        jm_collect_enclosing_lexicals_for_target(for_node->body, target, names);
+        break;
+    }
+    case JS_AST_NODE_FOR_IN_STATEMENT:
+    case JS_AST_NODE_FOR_OF_STATEMENT: {
+        JsForOfNode* for_node = (JsForOfNode*)node;
+        if (for_node->left && for_node->left->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+            jm_collect_var_decl_names_kind((JsVariableDeclarationNode*)for_node->left, names);
+        } else if (for_node->left &&
+                   (for_node->kind == JS_VAR_LET || for_node->kind == JS_VAR_CONST)) {
+            jm_collect_pattern_names_kind(for_node->left, names, for_node->kind);
+        }
+        jm_collect_enclosing_lexicals_for_target(for_node->left, target, names);
+        jm_collect_enclosing_lexicals_for_target(for_node->right, target, names);
+        jm_collect_enclosing_lexicals_for_target(for_node->body, target, names);
+        break;
+    }
+    case JS_AST_NODE_WHILE_STATEMENT: {
+        JsWhileNode* while_node = (JsWhileNode*)node;
+        jm_collect_enclosing_lexicals_for_target(while_node->test, target, names);
+        jm_collect_enclosing_lexicals_for_target(while_node->body, target, names);
+        break;
+    }
+    case JS_AST_NODE_DO_WHILE_STATEMENT: {
+        JsDoWhileNode* do_node = (JsDoWhileNode*)node;
+        jm_collect_enclosing_lexicals_for_target(do_node->body, target, names);
+        jm_collect_enclosing_lexicals_for_target(do_node->test, target, names);
+        break;
+    }
+    case JS_AST_NODE_TRY_STATEMENT: {
+        JsTryNode* try_node = (JsTryNode*)node;
+        jm_collect_enclosing_lexicals_for_target(try_node->block, target, names);
+        jm_collect_enclosing_lexicals_for_target(try_node->handler, target, names);
+        jm_collect_enclosing_lexicals_for_target(try_node->finalizer, target, names);
+        break;
+    }
+    case JS_AST_NODE_CATCH_CLAUSE: {
+        JsCatchNode* catch_node = (JsCatchNode*)node;
+        if (catch_node->body && jm_ast_node_contains_target(catch_node->body, target))
+            jm_collect_pattern_names_kind(catch_node->param, names, (int)JS_VAR_LET);
+        jm_collect_enclosing_lexicals_for_target(catch_node->body, target, names);
+        break;
+    }
+    case JS_AST_NODE_SWITCH_STATEMENT: {
+        JsSwitchNode* switch_node = (JsSwitchNode*)node;
+        jm_collect_enclosing_lexicals_for_target(switch_node->discriminant, target, names);
+        for (JsAstNode* c = switch_node->cases; c; c = c->next)
+            jm_collect_enclosing_lexicals_for_target(c, target, names);
+        break;
+    }
+    case JS_AST_NODE_SWITCH_CASE: {
+        JsSwitchCaseNode* switch_case = (JsSwitchCaseNode*)node;
+        jm_collect_enclosing_lexicals_for_target(switch_case->test, target, names);
+        for (JsAstNode* s = switch_case->consequent; s; s = s->next)
+            jm_collect_enclosing_lexicals_for_target(s, target, names);
+        break;
+    }
+    case JS_AST_NODE_LABELED_STATEMENT: {
+        JsLabeledStatementNode* labeled = (JsLabeledStatementNode*)node;
+        jm_collect_enclosing_lexicals_for_target(labeled->body, target, names);
+        break;
+    }
+    case JS_AST_NODE_WITH_STATEMENT: {
+        JsWithStatementNode* with_node = (JsWithStatementNode*)node;
+        jm_collect_enclosing_lexicals_for_target(with_node->object, target, names);
+        jm_collect_enclosing_lexicals_for_target(with_node->body, target, names);
+        break;
+    }
+    default:
+        break;
+    }
+}
+
 void jm_cleanup_active_mir(void) {
     if (g_active_mir_ctx) {
         MIR_finish(g_active_mir_ctx);
@@ -1196,6 +1531,44 @@ static void jm_emit_evalscript_global_decl_check_prefixed(JsMirTranspiler* mt, c
     jm_emit_exc_propagate_check(mt);
 }
 
+static void jm_emit_evalscript_global_lex_decl_check_name(JsMirTranspiler* mt, String* name) {
+    if (!name || !name->chars || name->len <= 0) return;
+    MIR_reg_t key_reg = jm_box_string_literal(mt, name->chars, (int)name->len);
+    jm_call_void_1(mt, "js_evalscript_check_global_lex_decl",
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
+    jm_emit_exc_propagate_check(mt);
+}
+
+static void jm_emit_evalscript_global_lex_decl_precheck(JsMirTranspiler* mt, JsAstNode* node) {
+    if (!node || node->node_type != JS_AST_NODE_VARIABLE_DECLARATION) return;
+    JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)node;
+    if (vd->kind != JS_VAR_LET && vd->kind != JS_VAR_CONST) return;
+    for (JsAstNode* d = vd->declarations; d; d = d->next) {
+        if (d->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
+        JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)d;
+        if (!decl->id) continue;
+        if (decl->id->node_type == JS_AST_NODE_IDENTIFIER) {
+            jm_emit_evalscript_global_lex_decl_check_name(mt, ((JsIdentifierNode*)decl->id)->name);
+        } else if (decl->id->node_type == JS_AST_NODE_OBJECT_PATTERN ||
+                   decl->id->node_type == JS_AST_NODE_ARRAY_PATTERN) {
+            struct hashmap* names = hashmap_new(sizeof(JsNameSetEntry), 8, 0, 0,
+                jm_name_hash, jm_name_cmp, NULL, NULL);
+            jm_collect_pattern_names(decl->id, names);
+            size_t iter = 0; void* item;
+            while (hashmap_iter(names, &iter, &item)) {
+                JsNameSetEntry* entry = (JsNameSetEntry*)item;
+                const char* name = entry->name;
+                if (strncmp(name, "_js_", 4) == 0) name += 4;
+                MIR_reg_t key_reg = jm_box_string_literal(mt, name, (int)strlen(name));
+                jm_call_void_1(mt, "js_evalscript_check_global_lex_decl",
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
+                jm_emit_exc_propagate_check(mt);
+            }
+            hashmap_free(names);
+        }
+    }
+}
+
 static void jm_emit_evalscript_global_decl_prechecks(JsMirTranspiler* mt, JsAstNode* node) {
     if (!node) return;
     switch (node->node_type) {
@@ -1603,7 +1976,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         struct hashmap* hoisted_vars = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
             jm_name_hash, jm_name_cmp, NULL, NULL);
         struct hashmap* eval_lex_collisions = NULL;
-        if (mt->is_eval_direct && !mt->is_global_strict && !mt->is_module && js_eval_env_is_active()) {
+        if (!mt->is_global_strict && !mt->is_module) {
             eval_lex_collisions = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
                 jm_name_hash, jm_name_cmp, NULL, NULL);
             JsAstNode* ls = program->body;
@@ -2297,11 +2670,32 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         // Use jm_collect_body_locals to also capture variables from for-of/for-in
         // loops, try/catch blocks, etc. at the top level
         {
+            struct hashmap* top_hoists = hashmap_new(sizeof(JsNameSetEntry), 32, 0, 0,
+                jm_name_hash, jm_name_cmp, NULL, NULL);
+            struct hashmap* top_lex_collisions = NULL;
+            if (!mt->is_global_strict && !mt->is_module) {
+                top_lex_collisions = hashmap_new(sizeof(JsNameSetEntry), 32, 0, 0,
+                    jm_name_hash, jm_name_cmp, NULL, NULL);
+            }
             JsAstNode* s = program->body;
             while (s) {
-                jm_collect_body_locals(s, all_names);
+                jm_collect_body_locals(s, top_hoists, true);
+                if (top_lex_collisions) jm_collect_all_let_const_names_recursive(s, top_lex_collisions);
+                jm_collect_direct_statement_let_const_names(s, all_names);
                 s = s->next;
             }
+            size_t th_iter = 0;
+            void* th_item;
+            while (hashmap_iter(top_hoists, &th_iter, &th_item)) {
+                JsNameSetEntry* e = (JsNameSetEntry*)th_item;
+                if (e->from_func_decl && top_lex_collisions &&
+                    jm_name_set_has(top_lex_collisions, e->name)) {
+                    continue;
+                }
+                jm_name_set_add(all_names, e->name);
+            }
+            if (top_lex_collisions) hashmap_free(top_lex_collisions);
+            hashmap_free(top_hoists);
         }
 
         // Add class method params and locals (for closures nested inside methods)
@@ -2343,6 +2737,8 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 JsNameSetEntry* e = (JsNameSetEntry*)copy_item;
                 jm_name_set_add(ancestor_names, e->name);
             }
+            jm_collect_enclosing_lexicals_for_target((JsAstNode*)program,
+                (JsAstNode*)fc->node, ancestor_names);
 
             // Now REMOVE function-level names from all_names that were added from
             // ALL functions indiscriminately (the loop at lines 13118+).
@@ -2352,6 +2748,8 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             // so we can detect when a parent function's local shadows a module constant.
             struct hashmap* ancestor_func_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
                 jm_name_hash, jm_name_cmp, NULL, NULL);
+            jm_collect_enclosing_lexicals_for_target((JsAstNode*)program,
+                (JsAstNode*)fc->node, ancestor_func_locals);
             int ancestor_idx = fc->parent_index;
             while (ancestor_idx >= 0 && ancestor_idx < mt->func_count) {
                 JsFuncCollected* anc = &mt->func_entries[ancestor_idx];
@@ -2375,7 +2773,9 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 if (afn->body) {
                     struct hashmap* anc_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
                         jm_name_hash, jm_name_cmp, NULL, NULL);
-                    jm_collect_body_locals(afn->body, anc_locals);
+                    jm_collect_visible_function_scope_names(afn->body, anc->is_strict, anc_locals, true);
+                    jm_collect_enclosing_lexicals_for_target(afn->body,
+                        (JsAstNode*)fc->node, anc_locals);
                     size_t al_iter = 0; void* al_item;
                     while (hashmap_iter(anc_locals, &al_iter, &al_item)) {
                         JsNameSetEntry* e = (JsNameSetEntry*)al_item;
@@ -2421,6 +2821,8 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         }
                         s = s->next;
                     }
+                    jm_collect_enclosing_lexicals_for_target((JsAstNode*)program,
+                        (JsAstNode*)fc->node, let_const_names);
                 }
                 // Collect from ancestor function bodies
                 int anc_idx = fc->parent_index;
@@ -2428,6 +2830,8 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     JsFuncCollected* anc = &mt->func_entries[anc_idx];
                     if (anc->node && anc->node->body) {
                         jm_collect_let_const_names(anc->node->body, let_const_names);
+                        jm_collect_enclosing_lexicals_for_target(anc->node->body,
+                            (JsAstNode*)fc->node, let_const_names);
                     }
                     anc_idx = anc->parent_index;
                 }
@@ -2483,7 +2887,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         // Only add body locals that will actually be emitted as local variables.
                         struct hashmap* body_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
                             jm_name_hash, jm_name_cmp, NULL, NULL);
-                        jm_collect_body_locals(pfn->body, body_locals);
+                        jm_collect_visible_function_scope_names(pfn->body, parent->is_strict, body_locals, true);
                         size_t bl_iter = 0;
                         void* bl_item;
                         while (hashmap_iter(body_locals, &bl_iter, &bl_item)) {
@@ -2908,7 +3312,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             jm_name_hash, jm_name_cmp, NULL, NULL);
         JsFunctionNode* parent_fn = parent_fc->node;
         if (parent_fn && parent_fn->body) {
-            jm_collect_body_locals(parent_fn->body, parent_locals);
+            jm_collect_visible_function_scope_names(parent_fn->body, parent_fc->is_strict, parent_locals, true);
             // Also add parameters as locals
             JsAstNode* pp = parent_fn->params;
             while (pp) {
@@ -2966,7 +3370,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         struct hashmap* parent_locals2 = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
             jm_name_hash, jm_name_cmp, NULL, NULL);
         if (parent_fn && parent_fn->body) {
-            jm_collect_body_locals(parent_fn->body, parent_locals2);
+            jm_collect_visible_function_scope_names(parent_fn->body, parent_fc->is_strict, parent_locals2, true);
             JsAstNode* pp2 = parent_fn->params;
             while (pp2) {
                 char pname2[128];
@@ -3323,19 +3727,22 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     if (!mt->is_global_strict && !mt->is_module) {
         JsAstNode* precheck_stmt = program->body;
         while (precheck_stmt) {
+            if (mt->is_eval_direct) {
+                jm_emit_evalscript_global_lex_decl_precheck(mt, precheck_stmt);
+            }
             jm_emit_evalscript_global_decl_prechecks(mt, precheck_stmt);
             precheck_stmt = precheck_stmt->next;
         }
     }
 
-    // AnnexB B.3.3.3 step 1.a.ii.6.b: For sloppy-mode global eval, pre-initialize
-    // globalThis.<name> = undefined for nested function declarations (those that
-    // would be created via CreateGlobalFunctionBinding).  This ensures the binding
-    // is observable BEFORE the function declaration statement executes.
+    // AnnexB B.3.3: For sloppy-mode scripts/eval, pre-initialize
+    // globalThis.<name> = undefined for nested function declarations that
+    // qualify for the web-compat extension. This ensures the binding is
+    // observable BEFORE the function declaration statement executes.
     // Suppression: skip if any let/const declaration in the eval program has the
     // same name (B.3.3.3 step 1.b — would be an early SyntaxError otherwise).
     struct hashmap* annexb_lex_collisions = NULL;
-    if (mt->is_eval_direct && !mt->is_global_strict && !mt->is_module && mt->module_consts) {
+    if (!mt->is_global_strict && !mt->is_module && mt->module_consts) {
         annexb_lex_collisions = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
             jm_name_hash, jm_name_cmp, NULL, NULL);
         JsAstNode* s = program->body;
@@ -3364,34 +3771,42 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             const char* js_name = mce->name;
             if (strncmp(js_name, "_js_", 4) == 0) js_name += 4;
             MIR_reg_t key_reg = jm_box_string_literal(mt, js_name, strlen(js_name));
-            MIR_reg_t bridged_reg = jm_call_1(mt, "js_eval_env_has_binding", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
             MIR_label_t skip_preinit = jm_new_label(mt);
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
-                MIR_new_label_op(mt->ctx, skip_preinit),
-                MIR_new_reg_op(mt->ctx, bridged_reg)));
+            if (mt->is_eval_direct) {
+                MIR_reg_t bridged_reg = jm_call_1(mt, "js_eval_env_has_binding", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                    MIR_new_label_op(mt->ctx, skip_preinit),
+                    MIR_new_reg_op(mt->ctx, bridged_reg)));
+            }
             MIR_reg_t undef_reg = jm_new_reg(mt, "annexb_undef", MIR_T_I64);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_reg_op(mt->ctx, undef_reg),
                 MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEF_VAL)));
-            MIR_reg_t eval_env_active = jm_call_0(mt, "js_eval_env_is_active", MIR_T_I64);
-            MIR_label_t global_preinit = jm_new_label(mt);
-            MIR_label_t preinit_done = jm_new_label(mt);
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
-                MIR_new_label_op(mt->ctx, global_preinit),
-                MIR_new_reg_op(mt->ctx, eval_env_active)));
-            jm_call_void_2(mt, "js_eval_local_export_var",
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, undef_reg));
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, preinit_done)));
-            jm_emit_label(mt, global_preinit);
-            jm_call_void_1(mt, "js_eval_env_track_global_binding",
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
-            jm_call_void_2(mt, "js_define_global_eval_var_property",
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, undef_reg));
+            if (mt->is_eval_direct) {
+                MIR_reg_t eval_env_active = jm_call_0(mt, "js_eval_env_is_active", MIR_T_I64);
+                MIR_label_t global_preinit = jm_new_label(mt);
+                MIR_label_t preinit_done = jm_new_label(mt);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+                    MIR_new_label_op(mt->ctx, global_preinit),
+                    MIR_new_reg_op(mt->ctx, eval_env_active)));
+                jm_call_void_2(mt, "js_eval_local_export_var",
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, undef_reg));
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, preinit_done)));
+                jm_emit_label(mt, global_preinit);
+                jm_call_void_1(mt, "js_eval_env_track_global_binding",
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
+                jm_call_void_2(mt, "js_define_global_eval_var_property",
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, undef_reg));
+                jm_emit_label(mt, preinit_done);
+            } else {
+                jm_call_void_2(mt, "js_define_global_var_property",
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, undef_reg));
+            }
             log_debug("js-mir: AnnexB pre-init globalThis.%s = undefined", js_name);
-            jm_emit_label(mt, preinit_done);
             jm_emit_label(mt, skip_preinit);
         }
         hashmap_free(annexb_lex_collisions);

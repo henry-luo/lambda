@@ -2862,6 +2862,11 @@ JsAstNode* build_js_for_in_statement(JsTranspiler* tp, TSNode for_node) {
         }
     }
 
+    TSNode init_node = ts_node_child_by_field_name(for_node, "value", strlen("value"));
+    if (!ts_node_is_null(init_node)) {
+        for_of->init = build_js_expression(tp, init_node);
+    }
+
     // Get the iterable expression (right side)
     TSNode right_node = ts_node_child_by_field_name(for_node, "right", strlen("right"));
     if (!ts_node_is_null(right_node)) {

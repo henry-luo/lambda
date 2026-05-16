@@ -1113,7 +1113,57 @@ static inline Item js_op_to_primitive(Item value, int hint) {
 static inline int js_upper_hex_digit_value(char c) {
     if (c >= '0' && c <= '9') return c - '0';
     if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
     return -1;
+}
+
+extern "C" uint64_t js_get_heap_epoch();
+
+static Item g_last_four_byte_uri_escape_string = {0};
+static uint32_t g_last_four_byte_uri_escape_cp = 0;
+static uint64_t g_last_four_byte_uri_escape_epoch = 0;
+
+static bool js_percent_escape_four_byte_cp(String* s, uint32_t* cp_out) {
+    if (!s || s->len != 12) return false;
+    if (s->chars[0] != '%' || s->chars[3] != '%' ||
+        s->chars[6] != '%' || s->chars[9] != '%') {
+        return false;
+    }
+    int b0_high = js_upper_hex_digit_value(s->chars[1]);
+    int b0_low = js_upper_hex_digit_value(s->chars[2]);
+    int b1_high = js_upper_hex_digit_value(s->chars[4]);
+    int b1_low = js_upper_hex_digit_value(s->chars[5]);
+    int b2_high = js_upper_hex_digit_value(s->chars[7]);
+    int b2_low = js_upper_hex_digit_value(s->chars[8]);
+    int b3_high = js_upper_hex_digit_value(s->chars[10]);
+    int b3_low = js_upper_hex_digit_value(s->chars[11]);
+    if ((b0_high | b0_low | b1_high | b1_low | b2_high | b2_low | b3_high | b3_low) < 0) return false;
+    unsigned int byte0 = (unsigned int)((b0_high << 4) | b0_low);
+    unsigned int byte1 = (unsigned int)((b1_high << 4) | b1_low);
+    unsigned int byte2 = (unsigned int)((b2_high << 4) | b2_low);
+    unsigned int byte3 = (unsigned int)((b3_high << 4) | b3_low);
+    if (byte0 < 0xF0 || byte0 > 0xF4) return false;
+    if ((byte1 & 0xC0) != 0x80 || (byte2 & 0xC0) != 0x80 || (byte3 & 0xC0) != 0x80) return false;
+    unsigned int cp = ((byte0 & 0x07) << 18) | ((byte1 & 0x3F) << 12) |
+                      ((byte2 & 0x3F) << 6) | (byte3 & 0x3F);
+    if (cp < 0x10000 || cp > 0x10FFFF) return false;
+    *cp_out = (uint32_t)cp;
+    return true;
+}
+
+extern "C" int64_t js_string_last_four_byte_uri_escape_cp(Item str_item) {
+    if (str_item.item == g_last_four_byte_uri_escape_string.item &&
+        g_last_four_byte_uri_escape_epoch == js_get_heap_epoch()) {
+        return (int64_t)g_last_four_byte_uri_escape_cp;
+    }
+    return -1;
+}
+
+extern "C" void js_string_remember_four_byte_uri_escape_cp(Item str_item, int64_t cp) {
+    if (cp < 0x10000 || cp > 0x10FFFF) return;
+    g_last_four_byte_uri_escape_string = str_item;
+    g_last_four_byte_uri_escape_cp = (uint32_t)cp;
+    g_last_four_byte_uri_escape_epoch = js_get_heap_epoch();
 }
 
 static inline Item js_try_concat_percent_hex(String* left, String* right) {
@@ -1157,7 +1207,14 @@ static inline Item js_concat_strings_fast(String* left, String* right) {
     memcpy(result->chars, left->chars, left_len);
     memcpy(result->chars + left_len, right->chars, right_len);
     result->chars[result->len] = '\0';
-    return (Item){.item = s2it(result)};
+    Item result_item = (Item){.item = s2it(result)};
+    uint32_t cp = 0;
+    if (result->len == 12 && js_percent_escape_four_byte_cp(result, &cp)) {
+        g_last_four_byte_uri_escape_string = result_item;
+        g_last_four_byte_uri_escape_cp = cp;
+        g_last_four_byte_uri_escape_epoch = js_get_heap_epoch();
+    }
+    return result_item;
 }
 
 extern "C" Item js_string_concat(Item left, Item right) {

@@ -121,6 +121,13 @@ extern "C" Item js_new_function_from_string(Item* args, int argc) {
         return ItemNull;
     }
 
+    int early_errors = js_check_early_errors(tp, js_ast);
+    if (early_errors > 0) {
+        js_transpiler_destroy(tp);
+        js_throw_syntax_error((Item){.item = s2it(heap_create_name("Invalid function source", 23))});
+        return ItemNull;
+    }
+
     // Use optimize level 0 for dynamic code (eval/new Function) — small snippets
     // don't benefit from optimization but pay the full cost of each pass.
     MIR_context_t ctx = jit_init(0);
