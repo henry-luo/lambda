@@ -7,16 +7,11 @@
  *
  * Based on Taffy's resolve_item_baselines() implementation.
  *
- * TODO: std::* Migration Plan (Phase 5+)
- * - std::vector<ItemBaselineInfo> items → Fixed array + count or ArrayList*
- * - std::vector<RowBaselineGroup> → Fixed array with MAX_GRID_ROWS limit
- * - std::vector<int> row_to_group_index → Fixed array with MAX_GRID_ROWS
- * Estimated effort: Moderate refactoring (~100 lines)
+ * Uses fixed-capacity scratch arrays to keep grid layout allocation style
+ * consistent with the rest of Radiant.
  */
 
-#include <vector>
 #include <cmath>
-#include <algorithm>
 
 #include "view.hpp"
 #include "grid.hpp"
@@ -28,6 +23,10 @@ namespace grid {
 // Bring global ViewBlock and GridContainerLayout into namespace scope
 using ::ViewBlock;
 using ::GridContainerLayout;
+
+constexpr int GRID_BASELINE_MAX_GROUPS = 256;
+constexpr int GRID_BASELINE_MAX_ITEMS_PER_GROUP = 256;
+constexpr int GRID_BASELINE_MAX_TRACKS = 256;
 
 // ============================================================================
 // Baseline Alignment Data
@@ -49,11 +48,42 @@ struct ItemBaselineInfo {
  */
 struct RowBaselineGroup {
     int row_index;                         // Which row this group represents
-    std::vector<ItemBaselineInfo> items;   // Items with baseline alignment in this row
+    ItemBaselineInfo items[GRID_BASELINE_MAX_ITEMS_PER_GROUP]; // Items with baseline alignment in this row
+    int item_count;
     float max_baseline_above;              // Max distance from top to baseline
     float max_baseline_below;              // Max distance from baseline to bottom
     float group_baseline;                  // Computed shared baseline for the row
 };
+
+struct RowBaselineGroupArray {
+    RowBaselineGroup groups[GRID_BASELINE_MAX_GROUPS];
+    int count;
+
+    void clear() {
+        count = 0;
+    }
+
+    RowBaselineGroup* append(int row_index) {
+        if (count >= GRID_BASELINE_MAX_GROUPS) {
+            return nullptr;
+        }
+        RowBaselineGroup* group = &groups[count++];
+        group->row_index = row_index;
+        group->item_count = 0;
+        group->max_baseline_above = 0.0f;
+        group->max_baseline_below = 0.0f;
+        group->group_baseline = 0.0f;
+        return group;
+    }
+};
+
+inline bool row_baseline_group_append_item(RowBaselineGroup* group, const ItemBaselineInfo& info) {
+    if (!group || group->item_count >= GRID_BASELINE_MAX_ITEMS_PER_GROUP) {
+        return false;
+    }
+    group->items[group->item_count++] = info;
+    return true;
+}
 
 } // namespace grid
 } // namespace radiant
@@ -146,15 +176,19 @@ inline float compute_item_first_baseline(ViewBlock* view) {
  */
 inline void resolve_grid_item_baselines(
     GridContainerLayout* grid_layout,
-    std::vector<RowBaselineGroup>& out_groups
+    RowBaselineGroupArray* out_groups
 ) {
-    out_groups.clear();
+    if (!out_groups) return;
+    out_groups->clear();
     if (!grid_layout || !grid_layout->grid_items || grid_layout->item_count <= 0) {
         return;
     }
 
     // Map from row index to group
-    std::vector<int> row_to_group_index(grid_layout->computed_row_count, -1);
+    int row_to_group_index[GRID_BASELINE_MAX_TRACKS];
+    for (int i = 0; i < GRID_BASELINE_MAX_TRACKS; i++) {
+        row_to_group_index[i] = -1;
+    }
 
     // First pass: collect items that participate in baseline alignment
     for (int i = 0; i < grid_layout->item_count; ++i) {
@@ -165,19 +199,15 @@ inline void resolve_grid_item_baselines(
         // computed_grid_row_start is 1-based, convert to 0-based
         int row = item->gi->computed_grid_row_start - 1;
         if (row < 0 || row >= grid_layout->computed_row_count) continue;
+        if (row >= GRID_BASELINE_MAX_TRACKS) continue;
 
         // Get or create group for this row
         int group_index = row_to_group_index[row];
         if (group_index < 0) {
-            group_index = static_cast<int>(out_groups.size());
+            RowBaselineGroup* group = out_groups->append(row);
+            if (!group) continue;
+            group_index = out_groups->count - 1;
             row_to_group_index[row] = group_index;
-
-            RowBaselineGroup group;
-            group.row_index = row;
-            group.max_baseline_above = 0.0f;
-            group.max_baseline_below = 0.0f;
-            group.group_baseline = 0.0f;
-            out_groups.push_back(group);
         }
 
         // Compute item's baseline
@@ -187,15 +217,17 @@ inline void resolve_grid_item_baselines(
         info.baseline_shim = 0.0f;
         info.participates = true;
 
-        out_groups[group_index].items.push_back(info);
+        row_baseline_group_append_item(&out_groups->groups[group_index], info);
     }
 
     // Second pass: compute shared baselines per group
-    for (auto& group : out_groups) {
-        if (group.items.empty()) continue;
+    for (int group_index = 0; group_index < out_groups->count; group_index++) {
+        RowBaselineGroup& group = out_groups->groups[group_index];
+        if (group.item_count <= 0) continue;
 
         // Find max baseline above and below
-        for (const auto& info : group.items) {
+        for (int item_index = 0; item_index < group.item_count; item_index++) {
+            const ItemBaselineInfo& info = group.items[item_index];
             if (info.baseline < 0) continue;
 
             float item_height = info.item ? info.item->height : 0.0f;
@@ -214,7 +246,8 @@ inline void resolve_grid_item_baselines(
         group.group_baseline = group.max_baseline_above;
 
         // Compute baseline shim for each item
-        for (auto& info : group.items) {
+        for (int item_index = 0; item_index < group.item_count; item_index++) {
+            ItemBaselineInfo& info = group.items[item_index];
             if (info.baseline >= 0) {
                 // Shim is the offset needed to align this item's baseline to the group baseline
                 info.baseline_shim = group.group_baseline - info.baseline;
@@ -228,10 +261,13 @@ inline void resolve_grid_item_baselines(
  * Call after baselines are resolved and items are positioned.
  */
 inline void apply_baseline_shims(
-    const std::vector<RowBaselineGroup>& groups
+    const RowBaselineGroupArray* groups
 ) {
-    for (const auto& group : groups) {
-        for (const auto& info : group.items) {
+    if (!groups) return;
+    for (int group_index = 0; group_index < groups->count; group_index++) {
+        const RowBaselineGroup& group = groups->groups[group_index];
+        for (int item_index = 0; item_index < group.item_count; item_index++) {
+            const ItemBaselineInfo& info = group.items[item_index];
             if (!info.participates || !info.item) continue;
             if (info.baseline_shim == 0.0f) continue;
 
@@ -245,9 +281,9 @@ inline void apply_baseline_shims(
  * Convenience function: resolve and apply baselines in one call.
  */
 inline void resolve_and_apply_grid_baselines(GridContainerLayout* grid_layout) {
-    std::vector<RowBaselineGroup> groups;
-    resolve_grid_item_baselines(grid_layout, groups);
-    apply_baseline_shims(groups);
+    RowBaselineGroupArray groups;
+    resolve_grid_item_baselines(grid_layout, &groups);
+    apply_baseline_shims(&groups);
 }
 
 } // namespace grid

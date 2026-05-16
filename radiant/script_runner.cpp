@@ -623,7 +623,6 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
     } else {
         log_info("execute_document_scripts: JS execution completed successfully");
         // Drain queued timers (setTimeout, setInterval).
-        // requestAnimationFrame is delivered by the Radiant frame clock.
         // This runs all pending callbacks with a 5s watchdog timeout.
         js_event_loop_drain();
         log_mem_stage("js: after event loop drain");

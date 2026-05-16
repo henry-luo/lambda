@@ -5,6 +5,7 @@
 #include "intrinsic_sizing.hpp"
 #include "layout_mode.hpp"
 #include "layout_cache.hpp"
+#include "layout_pass.hpp"
 
 #include "../lib/log.h"
 #include "../lib/strbuf.h"
@@ -92,9 +93,7 @@ static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* conta
             ViewBlock* child_block = lam::view_as_block(child->as_element());
 
             // Check if this child is absolute or fixed positioned
-            if (child_block && child_block->position &&
-                (child_block->position->position == CSS_VALUE_ABSOLUTE ||
-                 child_block->position->position == CSS_VALUE_FIXED)) {
+            if (layout_view_is_abs_or_fixed(child_block)) {
 
                 log_debug("Found absolute positioned child: %s", child->node_name());
 
@@ -113,6 +112,7 @@ static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* conta
                     wrap_mode = container->embed->flex->wrap;
                 }
                 bool is_wrap_reverse = (wrap_mode == CSS_VALUE_WRAP_REVERSE);
+                LayoutContainingBlock cb = layout_containing_block_for_view(container);
 
                 // Set up lycon->block dimensions from the child's CSS
                 // This is needed because layout_abs_block expects given_width/given_height
@@ -120,37 +120,7 @@ static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* conta
                 if (child_block->blk) {
                     lycon->block.given_width = child_block->blk->given_width;
                     lycon->block.given_height = child_block->blk->given_height;
-
-                    // CRITICAL: Re-resolve percentage width/height relative to flex container
-                    // CSS percentages were resolved during style resolution with wrong parent context.
-                    // For absolute children in flex containers, percentages should be relative to
-                    // the containing block (the flex container), not the initial viewport.
-                    // Calculate container's content area for percentage resolution
-                    float container_content_width = container->width;
-                    float container_content_height = container->height;
-                    if (container->bound) {
-                        container_content_width -= container->bound->padding.left + container->bound->padding.right;
-                        container_content_height -= container->bound->padding.top + container->bound->padding.bottom;
-                        if (container->bound->border) {
-                            container_content_width -= container->bound->border->width.left + container->bound->border->width.right;
-                            container_content_height -= container->bound->border->width.top + container->bound->border->width.bottom;
-                        }
-                    }
-
-                    if (!isnan(child_block->blk->given_width_percent) && container_content_width > 0) {
-                        float new_width = container_content_width * child_block->blk->given_width_percent / 100.0f;
-                        log_debug("Re-resolving abs child width: %.1f%% of %.1f = %.1f (was %.1f)",
-                                  child_block->blk->given_width_percent, container_content_width, new_width, lycon->block.given_width);
-                        lycon->block.given_width = new_width;
-                        child_block->blk->given_width = new_width;
-                    }
-                    if (!isnan(child_block->blk->given_height_percent) && container_content_height > 0) {
-                        float new_height = container_content_height * child_block->blk->given_height_percent / 100.0f;
-                        log_debug("Re-resolving abs child height: %.1f%% of %.1f = %.1f (was %.1f)",
-                                  child_block->blk->given_height_percent, container_content_height, new_height, lycon->block.given_height);
-                        lycon->block.given_height = new_height;
-                        child_block->blk->given_height = new_height;
-                    }
+                    layout_resolve_percent_size_for_child(lycon, child_block, cb, true, "flex abs child");
                 } else {
                     lycon->block.given_width = -1;
                     lycon->block.given_height = -1;
@@ -169,46 +139,28 @@ static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* conta
                 // is where it would be if it were the only flex item in the flex container.
                 // For reverse containers, this is at the end of the container minus item size.
                 if (needs_reverse_adjustment && child_block->position) {
-                    // Calculate container's content area (excluding padding and border)
-                    float container_content_width = container->width;
-                    float container_content_height = container->height;
-                    float border_offset_x = 0, border_offset_y = 0;
-
-                    if (container->bound) {
-                        container_content_width -= container->bound->padding.left + container->bound->padding.right;
-                        container_content_height -= container->bound->padding.top + container->bound->padding.bottom;
-                        border_offset_x = container->bound->padding.left;
-                        border_offset_y = container->bound->padding.top;
-                        if (container->bound->border) {
-                            container_content_width -= container->bound->border->width.left + container->bound->border->width.right;
-                            container_content_height -= container->bound->border->width.top + container->bound->border->width.bottom;
-                            border_offset_x += container->bound->border->width.left;
-                            border_offset_y += container->bound->border->width.top;
-                        }
-                    }
-
                     if (is_row) {
                         // row-reverse: adjust X if using static position (no left/right specified)
                         if (!child_block->position->has_left && !child_block->position->has_right) {
-                            float static_x = container_content_width - child_block->width + border_offset_x;
+                            float static_x = cb.content_width - child_block->width + cb.content_x;
                             // For row-reverse, margin-right acts like margin-start (at the end)
                             if (child_block->bound) {
                                 static_x -= child_block->bound->margin.right;
                             }
                             log_debug("row-reverse: adjusting static X from %.1f to %.1f (content_w=%.1f - item_w=%.1f + offset=%.1f)",
-                                      child_block->x, static_x, container_content_width, child_block->width, border_offset_x);
+                                      child_block->x, static_x, cb.content_width, child_block->width, cb.content_x);
                             child_block->x = static_x;
                         }
                     } else {
                         // column-reverse: adjust Y if using static position (no top/bottom specified)
                         if (!child_block->position->has_top && !child_block->position->has_bottom) {
-                            float static_y = container_content_height - child_block->height + border_offset_y;
+                            float static_y = cb.content_height - child_block->height + cb.content_y;
                             // For column-reverse, margin-bottom acts like margin-start (at the end)
                             if (child_block->bound) {
                                 static_y -= child_block->bound->margin.bottom;
                             }
                             log_debug("column-reverse: adjusting static Y from %.1f to %.1f (content_h=%.1f - item_h=%.1f + offset=%.1f)",
-                                      child_block->y, static_y, container_content_height, child_block->height, border_offset_y);
+                                      child_block->y, static_y, cb.content_height, child_block->height, cb.content_y);
                             child_block->y = static_y;
                         }
                     }
@@ -229,24 +181,6 @@ static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* conta
                     bool adjust_y = !child_block->position->has_top && !child_block->position->has_bottom;
 
                     if (adjust_x || adjust_y) {
-                        // Get container's content area for positioning
-                        float container_content_width = container->width;
-                        float container_content_height = container->height;
-                        float content_offset_x = 0, content_offset_y = 0;
-
-                        if (container->bound) {
-                            content_offset_x = container->bound->padding.left;
-                            content_offset_y = container->bound->padding.top;
-                            container_content_width -= container->bound->padding.left + container->bound->padding.right;
-                            container_content_height -= container->bound->padding.top + container->bound->padding.bottom;
-                            if (container->bound->border) {
-                                content_offset_x += container->bound->border->width.left;
-                                content_offset_y += container->bound->border->width.top;
-                                container_content_width -= container->bound->border->width.left + container->bound->border->width.right;
-                                container_content_height -= container->bound->border->width.top + container->bound->border->width.bottom;
-                            }
-                        }
-
                         // Get flex container properties
                         int justify_content = CSS_VALUE_FLEX_START;
                         int align_items = CSS_VALUE_STRETCH;
@@ -258,13 +192,13 @@ static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* conta
                         // Determine main/cross axis dimensions
                         float main_axis_size, cross_axis_size, item_main, item_cross;
                         if (is_row) {
-                            main_axis_size = container_content_width;
-                            cross_axis_size = container_content_height;
+                            main_axis_size = cb.content_width;
+                            cross_axis_size = cb.content_height;
                             item_main = child_block->width;
                             item_cross = child_block->height;
                         } else {
-                            main_axis_size = container_content_height;
-                            cross_axis_size = container_content_width;
+                            main_axis_size = cb.content_height;
+                            cross_axis_size = cb.content_width;
                             item_main = child_block->height;
                             item_cross = child_block->width;
                         }
@@ -307,9 +241,9 @@ static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* conta
                             }
 
                             if (is_row) {
-                                child_block->x = content_offset_x + main_offset;
+                                child_block->x = cb.content_x + main_offset;
                             } else {
-                                child_block->y = content_offset_y + main_offset;
+                                child_block->y = cb.content_y + main_offset;
                             }
                         }
 
@@ -362,9 +296,9 @@ static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* conta
                             }
 
                             if (is_row) {
-                                child_block->y = content_offset_y + cross_offset;
+                                child_block->y = cb.content_y + cross_offset;
                             } else {
-                                child_block->x = content_offset_x + cross_offset;
+                                child_block->x = cb.content_x + cross_offset;
                             }
                         }
 
@@ -2042,9 +1976,7 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                 // skip abs/fixed items — they are laid out by layout_flex_absolute_children,
                 // not here. including them in the fallback causes O(2^n) exponential blowup
                 // (each item gets laid out twice, duplicating the entire subtree recursively).
-                if (flex_item->position && flex_item->position->position &&
-                    (flex_item->position->position == CSS_VALUE_ABSOLUTE ||
-                     flex_item->position->position == CSS_VALUE_FIXED)) {
+                if (layout_view_is_abs_or_fixed(flex_item)) {
                     child = child->next();
                     continue;
                 }
@@ -2485,34 +2417,15 @@ void layout_flex_content(LayoutContext* lycon, ViewBlock* block) {
     // This avoids redundant layout for repeated measurements with same inputs
     // =========================================================================
     DomElement* dom_elem = lam::dom_require<DOM_NODE_ELEMENT>(block);
-    radiant::LayoutCache* cache = dom_elem ? dom_elem->layout_cache : nullptr;
-
-    // Build known dimensions from current constraints
-    radiant::KnownDimensions known_dims = radiant::known_dimensions_none();
-    if (lycon->block.given_width >= 0) {
-        known_dims.width = lycon->block.given_width;
-        known_dims.has_width = true;
-    }
-    if (lycon->block.given_height >= 0) {
-        known_dims.height = lycon->block.given_height;
-        known_dims.has_height = true;
-    }
+    radiant::KnownDimensions known_dims = radiant::layout_known_dimensions_from_context(lycon);
 
     // Try cache lookup
-    if (cache) {
-        radiant::SizeF cached_size;
-        if (radiant::layout_cache_get(cache, known_dims, lycon->available_space,
-                                       lycon->run_mode, &cached_size)) {
-            // Cache hit! Use cached dimensions
-            block->width = cached_size.width;
-            block->height = cached_size.height;
-            g_layout_cache_hits++;
-            log_info("FLEX CACHE HIT: container=%p, size=(%.1f x %.1f), mode=%d",
-                     block, cached_size.width, cached_size.height, (int)lycon->run_mode); // INT_CAST_OK: enum for log
-            log_leave();
-            return;
-        }
-        g_layout_cache_misses++;
+    radiant::SizeF cached_size;
+    if (radiant::layout_pass_cache_get(lycon, dom_elem, known_dims, &cached_size, "FLEX")) {
+        block->width = cached_size.width;
+        block->height = cached_size.height;
+        log_leave();
+        return;
     }
 
     // =========================================================================
@@ -2566,24 +2479,8 @@ void layout_flex_content(LayoutContext* lycon, ViewBlock* block) {
     // =========================================================================
     // CACHE STORE: Save computed result for future lookups
     // =========================================================================
-    if (cache || (dom_elem && lycon->pool)) {
-        // Lazy allocate cache if needed
-        if (!cache && dom_elem) {
-            cache = (radiant::LayoutCache*)pool_calloc(lycon->pool, sizeof(radiant::LayoutCache));
-            if (cache) {
-                radiant::layout_cache_init(cache);
-                dom_elem->layout_cache = cache;
-            }
-        }
-        if (cache) {
-            radiant::SizeF result = radiant::size_f(block->width, block->height);
-            radiant::layout_cache_store(cache, known_dims, lycon->available_space,
-                                        lycon->run_mode, result);
-            g_layout_cache_stores++;
-            log_debug("FLEX CACHE STORE: container=%p, size=(%.1f x %.1f), mode=%d",
-                      block, block->width, block->height, (int)lycon->run_mode); // INT_CAST_OK: enum for log
-        }
-    }
+    radiant::SizeF result = radiant::size_f(block->width, block->height);
+    radiant::layout_pass_cache_store(lycon, dom_elem, known_dims, result, "FLEX");
 
     // Note: layout_flex_container_with_nested_content handles its own
     // init_flex_container + cleanup_flex_container + pa_flex restore.

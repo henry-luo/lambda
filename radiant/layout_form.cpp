@@ -481,18 +481,7 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
         break;
     }
 
-    // Calculate border and padding sizes
-    float border_h = 0, border_v = 0;
-    float padding_h = 0, padding_v = 0;
-
-    if (block->bound) {
-        if (block->bound->border) {
-            border_h = block->bound->border->width.left + block->bound->border->width.right;
-            border_v = block->bound->border->width.top + block->bound->border->width.bottom;
-        }
-        padding_h = block->bound->padding.left + block->bound->padding.right;
-        padding_v = block->bound->padding.top + block->bound->padding.bottom;
-    }
+    BoxMetrics box = layout_box_metrics(block);
 
     // Check box-sizing model (default is content-box per CSS spec)
     bool is_border_box = (block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX);
@@ -508,34 +497,34 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
         // CSS specifies width
         if (is_border_box) {
             width = block->blk->given_width;
-            content_width = width - border_h - padding_h;
+            content_width = layout_content_width_from_border_box(block, width);
         } else {
             content_width = block->blk->given_width;
-            width = content_width + border_h + padding_h;
+            width = layout_border_width_from_content_box(block, content_width);
         }
     } else {
         // Use intrinsic content size + actual CSS border/padding
-        width = content_width + border_h + padding_h;
+        width = layout_border_width_from_content_box(block, content_width);
     }
 
     if (block->blk && block->blk->given_height >= 0) {
         // CSS specifies height
         if (is_border_box) {
             height = block->blk->given_height;
-            content_height = height - border_v - padding_v;
+            content_height = layout_content_height_from_border_box(block, height);
         } else {
             content_height = block->blk->given_height;
-            height = content_height + border_v + padding_v;
+            height = layout_border_height_from_content_box(block, content_height);
         }
     } else {
         // Use intrinsic content size + actual CSS border/padding
-        height = content_height + border_v + padding_v;
+        height = layout_border_height_from_content_box(block, content_height);
     }
 
     log_debug("[FORM] layout: intrinsic=%.1fx%.1f, given=%.1fx%.1f, border=%.1f/%.1f, padding=%.1f/%.1f, box_sizing=%s",
               form->intrinsic_width, form->intrinsic_height,
               block->blk ? block->blk->given_width : -1, block->blk ? block->blk->given_height : -1,
-              border_h, border_v, padding_h, padding_v, is_border_box ? "border-box" : "content-box");
+              box.border_h, box.border_v, box.padding_h, box.padding_v, is_border_box ? "border-box" : "content-box");
 
     // Set final dimensions
     // Apply CSS min-width/max-width constraints (e.g., max-width: 100px on textarea).
@@ -544,14 +533,14 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
     if (block->blk) {
         if (is_border_box) {
             width = adjust_min_max_width(block, width);
-            content_width = width - border_h - padding_h;
+            content_width = layout_content_width_from_border_box(block, width);
             height = adjust_min_max_height(block, height);
-            content_height = height - border_v - padding_v;
+            content_height = layout_content_height_from_border_box(block, height);
         } else {
             content_width = adjust_min_max_width(block, content_width);
             content_height = adjust_min_max_height(block, content_height);
-            width = content_width + border_h + padding_h;
-            height = content_height + border_v + padding_v;
+            width = layout_border_width_from_content_box(block, content_width);
+            height = layout_border_height_from_content_box(block, content_height);
         }
     }
     block->width = width;

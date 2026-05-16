@@ -1940,8 +1940,7 @@ int collect_flex_items(FlexContainerLayout* flex, ViewBlock* container, View*** 
         ViewElement* child_elmt = lam::view_require_element(child);
         // CRITICAL: Check position->position (PositionProp), NOT in_line->position
         ViewBlock* child_block = lam::view_as_block(child_elmt);
-        bool is_absolute = child_block && child_block->position && child_block->position->position &&
-            (child_block->position->position == CSS_VALUE_ABSOLUTE || child_block->position->position == CSS_VALUE_FIXED);
+        bool is_absolute = layout_view_is_abs_or_fixed(child_block);
         bool is_hidden = child_elmt && child_elmt->in_line && child_elmt->in_line->visibility == VIS_HIDDEN;
         if (!is_absolute && !is_hidden) {
             count++;
@@ -1974,8 +1973,7 @@ int collect_flex_items(FlexContainerLayout* flex, ViewBlock* container, View*** 
         ViewElement* child_elmt = lam::view_require_element(child);
         // CRITICAL: Check position->position (PositionProp), NOT in_line->position
         ViewBlock* child_block2 = lam::view_as_block(child_elmt);
-        bool is_absolute = child_block2 && child_block2->position && child_block2->position->position &&
-            (child_block2->position->position == CSS_VALUE_ABSOLUTE || child_block2->position->position == CSS_VALUE_FIXED);
+        bool is_absolute = layout_view_is_abs_or_fixed(child_block2);
         bool is_hidden = child_elmt && child_elmt->in_line && child_elmt->in_line->visibility == VIS_HIDDEN;
         if (!is_absolute && !is_hidden) {
             flex->flex_items[count] = child;
@@ -2162,14 +2160,8 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
     // During style resolution, lycon->block.parent->content_width still points to
     // the grandparent's width. We must temporarily update it to the flex container's
     // content width so that percentage margins/paddings resolve correctly.
-    float container_content_width = (float)container->width;
-    if (container->bound) {
-        container_content_width -= container->bound->padding.left + container->bound->padding.right;
-        if (container->bound->border) {
-            container_content_width -= container->bound->border->width.left + container->bound->border->width.right;
-        }
-    }
-    if (container_content_width < 0) container_content_width = 0;
+    LayoutContainingBlock cb = layout_containing_block_for_view(container);
+    float container_content_width = cb.content_width;
 
     // Create a temporary parent block context with the correct content width
     BlockContext flex_parent_ctx = {};
@@ -5277,16 +5269,7 @@ float get_border_box_height(ViewElement* item) {
 
 float get_content_width(ViewBlock* item) {
     float border_box_width = get_border_box_width(item);
-
-    if (!item->bound) {
-        return border_box_width;
-    }
-
-    // Subtract padding and border from border-box width to get content width
-    float padding_and_border = item->bound->padding.left + item->bound->padding.right +
-        (item->bound->border ? item->bound->border->width.left + item->bound->border->width.right : 0);
-
-    return fmaxf(border_box_width - padding_and_border, 0);
+    return layout_content_width_from_border_box(item, border_box_width);
 }
 
 float get_content_height(ViewBlock* item) {
@@ -5295,13 +5278,12 @@ float get_content_height(ViewBlock* item) {
     }
 
     // CRITICAL WORKAROUND for missing box-sizing: border-box implementation
-    float padding_and_border = item->bound->padding.top + item->bound->padding.bottom +
-        (item->bound->border ? item->bound->border->width.top + item->bound->border->width.bottom : 0);
+    BoxMetrics box = layout_box_metrics(item);
 
     // HACK: For flex items with padding, assume box-sizing: border-box was intended
-    if (padding_and_border > 0) {
-        float intended_border_box_height = item->height - padding_and_border;  // 120 - 20 = 100
-        float content_height = intended_border_box_height - padding_and_border;  // 100 - 20 = 80
+    if (box.pad_border_v > 0) {
+        float intended_border_box_height = item->height - box.pad_border_v;  // 120 - 20 = 100
+        float content_height = intended_border_box_height - box.pad_border_v;  // 100 - 20 = 80
         return fmaxf(content_height, 0);
     }
 
@@ -5310,17 +5292,13 @@ float get_content_height(ViewBlock* item) {
 }
 
 float get_border_offset_left(ViewBlock* item) {
-    if (!item->bound || !item->bound->border) {
-        return 0;
-    }
-    return item->bound->border->width.left;
+    BoxMetrics box = layout_box_metrics(item);
+    return box.border.left;
 }
 
 float get_border_offset_top(ViewBlock* item) {
-    if (!item->bound || !item->bound->border) {
-        return 0;
-    }
-    return item->bound->border->width.top;
+    BoxMetrics box = layout_box_metrics(item);
+    return box.border.top;
 }
 
 // Utility functions for axis-agnostic positioning

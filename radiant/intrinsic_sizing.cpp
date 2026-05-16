@@ -9,6 +9,7 @@
 #include "layout_flex.hpp"  // For FlexDirection enum
 #include "grid.hpp"         // For GridTrackList
 #include "form_control.hpp" // For FormDefaults
+#include "layout_pass.hpp"
 #include "rdt_video.h"
 #include "retained_fields.hpp"
 #include "../lib/font/font.h"
@@ -1265,10 +1266,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     // Intrinsic sizing needs the same outer/inner display mapping as normal
     // layout, especially for CSS table values on non-table HTML elements.
     if (!element->styles_resolved && element->specified_style) {
-        radiant::RunMode saved_run_mode = lycon->run_mode;
-        lycon->run_mode = radiant::RunMode::ComputeSize;
+        radiant::LayoutRunModeScope run_mode_scope(lycon, radiant::RunMode::ComputeSize);
         (lam::unsafe_view_block_element_storage(element))->display = resolve_display_value((void*)element);
-        lycon->run_mode = saved_run_mode;
     }
 
     log_debug("measure_element_intrinsic: tag=%s, outer=%d", element->node_name(),

@@ -16,6 +16,8 @@
 #include "layout_mode.hpp"
 #include "layout_cache.hpp"
 #include "layout_counters.hpp"
+#include "layout_box.hpp"
+#include "layout_containing_block.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_style.hpp"
 #include "../lib/scratch_arena.h"
@@ -683,19 +685,6 @@ bool has_id_line_break_class(uint32_t cp);
  * @return number of justification opportunities (spaces + CJK inter-char gaps)
  */
 int count_justify_opportunities(const char* str, int len);
-
-// ============================================================================
-// Size Constraint Utilities (§1.1)
-// ============================================================================
-
-// Apply min/max width constraints from block's blk prop (includes border-box floor).
-float adjust_min_max_width(ViewBlock* block, float width);
-// Apply min/max height constraints from block's blk prop (includes border-box floor).
-float adjust_min_max_height(ViewBlock* block, float height);
-// Subtract padding+border from width when box-sizing is border-box (returns content width).
-float adjust_border_padding_width(ViewBlock* block, float width);
-// Subtract padding+border from height when box-sizing is border-box (returns content height).
-float adjust_border_padding_height(ViewBlock* block, float height);
 
 // ============================================================================
 // Context Scope Guards (§1.8: Prevent context leaks on early returns)

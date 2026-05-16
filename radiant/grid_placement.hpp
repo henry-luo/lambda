@@ -14,11 +14,8 @@
  *
  * Based on Taffy's implementation with adaptations for Radiant's architecture.
  *
- * TODO: std::* Migration Plan (Phase 5+)
- * - std::pair<OriginZeroLine, OriginZeroLine> → struct GridLinePair { OriginZeroLine first, second; }
- * - std::vector<GridItemInfo>& → ArrayList* or pool-allocated array
- * - std::make_pair → Direct struct initialization
- * Estimated effort: Moderate refactoring (~200 lines)
+ * Uses explicit structs and fixed-capacity arrays for auto-placement scratch
+ * data.
  */
 
 #ifndef RADIANT_GRID_PLACEMENT_HPP
@@ -38,7 +35,7 @@
 namespace radiant {
 namespace grid {
 
-// Cursor position for grid auto-placement iteration (replaces std::pair)
+// Cursor position for grid auto-placement iteration
 struct GridCursor {
     OriginZeroLine primary;    // primary axis index
     OriginZeroLine secondary;  // secondary axis index
@@ -223,7 +220,7 @@ struct GridItemInfo {
     GridItemInfo() : item_index(-1), row(), column(), resolved_row(), resolved_column() {}
 };
 
-// Fixed-capacity array of GridItemInfo (replaces std::vector<GridItemInfo>)
+// Fixed-capacity array of GridItemInfo
 // MAX_GRID_ITEMS is defined in grid_sizing_algorithm.hpp (256); use same constant
 #ifndef MAX_GRID_ITEMS
 #define MAX_GRID_ITEMS 256

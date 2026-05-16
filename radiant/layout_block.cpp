@@ -9,6 +9,7 @@
 #include "layout_cache.hpp"
 #include "layout_counters.hpp"
 #include "layout_list.hpp"
+#include "layout_pass.hpp"
 #include "layout_table.hpp"
 #include "grid.hpp"
 #include "form_control.hpp"
@@ -4126,87 +4127,6 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
     }
 }
 
-float adjust_min_max_width(ViewBlock* block, float width) {
-    if (block->blk) {
-        if (block->blk->given_max_width >= 0 && width > block->blk->given_max_width) {
-            width = block->blk->given_max_width;
-            log_debug("[ADJUST] Clamped to max: %.2f", width);
-        }
-        // Note: given_min_width overrides given_max_width if both are specified
-        if (block->blk->given_min_width >= 0 && width < block->blk->given_min_width) {
-            width = block->blk->given_min_width;
-            log_debug("[ADJUST] Clamped to min: %.2f", width);
-        }
-        // CSS Box Model: In border-box, the box width cannot be smaller than
-        // its padding+border. If min/max clamping reduces below padding+border,
-        // floor at padding+border (content area becomes 0).
-        if (block->blk->box_sizing == CSS_VALUE_BORDER_BOX && block->bound) {
-            float pad_border = block->bound->padding.left + block->bound->padding.right;
-            if (block->bound->border) {
-                pad_border += block->bound->border->width.left + block->bound->border->width.right;
-            }
-            if (width < pad_border) {
-                log_debug("[ADJUST] border-box floor: %.2f → %.2f (padding+border)", width, pad_border);
-                width = pad_border;
-            }
-        }
-    }
-    return width;
-}
-
-float adjust_min_max_height(ViewBlock* block, float height) {
-    if (block->blk) {
-        if (block->blk->given_max_height >= 0 && height > block->blk->given_max_height) {
-            height = block->blk->given_max_height;
-        }
-        // Note: given_min_height overrides given_max_height if both are specified
-        if (block->blk->given_min_height >= 0 && height < block->blk->given_min_height) {
-            height = block->blk->given_min_height;
-        }
-        // CSS Box Model: In border-box, the box height cannot be smaller than
-        // its padding+border. If min/max clamping reduces below padding+border,
-        // floor at padding+border (content area becomes 0).
-        if (block->blk->box_sizing == CSS_VALUE_BORDER_BOX && block->bound) {
-            float pad_border = block->bound->padding.top + block->bound->padding.bottom;
-            if (block->bound->border) {
-                pad_border += block->bound->border->width.top + block->bound->border->width.bottom;
-            }
-            if (height < pad_border) {
-                height = pad_border;
-            }
-        }
-    }
-    return height;
-}
-
-float adjust_border_padding_width(ViewBlock* block, float width) {
-    // for border-box, the given width includes padding and borders
-    // so we need to subtract them to get the content width
-    float padding_and_border = 0;
-    if (block->bound) {
-        padding_and_border += block->bound->padding.left + block->bound->padding.right;
-        if (block->bound->border) {
-            padding_and_border += block->bound->border->width.left + block->bound->border->width.right;
-        }
-    }
-    width = max(width - padding_and_border, 0);
-    return width;
-}
-
-float adjust_border_padding_height(ViewBlock* block, float height) {
-    // for border-box, the given height includes padding and borders
-    // so we need to subtract them to get the content height
-    float padding_and_border = 0;
-    if (block->bound) {
-        padding_and_border += block->bound->padding.top + block->bound->padding.bottom;
-        if (block->bound->border) {
-            padding_and_border += block->bound->border->width.top + block->bound->border->width.bottom;
-        }
-    }
-    height = max(height - padding_and_border, 0);
-    return height;
-}
-
 void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     // setup inline context
     float content_width = lycon->block.content_width;
@@ -6488,40 +6408,20 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // Try cache lookup for early bailout when dimensions already computed
     // =========================================================================
     DomElement* dom_elem = elmt->is_element() ? elmt->as_element() : nullptr;
-    radiant::LayoutCache* cache = dom_elem ? dom_elem->layout_cache : nullptr;
-
-    // Build known dimensions from current constraints
-    radiant::KnownDimensions known_dims = radiant::known_dimensions_none();
-    if (block->blk && block->blk->given_width > 0) {
-        known_dims.width = block->blk->given_width;
-        known_dims.has_width = true;
-    }
-    if (block->blk && block->blk->given_height > 0) {
-        known_dims.height = block->blk->given_height;
-        known_dims.has_height = true;
-    }
+    radiant::KnownDimensions known_dims = radiant::layout_known_dimensions_from_block(block);
 
     // Try cache lookup
-    if (cache) {
-        radiant::SizeF cached_size;
-        if (radiant::layout_cache_get(cache, known_dims, lycon->available_space,
-                                       lycon->run_mode, &cached_size)) {
-            // Cache hit! Use cached dimensions
-            block->width = cached_size.width;
-            block->height = cached_size.height;
-            g_layout_cache_hits++;
-            log_info("%s BLOCK CACHE HIT: element=%s, size=(%.1f x %.1f), mode=%d", elmt->source_loc(),
-                     elmt->node_name(), cached_size.width, cached_size.height, (int)lycon->run_mode); // INT_CAST_OK: enum for log
-            // Restore parent context and return early
-            lycon->block = pa_block;  lycon->font = pa_font;  lycon->line = pa_line;
-            log_leave();
-            auto t_block_end = high_resolution_clock::now();
-            g_block_layout_time += duration<double, std::milli>(t_block_end - t_block_start).count();
-            g_block_layout_count++;
-            return;
-        }
-        g_layout_cache_misses++;
-        log_debug("BLOCK CACHE MISS: element=%s, mode=%d", elmt->source_loc(), (int)lycon->run_mode); // INT_CAST_OK: enum for log
+    radiant::SizeF cached_size;
+    if (radiant::layout_pass_cache_get(lycon, dom_elem, known_dims, &cached_size, "BLOCK")) {
+        block->width = cached_size.width;
+        block->height = cached_size.height;
+        // Restore parent context and return early
+        lycon->block = pa_block;  lycon->font = pa_font;  lycon->line = pa_line;
+        log_leave();
+        auto t_block_end = high_resolution_clock::now();
+        g_block_layout_time += duration<double, std::milli>(t_block_end - t_block_start).count();
+        g_block_layout_count++;
+        return;
     }
 
     // Early bailout for ComputeSize mode when both dimensions are known
@@ -7819,14 +7719,8 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // =========================================================================
     // CACHE STORE: Save computed dimensions for future lookups
     // =========================================================================
-    if (cache) {
-        radiant::SizeF result = radiant::size_f(block->width, block->height);
-        radiant::layout_cache_store(cache, known_dims, lycon->available_space,
-                                    lycon->run_mode, result);
-        g_layout_cache_stores++;
-        log_debug("%s BLOCK CACHE STORE: element=%s, size=(%.1f x %.1f), mode=%d", elmt->source_loc(),
-                  elmt->node_name(), block->width, block->height, (int)lycon->run_mode); // INT_CAST_OK: enum for log
-    }
+    radiant::SizeF result = radiant::size_f(block->width, block->height);
+    radiant::layout_pass_cache_store(lycon, dom_elem, known_dims, result, "BLOCK");
 
     log_leave();
 

@@ -13,12 +13,8 @@
  * - Provides coordinate conversion between OriginZero and matrix indices
  * - Supports collision detection for auto-placement algorithm
  *
- * TODO: std::* Migration Plan (Phase 5+)
- * - std::vector<CellOccupancyState> data_ → Fixed-size array with dynamic expansion
- *   or custom DynamicArray<T> implementation using lib/arraylist.h patterns
- * - std::move → Manual memory management with mem_alloc/mem_free
- * - Requires careful design due to 2D matrix dynamic sizing requirements
- * - Consider max grid size limits (e.g., 1000x1000) for fixed allocation
+ * Uses tracked manual storage so auto-placement stays consistent with
+ * Radiant's C+ allocation style.
  */
 
 #ifdef __cplusplus
@@ -32,8 +28,7 @@
 #endif
 
 #include "grid_types.hpp"
-#include <vector>
-#include <algorithm>
+#include "../lib/mem.h"
 
 namespace radiant {
 namespace grid {
@@ -57,8 +52,11 @@ public:
         , rows_(rows)
         , row_count_(rows.len())
         , col_count_(columns.len())
-        , data_(row_count_ * col_count_, CellOccupancyState::Unoccupied)
-    {}
+        , data_(nullptr)
+        , data_count_(0)
+    {
+        allocate_cells(row_count_ * col_count_);
+    }
 
     /**
      * Default constructor - empty grid
@@ -68,8 +66,19 @@ public:
         , rows_()
         , row_count_(0)
         , col_count_(0)
-        , data_()
+        , data_(nullptr)
+        , data_count_(0)
     {}
+
+    ~CellOccupancyMatrix() {
+        if (data_) {
+            mem_free(data_);
+            data_ = nullptr;
+        }
+    }
+
+    CellOccupancyMatrix(const CellOccupancyMatrix&) = delete;
+    CellOccupancyMatrix& operator=(const CellOccupancyMatrix&) = delete;
 
     // --- Accessors ---
 
@@ -95,6 +104,7 @@ public:
         if (row >= row_count_ || col >= col_count_) {
             return CellOccupancyState::Unoccupied;
         }
+        if (!data_) return CellOccupancyState::Unoccupied;
         return data_[row * col_count_ + col];
     }
 
@@ -103,7 +113,7 @@ public:
      * Silently ignores if out of bounds
      */
     void set(size_t row, size_t col, CellOccupancyState state) {
-        if (row < row_count_ && col < col_count_) {
+        if (data_ && row < row_count_ && col < col_count_) {
             data_[row * col_count_ + col] = state;
         }
     }
@@ -253,6 +263,7 @@ public:
         for (int16_t r = row_start; r < row_end; ++r) {
             for (int16_t c = col_start; c < col_end; ++c) {
                 if (r >= 0 && c >= 0 &&
+                    data_ &&
                     static_cast<size_t>(r) < row_count_ &&
                     static_cast<size_t>(c) < col_count_) {
                     if (data_[r * col_count_ + c] != CellOccupancyState::Unoccupied) {
@@ -269,6 +280,7 @@ public:
      */
     bool row_is_occupied(size_t row_index) const {
         if (row_index >= row_count_) return false;
+        if (!data_) return false;
 
         for (size_t c = 0; c < col_count_; ++c) {
             if (data_[row_index * col_count_ + c] != CellOccupancyState::Unoccupied) {
@@ -283,6 +295,7 @@ public:
      */
     bool column_is_occupied(size_t col_index) const {
         if (col_index >= col_count_) return false;
+        if (!data_) return false;
 
         for (size_t r = 0; r < row_count_; ++r) {
             if (data_[r * col_count_ + col_index] != CellOccupancyState::Unoccupied) {
@@ -306,6 +319,7 @@ public:
         CellOccupancyState kind,
         OriginZeroLine& out_result
     ) const {
+        if (!data_) return false;
         const TrackCounts& counts = track_counts(other_axis(track_type));
         int16_t track_index = counts.oz_line_to_next_track(start_at);
 
@@ -370,19 +384,30 @@ private:
         }
 
         // Create new data array
-        std::vector<CellOccupancyState> new_data(new_row_count * new_col_count, CellOccupancyState::Unoccupied);
+        size_t new_count = new_row_count * new_col_count;
+        CellOccupancyState* new_data = (CellOccupancyState*)mem_calloc(
+            new_count, sizeof(CellOccupancyState), MEM_CAT_LAYOUT);
+        if (!new_data && new_count > 0) {
+            return;
+        }
 
         // Copy existing data to new position (offset by negative expansion)
         for (size_t r = 0; r < old_row_count; ++r) {
             for (size_t c = 0; c < old_col_count; ++c) {
                 size_t new_r = r + req_negative_rows;
                 size_t new_c = c + req_negative_cols;
-                new_data[new_r * new_col_count + new_c] = data_[r * old_col_count + c];
+                if (data_) {
+                    new_data[new_r * new_col_count + new_c] = data_[r * old_col_count + c];
+                }
             }
         }
 
         // Update state
-        data_ = std::move(new_data);
+        if (data_) {
+            mem_free(data_);
+        }
+        data_ = new_data;
+        data_count_ = new_count;
         row_count_ = new_row_count;
         col_count_ = new_col_count;
 
@@ -397,7 +422,20 @@ private:
     TrackCounts rows_;
     size_t row_count_;
     size_t col_count_;
-    std::vector<CellOccupancyState> data_;
+    CellOccupancyState* data_;
+    size_t data_count_;
+
+    void allocate_cells(size_t count) {
+        data_count_ = count;
+        data_ = nullptr;
+        if (count == 0) return;
+        data_ = (CellOccupancyState*)mem_calloc(count, sizeof(CellOccupancyState), MEM_CAT_LAYOUT);
+        if (!data_) {
+            data_count_ = 0;
+            row_count_ = 0;
+            col_count_ = 0;
+        }
+    }
 };
 
 } // namespace grid

@@ -7,6 +7,7 @@
 #include "intrinsic_sizing.hpp"
 #include "layout_mode.hpp"
 #include "layout_cache.hpp"
+#include "layout_pass.hpp"
 #include "grid_baseline.hpp"
 #include "../lib/tagged.hpp"
 
@@ -44,35 +45,15 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
     // This avoids redundant layout for repeated measurements with same inputs
     // =========================================================================
     DomElement* dom_elem = lam::dom_require<DOM_NODE_ELEMENT>(grid_container);
-    radiant::LayoutCache* cache = dom_elem ? dom_elem->layout_cache : nullptr;
-
-    // Build known dimensions from current constraints
-    radiant::KnownDimensions known_dims = radiant::known_dimensions_none();
-    if (lycon->block.given_width >= 0) {
-        known_dims.width = lycon->block.given_width;
-        known_dims.has_width = true;
-    }
-    if (lycon->block.given_height >= 0) {
-        known_dims.height = lycon->block.given_height;
-        known_dims.has_height = true;
-    }
+    radiant::KnownDimensions known_dims = radiant::layout_known_dimensions_from_context(lycon);
 
     // Try cache lookup
-    if (cache) {
-        radiant::SizeF cached_size;
-        if (radiant::layout_cache_get(cache, known_dims, lycon->available_space,
-                                       lycon->run_mode, &cached_size)) {
-            // Cache hit! Use cached dimensions
-            grid_container->width = cached_size.width;
-            grid_container->height = cached_size.height;
-            g_layout_cache_hits++;
-            log_info("GRID CACHE HIT: container=%p, size=(%.1f x %.1f), mode=%d",
-                     grid_container, cached_size.width, cached_size.height, (int)lycon->run_mode); // INT_CAST_OK: enum for log
-            log_leave();
-            return;
-        }
-        g_layout_cache_misses++;
-        log_debug("GRID CACHE MISS: container=%p, mode=%d", grid_container, (int)lycon->run_mode); // INT_CAST_OK: enum for log
+    radiant::SizeF cached_size;
+    if (radiant::layout_pass_cache_get(lycon, dom_elem, known_dims, &cached_size, "GRID")) {
+        grid_container->width = cached_size.width;
+        grid_container->height = cached_size.height;
+        log_leave();
+        return;
     }
 
     // =========================================================================
@@ -447,24 +428,8 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
     // =========================================================================
     // CACHE STORE: Save computed result for future lookups
     // =========================================================================
-    if (cache || (dom_elem && lycon->pool)) {
-        // Lazy allocate cache if needed
-        if (!cache && dom_elem) {
-            cache = (radiant::LayoutCache*)pool_calloc(lycon->pool, sizeof(radiant::LayoutCache));
-            if (cache) {
-                radiant::layout_cache_init(cache);
-                dom_elem->layout_cache = cache;
-            }
-        }
-        if (cache) {
-            radiant::SizeF result = radiant::size_f(grid_container->width, grid_container->height);
-            radiant::layout_cache_store(cache, known_dims, lycon->available_space,
-                                        lycon->run_mode, result);
-            g_layout_cache_stores++;
-            log_debug("GRID CACHE STORE: container=%p, size=(%.1f x %.1f), mode=%d",
-                      grid_container, grid_container->width, grid_container->height, (int)lycon->run_mode); // INT_CAST_OK: enum for log
-        }
-    }
+    radiant::SizeF result = radiant::size_f(grid_container->width, grid_container->height);
+    radiant::layout_pass_cache_store(lycon, dom_elem, known_dims, result, "GRID");
 
     // Cleanup and restore parent context
     cleanup_grid_container(lycon);
@@ -490,15 +455,7 @@ int resolve_grid_item_styles(LayoutContext* lycon, ViewBlock* grid_container) {
     // (Same pattern as flex layout — see layout_flex.cpp and CSS §8.3.)
     // For an indefinite container (content_width == 0), percentages resolve to 0 (= auto),
     // which is correct per CSS Grid spec §7.2.1.
-    float container_content_width = (float)grid_container->width;
-    if (grid_container->bound) {
-        container_content_width -= grid_container->bound->padding.left + grid_container->bound->padding.right;
-        if (grid_container->bound->border) {
-            container_content_width -= grid_container->bound->border->width.left +
-                                       grid_container->bound->border->width.right;
-        }
-    }
-    if (container_content_width < 0) container_content_width = 0;
+    float container_content_width = layout_content_width_from_border_box(grid_container, grid_container->width);
 
     // Temporarily override lycon->block.parent so that percentage resolution
     // inside dom_node_resolve_style uses the grid container as the containing block,
@@ -522,9 +479,8 @@ int resolve_grid_item_styles(LayoutContext* lycon, ViewBlock* grid_container) {
             init_grid_item_view(lycon, child);
 
             // Re-check absolute positioning AFTER style resolution
-            bool is_absolute = elem->position &&
-                              (elem->position->position == CSS_VALUE_ABSOLUTE ||
-                               elem->position->position == CSS_VALUE_FIXED);
+            ViewBlock* elem_block = lam::view_as_block(elem);
+            bool is_absolute = layout_view_is_abs_or_fixed(elem_block);
 
             if (!is_absolute) {
                 // check display:none AFTER style resolution (display may be set via cascade)
@@ -630,9 +586,7 @@ void measure_grid_items(LayoutContext* lycon, GridContainerLayout* grid_layout) 
             ViewBlock* item = lam::view_require_block(child);
 
             // Skip absolute positioned and display:none items
-            bool is_absolute = item->position &&
-                              (item->position->position == CSS_VALUE_ABSOLUTE ||
-                               item->position->position == CSS_VALUE_FIXED);
+            bool is_absolute = layout_view_is_abs_or_fixed(item);
             bool is_display_none = (item->display.outer == CSS_VALUE_NONE);
 
             if (!is_absolute && !is_display_none) {
@@ -835,32 +789,16 @@ static void layout_grid_item_final_content_multipass(LayoutContext* lycon, ViewB
     }
 
     // Calculate content area dimensions accounting for box model
-    int content_width = grid_item->width;
-    int content_height = grid_item->height;
-    int content_x_offset = 0;
-    int content_y_offset = 0;
+    float content_width = layout_content_width_from_border_box(grid_item, grid_item->width);
+    float content_height = layout_content_height_from_border_box(grid_item, grid_item->height);
+    float content_x_offset = 0;
+    float content_y_offset = 0;
 
     if (grid_item->bound) {
-        // Account for padding
-        content_width -= (grid_item->bound->padding.left + grid_item->bound->padding.right);
-        content_height -= (grid_item->bound->padding.top + grid_item->bound->padding.bottom);
-        content_x_offset = grid_item->bound->padding.left;
-        content_y_offset = grid_item->bound->padding.top;
-
-        // Account for border
-        if (grid_item->bound->border) {
-            content_width -= (grid_item->bound->border->width.left +
-                             grid_item->bound->border->width.right);
-            content_height -= (grid_item->bound->border->width.top +
-                              grid_item->bound->border->width.bottom);
-            content_x_offset += grid_item->bound->border->width.left;
-            content_y_offset += grid_item->bound->border->width.top;
-        }
+        BoxMetrics box = layout_box_metrics(grid_item);
+        content_x_offset = box.padding.left + box.border.left;
+        content_y_offset = box.padding.top + box.border.top;
     }
-
-    // Ensure non-negative dimensions
-    if (content_width < 0) content_width = 0;
-    if (content_height < 0) content_height = 0;
 
     // Set up block formatting context for nested content
     lycon->block.content_width = content_width;
@@ -1103,13 +1041,9 @@ void layout_grid_absolute_children(LayoutContext* lycon, ViewBlock* container) {
 
     // For grid absolute positioning, the static position should be at the
     // padding box edge (border offset), not the content box edge (border + padding).
-    // Calculate border offset for use in static position correction.
-    float border_offset_x = 0, border_offset_y = 0;
-    if (container->bound && container->bound->border) {
-        border_offset_x = container->bound->border->width.left;
-        border_offset_y = container->bound->border->width.top;
-    }
-    log_debug("Grid absolute: border_offset=(%f, %f)", border_offset_x, border_offset_y);
+    LayoutContainingBlock cb = layout_containing_block_for_view(container);
+    log_debug("Grid absolute: padding_offset=(%f, %f), padding_size=(%f, %f)",
+              cb.padding_x, cb.padding_y, cb.padding_width, cb.padding_height);
 
     DomNode* child = container->first_child;
     int child_count = 0;
@@ -1123,9 +1057,7 @@ void layout_grid_absolute_children(LayoutContext* lycon, ViewBlock* container) {
                       child_block->position ? child_block->position->position : -1);
 
             // Check if this child is absolute or fixed positioned
-            if (child_block->position &&
-                (child_block->position->position == CSS_VALUE_ABSOLUTE ||
-                 child_block->position->position == CSS_VALUE_FIXED)) {
+            if (layout_view_is_abs_or_fixed(child_block)) {
 
                 log_debug("Found absolute positioned child: %s", child->node_name());
 
@@ -1145,8 +1077,8 @@ void layout_grid_absolute_children(LayoutContext* lycon, ViewBlock* container) {
                 // The pa_line.left and pa_block.advance_y include padding, so we need
                 // to subtract padding and only keep border offset for static position.
                 // This ensures absolute items with auto insets are placed at the padding edge.
-                pa_line.left = border_offset_x;
-                pa_block.advance_y = border_offset_y;
+                pa_line.left = cb.padding_x;
+                pa_block.advance_y = cb.padding_y;
 
                 // Set up lycon->block dimensions from the child's CSS
                 if (child_block->blk) {
@@ -1255,10 +1187,8 @@ void layout_grid_absolute_children(LayoutContext* lycon, ViewBlock* container) {
                     bool no_horiz = !pos->has_left && !pos->has_right;
                     bool no_vert  = !pos->has_top  && !pos->has_bottom;
 
-                    float right_border  = (container->bound && container->bound->border) ? container->bound->border->width.right  : 0;
-                    float bottom_border = (container->bound && container->bound->border) ? container->bound->border->width.bottom : 0;
-                    float pb_w = container->width  - border_offset_x - right_border;
-                    float pb_h = container->height - border_offset_y - bottom_border;
+                    float pb_w = cb.padding_width;
+                    float pb_h = cb.padding_height;
                     float ml = child_block->bound ? child_block->bound->margin.left   : 0;
                     float mr = child_block->bound ? child_block->bound->margin.right  : 0;
                     float mt = child_block->bound ? child_block->bound->margin.top    : 0;

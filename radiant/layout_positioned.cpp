@@ -225,37 +225,17 @@ void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
     // (during child layout), they are still 0. Instead, derive from the parent's
     // border-box width/height minus padding and border.
     float cb_width = 0, cb_height = 0;
-    ViewElement* cb_parent = parent;
     // CSS 2.1 §9.2.1.1: For block children inside inline spans (block-in-inline),
     // the containing block is the nearest block-level ancestor, not the inline span.
-    while (cb_parent && !cb_parent->is_block()) {
-        cb_parent = cb_parent->parent_view();
-    }
-    if (cb_parent && cb_parent->is_block()) {
-        ViewBlock* parent_block = lam::view_require_block(cb_parent);
-        // Compute content-box width from border-box width
-        float pad_border_h = 0;
-        if (parent_block->bound) {
-            pad_border_h = parent_block->bound->padding.left + parent_block->bound->padding.right;
-            if (parent_block->bound->border)
-                pad_border_h += parent_block->bound->border->width.left + parent_block->bound->border->width.right;
-        }
-        cb_width = parent_block->width - pad_border_h;
+    ViewBlock* parent_block = layout_nearest_block_ancestor(parent);
+    if (parent_block) {
+        LayoutContainingBlock cb = layout_containing_block_for_view(parent_block);
+        cb_width = cb.content_width;
 
         // CSS 2.1 §10.5: If containing block height is auto, percentage top/bottom = 0
         // Only use parent height if it has an explicit (non-auto) height
-        bool parent_has_definite_height = false;
-        if (parent_block->blk && parent_block->blk->given_height >= 0) {
-            parent_has_definite_height = true;
-        }
-        if (parent_has_definite_height) {
-            float pad_border_v = 0;
-            if (parent_block->bound) {
-                pad_border_v = parent_block->bound->padding.top + parent_block->bound->padding.bottom;
-                if (parent_block->bound->border)
-                    pad_border_v += parent_block->bound->border->width.top + parent_block->bound->border->width.bottom;
-            }
-            cb_height = parent_block->height - pad_border_v;
+        if (cb.has_definite_height) {
+            cb_height = cb.content_height;
         }
     }
 
@@ -681,8 +661,13 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     BlockContext* pa_block, Linebox* pa_line) {
 
     // get containing block dimensions
-    float cb_x = containing_block->x, cb_y = containing_block->y;
-    float cb_width = containing_block->width, cb_height = containing_block->height;
+    LayoutContainingBlock cb = layout_absolute_containing_block(lycon, containing_block);
+    float cb_x = containing_block->x + cb.padding_x;
+    float cb_y = containing_block->y + cb.padding_y;
+    float cb_width = cb.padding_width;
+    float cb_height = cb.padding_height;
+    float border_offset_x = cb.padding_x;
+    float border_offset_y = cb.padding_y;
 
     // CSS 2.1 Section 10.1: For absolutely positioned elements, if the containing block is
     // the initial containing block (ICB - i.e., the root element with no positioned ancestors),
@@ -690,34 +675,13 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     // It is NOT the root element's padding box — the root element's borders must not be subtracted.
     bool is_icb = (containing_block->parent_view() == nullptr);
     if (is_icb && lycon->ui_context) {
-        // ICB = viewport: origin at (0,0), size = viewport dimensions
         cb_x = 0;
         cb_y = 0;
-        if (lycon->ui_context->viewport_width > 0) {
-            cb_width = lycon->ui_context->viewport_width * lycon->ui_context->pixel_ratio;
-        }
-        if (lycon->ui_context->viewport_height > 0) {
-            cb_height = lycon->ui_context->viewport_height * lycon->ui_context->pixel_ratio;
-        }
+        border_offset_x = 0;
+        border_offset_y = 0;
         log_debug("[ABS POS] Using viewport as ICB: (0, 0) size (%.1f, %.1f)", cb_width, cb_height);
     }
 
-    // Calculate border offset - the absolute element is positioned relative to padding box,
-    // but block->x/y are stored relative to containing block's origin (border box)
-    float border_offset_x = 0, border_offset_y = 0;
-
-    // For positioned ancestors (not ICB), use the padding box dimensions
-    // For ICB, skip border adjustment — the viewport has no borders
-    if (!is_icb && containing_block->bound) {
-        if (containing_block->bound->border) {
-            border_offset_x = containing_block->bound->border->width.left;
-            border_offset_y = containing_block->bound->border->width.top;
-            cb_x += border_offset_x;
-            cb_y += border_offset_y;
-            cb_width -= (containing_block->bound->border->width.left + containing_block->bound->border->width.right);
-            cb_height -= (containing_block->bound->border->width.top + containing_block->bound->border->width.bottom);
-        }
-    }
     log_debug("containing block padding box: (%.0f, %.0f) size (%.0f, %.0f), border_offset: (%f, %f)",
               cb_x, cb_y, cb_width, cb_height, border_offset_x, border_offset_y);
 
@@ -742,16 +706,7 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     }
 
     // re-resolve percentage width/height against the actual containing block
-    if (block->blk && !isnan(block->blk->given_width_percent)) {
-        lycon->block.given_width = block->blk->given_width_percent * cb_width / 100.0f;
-        block->blk->given_width = lycon->block.given_width;
-        log_debug("[ABS POS] re-resolved width: %.1f%% of %.1f = %.1f", block->blk->given_width_percent, cb_width, lycon->block.given_width);
-    }
-    if (block->blk && !isnan(block->blk->given_height_percent)) {
-        lycon->block.given_height = block->blk->given_height_percent * cb_height / 100.0f;
-        block->blk->given_height = lycon->block.given_height;
-        log_debug("[ABS POS] re-resolved height: %.1f%% of %.1f = %.1f", block->blk->given_height_percent, cb_height, lycon->block.given_height);
-    }
+    layout_resolve_percent_size_for_child(lycon, block, cb, false, "abspos child");
 
     // CSS 2.1 §10.3.8: For absolutely positioned replaced elements with
     // 'width: auto', use the intrinsic width. §10.6.5: Same for height.
@@ -1193,10 +1148,8 @@ void re_resolve_abs_children_vertical(ViewBlock* containing_block) {
     if (!containing_block->position || !containing_block->position->first_abs_child) return;
 
     // Compute containing block's padding box height (CSS 2.1 §10.1)
-    float cb_height = containing_block->height;
-    if (containing_block->bound && containing_block->bound->border) {
-        cb_height -= (containing_block->bound->border->width.top + containing_block->bound->border->width.bottom);
-    }
+    LayoutContainingBlock cb = layout_containing_block_for_view(containing_block);
+    float cb_height = cb.padding_height;
     if (cb_height <= 0) return;
 
     ViewBlock* child = containing_block->position->first_abs_child;
@@ -1231,11 +1184,7 @@ void re_resolve_abs_children_vertical(ViewBlock* containing_block) {
             float old_top = child->position->top;
             child->position->top = child->position->top_percent * cb_height / 100.0f;
             if (child->position->top != old_top) {
-                float border_offset_y = 0;
-                if (containing_block->bound && containing_block->bound->border) {
-                    border_offset_y = containing_block->bound->border->width.top;
-                }
-                child->y = border_offset_y + child->position->top + (child->bound ? child->bound->margin.top : 0);
+                child->y = cb.padding_y + child->position->top + (child->bound ? child->bound->margin.top : 0);
                 changed = true;
                 log_debug("[ABS RE-RESOLVE] top for %s: %.1f%% of %.1f = %.1f, y=%.1f",
                     child->node_name(), child->position->top_percent, cb_height, child->position->top, child->y);
@@ -1252,11 +1201,7 @@ void re_resolve_abs_children_vertical(ViewBlock* containing_block) {
         // containing block is finalized, so cb_height changed for ALL children,
         // not just those with percentage values.
         if (child->position && child->position->has_bottom && !child->position->has_top) {
-            float border_offset_y = 0;
-            if (containing_block->bound && containing_block->bound->border) {
-                border_offset_y = containing_block->bound->border->width.top;
-            }
-            child->y = border_offset_y + cb_height - child->position->bottom
+            child->y = cb.padding_y + cb_height - child->position->bottom
                 - (child->bound ? child->bound->margin.bottom : 0) - child->height;
             log_debug("[ABS RE-RESOLVE] bottom-positioned y for %s: y=%.1f", child->node_name(), child->y);
         }
