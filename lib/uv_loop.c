@@ -10,14 +10,27 @@
 
 static uv_loop_t *g_loop = NULL;
 static uv_prepare_t g_prepare;
+static uv_check_t g_check;
 static void (*g_microtask_drain)(void) = NULL;
 static int g_prepare_active = 0;
+static int g_check_active = 0;
 
-static void prepare_cb(uv_prepare_t *handle) {
-    // drain microtasks before each event loop iteration
+static void drain_task_checkpoint(void) {
     if (g_microtask_drain) {
         g_microtask_drain();
     }
+}
+
+static void prepare_cb(uv_prepare_t *handle) {
+    (void)handle;
+    // drain tasks before libuv enters poll
+    drain_task_checkpoint();
+}
+
+static void check_cb(uv_check_t *handle) {
+    (void)handle;
+    // drain tasks after poll callbacks complete
+    drain_task_checkpoint();
 }
 
 uv_loop_t* lambda_uv_loop(void) {
@@ -41,12 +54,19 @@ int lambda_uv_init(void) {
         return r;
     }
 
-    // install prepare handle for microtask draining
+    // install prepare handle for JS task draining
     uv_prepare_init(g_loop, &g_prepare);
     uv_prepare_start(&g_prepare, prepare_cb);
     // unref so the prepare handle alone doesn't keep the loop alive
     uv_unref((uv_handle_t *)&g_prepare);
     g_prepare_active = 1;
+
+    // install check handle so callbacks that resolve promises during poll get
+    // a same-iteration JS task checkpoint.
+    uv_check_init(g_loop, &g_check);
+    uv_check_start(&g_check, check_cb);
+    uv_unref((uv_handle_t *)&g_check);
+    g_check_active = 1;
 
     log_debug("uv_loop: initialized");
     return 0;
@@ -73,6 +93,10 @@ void lambda_uv_cleanup(void) {
     if (g_prepare_active) {
         uv_prepare_stop(&g_prepare);
         g_prepare_active = 0;
+    }
+    if (g_check_active) {
+        uv_check_stop(&g_check);
+        g_check_active = 0;
     }
 
     // close all remaining handles

@@ -6341,6 +6341,15 @@ static Item js_invoke_fn(JsFunction* fn, Item* args, int arg_count) {
             js_clearImmediate(a0);
             return make_js_undefined();
         }
+        if (nl == 21 && strncmp(n, "requestAnimationFrame", 21) == 0) {
+            extern Item js_requestAnimationFrame(Item callback);
+            return js_requestAnimationFrame(a0);
+        }
+        if (nl == 20 && strncmp(n, "cancelAnimationFrame", 20) == 0) {
+            extern void js_cancelAnimationFrame(Item id);
+            js_cancelAnimationFrame(a0);
+            return make_js_undefined();
+        }
         if (nl == 14 && strncmp(n, "queueMicrotask", 14) == 0) {
             extern void js_microtask_enqueue(Item callback);
             js_microtask_enqueue(a0);

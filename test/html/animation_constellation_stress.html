@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Radiant Constellation Animation Stress</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            margin: 0;
+            min-height: 100%;
+            background: #0a0d14;
+            color: #e6edf3;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+
+        body {
+            padding: 24px;
+        }
+
+        .stage {
+            position: relative;
+            width: 100%;
+            max-width: 1120px;
+            height: 720px;
+            margin: 0 auto;
+            overflow: hidden;
+            background: #111827;
+            border: 1px solid #2f3b52;
+        }
+
+        #starfield {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background: #0b1220;
+            z-index: 1;
+            pointer-events: none;
+        }
+
+        .title {
+            position: absolute;
+            left: 28px;
+            top: 24px;
+            z-index: 4;
+            font-size: 22px;
+            font-weight: 700;
+            letter-spacing: 0;
+        }
+
+        .subtitle {
+            position: absolute;
+            left: 28px;
+            top: 58px;
+            z-index: 4;
+            font-size: 13px;
+            color: #9fb0c6;
+        }
+
+        #field {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2;
+            pointer-events: none;
+        }
+
+        #mouse-shield {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 6;
+            background: #000;
+            opacity: 0.001;
+            cursor: default;
+        }
+
+        .particle {
+            position: absolute;
+            animation-iteration-count: infinite;
+            animation-direction: alternate;
+            animation-fill-mode: both;
+            will-change: transform, opacity;
+            pointer-events: none;
+        }
+
+        .tiny {
+            width: 3px;
+            height: 3px;
+        }
+
+        .small {
+            width: 5px;
+            height: 5px;
+        }
+
+        .medium {
+            width: 8px;
+            height: 8px;
+        }
+
+        .large {
+            width: 12px;
+            height: 12px;
+        }
+
+        .wide {
+            width: 18px;
+            height: 5px;
+        }
+
+        .tall {
+            width: 4px;
+            height: 22px;
+        }
+
+        .chunk {
+            width: 24px;
+            height: 10px;
+        }
+
+        .dot {
+            border-radius: 50%;
+        }
+
+        .soft {
+            border-radius: 6px;
+        }
+
+        .tile {
+            border-radius: 2px;
+        }
+
+        .capsule {
+            border-radius: 999px;
+        }
+
+        .shard {
+            border-radius: 1px 8px 1px 8px;
+        }
+
+        .diamond {
+            border-radius: 2px;
+        }
+
+        .pebble {
+            border-radius: 50% 8px 50% 8px;
+        }
+
+        .lens {
+            border-radius: 50%;
+        }
+
+        .plate {
+            border-radius: 14px 2px 14px 2px;
+        }
+
+        .needle {
+            border-radius: 999px;
+        }
+
+        .moon {
+            border-radius: 50% 50% 8px 50%;
+        }
+
+        .solid-fill {
+            background: #7dd3fc;
+        }
+
+        .outline-fill {
+            background: transparent;
+            border: 1px solid #e0f2fe;
+        }
+
+        .dash-fill {
+            background: transparent;
+            border: 1px dashed #fde68a;
+        }
+
+        .dot-fill {
+            background: #0b1220;
+            border: 1px dotted #86efac;
+        }
+
+        .double-fill {
+            background: transparent;
+            border: 3px double #f0abfc;
+        }
+
+        .stripe-fill {
+            background-color: #1e293b;
+            background: repeating-linear-gradient(45deg, #7dd3fc 0 3px, #111827 3px 6px);
+            border: 1px solid #bae6fd;
+        }
+
+        .band-fill {
+            background-color: #312e81;
+            background: repeating-linear-gradient(90deg, #c4b5fd 0 4px, #111827 4px 8px);
+            border: 2px solid #ddd6fe;
+        }
+
+        .hollow-fill {
+            background: #0b1220;
+            border: 2px solid #fca5a5;
+        }
+
+        .glow-fill {
+            background: #86efac;
+            border: 1px solid #ecfeff;
+            box-shadow: 0 0 10px #7dd3fc;
+        }
+
+        .thick-fill {
+            background: transparent;
+            border: 3px solid #f8fafc;
+        }
+
+        .a {
+            animation-name: drift-a;
+            animation-timing-function: ease-in-out;
+        }
+
+        .b {
+            animation-name: drift-b;
+            animation-timing-function: ease;
+        }
+
+        .c {
+            animation-name: drift-c;
+            animation-timing-function: linear;
+        }
+
+        .d {
+            animation-name: drift-d;
+            animation-timing-function: ease-out;
+        }
+
+        .e {
+            animation-name: pulse-ring;
+            animation-timing-function: ease-in-out;
+        }
+
+        .f {
+            animation-name: orbit-f;
+            animation-timing-function: ease-in-out;
+        }
+
+        .g {
+            animation-name: scatter-g;
+            animation-timing-function: ease-in;
+        }
+
+        .h {
+            animation-name: flip-h;
+            animation-timing-function: linear;
+        }
+
+        .i {
+            animation-name: slingshot-i;
+            animation-timing-function: ease-in-out;
+        }
+
+        .ring {
+            position: absolute;
+            border: 1px solid #6ee7f9;
+            border-radius: 50%;
+            background: transparent;
+            opacity: 0.22;
+            animation-name: pulse-ring;
+            animation-duration: 5.5s;
+            animation-iteration-count: infinite;
+            animation-direction: alternate;
+            pointer-events: none;
+        }
+
+        .comet {
+            position: absolute;
+            width: 42px;
+            height: 3px;
+            background: #f8fafc;
+            opacity: 0.76;
+            animation-name: comet-sweep;
+            animation-duration: 8s;
+            animation-iteration-count: infinite;
+            animation-timing-function: linear;
+            pointer-events: none;
+        }
+
+        .giant {
+            position: absolute;
+            opacity: 0.2;
+            animation-iteration-count: infinite;
+            animation-direction: alternate;
+            animation-fill-mode: both;
+            pointer-events: none;
+        }
+
+        .giant-disc {
+            width: 96px;
+            height: 96px;
+            border-radius: 50%;
+            animation-name: giant-orbit;
+            animation-duration: 7.8s;
+            animation-timing-function: ease-in-out;
+        }
+
+        .giant-blade {
+            width: 150px;
+            height: 18px;
+            border-radius: 999px;
+            animation-name: giant-swing;
+            animation-duration: 6.2s;
+            animation-timing-function: ease-in-out;
+        }
+
+        .giant-panel {
+            width: 76px;
+            height: 120px;
+            border-radius: 10px;
+            animation-name: giant-breathe;
+            animation-duration: 9s;
+            animation-timing-function: ease;
+        }
+
+        .giant-lens {
+            width: 180px;
+            height: 58px;
+            border-radius: 50%;
+            animation-name: giant-swing;
+            animation-duration: 7.4s;
+            animation-timing-function: ease-in-out;
+        }
+
+        .giant-prism {
+            width: 92px;
+            height: 92px;
+            border-radius: 3px 32px 3px 32px;
+            animation-name: giant-orbit;
+            animation-duration: 8.6s;
+            animation-timing-function: ease;
+        }
+
+        @keyframes drift-a {
+            0% { transform: translate(-18px, 4px) scale(0.8); opacity: 0.28; }
+            50% { transform: translate(10px, -22px) scale(1.2); opacity: 0.95; }
+            100% { transform: translate(24px, 18px) scale(0.9); opacity: 0.42; }
+        }
+
+        @keyframes drift-b {
+            0% { transform: translate(12px, -12px) scale(1.0); opacity: 0.38; }
+            100% { transform: translate(-28px, 24px) scale(1.45); opacity: 0.86; }
+        }
+
+        @keyframes drift-c {
+            0% { transform: translate(-10px, -8px) rotate(0deg); opacity: 0.32; }
+            100% { transform: translate(18px, 14px) rotate(360deg); opacity: 0.74; }
+        }
+
+        @keyframes drift-d {
+            0% { transform: translate(0, 20px) scale(0.65); opacity: 0.24; }
+            70% { transform: translate(-24px, -16px) scale(1.3); opacity: 0.92; }
+            100% { transform: translate(8px, -28px) scale(0.8); opacity: 0.45; }
+        }
+
+        @keyframes pulse-ring {
+            0% { transform: scale(0.8); opacity: 0.12; }
+            100% { transform: scale(1.18); opacity: 0.42; }
+        }
+
+        @keyframes comet-sweep {
+            0% { transform: translate(-90px, 0) rotate(-18deg); opacity: 0; }
+            8% { opacity: 0.85; }
+            45% { opacity: 0.35; }
+            100% { transform: translate(1180px, 390px) rotate(-18deg); opacity: 0; }
+        }
+
+        @keyframes orbit-f {
+            0% { transform: translate(-36px, -26px) rotate(0deg) scale(0.7); opacity: 0.22; }
+            50% { transform: translate(38px, 18px) rotate(180deg) scale(1.5); opacity: 0.9; }
+            100% { transform: translate(-8px, 34px) rotate(360deg) scale(0.95); opacity: 0.48; }
+        }
+
+        @keyframes scatter-g {
+            0% { transform: translate(42px, 8px) scale(1.6); opacity: 0.18; }
+            35% { transform: translate(-44px, -38px) scale(0.7); opacity: 0.96; }
+            100% { transform: translate(12px, 46px) scale(1.1); opacity: 0.34; }
+        }
+
+        @keyframes flip-h {
+            0% { transform: translate(-12px, 18px) rotate(0deg) scale(0.9); opacity: 0.3; }
+            100% { transform: translate(28px, -20px) rotate(540deg) scale(1.25); opacity: 0.82; }
+        }
+
+        @keyframes slingshot-i {
+            0% { transform: translate(-60px, 0) rotate(-20deg) scale(0.6); opacity: 0.15; }
+            25% { transform: translate(18px, -52px) rotate(35deg) scale(1.7); opacity: 0.98; }
+            100% { transform: translate(74px, 28px) rotate(120deg) scale(0.85); opacity: 0.4; }
+        }
+
+        @keyframes giant-orbit {
+            0% { transform: translate(-90px, -60px) scale(0.55); opacity: 0.08; }
+            50% { transform: translate(86px, 70px) scale(1.45); opacity: 0.32; }
+            100% { transform: translate(-40px, 116px) scale(0.75); opacity: 0.16; }
+        }
+
+        @keyframes giant-swing {
+            0% { transform: translate(-120px, 20px) rotate(-35deg) scale(0.7); opacity: 0.08; }
+            45% { transform: translate(96px, -80px) rotate(42deg) scale(1.35); opacity: 0.38; }
+            100% { transform: translate(170px, 72px) rotate(12deg) scale(0.95); opacity: 0.18; }
+        }
+
+        @keyframes giant-breathe {
+            0% { transform: translate(60px, -92px) rotate(0deg) scale(0.62); opacity: 0.1; }
+            60% { transform: translate(-110px, 84px) rotate(155deg) scale(1.28); opacity: 0.36; }
+            100% { transform: translate(36px, 112px) rotate(260deg) scale(0.8); opacity: 0.14; }
+        }
+    </style>
+</head>
+<body>
+    <div class="stage">
+        <canvas id="starfield" width="1120" height="720"></canvas>
+        <div id="field"></div>
+        <div class="title">Radiant Constellation Stress</div>
+        <div class="subtitle">700 animated DOM bodies, 24 rings, 10 comets, 14 giant movers, one canvas</div>
+        <div id="mouse-shield" aria-hidden="true"></div>
+    </div>
+
+    <script>
+        (function() {
+            var field = document.getElementById("field");
+            var palette = ["#7dd3fc", "#f0abfc", "#86efac", "#fde68a", "#fca5a5", "#c4b5fd"];
+            var motions = ["a", "b", "c", "d", "e", "f", "g", "h", "i"];
+            var sizes = ["tiny", "small", "medium", "large", "wide", "tall", "chunk"];
+            var shapes = ["dot", "soft", "tile", "capsule", "shard", "diamond", "pebble", "lens", "plate", "needle", "moon"];
+            var fills = ["solid-fill", "outline-fill", "dash-fill", "dot-fill", "double-fill", "stripe-fill", "band-fill", "hollow-fill", "glow-fill", "thick-fill"];
+            var strokeStyles = ["solid", "dashed", "dotted", "double"];
+            var width = 1120;
+            var height = 720;
+            var centerX = width / 2;
+            var centerY = height / 2;
+
+            for (var i = 0; i < 700; i++) {
+                var angle = i * 0.39996322973;
+                var band = i % motions.length;
+                var radius = 38 + (i % 140) * 2.35;
+                var wobble = Math.sin(i * 1.37) * 48 + Math.cos(i * 0.51) * 22;
+                var x = centerX + Math.cos(angle) * (radius + wobble);
+                var y = centerY + Math.sin(angle) * (radius * 0.62 + wobble * 0.42);
+
+                var particle = document.createElement("div");
+                var fill = fills[(i + Math.floor(i / 11)) % fills.length];
+                particle.className = "particle " +
+                    sizes[i % sizes.length] + " " +
+                    shapes[(i + Math.floor(i / 7)) % shapes.length] + " " +
+                    fill + " " +
+                    motions[band];
+                particle.style.left = Math.round(x) + "px";
+                particle.style.top = Math.round(y) + "px";
+                if (fill === "solid-fill" || fill === "glow-fill") {
+                    particle.style.background = palette[i % palette.length];
+                }
+                particle.style.borderColor = palette[(i + 3) % palette.length];
+                if (fill !== "solid-fill" && fill !== "glow-fill") {
+                    particle.style.borderStyle = strokeStyles[(i + band) % strokeStyles.length];
+                    particle.style.borderWidth = String(1 + (i % 3)) + "px";
+                }
+                particle.style.opacity = String(0.26 + (i % 9) * 0.065);
+                particle.style.animationDuration = String(1.8 + (i % 29) * 0.14) + "s";
+                particle.style.animationDelay = String((i % 53) * -0.085) + "s";
+                field.appendChild(particle);
+            }
+
+            for (var r = 0; r < 24; r++) {
+                var ring = document.createElement("div");
+                var s = 110 + r * 29;
+                ring.className = "ring";
+                ring.style.left = Math.round(centerX - s / 2) + "px";
+                ring.style.top = Math.round(centerY - s / 2) + "px";
+                ring.style.width = s + "px";
+                ring.style.height = s + "px";
+                ring.style.borderColor = palette[r % palette.length];
+                ring.style.borderStyle = strokeStyles[r % strokeStyles.length];
+                ring.style.borderWidth = String(1 + (r % 3)) + "px";
+                ring.style.animationDelay = String(r * -0.27) + "s";
+                ring.style.animationDuration = String(4.5 + (r % 6) * 0.35) + "s";
+                field.appendChild(ring);
+            }
+
+            for (var g = 0; g < 14; g++) {
+                var giant = document.createElement("div");
+                var giantKinds = ["giant-disc", "giant-blade", "giant-panel", "giant-lens", "giant-prism"];
+                var giantKind = giantKinds[g % giantKinds.length];
+                giant.className = "giant " + giantKind;
+                giant.style.left = Math.round(80 + (g * 173) % 940) + "px";
+                giant.style.top = Math.round(108 + (g * 97) % 500) + "px";
+                giant.style.background = palette[(g * 2) % palette.length];
+                giant.style.borderColor = palette[(g * 2 + 1) % palette.length];
+                giant.style.borderStyle = strokeStyles[(g + 1) % strokeStyles.length];
+                giant.style.borderWidth = String(2 + (g % 3)) + "px";
+                giant.style.animationDelay = String(g * -0.42) + "s";
+                giant.style.animationDuration = String(5.8 + (g % 5) * 0.9) + "s";
+                field.appendChild(giant);
+            }
+
+            for (var c = 0; c < 10; c++) {
+                var comet = document.createElement("div");
+                comet.className = "comet";
+                comet.style.left = "-80px";
+                comet.style.top = (40 + c * 64) + "px";
+                comet.style.background = palette[(c + 2) % palette.length];
+                comet.style.borderTop = "1px " + strokeStyles[c % strokeStyles.length] + " " + palette[(c + 4) % palette.length];
+                comet.style.animationDelay = String(c * -0.78) + "s";
+                comet.style.animationDuration = String(5.5 + (c % 4) * 0.9) + "s";
+                field.appendChild(comet);
+            }
+
+            var canvas = document.getElementById("starfield");
+            if (!canvas || !canvas.getContext || !window.requestAnimationFrame) {
+                return;
+            }
+
+            var ctx = canvas.getContext("2d");
+            if (!ctx) return;
+
+            function draw(t) {
+                var time = t * 0.001;
+                ctx.clearRect(0, 0, width, height);
+                ctx.fillStyle = "#0b1220";
+                ctx.fillRect(0, 0, width, height);
+                for (var j = 0; j < 80; j++) {
+                    var a = j * 0.41 + time * 0.16;
+                    var rr = 80 + (j % 30) * 9;
+                    var px = centerX + Math.cos(a) * rr;
+                    var py = centerY + Math.sin(a * 1.3) * rr * 0.42;
+                    ctx.fillStyle = palette[j % palette.length];
+                    ctx.fillRect(px, py, 2, 2);
+                }
+                requestAnimationFrame(draw);
+            }
+
+            requestAnimationFrame(draw);
+        })();
+    </script>
+</body>
+</html>

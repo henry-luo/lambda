@@ -102,18 +102,13 @@ static void discover_link_callback(DomElement* link, void* user_data) {
         // Resolve relative URL against document base
         char* abs_url = resolve_url(href, doc);
 
-        // Queue for download with HIGH priority (CSS blocks rendering)
-        NetworkResource* res = resource_manager_load(doc->resource_manager,
-                                                     abs_url,
-                                                     RESOURCE_CSS,
-                                                     PRIORITY_HIGH,
-                                                     link);
-
-        // Set completion callback
-        if (res) {
-            res->on_complete = (void (*)(NetworkResource*, void*))process_css_resource;
-            res->user_data = (void*)doc;
-        }
+        // Queue for download with HIGH priority (CSS blocks rendering).
+        // Main-thread processing is handled by resource_manager_flush_layout_updates().
+        resource_manager_load(doc->resource_manager,
+                              abs_url,
+                              RESOURCE_CSS,
+                              PRIORITY_HIGH,
+                              link);
         mem_free(abs_url);
     }
     else if (strcmp(rel, "preload") == 0) {
@@ -161,18 +156,13 @@ static void discover_img_callback(DomElement* img, void* user_data) {
     // Resolve relative URL against document base
     char* abs_url = resolve_url(src, doc);
 
-    // Queue for download with NORMAL priority
-    NetworkResource* res = resource_manager_load(doc->resource_manager,
-                                                 abs_url,
-                                                 RESOURCE_IMAGE,
-                                                 PRIORITY_NORMAL,
-                                                 img);
-
-    // Set completion callback
-    if (res) {
-        res->on_complete = (void (*)(NetworkResource*, void*))process_image_resource;
-        res->user_data = (void*)img;
-    }
+    // Queue for download with NORMAL priority. Main-thread processing is
+    // handled by resource_manager_flush_layout_updates().
+    resource_manager_load(doc->resource_manager,
+                          abs_url,
+                          RESOURCE_IMAGE,
+                          PRIORITY_NORMAL,
+                          img);
     mem_free(abs_url);
 }
 
@@ -201,18 +191,13 @@ static void discover_use_callback(DomElement* use, void* user_data) {
     // Resolve relative URL against document base
     char* abs_url = resolve_url(href, doc);
 
-    // Queue for download with NORMAL priority
-    NetworkResource* res = resource_manager_load(doc->resource_manager,
-                                                 abs_url,
-                                                 RESOURCE_SVG,
-                                                 PRIORITY_NORMAL,
-                                                 use);
-
-    // Set completion callback
-    if (res) {
-        res->on_complete = (void (*)(NetworkResource*, void*))process_svg_resource;
-        res->user_data = (void*)use;
-    }
+    // Queue for download with NORMAL priority. Main-thread processing is
+    // handled by resource_manager_flush_layout_updates().
+    resource_manager_load(doc->resource_manager,
+                          abs_url,
+                          RESOURCE_SVG,
+                          PRIORITY_NORMAL,
+                          use);
     mem_free(abs_url);
 }
 
@@ -304,6 +289,10 @@ void radiant_discover_document_resources(DomDocument* doc) {
             }
         }
     }
+
+    // Process cache hits immediately on the main thread so first layout can
+    // see cached CSS/images even when no async wait loop runs.
+    resource_manager_flush_layout_updates(doc->resource_manager);
 
     log_debug("network: resource discovery complete");
 }

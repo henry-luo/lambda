@@ -2,7 +2,9 @@
  * JavaScript Event Loop for Lambda v15
  *
  * libuv-backed event loop with:
+ * - nextTick queue for Node-compatible process.nextTick ordering
  * - Microtask queue (FIFO) for Promise callbacks
+ * - Animation frame queue for requestAnimationFrame
  * - Timers via uv_timer_t for setTimeout/setInterval
  * - Main drain via uv_run() for post-script execution
  */
@@ -26,7 +28,17 @@ int  js_event_loop_drain(void);
 // =============================================================================
 
 void js_microtask_enqueue(Item callback);
+void js_next_tick_enqueue(Item callback);
 void js_microtask_flush(void);
+
+// =============================================================================
+// Animation Frame Queue
+// =============================================================================
+
+Item js_requestAnimationFrame(Item callback);
+void js_cancelAnimationFrame(Item request_id);
+int  js_animation_frame_has_pending(void);
+int  js_animation_frame_flush(double timestamp_ms);
 
 // =============================================================================
 // Timers

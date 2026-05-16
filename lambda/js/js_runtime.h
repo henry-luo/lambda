@@ -771,6 +771,8 @@ void js_clearTimeout(Item timer_id);
 void js_clearInterval(Item timer_id);
 Item js_setImmediate(Item callback);                   // schedule for next tick
 void js_clearImmediate(Item id);
+Item js_requestAnimationFrame(Item callback);          // schedule for next frame
+void js_cancelAnimationFrame(Item request_id);
 Item js_structuredClone(Item value);                   // deep clone
 
 /**
@@ -788,6 +790,7 @@ void js_event_loop_init(void);
  * Schedule a microtask (used by Promise resolution).
  */
 void js_microtask_enqueue(Item callback);
+void js_next_tick_enqueue(Item callback);
 
 // =============================================================================
 // v14: ES Module Runtime

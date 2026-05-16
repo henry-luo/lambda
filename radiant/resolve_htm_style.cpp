@@ -2,6 +2,7 @@
 #include "form_control.hpp"
 #include "rdt_video.h"
 #include "state_store.hpp"
+#include "video_frame_wake.h"
 #include "retained_fields.hpp"
 #include "../lib/str.h"
 #include "../lib/memtrack.h"
@@ -11,6 +12,40 @@
 
 // Direct declaration of the actual C symbol (compiler will add underscore)
 extern "C" int strview_to_int(StrView* s);
+
+static void media_state_changed(RdtVideo* video, RdtVideoState state, void* userdata) {
+    (void)video;
+    DocState* doc_state = (DocState*)userdata;
+    if (doc_state && state == RDT_VIDEO_STATE_PLAYING) {
+        doc_state->has_active_video = true;
+    }
+    radiant_video_notify_frame_ready(doc_state);
+}
+
+static void media_frame_ready(RdtVideo* video, void* userdata) {
+    (void)video;
+    radiant_video_notify_frame_ready((DocState*)userdata);
+}
+
+static void media_duration_known(RdtVideo* video, double seconds, void* userdata) {
+    (void)video;
+    (void)seconds;
+    radiant_video_notify_frame_ready((DocState*)userdata);
+}
+
+static void media_video_size_known(RdtVideo* video, int width, int height, void* userdata) {
+    (void)video;
+    (void)width;
+    (void)height;
+    radiant_video_notify_frame_ready((DocState*)userdata);
+}
+
+static RdtVideoCallbacks media_callbacks = {
+    media_state_changed,
+    media_frame_ready,
+    media_duration_known,
+    media_video_size_known
+};
 
 // Parse HTML color attribute (e.g., "#ff6600" or "ff6600" or named colors like "red")
 static Color parse_html_color(const char* color_str) {
@@ -597,7 +632,9 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 if (abs_url) url_destroy(abs_url);
 
                 if (file_path) {
-                    RdtVideo* video = rdt_video_create(NULL, NULL);
+                    DomDocument* doc = lycon->ui_context->document;
+                    DocState* doc_state = doc ? doc->state : NULL;
+                    RdtVideo* video = rdt_video_create(&media_callbacks, doc_state);
                     if (video) {
                         log_debug("audio: opening file: %s", file_path);
                         rdt_video_open_file(video, file_path);
@@ -606,7 +643,6 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                         block->embed->video = video;
                         if (elmt->has_attribute("autoplay")) {
                             rdt_video_play(video);
-                            DomDocument* doc = lycon->ui_context->document;
                             if (doc->state) doc->state->has_active_video = true;
                         }
                     }
@@ -650,7 +686,9 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                     const char* preload = elmt->get_attribute("preload");
                     bool preload_none = preload && strcmp(preload, "none") == 0;
 
-                    RdtVideo* video = rdt_video_create(NULL, NULL);
+                    DomDocument* doc = lycon->ui_context->document;
+                    DocState* doc_state = doc ? doc->state : NULL;
+                    RdtVideo* video = rdt_video_create(&media_callbacks, doc_state);
                     if (video) {
                         if (!preload_none) {
                             log_debug("video: opening file: %s", file_path);
@@ -681,7 +719,6 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                             }
                             rdt_video_play(video);
                             // enable continuous redraw for video playback
-                            DomDocument* doc = lycon->ui_context->document;
                             if (doc->state) doc->state->has_active_video = true;
                         }
                     }

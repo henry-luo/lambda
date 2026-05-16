@@ -6,6 +6,7 @@
 #ifdef __APPLE__
 
 #import <AVFoundation/AVFoundation.h>
+#import <CoreGraphics/CoreGraphics.h>
 #import <CoreMedia/CoreMedia.h>
 #import <CoreVideo/CoreVideo.h>
 #import <objc/runtime.h>
@@ -14,7 +15,10 @@
 #include "../lib/log.h"
 #include "../lib/mem.h"
 
+#include <math.h>
 #include <stdatomic.h>
+
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 
 // ---------------------------------------------------------------------------
 // Internal struct
@@ -22,9 +26,10 @@
 
 struct RdtVideo {
     // AVFoundation objects
+    AVAsset*                     asset;
     AVPlayer*                    player;
     AVPlayerItem*                player_item;
-    AVPlayerItemVideoOutput*     video_output;
+    AVAssetImageGenerator*       image_generator;
     id                           end_observer;
 
     // Frame double-buffer (atomic swap between AVF output and render thread)
@@ -33,6 +38,8 @@ struct RdtVideo {
     int                          frame_height;
     int                          frame_stride;
     atomic_bool                  has_new_frame;
+    atomic_int                   last_generated_frame_ms;
+    atomic_int                   last_notified_frame_ms;
 
     // Decode resolution cap
     int                          target_width;
@@ -50,6 +57,7 @@ struct RdtVideo {
     bool                         loop;
     bool                         muted;
     float                        volume;
+    bool                         metadata_sent;
 
     // KVO observation tracking
     bool                         observing_status;
@@ -67,6 +75,39 @@ static void set_state(RdtVideo* v, RdtVideoState new_state) {
     atomic_store(&v->state, (int)new_state);
     if (v->callbacks.on_state_changed) {
         v->callbacks.on_state_changed(v, new_state, v->userdata);
+    }
+}
+
+static void populate_metadata(RdtVideo* v, AVPlayerItem* item, bool emit_callbacks) {
+    if (!v || !item) return;
+    if (v->metadata_sent && emit_callbacks) return;
+
+    NSArray* tracks = [item.asset tracksWithMediaType:AVMediaTypeVideo];
+    if (tracks.count > 0) {
+        AVAssetTrack* vt = tracks[0];
+        CGSize size = vt.naturalSize;
+        v->intrinsic_width = (int)fabs(size.width);
+        v->intrinsic_height = (int)fabs(size.height);
+        log_info("video: intrinsic size %dx%d", v->intrinsic_width, v->intrinsic_height);
+        if (emit_callbacks && v->callbacks.on_video_size_known) {
+            v->callbacks.on_video_size_known(v, v->intrinsic_width, v->intrinsic_height, v->userdata);
+        }
+    }
+
+    NSArray* audio_tracks = [item.asset tracksWithMediaType:AVMediaTypeAudio];
+    v->has_audio_track = (audio_tracks.count > 0);
+    log_info("video: has_audio=%d", v->has_audio_track);
+
+    CMTime dur = item.duration;
+    if (CMTIME_IS_VALID(dur) && !CMTIME_IS_INDEFINITE(dur)) {
+        v->duration = CMTimeGetSeconds(dur);
+        if (emit_callbacks && v->callbacks.on_duration_known) {
+            v->callbacks.on_duration_known(v, v->duration, v->userdata);
+        }
+    }
+
+    if (emit_callbacks) {
+        v->metadata_sent = true;
     }
 }
 
@@ -90,32 +131,7 @@ static void set_state(RdtVideo* v, RdtVideoState new_state) {
     if ([keyPath isEqualToString:@"status"]) {
         AVPlayerItem* item = (AVPlayerItem*)object;
         if (item.status == AVPlayerItemStatusReadyToPlay) {
-            // extract video dimensions
-            NSArray* tracks = [item.asset tracksWithMediaType:AVMediaTypeVideo];
-            if (tracks.count > 0) {
-                AVAssetTrack* vt = tracks[0];
-                CGSize size = vt.naturalSize;
-                v->intrinsic_width = (int)size.width;
-                v->intrinsic_height = (int)size.height;
-                log_info("video: intrinsic size %dx%d", v->intrinsic_width, v->intrinsic_height);
-                if (v->callbacks.on_video_size_known) {
-                    v->callbacks.on_video_size_known(v, v->intrinsic_width, v->intrinsic_height, v->userdata);
-                }
-            }
-            // check for audio
-            NSArray* audio_tracks = [item.asset tracksWithMediaType:AVMediaTypeAudio];
-            v->has_audio_track = (audio_tracks.count > 0);
-            log_info("video: has_audio=%d", v->has_audio_track);
-
-            // duration
-            CMTime dur = item.duration;
-            if (CMTIME_IS_VALID(dur) && !CMTIME_IS_INDEFINITE(dur)) {
-                v->duration = CMTimeGetSeconds(dur);
-                if (v->callbacks.on_duration_known) {
-                    v->callbacks.on_duration_known(v, v->duration, v->userdata);
-                }
-            }
-
+            populate_metadata(v, item, true);
             set_state(v, RDT_VIDEO_STATE_READY);
         } else if (item.status == AVPlayerItemStatusFailed) {
             log_error("video: AVPlayerItem failed: %s",
@@ -159,6 +175,8 @@ RdtVideo* rdt_video_create(const RdtVideoCallbacks* cb, void* userdata) {
     if (cb) v->callbacks = *cb;
     v->userdata = userdata;
     atomic_store(&v->state, (int)RDT_VIDEO_STATE_IDLE);
+    atomic_store(&v->last_generated_frame_ms, -1);
+    atomic_store(&v->last_notified_frame_ms, -1);
     v->volume = 1.0f;
     v->target_width = 300;
     v->target_height = 150;
@@ -204,12 +222,14 @@ void rdt_video_destroy(RdtVideo* video) {
         [video->end_observer release];
         video->end_observer = nil;
     }
-    [video->video_output release];
-    video->video_output = nil;
+    [video->image_generator release];
+    video->image_generator = nil;
     [video->player release];
     video->player = nil;
     [video->player_item release];
     video->player_item = nil;
+    [video->asset release];
+    video->asset = nil;
 
     // free frame buffer
     if (video->frame_buffer) {
@@ -237,17 +257,18 @@ int rdt_video_open_file(RdtVideo* video, const char* file_path) {
 
         // create player item and player
         // NOTE: No ARC — use alloc/init to get +1 retained references
-        AVAsset* asset = [AVAsset assetWithURL:url];
-        video->player_item = [[AVPlayerItem alloc] initWithAsset:asset];
+        video->asset = [[AVURLAsset alloc] initWithURL:url options:nil];
+        video->player_item = [[AVPlayerItem alloc] initWithAsset:video->asset];
         video->player = [[AVPlayer alloc] initWithPlayerItem:video->player_item];
         video->player.volume = video->muted ? 0.0f : video->volume;
 
-        // set up video output for frame extraction
-        NSDictionary* attrs = @{
-            (NSString*)kCVPixelBufferPixelFormatTypeKey: @(kCVPixelFormatType_32BGRA),
-        };
-        video->video_output = [[AVPlayerItemVideoOutput alloc] initWithPixelBufferAttributes:attrs];
-        [video->player_item addOutput:video->video_output];
+        // AVPlayerItemVideoOutput can make otherwise playable items fail with
+        // AVFoundationErrorDomain -11821 in headless/test environments. Keep
+        // AVPlayer for timing/audio and use AVAssetImageGenerator for frames.
+        video->image_generator = [[AVAssetImageGenerator alloc] initWithAsset:video->asset];
+        video->image_generator.appliesPreferredTrackTransform = YES;
+        video->image_generator.requestedTimeToleranceBefore = CMTimeMake(1, 60);
+        video->image_generator.requestedTimeToleranceAfter = CMTimeMake(1, 60);
 
         // observe status and time control
         RdtVideoObserver* obs = get_or_create_observer(video);
@@ -256,15 +277,26 @@ int rdt_video_open_file(RdtVideo* video, const char* file_path) {
         [video->player addObserver:obs forKeyPath:@"timeControlStatus" options:0 context:NULL];
         video->observing_time_control = true;
 
-        // periodic time observer (10Hz)
+        // periodic media-time observer. It only wakes Radiant when AVFoundation
+        // reports a fresh pixel buffer, so low-FPS and paused videos do not
+        // force display-rate redraws.
         __block RdtVideo* weakVideo = video;
         // NOTE: No ARC — retain the returned observer token
-        video->time_observer = [[video->player addPeriodicTimeObserverForInterval:CMTimeMake(1, 10)
+        video->time_observer = [[video->player addPeriodicTimeObserverForInterval:CMTimeMake(1, 60)
                                                                           queue:dispatch_get_main_queue()
                                                                      usingBlock:^(CMTime time) {
             if (weakVideo) {
                 double t = CMTimeGetSeconds(time);
-                atomic_store(&weakVideo->current_time_ms, (int)(t * 1000.0));
+                int current_ms = (int)(t * 1000.0);
+                atomic_store(&weakVideo->current_time_ms, current_ms);
+                int last_ms = atomic_load(&weakVideo->last_notified_frame_ms);
+                if (current_ms >= 0 && (last_ms < 0 || current_ms - last_ms >= 33)) {
+                    atomic_store(&weakVideo->last_notified_frame_ms, current_ms);
+                    atomic_store(&weakVideo->has_new_frame, true);
+                    if (weakVideo->callbacks.on_frame_ready) {
+                        weakVideo->callbacks.on_frame_ready(weakVideo, weakVideo->userdata);
+                    }
+                }
             }
         }] retain];
 
@@ -272,9 +304,10 @@ int rdt_video_open_file(RdtVideo* video, const char* file_path) {
         // NOTE: No ARC — retain the returned observer token
         video->end_observer = [[[NSNotificationCenter defaultCenter]
             addObserverForName:AVPlayerItemDidPlayToEndTimeNotification
-                       object:video->player_item
+                   object:video->player_item
                         queue:[NSOperationQueue mainQueue]
                    usingBlock:^(NSNotification* note) {
+            (void)note;
             if (weakVideo) {
                 if (weakVideo->loop) {
                     [weakVideo->player seekToTime:kCMTimeZero];
@@ -344,21 +377,7 @@ RdtVideoState rdt_video_get_state(RdtVideo* video) {
     RdtVideoState cur = (RdtVideoState)atomic_load(&video->state);
     if (cur == RDT_VIDEO_STATE_LOADING && video->player_item) {
         if (video->player_item.status == AVPlayerItemStatusReadyToPlay) {
-            // perform the transition that KVO would have done
-            NSArray* tracks = [video->player_item.asset tracksWithMediaType:AVMediaTypeVideo];
-            if (tracks.count > 0) {
-                AVAssetTrack* vt = tracks[0];
-                CGSize size = vt.naturalSize;
-                video->intrinsic_width = (int)size.width;
-                video->intrinsic_height = (int)size.height;
-                log_info("video: intrinsic size %dx%d (polled)", video->intrinsic_width, video->intrinsic_height);
-            }
-            NSArray* audio_tracks = [video->player_item.asset tracksWithMediaType:AVMediaTypeAudio];
-            video->has_audio_track = (audio_tracks.count > 0);
-            CMTime dur = video->player_item.duration;
-            if (CMTIME_IS_VALID(dur) && !CMTIME_IS_INDEFINITE(dur)) {
-                video->duration = CMTimeGetSeconds(dur);
-            }
+            populate_metadata(video, video->player_item, true);
             set_state(video, RDT_VIDEO_STATE_READY);
             cur = RDT_VIDEO_STATE_READY;
         } else if (video->player_item.status == AVPlayerItemStatusFailed) {
@@ -413,54 +432,33 @@ bool rdt_video_has_audio(RdtVideo* video) {
 }
 
 int rdt_video_get_frame(RdtVideo* video, RdtVideoFrame* frame) {
-    if (!video || !frame || !video->video_output || !video->player_item) return -1;
+    if (!video || !frame || !video->player_item) return -1;
 
     @autoreleasepool {
+        if (!video->image_generator) return -1;
+
         CMTime current = [video->player_item currentTime];
-        if (![video->video_output hasNewPixelBufferForItemTime:current]) {
-            // no new frame — return the cached frame to avoid flicker
-            if (video->frame_buffer && video->frame_width > 0 && video->frame_height > 0) {
-                frame->pixels = video->frame_buffer;
-                frame->width  = video->frame_width;
-                frame->height = video->frame_height;
-                frame->stride = video->frame_stride;
-                frame->pts    = CMTimeGetSeconds(current);
-                return 0;
-            }
-            return -1;
+        int current_ms = (int)(CMTimeGetSeconds(current) * 1000.0);
+        if (current_ms == atomic_load(&video->last_generated_frame_ms) &&
+            video->frame_buffer && video->frame_width > 0 && video->frame_height > 0) {
+            frame->pixels = video->frame_buffer;
+            frame->width = video->frame_width;
+            frame->height = video->frame_height;
+            frame->stride = video->frame_stride;
+            frame->pts = CMTimeGetSeconds(current);
+            return 0;
         }
 
-        CVPixelBufferRef pb = [video->video_output copyPixelBufferForItemTime:current
-                                                           itemTimeForDisplay:NULL];
-        if (!pb) return -1;
+        NSError* error = nil;
+        CMTime actual = kCMTimeZero;
+        CGImageRef image = [video->image_generator copyCGImageAtTime:current
+                                                           actualTime:&actual
+                                                                error:&error];
+        if (!image) return -1;
 
-        CVPixelBufferLockBaseAddress(pb, kCVPixelBufferLock_ReadOnly);
-
-        int src_w = (int)CVPixelBufferGetWidth(pb);
-        int src_h = (int)CVPixelBufferGetHeight(pb);
-        int src_stride = (int)CVPixelBufferGetBytesPerRow(pb);
-        uint8_t* src_pixels = (uint8_t*)CVPixelBufferGetBaseAddress(pb);
-
-        // determine output dimensions (cap to target layout rect)
-        int out_w = src_w;
-        int out_h = src_h;
-        if (video->target_width > 0 && video->target_height > 0) {
-            if (out_w > video->target_width || out_h > video->target_height) {
-                float scale_x = (float)video->target_width / (float)out_w;
-                float scale_y = (float)video->target_height / (float)out_h;
-                float scale = scale_x < scale_y ? scale_x : scale_y;
-                out_w = (int)(out_w * scale);
-                out_h = (int)(out_h * scale);
-            }
-        }
-
-        // for now, use source dimensions directly (no resize in get_frame; 
-        // resize happens during blit_surface_scaled in the render path)
-        out_w = src_w;
-        out_h = src_h;
+        int out_w = (int)CGImageGetWidth(image);
+        int out_h = (int)CGImageGetHeight(image);
         int out_stride = out_w * 4;
-
-        // allocate/reallocate internal frame buffer if needed
         int needed = out_stride * out_h;
         if (!video->frame_buffer || video->frame_width != out_w || video->frame_height != out_h) {
             if (video->frame_buffer) mem_free(video->frame_buffer);
@@ -470,32 +468,31 @@ int rdt_video_get_frame(RdtVideo* video, RdtVideoFrame* frame) {
             video->frame_stride = out_stride;
         }
 
-        // convert BGRA → RGBA
-        for (int y = 0; y < out_h; y++) {
-            uint8_t* src_row = src_pixels + y * src_stride;
-            uint8_t* dst_row = video->frame_buffer + y * out_stride;
-            for (int x = 0; x < out_w; x++) {
-                dst_row[x * 4 + 0] = src_row[x * 4 + 2]; // R = B
-                dst_row[x * 4 + 1] = src_row[x * 4 + 1]; // G = G
-                dst_row[x * 4 + 2] = src_row[x * 4 + 0]; // B = R
-                dst_row[x * 4 + 3] = src_row[x * 4 + 3]; // A = A
-            }
+        CGColorSpaceRef color_space = CGColorSpaceCreateDeviceRGB();
+        CGContextRef context = CGBitmapContextCreate(video->frame_buffer, out_w, out_h, 8,
+                                                     out_stride, color_space,
+                                                     kCGImageAlphaPremultipliedLast |
+                                                     kCGBitmapByteOrder32Big);
+        CGColorSpaceRelease(color_space);
+        if (!context) {
+            CGImageRelease(image);
+            return -1;
         }
 
-        CVPixelBufferUnlockBaseAddress(pb, kCVPixelBufferLock_ReadOnly);
-        CVBufferRelease(pb);
+        CGContextDrawImage(context, CGRectMake(0, 0, out_w, out_h), image);
+        CGContextRelease(context);
+        CGImageRelease(image);
 
-        // fill output frame
         frame->pixels = video->frame_buffer;
         frame->width = out_w;
         frame->height = out_h;
         frame->stride = out_stride;
-        frame->pts = CMTimeGetSeconds(current);
+        frame->pts = CMTimeGetSeconds(actual);
 
+        atomic_store(&video->last_generated_frame_ms, current_ms);
         atomic_store(&video->has_new_frame, false);
+        return 0;
     }
-
-    return 0;
 }
 
 #endif // __APPLE__

@@ -2,7 +2,9 @@
  * JavaScript Event Loop for Lambda v15
  *
  * libuv-backed event loop implementation:
- * - Microtask queue: FIFO ring buffer, flushed via uv_prepare_t
+ * - nextTick queue: drained before Promise microtasks
+ * - Microtask queue: FIFO ring buffer, flushed at uv phase checkpoints
+ * - Animation frame queue: flushed by Radiant's frame clock
  * - Timers: uv_timer_t handles (unlimited, cross-platform)
  * - Drain: uv_run(UV_RUN_DEFAULT) — runs until no active handles
  */
@@ -21,15 +23,47 @@
 #include <signal.h>
 
 // =============================================================================
-// Microtask Queue (FIFO ring buffer — unchanged from v14)
+// Task Queues
 // =============================================================================
 
 #define MICROTASK_CAPACITY 1024
+#define RAF_CAPACITY 1024
+#define TASK_FLUSH_SAFETY_LIMIT (MICROTASK_CAPACITY * 8)
 
+static Item next_tick_ring[MICROTASK_CAPACITY];
+static int  next_tick_head = 0;
+static int  next_tick_tail = 0;
+static int  next_tick_count = 0;
 static Item microtask_ring[MICROTASK_CAPACITY];
 static int  microtask_head = 0;   // read index
 static int  microtask_tail = 0;   // write index
 static int  microtask_count = 0;
+
+static Item raf_callback_ring[RAF_CAPACITY];
+static int64_t raf_id_ring[RAF_CAPACITY];
+static int raf_head = 0;
+static int raf_tail = 0;
+static int raf_count = 0;
+static int64_t next_raf_id = 1;
+
+static void next_tick_push(Item cb) {
+    if (next_tick_count >= MICROTASK_CAPACITY) {
+        log_error("event_loop: nextTick queue overflow (%d)", MICROTASK_CAPACITY);
+        return;
+    }
+    next_tick_ring[next_tick_tail] = cb;
+    next_tick_tail = (next_tick_tail + 1) % MICROTASK_CAPACITY;
+    next_tick_count++;
+}
+
+static Item next_tick_pop() {
+    if (next_tick_count == 0) return ItemNull;
+    Item cb = next_tick_ring[next_tick_head];
+    next_tick_ring[next_tick_head] = ItemNull;
+    next_tick_head = (next_tick_head + 1) % MICROTASK_CAPACITY;
+    next_tick_count--;
+    return cb;
+}
 
 static void microtask_push(Item cb) {
     if (microtask_count >= MICROTASK_CAPACITY) {
@@ -44,6 +78,7 @@ static void microtask_push(Item cb) {
 static Item microtask_pop() {
     if (microtask_count == 0) return ItemNull;
     Item cb = microtask_ring[microtask_head];
+    microtask_ring[microtask_head] = ItemNull;
     microtask_head = (microtask_head + 1) % MICROTASK_CAPACITY;
     microtask_count--;
     return cb;
@@ -57,19 +92,113 @@ extern "C" void js_microtask_enqueue(Item callback) {
     microtask_push(callback);
 }
 
+extern "C" void js_next_tick_enqueue(Item callback) {
+    if (get_type_id(callback) != LMD_TYPE_FUNC) {
+        log_error("event_loop: nextTick enqueue called with non-function (type=%d)", get_type_id(callback));
+        return;
+    }
+    next_tick_push(callback);
+}
+
 extern "C" void js_microtask_flush(void) {
-    // drain all microtasks (including ones enqueued during execution)
     int safety = 0;
-    while (microtask_count > 0 && safety < MICROTASK_CAPACITY * 2) {
-        Item cb = microtask_pop();
-        if (get_type_id(cb) == LMD_TYPE_FUNC) {
-            js_call_function(cb, ItemNull, NULL, 0);
+    while ((next_tick_count > 0 || microtask_count > 0) &&
+           safety < TASK_FLUSH_SAFETY_LIMIT) {
+        while (next_tick_count > 0 && safety < TASK_FLUSH_SAFETY_LIMIT) {
+            Item cb = next_tick_pop();
+            if (get_type_id(cb) == LMD_TYPE_FUNC) {
+                js_call_function(cb, ItemNull, NULL, 0);
+            }
+            safety++;
         }
-        safety++;
+        while (microtask_count > 0 && safety < TASK_FLUSH_SAFETY_LIMIT) {
+            Item cb = microtask_pop();
+            if (get_type_id(cb) == LMD_TYPE_FUNC) {
+                js_call_function(cb, ItemNull, NULL, 0);
+            }
+            safety++;
+        }
     }
-    if (safety >= MICROTASK_CAPACITY * 2) {
-        log_error("event_loop: microtask flush exceeded safety limit");
+    if (safety >= TASK_FLUSH_SAFETY_LIMIT) {
+        log_error("event_loop: nextTick/microtask flush exceeded safety limit");
     }
+}
+
+static bool raf_push(Item cb, int64_t id) {
+    if (raf_count >= RAF_CAPACITY) {
+        log_error("event_loop: animation frame queue overflow (%d)", RAF_CAPACITY);
+        return false;
+    }
+    raf_callback_ring[raf_tail] = cb;
+    raf_id_ring[raf_tail] = id;
+    raf_tail = (raf_tail + 1) % RAF_CAPACITY;
+    raf_count++;
+    return true;
+}
+
+static Item raf_pop(int64_t* out_id) {
+    if (raf_count == 0) {
+        if (out_id) *out_id = -1;
+        return ItemNull;
+    }
+    Item cb = raf_callback_ring[raf_head];
+    if (out_id) *out_id = raf_id_ring[raf_head];
+    raf_callback_ring[raf_head] = ItemNull;
+    raf_id_ring[raf_head] = -1;
+    raf_head = (raf_head + 1) % RAF_CAPACITY;
+    raf_count--;
+    return cb;
+}
+
+extern "C" Item js_requestAnimationFrame(Item callback) {
+    if (get_type_id(callback) != LMD_TYPE_FUNC) {
+        extern Item js_throw_type_error_code(const char*, const char*);
+        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
+            "The \"callback\" argument must be of type function.");
+    }
+    int64_t id = next_raf_id++;
+    if (!raf_push(callback, id)) return ItemNull;
+    return (Item){.item = i2it(id)};
+}
+
+extern "C" void js_cancelAnimationFrame(Item request_id) {
+    if (get_type_id(request_id) != LMD_TYPE_INT) return;
+    int64_t id = it2i(request_id);
+    for (int i = 0; i < raf_count; i++) {
+        int idx = (raf_head + i) % RAF_CAPACITY;
+        if (raf_id_ring[idx] == id) {
+            raf_callback_ring[idx] = ItemNull;
+            raf_id_ring[idx] = -1;
+            return;
+        }
+    }
+}
+
+extern "C" int js_animation_frame_has_pending(void) {
+    return raf_count > 0 ? 1 : 0;
+}
+
+extern "C" int js_animation_frame_flush(double timestamp_ms) {
+    int pending = raf_count;
+    int called = 0;
+    if (pending <= 0) return 0;
+
+    double* ts = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+    if (!ts) return 0;
+    *ts = timestamp_ms;
+    Item timestamp = (Item){.item = d2it(ts)};
+
+    for (int i = 0; i < pending; i++) {
+        int64_t id = -1;
+        Item cb = raf_pop(&id);
+        (void)id;
+        if (get_type_id(cb) == LMD_TYPE_FUNC) {
+            js_call_function(cb, ItemNull, &timestamp, 1);
+            called++;
+        }
+    }
+    js_microtask_flush();
+    return called;
 }
 
 // =============================================================================
@@ -128,7 +257,7 @@ static void timer_fire_cb(uv_timer_t *handle) {
             js_call_function(th->callback, ItemNull, NULL, 0);
         }
     }
-    // microtasks are drained by the uv_prepare_t handle after each callback
+    // nextTick and Promise microtasks are drained at libuv phase checkpoints.
 
     if (!th->is_interval) {
         uv_timer_stop(&th->timer);
@@ -675,11 +804,20 @@ extern "C" void js_clearInterval(Item timer_id) {
 // =============================================================================
 
 extern "C" void js_event_loop_init(void) {
-    // reset microtask queue — zero ring buffer to prevent GC scanning stale Items
+    // reset task queues — zero ring buffers to prevent GC scanning stale Items
+    memset(next_tick_ring, 0, sizeof(next_tick_ring));
     memset(microtask_ring, 0, sizeof(microtask_ring));
+    memset(raf_callback_ring, 0, sizeof(raf_callback_ring));
+    next_tick_head = 0;
+    next_tick_tail = 0;
+    next_tick_count = 0;
     microtask_head = 0;
     microtask_tail = 0;
     microtask_count = 0;
+    raf_head = 0;
+    raf_tail = 0;
+    raf_count = 0;
+    next_raf_id = 1;
     // reset timers — clear stale callback pointers
     for (int i = 0; i < timer_handle_count; i++) {
         timer_handles[i] = NULL;
@@ -687,17 +825,19 @@ extern "C" void js_event_loop_init(void) {
     timer_handle_count = 0;
     next_timer_id = 1;
 
-    // register microtask ring buffer as GC root (static memory invisible to stack scanning)
+    // register task ring buffers as GC roots (static memory invisible to stack scanning)
     static bool statics_rooted = false;
     if (!statics_rooted) {
+        heap_register_gc_root_range((uint64_t*)next_tick_ring, MICROTASK_CAPACITY);
         heap_register_gc_root_range((uint64_t*)microtask_ring, MICROTASK_CAPACITY);
+        heap_register_gc_root_range((uint64_t*)raf_callback_ring, RAF_CAPACITY);
         statics_rooted = true;
     }
 
     // initialize libuv loop
     lambda_uv_init();
 
-    // register microtask drain to run before each event loop iteration
+    // register task drain to run at libuv phase checkpoints
     lambda_uv_set_microtask_drain(js_microtask_flush);
 }
 

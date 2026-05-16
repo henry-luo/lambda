@@ -88,6 +88,33 @@ static void lru_touch(EnhancedFileCache* cache, CacheMetadata* meta) {
     meta->last_accessed = time(NULL);
 }
 
+static bool cache_acquire_write_slot(EnhancedFileCache* cache, bool wait_for_slot) {
+    if (!cache) return false;
+
+    pthread_mutex_lock(&cache->write_mutex);
+    int max_writes = cache->max_concurrent_writes > 0 ? cache->max_concurrent_writes : 1;
+    while (cache->active_writes >= max_writes) {
+        if (!wait_for_slot) {
+            cache->skipped_write_count++;
+            pthread_mutex_unlock(&cache->write_mutex);
+            return false;
+        }
+        pthread_cond_wait(&cache->write_cond, &cache->write_mutex);
+    }
+    cache->active_writes++;
+    pthread_mutex_unlock(&cache->write_mutex);
+    return true;
+}
+
+static void cache_release_write_slot(EnhancedFileCache* cache) {
+    if (!cache) return;
+
+    pthread_mutex_lock(&cache->write_mutex);
+    if (cache->active_writes > 0) cache->active_writes--;
+    pthread_cond_signal(&cache->write_cond);
+    pthread_mutex_unlock(&cache->write_mutex);
+}
+
 // create cache
 EnhancedFileCache* enhanced_cache_create(const char* cache_dir, size_t max_size, int max_entries) {
     EnhancedFileCache* cache = (EnhancedFileCache*)mem_calloc(1, sizeof(EnhancedFileCache), MEM_CAT_NETWORK);
@@ -102,6 +129,9 @@ EnhancedFileCache* enhanced_cache_create(const char* cache_dir, size_t max_size,
     cache->miss_count = 0;
     cache->lru_head = NULL;
     cache->lru_tail = NULL;
+    cache->max_concurrent_writes = 2;
+    cache->active_writes = 0;
+    cache->skipped_write_count = 0;
 
     // create hashmap for URL→CacheMetadata lookup
     cache->metadata_map = hashmap_new(
@@ -122,6 +152,8 @@ EnhancedFileCache* enhanced_cache_create(const char* cache_dir, size_t max_size,
 
     create_dir_recursive(cache->cache_dir);
     pthread_rwlock_init(&cache->rwlock, NULL);
+    pthread_mutex_init(&cache->write_mutex, NULL);
+    pthread_cond_init(&cache->write_cond, NULL);
 
     log_debug("cache: created at %s (max_size=%zu, max_entries=%d)",
               cache->cache_dir, max_size, cache->max_entries);
@@ -133,6 +165,8 @@ void enhanced_cache_destroy(EnhancedFileCache* cache) {
     if (!cache) return;
 
     pthread_rwlock_destroy(&cache->rwlock);
+    pthread_mutex_destroy(&cache->write_mutex);
+    pthread_cond_destroy(&cache->write_cond);
 
     // hashmap_free also calls cache_entry_free on each entry
     if (cache->metadata_map) {
@@ -193,9 +227,9 @@ char* enhanced_cache_lookup(EnhancedFileCache* cache, const char* url) {
     return NULL;
 }
 
-char* enhanced_cache_store(EnhancedFileCache* cache, const char* url,
-                           const char* content, size_t size,
-                           const HttpCacheHeaders* headers) {
+static char* enhanced_cache_store_impl(EnhancedFileCache* cache, const char* url,
+                                       const char* content, size_t size,
+                                       const HttpCacheHeaders* headers) {
     if (!cache || !url || !content) return NULL;
 
     pthread_rwlock_wrlock(&cache->rwlock);
@@ -317,6 +351,38 @@ char* enhanced_cache_store(EnhancedFileCache* cache, const char* url,
     pthread_rwlock_unlock(&cache->rwlock);
 
     return path;
+}
+
+char* enhanced_cache_store(EnhancedFileCache* cache, const char* url,
+                           const char* content, size_t size,
+                           const HttpCacheHeaders* headers) {
+    if (!cache_acquire_write_slot(cache, true)) return NULL;
+    char* path = enhanced_cache_store_impl(cache, url, content, size, headers);
+    cache_release_write_slot(cache);
+    return path;
+}
+
+char* enhanced_cache_try_store(EnhancedFileCache* cache, const char* url,
+                               const char* content, size_t size,
+                               const HttpCacheHeaders* headers) {
+    if (!cache_acquire_write_slot(cache, false)) {
+        log_debug("cache: skipped bounded cache write for %s", url ? url : "(null)");
+        return NULL;
+    }
+    char* path = enhanced_cache_store_impl(cache, url, content, size, headers);
+    cache_release_write_slot(cache);
+    return path;
+}
+
+void enhanced_cache_set_max_concurrent_writes(EnhancedFileCache* cache, int max_writes) {
+    if (!cache) return;
+
+    pthread_mutex_lock(&cache->write_mutex);
+    cache->max_concurrent_writes = max_writes > 0 ? max_writes : 1;
+    pthread_cond_broadcast(&cache->write_cond);
+    pthread_mutex_unlock(&cache->write_mutex);
+
+    log_debug("cache: max concurrent writes set to %d", cache->max_concurrent_writes);
 }
 
 void enhanced_cache_evict_lru(EnhancedFileCache* cache) {

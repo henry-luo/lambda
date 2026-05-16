@@ -8115,6 +8115,19 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, id_val));
                 return jm_emit_null(mt);
             }
+            // requestAnimationFrame(callback) — schedule on Radiant's frame clock
+            if (nl == 21 && strncmp(n, "requestAnimationFrame", 21) == 0) {
+                MIR_reg_t cb = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                return jm_call_1(mt, "js_requestAnimationFrame", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, cb));
+            }
+            // cancelAnimationFrame(id)
+            if (nl == 20 && strncmp(n, "cancelAnimationFrame", 20) == 0) {
+                MIR_reg_t id_val = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                jm_call_void_1(mt, "js_cancelAnimationFrame",
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, id_val));
+                return jm_emit_null(mt);
+            }
             // structuredClone(value) — deep clone
             if (nl == 15 && strncmp(n, "structuredClone", 15) == 0) {
                 MIR_reg_t val = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);

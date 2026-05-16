@@ -477,7 +477,10 @@ static void render_play_button_overlay(ImageSurface* surface,
 }
 
 void render_video_frames(DisplayList* dl, ImageSurface* surface, DocState* rstate, UiContext* uicon) {
-    if (!dl || !surface) return;
+    if (!dl || !surface) {
+        if (rstate) doc_state_clear_video_frame_pending(rstate);
+        return;
+    }
 
     int count = dl_item_count(dl);
     DisplayItem* items = dl->items;
@@ -552,7 +555,10 @@ void render_video_frames(DisplayList* dl, ImageSurface* surface, DocState* rstat
         }
     }
 
-    if (rstate) rstate->video_placement_count = cached;
+    if (rstate) {
+        rstate->video_placement_count = cached;
+        doc_state_clear_video_frame_pending(rstate);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -561,7 +567,11 @@ void render_video_frames(DisplayList* dl, ImageSurface* surface, DocState* rstat
 // ---------------------------------------------------------------------------
 
 void render_video_frames_cached(DocState* rstate, ImageSurface* surface, UiContext* uicon) {
-    if (!rstate || !surface || rstate->video_placement_count <= 0) return;
+    if (!rstate || !surface) return;
+    if (rstate->video_placement_count <= 0) {
+        doc_state_clear_video_frame_pending(rstate);
+        return;
+    }
 
     for (int i = 0; i < rstate->video_placement_count; i++) {
         auto& p = rstate->video_placements[i];
@@ -610,4 +620,6 @@ void render_video_frames_cached(DocState* rstate, ImageSurface* surface, UiConte
             render_play_button_overlay(surface, p.dst_x, p.dst_y, p.dst_w, p.dst_h);
         }
     }
+
+    doc_state_clear_video_frame_pending(rstate);
 }

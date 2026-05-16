@@ -24,7 +24,7 @@ int  lambda_uv_run(void);        // run until no active handles/requests
 void lambda_uv_stop(void);       // stop loop (from signal handler etc.)
 void lambda_uv_cleanup(void);    // close all handles, free loop
 
-// microtask integration — called before each event loop iteration
+// JS task integration — called at event-loop phase checkpoints
 void lambda_uv_set_microtask_drain(void (*drain_fn)(void));
 
 #ifdef __cplusplus
