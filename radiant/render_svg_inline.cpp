@@ -155,24 +155,9 @@ static inline void svg_fill_path(SvgRenderContext* ctx, RdtPath* path, Color col
     else rdt_fill_path(ctx->vec, path, color, rule, xform);
 }
 
-static float svg_transform_stroke_scale(const RdtMatrix* xform) {
-    if (!xform) return 1.0f;
-    float sx = sqrtf(xform->e11 * xform->e11 + xform->e21 * xform->e21);
-    float sy = sqrtf(xform->e12 * xform->e12 + xform->e22 * xform->e22);
-    float scale = (sx + sy) * 0.5f;
-    return scale > 0.0f ? scale : 1.0f;
-}
-
 static inline void svg_stroke_path(SvgRenderContext* ctx, RdtPath* path, Color color, float width,
                                    RdtStrokeCap cap, RdtStrokeJoin join,
                                    const float* dash, int dash_count, const RdtMatrix* xform) {
-    if (width > 0.0f) {
-        float scale = svg_transform_stroke_scale(xform);
-        float device_width = width * scale;
-        if (device_width > 0.0f && device_width < 1.0f) {
-            width = 1.0f / scale;
-        }
-    }
     if (ctx->dl) dl_stroke_path(ctx->dl, path, color, width, cap, join, dash, dash_count, 0, xform);
     else rdt_stroke_path(ctx->vec, path, color, width, cap, join, dash, dash_count, 0, xform);
 }
