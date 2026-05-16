@@ -210,12 +210,35 @@ Replace any `uv_timer_t`-driven animation logic with a platform display-link:
 | Platform | Source |
 |----------|--------|
 | macOS | `CVDisplayLink` or `CADisplayLink`; deliver `CVTimeStamp::hostTime` to the scheduler |
-| Windows | `IDXGISwapChain::GetFrameLatencyWaitableObject` + `QueryPerformanceCounter` |
-| Linux/X11 | `glXGetSyncValuesOML` |
-| Linux/Wayland | `wl_surface_frame` callback |
+| Windows | DWM frame pacing (`DwmFlush`) + `QueryPerformanceCounter`; move to `IDXGISwapChain::GetFrameLatencyWaitableObject` if Radiant grows a D3D swapchain |
+| Linux/X11 | `glXGetSyncValuesOML` / `glXWaitVideoSyncSGI` once the GLX surface is explicitly owned by the clock layer |
+| Linux/Wayland | `wl_surface_frame` callback once Radiant owns the Wayland surface rather than only the GLFW abstraction |
 | Fallback | High-resolution monotonic clock + tracked refresh estimate |
 
+Implementation should hide the platform source behind a small `RadiantFrameClock`
+facade. The window loop asks the frame clock for the current frame timestamp and
+the next useful wake deadline; `animation_scheduler_tick()` only receives the
+timestamp and does not know whether it came from a native display link or the
+monotonic fallback.
+
+Initial backend mapping:
+- macOS uses `CVDisplayLink` and wakes the GLFW loop only when animation/video work is waiting for the next frame.
+- Windows uses a frame thread paced by `DwmFlush` when available, falling back to a QPC timer thread.
+- Linux uses a `timerfd`-paced native high-resolution frame thread under GLFW. True X11/Wayland display callbacks require passing the actual GLX/Wayland surface into this layer, so they remain a follow-up behind the same facade.
+
 This integrates with the existing animation design in [vibe/radiant/Radiant_Render_Threading_and_Animation.md](vibe/radiant/Radiant_Render_Threading_and_Animation.md).
+
+#### 3.4.2a Video frame invalidation
+
+Video playback follows the same rule as animation: **never use libuv timers to drive frames**. The video backend owns decode/playback timing and signals Radiant through `RdtVideoCallbacks::on_frame_ready`.
+
+Radiant should treat that callback as a video-only invalidation:
+- mark `DocState::video_frame_pending`;
+- wake the GUI loop with the same lightweight wake path used by the frame clock (`glfwPostEmptyEvent()` today);
+- on the next GUI tick, blit cached video placements without rebuilding layout or the display list;
+- clear `video_frame_pending` after the cached blit/full render consumes the frame.
+
+This avoids the old `has_active_video → redraw every display frame` behavior. Paused video and low-FPS media no longer burn a full-rate render loop, while active playback still presents promptly when the backend reports a fresh frame.
 
 #### 3.4.3 `requestAnimationFrame` bridge for JS
 
@@ -459,7 +482,7 @@ A suggested phasing that evolves the current network code toward the final archi
 | P9 | Dedicated blocking-curl backend | `lambda/network/network_scheduler.*`, `network_downloader.*` | Moves long HTTP work off libuv's global worker pool while keeping `curl_easy_perform` |
 | P10 | Bounded cache/decode queues | `lambda/network/*`, `radiant/surface.cpp`, font/image loaders | Prevents cache writes and CPU decode from stalling frames |
 | P11 | curl multi network-thread backend | `lambda/network/curl_multi_backend.*` | Final HTTP architecture: many transfers, connection reuse, HTTP/2 multiplexing |
-| P12 | Vsync animation source (§3.4.2) | `radiant/animation.cpp`, new platform shims | Aligns with `Radiant_Render_Threading_and_Animation.md` |
+| P12 | Vsync animation source (§3.4.2) | `radiant/frame_clock.*`, `radiant/window.cpp`, future platform shims | Separates animation timing from libuv; starts with the monotonic fallback and leaves native display-link backends behind the facade |
 | P13 | `process.nextTick` queue + microtask audit (§2.4.1, §2.4.2) | `lambda/js/*` | Node-compat correctness |
 | P14 | Handle leak detection + loop-thread assertions (§2.4.4, §2.4.5) | `lib/uv_loop.c`, debug builds only | Debugging quality |
 

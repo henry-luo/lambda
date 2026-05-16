@@ -323,7 +323,8 @@ typedef struct DocState {
     AnimationScheduler* animation_scheduler;
 
     // Video playback
-    bool has_active_video;         // true if any <video> is playing (drives continuous redraw)
+    bool has_active_video;         // true if any <video> is playing
+    bool video_frame_pending;      // true when playback produced a frame for cached blit
 
     // Cached video placements for video-only dirty optimisation
     // Saved after each full render; reused to blit video frames without DL rebuild
@@ -754,6 +755,8 @@ void doc_state_clear_drag_drop(DocState* state);
  */
 void doc_state_mark_dirty(DocState* state);
 void doc_state_request_repaint(DocState* state);
+void doc_state_mark_video_frame_pending(DocState* state);
+void doc_state_clear_video_frame_pending(DocState* state);
 void doc_state_request_reflow(DocState* state);
 void doc_state_clear_reflow(DocState* state);
 void doc_state_clear_render_flags(DocState* state);

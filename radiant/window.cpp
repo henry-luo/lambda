@@ -17,6 +17,8 @@
 #include "event_sim.hpp"
 #include "webview.h"
 #include "animation.h"
+#include "frame_clock.h"
+#include "video_frame_wake.h"
 #include "browsing_session.h"
 #include "event_state_log.hpp"
 #include "script_runner.h"
@@ -69,9 +71,59 @@ int ui_context_init(UiContext* uicon, bool headless);
 void ui_context_cleanup(UiContext* uicon);
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
 
-static void network_wake_glfw(void* user_data) {
+static void view_wake_glfw(void* user_data) {
     (void)user_data;
     glfwPostEmptyEvent();
+}
+
+static void network_wake_glfw(void* user_data) {
+    view_wake_glfw(user_data);
+}
+
+static double view_min_timeout(double current, double candidate) {
+    if (candidate < 0.0) return current;
+    if (current < 0.0 || candidate < current) return candidate;
+    return current;
+}
+
+static double view_uv_timeout_seconds(uv_loop_t* uv_loop, double active_fallback) {
+    if (!uv_loop || !uv_loop_alive(uv_loop)) return -1.0;
+
+    int timeout_ms = uv_backend_timeout(uv_loop);
+    if (timeout_ms < 0) return active_fallback;
+    if (timeout_ms == 0) return 0.0;
+
+    double timeout = (double)timeout_ms / 1000.0;
+    if (timeout > 1.0) return 1.0;
+    return timeout;
+}
+
+static double view_next_wait_timeout(RadiantFrameClock* frame_clock, double now,
+                                     bool frame_driven, bool caret_visible,
+                                     double caret_blink_elapsed,
+                                     double caret_blink_interval,
+                                     EventSimContext* sim_ctx,
+                                     double sim_start_time,
+                                     uv_loop_t* uv_loop) {
+    double timeout = radiant_frame_clock_next_timeout(frame_clock, now, frame_driven, false);
+    double frame_interval = frame_clock && frame_clock->initialized ?
+        frame_clock->refresh_interval : (1.0 / 60.0);
+
+    if (caret_visible) {
+        double caret_timeout = caret_blink_interval - caret_blink_elapsed;
+        if (caret_timeout < 0.0) caret_timeout = 0.0;
+        timeout = view_min_timeout(timeout, caret_timeout);
+    }
+
+    if (sim_ctx && sim_ctx->is_running) {
+        double sim_timeout = now < sim_start_time ? sim_start_time - now : frame_interval;
+        timeout = view_min_timeout(timeout, sim_timeout);
+    }
+
+    timeout = view_min_timeout(timeout, view_uv_timeout_seconds(uv_loop, frame_interval));
+    if (timeout < 0.0) return 0.0;
+    if (timeout > 1.0) return 1.0;
+    return timeout;
 }
 
 // Document format detection
@@ -1078,21 +1130,32 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
     do_redraw = 1;
 
     // Main loop
-    double lastTime = glfwGetTime();
+    RadiantFrameClock frame_clock;
+    if (!radiant_frame_clock_init(&frame_clock, 60.0)) {
+        log_warn("view_frame_clock: failed to initialize frame clock, using monotonic fallback");
+    }
+    radiant_frame_clock_set_wake_callback(&frame_clock, view_wake_glfw, NULL);
+    radiant_video_set_wake_callback(view_wake_glfw, NULL);
+    if (!radiant_frame_clock_start(&frame_clock)) {
+        log_warn("view_frame_clock: native clock start failed, using timed fallback");
+    }
+    log_info("view_frame_clock: using %s clock", radiant_frame_clock_mode_name(&frame_clock));
+
+    double lastTime = radiant_frame_clock_now(&frame_clock);
     double deltaTime = 0.0;
     double caretBlinkTime = 0.0;
     const double CARET_BLINK_INTERVAL = 0.5;  // 500ms blink interval
-    int frames = 0;
 
     // Give the window a moment to render before starting simulation
     double sim_start_delay = sim_ctx ? 0.5 : 0.0;  // 500ms delay before starting simulation
-    double sim_start_time = glfwGetTime() + sim_start_delay;
+    double sim_start_time = radiant_frame_clock_now(&frame_clock) + sim_start_delay;
 
     while (!glfwWindowShouldClose(window)) {
         // calculate deltaTime
-        double currentTime = glfwGetTime();
+        double currentTime = radiant_frame_clock_now(&frame_clock);
         deltaTime = currentTime - lastTime;
         lastTime = currentTime;
+        bool frame_driven = false;
 
         // poll for new events
         glfwPollEvents();
@@ -1120,7 +1183,8 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
 
         // Handle caret blinking
         DocState* state = ui_context.document ? ui_context.document->state : nullptr;
-        if (caret_has_projection(state)) {
+        bool caret_visible = caret_has_projection(state);
+        if (caret_visible) {
             caretBlinkTime += deltaTime;
             if (caretBlinkTime >= CARET_BLINK_INTERVAL) {
                 caretBlinkTime = 0.0;
@@ -1146,13 +1210,14 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
             bool still_active = animation_scheduler_tick(state->animation_scheduler,
                                                          currentTime, &state->dirty_tracker);
             doc_state_request_repaint(state);
+            frame_driven = still_active;
             do_redraw = 1;
         }
 
-        // Video playback: force continuous redraw when any video is playing
-        if (state && state->has_active_video) {
-            // only force full render if nothing else triggered it;
-            // otherwise the video-only blit path in render() handles it
+        // Video playback wakes through RdtVideoCallbacks::on_frame_ready.
+        // Only redraw when a frame is pending; paused and low-FPS videos no
+        // longer force a full display-refresh loop.
+        if (state && state->has_active_video && state->video_frame_pending) {
             do_redraw = 1;
         }
 
@@ -1179,14 +1244,22 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
         // only redraw if we need to
         if (do_redraw) {
             window_refresh_callback(window);
+            radiant_frame_clock_mark_presented(&frame_clock, currentTime);
         }
 
-        // limit to 60 FPS
-        if (deltaTime < (1.0 / 60.0)) {
-            glfwWaitEventsTimeout((1.0 / 60.0) - deltaTime);
+        double wait_timeout = view_next_wait_timeout(&frame_clock, currentTime,
+                                                     frame_driven, caret_visible,
+                                                     caretBlinkTime,
+                                                     CARET_BLINK_INTERVAL,
+                                                     sim_ctx, sim_start_time,
+                                                     uv_loop);
+        if (wait_timeout > 0.0) {
+            glfwWaitEventsTimeout(wait_timeout);
         }
-        frames++;
     }
+
+    radiant_video_set_wake_callback(NULL, NULL);
+    radiant_frame_clock_shutdown(&frame_clock);
 
     // Get simulation results before cleanup
     int sim_fail_count = 0;

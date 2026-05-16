@@ -1819,6 +1819,16 @@ void doc_state_request_repaint(DocState* state) {
     state_assert_after_mutation(state, "doc_state_request_repaint");
 }
 
+void doc_state_mark_video_frame_pending(DocState* state) {
+    if (!state) return;
+    state->video_frame_pending = true;
+}
+
+void doc_state_clear_video_frame_pending(DocState* state) {
+    if (!state) return;
+    state->video_frame_pending = false;
+}
+
 void doc_state_request_reflow(DocState* state) {
     if (!state) return;
     bool changed = !state->needs_reflow || !state->is_dirty;

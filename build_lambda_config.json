@@ -3410,6 +3410,35 @@
                         "icon": "🌐"
                     },
                     {
+                        "source": "test/test_network_scheduler_gtest.cpp",
+                        "name": "Network Scheduler Tests",
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "curl",
+                            "nghttp2",
+                            "brotlidec",
+                            "brotlicommon",
+                            "mbedtls",
+                            "mbedx509",
+                            "mbedcrypto",
+                            "zlib",
+                            "pthread",
+                            "CoreFoundation",
+                            "SystemConfiguration",
+                            "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "lambda/network/network_scheduler.cpp",
+                            "lambda/network/curl_multi_backend.cpp"
+                        ],
+                        "binary": "test_network_scheduler_gtest.exe",
+                        "icon": "🌐"
+                    },
+                    {
                         "source": "test/test_network_layout_gtest.cpp",
                         "name": "Network Layout Tests",
                         "dependencies": [],
