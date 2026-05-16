@@ -194,6 +194,7 @@ const JsBuiltinMethodSpec JS_ARRAY_PROTOTYPE_METHOD_SPECS[] = {
     {"values", 6, JS_BUILTIN_ARR_VALUES, 0},
     {"entries", 7, JS_BUILTIN_ARR_ENTRIES, 0},
     {"at", 2, JS_BUILTIN_ARR_AT, 1},
+    {"item", 4, JS_BUILTIN_ARR_ITEM, 1},
     {"reduceRight", 11, JS_BUILTIN_ARR_REDUCE_RIGHT, 1},
     {"findLast", 8, JS_BUILTIN_ARR_FIND_LAST, 1},
     {"findLastIndex", 13, JS_BUILTIN_ARR_FIND_LAST_INDEX, 1},
@@ -1097,4 +1098,3 @@ extern "C" void js_append_builtin_method_names(TypeId type, Item result) {
         return;
     }
 }
-

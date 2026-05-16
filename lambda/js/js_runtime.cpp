@@ -7379,6 +7379,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     case JS_BUILTIN_ARR_VALUES:
     case JS_BUILTIN_ARR_ENTRIES:
     case JS_BUILTIN_ARR_AT:
+    case JS_BUILTIN_ARR_ITEM:
     case JS_BUILTIN_ARR_LAST_INDEX_OF:
     case JS_BUILTIN_ARR_REDUCE_RIGHT:
     case JS_BUILTIN_ARR_FIND_LAST:
@@ -7418,6 +7419,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             [JS_BUILTIN_ARR_VALUES - JS_BUILTIN_ARR_PUSH] = "values",
             [JS_BUILTIN_ARR_ENTRIES - JS_BUILTIN_ARR_PUSH] = "entries",
             [JS_BUILTIN_ARR_AT - JS_BUILTIN_ARR_PUSH] = "at",
+            [JS_BUILTIN_ARR_ITEM - JS_BUILTIN_ARR_PUSH] = "item",
             [JS_BUILTIN_ARR_LAST_INDEX_OF - JS_BUILTIN_ARR_PUSH] = "lastIndexOf",
             [JS_BUILTIN_ARR_REDUCE_RIGHT - JS_BUILTIN_ARR_PUSH] = "reduceRight",
             [JS_BUILTIN_ARR_FIND_LAST - JS_BUILTIN_ARR_PUSH] = "findLast",
@@ -20001,6 +20003,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             (len == 6  && strncmp(c, "values", 6) == 0) ||
             (len == 7  && strncmp(c, "entries", 7) == 0) ||
             (len == 2  && strncmp(c, "at", 2) == 0) ||
+            (len == 4  && strncmp(c, "item", 4) == 0) ||
             (len == 4  && strncmp(c, "sort", 4) == 0);
         if (is_generic) {
             // Note: slice/map/filter length validation per ArraySpeciesCreate is done
@@ -21146,6 +21149,28 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         if (idx < 0 || idx >= a->length) return make_js_undefined();
         Item val = a->items[idx];
         if (val.item == JS_DELETED_SENTINEL_VAL) return make_js_undefined();
+        return val;
+    }
+    // item(index) — DOM NodeList/HTMLCollection compatibility. Unlike
+    // Array.prototype.at(), negative and out-of-range indices return null.
+    if (method->len == 4 && strncmp(method->chars, "item", 4) == 0) {
+        if (arr_type != LMD_TYPE_ARRAY) return ItemNull;
+        Array* a = arr.array;
+        int64_t idx = 0;
+        if (argc >= 1) {
+            if (js_key_is_symbol(args[0]))
+                return js_throw_type_error("Cannot convert a Symbol value to a number");
+            double d = js_get_number(args[0]);
+            if (js_exception_pending) return ItemNull;
+            if (d != d) d = 0.0;
+            d = d >= 0.0 ? floor(d) : ceil(d);
+            if (d < (double)INT64_MIN) d = (double)INT64_MIN;
+            if (d > (double)INT64_MAX) d = (double)INT64_MAX;
+            idx = (int64_t)d;
+        }
+        if (idx < 0 || idx >= a->length) return ItemNull;
+        Item val = a->items[idx];
+        if (val.item == JS_DELETED_SENTINEL_VAL) return ItemNull;
         return val;
     }
     // toString — join elements with comma

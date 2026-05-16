@@ -39,6 +39,7 @@ Item js_requestAnimationFrame(Item callback);
 void js_cancelAnimationFrame(Item request_id);
 int  js_animation_frame_has_pending(void);
 int  js_animation_frame_flush(double timestamp_ms);
+int  js_animation_frame_drain(int max_frames);
 
 // =============================================================================
 // Timers

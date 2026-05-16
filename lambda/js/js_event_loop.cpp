@@ -183,10 +183,7 @@ extern "C" int js_animation_frame_flush(double timestamp_ms) {
     int called = 0;
     if (pending <= 0) return 0;
 
-    double* ts = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-    if (!ts) return 0;
-    *ts = timestamp_ms;
-    Item timestamp = (Item){.item = d2it(ts)};
+    Item timestamp = (Item){.item = i2it((int64_t)timestamp_ms)};
 
     for (int i = 0; i < pending; i++) {
         int64_t id = -1;
@@ -198,6 +195,23 @@ extern "C" int js_animation_frame_flush(double timestamp_ms) {
         }
     }
     js_microtask_flush();
+    return called;
+}
+
+extern "C" int js_animation_frame_drain(int max_frames) {
+    if (max_frames <= 0) max_frames = 1;
+    int frames = 0;
+    int called = 0;
+    double timestamp_ms = 0.0;
+    while (raf_count > 0 && frames < max_frames) {
+        timestamp_ms += 16.6667;
+        called += js_animation_frame_flush(timestamp_ms);
+        js_event_loop_drain();
+        frames++;
+    }
+    if (raf_count > 0) {
+        log_error("event_loop: animation frame drain stopped with %d callback(s) pending", raf_count);
+    }
     return called;
 }
 

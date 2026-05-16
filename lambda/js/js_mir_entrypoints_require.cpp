@@ -640,6 +640,12 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     // v14: drain the event loop while JIT module is still alive
     // (MIR_finish below destroys compiled code, so timers must fire here)
     js_event_loop_drain();
+    if (runtime->dom_doc) {
+        // Headless Radiant layout has no frame clock; flush a bounded number
+        // of requestAnimationFrame ticks before the JS heap/context are
+        // restored so DOM callbacks can still allocate wrapper objects.
+        js_animation_frame_drain(8);
+    }
     log_debug("js-mir: event loop drained");
 
     // Fire process 'exit' event listeners (Node.js compatibility).

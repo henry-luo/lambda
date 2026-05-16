@@ -2385,6 +2385,7 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
 
     if (doc->view_tree && doc->view_tree->root && doc->view_tree->root->view_type == RDT_VIEW_BLOCK) {
         ViewBlock* root_block = lam::view_require_block(doc->view_tree->root);
+        layout_finalize_static_positioned_abs_descendants(root_block);
         if (root_block->scroller && root_block->scroller->pane) {
             ScrollPane* pane = root_block->scroller->pane;
             float target_x = doc->pending_viewport_scroll_x;

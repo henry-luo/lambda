@@ -13,19 +13,16 @@
  * 3. Track kind (Track vs Gutter) for gap handling
  * 4. Better fit-content() support
  *
- * TODO: std::* Migration Plan (Phase 5+)
- * - std::numeric_limits<float>::infinity() → INFINITY macro from <math.h>
- * - std::min/std::max → MIN_FLOAT/MAX_FLOAT macros (see layout_multicol.cpp)
- * - <cmath> std::isinf → isinf() from <math.h>
- * - <algorithm> include can be removed after min/max migration
+ * Uses C+ style sizing helpers and fixed-capacity arrays for layout scratch
+ * storage.
  */
 
 #ifdef __cplusplus
 
 #include <cstdint>
-#include <cmath>
-#include <limits>
-#include <algorithm>
+#include <math.h>
+
+#include "grid_types.hpp"
 
 // Undefine min/max macros if defined (commonly from windows.h or view.hpp)
 #ifdef min
@@ -202,7 +199,7 @@ struct MaxTrackSizingFunction {
             case SizingFunctionType::FitContentPercent:
                 return axis_available_space * (value / 100.0f);
             default:
-                return std::numeric_limits<float>::infinity();
+                return (float)INFINITY;
         }
     }
 
@@ -420,7 +417,7 @@ struct EnhancedGridTrack {
     /** Get the growth limit clamped by fit-content */
     float fit_content_limited_growth_limit(float axis_available_space) const {
         float limit = fit_content_limit(axis_available_space);
-        return std::min(growth_limit, limit);
+        return grid_min_value(growth_limit, limit);
     }
 
     /** Get the flex factor (0 if not flexible) */
@@ -448,7 +445,7 @@ struct EnhancedGridTrack {
 };
 
 // ============================================================================
-// TrackArray — fixed-size array replacing std::vector<EnhancedGridTrack> (§1.7)
+// TrackArray - fixed-size EnhancedGridTrack storage
 // ============================================================================
 
 /** Maximum number of tracks (content + gutter) in one axis. */
@@ -456,7 +453,6 @@ struct EnhancedGridTrack {
 
 /**
  * Fixed-capacity array of EnhancedGridTrack.
- * Replaces std::vector<EnhancedGridTrack> to comply with C+ convention.
  * Capacity is MAX_GRID_TRACKS which safely handles 16×16 grids with all gaps.
  */
 struct TrackArray {
@@ -489,7 +485,6 @@ struct TrackArray {
 
 /**
  * Fixed-capacity array of track indices (size_t).
- * Replaces std::vector<size_t> eligible_indices throughout the sizing algorithm (§1.7).
  */
 struct IndexArray {
     size_t data[MAX_GRID_TRACKS];

@@ -643,21 +643,16 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                                 ViewElement* item = lam::view_require_element(dom_child);
                                 // Skip display:none and absolute/hidden items
                                 if (!item || should_skip_flex_item(item)) continue;
-                                if (item->blk && item->blk->given_width >= 0) {
-                                    item_width = item->blk->given_width;
-                                } else {
-                                    DomElement* item_elem = lam::dom_require<DOM_NODE_ELEMENT>(item);
-                                    IntrinsicSizes item_sizes = measure_element_intrinsic_widths(lycon, item_elem);
-                                    item_width = item_sizes.max_content;
-                                }
-                                // Add padding+border for border-box contribution
+                                DomElement* item_elem = lam::dom_require<DOM_NODE_ELEMENT>(item);
+                                IntrinsicSizes item_sizes = measure_element_intrinsic_widths(lycon, item_elem);
+                                item_width = item_sizes.max_content;
+                                // Flex container intrinsic main size uses each
+                                // flex item's outer size contribution.
                                 if (item->bound) {
-                                    float pb = item->bound->padding.left + item->bound->padding.right;
-                                    if (item->bound->border)
-                                        pb += item->bound->border->width.left + item->bound->border->width.right;
-                                    // Only add if intrinsic sizing returned content-box value
-                                    if (!(item->blk && item->blk->given_width >= 0))
-                                        item_width += pb;
+                                    if (item->bound->margin.left_type != CSS_VALUE_AUTO)
+                                        item_width += item->bound->margin.left;
+                                    if (item->bound->margin.right_type != CSS_VALUE_AUTO)
+                                        item_width += item->bound->margin.right;
                                 }
                                 // Clamp by min-width/max-width (§1.1)
                                 if (item->blk) {
@@ -957,6 +952,12 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                     // 1) Start with item's outer max-content size
                     if (item->blk && item->blk->given_width >= 0) {
                         item_width = item->blk->given_width;
+                        if (item->bound && item->blk->box_sizing != CSS_VALUE_BORDER_BOX) {
+                            item_width += item->bound->padding.left + item->bound->padding.right;
+                            if (item->bound->border) {
+                                item_width += item->bound->border->width.left + item->bound->border->width.right;
+                            }
+                        }
                     } else if (item->fi && item->fi->has_intrinsic_width) {
                         item_width = item->fi->intrinsic_width.max_content;
                         // Intrinsic sizes from calculate_item_intrinsic_sizes are content-box,
@@ -999,6 +1000,12 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                         } else if (item->width > 0) {
                             item_width = item->width;
                         }
+                    }
+                    if (item->bound) {
+                        if (item->bound->margin.left_type != CSS_VALUE_AUTO)
+                            item_width += item->bound->margin.left;
+                        if (item->bound->margin.right_type != CSS_VALUE_AUTO)
+                            item_width += item->bound->margin.right;
                     }
                     // 2) If item has non-zero flex-shrink and its max-content exceeds
                     //    its specified size (flex-basis), use the specified size instead.
@@ -1940,8 +1947,7 @@ int collect_flex_items(FlexContainerLayout* flex, ViewBlock* container, View*** 
         ViewElement* child_elmt = lam::view_require_element(child);
         // CRITICAL: Check position->position (PositionProp), NOT in_line->position
         ViewBlock* child_block = lam::view_as_block(child_elmt);
-        bool is_absolute = child_block && child_block->position && child_block->position->position &&
-            (child_block->position->position == CSS_VALUE_ABSOLUTE || child_block->position->position == CSS_VALUE_FIXED);
+        bool is_absolute = layout_view_is_abs_or_fixed(child_block);
         bool is_hidden = child_elmt && child_elmt->in_line && child_elmt->in_line->visibility == VIS_HIDDEN;
         if (!is_absolute && !is_hidden) {
             count++;
@@ -1974,8 +1980,7 @@ int collect_flex_items(FlexContainerLayout* flex, ViewBlock* container, View*** 
         ViewElement* child_elmt = lam::view_require_element(child);
         // CRITICAL: Check position->position (PositionProp), NOT in_line->position
         ViewBlock* child_block2 = lam::view_as_block(child_elmt);
-        bool is_absolute = child_block2 && child_block2->position && child_block2->position->position &&
-            (child_block2->position->position == CSS_VALUE_ABSOLUTE || child_block2->position->position == CSS_VALUE_FIXED);
+        bool is_absolute = layout_view_is_abs_or_fixed(child_block2);
         bool is_hidden = child_elmt && child_elmt->in_line && child_elmt->in_line->visibility == VIS_HIDDEN;
         if (!is_absolute && !is_hidden) {
             flex->flex_items[count] = child;
@@ -2162,14 +2167,8 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
     // During style resolution, lycon->block.parent->content_width still points to
     // the grandparent's width. We must temporarily update it to the flex container's
     // content width so that percentage margins/paddings resolve correctly.
-    float container_content_width = (float)container->width;
-    if (container->bound) {
-        container_content_width -= container->bound->padding.left + container->bound->padding.right;
-        if (container->bound->border) {
-            container_content_width -= container->bound->border->width.left + container->bound->border->width.right;
-        }
-    }
-    if (container_content_width < 0) container_content_width = 0;
+    LayoutContainingBlock cb = layout_containing_block_for_view(container);
+    float container_content_width = cb.content_width;
 
     // Create a temporary parent block context with the correct content width
     BlockContext flex_parent_ctx = {};
@@ -3670,6 +3669,35 @@ float calculate_item_baseline(ViewElement* item) {
         child_view = child_view->next_sibling;
     }
 
+    // Text-only flex items (for example `<a class="p-btn">Label</a>`) have
+    // the most accurate baseline in the laid-out text child. Some block-flow
+    // fallback baselines include line-box advance and are too deep for flex
+    // baseline alignment.
+    DomNode* text_child = item->first_child;
+    while (text_child) {
+        if (text_child->is_text()) {
+            const char* text = (const char*)text_child->text_data();
+            while (text && (*text == ' ' || *text == '\t' || *text == '\n' || *text == '\r')) {
+                text++;
+            }
+            if (text && *text) {
+                float border_top = 0;
+                float padding_top = 0;
+                if (item->bound) {
+                    padding_top = item->bound->padding.top;
+                    if (item->bound->border) {
+                        border_top = item->bound->border->width.top;
+                    }
+                }
+                float text_ascender = item->font && item->font->ascender > 0
+                    ? item->font->ascender
+                    : (item->font ? item->font->font_size * 0.8f : item->height * 0.8f);
+                return margin_top + border_top + padding_top + text_ascender;
+            }
+        }
+        text_child = text_child->next_sibling;
+    }
+
     // CSS Flexbox §9.4 / CSS 2.1 §10.8.1: For block containers with in-flow
     // line boxes (text content), the baseline is the first line box's baseline.
     // Check stored first_line_baseline (set during content layout via finalize_block_flow).
@@ -3834,6 +3862,9 @@ void reposition_baseline_items(LayoutContext* lycon, ViewBlock* flex_container) 
             // alignment modes (start, stretch, etc.) set cross_pos.
             float item_margin_top = item->bound ? item->bound->margin.top : 0;
             float new_cross_pos = max_baseline - item_baseline + item_margin_top;
+            if (new_cross_pos < item_margin_top) {
+                new_cross_pos = item_margin_top;
+            }
 
             // Get current position for comparison
             float old_cross_pos = get_cross_axis_position(item, flex_layout);
@@ -3967,25 +3998,11 @@ void reposition_baseline_items(LayoutContext* lycon, ViewBlock* flex_container) 
 
         if (positions_changed) {
             log_debug("Baseline: line positions changed, re-running cross alignment");
-            // Re-run find_max_baseline + repositioning for each line
+            // Re-run the shared cross-axis alignment for each line so wrapped
+            // baseline lines use the same margin-box positioning as the main pass.
             for (int line_idx = 0; line_idx < flex_layout->line_count; line_idx++) {
                 FlexLineInfo* line = &flex_layout->lines[line_idx];
-                float max_bl = find_max_baseline(line, flex_layout->align_items);
-
-                for (int i = 0; i < line->item_count; i++) {
-                    ViewElement* item = lam::view_as_element(line->items[i]);
-                    if (!item || !item->fi) continue;
-                    int align_self = item->fi->align_self;
-                    bool uses_bl = (align_self == ALIGN_BASELINE) ||
-                                   (align_self == ALIGN_AUTO && flex_layout->align_items == ALIGN_BASELINE);
-                    if (!uses_bl) continue;
-
-                    float item_bl = calculate_item_baseline(item);
-                    float new_pos = line->cross_position + (max_bl - item_bl);
-                    set_cross_axis_position(item, new_pos, flex_layout);
-                    log_debug("Baseline re-position line %d item %d: y=%.1f (line_pos=%.1f, bl_offset=%.1f)",
-                              line_idx, i, new_pos, line->cross_position, max_bl - item_bl);
-                }
+                align_items_cross_axis(flex_layout, line);
             }
 
             // Update container auto-height if needed
@@ -5104,6 +5121,9 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
                         // Add margin_cross_start so item->y is the BORDER-BOX top, consistent
                         // with all other alignment cases (ALIGN_START, ALIGN_STRETCH, etc.).
                         cross_pos = max_baseline - item_baseline + margin_cross_start;
+                        if (cross_pos < margin_cross_start) {
+                            cross_pos = margin_cross_start;
+                        }
                         log_debug("ALIGN_BASELINE - item %d: item_baseline=%.1f, max_baseline=%.1f, margin_top=%.0f, cross_pos=%.1f",
                                   i, item_baseline, max_baseline, margin_cross_start, cross_pos);
                     } else {
@@ -5277,16 +5297,7 @@ float get_border_box_height(ViewElement* item) {
 
 float get_content_width(ViewBlock* item) {
     float border_box_width = get_border_box_width(item);
-
-    if (!item->bound) {
-        return border_box_width;
-    }
-
-    // Subtract padding and border from border-box width to get content width
-    float padding_and_border = item->bound->padding.left + item->bound->padding.right +
-        (item->bound->border ? item->bound->border->width.left + item->bound->border->width.right : 0);
-
-    return fmaxf(border_box_width - padding_and_border, 0);
+    return layout_content_width_from_border_box(item, border_box_width);
 }
 
 float get_content_height(ViewBlock* item) {
@@ -5295,13 +5306,12 @@ float get_content_height(ViewBlock* item) {
     }
 
     // CRITICAL WORKAROUND for missing box-sizing: border-box implementation
-    float padding_and_border = item->bound->padding.top + item->bound->padding.bottom +
-        (item->bound->border ? item->bound->border->width.top + item->bound->border->width.bottom : 0);
+    BoxMetrics box = layout_box_metrics(item);
 
     // HACK: For flex items with padding, assume box-sizing: border-box was intended
-    if (padding_and_border > 0) {
-        float intended_border_box_height = item->height - padding_and_border;  // 120 - 20 = 100
-        float content_height = intended_border_box_height - padding_and_border;  // 100 - 20 = 80
+    if (box.pad_border_v > 0) {
+        float intended_border_box_height = item->height - box.pad_border_v;  // 120 - 20 = 100
+        float content_height = intended_border_box_height - box.pad_border_v;  // 100 - 20 = 80
         return fmaxf(content_height, 0);
     }
 
@@ -5310,17 +5320,13 @@ float get_content_height(ViewBlock* item) {
 }
 
 float get_border_offset_left(ViewBlock* item) {
-    if (!item->bound || !item->bound->border) {
-        return 0;
-    }
-    return item->bound->border->width.left;
+    BoxMetrics box = layout_box_metrics(item);
+    return box.border.left;
 }
 
 float get_border_offset_top(ViewBlock* item) {
-    if (!item->bound || !item->bound->border) {
-        return 0;
-    }
-    return item->bound->border->width.top;
+    BoxMetrics box = layout_box_metrics(item);
+    return box.border.top;
 }
 
 // Utility functions for axis-agnostic positioning
@@ -5857,6 +5863,98 @@ static float measure_flex_content_height(ViewElement* elem) {
     return is_row ? max_child_height : sum_child_height;
 }
 
+static float measure_in_flow_children_border_height(ViewElement* elem) {
+    if (!elem) return 0.0f;
+
+    ViewBlock* block = lam::view_as_block(elem);
+    bool is_row_flex = false;
+    bool is_flex_container = false;
+    if (block && block->display.inner == CSS_VALUE_FLEX) {
+        is_flex_container = true;
+        FlexProp* flex = block->embed ? block->embed->flex : nullptr;
+        is_row_flex = !flex || flex->direction == CSS_VALUE_ROW ||
+                      flex->direction == CSS_VALUE_ROW_REVERSE;
+    }
+
+    float block_flow_height = 0.0f;
+    float row_flex_height = 0.0f;
+    float prev_margin_bottom = 0.0f;
+    bool saw_content = false;
+
+    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+        float child_height = 0.0f;
+        float margin_top = 0.0f;
+        float margin_bottom = 0.0f;
+
+        if (child->is_element()) {
+            ViewElement* child_elem = lam::view_as_element(child);
+            if (!child_elem || child_elem->display.outer == CSS_VALUE_NONE ||
+                child_elem->display.inner == CSS_VALUE_NONE) {
+                continue;
+            }
+            ViewBlock* child_block = lam::view_as_block(child_elem);
+            if (child_block && child_block->position &&
+                (child_block->position->position == CSS_VALUE_ABSOLUTE ||
+                 child_block->position->position == CSS_VALUE_FIXED ||
+                 element_has_float(child_block))) {
+                continue;
+            }
+
+            child_height = child_elem->height;
+            if (child_height <= 0.0f) {
+                child_height = measure_flex_content_height(child_elem);
+                if (child_elem->bound && child_height > 0.0f) {
+                    child_height += child_elem->bound->padding.top + child_elem->bound->padding.bottom;
+                    if (child_elem->bound->border) {
+                        child_height += child_elem->bound->border->width.top + child_elem->bound->border->width.bottom;
+                    }
+                }
+            }
+            if (child_elem->bound) {
+                margin_top = child_elem->bound->margin.top;
+                margin_bottom = child_elem->bound->margin.bottom;
+            }
+        } else if (child->is_text()) {
+            DomText* text = child->as_text();
+            for (TextRect* rect = text ? text->rect : nullptr; rect; rect = rect->next) {
+                float rect_bottom = rect->y + rect->height;
+                if (rect_bottom > child_height) child_height = rect_bottom;
+            }
+        }
+
+        if (child_height <= 0.0f) continue;
+        saw_content = true;
+
+        if (is_row_flex) {
+            float outer_height = child_height + margin_top + margin_bottom;
+            if (outer_height > row_flex_height) row_flex_height = outer_height;
+        } else {
+            float collapsed_margin = fmaxf(prev_margin_bottom, margin_top);
+            block_flow_height += collapsed_margin + child_height;
+            prev_margin_bottom = margin_bottom;
+        }
+    }
+
+    if (!saw_content) return 0.0f;
+
+    float content_height = is_row_flex ? row_flex_height : block_flow_height;
+    float pad_top = 0.0f, pad_bottom = 0.0f;
+    float border_top = 0.0f, border_bottom = 0.0f;
+    if (elem->bound) {
+        pad_top = elem->bound->padding.top;
+        pad_bottom = elem->bound->padding.bottom;
+        if (elem->bound->border) {
+            border_top = elem->bound->border->width.top;
+            border_bottom = elem->bound->border->width.bottom;
+        }
+    }
+    if (!is_flex_container && prev_margin_bottom > 0.0f && (pad_bottom > 0.0f || border_bottom > 0.0f)) {
+        content_height += prev_margin_bottom;
+    }
+
+    return content_height + pad_top + pad_bottom + border_top + border_bottom;
+}
+
 // ============================================================================
 // CSS Flexbox §9.4: Determine hypothetical cross size of each item
 // ============================================================================
@@ -5901,15 +5999,23 @@ void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContainerLayou
                             cross += item->bound->border->width.left + item->bound->border->width.right;
                     }
                 }
+                float margin_sum = 0;
+                if (item->bound) {
+                    margin_sum = is_horizontal
+                        ? item->bound->margin.top + item->bound->margin.bottom
+                        : item->bound->margin.left + item->bound->margin.right;
+                }
                 if (item->fi) {
-                    item->fi->hypothetical_outer_cross_size = cross;
+                    item->fi->hypothetical_cross_size = cross;
+                    item->fi->hypothetical_outer_cross_size = cross + margin_sum;
                 }
                 if (is_horizontal) {
                     item->height = cross;
                 } else {
                     item->width = cross;
                 }
-                log_debug("HYPOTHETICAL_CROSS: form control item[%d][%d] cross=%.1f", i, j, cross);
+                log_debug("HYPOTHETICAL_CROSS: form control item[%d][%d] cross=%.1f, outer=%.1f (margins=%.1f)",
+                          i, j, cross, cross + margin_sum, margin_sum);
                 continue;
             }
 
@@ -5958,12 +6064,19 @@ void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContainerLayou
                     if (item_content_width > 0) {
                         measured_height = calculate_max_content_height(lycon, item, item_content_width);
                     }
-                    if (measured_height <= 0) {
-                        // Fallback to recursive flex measurement for nested flex containers
-                        measured_height = measure_flex_content_height(item);
-                    }
-                    log_debug("HYPOTHETICAL_CROSS: item[%d][%d] %s measured_height=%.1f (content_w=%.1f, width=%.1f)",
-                              i, j, item->node_name(), measured_height, item_content_width, item->width);
+	                    if (measured_height <= 0) {
+	                        // Fallback to recursive flex measurement for nested flex containers
+	                        measured_height = measure_flex_content_height(item);
+	                    }
+	                    float laid_out_height = measure_in_flow_children_border_height(item);
+	                    if (laid_out_height > 0.0f &&
+	                        (measured_height <= 0.0f || laid_out_height < measured_height)) {
+	                        log_debug("HYPOTHETICAL_CROSS: item[%d][%d] using in-flow child height %.1f instead of estimate %.1f",
+	                                  i, j, laid_out_height, measured_height);
+	                        measured_height = laid_out_height;
+	                    }
+	                    log_debug("HYPOTHETICAL_CROSS: item[%d][%d] %s measured_height=%.1f (content_w=%.1f, width=%.1f)",
+	                              i, j, item->node_name(), measured_height, item_content_width, item->width);
 
                     if (measured_height > 0) {
                         // calculate_max_content_height returns border-box height

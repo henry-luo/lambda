@@ -12,14 +12,7 @@
  * 2. Integration helpers that use the new algorithms with existing data structures
  * 3. Migration path utilities for incremental adoption
  *
- * TODO: std::* Migration Plan (Phase 5+) - COMPLEX
- * - TrackArray → Pool-allocated arrays with count
- * - std::vector<GridItemInfo> → ArrayList* or fixed arrays
- * - std::vector<GridItemContribution> → ArrayList*
- * - std::pair<int, int> → Simple struct { int first; int second; }
- * - std::min/std::max → MIN_INT/MAX_INT macros
- * - std::optional (if used) → Pointer + null check pattern
- * Estimated effort: Major refactoring (~400+ lines)
+ * Uses fixed-capacity arrays and C+ helper functions for layout scratch work.
  */
 
 // IMPORTANT: Include grid.hpp first, then undef macros, then include enhanced headers
@@ -39,8 +32,6 @@
 #include "grid_occupancy.hpp"
 #include "grid_placement.hpp"
 #include "grid_sizing_algorithm.hpp"
-
-#include <algorithm>
 
 namespace radiant {
 namespace grid_adapter {
@@ -214,7 +205,7 @@ inline void copy_enhanced_tracks_to_old(
     const TrackArray& enhanced_tracks,
     ::GridTrack* old_tracks, int count)
 {
-    int copy_count = std::min(static_cast<int>(enhanced_tracks.size()), count);
+    int copy_count = grid_min_value(static_cast<int>(enhanced_tracks.size()), count);
 
     // Pass 1: floor each track and copy non-size fields
     float float_total = 0.0f;
@@ -244,11 +235,20 @@ inline void copy_enhanced_tracks_to_old(
                        - static_cast<float>(static_cast<int>(enhanced_tracks[i].base_size));
             if (frac > 0.0f && frac_count < MAX_GRID_TRACKS) fracs[frac_count++] = {frac, i};
         }
-        std::sort(fracs, fracs + frac_count,
-                  [](const FracEntry& a, const FracEntry& b) {
-                      return a.frac > b.frac;
-                  });
-        int to_add = std::min(remainder, static_cast<int>(frac_count));
+        for (size_t a = 0; a < frac_count; a++) {
+            size_t best = a;
+            for (size_t b = a + 1; b < frac_count; b++) {
+                if (fracs[b].frac > fracs[best].frac) {
+                    best = b;
+                }
+            }
+            if (best != a) {
+                FracEntry tmp = fracs[a];
+                fracs[a] = fracs[best];
+                fracs[best] = tmp;
+            }
+        }
+        int to_add = grid_min_value(remainder, static_cast<int>(frac_count));
         for (int j = 0; j < to_add; j++) {
             int idx = fracs[j].idx;
             old_tracks[idx].base_size++;
@@ -829,9 +829,9 @@ inline ContribArray collect_item_contributions(
             // while preserving padding+border. Capping by given_max_width would strip
             // out padding/border from the contribution (e.g. padding_border_overrides_max_size).
             if (item->blk && item->blk->given_min_width > 0) {
-                contrib.min_content_contribution = std::max(contrib.min_content_contribution,
+                contrib.min_content_contribution = grid_max_value(contrib.min_content_contribution,
                                                             item->blk->given_min_width);
-                contrib.max_content_contribution = std::max(contrib.max_content_contribution,
+                contrib.max_content_contribution = grid_max_value(contrib.max_content_contribution,
                                                             contrib.min_content_contribution);
             }
 
@@ -1053,8 +1053,8 @@ inline void run_enhanced_track_sizing(
                             if (ti < n_col) {
                                 float effective_min = contrib.is_scroll_container ? 0.0f
                                                                                   : contrib.min_content_contribution;
-                                track_min_floor[ti] = std::max(track_min_floor[ti], effective_min);
-                                track_max_floor[ti] = std::max(track_max_floor[ti],
+                                track_min_floor[ti] = grid_max_value(track_min_floor[ti], effective_min);
+                                track_max_floor[ti] = grid_max_value(track_max_floor[ti],
                                                                contrib.max_content_contribution);
                             }
                         }

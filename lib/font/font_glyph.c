@@ -704,6 +704,21 @@ LoadedGlyph* font_load_glyph(FontHandle* handle, const FontStyleDesc* style,
     result = try_load_from_handle_backend(handle, codepoint);
     if (result) {
         fill_loaded_glyph_font_metrics(handle);
+#ifdef __APPLE__
+        // The backend raster font can be the concrete file that was loaded
+        // first (for example Arial Regular), while ct_font_ref may point to
+        // the CSS-matched face for layout advances (for example Arial Bold
+        // for font-weight:600). Keep bitmap rendering and line metrics from
+        // the loaded face, but use the CSS-matched CoreText advance for layout.
+        if (handle->ct_font_ref) {
+            float pixel_ratio = (ctx && ctx->config.pixel_ratio > 0)
+                                    ? ctx->config.pixel_ratio : 1.0f;
+            float ct_adv = font_platform_get_glyph_advance(handle->ct_font_ref, codepoint);
+            if (ct_adv >= 0.0f) {
+                s_loaded_glyph.advance_x = ct_adv * pixel_ratio;
+            }
+        }
+#endif
         if (ctx) cache_loaded_glyph(ctx, handle, codepoint, for_rendering);
         return result;
     }

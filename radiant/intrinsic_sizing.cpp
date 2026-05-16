@@ -9,10 +9,13 @@
 #include "layout_flex.hpp"  // For FlexDirection enum
 #include "grid.hpp"         // For GridTrackList
 #include "form_control.hpp" // For FormDefaults
+#include "layout_pass.hpp"
 #include "rdt_video.h"
 #include "retained_fields.hpp"
+#include "font_face.h"
 #include "../lib/font/font.h"
 #include "../lib/utf.h"
+#include "../lib/str.h"
 #include "../lib/strbuf.h"
 #include "../lib/log.h"
 #include "../lib/tagged.hpp"
@@ -21,9 +24,83 @@
 #include <cstring>
 #include <chrono>
 
+void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
+
 // ============================================================================
 // Helper: Read border width from CSS specified style
 // ============================================================================
+static const char* css_font_family_name_from_value(const CssValue* value) {
+    if (!value) return NULL;
+    if (value->type == CSS_VALUE_TYPE_STRING) return value->data.string;
+    if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
+        return value->data.custom_property.name;
+    }
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        const CssEnumInfo* info = css_enum_info(value->data.keyword);
+        return info ? info->name : NULL;
+    }
+    return NULL;
+}
+
+static bool css_font_family_available_for_intrinsic(LayoutContext* lycon, const char* family) {
+    if (!family) return false;
+    size_t flen = strlen(family);
+    if (str_ieq(family, flen, "serif", 5) ||
+        str_ieq(family, flen, "sans-serif", 10) ||
+        str_ieq(family, flen, "monospace", 9) ||
+        str_ieq(family, flen, "cursive", 7) ||
+        str_ieq(family, flen, "fantasy", 7) ||
+        str_ieq(family, flen, "system-ui", 9) ||
+        str_ieq(family, flen, "ui-serif", 8) ||
+        str_ieq(family, flen, "ui-sans-serif", 13) ||
+        str_ieq(family, flen, "ui-monospace", 12) ||
+        str_ieq(family, flen, "ui-rounded", 10) ||
+        str_ieq(family, flen, "BlinkMacSystemFont", 18)) {
+        return true;
+    }
+    if (lycon->ui_context && lycon->ui_context->font_faces && lycon->ui_context->font_face_count > 0) {
+        for (int i = 0; i < lycon->ui_context->font_face_count; i++) {
+            FontFaceDescriptor* desc = lycon->ui_context->font_faces[i];
+            if (desc && desc->family_name &&
+                str_ieq(desc->family_name, strlen(desc->family_name), family, strlen(family))) {
+                return true;
+            }
+        }
+    }
+    if (lycon->ui_context && lycon->ui_context->font_ctx) {
+        return font_family_exists(lycon->ui_context->font_ctx, family);
+    }
+    return false;
+}
+
+static const char* select_intrinsic_font_family(LayoutContext* lycon, const CssValue* value) {
+    if (!value) return NULL;
+    if (value->type != CSS_VALUE_TYPE_LIST) return css_font_family_name_from_value(value);
+
+    const char* fallback = NULL;
+    for (int i = 0; i < value->data.list.count; i++) {
+        CssValue* item = value->data.list.values[i];
+        const char* family = css_font_family_name_from_value(item);
+        if (!family) continue;
+        fallback = family;
+        if (css_font_family_available_for_intrinsic(lycon, family)) return family;
+    }
+    return fallback;
+}
+
+static bool css_has_horizontal_box_decl(StyleTree* style) {
+    if (!style) return false;
+    return style_tree_get_declaration(style, CSS_PROPERTY_PADDING) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_PADDING_LEFT) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_PADDING_RIGHT) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_BORDER) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_WIDTH) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_LEFT) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_RIGHT) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_LEFT_WIDTH) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_RIGHT_WIDTH);
+}
+
 // Parses the CSS border shorthand to extract border width, matching the logic
 // in resolve_css_style.cpp. Handles: explicit length, keyword (thin/medium/thick),
 // and the CSS default of medium (3px) when style is visible but width unspecified.
@@ -966,6 +1043,14 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         MeasureGuard(DomElement* e) : e(e) {}
         ~MeasureGuard() { e->measuring_intrinsic_width = false; }
     } measure_guard(element);
+    View* saved_view = lycon->view;
+    lycon->view = static_cast<View*>(element);
+    struct IntrinsicViewGuard {
+        LayoutContext* l;
+        View* saved;
+        IntrinsicViewGuard(LayoutContext* l, View* saved) : l(l), saved(saved) {}
+        ~IntrinsicViewGuard() { l->view = saved; }
+    } view_guard(lycon, saved_view);
 
     auto t_measure_start = std::chrono::high_resolution_clock::now();
 
@@ -1111,33 +1196,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 
         if (font_family_decl && font_family_decl->value &&
             (!font_shorthand_decl || font_family_decl->source_order > font_shorthand_decl->source_order)) {
-            // Extract font-family from CSS value
-            const char* longhand_family = NULL;
-            if (font_family_decl->value->type == CSS_VALUE_TYPE_STRING) {
-                longhand_family = font_family_decl->value->data.string;
-            } else if (font_family_decl->value->type == CSS_VALUE_TYPE_LIST) {
-                // Multi-font stack - use first font
-                int list_count = font_family_decl->value->data.list.count;
-                CssValue** list_values = font_family_decl->value->data.list.values;
-                if (list_count > 0 && list_values[0]) {
-                    if (list_values[0]->type == CSS_VALUE_TYPE_STRING) {
-                        longhand_family = list_values[0]->data.string;
-                    } else if (list_values[0]->type == CSS_VALUE_TYPE_KEYWORD) {
-                        // Generic font family keyword
-                        CssEnum kw = list_values[0]->data.keyword;
-                        if (kw == CSS_VALUE_MONOSPACE || kw == CSS_VALUE_UI_MONOSPACE) longhand_family = "monospace";
-                        else if (kw == CSS_VALUE_SANS_SERIF || kw == CSS_VALUE_UI_SANS_SERIF) longhand_family = "sans-serif";
-                        else if (kw == CSS_VALUE_SERIF || kw == CSS_VALUE_UI_SERIF) longhand_family = "serif";
-                        else if (kw == CSS_VALUE_SYSTEM_UI) longhand_family = "system-ui";
-                    } else if (list_values[0]->type == CSS_VALUE_TYPE_CUSTOM) {
-                        // Custom identifier (e.g., "Menlo" as unquoted font name)
-                        longhand_family = list_values[0]->data.custom_property.name;
-                    }
-                }
-            } else if (font_family_decl->value->type == CSS_VALUE_TYPE_CUSTOM) {
-                // Single unquoted font name
-                longhand_family = font_family_decl->value->data.custom_property.name;
-            }
+            const char* longhand_family = select_intrinsic_font_family(lycon, font_family_decl->value);
 
             if (longhand_family) {
                 css_family = longhand_family;
@@ -1265,10 +1324,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     // Intrinsic sizing needs the same outer/inner display mapping as normal
     // layout, especially for CSS table values on non-table HTML elements.
     if (!element->styles_resolved && element->specified_style) {
-        radiant::RunMode saved_run_mode = lycon->run_mode;
-        lycon->run_mode = radiant::RunMode::ComputeSize;
+        radiant::LayoutRunModeScope run_mode_scope(lycon, radiant::RunMode::ComputeSize);
         (lam::unsafe_view_block_element_storage(element))->display = resolve_display_value((void*)element);
-        lycon->run_mode = saved_run_mode;
     }
 
     log_debug("measure_element_intrinsic: tag=%s, outer=%d", element->node_name(),
@@ -1314,11 +1371,38 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             is_inline_non_replaced = true;
         }
     }
+    ViewBlock* resolved_width_view = lam::unsafe_view_block_element_storage(element);
+    if (!content_only && !is_table_display && !is_inline_non_replaced &&
+        resolved_width_view->blk && resolved_width_view->blk->given_width >= 0.0f) {
+        float resolved_width = resolved_width_view->blk->given_width;
+        bool is_border_box = resolved_width_view->blk->box_sizing == CSS_VALUE_BORDER_BOX;
+
+        if (!is_border_box && resolved_width_view->bound) {
+            resolved_width += resolved_width_view->bound->padding.left + resolved_width_view->bound->padding.right;
+            if (resolved_width_view->bound->border) {
+                resolved_width += resolved_width_view->bound->border->width.left +
+                    resolved_width_view->bound->border->width.right;
+            }
+        } else if (is_border_box && resolved_width_view->bound) {
+            float pb_w = resolved_width_view->bound->padding.left + resolved_width_view->bound->padding.right;
+            if (resolved_width_view->bound->border) {
+                pb_w += resolved_width_view->bound->border->width.left +
+                    resolved_width_view->bound->border->width.right;
+            }
+            if (resolved_width < pb_w) resolved_width = pb_w;
+        }
+
+        sizes.min_content = resolved_width;
+        sizes.max_content = resolved_width;
+        return sizes;
+    }
+
     if (element->specified_style && !content_only && !is_table_display && !is_inline_non_replaced) {
         CssDeclaration* width_decl = style_tree_get_declaration(
             element->specified_style, CSS_PROPERTY_WIDTH);
         if (width_decl && width_decl->value &&
             (width_decl->value->type == CSS_VALUE_TYPE_LENGTH ||
+             width_decl->value->type == CSS_VALUE_TYPE_FUNCTION ||
              (width_decl->value->type == CSS_VALUE_TYPE_NUMBER &&
               width_decl->value->data.number.value == 0))) {
             float explicit_width = resolve_length_value(lycon, CSS_PROPERTY_WIDTH,
@@ -1657,7 +1741,18 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     replaced_width = FormDefaults::IMAGE_INPUT_WIDTH;
                 } else {
                     // text, password, number, email, url, search, tel, etc.
-                    replaced_width = FormDefaults::TEXT_WIDTH;
+                    // FormDefaults::TEXT_WIDTH is Chrome's UA border-box width.
+                    // If author CSS provides padding/border, measure the UA
+                    // content box and let the common box addition below apply
+                    // the author box. Otherwise keep the UA border-box value.
+                    bool has_author_box = css_has_horizontal_box_decl(element->specified_style);
+                    if (has_author_box || view_block_replaced->bound) {
+                        replaced_width = FormDefaults::TEXT_WIDTH -
+                            2.0f * (FormDefaults::TEXT_PADDING_H + FormDefaults::TEXT_BORDER);
+                    } else {
+                        replaced_width = FormDefaults::TEXT_WIDTH;
+                        sizes.replaced_includes_pad_border = true;
+                    }
                 }
                 log_debug("  -> replaced INPUT (tag fallback, type=%s) intrinsic width: %.1f",
                     input_type ? input_type : "text", replaced_width);
@@ -3903,6 +3998,37 @@ float calculate_min_content_height(LayoutContext* lycon, DomNode* node, float wi
     return calculate_max_content_height(lycon, node, width);
 }
 
+static bool intrinsic_height_should_collapse_whitespace(CssEnum white_space) {
+    return white_space == CSS_VALUE_NORMAL || white_space == CSS_VALUE_NOWRAP ||
+           white_space == CSS_VALUE_PRE_LINE || white_space == 0;
+}
+
+static size_t normalize_intrinsic_height_text(const char* text, size_t length,
+                                              char* buffer, size_t buffer_size) {
+    if (!text || !buffer || buffer_size == 0) return 0;
+
+    size_t out_pos = 0;
+    bool in_whitespace = true;
+    for (size_t i = 0; i < length && out_pos < buffer_size - 1; i++) {
+        unsigned char ch = (unsigned char)text[i];
+        if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f') {
+            if (!in_whitespace) {
+                buffer[out_pos++] = ' ';
+                in_whitespace = true;
+            }
+        } else {
+            buffer[out_pos++] = (char)ch;
+            in_whitespace = false;
+        }
+    }
+
+    while (out_pos > 0 && buffer[out_pos - 1] == ' ') {
+        out_pos--;
+    }
+    buffer[out_pos] = '\0';
+    return out_pos;
+}
+
 float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float width) {
     if (!node) return 0;
 
@@ -3970,19 +4096,31 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             }
         }
 
-        // Estimate how many lines the text will take based on available width
-        if (width > 0) {
-            size_t text_len = strlen(text);
-            // Get text-transform and font-variant from parent element (inherited)
-            CssEnum text_transform = CSS_VALUE_NONE;
-            CssEnum font_variant = CSS_VALUE_NONE;
-            if (node->parent && node->parent->is_element()) {
-                text_transform = get_element_text_transform(node->parent->as_element());
-                font_variant = get_element_font_variant(node->parent->as_element());
-            }
-            // Measure text width using intrinsic sizing
-            TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, text, text_len, text_transform, font_variant);
-            float text_width = widths.max_content;
+	        // Estimate how many lines the text will take based on available width
+	        if (width > 0) {
+	            size_t text_len = strlen(text);
+	            CssEnum ws_val = get_white_space_value(node);
+	            const char* measure_text = text;
+	            size_t measure_len = text_len;
+	            char normalized_text[4096];
+	            if (intrinsic_height_should_collapse_whitespace(ws_val)) {
+	                measure_len = normalize_intrinsic_height_text(text, text_len,
+	                                                              normalized_text,
+	                                                              sizeof(normalized_text));
+	                if (measure_len == 0) return 0;
+	                measure_text = normalized_text;
+	            }
+	            // Get text-transform and font-variant from parent element (inherited)
+	            CssEnum text_transform = CSS_VALUE_NONE;
+	            CssEnum font_variant = CSS_VALUE_NONE;
+	            if (node->parent && node->parent->is_element()) {
+	                text_transform = get_element_text_transform(node->parent->as_element());
+	                font_variant = get_element_font_variant(node->parent->as_element());
+	            }
+	            // Measure text width using intrinsic sizing
+	            TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, measure_text, measure_len,
+	                                                                       text_transform, font_variant);
+	            float text_width = widths.max_content;
 
             // Calculate number of lines (rounded up)
             // white-space: nowrap/pre prevents text wrapping → always 1 line
@@ -3993,8 +4131,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             // can differ from character-by-character accumulation by tiny amounts due to
             // floating-point rounding. Without tolerance, text that fits can appear to overflow.
             int num_lines = 1;
-            CssEnum ws_val = get_white_space_value(node);
-            if (ws_val != CSS_VALUE_NOWRAP && ws_val != CSS_VALUE_PRE && text_width > width + 0.005f) {
+	            if (ws_val != CSS_VALUE_NOWRAP && ws_val != CSS_VALUE_PRE && text_width > width + 0.005f) {
                 float effective_width = width;
                 if (widths.min_content > 0 && widths.min_content <= width) {
                     int units_per_line = (int)(width / widths.min_content); // INT_CAST_OK: integer count
@@ -4008,8 +4145,8 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                 num_lines = (int)ceil(text_width / effective_width); // INT_CAST_OK: integer line count
             }
 
-            log_debug("calculate_max_content_height: text len=%zu, text_width=%.1f, available_width=%.1f, lines=%d",
-                      text_len, text_width, width, num_lines);
+	            log_debug("calculate_max_content_height: text len=%zu, measure_len=%zu, text_width=%.1f, available_width=%.1f, lines=%d",
+	                      text_len, measure_len, text_width, width, num_lines);
 
             return line_height * num_lines;
         }
@@ -4017,13 +4154,23 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         return line_height;
     }
 
-    // For elements, we'd need to do a full layout pass
-    // For now, use a simplified estimation
-    DomElement* element = node->as_element();
-    if (!element) return 0;
+	    // For elements, we'd need to do a full layout pass
+	    // For now, use a simplified estimation
+	    DomElement* element = node->as_element();
+	    if (!element) return 0;
 
-    // CSS 2.1 §9.2.4: Elements with display: none do not generate boxes
-    // and contribute zero height.
+	    {
+	        FontBox saved_style_font = lycon->font;
+	        View* saved_style_view = lycon->view;
+	        radiant::LayoutRunModeScope run_mode_scope(lycon, radiant::RunMode::ComputeSize);
+	        lycon->view = static_cast<View*>(element);
+	        dom_node_resolve_style(element, lycon);
+	        lycon->view = saved_style_view;
+	        lycon->font = saved_style_font;
+	    }
+
+	    // CSS 2.1 §9.2.4: Elements with display: none do not generate boxes
+	    // and contribute zero height.
     ViewBlock* view = lam::unsafe_view_block_element_storage(element);
     if (view->display.outer == CSS_VALUE_NONE || view->display.inner == CSS_VALUE_NONE) {
         return 0;
@@ -4686,6 +4833,13 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                 DomElement* child_elem = child->as_element();
                 ViewElement* child_ve = lam::view_require_element(static_cast<View*>(child_elem));
                 if (child_ve->display.outer == CSS_VALUE_NONE || child_ve->display.inner == CSS_VALUE_NONE) {
+                    continue;
+                }
+                ViewBlock* child_block = lam::view_as_block(child_ve);
+                if (child_block && child_block->position &&
+                    (child_block->position->position == CSS_VALUE_ABSOLUTE ||
+                     child_block->position->position == CSS_VALUE_FIXED ||
+                     element_has_float(child_block))) {
                     continue;
                 }
             }

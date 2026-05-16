@@ -19,15 +19,13 @@
  * The TrackCounts struct tracks implicit and explicit track counts,
  * enabling coordinate conversion between systems.
  *
- * TODO: std::* Migration Plan (Phase 5+)
- * - <algorithm> include for std::min/std::max → MIN/MAX macros
- * - Uses mostly C types already, minimal migration needed
+ * Uses C+ style helpers and fixed-width types so grid layout headers do not
+ * depend on STL containers or algorithms.
  */
 
 #ifdef __cplusplus
 
 #include <cstdint>
-#include <algorithm>  // TODO: Replace with MIN/MAX macros
 #include <cassert>
 
 // Undefine min/max macros if defined (commonly from windows.h or view.hpp)
@@ -43,6 +41,16 @@ namespace grid {
 
 // Forward declarations
 struct TrackCounts;
+
+template <typename T>
+constexpr T grid_min_value(T a, T b) {
+    return (a < b) ? a : b;
+}
+
+template <typename T>
+constexpr T grid_max_value(T a, T b) {
+    return (a > b) ? a : b;
+}
 
 /**
  * Cell occupancy state for auto-placement tracking
