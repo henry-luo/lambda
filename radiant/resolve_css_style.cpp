@@ -3136,6 +3136,22 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                 }
             }
 
+            // heading font-size comes from the HTML UA stylesheet. It is already
+            // resolved by apply_element_default_style() against the parent font
+            // size, so inheritance must not overwrite it with the parent's
+            // computed font-size unless author CSS explicitly set font-size.
+            if (prop_id == CSS_PROPERTY_FONT_SIZE) {
+                uintptr_t tag = dom_elem->tag();
+                if (tag >= HTM_TAG_H1 && tag <= HTM_TAG_H6) {
+                    ViewSpan* span = lam::view_require_element(lycon->view);
+                    if (span->font && span->font->font_size > 0) {
+                        log_debug("[FONT INHERIT] Heading keeps UA font-size %.1f",
+                            span->font->font_size);
+                        continue;
+                    }
+                }
+            }
+
             // Property not set, check parent chain for inherited declaration
             // Walk up the parent chain until we find a declaration
             DomElement* ancestor = dom_parent_element(dom_elem);
@@ -3438,7 +3454,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
         // or table-column-group elements.
         if (is_row_or_rowgroup || is_column) {
             ViewBlock* block = lam::view_as_block(span);
-            if (block->blk) {
+            if (block && block->blk) {
                 if (block->blk->given_width >= 0) {
                     log_debug("[CSS] Zeroing given_width on table internal element (display.inner=%d)", di);
                     block->blk->given_width = -1;
@@ -3471,7 +3487,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
         (dom_elem->tag_name && strcmp(dom_elem->tag_name, "table") == 0);
     if (is_html_table && di == CSS_VALUE_TABLE) {
         ViewBlock* block = lam::view_as_block(span);
-        if (block->blk) {
+        if (block && block->blk) {
             CssDeclaration* box_sizing_decl = style_tree ? style_tree_get_declaration(style_tree, CSS_PROPERTY_BOX_SIZING) : nullptr;
             if (!box_sizing_decl) {
                 block->blk->box_sizing = CSS_VALUE_BORDER_BOX;

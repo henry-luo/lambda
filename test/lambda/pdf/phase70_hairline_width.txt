@@ -1,0 +1,1 @@
+{ path_count: 1, width: true, vector_effect: true}

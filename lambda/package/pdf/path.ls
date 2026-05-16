@@ -431,7 +431,11 @@ fn _emit_path(st, fill, stroke, fill_rule) {
     if (len(st.segments) == 0) { { state: _clear(st), emit: [] } }
     else {
         let d = _segments_to_d(st.segments)
-        let lw = st.line_width
+        // PDF line width 0 is a hairline: the thinnest line the device can render.
+        // Preserve that explicitly in generated SVG instead of relying on Radiant's
+        // generic SVG stroke renderer to clamp all fractional strokes.
+        let hairline = ((stroke != "none") and (float(st.line_width) == 0.0))
+        let lw = if (hairline) { 1.0 } else { st.line_width }
         let dash = _format_dash(st.dash_array)
         let cap = _line_cap_name(st.line_cap)
         let join = _line_join_name(st.line_join)
@@ -439,7 +443,57 @@ fn _emit_path(st, fill, stroke, fill_rule) {
         let has_extras = ((dash != "none")
                           or (st.fill_opacity < 1.0)
                           or (st.stroke_opacity < 1.0))
-        let elem = if (has_extras and (fill_rule == "evenodd")) {
+        let elem = if (hairline and has_extras and (fill_rule == "evenodd")) {
+            <path d: d,
+                  fill: fill,
+                  'fill-rule': "evenodd",
+                  'fill-opacity':   util.fmt_num(st.fill_opacity),
+                  stroke: stroke,
+                  'stroke-opacity': util.fmt_num(st.stroke_opacity),
+                  'stroke-width':   util.fmt_num(lw),
+                  'stroke-linecap': cap,
+                  'stroke-linejoin': join,
+                  'stroke-miterlimit': miter,
+                  'stroke-dasharray': dash,
+                  'stroke-dashoffset': util.fmt_num(st.dash_phase),
+                  'vector-effect': "non-scaling-stroke">
+        }
+        else if (hairline and has_extras) {
+            <path d: d,
+                  fill: fill,
+                  'fill-opacity':   util.fmt_num(st.fill_opacity),
+                  stroke: stroke,
+                  'stroke-opacity': util.fmt_num(st.stroke_opacity),
+                  'stroke-width':   util.fmt_num(lw),
+                  'stroke-linecap': cap,
+                  'stroke-linejoin': join,
+                  'stroke-miterlimit': miter,
+                  'stroke-dasharray': dash,
+                  'stroke-dashoffset': util.fmt_num(st.dash_phase),
+                  'vector-effect': "non-scaling-stroke">
+        }
+        else if (hairline and (fill_rule == "evenodd")) {
+            <path d: d,
+                  fill: fill,
+                  'fill-rule': "evenodd",
+                  stroke: stroke,
+                  'stroke-linecap': cap,
+                  'stroke-linejoin': join,
+                  'stroke-miterlimit': miter,
+                  'stroke-width': util.fmt_num(lw),
+                  'vector-effect': "non-scaling-stroke">
+        }
+        else if (hairline) {
+            <path d: d,
+                  fill: fill,
+                  stroke: stroke,
+                  'stroke-linecap': cap,
+                  'stroke-linejoin': join,
+                  'stroke-miterlimit': miter,
+                  'stroke-width': util.fmt_num(lw),
+                  'vector-effect': "non-scaling-stroke">
+        }
+        else if (has_extras and (fill_rule == "evenodd")) {
             <path d: d,
                   fill: fill,
                   'fill-rule': "evenodd",
