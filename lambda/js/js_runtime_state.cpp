@@ -692,11 +692,10 @@ extern "C" void js_runtime_set_input(void* input) {
 }
 
 extern "C" Item js_get_this() {
-    // Sloppy mode coercion: when this is null-like, return globalThis.
-    // Three null representations: {0} (initial/RAW_POINTER), ITEM_NULL (LMD_TYPE_NULL<<56)
-    // Both mean "no explicit this set" and should map to globalThis in sloppy mode.
-    // Strict mode bare calls use ITEM_JS_UNDEFINED which is NOT coerced.
-    if (js_current_this.item == 0 || js_current_this.item == ITEM_NULL) {
+    // Sloppy-mode coercion is applied by js_call_function/js_compute_callback_this
+    // before installing the binding. Here only the uninitialized sentinel means
+    // "no explicit this"; an actual JS null must remain observable to strict code.
+    if (js_current_this.item == 0) {
         extern Item js_get_global_this();
         return js_get_global_this();
     }
