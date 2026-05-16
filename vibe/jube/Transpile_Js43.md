@@ -901,3 +901,128 @@ Result: 33,573 / 34,165 fully passing, 583 failing, 9 non-fully-passing, 215
 improvements, and 0 regressions versus baseline. The nine non-fully-passing
 rows were recovered in isolated retry and are the existing slow/batch-kill
 family, mostly Array callback/index methods plus one RegExp whitespace case.
+
+## 14. Async / Generator Constructor Shape Pass
+
+Status on 2026-05-16 after the async/generator cluster pass:
+
+- Fixed dynamic `Function`-family compilation so each constructor parses the
+  correct source form instead of compiling an ordinary function and patching
+  flags afterward:
+  - `AsyncFunction` compiles `async function anonymous(...) { ... }`;
+  - `GeneratorFunction` compiles `function* anonymous(...) { ... }`;
+  - `AsyncGeneratorFunction` compiles `async function* anonymous(...) { ... }`;
+  - generated dynamic functions now receive the spec name `anonymous`.
+- Fixed async/generator function prototype shape:
+  - `%AsyncFunction.prototype%`, `%GeneratorFunction.prototype%`, and
+    `%AsyncGeneratorFunction.prototype%` inherit from `Function.prototype`;
+  - their constructor objects inherit from `Function`;
+  - `.constructor` and `@@toStringTag` descriptors are non-enumerable and
+    non-writable as expected by Test262.
+- Fixed async/generator constructability:
+  - async functions are no longer constructable;
+  - async non-generator functions no longer expose an own public `.prototype`;
+  - typed-array species construction rejects async functions as constructors.
+- Fixed async iterator / async generator prototype plumbing:
+  - `%AsyncIteratorPrototype%` now exposes `[Symbol.asyncIterator]`;
+  - async generator shared prototypes now expose `next`, `return`, and `throw`.
+- Fixed dynamic generator early errors:
+  - `yield` in generator formal parameters and `await` in async formal
+    parameters now fail early instead of reaching MIR lowering with missing
+    labels.
+
+Focused gates:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_async_generator_shape_batch.txt --write-failures=temp/js43_async_generator_shape_after_early_error_failures.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_object_remaining_batch.txt --write-failures=temp/js43_object_remaining_after_async_gen_seq_failures.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_object_tostring_batch.txt --write-failures=temp/js43_object_tostring_after_async_gen_seq_failures.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_regression_followup_batch.txt --write-failures=temp/js43_regression_followup_after_async_gen_failures.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_ownkeys_symbols_integrity_batch.txt --write-failures=temp/js43_ownkeys_symbols_after_async_gen_seq_failures.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_arguments_descriptor_batch.txt --write-failures=temp/js43_arguments_descriptor_after_async_gen_failures.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_object_assign_batch.txt --write-failures=temp/js43_object_assign_after_async_gen_failures.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_array_flat_batch.txt --write-failures=temp/js43_array_flat_after_async_gen_seq_failures.tsv
+```
+
+Results: async/generator shape batch 30 / 30 passed; Object remaining 26 / 26
+passed; Object toString 9 / 9 passed; regression follow-up 8 / 8 passed;
+ownKeys/symbol 8 / 8 passed; arguments descriptor 5 / 5 passed; Object.assign
+8 / 8 passed; Array flat/flatMap 6 / 6 passed.
+
+Broad gate before the sparse Array callback fix:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-only --write-failures=temp/js43_after_async_generator_dynamic_full_failures.tsv
+```
+
+Result: 33,601 / 34,165 fully passing, 537 failing, 27 non-fully-passing, 252
+improvements, and 3 reported regressions. The three regressions were timeout
+rows in the sparse Array callback family and are covered by section 15.
+
+## 15. Sparse Array Callback Timeout Pass
+
+Status on 2026-05-16 after fixing the remaining Array callback timeout family:
+
+- Fixed `Array.prototype.map`, `filter`, `forEach`, `some`, and `every` on
+  sparse arrays with large dense hole ranges:
+  - the shared iterative callback helper now jumps to the next present own
+    index when the prototype chain has no numeric properties;
+  - dense carriers are scanned directly for non-hole slots instead of doing a
+    companion-map lookup for every hole;
+  - companion-map numeric entries are still considered, so accessor/data index
+    properties installed by `defineProperty` remain visible;
+  - after each callback, the prototype chain is rechecked and iteration falls
+    back to the sequential `HasProperty` path if user code adds numeric
+    prototype properties.
+- The older method-name path uses the same next-own-index helper for
+  `forEach`, `some`, and `every`, keeping both dispatch paths aligned.
+
+Focused gate:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_sparse_array_iter_regressions_batch.txt --write-failures=temp/js43_sparse_array_iter5_after_generic_fix_failures.tsv
+```
+
+Result: 5 / 5 passed. The timeout cases now run in roughly 22-28ms each in the
+debug Test262 runner instead of hitting the 10s per-test cap.
+
+Guard gates:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_array_flat_batch.txt --write-failures=temp/js43_array_flat_after_sparse_iter_failures.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_object_assign_batch.txt --write-failures=temp/js43_object_assign_after_sparse_iter_failures.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_regression_followup_batch.txt --write-failures=temp/js43_regression_followup_after_sparse_iter_failures.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_async_generator_shape_batch.txt --write-failures=temp/js43_async_generator_shape_after_sparse_iter_failures.tsv
+```
+
+Results: Array flat/flatMap 6 / 6 passed; Object.assign 8 / 8 passed;
+regression follow-up 8 / 8 passed; async/generator shape 30 / 30 passed.
+
+Next recommended gate: rerun the full Test262 batch and update the baseline if
+the three sparse Array timeout rows are gone from the regression list.
+
+## 16. Full Test262 Baseline Update
+
+Status on 2026-05-16 after rerunning the full js262 batch and updating the
+baseline through the gated updater:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-only --update-baseline --write-failures=temp/js43_update_baseline_failures.tsv
+```
+
+Result: 33,580 / 34,165 fully passing, 513 failing, 72 non-fully-passing, 251
+improvements, and 0 regressions. The baseline gate passed with
+`batch-lost=0`, `crash=0`, and the stable minimum satisfied.
+
+Baseline artifacts:
+
+- `test/js262/test262_baseline.txt` now records 33,580 fully passing tests.
+- `test/js262/t262_partial.txt` now records 38 slow entries from this run.
+- `temp/js43_update_baseline_failures.tsv` records 547 manifest rows, with
+  summaries in `temp/js43_update_baseline_failures_by_feature.tsv` and
+  `temp/js43_update_baseline_failures_by_path.tsv`.
+
+Note: `test/js262` is a symlink to `../lambda-test/js262`, so the baseline
+update command needs permission to write through that symlink target. A
+non-elevated run can report "Baseline updated" even when the silent `fopen`
+inside the runner cannot write the target.

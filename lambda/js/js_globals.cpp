@@ -5859,6 +5859,7 @@ struct JsFuncFlagsAccess {
     uint8_t flags;
 };
 #define JS_FUNC_FLAG_GENERATOR_EARLY 1
+#define JS_FUNC_FLAG_ASYNC_EARLY     128
 
 static Item js_get_generator_function_prototype(bool is_async) {
     Item* cache = is_async ? &js_async_generator_function_proto_cache : &js_generator_function_proto_cache;
@@ -5867,6 +5868,14 @@ static Item js_get_generator_function_prototype(bool is_async) {
     // Create a MAP to serve as GeneratorFunction.prototype (or AsyncGeneratorFunction.prototype)
     Item proto = js_object_create(ItemNull);
     if (get_type_id(proto) != LMD_TYPE_MAP) return ItemNull;
+    {
+        Item function_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Function", 8))});
+        if (get_type_id(function_ctor) == LMD_TYPE_FUNC) {
+            Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
+            Item function_proto = js_property_get(function_ctor, proto_key);
+            if (get_type_id(function_proto) == LMD_TYPE_MAP) js_set_prototype(proto, function_proto);
+        }
+    }
 
     // Create the constructor function — use DIFFERENT func_ptr for sync vs async so that
     // js_new_function() caches them separately. Sharing the same func_ptr would cause
@@ -5877,11 +5886,25 @@ static Item js_get_generator_function_prototype(bool is_async) {
     if (get_type_id(ctor_fn) == LMD_TYPE_FUNC) {
         JsFuncFlagsAccess* fn = (JsFuncFlagsAccess*)ctor_fn.function;
         fn->name = heap_create_name(ctor_name, strlen(ctor_name));
+        Item function_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Function", 8))});
+        if (get_type_id(function_ctor) == LMD_TYPE_FUNC) {
+            js_set_prototype(ctor_fn, function_ctor);
+        }
     }
 
     // Set .constructor on the prototype
     Item ctor_key = (Item){.item = s2it(heap_create_name("constructor", 11))};
     js_property_set(proto, ctor_key, ctor_fn);
+    js_mark_non_writable(proto, ctor_key);
+    js_mark_non_enumerable(proto, ctor_key);
+
+    {
+        Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
+        Item tag_val = (Item){.item = s2it(heap_create_name(ctor_name, strlen(ctor_name)))};
+        js_property_set(proto, tag_key, tag_val);
+        js_mark_non_writable(proto, tag_key);
+        js_mark_non_enumerable(proto, tag_key);
+    }
 
     // v90: Set the constructor's .prototype field to the proto MAP so
     // Object.getOwnPropertyDescriptor returns the correct value.
@@ -5917,13 +5940,34 @@ static Item js_get_async_function_prototype() {
     if (js_async_function_proto_cache.item != 0) return js_async_function_proto_cache;
     Item proto = js_object_create(ItemNull);
     if (get_type_id(proto) != LMD_TYPE_MAP) return ItemNull;
+    {
+        Item function_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Function", 8))});
+        if (get_type_id(function_ctor) == LMD_TYPE_FUNC) {
+            Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
+            Item function_proto = js_property_get(function_ctor, proto_key);
+            if (get_type_id(function_proto) == LMD_TYPE_MAP) js_set_prototype(proto, function_proto);
+        }
+    }
     Item ctor_fn = js_new_function((void*)js_async_func_ctor_placeholder, 1);
     if (get_type_id(ctor_fn) == LMD_TYPE_FUNC) {
         JsFuncFlagsAccess* fn = (JsFuncFlagsAccess*)ctor_fn.function;
         fn->name = heap_create_name("AsyncFunction", 13);
+        Item function_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Function", 8))});
+        if (get_type_id(function_ctor) == LMD_TYPE_FUNC) {
+            js_set_prototype(ctor_fn, function_ctor);
+        }
     }
     Item ctor_key = (Item){.item = s2it(heap_create_name("constructor", 11))};
     js_property_set(proto, ctor_key, ctor_fn);
+    js_mark_non_writable(proto, ctor_key);
+    js_mark_non_enumerable(proto, ctor_key);
+    {
+        Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
+        Item tag_val = (Item){.item = s2it(heap_create_name("AsyncFunction", 13))};
+        js_property_set(proto, tag_key, tag_val);
+        js_mark_non_writable(proto, tag_key);
+        js_mark_non_enumerable(proto, tag_key);
+    }
     if (get_type_id(ctor_fn) == LMD_TYPE_FUNC) {
         JsFuncFlagsAccess* cfn = (JsFuncFlagsAccess*)ctor_fn.function;
         cfn->prototype = proto;
@@ -6142,6 +6186,7 @@ extern Item js_throw_type_error(const char* msg);
 #define JS_FUNC_FLAG_ARROW_G     2
 #define JS_FUNC_FLAG_TYPED_ARRAY_METHOD_G 4
 #define JS_FUNC_FLAG_METHOD_G    32
+#define JS_FUNC_FLAG_ASYNC_G     128
 
 struct JsFunctionLayout {
     TypeId type_id;
@@ -6183,6 +6228,7 @@ static bool js_func_is_constructor(Item func_item) {
     JsFunctionLayout* fn = (JsFunctionLayout*)func_item.function;
     if (fn->flags & JS_FUNC_FLAG_ARROW_G) return false;
     if (fn->flags & JS_FUNC_FLAG_GENERATOR_G) return false;
+    if (fn->flags & JS_FUNC_FLAG_ASYNC_G) return false;
     if (fn->flags & JS_FUNC_FLAG_TYPED_ARRAY_METHOD_G) return false;
     if (fn->flags & JS_FUNC_FLAG_METHOD_G) return false;
     if (fn->builtin_id > 0) return false;
@@ -6199,6 +6245,7 @@ static bool js_func_has_own_prototype(Item func_item) {
     // but they do not have a public own "prototype" property.
     if (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS_G) return false;
     if (fn->flags & JS_FUNC_FLAG_ARROW_G) return false;
+    if ((fn->flags & JS_FUNC_FLAG_ASYNC_G) && !(fn->flags & JS_FUNC_FLAG_GENERATOR_G)) return false;
     if ((fn->flags & JS_FUNC_FLAG_METHOD_G) && !(fn->flags & JS_FUNC_FLAG_GENERATOR_G)) return false;
     if (fn->flags & JS_FUNC_FLAG_TYPED_ARRAY_METHOD_G) return false;
     if (fn->builtin_id > 0) return false;
@@ -10145,7 +10192,9 @@ extern "C" Item js_is_constructor(Item fn) {
     JsFunctionLayout* jfn = (JsFunctionLayout*)fn.function;
     // Not constructable: builtins, arrows, generators, concise methods, and typed-array prototype methods.
     if (jfn->builtin_id > 0 || jfn->builtin_id == -2 ||
-        (jfn->flags & (JS_FUNC_FLAG_ARROW_G | JS_FUNC_FLAG_GENERATOR_G | JS_FUNC_FLAG_METHOD_G | JS_FUNC_FLAG_TYPED_ARRAY_METHOD_G))) {
+        (jfn->flags & (JS_FUNC_FLAG_ARROW_G | JS_FUNC_FLAG_GENERATOR_G |
+            JS_FUNC_FLAG_ASYNC_G | JS_FUNC_FLAG_METHOD_G |
+            JS_FUNC_FLAG_TYPED_ARRAY_METHOD_G))) {
         return (Item){.item = ITEM_FALSE};
     }
     return (Item){.item = ITEM_TRUE};

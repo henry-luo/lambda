@@ -9,6 +9,7 @@ static bool js_source_contains_import_meta(const char* source, size_t len);
 static bool js_dynamic_function_source_has_hashbang(const char* source, size_t len);
 static bool js_dynamic_function_param_has_invalid_html_close_comment(const char* source, size_t len);
 static bool js_eval_at_line_terminator(const char* source, size_t len, size_t pos, size_t* width);
+extern "C" void js_set_function_name(Item fn_item, Item name_item);
 
 static Item js_dynamic_function_throw_syntax_error(const char* message) {
     js_throw_syntax_error((Item){.item = s2it(heap_create_name(message, (int)strlen(message)))});
@@ -16,11 +17,10 @@ static Item js_dynamic_function_throw_syntax_error(const char* message) {
 }
 
 // ============================================================================
-// new Function(param1, param2, ..., body) — dynamic function compilation
-// Called from JIT code when new Function(...) is encountered.
-// Compiles a function body string into a new JsFunction object.
+// new Function / GeneratorFunction / AsyncFunction dynamic compilation
 // ============================================================================
-extern "C" Item js_new_function_from_string(Item* args, int argc) {
+static Item js_new_function_from_string_kind(Item* args, int argc, const char* parse_prefix,
+        const char* source_prefix) {
     if (!js_source_runtime) {
         log_error("js-new-function: no runtime context for dynamic function compilation");
         return ItemNull;
@@ -31,7 +31,9 @@ extern "C" Item js_new_function_from_string(Item* args, int argc) {
     // → (function(param1, param2) { body })
     // new Function() with no args → (function() {})
     StrBuf* sb = strbuf_new_cap(256);
-    strbuf_append_str(sb, "(function(");
+    strbuf_append_str(sb, "(");
+    strbuf_append_str(sb, parse_prefix);
+    strbuf_append_str(sb, "(");
 
     // params are args[0..argc-2], body is args[argc-1]
     // per spec, each argument is converted to string via ToString()
@@ -206,11 +208,16 @@ extern "C" Item js_new_function_from_string(Item* args, int argc) {
 
     log_debug("js-new-function: compiled dynamic function OK (type=%d)", get_type_id(fn_item));
 
-    // Set spec-correct toString() source: "function anonymous(params\n) {\nbody\n}"
+    // Set spec-correct name and toString() source:
+    // "function anonymous(params\n) {\nbody\n}" and generator/async variants.
     // The internal source was (function(params) { body }) which doesn't match the spec.
     if (get_type_id(fn_item) == LMD_TYPE_FUNC) {
+        Item anon_name = (Item){.item = s2it(heap_create_name("anonymous", 9))};
+        js_set_function_name(fn_item, anon_name);
+
         StrBuf* src_buf = strbuf_new_cap(256);
-        strbuf_append_str(src_buf, "function anonymous(");
+        strbuf_append_str(src_buf, source_prefix);
+        strbuf_append_str(src_buf, "(");
         for (int i = 0; i < argc - 1; i++) {
             if (i > 0) strbuf_append_str(src_buf, ",");
             String* ps2 = it2s(args[i]);
@@ -237,6 +244,21 @@ extern "C" Item js_new_function_from_string(Item* args, int argc) {
     }
 
     return fn_item;
+}
+
+extern "C" Item js_new_function_from_string(Item* args, int argc) {
+    return js_new_function_from_string_kind(args, argc, "function", "function anonymous");
+}
+
+extern "C" Item js_new_async_function_from_string(Item* args, int argc) {
+    return js_new_function_from_string_kind(args, argc, "async function", "async function anonymous");
+}
+
+extern "C" Item js_new_generator_function_from_string(Item* args, int argc, int is_async) {
+    if (is_async) {
+        return js_new_function_from_string_kind(args, argc, "async function*", "async function* anonymous");
+    }
+    return js_new_function_from_string_kind(args, argc, "function*", "function* anonymous");
 }
 
 // ============================================================================
