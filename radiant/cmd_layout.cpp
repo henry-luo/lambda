@@ -106,8 +106,10 @@ void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, S
 void apply_stylesheet_to_dom_tree_fast(DomElement* root, CssStylesheet* stylesheet, SelectorMatcher* matcher, Pool* pool, CssEngine* engine);
 static void apply_rule_to_dom_element(DomElement* elem, CssRule* rule, SelectorMatcher* matcher, Pool* pool, CssEngine* engine);
 CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, const char* base_path, Pool* pool, int* stylesheet_count, int* linked_count_out = nullptr);
-void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* base_path, Pool* pool, CssStylesheet*** stylesheets, int* count);
-void collect_inline_styles_to_list(Element* elem, CssEngine* engine, Pool* pool, CssStylesheet*** stylesheets, int* count);
+void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* base_path, Pool* pool,
+                                CssStylesheet*** stylesheets, int* count, int depth = 0, bool recurse = true);
+void collect_inline_styles_to_list(Element* elem, CssEngine* engine, Pool* pool,
+                                   CssStylesheet*** stylesheets, int* count, int depth = 0, bool recurse = true);
 void apply_inline_style_attributes(DomElement* dom_elem, Element* html_elem, Pool* pool);
 static const int MAX_CSS_TREE_DEPTH = 512;
 
@@ -1273,7 +1275,8 @@ static void prefetch_document_subresources(Element* html_root, const char* base_
  * Recursively collect <link rel="stylesheet"> references from HTML
  * Loads and parses external CSS files
  */
-void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* base_path, Pool* pool, CssStylesheet*** stylesheets, int* count, int depth = 0) {
+void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* base_path, Pool* pool,
+                                CssStylesheet*** stylesheets, int* count, int depth, bool recurse) {
     if (!elem || !engine || !pool || !stylesheets || !count) return;
     if (depth > MAX_CSS_TREE_DEPTH) return;
 
@@ -1481,10 +1484,12 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
     }
 
     // Recursively process children
-    for (int64_t i = 0; i < elem->length; i++) {
-        Item child_item = elem->items[i];
-        if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-            collect_linked_stylesheets(child_item.element, engine, base_path, pool, stylesheets, count, depth + 1);
+    if (recurse) {
+        for (int64_t i = 0; i < elem->length; i++) {
+            Item child_item = elem->items[i];
+            if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
+                collect_linked_stylesheets(child_item.element, engine, base_path, pool, stylesheets, count, depth + 1, true);
+            }
         }
     }
 }
@@ -1493,7 +1498,8 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
  * Recursively collect <style> inline CSS from HTML
  * Parses and returns list of stylesheets
  */
-void collect_inline_styles_to_list(Element* elem, CssEngine* engine, Pool* pool, CssStylesheet*** stylesheets, int* count, int depth = 0) {
+void collect_inline_styles_to_list(Element* elem, CssEngine* engine, Pool* pool,
+                                   CssStylesheet*** stylesheets, int* count, int depth, bool recurse) {
     if (!elem || !engine || !pool || !stylesheets || !count) return;
     if (depth > MAX_CSS_TREE_DEPTH) return;
 
@@ -1543,10 +1549,45 @@ void collect_inline_styles_to_list(Element* elem, CssEngine* engine, Pool* pool,
     }
 
     // Recursively process children
+    if (recurse) {
+        for (int64_t i = 0; i < elem->length; i++) {
+            Item child_item = elem->items[i];
+            if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
+                collect_inline_styles_to_list(child_item.element, engine, pool, stylesheets, count, depth + 1, true);
+            }
+        }
+    }
+}
+
+static void collect_stylesheets_in_document_order(Element* elem, CssEngine* engine,
+                                                  const char* base_path, Pool* pool,
+                                                  CssStylesheet*** stylesheets,
+                                                  int* count, int* linked_count,
+                                                  int depth = 0) {
+    if (!elem || !engine || !pool || !stylesheets || !count) return;
+    if (depth > MAX_CSS_TREE_DEPTH) return;
+
+    TypeElmt* type = (TypeElmt*)elem->type;
+    if (type) {
+        if (str_ieq_const(type->name.str, strlen(type->name.str), "link")) {
+            int before = *count;
+            collect_linked_stylesheets(elem, engine, base_path, pool,
+                                       stylesheets, count, depth, false);
+            if (linked_count && *count > before) {
+                *linked_count += *count - before;
+            }
+        } else if (str_ieq_const(type->name.str, strlen(type->name.str), "style")) {
+            collect_inline_styles_to_list(elem, engine, pool,
+                                          stylesheets, count, depth, false);
+        }
+    }
+
     for (int64_t i = 0; i < elem->length; i++) {
         Item child_item = elem->items[i];
         if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-            collect_inline_styles_to_list(child_item.element, engine, pool, stylesheets, count, depth + 1);
+            collect_stylesheets_in_document_order(child_item.element, engine,
+                                                  base_path, pool, stylesheets,
+                                                  count, linked_count, depth + 1);
         }
     }
 }
@@ -1677,20 +1718,15 @@ CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, c
     // so subsequent serial loaders find them already cached on disk.
     prefetch_document_subresources(html_root, base_path);
 
-    // Step 1: Collect linked stylesheets first. The returned array is applied in
-    // order later, and the JS re-scan path assumes linked sheets occupy the
-    // leading entries. This also matches the common document pattern:
-    // <link rel="stylesheet"> followed by author override <style> blocks.
-    log_debug("[CSS] Step 1: Collecting linked stylesheets...");
-    collect_linked_stylesheets(html_root, engine, base_path, pool, &stylesheets, stylesheet_count, 0);
-
-    int linked_count = *stylesheet_count;
+    // CSS Cascade §6.4: stylesheet source order follows document order across
+    // both <link rel=stylesheet> and <style>. A later external sheet must win
+    // ties against earlier inline rules, and vice versa.
+    log_debug("[CSS] Collecting stylesheets in document order...");
+    int linked_count = 0;
+    collect_stylesheets_in_document_order(html_root, engine, base_path, pool,
+                                          &stylesheets, stylesheet_count,
+                                          &linked_count, 0);
     if (linked_count_out) *linked_count_out = linked_count;
-
-    // Step 2: Collect inline <style> rules after linked stylesheets so equal
-    // specificity author rules in later override blocks win source-order ties.
-    log_debug("[CSS] Step 2: Collecting inline <style> elements...");
-    collect_inline_styles_to_list(html_root, engine, pool, &stylesheets, stylesheet_count, 0);
 
     int inline_count = *stylesheet_count - linked_count;
 
