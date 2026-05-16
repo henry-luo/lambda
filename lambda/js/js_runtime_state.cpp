@@ -850,8 +850,10 @@ extern "C" Item js_build_arguments_object() {
     Item companion = js_new_object();
     companion.map->map_kind = MAP_KIND_ARRAY_PROPS;
     arr.array->extra = (int64_t)(uintptr_t)companion.map;
-    js_property_set(companion, (Item){.item = s2it(heap_create_name("__sym_4", 7))},
+    Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
+    js_property_set(companion, tag_key,
                     (Item){.item = s2it(heap_create_name("Arguments", 9))});
+    js_mark_non_enumerable(companion, tag_key);
 
     // ES6 §9.4.4.6 step 12: Set Symbol.iterator to Array.prototype.values
     Item si_key = (Item){.item = s2it(heap_create_name("__sym_1", 7))};
