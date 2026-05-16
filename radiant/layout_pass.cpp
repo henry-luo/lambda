@@ -82,6 +82,7 @@ KnownDimensions layout_known_dimensions_from_context(::LayoutContext* lycon) {
 bool layout_pass_cache_get(::LayoutContext* lycon, ::DomElement* element,
     KnownDimensions known_dimensions, SizeF* out_size, const char* label) {
     if (!lycon || !element || !element->layout_cache || !out_size) return false;
+    if (lycon->run_mode != RunMode::ComputeSize) return false;
 
     if (layout_cache_get(element->layout_cache, known_dimensions, lycon->available_space,
                          lycon->run_mode, out_size)) {
@@ -103,6 +104,7 @@ bool layout_pass_cache_get(::LayoutContext* lycon, ::DomElement* element,
 void layout_pass_cache_store(::LayoutContext* lycon, ::DomElement* element,
     KnownDimensions known_dimensions, SizeF result, const char* label) {
     if (!lycon || !element) return;
+    if (lycon->run_mode != RunMode::ComputeSize) return;
 
     LayoutCache* cache = element->layout_cache;
     if (!cache && lycon->pool) {

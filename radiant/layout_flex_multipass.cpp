@@ -113,6 +113,10 @@ static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* conta
                 }
                 bool is_wrap_reverse = (wrap_mode == CSS_VALUE_WRAP_REVERSE);
                 LayoutContainingBlock cb = layout_containing_block_for_view(container);
+                bool inline_container_position_finalized_later =
+                    container->view_type == RDT_VIEW_INLINE_BLOCK;
+                bool container_position_finalized_later =
+                    container->fi != nullptr || inline_container_position_finalized_later;
 
                 // Set up lycon->block dimensions from the child's CSS
                 // This is needed because layout_abs_block expects given_width/given_height
@@ -142,7 +146,8 @@ static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* conta
                     if (is_row) {
                         // row-reverse: adjust X if using static position (no left/right specified)
                         if (!child_block->position->has_left && !child_block->position->has_right) {
-                            float static_x = cb.content_width - child_block->width + cb.content_x;
+                            float base_x = inline_container_position_finalized_later ? 0.0f : cb.content_x;
+                            float static_x = cb.content_width - child_block->width + base_x;
                             // For row-reverse, margin-right acts like margin-start (at the end)
                             if (child_block->bound) {
                                 static_x -= child_block->bound->margin.right;
@@ -150,11 +155,13 @@ static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* conta
                             log_debug("row-reverse: adjusting static X from %.1f to %.1f (content_w=%.1f - item_w=%.1f + offset=%.1f)",
                                       child_block->x, static_x, cb.content_width, child_block->width, cb.content_x);
                             child_block->x = static_x;
+                            child_block->position->static_x_needs_parent_offset = container_position_finalized_later;
                         }
                     } else {
                         // column-reverse: adjust Y if using static position (no top/bottom specified)
                         if (!child_block->position->has_top && !child_block->position->has_bottom) {
-                            float static_y = cb.content_height - child_block->height + cb.content_y;
+                            float base_y = inline_container_position_finalized_later ? 0.0f : cb.content_y;
+                            float static_y = cb.content_height - child_block->height + base_y;
                             // For column-reverse, margin-bottom acts like margin-start (at the end)
                             if (child_block->bound) {
                                 static_y -= child_block->bound->margin.bottom;
@@ -162,6 +169,7 @@ static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* conta
                             log_debug("column-reverse: adjusting static Y from %.1f to %.1f (content_h=%.1f - item_h=%.1f + offset=%.1f)",
                                       child_block->y, static_y, cb.content_height, child_block->height, cb.content_y);
                             child_block->y = static_y;
+                            child_block->position->static_y_needs_parent_offset = container_position_finalized_later;
                         }
                     }
                 }
@@ -241,9 +249,13 @@ static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* conta
                             }
 
                             if (is_row) {
-                                child_block->x = cb.content_x + main_offset;
+                                float base_x = inline_container_position_finalized_later ? 0.0f : cb.content_x;
+                                child_block->x = base_x + main_offset;
+                                child_block->position->static_x_needs_parent_offset = container_position_finalized_later;
                             } else {
-                                child_block->y = cb.content_y + main_offset;
+                                float base_y = inline_container_position_finalized_later ? 0.0f : cb.content_y;
+                                child_block->y = base_y + main_offset;
+                                child_block->position->static_y_needs_parent_offset = container_position_finalized_later;
                             }
                         }
 
@@ -296,9 +308,13 @@ static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* conta
                             }
 
                             if (is_row) {
-                                child_block->y = cb.content_y + cross_offset;
+                                float base_y = inline_container_position_finalized_later ? 0.0f : cb.content_y;
+                                child_block->y = base_y + cross_offset;
+                                child_block->position->static_y_needs_parent_offset = container_position_finalized_later;
                             } else {
-                                child_block->x = cb.content_x + cross_offset;
+                                float base_x = inline_container_position_finalized_later ? 0.0f : cb.content_x;
+                                child_block->x = base_x + cross_offset;
+                                child_block->position->static_x_needs_parent_offset = container_position_finalized_later;
                             }
                         }
 
@@ -1422,7 +1438,7 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
                 }
             }
             float total_height = flex_item->content_height + padding_top + padding_bottom + border_top + border_bottom;
-            if (total_height > flex_item->height + 0.5f) {
+            if (fabsf(total_height - flex_item->height) > 0.5f) {
                 log_debug("ROW FLEX CROSS FIX: item %s height %.1f -> %.1f (content=%.1f)",
                           flex_item->node_name(), flex_item->height, total_height, flex_item->content_height);
                 flex_item->height = total_height;
@@ -1727,10 +1743,14 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                     log_debug("FLEX TEXT: final position: x=%.1f, y=%.1f", text_x, text_y);
 
                     // Set up line context for this text at the calculated position
-                    // Use container's content width for line breaking, not max-content text width.
-                    // CSS Flexbox §9.4: text wraps at the item's determined main size.
+                    // Use the anonymous flex item's used width. Main-axis
+                    // alignment has already positioned the item; leaving the
+                    // line box as wide as the container makes inherited
+                    // text-align:center apply a second centering offset.
+                    // When text wraps, effective_text_width is the resolved
+                    // item width, so line breaking still uses the flex width.
                     lycon->line.left = text_x;
-                    lycon->line.right = text_x + container_content_width;
+                    lycon->line.right = text_x + effective_text_width;
                     lycon->line.advance_x = text_x;
                     lycon->block.advance_y = text_y;
                     lycon->block.max_width = effective_text_width;
@@ -2126,28 +2146,8 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                         log_debug("ROW FLEX CROSS REALIGN: restoring stretched item %s height %.1f -> %.1f",
                                   fi->node_name(), fi->height, orig);
                         fi->height = orig;
-                    } else if (fi->height > orig + 0.5f) {
+                    } else if (fabsf(fi->height - orig) > 0.5f) {
                         any_height_changed = true;
-                        // Update the line's cross_size if this item's outer cross size is now larger.
-                        // line->cross_size includes cross-axis margins (from hypothetical_outer_cross_size),
-                        // so we must compare using the outer height (height + margins).
-                        float margin_cross = 0;
-                        if (fi->bound) {
-                            margin_cross = fi->bound->margin.top + fi->bound->margin.bottom;
-                        }
-                        float new_outer_cross = fi->height + margin_cross;
-                        for (int li = 0; li < flex->line_count; li++) {
-                            FlexLineInfo* line = &flex->lines[li];
-                            for (int ii = 0; ii < line->item_count; ii++) {
-                                if (line->items[ii] == fi) {
-                                    if (new_outer_cross > line->cross_size) {
-                                        log_debug("ROW FLEX CROSS REALIGN: line %d cross_size %.1f -> %.1f (item %s grew)",
-                                                  li, line->cross_size, new_outer_cross, fi->node_name());
-                                        line->cross_size = new_outer_cross;
-                                    }
-                                }
-                            }
-                        }
                     }
                     check_idx++;
                 }
@@ -2159,48 +2159,52 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
             // the new line cross sizes after content layout.
             bool has_explicit_cross = (flex_container->blk && flex_container->blk->given_height >= 0);
             if (!has_explicit_cross) {
-                bool is_wrapping = (flex->wrap != WRAP_NOWRAP) && (flex->line_count > 1);
-                if (is_wrapping) {
-                    // CSS Flexbox §9.4: For wrapping containers, cross_axis_size is
-                    // the sum of all line cross sizes plus gaps between lines.
-                    float total_line_cross = 0;
-                    for (int i = 0; i < flex->line_count; i++) {
-                        total_line_cross += flex->lines[i].cross_size;
-                    }
-                    if (flex->line_count > 1) {
-                        total_line_cross += flex->row_gap * (flex->line_count - 1);
-                    }
-                    if (fabsf(total_line_cross - flex->cross_axis_size) > 0.5f) {
-                        log_debug("ROW FLEX CROSS REALIGN: updating cross_axis_size %.1f -> %.1f (wrapping sum)",
-                                  flex->cross_axis_size, total_line_cross);
-                        flex->cross_axis_size = total_line_cross;
-                    }
-                    // Update container height for auto-height wrapping containers
-                    float padding_height = 0, border_height = 0;
-                    if (flex_container->bound) {
-                        padding_height = flex_container->bound->padding.top + flex_container->bound->padding.bottom;
-                        if (flex_container->bound->border) {
-                            border_height = flex_container->bound->border->width.top + flex_container->bound->border->width.bottom;
+                float total_line_cross = 0;
+                float max_line_cross = 0;
+                for (int li = 0; li < flex->line_count; li++) {
+                    FlexLineInfo* line = &flex->lines[li];
+                    float recomputed_line_cross = 0;
+                    for (int ii = 0; ii < line->item_count; ii++) {
+                        ViewElement* line_item = lam::view_as_element(line->items[ii]);
+                        if (!line_item) continue;
+                        float item_outer_cross = line_item->height;
+                        if (line_item->bound) {
+                            item_outer_cross += line_item->bound->margin.top + line_item->bound->margin.bottom;
+                        }
+                        if (item_outer_cross > recomputed_line_cross) {
+                            recomputed_line_cross = item_outer_cross;
                         }
                     }
-                    float new_height = total_line_cross + padding_height + border_height;
-                    if (new_height > flex_container->height + 0.5f) {
-                        log_debug("ROW FLEX CROSS REALIGN: wrapping container height %.1f -> %.1f",
-                                  flex_container->height, new_height);
-                        flex_container->height = new_height;
+                    if (recomputed_line_cross > 0 && fabsf(recomputed_line_cross - line->cross_size) > 0.5f) {
+                        log_debug("ROW FLEX CROSS REALIGN: line %d cross_size %.1f -> %.1f",
+                                  li, line->cross_size, recomputed_line_cross);
+                        line->cross_size = recomputed_line_cross;
                     }
-                } else {
-                    // Nowrap: cross_axis_size is the max line cross size (single line)
-                    float max_line_cross = 0;
-                    for (int i = 0; i < flex->line_count; i++) {
-                        if (flex->lines[i].cross_size > max_line_cross)
-                            max_line_cross = flex->lines[i].cross_size;
+                    total_line_cross += line->cross_size;
+                    if (line->cross_size > max_line_cross) max_line_cross = line->cross_size;
+                }
+                if (flex->line_count > 1) {
+                    total_line_cross += flex->row_gap * (flex->line_count - 1);
+                }
+                float new_cross_axis_size = ((flex->wrap != WRAP_NOWRAP) && (flex->line_count > 1)) ?
+                    total_line_cross : max_line_cross;
+                if (fabsf(new_cross_axis_size - flex->cross_axis_size) > 0.5f) {
+                    log_debug("ROW FLEX CROSS REALIGN: updating cross_axis_size %.1f -> %.1f",
+                              flex->cross_axis_size, new_cross_axis_size);
+                    flex->cross_axis_size = new_cross_axis_size;
+                }
+                float padding_height = 0, border_height = 0;
+                if (flex_container->bound) {
+                    padding_height = flex_container->bound->padding.top + flex_container->bound->padding.bottom;
+                    if (flex_container->bound->border) {
+                        border_height = flex_container->bound->border->width.top + flex_container->bound->border->width.bottom;
                     }
-                    if (max_line_cross > flex->cross_axis_size + 0.5f) {
-                        log_debug("ROW FLEX CROSS REALIGN: updating cross_axis_size %.1f -> %.1f",
-                                  flex->cross_axis_size, max_line_cross);
-                        flex->cross_axis_size = max_line_cross;
-                    }
+                }
+                float new_height = new_cross_axis_size + padding_height + border_height;
+                if (fabsf(new_height - flex_container->height) > 0.5f) {
+                    log_debug("ROW FLEX CROSS REALIGN: container height %.1f -> %.1f",
+                              flex_container->height, new_height);
+                    flex_container->height = new_height;
                 }
             }
             // Recalculate line cross_positions via align_content.

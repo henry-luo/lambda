@@ -1458,6 +1458,14 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     float parent_to_cb_offset_x = 0, parent_to_cb_offset_y = 0;
     ViewElement* parent = block->parent_view();
     calculate_parent_to_cb_offset(block, cb, &parent_to_cb_offset_x, &parent_to_cb_offset_y);
+    if (!block->position->has_left && !block->position->has_right) {
+        block->position->has_static_parent_offset_x = true;
+        block->position->static_parent_offset_x = parent_to_cb_offset_x;
+    }
+    if (!block->position->has_top && !block->position->has_bottom) {
+        block->position->has_static_parent_offset_y = true;
+        block->position->static_parent_offset_y = parent_to_cb_offset_y;
+    }
 
     log_debug("[STATIC POS] Total parent-to-CB offset: (%f, %f)", parent_to_cb_offset_x, parent_to_cb_offset_y);
 
@@ -1948,6 +1956,134 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
         block->x, block->y, block->width,  block->height);
     lycon->depth--;
     log_leave();
+}
+
+static void finalize_static_positioned_abs_descendant(ViewBlock* block) {
+    if (!block || !block->position) return;
+    if (block->position->position != CSS_VALUE_ABSOLUTE &&
+        block->position->position != CSS_VALUE_FIXED) return;
+
+    // Absolute descendants of inline boxes can be laid out before the inline
+    // wrapper receives its final line position. The static x already includes
+    // the containing block line start, so add only the inline wrapper's delta
+    // from that line start.
+    if (!block->position->has_left && !block->position->has_right) {
+        ViewElement* parent = block->parent_view();
+        ViewElement* inline_parent = nullptr;
+        ViewElement* walk = parent;
+        while (walk && !walk->is_block()) {
+            if (walk->view_type == RDT_VIEW_INLINE) inline_parent = walk;
+            walk = walk->parent_view();
+        }
+        if (inline_parent && walk && walk->is_block()) {
+            float inline_delta_x = inline_parent->x;
+            if (fabs(inline_delta_x) > 0.01f) {
+                block->x += inline_delta_x;
+                log_debug("[ABS INLINE FINALIZE] %s inline_delta_x=%.1f, final_x=%.1f",
+                          block->source_loc(), inline_delta_x, block->x);
+            }
+        }
+    }
+
+    bool needs_offset_delta_x = block->position->has_static_parent_offset_x &&
+        !block->position->has_left && !block->position->has_right;
+    bool needs_offset_delta_y = block->position->has_static_parent_offset_y &&
+        !block->position->has_top && !block->position->has_bottom;
+    if (!block->position->static_x_needs_parent_offset &&
+        !block->position->static_y_needs_parent_offset &&
+        !needs_offset_delta_x && !needs_offset_delta_y) return;
+
+    ViewBlock* cb = find_containing_block(block, block->position->position);
+    if (!cb) return;
+
+    float offset_x = 0;
+    float offset_y = 0;
+    calculate_parent_to_cb_offset(block, cb, &offset_x, &offset_y);
+
+    if (block->position->static_x_needs_parent_offset) {
+        block->x += offset_x;
+        block->position->static_x_needs_parent_offset = false;
+        block->position->static_parent_offset_x = offset_x;
+        block->position->has_static_parent_offset_x = true;
+    } else if (needs_offset_delta_x) {
+        float delta_x = offset_x - block->position->static_parent_offset_x;
+        if (fabs(delta_x) > 0.01f) {
+            block->x += delta_x;
+        }
+        block->position->static_parent_offset_x = offset_x;
+    }
+    if (block->position->static_y_needs_parent_offset) {
+        block->y += offset_y;
+        block->position->static_y_needs_parent_offset = false;
+        block->position->static_parent_offset_y = offset_y;
+        block->position->has_static_parent_offset_y = true;
+    } else if (needs_offset_delta_y) {
+        float delta_y = offset_y - block->position->static_parent_offset_y;
+        if (fabs(delta_y) > 0.01f) {
+            block->y += delta_y;
+        }
+        block->position->static_parent_offset_y = offset_y;
+    }
+
+    log_debug("[ABS STATIC FINALIZE] %s parent-to-CB offset=(%.1f, %.1f), final=(%.1f, %.1f)",
+              block->source_loc(), offset_x, offset_y, block->x, block->y);
+}
+
+void layout_finalize_static_positioned_abs_descendants(ViewBlock* root) {
+    if (!root || !root->is_element()) return;
+
+    finalize_static_positioned_abs_descendant(root);
+
+    ViewElement* elem = lam::view_require_element(root);
+    for (View* child = elem->first_child; child; child = child->next_sibling) {
+        ViewBlock* child_block = lam::view_as_block(child);
+        if (child_block) {
+            layout_finalize_static_positioned_abs_descendants(child_block);
+        } else if (child && child->is_element()) {
+            ViewElement* child_elem = lam::view_require_element(child);
+            for (View* nested = child_elem->first_child; nested; nested = nested->next_sibling) {
+                ViewBlock* nested_block = lam::view_as_block(nested);
+                if (nested_block) layout_finalize_static_positioned_abs_descendants(nested_block);
+            }
+        }
+    }
+}
+
+void layout_shift_static_positioned_abs_descendants(ViewElement* root, float delta_x, float delta_y) {
+    if (!root || (delta_x == 0.0f && delta_y == 0.0f)) return;
+
+    for (View* child = root->first_child; child; child = child->next_sibling) {
+        if (!child || !child->is_element()) continue;
+
+        ViewBlock* child_block = lam::view_as_block(child);
+        if (child_block) {
+            bool is_abs_fixed = child_block->position &&
+                (child_block->position->position == CSS_VALUE_ABSOLUTE ||
+                 child_block->position->position == CSS_VALUE_FIXED);
+            if (is_abs_fixed) {
+                if (delta_x != 0.0f &&
+                    !child_block->position->has_left &&
+                    !child_block->position->has_right) {
+                    child_block->x += delta_x;
+                    if (child_block->position->has_static_parent_offset_x) {
+                        child_block->position->static_parent_offset_x += delta_x;
+                    }
+                }
+                if (delta_y != 0.0f &&
+                    !child_block->position->has_top &&
+                    !child_block->position->has_bottom) {
+                    child_block->y += delta_y;
+                    if (child_block->position->has_static_parent_offset_y) {
+                        child_block->position->static_parent_offset_y += delta_y;
+                    }
+                }
+                continue;
+            }
+        }
+
+        layout_shift_static_positioned_abs_descendants(
+            lam::view_require_element(child), delta_x, delta_y);
+    }
 }
 
 /**

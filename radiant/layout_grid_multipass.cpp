@@ -192,17 +192,17 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
                 }
                 if (h > max_content_h) max_content_h = h;
             }
-            if (max_content_h > gl->computed_rows[r].computed_size) {
+            if (max_content_h > 0 && fabsf(max_content_h - gl->computed_rows[r].computed_size) > 0.5f) {
                 // CSS Grid §7.2.1: Fixed-size tracks (length, percentage) are definite
-                // and should NOT grow from content — content overflows instead.
-                // Only auto/intrinsic/flexible tracks may grow.
+                // and should NOT be changed from content — content overflows instead.
+                // Only auto/intrinsic/flexible tracks reconcile to laid-out content.
                 GridTrack* row_track = &gl->computed_rows[r];
                 if (row_track->size &&
                     (row_track->size->type == GRID_TRACK_SIZE_LENGTH ||
                      row_track->size->type == GRID_TRACK_SIZE_PERCENTAGE)) {
                     continue;
                 }
-                log_debug("GRID row[%d] height updated: %d -> %.0f (from content)",
+                log_debug("GRID row[%d] height updated: %.1f -> %.1f (from content)",
                           r, gl->computed_rows[r].computed_size, max_content_h);
                 gl->computed_rows[r].computed_size = max_content_h;
                 gl->computed_rows[r].base_size = max_content_h;

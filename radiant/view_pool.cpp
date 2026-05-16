@@ -241,6 +241,12 @@ PositionProp* alloc_position_prop(LayoutContext* lycon) {
     prop->has_top = prop->has_right = prop->has_bottom = prop->has_left = false;  // no offsets set
     prop->clear = CSS_VALUE_NONE;  // default clear
     prop->float_prop = CSS_VALUE_NONE;  // default float
+    prop->static_x_needs_parent_offset = false;
+    prop->static_y_needs_parent_offset = false;
+    prop->has_static_parent_offset_x = false;
+    prop->has_static_parent_offset_y = false;
+    prop->static_parent_offset_x = 0;
+    prop->static_parent_offset_y = 0;
     return prop;
 }
 

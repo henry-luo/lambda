@@ -775,6 +775,46 @@ void* font_platform_create_ct_font(const char* postscript_name,
         }
     }
 
+    // For concrete families loaded through a regular face path (for example
+    // Arial.ttf), the PostScript name points at that exact regular face.
+    // Browser font matching still chooses the family's heavier face for
+    // font-weight:600+. Resolve a CoreText font by family + weight traits for
+    // layout advances so text metrics follow the CSS font matching result.
+    if (!ct_font && family_name && family_name[0] && css_weight > 500) {
+        CGFloat ct_weight;
+        if      (css_weight >= 900) ct_weight = 0.62f;
+        else if (css_weight >= 800) ct_weight = 0.56f;
+        else if (css_weight >= 700) ct_weight = 0.40f;
+        else                        ct_weight = 0.30f;
+
+        CFStringRef fam = CFStringCreateWithCString(NULL, family_name, kCFStringEncodingUTF8);
+        CFNumberRef wt_num = CFNumberCreate(NULL, kCFNumberCGFloatType, &ct_weight);
+        if (fam && wt_num) {
+            CFStringRef wt_key = kCTFontWeightTrait;
+            CFDictionaryRef traits = CFDictionaryCreate(NULL,
+                (const void**)&wt_key, (const void**)&wt_num, 1,
+                &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+            if (traits) {
+                CFStringRef keys[] = { kCTFontFamilyNameAttribute, kCTFontTraitsAttribute };
+                CFTypeRef vals[] = { fam, traits };
+                CFDictionaryRef attrs = CFDictionaryCreate(NULL,
+                    (const void**)keys, vals, 2,
+                    &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+                if (attrs) {
+                    CTFontDescriptorRef desc = CTFontDescriptorCreateWithAttributes(attrs);
+                    if (desc) {
+                        ct_font = CTFontCreateWithFontDescriptor(desc, (CGFloat)size_px, NULL);
+                        CFRelease(desc);
+                    }
+                    CFRelease(attrs);
+                }
+                CFRelease(traits);
+            }
+        }
+        if (wt_num) CFRelease(wt_num);
+        if (fam) CFRelease(fam);
+    }
+
     // For non-system fonts, try PostScript name lookup
     if (!ct_font && postscript_name && postscript_name[0]) {
         CFStringRef ps = CFStringCreateWithCString(NULL, postscript_name, kCFStringEncodingUTF8);

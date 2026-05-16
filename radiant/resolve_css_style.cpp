@@ -3119,10 +3119,9 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
             // Special case: font shorthand sets font-size directly on span->font
             // without creating a CssDeclaration, so also check if font_size is set
             if (prop_id == CSS_PROPERTY_FONT_SIZE) {
-                ViewSpan* span = lam::view_require_element(lycon->view);
-                if (span->font && span->font->font_size > 0) {
-                    log_debug("[FONT INHERIT] Skipping inheritance - font-size already set via shorthand: %.1f",
-                             span->font->font_size);
+                CssDeclaration* font_sh = style_tree_get_declaration(style_tree, CSS_PROPERTY_FONT);
+                if (font_sh) {
+                    log_debug("[FONT INHERIT] Skipping inheritance - font-size already set via shorthand");
                     continue;
                 }
             }
@@ -3221,13 +3220,13 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                 continue;
             }
 
-            // Special handling for font-size: also check ancestor's computed font->font_size
-            // This handles cases where ancestor is an anonymous box with no specified_style
-            // (e.g., anonymous table-row wrapping table-cells)
-            // ONLY apply for anonymous parents (have font but no specified_style)
-            if (prop_id == CSS_PROPERTY_FONT_SIZE && ancestor && !ancestor->specified_style
-                && ancestor->font && ancestor->font->font_size > 0) {
-                log_debug("[FONT INHERIT] Found computed font-size in anonymous parent <%s>: %.1f",
+            // CSS 2.1 §6.1.1/§6.2.1: inherited properties inherit the
+            // parent's computed value, not the parent's winning declaration.
+            // Prefer the immediate parent's computed font-size when it is
+            // available; declaration fallback below is for unresolved parents.
+            if (prop_id == CSS_PROPERTY_FONT_SIZE && ancestor &&
+                ancestor->font && ancestor->font->font_size > 0) {
+                log_debug("[FONT INHERIT] Found computed font-size in parent <%s>: %.1f",
                     ancestor->tag_name ? ancestor->tag_name : "?", ancestor->font->font_size);
                 ViewSpan* span = lam::view_require_element(lycon->view);
                 if (!span->font) {
@@ -3235,6 +3234,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                 }
                 // Copy font-size from parent's computed font
                 span->font->font_size = ancestor->font->font_size;
+                span->font->font_size_from_medium = ancestor->font->font_size_from_medium;
                 continue;  // Move to next property
             }
 
@@ -4049,7 +4049,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     str_ieq(family, flen, "ui-sans-serif", 13) ||
                     str_ieq(family, flen, "ui-monospace", 12) ||
                     str_ieq(family, flen, "ui-rounded", 10) ||
-                    str_ieq(family, flen, "-apple-system", 13) ||
                     str_ieq(family, flen, "BlinkMacSystemFont", 18)) {
                     return true;
                 }

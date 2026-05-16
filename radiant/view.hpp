@@ -941,6 +941,12 @@ typedef struct PositionProp {
     ViewBlock* first_abs_child;   // first child absolute/fixed positioned view
     ViewBlock* last_abs_child;    // last child absolute/fixed positioned view
     ViewBlock* next_abs_sibling;    // next sibling absolute/fixed positioned view
+    bool static_x_needs_parent_offset;  // flex static x was computed in parent-local coords
+    bool static_y_needs_parent_offset;  // flex static y was computed in parent-local coords
+    bool has_static_parent_offset_x;    // static x captured parent-to-containing-block offset
+    bool has_static_parent_offset_y;    // static y captured parent-to-containing-block offset
+    float static_parent_offset_x;       // parent-to-containing-block offset when static x was set
+    float static_parent_offset_y;       // parent-to-containing-block offset when static y was set
 } PositionProp;
 
 /**

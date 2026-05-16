@@ -41,3 +41,11 @@ void layout_clear_element(LayoutContext* lycon, ViewBlock* block);
 // against the containing block's used height. When the CB has auto height, this
 // must be deferred until after auto height is finalized.
 void re_resolve_abs_children_vertical(ViewBlock* containing_block);
+
+// Normalize flex static-positioned abs/fixed descendants after normal-flow
+// ancestors have their final positions.
+void layout_finalize_static_positioned_abs_descendants(ViewBlock* root);
+
+// Shift static-positioned absolute/fixed descendants when a normal-flow ancestor
+// is moved after those descendants have already been laid out.
+void layout_shift_static_positioned_abs_descendants(ViewElement* root, float delta_x, float delta_y);

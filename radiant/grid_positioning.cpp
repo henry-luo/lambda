@@ -1,6 +1,7 @@
 #include "grid.hpp"
 #include "view.hpp"
 #include "layout_alignment.hpp"
+#include "layout_positioned.hpp"
 #include "../lib/scratch_arena.h"
 #include "../lib/tagged.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
@@ -518,6 +519,9 @@ void align_grid_items(GridContainerLayout* grid_layout) {
 void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
     if (!item || !grid_layout || !item->gi) return;
 
+    float old_x = item->x;
+    float old_y = item->y;
+
     // Reset to base track position before applying alignment
     // This allows align_grid_item to be called multiple times (e.g., after content layout)
     item->x = item->gi->track_base_x;
@@ -901,4 +905,6 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
 
     log_debug("Aligned grid item: justify=%d, align=%d, final_pos=(%.0f,%.0f), final_size=%.0fx%.0f\n",
               justify, align, item->x, item->y, item->width, item->height);
+    layout_shift_static_positioned_abs_descendants(
+        lam::view_require_element(item), item->x - old_x, item->y - old_y);
 }
