@@ -2473,7 +2473,17 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                         JsModuleConstEntry mclookup;
                         snprintf(mclookup.name, sizeof(mclookup.name), "%s", e->name);
                         JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
-                        if (mc && mc->const_type == MCONST_MODVAR && mc->is_iife_var) continue;
+                        bool captured_in_scope_env = false;
+                        if (fc && fc->has_scope_env && fc->scope_env_names) {
+                            for (int s = 0; s < fc->scope_env_count; s++) {
+                                if (strcmp(fc->scope_env_names[s], e->name) == 0) {
+                                    captured_in_scope_env = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (mc && mc->const_type == MCONST_MODVAR && mc->is_iife_var &&
+                            !captured_in_scope_env) continue;
                     }
                     MIR_reg_t vr = jm_new_reg(mt, e->name, MIR_T_I64);
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,

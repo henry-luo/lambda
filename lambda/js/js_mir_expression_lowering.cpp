@@ -603,6 +603,12 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
 
     JsMirVarEntry* var = jm_find_var(mt, vname);
     if (var) {
+        if (var->in_scope_env && var->scope_env_reg != 0 && var->mir_type == MIR_T_I64) {
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, var->reg),
+                MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                    var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1)));
+        }
         // v20 TDZ: emit runtime check for let/const variables before their declaration
         if (var->tdz_active) {
             jm_call_void_3(mt, "js_check_tdz",
@@ -632,12 +638,6 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
                 MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)id->name->chars),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)id->name->len));
             jm_emit_exc_propagate_check(mt);
-        }
-        if (var->in_scope_env && var->scope_env_reg != 0 && var->mir_type == MIR_T_I64) {
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, var->reg),
-                MIR_new_mem_op(mt->ctx, MIR_T_I64,
-                    var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1)));
         }
         int param_index = jm_arguments_param_index(mt, vname);
         if (param_index >= 0) {
