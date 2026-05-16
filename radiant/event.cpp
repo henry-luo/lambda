@@ -2177,11 +2177,84 @@ static void clear_cascaded_styles_recursive(DomNode* node) {
     }
 }
 
+static bool css_simple_selector_uses_hover(CssSimpleSelector* simple) {
+    if (!simple) return false;
+    if (simple->type == CSS_SELECTOR_PSEUDO_HOVER) return true;
+    for (size_t i = 0; i < simple->function_selector_count; i++) {
+        CssSelector* nested = simple->function_selectors ? simple->function_selectors[i] : NULL;
+        if (!nested) continue;
+        for (size_t c = 0; c < nested->compound_selector_count; c++) {
+            CssCompoundSelector* compound = nested->compound_selectors ? nested->compound_selectors[c] : NULL;
+            if (!compound) continue;
+            for (size_t s = 0; s < compound->simple_selector_count; s++) {
+                if (css_simple_selector_uses_hover(compound->simple_selectors ? compound->simple_selectors[s] : NULL)) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+static bool css_selector_uses_hover(CssSelector* selector) {
+    if (!selector) return false;
+    for (size_t c = 0; c < selector->compound_selector_count; c++) {
+        CssCompoundSelector* compound = selector->compound_selectors ? selector->compound_selectors[c] : NULL;
+        if (!compound) continue;
+        for (size_t s = 0; s < compound->simple_selector_count; s++) {
+            if (css_simple_selector_uses_hover(compound->simple_selectors ? compound->simple_selectors[s] : NULL)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static bool css_rule_uses_hover(CssRule* rule) {
+    if (!rule) return false;
+    if (rule->type == CSS_RULE_STYLE || rule->type == CSS_RULE_NESTING) {
+        CssSelectorGroup* group = rule->data.style_rule.selector_group;
+        if (group) {
+            for (size_t i = 0; i < group->selector_count; i++) {
+                if (css_selector_uses_hover(group->selectors ? group->selectors[i] : NULL)) return true;
+            }
+        } else if (css_selector_uses_hover(rule->data.style_rule.selector)) {
+            return true;
+        }
+        for (size_t i = 0; i < rule->data.style_rule.nested_rule_count; i++) {
+            if (css_rule_uses_hover(rule->data.style_rule.nested_rules ? rule->data.style_rule.nested_rules[i] : NULL)) {
+                return true;
+            }
+        }
+    } else if (rule->type == CSS_RULE_MEDIA || rule->type == CSS_RULE_SUPPORTS ||
+               rule->type == CSS_RULE_CONTAINER) {
+        for (size_t i = 0; i < rule->data.conditional_rule.rule_count; i++) {
+            if (css_rule_uses_hover(rule->data.conditional_rule.rules ? rule->data.conditional_rule.rules[i] : NULL)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static bool document_has_hover_rules(DomDocument* doc) {
+    if (!doc) return false;
+    for (int i = 0; i < doc->stylesheet_count; i++) {
+        CssStylesheet* stylesheet = doc->stylesheets ? doc->stylesheets[i] : NULL;
+        if (!stylesheet) continue;
+        for (size_t r = 0; r < stylesheet->rule_count; r++) {
+            if (css_rule_uses_hover(stylesheet->rules ? stylesheet->rules[r] : NULL)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 /**
  * Schedule style/layout work after StateStore pseudo-state changes.
  */
 static void sync_pseudo_state(View* view, uint32_t pseudo_flag, bool set) {
-    (void)pseudo_flag;
     (void)set;
     if (!view || !view->is_element()) return;
 
@@ -2189,6 +2262,10 @@ static void sync_pseudo_state(View* view, uint32_t pseudo_flag, bool set) {
     if (element->doc && element->doc->state) {
         DocState* state = (DocState*)element->doc->state;
         DomDocument* doc = element->doc;
+
+        if (pseudo_flag == PSEUDO_STATE_HOVER && !document_has_hover_rules(doc)) {
+            return;
+        }
 
         // Pseudo-state changes affect which CSS rules match (e.g. `.btn:hover`).
         // Re-apply the cascade so the element's `specified_style` AVL tree picks

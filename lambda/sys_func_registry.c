@@ -1785,6 +1785,8 @@ JitImport jit_runtime_imports[] = {
     {"js_clearInterval", FPTR(js_clearInterval)},
     {"js_setImmediate", FPTR(js_setImmediate)},
     {"js_clearImmediate", FPTR(js_clearImmediate)},
+    {"js_requestAnimationFrame", FPTR(js_requestAnimationFrame)},
+    {"js_cancelAnimationFrame", FPTR(js_cancelAnimationFrame)},
     {"js_structuredClone", FPTR(js_structuredClone)},
     {"js_event_loop_init", FPTR(js_event_loop_init)},
     {"js_event_loop_drain", FPTR(js_event_loop_drain)},
