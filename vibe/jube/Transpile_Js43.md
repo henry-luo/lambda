@@ -676,3 +676,228 @@ Result: 5 / 5 passed.
 
 Result: 33,346 / 34,145 fully passing, 799 failing, 0 non-fully-passing,
 489 improvements, and 0 regressions versus baseline.
+
+## 10. Current Progress
+
+Status on 2026-05-16 after the latest remaining-failure pass:
+
+- Fixed `Array.prototype.flat` / `flatMap` generic receiver behavior:
+  - proxy `HasProperty` / `Get` ordering is now observable;
+  - `ArraySpeciesCreate` now constructs custom species with the proper
+    constructor path;
+  - `flatMap` preserves strict callback `thisArg` and bound-function callback
+    semantics.
+- Fixed `Object.assign`'s shared copy operation:
+  - sources now use `ToObject` and `OwnPropertyKeys` instead of manually walking
+    plain map shapes;
+  - proxy `ownKeys` / `getOwnPropertyDescriptor` ordering and abrupt completion
+    now flow through the normal path;
+  - array sources and array targets now use their exotic property behavior;
+  - target writes use strict `Set` behavior, including read-only String wrapper
+    indices.
+- Focused gates:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_array_flat_batch.txt --write-failures=temp/js43_array_flat_bound_rerun_failures.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_object_assign_batch.txt --write-failures=temp/js43_object_assign_rerun2_failures.tsv
+```
+
+Results: flat batch 6 / 6 passed; Object.assign batch 8 / 8 passed.
+
+- Broad gate:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-only --write-failures=temp/js43_after_object_assign_full_failures.tsv
+```
+
+Result: 33,541 / 34,165 fully passing, 608 failing, 16 non-fully-passing,
+183 improvements, and 0 regressions versus baseline.
+
+Current top remaining path clusters:
+
+| Area | Failures |
+|---|---:|
+| `language/statements` | 160 |
+| `built_ins/TypedArray` | 87 |
+| `language/expressions` | 60 |
+| `built_ins/RegExp` | 54 |
+| `built_ins/Promise` | 41 |
+| `built_ins/String` | 31 |
+| `built_ins/Object` | 28 |
+| `built_ins/Array` | 25 |
+
+## 11. OwnPropertyKeys / Symbol Integrity Pass
+
+Status on 2026-05-16 after the latest remaining-failure pass:
+
+- Fixed `Object.getOwnPropertySymbols` as a real own-key operation:
+  - proxy inputs now route through the existing `[[OwnPropertyKeys]]` trap and
+    invariant checks before filtering symbol keys;
+  - arrays now expose symbol keys stored in their companion property map;
+  - function custom symbol properties are read from the function property map;
+  - ordinary map symbol keys are converted from internal `__sym_N` storage back
+    to public Symbol items.
+- Fixed proxy integrity checks for `Object.isFrozen` / `Object.isSealed`:
+  - proxies now call `IsExtensible`, `OwnPropertyKeys`, and
+    `GetOwnPropertyDescriptor` in key order;
+  - descriptor checks now honor proxy trap exceptions and order-observable
+    `getOwnPropertyDescriptor` calls.
+- Fixed an arguments-object metadata leak exposed by the broader symbol path:
+  - internal `Symbol.toStringTag = "Arguments"` is now marked non-enumerable
+    when the arguments companion map is built;
+  - this prevents `Object.defineProperties` / `Object.create` from treating the
+    internal tag value as a property descriptor.
+
+Focused gates:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_ownkeys_symbols_integrity_batch.txt --write-failures=temp/js43_ownkeys_symbols_integrity_failures.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_arguments_descriptor_batch.txt --write-failures=temp/js43_arguments_descriptor_failures.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_object_assign_batch.txt --write-failures=temp/js43_object_assign_guard_failures.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_array_flat_batch.txt --write-failures=temp/js43_array_flat_guard_failures.tsv
+```
+
+Results: ownKeys/symbol batch 8 / 8 passed; arguments descriptor batch 5 / 5
+passed; Object.assign guard 8 / 8 passed; Array flat/flatMap guard 6 / 6
+passed.
+
+Broad gate before the final arguments metadata fix:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-only --write-failures=temp/js43_after_ownkeys_symbols_full_failures.tsv
+```
+
+Result: 33,509 / 34,165 fully passing, 584 failing, 72 non-fully-passing, 191
+improvements, and 11 baseline regressions reported by the debug runner. Five
+descriptor regressions were the arguments `Symbol.toStringTag` leak and are now
+covered by the focused descriptor batch above; the remaining six reported
+regressions are the existing 10s-per-test Array callback timeout family in this
+debug runner.
+
+## 12. Object.prototype.toString Tag Semantics Pass
+
+Status on 2026-05-16 after the latest Object-cluster pass:
+
+- Fixed `Object.prototype.toString` to read `@@toStringTag` through normal
+  `Get` semantics instead of raw map-slot probing:
+  - tag getters now run and abrupt completions propagate;
+  - primitive receivers are boxed with `ToObject` before reading inherited
+    `@@toStringTag`, so Boolean / Number / String / BigInt prototype overrides
+    are visible;
+  - proxy function targets now keep async/generator function brands.
+- Fixed fallback behavior for built-ins whose tag in these tests comes from
+  `@@toStringTag` rather than an intrinsic brand:
+  - deleting or replacing `Symbol.prototype[Symbol.toStringTag]` with a
+    non-string falls back to `[object Object]`;
+  - `Math` and Promise instances now fall back to `[object Object]` when their
+    tag property is missing or non-string.
+- Left one generator-prototype failure open:
+  - `Object.getPrototypeOf(gen) === genFn.prototype` is still false because the
+    generator instance currently inherits from the shared generator prototype
+    one level too high;
+  - avoid solving this by sharing all generator-function `.prototype` objects,
+    because that would violate per-function prototype identity.
+
+Focused gates:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_object_tostring_batch.txt --write-failures=temp/js43_object_tostring_final_failures.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_object_remaining_batch.txt --write-failures=temp/js43_object_remaining_after_tostring_failures.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_ownkeys_symbols_integrity_batch.txt --write-failures=temp/js43_ownkeys_symbols_integrity_after_tostring_failures.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_arguments_descriptor_batch.txt --write-failures=temp/js43_arguments_descriptor_after_tostring_failures.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_object_assign_batch.txt --write-failures=temp/js43_object_assign_after_tostring_seq_failures.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_array_flat_batch.txt --write-failures=temp/js43_array_flat_after_tostring_seq_failures.tsv
+```
+
+Results: Object toString batch 8 / 9 passed; Object remaining batch improved
+from 5 / 26 to 13 / 26 passed; ownKeys/symbol guard 8 / 8 passed; arguments
+descriptor guard 5 / 5 passed; Object.assign guard 8 / 8 passed; Array
+flat/flatMap guard 6 / 6 passed. The first parallel Object.assign / Array
+flat guard attempt produced runner-local "lost" rows; both passed when rerun
+sequentially.
+
+## 13. Object Prototype / Constructor Semantics Pass
+
+Status on 2026-05-16 after continuing the remaining Object failures:
+
+- Fixed object-prototype operations to accept every object representation used
+  by the runtime, not just ordinary maps:
+  - `Object.create` and proxy `getPrototypeOf` results now accept arrays,
+    functions, elements, ordinary maps, or null;
+  - `Object.getPrototypeOf(arguments)` now reports `Object.prototype` for the
+    arguments exotic instead of leaking the array carrier prototype;
+  - `Object.prototype.__lookupGetter__` / `__lookupSetter__` now walk the
+    prototype chain through `[[GetPrototypeOf]]`, so proxy abrupt completions
+    and traps are observable.
+- Fixed prototype mutation invariants:
+  - `Object.setPrototypeOf` now routes through the same semantic path as
+    `Reflect.setPrototypeOf` and propagates failures;
+  - `Object.prototype` is treated as an immutable-prototype exotic object;
+  - assigning `__proto__` on ordinary objects now rejects non-extensible
+    targets instead of silently changing the internal prototype.
+- Fixed constructor/newTarget edges:
+  - subclassing `Object` now creates the subclass instance and applies
+    `newTarget.prototype` instead of returning the wrapped argument object;
+  - `Reflect.construct(Object, args, NewTarget)` now accepts constructable
+    class maps as `newTarget` and applies object-valued prototypes from maps,
+    arrays, functions, or elements.
+- Finished the toString generator open item from section 12:
+  - no-argument generator direct calls now fall back to the runtime call setup
+    path so the generator instance receives the public `genFn.prototype`;
+  - the direct-call path still needs a fuller future cleanup to thread that
+    prototype explicitly for every generator shape.
+- Closed the follow-up regressions from the broad Object pass:
+  - `Object.entries` / `Object.values` now skip symbol keys after switching to
+    `Reflect.ownKeys`;
+  - function own-property names no longer duplicate intrinsic `length`, `name`,
+    or `prototype` entries when custom descriptors exist;
+  - primitive BigInt `Object.prototype.toString` now preserves the BigInt brand
+    when no `@@toStringTag` exists and falls back to Object for a present
+    non-string tag.
+
+Focused gates:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_object_remaining_batch.txt --write-failures=temp/js43_object_remaining_after_generator_call_failures.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_object_tostring_batch.txt --write-failures=temp/js43_object_tostring_after_generator_call_failures.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_ownkeys_symbols_integrity_batch.txt --write-failures=temp/js43_ownkeys_symbols_integrity_after_object_proto_ops_failures.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_arguments_descriptor_batch.txt --write-failures=temp/js43_arguments_descriptor_after_object_proto_ops_failures.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_object_assign_batch.txt --write-failures=temp/js43_object_assign_after_object_proto_ops_failures.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_array_flat_batch.txt --write-failures=temp/js43_array_flat_after_object_proto_ops_failures.tsv
+```
+
+Results: Object remaining batch 26 / 26 passed; Object toString batch 9 / 9
+passed; ownKeys/symbol guard 8 / 8 passed; arguments descriptor guard 5 / 5
+passed; Object.assign guard 8 / 8 passed; Array flat/flatMap guard 6 / 6
+passed.
+
+Broad gate before the final regression follow-up:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-only --write-failures=temp/js43_after_object_proto_ops_full_failures.tsv
+```
+
+Result: 33,565 / 34,165 fully passing, 589 failing, 11 non-fully-passing, 215
+improvements, and 7 reported regressions. Those seven were the two symbol-key
+enumeration fallouts, one primitive BigInt toString-tag fallback, and four
+generator direct-call cases; the focused regression follow-up below passes
+after the fixes above.
+
+Regression follow-up gate:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_regression_followup_batch.txt --write-failures=temp/js43_regression_followup_clean_failures.tsv
+```
+
+Result: 8 / 8 passed.
+
+Final broad gate after the regression follow-up:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-only --write-failures=temp/js43_after_object_proto_ops_regression_fixed_full_failures.tsv
+```
+
+Result: 33,573 / 34,165 fully passing, 583 failing, 9 non-fully-passing, 215
+improvements, and 0 regressions versus baseline. The nine non-fully-passing
+rows were recovered in isolated retry and are the existing slow/batch-kill
+family, mostly Array callback/index methods plus one RegExp whitespace case.

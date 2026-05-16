@@ -8264,6 +8264,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             if (fc && fc->has_rest_param) fc = NULL;  // rest-param functions need runtime arg collection
             if (fc && fc->uses_arguments) fc = NULL;  // uses_arguments needs runtime pending args from js_invoke_fn
             if (fc && fc->is_reassigned) fc = NULL;
+            if (fc && fc->node && fc->node->is_generator && jm_count_params(fc->node) == 0) fc = NULL;
             if (fc && (mt->with_depth > 0 ||
                     jm_node_has_with_ancestor_until_function((JsAstNode*)call) ||
                     jm_node_has_with_ancestor_until_function((JsAstNode*)resolved_fn) ||

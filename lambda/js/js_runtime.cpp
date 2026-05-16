@@ -11,6 +11,7 @@
 extern "C" Item js_to_property_key(Item key);
 extern "C" Item js_reflect_own_keys(Item obj);
 extern "C" Item js_reflect_set(Item target, Item key, Item value, Item receiver);
+extern "C" Item js_object_set_prototype_of(Item obj, Item proto);
 extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name);
 extern "C" Item js_has_own_property(Item obj, Item key);
 extern "C" Item js_property_set(Item object, Item key, Item value);
@@ -830,7 +831,8 @@ extern "C" Item js_proxy_trap_get_prototype_of(Item proxy) {
     if (js_exception_pending) return ItemNull;
     // ES2020 §9.5.1 invariant: result must be Object or null
     TypeId rt = get_type_id(result);
-    if (rt != LMD_TYPE_MAP && result.item != ItemNull.item && rt != LMD_TYPE_NULL) {
+    if (rt != LMD_TYPE_MAP && rt != LMD_TYPE_ARRAY && rt != LMD_TYPE_FUNC &&
+        rt != LMD_TYPE_ELEMENT && result.item != ItemNull.item && rt != LMD_TYPE_NULL) {
         return js_throw_type_error("'getPrototypeOf' on proxy: trap returned neither object nor null");
     }
     // If target is not extensible, result must match target's prototype
@@ -1388,6 +1390,20 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
 
             // Object
             if (nl == 6 && strncmp(n, "Object", 6) == 0) {
+                if (effective_new_target.item != callee.item) {
+                    Item result = js_new_object();
+                    Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
+                    Item nt_proto = js_property_get(effective_new_target, proto_key);
+                    if (js_exception_pending) return ItemNull;
+                    TypeId npt = get_type_id(nt_proto);
+                    if (npt == LMD_TYPE_MAP || npt == LMD_TYPE_ARRAY ||
+                        npt == LMD_TYPE_FUNC || npt == LMD_TYPE_ELEMENT) {
+                        js_set_prototype(result, nt_proto);
+                    }
+                    js_pending_new_target = ItemNull;
+                    js_has_pending_new_target = false;
+                    return result;
+                }
                 js_pending_new_target = ItemNull;
                 js_has_pending_new_target = false;
                 if (argc > 0 && args) return js_to_object(args[0]);
@@ -4444,6 +4460,27 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                 }
             }
         }
+        if (!js_skip_accessor_dispatch && get_type_id(key) == LMD_TYPE_STRING) {
+            String* sk = it2s(key);
+            if (sk && sk->len == 9 && strncmp(sk->chars, "__proto__", 9) == 0) {
+                TypeId vt = get_type_id(value);
+                bool value_is_proto = value.item == ItemNull.item || vt == LMD_TYPE_NULL ||
+                    vt == LMD_TYPE_MAP || vt == LMD_TYPE_ARRAY || vt == LMD_TYPE_FUNC ||
+                    vt == LMD_TYPE_ELEMENT;
+                if (value_is_proto) {
+                    bool own_proto_marker = false;
+                    Item own_proto_val = js_map_get_fast_ext(m, "__json_own_proto__", 18, &own_proto_marker);
+                    if (own_proto_marker && !js_is_truthy(own_proto_val)) {
+                        Item ok = js_reflect_set_prototype_of(object, value);
+                        if (js_exception_pending) return value;
+                        if (!it2b(js_to_boolean(ok))) {
+                            js_throw_type_error("Object prototype may only be an Object or null");
+                        }
+                        return value;
+                    }
+                }
+            }
+        }
         // v16: Enforce Object.freeze — frozen objects reject all property writes
         {
             bool frozen_found = false;
@@ -6564,6 +6601,36 @@ extern "C" Item js_number_is_nan(Item value);
 extern "C" Item js_number_is_safe_integer(Item value);
 extern "C" Item js_parseInt(Item str_item, Item radix_item);
 extern "C" Item js_parseFloat(Item str_item);
+extern "C" Item js_to_object(Item value);
+extern "C" Item js_property_get(Item object, Item key);
+
+static Item js_object_to_string_result(const char* tag, int tag_len) {
+    char buf[256];
+    int blen = snprintf(buf, sizeof(buf), "[object %.*s]", tag_len, tag);
+    return (Item){.item = s2it(heap_create_name(buf, blen))};
+}
+
+static Item js_object_to_string_tag_override(Item this_val) {
+    TypeId tid = get_type_id(this_val);
+    if (this_val.item == ITEM_NULL || this_val.item == ITEM_JS_UNDEFINED ||
+        tid == LMD_TYPE_NULL || tid == LMD_TYPE_UNDEFINED) {
+        return ItemNull;
+    }
+
+    Item receiver = this_val;
+    if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_ARRAY && tid != LMD_TYPE_FUNC) {
+        receiver = js_to_object(this_val);
+    }
+
+    Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
+    Item tag = js_property_get(receiver, tag_key);
+    if (js_exception_pending) return ItemNull;
+    if (get_type_id(tag) != LMD_TYPE_STRING) return ItemNull;
+
+    String* tag_str = it2s(tag);
+    if (!tag_str) return ItemNull;
+    return js_object_to_string_result(tag_str->chars, (int)tag_str->len);
+}
 
 // HasProperty: check own + prototype chain (ES spec [[HasProperty]])
 static bool js_has_property(Item obj, Item key) {
@@ -6889,6 +6956,16 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     }
     case JS_BUILTIN_OBJ_TO_STRING: {
         // ES spec §20.1.3.6: Object.prototype.toString returns "[object <tag>]"
+        TypeId tt = get_type_id(this_val);
+        if (this_val.item == ITEM_NULL || tt == LMD_TYPE_NULL)
+            return (Item){.item = s2it(heap_create_name("[object Null]", 13))};
+        if (this_val.item == ITEM_JS_UNDEFINED || tt == LMD_TYPE_UNDEFINED)
+            return (Item){.item = s2it(heap_create_name("[object Undefined]", 18))};
+
+        Item custom_tag = js_object_to_string_tag_override(this_val);
+        if (js_exception_pending) return ItemNull;
+        if (custom_tag.item != ItemNull.item) return custom_tag;
+
         if (js_is_proxy(this_val)) {
             JsProxyData* pd = js_get_proxy_data(this_val);
             if (!pd || pd->revoked) {
@@ -6900,6 +6977,13 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                 return (Item){.item = s2it(heap_create_name("[object Array]", 14))};
             }
             if (target_type == LMD_TYPE_FUNC) {
+                JsFunction* target_fn = (JsFunction*)target.function;
+                if (target_fn && (target_fn->flags & JS_FUNC_FLAG_GENERATOR)) {
+                    return (Item){.item = s2it(heap_create_name("[object GeneratorFunction]", 26))};
+                }
+                if (target_fn && (target_fn->flags & JS_FUNC_FLAG_ASYNC)) {
+                    return (Item){.item = s2it(heap_create_name("[object AsyncFunction]", 22))};
+                }
                 return (Item){.item = s2it(heap_create_name("[object Function]", 17))};
             }
         }
@@ -6989,11 +7073,6 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                 }
             }
         }
-        TypeId tt = get_type_id(this_val);
-        if (this_val.item == ITEM_NULL || tt == LMD_TYPE_NULL)
-            return (Item){.item = s2it(heap_create_name("[object Null]", 13))};
-        if (this_val.item == ITEM_JS_UNDEFINED || tt == LMD_TYPE_UNDEFINED)
-            return (Item){.item = s2it(heap_create_name("[object Undefined]", 18))};
         if (tt == LMD_TYPE_ARRAY) {
             // v41: Check for custom Symbol.toStringTag on array (via companion map)
             Array* arr = this_val.array;
@@ -7036,9 +7115,17 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         }        if (tt == LMD_TYPE_BOOL)
             return (Item){.item = s2it(heap_create_name("[object Boolean]", 16))};
         if (js_is_symbol(this_val))
-            return (Item){.item = s2it(heap_create_name("[object Symbol]", 15))};
+            return (Item){.item = s2it(heap_create_name("[object Object]", 15))};
         if (tt == LMD_TYPE_INT || tt == LMD_TYPE_FLOAT)
             return (Item){.item = s2it(heap_create_name("[object Number]", 15))};
+        if (tt == LMD_TYPE_DECIMAL && js_is_bigint(this_val)) {
+            Item wrapped = js_to_object(this_val);
+            Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
+            if (js_has_property(wrapped, tag_key)) {
+                return (Item){.item = s2it(heap_create_name("[object Object]", 15))};
+            }
+            return (Item){.item = s2it(heap_create_name("[object BigInt]", 15))};
+        }
         if (tt == LMD_TYPE_STRING)
             return (Item){.item = s2it(heap_create_name("[object String]", 15))};
         if (tt == LMD_TYPE_MAP) {
@@ -7104,11 +7191,6 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                         if (cnlen == 8 && memcmp(cnchars, "Function", 8) == 0)
                             return (Item){.item = s2it(heap_create_name("[object Function]", 17))};
                 }
-                // Check for Math object
-                found = false;
-                js_map_get_fast(m, "__is_math__", 11, &found);
-                if (found) return (Item){.item = s2it(heap_create_name("[object Math]", 13))};
-
                 // Check for ArrayBuffer / DataView / TypedArray
                 extern bool js_is_arraybuffer(Item val);
                 extern bool js_is_dataview(Item val);
@@ -7123,10 +7205,6 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                     return (Item){.item = s2it(heap_create_name(buf, blen))};
                 }
 
-                // Check for Promise
-                found = false;
-                js_map_get_fast(m, "__promise_idx", 13, &found);
-                if (found) return (Item){.item = s2it(heap_create_name("[object Promise]", 16))};
             }
             return (Item){.item = s2it(heap_create_name("[object Object]", 15))};
         }
@@ -7235,7 +7313,8 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                 }
                 return make_js_undefined();
             }
-            obj = js_get_prototype(obj);
+            obj = js_get_prototype_of(obj);
+            if (js_exception_pending) return ItemNull;
         }
         return make_js_undefined();
     }
@@ -8169,9 +8248,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             if (js_is_proxy(arg0)) return js_proxy_trap_get_prototype_of(arg0);
             return js_get_prototype_of(arg0);
         case JS_BUILTIN_OBJECT_SET_PROTOTYPE_OF:
-            if (js_is_proxy(arg0)) { js_proxy_trap_set_prototype_of(arg0, arg1); return arg0; }
-            js_set_prototype(arg0, arg1);
-            return arg0;
+            return js_object_set_prototype_of(arg0, arg1);
         default: return ItemNull;
         }
     }
