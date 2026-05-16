@@ -10,6 +10,7 @@
 #include "../lib/str.h"
 #include "../lib/file.h"
 #include "../lib/shell.h"
+#include "../lib/uv_loop.h"
 #include "layout.hpp"
 #include "font_face.h"
 #include "state_store.hpp"
@@ -67,6 +68,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event);
 int ui_context_init(UiContext* uicon, bool headless);
 void ui_context_cleanup(UiContext* uicon);
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
+
+static void network_wake_glfw(void* user_data) {
+    (void)user_data;
+    glfwPostEmptyEvent();
+}
 
 // Document format detection
 typedef enum {
@@ -934,15 +940,15 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
 
         // Initialize network support for HTTP-loaded documents
         // This enables async resource loading (CSS, images, fonts) during rendering.
-        // Use 16 worker threads so a typical web page's many sub-resources
-        // (CSS, images, fonts, scripts) download in parallel rather than serially.
         if (doc->html_root && file_to_load &&
             (strncmp(file_to_load, "http://", 7) == 0 || strncmp(file_to_load, "https://", 8) == 0)) {
             network_downloader_init_shared();
-            thread_pool = thread_pool_create(16);
             file_cache = enhanced_cache_create("./temp/cache", 100 * 1024 * 1024, 10000);
-            if (thread_pool) {
-                radiant_init_network_support(doc, thread_pool, file_cache);
+            if (radiant_init_network_support(doc, NULL, file_cache) == 0) {
+                if (!headless && doc->resource_manager) {
+                    resource_manager_set_wake_callback(doc->resource_manager,
+                                                       network_wake_glfw, NULL);
+                }
                 log_info("view: network support initialized for HTTP document");
             }
         }
@@ -1090,6 +1096,16 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
 
         // poll for new events
         glfwPollEvents();
+        uv_loop_t* uv_loop = lambda_uv_loop();
+        if (uv_loop) {
+            uv_run(uv_loop, UV_RUN_NOWAIT);
+        }
+
+        // Drain network completions on the UI thread before deciding whether
+        // this tick needs a reflow/repaint.
+        if (ui_context.document && ui_context.document->resource_manager) {
+            resource_manager_flush_layout_updates(ui_context.document->resource_manager);
+        }
 
         // Process simulated events if simulation is active
         if (sim_ctx && sim_ctx->is_running && currentTime >= sim_start_time) {

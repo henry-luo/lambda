@@ -133,7 +133,7 @@ static void resolve_stylesheet_urls(CssStylesheet* sheet) {
 }
 
 void process_css_resource(NetworkResource* res, struct DomDocument* doc) {
-    if (!res || res->state != STATE_COMPLETED || !doc) return;
+    if (!res || (res->state != STATE_COMPLETED && res->state != STATE_CACHED) || !doc) return;
 
     log_debug("network: processing CSS resource %s from %s", res->url, res->local_path);
 
@@ -193,29 +193,52 @@ void process_css_resource(NetworkResource* res, struct DomDocument* doc) {
 
 // Image resource handler
 void process_image_resource(NetworkResource* res, struct DomElement* img_element) {
-    if (!res || res->state != STATE_COMPLETED || !img_element) return;
+    if (!res || (res->state != STATE_COMPLETED && res->state != STATE_CACHED) || !img_element) return;
 
     log_debug("network: processing image resource %s from %s", res->url, res->local_path);
 
-    // load image data from file using stb_image
-    int img_width, img_height, channels;
-    unsigned char* data = image_load(res->local_path, &img_width, &img_height, &channels, 4);
-    if (!data) {
-        log_error("network: failed to load image: %s", res->local_path);
-        // schedule repaint to show broken image indicator
-        if (res->manager) {
-            resource_manager_schedule_repaint(res->manager, img_element);
+    int img_width = 0;
+    int img_height = 0;
+    ImageSurface* img_surface = NULL;
+
+    if (image_get_dimensions(res->local_path, &img_width, &img_height)) {
+        img_surface = (ImageSurface*)mem_calloc(1, sizeof(ImageSurface), MEM_CAT_IMAGE);
+        if (img_surface) {
+            img_surface->width = img_width;
+            img_surface->height = img_height;
+            img_surface->source_path = mem_strdup(res->local_path, MEM_CAT_IMAGE);
+            log_debug("network: image metadata loaded lazily: %dx%d from %s",
+                      img_width, img_height, res->local_path);
         }
-        return;
     }
 
-    log_debug("network: image loaded: %dx%d, channels=%d", img_width, img_height, channels);
+    if (!img_surface) {
+        // Header probing can fail for unusual formats. Fall back to a full
+        // decode so the resource still has a chance to render.
+        int channels = 0;
+        unsigned char* data = image_load(res->local_path, &img_width, &img_height, &channels, 4);
+        if (!data) {
+            log_error("network: failed to load image: %s", res->local_path);
+            // schedule repaint to show broken image indicator
+            if (res->manager) {
+                resource_manager_schedule_repaint(res->manager, img_element);
+            }
+            return;
+        }
 
-    // create ImageSurface from loaded data
-    ImageSurface* img_surface = image_surface_create_from(img_width, img_height, data);
+        log_debug("network: image decoded during fallback: %dx%d, channels=%d",
+                  img_width, img_height, channels);
+
+        img_surface = image_surface_create_from(img_width, img_height, data);
+        if (!img_surface) {
+            log_error("network: failed to create image surface: %s", res->url);
+            image_free(data);
+            return;
+        }
+    }
+
     if (!img_surface) {
         log_error("network: failed to create image surface: %s", res->url);
-        image_free(data);
         return;
     }
 
@@ -263,7 +286,7 @@ void process_image_resource(NetworkResource* res, struct DomElement* img_element
 
 // Font resource handler
 void process_font_resource(NetworkResource* res, struct CssFontFaceDescriptor* font_face) {
-    if (!res || res->state != STATE_COMPLETED || !font_face) return;
+    if (!res || (res->state != STATE_COMPLETED && res->state != STATE_CACHED) || !font_face) return;
 
     log_debug("network: processing font resource %s from %s", res->url, res->local_path);
 
@@ -323,7 +346,7 @@ void process_font_resource(NetworkResource* res, struct CssFontFaceDescriptor* f
 
 // SVG resource handler (for <use xlink:href="external.svg#id">)
 void process_svg_resource(NetworkResource* res, struct DomElement* use_element) {
-    if (!res || res->state != STATE_COMPLETED || !use_element) return;
+    if (!res || (res->state != STATE_COMPLETED && res->state != STATE_CACHED) || !use_element) return;
 
     log_debug("network: processing SVG resource %s from %s", res->url, res->local_path);
 
@@ -369,7 +392,7 @@ void process_svg_resource(NetworkResource* res, struct DomElement* use_element) 
 
 // HTML resource handler
 void process_html_resource(NetworkResource* res, struct DomDocument* doc) {
-    if (!res || res->state != STATE_COMPLETED || !doc) return;
+    if (!res || (res->state != STATE_COMPLETED && res->state != STATE_CACHED) || !doc) return;
 
     log_debug("network: processing HTML resource %s from %s", res->url, res->local_path);
 
@@ -390,7 +413,7 @@ void process_html_resource(NetworkResource* res, struct DomDocument* doc) {
 // Downloaded scripts are stored in cache — execution happens via script_runner
 // when the document reaches script execution phase (or on late arrival)
 void process_script_resource(NetworkResource* res, struct DomDocument* doc) {
-    if (!res || res->state != STATE_COMPLETED || !doc) return;
+    if (!res || (res->state != STATE_COMPLETED && res->state != STATE_CACHED) || !doc) return;
 
     log_info("network: script resource downloaded: %s -> %s", res->url, res->local_path);
 

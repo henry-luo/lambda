@@ -7,6 +7,8 @@
 
 #include <pthread.h>
 #include <stdbool.h>
+#include <stdint.h>
+#include <stdatomic.h>
 #include "network_thread_pool.h"
 #include "enhanced_file_cache.h"
 
@@ -19,6 +21,9 @@ struct DomDocument;
 struct DomElement;
 struct CssEngine;
 struct CookieJar;
+struct NetworkScheduler;
+
+typedef void (*NetworkWakeCallback)(void* user_data);
 
 // Resource types
 typedef enum {
@@ -61,6 +66,9 @@ typedef struct NetworkResource {
     int timeout_ms;                 // Timeout in milliseconds (default 30000)
     int retry_count;                // Current retry attempt (0 = first try)
     int max_retries;                // Maximum retry attempts (default 3)
+    atomic_bool cancel_requested;    // Cancellation requested by navigation/owner removal
+    uint64_t document_id;            // Owning document identity
+    uint64_t navigation_id;          // Owning navigation identity
     
     // Manager and cache references
     struct NetworkResourceManager* manager;  // Back-reference to manager
@@ -72,12 +80,17 @@ typedef struct NetworkResource {
     
     // Reference count for cleanup
     int ref_count;
+
+    // Main-thread delivery tracking
+    bool stats_counted;            // true once completed/failed stats include this resource
+    bool processed;                // true once main-thread resource processing has run
 } NetworkResource;
 
 // Network resource manager
 typedef struct NetworkResourceManager {
     struct DomDocument* document;
     NetworkThreadPool* thread_pool;
+    struct NetworkScheduler* scheduler;
     EnhancedFileCache* file_cache;
     
     // CSS parsing context (for processing network-loaded stylesheets)
@@ -90,12 +103,20 @@ typedef struct NetworkResourceManager {
     struct CookieJar* cookie_jar;
     
     void* resources;                // HashMap: URL → NetworkResource*
+    void* pending_ready;            // ArrayList of NetworkResource* ready for main-thread processing
+    void* pending_failed;           // ArrayList of NetworkResource* failed and ready for main-thread handling
     void* pending_reflows;          // ArrayList of DomElement*
     void* pending_repaints;         // ArrayList of DomElement*
     
     pthread_mutex_t mutex;          // Protects resource list
+
+    // Cross-thread wake callback, e.g. GLFW empty event or uv_async_send
+    NetworkWakeCallback wake_callback;
+    void* wake_callback_data;
     
     // Load tracking
+    uint64_t document_id;
+    uint64_t navigation_id;
     double load_start_time;
     int total_resources;
     int completed_resources;
@@ -119,6 +140,9 @@ void resource_manager_destroy(NetworkResourceManager* mgr);
 // Context setup (called after UiContext and CssEngine are initialized)
 void resource_manager_set_css_engine(NetworkResourceManager* mgr, struct CssEngine* engine);
 void resource_manager_set_ui_context(NetworkResourceManager* mgr, void* uicon);
+void resource_manager_set_wake_callback(NetworkResourceManager* mgr,
+                                        NetworkWakeCallback callback,
+                                        void* user_data);
 
 // Resource loading
 NetworkResource* resource_manager_load(NetworkResourceManager* mgr,
@@ -141,11 +165,11 @@ void resource_manager_get_stats(NetworkResourceManager* mgr, int* total, int* co
 bool resource_manager_check_page_timeout(NetworkResourceManager* mgr);
 bool resource_manager_retry_download(NetworkResourceManager* mgr, NetworkResource* res);
 
-// Reflow/repaint scheduling (called from worker threads)
+// Reflow/repaint scheduling (main-thread processing may call these; safe to call from workers)
 void resource_manager_schedule_reflow(NetworkResourceManager* mgr, struct DomElement* root);
 void resource_manager_schedule_repaint(NetworkResourceManager* mgr, struct DomElement* element);
 
-// Layout updates (called on main thread)
+// Process completed resources and layout updates (called on main thread)
 void resource_manager_flush_layout_updates(NetworkResourceManager* mgr);
 
 // Error handling

@@ -67,6 +67,10 @@ typedef struct {
     size_t size;
 } HttpResponse;
 
+typedef struct {
+    NetworkResource* resource;
+} DownloadProgressCtx;
+
 // Maximum single resource size (100 MB) — prevents unbounded memory growth
 #define NETWORK_MAX_RESOURCE_SIZE (100 * 1024 * 1024)
 
@@ -94,6 +98,25 @@ static size_t write_response_callback(void* contents, size_t size, size_t nmemb,
     response->data[response->size] = '\0';
     
     return total_size;
+}
+
+static int download_progress_callback(void* clientp,
+                                      curl_off_t dltotal,
+                                      curl_off_t dlnow,
+                                      curl_off_t ultotal,
+                                      curl_off_t ulnow) {
+    (void)dltotal;
+    (void)dlnow;
+    (void)ultotal;
+    (void)ulnow;
+
+    DownloadProgressCtx* ctx = (DownloadProgressCtx*)clientp;
+    if (ctx && ctx->resource && atomic_load(&ctx->resource->cancel_requested)) {
+        log_debug("network: aborting cancelled curl transfer: %s", ctx->resource->url);
+        return 1;
+    }
+
+    return 0;
 }
 
 // Context for header callback (captures Set-Cookie headers for cookie jar)
@@ -176,12 +199,16 @@ bool network_download_resource(NetworkResource* res) {
     }
     
     HttpResponse response = {0};
+    DownloadProgressCtx progress_ctx = { .resource = res };
     CURLcode curl_res;
     
     // Configure curl options
     curl_easy_setopt(curl, CURLOPT_URL, res->url);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_response_callback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, download_progress_callback);
+    curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &progress_ctx);
     
     // Timeout configuration (milliseconds)
     int timeout_ms = res->timeout_ms > 0 ? res->timeout_ms : 30000;  // Default 30s
@@ -266,6 +293,10 @@ bool network_download_resource(NetworkResource* res) {
                 snprintf(error_msg, sizeof(error_msg), "Request timed out");
                 log_error("network: request timed out for %s", res->url);
                 break;
+            case CURLE_ABORTED_BY_CALLBACK:
+                snprintf(error_msg, sizeof(error_msg), "Cancelled");
+                log_debug("network: curl transfer cancelled for %s", res->url);
+                break;
             case CURLE_COULDNT_RESOLVE_HOST:
                 snprintf(error_msg, sizeof(error_msg), "Could not resolve host");
                 log_error("network: could not resolve host for %s", res->url);
@@ -316,10 +347,12 @@ bool network_download_resource(NetworkResource* res) {
     log_debug("network: successfully downloaded %zu bytes from %s (HTTP %ld)",
               response.size, res->url, http_code);
     
-    // Store in cache (enhanced_file_cache will handle file writing)
+    // Store in cache opportunistically. If the bounded cache pipeline is full,
+    // skip persistence and fall back to a per-resource temp file; page loading
+    // must not wait behind cache body writes.
     if (res->cache) {
-        char* cached_path = enhanced_cache_store(res->cache, res->url, 
-                                                  response.data, response.size, NULL);
+        char* cached_path = enhanced_cache_try_store(res->cache, res->url,
+                                                     response.data, response.size, NULL);
         if (cached_path) {
             if (res->local_path) mem_free(res->local_path);
             res->local_path = cached_path;

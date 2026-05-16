@@ -53,6 +53,11 @@ typedef struct EnhancedFileCache {
     CacheMetadata* lru_tail;      // LRU list tail (least recent)
     
     pthread_rwlock_t rwlock;      // Read-write lock for thread safety
+    pthread_mutex_t write_mutex;   // Bounds concurrent cache body writes
+    pthread_cond_t write_cond;
+    int max_concurrent_writes;
+    int active_writes;
+    int skipped_write_count;
     
     // Statistics
     int hit_count;
@@ -72,6 +77,12 @@ char* enhanced_cache_store(EnhancedFileCache* cache,
                            const char* content, 
                            size_t size,
                            const HttpCacheHeaders* headers);
+char* enhanced_cache_try_store(EnhancedFileCache* cache,
+                               const char* url,
+                               const char* content,
+                               size_t size,
+                               const HttpCacheHeaders* headers);
+void enhanced_cache_set_max_concurrent_writes(EnhancedFileCache* cache, int max_writes);
 
 // Eviction operations
 void enhanced_cache_evict_lru(EnhancedFileCache* cache);
