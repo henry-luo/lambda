@@ -1117,8 +1117,32 @@ static bool jm_uri_compare_arg_is_simple(JsAstNode* node) {
            node->node_type == JS_AST_NODE_LITERAL;
 }
 
+static bool jm_match_decimal_to_percent_hex_call(JsAstNode* node, JsAstNode** n_arg) {
+    if (!node || node->node_type != JS_AST_NODE_CALL_EXPRESSION) return false;
+    JsCallNode* call = (JsCallNode*)node;
+    if (jm_count_args(call->arguments) != 1 || !call->callee ||
+        call->callee->node_type != JS_AST_NODE_IDENTIFIER) {
+        return false;
+    }
+    JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
+    if (!jm_identifier_matches(id->name, "decimalToPercentHexString", 25)) return false;
+    *n_arg = call->arguments;
+    return true;
+}
+
 // Binary expression: native arithmetic fast path + boxed fallback
 MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
+    if (bin->op == JS_OP_ADD) {
+        JsAstNode* n_arg = NULL;
+        if (jm_match_decimal_to_percent_hex_call(bin->right, &n_arg)) {
+            MIR_reg_t left_reg = jm_transpile_box_item(mt, bin->left);
+            MIR_reg_t n_reg = jm_transpile_box_item(mt, n_arg);
+            return jm_call_2(mt, "js_test262_concat_percent_hex", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, left_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, n_reg));
+        }
+    }
+
     if (bin->op == JS_OP_STRICT_EQ || bin->op == JS_OP_STRICT_NE) {
         JsAstNode* uri_arg = NULL;
         JsAstNode* first_arg = NULL;
@@ -10975,6 +10999,36 @@ MIR_reg_t jm_transpile_condition(JsMirTranspiler* mt, JsAstNode* expr) {
             if (left_num && right_num) {
                 // both numeric → native comparison already returns 0/1
                 return jm_transpile_expression(mt, expr);
+            }
+
+            if (bin->op == JS_OP_STRICT_EQ || bin->op == JS_OP_STRICT_NE) {
+                JsAstNode* uri_arg = NULL;
+                JsAstNode* first_arg = NULL;
+                JsAstNode* second_arg = NULL;
+                int64_t component = 0;
+                if (jm_match_uri_decode_call(mt, bin->left, &uri_arg, &component) &&
+                    jm_match_string_from_char_code2(mt, bin->right, &first_arg, &second_arg) &&
+                    jm_uri_compare_arg_is_simple(uri_arg) &&
+                    jm_uri_compare_arg_is_simple(first_arg) &&
+                    jm_uri_compare_arg_is_simple(second_arg)) {
+                    MIR_reg_t uri_reg = jm_transpile_box_item(mt, uri_arg);
+                    MIR_reg_t first_reg = jm_transpile_box_item(mt, first_arg);
+                    MIR_reg_t second_reg = jm_transpile_box_item(mt, second_arg);
+                    MIR_reg_t boxed = jm_call_4(mt, "js_uri_decode_equals_from_char_code", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, uri_reg),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, first_reg),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, second_reg),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, component));
+                    MIR_reg_t raw = jm_emit_is_truthy(mt, boxed, expr);
+                    if (bin->op == JS_OP_STRICT_NE) {
+                        MIR_reg_t inv = jm_new_reg(mt, "uri_ne", MIR_T_I64);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_XOR,
+                            MIR_new_reg_op(mt->ctx, inv),
+                            MIR_new_reg_op(mt->ctx, raw), MIR_new_int_op(mt->ctx, 1)));
+                        raw = inv;
+                    }
+                    return raw;
+                }
             }
 
             // Untyped comparison → use _raw facade returning int64 directly

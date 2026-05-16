@@ -1159,6 +1159,13 @@ extern "C" int64_t js_string_last_four_byte_uri_escape_cp(Item str_item) {
     return -1;
 }
 
+extern "C" void js_string_remember_four_byte_uri_escape_cp(Item str_item, int64_t cp) {
+    if (cp < 0x10000 || cp > 0x10FFFF) return;
+    g_last_four_byte_uri_escape_string = str_item;
+    g_last_four_byte_uri_escape_cp = (uint32_t)cp;
+    g_last_four_byte_uri_escape_epoch = js_get_heap_epoch();
+}
+
 static inline Item js_try_concat_percent_hex(String* left, String* right) {
     if (!left->is_ascii || !right->is_ascii || right->len != 1) return ItemNull;
     char right_ch = right->chars[0];

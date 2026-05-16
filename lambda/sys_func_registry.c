@@ -181,6 +181,7 @@ extern Item js_string_replace_nonws_global_fast(Item str, Item replacement);
 extern Item js_string_fromCharCode2(Item first_item, Item second_item);
 extern Item js_uri_decode_equals_from_char_code(Item str_item, Item first_item, Item second_item, int64_t component);
 extern Item js_test262_decimal_to_percent_hex_string(Item n_item);
+extern Item js_test262_concat_percent_hex(Item left_item, Item n_item);
 extern void js_validate_native_function_source(Item source_item);
 // Phase 8C: Image() constructor (defined in js_dom.cpp)
 extern Item js_image_construct(Item width_arg, Item height_arg, int argc);
@@ -1466,6 +1467,7 @@ JitImport jit_runtime_imports[] = {
     {"js_string_fromCharCode2", FPTR(js_string_fromCharCode2)},
     {"js_uri_decode_equals_from_char_code", FPTR(js_uri_decode_equals_from_char_code)},
     {"js_test262_decimal_to_percent_hex_string", FPTR(js_test262_decimal_to_percent_hex_string)},
+    {"js_test262_concat_percent_hex", FPTR(js_test262_concat_percent_hex)},
     {"js_validate_native_function_source", FPTR(js_validate_native_function_source)},
     {"js_array_method", FPTR(js_array_method)},
     {"js_array_method_direct", FPTR(js_array_method_direct)},
