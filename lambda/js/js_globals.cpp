@@ -2438,10 +2438,10 @@ extern "C" Item js_process_nextTick(Item rest_args) {
     if (get_type_id(callback) != LMD_TYPE_FUNC) {
         return js_throw_type_error("The \"callback\" argument must be of type function");
     }
-    extern void js_microtask_enqueue(Item func);
+    extern void js_next_tick_enqueue(Item func);
     if (argc == 1) {
         // no extra args — enqueue callback directly
-        js_microtask_enqueue(callback);
+        js_next_tick_enqueue(callback);
     } else {
         // bind extra args: callback.bind(undefined, arg1, arg2, ...)
         extern Item js_bind_function(Item func, Item this_val, Item* args, int arg_count);
@@ -2451,7 +2451,7 @@ extern "C" Item js_process_nextTick(Item rest_args) {
             bound_args[i] = js_array_get_int(rest_args, i + 1);
         }
         Item bound = js_bind_function(callback, make_js_undefined(), bound_args, extra);
-        js_microtask_enqueue(bound);
+        js_next_tick_enqueue(bound);
     }
     return make_js_undefined();
 }
@@ -13404,6 +13404,7 @@ extern "C" Item js_get_global_this() {
             {"setTimeout", 10, 2}, {"setInterval", 11, 2},
             {"clearTimeout", 12, 1}, {"clearInterval", 13, 1},
             {"setImmediate", 12, 1}, {"clearImmediate", 14, 1},
+            {"requestAnimationFrame", 21, 1}, {"cancelAnimationFrame", 20, 1},
             {"queueMicrotask", 14, 1},
             // Web API globals
             {"structuredClone", 15, 1}, {"fetch", 5, 2},

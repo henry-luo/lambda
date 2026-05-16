@@ -97,14 +97,14 @@ JavaScript runtime, Node-compatibility surface (`fs`, `net`, `dgram`, `dns`, `ht
 - This matters for retained Radiant documents, tests that run multiple runtimes in one process, embedders that already own an event loop, and future JS worker isolates. A process-global loop is convenient; process-global subsystem state is the part to avoid.
 - Async-capable subsystems may share the default loop when they are part of the same runtime instance. Long-running policy engines, such as the final network scheduler, should own their own scheduler state and use the default loop only for wakeups/completion delivery.
 - APIs that currently call `lambda_uv_loop()` directly should be considered legacy-compatible entry points. New lower-level helpers should prefer a context parameter such as `LambdaRuntime*`, `JsRuntime*`, `RadiantSession*`, or an explicit loop/integration handle.
-- `lambda_uv_set_microtask_drain()` hooks JS microtask draining between event-loop iterations.
+- `lambda_uv_set_microtask_drain()` hooks JS task draining at libuv phase checkpoints. The drain order is `process.nextTick` first, then Promise/queueMicrotask jobs.
 - Lambda Script itself (pure functional) **does not** expose raw async — async work is mediated by `io.*` modules or scheduler-backed APIs (Section 4) and returns synchronously unless the language explicitly grows async effects.
 
 ### 2.4 Enhancements Beyond Current Code
 
-1. **Microtask ordering audit.** Verify that `lambda_uv_set_microtask_drain` runs after **every** macrotask category Node runs it after: I/O callbacks, timers, `setImmediate`, close callbacks. Currently called only at top of iteration — check timer/I/O paths individually. Mismatches here cause subtle Promise-ordering bugs that break npm packages.
+1. **Microtask ordering audit.** `lambda_uv_set_microtask_drain` is installed on both `uv_prepare_t` and `uv_check_t`, so JS task queues are checked before libuv enters poll and after poll callbacks complete. Timer and manually-dispatched async callbacks may still call `js_microtask_flush()` directly when they bypass normal libuv phase flow. Keep tests around Promise/timer/I/O ordering because mismatches here cause subtle npm breakage.
 
-2. **`process.nextTick` queue.** Distinct from microtask queue in Node; runs before microtasks within each macrotask boundary. If not yet implemented, add a `nextTick` queue drained inside `lambda_uv_set_microtask_drain` *before* the JS microtask queue.
+2. **`process.nextTick` queue.** Implemented as a distinct queue in `lambda/js/js_event_loop.cpp`. It drains before Promise microtasks at each JS task checkpoint, including callbacks queued with extra `nextTick` arguments.
 
 3. **Tunable thread pool size.** Set `UV_THREADPOOL_SIZE` (env or `uv_os_setenv` before first `uv_*` call) based on CPU count. Default of 4 is fine for fs+dns, but starves under image decode + handler dispatch. Recommend `min(cores * 2, 16)`. Expose via `build_lambda_config.json`.
 
@@ -220,6 +220,11 @@ facade. The window loop asks the frame clock for the current frame timestamp and
 the next useful wake deadline; `animation_scheduler_tick()` only receives the
 timestamp and does not know whether it came from a native display link or the
 monotonic fallback.
+
+`requestAnimationFrame` follows the same rule: it is a JS queue drained from the
+Radiant frame loop, not a `setTimeout(16)` shim and not a libuv timer. New rAF
+callbacks scheduled during a frame wait for the next frame, and
+`cancelAnimationFrame` cancels queued callbacks before delivery.
 
 Initial backend mapping:
 - macOS uses `CVDisplayLink` and wakes the GLFW loop only when animation/video work is waiting for the next frame.
@@ -482,8 +487,8 @@ A suggested phasing that evolves the current network code toward the final archi
 | P9 | Dedicated blocking-curl backend | `lambda/network/network_scheduler.*`, `network_downloader.*` | Moves long HTTP work off libuv's global worker pool while keeping `curl_easy_perform` |
 | P10 | Bounded cache/decode queues | `lambda/network/*`, `radiant/surface.cpp`, font/image loaders | Prevents cache writes and CPU decode from stalling frames |
 | P11 | curl multi network-thread backend | `lambda/network/curl_multi_backend.*` | Final HTTP architecture: many transfers, connection reuse, HTTP/2 multiplexing |
-| P12 | Vsync animation source (§3.4.2) | `radiant/frame_clock.*`, `radiant/window.cpp`, future platform shims | Separates animation timing from libuv; starts with the monotonic fallback and leaves native display-link backends behind the facade |
-| P13 | `process.nextTick` queue + microtask audit (§2.4.1, §2.4.2) | `lambda/js/*` | Node-compat correctness |
+| P12 | Vsync animation source (§3.4.2) | `radiant/frame_clock.*`, `radiant/window.cpp`, `lambda/js/js_event_loop.*`, `radiant/script_runner.cpp` | Implemented: frame clock facade with native macOS/Windows/Linux pacing and rAF delivery from Radiant's frame loop, not libuv timers |
+| P13 | `process.nextTick` queue + microtask audit (§2.4.1, §2.4.2) | `lambda/js/*`, `lib/uv_loop.*` | Implemented: separate nextTick queue, prepare/check JS task checkpoints, and ordering coverage |
 | P14 | Handle leak detection + loop-thread assertions (§2.4.4, §2.4.5) | `lib/uv_loop.c`, debug builds only | Debugging quality |
 
 ---

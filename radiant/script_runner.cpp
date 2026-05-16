@@ -449,11 +449,8 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
         "var navigator = {userAgent: '', platform: '', language: 'en', languages: ['en']};\n"
         "window.navigator = navigator;\n"
         "window.document = document;\n"
-        // Timer stubs: requestAnimationFrame/cancelAnimationFrame use setTimeout/clearTimeout
-        // which the transpiler routes to native js_setTimeout/js_clearTimeout (libuv-backed).
-        // setTimeout/setInterval/clearTimeout/clearInterval are transpiler-intercepted — no JS stub needed.
-        "function requestAnimationFrame(fn) { return setTimeout(fn, 16); }\n"
-        "function cancelAnimationFrame(id) { clearTimeout(id); }\n"
+        // Timer globals are transpiler-intercepted. requestAnimationFrame is
+        // native too, but it is drained by Radiant's frame clock, not libuv.
         "window.setTimeout = setTimeout;\n"
         "window.setInterval = setInterval;\n"
         "window.clearTimeout = clearTimeout;\n"
@@ -625,7 +622,8 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
         log_error("execute_document_scripts: JS execution failed");
     } else {
         log_info("execute_document_scripts: JS execution completed successfully");
-        // Drain queued timers (setTimeout, setInterval, requestAnimationFrame).
+        // Drain queued timers (setTimeout, setInterval).
+        // requestAnimationFrame is delivered by the Radiant frame clock.
         // This runs all pending callbacks with a 5s watchdog timeout.
         js_event_loop_drain();
         log_mem_stage("js: after event loop drain");

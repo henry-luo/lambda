@@ -27,6 +27,7 @@
 #include "../lambda/network/network_thread_pool.h"
 #include "../lambda/network/enhanced_file_cache.h"
 #include "../lambda/network/network_downloader.h"
+#include "../lambda/js/js_event_loop.h"
 extern "C" {
 #include "../lib/url.h"
 }
@@ -1164,6 +1165,14 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
             uv_run(uv_loop, UV_RUN_NOWAIT);
         }
 
+        if (js_animation_frame_has_pending()) {
+            int callbacks = js_animation_frame_flush(currentTime * 1000.0);
+            if (callbacks > 0) {
+                do_redraw = 1;
+            }
+            frame_driven = js_animation_frame_has_pending() != 0;
+        }
+
         // Drain network completions on the UI thread before deciding whether
         // this tick needs a reflow/repaint.
         if (ui_context.document && ui_context.document->resource_manager) {
@@ -1210,7 +1219,7 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
             bool still_active = animation_scheduler_tick(state->animation_scheduler,
                                                          currentTime, &state->dirty_tracker);
             doc_state_request_repaint(state);
-            frame_driven = still_active;
+            frame_driven = frame_driven || still_active;
             do_redraw = 1;
         }
 
