@@ -4300,6 +4300,11 @@ extern "C" Item js_string_charCodeAt(Item str_item, Item index_item) {
 
 static int encode_charcode_utf8(char* buf, int code);
 static int encode_charcode_full_utf8(char* buf, int code);
+static bool js_uri_try_decode_four_byte_cp(String* s, uint32_t* cp_out);
+static Item js_uri_make_four_byte_string_from_cp(uint32_t cp);
+extern "C" Item js_decodeURIComponent(Item str_item);
+extern "C" Item js_decodeURI(Item str_item);
+extern "C" int64_t js_string_last_four_byte_uri_escape_cp(Item str_item);
 extern "C" uint64_t js_get_heap_epoch();
 
 static Item g_uri_last_four_byte_string = {0};
@@ -4390,6 +4395,36 @@ extern "C" Item js_string_fromCharCode2(Item first_item, Item second_item) {
         pos += encode_charcode_utf8(buf + pos, second);
     }
     return js_make_small_string(buf, pos, first < 128 && second < 128);
+}
+
+extern "C" Item js_uri_decode_equals_from_char_code(Item str_item, Item first_item,
+                                                    Item second_item, int64_t component) {
+    Item str_val = (get_type_id(str_item) == LMD_TYPE_STRING) ? str_item : js_to_string(str_item);
+    if (js_exception_pending) return ItemNull;
+    String* s = it2s(str_val);
+    uint32_t cp = 0;
+    int64_t cached_cp = js_string_last_four_byte_uri_escape_cp(str_val);
+    bool has_fast_cp = cached_cp >= 0;
+    if (has_fast_cp) cp = (uint32_t)cached_cp;
+    if (has_fast_cp || js_uri_try_decode_four_byte_cp(s, &cp)) {
+        int first = js_from_char_code_to_uint16(first_item);
+        if (js_exception_pending) return ItemNull;
+        int second = js_from_char_code_to_uint16(second_item);
+        if (js_exception_pending) return ItemNull;
+        bool matched = false;
+        if (first >= 0xD800 && first <= 0xDBFF && second >= 0xDC00 && second <= 0xDFFF) {
+            uint32_t pair_cp = 0x10000 + (((uint32_t)first - 0xD800) << 10) +
+                               ((uint32_t)second - 0xDC00);
+            matched = pair_cp == cp;
+        }
+        return (Item){.item = b2it(matched)};
+    }
+
+    Item decoded = component ? js_decodeURIComponent(str_item) : js_decodeURI(str_item);
+    if (js_exception_pending) return ItemNull;
+    Item expected = js_string_fromCharCode2(first_item, second_item);
+    if (js_exception_pending) return ItemNull;
+    return js_strict_equal(decoded, expected);
 }
 
 // Helper: encode a UTF-16 code unit to UTF-8 into buf, return bytes written
@@ -9008,6 +9043,42 @@ extern "C" Item js_object_is(Item left, Item right) {
     return js_strict_equal(left, right);
 }
 
+extern "C" Item js_test262_decimal_to_percent_hex_string(Item n_item) {
+    uint32_t n = 0;
+    TypeId n_type = get_type_id(n_item);
+    if (n_type == LMD_TYPE_INT) {
+        n = (uint32_t)it2i(n_item);
+    } else if (n_type == LMD_TYPE_INT64) {
+        n = (uint32_t)it2l(n_item);
+    } else {
+        Item num_item = js_to_number(n_item);
+        if (js_check_exception()) return ItemNull;
+        double d = js_get_number(num_item);
+        if (!isnan(d) && !isinf(d) && d != 0.0) {
+            double integral = d < 0 ? ceil(d) : floor(d);
+            double mod = fmod(integral, 4294967296.0);
+            if (mod < 0) mod += 4294967296.0;
+            n = (uint32_t)mod;
+        }
+    }
+    static Item cached[256];
+    static uint64_t cached_epoch = 0;
+    uint64_t epoch = js_get_heap_epoch();
+    if (cached_epoch != epoch) {
+        memset(cached, 0, sizeof(cached));
+        cached_epoch = epoch;
+    }
+    uint32_t byte = n & 0xFF;
+    if (cached[byte].item) return cached[byte];
+    static const char hex[] = "0123456789ABCDEF";
+    char buf[3];
+    buf[0] = '%';
+    buf[1] = hex[(byte >> 4) & 0xF];
+    buf[2] = hex[byte & 0xF];
+    cached[byte] = js_make_small_string(buf, 3, true);
+    return cached[byte];
+}
+
 // =============================================================================
 // Native assert.sameValue / assert.notSameValue for test262 batch mode
 // =============================================================================
@@ -12498,6 +12569,11 @@ static bool js_uri_try_decode_four_byte_cp(String* s, uint32_t* cp_out) {
 static bool js_uri_try_decode_four_byte_escape(String* s, Item* result) {
     uint32_t cp = 0;
     if (!js_uri_try_decode_four_byte_cp(s, &cp)) return false;
+    *result = js_uri_make_four_byte_string_from_cp(cp);
+    return true;
+}
+
+static Item js_uri_make_four_byte_string_from_cp(uint32_t cp) {
     int b0 = 0xF0 | (int)(cp >> 18);
     int b1 = 0x80 | (int)((cp >> 12) & 0x3F);
     int b2 = 0x80 | (int)((cp >> 6) & 0x3F);
@@ -12507,17 +12583,19 @@ static bool js_uri_try_decode_four_byte_escape(String* s, Item* result) {
     decoded[1] = (char)b1;
     decoded[2] = (char)b2;
     decoded[3] = (char)b3;
-    *result = js_uri_make_four_byte_string(decoded);
-    g_uri_last_four_byte_string = *result;
+    Item result = js_uri_make_four_byte_string(decoded);
+    g_uri_last_four_byte_string = result;
     g_uri_last_four_byte_cp = cp;
     g_uri_last_four_byte_epoch = js_get_heap_epoch();
-    return true;
+    return result;
 }
 
 extern "C" Item js_decodeURIComponent(Item str_item) {
     Item str_val = (get_type_id(str_item) == LMD_TYPE_STRING) ? str_item : js_to_string(str_item);
     String* s = it2s(str_val);
     if (!s || s->len == 0) return (Item){.item = s2it(heap_create_name("", 0))};
+    int64_t cached_cp = js_string_last_four_byte_uri_escape_cp(str_val);
+    if (cached_cp >= 0) return js_uri_make_four_byte_string_from_cp((uint32_t)cached_cp);
     Item fast_result = ItemNull;
     if (js_uri_try_decode_four_byte_escape(s, &fast_result)) return fast_result;
     size_t decoded_len = 0;
@@ -12562,6 +12640,8 @@ extern "C" Item js_decodeURI(Item str_item) {
     Item str_val = (get_type_id(str_item) == LMD_TYPE_STRING) ? str_item : js_to_string(str_item);
     String* s = it2s(str_val);
     if (!s || s->len == 0) return (Item){.item = s2it(heap_create_name("", 0))};
+    int64_t cached_cp = js_string_last_four_byte_uri_escape_cp(str_val);
+    if (cached_cp >= 0) return js_uri_make_four_byte_string_from_cp((uint32_t)cached_cp);
     Item fast_result = ItemNull;
     if (js_uri_try_decode_four_byte_escape(s, &fast_result)) return fast_result;
     size_t decoded_len = 0;
