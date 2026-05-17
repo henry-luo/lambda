@@ -6144,7 +6144,7 @@ extern "C" Item js_array_get_int(Item array, int64_t index) {
         return js_typed_array_get(array, (Item){.item = i2it((int)index)});
     }
     if (get_type_id(array) == LMD_TYPE_STRING && index >= 0) {
-        return item_at(array, index);
+        return js_string_get_int(array, index);
     }
     // fall back to general property access for strings, maps, etc.
     return js_property_access(array, (Item){.item = i2it(index)});
@@ -17241,13 +17241,21 @@ extern "C" Item js_string_replace_nonws_global_fast(Item str, Item replacement) 
 static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_replace_all) {
     String* s = it2s(str);
     if (!s) return str;
-    bool replacement_is_func = (get_type_id(args[1]) == LMD_TYPE_FUNC);
-    JsRegexData* rd = js_get_regex_data(args[0]);
+    Item search_arg = (argc >= 1) ? args[0] : make_js_undefined();
+    Item replacement_arg = (argc >= 2) ? args[1] : make_js_undefined();
+    bool replacement_is_func = (get_type_id(replacement_arg) == LMD_TYPE_FUNC);
+    if (!replacement_is_func) {
+        replacement_arg = js_to_string(replacement_arg);
+        if (js_exception_pending) return ItemNull;
+    }
+    JsRegexData* rd = js_get_regex_data(search_arg);
 
     if (s->len == 0 && !is_replace_all) return str;
     if (s->len == 0 && is_replace_all && !rd) {
         // "".replaceAll("", repl) — check if search is also empty
-        String* search = it2s(js_to_string(args[0]));
+        Item search_str_item = js_to_string(search_arg);
+        if (js_exception_pending) return ItemNull;
+        String* search = it2s(search_str_item);
         if (!search || search->len == 0) {
             // single match at position 0, produce replacement
             if (replacement_is_func) {
@@ -17255,10 +17263,10 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
                 fn_args[0] = (Item){.item = s2it(heap_create_name("", 0))};
                 fn_args[1] = (Item){.item = i2it(0)};
                 fn_args[2] = str;
-                Item result = js_call_function(args[1], ItemNull, fn_args, 3);
+                Item result = js_call_function(replacement_arg, ItemNull, fn_args, 3);
                 return js_to_string(result);
             }
-            String* repl = it2s(js_to_string(args[1]));
+            String* repl = it2s(replacement_arg);
             if (!repl || repl->len == 0) return str;
             StrBuf* buf = strbuf_new();
             js_apply_replacement(buf, repl->chars, (int)repl->len,
@@ -17272,7 +17280,7 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
     }
 
     if (rd) {
-        Item fast = js_try_fast_replace_non_whitespace(args[0], str, args[1], rd, replacement_is_func);
+        Item fast = js_try_fast_replace_non_whitespace(search_arg, str, replacement_arg, rd, replacement_is_func);
         if (fast.item != ItemNull.item || js_exception_pending) return fast;
         // regex-based replace
         re2::StringPiece input(s->chars, s->len);
@@ -17309,15 +17317,14 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
                 fn_args[ngroups] = (Item){.item = i2it(match_start)};
                 fn_args[ngroups + 1] = str;
                 if (has_groups) fn_args[ngroups + 2] = groups_obj;
-                Item result = js_call_function(args[1], ItemNull, fn_args, fn_argc);
+                Item result = js_call_function(replacement_arg, ItemNull, fn_args, fn_argc);
                 Item result_str = js_to_string(result);
                 String* rs = it2s(result_str);
                 if (rs) strbuf_append_str_n(buf, rs->chars, rs->len);
             } else {
                 // string replacement with $-substitution patterns
                 Item groups_obj = js_build_groups_object(rd, matches, ngroups);
-                Item repl_str = js_to_string(args[1]);
-                String* rs = it2s(repl_str);
+                String* rs = it2s(replacement_arg);
                 if (rs) {
                     js_apply_replacement(buf, rs->chars, (int)rs->len,
                         s->chars, (int)s->len, match_start, match_len,
@@ -17341,8 +17348,9 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
     }
 
     // string-based replace
-    String* search = it2s(js_to_string(args[0]));
+    Item search_str_item = js_to_string(search_arg);
     if (js_exception_pending) return make_js_undefined();
+    String* search = it2s(search_str_item);
     if (!search || search->len == 0) {
         if (is_replace_all) {
             // replaceAll("", repl): insert replacement between every character and at start/end
@@ -17355,12 +17363,12 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
                     fn_args[0] = (Item){.item = s2it(heap_create_name("", 0))};
                     fn_args[1] = (Item){.item = i2it(pos)};
                     fn_args[2] = str;
-                    Item result = js_call_function(args[1], ItemNull, fn_args, 3);
+                    Item result = js_call_function(replacement_arg, ItemNull, fn_args, 3);
                     Item result_str = js_to_string(result);
                     String* rs = it2s(result_str);
                     if (rs) strbuf_append_str_n(buf, rs->chars, rs->len);
                 } else {
-                    String* repl = it2s(js_to_string(args[1]));
+                    String* repl = it2s(replacement_arg);
                     if (repl && repl->len > 0) {
                         js_apply_replacement(buf, repl->chars, (int)repl->len,
                             s->chars, slen, pos, 0, NULL, 0, ItemNull);
@@ -17378,7 +17386,7 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
             fn_args[0] = (Item){.item = s2it(heap_create_name("", 0))};
             fn_args[1] = (Item){.item = i2it(0)};
             fn_args[2] = str;
-            Item result = js_call_function(args[1], ItemNull, fn_args, 3);
+            Item result = js_call_function(replacement_arg, ItemNull, fn_args, 3);
             Item result_str_val = js_to_string(result);
             String* rs = it2s(result_str_val);
             StrBuf* buf = strbuf_new();
@@ -17388,7 +17396,7 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
             strbuf_free(buf);
             return (Item){.item = s2it(result_str)};
         }
-        String* repl = it2s(js_to_string(args[1]));
+        String* repl = it2s(replacement_arg);
         if (!repl || repl->len == 0) return str;
         StrBuf* buf = strbuf_new();
         js_apply_replacement(buf, repl->chars, (int)repl->len,
@@ -17401,7 +17409,7 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
     if (!replacement_is_func) {
         if (is_replace_all) {
             // linear scan replaceAll: find each occurrence and build result
-            String* repl = it2s(js_to_string(args[1]));
+            String* repl = it2s(replacement_arg);
             if (!repl) return str;
             StrBuf* buf = strbuf_new();
             int pos = 0;
@@ -17429,7 +17437,7 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
         }
         // JS .replace() with string pattern: replace FIRST occurrence only
         {
-            String* repl = it2s(js_to_string(args[1]));
+            String* repl = it2s(replacement_arg);
             const char* found = (const char*)memmem(s->chars, s->len, search->chars, search->len);
             if (!found) return str;
             int match_start = (int)(found - s->chars);
@@ -17461,10 +17469,10 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
             strbuf_append_str_n(buf, s->chars + pos, match_start - pos);
         // call function(match, offset, originalString)
         Item fn_args[3];
-        fn_args[0] = args[0]; // the matched string == search string
+        fn_args[0] = search_str_item; // the matched string == search string
         fn_args[1] = (Item){.item = i2it(match_start)};
         fn_args[2] = str;
-        Item result = js_call_function(args[1], ItemNull, fn_args, 3);
+        Item result = js_call_function(replacement_arg, ItemNull, fn_args, 3);
         Item result_str = js_to_string(result);
         String* rs = it2s(result_str);
         if (rs) strbuf_append_str_n(buf, rs->chars, rs->len);
@@ -17859,6 +17867,33 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         mem_free(normalized);
         return (Item){.item = s2it(result)};
     }
+    if (method->len == 13 && strncmp(method->chars, "localeCompare", 13) == 0) {
+        String* left = it2s(str);
+        Item right_item = js_to_string((argc >= 1) ? args[0] : make_js_undefined());
+        if (js_exception_pending) return ItemNull;
+        String* right = it2s(right_item);
+        if (!left || !right) return ItemNull;
+
+        int left_norm_len = 0, right_norm_len = 0;
+        char* left_norm = normalize_utf8proc_nfc(left->chars, (int)left->len, &left_norm_len);
+        char* right_norm = normalize_utf8proc_nfc(right->chars, (int)right->len, &right_norm_len);
+        const char* left_chars = left_norm ? left_norm : left->chars;
+        const char* right_chars = right_norm ? right_norm : right->chars;
+        int left_len = left_norm ? left_norm_len : (int)left->len;
+        int right_len = right_norm ? right_norm_len : (int)right->len;
+
+        int min_len = left_len < right_len ? left_len : right_len;
+        int cmp = min_len > 0 ? memcmp(left_chars, right_chars, (size_t)min_len) : 0;
+        int result = 0;
+        if (cmp < 0) result = -1;
+        else if (cmp > 0) result = 1;
+        else if (left_len < right_len) result = -1;
+        else if (left_len > right_len) result = 1;
+
+        if (left_norm) mem_free(left_norm);
+        if (right_norm) mem_free(right_norm);
+        return (Item){.item = i2it(result)};
+    }
     if (method->len == 5 && strncmp(method->chars, "split", 5) == 0) {
         // ES spec §21.1.3.21: check [Symbol.split] on separator
         if (argc >= 1 && args[0].item != ItemNull.item && get_type_id(args[0]) != LMD_TYPE_UNDEFINED
@@ -18085,8 +18120,13 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
     }
     if (method->len == 6 && strncmp(method->chars, "charAt", 6) == 0) {
         String* s = it2s(str);
+        double didx = 0.0;
+        if (argc >= 1) {
+            Item idx_num = js_to_number(args[0]);
+            if (js_exception_pending) return ItemNull;
+            didx = js_get_number(idx_num);
+        }
         if (!s || s->len == 0) return (Item){.item = s2it(heap_create_name(""))};
-        double didx = (argc >= 1) ? js_get_number(args[0]) : 0;
         int64_t idx = isnan(didx) ? 0 : (int64_t)didx;
         if (idx < 0) return (Item){.item = s2it(heap_create_name(""))};
         // charAt uses UTF-16 unit index; extract the code unit as a 1-char string
@@ -18095,13 +18135,13 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
     }
     if (method->len == 10 && strncmp(method->chars, "charCodeAt", 10) == 0) {
         String* s = it2s(str);
-        if (!s || s->len == 0) return js_make_number(NAN);
         double didx = 0;
         if (argc >= 1) {
             Item idx_num = js_to_number(args[0]);
             if (js_exception_pending) return ItemNull;
             didx = js_get_number(idx_num);
         }
+        if (!s || s->len == 0) return js_make_number(NAN);
         int target_idx = isnan(didx) ? 0 : (int)didx;
         if (target_idx < 0) return js_make_number(NAN);
         // walk UTF-8 bytes, counting UTF-16 code units
