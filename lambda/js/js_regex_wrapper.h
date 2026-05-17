@@ -19,20 +19,26 @@ extern "C" {
 // Maximum number of post-filters per compiled regex
 #define JS_REGEX_MAX_FILTERS 16
 
-// Maximum capture groups supported
-#define JS_REGEX_MAX_GROUPS 16
+// Maximum capture groups copied out of a RegExp match. Test262 includes
+// legacy stress cases with hundreds of captures, so this must be well above
+// the old $1..$9 static-property limit.
+#define JS_REGEX_MAX_GROUPS 256
 
 // Post-filter types for runtime match verification
 enum JsRegexFilterType {
     JS_PF_TRIM_GROUP,        // trim captured group from match end (trailing lookahead absorbed)
     JS_PF_REJECT_MATCH,      // reject match if rejection pattern matches at the boundary
     JS_PF_GROUP_EQUALITY,    // require capture group[a] == capture group[b] (backreference)
+    JS_PF_ASSERT_MATCH,      // require absorbed positive lookahead to equal its anchored match
 };
+
+struct JsRegexCompiled;
 
 struct JsRegexFilter {
     JsRegexFilterType type;
     int trim_group_idx;            // for JS_PF_TRIM_GROUP: which group to trim from match end
     re2::RE2* reject_pattern;      // for JS_PF_REJECT_MATCH: pattern that must NOT match
+    JsRegexCompiled* reject_wrapper; // wrapper-backed reject pattern when assertion needs JS features
     int reject_at_start;           // for JS_PF_REJECT_MATCH: check at match start (1) or end (0)
     int eq_group_a;                // for JS_PF_GROUP_EQUALITY: first group index
     int eq_group_b;                // for JS_PF_GROUP_EQUALITY: second group index

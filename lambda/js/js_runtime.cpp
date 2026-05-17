@@ -9451,9 +9451,9 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
 
     // v46: RegExp prototype methods
     case JS_BUILTIN_REGEXP_EXEC:
-        return js_regex_exec(this_val, arg0);
+        return js_regex_exec(this_val, arg_count > 0 ? arg0 : make_js_undefined());
     case JS_BUILTIN_REGEXP_TEST:
-        return js_regex_test(this_val, arg0);
+        return js_regex_test(this_val, arg_count > 0 ? arg0 : make_js_undefined());
     case JS_BUILTIN_REGEXP_TO_STRING: {
         // /source/flags format
         Item src = js_property_get(this_val, (Item){.item = s2it(heap_create_name("source", 6))});
@@ -12174,6 +12174,104 @@ static bool js_regex_match_internal(JsRegexData* rd, const char* input, int inpu
                            anchor, matches, num_groups);
 }
 
+static bool js_regex_pattern_group_is_capturing(const std::string& pattern, int pos) {
+    if (pos < 0 || pos >= (int)pattern.size() || pattern[pos] != '(') return false;
+    if (pos + 1 >= (int)pattern.size()) return false;
+    if (pattern[pos + 1] != '?') return true;
+    if (pos + 3 < (int)pattern.size() && pattern[pos + 1] == '?' &&
+        pattern[pos + 2] == '<' && pattern[pos + 3] != '=' && pattern[pos + 3] != '!') {
+        return true;
+    }
+    if (pos + 4 < (int)pattern.size() && pattern[pos + 1] == '?' &&
+        pattern[pos + 2] == 'P' && pattern[pos + 3] == '<') {
+        return true;
+    }
+    return false;
+}
+
+static bool js_regex_pattern_has_quantifier_after(const std::string& pattern, int pos) {
+    if (pos < 0 || pos >= (int)pattern.size()) return false;
+    char ch = pattern[pos];
+    return ch == '*' || ch == '+' || ch == '?' || ch == '{';
+}
+
+static void js_regex_reset_stale_repeated_captures(JsRegexData* rd,
+        re2::StringPiece* matches, int num_groups) {
+    if (!rd || rd->wrapper || !rd->re2 || num_groups <= 1) return;
+    const std::string& pattern = rd->re2->pattern();
+    if (pattern.empty()) return;
+
+    struct RegexGroupInfo {
+        int parent;
+        bool repeated;
+    };
+    RegexGroupInfo groups[JS_REGEX_MAX_GROUPS];
+    int stack[JS_REGEX_MAX_GROUPS];
+    int stack_depth = 0;
+    int group_count = 0;
+    bool in_class = false;
+
+    for (int i = 0; i < (int)pattern.size(); i++) {
+        char ch = pattern[i];
+        if (ch == '\\' && i + 1 < (int)pattern.size()) {
+            i++;
+            continue;
+        }
+        if (ch == '[' && !in_class) {
+            in_class = true;
+            continue;
+        }
+        if (ch == ']' && in_class) {
+            in_class = false;
+            continue;
+        }
+        if (in_class) continue;
+
+        if (ch == '(') {
+            int idx = 0;
+            if (js_regex_pattern_group_is_capturing(pattern, i) &&
+                group_count + 1 < JS_REGEX_MAX_GROUPS) {
+                group_count++;
+                idx = group_count;
+                groups[idx].parent = stack_depth > 0 ? stack[stack_depth - 1] : 0;
+                groups[idx].repeated = false;
+            }
+            if (stack_depth < JS_REGEX_MAX_GROUPS) stack[stack_depth++] = idx;
+        } else if (ch == ')' && stack_depth > 0) {
+            int idx = stack[--stack_depth];
+            if (idx > 0 && idx < JS_REGEX_MAX_GROUPS) {
+                groups[idx].repeated = js_regex_pattern_has_quantifier_after(pattern, i + 1);
+            }
+        }
+    }
+
+    int max_group = group_count + 1;
+    if (max_group > num_groups) max_group = num_groups;
+    for (int parent = 1; parent < max_group; parent++) {
+        if (!groups[parent].repeated || !matches[parent].data()) continue;
+        const char* parent_start = matches[parent].data();
+        const char* parent_end = parent_start + matches[parent].size();
+        for (int child = 1; child < max_group; child++) {
+            if (child == parent || !matches[child].data()) continue;
+            int ancestor = groups[child].parent;
+            bool inside_parent = false;
+            while (ancestor > 0 && ancestor < JS_REGEX_MAX_GROUPS) {
+                if (ancestor == parent) {
+                    inside_parent = true;
+                    break;
+                }
+                ancestor = groups[ancestor].parent;
+            }
+            if (!inside_parent) continue;
+            const char* child_start = matches[child].data();
+            const char* child_end = child_start + matches[child].size();
+            if (child_start < parent_start || child_end > parent_end) {
+                matches[child] = re2::StringPiece();
+            }
+        }
+    }
+}
+
 static bool js_regex_try_make_literal_fast(const char* pattern, int pattern_len,
                                            const char* flags, int flags_len,
                                            char** literal_out, int* literal_len_out) {
@@ -12296,6 +12394,28 @@ static bool js_regex_pattern_has_surrogate_unit(const char* pattern, int pattern
         }
         if (all_hex && value >= 0xD800 && value <= 0xDFFF) return true;
         i++;
+    }
+    return false;
+}
+
+static bool js_regex_pattern_has_dot_atom(const char* pattern, int pattern_len) {
+    if (!pattern || pattern_len <= 0) return false;
+    bool in_class = false;
+    for (int i = 0; i < pattern_len; i++) {
+        unsigned char ch = (unsigned char)pattern[i];
+        if (ch == '\\') {
+            if (i + 1 < pattern_len) i++;
+            continue;
+        }
+        if (ch == '[' && !in_class) {
+            in_class = true;
+            continue;
+        }
+        if (ch == ']' && in_class) {
+            in_class = false;
+            continue;
+        }
+        if (ch == '.' && !in_class) return true;
     }
     return false;
 }
@@ -12621,7 +12741,8 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     bool has_re2_name_alias = js_regex_pattern_has_re2_name_alias(pattern, pattern_len);
     bool has_unicode = compile_info.unicode || compile_info.unicode_sets;
     bool needs_utf16_subject = !has_unicode &&
-        js_regex_pattern_has_surrogate_unit(pattern, pattern_len);
+        (js_regex_pattern_has_surrogate_unit(pattern, pattern_len) ||
+         js_regex_pattern_has_dot_atom(pattern, pattern_len));
 
     // Check permanent RE2 cache — survives pool resets, avoids recompiling huge regex literals between tests
     uint64_t perm_key = js_regex_content_hash(pattern, pattern_len, flags, flags_len);
@@ -13795,6 +13916,31 @@ extern "C" Item js_regex_test(Item regex, Item str) {
         match_len = match_s ? (int)match_s->len : 0;
     }
 
+    int start_pos = 0;
+    Item li_key = (Item){.item = s2it(heap_create_name("lastIndex", 9))};
+    bool uses_last_index = rd->global || rd->sticky;
+    Item li_val = js_property_get(regex, li_key);
+    if (js_exception_pending) return ItemNull;
+    li_val = js_to_number(li_val);
+    if (js_exception_pending) return ItemNull;
+    TypeId li_tid = get_type_id(li_val);
+    if (li_tid == LMD_TYPE_INT || li_tid == LMD_TYPE_INT64) {
+        start_pos = (int)it2i(li_val);
+    } else if (li_tid == LMD_TYPE_FLOAT) {
+        double d = li_val.get_double();
+        start_pos = (d != d) ? 0 : (int)d;
+    }
+    if (uses_last_index) {
+        if (start_pos < 0) start_pos = 0;
+        int64_t limit = utf16_subject ? subject_units : len;
+        if (start_pos > limit) {
+            if (!js_regex_set_lastindex_strict(regex, li_key, 0)) return ItemNull;
+            return (Item){.item = b2it(BOOL_FALSE)};
+        }
+    } else {
+        start_pos = 0;
+    }
+
     int property_mode = (!rd->global && !rd->sticky) ? js_regexp_property_all_mode(regex) : 0;
     if (property_mode != 0) {
         bool matched = js_regexp_test_property_all(input_s, property_mode);
@@ -13815,29 +13961,9 @@ extern "C" Item js_regex_test(Item regex, Item str) {
         return (Item){.item = b2it(matched ? BOOL_TRUE : BOOL_FALSE)};
     }
 
-    int start_pos = 0;
-    Item li_key = (Item){.item = s2it(heap_create_name("lastIndex", 9))};
-    bool uses_last_index = rd->global || rd->sticky;
-    if (uses_last_index) {
-        Item li_val = js_property_get(regex, li_key);
-        li_val = js_to_number(li_val);
-        TypeId li_tid = get_type_id(li_val);
-        if (li_tid == LMD_TYPE_INT || li_tid == LMD_TYPE_INT64) {
-            start_pos = (int)it2i(li_val);
-        } else if (li_tid == LMD_TYPE_FLOAT) {
-            double d = li_val.get_double();
-            start_pos = (d != d) ? 0 : (int)d;
-        }
-        int64_t limit = utf16_subject ? subject_units : len;
-        if (start_pos < 0 || start_pos > limit) {
-            if (!js_regex_set_lastindex_strict(regex, li_key, 0)) return ItemNull;
-            return (Item){.item = b2it(BOOL_FALSE)};
-        }
-    }
-
     int num_groups = js_regex_num_groups(rd);
-    if (num_groups > 16) num_groups = 16;
-    re2::StringPiece matches[16];
+    if (num_groups > JS_REGEX_MAX_GROUPS) num_groups = JS_REGEX_MAX_GROUPS;
+    re2::StringPiece matches[JS_REGEX_MAX_GROUPS];
     re2::RE2::Anchor anchor = rd->sticky ? re2::RE2::ANCHOR_START : re2::RE2::UNANCHORED;
     int match_start_pos = utf16_subject ?
         js_utf16_idx_to_byte(match_chars, match_len, start_pos) : start_pos;
@@ -13940,46 +14066,54 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     int64_t subject_units = len;
     bool utf16_subject = rd->needs_utf16_subject;
     bool full_unicode = rd->unicode;
+    bool code_unit_indices = input_s && !input_s->is_ascii;
     if (utf16_subject) {
         subject_units = input_s ? js_utf16_len(input_s->chars, (int)input_s->len, (bool)input_s->is_ascii) : 0;
         match_s = js_string_expand_utf16_subject(input_s);
         match_chars = match_s ? match_s->chars : "";
         match_len = match_s ? (int)match_s->len : 0;
+    } else if (code_unit_indices) {
+        subject_units = input_s ? js_utf16_len(input_s->chars, (int)input_s->len, (bool)input_s->is_ascii) : 0;
     }
 
-    // for global/sticky regexes, read lastIndex to start search from there
+    // RegExpBuiltinExec always observes lastIndex before deciding whether the
+    // match should use it; non-global/non-sticky regexes then reset the search
+    // start to zero without writing the property.
     int start_pos = 0;
     Item li_key = (Item){.item = s2it(heap_create_name("lastIndex", 9))};
     bool uses_last_index = rd->global || rd->sticky;
+    Item li_val = js_property_get(regex, li_key);
+    if (js_exception_pending) return ItemNull;
+    // ES spec §21.2.5.2.2 step 4: let lastIndex = ? ToLength(? Get(R, "lastIndex"))
+    // ToLength calls ToNumber which triggers valueOf/toString on objects.
+    li_val = js_to_number(li_val);
+    if (js_exception_pending) return ItemNull;
+    TypeId li_tid = get_type_id(li_val);
+    if (li_tid == LMD_TYPE_INT || li_tid == LMD_TYPE_INT64) {
+        start_pos = (int)it2i(li_val);
+    } else if (li_tid == LMD_TYPE_FLOAT) {
+        double d = li_val.get_double();
+        if (d != d) start_pos = 0; // NaN -> 0
+        else start_pos = (int)d;
+    }
     if (uses_last_index) {
-        Item li_val = js_property_get(regex, li_key);
-        // ES spec §21.2.5.2.2 step 4: let lastIndex = ? ToLength(? Get(R, "lastIndex"))
-        // ToLength calls ToNumber which triggers valueOf/toString on objects
-        li_val = js_to_number(li_val);
-        TypeId li_tid = get_type_id(li_val);
-        if (li_tid == LMD_TYPE_INT || li_tid == LMD_TYPE_INT64) {
-            start_pos = (int)it2i(li_val);
-        } else if (li_tid == LMD_TYPE_FLOAT) {
-            double d = li_val.get_double();
-            if (d != d) start_pos = 0; // NaN → 0
-            else start_pos = (int)d;
-        }
-        int64_t limit = (utf16_subject || full_unicode)
-            ? (input_s ? js_utf16_len(input_s->chars, (int)input_s->len, (bool)input_s->is_ascii) : 0)
-            : len;
-        if (start_pos < 0 || start_pos > limit) {
+        if (start_pos < 0) start_pos = 0;
+        int64_t limit = code_unit_indices ? subject_units : len;
+        if (start_pos > limit) {
             if (!js_regex_set_lastindex_strict(regex, li_key, 0)) return ItemNull;
             return ItemNull;
         }
+    } else {
+        start_pos = 0;
     }
 
     // perform match with captures
     int num_groups = js_regex_num_groups(rd);
-    if (num_groups > 16) num_groups = 16;
-    re2::StringPiece matches[16];
+    if (num_groups > JS_REGEX_MAX_GROUPS) num_groups = JS_REGEX_MAX_GROUPS;
+    re2::StringPiece matches[JS_REGEX_MAX_GROUPS];
     // sticky: must match at exactly start_pos (ANCHOR_START from start_pos)
     re2::RE2::Anchor anchor = rd->sticky ? re2::RE2::ANCHOR_START : re2::RE2::UNANCHORED;
-    int match_start_pos = (utf16_subject || full_unicode) ?
+    int match_start_pos = code_unit_indices ?
         js_utf16_idx_to_byte(match_chars, match_len, start_pos) : start_pos;
     bool matched = js_regex_match_internal(rd, match_chars, match_len, match_start_pos,
         anchor, matches, num_groups);
@@ -13989,14 +14123,14 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
         }
         return ItemNull;
     }
+    js_regex_reset_stale_repeated_captures(rd, matches, num_groups);
 
     // update lastIndex for global/sticky regexes (per ES spec §22.2.5.2 step 16:
     // Set R.lastIndex = e). Do NOT auto-advance on zero-length matches — that's
     // the responsibility of callers (e.g. @@split, @@match) which use AdvanceStringIndex.
     if (uses_last_index) {
         int match_end = (int)(matches[0].data() - match_chars) + (int)matches[0].size();
-        if (utf16_subject) match_end = (int)js_utf16_index_from_byte(match_chars, match_len, match_end);
-        else if (full_unicode) match_end = (int)js_utf16_index_from_byte(chars, len, match_end);
+        if (code_unit_indices) match_end = (int)js_utf16_index_from_byte(match_chars, match_len, match_end);
         if (!js_regex_set_lastindex_strict(regex, li_key, match_end)) return ItemNull;
     }
 
@@ -14038,8 +14172,7 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     js_skip_accessor_dispatch = _prev_skip_replace;
     // Set named properties (index, input, groups) via companion map
     int match_index = (int)(matches[0].data() - match_chars);
-    if (utf16_subject) match_index = (int)js_utf16_index_from_byte(match_chars, match_len, match_index);
-    else if (full_unicode) match_index = (int)js_utf16_index_from_byte(chars, len, match_index);
+    if (code_unit_indices) match_index = (int)js_utf16_index_from_byte(match_chars, match_len, match_index);
     Item index_key = (Item){.item = s2it(heap_create_name("index", 5))};
     js_property_set(result, index_key, (Item){.item = i2it(match_index)});
     // v46: add input property (the original string passed to exec)
@@ -16700,11 +16833,11 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
             String* method = it2s(method_name);
             if (method) {
                 if (method->len == 4 && strncmp(method->chars, "exec", 4) == 0) {
-                    Item str = argc > 0 ? args[0] : ItemNull;
+                    Item str = argc > 0 ? args[0] : make_js_undefined();
                     return js_regex_exec(obj, str);
                 }
                 if (method->len == 4 && strncmp(method->chars, "test", 4) == 0) {
-                    Item str = argc > 0 ? args[0] : ItemNull;
+                    Item str = argc > 0 ? args[0] : make_js_undefined();
                     return js_regex_test(obj, str);
                 }
             }
@@ -17244,49 +17377,21 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
     Item search_arg = (argc >= 1) ? args[0] : make_js_undefined();
     Item replacement_arg = (argc >= 2) ? args[1] : make_js_undefined();
     bool replacement_is_func = (get_type_id(replacement_arg) == LMD_TYPE_FUNC);
-    if (!replacement_is_func) {
-        replacement_arg = js_to_string(replacement_arg);
-        if (js_exception_pending) return ItemNull;
-    }
     JsRegexData* rd = js_get_regex_data(search_arg);
 
-    if (s->len == 0 && !is_replace_all) return str;
-    if (s->len == 0 && is_replace_all && !rd) {
-        // "".replaceAll("", repl) — check if search is also empty
-        Item search_str_item = js_to_string(search_arg);
-        if (js_exception_pending) return ItemNull;
-        String* search = it2s(search_str_item);
-        if (!search || search->len == 0) {
-            // single match at position 0, produce replacement
-            if (replacement_is_func) {
-                Item fn_args[3];
-                fn_args[0] = (Item){.item = s2it(heap_create_name("", 0))};
-                fn_args[1] = (Item){.item = i2it(0)};
-                fn_args[2] = str;
-                Item result = js_call_function(replacement_arg, ItemNull, fn_args, 3);
-                return js_to_string(result);
-            }
-            String* repl = it2s(replacement_arg);
-            if (!repl || repl->len == 0) return str;
-            StrBuf* buf = strbuf_new();
-            js_apply_replacement(buf, repl->chars, (int)repl->len,
-                "", 0, 0, 0, NULL, 0, ItemNull);
-            String* result_str = heap_strcpy(buf->str, buf->length);
-            strbuf_free(buf);
-            return (Item){.item = s2it(result_str)};
-        }
-        // "".replaceAll("x", repl) where x is non-empty → no match, return ""
-        return str;
-    }
-
     if (rd) {
+        if (!replacement_is_func) {
+            replacement_arg = js_to_string(replacement_arg);
+            if (js_exception_pending) return ItemNull;
+        }
+        if (s->len == 0 && !is_replace_all) return str;
         Item fast = js_try_fast_replace_non_whitespace(search_arg, str, replacement_arg, rd, replacement_is_func);
         if (fast.item != ItemNull.item || js_exception_pending) return fast;
         // regex-based replace
         re2::StringPiece input(s->chars, s->len);
         int ngroups = js_regex_num_groups(rd);
-        if (ngroups > 16) ngroups = 16;
-        re2::StringPiece matches[16];
+        if (ngroups > JS_REGEX_MAX_GROUPS) ngroups = JS_REGEX_MAX_GROUPS;
+        re2::StringPiece matches[JS_REGEX_MAX_GROUPS];
         StrBuf* buf = strbuf_new();
         int pos = 0;
         bool found_match = false;
@@ -17350,6 +17455,38 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
     // string-based replace
     Item search_str_item = js_to_string(search_arg);
     if (js_exception_pending) return make_js_undefined();
+    if (!replacement_is_func) {
+        replacement_arg = js_to_string(replacement_arg);
+        if (js_exception_pending) return ItemNull;
+    }
+
+    if (s->len == 0 && !is_replace_all) return str;
+    if (s->len == 0 && is_replace_all) {
+        // "".replaceAll("", repl) — check if search is also empty
+        String* search = it2s(search_str_item);
+        if (!search || search->len == 0) {
+            // single match at position 0, produce replacement
+            if (replacement_is_func) {
+                Item fn_args[3];
+                fn_args[0] = (Item){.item = s2it(heap_create_name("", 0))};
+                fn_args[1] = (Item){.item = i2it(0)};
+                fn_args[2] = str;
+                Item result = js_call_function(replacement_arg, ItemNull, fn_args, 3);
+                return js_to_string(result);
+            }
+            String* repl = it2s(replacement_arg);
+            if (!repl || repl->len == 0) return str;
+            StrBuf* buf = strbuf_new();
+            js_apply_replacement(buf, repl->chars, (int)repl->len,
+                "", 0, 0, 0, NULL, 0, ItemNull);
+            String* result_str = heap_strcpy(buf->str, buf->length);
+            strbuf_free(buf);
+            return (Item){.item = s2it(result_str)};
+        }
+        // "".replaceAll("x", repl) where x is non-empty → no match, return ""
+        return str;
+    }
+
     String* search = it2s(search_str_item);
     if (!search || search->len == 0) {
         if (is_replace_all) {
@@ -17519,6 +17656,235 @@ static int64_t js_string_clamp_integer(double value, int64_t length) {
     if (value <= 0.0 || (isinf(value) && value < 0.0)) return 0;
     if (value >= (double)length || (isinf(value) && value > 0.0)) return length;
     return (int64_t)value;
+}
+
+static void js_string_append_codepoint(StrBuf* sb, utf8proc_int32_t cp) {
+    char buf[4];
+    size_t out_len = utf8_encode((uint32_t)cp, buf);
+    if (out_len > 0) strbuf_append_str_n(sb, buf, (int)out_len);
+}
+
+static void js_string_append_codepoints(StrBuf* sb, const utf8proc_int32_t* cps, int count) {
+    for (int i = 0; i < count; i++) js_string_append_codepoint(sb, cps[i]);
+}
+
+static bool js_unicode_is_cased(utf8proc_int32_t cp) {
+    utf8proc_category_t category = utf8proc_category(cp);
+    if (category == UTF8PROC_CATEGORY_LU ||
+        category == UTF8PROC_CATEGORY_LL ||
+        category == UTF8PROC_CATEGORY_LT) {
+        return true;
+    }
+    return utf8proc_tolower(cp) != utf8proc_toupper(cp);
+}
+
+static bool js_unicode_is_case_ignorable(utf8proc_int32_t cp) {
+    utf8proc_category_t category = utf8proc_category(cp);
+    if (category == UTF8PROC_CATEGORY_MN ||
+        category == UTF8PROC_CATEGORY_ME ||
+        category == UTF8PROC_CATEGORY_CF ||
+        category == UTF8PROC_CATEGORY_LM ||
+        category == UTF8PROC_CATEGORY_SK) {
+        return true;
+    }
+    switch (cp) {
+        case 0x0027: case 0x002e: case 0x003a: case 0x00b7:
+        case 0x0387: case 0x05f4: case 0x2019: case 0x2027:
+        case 0xfe13: case 0xfe55: case 0xff07: case 0xff0e:
+        case 0xff1a:
+            return true;
+    }
+    return false;
+}
+
+static bool js_string_has_following_cased(const char* chars, int len, utf8proc_ssize_t pos) {
+    while (pos < (utf8proc_ssize_t)len) {
+        utf8proc_int32_t cp = 0;
+        utf8proc_ssize_t width = utf8proc_iterate(
+            (const utf8proc_uint8_t*)chars + pos,
+            (utf8proc_ssize_t)len - pos,
+            &cp);
+        if (width <= 0) return false;
+        if (!js_unicode_is_case_ignorable(cp)) return js_unicode_is_cased(cp);
+        pos += width;
+    }
+    return false;
+}
+
+static bool js_unicode_full_case_needs_composition(utf8proc_int32_t cp) {
+    if (cp >= 0x1f80 && cp <= 0x1faf) return true;
+    switch (cp) {
+        case 0x1fb2: case 0x1fb3: case 0x1fb4: case 0x1fb7: case 0x1fbc:
+        case 0x1fc2: case 0x1fc3: case 0x1fc4: case 0x1fc7: case 0x1fcc:
+        case 0x1ff2: case 0x1ff3: case 0x1ff4: case 0x1ff7: case 0x1ffc:
+            return true;
+    }
+    return false;
+}
+
+static bool js_string_append_full_case_map(StrBuf* sb, utf8proc_int32_t cp, bool to_upper) {
+    if (to_upper && cp == 0x00df) {
+        strbuf_append_str_n(sb, "SS", 2);
+        return true;
+    }
+    if (to_upper && cp >= 0x1f80 && cp <= 0x1faf) {
+        utf8proc_int32_t base = 0;
+        if (cp <= 0x1f8f) base = 0x1f08 + ((cp - 0x1f80) & 0x07);
+        else if (cp <= 0x1f9f) base = 0x1f28 + ((cp - 0x1f90) & 0x07);
+        else base = 0x1f68 + ((cp - 0x1fa0) & 0x07);
+        js_string_append_codepoint(sb, base);
+        js_string_append_codepoint(sb, 0x0399);
+        return true;
+    }
+    if (to_upper) {
+        switch (cp) {
+            case 0x1fb3: case 0x1fbc: {
+                const utf8proc_int32_t cps[] = {0x0391, 0x0399};
+                js_string_append_codepoints(sb, cps, 2);
+                return true;
+            }
+            case 0x1fc3: case 0x1fcc: {
+                const utf8proc_int32_t cps[] = {0x0397, 0x0399};
+                js_string_append_codepoints(sb, cps, 2);
+                return true;
+            }
+            case 0x1ff3: case 0x1ffc: {
+                const utf8proc_int32_t cps[] = {0x03a9, 0x0399};
+                js_string_append_codepoints(sb, cps, 2);
+                return true;
+            }
+            case 0x1fb2: {
+                const utf8proc_int32_t cps[] = {0x1fba, 0x0399};
+                js_string_append_codepoints(sb, cps, 2);
+                return true;
+            }
+            case 0x1fb4: {
+                const utf8proc_int32_t cps[] = {0x0386, 0x0399};
+                js_string_append_codepoints(sb, cps, 2);
+                return true;
+            }
+            case 0x1fc2: {
+                const utf8proc_int32_t cps[] = {0x1fca, 0x0399};
+                js_string_append_codepoints(sb, cps, 2);
+                return true;
+            }
+            case 0x1fc4: {
+                const utf8proc_int32_t cps[] = {0x0389, 0x0399};
+                js_string_append_codepoints(sb, cps, 2);
+                return true;
+            }
+            case 0x1ff2: {
+                const utf8proc_int32_t cps[] = {0x1ffa, 0x0399};
+                js_string_append_codepoints(sb, cps, 2);
+                return true;
+            }
+            case 0x1ff4: {
+                const utf8proc_int32_t cps[] = {0x038f, 0x0399};
+                js_string_append_codepoints(sb, cps, 2);
+                return true;
+            }
+            case 0x1fb7: {
+                const utf8proc_int32_t cps[] = {0x0391, 0x0342, 0x0399};
+                js_string_append_codepoints(sb, cps, 3);
+                return true;
+            }
+            case 0x1fc7: {
+                const utf8proc_int32_t cps[] = {0x0397, 0x0342, 0x0399};
+                js_string_append_codepoints(sb, cps, 3);
+                return true;
+            }
+            case 0x1ff7: {
+                const utf8proc_int32_t cps[] = {0x03a9, 0x0342, 0x0399};
+                js_string_append_codepoints(sb, cps, 3);
+                return true;
+            }
+        }
+    }
+
+    const utf8proc_property_t* prop = utf8proc_get_property(cp);
+    uint16_t seq = to_upper ? prop->uppercase_seqindex : prop->lowercase_seqindex;
+    if (seq == 0xffff || prop->decomp_seqindex == 0xffff) return false;
+
+    utf8proc_int32_t decomp[32];
+    int last_boundclass = 0;
+    utf8proc_option_t options = (utf8proc_option_t)(UTF8PROC_DECOMPOSE | UTF8PROC_COMPAT);
+    utf8proc_ssize_t count = utf8proc_decompose_char(cp, decomp, 32, options, &last_boundclass);
+    if (count <= 1 || count > 32) return false;
+
+    bool compose = js_unicode_full_case_needs_composition(cp);
+    bool append_upper_iota = false;
+    StrBuf* mapped_buf = strbuf_new();
+    for (utf8proc_ssize_t i = 0; i < count; i++) {
+        utf8proc_int32_t mapped = to_upper ? utf8proc_toupper(decomp[i]) : utf8proc_tolower(decomp[i]);
+        if (to_upper && compose && (decomp[i] == 0x0345 || mapped == 0x0345)) {
+            append_upper_iota = true;
+            continue;
+        }
+        js_string_append_codepoint(mapped_buf, mapped);
+    }
+
+    if (compose) {
+        int norm_len = 0;
+        char* normalized = normalize_utf8proc_nfc(mapped_buf->str, mapped_buf->length, &norm_len);
+        if (normalized) {
+            strbuf_append_str_n(sb, normalized, norm_len);
+            mem_free(normalized);
+        } else {
+            strbuf_append_str_n(sb, mapped_buf->str, mapped_buf->length);
+        }
+    } else {
+        strbuf_append_str_n(sb, mapped_buf->str, mapped_buf->length);
+    }
+    if (append_upper_iota) js_string_append_codepoint(sb, 0x0399);
+    strbuf_free(mapped_buf);
+    return true;
+}
+
+static Item js_string_simple_case_map(Item str, bool to_upper) {
+    String* s = it2s(str);
+    if (!s || s->len == 0) return str;
+
+    StrBuf* sb = strbuf_new();
+    bool changed = false;
+    bool last_non_ignorable_cased = false;
+    utf8proc_ssize_t pos = 0;
+    while (pos < (utf8proc_ssize_t)s->len) {
+        utf8proc_int32_t cp = 0;
+        utf8proc_ssize_t width = utf8proc_iterate(
+            (const utf8proc_uint8_t*)s->chars + pos,
+            (utf8proc_ssize_t)s->len - pos,
+            &cp);
+        if (width <= 0) {
+            strbuf_append_char(sb, s->chars[pos]);
+            pos++;
+            continue;
+        }
+
+        if (js_string_append_full_case_map(sb, cp, to_upper)) {
+            changed = true;
+        } else {
+            utf8proc_int32_t mapped = to_upper ? utf8proc_toupper(cp) : utf8proc_tolower(cp);
+            if (!to_upper && cp == 0x03a3 &&
+                last_non_ignorable_cased &&
+                !js_string_has_following_cased(s->chars, s->len, pos + width)) {
+                mapped = 0x03c2;
+            }
+            if (mapped != cp) changed = true;
+            size_t prev_len = sb->length;
+            js_string_append_codepoint(sb, mapped);
+            if (sb->length == prev_len) strbuf_append_str_n(sb, s->chars + pos, (int)width);
+        }
+
+        if (!js_unicode_is_case_ignorable(cp)) last_non_ignorable_cased = js_unicode_is_cased(cp);
+        pos += width;
+    }
+    if (!changed && sb->length == (int)s->len) {
+        strbuf_free(sb);
+        return str;
+    }
+    String* result = heap_create_name(sb->str, sb->length);
+    strbuf_free(sb);
+    return (Item){.item = s2it(result)};
 }
 
 static bool js_string_is_regexp(Item value, bool* out) {
@@ -17826,10 +18192,10 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         return (Item){.item = s2it(heap_create_name(s->chars, end))};
     }
     if (method->len == 11 && strncmp(method->chars, "toLowerCase", 11) == 0) {
-        return fn_lower(str);
+        return js_string_simple_case_map(str, false);
     }
     if (method->len == 11 && strncmp(method->chars, "toUpperCase", 11) == 0) {
-        return fn_upper(str);
+        return js_string_simple_case_map(str, true);
     }
     // String.prototype.normalize(form?) — Unicode normalization (NFC/NFD/NFKC/NFKD)
     if (method->len == 9 && strncmp(method->chars, "normalize", 9) == 0) {
@@ -17958,8 +18324,8 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
                 Item result = js_array_new(0);
                 re2::StringPiece input(s->chars, s->len);
                 int total_groups = js_regex_num_groups(rd);
-                if (total_groups > 16) total_groups = 16;
-                re2::StringPiece match[16];
+                if (total_groups > JS_REGEX_MAX_GROUPS) total_groups = JS_REGEX_MAX_GROUPS;
+                re2::StringPiece match[JS_REGEX_MAX_GROUPS];
                 int p = 0; // last split position
                 int q = 0; // search start position
                 while (q <= (int)s->len) {
@@ -18523,8 +18889,8 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
                 Item result = js_array_new(0);
                 int offset = 0;
                 int num_groups = rd->re2->NumberOfCapturingGroups() + 1;
-                if (num_groups > 16) num_groups = 16;
-                re2::StringPiece matches[16];
+                if (num_groups > JS_REGEX_MAX_GROUPS) num_groups = JS_REGEX_MAX_GROUPS;
+                re2::StringPiece matches[JS_REGEX_MAX_GROUPS];
                 while (offset < (int)s->len) {
                     bool matched = js_regex_match_internal(rd, s->chars, (int)s->len, offset,
                         re2::RE2::UNANCHORED, matches, num_groups);
