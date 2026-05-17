@@ -469,6 +469,11 @@ int main(int argc, char** argv) {
     int jobs = (int)std::thread::hardware_concurrency();
     if (jobs <= 1) jobs = 1;
     else jobs -= 1;
+    const char* env_jobs = getenv("LAMBDA_UI_TEST_JOBS");
+    if (env_jobs && *env_jobs) {
+        jobs = atoi(env_jobs);
+        if (jobs <= 0) jobs = 1;
+    }
     for (int i = 1; i < argc; i++) {
         if ((strcmp(argv[i], "-j") == 0 || strcmp(argv[i], "--jobs") == 0) && i + 1 < argc) {
             jobs = atoi(argv[++i]);
