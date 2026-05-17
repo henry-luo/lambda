@@ -457,26 +457,6 @@ static void check_block_redeclarations(EarlyErrorCtx* ctx, JsAstNode* stmts) {
 
 // ---- Phase 5: strict mode --------------------------------------------------
 
-static bool detect_strict_mode(JsAstNode* body) {
-    // check if first statement is "use strict" string literal expression
-    if (!body) return false;
-    JsAstNode* first = NULL;
-    if (body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
-        first = ((JsBlockNode*)body)->statements;
-    } else {
-        first = body; // linked list of statements
-    }
-    if (!first || first->node_type != JS_AST_NODE_EXPRESSION_STATEMENT) return false;
-    JsExpressionStatementNode* es = (JsExpressionStatementNode*)first;
-    if (!es->expression || es->expression->node_type != JS_AST_NODE_LITERAL) return false;
-    JsLiteralNode* lit = (JsLiteralNode*)es->expression;
-    if (lit->literal_type != JS_LITERAL_STRING) return false;
-    if (lit->value.string_value && strcmp(lit->value.string_value->chars, "use strict") == 0) {
-        return true;
-    }
-    return false;
-}
-
 // v17: check if a function has non-simple parameters (defaults, rest, destructuring)
 static bool has_non_simple_params(JsFunctionNode* func) {
     for (JsAstNode* p = func->params; p; p = p->next) {
@@ -493,7 +473,7 @@ static bool has_non_simple_params(JsFunctionNode* func) {
 // v17: "use strict" in function with non-simple params is SyntaxError
 static void check_strict_non_simple(EarlyErrorCtx* ctx, JsFunctionNode* func) {
     if (!func->body) return;
-    if (!detect_strict_mode(func->body)) return;
+    if (!func->has_use_strict_directive) return;
     if (has_non_simple_params(func)) {
         ee_error(ctx, (JsAstNode*)func,
             "Illegal 'use strict' directive in function with non-simple parameter list");
@@ -773,7 +753,7 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
             check_strict_non_simple(ctx, fn);
 
             // detect strict mode in function body
-            if (fn->body && detect_strict_mode(fn->body)) {
+            if (fn->has_use_strict_directive) {
                 ctx->in_strict = true;
             }
 
@@ -1047,7 +1027,7 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
             // v17: "use strict" with non-simple params is SyntaxError
             check_strict_non_simple(ctx, fn);
 
-            if (fn->body && detect_strict_mode(fn->body)) {
+            if (fn->has_use_strict_directive) {
                 ctx->in_strict = true;
             }
 
@@ -1199,7 +1179,7 @@ int js_check_early_errors(JsTranspiler* tp, JsAstNode* ast) {
     // for programs, check top-level "use strict"
     if (ast->node_type == JS_AST_NODE_PROGRAM) {
         JsProgramNode* prog = (JsProgramNode*)ast;
-        if (detect_strict_mode(prog->body)) {
+        if (prog->has_use_strict_directive) {
             ctx.in_strict = true;
         }
         check_block_redeclarations(&ctx, prog->body);

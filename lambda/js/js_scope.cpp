@@ -297,6 +297,131 @@ static bool js_source_ident_char(char c) {
            (c >= '0' && c <= '9') || c == '_' || c == '$';
 }
 
+static bool js_source_u180e_at(const char* source, size_t length, size_t pos) {
+    return pos + 2 < length &&
+        (unsigned char)source[pos] == 0xE1 &&
+        (unsigned char)source[pos + 1] == 0xA0 &&
+        (unsigned char)source[pos + 2] == 0x8E;
+}
+
+static bool js_source_slash_starts_regex(const char* source, size_t pos) {
+    if (!source) return false;
+    if (pos == 0) return true;
+    size_t scan = pos;
+    while (scan > 0) {
+        char c = source[scan - 1];
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+            scan--;
+            continue;
+        }
+        if (c == '(' || c == '[' || c == '{' || c == ':' || c == ',' || c == ';' ||
+            c == '=' || c == '!' || c == '?' || c == '&' || c == '|' || c == '+' ||
+            c == '-' || c == '*' || c == '~' || c == '^' || c == '<' || c == '>') {
+            return true;
+        }
+        return false;
+    }
+    return true;
+}
+
+static bool js_source_has_unescaped_u180e_code_char(const char* source, size_t length) {
+    enum {
+        ST_DEFAULT = 0,
+        ST_SQ,
+        ST_DQ,
+        ST_TPL,
+        ST_LINE_COMMENT,
+        ST_BLOCK_COMMENT,
+        ST_REGEX,
+    } state = ST_DEFAULT;
+
+    bool escaped = false;
+    bool regex_class = false;
+    for (size_t i = 0; i < length; i++) {
+        char c = source[i];
+        char n = (i + 1 < length) ? source[i + 1] : '\0';
+
+        if (state == ST_LINE_COMMENT) {
+            if (c == '\n' || c == '\r') state = ST_DEFAULT;
+            continue;
+        }
+        if (state == ST_BLOCK_COMMENT) {
+            if (c == '*' && n == '/') {
+                state = ST_DEFAULT;
+                i++;
+            }
+            continue;
+        }
+        if (state == ST_SQ || state == ST_DQ || state == ST_TPL) {
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+            if (c == '\\') {
+                escaped = true;
+                continue;
+            }
+            if ((state == ST_SQ && c == '\'') || (state == ST_DQ && c == '"') ||
+                (state == ST_TPL && c == '`')) {
+                state = ST_DEFAULT;
+            }
+            continue;
+        }
+        if (state == ST_REGEX) {
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+            if (c == '\\') {
+                escaped = true;
+                continue;
+            }
+            if (c == '[') {
+                regex_class = true;
+                continue;
+            }
+            if (c == ']' && regex_class) {
+                regex_class = false;
+                continue;
+            }
+            if (c == '/' && !regex_class) {
+                state = ST_DEFAULT;
+            }
+            continue;
+        }
+
+        if (js_source_u180e_at(source, length, i)) return true;
+        if (c == '/' && n == '/') {
+            state = ST_LINE_COMMENT;
+            i++;
+            continue;
+        }
+        if (c == '/' && n == '*') {
+            state = ST_BLOCK_COMMENT;
+            i++;
+            continue;
+        }
+        if (c == '/' && js_source_slash_starts_regex(source, i)) {
+            state = ST_REGEX;
+            regex_class = false;
+            continue;
+        }
+        if (c == '\'') {
+            state = ST_SQ;
+            continue;
+        }
+        if (c == '"') {
+            state = ST_DQ;
+            continue;
+        }
+        if (c == '`') {
+            state = ST_TPL;
+            continue;
+        }
+    }
+    return false;
+}
+
 static bool js_source_hex_char(char c) {
     return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
 }
@@ -751,6 +876,11 @@ bool js_transpiler_parse(JsTranspiler* tp, const char* source, size_t length) {
     if (tp->normalized_source) {
         mem_free(tp->normalized_source);
         tp->normalized_source = NULL;
+    }
+
+    if (js_source_has_unescaped_u180e_code_char(source, length)) {
+        log_error("JavaScript source has invalid U+180E source character");
+        return false;
     }
 
     const char* original_source = source;

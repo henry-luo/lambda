@@ -294,6 +294,7 @@ typedef struct JsFunctionNode {
     bool is_arrow;                  // Arrow function vs regular function
     bool is_async;                  // Async function
     bool is_generator;              // Generator function
+    bool has_use_strict_directive;  // true when raw directive prologue contains "use strict"
     int lexical_for_head_capture_count;
     char lexical_for_head_capture_names[8][64];
     struct TsTypeAnnotationNode* ts_return_type; // TS return type annotation (NULL in JS mode)
@@ -402,6 +403,7 @@ typedef struct JsExpressionStatementNode {
 typedef struct JsProgramNode {
     JsAstNode base;
     JsAstNode* body;                // Top-level statements
+    bool has_use_strict_directive;  // true when raw directive prologue contains "use strict"
 } JsProgramNode;
 
 // JavaScript conditional expression node (ternary operator)

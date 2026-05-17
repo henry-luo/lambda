@@ -1076,6 +1076,41 @@ static void js_func_mark_enclosing_lexical_for_heads(JsTranspiler* tp, JsFunctio
     }
 }
 
+static bool js_ts_string_is_raw_use_strict(JsTranspiler* tp, TSNode str_node) {
+    if (!tp || ts_node_is_null(str_node) || strcmp(ts_node_type(str_node), "string") != 0) {
+        return false;
+    }
+    StrView source = js_node_source(tp, str_node);
+    if (source.length != 12) return false;
+    char quote = source.str[0];
+    if ((quote != '\'' && quote != '"') || source.str[11] != quote) return false;
+    return memcmp(source.str + 1, "use strict", 10) == 0;
+}
+
+static bool js_ts_statement_is_string_literal(TSNode stmt_node) {
+    if (ts_node_is_null(stmt_node) || strcmp(ts_node_type(stmt_node), "expression_statement") != 0) {
+        return false;
+    }
+    TSNode expr = ts_node_named_child(stmt_node, 0);
+    return !ts_node_is_null(expr) && strcmp(ts_node_type(expr), "string") == 0;
+}
+
+static bool js_ts_body_has_use_strict_directive(JsTranspiler* tp, TSNode body_node) {
+    uint32_t child_count = ts_node_named_child_count(body_node);
+    for (uint32_t i = 0; i < child_count; i++) {
+        TSNode child = ts_node_named_child(body_node, i);
+        const char* type = ts_node_type(child);
+        if (strcmp(type, "comment") == 0 || strcmp(type, "html_comment") == 0) {
+            continue;
+        }
+        if (strcmp(type, "expression_statement") != 0) return false;
+        TSNode expr = ts_node_named_child(child, 0);
+        if (js_ts_string_is_raw_use_strict(tp, expr)) return true;
+        if (!js_ts_statement_is_string_literal(child)) return false;
+    }
+    return false;
+}
+
 JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
     // In TS mode, use TS function builder (allocates TsFunctionNode, handles return_type/type_params)
     if (!tp->strict_js) {
@@ -1124,6 +1159,7 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
 
     func->is_arrow = is_arrow;
     func->is_generator = is_generator;
+    func->has_use_strict_directive = false;
     js_func_mark_enclosing_lexical_for_heads(tp, func, func_node);
 
     // Detect async: check for "async" anonymous child before "function" keyword or "=>"
@@ -1258,6 +1294,7 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
     if (!ts_node_is_null(body_node)) {
         const char* body_type = ts_node_type(body_node);
         if (strcmp(body_type, "statement_block") == 0) {
+            func->has_use_strict_directive = js_ts_body_has_use_strict_directive(tp, body_node);
             func->body = build_js_block_statement(tp, body_node, JS_SCOPE_FUNCTION);
         } else {
             // Arrow function with expression body
@@ -1424,6 +1461,83 @@ JsAstNode* build_js_block_statement(JsTranspiler* tp, TSNode block_node, JsScope
 
     block->base.type = &TYPE_NULL;
 
+    return (JsAstNode*)block;
+}
+
+static size_t js_stmt_first_non_space(JsTranspiler* tp, TSNode stmt_node) {
+    size_t pos = ts_node_start_byte(stmt_node);
+    size_t end = ts_node_end_byte(stmt_node);
+    while (pos < end) {
+        char c = tp->source[pos];
+        if (c != ' ' && c != '\t' && c != '\n' && c != '\r' && c != '\f' && c != '\v') break;
+        pos++;
+    }
+    return pos;
+}
+
+static bool js_statement_node_starts_with_object(JsTranspiler* tp, TSNode stmt_node, TSNode object_node) {
+    if (ts_node_is_null(object_node)) return false;
+    return ts_node_start_byte(object_node) == js_stmt_first_non_space(tp, stmt_node);
+}
+
+static TSNode js_leading_object_expression_node(TSNode expr_node) {
+    TSNode cur = expr_node;
+    while (!ts_node_is_null(cur)) {
+        const char* type = ts_node_type(cur);
+        if (strcmp(type, "object") == 0) return cur;
+        TSNode left = ts_node_child_by_field_name(cur, "left", strlen("left"));
+        if (ts_node_is_null(left)) break;
+        cur = left;
+    }
+    return (TSNode){0};
+}
+
+static JsAstNode* build_js_statement_block_from_object_expression(JsTranspiler* tp, TSNode stmt_node, TSNode object_node) {
+    JsBlockNode* block = (JsBlockNode*)alloc_js_ast_node(tp, JS_AST_NODE_BLOCK_STATEMENT, stmt_node, sizeof(JsBlockNode));
+    JsScope* block_scope = js_scope_create(tp, JS_SCOPE_BLOCK, tp->current_scope);
+    js_scope_push(tp, block_scope);
+
+    uint32_t child_count = ts_node_named_child_count(object_node);
+    JsAstNode* prev_stmt = NULL;
+    for (uint32_t i = 0; i < child_count; i++) {
+        TSNode child = ts_node_named_child(object_node, i);
+        const char* child_type = ts_node_type(child);
+        JsAstNode* stmt = NULL;
+        if (strcmp(child_type, "pair") == 0) {
+            TSNode key_node = ts_node_child_by_field_name(child, "key", strlen("key"));
+            TSNode value_node = ts_node_child_by_field_name(child, "value", strlen("value"));
+            const char* key_type = ts_node_is_null(key_node) ? "" : ts_node_type(key_node);
+            bool key_is_label = strcmp(key_type, "property_identifier") == 0 ||
+                strcmp(key_type, "identifier") == 0;
+            if (!key_is_label || ts_node_is_null(value_node)) {
+                js_scope_pop(tp);
+                return NULL;
+            }
+            JsLabeledStatementNode* labeled = (JsLabeledStatementNode*)alloc_js_ast_node(
+                tp, JS_AST_NODE_LABELED_STATEMENT, child, sizeof(JsLabeledStatementNode));
+            labeled->base.type = &TYPE_NULL;
+            labeled->label = tp->source + ts_node_start_byte(key_node);
+            labeled->label_len = ts_node_end_byte(key_node) - ts_node_start_byte(key_node);
+            JsExpressionStatementNode* expr_stmt = (JsExpressionStatementNode*)alloc_js_ast_node(
+                tp, JS_AST_NODE_EXPRESSION_STATEMENT, value_node, sizeof(JsExpressionStatementNode));
+            expr_stmt->expression = build_js_expression(tp, value_node);
+            expr_stmt->base.type = expr_stmt->expression && expr_stmt->expression->type ?
+                expr_stmt->expression->type : &TYPE_NULL;
+            labeled->body = (JsAstNode*)expr_stmt;
+            stmt = (JsAstNode*)labeled;
+        } else {
+            stmt = build_js_statement(tp, child);
+        }
+        if (stmt) {
+            if (!prev_stmt) block->statements = stmt;
+            else prev_stmt->next = stmt;
+            while (stmt->next) stmt = stmt->next;
+            prev_stmt = stmt;
+        }
+    }
+
+    js_scope_pop(tp);
+    block->base.type = &TYPE_NULL;
     return (JsAstNode*)block;
 }
 
@@ -2182,9 +2296,14 @@ JsAstNode* build_js_statement(JsTranspiler* tp, TSNode stmt_node) {
             }
         }
 
-        JsExpressionStatementNode* expr_stmt = (JsExpressionStatementNode*)alloc_js_ast_node(tp, JS_AST_NODE_EXPRESSION_STATEMENT, stmt_node, sizeof(JsExpressionStatementNode));
         TSNode expr_node = ts_node_named_child(stmt_node, 0);
+        TSNode leading_object = js_leading_object_expression_node(expr_node);
+        if (js_statement_node_starts_with_object(tp, stmt_node, leading_object)) {
+            JsAstNode* block_stmt = build_js_statement_block_from_object_expression(tp, stmt_node, leading_object);
+            if (block_stmt) return block_stmt;
+        }
 
+        JsExpressionStatementNode* expr_stmt = (JsExpressionStatementNode*)alloc_js_ast_node(tp, JS_AST_NODE_EXPRESSION_STATEMENT, stmt_node, sizeof(JsExpressionStatementNode));
         expr_stmt->expression = build_js_expression(tp, expr_node);
 
         if (expr_stmt->expression && expr_stmt->expression->type) {
@@ -2387,6 +2506,7 @@ JsAstNode* build_js_export_statement(JsTranspiler* tp, TSNode export_node) {
 // Build JavaScript program (root node)
 JsAstNode* build_js_program(JsTranspiler* tp, TSNode program_node) {
     JsProgramNode* program = (JsProgramNode*)alloc_js_ast_node(tp, JS_AST_NODE_PROGRAM, program_node, sizeof(JsProgramNode));
+    program->has_use_strict_directive = js_ts_body_has_use_strict_directive(tp, program_node);
 
     uint32_t child_count = ts_node_named_child_count(program_node);
     JsAstNode* prev_stmt = NULL;

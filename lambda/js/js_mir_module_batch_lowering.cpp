@@ -1674,28 +1674,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     JsProgramNode* program = (JsProgramNode*)root;
 
     // v20: Detect program-level "use strict" directive
-    // Scan first few statements (var declarations may be hoisted before it)
-    mt->is_global_strict = mt->tp && mt->tp->strict_mode;
-    {
-        JsAstNode* n = program->body;
-        for (int i = 0; i < 10 && n; i++, n = n->next) {
-            if (n->node_type == JS_AST_NODE_EXPRESSION_STATEMENT) {
-                JsExpressionStatementNode* es = (JsExpressionStatementNode*)n;
-                if (es->expression && es->expression->node_type == JS_AST_NODE_LITERAL) {
-                    JsLiteralNode* lit = (JsLiteralNode*)es->expression;
-                    if (lit->literal_type == JS_LITERAL_STRING && lit->value.string_value &&
-                        lit->value.string_value->len == 10 &&
-                        strncmp(lit->value.string_value->chars, "use strict", 10) == 0) {
-                        mt->is_global_strict = true;
-                        break;
-                    }
-                }
-                break; // first expression statement that isn't "use strict" — stop
-            }
-            // skip hoisted var declarations
-            if (n->node_type != JS_AST_NODE_VARIABLE_DECLARATION) break;
-        }
-    }
+    mt->is_global_strict = (mt->tp && mt->tp->strict_mode) || program->has_use_strict_directive;
 
     // Phase 1: Collect all functions (post-order: innermost first)
     jm_collect_functions(mt, root);

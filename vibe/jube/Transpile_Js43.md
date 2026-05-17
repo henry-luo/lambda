@@ -1937,3 +1937,101 @@ Results:
 - The gtest runner also completed its batch collection phase without promoting
   any non-fully-passing tests under the default partial-skipping mode:
   fully passed target: 1 / 1, non-fully-passing: 0, regressions: 0.
+
+## 34. Low-Cardinality Language Cleanup: U+180E and Directive Prologues
+
+Status on 2026-05-17: fixed four remaining language failures from the latest
+manifest:
+
+- `language_white_space_mongolian_vowel_separator_eval_js`
+- `language_directive_prologue_14_1_16_s_js`
+- `language_directive_prologue_14_1_4_s_js`
+- `language_directive_prologue_14_1_5_s_js`
+
+Root causes:
+
+- Tree-sitter accepts raw U+180E (`E1 A0 8E`) in source positions where the
+  current ECMAScript grammar should reject it.  Eval then executed
+  `var\u180Efoo;` as an identifier expression and threw `ReferenceError`
+  instead of the required `SyntaxError`.
+- Eval parse failures returned `ItemNull` without installing a `SyntaxError`,
+  so parser-level eval failures were not observable by `assert.throws`.
+- Strict directive detection used the cooked string literal value after AST
+  building and skipped empty statements.  That incorrectly treated
+  `'use str\ict'`, `'use\u0020strict'`, and `; 'use strict'` as strict-mode
+  directives.
+
+Fix:
+
+- Added a source scan in `lambda/js/js_scope.cpp` that rejects raw U+180E in
+  executable source text while still allowing it inside comments, strings,
+  templates, and regular-expression literals.
+- Made eval convert direct-script parse failure into `SyntaxError`.
+- Moved strict directive detection to raw Tree-sitter source ranges and stored
+  the result on `JsProgramNode` / `JsFunctionNode`.  Runtime strictness and
+  early-error strictness now use that raw directive-prologue flag.
+- Preserved U+1680 (`E1 9A 80`) as valid Unicode whitespace; it was only
+  temporarily confused with U+180E during investigation.
+
+Focused verification:
+
+```bash
+make -C build/premake config=release_native lambda -j4 CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib"
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_u180e_language_batch.txt --write-failures=temp/js43_u180e_language_after.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_directive_prologue_batch.txt --write-failures=temp/js43_directive_prologue_after.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_directive_prologue_guard_batch.txt --write-failures=temp/js43_directive_prologue_guard_after.tsv
+```
+
+Results:
+
+- U+180E language neighborhood: 11 / 11 passed, including comments, strings,
+  regex literals, template literals, and eval forms.
+- Directive-prologue failures: 3 / 3 passed.
+- Directive guard batch: 9 / 9 passed, including valid strict-directive
+  representatives.
+
+## 35. Destructuring/StatementList/Arguments Cleanup
+
+Status on 2026-05-17: fixed eleven focused js262 failures across three small
+language clusters.
+
+Root causes:
+
+- Object destructuring under `with` evaluated the source property before probing
+  the binding target.  The spec-visible `HasBinding` trap for the target name
+  therefore happened too late.
+- Statement-position source beginning with `{` could reach lowering as an object
+  expression even though ECMAScript forbids `{` at the start of an
+  `ExpressionStatement`.  This miscompiled block/labeled statement completion
+  cases and regexp-literal-looking statement-list tests.
+- Arguments objects were backed by arrays, so `"length"` followed Array length
+  semantics instead of arguments-object data-property semantics.  Redefining a
+  mapped arguments index as an accessor also failed to snapshot the parameter
+  value at ParameterMap unlink time.
+- Strict direct eval used the single-expression fast path before applying the
+  strict-mode early error for assigning to `arguments`/`eval`.
+
+Fix:
+
+- Added `js_probe_with_binding()` and emitted a pre-`GetV` probe for object
+  binding destructuring targets when a `with` environment is active.
+- Reinterpreted statement-position leading object expressions as block/labeled
+  statements in AST construction.
+- Materialized `arguments.length` on the arguments companion map, routed
+  assignment/defineProperty/descriptor reads through that map, and taught the
+  `.length` fast path to preserve non-numeric arguments length values.
+- Snapshotted mapped arguments values before accessor/non-writable
+  `defineProperty` unmaps the index.
+- Added a strict direct-eval source scan so assignments to `arguments` or `eval`
+  throw `SyntaxError` before the expression-wrapper fast path.
+
+Focused verification:
+
+```bash
+make -C build/premake config=release_native lambda -j4 CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib"
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_current_focused_batch.txt --js-timeout=30 --write-failures=temp/js43_current_focused_after.tsv
+```
+
+Results:
+
+- Focused cleanup batch: 11 / 11 passed.

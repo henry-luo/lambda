@@ -2375,6 +2375,26 @@ static void jm_emit_destructure_bind_pre_reference(JsMirTranspiler* mt, JsAstNod
     jm_emit_destructure_put_reference(mt, ref, put_val);
 }
 
+static JsIdentifierNode* jm_destructure_binding_identifier_target(JsAstNode* target) {
+    if (!target) return NULL;
+    if (target->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
+        JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)target;
+        target = ap->left;
+    }
+    if (!target || target->node_type != JS_AST_NODE_IDENTIFIER) return NULL;
+    return (JsIdentifierNode*)target;
+}
+
+static void jm_emit_destructure_pre_binding_probe(JsMirTranspiler* mt, JsAstNode* target) {
+    if (!mt || mt->with_depth <= 0 || mt->destructure_assignment_mode) return;
+    JsIdentifierNode* id = jm_destructure_binding_identifier_target(target);
+    if (!id || !id->name || !id->name->chars) return;
+    MIR_reg_t key = jm_box_string_literal(mt, id->name->chars, id->name->len);
+    jm_call_1(mt, "js_probe_with_binding", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+    jm_emit_exc_propagate_check(mt);
+}
+
 // Bind a value to a named variable (find existing or create new register).
 // Handles closure env write-back and scope_env write-back.
 void jm_bind_destructure_var(JsMirTranspiler* mt, const char* vname, MIR_reg_t val) {
@@ -3101,6 +3121,7 @@ void jm_emit_object_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MI
                 jm_gen_spill_load(mt, key, pre_key_spill);
             }
             if (has_pre_ref) jm_emit_exc_propagate_check(mt);
+            jm_emit_destructure_pre_binding_probe(mt, target);
             MIR_reg_t val = jm_call_2(mt, "js_property_get", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, src),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
