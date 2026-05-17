@@ -2035,3 +2035,120 @@ make -C build/premake config=release_native lambda -j4 CC="gcc" CXX="g++" AR="ar
 Results:
 
 - Focused cleanup batch: 11 / 11 passed.
+
+## 36. Catch Parameters And Sparse Array Slow-List Cleanup
+
+Status on 2026-05-18: fixed the next catch-parameter failures and retired two
+array slow-list entries.
+
+Root causes:
+
+- Function/class collection skipped `catch` parameter binding patterns.  Default
+  initializers inside catch destructuring patterns were therefore not
+  pre-collected, so function/class name inference and class metadata could be
+  missing during lowering.
+- Strict-mode catch parameters were walked as expressions only.  A simple
+  `catch (arguments)` or `catch (eval)` in strict eval source therefore bypassed
+  reserved binding-name validation.
+- The active generic `Array.prototype.indexOf` / `lastIndexOf` path performed a
+  sequential `HasProperty` walk over every hole in large sparse arrays, even
+  when the prototype chain had no numeric keys.  The later legacy array branch
+  already had some sparse awareness, but it was not the path used by normal
+  method dispatch.
+
+Fix:
+
+- Recurse into `JsCatchNode::param` during function/class collection.
+- Run reserved binding-pattern validation on catch parameters before the normal
+  expression walk in early errors.
+- Added reverse sparse-own-element lookup and routed generic `indexOf` /
+  `lastIndexOf` through sparse own-element iteration when the array prototype
+  chain has no numeric keys or proxy prototypes.  This preserves observable
+  `HasProperty` behavior when prototype numeric keys exist, while avoiding the
+  all-hole scan for ordinary sparse arrays.
+- Locally cleaned the generated partial list from 39 loaded entries to 23 by
+  removing measured-fast URI entries and the two fixed sparse array search
+  entries.
+
+Focused verification:
+
+```bash
+make -C build/premake config=release_native lambda -j4 CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib"
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_try_dstr_fn_name_batch.txt --js-timeout=30 --write-failures=temp/js43_try_dstr_fn_name_after2.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_catch_restriction_batch.txt --js-timeout=30 --write-failures=temp/js43_catch_restriction_after2.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_sparse_array_search_batch.txt --js-timeout=30 --write-failures=temp/js43_sparse_array_search_after2.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_uri_slow_batch.txt --js-timeout=30 --write-failures=temp/js43_uri_slow_before.tsv
+```
+
+Results:
+
+- Catch destructuring default/name-inference batch: 12 / 12 passed.
+- Strict catch parameter restriction batch: 2 / 2 passed.
+- Sparse array search batch: 2 / 2 passed; timing improved to 12 ms for
+  `indexOf` and 14 ms for `lastIndexOf` after the generic-path fix.
+- URI slow batch: 14 / 14 passed, each under 1 second in the focused batch.
+
+## 37. Regression Cleanup After Partial-List Sweep
+
+Status on 2026-05-18: fixed the reported full-suite regressions from the
+partial-list cleanup pass and preserved the sparse-array speed work.
+
+Root causes:
+
+- The sparse `Array.prototype.indexOf` / `lastIndexOf` shortcut skipped holes
+  while assuming the prototype chain would stay free of numeric keys.  That is
+  not valid when an own indexed accessor runs during the scan and installs a
+  numeric property on `Array.prototype`.
+- Array iterator `.next()` used the backing array length for arguments objects.
+  `arguments.length` is an observable data property in this runtime, so
+  expansion and truncation before iterator exhaustion were ignored.
+- Array iterator `.next()` read raw dense slots for values/entries.  That missed
+  arguments overflow entries and other property-observable numeric values.
+- Generator array-rest destructuring did not spill the outer iterator state
+  before binding a rest target that could suspend through a nested
+  destructuring default `yield`.  After resume, the stale MIR registers could be
+  used by the close/exception path and crash.
+- Object destructuring similarly needed to preserve its source register across
+  yield-bearing nested targets so later properties/rest can continue safely.
+- The `Function.prototype.toString` intrinsic-object walk still passes but is
+  slow enough to remain a partial-list item under normal js262 timeouts.
+
+Fix:
+
+- Disabled the sparse array search shortcut for arrays with own numeric
+  accessor descriptors.  Ordinary sparse data arrays still use the fast
+  own-element scan when the prototype chain has no numeric keys.
+- Added live observable length lookup for arguments-backed array iterators.
+- Switched ArrayIterator values/entries to normal property reads rather than
+  raw dense-slot reads.
+- Added generator spill/restore around yield-bearing array rest targets and
+  object destructuring targets.
+- Added a dense identity-search fast path for `Array.prototype.includes`; it is
+  guarded to arrays with no companion map, full dense capacity, and object-like
+  search values, falling back to the existing property-observable path for
+  holes and primitive SameValueZero cases.
+- Restored the local partial list to include the two identifier Unicode slow
+  tests plus the slow `Function.prototype.toString` intrinsic walk.
+
+Focused verification:
+
+```bash
+make -C build/premake config=release_native lambda -j4 CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib"
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_array_search_regression_batch.txt --js-timeout=30 --write-failures=temp/js43_array_search_regression_after.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_remaining_regression_batch.txt --js-timeout=30 --write-failures=temp/js43_remaining_regression_after4.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js262_dstr_yield_focus.txt --js-timeout=30 --write-failures=temp/js43_dstr_yield_focus_after.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_array_includes_guard_batch.txt --js-timeout=30 --write-failures=temp/js43_array_includes_guard_after.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_function_to_string_slow_batch.txt --js-timeout=30 --write-failures=temp/js43_function_to_string_slow_after.tsv
+```
+
+Results:
+
+- Array search regression batch: 7 / 7 passed, including five accessor/prototype
+  mutation regressions and two sparse search sentinels.
+- Remaining regression batch: 6 / 6 passed.  The ArrayIterator arguments cases
+  and `language_expressions_assignment_dstr_array_rest_nested_obj_yield_expr_js`
+  crash are fixed.
+- Destructuring-yield focus batch: 11 / 11 passed.
+- Array includes guard batch: 5 / 5 passed.
+- Function `toString` slow representative: passes with a 30-second test timeout
+  but remains slow at roughly 18-22 seconds in focused runs.
