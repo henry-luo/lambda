@@ -146,6 +146,44 @@ static void annotate_css_stylesheet_source_file(CssStylesheet* stylesheet, const
     }
 }
 
+static bool resolve_layout_support_resource_path(const char* href, const char* base_path,
+                                                 char* out_path, size_t out_size) {
+    if (!href || href[0] != '/' || href[1] == '/' || !base_path || !out_path || out_size == 0) {
+        return false;
+    }
+
+    const char* base_local = base_path;
+    if (strncmp(base_local, "file:", 5) == 0) {
+        base_local += 5;
+        if (base_local[0] == '/' && base_local[1] == '/') base_local += 2;
+    }
+
+    const char* data_marker = strstr(base_local, "/data/");
+    size_t marker_prefix_len = 1;
+    if (!data_marker && strncmp(base_local, "data/", 5) == 0) {
+        data_marker = base_local;
+        marker_prefix_len = 0;
+    }
+    if (!data_marker) {
+        data_marker = strstr(base_local, "test/layout/data/");
+        marker_prefix_len = 0;
+    }
+    if (!data_marker) {
+        if (strlen("test/layout/data/support") + strlen(href) + 1 > out_size) return false;
+        snprintf(out_path, out_size, "test/layout/data/support%s", href);
+        return access(out_path, R_OK) == 0;
+    }
+
+    size_t data_root_len = data_marker - base_local + marker_prefix_len + strlen("data");
+    if (data_root_len + strlen("/support") + strlen(href) + 1 > out_size) return false;
+
+    memcpy(out_path, base_local, data_root_len);
+    out_path[data_root_len] = '\0';
+    strncat(out_path, "/support", out_size - strlen(out_path) - 1);
+    strncat(out_path, href, out_size - strlen(out_path) - 1);
+    return access(out_path, R_OK) == 0;
+}
+
 // Forward declaration for charset conversion (defined after convert_latin1_to_utf8)
 char* convert_charset_to_utf8(const char* content, size_t content_len, const char* from_charset);
 void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool* pool, int depth = 0);
@@ -1306,9 +1344,15 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
 
             if (href[0] == '/' && href[1] != '/'
                 && (!base_path || (strncmp(base_path, "http://", 7) != 0 && strncmp(base_path, "https://", 8) != 0))) {
-                // Absolute local path - use as-is (only when base is not HTTP)
-                strncpy(css_path, href, sizeof(css_path) - 1);
-                css_path[sizeof(css_path) - 1] = '\0';
+                // WPT-style absolute support URLs (for example /fonts/ahem.css)
+                // are rooted at the test server, not the local filesystem root.
+                if (!resolve_layout_support_resource_path(href, base_path, css_path, sizeof(css_path))) {
+                    log_debug("[CSS] Support resource fallback miss: href=%s base=%s",
+                              href, base_path ? base_path : "(none)");
+                    // Absolute local path - use as-is (only when base is not HTTP)
+                    strncpy(css_path, href, sizeof(css_path) - 1);
+                    css_path[sizeof(css_path) - 1] = '\0';
+                }
             } else if (strstr(href, "://") != nullptr) {
                 // Full URL - use as-is
                 strncpy(css_path, href, sizeof(css_path) - 1);

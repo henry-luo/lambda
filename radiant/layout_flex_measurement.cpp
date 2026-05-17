@@ -2,6 +2,7 @@
 #include "layout_flex.hpp"
 #include "layout_flex_measurement.hpp"
 #include "intrinsic_sizing.hpp"
+#include "layout_box.hpp"
 #include "layout_measure.hpp"
 #include "form_control.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
@@ -97,49 +98,175 @@ static float get_explicit_css_height(LayoutContext* lycon, ViewElement* elem) {
     return -1;
 }
 
-// Helper to get the resolved CSS margin for a specific side from an element's specified_style
-// Returns 0 if margin is auto, percentage, or not set
-static float get_css_margin(LayoutContext* lycon, ViewElement* elem, CssPropertyId property_id) {
-    if (!elem) return 0;
+static CssValue* flex_margin_side_value(const CssValue* value, CssPropertyId property_id) {
+    if (!value) return nullptr;
+    if (value->type != CSS_VALUE_TYPE_LIST) return (CssValue*)value;
 
-    // First check if bound is already resolved
+    int cnt = value->data.list.count;
+    CssValue** vals = value->data.list.values;
+    if (cnt <= 0 || !vals) return nullptr;
+
+    int side = 0;
+    if (property_id == CSS_PROPERTY_MARGIN_TOP) {
+        side = 0;
+    } else if (property_id == CSS_PROPERTY_MARGIN_RIGHT) {
+        side = 1;
+    } else if (property_id == CSS_PROPERTY_MARGIN_BOTTOM) {
+        side = 2;
+    } else {
+        side = 3;
+    }
+
+    int idx = 0;
+    if (side == 0) {
+        idx = 0;
+    } else if (side == 1) {
+        idx = (cnt >= 2) ? 1 : 0;
+    } else if (side == 2) {
+        idx = (cnt >= 3) ? 2 : 0;
+    } else {
+        idx = (cnt >= 4) ? 3 : ((cnt >= 2) ? 1 : 0);
+    }
+    return (idx < cnt) ? vals[idx] : nullptr;
+}
+
+static bool resolve_flex_margin_value(LayoutContext* lycon, CssPropertyId property_id,
+                                      CssValue* value, float inline_base, float* out) {
+    if (!value || !out) return false;
+    if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+        if (inline_base < 0.0f) return false;
+        *out = (float)(value->data.percentage.value / 100.0) * inline_base;
+        return true;
+    }
+    if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
+        *out = 0.0f;
+        return true;
+    }
+    if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_NUMBER ||
+        value->type == CSS_VALUE_TYPE_KEYWORD) {
+        float val = resolve_length_value(lycon, property_id, value);
+        if (!isnan(val) && val >= 0.0f) {
+            *out = val;
+            return true;
+        }
+    }
+    return false;
+}
+
+// Helper to get the resolved CSS margin for a specific side. Percentage
+// margins resolve against the containing block inline size, which may differ
+// from any earlier style-resolution context during intrinsic flex measurement.
+static float get_css_margin(LayoutContext* lycon, ViewElement* elem,
+                            CssPropertyId property_id, float inline_base) {
+    if (!elem) return 0.0f;
+
+    if (elem->specified_style && lycon) {
+        float val = 0.0f;
+        CssDeclaration* decl = style_tree_get_declaration(elem->specified_style, property_id);
+        if (decl && decl->value &&
+            resolve_flex_margin_value(lycon, property_id, decl->value, inline_base, &val)) {
+            return val;
+        }
+
+        CssDeclaration* short_decl = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_MARGIN);
+        CssValue* side_value = short_decl ? flex_margin_side_value(short_decl->value, property_id) : nullptr;
+        if (side_value &&
+            resolve_flex_margin_value(lycon, property_id, side_value, inline_base, &val)) {
+            return val;
+        }
+    }
+
     if (elem->bound) {
-        float val = 0;
+        float val = 0.0f;
         switch (property_id) {
             case CSS_PROPERTY_MARGIN_LEFT:   val = elem->bound->margin.left; break;
             case CSS_PROPERTY_MARGIN_RIGHT:  val = elem->bound->margin.right; break;
             case CSS_PROPERTY_MARGIN_TOP:    val = elem->bound->margin.top; break;
             case CSS_PROPERTY_MARGIN_BOTTOM: val = elem->bound->margin.bottom; break;
+            default: break;
         }
-        if (!isnan(val) && val >= 0) return val;
+        if (!isnan(val) && val >= 0.0f) return val;
     }
 
-    // Fall back to CSS declaration
-    if (!elem->specified_style || !lycon) return 0;
-    CssDeclaration* decl = style_tree_get_declaration(elem->specified_style, property_id);
-    if (decl && decl->value && decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-        float val = resolve_length_value(lycon, property_id, decl->value);
-        if (!isnan(val) && val >= 0) return val;
-    }
-    // Fallback: check shorthand margin property
-    CssDeclaration* short_decl = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_MARGIN);
-    if (short_decl && short_decl->value && short_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-        float val = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, short_decl->value);
-        if (!isnan(val) && val >= 0) return val;
-    }
-    return 0;
+    return 0.0f;
 }
 
 // Helper to get horizontal margins (left + right) for an element
-static float get_child_horizontal_margins(LayoutContext* lycon, ViewElement* elem) {
-    return get_css_margin(lycon, elem, CSS_PROPERTY_MARGIN_LEFT)
-         + get_css_margin(lycon, elem, CSS_PROPERTY_MARGIN_RIGHT);
+static float get_child_horizontal_margins(LayoutContext* lycon, ViewElement* elem,
+                                          float inline_base = -1.0f) {
+    return get_css_margin(lycon, elem, CSS_PROPERTY_MARGIN_LEFT, inline_base)
+         + get_css_margin(lycon, elem, CSS_PROPERTY_MARGIN_RIGHT, inline_base);
 }
 
 // Helper to get vertical margins (top + bottom) for an element
-static float get_child_vertical_margins(LayoutContext* lycon, ViewElement* elem) {
-    return get_css_margin(lycon, elem, CSS_PROPERTY_MARGIN_TOP)
-         + get_css_margin(lycon, elem, CSS_PROPERTY_MARGIN_BOTTOM);
+static float get_child_vertical_margins(LayoutContext* lycon, ViewElement* elem,
+                                        float inline_base = -1.0f) {
+    return get_css_margin(lycon, elem, CSS_PROPERTY_MARGIN_TOP, inline_base)
+         + get_css_margin(lycon, elem, CSS_PROPERTY_MARGIN_BOTTOM, inline_base);
+}
+
+static float flex_item_content_width_for_child_percentages(LayoutContext* lycon,
+                                                           ViewElement* item,
+                                                           FlexContainerLayout* flex_layout) {
+    ViewBlock* block = lam::view_as_block(item);
+    if (!block) return -1.0f;
+
+    if (block->width > 0.0f) {
+        return layout_content_width_from_border_box(block, block->width);
+    }
+    if (block->content_width > 0.0f) {
+        return block->content_width;
+    }
+
+    float content_width = -1.0f;
+    if (block->blk && block->blk->given_width >= 0.0f) {
+        content_width = block->blk->given_width;
+        if (block->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
+            content_width = layout_content_width_from_border_box(block, content_width);
+        }
+        return fmax(content_width, 0.0f);
+    }
+
+    if (!flex_layout || flex_layout->cross_axis_size <= 0.0f) return -1.0f;
+
+    CssDeclaration* width_decl = item->specified_style
+        ? style_tree_get_declaration(item->specified_style, CSS_PROPERTY_WIDTH) : nullptr;
+    if (width_decl && width_decl->value &&
+        width_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+        content_width = flex_layout->cross_axis_size *
+            (float)(width_decl->value->data.percentage.value / 100.0);
+        if (block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
+            content_width = layout_content_width_from_border_box(block, content_width);
+        }
+        return fmax(content_width, 0.0f);
+    }
+
+    if (!width_decl || !width_decl->value ||
+        (width_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
+         width_decl->value->data.keyword == CSS_VALUE_AUTO)) {
+        content_width = flex_layout->cross_axis_size;
+        if (block->bound) {
+            content_width -= block->bound->margin.left + block->bound->margin.right;
+            content_width -= block->bound->padding.left + block->bound->padding.right;
+            if (block->bound->border) {
+                content_width -= block->bound->border->width.left + block->bound->border->width.right;
+            }
+        }
+        return fmax(content_width, 0.0f);
+    }
+
+    if (lycon && width_decl && width_decl->value) {
+        float resolved_width = resolve_length_value(lycon, CSS_PROPERTY_WIDTH, width_decl->value);
+        if (!isnan(resolved_width) && resolved_width >= 0.0f) {
+            content_width = resolved_width;
+            if (block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
+                content_width = layout_content_width_from_border_box(block, content_width);
+            }
+            return fmax(content_width, 0.0f);
+        }
+    }
+
+    return -1.0f;
 }
 
 // ============================================================================
@@ -2112,6 +2239,9 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                 } else if (c->is_element()) {
                     ViewElement* child_view = lam::view_require_element(c);
                     if (child_view) {
+                        float child_margin_inline_base =
+                            flex_item_content_width_for_child_percentages(lycon, item, flex_layout);
+
                         // CSS Flexbox §4.1: Absolutely positioned children and display:none
                         // elements are not flex items and should not contribute to intrinsic sizing.
                         DisplayValue child_display = resolve_display_value((void*)c);
@@ -2363,17 +2493,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                                             }
                                         }
                                         if (parent_cw > 0) {
-                                            float chm = get_child_horizontal_margins(lycon, child_view);
-                                            // Also check shorthand margin property if longhand not found
-                                            if (chm == 0.0f && child_view->specified_style) {
-                                                CssDeclaration* margin_decl = style_tree_get_declaration(
-                                                    child_view->specified_style, CSS_PROPERTY_MARGIN);
-                                                if (margin_decl && margin_decl->value &&
-                                                    margin_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                                                    float m = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, margin_decl->value);
-                                                    if (!isnan(m) && m > 0) chm = m * 2;
-                                                }
-                                            }
+                                            float chm = get_child_horizontal_margins(lycon, child_view, parent_cw);
                                             avail_w = fmax(parent_cw - chm, 0.0f);
                                         }
                                     }
@@ -2406,7 +2526,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                                         }
                                     }
                                     if (parent_cw > 0) {
-                                        float chm = get_child_horizontal_margins(lycon, child_view);
+                                        float chm = get_child_horizontal_margins(lycon, child_view, parent_cw);
                                         available_width = fmax(parent_cw - chm, 0.0f);
                                     }
                                 }
@@ -2418,8 +2538,10 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                         // CSS Flexbox §9.9.1: Each flex item's contribution to the container's
                         // intrinsic size is its outer size (content + padding + border + margin).
                         // Add child margins to width/height for proper intrinsic sizing.
-                        float child_h_margin = get_child_horizontal_margins(lycon, child_view);
-                        float child_v_margin = get_child_vertical_margins(lycon, child_view);
+                        float child_h_margin = get_child_horizontal_margins(
+                            lycon, child_view, child_margin_inline_base);
+                        float child_v_margin = get_child_vertical_margins(
+                            lycon, child_view, child_margin_inline_base);
 
                         // For width: row flex sums widths, column flex takes max
                         // Track both min and max content widths separately

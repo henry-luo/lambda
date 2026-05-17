@@ -1,6 +1,8 @@
 #include "grid.hpp"
 #include "intrinsic_sizing.hpp"
+#include "layout_box.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
+#include "../lib/tagged.hpp"
 
 extern "C" {
 #include <stdlib.h>
@@ -8,6 +10,32 @@ extern "C" {
 #include <math.h>
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
+}
+
+static bool grid_item_has_in_flow_content(ViewBlock* item) {
+    if (!item) return false;
+    for (DomNode* child = item->first_child; child; child = child->next_sibling) {
+        if (child->is_text()) {
+            const char* text = (const char*)child->text_data();
+            if (!text) continue;
+            for (const char* p = text; *p; p++) {
+                if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r' && *p != '\f') {
+                    return true;
+                }
+            }
+            continue;
+        }
+        if (!child->is_element()) continue;
+        ViewBlock* child_block = lam::view_as_block(child->as_element());
+        if (!child_block) return true;
+        if (child_block->display.outer == CSS_VALUE_NONE ||
+            child_block->display.inner == CSS_VALUE_NONE ||
+            layout_view_is_abs_or_fixed(child_block)) {
+            continue;
+        }
+        return true;
+    }
+    return false;
 }
 
 // Create a new grid track list
@@ -410,6 +438,16 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
         }
     }
 
+    if (is_row_axis &&
+        (!item->blk || item->blk->given_height < 0.0f) &&
+        item->display.inner != RDT_DISPLAY_REPLACED &&
+        !grid_item_has_in_flow_content(item)) {
+        BoxMetrics box = layout_box_metrics(item);
+        sizes.min_content = box.pad_border_v;
+        sizes.max_content = box.pad_border_v;
+        return sizes;
+    }
+
     // Fallback: Use unified intrinsic sizing API if layout context is available
     if (lycon) {
         // Determine available space for measurement
@@ -493,8 +531,24 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
             available = AvailableSpace::make_max_content();
         }
 
-        // Use unified API to measure all sizes
+        // Use unified API to measure all sizes. Grid item percentage margins and
+        // paddings resolve against the grid container inline size, so preserve that
+        // parent width for any style re-resolution triggered during measurement.
+        BlockContext grid_parent_ctx = {};
+        BlockContext* saved_parent = lycon->block.parent;
+        bool override_parent = is_row_axis && lycon->grid_container &&
+                               lycon->grid_container->content_width > 0;
+        if (override_parent) {
+            if (saved_parent) {
+                grid_parent_ctx = *saved_parent;
+            }
+            grid_parent_ctx.content_width = lycon->grid_container->content_width;
+            lycon->block.parent = &grid_parent_ctx;
+        }
         IntrinsicSizesBidirectional all_sizes = measure_intrinsic_sizes(lycon, item, available);
+        if (override_parent) {
+            lycon->block.parent = saved_parent;
+        }
 
         // Extract the axis we need
         sizes = intrinsic_sizes_for_axis(all_sizes, !is_row_axis);

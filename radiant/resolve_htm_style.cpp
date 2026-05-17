@@ -1433,6 +1433,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // Chrome UA: font-size 13.3333px, font-family Arial for form controls
         if (!block->font) { block->font = alloc_font_prop(lycon); }
         block->font->font_size = 13.3333f;
+        block->font->font_size_from_medium = false;
         radiant_retain_font_family(block->font, lam::GcPtr<char>((char*)"Arial"));
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
         block->bound->padding.top = block->bound->padding.bottom = FormDefaults::BUTTON_PADDING_V;
@@ -1497,6 +1498,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // Chrome UA: font-size 13.3333px, font-family Arial for all form controls
         if (!block->font) { block->font = alloc_font_prop(lycon); }
         block->font->font_size = 13.3333f;
+        block->font->font_size_from_medium = false;
         radiant_retain_font_family(block->font, lam::GcPtr<char>((char*)"Arial"));
 
         switch (block->form->control_type) {

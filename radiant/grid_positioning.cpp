@@ -799,6 +799,11 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
         if (item->content_width > 0 && item->content_width < available_width) {
             actual_width = item->content_width;
             item->width = actual_width;
+        } else if (item->gi && item->gi->has_measured_size &&
+                   item->gi->measured_max_width > 0 &&
+                   item->gi->measured_max_width < available_width) {
+            actual_width = item->gi->measured_max_width;
+            item->width = actual_width;
         }
     }
 

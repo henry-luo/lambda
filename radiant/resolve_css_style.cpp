@@ -3150,6 +3150,26 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                         continue;
                     }
                 }
+                if (tag == HTM_TAG_SMALL || tag == HTM_TAG_BIG ||
+                    tag == HTM_TAG_SUB || tag == HTM_TAG_SUP) {
+                    ViewSpan* span = lam::view_require_element(lycon->view);
+                    if (span->font && span->font->font_size > 0 &&
+                        !span->font->font_size_from_medium) {
+                        log_debug("[FONT INHERIT] Inline UA font-size keeps %.1f",
+                            span->font->font_size);
+                        continue;
+                    }
+                }
+                if (tag == HTM_TAG_INPUT || tag == HTM_TAG_BUTTON ||
+                    tag == HTM_TAG_SELECT || tag == HTM_TAG_TEXTAREA) {
+                    ViewSpan* span = lam::view_require_element(lycon->view);
+                    if (span->font && span->font->font_size > 0 &&
+                        !span->font->font_size_from_medium) {
+                        log_debug("[FONT INHERIT] Form control UA font-size keeps %.1f",
+                            span->font->font_size);
+                        continue;
+                    }
+                }
             }
 
             // Property not set, check parent chain for inherited declaration
