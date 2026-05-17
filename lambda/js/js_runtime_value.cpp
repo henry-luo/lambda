@@ -5,6 +5,7 @@ extern "C" bool js_dom_item_is_range(Item item);
 extern "C" bool js_dom_item_is_selection(Item item);
 extern "C" Item js_dom_range_to_string_value(Item item);
 extern "C" Item js_dom_selection_to_string_value(Item item);
+extern "C" bool js_is_proxy(Item obj);
 
 // =============================================================================
 // Type Conversion Functions
@@ -452,6 +453,20 @@ extern "C" Item js_to_string(Item value) {
         return value;
 
     case LMD_TYPE_ARRAY: {
+        Item to_string_key = (Item){.item = s2it(heap_create_name("toString", 8))};
+        Item to_string_fn = js_property_get(value, to_string_key);
+        if (js_check_exception()) return ItemNull;
+        if (get_type_id(to_string_fn) == LMD_TYPE_FUNC) {
+            Item result = js_call_function(to_string_fn, value, NULL, 0);
+            if (js_check_exception()) return ItemNull;
+            TypeId result_type = get_type_id(result);
+            if (result_type == LMD_TYPE_MAP || result_type == LMD_TYPE_ARRAY ||
+                result_type == LMD_TYPE_FUNC || result_type == LMD_TYPE_ELEMENT) {
+                js_throw_type_error("Cannot convert object to primitive value");
+                return ItemNull;
+            }
+            return js_to_string(result);
+        }
         // JS: String([1,2,3]) => "1,2,3" (same as Array.prototype.join(","))
         Array* a = value.array;
         if (!a || a->length == 0) {
@@ -948,6 +963,7 @@ bool js_ta_proto_chain_set(Item object, Item key, Item value) {
     if (js_skip_accessor_dispatch) return false;
     TypeId object_type = get_type_id(object);
     if (object_type != LMD_TYPE_MAP && object_type != LMD_TYPE_ARRAY) return false;
+    if (js_is_proxy(object)) return false;
     if (object_type == LMD_TYPE_MAP && object.map && object.map->map_kind == MAP_KIND_TYPED_ARRAY) return false;
 
     double numeric_index = 0;

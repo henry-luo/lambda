@@ -1026,3 +1026,374 @@ Note: `test/js262` is a symlink to `../lambda-test/js262`, so the baseline
 update command needs permission to write through that symlink target. A
 non-elevated run can report "Baseline updated" even when the silent `fopen`
 inside the runner cannot write the target.
+
+## 17. Function Constructor And Proxy Shape Pass
+
+Status on 2026-05-16 after retiring the remaining `built-ins/Function` rows
+from `temp/js43_update_baseline_failures.tsv` and a small adjacent Proxy shape
+set:
+
+- Dynamic `Function` compilation now throws `SyntaxError` when the generated
+  function source fails to parse, instead of returning `null` and letting the
+  test body continue.
+- Early errors now track class-private names in the enclosing class stack and
+  reject unbound private identifiers in dynamic function bodies, covering
+  `new Function("o.#f")`.
+- MIR parameter inference no longer treats `+` as numeric evidence for unknown
+  parameters. Unknown `param + param` now stays boxed and routes through
+  `js_add`, preserving runtime string concatenation such as `"1" + 2`.
+- Constructor object creation now reads `new.target.prototype`, not always the
+  target function prototype. If a proxy is revoked during that prototype lookup
+  and the result is not an object, it raises the required TypeError.
+- Proxy constructor shape now matches the spec more closely:
+  - `Proxy` remains constructable but has no own `prototype` property;
+  - Proxy revocation functions have no own `prototype`, are not constructors,
+    and `new revoke()` throws `TypeError`;
+  - the native Test262 `isConstructor` helper recognizes callable proxies.
+
+Focused gates:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_function_constructor_batch.txt --write-failures=temp/js43_function_constructor_after_proxy_realm_fix.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_proxy_shape_batch.txt --write-failures=temp/js43_proxy_shape_after_new_revoke_failures.tsv
+```
+
+Results: Function constructor shard 8 / 8 passed; Proxy shape shard 3 / 3
+passed.
+
+Guard gate:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_function_guard_batch.txt --write-failures=temp/js43_function_guard_after_proxy_shape_failures.tsv
+```
+
+Result: 10 / 10 passed across Function constructor syntax/runtime behavior,
+addition semantics, proxy construct `newTarget` behavior, and private-name
+class checks.
+
+## 18. Reflect, Proxy Construct, And Object ToString Pass
+
+Status on 2026-05-17 after fixing the next stale rows from
+`temp/js43_update_baseline_failures.tsv`:
+
+- `Object.prototype.toString` now brands proxies from the target's builtin
+  tag (`Array`, `Function`, or `Object`) before applying `@@toStringTag`, and
+  preserves the required fallback when a proxy is revoked during the tag lookup.
+- `Reflect.apply` and `Reflect.construct` now use `CreateListFromArrayLike`
+  semantics for array-like argument lists instead of requiring actual Arrays.
+- `Reflect.construct(target, args)` lowering now defaults `newTarget` to
+  `target`, matching the JS spec and avoiding a spurious null newTarget.
+- Proxy `[[Construct]]` with missing, null, or undefined `construct` trap now
+  forwards through the target's construct path, preserving nested proxy and
+  `newTarget.prototype` behavior.
+- Class-map constructors now honor an explicit `newTarget.prototype` during
+  construction, including proxy targets and subclassed Array allocation.
+- `Function.prototype.bind` now supports class-map constructors on the
+  construct path, so bound class targets inside proxy construct forwarding
+  remain constructable.
+- The ordinary user-function construction path now preserves proxy
+  `newTarget`s through `OrdinaryCreateFromConstructor`; a proxy revoked while
+  resolving `newTarget.prototype` therefore raises the required `TypeError`.
+
+Focused gates:
+
+```bash
+./lambda.exe js-test-batch --timeout=10 < temp/js43_debug_bound_proxy.proto
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_reflect_arraylike_batch.txt --write-failures=temp/js43_reflect_arraylike_after_proxy_newtarget_failures.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_object_tostring_proxy_batch.txt --write-failures=temp/js43_object_tostring_proxy_after_proxy_newtarget_failures.tsv
+```
+
+Results: bound proxy construct protocol passed; Reflect/proxy construct shard
+9 / 9 passed; Object toString/proxy construct shard 4 / 4 passed.
+
+Guard gates:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_function_guard_batch.txt --write-failures=temp/js43_function_guard_after_proxy_newtarget_failures.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_proxy_shape_batch.txt --write-failures=temp/js43_proxy_shape_after_proxy_newtarget_failures.tsv
+```
+
+Results: Function/proxy/private-name guard 10 / 10 passed; Proxy shape guard
+3 / 3 passed.
+
+Next recommended gate: rerun the full Test262 batch without updating the
+baseline first, then update the baseline only if the regression list stays at
+zero.
+
+## 19. Proxy / Reflect Forwarding Follow-Up
+
+Status on 2026-05-17 while reducing the remaining
+`temp/js43_update_baseline_failures.tsv` rows:
+
+- Added a focused Proxy/Reflect forwarding shard in
+  `temp/js43_proxy_reflect_forwarding_batch.txt` covering 15 nested proxy,
+  Reflect, string exotic, and receiver-forwarding cases.
+- Proxy `construct`, `deleteProperty`, `get`, `has`, and Reflect
+  `defineProperty` / `get` / `set` forwarding now pass the shard.
+- `Reflect.get(target, key, receiver)` lowering and runtime dispatch now
+  preserve the explicit receiver through nested proxy forwarding.
+- Native Test262 `compareArray` now recognizes proxies to Arrays as
+  array-like while still reading `length` and indexed values through ordinary
+  property access.
+- String wrapper exotic `length` / index delete and define-property rejection
+  paths now reject consistently through Reflect/Proxy forwarding.
+- Array custom prototype storage now writes directly to the array companion
+  map, matching the storage read by `js_array_get_custom_proto`.
+- `ValidateAndApplyPropertyDescriptor` now rechecks own descriptors when the
+  fast own-property probe misses synthetic own properties such as function
+  `prototype`.
+- Proxy `setPrototypeOf` invariant validation now propagates abrupt completion
+  from the target's `[[GetPrototypeOf]]` instead of continuing with a null
+  fallback.
+- Ordinary `[[Set]]` now delegates array holes and out-of-range integer-index
+  writes through a proxy prototype's `set` trap, preserving the original
+  receiver and avoiding unrelated `getPrototypeOf` trap probes.
+- `__proto__` assignment now lets an immediate proxy prototype handle
+  `[[Set]]` before the Annex B prototype-setter shortcut mutates the receiver's
+  internal prototype.
+- The typed-array-prototype numeric set shortcut no longer probes
+  `[[GetOwnProperty]]` on proxy receivers before proxy `[[Set]]` forwarding,
+  so missing `set` traps perform exactly one receiver `getOwnPropertyDescriptor`
+  and one receiver `defineProperty` per assignment.
+
+Focused gate:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_proxy_reflect_forwarding_batch.txt --write-failures=temp/js43_proxy_reflect_forwarding_after_set_fix_failures.tsv
+```
+
+Result: 15 / 15 passed.
+
+Guard gates:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_proxy_shape_batch.txt --write-failures=temp/js43_proxy_shape_after_set_fix_seq_failures.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_reflect_arraylike_batch.txt --write-failures=temp/js43_reflect_arraylike_after_set_fix_seq_failures.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_function_guard_batch.txt --write-failures=temp/js43_function_guard_after_set_fix_failures.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_array_protocol_fixed_batch.txt --write-failures=temp/js43_array_protocol_fixed_after_set_fix_seq_failures.tsv
+```
+
+Results: Proxy shape 3 / 3 passed; Reflect/proxy construct array-like 9 / 9
+passed; Function/proxy/private-name guard 10 / 10 passed; Array protocol guard
+7 / 7 passed.
+
+Note: run these Test262 runner processes sequentially. Parallel invocations can
+share the runner's temporary batch-result channel and report spurious
+`results=52/N` lost rows.
+
+Next step: rerun the full Test262 batch without updating the baseline first,
+then update the baseline if the regression list remains empty.
+
+## 20. Regression And Promise Capability Follow-Up
+
+Status on 2026-05-17 while continuing the remaining js262 failures:
+
+- Closed the latest focused regression rows from the broad proxy/set run:
+  - `Reflect.get(target, key, receiver)` now rejects primitive and Symbol
+    targets before attempting ordinary property access.
+  - Array `length` descriptor queries now report the synthetic ES attributes:
+    non-enumerable, non-configurable, and writable unless the companion
+    non-writable marker is present.
+  - TypedArray integer-indexed `[[Set]]` with an altered receiver now defines
+    the receiver property directly instead of recursing through proxy `set`
+    forwarding.
+  - `eval` hashbang sources now bypass the expression wrapper and return
+    JavaScript `undefined` for empty/comment-only completions.
+  - Proxy `defineProperty` traps now receive public Symbol keys instead of the
+    runtime's internal `__sym_N` storage names.
+- Fixed constructor/newTarget edges:
+  - nested bound constructor calls now compute the effective bound
+    `new.target` before creating the receiver object, so `new C()` for
+    `C = A.bind().bind()` uses `A.prototype`;
+  - dynamic `super()` resolution now falls back to the lexical superclass when
+    a custom `Reflect.construct` newTarget would otherwise derive
+    `Function.prototype` as the parent constructor.
+- Fixed built-in `@@toStringTag` descriptor gaps for `Promise.prototype` and
+  `Reflect`: both are now non-writable and non-enumerable while remaining
+  configurable.
+- Fixed the Promise capability constructor protocol:
+  - class-map and proxy constructors are now accepted as valid native
+    `new.target` values;
+  - `super()` into native constructors that require construction now routes
+    through the construct path instead of ordinary call dispatch;
+  - Promise construction applies `newTarget.prototype` to the created promise
+    object;
+  - `NewPromiseCapability` capture cells now start as `undefined` and throw if
+    the executor tries to capture resolve/reject twice;
+  - `Promise.prototype.then` now uses the promise species constructor and
+    forwards the native reaction promise into the returned capability.
+
+Focused gates:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_construct_newtarget_batch.txt --write-failures=temp/js43_construct_newtarget_after_fix_failures.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_tostringtag_descriptor_batch.txt --write-failures=temp/js43_tostringtag_descriptor_after_fix_failures.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_promise_capability_batch.txt --write-failures=temp/js43_promise_capability_after_then_species_failures.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_turn_guard_batch.txt --write-failures=temp/js43_turn_guard_failures.tsv
+```
+
+Results: construct/newTarget 2 / 2 passed; toStringTag descriptor 2 / 2
+passed; Promise capability 13 / 13 passed; turn guard 27 / 27 passed.
+
+Next recommended gate: rerun the full Test262 batch without updating the
+baseline. If the regression list is clean, update the baseline in a separate
+run.
+
+## 21. Promise Generic Protocol And Array Slice Follow-Up
+
+Status on 2026-05-17 while reducing the remaining rows from
+`temp/js43_current_full_failures.tsv`:
+
+- Fixed the remaining Promise protocol cluster from the current manifest:
+  - Promise resolving functions, capability executors, and `finally` wrapper
+    closures now expose anonymous built-in `name` metadata and are
+    non-constructable.
+  - Promise executors are called with JavaScript `undefined` as `this`.
+  - `Promise.prototype.catch` and `Promise.prototype.finally` now use ordinary
+    `Invoke(this, "then", ...)` behavior, including primitive ToObject lookup
+    and poisoned/non-callable `then` handling.
+  - `Promise.prototype.then/finally` now use the species constructor path and
+    propagate constructor getter/type errors.
+  - Promise combinators fetch `constructor.resolve` once before the empty
+    iterable fast path, and call the captured resolve method for elements.
+  - `Promise.resolve` now honors a native promise's observable `constructor`
+    property before returning the original promise.
+  - `Promise.withResolvers` is registered as a real static builtin and dynamic
+    construction of no-constructor subclasses of `Promise` now creates a
+    Promise-backed instance with the subclass prototype.
+  - Removed the MIR direct-call shortcuts for `Promise.resolve/reject/all/race`
+    / `any/allSettled/withResolvers`; those shortcuts skipped observable
+    property lookup and the constructor protocol.
+- Fixed the Array `slice` high-index/proxy cluster:
+  - `Array.prototype.slice` on generic object/proxy receivers now uses a
+    spec-style `ToLength`, relative index, `HasProperty`, `Get`, and
+    `CreateDataProperty` loop.
+  - The previous array-like materialization and full-length pre-validation no
+    longer run for `slice`, so small slices near `2^53 - 1` do not throw
+    `RangeError` or drop high-index properties.
+  - Proxy-wrapped arrays now preserve `ArraySpeciesCreate` behavior for
+    `slice`.
+
+Focused gates:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_promise_remaining_batch.txt --write-failures=temp/js43_promise_remaining_after_sequential.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_promise_generic_batch.txt --write-failures=temp/js43_promise_generic_after_sequential.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_array_slice_batch.txt --write-failures=temp/js43_array_slice_after_generic.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_array_failures_batch.txt --write-failures=temp/js43_array_failures_after_generic_slice.tsv
+```
+
+Results: Promise remaining 5 / 5 passed; Promise generic 20 / 20 passed; Array
+slice 3 / 3 passed. The old 25-row Array manifest now has 3 passes and 22
+remaining failures, all in `reverse` high-index proxy ordering or the
+`sort` precise side-effect cluster.
+
+Important runner note: do not run multiple `test_js_test262_gtest` processes in
+parallel. Each runner process reuses `temp/_t262_worker_0.manifest`, so parallel
+batch-file invocations can clobber each other and report impossible
+`results=20/5` lost rows.
+
+## 22. Array Reverse/Delete And Generic Sort Follow-Up
+
+Status on 2026-05-17 while continuing from the remaining Array rows:
+
+- Fixed the `Array.prototype.reverse` high-index proxy trap-order failure:
+  - `DeletePropertyOrThrow` now performs the receiver's actual `[[Delete]]`
+    operation and throws only if it returns false.
+  - This removes the observable pre-delete `getOwnPropertyDescriptor` probe on
+    proxies; proxy delete invariants remain handled by the proxy delete path.
+- Replaced the direct-slot `Array.prototype.sort` implementation with a
+  generic spec-shaped path:
+  - collect elements through captured `length`, `HasProperty`, and `Get`;
+  - sort the collected list without writing to the receiver first, so comparator
+    throws leave the array in the collected-only side-effect state;
+  - call user comparators with JavaScript `undefined` as `this`;
+  - write sorted values back through strict `Set`, then delete the trailing
+    captured-index range through `DeletePropertyOrThrow`;
+  - route plain array-like receivers and primitive wrappers through the same
+    generic sort path instead of materializing and writing back a dense temp
+    array.
+- The previous 25-row Array manifest now passes completely.
+
+Focused gates:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_array_reverse_batch.txt --write-failures=temp/js43_array_reverse_after_delete_or_throw.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_array_failures_batch.txt --write-failures=temp/js43_array_failures_after_generic_sort.tsv
+```
+
+Results: reverse focused 1 / 1 passed; old Array failures 25 / 25 passed.
+
+Fresh full gate:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-only --write-failures=temp/js43_full_after_array_sort.tsv
+```
+
+Result: 33,700 / 34,127 fully passed, 425 failed, 2 non-fully-passing
+batch-unstable/slow rows, and 0 regressions versus the 33,580-row baseline.
+The full run reported 121 improvements. One RegExp generated-property test
+recovered in isolated retry after a batch worker signal 11.
+
+Current largest remaining clusters from
+`temp/js43_full_after_array_sort.tsv`:
+
+- `language/statements`: 137 failures, dominated by class/private fields,
+  switch/try lexical scoping, and try/destructuring completion semantics.
+- `built-ins/TypedArray`: 87 failures, especially `TypedArray.prototype.set`
+  and BigInt/toLocaleString/join/sort edges.
+- `language/expressions`: 57 failures, mostly class elements and class/private
+  method paths.
+- `built-ins/RegExp`: 54 failures, including lookbehind, named groups,
+  backreferences, and Unicode/dotAll behavior.
+- `built-ins/String`: 30 failures, including string wrapper descriptors,
+  locale/case conversion, and replace evaluation order.
+
+## 23. TypedArray Iterator Closeout And String Wrapper Follow-Up
+
+Status on 2026-05-17 while continuing the remaining js262 failures:
+
+- Closed the remaining TypedArray cluster from the latest focused manifest:
+  - `%ArrayIteratorPrototype%.next` mutations are now observable by array
+    iterators returned from `keys`, `values`, `entries`, and default array
+    iteration.
+  - `TypedArray` constructors and `TypedArray.from` now route array inputs
+    through the iterator protocol when `@@iterator` is present, so sparse array
+    holes become observable `undefined` values instead of dense-slot skips.
+  - Iterator prototype caches are reset by the Test262 batch reset path, so a
+    test that mutates an intrinsic iterator prototype cannot leak into the next
+    file in the same runner process.
+- Started reducing the next `built-ins/String` cluster:
+  - primitive string indexed access now rejects non-canonical array indices
+    such as `NaN`, `Infinity`, and `2^32 - 1`;
+  - `new String(value)` now creates a String exotic wrapper with a
+    non-writable, non-enumerable, non-configurable own `length`;
+  - dynamic `new String/Number/Boolean` constructor dispatch now creates the
+    correct wrapper object instead of a plain object with only the prototype;
+  - `String(array)` now observes the array's `toString` method before falling
+    back to the legacy join-shaped conversion.
+
+Focused gates:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_typedarray_last4_batch.txt --write-failures=temp/js43_typedarray_last4_after_cache_reset.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_typedarray_failures_batch.txt --write-failures=temp/js43_typedarray_after_iterator_cache_reset.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_string_failures_batch.txt --write-failures=temp/js43_string_after_tostring_index.tsv
+```
+
+Results: TypedArray last-four 4 / 4 passed; full TypedArray focused manifest
+89 / 89 passed; String focused manifest improved to 8 / 30 passed.
+
+Guard gates after the String `ToString(Array)` change:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_array_failures_batch.txt --write-failures=temp/js43_array_failures_after_string_tostring_guard_seq.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_typedarray_failures_batch.txt --write-failures=temp/js43_typedarray_after_string_tostring_guard_seq.tsv
+```
+
+Results: old Array failures 25 / 25 passed; TypedArray focused manifest
+89 / 89 passed.
+
+Runner note: the guard commands above must be run sequentially. A parallel
+attempt produced impossible `results=289/N` rows because the Test262 runner
+shares a temporary worker result channel.

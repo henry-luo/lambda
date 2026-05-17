@@ -6475,7 +6475,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 JsAstNode* a3 = a2 ? a2->next : NULL;
                 MIR_reg_t target_arg = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_null(mt);
                 MIR_reg_t args_arg = a2 ? jm_transpile_box_item(mt, a2) : jm_emit_null(mt);
-                MIR_reg_t newtarget_arg = a3 ? jm_transpile_box_item(mt, a3) : jm_emit_null(mt);
+                MIR_reg_t newtarget_arg = a3 ? jm_transpile_box_item(mt, a3) : target_arg;
                 return jm_call_3(mt, "js_reflect_construct", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, target_arg),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, args_arg),
@@ -6504,11 +6504,14 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 prop->name && prop->name->len == 3 && strncmp(prop->name->chars, "get", 3) == 0) {
                 JsAstNode* a1 = call->arguments;
                 JsAstNode* a2 = a1 ? a1->next : NULL;
+                JsAstNode* a3 = a2 ? a2->next : NULL;
                 MIR_reg_t obj_arg = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_null(mt);
                 MIR_reg_t key_arg = a2 ? jm_transpile_box_item(mt, a2) : jm_emit_null(mt);
-                return jm_call_2(mt, "js_reflect_get", MIR_T_I64,
+                MIR_reg_t recv_arg = a3 ? jm_transpile_box_item(mt, a3) : obj_arg;
+                return jm_call_3(mt, "js_reflect_get_with_receiver", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_arg),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key_arg));
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key_arg),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv_arg));
             }
             // Reflect.set(obj, key, value [, receiver])
             if (obj->name && obj->name->len == 7 && strncmp(obj->name->chars, "Reflect", 7) == 0 &&
@@ -6769,53 +6772,6 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 return jm_call_1(mt, "js_symbol_key_for", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
-            }
-            // v14: Promise.resolve(value)
-            if (obj->name && obj->name->len == 7 && strncmp(obj->name->chars, "Promise", 7) == 0 &&
-                prop->name && prop->name->len == 7 && strncmp(prop->name->chars, "resolve", 7) == 0) {
-                MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
-                return jm_call_1(mt, "js_promise_resolve", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
-            }
-            // v14: Promise.reject(reason)
-            if (obj->name && obj->name->len == 7 && strncmp(obj->name->chars, "Promise", 7) == 0 &&
-                prop->name && prop->name->len == 6 && strncmp(prop->name->chars, "reject", 6) == 0) {
-                MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
-                return jm_call_1(mt, "js_promise_reject", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
-            }
-            // v14: Promise.all(iterable)
-            if (obj->name && obj->name->len == 7 && strncmp(obj->name->chars, "Promise", 7) == 0 &&
-                prop->name && prop->name->len == 3 && strncmp(prop->name->chars, "all", 3) == 0) {
-                MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
-                return jm_call_1(mt, "js_promise_all", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
-            }
-            // v14: Promise.race(iterable)
-            if (obj->name && obj->name->len == 7 && strncmp(obj->name->chars, "Promise", 7) == 0 &&
-                prop->name && prop->name->len == 4 && strncmp(prop->name->chars, "race", 4) == 0) {
-                MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
-                return jm_call_1(mt, "js_promise_race", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
-            }
-            // v14: Promise.any(iterable)
-            if (obj->name && obj->name->len == 7 && strncmp(obj->name->chars, "Promise", 7) == 0 &&
-                prop->name && prop->name->len == 3 && strncmp(prop->name->chars, "any", 3) == 0) {
-                MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
-                return jm_call_1(mt, "js_promise_any", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
-            }
-            // v14: Promise.allSettled(iterable)
-            if (obj->name && obj->name->len == 7 && strncmp(obj->name->chars, "Promise", 7) == 0 &&
-                prop->name && prop->name->len == 10 && strncmp(prop->name->chars, "allSettled", 10) == 0) {
-                MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
-                return jm_call_1(mt, "js_promise_all_settled", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
-            }
-            // Phase 3: Promise.withResolvers()
-            if (obj->name && obj->name->len == 7 && strncmp(obj->name->chars, "Promise", 7) == 0 &&
-                prop->name && prop->name->len == 13 && strncmp(prop->name->chars, "withResolvers", 13) == 0) {
-                return jm_call_0(mt, "js_promise_with_resolvers", MIR_T_I64);
             }
         }
     }
