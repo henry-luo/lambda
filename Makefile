@@ -1976,7 +1976,7 @@ check-int-cast:
 		radiant/layout_form.cpp radiant/layout_list.cpp \
 		radiant/layout_counters.cpp \
 		radiant/grid_sizing.cpp radiant/grid_positioning.cpp \
-		radiant/grid_advanced.cpp radiant/grid_utils.cpp \
+		radiant/grid_utils.cpp \
 		radiant/intrinsic_sizing.cpp \
 		| grep -v '// INT_CAST_OK' \
 		| grep -v '^\s*//' \

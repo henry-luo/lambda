@@ -150,11 +150,6 @@ typedef struct GridContainerLayout : GridProp {
     bool owns_auto_columns;
 } GridContainerLayout;
 
-// Note: Grid item placement is stored directly in GridItemProp (elem->gi->computed_*)
-// GridItemPlacement struct was removed - use GridItemProp fields directly
-
-// Note: GridSizingState was removed as unused
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -179,8 +174,6 @@ int find_grid_line_by_name(GridContainerLayout* grid, const char* name, bool is_
 
 // Grid item collection and placement
 int collect_grid_items(GridContainerLayout* grid_layout, struct ViewBlock* container, struct ViewBlock*** items);
-void place_grid_items(GridContainerLayout* grid_layout, struct ViewBlock** items, int item_count);
-void auto_place_grid_item(GridContainerLayout* grid_layout, struct ViewBlock* item);
 
 // Grid sizing algorithm
 void determine_grid_size(GridContainerLayout* grid_layout);
@@ -194,36 +187,12 @@ void position_grid_items(GridContainerLayout* grid_layout, struct ViewBlock* con
 void align_grid_items(GridContainerLayout* grid_layout);
 void align_grid_item(struct ViewBlock* item, GridContainerLayout* grid_layout);
 
-// Utility functions
-bool is_valid_grid_item(struct ViewBlock* item);
-bool is_grid_item(struct ViewBlock* block);
-int resolve_grid_line_position(GridContainerLayout* grid_layout, int line_value, const char* line_name, bool is_row, bool is_end_line);
-
 // Grid template area parsing
 void parse_grid_template_areas(GridProp* grid_layout, const char* areas_string, ScratchArena* sa);
 void resolve_grid_template_areas(GridContainerLayout* grid_layout);
 
 // Grid content layout functions - now in layout_grid_multipass.cpp
 // See layout_grid_multipass.hpp for the new multi-pass API
-
-// Advanced grid features (Phase 6)
-// Minmax function support
-struct GridTrackSize* create_minmax_track_size(struct GridTrackSize* min_size, struct GridTrackSize* max_size);
-int resolve_minmax_track_size(struct GridTrackSize* track_size, int available_space, int min_content, int max_content);
-
-// Repeat function support
-struct GridTrackSize* create_repeat_track_size(int repeat_count, struct GridTrackSize** repeat_tracks, int track_count);
-struct GridTrackSize* create_auto_repeat_track_size(bool is_auto_fill, struct GridTrackSize** repeat_tracks, int track_count);
-void expand_repeat_tracks(GridTrackList* track_list, int available_space);
-
-// Enhanced auto-placement with dense packing
-void auto_place_grid_items_dense(GridContainerLayout* grid_layout);
-bool try_place_item_dense(GridContainerLayout* grid_layout, struct ViewBlock* item, int start_row, int start_col);
-
-// Track template parsing
-void parse_grid_template_tracks(GridTrackList* track_list, const char* template_string);
-void parse_minmax_function(const char* minmax_str, struct GridTrackSize** min_size, struct GridTrackSize** max_size);
-void parse_repeat_function(const char* repeat_str, struct GridTrackSize** result);
 
 #ifdef __cplusplus
 }
