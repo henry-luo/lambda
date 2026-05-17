@@ -1803,11 +1803,12 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
                 if (text[i] == '/') { last_slash = i; break; }
             }
             if (last_slash > 0) {
-                re->pattern = text + 1;
                 re->pattern_len = last_slash - 1;
+                re->pattern = name_pool_create_len(tp->name_pool, text + 1, re->pattern_len)->chars;
                 if (last_slash + 1 < text_len) {
-                    re->flags = text + last_slash + 1;
                     re->flags_len = text_len - last_slash - 1;
+                    re->flags = name_pool_create_len(tp->name_pool,
+                        text + last_slash + 1, re->flags_len)->chars;
                 }
             }
         }

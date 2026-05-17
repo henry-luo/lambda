@@ -46,6 +46,7 @@ for (let i = 0; i < args.length; i++) {
 Environment variables:
   LAMBDA_TEST_IDLE_TIMEOUT   Override idle timeout in seconds (default: auto-scaled by CPU count/load)
   LAMBDA_TEST_HEAVY_LOAD     Set to 1 to bias idle timeout upward for full-suite parallel runs
+  LAMBDA_UI_TEST_JOBS        Override UI automation parallelism in suite runs
   LAMBDA_USE_C2MIR           Set to 1 for legacy C2MIR JIT path`);
         process.exit(0);
     } else {
@@ -338,6 +339,12 @@ function runTest(testInfo) {
             if (baseName === 'test_input_roundtrip_gtest') {
                 testArgs.unshift('--gtest_filter=JsonTests.*');
             }
+            if (baseName === 'test_ui_automation_gtest') {
+                const uiJobs = process.env.LAMBDA_UI_TEST_JOBS || '';
+                if (uiJobs) {
+                    testArgs.push('--jobs', uiJobs);
+                }
+            }
         } else if (baseName === 'test_flex_standalone') {
             // No special args — output parsed manually
         } else {
@@ -488,7 +495,9 @@ function parseTestResults(baseName, jsonFile, timedOut) {
         if (Array.isArray(data.testsuites)) {
             for (const suite of data.testsuites) {
                 for (const tc of (suite.testsuite || [])) {
-                    if (tc.failures && tc.failures > 0) {
+                    const failureCount = Array.isArray(tc.failures) ?
+                        tc.failures.length : (tc.failures || 0);
+                    if (failureCount > 0) {
                         failedTests.push(`[${baseName}] ${suite.name}.${tc.name}`);
                     }
                 }
@@ -764,9 +773,15 @@ async function main() {
     // Display and save results
     if (!rawOutput) {
         const { totalFailed } = displayResults(config, results);
+        process.exitCode = totalFailed > 0 ? 1 : 0;
     } else {
         console.log('');
         console.log(`📁 Raw output mode - results saved to: ${TEST_OUTPUT_DIR}`);
+        let totalFailed = 0;
+        for (const entry of results.values()) {
+            totalFailed += entry.failed || 0;
+        }
+        process.exitCode = totalFailed > 0 ? 1 : 0;
     }
 }
 
