@@ -6,9 +6,9 @@
 #include "layout_mode.hpp"
 #include "layout_cache.hpp"
 #include "layout_pass.hpp"
+#include "layout_abs_children.hpp"
 
 #include "../lib/log.h"
-#include "../lib/strbuf.h"
 #include "../lib/tagged.hpp"
 #include <cmath>
 
@@ -20,9 +20,6 @@ bool has_main_axis_auto_margins(FlexLineInfo* line);
 void handle_main_axis_auto_margins(FlexContainerLayout* flex_layout, FlexLineInfo* line);
 bool has_auto_margins(ViewBlock* item);
 void apply_auto_margin_centering(LayoutContext* lycon, ViewBlock* flex_container);
-
-// External function for laying out absolute positioned children
-void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, BlockContext *pa_block, Linebox *pa_line);
 
 // External function for grid layout (from layout_grid_multipass.cpp)
 void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container);
@@ -51,332 +48,135 @@ void update_scroller(ViewBlock* block, float content_width, float content_height
 // External function from layout.cpp for whitespace detection
 extern bool is_only_whitespace(const char* str);
 
-// External function for printing view tree
-extern void print_view_block(ViewBlock* block, StrBuf* buf, int indent);
-
-// Helper function: Print view tree snapshot for debugging
-static void print_view_tree_snapshot(ViewBlock* container, const char* phase_name) {
-    log_info("=== VIEW TREE SNAPSHOT: %s ===", phase_name);
-    StrBuf* buf = strbuf_new_cap(2048);
-    print_view_block(container, buf, 0);
-    // limit snapshot output to avoid huge log writes in deeply nested trees
-    static const size_t MAX_SNAPSHOT_LEN = 64 * 1024;
-    if (buf->length > MAX_SNAPSHOT_LEN) {
-        buf->str[MAX_SNAPSHOT_LEN] = '\0';
-        buf->length = MAX_SNAPSHOT_LEN;
-    }
-    log_info("%s", buf->str);
-    log_info("=== END VIEW TREE SNAPSHOT ===");
-    strbuf_free(buf);
+static bool flex_layout_debug_checks_enabled() {
+    return false;
 }
 
-// Helper function: Lay out absolute positioned children within a flex container
-// These children are excluded from the flex algorithm but still need to be laid out
-static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* container) {
-    log_enter();
-    log_debug("=== LAYING OUT ABSOLUTE POSITIONED CHILDREN ===");
+static void layout_flex_abs_after_child(LayoutContext* lycon, ViewBlock* container,
+    AbsStaticContext* ctx, AbsChildLayoutState* state) {
+    (void)lycon;  (void)ctx;
+    ViewBlock* child_block = state->child_block;
+    if (!child_block || !child_block->position) return;
 
+    FlexProp* flex = container->embed ? container->embed->flex : nullptr;
+    int flex_direction = flex ? flex->direction : CSS_VALUE_ROW;
+    bool is_row = flex_direction == CSS_VALUE_ROW || flex_direction == CSS_VALUE_ROW_REVERSE;
+    bool is_reverse = flex_direction == CSS_VALUE_ROW_REVERSE ||
+                      flex_direction == CSS_VALUE_COLUMN_REVERSE;
+    int wrap_mode = flex ? flex->wrap : CSS_VALUE_NOWRAP;
+    bool is_wrap_reverse = wrap_mode == CSS_VALUE_WRAP_REVERSE;
+    LayoutContainingBlock cb = state->containing_block;
+    bool inline_container_position_finalized_later =
+        container->view_type == RDT_VIEW_INLINE_BLOCK;
+    bool container_position_finalized_later =
+        container->fi != nullptr || inline_container_position_finalized_later;
 
-
-    // Get flex direction from the container parameter directly (not lycon->flex_container!)
-    // This is critical for nested flex containers - lycon->flex_container points to the
-    // outer flex container, but we need the direction of the actual container being processed.
-    int flex_direction = CSS_VALUE_ROW;  // default
-    if (container->embed && container->embed->flex) {
-        flex_direction = container->embed->flex->direction;
-        log_debug("Container %s has flex-direction: %d", container->node_name(), flex_direction);
+    if (is_reverse) {
+        if (is_row && !child_block->position->has_left && !child_block->position->has_right) {
+            float base_x = inline_container_position_finalized_later ? 0.0f : cb.content_x;
+            float static_x = cb.content_width - child_block->width + base_x;
+            if (child_block->bound) static_x -= child_block->bound->margin.right;
+            child_block->x = static_x;
+            child_block->position->static_x_needs_parent_offset = container_position_finalized_later;
+        } else if (!is_row && !child_block->position->has_top && !child_block->position->has_bottom) {
+            float base_y = inline_container_position_finalized_later ? 0.0f : cb.content_y;
+            float static_y = cb.content_height - child_block->height + base_y;
+            if (child_block->bound) static_y -= child_block->bound->margin.bottom;
+            child_block->y = static_y;
+            child_block->position->static_y_needs_parent_offset = container_position_finalized_later;
+        }
+        return;
     }
 
-    DomNode* child = container->first_child;
-    while (child) {
-        if (child->is_element()) {
-            ViewBlock* child_block = lam::view_as_block(child->as_element());
+    bool adjust_x = !child_block->position->has_left && !child_block->position->has_right;
+    bool adjust_y = !child_block->position->has_top && !child_block->position->has_bottom;
+    if (!adjust_x && !adjust_y) return;
 
-            // Check if this child is absolute or fixed positioned
-            if (layout_view_is_abs_or_fixed(child_block)) {
+    int justify_content = flex ? flex->justify : CSS_VALUE_FLEX_START;
+    int align_items = flex ? flex->align_items : CSS_VALUE_STRETCH;
 
-                log_debug("Found absolute positioned child: %s", child->node_name());
+    float main_axis_size = is_row ? cb.content_width : cb.content_height;
+    float cross_axis_size = is_row ? cb.content_height : cb.content_width;
+    float item_main = is_row ? child_block->width : child_block->height;
+    float item_cross = is_row ? child_block->height : child_block->width;
 
-                // Save parent context
-                BlockContext pa_block = lycon->block;
-                Linebox pa_line = lycon->line;
+    float margin_left = 0.0f, margin_top = 0.0f, margin_right = 0.0f, margin_bottom = 0.0f;
+    if (child_block->bound) {
+        margin_left = child_block->bound->margin.left;
+        margin_top = child_block->bound->margin.top;
+        margin_right = child_block->bound->margin.right;
+        margin_bottom = child_block->bound->margin.bottom;
+    }
 
-                // Determine if we need reverse static position adjustment
-                bool is_row = (flex_direction == CSS_VALUE_ROW || flex_direction == CSS_VALUE_ROW_REVERSE);
-                bool is_reverse = (flex_direction == CSS_VALUE_ROW_REVERSE || flex_direction == CSS_VALUE_COLUMN_REVERSE);
-                bool needs_reverse_adjustment = is_reverse;
+    if ((is_row && adjust_x) || (!is_row && adjust_y)) {
+        float margin_start = is_row ? margin_left : margin_top;
+        float margin_end = is_row ? margin_right : margin_bottom;
+        float main_offset = margin_start;
+        if (justify_content == CSS_VALUE_CENTER) {
+            main_offset = (main_axis_size - item_main) / 2.0f;
+        } else if (justify_content == CSS_VALUE_FLEX_END || justify_content == CSS_VALUE_END) {
+            main_offset = main_axis_size - item_main - margin_end;
+        }
+        if (is_row) {
+            float base_x = inline_container_position_finalized_later ? 0.0f : cb.content_x;
+            child_block->x = base_x + main_offset;
+            child_block->position->static_x_needs_parent_offset = container_position_finalized_later;
+        } else {
+            float base_y = inline_container_position_finalized_later ? 0.0f : cb.content_y;
+            child_block->y = base_y + main_offset;
+            child_block->position->static_y_needs_parent_offset = container_position_finalized_later;
+        }
+    }
 
-                // Check for wrap-reverse which reverses the cross axis
-                int wrap_mode = CSS_VALUE_NOWRAP;
-                if (container->embed && container->embed->flex) {
-                    wrap_mode = container->embed->flex->wrap;
-                }
-                bool is_wrap_reverse = (wrap_mode == CSS_VALUE_WRAP_REVERSE);
-                LayoutContainingBlock cb = layout_containing_block_for_view(container);
-                bool inline_container_position_finalized_later =
-                    container->view_type == RDT_VIEW_INLINE_BLOCK;
-                bool container_position_finalized_later =
-                    container->fi != nullptr || inline_container_position_finalized_later;
-
-                // Set up lycon->block dimensions from the child's CSS
-                // This is needed because layout_abs_block expects given_width/given_height
-                // to be set in the lycon->block context
-                if (child_block->blk) {
-                    lycon->block.given_width = child_block->blk->given_width;
-                    lycon->block.given_height = child_block->blk->given_height;
-                    layout_resolve_percent_size_for_child(lycon, child_block, cb, true, "flex abs child");
-                } else {
-                    lycon->block.given_width = -1;
-                    lycon->block.given_height = -1;
-                }
-                // Save CSS-resolved dimensions before layout_abs_block, which may
-                // overwrite given_height/width with top+bottom / left+right inset values.
-                float abs_orig_given_width  = lycon->block.given_width;
-                float abs_orig_given_height = lycon->block.given_height;
-
-                // Lay out the absolute positioned block
-                layout_abs_block(lycon, child, child_block, &pa_block, &pa_line);
-
-                // CRITICAL: For flex containers with reverse direction, adjust the static
-                // position AFTER layout (when we know the item's size).
-                // Per CSS Flexbox spec section 4.1: the static position of an absolute element
-                // is where it would be if it were the only flex item in the flex container.
-                // For reverse containers, this is at the end of the container minus item size.
-                if (needs_reverse_adjustment && child_block->position) {
-                    if (is_row) {
-                        // row-reverse: adjust X if using static position (no left/right specified)
-                        if (!child_block->position->has_left && !child_block->position->has_right) {
-                            float base_x = inline_container_position_finalized_later ? 0.0f : cb.content_x;
-                            float static_x = cb.content_width - child_block->width + base_x;
-                            // For row-reverse, margin-right acts like margin-start (at the end)
-                            if (child_block->bound) {
-                                static_x -= child_block->bound->margin.right;
-                            }
-                            log_debug("row-reverse: adjusting static X from %.1f to %.1f (content_w=%.1f - item_w=%.1f + offset=%.1f)",
-                                      child_block->x, static_x, cb.content_width, child_block->width, cb.content_x);
-                            child_block->x = static_x;
-                            child_block->position->static_x_needs_parent_offset = container_position_finalized_later;
-                        }
-                    } else {
-                        // column-reverse: adjust Y if using static position (no top/bottom specified)
-                        if (!child_block->position->has_top && !child_block->position->has_bottom) {
-                            float base_y = inline_container_position_finalized_later ? 0.0f : cb.content_y;
-                            float static_y = cb.content_height - child_block->height + base_y;
-                            // For column-reverse, margin-bottom acts like margin-start (at the end)
-                            if (child_block->bound) {
-                                static_y -= child_block->bound->margin.bottom;
-                            }
-                            log_debug("column-reverse: adjusting static Y from %.1f to %.1f (content_h=%.1f - item_h=%.1f + offset=%.1f)",
-                                      child_block->y, static_y, cb.content_height, child_block->height, cb.content_y);
-                            child_block->y = static_y;
-                            child_block->position->static_y_needs_parent_offset = container_position_finalized_later;
-                        }
-                    }
-                }
-
-                // CRITICAL: Apply justify-content and align-items for static position
-                // Per CSS Flexbox spec section 4.1: "the static position of an absolutely-positioned
-                // child of a flex container is determined such that the child is positioned as if it
-                // were the sole flex item in the flex container"
-                // This means justify-content affects main axis static position and
-                // align-items affects cross axis static position.
-                // NOTE: Skip this for reverse layouts since the reverse adjustment above already
-                // positions the item correctly - flex-start in reverse means end of container.
-                // NOTE: Each axis is handled independently - if left/right is set, don't adjust x;
-                //       if top/bottom is set, don't adjust y.
-                if (!needs_reverse_adjustment && child_block->position) {
-                    bool adjust_x = !child_block->position->has_left && !child_block->position->has_right;
-                    bool adjust_y = !child_block->position->has_top && !child_block->position->has_bottom;
-
-                    if (adjust_x || adjust_y) {
-                        // Get flex container properties
-                        int justify_content = CSS_VALUE_FLEX_START;
-                        int align_items = CSS_VALUE_STRETCH;
-                        if (container->embed && container->embed->flex) {
-                            justify_content = container->embed->flex->justify;
-                            align_items = container->embed->flex->align_items;
-                        }
-
-                        // Determine main/cross axis dimensions
-                        float main_axis_size, cross_axis_size, item_main, item_cross;
-                        if (is_row) {
-                            main_axis_size = cb.content_width;
-                            cross_axis_size = cb.content_height;
-                            item_main = child_block->width;
-                            item_cross = child_block->height;
-                        } else {
-                            main_axis_size = cb.content_height;
-                            cross_axis_size = cb.content_width;
-                            item_main = child_block->height;
-                            item_cross = child_block->width;
-                        }
-
-                        // Get margins
-                        float margin_left = 0, margin_top = 0, margin_right = 0, margin_bottom = 0;
-                        if (child_block->bound) {
-                            margin_left = child_block->bound->margin.left;
-                            margin_top = child_block->bound->margin.top;
-                            margin_right = child_block->bound->margin.right;
-                            margin_bottom = child_block->bound->margin.bottom;
-                        }
-
-                        // Calculate main axis offset based on justify-content
-                        if ((is_row && adjust_x) || (!is_row && adjust_y)) {
-                            float main_offset = 0;
-                            // margin_start is the margin at the start of main axis
-                            // margin_end is the margin at the end of main axis
-                            float margin_start = is_row ? margin_left : margin_top;
-                            float margin_end = is_row ? margin_right : margin_bottom;
-
-                            switch (justify_content) {
-                                case CSS_VALUE_CENTER:
-                                    main_offset = (main_axis_size - item_main) / 2;
-                                    break;
-                                case CSS_VALUE_FLEX_END:
-                                case CSS_VALUE_END:
-                                    // Position at end minus item size minus end margin
-                                    main_offset = main_axis_size - item_main - margin_end;
-                                    break;
-                                case CSS_VALUE_SPACE_BETWEEN:
-                                case CSS_VALUE_SPACE_AROUND:
-                                case CSS_VALUE_SPACE_EVENLY:
-                                case CSS_VALUE_FLEX_START:
-                                case CSS_VALUE_START:
-                                default:
-                                    // Position at start plus start margin
-                                    main_offset = margin_start;
-                                    break;
-                            }
-
-                            if (is_row) {
-                                float base_x = inline_container_position_finalized_later ? 0.0f : cb.content_x;
-                                child_block->x = base_x + main_offset;
-                                child_block->position->static_x_needs_parent_offset = container_position_finalized_later;
-                            } else {
-                                float base_y = inline_container_position_finalized_later ? 0.0f : cb.content_y;
-                                child_block->y = base_y + main_offset;
-                                child_block->position->static_y_needs_parent_offset = container_position_finalized_later;
-                            }
-                        }
-
-                        // Calculate cross axis offset based on align-items
-                        // For wrap-reverse, the cross axis is flipped so flex-start means end
-                        if ((is_row && adjust_y) || (!is_row && adjust_x)) {
-                            float cross_offset = 0;
-
-                            // Check for align-self override on the item
-                            int item_align = align_items;  // default to container's align-items
-                            if (child_block->fi && child_block->fi->align_self != CSS_VALUE_AUTO &&
-                                child_block->fi->align_self != 0) {
-                                item_align = child_block->fi->align_self;
-                            }
-                            int effective_align = item_align;
-
-                            // For wrap-reverse, swap flex-start and flex-end meanings
-                            if (is_wrap_reverse) {
-                                if (item_align == CSS_VALUE_FLEX_START) {
-                                    effective_align = CSS_VALUE_FLEX_END;
-                                } else if (item_align == CSS_VALUE_FLEX_END) {
-                                    effective_align = CSS_VALUE_FLEX_START;
-                                } else if (item_align == CSS_VALUE_STRETCH) {
-                                    // Stretch starts from the "start" which is end for wrap-reverse
-                                    effective_align = CSS_VALUE_FLEX_END;
-                                }
-                            }
-
-                            // margin_cross_start is the margin at the start of cross axis
-                            // margin_cross_end is the margin at the end of cross axis
-                            float margin_cross_start = is_row ? margin_top : margin_left;
-                            float margin_cross_end = is_row ? margin_bottom : margin_right;
-
-                            switch (effective_align) {
-                                case CSS_VALUE_CENTER:
-                                    cross_offset = (cross_axis_size - item_cross) / 2;
-                                    break;
-                                case CSS_VALUE_FLEX_END:
-                                case CSS_VALUE_END:
-                                    // Position at end minus item size minus end margin
-                                    cross_offset = cross_axis_size - item_cross - margin_cross_end;
-                                    break;
-                                case CSS_VALUE_FLEX_START:
-                                case CSS_VALUE_START:
-                                case CSS_VALUE_STRETCH:
-                                default:
-                                    // Position at start plus start margin
-                                    cross_offset = margin_cross_start;
-                                    break;
-                            }
-
-                            if (is_row) {
-                                float base_y = inline_container_position_finalized_later ? 0.0f : cb.content_y;
-                                child_block->y = base_y + cross_offset;
-                                child_block->position->static_y_needs_parent_offset = container_position_finalized_later;
-                            } else {
-                                float base_x = inline_container_position_finalized_later ? 0.0f : cb.content_x;
-                                child_block->x = base_x + cross_offset;
-                                child_block->position->static_x_needs_parent_offset = container_position_finalized_later;
-                            }
-                        }
-
-                        log_debug("Abs child static position: justify=%d align=%d adjust_x=%d adjust_y=%d -> (%.1f, %.1f)",
-                                  justify_content, align_items, adjust_x, adjust_y, child_block->x, child_block->y);
-                    }
-                }
-
-                // Apply CSS aspect-ratio to compute the missing dimension.
-                // An inset-derived height (top+bottom) is NOT considered "explicit" here;
-                // abs_orig_given_height captures only the explicit CSS height: value.
-                if (child_block->specified_style) {
-                    float ar = 0.0f;
-                    CssDeclaration* ar_decl = style_tree_get_declaration(
-                        child_block->specified_style, CSS_PROPERTY_ASPECT_RATIO);
-                    if (ar_decl && ar_decl->value) {
-                        if (ar_decl->value->type == CSS_VALUE_TYPE_NUMBER) {
-                            ar = (float)ar_decl->value->data.number.value;
-                        } else if (ar_decl->value->type == CSS_VALUE_TYPE_LIST &&
-                                   ar_decl->value->data.list.count >= 2) {
-                            double num = 0, den = 0;
-                            bool got_num = false, got_den = false;
-                            for (int i = 0; i < ar_decl->value->data.list.count && !got_den; i++) {
-                                CssValue* v = ar_decl->value->data.list.values[i];
-                                if (v && v->type == CSS_VALUE_TYPE_NUMBER) {
-                                    if (!got_num) { num = v->data.number.value; got_num = true; }
-                                    else          { den = v->data.number.value; got_den = true; }
-                                }
-                            }
-                            if (got_num && got_den && den > 0) ar = (float)(num / den);
-                            else if (got_num)                   ar = (float)num;
-                        }
-                    }
-                    if (ar > 0.0f) {
-                        bool has_explicit_height = abs_orig_given_height > 0;
-                        bool has_explicit_width  = abs_orig_given_width  > 0;
-                        if (child_block->width > 0 && !has_explicit_height) {
-                            child_block->height = child_block->width / ar;
-                            log_debug("Absolute aspect-ratio: height = width(%.1f) / ar(%.3f) = %.1f",
-                                      child_block->width, ar, child_block->height);
-                        } else if (child_block->height > 0 && !has_explicit_width && child_block->width <= 0) {
-                            child_block->width = child_block->height * ar;
-                            log_debug("Absolute aspect-ratio: width = height(%.1f) * ar(%.3f) = %.1f",
-                                      child_block->height, ar, child_block->width);
-                        }
-                    }
-                }
-
-                // Restore parent context
-                lycon->block = pa_block;
-                lycon->line = pa_line;
-
-                log_debug("Absolute child laid out: %s at (%.1f, %.1f) size %.1fx%.1f",
-                         child->node_name(), child_block->x, child_block->y,
-                         child_block->width, child_block->height);
+    if ((is_row && adjust_y) || (!is_row && adjust_x)) {
+        int item_align = align_items;
+        if (child_block->fi && child_block->fi->align_self != CSS_VALUE_AUTO &&
+            child_block->fi->align_self != 0) {
+            item_align = child_block->fi->align_self;
+        }
+        int effective_align = item_align;
+        if (is_wrap_reverse) {
+            if (item_align == CSS_VALUE_FLEX_START || item_align == CSS_VALUE_STRETCH) {
+                effective_align = CSS_VALUE_FLEX_END;
+            } else if (item_align == CSS_VALUE_FLEX_END) {
+                effective_align = CSS_VALUE_FLEX_START;
             }
         }
-        child = child->next_sibling;
+
+        float margin_cross_start = is_row ? margin_top : margin_left;
+        float margin_cross_end = is_row ? margin_bottom : margin_right;
+        float cross_offset = margin_cross_start;
+        if (effective_align == CSS_VALUE_CENTER) {
+            cross_offset = (cross_axis_size - item_cross) / 2.0f;
+        } else if (effective_align == CSS_VALUE_FLEX_END || effective_align == CSS_VALUE_END) {
+            cross_offset = cross_axis_size - item_cross - margin_cross_end;
+        }
+
+        if (is_row) {
+            float base_y = inline_container_position_finalized_later ? 0.0f : cb.content_y;
+            child_block->y = base_y + cross_offset;
+            child_block->position->static_y_needs_parent_offset = container_position_finalized_later;
+        } else {
+            float base_x = inline_container_position_finalized_later ? 0.0f : cb.content_x;
+            child_block->x = base_x + cross_offset;
+            child_block->position->static_x_needs_parent_offset = container_position_finalized_later;
+        }
     }
 
-    log_debug("=== ABSOLUTE POSITIONED CHILDREN LAYOUT COMPLETE ===");
-    log_leave();
+    log_debug("[LAYOUT_ABS] flex static: justify=%d align=%d adjust_x=%d adjust_y=%d -> (%.1f, %.1f)",
+              justify_content, align_items, adjust_x, adjust_y, child_block->x, child_block->y);
+}
+
+// Helper function: Lay out absolute positioned children within a flex container.
+static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* container) {
+    AbsStaticContext ctx = {};
+    ctx.kind = ABS_STATIC_FLEX;
+    ctx.containing_block = layout_containing_block_for_view(container);
+    ctx.flex = lycon ? lycon->flex_container : nullptr;
+    ctx.resolve_percent_against_content_box = true;
+    ctx.log_context = "flex abs child";
+    ctx.after_child = layout_flex_abs_after_child;
+    layout_absolute_children_in_context(lycon, container, &ctx);
 }
 
 // Helper function: Validate coordinates for debugging (with depth limit)
@@ -1085,7 +885,9 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
         }
 
         // Validate nested flex coordinates
-        validate_flex_coordinates(flex_item, "After Nested Flex");
+        if (flex_layout_debug_checks_enabled()) {
+            validate_flex_coordinates(flex_item, "After Nested Flex");
+        }
 
         log_leave();
         log_info(">>> NESTED FLEX COMPLETE: item=%p", flex_item);
@@ -2471,9 +2273,9 @@ void layout_flex_content(LayoutContext* lycon, ViewBlock* block) {
     layout_flex_container_with_nested_content(lycon, block);
     log_info("=== PASS 2 COMPLETE ===");
 
-    // Print view tree and validate coordinates after PASS 2
-    print_view_tree_snapshot(block, "After PASS 2");
-    validate_flex_coordinates(block, "After PASS 2");
+    if (flex_layout_debug_checks_enabled()) {
+        validate_flex_coordinates(block, "After PASS 2");
+    }
 
     // PASS 3: Lay out absolute positioned children (excluded from flex algorithm)
     log_info("=== PASS 3: Laying out absolute positioned children ===");

@@ -8,6 +8,8 @@
 #include "layout_mode.hpp"
 #include "layout_cache.hpp"
 #include "layout_pass.hpp"
+#include "layout_abs_children.hpp"
+#include "layout_measure.hpp"
 #include "grid_baseline.hpp"
 #include "../lib/tagged.hpp"
 
@@ -24,7 +26,6 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
 void layout_flow_node(LayoutContext* lycon, DomNode* node);
 void line_init(LayoutContext* lycon, float left, float right);
 void line_break(LayoutContext* lycon);
-void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, BlockContext *pa_block, Linebox *pa_line);
 void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display);
 
 // Forward declarations for static functions
@@ -688,8 +689,8 @@ void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
     // Use unified intrinsic sizing API (same as flex layout)
     // This uses the shared font backend for accurate text measurement
     if (!has_explicit_width) {
-        IntrinsicSizes item_sizes = measure_element_intrinsic_widths(
-            lycon, lam::dom_require<DOM_NODE_ELEMENT>(item));
+        IntrinsicSizes item_sizes = layout_measure_intrinsic_widths(
+            lycon, lam::dom_require<DOM_NODE_ELEMENT>(item), "grid item intrinsic");
         *min_width = item_sizes.min_content;
         *max_width = item_sizes.max_content;
     }
@@ -1032,252 +1033,115 @@ static bool compute_grid_area_for_absolute(
     return true;
 }
 
-void layout_grid_absolute_children(LayoutContext* lycon, ViewBlock* container) {
-    log_enter();
-    log_debug("=== LAYING OUT ABSOLUTE POSITIONED CHILDREN for container=%s ===", container->node_name());
+static void layout_grid_abs_prepare_child(LayoutContext* lycon, ViewBlock* container,
+    AbsStaticContext* ctx, AbsChildLayoutState* state) {
+    (void)lycon;
+    state->has_grid_area = compute_grid_area_for_absolute(ctx->grid, container,
+        state->child_block, &state->grid_area_x, &state->grid_area_y,
+        &state->grid_area_width, &state->grid_area_height);
+    state->parent_line.left = state->containing_block.padding_x;
+    state->parent_block.advance_y = state->containing_block.padding_y;
+}
 
-    // Get grid layout for computing grid area containing blocks
-    GridContainerLayout* grid_layout = lycon->grid_container;
+static void layout_grid_abs_after_child(LayoutContext* lycon, ViewBlock* container,
+    AbsStaticContext* ctx, AbsChildLayoutState* state) {
+    (void)lycon;  (void)container;
+    ViewBlock* child_block = state->child_block;
+    if (!child_block || !child_block->position) return;
 
-    // For grid absolute positioning, the static position should be at the
-    // padding box edge (border offset), not the content box edge (border + padding).
-    LayoutContainingBlock cb = layout_containing_block_for_view(container);
-    log_debug("Grid absolute: padding_offset=(%f, %f), padding_size=(%f, %f)",
-              cb.padding_x, cb.padding_y, cb.padding_width, cb.padding_height);
+    LayoutContainingBlock cb = state->containing_block;
+    GridContainerLayout* grid_layout = ctx->grid;
 
-    DomNode* child = container->first_child;
-    int child_count = 0;
-    while (child) {
-        child_count++;
-        if (child->is_element()) {
-            ViewBlock* child_block = lam::view_require_block(child);
-            log_debug("Checking child %d: tag=%s, has_position=%d, position_type=%d",
-                      child_count, child->node_name(),
-                      child_block->position != nullptr,
-                      child_block->position ? child_block->position->position : -1);
+    if (state->has_grid_area) {
+        float old_x = child_block->x;
+        float old_y = child_block->y;
+        PositionProp* pos = child_block->position;
+        float new_x = old_x;
+        float new_y = old_y;
 
-            // Check if this child is absolute or fixed positioned
-            if (layout_view_is_abs_or_fixed(child_block)) {
-
-                log_debug("Found absolute positioned child: %s", child->node_name());
-
-                // Check if this absolute item has grid placement properties
-                float grid_area_x, grid_area_y, grid_area_width, grid_area_height;
-                bool has_grid_area = compute_grid_area_for_absolute(
-                    grid_layout, container, child_block,
-                    &grid_area_x, &grid_area_y, &grid_area_width, &grid_area_height
-                );
-
-                // Save parent context
-                BlockContext pa_block = lycon->block;
-                Linebox pa_line = lycon->line;
-
-                // For grid containers, static position should be at the padding box edge
-                // (where grid content starts), not at the content box edge.
-                // The pa_line.left and pa_block.advance_y include padding, so we need
-                // to subtract padding and only keep border offset for static position.
-                // This ensures absolute items with auto insets are placed at the padding edge.
-                pa_line.left = cb.padding_x;
-                pa_block.advance_y = cb.padding_y;
-
-                // Set up lycon->block dimensions from the child's CSS
-                if (child_block->blk) {
-                    lycon->block.given_width = child_block->blk->given_width;
-                    lycon->block.given_height = child_block->blk->given_height;
-                } else {
-                    lycon->block.given_width = -1;
-                    lycon->block.given_height = -1;
-                }
-                // Save CSS-resolved dimensions before layout_abs_block, which may
-                // overwrite given_height/width with top+bottom / left+right inset values.
-                // This lets us distinguish explicit CSS height/width from inset-derived ones.
-                float abs_orig_given_width  = lycon->block.given_width;
-                float abs_orig_given_height = lycon->block.given_height;
-
-                // Lay out the absolute positioned block
-                layout_abs_block(lycon, child, child_block, &pa_block, &pa_line);
-
-                // If item has grid area, adjust position relative to grid area
-                // The layout_abs_block uses the grid container as containing block,
-                // but we need to adjust for the grid area offset
-                if (has_grid_area) {
-                    // Position is now relative to grid container padding box
-                    // For grid-placed absolutes, need to adjust based on grid area
-                    log_debug("Adjusting absolute item position for grid area");
-
-                    // The insets (top/left/right/bottom) should be relative to grid area
-                    // layout_abs_block already computed position relative to container
-                    // We need to add grid area offset if item doesn't have explicit insets
-                    // Actually, for CSS Grid, the containing block IS the grid area
-
-                    // Recalculate position based on grid area as containing block
-                    // This requires reimplementing some of the absolute positioning logic
-                    // For now, just adjust the base position to start from grid area
-                    float old_x = child_block->x;
-                    float old_y = child_block->y;
-
-                    // Get container padding/border offset (already in grid_area coords)
-                    float cb_x = grid_area_x;
-                    float cb_y = grid_area_y;
-                    float cb_width = grid_area_width;
-                    float cb_height = grid_area_height;
-
-                    // Recompute position with grid area as containing block
-                    PositionProp* pos = child_block->position;
-                    float new_x = old_x, new_y = old_y;
-
-                    // Handle horizontal positioning
-                    if (pos->has_left) {
-                        new_x = cb_x + pos->left;
-                        if (child_block->bound && child_block->bound->margin.left > 0) {
-                            new_x += child_block->bound->margin.left;
-                        }
-                    } else if (pos->has_right) {
-                        new_x = cb_x + cb_width - pos->right - child_block->width;
-                        if (child_block->bound && child_block->bound->margin.right > 0) {
-                            new_x -= child_block->bound->margin.right;
-                        }
-                    } else {
-                        // auto positioning - use static position within grid area
-                        new_x = cb_x;
-                    }
-
-                    // Handle vertical positioning
-                    if (pos->has_top) {
-                        new_y = cb_y + pos->top;
-                        if (child_block->bound && child_block->bound->margin.top > 0) {
-                            new_y += child_block->bound->margin.top;
-                        }
-                    } else if (pos->has_bottom) {
-                        new_y = cb_y + cb_height - pos->bottom - child_block->height;
-                        if (child_block->bound && child_block->bound->margin.bottom > 0) {
-                            new_y -= child_block->bound->margin.bottom;
-                        }
-                    } else {
-                        // auto positioning - use static position within grid area
-                        new_y = cb_y;
-                    }
-
-                    // Handle percentage width/height relative to grid area
-                    if (pos->has_left && pos->has_right) {
-                        // Stretch to grid area (left to right)
-                        float margin_left = (child_block->bound) ? child_block->bound->margin.left : 0;
-                        float margin_right = (child_block->bound) ? child_block->bound->margin.right : 0;
-                        child_block->width = cb_width - pos->left - pos->right - margin_left - margin_right;
-                        new_x = cb_x + pos->left + margin_left;
-                    }
-
-                    if (pos->has_top && pos->has_bottom) {
-                        // Stretch to grid area (top to bottom)
-                        float margin_top = (child_block->bound) ? child_block->bound->margin.top : 0;
-                        float margin_bottom = (child_block->bound) ? child_block->bound->margin.bottom : 0;
-                        child_block->height = cb_height - pos->top - pos->bottom - margin_top - margin_bottom;
-                        new_y = cb_y + pos->top + margin_top;
-                    }
-
-                    child_block->x = new_x;
-                    child_block->y = new_y;
-
-                    log_debug("Grid area adjusted position: (%.1f, %.1f) -> (%.1f, %.1f)",
-                              old_x, old_y, new_x, new_y);
-                } else if (child_block->gi) {
-                    // No grid-area: item is positioned in the container's padding box.
-                    // Apply justify-self/align-self alignment when no explicit insets are set.
-                    PositionProp* pos = child_block->position;
-                    bool no_horiz = !pos->has_left && !pos->has_right;
-                    bool no_vert  = !pos->has_top  && !pos->has_bottom;
-
-                    float pb_w = cb.padding_width;
-                    float pb_h = cb.padding_height;
-                    float ml = child_block->bound ? child_block->bound->margin.left   : 0;
-                    float mr = child_block->bound ? child_block->bound->margin.right  : 0;
-                    float mt = child_block->bound ? child_block->bound->margin.top    : 0;
-                    float mb = child_block->bound ? child_block->bound->margin.bottom : 0;
-
-                    if (no_horiz) {
-                        int justify = radiant::resolve_justify_self(child_block->gi->justify_self,
-                            grid_layout ? grid_layout->justify_items : CSS_VALUE_STRETCH);
-                        float free_w = pb_w - child_block->width - ml - mr;
-                        float offset = radiant::compute_alignment_offset_simple(justify, free_w);
-                        if (offset != 0) {
-                            child_block->x += offset;
-                            log_debug("Absolute no-area: justify=%d free=%.0f offset=%.0f -> x=%.0f",
-                                      justify, free_w, offset, child_block->x);
-                        }
-                    }
-                    if (no_vert) {
-                        int align = radiant::resolve_align_self(child_block->gi->align_self_grid,
-                            grid_layout ? grid_layout->align_items : CSS_VALUE_STRETCH);
-                        float free_h = pb_h - child_block->height - mt - mb;
-                        float offset = radiant::compute_alignment_offset_simple(align, free_h);
-                        if (offset != 0) {
-                            child_block->y += offset;
-                            log_debug("Absolute no-area: align=%d free=%.0f offset=%.0f -> y=%.0f",
-                                      align, free_h, offset, child_block->y);
-                        }
-                    }
-                }
-
-                // Apply CSS aspect-ratio to compute the missing dimension.
-                // CSS Positioned Layout: aspect-ratio derives height from width (or vice versa).
-                // An inset-derived height (top+bottom) is NOT considered "explicit" for this purpose —
-                // aspect-ratio overrides it (e.g. test aspect_ratio_overrides_height_of_full_inset).
-                log_debug("Absolute aspect-ratio check: specified_style=%p, w=%.1f, h=%.1f",
-                          (void*)child_block->specified_style, child_block->width, child_block->height);
-                if (child_block->specified_style) {
-                    float ar = 0.0f;
-                    CssDeclaration* ar_decl = style_tree_get_declaration(
-                        child_block->specified_style, CSS_PROPERTY_ASPECT_RATIO);
-                    if (ar_decl && ar_decl->value) {
-                        if (ar_decl->value->type == CSS_VALUE_TYPE_NUMBER) {
-                            ar = (float)ar_decl->value->data.number.value;
-                        } else if (ar_decl->value->type == CSS_VALUE_TYPE_LIST &&
-                                   ar_decl->value->data.list.count >= 2) {
-                            double num = 0, den = 0;
-                            bool got_num = false, got_den = false;
-                            for (int i = 0; i < ar_decl->value->data.list.count && !got_den; i++) {
-                                CssValue* v = ar_decl->value->data.list.values[i];
-                                if (v && v->type == CSS_VALUE_TYPE_NUMBER) {
-                                    if (!got_num) { num = v->data.number.value; got_num = true; }
-                                    else          { den = v->data.number.value; got_den = true; }
-                                }
-                            }
-                            if (got_num && got_den && den > 0) ar = (float)(num / den);
-                            else if (got_num)                   ar = (float)num;
-                        }
-                    }
-                    if (ar > 0.0f) {
-                        // Use the pre-layout dimensions to detect explicit CSS properties.
-                        // calculate_absolute_position may have set given_height from top+bottom
-                        // insets; abs_orig_given_height captures only the explicit CSS value.
-                        bool has_explicit_height = abs_orig_given_height > 0;
-                        bool has_explicit_width  = abs_orig_given_width  > 0;
-                        if (child_block->width > 0 && !has_explicit_height) {
-                            // Width is definite (from left+right or explicit CSS width); derive height.
-                            child_block->height = child_block->width / ar;
-                            log_debug("Absolute aspect-ratio: height = width(%.1f) / ar(%.3f) = %.1f",
-                                      child_block->width, ar, child_block->height);
-                        } else if (child_block->height > 0 && !has_explicit_width && child_block->width <= 0) {
-                            // Height is definite (from top+bottom or explicit CSS height); derive width.
-                            child_block->width = child_block->height * ar;
-                            log_debug("Absolute aspect-ratio: width = height(%.1f) * ar(%.3f) = %.1f",
-                                      child_block->height, ar, child_block->width);
-                        }
-                    }
-                }
-
-                // Restore parent context
-                lycon->block = pa_block;
-                lycon->line = pa_line;
-
-                log_debug("Absolute child laid out: %s at (%.1f, %.1f) size %.1fx%.1f",
-                         child->node_name(), child_block->x, child_block->y,
-                         child_block->width, child_block->height);
+        if (pos->has_left) {
+            new_x = state->grid_area_x + pos->left;
+            if (child_block->bound && child_block->bound->margin.left > 0.0f) {
+                new_x += child_block->bound->margin.left;
             }
+        } else if (pos->has_right) {
+            new_x = state->grid_area_x + state->grid_area_width - pos->right - child_block->width;
+            if (child_block->bound && child_block->bound->margin.right > 0.0f) {
+                new_x -= child_block->bound->margin.right;
+            }
+        } else {
+            new_x = state->grid_area_x;
         }
-        child = child->next_sibling;
+
+        if (pos->has_top) {
+            new_y = state->grid_area_y + pos->top;
+            if (child_block->bound && child_block->bound->margin.top > 0.0f) {
+                new_y += child_block->bound->margin.top;
+            }
+        } else if (pos->has_bottom) {
+            new_y = state->grid_area_y + state->grid_area_height - pos->bottom - child_block->height;
+            if (child_block->bound && child_block->bound->margin.bottom > 0.0f) {
+                new_y -= child_block->bound->margin.bottom;
+            }
+        } else {
+            new_y = state->grid_area_y;
+        }
+
+        if (pos->has_left && pos->has_right) {
+            float margin_left = child_block->bound ? child_block->bound->margin.left : 0.0f;
+            float margin_right = child_block->bound ? child_block->bound->margin.right : 0.0f;
+            child_block->width = state->grid_area_width - pos->left - pos->right -
+                margin_left - margin_right;
+            new_x = state->grid_area_x + pos->left + margin_left;
+        }
+        if (pos->has_top && pos->has_bottom) {
+            float margin_top = child_block->bound ? child_block->bound->margin.top : 0.0f;
+            float margin_bottom = child_block->bound ? child_block->bound->margin.bottom : 0.0f;
+            child_block->height = state->grid_area_height - pos->top - pos->bottom -
+                margin_top - margin_bottom;
+            new_y = state->grid_area_y + pos->top + margin_top;
+        }
+
+        child_block->x = new_x;
+        child_block->y = new_y;
+        log_debug("[LAYOUT_ABS] grid area adjusted: (%.1f, %.1f) -> (%.1f, %.1f)",
+                  old_x, old_y, new_x, new_y);
+        return;
     }
 
-    log_debug("=== ABSOLUTE POSITIONED CHILDREN LAYOUT COMPLETE ===");
-    log_leave();
+    if (!child_block->gi) return;
+
+    PositionProp* pos = child_block->position;
+    bool no_horiz = !pos->has_left && !pos->has_right;
+    bool no_vert = !pos->has_top && !pos->has_bottom;
+    float ml = child_block->bound ? child_block->bound->margin.left : 0.0f;
+    float mr = child_block->bound ? child_block->bound->margin.right : 0.0f;
+    float mt = child_block->bound ? child_block->bound->margin.top : 0.0f;
+    float mb = child_block->bound ? child_block->bound->margin.bottom : 0.0f;
+
+    if (no_horiz) {
+        int justify = radiant::resolve_justify_self(child_block->gi->justify_self,
+            grid_layout ? grid_layout->justify_items : CSS_VALUE_STRETCH);
+        float free_w = cb.padding_width - child_block->width - ml - mr;
+        float offset = radiant::compute_alignment_offset_simple(justify, free_w);
+        if (offset != 0.0f) child_block->x += offset;
+    }
+    if (no_vert) {
+        int align = radiant::resolve_align_self(child_block->gi->align_self_grid,
+            grid_layout ? grid_layout->align_items : CSS_VALUE_STRETCH);
+        float free_h = cb.padding_height - child_block->height - mt - mb;
+        float offset = radiant::compute_alignment_offset_simple(align, free_h);
+        if (offset != 0.0f) child_block->y += offset;
+    }
+}
+
+void layout_grid_absolute_children(LayoutContext* lycon, ViewBlock* container) {
+    AbsStaticContext ctx = {};
+    ctx.kind = ABS_STATIC_GRID;
+    ctx.containing_block = layout_containing_block_for_view(container);
+    ctx.grid = lycon ? lycon->grid_container : nullptr;
+    ctx.log_context = "grid abs child";
+    ctx.prepare_child = layout_grid_abs_prepare_child;
+    ctx.after_child = layout_grid_abs_after_child;
+    layout_absolute_children_in_context(lycon, container, &ctx);
 }

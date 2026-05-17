@@ -2,6 +2,7 @@
 #include "layout_positioned.hpp"
 #include "available_space.hpp"
 #include "intrinsic_sizing.hpp"
+#include "layout_measure.hpp"
 #include "form_control.hpp"
 #include "../lib/tagged.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
@@ -9,10 +10,6 @@
 #include <stdlib.h>
 #include <cfloat>
 #include <cmath>
-#include <algorithm>
-
-using std::min;
-using std::max;
 
 static bool extract_aspect_ratio_number_for_positioned(const char* text, double* out_value) {
     if (!text || !out_value) return false;
@@ -868,8 +865,8 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         }
 
         // Measure intrinsic widths (returns border-box sizes including element's padding+border)
-        IntrinsicSizes intrinsic = measure_element_intrinsic_widths(
-            lycon, lam::dom_require<DOM_NODE_ELEMENT>(block));
+        IntrinsicSizes intrinsic = layout_measure_intrinsic_widths(
+            lycon, lam::dom_require<DOM_NODE_ELEMENT>(block), "abspos shrink-to-fit");
         float preferred_minimum = intrinsic.min_content;  // min-content width (border-box)
         float preferred = intrinsic.max_content;          // max-content width (border-box)
 

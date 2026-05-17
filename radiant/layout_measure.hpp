@@ -2,6 +2,21 @@
 
 #include "intrinsic_sizing.hpp"
 
+typedef struct IntrinsicSize {
+    float min_width;
+    float max_width;
+    float min_height;
+    float max_height;
+    bool has_baseline;
+    float first_baseline;
+    float last_baseline;
+} IntrinsicSize;
+
+IntrinsicSize layout_measure_intrinsic(LayoutContext* lycon, DomNode* node,
+    AvailableSpace space);
+IntrinsicSize layout_measure_replaced(ViewBlock* block, AvailableSpace space);
+IntrinsicSize layout_measure_form_control(ViewBlock* block, AvailableSpace space);
+
 IntrinsicSizes layout_measure_intrinsic_widths(LayoutContext* lycon, DomElement* element,
     const char* log_context = nullptr, bool content_only = false);
 

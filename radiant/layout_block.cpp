@@ -10,6 +10,7 @@
 #include "layout_counters.hpp"
 #include "layout_list.hpp"
 #include "layout_pass.hpp"
+#include "layout_measure.hpp"
 #include "layout_table.hpp"
 #include "grid.hpp"
 #include "form_control.hpp"
@@ -2539,7 +2540,8 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
         float available_width = block->width;
         IntrinsicSizes intrinsic = {0, 0};
         if (block->is_element()) {
-            intrinsic = measure_element_intrinsic_widths(lycon, lam::dom_require<DOM_NODE_ELEMENT>(block));
+            intrinsic = layout_measure_intrinsic_widths(
+                lycon, lam::dom_require<DOM_NODE_ELEMENT>(block), "block max-content width");
         }
         float shrink_to_fit_width = min(max(intrinsic.min_content, available_width),
                                         intrinsic.max_content);
@@ -4732,7 +4734,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 float min_required = 0;
                 bool should_step_down = false;
                 if (has_rigid_min_width && block->is_element()) {
-                    IntrinsicSizes isizes = measure_element_intrinsic_widths(lycon, lam::dom_require<DOM_NODE_ELEMENT>(block));
+                    IntrinsicSizes isizes = layout_measure_intrinsic_widths(
+                        lycon, lam::dom_require<DOM_NODE_ELEMENT>(block), "block rigid min width");
                     min_required = isizes.min_content;
                     // Add border/padding (min_content is content-box width)
                     if (block->bound) {
