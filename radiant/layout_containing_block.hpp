@@ -36,3 +36,5 @@ LayoutContainingBlock layout_absolute_containing_block(LayoutContext* lycon, Vie
 
 void layout_resolve_percent_size_for_child(LayoutContext* lycon, ViewBlock* child,
     LayoutContainingBlock cb, bool use_content_box, const char* log_context);
+void layout_resolve_percent_offsets_for_child(ViewBlock* child,
+    LayoutContainingBlock cb, const char* log_context);

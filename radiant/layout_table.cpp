@@ -6461,7 +6461,8 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             // The caption's min-content width determines the minimum table width
             DomElement* caption_elem = caption->as_element();
             if (caption_elem) {
-                IntrinsicSizes caption_sizes = measure_element_intrinsic_widths(lycon, caption_elem);
+                IntrinsicSizes caption_sizes = layout_measure_intrinsic_widths(
+                    lycon, caption_elem, "table caption");
                 caption_width_contribution = ceilf(caption_sizes.min_content);
                 // Apply min/max-width constraints to auto-width caption
                 caption_width_contribution = adjust_min_max_width(caption, caption_width_contribution);

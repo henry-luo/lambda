@@ -6,6 +6,8 @@
 #include "available_space.hpp"
 #include "intrinsic_sizing.hpp"
 #include "layout_alignment.hpp"
+#include "layout_axis.hpp"
+#include "layout_measure.hpp"
 extern "C" {
 #include <stdlib.h>
 #include <string.h>
@@ -644,7 +646,8 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                                 // Skip display:none and absolute/hidden items
                                 if (!item || should_skip_flex_item(item)) continue;
                                 DomElement* item_elem = lam::dom_require<DOM_NODE_ELEMENT>(item);
-                                IntrinsicSizes item_sizes = measure_element_intrinsic_widths(lycon, item_elem);
+                                IntrinsicSizes item_sizes = layout_measure_intrinsic_widths(
+                                    lycon, item_elem, "flex item intrinsic");
                                 item_width = item_sizes.max_content;
                                 // Flex container intrinsic main size uses each
                                 // flex item's outer size contribution.
@@ -681,7 +684,10 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                                 while (out_pos > 0 && normalized[out_pos - 1] == ' ') out_pos--;
                                 normalized[out_pos] = '\0';
                                 if (out_pos > 0) {
-                                    TextIntrinsicWidths tw = measure_text_intrinsic_widths(lycon, normalized, out_pos);
+                                    TextIntrinsicWidths tw = layout_measure_text_intrinsic_widths(
+                                        lycon, normalized, out_pos, CSS_VALUE_NONE, CSS_VALUE_NONE,
+                                        CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NORMAL,
+                                        "flex anonymous text");
                                     item_width = tw.max_content;
                                     child_count++;
                                 } else {
@@ -972,8 +978,9 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                         // Form control (including <button>): use form intrinsic width
                         item_width = item->form->intrinsic_width;
                         if (item_width <= 0 && item->tag() == HTM_TAG_BUTTON && flex_layout && flex_layout->lycon) {
-                            IntrinsicSizes sizes = measure_element_intrinsic_widths(
-                                flex_layout->lycon, lam::dom_require<DOM_NODE_ELEMENT>(item), true);
+                            IntrinsicSizes sizes = layout_measure_intrinsic_widths(
+                                flex_layout->lycon, lam::dom_require<DOM_NODE_ELEMENT>(item),
+                                "flex button intrinsic", true);
                             item_width = sizes.max_content;
                             item->form->intrinsic_width = item_width;
                         }
@@ -1074,8 +1081,10 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                         // Only measure if there's non-whitespace content
                         if (out_pos > 0) {
                             // Measure normalized text width using intrinsic sizing
-                            TextIntrinsicWidths text_widths = measure_text_intrinsic_widths(
-                                lycon, normalized_buffer, out_pos);
+                            TextIntrinsicWidths text_widths = layout_measure_text_intrinsic_widths(
+                                lycon, normalized_buffer, out_pos, CSS_VALUE_NONE, CSS_VALUE_NONE,
+                                CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NORMAL,
+                                "flex shrink-to-fit text");
                             item_width = text_widths.max_content;
                             flex_item_count++;
                             log_debug("SHRINK-TO-FIT RECALC: text item width=%.1f, normalized_len=%zu, text='%.30s...'",
@@ -2610,8 +2619,9 @@ float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) 
 
         // <button> elements have flow children — measure content if intrinsic size is 0
         if (basis <= 0 && item->tag() == HTM_TAG_BUTTON && flex_layout && flex_layout->lycon) {
-            IntrinsicSizes sizes = measure_element_intrinsic_widths(
-                flex_layout->lycon, lam::dom_require<DOM_NODE_ELEMENT>(item), true);
+            IntrinsicSizes sizes = layout_measure_intrinsic_widths(
+                flex_layout->lycon, lam::dom_require<DOM_NODE_ELEMENT>(item),
+                "flex form basis", true);
             if (is_horizontal) {
                 basis = sizes.max_content;
                 item->form->intrinsic_width = basis;
@@ -5301,22 +5311,8 @@ float get_content_width(ViewBlock* item) {
 }
 
 float get_content_height(ViewBlock* item) {
-    if (!item->bound) {
-        return item->height;
-    }
-
-    // CRITICAL WORKAROUND for missing box-sizing: border-box implementation
-    BoxMetrics box = layout_box_metrics(item);
-
-    // HACK: For flex items with padding, assume box-sizing: border-box was intended
-    if (box.pad_border_v > 0) {
-        float intended_border_box_height = item->height - box.pad_border_v;  // 120 - 20 = 100
-        float content_height = intended_border_box_height - box.pad_border_v;  // 100 - 20 = 80
-        return fmaxf(content_height, 0);
-    }
-
-    // No padding/border: use height as-is
-    return item->height;
+    float border_box_height = get_border_box_height(item);
+    return layout_content_height_from_border_box(item, border_box_height);
 }
 
 float get_border_offset_left(ViewBlock* item) {
@@ -5334,7 +5330,7 @@ float get_main_axis_size(ViewElement* item, FlexContainerLayout* flex_layout) {
     // Returns the BORDER-BOX size of the item, WITHOUT margins
     // Margins are handled separately in free space and positioning calculations
     // This matches CSS Flexbox spec: flex-grow/shrink operates on border-box sizes
-    float base_size = is_main_axis_horizontal(flex_layout) ? get_border_box_width(item) : get_border_box_height(item);
+    float base_size = layout_axis_size(item, flex_main_axis(flex_layout));
     return base_size;
 }
 
@@ -5575,23 +5571,14 @@ void set_main_axis_size(ViewElement* item, float size, FlexContainerLayout* flex
     // We should store this directly to match browser behavior
 
 
-    if (is_main_axis_horizontal(flex_layout)) {
-        log_debug("set_main_axis_size: item=%p (%s), width %.1f -> %.1f",
-                  item, item->node_name(), item->width, size);
-        item->width = size;
-    } else {
-        log_debug("set_main_axis_size: item=%p (%s), height %.1f -> %.1f",
-                  item, item->node_name(), item->height, size);
-        item->height = size;
-    }
+    LayoutAxis axis = flex_main_axis(flex_layout);
+    log_debug("set_main_axis_size: item=%p (%s), axis=%d %.1f -> %.1f",
+              item, item->node_name(), axis, layout_axis_size(item, axis), size);
+    layout_axis_set_size(item, axis, size);
 }
 
 void set_cross_axis_size(ViewElement* item, float size, FlexContainerLayout* flex_layout) {
-    if (is_main_axis_horizontal(flex_layout)) {
-        item->height = size;
-    } else {
-        item->width = size;
-    }
+    layout_axis_set_size(item, flex_cross_axis(flex_layout), size);
 }
 
 // Calculate gap space for items or lines
@@ -6109,8 +6096,10 @@ void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContainerLayou
                                     if (text && text[0]) {
                                         size_t text_len = strlen(text);
                                         // Check if text would wrap at this width
-                                        TextIntrinsicWidths tw = measure_text_intrinsic_widths(
-                                            lycon, text, text_len);
+                                        TextIntrinsicWidths tw = layout_measure_text_intrinsic_widths(
+                                            lycon, text, text_len, CSS_VALUE_NONE, CSS_VALUE_NONE,
+                                            CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NORMAL,
+                                            "flex item wrapping text");
                                         if (tw.max_content > item_content_width && tw.min_content > 0) {
                                             // Text wraps: compute height at constrained width
                                             // Resolve CSS line-height by walking ancestor chain

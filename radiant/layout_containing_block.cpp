@@ -111,3 +111,32 @@ void layout_resolve_percent_size_for_child(LayoutContext* lycon, ViewBlock* chil
         child->blk->given_height = height;
     }
 }
+
+void layout_resolve_percent_offsets_for_child(ViewBlock* child,
+    LayoutContainingBlock cb, const char* log_context) {
+    if (!child || !child->position) return;
+
+    PositionProp* pos = child->position;
+    const char* context = log_context ? log_context : "positioned child";
+
+    if (pos->has_left && !isnan(pos->left_percent)) {
+        pos->left = pos->left_percent * cb.padding_width / 100.0f;
+        log_debug("[LAYOUT_CB] %s left %.1f%% of %.1f = %.1f",
+                  context, pos->left_percent, cb.padding_width, pos->left);
+    }
+    if (pos->has_right && !isnan(pos->right_percent)) {
+        pos->right = pos->right_percent * cb.padding_width / 100.0f;
+        log_debug("[LAYOUT_CB] %s right %.1f%% of %.1f = %.1f",
+                  context, pos->right_percent, cb.padding_width, pos->right);
+    }
+    if (pos->has_top && !isnan(pos->top_percent)) {
+        pos->top = pos->top_percent * cb.padding_height / 100.0f;
+        log_debug("[LAYOUT_CB] %s top %.1f%% of %.1f = %.1f",
+                  context, pos->top_percent, cb.padding_height, pos->top);
+    }
+    if (pos->has_bottom && !isnan(pos->bottom_percent)) {
+        pos->bottom = pos->bottom_percent * cb.padding_height / 100.0f;
+        log_debug("[LAYOUT_CB] %s bottom %.1f%% of %.1f = %.1f",
+                  context, pos->bottom_percent, cb.padding_height, pos->bottom);
+    }
+}

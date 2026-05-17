@@ -2,6 +2,7 @@
 #include "layout_positioned.hpp"
 #include "available_space.hpp"
 #include "intrinsic_sizing.hpp"
+#include "layout_measure.hpp"
 #include "form_control.hpp"
 #include "../lib/tagged.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
@@ -9,10 +10,6 @@
 #include <stdlib.h>
 #include <cfloat>
 #include <cmath>
-#include <algorithm>
-
-using std::min;
-using std::max;
 
 static bool extract_aspect_ratio_number_for_positioned(const char* text, double* out_value) {
     if (!text || !out_value) return false;
@@ -685,25 +682,9 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     log_debug("containing block padding box: (%.0f, %.0f) size (%.0f, %.0f), border_offset: (%f, %f)",
               cb_x, cb_y, cb_width, cb_height, border_offset_x, border_offset_y);
 
-    // re-resolve percentage position values against the actual containing block
-    // during CSS resolution, percentages were resolved against the wrong reference (parent at resolution time)
-    // for absolute positioned elements, percentages are relative to the containing block's padding box
-    if (block->position->has_left && !isnan(block->position->left_percent)) {
-        block->position->left = block->position->left_percent * cb_width / 100.0f;
-        log_debug("[ABS POS] re-resolved left: %.1f%% of %.1f = %.1f", block->position->left_percent, cb_width, block->position->left);
-    }
-    if (block->position->has_right && !isnan(block->position->right_percent)) {
-        block->position->right = block->position->right_percent * cb_width / 100.0f;
-        log_debug("[ABS POS] re-resolved right: %.1f%% of %.1f = %.1f", block->position->right_percent, cb_width, block->position->right);
-    }
-    if (block->position->has_top && !isnan(block->position->top_percent)) {
-        block->position->top = block->position->top_percent * cb_height / 100.0f;
-        log_debug("[ABS POS] re-resolved top: %.1f%% of %.1f = %.1f", block->position->top_percent, cb_height, block->position->top);
-    }
-    if (block->position->has_bottom && !isnan(block->position->bottom_percent)) {
-        block->position->bottom = block->position->bottom_percent * cb_height / 100.0f;
-        log_debug("[ABS POS] re-resolved bottom: %.1f%% of %.1f = %.1f", block->position->bottom_percent, cb_height, block->position->bottom);
-    }
+    // re-resolve percentage position values against the actual containing block.
+    // for absolute positioned elements, percentages are relative to the padding box.
+    layout_resolve_percent_offsets_for_child(block, cb, "abspos child");
 
     // re-resolve percentage width/height against the actual containing block
     layout_resolve_percent_size_for_child(lycon, block, cb, false, "abspos child");
@@ -868,8 +849,8 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         }
 
         // Measure intrinsic widths (returns border-box sizes including element's padding+border)
-        IntrinsicSizes intrinsic = measure_element_intrinsic_widths(
-            lycon, lam::dom_require<DOM_NODE_ELEMENT>(block));
+        IntrinsicSizes intrinsic = layout_measure_intrinsic_widths(
+            lycon, lam::dom_require<DOM_NODE_ELEMENT>(block), "abspos shrink-to-fit");
         float preferred_minimum = intrinsic.min_content;  // min-content width (border-box)
         float preferred = intrinsic.max_content;          // max-content width (border-box)
 
