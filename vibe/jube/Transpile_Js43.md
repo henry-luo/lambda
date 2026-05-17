@@ -1438,3 +1438,325 @@ Remaining String rows in this manifest:
   supplementary-plane case pairs, and final-sigma context. The current
   `fn_lower`/`fn_upper` path is still ASCII-oriented, so this should be handled
   as a Unicode case-mapping kernel rather than a narrow per-test patch.
+
+## 25. Unicode String Case-Mapping Follow-Up
+
+Status on 2026-05-17 while continuing the remaining js262 failures:
+
+- Replaced the JS `String.prototype.toLowerCase/toUpperCase` dispatch from the
+  Lambda ASCII-oriented `fn_lower`/`fn_upper` helpers with a JS-specific Unicode
+  case-mapping path.
+- Added UTF-8 code point traversal for string case conversion:
+  - simple Unicode case pairs now use `utf8proc_tolower/toupper`;
+  - supplementary-plane case pairs now survive the conversion path;
+  - invalid UTF-8 bytes are copied through unchanged.
+- Added full-case expansion support using utf8proc metadata and decomposition:
+  - expansion rows such as `ß -> SS`, ligatures, Armenian ligatures, and Greek
+    decomposed upper-case mappings now go through the JS string mapper;
+  - lower-case `İ -> i + combining dot` is handled without normalizing the whole
+    surrounding string.
+- Added the language-insensitive final-sigma context rule:
+  - Greek capital sigma now lowercases to final sigma only when preceded by a
+    cased character and not followed by a cased character after case-ignorable
+    code points.
+
+Focused gates:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_string_failures_batch.txt --write-failures=temp/js43_string_after_upper_iota_split.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_array_failures_batch.txt --write-failures=temp/js43_array_after_unicode_case_guard.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_typedarray_failures_batch.txt --write-failures=temp/js43_typedarray_after_unicode_case_guard.tsv
+```
+
+Results at the first Unicode checkpoint: String focused manifest improved from
+17 / 30 at the previous checkpoint to 27 / 30 passed. Old Array failures
+remained 25 / 25 passed, and TypedArray focused manifest remained 89 / 89
+passed.
+
+Follow-up on the same cluster:
+
+- Added the missing Unicode SpecialCasing uppercase expansions that utf8proc's
+  simple mapper and decomposition path do not expose directly:
+  - `ß -> SS`;
+  - Greek ypogegrammeni/prosgegrammeni full uppercase mappings, including the
+    U+1F80..U+1FAF ranges and the U+1FB2/U+1FB3/U+1FB4/U+1FB7,
+    U+1FC2/U+1FC3/U+1FC4/U+1FC7, and
+    U+1FF2/U+1FF3/U+1FF4/U+1FF7 singletons.
+- This closed the remaining two Unicode uppercase rows and left only the RegExp
+  backreference/substitution case in the 30-row String manifest.
+
+Focused gate:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_string_failures_batch.txt --write-failures=temp/js43_string_after_greek_upper_table.tsv
+```
+
+Result: String focused manifest improved to 29 / 30 passed.
+
+## 26. RegExp Backreference Capture Selection Follow-Up
+
+Status on 2026-05-17 while continuing the remaining js262 failures:
+
+- Fixed the remaining `String.prototype.replace` row by repairing numeric
+  backreference execution in the RE2 wrapper.
+- The previous two-pass rewrite accepted the first widened RE2 match for
+  patterns like `^(a+)\1*,\1+$`. RE2 could choose a shorter referenced capture
+  than JavaScript's greedy backtracking semantics, so `$1` became `"a"` instead
+  of the expected `"aaaaa"`.
+- For regexes whose numeric backrefs all target the same group, the wrapper now
+  enumerates candidate referenced captures from longest to shortest, checks the
+  candidate against the original capture atom, literalizes both the referenced
+  capture and its synthetic backref groups, then reruns the refined pattern.
+  This keeps the fix at the RegExp semantic layer instead of special-casing
+  String replacement.
+
+Focused gates:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_string_failures_batch.txt --write-failures=temp/js43_string_after_backref_retry.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_array_failures_batch.txt --write-failures=temp/js43_array_after_backref_retry_guard.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_typedarray_failures_batch.txt --write-failures=temp/js43_typedarray_after_backref_retry_guard.tsv
+```
+
+Results: String focused manifest now passes completely at 30 / 30. Old Array
+failures remain 25 / 25 passed, and TypedArray focused manifest remains 89 / 89
+passed.
+
+## 27. RegExp Decimal Backrefs, Indices, And Dot Atoms
+
+Status on 2026-05-17 while continuing the remaining js262 failures:
+
+- Fixed multi-digit numeric backreference scanning in the RE2 wrapper:
+  - `\10` is now consumed as capture 10 when that capture exists, instead of
+    being rewritten as `\1` followed by literal `0`;
+  - the focused Sputnik rows `S15.10.2.11_A1_T8` and
+    `S15.10.2.11_A1_T9` now pass.
+- Fixed `RegExp.prototype.exec` visible index and `lastIndex` conversion for
+  non-ASCII subjects:
+  - JavaScript reports UTF-16 code-unit offsets regardless of the `u` flag;
+  - non-`u` regexes now convert `lastIndex`, match end, and `result.index`
+    through the same UTF-16 index helpers used by Unicode-mode regexes;
+  - this closes `S15.10.2.7_A2_T1`, where a UTF-8 byte offset `9` was reported
+    instead of code-unit offset `5`.
+- Fixed non-`u` dot atom matching for supplementary-plane characters:
+  - non-Unicode regex dot patterns now use the existing UTF-16-expanded subject
+    path, so a supplementary-plane code point is two code units and is not
+    matched by a single `.`;
+  - both `dotall/with-dotall.js` and `dotall/without-dotall.js` now pass.
+
+Focused gates:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_regexp_legacy_core_batch.txt --write-failures=temp/js43_regexp_legacy_core_after_dot_and_indices.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_regexp_dotall_batch.txt --write-failures=temp/js43_regexp_dotall_after_dot_and_indices.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_string_failures_batch.txt --write-failures=temp/js43_string_after_regexp_guard.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_array_failures_batch.txt --write-failures=temp/js43_array_after_regexp_guard.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_typedarray_failures_batch.txt --write-failures=temp/js43_typedarray_after_regexp_guard.tsv
+```
+
+Results: RegExp legacy core moved from 0 / 7 in the older full manifest to
+3 / 7 in the focused batch. RegExp dotAll is 2 / 2. String remains 30 / 30,
+old Array remains 25 / 25, and TypedArray remains 89 / 89.
+
+Remaining rows in the RegExp legacy-core focused batch:
+
+- `S15.10.2.5_A1_T4`: quantified capture reset semantics differ from RE2;
+- `S15.10.2.8_A1_T2`, `S15.10.2.8_A2_T1`,
+  `S15.10.2.8_A3_T15`: lookahead semantics still need a proper zero-width
+  assertion/capture implementation instead of the current consume-and-trim
+  rewrite.
+
+## 28. RegExp Capture Result Ceiling And Positive Lookahead Commit
+
+Status on 2026-05-17 while continuing the remaining js262 failures:
+
+- Lifted the RegExp capture extraction ceiling from the old static `$1..$9`
+  era limit to `JS_REGEX_MAX_GROUPS = 256`.
+  - The runtime `exec`, `test`, `replace`, `match`, and `split` paths now size
+    their temporary capture arrays from the same shared cap.
+  - This closes the legacy stress row `S15.10.2.8_A3_T15`, which expects a
+    result array with 200 nested captures instead of truncating near 16.
+- Fixed leading positive lookahead with backreferences.
+  - The wrapper had been absorbing `(?=Y)` as `(Y)` and then allowing the
+    backreference retry pass to choose a shorter capture than JavaScript's
+    committed first lookahead match.
+  - Leading positive lookaheads that participate in numeric backreferences now
+    get a post-filter requiring the absorbed assertion to equal the assertion's
+    first anchored match at that position. If an unanchored candidate is
+    rejected by that post-filter, the wrapper advances and retries the next
+    candidate.
+  - This closes `S15.10.2.8_A1_T2` without regressing the older passing
+    positive-lookahead rows.
+
+Focused gates:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_regexp_legacy_core_batch.txt --write-failures=temp/js43_regexp_legacy_core_after_capture_and_pos_lookahead.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_regexp_lookahead_guard_batch.txt --write-failures=temp/js43_regexp_lookahead_guard_after_assert_tight.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_string_failures_batch.txt --write-failures=temp/js43_string_after_lookahead_guard_sequential.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_array_failures_batch.txt --write-failures=temp/js43_array_after_lookahead_guard_sequential.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_typedarray_failures_batch.txt --write-failures=temp/js43_typedarray_after_lookahead_guard.tsv
+```
+
+Results: RegExp legacy core is now 5 / 7. The lookahead guard is 7 / 8, with
+only `S15.10.2.8_A2_T1` still failing. String remains 30 / 30, old Array
+remains 25 / 25, and TypedArray remains 89 / 89.
+
+Remaining rows in the RegExp legacy-core focused batch:
+
+- `S15.10.2.5_A1_T4`: quantified capture reset semantics still need JS
+  last-iteration capture handling instead of RE2's retained prior optional
+  capture;
+- `S15.10.2.8_A2_T1`: negative lookahead still needs proper capture-slot
+  preservation and assertion-local backreference evaluation.
+
+## 29. RegExp Negative Lookahead And Repeated Capture Close-Out
+
+Status on 2026-05-17 while continuing the remaining js262 failures:
+
+- Fixed quantified repeated-capture reset semantics for the direct RE2 path.
+  - RE2 retains optional child captures from earlier iterations of a repeated
+    parent group, while JavaScript exposes the captures from the final
+    iteration.
+  - After a direct RE2 match, the runtime now parses the pattern's capture
+    parentage and clears child captures that fall outside the repeated parent's
+    final captured span.
+  - This closes `S15.10.2.5_A1_T4`.
+- Fixed negative lookahead capture-slot and assertion-local backreference
+  handling in the wrapper.
+  - Captures inside a negative lookahead now still reserve their original JS
+    capture numbers even though the assertion body is erased from the widened
+    RE2 pattern.
+  - Assertion-local numeric backrefs are normalized before compiling the
+    rejection pattern, and rejection can use a nested wrapper when the assertion
+    itself needs JS-only regex features.
+  - When a rejected marker occurs after a non-greedy prefix, the wrapper now
+    retries later marker boundaries at the same overall match start instead of
+    advancing to the next input position. This matches JS backtracking for
+    `S15.10.2.8_A2_T1`.
+- Tightened the earlier numeric-backref capture-selection optimization.
+  - The longest-candidate retry is now skipped when the referenced capture
+    contains nested captures, preserving nested group participation for legacy
+    rows such as `S15.10.2.9_A1_T2` and `S15.10.2.9_A1_T3`.
+- Restored plain `String.prototype.replace` coercion order after the full-run
+  regression check exposed two baseline rows:
+  - string-search conversion now precedes non-callable replacement conversion;
+  - the RegExp replace path still converts non-callable replacement before
+    matching, as required by the RegExp replacement algorithm.
+
+Focused gates:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_regexp_legacy_core_batch.txt --write-failures=temp/js43_regexp_legacy_core_after_regression_fix.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_regexp_lookahead_guard_batch.txt --write-failures=temp/js43_regexp_lookahead_guard_after_regression_fix.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_string_failures_batch.txt --write-failures=temp/js43_string_after_regression_fix.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_array_failures_batch.txt --write-failures=temp/js43_array_after_regression_fix.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_typedarray_failures_batch.txt --write-failures=temp/js43_typedarray_after_regression_fix.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_regression_guard_batch.txt --write-failures=temp/js43_regression_guard_after_fix.tsv
+```
+
+Results: RegExp legacy core is now 7 / 7. The lookahead guard is 8 / 8.
+String remains 30 / 30, old Array remains 25 / 25, TypedArray remains 89 / 89,
+and the four-row regression guard is 4 / 4.
+
+Full js262 gate:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-only --write-failures=temp/js43_full_after_regression_fix.tsv
+```
+
+Result: 33834 / 34127 fully passed, 292 failed, 8092 skipped, and 1
+batch-unstable row (`built_ins_TypedArray_prototype_copyWithin_coerced_values_end_detached_js`)
+that passed in isolated retry. Baseline regression check reports 0 regressions
+and 255 improvements versus the 33580-entry baseline.
+
+Remaining failure areas after this checkpoint:
+
+- RegExp: lookbehind, named groups, nullable quantifier, and several older exec
+  edge cases;
+- Language/class semantics: private fields/methods, static blocks, class
+  expressions, destructuring/let/global-code strictness, and statement coverage;
+- Smaller clusters: Proxy, Symbol, generators, async, `globalThis`, `new.target`,
+  and one U+180E whitespace row.
+
+## 30. RegExp Exec/Test LastIndex Protocol Tail
+
+Status on 2026-05-17 while continuing the remaining js262 failures:
+
+- Fixed `RegExpBuiltinExec` lastIndex observation for non-global,
+  non-sticky regexes.
+  - The runtime now performs `Get(R, "lastIndex")` and numeric coercion before
+    deciding whether the value is used for the match start.
+  - Non-`g`/`y` regexes still search from zero and do not write `lastIndex`,
+    matching the accessor-count tests.
+- Fixed `ToLength(lastIndex)` handling for global/sticky regex execution.
+  - Negative numeric `lastIndex` values are clamped to zero instead of being
+    treated as an out-of-range failed match.
+  - The same alignment was applied to `RegExp.prototype.test`.
+- Fixed omitted-argument dispatch for regex instance `.exec()` / `.test()`.
+  - Both the builtin switch path and the regex-instance method fast path now
+    pass JS `undefined` for omitted arguments, so `exec()` matches against the
+    string `"undefined"` rather than the internal null sentinel.
+- Kept the change in the RegExp execution layer; no test-specific branches or
+  special casing were added.
+
+Focused gate:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_regexp_exec_tail_batch.txt --write-failures=temp/js43_regexp_exec_tail_after_test_tolength.tsv
+```
+
+Result: the RegExp exec/test tail is now 6 / 6, closing:
+
+- `built_ins_RegExp_prototype_exec_failure_lastindex_access_js`
+- `built_ins_RegExp_prototype_exec_success_lastindex_access_js`
+- `built_ins_RegExp_prototype_exec_S15_10_6_2_A12_js`
+- `built_ins_RegExp_prototype_exec_S15_10_6_2_A1_T16_js`
+- `built_ins_RegExp_prototype_exec_S15_10_6_2_A5_T3_js`
+- `built_ins_RegExp_prototype_test_S15_10_6_3_A1_T22_js`
+
+Regression gates:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_regexp_legacy_core_batch.txt --write-failures=temp/js43_regexp_legacy_core_after_exec_tail.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_regexp_lookahead_guard_batch.txt --write-failures=temp/js43_regexp_lookahead_guard_after_exec_tail.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_string_failures_batch.txt --write-failures=temp/js43_string_after_exec_tail.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_array_failures_batch.txt --write-failures=temp/js43_array_after_exec_tail.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_typedarray_failures_batch.txt --write-failures=temp/js43_typedarray_after_exec_tail.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_regression_guard_batch.txt --write-failures=temp/js43_regression_guard_after_exec_tail.tsv
+```
+
+Results: RegExp legacy core remains 7 / 7, lookahead guard remains 8 / 8,
+String remains 30 / 30, old Array remains 25 / 25, TypedArray remains 89 / 89,
+and the four-row regression guard remains 4 / 4.
+
+Full js262 gate:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-only --write-failures=temp/js43_full_after_exec_tail.tsv
+```
+
+Result: 33839 / 34127 fully passed, 285 failed, 8092 skipped, and 3
+non-fully-passing rows. The regression check reports 0 regressions and 261
+improvements versus the 33580-entry baseline. Two rows recovered in isolated
+Phase 4 retry after batch kills:
+
+- `built_ins_Object_defineProperties_15_2_3_7_6_a_202_js`
+- `built_ins_TypedArray_prototype_copyWithin_coerced_values_end_detached_js`
+
+Updated remaining failure areas:
+
+| Area | Failures |
+|---|---:|
+| `language/statements` | 134 |
+| `language/expressions` | 57 |
+| `built_ins/RegExp` | 36 |
+| `language/global_code` | 15 |
+| `language/function_code` | 13 |
+| `language/literals` | 13 |
+| `language/arguments_object` | 5 |
+| `language/statementList` | 5 |
+| `language/directive_prologue` | 3 |
+| `language/types` | 3 |
+| `language/destructuring` | 1 |
+| `language/white_space` | 1 |

@@ -48,6 +48,83 @@ static size_t find_matching_paren(const std::string& pat, size_t open_paren_pos)
     return std::string::npos;
 }
 
+static bool is_capturing_group_at(const std::string& pat, size_t pos) {
+    if (pos >= pat.size() || pat[pos] != '(' || pos + 1 >= pat.size()) return false;
+    if (pat[pos + 1] != '?') return true;
+    if (pos + 3 < pat.size() && pat[pos + 1] == '?' && pat[pos + 2] == 'P' && pat[pos + 3] == '<') {
+        return true;
+    }
+    if (pos + 3 < pat.size() && pat[pos + 1] == '?' && pat[pos + 2] == '<' &&
+        pat[pos + 3] != '=' && pat[pos + 3] != '!') {
+        return true;
+    }
+    return false;
+}
+
+static bool find_capture_group_span(const std::string& pat, int target_group,
+                                    size_t* open_pos, size_t* close_pos) {
+    int group_count = 0;
+    for (size_t p = 0; p < pat.size(); p++) {
+        if (pat[p] == '\\' && p + 1 < pat.size()) {
+            p++;
+            continue;
+        }
+        if (pat[p] == '[') {
+            p++;
+            while (p < pat.size() && pat[p] != ']') {
+                if (pat[p] == '\\' && p + 1 < pat.size()) p++;
+                p++;
+            }
+            continue;
+        }
+        if (!is_capturing_group_at(pat, p)) continue;
+        group_count++;
+        if (group_count == target_group) {
+            size_t close = find_matching_paren(pat, p);
+            if (close == std::string::npos) return false;
+            if (open_pos) *open_pos = p;
+            if (close_pos) *close_pos = close;
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool get_capture_group_inner(const std::string& pat, int target_group,
+                                    std::string* inner) {
+    size_t open_pos = 0, close_pos = 0;
+    if (!find_capture_group_span(pat, target_group, &open_pos, &close_pos)) return false;
+    size_t inner_start = open_pos + 1;
+    if (open_pos + 1 < pat.size() && pat[open_pos + 1] == '?') {
+        if (open_pos + 3 < pat.size() && pat[open_pos + 2] == 'P' && pat[open_pos + 3] == '<') {
+            inner_start = pat.find('>', open_pos + 4);
+            if (inner_start == std::string::npos || inner_start >= close_pos) return false;
+            inner_start++;
+        } else if (open_pos + 2 < pat.size() && pat[open_pos + 2] == '<') {
+            inner_start = pat.find('>', open_pos + 3);
+            if (inner_start == std::string::npos || inner_start >= close_pos) return false;
+            inner_start++;
+        }
+    }
+    if (inner_start > close_pos) return false;
+    if (inner) *inner = pat.substr(inner_start, close_pos - inner_start);
+    return true;
+}
+
+static bool replace_capture_group_by_index(std::string* pat, int target_group,
+                                           const std::string& replacement) {
+    size_t open_pos = 0, close_pos = 0;
+    if (!pat || !find_capture_group_span(*pat, target_group, &open_pos, &close_pos)) return false;
+    pat->replace(open_pos, close_pos - open_pos + 1, replacement);
+    return true;
+}
+
+static bool is_utf8_boundary(const char* input, int input_len, int pos) {
+    if (pos <= 0 || pos >= input_len) return true;
+    unsigned char c = (unsigned char)input[pos];
+    return (c & 0xC0) != 0x80;
+}
+
 static size_t parse_assertion_quantifier(const std::string& pat, size_t pos, bool* requires_assertion) {
     if (requires_assertion) *requires_assertion = true;
     if (pos >= pat.size()) return 0;
@@ -123,6 +200,62 @@ static int count_capture_groups(const std::string& pat) {
     return count;
 }
 
+static int count_capture_groups_until(const std::string& pat, size_t limit) {
+    int count = 0;
+    if (limit > pat.size()) limit = pat.size();
+    for (size_t i = 0; i < limit; i++) {
+        if (pat[i] == '\\' && i + 1 < limit) { i++; continue; }
+        if (inside_char_class(pat, i)) continue;
+        if (is_capturing_group_at(pat, i)) count++;
+    }
+    return count;
+}
+
+static void append_decimal_int(std::string* out, int value) {
+    char digits[16];
+    int count = 0;
+    if (value <= 0) {
+        out->push_back('0');
+        return;
+    }
+    while (value > 0 && count < 16) {
+        digits[count++] = (char)('0' + (value % 10));
+        value /= 10;
+    }
+    while (count > 0) out->push_back(digits[--count]);
+}
+
+static std::string normalize_assertion_backrefs(const std::string& inner, int group_offset) {
+    std::string result;
+    result.reserve(inner.size());
+    for (size_t i = 0; i < inner.size(); i++) {
+        if (inner[i] == '\\' && i + 1 < inner.size()) {
+            if (inner[i + 1] >= '1' && inner[i + 1] <= '9' && !inside_char_class(inner, i)) {
+                size_t j = i + 1;
+                int ref_num = 0;
+                while (j < inner.size() && inner[j] >= '0' && inner[j] <= '9') {
+                    ref_num = ref_num * 10 + (inner[j] - '0');
+                    j++;
+                }
+                if (ref_num > group_offset) {
+                    result.push_back('\\');
+                    append_decimal_int(&result, ref_num - group_offset);
+                } else {
+                    result.append(inner, i, j - i);
+                }
+                i = j - 1;
+                continue;
+            }
+            result.push_back(inner[i]);
+            result.push_back(inner[i + 1]);
+            i++;
+            continue;
+        }
+        result.push_back(inner[i]);
+    }
+    return result;
+}
+
 // ============================================================================
 // Assertion Type Classification
 // ============================================================================
@@ -145,20 +278,34 @@ struct AssertionInfo {
 };
 
 // Scan pattern for assertions and backreferences
-static int scan_assertions(const std::string& pat,
+static int scan_assertions(const std::string& pat, int capture_group_count,
                            AssertionInfo* out_infos, int max_infos) {
     int count = 0;
 
     for (size_t i = 0; i < pat.size() && count < max_infos; i++) {
         if (pat[i] == '\\' && i + 1 < pat.size()) {
-            // Check for backreference \1-\9
+            // Check for decimal backreferences. Consume the whole decimal
+            // escape only when that capture exists; otherwise leave it for the
+            // regex compiler's legacy escape handling.
             if (pat[i + 1] >= '1' && pat[i + 1] <= '9' && !inside_char_class(pat, i)) {
+                size_t j = i + 1;
+                int ref_num = 0;
+                while (j < pat.size() && pat[j] >= '0' && pat[j] <= '9') {
+                    ref_num = ref_num * 10 + (pat[j] - '0');
+                    j++;
+                }
+                if (ref_num > capture_group_count) {
+                    i++;
+                    continue;
+                }
                 out_infos[count].kind = ASSERT_BACKREF;
                 out_infos[count].start_pos = i;
-                out_infos[count].end_pos = i + 2;
-                out_infos[count].backref_num = pat[i + 1] - '0';
+                out_infos[count].end_pos = j;
+                out_infos[count].backref_num = ref_num;
                 out_infos[count].is_trailing = (i > 0);
                 count++;
+                i = j - 1;
+                continue;
             }
             i++; continue;
         }
@@ -318,7 +465,16 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
     out->original_group_count = count_capture_groups(original);
 
     AssertionInfo infos[32];
-    int assert_count = scan_assertions(original, infos, 32);
+    int assert_count = scan_assertions(original, out->original_group_count, infos, 32);
+    bool erased_original_group[JS_REGEX_MAX_GROUPS];
+    for (int i = 0; i < JS_REGEX_MAX_GROUPS; i++) erased_original_group[i] = false;
+    bool pattern_has_backref = false;
+    for (int a = 0; a < assert_count; a++) {
+        if (infos[a].kind == ASSERT_BACKREF) {
+            pattern_has_backref = true;
+            break;
+        }
+    }
 
     if (assert_count == 0) {
         // no assertions or backreferences — pass through unchanged
@@ -362,8 +518,9 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
                     }
                     break;
                 }
-                // X(?=Y) → X(Y) with PF_TRIM_GROUP
-                // Replace (?=Y) with (Y), add filter to trim the captured Y from match
+                // X(?=Y) → X(Y) with PF_TRIM_GROUP. A leading assertion is
+                // still absorbed so its captures are available to later
+                // backreferences, but it must not be trimmed from the match end.
                 std::string replacement = "(" + info.inner + ")";
                 size_t syn_pos = info.start_pos;
                 result.replace(info.start_pos, old_len, replacement);
@@ -377,11 +534,31 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
                     }
                 }
 
-                int fi = out->filter_count;
-                JsRegexFilter& f = out->filters[out->filter_count++];
-                f.type = JS_PF_TRIM_GROUP;
-                f.trim_group_idx = -1; // placeholder, fixed after pattern walk
-                f.reject_pattern = nullptr;
+                int fi = -1;
+                if (info.is_trailing || !pattern_has_backref) {
+                    fi = out->filter_count;
+                    JsRegexFilter& f = out->filters[out->filter_count++];
+                    f.type = JS_PF_TRIM_GROUP;
+                    f.trim_group_idx = -1; // placeholder, fixed after pattern walk
+                    f.reject_pattern = nullptr;
+                    f.reject_wrapper = nullptr;
+                } else {
+                    re2::RE2::Options assert_opts;
+                    assert_opts.set_log_errors(false);
+                    assert_opts.set_encoding(re2::RE2::Options::EncodingUTF8);
+                    re2::RE2* assert_re = new re2::RE2(info.inner, assert_opts);
+                    if (assert_re->ok()) {
+                        fi = out->filter_count;
+                        JsRegexFilter& f = out->filters[out->filter_count++];
+                        f.type = JS_PF_ASSERT_MATCH;
+                        f.trim_group_idx = -1; // placeholder, fixed after pattern walk
+                        f.reject_pattern = assert_re;
+                        f.reject_wrapper = nullptr;
+                    } else {
+                        log_debug("js regex wrapper: failed to compile assertion pattern '%s'", info.inner.c_str());
+                        delete assert_re;
+                    }
+                }
 
                 synthetic[synthetic_count++] = {syn_pos, fi};
                 break;
@@ -430,6 +607,15 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
                     break;
                 }
 
+                int erased_start = count_capture_groups_until(original, info.start_pos) + 1;
+                int erased_count = count_capture_groups(info.inner);
+                for (int eg = 0; eg < erased_count; eg++) {
+                    int group_idx = erased_start + eg;
+                    if (group_idx > 0 && group_idx < JS_REGEX_MAX_GROUPS) {
+                        erased_original_group[group_idx] = true;
+                    }
+                }
+
                 // (?!Y)X or X(?!Y) → insert marker group (), add PF_REJECT_MATCH
                 // The marker group captures the position where the lookahead was
                 std::string replacement = "()";
@@ -448,19 +634,28 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
                 re2::RE2::Options reject_opts;
                 reject_opts.set_log_errors(false);
                 reject_opts.set_encoding(re2::RE2::Options::EncodingUTF8);
-                re2::RE2* reject_re = new re2::RE2(info.inner, reject_opts);
+                int group_offset = count_capture_groups_until(original, info.start_pos);
+                std::string reject_inner = normalize_assertion_backrefs(info.inner, group_offset);
+                re2::RE2* reject_re = new re2::RE2(reject_inner, reject_opts);
+                JsRegexCompiled* reject_wrapper = nullptr;
+                if (!reject_re->ok()) {
+                    delete reject_re;
+                    reject_re = nullptr;
+                    reject_wrapper = js_regex_wrapper_compile(
+                        reject_inner.c_str(), (int)reject_inner.size(), "", 0, &reject_opts);
+                }
 
-                if (reject_re->ok()) {
+                if (reject_re || reject_wrapper) {
                     int fi = out->filter_count;
                     JsRegexFilter& f = out->filters[out->filter_count++];
                     f.type = JS_PF_REJECT_MATCH;
                     f.reject_pattern = reject_re;
+                    f.reject_wrapper = reject_wrapper;
                     f.reject_at_start = -1; // placeholder, will use marker group
 
                     synthetic[synthetic_count++] = {syn_pos, fi};
                 } else {
-                    log_debug("js regex wrapper: failed to compile rejection pattern '%s'", info.inner.c_str());
-                    delete reject_re;
+                    log_debug("js regex wrapper: failed to compile rejection pattern '%s'", reject_inner.c_str());
                     // still record synthetic for the () we inserted
                     synthetic[synthetic_count++] = {syn_pos, -1};
                 }
@@ -499,6 +694,7 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
                 f.eq_group_a = ref_num;  // original group number (will be remapped)
                 f.eq_group_b = -1;       // placeholder, fixed after pattern walk
                 f.reject_pattern = nullptr;
+                f.reject_wrapper = nullptr;
 
                 synthetic[synthetic_count++] = {syn_pos, fi};
                 break;
@@ -515,7 +711,11 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
         int remap_size = out->original_group_count + 1;
         out->group_remap = (int*)mem_calloc(remap_size, sizeof(int), MEM_CAT_JS_RUNTIME);
         out->group_remap_count = remap_size;
+        for (int i = 0; i < remap_size; i++) out->group_remap[i] = -1;
         out->group_remap[0] = 0; // group 0 always maps to itself
+        for (int i = 1; i < remap_size && i < JS_REGEX_MAX_GROUPS; i++) {
+            if (erased_original_group[i]) out->group_remap[i] = -1;
+        }
 
         // Map from synthetic entry index → RE2 group index
         int syn_re2_idx[JS_REGEX_MAX_FILTERS];
@@ -563,6 +763,10 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
                 syn_re2_idx[syn_idx] = re2_idx;
             } else {
                 orig_idx++;
+                while (orig_idx < remap_size && orig_idx < JS_REGEX_MAX_GROUPS &&
+                       erased_original_group[orig_idx]) {
+                    orig_idx++;
+                }
                 if (orig_idx < remap_size) {
                     out->group_remap[orig_idx] = re2_idx;
                 }
@@ -575,7 +779,7 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
             if (fi < 0) continue;
             JsRegexFilter& f = out->filters[fi];
 
-            if (f.type == JS_PF_TRIM_GROUP) {
+            if (f.type == JS_PF_TRIM_GROUP || f.type == JS_PF_ASSERT_MATCH) {
                 f.trim_group_idx = syn_re2_idx[s];
             } else if (f.type == JS_PF_REJECT_MATCH) {
                 // store the marker group's RE2 index in reject_at_start
@@ -843,6 +1047,119 @@ bool js_regex_wrapper_validate_unicode(const char* pattern, int pattern_len) {
     return validate_unicode_strict(pat);
 }
 
+static bool js_regex_assert_filter_accepts(JsRegexFilter& f, const char* input, int input_len,
+                                           re2::StringPiece* groups, int ngroups) {
+    if (!f.reject_pattern) return true;
+    if (f.trim_group_idx <= 0 || f.trim_group_idx >= ngroups) return false;
+    if (!groups[f.trim_group_idx].data()) return false;
+
+    const char* check_start = groups[f.trim_group_idx].data();
+    int check_offset = (int)(check_start - input);
+    if (check_offset < 0 || check_offset > input_len) return false;
+
+    int check_len = input_len - check_offset;
+    re2::StringPiece check_text(check_start, check_len);
+    re2::StringPiece asserted;
+    if (!f.reject_pattern->Match(check_text, 0, check_len,
+                                 re2::RE2::ANCHOR_START, &asserted, 1)) {
+        return false;
+    }
+    return asserted.data() == groups[f.trim_group_idx].data() &&
+           asserted.size() == groups[f.trim_group_idx].size();
+}
+
+static bool js_regex_reject_filter_matches(JsRegexFilter& f, const char* check_start, int check_len) {
+    if (f.reject_wrapper) {
+        int starts[JS_REGEX_MAX_GROUPS], ends[JS_REGEX_MAX_GROUPS];
+        return js_regex_wrapper_exec(f.reject_wrapper, check_start, check_len, 0, true,
+                                     starts, ends, JS_REGEX_MAX_GROUPS) > 0;
+    }
+    if (f.reject_pattern) {
+        re2::StringPiece check_text(check_start, check_len);
+        re2::StringPiece dummy;
+        return f.reject_pattern->Match(check_text, 0, check_len,
+                                       re2::RE2::ANCHOR_START, &dummy, 0);
+    }
+    return false;
+}
+
+static bool split_pattern_around_capture_group(const std::string& pat, int target_group,
+                                               std::string* prefix, std::string* suffix) {
+    size_t open_pos = 0, close_pos = 0;
+    if (!find_capture_group_span(pat, target_group, &open_pos, &close_pos)) return false;
+    if (prefix) *prefix = pat.substr(0, open_pos);
+    if (suffix) *suffix = pat.substr(close_pos + 1);
+    return true;
+}
+
+static bool js_regex_retry_reject_same_start(const std::string& refined_pattern,
+                                             const re2::RE2::Options& opts,
+                                             JsRegexFilter& reject_filter,
+                                             const char* input, int input_len,
+                                             int match_start, int rejected_offset,
+                                             re2::StringPiece* groups, int ngroups) {
+    int marker_group = reject_filter.reject_at_start;
+    if (marker_group <= 0 || marker_group >= ngroups) return false;
+    if (match_start < 0 || match_start > input_len) return false;
+    if (rejected_offset < match_start || rejected_offset > input_len) return false;
+
+    std::string prefix_pattern;
+    std::string suffix_pattern;
+    if (!split_pattern_around_capture_group(refined_pattern, marker_group,
+                                            &prefix_pattern, &suffix_pattern)) {
+        return false;
+    }
+
+    re2::RE2 prefix_re2(prefix_pattern, opts);
+    re2::RE2 suffix_re2(suffix_pattern, opts);
+    if (!prefix_re2.ok() || !suffix_re2.ok()) return false;
+
+    int prefix_ngroups = prefix_re2.NumberOfCapturingGroups() + 1;
+    int suffix_ngroups = suffix_re2.NumberOfCapturingGroups() + 1;
+    if (prefix_ngroups > JS_REGEX_MAX_GROUPS) prefix_ngroups = JS_REGEX_MAX_GROUPS;
+    if (suffix_ngroups > JS_REGEX_MAX_GROUPS) suffix_ngroups = JS_REGEX_MAX_GROUPS;
+
+    for (int boundary = rejected_offset + 1; boundary <= input_len; boundary++) {
+        if (!is_utf8_boundary(input, input_len, boundary)) continue;
+
+        int prefix_len = boundary - match_start;
+        re2::StringPiece prefix_text(input + match_start, prefix_len);
+        re2::StringPiece prefix_groups[JS_REGEX_MAX_GROUPS];
+        if (!prefix_re2.Match(prefix_text, 0, prefix_len, re2::RE2::ANCHOR_BOTH,
+                              prefix_groups, prefix_ngroups)) {
+            continue;
+        }
+
+        int check_len = input_len - boundary;
+        if (check_len < 0) continue;
+        if (js_regex_reject_filter_matches(reject_filter, input + boundary, check_len)) {
+            continue;
+        }
+
+        re2::StringPiece suffix_text(input + boundary, input_len - boundary);
+        re2::StringPiece suffix_groups[JS_REGEX_MAX_GROUPS];
+        if (!suffix_re2.Match(suffix_text, 0, input_len - boundary,
+                              re2::RE2::ANCHOR_START,
+                              suffix_groups, suffix_ngroups)) {
+            continue;
+        }
+
+        int match_end = boundary + (int)suffix_groups[0].size();
+        for (int g = 0; g < ngroups; g++) groups[g] = re2::StringPiece();
+        groups[0] = re2::StringPiece(input + match_start, match_end - match_start);
+        for (int g = 1; g < prefix_ngroups && g < ngroups; g++) {
+            groups[g] = prefix_groups[g];
+        }
+        groups[marker_group] = re2::StringPiece(input + boundary, 0);
+        for (int g = 1; g < suffix_ngroups && marker_group + g < ngroups; g++) {
+            groups[marker_group + g] = suffix_groups[g];
+        }
+        return true;
+    }
+
+    return false;
+}
+
 JsRegexCompiled* js_regex_wrapper_compile(const char* pattern, int pattern_len,
                                    const char* flags, int flags_len,
                                    re2::RE2::Options* opts) {
@@ -880,6 +1197,7 @@ JsRegexCompiled* js_regex_wrapper_compile(const char* pattern, int pattern_len,
         // free any reject patterns allocated
         for (int i = 0; i < rw.filter_count; i++) {
             if (rw.filters[i].reject_pattern) delete rw.filters[i].reject_pattern;
+            if (rw.filters[i].reject_wrapper) js_regex_compiled_free(rw.filters[i].reject_wrapper);
         }
         if (rw.group_remap) mem_free(rw.group_remap);
         return nullptr;
@@ -953,12 +1271,131 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
 
         int pos = start_pos;
         bool matched = false;
+        std::string matched_pattern = source_pattern;
 
         while (pos <= input_len) {
             bool found = compiled->re2->Match(text, pos, input_len, anchor, groups, ngroups);
             if (!found) return 0;
 
             int match_start = (int)(groups[0].data() - input);
+            int match_end = match_start + (int)groups[0].size();
+
+            // The widened RE2 pattern can choose a shorter referenced capture
+            // than JS backtracking would. For backrefs that all point at the
+            // same group, try candidate captures from longest to shortest and
+            // keep the first one that satisfies the original capture atom and
+            // the literalized backrefs.
+            {
+                int ref_group = -1;
+                bool single_ref_group = true;
+                for (int bi = 0; bi < backref_count; bi++) {
+                    JsRegexFilter& f = compiled->filters[backref_order[bi]];
+                    if (ref_group < 0) ref_group = f.eq_group_a;
+                    else if (ref_group != f.eq_group_a) {
+                        single_ref_group = false;
+                        break;
+                    }
+                }
+
+                if (single_ref_group && ref_group > 0 && ref_group < ngroups &&
+                    groups[ref_group].data()) {
+                    std::string ref_inner;
+                    if (get_capture_group_inner(source_pattern, ref_group, &ref_inner)) {
+                        if (count_capture_groups(ref_inner) == 0) {
+                            std::string ref_check_pattern = "^(?:";
+                            ref_check_pattern.append(ref_inner);
+                            ref_check_pattern.append(")$");
+                            re2::RE2 ref_check_re2(ref_check_pattern, refined_opts);
+                            if (ref_check_re2.ok()) {
+                                int ref_start = (int)(groups[ref_group].data() - input);
+                                if (ref_start >= match_start && ref_start <= match_end) {
+                                    for (int candidate_end = match_end; candidate_end >= ref_start; candidate_end--) {
+                                        if (!is_utf8_boundary(input, input_len, candidate_end)) continue;
+                                        re2::StringPiece candidate(input + ref_start, candidate_end - ref_start);
+                                        re2::StringPiece ref_dummy;
+                                        if (!ref_check_re2.Match(candidate, 0, (int)candidate.size(),
+                                                                 re2::RE2::ANCHOR_BOTH,
+                                                                 &ref_dummy, 0)) {
+                                            continue;
+                                        }
+
+                                        std::string literal = re2::RE2::QuoteMeta(candidate);
+                                        std::string refined_pattern = source_pattern;
+                                        std::string captured_literal = "(";
+                                        captured_literal.append(literal);
+                                        captured_literal.append(")");
+
+                                        int replace_groups[JS_REGEX_MAX_FILTERS + 1];
+                                        std::string replacements[JS_REGEX_MAX_FILTERS + 1];
+                                        int replace_count = 0;
+                                        replace_groups[replace_count] = ref_group;
+                                        replacements[replace_count] = captured_literal;
+                                        replace_count++;
+
+                                        for (int bi = 0; bi < backref_count; bi++) {
+                                            JsRegexFilter& f = compiled->filters[backref_order[bi]];
+                                            bool already_added = false;
+                                            for (int ri = 0; ri < replace_count; ri++) {
+                                                if (replace_groups[ri] == f.eq_group_b) {
+                                                    already_added = true;
+                                                    break;
+                                                }
+                                            }
+                                            if (!already_added && replace_count < JS_REGEX_MAX_FILTERS + 1) {
+                                                replace_groups[replace_count] = f.eq_group_b;
+                                                replacements[replace_count] = captured_literal;
+                                                replace_count++;
+                                            }
+                                        }
+
+                                        for (int i = 1; i < replace_count; i++) {
+                                            int group_key = replace_groups[i];
+                                            std::string repl_key = replacements[i];
+                                            int j = i - 1;
+                                            while (j >= 0 && replace_groups[j] < group_key) {
+                                                replace_groups[j + 1] = replace_groups[j];
+                                                replacements[j + 1] = replacements[j];
+                                                j--;
+                                            }
+                                            replace_groups[j + 1] = group_key;
+                                            replacements[j + 1] = repl_key;
+                                        }
+
+                                        bool replaced_all = true;
+                                        for (int ri = 0; ri < replace_count; ri++) {
+                                            if (!replace_capture_group_by_index(&refined_pattern,
+                                                    replace_groups[ri], replacements[ri])) {
+                                                replaced_all = false;
+                                                break;
+                                            }
+                                        }
+                                        if (!replaced_all) continue;
+
+                                        re2::RE2 refined_re2(refined_pattern, refined_opts);
+                                        if (!refined_re2.ok()) continue;
+                                        int refined_ngroups = refined_re2.NumberOfCapturingGroups() + 1;
+                                        if (refined_ngroups > JS_REGEX_MAX_GROUPS) refined_ngroups = JS_REGEX_MAX_GROUPS;
+                                        re2::StringPiece refined_groups[JS_REGEX_MAX_GROUPS];
+                                        found = refined_re2.Match(text, match_start, input_len,
+                                                                  re2::RE2::ANCHOR_START,
+                                                                  refined_groups, refined_ngroups);
+                                        if (!found) continue;
+
+                                        for (int g = 0; g < ngroups && g < refined_ngroups; g++) {
+                                            groups[g] = refined_groups[g];
+                                        }
+                                        matched_pattern = refined_pattern;
+                                        matched = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (matched) break;
 
             // Build refined pattern by substituting literal values for backref groups
             std::string refined_pattern = source_pattern;
@@ -968,7 +1405,7 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
                 JsRegexFilter& f = compiled->filters[backref_order[bi]];
                 int ref_group = f.eq_group_a;
                 std::string literal;
-                if (ref_group < ngroups && groups[ref_group].data()) {
+                if (ref_group >= 0 && ref_group < ngroups && groups[ref_group].data()) {
                     literal = re2::RE2::QuoteMeta(
                         re2::StringPiece(groups[ref_group].data(), groups[ref_group].size()));
                 } else {
@@ -998,7 +1435,10 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
                         if (group_count == target_group) {
                             size_t close = find_matching_paren(refined_pattern, p);
                             if (close != std::string::npos) {
-                                refined_pattern.replace(p, close - p + 1, literal);
+                                std::string captured_literal = "(";
+                                captured_literal.append(literal);
+                                captured_literal.append(")");
+                                refined_pattern.replace(p, close - p + 1, captured_literal);
                             }
                             break;
                         }
@@ -1021,6 +1461,7 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
                         for (int g = 0; g < ngroups && g < refined_ngroups; g++) {
                             groups[g] = refined_groups[g];
                         }
+                        matched_pattern = refined_pattern;
                         matched = true;
                         break; // success
                     }
@@ -1059,8 +1500,15 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
                         match_end_offset -= trim_len;
                         groups[0] = re2::StringPiece(match_begin, match_end_offset - match_begin_offset);
                     }
+                } else if (f.type == JS_PF_ASSERT_MATCH) {
+                    if (!js_regex_assert_filter_accepts(f, input, input_len, groups, ngroups)) {
+                        if (anchor_start) return 0;
+                        return js_regex_wrapper_exec(compiled, input, input_len,
+                            match_begin_offset + 1, anchor_start,
+                            match_starts, match_ends, max_groups);
+                    }
                 } else if (f.type == JS_PF_REJECT_MATCH) {
-                    if (f.reject_pattern) {
+                    if (f.reject_pattern || f.reject_wrapper) {
                         // reject_at_start holds the marker group's RE2 index
                         // Use the marker group's position for the rejection check
                         const char* check_start;
@@ -1071,12 +1519,22 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
                             check_start = input + match_end_offset;
                         }
                         int check_len = input_len - (int)(check_start - input);
-                        if (check_len > 0) {
-                            re2::StringPiece check_text(check_start, check_len);
-                            re2::StringPiece dummy;
-                            if (f.reject_pattern->Match(check_text, 0, check_len,
-                                                         re2::RE2::ANCHOR_START, &dummy, 0)) {
-                                return 0;
+                        if (check_len >= 0) {
+                            if (js_regex_reject_filter_matches(f, check_start, check_len)) {
+                                int rejected_offset = (int)(check_start - input);
+                                if (js_regex_retry_reject_same_start(
+                                        matched_pattern, refined_opts, f, input, input_len,
+                                        match_begin_offset, rejected_offset, groups, ngroups)) {
+                                    match_begin = groups[0].data();
+                                    match_begin_offset = (int)(match_begin - input);
+                                    match_end_offset = match_begin_offset + (int)groups[0].size();
+                                    fi = -1;
+                                    continue;
+                                }
+                                if (anchor_start) return 0;
+                                return js_regex_wrapper_exec(compiled, input, input_len,
+                                    match_begin_offset + 1, anchor_start,
+                                    match_starts, match_ends, max_groups);
                             }
                         }
                     }
@@ -1115,7 +1573,7 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
                             break;
                         }
                         case JS_PF_REJECT_MATCH: {
-                            if (f.reject_pattern) {
+                            if (f.reject_pattern || f.reject_wrapper) {
                                 const char* check_start;
                                 if (f.reject_at_start > 0 && f.reject_at_start < ngroups && groups[f.reject_at_start].data()) {
                                     check_start = groups[f.reject_at_start].data();
@@ -1123,11 +1581,8 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
                                     check_start = input + match_end_offset;
                                 }
                                 int check_len = input_len - (int)(check_start - input);
-                                if (check_len > 0) {
-                                    re2::StringPiece check_text(check_start, check_len);
-                                    re2::StringPiece dummy;
-                                    if (f.reject_pattern->Match(check_text, 0, check_len,
-                                                                 re2::RE2::ANCHOR_START, &dummy, 0)) {
+                                if (check_len >= 0) {
+                                    if (js_regex_reject_filter_matches(f, check_start, check_len)) {
                                         rejected = true;
                                         break;
                                     }
@@ -1137,6 +1592,12 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
                         }
                         case JS_PF_GROUP_EQUALITY:
                             break; // shouldn't happen in this path
+                        case JS_PF_ASSERT_MATCH: {
+                            if (!js_regex_assert_filter_accepts(f, input, input_len, groups, ngroups)) {
+                                rejected = true;
+                            }
+                            break;
+                        }
                     }
                 }
             }
@@ -1163,7 +1624,7 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
         if (compiled->group_remap && g < compiled->group_remap_count) {
             src_g = compiled->group_remap[g];
         }
-        if (src_g < ngroups && groups[src_g].data()) {
+        if (src_g >= 0 && src_g < ngroups && groups[src_g].data()) {
             match_starts[g] = (int)(groups[src_g].data() - input);
             match_ends[g] = match_starts[g] + (int)groups[src_g].size();
         } else {
@@ -1201,6 +1662,9 @@ void js_regex_compiled_free(JsRegexCompiled* compiled) {
     for (int i = 0; i < compiled->filter_count; i++) {
         if (compiled->filters[i].reject_pattern) {
             delete compiled->filters[i].reject_pattern;
+        }
+        if (compiled->filters[i].reject_wrapper) {
+            js_regex_compiled_free(compiled->filters[i].reject_wrapper);
         }
     }
     if (compiled->group_remap) mem_free(compiled->group_remap);
