@@ -904,21 +904,10 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
         // DEBUG: Set axis sizes
     }
 
-    // Phase 1: Collect flex items
-    // OPTIMIZATION: Skip collection if items were already collected by unified pass
-    View** items;
-    int item_count;
-    if (flex_layout->item_count > 0 && flex_layout->flex_items) {
-        // Items already collected by collect_and_prepare_flex_items()
-        log_debug("Phase 1: Using pre-collected flex items (count=%d)", flex_layout->item_count);
-        items = flex_layout->flex_items;
-        item_count = flex_layout->item_count;
-    } else {
-        // Fallback to legacy collection (for backward compatibility)
-        log_debug("Phase 1: Collecting flex items (legacy path)");
-        item_count = collect_flex_items(flex_layout, container, &items);
-    }
-    // DEBUG: Flex items collected
+    // Phase 1: use flex items collected by collect_and_prepare_flex_items().
+    View** items = flex_layout->flex_items;
+    int item_count = flex_layout->item_count;
+    log_debug("Phase 1: Using prepared flex items (count=%d)", item_count);
 
     if (item_count == 0) {
         log_debug("No flex items found");
@@ -1903,13 +1892,13 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
             float offset_x = 0, offset_y = 0;
             // horizontal offset — re-resolve percentage against actual parent width
             if (item_block->position->has_left) {
-                if (!std::isnan(item_block->position->left_percent)) {
+                if (!isnan(item_block->position->left_percent)) {
                     offset_x = item_block->position->left_percent * parent_content_width / 100.0f;
                 } else {
                     offset_x = item_block->position->left;
                 }
             } else if (item_block->position->has_right) {
-                if (!std::isnan(item_block->position->right_percent)) {
+                if (!isnan(item_block->position->right_percent)) {
                     offset_x = -(item_block->position->right_percent * parent_content_width / 100.0f);
                 } else {
                     offset_x = -item_block->position->right;
@@ -1917,13 +1906,13 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
             }
             // vertical offset — re-resolve percentage against actual parent height
             if (item_block->position->has_top) {
-                if (!std::isnan(item_block->position->top_percent)) {
+                if (!isnan(item_block->position->top_percent)) {
                     offset_y = item_block->position->top_percent * parent_content_height / 100.0f;
                 } else {
                     offset_y = item_block->position->top;
                 }
             } else if (item_block->position->has_bottom) {
-                if (!std::isnan(item_block->position->bottom_percent)) {
+                if (!isnan(item_block->position->bottom_percent)) {
                     offset_y = -(item_block->position->bottom_percent * parent_content_height / 100.0f);
                 } else {
                     offset_y = -item_block->position->bottom;
@@ -1937,155 +1926,6 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
     }
 
     flex_layout->needs_reflow = false;
-}// Collect flex items from container children
-int collect_flex_items(FlexContainerLayout* flex, ViewBlock* container, View*** items) {
-    if (!flex || !container || !items) return 0;
-
-    int count = 0;
-
-    // Count children first - use ViewBlock hierarchy for flex items
-    View* child = container->first_child;
-    while (child) {
-        // CRITICAL FIX: Skip text nodes - flex items must be elements
-        if (!child->is_element()) {
-            child = child->next_sibling;
-            continue;
-        }
-
-        // Filter out absolutely positioned and hidden items
-        ViewElement* child_elmt = lam::view_require_element(child);
-        // CRITICAL: Check position->position (PositionProp), NOT in_line->position
-        ViewBlock* child_block = lam::view_as_block(child_elmt);
-        bool is_absolute = layout_view_is_abs_or_fixed(child_block);
-        bool is_hidden = child_elmt && child_elmt->in_line && child_elmt->in_line->visibility == VIS_HIDDEN;
-        if (!is_absolute && !is_hidden) {
-            count++;
-        }
-        child = child->next_sibling;
-    }
-
-    if (count == 0) {
-        *items = nullptr;
-        return 0;
-    }
-
-    // Ensure we have enough space in the flex items array
-    if (count > flex->allocated_items) {
-        flex->allocated_items = count * 2;
-        flex->flex_items = (View**)mem_realloc(flex->flex_items, flex->allocated_items * sizeof(View*), MEM_CAT_LAYOUT);
-    }
-
-    // Collect items - use ViewBlock hierarchy for flex items
-    count = 0;
-    child = container->first_child;
-    while (child) {
-        // CRITICAL FIX: Skip text nodes - flex items must be elements
-        if (!child->is_element()) {
-            child = child->next_sibling;
-            continue;
-        }
-
-        // Filter out absolutely positioned and hidden items
-        ViewElement* child_elmt = lam::view_require_element(child);
-        // CRITICAL: Check position->position (PositionProp), NOT in_line->position
-        ViewBlock* child_block2 = lam::view_as_block(child_elmt);
-        bool is_absolute = layout_view_is_abs_or_fixed(child_block2);
-        bool is_hidden = child_elmt && child_elmt->in_line && child_elmt->in_line->visibility == VIS_HIDDEN;
-        if (!is_absolute && !is_hidden) {
-            flex->flex_items[count] = child;
-
-            // CRITICAL FIX: Apply cached measurements to flex items
-            // This connects the measurement pass with the layout pass
-            MeasurementCacheEntry* cached = get_from_measurement_cache(child);
-            if (cached) {
-                // For grid containers, skip the cached height — it was computed by
-                // stacking children as blocks (wrong); grid height = max_row_height.
-                bool child_is_grid_fc = (child_elmt && child_elmt->display.inner == CSS_VALUE_GRID);
-                if (!child_is_grid_fc && child_elmt && child_elmt->specified_style) {
-                    CssDeclaration* d = style_tree_get_declaration(
-                        child_elmt->specified_style, CSS_PROPERTY_DISPLAY);
-                    if (d && d->value && d->value->type == CSS_VALUE_TYPE_KEYWORD) {
-                        CssEnum dv = d->value->data.keyword;
-                        child_is_grid_fc = (dv == CSS_VALUE_GRID || dv == CSS_VALUE_INLINE_GRID);
-                    }
-                }
-                child->width = cached->measured_width;
-                if (!child_is_grid_fc) {
-                    child->height = cached->measured_height;
-                }
-                if (child_elmt) {
-                    child_elmt->content_width = cached->content_width;
-                    if (!child_is_grid_fc) {
-                        child_elmt->content_height = cached->content_height;
-                    }
-                    log_debug("%s Applied measurements: item %d now has size %dx%d (content: %dx%d, is_grid=%d)", container->source_loc(),
-                        count, child->width, child->height, child_elmt->content_width, child_elmt->content_height, child_is_grid_fc);
-                }
-            } else {
-                log_debug("%s No cached measurement found for flex item %d", container->source_loc(), count);
-            }
-
-            // DEBUG: Check CSS dimensions
-            if (child_elmt && child_elmt->blk) {
-                log_debug("%s Flex item %d CSS dimensions: given_width=%.1f, given_height=%.1f", container->source_loc(),
-                    count, child_elmt->blk->given_width, child_elmt->blk->given_height);
-
-                // CRITICAL FIX: Apply CSS dimensions to flex items if specified
-                // Must clamp against max-width/max-height constraints
-                if (child_elmt->blk->given_width >= 0 && child->width != child_elmt->blk->given_width) {
-                    float target_width = child_elmt->blk->given_width;
-
-                    // Clamp against max-width constraint if present
-                    if (child_elmt->blk->given_max_width > 0 && target_width > child_elmt->blk->given_max_width) {
-                        log_debug("%s Flex item %d width %.1f exceeds max-width %.1f, clamping", container->source_loc(),
-                                 count, target_width, child_elmt->blk->given_max_width);
-                        target_width = child_elmt->blk->given_max_width;
-                    }
-
-                    // Clamp against min-width constraint if present
-                    if (child_elmt->blk->given_min_width > 0 && target_width < child_elmt->blk->given_min_width) {
-                        log_debug("%s Flex item %d width %.1f below min-width %.1f, clamping", container->source_loc(),
-                                 count, target_width, child_elmt->blk->given_min_width);
-                        target_width = child_elmt->blk->given_min_width;
-                    }
-
-                    log_debug("%s Setting flex item %d width from CSS: %.1f -> %.1f", container->source_loc(),
-                             count, child->width, target_width);
-                    child->width = target_width;
-                }
-
-                if (child_elmt->blk->given_height >= 0 && child->height != child_elmt->blk->given_height) {
-                    float target_height = child_elmt->blk->given_height;
-
-                    // Clamp against max-height constraint if present
-                    if (child_elmt->blk->given_max_height > 0 && target_height > child_elmt->blk->given_max_height) {
-                        log_debug("%s Flex item %d height %.1f exceeds max-height %.1f, clamping", container->source_loc(),
-                                 count, target_height, child_elmt->blk->given_max_height);
-                        target_height = child_elmt->blk->given_max_height;
-                    }
-
-                    // Clamp against min-height constraint if present
-                    if (child_elmt->blk->given_min_height > 0 && target_height < child_elmt->blk->given_min_height) {
-                        log_debug("%s Flex item %d height %.1f below min-height %.1f, clamping", container->source_loc(),
-                                 count, target_height, child_elmt->blk->given_min_height);
-                        target_height = child_elmt->blk->given_min_height;
-                    }
-
-                    log_debug("%s Setting flex item %d height from CSS: %.1f -> %.1f", container->source_loc(),
-                             count, child->height, target_height);
-                    child->height = target_height;
-                }
-            } else {
-                log_debug("%s Flex item %d has no blk (CSS properties)", container->source_loc(), count);
-            }
-            count++;
-        }
-        child = child->next_sibling;
-    }
-
-    flex->item_count = count;
-    *items = flex->flex_items;
-    return count;
 }
 
 // Sort flex items by CSS order property
@@ -2155,7 +1995,7 @@ static void ensure_flex_items_capacity(FlexContainerLayout* flex, int required) 
 }
 
 // UNIFIED: Single-pass collection that combines measurement + View creation + collection
-// This replaces the separate PASS 1 (in layout_flex_multipass.cpp) and Phase 1 (collect_flex_items)
+// This replaces the older split PASS 1 plus flex-item collection path.
 int collect_and_prepare_flex_items(LayoutContext* lycon,
                                     FlexContainerLayout* flex_layout,
                                     ViewBlock* container) {
@@ -3898,13 +3738,13 @@ void reposition_baseline_items(LayoutContext* lycon, ViewBlock* flex_container) 
                 if (parent_h <= 0) parent_h = flex_container->height;
                 float relative_offset = 0;
                 if (item_block->position->has_top) {
-                    if (!std::isnan(item_block->position->top_percent)) {
+                    if (!isnan(item_block->position->top_percent)) {
                         relative_offset = item_block->position->top_percent * parent_h / 100.0f;
                     } else {
                         relative_offset = item_block->position->top;
                     }
                 } else if (item_block->position->has_bottom) {
-                    if (!std::isnan(item_block->position->bottom_percent)) {
+                    if (!isnan(item_block->position->bottom_percent)) {
                         relative_offset = -(item_block->position->bottom_percent * parent_h / 100.0f);
                     } else {
                         relative_offset = -item_block->position->bottom;
@@ -5289,7 +5129,7 @@ void align_content(FlexContainerLayout* flex_layout) {
 // CRITICAL FIX: Box model aware utility functions
 // These functions properly handle content vs border-box dimensions like block layout
 
-float get_border_box_width(ViewElement* item) {
+static float get_border_box_width(ViewElement* item) {
     // For flex items, item->width is ALWAYS the border-box width after flex layout completes,
     // regardless of the CSS box-sizing property. Flex layout computes border-box dimensions.
     // So we simply return item->width - no need to add padding/border.
@@ -5299,30 +5139,10 @@ float get_border_box_width(ViewElement* item) {
     return item->width;
 }
 
-float get_border_box_height(ViewElement* item) {
+static float get_border_box_height(ViewElement* item) {
     // For flex items, item->height is ALWAYS the border-box height after flex layout completes,
     // regardless of the CSS box-sizing property. Flex layout computes border-box dimensions.
     return item->height;
-}
-
-float get_content_width(ViewBlock* item) {
-    float border_box_width = get_border_box_width(item);
-    return layout_content_width_from_border_box(item, border_box_width);
-}
-
-float get_content_height(ViewBlock* item) {
-    float border_box_height = get_border_box_height(item);
-    return layout_content_height_from_border_box(item, border_box_height);
-}
-
-float get_border_offset_left(ViewBlock* item) {
-    BoxMetrics box = layout_box_metrics(item);
-    return box.border.left;
-}
-
-float get_border_offset_top(ViewBlock* item) {
-    BoxMetrics box = layout_box_metrics(item);
-    return box.border.top;
 }
 
 // Utility functions for axis-agnostic positioning
@@ -5339,7 +5159,7 @@ float get_main_axis_outer_size(ViewElement* item, FlexContainerLayout* flex_layo
     float base_size = is_main_axis_horizontal(flex_layout) ? get_border_box_width(item) : get_border_box_height(item);
 
     // defensive check: if base_size is NaN, use 0
-    if (std::isnan(base_size)) {
+    if (isnan(base_size)) {
         log_warn("NaN detected in base_size for item, using 0");
         base_size = 0.0f;
     }
@@ -5347,12 +5167,12 @@ float get_main_axis_outer_size(ViewElement* item, FlexContainerLayout* flex_layo
     // Include margins in main axis size for positioning calculations
     if (item->bound) {
         if (is_main_axis_horizontal(flex_layout)) {
-            float margin_left = std::isnan(item->bound->margin.left) ? 0.0f : item->bound->margin.left;
-            float margin_right = std::isnan(item->bound->margin.right) ? 0.0f : item->bound->margin.right;
+            float margin_left = isnan(item->bound->margin.left) ? 0.0f : item->bound->margin.left;
+            float margin_right = isnan(item->bound->margin.right) ? 0.0f : item->bound->margin.right;
             base_size += margin_left + margin_right;
         } else {
-            float margin_top = std::isnan(item->bound->margin.top) ? 0.0f : item->bound->margin.top;
-            float margin_bottom = std::isnan(item->bound->margin.bottom) ? 0.0f : item->bound->margin.bottom;
+            float margin_top = isnan(item->bound->margin.top) ? 0.0f : item->bound->margin.top;
+            float margin_bottom = isnan(item->bound->margin.bottom) ? 0.0f : item->bound->margin.bottom;
             base_size += margin_top + margin_bottom;
         }
     }

@@ -530,7 +530,7 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block) {
 
         // CSS 2.1 §10.8.1: "Negative values are not allowed" for line-height
         // Zero is a valid computed value; only negative/NaN falls back to 'normal'
-        if (resolved_height < 0 || std::isnan(resolved_height)) {
+        if (resolved_height < 0 || isnan(resolved_height)) {
             log_debug("%s invalid line-height: %f, falling back to normal", block->source_loc(), resolved_height);
             lycon->block.line_height = calc_normal_line_height(lycon->font.font_handle);
             lycon->block.line_height_is_normal = true;

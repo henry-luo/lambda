@@ -12,7 +12,7 @@
 
 #include "view.hpp"
 #include "rdt_vector.hpp"
-#include <cmath>
+#include <math.h>
 
 namespace radiant {
 
@@ -90,10 +90,10 @@ inline RdtMatrix compute_transform_matrix(TransformFunction* functions,
                 // Handle percentage values: resolve against element's own dimensions
                 float tx = tf->params.translate.x;
                 float ty = tf->params.translate.y;
-                if (!std::isnan(tf->translate_x_percent)) {
+                if (!isnan(tf->translate_x_percent)) {
                     tx = tf->translate_x_percent * width / 100.0f;
                 }
-                if (!std::isnan(tf->translate_y_percent)) {
+                if (!isnan(tf->translate_y_percent)) {
                     ty = tf->translate_y_percent * height / 100.0f;
                 }
                 m.e13 = tx;

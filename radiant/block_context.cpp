@@ -418,7 +418,7 @@ float block_context_find_y_for_width(BlockContext* ctx, float required_width, fl
             }
         }
 
-        if (next_y <= y || std::isinf(next_y) || next_y == FLT_MAX) {
+        if (next_y <= y || isinf(next_y) || next_y == FLT_MAX) {
             break;
         }
         y = next_y;

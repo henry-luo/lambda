@@ -1715,7 +1715,7 @@ static float evaluate_calc_expression(LayoutContext* lycon, uintptr_t raw_prop,
             // regular value
             float val = resolve_length_value(lycon, raw_prop, item);
             (*pos)++;
-            if (!std::isnan(val)) {
+            if (!isnan(val)) {
                 if (first_value) {
                     term = val; first_value = false;
                 } else if (pending_op == '*') {
@@ -4669,7 +4669,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             }
             float resolved = resolve_length_value(lycon, CSS_PROPERTY_MIN_WIDTH, value);
             // If resolve_length_value returns NAN (unresolvable), treat as 0 (no minimum)
-            if (std::isnan(resolved)) {
+            if (isnan(resolved)) {
                 block->blk->given_min_width = 0;
                 log_debug("[CSS] Min-width: unresolvable value (e.g. calc), treating as 0");
             } else {
@@ -4716,7 +4716,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             } else {
                 float resolved = resolve_length_value(lycon, CSS_PROPERTY_MAX_WIDTH, value);
                 // If resolve_length_value returns NAN (unresolvable), treat as 'none' (-1)
-                if (std::isnan(resolved)) {
+                if (isnan(resolved)) {
                     block->blk->given_max_width = -1;
                     log_debug("[CSS] Max-width: unresolvable value (e.g. calc), treating as 'none'");
                 } else {
@@ -4748,7 +4748,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             }
             float resolved = resolve_length_value(lycon, CSS_PROPERTY_MIN_HEIGHT, value);
             // If resolve_length_value returns NAN (unresolvable), treat as 0 (no minimum)
-            if (std::isnan(resolved)) {
+            if (isnan(resolved)) {
                 block->blk->given_min_height = 0;
                 log_debug("[CSS] Min-height: unresolvable value (e.g. calc), treating as 0");
             } else {
@@ -4789,7 +4789,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             }
             float resolved = resolve_length_value(lycon, CSS_PROPERTY_MAX_HEIGHT, value);
             // If resolve_length_value returns NAN (unresolvable), treat as 'none' (-1)
-            if (std::isnan(resolved)) {
+            if (isnan(resolved)) {
                 block->blk->given_max_height = -1;
                 log_debug("[CSS] Max-height: unresolvable value (e.g. calc), treating as 'none'");
             } else {

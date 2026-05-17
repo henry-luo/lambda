@@ -252,7 +252,7 @@ class LayoutDevTool {
       process.on('close', async (code) => {
         try {
           // Load the output and reference
-          const outputPath = '/tmp/view_tree.json';
+          const outputPath = path.join(this.projectRoot, 'temp', 'view_tree.json');
           let lambdaOutput = null;
 
           try {

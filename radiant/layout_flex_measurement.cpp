@@ -110,7 +110,7 @@ static float get_css_margin(LayoutContext* lycon, ViewElement* elem, CssProperty
             case CSS_PROPERTY_MARGIN_TOP:    val = elem->bound->margin.top; break;
             case CSS_PROPERTY_MARGIN_BOTTOM: val = elem->bound->margin.bottom; break;
         }
-        if (!std::isnan(val) && val >= 0) return val;
+        if (!isnan(val) && val >= 0) return val;
     }
 
     // Fall back to CSS declaration

@@ -17,8 +17,6 @@
 void layout_flex_content(LayoutContext* lycon, ViewBlock* flex_container);
 void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container);
 void run_enhanced_flex_algorithm(LayoutContext* lycon, ViewBlock* flex_container);
-bool has_main_axis_auto_margins(FlexLineInfo* line);
-void handle_main_axis_auto_margins(FlexContainerLayout* flex_layout, FlexLineInfo* line);
 bool has_auto_margins(ViewBlock* item);
 void apply_auto_margin_centering(LayoutContext* lycon, ViewBlock* flex_container);
 
@@ -635,11 +633,9 @@ void apply_auto_margin_centering(LayoutContext* lycon, ViewBlock* flex_container
 
     // Check each flex item for auto margins
     View* child = flex_container->first_child;
-    int item_count = 0;
     while (child) {
         if (child->view_type == RDT_VIEW_BLOCK) {
             ViewBlock* item = lam::view_require<RDT_VIEW_BLOCK>(child);
-            item_count++;
 
             if (has_auto_margins(item)) {
 
@@ -699,73 +695,6 @@ bool has_auto_margins(ViewBlock* item) {
     if (!item) return false;
     return item->bound && (item->bound->margin.left_type == CSS_VALUE_AUTO || item->bound->margin.right_type == CSS_VALUE_AUTO ||
            item->bound->margin.top_type == CSS_VALUE_AUTO || item->bound->margin.bottom_type == CSS_VALUE_AUTO);
-}
-
-// Simplified implementations that use existing functions
-
-// Collect flex items with measured sizes
-void collect_flex_items_with_measurements(FlexContainerLayout* flex_layout, ViewBlock* container) {
-    // Use existing implementation for now
-    // TODO: Add measurement-based flex item collection in the future
-}
-
-// Calculate flex basis using measured content
-void calculate_flex_basis_with_measurements(FlexContainerLayout* flex_layout) {
-    // In the future, we can enhance this to use measured content sizes
-}
-
-// Enhanced flexible length resolution
-void resolve_flexible_lengths_with_measurements(FlexContainerLayout* flex_layout, FlexLineInfo* line) {
-    if (!line || line->item_count == 0) return;
-
-    // Use existing resolve_flexible_lengths function as base
-    resolve_flexible_lengths(flex_layout, line);
-}
-
-// Enhanced main axis alignment with proper auto margin handling
-void align_items_main_axis_enhanced(FlexContainerLayout* flex_layout, FlexLineInfo* line) {
-
-    if (!line || line->item_count == 0) return;
-
-    // For now, just use existing align_items_main_axis function
-    // TODO: Add auto margin handling later
-
-    // Use existing align_items_main_axis function
-    align_items_main_axis(flex_layout, line);
-}
-
-// Check if any items have main axis auto margins
-bool has_main_axis_auto_margins(FlexLineInfo* line) {
-    for (int i = 0; i < line->item_count; i++) {
-        ViewElement* item = lam::view_as_element(line->items[i]);
-        if (item && item->bound && (item->bound->margin.left_type == CSS_VALUE_AUTO || item->bound->margin.right_type == CSS_VALUE_AUTO ||
-            item->bound->margin.top_type == CSS_VALUE_AUTO || item->bound->margin.bottom_type == CSS_VALUE_AUTO)) {
-            return true;
-        }
-    }
-    return false;
-}
-
-// Handle main axis auto margins
-void handle_main_axis_auto_margins(FlexContainerLayout* flex_layout, FlexLineInfo* line) {
-    // For now, implement simple centering for items with auto margins
-    for (int i = 0; i < line->item_count; i++) {
-        ViewElement* item = lam::view_as_element(line->items[i]);
-        if (!item) continue;
-        bool main_start_auto = is_main_axis_horizontal(flex_layout) ?
-            item->bound && item->bound->margin.left_type == CSS_VALUE_AUTO : item->bound && item->bound->margin.top_type == CSS_VALUE_AUTO;
-        bool main_end_auto = is_main_axis_horizontal(flex_layout) ?
-            item->bound && item->bound->margin.right_type == CSS_VALUE_AUTO : item->bound && item->bound->margin.bottom_type == CSS_VALUE_AUTO;
-
-        if (main_start_auto && main_end_auto) {
-            // Center the item
-            float container_size = flex_layout->main_axis_size;
-            float item_size = get_main_axis_size(item, flex_layout);
-            float center_pos = (container_size - item_size) / 2;
-
-            set_main_axis_position(item, center_pos, flex_layout);
-        }
-    }
 }
 
 // Enhanced flex item content layout with full HTML nested content support
@@ -2271,8 +2200,6 @@ void layout_flex_content(LayoutContext* lycon, ViewBlock* block) {
         log_debug("Updated font context for flex container: font-size=%.1f", block->font->font_size);
     }
 
-    FlexContainerLayout* pa_flex = lycon->flex_container;
-
     // PASS 2: Run enhanced flex algorithm with nested content support
     // layout_flex_container_with_nested_content handles init_flex_container +
     // collect_and_prepare_flex_items internally, so we don't duplicate that here.
@@ -2296,8 +2223,7 @@ void layout_flex_content(LayoutContext* lycon, ViewBlock* block) {
     radiant::layout_pass_cache_store(lycon, dom_elem, known_dims, result, "FLEX");
 
     // Note: layout_flex_container_with_nested_content handles its own
-    // init_flex_container + cleanup_flex_container + pa_flex restore.
-    // lycon->flex_container is already restored to pa_flex at this point.
+    // init_flex_container, cleanup_flex_container, and parent flex restore.
 
     log_info("FLEX LAYOUT END: container=%p", block);
     log_leave();
