@@ -1,6 +1,7 @@
 #include "grid.hpp"
 #include "view.hpp"
 #include "layout_alignment.hpp"
+#include "layout_box.hpp"
 #include "layout_positioned.hpp"
 #include "../lib/scratch_arena.h"
 #include "../lib/tagged.hpp"
@@ -214,14 +215,28 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
         float item_width = track_width;
         float item_height = track_height;
 
-        // Check if item has explicit CSS width
-        if (item->blk && item->blk->given_width > 0) {
-            item_width = item->blk->given_width;
-        }
+        if (item->blk) {
+            // Percentage sizes on grid items resolve against the final grid area,
+            // which is only known after track sizing and placement.
+            if (!isnan(item->blk->given_width_percent)) {
+                float content_width = track_width * item->blk->given_width_percent / 100.0f;
+                item->blk->given_width = content_width;
+                item_width = item->blk->box_sizing == CSS_VALUE_BORDER_BOX
+                    ? layout_floor_border_box_width(item, content_width)
+                    : layout_border_width_from_content_box(item, content_width);
+            } else if (item->blk->given_width > 0) {
+                item_width = item->blk->given_width;
+            }
 
-        // Check if item has explicit CSS height
-        if (item->blk && item->blk->given_height > 0) {
-            item_height = item->blk->given_height;
+            if (!isnan(item->blk->given_height_percent)) {
+                float content_height = track_height * item->blk->given_height_percent / 100.0f;
+                item->blk->given_height = content_height;
+                item_height = item->blk->box_sizing == CSS_VALUE_BORDER_BOX
+                    ? layout_floor_border_box_height(item, content_height)
+                    : layout_border_height_from_content_box(item, content_height);
+            } else if (item->blk->given_height > 0) {
+                item_height = item->blk->given_height;
+            }
         }
 
         // CSS Box Model: border-box minimum — the box cannot be smaller than padding+border

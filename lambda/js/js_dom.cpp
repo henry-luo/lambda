@@ -4197,6 +4197,12 @@ static bool _is_int_reflected(DomElement* elem, const char* prop,
     if (strcmp(prop, "size") == 0 && input) {
         *attr_name = "size"; *default_val = 20; return true;
     }
+    if (strcmp(prop, "width") == 0 && input) {
+        *attr_name = "width"; *default_val = 0; return true;
+    }
+    if (strcmp(prop, "height") == 0 && input) {
+        *attr_name = "height"; *default_val = 0; return true;
+    }
     if (strcmp(prop, "size") == 0 && select) {
         *attr_name = "size"; *default_val = 0; return true;
     }
@@ -5199,6 +5205,12 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
     }
     // HTMLInputElement: maxLength (default -1), minLength (default 0), size (default 20)
     if (_is_tag(elem, "input")) {
+        if (strcmp(prop, "width") == 0) {
+            return (Item){.item = i2it(_reflect_int_attr("width", 0))};
+        }
+        if (strcmp(prop, "height") == 0) {
+            return (Item){.item = i2it(_reflect_int_attr("height", 0))};
+        }
         if (strcmp(prop, "maxLength") == 0) {
             const char* v = dom_element_get_attribute(elem, "maxlength");
             if (!v) return (Item){.item = i2it(-1)};

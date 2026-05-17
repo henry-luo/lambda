@@ -23,10 +23,15 @@ typedef struct BoxMetrics {
 
 BoxMetrics layout_box_metrics(ViewBlock* block);
 
+float layout_padding_border_width(ViewBlock* block);
+float layout_padding_border_height(ViewBlock* block);
+
 float layout_content_width_from_border_box(ViewBlock* block, float border_width);
 float layout_content_height_from_border_box(ViewBlock* block, float border_height);
 float layout_border_width_from_content_box(ViewBlock* block, float content_width);
 float layout_border_height_from_content_box(ViewBlock* block, float content_height);
+float layout_floor_border_box_width(ViewBlock* block, float border_width);
+float layout_floor_border_box_height(ViewBlock* block, float border_height);
 
 float layout_apply_min_max_width(ViewBlock* block, float width, bool width_is_border_box);
 float layout_apply_min_max_height(ViewBlock* block, float height, bool height_is_border_box);

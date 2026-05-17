@@ -14,8 +14,8 @@ typedef struct IntrinsicSize {
 
 IntrinsicSize layout_measure_intrinsic(LayoutContext* lycon, DomNode* node,
     AvailableSpace space);
-IntrinsicSize layout_measure_replaced(ViewBlock* block, AvailableSpace space);
-IntrinsicSize layout_measure_form_control(ViewBlock* block, AvailableSpace space);
+IntrinsicSize layout_measure_replaced(LayoutContext* lycon, ViewBlock* block, AvailableSpace space);
+IntrinsicSize layout_measure_form_control(LayoutContext* lycon, ViewBlock* block, AvailableSpace space);
 
 IntrinsicSizes layout_measure_intrinsic_widths(LayoutContext* lycon, DomElement* element,
     const char* log_context = nullptr, bool content_only = false);

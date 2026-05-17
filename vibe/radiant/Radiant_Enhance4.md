@@ -459,6 +459,17 @@ Recommended test matrix:
 | Inline/text | whitespace, line-height, vertical-align, CJK, trailing spaces |
 | Performance | large markdown table, image-heavy docs, deeply nested layout |
 
+Seed fixtures now added under `test/layout/data/baseline/`:
+
+- `radiant_box_model_minmax_negative_clamp.html`
+- `radiant_containing_block_percent_nested_flex_grid.html`
+- `radiant_abspos_flex_reverse_static.html`
+- `radiant_abspos_grid_named_area.html`
+- `radiant_form_replaced_measure_cache.html`
+- `radiant_inline_block_baseline_cells.html`
+- `radiant_table_caption_box_width.html`
+- `radiant_text_whitespace_trailing_spaces.html`
+
 For each refactor phase:
 
 1. Run existing baseline layout tests.

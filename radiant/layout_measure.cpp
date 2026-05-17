@@ -1,18 +1,34 @@
 #include "layout_measure.hpp"
 #include "form_control.hpp"
+#include "layout_pass.hpp"
 
 #include "../lib/log.h"
 #include "../lib/tagged.hpp"
 #include <string.h>
+
+void layout_form_control(LayoutContext* lycon, ViewBlock* block);
 
 IntrinsicSize layout_measure_intrinsic(LayoutContext* lycon, DomNode* node,
     AvailableSpace space) {
     IntrinsicSize result = {};
     if (!lycon || !node) return result;
 
+    radiant::LayoutMeasureScope measure_scope(lycon, node);
+    lycon->available_space = space;
+
     if (node->is_element()) {
         ViewBlock* block = lam::view_as_block(node->as_element());
         if (!block) return result;
+
+        if (block->item_prop_type == DomElement::ITEM_PROP_FORM && block->form) {
+            return layout_measure_form_control(lycon, block, space);
+        }
+        if (block->display.inner == RDT_DISPLAY_REPLACED ||
+            block->tag() == HTM_TAG_IMG || block->tag() == HTM_TAG_IFRAME ||
+            block->tag() == HTM_TAG_VIDEO || block->tag() == HTM_TAG_EMBED ||
+            (block->tag() == HTM_TAG_OBJECT && block->get_attribute("data"))) {
+            return layout_measure_replaced(lycon, block, space);
+        }
 
         IntrinsicSizesBidirectional sizes = measure_intrinsic_sizes(lycon, block, space);
         result.min_width = sizes.min_content_width;
@@ -34,10 +50,46 @@ IntrinsicSize layout_measure_intrinsic(LayoutContext* lycon, DomNode* node,
     return result;
 }
 
-IntrinsicSize layout_measure_replaced(ViewBlock* block, AvailableSpace space) {
-    (void)space;
+static bool layout_measure_cache_get(LayoutContext* lycon, ViewBlock* block,
+    AvailableSpace space, IntrinsicSize* out, const char* label) {
+    if (!lycon || !block || !out) return false;
+    DomElement* element = block->as_element();
+    if (!element) return false;
+
+    radiant::SizeF cached = radiant::size_f_zero();
+    radiant::KnownDimensions known = radiant::layout_known_dimensions_from_block(block);
+    if (!radiant::layout_pass_cache_get_for_space(lycon, element, known, space, &cached, label)) {
+        return false;
+    }
+
+    out->min_width = cached.width;
+    out->max_width = cached.width;
+    out->min_height = cached.height;
+    out->max_height = cached.height;
+    return true;
+}
+
+static void layout_measure_cache_store(LayoutContext* lycon, ViewBlock* block,
+    AvailableSpace space, IntrinsicSize result, const char* label) {
+    if (!lycon || !block) return;
+    DomElement* element = block->as_element();
+    if (!element) return;
+
+    radiant::KnownDimensions known = radiant::layout_known_dimensions_from_block(block);
+    radiant::SizeF size = radiant::size_f(result.max_width, result.max_height);
+    radiant::layout_pass_cache_store_for_space(lycon, element, known, space, size, label);
+}
+
+IntrinsicSize layout_measure_replaced(LayoutContext* lycon, ViewBlock* block, AvailableSpace space) {
     IntrinsicSize result = {};
     if (!block) return result;
+
+    radiant::LayoutMeasureScope measure_scope(lycon, block);
+    if (lycon) lycon->available_space = space;
+
+    if (layout_measure_cache_get(lycon, block, space, &result, "REPLACED_MEASURE")) {
+        return result;
+    }
 
     float width = block->width > 0.0f ? block->width : 0.0f;
     float height = block->height > 0.0f ? block->height : 0.0f;
@@ -45,24 +97,58 @@ IntrinsicSize layout_measure_replaced(ViewBlock* block, AvailableSpace space) {
         if (block->embed->img->width > 0) width = (float)block->embed->img->width;
         if (block->embed->img->height > 0) height = (float)block->embed->img->height;
     }
+    uintptr_t tag = block->tag();
+    if (width <= 0.0f || height <= 0.0f) {
+        if (tag == HTM_TAG_IFRAME || tag == HTM_TAG_VIDEO || tag == HTM_TAG_CANVAS ||
+            tag == HTM_TAG_OBJECT || tag == HTM_TAG_EMBED || tag == HTM_TAG_SVG) {
+            if (width <= 0.0f) width = 300.0f;
+            if (height <= 0.0f) height = 150.0f;
+        } else if (tag == HTM_TAG_AUDIO) {
+            if (width <= 0.0f) width = 300.0f;
+            if (height <= 0.0f) height = 54.0f;
+        } else if (tag == HTM_TAG_METER) {
+            if (width <= 0.0f) width = FormDefaults::METER_WIDTH;
+            if (height <= 0.0f) height = FormDefaults::METER_HEIGHT;
+        } else if (tag == HTM_TAG_PROGRESS) {
+            if (width <= 0.0f) width = FormDefaults::PROGRESS_WIDTH;
+            if (height <= 0.0f) height = FormDefaults::PROGRESS_HEIGHT;
+        }
+    }
     result.min_width = width;
     result.max_width = width;
     result.min_height = height;
     result.max_height = height;
+    layout_measure_cache_store(lycon, block, space, result, "REPLACED_MEASURE");
     return result;
 }
 
-IntrinsicSize layout_measure_form_control(ViewBlock* block, AvailableSpace space) {
-    (void)space;
+IntrinsicSize layout_measure_form_control(LayoutContext* lycon, ViewBlock* block, AvailableSpace space) {
     IntrinsicSize result = {};
     if (!block || !block->form) return result;
 
+    radiant::LayoutMeasureScope measure_scope(lycon, block);
+    if (lycon) lycon->available_space = space;
+
+    if (layout_measure_cache_get(lycon, block, space, &result, "FORM_MEASURE")) {
+        return result;
+    }
+
     float width = block->form->intrinsic_width > 0.0f ? block->form->intrinsic_width : block->width;
     float height = block->form->intrinsic_height > 0.0f ? block->form->intrinsic_height : block->height;
+
+    if (lycon && lycon->ui_context) {
+        layout_form_control(lycon, block);
+        if (block->content_width > 0.0f) width = block->content_width;
+        else if (block->width > 0.0f) width = block->width;
+        if (block->content_height > 0.0f) height = block->content_height;
+        else if (block->height > 0.0f) height = block->height;
+    }
+
     result.min_width = width > 0.0f ? width : 0.0f;
     result.max_width = result.min_width;
     result.min_height = height > 0.0f ? height : 0.0f;
     result.max_height = result.min_height;
+    layout_measure_cache_store(lycon, block, space, result, "FORM_MEASURE");
     return result;
 }
 

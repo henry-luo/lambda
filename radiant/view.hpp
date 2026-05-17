@@ -1209,12 +1209,6 @@ typedef struct EmbedProp {
     struct RdtVideo* video;  // video playback context (NULL for non-video elements)
     ImageSurface* poster;    // poster image for <video> (displayed before playback starts)
     bool has_controls;       // true if <video controls> attribute present
-    // Math layout data (legacy)
-    void* math_box;              // legacy: was MathBox* - deprecated
-    Item math_node;              // source Lambda math node
-    bool math_is_display;        // display vs inline math
-    float math_baseline_offset;  // baseline offset for alignment
-    struct Arena* math_arena;    // arena for math box allocation
 } EmbedProp;
 
 struct ViewBlock : ViewSpan {

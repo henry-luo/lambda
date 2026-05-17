@@ -132,35 +132,6 @@ int find_grid_line_by_name(GridContainerLayout* grid, const char* name, bool is_
     return 0; // Not found
 }
 
-// Resolve grid line position
-int resolve_grid_line_position(GridContainerLayout* grid_layout, int line_value, const char* line_name, bool is_row, bool is_end_line) {
-    if (!grid_layout) return 1;
-
-    // If line name is provided, try to resolve it first
-    if (line_name) {
-        int named_line = find_grid_line_by_name(grid_layout, line_name, is_row);
-        if (named_line > 0) {
-            return named_line;
-        }
-    }
-
-    // If line value is provided, use it
-    if (line_value != 0) {
-        if (line_value < 0) {
-            // Negative values count from the end of the explicit grid
-            int track_count = is_row ? grid_layout->explicit_row_count : grid_layout->explicit_column_count;
-            if (track_count == 0) track_count = 1;
-            int resolved = track_count + line_value + 2;
-            if (resolved < 1) resolved = 1;
-            return resolved;
-        }
-        return line_value;
-    }
-
-    // Default to auto (will be resolved during auto-placement)
-    return 0;
-}
-
 // Enhanced grid template areas parser
 // Parses CSS grid-template-areas syntax like:
 //   "header header header"

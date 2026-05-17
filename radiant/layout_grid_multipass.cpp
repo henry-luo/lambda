@@ -10,6 +10,7 @@
 #include "layout_pass.hpp"
 #include "layout_abs_children.hpp"
 #include "layout_measure.hpp"
+#include "layout_box.hpp"
 #include "grid_baseline.hpp"
 #include "../lib/tagged.hpp"
 
@@ -178,16 +179,11 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
                 if (item->blk && item->blk->given_max_height >= 0) {
                     float bb_max = item->blk->given_max_height;
                     bool is_border_box = (item->blk->box_sizing == CSS_VALUE_BORDER_BOX);
-                    if (!is_border_box && item->bound) {
-                        bb_max += item->bound->padding.top + item->bound->padding.bottom;
-                        if (item->bound->border)
-                            bb_max += item->bound->border->width.top + item->bound->border->width.bottom;
+                    if (!is_border_box) {
+                        bb_max = layout_border_height_from_content_box(item, bb_max);
                     }
-                    if (is_border_box && item->bound) {
-                        float pad_border = item->bound->padding.top + item->bound->padding.bottom;
-                        if (item->bound->border)
-                            pad_border += item->bound->border->width.top + item->bound->border->width.bottom;
-                        if (bb_max < pad_border) bb_max = pad_border;
+                    if (is_border_box) {
+                        bb_max = layout_floor_border_box_height(item, bb_max);
                     }
                     if (h > bb_max) h = bb_max;
                 }
@@ -653,26 +649,16 @@ void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
     if (item->blk) {
         if (item->blk->given_width > 0) {
             float w = item->blk->given_width;
-            // CSS Box Model: border-box cannot be smaller than padding+border
-            if (item->blk->box_sizing == CSS_VALUE_BORDER_BOX && item->bound) {
-                float h_pb = item->bound->padding.left + item->bound->padding.right;
-                if (item->bound->border) {
-                    h_pb += item->bound->border->width.left + item->bound->border->width.right;
-                }
-                if (w < h_pb) w = h_pb;
+            if (item->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
+                w = layout_floor_border_box_width(item, w);
             }
             *min_width = *max_width = w;
             has_explicit_width = true;
         }
         if (item->blk->given_height > 0) {
             float h = item->blk->given_height;
-            // CSS Box Model: border-box cannot be smaller than padding+border
-            if (item->blk->box_sizing == CSS_VALUE_BORDER_BOX && item->bound) {
-                float v_pb = item->bound->padding.top + item->bound->padding.bottom;
-                if (item->bound->border) {
-                    v_pb += item->bound->border->width.top + item->bound->border->width.bottom;
-                }
-                if (h < v_pb) h = v_pb;
+            if (item->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
+                h = layout_floor_border_box_height(item, h);
             }
             *min_height = *max_height = h;
             has_explicit_height = true;

@@ -49,24 +49,9 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container);
 
 // Flex item collection and management
 int collect_and_prepare_flex_items(LayoutContext* lycon, FlexContainerLayout* flex_layout, ViewBlock* container);
-void sort_flex_items_by_order(View** items, int count);
-
-// Flex line creation
-int create_flex_lines(FlexContainerLayout* flex_layout, View** items, int item_count);
-void calculate_line_cross_sizes(FlexContainerLayout* flex_layout);
-
-// Hypothetical cross size determination (CSS Flexbox spec §9.4)
-// Computes hypothetical cross sizes for all flex items before line cross-size calculation
-void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContainerLayout* flex_layout);
-
-// Container cross size determination (CSS Flexbox spec §9.4)
-// Computes the flex container's cross size from line cross sizes
-void determine_container_cross_size(FlexContainerLayout* flex_layout, ViewBlock* container);
 
 // Flexible length resolution
-void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* line);
 float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout);
-void distribute_free_space(FlexLineInfo* line, bool is_growing);
 
 // Constraint resolution
 void resolve_flex_item_constraints(ViewElement* item, FlexContainerLayout* flex_layout);
@@ -85,19 +70,6 @@ float apply_stretch_constraint(ViewElement* item, float container_cross_size,
 void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line);
 void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line);
 void align_content(FlexContainerLayout* flex_layout);
-
-// Overflow fallback alignment (Yoga-inspired)
-// Returns safe alignment value when remaining space is negative
-int fallback_alignment(int align);
-int fallback_justify(int justify);
-
-// Baseline calculation (Yoga-inspired)
-// Recursive baseline calculation through nested flex containers
-float calculate_baseline_recursive(View* node, FlexContainerLayout* flex_layout);
-bool is_baseline_layout(ViewBlock* node, FlexContainerLayout* flex_layout);
-
-// Wrap-reverse final position adjustment
-void apply_wrap_reverse_positions(FlexContainerLayout* flex_layout, ViewBlock* container);
 
 // Baseline repositioning after nested content layout
 // Called after layout_final_flex_content() to recalculate baselines with actual child dimensions
@@ -121,14 +93,9 @@ float get_item_flex_basis(ViewElement* item);
 bool get_item_flex_basis_is_percent(ViewElement* item);
 
 // Helper functions for constraints and percentages
-float clamp_value(float value, float min_val, float max_val);
-int resolve_percentage(int value, bool is_percent, int container_size);
-void apply_constraints(ViewElement* item, int container_width, int container_height);
 float find_max_baseline(FlexLineInfo* line, int container_align_items);
-bool is_valid_flex_item(ViewElement* item);
 
 // Gap handling
 float calculate_gap_space(FlexContainerLayout* flex_layout, int item_count, bool is_main_axis);
-void apply_gaps(FlexContainerLayout* flex_layout, FlexLineInfo* line);
 
 #endif // LAYOUT_FLEX_HPP

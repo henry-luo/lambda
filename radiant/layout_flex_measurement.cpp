@@ -2,6 +2,7 @@
 #include "layout_flex.hpp"
 #include "layout_flex_measurement.hpp"
 #include "intrinsic_sizing.hpp"
+#include "layout_measure.hpp"
 #include "form_control.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
@@ -977,9 +978,11 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
 
         // Special handling for form controls - use intrinsic size as content
         if (elem && elem->item_prop_type == DomElement::ITEM_PROP_FORM && elem->form) {
-            // Form controls have intrinsic sizes stored in form property
-            content_height = elem->form->intrinsic_height;
-            content_width = elem->form->intrinsic_width;
+            ViewBlock* elem_block = lam::view_as_block(elem);
+            IntrinsicSize form_size = layout_measure_form_control(lycon, elem_block,
+                                                                  lycon->available_space);
+            content_height = form_size.max_height;
+            content_width = form_size.max_width;
 
             // For text-like inputs, recalculate content height using actual font
             // (CSS may override UA font-size, so intrinsic_height from UA phase may be stale)
