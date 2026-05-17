@@ -573,7 +573,10 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                 }
                 g_style_resolve_count++;
                 auto t_end = high_resolution_clock::now();
-                g_style_resolve_time += duration<double, std::milli>(t_end - t_start).count();
+                double elapsed_ms = duration<double, std::milli>(t_end - t_start).count();
+                g_style_resolve_time += elapsed_ms;
+                radiant::layout_profiler_record_node(&lycon->profiler,
+                    radiant::LAYOUT_PROFILE_STYLE, node, elapsed_ms);
                 return;  // early return - reuse existing styles
             }
 
@@ -706,8 +709,11 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
     }
 
     auto t_end = high_resolution_clock::now();
-    g_style_resolve_time += duration<double, std::milli>(t_end - t_start).count();
+    double elapsed_ms = duration<double, std::milli>(t_end - t_start).count();
+    g_style_resolve_time += elapsed_ms;
     g_style_resolve_count++;
+    radiant::layout_profiler_record_node(&lycon->profiler,
+        radiant::LAYOUT_PROFILE_STYLE, node, elapsed_ms);
 }
 
 float calculate_vertical_align_offset(LayoutContext* lycon, CssEnum align, float item_height, float line_height, float baseline_pos, float item_baseline, float valign_offset) {
@@ -2247,6 +2253,8 @@ void reset_styles_resolved(DomDocument* doc) {
 void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
     memset(lycon, 0, sizeof(LayoutContext));
     lycon->doc = doc;  lycon->ui_context = uicon;
+    radiant::layout_debug_init(&lycon->layout_debug);
+    radiant::layout_profiler_init(&lycon->profiler);
 
     // Initialize run mode to full layout (default for layout_html_doc)
     // Measurement passes will override this to ComputeSize
@@ -2403,6 +2411,16 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     double layout_ms = duration<double, std::milli>(t_layout - t_init).count();
     log_info("[TIMING] layout_html_root: %.1fms", layout_ms);
     fprintf(stderr, "[LAYOUT_PROF] layout_html_root: %.1fms\n", layout_ms);
+
+    radiant::layout_profiler_set_bucket(&lycon.profiler, radiant::LAYOUT_PROFILE_STYLE, g_style_resolve_time);
+    radiant::layout_profiler_set_bucket(&lycon.profiler, radiant::LAYOUT_PROFILE_TEXT, g_text_layout_time);
+    radiant::layout_profiler_set_bucket(&lycon.profiler, radiant::LAYOUT_PROFILE_BLOCK, g_block_layout_time);
+    radiant::layout_profiler_set_bucket(&lycon.profiler, radiant::LAYOUT_PROFILE_INLINE, g_inline_layout_time);
+    radiant::layout_profiler_set_bucket(&lycon.profiler, radiant::LAYOUT_PROFILE_TABLE, g_table_layout_time);
+    radiant::layout_profiler_set_bucket(&lycon.profiler, radiant::LAYOUT_PROFILE_FLEX, g_flex_layout_time);
+    radiant::layout_profiler_set_bucket(&lycon.profiler, radiant::LAYOUT_PROFILE_GRID, g_grid_layout_time);
+    radiant::layout_profiler_set_cache(&lycon.profiler, g_layout_cache_hits, g_layout_cache_misses);
+    radiant::layout_profiler_report(&lycon);
 
     log_debug("calling layout_cleanup...");
     layout_cleanup(&lycon);

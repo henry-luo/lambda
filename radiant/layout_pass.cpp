@@ -230,17 +230,24 @@ bool layout_pass_cache_get_for_space(::LayoutContext* lycon, ::DomElement* eleme
     if (layout_cache_get(element->layout_cache, known_dimensions, available_space,
                          lycon->run_mode, out_size)) {
         g_layout_cache_hits++;
+        layout_profiler_note_cache_hit(&lycon->profiler);
         log_info("%s %s CACHE HIT: element=%s, size=(%.1f x %.1f), mode=%d",
                  element->source_loc(), label ? label : "LAYOUT",
                  element->node_name(), out_size->width, out_size->height,
                  (int)lycon->run_mode); // INT_CAST_OK: enum for log
+        layout_debug_log(lycon, LAYOUT_DEBUG_CACHE, element,
+                         "%s cache hit size=(%.1f x %.1f)",
+                         label ? label : "LAYOUT", out_size->width, out_size->height);
         return true;
     }
 
     g_layout_cache_misses++;
+    layout_profiler_note_cache_miss(&lycon->profiler);
     log_debug("%s %s CACHE MISS: element=%s, mode=%d",
               element->source_loc(), label ? label : "LAYOUT",
               element->node_name(), (int)lycon->run_mode); // INT_CAST_OK: enum for log
+    layout_debug_log(lycon, LAYOUT_DEBUG_CACHE, element,
+                     "%s cache miss", label ? label : "LAYOUT");
     return false;
 }
 
@@ -266,6 +273,9 @@ void layout_pass_cache_store_for_space(::LayoutContext* lycon, ::DomElement* ele
               element->source_loc(), label ? label : "LAYOUT",
               element->node_name(), result.width, result.height,
               (int)lycon->run_mode); // INT_CAST_OK: enum for log
+    layout_debug_log(lycon, LAYOUT_DEBUG_CACHE, element,
+                     "%s cache store size=(%.1f x %.1f)",
+                     label ? label : "LAYOUT", result.width, result.height);
 }
 
 } // namespace radiant

@@ -285,7 +285,12 @@ New or expanded modules:
 | `layout_abs_children.hpp/cpp` | Shared absolute/fixed child loop and context setup |
 | `layout_pass.hpp/cpp` | Pass enter/leave, cache lookup/store, mode guards |
 | `layout_measure.hpp/cpp` | Public intrinsic/replaced/form measurement facade |
-| `layout_debug.hpp/cpp` | Structured layout logging helpers and optional snapshots |
+| `layout_debug.hpp/cpp` | Structured layout logging helpers and layout profiling buckets |
+
+Implemented now:
+
+- `layout_debug.hpp/cpp` provides category-gated debug logs via `LAYOUT_DEBUG=box,pass,abs,flex,grid,table,text,cache` or `LAYOUT_DEBUG=all`.
+- `LayoutProfiler` is stored on `LayoutContext`, enabled by `LAYOUT_PROFILE=1`, and reports timing buckets plus cache hit/miss counts.
 
 Target ownership after extraction:
 
@@ -422,7 +427,7 @@ Then audit each layout mode for measurement leaks.
 
 ### 4. Add Targeted Timing Buckets
 
-Existing global timers are useful but scattered. Wrap them in a single `LayoutProfiler` struct:
+Existing global timers are useful but scattered. They are now wrapped in a single `LayoutProfiler` struct:
 
 ```cpp
 typedef struct LayoutProfiler {
@@ -440,7 +445,7 @@ typedef struct LayoutProfiler {
 } LayoutProfiler;
 ```
 
-Report top offenders by node/source location in release layout profiling. Do not use debug builds for performance testing.
+`LayoutProfiler` is wired into style resolution, intrinsic measurement scopes, layout pass cache accounting, and the existing block/inline/text/flex/grid/table global timers. Profiling reports top offenders by node/source location through normal logging when `LAYOUT_PROFILE=1` is set. Do not use debug builds for performance testing.
 
 ## Testing Improvements
 
@@ -467,6 +472,8 @@ Seed fixtures now added under `test/layout/data/baseline/`:
 - `radiant_abspos_grid_named_area.html`
 - `radiant_form_replaced_measure_cache.html`
 - `radiant_inline_block_baseline_cells.html`
+- `radiant_inline_block_baseline_grid_cell.html`
+- `radiant_float_bfc_root_avoidance.html`
 - `radiant_table_caption_box_width.html`
 - `radiant_text_whitespace_trailing_spaces.html`
 

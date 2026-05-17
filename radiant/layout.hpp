@@ -16,6 +16,7 @@
 #include "layout_mode.hpp"
 #include "layout_cache.hpp"
 #include "layout_counters.hpp"
+#include "layout_debug.hpp"
 #include "layout_box.hpp"
 #include "layout_containing_block.hpp"
 #include "../lambda/input/css/dom_element.hpp"
@@ -375,6 +376,10 @@ typedef struct LayoutContext {
 
     // Total node count guard against pathological layouts (fuzzer-found timeouts)
     int node_count;
+
+    // Structured layout debug categories and optional release profiling buckets
+    radiant::LayoutDebugState layout_debug;
+    radiant::LayoutProfiler profiler;
 } LayoutContext;
 
 // ============================================================================

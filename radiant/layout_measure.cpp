@@ -13,6 +13,7 @@ IntrinsicSize layout_measure_intrinsic(LayoutContext* lycon, DomNode* node,
     IntrinsicSize result = {};
     if (!lycon || !node) return result;
 
+    radiant::LayoutProfileScope profile_scope(lycon, radiant::LAYOUT_PROFILE_INTRINSIC, node);
     radiant::LayoutMeasureScope measure_scope(lycon, node);
     lycon->available_space = space;
 
@@ -157,6 +158,7 @@ IntrinsicSizes layout_measure_intrinsic_widths(LayoutContext* lycon, DomElement*
     IntrinsicSizes sizes = {};
     if (!lycon || !element) return sizes;
 
+    radiant::LayoutProfileScope profile_scope(lycon, radiant::LAYOUT_PROFILE_INTRINSIC, element);
     sizes = measure_element_intrinsic_widths(lycon, element, content_only);
     if (log_context) {
         log_debug("[LAYOUT_MEASURE] %s element=%s min=%.1f max=%.1f",
