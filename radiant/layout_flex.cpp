@@ -8,6 +8,7 @@
 #include "layout_alignment.hpp"
 #include "layout_axis.hpp"
 #include "layout_measure.hpp"
+#include "layout_box.hpp"
 extern "C" {
 #include <stdlib.h>
 #include <string.h>
@@ -1021,15 +1022,10 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                             item_width = item->blk->given_max_width;
                         if (item->blk->given_min_width >= 0 && item_width < item->blk->given_min_width)
                             item_width = item->blk->given_min_width;
-                        // CSS Box Model: In border-box, the box cannot be smaller than
-                        // its padding+border (content area floors at 0).
-                        if (item->blk->box_sizing == CSS_VALUE_BORDER_BOX && item->bound) {
-                            float pad_border = item->bound->padding.left + item->bound->padding.right;
-                            if (item->bound->border) {
-                                pad_border += item->bound->border->width.left + item->bound->border->width.right;
-                            }
-                            if (item_width < pad_border) {
-                                item_width = pad_border;
+                        if (item->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
+                            ViewBlock* item_block = lam::view_as_block(item);
+                            if (item_block) {
+                                item_width = layout_floor_border_box_width(item_block, item_width);
                             }
                         }
                     }
@@ -5661,7 +5657,10 @@ static void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContain
 
             // Form controls use intrinsic sizes directly - don't read fi (union aliasing)
             if (item->item_prop_type == DomElement::ITEM_PROP_FORM && item->form) {
-                float cross = is_horizontal ? item->form->intrinsic_height : item->form->intrinsic_width;
+                ViewBlock* item_block = lam::view_as_block(item);
+                IntrinsicSize form_size = layout_measure_form_control(lycon, item_block,
+                                                                      lycon->available_space);
+                float cross = is_horizontal ? form_size.max_height : form_size.max_width;
                 // For text-like inputs, recalculate content height from actual font
                 // (CSS may override UA font-size set during resolve_htm_style)
                 if (is_horizontal && item->form->control_type == FORM_CONTROL_TEXT &&

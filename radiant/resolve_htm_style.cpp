@@ -1543,9 +1543,37 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         case FORM_CONTROL_IMAGE:
             block->display.outer = CSS_VALUE_INLINE_BLOCK;
             block->blk->box_sizing = CSS_VALUE_BORDER_BOX;
-            // Image button is a replaced element; use broken-image fallback dimensions
-            block->form->intrinsic_width = FormDefaults::IMAGE_INPUT_WIDTH;
-            block->form->intrinsic_height = FormDefaults::IMAGE_INPUT_HEIGHT;
+            // Image button is a replaced element; width/height content attributes
+            // override the missing-image fallback dimensions.
+            {
+                float image_width = FormDefaults::IMAGE_INPUT_WIDTH;
+                float image_height = FormDefaults::IMAGE_INPUT_HEIGHT;
+                const char* width_attr = block->get_attribute("width");
+                const char* height_attr = block->get_attribute("height");
+                bool has_width_attr = false;
+                bool has_height_attr = false;
+                if (width_attr) {
+                    float parsed_width = (float)str_to_double_default(width_attr, strlen(width_attr), -1.0);
+                    if (parsed_width >= 0.0f) {
+                        image_width = parsed_width;
+                        has_width_attr = true;
+                    }
+                }
+                if (height_attr) {
+                    float parsed_height = (float)str_to_double_default(height_attr, strlen(height_attr), -1.0);
+                    if (parsed_height >= 0.0f) {
+                        image_height = parsed_height;
+                        has_height_attr = true;
+                    }
+                }
+                if (has_width_attr && !has_height_attr) {
+                    // Chrome gives a width-constrained broken image submit control
+                    // a square fallback glyph plus 1px control reserve.
+                    image_height = image_width + 1.0f;
+                }
+                block->form->intrinsic_width = image_width;
+                block->form->intrinsic_height = image_height;
+            }
             lycon->block.given_width = block->form->intrinsic_width;
             lycon->block.given_height = block->form->intrinsic_height;
             break;

@@ -2,6 +2,7 @@
 
 #include "layout.hpp"
 #include "layout_cache.hpp"
+#include "../lib/arraylist.h"
 
 namespace radiant {
 
@@ -25,6 +26,7 @@ struct LayoutMeasureScope {
     RunMode saved_run_mode;
     SizingMode saved_sizing_mode;
     AvailableSpace saved_available_space;
+    ArrayList* saved_views;
 
     LayoutMeasureScope(::LayoutContext* l, ::DomNode* measure_elmt);
     ~LayoutMeasureScope();
@@ -41,5 +43,13 @@ bool layout_pass_cache_get(::LayoutContext* lycon, ::DomElement* element,
 
 void layout_pass_cache_store(::LayoutContext* lycon, ::DomElement* element,
     KnownDimensions known_dimensions, SizeF result, const char* label);
+
+bool layout_pass_cache_get_for_space(::LayoutContext* lycon, ::DomElement* element,
+    KnownDimensions known_dimensions, AvailableSpace available_space,
+    SizeF* out_size, const char* label);
+
+void layout_pass_cache_store_for_space(::LayoutContext* lycon, ::DomElement* element,
+    KnownDimensions known_dimensions, AvailableSpace available_space,
+    SizeF result, const char* label);
 
 } // namespace radiant

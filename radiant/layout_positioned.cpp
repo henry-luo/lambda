@@ -3,6 +3,7 @@
 #include "available_space.hpp"
 #include "intrinsic_sizing.hpp"
 #include "layout_measure.hpp"
+#include "layout_box.hpp"
 #include "form_control.hpp"
 #include "../lib/tagged.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
@@ -695,15 +696,16 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     if (block->display.inner == RDT_DISPLAY_REPLACED) {
         uintptr_t tag = block->tag();
         if (tag == HTM_TAG_IFRAME) {
+            IntrinsicSize replaced_size = layout_measure_replaced(lycon, block, lycon->available_space);
             if (lycon->block.given_width < 0) {
-                lycon->block.given_width = 300;
-                if (block->blk) block->blk->given_width = 300;
-                log_debug("[ABS POS] iframe intrinsic width: 300");
+                lycon->block.given_width = replaced_size.max_width > 0.0f ? replaced_size.max_width : 300.0f;
+                if (block->blk) block->blk->given_width = lycon->block.given_width;
+                log_debug("[ABS POS] iframe intrinsic width: %.1f", lycon->block.given_width);
             }
             if (lycon->block.given_height < 0) {
-                lycon->block.given_height = 150;
-                if (block->blk) block->blk->given_height = 150;
-                log_debug("[ABS POS] iframe intrinsic height: 150");
+                lycon->block.given_height = replaced_size.max_height > 0.0f ? replaced_size.max_height : 150.0f;
+                if (block->blk) block->blk->given_height = lycon->block.given_height;
+                log_debug("[ABS POS] iframe intrinsic height: %.1f", lycon->block.given_height);
             }
         }
     }
@@ -725,21 +727,17 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
 
     // CSS 2.1 §10.3.8 / §10.6.5: Absolutely positioned REPLACED elements
     // use intrinsic dimensions for auto width/height, not the constraint equation.
-    // Form controls (input, select, textarea) are also replaced elements per CSS spec.
+    // Form controls are semi-replaced in modern layout: their intrinsic sizes are
+    // the auto fallback, but auto sizes with both insets stretch like non-replaced boxes.
+    bool is_form_control_replaced =
+        block->item_prop_type == DomElement::ITEM_PROP_FORM && block->form;
     bool is_replaced = (block->display.inner == RDT_DISPLAY_REPLACED) ||
                        (block->tag() == HTM_TAG_IMG || block->tag() == HTM_TAG_IFRAME ||
                         block->tag() == HTM_TAG_VIDEO || block->tag() == HTM_TAG_EMBED ||
                         (block->tag() == HTM_TAG_OBJECT && block->get_attribute("data"))) ||
-                       (block->item_prop_type == DomElement::ITEM_PROP_FORM && block->form);
+                       is_form_control_replaced;
 
-    // Gather horizontal border+padding for constraint calculations
-    float h_border_padding = 0;
-    if (block->bound) {
-        h_border_padding += block->bound->padding.left + block->bound->padding.right;
-        if (block->bound->border) {
-            h_border_padding += block->bound->border->width.left + block->bound->border->width.right;
-        }
-    }
+    float h_border_padding = layout_padding_border_width(block);
 
     // CSS 2.1 §10.3.7: Detect containing block's direction for auto margin resolution
     TextDirection cb_direction = TD_LTR;
@@ -758,7 +756,10 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
 
     bool has_auto_margin_left = block->bound && block->bound->margin.left_type == CSS_VALUE_AUTO;
     bool has_auto_margin_right = block->bound && block->bound->margin.right_type == CSS_VALUE_AUTO;
-    bool has_width = (lycon->block.given_width >= 0 && !is_intrinsic_width);
+    bool width_is_auto = block->blk && block->blk->given_width_type == CSS_VALUE_AUTO;
+    bool stretch_form_width = is_form_control_replaced && width_is_auto &&
+        block->position->has_left && block->position->has_right && !is_intrinsic_width;
+    bool has_width = (lycon->block.given_width >= 0 && !is_intrinsic_width && !width_is_auto);
     ViewElement* parent = block->parent_view();
     TextDirection static_direction = get_static_position_direction(parent);
     bool was_inline = false;
@@ -774,18 +775,24 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     // First determine content_width: use CSS width if specified, otherwise calculate from constraints
     if (has_width) {
         content_width = lycon->block.given_width;
-    } else if (block->position->has_left && block->position->has_right && !is_intrinsic_width && !is_replaced) {
-        // CSS 2.1 §10.3.7: width is auto, both left and right specified (non-replaced only)
-        // For replaced elements, §10.3.8 says use intrinsic width (via §10.3.2)
+    } else if (block->position->has_left && block->position->has_right &&
+               !is_intrinsic_width && (!is_replaced || stretch_form_width)) {
+        // CSS 2.1 §10.3.7: width is auto, both left and right specified.
+        // Replaced elements use intrinsic width, except form controls stretch
+        // when their CSS width is still auto.
         // Auto margins are treated as 0 when width is auto
         float margin_left = has_auto_margin_left ? 0 : (block->bound ? block->bound->margin.left : 0);
         float margin_right = has_auto_margin_right ? 0 : (block->bound ? block->bound->margin.right : 0);
         float left_edge = block->position->left + margin_left;
         float right_edge = cb_width - block->position->right - margin_right;
         float border_box_width = max(right_edge - left_edge, 0.0f);
-        content_width = max(border_box_width - h_border_padding, 0.0f);
+        bool is_border_box = block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX;
+        content_width = is_border_box ? border_box_width :
+            layout_content_width_from_border_box(block, border_box_width);
         // CRITICAL: Store constraint-calculated width so finalize_block_flow knows width is fixed
         lycon->block.given_width = content_width;
+        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+        block->blk->given_width = content_width;
         // When width is derived from constraints, auto margins become 0
         if (has_auto_margin_left && block->bound) block->bound->margin.left = 0;
         if (has_auto_margin_right && block->bound) block->bound->margin.right = 0;
@@ -803,18 +810,11 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         float content_h = max_h;
         bool is_border_box = block->blk->box_sizing == CSS_VALUE_BORDER_BOX;
         if (is_border_box) {
-            float v_bp = 0;
-            if (block->bound) {
-                v_bp += block->bound->padding.top + block->bound->padding.bottom;
-                if (block->bound->border)
-                    v_bp += block->bound->border->width.top + block->bound->border->width.bottom;
-            }
-            content_h -= v_bp;
-            if (content_h < 0) content_h = 0;
+            content_h = layout_content_height_from_border_box(block, max_h);
         }
         float derived_width = content_h * block->fi->aspect_ratio;
         if (is_border_box) {
-            content_width = derived_width + h_border_padding;
+            content_width = layout_border_width_from_content_box(block, derived_width);
         } else {
             content_width = derived_width;
         }
@@ -823,7 +823,8 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     } else if (is_replaced && block->item_prop_type == DomElement::ITEM_PROP_FORM && block->form &&
                block->form->intrinsic_width > 0) {
         // CSS 2.1 §10.3.8: replaced form control with auto width → use intrinsic width
-        content_width = block->form->intrinsic_width;
+        IntrinsicSize form_size = layout_measure_form_control(lycon, block, lycon->available_space);
+        content_width = form_size.max_width;
         log_debug("[ABS POS] form control intrinsic width: %.1f", content_width);
     } else {
         // CSS 2.1 §10.3.7: width is auto, at most one of left/right specified (non-replaced)
@@ -866,7 +867,7 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         if (is_border_box) {
             content_width = max(shrink_to_fit, 0.0f);
         } else {
-            content_width = max(shrink_to_fit - h_border_padding, 0.0f);
+            content_width = layout_content_width_from_border_box(block, shrink_to_fit);
         }
 
         log_debug("[ABS POS] shrink-to-fit: min_content=%.1f, max_content=%.1f, available=%.1f, "
@@ -962,18 +963,14 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     bool has_auto_margin_top = block->bound && block->bound->margin.top_type == CSS_VALUE_AUTO;
     bool has_auto_margin_bottom = block->bound && block->bound->margin.bottom_type == CSS_VALUE_AUTO;
 
-    // Gather vertical border+padding for constraint calculations
-    float v_border_padding = 0;
-    if (block->bound) {
-        v_border_padding += block->bound->padding.top + block->bound->padding.bottom;
-        if (block->bound->border) {
-            v_border_padding += block->bound->border->width.top + block->bound->border->width.bottom;
-        }
-    }
+    float v_border_padding = layout_padding_border_height(block);
 
     log_debug("[ABS POS] height calc: given_height=%.1f, has_top=%d, has_bottom=%d, cb_height=%.1f",
               lycon->block.given_height, block->position->has_top, block->position->has_bottom, cb_height);
-    bool has_height = (lycon->block.given_height >= 0);
+    bool height_is_auto = block->blk && block->blk->given_height_type == CSS_VALUE_AUTO;
+    bool stretch_form_height = is_form_control_replaced && height_is_auto &&
+        block->position->has_top && block->position->has_bottom;
+    bool has_height = (lycon->block.given_height >= 0 && !height_is_auto);
 
     if (has_height) {
         content_height = lycon->block.given_height;
@@ -988,7 +985,8 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         block->blk->given_height = content_height;
         log_debug("[ABS POS] height from aspect-ratio: width=%.1f / ratio=%.3f -> height=%.1f",
                   content_width, aspect_ratio, content_height);
-    } else if (block->position->has_top && block->position->has_bottom && !is_replaced) {
+    } else if (block->position->has_top && block->position->has_bottom &&
+               (!is_replaced || stretch_form_height)) {
         // CSS 2.1 §10.6.4: height is auto, both top and bottom specified
         // Auto margins are treated as 0 when height is auto
         float margin_top = has_auto_margin_top ? 0 : (block->bound ? block->bound->margin.top : 0);
@@ -996,7 +994,9 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         float top_edge = block->position->top + margin_top;
         float bottom_edge = cb_height - block->position->bottom - margin_bottom;
         float border_box_height = max(bottom_edge - top_edge, 0.0f);
-        content_height = max(border_box_height - v_border_padding, 0.0f);
+        bool is_border_box = block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX;
+        content_height = is_border_box ? border_box_height :
+            layout_content_height_from_border_box(block, border_box_height);
         // CRITICAL: Store constraint-calculated height so finalize_block_flow knows height is fixed
         lycon->block.given_height = content_height;
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
@@ -1009,7 +1009,8 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     } else if (is_replaced && block->item_prop_type == DomElement::ITEM_PROP_FORM && block->form &&
                block->form->intrinsic_height > 0) {
         // CSS 2.1 §10.6.5: replaced form control with auto height → use intrinsic height
-        content_height = block->form->intrinsic_height;
+        IntrinsicSize form_size = layout_measure_form_control(lycon, block, lycon->available_space);
+        content_height = form_size.max_height;
         log_debug("[ABS POS] form control intrinsic height: %.1f", content_height);
     } else {
         // shrink-to-fit: height will be determined by content after layout

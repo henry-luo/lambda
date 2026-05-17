@@ -10,6 +10,7 @@
 #include "grid.hpp"         // For GridTrackList
 #include "form_control.hpp" // For FormDefaults
 #include "layout_pass.hpp"
+#include "layout_measure.hpp"
 #include "rdt_video.h"
 #include "retained_fields.hpp"
 #include "font_face.h"
@@ -1725,9 +1726,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         // value as "already includes pad+border" and skip the bottom addition.
         if (replaced_width < 0 && view_block_replaced->item_prop_type == DomElement::ITEM_PROP_FORM
             && view_block_replaced->form && view_block_replaced->form->intrinsic_width > 0) {
-            replaced_width = view_block_replaced->form->intrinsic_width;
-            sizes.replaced_includes_pad_border = true;
-            log_debug("  -> replaced FORM CONTROL intrinsic width: %.1f (border-box, skip bottom pad/border)", replaced_width);
+            IntrinsicSize form_size = layout_measure_form_control(lycon, view_block_replaced,
+                                                                  lycon->available_space);
+            replaced_width = form_size.max_width;
+            log_debug("  -> replaced FORM CONTROL intrinsic width: %.1f (central measure)",
+                      replaced_width);
         }
         // Tag-based fallback: form prop not yet allocated during early intrinsic sizing
         if (replaced_width < 0) {

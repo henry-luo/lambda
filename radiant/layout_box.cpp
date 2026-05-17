@@ -32,6 +32,16 @@ BoxMetrics layout_box_metrics(ViewBlock* block) {
     return metrics;
 }
 
+float layout_padding_border_width(ViewBlock* block) {
+    BoxMetrics metrics = layout_box_metrics(block);
+    return metrics.pad_border_h;
+}
+
+float layout_padding_border_height(ViewBlock* block) {
+    BoxMetrics metrics = layout_box_metrics(block);
+    return metrics.pad_border_v;
+}
+
 float layout_content_width_from_border_box(ViewBlock* block, float border_width) {
     BoxMetrics metrics = layout_box_metrics(block);
     float content_width = border_width - metrics.pad_border_h;
@@ -54,6 +64,16 @@ float layout_border_height_from_content_box(ViewBlock* block, float content_heig
     BoxMetrics metrics = layout_box_metrics(block);
     float clamped_content_height = content_height > 0 ? content_height : 0;
     return clamped_content_height + metrics.pad_border_v;
+}
+
+float layout_floor_border_box_width(ViewBlock* block, float border_width) {
+    float floor_width = layout_padding_border_width(block);
+    return border_width < floor_width ? floor_width : border_width;
+}
+
+float layout_floor_border_box_height(ViewBlock* block, float border_height) {
+    float floor_height = layout_padding_border_height(block);
+    return border_height < floor_height ? floor_height : border_height;
 }
 
 float layout_apply_min_max_width(ViewBlock* block, float width, bool width_is_border_box) {
