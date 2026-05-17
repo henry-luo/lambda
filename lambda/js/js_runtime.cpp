@@ -591,6 +591,41 @@ static int js_typed_array_sort_compare(Item x, Item y, Item comparefn, bool has_
     if (d != d || d == 0.0) return 0;
     return d < 0.0 ? -1 : 1;
 }
+
+static bool js_typed_array_sort_merge(Item* values, Item* scratch, int start, int mid, int end,
+                                      Item comparefn, bool has_comparefn) {
+    int left = start;
+    int right = mid;
+    int out = start;
+    while (left < mid && right < end) {
+        bool ok = true;
+        int cmp = js_typed_array_sort_compare(values[left], values[right],
+                                              comparefn, has_comparefn, &ok);
+        if (!ok || js_check_exception()) return false;
+        if (cmp <= 0) {
+            scratch[out++] = values[left++];
+        } else {
+            scratch[out++] = values[right++];
+        }
+    }
+    while (left < mid) scratch[out++] = values[left++];
+    while (right < end) scratch[out++] = values[right++];
+    for (int i = start; i < end; i++) values[i] = scratch[i];
+    return true;
+}
+
+static bool js_typed_array_sort_merge_sort(Item* values, Item* scratch, int start, int end,
+                                           Item comparefn, bool has_comparefn) {
+    if (end - start <= 1) return true;
+    int mid = start + (end - start) / 2;
+    if (!js_typed_array_sort_merge_sort(values, scratch, start, mid, comparefn, has_comparefn)) {
+        return false;
+    }
+    if (!js_typed_array_sort_merge_sort(values, scratch, mid, end, comparefn, has_comparefn)) {
+        return false;
+    }
+    return js_typed_array_sort_merge(values, scratch, start, mid, end, comparefn, has_comparefn);
+}
 static Item js_array_generic_flat(Item object, Item* args, int argc);
 static Item js_array_generic_flat_map(Item object, Item* args, int argc);
 static Item js_array_generic_iterative_callback_with_object(Item object, Item callback_object, Item* args, int argc, int method_kind);
@@ -16338,24 +16373,36 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
                 int len = ta->length;
                 if (len <= 1) return obj;
-                for (int i = 1; i < len; i++) {
-                    Item key = js_typed_array_get(obj, (Item){.item = i2it(i)});
-                    if (js_check_exception()) return ItemNull;
-                    int j = i - 1;
-                    while (j >= 0) {
-                        Item jval = js_typed_array_get(obj, (Item){.item = i2it(j)});
-                        if (js_check_exception()) return ItemNull;
-                        bool ok = true;
-                        int cmp = js_typed_array_sort_compare(jval, key, comparefn, has_comparefn, &ok);
-                        if (!ok || js_check_exception()) return ItemNull;
-                        if (cmp <= 0) break;
-                        js_typed_array_set(obj, (Item){.item = i2it(j + 1)}, jval);
-                        if (js_check_exception()) return ItemNull;
-                        j--;
-                    }
-                    js_typed_array_set(obj, (Item){.item = i2it(j + 1)}, key);
-                    if (js_check_exception()) return ItemNull;
+                Item* values = (Item*)mem_alloc((size_t)len * sizeof(Item), MEM_CAT_JS_RUNTIME);
+                Item* scratch = (Item*)mem_alloc((size_t)len * sizeof(Item), MEM_CAT_JS_RUNTIME);
+                if (!values || !scratch) {
+                    if (values) mem_free(values);
+                    if (scratch) mem_free(scratch);
+                    return js_throw_type_error("TypedArray.prototype.sort allocation failed");
                 }
+                for (int i = 0; i < len; i++) {
+                    values[i] = js_typed_array_get(obj, (Item){.item = i2it(i)});
+                    if (js_check_exception()) {
+                        mem_free(values);
+                        mem_free(scratch);
+                        return ItemNull;
+                    }
+                }
+                if (!js_typed_array_sort_merge_sort(values, scratch, 0, len, comparefn, has_comparefn)) {
+                    mem_free(values);
+                    mem_free(scratch);
+                    return ItemNull;
+                }
+                for (int i = 0; i < len; i++) {
+                    js_typed_array_set(obj, (Item){.item = i2it(i)}, values[i]);
+                    if (js_check_exception()) {
+                        mem_free(values);
+                        mem_free(scratch);
+                        return ItemNull;
+                    }
+                }
+                mem_free(values);
+                mem_free(scratch);
                 return obj;
             }
             // ES2023: TypedArray.prototype.with(index, value) — returns new copy with one element replaced

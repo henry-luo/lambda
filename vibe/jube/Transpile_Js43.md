@@ -1760,3 +1760,180 @@ Updated remaining failure areas:
 | `language/types` | 3 |
 | `language/destructuring` | 1 |
 | `language/white_space` | 1 |
+
+## 31. js262 Baseline Refresh After RegExp Exec Tail Fixes
+
+Status on 2026-05-17 after rerunning the full js262 suite with baseline update:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-only --update-baseline --write-failures=temp/js43_update_baseline_after_exec_tail.tsv
+```
+
+Result: the official updater accepted the run and rewrote
+`test/js262/test262_baseline.txt` with 33839 fully passing tests.
+
+- Fully passed: 33839 / 34127
+- Failed: 285
+- Skipped: 8092
+- Non-fully-passing: 3
+- Regression check: 0 regressions, 261 improvements versus the prior
+  33580-entry baseline
+- Failure manifest: `temp/js43_update_baseline_after_exec_tail.tsv`
+- Failure summaries:
+  - `temp/js43_update_baseline_after_exec_tail_by_path.tsv`
+  - `temp/js43_update_baseline_after_exec_tail_by_feature.tsv`
+
+The updated baseline header records:
+
+- Total tests: 42219
+- Batched: 34165
+- Runtime: 656.0s total
+- Phase timing: 653.8s batch execution, 3.4s retry-regressions
+
+Remaining failures by path:
+
+| Area | Failures |
+|---|---:|
+| `language/statements` | 134 |
+| `language/expressions` | 57 |
+| `built_ins/RegExp` | 36 |
+| `language/global_code` | 15 |
+| `language/function_code` | 13 |
+| `language/literals` | 13 |
+| `language/arguments_object` | 5 |
+| `language/statementList` | 5 |
+| `language/directive_prologue` | 3 |
+| `language/types` | 3 |
+| `language/destructuring` | 1 |
+| `language/white_space` | 1 |
+
+Remaining failures by feature are still dominated by class/private-field
+semantics and the general language statement/expression buckets:
+
+| Feature | Failures |
+|---|---:|
+| `(none)` | 125 |
+| `class` | 73 |
+| `class-methods-private` | 33 |
+| `class-fields-public` | 17 |
+| `regexp-lookbehind` | 17 |
+| `class-static-methods-private` | 16 |
+| `regexp-named-groups` | 15 |
+| `generators` | 13 |
+| `destructuring-binding` | 12 |
+| `Proxy` | 10 |
+| `let` | 10 |
+
+## 32. Non-Fully-Passing Cleanup: TypedArray Sort Stability
+
+Status on 2026-05-17 after targeting the 3 reported non-fully-passing
+entries.
+
+Root cause fixed:
+
+- `built_ins_TypedArray_prototype_sort_stability_js` was still using a
+  quadratic insertion-sort path for typed arrays.  The stability test sorts a
+  large typed array and was passing semantically but exceeding the js262 slow
+  threshold, keeping it in `t262_partial.txt` as `SLOW_3191`.
+- Replaced the typed-array sort implementation with a stable merge sort over a
+  temporary `Item` buffer and scratch buffer.  The comparator path is unchanged:
+  custom compare functions, BigInt typed arrays, `NaN`, and detached-buffer
+  checks still flow through the existing typed-array comparison and setter
+  helpers.
+
+Focused verification:
+
+```bash
+make release
+make build-test
+./test/test_js_test262_gtest.exe --batch-file=temp/js43_nonfull_sort_single.txt --write-failures=temp/js43_nonfull_sort_single_after.tsv
+./test/test_js_test262_gtest.exe --batch-file=temp/js43_nonfull_sort_neighborhood.txt --write-failures=temp/js43_nonfull_sort_neighborhood_after.tsv
+./test/test_js_test262_gtest.exe --batch-file=temp/js43_nonfull_copy_neighborhood.txt --write-failures=temp/js43_nonfull_copy_neighborhood_after.tsv
+./test/test_js_test262_gtest.exe --batch-file=temp/js43_nonfull_two.txt --write-failures=temp/js43_nonfull_two_after.tsv
+```
+
+Focused results:
+
+- `built_ins_TypedArray_prototype_sort_stability_js`: passed in 115ms as a
+  singleton and 92ms inside its 50-test neighborhood.
+- `built_ins_TypedArray_prototype_copyWithin_coerced_values_end_detached_js`:
+  passed in its 50-test neighborhood and in the combined non-full batch.
+- Combined non-full typed-array batch: 2 / 2 passed, with no failure manifest
+  rows.
+
+Attempted full partial/baseline refresh:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-only --run-partial --update-baseline --write-failures=temp/js43_nonfull_after.tsv
+```
+
+The run confirmed the two typed-array target improvements but did not update
+the baseline because one existing release/O0 generator test now fails the
+regression gate:
+
+- Fully passed: 33881 / 34165
+- Failed: 282
+- Skipped: 8054
+- Non-fully-passing: 2
+- Improvements: 44
+- Regressions: 1
+- Blocking regression:
+  `language_statements_for_of_dstr_array_rest_nested_obj_yield_expr_js`
+  (`crashed with signal 11`)
+
+Follow-up investigation for the blocker:
+
+- The `for_of` test crashes as a singleton through `js-test-batch
+  --opt-level=0`, but passes as a normal `lambda.exe js` file.
+- The minimized batch case also passes with `--mir-interp` and with
+  `--opt-level=3`, and it passes in a debug `lambda.exe` build.
+- This points at a release JIT/codegen issue in the batch source-protocol path
+  for a generator that resumes through a nested destructuring `yield` and then
+  performs a function call.  It is separate from the typed-array sort fix, but
+  it must be fixed before the baseline updater will accept the new typed-array
+  improvements.
+
+## 33. Generator Array-Rest Destructuring Yield Crash
+
+Status on 2026-05-17: fixed the release/O0 crash in
+`language_statements_for_of_dstr_array_rest_nested_obj_yield_expr_js`.
+
+Root cause:
+
+- The source test has one explicit `yield`, but the MIR lowering for array rest
+  destructuring emits the rest target twice: once for the collected-rest branch
+  and once for the already-exhausted empty-array branch.
+- `jm_count_yields()` already doubled yield counts for regular array-pattern
+  elements because those lower into value and exhausted-iterator branches.  It
+  did not apply the same branch-aware count to rest elements.
+- The generator state machine therefore allocated only two states (implicit
+  parameter-binding state plus one explicit yield) while codegen emitted a
+  third yield site.  In release/O0 native JIT this malformed state machine could
+  crash after resuming and reading an incremented local.
+
+Fix:
+
+- Updated `lambda/js/js_mir_analysis.cpp` so every non-elision array pattern
+  element, including rest/spread elements, counts yield-containing initializers
+  once per emitted branch.
+- Reverted the temporary spill-frame size experiment; the crash was a state
+  count mismatch, not generator env spill overflow.
+
+Focused verification:
+
+```bash
+make -C build/premake config=release_native lambda -j4 CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib"
+./lambda.exe js temp/js43_forof_use_incremented_after_dstr_yield.js --opt-level=0 --no-log
+./lambda.exe js temp/js43_forof_call_inside_only.js --opt-level=0 --no-log
+./lambda.exe js temp/js43_forof_call_min.js --opt-level=0 --no-log
+./lambda.exe js temp/js43_forof_yield_min.js --opt-level=0 --no-log
+./test/test_js_test262_gtest.exe '--gtest_filter=*language_statements_for_of_dstr_array_rest_nested_obj_yield_expr_js*' --gtest_print_time=0
+```
+
+Results:
+
+- All reduced release/O0 repros now pass.
+- The targeted js262 test passes through the gtest runner.
+- The gtest runner also completed its batch collection phase without promoting
+  any non-fully-passing tests under the default partial-skipping mode:
+  fully passed target: 1 / 1, non-fully-passing: 0, regressions: 0.
