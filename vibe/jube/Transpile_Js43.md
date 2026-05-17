@@ -1397,3 +1397,44 @@ Results: old Array failures 25 / 25 passed; TypedArray focused manifest
 Runner note: the guard commands above must be run sequentially. A parallel
 attempt produced impossible `results=289/N` rows because the Test262 runner
 shares a temporary worker result channel.
+
+## 24. String Indexed Access, Replace Ordering, And Locale Compare Follow-Up
+
+Status on 2026-05-17 while continuing the remaining js262 failures:
+
+- Fixed the lingering primitive string indexed-access row:
+  - the unknown-object integer fast path now routes strings through
+    `js_string_get_int` instead of Lambda `item_at`, so out-of-range string
+    indexes produce JavaScript `undefined` rather than Lambda `null`.
+- Fixed `String.prototype.charAt/charCodeAt` position coercion order:
+  - empty receivers now still coerce `pos` before returning `""`/`NaN`, matching
+    the spec path where `ToInteger(pos)` can throw.
+- Fixed `String.prototype.replace` replacement coercion order:
+  - non-callable `replaceValue` is converted with `ToString` before no-match and
+    empty-string exits;
+  - RegExp replacement objects with an own `toString` now use ordinary object
+    conversion instead of the internal `/source/flags` shortcut.
+- Added the missing `String.prototype.localeCompare` dispatcher body:
+  - compares the two strings after NFC normalization, which closes the focused
+    wrapper/coercion rows and canonical-equivalence row.
+
+Focused gates:
+
+```bash
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_string_failures_batch.txt --write-failures=temp/js43_string_after_locale_compare.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_array_failures_batch.txt --write-failures=temp/js43_array_after_string_locale_guard.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_typedarray_failures_batch.txt --write-failures=temp/js43_typedarray_after_string_locale_guard.tsv
+```
+
+Results: String focused manifest improved from 8 / 30 at the previous checkpoint
+to 17 / 30 passed. Old Array failures remain 25 / 25 passed, and TypedArray
+focused manifest remains 89 / 89 passed.
+
+Remaining String rows in this manifest:
+
+- one RegExp backreference/substitution case:
+  `built_ins_String_prototype_replace_S15_5_4_11_A5_T1_js`;
+- twelve Unicode case-mapping rows covering SpecialCasing expansions,
+  supplementary-plane case pairs, and final-sigma context. The current
+  `fn_lower`/`fn_upper` path is still ASCII-oriented, so this should be handled
+  as a Unicode case-mapping kernel rather than a narrow per-test patch.

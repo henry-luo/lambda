@@ -210,6 +210,20 @@ extern "C" Item js_to_number(Item value) {
         // J39-1b: route object operands through the unified js_to_primitive
         // kernel (ES §7.1.1). Returned primitive is then re-coerced via ToNumber.
         if (type == LMD_TYPE_MAP || type == LMD_TYPE_ELEMENT) {
+            if (type == LMD_TYPE_MAP && value.map) {
+                bool raw_proto_found = false;
+                Item raw_proto = js_map_get_fast(value.map, "__proto__", 9, &raw_proto_found);
+                if (raw_proto_found && raw_proto.item == ITEM_JS_UNDEFINED) {
+                    bool has_vo = false, has_ts = false, has_tp = false;
+                    js_map_get_fast(value.map, "valueOf", 7, &has_vo);
+                    js_map_get_fast(value.map, "toString", 8, &has_ts);
+                    js_map_get_fast(value.map, "__sym_2", 7, &has_tp);
+                    if (!has_vo && !has_ts && !has_tp) {
+                        js_throw_type_error("Cannot convert object to primitive value");
+                        return ItemNull;
+                    }
+                }
+            }
             Item prim = js_to_primitive(value, JS_HINT_NUMBER);
             if (js_check_exception()) return ItemNull;
             TypeId rt = get_type_id(prim);
@@ -550,7 +564,9 @@ extern "C" Item js_to_string(Item value) {
         {
             bool own_rd = false;
             js_map_get_fast(value.map, "__rd", 4, &own_rd);
-            if (own_rd) {
+            bool own_to_string = false;
+            js_map_get_fast(value.map, "toString", 8, &own_to_string);
+            if (own_rd && !own_to_string) {
                 bool own_src = false, own_flags = false;
                 Item src_val = js_map_get_fast(value.map, "source", 6, &own_src);
                 Item flags_val = js_map_get_fast(value.map, "flags", 5, &own_flags);

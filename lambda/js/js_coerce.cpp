@@ -15,6 +15,7 @@
 // lambda-mem.cpp but is only declared inside transpiler.hpp; pull a local
 // forward decl to avoid dragging the transpiler header in.
 String* heap_create_name(const char* name, size_t len);
+Map* js_resolve_object_prototype();
 
 // Cached interned symbol/method-name keys. heap_create_name interns into
 // the name pool, so these are stable for the lifetime of the heap.
@@ -126,6 +127,25 @@ extern "C" Item js_to_primitive(Item value, JsHint hint) {
             return ItemNull;
         }
         return result;
+    }
+
+    if (vt == LMD_TYPE_MAP) {
+        bool raw_proto_found = false;
+        Item raw_proto = js_map_get_fast_ext(value.map, "__proto__", 9, &raw_proto_found);
+        Item proto = raw_proto_found ? raw_proto : js_get_prototype(value);
+        TypeId proto_type = get_type_id(proto);
+        bool null_proto = proto.item == ItemNull.item || proto.item == ITEM_JS_UNDEFINED ||
+            proto_type == LMD_TYPE_NULL || proto_type == LMD_TYPE_UNDEFINED;
+        Map* object_proto = js_resolve_object_prototype();
+        if (raw_proto_found && null_proto && value.map != object_proto) {
+            bool has_vo = false, has_ts = false;
+            js_map_get_fast_ext(value.map, "valueOf", 7, &has_vo);
+            js_map_get_fast_ext(value.map, "toString", 8, &has_ts);
+            if (!has_vo && !has_ts) {
+                js_throw_type_error("Cannot convert object to primitive value");
+                return ItemNull;
+            }
+        }
     }
 
     if (vt == LMD_TYPE_MAP && js_is_proxy(value) && !js_proxy_has_get_trap(value)) {
