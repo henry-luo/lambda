@@ -259,6 +259,15 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
     // Check if container has explicit dimensions (needed for percentage gap resolution)
     bool has_explicit_height = container->blk && container->blk->given_height >= 0;
     bool has_explicit_width = container->blk && container->blk->given_width >= 0;
+    bool is_horizontal = is_main_axis_horizontal(flex);
+    bool width_is_intrinsic_keyword = container->blk &&
+        (container->blk->given_width_type == CSS_VALUE_MAX_CONTENT ||
+         container->blk->given_width_type == CSS_VALUE_MIN_CONTENT ||
+         container->blk->given_width_type == CSS_VALUE_FIT_CONTENT);
+    if (width_is_intrinsic_keyword) {
+        has_explicit_width = false;
+        content_width = 0.0f;
+    }
 
     // Resolve percentage gaps to actual pixel values
     // Per CSS spec, gap percentages are resolved against the content box dimension
@@ -296,8 +305,6 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
         }
     }
 
-    bool is_horizontal = is_main_axis_horizontal(flex);
-
     // Check if this is a shrink-to-fit flex container (auto width):
     // 1. Absolutely positioned with auto width (no explicit width/min/max)
     // 2. Inline-flex (display: inline-flex) with auto width
@@ -317,7 +324,7 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
     bool is_inline_no_width = !has_explicit_width &&
         (container->display.outer == CSS_VALUE_INLINE_BLOCK ||
          container->display.outer == CSS_VALUE_INLINE);
-    bool is_shrink_to_fit = is_absolute_no_width || is_inline_no_width;
+    bool is_shrink_to_fit = is_absolute_no_width || is_inline_no_width || width_is_intrinsic_keyword;
 
     if (is_horizontal) {
         // For row flex, main axis is width
@@ -404,7 +411,7 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
         // Block-level elements in normal flow have definite width from containing block
         // Only inline-block/inline elements with auto width are shrink-to-fit (indefinite)
         // Absolute/fixed positioned elements with auto width are also shrink-to-fit (indefinite)
-        if (!has_definite_width && !is_absolute && content_width > 0) {
+        if (!has_definite_width && !is_absolute && content_width > 0 && !width_is_intrinsic_keyword) {
             // Check if this is a block-level element (not inline-block, inline, or flex item)
             bool is_inline_level = (container->display.outer == CSS_VALUE_INLINE_BLOCK ||
                                     container->display.outer == CSS_VALUE_INLINE);
@@ -422,7 +429,7 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
         // Exception: shrink-to-fit containers (absolute-positioned or inline-flex with auto
         // width) get their containing block's width as fallback, so we must NOT treat that
         // as definite.
-        if (!has_definite_width && container->width > 0 && !is_shrink_to_fit) {
+        if (!has_definite_width && container->width > 0 && !is_shrink_to_fit && !width_is_intrinsic_keyword) {
             has_definite_width = true;
             log_debug("%s init_flex_container: using width set by parent (%.1f)", container->source_loc(),
                       container->width);
@@ -945,7 +952,10 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
 
                     // Compute max-content contribution per CSS §9.9.1:
                     // 1) Start with item's outer max-content size
-                    if (item->blk && item->blk->given_width >= 0) {
+                    bool percent_main_size_is_auto = item->blk &&
+                        !isnan(item->blk->given_width_percent) &&
+                        flex_layout->main_axis_is_indefinite;
+                    if (item->blk && item->blk->given_width >= 0 && !percent_main_size_is_auto) {
                         item_width = item->blk->given_width;
                         if (item->bound && item->blk->box_sizing != CSS_VALUE_BORDER_BOX) {
                             item_width += item->bound->padding.left + item->bound->padding.right;
@@ -2150,7 +2160,7 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
 
             // Re-resolve width percentage
             if (!isnan(item->blk->given_width_percent)) {
-                if (is_intrinsic_sizing && is_row) {
+                if ((is_intrinsic_sizing || flex_layout->main_axis_is_indefinite) && is_row) {
                     // In intrinsic sizing mode with percentage width in main axis,
                     // treat as auto - use intrinsic content width instead
                     log_info("%s FLEX: Intrinsic sizing mode - percentage width %.1f%% treated as auto", container->source_loc(),
@@ -2506,7 +2516,11 @@ float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) 
     // Case 2: flex-basis: auto - use main axis size if explicit
 
     // Check for explicit width/height in CSS (>= 0 because -1 means auto, 0 means explicit width:0px)
-    if (is_horizontal && item->blk && item->blk->given_width >= 0) {
+    bool horizontal_percent_main_size_is_auto = is_horizontal && item->blk &&
+        !isnan(item->blk->given_width_percent) &&
+        flex_layout->main_axis_is_indefinite;
+    if (is_horizontal && item->blk && item->blk->given_width >= 0 &&
+        !horizontal_percent_main_size_is_auto) {
         log_debug("%s calculate_flex_basis - using explicit width: %f", item->source_loc(), item->blk->given_width);
         item->fi->has_explicit_width = 1;
 

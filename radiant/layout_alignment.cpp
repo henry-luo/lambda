@@ -187,16 +187,18 @@ bool alignment_is_stretch(int32_t alignment) {
 int32_t resolve_align_self(int32_t align_self, int32_t align_items) {
     // auto resolves to parent's align-items
     if (align_self == CSS_VALUE_AUTO || align_self == CSS_VALUE__UNDEF) {
-        return align_items;
+        return align_items == CSS_VALUE_NORMAL ? CSS_VALUE_STRETCH : align_items;
     }
+    if (align_self == CSS_VALUE_NORMAL) return CSS_VALUE_STRETCH;
     return align_self;
 }
 
 int32_t resolve_justify_self(int32_t justify_self, int32_t justify_items) {
     // auto resolves to parent's justify-items
     if (justify_self == CSS_VALUE_AUTO || justify_self == CSS_VALUE__UNDEF) {
-        return justify_items;
+        return justify_items == CSS_VALUE_NORMAL ? CSS_VALUE_STRETCH : justify_items;
     }
+    if (justify_self == CSS_VALUE_NORMAL) return CSS_VALUE_STRETCH;
     return justify_self;
 }
 

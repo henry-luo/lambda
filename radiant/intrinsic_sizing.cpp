@@ -255,6 +255,130 @@ static DomNode* previous_non_whitespace_sibling(DomNode* node) {
     return sibling;
 }
 
+static bool element_has_in_flow_intrinsic_content(DomElement* element) {
+    if (!element) return false;
+    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+        if (child->is_text()) {
+            if (!text_node_is_ascii_whitespace(child)) return true;
+            continue;
+        }
+        if (!child->is_element()) continue;
+        ViewBlock* child_block = lam::view_as_block(child->as_element());
+        if (!child_block) return true;
+        if (child_block->display.outer == CSS_VALUE_NONE ||
+            child_block->display.inner == CSS_VALUE_NONE ||
+            layout_view_is_abs_or_fixed(child_block)) {
+            continue;
+        }
+        return true;
+    }
+    return false;
+}
+
+typedef struct IntrinsicSpacingCandidate {
+    CssDeclaration* decl;
+    CssValue* value;
+    int64_t priority;
+} IntrinsicSpacingCandidate;
+
+static CssValue* intrinsic_box_side_value(const CssValue* value, int side) {
+    if (!value) return nullptr;
+    if (value->type != CSS_VALUE_TYPE_LIST) return (CssValue*)value;
+
+    int cnt = value->data.list.count;
+    CssValue** vals = value->data.list.values;
+    if (cnt <= 0 || !vals) return nullptr;
+
+    int idx = 0;
+    if (side == 0) {
+        idx = 0;
+    } else if (side == 1) {
+        idx = (cnt >= 2) ? 1 : 0;
+    } else if (side == 2) {
+        idx = (cnt >= 3) ? 2 : 0;
+    } else {
+        idx = (cnt >= 4) ? 3 : ((cnt >= 2) ? 1 : 0);
+    }
+    return (idx < cnt) ? vals[idx] : nullptr;
+}
+
+static CssValue* intrinsic_pair_side_value(const CssValue* value, bool end_side) {
+    if (!value) return nullptr;
+    if (value->type != CSS_VALUE_TYPE_LIST) return (CssValue*)value;
+
+    int cnt = value->data.list.count;
+    CssValue** vals = value->data.list.values;
+    if (cnt <= 0 || !vals) return nullptr;
+
+    int idx = (end_side && cnt >= 2) ? 1 : 0;
+    return (idx < cnt) ? vals[idx] : nullptr;
+}
+
+static void intrinsic_consider_spacing_candidate(IntrinsicSpacingCandidate* candidate,
+                                                 CssDeclaration* decl, CssValue* value) {
+    if (!candidate || !decl || !value) return;
+    int64_t priority = get_cascade_priority(decl);
+    if (!candidate->decl || priority >= candidate->priority) {
+        candidate->decl = decl;
+        candidate->value = value;
+        candidate->priority = priority;
+    }
+}
+
+static bool intrinsic_resolve_margin_value(LayoutContext* lycon, CssValue* value,
+                                           float inline_base, float* out) {
+    if (!value || !out) return false;
+    if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+        if (inline_base < 0.0f) return false;
+        *out = (float)(value->data.percentage.value / 100.0) * inline_base;
+        return true;
+    }
+    if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
+        *out = 0.0f;
+        return true;
+    }
+    *out = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, value);
+    return true;
+}
+
+static bool intrinsic_resolve_vertical_margins(LayoutContext* lycon, DomElement* element,
+                                               float inline_base, float* mt, float* mb) {
+    if (!element || !element->specified_style || !mt || !mb) return false;
+
+    IntrinsicSpacingCandidate top = {};
+    IntrinsicSpacingCandidate bottom = {};
+
+    CssDeclaration* margin = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_MARGIN);
+    if (margin && margin->value) {
+        intrinsic_consider_spacing_candidate(&top, margin, intrinsic_box_side_value(margin->value, 0));
+        intrinsic_consider_spacing_candidate(&bottom, margin, intrinsic_box_side_value(margin->value, 2));
+    }
+
+    CssDeclaration* mt_decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_MARGIN_TOP);
+    intrinsic_consider_spacing_candidate(&top, mt_decl, mt_decl ? mt_decl->value : nullptr);
+    CssDeclaration* mb_decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_MARGIN_BOTTOM);
+    intrinsic_consider_spacing_candidate(&bottom, mb_decl, mb_decl ? mb_decl->value : nullptr);
+
+    CssDeclaration* block = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_MARGIN_BLOCK);
+    if (block && block->value) {
+        intrinsic_consider_spacing_candidate(&top, block, intrinsic_pair_side_value(block->value, false));
+        intrinsic_consider_spacing_candidate(&bottom, block, intrinsic_pair_side_value(block->value, true));
+    }
+    CssDeclaration* block_start = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_MARGIN_BLOCK_START);
+    intrinsic_consider_spacing_candidate(&top, block_start, block_start ? block_start->value : nullptr);
+    CssDeclaration* block_end = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_MARGIN_BLOCK_END);
+    intrinsic_consider_spacing_candidate(&bottom, block_end, block_end ? block_end->value : nullptr);
+
+    bool resolved = false;
+    if (top.value && intrinsic_resolve_margin_value(lycon, top.value, inline_base, mt)) {
+        resolved = true;
+    }
+    if (bottom.value && intrinsic_resolve_margin_value(lycon, bottom.value, inline_base, mb)) {
+        resolved = true;
+    }
+    return resolved;
+}
+
 static bool node_is_table_cell_like(DomNode* node) {
     if (!node || !node->is_element()) return false;
     DomElement* elem = node->as_element();
@@ -4628,6 +4752,10 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             }
         }
     }
+    bool is_empty_auto_container = !is_form_control_replaced &&
+        view->display.inner != RDT_DISPLAY_REPLACED &&
+        (!view->blk || view->blk->given_height < 0.0f) &&
+        !element_has_in_flow_intrinsic_content(element);
 
     // Check if this block element has only inline content (text and inline elements).
     // In that case, children flow inline on the same line(s), not stacked vertically.
@@ -4709,10 +4837,45 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
     // declared here so the last-child-margin fix after padding/border resolution can access them)
     float prev_margin_bottom = 0;
     bool is_block_flow = !is_grid_container && !is_flex_container && !has_only_inline_content;
+    bool block_flow_has_prior_content = false;
+
+    float block_flow_pad_top = 0.0f;
+    float block_flow_border_top = 0.0f;
+    if (view->bound) {
+        block_flow_pad_top = view->bound->padding.top;
+        if (view->bound->border) {
+            block_flow_border_top = view->bound->border->width.top;
+        }
+    } else if (element->specified_style && width > 0.0f) {
+        CssDeclaration* pt = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_PADDING_TOP);
+        if (pt && pt->value) {
+            if (pt->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                block_flow_pad_top = (float)(pt->value->data.percentage.value / 100.0) * width;
+            } else if (pt->value->type == CSS_VALUE_TYPE_LENGTH) {
+                block_flow_pad_top = resolve_length_value(lycon, CSS_PROPERTY_PADDING_TOP, pt->value);
+            }
+        } else {
+            CssDeclaration* pad_decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_PADDING);
+            if (pad_decl && pad_decl->value) {
+                if (pad_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                    block_flow_pad_top = (float)(pad_decl->value->data.percentage.value / 100.0) * width;
+                } else if (pad_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                    block_flow_pad_top = resolve_length_value(lycon, CSS_PROPERTY_PADDING, pad_decl->value);
+                }
+            }
+        }
+    }
+    bool block_flow_first_margin_collapses = is_block_flow &&
+        block_flow_pad_top <= 0.0f && block_flow_border_top <= 0.0f &&
+        !block_context_establishes_bfc(view);
 
     // For multi-column grids, calculate height based on rows
     if (is_form_control_replaced) {
         // Replaced form control: skip children entirely; padding/border added below.
+    } else if (is_empty_auto_container) {
+        // Empty auto-height containers have zero content height. Padding and border
+        // are still added below, but line-height must not synthesize a line.
+        height = 0.0f;
     } else if (is_grid_container && grid_column_count > 1) {
         // Collect child heights
         int child_count = 0;
@@ -4865,19 +5028,23 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             float child_height = calculate_max_content_height(lycon, child, child_content_w);
 
             // Resolve child's vertical margins for height estimation
+            bool block_flow_margin_handled = false;
             if (child->is_element() && content_w > 0) {
                 DomElement* child_elem = child->as_element();
                 float mt = 0, mb = 0;
 
-                // Try resolved bound->margin first (most reliable after CSS cascade)
                 ViewElement* child_ve = lam::view_require_element(static_cast<View*>(child_elem));
-                if (child_ve->bound) {
+                bool resolved_from_style = intrinsic_resolve_vertical_margins(
+                    lycon, child_elem, content_w, &mt, &mb);
+
+                // Fall back to resolved margins when no specified margin candidate exists.
+                if (!resolved_from_style && child_ve->bound) {
                     mt = child_ve->bound->margin.top;
                     mb = child_ve->bound->margin.bottom;
                 }
 
-                // Fall back to specified_style if bound not resolved
-                if (mt == 0 && mb == 0 && child_elem->specified_style) {
+                // Older styles can arrive without bounds during early measurement.
+                if (!resolved_from_style && mt == 0 && mb == 0 && child_elem->specified_style) {
                     CssDeclaration* mt_decl = style_tree_get_declaration(child_elem->specified_style, CSS_PROPERTY_MARGIN_TOP);
                     if (mt_decl && mt_decl->value) {
                         if (mt_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE)
@@ -4914,9 +5081,12 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                             child_ve->view_type == RDT_VIEW_INLINE_BLOCK)) {
                     // Block flow: collapse margins between adjacent block siblings
                     // CSS2 §8.3.1: adjoining margins collapse to max(mt, prev_mb)
-                    float collapsed = fmax(prev_margin_bottom, mt);
+                    float collapsed = (!block_flow_has_prior_content &&
+                                       block_flow_first_margin_collapses) ?
+                        0.0f : fmax(prev_margin_bottom, mt);
                     height += collapsed;
                     prev_margin_bottom = mb;
+                    block_flow_margin_handled = true;
                 }
             }
 
@@ -4926,6 +5096,11 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             } else {
                 // Items are stacked vertically - sum heights
                 height += child_height;
+            }
+            if (child_height > 0.0f) {
+                block_flow_has_prior_content = true;
+            } else if (block_flow_margin_handled) {
+                block_flow_has_prior_content = true;
             }
         }
     }

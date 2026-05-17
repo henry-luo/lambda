@@ -1945,28 +1945,6 @@ static void finalize_static_positioned_abs_descendant(ViewBlock* block) {
     if (block->position->position != CSS_VALUE_ABSOLUTE &&
         block->position->position != CSS_VALUE_FIXED) return;
 
-    // Absolute descendants of inline boxes can be laid out before the inline
-    // wrapper receives its final line position. The static x already includes
-    // the containing block line start, so add only the inline wrapper's delta
-    // from that line start.
-    if (!block->position->has_left && !block->position->has_right) {
-        ViewElement* parent = block->parent_view();
-        ViewElement* inline_parent = nullptr;
-        ViewElement* walk = parent;
-        while (walk && !walk->is_block()) {
-            if (walk->view_type == RDT_VIEW_INLINE) inline_parent = walk;
-            walk = walk->parent_view();
-        }
-        if (inline_parent && walk && walk->is_block()) {
-            float inline_delta_x = inline_parent->x;
-            if (fabs(inline_delta_x) > 0.01f) {
-                block->x += inline_delta_x;
-                log_debug("[ABS INLINE FINALIZE] %s inline_delta_x=%.1f, final_x=%.1f",
-                          block->source_loc(), inline_delta_x, block->x);
-            }
-        }
-    }
-
     bool needs_offset_delta_x = block->position->has_static_parent_offset_x &&
         !block->position->has_left && !block->position->has_right;
     bool needs_offset_delta_y = block->position->has_static_parent_offset_y &&
