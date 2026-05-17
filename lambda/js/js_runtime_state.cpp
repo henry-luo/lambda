@@ -853,6 +853,16 @@ extern "C" Item js_build_arguments_object() {
     Item companion = js_new_object();
     companion.map->map_kind = MAP_KIND_ARRAY_PROPS;
     arr.array->extra = (int64_t)(uintptr_t)companion.map;
+
+    Item length_key = (Item){.item = s2it(heap_create_name("length", 6))};
+    Item length_desc = js_new_object();
+    js_set_prototype(length_desc, ItemNull);
+    js_property_set(length_desc, (Item){.item = s2it(heap_create_name("value", 5))}, (Item){.item = i2it(argc)});
+    js_property_set(length_desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
+    js_property_set(length_desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(false)});
+    js_property_set(length_desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
+    js_object_define_property(companion, length_key, length_desc);
+
     Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
     js_property_set(companion, tag_key,
                     (Item){.item = s2it(heap_create_name("Arguments", 9))});

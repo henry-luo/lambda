@@ -723,6 +723,57 @@ static bool js_eval_source_assigns_immutable_binding(String* code_str) {
     return false;
 }
 
+static bool js_eval_strict_assigns_restricted_name(String* code_str) {
+    if (!code_str || !code_str->chars) return false;
+    const char* source = code_str->chars;
+    size_t len = code_str->len;
+    size_t pos = 0;
+    while (pos < len) {
+        char ch = source[pos];
+        if (ch == '\'' || ch == '"' || ch == '`') {
+            char quote = ch;
+            pos++;
+            while (pos < len && source[pos] != quote) {
+                if (source[pos] == '\\' && pos + 1 < len) pos++;
+                pos++;
+            }
+            if (pos < len) pos++;
+            continue;
+        }
+        if (ch == '/' && pos + 1 < len && source[pos + 1] == '/') {
+            pos += 2;
+            while (pos < len && !js_eval_at_line_terminator(source, len, pos, NULL)) pos++;
+            continue;
+        }
+        if (ch == '/' && pos + 1 < len && source[pos + 1] == '*') {
+            pos += 2;
+            while (pos + 1 < len && !(source[pos] == '*' && source[pos + 1] == '/')) pos++;
+            if (pos + 1 < len) pos += 2;
+            continue;
+        }
+        size_t name_len = 0;
+        if (js_eval_at_word(source, len, pos, "arguments", 9)) name_len = 9;
+        else if (js_eval_at_word(source, len, pos, "eval", 4)) name_len = 4;
+        if (name_len == 0) {
+            pos++;
+            continue;
+        }
+        size_t after = js_eval_skip_space_and_comments(source, len, pos + name_len);
+        if (after < len) {
+            char op = source[after];
+            char next = (after + 1 < len) ? source[after + 1] : '\0';
+            if ((op == '=' && next != '=' && next != '>') ||
+                ((op == '+' || op == '-') && next == op) ||
+                ((op == '+' || op == '-' || op == '*' || op == '/' || op == '%' ||
+                  op == '&' || op == '|' || op == '^') && next == '=')) {
+                return true;
+            }
+        }
+        pos += name_len;
+    }
+    return false;
+}
+
 // ============================================================================
 // eval(code) — dynamic evaluation of JavaScript source code
 // Wraps the code in an IIFE and compiles/executes via JIT.
@@ -822,6 +873,10 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
 
     if (is_direct_eval && inherited_strict && js_eval_source_assigns_immutable_binding(code_str)) {
         js_throw_type_error("Assignment to constant variable");
+        return ItemNull;
+    }
+    if (is_direct_eval && inherited_strict && js_eval_strict_assigns_restricted_name(code_str)) {
+        js_throw_syntax_error((Item){.item = s2it(heap_create_name("Invalid strict eval assignment", 30))});
         return ItemNull;
     }
 
@@ -971,6 +1026,7 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
         if (!js_transpiler_parse(tp, source, source_len)) {
             log_error("js-eval: parse failed for direct script");
             js_transpiler_destroy(tp);
+            js_throw_syntax_error((Item){.item = s2it(heap_create_name("Invalid eval source", 19))});
             return ItemNull;
         }
 

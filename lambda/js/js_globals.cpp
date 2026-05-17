@@ -295,6 +295,7 @@ static bool js_array_apply_failed_length_shrink(Item obj, int64_t new_len, bool 
     return true;
 }
 static int64_t js_parse_array_index(const char* s, int len);
+static bool js_is_arguments_exotic_array_for_proto(Item value);
 
 // ES2020 §9.1.6.3 ValidateAndApplyPropertyDescriptor
 static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descriptor) {
@@ -317,7 +318,8 @@ static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descrip
 
     // ES §9.4.2.1: Array exotic objects — special [[DefineOwnProperty]] for "length"
     // If obj is an array and name is "length", validate the value as a valid array length.
-    if (get_type_id(obj) == LMD_TYPE_ARRAY && get_type_id(name) == LMD_TYPE_STRING) {
+    bool is_arguments_exotic = js_is_arguments_exotic_array_for_proto(obj);
+    if (get_type_id(obj) == LMD_TYPE_ARRAY && !is_arguments_exotic && get_type_id(name) == LMD_TYPE_STRING) {
         String* ns = it2s(name);
         // J39-7: ES §9.4.2.1 step 3.f.iii — for an array index P >= length,
         // if length is non-writable (__nw_length marker on companion map),
@@ -763,7 +765,11 @@ static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descrip
     bool is_accessor = js_pd_is_accessor(&pd);
     bool is_data = (pd.flags & JS_PD_HAS_VALUE) != 0;
 
-    js_define_own_property_from_descriptor(obj, nm_chars, nm_len, &pd, is_new_property);
+    Item define_target = obj;
+    if (is_arguments_exotic && nm_len == 6 && strncmp(nm_chars, "length", 6) == 0) {
+        define_target = (Item){.map = (Map*)(uintptr_t)obj.array->extra};
+    }
+    js_define_own_property_from_descriptor(define_target, nm_chars, nm_len, &pd, is_new_property);
 
     // ES5 §15.4.5.1: array exotic — accessor at sparse index grows items array.
     if (is_accessor && get_type_id(obj) == LMD_TYPE_ARRAY && nm_len > 0 && nm_len <= 10) {
@@ -7489,6 +7495,23 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
     // Array properties: length, numeric indices
     if (type == LMD_TYPE_ARRAY) {
         if (name_str->len == 6 && strncmp(name_str->chars, "length", 6) == 0) {
+            if (js_is_arguments_exotic_array_for_proto(obj)) {
+                Item companion = (Item){.map = (Map*)(uintptr_t)obj.array->extra};
+                JsPropertyDescriptor pd = {};
+                if (js_get_own_property_descriptor(companion, name_str->chars,
+                                                    (int)name_str->len, &pd)) {
+                    Item desc = js_new_object();
+                    js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))},
+                                    (pd.flags & JS_PD_HAS_VALUE) ? pd.value : make_js_undefined());
+                    js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))},
+                                    (Item){.item = b2it((pd.flags & JS_PD_WRITABLE) != 0)});
+                    js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))},
+                                    (Item){.item = b2it((pd.flags & JS_PD_ENUMERABLE) != 0)});
+                    js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))},
+                                    (Item){.item = b2it(js_pd_is_configurable(&pd))});
+                    return desc;
+                }
+            }
             // J39-7: honor __nw_length marker (set by defineProperty(arr, "length", {writable:false}))
             bool writable = true;
             if (obj.array && obj.array->extra != 0) {
@@ -8007,6 +8030,21 @@ extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor) 
         }
     }
 
+    int64_t argument_unmap_index = -1;
+    Item argument_unmap_value = ItemNull;
+    bool have_argument_unmap_value = false;
+    if (get_type_id(obj) == LMD_TYPE_ARRAY && obj.array->is_content == 1 &&
+        obj.array->extra != 0 && get_type_id(name) == LMD_TYPE_STRING &&
+        get_type_id(descriptor) == LMD_TYPE_MAP) {
+        String* str_name = it2s(name);
+        int64_t arg_index = str_name ? js_parse_array_index(str_name->chars, (int)str_name->len) : -1;
+        if (arg_index >= 0 && arg_index < obj.array->length) {
+            argument_unmap_index = arg_index;
+            argument_unmap_value = js_property_get(obj, name);
+            have_argument_unmap_value = !js_check_exception();
+        }
+    }
+
     Item result = ValidateAndApplyPropertyDescriptor(obj, name, descriptor);
     if (!js_check_exception() && get_type_id(obj) == LMD_TYPE_ARRAY && obj.array->is_content == 1 &&
         obj.array->extra != 0 && get_type_id(name) == LMD_TYPE_STRING && get_type_id(descriptor) == LMD_TYPE_MAP) {
@@ -8025,12 +8063,11 @@ extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor) 
                 bool already_unmapped = false;
                 Item existing_marker = js_map_get_fast_ext(companion.map, marker_key, (int)strlen(marker_key), &already_unmapped);
                 bool was_mapped = !(already_unmapped && js_is_truthy(existing_marker));
-                if (was_mapped && writable_found && !js_is_truthy(writable) && !getter_found && !setter_found) {
+                if (was_mapped && ((writable_found && !js_is_truthy(writable)) || getter_found || setter_found) &&
+                    have_argument_unmap_value && argument_unmap_index == arg_index) {
                     bool value_found = false;
                     Item value = js_map_get_fast_ext(descriptor.map, "value", 5, &value_found);
-                    if (!value_found) {
-                        value = js_property_get(obj, (Item){.item = i2it(arg_index)});
-                    }
+                    if (!value_found || getter_found || setter_found) value = argument_unmap_value;
                     char value_key[64];
                     snprintf(value_key, sizeof(value_key), "__arg_value_%lld", (long long)arg_index);
                     js_property_set(companion, (Item){.item = s2it(heap_create_name(value_key, strlen(value_key)))}, value);
@@ -14176,6 +14213,28 @@ extern "C" Item js_get_with_binding_or_fallback(Item key, Item fallback) {
     bool found = false;
     Item result = js_with_scope_lookup(key, &found, false);
     return found ? result : fallback;
+}
+
+extern "C" int64_t js_probe_with_binding(Item key) {
+    if (js_with_stack_depth <= 0) return 0;
+    for (int i = js_with_stack_depth - 1; i >= 0; i--) {
+        Item scope_obj = js_with_stack[i];
+        if (get_type_id(scope_obj) != LMD_TYPE_MAP) continue;
+        if (it2b(js_in(key, scope_obj))) {
+            if (js_check_exception()) return 1;
+            Item unscopables_sym = (Item){.item = i2it(-(int64_t)(11 + JS_SYMBOL_BASE))};
+            Item unscopables = js_property_get(scope_obj, unscopables_sym);
+            if (js_check_exception()) return 1;
+            if (get_type_id(unscopables) == LMD_TYPE_MAP) {
+                Item blocked = js_property_get(unscopables, key);
+                if (js_check_exception()) return 1;
+                if (js_is_truthy(blocked)) continue;
+            }
+            return 1;
+        }
+        if (js_check_exception()) return 1;
+    }
+    return 0;
 }
 
 extern "C" int64_t js_capture_with_binding(Item key) {

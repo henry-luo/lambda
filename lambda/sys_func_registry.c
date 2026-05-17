@@ -850,6 +850,7 @@ extern int js_with_save_depth(void);
 extern void js_with_restore_depth(int depth);
 extern int64_t js_with_depth_active(void);
 extern Item js_get_with_binding_or_fallback(Item key, Item fallback);
+extern int64_t js_probe_with_binding(Item key);
 extern int64_t js_capture_with_binding(Item key);
 extern int64_t js_set_last_with_binding_if_valid(Item key, Item value, int64_t strict);
 extern Item js_delete_identifier_with_binding(Item key, int64_t declared_binding);
@@ -1696,6 +1697,7 @@ JitImport jit_runtime_imports[] = {
     {"js_with_restore_depth", FPTR(js_with_restore_depth)},
     {"js_with_depth_active", FPTR(js_with_depth_active)},
     {"js_get_with_binding_or_fallback", FPTR(js_get_with_binding_or_fallback)},
+    {"js_probe_with_binding", FPTR(js_probe_with_binding)},
     {"js_capture_with_binding", FPTR(js_capture_with_binding)},
     {"js_set_last_with_binding_if_valid", FPTR(js_set_last_with_binding_if_valid)},
     {"js_delete_identifier_with_binding", FPTR(js_delete_identifier_with_binding)},

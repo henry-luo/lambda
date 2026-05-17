@@ -162,28 +162,7 @@ int jm_arguments_param_index(JsMirTranspiler* mt, const char* vname) {
 
 // v20: Check if a function body starts with "use strict" directive.
 bool jm_has_use_strict_directive(JsFunctionNode* fn) {
-    if (!fn->body) return false;
-    JsAstNode* stmt = NULL;
-    if (fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
-        JsBlockNode* blk = (JsBlockNode*)fn->body;
-        stmt = blk->statements;
-    } else {
-        return false;
-    }
-    // scan directive prologue: string literal expression statements at the top
-    while (stmt && stmt->node_type == JS_AST_NODE_EXPRESSION_STATEMENT) {
-        JsExpressionStatementNode* es = (JsExpressionStatementNode*)stmt;
-        if (!es->expression || es->expression->node_type != JS_AST_NODE_LITERAL) break;
-        JsLiteralNode* lit = (JsLiteralNode*)es->expression;
-        if (lit->literal_type != JS_LITERAL_STRING) break;
-        if (lit->value.string_value &&
-            lit->value.string_value->len == 10 &&
-            strncmp(lit->value.string_value->chars, "use strict", 10) == 0) {
-            return true;
-        }
-        stmt = stmt->next;
-    }
-    return false;
+    return fn && fn->has_use_strict_directive;
 }
 
 // v20: Emit writeback from param register to arguments[param_index]

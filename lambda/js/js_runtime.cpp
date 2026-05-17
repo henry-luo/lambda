@@ -4213,6 +4213,9 @@ extern "C" Item js_property_get(Item object, Item key) {
 
 extern "C" Item js_property_set(Item object, Item key, Item value);
 
+static bool js_runtime_is_arguments_exotic(Item value);
+static Item js_arguments_companion_item(Item arguments);
+
 static Map* js_array_ensure_props_map(Array* arr) {
     if (!arr) return NULL;
     if (arr->extra == 0) {
@@ -4410,6 +4413,10 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
         if (get_type_id(key) == LMD_TYPE_STRING) {
             String* str_key = it2s(key);
             if (str_key->len == 6 && strncmp(str_key->chars, "length", 6) == 0) {
+                if (js_runtime_is_arguments_exotic(object)) {
+                    js_property_set(js_arguments_companion_item(object), key, value);
+                    return value;
+                }
                 double u32_num = js_get_number(value);
                 if (js_check_exception()) return value;
                 uint32_t u32_len = 0;
@@ -5851,6 +5858,10 @@ extern "C" Item js_get_length_item(Item object) {
         }
     }
     if (get_type_id(object) == LMD_TYPE_ARRAY) {
+        if (js_runtime_is_arguments_exotic(object)) {
+            Item key = (Item){.item = s2it(heap_create_name("length", 6))};
+            return js_property_get(object, key);
+        }
         return js_make_number((double)fn_len(object));
     }
     // For unknown types, try general property access
@@ -6854,6 +6865,23 @@ static Item js_string_matchall_get_flags(Item rx);
 static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_replace_all);
 // v18k: Forward declarations for Object/Array/Number static methods (js_globals.cpp)
 extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor);
+
+static bool js_runtime_is_arguments_exotic(Item value) {
+    if (get_type_id(value) != LMD_TYPE_ARRAY || !value.array ||
+        value.array->is_content != 1 || value.array->extra == 0) {
+        return false;
+    }
+    Map* props = (Map*)(uintptr_t)value.array->extra;
+    bool found = false;
+    Item tag = js_map_get_fast_ext(props, "__sym_4", 7, &found);
+    if (!found || get_type_id(tag) != LMD_TYPE_STRING) return false;
+    String* str = it2s(tag);
+    return str && str->len == 9 && strncmp(str->chars, "Arguments", 9) == 0;
+}
+
+static Item js_arguments_companion_item(Item arguments) {
+    return (Item){.map = (Map*)(uintptr_t)arguments.array->extra};
+}
 extern "C" Item js_create_data_property(Item obj, Item name, Item value);
 extern "C" Item js_object_define_properties(Item obj, Item props);
 extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name);
