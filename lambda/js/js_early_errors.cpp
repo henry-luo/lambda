@@ -31,6 +31,7 @@ struct EarlyErrorCtx {
     bool in_constructor;
     bool in_method;          // class method (non-constructor)
     bool in_static_init;     // class static block
+    bool in_formal_parameters;
     int  error_count;
 
     // Label tracking for continue target validation (ContainsUndefinedContinueTarget)
@@ -673,10 +674,16 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
             break;
 
         case JS_AST_NODE_YIELD_EXPRESSION:
+            if (ctx->in_generator && ctx->in_formal_parameters) {
+                ee_error(ctx, node, "YieldExpression is not permitted in generator formal parameters");
+            }
             walk_expression(ctx, ((JsYieldNode*)node)->argument);
             break;
 
         case JS_AST_NODE_AWAIT_EXPRESSION:
+            if (ctx->in_async && ctx->in_formal_parameters) {
+                ee_error(ctx, node, "AwaitExpression is not permitted in async formal parameters");
+            }
             walk_expression(ctx, ((JsAwaitNode*)node)->argument);
             break;
 
@@ -701,10 +708,13 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
             check_function_name_reserved(ctx, fn);
 
             // walk params
+            bool was_params = ctx->in_formal_parameters;
+            ctx->in_formal_parameters = true;
             for (JsAstNode* p = fn->params; p; p = p->next) {
                 check_binding_pattern_reserved(ctx, p);
                 walk_expression(ctx, p);
             }
+            ctx->in_formal_parameters = was_params;
 
             // walk body
             walk_statement(ctx, fn->body);
@@ -950,6 +960,7 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
             bool was_strict = ctx->in_strict;
             bool was_iteration = ctx->in_iteration;
             bool was_switch = ctx->in_switch;
+            bool was_params = ctx->in_formal_parameters;
             int was_label_count = ctx->iteration_label_count;
             ctx->in_generator = fn->is_generator;
             ctx->in_async = fn->is_async;
@@ -967,10 +978,12 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
             check_duplicate_params(ctx, fn);
             check_function_name_reserved(ctx, fn);
 
+            ctx->in_formal_parameters = true;
             for (JsAstNode* p = fn->params; p; p = p->next) {
                 check_binding_pattern_reserved(ctx, p);
                 walk_expression(ctx, p);
             }
+            ctx->in_formal_parameters = was_params;
             walk_statement(ctx, fn->body);
 
             ctx->in_generator = was_gen;
@@ -978,6 +991,7 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
             ctx->in_strict = was_strict;
             ctx->in_iteration = was_iteration;
             ctx->in_switch = was_switch;
+            ctx->in_formal_parameters = was_params;
             ctx->iteration_label_count = was_label_count;
             break;
         }

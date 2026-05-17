@@ -16,6 +16,8 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name);
 extern "C" Item js_has_own_property(Item obj, Item key);
 extern "C" Item js_property_set(Item object, Item key, Item value);
 extern "C" Item js_property_set_strict(Item object, Item key, Item value);
+extern "C" Item js_new_async_function_from_string(Item* args, int argc);
+extern "C" Item js_new_generator_function_from_string(Item* args, int argc, int is_async);
 extern void js_double_to_string(double d, char* out, int out_size);
 Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_found);
 
@@ -1111,7 +1113,8 @@ static Item js_typed_array_create_with_constructor(Item constructor, int length)
     }
     if (constructor_type == LMD_TYPE_FUNC) {
         JsFunction* fn = (JsFunction*)constructor.function;
-        if ((fn->flags & (JS_FUNC_FLAG_ARROW | JS_FUNC_FLAG_METHOD | JS_FUNC_FLAG_GENERATOR | JS_FUNC_FLAG_TYPED_ARRAY_METHOD)) ||
+        if ((fn->flags & (JS_FUNC_FLAG_ARROW | JS_FUNC_FLAG_METHOD | JS_FUNC_FLAG_GENERATOR |
+                JS_FUNC_FLAG_ASYNC | JS_FUNC_FLAG_TYPED_ARRAY_METHOD)) ||
             fn->builtin_id > 0 || fn->builtin_id == -2) {
             return js_throw_type_error("TypedArrayCreate requires a constructor");
         }
@@ -1198,7 +1201,10 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
         JsFunction* fn = (JsFunction*)callee.function;
         // Builtin functions (Math.abs, etc.), arrow functions, generators, and global builtins
         // (parseInt, etc.) are not constructable
-        if (fn->builtin_id > 0 || fn->builtin_id == -2 || (fn->flags & (JS_FUNC_FLAG_ARROW | JS_FUNC_FLAG_METHOD | JS_FUNC_FLAG_GENERATOR | JS_FUNC_FLAG_TYPED_ARRAY_METHOD))) {
+        if (fn->builtin_id > 0 || fn->builtin_id == -2 ||
+            (fn->flags & (JS_FUNC_FLAG_ARROW | JS_FUNC_FLAG_METHOD |
+                JS_FUNC_FLAG_GENERATOR | JS_FUNC_FLAG_ASYNC |
+                JS_FUNC_FLAG_TYPED_ARRAY_METHOD))) {
             js_pending_new_target = ItemNull;
             js_has_pending_new_target = false;
             char buf[256];
@@ -3352,6 +3358,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                 // - Proxy (ES spec: Proxy has no prototype property)
                 if (fn->builtin_id == -2 || fn->builtin_id > 0 ||
                     (fn->flags & JS_FUNC_FLAG_ARROW) ||
+                    ((fn->flags & JS_FUNC_FLAG_ASYNC) && !(fn->flags & JS_FUNC_FLAG_GENERATOR)) ||
                     ((fn->flags & JS_FUNC_FLAG_METHOD) && !(fn->flags & JS_FUNC_FLAG_GENERATOR)) ||
                     (fn->name && fn->name->len == 5 && strncmp(fn->name->chars, "Proxy", 5) == 0)) return make_js_undefined();
                 if (fn->prototype.item == ItemNull.item) {
@@ -5020,7 +5027,8 @@ static bool js_is_constructor_internal(Item callee) {
     }
     if (fn->builtin_id > 0 || fn->builtin_id == -2) return false;
     if (fn->flags & (JS_FUNC_FLAG_ARROW | JS_FUNC_FLAG_METHOD |
-                     JS_FUNC_FLAG_GENERATOR | JS_FUNC_FLAG_TYPED_ARRAY_METHOD)) {
+                     JS_FUNC_FLAG_GENERATOR | JS_FUNC_FLAG_ASYNC |
+                     JS_FUNC_FLAG_TYPED_ARRAY_METHOD)) {
         return false;
     }
     return true;
@@ -10107,7 +10115,9 @@ static bool js_super_callee_is_constructor(Item callee) {
     JsFunction* fn = (JsFunction*)callee.function;
     if (!fn) return false;
     if (fn->builtin_id > 0 || fn->builtin_id == -2) return false;
-    if (fn->flags & (JS_FUNC_FLAG_ARROW | JS_FUNC_FLAG_METHOD | JS_FUNC_FLAG_GENERATOR | JS_FUNC_FLAG_TYPED_ARRAY_METHOD)) return false;
+    if (fn->flags & (JS_FUNC_FLAG_ARROW | JS_FUNC_FLAG_METHOD |
+            JS_FUNC_FLAG_GENERATOR | JS_FUNC_FLAG_ASYNC |
+            JS_FUNC_FLAG_TYPED_ARRAY_METHOD)) return false;
     return true;
 }
 
@@ -10258,56 +10268,20 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         bool is_async_gen_ctor = (fn->name->len == 22 && strncmp(fn->name->chars, "AsyncGeneratorFunction", 22) == 0);
         bool is_async_ctor = (fn->name->len == 13 && strncmp(fn->name->chars, "AsyncFunction", 13) == 0);
         if (is_async_ctor) {
-            Item result = js_new_function_from_string(args, arg_count);
+            Item result = js_new_async_function_from_string(args, arg_count);
             if (get_type_id(result) == LMD_TYPE_FUNC) {
                 JsFunction* rfn = (JsFunction*)result.function;
                 rfn->flags |= JS_FUNC_FLAG_ASYNC;
-                // Update source text: "function anonymous(...)" → "async function anonymous(...)"
-                if (rfn->source_text && rfn->source_text->len > 8) {
-                    StrBuf* asb = strbuf_new_cap((int)rfn->source_text->len + 8);
-                    const char* src_c = rfn->source_text->chars;
-                    const char* paren = (const char*)memchr(src_c, '(', rfn->source_text->len);
-                    if (paren) {
-                        strbuf_append_str(asb, "async function anonymous(");
-                        size_t rest = rfn->source_text->len - (size_t)(paren - src_c + 1);
-                        strbuf_append_str_n(asb, paren + 1, (int)rest);
-                        String* new_src = heap_create_name(asb->str, asb->length);
-                        strbuf_free(asb);
-                        rfn->source_text = new_src;
-                    } else {
-                        strbuf_free(asb);
-                    }
-                }
             }
             return result;
         }
         if (is_gen_ctor || is_async_gen_ctor) {
-            Item result = js_new_function_from_string(args, arg_count);
+            Item result = js_new_generator_function_from_string(args, arg_count, is_async_gen_ctor ? 1 : 0);
             if (get_type_id(result) == LMD_TYPE_FUNC) {
                 JsFunction* rfn = (JsFunction*)result.function;
                 rfn->flags |= JS_FUNC_FLAG_GENERATOR;
                 if (is_async_gen_ctor) {
                     rfn->flags |= JS_FUNC_FLAG_ASYNC_GEN;
-                }
-                // Update source text to use function* / async function* instead of function
-                if (rfn->source_text && rfn->source_text->len > 8) {
-                    StrBuf* gensb = strbuf_new_cap((int)rfn->source_text->len + 8);
-                    const char* src_c = rfn->source_text->chars;
-                    // Find the '(' after "function anonymous" — replace prefix
-                    const char* paren = (const char*)memchr(src_c, '(', rfn->source_text->len);
-                    if (paren) {
-                        if (is_async_gen_ctor)
-                            strbuf_append_str(gensb, "async function* anonymous(");
-                        else
-                            strbuf_append_str(gensb, "function* anonymous(");
-                        size_t rest = rfn->source_text->len - (size_t)(paren - src_c + 1);
-                        strbuf_append_str_n(gensb, paren + 1, (int)rest);
-                        String* new_src = heap_create_name(gensb->str, gensb->length);
-                        strbuf_free(gensb);
-                        rfn->source_text = new_src;
-                    } else {
-                        strbuf_free(gensb);
-                    }
                 }
             }
             return result;
@@ -18675,13 +18649,13 @@ extern "C" void js_throw_reference_error(Item message) {
 }
 
 // helper: read array element, checking for accessor properties (getters via defineProperty)
-static inline Item js_array_element(Item arr_item, int idx) {
+static inline Item js_array_element(Item arr_item, int64_t idx) {
     Array* arr = arr_item.array;
     if (arr->extra != 0) {
         Map* props = (Map*)(uintptr_t)arr->extra;
         // Phase 5D: IS_ACCESSOR shape-flag dispatch under digit-string name.
         char idx_buf[32];
-        int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%d", idx);
+        int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)idx);
         Item pm_item = (Item){.map = props};
         ShapeEntry* _se_idx = js_find_shape_entry(pm_item, idx_buf, idx_len);
         if (_se_idx && jspd_is_accessor(_se_idx)) {
@@ -18903,7 +18877,7 @@ static bool js_proto_chain_has_numeric_keys(Item arr) {
 // If the array slot is a sentinel (hole), checks own accessors first,
 // then walks the prototype chain only if check_proto is true.
 // When present=true, *out receives the value (from prototype if needed).
-static bool js_array_has_element(Item arr, Array* a, int idx, Item* out, bool check_proto) {
+static bool js_array_has_element(Item arr, Array* a, int64_t idx, Item* out, bool check_proto) {
     if (idx >= 0 && idx < a->length && idx < a->capacity &&
         a->items[idx].item != JS_DELETED_SENTINEL_VAL) {
         // Own element — fast path
@@ -18915,7 +18889,7 @@ static bool js_array_has_element(Item arr, Array* a, int idx, Item* out, bool ch
         Map* props = (Map*)(uintptr_t)a->extra;
         // Phase 5D: IS_ACCESSOR shape-flag dispatch under digit-string name.
         char idx_buf[32];
-        int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%d", idx);
+        int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)idx);
         Item pm_item = (Item){.map = props};
         ShapeEntry* _se_idx = js_find_shape_entry(pm_item, idx_buf, idx_len);
         bool slot_found = false;
@@ -18949,8 +18923,8 @@ static bool js_array_has_element(Item arr, Array* a, int idx, Item* out, bool ch
     // proto chain. Pure-data iteration (no callback) keeps the optimization.
     if (!check_proto) return false;
     // Hole — check prototype chain via HasProperty
-    char buf[16];
-    int blen = snprintf(buf, sizeof(buf), "%d", idx);
+    char buf[32];
+    int blen = snprintf(buf, sizeof(buf), "%lld", (long long)idx);
     Item idx_key = (Item){.item = s2it(heap_create_name(buf, blen))};
     if (js_has_property(arr, idx_key)) {
         // Value lives on Array.prototype or Object.prototype
@@ -18958,6 +18932,51 @@ static bool js_array_has_element(Item arr, Array* a, int idx, Item* out, bool ch
         return true;
     }
     return false; // true hole — no property in chain
+}
+
+// For sparse arrays with no numeric prototype keys, callback methods can skip
+// true holes by finding the next own dense or companion-map index. The caller
+// still refreshes the prototype check after each callback; if user code installs
+// numeric prototype keys, iteration falls back to the sequential HasProperty path.
+static bool js_array_find_next_own_element(Item arr, Array* a, int64_t start, int64_t len,
+        int64_t* out_index, Item* out_elem) {
+    if (!a) return false;
+    if (start < 0) start = 0;
+    if (start >= len) return false;
+
+    int64_t dense_limit = a->capacity;
+    if (dense_limit > len) dense_limit = len;
+    if (dense_limit > a->length) dense_limit = a->length;
+    int64_t best_dense = -1;
+    for (int64_t i = start; i < dense_limit; i++) {
+        if (a->items[i].item != JS_DELETED_SENTINEL_VAL) {
+            best_dense = i;
+            break;
+        }
+    }
+
+    int64_t best_extra = -1;
+    if (a->extra != 0) {
+        Map* props = (Map*)(uintptr_t)a->extra;
+        if (props && props->type) {
+            TypeMap* tm = (TypeMap*)props->type;
+            for (ShapeEntry* se = tm ? tm->shape : NULL; se; se = se->next) {
+                if (!se->name) continue;
+                int64_t idx = -1;
+                if (!js_array_parse_index_name(se->name->str, (int)se->name->length, &idx)) continue;
+                if (idx < start || idx >= len) continue;
+                Item val = _map_read_field(se, props->data);
+                if (val.item == JS_DELETED_SENTINEL_VAL) continue;
+                if (best_extra < 0 || idx < best_extra) best_extra = idx;
+            }
+        }
+    }
+    int64_t best_index = best_dense;
+    if (best_extra >= 0 && (best_index < 0 || best_extra < best_index)) best_index = best_extra;
+    if (best_index < 0) return false;
+    if (!js_array_has_element(arr, a, best_index, out_elem, false)) return false;
+    *out_index = best_index;
+    return true;
 }
 
 extern "C" Item js_array_indexOf_int(Item arr, int64_t search) {
@@ -19810,18 +19829,42 @@ static Item js_array_generic_iterative_callback_with_object(Item object, Item ca
         if (js_exception_pending) return ItemNull;
     }
 
+    bool object_is_array = get_type_id(object) == LMD_TYPE_ARRAY;
+    Array* object_array = object_is_array ? object.array : NULL;
+    bool check_proto = object_is_array ? js_proto_chain_has_numeric_keys(object) : true;
     int64_t k = 0;
     while (k < len) {
-        Item key = js_array_index_key(k);
-        if (js_array_method_has_property(object, key)) {
-            Item elem = js_property_get(object, key);
-            if (js_exception_pending) return ItemNull;
-            Item cb_args[3] = { elem, (Item){.item = i2it(k)}, callback_object };
+        Item elem = ItemNull;
+        int64_t idx = k;
+        bool present = false;
+        if (object_is_array) {
+            if (!check_proto) {
+                present = js_array_find_next_own_element(object, object_array, k, len, &idx, &elem);
+                if (!present) break;
+            } else {
+                for (; idx < len; idx++) {
+                    if (js_array_has_element(object, object_array, idx, &elem, true)) {
+                        present = true;
+                        break;
+                    }
+                }
+                if (!present) break;
+            }
+        } else {
+            Item key = js_array_index_key(k);
+            if (js_array_method_has_property(object, key)) {
+                elem = js_property_get(object, key);
+                if (js_exception_pending) return ItemNull;
+                present = true;
+            }
+        }
+        if (present) {
+            Item cb_args[3] = { elem, (Item){.item = i2it(idx)}, callback_object };
             Item selected = js_call_function(callback, this_arg, cb_args, 3);
             if (js_exception_pending) return ItemNull;
 
             if (method_kind == JS_ARRAY_ITER_MAP) {
-                js_create_data_property_or_throw(result, k, selected);
+                js_create_data_property_or_throw(result, idx, selected);
                 if (js_exception_pending) return ItemNull;
             } else if (method_kind == JS_ARRAY_ITER_FILTER) {
                 if (js_is_truthy(selected)) {
@@ -19834,9 +19877,12 @@ static Item js_array_generic_iterative_callback_with_object(Item object, Item ca
             } else if (method_kind == JS_ARRAY_ITER_EVERY) {
                 if (!js_is_truthy(selected)) return (Item){.item = b2it(false)};
             }
+            if (object_is_array) {
+                check_proto = js_proto_chain_has_numeric_keys(object);
+            }
         }
         if (js_exception_pending) return ItemNull;
-        k++;
+        k = idx + 1;
     }
 
     if (method_kind == JS_ARRAY_ITER_FOR_EACH) return make_js_undefined();
@@ -20623,15 +20669,28 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         Item prev_this = js_current_this;
         Item thisArg_forEach = (argc >= 2 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) ? args[1] : make_js_undefined();
         js_current_this = js_compute_callback_this(fn, thisArg_forEach);
-        int len = src->length;  // spec: capture length before loop
+        int64_t len = src->length;  // spec: capture length before loop
         bool check_proto = js_proto_chain_has_numeric_keys(arr);
-        for (int i = 0; i < len; i++) {
-            // v37: use HasProperty (checks prototype chain for holes)
+        int64_t i = 0;
+        while (i < len) {
             Item elem;
-            if (!js_array_has_element(arr, src, i, &elem, check_proto)) continue;
-            Item cb_args[3] = { elem, (Item){.item = i2it(i)}, cb_this };
+            int64_t idx = i;
+            if (!check_proto) {
+                if (!js_array_find_next_own_element(arr, src, i, len, &idx, &elem)) break;
+            } else {
+                bool found = false;
+                for (; idx < len; idx++) {
+                    if (js_array_has_element(arr, src, idx, &elem, true)) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) break;
+            }
+            Item cb_args[3] = { elem, (Item){.item = i2it(idx)}, cb_this };
             js_invoke_fn(fn, cb_args, 3);
             if (js_exception_pending) break;
+            i = idx + 1;
             // J39-7: refresh check_proto in case callback mutated proto chain.
             check_proto = js_proto_chain_has_numeric_keys(arr);
         }
@@ -20730,16 +20789,29 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         Item prev_this = js_current_this;
         Item thisArg_some = (argc >= 2 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) ? args[1] : make_js_undefined();
         js_current_this = js_compute_callback_this(fn, thisArg_some);
-        int len = src->length;  // spec: capture length before loop
+        int64_t len = src->length;  // spec: capture length before loop
         bool check_proto = js_proto_chain_has_numeric_keys(arr);
-        for (int i = 0; i < len; i++) {
-            // v37: use HasProperty (checks prototype chain for holes)
+        int64_t i = 0;
+        while (i < len) {
             Item elem;
-            if (!js_array_has_element(arr, src, i, &elem, check_proto)) continue;
-            Item cb_args[3] = { elem, (Item){.item = i2it(i)}, cb_this };
+            int64_t idx = i;
+            if (!check_proto) {
+                if (!js_array_find_next_own_element(arr, src, i, len, &idx, &elem)) break;
+            } else {
+                bool found = false;
+                for (; idx < len; idx++) {
+                    if (js_array_has_element(arr, src, idx, &elem, true)) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) break;
+            }
+            Item cb_args[3] = { elem, (Item){.item = i2it(idx)}, cb_this };
             Item pred = js_invoke_fn(fn, cb_args, 3);
             if (js_exception_pending) break;
             if (js_is_truthy(pred)) { js_current_this = prev_this; return (Item){.item = b2it(true)}; }
+            i = idx + 1;
             // J39-7: refresh check_proto in case callback or getter mutated proto chain.
             check_proto = js_proto_chain_has_numeric_keys(arr);
         }
@@ -20757,16 +20829,29 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         Item prev_this = js_current_this;
         Item thisArg_every = (argc >= 2 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) ? args[1] : make_js_undefined();
         js_current_this = js_compute_callback_this(fn, thisArg_every);
-        int len = src->length;  // spec: capture length before loop
+        int64_t len = src->length;  // spec: capture length before loop
         bool check_proto = js_proto_chain_has_numeric_keys(arr);
-        for (int i = 0; i < len; i++) {
-            // v37: use HasProperty (checks prototype chain for holes)
+        int64_t i = 0;
+        while (i < len) {
             Item elem;
-            if (!js_array_has_element(arr, src, i, &elem, check_proto)) continue;
-            Item cb_args[3] = { elem, (Item){.item = i2it(i)}, cb_this };
+            int64_t idx = i;
+            if (!check_proto) {
+                if (!js_array_find_next_own_element(arr, src, i, len, &idx, &elem)) break;
+            } else {
+                bool found = false;
+                for (; idx < len; idx++) {
+                    if (js_array_has_element(arr, src, idx, &elem, true)) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) break;
+            }
+            Item cb_args[3] = { elem, (Item){.item = i2it(idx)}, cb_this };
             Item pred = js_invoke_fn(fn, cb_args, 3);
             if (js_exception_pending) break;
             if (!js_is_truthy(pred)) { js_current_this = prev_this; return (Item){.item = b2it(false)}; }
+            i = idx + 1;
             // J39-7: refresh check_proto in case callback or getter mutated proto chain.
             check_proto = js_proto_chain_has_numeric_keys(arr);
         }
@@ -22934,26 +23019,57 @@ static Item js_generator_proto_depth1_cache = {0};      // depth-1 from instance
 static Item js_async_generator_proto_depth1_cache = {0};
 static Item js_generator_proto_depth2_cache = {0};      // depth-2: has Symbol.toStringTag
 static Item js_async_generator_proto_depth2_cache = {0};
+static Item js_async_iterator_proto_cache = {0};
+
+static Item js_create_uncached_builtin_function(int builtin_id, const char* name, int param_count) {
+    JsFunction* fn = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
+    fn->type_id = LMD_TYPE_FUNC;
+    fn->param_count = param_count;
+    fn->formal_length = -1;
+    fn->builtin_id = builtin_id;
+    fn->name = heap_create_name(name, strlen(name));
+    return (Item){.function = (Function*)fn};
+}
+
+static Item js_get_async_iterator_proto() {
+    if (js_async_iterator_proto_cache.item != 0 &&
+        get_type_id(js_async_iterator_proto_cache) == LMD_TYPE_MAP) {
+        return js_async_iterator_proto_cache;
+    }
+    Item proto = js_new_object();
+    {
+        Item obj_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Object", 6))});
+        if (get_type_id(obj_ctor) == LMD_TYPE_FUNC) {
+            Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
+            Item obj_proto = js_property_get(obj_ctor, proto_key);
+            if (get_type_id(obj_proto) == LMD_TYPE_MAP) js_set_prototype(proto, obj_proto);
+        }
+    }
+    Item si_key = (Item){.item = s2it(heap_create_name("__sym_5", 7))};
+    Item si_fn = js_create_uncached_builtin_function(JS_BUILTIN_ITER_IDENTITY, "[Symbol.asyncIterator]", 0);
+    js_property_set(proto, si_key, si_fn);
+    js_mark_non_enumerable(proto, si_key);
+    js_async_iterator_proto_cache = proto;
+    return proto;
+}
 
 // Returns the shared depth-2 prototype (%AsyncGeneratorPrototype%) with Symbol.toStringTag.
 extern "C" Item js_get_generator_shared_proto(bool is_async) {
     Item* cache = is_async ? &js_async_generator_proto_depth2_cache : &js_generator_proto_depth2_cache;
     if (cache->item != 0 && get_type_id(*cache) == LMD_TYPE_MAP) return *cache;
     Item proto = js_new_object();
-    js_set_prototype(proto, js_get_iterator_proto());
-    if (!is_async) {
-        struct { const char* name; int len; int bid; } methods[] = {
-            {"next", 4, JS_BUILTIN_GENERATOR_NEXT},
-            {"return", 6, JS_BUILTIN_GENERATOR_RETURN},
-            {"throw", 5, JS_BUILTIN_GENERATOR_THROW},
-            {NULL, 0, 0}
-        };
-        for (int i = 0; methods[i].name; i++) {
-            Item key = (Item){.item = s2it(heap_create_name(methods[i].name, methods[i].len))};
-            Item fn = js_get_or_create_builtin(methods[i].bid, methods[i].name, 1);
-            js_property_set(proto, key, fn);
-            js_mark_non_enumerable(proto, key);
-        }
+    js_set_prototype(proto, is_async ? js_get_async_iterator_proto() : js_get_iterator_proto());
+    struct { const char* name; int len; int bid; } methods[] = {
+        {"next", 4, JS_BUILTIN_GENERATOR_NEXT},
+        {"return", 6, JS_BUILTIN_GENERATOR_RETURN},
+        {"throw", 5, JS_BUILTIN_GENERATOR_THROW},
+        {NULL, 0, 0}
+    };
+    for (int i = 0; methods[i].name; i++) {
+        Item key = (Item){.item = s2it(heap_create_name(methods[i].name, methods[i].len))};
+        Item fn = js_get_or_create_builtin(methods[i].bid, methods[i].name, 1);
+        js_property_set(proto, key, fn);
+        js_mark_non_enumerable(proto, key);
     }
     // Symbol.toStringTag = "AsyncGenerator" | "Generator" (non-writable, non-enum, configurable)
     Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
@@ -27815,5 +27931,6 @@ void js_deep_batch_reset() {
     js_async_generator_proto_depth1_cache = (Item){0};
     js_generator_proto_depth2_cache = (Item){0};
     js_async_generator_proto_depth2_cache = (Item){0};
+    js_async_iterator_proto_cache = (Item){0};
     js_generator_callee_proto = (Item){0};
 }
