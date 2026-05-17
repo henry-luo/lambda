@@ -2036,6 +2036,8 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
             jm_call_void_0(mt, "js_private_field_init_begin");
             for (int ci = field_chain_len - 1; ci >= 0; ci--) {
                 JsClassEntry* fc_ce = field_chain[ci];
+                JsClassEntry* saved_current_class = mt->current_class;
+                mt->current_class = fc_ce;
                 for (int fi = 0; fi < fc_ce->instance_field_count; fi++) {
                     JsInstanceFieldEntry* inf = &fc_ce->instance_fields[fi];
                     MIR_reg_t key;
@@ -2088,8 +2090,11 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
                 }
+                mt->current_class = saved_current_class;
             }
             // Own class instance fields
+            JsClassEntry* saved_current_class = mt->current_class;
+            mt->current_class = ce;
             for (int fi = 0; fi < ce->instance_field_count; fi++) {
                 JsInstanceFieldEntry* inf = &ce->instance_fields[fi];
                 MIR_reg_t key;
@@ -2142,6 +2147,7 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
             }
+            mt->current_class = saved_current_class;
             // v37: Clear private field init flag after all fields are initialized
             jm_call_void_0(mt, "js_private_field_init_end");
             // Restore 'this' after field initialization

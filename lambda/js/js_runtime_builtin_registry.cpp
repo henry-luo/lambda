@@ -566,6 +566,7 @@ const JsBuiltinMethodSpec JS_PROMISE_STATIC_METHOD_SPECS[] = {
     {"allSettled", 10, JS_BUILTIN_PROMISE_ALL_SETTLED, 1},
     {"any", 3, JS_BUILTIN_PROMISE_ANY, 1},
     {"race", 4, JS_BUILTIN_PROMISE_RACE, 1},
+    {"withResolvers", 13, JS_BUILTIN_PROMISE_WITH_RESOLVERS, 0},
     {NULL, 0, 0, 0}
 };
 
@@ -620,7 +621,7 @@ const JsBuiltinMethodSpec JS_TYPED_ARRAY_PROTOTYPE_METHOD_SPECS[] = {
     {"forEach", 7, JS_BUILTIN_ARR_FOR_EACH, 1},
     {"includes", 8, JS_BUILTIN_ARR_INCLUDES, 1},
     {"indexOf", 7, JS_BUILTIN_ARR_INDEX_OF, 1},
-    {"join", 4, JS_BUILTIN_ARR_JOIN, 0},
+    {"join", 4, JS_BUILTIN_ARR_JOIN, 1},
     {"keys", 4, JS_BUILTIN_ARR_KEYS, 0},
     {"lastIndexOf", 11, JS_BUILTIN_ARR_LAST_INDEX_OF, 1},
     {"map", 3, JS_BUILTIN_ARR_MAP, 1},
@@ -957,6 +958,14 @@ extern "C" void js_populate_typed_array_base_proto(Item proto, Item base_ctor) {
     // Prototype methods: reuse Array builtins (dispatch handles typed arrays)
     js_install_builtin_function_specs(proto, JS_TYPED_ARRAY_PROTOTYPE_METHOD_SPECS,
         JS_FUNC_FLAG_TYPED_ARRAY_METHOD, false);
+
+    // %TypedArray%.prototype.toString is exactly Array.prototype.toString.
+    {
+        Item to_string_key = (Item){.item = s2it(heap_create_name("toString", 8))};
+        Item array_to_string = js_get_or_create_builtin(JS_BUILTIN_ARR_TO_STRING, "toString", 0);
+        js_property_set(proto, to_string_key, array_to_string);
+        js_mark_non_enumerable(proto, to_string_key);
+    }
 
     // TypedArray-specific methods (stubs — no Array equivalent)
     js_install_builtin_function_specs(proto, JS_TYPED_ARRAY_STUB_METHOD_SPECS,

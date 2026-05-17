@@ -19,10 +19,12 @@ extern void* heap_alloc(int size, TypeId type_id);
 extern "C" int js_check_exception(void);
 extern "C" Item js_get_constructor(Item name_item);
 extern "C" Item js_property_get(Item object, Item key);
+extern "C" Item js_to_object(Item value);
 extern "C" void js_set_prototype(Item object, Item prototype);
 extern "C" Item js_iterable_to_array(Item iterable);
 extern "C" bool js_is_generator(Item obj);
 extern Item js_to_number(Item);
+extern double js_get_number(Item value);
 extern "C" Item js_bigint_constructor(Item value);
 extern "C" Item js_bigint_as_int_n(Item bits_item, Item bigint_item);
 extern "C" Item js_bigint_as_uint_n(Item bits_item, Item bigint_item);
@@ -1539,7 +1541,24 @@ extern "C" Item js_typed_array_construct(int type_id, Item arg, Item byte_offset
 
     // Check if arg is another TypedArray or Array
     TypeId arg_type = get_type_id(arg);
-    if (js_is_typed_array(arg) || arg_type == LMD_TYPE_ARRAY) {
+    if (js_is_typed_array(arg)) {
+        return js_typed_array_new_from_array(type_id, arg);
+    }
+    if (arg_type == LMD_TYPE_ARRAY) {
+        Item iter_key = (Item){.item = s2it(heap_create_name("__sym_1"))};
+        Item iter_method = js_property_get(arg, iter_key);
+        if (js_check_exception()) return ItemNull;
+        TypeId iter_type = get_type_id(iter_method);
+        bool has_iter = iter_type != LMD_TYPE_UNDEFINED && iter_type != LMD_TYPE_NULL &&
+            iter_method.item != ITEM_JS_UNDEFINED;
+        if (has_iter) {
+            if (iter_type != LMD_TYPE_FUNC) {
+                return js_throw_type_error("@@iterator is not callable");
+            }
+            Item values = js_iterable_to_array(arg);
+            if (js_check_exception()) return ItemNull;
+            return js_typed_array_new_from_array(type_id, values);
+        }
         return js_typed_array_new_from_array(type_id, arg);
     }
 
@@ -1900,39 +1919,82 @@ extern "C" Item js_typed_array_fill(Item ta_item, Item value, int start, int end
 
 // .set(source [, offset]) — bulk copy from another array/typed array
 extern "C" Item js_typed_array_set_from(Item ta_item, Item source, int offset) {
-    if (!js_is_typed_array(ta_item)) return (Item){.item = ITEM_NULL};
+    if (!js_is_typed_array(ta_item)) return ItemNull;
     JsTypedArray* dst = js_get_typed_array_ptr(ta_item.map);
-    if (offset < 0) offset = 0;
+    if (!dst || js_typed_array_is_out_of_bounds(dst)) {
+        return js_throw_type_error("Cannot perform %TypedArray%.prototype.set on a detached or out-of-bounds ArrayBuffer");
+    }
+    int target_len = js_typed_array_current_length(dst);
+    if (offset < 0) return js_throw_range_error("offset is out of bounds");
 
     if (js_is_typed_array(source)) {
         JsTypedArray* src = js_get_typed_array_ptr(source.map);
-        int copy_len = src->length;
-        if (offset + copy_len > dst->length) copy_len = dst->length - offset;
-        if (copy_len <= 0) return (Item){.item = ITEM_NULL};
+        if (!src || js_typed_array_is_out_of_bounds(src) || js_typed_array_is_out_of_bounds(dst)) {
+            return js_throw_type_error("Cannot perform %TypedArray%.prototype.set on a detached or out-of-bounds ArrayBuffer");
+        }
+        int src_len = js_typed_array_current_length(src);
+        if ((int64_t)offset + (int64_t)src_len > (int64_t)target_len) {
+            return js_throw_range_error("source is too large");
+        }
+        if (src_len <= 0) return (Item){.item = ITEM_JS_UNDEFINED};
 
-        if (src->element_type == dst->element_type) {
-            // fast path: same type → memcpy (or memmove for overlapping buffers)
-            int elem_size = typed_array_element_size(src->element_type);
-            void* dst_ptr = (char*)dst->data + offset * elem_size;
-            void* src_ptr = src->data;
-            memmove(dst_ptr, src_ptr, copy_len * elem_size);
-        } else {
-            // different types: element-by-element with direct memory access
-            for (int i = 0; i < copy_len; i++) {
-                Item idx_s = (Item){.item = i2it(i)};
-                Item idx_d = (Item){.item = i2it(offset + i)};
-                Item val = js_typed_array_get(source, idx_s);
-                js_typed_array_set(ta_item, idx_d, val);
+        Item* values = (Item*)mem_alloc((size_t)src_len * sizeof(Item), MEM_CAT_JS_RUNTIME);
+        if (!values) return js_throw_type_error("TypedArray.prototype.set allocation failed");
+        for (int i = 0; i < src_len; i++) {
+            values[i] = js_typed_array_get(source, (Item){.item = i2it(i)});
+            if (js_check_exception()) {
+                mem_free(values);
+                return ItemNull;
             }
         }
-    } else if (get_type_id(source) == LMD_TYPE_ARRAY) {
-        Array* arr = source.array;
-        for (int i = 0; i < (int)arr->length && (offset + i) < dst->length; i++) {
-            Item idx_d = (Item){.item = i2it(offset + i)};
-            js_typed_array_set(ta_item, idx_d, arr->items[i]);
+        for (int i = 0; i < src_len; i++) {
+            js_typed_array_set(ta_item, (Item){.item = i2it(offset + i)}, values[i]);
+            if (js_check_exception()) {
+                mem_free(values);
+                return ItemNull;
+            }
         }
+        mem_free(values);
+        return (Item){.item = ITEM_JS_UNDEFINED};
     }
-    return (Item){.item = ITEM_NULL};
+
+    TypeId source_type = get_type_id(source);
+    if (source_type == LMD_TYPE_NULL || source_type == LMD_TYPE_UNDEFINED || source.item == ITEM_JS_UNDEFINED) {
+        return js_throw_type_error("Cannot convert undefined or null to object");
+    }
+    Item src_obj = js_to_object(source);
+    if (js_check_exception()) return ItemNull;
+
+    Item length_key = (Item){.item = s2it(heap_create_name("length"))};
+    Item length_item = js_property_get(src_obj, length_key);
+    if (js_check_exception()) return ItemNull;
+    Item length_num = js_to_number(length_item);
+    if (js_check_exception()) return ItemNull;
+    double length_double = js_get_number(length_num);
+    int64_t src_len = 0;
+    if (length_double != length_double || length_double <= 0.0) {
+        src_len = 0;
+    } else if (length_double >= 9007199254740991.0) {
+        src_len = 9007199254740991LL;
+    } else {
+        src_len = (int64_t)floor(length_double);
+    }
+
+    if (js_typed_array_is_out_of_bounds(dst)) {
+        return js_throw_type_error("Cannot perform %TypedArray%.prototype.set on a detached or out-of-bounds ArrayBuffer");
+    }
+    target_len = js_typed_array_current_length(dst);
+    if ((int64_t)offset + src_len > (int64_t)target_len) {
+        return js_throw_range_error("source is too large");
+    }
+
+    for (int64_t i = 0; i < src_len; i++) {
+        Item value = js_property_get(src_obj, (Item){.item = i2it(i)});
+        if (js_check_exception()) return ItemNull;
+        js_typed_array_set(ta_item, (Item){.item = i2it((int64_t)offset + i)}, value);
+        if (js_check_exception()) return ItemNull;
+    }
+    return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
 // .slice(begin, end) — creates a copy

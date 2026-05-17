@@ -342,18 +342,34 @@ static Map* js_obj_resolve_map(Item obj) {
 }
 
 extern "C" bool js_props_obj_query_enumerable(Item obj, const char* name, int name_len) {
+    if (get_type_id(obj) == LMD_TYPE_ARRAY && name_len == 6 &&
+        strncmp(name, "length", 6) == 0) {
+        return false;
+    }
     ShapeEntry* se = js_find_shape_entry(obj, name, name_len);
     Map* m = js_obj_resolve_map(obj);
     return js_props_query_enumerable(m, se, name, name_len);
 }
 
 extern "C" bool js_props_obj_query_writable(Item obj, const char* name, int name_len) {
+    if (get_type_id(obj) == LMD_TYPE_ARRAY && name_len == 6 &&
+        strncmp(name, "length", 6) == 0) {
+        Map* pm = js_obj_resolve_map(obj);
+        if (!pm) return true;
+        bool found = false;
+        Item nw = js_map_get_fast_ext(pm, "__nw_length", 11, &found);
+        return !(found && nw.item != JS_DELETED_SENTINEL_VAL && js_is_truthy(nw));
+    }
     ShapeEntry* se = js_find_shape_entry(obj, name, name_len);
     Map* m = js_obj_resolve_map(obj);
     return js_props_query_writable(m, se, name, name_len);
 }
 
 extern "C" bool js_props_obj_query_configurable(Item obj, const char* name, int name_len) {
+    if (get_type_id(obj) == LMD_TYPE_ARRAY && name_len == 6 &&
+        strncmp(name, "length", 6) == 0) {
+        return false;
+    }
     ShapeEntry* se = js_find_shape_entry(obj, name, name_len);
     Map* m = js_obj_resolve_map(obj);
     return js_props_query_configurable(m, se, name, name_len);

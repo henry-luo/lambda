@@ -21,6 +21,8 @@
 #include <cstring>
 #include <cstdio>
 
+extern "C" Item js_eval_private_resolve(Item unscoped_key);
+
 // context flags passed down during AST walk
 struct EarlyErrorCtx {
     JsTranspiler* tp;
@@ -33,6 +35,10 @@ struct EarlyErrorCtx {
     bool in_static_init;     // class static block
     bool in_formal_parameters;
     int  error_count;
+
+    const char* private_names[128];
+    int private_name_lens[128];
+    int private_name_count;
 
     // Label tracking for continue target validation (ContainsUndefinedContinueTarget)
     // iteration_labels: labels attached to iteration statements (for/while/do-while/for-in/for-of)
@@ -96,6 +102,67 @@ static bool is_reserved_word(const char* name, bool strict) {
     if (is_in_list(name, JS_FUTURE_RESERVED)) return true;
     if (strict && is_in_list(name, JS_STRICT_RESERVED)) return true;
     return false;
+}
+
+static bool is_private_name_string(String* name) {
+    return name && name->len > 10 && strncmp(name->chars, "__private_", 10) == 0;
+}
+
+static bool private_names_same_suffix(String* name, const char* declared, int declared_len) {
+    if (!is_private_name_string(name) || !declared || declared_len <= 10) return false;
+    int name_suffix_len = name->len - 10;
+    int declared_suffix_len = declared_len - 10;
+    if (name_suffix_len != declared_suffix_len) return false;
+    return strncmp(name->chars + 10, declared + 10, name_suffix_len) == 0;
+}
+
+static bool ctx_private_name_is_declared(EarlyErrorCtx* ctx, String* name) {
+    if (!is_private_name_string(name)) return true;
+    for (int i = ctx->private_name_count - 1; i >= 0; i--) {
+        if (private_names_same_suffix(name, ctx->private_names[i], ctx->private_name_lens[i])) return true;
+    }
+    Item resolved = js_eval_private_resolve((Item){.item = s2it(name)});
+    if (resolved.item != ItemNull.item) return true;
+    return false;
+}
+
+static void ctx_add_private_name(EarlyErrorCtx* ctx, String* name) {
+    if (!is_private_name_string(name) || ctx->private_name_count >= 128) return;
+    for (int i = ctx->private_name_count - 1; i >= 0; i--) {
+        if (private_names_same_suffix(name, ctx->private_names[i], ctx->private_name_lens[i])) return;
+    }
+    ctx->private_names[ctx->private_name_count] = name->chars;
+    ctx->private_name_lens[ctx->private_name_count] = name->len;
+    ctx->private_name_count++;
+}
+
+static void collect_class_private_names(EarlyErrorCtx* ctx, JsClassNode* cls) {
+    if (!ctx || !cls) return;
+    JsAstNode* members = cls->body;
+    if (members && members->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
+        members = ((JsBlockNode*)members)->statements;
+    }
+    for (JsAstNode* m = members; m; m = m->next) {
+        if (m->node_type == JS_AST_NODE_METHOD_DEFINITION) {
+            JsMethodDefinitionNode* md = (JsMethodDefinitionNode*)m;
+            if (!md->computed && md->key && md->key->node_type == JS_AST_NODE_IDENTIFIER) {
+                ctx_add_private_name(ctx, ((JsIdentifierNode*)md->key)->name);
+            }
+        } else if (m->node_type == JS_AST_NODE_FIELD_DEFINITION) {
+            JsFieldDefinitionNode* fd = (JsFieldDefinitionNode*)m;
+            if (!fd->computed && fd->key && fd->key->node_type == JS_AST_NODE_IDENTIFIER) {
+                ctx_add_private_name(ctx, ((JsIdentifierNode*)fd->key)->name);
+            }
+        }
+    }
+}
+
+static void check_private_identifier_valid(EarlyErrorCtx* ctx, JsAstNode* node, String* name) {
+    if (!is_private_name_string(name)) return;
+    if (!ctx_private_name_is_declared(ctx, name)) {
+        ee_error(ctx, node, "Private identifier '#%.*s' must be declared in an enclosing class",
+            name->len - 10, name->chars + 10);
+    }
 }
 
 // ---- unicode escape normalization ------------------------------------------
@@ -549,6 +616,7 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
             // Reserved word checks are done in binding positions (declarations,
             // parameters), not in expression (reference) positions. Keywords
             // like 'this', 'null', 'true' may appear as identifiers in the AST.
+            check_private_identifier_valid(ctx, node, ((JsIdentifierNode*)node)->name);
             break;
 
         case JS_AST_NODE_LITERAL: {
@@ -613,7 +681,12 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
         case JS_AST_NODE_MEMBER_EXPRESSION: {
             JsMemberNode* mn = (JsMemberNode*)node;
             walk_expression(ctx, mn->object);
-            if (mn->computed) walk_expression(ctx, mn->property);
+            if (mn->computed) {
+                walk_expression(ctx, mn->property);
+            } else if (mn->property && mn->property->node_type == JS_AST_NODE_IDENTIFIER) {
+                check_private_identifier_valid(ctx, mn->property,
+                    ((JsIdentifierNode*)mn->property)->name);
+            }
             break;
         }
 
@@ -728,11 +801,14 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
         case JS_AST_NODE_CLASS_EXPRESSION: {
             JsClassNode* cls = (JsClassNode*)node;
             bool was_strict = ctx->in_strict;
+            int saved_private_count = ctx->private_name_count;
             ctx->in_strict = true; // class bodies are always strict
+            collect_class_private_names(ctx, cls);
             walk_expression(ctx, cls->superclass);
             for (JsAstNode* m = cls->body; m; m = m->next) {
                 walk_statement(ctx, m);
             }
+            ctx->private_name_count = saved_private_count;
             ctx->in_strict = was_strict;
             break;
         }
@@ -999,11 +1075,14 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
         case JS_AST_NODE_CLASS_DECLARATION: {
             JsClassNode* cls = (JsClassNode*)node;
             bool was_strict = ctx->in_strict;
+            int saved_private_count = ctx->private_name_count;
             ctx->in_strict = true; // class body is always strict
+            collect_class_private_names(ctx, cls);
             walk_expression(ctx, cls->superclass);
             for (JsAstNode* m = cls->body; m; m = m->next) {
                 walk_statement(ctx, m);
             }
+            ctx->private_name_count = saved_private_count;
             ctx->in_strict = was_strict;
             break;
         }

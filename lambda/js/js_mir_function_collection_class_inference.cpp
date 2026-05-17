@@ -1643,7 +1643,7 @@ void jm_infer_walk(JsAstNode* node, const char param_names[][128],
         JsBinaryNode* bin = (JsBinaryNode*)node;
         int li = find_param(bin->left);
         int ri = find_param(bin->right);
-        bool is_arith = (bin->op == JS_OP_ADD || bin->op == JS_OP_SUB ||
+        bool is_arith = (bin->op == JS_OP_SUB ||
                          bin->op == JS_OP_MUL || bin->op == JS_OP_DIV ||
                          bin->op == JS_OP_MOD || bin->op == JS_OP_EXP);
         bool is_cmp = (bin->op == JS_OP_LT || bin->op == JS_OP_LE ||
@@ -2138,13 +2138,15 @@ void jm_infer_return_type_walk(JsAstNode* node, const char* self_name,
             case JS_OP_EQ: case JS_OP_NE: case JS_OP_STRICT_EQ: case JS_OP_STRICT_NE:
                 t = LMD_TYPE_BOOL; break;
             case JS_OP_ADD:
-                // + is string concat when any operand is a string
+                // plus is string concat when any operand is a string; otherwise
+                // unknown operands must stay boxed because param + param can
+                // still concatenate at runtime.
                 if (jm_expr_has_bigint_literal(expr))
                     t = LMD_TYPE_ANY;
                 else if (jm_add_chain_has_string(bin->left) || jm_add_chain_has_string(bin->right))
                     t = LMD_TYPE_STRING;
                 else
-                    t = LMD_TYPE_INT;
+                    t = LMD_TYPE_ANY;
                 break;
             case JS_OP_SUB: case JS_OP_MUL: case JS_OP_MOD:
                 t = jm_expr_has_bigint_literal(expr) ? LMD_TYPE_ANY : LMD_TYPE_INT;

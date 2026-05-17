@@ -111,7 +111,7 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
         log_error("js-new-function: parse failed for '%s'", source);
         mem_free(source);
         js_transpiler_destroy(tp);
-        return ItemNull;
+        return js_dynamic_function_throw_syntax_error("Invalid function source");
     }
 
     TSNode root = ts_tree_root_node(tp->tree);
@@ -739,7 +739,7 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
         return code_item;
     }
     String* code_str = it2s(code_item);
-    if (!code_str || code_str->len == 0) return ItemNull;
+    if (!code_str || code_str->len == 0) return (Item){.item = ITEM_JS_UNDEFINED};
     bool is_direct_eval = (eval_flags & 2) != 0;
     bool is_global_scope = (eval_flags & 1) != 0;
     bool inherited_strict = (eval_flags & 4) != 0;
@@ -760,6 +760,12 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
             size_t lt_width = 0;
             if (c == ' ' || c == '\t') { i++; continue; }
             if (js_eval_at_line_terminator(s, slen, i, &lt_width)) { i += lt_width; continue; }
+            // skip hashbang comment at the start of eval script source
+            if (i == 0 && c == '#' && i + 1 < slen && s[i + 1] == '!') {
+                i += 2;
+                while (i < slen && !js_eval_at_line_terminator(s, slen, i, NULL)) i++;
+                continue;
+            }
             // skip line comments
             if (c == '/' && i + 1 < slen && s[i+1] == '/') {
                 i += 2;
@@ -776,7 +782,7 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
             has_code = true;
             break;
         }
-        if (!has_code) return ItemNull;
+        if (!has_code) return (Item){.item = ITEM_JS_UNDEFINED};
     }
 
     // Fast path: if code is a single RegExp literal, construct directly
@@ -839,6 +845,8 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
         }
         if (i < slen) {
             if (s[i] == '/' && i + 1 < slen && (s[i + 1] == '/' || s[i + 1] == '*'))
+                skip_expr_form = true;
+            if (i == 0 && s[i] == '#' && i + 1 < slen && s[i + 1] == '!')
                 skip_expr_form = true;
             if (slen - i >= 8 && memcmp(s + i, "function", 8) == 0 &&
                 (i + 8 >= slen || s[i+8] == ' ' || s[i+8] == '*' || s[i+8] == '('))

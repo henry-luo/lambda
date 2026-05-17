@@ -900,6 +900,7 @@ extern Item js_object_set_prototype_of(Item obj, Item proto);
 extern Item js_reflect_prevent_extensions(Item obj);
 extern Item js_reflect_apply(Item target, Item this_arg, Item args_array);
 extern Item js_reflect_get(Item target, Item key);
+extern Item js_reflect_get_with_receiver(Item target, Item key, Item receiver);
 extern Item js_reflect_has(Item target, Item key);
 extern Item js_reflect_get_prototype_of(Item target);
 extern Item js_reflect_is_extensible(Item target);
@@ -1572,6 +1573,7 @@ JitImport jit_runtime_imports[] = {
     {"js_reflect_prevent_extensions", FPTR(js_reflect_prevent_extensions)},
     {"js_reflect_apply", FPTR(js_reflect_apply)},
     {"js_reflect_get", FPTR(js_reflect_get)},
+    {"js_reflect_get_with_receiver", FPTR(js_reflect_get_with_receiver)},
     {"js_reflect_has", FPTR(js_reflect_has)},
     {"js_reflect_get_prototype_of", FPTR(js_reflect_get_prototype_of)},
     {"js_reflect_is_extensible", FPTR(js_reflect_is_extensible)},
