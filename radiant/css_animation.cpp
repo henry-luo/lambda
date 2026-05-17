@@ -871,9 +871,9 @@ void css_animation_tick(AnimationInstance* anim, float t) {
                 tf->type == TRANSFORM_TRANSLATEY) {
                 float tx = tf->params.translate.x;
                 float ty = tf->params.translate.y;
-                if (!std::isnan(tf->translate_x_percent))
+                if (!isnan(tf->translate_x_percent))
                     tx = tf->translate_x_percent * span->width / 100.0f;
-                if (!std::isnan(tf->translate_y_percent))
+                if (!isnan(tf->translate_y_percent))
                     ty = tf->translate_y_percent * span->height / 100.0f;
                 anim->bounds[0] += tx;
                 anim->bounds[1] += ty;

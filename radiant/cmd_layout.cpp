@@ -5611,7 +5611,7 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
     opts->output_file = nullptr;
     opts->output_dir = nullptr;
     opts->css_file = nullptr;
-    opts->view_output_file = nullptr;  // Default to /tmp/view_tree.json
+    opts->view_output_file = nullptr;  // Default to ./temp/view_tree.json
     opts->font_dir_count = 0;
     opts->viewport_width = 1200;  // Standard viewport width for layout tests (matches browser reference)
     opts->viewport_height = 800;  // Standard viewport height for layout tests (matches browser reference)
@@ -5921,7 +5921,7 @@ static bool layout_single_file(
         }
 
         print_view_tree(lam::unsafe_view_element_storage(doc->view_tree->root), doc->url, output_path);
-        log_debug("[Layout] Layout tree written to %s", output_path ? output_path : "/tmp/view_tree.json");
+        log_debug("[Layout] Layout tree written to %s", output_path ? output_path : "./temp/view_tree.json");
 
         if (is_pdf || is_svg) {
             set_combine_text_nodes(true);

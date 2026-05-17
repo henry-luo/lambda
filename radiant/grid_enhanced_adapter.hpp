@@ -287,6 +287,7 @@ inline int grid_line_to_css_line(GridLine line) {
  * @param explicit_track_count Number of explicit columns (needed to resolve negative line numbers)
  */
 inline int get_span_value_ex(int start, int end, bool end_is_span, int explicit_track_count) {
+    (void)explicit_track_count;
     if (start > 0 && end > 0) {
         return end - start;
     } else if (start > 0 && end < 0) {
@@ -323,21 +324,6 @@ inline int resolve_negative_line(int negative_line, int total_track_count) {
     // CSS Grid spec: values <= 0 represent positions before the explicit grid start,
     // creating negative implicit tracks. Do NOT clamp to 1.
     return resolved;
-}
-
-/**
- * Legacy get_span_value - assumes negative end is always span
- * @deprecated Use get_span_value_ex with is_span flag instead
- */
-inline int get_span_value(int start, int end) {
-    if (start > 0 && end > 0) {
-        return end - start;
-    } else if (start > 0 && end < 0) {
-        return -end;  // end is negative span (LEGACY: doesn't distinguish from negative line)
-    } else if (end < 0) {
-        return -end;  // end is negative span
-    }
-    return 1;  // default span
 }
 
 /**

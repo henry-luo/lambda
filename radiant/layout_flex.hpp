@@ -48,10 +48,7 @@ void cleanup_flex_container(LayoutContext* lycon);
 void layout_flex_container(LayoutContext* lycon, ViewBlock* container);
 
 // Flex item collection and management
-// UNIFIED: Single-pass collection that combines measurement + View creation + collection
 int collect_and_prepare_flex_items(LayoutContext* lycon, FlexContainerLayout* flex_layout, ViewBlock* container);
-// DEPRECATED: Use collect_and_prepare_flex_items instead (kept for compatibility)
-int collect_flex_items(FlexContainerLayout* flex_layout, ViewBlock* container, View*** items);
 void sort_flex_items_by_order(View** items, int count);
 
 // Flex line creation

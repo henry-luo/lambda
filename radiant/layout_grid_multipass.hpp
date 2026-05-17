@@ -80,7 +80,7 @@ void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
 // - collect_grid_items()
 // - place_grid_items()
 // - determine_grid_size()
-// - resolve_track_sizes()
+// - resolve_track_sizes_enhanced()
 // - position_grid_items()
 // - align_grid_items()
 

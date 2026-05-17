@@ -184,13 +184,7 @@ void auto_place_grid_item(GridContainerLayout* grid_layout, struct ViewBlock* it
 
 // Grid sizing algorithm
 void determine_grid_size(GridContainerLayout* grid_layout);
-void resolve_track_sizes(GridContainerLayout* grid_layout, struct ViewBlock* container);
 void initialize_track_sizes(GridContainerLayout* grid_layout);
-void resolve_intrinsic_track_sizes(GridContainerLayout* grid_layout);
-void maximize_tracks(GridContainerLayout* grid_layout);
-void expand_flexible_tracks(GridContainerLayout* grid_layout, struct ViewBlock* container);
-float calculate_track_intrinsic_size(GridContainerLayout* grid_layout, int track_index, bool is_row, GridTrackSizeType size_type);
-void expand_flexible_tracks_in_axis(GridTrack* tracks, int track_count, float available_space);
 
 // Enhanced track sizing algorithm (uses Taffy-inspired implementation)
 void resolve_track_sizes_enhanced(GridContainerLayout* grid_layout, struct ViewBlock* container);
@@ -203,7 +197,6 @@ void align_grid_item(struct ViewBlock* item, GridContainerLayout* grid_layout);
 // Utility functions
 bool is_valid_grid_item(struct ViewBlock* item);
 bool is_grid_item(struct ViewBlock* block);
-IntrinsicSizes calculate_grid_item_intrinsic_sizes(struct LayoutContext* lycon, struct ViewBlock* item, bool is_row_axis);
 int resolve_grid_line_position(GridContainerLayout* grid_layout, int line_value, const char* line_name, bool is_row, bool is_end_line);
 
 // Grid template area parsing
@@ -236,5 +229,6 @@ void parse_repeat_function(const char* repeat_str, struct GridTrackSize** result
 }
 
 // C++ function declarations (outside extern "C")
+IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlock* item, bool is_row_axis);
 void layout_grid_container(LayoutContext* lycon, ViewBlock* container);
 #endif

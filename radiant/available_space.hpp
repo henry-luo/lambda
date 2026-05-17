@@ -13,7 +13,7 @@
  */
 
 #pragma once
-#include <cmath>
+#include <math.h>
 
 // ============================================================================
 // Available Size Type
@@ -224,7 +224,7 @@ struct AvailableSpace {
  */
 inline float apply_size_constraints(float size, float min_size, float max_size) {
     if (min_size > 0 && size < min_size) size = min_size;
-    if (max_size > 0 && !std::isinf(max_size) && size > max_size) size = max_size;
+    if (max_size > 0 && !isinf(max_size) && size > max_size) size = max_size;
     return size;
 }
 

@@ -1471,8 +1471,8 @@ resolve: build
 	echo "─────────────────────────────────────────────────────────────────────────────────"; \
 	./$(LAMBDA_EXE) layout "$${HTML_FILE}" --width 1200 --height 800 2>&1 | grep -E '^\[|^Error' || true; \
 	echo ""; \
-	if [ ! -f "/tmp/view_tree.json" ]; then \
-		echo "❌ Error: Lambda CSS output not generated at /tmp/view_tree.json"; \
+	if [ ! -f "temp/view_tree.json" ]; then \
+		echo "❌ Error: Lambda CSS output not generated at temp/view_tree.json"; \
 		exit 1; \
 	fi; \
 	echo "✅ Lambda CSS output generated"; \

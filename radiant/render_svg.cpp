@@ -1281,8 +1281,8 @@ static bool svg_build_transform_attr(const TransformProp* tp, float elem_x, floa
             case TRANSFORM_TRANSLATEX:
             case TRANSFORM_TRANSLATEY: {
                 float tx = tf->params.translate.x, ty = tf->params.translate.y;
-                if (!std::isnan(tf->translate_x_percent)) tx = tf->translate_x_percent * elem_w / 100.0f;
-                if (!std::isnan(tf->translate_y_percent)) ty = tf->translate_y_percent * elem_h / 100.0f;
+                if (!isnan(tf->translate_x_percent)) tx = tf->translate_x_percent * elem_w / 100.0f;
+                if (!isnan(tf->translate_y_percent)) ty = tf->translate_y_percent * elem_h / 100.0f;
                 le = tx; lf = ty;
                 break;
             }
