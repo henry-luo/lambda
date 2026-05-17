@@ -7,6 +7,7 @@
 #include "layout_cache.hpp"
 #include "layout_pass.hpp"
 #include "layout_abs_children.hpp"
+#include "layout_measure.hpp"
 
 #include "../lib/log.h"
 #include "../lib/tagged.hpp"
@@ -1394,7 +1395,10 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                     }
 
                     // Measure this text node
-                    TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, measure_text, measure_len, text_transform);
+                    TextIntrinsicWidths widths = layout_measure_text_intrinsic_widths(
+                        lycon, measure_text, measure_len, text_transform, CSS_VALUE_NONE,
+                        CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NORMAL,
+                        "flex multipass text");
                     float text_width = widths.max_content;
                     float text_height = lycon->font.style ? lycon->font.style->font_size : 16.0f;
 
@@ -1665,7 +1669,10 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                         }
 
                         // Measure the trimmed text width/height
-                        TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, trimmed, trimmed_len, text_transform);
+                        TextIntrinsicWidths widths = layout_measure_text_intrinsic_widths(
+                            lycon, trimmed, trimmed_len, text_transform, CSS_VALUE_NONE,
+                            CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NORMAL,
+                            "flex multipass trimmed text");
                         float text_size = is_row ? widths.max_content : (lycon->font.style ? lycon->font.style->font_size : 16.0f);
 
                         // Add text size plus gap (if there's a following element)

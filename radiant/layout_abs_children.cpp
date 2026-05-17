@@ -93,6 +93,7 @@ void layout_absolute_children_in_context(LayoutContext* lycon, ViewBlock* contai
             : layout_containing_block_for_view(container);
         state.parent_block = lycon->block;
         state.parent_line = lycon->line;
+        LayoutContextScope child_scope(lycon);
 
         if (child_block->blk) {
             lycon->block.given_width = child_block->blk->given_width;
@@ -120,9 +121,6 @@ void layout_absolute_children_in_context(LayoutContext* lycon, ViewBlock* contai
         }
 
         layout_apply_abs_child_aspect_ratio(&state);
-
-        lycon->block = state.parent_block;
-        lycon->line = state.parent_line;
 
         log_debug("[LAYOUT_ABS] child laid out: %s at (%.1f, %.1f) size %.1fx%.1f",
                   child->node_name(), child_block->x, child_block->y,

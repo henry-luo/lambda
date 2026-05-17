@@ -684,7 +684,10 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                                 while (out_pos > 0 && normalized[out_pos - 1] == ' ') out_pos--;
                                 normalized[out_pos] = '\0';
                                 if (out_pos > 0) {
-                                    TextIntrinsicWidths tw = measure_text_intrinsic_widths(lycon, normalized, out_pos);
+                                    TextIntrinsicWidths tw = layout_measure_text_intrinsic_widths(
+                                        lycon, normalized, out_pos, CSS_VALUE_NONE, CSS_VALUE_NONE,
+                                        CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NORMAL,
+                                        "flex anonymous text");
                                     item_width = tw.max_content;
                                     child_count++;
                                 } else {
@@ -1078,8 +1081,10 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                         // Only measure if there's non-whitespace content
                         if (out_pos > 0) {
                             // Measure normalized text width using intrinsic sizing
-                            TextIntrinsicWidths text_widths = measure_text_intrinsic_widths(
-                                lycon, normalized_buffer, out_pos);
+                            TextIntrinsicWidths text_widths = layout_measure_text_intrinsic_widths(
+                                lycon, normalized_buffer, out_pos, CSS_VALUE_NONE, CSS_VALUE_NONE,
+                                CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NORMAL,
+                                "flex shrink-to-fit text");
                             item_width = text_widths.max_content;
                             flex_item_count++;
                             log_debug("SHRINK-TO-FIT RECALC: text item width=%.1f, normalized_len=%zu, text='%.30s...'",
@@ -6091,8 +6096,10 @@ void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContainerLayou
                                     if (text && text[0]) {
                                         size_t text_len = strlen(text);
                                         // Check if text would wrap at this width
-                                        TextIntrinsicWidths tw = measure_text_intrinsic_widths(
-                                            lycon, text, text_len);
+                                        TextIntrinsicWidths tw = layout_measure_text_intrinsic_widths(
+                                            lycon, text, text_len, CSS_VALUE_NONE, CSS_VALUE_NONE,
+                                            CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NORMAL,
+                                            "flex item wrapping text");
                                         if (tw.max_content > item_content_width && tw.min_content > 0) {
                                             // Text wraps: compute height at constrained width
                                             // Resolve CSS line-height by walking ancestor chain

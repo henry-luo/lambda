@@ -682,25 +682,9 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     log_debug("containing block padding box: (%.0f, %.0f) size (%.0f, %.0f), border_offset: (%f, %f)",
               cb_x, cb_y, cb_width, cb_height, border_offset_x, border_offset_y);
 
-    // re-resolve percentage position values against the actual containing block
-    // during CSS resolution, percentages were resolved against the wrong reference (parent at resolution time)
-    // for absolute positioned elements, percentages are relative to the containing block's padding box
-    if (block->position->has_left && !isnan(block->position->left_percent)) {
-        block->position->left = block->position->left_percent * cb_width / 100.0f;
-        log_debug("[ABS POS] re-resolved left: %.1f%% of %.1f = %.1f", block->position->left_percent, cb_width, block->position->left);
-    }
-    if (block->position->has_right && !isnan(block->position->right_percent)) {
-        block->position->right = block->position->right_percent * cb_width / 100.0f;
-        log_debug("[ABS POS] re-resolved right: %.1f%% of %.1f = %.1f", block->position->right_percent, cb_width, block->position->right);
-    }
-    if (block->position->has_top && !isnan(block->position->top_percent)) {
-        block->position->top = block->position->top_percent * cb_height / 100.0f;
-        log_debug("[ABS POS] re-resolved top: %.1f%% of %.1f = %.1f", block->position->top_percent, cb_height, block->position->top);
-    }
-    if (block->position->has_bottom && !isnan(block->position->bottom_percent)) {
-        block->position->bottom = block->position->bottom_percent * cb_height / 100.0f;
-        log_debug("[ABS POS] re-resolved bottom: %.1f%% of %.1f = %.1f", block->position->bottom_percent, cb_height, block->position->bottom);
-    }
+    // re-resolve percentage position values against the actual containing block.
+    // for absolute positioned elements, percentages are relative to the padding box.
+    layout_resolve_percent_offsets_for_child(block, cb, "abspos child");
 
     // re-resolve percentage width/height against the actual containing block
     layout_resolve_percent_size_for_child(lycon, block, cb, false, "abspos child");

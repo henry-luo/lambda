@@ -720,10 +720,8 @@ void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
         *max_height = content_height;
     }
 
-    // NOTE: Padding and border are already included by:
-    // - calculate_max_content_width: via measure_element_intrinsic_widths (lines 304-318)
-    // - calculate_max_content_height: directly adds padding/border (lines 405-413)
-    // Do NOT add padding/border again here to avoid double-counting
+    // NOTE: Padding and border are already included by intrinsic width/height
+    // measurement helpers. Do not add padding/border again here.
 
     // Store in cache
     store_in_measurement_cache(static_cast<DomNode*>(item), *max_width, *max_height,
