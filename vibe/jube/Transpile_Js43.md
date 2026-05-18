@@ -3243,3 +3243,70 @@ Baseline update result:
 - Updated baseline header: `# Total passing: 34053`.
 - Failure manifest:
   `temp/js43_update_baseline_after_this_eval_fix.tsv`.
+
+## 57. Constructor Shape Scan And Formal `arguments`
+
+Status on 2026-05-18: fixed 5 rows from the 110-test remaining failure
+manifest without regressing the existing baseline.  The replay manifest now has
+105 failures left.
+
+Root causes fixed:
+
+- The constructor pre-shape scan recorded every top-level `this.prop = ...`
+  assignment, including duplicate writes to the same property.  A constructor
+  such as `this.id = 0; this.id = this.func();` could allocate two `id` slots,
+  then writes and reads disagreed about which slot was authoritative.
+- The same scan continued after unconditional `return` / `throw`, so unreachable
+  writes such as `return true; this.bar = ...` created observable own properties
+  initialized to `null`.
+- Function lowering always materialized the synthetic `arguments` object when a
+  body referenced `arguments`.  A formal parameter named `arguments` should own
+  that binding instead, so `function f(arguments) { return arguments; }` was
+  incorrectly returning the arguments object.
+
+Implementation:
+
+- Canonicalized constructor pre-shape entries by property name.  Duplicate
+  writes now reuse the existing slot and preserve a concrete detected type when
+  a later complex expression has unknown type.
+- Stopped the constructor pre-shape scan at top-level unconditional
+  `return` / `throw`.
+- Added formal-parameter detection for `_js_arguments` and skipped synthetic
+  arguments object materialization when that formal binding exists.
+- Made native slot get/set metadata lookup fall back from `slot_entries` to the
+  linked `ShapeEntry` list by byte offset, so typed slot helpers remain correct
+  even when a shaped map does not publish the side table.
+
+Changed files:
+
+- `lambda/js/js_mir_function_collection_class_inference.cpp`
+- `lambda/js/js_mir_function_class_lowering.cpp`
+- `lambda/js/js_runtime.cpp`
+
+Verification:
+
+```bash
+make -C build/premake config=release_native lambda test_js_test262_gtest -j4
+./lambda.exe js temp/js43_probe_func.js
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_ctor_slot_batch.txt --js-timeout=30 --write-failures=temp/js43_ctor_slot_after_return_arguments.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_remaining_110_after_eval_baseline.txt --js-timeout=30 --write-failures=temp/js43_remaining_110_after_ctor_args_fixes.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --baseline-only --batch-only --js-timeout=30 --write-failures=temp/js43_baseline_guard_after_ctor_args.tsv --gtest_brief=1
+```
+
+Focused results:
+
+- Constructor/function focused batch: 4 / 4 passed.
+- Old 110-row failure replay: 5 passed, 105 failed.
+- Baseline guard: 34,053 / 34,053 passed, 0 regressions.
+
+Newly passing tests from the old remaining manifest:
+
+- `language_statements_function_S13_2_2_A10_js`
+- `language_statements_function_S13_2_2_A12_js`
+- `language_statements_function_S13_2_2_A6_T2_js`
+- `language_statements_function_S13_A15_T1_js`
+- `language_statements_function_S13_A15_T3_js`
+
+Current failure manifest:
+
+- `temp/js43_remaining_110_after_ctor_args_fixes.tsv`

@@ -29,6 +29,17 @@ static void jm_activate_arguments_aliasing(JsMirTranspiler* mt, JsFuncCollected*
     }
 }
 
+static bool jm_function_has_formal_arguments_binding(JsFunctionNode* fn) {
+    if (!fn) return false;
+    JsAstNode* param = fn->params;
+    for (int i = 0; param; i++, param = param->next) {
+        char pname[128];
+        jm_get_param_name(param, i, pname, sizeof(pname));
+        if (strcmp(pname, "_js_arguments") == 0) return true;
+    }
+    return false;
+}
+
 static bool jm_param_tree_has_assignment_pattern(JsAstNode* node) {
     for (JsAstNode* cur = node; cur; cur = cur->next) {
         switch (cur->node_type) {
@@ -2333,9 +2344,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         }
 
         bool has_default_params = jm_param_tree_has_assignment_pattern(fn->params);
+        bool has_formal_arguments_binding = jm_function_has_formal_arguments_binding(fn);
 
         bool arguments_object_materialized = false;
-        if (has_default_params && fc->uses_arguments) {
+        if (has_default_params && fc->uses_arguments && !has_formal_arguments_binding) {
             bool args_aliased = false;
             jm_call_void_1(mt, "js_set_arguments_info",
                 MIR_T_I64, MIR_new_int_op(mt->ctx, args_aliased ? 0 : 1));
@@ -2705,7 +2717,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     this_entry.var.scope_env_reg = mt->scope_env_reg;
                     this_entry.var.typed_array_type = -1;
                     hashmap_set(mt->var_scopes[mt->scope_depth], &this_entry);
-                } else if (strcmp(sname, "_js_arguments") == 0 && fc->uses_arguments) {
+                } else if (strcmp(sname, "_js_arguments") == 0 && fc->uses_arguments && !has_formal_arguments_binding) {
                     bool args_aliased = !fc->has_non_simple_params &&
                                         !mt->is_module &&
                                         !mt->is_global_strict &&
@@ -2856,7 +2868,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         }
 
         // v18q: Create 'arguments' array-like object for non-arrow functions
-        if (fc->uses_arguments) {
+        if (fc->uses_arguments && !has_formal_arguments_binding) {
             // v20: Set up arguments aliasing for formal params, but only in sloppy mode
             // with simple parameters. Strict mode, default/rest/destructuring params
             // → arguments is "unmapped" (no aliasing).
