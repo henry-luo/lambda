@@ -20,7 +20,7 @@ The goal is an incremental extraction, not a rewrite. Each phase should preserve
 
 ## Implementation Update: 2026-05-18
 
-The first rendering extraction pass has been completed for the direct raster and feature-module paint paths. This pass kept the existing files instead of immediately creating new `render_painter.*` modules, but it established the common APIs that those modules can later own.
+The first rendering extraction passes have been completed for the direct raster and feature-module paint paths.
 
 Completed:
 
@@ -30,11 +30,15 @@ Completed:
   - `raster_blit_surface_scaled()`
   - `raster_blit_pixels_scaled()`
 - Kept legacy `fill_surface_rect()` and `blit_surface_scaled()` as compatibility wrappers that delegate to the shared raster API.
-- Added shared painter helpers in `render.hpp`:
+- Added shared painter helpers and moved them into dedicated painter files:
+  - `render_painter.hpp`
+  - `render_painter.cpp`
   - `render_painter_draw_picture_rect()`
   - `render_painter_draw_pixels_rect()`
   - `render_painter_fill_surface_rect()`
   - `render_painter_blit_surface_scaled()`
+- Moved the `rc_*` display-list/direct-vector dispatch gateway out of `render.hpp` and into `render_painter.cpp`, while keeping all existing call signatures available through `render_painter.hpp`.
+- Gave `RenderContext` a struct tag so painter declarations can forward-declare the context cleanly.
 - Refactored `render_background.cpp` and `render_border.cpp` to use the shared painter helpers for direct surface fills, image tiles, and SVG picture tiles.
 - Refactored replaced-content image rendering in `render.cpp` so SVG pictures, SVG raster fallbacks, normal raster images, webview layers, and surface clears use the shared vector/raster helpers.
 - Refactored video frame blitting in `render_video.cpp` to use `raster_blit_pixels_scaled()` instead of a local scaling loop.
@@ -42,6 +46,16 @@ Completed:
 - Updated `DisplayList` direct-pixel commands so fill/blit replay receives the current rectangular clip and clip-shape stack.
 - Updated tiled replay in `tile_pool.cpp` so direct-pixel fill/blit replay restores clip shapes and translates shape coordinates into tile-local space.
 - Preserved blit opacity through display-list recording and replay.
+- Added arena-owned polygon vertex copies for display-list raster clip stacks, plus per-tile scratch copies with tile-local coordinate translation during tiled replay.
+- Added shared clip helper files:
+  - `render_clip.hpp`
+  - `render_clip.cpp`
+- Moved CSS clip-shape parsing, clip-shape scratch cleanup, clip-shape-to-path conversion, and per-corner rounded-rect path construction out of `render.cpp`.
+- Made `clip_shape.h` include its own `string.h` dependency for `memset()` instead of relying on transitive includes from larger render files.
+- Added initial render-state helper files:
+  - `render_state.hpp`
+  - `render_state.cpp`
+- Moved transform save/apply/restore and transform matrix concatenation out of `render_block_view()` into `render_state_push_transform()` and `render_state_pop_transform()`.
 
 Validation:
 
@@ -51,9 +65,9 @@ Validation:
 
 Known remaining gap:
 
-- Display-list raster clip serialization preserves circle, ellipse, inset, and rounded-rect clip shapes. Polygon clip shapes still need display-list arena ownership for copied vertex arrays plus tile-local coordinate adjustment before they can be replayed safely.
+- The common raster functions still live in `surface.cpp`. A later cleanup can introduce a small `render_raster.hpp/cpp` facade if the surface file remains too broad.
 
-This means the practical Phase 1 painter/raster consolidation is partially complete. The next cleanup step is to move these helpers out of `render.hpp` into dedicated `render_painter.hpp/cpp` and, if needed, a small `render_raster.hpp/cpp` wrapper around `surface.cpp`.
+This means the practical Phase 1 painter/raster consolidation is now largely complete, and the first shared clip/path plus render-state helper extractions have started. The next cleanup step is to continue extracting shared geometry and additional state scopes so feature modules stop carrying their own small variants of the same math and save/restore logic.
 
 ## Current Structure Assessment
 

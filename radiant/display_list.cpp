@@ -294,7 +294,8 @@ void dl_restore_clip_depth(DisplayList* dl, int saved_depth) {
 // Recording: direct-pixel operations
 // ---------------------------------------------------------------------------
 
-static void dl_store_clip_shapes(DlClipShapeStack* dst, ClipShape** clip_shapes, int clip_depth) {
+static void dl_store_clip_shapes(DisplayList* dl, DlClipShapeStack* dst,
+                                 ClipShape** clip_shapes, int clip_depth) {
     if (!dst) return;
     memset(dst, 0, sizeof(DlClipShapeStack));
     if (!clip_shapes || clip_depth <= 0) return;
@@ -302,11 +303,22 @@ static void dl_store_clip_shapes(DlClipShapeStack* dst, ClipShape** clip_shapes,
     dst->depth = clip_depth;
     for (int i = 0; i < clip_depth; i++) {
         ClipShape* shape = clip_shapes[i];
-        if (shape && shape->type == CLIP_SHAPE_POLYGON) {
-            // polygon clip shapes carry vertex arrays; keep raster DL serialization
-            // bounded until display-list arena ownership is added for polygon data.
-            dst->type[i] = CLIP_SHAPE_NONE;
-            memset(dst->params[i], 0, 8 * sizeof(float));
+        if (shape && shape->type == CLIP_SHAPE_POLYGON &&
+            shape->polygon.count > 0 && shape->polygon.vx && shape->polygon.vy) {
+            int count = shape->polygon.count;
+            size_t sz = count * sizeof(float);
+            float* vx = (float*)scratch_alloc(&dl->arena, sz);
+            float* vy = (float*)scratch_alloc(&dl->arena, sz);
+            if (!vx || !vy) {
+                dst->type[i] = CLIP_SHAPE_NONE;
+                continue;
+            }
+            memcpy(vx, shape->polygon.vx, sz);
+            memcpy(vy, shape->polygon.vy, sz);
+            dst->type[i] = CLIP_SHAPE_POLYGON;
+            dst->polygon_count[i] = count;
+            dst->polygon_vx[i] = vx;
+            dst->polygon_vy[i] = vy;
             continue;
         }
         clip_shape_to_params(shape, &dst->type[i], dst->params[i]);
@@ -321,7 +333,13 @@ static int dl_restore_clip_shapes(const DlClipShapeStack* src, ClipShape* shapes
     int out_depth = 0;
     for (int i = 0; i < depth; i++) {
         if (src->type[i] == CLIP_SHAPE_NONE) continue;
-        shapes[out_depth] = clip_shape_from_params(src->type[i], src->params[i]);
+        if (src->type[i] == CLIP_SHAPE_POLYGON) {
+            if (src->polygon_count[i] < 3 || !src->polygon_vx[i] || !src->polygon_vy[i]) continue;
+            shapes[out_depth].type = CLIP_SHAPE_POLYGON;
+            shapes[out_depth].polygon = {src->polygon_vx[i], src->polygon_vy[i], src->polygon_count[i]};
+        } else {
+            shapes[out_depth] = clip_shape_from_params(src->type[i], src->params[i]);
+        }
         shape_ptrs[out_depth] = &shapes[out_depth];
         out_depth++;
     }
@@ -340,7 +358,7 @@ void dl_fill_surface_rect(DisplayList* dl, float x, float y, float w, float h,
     item->fill_surface_rect.h = h;
     item->fill_surface_rect.color = color;
     item->fill_surface_rect.clip = clip ? *clip : (Bound){0, 0, 99999, 99999};
-    dl_store_clip_shapes(&item->fill_surface_rect.clip_shapes, clip_shapes, clip_depth);
+    dl_store_clip_shapes(dl, &item->fill_surface_rect.clip_shapes, clip_shapes, clip_depth);
 }
 
 void dl_blit_surface_scaled(DisplayList* dl, void* src_surface,
@@ -359,7 +377,7 @@ void dl_blit_surface_scaled(DisplayList* dl, void* src_surface,
     item->blit_surface_scaled.scale_mode = scale_mode;
     item->blit_surface_scaled.opacity = opacity;
     item->blit_surface_scaled.clip = clip ? *clip : (Bound){0, 0, 99999, 99999};
-    dl_store_clip_shapes(&item->blit_surface_scaled.clip_shapes, clip_shapes, clip_depth);
+    dl_store_clip_shapes(dl, &item->blit_surface_scaled.clip_shapes, clip_shapes, clip_depth);
 }
 
 // ---------------------------------------------------------------------------

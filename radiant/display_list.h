@@ -158,6 +158,9 @@ typedef struct {
     int depth;
     int type[RDT_MAX_CLIP_SHAPES];
     float params[RDT_MAX_CLIP_SHAPES][8];
+    int polygon_count[RDT_MAX_CLIP_SHAPES];
+    float* polygon_vx[RDT_MAX_CLIP_SHAPES];
+    float* polygon_vy[RDT_MAX_CLIP_SHAPES];
 } DlClipShapeStack;
 
 // Direct-pixel fill (selection highlights, surface clear, etc.)

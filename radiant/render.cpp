@@ -3,8 +3,9 @@
 #include "render_border.hpp"
 #include "render_background.hpp"
 #include "render_filter.hpp"
+#include "render_clip.hpp"
+#include "render_state.hpp"
 #include "render_svg_inline.hpp"
-#include "transform.hpp"
 #include "layout.hpp"
 #include "form_control.hpp"
 #include "state_store.hpp"
@@ -339,228 +340,6 @@ void render_column_rules(RenderContext* rdcon, ViewBlock* block);  // multi-colu
 // post-composite video frame blit (defined in render_video.cpp)
 void render_video_frames(DisplayList* dl, ImageSurface* surface, DocState* rstate, UiContext* uicon);
 void render_video_frames_cached(DocState* rstate, ImageSurface* surface, UiContext* uicon);
-
-// ============================================================================
-// Per-corner rounded rect path helper
-// ============================================================================
-
-/**
- * Build a path for a rectangle with per-corner border radii.
- * Uses cubic Bézier arcs (kappa ≈ 0.5522847) to approximate quarter-circle arcs.
- */
-static RdtPath* create_per_corner_rounded_rect_path(
-    float x, float y, float w, float h,
-    float r_tl, float r_tr, float r_br, float r_bl) {
-
-    RdtPath* p = rdt_path_new();
-    // clamp radii to half-dimensions
-    float max_rx = w * 0.5f, max_ry = h * 0.5f;
-    if (r_tl > max_rx) r_tl = max_rx; if (r_tl > max_ry) r_tl = max_ry;
-    if (r_tr > max_rx) r_tr = max_rx; if (r_tr > max_ry) r_tr = max_ry;
-    if (r_br > max_rx) r_br = max_rx; if (r_br > max_ry) r_br = max_ry;
-    if (r_bl > max_rx) r_bl = max_rx; if (r_bl > max_ry) r_bl = max_ry;
-
-    const float k = 0.5522847f; // cubic Bézier kappa for 90° arc
-
-    // start at top-left corner, after the TL arc
-    rdt_path_move_to(p, x + r_tl, y);
-    // top edge → top-right corner
-    rdt_path_line_to(p, x + w - r_tr, y);
-    if (r_tr > 0) {
-        rdt_path_cubic_to(p, x + w - r_tr + r_tr * k, y,
-                             x + w, y + r_tr - r_tr * k,
-                             x + w, y + r_tr);
-    }
-    // right edge → bottom-right corner
-    rdt_path_line_to(p, x + w, y + h - r_br);
-    if (r_br > 0) {
-        rdt_path_cubic_to(p, x + w, y + h - r_br + r_br * k,
-                             x + w - r_br + r_br * k, y + h,
-                             x + w - r_br, y + h);
-    }
-    // bottom edge → bottom-left corner
-    rdt_path_line_to(p, x + r_bl, y + h);
-    if (r_bl > 0) {
-        rdt_path_cubic_to(p, x + r_bl - r_bl * k, y + h,
-                             x, y + h - r_bl + r_bl * k,
-                             x, y + h - r_bl);
-    }
-    // left edge → top-left corner
-    rdt_path_line_to(p, x, y + r_tl);
-    if (r_tl > 0) {
-        rdt_path_cubic_to(p, x, y + r_tl - r_tl * k,
-                             x + r_tl - r_tl * k, y,
-                             x + r_tl, y);
-    }
-    rdt_path_close(p);
-    return p;
-}
-
-// Create a ThorVG RdtPath from a ClipShape for use with rdt_push_clip
-static RdtPath* create_clip_shape_path(ClipShape* cs) {
-    if (!cs) return nullptr;
-    RdtPath* p = rdt_path_new();
-    switch (cs->type) {
-        case CLIP_SHAPE_ROUNDED_RECT: {
-            auto& rr = cs->rounded_rect;
-            rdt_path_free(p);
-            return create_per_corner_rounded_rect_path(rr.x, rr.y, rr.w, rr.h,
-                rr.r_tl, rr.r_tr, rr.r_br, rr.r_bl);
-        }
-        case CLIP_SHAPE_CIRCLE:
-            rdt_path_add_circle(p, cs->circle.cx, cs->circle.cy, cs->circle.r, cs->circle.r);
-            break;
-        case CLIP_SHAPE_ELLIPSE:
-            rdt_path_add_circle(p, cs->ellipse.cx, cs->ellipse.cy, cs->ellipse.rx, cs->ellipse.ry);
-            break;
-        case CLIP_SHAPE_INSET:
-            rdt_path_add_rect(p, cs->inset.x, cs->inset.y, cs->inset.w, cs->inset.h, 0, 0);
-            break;
-        case CLIP_SHAPE_POLYGON:
-            if (cs->polygon.count >= 3) {
-                rdt_path_move_to(p, cs->polygon.vx[0], cs->polygon.vy[0]);
-                for (int i = 1; i < cs->polygon.count; i++) {
-                    rdt_path_line_to(p, cs->polygon.vx[i], cs->polygon.vy[i]);
-                }
-                rdt_path_close(p);
-            }
-            break;
-        default: break;
-    }
-    return p;
-}
-
-// Free a scratch-allocated ClipShape
-static void free_clip_shape(ScratchArena* sa, ClipShape* shape) {
-    if (shape) {
-        if (shape->type == CLIP_SHAPE_POLYGON) {
-            scratch_free(sa, shape->polygon.vy);
-            scratch_free(sa, shape->polygon.vx);
-        }
-        scratch_free(sa, shape);
-    }
-}
-
-// Parse CSS clip-path value and return a ClipShape
-static ClipShape* parse_css_clip_shape(ScratchArena* sa, const char* value, float elem_w, float elem_h,
-                                        float abs_x, float abs_y) {
-    if (!value || strncmp(value, "none", 4) == 0) return nullptr;
-
-    auto parse_len = [](const char*& s, float ref) -> float {
-        while (*s == ' ' || *s == ',') s++;
-        float val = strtof(s, (char**)&s);
-        while (*s == ' ') s++;
-        if (*s == '%') { s++; return val / 100.0f * ref; }
-        if (s[0] == 'p' && s[1] == 'x') s += 2;
-        return val;
-    };
-
-    if (strncmp(value, "inset(", 6) == 0) {
-        const char* s = value + 6;
-        // Parse 1-4 inset values (CSS shorthand: top [right [bottom [left]]])
-        float vals[4] = {0};
-        int val_count = 0;
-        while (*s && *s != ')' && val_count < 4) {
-            while (*s == ' ') s++;
-            if (*s == ')' || strncmp(s, "round", 5) == 0) break;
-            float ref = (val_count == 0 || val_count == 2) ? elem_h : elem_w;
-            vals[val_count++] = parse_len(s, ref);
-        }
-        float top, right_v, bottom, left_v;
-        if (val_count == 1)      { top = right_v = bottom = left_v = vals[0]; }
-        else if (val_count == 2) { top = bottom = vals[0]; right_v = left_v = vals[1]; }
-        else if (val_count == 3) { top = vals[0]; right_v = left_v = vals[1]; bottom = vals[2]; }
-        else                     { top = vals[0]; right_v = vals[1]; bottom = vals[2]; left_v = vals[3]; }
-        float rx = 0, ry = 0;
-        while (*s == ' ') s++;
-        if (strncmp(s, "round", 5) == 0) {
-            s += 5;
-            rx = parse_len(s, elem_w);
-            ry = rx;
-        }
-        ClipShape* cs = (ClipShape*)scratch_calloc(sa, sizeof(ClipShape));
-        if (rx > 0 || ry > 0) {
-            cs->type = CLIP_SHAPE_ROUNDED_RECT;
-            cs->rounded_rect = {abs_x + left_v, abs_y + top,
-                                elem_w - left_v - right_v, elem_h - top - bottom,
-                                rx, rx, rx, rx};
-        } else {
-            cs->type = CLIP_SHAPE_INSET;
-            cs->inset = {abs_x + left_v, abs_y + top,
-                         elem_w - left_v - right_v, elem_h - top - bottom, 0, 0};
-        }
-        return cs;
-    }
-
-    if (strncmp(value, "circle(", 7) == 0) {
-        const char* s = value + 7;
-        float ref = fmin(elem_w, elem_h);
-        float r = parse_len(s, ref);
-        float cx = abs_x + elem_w * 0.5f, cy = abs_y + elem_h * 0.5f;
-        while (*s == ' ') s++;
-        if (strncmp(s, "at", 2) == 0) {
-            s += 2;
-            cx = abs_x + parse_len(s, elem_w);
-            cy = abs_y + parse_len(s, elem_h);
-        }
-        ClipShape* cs = (ClipShape*)scratch_calloc(sa, sizeof(ClipShape));
-        cs->type = CLIP_SHAPE_CIRCLE;
-        cs->circle = {cx, cy, r};
-        return cs;
-    }
-
-    if (strncmp(value, "ellipse(", 8) == 0) {
-        const char* s = value + 8;
-        float rx = parse_len(s, elem_w);
-        float ry = parse_len(s, elem_h);
-        float cx = abs_x + elem_w * 0.5f, cy = abs_y + elem_h * 0.5f;
-        while (*s == ' ') s++;
-        if (strncmp(s, "at", 2) == 0) {
-            s += 2;
-            cx = abs_x + parse_len(s, elem_w);
-            cy = abs_y + parse_len(s, elem_h);
-        }
-        ClipShape* cs = (ClipShape*)scratch_calloc(sa, sizeof(ClipShape));
-        cs->type = CLIP_SHAPE_ELLIPSE;
-        cs->ellipse = {cx, cy, rx, ry};
-        return cs;
-    }
-
-    if (strncmp(value, "polygon(", 8) == 0) {
-        const char* s = value + 8;
-        // count points first
-        const char* scan = s;
-        int count = 0;
-        while (*scan && *scan != ')') {
-            while (*scan == ' ' || *scan == ',') scan++;
-            if (*scan == ')') break;
-            strtof(scan, (char**)&scan);
-            while (*scan == ' ') scan++;
-            if (*scan == '%') scan++;
-            if (scan[0] == 'p' && scan[1] == 'x') scan += 2;
-            strtof(scan, (char**)&scan);
-            while (*scan == ' ') scan++;
-            if (*scan == '%') scan++;
-            if (scan[0] == 'p' && scan[1] == 'x') scan += 2;
-            count++;
-            while (*scan == ' ' || *scan == ',') scan++;
-        }
-        if (count < 3) return nullptr;
-
-        float* vx = (float*)scratch_alloc(sa, count * sizeof(float));
-        float* vy = (float*)scratch_alloc(sa, count * sizeof(float));
-        for (int i = 0; i < count; i++) {
-            vx[i] = parse_len(s, elem_w) + abs_x;
-            vy[i] = parse_len(s, elem_h) + abs_y;
-        }
-        ClipShape* cs = (ClipShape*)scratch_calloc(sa, sizeof(ClipShape));
-        cs->type = CLIP_SHAPE_POLYGON;
-        cs->polygon = {vx, vy, count};
-        return cs;
-    }
-
-    return nullptr;
-}
 
 /**
  * Helper function to apply transform and push paint to canvas
@@ -2391,52 +2170,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
     // (children with visibility:visible should still appear)
     bool self_hidden = block->in_line && block->in_line->visibility == VIS_HIDDEN;
 
-    // Save transform state and apply element's transform
-    RdtMatrix pa_transform = rdcon->transform;
-    bool pa_has_transform = rdcon->has_transform;
-
-    if (block->transform && block->transform->functions) {
-        // Calculate transform origin
-        float origin_x = block->transform->origin_x_percent
-            ? (block->transform->origin_x / 100.0f) * block->width
-            : block->transform->origin_x;
-        float origin_y = block->transform->origin_y_percent
-            ? (block->transform->origin_y / 100.0f) * block->height
-            : block->transform->origin_y;
-
-        // Origin is relative to element's position in parent
-        float elem_x = pa_block.x + block->x;
-        float elem_y = pa_block.y + block->y;
-        origin_x += elem_x;
-        origin_y += elem_y;
-
-        // Compute new transform matrix
-        RdtMatrix new_transform = radiant::compute_transform_matrix(
-            block->transform->functions, block->width, block->height, origin_x, origin_y);
-
-        // If parent has transform, concatenate
-        if (rdcon->has_transform) {
-            // Matrix multiply: new = parent * element
-            RdtMatrix combined = {
-                pa_transform.e11 * new_transform.e11 + pa_transform.e12 * new_transform.e21 + pa_transform.e13 * new_transform.e31,
-                pa_transform.e11 * new_transform.e12 + pa_transform.e12 * new_transform.e22 + pa_transform.e13 * new_transform.e32,
-                pa_transform.e11 * new_transform.e13 + pa_transform.e12 * new_transform.e23 + pa_transform.e13 * new_transform.e33,
-                pa_transform.e21 * new_transform.e11 + pa_transform.e22 * new_transform.e21 + pa_transform.e23 * new_transform.e31,
-                pa_transform.e21 * new_transform.e12 + pa_transform.e22 * new_transform.e22 + pa_transform.e23 * new_transform.e32,
-                pa_transform.e21 * new_transform.e13 + pa_transform.e22 * new_transform.e23 + pa_transform.e23 * new_transform.e33,
-                pa_transform.e31 * new_transform.e11 + pa_transform.e32 * new_transform.e21 + pa_transform.e33 * new_transform.e31,
-                pa_transform.e31 * new_transform.e12 + pa_transform.e32 * new_transform.e22 + pa_transform.e33 * new_transform.e32,
-                pa_transform.e31 * new_transform.e13 + pa_transform.e32 * new_transform.e23 + pa_transform.e33 * new_transform.e33
-            };
-            rdcon->transform = combined;
-        } else {
-            rdcon->transform = new_transform;
-        }
-        rdcon->has_transform = true;
-
-        log_debug("[TRANSFORM] Element %s: transform active, origin=(%.1f,%.1f)",
-            block->node_name(), origin_x, origin_y);
-    }
+    RenderTransformScope transform_scope = render_state_push_transform(rdcon, block, &pa_block);
 
     if (block->font) {
         auto t1 = std::chrono::high_resolution_clock::now();
@@ -2468,10 +2202,10 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
                 float elem_h = block->height * s;
                 float abs_x = pa_block.x + block->x * s;
                 float abs_y = pa_block.y + block->y * s;
-                css_clip_shape = parse_css_clip_shape(&rdcon->scratch, clip_str, elem_w, elem_h, abs_x, abs_y);
+                css_clip_shape = render_clip_parse_css_shape(&rdcon->scratch, clip_str, elem_w, elem_h, abs_x, abs_y);
                 if (css_clip_shape) {
                     // Push ThorVG clip path for vector operations
-                    RdtPath* clip_path = create_clip_shape_path(css_clip_shape);
+                    RdtPath* clip_path = render_clip_create_shape_path(css_clip_shape);
                     if (clip_path) {
                         rc_push_clip(rdcon, clip_path, nullptr);
                         rdt_path_free(clip_path);
@@ -2720,7 +2454,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
             float ch = clip->bottom - clip->top;
             if (cw > 0 && ch > 0) {
                 // Push ThorVG clip path for vector operations
-                RdtPath* clip_path = create_per_corner_rounded_rect_path(
+                RdtPath* clip_path = render_clip_create_rounded_rect_path(
                     clip->left, clip->top, cw, ch,
                     cr->top_left, cr->top_right, cr->bottom_right, cr->bottom_left);
                 rc_push_clip(rdcon, clip_path, nullptr);
@@ -2981,15 +2715,13 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
         auto tc1 = std::chrono::high_resolution_clock::now();
         rc_pop_clip(rdcon);
         if (rdcon->clip_shape_depth > 0) rdcon->clip_shape_depth--;
-        free_clip_shape(&rdcon->scratch, css_clip_shape);
+        render_clip_free_shape(&rdcon->scratch, css_clip_shape);
         auto tc2 = std::chrono::high_resolution_clock::now();
         g_render_clip_time += std::chrono::duration<double, std::milli>(tc2 - tc1).count();
         g_render_clip_count++;
     }
 
-    // Restore transform state
-    rdcon->transform = pa_transform;
-    rdcon->has_transform = pa_has_transform;
+    render_state_pop_transform(&transform_scope);
 
     rdcon->block = pa_block;  rdcon->font = pa_font;  rdcon->color = pa_color;
     log_leave();
