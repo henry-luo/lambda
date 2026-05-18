@@ -107,6 +107,20 @@ Completed:
   - `render_output.cpp`
 - Moved render-context initialization/cleanup, canvas background resolution, full/selective surface clear, root view-tree paint dispatch, and PNG/JPEG surface-save dispatch into `render_output`.
 - Moved display-list replay planning and render-pool ownership out of `render.cpp` into `render_output_replay_display_list()`, including the single-thread versus tiled replay choice.
+- Moved the normal HTML document render orchestration out of `render.cpp` into `render_output_render_html_doc()`, leaving `render_html_doc()` as a thin public wrapper.
+- Moved large-output tiled PNG streaming out of `render.cpp` into `render_output_render_tiled_png()`, keeping `render_html_doc_tiled()` as a thin public entrypoint wrapper.
+- Added initial UI overlay helper files:
+  - `render_overlay.hpp`
+  - `render_overlay.cpp`
+- Moved focus outline, caret, canonical selection highlight, dropdown/context-menu overlay dispatch, and drag/drop overlay painting out of `render.cpp`.
+- Added initial render-selection helper files:
+  - `render_selection.hpp`
+  - `render_selection.cpp`
+- Moved cross-view selection ordering and image-selection membership checks out of `render.cpp`.
+- Added initial column rendering helper files:
+  - `render_columns.hpp`
+  - `render_columns.cpp`
+- Moved multi-column rule painting out of `render.cpp`.
 - Added initial display-list bounds helper file:
   - `display_list_bounds.cpp`
 - Moved the tile replay item-intersection helper behind the public display-list bounds API.
@@ -162,7 +176,7 @@ Validation:
 
 The earlier raster-facade gap has been closed: `surface.cpp` now keeps the surface ownership, image loading, and compatibility wrappers, while render-facing fill/blit/scaling behavior lives in `render_raster.cpp`.
 
-This means the practical Phase 1 painter/raster/effect consolidation is now largely complete, and the first shared clip/path, geometry, render-state, profiler, composite, effects, glyph, text, output, display-list bounds/storage/recording/replay, and backend capability helper extractions are in place. The next cleanup step is to continue splitting display-list replay dispatch and output-target orchestration.
+This means the practical Phase 1 painter/raster/effect consolidation is now largely complete, and the first shared clip/path, geometry, render-state, profiler, composite, effects, glyph, text, selection, column rendering, output, display-list bounds/storage/recording/replay, and backend capability helper extractions are in place. The next cleanup step is to continue splitting display-list replay dispatch and output-target orchestration.
 
 ## Current Structure Assessment
 
@@ -178,7 +192,7 @@ This means the practical Phase 1 painter/raster/effect consolidation is now larg
 
 ### Where The Structure Is Uneven
 
-- `render.cpp` is doing too much. It owns profiling globals, thread-count setup, clip-shape parsing, rounded-rect path creation, glyph rasterization, text selection, text decorations, list markers, column rules, block traversal, transforms, clip-path, overflow clipping, opacity groups, mix-blend, filters, image dispatch, display-list recording, display-list replay, tiled PNG output, and UI overlays.
+- `render.cpp` is still doing too much. It owns text run walking, list markers, block traversal, transform/effect orchestration call sites, image dispatch, and parts of display-list recording, even though profiling, clip/path helpers, selection helpers, column-rule painting, output orchestration, display-list storage/replay slices, and UI overlays have been extracted.
 - `render_svg_inline.cpp` is another large mixed-responsibility module. SVG parsing helpers, inherited style state, transform handling, definitions, gradients, patterns, text, images, and painting all live together.
 - The main screen renderer and the PDF/SVG renderers do not share the same paint walker. `render_walk.cpp` explicitly excludes the raster backend because the raster path has extra concerns, but those concerns can be modeled as painter/effect/output-target capabilities instead of requiring a separate traversal forever.
 - Geometry helpers are duplicated or near-duplicated across rendering modules. Examples include transform lookup, per-corner rounded rect path creation, background/border/content paint rect adjustment, clip path construction, physical pixel conversion, and effect-region expansion.
@@ -187,7 +201,7 @@ This means the practical Phase 1 painter/raster/effect consolidation is now larg
 - Text painting combines too many stages in one function: run walking, font setup, glyph loading, glyph drawing, selection background, composition bounds, text shadow, skip-ink gap collection, text decorations, and profiling.
 - Display-list recording, storage, resource ownership, command bounds, and replay are tightly coupled. Some operations have precise bounds, while paths/effects often fall back to coarse bounds, limiting dirty-region and tiled replay efficiency.
 - Direct-pixel operations and vector operations are mixed at call sites. Selection fills, glyph blits, image blits, opacity, blend, and filter paths need consistent clipping and transform behavior.
-- `render_html_doc()` and `render_html_doc_tiled()` duplicate document render setup but differ in output strategy. This makes output modes harder to reason about and test.
+- `render_html_doc()` and `render_html_doc_tiled()` are now thin public wrappers, but normal/tiled output behavior still needs a clearer target abstraction before adding PDF/SVG/screen-specific orchestration.
 
 ## Proposed Module Boundaries
 
@@ -848,9 +862,9 @@ Performance comparisons should use release builds, not debug builds.
 5. Add backend capability reporting for the active `RdtVector` implementation. Done with `RdtVectorCaps` and `render_backend_get_caps()`.
 6. Add `render_clip` scope helpers and migrate CSS clip-path plus overflow clipping. Done.
 7. Continue `render_effects` by moving profiling hooks out of `render_block_view()` and collapsing effect finish calls into a scoped end helper. Done.
-8. Split text painting into text/glyph/decorations helpers. Started with glyph bitmap rendering in `render_glyph` plus inline background, trailing mark, text-decoration, text-shadow, and profiled glyph-load helpers in `render_text`.
+8. Split text painting and smaller feature paint paths into named helpers. Started with glyph bitmap rendering in `render_glyph`, inline background, trailing mark, text-decoration, text-shadow, and profiled glyph-load helpers in `render_text`, cross-view selection predicates in `render_selection`, and column-rule painting in `render_columns`.
 9. Split display-list storage, builder, replay, and bounds. Started with public display-list bounds helpers used by tile replay, a storage/lifecycle module, glyph replay helpers, replay dirty-clip state helpers, backdrop replay helpers, shadow clip replay helpers, effect replay helpers, direct raster replay helpers, direct raster recording helpers, effect recording helpers, and vector recording helpers.
-10. Unify `render_html_doc()` and `render_html_doc_tiled()` setup through `render_output`. Started with shared context lifecycle, background/clear handling, root paint dispatch, display-list replay planning, render-pool ownership, and surface-save dispatch.
+10. Unify `render_html_doc()` and `render_html_doc_tiled()` setup through `render_output`. In progress: shared context lifecycle, background/clear handling, root paint dispatch, display-list replay planning, render-pool ownership, surface-save dispatch, normal document render orchestration, tiled PNG streaming, and overlay dispatch are now outside `render.cpp`.
 11. Expand `render_walk` into the shared paint walker and migrate raster rendering to it.
 12. Split `render_svg_inline.cpp` into SVG parse/style/defs/geometry/paint modules.
 

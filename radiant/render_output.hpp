@@ -25,3 +25,7 @@ RenderOutputReplayResult render_output_replay_display_list(RenderContext* rdcon,
                                                            uint32_t canvas_bg,
                                                            DirtyTracker* replay_dirty);
 void render_output_save_surface(ImageSurface* surface, const char* output_file);
+void render_output_render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file);
+void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree,
+                                    const char* output_file,
+                                    int total_width, int total_height);

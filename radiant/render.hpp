@@ -59,10 +59,5 @@ void render_pool_shutdown();
 void render_html_doc_tiled(UiContext* uicon, ViewTree* view_tree, const char* output_file,
                            int total_width, int total_height);
 
-// UI overlay rendering (focus, caret, selection)
-void render_focus_outline(RenderContext* rdcon, DocState* state);
-void render_caret(RenderContext* rdcon, DocState* state);
-void render_selection(RenderContext* rdcon, DocState* state);
-void render_ui_overlays(RenderContext* rdcon, DocState* state);
-
+#include "render_overlay.hpp"
 #include "render_painter.hpp"
