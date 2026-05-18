@@ -38,7 +38,3 @@ void render_outer_shadow_blur_composite(
     Color shadow_color, float blur_radius,
     int exclude_type, const float* exclude_params,
     int clip_type, const float* clip_params);
-
-// CSS blend mode compositing: blend source pixel onto backdrop
-// pixel format: ABGR (A=bits24-31, B=bits16-23, G=bits8-15, R=bits0-7)
-uint32_t composite_blend_pixel(uint32_t backdrop, uint32_t source, CssEnum blend_mode);

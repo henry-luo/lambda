@@ -1,11 +1,8 @@
 #include "render_border.hpp"
+#include "render_path.hpp"
+#include "render_state.hpp"
 #include "../lib/log.h"
 #include <math.h>
-#include <string.h>
-
-// Bezier control point constant for circular arc approximation
-// (4/3) * tan(π/8) ≈ 0.5522847498
-#define KAPPA 0.5522847498f
 
 // ---------------------------------------------------------------------------
 // Color helpers — Chrome-compatible 3D border color computation
@@ -53,12 +50,6 @@ static void inset_outset_side_colors(Color base, CssEnum style,
     }
 }
 
-// Get transform pointer for rdt_* calls (NULL if identity)
-static const RdtMatrix* get_transform(RenderContext* rdcon) {
-    if (!rdcon->has_transform) return nullptr;
-    return &rdcon->transform;
-}
-
 static Corner corner_scaled(const Corner* radius, float scale) {
     Corner out = *radius;
     out.top_left *= scale;
@@ -98,25 +89,6 @@ static Corner corner_expand(const Corner* radius, float expand_x, float expand_y
     return out;
 }
 
-// Create a clip path from the render context's clip region
-static RdtPath* create_border_clip_path(RenderContext* rdcon) {
-    if (rdcon->block.has_clip_radius) {
-        float clip_x = rdcon->block.clip.left;
-        float clip_y = rdcon->block.clip.top;
-        float clip_w = rdcon->block.clip.right - rdcon->block.clip.left;
-        float clip_h = rdcon->block.clip.bottom - rdcon->block.clip.top;
-        Corner clip_radius = rdcon->block.clip_radius;
-        constrain_corner_radii(&clip_radius, clip_w, clip_h);
-        Rect clip_rect = {clip_x, clip_y, clip_w, clip_h};
-        return build_rounded_rect_path(clip_rect, &clip_radius);
-    }
-    RdtPath* clip = rdt_path_new();
-    rdt_path_add_rect(clip, rdcon->block.clip.left, rdcon->block.clip.top,
-        rdcon->block.clip.right - rdcon->block.clip.left,
-        rdcon->block.clip.bottom - rdcon->block.clip.top, 0, 0);
-    return clip;
-}
-
 /**
  * Render an inset/outset border as two trapezoid-filled polygons.
  */
@@ -124,11 +96,10 @@ static void render_inset_outset_trapezoid(RenderContext* rdcon, Rect rect,
     float bw_top, float bw_right, float bw_bottom, float bw_left,
     Color tl_color, Color br_color) {
 
-    RdtVector* vec = &rdcon->vec;
-    const RdtMatrix* xform = get_transform(rdcon);
+    const RdtMatrix* xform = render_state_current_transform(rdcon);
     float x = rect.x, y = rect.y, W = rect.width, H = rect.height;
 
-    RdtPath* clip = create_border_clip_path(rdcon);
+    RdtPath* clip = render_path_create_clip_path(rdcon);
     rc_push_clip(rdcon, clip, NULL);
 
     // top-left polygon: covers top side + left side
@@ -174,14 +145,13 @@ static void render_per_side_borders(RenderContext* rdcon, Rect rect, BorderProp*
     float bwt = border->width.top, bwr = border->width.right;
     float bwb = border->width.bottom, bwl = border->width.left;
 
-    RdtVector* vec = &rdcon->vec;
-    const RdtMatrix* xform = get_transform(rdcon);
+    const RdtMatrix* xform = render_state_current_transform(rdcon);
 
     // If border-radius is present, clip all per-side trapezoids to the outer rounded rect
     bool has_radius = corner_has_radius(&border->radius);
     RdtPath* radius_clip = nullptr;
     if (has_radius) {
-        radius_clip = build_rounded_rect_path(rect, &border->radius);
+        radius_clip = render_path_create_rounded_rect(rect, &border->radius);
         rc_push_clip(rdcon, radius_clip, NULL);
     }
 
@@ -189,9 +159,8 @@ static void render_per_side_borders(RenderContext* rdcon, Rect rect, BorderProp*
     struct SideDraw {
         static void top(RenderContext* rdcon, Rect rect, float bwt, float bwr, float bwl, Color c) {
             if (bwt <= 0 || c.a == 0) return;
-            RdtVector* vec = &rdcon->vec;
-            const RdtMatrix* xform = get_transform(rdcon);
-            RdtPath* clip = create_border_clip_path(rdcon);
+            const RdtMatrix* xform = render_state_current_transform(rdcon);
+            RdtPath* clip = render_path_create_clip_path(rdcon);
             rc_push_clip(rdcon, clip, NULL);
             RdtPath* p = rdt_path_new();
             rdt_path_move_to(p, rect.x, rect.y);
@@ -206,9 +175,8 @@ static void render_per_side_borders(RenderContext* rdcon, Rect rect, BorderProp*
         }
         static void bottom(RenderContext* rdcon, Rect rect, float bwb, float bwr, float bwl, Color c) {
             if (bwb <= 0 || c.a == 0) return;
-            RdtVector* vec = &rdcon->vec;
-            const RdtMatrix* xform = get_transform(rdcon);
-            RdtPath* clip = create_border_clip_path(rdcon);
+            const RdtMatrix* xform = render_state_current_transform(rdcon);
+            RdtPath* clip = render_path_create_clip_path(rdcon);
             rc_push_clip(rdcon, clip, NULL);
             RdtPath* p = rdt_path_new();
             float bot = rect.y + rect.height;
@@ -224,9 +192,8 @@ static void render_per_side_borders(RenderContext* rdcon, Rect rect, BorderProp*
         }
         static void left(RenderContext* rdcon, Rect rect, float bwl, float bwt, float bwb, Color c) {
             if (bwl <= 0 || c.a == 0) return;
-            RdtVector* vec = &rdcon->vec;
-            const RdtMatrix* xform = get_transform(rdcon);
-            RdtPath* clip = create_border_clip_path(rdcon);
+            const RdtMatrix* xform = render_state_current_transform(rdcon);
+            RdtPath* clip = render_path_create_clip_path(rdcon);
             rc_push_clip(rdcon, clip, NULL);
             RdtPath* p = rdt_path_new();
             rdt_path_move_to(p, rect.x, rect.y);
@@ -241,9 +208,8 @@ static void render_per_side_borders(RenderContext* rdcon, Rect rect, BorderProp*
         }
         static void right(RenderContext* rdcon, Rect rect, float bwr, float bwt, float bwb, Color c) {
             if (bwr <= 0 || c.a == 0) return;
-            RdtVector* vec = &rdcon->vec;
-            const RdtMatrix* xform = get_transform(rdcon);
-            RdtPath* clip = create_border_clip_path(rdcon);
+            const RdtMatrix* xform = render_state_current_transform(rdcon);
+            RdtPath* clip = render_path_create_clip_path(rdcon);
             rc_push_clip(rdcon, clip, NULL);
             RdtPath* p = rdt_path_new();
             float rg = rect.x + rect.width;
@@ -379,7 +345,7 @@ static void render_per_side_borders(RenderContext* rdcon, Rect rect, BorderProp*
             RdtStrokeCap cap;
             int dash_count = get_dash_pattern(st, w, dash, &cap);
             float half_w = w / 2.0f;
-            const RdtMatrix* xform = get_transform(rdcon);
+            const RdtMatrix* xform = render_state_current_transform(rdcon);
 
             // For non-radiused boxes, adjust gap so dashes appear at both ends
             // of the side and use phase=0 (matches browser per-side rendering).
@@ -400,7 +366,7 @@ static void render_per_side_borders(RenderContext* rdcon, Rect rect, BorderProp*
                 phase = 0;
             }
 
-            RdtPath* clip = create_border_clip_path(rdcon);
+            RdtPath* clip = render_path_create_clip_path(rdcon);
             rc_push_clip(rdcon, clip, NULL);
 
             RdtPath* p = rdt_path_new();
@@ -620,77 +586,6 @@ void render_straight_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
 }
 
 /**
- * Build rounded rectangle path with per-corner elliptical radii.
- */
-RdtPath* build_rounded_rect_path(Rect rect, const Corner* radius) {
-    RdtPath* p = rdt_path_new();
-
-    float x = rect.x;
-    float y = rect.y;
-    float w = rect.width;
-    float h = rect.height;
-
-    float rx_tl = radius->top_left;
-    float rx_tr = radius->top_right;
-    float rx_br = radius->bottom_right;
-    float rx_bl = radius->bottom_left;
-    float ry_tl = radius->top_left_y;
-    float ry_tr = radius->top_right_y;
-    float ry_br = radius->bottom_right_y;
-    float ry_bl = radius->bottom_left_y;
-
-    // Start from top-left corner (after the radius)
-    rdt_path_move_to(p, x + rx_tl, y);
-
-    // Top edge
-    rdt_path_line_to(p, x + w - rx_tr, y);
-
-    // Top-right corner (Bezier curve)
-    if (rx_tr > 0 || ry_tr > 0) {
-        rdt_path_cubic_to(p,
-            x + w - rx_tr + rx_tr * KAPPA, y,
-            x + w, y + ry_tr - ry_tr * KAPPA,
-            x + w, y + ry_tr);
-    }
-
-    // Right edge
-    rdt_path_line_to(p, x + w, y + h - ry_br);
-
-    // Bottom-right corner (Bezier curve)
-    if (rx_br > 0 || ry_br > 0) {
-        rdt_path_cubic_to(p,
-            x + w, y + h - ry_br + ry_br * KAPPA,
-            x + w - rx_br + rx_br * KAPPA, y + h,
-            x + w - rx_br, y + h);
-    }
-
-    // Bottom edge
-    rdt_path_line_to(p, x + rx_bl, y + h);
-
-    // Bottom-left corner (Bezier curve)
-    if (rx_bl > 0 || ry_bl > 0) {
-        rdt_path_cubic_to(p,
-            x + rx_bl - rx_bl * KAPPA, y + h,
-            x, y + h - ry_bl + ry_bl * KAPPA,
-            x, y + h - ry_bl);
-    }
-
-    // Left edge
-    rdt_path_line_to(p, x, y + ry_tl);
-
-    // Top-left corner (Bezier curve)
-    if (rx_tl > 0 || ry_tl > 0) {
-        rdt_path_cubic_to(p,
-            x, y + ry_tl - ry_tl * KAPPA,
-            x + rx_tl - rx_tl * KAPPA, y,
-            x + rx_tl, y);
-    }
-
-    rdt_path_close(p);
-    return p;
-}
-
-/**
  * Get dash pattern for dotted/dashed borders. Returns dash count (0 if none).
  * Caller provides a float[2] array. Also sets the cap style.
  */
@@ -717,8 +612,7 @@ static int get_dash_pattern(CssEnum style, float width, float* out_dash, RdtStro
  */
 void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     BorderProp* border = view->bound->border;
-    RdtVector* vec = &rdcon->vec;
-    const RdtMatrix* xform = get_transform(rdcon);
+    const RdtMatrix* xform = render_state_current_transform(rdcon);
 
     // For uniform borders, we can render as a single shape
     bool uniform_width = (border->width.top == border->width.right &&
@@ -749,7 +643,7 @@ void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         float w = border->width.top;
         Color c = border->top_color;
 
-        RdtPath* clip = create_border_clip_path(rdcon);
+        RdtPath* clip = render_path_create_clip_path(rdcon);
         rc_push_clip(rdcon, clip, NULL);
 
         // Stroke-based border rendering: the path must be inset by half the stroke
@@ -767,7 +661,7 @@ void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
             Rect outer_rect = {rect.x + half_lw, rect.y + half_lw,
                                rect.width - line_w, rect.height - line_w};
             Corner outer_radius = corner_inset(&orig_r, half_lw, half_lw);
-            RdtPath* outer = build_rounded_rect_path(outer_rect, &outer_radius);
+            RdtPath* outer = render_path_create_rounded_rect(outer_rect, &outer_radius);
             rc_stroke_path(rdcon, outer, c, line_w, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, xform);
             rdt_path_free(outer);
 
@@ -776,7 +670,7 @@ void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
             Rect inner_rect = {rect.x + inner_inset, rect.y + inner_inset,
                                rect.width - inner_inset * 2, rect.height - inner_inset * 2};
             Corner inner_radius = corner_inset(&orig_r, inner_inset, inner_inset);
-            RdtPath* inner = build_rounded_rect_path(inner_rect, &inner_radius);
+            RdtPath* inner = render_path_create_rounded_rect(inner_rect, &inner_radius);
             rc_stroke_path(rdcon, inner, c, line_w, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, xform);
             rdt_path_free(inner);
 
@@ -796,7 +690,7 @@ void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
             Rect outer_rect = {rect.x + quarter_w, rect.y + quarter_w,
                                rect.width - half_w, rect.height - half_w};
             Corner outer_radius = corner_inset(&orig_r, quarter_w, quarter_w);
-            RdtPath* outer = build_rounded_rect_path(outer_rect, &outer_radius);
+            RdtPath* outer = render_path_create_rounded_rect(outer_rect, &outer_radius);
             rc_stroke_path(rdcon, outer, outer_c, half_w, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, xform);
             rdt_path_free(outer);
 
@@ -805,7 +699,7 @@ void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
             Rect inner_rect = {rect.x + inner_inset, rect.y + inner_inset,
                                rect.width - inner_inset * 2, rect.height - inner_inset * 2};
             Corner inner_radius = corner_inset(&orig_r, inner_inset, inner_inset);
-            RdtPath* inner = build_rounded_rect_path(inner_rect, &inner_radius);
+            RdtPath* inner = render_path_create_rounded_rect(inner_rect, &inner_radius);
             rc_stroke_path(rdcon, inner, inner_c, half_w, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, xform);
             rdt_path_free(inner);
 
@@ -827,7 +721,7 @@ void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
                                     rect.width - w, rect.height - w};
                 Corner orig_r = border->radius;
                 Corner stroke_radius = corner_inset(&orig_r, half_w, half_w);
-                RdtPath* shape = build_rounded_rect_path(stroke_rect, &stroke_radius);
+                RdtPath* shape = render_path_create_rounded_rect(stroke_rect, &stroke_radius);
                 rc_stroke_path(rdcon, shape, tl_color, w, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, xform);
                 rdt_path_free(shape);
             }
@@ -840,7 +734,7 @@ void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
                                 rect.width - w, rect.height - w};
             Corner orig_r = border->radius;
             Corner stroke_radius = corner_inset(&orig_r, half_w, half_w);
-            RdtPath* shape = build_rounded_rect_path(stroke_rect, &stroke_radius);
+            RdtPath* shape = render_path_create_rounded_rect(stroke_rect, &stroke_radius);
             float dash[2];
             RdtStrokeCap cap;
             int dash_count = get_dash_pattern(style, w, dash, &cap);
@@ -885,8 +779,7 @@ void render_outline(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     outline_rect.width = rect.width + expand * 2;
     outline_rect.height = rect.height + expand * 2;
 
-    RdtVector* vec = &rdcon->vec;
-    const RdtMatrix* xform = get_transform(rdcon);
+    const RdtMatrix* xform = render_state_current_transform(rdcon);
     RdtPath* p = nullptr;
 
     // If border-radius exists, use rounded outline path
@@ -897,7 +790,7 @@ void render_outline(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         Corner scaled_radius = corner_scaled(&border->radius, s);
         Corner outline_radius = corner_expand(&scaled_radius, expand, expand);
         constrain_corner_radii(&outline_radius, outline_rect.width, outline_rect.height);
-        p = build_rounded_rect_path(outline_rect, &outline_radius);
+        p = render_path_create_rounded_rect(outline_rect, &outline_radius);
     } else {
         p = rdt_path_new();
         rdt_path_add_rect(p, outline_rect.x, outline_rect.y,
@@ -917,7 +810,7 @@ void render_outline(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         dash[1] = w * 2;
     }
 
-    RdtPath* clip = create_border_clip_path(rdcon);
+    RdtPath* clip = render_path_create_clip_path(rdcon);
     rc_push_clip(rdcon, clip, NULL);
     float phase = (dash_count > 0) ? w * 0.75f : 0;
     rc_stroke_path(rdcon, p, outline->color, w, cap, RDT_JOIN_MITER,

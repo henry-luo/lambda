@@ -5,6 +5,7 @@
 #include "display_list.h"
 #include "render_filter.hpp"
 #include "render_background.hpp"
+#include "render_composite.hpp"
 #include "render_raster.hpp"
 #include "clip_shape.h"
 #include "../lib/log.h"
@@ -1172,7 +1173,7 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
                             uint32_t bd = backdrop[row * bw + col];
                             uint32_t source = px[(by + row) * pitch + (bx + col)];
                             px[(by + row) * pitch + (bx + col)] =
-                                composite_blend_pixel(bd, source, (CssEnum)r->blend_mode);
+                                render_composite_blend_pixel(bd, source, (CssEnum)r->blend_mode);
                         }
                     }
                 }

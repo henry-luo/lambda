@@ -2,7 +2,7 @@
 #include "render_img.hpp"
 #include "render_border.hpp"
 #include "render_background.hpp"
-#include "render_filter.hpp"
+#include "render_effects.hpp"
 #include "render_clip.hpp"
 #include "render_raster.hpp"
 #include "render_state.hpp"
@@ -2222,171 +2222,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
         }
     }
 
-    // Save backdrop for mix-blend-mode before rendering this element
-    CssEnum mix_blend = (block->in_line && block->in_line->mix_blend_mode &&
-                         block->in_line->mix_blend_mode != CSS_VALUE_NORMAL)
-                        ? block->in_line->mix_blend_mode : (CssEnum)0;
-    uint32_t* mix_blend_backdrop = nullptr;
-    int mbx0 = 0, mby0 = 0, mbw = 0, mbh = 0;
-    if (mix_blend) {
-        float ms = rdcon->scale;
-        ImageSurface* surface = rdcon->ui_context->surface;
-        if (surface && surface->pixels) {
-            mbx0 = (int)(pa_block.x + block->x * ms);
-            mby0 = (int)(pa_block.y + block->y * ms);
-            int mx1 = mbx0 + (int)(block->width * ms);
-            int my1 = mby0 + (int)(block->height * ms);
-            if (mbx0 < 0) mbx0 = 0;
-            if (mby0 < 0) mby0 = 0;
-            if (mx1 > surface->width) mx1 = surface->width;
-            if (my1 > surface->height) my1 = surface->height;
-            mbw = mx1 - mbx0;
-            mbh = my1 - mby0;
-            if (mbw > 0 && mbh > 0) {
-                if (rdcon->dl) {
-                    // record save/apply pair — replay handles pixel ops
-                    dl_save_backdrop(rdcon->dl, mbx0, mby0, mbw, mbh);
-                } else {
-                    mix_blend_backdrop = (uint32_t*)scratch_alloc(&rdcon->scratch, (size_t)mbw * mbh * sizeof(uint32_t));
-                    if (mix_blend_backdrop) {
-                        uint32_t* px = (uint32_t*)surface->pixels;
-                        int pitch = surface->pitch / 4;
-                        for (int row = 0; row < mbh; row++) {
-                            memcpy(mix_blend_backdrop + row * mbw,
-                                   px + (mby0 + row) * pitch + mbx0,
-                                   mbw * sizeof(uint32_t));
-                        }
-                        // Clear region to transparent so element renders on clean background
-                        for (int row = 0; row < mbh; row++) {
-                            memset(px + (mby0 + row) * pitch + mbx0, 0, mbw * sizeof(uint32_t));
-                        }
-                        log_debug("[MIX-BLEND] Saved backdrop %dx%d for <%s>", mbw, mbh, block->node_name());
-                    }
-                }
-            }
-        }
-    }
-
-    // Save backdrop for opacity stacking context (must nest inside mix-blend save)
-    bool has_opacity_group = (block->in_line && block->in_line->opacity < 1.0f && block->in_line->opacity >= 0.0f);
-    uint32_t* opacity_backdrop = nullptr;
-    int opx0 = 0, opy0 = 0, opw = 0, oph = 0;
-    if (has_opacity_group) {
-        float os = rdcon->scale;
-        ImageSurface* surface = rdcon->ui_context->surface;
-        if (surface && surface->pixels) {
-            opx0 = (int)(pa_block.x + block->x * os);
-            opy0 = (int)(pa_block.y + block->y * os);
-            int ox1 = opx0 + (int)(block->width * os);
-            int oy1 = opy0 + (int)(block->height * os);
-            if (opx0 < 0) opx0 = 0;
-            if (opy0 < 0) opy0 = 0;
-            if (ox1 > surface->width) ox1 = surface->width;
-            if (oy1 > surface->height) oy1 = surface->height;
-            opw = ox1 - opx0;
-            oph = oy1 - opy0;
-            if (opw > 0 && oph > 0) {
-                if (rdcon->dl) {
-                    dl_save_backdrop(rdcon->dl, opx0, opy0, opw, oph);
-                } else {
-                    opacity_backdrop = (uint32_t*)scratch_alloc(&rdcon->scratch, (size_t)opw * oph * sizeof(uint32_t));
-                    if (opacity_backdrop) {
-                        uint32_t* px = (uint32_t*)surface->pixels;
-                        int pitch = surface->pitch / 4;
-                        for (int row = 0; row < oph; row++) {
-                            memcpy(opacity_backdrop + row * opw,
-                                   px + (opy0 + row) * pitch + opx0,
-                                   opw * sizeof(uint32_t));
-                        }
-                        // clear region so element renders on transparent background
-                        for (int row = 0; row < oph; row++) {
-                            memset(px + (opy0 + row) * pitch + opx0, 0, opw * sizeof(uint32_t));
-                        }
-                        log_debug("[OPACITY] Saved backdrop %dx%d for <%s>", opw, oph, block->node_name());
-                    }
-                }
-            }
-        }
-    }
-
-    // Save backdrop for filter: drop-shadow() (element must render on transparent so we get true alpha)
-    bool has_drop_shadow = false;
-    bool has_filter_opacity = false;
-    bool has_filter_backdrop = false;
-    uint32_t* ds_backdrop = nullptr;
-    int dsx0 = 0, dsy0 = 0, dsw = 0, dsh = 0;
-    float ds_offset_x = 0, ds_offset_y = 0, ds_blur = 0;
-    float filter_blur_max = 0;
-    if (block->filter && block->filter->functions) {
-        FilterFunction* ff = block->filter->functions;
-        while (ff) {
-            if (ff->type == FILTER_DROP_SHADOW) {
-                has_drop_shadow = true;
-                ds_offset_x = ff->params.drop_shadow.offset_x;
-                ds_offset_y = ff->params.drop_shadow.offset_y;
-                ds_blur = ff->params.drop_shadow.blur_radius;
-            } else if (ff->type == FILTER_BLUR) {
-                if (ff->params.blur_radius > filter_blur_max)
-                    filter_blur_max = ff->params.blur_radius;
-            } else if (ff->type == FILTER_OPACITY) {
-                has_filter_opacity = true;
-            }
-            ff = ff->next;
-        }
-        // Backdrop save (transparent rendering) is needed only for filters that
-        // produce alpha that must composite over the underlying surface:
-        //  - drop-shadow(): needs element alpha to generate the shadow
-        //  - opacity(): reduces element alpha; without backdrop save, lowering
-        //    alpha would punch holes through the underlying surface
-        // Pure color/blur filters operate on pixels in place and don't need it.
-        has_filter_backdrop = has_drop_shadow || has_filter_opacity;
-    }
-    if (has_filter_backdrop) {
-        float ds = rdcon->scale;
-        ImageSurface* surface = rdcon->ui_context->surface;
-        if (surface && surface->pixels) {
-            // Expand region to cover element + drop-shadow offset/blur + filter blur
-            float ds_expand = has_drop_shadow ?
-                (ceilf(fabs(ds_offset_x > 0 ? ds_offset_x : -ds_offset_x)) +
-                 ceilf(fabs(ds_offset_y > 0 ? ds_offset_y : -ds_offset_y)) +
-                 ceilf(ds_blur) + 2) : 0;
-            // Blur output extends 2 * blur_radius from element edge:
-            //  filter_rect padding (blur_radius) + box_blur kernel padding (blur_radius).
-            // Backdrop region must cover the full blur output so it's composited back.
-            float blur_expand = ceilf(filter_blur_max * 2.0f);
-            float expand = ds_expand > blur_expand ? ds_expand : blur_expand;
-            dsx0 = (int)(pa_block.x + block->x * ds - expand);
-            dsy0 = (int)(pa_block.y + block->y * ds - expand);
-            int dx1 = (int)(pa_block.x + block->x * ds + block->width * ds + expand);
-            int dy1 = (int)(pa_block.y + block->y * ds + block->height * ds + expand);
-            if (dsx0 < 0) dsx0 = 0;
-            if (dsy0 < 0) dsy0 = 0;
-            if (dx1 > surface->width) dx1 = surface->width;
-            if (dy1 > surface->height) dy1 = surface->height;
-            dsw = dx1 - dsx0;
-            dsh = dy1 - dsy0;
-            if (dsw > 0 && dsh > 0) {
-                if (rdcon->dl) {
-                    dl_save_backdrop(rdcon->dl, dsx0, dsy0, dsw, dsh);
-                } else {
-                    ds_backdrop = (uint32_t*)scratch_alloc(&rdcon->scratch, (size_t)dsw * dsh * sizeof(uint32_t));
-                    if (ds_backdrop) {
-                        uint32_t* px = (uint32_t*)surface->pixels;
-                        int pitch = surface->pitch / 4;
-                        for (int row = 0; row < dsh; row++) {
-                            memcpy(ds_backdrop + row * dsw,
-                                   px + (dsy0 + row) * pitch + dsx0,
-                                   dsw * sizeof(uint32_t));
-                        }
-                        for (int row = 0; row < dsh; row++) {
-                            memset(px + (dsy0 + row) * pitch + dsx0, 0, dsw * sizeof(uint32_t));
-                        }
-                        log_debug("[DROP-SHADOW] Saved backdrop %dx%d for <%s>", dsw, dsh, block->node_name());
-                    }
-                }
-            }
-        }
-    }
+    RenderEffectGroup effect_group = render_effect_group_begin(rdcon, block, &pa_block);
 
     if (!self_hidden && block->bound) {
         // CSS 2.1 Section 17.6.1: empty-cells: hide suppresses borders/backgrounds
@@ -2555,39 +2391,10 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
 
     // Apply CSS filters after all content is rendered
     // Filters are applied to the rendered pixel data in the element's region
-    if (block->filter && block->filter->functions) {
+    if (render_effect_group_has_filter_rect(&effect_group)) {
         auto tf1 = std::chrono::high_resolution_clock::now();
 
-        // Calculate the element's bounding rect, expanded for filter effects
-        float filter_expand = 0;
-        FilterFunction* ff = block->filter->functions;
-        while (ff) {
-            if (ff->type == FILTER_BLUR && ff->params.blur_radius > filter_expand)
-                filter_expand = ff->params.blur_radius;
-            if (ff->type == FILTER_DROP_SHADOW) {
-                float ds_exp = fabsf(ff->params.drop_shadow.offset_x)
-                             + fabsf(ff->params.drop_shadow.offset_y)
-                             + ff->params.drop_shadow.blur_radius + 2;
-                if (ds_exp > filter_expand) filter_expand = ds_exp;
-            }
-            ff = ff->next;
-        }
-        Rect filter_rect;
-        filter_rect.x = pa_block.x + block->x - filter_expand;
-        filter_rect.y = pa_block.y + block->y - filter_expand;
-        filter_rect.width = block->width + filter_expand * 2;
-        filter_rect.height = block->height + filter_expand * 2;
-
-        log_debug("[FILTER] Applying filters to element %s at (%.0f,%.0f) size %.0fx%.0f",
-                  block->node_name(), filter_rect.x, filter_rect.y, filter_rect.width, filter_rect.height);
-
-        // Apply the filter chain to the rendered pixels
-        if (rdcon->dl) {
-            dl_apply_filter(rdcon->dl, filter_rect.x, filter_rect.y, filter_rect.width, filter_rect.height,
-                            block->filter, &rdcon->block.clip);
-        } else {
-            apply_css_filters(&rdcon->scratch, rdcon->ui_context->surface, block->filter, &filter_rect, &rdcon->block.clip);
-        }
+        render_effect_group_apply_filter(&effect_group, block, &rdcon->block.clip);
 
         auto tf2 = std::chrono::high_resolution_clock::now();
         g_render_filter_time += std::chrono::duration<double, std::milli>(tf2 - tf1).count();
@@ -2597,87 +2404,13 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
     // Composite filter result: element rendered on transparent, now composite over saved backdrop.
     // apply_css_filters() premultiplies its output, so we use the premul source-over formula
     // for both drop-shadow and other filters.
-    if (has_filter_backdrop && dsw > 0 && dsh > 0) {
-        if (rdcon->dl) {
-            // DL path: composite element+filter group over saved backdrop at full opacity
-            dl_composite_opacity(rdcon->dl, dsx0, dsy0, dsw, dsh, 1.0f);
-        } else if (ds_backdrop) {
-            ImageSurface* surface = rdcon->ui_context->surface;
-            uint32_t* px = (uint32_t*)surface->pixels;
-            int pitch = surface->pitch / 4;
-            for (int row = 0; row < dsh; row++) {
-                for (int col = 0; col < dsw; col++) {
-                    uint32_t src = px[(dsy0 + row) * pitch + (dsx0 + col)];
-                    uint32_t dst = ds_backdrop[row * dsw + col];
-                    if (src == 0) {
-                        px[(dsy0 + row) * pitch + (dsx0 + col)] = dst;
-                        continue;
-                    }
-                    uint32_t sa = (src >> 24) & 0xFF;
-                    if (sa == 255) continue;  // fully opaque element pixel, keep as is
-                    // Porter-Duff source-over (premul): result = src + dst * (1 - src_a)
-                    uint32_t da = (dst >> 24) & 0xFF;
-                    uint32_t inv_sa = 255 - sa;
-                    uint32_t ra = sa + (da * inv_sa + 127) / 255;
-                    uint32_t rr = (src & 0xFF) + (((dst & 0xFF) * inv_sa + 127) / 255);
-                    uint32_t rg = (((src >> 8) & 0xFF) + ((((dst >> 8) & 0xFF) * inv_sa + 127) / 255));
-                    uint32_t rb = (((src >> 16) & 0xFF) + ((((dst >> 16) & 0xFF) * inv_sa + 127) / 255));
-                    px[(dsy0 + row) * pitch + (dsx0 + col)] =
-                        (std::min(ra, 255u) << 24) | (std::min(rb, 255u) << 16) |
-                        (std::min(rg, 255u) << 8) | std::min(rr, 255u);
-                }
-            }
-            log_debug("[FILTER] Composited filtered element over backdrop %dx%d", dsw, dsh);
-        }
-    }
+    render_effect_group_finish_filter_backdrop(&effect_group, block);
 
     // Apply CSS opacity: composite element group over saved backdrop at opacity
-    if (has_opacity_group && opw > 0 && oph > 0) {
+    if (render_effect_backdrop_active(&effect_group.opacity_backdrop)) {
         auto to1 = std::chrono::high_resolution_clock::now();
 
-        float opacity = block->in_line->opacity;
-        if (rdcon->dl) {
-            dl_composite_opacity(rdcon->dl, opx0, opy0, opw, oph, opacity);
-        } else if (opacity_backdrop) {
-            ImageSurface* surface = rdcon->ui_context->surface;
-            uint32_t* px = (uint32_t*)surface->pixels;
-            int pitch = surface->pitch / 4;
-            int opacity_i = (int)(opacity * 256 + 0.5f);
-            for (int row = 0; row < oph; row++) {
-                for (int col = 0; col < opw; col++) {
-                    uint32_t src = px[(opy0 + row) * pitch + (opx0 + col)];
-                    uint32_t dst = opacity_backdrop[row * opw + col];
-                    if (src == 0) {
-                        px[(opy0 + row) * pitch + (opx0 + col)] = dst;
-                        continue;
-                    }
-                    // Scale source by opacity (premultiplied alpha compositing)
-                    uint32_t sa = ((src >> 24) & 0xFF) * opacity_i + 128;  sa >>= 8;
-                    uint32_t sr = (src & 0xFF) * opacity_i + 128;          sr >>= 8;
-                    uint32_t sg = ((src >> 8) & 0xFF) * opacity_i + 128;   sg >>= 8;
-                    uint32_t sb = ((src >> 16) & 0xFF) * opacity_i + 128;  sb >>= 8;
-                    // Porter-Duff source over: result = src' + dst * (1 - src'_alpha)
-                    uint32_t inv_sa = 255 - sa;
-                    uint32_t da = (dst >> 24) & 0xFF;
-                    uint32_t dr = dst & 0xFF;
-                    uint32_t dg = (dst >> 8) & 0xFF;
-                    uint32_t db = (dst >> 16) & 0xFF;
-                    uint32_t ra = sa + (da * inv_sa + 128) / 255;
-                    uint32_t rr = sr + (dr * inv_sa + 128) / 255;
-                    uint32_t rg = sg + (dg * inv_sa + 128) / 255;
-                    uint32_t rb = sb + (db * inv_sa + 128) / 255;
-                    if (ra > 255) ra = 255;
-                    if (rr > 255) rr = 255;
-                    if (rg > 255) rg = 255;
-                    if (rb > 255) rb = 255;
-                    px[(opy0 + row) * pitch + (opx0 + col)] =
-                        (ra << 24) | (rb << 16) | (rg << 8) | rr;
-                }
-            }
-            scratch_free(&rdcon->scratch, opacity_backdrop);
-            log_debug("[OPACITY] Composited opacity=%.2f on <%s> region (%d,%d) %dx%d",
-                      opacity, block->node_name(), opx0, opy0, opw, oph);
-        }
+        render_effect_group_finish_opacity(&effect_group, block);
 
         auto to2 = std::chrono::high_resolution_clock::now();
         g_render_opacity_time += std::chrono::duration<double, std::milli>(to2 - to1).count();
@@ -2685,26 +2418,10 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
     }
 
     // Apply mix-blend-mode: composite rendered element onto saved backdrop
-    if (mix_blend && mbw > 0 && mbh > 0) {
+    if (render_effect_backdrop_active(&effect_group.mix_blend_backdrop)) {
         auto tm1 = std::chrono::high_resolution_clock::now();
 
-        if (rdcon->dl) {
-            dl_apply_blend_mode(rdcon->dl, mbx0, mby0, mbw, mbh, (int)mix_blend);
-        } else if (mix_blend_backdrop) {
-            ImageSurface* surface = rdcon->ui_context->surface;
-            uint32_t* px = (uint32_t*)surface->pixels;
-            int pitch = surface->pitch / 4;
-            for (int row = 0; row < mbh; row++) {
-                for (int col = 0; col < mbw; col++) {
-                    uint32_t backdrop = mix_blend_backdrop[row * mbw + col];
-                    uint32_t source = px[(mby0 + row) * pitch + (mbx0 + col)];
-                    px[(mby0 + row) * pitch + (mbx0 + col)] =
-                        composite_blend_pixel(backdrop, source, mix_blend);
-                }
-            }
-            scratch_free(&rdcon->scratch, mix_blend_backdrop);
-            log_debug("[MIX-BLEND] Applied mix-blend-mode on <%s> %dx%d", block->node_name(), mbw, mbh);
-        }
+        render_effect_group_finish_blend(&effect_group, block);
 
         auto tm2 = std::chrono::high_resolution_clock::now();
         g_render_blend_time += std::chrono::duration<double, std::milli>(tm2 - tm1).count();

@@ -15,3 +15,4 @@ typedef struct RenderTransformScope {
 RenderTransformScope render_state_push_transform(RenderContext* rdcon, ViewBlock* block,
                                                  const BlockBlot* parent_block);
 void render_state_pop_transform(RenderTransformScope* scope);
+const RdtMatrix* render_state_current_transform(RenderContext* rdcon);

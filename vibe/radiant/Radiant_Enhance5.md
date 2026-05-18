@@ -60,6 +60,28 @@ Completed:
   - `render_state.hpp`
   - `render_state.cpp`
 - Moved transform save/apply/restore and transform matrix concatenation out of `render_block_view()` into `render_state_push_transform()` and `render_state_pop_transform()`.
+- Added initial render-geometry helper files:
+  - `render_geometry.hpp`
+  - `render_geometry.cpp`
+- Moved background-origin/background-clip box adjustment, clip/rect intersection, and clipped pixel-bound conversion into the shared geometry layer.
+- Added initial render-path helper files:
+  - `render_path.hpp`
+  - `render_path.cpp`
+- Moved shared rounded-rect path construction and render-context clip path construction out of background/border feature modules.
+- Updated clip-shape rounded-rect path creation to use the shared path builder.
+- Added initial render-composite helper files:
+  - `render_composite.hpp`
+  - `render_composite.cpp`
+- Moved CSS blend-mode pixel compositing, backdrop copy/clear, premultiplied source-over compositing, and opacity group compositing into the shared composite layer.
+- Updated background blend, block opacity/filter/mix-blend, display-list replay, and tiled replay to use the shared composite helpers.
+- Added initial render-effects helper files:
+  - `render_effects.hpp`
+  - `render_effects.cpp`
+- Moved shared effect backdrop save/clear and final opacity/source-over/blend application out of `render_block_view()` into the effects layer.
+- Added `RenderEffectGroup` and moved opacity, filter, and mix-blend effect detection plus filter/backdrop region planning out of `render_block_view()`.
+- Moved CSS filter application dispatch into `render_effect_group_apply_filter()`, so `render_block_view()` no longer directly calls display-list filter commands or software filter fallback.
+- Moved the repeated current-transform lookup into `render_state_current_transform()` and updated background/border drawing paths to use it.
+- Removed stale local `RdtVector*` variables from background and border paths that now draw through the painter/context gateway.
 
 Validation:
 
@@ -69,7 +91,7 @@ Validation:
 
 The earlier raster-facade gap has been closed: `surface.cpp` now keeps the surface ownership, image loading, and compatibility wrappers, while render-facing fill/blit/scaling behavior lives in `render_raster.cpp`.
 
-This means the practical Phase 1 painter/raster consolidation is now largely complete, and the first shared clip/path plus render-state helper extractions have started. The next cleanup step is to continue extracting shared geometry and additional state scopes so feature modules stop carrying their own small variants of the same math and save/restore logic.
+This means the practical Phase 1 painter/raster consolidation is now largely complete, and the first shared clip/path, geometry, and render-state helper extractions have started. The next cleanup step is to keep moving repeated path construction and additional state scopes out of feature modules so they stop carrying small variants of the same math and save/restore logic.
 
 ## Current Structure Assessment
 
@@ -282,25 +304,39 @@ Create:
 - `radiant/render_effects.hpp`
 - `radiant/render_effects.cpp`
 
-Effects should be planned and applied as groups instead of being hand-coded inside block traversal.
+Initial helper extraction is now in place. `render_effects` owns bounded backdrop save/clear plus final source-over, opacity, and blend application for both display-list and direct-surface paths.
 
-Proposed effect group:
+`RenderEffectGroup` now centralizes element effect detection and region planning, including:
+
+- opacity group detection
+- mix-blend detection
+- filter rect expansion
+- filter backdrop expansion and clamping
+- filter command dispatch for display-list and direct-surface rendering
+
+Current effect group:
 
 ```cpp
 typedef struct RenderEffectGroup {
-    RenderContext* context;
-    Bound region;
+    RenderEffectBackdrop mix_blend_backdrop;
+    RenderEffectBackdrop opacity_backdrop;
+    RenderEffectBackdrop filter_backdrop;
+    Rect filter_rect;
+    CssEnum mix_blend_mode;
+    float opacity;
     bool has_filter_backdrop;
     bool has_opacity_group;
-    bool has_mix_blend;
-    float opacity;
-    CssEnum blend_mode;
+    bool has_filter;
 } RenderEffectGroup;
 
 RenderEffectGroup render_effect_group_begin(RenderContext* rdcon, ViewBlock* block,
-                                            float abs_x, float abs_y);
-void render_effect_group_end(RenderEffectGroup* group, ViewBlock* block);
+                                            const BlockBlot* parent_block);
+bool render_effect_group_apply_filter(RenderEffectGroup* group,
+                                      ViewBlock* block,
+                                      Bound* clip);
 ```
+
+The remaining cleanup is to collapse the separate filter/opacity/blend finish calls into a tighter begin/end scope once profiling hooks have a home.
 
 This module should own:
 
@@ -720,7 +756,7 @@ Performance comparisons should use release builds, not debug builds.
 4. Extract `render_painter`, keeping compatibility wrappers for existing `rc_*` calls.
 5. Add backend capability reporting for the active `RdtVector` implementation.
 6. Add `render_clip` scope helpers and migrate CSS clip-path plus overflow clipping.
-7. Add `render_effects` and migrate opacity, filter, and mix-blend planning out of `render_block_view()`.
+7. Continue `render_effects` by moving profiling hooks out of `render_block_view()` and collapsing effect finish calls into a scoped end helper.
 8. Split text painting into text/glyph/decorations helpers.
 9. Split display-list storage, builder, replay, and bounds.
 10. Unify `render_html_doc()` and `render_html_doc_tiled()` setup through `render_output`.
