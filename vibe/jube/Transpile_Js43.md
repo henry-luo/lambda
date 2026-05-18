@@ -2835,3 +2835,147 @@ Next work:
 - Then repair compatible property redefinition semantics, validating both plain
   Object and TypedArray length/internal-slot cases before the next baseline
   refresh attempt.
+
+## 50. Close The 123 Regressions
+
+Status on 2026-05-18: fixed the remaining real regressions from the blocked
+baseline refresh.  The full js262/test262 run now reports 0 regressions against
+the checked-in baseline.
+
+Fixes:
+
+- Annex B function-code binding cluster: fixed the 61 block-function binding
+  regressions first.  The focused Annex B retry passed 61 / 61 and reduced the
+  full-suite regression count from 123 to 62.
+- Compatible accessor redefinition cluster: fixed
+  `js_define_accessor_partial()` so the low-level property storage path no
+  longer rejects every non-configurable accessor entry after
+  `ValidateAndApplyPropertyDescriptor` has already accepted a compatible update.
+- The accessor storage path now normalizes an absent `get` / `set` field to
+  `ItemNull`, compares the existing accessor half with `Object.is` when both
+  sides are callable/object values, and rejects only genuinely incompatible
+  accessor-half changes.
+- This repaired both descriptor groups left after the Annex B fix:
+  20 `Object.defineProperty` / `Object.defineProperties` rows and 42 TypedArray
+  internal-length/property redefinition rows.
+
+Changed files:
+
+- `lambda/js/js_property_attrs.cpp`
+
+Verification:
+
+```bash
+make
+make -C build/premake config=release_native lambda test_js_test262_gtest -j4 CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib"
+awk 'NR>1 && ($1 ~ /^built_ins_Object_define(Property|Properties)_/ || $1 ~ /^built_ins_TypedArray_prototype_.*(length|arraylength|byteoffset)/) { print $1 }' temp/js43_after_annexb_full.tsv > temp/js43_descriptor_62.txt
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_descriptor_62.txt --js-timeout=30 --write-failures=temp/js43_descriptor_after_accessor_guard.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --write-failures=temp/js43_after_descriptor_full.tsv --gtest_brief=1
+```
+
+Results:
+
+- Descriptor-focused 62-test retry: 62 / 62 passed.
+- Full js262/test262 retry: fully passed 34,023 / 34,163.
+- Failed: 140; skipped: 8,056.
+- Improvements: 184 fail-to-pass rows.
+- Regressions: 0 pass-to-fail rows.
+- Failure manifest for remaining non-baseline failures:
+  `temp/js43_after_descriptor_full.tsv`.
+- Grouped summaries:
+  `temp/js43_after_descriptor_full_by_feature.tsv` and
+  `temp/js43_after_descriptor_full_by_path.tsv`.
+
+Note:
+
+- `make` was run before the release build so Premake could regenerate the build
+  graph from config; no generated build files were edited manually.
+- The checked-in baseline was not changed during this pass.  The suite is now
+  clean against the existing baseline, so the next baseline refresh should no
+  longer be blocked by these 123 real regressions.
+
+## 51. Baseline Refresh After Closing Regressions
+
+Status on 2026-05-18: reran the full js262/test262 update gate after closing
+the 123 real regressions.  The gate completed cleanly and refreshed the
+test262 baseline to the current 34,023 fully passing tests.
+
+Verification:
+
+```bash
+make -C build/premake config=release_native lambda test_js_test262_gtest -j4 CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib"
+./test/test_js_test262_gtest.exe --batch-only --update-baseline --gtest_brief=1
+```
+
+Results:
+
+- Fully passed: 34,023 / 34,163.
+- Non-fully-passing: 0.
+- Failed: 140.
+- Skipped: 8,056.
+- Improvements: 184 fail-to-pass rows.
+- Regressions: 0 pass-to-fail rows.
+- Baseline refreshed: `test/js262/test262_baseline.txt` now records
+  `# Total passing: 34023`.
+- Partial list cleanup removed two stale entries that are now in the baseline.
+
+Note:
+
+- `test/js262` is a symlink to `../../lambda-test/js262`.  A first sandboxed
+  baseline-update run printed the normal "Baseline updated" message, but the
+  write through the symlink target was blocked.  The release update gate was
+  rerun with permission to write the symlink target, and the baseline file now
+  reflects the 34,023-test passing set.
+
+## 52. Release Harness Native Matcher Cleanup
+
+Status on 2026-05-18: fixed the remaining release-suite slowdown/regression
+risk around the Test262 native function source matcher.  The full baseline-only
+gate is clean again: 0 non-fully-passing rows and 0 regressions.
+
+Root cause:
+
+- `nativeFunctionMatcher.js` calls `validateNativeFunctionSource()` many times
+  while checking `Function.prototype.toString()` intrinsic source syntax.
+- A native C++ validator already exists, but the MIR lowering for this helper
+  was compiled only in debug builds.  Release js262 runs therefore fell back to
+  the slow JavaScript matcher path.
+- An experimental preamble preload of `wellKnownIntrinsicObjects.js` was
+  reverted because it changed harness/global-object behavior and produced noisy
+  pass-to-fail rows unrelated to the matcher issue.
+
+Fix:
+
+- Enable the existing `js_validate_native_function_source()` lowering in release
+  builds, scoped to Test262 harness/preamble compilation only.
+- Keep the helper semantics intact: the C++ native still validates the generated
+  native function source and throws if the source is malformed; it only avoids
+  repeatedly running the large JavaScript matcher.
+
+Changed files:
+
+- `lambda/js/js_mir_expression_lowering.cpp`
+
+Verification:
+
+```bash
+make -C build/premake config=release_native lambda test_js_test262_gtest -j4 CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib"
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js262_function_tostring_one.txt --js-timeout=30 --write-failures=temp/js262_function_tostring_after_preamble_revert.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --baseline-only --batch-only --write-failures=temp/js262_after_native_validator_baseline2.tsv --gtest_brief=1
+```
+
+Results:
+
+- Focused `built_ins_Function_prototype_toString_built_in_function_object_js`
+  retry: passed; focused batch time dropped from about 5,049 ms to about 98 ms.
+- Full baseline-only js262/test262 gate: fully passed 34,023 / 34,023.
+- Non-fully-passing: 0.
+- Regressions: 0.
+- Failure manifest: 0 rows in
+  `temp/js262_after_native_validator_baseline2.tsv`.
+
+Note:
+
+- Avoid running multiple `test_js_test262_gtest.exe --batch-only` processes in
+  parallel.  The harness reuses worker manifest paths under `temp/`, and
+  overlapping runs can report false missing/lost rows.

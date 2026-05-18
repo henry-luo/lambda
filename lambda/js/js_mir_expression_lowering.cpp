@@ -8254,14 +8254,14 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 return jm_call_1(mt, "js_decodeURI", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
-#ifndef NDEBUG
-            if (nl == 28 && strncmp(n, "validateNativeFunctionSource", 28) == 0) {
+            if (nl == 28 && strncmp(n, "validateNativeFunctionSource", 28) == 0 &&
+                    ((mt->filename && strcmp(mt->filename, "<harness>") == 0) ||
+                     (mt->preamble_entries && mt->preamble_entry_count > 0))) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_undefined(mt);
                 jm_call_void_1(mt, "js_validate_native_function_source",
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
                 return jm_emit_undefined(mt);
             }
-#endif
             // unescape(str) — legacy percent-decoding
             if (nl == 8 && strncmp(n, "unescape", 8) == 0 && !jm_find_var(mt, "_js_unescape")) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_undefined(mt);
