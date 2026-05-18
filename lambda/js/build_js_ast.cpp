@@ -253,11 +253,22 @@ JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node) {
             }
             {
                 char* endptr;
-                // strtod handles decimal and 0x hex, but not 0b binary or 0o octal
+                // strtod handles decimal and 0x hex, but not 0b binary, 0o
+                // octal, or Annex B legacy octal integer literals.
                 if (j > 2 && temp_str[0] == '0' && (temp_str[1] == 'b' || temp_str[1] == 'B')) {
                     literal->value.number_value = (double)strtoull(temp_str + 2, &endptr, 2);
                 } else if (j > 2 && temp_str[0] == '0' && (temp_str[1] == 'o' || temp_str[1] == 'O')) {
                     literal->value.number_value = (double)strtoull(temp_str + 2, &endptr, 8);
+                } else if (j > 1 && temp_str[0] == '0' && !literal->has_decimal) {
+                    bool is_legacy_octal = true;
+                    for (size_t k = 1; k < j; k++) {
+                        if (temp_str[k] < '0' || temp_str[k] > '7') {
+                            is_legacy_octal = false;
+                            break;
+                        }
+                    }
+                    literal->value.number_value = is_legacy_octal ?
+                        (double)strtoull(temp_str, &endptr, 8) : strtod(temp_str, &endptr);
                 } else {
                     literal->value.number_value = strtod(temp_str, &endptr);
                 }
@@ -324,6 +335,11 @@ JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node) {
                                 if (i + 1 < content_len && src[i + 1] == '\n') {
                                     i++; // also skip <LF> in \<CR><LF>
                                 }
+                            } else if ((unsigned char)next == 0xE2 && i + 3 < content_len &&
+                                       (unsigned char)src[i + 2] == 0x80 &&
+                                       ((unsigned char)src[i + 3] == 0xA8 ||
+                                        (unsigned char)src[i + 3] == 0xA9)) {
+                                i += 3; // skip over \<LS> or \<PS>
                             } else if (js_is_octal_digit(next)) {
                                 uint32_t code = 0;
                                 size_t end_pos = js_decode_legacy_octal_escape(src, content_len, i, &code);

@@ -6152,34 +6152,6 @@ extern "C" Item js_get_prototype_of(Item object) {
         if (raw_proto.item != ItemNull.item) return raw_proto;
     }
 
-    // v18g: if instance has an own data constructor with a .prototype property,
-    // and the object is not that prototype itself, return constructor.prototype.
-    // this is an internal prototype inference path; it must not invoke a user
-    // `constructor` accessor while implementing [[GetPrototypeOf]].
-    {
-        Item ctor = ItemNull;
-        ShapeEntry* ctor_se = js_find_shape_entry(object, "constructor", 11);
-        if (ctor_se && !jspd_is_accessor(ctor_se)) {
-            bool ctor_found = false;
-            ctor = js_map_get_fast_ext(object.map, "constructor", 11, &ctor_found);
-            if (!ctor_found || ctor.item == JS_DELETED_SENTINEL_VAL) ctor = ItemNull;
-        }
-        if (get_type_id(ctor) == LMD_TYPE_MAP) {
-            // user-defined class: read its "prototype" property
-            Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
-            Item proto = js_property_get(ctor, proto_key);
-            // Guard: don't return self (prototype objects have constructor.prototype === self)
-            if (get_type_id(proto) == LMD_TYPE_MAP && proto.map != object.map) return proto;
-        } else if (get_type_id(ctor) == LMD_TYPE_FUNC) {
-            // built-in constructor: get .prototype via property_get (triggers lazy init)
-            Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
-            Item proto = js_property_get(ctor, proto_key);
-            if (get_type_id(proto) == LMD_TYPE_MAP && proto.map != object.map) {
-                return proto;
-            }
-        }
-    }
-
     // No __proto__ found — return Object.prototype for plain objects
     Item obj_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Object", 6))});
     if (get_type_id(obj_ctor) == LMD_TYPE_FUNC) {

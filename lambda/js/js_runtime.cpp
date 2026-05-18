@@ -3679,6 +3679,14 @@ extern "C" Item js_property_get(Item object, Item key) {
             // v20: Check string builtin methods before falling through to index access
             Item builtin = js_lookup_builtin_method(LMD_TYPE_STRING, str_key->chars, str_key->len);
             if (builtin.item != ItemNull.item) return builtin;
+            Item proto = js_get_prototype_of(object);
+            if (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP) {
+                Item saved_receiver = js_proxy_receiver;
+                js_proxy_receiver = object;
+                Item result = js_property_get(proto, key);
+                js_proxy_receiver = saved_receiver;
+                if (get_type_id(result) != LMD_TYPE_UNDEFINED) return result;
+            }
             int64_t string_index = -1;
             if (!js_array_parse_index_name(str_key->chars, (int)str_key->len, &string_index)) {
                 return make_js_undefined();
@@ -4377,6 +4385,14 @@ extern "C" Item js_property_get(Item object, Item key) {
                 }
                 Item object_builtin = js_lookup_builtin_method(LMD_TYPE_MAP, str_key->chars, str_key->len);
                 if (object_builtin.item != ItemNull.item) return object_builtin;
+                Item proto = js_get_prototype_of(object);
+                if (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP) {
+                    Item saved_receiver = js_proxy_receiver;
+                    js_proxy_receiver = object;
+                    Item result = js_property_get(proto, key);
+                    js_proxy_receiver = saved_receiver;
+                    if (get_type_id(result) != LMD_TYPE_UNDEFINED) return result;
+                }
                 return make_js_undefined();
             }
         }
@@ -4434,6 +4450,59 @@ extern "C" Item js_property_set(Item object, Item key, Item value);
 
 static bool js_runtime_is_arguments_exotic(Item value);
 static Item js_arguments_companion_item(Item arguments);
+
+static bool js_is_property_reference_primitive(TypeId type, Item value) {
+    return type == LMD_TYPE_STRING || type == LMD_TYPE_BOOL ||
+           type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT ||
+           (type == LMD_TYPE_INT && !js_is_symbol(value)) ||
+           (type == LMD_TYPE_DECIMAL && js_is_bigint(value)) ||
+           js_is_symbol(value);
+}
+
+static Item js_property_set_on_primitive_base(Item object, Item key, Item value) {
+    Item boxed = js_to_object(object);
+    if (js_check_exception()) return value;
+    TypeId boxed_type = get_type_id(boxed);
+    if (boxed_type == LMD_TYPE_MAP || boxed_type == LMD_TYPE_ARRAY || boxed_type == LMD_TYPE_FUNC) {
+        Item proto = js_get_prototype(boxed);
+        if (proto.item == ItemNull.item) proto = js_get_prototype_of(boxed);
+        int depth = 0;
+        while (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP && depth < 32) {
+            if (js_is_proxy(proto)) {
+                js_proxy_trap_set_with_receiver(proto, key, value, object);
+                return value;
+            }
+            if (get_type_id(key) == LMD_TYPE_STRING) {
+                String* sk = it2s(key);
+                ShapeEntry* se = sk ? js_find_shape_entry(proto, sk->chars, (int)sk->len) : NULL;
+                if (se) {
+                    if (jspd_is_accessor(se)) {
+                        JsSetterDispatchStatus st = js_ordinary_set_via_accessor(
+                            proto, sk->chars, (int)sk->len, value, object);
+                        if (st == JS_SET_DISPATCHED) return value;
+                        if (st == JS_SET_NO_SETTER) break;
+                    }
+                    break;
+                }
+            }
+            Item next = js_get_prototype(proto);
+            if (next.item == ItemNull.item) next = js_get_prototype_of(proto);
+            proto = next;
+            depth++;
+        }
+    }
+    if (js_strict_mode) {
+        const char* prop_name = NULL;
+        int prop_len = 0;
+        if (get_type_id(key) == LMD_TYPE_STRING) {
+            String* sk = it2s(key);
+            prop_name = sk ? sk->chars : NULL;
+            prop_len = sk ? (int)sk->len : 0;
+        }
+        js_strict_throw_property_error("add property", prop_name, prop_len);
+    }
+    return value;
+}
 
 static Map* js_array_ensure_props_map(Array* arr) {
     if (!arr) return NULL;
@@ -4605,6 +4674,9 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                 (int)private_key->len - 10, private_key->chars + 10);
             return js_throw_type_error(msg);
         }
+    }
+    if (js_is_property_reference_primitive(type, object)) {
+        return js_property_set_on_primitive_base(object, key, value);
     }
     if (js_is_symbol(object)) {
         if (js_strict_mode) {
@@ -9819,6 +9891,9 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     case JS_BUILTIN_REGEXP_TEST:
         return js_regex_test(this_val, arg_count > 0 ? arg0 : make_js_undefined());
     case JS_BUILTIN_REGEXP_TO_STRING: {
+        if (!js_is_object_constructor_result(this_val)) {
+            return js_throw_type_error("RegExp.prototype.toString called on incompatible receiver");
+        }
         // /source/flags format
         Item src = js_property_get(this_val, (Item){.item = s2it(heap_create_name("source", 6))});
         Item flg = js_property_get(this_val, (Item){.item = s2it(heap_create_name("flags", 5))});
@@ -15153,8 +15228,7 @@ static Item js_regexp_symbol_search(Item this_val, Item arg0) {
 // RegExp.prototype[@@split](string, limit) — ES spec §22.2.5.13
 static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
     // Step 2: Type(rx) must be Object
-    TypeId rx_tid = get_type_id(this_val);
-    if (rx_tid != LMD_TYPE_MAP && rx_tid != LMD_TYPE_ARRAY) {
+    if (!js_is_object_constructor_result(this_val)) {
         Item tn = (Item){.item = s2it(heap_create_name("TypeError", 9))};
         Item msg = (Item){.item = s2it(heap_create_name("RegExp.prototype[@@split] called on incompatible receiver"))};
         js_throw_value(js_new_error_with_name(tn, msg));
@@ -15172,11 +15246,10 @@ static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
     if (js_exception_pending) return js_array_new(0);
     extern Item js_get_constructor(Item name_item);
     Item default_regexp = js_get_constructor((Item){.item = s2it(heap_create_name("RegExp", 6))});
-    if (get_type_id(C) == LMD_TYPE_UNDEFINED || C.item == ItemNull.item) {
+    if (get_type_id(C) == LMD_TYPE_UNDEFINED) {
         C = default_regexp;
     } else {
-        TypeId ct = get_type_id(C);
-        if (ct != LMD_TYPE_FUNC && ct != LMD_TYPE_MAP) {
+        if (!js_is_object_constructor_result(C)) {
             return js_throw_type_error("Constructor is not an object");
         }
         // Get C[@@species] (Phase 3 Stage C: js_property_get fast-path

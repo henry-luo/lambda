@@ -2979,3 +2979,127 @@ Note:
 - Avoid running multiple `test_js_test262_gtest.exe --batch-only` processes in
   parallel.  The harness reuses worker manifest paths under `temp/`, and
   overlapping runs can report false missing/lost rows.
+
+## 53. Prototype, Primitive Reference, And Literal Cleanup
+
+Status on 2026-05-18: continued reducing the non-baseline js262 failure list
+without disturbing the refreshed 34,023-test baseline.  The old 140-row
+failure batch now has 8 pass rows and 132 remaining fail rows.
+
+Root causes fixed:
+
+- `RegExp.prototype.toString` and `RegExp.prototype[@@split]` were accepting
+  incompatible receivers/constructors too broadly.  `@@split` also treated
+  `constructor: null` like an absent constructor; SpeciesConstructor must only
+  default for `undefined`.
+- `js_get_prototype_of()` had a dynamic `constructor.prototype` inference path.
+  That made an existing object appear to inherit from a constructor prototype
+  assigned after the object was created, violating stable `[[Prototype]]`
+  behavior.
+- Primitive property references skipped prototype lookup.  String/Symbol
+  primitive reads now walk their prototype chains, and primitive writes now use
+  transient ToObject/prototype-chain semantics: inherited proxy/setter dispatch
+  can run with the primitive receiver, otherwise strict mode throws and sloppy
+  mode no-ops.
+- Legacy sloppy octal numeric literals such as `070` were parsed as decimal.
+- String literal line continuations removed `<LF>`/`<CRLF>`, but missed UTF-8
+  `<LS>` and `<PS>` terminators.
+- Added early-error detection for regex literal patterns that contain raw line
+  terminators.  The eval-based RegExp literal rows are still failing, so their
+  remaining root cause is likely in the eval parse/compile path rather than the
+  ordinary AST walker.
+
+Changed files:
+
+- `lambda/js/js_runtime.cpp`
+- `lambda/js/js_globals.cpp`
+- `lambda/js/build_js_ast.cpp`
+- `lambda/js/js_early_errors.cpp`
+
+Verification:
+
+```bash
+make -C build/premake config=release_native lambda test_js_test262_gtest -j4 CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib"
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js262_remaining_140_old.txt --js-timeout=30 --write-failures=temp/js262_remaining_140_after_regex_line_terms.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --baseline-only --batch-only --write-failures=temp/js262_after_literal_cleanup_baseline.tsv --gtest_brief=1
+```
+
+Focused results:
+
+- `built_ins_RegExp_prototype_Symbol_split_species_ctor_ctor_non_obj_js`: pass.
+- `built_ins_RegExp_prototype_toString_called_as_function_js`: pass.
+- `language_types_object_S8_6_2_A1_js`: pass.
+- `language_types_reference_get_value_prop_base_primitive_js`: pass.
+- `language_types_reference_put_value_prop_base_primitive_js`: pass.
+- `language_literals_numeric_legacy_octal_integer_js`: pass.
+- `language_literals_string_line_continuation_double_js`: pass.
+- `language_literals_string_line_continuation_single_js`: pass.
+- Old 140-row batch: 8 passed, 132 failed.
+
+Baseline result:
+
+- Full baseline-only js262/test262 gate: fully passed 34,023 / 34,023.
+- Non-fully-passing: 0.
+- Regressions: 0.
+- Failure manifest: 0 rows in
+  `temp/js262_after_literal_cleanup_baseline.tsv`.
+
+## 54. Mapped Arguments Accessor Setter Readback
+
+Status on 2026-05-18: fixed the mapped `arguments` accessor row without adding
+baseline regressions.  The old 140-row failure batch now has 10 pass rows and
+130 remaining fail rows.
+
+Root cause fixed:
+
+- `Object.defineProperty(arguments, "0", { set(...) { ... } })` installs an
+  accessor closure that is invoked later by `arguments[0] = value`.  The setter
+  updated its captured environment in runtime storage, but the MIR frame did not
+  read that environment back after the property assignment because the
+  `Object.defineProperty` call had cleared the closure-env tracking metadata.
+- The A4 member-assignment fast path also treated `arguments[i] = value` as a
+  direct parameter write.  That is only valid while the mapped arguments exotic
+  still maps the index to the parameter; descriptor redefinition, accessors, and
+  deletes can unmap the entry.
+
+Implementation:
+
+- Added a direct `Object.defineProperty(obj, key, desc)` lowering for the global
+  `Object.defineProperty` builtin.  It preserves closure-env tracking produced
+  while lowering accessor descriptor functions, so a later setter invocation can
+  read mutable captures back into the active MIR frame.
+- After member assignment, read back the last closure environment because a
+  property write may dispatch to an accessor setter.
+- For `arguments[i]` parameter synchronization, call
+  `js_arguments_mapped_get(arguments, i, param)` and write the returned effective
+  mapped value to the parameter register instead of blindly copying the RHS.
+  This keeps accessor/unmapped arguments rows from mutating the formal
+  parameter incorrectly.
+
+Changed file:
+
+- `lambda/js/js_mir_expression_lowering.cpp`
+
+Verification:
+
+```bash
+make -C build/premake config=release_native lambda test_js_test262_gtest -j4 CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib"
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_arguments_batch.txt --js-timeout=30 --write-failures=temp/js43_arguments_after_accessor_readback.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js262_remaining_140_old.txt --js-timeout=30 --write-failures=temp/js262_remaining_140_after_arguments_accessor.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --baseline-only --batch-only --write-failures=temp/js262_after_arguments_accessor_baseline.tsv --gtest_brief=1
+```
+
+Focused results:
+
+- `language_arguments_object_mapped_enumerable_configurable_accessor_descriptor_js`:
+  pass.
+- Arguments focused batch: 5 / 5 passed.
+- Old 140-row batch: 10 passed, 130 failed.
+
+Baseline result:
+
+- Full baseline-only js262/test262 gate: fully passed 34,023 / 34,023.
+- Non-fully-passing: 0.
+- Regressions: 0.
+- Failure manifest: 0 rows in
+  `temp/js262_after_arguments_accessor_baseline.tsv`.
