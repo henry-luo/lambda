@@ -1,0 +1,19 @@
+#pragma once
+
+#include "display_list.h"
+#include "display_list_replay_state.hpp"
+
+void dl_replay_apply_opacity(ImageSurface* surface, const DlApplyOpacity* opacity);
+void dl_replay_apply_filter(ScratchArena* scratch,
+                            ImageSurface* surface,
+                            const DisplayReplayDirtyClip* dirty_clip,
+                            const DlApplyFilter* filter);
+void dl_replay_box_blur_region(ScratchArena* scratch,
+                               ImageSurface* surface,
+                               const DlBoxBlurRegion* blur);
+void dl_replay_box_blur_inset(ScratchArena* scratch,
+                              ImageSurface* surface,
+                              const DlBoxBlurInset* blur);
+void dl_replay_outer_shadow(ScratchArena* scratch,
+                            ImageSurface* surface,
+                            const DlOuterShadow* shadow);

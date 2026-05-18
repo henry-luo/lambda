@@ -126,6 +126,27 @@ Completed:
   - `display_list_replay_backdrop.hpp`
   - `display_list_replay_backdrop.cpp`
 - Moved replay backdrop stack management for CSS opacity and blend-mode out of `display_list.cpp`.
+- Added initial display-list shadow replay helper files:
+  - `display_list_replay_shadow.hpp`
+  - `display_list_replay_shadow.cpp`
+- Moved replay shadow clip save/restore state out of `display_list.cpp`.
+- Added initial display-list effect replay helper files:
+  - `display_list_replay_effects.hpp`
+  - `display_list_replay_effects.cpp`
+- Moved replay opacity, CSS filter dispatch, box blur, inset blur, and outer-shadow replay out of `display_list.cpp`.
+- Added initial display-list raster replay helper files:
+  - `display_list_replay_raster.hpp`
+  - `display_list_replay_raster.cpp`
+- Moved replay of direct surface fills, scaled surface blits, and webview layer placeholders out of `display_list.cpp`.
+- Added initial display-list raster recording helper file:
+  - `display_list_record_raster.cpp`
+- Moved direct surface fill/blit recording and external video/webview placeholder recording out of `display_list.cpp`.
+- Added initial display-list effect recording helper file:
+  - `display_list_record_effects.cpp`
+- Moved opacity, backdrop, blend, filter, blur, shadow-clip, and outer-shadow command recording out of `display_list.cpp`.
+- Added initial display-list vector recording helper file:
+  - `display_list_record_vector.cpp`
+- Moved vector draw command recording, glyph bounds calculation, image/picture recording, and clip-depth command recording out of `display_list.cpp`.
 - Added initial backend capability helpers:
   - `render_backend_caps.hpp`
   - `render_backend_caps.cpp`
@@ -141,7 +162,7 @@ Validation:
 
 The earlier raster-facade gap has been closed: `surface.cpp` now keeps the surface ownership, image loading, and compatibility wrappers, while render-facing fill/blit/scaling behavior lives in `render_raster.cpp`.
 
-This means the practical Phase 1 painter/raster consolidation is now largely complete, and the first shared clip/path, geometry, render-state, profiler, composite, effects, glyph, text, output, display-list bounds/storage, and backend capability helper extractions are in place. The next cleanup step is to continue splitting display-list recording/replay internals and remaining output-target orchestration.
+This means the practical Phase 1 painter/raster/effect consolidation is now largely complete, and the first shared clip/path, geometry, render-state, profiler, composite, effects, glyph, text, output, display-list bounds/storage/recording/replay, and backend capability helper extractions are in place. The next cleanup step is to continue splitting display-list replay dispatch and output-target orchestration.
 
 ## Current Structure Assessment
 
@@ -828,7 +849,7 @@ Performance comparisons should use release builds, not debug builds.
 6. Add `render_clip` scope helpers and migrate CSS clip-path plus overflow clipping. Done.
 7. Continue `render_effects` by moving profiling hooks out of `render_block_view()` and collapsing effect finish calls into a scoped end helper. Done.
 8. Split text painting into text/glyph/decorations helpers. Started with glyph bitmap rendering in `render_glyph` plus inline background, trailing mark, text-decoration, text-shadow, and profiled glyph-load helpers in `render_text`.
-9. Split display-list storage, builder, replay, and bounds. Started with public display-list bounds helpers used by tile replay, a storage/lifecycle module, glyph replay helpers, replay dirty-clip state helpers, and backdrop replay helpers.
+9. Split display-list storage, builder, replay, and bounds. Started with public display-list bounds helpers used by tile replay, a storage/lifecycle module, glyph replay helpers, replay dirty-clip state helpers, backdrop replay helpers, shadow clip replay helpers, effect replay helpers, direct raster replay helpers, direct raster recording helpers, effect recording helpers, and vector recording helpers.
 10. Unify `render_html_doc()` and `render_html_doc_tiled()` setup through `render_output`. Started with shared context lifecycle, background/clear handling, root paint dispatch, display-list replay planning, render-pool ownership, and surface-save dispatch.
 11. Expand `render_walk` into the shared paint walker and migrate raster rendering to it.
 12. Split `render_svg_inline.cpp` into SVG parse/style/defs/geometry/paint modules.
