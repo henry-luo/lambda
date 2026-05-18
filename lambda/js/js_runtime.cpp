@@ -14137,7 +14137,16 @@ extern "C" Item js_create_regexp_from_source(const char* src, size_t len) {
     size_t i = 1;
     bool in_class = false;
     while (i < len) {
-        char c = src[i];
+        unsigned char c = (unsigned char)src[i];
+        if (c == 0x0A || c == 0x0D ||
+            (i + 2 < len && c == 0xE2 &&
+             (unsigned char)src[i + 1] == 0x80 &&
+             ((unsigned char)src[i + 2] == 0xA8 || (unsigned char)src[i + 2] == 0xA9))) {
+            const char* msg = "Invalid regular expression: line terminator in pattern";
+            Item m = (Item){.item = s2it(heap_create_name(msg, (int)strlen(msg)))};
+            js_throw_syntax_error(m);
+            return ItemNull;
+        }
         if (c == '\\' && i + 1 < len) {
             unsigned char n0 = (unsigned char)src[i + 1];
             if (n0 == 0x0A || n0 == 0x0D ||
@@ -17936,7 +17945,7 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
                 fn_args[ngroups] = (Item){.item = i2it(match_start)};
                 fn_args[ngroups + 1] = str;
                 if (has_groups) fn_args[ngroups + 2] = groups_obj;
-                Item result = js_call_function(replacement_arg, ItemNull, fn_args, fn_argc);
+                Item result = js_call_function(replacement_arg, make_js_undefined(), fn_args, fn_argc);
                 Item result_str = js_to_string(result);
                 String* rs = it2s(result_str);
                 if (rs) strbuf_append_str_n(buf, rs->chars, rs->len);
@@ -17985,7 +17994,7 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
                 fn_args[0] = (Item){.item = s2it(heap_create_name("", 0))};
                 fn_args[1] = (Item){.item = i2it(0)};
                 fn_args[2] = str;
-                Item result = js_call_function(replacement_arg, ItemNull, fn_args, 3);
+                Item result = js_call_function(replacement_arg, make_js_undefined(), fn_args, 3);
                 return js_to_string(result);
             }
             String* repl = it2s(replacement_arg);
@@ -18014,7 +18023,7 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
                     fn_args[0] = (Item){.item = s2it(heap_create_name("", 0))};
                     fn_args[1] = (Item){.item = i2it(pos)};
                     fn_args[2] = str;
-                    Item result = js_call_function(replacement_arg, ItemNull, fn_args, 3);
+                    Item result = js_call_function(replacement_arg, make_js_undefined(), fn_args, 3);
                     Item result_str = js_to_string(result);
                     String* rs = it2s(result_str);
                     if (rs) strbuf_append_str_n(buf, rs->chars, rs->len);
@@ -18037,7 +18046,7 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
             fn_args[0] = (Item){.item = s2it(heap_create_name("", 0))};
             fn_args[1] = (Item){.item = i2it(0)};
             fn_args[2] = str;
-            Item result = js_call_function(replacement_arg, ItemNull, fn_args, 3);
+            Item result = js_call_function(replacement_arg, make_js_undefined(), fn_args, 3);
             Item result_str_val = js_to_string(result);
             String* rs = it2s(result_str_val);
             StrBuf* buf = strbuf_new();
@@ -18123,7 +18132,7 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
         fn_args[0] = search_str_item; // the matched string == search string
         fn_args[1] = (Item){.item = i2it(match_start)};
         fn_args[2] = str;
-        Item result = js_call_function(replacement_arg, ItemNull, fn_args, 3);
+        Item result = js_call_function(replacement_arg, make_js_undefined(), fn_args, 3);
         Item result_str = js_to_string(result);
         String* rs = it2s(result_str);
         if (rs) strbuf_append_str_n(buf, rs->chars, rs->len);

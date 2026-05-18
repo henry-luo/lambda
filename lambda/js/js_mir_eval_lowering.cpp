@@ -983,7 +983,7 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
             }
         }
         if (!skip_expr_form) {
-            const char* prefix = "return (";
+            const char* prefix = inherited_strict ? "\"use strict\";\nreturn (" : "return (";
             const char* suffix = "\n)";
             size_t plen = strlen(prefix), slen2 = strlen(suffix);
             size_t total = plen + code_len + slen2 + 1;
