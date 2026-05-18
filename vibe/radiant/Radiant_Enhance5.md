@@ -55,6 +55,7 @@ Completed:
   - `render_clip.hpp`
   - `render_clip.cpp`
 - Moved CSS clip-shape parsing, clip-shape scratch cleanup, clip-shape-to-path conversion, and per-corner rounded-rect path construction out of `render.cpp`.
+- Added `RenderClipScope` helpers and moved CSS `clip-path` plus overflow rounded-rect clip push/pop logic out of `render_block_view()` into `render_clip.cpp`.
 - Made `clip_shape.h` include its own `string.h` dependency for `memset()` instead of relying on transitive includes from larger render files.
 - Added initial render-state helper files:
   - `render_state.hpp`
@@ -68,6 +69,16 @@ Completed:
   - `render_path.hpp`
   - `render_path.cpp`
 - Moved shared rounded-rect path construction and render-context clip path construction out of background/border feature modules.
+- Added initial render-profiler helper files:
+  - `render_profiler.hpp`
+  - `render_profiler.cpp`
+- Moved render profiling counter storage, reset, log-summary output, stderr profiling output, and `render.stats` event-log JSON emission out of `render.cpp`.
+- Removed direct profiler `fprintf()` calls from `render.cpp`; stderr profiling output now goes through `render_profiler`.
+- Added a `RenderProfiler*` to `RenderContext`, made each top-level render/tile render own its profiler instance, and removed the temporary process-global profiler getter.
+- Replaced `render.cpp` compatibility counter macros with named profiler zones and helper calls:
+  - `render_profiler_increment()`
+  - `render_profiler_add_time()`
+  - `render_profiler_add_sample()`
 - Updated clip-shape rounded-rect path creation to use the shared path builder.
 - Added initial render-composite helper files:
   - `render_composite.hpp`
@@ -80,6 +91,66 @@ Completed:
 - Moved shared effect backdrop save/clear and final opacity/source-over/blend application out of `render_block_view()` into the effects layer.
 - Added `RenderEffectGroup` and moved opacity, filter, and mix-blend effect detection plus filter/backdrop region planning out of `render_block_view()`.
 - Moved CSS filter application dispatch into `render_effect_group_apply_filter()`, so `render_block_view()` no longer directly calls display-list filter commands or software filter fallback.
+- Added `render_effect_group_finish()` so filter, opacity, blend finishing and their profiler samples are owned by `render_effects` instead of `render_block_view()`.
+- Added initial glyph rendering helper files:
+  - `render_glyph.hpp`
+  - `render_glyph.cpp`
+- Moved glyph bitmap compositing, color-glyph scaling/blending, and glyph pixel sampling out of `render.cpp`.
+- Added initial text rendering helper files:
+  - `render_text.hpp`
+  - `render_text.cpp`
+- Moved text-decoration rendering and skip-ink gap collection out of `render_text_view()` into `render_text_decorations()`.
+- Moved inline-fragment background painting and trailing soft-hyphen/ellipsis painting into `render_text`.
+- Moved text-shadow painting, shadow-region blur dispatch, emoji-presentation detection, and profiled glyph-load dispatch into `render_text`.
+- Added initial render-output helper files:
+  - `render_output.hpp`
+  - `render_output.cpp`
+- Moved render-context initialization/cleanup, canvas background resolution, full/selective surface clear, root view-tree paint dispatch, and PNG/JPEG surface-save dispatch into `render_output`.
+- Moved display-list replay planning and render-pool ownership out of `render.cpp` into `render_output_replay_display_list()`, including the single-thread versus tiled replay choice.
+- Added initial display-list bounds helper file:
+  - `display_list_bounds.cpp`
+- Moved the tile replay item-intersection helper behind the public display-list bounds API.
+- Added initial display-list storage helper file:
+  - `display_list_storage.hpp`
+  - `display_list_storage.cpp`
+- Moved display-list item-array allocation/growth, arena-owned stop/dash/clip-shape copying, clip-shape restoration, initialization, cleanup, owned-resource release, and simple list queries out of `display_list.cpp`.
+- Added initial display-list glyph replay helper files:
+  - `display_list_replay_glyph.hpp`
+  - `display_list_replay_glyph.cpp`
+- Moved display-list glyph sampling, transformed glyph replay, grayscale glyph replay, and color-emoji replay out of `display_list.cpp`.
+- Added initial display-list replay state helper files:
+  - `display_list_replay_state.hpp`
+  - `display_list_replay_state.cpp`
+- Moved selective-repaint dirty clip union calculation, vector dirty clip push/pop, and replay-bound tightening helpers out of `display_list.cpp`.
+- Added initial display-list backdrop replay helper files:
+  - `display_list_replay_backdrop.hpp`
+  - `display_list_replay_backdrop.cpp`
+- Moved replay backdrop stack management for CSS opacity and blend-mode out of `display_list.cpp`.
+- Added initial display-list shadow replay helper files:
+  - `display_list_replay_shadow.hpp`
+  - `display_list_replay_shadow.cpp`
+- Moved replay shadow clip save/restore state out of `display_list.cpp`.
+- Added initial display-list effect replay helper files:
+  - `display_list_replay_effects.hpp`
+  - `display_list_replay_effects.cpp`
+- Moved replay opacity, CSS filter dispatch, box blur, inset blur, and outer-shadow replay out of `display_list.cpp`.
+- Added initial display-list raster replay helper files:
+  - `display_list_replay_raster.hpp`
+  - `display_list_replay_raster.cpp`
+- Moved replay of direct surface fills, scaled surface blits, and webview layer placeholders out of `display_list.cpp`.
+- Added initial display-list raster recording helper file:
+  - `display_list_record_raster.cpp`
+- Moved direct surface fill/blit recording and external video/webview placeholder recording out of `display_list.cpp`.
+- Added initial display-list effect recording helper file:
+  - `display_list_record_effects.cpp`
+- Moved opacity, backdrop, blend, filter, blur, shadow-clip, and outer-shadow command recording out of `display_list.cpp`.
+- Added initial display-list vector recording helper file:
+  - `display_list_record_vector.cpp`
+- Moved vector draw command recording, glyph bounds calculation, image/picture recording, and clip-depth command recording out of `display_list.cpp`.
+- Added initial backend capability helpers:
+  - `render_backend_caps.hpp`
+  - `render_backend_caps.cpp`
+- Added immutable `RdtVectorCaps` reporting for the active vector backend, with ThorVG and experimental Core Graphics capability tables.
 - Moved the repeated current-transform lookup into `render_state_current_transform()` and updated background/border drawing paths to use it.
 - Removed stale local `RdtVector*` variables from background and border paths that now draw through the painter/context gateway.
 
@@ -91,7 +162,7 @@ Validation:
 
 The earlier raster-facade gap has been closed: `surface.cpp` now keeps the surface ownership, image loading, and compatibility wrappers, while render-facing fill/blit/scaling behavior lives in `render_raster.cpp`.
 
-This means the practical Phase 1 painter/raster consolidation is now largely complete, and the first shared clip/path, geometry, and render-state helper extractions have started. The next cleanup step is to keep moving repeated path construction and additional state scopes out of feature modules so they stop carrying small variants of the same math and save/restore logic.
+This means the practical Phase 1 painter/raster/effect consolidation is now largely complete, and the first shared clip/path, geometry, render-state, profiler, composite, effects, glyph, text, output, display-list bounds/storage/recording/replay, and backend capability helper extractions are in place. The next cleanup step is to continue splitting display-list replay dispatch and output-target orchestration.
 
 ## Current Structure Assessment
 
@@ -199,9 +270,8 @@ typedef struct RenderClipScope {
     bool active;
 } RenderClipScope;
 
-RenderClipScope render_push_overflow_clip(RenderContext* rdcon, ViewBlock* block,
-                                          float abs_x, float abs_y);
-void render_pop_clip(RenderClipScope* scope);
+RenderClipScope render_clip_push_overflow_scope(RenderContext* rdcon);
+void render_clip_pop_scope(RenderContext* rdcon, RenderClipScope* scope);
 ```
 
 This does not require exceptions or C++ destructors. Plain begin/end structs match the existing C+ style and make cleanup auditable.
@@ -290,11 +360,10 @@ Sketch:
 ```cpp
 typedef struct RenderClipScope RenderClipScope;
 
-RenderClipScope render_clip_push_css_clip_path(RenderContext* rdcon, ViewBlock* block,
-                                               float abs_x, float abs_y);
-RenderClipScope render_clip_push_overflow(RenderContext* rdcon, ViewBlock* block,
-                                          float abs_x, float abs_y);
-void render_clip_pop(RenderClipScope* scope);
+RenderClipScope render_clip_push_css_scope(RenderContext* rdcon, ViewBlock* block,
+                                           float parent_x, float parent_y, float scale);
+RenderClipScope render_clip_push_overflow_scope(RenderContext* rdcon);
+void render_clip_pop_scope(RenderContext* rdcon, RenderClipScope* scope);
 ```
 
 ### 6. Render Effects
@@ -336,7 +405,7 @@ bool render_effect_group_apply_filter(RenderEffectGroup* group,
                                       Bound* clip);
 ```
 
-The remaining cleanup is to collapse the separate filter/opacity/blend finish calls into a tighter begin/end scope once profiling hooks have a home.
+The separate filter/opacity/blend finish calls have now been collapsed into `render_effect_group_finish()`, including profiler sampling for each effect kind.
 
 This module should own:
 
@@ -357,6 +426,13 @@ Create:
 - `radiant/render_text.cpp`
 - `radiant/render_glyph.hpp`
 - `radiant/render_glyph.cpp`
+
+Initial text/glyph extraction is now in place: `render_glyph` owns `draw_glyph()`,
+color glyph scaling/blending, and glyph pixel sampling. `render_text` owns
+inline-fragment backgrounds, trailing soft-hyphen/ellipsis marks,
+text-decoration rendering, skip-ink gap collection, text-shadow painting, and
+emoji-aware glyph loading. `render_text_view()` still owns run walking,
+font/color setup, and selection logic.
 
 Split `render_text_view()` into stages.
 
@@ -397,12 +473,14 @@ Performance opportunities after this split:
 
 ### 8. Render Profiler
 
-Create:
+Created:
 
 - `radiant/render_profiler.hpp`
 - `radiant/render_profiler.cpp`
 
-Move global profiling counters out of `render.cpp` and into a context-owned profiler.
+Profiler ownership is now render-job scoped: top-level render paths create a
+`RenderProfiler`, pass it through `RenderContext`, and use named profiler zones
+instead of compatibility counter macros.
 
 Proposed responsibilities:
 
@@ -411,6 +489,19 @@ Proposed responsibilities:
 - log output through one reporting function
 - optional event-state JSON emission
 - thread-safe aggregation for tiled or parallel replay paths
+
+Completed responsibilities:
+
+- reset and log-summary output
+- stderr counter and replay summaries for `--no-log` profiling
+- `render.stats` event-log JSON emission
+- render-job scoped profiler lifetime through `RenderContext`
+- named increment/add-time/sample helpers for paint-phase counters
+
+Remaining responsibilities:
+
+- scoped timers for the main paint phases
+- thread-safe aggregation for future tiled replay counters
 
 Sketch:
 
@@ -436,7 +527,7 @@ void render_profiler_log(RenderProfiler* profiler);
 void render_profiler_emit_event(RenderProfiler* profiler);
 ```
 
-The current stderr render summary can remain during migration, but it should be emitted by the profiler rather than by ad hoc globals.
+The current stderr render summary remains available during migration and is now emitted by the profiler instead of ad hoc code in `render.cpp`.
 
 ### 9. Display List Cleanup
 
@@ -563,12 +654,12 @@ Radiant should reuse ThorVG and OS native APIs where they give correct CSS seman
 
 ### Backend Capability Layer
 
-Create:
+Created:
 
 - `radiant/render_backend_caps.hpp`
 - `radiant/render_backend_caps.cpp`
 
-The renderer should ask what a backend can do instead of assuming ThorVG or Core Graphics behavior directly.
+The renderer can now ask what a backend can do instead of assuming ThorVG or Core Graphics behavior directly. `RdtVector` exposes immutable backend capability metadata, and `render_backend_caps` provides the render-facing wrapper.
 
 Sketch:
 
@@ -652,8 +743,8 @@ Some operations should remain software-first until backend parity is proven:
 
 - Move `rc_*` helpers into `render_painter`.
 - Move duplicated geometry/path helpers into `render_geometry` and `render_path`.
-- Move profiling globals into `RenderProfiler`.
-- Replace manual clip/transform save/restore in a few narrow call sites with explicit scope structs.
+- Move profiling globals into `RenderProfiler`. Done: counters are owned by render-job scoped profiler instances passed through `RenderContext`.
+- Replace manual clip/transform save/restore in a few narrow call sites with explicit scope structs. Done for transforms, CSS `clip-path`, and overflow rounded clips.
 - Keep visual output unchanged.
 
 Expected benefit: code becomes auditable, and future performance changes become safer.
@@ -750,16 +841,16 @@ Performance comparisons should use release builds, not debug builds.
 
 ## Suggested Implementation Order
 
-1. Extract `render_profiler` from `render.cpp`.
-2. Extract `render_geometry` and replace background/border/effect rect adjustment call sites.
-3. Extract `render_path` and replace duplicated rounded-rect, clip-shape, and border path helpers.
-4. Extract `render_painter`, keeping compatibility wrappers for existing `rc_*` calls.
-5. Add backend capability reporting for the active `RdtVector` implementation.
-6. Add `render_clip` scope helpers and migrate CSS clip-path plus overflow clipping.
-7. Continue `render_effects` by moving profiling hooks out of `render_block_view()` and collapsing effect finish calls into a scoped end helper.
-8. Split text painting into text/glyph/decorations helpers.
-9. Split display-list storage, builder, replay, and bounds.
-10. Unify `render_html_doc()` and `render_html_doc_tiled()` setup through `render_output`.
+1. Extract `render_profiler` from `render.cpp`. Done, including render-job scoped lifetime and named counter helpers.
+2. Extract `render_geometry` and replace background/border/effect rect adjustment call sites. Done for background, border, and common clipped pixel bounds.
+3. Extract `render_path` and replace duplicated rounded-rect, clip-shape, and border path helpers. Done for shared rounded-rect and clip-path creation.
+4. Extract `render_painter`, keeping compatibility wrappers for existing `rc_*` calls. Done for the shared painter gateway and feature-module callers.
+5. Add backend capability reporting for the active `RdtVector` implementation. Done with `RdtVectorCaps` and `render_backend_get_caps()`.
+6. Add `render_clip` scope helpers and migrate CSS clip-path plus overflow clipping. Done.
+7. Continue `render_effects` by moving profiling hooks out of `render_block_view()` and collapsing effect finish calls into a scoped end helper. Done.
+8. Split text painting into text/glyph/decorations helpers. Started with glyph bitmap rendering in `render_glyph` plus inline background, trailing mark, text-decoration, text-shadow, and profiled glyph-load helpers in `render_text`.
+9. Split display-list storage, builder, replay, and bounds. Started with public display-list bounds helpers used by tile replay, a storage/lifecycle module, glyph replay helpers, replay dirty-clip state helpers, backdrop replay helpers, shadow clip replay helpers, effect replay helpers, direct raster replay helpers, direct raster recording helpers, effect recording helpers, and vector recording helpers.
+10. Unify `render_html_doc()` and `render_html_doc_tiled()` setup through `render_output`. Started with shared context lifecycle, background/clear handling, root paint dispatch, display-list replay planning, render-pool ownership, and surface-save dispatch.
 11. Expand `render_walk` into the shared paint walker and migrate raster rendering to it.
 12. Split `render_svg_inline.cpp` into SVG parse/style/defs/geometry/paint modules.
 

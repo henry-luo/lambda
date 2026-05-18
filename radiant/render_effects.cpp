@@ -2,6 +2,7 @@
 
 #include "render_composite.hpp"
 #include "render_filter.hpp"
+#include "render_profiler.hpp"
 
 #include "../lib/log.h"
 
@@ -353,4 +354,40 @@ bool render_effect_group_finish_blend(RenderEffectGroup* group,
                   block ? block->node_name() : "unknown", width, height);
     }
     return true;
+}
+
+bool render_effect_group_finish(RenderEffectGroup* group,
+                                ViewBlock* block,
+                                Bound* clip) {
+    if (!group || !group->context) {
+        return false;
+    }
+
+    RenderContext* rdcon = group->context;
+    bool finished = false;
+
+    if (render_effect_group_has_filter_rect(group)) {
+        double start_ms = render_profiler_now_ms();
+        finished = render_effect_group_apply_filter(group, block, clip) || finished;
+        render_profiler_add_sample(rdcon->profiler, RENDER_PROFILE_FILTER,
+                                   render_profiler_now_ms() - start_ms);
+    }
+
+    finished = render_effect_group_finish_filter_backdrop(group, block) || finished;
+
+    if (render_effect_backdrop_active(&group->opacity_backdrop)) {
+        double start_ms = render_profiler_now_ms();
+        finished = render_effect_group_finish_opacity(group, block) || finished;
+        render_profiler_add_sample(rdcon->profiler, RENDER_PROFILE_OPACITY,
+                                   render_profiler_now_ms() - start_ms);
+    }
+
+    if (render_effect_backdrop_active(&group->mix_blend_backdrop)) {
+        double start_ms = render_profiler_now_ms();
+        finished = render_effect_group_finish_blend(group, block) || finished;
+        render_profiler_add_sample(rdcon->profiler, RENDER_PROFILE_BLEND,
+                                   render_profiler_now_ms() - start_ms);
+    }
+
+    return finished;
 }

@@ -56,6 +56,33 @@ typedef struct RdtVector {
     RdtVectorImpl* impl;
 } RdtVector;
 
+typedef enum {
+    RDT_VECTOR_BACKEND_UNKNOWN = 0,
+    RDT_VECTOR_BACKEND_THORVG,
+    RDT_VECTOR_BACKEND_CORE_GRAPHICS,
+} RdtVectorBackend;
+
+typedef struct RdtVectorCaps {
+    RdtVectorBackend backend;
+    const char* backend_name;
+    bool vector_paths;
+    bool rounded_rects;
+    bool gradients;
+    bool nested_clips;
+    bool image_scaling;
+    bool picture_svg;
+    bool picture_duplication;
+    bool svg_dom_pictures;
+    bool opacity_group;
+    bool blend_modes;
+    bool gaussian_blur;
+    bool color_matrix_filters;
+    bool native_text_runs;
+    bool premultiplied_surface;
+    bool tile_offsets;
+    bool clip_depth_save_restore;
+} RdtVectorCaps;
+
 // ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
@@ -72,6 +99,9 @@ void rdt_vector_set_target(RdtVector* vec, uint32_t* pixels, int w, int h, int s
 // all subsequent draw calls are translated upward by offset_y physical pixels
 void rdt_vector_set_tile_offset_y(RdtVector* vec, float offset_y);
 void rdt_vector_set_tile_offset_x(RdtVector* vec, float offset_x);
+
+// Return immutable capability metadata for the active vector backend.
+const RdtVectorCaps* rdt_vector_get_caps(const RdtVector* vec);
 
 // ---------------------------------------------------------------------------
 // Path construction

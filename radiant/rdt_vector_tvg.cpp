@@ -190,6 +190,27 @@ static Tvg_Paint create_clip_mask(RdtPath* clip_path, const RdtMatrix* transform
 // Lifecycle
 // ============================================================================
 
+static const RdtVectorCaps g_tvg_caps = {
+    RDT_VECTOR_BACKEND_THORVG,
+    "ThorVG",
+    true,   // vector_paths
+    true,   // rounded_rects
+    true,   // gradients
+    true,   // nested_clips
+    true,   // image_scaling
+    true,   // picture_svg
+    true,   // picture_duplication
+    true,   // svg_dom_pictures
+    false,  // opacity_group
+    false,  // blend_modes
+    false,  // gaussian_blur
+    false,  // color_matrix_filters
+    false,  // native_text_runs
+    false,  // premultiplied_surface
+    true,   // tile_offsets
+    true,   // clip_depth_save_restore
+};
+
 void rdt_vector_init(RdtVector* vec, uint32_t* pixels, int w, int h, int stride) {
     RdtVectorImpl* impl = (RdtVectorImpl*)mem_calloc(1, sizeof(RdtVectorImpl), MEM_CAT_RENDER);
     impl->canvas = tvg_swcanvas_create(TVG_ENGINE_OPTION_DEFAULT);
@@ -234,6 +255,11 @@ void rdt_vector_set_tile_offset_y(RdtVector* vec, float offset_y) {
 void rdt_vector_set_tile_offset_x(RdtVector* vec, float offset_x) {
     if (!vec || !vec->impl) return;
     vec->impl->tile_offset_x = offset_x;
+}
+
+const RdtVectorCaps* rdt_vector_get_caps(const RdtVector* vec) {
+    (void)vec;
+    return &g_tvg_caps;
 }
 
 // ============================================================================
