@@ -66,3 +66,10 @@ void render_state_pop_transform(RenderTransformScope* scope) {
     scope->context->has_transform = scope->previous_has_transform;
     scope->active = false;
 }
+
+const RdtMatrix* render_state_current_transform(RenderContext* rdcon) {
+    if (!rdcon || !rdcon->has_transform) {
+        return nullptr;
+    }
+    return &rdcon->transform;
+}

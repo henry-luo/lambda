@@ -1,4 +1,5 @@
 #include "render_clip.hpp"
+#include "render_path.hpp"
 
 #include <math.h>
 #include <string.h>
@@ -7,42 +8,22 @@
 RdtPath* render_clip_create_rounded_rect_path(float x, float y, float w, float h,
                                               float r_tl, float r_tr,
                                               float r_br, float r_bl) {
-    RdtPath* p = rdt_path_new();
     float max_rx = w * 0.5f, max_ry = h * 0.5f;
     if (r_tl > max_rx) r_tl = max_rx; if (r_tl > max_ry) r_tl = max_ry;
     if (r_tr > max_rx) r_tr = max_rx; if (r_tr > max_ry) r_tr = max_ry;
     if (r_br > max_rx) r_br = max_rx; if (r_br > max_ry) r_br = max_ry;
     if (r_bl > max_rx) r_bl = max_rx; if (r_bl > max_ry) r_bl = max_ry;
-
-    const float k = 0.5522847f;
-
-    rdt_path_move_to(p, x + r_tl, y);
-    rdt_path_line_to(p, x + w - r_tr, y);
-    if (r_tr > 0) {
-        rdt_path_cubic_to(p, x + w - r_tr + r_tr * k, y,
-                             x + w, y + r_tr - r_tr * k,
-                             x + w, y + r_tr);
-    }
-    rdt_path_line_to(p, x + w, y + h - r_br);
-    if (r_br > 0) {
-        rdt_path_cubic_to(p, x + w, y + h - r_br + r_br * k,
-                             x + w - r_br + r_br * k, y + h,
-                             x + w - r_br, y + h);
-    }
-    rdt_path_line_to(p, x + r_bl, y + h);
-    if (r_bl > 0) {
-        rdt_path_cubic_to(p, x + r_bl - r_bl * k, y + h,
-                             x, y + h - r_bl + r_bl * k,
-                             x, y + h - r_bl);
-    }
-    rdt_path_line_to(p, x, y + r_tl);
-    if (r_tl > 0) {
-        rdt_path_cubic_to(p, x, y + r_tl - r_tl * k,
-                             x + r_tl - r_tl * k, y,
-                             x + r_tl, y);
-    }
-    rdt_path_close(p);
-    return p;
+    Corner radius = {};
+    radius.top_left = r_tl;
+    radius.top_right = r_tr;
+    radius.bottom_right = r_br;
+    radius.bottom_left = r_bl;
+    radius.top_left_y = r_tl;
+    radius.top_right_y = r_tr;
+    radius.bottom_right_y = r_br;
+    radius.bottom_left_y = r_bl;
+    Rect rect = {x, y, w, h};
+    return render_path_create_rounded_rect(rect, &radius);
 }
 
 RdtPath* render_clip_create_shape_path(ClipShape* shape) {

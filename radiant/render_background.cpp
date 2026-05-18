@@ -1,5 +1,9 @@
 #include "render_background.hpp"
 #include "render_border.hpp"
+#include "render_composite.hpp"
+#include "render_geometry.hpp"
+#include "render_path.hpp"
+#include "render_state.hpp"
 #include "display_list.h"
 #include "clip_shape.h"
 #include "../lib/log.h"
@@ -8,167 +12,9 @@
 #include "../lambda/input/css/css_value.hpp"
 #include <math.h>
 
-// --- CSS Blend Mode Functions (CSS Compositing and Blending Level 1) ---
-// All operate on normalized [0,1] channel values.
-static inline float blend_multiply(float Cb, float Cs) { return Cb * Cs; }
-static inline float blend_screen(float Cb, float Cs) { return Cb + Cs - Cb * Cs; }
-static inline float blend_overlay(float Cb, float Cs) {
-    return Cb <= 0.5f ? 2.0f * Cb * Cs : 1.0f - 2.0f * (1.0f - Cb) * (1.0f - Cs);
-}
-static inline float blend_darken(float Cb, float Cs) { return Cb < Cs ? Cb : Cs; }
-static inline float blend_lighten(float Cb, float Cs) { return Cb > Cs ? Cb : Cs; }
-static inline float blend_color_dodge(float Cb, float Cs) {
-    if (Cb <= 0.0f) return 0.0f;
-    if (Cs >= 1.0f) return 1.0f;
-    float v = Cb / (1.0f - Cs);
-    return v < 1.0f ? v : 1.0f;
-}
-static inline float blend_color_burn(float Cb, float Cs) {
-    if (Cb >= 1.0f) return 1.0f;
-    if (Cs <= 0.0f) return 0.0f;
-    float v = 1.0f - (1.0f - Cb) / Cs;
-    return v > 0.0f ? v : 0.0f;
-}
-static inline float blend_hard_light(float Cb, float Cs) {
-    return Cs <= 0.5f ? 2.0f * Cb * Cs : 1.0f - 2.0f * (1.0f - Cb) * (1.0f - Cs);
-}
-static inline float blend_soft_light(float Cb, float Cs) {
-    if (Cs <= 0.5f) return Cb - (1.0f - 2.0f * Cs) * Cb * (1.0f - Cb);
-    float D = Cb <= 0.25f ? ((16.0f * Cb - 12.0f) * Cb + 4.0f) * Cb : sqrtf(Cb);
-    return Cb + (2.0f * Cs - 1.0f) * (D - Cb);
-}
-static inline float blend_difference(float Cb, float Cs) { return fabsf(Cb - Cs); }
-static inline float blend_exclusion(float Cb, float Cs) { return Cb + Cs - 2.0f * Cb * Cs; }
-
-// Apply a blend mode to a single channel (normalized [0,255] byte values)
-static inline uint8_t apply_blend_channel(uint8_t Cb_byte, uint8_t Cs_byte, CssEnum mode) {
-    float Cb = Cb_byte / 255.0f;
-    float Cs = Cs_byte / 255.0f;
-    float result;
-    switch (mode) {
-        case CSS_VALUE_MULTIPLY:    result = blend_multiply(Cb, Cs); break;
-        case CSS_VALUE_SCREEN:      result = blend_screen(Cb, Cs); break;
-        case CSS_VALUE_OVERLAY:     result = blend_overlay(Cb, Cs); break;
-        case CSS_VALUE_DARKEN:      result = blend_darken(Cb, Cs); break;
-        case CSS_VALUE_LIGHTEN:     result = blend_lighten(Cb, Cs); break;
-        case CSS_VALUE_COLOR_DODGE: result = blend_color_dodge(Cb, Cs); break;
-        case CSS_VALUE_COLOR_BURN:  result = blend_color_burn(Cb, Cs); break;
-        case CSS_VALUE_HARD_LIGHT:  result = blend_hard_light(Cb, Cs); break;
-        case CSS_VALUE_SOFT_LIGHT:  result = blend_soft_light(Cb, Cs); break;
-        case CSS_VALUE_DIFFERENCE:  result = blend_difference(Cb, Cs); break;
-        case CSS_VALUE_EXCLUSION:   result = blend_exclusion(Cb, Cs); break;
-        default:                    result = Cs; break; // normal
-    }
-    int v = (int)(result * 255.0f + 0.5f);
-    return (uint8_t)(v < 0 ? 0 : (v > 255 ? 255 : v));
-}
-
-// Composite a source pixel onto a backdrop pixel using a CSS blend mode.
-// pixel format: ABGR (A=bits24-31, B=bits16-23, G=bits8-15, R=bits0-7)
-uint32_t composite_blend_pixel(uint32_t backdrop, uint32_t source, CssEnum blend_mode) {
-    uint8_t sa = (source >> 24) & 0xFF;
-    if (sa == 0) return backdrop;
-    uint8_t ba = (backdrop >> 24) & 0xFF;
-    if (ba == 0) return source;
-
-    uint8_t sr = source & 0xFF, sg = (source >> 8) & 0xFF, sb = (source >> 16) & 0xFF;
-    uint8_t br = backdrop & 0xFF, bg = (backdrop >> 8) & 0xFF, bb = (backdrop >> 16) & 0xFF;
-
-    // CSS Compositing spec: Co = (1-αb)·Cs + (1-αs)·Cb + αb·αs·B(Cb,Cs)
-    // For fully opaque pixels (common case): Co = B(Cb, Cs)
-    if (sa == 255 && ba == 255) {
-        uint8_t rr = apply_blend_channel(br, sr, blend_mode);
-        uint8_t rg = apply_blend_channel(bg, sg, blend_mode);
-        uint8_t rb = apply_blend_channel(bb, sb, blend_mode);
-        return (255u << 24) | ((uint32_t)rb << 16) | ((uint32_t)rg << 8) | rr;
-    }
-
-    // General case with alpha
-    float fa = ba / 255.0f, fsa = sa / 255.0f;
-    float ra = fa + fsa - fa * fsa; // result alpha
-    if (ra < 0.001f) return 0;
-
-    float p = (1.0f - fa) * fsa;
-    float q = (1.0f - fsa) * fa;
-    float t = fa * fsa;
-    auto blendch = [&](uint8_t Cb_b, uint8_t Cs_b) -> uint8_t {
-        float Bb = apply_blend_channel(Cb_b, Cs_b, blend_mode) / 255.0f;
-        float Co = (p * (Cs_b / 255.0f) + q * (Cb_b / 255.0f) + t * Bb) / ra;
-        int v = (int)(Co * 255.0f + 0.5f);
-        return (uint8_t)(v < 0 ? 0 : (v > 255 ? 255 : v));
-    };
-    uint8_t rr = blendch(br, sr);
-    uint8_t rg_ch = blendch(bg, sg);
-    uint8_t rb = blendch(bb, sb);
-    uint8_t new_a = (uint8_t)(ra * 255.0f + 0.5f);
-    return ((uint32_t)new_a << 24) | ((uint32_t)rb << 16) | ((uint32_t)rg_ch << 8) | rr;
-}
-
-// Get transform pointer for rdt_* calls (NULL if identity)
-static const RdtMatrix* get_transform(RenderContext* rdcon) {
-    if (!rdcon->has_transform) return nullptr;
-    return &rdcon->transform;
-}
-
-// Create a clip path from the render context's clip region
-static RdtPath* create_bg_clip_path(RenderContext* rdcon) {
-    if (rdcon->block.has_clip_radius) {
-        float clip_x = rdcon->block.clip.left;
-        float clip_y = rdcon->block.clip.top;
-        float clip_w = rdcon->block.clip.right - rdcon->block.clip.left;
-        float clip_h = rdcon->block.clip.bottom - rdcon->block.clip.top;
-        Corner clip_radius = rdcon->block.clip_radius;
-        constrain_corner_radii(&clip_radius, clip_w, clip_h);
-        Rect clip_rect = {clip_x, clip_y, clip_w, clip_h};
-        log_debug("[CLIP] Using rounded clip: (%.0f,%.0f) %.0fx%.0f",
-                  clip_x, clip_y, clip_w, clip_h);
-        return build_rounded_rect_path(clip_rect, &clip_radius);
-    }
-    RdtPath* clip = rdt_path_new();
-    rdt_path_add_rect(clip, rdcon->block.clip.left, rdcon->block.clip.top,
-        rdcon->block.clip.right - rdcon->block.clip.left,
-        rdcon->block.clip.bottom - rdcon->block.clip.top, 0, 0);
-    log_debug("[CLIP SHAPE] clip_rect created: clip=%.0f,%.0f to %.0f,%.0f has_radius=%d", 
-              rdcon->block.clip.left, rdcon->block.clip.top, 
-              rdcon->block.clip.right, rdcon->block.clip.bottom,
-              rdcon->block.has_clip_radius);
-    return clip;
-}
-
 /**
  * Main background rendering dispatch
  */
-
-/**
- * Shrink a border-box rect to the padding-box or content-box area, in physical pixels.
- * Used to implement background-origin and background-clip.
- *   CSS_VALUE_BORDER_BOX  → rect unchanged
- *   CSS_VALUE_PADDING_BOX → shrink by border widths
- *   CSS_VALUE_CONTENT_BOX → shrink by border widths + padding
- */
-static Rect compute_adjusted_rect(Rect rect, CssEnum box, float s,
-                                   BorderProp* border, Spacing* padding) {
-    Rect r = rect;
-    if (box == CSS_VALUE_PADDING_BOX || box == CSS_VALUE_CONTENT_BOX) {
-        float bwt = border ? border->width.top * s : 0.0f;
-        float bwr = border ? border->width.right * s : 0.0f;
-        float bwb = border ? border->width.bottom * s : 0.0f;
-        float bwl = border ? border->width.left * s : 0.0f;
-        r.x += bwl;  r.y += bwt;
-        r.width  -= bwl + bwr;
-        r.height -= bwt + bwb;
-    }
-    if (box == CSS_VALUE_CONTENT_BOX && padding) {
-        float pt = padding->top * s,  pr = padding->right * s;
-        float pb = padding->bottom * s, pl = padding->left * s;
-        r.x += pl;  r.y += pt;
-        r.width  -= pl + pr;
-        r.height -= pt + pb;
-    }
-    if (r.width  < 0) r.width  = 0;
-    if (r.height < 0) r.height = 0;
-    return r;
-}
 
 void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     if (!view->bound || !view->bound->background) return;
@@ -186,12 +32,12 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     // Determine positioning area (bg-origin, default: padding-box)
     // Controls where background-position and background-size are calculated relative to.
     CssEnum origin = bg->bg_origin ? bg->bg_origin : CSS_VALUE_PADDING_BOX;
-    Rect pos_rect = compute_adjusted_rect(rect, origin, s, border, padding);
+    Rect pos_rect = render_geometry_adjust_box_rect(rect, origin, s, border, padding);
 
     // Determine paint area (bg-clip, default: border-box)
     // Controls where the background is visually clipped.
     CssEnum clip_box = bg->bg_clip ? bg->bg_clip : CSS_VALUE_BORDER_BOX;
-    Rect paint_rect = compute_adjusted_rect(rect, clip_box, s, border, padding);
+    Rect paint_rect = render_geometry_adjust_box_rect(rect, clip_box, s, border, padding);
 
     // Narrow the active clip to the paint area (intersect with existing viewport clip).
     // Skip clip tightening when a CSS transform is active — the transform displaces
@@ -199,10 +45,7 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     // paint area would clip the transformed content (e.g. translateX causes half-circles).
     Bound orig_clip = rdcon->block.clip;
     if (!rdcon->has_transform) {
-        rdcon->block.clip.left   = max(orig_clip.left,   paint_rect.x);
-        rdcon->block.clip.top    = max(orig_clip.top,    paint_rect.y);
-        rdcon->block.clip.right  = min(orig_clip.right,  paint_rect.x + paint_rect.width);
-        rdcon->block.clip.bottom = min(orig_clip.bottom, paint_rect.y + paint_rect.height);
+        rdcon->block.clip = render_geometry_intersect_bound_rect(orig_clip, paint_rect);
     }
 
     // Render base color first (if any), clipped to paint area
@@ -225,36 +68,20 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     uint32_t* saved_pixels = nullptr;
     int blend_x0 = 0, blend_y0 = 0, blend_w = 0, blend_h = 0;
     if (has_blend && has_upper_layers) {
-        blend_x0 = max(0, (int)rdcon->block.clip.left);
-        blend_y0 = max(0, (int)rdcon->block.clip.top);
-        int x1 = 0, y1 = 0;
-        if (surface) {
-            x1 = min(surface->width, (int)rdcon->block.clip.right);
-            y1 = min(surface->height, (int)rdcon->block.clip.bottom);
-        } else {
-            x1 = (int)rdcon->block.clip.right;
-            y1 = (int)rdcon->block.clip.bottom;
-        }
-        blend_w = x1 - blend_x0;
-        blend_h = y1 - blend_y0;
-        if (blend_w > 0 && blend_h > 0) {
+        RenderPixelBounds blend_bounds = render_geometry_clip_to_pixel_bounds(rdcon->block.clip, surface);
+        blend_x0 = blend_bounds.x;
+        blend_y0 = blend_bounds.y;
+        blend_w = blend_bounds.width;
+        blend_h = blend_bounds.height;
+        if (!render_geometry_pixel_bounds_empty(blend_bounds)) {
             if (rdcon->dl) {
                 // record save/apply pair — replay handles pixel ops
                 dl_save_backdrop(rdcon->dl, blend_x0, blend_y0, blend_w, blend_h);
             } else if (surface && surface->pixels) {
                 saved_pixels = (uint32_t*)mem_alloc((size_t)blend_w * blend_h * sizeof(uint32_t), MEM_CAT_RENDER);
                 if (saved_pixels) {
-                    uint32_t* px = (uint32_t*)surface->pixels;
-                    int pitch = surface->pitch / 4;
-                    for (int row = 0; row < blend_h; row++) {
-                        memcpy(saved_pixels + row * blend_w,
-                               px + (blend_y0 + row) * pitch + blend_x0,
-                               blend_w * sizeof(uint32_t));
-                    }
-                    // Clear the region to transparent so upper layers render cleanly
-                    for (int row = 0; row < blend_h; row++) {
-                        memset(px + (blend_y0 + row) * pitch + blend_x0, 0, blend_w * sizeof(uint32_t));
-                    }
+                    render_composite_copy_backdrop(surface, saved_pixels,
+                        blend_x0, blend_y0, blend_w, blend_h, true);
                 }
             }
         }
@@ -301,16 +128,8 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
             log_debug("[BLEND] Recorded DL background-blend-mode=%d for %dx%d region",
                       bg->blend_mode, blend_w, blend_h);
         } else if (saved_pixels) {
-            uint32_t* px = (uint32_t*)surface->pixels;
-            int pitch = surface->pitch / 4;
-            for (int row = 0; row < blend_h; row++) {
-                for (int col = 0; col < blend_w; col++) {
-                    uint32_t backdrop = saved_pixels[row * blend_w + col];
-                    uint32_t source = px[(blend_y0 + row) * pitch + (blend_x0 + col)];
-                    px[(blend_y0 + row) * pitch + (blend_x0 + col)] =
-                        composite_blend_pixel(backdrop, source, bg->blend_mode);
-                }
-            }
+            render_composite_apply_blend(surface, saved_pixels,
+                blend_x0, blend_y0, blend_w, blend_h, bg->blend_mode);
             mem_free(saved_pixels);
             log_debug("[BLEND] Applied background-blend-mode to %dx%d region", blend_w, blend_h);
         }
@@ -335,18 +154,18 @@ void render_background_color(RenderContext* rdcon, ViewBlock* view, Color color,
     bool needs_rounded_clip = rdcon->block.has_clip_radius;
 
     if (has_radius || needs_rounded_clip || rdcon->has_transform || rdcon->clip_shape_depth > 0) {
-        const RdtMatrix* xform = get_transform(rdcon);
+        const RdtMatrix* xform = render_state_current_transform(rdcon);
 
         RdtPath* p = nullptr;
         if (has_radius && border) {
             constrain_border_radii(border, rect.width, rect.height);
-            p = build_rounded_rect_path(rect, &border->radius);
+            p = render_path_create_rounded_rect(rect, &border->radius);
         } else {
             p = rdt_path_new();
             rdt_path_add_rect(p, rect.x, rect.y, rect.width, rect.height, 0, 0);
         }
 
-        RdtPath* clip = create_bg_clip_path(rdcon);
+        RdtPath* clip = render_path_create_clip_path(rdcon);
         rc_push_clip(rdcon, clip, NULL);
         rc_fill_path(rdcon, p, color, RDT_FILL_WINDING, xform);
         rc_pop_clip(rdcon);
@@ -407,8 +226,7 @@ void render_linear_gradient(RenderContext* rdcon, ViewBlock* view, LinearGradien
     log_debug("[GRADIENT] render_linear_gradient <%s> rect=(%.0f,%.0f,%.0f,%.0f)",
               view->node_name(), rect.x, rect.y, rect.width, rect.height);
 
-    RdtVector* vec = &rdcon->vec;
-    const RdtMatrix* xform = get_transform(rdcon);
+    const RdtMatrix* xform = render_state_current_transform(rdcon);
 
     // Build shape path
     RdtPath* p = rdt_path_new();
@@ -422,7 +240,7 @@ void render_linear_gradient(RenderContext* rdcon, ViewBlock* view, LinearGradien
     if (has_radius) {
         constrain_border_radii(border, rect.width, rect.height);
         rdt_path_free(p);
-        p = build_rounded_rect_path(rect, &border->radius);
+        p = render_path_create_rounded_rect(rect, &border->radius);
     } else {
         rdt_path_add_rect(p, rect.x, rect.y, rect.width, rect.height, 0, 0);
     }
@@ -489,7 +307,7 @@ void render_linear_gradient(RenderContext* rdcon, ViewBlock* view, LinearGradien
         }
     }
 
-    RdtPath* clip = create_bg_clip_path(rdcon);
+    RdtPath* clip = render_path_create_clip_path(rdcon);
     rc_push_clip(rdcon, clip, NULL);
     rc_fill_linear_gradient(rdcon, p, x1, y1, x2, y2, final_stops, final_stop_count,
                              RDT_FILL_WINDING, xform);
@@ -547,8 +365,7 @@ void render_radial_gradient(RenderContext* rdcon, ViewBlock* view, RadialGradien
         return;
     }
 
-    RdtVector* vec = &rdcon->vec;
-    const RdtMatrix* xform = get_transform(rdcon);
+    const RdtMatrix* xform = render_state_current_transform(rdcon);
 
     RdtPath* p = rdt_path_new();
     bool has_radius = false;
@@ -561,7 +378,7 @@ void render_radial_gradient(RenderContext* rdcon, ViewBlock* view, RadialGradien
     if (has_radius) {
         constrain_border_radii(border, rect.width, rect.height);
         rdt_path_free(p);
-        p = build_rounded_rect_path(rect, &border->radius);
+        p = render_path_create_rounded_rect(rect, &border->radius);
     } else {
         rdt_path_add_rect(p, rect.x, rect.y, rect.width, rect.height, 0, 0);
     }
@@ -589,7 +406,7 @@ void render_radial_gradient(RenderContext* rdcon, ViewBlock* view, RadialGradien
                   i, stops[i].offset, stops[i].r, stops[i].g, stops[i].b, stops[i].a);
     }
 
-    RdtPath* clip = create_bg_clip_path(rdcon);
+    RdtPath* clip = render_path_create_clip_path(rdcon);
     rc_push_clip(rdcon, clip, NULL);
     rc_fill_radial_gradient(rdcon, p, cx, cy, radius, stops, gradient->stop_count,
                              RDT_FILL_WINDING, xform);
@@ -680,7 +497,7 @@ void render_conic_gradient(RenderContext* rdcon, ViewBlock* view, ConicGradient*
     if (view->bound && view->bound->border && corner_has_radius(&view->bound->border->radius)) {
         Corner radius = view->bound->border->radius;
         constrain_corner_radii(&radius, rect.width, rect.height);
-        RdtPath* clip_path = build_rounded_rect_path(rect, &radius);
+        RdtPath* clip_path = render_path_create_rounded_rect(rect, &radius);
         rc_push_clip(rdcon, clip_path, NULL);
         pushed_clip = true;
     }
@@ -1219,7 +1036,7 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         r_bl = border->radius.bottom_left * sc;
     }
 
-    const RdtMatrix* xform = get_transform(rdcon);
+    const RdtMatrix* xform = render_state_current_transform(rdcon);
 
     // Render outer shadows first (in reverse order - last shadow is bottommost)
     for (int i = shadow_count - 1; i >= 0; i--) {
@@ -1305,46 +1122,24 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
             }
 
             // Build shadow path
-            RdtPath* shadow_path = rdt_path_new();
+            Rect shadow_rect = {shadow_x, shadow_y, shadow_w, shadow_h};
+            RdtPath* shadow_path = nullptr;
             if (sr_tl > 0 || sr_tr > 0 || sr_br > 0 || sr_bl > 0) {
-                float x = shadow_x, y = shadow_y, w = shadow_w, h = shadow_h;
-                #define KAPPA_SHADOW 0.5522847498f
-                rdt_path_move_to(shadow_path, x + sr_tl, y);
-                rdt_path_line_to(shadow_path, x + w - sr_tr, y);
-                if (sr_tr > 0) {
-                    rdt_path_cubic_to(shadow_path,
-                        x + w - sr_tr + sr_tr * KAPPA_SHADOW, y,
-                        x + w, y + sr_tr - sr_tr * KAPPA_SHADOW,
-                        x + w, y + sr_tr);
-                }
-                rdt_path_line_to(shadow_path, x + w, y + h - sr_br);
-                if (sr_br > 0) {
-                    rdt_path_cubic_to(shadow_path,
-                        x + w, y + h - sr_br + sr_br * KAPPA_SHADOW,
-                        x + w - sr_br + sr_br * KAPPA_SHADOW, y + h,
-                        x + w - sr_br, y + h);
-                }
-                rdt_path_line_to(shadow_path, x + sr_bl, y + h);
-                if (sr_bl > 0) {
-                    rdt_path_cubic_to(shadow_path,
-                        x + sr_bl - sr_bl * KAPPA_SHADOW, y + h,
-                        x, y + h - sr_bl + sr_bl * KAPPA_SHADOW,
-                        x, y + h - sr_bl);
-                }
-                rdt_path_line_to(shadow_path, x, y + sr_tl);
-                if (sr_tl > 0) {
-                    rdt_path_cubic_to(shadow_path,
-                        x, y + sr_tl - sr_tl * KAPPA_SHADOW,
-                        x + sr_tl - sr_tl * KAPPA_SHADOW, y,
-                        x + sr_tl, y);
-                }
-                rdt_path_close(shadow_path);
-                #undef KAPPA_SHADOW
+                Corner shadow_radius = {};
+                shadow_radius.top_left = sr_tl;
+                shadow_radius.top_right = sr_tr;
+                shadow_radius.bottom_right = sr_br;
+                shadow_radius.bottom_left = sr_bl;
+                shadow_radius.top_left_y = sr_tl;
+                shadow_radius.top_right_y = sr_tr;
+                shadow_radius.bottom_right_y = sr_br;
+                shadow_radius.bottom_left_y = sr_bl;
+                shadow_path = render_path_create_rounded_rect(shadow_rect, &shadow_radius);
             } else {
-                rdt_path_add_rect(shadow_path, shadow_x, shadow_y, shadow_w, shadow_h, 0, 0);
+                shadow_path = render_path_create_rounded_rect(shadow_rect, nullptr);
             }
 
-            RdtPath* clip_path = create_bg_clip_path(rdcon);
+            RdtPath* clip_path = render_path_create_clip_path(rdcon);
             rc_push_clip(rdcon, clip_path, xform);
             rc_fill_path(rdcon, shadow_path, s->color, RDT_FILL_WINDING, xform);
             rc_pop_clip(rdcon);
@@ -1409,7 +1204,7 @@ void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         r_bl = view->bound->border->radius.bottom_left * sc;
     }
 
-    const RdtMatrix* xform = get_transform(rdcon);
+    const RdtMatrix* xform = render_state_current_transform(rdcon);
 
     // Render inset shadows in reverse order (last specified = bottommost)
     for (int i = shadow_count - 1; i >= 0; i--) {
@@ -1709,7 +1504,7 @@ static void render_bg_tile_tvg(RenderContext* rdcon, ImageSurface* img, Rect* ti
     if (!pic) return;
 
     // Clip to block clip region (clip path is already in absolute coordinates, no transform needed)
-    RdtPath* clip_path = create_bg_clip_path(rdcon);
+    RdtPath* clip_path = render_path_create_clip_path(rdcon);
     rc_push_clip(rdcon, clip_path, NULL);
     render_painter_draw_picture_rect(rdcon, pic, tile_rect, NULL, 255);
     rc_pop_clip(rdcon);
