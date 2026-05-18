@@ -21,6 +21,19 @@ int js_dynamic_func_counter = 0;
 // Set before execution, cleared after normal cleanup in transpile_js_to_mir_core.
 MIR_context_t g_active_mir_ctx = NULL;
 
+static bool jm_is_direct_program_class_decl(JsProgramNode* program, JsClassNode* class_node) {
+    if (!program || !class_node) return false;
+    for (JsAstNode* stmt = program->body; stmt; stmt = stmt->next) {
+        JsAstNode* actual = stmt;
+        if (stmt->node_type == JS_AST_NODE_EXPORT_DECLARATION) {
+            JsExportNode* exp = (JsExportNode*)stmt;
+            if (exp->declaration) actual = exp->declaration;
+        }
+        if (actual == (JsAstNode*)class_node) return true;
+    }
+    return false;
+}
+
 static MIR_reg_t jm_emit_class_object_for_entry(JsMirTranspiler* mt, JsClassEntry* ce) {
     if (!mt || !ce || !ce->name) return 0;
     JsIdentifierNode tmp_id;
@@ -436,6 +449,7 @@ static void jm_collect_enclosing_lexicals_for_target(JsAstNode* node,
     case JS_AST_NODE_SWITCH_STATEMENT: {
         JsSwitchNode* switch_node = (JsSwitchNode*)node;
         jm_collect_enclosing_lexicals_for_target(switch_node->discriminant, target, names);
+        jm_collect_switch_lexical_names(node, names);
         for (JsAstNode* c = switch_node->cases; c; c = c->next)
             jm_collect_enclosing_lexicals_for_target(c, target, names);
         break;
@@ -1793,7 +1807,10 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             mt->preamble_entry_count, mt->preamble_var_count);
     }
 
-    // First pass: collect simple literal constants (const declarations only)
+    // First pass: collect simple literal constants (const declarations only).
+    // Top-level const declarations are lexical bindings with TDZ and live-binding
+    // semantics, so they must stay in module var slots rather than being folded
+    // into immediate constants.
     {
         JsAstNode* s = program->body;
         while (s) {
@@ -1804,57 +1821,8 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 if (exp->declaration) actual = exp->declaration;
             }
             if (actual->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
-                JsVariableDeclarationNode* v = (JsVariableDeclarationNode*)actual;
-                // Only const declarations can be inlined as compile-time constants.
-                // let/var are mutable and will be registered as module vars in third pass.
-                if (v->kind != JS_VAR_CONST) { s = s->next; continue; }
-                JsAstNode* d = v->declarations;
-                while (d) {
-                    if (d->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
-                        JsVariableDeclaratorNode* vd = (JsVariableDeclaratorNode*)d;
-                        if (vd->id && vd->id->node_type == JS_AST_NODE_IDENTIFIER && vd->init) {
-                            JsIdentifierNode* vid = (JsIdentifierNode*)vd->id;
-                            if (vd->init->node_type == JS_AST_NODE_LITERAL) {
-                                JsLiteralNode* lit = (JsLiteralNode*)vd->init;
-                                JsModuleConstEntry mce;
-                                memset(&mce, 0, sizeof(mce));
-                                snprintf(mce.name, sizeof(mce.name), "_js_%.*s",
-                                    (int)vid->name->len, vid->name->chars);
-                                mce.var_kind = JS_VAR_CONST;
-                                if (lit->literal_type == JS_LITERAL_NUMBER) {
-                                    double dv = lit->value.number_value;
-                                    if (dv == (int64_t)dv && dv >= -1e15 && dv <= 1e15) {
-                                        mce.is_int = true;
-                                        mce.const_type = MCONST_INT;
-                                        mce.int_val = (int64_t)dv;
-                                    } else {
-                                        mce.is_int = false;
-                                        mce.const_type = MCONST_FLOAT;
-                                        mce.float_val = dv;
-                                    }
-                                    hashmap_set(mt->module_consts, &mce);
-                                    log_debug("js-mir: module const '%s' = %s",
-                                        mce.name, mce.is_int ? "int" : "float");
-                                } else if (lit->literal_type == JS_LITERAL_NULL) {
-                                    mce.const_type = MCONST_NULL;
-                                    hashmap_set(mt->module_consts, &mce);
-                                    log_debug("js-mir: module const '%s' = null", mce.name);
-                                } else if (lit->literal_type == JS_LITERAL_UNDEFINED) {
-                                    mce.const_type = MCONST_UNDEFINED;
-                                    hashmap_set(mt->module_consts, &mce);
-                                    log_debug("js-mir: module const '%s' = undefined", mce.name);
-                                } else if (lit->literal_type == JS_LITERAL_BOOLEAN) {
-                                    mce.const_type = MCONST_BOOL;
-                                    mce.int_val = lit->value.boolean_value ? 1 : 0;
-                                    hashmap_set(mt->module_consts, &mce);
-                                    log_debug("js-mir: module const '%s' = %s", mce.name,
-                                        lit->value.boolean_value ? "true" : "false");
-                                }
-                            }
-                        }
-                    }
-                    d = d->next;
-                }
+                s = s->next;
+                continue;
             }
             s = s->next;
         }
@@ -1873,47 +1841,8 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 if (exp->declaration) actual = exp->declaration;
             }
             if (actual->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
-                JsVariableDeclarationNode* v = (JsVariableDeclarationNode*)actual;
-                if (v->kind != JS_VAR_CONST) { s = s->next; continue; }
-                JsAstNode* d = v->declarations;
-                while (d) {
-                    if (d->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
-                        JsVariableDeclaratorNode* vd = (JsVariableDeclaratorNode*)d;
-                        if (vd->id && vd->id->node_type == JS_AST_NODE_IDENTIFIER && vd->init) {
-                            JsIdentifierNode* vid = (JsIdentifierNode*)vd->id;
-                            char vname[128];
-                            snprintf(vname, sizeof(vname), "_js_%.*s",
-                                (int)vid->name->len, vid->name->chars);
-                            // Skip if already in module_consts
-                            JsModuleConstEntry lookup;
-                            snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
-                            if (hashmap_get(mt->module_consts, &lookup)) {
-                                d = d->next;
-                                continue;
-                            }
-                            // Try recursive constant evaluation
-                            double result;
-                            if (jm_try_eval_const_expr(mt, vd->init, &result)) {
-                                JsModuleConstEntry mce;
-                                memset(&mce, 0, sizeof(mce));
-                                snprintf(mce.name, sizeof(mce.name), "%s", vname);
-                                if (result == (int64_t)result && result >= -1e15 && result <= 1e15
-                                    && !(result == 0.0 && signbit(result))) {
-                                    mce.is_int = true;
-                                    mce.const_type = MCONST_INT;
-                                    mce.int_val = (int64_t)result;
-                                } else {
-                                    mce.is_int = false;
-                                    mce.const_type = MCONST_FLOAT;
-                                    mce.float_val = result;
-                                }
-                                hashmap_set(mt->module_consts, &mce);
-                                log_debug("js-mir: module const fold '%s' = %g", mce.name, result);
-                            }
-                        }
-                    }
-                    d = d->next;
-                }
+                s = s->next;
+                continue;
             }
             s = s->next;
         }
@@ -2045,6 +1974,10 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         size_t iter = 0; void* item;
         while (hashmap_iter(hoisted_vars, &iter, &item)) {
             JsNameSetEntry* e = (JsNameSetEntry*)item;
+            if (e->from_func_decl && (mt->is_global_strict || mt->is_module)) {
+                log_debug("js-mir: suppress strict nested func hoist '%s'", e->name);
+                continue;
+            }
             if (eval_lex_collisions && e->from_func_decl) {
                 JsNameSetEntry lex_lookup;
                 memset(&lex_lookup, 0, sizeof(lex_lookup));
@@ -2542,6 +2475,14 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     for (int ci = 0; ci < mt->class_count; ci++) {
         JsClassEntry* ce = &mt->class_entries[ci];
         if (ce->name && ce->name->chars) {
+            bool direct_program_class = ce->is_declaration &&
+                jm_is_direct_program_class_decl(program, ce->node);
+            if (ce->is_declaration && !direct_program_class) {
+                ce->inner_module_var_index = mt->module_var_count++;
+                log_debug("js-mir: nested class inner binding '%.*s' module_var[%d]",
+                    (int)ce->name->len, ce->name->chars, ce->inner_module_var_index);
+                continue;
+            }
             JsModuleConstEntry mce;
             memset(&mce, 0, sizeof(mce));
             snprintf(mce.name, sizeof(mce.name), "_js_%.*s",
@@ -2728,6 +2669,9 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             void* th_item;
             while (hashmap_iter(top_hoists, &th_iter, &th_item)) {
                 JsNameSetEntry* e = (JsNameSetEntry*)th_item;
+                if (e->from_func_decl && (mt->is_global_strict || mt->is_module)) {
+                    continue;
+                }
                 if (e->from_func_decl && top_lex_collisions &&
                     jm_name_set_has(top_lex_collisions, e->name)) {
                     continue;
@@ -3954,6 +3898,9 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     for (int ci = 0; ci < mt->class_count; ci++) {
         JsClassEntry* ce = &mt->class_entries[ci];
         if (ce->name && ce->name->chars) {
+            if (ce->is_declaration && !jm_is_direct_program_class_decl(program, ce->node)) {
+                continue;
+            }
             char vname[128];
             snprintf(vname, sizeof(vname), "_js_%.*s", (int)ce->name->len, ce->name->chars);
             // Create a variable holding null placeholder.

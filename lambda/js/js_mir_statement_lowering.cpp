@@ -945,6 +945,7 @@ void jm_transpile_while(JsMirTranspiler* mt, JsWhileNode* wh) {
 
     // Push loop labels
     jm_push_loop_labels(mt, l_test, l_end);
+    mt->iteration_depth++;
 
     // Eval completion: Let V = undefined (spec §14.7.3.2)
     jm_eval_cptn_reset(mt);
@@ -1034,6 +1035,7 @@ void jm_transpile_while(JsMirTranspiler* mt, JsWhileNode* wh) {
         p4h_hoisted_vars[hi]->hoisted_len_reg = 0;
     }
 
+    if (mt->iteration_depth > 0) mt->iteration_depth--;
     if (mt->loop_depth > 0) mt->loop_depth--;
 }
 
@@ -1237,6 +1239,7 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
 
     // Push loop labels
     jm_push_loop_labels(mt, l_update, l_end);
+    mt->iteration_depth++;
 
     jm_emit_label(mt, l_test);
 
@@ -1316,6 +1319,7 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
         p4h_hoisted_vars[hi]->hoisted_len_reg = 0;
     }
 
+    if (mt->iteration_depth > 0) mt->iteration_depth--;
     if (mt->loop_depth > 0) mt->loop_depth--;
     jm_pop_scope(mt);
 }
@@ -2838,10 +2842,24 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
 
 // switch statement
 void jm_transpile_switch(JsMirTranspiler* mt, JsSwitchNode* sw) {
-    jm_push_scope(mt);
-
     MIR_reg_t discriminant = jm_transpile_box_item(mt, sw->discriminant);
     MIR_label_t l_end = jm_new_label(mt);
+
+    jm_push_scope(mt);
+
+    MIR_reg_t saved_scope_env_reg = mt->scope_env_reg;
+    int saved_scope_env_slot_count = mt->scope_env_slot_count;
+    struct hashmap* switch_lexicals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+        jm_name_hash, jm_name_cmp, NULL, NULL);
+    jm_collect_switch_lexical_names((JsAstNode*)sw, switch_lexicals);
+    int switch_lexical_count = (int)hashmap_count(switch_lexicals);
+    hashmap_free(switch_lexicals);
+    if (switch_lexical_count > 0) {
+        mt->scope_env_reg = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
+            MIR_T_I64, MIR_new_int_op(mt->ctx, switch_lexical_count));
+        mt->scope_env_slot_count = switch_lexical_count;
+    }
+    jm_init_switch_tdz(mt, (JsAstNode*)sw);
 
     // Eval completion: reset to undefined (spec §14.12.4)
     jm_eval_cptn_reset(mt);
@@ -2906,6 +2924,8 @@ void jm_transpile_switch(JsMirTranspiler* mt, JsSwitchNode* sw) {
 
     jm_emit_label(mt, l_end);
     if (mt->loop_depth > 0) mt->loop_depth--;
+    mt->scope_env_reg = saved_scope_env_reg;
+    mt->scope_env_slot_count = saved_scope_env_slot_count;
     jm_pop_scope(mt);
 }
 
@@ -2916,6 +2936,7 @@ void jm_transpile_do_while(JsMirTranspiler* mt, JsDoWhileNode* dw) {
     MIR_label_t l_end = jm_new_label(mt);
 
     jm_push_loop_labels(mt, l_test, l_end);
+    mt->iteration_depth++;
 
     // Eval completion: Let V = undefined (spec §14.7.2.2)
     jm_eval_cptn_reset(mt);
@@ -2946,6 +2967,7 @@ void jm_transpile_do_while(JsMirTranspiler* mt, JsDoWhileNode* dw) {
     }
 
     jm_emit_label(mt, l_end);
+    if (mt->iteration_depth > 0) mt->iteration_depth--;
     if (mt->loop_depth > 0) mt->loop_depth--;
 }
 
@@ -3241,6 +3263,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         MIR_label_t l_end = jm_new_label(mt);
 
         jm_push_loop_labels(mt, l_update, l_end);
+        mt->iteration_depth++;
 
         jm_emit_label(mt, l_test);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, len),
@@ -3335,6 +3358,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_test)));
 
         jm_emit_label(mt, l_end);
+        if (mt->iteration_depth > 0) mt->iteration_depth--;
         if (mt->loop_depth > 0) mt->loop_depth--;
         jm_pop_scope(mt);
         return;
@@ -3389,6 +3413,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
 
     // v29: Use l_break as the break target so IteratorClose is called
     jm_push_loop_labels(mt, l_update, l_break);
+    mt->iteration_depth++;
     if (mt->loop_depth > 0) {
         mt->loop_stack[mt->loop_depth - 1].iterator_to_close = iterator;
     }
@@ -3649,6 +3674,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     }
 
     if (mt->for_of_depth > 0) mt->for_of_depth--;
+    if (mt->iteration_depth > 0) mt->iteration_depth--;
     if (mt->loop_depth > 0) mt->loop_depth--;
     jm_pop_scope(mt);
 }
@@ -3967,10 +3993,22 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                     // Store class object in module var
                     char vname[128];
                     snprintf(vname, sizeof(vname), "_js_%.*s", (int)cls_node->name->len, cls_node->name->chars);
+                    JsMirVarEntry* local_class_binding = jm_find_var(mt, vname);
+                    bool stored_local_class_binding = false;
+                    if (local_class_binding && local_class_binding->is_let_const) {
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, local_class_binding->reg),
+                            MIR_new_reg_op(mt->ctx, cls_obj)));
+                        local_class_binding->tdz_active = false;
+                        local_class_binding->type_id = LMD_TYPE_ANY;
+                        local_class_binding->mir_type = MIR_T_I64;
+                        jm_scope_env_mark_and_writeback(mt, vname, local_class_binding->reg);
+                        stored_local_class_binding = true;
+                    }
                     JsModuleConstEntry mclookup;
                     snprintf(mclookup.name, sizeof(mclookup.name), "%s", vname);
                     JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
-                    if (mc && mc->const_type == MCONST_CLASS) {
+                    if (!stored_local_class_binding && mc && mc->const_type == MCONST_CLASS) {
                         jm_call_void_2(mt, "js_set_module_var",
                             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));

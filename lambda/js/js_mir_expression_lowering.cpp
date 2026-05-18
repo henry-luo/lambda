@@ -10604,6 +10604,10 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
             if (cv && cv->is_let_const) {
                 fc->captures[ci].is_let_const = true;
             }
+            if (cv && cv->in_scope_env && cv->scope_env_reg == mt->scope_env_reg &&
+                cv->scope_env_slot >= 0 && fc->captures[ci].scope_env_slot < 0) {
+                fc->captures[ci].scope_env_slot = cv->scope_env_slot;
+            }
         }
         // Check if this closure should use the parent's shared scope env.
         // Share scope env so var-scoped closures can persist mutations to outer
@@ -10613,6 +10617,10 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
         if (use_scope_env) {
             for (int ci = 0; ci < fc->capture_count; ci++) {
                 JsMirVarEntry* cv = jm_find_var(mt, fc->captures[ci].name);
+                if (fc->captures[ci].scope_env_slot < 0) {
+                    use_scope_env = false;
+                    break;
+                }
                 if (cv && cv->is_let_const &&
                     (!cv->in_scope_env || cv->scope_env_reg != mt->scope_env_reg ||
                      cv->scope_env_slot != fc->captures[ci].scope_env_slot)) {
@@ -10621,7 +10629,7 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 }
             }
         }
-        if (use_scope_env && mt->loop_depth > 0) {
+        if (use_scope_env && mt->iteration_depth > 0) {
             for (int ci = 0; ci < fc->capture_count; ci++) {
                 JsMirVarEntry* cv = jm_find_var(mt, fc->captures[ci].name);
                 if (cv && cv->is_let_const) { use_scope_env = false; break; }
@@ -10764,10 +10772,24 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
 
     MIR_reg_t fn_reg;
     if (fc->capture_count > 0) {
+        for (int ci = 0; ci < fc->capture_count; ci++) {
+            JsMirVarEntry* cv = jm_find_var(mt, fc->captures[ci].name);
+            if (cv && cv->in_scope_env && cv->scope_env_reg == mt->scope_env_reg &&
+                cv->scope_env_slot >= 0 && fc->captures[ci].scope_env_slot < 0) {
+                fc->captures[ci].scope_env_slot = cv->scope_env_slot;
+            }
+            if (cv && cv->is_let_const) {
+                fc->captures[ci].is_let_const = true;
+            }
+        }
         bool use_scope_env = (mt->scope_env_reg != 0 && fc->captures[0].scope_env_slot >= 0);
         if (use_scope_env) {
             for (int ci = 0; ci < fc->capture_count; ci++) {
                 JsMirVarEntry* cv = jm_find_var(mt, fc->captures[ci].name);
+                if (fc->captures[ci].scope_env_slot < 0) {
+                    use_scope_env = false;
+                    break;
+                }
                 if (cv && cv->is_let_const &&
                     (!cv->in_scope_env || cv->scope_env_reg != mt->scope_env_reg ||
                      cv->scope_env_slot != fc->captures[ci].scope_env_slot)) {
@@ -10776,7 +10798,7 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
                 }
             }
         }
-        if (use_scope_env && mt->loop_depth > 0) {
+        if (use_scope_env && mt->iteration_depth > 0) {
             for (int ci = 0; ci < fc->capture_count; ci++) {
                 JsMirVarEntry* cv = jm_find_var(mt, fc->captures[ci].name);
                 if (cv && cv->is_let_const) { use_scope_env = false; break; }

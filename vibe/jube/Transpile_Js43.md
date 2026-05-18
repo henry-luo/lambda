@@ -2479,3 +2479,75 @@ Next work:
 - The language side is now mostly switch/try lexical environment handling,
   global declaration attributes, subclass builtin edges, and legacy
   activation-object function behavior.
+
+## 44. Switch CaseBlock, Strict Annex B, And Global Const TDZ
+
+Status on 2026-05-18: reduced the 151-test remaining slice to 134 failures.
+The focused switch lexical batch, strict global switch declarations, and strict
+function block/switch declaration cases now pass.  A direct global const TDZ
+read before declaration also now throws correctly.
+
+Root causes:
+
+- `switch` reused `loop_depth` for break-label tracking.  Closure creation used
+  the same value to decide whether let/const captures were inside an iteration
+  loop, so closures inside switch CaseBlocks copied the TDZ value instead of
+  sharing the CaseBlock lexical environment.
+- Switch CaseBlock lexical collection omitted function declarations.  Function
+  declarations in switch cases therefore leaked through Annex B/module hoist
+  paths and did not participate in lexical collision suppression.
+- Strict scripts/functions still treated nested block/switch function
+  declarations as Annex B function-scope hoists.
+- Top-level `const` literal folding turned lexical bindings into immediate
+  `MCONST_*` constants, bypassing the module-var TDZ slot for reads before the
+  declaration.
+
+Fix:
+
+- Added a separate `iteration_depth` and increment it only for real iteration
+  statements; `switch` and labeled break scopes continue to use `loop_depth`.
+- Added switch CaseBlock function declarations to lexical-name collection and
+  initialized switch-local function bindings in the CaseBlock environment.
+- Suppressed nested function hoist registration for strict scripts/modules and
+  strict function bodies, while preserving direct function-body declarations.
+- Kept top-level `const` declarations as live module-var bindings instead of
+  folding them into immediate constants.
+
+Verification:
+
+```bash
+make -C build/premake config=release_native lambda -j4 CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib"
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_switch_scope_lex_batch.txt --js-timeout=30 --write-failures=temp/js43_switch_scope_lex_after_nested_class.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_strict_switch_decl_batch.txt --js-timeout=30 --write-failures=temp/js43_strict_switch_decl_after.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_strict_func_block_decl_batch.txt --js-timeout=30 --write-failures=temp/js43_strict_func_block_decl_after.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_global_tdz_closure_batch.txt --js-timeout=30 --write-failures=temp/js43_global_tdz_closure_after.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_current_remaining_after_switch_input.txt --js-timeout=30 --write-failures=temp/js43_current_remaining_after_const_tdz_fix.tsv --gtest_brief=1
+```
+
+Results:
+
+- Switch lexical focused batch: 8 / 8 passed.
+- Strict global switch declaration batch: 2 / 2 passed.
+- Strict function block/switch declaration batch: 4 / 4 passed.
+- Global TDZ focused batch: 1 / 5 passed; direct prior-statement const TDZ is
+  fixed, closure get/set TDZ still needs capture/env work.
+- Original 151-test slice: 17 / 151 passed, leaving 134 failures.  Earlier in
+  this section it was 15 / 151 after the strict-function fix, and 12 / 151
+  after the switch/global strict fixes.
+
+Current top remaining path clusters:
+
+| Area | Failures |
+|---|---:|
+| `language/statements` | 47 |
+| `built_ins/RegExp` | 36 |
+| `language/expressions` | 14 |
+| `language/literals` | 12 |
+| `language/global_code` | 11 |
+| `language/function_code` | 10 |
+
+Next work:
+
+- Finish global/block/function lexical TDZ through closure envs.
+- Then return to the RegExp lookbehind/named-groups cluster, which remains the
+  largest standalone area.

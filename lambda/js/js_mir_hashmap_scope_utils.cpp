@@ -211,6 +211,11 @@ void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
             if (existing->from_catch_param) {
                 entry.var.from_catch_param = true;
             }
+            if (existing->in_scope_env) {
+                entry.var.in_scope_env = true;
+                entry.var.scope_env_slot = existing->scope_env_slot;
+                entry.var.scope_env_reg = existing->scope_env_reg;
+            }
         }
     }
 

@@ -116,8 +116,10 @@ void jm_collect_arrow_lexical_refs(JsAstNode* node, struct hashmap* refs);
 void jm_collect_body_refs(JsAstNode* node, struct hashmap* refs);
 void jm_collect_body_locals(JsAstNode* node, struct hashmap* locals, bool var_only = false);
 void jm_collect_let_const_names(JsAstNode* block, struct hashmap* names);
+void jm_collect_switch_lexical_names(JsAstNode* switch_node, struct hashmap* names);
 void jm_collect_all_let_const_names_recursive(JsAstNode* node, struct hashmap* names);
 void jm_init_block_tdz(JsMirTranspiler* mt, JsAstNode* block);
+void jm_init_switch_tdz(JsMirTranspiler* mt, JsAstNode* switch_node);
 void jm_collect_pattern_names(JsAstNode* pat, struct hashmap* names);
 void jm_collect_param_default_refs(JsAstNode* params, struct hashmap* refs);
 void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,

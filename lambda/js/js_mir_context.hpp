@@ -351,6 +351,7 @@ struct JsMirTranspiler {
     // Loop label stack
     JsLoopLabels loop_stack[32];
     int loop_depth;
+    int iteration_depth;
 
     // Active for-of iterator stack for return cleanup
     MIR_reg_t for_of_iterators[32];

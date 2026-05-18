@@ -1038,6 +1038,18 @@ static bool jm_has_outer_binding_before_depth(JsMirTranspiler* mt, const char* n
 // Called after jm_set_var or assignment to propagate value to shared scope env.
 void jm_scope_env_mark_and_writeback(JsMirTranspiler* mt, const char* name, MIR_reg_t val_reg, TypeId type_id) {
     if (mt->scope_env_reg == 0) return;
+    JsMirVarEntry* active_var = jm_find_var(mt, name);
+    if (active_var && active_var->in_scope_env && active_var->scope_env_reg == mt->scope_env_reg &&
+        active_var->scope_env_slot >= 0) {
+        MIR_reg_t val = val_reg;
+        if (jm_is_native_type(type_id))
+            val = jm_box_native(mt, val_reg, type_id);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                active_var->scope_env_slot * (int)sizeof(uint64_t), active_var->scope_env_reg, 0, 1),
+            MIR_new_reg_op(mt->ctx, val)));
+        return;
+    }
     // Check if this var name is in the current function's scope env
     int fi = mt->current_func_index;
     if (fi < 0 || fi >= mt->func_count) return;

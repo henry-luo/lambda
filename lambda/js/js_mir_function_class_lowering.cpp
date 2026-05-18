@@ -391,6 +391,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             size_t viter = 0; void* vitem;
             while (hashmap_iter(body_locals, &viter, &vitem)) {
                 JsNameSetEntry* e = (JsNameSetEntry*)vitem;
+                if (e->from_func_decl && fc && fc->is_strict) {
+                    log_debug("js-mir: strict skip nested function hoist '%s'", e->name);
+                    continue;
+                }
                 if (e->from_func_decl && annexb_lex_collisions &&
                     jm_name_set_has(annexb_lex_collisions, e->name)) {
                     log_debug("js-mir: AnnexB skip function hoist '%s' (lexical collision)", e->name);
@@ -2528,6 +2532,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             size_t viter = 0; void* vitem;
             while (hashmap_iter(body_locals, &viter, &vitem)) {
                 JsNameSetEntry* e = (JsNameSetEntry*)vitem;
+                if (e->from_func_decl && fc && fc->is_strict) {
+                    log_debug("js-mir: strict skip nested function hoist '%s'", e->name);
+                    continue;
+                }
                 if (e->from_func_decl && annexb_lex_collisions &&
                     jm_name_set_has(annexb_lex_collisions, e->name)) {
                     log_debug("js-mir: AnnexB skip function hoist '%s' (lexical collision)", e->name);
