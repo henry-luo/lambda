@@ -1,5 +1,6 @@
 #pragma once
 #include <math.h>
+#include <string.h>
 
 // ============================================================================
 // Vector clip shapes for overflow:hidden and CSS clip-path

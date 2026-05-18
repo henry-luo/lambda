@@ -8,6 +8,7 @@
 // ==========================================================================
 
 #include "rdt_vector.hpp"
+#include "clip_shape.h"
 #include "../lib/scratch_arena.h"
 #include "../lib/font/font.h"
 #include "view.hpp"          // Bound, ImageSurface
@@ -153,11 +154,21 @@ typedef struct {
     int saved_depth;
 } DlClipDepth;
 
+typedef struct {
+    int depth;
+    int type[RDT_MAX_CLIP_SHAPES];
+    float params[RDT_MAX_CLIP_SHAPES][8];
+    int polygon_count[RDT_MAX_CLIP_SHAPES];
+    float* polygon_vx[RDT_MAX_CLIP_SHAPES];
+    float* polygon_vy[RDT_MAX_CLIP_SHAPES];
+} DlClipShapeStack;
+
 // Direct-pixel fill (selection highlights, surface clear, etc.)
 typedef struct {
     float x, y, w, h;
     uint32_t color;          // ABGR8888
     Bound clip;              // rectangular clip bounds at recording time
+    DlClipShapeStack clip_shapes;
 } DlFillSurfaceRect;
 
 // Direct-pixel scaled blit (raster images via blit_surface_scaled)
@@ -165,7 +176,9 @@ typedef struct {
     void* src_surface;       // ImageSurface* — borrowed
     float dst_x, dst_y, dst_w, dst_h;
     int scale_mode;
+    uint8_t opacity;
     Bound clip;              // rectangular clip bounds at recording time
+    DlClipShapeStack clip_shapes;
 } DlBlitSurfaceScaled;
 
 // Post-processing: multiply alpha of all pixels in region
@@ -377,11 +390,14 @@ void dl_restore_clip_depth(DisplayList* dl, int saved_depth);
 
 // Direct-pixel operations
 void dl_fill_surface_rect(DisplayList* dl, float x, float y, float w, float h,
-                          uint32_t color, const Bound* clip);
+                          uint32_t color, const Bound* clip,
+                          ClipShape** clip_shapes = nullptr, int clip_depth = 0);
 
 void dl_blit_surface_scaled(DisplayList* dl, void* src_surface,
                             float dst_x, float dst_y, float dst_w, float dst_h,
-                            int scale_mode, const Bound* clip);
+                            int scale_mode, const Bound* clip,
+                            ClipShape** clip_shapes = nullptr, int clip_depth = 0,
+                            uint8_t opacity = 255);
 
 // Post-processing operations (coordinates already in physical pixels)
 void dl_apply_opacity(DisplayList* dl, int x0, int y0, int x1, int y1,

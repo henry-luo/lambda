@@ -7,6 +7,7 @@
 #include "tile_pool.h"
 #include "render_filter.hpp"
 #include "render_background.hpp"
+#include "render_raster.hpp"
 #include "clip_shape.h"
 #include "../lib/log.h"
 #include "../lib/mem.h"
@@ -24,6 +25,57 @@ static inline int get_cpu_count() {
 #include <unistd.h>
 static inline int get_cpu_count() { return (int)sysconf(_SC_NPROCESSORS_ONLN); }
 #endif
+
+static void tile_offset_clip_shape(ClipShape* cs, float tile_x, float tile_y) {
+    if (!cs) return;
+    switch (cs->type) {
+        case CLIP_SHAPE_CIRCLE:
+            cs->circle.cx -= tile_x; cs->circle.cy -= tile_y;
+            break;
+        case CLIP_SHAPE_ELLIPSE:
+            cs->ellipse.cx -= tile_x; cs->ellipse.cy -= tile_y;
+            break;
+        case CLIP_SHAPE_INSET:
+            cs->inset.x -= tile_x; cs->inset.y -= tile_y;
+            break;
+        case CLIP_SHAPE_ROUNDED_RECT:
+            cs->rounded_rect.x -= tile_x; cs->rounded_rect.y -= tile_y;
+            break;
+        default:
+            break;
+    }
+}
+
+static int dl_restore_raster_clip_shapes(const DlClipShapeStack* src, ClipShape* shapes,
+                                         ClipShape** shape_ptrs, ScratchArena* scratch,
+                                         float tile_x, float tile_y) {
+    if (!src || !shapes || !shape_ptrs || src->depth <= 0) return 0;
+    int depth = src->depth;
+    if (depth > RDT_MAX_CLIP_SHAPES) depth = RDT_MAX_CLIP_SHAPES;
+    int out_depth = 0;
+    for (int i = 0; i < depth; i++) {
+        if (src->type[i] == CLIP_SHAPE_NONE) continue;
+        if (src->type[i] == CLIP_SHAPE_POLYGON) {
+            int count = src->polygon_count[i];
+            if (!scratch || count < 3 || !src->polygon_vx[i] || !src->polygon_vy[i]) continue;
+            float* vx = (float*)scratch_alloc(scratch, count * sizeof(float));
+            float* vy = (float*)scratch_alloc(scratch, count * sizeof(float));
+            if (!vx || !vy) continue;
+            for (int pi = 0; pi < count; pi++) {
+                vx[pi] = src->polygon_vx[i][pi] - tile_x;
+                vy[pi] = src->polygon_vy[i][pi] - tile_y;
+            }
+            shapes[out_depth].type = CLIP_SHAPE_POLYGON;
+            shapes[out_depth].polygon = {vx, vy, count};
+        } else {
+            shapes[out_depth] = clip_shape_from_params(src->type[i], src->params[i]);
+            tile_offset_clip_shape(&shapes[out_depth], tile_x, tile_y);
+        }
+        shape_ptrs[out_depth] = &shapes[out_depth];
+        out_depth++;
+    }
+    return out_depth;
+}
 
 // Global mutex to serialize ThorVG canvas operations across worker threads.
 // ThorVG's internal state (global mpool, loader sharing counts, etc.) is not
@@ -669,7 +721,14 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
             bound.top    = std::max(0.0f, r->clip.top    - tile_y);
             bound.right  = std::min((float)tile_surface->width,  r->clip.right  - tile_x);
             bound.bottom = std::min((float)tile_surface->height, r->clip.bottom - tile_y);
-            fill_surface_rect(tile_surface, &rect, r->color, &bound);
+            ClipShape shapes[RDT_MAX_CLIP_SHAPES];
+            ClipShape* shape_ptrs[RDT_MAX_CLIP_SHAPES];
+            ScratchMark clip_mark = scratch_mark(scratch);
+            int clip_depth = dl_restore_raster_clip_shapes(&r->clip_shapes, shapes, shape_ptrs,
+                                                           scratch, tile_x, tile_y);
+            RasterPaintContext raster = {tile_surface, &bound, shape_ptrs, clip_depth};
+            raster_fill_rect(&raster, &rect, r->color);
+            scratch_restore(scratch, clip_mark);
             items_drawn++;
             break;
         }
@@ -682,9 +741,15 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
             bound.top    = std::max(0.0f, r->clip.top    - tile_y);
             bound.right  = std::min((float)tile_surface->width,  r->clip.right  - tile_x);
             bound.bottom = std::min((float)tile_surface->height, r->clip.bottom - tile_y);
-            blit_surface_scaled((ImageSurface*)r->src_surface, nullptr,
-                                tile_surface, &dst_rect, &bound,
-                                (ScaleMode)r->scale_mode, nullptr, 0);
+            ClipShape shapes[RDT_MAX_CLIP_SHAPES];
+            ClipShape* shape_ptrs[RDT_MAX_CLIP_SHAPES];
+            ScratchMark clip_mark = scratch_mark(scratch);
+            int clip_depth = dl_restore_raster_clip_shapes(&r->clip_shapes, shapes, shape_ptrs,
+                                                           scratch, tile_x, tile_y);
+            RasterPaintContext raster = {tile_surface, &bound, shape_ptrs, clip_depth};
+            raster_blit_surface_scaled(&raster, (ImageSurface*)r->src_surface, nullptr,
+                                       &dst_rect, (ScaleMode)r->scale_mode, r->opacity);
+            scratch_restore(scratch, clip_mark);
             items_drawn++;
             break;
         }
@@ -1022,8 +1087,8 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
                 bound.top    = std::max(0.0f, r->clip.top    - tile_y);
                 bound.right  = std::min((float)tile_surface->width,  r->clip.right  - tile_x);
                 bound.bottom = std::min((float)tile_surface->height, r->clip.bottom - tile_y);
-                blit_surface_scaled(src, nullptr, tile_surface, &dst_rect, &bound,
-                                    SCALE_MODE_LINEAR, nullptr, 0);
+                RasterPaintContext raster = {tile_surface, &bound, nullptr, 0};
+                raster_blit_surface_scaled(&raster, src, nullptr, &dst_rect, SCALE_MODE_LINEAR);
                 items_drawn++;
             }
             break;

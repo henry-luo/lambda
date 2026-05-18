@@ -353,7 +353,7 @@ void render_background_color(RenderContext* rdcon, ViewBlock* view, Color color,
         rdt_path_free(clip);
         rdt_path_free(p);
     } else {
-        rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &rect, color.c, &rdcon->block.clip,
+        render_painter_fill_surface_rect(rdcon, rdcon->ui_context->surface, &rect, color.c, &rdcon->block.clip,
             rdcon->clip_shapes, rdcon->clip_shape_depth);
     }
 }
@@ -1696,7 +1696,7 @@ static void compute_bg_image_position(BackgroundProp* bg, float img_w, float img
 static void blit_bg_tile(RenderContext* rdcon, ImageSurface* img, ImageSurface* dst, Rect* tile_rect, Bound* clip,
                          ScaleMode mode = SCALE_MODE_LINEAR,
                          ClipShape** clip_shapes = nullptr, int clip_depth = 0) {
-    rc_blit_surface_scaled(rdcon, img, NULL, dst, tile_rect, clip, mode, clip_shapes, clip_depth);
+    render_painter_blit_surface_scaled(rdcon, img, NULL, dst, tile_rect, clip, mode, clip_shapes, clip_depth);
 }
 
 /**
@@ -1708,17 +1708,10 @@ static void render_bg_tile_tvg(RenderContext* rdcon, ImageSurface* img, Rect* ti
     RdtPicture* pic = rdt_picture_dup(img->pic);
     if (!pic) return;
 
-    rdt_picture_set_size(pic, tile_rect->width, tile_rect->height);
-
-    // Build translation matrix for tile position
-    RdtMatrix m = rdt_matrix_identity();
-    m.e13 = tile_rect->x;
-    m.e23 = tile_rect->y;
-
     // Clip to block clip region (clip path is already in absolute coordinates, no transform needed)
     RdtPath* clip_path = create_bg_clip_path(rdcon);
     rc_push_clip(rdcon, clip_path, NULL);
-    rc_draw_picture(rdcon, pic, 255, &m);
+    render_painter_draw_picture_rect(rdcon, pic, tile_rect, NULL, 255);
     rc_pop_clip(rdcon);
     rdt_path_free(clip_path);
     // In display-list mode, rc_draw_picture transfers ownership to the DL;
