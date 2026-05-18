@@ -3340,6 +3340,11 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         MIR_reg_t elem = jm_call_2(mt, "js_property_access", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, collection),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_item));
+        MIR_reg_t live_key = jm_call_2(mt, "js_for_in_key_is_live", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, iterable),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, elem));
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_update),
+            MIR_new_reg_op(mt->ctx, live_key)));
         if (lhs_call_target) {
             jm_transpile_box_item(mt, fo->left);
             jm_emit_exc_propagate_check(mt);

@@ -7429,7 +7429,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             // Pattern: Foo.call(thisObj, a1, a2, ...)
             if (prop->name->len == 4 && strncmp(prop->name->chars, "call", 4) == 0) {
                 MIR_reg_t fn = jm_transpile_box_item(mt, m->object);
-                MIR_reg_t this_arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                MIR_reg_t this_arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_undefined(mt);
                 // Build args from the remaining arguments (skip the first 'this' arg)
                 int remaining_count = arg_count > 1 ? arg_count - 1 : 0;
                 JsAstNode* remaining_args = (call->arguments && call->arguments->next) ? call->arguments->next : NULL;
@@ -7469,7 +7469,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     }
                 }
                 MIR_reg_t fn = jm_transpile_box_item(mt, m->object);
-                MIR_reg_t this_arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                MIR_reg_t this_arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_undefined(mt);
                 MIR_reg_t args_array = (call->arguments && call->arguments->next)
                     ? jm_transpile_box_item(mt, call->arguments->next) : jm_emit_null(mt);
                 return jm_call_3(mt, "js_apply_function", MIR_T_I64,

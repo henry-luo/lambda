@@ -41,6 +41,7 @@ extern Item js_super_instance_method_get(Item receiver, Item key);
 extern Item js_super_property_set(Item receiver, Item key, Item value);
 extern Item js_super_property_set_non_strict(Item receiver, Item key, Item value);
 extern Item js_create_data_property(Item obj, Item name, Item value);
+extern bool js_for_in_key_is_live(Item object, Item key);
 
 // super() for class-expression superclasses: handles FUNC and MAP (class object) callee
 extern Item js_super_call_class(Item callee, Item this_val, Item* args, int argc);
@@ -1548,6 +1549,7 @@ JitImport jit_runtime_imports[] = {
     // object utilities
     {"js_object_keys", FPTR(js_object_keys)},
     {"js_for_in_keys", FPTR(js_for_in_keys)},
+    {"js_for_in_key_is_live", FPTR(js_for_in_key_is_live)},
     {"js_object_get_own_property_names", FPTR(js_object_get_own_property_names)},
     {"js_object_get_own_property_symbols", FPTR(js_object_get_own_property_symbols)},
     {"js_object_create", FPTR(js_object_create)},

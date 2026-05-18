@@ -8958,13 +8958,14 @@ extern "C" Item js_for_in_keys(Item object) {
                         Item val = _map_read_field(e, m->data);
                         if (val.item == JS_DELETED_SENTINEL_VAL) skip = true;
                     }
-                    if (!skip && !js_props_query_enumerable(m, e, s, len)) skip = true;
                     if (!skip) {
                         JsForInSeenEntry probe;
                         js_for_in_seen_entry_set(&probe, s, len);
                         if (!hashmap_get(seen, &probe)) {
                             hashmap_set(seen, &probe);
-                            js_array_push(result, (Item){.item = s2it(heap_create_name(s, len))});
+                            if (js_props_query_enumerable(m, e, s, len)) {
+                                js_array_push(result, (Item){.item = s2it(heap_create_name(s, len))});
+                            }
                         }
                     }
                 }
@@ -9045,25 +9046,25 @@ extern "C" Item js_for_in_keys(Item object) {
                     if (val.item == JS_DELETED_SENTINEL_VAL) skip = true;
                 }
 
-                // skip non-enumerable properties (Stage A3: shape-flag-first)
-                if (!skip && !js_props_query_enumerable(m, e, s, len)) skip = true;
-
                 if (!skip) {
-                    // deduplicate: only add if not seen before
+                    // For-in visited-name tracking sees all own string keys,
+                    // including non-enumerable keys which shadow prototypes.
                     JsForInSeenEntry probe;
                     js_for_in_seen_entry_set(&probe, s, len);
                     const JsForInSeenEntry* existing = (const JsForInSeenEntry*)hashmap_get(seen, &probe);
                     if (!existing) {
                         hashmap_set(seen, &probe);
-                        Item key_str = (Item){.item = s2it(heap_create_name(s, len))};
-                        // v20: classify as index or string key
-                        int64_t idx = js_parse_array_index(s, len);
-                        if (idx >= 0 && idx_count < idx_cap) {
-                            idx_vals[idx_count] = idx;
-                            idx_items[idx_count] = key_str;
-                            idx_count++;
-                        } else {
-                            js_array_push(str_result, key_str);
+                        if (js_props_query_enumerable(m, e, s, len)) {
+                            Item key_str = (Item){.item = s2it(heap_create_name(s, len))};
+                            // v20: classify as index or string key
+                            int64_t idx = js_parse_array_index(s, len);
+                            if (idx >= 0 && idx_count < idx_cap) {
+                                idx_vals[idx_count] = idx;
+                                idx_items[idx_count] = key_str;
+                                idx_count++;
+                            } else {
+                                js_array_push(str_result, key_str);
+                            }
                         }
                     }
                 }
@@ -9104,6 +9105,42 @@ extern "C" Item js_for_in_keys(Item object) {
     for (int i = 0; i < str_arr->length; i++) array_push(arr, str_arr->items[i]);
 
     return result;
+}
+
+extern "C" bool js_for_in_key_is_live(Item object, Item key) {
+    TypeId key_type = get_type_id(key);
+    if (key_type != LMD_TYPE_STRING && key_type != LMD_TYPE_SYMBOL) {
+        key = js_to_property_key(key);
+        key_type = get_type_id(key);
+    }
+    if (key_type != LMD_TYPE_STRING) return false;
+
+    TypeId object_type = get_type_id(object);
+    if (object.item == ItemNull.item || object_type == LMD_TYPE_UNDEFINED) return false;
+    if (object_type != LMD_TYPE_MAP && object_type != LMD_TYPE_ARRAY &&
+        object_type != LMD_TYPE_FUNC && object_type != LMD_TYPE_ELEMENT) {
+        object = js_to_object(object);
+    }
+
+    Item current = object;
+    int depth = 0;
+    while (current.item != ItemNull.item && depth < 64) {
+        TypeId current_type = get_type_id(current);
+        if (current_type != LMD_TYPE_MAP && current_type != LMD_TYPE_ARRAY &&
+            current_type != LMD_TYPE_FUNC && current_type != LMD_TYPE_ELEMENT) {
+            break;
+        }
+        Item desc = js_object_get_own_property_descriptor(current, key);
+        if (js_check_exception()) return false;
+        if (desc.item != ITEM_JS_UNDEFINED && desc.item != ItemNull.item) {
+            Item enumerable_key = (Item){.item = s2it(heap_create_name("enumerable", 10))};
+            Item enumerable = js_property_get(desc, enumerable_key);
+            return js_is_truthy(enumerable);
+        }
+        current = current_type == LMD_TYPE_FUNC ? js_get_prototype_of(current) : js_get_prototype(current);
+        depth++;
+    }
+    return false;
 }
 
 extern "C" Item js_object_get_own_property_symbols(Item object) {

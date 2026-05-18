@@ -3103,3 +3103,143 @@ Baseline result:
 - Regressions: 0.
 - Failure manifest: 0 rows in
   `temp/js262_after_arguments_accessor_baseline.tsv`.
+
+## 55. Eval RegExp Line Terminators And For-In Liveness
+
+Status on 2026-05-18: fixed another 11 rows from the old 140-test failure
+batch, then refreshed the gated js262 baseline to 34,044 fully passing tests.
+The suite now reports 119 remaining failed tests, 0 regressions, and 0
+non-fully-passing rows.
+
+Root causes fixed:
+
+- The `eval` RegExp-literal fast path called `js_create_regexp_from_source()`
+  directly, bypassing the normal AST early-error check for raw line
+  terminators.  Raw `<LF>`, `<CR>`, `<LS>`, and `<PS>` inside a pattern now
+  throw `SyntaxError` before RE2 compilation, matching ordinary RegExp literal
+  parsing.
+- `for-in` visited-name tracking only marked enumerable own keys as seen.  The
+  spec visited-name set includes non-enumerable own string keys too, so a
+  non-enumerable own property must still shadow an enumerable prototype
+  property.
+- The MIR `for-in` loop snapped the key list before loop execution and then
+  yielded deleted keys without re-checking liveness.  It now verifies the queued
+  key is still found as enumerable on the object/prototype chain before binding
+  the loop variable.
+- The first liveness check used the raw custom prototype slot for function
+  objects.  Bound functions synthesize `Function.prototype`, so inherited
+  enumerable `Function.prototype` keys were incorrectly skipped until the live
+  walk was aligned with `js_for_in_keys()`.
+
+Implementation:
+
+- Added raw line-terminator validation in `js_create_regexp_from_source()`.
+- Updated `js_for_in_keys()` so map and function enumeration add every
+  non-internal, non-deleted own string key to the visited set, but only append
+  enumerable keys to the result list.
+- Added `js_for_in_key_is_live(object, key)` and registered it for MIR calls.
+- Added a MIR `for-in` live-key guard before loop-variable assignment/body
+  execution, so deleted or newly non-enumerable queued keys are skipped.
+
+Changed files:
+
+- `lambda/js/js_runtime.cpp`
+- `lambda/js/js_globals.cpp`
+- `lambda/js/js_mir_statement_lowering.cpp`
+- `lambda/sys_func_registry.c`
+- `test/js262/test262_baseline.txt` via the guarded updater
+
+Verification:
+
+```bash
+make -C build/premake config=release_native lambda test_js_test262_gtest -j4 CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib"
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_regex_line_terms_batch.txt --js-timeout=30 --write-failures=temp/js43_regex_line_terms_after_rawlt.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_for_in_batch.txt --js-timeout=30 --write-failures=temp/js43_for_in_after_shadow_live2.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_forin_regression_batch.txt --js-timeout=30 --write-failures=temp/js43_forin_regression_after.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --update-baseline --write-failures=temp/js43_update_baseline_after_forin_live_fix_escalated.tsv --gtest_brief=1
+```
+
+Focused results:
+
+- Eval RegExp raw line-terminator batch: 8 / 9 passed.  The remaining row is
+  `built_ins_RegExp_nullable_quantifier_js`.
+- For-in shadow/delete batch: 3 / 3 passed.
+- Bound-function for-in regression batch: 5 / 5 passed.
+- Old 140-row failure batch: 21 passed, 119 failed.
+
+Baseline update result:
+
+- Fully passed: 34,044 / 34,163.
+- Failed: 119.
+- Skipped: 8,056.
+- Non-fully-passing: 0.
+- Improvements: 21.
+- Regressions: 0.
+- Updated baseline header: `# Total passing: 34044`.
+- Failure manifest:
+  `temp/js43_update_baseline_after_forin_live_fix_escalated.tsv`.
+
+## 56. Strict Callback Receivers And Direct Eval This
+
+Status on 2026-05-18: fixed 9 more rows from the remaining js262 failure
+set, then refreshed the gated baseline to 34,053 fully passing tests.  The
+suite now reports 110 remaining failed tests, 0 regressions, and 0
+non-fully-passing rows.
+
+Root causes fixed:
+
+- The MIR fast paths for `Function.prototype.call()` and
+  `Function.prototype.apply()` lowered an omitted `thisArg` to JS `null`.
+  The spec passes `undefined` when the receiver argument is absent, which is
+  observable inside strict callees.
+- `String.prototype.replace()` functional replacers were invoked with
+  `ItemNull` as the callback receiver.  Strict replacer callbacks therefore
+  saw `this === null` instead of `this === undefined`.
+- Direct eval inherited the caller's strict flag, but the expression fast path
+  wrapped source as a generated function body with `return (...)` and no strict
+  directive.  In strict direct eval, `eval("this")` could still fall back to
+  the global object.
+
+Implementation:
+
+- Changed omitted `.call()` / `.apply()` `thisArg` lowering to emit JS
+  `undefined`.
+- Changed all `String.replace` functional replacer dispatches to pass
+  `make_js_undefined()` as the callback receiver.
+- Added a `"use strict";` directive to the direct-eval expression wrapper when
+  the inherited eval context is strict.
+
+Changed files:
+
+- `lambda/js/js_mir_expression_lowering.cpp`
+- `lambda/js/js_mir_eval_lowering.cpp`
+- `lambda/js/js_runtime.cpp`
+- `test/js262/test262_baseline.txt` via the guarded updater
+
+Verification:
+
+```bash
+make -C build/premake config=release_native lambda test_js_test262_gtest -j4 CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib"
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_this_binding_batch.txt --js-timeout=30 --write-failures=temp/js43_this_binding_after_undefined_receiver.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_strict_eval_this_batch.txt --js-timeout=30 --write-failures=temp/js43_strict_eval_this_after_wrapper_strict.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_remaining_119_before_this_fix.txt --js-timeout=30 --write-failures=temp/js43_remaining_119_after_this_eval_fix.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --update-baseline --write-failures=temp/js43_update_baseline_after_this_eval_fix.tsv --gtest_brief=1
+```
+
+Focused results:
+
+- Strict call/apply/String.replace receiver batch: 8 / 8 passed.
+- Strict direct-eval `this` batch: 1 / 1 passed.
+- Old 119-row failure batch: 9 passed, 110 failed.
+
+Baseline update result:
+
+- Fully passed: 34,053 / 34,163.
+- Failed: 110.
+- Skipped: 8,056.
+- Non-fully-passing: 0.
+- Improvements: 9.
+- Regressions: 0.
+- Updated baseline header: `# Total passing: 34053`.
+- Failure manifest:
+  `temp/js43_update_baseline_after_this_eval_fix.tsv`.
