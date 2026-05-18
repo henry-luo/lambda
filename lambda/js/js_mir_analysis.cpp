@@ -1031,6 +1031,16 @@ void jm_collect_body_locals(JsAstNode* node, struct hashmap* locals, bool var_on
         }
         break;
     }
+    case JS_AST_NODE_CLASS_DECLARATION: {
+        if (var_only) break;
+        JsClassNode* cls = (JsClassNode*)node;
+        if (cls->name && cls->name->chars) {
+            char name[128];
+            snprintf(name, sizeof(name), "_js_%.*s", (int)cls->name->len, cls->name->chars);
+            jm_name_set_add(locals, name);
+        }
+        break;
+    }
 
     case JS_AST_NODE_BLOCK_STATEMENT: {
         JsBlockNode* blk = (JsBlockNode*)node;

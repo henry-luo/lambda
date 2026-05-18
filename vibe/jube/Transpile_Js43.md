@@ -2731,3 +2731,59 @@ Next work:
   cluster.
 - Then return to class computed-property `yield` crashes and derived-class
   `super()`/return override semantics.
+
+## 48. Close The 15 Remaining Focused Regressions
+
+Status on 2026-05-18: fixed the remaining 15 failures listed above.  The
+30-test focused real-regression slice now passes 30 / 30.
+
+Fixes:
+
+- Line terminator regressions: adjusted the JavaScript scanner ASI handling so
+  `*` after a line terminator is parsed as multiplication where the grammar
+  expects a continued expression.
+- Class name binding: preserved the immutable inner class binding for
+  `class C {}` so assignments target the correct binding and throw the expected
+  const-assignment error.
+- TypedArray `.at`: fixed the native-call boxing/import cache path so the sparse
+  array hole case no longer emits a double operand where an int operand is
+  required.
+- Identifier resolution: kept local/captured shadowing ahead of stale AST scope
+  function lookup, fixing the `S10.2.2_A1_T3` capture case.
+- Computed-property `yield` in classes: collected class declarations as lexical
+  locals, preserved class/prototype objects across computed-key yields, and
+  evaluated static computed method keys before creating method functions.
+- Derived class `super()`: stored the evaluated superclass constructor on class
+  objects and reused it from derived constructors, preventing inline superclass
+  expressions from being re-evaluated during `super()`.
+- `super(...)` argument abrupt completion: evaluated/build argument lists before
+  reading the derived constructor `this` binding, and changed the direct-call
+  fast path to save the caller `this` with `js_get_lexical_this_binding()` so a
+  call before `super()` preserves the TDZ sentinel without throwing.
+- Bound superclass functions: allowed assignment to a bound function's ordinary
+  own `prototype` property while keeping the default bound-function prototype
+  absent.
+
+Verification:
+
+```bash
+make -C build/premake config=release_native lambda -j4 CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib"
+./lambda.exe js temp/js43_super_arg_eval_repro.js
+./lambda.exe js temp/js43_bound_superclass_repro.js
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_remaining6_after_static.txt --js-timeout=30 --write-failures=temp/js43_remaining6_after_direct_this_save.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_30_regressions_from_full_gate.txt --js-timeout=30 --write-failures=temp/js43_30_regressions_after_direct_this_save.tsv --gtest_brief=1
+```
+
+Results:
+
+- Direct `super(thrower())` repro: catches the original sentinel error before
+  the derived-constructor completion `ReferenceError`.
+- Bound superclass repro: `bound.prototype = ...` is observable as an own
+  property and subclassing succeeds.
+- Remaining 6 derived/super residue: 6 / 6 passed.
+- 30-regression focused slice: 30 / 30 passed, leaving 0 failures in this slice.
+
+Next work:
+
+- Rerun `make test262-update-baseline` to refresh the full-suite baseline and
+  identify the next real-regression cluster, if any remains.

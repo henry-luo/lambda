@@ -3484,20 +3484,21 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
         char vname[128];
         snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
         JsMirVarEntry* var = jm_find_var(mt, vname);
+        JsClassEntry* inner_ce = jm_current_inner_class_binding(mt, id->name);
+        bool local_shadow = var && !var->from_env && !var->from_shared_env;
+        if (inner_ce && !local_shadow) {
+            jm_call_void_2(mt, "js_throw_const_assign",
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)id->name->chars),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)id->name->len));
+            jm_emit_exc_propagate_check(mt);
+            return jm_emit_undefined(mt);
+        }
         if (!var) {
             // Check module-level variables (let/var at top level accessed from inside functions)
             if (mt->module_consts) {
                 JsModuleConstEntry lookup;
                 snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
                 JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
-                JsClassEntry* inner_ce = jm_current_inner_class_binding(mt, id->name);
-                if (inner_ce) {
-                    jm_call_void_2(mt, "js_throw_const_assign",
-                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)id->name->chars),
-                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)id->name->len));
-                    jm_emit_exc_propagate_check(mt);
-                    return jm_emit_undefined(mt);
-                }
                 if (mc && (mc->const_type == MCONST_MODVAR || mc->const_type == MCONST_CLASS)) {
                     if (mc->const_type == MCONST_MODVAR &&
                         (mc->var_kind == JS_VAR_LET || mc->var_kind == JS_VAR_CONST)) {
@@ -3906,6 +3907,8 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                     MIR_new_reg_op(mt->ctx, old_binding),
                     MIR_new_mem_op(mt->ctx, MIR_T_I64,
                         var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1)));
+            } else if (jm_is_native_type(var->type_id)) {
+                old_binding = jm_box_native(mt, old_binding, var->type_id);
             }
             jm_call_void_3(mt, "js_check_tdz",
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, old_binding),
@@ -3925,14 +3928,17 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
 
         // --- Native-typed variable fast path ---
         if (mt->with_depth <= 0 && var->type_id == LMD_TYPE_INT && !var->from_env) {
+            TypeId rhs_type = jm_get_effective_type(mt, asgn->right);
+            if (asgn->op == JS_OP_ASSIGN && rhs_type != LMD_TYPE_INT) {
+                var->type_id = LMD_TYPE_ANY;
+                var->mir_type = MIR_T_I64;
+            } else {
             if (asgn->op == JS_OP_ASSIGN) {
-                TypeId rhs_type = jm_get_effective_type(mt, asgn->right);
                 MIR_reg_t rhs = jm_transpile_as_native(mt, asgn->right, rhs_type, LMD_TYPE_INT);
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_reg_op(mt->ctx, var->reg), MIR_new_reg_op(mt->ctx, rhs)));
             } else {
                 // Compound assignment on native int
-                TypeId rhs_type = jm_get_effective_type(mt, asgn->right);
                 MIR_reg_t rval = jm_transpile_as_native(mt, asgn->right, rhs_type, LMD_TYPE_INT);
                 MIR_insn_code_t op = MIR_ADD;
                 switch (asgn->op) {
@@ -3970,6 +3976,7 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                 }
             }
             return var->reg;
+            }
         }
 
         if (mt->with_depth <= 0 && var->type_id == LMD_TYPE_FLOAT && !var->from_env) {
@@ -5878,8 +5885,6 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             if (mt->current_class && mt->current_class->superclass) {
                 JsClassEntry* parent = mt->current_class->superclass;
                 if (parent->constructor && parent->constructor->fc && parent->constructor->fc->func_item) {
-                    // Get current 'this' — super() is called inside a constructor
-                    MIR_reg_t this_val = jm_call_0(mt, "js_get_super_this_value", MIR_T_I64);
                     MIR_reg_t ctor_fn;
                     if (parent->constructor->fc->capture_count > 0) {
                         ctor_fn = jm_build_closure_for_method(mt, parent->constructor->fc, parent->constructor->param_count);
@@ -5896,6 +5901,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     } else {
                         args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
                     }
+                    MIR_reg_t this_val = jm_call_0(mt, "js_get_super_this_value", MIR_T_I64);
                     // Propagate new.target to parent constructor via super()
                     MIR_reg_t cur_nt = jm_call_0(mt, "js_get_new_target", MIR_T_I64);
                     jm_call_void_1(mt, "js_set_new_target",
@@ -5920,7 +5926,6 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     JsClassEntry* ancestor = parent->superclass;
                     while (ancestor) {
                         if (ancestor->constructor && ancestor->constructor->fc && ancestor->constructor->fc->func_item) {
-                            MIR_reg_t this_val = jm_call_0(mt, "js_get_super_this_value", MIR_T_I64);
                             MIR_reg_t ctor_fn;
                             if (ancestor->constructor->fc->capture_count > 0) {
                                 ctor_fn = jm_build_closure_for_method(mt, ancestor->constructor->fc, ancestor->constructor->param_count);
@@ -5937,6 +5942,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                             } else {
                                 args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
                             }
+                            MIR_reg_t this_val = jm_call_0(mt, "js_get_super_this_value", MIR_T_I64);
                             // Propagate new.target to ancestor constructor via super()
                             MIR_reg_t cur_nt2 = jm_call_0(mt, "js_get_new_target", MIR_T_I64);
                             jm_call_void_1(mt, "js_set_new_target",
@@ -6015,10 +6021,6 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                         // this merge the derived `this` would lack the base fields like `type`.
                         {
                             MIR_reg_t parent_fn = jm_transpile_box_item(mt, mt->current_class->node->superclass);
-                            MIR_reg_t this_val = jm_call_0(mt, "js_get_super_this_value", MIR_T_I64);
-                            parent_fn = jm_call_2(mt, "js_get_super_constructor_from_receiver", MIR_T_I64,
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, parent_fn));
                             bool super_has_spread = false;
                             for (JsAstNode* chk = call->arguments; chk; chk = chk->next) {
                                 if (chk->node_type == JS_AST_NODE_SPREAD_ELEMENT) { super_has_spread = true; break; }
@@ -6026,6 +6028,10 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                             MIR_reg_t args_ptr = super_has_spread ?
                                 jm_build_spread_args_array(mt, call->arguments) :
                                 jm_build_args_array(mt, call->arguments, arg_count);
+                            MIR_reg_t this_val = jm_call_0(mt, "js_get_super_this_value", MIR_T_I64);
+                            parent_fn = jm_call_2(mt, "js_get_super_constructor_from_receiver", MIR_T_I64,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, parent_fn));
                             // Propagate new.target to dynamically-resolved parent via super()
                             MIR_reg_t cur_nt3 = jm_call_0(mt, "js_get_new_target", MIR_T_I64);
                             jm_call_void_1(mt, "js_set_new_target",
@@ -6056,12 +6062,25 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 if (mt->current_class && mt->current_class->node &&
                     mt->current_class->node->superclass &&
                     mt->current_class->node->superclass->node_type != JS_AST_NODE_IDENTIFIER) {
-                    MIR_reg_t parent_fn = jm_transpile_box_item(mt, mt->current_class->node->superclass);
+                    MIR_reg_t parent_fn = 0;
+                    if (mt->current_class->name) {
+                        JsIdentifierNode class_id;
+                        memset(&class_id, 0, sizeof(class_id));
+                        class_id.base.node_type = JS_AST_NODE_IDENTIFIER;
+                        class_id.name = mt->current_class->name;
+                        MIR_reg_t class_obj = jm_transpile_box_item(mt, (JsAstNode*)&class_id);
+                        MIR_reg_t super_ctor_key = jm_box_string_literal(mt, "__super_ctor__", 14);
+                        parent_fn = jm_call_2(mt, "js_property_get", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, class_obj),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, super_ctor_key));
+                    } else {
+                        parent_fn = jm_transpile_box_item(mt, mt->current_class->node->superclass);
+                    }
+                    MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
                     MIR_reg_t this_val = jm_call_0(mt, "js_get_super_this_value", MIR_T_I64);
                     parent_fn = jm_call_2(mt, "js_get_super_constructor_from_receiver", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, parent_fn));
-                    MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
                     MIR_reg_t cur_nt3 = jm_call_0(mt, "js_get_new_target", MIR_T_I64);
                     jm_call_void_1(mt, "js_set_new_target",
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, cur_nt3));
@@ -8724,8 +8743,11 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 int param_count = jm_count_params(resolved_fn);
 
                 // v17: save prev this/new.target BEFORE evaluating args, but set
-                // undefined AFTER args — otherwise `this` in args reads undefined
-                MIR_reg_t prev_this = jm_call_0(mt, "js_get_this", MIR_T_I64);
+                // undefined AFTER args — otherwise `this` in args reads undefined.
+                // Use the lexical binding accessor so a direct call before super()
+                // in a derived constructor preserves the TDZ sentinel instead of
+                // throwing while merely saving caller state.
+                MIR_reg_t prev_this = jm_call_0(mt, "js_get_lexical_this_binding", MIR_T_I64);
                 MIR_reg_t prev_nt_dc = jm_call_0(mt, "js_get_new_target", MIR_T_I64);
 
                 // Build proto for this call site

@@ -4161,6 +4161,19 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                         JsClassMethodEntry* me = &ce->methods[mi];
                         if (!me->is_static || me->is_constructor) continue;
                         if (!me->fc || !me->fc->func_item) continue;
+                        MIR_reg_t mk = 0;
+                        if (me->computed && me->key_expr) {
+                            int proto_spill = -1, cls_spill = -1;
+                            if (mt->in_generator && jm_has_yield(me->key_expr)) {
+                                proto_spill = jm_gen_spill_save(mt, class_proto_obj);
+                                cls_spill = jm_gen_spill_save(mt, cls_obj);
+                            }
+                            mk = jm_transpile_box_item(mt, me->key_expr);
+                            if (cls_spill >= 0) {
+                                jm_gen_spill_load(mt, class_proto_obj, proto_spill);
+                                jm_gen_spill_load(mt, cls_obj, cls_spill);
+                            }
+                        }
                         MIR_reg_t fn_item;
                         if (me->fc->capture_count > 0) {
                             fn_item = jm_build_closure_for_method(mt, me->fc, me->param_count);
@@ -4179,23 +4192,10 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                         if (me->fc) jm_emit_set_function_source(mt, fn_item, me->fc->node);
                         jm_call_void_1(mt, "js_mark_method_func", MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
                         jm_emit_set_function_home_class(mt, fn_item, cls_obj);
-                        MIR_reg_t mk;
-                        if (me->computed && me->key_expr) {
-                            // generator spill: save cls_obj and fn_item before yield-containing key expr
-                            int cls_spill = -1, fn_spill = -1;
-                            if (mt->in_generator && jm_has_yield(me->key_expr)) {
-                                cls_spill = jm_gen_spill_save(mt, cls_obj);
-                                fn_spill = jm_gen_spill_save(mt, fn_item);
-                            }
-                            mk = jm_transpile_box_item(mt, me->key_expr);
-                            if (cls_spill >= 0) {
-                                jm_gen_spill_load(mt, cls_obj, cls_spill);
-                                jm_gen_spill_load(mt, fn_item, fn_spill);
-                            }
-                            // Phase-5C: no longer wrap key with __get_/__set_.
-                        } else if (me->name) {
+                        if (!mk && me->name) {
                             mk = jm_box_string_literal(mt, me->name->chars, (int)me->name->len);
-                        } else {
+                        }
+                        if (!mk) {
                             continue;
                         }
                         jm_emit_install_method_or_accessor(mt, cls_obj, mk, fn_item,
@@ -4271,6 +4271,11 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, last_proto),
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_obj));
                                 ctor_super_val = super_val;
+                                MIR_reg_t super_ctor_key = jm_box_string_literal(mt, "__super_ctor__", 14);
+                                jm_call_3(mt, "js_property_set", MIR_T_I64,
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, super_ctor_key),
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, super_val));
                             }
                             JsAstNode* heritage = cls_node->superclass ? cls_node->superclass :
                                 ((ce->node && ce->node->superclass) ? ce->node->superclass : NULL);
@@ -4298,6 +4303,11 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, last_proto),
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_obj));
                                 ctor_super_val = super_val;
+                                MIR_reg_t super_ctor_key = jm_box_string_literal(mt, "__super_ctor__", 14);
+                                jm_call_3(mt, "js_property_set", MIR_T_I64,
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, super_ctor_key),
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, super_val));
                             }
                             if (heritage_is_null) {
                                 MIR_reg_t null_proto = jm_emit_null(mt);

@@ -2918,9 +2918,9 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         pp = pp->next;
                     }
                     if (pfn->body) {
-                        // Collect body locals, but exclude module-const entries (MODVAR,
-                        // FUNC, CLASS) — the parent won't create local registers for them.
-                        // Only add body locals that will actually be emitted as local variables.
+                        // Collect body locals.  Only IIFE-promoted module vars are omitted:
+                        // ordinary function-local declarations still shadow same-named
+                        // module constants and must stop capture propagation.
                         struct hashmap* body_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
                             jm_name_hash, jm_name_cmp, NULL, NULL);
                         jm_collect_visible_function_scope_names(pfn->body, parent->is_strict, body_locals, true);
@@ -2928,16 +2928,17 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         void* bl_item;
                         while (hashmap_iter(body_locals, &bl_iter, &bl_item)) {
                             JsNameSetEntry* bl_entry = (JsNameSetEntry*)bl_item;
-                            bool is_module_const = false;
+                            bool skip_local_binding = false;
                             if (mt->module_consts) {
                                 JsModuleConstEntry mclookup;
                                 snprintf(mclookup.name, sizeof(mclookup.name), "%s", bl_entry->name);
                                 JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
-                                if (mc) {
-                                    is_module_const = true;
+                                if (mc && mc->const_type == MCONST_MODVAR &&
+                                    mc->is_iife_var && parent->is_iife_body) {
+                                    skip_local_binding = true;
                                 }
                             }
-                            if (!is_module_const) {
+                            if (!skip_local_binding) {
                                 jm_name_set_add(parent_own, bl_entry->name);
                             }
                         }

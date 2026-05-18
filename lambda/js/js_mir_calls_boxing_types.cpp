@@ -8,13 +8,19 @@ JsMirImportEntry* jm_ensure_import(JsMirTranspiler* mt, const char* name,
     MIR_type_t ret_type, int nargs, MIR_var_t* args, int nres) {
     JsImportCacheEntry key;
     memset(&key, 0, sizeof(key));
-    snprintf(key.name, sizeof(key.name), "%s", name);
+    int key_len = snprintf(key.name, sizeof(key.name), "%s#r%d#n%d#a%d",
+        name, (int)ret_type, nres, nargs);
+    for (int i = 0; i < nargs && key_len > 0 && key_len < (int)sizeof(key.name); i++) {
+        key_len += snprintf(key.name + key_len, sizeof(key.name) - key_len,
+            "#%d", (int)args[i].type);
+    }
 
     JsImportCacheEntry* found = (JsImportCacheEntry*)hashmap_get(mt->import_cache, &key);
     if (found) return &found->entry;
 
     char proto_name[140];
-    snprintf(proto_name, sizeof(proto_name), "%s_p", name);
+    snprintf(proto_name, sizeof(proto_name), "%s_p_r%d_n%d_a%d",
+        name, (int)ret_type, nres, nargs);
 
     MIR_type_t res_types[1] = { ret_type };
     MIR_item_t proto = MIR_new_proto_arr(mt->ctx, proto_name, nres, res_types, nargs, args);
@@ -22,7 +28,7 @@ JsMirImportEntry* jm_ensure_import(JsMirTranspiler* mt, const char* name,
 
     JsImportCacheEntry new_entry;
     memset(&new_entry, 0, sizeof(new_entry));
-    snprintf(new_entry.name, sizeof(new_entry.name), "%s", name);
+    snprintf(new_entry.name, sizeof(new_entry.name), "%s", key.name);
     new_entry.entry.proto = proto;
     new_entry.entry.import = imp;
     hashmap_set(mt->import_cache, &new_entry);

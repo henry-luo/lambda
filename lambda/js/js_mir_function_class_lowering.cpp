@@ -156,6 +156,15 @@ static void jm_collect_lexical_decl_names(JsAstNode* node, struct hashmap* names
         }
         break;
     }
+    case JS_AST_NODE_CLASS_DECLARATION: {
+        JsClassNode* cls = (JsClassNode*)node;
+        if (cls->name && cls->name->chars) {
+            char name[128];
+            snprintf(name, sizeof(name), "_js_%.*s", (int)cls->name->len, cls->name->chars);
+            jm_name_set_add(names, name);
+        }
+        break;
+    }
     case JS_AST_NODE_BLOCK_STATEMENT:
         jm_collect_lexical_decl_statements(((JsBlockNode*)node)->statements, names);
         break;

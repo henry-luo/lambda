@@ -5286,6 +5286,14 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
             // ES spec: built-in constructor .prototype is non-writable. Mirrors the
             // descriptor synthesis in js_object_get_own_property_descriptor.
             if (js_func_is_builtin_ctor(object)) return value;
+            if (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS) {
+                if (fn->properties_map.item == 0) {
+                    fn->properties_map = js_new_object();
+                    heap_register_gc_root(&fn->properties_map.item);
+                }
+                js_property_set(fn->properties_map, key, value);
+                return value;
+            }
             fn->prototype = value;
             // Register fn->prototype as a GC root so the prototype map survives GC.
             // JsFunction is pool-allocated (invisible to GC), but fn->prototype points
