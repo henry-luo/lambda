@@ -9,6 +9,7 @@
 #include "display_list.h"
 #include "rdt_video.h"
 #include "rdt_vector.hpp"
+#include "render_raster.hpp"
 #include "state_store.hpp"
 #include "view.hpp"
 #include "../lib/font/font.h"

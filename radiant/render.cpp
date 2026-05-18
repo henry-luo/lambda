@@ -4,6 +4,7 @@
 #include "render_background.hpp"
 #include "render_filter.hpp"
 #include "render_clip.hpp"
+#include "render_raster.hpp"
 #include "render_state.hpp"
 #include "render_svg_inline.hpp"
 #include "layout.hpp"

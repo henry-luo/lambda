@@ -5,6 +5,7 @@
 #include "display_list.h"
 #include "render_filter.hpp"
 #include "render_background.hpp"
+#include "render_raster.hpp"
 #include "clip_shape.h"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"

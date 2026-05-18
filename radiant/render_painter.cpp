@@ -1,4 +1,5 @@
 #include "render.hpp"
+#include "render_raster.hpp"
 
 void rc_fill_rect(RenderContext* rdcon, float x, float y, float w, float h, Color color) {
     if (rdcon->dl) dl_fill_rect(rdcon->dl, x, y, w, h, color);

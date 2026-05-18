@@ -29,6 +29,9 @@ Completed:
   - `raster_fill_rect()`
   - `raster_blit_surface_scaled()`
   - `raster_blit_pixels_scaled()`
+- Moved the shared raster API into dedicated raster files:
+  - `render_raster.hpp`
+  - `render_raster.cpp`
 - Kept legacy `fill_surface_rect()` and `blit_surface_scaled()` as compatibility wrappers that delegate to the shared raster API.
 - Added shared painter helpers and moved them into dedicated painter files:
   - `render_painter.hpp`
@@ -43,6 +46,7 @@ Completed:
 - Refactored replaced-content image rendering in `render.cpp` so SVG pictures, SVG raster fallbacks, normal raster images, webview layers, and surface clears use the shared vector/raster helpers.
 - Refactored video frame blitting in `render_video.cpp` to use `raster_blit_pixels_scaled()` instead of a local scaling loop.
 - Removed an unused duplicate poster-image scaler from `render_video.cpp`.
+- Cleaned `surface.cpp` around the raster split by replacing local `fprintf()` diagnostics with `log_error()`, removing an unused temporary path variable, and adding a missing allocation-null check for `image_surface_create()`.
 - Updated `DisplayList` direct-pixel commands so fill/blit replay receives the current rectangular clip and clip-shape stack.
 - Updated tiled replay in `tile_pool.cpp` so direct-pixel fill/blit replay restores clip shapes and translates shape coordinates into tile-local space.
 - Preserved blit opacity through display-list recording and replay.
@@ -63,9 +67,7 @@ Validation:
 - `make build` passed with 0 errors.
 - `make layout suite=baseline` passed with 4149 successful tests and 6 skipped tests.
 
-Known remaining gap:
-
-- The common raster functions still live in `surface.cpp`. A later cleanup can introduce a small `render_raster.hpp/cpp` facade if the surface file remains too broad.
+The earlier raster-facade gap has been closed: `surface.cpp` now keeps the surface ownership, image loading, and compatibility wrappers, while render-facing fill/blit/scaling behavior lives in `render_raster.cpp`.
 
 This means the practical Phase 1 painter/raster consolidation is now largely complete, and the first shared clip/path plus render-state helper extractions have started. The next cleanup step is to continue extracting shared geometry and additional state scopes so feature modules stop carrying their own small variants of the same math and save/restore logic.
 
