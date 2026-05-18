@@ -2,18 +2,26 @@
 #include "layout.hpp"
 #include "render_backend_caps.hpp"
 #include "render_img.hpp"
+#include "render_overlay.hpp"
+#include "render_profiler.hpp"
 #include "render_raster.hpp"
+#include "state_store.hpp"
 #include "tile_pool.h"
 
 #include "../lib/tagged.hpp"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include "../lib/str.h"
+#include <chrono>
 #include <pthread.h>
+#include <png.h>
+#include <setjmp.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 void render_block_view(RenderContext* rdcon, ViewBlock* view_block);
 void render_image_view(RenderContext* rdcon, ViewBlock* view);
+void render_video_frames(DisplayList* dl, ImageSurface* surface, DocState* rstate, UiContext* uicon);
 
 static RenderPool* g_render_pool = nullptr;
 static pthread_once_t g_render_pool_once = PTHREAD_ONCE_INIT;
@@ -249,4 +257,187 @@ void render_output_save_surface(ImageSurface* surface, const char* output_file) 
     } else {
         save_surface_to_png(surface, output_file);
     }
+}
+
+void render_output_render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file) {
+    using namespace std::chrono;
+    auto t_start = high_resolution_clock::now();
+
+    RenderProfiler profiler;
+    render_profiler_reset(&profiler);
+    RenderContext rdcon;
+    log_debug("Render HTML doc");
+    render_output_init_context(&rdcon, uicon, view_tree, &profiler);
+
+    uint32_t canvas_bg = render_output_canvas_background(view_tree->root);
+    DocState* state = uicon->document ? (DocState*)uicon->document->state : nullptr;
+    RenderOutputClearResult clear_result =
+        render_output_clear_surface(&rdcon, view_tree, state, canvas_bg);
+    bool selective = clear_result.selective;
+
+    DisplayList display_list = {};
+    dl_init(&display_list, view_tree->arena);
+    rdcon.dl = &display_list;
+
+    auto t_init = high_resolution_clock::now();
+
+    render_output_render_view_tree(&rdcon, view_tree);
+
+    auto t_render = high_resolution_clock::now();
+    log_info("[TIMING] render_block_view (record): %.1fms, %d display list items",
+             duration<double, std::milli>(t_render - t_init).count(), dl_item_count(&display_list));
+    render_profiler_log(rdcon.profiler);
+
+    double render_ms = duration<double, std::milli>(t_render - t_init).count();
+    render_profiler_write_record_stderr(render_ms, uicon->surface->width,
+        uicon->surface->height, dl_item_count(&display_list));
+    render_profiler_write_counters_stderr(rdcon.profiler);
+
+    if (uicon->document && uicon->document->state) {
+        log_debug("[RENDER] calling render_ui_overlays, state=%p", (void*)uicon->document->state);
+        render_ui_overlays(&rdcon, uicon->document->state);
+    } else {
+        log_debug("[RENDER] no state for overlays: doc=%p, state=%p",
+            (void*)uicon->document, uicon->document ? (void*)uicon->document->state : nullptr);
+    }
+
+    auto t_replay_start = high_resolution_clock::now();
+
+    int item_count = dl_item_count(&display_list);
+    RenderOutputReplayResult replay_result =
+        render_output_replay_display_list(&rdcon, &display_list, canvas_bg, clear_result.replay_dirty);
+
+    auto t_replay_end = high_resolution_clock::now();
+    double replay_ms = duration<double, std::milli>(t_replay_end - t_replay_start).count();
+    if (replay_result.tiled) {
+        log_info("[TIMING] dl_replay_tiled: %.1fms (%d items, %d tiles, %d threads)",
+                 replay_ms, item_count, replay_result.tile_count, replay_result.thread_count);
+        render_profiler_write_tiled_replay_stderr(replay_ms, item_count,
+            replay_result.tile_count, replay_result.thread_count);
+    } else {
+        log_info("[TIMING] dl_replay: %.1fms (%d items)",
+                 replay_ms, item_count);
+        render_profiler_write_replay_stderr(replay_ms, item_count);
+    }
+
+    DocState* rstate = uicon->document ? uicon->document->state : nullptr;
+    render_video_frames(&display_list, rdcon.ui_context->surface, rstate, rdcon.ui_context);
+
+    auto t_sync = high_resolution_clock::now();
+    log_info("[TIMING] render complete: %.1fms", duration<double, std::milli>(t_sync - t_render).count());
+    render_profiler_emit_event(rdcon.profiler, uicon, rstate, render_ms, replay_ms,
+        duration<double, std::milli>(t_sync - t_start).count(), item_count, selective,
+        replay_result.tiled, replay_result.tile_count, replay_result.thread_count);
+
+    render_output_save_surface(rdcon.ui_context->surface, output_file);
+
+    auto t_save = high_resolution_clock::now();
+    if (output_file) {
+        log_info("[TIMING] save_to_file: %.1fms", duration<double, std::milli>(t_save - t_sync).count());
+    }
+
+    dl_destroy(&display_list);
+    render_output_cleanup_context(&rdcon);
+    if (uicon->document && uicon->document->state) {
+        doc_state_clear_render_flags(uicon->document->state);
+    }
+
+    auto t_end = high_resolution_clock::now();
+    log_info("[TIMING] render_html_doc total: %.1fms%s",
+        duration<double, std::milli>(t_end - t_start).count(), selective ? " (selective)" : "");
+}
+
+/**
+ * Render a large output image in horizontal PNG strips.
+ *
+ * The caller passes the full physical output size. This function creates one
+ * tile surface at a time, renders into page-absolute clipped coordinates, and
+ * streams rows into libpng so peak pixel memory stays bounded by the tile
+ * height rather than the full page height.
+ */
+void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree,
+                                    const char* output_file,
+                                    int total_width, int total_height) {
+    using namespace std::chrono;
+    auto t_start = high_resolution_clock::now();
+
+    static const int TILE_H = 4096;  // physical pixels per strip
+    log_info("render_output_render_tiled_png: %dx%d px -> %s (%d tiles of %d px)",
+        total_width, total_height, output_file,
+        (total_height + TILE_H - 1) / TILE_H, TILE_H);
+
+    FILE* fp = fopen(output_file, "wb");
+    if (!fp) {
+        log_error("render_output_render_tiled_png: cannot open output file: %s", output_file);
+        return;
+    }
+    png_structp png = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+    if (!png) { fclose(fp); return; }
+    png_infop info = png_create_info_struct(png);
+    if (!info) { png_destroy_write_struct(&png, NULL); fclose(fp); return; }
+    if (setjmp(png_jmpbuf(png))) {
+        log_error("render_output_render_tiled_png: PNG error during write");
+        png_destroy_write_struct(&png, &info); fclose(fp); return;
+    }
+    png_init_io(png, fp);
+    png_set_IHDR(png, info, total_width, total_height,
+                 8, PNG_COLOR_TYPE_RGBA, PNG_INTERLACE_NONE,
+                 PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
+    png_write_info(png, info);
+
+    uint32_t canvas_bg = render_output_canvas_background(view_tree->root);
+
+    ImageSurface* saved_surface = uicon->surface;
+    int saved_window_height = uicon->window_height;
+
+    for (int tile_y = 0; tile_y < total_height; tile_y += TILE_H) {
+        int tile_h = (tile_y + TILE_H <= total_height) ? TILE_H : (total_height - tile_y);
+
+        ImageSurface* tile_surf = image_surface_create(total_width, tile_h);
+        if (!tile_surf) {
+            log_error("render_output_render_tiled_png: failed to allocate tile surface %dx%d at y=%d",
+                total_width, tile_h, tile_y);
+            break;
+        }
+
+        {
+            Bound tile_clip = {0, 0, (float)total_width, (float)tile_h};
+            RasterPaintContext raster = {tile_surf, &tile_clip, nullptr, 0};
+            raster_fill_rect(&raster, NULL, canvas_bg);
+        }
+        tile_surf->tile_offset_y = tile_y;
+
+        uicon->surface = tile_surf;
+        uicon->window_height = tile_h;
+
+        RenderProfiler profiler;
+        render_profiler_reset(&profiler);
+        RenderContext rdcon;
+        render_output_init_context(&rdcon, uicon, view_tree, &profiler);
+
+        rdcon.block.clip = {0, (float)tile_y, (float)total_width, (float)(tile_y + tile_h)};
+        rdt_vector_set_tile_offset_y(&rdcon.vec, (float)tile_y);
+
+        render_output_render_view_tree(&rdcon, view_tree);
+        render_output_cleanup_context(&rdcon);
+
+        for (int y = 0; y < tile_h; y++) {
+            uint8_t* row = (uint8_t*)tile_surf->pixels + y * tile_surf->pitch;
+            png_write_row(png, row);
+        }
+
+        image_surface_destroy(tile_surf);
+        log_info("render_output_render_tiled_png: tile y=%d..%d done", tile_y, tile_y + tile_h);
+    }
+
+    uicon->surface = saved_surface;
+    uicon->window_height = saved_window_height;
+
+    png_write_end(png, NULL);
+    png_destroy_write_struct(&png, &info);
+    fclose(fp);
+
+    auto t_end = high_resolution_clock::now();
+    log_info("[TIMING] render_output_render_tiled_png total: %.1fms (%dx%d)",
+        duration<double, std::milli>(t_end - t_start).count(), total_width, total_height);
 }
