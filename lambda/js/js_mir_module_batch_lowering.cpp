@@ -34,6 +34,18 @@ static bool jm_is_direct_program_class_decl(JsProgramNode* program, JsClassNode*
     return false;
 }
 
+static JsFunctionNode* jm_find_iife_function_expr(JsAstNode* expr) {
+    if (!expr) return NULL;
+    if (expr->node_type != JS_AST_NODE_CALL_EXPRESSION) return NULL;
+    JsCallNode* call = (JsCallNode*)expr;
+    if (call->callee &&
+        (call->callee->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
+         call->callee->node_type == JS_AST_NODE_ARROW_FUNCTION)) {
+        return (JsFunctionNode*)call->callee;
+    }
+    return jm_find_iife_function_expr(call->callee);
+}
+
 static MIR_reg_t jm_emit_class_object_for_entry(JsMirTranspiler* mt, JsClassEntry* ce) {
     if (!mt || !ce || !ce->name) return 0;
     JsIdentifierNode tmp_id;
@@ -139,6 +151,29 @@ static void jm_emit_class_instance_field_metadata_for_decl(JsMirTranspiler* mt, 
             MIR_T_I64, MIR_new_reg_op(mt->ctx, kind_val));
         metadata_index++;
     }
+}
+
+static bool jm_private_static_method_brand_seen(JsClassEntry* ce, int method_index) {
+    if (!ce || method_index < 0 || method_index >= ce->method_count) return false;
+    JsClassMethodEntry* me = &ce->methods[method_index];
+    if (!me->is_static || me->is_constructor || !me->name || !jm_is_private_name(me->name)) return false;
+    for (int pi = 0; pi < method_index; pi++) {
+        JsClassMethodEntry* prev = &ce->methods[pi];
+        if (!prev->is_static || prev->is_constructor || !prev->name || !jm_is_private_name(prev->name)) continue;
+        if (prev->name->len == me->name->len &&
+            memcmp(prev->name->chars, me->name->chars, (size_t)me->name->len) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void jm_emit_set_private_class_index(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce) {
+    if (!mt || !cls_obj || !ce || !mt->class_entries) return;
+    int class_index = (int)(ce - mt->class_entries);
+    jm_call_void_2(mt, "js_set_private_class_index",
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, class_index));
 }
 
 static void jm_collect_direct_statement_let_const_names(JsAstNode* stmt, struct hashmap* names) {
@@ -2394,15 +2429,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 stmt = stmt->next;
                 continue;
             }
-            JsCallNode* call = (JsCallNode*)expr;
-            JsAstNode* callee = call->callee;
-            if (!callee) { stmt = stmt->next; continue; }
-            // Callee can be ARROW_FUNCTION or FUNCTION_EXPRESSION (possibly wrapped)
-            JsFunctionNode* iife_fn = NULL;
-            if (callee->node_type == JS_AST_NODE_ARROW_FUNCTION ||
-                callee->node_type == JS_AST_NODE_FUNCTION_EXPRESSION) {
-                iife_fn = (JsFunctionNode*)callee;
-            }
+            JsFunctionNode* iife_fn = jm_find_iife_function_expr(expr);
             if (!iife_fn || !iife_fn->body) { stmt = stmt->next; continue; }
 
             bool self_referencing_named_iife = false;
@@ -2454,6 +2481,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                         mce.const_type = MCONST_MODVAR;
                                         mce.is_iife_var = true;
                                         mce.int_val = mt->module_var_count++;
+                                        mce.var_kind = (int)vd->kind;
                                         hashmap_set(mt->module_consts, &mce);
                                         log_debug("js-mir: iife var '%s' → module_var[%d]", vname, (int)mce.int_val);
                                     }
@@ -2464,6 +2492,30 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     }
                     s = s->next;
                 }
+                struct hashmap* iife_func_hoists = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+                    jm_name_hash, jm_name_cmp, NULL, NULL);
+                jm_collect_body_locals(iife_fn->body, iife_func_hoists, true);
+                size_t fh_iter = 0; void* fh_item;
+                while (hashmap_iter(iife_func_hoists, &fh_iter, &fh_item)) {
+                    JsNameSetEntry* e = (JsNameSetEntry*)fh_item;
+                    if (!e->from_func_decl) continue;
+                    if (top_level_declares_name(e->name, stmt)) continue;
+                    JsModuleConstEntry lookup;
+                    snprintf(lookup.name, sizeof(lookup.name), "%s", e->name);
+                    if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < 2048) {
+                        JsModuleConstEntry mce;
+                        memset(&mce, 0, sizeof(mce));
+                        snprintf(mce.name, sizeof(mce.name), "%s", e->name);
+                        mce.const_type = MCONST_MODVAR;
+                        mce.int_val = mt->module_var_count++;
+                        mce.is_nested_func_hoist = true;
+                        mce.is_iife_var = true;
+                        hashmap_set(mt->module_consts, &mce);
+                        log_debug("js-mir: nested iife func '%s' → module_var[%d]",
+                            mce.name, (int)mce.int_val);
+                    }
+                }
+                hashmap_free(iife_func_hoists);
             }
             stmt = stmt->next;
         }
@@ -3736,6 +3788,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             JsModuleConstEntry* mce = (JsModuleConstEntry*)aitem;
             if (mce->const_type != MCONST_MODVAR) continue;
             if (!mce->is_nested_func_hoist) continue;
+            if (mce->is_iife_var) continue;
             // Suppress if a let/const in the program shadows this name
             JsNameSetEntry lex_lookup;
             memset(&lex_lookup, 0, sizeof(lex_lookup));
@@ -4155,6 +4208,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     }
                     // Create class object with __class_name__ property
                     MIR_reg_t cls_obj = jm_call_0(mt, "js_new_object", MIR_T_I64);
+                    jm_emit_set_private_class_index(mt, cls_obj, ce);
                     jm_emit_set_class_source(mt, cls_obj, cls_node);
                     MIR_reg_t cn_key = jm_box_string_literal(mt, "__class_name__", 14);
                     MIR_reg_t cn_val = jm_box_string_literal(mt, cls_node->name->chars, (int)cls_node->name->len);
@@ -4328,7 +4382,8 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
 
                         jm_emit_install_method_or_accessor(mt, cls_obj, mk, fn_item,
                             me->is_getter, me->is_setter);
-                        if (me->name && jm_is_private_name(me->name)) {
+                        if (me->name && jm_is_private_name(me->name) &&
+                            !jm_private_static_method_brand_seen(ce, mi)) {
                             jm_call_void_3(mt, "js_private_brand_add",
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, mk),

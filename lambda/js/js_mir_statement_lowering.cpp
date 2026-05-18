@@ -23,6 +23,19 @@ static bool jm_has_outer_block_func_binding(JsMirTranspiler* mt, const char* nam
     return false;
 }
 
+static JsMirVarEntry* jm_find_enclosing_var_env_binding(JsMirTranspiler* mt, const char* name) {
+    if (!mt || !name) return NULL;
+    int start_depth = mt->scope_depth - 1;
+    if (start_depth >= 64) start_depth = 63;
+    for (int depth = start_depth; depth >= 0; depth--) {
+        JsMirVarEntry* var = jm_find_var_in_scope_depth(mt, name, depth);
+        if (!var) continue;
+        if (var->is_let_const || var->from_block_func_decl || var->from_catch_param) continue;
+        return var;
+    }
+    return NULL;
+}
+
 void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) {
     // JS spec: 'var' is function-scoped. Redirect variable creation to scope 1
     // (the function body scope after jm_push_scope) so vars survive after block scopes pop.
@@ -1595,6 +1608,21 @@ static bool jm_private_instance_method_brand_seen(JsClassEntry* ce, int method_i
     return false;
 }
 
+static bool jm_private_static_method_brand_seen(JsClassEntry* ce, int method_index) {
+    if (!ce || method_index < 0 || method_index >= ce->method_count) return false;
+    JsClassMethodEntry* me = &ce->methods[method_index];
+    if (!me->is_static || me->is_constructor || !me->name || !jm_is_private_name(me->name)) return false;
+    for (int pi = 0; pi < method_index; pi++) {
+        JsClassMethodEntry* prev = &ce->methods[pi];
+        if (!prev->is_static || prev->is_constructor || !prev->name || !jm_is_private_name(prev->name)) continue;
+        if (prev->name->len == me->name->len &&
+            memcmp(prev->name->chars, me->name->chars, (size_t)me->name->len) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static void jm_emit_private_instance_method_brands(JsMirTranspiler* mt, MIR_reg_t obj, MIR_reg_t cls_obj, JsClassEntry* ce) {
     if (!mt || !ce || !cls_obj) return;
     for (int mi = 0; mi < ce->method_count; mi++) {
@@ -1611,6 +1639,9 @@ static void jm_emit_own_instance_fields_on_object(JsMirTranspiler* mt, JsClassEn
     JsClassEntry* saved_current_class = mt->current_class;
     mt->current_class = ce;
     jm_call_void_0(mt, "js_private_field_init_begin");
+    if (include_private && cls_obj) {
+        jm_emit_private_instance_method_brands(mt, obj, cls_obj, ce);
+    }
     for (int fi = 0; fi < ce->instance_field_count; fi++) {
         JsInstanceFieldEntry* inf = &ce->instance_fields[fi];
         MIR_reg_t key = 0;
@@ -1652,9 +1683,6 @@ static void jm_emit_own_instance_fields_on_object(JsMirTranspiler* mt, JsClassEn
         }
         jm_emit_exc_propagate_check(mt);
     }
-    if (include_private && cls_obj) {
-        jm_emit_private_instance_method_brands(mt, obj, cls_obj, ce);
-    }
     jm_call_void_0(mt, "js_private_field_init_end");
     mt->current_class = saved_current_class;
 }
@@ -1666,6 +1694,14 @@ static void jm_emit_set_function_home_class(JsMirTranspiler* mt, MIR_reg_t fn_it
         MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, home_key),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
+}
+
+static void jm_emit_set_private_class_index(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce) {
+    if (!mt || !cls_obj || !ce || !mt->class_entries) return;
+    int class_index = (int)(ce - mt->class_entries);
+    jm_call_void_2(mt, "js_set_private_class_index",
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, class_index));
 }
 
 void jm_emit_class_static_field(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce, JsStaticFieldEntry* sf) {
@@ -2435,13 +2471,17 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
             // own public fields run after the first successful super() call.
             // v37: Set private field init flag to bypass brand check during initialization
             jm_call_void_0(mt, "js_private_field_init_begin");
-            bool defer_private_instance_init = ce->node && ce->node->superclass;
+            bool defer_private_instance_init = ce->node && ce->node->superclass &&
+                ce->constructor && ce->constructor->fc;
             for (int ci = field_chain_len - 1; ci >= 0; ci--) {
                 JsClassEntry* fc_ce = field_chain[ci];
                 JsClassEntry* saved_current_class = mt->current_class;
                 mt->current_class = fc_ce;
                 MIR_reg_t fc_cls_val = jm_class_has_private_instance_brands(fc_ce)
                     ? jm_emit_class_object_for_entry(mt, fc_ce) : 0;
+                if (!defer_private_instance_init) {
+                    jm_emit_private_instance_method_brands(mt, obj, fc_cls_val, fc_ce);
+                }
                 for (int fi = 0; fi < fc_ce->instance_field_count; fi++) {
                     JsInstanceFieldEntry* inf = &fc_ce->instance_fields[fi];
                     MIR_reg_t key;
@@ -2507,9 +2547,6 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
                         jm_emit_private_brand_add(mt, obj, fc_cls_val, private_field_name);
                     }
                 }
-                if (!defer_private_instance_init) {
-                    jm_emit_private_instance_method_brands(mt, obj, fc_cls_val, fc_ce);
-                }
                 mt->current_class = saved_current_class;
             }
             // Own class instance fields
@@ -2518,6 +2555,9 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
             MIR_reg_t own_cls_val = jm_class_has_private_instance_brands(ce)
                 ? jm_transpile_box_item(mt, call->callee) : 0;
             bool defer_own_instance_fields = ce->node && ce->node->superclass;
+            if (!defer_private_instance_init && !defer_own_instance_fields) {
+                jm_emit_private_instance_method_brands(mt, obj, own_cls_val, ce);
+            }
             for (int fi = 0; fi < ce->instance_field_count; fi++) {
                 JsInstanceFieldEntry* inf = &ce->instance_fields[fi];
                 if (defer_own_instance_fields) continue;
@@ -2583,9 +2623,6 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
                 if (private_field_name && own_cls_val) {
                     jm_emit_private_brand_add(mt, obj, own_cls_val, private_field_name);
                 }
-            }
-            if (!defer_private_instance_init) {
-                jm_emit_private_instance_method_brands(mt, obj, own_cls_val, ce);
             }
             mt->current_class = saved_current_class;
             // v37: Clear private field init flag after all fields are initialized
@@ -3811,20 +3848,27 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                 break;
             }
             JsMirVarEntry* existing = jm_find_var(mt, fn_vname);
-            // Annex B skip: if the existing binding is let/const, don't overwrite
-            // (B.3.3.1/B.3.3.3 — would produce early error if replaced with var)
-            if (existing && existing->is_let_const) {
-                break;
-            }
             // Annex B runtime replacement targets the var/function environment,
             // not an intervening block/catch binding.  In `catch (f) { { function f(){} } }`,
             // the simple catch parameter is intentionally allowed by B.3.5 while
             // the outer function-scoped `var f` binding must receive the function.
             if (mt->current_fc && mt->scope_depth > 1) {
-                JsMirVarEntry* var_env_existing = jm_find_var_in_scope_depth(mt, fn_vname, 1);
+                JsMirVarEntry* var_env_existing = jm_find_enclosing_var_env_binding(mt, fn_vname);
                 if (var_env_existing && !var_env_existing->is_let_const &&
                     !jm_has_outer_block_func_binding(mt, fn_vname)) {
                     existing = var_env_existing;
+                }
+            }
+            // Annex B skip: if the existing binding is let/const, don't overwrite
+            // (B.3.3.1/B.3.3.3 — would produce early error if replaced with var).
+            // A sloppy block-level function declaration also has a block/switch
+            // lexical binding; that binding must not suppress the Annex B
+            // var/global environment update for the same function declaration.
+            if (existing && existing->is_let_const) {
+                if (existing->from_block_func_decl) {
+                    existing = NULL;
+                } else {
+                    break;
                 }
             }
             // Also check module_consts for let/const conflict (eval context stores
@@ -3983,6 +4027,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                     }
                     // Create class object with __class_name__ property
                     MIR_reg_t cls_obj = jm_call_0(mt, "js_new_object", MIR_T_I64);
+                    jm_emit_set_private_class_index(mt, cls_obj, ce);
                     jm_emit_set_class_source(mt, cls_obj, cls_node);
                     MIR_reg_t cn_key = jm_box_string_literal(mt, "__class_name__", 14);
                     MIR_reg_t cn_val = jm_box_string_literal(mt, cls_node->name->chars, (int)cls_node->name->len);
@@ -4155,7 +4200,8 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                         }
                         jm_emit_install_method_or_accessor(mt, cls_obj, mk, fn_item,
                             me->is_getter, me->is_setter);
-                        if (me->name && jm_is_private_name(me->name)) {
+                        if (me->name && jm_is_private_name(me->name) &&
+                            !jm_private_static_method_brand_seen(ce, mi)) {
                             jm_call_void_3(mt, "js_private_brand_add",
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, mk),

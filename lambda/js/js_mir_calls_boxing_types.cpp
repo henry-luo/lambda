@@ -1161,6 +1161,14 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
         snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
         JsMirVarEntry* var = jm_find_var(mt, vname);
         if (var && jm_is_native_type(var->type_id)) {
+            if (var->tdz_active) {
+                MIR_reg_t boxed = jm_box_native(mt, var->reg, var->type_id);
+                jm_call_void_3(mt, "js_check_tdz",
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)id->name->chars),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int)id->name->len));
+                jm_emit_exc_propagate_check(mt);
+            }
             if (target_type == LMD_TYPE_FLOAT)
                 return jm_ensure_native_float(mt, var->reg, var->type_id);
             else
@@ -1178,6 +1186,13 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
             if (mc && mc->const_type == MCONST_MODVAR) {
                 boxed = jm_call_1(mt, "js_get_module_var", MIR_T_I64,
                     MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val));
+                if (mc->var_kind == JS_VAR_LET || mc->var_kind == JS_VAR_CONST) {
+                    jm_call_void_3(mt, "js_check_tdz",
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)id->name->chars),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int)id->name->len));
+                    jm_emit_exc_propagate_check(mt);
+                }
             } else if (mc && mc->const_type == MCONST_INT) {
                 // constant int: emit directly as native
                 MIR_reg_t r = jm_new_reg(mt, "mcint", MIR_T_I64);

@@ -803,7 +803,17 @@ void jm_collect_body_refs(JsAstNode* node, struct hashmap* refs) {
     case JS_AST_NODE_CALL_EXPRESSION:
     case JS_AST_NODE_NEW_EXPRESSION: {
         JsCallNode* c = (JsCallNode*)node;
-        jm_collect_body_refs(c->callee, refs);
+        bool is_super_call = false;
+        if (c->callee && c->callee->node_type == JS_AST_NODE_IDENTIFIER) {
+            JsIdentifierNode* id = (JsIdentifierNode*)c->callee;
+            is_super_call = id->name && id->name->len == 5 &&
+                strncmp(id->name->chars, "super", 5) == 0;
+        }
+        if (is_super_call) {
+            jm_name_set_add(refs, "_js_this");
+        } else {
+            jm_collect_body_refs(c->callee, refs);
+        }
         JsAstNode* arg = c->arguments;
         while (arg) { jm_collect_body_refs(arg, refs); arg = arg->next; }
         break;
@@ -1280,7 +1290,6 @@ void jm_collect_all_let_const_names_recursive(JsAstNode* node, struct hashmap* n
     }
     case JS_AST_NODE_SWITCH_STATEMENT: {
         JsSwitchNode* sw = (JsSwitchNode*)node;
-        jm_collect_switch_lexical_names(node, names);
         JsAstNode* c = sw->cases;
         while (c) { jm_collect_all_let_const_names_recursive(c, names); c = c->next; }
         break;

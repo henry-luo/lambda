@@ -2551,3 +2551,183 @@ Next work:
 - Finish global/block/function lexical TDZ through closure envs.
 - Then return to the RegExp lookbehind/named-groups cluster, which remains the
   largest standalone area.
+
+## 45. Closure TDZ For Module And IIFE Lexical Bindings
+
+Status on 2026-05-18: the focused global/block/function closure TDZ cases now
+pass, and the 151-test remaining slice is down to 130 failures.
+
+Root causes:
+
+- Native arithmetic unboxing for typed module vars read `MCONST_MODVAR` values
+  directly, so `function f() { return x + 1; }` could consume the TDZ sentinel
+  before the normal identifier read emitted `js_check_tdz`.
+- Assignment to captured/module lexical bindings overwrote the binding without
+  first checking whether the current binding value was still the TDZ sentinel.
+- IIFE-local `let`/`const` promotion registered module-var slots without
+  preserving the declaration kind, so TDZ setup treated those promoted bindings
+  like `var`.
+
+Fix:
+
+- Added TDZ checks to native identifier unboxing for let/const module vars.
+- Added assignment-side TDZ checks for module lexical bindings and captured
+  env/scope-env lexical bindings before writes.
+- Preserved `var_kind` when promoting IIFE-local declarations to module vars.
+
+Verification:
+
+```bash
+make -C build/premake config=release_native lambda -j4 CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib"
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_global_tdz_closure_batch.txt --js-timeout=30 --write-failures=temp/js43_global_tdz_closure_after_iife_varkind.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_func_tdz_getset_batch.txt --js-timeout=30 --write-failures=temp/js43_func_tdz_getset_after_iife_varkind.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_current_remaining_after_switch_input.txt --js-timeout=30 --write-failures=temp/js43_current_remaining_after_tdz_closure_fix.tsv --gtest_brief=1
+```
+
+Results:
+
+- Global TDZ focused batch: 5 / 5 passed.
+- Function/block closure TDZ focused batch: 6 / 6 passed.
+- Original 151-test slice: 21 / 151 passed, leaving 130 failures.  Previous
+  checkpoint was 17 / 151 passed, leaving 134 failures.
+
+Current top remaining path clusters:
+
+| Area | Failures |
+|---|---:|
+| `language/statements` | 43 |
+| `built_ins/RegExp` | 36 |
+| `language/expressions` | 14 |
+| `language/literals` | 12 |
+| `language/global_code` | 11 |
+| `language/function_code` | 10 |
+
+Next work:
+
+- The largest single cluster remains RegExp lookbehind/named-groups.
+- On the language side, the next small target is the remaining `let` closure
+  update-expression case: `language_statements_let_syntax_let_closure_inside_next_expression_js`.
+
+## 46. Full test262 Baseline Update Attempt
+
+Status on 2026-05-18: reran the full js262/test262 suite through the baseline
+update target.  The suite completed, but the baseline was not rewritten because
+the runner found real regressions after isolated retry.
+
+Command:
+
+```bash
+make test262-update-baseline
+```
+
+Result:
+
+- Prepared 42,219 tests: 8,056 skipped, 34,163 executable/non-skipped count.
+- Fully passed: 33,865 / 34,163 (99.1%).
+- Failed: 298.
+- Non-fully-passing: 0.
+- Existing baseline passing count loaded by the runner: 33,839.
+- Improvements: 194 tests.
+- Regressions: 168 tests.
+- Baseline update result: not updated; the target requires 0 regressions.
+- `test/js262/t262_partial.txt`: still 3 entries.
+
+Major regression clusters:
+
+- Annex B block-level function declarations inside `switch` cases/defaults,
+  across global/function/eval code paths.  Most failures report `f is not
+  defined` or mismatched function-vs-var/global binding expectations.
+- Private class element brand checks and nested class/private name visibility.
+  Failures include incorrect `Cannot read/write private member` errors and
+  duplicate private-member initialization for static private accessors.
+- Class computed property names involving `yield` expressions; several cases
+  still crash with signal 11.
+- Derived class `super()`/return override ordering; several tests now throw
+  `ReferenceError` where Test262 expects `TypeError` or the original abrupt
+  completion.
+- A small MIR typing regression in
+  `built_ins_TypedArray_prototype_at_returns_undefined_for_holes_in_sparse_arrays_js`
+  reports `unexpected operand mode ... Got 'double', expected 'int'`.
+
+Next work:
+
+- Fix the 168 regressions before attempting `make test262-update-baseline`
+  again.
+- Start with the Annex B `switch` block-function binding cluster because it is
+  the largest and likely shares one root cause.
+- Then address class private-element branding/nested-class regressions, followed
+  by computed-property `yield` crashes and the single TypedArray MIR operand
+  mode failure.
+
+## 47. Annex B Switch Function Binding In IIFEs
+
+Status on 2026-05-18: fixed the two focused Annex B `switch` regressions in
+the 30-test real-regression slice.  The focused slice improved from 13 / 30
+passing to 15 / 30 passing.
+
+Root cause:
+
+- IIFE-local Annex B function declarations are promoted to module-var storage
+  so the function body and closures can share the binding.
+- When the nested function body referenced or assigned its own Annex B name,
+  the IIFE body still created a local hoisted placeholder for that name because
+  the name appeared in the capture/scope-env set.
+- That local placeholder shadowed the promoted module-var binding after the
+  `switch`, so `typeof f` read `undefined` even though evaluating the case had
+  created the function value.
+
+Fix:
+
+- Teach IIFE detection to recognize nested call-expression callee shapes for
+  both `(function(){...}())` and `(function(){...})()`.
+- Register nested IIFE function-declaration hoists as `MCONST_MODVAR` with
+  `is_iife_var`, but keep them out of global Annex B pre-init/fallback paths.
+- In function lowering, never create a local hoist placeholder for an
+  IIFE-promoted module var, even when the name is captured by a nested
+  function.  Reads/writes now use the shared module-var slot consistently.
+
+Verification:
+
+```bash
+make -C build/premake config=release_native lambda -j4 CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib"
+make -C build/premake config=release_native test_js_test262_gtest -j4 CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib"
+./lambda.exe js temp/js43_annexb_switch_repro.js --no-log
+./lambda.exe js temp/js43_annexb_switch_repro_iife_alt.js --no-log
+./lambda.exe js temp/js43_annexb_switch_repro_iife_alt_mut.js --no-log
+./lambda.exe js temp/js43_annexb_switch_repro_function.js --no-log
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_annexb_switch_pair.txt --js-timeout=30 --write-failures=temp/js43_annexb_switch_pair_after_iife_modvar.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_30_regressions_from_full_gate.txt --js-timeout=30 --write-failures=temp/js43_30_regressions_after_annexb_iife_modvar.tsv --gtest_brief=1
+```
+
+Results:
+
+- Annex B switch focused pair: 2 / 2 passed.
+- 30-regression focused slice: 15 / 30 passed, leaving 15 failures.
+- A broad gtest-filter run was also allowed to finish after a bad filter
+  invocation; it did not update the baseline.  The useful output confirmed the
+  two line-terminator tests still fail as focused regressions.
+
+Remaining failures in the 30-test slice:
+
+- `built_ins_TypedArray_prototype_at_returns_undefined_for_holes_in_sparse_arrays_js`
+- `language_expressions_multiplication_line_terminator_js`
+- `language_expressions_super_call_arg_evaluation_err_js`
+- `language_identifier_resolution_S10_2_2_A1_T3_js`
+- `language_line_terminators_S7_3_A7_T3_js`
+- `language_statements_class_accessor_name_inst_computed_yield_expr_js`
+- `language_statements_class_accessor_name_static_computed_yield_expr_js`
+- `language_statements_class_cpn_class_decl_accessors_computed_property_name_from_yield_expression_js`
+- `language_statements_class_cpn_class_decl_computed_property_name_from_yield_expression_js`
+- `language_statements_class_name_binding_const_js`
+- `language_statements_class_subclass_derived_class_return_override_catch_finally_js`
+- `language_statements_class_subclass_derived_class_return_override_catch_js`
+- `language_statements_class_subclass_derived_class_return_override_finally_super_js`
+- `language_statements_class_subclass_derived_class_return_override_for_of_js`
+- `language_statements_class_subclass_superclass_bound_function_js`
+
+Next work:
+
+- Fix the two line-terminator regressions as a small parser/source-handling
+  cluster.
+- Then return to class computed-property `yield` crashes and derived-class
+  `super()`/return override semantics.

@@ -38,9 +38,13 @@ Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_fou
 // Set by js_call_function before invoking a generator function, read by js_generator_create.
 static Item js_generator_callee_proto = {0};
 static Item js_current_private_home_class = {0};
+static int js_current_private_home_class_index = -1;
 
 static const char* JS_HOME_CLASS_KEY = "__home_class__";
 static const int JS_HOME_CLASS_KEY_LEN = 14;
+
+static const char* JS_PRIVATE_CLASS_INDEX_KEY = "__class_private_index__";
+static const int JS_PRIVATE_CLASS_INDEX_KEY_LEN = 23;
 
 static const char* JS_BOUND_TARGET_KEY = "__bound_target__";
 static const int JS_BOUND_TARGET_KEY_LEN = 16;
@@ -58,6 +62,37 @@ static Item js_function_home_class(Item func_item) {
     bool found = false;
     Item home = js_map_get_fast_ext(fn->properties_map.map, JS_HOME_CLASS_KEY, JS_HOME_CLASS_KEY_LEN, &found);
     return found ? home : ItemNull;
+}
+
+static int js_private_key_class_index(String* private_key) {
+    if (!private_key || private_key->len <= 10 ||
+        strncmp(private_key->chars, "__private_", 10) != 0) return -1;
+    const char* p = private_key->chars + 10;
+    const char* end = private_key->chars + private_key->len;
+    if (p >= end || *p < '0' || *p > '9') return -1;
+    int idx = 0;
+    while (p < end && *p >= '0' && *p <= '9') {
+        idx = idx * 10 + (*p - '0');
+        p++;
+    }
+    if (p >= end || *p != '_') return -1;
+    return idx;
+}
+
+static int js_class_private_index(Item class_item) {
+    if (get_type_id(class_item) != LMD_TYPE_MAP) return -1;
+    bool found = false;
+    Item index_item = js_map_get_fast_ext(class_item.map, JS_PRIVATE_CLASS_INDEX_KEY,
+        JS_PRIVATE_CLASS_INDEX_KEY_LEN, &found);
+    if (!found || get_type_id(index_item) != LMD_TYPE_INT) return -1;
+    return (int)it2i(index_item);
+}
+
+extern "C" void js_set_private_class_index(Item class_item, int index) {
+    if (get_type_id(class_item) != LMD_TYPE_MAP || index < 0) return;
+    Item key = (Item){.item = s2it(heap_create_name(JS_PRIVATE_CLASS_INDEX_KEY, JS_PRIVATE_CLASS_INDEX_KEY_LEN))};
+    Item val = (Item){.item = i2it(index)};
+    js_property_set(class_item, key, val);
 }
 
 extern "C" Item js_bound_function_target(Item func_item) {
@@ -2971,12 +3006,17 @@ static Item js_private_find_scoped_key_on_object_chain(Item object, const char* 
 static Item js_private_brand_owner(Item object, String* private_key, bool* out_found);
 
 static bool js_private_brand_mismatch(Item object, String* private_key) {
-    if (js_current_private_home_class.item == 0 || js_current_private_home_class.item == ItemNull.item ||
-        !private_key || get_type_id(object) != LMD_TYPE_MAP) return false;
+    if (!private_key || get_type_id(object) != LMD_TYPE_MAP) return false;
     if (private_key->len <= 10 || strncmp(private_key->chars, "__private_", 10) != 0) return false;
     bool found = false;
     Item brand = js_private_brand_owner(object, private_key, &found);
-    return !found || brand.item != js_current_private_home_class.item;
+    if (!found) return true;
+    int key_class_index = js_private_key_class_index(private_key);
+    if (key_class_index >= 0 && key_class_index == js_current_private_home_class_index &&
+        js_current_private_home_class.item != 0 && js_current_private_home_class.item != ItemNull.item) {
+        return brand.item != js_current_private_home_class.item;
+    }
+    return false;
 }
 
 static Item js_private_brand_owner(Item object, String* private_key, bool* out_found) {
@@ -3004,7 +3044,9 @@ static Item js_private_method_lookup_from_brand(Item receiver, Item key, String*
     bool brand_found = false;
     Item brand = js_private_brand_owner(receiver, private_key, &brand_found);
     if (!brand_found || brand.item == ItemNull.item) return ItemNull;
-    if (js_current_private_home_class.item != 0 && js_current_private_home_class.item != ItemNull.item &&
+    int key_class_index = js_private_key_class_index(private_key);
+    if (key_class_index >= 0 && key_class_index == js_current_private_home_class_index &&
+        js_current_private_home_class.item != 0 && js_current_private_home_class.item != ItemNull.item &&
         brand.item != js_current_private_home_class.item) {
         return ItemNull;
     }
@@ -5067,6 +5109,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                 // routed through js_ordinary_set_via_accessor.
                 {
                     if (str_key->len > 10 && strncmp(str_key->chars, "__private_", 10) == 0 &&
+                        !js_private_field_initializing &&
                         js_private_brand_mismatch(object, str_key)) {
                         char msg[256];
                         snprintf(msg, sizeof(msg), "Cannot write private member '#%.*s' to an object whose class did not declare it",
@@ -5388,7 +5431,8 @@ static Item js_private_property_set_checked(Item object, Item key, Item value) {
                     (int)private_key->len - 10, private_key->chars + 10);
                 return js_throw_type_error(msg);
             }
-            if (!js_private_storage_has_own(object, key) &&
+            if (!js_private_field_initializing &&
+                !js_private_storage_has_own(object, key) &&
                 !js_private_brand_storage_has_own(object, private_key)) {
                 char msg[256];
                 snprintf(msg, sizeof(msg), "Cannot write private member '#%.*s' to an object whose class did not declare it",
@@ -11116,13 +11160,16 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
             js_current_this = (Item){.item = ITEM_JS_TDZ};
         }
         Item prev_private_home_class = js_current_private_home_class;
+        int prev_private_home_class_index = js_current_private_home_class_index;
         Item method_home_class = js_function_home_class(func_item);
         if (method_home_class.item != ItemNull.item && method_home_class.item != 0 &&
             get_type_id(method_home_class) != LMD_TYPE_UNDEFINED) {
             js_current_private_home_class = method_home_class;
+            js_current_private_home_class_index = js_class_private_index(method_home_class);
         }
         Item result = js_invoke_fn(fn, merged_args, total_argc);
         js_current_private_home_class = prev_private_home_class;
+        js_current_private_home_class_index = prev_private_home_class_index;
         if (derived_ctor_call) result = js_super_this_binding_finish(result);
         js_generator_callee_proto = saved_gen_callee_proto_b;
         js_with_set_stack(saved_with_stack, saved_with_depth);
@@ -11187,13 +11234,16 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         js_current_this = (Item){.item = ITEM_JS_TDZ};
     }
     Item prev_private_home_class = js_current_private_home_class;
+    int prev_private_home_class_index = js_current_private_home_class_index;
     Item method_home_class = js_function_home_class(func_item);
     if (method_home_class.item != ItemNull.item && method_home_class.item != 0 &&
         get_type_id(method_home_class) != LMD_TYPE_UNDEFINED) {
         js_current_private_home_class = method_home_class;
+        js_current_private_home_class_index = js_class_private_index(method_home_class);
     }
     Item result = js_invoke_fn(fn, args, arg_count);
     js_current_private_home_class = prev_private_home_class;
+    js_current_private_home_class_index = prev_private_home_class_index;
     if (derived_ctor_call) result = js_super_this_binding_finish(result);
     js_generator_callee_proto = saved_gen_callee_proto;
     js_with_set_stack(saved_with_stack, saved_with_depth);
