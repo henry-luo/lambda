@@ -51,6 +51,27 @@ static inline CGAffineTransform cg_affine_from_rdt(const RdtMatrix* m) {
 // Lifecycle
 // ============================================================================
 
+static const RdtVectorCaps g_cg_caps = {
+    RDT_VECTOR_BACKEND_CORE_GRAPHICS,
+    "CoreGraphics",
+    true,   // vector_paths
+    true,   // rounded_rects
+    true,   // gradients
+    true,   // nested_clips
+    true,   // image_scaling
+    false,  // picture_svg
+    false,  // picture_duplication
+    false,  // svg_dom_pictures
+    false,  // opacity_group
+    false,  // blend_modes
+    false,  // gaussian_blur
+    false,  // color_matrix_filters
+    false,  // native_text_runs
+    true,   // premultiplied_surface
+    false,  // tile_offsets
+    false,  // clip_depth_save_restore
+};
+
 void rdt_vector_init(RdtVector* vec, uint32_t* pixels, int w, int h, int stride) {
     RdtVectorImpl* cg = (RdtVectorImpl*)calloc(1, sizeof(RdtVectorImpl));
     cg->colorspace = CGColorSpaceCreateDeviceRGB();
@@ -156,6 +177,11 @@ void rdt_vector_set_target(RdtVector* vec, uint32_t* pixels, int w, int h, int s
         CGContextScaleCTM(cg->ctx, 1.0, -1.0);
     }
     // else same buffer, nothing to do
+}
+
+const RdtVectorCaps* rdt_vector_get_caps(const RdtVector* vec) {
+    (void)vec;
+    return &g_cg_caps;
 }
 
 // ============================================================================

@@ -9,6 +9,9 @@
 // format to SDL_PIXELFORMAT_ARGB8888
 #define RDT_PIXELFORMAT_RGB(r, g, b)    ((uint32_t)((r << 16) | (g << 8) | b))
 
+struct RenderProfiler;
+typedef struct RenderProfiler RenderProfiler;
+
 typedef struct RenderContext {
     FontBox font;  // current font style
     BlockBlot block;
@@ -36,6 +39,9 @@ typedef struct RenderContext {
 
     // LIFO scratch allocator for scoped temporary buffers (pixel buffers, clip masks, etc.)
     ScratchArena scratch;
+
+    // Per-render profiling counters and timers.
+    RenderProfiler* profiler;
 
     // Vector clip shape stack for overflow:hidden with border-radius and CSS clip-path
     ClipShape* clip_shapes[RDT_MAX_CLIP_SHAPES];

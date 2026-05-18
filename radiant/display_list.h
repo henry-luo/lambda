@@ -459,6 +459,14 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
                DirtyTracker* dirty_tracker);
 
 // ---------------------------------------------------------------------------
+// Bounds helpers
+// ---------------------------------------------------------------------------
+
+Bound dl_item_bounds(const DisplayItem* item);
+bool dl_item_intersects_rect(const DisplayItem* item,
+                             float x, float y, float w, float h);
+
+// ---------------------------------------------------------------------------
 // Debug / stats
 // ---------------------------------------------------------------------------
 

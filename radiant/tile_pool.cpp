@@ -329,17 +329,6 @@ void render_pool_dispatch(RenderPool* pool, TileJob* jobs, int count) {
 // Tile-aware display list replay
 // ============================================================================
 
-// Check if an item's bounds intersect a tile region (all in physical pixels)
-static inline bool bounds_intersect(const float item_bounds[4],
-                                     float tx, float ty, float tw, float th) {
-    float ix = item_bounds[0], iy = item_bounds[1];
-    float iw = item_bounds[2], ih = item_bounds[3];
-    // items with zero bounds (clips, depth markers) always pass
-    if (iw <= 0 && ih <= 0) return true;
-    return !(ix >= tx + tw || ix + iw <= tx ||
-             iy >= ty + th || iy + ih <= ty);
-}
-
 static uint32_t tile_glyph_sample_pixel(const GlyphBitmap* bitmap, int src_y, int src_x) {
     if (!bitmap || !bitmap->buffer || src_y < 0 || src_y >= bitmap->height ||
         src_x < 0 || src_x >= bitmap->width) return 0;
@@ -550,7 +539,7 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
 
         // Cull: skip items that don't intersect this tile
         // Items with zero bounds (clips, markers) always pass
-        if (!bounds_intersect(item->bounds, tile_x, tile_y, tile_w, tile_h)) {
+        if (!dl_item_intersects_rect(item, tile_x, tile_y, tile_w, tile_h)) {
             // Still need to track clip/backdrop depth for correctness
             switch (item->op) {
                 case DL_PUSH_CLIP:

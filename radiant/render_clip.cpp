@@ -1,6 +1,13 @@
 #include "render_clip.hpp"
 #include "render_path.hpp"
+#include "render.hpp"
 
+#include "../lambda/input/css/dom_element.hpp"
+#include "../lambda/input/css/css_style.hpp"
+#include "../lib/tagged.hpp"
+#include "../lib/log.h"
+
+#include <stddef.h>
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
@@ -189,4 +196,103 @@ ClipShape* render_clip_parse_css_shape(ScratchArena* scratch, const char* value,
     }
 
     return nullptr;
+}
+
+static bool render_clip_push_shape_scope(RenderContext* rdcon, RenderClipScope* scope,
+                                         ClipShape* shape) {
+    if (!rdcon || !scope || !shape) {
+        return false;
+    }
+    RdtPath* clip_path = render_clip_create_shape_path(shape);
+    if (!clip_path) {
+        return false;
+    }
+    rc_push_clip(rdcon, clip_path, nullptr);
+    rdt_path_free(clip_path);
+
+    scope->shape = shape;
+    scope->active = true;
+    if (rdcon->clip_shape_depth < RDT_MAX_CLIP_SHAPES) {
+        rdcon->clip_shapes[rdcon->clip_shape_depth++] = shape;
+        scope->pushed_shape = true;
+    }
+    return true;
+}
+
+RenderClipScope render_clip_push_css_scope(RenderContext* rdcon, ViewBlock* block,
+                                           float parent_x, float parent_y, float scale) {
+    RenderClipScope scope = {};
+    if (!rdcon || !block) {
+        return scope;
+    }
+    DomElement* element = lam::dom_require_element(lam::view_dom_node(block));
+    CssDeclaration* clip_decl = dom_element_get_specified_value(element, CSS_PROPERTY_CLIP_PATH);
+    if (!clip_decl || !clip_decl->value_text || clip_decl->value_text_len <= 0) {
+        return scope;
+    }
+    const char* clip_str = clip_decl->value_text;
+    if (!clip_str || strncmp(clip_str, "none", 4) == 0) {
+        return scope;
+    }
+
+    float elem_w = block->width * scale;
+    float elem_h = block->height * scale;
+    float abs_x = parent_x + block->x * scale;
+    float abs_y = parent_y + block->y * scale;
+    ClipShape* css_shape = render_clip_parse_css_shape(&rdcon->scratch, clip_str, elem_w, elem_h, abs_x, abs_y);
+    if (!css_shape) {
+        return scope;
+    }
+
+    scope.owns_shape = true;
+    if (!render_clip_push_shape_scope(rdcon, &scope, css_shape)) {
+        render_clip_free_shape(&rdcon->scratch, css_shape);
+        scope = {};
+        return scope;
+    }
+    log_debug("[CLIP] CSS clip-path: %s on element %s", clip_str, block->node_name());
+    return scope;
+}
+
+RenderClipScope render_clip_push_overflow_scope(RenderContext* rdcon) {
+    RenderClipScope scope = {};
+    if (!rdcon || !rdcon->block.has_clip_radius) {
+        return scope;
+    }
+    Bound* clip = &rdcon->block.clip;
+    Corner* cr = &rdcon->block.clip_radius;
+    float cw = clip->right - clip->left;
+    float ch = clip->bottom - clip->top;
+    if (cw <= 0 || ch <= 0) {
+        return scope;
+    }
+
+    scope.inline_shape.type = CLIP_SHAPE_ROUNDED_RECT;
+    scope.inline_shape.rounded_rect = {clip->left, clip->top, cw, ch,
+        cr->top_left, cr->top_right, cr->bottom_right, cr->bottom_left};
+    if (!render_clip_push_shape_scope(rdcon, &scope, &scope.inline_shape)) {
+        scope = {};
+        return scope;
+    }
+
+    // Clear the flag so child elements do not redundantly push the same clip.
+    rdcon->block.has_clip_radius = false;
+    log_debug("[CLIP] pushed overflow vector clip: (%.0f,%.0f) %.0fx%.0f r=[%.0f,%.0f,%.0f,%.0f]",
+        clip->left, clip->top, cw, ch,
+        cr->top_left, cr->top_right, cr->bottom_right, cr->bottom_left);
+    return scope;
+}
+
+void render_clip_pop_scope(RenderContext* rdcon, RenderClipScope* scope) {
+    if (!rdcon || !scope || !scope->active) {
+        return;
+    }
+    rc_pop_clip(rdcon);
+    if (scope->pushed_shape && rdcon->clip_shape_depth > 0) {
+        rdcon->clip_shape_depth--;
+    }
+    if (scope->owns_shape) {
+        render_clip_free_shape(&rdcon->scratch, scope->shape);
+    }
+    *scope = {};
 }

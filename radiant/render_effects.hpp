@@ -48,3 +48,6 @@ bool render_effect_group_finish_opacity(RenderEffectGroup* group,
                                         ViewBlock* block);
 bool render_effect_group_finish_blend(RenderEffectGroup* group,
                                       ViewBlock* block);
+bool render_effect_group_finish(RenderEffectGroup* group,
+                                ViewBlock* block,
+                                Bound* clip);
