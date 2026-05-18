@@ -938,6 +938,7 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
             walk_statement(ctx, tn->block);
             if (tn->handler) {
                 JsCatchNode* cn = (JsCatchNode*)tn->handler;
+                check_binding_pattern_reserved(ctx, cn->param);
                 walk_expression(ctx, cn->param);
                 walk_statement(ctx, cn->body);
             }

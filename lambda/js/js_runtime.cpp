@@ -527,6 +527,7 @@ extern "C" Item js_proxy_trap_delete(Item proxy, Item key) {
 static Item js_array_like_to_array(Item obj);
 static Item js_array_index_key(int64_t index);
 static Item js_create_array_iterator_object(Item source, int kind);
+static int64_t js_array_iterator_source_length(Item source);
 static double js_array_to_integer_or_infinity(Item value);
 enum JsArrayIterativeMethodKind {
     JS_ARRAY_ITER_FOR_EACH = 0,
@@ -8727,7 +8728,9 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             js_property_set(result, (Item){.item = s2it(heap_create_name("done", 4))}, (Item){.item = b2it(false)});
             return result;
         }
-        if (get_type_id(arr_item) != LMD_TYPE_ARRAY || idx >= arr_item.array->length) {
+        int64_t iter_len = js_array_iterator_source_length(arr_item);
+        if (js_check_exception()) return ItemNull;
+        if (get_type_id(arr_item) != LMD_TYPE_ARRAY || idx >= iter_len) {
             // done — per ES §23.1.5.2.1 step 8.a: set [[IteratedObject]] to
             // undefined so subsequent calls keep returning done=true even if
             // new elements are pushed onto the original array afterwards.
@@ -8744,13 +8747,13 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         if (kind == 0) {
             val = (Item){.item = i2it(idx)};
         } else if (kind == 1) {
-            val = arr_item.array->items[idx];
-            if (val.item == JS_DELETED_SENTINEL_VAL) val = make_js_undefined();
+            val = js_property_get(arr_item, js_array_index_key(idx));
+            if (js_check_exception()) return ItemNull;
         } else {
             // entries: [index, value]
             Item pair = js_array_new(2);
-            Item elem = arr_item.array->items[idx];
-            if (elem.item == JS_DELETED_SENTINEL_VAL) elem = make_js_undefined();
+            Item elem = js_property_get(arr_item, js_array_index_key(idx));
+            if (js_check_exception()) return ItemNull;
             pair.array->items[0] = (Item){.item = i2it(idx)};
             pair.array->items[1] = elem;
             val = pair;
@@ -19863,6 +19866,62 @@ static bool js_array_find_next_own_element(Item arr, Array* a, int64_t start, in
     return true;
 }
 
+static bool js_array_has_numeric_own_accessors(Array* a) {
+    if (!a || a->extra == 0) return false;
+    Map* props = (Map*)(uintptr_t)a->extra;
+    if (!props || !props->type) return false;
+    TypeMap* tm = (TypeMap*)props->type;
+    for (ShapeEntry* se = tm ? tm->shape : NULL; se; se = se->next) {
+        if (!se->name) continue;
+        int64_t idx = -1;
+        if (!js_array_parse_index_name(se->name->str, (int)se->name->length, &idx)) continue;
+        if (jspd_is_accessor(se)) return true;
+    }
+    return false;
+}
+
+static bool js_array_find_prev_own_element(Item arr, Array* a, int64_t start,
+        int64_t* out_index, Item* out_elem) {
+    if (!a) return false;
+    if (start >= a->length) start = a->length - 1;
+    if (start < 0) return false;
+
+    int64_t dense_start = start;
+    if (dense_start >= a->capacity) dense_start = a->capacity - 1;
+    if (dense_start >= a->length) dense_start = a->length - 1;
+    int64_t best_dense = -1;
+    for (int64_t i = dense_start; i >= 0; i--) {
+        if (a->items[i].item != JS_DELETED_SENTINEL_VAL) {
+            best_dense = i;
+            break;
+        }
+    }
+
+    int64_t best_extra = -1;
+    if (a->extra != 0) {
+        Map* props = (Map*)(uintptr_t)a->extra;
+        if (props && props->type) {
+            TypeMap* tm = (TypeMap*)props->type;
+            for (ShapeEntry* se = tm ? tm->shape : NULL; se; se = se->next) {
+                if (!se->name) continue;
+                int64_t idx = -1;
+                if (!js_array_parse_index_name(se->name->str, (int)se->name->length, &idx)) continue;
+                if (idx > start || idx < 0) continue;
+                Item val = _map_read_field(se, props->data);
+                if (val.item == JS_DELETED_SENTINEL_VAL) continue;
+                if (best_extra < 0 || idx > best_extra) best_extra = idx;
+            }
+        }
+    }
+
+    int64_t best_index = best_dense;
+    if (best_extra >= 0 && (best_index < 0 || best_extra > best_index)) best_index = best_extra;
+    if (best_index < 0) return false;
+    if (!js_array_has_element(arr, a, best_index, out_elem, false)) return false;
+    *out_index = best_index;
+    return true;
+}
+
 extern "C" Item js_array_indexOf_int(Item arr, int64_t search) {
     if (get_type_id(arr) != LMD_TYPE_ARRAY) return (Item){.item = i2it(-1)};
     Array* array = arr.array;
@@ -19871,6 +19930,18 @@ extern "C" Item js_array_indexOf_int(Item arr, int64_t search) {
     Item search_val = (Item){.item = i2it((int)search)};
     bool check_proto = false;
     bool checked_proto = false;
+    if (array->extra != 0 && !js_array_has_numeric_own_accessors(array) && !js_proto_chain_has_numeric_keys(arr)) {
+        int64_t idx = 0;
+        Item elem = ItemNull;
+        while (js_array_find_next_own_element(arr, array, idx, array->length, &idx, &elem)) {
+            if (elem.item == search_val.item) return (Item){.item = i2it((int)idx)};
+            if (get_type_id(elem) != LMD_TYPE_INT && it2b(js_strict_equal(elem, search_val))) {
+                return (Item){.item = i2it((int)idx)};
+            }
+            idx++;
+        }
+        return (Item){.item = i2it(-1)};
+    }
     if (array->extra == 0) {
         bool all_dense_int = true;
         for (int64_t int_idx = 0; int_idx < dense_limit; int_idx++) {
@@ -20655,6 +20726,20 @@ static Item js_array_generic_index_of(Item object, Item* args, int argc, bool fr
                 k = rel <= 0.0 ? 0 : (int64_t)rel;
             }
         }
+        if (get_type_id(object) == LMD_TYPE_ARRAY &&
+                !js_array_has_numeric_own_accessors(object.array) &&
+                !js_proto_chain_has_numeric_keys(object)) {
+            Array* a = object.array;
+            int64_t own_idx = k;
+            Item elem = ItemNull;
+            while (js_array_find_next_own_element(object, a, own_idx, len, &own_idx, &elem)) {
+                if (it2b(js_strict_equal(elem, search_val))) {
+                    return (Item){.item = i2it(own_idx)};
+                }
+                own_idx++;
+            }
+            return (Item){.item = i2it(-1)};
+        }
         while (k < len) {
             Item key = js_array_index_key(k);
             if (js_array_search_has_property(object, key)) {
@@ -20685,6 +20770,20 @@ static Item js_array_generic_index_of(Item object, Item* args, int argc, bool fr
         }
     } else {
         k = len - 1;
+    }
+    if (get_type_id(object) == LMD_TYPE_ARRAY &&
+            !js_array_has_numeric_own_accessors(object.array) &&
+            !js_proto_chain_has_numeric_keys(object)) {
+        Array* a = object.array;
+        int64_t own_idx = k;
+        Item elem = ItemNull;
+        while (js_array_find_prev_own_element(object, a, own_idx, &own_idx, &elem)) {
+            if (it2b(js_strict_equal(elem, search_val))) {
+                return (Item){.item = i2it(own_idx)};
+            }
+            own_idx--;
+        }
+        return (Item){.item = i2it(-1)};
     }
     while (k >= 0) {
         Item key = js_array_index_key(k);
@@ -21378,6 +21477,20 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             from = (int)d_from;
         }
         if (from < 0) { from = a->length + from; if (from < 0) from = 0; }
+        TypeId search_type = get_type_id(search_val);
+        bool identity_search =
+            search_type == LMD_TYPE_MAP || search_type == LMD_TYPE_ARRAY ||
+            search_type == LMD_TYPE_FUNC || search_type == LMD_TYPE_ELEMENT ||
+            search_type == LMD_TYPE_OBJECT || search_type == LMD_TYPE_VMAP;
+        if (identity_search && a->extra == 0 && a->capacity >= a->length) {
+            for (int i = from; i < a->length; i++) {
+                Item elem = a->items[i];
+                if (elem.item == JS_DELETED_SENTINEL_VAL) goto includes_slow_path;
+                if (elem.item == search_val.item) return (Item){.item = b2it(true)};
+            }
+            return (Item){.item = b2it(false)};
+        }
+includes_slow_path:
         for (int i = from; i < a->length; i++) {
             // includes uses SameValueZero (NaN === NaN, +0 === -0)
             Item elem = js_array_element(arr, i);
@@ -24702,6 +24815,13 @@ static bool js_array_iterator_next_is_default() {
     return fn && fn->builtin_id == JS_BUILTIN_ARRAY_ITER_NEXT;
 }
 
+static int64_t js_array_iterator_source_length(Item source) {
+    if (get_type_id(source) != LMD_TYPE_ARRAY) return 0;
+    if (!js_runtime_is_arguments_exotic(source)) return source.array->length;
+    Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
+    return js_array_to_length(js_property_get(source, len_key));
+}
+
 static Item js_get_string_iterator_proto() {
     Item proto = js_make_iterator_proto(&js_string_iterator_proto_cache,
         JS_BUILTIN_STRING_ITER_NEXT, "String Iterator", 15);
@@ -24748,10 +24868,7 @@ static Item js_create_array_iterator(Item source) {
     JsIterData* data = (JsIterData*)mem_alloc(sizeof(JsIterData), MEM_CAT_JS_RUNTIME);
     data->source = source;
     data->index = 0;
-    // Snapshot length for arguments objects (prevents infinite for-of when body extends arguments)
-    // Regular arrays use live length (-1 sentinel) per ES spec (mutations visible during iteration)
-    bool is_arguments = (get_type_id(source) == LMD_TYPE_ARRAY && source.array->is_content);
-    data->length = is_arguments ? source.array->length : -1;
+    data->length = -1;
     m->data = data;
     m->data_cap = sizeof(JsIterData);
     return (Item){.map = m};
@@ -25008,10 +25125,9 @@ extern "C" Item js_iterator_step(Item iterator) {
         int64_t idx = d->index;
 
         if (m->type == (void*)&js_array_iter_marker) {
-            // Array iterator: direct index read + increment
-            // Use snapshot length for arguments (-1 means use live length for regular arrays)
-            int len = (d->length >= 0) ? (int)d->length
-                     : ((get_type_id(d->source) == LMD_TYPE_ARRAY) ? (int)d->source.array->length : 0);
+            // Array iterator: read live observable length, then direct index get.
+            int64_t len = js_array_iterator_source_length(d->source);
+            if (js_check_exception()) return (Item){.item = JS_ITER_DONE_SENTINEL};
             if (idx >= len) return (Item){.item = JS_ITER_DONE_SENTINEL};
             Item elem = js_property_access(d->source, (Item){.item = i2it((int)idx)});
             d->index = idx + 1;
@@ -25073,7 +25189,8 @@ extern "C" Item js_iterator_step(Item iterator) {
             bool has_idx = false;
             Item idx_val = js_map_get_fast(iterator.map, "__idx__", 7, &has_idx);
             int idx = has_idx ? (int)it2i(idx_val) : 0;
-            int len = (get_type_id(arr_val) == LMD_TYPE_ARRAY) ? arr_val.array->length : 0;
+            int64_t len = js_array_iterator_source_length(arr_val);
+            if (js_check_exception()) return (Item){.item = JS_ITER_DONE_SENTINEL};
             if (idx >= len) return (Item){.item = JS_ITER_DONE_SENTINEL};  // done
             Item elem = js_property_access(arr_val, (Item){.item = i2it(idx)});
             js_property_set(iterator, (Item){.item = s2it(heap_create_name("__idx__", 7))}, (Item){.item = i2it(idx + 1)});

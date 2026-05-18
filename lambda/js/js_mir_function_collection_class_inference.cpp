@@ -628,6 +628,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
     }
     case JS_AST_NODE_CATCH_CLAUSE: {
         JsCatchNode* n = (JsCatchNode*)node;
+        jm_collect_functions(mt, n->param);
         jm_collect_functions(mt, n->body);
         break;
     }
