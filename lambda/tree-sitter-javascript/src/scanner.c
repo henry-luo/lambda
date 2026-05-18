@@ -113,7 +113,6 @@ static bool scan_semicolon_after_line_terminator(TSLexer *lexer) {
         case ',':
         case ':':
         case ';':
-        case '*':
         case '%':
         case '>':
         case '<':

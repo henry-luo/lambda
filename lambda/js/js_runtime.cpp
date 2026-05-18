@@ -18,6 +18,8 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name);
 extern "C" Item js_has_own_property(Item obj, Item key);
 extern "C" Item js_property_set(Item object, Item key, Item value);
 extern "C" Item js_property_set_strict(Item object, Item key, Item value);
+extern "C" Item js_private_property_set(Item object, Item key, Item value);
+extern "C" Item js_private_property_set_strict(Item object, Item key, Item value);
 extern "C" Item js_new_number_wrapper(Item arg);
 extern "C" Item js_new_boolean_wrapper(Item arg);
 extern "C" Item js_new_string_wrapper(Item arg);
@@ -181,6 +183,7 @@ extern "C" Item js_new_object() {
 // Helper macros: JsProxyData stores target/handler as uint64_t for C header compat
 #define PD_TARGET(pd) ((Item){.item = (pd)->target})
 #define PD_HANDLER(pd) ((Item){.item = (pd)->handler})
+#define PD_PRIVATE_SLOTS(pd) ((Item){.item = (pd)->private_slots})
 
 extern "C" bool js_is_proxy(Item obj) {
     return get_type_id(obj) == LMD_TYPE_MAP && obj.map->map_kind == MAP_KIND_PROXY;
@@ -200,6 +203,17 @@ extern "C" Item js_proxy_get_target(Item obj) {
         depth++;
     }
     return obj;
+}
+
+static Item js_proxy_private_slots(Item proxy, bool create) {
+    JsProxyData* pd = js_get_proxy_data(proxy);
+    if (!pd || pd->revoked) return ItemNull;
+    Item slots = PD_PRIVATE_SLOTS(pd);
+    if (get_type_id(slots) == LMD_TYPE_MAP) return slots;
+    if (!create) return ItemNull;
+    slots = js_new_object();
+    pd->private_slots = slots.item;
+    return slots;
 }
 
 extern "C" bool js_proxy_has_callable_target(Item obj) {
@@ -271,6 +285,7 @@ extern "C" Item js_proxy_new(Item target, Item handler) {
     JsProxyData* pd = (JsProxyData*)mem_alloc(sizeof(JsProxyData), MEM_CAT_JS_RUNTIME);
     pd->target = target.item;
     pd->handler = handler.item;
+    pd->private_slots = ItemNull.item;
     pd->revoked = false;
 
     Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
@@ -1279,17 +1294,48 @@ static Item js_typed_array_create_with_constructor(Item constructor, int length)
     return result;
 }
 
+static bool js_can_host_private_slots(Item object) {
+    TypeId type = get_type_id(object);
+    return type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_FUNC ||
+        type == LMD_TYPE_ELEMENT || type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP;
+}
+
+static bool js_private_storage_has_own(Item object, Item private_key) {
+    if (get_type_id(private_key) != LMD_TYPE_STRING) return false;
+    String* key_str = it2s(private_key);
+    if (!key_str) return false;
+    Item lookup_object = object;
+    if (js_is_proxy(object)) {
+        lookup_object = js_proxy_private_slots(object, false);
+    }
+    if (get_type_id(lookup_object) != LMD_TYPE_MAP) return false;
+    bool found = false;
+    Item existing = js_map_get_fast(lookup_object.map, key_str->chars, (int)key_str->len, &found);
+    return found && existing.item != JS_DELETED_SENTINEL_VAL;
+}
+
+static bool js_private_brand_storage_has_own(Item object, String* field_key_str) {
+    if (!field_key_str || field_key_str->len <= 10 ||
+        strncmp(field_key_str->chars, "__private_", 10) != 0) return false;
+    char brand_key[512];
+    int brand_key_len = snprintf(brand_key, sizeof(brand_key), "__brand_%.*s",
+        (int)field_key_str->len, field_key_str->chars);
+    if (brand_key_len <= 0) return false;
+    if (brand_key_len >= (int)sizeof(brand_key)) brand_key_len = (int)sizeof(brand_key) - 1;
+    Item brand_key_item = (Item){.item = s2it(heap_create_name(brand_key, brand_key_len))};
+    return js_private_storage_has_own(object, brand_key_item);
+}
+
 static void js_init_class_instance_fields_inner(Item callee, Item object, int depth) {
     if (depth > 32) return;
     if (get_type_id(callee) != LMD_TYPE_MAP) return;
-    TypeId object_type = get_type_id(object);
-    if (object_type != LMD_TYPE_MAP && object_type != LMD_TYPE_ARRAY && object_type != LMD_TYPE_FUNC &&
-        object_type != LMD_TYPE_ELEMENT && object_type != LMD_TYPE_OBJECT && object_type != LMD_TYPE_VMAP) return;
+    if (!js_can_host_private_slots(object)) return;
 
     bool super_found = false;
     Item super_class = js_map_get_fast(callee.map, "__super_class__", 15, &super_found);
     if (super_found && get_type_id(super_class) == LMD_TYPE_MAP) {
         js_init_class_instance_fields_inner(super_class, object, depth + 1);
+        if (js_check_exception()) return;
     }
 
     bool field_count_found = false;
@@ -1304,13 +1350,40 @@ static void js_init_class_instance_fields_inner(Item callee, Item object, int de
         Item field_key = js_map_get_fast(callee.map, key_slot, key_slot_len, &key_found);
         if (!key_found || get_type_id(field_key) != LMD_TYPE_STRING) continue;
 
+        bool brand_only = false;
+        char kind_slot[32];
+        int kind_slot_len = snprintf(kind_slot, sizeof(kind_slot), "__if_kind_%lld", (long long)field_index);
+        bool kind_found = false;
+        Item kind_item = js_map_get_fast(callee.map, kind_slot, kind_slot_len, &kind_found);
+        if (kind_found && get_type_id(kind_item) == LMD_TYPE_INT && it2i(kind_item) == 1) {
+            brand_only = true;
+        }
+
         char val_slot[32];
         int val_slot_len = snprintf(val_slot, sizeof(val_slot), "__if_val_%lld", (long long)field_index);
         bool val_found = false;
         Item field_val = js_map_get_fast(callee.map, val_slot, val_slot_len, &val_found);
-        if (!val_found) field_val = make_js_undefined();
-        js_property_set(object, field_key, field_val);
         String* field_key_str = it2s(field_key);
+        if (field_key_str && field_key_str->len > 10 &&
+            strncmp(field_key_str->chars, "__private_", 10) == 0) {
+            bool duplicate_private = brand_only ?
+                js_private_brand_storage_has_own(object, field_key_str) :
+                js_private_storage_has_own(object, field_key);
+            if (duplicate_private) {
+                js_throw_type_error("Cannot initialize private member twice on the same object");
+                return;
+            }
+        }
+        if (!brand_only) {
+            if (!val_found) field_val = make_js_undefined();
+            if (field_key_str && field_key_str->len > 10 &&
+                strncmp(field_key_str->chars, "__private_", 10) == 0) {
+                js_property_set(object, field_key, field_val);
+            } else {
+                js_create_data_property(object, field_key, field_val);
+            }
+            if (js_check_exception()) return;
+        }
         if (field_key_str && field_key_str->len > 10 && strncmp(field_key_str->chars, "__private_", 10) == 0) {
             char brand_key[512];
             int brand_key_len = snprintf(brand_key, sizeof(brand_key), "__brand_%.*s",
@@ -1319,6 +1392,7 @@ static void js_init_class_instance_fields_inner(Item callee, Item object, int de
                 if (brand_key_len >= (int)sizeof(brand_key)) brand_key_len = (int)sizeof(brand_key) - 1;
                 Item brand_key_item = (Item){.item = s2it(heap_create_name(brand_key, brand_key_len))};
                 js_property_set(object, brand_key_item, callee);
+                if (js_check_exception()) return;
             }
         }
     }
@@ -1329,6 +1403,25 @@ extern "C" void js_init_class_instance_fields(Item callee, Item object) {
     js_private_field_initializing = true;
     js_init_class_instance_fields_inner(callee, object, 0);
     js_private_field_initializing = saved_private_init;
+}
+
+extern "C" void js_private_brand_add(Item object, Item private_key, Item callee) {
+    if (!js_can_host_private_slots(object)) return;
+    if (get_type_id(private_key) != LMD_TYPE_STRING) return;
+    String* field_key_str = it2s(private_key);
+    if (!field_key_str || field_key_str->len <= 10 ||
+        strncmp(field_key_str->chars, "__private_", 10) != 0) return;
+    if (js_private_brand_storage_has_own(object, field_key_str)) {
+        js_throw_type_error("Cannot initialize private member twice on the same object");
+        return;
+    }
+    char brand_key[512];
+    int brand_key_len = snprintf(brand_key, sizeof(brand_key), "__brand_%.*s",
+        (int)field_key_str->len, field_key_str->chars);
+    if (brand_key_len <= 0) return;
+    if (brand_key_len >= (int)sizeof(brand_key)) brand_key_len = (int)sizeof(brand_key) - 1;
+    Item brand_key_item = (Item){.item = s2it(heap_create_name(brand_key, brand_key_len))};
+    js_property_set(object, brand_key_item, callee);
 }
 
 static Item js_apply_constructed_builtin_prototype(Item result, Item callee, Item effective_new_target) {
@@ -2842,6 +2935,17 @@ static bool js_property_key_needs_object_to_key(Item key) {
 
 extern "C" Item js_get_prototype(Item object);
 
+static bool js_is_private_internal_property_key(Item key) {
+    if (get_type_id(key) != LMD_TYPE_STRING) return false;
+    String* sk = it2s(key);
+    if (!sk) return false;
+    return (sk->len > 10 && strncmp(sk->chars, "__private_", 10) == 0) ||
+           (sk->len > 8 && strncmp(sk->chars, "__brand_", 8) == 0) ||
+           (sk->len == 13 && strncmp(sk->chars, "__promise_idx", 13) == 0) ||
+           (sk->len == 9 && strncmp(sk->chars, "__gen_idx", 9) == 0) ||
+           (sk->len == 4 && strncmp(sk->chars, "__rd", 4) == 0);
+}
+
 static Item js_private_find_scoped_key_on_map(Map* map, const char* suffix, int suffix_len) {
     if (!map || !map->type) return ItemNull;
     TypeMap* map_type = (TypeMap*)map->type;
@@ -2864,41 +2968,64 @@ static Item js_private_find_scoped_key_on_object_chain(Item object, const char* 
     return ItemNull;
 }
 
-static bool js_class_metadata_declares_private_key(Item class_obj, String* private_key) {
-    if (get_type_id(class_obj) != LMD_TYPE_MAP || !private_key) return false;
-    bool count_found = false;
-    Item count_item = js_map_get_fast(class_obj.map, "__if_count__", 12, &count_found);
-    if (!count_found || get_type_id(count_item) != LMD_TYPE_INT) return false;
-    int64_t count = it2i(count_item);
-    if (count > 32) count = 32;
-    for (int64_t i = 0; i < count; i++) {
-        char key_slot[32];
-        int key_slot_len = snprintf(key_slot, sizeof(key_slot), "__if_key_%lld", (long long)i);
-        bool key_found = false;
-        Item key_item = js_map_get_fast(class_obj.map, key_slot, key_slot_len, &key_found);
-        if (!key_found || get_type_id(key_item) != LMD_TYPE_STRING) continue;
-        String* declared_key = it2s(key_item);
-        if (declared_key && declared_key->len == private_key->len &&
-            memcmp(declared_key->chars, private_key->chars, (size_t)private_key->len) == 0) {
-            return true;
-        }
-    }
-    return false;
-}
+static Item js_private_brand_owner(Item object, String* private_key, bool* out_found);
 
 static bool js_private_brand_mismatch(Item object, String* private_key) {
     if (js_current_private_home_class.item == 0 || js_current_private_home_class.item == ItemNull.item ||
         !private_key || get_type_id(object) != LMD_TYPE_MAP) return false;
     if (private_key->len <= 10 || strncmp(private_key->chars, "__private_", 10) != 0) return false;
-    if (!js_class_metadata_declares_private_key(js_current_private_home_class, private_key)) return false;
+    bool found = false;
+    Item brand = js_private_brand_owner(object, private_key, &found);
+    return !found || brand.item != js_current_private_home_class.item;
+}
+
+static Item js_private_brand_owner(Item object, String* private_key, bool* out_found) {
+    if (out_found) *out_found = false;
+    if (!private_key || get_type_id(object) != LMD_TYPE_MAP) return ItemNull;
+    if (private_key->len <= 10 || strncmp(private_key->chars, "__private_", 10) != 0) return ItemNull;
+    Item lookup_object = object;
+    if (js_is_proxy(object)) {
+        lookup_object = js_proxy_private_slots(object, false);
+        if (get_type_id(lookup_object) != LMD_TYPE_MAP) return ItemNull;
+    }
     char brand_key[512];
     int brand_key_len = snprintf(brand_key, sizeof(brand_key), "__brand_%.*s",
         (int)private_key->len, private_key->chars);
-    if (brand_key_len <= 0) return false;
+    if (brand_key_len <= 0) return ItemNull;
     if (brand_key_len >= (int)sizeof(brand_key)) brand_key_len = (int)sizeof(brand_key) - 1;
     bool found = false;
-    Item brand = js_map_get_fast(object.map, brand_key, brand_key_len, &found);
-    return found && brand.item != js_current_private_home_class.item;
+    Item brand = js_map_get_fast(lookup_object.map, brand_key, brand_key_len, &found);
+    if (out_found) *out_found = found;
+    return found ? brand : ItemNull;
+}
+
+static Item js_private_method_lookup_from_brand(Item receiver, Item key, String* private_key, bool* out_found) {
+    if (out_found) *out_found = false;
+    bool brand_found = false;
+    Item brand = js_private_brand_owner(receiver, private_key, &brand_found);
+    if (!brand_found || brand.item == ItemNull.item) return ItemNull;
+    if (js_current_private_home_class.item != 0 && js_current_private_home_class.item != ItemNull.item &&
+        brand.item != js_current_private_home_class.item) {
+        return ItemNull;
+    }
+    if (get_type_id(brand) != LMD_TYPE_MAP) return ItemNull;
+    bool proto_found = false;
+    Item proto = js_map_get_fast(brand.map, "__instance_proto__", 18, &proto_found);
+    if (!proto_found || get_type_id(proto) != LMD_TYPE_MAP) {
+        proto = js_map_get_fast(brand.map, "prototype", 9, &proto_found);
+    }
+    if (!proto_found || get_type_id(proto) != LMD_TYPE_MAP) return ItemNull;
+    Item ord_val = ItemNull;
+    JsOwnGetStatus st = js_ordinary_get_own(proto, key, receiver, &ord_val);
+    if (st == JS_OWN_READY) {
+        if (out_found) *out_found = true;
+        return ord_val;
+    }
+    if (st == JS_OWN_DELETED) {
+        if (out_found) *out_found = true;
+        return make_js_undefined();
+    }
+    return ItemNull;
 }
 
 static Item js_eval_initializer_resolve_private_key(Item object, String* key) {
@@ -2918,9 +3045,43 @@ extern "C" Item js_property_get(Item object, Item key) {
         proxy_key = true;
     }
     if (js_key_is_symbol(key) && !proxy_key) key = js_symbol_to_key(key);
+    if (get_type_id(key) == LMD_TYPE_STRING) {
+        String* private_key = it2s(key);
+        if (private_key && private_key->len > 10 &&
+            strncmp(private_key->chars, "__private_", 10) == 0 &&
+            !js_can_host_private_slots(object)) {
+            char msg[256];
+            snprintf(msg, sizeof(msg), "Cannot read private member #%.*s from an object whose class did not declare it",
+                (int)(private_key->len - 10), private_key->chars + 10);
+            return js_throw_type_error(msg);
+        }
+    }
 
     if (type == LMD_TYPE_MAP) {
         Map* m = object.map;
+        bool private_internal_property_key = js_is_private_internal_property_key(key);
+        if (private_internal_property_key && js_is_proxy(object)) {
+            Item slots = js_proxy_private_slots(object, false);
+            if (get_type_id(slots) == LMD_TYPE_MAP) {
+                Item ord_val = ItemNull;
+                JsOwnGetStatus st = js_ordinary_get_own(slots, key, object, &ord_val);
+                if (st == JS_OWN_READY) {
+                    if (get_type_id(key) == LMD_TYPE_STRING) {
+                        String* private_key = it2s(key);
+                        if (private_key && private_key->len > 10 &&
+                            strncmp(private_key->chars, "__private_", 10) == 0 &&
+                            js_private_brand_mismatch(object, private_key)) {
+                            char msg[256];
+                            snprintf(msg, sizeof(msg), "Cannot read private member #%.*s from an object whose class did not declare it",
+                                (int)(private_key->len - 10), private_key->chars + 10);
+                            return js_throw_type_error(msg);
+                        }
+                    }
+                    return ord_val;
+                }
+                if (st == JS_OWN_DELETED) return make_js_undefined();
+            }
+        }
         if (get_type_id(key) == LMD_TYPE_STRING) {
             String* str_key = it2s(key);
             if (str_key->len == 17 && strncmp(str_key->chars, "BYTES_PER_ELEMENT", 17) == 0) {
@@ -2940,7 +3101,7 @@ extern "C" Item js_property_get(Item object, Item key) {
             }
         }
         // MapKind fast path: plain objects (95%+ of accesses) skip all exotic checks
-        if (m->map_kind != MAP_KIND_PLAIN) {
+        if (m->map_kind != MAP_KIND_PLAIN && !private_internal_property_key) {
             Item exotic_result = ItemNull;
             if (js_try_exotic_property_get(object, key, &exotic_result)) return exotic_result;
         }
@@ -3050,6 +3211,21 @@ extern "C" Item js_property_get(Item object, Item key) {
         // has getter == ItemNull, returning undefined per ES §9.1.8).
         // Prototype chain fallback: if property not found on own object, walk __proto__.
         // Use _ex variant to distinguish "found, returned JS null" from "not found".
+        if (!own_found && get_type_id(key) == LMD_TYPE_STRING) {
+            String* private_key = it2s(key);
+            if (private_key && private_key->len > 10 &&
+                strncmp(private_key->chars, "__private_", 10) == 0) {
+                if (js_private_brand_mismatch(object, private_key)) {
+                    char msg[256];
+                    snprintf(msg, sizeof(msg), "Cannot read private member #%.*s from an object whose class did not declare it",
+                        (int)(private_key->len - 10), private_key->chars + 10);
+                    return js_throw_type_error(msg);
+                }
+                bool private_method_found = false;
+                Item private_method = js_private_method_lookup_from_brand(object, key, private_key, &private_method_found);
+                if (private_method_found) return private_method;
+            }
+        }
         bool proto_found = false;
         result = js_prototype_lookup_ex(object, key, &proto_found);
         if (proto_found) return result;
@@ -4377,6 +4553,17 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
     if (object.item == ITEM_NULL || object.item == ITEM_JS_UNDEFINED) {
         return js_throw_type_error("Cannot set property on null or undefined");
     }
+    if (get_type_id(key) == LMD_TYPE_STRING) {
+        String* private_key = it2s(key);
+        if (private_key && private_key->len > 10 &&
+            strncmp(private_key->chars, "__private_", 10) == 0 &&
+            !js_can_host_private_slots(object)) {
+            char msg[256];
+            snprintf(msg, sizeof(msg), "Cannot write private member '#%.*s' to an object whose class did not declare it",
+                (int)private_key->len - 10, private_key->chars + 10);
+            return js_throw_type_error(msg);
+        }
+    }
     if (js_is_symbol(object)) {
         if (js_strict_mode) {
             const char* prop_name = NULL;
@@ -4700,6 +4887,25 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
         } else if (kt == LMD_TYPE_UNDEFINED) {
             key = (Item){.item = s2it(heap_create_name("undefined", 9))};
         }
+        bool private_internal_property_key = js_is_private_internal_property_key(key);
+        if (private_internal_property_key && js_is_proxy(object)) {
+            if (get_type_id(key) == LMD_TYPE_STRING) {
+                String* private_key = it2s(key);
+                if (private_key && private_key->len > 10 &&
+                    strncmp(private_key->chars, "__private_", 10) == 0 &&
+                    !js_private_field_initializing &&
+                    js_private_brand_mismatch(object, private_key)) {
+                    char msg[256];
+                    snprintf(msg, sizeof(msg), "Cannot write private member '#%.*s' to an object whose class did not declare it",
+                        (int)private_key->len - 10, private_key->chars + 10);
+                    return js_throw_type_error(msg);
+                }
+            }
+            Item slots = js_proxy_private_slots(object, true);
+            if (get_type_id(slots) == LMD_TYPE_MAP) {
+                return js_property_set(slots, key, value);
+            }
+        }
         if (get_type_id(key) == LMD_TYPE_STRING && js_class_id(object) == JS_CLASS_ARRAY) {
             bool is_proto = false;
             js_map_get_fast_ext(m, "__is_proto__", 12, &is_proto);
@@ -4807,7 +5013,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
             }
         }
         // MapKind fast path: skip exotic checks for plain objects
-        if (m->map_kind != MAP_KIND_PLAIN) {
+        if (m->map_kind != MAP_KIND_PLAIN && !private_internal_property_key) {
             Item exotic_result = ItemNull;
             if (js_try_exotic_property_set(object, key, &value, &exotic_result)) return exotic_result;
         }
@@ -4860,6 +5066,13 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                 // Stage A1.4: IS_ACCESSOR setter dispatch on own + proto chain
                 // routed through js_ordinary_set_via_accessor.
                 {
+                    if (str_key->len > 10 && strncmp(str_key->chars, "__private_", 10) == 0 &&
+                        js_private_brand_mismatch(object, str_key)) {
+                        char msg[256];
+                        snprintf(msg, sizeof(msg), "Cannot write private member '#%.*s' to an object whose class did not declare it",
+                            (int)str_key->len - 10, str_key->chars + 10);
+                        return js_throw_type_error(msg);
+                    }
                     Item recv = js_proxy_receiver.item ? js_proxy_receiver : object;
                     JsSetterDispatchStatus st = js_ordinary_set_via_accessor(
                         object, str_key->chars, (int)str_key->len, value, recv);
@@ -5152,6 +5365,49 @@ extern "C" Item js_property_set_strict(Item object, Item key, Item value) {
     bool saved_strict = js_strict_mode;
     js_strict_mode = true;
     Item result = js_property_set(object, key, value);
+    if (!js_exception_pending && js_is_proxy(object) && result.item == (uint64_t)b2it(false)) {
+        if (get_type_id(key) == LMD_TYPE_STRING) {
+            String* sk = it2s(key);
+            js_strict_throw_property_error("set", sk ? sk->chars : NULL, sk ? (int)sk->len : 0);
+        } else {
+            js_strict_throw_property_error("set", NULL, 0);
+        }
+    }
+    js_strict_mode = saved_strict;
+    return result;
+}
+
+static Item js_private_property_set_checked(Item object, Item key, Item value) {
+    if (get_type_id(key) == LMD_TYPE_STRING) {
+        String* private_key = it2s(key);
+        if (private_key && private_key->len > 10 &&
+            strncmp(private_key->chars, "__private_", 10) == 0) {
+            if (!js_can_host_private_slots(object)) {
+                char msg[256];
+                snprintf(msg, sizeof(msg), "Cannot write private member '#%.*s' to an object whose class did not declare it",
+                    (int)private_key->len - 10, private_key->chars + 10);
+                return js_throw_type_error(msg);
+            }
+            if (!js_private_storage_has_own(object, key) &&
+                !js_private_brand_storage_has_own(object, private_key)) {
+                char msg[256];
+                snprintf(msg, sizeof(msg), "Cannot write private member '#%.*s' to an object whose class did not declare it",
+                    (int)private_key->len - 10, private_key->chars + 10);
+                return js_throw_type_error(msg);
+            }
+        }
+    }
+    return js_property_set(object, key, value);
+}
+
+extern "C" Item js_private_property_set(Item object, Item key, Item value) {
+    return js_private_property_set_checked(object, key, value);
+}
+
+extern "C" Item js_private_property_set_strict(Item object, Item key, Item value) {
+    bool saved_strict = js_strict_mode;
+    js_strict_mode = true;
+    Item result = js_private_property_set_checked(object, key, value);
     if (!js_exception_pending && js_is_proxy(object) && result.item == (uint64_t)b2it(false)) {
         if (get_type_id(key) == LMD_TYPE_STRING) {
             String* sk = it2s(key);
@@ -6573,6 +6829,12 @@ extern "C" Item js_new_check_constructor_return(Item obj, Item result) {
         return result;
     }
     return obj;
+}
+
+extern "C" void js_set_internal_class_name(Item obj, Item class_name) {
+    if (js_is_proxy(obj)) obj = js_proxy_get_target(obj);
+    Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
+    js_property_set(obj, cn_key, class_name);
 }
 
 // =============================================================================
@@ -10416,6 +10678,15 @@ extern "C" Item js_super_bind_this(Item this_val, Item construct_result) {
     return bound_this;
 }
 
+extern "C" Item js_get_super_this_value(void) {
+    if (js_super_this_bound_depth > 0) {
+        int idx = js_super_this_bound_depth - 1;
+        return js_super_this_value_stack[idx];
+    }
+    extern Item js_get_this();
+    return js_get_this();
+}
+
 static bool js_super_callee_is_constructor(Item callee);
 
 extern "C" Item js_get_super_constructor_from_receiver(Item receiver, Item fallback_ctor) {
@@ -10494,6 +10765,16 @@ extern "C" void js_check_class_heritage_constructor(Item superclass) {
     if (!js_super_callee_is_constructor(superclass)) {
         js_throw_type_error("Class extends value is not a constructor or null");
     }
+}
+
+extern "C" void js_check_class_prototype_parent(Item prototype) {
+    TypeId type = get_type_id(prototype);
+    if (prototype.item == ItemNull.item || type == LMD_TYPE_NULL) return;
+    if (type == LMD_TYPE_MAP || type == LMD_TYPE_FUNC ||
+        type == LMD_TYPE_ARRAY || type == LMD_TYPE_ELEMENT) {
+        return;
+    }
+    js_throw_type_error("Class extends value has invalid prototype property");
 }
 
 // super() for class-expression superclasses: handle both FUNC and MAP (class object) callee.
@@ -10830,7 +11111,10 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
             js_generator_callee_proto = js_property_get(func_item, proto_key);
         }
         bool derived_ctor_call = (fn->flags & JS_FUNC_FLAG_DERIVED_CTOR) != 0;
-        if (derived_ctor_call) js_super_this_binding_push(effective_this);
+        if (derived_ctor_call) {
+            js_super_this_binding_push(effective_this);
+            js_current_this = (Item){.item = ITEM_JS_TDZ};
+        }
         Item prev_private_home_class = js_current_private_home_class;
         Item method_home_class = js_function_home_class(func_item);
         if (method_home_class.item != ItemNull.item && method_home_class.item != 0 &&
@@ -10898,7 +11182,10 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         js_generator_callee_proto = js_property_get(func_item, proto_key);
     }
     bool derived_ctor_call = (fn->flags & JS_FUNC_FLAG_DERIVED_CTOR) != 0;
-    if (derived_ctor_call) js_super_this_binding_push(this_val);
+    if (derived_ctor_call) {
+        js_super_this_binding_push(this_val);
+        js_current_this = (Item){.item = ITEM_JS_TDZ};
+    }
     Item prev_private_home_class = js_current_private_home_class;
     Item method_home_class = js_function_home_class(func_item);
     if (method_home_class.item != ItemNull.item && method_home_class.item != 0 &&

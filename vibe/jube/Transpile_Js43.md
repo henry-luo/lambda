@@ -2152,3 +2152,330 @@ Results:
 - Array includes guard batch: 5 / 5 passed.
 - Function `toString` slow representative: passes with a 30-second test timeout
   but remains slow at roughly 18-22 seconds in focused runs.
+
+## 38. Private Field Assignment Tightening
+
+Status on 2026-05-18: fixed the remaining `privatefieldset` rows from the
+current 591-test remaining manifest and reduced that manifest from 190 to 184
+failures.
+
+Root causes:
+
+- Runtime private field installation and ordinary private assignment both used
+  `js_property_set`.  During class field initialization the runtime suppresses
+  missing-private checks so real field adds can succeed; ordinary assignments
+  like `this.#x = 1` inside an earlier public initializer were accidentally
+  using the same relaxed path.
+- The MIR Reference record did not remember when a member target was a private
+  reference, so `PutValue` could not distinguish private assignment from normal
+  object property writes.
+- `for-in` member left-hand sides were evaluated into the loop temporary but
+  were not written back through the Reference path in the for-in branch.
+- Destructuring pre-reference evaluation for `this.#field` before `super()`
+  resolved to a later TypeError instead of the required ReferenceError before
+  the source getter was invoked.
+
+Fix:
+
+- Added `js_private_property_set` / `js_private_property_set_strict` as the
+  ordinary-private-assignment path.  It requires an existing private field slot
+  or private brand before delegating to the normal property setter, while class
+  field installation continues to use the existing add path.
+- Marked MIR references with `is_private` and routed private reference writes
+  through the new checked runtime helper.
+- Added immediate ReferenceError emission when a member reference evaluates
+  `this` before `super()` in a derived constructor.
+- Made for-in member targets use `jm_emit_reference` / `jm_emit_put_value`,
+  matching the for-of member target path.
+- Registered the new runtime helpers in `sys_func_registry.c` for MIR imports.
+
+Focused verification:
+
+```bash
+make -C build/premake config=release_native lambda -j4 CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib"
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_private_runtime_batch.txt --js-timeout=30 --write-failures=temp/js43_private_runtime_after_private_set.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_privatefieldset_batch.txt --js-timeout=30 --write-failures=temp/js43_privatefieldset_after_private_set.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_current_remaining_batch_after_private.txt --js-timeout=30 --write-failures=temp/js43_current_remaining_after_private_set.tsv
+```
+
+Results:
+
+- Private runtime guard batch: 7 / 7 passed.
+- Private field set focused batch: 3 / 3 passed.
+- Current remaining batch: 407 / 591 passed, 184 failed.  Previous comparable
+  run was 401 / 591 passed, 190 failed.
+
+Next class work:
+
+- The remaining public-field derived-constructor rows require moving public
+  field initializer emission from `new` construction into the `super()` binding
+  path, so initializers run immediately after the first successful `super()`
+  and are not rerun on a second `super()` attempt.
+
+## 39. Derived Public Fields And Private Method Reinitialization
+
+Status on 2026-05-18: fixed the next class-element slice from the 591-test
+remaining manifest.  The public-field/super rows now pass, and the private
+method duplicate-initialization rows are restored.
+
+Root causes:
+
+- Derived constructor `this` was visible to arrow closures during field
+  initializers before `super()` had bound it.  The runtime needed a lexical
+  `this` binding that can hold TDZ, while internal `super()` still reads the
+  pending superclass receiver.
+- Public instance fields were installed through assignment, so inherited
+  setters and proxy-observable internal writes could run.  Public fields must
+  use `CreateDataPropertyOrThrow` semantics.
+- Derived own fields were emitted in the outer `new` path instead of after the
+  first successful `super()` binding.  That made double-`super()` and
+  superclass-returned-object cases observable in the wrong order.
+- Private method brands installed on superclass-returned objects did not check
+  whether the same private name was already present.  Getter/setter pairs also
+  needed emitter-side de-duplication so the first construction still installs
+  one shared private accessor brand.
+
+Fix:
+
+- Added TDZ-aware lexical `this` capture/resolution helpers and updated
+  derived constructor call setup so explicit `super()` uses the pending
+  superclass receiver while ordinary `this` remains TDZ until bound.
+- Updated derived public-field initialization to use `js_create_data_property`
+  and to run on the object returned by `super()`.
+- Added `js_set_internal_class_name` so class-name stamping bypasses proxy
+  traps when a superclass constructor returns a proxy.
+- Added duplicate-brand detection to `js_private_brand_add` and de-duplicated
+  private instance method brand emission by private name.
+
+Focused verification:
+
+```bash
+make -C build/premake config=release_native lambda -j4 CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib"
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_public_field_super_batch.txt --js-timeout=30 --write-failures=temp/js43_public_field_super_after_brand_guard.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_private_method_double_init_batch.txt --js-timeout=30 --jobs=1 --write-failures=temp/js43_private_method_double_init_after_brand_guard_seq.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_current_remaining_batch_after_private.txt --js-timeout=30 --write-failures=temp/js43_current_remaining_after_private_brand_guard.tsv
+```
+
+Results:
+
+- Public field/super batch: 4 / 4 passed.
+- Private method duplicate-initialization batch: 4 / 4 passed.
+- Current remaining batch: 412 / 591 passed, 179 failed.  Previous comparable
+  run was 407 / 591 passed, 184 failed.
+
+Next class work:
+
+- The two remaining `grammar-field-named-{get,set}-followed-by-generator-asi`
+  rows are parser/ASI issues: the JavaScript grammar still refuses to insert a
+  class-field semicolon before a following generator `*` method.
+
+## 40. Class Field ASI Before Generator Methods
+
+Status on 2026-05-18: fixed the two remaining class-element ASI rows.
+
+Root causes:
+
+- The JavaScript scanner refused automatic semicolon insertion when the next
+  token was `*`, which prevented a class field named `get` or `set` from ending
+  before a following generator method.
+- Non-static `get` / `set` field definitions needed a small precedence lift so
+  `get\n*a(){}` parses as a field plus generator method rather than one broken
+  accessor parse.
+- The existing `static get\n...` grammar alias is needed for line-broken static
+  getters, but it over-consumes the exact `static get\n*a(){}` ASI shape.  The
+  AST builder now recognizes only that generator-ASI parse shape and splits it
+  into a static field named `get` plus an instance generator method.
+
+Verification:
+
+```bash
+make -B -C build/premake config=release_native lambda -j4 CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib"
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_class_get_set_generator_asi_batch.txt --js-timeout=30 --jobs=1 --write-failures=temp/js43_class_get_set_generator_asi_after_ast_split.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_current_remaining_batch_after_private.txt --js-timeout=30 --write-failures=temp/js43_current_remaining_after_ast_split.tsv
+```
+
+Results:
+
+- Class `get` / `set` generator ASI batch: 2 / 2 passed.
+- Current remaining batch: 414 / 591 passed, 177 failed.  Previous comparable
+  run was 412 / 591 passed, 179 failed.
+
+## 41. Class Constructor Metadata Ordering
+
+Status on 2026-05-18: fixed the static `length` precedence slice and improved
+the current remaining manifest to 173 failures.
+
+Root causes:
+
+- Class constructor `.length` and `.name` were emitted after static methods and
+  accessors.  That overwrote `static length()` and invoked `static set length`
+  while defining the class.
+- The class constructor `prototype` property was also created too late for
+  Test262's required own-property order.  The constructor now creates
+  `length`, `name`, and `prototype` before static class elements run.
+- Method installation used assignment semantics.  Static methods that replace
+  configurable constructor intrinsics need define-property semantics, so method
+  installation now uses `js_create_data_property` for data methods while
+  accessors continue through the accessor installer.
+
+Focused verification:
+
+```bash
+make -B -C build/premake config=release_native lambda -j4 CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib"
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_class_length_static_batch.txt --js-timeout=30 --jobs=1 --write-failures=temp/js43_class_length_static_after_reorder.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_class_definition_remaining_batch.txt --js-timeout=30 --jobs=1 --write-failures=temp/js43_class_definition_after_reorder.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_current_remaining_batch_after_private.txt --js-timeout=30 --write-failures=temp/js43_current_remaining_after_class_metadata.tsv
+```
+
+Results:
+
+- Static `length` precedence batch: 2 / 2 passed.
+- Class-definition focused batch: 3 / 12 passed.  New passes are the two static
+  `length` rows plus `side-effects-in-property-define`.
+- Current remaining batch: 418 / 591 passed, 173 failed.  Previous comparable
+  run was 414 / 591 passed, 177 failed.
+
+Next work:
+
+- The remaining class-definition `fn-name-*` rows point at computed Symbol
+  property-key `SetFunctionName` formatting for class methods/accessors.
+- The larger remaining clusters are still RegExp lookbehind/named groups,
+  lexical TDZ/scope behavior, global binding attributes, and legacy function
+  activation semantics.
+
+## 42. Class Definition Completion And Derived Super TDZ
+
+Status on 2026-05-18: completed the focused `class/definition` slice and
+improved the current 591-test remaining manifest from 418 / 591 passing to
+428 / 591 passing.
+
+Root causes:
+
+- Computed Symbol class method/accessor keys installed the function before
+  applying `SetFunctionName`, so Test262 saw missing or incorrectly prefixed
+  names for `[sym](){}`, `get [sym](){}`, and `set [sym](v){}`.
+- The P4 `this.prop` shaped-slot fast path treated static class
+  methods/accessors as instance methods.  Static accessors like
+  `static get x() { return this._x; }` read constructor instance-layout slots
+  instead of class-object properties.
+- Class heritage validation checked the superclass constructor but skipped the
+  required validation of `superclass.prototype`.  Bound functions and accessors
+  returning non-object prototype values therefore failed to throw the required
+  TypeError.
+- `new C()` used the compile-time class-entry fast path even when multiple
+  lexical classes had the same name.  Test262's repeated local `class C extends
+  Base { ... }; new C();` forms could run the wrong class metadata instead of
+  the runtime lexical binding.
+- The no-op `super(...args)` path for parent classes without explicit
+  constructors skipped argument evaluation, so TDZ reads like `super(this)` and
+  `super(Object.getPrototypeOf(this))` did not execute.
+- Some super-property and builtin-call fast paths continued after
+  `js_get_this()` had raised a pending ReferenceError, allowing a later TypeError
+  to overwrite the expected error type.
+
+Fix:
+
+- Centralized method/accessor installation through
+  `js_set_function_name_from_property_key_if_anonymous` before defining the
+  method or accessor.
+- Added `is_class_static_method` to collected function metadata and excluded
+  static class methods/accessors from the instance shaped-slot `this.prop`
+  optimization.
+- Added `js_check_class_prototype_parent` and called it after resolving
+  `superclass.prototype` for class declarations, expressions, and module-batch
+  lowering.
+- Added a duplicate-class-name guard to `new ClassName(...)`; ambiguous class
+  names now use runtime `js_new_from_class_object` dispatch so block/function
+  lexical bindings select the actual class object.
+- Evaluated `super()` arguments even when the parent class has no explicit
+  constructor, and added exception propagation after TDZ-sensitive `this`
+  resolution in `super.method()` and `Object.getPrototypeOf(...)` fast paths.
+- Generalized argument-array builders to propagate pending exceptions after
+  argument evaluation.
+
+Verification:
+
+```bash
+make -C build/premake config=release_native lambda -j4 CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib"
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_class_definition_remaining_batch.txt --js-timeout=30 --jobs=1 --write-failures=temp/js43_class_definition_after_super_tdz.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_current_remaining_batch_after_private.txt --js-timeout=30 --write-failures=temp/js43_current_remaining_after_class_definition_tdz.tsv
+```
+
+Results:
+
+- Class-definition focused batch: 12 / 12 passed.
+- Current remaining batch: 428 / 591 passed, 163 failed.  Previous comparable
+  run was 418 / 591 passed, 173 failed.
+
+Next work:
+
+- The largest remaining block is still RegExp lookbehind/named groups.
+- The non-RegExp failures are now concentrated around lexical/global binding
+  semantics, class static blocks/subclass builtins, and older activation-object
+  function semantics.
+
+## 43. Static Blocks And Block Lexical Closure Capture
+
+Status on 2026-05-18: fixed the focused static-block slice and the two
+ordinary block lexical closure rows from the current remaining manifest.  The
+current 591-test remaining manifest now reports 440 / 591 passing, leaving
+151 failures.
+
+Root causes:
+
+- Static class elements were not emitted in exact source order across static
+  fields and static blocks.  That broke static-block sequencing, `arguments`
+  behavior inside static blocks, `new.target`, and `var` scoping around static
+  blocks.
+- Static element execution needed to run with `this` set to the class object,
+  `new.target` cleared, and the superclass prototype already installed so
+  static `super` property reads observe the right class state.
+- Function bodies for closures over a block `let` that shadows a top-level
+  module binding still treated the name as a live module variable.  The
+  closure creator copied the correct block value into the per-closure env, but
+  the compiled prologue skipped loading it because `force_env_capture` was only
+  set for lexical `for` head captures.
+
+Fix:
+
+- Added source-order emission for static fields and static blocks, with static
+  block lowering isolated through a class-static-block helper.
+- Preserved and restored static-element `this` and `new.target`, and installed
+  class prototype linkage before static elements execute.
+- Marked captures as forced env captures when an ancestor lexical/function
+  local shadows a same-named `MCONST_MODVAR`, so block lexical closures read the
+  per-closure env instead of falling through to the module table.
+
+Verification:
+
+```bash
+make -C build/premake config=release_native lambda -j4 CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib"
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_class_static_block_batch.txt --js-timeout=30 --jobs=1 --write-failures=temp/js43_class_static_block_after_cleanup_serial.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_lexical_scope_batch.txt --js-timeout=30 --jobs=1 --write-failures=temp/js43_lexical_scope_after_cleanup_serial.tsv
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_current_remaining_batch_after_private.txt --js-timeout=30 --write-failures=temp/js43_current_remaining_after_lexical_shadow.tsv
+```
+
+Results:
+
+- Static-block focused batch: 8 / 8 passed.
+- Block lexical closure batch: 2 / 2 passed.
+- Current remaining batch: 440 / 591 passed, 151 failed.  The earlier
+  comparable checkpoint in this doc was 428 / 591 passed, 163 failed.
+
+Current top remaining path clusters:
+
+| Area | Failures |
+|---|---:|
+| `language/statements` | 56 |
+| `built_ins/RegExp` | 36 |
+| `language/global_code` | 15 |
+| `language/expressions` | 14 |
+| `language/function_code` | 13 |
+| `language/literals` | 12 |
+
+Next work:
+
+- RegExp lookbehind/named-groups remains the largest single cluster.
+- The language side is now mostly switch/try lexical environment handling,
+  global declaration attributes, subclass builtin edges, and legacy
+  activation-object function behavior.

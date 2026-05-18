@@ -1147,12 +1147,12 @@ module.exports = grammar({
       '}',
     ),
 
-    field_definition: $ => seq(
+    field_definition: $ => prec(1, seq(
       repeat(field('decorator', $.decorator)),
       optional('static'),
       field('property', $._property_name),
       optional($._initializer),
-    ),
+    )),
 
     formal_parameters: $ => seq(
       '(',

@@ -51,6 +51,7 @@ typedef struct JsMirReference {
     MIR_reg_t key_reg;
     bool strict;
     bool uninitialized_this;
+    bool is_private;
 } JsMirReference;
 
 // internal function declarations
@@ -321,6 +322,8 @@ void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node);
 void jm_scope_env_reload_vars(JsMirTranspiler* mt);
 void jm_env_reload_shared_captures(JsMirTranspiler* mt);
 void jm_emit_exc_propagate_check(JsMirTranspiler* mt);
+void jm_emit_class_static_field(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce, JsStaticFieldEntry* sf);
+void jm_emit_class_static_block(JsMirTranspiler* mt, JsClassEntry* ce, JsAstNode* block);
 void jm_transpile_while(JsMirTranspiler* mt, JsWhileNode* wh);
 void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node);
 MIR_reg_t jm_build_closure_for_method(JsMirTranspiler* mt, JsFuncCollected* fc, int param_count);
