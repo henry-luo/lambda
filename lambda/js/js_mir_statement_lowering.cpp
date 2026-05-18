@@ -789,6 +789,20 @@ bool jm_push_typeof_narrow(JsMirTranspiler* mt, JsIdentifierNode* id, TypeId nar
     return true;
 }
 
+static void jm_init_if_clause_function_binding(JsMirTranspiler* mt, JsAstNode* stmt) {
+    if (!stmt || stmt->node_type != JS_AST_NODE_FUNCTION_DECLARATION) return;
+    JsFunctionNode* fn = (JsFunctionNode*)stmt;
+    if (!fn->name || !fn->name->chars) return;
+    JsFuncCollected* fc = jm_find_collected_func(mt, fn);
+    if (!fc || !fc->func_item) return;
+    char vname[128];
+    snprintf(vname, sizeof(vname), "_js_%.*s", (int)fn->name->len, fn->name->chars);
+    MIR_reg_t fn_reg = jm_create_func_or_closure(mt, fc);
+    jm_set_var(mt, vname, fn_reg);
+    JsMirVarEntry* ve = jm_find_var(mt, vname);
+    if (ve) ve->from_block_func_decl = true;
+}
+
 void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node) {
     // Phase 3.5: detect typeof narrowing pattern before emitting the test
     TypeId typeof_narrowed_type = LMD_TYPE_ANY;
@@ -824,6 +838,11 @@ void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node) {
             JsAstNode* s = blk->statements;
             while (s) { jm_transpile_statement(mt, s); s = s->next; }
             jm_pop_scope(mt);
+        } else if (if_node->consequent->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
+            jm_push_scope(mt);
+            jm_init_if_clause_function_binding(mt, if_node->consequent);
+            jm_transpile_statement(mt, if_node->consequent);
+            jm_pop_scope(mt);
         } else {
             jm_transpile_statement(mt, if_node->consequent);
         }
@@ -846,6 +865,11 @@ void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node) {
             JsBlockNode* blk = (JsBlockNode*)if_node->alternate;
             JsAstNode* s = blk->statements;
             while (s) { jm_transpile_statement(mt, s); s = s->next; }
+            jm_pop_scope(mt);
+        } else if (if_node->alternate->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
+            jm_push_scope(mt);
+            jm_init_if_clause_function_binding(mt, if_node->alternate);
+            jm_transpile_statement(mt, if_node->alternate);
             jm_pop_scope(mt);
         } else {
             jm_transpile_statement(mt, if_node->alternate);
@@ -3908,7 +3932,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                     jm_call_void_2(mt, "js_set_module_var",
                         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)annexb_modvar->int_val),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
-                    if (annexb_modvar->is_nested_func_hoist) {
+                    if (annexb_modvar->is_nested_func_hoist && !annexb_modvar->is_iife_var) {
                         MIR_reg_t key_reg = jm_box_string_literal(mt,
                             fn_decl->name->chars, (int)fn_decl->name->len);
                         if (mt->is_eval_direct && !mt->is_global_strict && !mt->is_module) {
@@ -3959,7 +3983,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                         jm_call_void_2(mt, "js_set_module_var",
                             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mvc->int_val),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
-                        if (mvc->is_nested_func_hoist) {
+                        if (mvc->is_nested_func_hoist && !mvc->is_iife_var) {
                             MIR_reg_t key_reg = jm_box_string_literal(mt,
                                 fn_decl->name->chars, (int)fn_decl->name->len);
                             if (mt->is_eval_direct && !mt->is_global_strict && !mt->is_module) {

@@ -2787,3 +2787,51 @@ Next work:
 
 - Rerun `make test262-update-baseline` to refresh the full-suite baseline and
   identify the next real-regression cluster, if any remains.
+
+## 49. Full test262 Baseline Refresh Blocked By 123 Regressions
+
+Status on 2026-05-18: reran the full js262/test262 baseline update target.
+The suite itself completed cleanly, but the baseline was not updated because the
+regression gate found 123 pass-to-fail rows after isolated retry.
+
+Verification:
+
+```bash
+make test262-update-baseline
+```
+
+Results:
+
+- Prepared 42,219 tests: 34,165 runnable, 8,054 skipped before batch execution.
+- Phase 1 completed with 34,162 clean tests and 3 partial-list skips.
+- Non-fully-passing rows: 0 batch-unstable/slow rows; only the 3 expected
+  partial skips were left out.
+- Fully passed: 33,900 / 34,163, up from the checked-in 33,839 baseline.
+- Failed: 263; skipped: 8,056.
+- Improvements: 184 fail-to-pass rows.
+- Regressions: 123 pass-to-fail rows.
+- Isolated retry recovered 0 / 123, so these are real regressions rather than
+  batch kills.
+- Baseline update result: not updated; `test262_baseline.txt` remains at the
+  prior 33,839 passing rows.
+
+Regression clusters:
+
+- 61 Annex B block-function binding regressions under
+  `annexB/language/function-code/*`: global binding creation, skipped early
+  initialized binding checks, and block-scoping `is not a function` failures.
+- 20 `Object.defineProperty` / `Object.defineProperties` descriptor regressions:
+  current behavior throws `TypeError: Cannot redefine property` where the tests
+  expect compatible redefinition semantics.
+- 42 TypedArray internal-length rows: methods such as `copyWithin`, `every`,
+  `fill`, `filter`, `find*`, `join`, `reduce*`, `reverse`, `set`, `slice`,
+  `some`, `sort`, and `toLocaleString` now fail while redefining or probing
+  `length` on typed-array instances.
+
+Next work:
+
+- Fix the Annex B function-code binding cluster first; it is the largest
+  coherent block and likely shares the recent IIFE/module-var hoist changes.
+- Then repair compatible property redefinition semantics, validating both plain
+  Object and TypedArray length/internal-slot cases before the next baseline
+  refresh attempt.

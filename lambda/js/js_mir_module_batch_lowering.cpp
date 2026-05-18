@@ -2494,12 +2494,16 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 }
                 struct hashmap* iife_func_hoists = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
                     jm_name_hash, jm_name_cmp, NULL, NULL);
+                struct hashmap* iife_lex_collisions = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+                    jm_name_hash, jm_name_cmp, NULL, NULL);
+                jm_collect_all_let_const_names_recursive(iife_fn->body, iife_lex_collisions);
                 jm_collect_body_locals(iife_fn->body, iife_func_hoists, true);
                 size_t fh_iter = 0; void* fh_item;
                 while (hashmap_iter(iife_func_hoists, &fh_iter, &fh_item)) {
                     JsNameSetEntry* e = (JsNameSetEntry*)fh_item;
                     if (!e->from_func_decl) continue;
                     if (top_level_declares_name(e->name, stmt)) continue;
+                    if (jm_name_set_has(iife_lex_collisions, e->name)) continue;
                     JsModuleConstEntry lookup;
                     snprintf(lookup.name, sizeof(lookup.name), "%s", e->name);
                     if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < 2048) {
@@ -2515,6 +2519,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             mce.name, (int)mce.int_val);
                     }
                 }
+                hashmap_free(iife_lex_collisions);
                 hashmap_free(iife_func_hoists);
             }
             stmt = stmt->next;

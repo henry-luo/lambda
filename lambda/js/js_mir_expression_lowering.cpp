@@ -44,6 +44,17 @@ static bool jm_node_has_with_ancestor_until_function(JsAstNode* node) {
     return false;
 }
 
+static bool jm_current_scope_can_see_iife_modvar(JsMirTranspiler* mt) {
+    if (!mt || mt->current_func_index < 0 || !mt->func_entries) return false;
+    int idx = mt->current_func_index;
+    while (idx >= 0 && idx < mt->func_count) {
+        JsFuncCollected* fc = &mt->func_entries[idx];
+        if (fc->is_iife_body) return true;
+        idx = fc->parent_index;
+    }
+    return false;
+}
+
 bool jm_is_private_name(String* name) {
     return name && name->len > 10 && strncmp(name->chars, "__private_", 10) == 0;
 }
@@ -866,6 +877,9 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
         JsModuleConstEntry lookup;
         snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
         JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
+        if (mc && mc->is_iife_var && !jm_current_scope_can_see_iife_modvar(mt)) {
+            mc = NULL;
+        }
         if (mc) {
             switch (mc->const_type) {
             case MCONST_INT:
