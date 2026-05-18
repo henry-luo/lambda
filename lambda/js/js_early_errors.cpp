@@ -562,6 +562,21 @@ static void check_function_name_reserved(EarlyErrorCtx* ctx, JsFunctionNode* fun
     }
 }
 
+static bool regex_pattern_has_line_terminator(const char* pattern, int pattern_len) {
+    if (!pattern || pattern_len <= 0) return false;
+    for (int i = 0; i < pattern_len; i++) {
+        unsigned char ch = (unsigned char)pattern[i];
+        if (ch == '\n' || ch == '\r') return true;
+        if (ch == 0xE2 && i + 2 < pattern_len &&
+            (unsigned char)pattern[i + 1] == 0x80 &&
+            ((unsigned char)pattern[i + 2] == 0xA8 ||
+             (unsigned char)pattern[i + 2] == 0xA9)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // ---- recursive AST walker --------------------------------------------------
 
 static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node);
@@ -639,6 +654,14 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
                         }
                     }
                 }
+            }
+            break;
+        }
+
+        case JS_AST_NODE_REGEX: {
+            JsRegexNode* re = (JsRegexNode*)node;
+            if (regex_pattern_has_line_terminator(re->pattern, re->pattern_len)) {
+                ee_error(ctx, node, "Regular expression literal cannot contain a line terminator");
             }
             break;
         }

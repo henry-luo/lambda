@@ -44,6 +44,17 @@ static bool jm_node_has_with_ancestor_until_function(JsAstNode* node) {
     return false;
 }
 
+static bool jm_current_scope_can_see_iife_modvar(JsMirTranspiler* mt) {
+    if (!mt || mt->current_func_index < 0 || !mt->func_entries) return false;
+    int idx = mt->current_func_index;
+    while (idx >= 0 && idx < mt->func_count) {
+        JsFuncCollected* fc = &mt->func_entries[idx];
+        if (fc->is_iife_body) return true;
+        idx = fc->parent_index;
+    }
+    return false;
+}
+
 bool jm_is_private_name(String* name) {
     return name && name->len > 10 && strncmp(name->chars, "__private_", 10) == 0;
 }
@@ -866,6 +877,9 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
         JsModuleConstEntry lookup;
         snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
         JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
+        if (mc && mc->is_iife_var && !jm_current_scope_can_see_iife_modvar(mt)) {
+            mc = NULL;
+        }
         if (mc) {
             switch (mc->const_type) {
             case MCONST_INT:
@@ -4386,7 +4400,10 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_native),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, new_val));
 
-                // v20: arguments[i] → param aliasing in A4 fast path
+                // v20: arguments[i] → param aliasing in A4 fast path.
+                // Mapped arguments can be unmapped by defineProperty/delete,
+                // so read the effective mapped value instead of blindly
+                // copying the RHS into the parameter register.
                 if (mt->arguments_reg != 0 &&
                     member->object && member->object->node_type == JS_AST_NODE_IDENTIFIER) {
                     JsIdentifierNode* obj_id = (JsIdentifierNode*)member->object;
@@ -4399,15 +4416,20 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                             if (idx >= 0 && idx < mt->arguments_param_count) {
                                 JsMirVarEntry* pvar = jm_find_var(mt, mt->arguments_param_names[idx]);
                                 if (pvar) {
+                                    MIR_reg_t mapped_val = jm_call_3(mt, "js_arguments_mapped_get", MIR_T_I64,
+                                        MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->arguments_reg),
+                                        MIR_T_I64, MIR_new_int_op(mt->ctx, idx),
+                                        MIR_T_I64, MIR_new_reg_op(mt->ctx, pvar->reg));
                                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                                         MIR_new_reg_op(mt->ctx, pvar->reg),
-                                        MIR_new_reg_op(mt->ctx, new_val)));
+                                        MIR_new_reg_op(mt->ctx, mapped_val)));
                                 }
                             }
                         }
                     }
                 }
 
+                jm_readback_closure_env(mt);
                 return a4_result;
             }
         }
@@ -4816,12 +4838,17 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                     if (idx_lit->literal_type == JS_LITERAL_NUMBER && !idx_lit->has_decimal) {
                         int idx = (int)idx_lit->value.number_value;
                         if (idx >= 0 && idx < mt->arguments_param_count) {
-                            // Write back to the param register
+                            // Write back to the param register only if the
+                            // arguments exotic mapping still points at it.
                             JsMirVarEntry* pvar = jm_find_var(mt, mt->arguments_param_names[idx]);
                             if (pvar) {
+                                MIR_reg_t mapped_val = jm_call_3(mt, "js_arguments_mapped_get", MIR_T_I64,
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->arguments_reg),
+                                    MIR_T_I64, MIR_new_int_op(mt->ctx, idx),
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, pvar->reg));
                                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                                     MIR_new_reg_op(mt->ctx, pvar->reg),
-                                    MIR_new_reg_op(mt->ctx, new_val)));
+                                    MIR_new_reg_op(mt->ctx, mapped_val)));
                             }
                         }
                     }
@@ -4829,6 +4856,7 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
             }
         }
 
+        jm_readback_closure_env(mt);
         return result;
     }
 
@@ -7617,6 +7645,28 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 }
             }
 
+            // Object.defineProperty(obj, key, desc) installs accessor closures
+            // for future [[Set]]/[[Get]] calls. Preserve the closure-env
+            // tracking produced while lowering `desc` so a later setter call
+            // can read mutable captures back into the current frame.
+            if (prop->name->len == 14 && strncmp(prop->name->chars, "defineProperty", 14) == 0 &&
+                m->object && m->object->node_type == JS_AST_NODE_IDENTIFIER &&
+                call->arguments && call->arguments->next && call->arguments->next->next) {
+                JsIdentifierNode* obj_id = (JsIdentifierNode*)m->object;
+                if (obj_id->name && obj_id->name->len == 6 &&
+                    strncmp(obj_id->name->chars, "Object", 6) == 0 &&
+                    !jm_find_var(mt, "_js_Object")) {
+                    mt->last_closure_has_env = false;
+                    MIR_reg_t target = jm_transpile_box_item(mt, call->arguments);
+                    MIR_reg_t key = jm_transpile_box_item(mt, call->arguments->next);
+                    MIR_reg_t desc = jm_transpile_box_item(mt, call->arguments->next->next);
+                    return jm_call_3(mt, "js_object_define_property", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, target),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, desc));
+                }
+            }
+
             // Reset closure env tracking before evaluating arguments
             mt->last_closure_has_env = false;
 
@@ -8240,14 +8290,14 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 return jm_call_1(mt, "js_decodeURI", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
-#ifndef NDEBUG
-            if (nl == 28 && strncmp(n, "validateNativeFunctionSource", 28) == 0) {
+            if (nl == 28 && strncmp(n, "validateNativeFunctionSource", 28) == 0 &&
+                    ((mt->filename && strcmp(mt->filename, "<harness>") == 0) ||
+                     (mt->preamble_entries && mt->preamble_entry_count > 0))) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_undefined(mt);
                 jm_call_void_1(mt, "js_validate_native_function_source",
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
                 return jm_emit_undefined(mt);
             }
-#endif
             // unescape(str) — legacy percent-decoding
             if (nl == 8 && strncmp(n, "unescape", 8) == 0 && !jm_find_var(mt, "_js_unescape")) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_undefined(mt);

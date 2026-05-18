@@ -14,6 +14,7 @@
 
 extern "C" void* heap_calloc(size_t size, TypeId type);
 String* heap_create_name(const char* name, size_t len);
+extern "C" Item js_object_is(Item left, Item right);
 
 // Mirror of JsFuncProps from js_globals.cpp / js_runtime.cpp — only used here to
 // reach `properties_map`. Layout MUST stay in sync with the canonical definitions.
@@ -545,6 +546,19 @@ static Map* js_obj_underlying_map(Item obj) {
     return nullptr;
 }
 
+static Item js_accessor_half_storage_value(Item value) {
+    return get_type_id(value) == LMD_TYPE_UNDEFINED ? ItemNull : value;
+}
+
+static bool js_accessor_half_same(Item left, Item right) {
+    left = js_accessor_half_storage_value(left);
+    right = js_accessor_half_storage_value(right);
+    if (left.item == ItemNull.item || right.item == ItemNull.item) {
+        return left.item == right.item;
+    }
+    return it2b(js_object_is(left, right));
+}
+
 extern "C" void js_define_accessor_partial(Item obj, Item name, Item fn,
                                             int is_setter, uint8_t attrs) {
     if (get_type_id(name) != LMD_TYPE_STRING) return;
@@ -563,15 +577,11 @@ extern "C" void js_define_accessor_partial(Item obj, Item name, Item fn,
     // descriptor field (e.g. defineProperty with `{set: ...}` only) as absent.
     // Without this, Item-typed undefined leaks into pair->getter and dispatch
     // attempts to invoke `undefined` as a function.
-    if (get_type_id(fn) == LMD_TYPE_UNDEFINED) fn = ItemNull;
+    fn = js_accessor_half_storage_value(fn);
 
     // Look up any existing accessor pair under name X.
     JsAccessorPair* pair = nullptr;
     ShapeEntry* se = js_find_shape_entry(obj, ns->chars, (int)ns->len);
-    if (se && !jspd_is_configurable(se)) {
-        js_throw_type_error("Cannot redefine property");
-        return;
-    }
     if (se && jspd_is_accessor(se)) {
         Map* m = js_obj_underlying_map(obj);
         if (m) {
@@ -580,6 +590,18 @@ extern "C" void js_define_accessor_partial(Item obj, Item name, Item fn,
             if (found && slot_val.item != ItemNull.item) {
                 pair = js_item_to_accessor_pair(slot_val);
             }
+        }
+    }
+    if (se && !jspd_is_configurable(se)) {
+        if (!jspd_is_accessor(se)) {
+            js_throw_type_error("Cannot redefine property");
+            return;
+        }
+        Item current_half = ItemNull;
+        if (pair) current_half = is_setter ? pair->setter : pair->getter;
+        if (!js_accessor_half_same(current_half, fn)) {
+            js_throw_type_error("Cannot redefine property");
+            return;
         }
     }
 

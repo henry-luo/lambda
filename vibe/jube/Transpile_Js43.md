@@ -2787,3 +2787,319 @@ Next work:
 
 - Rerun `make test262-update-baseline` to refresh the full-suite baseline and
   identify the next real-regression cluster, if any remains.
+
+## 49. Full test262 Baseline Refresh Blocked By 123 Regressions
+
+Status on 2026-05-18: reran the full js262/test262 baseline update target.
+The suite itself completed cleanly, but the baseline was not updated because the
+regression gate found 123 pass-to-fail rows after isolated retry.
+
+Verification:
+
+```bash
+make test262-update-baseline
+```
+
+Results:
+
+- Prepared 42,219 tests: 34,165 runnable, 8,054 skipped before batch execution.
+- Phase 1 completed with 34,162 clean tests and 3 partial-list skips.
+- Non-fully-passing rows: 0 batch-unstable/slow rows; only the 3 expected
+  partial skips were left out.
+- Fully passed: 33,900 / 34,163, up from the checked-in 33,839 baseline.
+- Failed: 263; skipped: 8,056.
+- Improvements: 184 fail-to-pass rows.
+- Regressions: 123 pass-to-fail rows.
+- Isolated retry recovered 0 / 123, so these are real regressions rather than
+  batch kills.
+- Baseline update result: not updated; `test262_baseline.txt` remains at the
+  prior 33,839 passing rows.
+
+Regression clusters:
+
+- 61 Annex B block-function binding regressions under
+  `annexB/language/function-code/*`: global binding creation, skipped early
+  initialized binding checks, and block-scoping `is not a function` failures.
+- 20 `Object.defineProperty` / `Object.defineProperties` descriptor regressions:
+  current behavior throws `TypeError: Cannot redefine property` where the tests
+  expect compatible redefinition semantics.
+- 42 TypedArray internal-length rows: methods such as `copyWithin`, `every`,
+  `fill`, `filter`, `find*`, `join`, `reduce*`, `reverse`, `set`, `slice`,
+  `some`, `sort`, and `toLocaleString` now fail while redefining or probing
+  `length` on typed-array instances.
+
+Next work:
+
+- Fix the Annex B function-code binding cluster first; it is the largest
+  coherent block and likely shares the recent IIFE/module-var hoist changes.
+- Then repair compatible property redefinition semantics, validating both plain
+  Object and TypedArray length/internal-slot cases before the next baseline
+  refresh attempt.
+
+## 50. Close The 123 Regressions
+
+Status on 2026-05-18: fixed the remaining real regressions from the blocked
+baseline refresh.  The full js262/test262 run now reports 0 regressions against
+the checked-in baseline.
+
+Fixes:
+
+- Annex B function-code binding cluster: fixed the 61 block-function binding
+  regressions first.  The focused Annex B retry passed 61 / 61 and reduced the
+  full-suite regression count from 123 to 62.
+- Compatible accessor redefinition cluster: fixed
+  `js_define_accessor_partial()` so the low-level property storage path no
+  longer rejects every non-configurable accessor entry after
+  `ValidateAndApplyPropertyDescriptor` has already accepted a compatible update.
+- The accessor storage path now normalizes an absent `get` / `set` field to
+  `ItemNull`, compares the existing accessor half with `Object.is` when both
+  sides are callable/object values, and rejects only genuinely incompatible
+  accessor-half changes.
+- This repaired both descriptor groups left after the Annex B fix:
+  20 `Object.defineProperty` / `Object.defineProperties` rows and 42 TypedArray
+  internal-length/property redefinition rows.
+
+Changed files:
+
+- `lambda/js/js_property_attrs.cpp`
+
+Verification:
+
+```bash
+make
+make -C build/premake config=release_native lambda test_js_test262_gtest -j4 CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib"
+awk 'NR>1 && ($1 ~ /^built_ins_Object_define(Property|Properties)_/ || $1 ~ /^built_ins_TypedArray_prototype_.*(length|arraylength|byteoffset)/) { print $1 }' temp/js43_after_annexb_full.tsv > temp/js43_descriptor_62.txt
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_descriptor_62.txt --js-timeout=30 --write-failures=temp/js43_descriptor_after_accessor_guard.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --write-failures=temp/js43_after_descriptor_full.tsv --gtest_brief=1
+```
+
+Results:
+
+- Descriptor-focused 62-test retry: 62 / 62 passed.
+- Full js262/test262 retry: fully passed 34,023 / 34,163.
+- Failed: 140; skipped: 8,056.
+- Improvements: 184 fail-to-pass rows.
+- Regressions: 0 pass-to-fail rows.
+- Failure manifest for remaining non-baseline failures:
+  `temp/js43_after_descriptor_full.tsv`.
+- Grouped summaries:
+  `temp/js43_after_descriptor_full_by_feature.tsv` and
+  `temp/js43_after_descriptor_full_by_path.tsv`.
+
+Note:
+
+- `make` was run before the release build so Premake could regenerate the build
+  graph from config; no generated build files were edited manually.
+- The checked-in baseline was not changed during this pass.  The suite is now
+  clean against the existing baseline, so the next baseline refresh should no
+  longer be blocked by these 123 real regressions.
+
+## 51. Baseline Refresh After Closing Regressions
+
+Status on 2026-05-18: reran the full js262/test262 update gate after closing
+the 123 real regressions.  The gate completed cleanly and refreshed the
+test262 baseline to the current 34,023 fully passing tests.
+
+Verification:
+
+```bash
+make -C build/premake config=release_native lambda test_js_test262_gtest -j4 CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib"
+./test/test_js_test262_gtest.exe --batch-only --update-baseline --gtest_brief=1
+```
+
+Results:
+
+- Fully passed: 34,023 / 34,163.
+- Non-fully-passing: 0.
+- Failed: 140.
+- Skipped: 8,056.
+- Improvements: 184 fail-to-pass rows.
+- Regressions: 0 pass-to-fail rows.
+- Baseline refreshed: `test/js262/test262_baseline.txt` now records
+  `# Total passing: 34023`.
+- Partial list cleanup removed two stale entries that are now in the baseline.
+
+Note:
+
+- `test/js262` is a symlink to `../../lambda-test/js262`.  A first sandboxed
+  baseline-update run printed the normal "Baseline updated" message, but the
+  write through the symlink target was blocked.  The release update gate was
+  rerun with permission to write the symlink target, and the baseline file now
+  reflects the 34,023-test passing set.
+
+## 52. Release Harness Native Matcher Cleanup
+
+Status on 2026-05-18: fixed the remaining release-suite slowdown/regression
+risk around the Test262 native function source matcher.  The full baseline-only
+gate is clean again: 0 non-fully-passing rows and 0 regressions.
+
+Root cause:
+
+- `nativeFunctionMatcher.js` calls `validateNativeFunctionSource()` many times
+  while checking `Function.prototype.toString()` intrinsic source syntax.
+- A native C++ validator already exists, but the MIR lowering for this helper
+  was compiled only in debug builds.  Release js262 runs therefore fell back to
+  the slow JavaScript matcher path.
+- An experimental preamble preload of `wellKnownIntrinsicObjects.js` was
+  reverted because it changed harness/global-object behavior and produced noisy
+  pass-to-fail rows unrelated to the matcher issue.
+
+Fix:
+
+- Enable the existing `js_validate_native_function_source()` lowering in release
+  builds, scoped to Test262 harness/preamble compilation only.
+- Keep the helper semantics intact: the C++ native still validates the generated
+  native function source and throws if the source is malformed; it only avoids
+  repeatedly running the large JavaScript matcher.
+
+Changed files:
+
+- `lambda/js/js_mir_expression_lowering.cpp`
+
+Verification:
+
+```bash
+make -C build/premake config=release_native lambda test_js_test262_gtest -j4 CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib"
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js262_function_tostring_one.txt --js-timeout=30 --write-failures=temp/js262_function_tostring_after_preamble_revert.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --baseline-only --batch-only --write-failures=temp/js262_after_native_validator_baseline2.tsv --gtest_brief=1
+```
+
+Results:
+
+- Focused `built_ins_Function_prototype_toString_built_in_function_object_js`
+  retry: passed; focused batch time dropped from about 5,049 ms to about 98 ms.
+- Full baseline-only js262/test262 gate: fully passed 34,023 / 34,023.
+- Non-fully-passing: 0.
+- Regressions: 0.
+- Failure manifest: 0 rows in
+  `temp/js262_after_native_validator_baseline2.tsv`.
+
+Note:
+
+- Avoid running multiple `test_js_test262_gtest.exe --batch-only` processes in
+  parallel.  The harness reuses worker manifest paths under `temp/`, and
+  overlapping runs can report false missing/lost rows.
+
+## 53. Prototype, Primitive Reference, And Literal Cleanup
+
+Status on 2026-05-18: continued reducing the non-baseline js262 failure list
+without disturbing the refreshed 34,023-test baseline.  The old 140-row
+failure batch now has 8 pass rows and 132 remaining fail rows.
+
+Root causes fixed:
+
+- `RegExp.prototype.toString` and `RegExp.prototype[@@split]` were accepting
+  incompatible receivers/constructors too broadly.  `@@split` also treated
+  `constructor: null` like an absent constructor; SpeciesConstructor must only
+  default for `undefined`.
+- `js_get_prototype_of()` had a dynamic `constructor.prototype` inference path.
+  That made an existing object appear to inherit from a constructor prototype
+  assigned after the object was created, violating stable `[[Prototype]]`
+  behavior.
+- Primitive property references skipped prototype lookup.  String/Symbol
+  primitive reads now walk their prototype chains, and primitive writes now use
+  transient ToObject/prototype-chain semantics: inherited proxy/setter dispatch
+  can run with the primitive receiver, otherwise strict mode throws and sloppy
+  mode no-ops.
+- Legacy sloppy octal numeric literals such as `070` were parsed as decimal.
+- String literal line continuations removed `<LF>`/`<CRLF>`, but missed UTF-8
+  `<LS>` and `<PS>` terminators.
+- Added early-error detection for regex literal patterns that contain raw line
+  terminators.  The eval-based RegExp literal rows are still failing, so their
+  remaining root cause is likely in the eval parse/compile path rather than the
+  ordinary AST walker.
+
+Changed files:
+
+- `lambda/js/js_runtime.cpp`
+- `lambda/js/js_globals.cpp`
+- `lambda/js/build_js_ast.cpp`
+- `lambda/js/js_early_errors.cpp`
+
+Verification:
+
+```bash
+make -C build/premake config=release_native lambda test_js_test262_gtest -j4 CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib"
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js262_remaining_140_old.txt --js-timeout=30 --write-failures=temp/js262_remaining_140_after_regex_line_terms.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --baseline-only --batch-only --write-failures=temp/js262_after_literal_cleanup_baseline.tsv --gtest_brief=1
+```
+
+Focused results:
+
+- `built_ins_RegExp_prototype_Symbol_split_species_ctor_ctor_non_obj_js`: pass.
+- `built_ins_RegExp_prototype_toString_called_as_function_js`: pass.
+- `language_types_object_S8_6_2_A1_js`: pass.
+- `language_types_reference_get_value_prop_base_primitive_js`: pass.
+- `language_types_reference_put_value_prop_base_primitive_js`: pass.
+- `language_literals_numeric_legacy_octal_integer_js`: pass.
+- `language_literals_string_line_continuation_double_js`: pass.
+- `language_literals_string_line_continuation_single_js`: pass.
+- Old 140-row batch: 8 passed, 132 failed.
+
+Baseline result:
+
+- Full baseline-only js262/test262 gate: fully passed 34,023 / 34,023.
+- Non-fully-passing: 0.
+- Regressions: 0.
+- Failure manifest: 0 rows in
+  `temp/js262_after_literal_cleanup_baseline.tsv`.
+
+## 54. Mapped Arguments Accessor Setter Readback
+
+Status on 2026-05-18: fixed the mapped `arguments` accessor row without adding
+baseline regressions.  The old 140-row failure batch now has 10 pass rows and
+130 remaining fail rows.
+
+Root cause fixed:
+
+- `Object.defineProperty(arguments, "0", { set(...) { ... } })` installs an
+  accessor closure that is invoked later by `arguments[0] = value`.  The setter
+  updated its captured environment in runtime storage, but the MIR frame did not
+  read that environment back after the property assignment because the
+  `Object.defineProperty` call had cleared the closure-env tracking metadata.
+- The A4 member-assignment fast path also treated `arguments[i] = value` as a
+  direct parameter write.  That is only valid while the mapped arguments exotic
+  still maps the index to the parameter; descriptor redefinition, accessors, and
+  deletes can unmap the entry.
+
+Implementation:
+
+- Added a direct `Object.defineProperty(obj, key, desc)` lowering for the global
+  `Object.defineProperty` builtin.  It preserves closure-env tracking produced
+  while lowering accessor descriptor functions, so a later setter invocation can
+  read mutable captures back into the active MIR frame.
+- After member assignment, read back the last closure environment because a
+  property write may dispatch to an accessor setter.
+- For `arguments[i]` parameter synchronization, call
+  `js_arguments_mapped_get(arguments, i, param)` and write the returned effective
+  mapped value to the parameter register instead of blindly copying the RHS.
+  This keeps accessor/unmapped arguments rows from mutating the formal
+  parameter incorrectly.
+
+Changed file:
+
+- `lambda/js/js_mir_expression_lowering.cpp`
+
+Verification:
+
+```bash
+make -C build/premake config=release_native lambda test_js_test262_gtest -j4 CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib"
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_arguments_batch.txt --js-timeout=30 --write-failures=temp/js43_arguments_after_accessor_readback.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js262_remaining_140_old.txt --js-timeout=30 --write-failures=temp/js262_remaining_140_after_arguments_accessor.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --baseline-only --batch-only --write-failures=temp/js262_after_arguments_accessor_baseline.tsv --gtest_brief=1
+```
+
+Focused results:
+
+- `language_arguments_object_mapped_enumerable_configurable_accessor_descriptor_js`:
+  pass.
+- Arguments focused batch: 5 / 5 passed.
+- Old 140-row batch: 10 passed, 130 failed.
+
+Baseline result:
+
+- Full baseline-only js262/test262 gate: fully passed 34,023 / 34,023.
+- Non-fully-passing: 0.
+- Regressions: 0.
+- Failure manifest: 0 rows in
+  `temp/js262_after_arguments_accessor_baseline.tsv`.
