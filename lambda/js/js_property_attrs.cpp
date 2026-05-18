@@ -568,6 +568,10 @@ extern "C" void js_define_accessor_partial(Item obj, Item name, Item fn,
     // Look up any existing accessor pair under name X.
     JsAccessorPair* pair = nullptr;
     ShapeEntry* se = js_find_shape_entry(obj, ns->chars, (int)ns->len);
+    if (se && !jspd_is_configurable(se)) {
+        js_throw_type_error("Cannot redefine property");
+        return;
+    }
     if (se && jspd_is_accessor(se)) {
         Map* m = js_obj_underlying_map(obj);
         if (m) {

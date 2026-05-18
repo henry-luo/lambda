@@ -3196,6 +3196,59 @@ JsAstNode* build_js_field_definition(JsTranspiler* tp, TSNode field_node) {
     return (JsAstNode*)field;
 }
 
+static bool js_is_line_terminator_char(char c) {
+    return c == '\n' || c == '\r';
+}
+
+static bool js_method_is_static_get_generator_asi(JsTranspiler* tp, TSNode method_node) {
+    if (!tp || !tp->source) return false;
+
+    TSNode name_node = ts_node_child_by_field_name(method_node, "name", strlen("name"));
+    if (ts_node_is_null(name_node)) return false;
+
+    uint32_t start = ts_node_start_byte(method_node);
+    uint32_t name_start = ts_node_start_byte(name_node);
+    if (name_start <= start) return false;
+
+    const char* src = tp->source + start;
+    int len = (int)(name_start - start);
+    int i = 0;
+    while (i < len && (src[i] == ' ' || src[i] == '\t' || src[i] == '\n' || src[i] == '\r')) i++;
+
+    if (i + 6 > len || memcmp(src + i, "static", 6) != 0) return false;
+    i += 6;
+    if (i >= len || !(src[i] == ' ' || src[i] == '\t' || src[i] == '\n' || src[i] == '\r')) return false;
+    while (i < len && (src[i] == ' ' || src[i] == '\t' || src[i] == '\n' || src[i] == '\r')) i++;
+
+    if (i + 3 > len || memcmp(src + i, "get", 3) != 0) return false;
+    i += 3;
+
+    bool saw_line_terminator = false;
+    while (i < len && (src[i] == ' ' || src[i] == '\t' || src[i] == '\n' || src[i] == '\r')) {
+        if (js_is_line_terminator_char(src[i])) saw_line_terminator = true;
+        i++;
+    }
+    if (!saw_line_terminator) return false;
+
+    return i < len && src[i] == '*';
+}
+
+static JsAstNode* build_js_static_get_field_for_asi(JsTranspiler* tp, TSNode method_node) {
+    JsFieldDefinitionNode* field = (JsFieldDefinitionNode*)alloc_js_ast_node(
+        tp, JS_AST_NODE_FIELD_DEFINITION, method_node, sizeof(JsFieldDefinitionNode));
+    field->is_static = true;
+    field->is_private = false;
+    field->computed = false;
+    field->value = NULL;
+
+    JsIdentifierNode* key = (JsIdentifierNode*)alloc_js_ast_node(
+        tp, JS_AST_NODE_IDENTIFIER, method_node, sizeof(JsIdentifierNode));
+    key->name = name_pool_create_len(tp->name_pool, "get", 3);
+    key->base.type = &TYPE_ANY;
+    field->key = (JsAstNode*)key;
+    return (JsAstNode*)field;
+}
+
 // Build JavaScript class body
 JsAstNode* build_js_class_body(JsTranspiler* tp, TSNode body_node) {
     JsBlockNode* body = (JsBlockNode*)alloc_js_ast_node(tp, JS_AST_NODE_BLOCK_STATEMENT, body_node, sizeof(JsBlockNode));
@@ -3221,6 +3274,23 @@ JsAstNode* build_js_class_body(JsTranspiler* tp, TSNode body_node) {
                 sb->body = build_js_block_statement(tp, body_node);
             }
             method = (JsAstNode*)sb;
+        } else if (strcmp(child_type, "method_definition") == 0 &&
+                   js_method_is_static_get_generator_asi(tp, child_node)) {
+            JsAstNode* field = build_js_static_get_field_for_asi(tp, child_node);
+            if (field) {
+                if (!prev_method) {
+                    body->statements = field;
+                } else {
+                    prev_method->next = field;
+                }
+                prev_method = field;
+            }
+            method = build_js_method_definition(tp, child_node);
+            if (method && method->node_type == JS_AST_NODE_METHOD_DEFINITION) {
+                JsMethodDefinitionNode* md = (JsMethodDefinitionNode*)method;
+                md->static_method = false;
+                md->kind = JsMethodDefinitionNode::JS_METHOD_METHOD;
+            }
         } else {
             method = build_js_method_definition(tp, child_node);
         }

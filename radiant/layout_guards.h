@@ -16,5 +16,12 @@ constexpr int MAX_LAYOUT_NODES = 50000;
 // from deeply nested flex-in-flex containers.
 constexpr int MAX_FLEX_DEPTH = 16;
 
+// maximum grid container nesting depth. in optimized builds the grid multipass
+// cycle (layout_grid_content / layout_final_grid_content /
+// layout_grid_item_final_content_multipass + baseline) is inlined into a single
+// function whose frame measures ~1.5 MB, so the 8 MB main-thread stack only fits
+// ~5 nested grids. kept well below that; grid nested deeper than this is skipped.
+constexpr int MAX_GRID_DEPTH = 4;
+
 // maximum iframe nesting depth. prevents infinite recursion for self-referencing iframes.
 constexpr int MAX_IFRAME_DEPTH = 3;

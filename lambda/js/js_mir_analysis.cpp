@@ -803,7 +803,17 @@ void jm_collect_body_refs(JsAstNode* node, struct hashmap* refs) {
     case JS_AST_NODE_CALL_EXPRESSION:
     case JS_AST_NODE_NEW_EXPRESSION: {
         JsCallNode* c = (JsCallNode*)node;
-        jm_collect_body_refs(c->callee, refs);
+        bool is_super_call = false;
+        if (c->callee && c->callee->node_type == JS_AST_NODE_IDENTIFIER) {
+            JsIdentifierNode* id = (JsIdentifierNode*)c->callee;
+            is_super_call = id->name && id->name->len == 5 &&
+                strncmp(id->name->chars, "super", 5) == 0;
+        }
+        if (is_super_call) {
+            jm_name_set_add(refs, "_js_this");
+        } else {
+            jm_collect_body_refs(c->callee, refs);
+        }
         JsAstNode* arg = c->arguments;
         while (arg) { jm_collect_body_refs(arg, refs); arg = arg->next; }
         break;
@@ -1021,6 +1031,16 @@ void jm_collect_body_locals(JsAstNode* node, struct hashmap* locals, bool var_on
         }
         break;
     }
+    case JS_AST_NODE_CLASS_DECLARATION: {
+        if (var_only) break;
+        JsClassNode* cls = (JsClassNode*)node;
+        if (cls->name && cls->name->chars) {
+            char name[128];
+            snprintf(name, sizeof(name), "_js_%.*s", (int)cls->name->len, cls->name->chars);
+            jm_name_set_add(locals, name);
+        }
+        break;
+    }
 
     case JS_AST_NODE_BLOCK_STATEMENT: {
         JsBlockNode* blk = (JsBlockNode*)node;
@@ -1147,8 +1167,63 @@ void jm_collect_let_const_names(JsAstNode* block, struct hashmap* names) {
                     d = d->next;
                 }
             }
+        } else if (stmt->node_type == JS_AST_NODE_CLASS_DECLARATION) {
+            JsClassNode* c = (JsClassNode*)stmt;
+            if (c->name && c->name->chars) {
+                char name[128];
+                snprintf(name, sizeof(name), "_js_%.*s", (int)c->name->len, c->name->chars);
+                jm_name_set_add_kind(names, name, (int)JS_VAR_LET);
+            }
         }
         stmt = stmt->next;
+    }
+}
+
+static void jm_collect_pattern_names_kind(JsAstNode* pat, struct hashmap* names, int var_kind) {
+    if (!pat || !names) return;
+    struct hashmap* tmp = hashmap_new(sizeof(JsNameSetEntry), 8, 0, 0,
+        jm_name_hash, jm_name_cmp, NULL, NULL);
+    jm_collect_pattern_names(pat, tmp);
+    size_t iter = 0;
+    void* item = NULL;
+    while (hashmap_iter(tmp, &iter, &item)) {
+        JsNameSetEntry* e = (JsNameSetEntry*)item;
+        jm_name_set_add_kind(names, e->name, var_kind);
+    }
+    hashmap_free(tmp);
+}
+
+void jm_collect_switch_lexical_names(JsAstNode* switch_node, struct hashmap* names) {
+    if (!switch_node || switch_node->node_type != JS_AST_NODE_SWITCH_STATEMENT || !names) return;
+    JsSwitchNode* sw = (JsSwitchNode*)switch_node;
+    for (JsAstNode* c = sw->cases; c; c = c->next) {
+        if (c->node_type != JS_AST_NODE_SWITCH_CASE) continue;
+        JsSwitchCaseNode* sc = (JsSwitchCaseNode*)c;
+        for (JsAstNode* stmt = sc->consequent; stmt; stmt = stmt->next) {
+            if (stmt->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+                JsVariableDeclarationNode* v = (JsVariableDeclarationNode*)stmt;
+                if (v->kind != JS_VAR_LET && v->kind != JS_VAR_CONST) continue;
+                for (JsAstNode* d = v->declarations; d; d = d->next) {
+                    if (d->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
+                    JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)d;
+                    jm_collect_pattern_names_kind(decl->id, names, (int)v->kind);
+                }
+            } else if (stmt->node_type == JS_AST_NODE_CLASS_DECLARATION) {
+                JsClassNode* cls = (JsClassNode*)stmt;
+                if (cls->name && cls->name->chars) {
+                    char name[128];
+                    snprintf(name, sizeof(name), "_js_%.*s", (int)cls->name->len, cls->name->chars);
+                    jm_name_set_add_kind(names, name, (int)JS_VAR_LET);
+                }
+            } else if (stmt->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
+                JsFunctionNode* fn = (JsFunctionNode*)stmt;
+                if (fn->name && fn->name->chars) {
+                    char name[128];
+                    snprintf(name, sizeof(name), "_js_%.*s", (int)fn->name->len, fn->name->chars);
+                    jm_name_set_add_kind(names, name, (int)JS_VAR_LET);
+                }
+            }
+        }
     }
 }
 
@@ -1327,6 +1402,64 @@ void jm_init_block_tdz(JsMirTranspiler* mt, JsAstNode* block) {
     }
 }
 
+void jm_init_switch_tdz(JsMirTranspiler* mt, JsAstNode* switch_node) {
+    if (!switch_node || switch_node->node_type != JS_AST_NODE_SWITCH_STATEMENT) return;
+    struct hashmap* let_consts = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+        jm_name_hash, jm_name_cmp, NULL, NULL);
+    jm_collect_switch_lexical_names(switch_node, let_consts);
+    int slot = 0;
+    size_t iter = 0; void* item;
+    while (hashmap_iter(let_consts, &iter, &item)) {
+        JsNameSetEntry* e = (JsNameSetEntry*)item;
+        MIR_reg_t tdz_reg = jm_new_reg(mt, e->name, MIR_T_I64);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, tdz_reg),
+            MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_TDZ)));
+        jm_set_var(mt, e->name, tdz_reg);
+        JsMirVarEntry* ve = jm_find_var(mt, e->name);
+        if (ve) {
+            ve->is_let_const = true;
+            ve->is_const = (e->var_kind == JS_VAR_CONST);
+            ve->tdz_active = true;
+            if (mt->scope_env_reg != 0) {
+                ve->in_scope_env = true;
+                ve->scope_env_slot = slot;
+                ve->scope_env_reg = mt->scope_env_reg;
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t),
+                        mt->scope_env_reg, 0, 1),
+                    MIR_new_reg_op(mt->ctx, tdz_reg)));
+            }
+        }
+        slot++;
+    }
+    hashmap_free(let_consts);
+
+    JsSwitchNode* sw = (JsSwitchNode*)switch_node;
+    for (JsAstNode* c = sw->cases; c; c = c->next) {
+        if (c->node_type != JS_AST_NODE_SWITCH_CASE) continue;
+        JsSwitchCaseNode* sc = (JsSwitchCaseNode*)c;
+        for (JsAstNode* stmt = sc->consequent; stmt; stmt = stmt->next) {
+            if (stmt->node_type != JS_AST_NODE_FUNCTION_DECLARATION) continue;
+            JsFunctionNode* fn = (JsFunctionNode*)stmt;
+            if (!fn->name || !fn->name->chars) continue;
+            JsFuncCollected* fc = jm_find_collected_func(mt, fn);
+            if (!fc || !fc->func_item) continue;
+            char vname[128];
+            snprintf(vname, sizeof(vname), "_js_%.*s", (int)fn->name->len, fn->name->chars);
+            MIR_reg_t fn_reg = jm_create_func_or_closure(mt, fc);
+            jm_set_var(mt, vname, fn_reg);
+            JsMirVarEntry* ve = jm_find_var(mt, vname);
+            if (ve) {
+                ve->is_let_const = true;
+                ve->tdz_active = false;
+                ve->from_block_func_decl = true;
+            }
+            jm_scope_env_mark_and_writeback(mt, vname, fn_reg);
+        }
+    }
+}
+
 // Analyze captures for a function: find identifiers referenced but not locally declared
 // Recursively collect variable names from a destructuring pattern into a name set.
 // Handles: identifier, assignment_pattern (x ), object_pattern, array_pattern.
@@ -1485,6 +1618,16 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
                 continue;  // resolved via module_consts, no capture needed
             }
         }
+        bool force_env_capture = false;
+        if (module_consts && ancestor_func_locals && jm_name_set_has(ancestor_func_locals, ref->name)) {
+            JsModuleConstEntry lookup;
+            snprintf(lookup.name, sizeof(lookup.name), "%s", ref->name);
+            JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(module_consts, &lookup);
+            if (mc && mc->const_type == MCONST_MODVAR) {
+                force_env_capture = true;
+            }
+        }
+
         // This is a capture
         {
             jm_ensure_captures_capacity(fc);
@@ -1494,7 +1637,7 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
             fc->captures[fc->capture_count].is_let_const = false;
             fc->captures[fc->capture_count].is_const = false;
             fc->captures[fc->capture_count].is_nfe_binding = false;
-            fc->captures[fc->capture_count].force_env_capture = false;
+            fc->captures[fc->capture_count].force_env_capture = force_env_capture;
             for (int li = 0; li < fn->lexical_for_head_capture_count; li++) {
                 if (strcmp(fn->lexical_for_head_capture_names[li], ref->name) == 0) {
                     fc->captures[fc->capture_count].is_let_const = true;

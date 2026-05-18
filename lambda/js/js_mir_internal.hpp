@@ -51,6 +51,7 @@ typedef struct JsMirReference {
     MIR_reg_t key_reg;
     bool strict;
     bool uninitialized_this;
+    bool is_private;
 } JsMirReference;
 
 // internal function declarations
@@ -115,8 +116,10 @@ void jm_collect_arrow_lexical_refs(JsAstNode* node, struct hashmap* refs);
 void jm_collect_body_refs(JsAstNode* node, struct hashmap* refs);
 void jm_collect_body_locals(JsAstNode* node, struct hashmap* locals, bool var_only = false);
 void jm_collect_let_const_names(JsAstNode* block, struct hashmap* names);
+void jm_collect_switch_lexical_names(JsAstNode* switch_node, struct hashmap* names);
 void jm_collect_all_let_const_names_recursive(JsAstNode* node, struct hashmap* names);
 void jm_init_block_tdz(JsMirTranspiler* mt, JsAstNode* block);
+void jm_init_switch_tdz(JsMirTranspiler* mt, JsAstNode* switch_node);
 void jm_collect_pattern_names(JsAstNode* pat, struct hashmap* names);
 void jm_collect_param_default_refs(JsAstNode* params, struct hashmap* refs);
 void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
@@ -321,6 +324,8 @@ void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node);
 void jm_scope_env_reload_vars(JsMirTranspiler* mt);
 void jm_env_reload_shared_captures(JsMirTranspiler* mt);
 void jm_emit_exc_propagate_check(JsMirTranspiler* mt);
+void jm_emit_class_static_field(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce, JsStaticFieldEntry* sf);
+void jm_emit_class_static_block(JsMirTranspiler* mt, JsClassEntry* ce, JsAstNode* block);
 void jm_transpile_while(JsMirTranspiler* mt, JsWhileNode* wh);
 void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node);
 MIR_reg_t jm_build_closure_for_method(JsMirTranspiler* mt, JsFuncCollected* fc, int param_count);

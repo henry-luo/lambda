@@ -45,11 +45,16 @@ extern Item js_create_data_property(Item obj, Item name, Item value);
 // super() for class-expression superclasses: handles FUNC and MAP (class object) callee
 extern Item js_super_call_class(Item callee, Item this_val, Item* args, int argc);
 extern void js_check_class_heritage_constructor(Item superclass);
+extern void js_check_class_prototype_parent(Item prototype);
 // super() for native parent constructors: merges returned object's own props onto `this`
 extern Item js_super_call_native(Item callee, Item this_val, Item* args, int argc);
 extern Item js_super_apply_native(Item callee, Item this_val, Item args_array);
 extern Item js_super_bind_this(Item this_val, Item construct_result);
+extern Item js_get_super_this_value(void);
 extern Item js_get_super_constructor_from_receiver(Item receiver, Item fallback_ctor);
+extern Item js_get_lexical_this_binding(void);
+extern Item js_resolve_lexical_this(Item this_val);
+extern void js_set_internal_class_name(Item obj, Item class_name);
 extern void js_mark_derived_constructor_func(Item fn_item);
 
 // Symbol key check for typed array P9 guard (js_runtime.cpp)
@@ -861,6 +866,8 @@ extern void js_set_global_property_strict_prechecked(Item key, Item value, int64
 extern void js_mark_private_method_non_writable(Item object, Item name);
 extern void js_set_method_home_from_target(Item target, Item fn_item);
 extern void js_init_class_instance_fields(Item callee, Item object);
+extern void js_private_brand_add(Item object, Item private_key, Item callee);
+extern void js_set_private_class_index(Item class_item, int index);
 extern void js_define_global_var_property(Item key, Item value);
 extern void js_define_global_eval_var_property(Item key, Item value);
 extern void js_evalscript_check_global_var_decl(Item key);
@@ -1359,6 +1366,8 @@ JitImport jit_runtime_imports[] = {
     {"js_arguments_mapped_param_writeback", FPTR(js_arguments_mapped_param_writeback)},
     {"js_property_set", FPTR(js_property_set)},
     {"js_property_set_strict", FPTR(js_property_set_strict)},
+    {"js_private_property_set", FPTR(js_private_property_set)},
+    {"js_private_property_set_strict", FPTR(js_private_property_set_strict)},
     {"js_create_data_property", FPTR(js_create_data_property)},
     {"js_property_access", FPTR(js_property_access)},
     {"js_key_is_symbol_c", FPTR(js_key_is_symbol_c)},
@@ -1368,6 +1377,7 @@ JitImport jit_runtime_imports[] = {
     {"js_super_property_set_non_strict", FPTR(js_super_property_set_non_strict)},
     {"js_super_call_class", FPTR(js_super_call_class)},
     {"js_check_class_heritage_constructor", FPTR(js_check_class_heritage_constructor)},
+    {"js_check_class_prototype_parent", FPTR(js_check_class_prototype_parent)},
     {"js_super_call_native", FPTR(js_super_call_native)},
     {"js_super_apply_native", FPTR(js_super_apply_native)},
     {"js_property_get_str", FPTR(js_property_get_str)},
@@ -1428,6 +1438,7 @@ JitImport jit_runtime_imports[] = {
     {"js_new_object_with_shape", FPTR(js_new_object_with_shape)},
     {"js_constructor_create_object_shaped", FPTR(js_constructor_create_object_shaped)},
     {"js_constructor_create_object_shaped_cached", FPTR(js_constructor_create_object_shaped_cached)},
+    {"js_set_internal_class_name", FPTR(js_set_internal_class_name)},
     {"js_get_shaped_slot", FPTR(js_get_shaped_slot)},
     {"js_set_shaped_slot", FPTR(js_set_shaped_slot)},
     {"js_get_slot_f", FPTR(js_get_slot_f)},
@@ -1441,11 +1452,14 @@ JitImport jit_runtime_imports[] = {
     {"js_array_set_int", FPTR(js_array_set_int)},
     {"js_debug_check_callee", FPTR(js_debug_check_callee)},
     {"js_get_this", FPTR(js_get_this)},
+    {"js_get_lexical_this_binding", FPTR(js_get_lexical_this_binding)},
+    {"js_resolve_lexical_this", FPTR(js_resolve_lexical_this)},
     {"js_set_this", FPTR(js_set_this)},
     {"js_get_new_target", FPTR(js_get_new_target)},
     {"js_set_new_target", FPTR(js_set_new_target)},
     {"js_set_direct_new_target", FPTR(js_set_direct_new_target)},
     {"js_super_bind_this", FPTR(js_super_bind_this)},
+    {"js_get_super_this_value", FPTR(js_get_super_this_value)},
     {"js_get_super_constructor_from_receiver", FPTR(js_get_super_constructor_from_receiver)},
     {"js_set_strict_mode", FPTR(js_set_strict_mode)},
     {"js_console_log", FPTR(js_console_log)},
@@ -1707,6 +1721,8 @@ JitImport jit_runtime_imports[] = {
     {"js_set_global_property_strict_prechecked", FPTR(js_set_global_property_strict_prechecked)},
     {"js_mark_private_method_non_writable", FPTR(js_mark_private_method_non_writable)},
     {"js_init_class_instance_fields", FPTR(js_init_class_instance_fields)},
+    {"js_private_brand_add", FPTR(js_private_brand_add)},
+    {"js_set_private_class_index", FPTR(js_set_private_class_index)},
     {"js_define_global_var_property", FPTR(js_define_global_var_property)},
     {"js_define_global_eval_var_property", FPTR(js_define_global_eval_var_property)},
     {"js_evalscript_check_global_var_decl", FPTR(js_evalscript_check_global_var_decl)},

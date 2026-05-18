@@ -698,11 +698,36 @@ extern "C" Item js_get_this() {
     // Sloppy-mode coercion is applied by js_call_function/js_compute_callback_this
     // before installing the binding. Here only the uninitialized sentinel means
     // "no explicit this"; an actual JS null must remain observable to strict code.
+    if (js_current_this.item == ITEM_JS_TDZ) {
+        Item tn = (Item){.item = s2it(heap_create_name("ReferenceError", 14))};
+        Item msg = (Item){.item = s2it(heap_create_name("Must call super constructor before accessing 'this'", 51))};
+        js_throw_value(js_new_error_with_name(tn, msg));
+        return make_js_undefined();
+    }
     if (js_current_this.item == 0) {
         extern Item js_get_global_this();
         return js_get_global_this();
     }
     return js_current_this;
+}
+
+extern "C" Item js_get_lexical_this_binding(void) {
+    if (js_current_this.item == ITEM_JS_TDZ) return js_current_this;
+    return js_get_this();
+}
+
+extern "C" Item js_resolve_lexical_this(Item this_val) {
+    if (this_val.item == ITEM_JS_TDZ) {
+        Item tn = (Item){.item = s2it(heap_create_name("ReferenceError", 14))};
+        Item msg = (Item){.item = s2it(heap_create_name("Must call super constructor before accessing 'this'", 51))};
+        js_throw_value(js_new_error_with_name(tn, msg));
+        return make_js_undefined();
+    }
+    if (this_val.item == 0) {
+        extern Item js_get_global_this();
+        return js_get_global_this();
+    }
+    return this_val;
 }
 
 extern "C" void js_set_this(Item this_val) {

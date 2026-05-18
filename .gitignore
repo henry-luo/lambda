@@ -81,6 +81,7 @@ lambda/vsce/dist/
 !.vscode/settings.base.json
 !.vscode/c_cpp_properties.json
 .idea/
+.claude/worktrees
 *.iml
 *.swp
 *.swo

@@ -865,6 +865,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                                     // A5: Scan constructor for this.prop = expr
                                     if (fn->body) jm_scan_ctor_props(fc, fn->body);
                                 }
+                                fc->is_class_static_method = me->is_static;
                                 ce->method_count++;
                             }
                         }
@@ -2588,6 +2589,7 @@ MIR_reg_t jm_build_args_array(JsMirTranspiler* mt, JsAstNode* first_arg, int arg
         JsAstNode* arg = first_arg;
         for (int i = 0; i < arg_count && arg; i++) {
             MIR_reg_t val = jm_transpile_box_item(mt, arg);
+            jm_emit_exc_propagate_check(mt);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_mem_op(mt->ctx, MIR_T_I64,
                     (base_spill + i) * (int)sizeof(uint64_t), mt->gen_env_reg, 0, 1),
@@ -2622,6 +2624,7 @@ MIR_reg_t jm_build_args_array(JsMirTranspiler* mt, JsAstNode* first_arg, int arg
     JsAstNode* arg = first_arg;
     for (int i = 0; i < arg_count && arg; i++) {
         MIR_reg_t val = jm_transpile_box_item(mt, arg);
+        jm_emit_exc_propagate_check(mt);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_mem_op(mt->ctx, MIR_T_I64, i * 8, args_ptr, 0, 1),
             MIR_new_reg_op(mt->ctx, val)));
@@ -2649,6 +2652,7 @@ MIR_reg_t jm_build_spread_args_array(JsMirTranspiler* mt, JsAstNode* first_arg) 
         if (arg->node_type == JS_AST_NODE_SPREAD_ELEMENT) {
             JsSpreadElementNode* spread = (JsSpreadElementNode*)arg;
             MIR_reg_t src_raw = jm_transpile_box_item(mt, spread->argument);
+            jm_emit_exc_propagate_check(mt);
             // Generator spill: restore array after yield in spread argument
             if (arr_spill_slot >= 0 && jm_has_yield(spread->argument)) {
                 jm_gen_spill_load(mt, array, arr_spill_slot);
@@ -2656,9 +2660,11 @@ MIR_reg_t jm_build_spread_args_array(JsMirTranspiler* mt, JsAstNode* first_arg) 
             // Convert any iterable to array first
             MIR_reg_t src = jm_call_1(mt, "js_iterable_to_array", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, src_raw));
+            jm_emit_exc_propagate_check(mt);
             // Get length
             MIR_reg_t src_len = jm_call_1(mt, "js_array_length", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, src));
+            jm_emit_exc_propagate_check(mt);
             // Loop: push each element
             MIR_reg_t i_reg = jm_new_reg(mt, "spai", MIR_T_I64);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -2677,15 +2683,18 @@ MIR_reg_t jm_build_spread_args_array(JsMirTranspiler* mt, JsAstNode* first_arg) 
             MIR_reg_t elem = jm_call_2(mt, "js_array_get", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, src),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_boxed));
+            jm_emit_exc_propagate_check(mt);
             jm_call_2(mt, "js_array_push", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, array),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, elem));
+            jm_emit_exc_propagate_check(mt);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, i_reg),
                 MIR_new_reg_op(mt->ctx, i_reg), MIR_new_int_op(mt->ctx, 1)));
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_check)));
             jm_emit_label(mt, l_end);
         } else {
             MIR_reg_t val = jm_transpile_box_item(mt, arg);
+            jm_emit_exc_propagate_check(mt);
             // Generator spill: restore array after yield in argument
             if (arr_spill_slot >= 0 && jm_has_yield(arg)) {
                 jm_gen_spill_load(mt, array, arr_spill_slot);
@@ -2693,6 +2702,7 @@ MIR_reg_t jm_build_spread_args_array(JsMirTranspiler* mt, JsAstNode* first_arg) 
             jm_call_2(mt, "js_array_push", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, array),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+            jm_emit_exc_propagate_check(mt);
         }
         arg = arg->next;
     }

@@ -110,6 +110,8 @@ Item js_new_object(void);
 Item js_property_get(Item object, Item key);
 Item js_property_set(Item object, Item key, Item value);
 Item js_property_set_strict(Item object, Item key, Item value);
+Item js_private_property_set(Item object, Item key, Item value);
+Item js_private_property_set_strict(Item object, Item key, Item value);
 Item js_create_data_property(Item object, Item key, Item value);
 Item js_property_access(Item object, Item key);
 
@@ -151,6 +153,7 @@ Item js_get_constructor(Item name_item);
 Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
 Item js_apply_function(Item func_item, Item this_val, Item args_array);
 Item js_apply_constructor(Item constructor, Item args_array);
+void js_set_internal_class_name(Item obj, Item class_name);
 Item js_bind_function(Item func_item, Item bound_this, Item* bound_args, int bound_argc);
 Item js_func_bind(Item func_item, Item bound_this, Item* bound_args, int bound_argc);
 Item js_new_function_from_string(Item* args, int argc);
@@ -166,11 +169,14 @@ Item js_regex_test(Item regex, Item str);
 Item js_regex_exec(Item regex, Item str);
 Item js_debug_check_callee(Item callee, int64_t site_id);
 Item js_get_this();
+Item js_get_lexical_this_binding(void);
+Item js_resolve_lexical_this(Item this_val);
 void js_set_this(Item this_val);
 Item js_get_new_target();
 void js_set_new_target(Item target);
 void js_set_direct_new_target(Item target);
 Item js_super_bind_this(Item this_val, Item construct_result);
+Item js_get_super_this_value(void);
 Item js_get_super_constructor_from_receiver(Item receiver, Item fallback_ctor);
 Item js_build_arguments_object(void);
 void js_set_arguments_info(int64_t is_strict);
@@ -579,6 +585,7 @@ void js_evalscript_check_global_lex_decl(Item key);
 void js_mark_private_method_non_writable(Item object, Item name);
 void js_set_method_home_from_target(Item target, Item fn_item);
 void js_init_class_instance_fields(Item callee, Item object);
+void js_private_brand_add(Item object, Item private_key, Item callee);
 void js_set_function_name_from_property_key_if_anonymous(Item fn_item, Item key_item, int64_t prefix_kind);
 Item js_get_global_builtin_fn(Item name, Item param_count);
 void js_eval_env_push_frame(void);
@@ -735,6 +742,7 @@ bool js_is_set_instance(Item obj);
 typedef struct JsProxyData {
     uint64_t target;   // [[ProxyTarget]] — Item stored as uint64_t for C/C++ header compat
     uint64_t handler;  // [[ProxyHandler]] — Item stored as uint64_t for C/C++ header compat
+    uint64_t private_slots; // engine-private slots attached to the Proxy object itself
     bool revoked;      // true after Proxy.revocable().revoke() called
 } JsProxyData;
 
