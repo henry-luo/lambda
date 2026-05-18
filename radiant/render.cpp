@@ -3109,35 +3109,14 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view) {
         if (img->pic) {
             RdtPicture* pic = rdt_picture_dup(img->pic);
             if (pic) {
-                rdt_picture_set_size(pic, img_rect.width, img_rect.height);
-                RdtMatrix m = rdt_matrix_identity();
-                m.e13 = img_rect.x;
-                m.e23 = img_rect.y;
-
-                Bound* clip = &rdcon->block.clip;
-                RdtPath* clip_path = rdt_path_new();
-                rdt_path_add_rect(clip_path, clip->left, clip->top, clip->right - clip->left, clip->bottom - clip->top, 0, 0);
-                rc_push_clip(rdcon, clip_path, nullptr);
-                rdt_path_free(clip_path);
-
-                rc_draw_picture(rdcon, pic, 255, &m);
-
-                rc_pop_clip(rdcon);
+                render_painter_draw_picture_rect(rdcon, pic, &img_rect, &rdcon->block.clip, 255);
                 if (!rdcon->dl) {
                     rdt_picture_free(pic);
                 }
             }
         } else if (img->pixels) {
-            Bound* clip = &rdcon->block.clip;
-            RdtPath* clip_path = rdt_path_new();
-            rdt_path_add_rect(clip_path, clip->left, clip->top, clip->right - clip->left, clip->bottom - clip->top, 0, 0);
-            rc_push_clip(rdcon, clip_path, nullptr);
-            rdt_path_free(clip_path);
-
-            rc_draw_image(rdcon, (uint32_t*)img->pixels, img->width, img->height,
-                           img->width, img_rect.x, img_rect.y, img_rect.width, img_rect.height, 255, nullptr);
-
-            rc_pop_clip(rdcon);
+            render_painter_draw_pixels_rect(rdcon, (uint32_t*)img->pixels, img->width, img->height,
+                                            img->width, &img_rect, &rdcon->block.clip, 255);
         } else {
             log_debug("failed to render svg image: no vector picture or raster pixels");
         }
@@ -3145,7 +3124,8 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view) {
         // ensure raster image pixels are decoded (lazy loading) at the displayed size
         image_surface_ensure_decoded(img, (int)img_rect.width, (int)img_rect.height);
         log_debug("blit image at x:%f, y:%f, wd:%f, hg:%f", img_rect.x, img_rect.y, img_rect.width, img_rect.height);
-        rc_blit_surface_scaled(rdcon, img, NULL, rdcon->ui_context->surface, &img_rect, &rdcon->block.clip, SCALE_MODE_LINEAR,
+        render_painter_blit_surface_scaled(rdcon, img, NULL, rdcon->ui_context->surface,
+            &img_rect, &rdcon->block.clip, SCALE_MODE_LINEAR,
             rdcon->clip_shapes, rdcon->clip_shape_depth);
     }
 
@@ -3196,9 +3176,13 @@ void render_webview_layer_content(RenderContext* rdcon, ViewBlock* view) {
     } else {
         // fallback: direct blit (single-threaded path)
         Rect rect = { dst_x, dst_y, dst_w, dst_h };
-        blit_surface_scaled(wv->surface, NULL, rdcon->ui_context->surface, &rect,
-                            &rdcon->block.clip, SCALE_MODE_LINEAR,
-                            rdcon->clip_shapes, rdcon->clip_shape_depth);
+        RasterPaintContext raster = {
+            rdcon->ui_context->surface,
+            &rdcon->block.clip,
+            rdcon->clip_shapes,
+            rdcon->clip_shape_depth
+        };
+        raster_blit_surface_scaled(&raster, wv->surface, NULL, &rect, SCALE_MODE_LINEAR);
     }
 }
 
@@ -3983,7 +3967,8 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
         float scale = rdcon.scale;
         while (dr) {
             Rect dirty_rect = {dr->x * scale, dr->y * scale, dr->width * scale, dr->height * scale};
-            fill_surface_rect(rdcon.ui_context->surface, &dirty_rect, canvas_bg, &rdcon.block.clip);
+            RasterPaintContext raster = {rdcon.ui_context->surface, &rdcon.block.clip, nullptr, 0};
+            raster_fill_rect(&raster, &dirty_rect, canvas_bg);
             dr = dr->next;
         }
         selective = true;
@@ -4005,7 +3990,8 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
                   du_l, du_t, du_r, du_b);
     } else {
         // Full clear
-        fill_surface_rect(rdcon.ui_context->surface, NULL, canvas_bg, &rdcon.block.clip);
+        RasterPaintContext raster = {rdcon.ui_context->surface, &rdcon.block.clip, nullptr, 0};
+        raster_fill_rect(&raster, NULL, canvas_bg);
     }
 
     // Initialize display list for deferred rendering (Phase 1)
@@ -4229,7 +4215,8 @@ void render_html_doc_tiled(UiContext* uicon, ViewTree* view_tree,
         // clear tile to background color before setting the tile offset
         {
             Bound tile_clip = {0, 0, (float)total_width, (float)tile_h};
-            fill_surface_rect(tile_surf, NULL, canvas_bg, &tile_clip);
+            RasterPaintContext raster = {tile_surf, &tile_clip, nullptr, 0};
+            raster_fill_rect(&raster, NULL, canvas_bg);
         }
         // tile_offset_y must be set AFTER the clear (clear uses tile-relative coords)
         tile_surf->tile_offset_y = tile_y;

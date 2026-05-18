@@ -636,10 +636,16 @@ void _fill_row(uint8_t* pixels, int x, int wd, uint32_t color) {
     // else src_a == 0: fully transparent, don't draw anything
 }
 
-void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color, Bound* clip,
-                       ClipShape** clip_shapes, int clip_depth) {
+void raster_fill_rect(RasterPaintContext* ctx, Rect* rect, uint32_t color) {
     Rect r;
+    if (!ctx) return;
+    ImageSurface* surface = ctx->surface;
+    Bound* clip = ctx->clip;
+    ClipShape** clip_shapes = ctx->clip_shapes;
+    int clip_depth = ctx->clip_depth;
     if (!surface || !surface->pixels) return;
+    Bound default_clip = {0, 0, (float)surface->width, (float)surface->height};
+    if (!clip) clip = &default_clip;
     if (!rect) { r = (Rect){0, 0, (float)surface->width, (float)surface->height};  rect = &r; }
     log_debug("fill rect: x:%.0f, y:%.0f, wd:%.0f, hg:%.0f, color:%x", rect->x, rect->y, rect->width, rect->height, color);
 
@@ -680,6 +686,12 @@ void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color, Bound*
         uint8_t* row_pixels = (uint8_t*)surface->pixels + (i - y_off) * surface->pitch;
         _fill_row(row_pixels, rl, rr - rl, color);
     }
+}
+
+void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color, Bound* clip,
+                       ClipShape** clip_shapes, int clip_depth) {
+    RasterPaintContext ctx = {surface, clip, clip_shapes, clip_depth};
+    raster_fill_rect(&ctx, rect, color);
 }
 
 // Bilinear interpolation helper function (for upscaling or 1:1)
@@ -809,17 +821,23 @@ static uint32_t area_average(ImageSurface* src, float x0, float y0, float x1, fl
     return r | (g << 8) | (b << 16) | (a << 24);
 }
 
-// Enhanced blit function with support for different scaling modes
-void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, Rect* dst_rect, Bound* clip, ScaleMode scale_mode,
-                         ClipShape** clip_shapes, int clip_depth) {
+void raster_blit_surface_scaled(RasterPaintContext* ctx, ImageSurface* src, Rect* src_rect,
+                                Rect* dst_rect, ScaleMode scale_mode, uint8_t opacity) {
     Rect rect;
-    if (!src || !dst || !dst_rect || !clip) return;
+    if (!ctx) return;
+    ImageSurface* dst = ctx->surface;
+    Bound* clip = ctx->clip;
+    ClipShape** clip_shapes = ctx->clip_shapes;
+    int clip_depth = ctx->clip_depth;
+    if (!src || !dst || !dst_rect) return;
+    Bound default_clip = {0, 0, (float)dst->width, (float)dst->height};
+    if (!clip) clip = &default_clip;
     if (!src->pixels) {
-        log_error("blit_surface_scaled: src->pixels is NULL!");
+        log_error("raster_blit_surface_scaled: src->pixels is NULL!");
         return;
     }
     if (!dst->pixels) {
-        log_error("blit_surface_scaled: dst->pixels is NULL!");
+        log_error("raster_blit_surface_scaled: dst->pixels is NULL!");
         return;
     }
     if (!src_rect) { // use the entire source image
@@ -908,6 +926,9 @@ void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, R
             uint8_t src_g = (src_color >> 8) & 0xFF;
             uint8_t src_b = (src_color >> 16) & 0xFF;
             uint8_t src_a = (src_color >> 24) & 0xFF;
+            if (opacity < 255 && src_a > 0) {
+                src_a = (uint8_t)((src_a * opacity + 127) / 255);
+            }
 
             if (src_a == 255) {
                 // Fully opaque - direct copy
@@ -931,6 +952,30 @@ void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, R
             // if src_a == 0, skip (fully transparent)
         }
     }
+}
+
+void raster_blit_pixels_scaled(RasterPaintContext* ctx, const uint32_t* pixels,
+                               int src_w, int src_h, int src_stride,
+                               Rect* dst_rect, ScaleMode scale_mode, uint8_t opacity) {
+    if (!pixels || src_w <= 0 || src_h <= 0 || src_stride <= 0) return;
+    ImageSurface src = {};
+    src.format = IMAGE_FORMAT_UNKNOWN;
+    src.width = src_w;
+    src.height = src_h;
+    src.encoded_width = src_w;
+    src.encoded_height = src_h;
+    src.orientation = 1;
+    src.has_intrinsic_size = true;
+    src.pitch = src_stride * 4;
+    src.pixels = (void*)pixels;
+    raster_blit_surface_scaled(ctx, &src, NULL, dst_rect, scale_mode, opacity);
+}
+
+// Enhanced blit function with support for different scaling modes
+void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, Rect* dst_rect, Bound* clip, ScaleMode scale_mode,
+                         ClipShape** clip_shapes, int clip_depth) {
+    RasterPaintContext ctx = {dst, clip, clip_shapes, clip_depth};
+    raster_blit_surface_scaled(&ctx, src, src_rect, dst_rect, scale_mode, 255);
 }
 
 void image_surface_destroy(ImageSurface* img_surface) {

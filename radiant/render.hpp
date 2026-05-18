@@ -143,12 +143,81 @@ static inline void rc_clip_restore_depth(RenderContext* rdcon, int saved) {
     else rdt_clip_restore_depth(saved);
 }
 
+static inline void render_painter_draw_picture_rect(RenderContext* rdcon, RdtPicture* picture,
+                                                    Rect* dst_rect, Bound* clip,
+                                                    uint8_t opacity) {
+    if (!picture || !dst_rect) return;
+    rdt_picture_set_size(picture, dst_rect->width, dst_rect->height);
+    RdtMatrix m = rdt_matrix_identity();
+    m.e13 = dst_rect->x;
+    m.e23 = dst_rect->y;
+
+    if (clip) {
+        RdtPath* clip_path = rdt_path_new();
+        rdt_path_add_rect(clip_path, clip->left, clip->top,
+                          clip->right - clip->left, clip->bottom - clip->top, 0, 0);
+        rc_push_clip(rdcon, clip_path, nullptr);
+        rdt_path_free(clip_path);
+    }
+
+    rc_draw_picture(rdcon, picture, opacity, &m);
+
+    if (clip) rc_pop_clip(rdcon);
+}
+
+static inline void render_painter_draw_pixels_rect(RenderContext* rdcon, const uint32_t* pixels,
+                                                   int src_w, int src_h, int src_stride,
+                                                   Rect* dst_rect, Bound* clip,
+                                                   uint8_t opacity) {
+    if (!pixels || !dst_rect) return;
+    if (clip) {
+        RdtPath* clip_path = rdt_path_new();
+        rdt_path_add_rect(clip_path, clip->left, clip->top,
+                          clip->right - clip->left, clip->bottom - clip->top, 0, 0);
+        rc_push_clip(rdcon, clip_path, nullptr);
+        rdt_path_free(clip_path);
+    }
+
+    rc_draw_image(rdcon, pixels, src_w, src_h, src_stride,
+                  dst_rect->x, dst_rect->y, dst_rect->width, dst_rect->height,
+                  opacity, nullptr);
+
+    if (clip) rc_pop_clip(rdcon);
+}
+
 // Direct-pixel wrappers
+static inline void render_painter_fill_surface_rect(RenderContext* rdcon, ImageSurface* surface,
+                                                    Rect* rect, uint32_t color, Bound* clip,
+                                                    ClipShape** clip_shapes, int clip_depth) {
+    if (rdcon->dl) {
+        dl_fill_surface_rect(rdcon->dl, rect->x, rect->y, rect->width, rect->height,
+                             color, clip, clip_shapes, clip_depth);
+    } else {
+        RasterPaintContext raster = {surface, clip, clip_shapes, clip_depth};
+        raster_fill_rect(&raster, rect, color);
+    }
+}
+
+static inline void render_painter_blit_surface_scaled(RenderContext* rdcon,
+                                                      ImageSurface* src, Rect* src_rect,
+                                                      ImageSurface* dst, Rect* dst_rect, Bound* clip,
+                                                      ScaleMode scale_mode,
+                                                      ClipShape** clip_shapes, int clip_depth,
+                                                      uint8_t opacity = 255) {
+    if (rdcon->dl) {
+        dl_blit_surface_scaled(rdcon->dl, src, dst_rect->x, dst_rect->y,
+                               dst_rect->width, dst_rect->height, (int)scale_mode,
+                               clip, clip_shapes, clip_depth, opacity);
+    } else {
+        RasterPaintContext raster = {dst, clip, clip_shapes, clip_depth};
+        raster_blit_surface_scaled(&raster, src, src_rect, dst_rect, scale_mode, opacity);
+    }
+}
+
 static inline void rc_fill_surface_rect(RenderContext* rdcon, ImageSurface* surface,
                                         Rect* rect, uint32_t color, Bound* clip,
                                         ClipShape** clip_shapes, int clip_depth) {
-    if (rdcon->dl) dl_fill_surface_rect(rdcon->dl, rect->x, rect->y, rect->width, rect->height, color, clip);
-    else fill_surface_rect(surface, rect, color, clip, clip_shapes, clip_depth);
+    render_painter_fill_surface_rect(rdcon, surface, rect, color, clip, clip_shapes, clip_depth);
 }
 
 static inline void rc_blit_surface_scaled(RenderContext* rdcon,
@@ -156,7 +225,6 @@ static inline void rc_blit_surface_scaled(RenderContext* rdcon,
                                           ImageSurface* dst, Rect* dst_rect, Bound* clip,
                                           ScaleMode scale_mode,
                                           ClipShape** clip_shapes, int clip_depth) {
-    if (rdcon->dl) dl_blit_surface_scaled(rdcon->dl, src, dst_rect->x, dst_rect->y,
-                                          dst_rect->width, dst_rect->height, (int)scale_mode, clip);
-    else blit_surface_scaled(src, src_rect, dst, dst_rect, clip, scale_mode, clip_shapes, clip_depth);
+    render_painter_blit_surface_scaled(rdcon, src, src_rect, dst, dst_rect, clip,
+                                       scale_mode, clip_shapes, clip_depth);
 }

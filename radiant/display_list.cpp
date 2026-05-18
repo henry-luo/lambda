@@ -294,8 +294,43 @@ void dl_restore_clip_depth(DisplayList* dl, int saved_depth) {
 // Recording: direct-pixel operations
 // ---------------------------------------------------------------------------
 
+static void dl_store_clip_shapes(DlClipShapeStack* dst, ClipShape** clip_shapes, int clip_depth) {
+    if (!dst) return;
+    memset(dst, 0, sizeof(DlClipShapeStack));
+    if (!clip_shapes || clip_depth <= 0) return;
+    if (clip_depth > RDT_MAX_CLIP_SHAPES) clip_depth = RDT_MAX_CLIP_SHAPES;
+    dst->depth = clip_depth;
+    for (int i = 0; i < clip_depth; i++) {
+        ClipShape* shape = clip_shapes[i];
+        if (shape && shape->type == CLIP_SHAPE_POLYGON) {
+            // polygon clip shapes carry vertex arrays; keep raster DL serialization
+            // bounded until display-list arena ownership is added for polygon data.
+            dst->type[i] = CLIP_SHAPE_NONE;
+            memset(dst->params[i], 0, 8 * sizeof(float));
+            continue;
+        }
+        clip_shape_to_params(shape, &dst->type[i], dst->params[i]);
+    }
+}
+
+static int dl_restore_clip_shapes(const DlClipShapeStack* src, ClipShape* shapes,
+                                  ClipShape** shape_ptrs) {
+    if (!src || !shapes || !shape_ptrs || src->depth <= 0) return 0;
+    int depth = src->depth;
+    if (depth > RDT_MAX_CLIP_SHAPES) depth = RDT_MAX_CLIP_SHAPES;
+    int out_depth = 0;
+    for (int i = 0; i < depth; i++) {
+        if (src->type[i] == CLIP_SHAPE_NONE) continue;
+        shapes[out_depth] = clip_shape_from_params(src->type[i], src->params[i]);
+        shape_ptrs[out_depth] = &shapes[out_depth];
+        out_depth++;
+    }
+    return out_depth;
+}
+
 void dl_fill_surface_rect(DisplayList* dl, float x, float y, float w, float h,
-                          uint32_t color, const Bound* clip) {
+                          uint32_t color, const Bound* clip,
+                          ClipShape** clip_shapes, int clip_depth) {
     DisplayItem* item = dl_alloc_item(dl);
     item->op = DL_FILL_SURFACE_RECT;
     item->bounds[0] = x; item->bounds[1] = y; item->bounds[2] = w; item->bounds[3] = h;
@@ -305,11 +340,13 @@ void dl_fill_surface_rect(DisplayList* dl, float x, float y, float w, float h,
     item->fill_surface_rect.h = h;
     item->fill_surface_rect.color = color;
     item->fill_surface_rect.clip = clip ? *clip : (Bound){0, 0, 99999, 99999};
+    dl_store_clip_shapes(&item->fill_surface_rect.clip_shapes, clip_shapes, clip_depth);
 }
 
 void dl_blit_surface_scaled(DisplayList* dl, void* src_surface,
                             float dst_x, float dst_y, float dst_w, float dst_h,
-                            int scale_mode, const Bound* clip) {
+                            int scale_mode, const Bound* clip,
+                            ClipShape** clip_shapes, int clip_depth, uint8_t opacity) {
     DisplayItem* item = dl_alloc_item(dl);
     item->op = DL_BLIT_SURFACE_SCALED;
     item->bounds[0] = dst_x; item->bounds[1] = dst_y;
@@ -320,7 +357,9 @@ void dl_blit_surface_scaled(DisplayList* dl, void* src_surface,
     item->blit_surface_scaled.dst_w = dst_w;
     item->blit_surface_scaled.dst_h = dst_h;
     item->blit_surface_scaled.scale_mode = scale_mode;
+    item->blit_surface_scaled.opacity = opacity;
     item->blit_surface_scaled.clip = clip ? *clip : (Bound){0, 0, 99999, 99999};
+    dl_store_clip_shapes(&item->blit_surface_scaled.clip_shapes, clip_shapes, clip_depth);
 }
 
 // ---------------------------------------------------------------------------
@@ -961,7 +1000,11 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
                 bound.right  = std::min(bound.right,  dirty_union.right);
                 bound.bottom = std::min(bound.bottom, dirty_union.bottom);
             }
-            fill_surface_rect(surface, &rect, r->color, &bound, nullptr, 0);
+            ClipShape shapes[RDT_MAX_CLIP_SHAPES];
+            ClipShape* shape_ptrs[RDT_MAX_CLIP_SHAPES];
+            int clip_depth = dl_restore_clip_shapes(&r->clip_shapes, shapes, shape_ptrs);
+            RasterPaintContext raster = {surface, &bound, shape_ptrs, clip_depth};
+            raster_fill_rect(&raster, &rect, r->color);
             break;
         }
 
@@ -975,9 +1018,12 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
                 bound.right  = std::min(bound.right,  dirty_union.right);
                 bound.bottom = std::min(bound.bottom, dirty_union.bottom);
             }
-            blit_surface_scaled((ImageSurface*)r->src_surface, nullptr,
-                                surface, &dst_rect, &bound,
-                                (ScaleMode)r->scale_mode, nullptr, 0);
+            ClipShape shapes[RDT_MAX_CLIP_SHAPES];
+            ClipShape* shape_ptrs[RDT_MAX_CLIP_SHAPES];
+            int clip_depth = dl_restore_clip_shapes(&r->clip_shapes, shapes, shape_ptrs);
+            RasterPaintContext raster = {surface, &bound, shape_ptrs, clip_depth};
+            raster_blit_surface_scaled(&raster, (ImageSurface*)r->src_surface, nullptr,
+                                       &dst_rect, (ScaleMode)r->scale_mode, r->opacity);
             break;
         }
 
@@ -1243,8 +1289,8 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
             ImageSurface* src = (ImageSurface*)r->surface;
             if (src && src->pixels) {
                 Rect dst_rect = { r->dst_x, r->dst_y, r->dst_w, r->dst_h };
-                blit_surface_scaled(src, nullptr, surface, &dst_rect,
-                                    &r->clip, SCALE_MODE_LINEAR, nullptr, 0);
+                RasterPaintContext raster = {surface, &r->clip, nullptr, 0};
+                raster_blit_surface_scaled(&raster, src, nullptr, &dst_rect, SCALE_MODE_LINEAR);
             }
             break;
         }

@@ -382,10 +382,23 @@ typedef struct ImageSurface {
     int decoded_height;
 } ImageSurface;
 
+typedef struct RasterPaintContext {
+    ImageSurface* surface;
+    Bound* clip;
+    struct ClipShape** clip_shapes;
+    int clip_depth;
+} RasterPaintContext;
+
 extern ImageSurface* image_surface_create(int pixel_width, int pixel_height);
 extern ImageSurface* image_surface_create_from(int pixel_width, int pixel_height, void* pixels);
 extern void image_surface_destroy(ImageSurface* img_surface);
 extern void image_surface_ensure_decoded(ImageSurface* img, int target_w, int target_h);
+extern void raster_fill_rect(RasterPaintContext* ctx, Rect* rect, uint32_t color);
+extern void raster_blit_surface_scaled(RasterPaintContext* ctx, ImageSurface* src, Rect* src_rect,
+                                       Rect* dst_rect, ScaleMode scale_mode, uint8_t opacity = 255);
+extern void raster_blit_pixels_scaled(RasterPaintContext* ctx, const uint32_t* pixels,
+                                      int src_w, int src_h, int src_stride,
+                                      Rect* dst_rect, ScaleMode scale_mode, uint8_t opacity = 255);
 extern void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color, Bound* clip,
                               struct ClipShape** clip_shapes = nullptr, int clip_depth = 0);
 extern void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, Rect* dst_rect, Bound* clip, ScaleMode scale_mode,

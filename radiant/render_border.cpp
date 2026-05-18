@@ -591,7 +591,7 @@ void render_straight_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     if (border->width.left > 0 && border->left_style != CSS_VALUE_NONE &&
         border->left_style != CSS_VALUE_HIDDEN && border->left_color.a > 0) {
         Rect border_rect = {rect.x, rect.y, border->width.left, rect.height};
-        rc_fill_surface_rect(rdcon, surface, &border_rect, border->left_color.c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
+        render_painter_fill_surface_rect(rdcon, surface, &border_rect, border->left_color.c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
     }
 
     if (border->width.right > 0 && border->right_style != CSS_VALUE_NONE &&
@@ -600,13 +600,13 @@ void render_straight_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
             rect.x + rect.width - border->width.right, rect.y,
             border->width.right, rect.height
         };
-        rc_fill_surface_rect(rdcon, surface, &border_rect, border->right_color.c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
+        render_painter_fill_surface_rect(rdcon, surface, &border_rect, border->right_color.c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
     }
 
     if (border->width.top > 0 && border->top_style != CSS_VALUE_NONE &&
         border->top_style != CSS_VALUE_HIDDEN && border->top_color.a > 0) {
         Rect border_rect = {rect.x, rect.y, rect.width, border->width.top};
-        rc_fill_surface_rect(rdcon, surface, &border_rect, border->top_color.c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
+        render_painter_fill_surface_rect(rdcon, surface, &border_rect, border->top_color.c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
     }
 
     if (border->width.bottom > 0 && border->bottom_style != CSS_VALUE_NONE &&
@@ -615,7 +615,7 @@ void render_straight_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
             rect.x, rect.y + rect.height - border->width.bottom,
             rect.width, border->width.bottom
         };
-        rc_fill_surface_rect(rdcon, surface, &border_rect, border->bottom_color.c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
+        render_painter_fill_surface_rect(rdcon, surface, &border_rect, border->bottom_color.c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
     }
 }
 

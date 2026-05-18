@@ -25,6 +25,21 @@ static inline int get_cpu_count() {
 static inline int get_cpu_count() { return (int)sysconf(_SC_NPROCESSORS_ONLN); }
 #endif
 
+static int dl_restore_raster_clip_shapes(const DlClipShapeStack* src, ClipShape* shapes,
+                                         ClipShape** shape_ptrs) {
+    if (!src || !shapes || !shape_ptrs || src->depth <= 0) return 0;
+    int depth = src->depth;
+    if (depth > RDT_MAX_CLIP_SHAPES) depth = RDT_MAX_CLIP_SHAPES;
+    int out_depth = 0;
+    for (int i = 0; i < depth; i++) {
+        if (src->type[i] == CLIP_SHAPE_NONE) continue;
+        shapes[out_depth] = clip_shape_from_params(src->type[i], src->params[i]);
+        shape_ptrs[out_depth] = &shapes[out_depth];
+        out_depth++;
+    }
+    return out_depth;
+}
+
 // Global mutex to serialize ThorVG canvas operations across worker threads.
 // ThorVG's internal state (global mpool, loader sharing counts, etc.) is not
 // fully thread-safe for concurrent canvas operations from multiple threads.
@@ -669,7 +684,31 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
             bound.top    = std::max(0.0f, r->clip.top    - tile_y);
             bound.right  = std::min((float)tile_surface->width,  r->clip.right  - tile_x);
             bound.bottom = std::min((float)tile_surface->height, r->clip.bottom - tile_y);
-            fill_surface_rect(tile_surface, &rect, r->color, &bound);
+            ClipShape shapes[RDT_MAX_CLIP_SHAPES];
+            ClipShape* shape_ptrs[RDT_MAX_CLIP_SHAPES];
+            int clip_depth = dl_restore_raster_clip_shapes(&r->clip_shapes, shapes, shape_ptrs);
+            for (int ci = 0; ci < clip_depth; ci++) {
+                ClipShape* cs = shape_ptrs[ci];
+                if (!cs) continue;
+                switch (cs->type) {
+                    case CLIP_SHAPE_CIRCLE:
+                        cs->circle.cx -= tile_x; cs->circle.cy -= tile_y;
+                        break;
+                    case CLIP_SHAPE_ELLIPSE:
+                        cs->ellipse.cx -= tile_x; cs->ellipse.cy -= tile_y;
+                        break;
+                    case CLIP_SHAPE_INSET:
+                        cs->inset.x -= tile_x; cs->inset.y -= tile_y;
+                        break;
+                    case CLIP_SHAPE_ROUNDED_RECT:
+                        cs->rounded_rect.x -= tile_x; cs->rounded_rect.y -= tile_y;
+                        break;
+                    default:
+                        break;
+                }
+            }
+            RasterPaintContext raster = {tile_surface, &bound, shape_ptrs, clip_depth};
+            raster_fill_rect(&raster, &rect, r->color);
             items_drawn++;
             break;
         }
@@ -682,9 +721,32 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
             bound.top    = std::max(0.0f, r->clip.top    - tile_y);
             bound.right  = std::min((float)tile_surface->width,  r->clip.right  - tile_x);
             bound.bottom = std::min((float)tile_surface->height, r->clip.bottom - tile_y);
-            blit_surface_scaled((ImageSurface*)r->src_surface, nullptr,
-                                tile_surface, &dst_rect, &bound,
-                                (ScaleMode)r->scale_mode, nullptr, 0);
+            ClipShape shapes[RDT_MAX_CLIP_SHAPES];
+            ClipShape* shape_ptrs[RDT_MAX_CLIP_SHAPES];
+            int clip_depth = dl_restore_raster_clip_shapes(&r->clip_shapes, shapes, shape_ptrs);
+            for (int ci = 0; ci < clip_depth; ci++) {
+                ClipShape* cs = shape_ptrs[ci];
+                if (!cs) continue;
+                switch (cs->type) {
+                    case CLIP_SHAPE_CIRCLE:
+                        cs->circle.cx -= tile_x; cs->circle.cy -= tile_y;
+                        break;
+                    case CLIP_SHAPE_ELLIPSE:
+                        cs->ellipse.cx -= tile_x; cs->ellipse.cy -= tile_y;
+                        break;
+                    case CLIP_SHAPE_INSET:
+                        cs->inset.x -= tile_x; cs->inset.y -= tile_y;
+                        break;
+                    case CLIP_SHAPE_ROUNDED_RECT:
+                        cs->rounded_rect.x -= tile_x; cs->rounded_rect.y -= tile_y;
+                        break;
+                    default:
+                        break;
+                }
+            }
+            RasterPaintContext raster = {tile_surface, &bound, shape_ptrs, clip_depth};
+            raster_blit_surface_scaled(&raster, (ImageSurface*)r->src_surface, nullptr,
+                                       &dst_rect, (ScaleMode)r->scale_mode, r->opacity);
             items_drawn++;
             break;
         }
@@ -1022,8 +1084,8 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
                 bound.top    = std::max(0.0f, r->clip.top    - tile_y);
                 bound.right  = std::min((float)tile_surface->width,  r->clip.right  - tile_x);
                 bound.bottom = std::min((float)tile_surface->height, r->clip.bottom - tile_y);
-                blit_surface_scaled(src, nullptr, tile_surface, &dst_rect, &bound,
-                                    SCALE_MODE_LINEAR, nullptr, 0);
+                RasterPaintContext raster = {tile_surface, &bound, nullptr, 0};
+                raster_blit_surface_scaled(&raster, src, nullptr, &dst_rect, SCALE_MODE_LINEAR);
                 items_drawn++;
             }
             break;
