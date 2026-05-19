@@ -78,6 +78,7 @@ typedef struct RdtVectorCaps {
     bool gaussian_blur;
     bool color_matrix_filters;
     bool native_text_runs;
+    bool vector_batching;
     bool premultiplied_surface;
     bool tile_offsets;
     bool clip_depth_save_restore;
@@ -102,6 +103,13 @@ void rdt_vector_set_tile_offset_x(RdtVector* vec, float offset_x);
 
 // Return immutable capability metadata for the active vector backend.
 const RdtVectorCaps* rdt_vector_get_caps(const RdtVector* vec);
+
+// Batch consecutive vector paints into one backend submission when supported.
+// Software/raster callers should flush before reading or directly mutating the
+// target pixels.
+void rdt_vector_begin_batch(RdtVector* vec);
+void rdt_vector_flush_batch(RdtVector* vec);
+void rdt_vector_end_batch(RdtVector* vec);
 
 // ---------------------------------------------------------------------------
 // Path construction
@@ -189,7 +197,8 @@ void rdt_clip_restore_depth(int saved_depth);
 // with optional transform, clipping, and opacity
 void rdt_draw_image(RdtVector* vec, const uint32_t* pixels, int src_w, int src_h,
                     int src_stride, float dst_x, float dst_y, float dst_w, float dst_h,
-                    uint8_t opacity, const RdtMatrix* transform);
+                    uint8_t opacity, const RdtMatrix* transform,
+                    uint64_t resource_generation = 0);
 
 // ---------------------------------------------------------------------------
 // SVG picture (load from file/data, render at given rect)

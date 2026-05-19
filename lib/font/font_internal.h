@@ -266,6 +266,7 @@ struct FontContext {
 
     // Phase 17: full LoadedGlyph cache for font_load_glyph (persistent across frames)
     struct hashmap*  loaded_glyph_cache;
+    uint64_t         glyph_cache_generation;
 
     // codepoint → fallback handle cache (for font_find_codepoint_fallback)
     struct hashmap*  codepoint_fallback_cache;

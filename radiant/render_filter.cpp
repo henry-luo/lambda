@@ -1,9 +1,16 @@
+#ifdef __APPLE__
+#define Rect MacOSRect
+#include <Accelerate/Accelerate.h>
+#undef Rect
+#endif
+
 #include "render_filter.hpp"
 #include "render_background.hpp"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include <math.h>
 #include <algorithm>
+#include <string.h>
 
 /**
  * CSS Filter Implementation
@@ -185,6 +192,157 @@ void filter_saturate(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
 void filter_opacity(uint8_t* a, float amount) {
     amount = clamp_01(amount);
     *a = clamp_byte(*a * amount);
+}
+
+static bool render_filter_apply_native_backend(const RenderBackendCaps* caps,
+                                               ScratchArena* sa,
+                                               ImageSurface* surface,
+                                               FilterProp* filter,
+                                               Rect* rect,
+                                               Bound* clip) {
+#ifndef __APPLE__
+    (void)caps; (void)sa; (void)surface; (void)filter; (void)rect; (void)clip;
+    return false;
+#else
+    if (!caps || !caps->gaussian_blur || !sa || !surface || !surface->pixels ||
+        !filter || !filter->functions || !rect || !clip) {
+        return false;
+    }
+
+    FilterFunction* func = filter->functions;
+    bool has_blur = false;
+    while (func) {
+        if (func->type != FILTER_BLUR) {
+            return false;
+        }
+        if (func->params.blur_radius > 0) {
+            has_blur = true;
+        }
+        func = func->next;
+    }
+    if (!has_blur) {
+        return false;
+    }
+
+    int left = (int)fmaxf(rect->x, clip->left);
+    int top = (int)fmaxf(rect->y, clip->top);
+    int right = (int)fminf(rect->x + rect->width, clip->right);
+    int bottom = (int)fminf(rect->y + rect->height, clip->bottom);
+
+    if (left < 0) left = 0;
+    if (top < 0) top = 0;
+    if (right > surface->width) right = surface->width;
+    if (bottom > surface->height) bottom = surface->height;
+
+    if (left >= right || top >= bottom) {
+        return true;
+    }
+
+    uint32_t* pixels = (uint32_t*)surface->pixels;
+    int pitch = surface->pitch / (int)sizeof(uint32_t);
+
+    func = filter->functions;
+    while (func) {
+        float br = func->params.blur_radius;
+        if (br > 0) {
+            float kernel_b = br * 2.0f;
+            int pad = (int)ceilf(br * 2.0f);
+            int blur_x = left - pad;
+            int blur_y = top - pad;
+            int blur_r = right + pad;
+            int blur_b = bottom + pad;
+            if (blur_x < 0) blur_x = 0;
+            if (blur_y < 0) blur_y = 0;
+            if (blur_r > surface->width) blur_r = surface->width;
+            if (blur_b > surface->height) blur_b = surface->height;
+
+            int blur_w = blur_r - blur_x;
+            int blur_h = blur_b - blur_y;
+            if (blur_w <= 0 || blur_h <= 0) {
+                func = func->next;
+                continue;
+            }
+
+            size_t row_bytes = (size_t)blur_w * sizeof(uint32_t);
+            size_t buf_bytes = row_bytes * (size_t)blur_h;
+            uint32_t* src_px = (uint32_t*)scratch_alloc(sa, buf_bytes);
+            if (!src_px) {
+                return false;
+            }
+            uint32_t* dst_px = (uint32_t*)scratch_alloc(sa, buf_bytes);
+            if (!dst_px) {
+                scratch_free(sa, src_px);
+                return false;
+            }
+
+            for (int row = 0; row < blur_h; row++) {
+                memcpy((uint8_t*)src_px + (size_t)row * row_bytes,
+                       pixels + (blur_y + row) * pitch + blur_x,
+                       row_bytes);
+            }
+
+            vImage_Buffer src = { src_px, (vImagePixelCount)blur_h,
+                                  (vImagePixelCount)blur_w, row_bytes };
+            vImage_Buffer dst = { dst_px, (vImagePixelCount)blur_h,
+                                  (vImagePixelCount)blur_w, row_bytes };
+            uint32_t kernel = (uint32_t)ceilf(kernel_b);
+            if (kernel < 1) kernel = 1;
+            if ((kernel & 1u) == 0) kernel++;
+
+            vImage_Error error = kvImageNoError;
+            for (int pass = 0; pass < 3; pass++) {
+                error = vImageBoxConvolve_ARGB8888(&src, &dst, nullptr, 0, 0,
+                                                   kernel, kernel, nullptr,
+                                                   kvImageEdgeExtend);
+                if (error != kvImageNoError) break;
+                void* tmp_data = src.data;
+                src.data = dst.data;
+                dst.data = tmp_data;
+            }
+
+            if (error == kvImageNoError) {
+                for (int row = 0; row < blur_h; row++) {
+                    memcpy(pixels + (blur_y + row) * pitch + blur_x,
+                           (uint8_t*)src.data + (size_t)row * row_bytes,
+                           row_bytes);
+                }
+                log_debug("[FILTER] Applied blur(%.1fpx) via Accelerate/vImage to region (%d,%d,%d,%d)",
+                          br, blur_x, blur_y, blur_w, blur_h);
+            } else {
+                log_debug("[FILTER] vImage blur failed error=%ld; falling back to software",
+                          (long)error);
+                scratch_free(sa, dst_px);
+                scratch_free(sa, src_px);
+                return false;
+            }
+
+            scratch_free(sa, dst_px);
+            scratch_free(sa, src_px);
+        }
+        func = func->next;
+    }
+
+    return true;
+#endif
+}
+
+bool render_filter_apply_with_backend(const RenderBackendCaps* caps,
+                                      ScratchArena* sa,
+                                      ImageSurface* surface,
+                                      FilterProp* filter,
+                                      Rect* rect,
+                                      Bound* clip) {
+    if (!filter || !filter->functions) {
+        return false;
+    }
+
+    if (render_backend_supports_filter_chain(caps, filter) &&
+        render_filter_apply_native_backend(caps, sa, surface, filter, rect, clip)) {
+        return true;
+    }
+
+    apply_css_filters(sa, surface, filter, rect, clip);
+    return true;
 }
 
 /**

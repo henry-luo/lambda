@@ -1,4 +1,5 @@
 #pragma once
+#include "render_backend_caps.hpp"
 #include "render.hpp"
 #include "view.hpp"
 
@@ -20,6 +21,12 @@
  * @param clip The clipping bounds
  */
 void apply_css_filters(ScratchArena* sa, ImageSurface* surface, FilterProp* filter, Rect* rect, Bound* clip);
+bool render_filter_apply_with_backend(const RenderBackendCaps* caps,
+                                      ScratchArena* sa,
+                                      ImageSurface* surface,
+                                      FilterProp* filter,
+                                      Rect* rect,
+                                      Bound* clip);
 
 /**
  * Individual filter effect functions

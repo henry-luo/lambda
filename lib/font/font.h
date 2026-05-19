@@ -372,6 +372,10 @@ void font_context_reset_document_fonts(FontContext* ctx);
 // Call between documents in batch mode to reclaim memory.
 void font_context_reset_glyph_caches(FontContext* ctx);
 
+// generation for cached glyph bitmap buffers. Increments whenever the glyph
+// arena is reset, invalidating borrowed GlyphBitmap::buffer pointers.
+uint64_t font_context_glyph_cache_generation(FontContext* ctx);
+
 // ============================================================================
 // Direct Font Loading — for non-CSS use cases (PDF, CLI, tests)
 // ============================================================================

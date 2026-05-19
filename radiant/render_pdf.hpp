@@ -6,7 +6,9 @@ extern "C" {
 #endif
 
 // Main function to render HTML to PDF
-int render_html_to_pdf(const char* html_file, const char* pdf_file, int viewport_width, int viewport_height);
+int render_html_to_pdf(const char* html_file, const char* pdf_file,
+                       int viewport_width, int viewport_height,
+                       float scale = 1.0f);
 
 #ifdef __cplusplus
 }

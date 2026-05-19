@@ -4163,7 +4163,7 @@ static void render_svg_element(SvgRenderContext* ctx, Element* elem) {
 void render_svg_to_vec(RdtVector* vec, Element* svg_element, float viewport_width, float viewport_height,
                        Pool* pool, float pixel_ratio, FontContext* font_ctx, const RdtMatrix* base_transform,
                        DisplayList* dl, const Color* initial_current_color, const Color* initial_fill_color,
-                       const char* source_path) {
+                       const char* source_path, float initial_opacity) {
     if (!svg_element || !vec) return;
     if (source_path && svg_resource_stack_contains(source_path)) {
         log_debug("[SVG] skipped recursive render of SVG resource: %s", source_path);
@@ -4194,7 +4194,9 @@ void render_svg_to_vec(RdtVector* vec, Element* svg_element, float viewport_widt
         ctx.fill_none = false;
     }
     ctx.stroke_width = 1.0f;
-    ctx.opacity = 1.0f;
+    if (initial_opacity < 0.0f) initial_opacity = 0.0f;
+    if (initial_opacity > 1.0f) initial_opacity = 1.0f;
+    ctx.opacity = initial_opacity;
     ctx.fill_none = false;
     ctx.stroke_none = true;
 

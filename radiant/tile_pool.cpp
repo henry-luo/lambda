@@ -534,6 +534,9 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
     rdt_vector_set_tile_offset_y(vec, tile_y);
 
     int items_drawn = 0;
+    const RenderBackendCaps* caps = render_backend_get_caps(vec);
+
+    rdt_vector_begin_batch(vec);
 
     for (int i = 0; i < dl->count; i++) {
         DisplayItem* item = &dl->items[i];
@@ -659,7 +662,8 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
             DlDrawImage* r = &item->draw_image;
             rdt_draw_image(vec, r->pixels, r->src_w, r->src_h, r->src_stride,
                            r->dst_x, r->dst_y, r->dst_w, r->dst_h, r->opacity,
-                           r->has_transform ? &r->transform : nullptr);
+                           r->has_transform ? &r->transform : nullptr,
+                           r->resource_generation);
             items_drawn++;
             break;
         }
@@ -667,6 +671,7 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
         // -- Direct-pixel operations: manual tile-local coordinate translation --
 
         case DL_DRAW_GLYPH: {
+            rdt_vector_flush_batch(vec);
             replay_tile_glyph(tile_surface, &item->draw_glyph, tile_x, tile_y);
             items_drawn++;
             break;
@@ -695,6 +700,7 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
         }
 
         case DL_SAVE_CLIP_DEPTH: {
+            rdt_vector_flush_batch(vec);
             if (clip_save_sp < DL_MAX_CLIP_SAVE_DEPTH) {
                 clip_saved_depths[clip_save_sp++] = rdt_clip_save_depth();
             }
@@ -702,6 +708,7 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
         }
 
         case DL_RESTORE_CLIP_DEPTH: {
+            rdt_vector_flush_batch(vec);
             if (clip_save_sp > 0) {
                 rdt_clip_restore_depth(clip_saved_depths[--clip_save_sp]);
             }
@@ -709,6 +716,7 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
         }
 
         case DL_FILL_SURFACE_RECT: {
+            rdt_vector_flush_batch(vec);
             DlFillSurfaceRect* r = &item->fill_surface_rect;
             // translate to tile-local coordinates
             Rect rect = {r->x - tile_x, r->y - tile_y, r->w, r->h};
@@ -730,6 +738,7 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
         }
 
         case DL_BLIT_SURFACE_SCALED: {
+            rdt_vector_flush_batch(vec);
             DlBlitSurfaceScaled* r = &item->blit_surface_scaled;
             Rect dst_rect = {r->dst_x - tile_x, r->dst_y - tile_y, r->dst_w, r->dst_h};
             Bound bound;
@@ -751,6 +760,7 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
         }
 
         case DL_APPLY_OPACITY: {
+            rdt_vector_flush_batch(vec);
             DlApplyOpacity* r = &item->apply_opacity;
             // translate to tile-local coordinates
             int x0 = r->x0 - (int)tile_x;
@@ -775,6 +785,7 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
         }
 
         case DL_COMPOSITE_OPACITY: {
+            rdt_vector_flush_batch(vec);
             DlCompositeOpacity* r = &item->composite_opacity;
             if (backdrop_sp > 0) {
                 backdrop_sp--;
@@ -823,6 +834,7 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
         }
 
         case DL_SAVE_BACKDROP: {
+            rdt_vector_flush_batch(vec);
             DlSaveBackdrop* r = &item->save_backdrop;
             if (backdrop_sp < DL_MAX_BACKDROP_DEPTH) {
                 // translate to tile-local
@@ -866,6 +878,7 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
         }
 
         case DL_APPLY_BLEND_MODE: {
+            rdt_vector_flush_batch(vec);
             DlApplyBlendMode* r = &item->apply_blend_mode;
             if (backdrop_sp > 0) {
                 backdrop_sp--;
@@ -892,6 +905,7 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
         }
 
         case DL_APPLY_FILTER: {
+            rdt_vector_flush_batch(vec);
             DlApplyFilter* r = &item->apply_filter;
             Rect rect = {r->x - tile_x, r->y - tile_y, r->w, r->h};
             Bound bound;
@@ -899,11 +913,13 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
             bound.top    = std::max(0.0f, r->clip.top    - tile_y);
             bound.right  = std::min((float)tile_surface->width,  r->clip.right  - tile_x);
             bound.bottom = std::min((float)tile_surface->height, r->clip.bottom - tile_y);
-            apply_css_filters(scratch, tile_surface, (FilterProp*)r->filter, &rect, &bound);
+            render_filter_apply_with_backend(caps, scratch, tile_surface,
+                                             (FilterProp*)r->filter, &rect, &bound);
             break;
         }
 
         case DL_BOX_BLUR_REGION: {
+            rdt_vector_flush_batch(vec);
             DlBoxBlurRegion* r = &item->box_blur_region;
             // adjust coordinates relative to tile origin
             int rx = r->rx - (int)tile_x;
@@ -956,6 +972,7 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
         }
 
         case DL_BOX_BLUR_INSET: {
+            rdt_vector_flush_batch(vec);
             DlBoxBlurInset* r = &item->box_blur_inset;
             int rx = r->rx - (int)tile_x;
             int ry = r->ry - (int)tile_y;
@@ -965,6 +982,7 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
         }
 
         case DL_SHADOW_CLIP_SAVE: {
+            rdt_vector_flush_batch(vec);
             DlShadowClipSave* r = &item->shadow_clip_save;
             shadow_clip_saved = nullptr;
             if (tile_surface && tile_surface->pixels) {
@@ -990,6 +1008,7 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
         }
 
         case DL_SHADOW_CLIP_RESTORE: {
+            rdt_vector_flush_batch(vec);
             DlShadowClipRestore* r = &item->shadow_clip_restore;
             if (shadow_clip_saved && tile_surface && tile_surface->pixels && r->exclude_type) {
                 int x0 = shadow_clip_region[0], y0 = shadow_clip_region[1];
@@ -1026,6 +1045,7 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
         }
 
         case DL_OUTER_SHADOW: {
+            rdt_vector_flush_batch(vec);
             DlOuterShadow* o = &item->outer_shadow;
             // adjust shadow rect to tile-local coords
             float sx = o->shadow_x - tile_x;
@@ -1074,6 +1094,7 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
             break;
 
         case DL_WEBVIEW_LAYER_PLACEHOLDER: {
+            rdt_vector_flush_batch(vec);
             DlWebviewLayerPlaceholder* r = &item->webview_layer_placeholder;
             ImageSurface* src = (ImageSurface*)r->surface;
             if (src && src->pixels) {
@@ -1091,6 +1112,8 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
         }
         }
     }
+
+    rdt_vector_end_batch(vec);
 
     if (backdrop_sp > 0) {
         log_error("[DL_REPLAY_TILE] unbalanced backdrop stack: %d entries left", backdrop_sp);

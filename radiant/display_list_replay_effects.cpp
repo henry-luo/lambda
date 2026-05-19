@@ -29,13 +29,15 @@ void dl_replay_apply_opacity(ImageSurface* surface, const DlApplyOpacity* opacit
 
 void dl_replay_apply_filter(ScratchArena* scratch,
                             ImageSurface* surface,
+                            const RenderBackendCaps* caps,
                             const DisplayReplayDirtyClip* dirty_clip,
                             const DlApplyFilter* filter) {
     if (!filter) return;
     Rect rect = {filter->x, filter->y, filter->w, filter->h};
     Bound bound = filter->clip;
     dl_replay_intersect_dirty_clip(dirty_clip, &bound);
-    apply_css_filters(scratch, surface, (FilterProp*)filter->filter, &rect, &bound);
+    render_filter_apply_with_backend(caps, scratch, surface, (FilterProp*)filter->filter,
+                                     &rect, &bound);
 }
 
 void dl_replay_box_blur_region(ScratchArena* scratch,

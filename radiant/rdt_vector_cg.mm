@@ -1,9 +1,19 @@
 // rdt_vector_cg.mm — Core Graphics backend for RdtVector (macOS)
 #include "rdt_vector.hpp"
+#include "render_svg_inline.hpp"
 #include "../lib/log.h"
+#include "../lib/mem.h"
+#include "../lib/mempool.h"
+#include "../lambda/input/input.hpp"
+#include "../lambda/input/input-parsers.h"
+#include "../lambda/lambda-data.hpp"
+#define Rect MacOSRect
 #include <CoreGraphics/CoreGraphics.h>
+#undef Rect
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
+#include <pthread.h>
 
 #ifdef __APPLE__
 
@@ -15,20 +25,51 @@ struct RdtVectorImpl {
     CGContextRef ctx;
     CGColorSpaceRef colorspace;
     uint32_t* pixels;
+    uint32_t* premul_pixels;
     int width;
     int height;
     int stride;
+    int batch_depth;
+    float tile_offset_x;
+    float tile_offset_y;
+    bool dirty;
+    bool needs_sync_from_target;
 };
 
 struct RdtPath {
     CGMutablePathRef cg;
 };
 
+typedef struct RdtSvgShared {
+    Input* input;
+    Pool* pool;
+    Element* svg_root;
+    int ref_count;
+} RdtSvgShared;
+
 struct RdtPicture {
+    enum Kind { KIND_RASTER_IMAGE, KIND_SVG_DOM, KIND_TVG_PAINT };
+    Kind kind;
     CGImageRef image;
+    Tvg_Paint paint;
+    RdtSvgShared* svg;
+    char* source_path;
     float width;
     float height;
+    RdtMatrix transform;
+    bool has_transform;
 };
+
+static pthread_mutex_t g_svg_shared_mutex = PTHREAD_MUTEX_INITIALIZER;
+static FontContext* g_picture_font_ctx = nullptr;
+
+typedef struct CGClipEntry {
+    CGPathRef path;
+} CGClipEntry;
+
+static const int RDT_CG_MAX_CLIP_DEPTH = 8;
+static thread_local CGClipEntry s_cg_clip_stack[RDT_CG_MAX_CLIP_DEPTH];
+static thread_local int s_cg_clip_depth = 0;
 
 // ============================================================================
 // Helpers
@@ -42,10 +83,187 @@ static inline CGAffineTransform cg_affine_from_rdt(const RdtMatrix* m) {
     return CGAffineTransformMake(m->e11, m->e21, m->e12, m->e22, m->e13, m->e23);
 }
 
-// Core Graphics uses premultiplied alpha; Radiant stores straight alpha ABGR.
-// The CGBitmapContext is configured to handle this via kCGImageAlphaPremultipliedFirst.
-// We use BGRA byte order (kCGBitmapByteOrder32Little + kCGImageAlphaPremultipliedFirst)
-// which matches the ABGR uint32_t layout on little-endian.
+static inline Tvg_Matrix cg_tvg_matrix_from_rdt(const RdtMatrix* m) {
+    Tvg_Matrix tm = { m->e11, m->e12, m->e13,
+                      m->e21, m->e22, m->e23,
+                      m->e31, m->e32, m->e33 };
+    return tm;
+}
+
+static inline void cg_apply_tile_offset(RdtVectorImpl* cg) {
+    if (!cg) return;
+    if (cg->tile_offset_x != 0.0f || cg->tile_offset_y != 0.0f) {
+        CGContextTranslateCTM(cg->ctx, -cg->tile_offset_x, -cg->tile_offset_y);
+    }
+}
+
+static void cg_apply_active_clips(RdtVectorImpl* cg) {
+    if (!cg || s_cg_clip_depth <= 0) return;
+    for (int i = 0; i < s_cg_clip_depth; i++) {
+        if (!s_cg_clip_stack[i].path) continue;
+        CGContextAddPath(cg->ctx, s_cg_clip_stack[i].path);
+        CGContextClip(cg->ctx);
+    }
+}
+
+static void cg_free_clip_range(int begin_depth, int end_depth) {
+    if (begin_depth < 0) begin_depth = 0;
+    if (end_depth > RDT_CG_MAX_CLIP_DEPTH) end_depth = RDT_CG_MAX_CLIP_DEPTH;
+    for (int i = begin_depth; i < end_depth; i++) {
+        if (s_cg_clip_stack[i].path) {
+            CGPathRelease(s_cg_clip_stack[i].path);
+            s_cg_clip_stack[i].path = nullptr;
+        }
+    }
+}
+
+static inline uint8_t cg_premul_channel(uint8_t channel, uint8_t alpha) {
+    return (uint8_t)(((uint32_t)channel * alpha + 127) / 255);
+}
+
+static inline uint8_t cg_unpremul_channel(uint8_t channel, uint8_t alpha) {
+    if (alpha == 0) return 0;
+    if (alpha == 255) return channel;
+    uint32_t value = ((uint32_t)channel * 255 + (alpha / 2)) / alpha;
+    return (uint8_t)(value > 255 ? 255 : value);
+}
+
+static void cg_sync_from_target(RdtVectorImpl* cg) {
+    if (!cg || !cg->pixels || !cg->premul_pixels) return;
+    for (int y = 0; y < cg->height; y++) {
+        uint32_t* dst = cg->premul_pixels + y * cg->stride;
+        uint32_t* src = cg->pixels + y * cg->stride;
+        for (int x = 0; x < cg->width; x++) {
+            uint32_t p = src[x];
+            uint8_t a = (p >> 24) & 0xff;
+            uint8_t b = (p >> 16) & 0xff;
+            uint8_t g = (p >> 8) & 0xff;
+            uint8_t r = p & 0xff;
+            dst[x] = ((uint32_t)a << 24) |
+                     ((uint32_t)cg_premul_channel(b, a) << 16) |
+                     ((uint32_t)cg_premul_channel(g, a) << 8) |
+                     (uint32_t)cg_premul_channel(r, a);
+        }
+    }
+    cg->needs_sync_from_target = false;
+}
+
+static void cg_flush_to_target(RdtVectorImpl* cg) {
+    if (!cg || !cg->dirty || !cg->pixels || !cg->premul_pixels) return;
+    if (cg->ctx) CGContextFlush(cg->ctx);
+    for (int y = 0; y < cg->height; y++) {
+        uint32_t* dst = cg->pixels + y * cg->stride;
+        uint32_t* src = cg->premul_pixels + y * cg->stride;
+        for (int x = 0; x < cg->width; x++) {
+            uint32_t p = src[x];
+            uint8_t a = (p >> 24) & 0xff;
+            uint8_t b = (p >> 16) & 0xff;
+            uint8_t g = (p >> 8) & 0xff;
+            uint8_t r = p & 0xff;
+            dst[x] = ((uint32_t)a << 24) |
+                     ((uint32_t)cg_unpremul_channel(b, a) << 16) |
+                     ((uint32_t)cg_unpremul_channel(g, a) << 8) |
+                     (uint32_t)cg_unpremul_channel(r, a);
+        }
+    }
+    cg->dirty = false;
+    cg->needs_sync_from_target = true;
+}
+
+static bool cg_create_bitmap_context(RdtVectorImpl* cg) {
+    if (!cg || !cg->colorspace || !cg->pixels || cg->width <= 0 ||
+        cg->height <= 0 || cg->stride <= 0) {
+        return false;
+    }
+    size_t bytes = (size_t)cg->stride * (size_t)cg->height * sizeof(uint32_t);
+    cg->premul_pixels = (uint32_t*)calloc(1, bytes);
+    if (!cg->premul_pixels) return false;
+    cg->needs_sync_from_target = true;
+    cg_sync_from_target(cg);
+    cg->ctx = CGBitmapContextCreate(
+        cg->premul_pixels,
+        cg->width, cg->height,
+        8,
+        cg->stride * 4,
+        cg->colorspace,
+        kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big
+    );
+    if (!cg->ctx) {
+        free(cg->premul_pixels);
+        cg->premul_pixels = nullptr;
+        return false;
+    }
+    CGContextSetShouldAntialias(cg->ctx, true);
+    CGContextSetAllowsAntialiasing(cg->ctx, true);
+    CGContextTranslateCTM(cg->ctx, 0, cg->height);
+    CGContextScaleCTM(cg->ctx, 1.0, -1.0);
+    return true;
+}
+
+static void cg_destroy_bitmap_context(RdtVectorImpl* cg) {
+    if (!cg) return;
+    if (cg->ctx) {
+        CGContextRelease(cg->ctx);
+        cg->ctx = nullptr;
+    }
+    if (cg->premul_pixels) {
+        free(cg->premul_pixels);
+        cg->premul_pixels = nullptr;
+    }
+    cg->dirty = false;
+    cg->needs_sync_from_target = true;
+}
+
+static void cg_mark_dirty(RdtVectorImpl* cg) {
+    if (!cg) return;
+    cg->dirty = true;
+    if (cg->batch_depth <= 0) {
+        cg_flush_to_target(cg);
+    }
+}
+
+static void cg_begin_draw_state(RdtVectorImpl* cg) {
+    if (!cg) return;
+    if (cg->needs_sync_from_target) {
+        cg_sync_from_target(cg);
+    }
+    CGContextSaveGState(cg->ctx);
+    cg_apply_tile_offset(cg);
+    cg_apply_active_clips(cg);
+}
+
+static void cg_end_draw_state(RdtVectorImpl* cg) {
+    if (!cg) return;
+    CGContextRestoreGState(cg->ctx);
+    cg_mark_dirty(cg);
+}
+
+static uint32_t* cg_copy_premul_image_data(const uint32_t* pixels, int src_w,
+                                           int src_h, int src_stride) {
+    if (!pixels || src_w <= 0 || src_h <= 0 || src_stride <= 0) return nullptr;
+    uint32_t* copy = (uint32_t*)malloc((size_t)src_w * (size_t)src_h * sizeof(uint32_t));
+    if (!copy) return nullptr;
+    for (int y = 0; y < src_h; y++) {
+        const uint32_t* src = pixels + y * src_stride;
+        uint32_t* dst = copy + y * src_w;
+        for (int x = 0; x < src_w; x++) {
+            uint32_t p = src[x];
+            uint8_t a = (p >> 24) & 0xff;
+            uint8_t b = (p >> 16) & 0xff;
+            uint8_t g = (p >> 8) & 0xff;
+            uint8_t r = p & 0xff;
+            dst[x] = ((uint32_t)a << 24) |
+                     ((uint32_t)cg_premul_channel(b, a) << 16) |
+                     ((uint32_t)cg_premul_channel(g, a) << 8) |
+                     (uint32_t)cg_premul_channel(r, a);
+        }
+    }
+    return copy;
+}
+
+// Core Graphics only draws to premultiplied-alpha bitmap contexts. Radiant's
+// public surface stays straight-alpha ABGR; this backend keeps a private
+// premultiplied backing surface and converts at vector flush boundaries.
 
 // ============================================================================
 // Lifecycle
@@ -59,17 +277,18 @@ static const RdtVectorCaps g_cg_caps = {
     true,   // gradients
     true,   // nested_clips
     true,   // image_scaling
-    false,  // picture_svg
-    false,  // picture_duplication
-    false,  // svg_dom_pictures
+    true,   // picture_svg
+    true,   // picture_duplication
+    true,   // svg_dom_pictures
     false,  // opacity_group
     false,  // blend_modes
-    false,  // gaussian_blur
+    true,   // gaussian_blur
     false,  // color_matrix_filters
     false,  // native_text_runs
-    true,   // premultiplied_surface
-    false,  // tile_offsets
-    false,  // clip_depth_save_restore
+    true,   // vector_batching
+    false,  // premultiplied_surface
+    true,   // tile_offsets
+    true,   // clip_depth_save_restore
 };
 
 void rdt_vector_init(RdtVector* vec, uint32_t* pixels, int w, int h, int stride) {
@@ -80,52 +299,13 @@ void rdt_vector_init(RdtVector* vec, uint32_t* pixels, int w, int h, int stride)
     cg->height = h;
     cg->stride = stride;
 
-    // ABGR8888 as uint32_t on little-endian = byte order [R, G, B, A]
-    // That's kCGImageAlphaPremultipliedLast with big-endian byte order,
-    // or equivalently kCGImageAlphaPremultipliedFirst with 32-bit little-endian.
-    // Actually: ABGR as uint32_t means A in high byte on little-endian = bytes [R][G][B][A].
-    // CGBitmapContext byte order:
-    //   kCGBitmapByteOrder32Little | kCGImageAlphaPremultipliedFirst
-    //   = premultiplied ARGB stored as 32-bit little-endian = memory order [B][G][R][A]
-    //   That doesn't match either.
-    //
-    // The actual Radiant pixel format per dom_node.hpp comment:
-    //   "32-bit ABGR color format" for the uint32_t .c field
-    //   Union with struct { r, g, b, a } (little-endian: r at lowest address)
-    //   So in memory: [R][G][B][A] = byte 0 is R
-    //   As uint32_t on LE: A<<24 | B<<16 | G<<8 | R = 0xAABBGGRR
-    //
-    // For CGBitmapContext to match [R][G][B][A] byte order:
-    //   kCGImageAlphaPremultipliedLast (alpha is last byte)
-    //   kCGBitmapByteOrder32Big (bytes written as R,G,B,A in memory)
-    // But Radiant uses straight alpha, not premultiplied.
-    // kCGImageAlphaLast = straight alpha, last byte.
-    // However CGBitmapContext only supports premultiplied alpha for drawing.
-    // We'll use premultiplied and accept the slight difference for semi-transparent shapes.
-    
-    cg->ctx = CGBitmapContextCreate(
-        pixels,
-        w, h,
-        8,                // bits per component
-        stride * 4,       // bytes per row (stride is in pixels)
-        cg->colorspace,
-        kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big
-    );
-
-    if (!cg->ctx) {
+    if (!cg_create_bitmap_context(cg)) {
         log_error("rdt_vector_init: CGBitmapContextCreate failed for %dx%d", w, h);
+        if (cg->colorspace) CGColorSpaceRelease(cg->colorspace);
         free(cg);
         vec->impl = nullptr;
         return;
     }
-
-    CGContextSetShouldAntialias(cg->ctx, true);
-    CGContextSetAllowsAntialiasing(cg->ctx, true);
-
-    // Core Graphics origin is bottom-left; Radiant is top-left.
-    // Flip the coordinate system.
-    CGContextTranslateCTM(cg->ctx, 0, h);
-    CGContextScaleCTM(cg->ctx, 1.0, -1.0);
 
     vec->impl = cg;
     log_debug("rdt_vector_init: CG backend ready %dx%d stride=%d", w, h, stride);
@@ -134,7 +314,10 @@ void rdt_vector_init(RdtVector* vec, uint32_t* pixels, int w, int h, int stride)
 void rdt_vector_destroy(RdtVector* vec) {
     if (!vec || !vec->impl) return;
     RdtVectorImpl* cg = vec->impl;
-    if (cg->ctx) CGContextRelease(cg->ctx);
+    cg_flush_to_target(cg);
+    cg_free_clip_range(0, s_cg_clip_depth);
+    s_cg_clip_depth = 0;
+    cg_destroy_bitmap_context(cg);
     if (cg->colorspace) CGColorSpaceRelease(cg->colorspace);
     free(cg);
     vec->impl = nullptr;
@@ -143,45 +326,64 @@ void rdt_vector_destroy(RdtVector* vec) {
 void rdt_vector_set_target(RdtVector* vec, uint32_t* pixels, int w, int h, int stride) {
     if (!vec || !vec->impl) return;
     RdtVectorImpl* cg = vec->impl;
+    cg_flush_to_target(cg);
 
     // if dimensions changed, recreate context
     if (cg->width != w || cg->height != h || cg->stride != stride) {
-        CGContextRelease(cg->ctx);
+        cg_destroy_bitmap_context(cg);
         cg->pixels = pixels;
         cg->width = w;
         cg->height = h;
         cg->stride = stride;
-        cg->ctx = CGBitmapContextCreate(
-            pixels, w, h, 8, stride * 4, cg->colorspace,
-            kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
-        if (!cg->ctx) {
+        if (!cg_create_bitmap_context(cg)) {
             log_error("rdt_vector_set_target: CGBitmapContextCreate failed");
             return;
         }
-        CGContextSetShouldAntialias(cg->ctx, true);
-        CGContextTranslateCTM(cg->ctx, 0, h);
-        CGContextScaleCTM(cg->ctx, 1.0, -1.0);
     } else if (cg->pixels != pixels) {
         // same size, different pointer — recreate
-        CGContextRelease(cg->ctx);
+        cg_destroy_bitmap_context(cg);
         cg->pixels = pixels;
-        cg->ctx = CGBitmapContextCreate(
-            pixels, w, h, 8, stride * 4, cg->colorspace,
-            kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
-        if (!cg->ctx) {
+        if (!cg_create_bitmap_context(cg)) {
             log_error("rdt_vector_set_target: CGBitmapContextCreate failed");
             return;
         }
-        CGContextSetShouldAntialias(cg->ctx, true);
-        CGContextTranslateCTM(cg->ctx, 0, h);
-        CGContextScaleCTM(cg->ctx, 1.0, -1.0);
+    } else {
+        cg->needs_sync_from_target = true;
     }
-    // else same buffer, nothing to do
+}
+
+void rdt_vector_set_tile_offset_y(RdtVector* vec, float offset_y) {
+    if (!vec || !vec->impl) return;
+    vec->impl->tile_offset_y = offset_y;
+}
+
+void rdt_vector_set_tile_offset_x(RdtVector* vec, float offset_x) {
+    if (!vec || !vec->impl) return;
+    vec->impl->tile_offset_x = offset_x;
 }
 
 const RdtVectorCaps* rdt_vector_get_caps(const RdtVector* vec) {
     (void)vec;
     return &g_cg_caps;
+}
+
+void rdt_vector_begin_batch(RdtVector* vec) {
+    if (!vec || !vec->impl) return;
+    vec->impl->batch_depth++;
+}
+
+void rdt_vector_flush_batch(RdtVector* vec) {
+    if (!vec || !vec->impl) return;
+    cg_flush_to_target(vec->impl);
+}
+
+void rdt_vector_end_batch(RdtVector* vec) {
+    if (!vec || !vec->impl) return;
+    RdtVectorImpl* cg = vec->impl;
+    if (cg->batch_depth > 0) cg->batch_depth--;
+    if (cg->batch_depth <= 0) {
+        cg_flush_to_target(cg);
+    }
 }
 
 // ============================================================================
@@ -267,7 +469,7 @@ void rdt_fill_path(RdtVector* vec, RdtPath* p, Color color,
     if (!vec || !vec->impl || !p) return;
     RdtVectorImpl* cg = vec->impl;
 
-    CGContextSaveGState(cg->ctx);
+    cg_begin_draw_state(cg);
 
     if (transform) {
         CGContextConcatCTM(cg->ctx, cg_affine_from_rdt(transform));
@@ -285,7 +487,7 @@ void rdt_fill_path(RdtVector* vec, RdtPath* p, Color color,
         CGContextFillPath(cg->ctx);
     }
 
-    CGContextRestoreGState(cg->ctx);
+    cg_end_draw_state(cg);
 }
 
 void rdt_fill_rect(RdtVector* vec, float x, float y, float w, float h,
@@ -293,10 +495,12 @@ void rdt_fill_rect(RdtVector* vec, float x, float y, float w, float h,
     if (!vec || !vec->impl) return;
     RdtVectorImpl* cg = vec->impl;
 
+    cg_begin_draw_state(cg);
     CGContextSetRGBFillColor(cg->ctx,
         color.r / 255.0, color.g / 255.0,
         color.b / 255.0, color.a / 255.0);
     CGContextFillRect(cg->ctx, CGRectMake(x, y, w, h));
+    cg_end_draw_state(cg);
 }
 
 void rdt_fill_rounded_rect(RdtVector* vec, float x, float y, float w, float h,
@@ -304,7 +508,7 @@ void rdt_fill_rounded_rect(RdtVector* vec, float x, float y, float w, float h,
     if (!vec || !vec->impl) return;
     RdtVectorImpl* cg = vec->impl;
 
-    CGContextSaveGState(cg->ctx);
+    cg_begin_draw_state(cg);
     CGContextSetRGBFillColor(cg->ctx,
         color.r / 255.0, color.g / 255.0,
         color.b / 255.0, color.a / 255.0);
@@ -319,7 +523,7 @@ void rdt_fill_rounded_rect(RdtVector* vec, float x, float y, float w, float h,
         CGPathRelease(path);
     }
 
-    CGContextRestoreGState(cg->ctx);
+    cg_end_draw_state(cg);
 }
 
 // ============================================================================
@@ -333,7 +537,7 @@ void rdt_stroke_path(RdtVector* vec, RdtPath* p, Color color, float width,
     if (!vec || !vec->impl || !p) return;
     RdtVectorImpl* cg = vec->impl;
 
-    CGContextSaveGState(cg->ctx);
+    cg_begin_draw_state(cg);
 
     if (transform) {
         CGContextConcatCTM(cg->ctx, cg_affine_from_rdt(transform));
@@ -374,7 +578,7 @@ void rdt_stroke_path(RdtVector* vec, RdtPath* p, Color color, float width,
     CGContextAddPath(cg->ctx, p->cg);
     CGContextStrokePath(cg->ctx);
 
-    CGContextRestoreGState(cg->ctx);
+    cg_end_draw_state(cg);
 }
 
 // ============================================================================
@@ -403,7 +607,7 @@ void rdt_fill_linear_gradient(RdtVector* vec, RdtPath* p,
     if (!vec || !vec->impl || !p || !stops || stop_count < 2) return;
     RdtVectorImpl* cg = vec->impl;
 
-    CGContextSaveGState(cg->ctx);
+    cg_begin_draw_state(cg);
 
     if (transform) {
         CGContextConcatCTM(cg->ctx, cg_affine_from_rdt(transform));
@@ -423,7 +627,7 @@ void rdt_fill_linear_gradient(RdtVector* vec, RdtPath* p,
         kCGGradientDrawsBeforeStartLocation | kCGGradientDrawsAfterEndLocation);
     CGGradientRelease(gradient);
 
-    CGContextRestoreGState(cg->ctx);
+    cg_end_draw_state(cg);
 }
 
 void rdt_fill_radial_gradient(RdtVector* vec, RdtPath* p,
@@ -434,7 +638,7 @@ void rdt_fill_radial_gradient(RdtVector* vec, RdtPath* p,
     if (!vec || !vec->impl || !p || !stops || stop_count < 2) return;
     RdtVectorImpl* cg = vec->impl;
 
-    CGContextSaveGState(cg->ctx);
+    cg_begin_draw_state(cg);
 
     if (transform) {
         CGContextConcatCTM(cg->ctx, cg_affine_from_rdt(transform));
@@ -455,7 +659,7 @@ void rdt_fill_radial_gradient(RdtVector* vec, RdtPath* p,
         kCGGradientDrawsBeforeStartLocation | kCGGradientDrawsAfterEndLocation);
     CGGradientRelease(gradient);
 
-    CGContextRestoreGState(cg->ctx);
+    cg_end_draw_state(cg);
 }
 
 // ============================================================================
@@ -464,22 +668,42 @@ void rdt_fill_radial_gradient(RdtVector* vec, RdtPath* p,
 
 void rdt_push_clip(RdtVector* vec, RdtPath* clip_path, const RdtMatrix* transform) {
     if (!vec || !vec->impl || !clip_path) return;
-    RdtVectorImpl* cg = vec->impl;
-
-    CGContextSaveGState(cg->ctx);
-
-    if (transform) {
-        CGContextConcatCTM(cg->ctx, cg_affine_from_rdt(transform));
+    if (s_cg_clip_depth >= RDT_CG_MAX_CLIP_DEPTH) {
+        log_error("rdt_push_clip: Core Graphics clip stack overflow (depth %d)", s_cg_clip_depth);
+        return;
     }
-
-    CGContextAddPath(cg->ctx, clip_path->cg);
-    CGContextClip(cg->ctx);
+    CGPathRef copied_path = nullptr;
+    if (transform) {
+        CGAffineTransform t = cg_affine_from_rdt(transform);
+        copied_path = CGPathCreateCopyByTransformingPath(clip_path->cg, &t);
+    } else {
+        copied_path = CGPathCreateMutableCopy(clip_path->cg);
+    }
+    if (!copied_path) return;
+    s_cg_clip_stack[s_cg_clip_depth++].path = copied_path;
 }
 
 void rdt_pop_clip(RdtVector* vec) {
     if (!vec || !vec->impl) return;
-    RdtVectorImpl* cg = vec->impl;
-    CGContextRestoreGState(cg->ctx);
+    if (s_cg_clip_depth <= 0) {
+        log_error("rdt_pop_clip: Core Graphics clip stack underflow");
+        return;
+    }
+    s_cg_clip_depth--;
+    cg_free_clip_range(s_cg_clip_depth, s_cg_clip_depth + 1);
+}
+
+int rdt_clip_save_depth() {
+    int saved = s_cg_clip_depth;
+    s_cg_clip_depth = 0;
+    return saved;
+}
+
+void rdt_clip_restore_depth(int saved_depth) {
+    if (saved_depth < 0) saved_depth = 0;
+    if (saved_depth > RDT_CG_MAX_CLIP_DEPTH) saved_depth = RDT_CG_MAX_CLIP_DEPTH;
+    cg_free_clip_range(saved_depth, s_cg_clip_depth);
+    s_cg_clip_depth = saved_depth;
 }
 
 // ============================================================================
@@ -488,11 +712,12 @@ void rdt_pop_clip(RdtVector* vec) {
 
 void rdt_draw_image(RdtVector* vec, const uint32_t* pixels, int src_w, int src_h,
                     int src_stride, float dst_x, float dst_y, float dst_w, float dst_h,
-                    uint8_t opacity, const RdtMatrix* transform) {
+                    uint8_t opacity, const RdtMatrix* transform, uint64_t resource_generation) {
+    (void)resource_generation;
     if (!vec || !vec->impl || !pixels) return;
     RdtVectorImpl* cg = vec->impl;
 
-    CGContextSaveGState(cg->ctx);
+    cg_begin_draw_state(cg);
 
     if (transform) {
         CGContextConcatCTM(cg->ctx, cg_affine_from_rdt(transform));
@@ -502,12 +727,18 @@ void rdt_draw_image(RdtVector* vec, const uint32_t* pixels, int src_w, int src_h
         CGContextSetAlpha(cg->ctx, opacity / 255.0);
     }
 
-    // create CGImage from pixel data
+    uint32_t* premul_src = cg_copy_premul_image_data(pixels, src_w, src_h, src_stride);
+    if (!premul_src) {
+        cg_end_draw_state(cg);
+        return;
+    }
+
+    // create CGImage from premultiplied pixel data
     CGDataProviderRef provider = CGDataProviderCreateWithData(
-        NULL, pixels, src_stride * src_h * 4, NULL);
+        NULL, premul_src, (size_t)src_w * (size_t)src_h * sizeof(uint32_t), NULL);
     CGImageRef image = CGImageCreate(
         src_w, src_h,
-        8, 32, src_stride * 4,
+        8, 32, src_w * 4,
         cg->colorspace,
         kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big,
         provider,
@@ -522,15 +753,191 @@ void rdt_draw_image(RdtVector* vec, const uint32_t* pixels, int src_w, int src_h
     }
 
     CGDataProviderRelease(provider);
-    CGContextRestoreGState(cg->ctx);
+    free(premul_src);
+    cg_end_draw_state(cg);
 }
 
 // ============================================================================
 // Picture (SVG / vector image files)
 // ============================================================================
 
+static bool cg_ascii_ends_with_svg(const char* path) {
+    if (!path) return false;
+    size_t len = strlen(path);
+    if (len < 4) return false;
+    const char* ext = path + len - 4;
+    return (ext[0] == '.') &&
+           (ext[1] == 's' || ext[1] == 'S') &&
+           (ext[2] == 'v' || ext[2] == 'V') &&
+           (ext[3] == 'g' || ext[3] == 'G');
+}
+
+static bool cg_mime_is_svg(const char* mime_type) {
+    return mime_type && (strstr(mime_type, "svg") || strstr(mime_type, "xml"));
+}
+
+static RdtSvgShared* cg_svg_shared_new(Input* input, Pool* pool, Element* svg_root) {
+    RdtSvgShared* shared = (RdtSvgShared*)mem_calloc(1, sizeof(RdtSvgShared), MEM_CAT_RENDER);
+    if (!shared) return nullptr;
+    shared->input = input;
+    shared->pool = pool;
+    shared->svg_root = svg_root;
+    shared->ref_count = 1;
+    return shared;
+}
+
+static void cg_svg_shared_retain(RdtSvgShared* shared) {
+    if (!shared) return;
+    pthread_mutex_lock(&g_svg_shared_mutex);
+    shared->ref_count++;
+    pthread_mutex_unlock(&g_svg_shared_mutex);
+}
+
+static void cg_svg_shared_release(RdtSvgShared* shared) {
+    if (!shared) return;
+    bool destroy = false;
+    pthread_mutex_lock(&g_svg_shared_mutex);
+    shared->ref_count--;
+    if (shared->ref_count <= 0) destroy = true;
+    pthread_mutex_unlock(&g_svg_shared_mutex);
+    if (destroy) {
+        if (shared->pool) pool_destroy(shared->pool);
+        mem_free(shared);
+    }
+}
+
+static RdtPicture* cg_svg_picture_create(const char* data, int size, const char* source_path) {
+    if (!data || size <= 0) return nullptr;
+
+    Pool* pool = pool_create();
+    if (!pool) {
+        log_error("cg_svg_picture_create: pool_create failed");
+        return nullptr;
+    }
+    Input* input = Input::create(pool, nullptr);
+    if (!input) {
+        pool_destroy(pool);
+        return nullptr;
+    }
+    input->ui_mode = false;
+
+    char* buf = (char*)mem_alloc((size_t)size + 1, MEM_CAT_RENDER);
+    if (!buf) {
+        pool_destroy(pool);
+        return nullptr;
+    }
+    memcpy(buf, data, (size_t)size);
+    buf[size] = '\0';
+    Element* svg_root = html5_parse_svg_document(input, buf, nullptr);
+    mem_free(buf);
+
+    if (!input->root.item || input->root.item == ITEM_ERROR || !svg_root) {
+        log_error("cg_svg_picture_create: failed to parse SVG picture");
+        pool_destroy(pool);
+        return nullptr;
+    }
+
+    SvgIntrinsicSize isz = calculate_svg_intrinsic_size(svg_root);
+    float w = isz.width > 0 ? isz.width : 300.0f;
+    float h = isz.height > 0 ? isz.height : 150.0f;
+
+    RdtSvgShared* shared = cg_svg_shared_new(input, pool, svg_root);
+    if (!shared) {
+        pool_destroy(pool);
+        return nullptr;
+    }
+
+    RdtPicture* pic = (RdtPicture*)calloc(1, sizeof(RdtPicture));
+    if (!pic) {
+        cg_svg_shared_release(shared);
+        return nullptr;
+    }
+    pic->kind = RdtPicture::KIND_SVG_DOM;
+    pic->svg = shared;
+    pic->source_path = source_path ? mem_strdup(source_path, MEM_CAT_RENDER) : nullptr;
+    pic->width = w;
+    pic->height = h;
+    return pic;
+}
+
+static char* cg_read_file_bytes(const char* path, int* out_size) {
+    if (out_size) *out_size = 0;
+    FILE* fp = fopen(path, "rb");
+    if (!fp) return nullptr;
+    fseek(fp, 0, SEEK_END);
+    long fsz = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+    if (fsz <= 0) {
+        fclose(fp);
+        return nullptr;
+    }
+    char* buf = (char*)mem_alloc((size_t)fsz, MEM_CAT_RENDER);
+    if (!buf) {
+        fclose(fp);
+        return nullptr;
+    }
+    size_t rd = fread(buf, 1, (size_t)fsz, fp);
+    fclose(fp);
+    if (rd == 0) {
+        mem_free(buf);
+        return nullptr;
+    }
+    if (out_size) *out_size = (int)rd;
+    return buf;
+}
+
+static RdtPicture* cg_svg_picture_load_file(const char* path) {
+    int size = 0;
+    char* data = cg_read_file_bytes(path, &size);
+    if (!data) return nullptr;
+    RdtPicture* pic = cg_svg_picture_create(data, size, path);
+    mem_free(data);
+    return pic;
+}
+
+static const char* cg_picture_elem_attr(Element* element, const char* attr_name) {
+    if (!element || !element->data || !attr_name) return nullptr;
+    TypeElmt* elem_type = (TypeElmt*)element->type;
+    if (!elem_type) return nullptr;
+    TypeMap* map_type = (TypeMap*)elem_type;
+    if (!map_type->shape) return nullptr;
+
+    size_t attr_len = strlen(attr_name);
+    ShapeEntry* field = map_type->shape;
+    for (int i = 0; i < map_type->length && field; i++) {
+        if (field->name && field->name->str &&
+            field->name->length == attr_len &&
+            strncmp(field->name->str, attr_name, attr_len) == 0 &&
+            field->type && field->type->type_id == LMD_TYPE_STRING) {
+            void* data = ((char*)element->data) + field->byte_offset;
+            String* str_val = *(String**)data;
+            return str_val ? str_val->chars : nullptr;
+        }
+        field = field->next;
+    }
+    return nullptr;
+}
+
+static Element* cg_picture_find_id_recursive(Element* elem, const char* id) {
+    if (!elem || !id) return nullptr;
+    const char* elem_id = cg_picture_elem_attr(elem, "id");
+    if (elem_id && strcmp(elem_id, id) == 0) return elem;
+    for (int64_t i = 0; i < elem->length; i++) {
+        Item child = elem->items[i];
+        if (get_type_id(child) != LMD_TYPE_ELEMENT) continue;
+        Element* found = cg_picture_find_id_recursive(child.element, id);
+        if (found) return found;
+    }
+    return nullptr;
+}
+
 RdtPicture* rdt_picture_load(const char* path) {
     if (!path) return nullptr;
+
+    if (cg_ascii_ends_with_svg(path)) {
+        RdtPicture* svg = cg_svg_picture_load_file(path);
+        if (svg) return svg;
+    }
 
     CGDataProviderRef provider = CGDataProviderCreateWithFilename(path);
     if (!provider) {
@@ -546,11 +953,14 @@ RdtPicture* rdt_picture_load(const char* path) {
     CGDataProviderRelease(provider);
 
     if (!image) {
+        RdtPicture* svg = cg_svg_picture_load_file(path);
+        if (svg) return svg;
         log_error("rdt_picture_load: unsupported format %s", path);
         return nullptr;
     }
 
     RdtPicture* pic = (RdtPicture*)calloc(1, sizeof(RdtPicture));
+    pic->kind = RdtPicture::KIND_RASTER_IMAGE;
     pic->image = image;
     pic->width = (float)CGImageGetWidth(image);
     pic->height = (float)CGImageGetHeight(image);
@@ -559,6 +969,11 @@ RdtPicture* rdt_picture_load(const char* path) {
 
 RdtPicture* rdt_picture_load_data(const char* data, int size, const char* mime_type) {
     if (!data || size <= 0) return nullptr;
+
+    if (cg_mime_is_svg(mime_type)) {
+        RdtPicture* svg = cg_svg_picture_create(data, size, nullptr);
+        if (svg) return svg;
+    }
 
     CFDataRef cf_data = CFDataCreate(NULL, (const UInt8*)data, size);
     CGDataProviderRef provider = CGDataProviderCreateWithCFData(cf_data);
@@ -579,11 +994,14 @@ RdtPicture* rdt_picture_load_data(const char* data, int size, const char* mime_t
     CGDataProviderRelease(provider);
 
     if (!image) {
+        RdtPicture* svg = cg_svg_picture_create(data, size, nullptr);
+        if (svg) return svg;
         log_error("rdt_picture_load_data: failed to decode image");
         return nullptr;
     }
 
     RdtPicture* pic = (RdtPicture*)calloc(1, sizeof(RdtPicture));
+    pic->kind = RdtPicture::KIND_RASTER_IMAGE;
     pic->image = image;
     pic->width = (float)CGImageGetWidth(image);
     pic->height = (float)CGImageGetHeight(image);
@@ -602,15 +1020,128 @@ void rdt_picture_set_size(RdtPicture* pic, float w, float h) {
     pic->height = h;
 }
 
+RdtPicture* rdt_picture_dup(RdtPicture* pic) {
+    if (!pic) return nullptr;
+    RdtPicture* dup = (RdtPicture*)calloc(1, sizeof(RdtPicture));
+    if (!dup) return nullptr;
+    dup->kind = pic->kind;
+    if (pic->kind == RdtPicture::KIND_SVG_DOM) {
+        dup->svg = pic->svg;
+        cg_svg_shared_retain(dup->svg);
+        dup->source_path = pic->source_path ? mem_strdup(pic->source_path, MEM_CAT_RENDER) : nullptr;
+    } else if (pic->kind == RdtPicture::KIND_TVG_PAINT) {
+        if (!pic->paint) {
+            free(dup);
+            return nullptr;
+        }
+        dup->paint = tvg_paint_duplicate(pic->paint);
+        if (!dup->paint) {
+            free(dup);
+            return nullptr;
+        }
+    } else {
+        if (!pic->image) {
+            free(dup);
+            return nullptr;
+        }
+        dup->image = CGImageRetain(pic->image);
+    }
+    dup->width = pic->width;
+    dup->height = pic->height;
+    dup->transform = pic->transform;
+    dup->has_transform = pic->has_transform;
+    return dup;
+}
+
+Element* rdt_picture_get_svg_root(RdtPicture* pic) {
+    if (!pic || pic->kind != RdtPicture::KIND_SVG_DOM || !pic->svg) return nullptr;
+    return pic->svg->svg_root;
+}
+
+Element* rdt_picture_find_svg_element_by_id(RdtPicture* pic, const char* id) {
+    if (!pic || pic->kind != RdtPicture::KIND_SVG_DOM || !pic->svg || !id || !*id) return nullptr;
+    return cg_picture_find_id_recursive(pic->svg->svg_root, id);
+}
+
+Pool* rdt_picture_get_pool(RdtPicture* pic) {
+    if (!pic || pic->kind != RdtPicture::KIND_SVG_DOM || !pic->svg) return nullptr;
+    return pic->svg->pool;
+}
+
+const char* rdt_picture_get_source_path(RdtPicture* pic) {
+    if (!pic || pic->kind != RdtPicture::KIND_SVG_DOM) return nullptr;
+    return pic->source_path;
+}
+
 void rdt_picture_draw(RdtVector* vec, RdtPicture* pic,
                       uint8_t opacity, const RdtMatrix* transform) {
-    if (!vec || !vec->impl || !pic || !pic->image) return;
+    if (!vec || !vec->impl || !pic) return;
+
+    if (pic->kind == RdtPicture::KIND_TVG_PAINT) {
+        if (!pic->paint) return;
+        RdtVectorImpl* cg = vec->impl;
+        Tvg_Paint draw = tvg_paint_duplicate(pic->paint);
+        if (!draw) return;
+        RdtMatrix base = rdt_matrix_identity();
+        if (pic->has_transform) base = pic->transform;
+        if (transform) base = rdt_matrix_multiply(transform, &base);
+        Tvg_Matrix tm = cg_tvg_matrix_from_rdt(&base);
+        tvg_paint_set_transform(draw, &tm);
+        if (opacity < 255) {
+            tvg_paint_set_opacity(draw, opacity);
+        }
+
+        size_t count = (size_t)cg->stride * (size_t)cg->height;
+        uint32_t* temp = (uint32_t*)calloc(count, sizeof(uint32_t));
+        if (!temp) {
+            tvg_paint_unref(draw, true);
+            return;
+        }
+        Tvg_Canvas canvas = tvg_swcanvas_create(TVG_ENGINE_OPTION_DEFAULT);
+        if (!canvas) {
+            free(temp);
+            tvg_paint_unref(draw, true);
+            return;
+        }
+        if (tvg_swcanvas_set_target(canvas, temp, cg->stride, cg->width, cg->height,
+                                    TVG_COLORSPACE_ABGR8888) == TVG_RESULT_SUCCESS) {
+            tvg_canvas_push(canvas, draw);
+            tvg_canvas_draw(canvas, true);
+            tvg_canvas_sync(canvas);
+            rdt_draw_image(vec, temp, cg->width, cg->height, cg->stride,
+                           0, 0, (float)cg->width, (float)cg->height, 255,
+                           nullptr, 0);
+            tvg_canvas_remove(canvas, draw);
+        } else {
+            tvg_paint_unref(draw, true);
+        }
+        tvg_canvas_destroy(canvas);
+        free(temp);
+        return;
+    }
+
+    if (pic->kind == RdtPicture::KIND_SVG_DOM) {
+        if (!pic->svg || !pic->svg->svg_root) return;
+        RdtMatrix base = rdt_matrix_identity();
+        if (pic->has_transform) base = pic->transform;
+        if (transform) base = rdt_matrix_multiply(transform, &base);
+        render_svg_to_vec(vec, pic->svg->svg_root, pic->width, pic->height,
+                          pic->svg->pool, 1.0f, g_picture_font_ctx, &base, nullptr,
+                          nullptr, nullptr, pic->source_path,
+                          (float)opacity / 255.0f);
+        return;
+    }
+
+    if (!pic->image) return;
     RdtVectorImpl* cg = vec->impl;
 
-    CGContextSaveGState(cg->ctx);
+    cg_begin_draw_state(cg);
 
     if (transform) {
         CGContextConcatCTM(cg->ctx, cg_affine_from_rdt(transform));
+    }
+    if (pic->has_transform) {
+        CGContextConcatCTM(cg->ctx, cg_affine_from_rdt(&pic->transform));
     }
 
     if (opacity < 255) {
@@ -622,13 +1153,63 @@ void rdt_picture_draw(RdtVector* vec, RdtPicture* pic,
     CGContextScaleCTM(cg->ctx, 1.0, -1.0);
     CGContextDrawImage(cg->ctx, CGRectMake(0, 0, pic->width, pic->height), pic->image);
 
-    CGContextRestoreGState(cg->ctx);
+    cg_end_draw_state(cg);
+}
+
+void rdt_picture_draw_dup(RdtVector* vec, RdtPicture* pic,
+                          uint8_t opacity, const RdtMatrix* transform) {
+    rdt_picture_draw(vec, pic, opacity, transform);
+}
+
+bool rdt_picture_get_transform(RdtPicture* pic, RdtMatrix* out) {
+    if (!pic || !out || !pic->has_transform) return false;
+    *out = pic->transform;
+    return true;
+}
+
+void rdt_picture_set_transform(RdtPicture* pic, const RdtMatrix* m) {
+    if (!pic || !m) return;
+    pic->transform = *m;
+    pic->has_transform = true;
 }
 
 void rdt_picture_free(RdtPicture* pic) {
     if (!pic) return;
     if (pic->image) CGImageRelease(pic->image);
+    if (pic->paint) tvg_paint_unref(pic->paint, true);
+    if (pic->svg) cg_svg_shared_release(pic->svg);
+    if (pic->source_path) mem_free(pic->source_path);
     free(pic);
+}
+
+void rdt_engine_init(int threads) {
+    tvg_engine_init((unsigned)threads);
+}
+
+void rdt_engine_term(void) {
+    tvg_engine_term();
+}
+
+void rdt_font_load(const char* font_path) {
+    (void)font_path;
+}
+
+void rdt_set_font_context(FontContext* ctx) {
+    g_picture_font_ctx = ctx;
+}
+
+RdtPicture* rdt_picture_take_tvg_paint(Tvg_Paint paint, float w, float h) {
+    if (!paint) return nullptr;
+    RdtPicture* pic = (RdtPicture*)calloc(1, sizeof(RdtPicture));
+    if (!pic) {
+        tvg_paint_unref(paint, true);
+        return nullptr;
+    }
+    pic->kind = RdtPicture::KIND_TVG_PAINT;
+    pic->paint = paint;
+    pic->width = w;
+    pic->height = h;
+    return pic;
 }
 
 #endif // __APPLE__

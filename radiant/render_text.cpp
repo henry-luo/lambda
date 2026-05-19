@@ -569,6 +569,7 @@ bool render_text_paint_blurred_shadows(RenderContext* rdcon, unsigned char* str,
         if (rdcon->dl) {
             dl_box_blur_region(rdcon->dl, bx, by, bw, bh, max_shadow_blur, 0, nullptr);
         } else {
+            render_painter_flush_vector_batch(rdcon);
             box_blur_region(&rdcon->scratch, rdcon->ui_context->surface, bx, by, bw, bh, max_shadow_blur);
         }
         log_debug("[TEXT-SHADOW] Applied blur radius=%.1f to region (%d,%d,%d,%d) dl=%d",

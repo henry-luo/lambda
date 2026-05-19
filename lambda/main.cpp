@@ -156,6 +156,11 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
 // JPEG rendering function from radiant (available since radiant sources are included in lambda.exe)
 int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int quality, int viewport_width = 1200, int viewport_height = 800, float scale = 1.0f, float pixel_ratio = 1.0f);
 
+// Unified Radiant output-target rendering function
+int render_html_to_output_target(const char* html_file, const char* output_file,
+                                 int viewport_width, int viewport_height,
+                                 float scale, float pixel_ratio, int jpeg_quality);
+
 // Batch render command: reads jobs from stdin, shares one UiContext for efficiency
 int cmd_render_batch(int argc, char** argv);
 
@@ -2397,15 +2402,15 @@ int main(int argc, char *argv[]) {
                 }
                 write_text_file(temp_svg, svg_str->chars);
 
-                // Render the SVG using the appropriate renderer
                 int exit_code = 0;
-                if (output_ext && strcmp(output_ext, ".pdf") == 0) {
-                    exit_code = render_html_to_pdf(temp_svg, output_file, 0, 0, render_scale);
-                } else if (output_ext && strcmp(output_ext, ".png") == 0) {
-                    exit_code = render_html_to_png(temp_svg, output_file, 0, 0, render_scale, pixel_ratio);
-                } else if (output_ext && (strcmp(output_ext, ".jpg") == 0 || strcmp(output_ext, ".jpeg") == 0)) {
-                    exit_code = render_html_to_jpeg(temp_svg, output_file, 85, 0, 0, render_scale, pixel_ratio);
-                } else {
+                if (output_ext && (strcmp(output_ext, ".pdf") == 0 ||
+                                   strcmp(output_ext, ".png") == 0 ||
+                                   strcmp(output_ext, ".jpg") == 0 ||
+                                   strcmp(output_ext, ".jpeg") == 0)) {
+                    exit_code = render_html_to_output_target(temp_svg, output_file,
+                        0, 0, render_scale, pixel_ratio, 85);
+                }
+                else {
                     printf("Error: Unsupported output format for graph rendering: %s\n", output_ext);
                     exit_code = 1;
                 }
@@ -2466,31 +2471,16 @@ int main(int argc, char *argv[]) {
             }
             log_finish();
             return 1;
-        } else if (ext && strcmp(ext, ".pdf") == 0) {
-            // Call the PDF rendering function (pass 0 for auto-sizing)
-            log_debug("Detected PDF output format");
-            int pdf_width = viewport_width;   // 0 means auto-size
-            int pdf_height = viewport_height; // 0 means auto-size
-            exit_code = render_html_to_pdf(html_file, output_file, pdf_width, pdf_height, render_scale);
-        } else if (ext && strcmp(ext, ".svg") == 0) {
-            // Call the SVG rendering function (pass 0 for auto-sizing)
-            log_debug("Detected SVG output format");
-            int svg_width = viewport_width;   // 0 means auto-size
-            int svg_height = viewport_height; // 0 means auto-size
-            exit_code = render_html_to_svg(html_file, output_file, svg_width, svg_height, render_scale);
-        } else if (ext && strcmp(ext, ".png") == 0) {
-            // Call the PNG rendering function (pass 0 for auto-sizing)
-            log_debug("Detected PNG output format");
-            int png_width = viewport_width;   // 0 means auto-size
-            int png_height = viewport_height; // 0 means auto-size
-            exit_code = render_html_to_png(html_file, output_file, png_width, png_height, render_scale, pixel_ratio);
-        } else if (ext && (strcmp(ext, ".jpg") == 0 || strcmp(ext, ".jpeg") == 0)) {
-            // Call the JPEG rendering function with default quality of 85 (pass 0 for auto-sizing)
-            log_debug("Detected JPEG output format");
-            int jpeg_width = viewport_width;   // 0 means auto-size
-            int jpeg_height = viewport_height; // 0 means auto-size
-            exit_code = render_html_to_jpeg(html_file, output_file, 85, jpeg_width, jpeg_height, render_scale, pixel_ratio);
-        } else {
+        } else if (ext && (strcmp(ext, ".pdf") == 0 ||
+                           strcmp(ext, ".svg") == 0 ||
+                           strcmp(ext, ".png") == 0 ||
+                           strcmp(ext, ".jpg") == 0 ||
+                           strcmp(ext, ".jpeg") == 0)) {
+            log_debug("Detected render output format: %s", ext);
+            exit_code = render_html_to_output_target(html_file, output_file,
+                viewport_width, viewport_height, render_scale, pixel_ratio, 85);
+        }
+        else {
             printf("Error: Unsupported output format. Use .svg, .pdf, .png, .jpg, or .jpeg extension\n");
             printf("Supported formats: .svg (SVG), .pdf (PDF), .png (PNG), .jpg/.jpeg (JPEG)\n");
             if (render_pdf_temp_input) {

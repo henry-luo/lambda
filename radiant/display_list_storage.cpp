@@ -193,6 +193,10 @@ int dl_begin_element(DisplayList* dl, uint32_t view_id,
     dl_set_item_rect_bounds(item, x, y, w, h);
     item->element_marker.view_id = view_id;
     item->element_marker.matching_index = -1;
+    item->element_marker.marker_x = x;
+    item->element_marker.marker_y = y;
+    item->element_marker.marker_w = w;
+    item->element_marker.marker_h = h;
     return index;
 }
 
@@ -226,4 +230,8 @@ void dl_end_element(DisplayList* dl, int begin_index) {
     }
     begin->element_marker.matching_index = end_index;
     end->element_marker.view_id = begin->element_marker.view_id;
+    end->element_marker.marker_x = begin->element_marker.marker_x;
+    end->element_marker.marker_y = begin->element_marker.marker_y;
+    end->element_marker.marker_w = begin->element_marker.marker_w;
+    end->element_marker.marker_h = begin->element_marker.marker_h;
 }

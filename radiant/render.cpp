@@ -95,39 +95,13 @@ static bool render_view_subtree_contains_id(View* view, uint32_t id) {
     return false;
 }
 
-static bool render_dirty_rect_intersects_marker(RenderContext* rdcon,
-                                                const DirtyRect* dirty,
-                                                Rect marker_rect) {
-    if (!rdcon || !dirty) return false;
-    float s = rdcon->scale > 0 ? rdcon->scale : 1.0f;
-    Bound dirty_bound = {
-        dirty->x * s,
-        dirty->y * s,
-        (dirty->x + dirty->width) * s,
-        (dirty->y + dirty->height) * s
-    };
-    return render_geometry_bounds_intersect(
-        render_geometry_rect_to_bound(marker_rect), dirty_bound);
-}
-
-static bool render_retained_fragment_bounds_match(Bound cached, Rect current) {
-    float left = current.x;
-    float top = current.y;
-    float right = current.x + current.width;
-    float bottom = current.y + current.height;
-    float tolerance = 0.5f;
-    return fabsf(cached.left - left) <= tolerance &&
-           fabsf(cached.top - top) <= tolerance &&
-           fabsf(cached.right - right) <= tolerance &&
-           fabsf(cached.bottom - bottom) <= tolerance;
+static bool render_retained_dirty_source_inside(void* userdata, uint32_t source_view_id) {
+    return render_view_subtree_contains_id((View*)userdata, source_view_id);
 }
 
 bool render_block_try_retained_fragment(RenderContext* rdcon, ViewBlock* block) {
     if (!rdcon || !block || !rdcon->dl || !rdcon->retained_dl_cache ||
         !rdcon->has_dirty_union || rdcon->element_marker_suppression_depth > 0) {
-        return false;
-    }
-    if (rdcon->has_transform || (block->transform && block->transform->functions)) {
         return false;
     }
 
@@ -136,11 +110,17 @@ bool render_block_try_retained_fragment(RenderContext* rdcon, ViewBlock* block) 
         retained_dl_cache_get(rdcon->retained_dl_cache, view_id);
     if (!fragment) return false;
     uint64_t current_video_generation = 0;
+    uint64_t current_glyph_generation = 0;
     if (rdcon->ui_context && rdcon->ui_context->document &&
         rdcon->ui_context->document->state) {
         current_video_generation = rdcon->ui_context->document->state->video_frame_generation;
     }
-    if (!retained_dl_fragment_resources_valid(fragment, current_video_generation)) {
+    if (rdcon->ui_context) {
+        current_glyph_generation =
+            font_context_glyph_cache_generation(rdcon->ui_context->font_ctx);
+    }
+    if (!retained_dl_fragment_resources_valid(fragment, current_video_generation,
+                                             current_glyph_generation)) {
         return false;
     }
 
@@ -149,25 +129,15 @@ bool render_block_try_retained_fragment(RenderContext* rdcon, ViewBlock* block) 
     Rect marker_rect = render_geometry_expand_rect(
         render_geometry_block_border_rect(&rdcon->block, block, s),
         visual_overflow);
-    if (!render_retained_fragment_bounds_match(
-            retained_dl_fragment_bounds(fragment), marker_rect)) {
-        return false;
-    }
-
-    DirtyTracker* tracker = rdcon->dirty_tracker;
-    if (!tracker || tracker->full_repaint || !tracker->dirty_list) return false;
-    for (DirtyRect* dirty = tracker->dirty_list; dirty; dirty = dirty->next) {
-        if (!render_dirty_rect_intersects_marker(rdcon, dirty, marker_rect)) {
-            continue;
-        }
-        if (dirty->source_view_id == 0 ||
-            render_view_subtree_contains_id(static_cast<View*>(block),
-                                            dirty->source_view_id)) {
-            return false;
-        }
-    }
-
-    if (!retained_dl_append_fragment(rdcon->dl, fragment)) {
+    Bound marker_bound = {
+        marker_rect.x,
+        marker_rect.y,
+        marker_rect.x + marker_rect.width,
+        marker_rect.y + marker_rect.height
+    };
+    if (!retained_dl_append_fragment_for_dirty(
+            rdcon->dl, fragment, marker_bound, rdcon->dirty_tracker, rdcon->scale,
+            render_retained_dirty_source_inside, static_cast<View*>(block))) {
         return false;
     }
     log_debug("[RETAINED_DL] reused view %u (%d items)",

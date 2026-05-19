@@ -78,6 +78,7 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
                 // record save/apply pair — replay handles pixel ops
                 dl_save_backdrop(rdcon->dl, blend_x0, blend_y0, blend_w, blend_h);
             } else if (surface && surface->pixels) {
+                render_painter_flush_vector_batch(rdcon);
                 saved_pixels = (uint32_t*)mem_alloc((size_t)blend_w * blend_h * sizeof(uint32_t), MEM_CAT_RENDER);
                 if (saved_pixels) {
                     render_composite_copy_backdrop(surface, saved_pixels,
@@ -128,6 +129,7 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
             log_debug("[BLEND] Recorded DL background-blend-mode=%d for %dx%d region",
                       bg->blend_mode, blend_w, blend_h);
         } else if (saved_pixels) {
+            render_painter_flush_vector_batch(rdcon);
             render_composite_apply_blend(surface, saved_pixels,
                 blend_x0, blend_y0, blend_w, blend_h, bg->blend_mode);
             mem_free(saved_pixels);
@@ -1094,6 +1096,7 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
                                 exclude_type, exclude_params,
                                 clip_type, clip_params);
             } else if (rdcon->ui_context->surface) {
+                render_painter_flush_vector_batch(rdcon);
                 render_outer_shadow_blur_composite(
                     &rdcon->scratch, rdcon->ui_context->surface,
                     shadow_x, shadow_y, shadow_w, shadow_h,
@@ -1384,6 +1387,7 @@ void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
             if (rdcon->dl) {
                 dl_box_blur_inset(rdcon->dl, br_x, br_y, br_w, br_h, pad, blur_px, bg_pixel);
             } else if (rdcon->ui_context->surface) {
+                render_painter_flush_vector_batch(rdcon);
                 box_blur_region_inset(&rdcon->scratch, rdcon->ui_context->surface,
                                       br_x, br_y, br_w, br_h, pad, blur_px, bg_pixel);
             }

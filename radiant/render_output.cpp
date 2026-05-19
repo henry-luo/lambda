@@ -24,6 +24,16 @@
 void render_block_view(RenderContext* rdcon, ViewBlock* view_block);
 void render_image_view(RenderContext* rdcon, ViewBlock* view);
 void render_video_frames(DisplayList* dl, ImageSurface* surface, DocState* rstate, UiContext* uicon);
+int render_html_to_png(const char* html_file, const char* png_file,
+                       int viewport_width, int viewport_height,
+                       float scale, float pixel_ratio);
+int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int quality,
+                        int viewport_width, int viewport_height,
+                        float scale, float pixel_ratio);
+int render_html_to_pdf(const char* html_file, const char* pdf_file,
+                       int viewport_width, int viewport_height, float scale);
+int render_html_to_svg(const char* html_file, const char* svg_file,
+                       int viewport_width, int viewport_height, float scale);
 
 static RenderPool* g_render_pool = nullptr;
 static pthread_once_t g_render_pool_once = PTHREAD_ONCE_INIT;
@@ -53,6 +63,40 @@ static int render_output_thread_count() {
         cached = 0;
     }
     return cached;
+}
+
+RenderOutputKind render_output_kind_from_file(const char* output_file) {
+    if (!output_file) {
+        return RENDER_OUTPUT_SCREEN;
+    }
+
+    const char* ext = strrchr(output_file, '.');
+    if (!ext) {
+        return RENDER_OUTPUT_PNG;
+    }
+    if (strcmp(ext, ".jpg") == 0 || strcmp(ext, ".jpeg") == 0) {
+        return RENDER_OUTPUT_JPEG;
+    }
+    if (strcmp(ext, ".pdf") == 0) {
+        return RENDER_OUTPUT_PDF;
+    }
+    if (strcmp(ext, ".svg") == 0) {
+        return RENDER_OUTPUT_SVG;
+    }
+    return RENDER_OUTPUT_PNG;
+}
+
+void render_output_target_init(RenderOutputTarget* target, RenderOutputKind kind,
+                               const char* output_file) {
+    if (!target) {
+        return;
+    }
+    memset(target, 0, sizeof(RenderOutputTarget));
+    target->kind = kind;
+    target->output_file = output_file;
+    target->jpeg_quality = 85;
+    target->scale = 1.0f;
+    target->pixel_ratio = 1.0f;
 }
 
 void render_output_init_context(RenderContext* rdcon, UiContext* uicon, ViewTree* view_tree,
@@ -179,6 +223,8 @@ void render_output_render_view_tree(RenderContext* rdcon, ViewTree* view_tree) {
         return;
     }
 
+    render_painter_begin_vector_batch(rdcon);
+
     View* root_view = view_tree->root;
     if (root_view && root_view->view_type == RDT_VIEW_BLOCK) {
         log_debug("Render root view");
@@ -200,6 +246,8 @@ void render_output_render_view_tree(RenderContext* rdcon, ViewTree* view_tree) {
     else {
         log_error("Invalid root view");
     }
+
+    render_painter_end_vector_batch(rdcon);
 }
 
 RenderOutputReplayResult render_output_replay_display_list(RenderContext* rdcon,
@@ -264,9 +312,15 @@ void render_output_save_surface(ImageSurface* surface, const char* output_file) 
     }
 }
 
-void render_output_render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file) {
+static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_tree,
+                                              RenderOutputTarget* target) {
     using namespace std::chrono;
     auto t_start = high_resolution_clock::now();
+
+    if (!uicon || !view_tree || !target) {
+        log_error("render_output_render_raster_target: invalid render job");
+        return 1;
+    }
 
     RenderProfiler profiler;
     render_profiler_reset(&profiler);
@@ -336,10 +390,17 @@ void render_output_render_html_doc(UiContext* uicon, ViewTree* view_tree, const 
         duration<double, std::milli>(t_sync - t_start).count(), item_count, selective,
         replay_result.tiled, replay_result.tile_count, replay_result.thread_count);
 
-    render_output_save_surface(rdcon.ui_context->surface, output_file);
+    if (target->kind == RENDER_OUTPUT_JPEG && target->output_file) {
+        save_surface_to_jpeg(rdcon.ui_context->surface, target->output_file,
+                             target->jpeg_quality > 0 ? target->jpeg_quality : 85);
+    } else if (target->kind == RENDER_OUTPUT_PNG && target->output_file) {
+        save_surface_to_png(rdcon.ui_context->surface, target->output_file);
+    } else {
+        render_output_save_surface(rdcon.ui_context->surface, target->output_file);
+    }
 
     auto t_save = high_resolution_clock::now();
-    if (output_file) {
+    if (target->output_file) {
         log_info("[TIMING] save_to_file: %.1fms", duration<double, std::milli>(t_save - t_sync).count());
     }
 
@@ -352,6 +413,94 @@ void render_output_render_html_doc(UiContext* uicon, ViewTree* view_tree, const 
     auto t_end = high_resolution_clock::now();
     log_info("[TIMING] render_html_doc total: %.1fms%s",
         duration<double, std::milli>(t_end - t_start).count(), selective ? " (selective)" : "");
+    return 0;
+}
+
+int render_output_render_view_tree_to_target(UiContext* uicon, ViewTree* view_tree,
+                                             RenderOutputTarget* target) {
+    if (!target) {
+        log_error("render_output_render_view_tree_to_target: missing output target");
+        return 1;
+    }
+
+    switch (target->kind) {
+        case RENDER_OUTPUT_SCREEN:
+        case RENDER_OUTPUT_PNG:
+        case RENDER_OUTPUT_JPEG:
+            return render_output_render_raster_target(uicon, view_tree, target);
+        case RENDER_OUTPUT_TILED_PNG:
+            render_output_render_tiled_png(uicon, view_tree, target->output_file,
+                                           target->width, target->height);
+            return 0;
+        case RENDER_OUTPUT_PDF:
+        case RENDER_OUTPUT_SVG:
+            log_error("render_output_render_view_tree_to_target: PDF/SVG targets require file-level export");
+            return 1;
+    }
+
+    log_error("render_output_render_view_tree_to_target: unknown output target kind %d", target->kind);
+    return 1;
+}
+
+int render_output_render_html_file_to_target(const char* html_file,
+                                             RenderOutputTarget* target) {
+    if (!html_file || !target || !target->output_file) {
+        log_error("render_output_render_html_file_to_target: invalid file render job");
+        return 1;
+    }
+
+    float scale = target->scale > 0 ? target->scale : 1.0f;
+    float pixel_ratio = target->pixel_ratio > 0 ? target->pixel_ratio : 1.0f;
+    int viewport_width = target->viewport_width;
+    int viewport_height = target->viewport_height;
+
+    switch (target->kind) {
+        case RENDER_OUTPUT_PDF:
+            return render_html_to_pdf(html_file, target->output_file,
+                                      viewport_width, viewport_height, scale);
+        case RENDER_OUTPUT_SVG:
+            return render_html_to_svg(html_file, target->output_file,
+                                      viewport_width, viewport_height, scale);
+        case RENDER_OUTPUT_PNG:
+        case RENDER_OUTPUT_TILED_PNG:
+            return render_html_to_png(html_file, target->output_file,
+                                      viewport_width, viewport_height, scale, pixel_ratio);
+        case RENDER_OUTPUT_JPEG:
+            return render_html_to_jpeg(html_file, target->output_file,
+                                       target->jpeg_quality > 0 ? target->jpeg_quality : 85,
+                                       viewport_width, viewport_height, scale, pixel_ratio);
+        case RENDER_OUTPUT_SCREEN:
+            log_error("render_output_render_html_file_to_target: screen target needs a UiContext");
+            return 1;
+    }
+
+    log_error("render_output_render_html_file_to_target: unknown output target kind %d", target->kind);
+    return 1;
+}
+
+int render_html_to_output_target(const char* html_file, const char* output_file,
+                                 int viewport_width, int viewport_height,
+                                 float scale, float pixel_ratio,
+                                 int jpeg_quality) {
+    RenderOutputTarget target;
+    render_output_target_init(&target, render_output_kind_from_file(output_file), output_file);
+    target.viewport_width = viewport_width;
+    target.viewport_height = viewport_height;
+    target.scale = scale;
+    target.pixel_ratio = pixel_ratio;
+    target.jpeg_quality = jpeg_quality > 0 ? jpeg_quality : 85;
+    return render_output_render_html_file_to_target(html_file, &target);
+}
+
+void render_output_render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file) {
+    RenderOutputTarget target;
+    render_output_target_init(&target, render_output_kind_from_file(output_file), output_file);
+    target.surface = uicon ? uicon->surface : nullptr;
+    if (target.kind == RENDER_OUTPUT_PDF || target.kind == RENDER_OUTPUT_SVG) {
+        log_error("render_output_render_html_doc: PDF/SVG require render_output_render_html_file_to_target");
+        return;
+    }
+    render_output_render_view_tree_to_target(uicon, view_tree, &target);
 }
 
 /**

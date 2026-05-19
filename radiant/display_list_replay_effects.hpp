@@ -2,10 +2,12 @@
 
 #include "display_list.h"
 #include "display_list_replay_state.hpp"
+#include "render_backend_caps.hpp"
 
 void dl_replay_apply_opacity(ImageSurface* surface, const DlApplyOpacity* opacity);
 void dl_replay_apply_filter(ScratchArena* scratch,
                             ImageSurface* surface,
+                            const RenderBackendCaps* caps,
                             const DisplayReplayDirtyClip* dirty_clip,
                             const DlApplyFilter* filter);
 void dl_replay_box_blur_region(ScratchArena* scratch,

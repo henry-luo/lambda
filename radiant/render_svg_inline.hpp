@@ -147,7 +147,8 @@ void render_svg_to_vec(RdtVector* vec, Element* svg_element,
                       DisplayList* dl = nullptr,
                       const Color* initial_current_color = nullptr,
                       const Color* initial_fill_color = nullptr,
-                      const char* source_path = nullptr);
+                      const char* source_path = nullptr,
+                      float initial_opacity = 1.0f);
 
 /**
  * Render inline SVG element in document context

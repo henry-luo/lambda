@@ -209,6 +209,7 @@ void render_webview_layer_content(RenderContext* rdcon, ViewBlock* view) {
                                      wv->surface ? wv->surface->generation : 0);
     } else {
         // fallback: direct blit (single-threaded path)
+        render_painter_flush_vector_batch(rdcon);
         Rect rect = { dst_x, dst_y, dst_w, dst_h };
         RasterPaintContext raster = {
             rdcon->ui_context->surface,
