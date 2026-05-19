@@ -1492,6 +1492,10 @@ void jm_scan_ctor_props(JsFuncCollected* fc, JsAstNode* body) {
     JsBlockNode* blk = (JsBlockNode*)body;
     JsAstNode* stmt = blk->statements;
     while (stmt) {
+        if (stmt->node_type == JS_AST_NODE_RETURN_STATEMENT ||
+            stmt->node_type == JS_AST_NODE_THROW_STATEMENT) {
+            break;
+        }
         if (stmt->node_type == JS_AST_NODE_EXPRESSION_STATEMENT) {
             JsExpressionStatementNode* es = (JsExpressionStatementNode*)stmt;
             if (es->expression && es->expression->node_type == JS_AST_NODE_ASSIGNMENT_EXPRESSION) {
@@ -1506,15 +1510,32 @@ void jm_scan_ctor_props(JsFuncCollected* fc, JsAstNode* body) {
                             !mem->computed && mem->property &&
                             mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
                             JsIdentifierNode* prop = (JsIdentifierNode*)mem->property;
-                            if (fc->ctor_prop_count < 16) {
-                                int idx = fc->ctor_prop_count;
+                            int idx = -1;
+                            for (int existing = 0; existing < fc->ctor_prop_count; existing++) {
+                                if (fc->ctor_prop_lens[existing] == (int)prop->name->len &&
+                                    strncmp(fc->ctor_prop_ptrs[existing], prop->name->chars,
+                                            (int)prop->name->len) == 0) {
+                                    idx = existing;
+                                    break;
+                                }
+                            }
+                            if (idx >= 0 || fc->ctor_prop_count < 16) {
+                                bool is_new_prop = idx < 0;
+                                if (is_new_prop) idx = fc->ctor_prop_count;
                                 fc->ctor_prop_ptrs[idx] = prop->name->chars;
                                 fc->ctor_prop_lens[idx] = (int)prop->name->len;
                                 // detect typed array type from RHS
-                                fc->ctor_prop_ta_types[idx] = jm_detect_typed_array_new(asgn->right);
+                                int ta_type = jm_detect_typed_array_new(asgn->right);
+                                if (ta_type >= 0 || is_new_prop) {
+                                    fc->ctor_prop_ta_types[idx] = ta_type;
+                                }
                                 // P1: detect field type from init expression
-                                fc->ctor_prop_types[idx] = jm_detect_ctor_field_type(asgn->right);
+                                TypeId detected_type = jm_detect_ctor_field_type(asgn->right);
+                                if (detected_type != LMD_TYPE_NULL || is_new_prop) {
+                                    fc->ctor_prop_types[idx] = detected_type;
+                                }
                                 // P4b: detect if RHS is a constructor parameter
+                                if (is_new_prop) fc->ctor_prop_param_idx[idx] = -1;
                                 if (asgn->right && asgn->right->node_type == JS_AST_NODE_IDENTIFIER) {
                                     JsIdentifierNode* rhs_id = (JsIdentifierNode*)asgn->right;
                                     JsAstNode* param = fc->node->params;
@@ -1537,8 +1558,10 @@ void jm_scan_ctor_props(JsFuncCollected* fc, JsAstNode* body) {
                                             break;
                                         }
                                     }
+                                } else if (!is_new_prop && detected_type != LMD_TYPE_NULL) {
+                                    fc->ctor_prop_param_idx[idx] = -1;
                                 }
-                                fc->ctor_prop_count++;
+                                if (is_new_prop) fc->ctor_prop_count++;
                             }
                         }
                     }
