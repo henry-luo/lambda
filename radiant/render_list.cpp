@@ -56,7 +56,7 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
             float ix = x + width - font_size - img_w / 2.0f;
             float iy = y + marker->height / 2.0f - img_h / 2.0f;
             rc_draw_image(rdcon, (uint32_t*)img->pixels, img->width, img->height,
-                          img->width, ix, iy, img_w, img_h, 255, nullptr);
+                          img->width, ix, iy, img_w, img_h, 255, nullptr, img);
             log_debug("[MARKER RENDER] Drew list-style-image at (%.1f, %.1f) size %.0fx%.0f",
                       ix, iy, img_w, img_h);
             return;

@@ -216,11 +216,14 @@ void dl_fill_radial_gradient(DisplayList* dl, RdtPath* path,
 void dl_draw_image(DisplayList* dl, const uint32_t* pixels,
                    int src_w, int src_h, int src_stride,
                    float dst_x, float dst_y, float dst_w, float dst_h,
-                   uint8_t opacity, const RdtMatrix* transform) {
+                   uint8_t opacity, const RdtMatrix* transform,
+                   void* resource_owner, uint64_t resource_generation) {
     DisplayItem* item = dl_alloc_item(dl);
     item->op = DL_DRAW_IMAGE;
     dl_record_set_rect_bounds(item, dst_x, dst_y, dst_w, dst_h, transform, 1.0f);
     item->draw_image.pixels = pixels;
+    item->draw_image.resource_owner = resource_owner;
+    item->draw_image.resource_generation = resource_generation;
     item->draw_image.src_w = src_w;
     item->draw_image.src_h = src_h;
     item->draw_image.src_stride = src_stride;
@@ -235,7 +238,7 @@ void dl_draw_image(DisplayList* dl, const uint32_t* pixels,
 
 void dl_draw_glyph(DisplayList* dl, GlyphBitmap* bitmap, int x, int y,
                    Color color, bool is_color_emoji, const Bound* clip,
-                   const RdtMatrix* transform) {
+                   const RdtMatrix* transform, uint64_t resource_generation) {
     DisplayItem* item = dl_alloc_item(dl);
     item->op = DL_DRAW_GLYPH;
     dl_record_set_rect_bounds(item, (float)x, (float)y,
@@ -243,6 +246,7 @@ void dl_draw_glyph(DisplayList* dl, GlyphBitmap* bitmap, int x, int y,
                               transform, 1.0f);
     dl_record_intersect_bounds_with_clip(item, clip);
     item->draw_glyph.bitmap = *bitmap;  // copy descriptor, buffer pointer borrowed
+    item->draw_glyph.resource_generation = resource_generation;
     item->draw_glyph.x = x;
     item->draw_glyph.y = y;
     item->draw_glyph.color = color;

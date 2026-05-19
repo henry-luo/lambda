@@ -1840,6 +1840,8 @@ void doc_state_request_repaint(DocState* state) {
 void doc_state_mark_video_frame_pending(DocState* state) {
     if (!state) return;
     state->video_frame_pending = true;
+    state->video_frame_generation++;
+    if (state->video_frame_generation == 0) state->video_frame_generation = 1;
 }
 
 void doc_state_clear_video_frame_pending(DocState* state) {

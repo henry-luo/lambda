@@ -346,6 +346,58 @@ int retained_dl_fragment_item_count(const RetainedDisplayListFragment* fragment)
     return fragment->list.count;
 }
 
+bool retained_dl_fragment_resources_valid(const RetainedDisplayListFragment* fragment,
+                                          uint64_t current_video_generation) {
+    if (!fragment) return false;
+    const DisplayList* list = &fragment->list;
+    for (int i = 0; i < list->count; i++) {
+        const DisplayItem* item = &list->items[i];
+        switch (item->op) {
+            case DL_DRAW_IMAGE: {
+                if (!item->draw_image.pixels) break;
+                ImageSurface* owner = (ImageSurface*)item->draw_image.resource_owner;
+                if (!owner || item->draw_image.resource_generation == 0 ||
+                    owner->generation != item->draw_image.resource_generation) {
+                    return false;
+                }
+                break;
+            }
+            case DL_DRAW_GLYPH:
+                // Glyph bitmap buffers are borrowed from the font cache. Until
+                // the font cache exposes an eviction generation, text fragments
+                // must be re-recorded instead of retained across frames.
+                if (item->draw_glyph.bitmap.buffer) return false;
+                break;
+            case DL_BLIT_SURFACE_SCALED: {
+                ImageSurface* src = (ImageSurface*)item->blit_surface_scaled.src_surface;
+                if (!src || item->blit_surface_scaled.src_generation == 0 ||
+                    src->generation != item->blit_surface_scaled.src_generation) {
+                    return false;
+                }
+                break;
+            }
+            case DL_VIDEO_PLACEHOLDER:
+                if (item->video_placeholder.video &&
+                    (item->video_placeholder.video_generation == 0 ||
+                     item->video_placeholder.video_generation != current_video_generation)) {
+                    return false;
+                }
+                break;
+            case DL_WEBVIEW_LAYER_PLACEHOLDER: {
+                ImageSurface* surface = (ImageSurface*)item->webview_layer_placeholder.surface;
+                if (!surface || item->webview_layer_placeholder.surface_generation == 0 ||
+                    surface->generation != item->webview_layer_placeholder.surface_generation) {
+                    return false;
+                }
+                break;
+            }
+            default:
+                break;
+        }
+    }
+    return true;
+}
+
 bool retained_dl_append_fragment(DisplayList* dst,
                                  const RetainedDisplayListFragment* fragment) {
     if (!dst || !fragment || fragment->list.count <= 0) return false;

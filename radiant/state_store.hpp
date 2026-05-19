@@ -328,6 +328,7 @@ typedef struct DocState {
     // Video playback
     bool has_active_video;         // true if any <video> is playing
     bool video_frame_pending;      // true when playback produced a frame for cached blit
+    uint64_t video_frame_generation; // incremented when video frame content changes
 
     // Cached video placements for video-only dirty optimisation
     // Saved after each full render; reused to blit video frames without DL rebuild

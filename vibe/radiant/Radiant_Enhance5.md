@@ -223,8 +223,14 @@ Completed:
   - every intersecting dirty rect has a known source view id
   - no intersecting dirty source is inside the reused subtree
 - Image, video, and webview layer paths attempt retained reuse before re-recording their block/payload marker range.
+- Added resource-generation invalidation for borrowed retained payloads:
+  - `ImageSurface::generation` now increments when image pixels are decoded, SVG fallback pixels are rasterized, GIF/Lottie animation frames swap or clear their pixel buffers, and webview layer snapshots refresh their surface.
+  - Display-list image, scaled-surface blit, video placeholder, and webview placeholder commands record the generation observed at capture time.
+  - Retained fragment reuse now rejects stale borrowed image/surface/video/webview payloads before appending the cached fragment.
+  - Glyph bitmap buffers remain conservatively non-retainable until the font cache exposes a generation/eviction contract.
 - Added `test_retained_display_list_gtest.cpp` plus a small test-only stub file so retained fragment capture/append can be tested without linking the full ThorVG/SVG stack.
 - Added the retained display-list gtest to `build_lambda_config.json` and regenerated the generated Premake files through `make build-test`.
+- Extended retained display-list tests to cover stale borrowed image pixels, scaled surface blits, video generations, webview surface generations, and borrowed glyph buffers.
 
 Validation:
 
@@ -234,8 +240,8 @@ Validation:
 Remaining limits:
 
 - Reuse is intentionally conservative and skips transformed subtrees, full repaints, unknown dirty sources, and any dirty source inside the subtree.
-- The cache is currently keyed by view id and bounds. It does not yet track per-resource invalidation generations for borrowed image/glyph/video/webview payloads.
-- Volatile overlays such as caret/selection still need more focused fixtures before broad text-subtree reuse should be relaxed.
+- The cache is currently keyed by view id and bounds, plus generation checks for borrowed image/surface/video/webview payloads.
+- Volatile text fragments remain conservative: glyph buffers are not reused across frames yet, and caret/selection/preedit overlays still need more focused dirty-region fixtures before broad text-subtree reuse should be relaxed.
 
 ## Current Structure Assessment
 
@@ -258,7 +264,7 @@ Remaining limits:
 - Paint state save/restore is mostly manual. `render_block_view()` has many local saved values and cleanup branches for transform, clip-path, overflow clip, filter backdrop, opacity backdrop, and mix-blend backdrop.
 - Effects are not a first-class subsystem. Opacity, filter, blend, shadow, and backdrop save/composite operations are scattered across `render.cpp`, `render_background.cpp`, `render_filter.cpp`, and `display_list.cpp`.
 - Text painting now lives in `render_text.cpp`, but it still combines too many stages in one function: run walking, font setup, glyph loading, glyph drawing, selection background, composition bounds, text shadow, skip-ink gap collection, text decorations, and profiling.
-- Display-list recording, storage, resource ownership, command bounds, and replay are still spread across several files, but the highest-risk pieces now have explicit homes: storage/lifecycle, bounds, record slices, replay slices, and retained fragment capture/reuse. Broad retained reuse still needs more validation around borrowed resource invalidation and volatile overlays.
+- Display-list recording, storage, resource ownership, command bounds, and replay are still spread across several files, but the highest-risk pieces now have explicit homes: storage/lifecycle, bounds, record slices, replay slices, retained fragment capture/reuse, and borrowed resource-generation validation. Broad retained reuse still needs more validation around volatile overlays.
 - Direct-pixel operations and vector operations are mixed at call sites. Selection fills, glyph blits, image blits, opacity, blend, and filter paths need consistent clipping and transform behavior.
 - `render_html_doc()` and `render_html_doc_tiled()` are now thin public wrappers, but normal/tiled output behavior still needs a clearer target abstraction before adding PDF/SVG/screen-specific orchestration.
 
@@ -856,7 +862,7 @@ Expected benefit: fewer temporary buffers and less duplicated pixel compositing 
 - Use existing `DL_BEGIN_ELEMENT` and `DL_END_ELEMENT` markers to cache unchanged element subtrees. Done for conservative reuse: markers are recorded, matched, bounded by subtree command union, captured into `RetainedDisplayListCache`, and used for dirty/tile replay skipping plus cross-frame fragment append.
 - Attach retained display-list fragments to stable view identity or dirty tracker keys. Done initially by stable view id, with dirty rects carrying optional `source_view_id` so reuse can reject dirty sources inside the subtree.
 - Re-record only dirty subtrees and volatile overlays. Started: reuse is enabled only when intersecting dirty sources are known and outside the subtree; volatile/unknown/full-repaint cases fall back to normal recording.
-- Keep borrowed resource lifetime explicit before enabling broad retained reuse. Started: owned display-list payloads are deep-copied, while image/glyph/filter/video/webview payloads stay documented borrowed references. Resource-generation invalidation is still needed before relaxing the current safety gates.
+- Keep borrowed resource lifetime explicit before enabling broad retained reuse. Started: owned display-list payloads are deep-copied, image/surface/video/webview payloads carry generation checks, and glyph/filter payloads remain documented borrowed references with conservative reuse gates.
 
 Expected benefit: large static documents avoid full display-list rebuild on small UI changes.
 

@@ -36,6 +36,7 @@ void render_svg(ImageSurface* surface) {
     }
     surface->pixels = (uint32_t*)mem_alloc(width * height * sizeof(uint32_t), MEM_CAT_RENDER);
     if (!surface->pixels) return;
+    image_surface_bump_generation(surface);
 
     // CRITICAL: Clear the buffer to transparent before rendering SVG
     memset(surface->pixels, 0, width * height * sizeof(uint32_t));
@@ -128,7 +129,7 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view) {
             }
         } else if (img->pixels) {
             render_painter_draw_pixels_rect(rdcon, (uint32_t*)img->pixels, img->width, img->height,
-                                            img->width, &img_rect, &rdcon->block.clip, 255);
+                                            img->width, &img_rect, &rdcon->block.clip, 255, img);
         } else {
             log_debug("failed to render svg image: no vector picture or raster pixels");
         }
@@ -204,7 +205,8 @@ void render_webview_layer_content(RenderContext* rdcon, ViewBlock* view) {
     if (rdcon->dl) {
         dl_webview_layer_placeholder(rdcon->dl, wv->surface,
                                      dst_x, dst_y, dst_w, dst_h,
-                                     &rdcon->block.clip);
+                                     &rdcon->block.clip,
+                                     wv->surface ? wv->surface->generation : 0);
     } else {
         // fallback: direct blit (single-threaded path)
         Rect rect = { dst_x, dst_y, dst_w, dst_h };
@@ -236,6 +238,9 @@ void render_video_content(RenderContext* rdcon, ViewBlock* view) {
     if (rdcon->dl) {
         dl_video_placeholder(rdcon->dl, view->embed->video,
                              dst_x, dst_y, dst_w, dst_h,
-                             object_fit_flags, &rdcon->block.clip);
+                             object_fit_flags, &rdcon->block.clip,
+                             rdcon->ui_context && rdcon->ui_context->document &&
+                             rdcon->ui_context->document->state ?
+                                 rdcon->ui_context->document->state->video_frame_generation : 0);
     }
 }

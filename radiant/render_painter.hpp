@@ -31,7 +31,8 @@ void rc_fill_radial_gradient(RenderContext* rdcon, RdtPath* path,
 void rc_draw_image(RenderContext* rdcon, const uint32_t* pixels,
                    int src_w, int src_h, int src_stride,
                    float dst_x, float dst_y, float dst_w, float dst_h,
-                   uint8_t opacity, const RdtMatrix* transform);
+                   uint8_t opacity, const RdtMatrix* transform,
+                   ImageSurface* resource_owner = nullptr);
 void rc_draw_picture(RenderContext* rdcon, RdtPicture* picture,
                      uint8_t opacity, const RdtMatrix* transform);
 void rc_push_clip(RenderContext* rdcon, RdtPath* clip_path, const RdtMatrix* transform);
@@ -58,7 +59,8 @@ void render_painter_draw_picture_rect(RenderContext* rdcon, RdtPicture* picture,
 void render_painter_draw_pixels_rect(RenderContext* rdcon, const uint32_t* pixels,
                                      int src_w, int src_h, int src_stride,
                                      Rect* dst_rect, Bound* clip,
-                                     uint8_t opacity);
+                                     uint8_t opacity,
+                                     ImageSurface* resource_owner = nullptr);
 void render_painter_fill_surface_rect(RenderContext* rdcon, ImageSurface* surface,
                                       Rect* rect, uint32_t color, Bound* clip,
                                       ClipShape** clip_shapes, int clip_depth);

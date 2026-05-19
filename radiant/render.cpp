@@ -137,6 +137,14 @@ bool render_block_try_retained_fragment(RenderContext* rdcon, ViewBlock* block) 
     const RetainedDisplayListFragment* fragment =
         retained_dl_cache_get(rdcon->retained_dl_cache, view_id);
     if (!fragment) return false;
+    uint64_t current_video_generation = 0;
+    if (rdcon->ui_context && rdcon->ui_context->document &&
+        rdcon->ui_context->document->state) {
+        current_video_generation = rdcon->ui_context->document->state->video_frame_generation;
+    }
+    if (!retained_dl_fragment_resources_valid(fragment, current_video_generation)) {
+        return false;
+    }
 
     float s = rdcon->scale > 0 ? rdcon->scale : 1.0f;
     float visual_overflow = render_geometry_block_visual_overflow(block) * s;

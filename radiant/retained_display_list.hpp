@@ -16,6 +16,7 @@ const RetainedDisplayListFragment* retained_dl_cache_get(RetainedDisplayListCach
                                                          uint32_t view_id);
 Bound retained_dl_fragment_bounds(const RetainedDisplayListFragment* fragment);
 int retained_dl_fragment_item_count(const RetainedDisplayListFragment* fragment);
+bool retained_dl_fragment_resources_valid(const RetainedDisplayListFragment* fragment,
+                                          uint64_t current_video_generation);
 bool retained_dl_append_fragment(DisplayList* dst,
                                  const RetainedDisplayListFragment* fragment);
-
