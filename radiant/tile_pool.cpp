@@ -5,6 +5,7 @@
 // ==========================================================================
 
 #include "tile_pool.h"
+#include "display_list_bounds.hpp"
 #include "render_filter.hpp"
 #include "render_background.hpp"
 #include "render_composite.hpp"

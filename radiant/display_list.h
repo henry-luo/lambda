@@ -470,29 +470,6 @@ int dl_begin_element(DisplayList* dl, uint32_t view_id,
 void dl_end_element(DisplayList* dl, int begin_index);
 
 // ---------------------------------------------------------------------------
-// Replay — execute all recorded commands through rdt_* calls
-// ---------------------------------------------------------------------------
-
-// Replay the entire display list to the given vector context.
-// surface is needed for direct-pixel operations (glyph, blit, opacity, etc.).
-// clip is the current clip bounds.  scratch is used for transient allocations.
-// dirty_tracker: if non-NULL, clips all rendering to dirty regions only
-//   (for selective/incremental repaint — prevents parent backgrounds from
-//    overwriting preserved content outside dirty areas).
-void dl_replay(DisplayList* dl, RdtVector* vec,
-               ImageSurface* surface, Bound* clip,
-               ScratchArena* scratch, float scale,
-               DirtyTracker* dirty_tracker);
-
-// ---------------------------------------------------------------------------
-// Bounds helpers
-// ---------------------------------------------------------------------------
-
-Bound dl_item_bounds(const DisplayItem* item);
-bool dl_item_intersects_rect(const DisplayItem* item,
-                             float x, float y, float w, float h);
-
-// ---------------------------------------------------------------------------
 // Debug / stats
 // ---------------------------------------------------------------------------
 

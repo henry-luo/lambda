@@ -1,6 +1,7 @@
 #include "render_output.hpp"
 #include "layout.hpp"
 #include "render_backend_caps.hpp"
+#include "display_list_replay.hpp"
 #include "render_img.hpp"
 #include "render_overlay.hpp"
 #include "render_profiler.hpp"

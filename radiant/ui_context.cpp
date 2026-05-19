@@ -1,6 +1,7 @@
 #include "view.hpp"
 #include "rdt_vector.hpp"
 #include "render.hpp"
+#include "scroller.hpp"
 #include "animation.h"
 #include "rdt_video.h"
 #include "webview.h"
@@ -21,7 +22,6 @@ void view_pool_destroy(ViewTree* tree);
 void fontface_cleanup(UiContext* uicon);
 void image_cache_cleanup(UiContext* uicon);
 char* load_font_path(FontContext *font_ctx, const char* font_name);
-void scroll_config_init(int pixel_ratio);
 
 // F7: platform IME shims (radiant/ime_mac.mm, radiant/ime_win.cpp).
 // Take an opaque GLFWwindow*; resolve focus/state through provided

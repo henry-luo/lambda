@@ -2,6 +2,7 @@
 #include "render.hpp"
 #include "state_store.hpp"
 #include "state_machine.hpp"
+#include "scroller.hpp"
 #include "form_control.hpp"
 #include "text_control.hpp"
 #include "text_edit.hpp"
@@ -66,11 +67,6 @@ void target_html_doc(EventContext* evcon, ViewTree* view_tree);
 void target_block_view(EventContext* evcon, ViewBlock* block);
 void target_inline_view(EventContext* evcon, ViewSpan* view_span);
 void target_text_view(EventContext* evcon, ViewText* text);
-void scrollpane_scroll(EventContext* evcon, ViewBlock* block, ScrollPane* sp);
-bool scrollpane_target(EventContext* evcon, ViewBlock* block);
-void scrollpane_mouse_up(EventContext* evcon, ViewBlock* block);
-void scrollpane_mouse_down(EventContext* evcon, ViewBlock* block);
-void scrollpane_drag(EventContext* evcon, ViewBlock* block);
 void update_scroller(ViewBlock* block, float content_width, float content_height);
 void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event);
 

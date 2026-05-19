@@ -1,5 +1,6 @@
-#include "render.hpp"
+#include "scroller.hpp"
 #include "handler.hpp"
+#include "render_border.hpp"
 #include "state_store.hpp"
 #include "state_machine.hpp"
 #include "../lib/log.h"
@@ -105,6 +106,85 @@ void scrollpane_render(RdtVector* vec, ScrollPane* sp, Rect* block_bound,
 
     rdt_pop_clip(vec);
     log_debug("finished rendering scroller");
+}
+
+void setup_scroller(RenderContext* rdcon, ViewBlock* block) {
+    float s = rdcon->scale;
+    if (block->scroller->has_clip) {
+        // Inset clip by border widths for padding-box clipping (CSS spec: overflow clips to padding edge)
+        float bl = 0, bt = 0, br = 0, bb = 0;
+        if (block->bound && block->bound->border) {
+            BorderProp* border = block->bound->border;
+            bl = border->width.left;
+            bt = border->width.top;
+            br = border->width.right;
+            bb = border->width.bottom;
+        }
+        log_debug("setup scroller clip: left:%f, top:%f, right:%f, bottom:%f",
+            block->scroller->clip.left, block->scroller->clip.top, block->scroller->clip.right, block->scroller->clip.bottom);
+        rdcon->block.clip.left = max(rdcon->block.clip.left, rdcon->block.x + (block->scroller->clip.left + bl) * s);
+        rdcon->block.clip.top = max(rdcon->block.clip.top, rdcon->block.y + (block->scroller->clip.top + bt) * s);
+        rdcon->block.clip.right = min(rdcon->block.clip.right, rdcon->block.x + (block->scroller->clip.right - br) * s);
+        rdcon->block.clip.bottom = min(rdcon->block.clip.bottom, rdcon->block.y + (block->scroller->clip.bottom - bb) * s);
+
+        // Copy border-radius for rounded corner clipping when overflow:hidden (scale radius)
+        if (block->bound && block->bound->border) {
+            BorderProp* border = block->bound->border;
+            // resolve percentage border-radius if not yet resolved
+            resolve_border_radius_percentages(&border->radius, block->width, block->height);
+            if (corner_has_radius(&border->radius)) {
+                rdcon->block.has_clip_radius = true;
+                // Use inner radius (outer minus border width) for padding-box clipping
+                rdcon->block.clip_radius.top_left = fmaxf(0, border->radius.top_left - bl) * s;
+                rdcon->block.clip_radius.top_right = fmaxf(0, border->radius.top_right - br) * s;
+                rdcon->block.clip_radius.bottom_left = fmaxf(0, border->radius.bottom_left - bl) * s;
+                rdcon->block.clip_radius.bottom_right = fmaxf(0, border->radius.bottom_right - br) * s;
+                rdcon->block.clip_radius.top_left_y = fmaxf(0, border->radius.top_left_y - bt) * s;
+                rdcon->block.clip_radius.top_right_y = fmaxf(0, border->radius.top_right_y - bt) * s;
+                rdcon->block.clip_radius.bottom_left_y = fmaxf(0, border->radius.bottom_left_y - bb) * s;
+                rdcon->block.clip_radius.bottom_right_y = fmaxf(0, border->radius.bottom_right_y - bb) * s;
+                constrain_corner_radii(&rdcon->block.clip_radius,
+                    rdcon->block.clip.right - rdcon->block.clip.left,
+                    rdcon->block.clip.bottom - rdcon->block.clip.top);
+                log_debug("setup rounded clip: tl=%f, tr=%f, bl=%f, br=%f",
+                    rdcon->block.clip_radius.top_left, rdcon->block.clip_radius.top_right,
+                    rdcon->block.clip_radius.bottom_left, rdcon->block.clip_radius.bottom_right);
+            }
+        }
+    }
+    if (block->scroller->pane) {
+        DocState* state = block->doc ? block->doc->state : NULL;
+        float scroll_x = 0.0f, scroll_y = 0.0f;
+        scroll_state_get_position_for_view(state, static_cast<View*>(block), block->scroller->pane,
+                                           &scroll_x, &scroll_y, NULL, NULL);
+        rdcon->block.x -= scroll_x * s;
+        rdcon->block.y -= scroll_y * s;
+    }
+}
+
+void render_scroller(RenderContext* rdcon, ViewBlock* block, BlockBlot* pa_block) {
+    log_debug("render scrollbars");
+    // need to reset block.x and y, which was changed by the scroller
+    float s = rdcon->scale;
+    rdcon->block.x = pa_block->x + block->x * s;  rdcon->block.y = pa_block->y + block->y * s;
+    if (block->scroller->has_hz_scroll || block->scroller->has_vt_scroll) {
+        Rect rect = {rdcon->block.x, rdcon->block.y, block->width * s, block->height * s};
+        if (block->bound && block->bound->border) {
+            rect.x += block->bound->border->width.left * s;
+            rect.y += block->bound->border->width.top * s;
+            rect.width -= (block->bound->border->width.left + block->bound->border->width.right) * s;
+            rect.height -= (block->bound->border->width.top + block->bound->border->width.bottom) * s;
+        }
+        if (block->scroller->pane) {
+            DocState* state = block->doc ? block->doc->state : NULL;
+            scrollpane_render(&rdcon->vec, block->scroller->pane, &rect,
+                block->content_width * s, block->content_height * s, &rdcon->block.clip, s,
+                state, static_cast<View*>(block),
+                block->scroller->has_hz_scroll, block->scroller->has_vt_scroll);
+        } else {
+            log_error("scroller has no scroll pane");
+        }
+    }
 }
 
 void scrollpane_scroll(EventContext* evcon, ViewBlock* block, ScrollPane* sp) {

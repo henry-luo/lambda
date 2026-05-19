@@ -137,6 +137,7 @@ Completed:
 - Moved the public text rendering orchestration (`render_text_view()`) out of `render.cpp` and into `render_text.cpp`, keeping text run walking next to the text-specific glyph, shadow, decoration, and inline-background helpers.
 - Restored saved font/color state before returning from the zero-font-size text path.
 - Added initial display-list bounds helper file:
+  - `display_list_bounds.hpp`
   - `display_list_bounds.cpp`
 - Moved the tile replay item-intersection helper behind the public display-list bounds API.
 - Added initial display-list storage helper file:
@@ -167,6 +168,9 @@ Completed:
   - `display_list_replay_raster.hpp`
   - `display_list_replay_raster.cpp`
 - Moved replay of direct surface fills, scaled surface blits, and webview layer placeholders out of `display_list.cpp`.
+- Added `display_list_replay.hpp` and `display_list_replay.cpp`.
+- Moved the top-level display-list replay dispatcher out of `display_list.cpp`, leaving `display_list.cpp` as a compatibility placeholder while storage, bounds, recording, and replay now live in focused modules.
+- Moved replay and bounds public declarations out of `display_list.h` into focused headers, and updated replay/tile/retained callers to include the narrower API.
 - Added initial display-list raster recording helper file:
   - `display_list_record_raster.cpp`
 - Moved direct surface fill/blit recording and external video/webview placeholder recording out of `display_list.cpp`.
@@ -931,7 +935,7 @@ Performance comparisons should use release builds, not debug builds.
 6. Add `render_clip` scope helpers and migrate CSS clip-path plus overflow clipping. Done.
 7. Continue `render_effects` by moving profiling hooks out of `render_block_view()` and collapsing effect finish calls into a scoped end helper. Done.
 8. Split text painting and smaller feature paint paths into named helpers. Started with glyph bitmap rendering in `render_glyph`, inline background, trailing mark, text-decoration, text-shadow, profiled glyph-load helpers, and `render_text_view()` ownership in `render_text`, cross-view selection predicates in `render_selection`, column-rule painting in `render_columns`, marker/list rendering in `render_list`, vector path painting in `render_vector_path`, and image/video/webview payload painting in `render_media`.
-9. Split display-list storage, builder, replay, and bounds. Started with public display-list bounds helpers used by tile replay, a storage/lifecycle module, glyph replay helpers, replay dirty-clip state helpers, backdrop replay helpers, shadow clip replay helpers, effect replay helpers, direct raster replay helpers, direct raster recording helpers, effect recording helpers, and vector recording helpers.
+9. Split display-list storage, builder, replay, and bounds. Started with public display-list bounds helpers used by tile replay, a storage/lifecycle module, glyph replay helpers, replay dirty-clip state helpers, backdrop replay helpers, shadow clip replay helpers, effect replay helpers, direct raster replay helpers, top-level replay dispatch, direct raster recording helpers, effect recording helpers, and vector recording helpers.
    - Update: dirty replay now culls individual bounded commands, matched element markers carry subtree-union bounds, and dirty/tile replay can skip entire non-intersecting element subtrees.
    - Update: true cross-frame retained fragment reuse is enabled conservatively through `RetainedDisplayListCache`. Cached fragments deep-copy owned payloads and are reused only when bounds match and intersecting dirty sources are known to be outside the subtree.
 10. Unify `render_html_doc()` and `render_html_doc_tiled()` setup through `render_output`. In progress: shared context lifecycle, background/clear handling, root paint dispatch, display-list replay planning, render-pool ownership, surface-save dispatch, normal document render orchestration, tiled PNG streaming, and overlay dispatch are now outside `render.cpp`.

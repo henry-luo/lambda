@@ -2,7 +2,7 @@
 // DisplayList bounds helpers.
 // ==========================================================================
 
-#include "display_list.h"
+#include "display_list_bounds.hpp"
 
 Bound dl_item_bounds(const DisplayItem* item) {
     if (!item) return {0, 0, 0, 0};

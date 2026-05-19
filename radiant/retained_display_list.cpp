@@ -1,5 +1,6 @@
 #include "retained_display_list.hpp"
 
+#include "display_list_bounds.hpp"
 #include "display_list_storage.hpp"
 #include "../lib/hashmap.h"
 #include "../lib/log.h"
