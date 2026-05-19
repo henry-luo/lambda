@@ -732,11 +732,11 @@ void jm_collect_func_assignments(JsAstNode* node, struct hashmap* names) {
     }
 }
 
-// Walk a node tree collecting only `_js_this` / `_js_arguments` references.
-// Used to propagate lexical-this/arguments requirements from nested arrow
+// Walk a node tree collecting only lexical arrow pseudo references.
+// Used to propagate lexical this/arguments/new.target requirements from nested arrow
 // functions up to enclosing arrows. Stops at non-arrow function boundaries
 // (those introduce a fresh `this`/`arguments` binding) and only adds the
-// two pseudo-refs (no other identifiers) so it does not pollute the
+// pseudo-refs (no other identifiers) so it does not pollute the
 // closure-capture analysis with the nested arrow's own free variables.
 void jm_collect_arrow_lexical_refs(JsAstNode* node, struct hashmap* refs) {
     if (!node) return;
@@ -749,6 +749,7 @@ void jm_collect_arrow_lexical_refs(JsAstNode* node, struct hashmap* refs) {
     jm_collect_body_refs(node, tmp);
     if (jm_name_set_has(tmp, "_js_this")) jm_name_set_add(refs, "_js_this");
     if (jm_name_set_has(tmp, "_js_arguments")) jm_name_set_add(refs, "_js_arguments");
+    if (jm_name_set_has(tmp, "_js_new.target")) jm_name_set_add(refs, "_js_new.target");
     hashmap_free(tmp);
     // jm_collect_body_refs already invokes us recursively for nested
     // ARROW bodies (via the FUNCTION_*/ARROW case), so transitive arrows
@@ -1044,6 +1045,7 @@ void jm_collect_body_locals(JsAstNode* node, struct hashmap* locals, bool var_on
         break;
     case JS_AST_NODE_FUNCTION_DECLARATION: {
         JsFunctionNode* fn = (JsFunctionNode*)node;
+        if (var_only && (fn->is_async || fn->is_generator)) break;
         if (fn->name && fn->name->chars) {
             char name[128];
             snprintf(name, sizeof(name), "_js_%.*s", (int)fn->name->len, fn->name->chars);
@@ -1381,7 +1383,7 @@ void jm_init_block_tdz(JsMirTranspiler* mt, JsAstNode* block) {
     while (hashmap_iter(let_consts, &iter, &item)) {
         JsNameSetEntry* e = (JsNameSetEntry*)item;
         // Skip variables that are module vars (TDZ handled at module level)
-        if (mt->current_fc && mt->module_consts) {
+        if (mt->current_fc && mt->module_consts && mt->scope_depth <= 1) {
             JsModuleConstEntry mclookup;
             memset(&mclookup, 0, sizeof(mclookup));
             snprintf(mclookup.name, sizeof(mclookup.name), "%s", e->name);
@@ -1649,7 +1651,8 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
         // not at runtime via closure environment.
         // BUT: if a parent function declares a local with the same name, the parent's
         // local shadows the module constant, so we must capture it.
-        if (module_consts && !(ancestor_func_locals && jm_name_set_has(ancestor_func_locals, ref->name))) {
+        bool ancestor_has_local_name = ancestor_func_locals && jm_name_set_has(ancestor_func_locals, ref->name);
+        if (module_consts && !ancestor_has_local_name) {
             JsModuleConstEntry lookup;
             snprintf(lookup.name, sizeof(lookup.name), "%s", ref->name);
             JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(module_consts, &lookup);
@@ -1659,7 +1662,7 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
             }
         }
         bool force_env_capture = false;
-        if (module_consts && ancestor_func_locals && jm_name_set_has(ancestor_func_locals, ref->name)) {
+        if (module_consts && ancestor_has_local_name) {
             JsModuleConstEntry lookup;
             snprintf(lookup.name, sizeof(lookup.name), "%s", ref->name);
             JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(module_consts, &lookup);
@@ -1740,6 +1743,19 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
         fc->captures[fc->capture_count].force_env_capture = false;
         fc->capture_count++;
         log_debug("js-mir: arrow capture '_js_arguments' in function '%s'", fc->name);
+    }
+
+    if (fn->is_arrow && jm_name_set_has(refs, "_js_new.target")) {
+        jm_ensure_captures_capacity(fc);
+        snprintf(fc->captures[fc->capture_count].name, 128, "_js_new.target");
+        fc->captures[fc->capture_count].scope_env_slot = -1;
+        fc->captures[fc->capture_count].grandparent_slot = -1;
+        fc->captures[fc->capture_count].is_let_const = false;
+        fc->captures[fc->capture_count].is_const = false;
+        fc->captures[fc->capture_count].is_nfe_binding = false;
+        fc->captures[fc->capture_count].force_env_capture = false;
+        fc->capture_count++;
+        log_debug("js-mir: arrow capture '_js_new.target' in function '%s'", fc->name);
     }
 
     // v18q: Check if function uses 'arguments' keyword

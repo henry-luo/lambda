@@ -528,6 +528,7 @@ void js_globals_batch_reset(void);
 void js_reset_constructor_prototypes(void);
 Item js_constructor_create_object(Item callee);
 Item js_new_from_class_object(Item callee, Item* args, int argc);
+bool js_is_constructor_object(Item callee);
 
 // A5: Constructor shape pre-allocation
 // Creates a new object with pre-built shape: all property slots pre-allocated
@@ -581,7 +582,11 @@ void js_set_global_property(Item key, Item value);
 void js_set_global_var_property_fast(Item key, Item value);
 void js_set_global_property_strict(Item key, Item value);
 void js_set_global_property_strict_prechecked(Item key, Item value, int64_t binding_exists_at_lhs);
+void js_define_global_var_property(Item key, Item value);
 void js_define_global_eval_var_property(Item key, Item value);
+void js_define_global_function_property(Item key, Item value);
+void js_define_global_lexical_binding(Item key, Item value, int64_t immutable);
+void js_check_global_lex_decl(Item key);
 void js_evalscript_check_global_lex_decl(Item key);
 void js_mark_private_method_non_writable(Item object, Item name);
 void js_set_method_home_from_target(Item target, Item fn_item);
@@ -607,6 +612,7 @@ Item js_get_with_binding_or_fallback(Item key, Item fallback);
 int64_t js_probe_with_binding(Item key);
 int64_t js_capture_with_binding(Item key);
 int64_t js_set_last_with_binding_if_valid(Item key, Item value, int64_t strict);
+Item js_last_with_binding_base_or_undefined(Item key);
 void js_eval_env_bind(Item key, Item value);
 int64_t js_eval_env_has_binding(Item key);
 int64_t js_eval_env_is_active(void);

@@ -4387,16 +4387,10 @@ static inline Item js_make_small_string(char* chars, int len, bool is_ascii) {
 static int js_from_char_code_to_uint16(Item code_item) {
     TypeId code_type = get_type_id(code_item);
     if (code_type == LMD_TYPE_INT) {
-        int64_t value = it2i(code_item);
-        int64_t mod = value % 65536;
-        if (mod < 0) mod += 65536;
-        return (int)mod;
+        return (int)((uint64_t)it2i(code_item) & 0xFFFFu);
     }
     if (code_type == LMD_TYPE_INT64) {
-        int64_t value = it2l(code_item);
-        int64_t mod = value % 65536;
-        if (mod < 0) mod += 65536;
-        return (int)mod;
+        return (int)((uint64_t)it2l(code_item) & 0xFFFFu);
     }
     Item num_item = js_to_number(code_item);
     double d = js_get_number(num_item);
@@ -4490,6 +4484,13 @@ extern "C" Item js_uri_decode_equals_from_char_code(Item str_item, Item first_it
     Item expected = js_string_fromCharCode2(first_item, second_item);
     if (js_exception_pending) return ItemNull;
     return js_strict_equal(decoded, expected);
+}
+
+extern "C" int64_t js_uri_decode_equals_from_char_code_raw(Item str_item, Item first_item,
+                                                           Item second_item, int64_t component) {
+    Item matched = js_uri_decode_equals_from_char_code(str_item, first_item, second_item, component);
+    if (js_exception_pending) return 0;
+    return get_type_id(matched) == LMD_TYPE_BOOL && it2b(matched) ? 1 : 0;
 }
 
 // Helper: encode a UTF-16 code unit to UTF-8 into buf, return bytes written
@@ -8199,6 +8200,19 @@ extern "C" Item js_alert(Item msg) {
 // Object.keys — return array of property names
 // =============================================================================
 
+static bool js_is_internal_enumeration_key(const char* s, int len) {
+    if (!s || len < 5) return false;
+    if (len >= 6 && (strncmp(s, "__get_", 6) == 0 ||
+                     strncmp(s, "__set_", 6) == 0)) return true;
+    if (strncmp(s, "__nw_", 5) == 0 ||
+        strncmp(s, "__ne_", 5) == 0 ||
+        strncmp(s, "__nc_", 5) == 0) return true;
+    if (len == 14 && strncmp(s, "__class_name__", 14) == 0) return true;
+    if (len == 23 && strncmp(s, "__class_private_index__", 23) == 0) return true;
+    if (len == 10 && strncmp(s, "__is_proto__", 10) == 0) return true;
+    return false;
+}
+
 // Object.getOwnPropertyNames — includes non-enumerable own properties
 extern "C" Item js_object_get_own_property_names(Item object) {
     Item exotic_result = ItemNull;
@@ -8242,7 +8256,7 @@ extern "C" Item js_object_get_own_property_names(Item object) {
             while (e) {
                 const char* s = e->name->str;
                 int slen = (int)e->name->length;
-                if (slen >= 2 && s[0] == '_' && s[1] == '_') { e = e->next; continue; }
+                if (js_is_internal_enumeration_key(s, slen)) { e = e->next; continue; }
                 Item val = _map_read_field(e, pm->data);
                 if (val.item == JS_DELETED_SENTINEL_VAL) { e = e->next; continue; }
                 Item key_item = (Item){.item = s2it(heap_create_name(s, slen))};
@@ -8275,7 +8289,7 @@ extern "C" Item js_object_get_own_property_names(Item object) {
                         (slen == 4 && strncmp(s, "name", 4) == 0) ||
                         (slen == 9 && strncmp(s, "prototype", 9) == 0)) { e = e->next; continue; }
                     // skip internal markers (__ne_, __nw_, __nc_, etc.)
-                    if (slen >= 2 && s[0] == '_' && s[1] == '_') { e = e->next; continue; }
+                    if (js_is_internal_enumeration_key(s, slen)) { e = e->next; continue; }
                     // skip deleted sentinels
                     Item val = _map_read_field(e, pm->data);
                     if (val.item == JS_DELETED_SENTINEL_VAL) { e = e->next; continue; }
@@ -8363,7 +8377,7 @@ extern "C" Item js_object_get_own_property_names(Item object) {
                         while (se) {
                             const char* s = se->name->str;
                             int len = (int)se->name->length;
-                            bool skip = (len >= 2 && s[0] == '_' && s[1] == '_');
+                            bool skip = js_is_internal_enumeration_key(s, len);
                             // skip "length" (already added) and numeric-only names
                             if (!skip && len == 6 && memcmp(s, "length", 6) == 0) skip = true;
                             if (!skip && len > 0 && s[0] >= '0' && s[0] <= '9') {
@@ -8412,7 +8426,7 @@ extern "C" Item js_object_get_own_property_names(Item object) {
     while (e) {
         const char* s = e->name->str;
         int len = (int)e->name->length;
-        bool skip = (len >= 2 && s[0] == '_' && s[1] == '_');
+        bool skip = js_is_internal_enumeration_key(s, len);
         if (!skip && is_regexp_obj && js_regexp_virtual_prop_name(s, len)) skip = true;
         if (!skip) {
             Item val = _map_read_field(e, m->data);
@@ -8456,7 +8470,7 @@ extern "C" Item js_object_get_own_property_names(Item object) {
     while (e) {
         const char* s = e->name->str;
         int len = (int)e->name->length;
-        bool skip = (len >= 2 && s[0] == '_' && s[1] == '_');
+        bool skip = js_is_internal_enumeration_key(s, len);
         if (!skip && is_regexp_obj && js_regexp_virtual_prop_name(s, len)) skip = true;
         if (!skip && js_parse_array_index(s, len) >= 0) skip = true;
         if (!skip && is_class_ctor) {
@@ -8694,7 +8708,7 @@ extern "C" Item js_object_keys(Item object) {
                 const char* s = e->name->str;
                 int slen = (int)e->name->length;
                 // skip internal markers (__xx_xxx), deleted sentinels, non-enumerable
-                if (slen >= 2 && s[0] == '_' && s[1] == '_') { e = e->next; continue; }
+                if (js_is_internal_enumeration_key(s, slen)) { e = e->next; continue; }
                 Item val = _map_read_field(e, pm->data);
                 if (val.item == JS_DELETED_SENTINEL_VAL) { e = e->next; continue; }
                 // skip non-enumerable (Stage A3: shape-flag-first)
@@ -8734,7 +8748,7 @@ extern "C" Item js_object_keys(Item object) {
                         (slen == 4 && strncmp(s, "name", 4) == 0) ||
                         (slen == 9 && strncmp(s, "prototype", 9) == 0)) { e = e->next; continue; }
                     // skip internal markers (__ne_, __nw_, __nc_, etc.)
-                    if (slen >= 2 && s[0] == '_' && s[1] == '_') { e = e->next; continue; }
+                    if (js_is_internal_enumeration_key(s, slen)) { e = e->next; continue; }
                     // skip deleted sentinels
                     Item val = _map_read_field(e, pm->data);
                     if (val.item == JS_DELETED_SENTINEL_VAL) { e = e->next; continue; }
@@ -8774,7 +8788,7 @@ extern "C" Item js_object_keys(Item object) {
                     while (se) {
                         const char* s = se->name->str;
                         int len = (int)se->name->length;
-                        if (!((len >= 2 && s[0] == '_' && s[1] == '_') ||
+                        if (!(js_is_internal_enumeration_key(s, len) ||
                               (len == 18 && strncmp(s, "__primitiveValue__", 18) == 0))) {
                             Item val = _map_read_field(se, m->data);
                             if (val.item != JS_DELETED_SENTINEL_VAL && js_props_query_enumerable(m, se, s, len)) {
@@ -8816,7 +8830,7 @@ extern "C" Item js_object_keys(Item object) {
         const char* s = e->name->str;
         int len = (int)e->name->length;
         bool skip = false;
-        if (len >= 2 && s[0] == '_' && s[1] == '_') {
+        if (js_is_internal_enumeration_key(s, len)) {
             skip = true;
         }
         if (is_error_object && len == 5 && strncmp(s, "stack", 5) == 0) {
@@ -8953,7 +8967,7 @@ extern "C" Item js_for_in_keys(Item object) {
                 for (ShapeEntry* e = tm->shape; e; e = e->next) {
                     const char* s = e->name->str;
                     int len = (int)e->name->length;
-                    bool skip = (len >= 2 && s[0] == '_' && s[1] == '_');
+                    bool skip = js_is_internal_enumeration_key(s, len);
                     if (!skip) {
                         Item val = _map_read_field(e, m->data);
                         if (val.item == JS_DELETED_SENTINEL_VAL) skip = true;
@@ -9036,7 +9050,7 @@ extern "C" Item js_for_in_keys(Item object) {
                 // (default-set non-enumerable on class/object prototypes;
                 //  user-defined static class fields override to enumerable).
                 bool skip = false;
-                if (len >= 2 && s[0] == '_' && s[1] == '_') {
+                if (js_is_internal_enumeration_key(s, len)) {
                     skip = true;
                 }
 
@@ -9571,6 +9585,30 @@ static inline bool js_test262_percent_escape_cp_from_append(String* left, uint32
     return true;
 }
 
+static Item g_last_three_byte_uri_prefix_string = {0};
+static uint32_t g_last_three_byte_uri_prefix_cp = 0;
+static uint64_t g_last_three_byte_uri_prefix_epoch = 0;
+
+static inline bool js_test262_percent_escape_three_byte_prefix(String* s, uint32_t* prefix_out) {
+    if (!s || s->len != 9 || !s->is_ascii) return false;
+    if (s->chars[0] != '%' || s->chars[3] != '%' || s->chars[6] != '%') return false;
+    int b0_high = js_test262_upper_hex_digit(s->chars[1]);
+    int b0_low = js_test262_upper_hex_digit(s->chars[2]);
+    int b1_high = js_test262_upper_hex_digit(s->chars[4]);
+    int b1_low = js_test262_upper_hex_digit(s->chars[5]);
+    int b2_high = js_test262_upper_hex_digit(s->chars[7]);
+    int b2_low = js_test262_upper_hex_digit(s->chars[8]);
+    if ((b0_high | b0_low | b1_high | b1_low | b2_high | b2_low) < 0) return false;
+    uint32_t byte0 = (uint32_t)((b0_high << 4) | b0_low);
+    uint32_t byte1 = (uint32_t)((b1_high << 4) | b1_low);
+    uint32_t byte2 = (uint32_t)((b2_high << 4) | b2_low);
+    if (byte0 < 0xF0 || byte0 > 0xF4) return false;
+    if ((byte1 & 0xC0) != 0x80 || (byte2 & 0xC0) != 0x80) return false;
+    *prefix_out = ((byte0 & 0x07) << 18) | ((byte1 & 0x3F) << 12) |
+                  ((byte2 & 0x3F) << 6);
+    return true;
+}
+
 extern "C" Item js_test262_concat_percent_hex(Item left_item, Item n_item) {
     Item left_val = (get_type_id(left_item) == LMD_TYPE_STRING) ? left_item : js_to_string(left_item);
     if (js_check_exception()) return ItemNull;
@@ -9608,8 +9646,21 @@ extern "C" Item js_test262_concat_percent_hex(Item left_item, Item n_item) {
     result->chars[left_len + 3] = '\0';
     Item result_item = (Item){.item = s2it(result)};
     uint32_t cp = 0;
-    if (js_test262_percent_escape_cp_from_append(left, byte, &cp)) {
+    uint64_t epoch = js_get_heap_epoch();
+    if (left_item.item == g_last_three_byte_uri_prefix_string.item &&
+        g_last_three_byte_uri_prefix_epoch == epoch &&
+        (byte & 0xC0) == 0x80) {
+        cp = g_last_three_byte_uri_prefix_cp | (byte & 0x3F);
+        if (cp >= 0x10000 && cp <= 0x10FFFF) {
+            js_string_remember_four_byte_uri_escape_cp(result_item, (int64_t)cp);
+        }
+    } else if (js_test262_percent_escape_cp_from_append(left, byte, &cp)) {
         js_string_remember_four_byte_uri_escape_cp(result_item, (int64_t)cp);
+    }
+    if (result->len == 9 && js_test262_percent_escape_three_byte_prefix(result, &cp)) {
+        g_last_three_byte_uri_prefix_string = result_item;
+        g_last_three_byte_uri_prefix_cp = cp;
+        g_last_three_byte_uri_prefix_epoch = epoch;
     }
     return result_item;
 }
@@ -9790,59 +9841,35 @@ extern "C" void js_validate_native_function_source(Item source_item) {
 // Native compareArray / assert.compareArray for test262 batch mode
 // =============================================================================
 
-// check if item is an array or typed array (array-like for comparison)
-static bool is_array_like(Item v) {
-    int depth = 0;
-    while (js_is_proxy(v) && depth < 32) {
-        JsProxyData* pd = js_get_proxy_data(v);
-        if (!pd || pd->revoked) return false;
-        v = (Item){.item = pd->target};
-        depth++;
-    }
-    TypeId t = get_type_id(v);
-    if (t == LMD_TYPE_ARRAY) return true;
-    if (t == LMD_TYPE_MAP && ((Container*)(uintptr_t)v.item)->map_kind == MAP_KIND_TYPED_ARRAY) return true;
-    if (t == LMD_TYPE_MAP && ((Container*)(uintptr_t)v.item)->map_kind == MAP_KIND_ARRAYBUFFER) return true;
-    return false;
+static Item compare_array_length_value(Item v) {
+    extern Item js_property_access(Item object, Item key);
+    Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
+    return js_property_access(v, len_key);
 }
 
-// get length of array or typed array (for compareArray)
-static int64_t array_like_length(Item v) {
-    extern int64_t js_array_length(Item array);
-    extern Item js_property_access(Item object, Item key);
-    TypeId t = get_type_id(v);
-    if (js_is_proxy(v)) {
-        Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
-        Item len_val = js_property_access(v, len_key);
-        if (get_type_id(len_val) == LMD_TYPE_INT) return (int64_t)it2i(len_val);
-        Item len_num = js_to_number(len_val);
-        if (get_type_id(len_num) == LMD_TYPE_INT) return (int64_t)it2i(len_num);
-        return 0;
-    }
-    if (t == LMD_TYPE_ARRAY) return js_array_length(v);
-    // for typed arrays, use property access for "length"
-    if (t == LMD_TYPE_MAP) {
-        Item len_key = (Item){.item = s2it(heap_create_name("length"))};
-        Item len_val = js_property_access(v, len_key);
-        if (get_type_id(len_val) == LMD_TYPE_INT) return (int64_t)it2i(len_val);
-    }
-    return 0;
+static int64_t compare_array_iteration_count(Item len_val) {
+    Item len_num = js_to_number(len_val);
+    double len = js_get_number(len_num);
+    if (!(len > 0.0) || isinf(len)) return 0;
+    double count = ceil(len);
+    if (count > 9007199254740991.0) return 0;
+    return (int64_t)count;
 }
 
 // compareArray(a, b): element-wise SameValue comparison, returns bool Item
 extern "C" Item js_compare_array(Item a, Item b) {
-    extern Item js_array_get_int(Item array, int64_t index);
+    extern Item js_property_access(Item object, Item key);
 
-    if (!is_array_like(a) || !is_array_like(b))
-        return (Item){.item = b2it(false)};
+    Item len_a = compare_array_length_value(a);
+    Item len_b = compare_array_length_value(b);
+    if (!it2b(js_strict_equal(len_b, len_a))) return (Item){.item = b2it(false)};
 
-    int64_t len_a = array_like_length(a);
-    int64_t len_b = array_like_length(b);
-    if (len_a != len_b) return (Item){.item = b2it(false)};
+    int64_t len = compare_array_iteration_count(len_a);
 
-    for (int64_t i = 0; i < len_a; i++) {
-        Item ai = js_array_get_int(a, i);
-        Item bi = js_array_get_int(b, i);
+    for (int64_t i = 0; i < len; i++) {
+        Item index_key = (Item){.item = i2it((int)i)};
+        Item ai = js_property_access(a, index_key);
+        Item bi = js_property_access(b, index_key);
         if (!it2b(js_object_is(ai, bi))) return (Item){.item = b2it(false)};
     }
     return (Item){.item = b2it(true)};
@@ -9850,20 +9877,17 @@ extern "C" Item js_compare_array(Item a, Item b) {
 
 // helper: format array as "[elem1, elem2, ...]" for error messages
 static Item assert_format_array(Item arr) {
-    extern Item js_array_get_int(Item array, int64_t index);
+    extern Item js_property_access(Item object, Item key);
     extern Item js_to_string_val(Item value);
 
-    if (!is_array_like(arr)) {
-        return (Item){.item = s2it(heap_create_name("(not an array)"))};
-    }
-    int64_t len = array_like_length(arr);
+    int64_t len = compare_array_iteration_count(compare_array_length_value(arr));
     // pre-pass: compute total length
     int total = 2; // "[]"
     char* strs[256];
     int slens[256];
     int maxn = len > 256 ? 256 : (int)len;
     for (int i = 0; i < maxn; i++) {
-        Item elem = js_array_get_int(arr, i);
+        Item elem = js_property_access(arr, (Item){.item = i2it(i)});
         Item s = js_to_string_val(elem);
         String* ss = it2s(s);
         strs[i] = ss ? ss->chars : (char*)"undefined";
@@ -14299,6 +14323,17 @@ extern "C" int64_t js_set_last_with_binding_if_valid(Item key, Item value, int64
     return 1;
 }
 
+extern "C" Item js_last_with_binding_base_or_undefined(Item key) {
+    if (!js_last_with_binding_valid || !js_with_binding_key_same(js_last_with_binding_key, key)) {
+        return make_js_undefined();
+    }
+    Item scope_obj = js_last_with_binding_scope;
+    if (!js_with_scope_is_object(scope_obj)) return make_js_undefined();
+    return scope_obj;
+}
+
+static int js_global_lexical_find_binding(Item key);
+
 extern "C" Item js_delete_identifier_with_binding(Item key, int64_t declared_binding) {
     if (js_with_stack_depth > 0) {
         for (int i = js_with_stack_depth - 1; i >= 0; i--) {
@@ -14319,9 +14354,53 @@ extern "C" Item js_delete_identifier_with_binding(Item key, int64_t declared_bin
             if (js_check_exception()) return (Item){.item = b2it(false)};
         }
     }
+    if (js_global_lexical_find_binding(key) >= 0) return (Item){.item = b2it(false)};
     if (declared_binding) return (Item){.item = b2it(false)};
     Item global = js_get_global_this();
     return js_delete_property(global, key);
+}
+
+#define JS_GLOBAL_LEXICAL_BIND_MAX 512
+typedef struct JsGlobalLexicalBinding {
+    Item key;
+    Item value;
+    bool immutable;
+} JsGlobalLexicalBinding;
+
+static JsGlobalLexicalBinding js_global_lexical_bindings[JS_GLOBAL_LEXICAL_BIND_MAX];
+static int js_global_lexical_binding_count = 0;
+
+static int js_global_lexical_find_binding(Item key) {
+    key = js_to_property_key(key);
+    if (js_check_exception()) return -1;
+    for (int i = js_global_lexical_binding_count - 1; i >= 0; i--) {
+        if (js_with_binding_key_same(js_global_lexical_bindings[i].key, key)) return i;
+    }
+    return -1;
+}
+
+extern "C" void js_reset_global_lexical_bindings(void) {
+    js_global_lexical_binding_count = 0;
+}
+
+extern "C" void js_define_global_lexical_binding(Item key, Item value, int64_t immutable) {
+    key = js_to_property_key(key);
+    if (js_check_exception()) return;
+    int idx = js_global_lexical_find_binding(key);
+    if (idx >= 0) {
+        js_global_lexical_bindings[idx].value = value;
+        js_global_lexical_bindings[idx].immutable = immutable != 0;
+        return;
+    }
+    if (js_global_lexical_binding_count >= JS_GLOBAL_LEXICAL_BIND_MAX) {
+        log_error("js-global-lexical: binding table overflow");
+        return;
+    }
+    JsGlobalLexicalBinding* binding =
+        &js_global_lexical_bindings[js_global_lexical_binding_count++];
+    binding->key = key;
+    binding->value = value;
+    binding->immutable = immutable != 0;
 }
 
 // js_get_global_property: look up a property on the global object by name string
@@ -14333,6 +14412,8 @@ extern "C" Item js_get_global_property(Item key) {
         Item result = js_with_scope_lookup(key, &found, false);
         if (found) return result;
     }
+    int lex_idx = js_global_lexical_find_binding(key);
+    if (lex_idx >= 0) return js_global_lexical_bindings[lex_idx].value;
     Item global = js_get_global_this();
     return js_property_get(global, key);
 }
@@ -14347,6 +14428,8 @@ extern "C" Item js_get_global_property_strict(Item key) {
         Item result = js_with_scope_lookup(key, &found, true);
         if (found) return result;
     }
+    int lex_idx = js_global_lexical_find_binding(key);
+    if (lex_idx >= 0) return js_global_lexical_bindings[lex_idx].value;
     Item global = js_get_global_this();
     Item result = js_property_get(global, key);
     // property_get returns JS undefined for missing keys.
@@ -14386,6 +14469,7 @@ extern "C" int64_t js_global_binding_exists(Item key) {
         if (js_check_exception()) return 0;
     }
     Item global = js_get_global_this();
+    if (js_global_lexical_find_binding(key) >= 0) return 1;
     Item exists = js_in(key, global);
     if (js_check_exception()) return 0;
     return it2b(exists) ? 1 : 0;
@@ -14450,6 +14534,15 @@ static void js_set_global_property_impl(Item key, Item value, bool strict) {
         }
     }
     js_last_with_binding_valid = false;
+    int lex_idx = js_global_lexical_find_binding(key);
+    if (lex_idx >= 0) {
+        if (js_global_lexical_bindings[lex_idx].immutable) {
+            js_throw_type_error("Assignment to constant global lexical binding");
+            return;
+        }
+        js_global_lexical_bindings[lex_idx].value = value;
+        return;
+    }
     Item global = js_get_global_this();
     if (strict && !it2b(js_in(key, global))) {
         if (js_check_exception()) return;
@@ -14557,10 +14650,47 @@ extern "C" void js_define_global_eval_var_property(Item key, Item value) {
     js_define_own_property_from_descriptor(global, str->chars, (int)str->len, &pd, is_new_property);
 }
 
+extern "C" void js_define_global_function_property(Item key, Item value) {
+    Item global = js_get_global_this();
+    Item name = js_to_string(key);
+    if (get_type_id(name) != LMD_TYPE_STRING) return;
+    String* str = it2s(name);
+    if (!str || str->len <= 0 || str->len >= 200) return;
+    JsPropertyDescriptor existing;
+    bool has_existing = js_get_own_property_descriptor(global, str->chars, (int)str->len, &existing);
+    bool can_replace_existing = has_existing && (
+        js_pd_is_configurable(&existing) ||
+        (js_pd_is_data(&existing) &&
+         (existing.flags & JS_PD_WRITABLE) &&
+         (existing.flags & JS_PD_ENUMERABLE)));
+    if (can_replace_existing && get_type_id(global) == LMD_TYPE_MAP) {
+        js_shape_entry_set_accessor(global, str->chars, (int)str->len, false);
+        map_put(global.map, str, value, js_input);
+        js_attr_set_writable(global, str->chars, (int)str->len, true);
+        js_attr_set_enumerable(global, str->chars, (int)str->len, true);
+        js_attr_set_configurable(global, str->chars, (int)str->len, false);
+        return;
+    }
+    JsPropertyDescriptor pd;
+    memset(&pd, 0, sizeof(pd));
+    pd.flags = JS_PD_HAS_VALUE | JS_PD_HAS_WRITABLE | JS_PD_HAS_ENUMERABLE |
+        JS_PD_HAS_CONFIGURABLE | JS_PD_WRITABLE | JS_PD_ENUMERABLE;
+    js_pd_set_configurable(&pd, false);
+    pd.value = value;
+    bool is_new_property = !has_existing;
+    js_define_own_property_from_descriptor(global, str->chars, (int)str->len, &pd, is_new_property);
+}
+
 extern "C" void js_evalscript_check_global_var_decl(Item key) {
     if (!js_262_eval_script_is_active()) return;
     key = js_to_property_key(key);
     if (js_check_exception()) return;
+    if (js_global_lexical_find_binding(key) >= 0) {
+        const char* msg_str = "Var declaration conflicts with existing global lexical declaration";
+        Item msg = (Item){.item = s2it(heap_create_name(msg_str, strlen(msg_str)))};
+        js_throw_syntax_error(msg);
+        return;
+    }
     Item global = js_get_global_this();
     if (it2b(js_has_own_property(global, key))) return;
     if (js_is_truthy(js_object_is_extensible(global))) return;
@@ -14571,6 +14701,12 @@ extern "C" void js_evalscript_check_global_function_decl(Item key) {
     if (!js_262_eval_script_is_active()) return;
     key = js_to_property_key(key);
     if (js_check_exception()) return;
+    if (js_global_lexical_find_binding(key) >= 0) {
+        const char* msg_str = "Function declaration conflicts with existing global lexical declaration";
+        Item msg = (Item){.item = s2it(heap_create_name(msg_str, strlen(msg_str)))};
+        js_throw_syntax_error(msg);
+        return;
+    }
     Item global = js_get_global_this();
     Item name = js_to_string(key);
     if (get_type_id(name) != LMD_TYPE_STRING) return;
@@ -14589,10 +14725,15 @@ extern "C" void js_evalscript_check_global_function_decl(Item key) {
     js_throw_type_error("Cannot declare global function over incompatible global property");
 }
 
-extern "C" void js_evalscript_check_global_lex_decl(Item key) {
-    if (!js_262_eval_script_is_active()) return;
+extern "C" void js_check_global_lex_decl(Item key) {
     key = js_to_property_key(key);
     if (js_check_exception()) return;
+    if (js_global_lexical_find_binding(key) >= 0) {
+        const char* msg_str = "Lexical declaration conflicts with existing global lexical declaration";
+        Item msg = (Item){.item = s2it(heap_create_name(msg_str, strlen(msg_str)))};
+        js_throw_syntax_error(msg);
+        return;
+    }
     Item global = js_get_global_this();
     if (!it2b(js_has_own_property(global, key))) return;
     Item name = js_to_string(key);
@@ -14606,6 +14747,11 @@ extern "C" void js_evalscript_check_global_lex_decl(Item key) {
     const char* msg_str = "Lexical declaration conflicts with existing global var declaration";
     Item msg = (Item){.item = s2it(heap_create_name(msg_str, strlen(msg_str)))};
     js_throw_syntax_error(msg);
+}
+
+extern "C" void js_evalscript_check_global_lex_decl(Item key) {
+    if (!js_262_eval_script_is_active()) return;
+    js_check_global_lex_decl(key);
 }
 
 // Direct eval bridge: function-scope eval code is compiled as a small script,

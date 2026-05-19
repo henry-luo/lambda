@@ -1123,7 +1123,7 @@ extern "C" Item js_arraybuffer_slice_items(Item val, Item begin_item, Item end_i
         if (species_type == LMD_TYPE_UNDEFINED || species_type == LMD_TYPE_NULL) {
             use_default_ctor = true;
         } else {
-            if (species_type != LMD_TYPE_FUNC && !js_is_proxy(species)) {
+            if (!js_is_constructor_object(species)) {
                 return js_throw_type_error("ArrayBuffer species is not a constructor");
             }
             Item len_arg = (Item){.item = i2it(new_len)};

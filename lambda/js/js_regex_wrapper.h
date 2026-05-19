@@ -27,9 +27,12 @@ extern "C" {
 // Post-filter types for runtime match verification
 enum JsRegexFilterType {
     JS_PF_TRIM_GROUP,        // trim captured group from match end (trailing lookahead absorbed)
+    JS_PF_TRIM_TO_LENGTH,    // trim full match to a byte length (leading lookahead absorbed)
     JS_PF_REJECT_MATCH,      // reject match if rejection pattern matches at the boundary
     JS_PF_GROUP_EQUALITY,    // require capture group[a] == capture group[b] (backreference)
     JS_PF_ASSERT_MATCH,      // require absorbed positive lookahead to equal its anchored match
+    JS_PF_LOOKBEHIND_POS,    // require pattern to match immediately before marker
+    JS_PF_LOOKBEHIND_NEG,    // require pattern not to match immediately before marker
 };
 
 struct JsRegexCompiled;
@@ -42,6 +45,14 @@ struct JsRegexFilter {
     int reject_at_start;           // for JS_PF_REJECT_MATCH: check at match start (1) or end (0)
     int eq_group_a;                // for JS_PF_GROUP_EQUALITY: first group index
     int eq_group_b;                // for JS_PF_GROUP_EQUALITY: second group index
+    int lookbehind_group_start;    // first original group captured inside lookbehind
+    int lookbehind_group_count;    // number of original groups captured inside lookbehind
+    int lookbehind_prefer_longest; // choose earliest valid prefix for greedy variable-width lookbehind
+    int lookbehind_case_sensitive;
+    int lookbehind_one_line;
+    int lookbehind_dot_nl;
+    char* lookbehind_source;       // original lookbehind body for external backref substitution
+    int lookbehind_source_len;
 };
 
 struct JsRegexCompiled {

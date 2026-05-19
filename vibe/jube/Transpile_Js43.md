@@ -3310,3 +3310,621 @@ Newly passing tests from the old remaining manifest:
 Current failure manifest:
 
 - `temp/js43_remaining_110_after_ctor_args_fixes.tsv`
+
+## 58. Baseline Guard After URI Decode Fast-Path Cleanup
+
+Status on 2026-05-19: reran the full js262 baseline after tightening the
+URI decode comparison hot path.  There are no remaining real pass-to-fail
+regressions in the baseline manifest; the only non-full rows are the known
+4-byte URI decode tests that pass in isolated retry but exceed the 3-second
+slow threshold in batch mode.
+
+Implementation:
+
+- Added a cached metadata shortcut for `%XX%XX%XX` URI prefix strings produced
+  by the test262 `decimalToPercentHexString` concatenation path, so appending
+  the fourth byte can remember the decoded scalar value without reparsing the
+  full 12-byte escape string.
+- Changed integer `String.fromCharCode` coercion to use the equivalent UTF-16
+  low-16-bit mask instead of modulo for `int` / `int64` inputs.
+- Added and registered `js_uri_decode_equals_from_char_code_raw` for raw
+  condition lowering of `decodeURI(...) === String.fromCharCode(H, L)`.
+
+Verification:
+
+```bash
+make release
+make -C build/premake config=release_native lambda test_js_test262_gtest -j4
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_uri_slow_batch.txt --js-timeout=30 --jobs=1 --write-failures=temp/js43_uri_slow_after_raw_fixed.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --baseline-only --js-timeout=30 --write-failures=temp/js43_baseline_after_uri_raw.tsv --gtest_brief=1
+```
+
+Results:
+
+- Focused URI batch: 14 / 14 passed, 0 failure rows.
+- Full baseline guard: failure manifest has 0 rows.
+- Regression check: 34,053 baseline passing, 34,051 fully passing,
+  0 improvements, 0 regressions.
+- Non-fully-passing rows remain only:
+  `built_ins_decodeURI_S15_1_3_1_A2_5_T1_js` and
+  `built_ins_decodeURIComponent_S15_1_3_2_A2_5_T1_js`.
+
+## 59. Js262 Baseline Refresh After URI Fast-Path Work
+
+Status on 2026-05-19: reran the full js262 update-baseline gate and refreshed
+the baseline to the current fully passing set.  The first sandboxed run passed
+the gate but could not actually write through `test/js262`, which is a symlink
+to the external `lambda-test/js262` tree; reran the same updater with escalation
+so the harness could update the symlink target.
+
+Verification:
+
+```bash
+make -C build/premake config=release_native lambda test_js_test262_gtest -j4
+./test/test_js_test262_gtest.exe --batch-only --update-baseline --js-timeout=30 --write-failures=temp/js43_update_baseline_latest.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --update-baseline --js-timeout=30 --write-failures=temp/js43_update_baseline_latest_escalated.tsv --gtest_brief=1
+```
+
+Results from the escalated updater:
+
+- Baseline updated: `test/js262/test262_baseline.txt`
+- Baseline header now reports 34,071 fully passing tests.
+- Regression check: 34,053 old baseline passing, 34,071 fully passing,
+  20 improvements, 0 regressions.
+- Compliance summary: 34,071 fully passed / 34,165 runnable, 90 failed,
+  8,054 skipped.
+- Failure manifest: `temp/js43_update_baseline_latest_escalated.tsv`
+  has 92 data rows.
+- Summary manifests:
+  `temp/js43_update_baseline_latest_escalated_by_feature.tsv` has 19 data rows,
+  and `temp/js43_update_baseline_latest_escalated_by_path.tsv` has 5 data rows.
+- Remaining non-fully-passing tests are still the two URI 4-byte decode slow
+  cases, each passing in isolated Phase 4 retry:
+  `built_ins_decodeURI_S15_1_3_1_A2_5_T1_js` and
+  `built_ins_decodeURIComponent_S15_1_3_2_A2_5_T1_js`.
+
+## 60. RegExp Named-Group Unicode Names And Groups Data Properties
+
+Status on 2026-05-19: started reducing the remaining post-refresh js262
+failures by taking the compact RegExp named-groups cluster.  The immediate
+root causes were in compile-time name validation and runtime result shaping,
+not in the test harness.
+
+Implementation:
+
+- Replaced byte-based named capture/backreference name validation with UTF-8
+  and `\u` escape decoding backed by Unicode identifier categories.
+- Decoded escaped public named-group keys when the runtime rewrites names to
+  RE2-compatible aliases, including surrogate pairs that arrive as `\x{...}`
+  after preprocessing.
+- Built RegExp exec `index`, `input`, `groups`, and named group entries with
+  CreateDataProperty-style own data properties so inherited setters are not
+  invoked.
+- Preserved null-prototype `groups` objects when a named capture is literally
+  `__proto__`, making it a normal data key instead of mutating the prototype.
+
+Changed files:
+
+- `lambda/js/js_regexp_compile.cpp`
+- `lambda/js/js_runtime.cpp`
+
+Verification:
+
+```bash
+make -C build/premake config=release_native lambda test_js_test262_gtest -j4
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_named_groups_batch.txt --js-timeout=30 --write-failures=temp/js43_named_groups_after_surrogate_names.tsv --gtest_brief=1
+```
+
+Focused results:
+
+- Named-groups focused batch: 7 / 14 passed.
+- Newly passing in this slice:
+  `built_ins_RegExp_named_groups_groups_object_js`,
+  `built_ins_RegExp_named_groups_non_unicode_property_names_invalid_js`,
+  `built_ins_RegExp_named_groups_non_unicode_property_names_js`,
+  `built_ins_RegExp_named_groups_non_unicode_property_names_valid_js`,
+  `built_ins_RegExp_named_groups_unicode_property_names_invalid_js`,
+  `built_ins_RegExp_named_groups_unicode_property_names_js`, and
+  `built_ins_RegExp_named_groups_unicode_property_names_valid_js`.
+- Remaining in this slice are replacement callback plumbing, subclass exec
+  result lookup, and named backreference matching:
+  `built_ins_RegExp_named_groups_functional_replace_global_js`,
+  `built_ins_RegExp_named_groups_functional_replace_non_global_js`,
+  `built_ins_RegExp_named_groups_groups_object_subclass_js`,
+  `built_ins_RegExp_named_groups_groups_object_subclass_sans_js`,
+  `built_ins_RegExp_named_groups_non_unicode_references_js`,
+  `built_ins_RegExp_named_groups_unicode_match_js`, and
+  `built_ins_RegExp_named_groups_unicode_references_js`.
+
+## 61. Remaining-Manifest Cleanup: Argument Evaluation, Lexical `new.target`, Contextual Syntax, And Const Loop Bindings
+
+Status on 2026-05-19: continued the post-refresh 92-row failure manifest while
+keeping the refreshed 34,071-test baseline clean.  This pass intentionally
+avoided the larger RegExp lookbehind engine work and fixed smaller root causes
+in call lowering, arrow capture analysis, JavaScript grammar context,
+`with`-captured identifier lookup, and `for-in/of` loop binding metadata.
+
+Root causes fixed:
+
+- Direct/inline/native call paths bound only formal parameters and skipped
+  evaluation of extra actual arguments, breaking left-to-right side effects
+  when a function was called with more arguments than parameters.
+- Arrow closures captured lexical `this`, but not lexical `new.target`, so
+  `new.target` inside returned arrows observed the wrong constructor context.
+- The JavaScript grammar rejected contextual `yield` / `await` labels and
+  contextual `yield` / `await` formal parameters in sloppy positions.  It also
+  parsed `get` / `set` class fields followed by generator methods incorrectly
+  without the ASI split required by the valid grammar tests.
+- Contextual `yield:` / `await:` labels initially stole bare generator `yield`
+  expressions in block position.  The label forms are now colon-bearing special
+  tokens, and `yield_expression` is split into explicit bare, RHS, and
+  delegation forms with a conflict against `formal_parameters`.  This keeps
+  `yield:` / `await:` valid while allowing `(yield)`, `[yield]`, `{yield}`,
+  comma expressions, and ternary operands inside generator bodies.
+- Functions created inside `with` captured the `with` stack correctly, but the
+  fallback read path was applied to every local identifier in the function.
+  Local declarations could therefore be shadowed by the captured object
+  environment.  Identifier reads now consult captured `with` fallback only for
+  captured environment variables or when a `with` is actively in scope.
+- `for (const x in/of ...)` loop lowering marked `x` as a lexical binding but
+  failed to preserve `is_const`, so assignment/update expressions in the loop
+  body mutated the binding instead of throwing `TypeError`.
+
+Changed files:
+
+- `lambda/js/js_mir_analysis.cpp`
+- `lambda/js/js_mir_expression_lowering.cpp`
+- `lambda/js/js_mir_function_class_lowering.cpp`
+- `lambda/js/js_mir_module_batch_lowering.cpp`
+- `lambda/js/js_mir_statement_lowering.cpp`
+- `lambda/tree-sitter-javascript/grammar.js`
+- generated tree-sitter JavaScript artifacts under
+  `lambda/tree-sitter-javascript/src/`
+
+Verification:
+
+```bash
+./node_modules/.bin/tree-sitter generate
+make -B -C lambda/tree-sitter-javascript libtree-sitter-javascript.a CC=gcc CXX=g++ TS=/Users/henryluo/Projects/Lambda/node_modules/.bin/tree-sitter
+make -B -C build/premake config=release_native lambda test_js_test262_gtest -j4
+./lambda.exe js temp/js43_probe_yield_rhs_omitted.js --opt-level=0
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_four_yield_missing.txt --js-timeout=30 --write-failures=temp/js43_four_yield_missing.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_syntax_runtime_empty_batch.txt --js-timeout=30 --write-failures=temp/js43_syntax_runtime_empty_after_yield_precedence.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --baseline-only --batch-only --js-timeout=30 --write-failures=temp/js43_baseline_guard_after_yield_with_fixes.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_remaining_90_replay_from_latest.txt --js-timeout=30 --write-failures=temp/js43_remaining_90_after_yield_with_fixes.tsv --gtest_brief=1
+```
+
+Focused and replay results:
+
+- The bare-yield probe passed under `./lambda.exe js`.
+- The four formerly missing yield-expression rows passed as a focused batch:
+  `language_expressions_in_private_field_rhs_yield_present_js`,
+  `language_expressions_in_rhs_yield_absent_non_strict_js`,
+  `language_expressions_in_rhs_yield_present_js`, and
+  `language_expressions_object_method_definition_yield_as_expression_without_rhs_js`.
+- The syntax/contextual grammar batch passed 5 / 5.
+- The full baseline guard passed 34,071 / 34,071 with 0 regressions and 0
+  non-fully-passing rows.
+- The 92-row replay reports 29 passed and 63 failed.  The remaining failing
+  `language_statements_generators_yield_as_generator_declaration_binding_identifier_js`
+  row is still open.
+- Current failure manifest:
+  `temp/js43_remaining_90_after_yield_with_fixes.tsv`.
+- Summary manifests:
+  `temp/js43_remaining_90_after_yield_with_fixes_by_feature.tsv` and
+  `temp/js43_remaining_90_after_yield_with_fixes_by_path.tsv`.
+
+Newly passing in this pass:
+
+- `language_expressions_call_S11_2_4_A1_4_T2_js`
+- `language_expressions_call_S11_2_4_A1_4_T4_js`
+- `language_expressions_arrow_function_lexical_new_target_js`
+- `language_expressions_arrow_function_lexical_new_target_closure_returned_js`
+- `language_expressions_object_method_definition_name_param_id_yield_js`
+- `language_expressions_yield_rhs_omitted_js`
+- `language_statements_class_definition_methods_gen_yield_as_expression_without_rhs_js`
+- `language_statements_labeled_value_yield_non_strict_js`
+- `language_statements_labeled_value_await_non_module_js`
+- `language_statements_class_elements_syntax_valid_grammar_field_named_get_followed_by_generator_asi_js`
+- `language_statements_class_elements_syntax_valid_grammar_field_named_set_followed_by_generator_asi_js`
+- `language_statements_const_syntax_const_invalid_assignment_statement_body_for_in_js`
+- `language_statements_const_syntax_const_invalid_assignment_statement_body_for_of_js`
+
+Remaining shape:
+
+- RegExp: 20 rows, dominated by 17 lookbehind/lookahead/nullable/full-case
+  folding cases.
+- Global declaration / variable behavior: 9 rows.
+- Class/subclass/private-field behavior: 15 rows.
+- Generator / `with` / scope / completion behavior: the remaining 19 rows in
+  the 63-row long tail.
+
+## 62. Script `var` Writeback From Function And Generator Bodies
+
+Status on 2026-05-19: fixed the generator `with`/`Symbol.unscopables`
+failures by following the stale `callCount` binding back to script `var`
+writeback.  The issue was not `with` lookup: object-environment unscopables
+were already respected.  The failing tests used a script/global `var` that was
+updated inside a function/generator body, then observed through the script
+binding.
+
+Root cause:
+
+- Script `var` bindings are mirrored through both the module-var table and the
+  global object property.
+- Function/generator assignment paths emitted a module-var update, and the
+  helper then tried to sync the global object through
+  `js_set_global_var_property_fast`.
+- That fast helper first found the existing property by character content but
+  then wrote with the current string `Item`.  When the function body had a
+  different string literal object for the same property name, the fast map write
+  could miss the actual global binding, leaving reads of the script `var`
+  pinned to the old global-property value.
+
+Fix:
+
+- `jm_emit_global_var_property_sync()` now uses the normal
+  `js_set_global_property` path for function/generator writebacks.  This keeps
+  the module-var and global-object views coherent using ordinary JS property-key
+  semantics.
+- Captured module-var writebacks continue to update the module-var slot first,
+  then sync the global property for non-module script `var` bindings.
+
+Verification:
+
+```bash
+make -C build/premake config=release_native lambda test_js_test262_gtest -j4
+./lambda.exe js temp/js43_function_direct_outer_var_assign_result_probe.js --no-log
+./lambda.exe js temp/js43_generator_direct_outer_var_increment_string_probe.js --no-log
+./lambda.exe js temp/js43_generator_capture_block_callcount_assign_probe.js --no-log
+./lambda.exe js temp/js43_function_block_func_outer_var_probe.js --no-log
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_unscopables_probe.txt --js-timeout=30 --write-failures=temp/js43_unscopables_after_global_var_sync.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_remaining_90_replay_from_latest.txt --js-timeout=30 --write-failures=temp/js43_remaining_90_after_global_var_sync.tsv --gtest_brief=1
+```
+
+Results:
+
+- Focused script-var probes passed for direct functions, direct generators,
+  block-level function declarations, and block-level generator declarations.
+- Focused unscopables batch passed 2 / 2:
+  `language_expressions_generators_unscopables_with_js` and
+  `language_statements_generators_unscopables_with_js`.
+- The 92-row replay improved to 48 passed / 44 failed.  The unscopables rows
+  and `language_statements_generators_yield_as_generator_declaration_binding_identifier_js`
+  are now passing.
+- Current failure manifest:
+  `temp/js43_remaining_90_after_global_var_sync.tsv`.
+
+Remaining shape:
+
+- RegExp: lookbehind/lookahead/nullable/full-case-folding behavior remains the
+  largest cluster.
+- Class/subclass/private-field semantics remain the next largest cluster.
+- Smaller open items remain in lexical `new.target`, tagged-template eval
+  caching, try/catch lexical opening, completion values, and one timeout.
+
+## 63. Catch/Block Lexical Scope And `for` Update Per-Iteration Closures
+
+Status on 2026-05-19: fixed three more language failures from the reduced
+92-row replay, moving the replay from 51 passed / 41 failed before this scope
+work to 54 passed / 38 failed.
+
+Root causes fixed:
+
+- Catch parameter bindings and catch-body `let` / `const` bindings were merged
+  into a single ad hoc scope environment.  The closure collector assigns slots
+  from captured names, while the runtime catch env was assigning slots from
+  catch-pattern names first.  A body closure over `let x` could therefore read
+  the catch-pattern `_` slot instead of `x`.
+- Block TDZ initialization skipped local `let` / `const` bindings whenever a
+  module/global mutable binding with the same name existed.  That skip is only
+  valid for the top-level binding; nested block and catch-body shadows must
+  still create local TDZ bindings before closures are created.
+- `for (let i = ...; ...; update)` closures created inside the update expression
+  captured the old iteration value by copy.  ES creates a fresh per-iteration
+  environment before the update expression, and subsequent update operations
+  mutate that same environment.  The update expression now gets a fresh scope
+  env for the loop's lexical init bindings and closures created there may share
+  it.
+
+Fix:
+
+- Catch lowering now allocates a catch-parameter env only for the catch
+  parameter, then lowers the catch body through normal block-statement lowering
+  so body lexicals get a distinct environment.
+- Nested block TDZ setup only skips module-var TDZ at top-level scope.
+- Added `allow_iteration_scope_env_capture` around `for` update lowering and a
+  fresh update env seeded from the loop lexical bindings, so closures in the
+  update see the later `++i` mutation.
+
+Verification:
+
+```bash
+make -C build/premake config=release_native lambda test_js_test262_gtest -j4
+./lambda.exe js temp/js43_try_catch_lex_probe.js --no-log
+./lambda.exe js temp/js43_block_lex_probe.js --no-log
+./lambda.exe js temp/js43_let_next_probe.js --no-log
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_try_catch_lex_batch.txt --js-timeout=30 --write-failures=temp/js43_try_catch_lex_after_split_catch_body.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_let_next_probe.txt --js-timeout=30 --write-failures=temp/js43_let_next_after_update_env.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_remaining_90_replay_from_latest.txt --js-timeout=30 --write-failures=temp/js43_remaining_90_after_for_update_env.tsv --gtest_brief=1
+```
+
+Results:
+
+- Catch lexical focused batch passed 2 / 2:
+  `language_statements_try_scope_catch_block_lex_open_js` and
+  `language_statements_try_scope_catch_param_lex_open_js`.
+- `language_statements_let_syntax_let_closure_inside_next_expression_js`
+  passed as a focused batch.
+- Arrow lexical sanity batch passed 2 / 2 when rerun alone:
+  `language_expressions_arrow_function_lexical_new_target_js` and
+  `language_expressions_arrow_function_lexical_super_call_from_within_constructor_js`.
+- The 92-row replay now reports 54 passed / 38 failed.
+- Current failure manifest:
+  `temp/js43_remaining_90_after_for_update_env.tsv`.
+
+Remaining shape:
+
+- RegExp remains the largest cluster: lookbehind/lookahead/nullable/full-case
+  folding.
+- Class/subclass/private-field semantics remain the next largest cluster.
+- Smaller open language items include tagged-template eval capture, try
+  completion values, and class expression binding edge cases.
+
+## 64. Try Completion, Class Expression Binding, And Private Field Ordering
+
+Status on 2026-05-19: fixed five more failures from the reduced 92-row replay,
+moving it from 54 passed / 38 failed to 59 passed / 33 failed.
+
+Root causes fixed:
+
+- `try` / `finally` completion tracking saved the try completion before running
+  the finalizer, but left the old completion live while the finalizer executed.
+  A `finally { break; }` therefore carried the try block's value instead of an
+  empty finalizer completion.  The lowering now resets the eval completion
+  register immediately after saving the try completion for possible fallback.
+- Named class expressions were still leaking their inner name to the outer
+  environment through two paths: both class AST builders added named class
+  expressions to the surrounding parser scope, and module lowering created a
+  top-level `_js_<name>` placeholder for every class entry.  Class-expression
+  names are now kept as private inner bindings only; real class declarations
+  continue to bind normally.
+- Instance field initialization kept the runtime private-field initialization
+  bypass enabled while evaluating every initializer.  That allowed ordinary
+  initializer code such as `this.#x = 1` before `#x` was declared to skip the
+  required private-brand TypeError.  The bypass is now scoped only around the
+  engine's own private-field installation write.
+
+Verification:
+
+```bash
+make -C build/premake config=release_native lambda test_js_test262_gtest -j4
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_try_completion_probe.txt --js-timeout=30 --write-failures=temp/js43_try_completion_after_finally_reset.tsv --gtest_brief=1
+./lambda.exe js temp/js43_class_expr_binding_probe.js --no-log
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_class_expr_binding_probe.txt --js-timeout=30 --write-failures=temp/js43_class_expr_binding_after_hoist_skip.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_private_field_order_probe.txt --js-timeout=30 --write-failures=temp/js43_private_field_order_after_flag_narrow.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_remaining_90_replay_from_latest.txt --js-timeout=30 --write-failures=temp/js43_remaining_90_after_private_field_order.tsv --gtest_brief=1
+```
+
+Results:
+
+- `language_statements_try_completion_values_js` passes.
+- `language_statements_class_syntax_class_expression_binding_identifier_opt_class_element_list_js`
+  passes, and the probe now reports `typeof B` as `undefined` outside
+  `var A = class B {}`.
+- Private-field ordering focused batch passed 3 / 3:
+  `language_statements_class_elements_privatefieldset_typeerror_1_js`,
+  `language_statements_class_elements_prod_private_setter_before_super_return_in_field_initializer_js`,
+  and `language_expressions_class_elements_prod_private_setter_before_super_return_in_field_initializer_js`.
+- The 92-row replay now reports 59 passed / 33 failed.
+- Current failure manifest:
+  `temp/js43_remaining_90_after_private_field_order.tsv`.
+
+Remaining shape:
+
+- RegExp is now the dominant cluster: lookbehind, nullable quantifier, and
+  Unicode case folding.
+- Class/subclass construction remains the next cluster, especially bound class
+  calls and built-in subclassing.
+- Smaller open language items include direct-eval lexical capture in tagged
+  templates and the `eval("break LABEL")` SyntaxError case.
+
+## 65. Labeled Break And Super Constructor Edge Cases
+
+Status on 2026-05-19: fixed six more failures from the reduced 92-row replay,
+moving it from 59 passed / 33 failed to 65 passed / 27 failed.
+
+Root causes fixed:
+
+- Early-error validation tracked unlabeled `break` and labeled `continue`, but
+  did not verify that a labeled `break` target existed inside the same parsed
+  source.  A direct eval such as `eval("break LABEL1")` could therefore escape
+  toward an outer label instead of throwing SyntaxError.
+- Bound class constructors reused the class construction stub for ordinary
+  calls.  `A.bind()()` must still throw like `A()`, while `new (A.bind())()`
+  remains valid.
+- The class-heritage constructor check treated `Proxy(generator)` as
+  constructible because the proxy target was callable.  `extends` must use
+  recursive `IsConstructor`, not callability, so generator and async-generator
+  proxy targets are rejected before `.prototype` lookup.
+- `super()` in `class C extends null` fell through the dynamic superclass path
+  and returned `this`.  The lowering now evaluates the argument list and then
+  calls the native super-constructor path with `null`, which raises TypeError.
+- The class-super helper returned `this` for any non-function/non-class callee.
+  It now only treats class objects with no explicit constructor as a no-op.
+- `super()` for `class S extends Symbol` called `Symbol` as a normal function.
+  Symbol is valid as heritage, but construction must dispatch through
+  `js_new_from_class_object` so the Symbol constructor rejects `NewTarget`.
+
+Verification:
+
+```bash
+make -C build/premake config=release_native lambda test_js_test262_gtest -j4
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_eval_break_batch.txt --js-timeout=30 --write-failures=temp/js43_eval_break_after_label_scope.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_class_subclass_binding_batch.txt --js-timeout=30 --write-failures=temp/js43_class_subclass_binding_after_bound_guard.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_class_subclass_generator_super_batch.txt --js-timeout=30 --write-failures=temp/js43_class_subclass_generator_super_after_proxy_ctor.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_class_null_proto_super_batch.txt --js-timeout=30 --write-failures=temp/js43_class_null_proto_super_after_null_lowering.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_symbol_super_batch.txt --js-timeout=30 --write-failures=temp/js43_symbol_super_after_construct_dispatch.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_remaining_90_replay_from_latest.txt --js-timeout=30 --write-failures=temp/js43_remaining_90_after_symbol_super.tsv --gtest_brief=1
+```
+
+Results:
+
+- Focused batches passed for:
+  `language_statements_break_S12_8_A7_js`,
+  `language_statements_class_subclass_binding_js`,
+  `language_statements_class_subclass_superclass_generator_function_js`,
+  `language_statements_class_subclass_superclass_async_generator_function_js`,
+  `language_statements_class_subclass_class_definition_null_proto_super_js`,
+  and `language_statements_class_subclass_builtin_objects_Symbol_new_symbol_with_super_throws_js`.
+- The 92-row replay now reports 65 passed / 27 failed.
+- Current failure manifest:
+  `temp/js43_remaining_90_after_symbol_super.tsv`.
+
+Remaining shape:
+
+- RegExp remains dominant: 20 failures covering lookbehind, lookahead capture
+  groups, nullable quantifier, and Unicode case folding.
+- Five class/builtin subclassing failures remain: ArrayBuffer, Array,
+  Boolean, TypedArray, and general TypedArray subclass behavior.
+- One direct-eval tagged-template lexical capture failure remains.
+
+## 66. Direct Eval Template Registry And RegExp Case Folding
+
+Status on 2026-05-19: fixed the direct-eval tagged-template failure and two
+Unicode RegExp case-folding failures.  The reduced 92-row replay moved from
+71 passed / 21 failed to 73 passed / 19 failed after the RegExp case fix.
+
+Root causes fixed:
+
+- Top-level direct eval reused the caller lexical bridge, but `js_main` did not
+  allocate an eval-local frame.  A loop block `let` captured by direct eval
+  could therefore fail lookup during the eval compile/execution path.  `js_main`
+  now initializes the eval-local frame register and pops it on normal and
+  exceptional exits.
+- Tagged template cache keys used source pointer and byte range only.  Repeated
+  direct eval of the same source string must still create fresh template site
+  identity, so the site hash now includes the eval module identity.
+- RE2's case-fold table matched Kelvin under non-`u` ignore-case, which is not
+  ECMAScript behavior.  The RegExp runtime now filters simple one-code-point
+  `/i` matches through ECMAScript canonicalization.
+- RE2 also missed Unicode fold-sequence equality for cases such as
+  `\u0390`/`\u1fd3`.  For `/iu` single-code-point atoms/classes, the runtime
+  compares utf8proc fold sequences while still consuming only one input code
+  point.
+
+Verification:
+
+```bash
+make -C build/premake config=release_native lambda -j4
+./lambda.exe js temp/js43_regex_case_probe.js --no-log
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_tagged_eval_batch.txt --js-timeout=30 --write-failures=temp/js43_tagged_eval_after_template_site_module.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_regex_case_batch.txt --js-timeout=30 --write-failures=temp/js43_regex_case_after_ecma_canonical.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_remaining_90_replay_from_latest.txt --js-timeout=30 --write-failures=temp/js43_remaining_90_after_regex_case.tsv --gtest_brief=1
+```
+
+Results:
+
+- `language_expressions_tagged_template_cache_eval_inner_function_js` passes.
+- `language_literals_regexp_u_case_mapping_js` passes.
+- `built_ins_RegExp_unicode_full_case_folding_js` passes.
+- The 92-row replay reported 73 passed / 19 failed.
+- Current failure manifest:
+  `temp/js43_remaining_90_after_regex_case.tsv`.
+
+## 67. Required Leading Lookahead Captures
+
+Status on 2026-05-19: fixed one more RegExp failure from the reduced replay,
+moving it from 73 passed / 19 failed to 74 passed / 18 failed.
+
+Root cause fixed:
+
+- Required leading positive lookaheads were rewritten as consuming captures but
+  the following atom was left in the RE2 pattern.  For example,
+  `(?:(?=(abc)))a` effectively became "consume `abc`, then match `a`" and
+  failed.  The wrapper now absorbs the following simple atom for required
+  leading lookaheads, keeps the assertion captures, and trims the reported full
+  match back to that atom's byte length.
+- Optional leading lookaheads continue to erase the assertion path, preserving
+  the expected `undefined` capture behavior for `?` and `{0,1}`.
+
+Verification:
+
+```bash
+make -C build/premake config=release_native lambda test_js_test262_gtest -j4
+./lambda.exe js temp/js43_regex_remaining_probe.js --no-log
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_regex_lookahead_nullable_batch.txt --js-timeout=30 --write-failures=temp/js43_regex_lookahead_nullable_after.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_remaining_90_replay_from_latest.txt --js-timeout=30 --write-failures=temp/js43_remaining_90_after_lookahead_trim.tsv --gtest_brief=1
+```
+
+Results:
+
+- `built_ins_RegExp_lookahead_quantifier_match_groups_js` passes.
+- `built_ins_RegExp_nullable_quantifier_js` still fails with `a` vs `ab`.
+- The 92-row replay now reports 74 passed / 18 failed.
+- Current failure manifest:
+  `temp/js43_remaining_90_after_lookahead_trim.tsv`.
+
+Remaining shape:
+
+- 17 failures are lookbehind-family failures.  The current runtime still strips
+  or only partially simulates lookbehind before handing patterns to RE2.
+- 1 failure is the nullable quantifier semantics mismatch:
+  `built_ins_RegExp_nullable_quantifier_js`.
+
+## 68. Lookbehind Boundary, Marker, And Backreference Progress
+
+Status on 2026-05-19: fixed four more tests from the reduced 92-row replay,
+moving it from 81 passed / 11 failed to 85 passed / 7 failed.
+
+Root causes fixed:
+
+- A consumed leading positive lookahead could move the following lookbehind
+  marker to the end of the lookahead text.  Adjacent zero-width assertions now
+  keep the lookbehind marker at the original assertion boundary, which also
+  keeps the sliced-string lookbehind cases from reading outside the actual
+  subject slice.
+- Lookbehind filters evaluated `\b`, `\B`, `^`, and `$` against a truncated
+  prefix, losing right-side context and multiline line-boundary behavior.  The
+  wrapper now handles those zero-width lookbehind bodies at the real input
+  boundary and prefixes nested multiline lookbehind matchers with `(?m)`.
+- Greedy prefixes such as `.*(?<=...)(.*)` now retry shorter same-start
+  lookbehind boundaries before advancing the overall match start.  This matches
+  the ECMAScript behavior where the outer expression can backtrack to a valid
+  assertion boundary, while the lookbehind disjunction itself is not
+  backtracked after it succeeds.
+- Dynamic lookbehind backreferences now substitute external captures through
+  the wrapper's original-to-RE2 group remap, so synthetic marker groups do not
+  get mistaken for original captures.
+- A simple inline positive lookahead followed by a consuming atom it already
+  proves, such as `(?=c)\w`, now consumes that character once instead of
+  consuming both the asserted literal and the following atom.
+
+Verification:
+
+```bash
+make -C build/premake config=release_native lambda test_js_test262_gtest -j4
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_regex_remaining_focus_batch.txt --js-timeout=30 --write-failures=temp/js43_regex_remaining_focus_after_dynamic_assert.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_remaining_90_replay_from_latest.txt --js-timeout=30 --write-failures=temp/js43_remaining_90_after_lb_boundary_retry.tsv --gtest_brief=1
+```
+
+Results:
+
+- Newly passing in the reduced replay:
+  `built_ins_RegExp_lookBehind_alternations_js`,
+  `built_ins_RegExp_lookBehind_sliced_strings_js`,
+  `built_ins_RegExp_lookBehind_start_of_line_js`, and
+  `built_ins_RegExp_lookBehind_word_boundary_js`.
+- The 92-row replay now reports 85 passed / 7 failed.
+- Current failure manifest:
+  `temp/js43_remaining_90_after_lb_boundary_retry.tsv`.
+
+Remaining shape:
+
+- Six RegExp failures remain:
+  backreference filter ordering after lookbehind capture materialization,
+  reverse-direction captures inside lookbehind, no-backtrack semantics after
+  a successful lookbehind, mutual-recursive captures/backrefs, nested lookahead
+  captures wider than a single literal, and named groups inside lookbehind.
+- One non-lookbehind RegExp failure remains:
+  `built_ins_RegExp_nullable_quantifier_js`.

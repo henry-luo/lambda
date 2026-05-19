@@ -186,6 +186,7 @@ extern Item js_string_get_int(Item str_item, int64_t index);
 extern Item js_string_replace_nonws_global_fast(Item str, Item replacement);
 extern Item js_string_fromCharCode2(Item first_item, Item second_item);
 extern Item js_uri_decode_equals_from_char_code(Item str_item, Item first_item, Item second_item, int64_t component);
+extern int64_t js_uri_decode_equals_from_char_code_raw(Item str_item, Item first_item, Item second_item, int64_t component);
 extern Item js_test262_decimal_to_percent_hex_string(Item n_item);
 extern Item js_test262_concat_percent_hex(Item left_item, Item n_item);
 extern void js_validate_native_function_source(Item source_item);
@@ -859,6 +860,7 @@ extern Item js_get_with_binding_or_fallback(Item key, Item fallback);
 extern int64_t js_probe_with_binding(Item key);
 extern int64_t js_capture_with_binding(Item key);
 extern int64_t js_set_last_with_binding_if_valid(Item key, Item value, int64_t strict);
+extern Item js_last_with_binding_base_or_undefined(Item key);
 extern Item js_delete_identifier_with_binding(Item key, int64_t declared_binding);
 extern int64_t js_global_binding_exists(Item key);
 extern void js_set_global_property(Item key, Item value);
@@ -872,6 +874,9 @@ extern void js_private_brand_add(Item object, Item private_key, Item callee);
 extern void js_set_private_class_index(Item class_item, int index);
 extern void js_define_global_var_property(Item key, Item value);
 extern void js_define_global_eval_var_property(Item key, Item value);
+extern void js_define_global_function_property(Item key, Item value);
+extern void js_define_global_lexical_binding(Item key, Item value, int64_t immutable);
+extern void js_check_global_lex_decl(Item key);
 extern void js_evalscript_check_global_var_decl(Item key);
 extern void js_evalscript_check_global_function_decl(Item key);
 extern void js_evalscript_check_global_lex_decl(Item key);
@@ -1484,6 +1489,7 @@ JitImport jit_runtime_imports[] = {
     {"js_string_replace_nonws_global_fast", FPTR(js_string_replace_nonws_global_fast)},
     {"js_string_fromCharCode2", FPTR(js_string_fromCharCode2)},
     {"js_uri_decode_equals_from_char_code", FPTR(js_uri_decode_equals_from_char_code)},
+    {"js_uri_decode_equals_from_char_code_raw", FPTR(js_uri_decode_equals_from_char_code_raw)},
     {"js_test262_decimal_to_percent_hex_string", FPTR(js_test262_decimal_to_percent_hex_string)},
     {"js_test262_concat_percent_hex", FPTR(js_test262_concat_percent_hex)},
     {"js_validate_native_function_source", FPTR(js_validate_native_function_source)},
@@ -1717,6 +1723,7 @@ JitImport jit_runtime_imports[] = {
     {"js_probe_with_binding", FPTR(js_probe_with_binding)},
     {"js_capture_with_binding", FPTR(js_capture_with_binding)},
     {"js_set_last_with_binding_if_valid", FPTR(js_set_last_with_binding_if_valid)},
+    {"js_last_with_binding_base_or_undefined", FPTR(js_last_with_binding_base_or_undefined)},
     {"js_delete_identifier_with_binding", FPTR(js_delete_identifier_with_binding)},
     {"js_global_binding_exists", FPTR(js_global_binding_exists)},
     {"js_set_global_property", FPTR(js_set_global_property)},
@@ -1729,6 +1736,9 @@ JitImport jit_runtime_imports[] = {
     {"js_set_private_class_index", FPTR(js_set_private_class_index)},
     {"js_define_global_var_property", FPTR(js_define_global_var_property)},
     {"js_define_global_eval_var_property", FPTR(js_define_global_eval_var_property)},
+    {"js_define_global_function_property", FPTR(js_define_global_function_property)},
+    {"js_define_global_lexical_binding", FPTR(js_define_global_lexical_binding)},
+    {"js_check_global_lex_decl", FPTR(js_check_global_lex_decl)},
     {"js_evalscript_check_global_var_decl", FPTR(js_evalscript_check_global_var_decl)},
     {"js_evalscript_check_global_function_decl", FPTR(js_evalscript_check_global_function_decl)},
     {"js_evalscript_check_global_lex_decl", FPTR(js_evalscript_check_global_lex_decl)},

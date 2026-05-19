@@ -3494,10 +3494,6 @@
     "named": false
   },
   {
-    "type": "static get",
-    "named": false
-  },
-  {
     "type": "string_fragment",
     "named": true
   },
