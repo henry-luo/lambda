@@ -9,6 +9,31 @@ int jm_name_cmp(const void* a, const void* b, void* udata) {
     return strcmp(((const JsNameSetEntry*)a)->name, ((const JsNameSetEntry*)b)->name);
 }
 
+static bool jm_analysis_function_decl_is_direct_binding(JsFunctionNode* fn) {
+    if (!fn) return false;
+    TSNode fn_node = fn->base.node;
+    if (ts_node_is_null(fn_node)) return false;
+    TSNode parent = ts_node_parent(fn_node);
+    if (ts_node_is_null(parent)) return false;
+    const char* parent_type = ts_node_type(parent);
+    if (parent_type && strcmp(parent_type, "program") == 0) return true;
+    if (!parent_type || strcmp(parent_type, "statement_block") != 0) return false;
+    TSNode grandparent = ts_node_parent(parent);
+    if (ts_node_is_null(grandparent)) return false;
+    const char* grandparent_type = ts_node_type(grandparent);
+    if (!grandparent_type) return false;
+    bool function_body_parent = strcmp(grandparent_type, "function_declaration") == 0 ||
+        strcmp(grandparent_type, "function_expression") == 0 ||
+        strcmp(grandparent_type, "generator_function_declaration") == 0 ||
+        strcmp(grandparent_type, "generator_function") == 0 ||
+        strcmp(grandparent_type, "arrow_function") == 0;
+    if (!function_body_parent) return false;
+    TSNode body = ts_node_child_by_field_name(grandparent, "body", 4);
+    return !ts_node_is_null(body) &&
+        ts_node_start_byte(body) == ts_node_start_byte(parent) &&
+        ts_node_end_byte(body) == ts_node_end_byte(parent);
+}
+
 void jm_name_set_add(struct hashmap* set, const char* name) {
     JsNameSetEntry e;
     memset(&e, 0, sizeof(e));
@@ -1394,7 +1419,11 @@ void jm_init_block_tdz(JsMirTranspiler* mt, JsAstNode* block) {
                     MIR_reg_t fn_reg = jm_create_func_or_closure(mt, fc);
                     jm_set_var(mt, vname, fn_reg);
                     JsMirVarEntry* ve = jm_find_var(mt, vname);
-                    if (ve) ve->from_block_func_decl = true;
+                    if (ve) {
+                        ve->is_let_const = true;
+                        ve->tdz_active = false;
+                        ve->from_block_func_decl = true;
+                    }
                 }
             }
         }
@@ -1555,9 +1584,18 @@ void jm_collect_param_default_refs(JsAstNode* params, struct hashmap* refs) {
     }
 }
 
+static bool jm_analysis_function_is_method_syntax(JsFunctionNode* fn) {
+    if (!fn || ts_node_is_null(fn->base.node)) return false;
+    TSNode parent = ts_node_parent(fn->base.node);
+    if (ts_node_is_null(parent)) return false;
+    const char* parent_type = ts_node_type(parent);
+    if (!parent_type) return false;
+    return strcmp(parent_type, "method_definition") == 0;
+}
+
 void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
-                                struct hashmap* module_consts,
-                                struct hashmap* ancestor_func_locals) {
+                         struct hashmap* module_consts,
+                         struct hashmap* ancestor_func_locals) {
     JsFunctionNode* fn = fc->node;
     fc->capture_count = 0;
 
@@ -1591,6 +1629,7 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
     if (fn->name && fn->name->chars) {
         snprintf(self_name, sizeof(self_name), "_js_%.*s", (int)fn->name->len, fn->name->chars);
     }
+    bool is_method_syntax = jm_analysis_function_is_method_syntax(fn);
 
     size_t iter = 0;
     void* item;
@@ -1600,7 +1639,8 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
         if (jm_name_set_has(locals, ref->name)) continue;    // local var
         // NFE self-reference: check before outer_scope guard since NFE name
         // is not in outer scope but still needs to be captured
-        if (self_name[0] && strcmp(ref->name, self_name) == 0) {
+        if (!fc->is_class_method && !is_method_syntax &&
+            self_name[0] && strcmp(ref->name, self_name) == 0) {
             has_self_ref = true;
             continue; // handle after we know if there are other captures
         }
@@ -1661,7 +1701,9 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
     // Exception: function EXPRESSIONS always need self-capture for NFE name binding,
     // since their name is not in the module var table even when top-level.
     bool is_func_expr = fn->base.node_type == JS_AST_NODE_FUNCTION_EXPRESSION;
-    if (has_self_ref && self_name[0] && (fc->parent_index >= 0 || is_func_expr)) {
+    bool is_block_func_decl = fn->base.node_type == JS_AST_NODE_FUNCTION_DECLARATION &&
+        !jm_analysis_function_decl_is_direct_binding(fn);
+    if (has_self_ref && self_name[0] && (fc->parent_index >= 0 || is_func_expr || is_block_func_decl)) {
         jm_ensure_captures_capacity(fc);
         snprintf(fc->captures[fc->capture_count].name, 128, "%s", self_name);
         fc->captures[fc->capture_count].scope_env_slot = -1;

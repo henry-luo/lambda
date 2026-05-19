@@ -14959,7 +14959,7 @@ static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) 
     bool utf16_replace = fast_rd && fast_rd->needs_utf16_subject;
     int64_t source_units = utf16_replace && S ?
         js_utf16_len(S->chars, (int)S->len, (bool)S->is_ascii) : lengthS;
-    if (fast_rd && !fast_rd->needs_utf16_subject && fast_rd->global && !functional_replace) {
+    if (fast_rd && fast_rd->global && !functional_replace) {
         bool own_global_fast = false;
         Item own_global_val = js_map_get_fast_ext(this_val.map, "global", 6, &own_global_fast);
         bool own_flags_fast = false;
@@ -24682,11 +24682,17 @@ extern "C" Item js_generator_create(void* func_ptr, Item* env, int env_size, int
     Item obj = js_new_object();
     String* gen_key = heap_create_name("__gen_idx", 9);
     js_property_set(obj, (Item){.item = s2it(gen_key)}, (Item){.item = i2it(idx)});
-    // Set prototype: use the generator function's .prototype if it's an object (OrdinaryCreateFromConstructor).
-    // When .prototype is not an object, fall back to %AsyncGeneratorPrototype% / %GeneratorPrototype% (depth-2).
-    // js_generator_callee_proto was set by js_call_function before invoking this generator function.
+    // Set prototype: use the generator function's current .prototype if it's an
+    // object (OrdinaryCreateFromConstructor).  Default parameter evaluation can
+    // mutate g.prototype before the generator object is created, so read the
+    // pending callee now instead of relying only on the pre-call snapshot.
     {
-        Item callee_proto = js_generator_callee_proto;
+        Item callee_proto = (Item){0};
+        if (get_type_id(js_pending_args_callee) == LMD_TYPE_FUNC) {
+            Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
+            callee_proto = js_property_get(js_pending_args_callee, proto_key);
+        }
+        if (callee_proto.item == 0) callee_proto = js_generator_callee_proto;
         js_generator_callee_proto = (Item){0}; // reset
         if (callee_proto.item != 0 && get_type_id(callee_proto) == LMD_TYPE_MAP) {
             js_set_prototype(obj, callee_proto);

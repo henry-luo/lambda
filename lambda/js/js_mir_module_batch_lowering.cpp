@@ -1810,7 +1810,10 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             JsClassEntry* ce = &mt->class_entries[ci];
             for (int mi = 0; mi < ce->method_count; mi++) {
                 JsClassMethodEntry* me = &ce->methods[mi];
-                if (me->fc) me->fc->is_strict = true;
+                if (me->fc) {
+                    me->fc->is_class_method = true;
+                    me->fc->is_strict = true;
+                }
             }
         }
         // Step 3: propagate strict from parent to child (func_entries are post-order,
@@ -2496,12 +2499,15 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     jm_name_hash, jm_name_cmp, NULL, NULL);
                 struct hashmap* iife_lex_collisions = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
                     jm_name_hash, jm_name_cmp, NULL, NULL);
+                bool iife_effective_strict = mt->is_global_strict || mt->is_module ||
+                    (iife_fc && iife_fc->is_strict) || jm_has_use_strict_directive(iife_fn);
                 jm_collect_all_let_const_names_recursive(iife_fn->body, iife_lex_collisions);
                 jm_collect_body_locals(iife_fn->body, iife_func_hoists, true);
                 size_t fh_iter = 0; void* fh_item;
                 while (hashmap_iter(iife_func_hoists, &fh_iter, &fh_item)) {
                     JsNameSetEntry* e = (JsNameSetEntry*)fh_item;
                     if (!e->from_func_decl) continue;
+                    if (iife_effective_strict) continue;
                     if (top_level_declares_name(e->name, stmt)) continue;
                     if (jm_name_set_has(iife_lex_collisions, e->name)) continue;
                     JsModuleConstEntry lookup;
@@ -3758,6 +3764,15 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 jm_call_void_2(mt, "js_set_module_var",
                     MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mce->int_val),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, init_val));
+                if (!mt->is_module && !mt->is_eval_direct &&
+                    !mce->is_iife_var && !mce->is_implicit_global) {
+                    const char* js_name = mce->name;
+                    if (strncmp(js_name, "_js_", 4) == 0) js_name += 4;
+                    MIR_reg_t key_reg = jm_box_string_literal(mt, js_name, strlen(js_name));
+                    jm_call_void_2(mt, "js_define_global_var_property",
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, init_val));
+                }
             }
         }
     }

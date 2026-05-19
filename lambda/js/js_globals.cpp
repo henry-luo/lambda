@@ -14077,6 +14077,12 @@ static bool js_with_binding_key_same(Item a, Item b) {
     return memcmp(sa->chars, sb->chars, sa->len) == 0;
 }
 
+static bool js_with_scope_is_object(Item value) {
+    TypeId type = get_type_id(value);
+    return type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY ||
+           type == LMD_TYPE_FUNC || type == LMD_TYPE_ELEMENT;
+}
+
 extern "C" void js_with_batch_reset(void) {
     js_with_stack_depth = 0;
     js_last_with_binding_valid = false;
@@ -14156,7 +14162,7 @@ static Item js_with_scope_lookup(Item key, bool* found, bool strict_get) {
     *found = false;
     for (int i = js_with_stack_depth - 1; i >= 0; i--) {
         Item scope_obj = js_with_stack[i];
-        if (get_type_id(scope_obj) == LMD_TYPE_MAP) {
+        if (js_with_scope_is_object(scope_obj)) {
             if (it2b(js_in(key, scope_obj))) {
                 if (js_check_exception()) {
                     *found = true;
@@ -14228,7 +14234,7 @@ extern "C" int64_t js_probe_with_binding(Item key) {
     if (js_with_stack_depth <= 0) return 0;
     for (int i = js_with_stack_depth - 1; i >= 0; i--) {
         Item scope_obj = js_with_stack[i];
-        if (get_type_id(scope_obj) != LMD_TYPE_MAP) continue;
+        if (!js_with_scope_is_object(scope_obj)) continue;
         if (it2b(js_in(key, scope_obj))) {
             if (js_check_exception()) return 1;
             Item unscopables_sym = (Item){.item = i2it(-(int64_t)(11 + JS_SYMBOL_BASE))};
@@ -14251,7 +14257,7 @@ extern "C" int64_t js_capture_with_binding(Item key) {
     if (js_with_stack_depth <= 0) return 0;
     for (int i = js_with_stack_depth - 1; i >= 0; i--) {
         Item scope_obj = js_with_stack[i];
-        if (get_type_id(scope_obj) != LMD_TYPE_MAP) continue;
+        if (!js_with_scope_is_object(scope_obj)) continue;
         if (it2b(js_in(key, scope_obj))) {
             if (js_check_exception()) return 1;
             Item unscopables_sym = (Item){.item = i2it(-(int64_t)(11 + JS_SYMBOL_BASE))};
@@ -14278,7 +14284,7 @@ extern "C" int64_t js_set_last_with_binding_if_valid(Item key, Item value, int64
     }
     Item scope_obj = js_last_with_binding_scope;
     js_last_with_binding_valid = false;
-    if (get_type_id(scope_obj) != LMD_TYPE_MAP) return 0;
+    if (!js_with_scope_is_object(scope_obj)) return 0;
     if (it2b(js_in(key, scope_obj))) {
         if (js_check_exception()) return 1;
         js_property_set(scope_obj, key, value);
@@ -14297,7 +14303,7 @@ extern "C" Item js_delete_identifier_with_binding(Item key, int64_t declared_bin
     if (js_with_stack_depth > 0) {
         for (int i = js_with_stack_depth - 1; i >= 0; i--) {
             Item scope_obj = js_with_stack[i];
-            if (get_type_id(scope_obj) != LMD_TYPE_MAP) continue;
+            if (!js_with_scope_is_object(scope_obj)) continue;
             if (it2b(js_in(key, scope_obj))) {
                 if (js_check_exception()) return (Item){.item = b2it(false)};
                 Item unscopables_sym = (Item){.item = i2it(-(int64_t)(11 + JS_SYMBOL_BASE))};
@@ -14401,7 +14407,7 @@ static void js_set_global_property_impl(Item key, Item value, bool strict) {
     if (js_with_stack_depth > 0) {
         for (int i = js_with_stack_depth - 1; i >= 0; i--) {
             Item scope_obj = js_with_stack[i];
-            if (get_type_id(scope_obj) == LMD_TYPE_MAP) {
+            if (js_with_scope_is_object(scope_obj)) {
                 if (js_last_with_binding_valid &&
                     js_last_with_binding_scope.item == scope_obj.item &&
                     js_with_binding_key_same(js_last_with_binding_key, key)) {
@@ -14457,6 +14463,30 @@ static void js_set_global_property_impl(Item key, Item value, bool strict) {
 // js_set_global_property: write a property to the global object by name string
 // Used for implicit global assignments (sloppy mode: assigning to undeclared variables)
 extern "C" void js_set_global_property(Item key, Item value) {
+    js_set_global_property_impl(key, value, false);
+}
+
+extern "C" void js_set_global_var_property_fast(Item key, Item value) {
+    if (js_with_stack_depth == 0 && get_type_id(key) == LMD_TYPE_STRING) {
+        Item global = js_get_global_this();
+        if (get_type_id(global) == LMD_TYPE_MAP && global.map) {
+            String* str = it2s(key);
+            if (str && str->len > 0) {
+                ShapeEntry* se = js_find_shape_entry(global, str->chars, (int)str->len);
+                bool found = false;
+                Item slot = js_map_get_fast_ext(global.map, str->chars, (int)str->len, &found);
+                TypeId slot_type = get_type_id(slot);
+                TypeId value_type = get_type_id(value);
+                if (found && slot.item != JS_DELETED_SENTINEL_VAL &&
+                    se && !jspd_is_deleted(se) && !jspd_is_accessor(se) &&
+                    js_props_query_writable(global.map, se, str->chars, (int)str->len) &&
+                    slot_type == value_type) {
+                    fn_map_set(global, key, value);
+                    return;
+                }
+            }
+        }
+    }
     js_set_global_property_impl(key, value, false);
 }
 

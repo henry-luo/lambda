@@ -795,13 +795,19 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
         //   offset 8: Item* items (8 bytes)
         //   offset 16: int64_t length (8 bytes)
         uint8_t* p = (uint8_t*)obj;
-        void* items_ptr = *(void**)(p + 8);   // Item* items
-        int64_t length = *(int64_t*)(p + 16);  // length
-        if (items_ptr && length > 0) {
+        void* items_ptr = *(void**)(p + 8);     // Item* items
+        int64_t length = *(int64_t*)(p + 16);   // logical length
+        int64_t extra = *(int64_t*)(p + 24);    // js arrays may store a companion Map* here
+        int64_t capacity = *(int64_t*)(p + 32); // allocated dense capacity
+        int64_t dense_count = length < capacity ? length : capacity;
+        if (items_ptr && dense_count > 0) {
             uint64_t* items = (uint64_t*)items_ptr;
-            for (int64_t i = 0; i < length; i++) {
+            for (int64_t i = 0; i < dense_count; i++) {
                 gc_mark_item(gc, items[i]);
             }
+        }
+        if (extra != 0) {
+            gc_mark_possible_item(gc, (uint64_t)extra);
         }
         break;
     }
@@ -905,13 +911,15 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
         uint8_t* p = (uint8_t*)obj;
         void* items_ptr = *(void**)(p + 8);
         int64_t length = *(int64_t*)(p + 16);
+        int64_t capacity = *(int64_t*)(p + 32);
         void* type_ptr = *(void**)(p + 40);
         void* data_ptr = *(void**)(p + 48);
+        int64_t dense_count = length < capacity ? length : capacity;
 
         // trace children items
-        if (items_ptr && length > 0) {
+        if (items_ptr && dense_count > 0) {
             uint64_t* items = (uint64_t*)items_ptr;
-            for (int64_t i = 0; i < length; i++) {
+            for (int64_t i = 0; i < dense_count; i++) {
                 gc_mark_item(gc, items[i]);
             }
         }
@@ -1077,8 +1085,9 @@ static void gc_compact_data(gc_heap_t* gc) {
                     // Fix embedded float/int64/datetime pointers that reference
                     // the old buffer's extra area (set by array_set)
                     if (extra > 0) {
+                        int64_t dense_count = length < capacity ? length : capacity;
                         gc_fixup_embedded_pointers(old_items, (uint64_t*)new_items,
-                                                   length, capacity);
+                                                   dense_count, capacity);
                     }
                     compacted++;
                 }
@@ -1131,8 +1140,9 @@ static void gc_compact_data(gc_heap_t* gc) {
                     *items_slot = new_items;
                     // Fix embedded float/int64/datetime pointers
                     if (elmt_extra > 0) {
+                        int64_t dense_count = elmt_length < elmt_capacity ? elmt_length : elmt_capacity;
                         gc_fixup_embedded_pointers(old_elmt_items, (uint64_t*)new_items,
-                                                   elmt_length, elmt_capacity);
+                                                   dense_count, elmt_capacity);
                     }
                     compacted++;
                 }

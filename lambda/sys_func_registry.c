@@ -862,6 +862,7 @@ extern int64_t js_set_last_with_binding_if_valid(Item key, Item value, int64_t s
 extern Item js_delete_identifier_with_binding(Item key, int64_t declared_binding);
 extern int64_t js_global_binding_exists(Item key);
 extern void js_set_global_property(Item key, Item value);
+extern void js_set_global_var_property_fast(Item key, Item value);
 extern void js_set_global_property_strict(Item key, Item value);
 extern void js_set_global_property_strict_prechecked(Item key, Item value, int64_t binding_exists_at_lhs);
 extern void js_mark_private_method_non_writable(Item object, Item name);
@@ -1719,6 +1720,7 @@ JitImport jit_runtime_imports[] = {
     {"js_delete_identifier_with_binding", FPTR(js_delete_identifier_with_binding)},
     {"js_global_binding_exists", FPTR(js_global_binding_exists)},
     {"js_set_global_property", FPTR(js_set_global_property)},
+    {"js_set_global_var_property_fast", FPTR(js_set_global_var_property_fast)},
     {"js_set_global_property_strict", FPTR(js_set_global_property_strict)},
     {"js_set_global_property_strict_prechecked", FPTR(js_set_global_property_strict_prechecked)},
     {"js_mark_private_method_non_writable", FPTR(js_mark_private_method_non_writable)},
