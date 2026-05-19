@@ -187,6 +187,40 @@ void filter_opacity(uint8_t* a, float amount) {
     *a = clamp_byte(*a * amount);
 }
 
+static bool render_filter_apply_native_backend(const RenderBackendCaps* caps,
+                                               ScratchArena* sa,
+                                               ImageSurface* surface,
+                                               FilterProp* filter,
+                                               Rect* rect,
+                                               Bound* clip) {
+    (void)caps;
+    (void)sa;
+    (void)surface;
+    (void)filter;
+    (void)rect;
+    (void)clip;
+    return false;
+}
+
+bool render_filter_apply_with_backend(const RenderBackendCaps* caps,
+                                      ScratchArena* sa,
+                                      ImageSurface* surface,
+                                      FilterProp* filter,
+                                      Rect* rect,
+                                      Bound* clip) {
+    if (!filter || !filter->functions) {
+        return false;
+    }
+
+    if (render_backend_supports_filter_chain(caps, filter) &&
+        render_filter_apply_native_backend(caps, sa, surface, filter, rect, clip)) {
+        return true;
+    }
+
+    apply_css_filters(sa, surface, filter, rect, clip);
+    return true;
+}
+
 /**
  * Apply all CSS filters to a rendered region
  *

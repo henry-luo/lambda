@@ -18,6 +18,8 @@ struct RdtVectorImpl {
     int width;
     int height;
     int stride;
+    float tile_offset_x;
+    float tile_offset_y;
 };
 
 struct RdtPath {
@@ -28,6 +30,8 @@ struct RdtPicture {
     CGImageRef image;
     float width;
     float height;
+    RdtMatrix transform;
+    bool has_transform;
 };
 
 // ============================================================================
@@ -67,6 +71,7 @@ static const RdtVectorCaps g_cg_caps = {
     false,  // gaussian_blur
     false,  // color_matrix_filters
     false,  // native_text_runs
+    false,  // vector_batching
     true,   // premultiplied_surface
     false,  // tile_offsets
     false,  // clip_depth_save_restore
@@ -179,9 +184,31 @@ void rdt_vector_set_target(RdtVector* vec, uint32_t* pixels, int w, int h, int s
     // else same buffer, nothing to do
 }
 
+void rdt_vector_set_tile_offset_y(RdtVector* vec, float offset_y) {
+    if (!vec || !vec->impl) return;
+    vec->impl->tile_offset_y = offset_y;
+}
+
+void rdt_vector_set_tile_offset_x(RdtVector* vec, float offset_x) {
+    if (!vec || !vec->impl) return;
+    vec->impl->tile_offset_x = offset_x;
+}
+
 const RdtVectorCaps* rdt_vector_get_caps(const RdtVector* vec) {
     (void)vec;
     return &g_cg_caps;
+}
+
+void rdt_vector_begin_batch(RdtVector* vec) {
+    (void)vec;
+}
+
+void rdt_vector_flush_batch(RdtVector* vec) {
+    (void)vec;
+}
+
+void rdt_vector_end_batch(RdtVector* vec) {
+    (void)vec;
 }
 
 // ============================================================================
@@ -482,6 +509,14 @@ void rdt_pop_clip(RdtVector* vec) {
     CGContextRestoreGState(cg->ctx);
 }
 
+int rdt_clip_save_depth() {
+    return 0;
+}
+
+void rdt_clip_restore_depth(int saved_depth) {
+    (void)saved_depth;
+}
+
 // ============================================================================
 // Image drawing
 // ============================================================================
@@ -602,6 +637,39 @@ void rdt_picture_set_size(RdtPicture* pic, float w, float h) {
     pic->height = h;
 }
 
+RdtPicture* rdt_picture_dup(RdtPicture* pic) {
+    if (!pic || !pic->image) return nullptr;
+    RdtPicture* dup = (RdtPicture*)calloc(1, sizeof(RdtPicture));
+    if (!dup) return nullptr;
+    dup->image = CGImageRetain(pic->image);
+    dup->width = pic->width;
+    dup->height = pic->height;
+    dup->transform = pic->transform;
+    dup->has_transform = pic->has_transform;
+    return dup;
+}
+
+Element* rdt_picture_get_svg_root(RdtPicture* pic) {
+    (void)pic;
+    return nullptr;
+}
+
+Element* rdt_picture_find_svg_element_by_id(RdtPicture* pic, const char* id) {
+    (void)pic;
+    (void)id;
+    return nullptr;
+}
+
+Pool* rdt_picture_get_pool(RdtPicture* pic) {
+    (void)pic;
+    return nullptr;
+}
+
+const char* rdt_picture_get_source_path(RdtPicture* pic) {
+    (void)pic;
+    return nullptr;
+}
+
 void rdt_picture_draw(RdtVector* vec, RdtPicture* pic,
                       uint8_t opacity, const RdtMatrix* transform) {
     if (!vec || !vec->impl || !pic || !pic->image) return;
@@ -611,6 +679,9 @@ void rdt_picture_draw(RdtVector* vec, RdtPicture* pic,
 
     if (transform) {
         CGContextConcatCTM(cg->ctx, cg_affine_from_rdt(transform));
+    }
+    if (pic->has_transform) {
+        CGContextConcatCTM(cg->ctx, cg_affine_from_rdt(&pic->transform));
     }
 
     if (opacity < 255) {
@@ -625,10 +696,49 @@ void rdt_picture_draw(RdtVector* vec, RdtPicture* pic,
     CGContextRestoreGState(cg->ctx);
 }
 
+void rdt_picture_draw_dup(RdtVector* vec, RdtPicture* pic,
+                          uint8_t opacity, const RdtMatrix* transform) {
+    rdt_picture_draw(vec, pic, opacity, transform);
+}
+
+bool rdt_picture_get_transform(RdtPicture* pic, RdtMatrix* out) {
+    if (!pic || !out || !pic->has_transform) return false;
+    *out = pic->transform;
+    return true;
+}
+
+void rdt_picture_set_transform(RdtPicture* pic, const RdtMatrix* m) {
+    if (!pic || !m) return;
+    pic->transform = *m;
+    pic->has_transform = true;
+}
+
 void rdt_picture_free(RdtPicture* pic) {
     if (!pic) return;
     if (pic->image) CGImageRelease(pic->image);
     free(pic);
+}
+
+void rdt_engine_init(int threads) {
+    (void)threads;
+}
+
+void rdt_engine_term(void) {
+}
+
+void rdt_font_load(const char* font_path) {
+    (void)font_path;
+}
+
+void rdt_set_font_context(FontContext* ctx) {
+    (void)ctx;
+}
+
+RdtPicture* rdt_picture_take_tvg_paint(Tvg_Paint paint, float w, float h) {
+    (void)paint;
+    (void)w;
+    (void)h;
+    return nullptr;
 }
 
 #endif // __APPLE__

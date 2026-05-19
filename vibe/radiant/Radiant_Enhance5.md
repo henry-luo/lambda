@@ -191,6 +191,10 @@ Completed:
   - `render_backend_caps.hpp`
   - `render_backend_caps.cpp`
 - Added immutable `RdtVectorCaps` reporting for the active vector backend, with ThorVG and experimental Core Graphics capability tables.
+- Added retained ThorVG/Rdt picture resource caching in `rdt_vector_tvg.cpp` for parsed SVG file and SVG data pictures. Calls to `rdt_picture_load()` and `rdt_picture_load_data()` now return shallow duplicates of immutable cached SVG DOM pictures, avoiding repeated SVG parsing while preserving per-call size/transform mutation and caller-owned handles.
+- Added an `RdtVector` batching API and ThorVG scene batching for display-list replay. Consecutive vector/image/picture replay commands now accumulate into one ThorVG scene and flush before software pixel operations such as glyph blits, filters, opacity/backdrop compositing, shadows, and webview layers.
+- Extended the experimental Core Graphics backend to satisfy the expanded `RdtVector` entrypoint set with explicit unsupported fallbacks for SVG DOM pictures, engine/font lifecycle hooks, clip-depth save/restore, and batching.
+- Added backend capability predicates for native blur and color-matrix filter chains, plus a shared `render_filter_apply_with_backend()` gateway. Direct effect rendering, display-list replay, and tiled replay now route CSS filters through one backend-aware entrypoint before falling back to the software reference path.
 - Moved the repeated current-transform lookup into `render_state_current_transform()` and updated background/border drawing paths to use it.
 - Removed stale local `RdtVector*` variables from background and border paths that now draw through the painter/context gateway.
 
@@ -762,9 +766,11 @@ Radiant should reuse ThorVG and OS native APIs where they give correct CSS seman
 ### Current Backend Usage
 
 - ThorVG is already used for path fill/stroke, rectangles, rounded rectangles, linear/radial gradients, vector clipping masks, raw image drawing, SVG picture drawing, inline SVG text/image bridging, SVG rasterization, and Lottie rendering.
-- The ThorVG wrapper currently behaves like an immediate-mode renderer: each shape is pushed, drawn, synced, then removed. This keeps behavior simple, but it limits batching and makes clip masks expensive when many shapes are drawn inside the same clip.
-- The raster renderer still uses software pixel paths for many operations: surface fills, raster image scaling, glyph blitting, selection/caret fills, CSS filters, box shadow blur, opacity compositing, mix-blend compositing, background-blend compositing, video frame blits, and webview layer blits.
-- The Core Graphics backend implements basic paths, fills, strokes, gradients, clips, and image drawing, but it has unresolved semantic gaps: premultiplied-alpha drawing into Radiant's straight-alpha ABGR surface, missing or incomplete parity for tile offsets, clip depth save/restore, SVG DOM pictures, picture duplication, and the same display-list replay semantics as ThorVG.
+- Parsed SVG file/data pictures are now retained behind `RdtPicture`; repeated loads reuse immutable cached SVG DOM resources and return per-call shallow duplicates.
+- The ThorVG wrapper still supports immediate-mode calls, but display-list replay now uses `rdt_vector_begin_batch()` / `rdt_vector_flush_batch()` / `rdt_vector_end_batch()` to submit consecutive vector paints as one ThorVG scene. Software pixel operations remain explicit flush points.
+- CSS filters now enter through a backend-aware filter gateway. The active ThorVG and Core Graphics capability tables currently report no native blur/color-matrix support, so the gateway preserves the existing software reference implementation.
+- The raster renderer still uses software pixel paths for many operations: surface fills, raster image scaling, glyph blitting, selection/caret fills, CSS filter fallback, box shadow blur, opacity compositing, mix-blend compositing, background-blend compositing, video frame blits, and webview layer blits.
+- The Core Graphics backend implements basic paths, fills, strokes, gradients, clips, image drawing, raster picture duplication, transform metadata, and no-op/fallback lifecycle hooks for the full `RdtVector` entrypoint set. It remains experimental because premultiplied-alpha drawing into Radiant's straight-alpha ABGR surface, real tile offset replay, SVG DOM pictures, native batching, and display-list replay parity still need fixture coverage before it can be enabled.
 
 ### Backend Capability Layer
 
@@ -774,6 +780,8 @@ Created:
 - `radiant/render_backend_caps.cpp`
 
 The renderer can now ask what a backend can do instead of assuming ThorVG or Core Graphics behavior directly. `RdtVector` exposes immutable backend capability metadata, and `render_backend_caps` provides the render-facing wrapper.
+
+Filter dispatch now uses the same capability layer. `render_backend_supports_filter_chain()` checks whether a full CSS filter chain can be represented by native blur/color-matrix primitives, and `render_filter_apply_with_backend()` is the single entrypoint used by direct rendering, display-list replay, and tiled replay. Until a backend implements the native branch, it falls back to `apply_css_filters()`.
 
 Sketch:
 
@@ -790,6 +798,7 @@ typedef struct RenderBackendCaps {
     bool gaussian_blur;
     bool color_matrix_filters;
     bool native_text_runs;
+    bool vector_batching;
     bool premultiplied_surface;
     bool tile_offsets;
 } RenderBackendCaps;
@@ -803,11 +812,11 @@ This lets the painter choose a native path only when the backend supports the ex
 
 ThorVG should remain the default cross-platform vector backend. The best near-term reuse opportunities are:
 
-- Batch vector replay into ThorVG scenes. Instead of push/draw/sync/remove per operation, display-list replay can build a ThorVG scene for consecutive vector-only commands, draw once, and flush before direct-pixel effects. This should reduce backend overhead without changing CSS semantics.
+- Broaden ThorVG scene batching beyond display-list replay where it is safe, especially direct render paths that emit long runs of vector-only commands before any software pixel readback.
 - Reuse ThorVG picture and scene opacity for simple vector-only opacity groups. This is safe only when the group has no direct-pixel commands, no CSS filter, no mix-blend-mode, and no video/webview placeholders.
 - Route more raster image draws through `rdt_draw_image()` when the image does not need software-only behavior such as repeat wrapping, custom area-averaging, or clip-shape pixel masking. This gives ThorVG a chance to use its optimized image scaling path.
 - Keep SVG and Lottie through ThorVG. These are already natural fits and should be preserved behind `RdtPicture` and the Lottie player.
-- Add a retained ThorVG resource cache for static paths, repeated gradients, SVG pictures, and image paints, keyed by display-list resource identity. This should come after display-list ownership is clarified.
+- Continue retained ThorVG resource caching beyond the completed SVG picture cache: static paths, repeated gradients, and image paints should be keyed by display-list resource identity after ownership and invalidation rules are explicit.
 
 ### Native API Reuse Opportunities
 

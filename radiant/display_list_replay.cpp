@@ -7,6 +7,7 @@
 #include "display_list_replay_raster.hpp"
 #include "display_list_replay_shadow.hpp"
 #include "display_list_replay_state.hpp"
+#include "render_backend_caps.hpp"
 #include "../lib/log.h"
 
 static bool dl_replay_can_skip_item_for_dirty(DisplayOp op) {
@@ -53,12 +54,15 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
     log_debug("[DL_REPLAY] replaying %d items", dl->count);
 
     DisplayReplayDirtyClip dirty_clip = dl_replay_push_dirty_clip(vec, dirty_tracker, scale);
+    const RenderBackendCaps* caps = render_backend_get_caps(vec);
 
     DisplayReplayBackdropStack backdrop_stack;
     dl_replay_backdrop_init(&backdrop_stack);
 
     DisplayReplayShadowClip shadow_clip;
     dl_replay_shadow_clip_init(&shadow_clip);
+
+    rdt_vector_begin_batch(vec);
 
     for (int i = 0; i < dl->count; i++) {
         DisplayItem* item = &dl->items[i];
@@ -129,6 +133,7 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
         }
 
         case DL_DRAW_GLYPH: {
+            rdt_vector_flush_batch(vec);
             if (dirty_clip.active) {
                 DlDrawGlyph tightened = item->draw_glyph;
                 dl_replay_intersect_dirty_clip(&dirty_clip, &tightened.clip);
@@ -158,80 +163,94 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
             break;
 
         case DL_SAVE_CLIP_DEPTH:
+            rdt_vector_flush_batch(vec);
             item->clip_depth.saved_depth = rdt_clip_save_depth();
             break;
 
         case DL_RESTORE_CLIP_DEPTH:
+            rdt_vector_flush_batch(vec);
             rdt_clip_restore_depth(item->clip_depth.saved_depth);
             break;
 
         case DL_FILL_SURFACE_RECT: {
+            rdt_vector_flush_batch(vec);
             DlFillSurfaceRect* r = &item->fill_surface_rect;
             dl_replay_fill_surface_rect(surface, &dirty_clip, r);
             break;
         }
 
         case DL_BLIT_SURFACE_SCALED: {
+            rdt_vector_flush_batch(vec);
             DlBlitSurfaceScaled* r = &item->blit_surface_scaled;
             dl_replay_blit_surface_scaled(surface, &dirty_clip, r);
             break;
         }
 
         case DL_APPLY_OPACITY: {
+            rdt_vector_flush_batch(vec);
             DlApplyOpacity* r = &item->apply_opacity;
             dl_replay_apply_opacity(surface, r);
             break;
         }
 
         case DL_COMPOSITE_OPACITY: {
+            rdt_vector_flush_batch(vec);
             DlCompositeOpacity* r = &item->composite_opacity;
             dl_replay_backdrop_composite_opacity(&backdrop_stack, surface, r);
             break;
         }
 
         case DL_SAVE_BACKDROP: {
+            rdt_vector_flush_batch(vec);
             DlSaveBackdrop* r = &item->save_backdrop;
             dl_replay_backdrop_save(&backdrop_stack, surface, scratch, r);
             break;
         }
 
         case DL_APPLY_BLEND_MODE: {
+            rdt_vector_flush_batch(vec);
             DlApplyBlendMode* r = &item->apply_blend_mode;
             dl_replay_backdrop_apply_blend_mode(&backdrop_stack, surface, r);
             break;
         }
 
         case DL_APPLY_FILTER: {
+            rdt_vector_flush_batch(vec);
             DlApplyFilter* r = &item->apply_filter;
-            dl_replay_apply_filter(scratch, surface, &dirty_clip, r);
+            dl_replay_apply_filter(scratch, surface, caps, &dirty_clip, r);
             break;
         }
 
         case DL_BOX_BLUR_REGION: {
+            rdt_vector_flush_batch(vec);
             DlBoxBlurRegion* r = &item->box_blur_region;
             dl_replay_box_blur_region(scratch, surface, r);
             break;
         }
 
         case DL_BOX_BLUR_INSET: {
+            rdt_vector_flush_batch(vec);
             DlBoxBlurInset* r = &item->box_blur_inset;
             dl_replay_box_blur_inset(scratch, surface, r);
             break;
         }
 
         case DL_SHADOW_CLIP_SAVE: {
+            rdt_vector_flush_batch(vec);
             DlShadowClipSave* r = &item->shadow_clip_save;
             dl_replay_shadow_clip_save(&shadow_clip, surface, scratch, r);
             break;
         }
 
         case DL_SHADOW_CLIP_RESTORE: {
+            rdt_vector_flush_batch(vec);
             DlShadowClipRestore* r = &item->shadow_clip_restore;
             dl_replay_shadow_clip_restore(&shadow_clip, surface, r);
             break;
         }
 
         case DL_OUTER_SHADOW: {
+            rdt_vector_flush_batch(vec);
             DlOuterShadow* o = &item->outer_shadow;
             dl_replay_outer_shadow(scratch, surface, o);
             break;
@@ -245,12 +264,15 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
             break;
 
         case DL_WEBVIEW_LAYER_PLACEHOLDER: {
+            rdt_vector_flush_batch(vec);
             DlWebviewLayerPlaceholder* r = &item->webview_layer_placeholder;
             dl_replay_webview_layer_placeholder(surface, r);
             break;
         }
         }
     }
+
+    rdt_vector_end_batch(vec);
 
     int backdrop_depth = dl_replay_backdrop_depth(&backdrop_stack);
     if (backdrop_depth > 0) {

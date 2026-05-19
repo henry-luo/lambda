@@ -266,8 +266,9 @@ bool render_effect_group_apply_filter(RenderEffectGroup* group,
                         filter_rect.width, filter_rect.height,
                         block->filter, clip);
     } else {
-        apply_css_filters(&rdcon->scratch, rdcon->ui_context->surface,
-                          block->filter, &filter_rect, clip);
+        const RenderBackendCaps* caps = render_backend_get_caps(&rdcon->vec);
+        render_filter_apply_with_backend(caps, &rdcon->scratch, rdcon->ui_context->surface,
+                                         block->filter, &filter_rect, clip);
     }
     return true;
 }

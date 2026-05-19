@@ -22,10 +22,12 @@
 
 struct RdtVectorImpl {
     Tvg_Canvas canvas;
+    Tvg_Paint batch_scene;
     uint32_t* pixels;
     int width;
     int height;
     int stride;
+    int batch_depth;
     float tile_offset_x;  // physical-pixel X start of current tile (0 = full page)
     float tile_offset_y;  // physical-pixel Y start of current tile (0 = full page)
 };
@@ -268,7 +270,7 @@ static void path_replay(RdtPath* p, Tvg_Paint shape) {
 
 // Central draw-and-remove: resets target, pushes, draws, syncs, removes.
 // This encapsulates the ThorVG immediate-mode workaround.
-static void tvg_push_draw_remove(RdtVectorImpl* impl, Tvg_Paint shape) {
+static void tvg_draw_paint_now(RdtVectorImpl* impl, Tvg_Paint shape) {
     // reset target to prevent ThorVG from clearing previously-drawn content
     tvg_swcanvas_set_target(impl->canvas, impl->pixels, impl->stride,
                             impl->width, impl->height, TVG_COLORSPACE_ABGR8888);
@@ -284,6 +286,26 @@ static void tvg_push_draw_remove(RdtVectorImpl* impl, Tvg_Paint shape) {
     tvg_canvas_draw(impl->canvas, false);
     tvg_canvas_sync(impl->canvas);
     tvg_canvas_remove(impl->canvas, NULL);
+}
+
+static void tvg_flush_batch_scene(RdtVectorImpl* impl) {
+    if (!impl || !impl->batch_scene) return;
+    Tvg_Paint scene = impl->batch_scene;
+    impl->batch_scene = nullptr;
+    tvg_draw_paint_now(impl, scene);
+}
+
+static void tvg_push_draw_remove(RdtVectorImpl* impl, Tvg_Paint shape) {
+    if (impl->batch_depth > 0) {
+        if (!impl->batch_scene) {
+            impl->batch_scene = tvg_scene_new();
+        }
+        if (impl->batch_scene) {
+            tvg_scene_push(impl->batch_scene, shape);
+            return;
+        }
+    }
+    tvg_draw_paint_now(impl, shape);
 }
 
 // Apply optional transform to a shape
@@ -324,6 +346,7 @@ static const RdtVectorCaps g_tvg_caps = {
     false,  // gaussian_blur
     false,  // color_matrix_filters
     false,  // native_text_runs
+    true,   // vector_batching
     false,  // premultiplied_surface
     true,   // tile_offsets
     true,   // clip_depth_save_restore
@@ -350,6 +373,7 @@ void rdt_vector_init(RdtVector* vec, uint32_t* pixels, int w, int h, int stride)
 void rdt_vector_destroy(RdtVector* vec) {
     if (!vec || !vec->impl) return;
     RdtVectorImpl* impl = vec->impl;
+    tvg_flush_batch_scene(impl);
     if (impl->canvas) tvg_canvas_destroy(impl->canvas);
     mem_free(impl);
     vec->impl = nullptr;
@@ -358,6 +382,7 @@ void rdt_vector_destroy(RdtVector* vec) {
 void rdt_vector_set_target(RdtVector* vec, uint32_t* pixels, int w, int h, int stride) {
     if (!vec || !vec->impl) return;
     RdtVectorImpl* impl = vec->impl;
+    tvg_flush_batch_scene(impl);
     impl->pixels = pixels;
     impl->width = w;
     impl->height = h;
@@ -378,6 +403,29 @@ void rdt_vector_set_tile_offset_x(RdtVector* vec, float offset_x) {
 const RdtVectorCaps* rdt_vector_get_caps(const RdtVector* vec) {
     (void)vec;
     return &g_tvg_caps;
+}
+
+void rdt_vector_begin_batch(RdtVector* vec) {
+    if (!vec || !vec->impl) return;
+    vec->impl->batch_depth++;
+}
+
+void rdt_vector_flush_batch(RdtVector* vec) {
+    if (!vec || !vec->impl) return;
+    tvg_flush_batch_scene(vec->impl);
+}
+
+void rdt_vector_end_batch(RdtVector* vec) {
+    if (!vec || !vec->impl) return;
+    RdtVectorImpl* impl = vec->impl;
+    if (impl->batch_depth <= 0) {
+        log_error("rdt_vector_end_batch: unbalanced batch end");
+        return;
+    }
+    impl->batch_depth--;
+    if (impl->batch_depth == 0) {
+        tvg_flush_batch_scene(impl);
+    }
 }
 
 // ============================================================================
