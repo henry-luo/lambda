@@ -8,10 +8,10 @@
  * implements. The shared tree walker (render_walk.cpp) traverses the
  * View tree once and dispatches drawing through these callbacks.
  *
- * The raster backend (render.cpp / ThorVG) is NOT wired through this
- * interface because it has HiDPI scaling, pixel-level post-processing,
- * scrollbar rendering, and other complexities that do not map cleanly
- * to this abstraction. It may be migrated in a future phase.
+ * The raster backend uses the shared walker through full-node override
+ * callbacks while its richer block state, HiDPI scaling, pixel-level
+ * post-processing, scrollbars, and display-list markers are migrated in
+ * staged slices.
  *
  * All coordinates are in CSS logical pixels. Each callback receives
  * the backend's own opaque context pointer (ctx).
@@ -21,6 +21,14 @@ typedef struct RenderBackend RenderBackend;
 
 struct RenderBackend {
     void* ctx;   // backend-specific context (SvgRenderContext*, PdfRenderContext*, etc.)
+
+    // Optional full-node overrides. Raster screen rendering uses these while
+    // legacy block/text helpers are migrated behind this shared walker.
+    // Backends that leave these null use the generic callbacks below.
+    void (*render_block)(void* ctx, ViewBlock* block, float abs_x, float abs_y,
+                         FontBox* font, Color color);
+    void (*render_inline)(void* ctx, ViewSpan* span, float abs_x, float abs_y,
+                          FontBox* font, Color color);
 
     // ── Boundary rendering (background, borders, shadow, outline) ──────
     // Called for every block/inline element that has a BoundaryProp.
@@ -88,3 +96,4 @@ typedef struct {
 void render_walk_block(RenderBackend* backend, RenderWalkState* state, ViewBlock* block);
 void render_walk_inline(RenderBackend* backend, RenderWalkState* state, ViewSpan* span);
 void render_walk_children(RenderBackend* backend, RenderWalkState* state, View* first_child);
+void render_walk_positioned_children(RenderBackend* backend, RenderWalkState* state, ViewBlock* block);

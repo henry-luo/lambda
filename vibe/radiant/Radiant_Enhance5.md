@@ -201,6 +201,7 @@ Completed:
 - Added bounded retained ThorVG paint caches for path-derived fills, strokes, linear gradients, radial gradients, and generation-keyed raw image paints. Cached path/gradient paints are duplicated before draw so transforms and clip masks mutate only per-draw copies; cached raw image paints are stored with copied ThorVG pixel data and are used only when the caller provides a nonzero image generation.
 - Moved the repeated current-transform lookup into `render_state_current_transform()` and updated background/border drawing paths to use it.
 - Removed stale local `RdtVector*` variables from background and border paths that now draw through the painter/context gateway.
+- Started migrating the raster screen renderer onto `render_walk.cpp`: `RenderBackend` now supports optional full block/inline overrides, `render_children()` dispatches through `render_walk_children()` with raster callbacks, and raster root painting enters through `render_raster_view_tree()`. Positioned absolute/fixed children now use shared `render_walk_positioned_children()` z-index ordering too. The callbacks preserve the existing rich raster behavior for forms, media, retained display-list fragments, effects, clipping, scrolling, and special roots while the deeper block-state migration remains staged.
 
 Validation:
 
@@ -986,7 +987,7 @@ Performance comparisons should use release builds, not debug builds.
    - Update: dirty replay now culls individual bounded commands, matched element markers carry subtree-union bounds, and dirty/tile replay can skip entire non-intersecting element subtrees.
    - Update: true cross-frame retained fragment reuse is enabled conservatively through `RetainedDisplayListCache`. Cached fragments deep-copy owned payloads and are reused only when bounds match and intersecting dirty sources are known to be outside the subtree.
 10. Unify `render_html_doc()` and `render_html_doc_tiled()` setup through `render_output`. Done for the current raster pipeline: shared context lifecycle, background/clear handling, root paint dispatch, display-list replay planning, render-pool ownership, surface-save dispatch, normal document render orchestration, tiled PNG streaming, overlay dispatch, and screen/PNG/JPEG/tiled target dispatch are now outside `render.cpp`. File-level PDF/SVG targets are represented by the same `RenderOutputTarget` abstraction and currently delegate to the existing exporters; the CLI render command uses the unified file-target entrypoint.
-11. Expand `render_walk` into the shared paint walker and migrate raster rendering to it.
+11. Expand `render_walk` into the shared paint walker and migrate raster rendering to it. Started: raster root, recursive child dispatch, and positioned child z-index traversal now use `render_walk` helpers through raster-specific full-node callbacks while `render_block_view()` still owns the complex raster-only state transitions.
 12. Split `render_svg_inline.cpp` into SVG parse/style/defs/geometry/paint modules.
 
 This order keeps high-risk behavior changes late. The early phases make the code smaller and easier to inspect, while preserving the current rendering model.
