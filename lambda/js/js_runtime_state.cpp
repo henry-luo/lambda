@@ -1,6 +1,15 @@
 #include "js_runtime_internal.hpp"
 
 JsRuntimeState js_runtime_state;
+extern __thread EvalContext* context;
+
+static void js_ensure_module_vars_gc_rooted() {
+    static struct gc_heap* rooted_gc = NULL;
+    if (!context || !context->heap || !context->heap->gc) return;
+    if (rooted_gc == context->heap->gc) return;
+    heap_register_gc_root_range((uint64_t*)js_module_vars, JS_MAX_MODULE_VARS);
+    rooted_gc = context->heap->gc;
+}
 
 // Forward declaration for regex compilation cache reset (defined near JsRegexData)
 void js_regex_cache_reset();
@@ -126,15 +135,9 @@ extern "C" Item js_get_module_var(int index) {
 }
 
 extern "C" void js_reset_module_vars() {
+    js_ensure_module_vars_gc_rooted();
     memset(js_module_vars, 0, sizeof(js_module_vars));
     js_module_var_count = 0;
-    // Register module vars as GC root range so class objects and their
-    // prototypes are traceable by the garbage collector.
-    static bool module_vars_rooted = false;
-    if (!module_vars_rooted) {
-        heap_register_gc_root_range((uint64_t*)js_module_vars, JS_MAX_MODULE_VARS);
-        module_vars_rooted = true;
-    }
 }
 
 // Save/restore module vars for nested require() — prevents inner module
@@ -379,6 +382,7 @@ extern "C" int js_get_module_var_count() {
 // but leave heap and cached builtins intact.  Used by js-test-batch preamble mode
 // to avoid re-initializing the harness between tests.
 extern "C" void js_batch_reset_to(int checkpoint_var_count) {
+    js_ensure_module_vars_gc_rooted();
     // If preamble ran with a pool-allocated module vars array, copy preamble vars
     // [0..checkpoint) into the static js_module_vars so tests can access them via
     // js_get_module_var(). Tests skip re-including preamble files (e.g.

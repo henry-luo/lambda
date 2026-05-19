@@ -578,6 +578,7 @@ Item js_get_global_property_strict(Item key);
 Item js_get_global_property_reference(Item key, int64_t strict_reference);
 int64_t js_global_binding_exists(Item key);
 void js_set_global_property(Item key, Item value);
+void js_set_global_var_property_fast(Item key, Item value);
 void js_set_global_property_strict(Item key, Item value);
 void js_set_global_property_strict_prechecked(Item key, Item value, int64_t binding_exists_at_lhs);
 void js_define_global_eval_var_property(Item key, Item value);

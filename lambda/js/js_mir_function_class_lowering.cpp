@@ -40,6 +40,24 @@ static bool jm_function_has_formal_arguments_binding(JsFunctionNode* fn) {
     return false;
 }
 
+static bool jm_function_has_direct_body_function_binding(JsFunctionNode* fn, const char* vname) {
+    if (!fn || !vname || !fn->body ||
+        fn->body->node_type != JS_AST_NODE_BLOCK_STATEMENT) {
+        return false;
+    }
+    JsBlockNode* body = (JsBlockNode*)fn->body;
+    for (JsAstNode* stmt = body->statements; stmt; stmt = stmt->next) {
+        if (stmt->node_type != JS_AST_NODE_FUNCTION_DECLARATION) continue;
+        JsFunctionNode* decl = (JsFunctionNode*)stmt;
+        if (!decl->name || !decl->name->chars) continue;
+        char name[128];
+        snprintf(name, sizeof(name), "_js_%.*s",
+            (int)decl->name->len, decl->name->chars);
+        if (strcmp(name, vname) == 0) return true;
+    }
+    return false;
+}
+
 static bool jm_param_tree_has_assignment_pattern(JsAstNode* node) {
     for (JsAstNode* cur = node; cur; cur = cur->next) {
         switch (cur->node_type) {
@@ -401,8 +419,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         if (fn->body && fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
             struct hashmap* body_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
                 jm_name_hash, jm_name_cmp, NULL, NULL);
+            bool effective_strict = mt->is_global_strict || mt->is_module ||
+                (fc && fc->is_strict) || jm_has_use_strict_directive(fn);
             struct hashmap* annexb_lex_collisions = NULL;
-            if (fc && !fc->is_strict) {
+            if (!effective_strict) {
                 annexb_lex_collisions = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
                     jm_name_hash, jm_name_cmp, NULL, NULL);
                 jm_collect_all_let_const_names_recursive(fn->body, annexb_lex_collisions);
@@ -411,7 +431,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             size_t viter = 0; void* vitem;
             while (hashmap_iter(body_locals, &viter, &vitem)) {
                 JsNameSetEntry* e = (JsNameSetEntry*)vitem;
-                if (e->from_func_decl && fc && fc->is_strict) {
+                if (e->from_func_decl && effective_strict) {
                     log_debug("js-mir: strict skip nested function hoist '%s'", e->name);
                     continue;
                 }
@@ -421,7 +441,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     continue;
                 }
                 if (e->from_func_decl && fc && fc->uses_arguments &&
-                    strcmp(e->name, "_js_arguments") == 0) {
+                    strcmp(e->name, "_js_arguments") == 0 &&
+                    jm_function_has_formal_arguments_binding(fn)) {
                     log_debug("js-mir: AnnexB skip function hoist '%s' (arguments binding)", e->name);
                     continue;
                 }
@@ -2068,6 +2089,12 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             MIR_T_I64, MIR_new_int_op(mt->ctx, fn->is_async ? 1 : 0));
 
         jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, gen_obj)));
+        if (mt->func_except_label != 0) {
+            jm_emit_label(mt, mt->func_except_label);
+            MIR_reg_t exc_ret = jm_emit_null(mt);
+            jm_emit_eval_local_pop_if_needed(mt);
+            jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, exc_ret)));
+        }
         goto finish_boxed;
     }
 
@@ -2543,8 +2570,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         if (fn->body && fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
             struct hashmap* body_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
                 jm_name_hash, jm_name_cmp, NULL, NULL);
+            bool effective_strict = mt->is_global_strict || mt->is_module ||
+                (fc && fc->is_strict) || jm_has_use_strict_directive(fn);
             struct hashmap* annexb_lex_collisions = NULL;
-            if (fc && !fc->is_strict) {
+            if (!effective_strict) {
                 annexb_lex_collisions = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
                     jm_name_hash, jm_name_cmp, NULL, NULL);
                 jm_collect_all_let_const_names_recursive(fn->body, annexb_lex_collisions);
@@ -2553,7 +2582,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             size_t viter = 0; void* vitem;
             while (hashmap_iter(body_locals, &viter, &vitem)) {
                 JsNameSetEntry* e = (JsNameSetEntry*)vitem;
-                if (e->from_func_decl && fc && fc->is_strict) {
+                if (e->from_func_decl && effective_strict) {
                     log_debug("js-mir: strict skip nested function hoist '%s'", e->name);
                     continue;
                 }
@@ -2563,7 +2592,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     continue;
                 }
                 if (e->from_func_decl && fc && fc->uses_arguments &&
-                    strcmp(e->name, "_js_arguments") == 0) {
+                    strcmp(e->name, "_js_arguments") == 0 &&
+                    jm_function_has_formal_arguments_binding(fn)) {
                     log_debug("js-mir: AnnexB skip function hoist '%s' (arguments binding)", e->name);
                     continue;
                 }
@@ -2717,7 +2747,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     this_entry.var.scope_env_reg = mt->scope_env_reg;
                     this_entry.var.typed_array_type = -1;
                     hashmap_set(mt->var_scopes[mt->scope_depth], &this_entry);
-                } else if (strcmp(sname, "_js_arguments") == 0 && fc->uses_arguments && !has_formal_arguments_binding) {
+                } else if (strcmp(sname, "_js_arguments") == 0 && fc->uses_arguments &&
+                           !has_formal_arguments_binding) {
                     bool args_aliased = !fc->has_non_simple_params &&
                                         !mt->is_module &&
                                         !mt->is_global_strict &&
@@ -2868,7 +2899,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         }
 
         // v18q: Create 'arguments' array-like object for non-arrow functions
-        if (fc->uses_arguments && !has_formal_arguments_binding) {
+        bool has_direct_arguments_function_binding =
+            jm_function_has_direct_body_function_binding(fn, "_js_arguments");
+        if (fc->uses_arguments && !has_formal_arguments_binding &&
+            !has_direct_arguments_function_binding) {
             // v20: Set up arguments aliasing for formal params, but only in sloppy mode
             // with simple parameters. Strict mode, default/rest/destructuring params
             // → arguments is "unmapped" (no aliasing).
