@@ -3156,8 +3156,10 @@ JsAstNode* build_js_class_declaration(JsTranspiler* tp, TSNode class_node) {
 
     class_decl->base.type = &TYPE_FUNC; // Classes are constructor functions
 
-    // Add class to scope
-    if (class_decl->name) {
+    // Add class declarations to the surrounding scope.  Named class
+    // expressions have a private inner binding instead and must not leak.
+    const char* class_node_type = ts_node_type(class_node);
+    if (class_decl->name && class_node_type && strcmp(class_node_type, "class_declaration") == 0) {
         js_scope_define(tp, class_decl->name, (JsAstNode*)class_decl, JS_VAR_VAR);
     }
 
@@ -4356,7 +4358,10 @@ static JsAstNode* build_ts_class_decl_u(JsTranspiler* tp, TSNode class_node) {
 
     class_decl->base.type = &TYPE_FUNC;
 
-    if (class_decl->name) {
+    // Add class declarations to the surrounding scope.  Named class
+    // expressions have a private inner binding instead and must not leak.
+    const char* class_node_type = ts_node_type(class_node);
+    if (class_decl->name && class_node_type && strcmp(class_node_type, "class_declaration") == 0) {
         js_scope_define(tp, class_decl->name, (JsAstNode*)class_decl, JS_VAR_VAR);
     }
 

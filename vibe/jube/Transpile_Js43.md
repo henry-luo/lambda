@@ -3670,3 +3670,61 @@ Remaining shape:
 - Class/subclass/private-field semantics remain the next largest cluster.
 - Smaller open language items include tagged-template eval capture, try
   completion values, and class expression binding edge cases.
+
+## 64. Try Completion, Class Expression Binding, And Private Field Ordering
+
+Status on 2026-05-19: fixed five more failures from the reduced 92-row replay,
+moving it from 54 passed / 38 failed to 59 passed / 33 failed.
+
+Root causes fixed:
+
+- `try` / `finally` completion tracking saved the try completion before running
+  the finalizer, but left the old completion live while the finalizer executed.
+  A `finally { break; }` therefore carried the try block's value instead of an
+  empty finalizer completion.  The lowering now resets the eval completion
+  register immediately after saving the try completion for possible fallback.
+- Named class expressions were still leaking their inner name to the outer
+  environment through two paths: both class AST builders added named class
+  expressions to the surrounding parser scope, and module lowering created a
+  top-level `_js_<name>` placeholder for every class entry.  Class-expression
+  names are now kept as private inner bindings only; real class declarations
+  continue to bind normally.
+- Instance field initialization kept the runtime private-field initialization
+  bypass enabled while evaluating every initializer.  That allowed ordinary
+  initializer code such as `this.#x = 1` before `#x` was declared to skip the
+  required private-brand TypeError.  The bypass is now scoped only around the
+  engine's own private-field installation write.
+
+Verification:
+
+```bash
+make -C build/premake config=release_native lambda test_js_test262_gtest -j4
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_try_completion_probe.txt --js-timeout=30 --write-failures=temp/js43_try_completion_after_finally_reset.tsv --gtest_brief=1
+./lambda.exe js temp/js43_class_expr_binding_probe.js --no-log
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_class_expr_binding_probe.txt --js-timeout=30 --write-failures=temp/js43_class_expr_binding_after_hoist_skip.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_private_field_order_probe.txt --js-timeout=30 --write-failures=temp/js43_private_field_order_after_flag_narrow.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_remaining_90_replay_from_latest.txt --js-timeout=30 --write-failures=temp/js43_remaining_90_after_private_field_order.tsv --gtest_brief=1
+```
+
+Results:
+
+- `language_statements_try_completion_values_js` passes.
+- `language_statements_class_syntax_class_expression_binding_identifier_opt_class_element_list_js`
+  passes, and the probe now reports `typeof B` as `undefined` outside
+  `var A = class B {}`.
+- Private-field ordering focused batch passed 3 / 3:
+  `language_statements_class_elements_privatefieldset_typeerror_1_js`,
+  `language_statements_class_elements_prod_private_setter_before_super_return_in_field_initializer_js`,
+  and `language_expressions_class_elements_prod_private_setter_before_super_return_in_field_initializer_js`.
+- The 92-row replay now reports 59 passed / 33 failed.
+- Current failure manifest:
+  `temp/js43_remaining_90_after_private_field_order.tsv`.
+
+Remaining shape:
+
+- RegExp is now the dominant cluster: lookbehind, nullable quantifier, and
+  Unicode case folding.
+- Class/subclass construction remains the next cluster, especially bound class
+  calls and built-in subclassing.
+- Smaller open language items include direct-eval lexical capture in tagged
+  templates and the `eval("break LABEL")` SyntaxError case.

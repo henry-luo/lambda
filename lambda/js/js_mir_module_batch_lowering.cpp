@@ -3999,6 +3999,9 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     for (int ci = 0; ci < mt->class_count; ci++) {
         JsClassEntry* ce = &mt->class_entries[ci];
         if (ce->name && ce->name->chars) {
+            if (!ce->is_declaration) {
+                continue;
+            }
             if (ce->is_declaration && !jm_is_direct_program_class_decl(program, ce->node)) {
                 continue;
             }

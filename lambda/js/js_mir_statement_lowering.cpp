@@ -1846,7 +1846,6 @@ static void jm_emit_own_instance_fields_on_object(JsMirTranspiler* mt, JsClassEn
     if (!mt || !ce || !obj) return;
     JsClassEntry* saved_current_class = mt->current_class;
     mt->current_class = ce;
-    jm_call_void_0(mt, "js_private_field_init_begin");
     if (include_private && cls_obj) {
         jm_emit_private_instance_method_brands(mt, obj, cls_obj, ce);
     }
@@ -1878,10 +1877,12 @@ static void jm_emit_own_instance_fields_on_object(JsMirTranspiler* mt, JsClassEn
 
         MIR_reg_t val = inf->initializer ? jm_transpile_box_item(mt, inf->initializer) : jm_emit_undefined(mt);
         if (private_field_name) {
+            jm_call_void_0(mt, "js_private_field_init_begin");
             jm_call_3(mt, "js_property_set", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+            jm_call_void_0(mt, "js_private_field_init_end");
             if (cls_obj) jm_emit_private_brand_add(mt, obj, cls_obj, private_field_name);
         } else {
             jm_call_3(mt, "js_create_data_property", MIR_T_I64,
@@ -1891,7 +1892,6 @@ static void jm_emit_own_instance_fields_on_object(JsMirTranspiler* mt, JsClassEn
         }
         jm_emit_exc_propagate_check(mt);
     }
-    jm_call_void_0(mt, "js_private_field_init_end");
     mt->current_class = saved_current_class;
 }
 
@@ -2677,8 +2677,6 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
             }
             // Emit base-first, then own class. For explicit derived constructors,
             // own public fields run after the first successful super() call.
-            // v37: Set private field init flag to bypass brand check during initialization
-            jm_call_void_0(mt, "js_private_field_init_begin");
             bool defer_private_instance_init = ce->node && ce->node->superclass &&
                 ce->constructor && ce->constructor->fc;
             for (int ci = field_chain_len - 1; ci >= 0; ci--) {
@@ -2741,10 +2739,12 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
                         jm_gen_spill_load(mt, key, key_spill);
                     }
                     if (private_field_name) {
+                        jm_call_void_0(mt, "js_private_field_init_begin");
                         jm_call_3(mt, "js_property_set", MIR_T_I64,
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+                        jm_call_void_0(mt, "js_private_field_init_end");
                     } else {
                         jm_call_3(mt, "js_create_data_property", MIR_T_I64,
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
@@ -2818,10 +2818,12 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
                     jm_gen_spill_load(mt, key, key_spill);
                 }
                 if (private_field_name) {
+                    jm_call_void_0(mt, "js_private_field_init_begin");
                     jm_call_3(mt, "js_property_set", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+                    jm_call_void_0(mt, "js_private_field_init_end");
                 } else {
                     jm_call_3(mt, "js_create_data_property", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
@@ -2833,8 +2835,6 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
                 }
             }
             mt->current_class = saved_current_class;
-            // v37: Clear private field init flag after all fields are initialized
-            jm_call_void_0(mt, "js_private_field_init_end");
             // Restore 'this' after field initialization
             jm_call_void_1(mt, "js_set_this",
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, prev_this_fi));
@@ -5275,6 +5275,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_reg_op(mt->ctx, saved_cptn),
                     MIR_new_reg_op(mt->ctx, mt->eval_completion_reg)));
+                jm_eval_cptn_reset(mt);
             }
 
             // Save and clear any pending exception so finally body starts
