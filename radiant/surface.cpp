@@ -609,12 +609,6 @@ ImageSurface* image_surface_create_from(int pixel_width, int pixel_height, void*
     return img_surface;
 }
 
-void image_surface_bump_generation(ImageSurface* img_surface) {
-    if (!img_surface) return;
-    img_surface->generation++;
-    if (img_surface->generation == 0) img_surface->generation = 1;
-}
-
 void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color, Bound* clip,
                        ClipShape** clip_shapes, int clip_depth) {
     RasterPaintContext ctx = {surface, clip, clip_shapes, clip_depth};

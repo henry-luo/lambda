@@ -180,6 +180,13 @@ Completed:
 - Added initial display-list vector recording helper file:
   - `display_list_record_vector.cpp`
 - Moved vector draw command recording, glyph bounds calculation, image/picture recording, and clip-depth command recording out of `display_list.cpp`.
+- Added `test_display_list_gtest.cpp` with focused coverage for the display-list refactor:
+  - bounds/intersection behavior for replay-state commands
+  - element marker layout bounds versus visual union bounds
+  - vector path, stroke dash, gradient stop, image, glyph, and picture recording metadata
+  - raster clip/clip-shape copies and external layer generations
+  - effect-region bounds for filters, inset blur, and outer shadows
+  - `dl_clear()` scratch rewind and list reuse
 - Added initial backend capability helpers:
   - `render_backend_caps.hpp`
   - `render_backend_caps.cpp`
@@ -223,18 +230,21 @@ Completed:
 - `render_block_try_retained_fragment()` can reuse a cached fragment when:
   - the render is a selective dirty repaint
   - the cached marker bounds still match the current block marker bounds
-  - no current/block transform is active
   - every intersecting dirty rect has a known source view id
   - no intersecting dirty source is inside the reused subtree
+  - transformed content keeps stable marker bounds and uses the cached visual union for dirty intersection
 - Image, video, and webview layer paths attempt retained reuse before re-recording their block/payload marker range.
 - Added resource-generation invalidation for borrowed retained payloads:
   - `ImageSurface::generation` now increments when image pixels are decoded, SVG fallback pixels are rasterized, GIF/Lottie animation frames swap or clear their pixel buffers, and webview layer snapshots refresh their surface.
   - Display-list image, scaled-surface blit, video placeholder, and webview placeholder commands record the generation observed at capture time.
   - Retained fragment reuse now rejects stale borrowed image/surface/video/webview payloads before appending the cached fragment.
-  - Glyph bitmap buffers remain conservatively non-retainable until the font cache exposes a generation/eviction contract.
-- Added `test_retained_display_list_gtest.cpp` plus a small test-only stub file so retained fragment capture/append can be tested without linking the full ThorVG/SVG stack.
+  - Glyph bitmap buffers now record the font glyph-cache generation observed at capture time. Retained reuse accepts glyph-backed text fragments while the generation matches and rejects them after the glyph arena is reset.
+- Transformed subtree reuse is less conservative:
+  - Element markers now preserve the original layout marker bounds separately from the visual union bounds used for replay/dirty culling.
+  - Retained reuse can compare stable layout marker bounds while using cached visual bounds for dirty-region intersection, so transformed fragments are no longer rejected solely because their recorded visual bounds differ from untransformed layout bounds.
+- Added `test_retained_display_list_gtest.cpp` plus a small test-only stub file so retained fragment capture/append and dirty-source retained replay decisions can be tested without linking the full ThorVG/SVG stack.
 - Added the retained display-list gtest to `build_lambda_config.json` and regenerated the generated Premake files through `make build-test`.
-- Extended retained display-list tests to cover stale borrowed image pixels, scaled surface blits, video generations, webview surface generations, and borrowed glyph buffers.
+- Extended retained display-list tests to cover stale borrowed image pixels, scaled surface blits, video generations, webview surface generations, borrowed glyph buffers, marker-bounds mismatch, unknown dirty-source rejection, dirty-source-inside-subtree rejection, external dirty-source reuse, dirty misses, and transformed visual bounds with stable marker bounds.
 
 Validation:
 
@@ -243,9 +253,9 @@ Validation:
 
 Remaining limits:
 
-- Reuse is intentionally conservative and skips transformed subtrees, full repaints, unknown dirty sources, and any dirty source inside the subtree.
+- Reuse is intentionally conservative and skips full repaints, unknown dirty sources, and any dirty source inside the subtree.
 - The cache is currently keyed by view id and bounds, plus generation checks for borrowed image/surface/video/webview payloads.
-- Volatile text fragments remain conservative: glyph buffers are not reused across frames yet, and caret/selection/preedit overlays still need more focused dirty-region fixtures before broad text-subtree reuse should be relaxed.
+- Volatile text fragments are now generation-checked: glyph-backed fragments can be reused while the font glyph cache generation matches, but caret/selection/preedit overlay integration still needs full UI repaint fixtures before broad text-subtree reuse should be relaxed further.
 
 ## Current Structure Assessment
 
@@ -652,7 +662,8 @@ Create:
 - `radiant/render_output.hpp`
 - `radiant/render_output.cpp`
 
-Unify the setup currently split across `render_html_doc()` and `render_html_doc_tiled()`.
+Unify the setup currently split across `render_html_doc()`, `render_html_doc_tiled()`,
+and the headless file exporters.
 
 Proposed concepts:
 
@@ -669,6 +680,7 @@ Sketch:
 typedef enum {
     RENDER_OUTPUT_SCREEN,
     RENDER_OUTPUT_PNG,
+    RENDER_OUTPUT_JPEG,
     RENDER_OUTPUT_TILED_PNG,
     RENDER_OUTPUT_PDF,
     RENDER_OUTPUT_SVG,
@@ -676,16 +688,35 @@ typedef enum {
 
 typedef struct RenderOutputTarget {
     RenderOutputKind kind;
+    const char* output_file;
     ImageSurface* surface;
-    const char* output_path;
-    int tile_height;
+    int width;
+    int height;
+    int viewport_width;
+    int viewport_height;
+    int jpeg_quality;
+    float scale;
+    float pixel_ratio;
 } RenderOutputTarget;
 
-void render_document_to_target(UiContext* uicon, ViewTree* view_tree,
-                               RenderOutputTarget* target);
+int render_output_render_view_tree_to_target(UiContext* uicon, ViewTree* view_tree,
+                                             RenderOutputTarget* target);
+int render_output_render_html_file_to_target(const char* html_file,
+                                             RenderOutputTarget* target);
 ```
 
-The first phase can preserve the existing code paths internally while moving shared setup into helpers.
+Implemented state:
+
+- `RenderOutputTarget` now covers screen, PNG, JPEG, tiled PNG, PDF, and SVG.
+- screen/PNG/JPEG/tiled PNG view-tree rendering routes through
+  `render_output_render_view_tree_to_target()`.
+- file-level PDF/SVG/PNG/JPEG orchestration is represented by
+  `render_output_render_html_file_to_target()`, which delegates to the existing
+  exporters while keeping target selection and output metadata centralized.
+- the CLI render command now routes supported file outputs through the unified
+  `render_html_to_output_target()` compatibility entrypoint.
+- `render_html_doc()` remains a thin compatibility wrapper that creates a screen
+  or raster-file target.
 
 ### 11. Shared Paint Walker
 
@@ -938,7 +969,7 @@ Performance comparisons should use release builds, not debug builds.
 9. Split display-list storage, builder, replay, and bounds. Started with public display-list bounds helpers used by tile replay, a storage/lifecycle module, glyph replay helpers, replay dirty-clip state helpers, backdrop replay helpers, shadow clip replay helpers, effect replay helpers, direct raster replay helpers, top-level replay dispatch, direct raster recording helpers, effect recording helpers, and vector recording helpers.
    - Update: dirty replay now culls individual bounded commands, matched element markers carry subtree-union bounds, and dirty/tile replay can skip entire non-intersecting element subtrees.
    - Update: true cross-frame retained fragment reuse is enabled conservatively through `RetainedDisplayListCache`. Cached fragments deep-copy owned payloads and are reused only when bounds match and intersecting dirty sources are known to be outside the subtree.
-10. Unify `render_html_doc()` and `render_html_doc_tiled()` setup through `render_output`. In progress: shared context lifecycle, background/clear handling, root paint dispatch, display-list replay planning, render-pool ownership, surface-save dispatch, normal document render orchestration, tiled PNG streaming, and overlay dispatch are now outside `render.cpp`.
+10. Unify `render_html_doc()` and `render_html_doc_tiled()` setup through `render_output`. Done for the current raster pipeline: shared context lifecycle, background/clear handling, root paint dispatch, display-list replay planning, render-pool ownership, surface-save dispatch, normal document render orchestration, tiled PNG streaming, overlay dispatch, and screen/PNG/JPEG/tiled target dispatch are now outside `render.cpp`. File-level PDF/SVG targets are represented by the same `RenderOutputTarget` abstraction and currently delegate to the existing exporters; the CLI render command uses the unified file-target entrypoint.
 11. Expand `render_walk` into the shared paint walker and migrate raster rendering to it.
 12. Split `render_svg_inline.cpp` into SVG parse/style/defs/geometry/paint modules.
 

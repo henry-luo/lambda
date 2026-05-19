@@ -7,11 +7,13 @@
 #include "../lib/memtrack.h"
 #include "../lib/arena.h"
 
+#include <math.h>
 #include <string.h>
 
 struct RetainedDisplayListFragment {
     uint32_t view_id;
     Bound bounds;
+    Bound marker_bounds;
     DisplayList list;
     bool initialized;
     uint32_t last_stored_epoch;
@@ -312,6 +314,12 @@ static void retained_dl_cache_store_marker(RetainedDisplayListCache* cache,
     }
 
     fragment->bounds = dl_item_bounds(begin);
+    fragment->marker_bounds = {
+        begin->element_marker.marker_x,
+        begin->element_marker.marker_y,
+        begin->element_marker.marker_x + begin->element_marker.marker_w,
+        begin->element_marker.marker_y + begin->element_marker.marker_h
+    };
     fragment->last_stored_epoch = cache->epoch;
 }
 
@@ -342,13 +350,46 @@ Bound retained_dl_fragment_bounds(const RetainedDisplayListFragment* fragment) {
     return fragment->bounds;
 }
 
+Bound retained_dl_fragment_marker_bounds(const RetainedDisplayListFragment* fragment) {
+    if (!fragment) return {0, 0, 0, 0};
+    return fragment->marker_bounds;
+}
+
 int retained_dl_fragment_item_count(const RetainedDisplayListFragment* fragment) {
     if (!fragment) return 0;
     return fragment->list.count;
 }
 
+static bool retained_dl_bounds_match(Bound cached, Bound current) {
+    float tolerance = 0.5f;
+    return fabsf(cached.left - current.left) <= tolerance &&
+           fabsf(cached.top - current.top) <= tolerance &&
+           fabsf(cached.right - current.right) <= tolerance &&
+           fabsf(cached.bottom - current.bottom) <= tolerance;
+}
+
+static bool retained_dl_bounds_intersect(Bound a, Bound b) {
+    return !(a.left >= b.right || a.right <= b.left ||
+             a.top >= b.bottom || a.bottom <= b.top);
+}
+
+static bool retained_dl_dirty_rect_intersects_bound(const DirtyRect* dirty,
+                                                    Bound visual_bound,
+                                                    float scale) {
+    if (!dirty) return false;
+    float s = scale > 0 ? scale : 1.0f;
+    Bound dirty_bound = {
+        dirty->x * s,
+        dirty->y * s,
+        (dirty->x + dirty->width) * s,
+        (dirty->y + dirty->height) * s
+    };
+    return retained_dl_bounds_intersect(visual_bound, dirty_bound);
+}
+
 bool retained_dl_fragment_resources_valid(const RetainedDisplayListFragment* fragment,
-                                          uint64_t current_video_generation) {
+                                          uint64_t current_video_generation,
+                                          uint64_t current_glyph_generation) {
     if (!fragment) return false;
     const DisplayList* list = &fragment->list;
     for (int i = 0; i < list->count; i++) {
@@ -364,10 +405,11 @@ bool retained_dl_fragment_resources_valid(const RetainedDisplayListFragment* fra
                 break;
             }
             case DL_DRAW_GLYPH:
-                // Glyph bitmap buffers are borrowed from the font cache. Until
-                // the font cache exposes an eviction generation, text fragments
-                // must be re-recorded instead of retained across frames.
-                if (item->draw_glyph.bitmap.buffer) return false;
+                if (item->draw_glyph.bitmap.buffer &&
+                    (item->draw_glyph.resource_generation == 0 ||
+                     item->draw_glyph.resource_generation != current_glyph_generation)) {
+                    return false;
+                }
                 break;
             case DL_BLIT_SURFACE_SCALED: {
                 ImageSurface* src = (ImageSurface*)item->blit_surface_scaled.src_surface;
@@ -397,6 +439,34 @@ bool retained_dl_fragment_resources_valid(const RetainedDisplayListFragment* fra
         }
     }
     return true;
+}
+
+bool retained_dl_append_fragment_for_dirty(DisplayList* dst,
+                                           const RetainedDisplayListFragment* fragment,
+                                           Bound current_marker_bounds,
+                                           DirtyTracker* tracker,
+                                           float scale,
+                                           RetainedDisplayListContainsViewFn contains_view,
+                                           void* contains_userdata) {
+    if (!dst || !fragment || !tracker || tracker->full_repaint || !tracker->dirty_list) {
+        return false;
+    }
+    if (!retained_dl_bounds_match(fragment->marker_bounds, current_marker_bounds)) {
+        return false;
+    }
+
+    Bound visual_bound = fragment->bounds;
+    for (DirtyRect* dirty = tracker->dirty_list; dirty; dirty = dirty->next) {
+        if (!retained_dl_dirty_rect_intersects_bound(dirty, visual_bound, scale)) {
+            continue;
+        }
+        if (dirty->source_view_id == 0 || !contains_view ||
+            contains_view(contains_userdata, dirty->source_view_id)) {
+            return false;
+        }
+    }
+
+    return retained_dl_append_fragment(dst, fragment);
 }
 
 bool retained_dl_append_fragment(DisplayList* dst,

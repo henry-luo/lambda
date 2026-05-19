@@ -111,6 +111,7 @@ FontContext* font_context_create(FontContextConfig* config) {
     ctx->arena = arena;
     ctx->owns_pool = owns_pool;
     ctx->owns_arena = owns_arena;
+    ctx->glyph_cache_generation = 1;
 
     // create glyph arena (separate for bitmap data, resettable)
     ctx->glyph_arena = arena_create(pool, 256 * 1024, 4 * 1024 * 1024);
@@ -346,8 +347,14 @@ void font_context_reset_glyph_caches(FontContext* ctx) {
     if (ctx->glyph_arena) {
         arena_reset(ctx->glyph_arena);
     }
+    ctx->glyph_cache_generation++;
+    if (ctx->glyph_cache_generation == 0) ctx->glyph_cache_generation = 1;
 
     log_info("font_context_reset_glyph_caches: cleared loaded/bitmap caches and glyph arena");
+}
+
+uint64_t font_context_glyph_cache_generation(FontContext* ctx) {
+    return ctx ? ctx->glyph_cache_generation : 0;
 }
 
 bool font_context_scan(FontContext* ctx) {

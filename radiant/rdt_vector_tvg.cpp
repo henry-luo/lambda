@@ -78,6 +78,26 @@ struct RdtPicture {
 // we keep a global pointer set once at startup.
 static FontContext* g_picture_font_ctx = nullptr;
 
+// SVG_DOM pictures are immutable after parsing. Keep parsed external SVGs and
+// repeated SVG data payloads alive for the process lifetime so callers can draw
+// cheap shallow duplicates instead of reparsing and rebuilding SVG resources.
+typedef struct RdtPictureCacheEntry {
+    char* path_key;
+    uint64_t data_hash;
+    int data_size;
+    char* mime_key;
+    char* data_copy;
+    RdtPicture* picture;
+    RdtPictureCacheEntry* next;
+} RdtPictureCacheEntry;
+
+static RdtPictureCacheEntry* g_picture_path_cache = nullptr;
+static RdtPictureCacheEntry* g_picture_data_cache = nullptr;
+static pthread_mutex_t g_picture_cache_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+RdtPicture* rdt_picture_dup(RdtPicture* pic);
+void rdt_picture_free(RdtPicture* pic);
+
 static bool svg_doc_child_is_renderable(const char* tag) {
     if (!tag || !*tag) return false;
     if (tag[0] == '?' || tag[0] == '!') return false;
@@ -114,6 +134,104 @@ static void path_ensure_capacity(RdtPath* p) {
         p->entries = (RdtPath::Entry*)mem_realloc(p->entries, new_cap * sizeof(RdtPath::Entry), MEM_CAT_RENDER);
         p->capacity = new_cap;
     }
+}
+
+static uint64_t rdt_picture_data_hash(const char* data, int size, const char* mime_type) {
+    uint64_t h = 1469598103934665603ULL;
+    const unsigned char* bytes = (const unsigned char*)data;
+    for (int i = 0; i < size; i++) {
+        h ^= bytes[i];
+        h *= 1099511628211ULL;
+    }
+    if (mime_type) {
+        const unsigned char* mime = (const unsigned char*)mime_type;
+        while (*mime) {
+            h ^= *mime++;
+            h *= 1099511628211ULL;
+        }
+    }
+    return h;
+}
+
+static RdtPicture* picture_cache_dup_path_locked(const char* path) {
+    for (RdtPictureCacheEntry* e = g_picture_path_cache; e; e = e->next) {
+        if (e->path_key && strcmp(e->path_key, path) == 0) {
+            return rdt_picture_dup(e->picture);
+        }
+    }
+    return nullptr;
+}
+
+static bool picture_cache_data_matches(RdtPictureCacheEntry* e, const char* data,
+                                       int size, const char* mime_type, uint64_t hash) {
+    if (!e || e->data_hash != hash || e->data_size != size) return false;
+    const char* entry_mime = e->mime_key ? e->mime_key : "";
+    const char* query_mime = mime_type ? mime_type : "";
+    if (strcmp(entry_mime, query_mime) != 0) return false;
+    return e->data_copy && memcmp(e->data_copy, data, (size_t)size) == 0;
+}
+
+static RdtPicture* picture_cache_dup_data_locked(const char* data, int size,
+                                                 const char* mime_type, uint64_t hash) {
+    for (RdtPictureCacheEntry* e = g_picture_data_cache; e; e = e->next) {
+        if (picture_cache_data_matches(e, data, size, mime_type, hash)) {
+            return rdt_picture_dup(e->picture);
+        }
+    }
+    return nullptr;
+}
+
+static void picture_cache_insert_path_locked(const char* path, RdtPicture* picture) {
+    if (!path || !picture) return;
+    RdtPictureCacheEntry* e = (RdtPictureCacheEntry*)mem_calloc(1, sizeof(RdtPictureCacheEntry), MEM_CAT_CACHE_IMAGE);
+    e->path_key = mem_strdup(path, MEM_CAT_CACHE_IMAGE);
+    e->picture = picture;
+    e->next = g_picture_path_cache;
+    g_picture_path_cache = e;
+}
+
+static bool picture_cache_insert_data_locked(const char* data, int size,
+                                             const char* mime_type, uint64_t hash,
+                                             RdtPicture* picture) {
+    if (!data || size <= 0 || !picture) return false;
+    RdtPictureCacheEntry* e = (RdtPictureCacheEntry*)mem_calloc(1, sizeof(RdtPictureCacheEntry), MEM_CAT_CACHE_IMAGE);
+    e->data_copy = (char*)mem_alloc((size_t)size, MEM_CAT_CACHE_IMAGE);
+    if (!e->data_copy) {
+        mem_free(e);
+        return false;
+    }
+    memcpy(e->data_copy, data, (size_t)size);
+    e->data_size = size;
+    e->data_hash = hash;
+    e->mime_key = mem_strdup(mime_type ? mime_type : "", MEM_CAT_CACHE_IMAGE);
+    e->picture = picture;
+    e->next = g_picture_data_cache;
+    g_picture_data_cache = e;
+    return true;
+}
+
+static void picture_cache_free_list(RdtPictureCacheEntry* entry) {
+    while (entry) {
+        RdtPictureCacheEntry* next = entry->next;
+        if (entry->path_key) mem_free(entry->path_key);
+        if (entry->mime_key) mem_free(entry->mime_key);
+        if (entry->data_copy) mem_free(entry->data_copy);
+        if (entry->picture) rdt_picture_free(entry->picture);
+        mem_free(entry);
+        entry = next;
+    }
+}
+
+static void picture_cache_clear_all() {
+    pthread_mutex_lock(&g_picture_cache_mutex);
+    RdtPictureCacheEntry* path_cache = g_picture_path_cache;
+    RdtPictureCacheEntry* data_cache = g_picture_data_cache;
+    g_picture_path_cache = nullptr;
+    g_picture_data_cache = nullptr;
+    pthread_mutex_unlock(&g_picture_cache_mutex);
+
+    picture_cache_free_list(path_cache);
+    picture_cache_free_list(data_cache);
 }
 
 // Replay a path's commands onto a ThorVG shape
@@ -777,6 +895,14 @@ static RdtPicture* svg_picture_create(const char* data, int size, const char* so
 RdtPicture* rdt_picture_load(const char* path) {
     if (!path) return nullptr;
 
+    pthread_mutex_lock(&g_picture_cache_mutex);
+    RdtPicture* cached = picture_cache_dup_path_locked(path);
+    pthread_mutex_unlock(&g_picture_cache_mutex);
+    if (cached) {
+        log_debug("rdt_picture_load: cache hit for %s", path);
+        return cached;
+    }
+
     // Read file content; the SVG path is parsed by Radiant (not ThorVG).
     FILE* fp = fopen(path, "rb");
     if (!fp) {
@@ -796,8 +922,20 @@ RdtPicture* rdt_picture_load(const char* path) {
     mem_free(buf);
     if (!p) {
         log_error("rdt_picture_load: failed to parse %s", path);
+        return nullptr;
     }
-    return p;
+
+    pthread_mutex_lock(&g_picture_cache_mutex);
+    cached = picture_cache_dup_path_locked(path);
+    if (cached) {
+        pthread_mutex_unlock(&g_picture_cache_mutex);
+        rdt_picture_free(p);
+        return cached;
+    }
+    picture_cache_insert_path_locked(path, p);
+    RdtPicture* result = rdt_picture_dup(p);
+    pthread_mutex_unlock(&g_picture_cache_mutex);
+    return result;
 }
 
 RdtPicture* rdt_picture_load_data(const char* data, int size, const char* mime_type) {
@@ -805,8 +943,30 @@ RdtPicture* rdt_picture_load_data(const char* data, int size, const char* mime_t
     // Currently the only vector format Radiant pictures handle is SVG.
     // mime_type is accepted for API compatibility; non-svg types fall through
     // to the SVG parser which will fail gracefully.
-    (void)mime_type;
-    return svg_picture_create(data, size, nullptr);
+    uint64_t hash = rdt_picture_data_hash(data, size, mime_type);
+    pthread_mutex_lock(&g_picture_cache_mutex);
+    RdtPicture* cached = picture_cache_dup_data_locked(data, size, mime_type, hash);
+    pthread_mutex_unlock(&g_picture_cache_mutex);
+    if (cached) {
+        log_debug("rdt_picture_load_data: cache hit (%d bytes, mime=%s)",
+                  size, mime_type ? mime_type : "");
+        return cached;
+    }
+
+    RdtPicture* p = svg_picture_create(data, size, nullptr);
+    if (!p) return nullptr;
+
+    pthread_mutex_lock(&g_picture_cache_mutex);
+    cached = picture_cache_dup_data_locked(data, size, mime_type, hash);
+    if (cached) {
+        pthread_mutex_unlock(&g_picture_cache_mutex);
+        rdt_picture_free(p);
+        return cached;
+    }
+    bool inserted = picture_cache_insert_data_locked(data, size, mime_type, hash, p);
+    RdtPicture* result = inserted ? rdt_picture_dup(p) : p;
+    pthread_mutex_unlock(&g_picture_cache_mutex);
+    return result;
 }
 
 RdtPicture* rdt_picture_dup(RdtPicture* pic) {
@@ -1064,6 +1224,7 @@ void rdt_engine_init(int threads) {
 }
 
 void rdt_engine_term(void) {
+    picture_cache_clear_all();
     tvg_engine_term();
 }
 

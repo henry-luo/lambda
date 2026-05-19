@@ -28,6 +28,41 @@ protected:
     }
 };
 
+static DisplayItem* retained_test_add_rect(DisplayList* dl,
+                                           float x, float y, float w, float h) {
+    DisplayItem* rect = dl_alloc_item(dl);
+    if (!rect) return nullptr;
+    rect->op = DL_FILL_RECT;
+    rect->bounds[0] = x;
+    rect->bounds[1] = y;
+    rect->bounds[2] = w;
+    rect->bounds[3] = h;
+    rect->fill_rect.x = x;
+    rect->fill_rect.y = y;
+    rect->fill_rect.w = w;
+    rect->fill_rect.h = h;
+    Color color = {};
+    color.c = 0xff336699;
+    rect->fill_rect.color = color;
+    return rect;
+}
+
+static DirtyRect retained_test_dirty(float x, float y, float w, float h,
+                                     uint32_t source_view_id) {
+    DirtyRect dirty = {};
+    dirty.x = x;
+    dirty.y = y;
+    dirty.width = w;
+    dirty.height = h;
+    dirty.source_view_id = source_view_id;
+    return dirty;
+}
+
+static bool retained_test_contains_view_id(void* userdata, uint32_t source_view_id) {
+    uint32_t* contained_id = (uint32_t*)userdata;
+    return contained_id && *contained_id == source_view_id;
+}
+
 TEST_F(RetainedDisplayListTest, CapturesAndAppendsMatchedElementFragment) {
     DisplayList source = {};
     dl_init(&source, arena);
@@ -73,6 +108,164 @@ TEST_F(RetainedDisplayListTest, CapturesAndAppendsMatchedElementFragment) {
     dl_destroy(&source);
 }
 
+TEST_F(RetainedDisplayListTest, AppendsRetainedFragmentForExternalDirtySource) {
+    DisplayList source = {};
+    dl_init(&source, arena);
+
+    int begin = dl_begin_element(&source, 42, 10.0f, 20.0f, 30.0f, 40.0f);
+    ASSERT_NE(retained_test_add_rect(&source, 12.0f, 24.0f, 8.0f, 6.0f), nullptr);
+    dl_end_element(&source, begin);
+
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool);
+    ASSERT_NE(cache, nullptr);
+    retained_dl_cache_capture(cache, &source);
+    const RetainedDisplayListFragment* fragment = retained_dl_cache_get(cache, 42);
+    ASSERT_NE(fragment, nullptr);
+
+    DirtyRect dirty = retained_test_dirty(12.0f, 24.0f, 2.0f, 2.0f, 9001);
+    DirtyTracker tracker = {};
+    tracker.dirty_list = &dirty;
+    Bound current_marker = {10.0f, 20.0f, 40.0f, 60.0f};
+    uint32_t contained_id = 7777;
+
+    DisplayList replay = {};
+    dl_init(&replay, arena);
+    EXPECT_TRUE(retained_dl_append_fragment_for_dirty(
+        &replay, fragment, current_marker, &tracker, 1.0f,
+        retained_test_contains_view_id, &contained_id));
+    EXPECT_EQ(replay.count, 3);
+    EXPECT_EQ(replay.items[1].op, DL_FILL_RECT);
+
+    dl_destroy(&replay);
+    retained_dl_cache_destroy(cache);
+    dl_destroy(&source);
+}
+
+TEST_F(RetainedDisplayListTest, AppendsRetainedFragmentWhenUnknownDirtyMissesVisualBounds) {
+    DisplayList source = {};
+    dl_init(&source, arena);
+
+    int begin = dl_begin_element(&source, 42, 10.0f, 20.0f, 30.0f, 40.0f);
+    ASSERT_NE(retained_test_add_rect(&source, 12.0f, 24.0f, 8.0f, 6.0f), nullptr);
+    dl_end_element(&source, begin);
+
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool);
+    ASSERT_NE(cache, nullptr);
+    retained_dl_cache_capture(cache, &source);
+    const RetainedDisplayListFragment* fragment = retained_dl_cache_get(cache, 42);
+    ASSERT_NE(fragment, nullptr);
+
+    DirtyRect dirty = retained_test_dirty(100.0f, 100.0f, 5.0f, 5.0f, 0);
+    DirtyTracker tracker = {};
+    tracker.dirty_list = &dirty;
+    Bound current_marker = {10.0f, 20.0f, 40.0f, 60.0f};
+
+    DisplayList replay = {};
+    dl_init(&replay, arena);
+    EXPECT_TRUE(retained_dl_append_fragment_for_dirty(
+        &replay, fragment, current_marker, &tracker, 1.0f,
+        retained_test_contains_view_id, nullptr));
+    EXPECT_EQ(replay.count, 3);
+
+    dl_destroy(&replay);
+    retained_dl_cache_destroy(cache);
+    dl_destroy(&source);
+}
+
+TEST_F(RetainedDisplayListTest, RejectsRetainedFragmentForUnknownIntersectingDirtySource) {
+    DisplayList source = {};
+    dl_init(&source, arena);
+
+    int begin = dl_begin_element(&source, 42, 10.0f, 20.0f, 30.0f, 40.0f);
+    ASSERT_NE(retained_test_add_rect(&source, 12.0f, 24.0f, 8.0f, 6.0f), nullptr);
+    dl_end_element(&source, begin);
+
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool);
+    ASSERT_NE(cache, nullptr);
+    retained_dl_cache_capture(cache, &source);
+    const RetainedDisplayListFragment* fragment = retained_dl_cache_get(cache, 42);
+    ASSERT_NE(fragment, nullptr);
+
+    DirtyRect dirty = retained_test_dirty(12.0f, 24.0f, 2.0f, 2.0f, 0);
+    DirtyTracker tracker = {};
+    tracker.dirty_list = &dirty;
+    Bound current_marker = {10.0f, 20.0f, 40.0f, 60.0f};
+
+    DisplayList replay = {};
+    dl_init(&replay, arena);
+    EXPECT_FALSE(retained_dl_append_fragment_for_dirty(
+        &replay, fragment, current_marker, &tracker, 1.0f,
+        retained_test_contains_view_id, nullptr));
+    EXPECT_EQ(replay.count, 0);
+
+    dl_destroy(&replay);
+    retained_dl_cache_destroy(cache);
+    dl_destroy(&source);
+}
+
+TEST_F(RetainedDisplayListTest, RejectsRetainedFragmentForDirtySourceInsideSubtree) {
+    DisplayList source = {};
+    dl_init(&source, arena);
+
+    int begin = dl_begin_element(&source, 42, 10.0f, 20.0f, 30.0f, 40.0f);
+    ASSERT_NE(retained_test_add_rect(&source, 12.0f, 24.0f, 8.0f, 6.0f), nullptr);
+    dl_end_element(&source, begin);
+
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool);
+    ASSERT_NE(cache, nullptr);
+    retained_dl_cache_capture(cache, &source);
+    const RetainedDisplayListFragment* fragment = retained_dl_cache_get(cache, 42);
+    ASSERT_NE(fragment, nullptr);
+
+    uint32_t contained_id = 1234;
+    DirtyRect dirty = retained_test_dirty(12.0f, 24.0f, 2.0f, 2.0f, contained_id);
+    DirtyTracker tracker = {};
+    tracker.dirty_list = &dirty;
+    Bound current_marker = {10.0f, 20.0f, 40.0f, 60.0f};
+
+    DisplayList replay = {};
+    dl_init(&replay, arena);
+    EXPECT_FALSE(retained_dl_append_fragment_for_dirty(
+        &replay, fragment, current_marker, &tracker, 1.0f,
+        retained_test_contains_view_id, &contained_id));
+    EXPECT_EQ(replay.count, 0);
+
+    dl_destroy(&replay);
+    retained_dl_cache_destroy(cache);
+    dl_destroy(&source);
+}
+
+TEST_F(RetainedDisplayListTest, RejectsRetainedFragmentWhenMarkerBoundsChanged) {
+    DisplayList source = {};
+    dl_init(&source, arena);
+
+    int begin = dl_begin_element(&source, 42, 10.0f, 20.0f, 30.0f, 40.0f);
+    ASSERT_NE(retained_test_add_rect(&source, 12.0f, 24.0f, 8.0f, 6.0f), nullptr);
+    dl_end_element(&source, begin);
+
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool);
+    ASSERT_NE(cache, nullptr);
+    retained_dl_cache_capture(cache, &source);
+    const RetainedDisplayListFragment* fragment = retained_dl_cache_get(cache, 42);
+    ASSERT_NE(fragment, nullptr);
+
+    DirtyRect dirty = retained_test_dirty(12.0f, 24.0f, 2.0f, 2.0f, 9001);
+    DirtyTracker tracker = {};
+    tracker.dirty_list = &dirty;
+    Bound moved_marker = {11.0f, 20.0f, 41.0f, 60.0f};
+
+    DisplayList replay = {};
+    dl_init(&replay, arena);
+    EXPECT_FALSE(retained_dl_append_fragment_for_dirty(
+        &replay, fragment, moved_marker, &tracker, 1.0f,
+        retained_test_contains_view_id, nullptr));
+    EXPECT_EQ(replay.count, 0);
+
+    dl_destroy(&replay);
+    retained_dl_cache_destroy(cache);
+    dl_destroy(&source);
+}
+
 TEST_F(RetainedDisplayListTest, RejectsStaleBorrowedSurfaceGeneration) {
     DisplayList source = {};
     dl_init(&source, arena);
@@ -98,11 +291,44 @@ TEST_F(RetainedDisplayListTest, RejectsStaleBorrowedSurfaceGeneration) {
 
     const RetainedDisplayListFragment* fragment = retained_dl_cache_get(cache, 77);
     ASSERT_NE(fragment, nullptr);
-    EXPECT_TRUE(retained_dl_fragment_resources_valid(fragment, 0));
+    EXPECT_TRUE(retained_dl_fragment_resources_valid(fragment, 0, 1));
 
     surface.generation++;
-    EXPECT_FALSE(retained_dl_fragment_resources_valid(fragment, 0));
+    EXPECT_FALSE(retained_dl_fragment_resources_valid(fragment, 0, 1));
 
+    retained_dl_cache_destroy(cache);
+    dl_destroy(&source);
+}
+
+TEST_F(RetainedDisplayListTest, AppendsTransformedVisualFragmentWithStableMarkerBounds) {
+    DisplayList source = {};
+    dl_init(&source, arena);
+
+    int begin = dl_begin_element(&source, 92, 10.0f, 20.0f, 30.0f, 40.0f);
+    ASSERT_NE(retained_test_add_rect(&source, 100.0f, 200.0f, 30.0f, 40.0f), nullptr);
+    dl_end_element(&source, begin);
+
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool);
+    ASSERT_NE(cache, nullptr);
+    retained_dl_cache_capture(cache, &source);
+    const RetainedDisplayListFragment* fragment = retained_dl_cache_get(cache, 92);
+    ASSERT_NE(fragment, nullptr);
+
+    DirtyRect dirty = retained_test_dirty(110.0f, 210.0f, 5.0f, 5.0f, 9001);
+    DirtyTracker tracker = {};
+    tracker.dirty_list = &dirty;
+    Bound current_marker = {10.0f, 20.0f, 40.0f, 60.0f};
+    uint32_t contained_id = 7777;
+
+    DisplayList replay = {};
+    dl_init(&replay, arena);
+    EXPECT_TRUE(retained_dl_append_fragment_for_dirty(
+        &replay, fragment, current_marker, &tracker, 1.0f,
+        retained_test_contains_view_id, &contained_id));
+    EXPECT_EQ(replay.count, 3);
+    EXPECT_FLOAT_EQ(replay.items[1].bounds[0], 100.0f);
+
+    dl_destroy(&replay);
     retained_dl_cache_destroy(cache);
     dl_destroy(&source);
 }
@@ -134,10 +360,10 @@ TEST_F(RetainedDisplayListTest, RejectsStaleBorrowedImageGeneration) {
 
     const RetainedDisplayListFragment* fragment = retained_dl_cache_get(cache, 78);
     ASSERT_NE(fragment, nullptr);
-    EXPECT_TRUE(retained_dl_fragment_resources_valid(fragment, 0));
+    EXPECT_TRUE(retained_dl_fragment_resources_valid(fragment, 0, 1));
 
     surface.generation++;
-    EXPECT_FALSE(retained_dl_fragment_resources_valid(fragment, 0));
+    EXPECT_FALSE(retained_dl_fragment_resources_valid(fragment, 0, 1));
 
     retained_dl_cache_destroy(cache);
     dl_destroy(&source);
@@ -167,7 +393,74 @@ TEST_F(RetainedDisplayListTest, RejectsBorrowedGlyphWithoutGeneration) {
 
     const RetainedDisplayListFragment* fragment = retained_dl_cache_get(cache, 88);
     ASSERT_NE(fragment, nullptr);
-    EXPECT_FALSE(retained_dl_fragment_resources_valid(fragment, 0));
+    EXPECT_FALSE(retained_dl_fragment_resources_valid(fragment, 0, 1));
+
+    retained_dl_cache_destroy(cache);
+    dl_destroy(&source);
+}
+
+TEST_F(RetainedDisplayListTest, KeepsBorrowedGlyphWhenGenerationMatches) {
+    DisplayList source = {};
+    dl_init(&source, arena);
+
+    uint8_t pixel = 255;
+    int begin = dl_begin_element(&source, 91, 0.0f, 0.0f, 4.0f, 4.0f);
+    DisplayItem* glyph = dl_alloc_item(&source);
+    ASSERT_NE(glyph, nullptr);
+    glyph->op = DL_DRAW_GLYPH;
+    glyph->bounds[2] = 4.0f;
+    glyph->bounds[3] = 4.0f;
+    glyph->draw_glyph.bitmap.buffer = &pixel;
+    glyph->draw_glyph.bitmap.width = 1;
+    glyph->draw_glyph.bitmap.height = 1;
+    glyph->draw_glyph.bitmap.pitch = 1;
+    glyph->draw_glyph.resource_generation = 7;
+    dl_end_element(&source, begin);
+
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool);
+    ASSERT_NE(cache, nullptr);
+    retained_dl_cache_capture(cache, &source);
+
+    const RetainedDisplayListFragment* fragment = retained_dl_cache_get(cache, 91);
+    ASSERT_NE(fragment, nullptr);
+    EXPECT_TRUE(retained_dl_fragment_resources_valid(fragment, 0, 7));
+    EXPECT_FALSE(retained_dl_fragment_resources_valid(fragment, 0, 8));
+
+    retained_dl_cache_destroy(cache);
+    dl_destroy(&source);
+}
+
+TEST_F(RetainedDisplayListTest, PreservesOriginalMarkerBoundsForTransformedVisualBounds) {
+    DisplayList source = {};
+    dl_init(&source, arena);
+
+    int begin = dl_begin_element(&source, 92, 10.0f, 20.0f, 30.0f, 40.0f);
+    DisplayItem* transformed_rect = dl_alloc_item(&source);
+    ASSERT_NE(transformed_rect, nullptr);
+    transformed_rect->op = DL_FILL_RECT;
+    transformed_rect->bounds[0] = 100.0f;
+    transformed_rect->bounds[1] = 200.0f;
+    transformed_rect->bounds[2] = 30.0f;
+    transformed_rect->bounds[3] = 40.0f;
+    dl_end_element(&source, begin);
+
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool);
+    ASSERT_NE(cache, nullptr);
+    retained_dl_cache_capture(cache, &source);
+
+    const RetainedDisplayListFragment* fragment = retained_dl_cache_get(cache, 92);
+    ASSERT_NE(fragment, nullptr);
+    Bound marker_bounds = retained_dl_fragment_marker_bounds(fragment);
+    EXPECT_FLOAT_EQ(marker_bounds.left, 10.0f);
+    EXPECT_FLOAT_EQ(marker_bounds.top, 20.0f);
+    EXPECT_FLOAT_EQ(marker_bounds.right, 40.0f);
+    EXPECT_FLOAT_EQ(marker_bounds.bottom, 60.0f);
+
+    Bound visual_bounds = retained_dl_fragment_bounds(fragment);
+    EXPECT_FLOAT_EQ(visual_bounds.left, 10.0f);
+    EXPECT_FLOAT_EQ(visual_bounds.top, 20.0f);
+    EXPECT_FLOAT_EQ(visual_bounds.right, 130.0f);
+    EXPECT_FLOAT_EQ(visual_bounds.bottom, 240.0f);
 
     retained_dl_cache_destroy(cache);
     dl_destroy(&source);
@@ -193,8 +486,8 @@ TEST_F(RetainedDisplayListTest, RejectsStaleVideoGeneration) {
 
     const RetainedDisplayListFragment* fragment = retained_dl_cache_get(cache, 89);
     ASSERT_NE(fragment, nullptr);
-    EXPECT_TRUE(retained_dl_fragment_resources_valid(fragment, 4));
-    EXPECT_FALSE(retained_dl_fragment_resources_valid(fragment, 5));
+    EXPECT_TRUE(retained_dl_fragment_resources_valid(fragment, 4, 1));
+    EXPECT_FALSE(retained_dl_fragment_resources_valid(fragment, 5, 1));
 
     retained_dl_cache_destroy(cache);
     dl_destroy(&source);
@@ -225,10 +518,10 @@ TEST_F(RetainedDisplayListTest, RejectsStaleWebviewSurfaceGeneration) {
 
     const RetainedDisplayListFragment* fragment = retained_dl_cache_get(cache, 90);
     ASSERT_NE(fragment, nullptr);
-    EXPECT_TRUE(retained_dl_fragment_resources_valid(fragment, 0));
+    EXPECT_TRUE(retained_dl_fragment_resources_valid(fragment, 0, 1));
 
     surface.generation++;
-    EXPECT_FALSE(retained_dl_fragment_resources_valid(fragment, 0));
+    EXPECT_FALSE(retained_dl_fragment_resources_valid(fragment, 0, 1));
 
     retained_dl_cache_destroy(cache);
     dl_destroy(&source);

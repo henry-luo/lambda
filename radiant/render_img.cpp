@@ -1,4 +1,5 @@
 #include "render.hpp"
+#include "render_output.hpp"
 #include "view.hpp"
 #include "layout.hpp"
 #include "font_face.h"
@@ -308,8 +309,15 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
             // Large page: render in tiles to avoid allocating a single huge surface
             log_info("render_html_to_png: using tiled render (%dx%d exceeds %lld-pixel threshold)",
                 output_width, output_height, PNG_TILE_THRESHOLD);
-            render_html_doc_tiled(&ui_context, doc->view_tree, png_file,
-                output_width, output_height);
+            RenderOutputTarget target;
+            render_output_target_init(&target, RENDER_OUTPUT_TILED_PNG, png_file);
+            target.width = output_width;
+            target.height = output_height;
+            target.viewport_width = viewport_width;
+            target.viewport_height = viewport_height;
+            target.scale = scale;
+            target.pixel_ratio = pixel_ratio;
+            render_output_render_view_tree_to_target(&ui_context, doc->view_tree, &target);
             rendered = true;
         } else {
             // Normal path: allocate the full surface
@@ -320,7 +328,14 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
     // Render the document (normal path only)
     if (!rendered) {
         if (doc && doc->view_tree) {
-            render_html_doc(&ui_context, doc->view_tree, png_file);
+            RenderOutputTarget target;
+            render_output_target_init(&target, RENDER_OUTPUT_PNG, png_file);
+            target.surface = ui_context.surface;
+            target.viewport_width = viewport_width;
+            target.viewport_height = viewport_height;
+            target.scale = scale;
+            target.pixel_ratio = pixel_ratio;
+            render_output_render_view_tree_to_target(&ui_context, doc->view_tree, &target);
         } else {
             log_debug("No view tree to render");
             ui_context_cleanup(&ui_context);
@@ -409,7 +424,15 @@ int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int qualit
 
     // Render the document
     if (doc && doc->view_tree) {
-        render_html_doc(&ui_context, doc->view_tree, jpeg_file);
+        RenderOutputTarget target;
+        render_output_target_init(&target, RENDER_OUTPUT_JPEG, jpeg_file);
+        target.surface = ui_context.surface;
+        target.jpeg_quality = quality;
+        target.viewport_width = viewport_width;
+        target.viewport_height = viewport_height;
+        target.scale = scale;
+        target.pixel_ratio = pixel_ratio;
+        render_output_render_view_tree_to_target(&ui_context, doc->view_tree, &target);
     } else {
         log_debug("No view tree to render");
         ui_context_cleanup(&ui_context);
@@ -438,7 +461,10 @@ int render_uicontext_to_png(UiContext* uicon, const char* png_file) {
     log_info("render_uicontext_to_png: rendering to %s", png_file);
 
     // Render the document (this will include caret/selection via render_ui_overlays)
-    render_html_doc(uicon, uicon->document->view_tree, png_file);
+    RenderOutputTarget target;
+    render_output_target_init(&target, RENDER_OUTPUT_PNG, png_file);
+    target.surface = uicon->surface;
+    render_output_render_view_tree_to_target(uicon, uicon->document->view_tree, &target);
 
     log_info("render_uicontext_to_png: completed successfully");
     return 0;

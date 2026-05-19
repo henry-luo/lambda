@@ -132,6 +132,15 @@ int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int qualit
     return 1;
 }
 
+int render_html_to_output_target(const char* html_file, const char* output_file,
+                                 int viewport_width, int viewport_height,
+                                 float scale, float pixel_ratio, int jpeg_quality) {
+    (void)html_file; (void)output_file; (void)viewport_width; (void)viewport_height;
+    (void)scale; (void)pixel_ratio; (void)jpeg_quality;
+    fprintf(stderr, "Error: render command not available in headless CLI build\n");
+    return 1;
+}
+
 int view_doc_in_window(const char* doc_file) {
     (void)doc_file;
     fprintf(stderr, "Error: view command not available in headless CLI build\n");

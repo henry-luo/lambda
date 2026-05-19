@@ -291,6 +291,7 @@ typedef struct {
 typedef struct {
     uint32_t view_id;
     int matching_index;      // begin -> end, end -> begin; -1 while open
+    float marker_x, marker_y, marker_w, marker_h; // original layout marker before visual-union tightening
 } DlElementMarker;
 
 // ---------------------------------------------------------------------------

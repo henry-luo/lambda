@@ -1860,6 +1860,28 @@
                         "icon": "🧾"
                     },
                     {
+                        "source": "test_display_list_gtest.cpp",
+                        "name": "Display List Tests",
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "radiant/display_list_bounds.cpp",
+                            "radiant/display_list_storage.cpp",
+                            "radiant/display_list_record_vector.cpp",
+                            "radiant/display_list_record_effects.cpp",
+                            "radiant/display_list_record_raster.cpp",
+                            "test/test_display_list_stubs.cpp"
+                        ],
+                        "binary": "test_display_list_gtest.exe",
+                        "icon": "🧾"
+                    },
+                    {
                         "source": "test_pdf_writer_gtest.cpp",
                         "name": "PDF Writer Tests",
                         "dependencies": [
@@ -2075,6 +2097,7 @@
                         ],
                         "additional_sources": [
                             "radiant/animation.cpp",
+                            "radiant/image_surface_generation.cpp",
                             "radiant/gif_player.cpp",
                             "lib/image.c"
                         ],
@@ -2103,6 +2126,7 @@
                         },
                         "additional_sources": [
                             "radiant/animation.cpp",
+                            "radiant/image_surface_generation.cpp",
                             "radiant/lottie_player.cpp"
                         ],
                         "binary": "test_lottie_player_gtest.exe",
