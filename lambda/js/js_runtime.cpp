@@ -13026,6 +13026,71 @@ static void js_regex_reset_stale_repeated_captures(JsRegexData* rd,
     }
 }
 
+static bool js_regex_parse_optional_literal_repeat_group(JsRegexData* rd,
+        char* atoms, int* atom_count) {
+    if (atom_count) *atom_count = 0;
+    if (!rd || !rd->source_pattern || rd->source_pattern_len < 5 ||
+            !atoms || !atom_count) {
+        return false;
+    }
+    const char* pat = rd->source_pattern;
+    int len = rd->source_pattern_len;
+    if (pat[0] != '(' || pat[len - 1] != '*') return false;
+    int close = len - 2;
+    if (pat[close] != ')') return false;
+    int count = 0;
+    for (int i = 1; i < close;) {
+        unsigned char ch = (unsigned char)pat[i];
+        if (ch < 0x20 || ch >= 0x80 || pat[i] == '\\') return false;
+        switch (pat[i]) {
+        case '^': case '$': case '.': case '*': case '+': case '?':
+        case '(': case ')': case '[': case ']': case '{': case '}': case '|':
+            return false;
+        default:
+            break;
+        }
+        if (i + 1 >= close || pat[i + 1] != '?') return false;
+        if (count >= 16) return false;
+        atoms[count++] = pat[i];
+        i += 2;
+        if (i < close && pat[i] == '?') i++;
+    }
+    if (count <= 0) return false;
+    *atom_count = count;
+    return true;
+}
+
+static void js_regex_adjust_nullable_literal_repeat_match(JsRegexData* rd,
+        const char* input, int input_len, re2::StringPiece* matches, int num_groups) {
+    if (!rd || rd->wrapper || !input || !matches || num_groups <= 0 ||
+            !matches[0].data()) {
+        return;
+    }
+    char atoms[16];
+    int atom_count = 0;
+    if (!js_regex_parse_optional_literal_repeat_group(rd, atoms, &atom_count)) return;
+    int start = (int)(matches[0].data() - input);
+    if (start < 0 || start > input_len) return;
+    int pos = start;
+    int last_start = start;
+    int last_end = start;
+    while (pos < input_len) {
+        int iter_start = pos;
+        for (int a = 0; a < atom_count && pos < input_len; a++) {
+            if (input[pos] == atoms[a]) pos++;
+        }
+        if (pos == iter_start) break;
+        last_start = iter_start;
+        last_end = pos;
+    }
+    int old_end = start + (int)matches[0].size();
+    if (pos <= old_end) return;
+    matches[0] = re2::StringPiece(input + start, pos - start);
+    if (num_groups > 1 && last_end >= last_start) {
+        matches[1] = re2::StringPiece(input + last_start, last_end - last_start);
+    }
+}
+
 static bool js_regex_try_make_literal_fast(const char* pattern, int pattern_len,
                                            const char* flags, int flags_len,
                                            char** literal_out, int* literal_len_out) {
@@ -13664,6 +13729,54 @@ static int js_regex_count_capture_groups_before(const char* pattern, int pattern
     return count;
 }
 
+static bool js_regex_lookbehind_group_offset_at(const char* pattern, int pattern_len,
+        int target_pos, int* group_offset) {
+    if (group_offset) *group_offset = 0;
+    if (!pattern || target_pos < 0 || target_pos > pattern_len) return false;
+    bool lookbehind_stack[64];
+    int start_stack[64];
+    int depth = 0;
+    int bracket_depth = 0;
+    for (int pos = 0; pos < target_pos && pos < pattern_len; pos++) {
+        if (pattern[pos] == '\\' && pos + 1 < target_pos) {
+            pos++;
+            continue;
+        }
+        if (pattern[pos] == '[') {
+            bracket_depth++;
+            continue;
+        }
+        if (pattern[pos] == ']' && bracket_depth > 0) {
+            bracket_depth--;
+            continue;
+        }
+        if (bracket_depth > 0) continue;
+        if (pattern[pos] == '(') {
+            bool is_lookbehind = pos + 3 < pattern_len &&
+                pattern[pos + 1] == '?' && pattern[pos + 2] == '<' &&
+                (pattern[pos + 3] == '=' || pattern[pos + 3] == '!');
+            if (depth < 64) {
+                lookbehind_stack[depth] = is_lookbehind;
+                start_stack[depth] = pos;
+            }
+            depth++;
+            continue;
+        }
+        if (pattern[pos] == ')' && depth > 0) {
+            depth--;
+        }
+    }
+    for (int i = depth - 1; i >= 0 && i < 64; i--) {
+        if (!lookbehind_stack[i]) continue;
+        if (group_offset) {
+            *group_offset = js_regex_count_capture_groups_before(pattern, pattern_len,
+                start_stack[i]);
+        }
+        return true;
+    }
+    return false;
+}
+
 static bool js_regex_is_class_escape_shorthand(char ch) {
     return ch == 'd' || ch == 'D' || ch == 's' || ch == 'S' || ch == 'w' || ch == 'W';
 }
@@ -14038,7 +14151,26 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
                 } else {
                     int groups_before_ref = js_regex_count_capture_groups_before(effective_pattern,
                         effective_pattern_len, i);
+                    int lookbehind_group_offset = 0;
+                    bool inside_lookbehind = js_regex_lookbehind_group_offset_at(
+                        effective_pattern, effective_pattern_len, i, &lookbehind_group_offset);
+                    if (inside_lookbehind && ref_num <= lookbehind_group_offset) {
+                        processed_pattern += '\\';
+                        processed_pattern += next;
+                        i++;
+                        continue;
+                    }
                     if (ref_num > groups_before_ref) {
+                        if (inside_lookbehind) {
+                            processed_pattern += '\\';
+                            processed_pattern += next;
+                            i++;
+                            continue;
+                        }
+                        i++;
+                        continue;
+                    }
+                    if (inside_lookbehind && ref_num > lookbehind_group_offset) {
                         i++;
                         continue;
                     }
@@ -15115,6 +15247,7 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
         }
         return ItemNull;
     }
+    js_regex_adjust_nullable_literal_repeat_match(rd, match_chars, match_len, matches, num_groups);
     js_regex_reset_stale_repeated_captures(rd, matches, num_groups);
 
     // update lastIndex for global/sticky regexes (per ES spec §22.2.5.2 step 16:

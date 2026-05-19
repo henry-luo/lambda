@@ -1701,6 +1701,7 @@ JitImport jit_runtime_imports[] = {
     {"js_decodeURIComponent", FPTR(js_decodeURIComponent)},
     {"js_encodeURI", FPTR(js_encodeURI)},
     {"js_decodeURI", FPTR(js_decodeURI)},
+    {"js_decodeURI_percent_fromCharCode_1", FPTR(js_decodeURI_percent_fromCharCode_1)},
     {"js_unescape", FPTR(js_unescape)},
     {"js_escape", FPTR(js_escape)},
     {"js_atob", FPTR(js_atob)},
