@@ -5789,7 +5789,7 @@ static bool jm_eval_env_is_bridgeable_var(const char* name, const JsMirVarEntry*
     if (strncmp(name, "_js_", 4) != 0) return false;
     if (strcmp(name, "_js_this") == 0 || strcmp(name, "_js_new.target") == 0) return false;
     if (strstr(name, "__dup") != NULL) return false;
-    if (var->is_let_const || var->is_const || var->tdz_active) return false;
+    if (var->is_const || var->tdz_active) return false;
     if (var->mir_type != MIR_T_I64) return false;
     return true;
 }
@@ -6074,6 +6074,34 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 }
             } else {
                 // No user-defined superclass — check for builtin parent class (Error, etc.)
+                JsAstNode* heritage = (mt->current_class && mt->current_class->node) ?
+                    mt->current_class->node->superclass : NULL;
+                bool heritage_is_null = heritage && (heritage->node_type == JS_AST_NODE_NULL ||
+                    (heritage->node_type == JS_AST_NODE_LITERAL &&
+                     ((JsLiteralNode*)heritage)->literal_type == JS_LITERAL_NULL));
+                if (heritage_is_null) {
+                    bool null_super_has_spread = false;
+                    for (JsAstNode* chk = call->arguments; chk; chk = chk->next) {
+                        if (chk->node_type == JS_AST_NODE_SPREAD_ELEMENT) { null_super_has_spread = true; break; }
+                    }
+                    MIR_reg_t args_ptr = null_super_has_spread ?
+                        jm_build_spread_args_array(mt, call->arguments) :
+                        jm_build_args_array(mt, call->arguments, arg_count);
+                    MIR_reg_t this_val = jm_call_0(mt, "js_get_super_this_value", MIR_T_I64);
+                    MIR_reg_t null_ctor = jm_emit_null(mt);
+                    MIR_reg_t super_result = null_super_has_spread ?
+                        jm_call_3(mt, "js_super_apply_native", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, null_ctor),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, args_ptr)) :
+                        jm_call_4(mt, "js_super_call_native", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, null_ctor),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
+                            MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                    jm_emit_exc_propagate_check(mt);
+                    return jm_emit_super_bind_this_with_public_fields(mt, this_val, super_result);
+                }
                 // When super(msg) is called in a class extending Error, set this.message and this.name
                 if (mt->current_class && mt->current_class->node &&
                     mt->current_class->node->superclass &&
@@ -6114,7 +6142,6 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                         // object (e.g. Event, URL) get their own props merged onto `this` — without
                         // this merge the derived `this` would lack the base fields like `type`.
                         {
-                            MIR_reg_t parent_fn = jm_transpile_box_item(mt, mt->current_class->node->superclass);
                             bool super_has_spread = false;
                             for (JsAstNode* chk = call->arguments; chk; chk = chk->next) {
                                 if (chk->node_type == JS_AST_NODE_SPREAD_ELEMENT) { super_has_spread = true; break; }
@@ -6123,6 +6150,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                                 jm_build_spread_args_array(mt, call->arguments) :
                                 jm_build_args_array(mt, call->arguments, arg_count);
                             MIR_reg_t this_val = jm_call_0(mt, "js_get_super_this_value", MIR_T_I64);
+                            MIR_reg_t parent_fn = jm_emit_undefined(mt);
                             parent_fn = jm_call_2(mt, "js_get_super_constructor_from_receiver", MIR_T_I64,
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, parent_fn));
@@ -10800,9 +10828,11 @@ MIR_reg_t jm_transpile_tagged_template(JsMirTranspiler* mt, JsTaggedTemplateNode
     if (tmpl) {
         TSNode node = tmpl->base.node;
         uint64_t source_part = (mt->tp && mt->tp->source) ? (uint64_t)(uintptr_t)mt->tp->source : 0;
+        uint64_t module_part = mt->module ? (uint64_t)(uintptr_t)mt->module : 0;
         uint64_t start_part = ts_node_is_null(node) ? 0 : (uint64_t)ts_node_start_byte(node);
         uint64_t end_part = ts_node_is_null(node) ? 0 : (uint64_t)ts_node_end_byte(node);
         site_id ^= source_part; site_id *= 1099511628211ULL;
+        site_id ^= module_part; site_id *= 1099511628211ULL;
         site_id ^= start_part; site_id *= 1099511628211ULL;
         site_id ^= end_part; site_id *= 1099511628211ULL;
     }

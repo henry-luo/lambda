@@ -3696,6 +3696,10 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     mt->func_except_label = 0;  // reset for js_main
 
     jm_push_scope(mt);
+    mt->eval_local_frame_reg = jm_new_reg(mt, "eval_local_frame", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, mt->eval_local_frame_reg),
+        MIR_new_int_op(mt->ctx, 0)));
 
     // Initialize result register to undefined (JS completion value default)
     MIR_reg_t result = jm_new_reg(mt, "result", MIR_T_I64);
@@ -5043,6 +5047,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     }
 
     // Module mode: return namespace instead of result
+    jm_emit_eval_local_pop_if_needed(mt);
     if (mt->is_module) {
         jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, mt->namespace_reg)));
     } else {
@@ -5052,6 +5057,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     // Exception landing pad for js_main: return null if exception is pending
     if (mt->func_except_label) {
         jm_emit_label(mt, mt->func_except_label);
+        jm_emit_eval_local_pop_if_needed(mt);
         jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1,
             MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL_VAL)));
     }

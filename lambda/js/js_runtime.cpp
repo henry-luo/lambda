@@ -7,6 +7,7 @@
 #include "js_runtime_internal.hpp"
 #include "js_job_queue.h"
 #include "js_state_guards.h"
+#include <re2/unicode_casefold.h>
 
 extern "C" Item js_to_property_key(Item key);
 extern "C" Item js_reflect_own_keys(Item obj);
@@ -1569,7 +1570,8 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 Item arg = (argc > 0 && args) ? args[0] : ItemNull;
                 Item off = (argc > 1 && args) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
                 Item tlen = (argc > 2 && args) ? args[2] : (Item){.item = ITEM_JS_UNDEFINED};
-                return js_typed_array_construct(ta_type, arg, off, tlen, argc);
+                Item result = js_typed_array_construct(ta_type, arg, off, tlen, argc);
+                return js_apply_constructed_builtin_prototype(result, callee, effective_new_target);
             }
 
             // ArrayBuffer
@@ -1578,7 +1580,8 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 js_has_pending_new_target = false;
                 Item blen_arg = (argc > 0 && args) ? args[0] : ItemNull;
                 Item options_arg = (argc > 1 && args) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
-                return js_arraybuffer_construct_resizable(blen_arg, options_arg);
+                Item result = js_arraybuffer_construct_resizable(blen_arg, options_arg);
+                return js_apply_constructed_builtin_prototype(result, callee, effective_new_target);
             }
 
             // SharedArrayBuffer
@@ -1587,7 +1590,8 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 js_has_pending_new_target = false;
                 Item blen_arg = (argc > 0 && args) ? args[0] : ItemNull;
                 Item options_arg = (argc > 1 && args) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
-                return js_sharedarraybuffer_construct_with_options(blen_arg, options_arg);
+                Item result = js_sharedarraybuffer_construct_with_options(blen_arg, options_arg);
+                return js_apply_constructed_builtin_prototype(result, callee, effective_new_target);
             }
 
             // DataView
@@ -1597,37 +1601,40 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 Item buf = (argc > 0 && args) ? args[0] : ItemNull;
                 Item off = (argc > 1 && args) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
                 Item dvlen = (argc > 2 && args) ? args[2] : (Item){.item = ITEM_JS_UNDEFINED};
-                return js_dataview_new(buf, off, dvlen);
+                Item result = js_dataview_new(buf, off, dvlen);
+                return js_apply_constructed_builtin_prototype(result, callee, effective_new_target);
             }
 
             // Map
             if (nl == 3 && strncmp(n, "Map", 3) == 0) {
                 js_pending_new_target = ItemNull;
                 js_has_pending_new_target = false;
-                if (argc > 0 && args) return js_map_collection_new_from(args[0]);
-                return js_map_collection_new();
+                Item result = (argc > 0 && args) ? js_map_collection_new_from(args[0]) : js_map_collection_new();
+                return js_apply_constructed_builtin_prototype(result, callee, effective_new_target);
             }
 
             // Set
             if (nl == 3 && strncmp(n, "Set", 3) == 0) {
                 js_pending_new_target = ItemNull;
                 js_has_pending_new_target = false;
-                if (argc > 0 && args) return js_set_collection_new_from(args[0]);
-                return js_set_collection_new();
+                Item result = (argc > 0 && args) ? js_set_collection_new_from(args[0]) : js_set_collection_new();
+                return js_apply_constructed_builtin_prototype(result, callee, effective_new_target);
             }
 
             // WeakMap
             if (nl == 7 && strncmp(n, "WeakMap", 7) == 0) {
                 js_pending_new_target = ItemNull;
                 js_has_pending_new_target = false;
-                return js_weakmap_new();
+                Item result = js_weakmap_new();
+                return js_apply_constructed_builtin_prototype(result, callee, effective_new_target);
             }
 
             // WeakSet
             if (nl == 7 && strncmp(n, "WeakSet", 7) == 0) {
                 js_pending_new_target = ItemNull;
                 js_has_pending_new_target = false;
-                return js_weakset_new();
+                Item result = js_weakset_new();
+                return js_apply_constructed_builtin_prototype(result, callee, effective_new_target);
             }
 
             // Promise
@@ -1655,7 +1662,8 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 js_has_pending_new_target = false;
                 Item pattern = (argc > 0 && args) ? args[0] : make_js_undefined();
                 Item flags = (argc > 1 && args) ? args[1] : make_js_undefined();
-                return js_regexp_construct(pattern, flags);
+                Item result = js_regexp_construct(pattern, flags);
+                return js_apply_constructed_builtin_prototype(result, callee, effective_new_target);
             }
 
             // Symbol — not constructable (ES §19.4.1 step 1)
@@ -1669,12 +1677,19 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
             if (nl == 4 && strncmp(n, "Date", 4) == 0) {
                 js_pending_new_target = ItemNull;
                 js_has_pending_new_target = false;
-                if (argc == 0) return js_date_new();
-                if (argc == 1) return js_date_new_from(args[0]);
+                if (argc == 0) {
+                    Item result = js_date_new();
+                    return js_apply_constructed_builtin_prototype(result, callee, effective_new_target);
+                }
+                if (argc == 1) {
+                    Item result = js_date_new_from(args[0]);
+                    return js_apply_constructed_builtin_prototype(result, callee, effective_new_target);
+                }
                 // Multi-arg: pack into an array and call js_date_new_multi
                 Item arr = js_array_new(0);
                 for (int i = 0; i < argc; i++) js_array_push(arr, args[i]);
-                return js_date_new_multi(arr);
+                Item result = js_date_new_multi(arr);
+                return js_apply_constructed_builtin_prototype(result, callee, effective_new_target);
             }
 
             // Error and subclasses
@@ -1710,11 +1725,17 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
             if (nl == 5 && strncmp(n, "Array", 5) == 0) {
                 js_pending_new_target = ItemNull;
                 js_has_pending_new_target = false;
-                if (eff_argc == 0) return js_array_new(0);
-                if (eff_argc == 1) return js_array_new_from_item(eff_args[0]);
+                if (eff_argc == 0) {
+                    Item result = js_array_new(0);
+                    return js_apply_constructed_builtin_prototype(result, callee, effective_new_target);
+                }
+                if (eff_argc == 1) {
+                    Item result = js_array_new_from_item(eff_args[0]);
+                    return js_apply_constructed_builtin_prototype(result, callee, effective_new_target);
+                }
                 Item arr = js_array_new(0);
                 for (int i = 0; i < eff_argc; i++) js_array_push(arr, eff_args[i]);
-                return arr;
+                return js_apply_constructed_builtin_prototype(arr, callee, effective_new_target);
             }
 
             // Object
@@ -1881,6 +1902,7 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
         // to find if a builtin class (Array, etc.) is in the ancestor chain.
         // If so, create the appropriate backing object instead of a plain MAP.
         bool extends_promise_builtin = false;
+        bool extends_arraybuffer_builtin = false;
         if (construction_proto.item != ItemNull.item && get_type_id(construction_proto) == LMD_TYPE_MAP) {
             Item proto = js_get_prototype(construction_proto);
             int depth = 0;
@@ -1895,12 +1917,31 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                         extends_promise_builtin = true;
                         break;
                     }
+                    if (js_class_id(proto) == JS_CLASS_ARRAY_BUFFER) {
+                        extends_arraybuffer_builtin = true;
+                        break;
+                    }
                     proto = js_get_prototype(proto);
                 } else {
                     break;
                 }
                 depth++;
             }
+        }
+        if (extends_arraybuffer_builtin && get_type_id(ctor) != LMD_TYPE_FUNC) {
+            Item blen_arg = (argc > 0 && args) ? args[0] : ItemNull;
+            Item options_arg = (argc > 1 && args) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
+            Item result = js_arraybuffer_construct_resizable(blen_arg, options_arg);
+            if (js_check_exception()) return ItemNull;
+            if (construction_proto.item != ItemNull.item && get_type_id(construction_proto) == LMD_TYPE_MAP) {
+                js_set_prototype(result, construction_proto);
+            }
+            Item ctor_key = (Item){.item = s2it(heap_create_name("constructor"))};
+            js_property_set(result, ctor_key, callee);
+            Item ne_ctor_key = (Item){.item = s2it(heap_create_name("__ne_constructor", 16))};
+            js_property_set(result, ne_ctor_key, (Item){.item = b2it(true)});
+            js_init_class_instance_fields(callee, result);
+            return result;
         }
         if (extends_promise_builtin && get_type_id(ctor) != LMD_TYPE_FUNC) {
             Item executor = (argc > 0 && args) ? args[0] : ItemNull;
@@ -5692,6 +5733,10 @@ static bool js_is_constructor_internal(Item callee) {
     return true;
 }
 
+extern "C" bool js_is_constructor_object(Item callee) {
+    return js_is_constructor_internal(callee);
+}
+
 static bool js_is_class_instance_prototype(Item proto) {
     if (get_type_id(proto) != LMD_TYPE_MAP || !proto.map) return false;
     bool own_constructor = false;
@@ -6970,6 +7015,7 @@ extern "C" Item js_new_check_constructor_return(Item obj, Item result) {
 
 extern "C" void js_set_internal_class_name(Item obj, Item class_name) {
     if (js_is_proxy(obj)) obj = js_proxy_get_target(obj);
+    if (get_type_id(obj) == LMD_TYPE_MAP && js_class_id(obj) != JS_CLASS_NONE) return;
     Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
     js_property_set(obj, cn_key, class_name);
 }
@@ -10845,13 +10891,16 @@ extern "C" Item js_get_super_constructor_from_receiver(Item receiver, Item fallb
 }
 
 static bool js_super_callee_is_constructor(Item callee) {
-    if (js_is_proxy(callee)) return js_proxy_has_callable_target(callee);
+    if (js_is_proxy(callee)) {
+        Item target = js_proxy_get_target(callee);
+        return js_super_callee_is_constructor(target);
+    }
     TypeId type = get_type_id(callee);
     if (type == LMD_TYPE_MAP) return js_is_class_object_item(callee);
     if (type != LMD_TYPE_FUNC) return false;
     JsFunction* fn = (JsFunction*)callee.function;
     if (!fn) return false;
-    if (fn->builtin_id > 0 || fn->builtin_id == -2) return false;
+    if (fn->builtin_id > 0 || fn->builtin_id == -2 || fn->builtin_id == -3) return false;
     if (fn->flags & (JS_FUNC_FLAG_ARROW | JS_FUNC_FLAG_METHOD |
             JS_FUNC_FLAG_GENERATOR | JS_FUNC_FLAG_ASYNC |
             JS_FUNC_FLAG_TYPED_ARRAY_METHOD)) return false;
@@ -10864,11 +10913,16 @@ static bool js_builtin_super_constructs_via_construct(Item callee) {
     if (!fn || !fn->name) return false;
     const char* name = fn->name->chars;
     int len = (int)fn->name->len;
-    return (len == 7 && strncmp(name, "Promise", 7) == 0) ||
+    return (len == 5 && strncmp(name, "Array", 5) == 0) ||
+           (len == 6 && strncmp(name, "String", 6) == 0) ||
+           (len == 6 && strncmp(name, "Number", 6) == 0) ||
+           (len == 7 && strncmp(name, "Boolean", 7) == 0) ||
+           (len == 7 && strncmp(name, "Promise", 7) == 0) ||
            (len == 3 && strncmp(name, "Map", 3) == 0) ||
            (len == 3 && strncmp(name, "Set", 3) == 0) ||
            (len == 7 && strncmp(name, "WeakMap", 7) == 0) ||
            (len == 7 && strncmp(name, "WeakSet", 7) == 0) ||
+           (len == 6 && strncmp(name, "Symbol", 6) == 0) ||
            (len == 11 && strncmp(name, "ArrayBuffer", 11) == 0) ||
            (len == 17 && strncmp(name, "SharedArrayBuffer", 17) == 0) ||
            (len == 8 && strncmp(name, "DataView", 8) == 0) ||
@@ -10918,8 +10972,9 @@ extern "C" Item js_super_call_class(Item callee, Item this_val, Item* args, int 
             return js_call_function(ctor, this_val, args, argc);
         }
         // Empty class with no constructor — no-op, this is already created
+        return this_val;
     }
-    return this_val;
+    return js_throw_type_error("Super constructor is not a constructor");
 }
 
 // super() for native (built-in) parent constructors that ignore `this` and return a fresh
@@ -11444,9 +11499,10 @@ static Item js_bound_class_construct_stub(Item env_item, Item rest_array) {
         }
     }
     Item new_target = js_get_new_target();
-    if (new_target.item != ITEM_JS_UNDEFINED && new_target.item != ItemNull.item && new_target.item != 0) {
-        js_set_new_target(new_target);
+    if (new_target.item == ITEM_JS_UNDEFINED || new_target.item == ItemNull.item || new_target.item == 0) {
+        return js_throw_type_error("Class constructor cannot be invoked without 'new'");
     }
+    js_set_new_target(new_target);
     return js_new_from_class_object(target, args, argc);
 }
 
@@ -11630,6 +11686,8 @@ static void js_regexp_update_last_match(String* input_s,
 struct JsRegexData {
     re2::RE2* re2;            // compiled regex (direct, for patterns without assertions)
     JsRegexCompiled* wrapper; // wrapper with post-filters (for patterns with lookaheads/backrefs)
+    const char* source_pattern;
+    int source_pattern_len;
     const char* literal_pattern; // simple literal pattern handled without RE2
     int literal_pattern_len;
     int special_property_kind; // +/-: fast Unicode property-repeat kind
@@ -12637,6 +12695,180 @@ static int js_regex_num_groups(JsRegexData* rd) {
     return rd->re2->NumberOfCapturingGroups() + 1;
 }
 
+static bool js_regex_hex_val(char ch, int* out) {
+    if (ch >= '0' && ch <= '9') { *out = ch - '0'; return true; }
+    if (ch >= 'a' && ch <= 'f') { *out = ch - 'a' + 10; return true; }
+    if (ch >= 'A' && ch <= 'F') { *out = ch - 'A' + 10; return true; }
+    return false;
+}
+
+static bool js_regex_decode_atom_codepoint(const char* pattern, int len, int* out_cp) {
+    if (!pattern || len <= 0 || !out_cp) return false;
+    if (pattern[0] == '\\') {
+        if (len >= 6 && pattern[1] == 'u') {
+            int cp = 0;
+            for (int i = 2; i < 6; i++) {
+                int v = 0;
+                if (!js_regex_hex_val(pattern[i], &v)) return false;
+                cp = (cp << 4) | v;
+            }
+            if (len != 6) return false;
+            *out_cp = cp;
+            return true;
+        }
+        if (len >= 5 && pattern[1] == 'u' && pattern[2] == '{') {
+            int cp = 0;
+            int i = 3;
+            if (i >= len || pattern[i] == '}') return false;
+            for (; i < len && pattern[i] != '}'; i++) {
+                int v = 0;
+                if (!js_regex_hex_val(pattern[i], &v)) return false;
+                cp = (cp << 4) | v;
+                if (cp > 0x10FFFF) return false;
+            }
+            if (i != len - 1 || pattern[i] != '}') return false;
+            *out_cp = cp;
+            return true;
+        }
+        if (len == 4 && pattern[1] == 'x') {
+            int hi = 0, lo = 0;
+            if (!js_regex_hex_val(pattern[2], &hi) || !js_regex_hex_val(pattern[3], &lo)) return false;
+            *out_cp = (hi << 4) | lo;
+            return true;
+        }
+        if (len == 2) {
+            *out_cp = (unsigned char)pattern[1];
+            return true;
+        }
+        return false;
+    }
+    utf8proc_int32_t cp = 0;
+    utf8proc_ssize_t width = utf8proc_iterate(
+        (const utf8proc_uint8_t*)pattern, (utf8proc_ssize_t)len, &cp);
+    if (width <= 0 || width != len) return false;
+    *out_cp = (int)cp;
+    return true;
+}
+
+static bool js_regex_simple_source_codepoint(JsRegexData* rd, int* out_cp) {
+    if (!rd || !rd->source_pattern || rd->source_pattern_len <= 0 || !out_cp) return false;
+    const char* pattern = rd->source_pattern;
+    int len = rd->source_pattern_len;
+    if (len >= 2 && pattern[0] == '[' && pattern[len - 1] == ']') {
+        if (len >= 3 && pattern[1] == '^') return false;
+        return js_regex_decode_atom_codepoint(pattern + 1, len - 2, out_cp);
+    }
+    return js_regex_decode_atom_codepoint(pattern, len, out_cp);
+}
+
+static int js_regex_ecma_canonicalize_cp(int cp, bool unicode) {
+    if (unicode) {
+        int canonical = cp;
+        int cur = cp;
+        for (int i = 0; i < 16; i++) {
+            const re2::CaseFold* fold = re2::LookupCaseFold(
+                re2::unicode_casefold, re2::num_unicode_casefold, (re2::Rune)cur);
+            if (!fold || cur < fold->lo || cur > fold->hi) break;
+            int next = (int)re2::ApplyFold(fold, (re2::Rune)cur);
+            if (next < canonical) canonical = next;
+            if (next == cp || next == cur) break;
+            cur = next;
+        }
+        cur = cp;
+        for (int i = 0; i < 16; i++) {
+            utf8proc_int32_t folded[8];
+            utf8proc_ssize_t folded_len = utf8proc_decompose_char(
+                (utf8proc_int32_t)cur, folded, 8,
+                (utf8proc_option_t)UTF8PROC_CASEFOLD, NULL);
+            if (folded_len != 1 || folded[0] == cur) break;
+            int next = (int)folded[0];
+            if (next < canonical) canonical = next;
+            if (next == cp) break;
+            cur = next;
+        }
+        return canonical;
+    }
+    if (cp >= 'a' && cp <= 'z') return cp - 32;
+    if (cp >= 'A' && cp <= 'Z') return cp;
+    return cp;
+}
+
+static bool js_regex_unicode_fold_sequence(int cp, utf8proc_int32_t* out,
+        int out_cap, int* out_len) {
+    if (!out || out_cap <= 0 || !out_len) return false;
+    utf8proc_ssize_t folded_len = utf8proc_decompose_char(
+        (utf8proc_int32_t)cp, out, out_cap,
+        (utf8proc_option_t)UTF8PROC_CASEFOLD, NULL);
+    if (folded_len <= 0) {
+        out[0] = (utf8proc_int32_t)cp;
+        *out_len = 1;
+        return true;
+    }
+    if (folded_len > out_cap) return false;
+    *out_len = (int)folded_len;
+    return true;
+}
+
+static bool js_regex_casefold_cp_equal(int pattern_cp, int input_cp, bool unicode) {
+    if (!unicode) {
+        int pattern_canon = js_regex_ecma_canonicalize_cp(pattern_cp, false);
+        int input_canon = js_regex_ecma_canonicalize_cp(input_cp, false);
+        return pattern_canon == input_canon;
+    }
+    utf8proc_int32_t pattern_folded[8];
+    utf8proc_int32_t input_folded[8];
+    int pattern_len = 0, input_len = 0;
+    if (!js_regex_unicode_fold_sequence(pattern_cp, pattern_folded, 8, &pattern_len) ||
+        !js_regex_unicode_fold_sequence(input_cp, input_folded, 8, &input_len)) {
+        return false;
+    }
+    if (pattern_len != input_len) return false;
+    for (int i = 0; i < pattern_len; i++) {
+        if (pattern_folded[i] != input_folded[i]) return false;
+    }
+    return true;
+}
+
+static bool js_regex_decode_input_cp_at(const char* input, int input_len, int pos,
+        int* out_cp, int* out_width) {
+    if (!input || pos < 0 || pos >= input_len || !out_cp || !out_width) return false;
+    utf8proc_int32_t cp = 0;
+    utf8proc_ssize_t width = utf8proc_iterate(
+        (const utf8proc_uint8_t*)input + pos, (utf8proc_ssize_t)(input_len - pos), &cp);
+    if (width <= 0) return false;
+    *out_cp = (int)cp;
+    *out_width = (int)width;
+    return true;
+}
+
+static bool js_regex_single_case_match(JsRegexData* rd, const char* input, int input_len,
+        int start_pos, re2::RE2::Anchor anchor, re2::StringPiece* matches, int num_groups) {
+    int pattern_cp = 0;
+    if (!rd || !rd->ignore_case || !js_regex_simple_source_codepoint(rd, &pattern_cp)) return false;
+    int pos = start_pos;
+    while (pos <= input_len) {
+        int input_cp = 0, width = 0;
+        if (!js_regex_decode_input_cp_at(input, input_len, pos, &input_cp, &width)) return false;
+        if (js_regex_casefold_cp_equal(pattern_cp, input_cp, rd->unicode)) {
+            if (num_groups > 0) matches[0] = re2::StringPiece(input + pos, width);
+            return true;
+        }
+        if (anchor == re2::RE2::ANCHOR_START) return false;
+        pos += width;
+    }
+    return false;
+}
+
+static bool js_regex_single_case_match_accepts(JsRegexData* rd, const re2::StringPiece& match) {
+    if (!rd || !rd->ignore_case) return true;
+    int pattern_cp = 0;
+    if (!js_regex_simple_source_codepoint(rd, &pattern_cp)) return true;
+    int input_cp = 0, width = 0;
+    if (!js_regex_decode_input_cp_at(match.data(), (int)match.size(), 0, &input_cp, &width)) return false;
+    if (width != (int)match.size()) return false;
+    return js_regex_casefold_cp_equal(pattern_cp, input_cp, rd->unicode);
+}
+
 // Helper: match using wrapper if available, otherwise direct RE2
 // Returns true if matched. Fills `matches` array with StringPiece groups.
 static bool js_regex_match_internal(JsRegexData* rd, const char* input, int input_len,
@@ -12686,8 +12918,14 @@ static bool js_regex_match_internal(JsRegexData* rd, const char* input, int inpu
         return true;
     }
     // direct RE2 match (no assertions to worry about)
-    return rd->re2->Match(re2::StringPiece(input, input_len), start_pos, input_len,
+    bool matched = rd->re2->Match(re2::StringPiece(input, input_len), start_pos, input_len,
                            anchor, matches, num_groups);
+    if (matched && !js_regex_single_case_match_accepts(rd, matches[0])) return false;
+    if (!matched && rd->ignore_case) {
+        return js_regex_single_case_match(rd, input, input_len, start_pos, anchor,
+            matches, num_groups);
+    }
+    return matched;
 }
 
 static bool js_regex_pattern_group_is_capturing(const std::string& pattern, int pos) {
@@ -12977,6 +13215,86 @@ static void js_regex_create_data_property(Item object, const char* name, int nam
     js_define_own_property_from_descriptor(object, name, name_len, &pd, is_new);
 }
 
+static Item js_regex_match_piece_to_item(Item str, const char* chars, int len,
+        const char* match_chars, int match_len, bool utf16_subject, bool full_unicode,
+        const re2::StringPiece& piece) {
+    int mlen = (int)piece.size();
+    if (utf16_subject) {
+        int start_units = (int)js_utf16_index_from_byte(match_chars, match_len,
+            (int)(piece.data() - match_chars));
+        int end_units = (int)js_utf16_index_from_byte(match_chars, match_len,
+            (int)(piece.data() - match_chars) + mlen);
+        return js_str_substring_utf16(str, start_units, end_units);
+    }
+    if (full_unicode) {
+        int start_units = (int)js_utf16_index_from_byte(chars, len,
+            (int)(piece.data() - match_chars));
+        int end_units = (int)js_utf16_index_from_byte(chars, len,
+            (int)(piece.data() - match_chars) + mlen);
+        return js_str_substring_utf16(str, start_units, end_units);
+    }
+    return (Item){.item = s2it(heap_strcpy((char*)piece.data(), mlen))};
+}
+
+static Item js_regex_build_source_named_groups_object(JsRegexData* rd,
+        re2::StringPiece* matches, int num_groups, Item str,
+        const char* chars, int len, const char* match_chars, int match_len,
+        bool utf16_subject, bool full_unicode) {
+    if (!rd || !rd->source_pattern || rd->source_pattern_len <= 0) return make_js_undefined();
+    Item groups_obj = js_object_create(ItemNull);
+    bool found_named = false;
+    bool in_class = false;
+    int group_idx = 0;
+    const char* pat = rd->source_pattern;
+    int pat_len = rd->source_pattern_len;
+    for (int i = 0; i < pat_len; i++) {
+        char ch = pat[i];
+        if (ch == '\\' && i + 1 < pat_len) { i++; continue; }
+        if (ch == '[' && !in_class) { in_class = true; continue; }
+        if (ch == ']' && in_class) { in_class = false; continue; }
+        if (in_class || ch != '(' || i + 1 >= pat_len) continue;
+        if (pat[i + 1] != '?') {
+            group_idx++;
+            continue;
+        }
+        if (i + 3 < pat_len && pat[i + 2] == '<' &&
+                pat[i + 3] != '=' && pat[i + 3] != '!') {
+            int name_start = i + 3;
+            int name_end = name_start;
+            while (name_end < pat_len && pat[name_end] != '>') name_end++;
+            if (name_end >= pat_len) continue;
+            group_idx++;
+            Item val = make_js_undefined();
+            if (group_idx < num_groups && matches[group_idx].data()) {
+                val = js_regex_match_piece_to_item(str, chars, len, match_chars, match_len,
+                    utf16_subject, full_unicode, matches[group_idx]);
+            }
+            js_regex_create_data_property(groups_obj, pat + name_start,
+                name_end - name_start, val);
+            found_named = true;
+            i = name_end;
+            continue;
+        }
+        if (i + 4 < pat_len && pat[i + 2] == 'P' && pat[i + 3] == '<') {
+            int name_start = i + 4;
+            int name_end = name_start;
+            while (name_end < pat_len && pat[name_end] != '>') name_end++;
+            if (name_end >= pat_len) continue;
+            group_idx++;
+            Item val = make_js_undefined();
+            if (group_idx < num_groups && matches[group_idx].data()) {
+                val = js_regex_match_piece_to_item(str, chars, len, match_chars, match_len,
+                    utf16_subject, full_unicode, matches[group_idx]);
+            }
+            js_regex_create_data_property(groups_obj, pat + name_start,
+                name_end - name_start, val);
+            found_named = true;
+            i = name_end;
+        }
+    }
+    return found_named ? groups_obj : make_js_undefined();
+}
+
 static bool js_regex_append_utf8_cp(std::string& out, uint32_t cp) {
     if (cp > 0x10FFFFu || (cp >= 0xD800u && cp <= 0xDFFFu)) return false;
     char buf[5];
@@ -13127,6 +13445,8 @@ static bool js_regex_needs_wrapper(const char* pattern, int pattern_len) {
         if (!in_class && c == '(' && i + 2 < pattern_len && pattern[i + 1] == '?') {
             char kind = pattern[i + 2];
             if (kind == '=' || kind == '!') return true;
+            if (kind == '<' && i + 3 < pattern_len &&
+                (pattern[i + 3] == '=' || pattern[i + 3] == '!')) return true;
         }
     }
     return false;
@@ -13155,6 +13475,8 @@ static void js_regex_put_fresh(Item obj, const char* key, int key_len, Item valu
 // Build a JS RegExp Map object from a cached regex entry, reusing compiled JsRegexData.
 static Item js_regex_build_object_from_cache(const JsRegexCacheEntry& ce) {
     JsRegexData* rd = ce.rd;
+    rd->source_pattern = ce.source;
+    rd->source_pattern_len = ce.source_len;
     rd->unicode = ce.has_unicode;
     Item regex_obj = js_new_object();
     Item rd_key = (Item){.item = s2it(heap_create_name(JS_REGEX_DATA_KEY))};
@@ -14052,28 +14374,6 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
             }
         }
     }
-    // 3b. Strip lookbehind assertions (?<=...) and (?<!...) since RE2 doesn't support them
-    //     This prevents RE2 compile failures. Log a warning for diagnostics.
-    {
-        for (const char* lb_prefix : {"(?<=", "(?<!"}) {
-            size_t pos = 0;
-            while ((pos = processed_pattern.find(lb_prefix, pos)) != std::string::npos) {
-                if (pos > 0 && processed_pattern[pos - 1] == '\\') { pos++; continue; }
-                int depth = 1;
-                size_t end = pos + strlen(lb_prefix);
-                while (end < processed_pattern.size() && depth > 0) {
-                    if (processed_pattern[end] == '\\' && end + 1 < processed_pattern.size()) {
-                        end += 2; continue;
-                    }
-                    if (processed_pattern[end] == '(') depth++;
-                    else if (processed_pattern[end] == ')') depth--;
-                    end++;
-                }
-                log_debug("js regex: stripping lookbehind %s from pattern (RE2 unsupported)", lb_prefix);
-                processed_pattern.erase(pos, end - pos);
-            }
-        }
-    }
     // 4. Convert JS named capture groups (?<name>...) to RE2 syntax (?P<name>...)
     //    Must NOT convert lookbehind (?<=...) or (?<!...)
     {
@@ -14191,6 +14491,8 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     JsRegexData* rd = (JsRegexData*)pool_calloc(js_input->pool, sizeof(JsRegexData));
     rd->re2 = re2;
     rd->wrapper = wrapper;
+    rd->source_pattern = pattern;
+    rd->source_pattern_len = pattern_len;
     rd->global = global;
     rd->ignore_case = !opts.case_sensitive();
     rd->multiline = multiline;
@@ -14911,6 +15213,12 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
             js_regex_create_data_property(groups_obj, js_name, js_name_len, val);
         }
         js_regex_create_data_property(result, "groups", 6, groups_obj);
+            return result;
+        }
+        Item source_groups = js_regex_build_source_named_groups_object(rd, matches, num_groups,
+            str, chars, len, match_chars, match_len, utf16_subject, full_unicode);
+        if (source_groups.item != ITEM_JS_UNDEFINED) {
+            js_regex_create_data_property(result, "groups", 6, source_groups);
             return result;
         }
     }

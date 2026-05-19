@@ -34,7 +34,7 @@ This proposal adds three capabilities:
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| **Schema syntax** | **Explicit binary type `type A : binary { … }`; physical layout via a trailing annotation map per field** (`a: int32 {offset:…, magic:…, align:…, endian:…}`). A new general Lambda feature: any type field may carry a following `{…}` annotation map. | Zero new top-level grammar; the annotation map is itself ordinary Lambda map syntax; schemas are first-class values, composable, importable, validator-usable. |
+| **Schema syntax** | **Explicit binary type `type A : binary { … }`; physical layout via a trailing `that {…}` annotation map per field** (`a: int32 that {offset:…, magic:…, align:…, endian:…}`). A new general Lambda feature: any type field may carry a `that {…}` annotation map; the `that` keyword removes the `a: int {…}` grammar ambiguity. | Zero new top-level grammar; the annotation map is itself ordinary Lambda map syntax; schemas are first-class values, composable, importable, validator-usable. |
 | **Endianness** | **Declared once at the schema root (type-level annotation map), inherited by all nested fields, overridable per field.** Mirrors Kaitai's `meta/endian`. | Matches real formats (almost always single-endian); avoids per-field verbosity while staying explicit where it matters. |
 | **Element shape** | Fields → **element attributes** for scalars, nested structs, and **any array with a given/encoded count** (homogeneous or heterogeneous). Fields → **child nodes** only for **sentinel-/EOS-terminated repeating content** (no on-wire count). | Counted data is a value; only open-ended chunked streams are document "body". Preserves declared order and `rec.field` access. |
 | **Velmt decoding** | **Lazy + zero-copy.** `Velmt` holds `{ buffer, schema, base_offset }`; scalar/array fields decode on access; sub-structs and `binary`/array slices are zero-copy sub-views into the parent buffer. | Handles multi-GB / mmap'd inputs; depends on sub-binary slicing from [Lambda_Type_Binary.md §6.1]. |
@@ -63,26 +63,26 @@ This proposal adds three capabilities:
 ### 4.1 The user's example, annotated
 
 ```lambda
-type AnimalRecord : binary {endian: big} {     // ': binary' = explicit binary type;
-                                               // trailing {…} = type-level annotation map
-    uuid:       uint8[16]                       // 128-bit UUID, 16 raw bytes
-    name:       uint8[24]                        // fixed 24-byte field (NUL-padded)
-    birth_year: uint16                           // inherits big-endian
-    weight:     float64                          // IEEE-754, big-endian
-    rating:     int32                            // signed, big-endian
-    crc:        uint32 {endian: little}          // per-field override via annotation map
+type AnimalRecord : binary that {endian: big} {  // ': binary' = explicit binary type;
+                                                 // 'that {…}' = type-level annotation map
+    uuid:       uint8[16]                         // 128-bit UUID, 16 raw bytes
+    name:       uint8[24]                          // fixed 24-byte field (NUL-padded)
+    birth_year: uint16                             // inherits big-endian
+    weight:     float64                            // IEEE-754, big-endian
+    rating:     int32                              // signed, big-endian
+    crc:        uint32 that {endian: little}       // per-field override via annotation map
 }
 ```
 
 - **`type A : binary { … }`** marks an explicit binary (physical-layout) type, so tools/validator distinguish it from a logical type. It is still structurally "a Lambda `type`."
-- **Field annotations are a trailing Lambda map** `{ key: value, … }` after the field's type — a new, *general* Lambda capability (any type field may carry a following annotation map), reusing ordinary map syntax. Recognized keys: `endian`, `offset`, `magic`, `align`, `until`, `until_eos`, `if` (Phase 2). Array/blob length is **not** an annotation key — it is the bracket expression `T[len]` in type position. No new `@`/`/be` micro-syntax.
-- The **type-level annotation map** (the `{endian: big}` right after `: binary`) sets schema-wide defaults — chiefly `endian` — inherited by all fields and by nested binary types unless they declare their own.
+- **Field annotations are a trailing `that {…}` Lambda map** after the field's type — a new, *general* Lambda capability (any type field may carry a `that { key: value, … }` annotation map). The `that` keyword disambiguates the annotation map from the schema body / a map-typed field — without it `a: int {…}` is grammatically ambiguous. Recognized keys: `endian`, `offset`, `magic`, `align`, `until`, `until_eos`, `if` (Phase 2). Array/blob length is **not** an annotation key — it is the bracket expression `T[len]` in type position. No new `@`/`/be` micro-syntax.
+- The **type-level annotation map** (`that {endian: big}` right after `: binary`) sets schema-wide defaults — chiefly `endian` — inherited by all fields and by nested binary types unless they declare their own.
 - Field types are Lambda's existing fixed-width numerics (`uint8`, `int32`, `float64`, …) — already needed by [Lambda_Type_Binary.md §5.3].
 - `T[N]` = fixed-length array of `N` `T`. `uint8[16]` decodes to a zero-copy `binary` sub-view (raw bytes); other element types decode to a typed array view.
 
 ### 4.2 Annotation vocabulary (Phase 1)
 
-Array/blob **length lives in the type position** as a bracket expression `T[expr]` where `expr` is a literal, a const, **or the name of a previously-decoded field** (`int8[len]`). The trailing `{…}` map carries everything else: type-level keys after `: binary`, field-level keys after the field's type.
+Array/blob **length lives in the type position** as a bracket expression `T[expr]` where `expr` is a literal, a const, **or the name of a previously-decoded field** (`int8[len]`). The trailing `that {…}` map carries everything else: type-level keys after `: binary`, field-level keys after the field's type.
 
 | Form | Level | Meaning | Kaitai analogue |
 |---|---|---|---|
@@ -102,25 +102,25 @@ Array/blob **length lives in the type position** as a bracket expression `T[expr
 Enums are an ordinary Lambda type declaration — `type Name { label: value, … }` — used directly as a field type over its backing integer width.
 
 ```lambda
-type Chunk : binary {endian: big} {
+type Chunk : binary that {endian: big} {
     length: uint32                              // real wire field
     ctype:  uint8[4]
     data:   binary[length]                       // blob length = the 'length' field above
     crc:    uint32
 }
 
-type Png : binary {endian: big, magic: b'\x89504E470D0A1A0A'} {
-    chunks: Chunk {until_eos: true}             // sentinel/EOS-terminated → child nodes
+type Png : binary that {endian: big, magic: b'\x89504E470D0A1A0A'} {
+    chunks: Chunk that {until_eos: true}        // sentinel/EOS-terminated → child nodes
 }
 
 type Compression { none: 0, zlib: 1, lz4: 2 }   // plain Lambda enum type
 
-type Header : binary {endian: little} {
+type Header : binary that {endian: little} {
     version: uint16
     codec:   Compression                         // decode uint → enum label; encode → int
 }
 
-type B : binary {endian: big} {
+type B : binary that {endian: big} {
     len:    int16
     fieldA: int8[len]                            // counted array → attribute (see §5.1)
 }
@@ -199,7 +199,7 @@ struct VElmt : Container {                        // LMD_TYPE_ELEMENT, IS_VIRTUA
 **Field → element mapping rule (resolved):** the axis is *counted vs. open-ended*, not homogeneous vs. heterogeneous.
 
 - Scalars, nested structs, and **any array whose length is known/encoded** — fixed `T[N]`, or `T[prev_field]` — → an **attribute** (element tagged with the schema name; attribute order = declared order). True whether items are homogeneous (`uint8[16]`) or heterogeneous. `rec.weight`, `rec.uuid`, `b.fieldA` work; `rec.name` is a zero-copy `binary`.
-- Only **sentinel-/EOS-terminated repeating content** with no on-wire count (`{until: …}` / `{until_eos: true}`, e.g. `Png.chunks`, a TLV stream) → **child nodes**, iterated via `for ch in elmt` / `elmt[i]`.
+- Only **sentinel-/EOS-terminated repeating content** with no on-wire count (`that {until: …}` / `that {until_eos: true}`, e.g. `Png.chunks`, a TLV stream) → **child nodes**, iterated via `for ch in elmt` / `elmt[i]`.
 
 ### 5.2 The decode entry point
 
@@ -242,7 +242,7 @@ binary.encode(binary.decode(b, S), S) == b               // for canonical inputs
 - **Fast path — unmodified `Velmt`:** if the node is a `Velmt` over schema `S` and no field cache slot was written through a mutation API, `encode` is a single `memcpy` of the underlying view (it is already the exact bytes).
 - **General path:** walk `S.fields` in declared order; for each field pull the value (`get_attr` for attribute-mapped fields, child traversal for sentinel/EOS-mapped fields), encode with the field's resolved endianness/width, honoring `align`/`magic` (emit the constant), and emit sentinel/EOS terminators per `repeat_mode`. Output is assembled via `binary.builder()` from [Lambda_Type_Binary.md §5.1].
 - **Source flexibility:** the input need not be a `Velmt` — any Lambda `Element`/`Map`/`Object` whose fields satisfy `S` (a plain constructed map of the right shape) serializes. This is what makes the type *useful for producing* binary, not just parsing it.
-- **Consistency checks:** when a real wire field is used as another field's length (`len` → `int8[len]`), `encode` verifies the supplied `len` equals the actual array length and returns `error` on mismatch rather than emitting a corrupt buffer. (Phase 2 adds an opt-in `{derive: true}` to *auto-compute* such a length field from the array on encode, so callers need not set it by hand.)
+- **Consistency checks:** when a real wire field is used as another field's length (`len` → `int8[len]`), `encode` verifies the supplied `len` equals the actual array length and returns `error` on mismatch rather than emitting a corrupt buffer. (Phase 2 adds an opt-in `that {derive: true}` to *auto-compute* such a length field from the array on encode, so callers need not set it by hand.)
 
 ### 6.2 Mutation & re-encode
 
@@ -254,7 +254,7 @@ Phase 1 treats `Velmt` as read-only; producing modified binary = build a new con
 
 | File | Change |
 |---|---|
-| `lambda/tree-sitter-lambda/grammar.js` | (a) `type … : binary` supertype form; (b) **general feature: optional trailing `{…}` annotation map on a type field and after the type-level `: binary`** (ordinary map syntax); array-type `T[N]`; `enum E` field type. Then `make generate-grammar`. |
+| `lambda/tree-sitter-lambda/grammar.js` | (a) `type … : binary` supertype form; (b) **general feature: optional `that {…}` annotation map after a type field and after the type-level `: binary`** (new `that` keyword + ordinary map syntax; resolves the `a: int {…}` ambiguity); array-type `T[N]`/`T[field]`. Then `make generate-grammar`. |
 | `lambda/lambda-data.hpp` | Add `BinarySchema`, `BinFieldDesc`, `LMD_TYPE_BINARY_SCHEMA`. |
 | `lambda/lambda.hpp` / `lambda.h` | Add `VElmt`, `VElmtVtable`; reuse `LMD_TYPE_ELEMENT` with an `IS_VIRTUAL` container flag (parallel to `VMap`). |
 | `lambda/build_ast.cpp` | Lower `type … : binary` decls + annotation maps to `BinarySchema`; resolve inherited endianness; precompute fixed-stride offset tables; classify each field as attribute- vs child-mapped. |
@@ -274,7 +274,7 @@ Phase 1 treats `Velmt` as read-only; producing modified binary = build a new con
 |---|---|---|
 | **0 (prereq)** | Bytes | [Lambda_Type_Binary.md] Tier 1 (`Binary` repr) + Tier 3.1 (sub-binary slicing). |
 | **1** | Schema + Velmt + round trip | `type … : binary` + annotation maps; fixed & field-referenced arrays (`T[N]`, `T[prev_field]`), `until`/`until_eos`, enum types, `magic`/`endian`/`align`; counted-vs-sentinel mapping rule; `BinarySchema`; lazy zero-copy `VElmt`; `binary.decode`/`binary.encode`; validator hook; full test suite. |
-| **2** | Kaitai depth | `if` conditionals; computed/derived instances; substreams; `{derive: true}` auto-length on encode; mutable/write-through `VElmt`. |
+| **2** | Kaitai depth | `if` conditionals; computed/derived instances; substreams; `that {derive: true}` auto-length on encode; mutable/write-through `VElmt`. |
 | **3** | Full parity | Bit-sized fields; the expression sublanguage; schema `import`; Erlang-style bit-pattern `match` integration; cross-runtime buffer bridge (share `Velmt` buffer with JS `Uint8Array`). |
 
 ---
@@ -283,14 +283,14 @@ Phase 1 treats `Velmt` as read-only; producing modified binary = build a new con
 
 **All folded into the proposal:**
 
-1. **Syntax.** Explicit `type A : binary { … }`; per-field non-length layout via a trailing Lambda annotation map (`{offset:…, magic:…, align:…, endian:…}`); schema-wide defaults via the type-level map after `: binary`. Introduces one general Lambda feature — an optional trailing `{…}` annotation map on type fields.
+1. **Syntax.** Explicit `type A : binary { … }`; per-field non-length layout via a trailing `that {…}` annotation map (`that {offset:…, magic:…, align:…, endian:…}`); schema-wide defaults via the type-level `that {…}` after `: binary`. Introduces one general Lambda feature — an optional `that {…}` annotation map on type fields, the `that` keyword resolving the `a: int {…}` parse ambiguity.
 2. **Array length.** Lives in type position as `T[expr]`; `expr` may be a literal, a const, or the **name of a previously-decoded field** (`int8[len]`). No annotation key, no synthetic counter — a length field exists only if the wire format has one.
 3. **Element shape.** Counted/sized content (scalars, nested structs, `T[N]`, `T[prev_field]`) → **attributes**. Only sentinel-/EOS-terminated content with no on-wire count (`until` / `until_eos`) → **child nodes**.
 4. **Enums.** Ordinary Lambda type declaration `type Name { label: value, … }`, used directly as a field type — decode int → label, encode label → int.
 5. **Nested endianness.** A nested `: binary` type inherits the enclosing schema's `endian` unless it declares its own (Kaitai-style).
 6. **Failure model.** Cheap file-level checks (root `magic`, declared/fixed-stride span vs. buffer length) error at `decode`; everything else errors on the offending field access. No fabricated count/size fields.
 
-**No open questions remain — Phase 1 design is locked.** Items deferred *by phase* (not open): the general expression sublanguage for `T[expr]`/`if` (Phase 3 — Phase 1 accepts only literal/const/bare-field-name), `{derive: true}` auto-length on encode (Phase 2), conditionals/computed instances/substreams (Phase 2), bit-sized fields and schema `import` (Phase 3).
+**No open questions remain — Phase 1 design is locked.** Items deferred *by phase* (not open): the general expression sublanguage for `T[expr]`/`if` (Phase 3 — Phase 1 accepts only literal/const/bare-field-name), `that {derive: true}` auto-length on encode (Phase 2), conditionals/computed instances/substreams (Phase 2), bit-sized fields and schema `import` (Phase 3).
 
 ---
 

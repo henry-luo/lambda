@@ -46,6 +46,9 @@ struct EarlyErrorCtx {
     const char* iteration_labels[32];
     int iteration_label_lens[32];
     int iteration_label_count;
+    const char* break_labels[32];
+    int break_label_lens[32];
+    int break_label_count;
     bool in_iteration;       // currently inside any iteration statement
     bool in_switch;          // currently inside switch
 };
@@ -1042,11 +1045,13 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
             bool was_switch = ctx->in_switch;
             bool was_params = ctx->in_formal_parameters;
             int was_label_count = ctx->iteration_label_count;
+            int was_break_label_count = ctx->break_label_count;
             ctx->in_generator = fn->is_generator;
             ctx->in_async = fn->is_async;
             ctx->in_iteration = false;
             ctx->in_switch = false;
             ctx->iteration_label_count = 0;
+            ctx->break_label_count = 0;
 
             // v17: "use strict" with non-simple params is SyntaxError
             check_strict_non_simple(ctx, fn);
@@ -1073,6 +1078,7 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
             ctx->in_switch = was_switch;
             ctx->in_formal_parameters = was_params;
             ctx->iteration_label_count = was_label_count;
+            ctx->break_label_count = was_break_label_count;
             break;
         }
 
@@ -1132,6 +1138,12 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
                                     ls->body->node_type == JS_AST_NODE_WHILE_STATEMENT ||
                                     ls->body->node_type == JS_AST_NODE_DO_WHILE_STATEMENT;
                 int saved_count = ctx->iteration_label_count;
+                int saved_break_count = ctx->break_label_count;
+                if (ls->label && ctx->break_label_count < 32) {
+                    ctx->break_labels[ctx->break_label_count] = ls->label;
+                    ctx->break_label_lens[ctx->break_label_count] = ls->label_len;
+                    ctx->break_label_count++;
+                }
                 if (is_iteration && ls->label && ctx->iteration_label_count < 32) {
                     ctx->iteration_labels[ctx->iteration_label_count] = ls->label;
                     ctx->iteration_label_lens[ctx->iteration_label_count] = ls->label_len;
@@ -1139,6 +1151,7 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
                 }
                 walk_statement(ctx, ls->body);
                 ctx->iteration_label_count = saved_count;
+                ctx->break_label_count = saved_break_count;
             }
             break;
         }
@@ -1173,6 +1186,19 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
             JsBreakContinueNode* bn = (JsBreakContinueNode*)node;
             if (!bn->label && !ctx->in_iteration && !ctx->in_switch) {
                 ee_error(ctx, node, "Illegal break statement");
+            } else if (bn->label) {
+                bool found = false;
+                for (int i = 0; i < ctx->break_label_count; i++) {
+                    if (ctx->break_label_lens[i] == bn->label_len &&
+                        strncmp(ctx->break_labels[i], bn->label, bn->label_len) == 0) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    ee_error(ctx, node, "Illegal break statement: '%.*s' does not denote a label",
+                        bn->label_len, bn->label);
+                }
             }
             break;
         }

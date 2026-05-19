@@ -528,6 +528,7 @@ void js_globals_batch_reset(void);
 void js_reset_constructor_prototypes(void);
 Item js_constructor_create_object(Item callee);
 Item js_new_from_class_object(Item callee, Item* args, int argc);
+bool js_is_constructor_object(Item callee);
 
 // A5: Constructor shape pre-allocation
 // Creates a new object with pre-built shape: all property slots pre-allocated

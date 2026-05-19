@@ -3728,3 +3728,203 @@ Remaining shape:
   calls and built-in subclassing.
 - Smaller open language items include direct-eval lexical capture in tagged
   templates and the `eval("break LABEL")` SyntaxError case.
+
+## 65. Labeled Break And Super Constructor Edge Cases
+
+Status on 2026-05-19: fixed six more failures from the reduced 92-row replay,
+moving it from 59 passed / 33 failed to 65 passed / 27 failed.
+
+Root causes fixed:
+
+- Early-error validation tracked unlabeled `break` and labeled `continue`, but
+  did not verify that a labeled `break` target existed inside the same parsed
+  source.  A direct eval such as `eval("break LABEL1")` could therefore escape
+  toward an outer label instead of throwing SyntaxError.
+- Bound class constructors reused the class construction stub for ordinary
+  calls.  `A.bind()()` must still throw like `A()`, while `new (A.bind())()`
+  remains valid.
+- The class-heritage constructor check treated `Proxy(generator)` as
+  constructible because the proxy target was callable.  `extends` must use
+  recursive `IsConstructor`, not callability, so generator and async-generator
+  proxy targets are rejected before `.prototype` lookup.
+- `super()` in `class C extends null` fell through the dynamic superclass path
+  and returned `this`.  The lowering now evaluates the argument list and then
+  calls the native super-constructor path with `null`, which raises TypeError.
+- The class-super helper returned `this` for any non-function/non-class callee.
+  It now only treats class objects with no explicit constructor as a no-op.
+- `super()` for `class S extends Symbol` called `Symbol` as a normal function.
+  Symbol is valid as heritage, but construction must dispatch through
+  `js_new_from_class_object` so the Symbol constructor rejects `NewTarget`.
+
+Verification:
+
+```bash
+make -C build/premake config=release_native lambda test_js_test262_gtest -j4
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_eval_break_batch.txt --js-timeout=30 --write-failures=temp/js43_eval_break_after_label_scope.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_class_subclass_binding_batch.txt --js-timeout=30 --write-failures=temp/js43_class_subclass_binding_after_bound_guard.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_class_subclass_generator_super_batch.txt --js-timeout=30 --write-failures=temp/js43_class_subclass_generator_super_after_proxy_ctor.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_class_null_proto_super_batch.txt --js-timeout=30 --write-failures=temp/js43_class_null_proto_super_after_null_lowering.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_symbol_super_batch.txt --js-timeout=30 --write-failures=temp/js43_symbol_super_after_construct_dispatch.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_remaining_90_replay_from_latest.txt --js-timeout=30 --write-failures=temp/js43_remaining_90_after_symbol_super.tsv --gtest_brief=1
+```
+
+Results:
+
+- Focused batches passed for:
+  `language_statements_break_S12_8_A7_js`,
+  `language_statements_class_subclass_binding_js`,
+  `language_statements_class_subclass_superclass_generator_function_js`,
+  `language_statements_class_subclass_superclass_async_generator_function_js`,
+  `language_statements_class_subclass_class_definition_null_proto_super_js`,
+  and `language_statements_class_subclass_builtin_objects_Symbol_new_symbol_with_super_throws_js`.
+- The 92-row replay now reports 65 passed / 27 failed.
+- Current failure manifest:
+  `temp/js43_remaining_90_after_symbol_super.tsv`.
+
+Remaining shape:
+
+- RegExp remains dominant: 20 failures covering lookbehind, lookahead capture
+  groups, nullable quantifier, and Unicode case folding.
+- Five class/builtin subclassing failures remain: ArrayBuffer, Array,
+  Boolean, TypedArray, and general TypedArray subclass behavior.
+- One direct-eval tagged-template lexical capture failure remains.
+
+## 66. Direct Eval Template Registry And RegExp Case Folding
+
+Status on 2026-05-19: fixed the direct-eval tagged-template failure and two
+Unicode RegExp case-folding failures.  The reduced 92-row replay moved from
+71 passed / 21 failed to 73 passed / 19 failed after the RegExp case fix.
+
+Root causes fixed:
+
+- Top-level direct eval reused the caller lexical bridge, but `js_main` did not
+  allocate an eval-local frame.  A loop block `let` captured by direct eval
+  could therefore fail lookup during the eval compile/execution path.  `js_main`
+  now initializes the eval-local frame register and pops it on normal and
+  exceptional exits.
+- Tagged template cache keys used source pointer and byte range only.  Repeated
+  direct eval of the same source string must still create fresh template site
+  identity, so the site hash now includes the eval module identity.
+- RE2's case-fold table matched Kelvin under non-`u` ignore-case, which is not
+  ECMAScript behavior.  The RegExp runtime now filters simple one-code-point
+  `/i` matches through ECMAScript canonicalization.
+- RE2 also missed Unicode fold-sequence equality for cases such as
+  `\u0390`/`\u1fd3`.  For `/iu` single-code-point atoms/classes, the runtime
+  compares utf8proc fold sequences while still consuming only one input code
+  point.
+
+Verification:
+
+```bash
+make -C build/premake config=release_native lambda -j4
+./lambda.exe js temp/js43_regex_case_probe.js --no-log
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_tagged_eval_batch.txt --js-timeout=30 --write-failures=temp/js43_tagged_eval_after_template_site_module.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_regex_case_batch.txt --js-timeout=30 --write-failures=temp/js43_regex_case_after_ecma_canonical.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_remaining_90_replay_from_latest.txt --js-timeout=30 --write-failures=temp/js43_remaining_90_after_regex_case.tsv --gtest_brief=1
+```
+
+Results:
+
+- `language_expressions_tagged_template_cache_eval_inner_function_js` passes.
+- `language_literals_regexp_u_case_mapping_js` passes.
+- `built_ins_RegExp_unicode_full_case_folding_js` passes.
+- The 92-row replay reported 73 passed / 19 failed.
+- Current failure manifest:
+  `temp/js43_remaining_90_after_regex_case.tsv`.
+
+## 67. Required Leading Lookahead Captures
+
+Status on 2026-05-19: fixed one more RegExp failure from the reduced replay,
+moving it from 73 passed / 19 failed to 74 passed / 18 failed.
+
+Root cause fixed:
+
+- Required leading positive lookaheads were rewritten as consuming captures but
+  the following atom was left in the RE2 pattern.  For example,
+  `(?:(?=(abc)))a` effectively became "consume `abc`, then match `a`" and
+  failed.  The wrapper now absorbs the following simple atom for required
+  leading lookaheads, keeps the assertion captures, and trims the reported full
+  match back to that atom's byte length.
+- Optional leading lookaheads continue to erase the assertion path, preserving
+  the expected `undefined` capture behavior for `?` and `{0,1}`.
+
+Verification:
+
+```bash
+make -C build/premake config=release_native lambda test_js_test262_gtest -j4
+./lambda.exe js temp/js43_regex_remaining_probe.js --no-log
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_regex_lookahead_nullable_batch.txt --js-timeout=30 --write-failures=temp/js43_regex_lookahead_nullable_after.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_remaining_90_replay_from_latest.txt --js-timeout=30 --write-failures=temp/js43_remaining_90_after_lookahead_trim.tsv --gtest_brief=1
+```
+
+Results:
+
+- `built_ins_RegExp_lookahead_quantifier_match_groups_js` passes.
+- `built_ins_RegExp_nullable_quantifier_js` still fails with `a` vs `ab`.
+- The 92-row replay now reports 74 passed / 18 failed.
+- Current failure manifest:
+  `temp/js43_remaining_90_after_lookahead_trim.tsv`.
+
+Remaining shape:
+
+- 17 failures are lookbehind-family failures.  The current runtime still strips
+  or only partially simulates lookbehind before handing patterns to RE2.
+- 1 failure is the nullable quantifier semantics mismatch:
+  `built_ins_RegExp_nullable_quantifier_js`.
+
+## 68. Lookbehind Boundary, Marker, And Backreference Progress
+
+Status on 2026-05-19: fixed four more tests from the reduced 92-row replay,
+moving it from 81 passed / 11 failed to 85 passed / 7 failed.
+
+Root causes fixed:
+
+- A consumed leading positive lookahead could move the following lookbehind
+  marker to the end of the lookahead text.  Adjacent zero-width assertions now
+  keep the lookbehind marker at the original assertion boundary, which also
+  keeps the sliced-string lookbehind cases from reading outside the actual
+  subject slice.
+- Lookbehind filters evaluated `\b`, `\B`, `^`, and `$` against a truncated
+  prefix, losing right-side context and multiline line-boundary behavior.  The
+  wrapper now handles those zero-width lookbehind bodies at the real input
+  boundary and prefixes nested multiline lookbehind matchers with `(?m)`.
+- Greedy prefixes such as `.*(?<=...)(.*)` now retry shorter same-start
+  lookbehind boundaries before advancing the overall match start.  This matches
+  the ECMAScript behavior where the outer expression can backtrack to a valid
+  assertion boundary, while the lookbehind disjunction itself is not
+  backtracked after it succeeds.
+- Dynamic lookbehind backreferences now substitute external captures through
+  the wrapper's original-to-RE2 group remap, so synthetic marker groups do not
+  get mistaken for original captures.
+- A simple inline positive lookahead followed by a consuming atom it already
+  proves, such as `(?=c)\w`, now consumes that character once instead of
+  consuming both the asserted literal and the following atom.
+
+Verification:
+
+```bash
+make -C build/premake config=release_native lambda test_js_test262_gtest -j4
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_regex_remaining_focus_batch.txt --js-timeout=30 --write-failures=temp/js43_regex_remaining_focus_after_dynamic_assert.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_remaining_90_replay_from_latest.txt --js-timeout=30 --write-failures=temp/js43_remaining_90_after_lb_boundary_retry.tsv --gtest_brief=1
+```
+
+Results:
+
+- Newly passing in the reduced replay:
+  `built_ins_RegExp_lookBehind_alternations_js`,
+  `built_ins_RegExp_lookBehind_sliced_strings_js`,
+  `built_ins_RegExp_lookBehind_start_of_line_js`, and
+  `built_ins_RegExp_lookBehind_word_boundary_js`.
+- The 92-row replay now reports 85 passed / 7 failed.
+- Current failure manifest:
+  `temp/js43_remaining_90_after_lb_boundary_retry.tsv`.
+
+Remaining shape:
+
+- Six RegExp failures remain:
+  backreference filter ordering after lookbehind capture materialization,
+  reverse-direction captures inside lookbehind, no-backtrack semantics after
+  a successful lookbehind, mutual-recursive captures/backrefs, nested lookahead
+  captures wider than a single literal, and named groups inside lookbehind.
+- One non-lookbehind RegExp failure remains:
+  `built_ins_RegExp_nullable_quantifier_js`.
