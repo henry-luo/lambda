@@ -24,6 +24,7 @@ typedef struct RenderContext {
     // Display list for deferred rendering (Phase 1)
     // When non-NULL, render functions record to dl instead of drawing directly.
     DisplayList* dl;
+    RetainedDisplayListCache* retained_dl_cache;
 
     // Transform state
     RdtMatrix transform;           // Current combined transform matrix
@@ -46,10 +47,23 @@ typedef struct RenderContext {
     // Vector clip shape stack for overflow:hidden with border-radius and CSS clip-path
     ClipShape* clip_shapes[RDT_MAX_CLIP_SHAPES];
     int clip_shape_depth;
+
+    // Suppresses automatic per-block display-list markers while a caller records
+    // a wider element subtree marker around replaced/layer content.
+    int element_marker_suppression_depth;
 } RenderContext;
 
 // Function declarations
 void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file);
+
+typedef struct RenderElementMarkerScope {
+    int begin_index;
+} RenderElementMarkerScope;
+
+bool render_block_dirty_misses(RenderContext* rdcon, ViewBlock* block);
+bool render_block_try_retained_fragment(RenderContext* rdcon, ViewBlock* block);
+RenderElementMarkerScope render_element_marker_begin(RenderContext* rdcon, ViewBlock* block);
+void render_element_marker_end(RenderContext* rdcon, RenderElementMarkerScope* scope);
 
 // Shut down the render pool (must be called before rdt_engine_term)
 void render_pool_shutdown();

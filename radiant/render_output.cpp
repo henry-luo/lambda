@@ -5,6 +5,7 @@
 #include "render_overlay.hpp"
 #include "render_profiler.hpp"
 #include "render_raster.hpp"
+#include "retained_display_list.hpp"
 #include "state_store.hpp"
 #include "tile_pool.h"
 
@@ -58,6 +59,9 @@ void render_output_init_context(RenderContext* rdcon, UiContext* uicon, ViewTree
     memset(rdcon, 0, sizeof(RenderContext));
     rdcon->ui_context = uicon;
     rdcon->profiler = profiler;
+    if (uicon && uicon->document && uicon->document->state) {
+        rdcon->retained_dl_cache = uicon->document->state->retained_dl_cache;
+    }
 
     scratch_init(&rdcon->scratch, view_tree->arena);
     rdt_vector_init(&rdcon->vec, (uint32_t*)uicon->surface->pixels,
@@ -278,6 +282,7 @@ void render_output_render_html_doc(UiContext* uicon, ViewTree* view_tree, const 
     DisplayList display_list = {};
     dl_init(&display_list, view_tree->arena);
     rdcon.dl = &display_list;
+    retained_dl_cache_begin_frame(rdcon.retained_dl_cache);
 
     auto t_init = high_resolution_clock::now();
 
@@ -300,6 +305,7 @@ void render_output_render_html_doc(UiContext* uicon, ViewTree* view_tree, const 
         log_debug("[RENDER] no state for overlays: doc=%p, state=%p",
             (void*)uicon->document, uicon->document ? (void*)uicon->document->state : nullptr);
     }
+    retained_dl_cache_capture(rdcon.retained_dl_cache, &display_list);
 
     auto t_replay_start = high_resolution_clock::now();
 

@@ -237,6 +237,27 @@ void rdt_path_free(RdtPath* p) {
     free(p);
 }
 
+RdtPath* rdt_path_clone(const RdtPath* src) {
+    if (!src) return nullptr;
+    RdtPath* dst = (RdtPath*)calloc(1, sizeof(RdtPath));
+    if (!dst) return nullptr;
+    dst->cg = src->cg ? CGPathCreateMutableCopy(src->cg) : CGPathCreateMutable();
+    return dst;
+}
+
+bool rdt_path_get_bounds(const RdtPath* p, float* left, float* top,
+                         float* right, float* bottom) {
+    if (!p || !p->cg || !left || !top || !right || !bottom) return false;
+    if (CGPathIsEmpty(p->cg)) return false;
+    CGRect box = CGPathGetBoundingBox(p->cg);
+    if (CGRectIsNull(box) || CGRectIsEmpty(box)) return false;
+    *left = (float)CGRectGetMinX(box);
+    *top = (float)CGRectGetMinY(box);
+    *right = (float)CGRectGetMaxX(box);
+    *bottom = (float)CGRectGetMaxY(box);
+    return true;
+}
+
 // ============================================================================
 // Fill
 // ============================================================================

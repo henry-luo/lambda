@@ -121,6 +121,21 @@ Completed:
   - `render_columns.hpp`
   - `render_columns.cpp`
 - Moved multi-column rule painting out of `render.cpp`.
+- Added initial list/marker rendering helper files:
+  - `render_list.hpp`
+  - `render_list.cpp`
+- Moved marker painting and list traversal helpers out of `render.cpp`.
+- Removed obsolete commented-out list-number formatting code from `render.cpp`.
+- Added initial vector-path rendering helper files:
+  - `render_vector_path.hpp`
+  - `render_vector_path.cpp`
+- Moved PDF/vector path segment painting out of `render.cpp`.
+- Added initial media rendering helper files:
+  - `render_media.hpp`
+  - `render_media.cpp`
+- Moved SVG rasterization, replaced image content painting, image view wrapping, video placeholder recording, and webview layer placeholder/direct-blit painting out of `render.cpp`.
+- Moved the public text rendering orchestration (`render_text_view()`) out of `render.cpp` and into `render_text.cpp`, keeping text run walking next to the text-specific glyph, shadow, decoration, and inline-background helpers.
+- Restored saved font/color state before returning from the zero-font-size text path.
 - Added initial display-list bounds helper file:
   - `display_list_bounds.cpp`
 - Moved the tile replay item-intersection helper behind the public display-list bounds API.
@@ -176,7 +191,51 @@ Validation:
 
 The earlier raster-facade gap has been closed: `surface.cpp` now keeps the surface ownership, image loading, and compatibility wrappers, while render-facing fill/blit/scaling behavior lives in `render_raster.cpp`.
 
-This means the practical Phase 1 painter/raster/effect consolidation is now largely complete, and the first shared clip/path, geometry, render-state, profiler, composite, effects, glyph, text, selection, column rendering, output, display-list bounds/storage/recording/replay, and backend capability helper extractions are in place. The next cleanup step is to continue splitting display-list replay dispatch and output-target orchestration.
+This means the practical Phase 1 painter/raster/effect consolidation is now largely complete, and the first shared clip/path, geometry, render-state, profiler, composite, effects, glyph, text, selection, column rendering, list/marker rendering, vector-path rendering, media rendering, output, display-list bounds/storage/recording/replay, and backend capability helper extractions are in place. The next cleanup step is to continue splitting text paint-run internals, display-list replay dispatch, and output-target orchestration.
+
+## Implementation Update: 2026-05-19
+
+The retained display-list work has moved from replay-only subtree skipping to a conservative cross-frame fragment cache.
+
+Completed:
+
+- Added `retained_display_list.hpp` and `retained_display_list.cpp`.
+- Added a document-owned `RetainedDisplayListCache` in `DocState`.
+- Capture now stores matched `DL_BEGIN_ELEMENT` / `DL_END_ELEMENT` ranges by stable `view_id` after each display-list recording pass.
+- Cached fragments deep-copy display-list-owned resources:
+  - paths
+  - pictures
+  - gradient stops
+  - dash arrays
+  - polygon clip-shape stacks
+- Borrowed resources remain explicit borrowed references:
+  - image pixel buffers
+  - glyph bitmap buffers
+  - filter/style pointers
+  - video/webview surfaces
+- `dl_clear()` now releases the display-list scratch arena, so repeated retained capture does not accumulate copied stops, dashes, or clip polygons.
+- Added append rollback for retained fragments: failed resource cloning removes only the partially appended items and preserves the caller's existing display list.
+- Dirty rects can now carry a `source_view_id`; merged dirty rects only keep that id when all merged sources match.
+- `render_block_try_retained_fragment()` can reuse a cached fragment when:
+  - the render is a selective dirty repaint
+  - the cached marker bounds still match the current block marker bounds
+  - no current/block transform is active
+  - every intersecting dirty rect has a known source view id
+  - no intersecting dirty source is inside the reused subtree
+- Image, video, and webview layer paths attempt retained reuse before re-recording their block/payload marker range.
+- Added `test_retained_display_list_gtest.cpp` plus a small test-only stub file so retained fragment capture/append can be tested without linking the full ThorVG/SVG stack.
+- Added the retained display-list gtest to `build_lambda_config.json` and regenerated the generated Premake files through `make build-test`.
+
+Validation:
+
+- `make build-test` passed.
+- `./test/test_retained_display_list_gtest.exe` passed.
+
+Remaining limits:
+
+- Reuse is intentionally conservative and skips transformed subtrees, full repaints, unknown dirty sources, and any dirty source inside the subtree.
+- The cache is currently keyed by view id and bounds. It does not yet track per-resource invalidation generations for borrowed image/glyph/video/webview payloads.
+- Volatile overlays such as caret/selection still need more focused fixtures before broad text-subtree reuse should be relaxed.
 
 ## Current Structure Assessment
 
@@ -192,14 +251,14 @@ This means the practical Phase 1 painter/raster/effect consolidation is now larg
 
 ### Where The Structure Is Uneven
 
-- `render.cpp` is still doing too much. It owns text run walking, list markers, block traversal, transform/effect orchestration call sites, image dispatch, and parts of display-list recording, even though profiling, clip/path helpers, selection helpers, column-rule painting, output orchestration, display-list storage/replay slices, and UI overlays have been extracted.
+- `render.cpp` is still doing too much. It owns block traversal, transform/effect orchestration call sites, and parts of display-list recording, even though profiling, clip/path helpers, text rendering, selection helpers, column-rule painting, list/marker rendering, vector-path rendering, media rendering, output orchestration, display-list storage/replay slices, and UI overlays have been extracted.
 - `render_svg_inline.cpp` is another large mixed-responsibility module. SVG parsing helpers, inherited style state, transform handling, definitions, gradients, patterns, text, images, and painting all live together.
 - The main screen renderer and the PDF/SVG renderers do not share the same paint walker. `render_walk.cpp` explicitly excludes the raster backend because the raster path has extra concerns, but those concerns can be modeled as painter/effect/output-target capabilities instead of requiring a separate traversal forever.
 - Geometry helpers are duplicated or near-duplicated across rendering modules. Examples include transform lookup, per-corner rounded rect path creation, background/border/content paint rect adjustment, clip path construction, physical pixel conversion, and effect-region expansion.
 - Paint state save/restore is mostly manual. `render_block_view()` has many local saved values and cleanup branches for transform, clip-path, overflow clip, filter backdrop, opacity backdrop, and mix-blend backdrop.
 - Effects are not a first-class subsystem. Opacity, filter, blend, shadow, and backdrop save/composite operations are scattered across `render.cpp`, `render_background.cpp`, `render_filter.cpp`, and `display_list.cpp`.
-- Text painting combines too many stages in one function: run walking, font setup, glyph loading, glyph drawing, selection background, composition bounds, text shadow, skip-ink gap collection, text decorations, and profiling.
-- Display-list recording, storage, resource ownership, command bounds, and replay are tightly coupled. Some operations have precise bounds, while paths/effects often fall back to coarse bounds, limiting dirty-region and tiled replay efficiency.
+- Text painting now lives in `render_text.cpp`, but it still combines too many stages in one function: run walking, font setup, glyph loading, glyph drawing, selection background, composition bounds, text shadow, skip-ink gap collection, text decorations, and profiling.
+- Display-list recording, storage, resource ownership, command bounds, and replay are still spread across several files, but the highest-risk pieces now have explicit homes: storage/lifecycle, bounds, record slices, replay slices, and retained fragment capture/reuse. Broad retained reuse still needs more validation around borrowed resource invalidation and volatile overlays.
 - Direct-pixel operations and vector operations are mixed at call sites. Selection fills, glyph blits, image blits, opacity, blend, and filter paths need consistent clipping and transform behavior.
 - `render_html_doc()` and `render_html_doc_tiled()` are now thin public wrappers, but normal/tiled output behavior still needs a clearer target abstraction before adding PDF/SVG/screen-specific orchestration.
 
@@ -765,10 +824,12 @@ Expected benefit: code becomes auditable, and future performance changes become 
 
 ### Phase 2: Better Dirty Bounds
 
-- Add precise `DisplayItem` bounds for path, gradient, clip, filter, shadow, picture, and glyph commands.
-- Use item bounds during replay instead of relying on broad page or subtree regions.
-- Make effect-region expansion use `render_geometry` helpers so filters and shadows do not over-invalidate.
-- Add tests for dirty caret/selection updates, transformed elements, and clipped elements.
+- Add precise `DisplayItem` bounds for path, gradient, clip, filter, shadow, picture, and glyph commands. Done: path/gradient/clip bounds now come from `RdtPath` geometry, transformed images and pictures use transformed destination bounds, glyph and filter bounds are clipped to their recorded rectangular clip, and stateful zero-bound commands are preserved separately from drawable empty bounds.
+- Use item bounds during replay instead of relying on broad page or subtree regions. Done for dirty replay and tile replay culling; skipped items still maintain clip/backdrop stack state.
+- Make effect-region expansion use `render_geometry` helpers so filters and shadows do not over-invalidate. Done: filter group bounds and block dirty-marker bounds share `render_geometry` overflow helpers.
+- Record matched `DL_BEGIN_ELEMENT` / `DL_END_ELEMENT` markers around block subtrees and compute marker bounds from the union of child display-list item bounds. Done: dirty replay and tile replay can now jump over a non-intersecting matched subtree.
+- Keep replaced/layer payloads inside element marker bounds. Done for image, video, and webview-layer render paths by recording one outer marker around the block paint plus payload command.
+- Add tests for dirty caret/selection updates, transformed elements, and clipped elements. Still needed as focused regression fixtures; current verification is build plus render smoke coverage.
 
 Expected benefit: smaller replay regions and less full-surface work during interactive editing.
 
@@ -792,10 +853,10 @@ Expected benefit: fewer temporary buffers and less duplicated pixel compositing 
 
 ### Phase 5: Retained Display-List Subtrees
 
-- Use existing `DL_BEGIN_ELEMENT` and `DL_END_ELEMENT` markers to cache unchanged element subtrees.
-- Attach retained display-list fragments to stable view identity or dirty tracker keys.
-- Re-record only dirty subtrees and volatile overlays.
-- Keep borrowed resource lifetime explicit before enabling broad retained reuse.
+- Use existing `DL_BEGIN_ELEMENT` and `DL_END_ELEMENT` markers to cache unchanged element subtrees. Done for conservative reuse: markers are recorded, matched, bounded by subtree command union, captured into `RetainedDisplayListCache`, and used for dirty/tile replay skipping plus cross-frame fragment append.
+- Attach retained display-list fragments to stable view identity or dirty tracker keys. Done initially by stable view id, with dirty rects carrying optional `source_view_id` so reuse can reject dirty sources inside the subtree.
+- Re-record only dirty subtrees and volatile overlays. Started: reuse is enabled only when intersecting dirty sources are known and outside the subtree; volatile/unknown/full-repaint cases fall back to normal recording.
+- Keep borrowed resource lifetime explicit before enabling broad retained reuse. Started: owned display-list payloads are deep-copied, while image/glyph/filter/video/webview payloads stay documented borrowed references. Resource-generation invalidation is still needed before relaxing the current safety gates.
 
 Expected benefit: large static documents avoid full display-list rebuild on small UI changes.
 
@@ -838,6 +899,7 @@ Add display-list unit coverage for:
 - dirty-region intersection
 - backdrop save and opacity composite
 - filter command replay
+- retained marker capture and append with matching begin/end indices. Started with `test_retained_display_list_gtest.cpp`.
 
 Performance comparisons should use release builds, not debug builds.
 
@@ -862,8 +924,10 @@ Performance comparisons should use release builds, not debug builds.
 5. Add backend capability reporting for the active `RdtVector` implementation. Done with `RdtVectorCaps` and `render_backend_get_caps()`.
 6. Add `render_clip` scope helpers and migrate CSS clip-path plus overflow clipping. Done.
 7. Continue `render_effects` by moving profiling hooks out of `render_block_view()` and collapsing effect finish calls into a scoped end helper. Done.
-8. Split text painting and smaller feature paint paths into named helpers. Started with glyph bitmap rendering in `render_glyph`, inline background, trailing mark, text-decoration, text-shadow, and profiled glyph-load helpers in `render_text`, cross-view selection predicates in `render_selection`, and column-rule painting in `render_columns`.
+8. Split text painting and smaller feature paint paths into named helpers. Started with glyph bitmap rendering in `render_glyph`, inline background, trailing mark, text-decoration, text-shadow, profiled glyph-load helpers, and `render_text_view()` ownership in `render_text`, cross-view selection predicates in `render_selection`, column-rule painting in `render_columns`, marker/list rendering in `render_list`, vector path painting in `render_vector_path`, and image/video/webview payload painting in `render_media`.
 9. Split display-list storage, builder, replay, and bounds. Started with public display-list bounds helpers used by tile replay, a storage/lifecycle module, glyph replay helpers, replay dirty-clip state helpers, backdrop replay helpers, shadow clip replay helpers, effect replay helpers, direct raster replay helpers, direct raster recording helpers, effect recording helpers, and vector recording helpers.
+   - Update: dirty replay now culls individual bounded commands, matched element markers carry subtree-union bounds, and dirty/tile replay can skip entire non-intersecting element subtrees.
+   - Update: true cross-frame retained fragment reuse is enabled conservatively through `RetainedDisplayListCache`. Cached fragments deep-copy owned payloads and are reused only when bounds match and intersecting dirty sources are known to be outside the subtree.
 10. Unify `render_html_doc()` and `render_html_doc_tiled()` setup through `render_output`. In progress: shared context lifecycle, background/clear handling, root paint dispatch, display-list replay planning, render-pool ownership, surface-save dispatch, normal document render orchestration, tiled PNG streaming, and overlay dispatch are now outside `render.cpp`.
 11. Expand `render_walk` into the shared paint walker and migrate raster rendering to it.
 12. Split `render_svg_inline.cpp` into SVG parse/style/defs/geometry/paint modules.

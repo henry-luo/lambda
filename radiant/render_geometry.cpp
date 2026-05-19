@@ -63,3 +63,87 @@ bool render_geometry_pixel_bounds_empty(RenderPixelBounds bounds) {
     return bounds.width <= 0 || bounds.height <= 0;
 }
 
+Rect render_geometry_block_border_rect(const BlockBlot* parent_block,
+                                       const ViewBlock* block,
+                                       float scale) {
+    Rect rect = {};
+    if (!parent_block || !block) return rect;
+    rect.x = parent_block->x + block->x * scale;
+    rect.y = parent_block->y + block->y * scale;
+    rect.width = block->width * scale;
+    rect.height = block->height * scale;
+    return rect;
+}
+
+Rect render_geometry_expand_rect(Rect rect, float expand) {
+    if (expand <= 0.0f) return rect;
+    rect.x -= expand;
+    rect.y -= expand;
+    rect.width += expand * 2.0f;
+    rect.height += expand * 2.0f;
+    if (rect.width < 0.0f) rect.width = 0.0f;
+    if (rect.height < 0.0f) rect.height = 0.0f;
+    return rect;
+}
+
+Bound render_geometry_rect_to_bound(Rect rect) {
+    Bound bound = {rect.x, rect.y, rect.x + rect.width, rect.y + rect.height};
+    return bound;
+}
+
+bool render_geometry_bounds_intersect(Bound a, Bound b) {
+    return a.left < b.right && a.right > b.left &&
+           a.top < b.bottom && a.bottom > b.top;
+}
+
+static float render_geometry_absf(float value) {
+    return value < 0.0f ? -value : value;
+}
+
+float render_geometry_filter_effect_expand(const FilterProp* filter) {
+    if (!filter || !filter->functions) return 0.0f;
+    float expand = 0.0f;
+    FilterFunction* ff = filter->functions;
+    while (ff) {
+        if (ff->type == FILTER_BLUR) {
+            float blur_expand = ff->params.blur_radius * 2.0f;
+            if (blur_expand > expand) expand = blur_expand;
+        } else if (ff->type == FILTER_DROP_SHADOW) {
+            float shadow_expand =
+                render_geometry_absf(ff->params.drop_shadow.offset_x) +
+                render_geometry_absf(ff->params.drop_shadow.offset_y) +
+                ff->params.drop_shadow.blur_radius + 2.0f;
+            if (shadow_expand > expand) expand = shadow_expand;
+        }
+        ff = ff->next;
+    }
+    return expand;
+}
+
+float render_geometry_block_visual_overflow(const ViewBlock* block) {
+    if (!block) return 0.0f;
+
+    float overflow = 0.0f;
+    if (block->filter) {
+        float filter_overflow = render_geometry_filter_effect_expand(block->filter);
+        if (filter_overflow > overflow) overflow = filter_overflow;
+    }
+    if (block->bound && block->bound->box_shadow) {
+        BoxShadow* shadow = block->bound->box_shadow;
+        while (shadow) {
+            if (!shadow->inset) {
+                float shadow_overflow =
+                    render_geometry_absf(shadow->offset_x) +
+                    render_geometry_absf(shadow->offset_y) +
+                    shadow->blur_radius + render_geometry_absf(shadow->spread_radius) + 2.0f;
+                if (shadow_overflow > overflow) overflow = shadow_overflow;
+            }
+            shadow = shadow->next;
+        }
+    }
+    if (block->bound && block->bound->outline) {
+        float outline_overflow = block->bound->outline->width + block->bound->outline->offset + 2.0f;
+        if (outline_overflow > overflow) overflow = outline_overflow;
+    }
+    return overflow;
+}

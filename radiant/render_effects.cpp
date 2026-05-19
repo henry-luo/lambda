@@ -2,6 +2,7 @@
 
 #include "render_composite.hpp"
 #include "render_filter.hpp"
+#include "render_geometry.hpp"
 #include "render_profiler.hpp"
 
 #include "../lib/log.h"
@@ -127,33 +128,6 @@ void render_effect_backdrop_finish_blend(RenderEffectBackdrop* backdrop,
     backdrop->active = false;
 }
 
-static float render_effect_absf(float value) {
-    return value < 0 ? -value : value;
-}
-
-static float render_effect_filter_expand(const FilterProp* filter) {
-    if (!filter || !filter->functions) {
-        return 0;
-    }
-    float expand = 0;
-    FilterFunction* ff = filter->functions;
-    while (ff) {
-        if (ff->type == FILTER_BLUR && ff->params.blur_radius > expand) {
-            expand = ff->params.blur_radius;
-        }
-        if (ff->type == FILTER_DROP_SHADOW) {
-            float ds_exp = render_effect_absf(ff->params.drop_shadow.offset_x)
-                         + render_effect_absf(ff->params.drop_shadow.offset_y)
-                         + ff->params.drop_shadow.blur_radius + 2;
-            if (ds_exp > expand) {
-                expand = ds_exp;
-            }
-        }
-        ff = ff->next;
-    }
-    return expand;
-}
-
 static void render_effect_filter_backdrop_info(const FilterProp* filter,
                                                bool* has_backdrop,
                                                float* expand) {
@@ -195,8 +169,8 @@ static void render_effect_filter_backdrop_info(const FilterProp* filter,
     }
 
     float ds_expand = has_drop_shadow ?
-        (ceilf(render_effect_absf(ds_offset_x)) +
-         ceilf(render_effect_absf(ds_offset_y)) +
+        (ceilf(fabsf(ds_offset_x)) +
+         ceilf(fabsf(ds_offset_y)) +
          ceilf(ds_blur) + 2) : 0;
     float blur_expand = ceilf(filter_blur_max * 2.0f);
     *expand = ds_expand > blur_expand ? ds_expand : blur_expand;
@@ -246,11 +220,9 @@ RenderEffectGroup render_effect_group_begin(RenderContext* rdcon,
     }
 
     if (group.has_filter) {
-        float filter_expand = render_effect_filter_expand(block->filter);
-        group.filter_rect.x = parent_block->x + block->x - filter_expand;
-        group.filter_rect.y = parent_block->y + block->y - filter_expand;
-        group.filter_rect.width = block->width + filter_expand * 2;
-        group.filter_rect.height = block->height + filter_expand * 2;
+        float filter_expand = render_geometry_filter_effect_expand(block->filter);
+        Rect border_rect = render_geometry_block_border_rect(parent_block, block, scale);
+        group.filter_rect = render_geometry_expand_rect(border_rect, filter_expand);
 
         float backdrop_expand = 0;
         render_effect_filter_backdrop_info(block->filter,

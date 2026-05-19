@@ -11,6 +11,42 @@
 #include "display_list_replay_raster.hpp"
 #include "../lib/log.h"
 
+static bool dl_replay_can_skip_item_for_dirty(DisplayOp op) {
+    switch (op) {
+        case DL_FILL_RECT:
+        case DL_FILL_ROUNDED_RECT:
+        case DL_FILL_PATH:
+        case DL_STROKE_PATH:
+        case DL_FILL_LINEAR_GRADIENT:
+        case DL_FILL_RADIAL_GRADIENT:
+        case DL_DRAW_IMAGE:
+        case DL_DRAW_GLYPH:
+        case DL_DRAW_PICTURE:
+        case DL_FILL_SURFACE_RECT:
+        case DL_BLIT_SURFACE_SCALED:
+        case DL_APPLY_OPACITY:
+        case DL_APPLY_FILTER:
+        case DL_BOX_BLUR_REGION:
+        case DL_BOX_BLUR_INSET:
+        case DL_OUTER_SHADOW:
+        case DL_VIDEO_PLACEHOLDER:
+        case DL_WEBVIEW_LAYER_PLACEHOLDER:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static bool dl_replay_item_intersects_dirty(const DisplayReplayDirtyClip* dirty_clip,
+                                            const DisplayItem* item) {
+    if (!dirty_clip || !dirty_clip->active || !item) return true;
+    return dl_item_intersects_rect(item,
+        dirty_clip->bounds.left,
+        dirty_clip->bounds.top,
+        dirty_clip->bounds.right - dirty_clip->bounds.left,
+        dirty_clip->bounds.bottom - dirty_clip->bounds.top);
+}
+
 // ---------------------------------------------------------------------------
 // Replay: execute all recorded commands
 // ---------------------------------------------------------------------------
@@ -31,6 +67,19 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
 
     for (int i = 0; i < dl->count; i++) {
         DisplayItem* item = &dl->items[i];
+
+        if (dirty_clip.active) {
+            if (item->op == DL_BEGIN_ELEMENT &&
+                item->element_marker.matching_index > i &&
+                !dl_replay_item_intersects_dirty(&dirty_clip, item)) {
+                i = item->element_marker.matching_index;
+                continue;
+            }
+            if (dl_replay_can_skip_item_for_dirty(item->op) &&
+                !dl_replay_item_intersects_dirty(&dirty_clip, item)) {
+                continue;
+            }
+        }
 
         switch (item->op) {
 

@@ -4,12 +4,14 @@
 #include "render_profiler.hpp"
 #include "layout.hpp"
 
+#include "../lib/tagged.hpp"
 #include "../lib/log.h"
 #include "../lib/str.h"
 #include "../lib/font/font.h"
 
 #include <chrono>
 #include <math.h>
+#include <string.h>
 
 // Check if a codepoint has Emoji_Presentation=Yes (Unicode 15.0, UTS #51).
 // Mirrors is_emoji_presentation_default in layout_text.cpp.
@@ -52,6 +54,339 @@ static inline bool render_text_is_emoji_presentation_default(uint32_t cp) {
     if (cp == 0x3030 || cp == 0x303D) return true;
     if (cp == 0x3297 || cp == 0x3299) return true;
     return false;
+}
+
+static inline bool render_text_preserve_spaces(CssEnum ws) {
+    return ws == CSS_VALUE_PRE || ws == CSS_VALUE_PRE_WRAP || ws == CSS_VALUE_BREAK_SPACES;
+}
+
+extern CssEnum get_white_space_value(DomNode* node);
+
+void render_text_view(RenderContext* rdcon, ViewText* text_view) {
+    log_debug("render_text_view clip:[%.0f,%.0f,%.0f,%.0f]",
+        rdcon->block.clip.left, rdcon->block.clip.top, rdcon->block.clip.right, rdcon->block.clip.bottom);
+
+    // CSS 2.1 §11.2: text inherits visibility from parent element
+    if (text_view->parent && text_view->parent->is_element()) {
+        DomElement* parent_elem = lam::dom_require_element(text_view->parent);
+        if (parent_elem->in_line && parent_elem->in_line->visibility == VIS_HIDDEN) {
+            log_debug("text hidden by parent visibility:hidden");
+            return;
+        }
+    }
+
+    if (!rdcon->font.font_handle) {
+        log_debug("font face is null");
+        return;
+    }
+
+    float s = rdcon->scale;  // scale factor for CSS -> physical pixels
+    unsigned char* str = text_view->text_data();
+    TextRect* text_rect = text_view->rect;
+
+    if (!text_rect) {
+        log_debug("no text rect for text view");
+        return;
+    }
+
+    // Legacy glyph-by-glyph selection code remains disabled.
+    int sel_start = 0, sel_end = 0;
+    (void)sel_start; (void)sel_end;
+
+    // Calculate total text length for cross-view selection check
+    int total_text_length = 0;
+    if (str) {
+        total_text_length = strlen((const char*)str);
+    }
+    (void)total_text_length;
+
+    bool has_selection = false;
+
+    // Apply text color from text_view if set (PDF text uses this for fill color)
+    Color saved_color = rdcon->color;
+    if (text_view->color.c != 0) {
+        rdcon->color = text_view->color;
+    }
+
+    // Setup font from text_view if set (PDF text has font property directly on ViewText)
+    FontBox saved_font = rdcon->font;
+    if (text_view->font) {
+        setup_font(rdcon->ui_context, &rdcon->font, text_view->font);
+    }
+
+    // Skip rendering if font size is 0 - text should be invisible (e.g., font-size: 0)
+    if (rdcon->font.style && rdcon->font.style->font_size <= 0.0f) {
+        log_debug("skipping zero font-size text render");
+        rdcon->font = saved_font;
+        rdcon->color = saved_color;
+        return;
+    }
+
+    // Get the white-space property for this text node
+    CssEnum white_space = get_white_space_value(text_view);
+    bool preserve_spaces = render_text_preserve_spaces(white_space);
+
+    // Get text-transform from parent elements
+    CssEnum text_transform = CSS_VALUE_NONE;
+    CssEnum text_align = CSS_VALUE_LEFT;  // default to left alignment
+    bool text_align_found = false;
+    DomNode* parent = text_view->parent;
+    while (parent) {
+        if (parent->is_element()) {
+            DomElement* elem = lam::dom_require_element(parent);
+            CssEnum transform = get_text_transform_from_block(elem->blk);
+            if (transform != CSS_VALUE_NONE) {
+                text_transform = transform;
+            }
+            // Get text-align from the nearest ancestor that has block properties.
+            // text-align is CSS-inherited, so the closest block already holds the
+            // resolved value; walking further would overwrite it with an outer
+            // (e.g. <html>) default and lose 'justify'.
+            if (!text_align_found && elem->blk) {
+                BlockProp* blk_prop = (BlockProp*)elem->blk;
+                text_align = blk_prop->text_align;
+                text_align_found = true;
+            }
+            if (transform != CSS_VALUE_NONE) {
+                break;
+            }
+        }
+        parent = parent->parent;
+    }
+
+    DomElement* parent_elem = text_view->parent ? text_view->parent->as_element() : nullptr;
+
+    // Get text-shadow from parent element's font property
+    TextShadow* text_shadow = nullptr;
+    if (parent_elem && parent_elem->font && parent_elem->font->text_shadow) {
+        text_shadow = parent_elem->font->text_shadow;
+    }
+
+    while (text_rect) {
+        // Apply scale to convert CSS pixel positions to physical surface pixels
+        float x = rdcon->block.x + text_rect->x * s, y = rdcon->block.y + text_rect->y * s;
+
+        render_text_inline_background(rdcon, text_view, text_rect, parent_elem, x, y);
+
+        unsigned char* p = str + text_rect->start_index;  unsigned char* end = p + text_rect->length;
+        log_debug("draw text:'%t', start:%d, len:%d, x:%f, y:%f, wd:%f, hg:%f, at (%f, %f), white_space:%d, preserve:%d, color:0x%08x",
+            str, text_rect->start_index, text_rect->length, text_rect->x, text_rect->y, text_rect->width, text_rect->height, x, y,
+            white_space, preserve_spaces, rdcon->color.c);
+
+        // Calculate natural text width and space count for justify rendering
+        // Note: space_width is in CSS pixels (scaled down for layout), need to scale up for render
+        float scaled_space_width = rdcon->font.style->space_width * s;
+        float natural_width = 0.0f;
+        int space_count = 0;
+        unsigned char* scan = p;
+        bool scan_has_space = false;
+
+        // Scan all content including trailing spaces for width calculation
+        // Trailing whitespace is intentionally included because layout has already
+        // determined the correct width and positioning - we should render exactly
+        // what was laid out, including spaces between inline elements
+        unsigned char* content_end = end;
+
+        while (scan < content_end) {
+            if (is_space(*scan)) {
+                if (preserve_spaces || !scan_has_space) {
+                    scan_has_space = true;
+                    natural_width += scaled_space_width;
+                    space_count++;
+                }
+                scan++;
+            }
+            else {
+                scan_has_space = false;
+                uint32_t scan_codepoint;
+                int bytes = str_utf8_decode((const char*)scan, (size_t)(content_end - scan), &scan_codepoint);
+                if (bytes <= 0) { scan++; }
+                else { scan += bytes; }
+
+                auto t1 = std::chrono::high_resolution_clock::now();
+                FontStyleDesc _sd = font_style_desc_from_prop(rdcon->font.style);
+                LoadedGlyph* glyph = font_load_glyph(rdcon->font.font_handle, &_sd, scan_codepoint, false);
+                auto t2 = std::chrono::high_resolution_clock::now();
+                render_profiler_add_sample(rdcon->profiler, RENDER_PROFILE_GLYPH_LOAD,
+                    std::chrono::duration<double, std::milli>(t2 - t1).count());
+                if (glyph) {
+                    natural_width += glyph->advance_x + rdcon->font.style->letter_spacing * s;  // already in physical pixels
+                } else {
+                    natural_width += scaled_space_width;  // fallback width in physical pixels
+                }
+            }
+        }
+
+        // Calculate adjusted space width for justified text (in physical pixels)
+        float space_width = scaled_space_width;
+        if (text_align == CSS_VALUE_JUSTIFY && space_count > 0 && natural_width > 0 && text_rect->width * s > natural_width) {
+            // This text is explicitly justified - distribute extra space across spaces
+            float extra_space = (text_rect->width * s) - natural_width;
+            space_width += (extra_space / space_count);
+            log_debug("apply justification: text_align=JUSTIFY, natural_width=%f, text_rect->width=%f, space_count=%d, space_width=%f -> %f",
+                natural_width, text_rect->width * s, space_count, scaled_space_width, space_width);
+        }
+
+        // Render the text with adjusted spacing
+        bool has_space = false;  uint32_t codepoint;
+        bool is_word_start = true;  // Track word boundaries for capitalize
+        int char_index = text_rect->start_index;  // Track character offset for selection
+
+        // Selection background color - standard blue for text selection
+        uint32_t sel_bg_color = 0x80FF9933;  // ABGR format: semi-transparent blue (like browser selection)
+
+        // Debug: log inline selection position info
+        if (has_selection) {
+            log_debug("[SEL-INLINE] text_rect: x=%.1f y=%.1f, rdcon->block: x=%.1f y=%.1f, final pos: x=%.1f y=%.1f, font_size=%.1f, y_ppem=%d",
+                text_rect->x, text_rect->y, rdcon->block.x, rdcon->block.y, x, y,
+                rdcon->font.style->font_size, (int)font_handle_get_physical_size_px(rdcon->font.font_handle));
+        }
+
+        // Track cumulative position for debugging
+        float debug_start_x = x;
+
+        bool shadow_needs_blur = render_text_paint_blurred_shadows(rdcon, str, text_rect,
+            text_shadow, text_transform, preserve_spaces, space_width, scaled_space_width, x, y);
+
+        while (p < end) {
+            // Check if current character is in selection range
+            bool is_selected = has_selection && char_index >= sel_start && char_index < sel_end;
+
+            // Debug first selected character
+            if (is_selected && char_index == sel_start) {
+                log_debug("[SEL-INLINE] First selected char at index=%d, x=%.1f y=%.1f, advance_so_far=%.1f (expected overlay start_x=%.1f * scale=%.1f = %.1f)",
+                    char_index, x, y, x - debug_start_x, 0.0f, s, 0.0f);
+            }
+
+            // log_debug("draw character '%c'", *p);
+            if (is_space(*p)) {
+                if (preserve_spaces || !has_space) {  // preserve all spaces or add single whitespace
+                    has_space = true;
+
+                    // Draw selection background for selected space
+                    if (is_selected) {
+                        Rect sel_rect = {x, y, space_width, text_rect->height * s};
+                        rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &sel_rect, sel_bg_color, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
+                    }
+
+                    // Render space by advancing x position
+                    // All spaces are rendered (not just non-trailing) because layout has
+                    // already determined correct positioning including inter-element whitespace
+                    x += space_width;  // Use adjusted space width for justified text
+                }
+                // else  // skip consecutive spaces
+                is_word_start = true;  // Next non-space is word start
+                p++;
+                char_index++;
+            }
+            else {
+                has_space = false;
+                int bytes = str_utf8_decode((const char*)p, (size_t)(end - p), &codepoint);
+                if (bytes <= 0) { p++;  codepoint = 0;  char_index++; }
+                else { p += bytes;  char_index++; }
+
+                // skip soft hyphen (U+00AD) — invisible unless line breaks there
+                if (codepoint == 0x00AD) continue;
+
+                // Apply text-transform before loading glyph
+                uint32_t tt_out[3];
+                int tt_count = apply_text_transform_full(codepoint, text_transform, is_word_start, tt_out);
+                codepoint = tt_out[0];
+                is_word_start = false;
+
+                for (int tti = 0; tti < tt_count; tti++) {
+                    uint32_t render_cp = tt_out[tti];
+                    if (render_cp == 0) continue;
+
+                    // Debug: Log the font face being used for this glyph
+                    static int glyph_debug_count = 0;
+                    if (glyph_debug_count < 500) {
+                        log_debug("[GLYPH DEBUG] loading glyph U+%04X from font '%s' (family=%s) y_ppem=%d css_size=%.2f",
+                                  codepoint,
+                                  rdcon->font.font_handle ? font_handle_get_family_name(rdcon->font.font_handle) : "NULL",
+                                  rdcon->font.style ? rdcon->font.style->family : "NULL",
+                                  rdcon->font.font_handle ? (int)font_handle_get_physical_size_px(rdcon->font.font_handle) : -1,
+                                  rdcon->font.style ? rdcon->font.style->font_size : -1.0f);
+                        glyph_debug_count++;
+                    }
+
+                    LoadedGlyph* glyph = render_text_load_glyph_for_paint(rdcon, render_cp, p, end);
+                    if (!glyph) {
+                        // draw a square box for missing glyph (scaled_space_width is in physical pixels)
+                        float phys_size = font_handle_get_physical_size_px(rdcon->font.font_handle);
+                        const FontMetrics* _m = font_get_metrics(rdcon->font.font_handle);
+                        float box_height = (phys_size > 0) ? phys_size : (_m ? (_m->hhea_line_height * rdcon->scale / 1.2f) : 16.0f);
+                        Rect rect = {x + 1, y, (float)(scaled_space_width - 2), box_height};
+                        rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &rect, 0xFF0000FF, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
+                        x += scaled_space_width;
+                    }
+                    else {
+                        // draw the glyph to the image buffer — use rendering ascender for glyph bitmap placement.
+                        // font_get_rendering_ascender() returns the raw platform ascent (e.g. CoreText ascent on
+                        // macOS) WITHOUT half-leading.  The glyph bitmap's bearing_y is measured from this
+                        // platform baseline, so we must use the same value here.  Layout uses
+                        // fprop->ascender (= init_ascender, which INCLUDES half-leading) for CSS vertical-
+                        // align math, but text_rect.y already incorporates lead_y so the absolute baseline
+                        // y = text_rect.y + rendering_ascender == init_ascender + lead_y  is correct.
+                        float ascend;
+                        {
+                            auto tfm1 = std::chrono::high_resolution_clock::now();
+                            ascend = font_get_rendering_ascender(rdcon->font.font_handle) * rdcon->scale;
+                            auto tfm2 = std::chrono::high_resolution_clock::now();
+                            render_profiler_add_sample(rdcon->profiler, RENDER_PROFILE_FONT_METRICS,
+                                std::chrono::duration<double, std::milli>(tfm2 - tfm1).count());
+                        }
+                        if (has_selection && char_index <= 15) {
+                            log_debug("[SEL-ADVANCE] char_index=%d codepoint=U+%04X '%c' x=%.1f advance=%.1f",
+                                char_index, codepoint, (codepoint >= 32 && codepoint < 127) ? (char)codepoint : '?',
+                                x, glyph->advance_x);
+                        }
+
+                        // Draw selection background BEFORE glyph (so text appears on top)
+                        if (is_selected) {
+                            float glyph_width = glyph->advance_x;
+                            Rect sel_rect = {x, y, glyph_width, text_rect->height * s};
+                            rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &sel_rect, sel_bg_color, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
+                        }
+
+                        // Debug: Check bitmap data for Monaco (capped to avoid log spam)
+                        static int bitmap_debug_count = 0;
+                        const char* _dbg_fname = rdcon->font.font_handle ? font_handle_get_family_name(rdcon->font.font_handle) : NULL;
+                        if (bitmap_debug_count < 50 && _dbg_fname &&
+                            strcmp(_dbg_fname, "Monaco") == 0) {
+                            log_debug("[BITMAP DEBUG] Monaco glyph U+%04X: bitmap=%dx%d pitch=%d left=%d top=%d advance=%.1f pixel_mode=%d",
+                                      codepoint, glyph->bitmap.width, glyph->bitmap.height,
+                                      glyph->bitmap.pitch, glyph->bitmap.bearing_x, glyph->bitmap.bearing_y,
+                                      glyph->advance_x, glyph->bitmap.pixel_mode);
+                            bitmap_debug_count++;
+                        }
+
+                        auto t3 = std::chrono::high_resolution_clock::now();
+
+                        // Render text-shadow glyphs BEFORE the main glyph
+                        // Skip if blur pre-pass already rendered shadows
+                        if (text_shadow && !shadow_needs_blur) {
+                            render_text_paint_glyph_shadows(rdcon, glyph, text_shadow, x, y, ascend);
+                        }
+
+                        draw_glyph(rdcon, &glyph->bitmap, lroundf(x + glyph->bitmap.bearing_x), lroundf(y + ascend - glyph->bitmap.bearing_y));
+                        auto t4 = std::chrono::high_resolution_clock::now();
+                        render_profiler_add_sample(rdcon->profiler, RENDER_PROFILE_GLYPH_DRAW,
+                            std::chrono::duration<double, std::milli>(t4 - t3).count());
+                        // advance to the next position (include letter-spacing)
+                        x += glyph->advance_x + rdcon->font.style->letter_spacing * s;
+                    }
+                } // end for tti (full case mapping expansion)
+            }
+        }
+        x = render_text_trailing_marks(rdcon, text_rect, x, y);
+        render_text_decorations(rdcon, str, text_rect);
+        text_rect = text_rect->next;
+    }
+
+    // Restore color and font (in case they were changed for PDF text)
+    rdcon->font = saved_font;
+    rdcon->color = saved_color;
 }
 
 void render_text_inline_background(RenderContext* rdcon, ViewText* text_view,

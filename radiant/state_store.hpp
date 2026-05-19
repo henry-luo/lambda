@@ -64,6 +64,7 @@ typedef struct StateEntry {
  */
 typedef struct DirtyRect {
     float x, y, width, height;
+    uint32_t source_view_id;       // 0 when source is unknown or non-elemental
     struct DirtyRect* next;
 } DirtyRect;
 
@@ -174,6 +175,7 @@ typedef struct StateStore {
 typedef struct CaretState CaretState;
 typedef struct SelectionState SelectionState;
 typedef struct FocusState FocusState;
+typedef struct RetainedDisplayListCache RetainedDisplayListCache;
 
 /**
  * Mouse cursor state
@@ -217,6 +219,7 @@ typedef struct DocState {
     // State storage
     HashMap* state_map;            // map from StateKey -> StateEntry
     HashMap* view_state_map;       // map from ViewId -> ViewStateEntry
+    RetainedDisplayListCache* retained_dl_cache; // cross-frame display-list fragments
     
     // Template reactive state (unified with Lambda template state store)
     // Keyed by (model_item, template_ref, state_name) — see template_state.h

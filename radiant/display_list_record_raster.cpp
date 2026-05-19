@@ -7,6 +7,34 @@ static Bound dl_default_record_clip() {
     return clip;
 }
 
+static float dl_raster_min_f(float a, float b) {
+    return a < b ? a : b;
+}
+
+static float dl_raster_max_f(float a, float b) {
+    return a > b ? a : b;
+}
+
+static void dl_raster_set_clipped_bounds(DisplayItem* item,
+                                         float x, float y, float w, float h,
+                                         const Bound* clip) {
+    if (!item) return;
+    float left = x;
+    float top = y;
+    float right = x + w;
+    float bottom = y + h;
+    if (clip) {
+        left = dl_raster_max_f(left, clip->left);
+        top = dl_raster_max_f(top, clip->top);
+        right = dl_raster_min_f(right, clip->right);
+        bottom = dl_raster_min_f(bottom, clip->bottom);
+    }
+    item->bounds[0] = left;
+    item->bounds[1] = top;
+    item->bounds[2] = right > left ? right - left : 0.0f;
+    item->bounds[3] = bottom > top ? bottom - top : 0.0f;
+}
+
 // ---------------------------------------------------------------------------
 // Recording: direct-pixel and external-layer operations
 // ---------------------------------------------------------------------------
@@ -16,7 +44,7 @@ void dl_fill_surface_rect(DisplayList* dl, float x, float y, float w, float h,
                           ClipShape** clip_shapes, int clip_depth) {
     DisplayItem* item = dl_alloc_item(dl);
     item->op = DL_FILL_SURFACE_RECT;
-    item->bounds[0] = x; item->bounds[1] = y; item->bounds[2] = w; item->bounds[3] = h;
+    dl_raster_set_clipped_bounds(item, x, y, w, h, clip);
     item->fill_surface_rect.x = x;
     item->fill_surface_rect.y = y;
     item->fill_surface_rect.w = w;
@@ -32,8 +60,7 @@ void dl_blit_surface_scaled(DisplayList* dl, void* src_surface,
                             ClipShape** clip_shapes, int clip_depth, uint8_t opacity) {
     DisplayItem* item = dl_alloc_item(dl);
     item->op = DL_BLIT_SURFACE_SCALED;
-    item->bounds[0] = dst_x; item->bounds[1] = dst_y;
-    item->bounds[2] = dst_w; item->bounds[3] = dst_h;
+    dl_raster_set_clipped_bounds(item, dst_x, dst_y, dst_w, dst_h, clip);
     item->blit_surface_scaled.src_surface = src_surface;
     item->blit_surface_scaled.dst_x = dst_x;
     item->blit_surface_scaled.dst_y = dst_y;
@@ -50,8 +77,7 @@ void dl_video_placeholder(DisplayList* dl, void* video,
                           int object_fit, const Bound* clip) {
     DisplayItem* item = dl_alloc_item(dl);
     item->op = DL_VIDEO_PLACEHOLDER;
-    item->bounds[0] = dst_x; item->bounds[1] = dst_y;
-    item->bounds[2] = dst_w; item->bounds[3] = dst_h;
+    dl_raster_set_clipped_bounds(item, dst_x, dst_y, dst_w, dst_h, clip);
     item->video_placeholder.video = video;
     item->video_placeholder.dst_x = dst_x;
     item->video_placeholder.dst_y = dst_y;
@@ -66,8 +92,7 @@ void dl_webview_layer_placeholder(DisplayList* dl, void* surface,
                                   const Bound* clip) {
     DisplayItem* item = dl_alloc_item(dl);
     item->op = DL_WEBVIEW_LAYER_PLACEHOLDER;
-    item->bounds[0] = dst_x; item->bounds[1] = dst_y;
-    item->bounds[2] = dst_w; item->bounds[3] = dst_h;
+    dl_raster_set_clipped_bounds(item, dst_x, dst_y, dst_w, dst_h, clip);
     item->webview_layer_placeholder.surface = surface;
     item->webview_layer_placeholder.dst_x = dst_x;
     item->webview_layer_placeholder.dst_y = dst_y;

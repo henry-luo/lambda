@@ -280,6 +280,13 @@ typedef struct {
     Bound clip;
 } DlWebviewLayerPlaceholder;
 
+// Element group marker: records a matched display-list item range for subtree
+// culling and future retained display-list reuse.
+typedef struct {
+    uint32_t view_id;
+    int matching_index;      // begin -> end, end -> begin; -1 while open
+} DlElementMarker;
+
 // ---------------------------------------------------------------------------
 // DisplayItem — tagged union of all draw commands
 // ---------------------------------------------------------------------------
@@ -314,6 +321,7 @@ typedef struct DisplayItem {
         DlOuterShadow        outer_shadow;
         DlVideoPlaceholder   video_placeholder;
         DlWebviewLayerPlaceholder webview_layer_placeholder;
+        DlElementMarker      element_marker;
     };
 } DisplayItem;
 
@@ -442,6 +450,12 @@ void dl_video_placeholder(DisplayList* dl, void* video,
 void dl_webview_layer_placeholder(DisplayList* dl, void* surface,
                                   float dst_x, float dst_y, float dst_w, float dst_h,
                                   const Bound* clip);
+
+// Element group markers.  dl_begin_element() returns the begin item index,
+// which must be passed to dl_end_element() after the subtree has been recorded.
+int dl_begin_element(DisplayList* dl, uint32_t view_id,
+                     float x, float y, float w, float h);
+void dl_end_element(DisplayList* dl, int begin_index);
 
 // ---------------------------------------------------------------------------
 // Replay — execute all recorded commands through rdt_* calls

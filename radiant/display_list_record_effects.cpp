@@ -8,6 +8,47 @@ static Bound dl_default_effect_clip() {
     return clip;
 }
 
+static float dl_effect_min_f(float a, float b) {
+    return a < b ? a : b;
+}
+
+static float dl_effect_max_f(float a, float b) {
+    return a > b ? a : b;
+}
+
+static void dl_effect_set_bounds_xyxy(DisplayItem* item,
+                                      float left, float top,
+                                      float right, float bottom) {
+    if (!item) return;
+    if (right <= left || bottom <= top) {
+        item->bounds[0] = left;
+        item->bounds[1] = top;
+        item->bounds[2] = 0.0f;
+        item->bounds[3] = 0.0f;
+        return;
+    }
+    item->bounds[0] = left;
+    item->bounds[1] = top;
+    item->bounds[2] = right - left;
+    item->bounds[3] = bottom - top;
+}
+
+static void dl_effect_set_clipped_rect_bounds(DisplayItem* item,
+                                              float x, float y, float w, float h,
+                                              const Bound* clip) {
+    float left = x;
+    float top = y;
+    float right = x + w;
+    float bottom = y + h;
+    if (clip) {
+        left = dl_effect_max_f(left, clip->left);
+        top = dl_effect_max_f(top, clip->top);
+        right = dl_effect_min_f(right, clip->right);
+        bottom = dl_effect_min_f(bottom, clip->bottom);
+    }
+    dl_effect_set_bounds_xyxy(item, left, top, right, bottom);
+}
+
 static void dl_copy_effect_params(float* dst, int type, const float* params) {
     if (type && params) {
         memcpy(dst, params, 8 * sizeof(float));
@@ -74,7 +115,7 @@ void dl_apply_filter(DisplayList* dl, float x, float y, float w, float h,
                      void* filter, const Bound* clip) {
     DisplayItem* item = dl_alloc_item(dl);
     item->op = DL_APPLY_FILTER;
-    item->bounds[0] = x; item->bounds[1] = y; item->bounds[2] = w; item->bounds[3] = h;
+    dl_effect_set_clipped_rect_bounds(item, x, y, w, h, clip);
     item->apply_filter.x = x;
     item->apply_filter.y = y;
     item->apply_filter.w = w;
