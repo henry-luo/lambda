@@ -6659,6 +6659,10 @@
         {
           "type": "STRING",
           "value": "let"
+        },
+        {
+          "type": "STRING",
+          "value": "of"
         }
       ]
     },

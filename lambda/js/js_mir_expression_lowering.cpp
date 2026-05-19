@@ -49,6 +49,11 @@ static bool jm_node_has_with_ancestor_until_function(JsAstNode* node) {
     return false;
 }
 
+static bool jm_current_function_captures_with_env(JsMirTranspiler* mt) {
+    return mt && mt->current_fc && mt->current_fc->node &&
+        jm_node_has_with_ancestor_until_function((JsAstNode*)mt->current_fc->node);
+}
+
 static bool jm_current_scope_can_see_iife_modvar(JsMirTranspiler* mt) {
     if (!mt || mt->current_func_index < 0 || !mt->func_entries) return false;
     int idx = mt->current_func_index;
@@ -860,7 +865,7 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, lookup_key),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, var->reg));
         }
-        if (mt->with_depth > 0) {
+        if (mt->with_depth > 0 || jm_current_function_captures_with_env(mt)) {
             if (!lookup_key) lookup_key = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
             var_read_reg = jm_call_2(mt, "js_get_with_binding_or_fallback", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, lookup_key),
@@ -7768,6 +7773,20 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 return opt_result;
             }
 
+            {
+                MIR_reg_t recv_nullish = jm_call_1(mt, "js_is_nullish", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv));
+                MIR_label_t recv_ok = jm_new_label(mt);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+                    MIR_new_label_op(mt->ctx, recv_ok),
+                    MIR_new_reg_op(mt->ctx, recv_nullish)));
+                jm_call_2(mt, "js_property_access", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name));
+                jm_emit_exc_propagate_check(mt);
+                jm_emit_label(mt, recv_ok);
+            }
+
             // Check for spread args — if present, use apply-based dispatch
             bool method_has_spread = false;
             for (JsAstNode* chk = call->arguments; chk; chk = chk->next) {
@@ -7955,11 +7974,13 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             }
 
             if (recv_type == LMD_TYPE_STRING) {
-                return jm_call_4(mt, "js_string_method", MIR_T_I64,
+                MIR_reg_t r = jm_call_4(mt, "js_string_method", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name),
                     MIR_T_I64, args_op,
                     MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                jm_readback_closure_env(mt);
+                return r;
             }
             if (recv_type == LMD_TYPE_ARRAY) {
                 MIR_reg_t r = jm_call_4(mt, "js_array_method_direct", MIR_T_I64,
@@ -8915,6 +8936,14 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
         }
     }
 
+    MIR_reg_t plain_call_this = jm_emit_undefined(mt);
+    if (call->callee && call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
+        JsIdentifierNode* plain_id = (JsIdentifierNode*)call->callee;
+        MIR_reg_t plain_key = jm_box_string_literal(mt, plain_id->name->chars, (int)plain_id->name->len);
+        plain_call_this = jm_call_1(mt, "js_last_with_binding_base_or_undefined", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, plain_key));
+    }
+
     // Optional chaining propagation: if callee is from an optional chain,
     // it may be undefined from short-circuiting — skip the call.
     if (!call->optional && jm_has_optional_chain(call->callee)) {
@@ -8943,21 +8972,20 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
         jm_call_2(mt, "js_debug_check_callee", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)site_id));
-        MIR_reg_t null_this = jm_emit_undefined(mt);
         MIR_reg_t call_result;
         if (fallback_has_spread) {
             MIR_reg_t sp_arr = jm_build_spread_args_array(mt, call->arguments);
             if (callee_spill_slot >= 0) jm_gen_spill_load(mt, callee, callee_spill_slot);
             call_result = jm_call_3(mt, "js_apply_function", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, null_this),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, plain_call_this),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_arr));
         } else {
             MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
             if (callee_spill_slot >= 0) jm_gen_spill_load(mt, callee, callee_spill_slot);
             call_result = jm_call_4(mt, "js_call_function", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, null_this),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, plain_call_this),
                 MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
         }
@@ -8994,22 +9022,20 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
         jm_call_2(mt, "js_debug_check_callee", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)site_id));
-        // v17: pass undefined as this for plain calls (strict mode: this === undefined)
-        MIR_reg_t null_this = jm_emit_undefined(mt);
         MIR_reg_t call_result;
         if (fallback_has_spread) {
             MIR_reg_t sp_arr = jm_build_spread_args_array(mt, call->arguments);
             if (callee_spill_slot >= 0) jm_gen_spill_load(mt, callee, callee_spill_slot);
             call_result = jm_call_3(mt, "js_apply_function", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, null_this),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, plain_call_this),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_arr));
         } else {
             MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
             if (callee_spill_slot >= 0) jm_gen_spill_load(mt, callee, callee_spill_slot);
             call_result = jm_call_4(mt, "js_call_function", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, null_this),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, plain_call_this),
                 MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
         }
@@ -9027,11 +9053,9 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
     if (fallback_has_spread) {
         MIR_reg_t sp_arr = jm_build_spread_args_array(mt, call->arguments);
         if (callee_spill_slot >= 0) jm_gen_spill_load(mt, callee, callee_spill_slot);
-        // v17: pass undefined as this for plain calls (strict mode: this === undefined)
-        MIR_reg_t null_this = jm_emit_undefined(mt);
         MIR_reg_t call_result = jm_call_3(mt, "js_apply_function", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, null_this),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, plain_call_this),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_arr));
         jm_emit_exc_propagate_check(mt);
         return call_result;
@@ -9039,11 +9063,9 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
 
     MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
     if (callee_spill_slot >= 0) jm_gen_spill_load(mt, callee, callee_spill_slot);
-    // v17: pass undefined as this for plain calls (strict mode: this === undefined)
-    MIR_reg_t null_this = jm_emit_undefined(mt);
     MIR_reg_t call_result = jm_call_4(mt, "js_call_function", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, null_this),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, plain_call_this),
         MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
         MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
     jm_emit_exc_propagate_check(mt);
@@ -11477,12 +11499,11 @@ MIR_reg_t jm_transpile_condition(JsMirTranspiler* mt, JsAstNode* expr) {
                     MIR_reg_t uri_reg = jm_transpile_box_item(mt, uri_arg);
                     MIR_reg_t first_reg = jm_transpile_box_item(mt, first_arg);
                     MIR_reg_t second_reg = jm_transpile_box_item(mt, second_arg);
-                    MIR_reg_t boxed = jm_call_4(mt, "js_uri_decode_equals_from_char_code", MIR_T_I64,
+                    MIR_reg_t raw = jm_call_4(mt, "js_uri_decode_equals_from_char_code_raw", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, uri_reg),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, first_reg),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, second_reg),
                         MIR_T_I64, MIR_new_int_op(mt->ctx, component));
-                    MIR_reg_t raw = jm_emit_is_truthy(mt, boxed, expr);
                     if (bin->op == JS_OP_STRICT_NE) {
                         MIR_reg_t inv = jm_new_reg(mt, "uri_ne", MIR_T_I64);
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_XOR,

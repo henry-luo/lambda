@@ -12947,6 +12947,161 @@ static const char* js_regex_original_group_name(JsRegexData* rd, const char* re2
     return re2_name;
 }
 
+static void js_regex_create_data_property(Item object, const char* name, int name_len, Item value) {
+    if (get_type_id(object) == LMD_TYPE_MAP && name_len == 9 &&
+        strncmp(name, "__proto__", 9) == 0) {
+        bool raw_found = false;
+        Item raw_proto = js_map_get_fast_ext(object.map, "__proto__", 9, &raw_found);
+        ScopedSkipAccessorDispatch _skip_guard;
+        if (raw_found && raw_proto.item != JS_DELETED_SENTINEL_VAL) {
+            js_property_set(object,
+                (Item){.item = s2it(heap_create_name("__internal_proto__", 18))},
+                raw_proto);
+            js_property_set(object,
+                (Item){.item = s2it(heap_create_name("__json_own_proto__", 18))},
+                (Item){.item = ITEM_TRUE});
+        }
+    }
+    JsPropertyDescriptor pd;
+    memset(&pd, 0, sizeof(pd));
+    pd.flags = JS_PD_HAS_VALUE | JS_PD_HAS_WRITABLE |
+        JS_PD_HAS_ENUMERABLE | JS_PD_HAS_CONFIGURABLE |
+        JS_PD_WRITABLE | JS_PD_ENUMERABLE;
+    js_pd_set_configurable(&pd, true);
+    pd.value = value;
+    bool is_new = !it2b(js_has_own_property(object,
+        (Item){.item = s2it(heap_create_name(name, name_len))}));
+    js_define_own_property_from_descriptor(object, name, name_len, &pd, is_new);
+}
+
+static bool js_regex_append_utf8_cp(std::string& out, uint32_t cp) {
+    if (cp > 0x10FFFFu || (cp >= 0xD800u && cp <= 0xDFFFu)) return false;
+    char buf[5];
+    int len = 0;
+    if (cp <= 0x7Fu) {
+        buf[len++] = (char)cp;
+    } else if (cp <= 0x7FFu) {
+        buf[len++] = (char)(0xC0u | (cp >> 6));
+        buf[len++] = (char)(0x80u | (cp & 0x3Fu));
+    } else if (cp <= 0xFFFFu) {
+        buf[len++] = (char)(0xE0u | (cp >> 12));
+        buf[len++] = (char)(0x80u | ((cp >> 6) & 0x3Fu));
+        buf[len++] = (char)(0x80u | (cp & 0x3Fu));
+    } else {
+        buf[len++] = (char)(0xF0u | (cp >> 18));
+        buf[len++] = (char)(0x80u | ((cp >> 12) & 0x3Fu));
+        buf[len++] = (char)(0x80u | ((cp >> 6) & 0x3Fu));
+        buf[len++] = (char)(0x80u | (cp & 0x3Fu));
+    }
+    out.append(buf, len);
+    return true;
+}
+
+static int js_regex_decode_group_name_escape(const char* name, int name_len,
+                                             int index, uint32_t* out_cp) {
+    if (!name || index + 1 >= name_len || name[index] != '\\') return 0;
+    char kind = name[index + 1];
+    if (kind == 'x' && index + 2 < name_len && name[index + 2] == '{') {
+        int j = index + 3;
+        uint32_t cp = 0;
+        int digits = 0;
+        while (j < name_len && name[j] != '}') {
+            int hv = js_regex_hex_value(name[j]);
+            if (hv < 0 || digits >= 6) return 0;
+            cp = (cp << 4) | (uint32_t)hv;
+            digits++;
+            j++;
+        }
+        if (j >= name_len || digits <= 0 || cp > 0x10FFFFu) return 0;
+        int end = j + 1;
+        if (cp >= 0xD800u && cp <= 0xDBFFu &&
+            end + 3 < name_len && name[end] == '\\' &&
+            name[end + 1] == 'x' && name[end + 2] == '{') {
+            int low_j = end + 3;
+            uint32_t low = 0;
+            int low_digits = 0;
+            while (low_j < name_len && name[low_j] != '}') {
+                int hv = js_regex_hex_value(name[low_j]);
+                if (hv < 0 || low_digits >= 6) return 0;
+                low = (low << 4) | (uint32_t)hv;
+                low_digits++;
+                low_j++;
+            }
+            if (low_j < name_len && low_digits > 0 &&
+                low >= 0xDC00u && low <= 0xDFFFu) {
+                cp = 0x10000u + ((cp - 0xD800u) << 10) + (low - 0xDC00u);
+                end = low_j + 1;
+            }
+        }
+        if (out_cp) *out_cp = cp;
+        return end;
+    }
+    if ((kind == 'x' || kind == 'u') && index + 3 < name_len) {
+        int digits = kind == 'x' ? 2 : 4;
+        if (index + 1 + digits >= name_len) return 0;
+        uint32_t cp = 0;
+        for (int j = index + 2; j < index + 2 + digits; j++) {
+            int hv = js_regex_hex_value(name[j]);
+            if (hv < 0) return 0;
+            cp = (cp << 4) | (uint32_t)hv;
+        }
+        int end = index + 2 + digits;
+        if (kind == 'u' && cp >= 0xD800u && cp <= 0xDBFFu &&
+            end + 5 < name_len && name[end] == '\\' && name[end + 1] == 'u') {
+            uint32_t low = 0;
+            bool low_ok = true;
+            for (int j = end + 2; j < end + 6; j++) {
+                int hv = js_regex_hex_value(name[j]);
+                if (hv < 0) { low_ok = false; break; }
+                low = (low << 4) | (uint32_t)hv;
+            }
+            if (low_ok && low >= 0xDC00u && low <= 0xDFFFu) {
+                cp = 0x10000u + ((cp - 0xD800u) << 10) + (low - 0xDC00u);
+                end += 6;
+            }
+        }
+        if (out_cp) *out_cp = cp;
+        return end;
+    }
+    return 0;
+}
+
+static char* js_regex_copy_public_group_name(const char* name, int name_len, int* out_len) {
+    if (out_len) *out_len = name_len;
+    if (!name || name_len < 0) return NULL;
+    bool has_escape = false;
+    for (int i = 0; i < name_len; i++) {
+        if (name[i] == '\\') { has_escape = true; break; }
+    }
+    if (!has_escape) {
+        char* copy = (char*)pool_calloc(js_input->pool, name_len + 1);
+        if (!copy) return NULL;
+        memcpy(copy, name, name_len);
+        copy[name_len] = '\0';
+        return copy;
+    }
+    std::string decoded;
+    decoded.reserve(name_len);
+    for (int i = 0; i < name_len; i++) {
+        if (name[i] == '\\') {
+            uint32_t cp = 0;
+            int next = js_regex_decode_group_name_escape(name, name_len, i, &cp);
+            if (next > i && js_regex_append_utf8_cp(decoded, cp)) {
+                i = next - 1;
+                continue;
+            }
+        }
+        decoded.push_back(name[i]);
+    }
+    int decoded_len = (int)decoded.size();
+    char* copy = (char*)pool_calloc(js_input->pool, decoded_len + 1);
+    if (!copy) return NULL;
+    if (decoded_len > 0) memcpy(copy, decoded.data(), decoded_len);
+    copy[decoded_len] = '\0';
+    if (out_len) *out_len = decoded_len;
+    return copy;
+}
+
 static bool js_regex_needs_wrapper(const char* pattern, int pattern_len) {
     bool in_class = false;
     for (int i = 0; i < pattern_len; i++) {
@@ -13947,13 +14102,19 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
                 char* re2_copy = (char*)pool_calloc(js_input->pool, alias_len + 1);
                 memcpy(re2_copy, alias_buf, alias_len);
                 re2_copy[alias_len] = '\0';
-                char* js_copy = (char*)pool_calloc(js_input->pool, name_len + 1);
-                memcpy(js_copy, processed_pattern.c_str() + after, name_len);
-                js_copy[name_len] = '\0';
+                int js_copy_len = name_len;
+                char* js_copy = js_regex_copy_public_group_name(
+                    processed_pattern.c_str() + after, name_len, &js_copy_len);
+                if (!js_copy) {
+                    js_copy = (char*)pool_calloc(js_input->pool, name_len + 1);
+                    memcpy(js_copy, processed_pattern.c_str() + after, name_len);
+                    js_copy[name_len] = '\0';
+                    js_copy_len = name_len;
+                }
                 named_alias_re2_names[named_alias_count] = re2_copy;
                 named_alias_re2_lens[named_alias_count] = alias_len;
                 named_alias_js_names[named_alias_count] = js_copy;
-                named_alias_js_lens[named_alias_count] = name_len;
+                named_alias_js_lens[named_alias_count] = js_copy_len;
                 named_alias_count++;
                 processed_pattern.replace(after, name_len, alias_buf, alias_len);
                 processed_pattern.insert(pos + 2, "P");
@@ -14699,14 +14860,11 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     // Set named properties (index, input, groups) via companion map
     int match_index = (int)(matches[0].data() - match_chars);
     if (code_unit_indices) match_index = (int)js_utf16_index_from_byte(match_chars, match_len, match_index);
-    Item index_key = (Item){.item = s2it(heap_create_name("index", 5))};
-    js_property_set(result, index_key, (Item){.item = i2it(match_index)});
+    js_regex_create_data_property(result, "index", 5, (Item){.item = i2it(match_index)});
     // v46: add input property (the original string passed to exec)
-    Item input_key = (Item){.item = s2it(heap_create_name("input", 5))};
-    js_property_set(result, input_key, str);
+    js_regex_create_data_property(result, "input", 5, str);
     // groups property — populated with named captures if regex has named groups
     // ES spec: groups object must be a null-prototype object (Object.create(null))
-    Item groups_key = (Item){.item = s2it(heap_create_name("groups", 6))};
     if (!rd->literal_fast && rd->re2) {
         const std::map<std::string, int>& named = rd->re2->NamedCapturingGroups();
         if (!named.empty()) {
@@ -14747,14 +14905,13 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
             int js_name_len = (int)pair.first.size();
             const char* js_name = js_regex_original_group_name(rd, pair.first.c_str(),
                 (int)pair.first.size(), &js_name_len);
-            Item key = (Item){.item = s2it(heap_create_name(js_name, js_name_len))};
-            js_property_set(groups_obj, key, val);
+            js_regex_create_data_property(groups_obj, js_name, js_name_len, val);
         }
-        js_property_set(result, groups_key, groups_obj);
+        js_regex_create_data_property(result, "groups", 6, groups_obj);
             return result;
         }
     }
-    js_property_set(result, groups_key, make_js_undefined());
+    js_regex_create_data_property(result, "groups", 6, make_js_undefined());
     return result;
 }
 
@@ -17362,24 +17519,6 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
         }
     }
 
-    // v15: Regex instance methods (.exec, .test)
-    {
-        JsRegexData* rd = js_get_regex_data(obj);
-        if (rd) {
-            String* method = it2s(method_name);
-            if (method) {
-                if (method->len == 4 && strncmp(method->chars, "exec", 4) == 0) {
-                    Item str = argc > 0 ? args[0] : make_js_undefined();
-                    return js_regex_exec(obj, str);
-                }
-                if (method->len == 4 && strncmp(method->chars, "test", 4) == 0) {
-                    Item str = argc > 0 ? args[0] : make_js_undefined();
-                    return js_regex_test(obj, str);
-                }
-            }
-        }
-    }
-
     // TextEncoder/TextDecoder instance methods (.encode, .decode)
     // Only intercept for actual TextEncoder/TextDecoder objects
     {
@@ -17740,8 +17879,7 @@ static Item js_build_groups_object(JsRegexData* rd, re2::StringPiece* matches, i
         int js_name_len = (int)pair.first.size();
         const char* js_name = js_regex_original_group_name(rd, pair.first.c_str(),
             (int)pair.first.size(), &js_name_len);
-        Item key = (Item){.item = s2it(heap_create_name(js_name, js_name_len))};
-        js_property_set(groups_obj, key, val);
+        js_regex_create_data_property(groups_obj, js_name, js_name_len, val);
     }
     return groups_obj;
 }

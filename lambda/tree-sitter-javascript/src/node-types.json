@@ -3321,8 +3321,7 @@
   },
   {
     "type": "comment",
-    "named": true,
-    "extra": true
+    "named": true
   },
   {
     "type": "const",
@@ -3398,8 +3397,7 @@
   },
   {
     "type": "html_comment",
-    "named": true,
-    "extra": true
+    "named": true
   },
   {
     "type": "identifier",

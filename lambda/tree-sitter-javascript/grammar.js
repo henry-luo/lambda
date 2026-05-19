@@ -1231,6 +1231,7 @@ module.exports = grammar({
       'static',
       'export',
       'let',
+      'of',
     ),
 
     _semicolon: $ => choice($._automatic_semicolon, ';'),

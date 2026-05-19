@@ -4387,16 +4387,10 @@ static inline Item js_make_small_string(char* chars, int len, bool is_ascii) {
 static int js_from_char_code_to_uint16(Item code_item) {
     TypeId code_type = get_type_id(code_item);
     if (code_type == LMD_TYPE_INT) {
-        int64_t value = it2i(code_item);
-        int64_t mod = value % 65536;
-        if (mod < 0) mod += 65536;
-        return (int)mod;
+        return (int)((uint64_t)it2i(code_item) & 0xFFFFu);
     }
     if (code_type == LMD_TYPE_INT64) {
-        int64_t value = it2l(code_item);
-        int64_t mod = value % 65536;
-        if (mod < 0) mod += 65536;
-        return (int)mod;
+        return (int)((uint64_t)it2l(code_item) & 0xFFFFu);
     }
     Item num_item = js_to_number(code_item);
     double d = js_get_number(num_item);
@@ -4490,6 +4484,13 @@ extern "C" Item js_uri_decode_equals_from_char_code(Item str_item, Item first_it
     Item expected = js_string_fromCharCode2(first_item, second_item);
     if (js_exception_pending) return ItemNull;
     return js_strict_equal(decoded, expected);
+}
+
+extern "C" int64_t js_uri_decode_equals_from_char_code_raw(Item str_item, Item first_item,
+                                                           Item second_item, int64_t component) {
+    Item matched = js_uri_decode_equals_from_char_code(str_item, first_item, second_item, component);
+    if (js_exception_pending) return 0;
+    return get_type_id(matched) == LMD_TYPE_BOOL && it2b(matched) ? 1 : 0;
 }
 
 // Helper: encode a UTF-16 code unit to UTF-8 into buf, return bytes written
@@ -9571,6 +9572,30 @@ static inline bool js_test262_percent_escape_cp_from_append(String* left, uint32
     return true;
 }
 
+static Item g_last_three_byte_uri_prefix_string = {0};
+static uint32_t g_last_three_byte_uri_prefix_cp = 0;
+static uint64_t g_last_three_byte_uri_prefix_epoch = 0;
+
+static inline bool js_test262_percent_escape_three_byte_prefix(String* s, uint32_t* prefix_out) {
+    if (!s || s->len != 9 || !s->is_ascii) return false;
+    if (s->chars[0] != '%' || s->chars[3] != '%' || s->chars[6] != '%') return false;
+    int b0_high = js_test262_upper_hex_digit(s->chars[1]);
+    int b0_low = js_test262_upper_hex_digit(s->chars[2]);
+    int b1_high = js_test262_upper_hex_digit(s->chars[4]);
+    int b1_low = js_test262_upper_hex_digit(s->chars[5]);
+    int b2_high = js_test262_upper_hex_digit(s->chars[7]);
+    int b2_low = js_test262_upper_hex_digit(s->chars[8]);
+    if ((b0_high | b0_low | b1_high | b1_low | b2_high | b2_low) < 0) return false;
+    uint32_t byte0 = (uint32_t)((b0_high << 4) | b0_low);
+    uint32_t byte1 = (uint32_t)((b1_high << 4) | b1_low);
+    uint32_t byte2 = (uint32_t)((b2_high << 4) | b2_low);
+    if (byte0 < 0xF0 || byte0 > 0xF4) return false;
+    if ((byte1 & 0xC0) != 0x80 || (byte2 & 0xC0) != 0x80) return false;
+    *prefix_out = ((byte0 & 0x07) << 18) | ((byte1 & 0x3F) << 12) |
+                  ((byte2 & 0x3F) << 6);
+    return true;
+}
+
 extern "C" Item js_test262_concat_percent_hex(Item left_item, Item n_item) {
     Item left_val = (get_type_id(left_item) == LMD_TYPE_STRING) ? left_item : js_to_string(left_item);
     if (js_check_exception()) return ItemNull;
@@ -9608,8 +9633,21 @@ extern "C" Item js_test262_concat_percent_hex(Item left_item, Item n_item) {
     result->chars[left_len + 3] = '\0';
     Item result_item = (Item){.item = s2it(result)};
     uint32_t cp = 0;
-    if (js_test262_percent_escape_cp_from_append(left, byte, &cp)) {
+    uint64_t epoch = js_get_heap_epoch();
+    if (left_item.item == g_last_three_byte_uri_prefix_string.item &&
+        g_last_three_byte_uri_prefix_epoch == epoch &&
+        (byte & 0xC0) == 0x80) {
+        cp = g_last_three_byte_uri_prefix_cp | (byte & 0x3F);
+        if (cp >= 0x10000 && cp <= 0x10FFFF) {
+            js_string_remember_four_byte_uri_escape_cp(result_item, (int64_t)cp);
+        }
+    } else if (js_test262_percent_escape_cp_from_append(left, byte, &cp)) {
         js_string_remember_four_byte_uri_escape_cp(result_item, (int64_t)cp);
+    }
+    if (result->len == 9 && js_test262_percent_escape_three_byte_prefix(result, &cp)) {
+        g_last_three_byte_uri_prefix_string = result_item;
+        g_last_three_byte_uri_prefix_cp = cp;
+        g_last_three_byte_uri_prefix_epoch = epoch;
     }
     return result_item;
 }
@@ -9790,59 +9828,35 @@ extern "C" void js_validate_native_function_source(Item source_item) {
 // Native compareArray / assert.compareArray for test262 batch mode
 // =============================================================================
 
-// check if item is an array or typed array (array-like for comparison)
-static bool is_array_like(Item v) {
-    int depth = 0;
-    while (js_is_proxy(v) && depth < 32) {
-        JsProxyData* pd = js_get_proxy_data(v);
-        if (!pd || pd->revoked) return false;
-        v = (Item){.item = pd->target};
-        depth++;
-    }
-    TypeId t = get_type_id(v);
-    if (t == LMD_TYPE_ARRAY) return true;
-    if (t == LMD_TYPE_MAP && ((Container*)(uintptr_t)v.item)->map_kind == MAP_KIND_TYPED_ARRAY) return true;
-    if (t == LMD_TYPE_MAP && ((Container*)(uintptr_t)v.item)->map_kind == MAP_KIND_ARRAYBUFFER) return true;
-    return false;
+static Item compare_array_length_value(Item v) {
+    extern Item js_property_access(Item object, Item key);
+    Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
+    return js_property_access(v, len_key);
 }
 
-// get length of array or typed array (for compareArray)
-static int64_t array_like_length(Item v) {
-    extern int64_t js_array_length(Item array);
-    extern Item js_property_access(Item object, Item key);
-    TypeId t = get_type_id(v);
-    if (js_is_proxy(v)) {
-        Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
-        Item len_val = js_property_access(v, len_key);
-        if (get_type_id(len_val) == LMD_TYPE_INT) return (int64_t)it2i(len_val);
-        Item len_num = js_to_number(len_val);
-        if (get_type_id(len_num) == LMD_TYPE_INT) return (int64_t)it2i(len_num);
-        return 0;
-    }
-    if (t == LMD_TYPE_ARRAY) return js_array_length(v);
-    // for typed arrays, use property access for "length"
-    if (t == LMD_TYPE_MAP) {
-        Item len_key = (Item){.item = s2it(heap_create_name("length"))};
-        Item len_val = js_property_access(v, len_key);
-        if (get_type_id(len_val) == LMD_TYPE_INT) return (int64_t)it2i(len_val);
-    }
-    return 0;
+static int64_t compare_array_iteration_count(Item len_val) {
+    Item len_num = js_to_number(len_val);
+    double len = js_get_number(len_num);
+    if (!(len > 0.0) || isinf(len)) return 0;
+    double count = ceil(len);
+    if (count > 9007199254740991.0) return 0;
+    return (int64_t)count;
 }
 
 // compareArray(a, b): element-wise SameValue comparison, returns bool Item
 extern "C" Item js_compare_array(Item a, Item b) {
-    extern Item js_array_get_int(Item array, int64_t index);
+    extern Item js_property_access(Item object, Item key);
 
-    if (!is_array_like(a) || !is_array_like(b))
-        return (Item){.item = b2it(false)};
+    Item len_a = compare_array_length_value(a);
+    Item len_b = compare_array_length_value(b);
+    if (!it2b(js_strict_equal(len_b, len_a))) return (Item){.item = b2it(false)};
 
-    int64_t len_a = array_like_length(a);
-    int64_t len_b = array_like_length(b);
-    if (len_a != len_b) return (Item){.item = b2it(false)};
+    int64_t len = compare_array_iteration_count(len_a);
 
-    for (int64_t i = 0; i < len_a; i++) {
-        Item ai = js_array_get_int(a, i);
-        Item bi = js_array_get_int(b, i);
+    for (int64_t i = 0; i < len; i++) {
+        Item index_key = (Item){.item = i2it((int)i)};
+        Item ai = js_property_access(a, index_key);
+        Item bi = js_property_access(b, index_key);
         if (!it2b(js_object_is(ai, bi))) return (Item){.item = b2it(false)};
     }
     return (Item){.item = b2it(true)};
@@ -9850,20 +9864,17 @@ extern "C" Item js_compare_array(Item a, Item b) {
 
 // helper: format array as "[elem1, elem2, ...]" for error messages
 static Item assert_format_array(Item arr) {
-    extern Item js_array_get_int(Item array, int64_t index);
+    extern Item js_property_access(Item object, Item key);
     extern Item js_to_string_val(Item value);
 
-    if (!is_array_like(arr)) {
-        return (Item){.item = s2it(heap_create_name("(not an array)"))};
-    }
-    int64_t len = array_like_length(arr);
+    int64_t len = compare_array_iteration_count(compare_array_length_value(arr));
     // pre-pass: compute total length
     int total = 2; // "[]"
     char* strs[256];
     int slens[256];
     int maxn = len > 256 ? 256 : (int)len;
     for (int i = 0; i < maxn; i++) {
-        Item elem = js_array_get_int(arr, i);
+        Item elem = js_property_access(arr, (Item){.item = i2it(i)});
         Item s = js_to_string_val(elem);
         String* ss = it2s(s);
         strs[i] = ss ? ss->chars : (char*)"undefined";
@@ -14297,6 +14308,15 @@ extern "C" int64_t js_set_last_with_binding_if_valid(Item key, Item value, int64
     }
     js_property_set(scope_obj, key, value);
     return 1;
+}
+
+extern "C" Item js_last_with_binding_base_or_undefined(Item key) {
+    if (!js_last_with_binding_valid || !js_with_binding_key_same(js_last_with_binding_key, key)) {
+        return make_js_undefined();
+    }
+    Item scope_obj = js_last_with_binding_scope;
+    if (!js_with_scope_is_object(scope_obj)) return make_js_undefined();
+    return scope_obj;
 }
 
 extern "C" Item js_delete_identifier_with_binding(Item key, int64_t declared_binding) {
