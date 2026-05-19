@@ -4351,6 +4351,7 @@ extern "C" Item js_string_charCodeAt(Item str_item, Item index_item) {
 
 static int encode_charcode_utf8(char* buf, int code);
 static int encode_charcode_full_utf8(char* buf, int code);
+static inline int js_uri_hex_digit(char c);
 static bool js_uri_try_decode_four_byte_cp(String* s, uint32_t* cp_out);
 static Item js_uri_make_four_byte_string_from_cp(uint32_t cp);
 extern "C" Item js_decodeURIComponent(Item str_item);
@@ -4382,6 +4383,51 @@ static inline Item js_make_small_string(char* chars, int len, bool is_ascii) {
     memcpy(result->chars, chars, len);
     result->chars[len] = '\0';
     return (Item){.item = s2it(result)};
+}
+
+static inline bool js_uri_is_reserved_cp(uint32_t cp) {
+    switch (cp) {
+    case ';': case '/': case '?': case ':': case '@': case '&':
+    case '=': case '+': case '$': case ',': case '#':
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool js_uri_try_decode_percent_utf16_cp(String* s, uint32_t* cp_out) {
+    if (!s || !cp_out) return false;
+    int bytes[3];
+    int byte_count = 0;
+    if (s->len != 3 && s->len != 6 && s->len != 9) return false;
+    for (int i = 0; i < s->len; i += 3) {
+        if (s->chars[i] != '%') return false;
+        int hi = js_uri_hex_digit(s->chars[i + 1]);
+        int lo = js_uri_hex_digit(s->chars[i + 2]);
+        if (hi < 0 || lo < 0) return false;
+        bytes[byte_count++] = (hi << 4) | lo;
+    }
+
+    uint32_t cp = 0;
+    if (byte_count == 1) {
+        if (bytes[0] >= 0x80) return false;
+        cp = (uint32_t)bytes[0];
+    } else if (byte_count == 2) {
+        if (bytes[0] < 0xC2 || bytes[0] > 0xDF) return false;
+        if ((bytes[1] & 0xC0) != 0x80) return false;
+        cp = (uint32_t)(((bytes[0] & 0x1F) << 6) | (bytes[1] & 0x3F));
+    } else {
+        if (bytes[0] < 0xE0 || bytes[0] > 0xEF) return false;
+        if ((bytes[1] & 0xC0) != 0x80 || (bytes[2] & 0xC0) != 0x80) return false;
+        if (bytes[0] == 0xE0 && bytes[1] < 0xA0) return false;
+        if (bytes[0] == 0xED && bytes[1] >= 0xA0) return false;
+        cp = (uint32_t)(((bytes[0] & 0x0F) << 12) |
+                        ((bytes[1] & 0x3F) << 6) |
+                        (bytes[2] & 0x3F));
+    }
+    if (cp > 0xFFFF) return false;
+    *cp_out = cp;
+    return true;
 }
 
 static int js_from_char_code_to_uint16(Item code_item) {
@@ -4491,6 +4537,58 @@ extern "C" int64_t js_uri_decode_equals_from_char_code_raw(Item str_item, Item f
     Item matched = js_uri_decode_equals_from_char_code(str_item, first_item, second_item, component);
     if (js_exception_pending) return 0;
     return get_type_id(matched) == LMD_TYPE_BOOL && it2b(matched) ? 1 : 0;
+}
+
+extern "C" int64_t js_uri_decode_equals_from_char_code1_raw(Item str_item, Item code_item,
+                                                            int64_t component) {
+    Item str_val = (get_type_id(str_item) == LMD_TYPE_STRING) ? str_item : js_to_string(str_item);
+    if (js_exception_pending) return 0;
+    String* s = it2s(str_val);
+    uint32_t cp = 0;
+    if (js_uri_try_decode_percent_utf16_cp(s, &cp)) {
+        if (!component && js_uri_is_reserved_cp(cp)) return 0;
+        int code = js_from_char_code_to_uint16(code_item);
+        if (js_exception_pending) return 0;
+        return cp == (uint32_t)code ? 1 : 0;
+    }
+
+    Item decoded = component ? js_decodeURIComponent(str_item) : js_decodeURI(str_item);
+    if (js_exception_pending) return 0;
+    Item expected = js_string_fromCharCode(code_item);
+    if (js_exception_pending) return 0;
+    return it2b(js_strict_equal(decoded, expected)) ? 1 : 0;
+}
+
+extern "C" Item js_uri_decode_equals_from_char_code1(Item str_item, Item code_item,
+                                                     int64_t component) {
+    int64_t matched = js_uri_decode_equals_from_char_code1_raw(str_item, code_item, component);
+    if (js_exception_pending) return ItemNull;
+    return (Item){.item = b2it(matched != 0)};
+}
+
+extern "C" int64_t js_uri_decode_identity_raw(Item str_item, int64_t component) {
+    Item str_val = (get_type_id(str_item) == LMD_TYPE_STRING) ? str_item : js_to_string(str_item);
+    if (js_exception_pending) return 0;
+    String* s = it2s(str_val);
+    if (!s || s->len == 0) return it2b(js_strict_equal(str_val, str_item)) ? 1 : 0;
+    bool has_percent = false;
+    for (int64_t i = 0; i < s->len; i++) {
+        if (s->chars[i] == '%') {
+            has_percent = true;
+            break;
+        }
+    }
+    if (!has_percent) return it2b(js_strict_equal(str_val, str_item)) ? 1 : 0;
+
+    Item decoded = component ? js_decodeURIComponent(str_item) : js_decodeURI(str_item);
+    if (js_exception_pending) return 0;
+    return it2b(js_strict_equal(decoded, str_item)) ? 1 : 0;
+}
+
+extern "C" Item js_uri_decode_identity(Item str_item, int64_t component) {
+    int64_t matched = js_uri_decode_identity_raw(str_item, component);
+    if (js_exception_pending) return ItemNull;
+    return (Item){.item = b2it(matched != 0)};
 }
 
 // Helper: encode a UTF-16 code unit to UTF-8 into buf, return bytes written
