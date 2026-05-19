@@ -21,9 +21,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-void render_block_view(RenderContext* rdcon, ViewBlock* view_block);
-void render_image_view(RenderContext* rdcon, ViewBlock* view);
-void render_raster_view_tree(RenderContext* rdcon, ViewTree* view_tree);
 void render_video_frames(DisplayList* dl, ImageSurface* surface, DocState* rstate, UiContext* uicon);
 int render_html_to_png(const char* html_file, const char* png_file,
                        int viewport_width, int viewport_height,
