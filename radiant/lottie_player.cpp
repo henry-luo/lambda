@@ -43,6 +43,7 @@ void lottie_animation_tick(AnimationInstance* anim, float t) {
     // Point the surface pixels at our buffer
     if (lp->surface) {
         lp->surface->pixels = lp->pixels;
+        image_surface_bump_generation(lp->surface);
     }
 
     log_debug("lottie tick: frame %.1f/%.0f (t=%.3f)", frame_no, lp->total_frames, t);
@@ -75,6 +76,7 @@ void lottie_animation_finish(AnimationInstance* anim) {
     }
     if (lp->surface) {
         lp->surface->pixels = NULL;
+        image_surface_bump_generation(lp->surface);
     }
 
     mem_free(lp);
@@ -171,6 +173,7 @@ static LottiePlayer* lottie_player_init(ImageSurface* surface,
     // Point the surface at our pixels
     if (surface) {
         surface->pixels = pixels;
+        image_surface_bump_generation(surface);
     }
 
     log_info("lottie player init: %.0f frames, %.1f fps, %.1fs, %dx%d",

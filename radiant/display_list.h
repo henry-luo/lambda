@@ -119,6 +119,8 @@ typedef struct {
 } DlFillRadialGradient;
 
 typedef struct {
+    void* resource_owner;    // optional ImageSurface* owner for generation checks
+    uint64_t resource_generation;
     const uint32_t* pixels;  // borrowed — image lifetime must exceed display list
     int src_w, src_h, src_stride;
     float dst_x, dst_y, dst_w, dst_h;
@@ -128,6 +130,7 @@ typedef struct {
 } DlDrawImage;
 
 typedef struct {
+    uint64_t resource_generation; // 0 means not safe for retained reuse
     GlyphBitmap bitmap;      // copy of bitmap descriptor (buffer pointer borrowed)
     int x, y;                // destination pixel position
     Color color;             // text color at recording time
@@ -174,6 +177,7 @@ typedef struct {
 // Direct-pixel scaled blit (raster images via blit_surface_scaled)
 typedef struct {
     void* src_surface;       // ImageSurface* — borrowed
+    uint64_t src_generation;
     float dst_x, dst_y, dst_w, dst_h;
     int scale_mode;
     uint8_t opacity;
@@ -268,6 +272,7 @@ typedef struct {
 // The actual video frame pixels are blitted after tile compositing in the render loop.
 typedef struct {
     void* video;             // RdtVideo* — borrowed, lifetime managed by view tree
+    uint64_t video_generation;
     float dst_x, dst_y, dst_w, dst_h;  // physical pixel coordinates
     Bound clip;              // rectangular clip bounds at recording time
     int object_fit;          // CssEnum
@@ -276,9 +281,17 @@ typedef struct {
 // Webview layer placeholder: records the layout rect and clip for post-composite blit.
 typedef struct {
     void* surface;           // ImageSurface* — borrowed, lifetime managed by WebViewProp
+    uint64_t surface_generation;
     float dst_x, dst_y, dst_w, dst_h;
     Bound clip;
 } DlWebviewLayerPlaceholder;
+
+// Element group marker: records a matched display-list item range for subtree
+// culling and future retained display-list reuse.
+typedef struct {
+    uint32_t view_id;
+    int matching_index;      // begin -> end, end -> begin; -1 while open
+} DlElementMarker;
 
 // ---------------------------------------------------------------------------
 // DisplayItem — tagged union of all draw commands
@@ -314,6 +327,7 @@ typedef struct DisplayItem {
         DlOuterShadow        outer_shadow;
         DlVideoPlaceholder   video_placeholder;
         DlWebviewLayerPlaceholder webview_layer_placeholder;
+        DlElementMarker      element_marker;
     };
 } DisplayItem;
 
@@ -372,12 +386,15 @@ void dl_fill_radial_gradient(DisplayList* dl, RdtPath* path,
 void dl_draw_image(DisplayList* dl, const uint32_t* pixels,
                    int src_w, int src_h, int src_stride,
                    float dst_x, float dst_y, float dst_w, float dst_h,
-                   uint8_t opacity, const RdtMatrix* transform);
+                   uint8_t opacity, const RdtMatrix* transform,
+                   void* resource_owner = nullptr,
+                   uint64_t resource_generation = 0);
 
 // Record a glyph draw command.  bitmap buffer is borrowed (must outlive display list).
 void dl_draw_glyph(DisplayList* dl, GlyphBitmap* bitmap, int x, int y,
                    Color color, bool is_color_emoji, const Bound* clip,
-                   const RdtMatrix* transform = nullptr);
+                   const RdtMatrix* transform = nullptr,
+                   uint64_t resource_generation = 0);
 
 void dl_draw_picture(DisplayList* dl, RdtPicture* picture,
                      uint8_t opacity, const RdtMatrix* transform);
@@ -397,7 +414,8 @@ void dl_blit_surface_scaled(DisplayList* dl, void* src_surface,
                             float dst_x, float dst_y, float dst_w, float dst_h,
                             int scale_mode, const Bound* clip,
                             ClipShape** clip_shapes = nullptr, int clip_depth = 0,
-                            uint8_t opacity = 255);
+                            uint8_t opacity = 255,
+                            uint64_t src_generation = 0);
 
 // Post-processing operations (coordinates already in physical pixels)
 void dl_apply_opacity(DisplayList* dl, int x0, int y0, int x1, int y1,
@@ -436,12 +454,20 @@ void dl_outer_shadow(DisplayList* dl,
 // Video placeholder (rect + clip only; actual blit is post-composite)
 void dl_video_placeholder(DisplayList* dl, void* video,
                           float dst_x, float dst_y, float dst_w, float dst_h,
-                          int object_fit, const Bound* clip);
+                          int object_fit, const Bound* clip,
+                          uint64_t video_generation = 0);
 
 // Webview layer placeholder (rect + clip only; actual blit is post-composite)
 void dl_webview_layer_placeholder(DisplayList* dl, void* surface,
                                   float dst_x, float dst_y, float dst_w, float dst_h,
-                                  const Bound* clip);
+                                  const Bound* clip,
+                                  uint64_t surface_generation = 0);
+
+// Element group markers.  dl_begin_element() returns the begin item index,
+// which must be passed to dl_end_element() after the subtree has been recorded.
+int dl_begin_element(DisplayList* dl, uint32_t view_id,
+                     float x, float y, float w, float h);
+void dl_end_element(DisplayList* dl, int begin_index);
 
 // ---------------------------------------------------------------------------
 // Replay — execute all recorded commands through rdt_* calls

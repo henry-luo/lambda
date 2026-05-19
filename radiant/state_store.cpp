@@ -12,6 +12,7 @@
 #include "form_control.hpp"
 #include "text_control.hpp"
 #include "state_machine.hpp"
+#include "retained_display_list.hpp"
 // str.h included via view.hpp
 #include "view.hpp"
 #include "../lib/tagged.hpp"
@@ -192,6 +193,18 @@ DocState* radiant_state_create(Pool* pool, StateUpdateMode mode) {
     );
     if (!state->view_state_map) {
         log_error("radiant_state_create: failed to create view_state_map");
+        hashmap_free(state->state_map);
+        state->state_map = NULL;
+        arena_destroy(state->arena);
+        state->arena = NULL;
+        return NULL;
+    }
+
+    state->retained_dl_cache = retained_dl_cache_create(pool);
+    if (!state->retained_dl_cache) {
+        log_error("radiant_state_create: failed to create retained display-list cache");
+        hashmap_free(state->view_state_map);
+        state->view_state_map = NULL;
         hashmap_free(state->state_map);
         state->state_map = NULL;
         arena_destroy(state->arena);
@@ -721,6 +734,11 @@ void radiant_state_destroy(DocState* state) {
     if (state->view_state_map) {
         hashmap_free(state->view_state_map);
         state->view_state_map = NULL;
+    }
+
+    if (state->retained_dl_cache) {
+        retained_dl_cache_destroy(state->retained_dl_cache);
+        state->retained_dl_cache = NULL;
     }
 
     if (state->arena) {
@@ -1822,6 +1840,8 @@ void doc_state_request_repaint(DocState* state) {
 void doc_state_mark_video_frame_pending(DocState* state) {
     if (!state) return;
     state->video_frame_pending = true;
+    state->video_frame_generation++;
+    if (state->video_frame_generation == 0) state->video_frame_generation = 1;
 }
 
 void doc_state_clear_video_frame_pending(DocState* state) {
@@ -3029,7 +3049,9 @@ void state_end_batch(DocState* state) {
 // Dirty Tracking
 // ============================================================================
 
-void dirty_mark_rect(DirtyTracker* tracker, float x, float y, float width, float height) {
+static void dirty_mark_rect_with_source(DirtyTracker* tracker, float x, float y,
+                                        float width, float height,
+                                        uint32_t source_view_id) {
     if (!tracker) return;
 
     if (tracker->full_repaint) return;  // already marked for full repaint
@@ -3060,6 +3082,9 @@ void dirty_mark_rect(DirtyTracker* tracker, float x, float y, float width, float
             dr->y = new_y;
             dr->width = new_right - new_x;
             dr->height = new_bottom - new_y;
+            if (dr->source_view_id != source_view_id) {
+                dr->source_view_id = 0;
+            }
             return;
         }
         dr = dr->next;
@@ -3075,8 +3100,13 @@ void dirty_mark_rect(DirtyTracker* tracker, float x, float y, float width, float
     new_dr->y = y;
     new_dr->width = width;
     new_dr->height = height;
+    new_dr->source_view_id = source_view_id;
     new_dr->next = tracker->dirty_list;
     tracker->dirty_list = new_dr;
+}
+
+void dirty_mark_rect(DirtyTracker* tracker, float x, float y, float width, float height) {
+    dirty_mark_rect_with_source(tracker, x, y, width, height, 0);
 }
 
 void dirty_mark_element(DocState* state, void* view_ptr) {
@@ -3093,7 +3123,8 @@ void dirty_mark_element(DocState* state, void* view_ptr) {
         p = p->parent_view();
     }
 
-    dirty_mark_rect(&state->dirty_tracker, abs_x, abs_y, view->width, view->height);
+    dirty_mark_rect_with_source(&state->dirty_tracker, abs_x, abs_y,
+                                view->width, view->height, view->id);
     state->needs_repaint = true;
 }
 

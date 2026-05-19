@@ -375,6 +375,7 @@ typedef struct ImageSurface {
     unsigned char* source_data;  // in-memory data for lazy decode of HTTP images (NULL if file-based)
     size_t source_data_len;      // length of source_data
     int tile_offset_y;   // tiled PNG rendering: physical-pixel Y start of this tile (0 = full-page surface)
+    uint64_t generation; // incremented when borrowed pixels/picture content changes
     // Decoded buffer dimensions (for raster images decoded at a smaller scale than intrinsic).
     // If decoded_width > 0, these reflect the actual pixel buffer dims; pitch matches decoded_width*4.
     // Otherwise the buffer matches width/height/pitch above.
@@ -386,6 +387,7 @@ extern ImageSurface* image_surface_create(int pixel_width, int pixel_height);
 extern ImageSurface* image_surface_create_from(int pixel_width, int pixel_height, void* pixels);
 extern void image_surface_destroy(ImageSurface* img_surface);
 extern void image_surface_ensure_decoded(ImageSurface* img, int target_w, int target_h);
+extern void image_surface_bump_generation(ImageSurface* img_surface);
 extern void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color, Bound* clip,
                               struct ClipShape** clip_shapes = nullptr, int clip_depth = 0);
 extern void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, Rect* dst_rect, Bound* clip, ScaleMode scale_mode,

@@ -60,10 +60,13 @@ void rc_fill_radial_gradient(RenderContext* rdcon, RdtPath* path,
 void rc_draw_image(RenderContext* rdcon, const uint32_t* pixels,
                    int src_w, int src_h, int src_stride,
                    float dst_x, float dst_y, float dst_w, float dst_h,
-                   uint8_t opacity, const RdtMatrix* transform) {
+                   uint8_t opacity, const RdtMatrix* transform,
+                   ImageSurface* resource_owner) {
     if (rdcon->dl) {
         dl_draw_image(rdcon->dl, pixels, src_w, src_h, src_stride,
-                      dst_x, dst_y, dst_w, dst_h, opacity, transform);
+                      dst_x, dst_y, dst_w, dst_h, opacity, transform,
+                      resource_owner,
+                      resource_owner ? resource_owner->generation : 0);
     } else {
         rdt_draw_image(&rdcon->vec, pixels, src_w, src_h, src_stride,
                        dst_x, dst_y, dst_w, dst_h, opacity, transform);
@@ -124,7 +127,8 @@ void render_painter_draw_picture_rect(RenderContext* rdcon, RdtPicture* picture,
 void render_painter_draw_pixels_rect(RenderContext* rdcon, const uint32_t* pixels,
                                      int src_w, int src_h, int src_stride,
                                      Rect* dst_rect, Bound* clip,
-                                     uint8_t opacity) {
+                                     uint8_t opacity,
+                                     ImageSurface* resource_owner) {
     if (!pixels || !dst_rect) return;
     if (clip) {
         RdtPath* clip_path = rdt_path_new();
@@ -136,7 +140,7 @@ void render_painter_draw_pixels_rect(RenderContext* rdcon, const uint32_t* pixel
 
     rc_draw_image(rdcon, pixels, src_w, src_h, src_stride,
                   dst_rect->x, dst_rect->y, dst_rect->width, dst_rect->height,
-                  opacity, nullptr);
+                  opacity, nullptr, resource_owner);
 
     if (clip) rc_pop_clip(rdcon);
 }
@@ -162,7 +166,8 @@ void render_painter_blit_surface_scaled(RenderContext* rdcon,
     if (rdcon->dl) {
         dl_blit_surface_scaled(rdcon->dl, src, dst_rect->x, dst_rect->y,
                                dst_rect->width, dst_rect->height, (int)scale_mode,
-                               clip, clip_shapes, clip_depth, opacity);
+                               clip, clip_shapes, clip_depth, opacity,
+                               src ? src->generation : 0);
     } else {
         RasterPaintContext raster = {dst, clip, clip_shapes, clip_depth};
         raster_blit_surface_scaled(&raster, src, src_rect, dst_rect, scale_mode, opacity);

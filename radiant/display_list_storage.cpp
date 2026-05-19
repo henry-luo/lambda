@@ -122,6 +122,7 @@ void dl_clear(DisplayList* dl) {
         }
     }
     dl->count = 0;
+    scratch_release(&dl->arena);
 }
 
 void dl_destroy(DisplayList* dl) {
@@ -146,4 +147,83 @@ bool dl_contains_glyphs(const DisplayList* dl) {
         if (dl->items[i].op == DL_DRAW_GLYPH) return true;
     }
     return false;
+}
+
+static void dl_set_item_rect_bounds(DisplayItem* item,
+                                    float x, float y, float w, float h) {
+    if (!item) return;
+    item->bounds[0] = x;
+    item->bounds[1] = y;
+    item->bounds[2] = w > 0.0f ? w : 0.0f;
+    item->bounds[3] = h > 0.0f ? h : 0.0f;
+}
+
+static bool dl_union_item_bounds(float* left, float* top,
+                                 float* right, float* bottom,
+                                 const DisplayItem* item,
+                                 bool has_bounds) {
+    if (!item) return has_bounds;
+    float w = item->bounds[2];
+    float h = item->bounds[3];
+    if (w <= 0.0f || h <= 0.0f) return has_bounds;
+    float l = item->bounds[0];
+    float t = item->bounds[1];
+    float r = l + w;
+    float b = t + h;
+    if (!has_bounds) {
+        *left = l;
+        *top = t;
+        *right = r;
+        *bottom = b;
+        return true;
+    }
+    if (l < *left) *left = l;
+    if (t < *top) *top = t;
+    if (r > *right) *right = r;
+    if (b > *bottom) *bottom = b;
+    return true;
+}
+
+int dl_begin_element(DisplayList* dl, uint32_t view_id,
+                     float x, float y, float w, float h) {
+    DisplayItem* item = dl_alloc_item(dl);
+    if (!item) return -1;
+    int index = dl->count - 1;
+    item->op = DL_BEGIN_ELEMENT;
+    dl_set_item_rect_bounds(item, x, y, w, h);
+    item->element_marker.view_id = view_id;
+    item->element_marker.matching_index = -1;
+    return index;
+}
+
+void dl_end_element(DisplayList* dl, int begin_index) {
+    DisplayItem* end = dl_alloc_item(dl);
+    if (!end) return;
+    int end_index = dl->count - 1;
+    end->op = DL_END_ELEMENT;
+    end->element_marker.view_id = 0;
+    end->element_marker.matching_index = begin_index;
+
+    if (!dl || begin_index < 0 || begin_index >= end_index) {
+        return;
+    }
+
+    DisplayItem* begin = &dl->items[begin_index];
+    if (begin->op != DL_BEGIN_ELEMENT) {
+        return;
+    }
+
+    float left = 0.0f, top = 0.0f, right = 0.0f, bottom = 0.0f;
+    bool has_bounds = false;
+    has_bounds = dl_union_item_bounds(&left, &top, &right, &bottom, begin, has_bounds);
+    for (int i = begin_index + 1; i < end_index; i++) {
+        has_bounds = dl_union_item_bounds(&left, &top, &right, &bottom,
+                                          &dl->items[i], has_bounds);
+    }
+    if (has_bounds) {
+        dl_set_item_rect_bounds(begin, left, top, right - left, bottom - top);
+        dl_set_item_rect_bounds(end, left, top, right - left, bottom - top);
+    }
+    begin->element_marker.matching_index = end_index;
+    end->element_marker.view_id = begin->element_marker.view_id;
 }

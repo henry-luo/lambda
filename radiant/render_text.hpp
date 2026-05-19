@@ -2,6 +2,7 @@
 
 #include "render.hpp"
 
+void render_text_view(RenderContext* rdcon, ViewText* text_view);
 void render_text_inline_background(RenderContext* rdcon, ViewText* text_view,
                                    TextRect* text_rect, DomElement* parent_elem,
                                    float x, float y);

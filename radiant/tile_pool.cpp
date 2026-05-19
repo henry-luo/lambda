@@ -537,8 +537,8 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
     for (int i = 0; i < dl->count; i++) {
         DisplayItem* item = &dl->items[i];
 
-        // Cull: skip items that don't intersect this tile
-        // Items with zero bounds (clips, markers) always pass
+        // Cull draw work that doesn't intersect this tile; the skip path below
+        // still preserves clip/backdrop stack state for ordered replay.
         if (!dl_item_intersects_rect(item, tile_x, tile_y, tile_w, tile_h)) {
             // Still need to track clip/backdrop depth for correctness
             switch (item->op) {
@@ -588,6 +588,11 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
                     break;
                 case DL_OUTER_SHADOW:
                     // self-contained, nothing to track on skip
+                    break;
+                case DL_BEGIN_ELEMENT:
+                    if (item->element_marker.matching_index > i) {
+                        i = item->element_marker.matching_index;
+                    }
                     break;
                 default:
                     break;

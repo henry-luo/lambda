@@ -340,6 +340,78 @@ RdtPath* rdt_path_clone(const RdtPath* src) {
     return dst;
 }
 
+static void path_bounds_include_point(bool* has_point, float* left, float* top,
+                                      float* right, float* bottom,
+                                      float x, float y) {
+    if (!*has_point) {
+        *left = *right = x;
+        *top = *bottom = y;
+        *has_point = true;
+        return;
+    }
+    if (x < *left) *left = x;
+    if (x > *right) *right = x;
+    if (y < *top) *top = y;
+    if (y > *bottom) *bottom = y;
+}
+
+static void path_bounds_include_rect(bool* has_point, float* left, float* top,
+                                     float* right, float* bottom,
+                                     float x, float y, float w, float h) {
+    float x0 = w < 0 ? x + w : x;
+    float x1 = w < 0 ? x : x + w;
+    float y0 = h < 0 ? y + h : y;
+    float y1 = h < 0 ? y : y + h;
+    path_bounds_include_point(has_point, left, top, right, bottom, x0, y0);
+    path_bounds_include_point(has_point, left, top, right, bottom, x1, y1);
+}
+
+bool rdt_path_get_bounds(const RdtPath* p, float* left, float* top,
+                         float* right, float* bottom) {
+    if (!p || !left || !top || !right || !bottom) return false;
+
+    bool has_point = false;
+    float l = 0, t = 0, r = 0, b = 0;
+    for (int i = 0; i < p->count; i++) {
+        const RdtPath::Entry* e = &p->entries[i];
+        switch (e->cmd) {
+            case RdtPath::CMD_MOVE:
+            case RdtPath::CMD_LINE:
+                path_bounds_include_point(&has_point, &l, &t, &r, &b,
+                                          e->args[0], e->args[1]);
+                break;
+            case RdtPath::CMD_CUBIC:
+                path_bounds_include_point(&has_point, &l, &t, &r, &b,
+                                          e->args[0], e->args[1]);
+                path_bounds_include_point(&has_point, &l, &t, &r, &b,
+                                          e->args[2], e->args[3]);
+                path_bounds_include_point(&has_point, &l, &t, &r, &b,
+                                          e->args[4], e->args[5]);
+                break;
+            case RdtPath::CMD_RECT:
+                path_bounds_include_rect(&has_point, &l, &t, &r, &b,
+                                         e->args[0], e->args[1],
+                                         e->args[2], e->args[3]);
+                break;
+            case RdtPath::CMD_CIRCLE:
+                path_bounds_include_rect(&has_point, &l, &t, &r, &b,
+                                         e->args[0] - e->args[2],
+                                         e->args[1] - e->args[3],
+                                         e->args[2] * 2.0f,
+                                         e->args[3] * 2.0f);
+                break;
+            case RdtPath::CMD_CLOSE:
+                break;
+        }
+    }
+    if (!has_point) return false;
+    *left = l;
+    *top = t;
+    *right = r;
+    *bottom = b;
+    return true;
+}
+
 // ============================================================================
 // Fill
 // ============================================================================

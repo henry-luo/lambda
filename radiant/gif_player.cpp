@@ -35,6 +35,7 @@ void gif_animation_tick(AnimationInstance* anim, float t) {
 
         // Swap the surface pixel pointer to the new frame
         ga->surface->pixels = frame->pixels;
+        image_surface_bump_generation(ga->surface);
 
         // Set next frame end time
         ga->frame_end_time = now + frame->delay_ms / 1000.0;
@@ -60,6 +61,7 @@ void gif_animation_finish(AnimationInstance* anim) {
     // We reset to NULL so the renderer shows nothing (or the caller can re-set).
     if (ga->surface) {
         ga->surface->pixels = NULL;
+        image_surface_bump_generation(ga->surface);
     }
     mem_free(ga);
     anim->state = NULL;
@@ -94,6 +96,7 @@ AnimationInstance* gif_animation_create(AnimationScheduler* scheduler,
 
     // Set the initial frame pixels on the surface
     surface->pixels = gif_frames->frames[0].pixels;
+    image_surface_bump_generation(surface);
 
     AnimationInstance* inst = animation_instance_create(scheduler);
     inst->type = ANIM_GIF;

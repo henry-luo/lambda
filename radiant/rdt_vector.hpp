@@ -121,6 +121,11 @@ void     rdt_path_free(RdtPath* p);
 // Deep-copy a path (entries array is duplicated).
 RdtPath* rdt_path_clone(const RdtPath* src);
 
+// Compute a conservative axis-aligned path bound in path-local coordinates.
+// Returns false when the path has no drawable geometry.
+bool rdt_path_get_bounds(const RdtPath* p, float* left, float* top,
+                         float* right, float* bottom);
+
 // ---------------------------------------------------------------------------
 // Fill
 // ---------------------------------------------------------------------------

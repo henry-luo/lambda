@@ -1840,6 +1840,26 @@
                         "icon": "📋"
                     },
                     {
+                        "source": "test_retained_display_list_gtest.cpp",
+                        "name": "Retained Display List Tests",
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "radiant/display_list_bounds.cpp",
+                            "radiant/display_list_storage.cpp",
+                            "radiant/retained_display_list.cpp",
+                            "test/test_retained_display_list_stubs.cpp"
+                        ],
+                        "binary": "test_retained_display_list_gtest.exe",
+                        "icon": "🧾"
+                    },
+                    {
                         "source": "test_pdf_writer_gtest.cpp",
                         "name": "PDF Writer Tests",
                         "dependencies": [

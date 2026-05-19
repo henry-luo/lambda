@@ -246,6 +246,7 @@ static void sync_walk(WebViewManager* mgr, ViewBlock* block,
                 if (wv->dirty && wv->surface) {
                     bool ok = webview_layer_platform_snapshot(wv->handle, wv->surface);
                     if (ok) {
+                        image_surface_bump_generation(wv->surface);
                         wv->dirty = false;
                         log_debug("webview layer: snapshot captured %.0fx%.0f",
                                   block->width, block->height);
@@ -344,6 +345,7 @@ static bool poll_dirty_walk(ViewBlock* block) {
             if (wv->dirty) {
                 bool ok = webview_layer_platform_snapshot(wv->handle, wv->surface);
                 if (ok) {
+                    image_surface_bump_generation(wv->surface);
                     wv->dirty = false;
                     any_dirty = true;
                     log_debug("webview poll: re-snapshotted layer webview");

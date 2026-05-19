@@ -581,6 +581,7 @@ ImageSurface* image_surface_create(int pixel_width, int pixel_height) {
     img_surface->orientation = 1;
     img_surface->has_intrinsic_size = true;
     img_surface->pitch = pixel_width * 4;
+    img_surface->generation = 1;
     img_surface->pixels = mem_calloc(pixel_width * pixel_height * 4, sizeof(uint32_t), MEM_CAT_IMAGE);
     if (!img_surface->pixels) {
         log_error("[surface] Could not allocate memory for image surface");
@@ -603,8 +604,15 @@ ImageSurface* image_surface_create_from(int pixel_width, int pixel_height, void*
         img_surface->has_intrinsic_size = true;
         img_surface->pitch = pixel_width * 4;
         img_surface->pixels = pixels;
+        img_surface->generation = 1;
     }
     return img_surface;
+}
+
+void image_surface_bump_generation(ImageSurface* img_surface) {
+    if (!img_surface) return;
+    img_surface->generation++;
+    if (img_surface->generation == 0) img_surface->generation = 1;
 }
 
 void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color, Bound* clip,
@@ -649,6 +657,7 @@ void image_surface_ensure_decoded(ImageSurface* img, int target_w, int target_h)
             img->decoded_width = width;
             img->decoded_height = height;
             img->pitch = width * 4;
+            image_surface_bump_generation(img);
             log_debug("[image] Decoded local image on demand: %dx%d (intrinsic %dx%d, target %dx%d) from %s",
                       width, height, img->width, img->height, target_w, target_h, img->source_path);
         } else {
@@ -666,6 +675,7 @@ void image_surface_ensure_decoded(ImageSurface* img, int target_w, int target_h)
             img->decoded_width = width;
             img->decoded_height = height;
             img->pitch = width * 4;
+            image_surface_bump_generation(img);
             log_debug("[image] Decoded HTTP image on demand: %dx%d (intrinsic %dx%d, target %dx%d)",
                       width, height, img->width, img->height, target_w, target_h);
         } else {
