@@ -223,6 +223,8 @@ void render_output_render_view_tree(RenderContext* rdcon, ViewTree* view_tree) {
         return;
     }
 
+    render_painter_begin_vector_batch(rdcon);
+
     View* root_view = view_tree->root;
     if (root_view && root_view->view_type == RDT_VIEW_BLOCK) {
         log_debug("Render root view");
@@ -244,6 +246,8 @@ void render_output_render_view_tree(RenderContext* rdcon, ViewTree* view_tree) {
     else {
         log_error("Invalid root view");
     }
+
+    render_painter_end_vector_batch(rdcon);
 }
 
 RenderOutputReplayResult render_output_replay_display_list(RenderContext* rdcon,

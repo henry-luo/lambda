@@ -128,7 +128,8 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
             DlDrawImage* r = &item->draw_image;
             rdt_draw_image(vec, r->pixels, r->src_w, r->src_h, r->src_stride,
                            r->dst_x, r->dst_y, r->dst_w, r->dst_h, r->opacity,
-                           r->has_transform ? &r->transform : nullptr);
+                           r->has_transform ? &r->transform : nullptr,
+                           r->resource_generation);
             break;
         }
 

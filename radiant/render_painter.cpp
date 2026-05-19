@@ -69,7 +69,8 @@ void rc_draw_image(RenderContext* rdcon, const uint32_t* pixels,
                       resource_owner ? resource_owner->generation : 0);
     } else {
         rdt_draw_image(&rdcon->vec, pixels, src_w, src_h, src_stride,
-                       dst_x, dst_y, dst_w, dst_h, opacity, transform);
+                       dst_x, dst_y, dst_w, dst_h, opacity, transform,
+                       resource_owner ? resource_owner->generation : 0);
     }
 }
 
@@ -100,6 +101,21 @@ int rc_clip_save_depth(RenderContext* rdcon) {
 void rc_clip_restore_depth(RenderContext* rdcon, int saved) {
     if (rdcon->dl) dl_restore_clip_depth(rdcon->dl, saved);
     else rdt_clip_restore_depth(saved);
+}
+
+void render_painter_begin_vector_batch(RenderContext* rdcon) {
+    if (!rdcon || rdcon->dl) return;
+    rdt_vector_begin_batch(&rdcon->vec);
+}
+
+void render_painter_flush_vector_batch(RenderContext* rdcon) {
+    if (!rdcon || rdcon->dl) return;
+    rdt_vector_flush_batch(&rdcon->vec);
+}
+
+void render_painter_end_vector_batch(RenderContext* rdcon) {
+    if (!rdcon || rdcon->dl) return;
+    rdt_vector_end_batch(&rdcon->vec);
 }
 
 void render_painter_draw_picture_rect(RenderContext* rdcon, RdtPicture* picture,
@@ -152,6 +168,7 @@ void render_painter_fill_surface_rect(RenderContext* rdcon, ImageSurface* surfac
         dl_fill_surface_rect(rdcon->dl, rect->x, rect->y, rect->width, rect->height,
                              color, clip, clip_shapes, clip_depth);
     } else {
+        render_painter_flush_vector_batch(rdcon);
         RasterPaintContext raster = {surface, clip, clip_shapes, clip_depth};
         raster_fill_rect(&raster, rect, color);
     }
@@ -169,6 +186,7 @@ void render_painter_blit_surface_scaled(RenderContext* rdcon,
                                clip, clip_shapes, clip_depth, opacity,
                                src ? src->generation : 0);
     } else {
+        render_painter_flush_vector_batch(rdcon);
         RasterPaintContext raster = {dst, clip, clip_shapes, clip_depth};
         raster_blit_surface_scaled(&raster, src, src_rect, dst_rect, scale_mode, opacity);
     }

@@ -39,6 +39,9 @@ void rc_push_clip(RenderContext* rdcon, RdtPath* clip_path, const RdtMatrix* tra
 void rc_pop_clip(RenderContext* rdcon);
 int rc_clip_save_depth(RenderContext* rdcon);
 void rc_clip_restore_depth(RenderContext* rdcon, int saved);
+void render_painter_begin_vector_batch(RenderContext* rdcon);
+void render_painter_flush_vector_batch(RenderContext* rdcon);
+void render_painter_end_vector_batch(RenderContext* rdcon);
 
 void rc_fill_surface_rect(RenderContext* rdcon, ImageSurface* surface,
                           Rect* rect, uint32_t color, Bound* clip,

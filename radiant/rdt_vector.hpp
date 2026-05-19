@@ -197,7 +197,8 @@ void rdt_clip_restore_depth(int saved_depth);
 // with optional transform, clipping, and opacity
 void rdt_draw_image(RdtVector* vec, const uint32_t* pixels, int src_w, int src_h,
                     int src_stride, float dst_x, float dst_y, float dst_w, float dst_h,
-                    uint8_t opacity, const RdtMatrix* transform);
+                    uint8_t opacity, const RdtMatrix* transform,
+                    uint64_t resource_generation = 0);
 
 // ---------------------------------------------------------------------------
 // SVG picture (load from file/data, render at given rect)

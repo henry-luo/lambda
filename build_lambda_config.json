@@ -1424,6 +1424,12 @@
                     "link": "dynamic"
                 },
                 {
+                    "name": "Accelerate",
+                    "include": null,
+                    "lib": "-framework Accelerate",
+                    "link": "dynamic"
+                },
+                {
                     "name": "CoreText",
                     "include": null,
                     "lib": "-framework CoreText",

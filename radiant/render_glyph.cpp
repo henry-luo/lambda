@@ -117,6 +117,7 @@ void draw_glyph(RenderContext* rdcon, GlyphBitmap* bitmap, int x, int y) {
             rdcon->has_transform ? &rdcon->transform : nullptr, glyph_generation);
         return;
     }
+    render_painter_flush_vector_batch(rdcon);
     if (bitmap->pixel_mode == GLYPH_PIXEL_BGRA) {
         draw_color_glyph(rdcon, bitmap, x, y);
         return;
