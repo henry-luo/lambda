@@ -125,7 +125,7 @@ A ProseMirror-class editor owns its DOM. WPT tests split cleanly into two kinds:
 | `selection/textcontrols/` (`selectionchange`, `selectionchange-bubble`, `focus`) | `selectionchange` firing + bubbling on text controls | **Tier A — enforce.** The `<input>`/`<textarea>` path is the fast path we must not regress. |
 | `input-events/` (`input-events-get-target-ranges*`, `input-events-typing`, `input-events-cut-paste`, `*-inputType*`, `idlharness`) | `beforeinput`/`input`, `InputEvent.inputType`, `getTargetRanges()`, `dataTransfer` on paste | **Tier A — enforce the non-`tentative` subset; track `*.tentative` informationally.** This is the precise contract `mod_input_intent.ls` claims to honour — it must be pinned to the spec, not to our own intuition. |
 | `uievents/keyboard/` + `uievents/constructors` + `uievents/legacy` | `KeyboardEvent.key`/`code`/`keyCode`, modifier state, event order | **Tier A — enforce keyboard subset.** Underpins the §7.2 keymap and the `event_sim` `key_press`/`key_combo` vocabulary. |
-| `editing/event.html` + composition (IME) | `compositionstart/update/end` ordering, `beforeinput` interaction with IME | **Tier A — enforce.** §7.3 makes a composition session "one transaction"; this is the only objective oracle for that ordering. Gate before Stage-3 IME work lands. |
+| `editing/event.html` + composition (IME) | `compositionstart/update/end` ordering | **Tier A — but as a *behavioral cross-check*, not the contract.** The real IME *integration contract* is the platform text-input layer `RdTextInputClient` (§3.9) ↔ TSF / `NSTextInputClient` / IBus. WPT pins the observable ordering + "one transaction per session"; the per-platform call sequence is tested via the `ime_compose` driver (§3.9). |
 | `dom/ranges/` + `domparsing/` | `Range` mutation, `Selection.toString`, `innerHTML` round-trip | **Tier A — enforce subset.** Mostly already satisfied via `dom_range`; the WPT subset is a cheap regression net. |
 | `clipboard-apis/` | Async clipboard, `DataTransfer`, paste sanitisation | **Already Tier A.** 19/19 + 8 documented skips per [Radiant_Clipboard_WPT_Status.md](radiant/Radiant_Clipboard_WPT_Status.md). Editor cut/copy/paste rides this. |
 | `editing/run/*` (`bold`, `delete`, `indent`, `createlink`, `forwarddelete`, `backcolor`, …) | Legacy `execCommand` markup quirks | **Tier B — informational gauge only. NEVER a baseline gate.** Report `passed/total` per quarter; each failure is consciously triaged "spec bug to fix" vs. "quirk we intentionally don't emulate." |
@@ -207,10 +207,13 @@ operates *natively* on child-index paths — the same shape we already have — 
   (Slate-style), exposing `mapping_new/append/map/map_result/invert` — the API
   shape PM's `Mapping` exposes, the implementation Slate's path transform provides.
 - Route `tx_map_pos` / `sel_map` / `mod_collab.rebase_steps` through it.
-- **Conformance is dual-sourced:** PM's `test-mapping.js` (`!`-suffixed = deleted)
-  *and* Slate's `Path.transform`/`Point.transform` fixtures (`null` = deleted) must
-  both pass. They test the same property from the integer side and the path side;
-  passing both is the strongest possible signal for the model we actually run.
+- **Conformance is triple-sourced:** PM's `test-mapping.js` (`!`-suffixed =
+  deleted), Slate's `Path.transform`/`Point.transform` fixtures (`null` =
+  deleted), **and CodeMirror 6's `ChangeSet`/`mapPos` + changeset-composition
+  test suite** (the position-mapping property tested from the text/code side; CM6
+  is the editor under Obsidian, Part E.3) must all pass. Three independent oracles
+  — integer-step (PM), path (Slate), changeset (CM6) — for the one property the
+  model actually runs on; passing all three is the strongest possible signal.
 - *PM fallback:* if a path case proves intractable, fall back to a local integer
   `StepMap` scoped to a single text leaf only (never document-wide).
 
@@ -381,11 +384,15 @@ Concretely, in the Stage-3 local model:
   resolved to a live path on demand via §3.1. (Transient in-RAM positions stay
   paths — no churn there.)
 - **Serialisable delta, no sync.** A committed transaction serialises to the
-  ID-anchored JSON delta of Part F.3 (`"rtd/1"`), and `mod_history.ls` is backed
-  by it. **No merge, no transform, no protocol, no version vectors are built in
-  Stage 3** — only the *encoding* and the *identity* it presupposes. This is the
-  whole forward-compat surface, and it is independently useful now (stable
-  on-disk undo log, autosave, debuggable diffs).
+  ID-anchored **RTD** delta of Part F.3 (`"rtd/1"`; **RTD = *Radiant Tree
+  Delta***, the name coined in this proposal for the path/tree-native op-list
+  encoding), and `mod_history.ls` is backed by it. **No merge, no transform, no
+  protocol, no version vectors are built in Stage 3** — only the *encoding* and
+  the *identity* it presupposes. This is the whole forward-compat surface, and it
+  is independently useful now (stable on-disk undo log, autosave, debuggable
+  diffs). *(Distinct from the clipboard exchange format — §3.10 — which is Lambda
+  **Mark notation**, not RTD: RTD encodes a sequence of operations for
+  history/collab; the clipboard carries a static document slice.)*
 
 What is **explicitly NOT** in the Stage-3 local model: peer discovery, version
 vectors / causal metadata, the merge function, conflict policy, the move-conflict
@@ -397,7 +404,207 @@ produce meaningful pass/fail signal. 3.7 depends on 3.1 (`set_selection` rides t
 mapping) and 3.4 (`NodeRange`). **3.8 is a constraint *on* 3.1/3.7, not a separate
 build step** — it is satisfied by making the §3.7 op set ID-anchored and adding
 the `NodeId` stamp in `mod_doc.ls`; it adds the serialisable delta encoding but no
-sync logic.
+sync logic. **3.9 depends on 3.8** (the text-input store is `Anchor`-addressable).
+
+### 3.9 Platform-neutral text-input / IME — `RdTextInputClient`
+
+**Today (verified in-tree):** Radiant already has the *core* of a neutral IME
+layer — `te_ime_begin/update/commit/cancel/is_composing`
+([radiant/text_edit.hpp](../radiant/text_edit.hpp)), `RDT_EVENT_COMPOSITION_*` +
+`CompositionEvent{text, preedit_caret}` ([radiant/event.hpp](../radiant/event.hpp)),
+a structured-editor path `radiant_dispatch_rich_composition_event`, and an
+`ime_compose` simulation event for tests. But the only real platform backend is
+**macOS** ([radiant/ime_mac.mm](../radiant/ime_mac.mm), an `NSTextInputClient`
+subclass); Windows and Linux have no IME, and the contract is `<textarea>`-shaped
+(`DomElement* elem` + byte offsets), not editor-model-shaped.
+
+**The problem with the §2 plan as written:** it makes WPT `editing/event.html` +
+composition the *contract*. But Radiant is **not a browser** — it never receives
+`beforeinput`/`compositionstart`. The real native contract is the OS text-input
+protocol, and all three are *query-driven*: the IME asks the application for the
+selected range, the substring around a range, and the **caret rectangle** (to
+place the candidate window). A `compositionstart`-style fire-and-forget event
+model cannot answer those.
+
+**Design — one neutral interface, three backends, the editor as the store.**
+Define `RdTextInputClient`: the platform-neutral subset common to Windows **TSF
+`ITextStoreACP`**, macOS **`NSTextInputClient`**, and Linux **IBus/Fcitx**, expressed
+over §3.8 `Anchor` positions (never raw byte offsets):
+
+| `RdTextInputClient` method | TSF | NSTextInputClient | IBus | Backed by |
+|---|---|---|---|---|
+| `selected_range() → (Anchor, Anchor)` | `GetSelection` | `selectedRange` | preedit anchor | editor selection (§3.7) |
+| `text_in_range(a,b) → str` | `GetText` | `attributedSubstringForProposedRange` | surrounding-text | `selection_to_string` (§3.6 src-pos) |
+| `replace_range(a,b,str)` | `SetText`/`InsertTextAtSelection` | `insertText:replacementRange:` | commit | `cmd_insert_text` transaction |
+| `set_marked(str, sel, repl)` | composition view | `setMarkedText:` | preedit update | transient overlay, **not** a step |
+| `unmark()/commit()` | `OnEndComposition` | `unmarkText` | commit | one transaction (Stage-1 §7.3) |
+| `caret_rect(a) → Rect` | `GetTextExt` | `firstRectForCharacterRange` | cursor-location | Radiant layout: `Anchor`→box |
+| `composing?()` | — | `hasMarkedText` | — | `te_ime_is_composing` |
+
+Key design points:
+
+1. **The composing range is an overlay, never a document step.** Per Stage-1 §7.3
+   the whole session is *one* transaction committed on `commit()`; `set_marked`
+   only paints a transient decoration (Stage-1 §8) over the `Anchor` range —
+   nothing enters history until commit. The existing `te_ime_*` "preedit buffer is
+   NOT part of value" rule generalises verbatim from textarea to the structured
+   editor.
+2. **`caret_rect` is why §3.8 matters here too.** TSF/NSTextInputClient need a
+   screen rectangle for an `Anchor`; that is `Anchor → SourcePos → render_map →
+   layout box`, reusing the §3.1 bridge and `source_pos_bridge`. No new geometry
+   code — it is the selection-rendering path already built for carets.
+3. **Backends, not rewrites.** `ime_mac.mm` becomes the `NSTextInputClient`
+   implementation of `RdTextInputClient`; add `ime_win.cpp` (TSF `ITextStoreACP`)
+   and `ime_linux.cpp` (IBus). The neutral `te_ime_*` core and `ime_compose` test
+   driver are unchanged — they become the in-process test backend.
+4. **WPT is demoted to a behavioral cross-check, not the contract.** `editing/
+   event.html` composition ordering is still run (Tier A) as an *oracle for
+   observable behavior* (event order, one-transaction-per-session), but the
+   *integration contract* is `RdTextInputClient` ↔ the three OS protocols, tested
+   per-platform via the `ime_compose` driver scripted to mirror real TSF/Cocoa/IBus
+   call sequences.
+
+**Recommendation:** lift `te_ime_*` into the `RdTextInputClient` interface over
+`Anchor`s; keep macOS as backend #1; specify (not necessarily build in Stage 3)
+the TSF and IBus backends; rewrite the §2 / phased-plan IME line so the contract
+is the platform protocols with WPT as cross-check.
+
+### 3.10 Clipboard exchange — `text/html` + Mark-notation slice sentinel
+
+**Today (verified in-tree):** the *transport* is done — `radiant/clipboard.cpp`'s
+`ClipboardStore` is multi-MIME, sanitising (`<script>`/`<style>` stripped), and
+WPT-conformant (19/19, [Radiant_Clipboard_WPT_Status.md](radiant/Radiant_Clipboard_WPT_Status.md)).
+What is missing is the editor's *representation* strategy. Stage-2 §4.5 currently
+copies via `output(slice, 'markdown)` — **lossy** (markdown cannot carry
+mark-stacking, attrs, schema role, or block nesting fidelity).
+
+**Design — two representations, one of them dual-purpose.** On copy, write
+**exactly two** clipboard representations through the existing `ClipboardStore`
+(no new transport code):
+
+1. **`text/plain`** — the slice's text content. Universal degrade path.
+2. **`text/html`** — a schema downcast of the slice for cross-app interop
+   (browsers, Word, Google Docs), whose **root element carries a sentinel
+   attribute `data-mark-slice="…"`** holding the *high-fidelity* internal payload.
+
+The internal payload is **Lambda Mark notation** of the sliced document
+subtree — *not* RTD JSON. Rationale: Mark notation is the doc model's own
+canonical textual form, so it reuses the existing Mark parser/formatter
+(`lambda/format/*`, `lambda/input/*`), is human-debuggable, and needs no separate
+JSON schema. RTD encodes *operations* (history/collab); the clipboard carries a
+*static document slice* — different problem, different format. (See §3.8 note.)
+
+Slice open-depth (§3.2 `openStart`/`openEnd`, needed so a partial paragraph
+pastes as inline content, not a new block) is carried *in* the Mark notation by
+wrapping the content in a synthetic root:
+
+```
+<mark-slice open-start:1 open-end:1
+  "world"                       // e.g. copying inside "Hello world", from offset 6
+>
+```
+
+`NodeId`s are **omitted** from the serialised slice (the §3.8 fresh-identity rule,
+below) — Mark notation simply does not emit them for clipboard.
+
+**Attribute encoding.** Mark notation contains `<>"` etc.; embed it as
+**base64url(UTF-8)** in `data-mark-slice` — robust against every HTML
+re-serialiser the clipboard may pass through, at the cost of debuggability
+(percent-encoding is the documented debuggable alternative). The `ClipboardStore`
+HTML sanitiser must **preserve** `data-*` attributes (it already strips only
+`<script>`/`<style>`); confirm in the §2 clipboard tests.
+
+**Paste — read priority resolver:**
+
+1. **`data-mark-slice` present and schema-compatible** → base64url-decode → parse
+   Mark notation → it *is* the doc-model shape → run the §3.3 normalize/coerce
+   pass → insert. Lossless within Radiant.
+2. **else `text/html`** → Lambda HTML parser → the §3.3 / Part-E.1 CKEditor-style
+   **upcast-over-a-fragment** + schema `normalize` (this *is* `mod_html_paste.ls`,
+   not a separate parser).
+3. **else `text/plain`** → split into schema default blocks.
+4. (image/file → image node — Stage-2-deferred hook.)
+
+**Security.** Clipboard content is untrusted *including a `data-mark-slice` that a
+hostile app could forge*. Both the Mark-notation path and the HTML path therefore
+run the **§3.3 schema normalize** (drop disallowed elements/attrs) — that, not a
+blocklist, is the real filter. `ClipboardStore`'s `<script>`/`<style>` strip stays
+as defense-in-depth. Never execute pasted HTML.
+
+**Identity rule (collab-critical, explicit).** **Paste always mints fresh
+`NodeId`s**, even when the source is the same document — pasted content is *new*
+content. Cut = delete + (paste as new ids). The only identity-preserving relocation
+is an internal drag-*move*, which is a `move` op (Part F.3), never a clipboard
+round-trip. This prevents duplicate-id divergence in the §3.8 / Part F
+decentralized model and is why the slice serialisation omits ids in the first
+place.
+
+**Recommendation:** add (a) a slice → `text/html` + `data-mark-slice`(Mark
+notation, base64url) encoder, (b) the priority paste resolver above, (c) the
+fresh-`NodeId` rule; **replace** the Stage-2 markdown-copy path (markdown becomes
+save/export-only); reuse `ClipboardStore` and the existing WPT clipboard
+conformance unchanged. The HTML upcast is the §3.3 converter scoped to a
+fragment — no new parser.
+
+### 3.11 Input rules — typed markdown shortcuts (Typora-grade UX)
+
+**Today:** there is **no input-rule layer**. `mod_input_intent.ls` maps platform
+keys to `InputIntent`s and §3.7 makes `edit_dispatch` a priority bus, but nothing
+turns *typed text patterns* into structural commands. Typing `- ` stays literal
+text instead of starting a bullet list.
+
+**Why it is its own layer (not just commands):** an input rule fires on a *text
+pattern reaching a trigger* (usually a space or newline), must be **atomic and
+undoable as one transaction**, and a single Ctrl/Cmd+Z must restore the literal
+text (so a user who *wanted* `- ` keeps it). That lifecycle is distinct from a
+keymap command; ProseMirror isolates it as `inputRules` for exactly this reason,
+and Typora is the UX bar (no mode switch — markup becomes formatting as you type).
+
+**Design — an input-rule stage in the §3.7 pipeline:**
+
+```
+platform key → mod_input_intent → [INPUT-RULE STAGE] → command (priority bus) → transaction
+```
+
+An input rule is `{ pattern: regex, on_match: (state, captures, range) → Transaction? }`.
+On every `insertText` the stage tests the *current block's text up to the caret*
+against registered rules in priority order; the first match returns one
+transaction (which **replaces the matched literal text** with the structural
+edit) and stores an "undo-to-literal" marker so the next backspace/Ctrl-Z reverts
+the rule rather than the structure. Rules are **schema-gated**: a rule only fires
+if its result is valid at the caret per §3.3 (e.g. `# ` does nothing inside a
+`code_block`).
+
+**Default rule set (ships in `mod_input_rules.ls`):**
+
+| Typed (at block start unless noted) | Becomes | Command |
+|---|---|---|
+| `- ` / `* ` / `+ ` | unordered list item | `cmd_wrap_list('bullet)` |
+| `1. ` / `1) ` | ordered list item (start = typed number) | `cmd_wrap_list('ordered)` |
+| `[ ] ` / `[x] ` | task-list item (unchecked/checked) | `cmd_wrap_list('task)` |
+| `# `…`###### ` | heading level 1–6 | `cmd_set_block_type('heading, {level})` |
+| `> ` | blockquote | `cmd_wrap_blockquote` |
+| ` ``` ` / ` ```lang ` | fenced code block (lang attr) | `cmd_set_block_type('code_block)` |
+| `---` / `***` / `___` (whole line) | thematic break (`hr`) | `cmd_insert_hr` |
+| `**x**` / `__x__` (inline, on close) | bold | `cmd_toggle_mark('strong)` over `x` |
+| `*x*` / `_x_` (inline, on close) | italic | `cmd_toggle_mark('em)` |
+| `` `x` `` (inline, on close) | inline code | `cmd_toggle_mark('code)` |
+| `~~x~~` (inline, on close) | strikethrough | `cmd_toggle_mark('strike)` |
+| `[text](url)` (inline, on close) | link | `cmd_insert_link(url, null, text)` |
+
+Block rules trigger on the trailing space/newline; inline rules trigger on the
+closing delimiter. All are user-overridable Lambda (same plugin-as-function model
+as §3.7) and all are **off inside `code_block`** by schema gate.
+
+**Conformance:** PM's `prosemirror-inputrules` cases transcribe directly (§4.4
+method) into `test/lambda/editor/input_rules.ls` (+ `.txt`); each asserts (1)
+typed sequence → expected doc, (2) immediate Ctrl-Z → literal text restored, (3)
+rule suppressed inside `code_block`. Plus a `test/ui/rte_inputrules.json`
+UI-automation driving real keystrokes.
+
+**Recommendation:** add `mod_input_rules.ls` + the pipeline stage between
+`mod_input_intent` and the §3.7 command bus; ship the table above; gate by §3.3
+schema; make undo-to-literal a single transaction.
 
 ---
 
@@ -415,6 +622,8 @@ ProseMirror's tests are layered; portability varies sharply.
 | `prosemirror-commands` — `test-commands` | Partly | **Medium (scenarios)** | `mod_commands.ls` |
 | `prosemirror-view` — `test-draw`, `test-domchange`, `test-selection`, `test-paste` | **Yes (jsdom)** | **Low (scenarios only)** | `test/ui/*.json` UI-automation; Tier-A WPT (§2) |
 | **Slate** `slate/test/transforms/*`, `interfaces/path`, `interfaces/point`, `normalization/*` | No | **High — and unique** | `path_transform`/`pos_transform` (§3.1), `normalize_doc` (§3.3), `Transforms` core (§3.7) |
+| **CodeMirror 6** `@codemirror/state` — `ChangeSet`/`mapPos`/changeset-composition tests | No | **High (mapping only)** | `mod_mapping.ls` (§3.1) — third independent mapping oracle |
+| **Yjs / Automerge** randomized convergence harness | No | **Methodology only** | Part F.7 convergence property (deferred) |
 
 The **model + transform** tier (PM) plus the **path-transform + normalization**
 tier (Slate) together are the high-ROI target: both are DOM-free executable
@@ -591,6 +800,78 @@ and defaults all want the same key, registration order is too fragile. Lexical's
 `COMMAND_PRIORITY_{LOW,NORMAL,HIGH,EDITOR}` bus solves exactly this and is a small,
 local change to `edit_dispatch`.
 
+### E.3 Native desktop precedents (prior art — validation, not new design)
+
+Radiant is a *native* engine, so the mature **desktop** editor frameworks are
+direct prior art. None changes the design; each independently confirms a primitive
+the proposal already commits to, and two imply a future conformance tier.
+
+**Document-model frameworks — consensus validation of the model split.**
+
+| Framework | What it independently confirms |
+|---|---|
+| **Cocoa TextKit 2** — `NSTextContentStorage` / `NSTextLayoutManager` / `NSTextElement` over `NSAttributedString` | Apple's own re-derivation of the *content / layout / view* separation = Radiant's source-tree / layout / `render_map` split. Cite as precedent the way §E.2 cites Lexical's reconciler. |
+| **GTK `GtkTextBuffer`** — `GtkTextMark` with **left/right gravity** | `GtkTextMark` is a position that *survives edits with a bias* — exactly §3.1 `Anchor.assoc` / PM association. Battle-tested confirmation that the §3.1/§3.8 anchor primitive is correct, not novel. |
+| **Qt `QTextDocument` / `QTextCursor`** — cursor = position+anchor, methods, built-in undo stack | API-shape reference for the Stage-1 §9 public surface; validates "edits expressed through a cursor/selection object over an undoable document." |
+| **Scintilla / piece table** (orig. MS Word data structure) | A data-structure option *iff* large-document edit perf becomes a measured problem. Secondary — Radiant's model is a Mark tree, not a text buffer — but the reference is logged so the option isn't re-discovered later. |
+
+Takeaway: the model/layout/view split, the stable-anchor primitive, and the
+cursor-over-undoable-document API are the **consensus of every mature native
+editor**. The proposal is on the well-trodden path; these are citations, not
+action items.
+
+**Formats & accessibility — prior art + one future tier.**
+
+- **Interchange formats:** RTF, Microsoft **TOM** (`ITextDocument`/`ITextRange`),
+  and the ISO document standards **ODF** / **OOXML** are the desktop rich-text
+  *interchange* standards. Radiant already round-trips formats via
+  `lambda/format/*`; these are export-target prior art, **low marginal value** —
+  noted so "should we invent a format?" is answered (no: the model is the Mark
+  tree, interchange is the existing formatters, and the collab/undo wire form is
+  the §3.8 `"rtd/1"` delta).
+- **OpenOffice / LibreOffice — *not* an editing-model source; a conditional
+  format-corpus.** LibreOffice's editing tests (`sw/qa/`, `qadevOOo`) are bound to
+  the `SwDoc`/`SwPaM` cursor model and UNO API — **not portable** as
+  model/transform fixtures (PM/Slate/CM6 already cover that, DOM-free and
+  transform-shaped). Its genuine strength is the **ODF / DOCX / RTF round-trip
+  corpus** (`sw/qa/extras/{ooxmlexport,ooxmlimport,rtfexport,…}`, thousands of
+  real-world documents with import/export assertions). **Conditional value:** *if
+  Radiant ever adds ODF or DOCX import/export*, that corpus is the best external
+  conformance set for **those specific formatters** (transcribe scenarios, not
+  vendor code — same method as the PM/Slate ports; MPL/LGPL makes fixture reuse
+  fine). It is **out of Stage-3 scope** and is **not** an editing-model corpus —
+  logged here only so the option is not re-discovered or mistaken for model-test
+  work later. *Change-tracking contrast (future note):* LibreOffice weaves
+  redlines invasively into the `SwDoc` core; Radiant should instead derive
+  tracked-changes from the RTD op-log + decorations (Stage-1 §8) — no core-model
+  change — if/when change-tracking is requested.
+- **Native accessible-text APIs — a legitimate future conformance tier.**
+  `IAccessible2`/`IAccessibleText` (Windows), `ATK`/`AT-SPI` (Linux),
+  `NSAccessibility` (macOS), unified by **AccessKit**. The §2 WPT tiers pin the
+  *web* a11y contract; a native editor *also* owes the *desktop* a11y text
+  contract (expose caret, ranges, text attributes, selection changes to assistive
+  tech). This is **out of Stage-3 scope** but is recorded here as a **"Tier D —
+  native accessible-text conformance"** that parallels the WPT tiers, to be
+  designed alongside the §3.9 platform backends (the same `Anchor`-addressable
+  store that feeds TSF/NSTextInputClient also feeds `IAccessibleText`/AccessKit —
+  one store, two consumers).
+
+**Modern WYSIWYG / markdown editors — design lessons (not test suites).** None is
+open enough to import a corpus from; each contributes one design validation or
+borrowed UX.
+
+| App | Editing model | Lesson for Radiant |
+|---|---|---|
+| **Notion** | Every block has a stable, *user-visible* ID; document = blocks with `content:[childId]` (adjacency, not deep nesting); sync ships **per-block records, not a tree diff** | Strongly validates §3.8 (`NodeId` is not just a merge key — it is a product feature: block links, "copy link to block", comment/backlink anchors) **and** Part F.4 (per-node keyed δ-merge over git-style tree-diff is what a shipping decentralized block editor actually does). Also: block-with-childIds is the natural answer to Stage-1's open *embeds / transclusion* question. |
+| **Typora** | Seamless markdown WYSIWYG: typing markdown syntax transforms to formatted output inline, **no mode switch**, document stays markdown | The gold-standard **input-rule** UX. Directly motivates **§3.11** (input rules). PM's `inputRules` is the implementation precedent; Typora is the UX bar. |
+| **Obsidian** | Markdown text *is* the model; "live preview" is a **CodeMirror 6 decoration layer** that hides syntax except on the caret's line; no separate rich model | Radiant chose model-first (opposite), but the *technique* is valuable because Radiant has *both* source format and model: an optional "show raw markup at caret" mode implemented purely via decorations (Stage-1 §8), **no model change**. Also why CM6's changeset suite is a §3.1 oracle (Part C). |
+| **Typst** | Not WYSIWYG — compile-based; source-text editing + **memoized incremental recompilation** (`comemo`): re-evaluate only content whose inputs changed | *Not* an editing-model source. The single transferable idea is the memoized incremental-recompile model as a **validating precedent for `render_map`'s dirty-tracking** (and a reference if finer-grained incrementalism is ever needed). Logged so it is not mistaken for an editing reference. |
+
+Takeaway: Notion validates the identity decisions (§3.8, F.4); Typora supplies
+the only genuinely missing *design* element → §3.11; Obsidian gives a future
+decoration-only "raw-at-caret" mode and motivates the CM6 test oracle; Typst is a
+`render_map` precedent only.
+
 ---
 
 ## Part F — Decentralized offline tree-merge collaboration (design only; **deferred, not built in Stage 3**)
@@ -715,7 +996,28 @@ local op log + growing local `vv`; reconnect = one delta exchange. No "rebase
 loop", no central `V`, no in-flight/pending state machine (those were the *OT*
 model — explicitly dropped).
 
-### F.7 Awareness (presence)
+### F.7 Convergence testing — adopt the Yjs / Automerge methodology
+
+When this engine is eventually built, its correctness test is **not** an
+example-fixture corpus — it is the **randomized convergence property** that the
+mature CRDT libraries pioneered:
+
+> Generate a random schema-valid document; fork it to *N* replicas; apply
+> independent random op sequences to each; sync them pairwise in a **random
+> order / random topology** (including syncing through a third replica first);
+> assert **every replica ends byte-identical and schema-valid**, and that the
+> result is invariant under sync order.
+
+This is exactly **Yjs's and Automerge's own test harness design** (randomized
+concurrent ops + all-pairs/all-orders convergence), and it is the named precedent
+for this section — not a vague "fuzz it." Adopt their methodology directly:
+property-based generator + a frozen seed corpus for regressions, run by the §4
+GTest driver. The Kleppmann move rule (F.5) and the per-op-class joins (F.4) are
+*defined* to make this property hold; the test is what proves they do. (Deferred
+with the rest of Part F — listed here so the eventual test plan is not
+re-invented.)
+
+### F.8 Awareness (presence)
 
 Unchanged from good practice: cursors/selections travel on a **separate ephemeral
 channel**, never in the op log, never merged, never undoable — `{ClientId,
@@ -723,7 +1025,7 @@ anchor:Anchor, head:Anchor, ttl}` where `Anchor = {node:NodeId, offset, assoc}`,
 re-resolved locally via §3.1 mapping. Presence loss on disconnect is expected and
 fine.
 
-### F.8 What this means for Stage 3 (the only actionable part)
+### F.9 What this means for Stage 3 (the only actionable part)
 
 **Build now (it is §3.8, nothing more):** `NodeId` stamped at node creation;
 ops/anchors addressed by `NodeId`; the `"rtd/1"` JSON delta encoding as the undo
@@ -749,9 +1051,9 @@ of admitting §3.8 now and nothing else.
 | **S3.3 — Path-native mapping** | Implement §3.1 the **Slate** way (`path_transform`/`pos_transform` → `deleted`, `mod_mapping.ls` with inverse mirrors); route `tx_map_pos`/`sel_map`/collab through it. Port **both** PM `test-mapping.js` and Slate `path`/`point` transform fixtures. | Both corpora 100 % incl. PM `!`-deleted and Slate `null`-deleted. |
 | **S3.4 — Slice + schema (normalize + reject)** | §3.2 (`Slice` + fitting); §3.3 `ContentMatch` + Slate `normalize_doc` on load + PM rejection on step. Port `test-replace`/`test-structure`/`test-content`/`test-trans` **and** Slate `normalization/*`. Retires the §3a `build_dom_tree` inline-scalar blocker. | Transform corpus + Slate normalization 100 %; dirty parser input loads valid; invalid live steps rejected. |
 | **S3.5 — WPT Tier A: selection** | `wpt_testharness_shim.js` editing extensions; runner over `selection/*`, `selection/contenteditable/*`, `selection/textcontrols/*`, `dom/ranges` subset; `Radiant_Editor_WPT_Status.md`. | Curated selection subset 100 %; status doc published. |
-| **S3.6 — WPT Tier A: input** | Runner over `input-events/*` (non-tentative), `uievents/keyboard` subset, `editing/event.html` + composition. Land §3.5 (`storedMarks`) so typing-after-toggle matches `input-events-typing`. | Input/keyboard/composition subset 100 %. |
-| **S3.7 — Operations substrate + commands** | §3.7: add `set_selection` step kind so selection rides `mod_mapping.ls`; derive `is_inline`/`is_void`/`is_element` from schema; refactor list/blockquote/setBlockType onto a Slate-style `Transforms` core over `NodeRange`; make `edit_dispatch` a **Lexical-style priority bus** (Part E.2). Port `prosemirror-commands` + Slate `Transforms` + `editing/other` (Tier C) scenarios as `test/ui/rte_*.json`. | Command UI-automation green; `mod_commands.ls` surface shrunk; keymap/IME/plugin contention resolved by priority; `make test-radiant-baseline` green with Tier A added. |
-| **S3.8 — Conversion layer + collab-ready local model** | Refactor parser↔tree↔render_map into a **CKEditor-style upcast/downcast converter registry** (Part E.1); land **§3.8 only**: `NodeId` stamped in `mod_doc.ls`, §3.7 ops + anchors made ID-addressed, the `"rtd/1"` ID-anchored JSON delta *encoding*, `mod_history.ls` re-based onto it. Non-gating `make wpt-editing-gauge` over `editing/run/*`. | History/undo is ID-anchored-delta-backed and round-trips 100 %; one conversion layer with its own test surface; **no merge/sync code** — Part F engine is explicitly *not* started. |
+| **S3.6 — Input contract: WPT Tier A + `RdTextInputClient`** | Runner over `input-events/*` (non-tentative), `uievents/keyboard` subset, `editing/event.html` composition (behavioral cross-check). Land §3.5 (`storedMarks`) so typing-after-toggle matches `input-events-typing`. Land §3.9: lift `te_ime_*` into the `RdTextInputClient` interface over `Anchor`s; macOS (`ime_mac.mm`) as backend #1; TSF + IBus backends *specified*; `ime_compose` driver scripted to mirror real TSF/Cocoa/IBus call sequences. | WPT input/keyboard/composition subset 100 %; `RdTextInputClient` neutral interface landed with macOS backend + `ime_compose` per-protocol sequence tests green; TSF/IBus backends specified. |
+| **S3.7 — Operations substrate + commands** | §3.7: add `set_selection` step kind so selection rides `mod_mapping.ls`; derive `is_inline`/`is_void`/`is_element` from schema; refactor list/blockquote/setBlockType onto a Slate-style `Transforms` core over `NodeRange`; make `edit_dispatch` a **Lexical-style priority bus** (Part E.2). **§3.11:** add `mod_input_rules.ls` + the input-rule pipeline stage with the default markdown-shortcut table (`- `→bullet, `# `→heading, `**x**`→bold, …), schema-gated, undo-to-literal in one transaction. Port `prosemirror-commands` + `prosemirror-inputrules` + Slate `Transforms` + `editing/other` (Tier C) scenarios as `test/lambda/editor/*.ls` + `test/ui/rte_*.json`. | Command + input-rule UI-automation green; `mod_commands.ls` surface shrunk; keymap/IME/plugin contention resolved by priority; `make test-radiant-baseline` green with Tier A added. |
+| **S3.8 — Conversion layer + clipboard + collab-ready local model** | Refactor parser↔tree↔render_map into a **CKEditor-style upcast/downcast converter registry** (Part E.1); land **§3.8 only**: `NodeId` stamped in `mod_doc.ls`, §3.7 ops + anchors made ID-addressed, the `"rtd/1"` ID-anchored RTD delta *encoding*, `mod_history.ls` re-based onto it. **§3.10 clipboard:** slice → `text/html` + `data-mark-slice`(Mark notation, base64url) encoder + priority paste resolver + fresh-`NodeId` rule; **delete the Stage-2 markdown-copy path**; extend `rte_clipboard.json`. Non-gating `make wpt-editing-gauge` over `editing/run/*`. | History/undo is RTD-delta-backed and round-trips 100 %; one conversion layer with its own test surface; copy/paste round-trips losslessly within Radiant and degrades to clean HTML/plain-text cross-app; WPT clipboard still 19/19; **no merge/sync code** — Part F engine is explicitly *not* started. |
 
 Dependency: S3.1→S3.2→S3.3→S3.4 (model/transform spine); S3.5/S3.6 (WPT) depend
 only on S3.1's harness conventions and can run parallel to S3.2–S3.4; S3.7 needs
@@ -802,6 +1104,36 @@ collab-*ready* local model (§3.8), not collab itself.
   *can the entire Part F decentralized engine be added later with zero changes to
   the step set, schema, position model, or test corpus?* — demonstrated by the
   ID-anchored delta encoding alone.
+- **Platform-neutral IME (§3.9):** `te_ime_*` is lifted into a single
+  `RdTextInputClient` interface expressed over §3.8 `Anchor`s; the macOS
+  `NSTextInputClient` backend (`ime_mac.mm`) drives it; the `ime_compose` test
+  driver, scripted to mirror real TSF / Cocoa / IBus query+commit sequences,
+  passes per-protocol; WPT `editing/event.html` composition passes as the
+  behavioral cross-check; TSF and IBus backends are *specified* (not necessarily
+  built). `caret_rect` resolves `Anchor → render_map → layout box` with no new
+  geometry code.
+- **Prior-art & future tiers recorded (Part E.3):** the design doc names TextKit 2
+  / GtkTextMark / QTextCursor as validating precedents and logs a future **Tier D —
+  native accessible-text conformance** (IAccessible2/ATK/NSAccessibility via
+  AccessKit) parallel to the WPT tiers, fed by the same `Anchor`-addressable store
+  as §3.9. (Documentation criterion, no Stage-3 implementation.)
+- **Clipboard exchange (§3.10):** copy writes exactly `text/plain` + `text/html`,
+  the latter carrying `data-mark-slice` = base64url Lambda **Mark notation** of the
+  slice (with `open-start`/`open-end`, no `NodeId`s). Paste resolves
+  slice → sanitised HTML upcast → plain text; pasted nodes get **fresh
+  `NodeId`s**. Radiant→Radiant copy/paste is lossless; paste into a browser/Word
+  yields clean HTML; the Stage-2 `output(slice,'markdown)` copy path is **removed**
+  (markdown is save/export-only); `ClipboardStore` and WPT clipboard (19/19) are
+  unchanged and `data-*` survives the sanitiser.
+- **Input rules (§3.11):** `mod_input_rules.ls` + pipeline stage shipped with the
+  default table; ported `prosemirror-inputrules` cases pass, each asserting
+  typed-sequence→doc, immediate-undo→literal-text-restored, and
+  suppressed-inside-`code_block`; `test/ui/rte_inputrules.json` drives real
+  keystrokes (`- `→bullet, `# `→heading, `**x**`→bold, fenced code, `---`→hr,
+  `[text](url)`→link) green.
+- **Mapping is triple-sourced (§3.1):** PM `test-mapping` + Slate
+  `Path/Point.transform` + **CodeMirror 6 `ChangeSet`** corpora all pass; Part F.7
+  records the Yjs/Automerge randomized-convergence methodology (deferred).
 - `make wpt-editing-gauge` runs `editing/run/*` and reports a tracked, non-gating
   pass count.
 
@@ -812,7 +1144,13 @@ pipeline* is a single CKEditor-style upcast/downcast layer and its *dispatch* a
 Lexical-style priority bus; its *collaboration future* is held open — not built —
 by a single local-model constraint (§3.8: stable identity + ID-anchored ops),
 with the decentralized offline tree-merge engine designed in Part F and deferred
-in full; and its *web-platform contract* (selection, beforeinput, keyboard,
-composition, clipboard) is pinned by the curated WPT subset — while the legacy
+in full; its *text-input contract* is a platform-neutral `RdTextInputClient`
+(§3.9) over the OS protocols (TSF / `NSTextInputClient` / IBus), with WPT
+composition demoted to a behavioral cross-check; its *model* is validated by the
+native-editor consensus (TextKit 2 / GtkTextMark / QTextCursor, Part E.3) with a
+future native-accessibility tier logged; its *clipboard exchange* is `text/html` +
+a `data-mark-slice` Mark-notation sentinel (§3.10) — lossless within Radiant,
+clean HTML outward; and its *web-platform contract* (selection, beforeinput,
+keyboard, clipboard) is pinned by the curated WPT subset — while the legacy
 `execCommand` quirk corpus is consciously held at arm's length as an
 informational gauge, not a target.

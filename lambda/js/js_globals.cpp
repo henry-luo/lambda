@@ -8200,6 +8200,19 @@ extern "C" Item js_alert(Item msg) {
 // Object.keys — return array of property names
 // =============================================================================
 
+static bool js_is_internal_enumeration_key(const char* s, int len) {
+    if (!s || len < 5) return false;
+    if (len >= 6 && (strncmp(s, "__get_", 6) == 0 ||
+                     strncmp(s, "__set_", 6) == 0)) return true;
+    if (strncmp(s, "__nw_", 5) == 0 ||
+        strncmp(s, "__ne_", 5) == 0 ||
+        strncmp(s, "__nc_", 5) == 0) return true;
+    if (len == 14 && strncmp(s, "__class_name__", 14) == 0) return true;
+    if (len == 23 && strncmp(s, "__class_private_index__", 23) == 0) return true;
+    if (len == 10 && strncmp(s, "__is_proto__", 10) == 0) return true;
+    return false;
+}
+
 // Object.getOwnPropertyNames — includes non-enumerable own properties
 extern "C" Item js_object_get_own_property_names(Item object) {
     Item exotic_result = ItemNull;
@@ -8243,7 +8256,7 @@ extern "C" Item js_object_get_own_property_names(Item object) {
             while (e) {
                 const char* s = e->name->str;
                 int slen = (int)e->name->length;
-                if (slen >= 2 && s[0] == '_' && s[1] == '_') { e = e->next; continue; }
+                if (js_is_internal_enumeration_key(s, slen)) { e = e->next; continue; }
                 Item val = _map_read_field(e, pm->data);
                 if (val.item == JS_DELETED_SENTINEL_VAL) { e = e->next; continue; }
                 Item key_item = (Item){.item = s2it(heap_create_name(s, slen))};
@@ -8276,7 +8289,7 @@ extern "C" Item js_object_get_own_property_names(Item object) {
                         (slen == 4 && strncmp(s, "name", 4) == 0) ||
                         (slen == 9 && strncmp(s, "prototype", 9) == 0)) { e = e->next; continue; }
                     // skip internal markers (__ne_, __nw_, __nc_, etc.)
-                    if (slen >= 2 && s[0] == '_' && s[1] == '_') { e = e->next; continue; }
+                    if (js_is_internal_enumeration_key(s, slen)) { e = e->next; continue; }
                     // skip deleted sentinels
                     Item val = _map_read_field(e, pm->data);
                     if (val.item == JS_DELETED_SENTINEL_VAL) { e = e->next; continue; }
@@ -8364,7 +8377,7 @@ extern "C" Item js_object_get_own_property_names(Item object) {
                         while (se) {
                             const char* s = se->name->str;
                             int len = (int)se->name->length;
-                            bool skip = (len >= 2 && s[0] == '_' && s[1] == '_');
+                            bool skip = js_is_internal_enumeration_key(s, len);
                             // skip "length" (already added) and numeric-only names
                             if (!skip && len == 6 && memcmp(s, "length", 6) == 0) skip = true;
                             if (!skip && len > 0 && s[0] >= '0' && s[0] <= '9') {
@@ -8413,7 +8426,7 @@ extern "C" Item js_object_get_own_property_names(Item object) {
     while (e) {
         const char* s = e->name->str;
         int len = (int)e->name->length;
-        bool skip = (len >= 2 && s[0] == '_' && s[1] == '_');
+        bool skip = js_is_internal_enumeration_key(s, len);
         if (!skip && is_regexp_obj && js_regexp_virtual_prop_name(s, len)) skip = true;
         if (!skip) {
             Item val = _map_read_field(e, m->data);
@@ -8457,7 +8470,7 @@ extern "C" Item js_object_get_own_property_names(Item object) {
     while (e) {
         const char* s = e->name->str;
         int len = (int)e->name->length;
-        bool skip = (len >= 2 && s[0] == '_' && s[1] == '_');
+        bool skip = js_is_internal_enumeration_key(s, len);
         if (!skip && is_regexp_obj && js_regexp_virtual_prop_name(s, len)) skip = true;
         if (!skip && js_parse_array_index(s, len) >= 0) skip = true;
         if (!skip && is_class_ctor) {
@@ -8695,7 +8708,7 @@ extern "C" Item js_object_keys(Item object) {
                 const char* s = e->name->str;
                 int slen = (int)e->name->length;
                 // skip internal markers (__xx_xxx), deleted sentinels, non-enumerable
-                if (slen >= 2 && s[0] == '_' && s[1] == '_') { e = e->next; continue; }
+                if (js_is_internal_enumeration_key(s, slen)) { e = e->next; continue; }
                 Item val = _map_read_field(e, pm->data);
                 if (val.item == JS_DELETED_SENTINEL_VAL) { e = e->next; continue; }
                 // skip non-enumerable (Stage A3: shape-flag-first)
@@ -8735,7 +8748,7 @@ extern "C" Item js_object_keys(Item object) {
                         (slen == 4 && strncmp(s, "name", 4) == 0) ||
                         (slen == 9 && strncmp(s, "prototype", 9) == 0)) { e = e->next; continue; }
                     // skip internal markers (__ne_, __nw_, __nc_, etc.)
-                    if (slen >= 2 && s[0] == '_' && s[1] == '_') { e = e->next; continue; }
+                    if (js_is_internal_enumeration_key(s, slen)) { e = e->next; continue; }
                     // skip deleted sentinels
                     Item val = _map_read_field(e, pm->data);
                     if (val.item == JS_DELETED_SENTINEL_VAL) { e = e->next; continue; }
@@ -8775,7 +8788,7 @@ extern "C" Item js_object_keys(Item object) {
                     while (se) {
                         const char* s = se->name->str;
                         int len = (int)se->name->length;
-                        if (!((len >= 2 && s[0] == '_' && s[1] == '_') ||
+                        if (!(js_is_internal_enumeration_key(s, len) ||
                               (len == 18 && strncmp(s, "__primitiveValue__", 18) == 0))) {
                             Item val = _map_read_field(se, m->data);
                             if (val.item != JS_DELETED_SENTINEL_VAL && js_props_query_enumerable(m, se, s, len)) {
@@ -8817,7 +8830,7 @@ extern "C" Item js_object_keys(Item object) {
         const char* s = e->name->str;
         int len = (int)e->name->length;
         bool skip = false;
-        if (len >= 2 && s[0] == '_' && s[1] == '_') {
+        if (js_is_internal_enumeration_key(s, len)) {
             skip = true;
         }
         if (is_error_object && len == 5 && strncmp(s, "stack", 5) == 0) {
@@ -8954,7 +8967,7 @@ extern "C" Item js_for_in_keys(Item object) {
                 for (ShapeEntry* e = tm->shape; e; e = e->next) {
                     const char* s = e->name->str;
                     int len = (int)e->name->length;
-                    bool skip = (len >= 2 && s[0] == '_' && s[1] == '_');
+                    bool skip = js_is_internal_enumeration_key(s, len);
                     if (!skip) {
                         Item val = _map_read_field(e, m->data);
                         if (val.item == JS_DELETED_SENTINEL_VAL) skip = true;
@@ -9037,7 +9050,7 @@ extern "C" Item js_for_in_keys(Item object) {
                 // (default-set non-enumerable on class/object prototypes;
                 //  user-defined static class fields override to enumerable).
                 bool skip = false;
-                if (len >= 2 && s[0] == '_' && s[1] == '_') {
+                if (js_is_internal_enumeration_key(s, len)) {
                     skip = true;
                 }
 
@@ -14319,6 +14332,8 @@ extern "C" Item js_last_with_binding_base_or_undefined(Item key) {
     return scope_obj;
 }
 
+static int js_global_lexical_find_binding(Item key);
+
 extern "C" Item js_delete_identifier_with_binding(Item key, int64_t declared_binding) {
     if (js_with_stack_depth > 0) {
         for (int i = js_with_stack_depth - 1; i >= 0; i--) {
@@ -14339,9 +14354,53 @@ extern "C" Item js_delete_identifier_with_binding(Item key, int64_t declared_bin
             if (js_check_exception()) return (Item){.item = b2it(false)};
         }
     }
+    if (js_global_lexical_find_binding(key) >= 0) return (Item){.item = b2it(false)};
     if (declared_binding) return (Item){.item = b2it(false)};
     Item global = js_get_global_this();
     return js_delete_property(global, key);
+}
+
+#define JS_GLOBAL_LEXICAL_BIND_MAX 512
+typedef struct JsGlobalLexicalBinding {
+    Item key;
+    Item value;
+    bool immutable;
+} JsGlobalLexicalBinding;
+
+static JsGlobalLexicalBinding js_global_lexical_bindings[JS_GLOBAL_LEXICAL_BIND_MAX];
+static int js_global_lexical_binding_count = 0;
+
+static int js_global_lexical_find_binding(Item key) {
+    key = js_to_property_key(key);
+    if (js_check_exception()) return -1;
+    for (int i = js_global_lexical_binding_count - 1; i >= 0; i--) {
+        if (js_with_binding_key_same(js_global_lexical_bindings[i].key, key)) return i;
+    }
+    return -1;
+}
+
+extern "C" void js_reset_global_lexical_bindings(void) {
+    js_global_lexical_binding_count = 0;
+}
+
+extern "C" void js_define_global_lexical_binding(Item key, Item value, int64_t immutable) {
+    key = js_to_property_key(key);
+    if (js_check_exception()) return;
+    int idx = js_global_lexical_find_binding(key);
+    if (idx >= 0) {
+        js_global_lexical_bindings[idx].value = value;
+        js_global_lexical_bindings[idx].immutable = immutable != 0;
+        return;
+    }
+    if (js_global_lexical_binding_count >= JS_GLOBAL_LEXICAL_BIND_MAX) {
+        log_error("js-global-lexical: binding table overflow");
+        return;
+    }
+    JsGlobalLexicalBinding* binding =
+        &js_global_lexical_bindings[js_global_lexical_binding_count++];
+    binding->key = key;
+    binding->value = value;
+    binding->immutable = immutable != 0;
 }
 
 // js_get_global_property: look up a property on the global object by name string
@@ -14353,6 +14412,8 @@ extern "C" Item js_get_global_property(Item key) {
         Item result = js_with_scope_lookup(key, &found, false);
         if (found) return result;
     }
+    int lex_idx = js_global_lexical_find_binding(key);
+    if (lex_idx >= 0) return js_global_lexical_bindings[lex_idx].value;
     Item global = js_get_global_this();
     return js_property_get(global, key);
 }
@@ -14367,6 +14428,8 @@ extern "C" Item js_get_global_property_strict(Item key) {
         Item result = js_with_scope_lookup(key, &found, true);
         if (found) return result;
     }
+    int lex_idx = js_global_lexical_find_binding(key);
+    if (lex_idx >= 0) return js_global_lexical_bindings[lex_idx].value;
     Item global = js_get_global_this();
     Item result = js_property_get(global, key);
     // property_get returns JS undefined for missing keys.
@@ -14406,6 +14469,7 @@ extern "C" int64_t js_global_binding_exists(Item key) {
         if (js_check_exception()) return 0;
     }
     Item global = js_get_global_this();
+    if (js_global_lexical_find_binding(key) >= 0) return 1;
     Item exists = js_in(key, global);
     if (js_check_exception()) return 0;
     return it2b(exists) ? 1 : 0;
@@ -14470,6 +14534,15 @@ static void js_set_global_property_impl(Item key, Item value, bool strict) {
         }
     }
     js_last_with_binding_valid = false;
+    int lex_idx = js_global_lexical_find_binding(key);
+    if (lex_idx >= 0) {
+        if (js_global_lexical_bindings[lex_idx].immutable) {
+            js_throw_type_error("Assignment to constant global lexical binding");
+            return;
+        }
+        js_global_lexical_bindings[lex_idx].value = value;
+        return;
+    }
     Item global = js_get_global_this();
     if (strict && !it2b(js_in(key, global))) {
         if (js_check_exception()) return;
@@ -14577,10 +14650,47 @@ extern "C" void js_define_global_eval_var_property(Item key, Item value) {
     js_define_own_property_from_descriptor(global, str->chars, (int)str->len, &pd, is_new_property);
 }
 
+extern "C" void js_define_global_function_property(Item key, Item value) {
+    Item global = js_get_global_this();
+    Item name = js_to_string(key);
+    if (get_type_id(name) != LMD_TYPE_STRING) return;
+    String* str = it2s(name);
+    if (!str || str->len <= 0 || str->len >= 200) return;
+    JsPropertyDescriptor existing;
+    bool has_existing = js_get_own_property_descriptor(global, str->chars, (int)str->len, &existing);
+    bool can_replace_existing = has_existing && (
+        js_pd_is_configurable(&existing) ||
+        (js_pd_is_data(&existing) &&
+         (existing.flags & JS_PD_WRITABLE) &&
+         (existing.flags & JS_PD_ENUMERABLE)));
+    if (can_replace_existing && get_type_id(global) == LMD_TYPE_MAP) {
+        js_shape_entry_set_accessor(global, str->chars, (int)str->len, false);
+        map_put(global.map, str, value, js_input);
+        js_attr_set_writable(global, str->chars, (int)str->len, true);
+        js_attr_set_enumerable(global, str->chars, (int)str->len, true);
+        js_attr_set_configurable(global, str->chars, (int)str->len, false);
+        return;
+    }
+    JsPropertyDescriptor pd;
+    memset(&pd, 0, sizeof(pd));
+    pd.flags = JS_PD_HAS_VALUE | JS_PD_HAS_WRITABLE | JS_PD_HAS_ENUMERABLE |
+        JS_PD_HAS_CONFIGURABLE | JS_PD_WRITABLE | JS_PD_ENUMERABLE;
+    js_pd_set_configurable(&pd, false);
+    pd.value = value;
+    bool is_new_property = !has_existing;
+    js_define_own_property_from_descriptor(global, str->chars, (int)str->len, &pd, is_new_property);
+}
+
 extern "C" void js_evalscript_check_global_var_decl(Item key) {
     if (!js_262_eval_script_is_active()) return;
     key = js_to_property_key(key);
     if (js_check_exception()) return;
+    if (js_global_lexical_find_binding(key) >= 0) {
+        const char* msg_str = "Var declaration conflicts with existing global lexical declaration";
+        Item msg = (Item){.item = s2it(heap_create_name(msg_str, strlen(msg_str)))};
+        js_throw_syntax_error(msg);
+        return;
+    }
     Item global = js_get_global_this();
     if (it2b(js_has_own_property(global, key))) return;
     if (js_is_truthy(js_object_is_extensible(global))) return;
@@ -14591,6 +14701,12 @@ extern "C" void js_evalscript_check_global_function_decl(Item key) {
     if (!js_262_eval_script_is_active()) return;
     key = js_to_property_key(key);
     if (js_check_exception()) return;
+    if (js_global_lexical_find_binding(key) >= 0) {
+        const char* msg_str = "Function declaration conflicts with existing global lexical declaration";
+        Item msg = (Item){.item = s2it(heap_create_name(msg_str, strlen(msg_str)))};
+        js_throw_syntax_error(msg);
+        return;
+    }
     Item global = js_get_global_this();
     Item name = js_to_string(key);
     if (get_type_id(name) != LMD_TYPE_STRING) return;
@@ -14609,10 +14725,15 @@ extern "C" void js_evalscript_check_global_function_decl(Item key) {
     js_throw_type_error("Cannot declare global function over incompatible global property");
 }
 
-extern "C" void js_evalscript_check_global_lex_decl(Item key) {
-    if (!js_262_eval_script_is_active()) return;
+extern "C" void js_check_global_lex_decl(Item key) {
     key = js_to_property_key(key);
     if (js_check_exception()) return;
+    if (js_global_lexical_find_binding(key) >= 0) {
+        const char* msg_str = "Lexical declaration conflicts with existing global lexical declaration";
+        Item msg = (Item){.item = s2it(heap_create_name(msg_str, strlen(msg_str)))};
+        js_throw_syntax_error(msg);
+        return;
+    }
     Item global = js_get_global_this();
     if (!it2b(js_has_own_property(global, key))) return;
     Item name = js_to_string(key);
@@ -14626,6 +14747,11 @@ extern "C" void js_evalscript_check_global_lex_decl(Item key) {
     const char* msg_str = "Lexical declaration conflicts with existing global var declaration";
     Item msg = (Item){.item = s2it(heap_create_name(msg_str, strlen(msg_str)))};
     js_throw_syntax_error(msg);
+}
+
+extern "C" void js_evalscript_check_global_lex_decl(Item key) {
+    if (!js_262_eval_script_is_active()) return;
+    js_check_global_lex_decl(key);
 }
 
 // Direct eval bridge: function-scope eval code is compiled as a small script,

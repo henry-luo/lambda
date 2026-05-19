@@ -2290,6 +2290,25 @@ JsAstNode* build_js_statement(JsTranspiler* tp, TSNode stmt_node) {
             uint32_t start = ts_node_start_byte(label_node);
             uint32_t end = ts_node_end_byte(label_node);
             labeled->label = tp->source + start;
+            while (end > start) {
+                char ch = tp->source[end - 1];
+                if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') {
+                    end--;
+                } else {
+                    break;
+                }
+            }
+            if (end > start && tp->source[end - 1] == ':') {
+                end--;
+                while (end > start) {
+                    char ch = tp->source[end - 1];
+                    if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') {
+                        end--;
+                    } else {
+                        break;
+                    }
+                }
+            }
             labeled->label_len = end - start;
         }
         // get body statement

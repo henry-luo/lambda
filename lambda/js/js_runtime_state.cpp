@@ -41,6 +41,7 @@ extern "C" void js_mark_non_enumerable(Item object, Item name);
 extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor);
 extern "C" void js_set_prototype(Item object, Item prototype);
 extern "C" Item js_in(Item key, Item object);
+extern "C" void js_reset_global_lexical_bindings(void);
 extern "C" Item js_get_current_this(void) { return js_current_this; }
 
 static void js_runtime_make_non_enumerable(Item object, Item name) {
@@ -314,6 +315,7 @@ extern "C" void js_batch_reset() {
     // reset globalThis, constructor cache, process object — stale heap pointers
     extern void js_globals_batch_reset(void);
     js_globals_batch_reset();
+    js_reset_global_lexical_bindings();
     // reset DOM state — stale document proxy and document pointer
     extern void js_dom_batch_reset(void);
     js_dom_batch_reset();
@@ -431,6 +433,7 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     // reset globalThis, constructor cache, process object — stale heap pointers
     extern void js_globals_batch_reset(void);
     js_globals_batch_reset();
+    js_reset_global_lexical_bindings();
     // reset DOM state — stale document proxy and document pointer
     extern void js_dom_batch_reset(void);
     js_dom_batch_reset();

@@ -10783,21 +10783,24 @@ static Item js_super_this_binding_finish(Item result) {
 extern "C" Item js_super_bind_this(Item this_val, Item construct_result) {
     if (js_check_exception()) return make_js_undefined();
     Item bound_this = js_is_object_constructor_result(construct_result) ? construct_result : this_val;
-    if (js_super_this_bound_depth > 0) {
-        int idx = js_super_this_bound_depth - 1;
-        if (js_super_this_bound_stack[idx]) {
-            Item msg = (Item){.item = s2it(heap_create_name("Super constructor may only be called once", 43))};
-            js_throw_reference_error(msg);
-            return make_js_undefined();
-        }
-        if (!js_is_object_constructor_result(bound_this) &&
-            (bound_this.item == 0 || bound_this.item == ITEM_JS_UNDEFINED || bound_this.item == ITEM_NULL) &&
-            js_is_object_constructor_result(js_super_this_value_stack[idx])) {
-            bound_this = js_super_this_value_stack[idx];
-        }
-        js_super_this_bound_stack[idx] = true;
-        js_super_this_value_stack[idx] = bound_this;
+    if (js_super_this_bound_depth <= 0) {
+        Item msg = (Item){.item = s2it(heap_create_name("Super constructor may only be called once", 43))};
+        js_throw_reference_error(msg);
+        return make_js_undefined();
     }
+    int idx = js_super_this_bound_depth - 1;
+    if (js_super_this_bound_stack[idx]) {
+        Item msg = (Item){.item = s2it(heap_create_name("Super constructor may only be called once", 43))};
+        js_throw_reference_error(msg);
+        return make_js_undefined();
+    }
+    if (!js_is_object_constructor_result(bound_this) &&
+        (bound_this.item == 0 || bound_this.item == ITEM_JS_UNDEFINED || bound_this.item == ITEM_NULL) &&
+        js_is_object_constructor_result(js_super_this_value_stack[idx])) {
+        bound_this = js_super_this_value_stack[idx];
+    }
+    js_super_this_bound_stack[idx] = true;
+    js_super_this_value_stack[idx] = bound_this;
     js_current_this = bound_this;
     return bound_this;
 }

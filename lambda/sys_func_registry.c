@@ -874,6 +874,9 @@ extern void js_private_brand_add(Item object, Item private_key, Item callee);
 extern void js_set_private_class_index(Item class_item, int index);
 extern void js_define_global_var_property(Item key, Item value);
 extern void js_define_global_eval_var_property(Item key, Item value);
+extern void js_define_global_function_property(Item key, Item value);
+extern void js_define_global_lexical_binding(Item key, Item value, int64_t immutable);
+extern void js_check_global_lex_decl(Item key);
 extern void js_evalscript_check_global_var_decl(Item key);
 extern void js_evalscript_check_global_function_decl(Item key);
 extern void js_evalscript_check_global_lex_decl(Item key);
@@ -1733,6 +1736,9 @@ JitImport jit_runtime_imports[] = {
     {"js_set_private_class_index", FPTR(js_set_private_class_index)},
     {"js_define_global_var_property", FPTR(js_define_global_var_property)},
     {"js_define_global_eval_var_property", FPTR(js_define_global_eval_var_property)},
+    {"js_define_global_function_property", FPTR(js_define_global_function_property)},
+    {"js_define_global_lexical_binding", FPTR(js_define_global_lexical_binding)},
+    {"js_check_global_lex_decl", FPTR(js_check_global_lex_decl)},
     {"js_evalscript_check_global_var_decl", FPTR(js_evalscript_check_global_var_decl)},
     {"js_evalscript_check_global_function_decl", FPTR(js_evalscript_check_global_function_decl)},
     {"js_evalscript_check_global_lex_decl", FPTR(js_evalscript_check_global_lex_decl)},

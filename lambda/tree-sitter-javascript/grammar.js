@@ -102,6 +102,9 @@ module.exports = grammar({
     [$.assignment_expression, $.pattern],
     [$.assignment_expression, $.object_assignment_pattern],
     [$.labeled_statement, $._property_name],
+    [$.yield_expression, $.formal_parameters],
+    [$.parenthesized_expression, $.arguments],
+    [$.sequence_expression, $.arguments],
     [$.computed_property_name, $.array],
     [$.binary_expression, $._initializer],
     [$.class_static_block, $._property_name],
@@ -433,11 +436,17 @@ module.exports = grammar({
 
     empty_statement: _ => ';',
 
-    labeled_statement: $ => prec.dynamic(-1, seq(
-      field('label', alias(choice($.identifier, $._reserved_identifier), $.statement_identifier)),
-      ':',
-      field('body', $.statement),
-    )),
+    labeled_statement: $ => choice(
+      prec.dynamic(-1, seq(
+        field('label', alias(choice($.identifier, $._reserved_identifier), $.statement_identifier)),
+        ':',
+        field('body', $.statement),
+      )),
+      prec.dynamic(1, seq(
+        field('label', alias(choice(token(seq('yield', ':')), token(seq('await', ':'))), $.statement_identifier)),
+        field('body', $.statement),
+      )),
+    ),
 
     //
     // Statement components
@@ -526,12 +535,11 @@ module.exports = grammar({
       $.call_expression,
     ),
 
-    yield_expression: $ => prec.right(seq(
-      'yield',
-      choice(
-        seq('*', $.expression),
-        optional($.expression),
-      ))),
+    yield_expression: $ => choice(
+      prec.right(2, seq('yield', '*', $.expression)),
+      prec.right(1, seq('yield', $.expression)),
+      prec(0, 'yield'),
+    ),
 
     object: $ => prec('object', seq(
       '{',
@@ -786,11 +794,19 @@ module.exports = grammar({
 
     // Override
     _call_signature: $ => field('parameters', $.formal_parameters),
-    _formal_parameter: $ => choice($.pattern, $.assignment_pattern),
+    _formal_parameter: $ => choice(
+      alias(choice('yield', 'await'), $.identifier),
+      $.pattern,
+      $.assignment_pattern,
+    ),
 
     optional_chain: _ => '?.',
 
     call_expression: $ => choice(
+      prec('call', seq(
+        field('function', alias('yield', $.identifier)),
+        field('arguments', $.arguments),
+      )),
       prec('call', seq(
         field('function', choice($.expression, $.import)),
         field('arguments', $.arguments),
@@ -1139,6 +1155,11 @@ module.exports = grammar({
     class_body: $ => seq(
       '{',
       repeat(choice(
+        seq(
+          field('member', alias($.field_definition_before_generator_method, $.field_definition)),
+          field('member', alias($.generator_method_definition, $.method_definition)),
+          optional(';'),
+        ),
         seq(field('member', $.method_definition), optional(';')),
         seq(field('member', $.field_definition), $._semicolon),
         field('member', $.class_static_block),
@@ -1152,6 +1173,12 @@ module.exports = grammar({
       optional('static'),
       field('property', $._property_name),
       optional($._initializer),
+    )),
+
+    field_definition_before_generator_method: $ => prec(2, seq(
+      repeat(field('decorator', $.decorator)),
+      optional('static'),
+      field('property', alias(choice('get', 'set'), $.property_identifier)),
     )),
 
     formal_parameters: $ => seq(
@@ -1184,12 +1211,17 @@ module.exports = grammar({
 
     method_definition: $ => seq(
       repeat(field('decorator', $.decorator)),
-      optional(choice(
-        'static',
-        alias(token(seq('static', /\s+/, 'get', /\s*\n/)), 'static get'),
-      )),
+      optional('static'),
       optional('async'),
       optional(choice('get', 'set', '*')),
+      field('name', $._property_name),
+      field('parameters', $.formal_parameters),
+      field('body', $.statement_block),
+    ),
+
+    generator_method_definition: $ => seq(
+      repeat(field('decorator', $.decorator)),
+      '*',
       field('name', $._property_name),
       field('parameters', $.formal_parameters),
       field('body', $.statement_block),
