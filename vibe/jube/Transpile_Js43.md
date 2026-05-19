@@ -3928,3 +3928,145 @@ Remaining shape:
   captures wider than a single literal, and named groups inside lookbehind.
 - One non-lookbehind RegExp failure remains:
   `built_ins_RegExp_nullable_quantifier_js`.
+
+## 69. Lookbehind Capture Prerequisites And Null-Prototype Group Names
+
+Status on 2026-05-19: fixed two more reduced-replay failures, moving the
+92-row replay from 85 passed / 7 failed to 87 passed / 5 failed.
+
+Root causes fixed:
+
+- Dynamic positive lookahead filters such as `(?=\1)` could run before an
+  earlier lookbehind filter had materialized the capture referenced by `\1`.
+  The wrapper now runs prerequisite lookbehind filters first when a later
+  dynamic assertion references a capture produced inside that lookbehind, and
+  marks those filters as satisfied so their marker groups are not reinterpreted
+  as captures on a second pass.
+- Top-level alternatives at the same input position were not retried after a
+  lookbehind filter rejected the branch that RE2 selected first.  The wrapper
+  now retries same-start top-level alternatives that do not contain the rejected
+  marker group, which preserves fallback branches like
+  `(?<!(?<a>\D){3})f|f`.
+- The runtime represents `Object.create(null)` with an internal
+  `__proto__: undefined` sentinel.  `Object.getOwnPropertyNames` now hides only
+  that sentinel, so RegExp named-groups objects expose just their named captures
+  while real `__proto__` data properties remain visible.
+- Inline fixed-width positive lookaheads followed by an equivalent `\w{N}`
+  consumer now consume the asserted span once while preserving captures.  This
+  advances the nested-lookaround test from the plain fixed-width capture case
+  to the remaining nested-lookbehind-inside-lookahead case.
+
+Verification:
+
+```bash
+make -C build/premake config=release_native lambda test_js_test262_gtest -j4
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_regex_remaining_focus_batch.txt --js-timeout=30 --write-failures=temp/js43_regex_remaining_focus_after_alt_proto.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_remaining_90_replay_from_latest.txt --js-timeout=30 --write-failures=temp/js43_remaining_90_after_prereq_alt_proto.tsv --gtest_brief=1
+```
+
+Results:
+
+- Newly passing in the reduced replay:
+  `built_ins_RegExp_lookBehind_back_references_js` and
+  `built_ins_RegExp_named_groups_lookbehind_js`.
+- The 92-row replay now reports 87 passed / 5 failed.
+- Current failure manifest:
+  `temp/js43_remaining_90_after_prereq_alt_proto.tsv`.
+
+Remaining shape:
+
+- Four lookbehind-family failures remain:
+  captures referenced before declaration inside lookbehind, no-backtrack
+  capture freezing after a successful lookbehind, mutual-recursive
+  capture/backreference cases, and nested lookbehind inside a positive
+  lookahead body.
+- One non-lookbehind RegExp failure remains:
+  `built_ins_RegExp_nullable_quantifier_js`.
+
+## 70. Regex Tail: Reverse Lookbehind Backrefs And Nullable Repeat Progress
+
+Status on 2026-05-19: fixed the last known failures in the 92-row reduced
+replay.  The focused regex batch now reports 12 passed / 0 failed, and the
+remaining replay now reports 92 passed / 0 failed.
+
+Root causes fixed:
+
+- Lookbehind filters that feed later dynamic backreference assertions needed
+  their capture groups materialized before the assertion was evaluated.  The
+  wrapper now executes only the prerequisite lookbehind filters first, remaps
+  their original capture groups before remapping the dependent equality filter,
+  and then reuses those satisfied filters during the normal pass.
+- Reverse-direction backreferences inside a lookbehind are not the same as
+  forward RE2 backreferences.  The runtime now preserves external and
+  later-declared lookbehind backrefs during preprocessing, drops only the
+  earlier-declared local cases that evaluate as empty in reverse order, and the
+  wrapper directly evaluates the leading local-backref shape at the lookbehind
+  boundary.
+- Nested negative lookbehind inside a rewritten inline positive lookahead could
+  be decided statically for simple cases.  The wrapper now drops provably true
+  nested assertions such as a preceding class that excludes the literal repeat,
+  and turns nullable negative lookbehind into an impossible replacement because
+  a nullable lookbehind body always makes the negative assertion fail.
+- Active lookbehind execution now evaluates against the right-side context from
+  the candidate start position while still requiring the consumed lookbehind
+  match to end at the marker.  This lets zero-width lookahead inside a
+  lookbehind see the character after the marker without allowing the lookbehind
+  body to consume past it.
+- The nullable-quantifier failure was a RepeatMatcher progress issue for a
+  narrow repeated optional-literal capture shape.  The runtime now extends that
+  simple repeated group while each iteration consumes input, matching the ES
+  rule that a min-zero repeat must stop when the next iteration would be empty.
+
+Verification:
+
+```bash
+make -C build/premake config=release_native lambda test_js_test262_gtest -j4
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_regex_remaining_focus_batch.txt --js-timeout=30 --write-failures=temp/js43_regex_remaining_focus_after_nullable.tsv --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_remaining_90_replay_from_latest.txt --js-timeout=30 --write-failures=temp/js43_remaining_90_after_regex_tail.tsv --gtest_brief=1
+```
+
+Results:
+
+- Focused regex batch: 12 passed / 0 failed.
+- Reduced remaining replay: 92 passed / 0 failed.
+- Current known failures in that replay: none.
+
+## 71. Full js262 Baseline Update Attempt
+
+Status on 2026-05-19: release build succeeded, but the full js262 baseline
+update did not write a new baseline because the runner's stability gate was
+blocked.
+
+Commands run:
+
+```bash
+make -C build/premake config=release_native lambda test_js_test262_gtest -j4
+./test/test_js_test262_gtest.exe --batch-only --update-baseline
+./test/test_js_test262_gtest.exe --batch-only --batch-file=test/js262/test262_baseline.txt --js-timeout=30 --write-failures=temp/js262_baseline_recheck_after_full_update_block.tsv --gtest_brief=1
+```
+
+Observed blocker:
+
+- The full update run completed the main batch phase, recovered 11 lost tests
+  in the batch-lost retry, then entered Phase 4 with 1850 baseline regressions
+  to retry individually at 60 seconds each.  The first retries consumed the
+  full timeout, so the run was stopped before it could safely write a baseline.
+- A direct baseline-file replay, which avoids the long Phase 4 update gate,
+  produced 1893 failing baseline rows: 1864 `FAIL` and 29 `TIMEOUT`.
+- Failure kind summary from the manifest: 958 runtime, 731 assert, 120 parse,
+  55 missing, and 29 timeout.
+- Top path concentrations: `language/expressions` 437,
+  `language/statements` 410, `built_ins/Object` 287,
+  `annexB_language/eval_code` 155, `built_ins/Array` 94,
+  and `built_ins/Function` 67.
+
+Artifacts:
+
+- `temp/js262_baseline_recheck_after_full_update_block.tsv`
+- `temp/js262_baseline_recheck_after_full_update_block_by_feature.tsv`
+- `temp/js262_baseline_recheck_after_full_update_block_by_path.tsv`
+
+Baseline status:
+
+- `test/js262/test262_baseline.txt` was not updated.
+- `test/js262/t262_partial.txt` was not updated.

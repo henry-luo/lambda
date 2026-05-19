@@ -420,6 +420,7 @@ void js_fetch_set_base_path(const char* dir_path);
  * In a called function, throw sets the flag and returns; the caller checks.
  */
 void js_throw_value(Item value);
+void js_throw_value_with_message(Item value, const char* message);
 
 /** v20: Throw a RangeError with the given message. */
 Item js_throw_range_error(const char* message);
@@ -566,6 +567,7 @@ Item js_encodeURIComponent(Item str_item);
 Item js_decodeURIComponent(Item str_item);
 Item js_encodeURI(Item str_item);
 Item js_decodeURI(Item str_item);
+Item js_decodeURI_percent_fromCharCode_1(Item code_item, int64_t component);
 Item js_unescape(Item str_item);
 Item js_escape(Item str_item);
 Item js_atob(Item str_item);

@@ -287,6 +287,247 @@ static bool find_inline_consumed_lookahead_atom(const std::string& pat,
     return true;
 }
 
+static bool parse_fixed_word_quantifier_at(const std::string& pat, size_t pos,
+                                           int width, size_t* atom_len) {
+    if (atom_len) *atom_len = 0;
+    if (width <= 0 || pos + 2 > pat.size()) return false;
+    if (pat[pos] != '\\' || pat[pos + 1] != 'w') return false;
+    size_t end = pos + 2;
+    if (width == 1) {
+        if (atom_len) *atom_len = 2;
+        return true;
+    }
+    if (end >= pat.size() || pat[end] != '{') return false;
+    size_t j = end + 1;
+    int value = 0;
+    bool saw_digit = false;
+    while (j < pat.size() && pat[j] >= '0' && pat[j] <= '9') {
+        saw_digit = true;
+        value = value * 10 + (pat[j] - '0');
+        j++;
+    }
+    if (!saw_digit || value != width || j >= pat.size() || pat[j] != '}') return false;
+    if (atom_len) *atom_len = j - pos + 1;
+    return true;
+}
+
+static bool regex_fixed_byte_width(const std::string& pat, int* width) {
+    if (width) *width = 0;
+    int total = 0;
+    for (size_t i = 0; i < pat.size(); i++) {
+        if (pat[i] == '\\' && i + 1 < pat.size()) {
+            char kind = pat[i + 1];
+            if (kind == 'w' || kind == 'd' || kind == 's') {
+                total++;
+                i++;
+                continue;
+            }
+            if (kind == 'b' || kind == 'B') {
+                i++;
+                continue;
+            }
+            total++;
+            i++;
+            continue;
+        }
+        if (pat[i] == '[') {
+            size_t close = i + 1;
+            while (close < pat.size() && pat[close] != ']') {
+                if (pat[close] == '\\' && close + 1 < pat.size()) close++;
+                close++;
+            }
+            if (close >= pat.size()) return false;
+            int count = 1;
+            size_t after = close + 1;
+            if (after < pat.size() && pat[after] == '{') {
+                size_t j = after + 1;
+                int value = 0;
+                bool saw_digit = false;
+                while (j < pat.size() && pat[j] >= '0' && pat[j] <= '9') {
+                    saw_digit = true;
+                    value = value * 10 + (pat[j] - '0');
+                    j++;
+                }
+                if (!saw_digit || j >= pat.size() || pat[j] != '}') return false;
+                count = value;
+                i = j;
+            } else {
+                i = close;
+            }
+            total += count;
+            continue;
+        }
+        if (pat[i] == '(') {
+            size_t close = find_matching_paren(pat, i);
+            if (close == std::string::npos) return false;
+            size_t inner_start = i + 1;
+            if (i + 1 < pat.size() && pat[i + 1] == '?') {
+                if (i + 2 < pat.size() && pat[i + 2] == ':') {
+                    inner_start = i + 3;
+                } else if (i + 3 < pat.size() && pat[i + 2] == '<' &&
+                        (pat[i + 3] == '=' || pat[i + 3] == '!')) {
+                    i = close;
+                    continue;
+                } else {
+                    return false;
+                }
+            }
+            std::string inner = pat.substr(inner_start, close - inner_start);
+            int inner_width = 0;
+            if (!regex_fixed_byte_width(inner, &inner_width)) return false;
+            int count = 1;
+            size_t after = close + 1;
+            if (after < pat.size() && pat[after] == '{') {
+                size_t j = after + 1;
+                int value = 0;
+                bool saw_digit = false;
+                while (j < pat.size() && pat[j] >= '0' && pat[j] <= '9') {
+                    saw_digit = true;
+                    value = value * 10 + (pat[j] - '0');
+                    j++;
+                }
+                if (!saw_digit || j >= pat.size() || pat[j] != '}') return false;
+                count = value;
+                i = j;
+            } else {
+                i = close;
+            }
+            total += inner_width * count;
+            continue;
+        }
+        switch (pat[i]) {
+            case '^': case '$':
+                break;
+            case '.':
+                total++;
+                break;
+            case '*': case '+': case '?': case '{': case '}': case '|':
+                return false;
+            default: {
+                total++;
+                while (i + 1 < pat.size() && (((unsigned char)pat[i + 1] & 0xC0) == 0x80)) {
+                    i++;
+                }
+                break;
+            }
+        }
+    }
+    if (width) *width = total;
+    return true;
+}
+
+static bool find_inline_fixed_width_lookahead_atom(const std::string& pat,
+                                                   const std::string& inner,
+                                                   size_t assertion_end,
+                                                   size_t* atom_len) {
+    int width = 0;
+    if (!regex_fixed_byte_width(inner, &width)) return false;
+    return parse_fixed_word_quantifier_at(pat, assertion_end, width, atom_len);
+}
+
+static bool simple_nullable_pattern(const std::string& pat) {
+    if (pat.empty()) return true;
+    if (pat.size() == 2 && pat[1] == '*') return true;
+    if (pat.size() == 2 && pat[1] == '?') return true;
+    if (pat.size() >= 4 && pat[1] == '{' && pat[2] == '0') return true;
+    return false;
+}
+
+static bool parse_literal_exact_repeat(const std::string& pat, char* literal, int* count) {
+    if (literal) *literal = '\0';
+    if (count) *count = 0;
+    if (pat.empty()) return false;
+    if (pat[0] == '\\') return false;
+    char ch = pat[0];
+    if (pat.size() == 1) {
+        if (literal) *literal = ch;
+        if (count) *count = 1;
+        return true;
+    }
+    if (pat.size() >= 4 && pat[1] == '{') {
+        size_t i = 2;
+        int value = 0;
+        bool saw_digit = false;
+        while (i < pat.size() && pat[i] >= '0' && pat[i] <= '9') {
+            saw_digit = true;
+            value = value * 10 + (pat[i] - '0');
+            i++;
+        }
+        if (!saw_digit || i + 1 != pat.size() || pat[i] != '}') return false;
+        if (literal) *literal = ch;
+        if (count) *count = value;
+        return true;
+    }
+    for (size_t i = 0; i < pat.size(); i++) {
+        if (pat[i] != ch) return false;
+    }
+    if (literal) *literal = ch;
+    if (count) *count = (int)pat.size();
+    return true;
+}
+
+static bool preceding_class_excludes_literal_repeat(const std::string& pat,
+        size_t assertion_pos, char literal, int count) {
+    if (count <= 0 || assertion_pos == 0) return false;
+    size_t pos = assertion_pos;
+    int repeat = 1;
+    if (pos > 0 && pat[pos - 1] == '}') {
+        size_t open = pat.rfind('{', pos - 1);
+        if (open == std::string::npos || open == 0) return false;
+        size_t j = open + 1;
+        int value = 0;
+        bool saw_digit = false;
+        while (j < pos - 1 && pat[j] >= '0' && pat[j] <= '9') {
+            saw_digit = true;
+            value = value * 10 + (pat[j] - '0');
+            j++;
+        }
+        if (!saw_digit || j != pos - 1 || value != count) return false;
+        repeat = value;
+        pos = open;
+    }
+    if (repeat != count || pos == 0 || pat[pos - 1] != ']') return false;
+    size_t open_class = pat.rfind('[', pos - 1);
+    if (open_class == std::string::npos || open_class + 1 >= pos - 1) return false;
+    if (pat[open_class + 1] == '^') return false;
+    for (size_t i = open_class + 1; i < pos - 1; i++) {
+        if (pat[i] == '\\' && i + 1 < pos - 1) {
+            i++;
+            if (pat[i] == literal) return false;
+            continue;
+        }
+        if (pat[i] == literal) return false;
+    }
+    return true;
+}
+
+static std::string simplify_inline_nested_lookbehind(const std::string& inner,
+                                                     bool* impossible) {
+    if (impossible) *impossible = false;
+    std::string result = inner;
+    for (size_t pos = 0; pos + 3 < result.size();) {
+        size_t found = result.find("(?<!", pos);
+        if (found == std::string::npos) break;
+        size_t close = find_matching_paren(result, found);
+        if (close == std::string::npos) break;
+        std::string negative_inner = result.substr(found + 4, close - (found + 4));
+        if (simple_nullable_pattern(negative_inner)) {
+            if (impossible) *impossible = true;
+            return result;
+        }
+        char literal = '\0';
+        int count = 0;
+        if (parse_literal_exact_repeat(negative_inner, &literal, &count) &&
+                preceding_class_excludes_literal_repeat(result, found, literal, count)) {
+            result.erase(found, close - found + 1);
+            pos = found;
+            continue;
+        }
+        pos = close + 1;
+    }
+    return result;
+}
+
 static bool find_required_leading_lookahead_atom(const std::string& pat, size_t assertion_end,
                                                  size_t* atom_pos, size_t* atom_len,
                                                  int* trim_len) {
@@ -767,9 +1008,15 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out,
                 }
                 size_t inline_atom_len = 0;
                 if (quantifier_len == 0 && info.is_trailing &&
-                        find_inline_consumed_lookahead_atom(original, info.inner,
-                            info.end_pos, &inline_atom_len)) {
-                    std::string replacement = "(" + info.inner + ")";
+                        (find_inline_consumed_lookahead_atom(original, info.inner,
+                            info.end_pos, &inline_atom_len) ||
+                         find_inline_fixed_width_lookahead_atom(original, info.inner,
+                            info.end_pos, &inline_atom_len))) {
+                    bool inline_impossible = false;
+                    std::string inline_inner = simplify_inline_nested_lookbehind(
+                        info.inner, &inline_impossible);
+                    std::string replacement = inline_impossible ?
+                        "(\\x{FFFE})" : "(" + inline_inner + ")";
                     size_t syn_pos = info.start_pos;
                     size_t inline_old_len = info.end_pos - info.start_pos + inline_atom_len;
                     result.replace(info.start_pos, inline_old_len, replacement);
@@ -1202,6 +1449,19 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out,
                 }
                 if (orig_idx < remap_size) {
                     out->group_remap[orig_idx] = re2_idx;
+                }
+            }
+        }
+
+        for (int s = 0; s < synthetic_count; s++) {
+            int fi = synthetic[s].filter_idx;
+            if (fi < 0) continue;
+            JsRegexFilter& f = out->filters[fi];
+            if (f.type != JS_PF_LOOKBEHIND_POS) continue;
+            for (int g = 0; g < f.lookbehind_group_count; g++) {
+                int original_group = f.lookbehind_group_start + g;
+                if (original_group > 0 && original_group < remap_size) {
+                    out->group_remap[original_group] = original_group;
                 }
             }
         }
@@ -1688,6 +1948,211 @@ static bool js_regex_simple_zero_width_lookbehind(JsRegexFilter& f, const char* 
     return false;
 }
 
+static char js_regex_ascii_fold(char c) {
+    return (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
+}
+
+static bool js_regex_bytes_equal_for_flags(const char* a, const char* b, int len,
+                                           bool case_sensitive) {
+    if (!a || !b || len < 0) return false;
+    for (int i = 0; i < len; i++) {
+        char ca = a[i];
+        char cb = b[i];
+        if (!case_sensitive) {
+            ca = js_regex_ascii_fold(ca);
+            cb = js_regex_ascii_fold(cb);
+        }
+        if (ca != cb) return false;
+    }
+    return true;
+}
+
+static bool js_regex_adjust_active_lookbehind_leading_backref(JsRegexFilter& f,
+        const char* text, int text_len, int* starts, int* ends, int group_count,
+        bool* handled, bool* accepted) {
+    if (handled) *handled = false;
+    if (accepted) *accepted = true;
+    if (!f.lookbehind_source || f.lookbehind_source_len <= 0 ||
+            !text || text_len < 0 || !starts || !ends || group_count <= 1) {
+        return false;
+    }
+    std::string inner(f.lookbehind_source, f.lookbehind_source_len);
+    int ref_num = 0;
+    size_t ref_end = 0;
+    if (inner.size() >= 2 && inner[0] == '\\' && inner[1] >= '1' && inner[1] <= '9') {
+        ref_end = 1;
+        while (ref_end < inner.size() && inner[ref_end] >= '0' && inner[ref_end] <= '9') {
+            ref_num = ref_num * 10 + (inner[ref_end] - '0');
+            ref_end++;
+        }
+    } else if (!inner.empty() && (unsigned char)inner[0] >= 1 &&
+            (unsigned char)inner[0] <= 9) {
+        ref_num = (unsigned char)inner[0];
+        ref_end = 1;
+    } else {
+        return false;
+    }
+    int group_offset = f.lookbehind_group_start - 1;
+    int local_ref = ref_num - group_offset;
+    if (local_ref <= 0 || local_ref >= group_count) return false;
+
+    size_t open_pos = 0, close_pos = 0;
+    if (!find_capture_group_span(inner, local_ref, &open_pos, &close_pos)) return false;
+    if (open_pos != ref_end) return false;
+
+    std::string capture_inner;
+    if (!get_capture_group_inner(inner, local_ref, &capture_inner)) return false;
+    if (count_capture_groups(capture_inner) != 0) return false;
+
+    re2::RE2::Options opts;
+    opts.set_log_errors(false);
+    opts.set_encoding(re2::RE2::Options::EncodingUTF8);
+    opts.set_case_sensitive(f.lookbehind_case_sensitive != 0);
+    opts.set_one_line(f.lookbehind_one_line != 0);
+    opts.set_dot_nl(f.lookbehind_dot_nl != 0);
+    std::string check_source = "^(?:";
+    check_source.append(capture_inner);
+    check_source.append(")$");
+    re2::RE2 capture_check(check_source, opts);
+    if (!capture_check.ok()) return false;
+
+    if (handled) *handled = true;
+    for (int width = text_len / 2; width >= 0; width--) {
+        int suffix_start = text_len - width;
+        int prev_start = suffix_start - width;
+        if (prev_start < 0) continue;
+        if (!is_utf8_boundary(text, text_len, suffix_start) ||
+                !is_utf8_boundary(text, text_len, prev_start)) {
+            continue;
+        }
+        re2::StringPiece suffix(text + suffix_start, width);
+        re2::StringPiece dummy;
+        if (!capture_check.Match(suffix, 0, width, re2::RE2::ANCHOR_BOTH,
+                &dummy, 0)) {
+            continue;
+        }
+        if (!js_regex_bytes_equal_for_flags(text + prev_start, text + suffix_start,
+                width, f.lookbehind_case_sensitive != 0)) {
+            continue;
+        }
+        starts[local_ref] = suffix_start;
+        ends[local_ref] = text_len;
+        if (accepted) *accepted = true;
+        return true;
+    }
+    if (accepted) *accepted = false;
+    return true;
+}
+
+static bool js_regex_adjust_static_lookbehind_leading_backref(JsRegexFilter& f,
+        re2::StringPiece* groups, int group_count, bool* handled, bool* accepted) {
+    if (handled) *handled = false;
+    if (accepted) *accepted = true;
+    if (!groups || group_count <= 1 || !groups[0].data()) return false;
+    int starts[JS_REGEX_MAX_GROUPS];
+    int ends[JS_REGEX_MAX_GROUPS];
+    int text_len = (int)groups[0].size();
+    for (int g = 0; g < group_count && g < JS_REGEX_MAX_GROUPS; g++) {
+        if (groups[g].data()) {
+            starts[g] = (int)(groups[g].data() - groups[0].data());
+            ends[g] = starts[g] + (int)groups[g].size();
+        } else {
+            starts[g] = -1;
+            ends[g] = -1;
+        }
+    }
+    bool local_handled = false;
+    bool local_accepted = true;
+    bool result = js_regex_adjust_active_lookbehind_leading_backref(f,
+        groups[0].data(), text_len, starts, ends, group_count,
+        &local_handled, &local_accepted);
+    if (handled) *handled = local_handled;
+    if (accepted) *accepted = local_accepted;
+    if (!result || !local_handled || !local_accepted) return result;
+    for (int g = 1; g < group_count && g < JS_REGEX_MAX_GROUPS; g++) {
+        if (starts[g] >= 0 && ends[g] >= starts[g]) {
+            groups[g] = re2::StringPiece(groups[0].data() + starts[g], ends[g] - starts[g]);
+        } else {
+            groups[g] = re2::StringPiece();
+        }
+    }
+    return true;
+}
+
+static bool js_regex_match_leading_backref_lookbehind_direct(JsRegexFilter& f,
+        const char* input, int input_len, int marker_offset,
+        re2::StringPiece* groups, int max_groups, bool* handled, bool* matched) {
+    if (handled) *handled = false;
+    if (matched) *matched = false;
+    if (!f.lookbehind_source || f.lookbehind_source_len <= 0 ||
+            !input || marker_offset < 0 || marker_offset > input_len ||
+            !groups || max_groups <= 1) {
+        return false;
+    }
+    std::string inner(f.lookbehind_source, f.lookbehind_source_len);
+    int ref_num = 0;
+    size_t ref_end = 0;
+    if (inner.size() >= 2 && inner[0] == '\\' && inner[1] >= '1' && inner[1] <= '9') {
+        ref_end = 1;
+        while (ref_end < inner.size() && inner[ref_end] >= '0' && inner[ref_end] <= '9') {
+            ref_num = ref_num * 10 + (inner[ref_end] - '0');
+            ref_end++;
+        }
+    } else {
+        return false;
+    }
+    int group_offset = f.lookbehind_group_start - 1;
+    int local_ref = ref_num - group_offset;
+    if (local_ref <= 0 || local_ref > f.lookbehind_group_count) return false;
+
+    size_t open_pos = 0, close_pos = 0;
+    if (!find_capture_group_span(inner, local_ref, &open_pos, &close_pos)) return false;
+    if (open_pos != ref_end || close_pos + 1 != inner.size()) return false;
+    std::string capture_inner;
+    if (!get_capture_group_inner(inner, local_ref, &capture_inner)) return false;
+    if (count_capture_groups(capture_inner) != 0) return false;
+
+    re2::RE2::Options opts;
+    opts.set_log_errors(false);
+    opts.set_encoding(re2::RE2::Options::EncodingUTF8);
+    opts.set_case_sensitive(f.lookbehind_case_sensitive != 0);
+    opts.set_one_line(f.lookbehind_one_line != 0);
+    opts.set_dot_nl(f.lookbehind_dot_nl != 0);
+    std::string check_source = "^(?:";
+    check_source.append(capture_inner);
+    check_source.append(")$");
+    re2::RE2 capture_check(check_source, opts);
+    if (!capture_check.ok()) return false;
+
+    if (handled) *handled = true;
+    for (int width = marker_offset / 2; width >= 0; width--) {
+        int suffix_start = marker_offset - width;
+        int prev_start = suffix_start - width;
+        if (prev_start < 0) continue;
+        if (!is_utf8_boundary(input, input_len, suffix_start) ||
+                !is_utf8_boundary(input, input_len, prev_start)) {
+            continue;
+        }
+        re2::StringPiece suffix(input + suffix_start, width);
+        re2::StringPiece dummy;
+        if (!capture_check.Match(suffix, 0, width, re2::RE2::ANCHOR_BOTH,
+                &dummy, 0)) {
+            continue;
+        }
+        if (!js_regex_bytes_equal_for_flags(input + prev_start, input + suffix_start,
+                width, f.lookbehind_case_sensitive != 0)) {
+            continue;
+        }
+        int dst = f.lookbehind_group_start + local_ref - 1;
+        if (dst > 0 && dst < max_groups) {
+            groups[dst] = suffix;
+        }
+        if (matched) *matched = true;
+        return true;
+    }
+    return true;
+}
+
 static bool js_regex_lookbehind_filter_matches(JsRegexFilter& f, const char* input, int input_len,
                                                int marker_offset, re2::StringPiece* groups,
                                                int max_groups, int* group_remap = nullptr,
@@ -1698,6 +2163,13 @@ static bool js_regex_lookbehind_filter_matches(JsRegexFilter& f, const char* inp
     if (js_regex_simple_zero_width_lookbehind(f, input, input_len, marker_offset,
             &zero_width_handled, &zero_width_matched) && zero_width_handled) {
         return zero_width_matched;
+    }
+    bool direct_handled = false;
+    bool direct_matched = false;
+    if (js_regex_match_leading_backref_lookbehind_direct(f, input, input_len,
+            marker_offset, groups, max_groups, &direct_handled, &direct_matched) &&
+            direct_handled) {
+        return direct_matched;
     }
     int capture_count = f.lookbehind_group_count;
     if (capture_count < 0) capture_count = 0;
@@ -1738,8 +2210,14 @@ static bool js_regex_lookbehind_filter_matches(JsRegexFilter& f, const char* inp
         for (; start >= 0 && start <= marker_offset; start += step) {
             if (!is_utf8_boundary(input, input_len, start)) continue;
             int found = js_regex_wrapper_exec(active_wrapper, input + start,
-                marker_offset - start, 0, true, starts, ends, local_groups_count);
+                input_len - start, 0, true, starts, ends, local_groups_count);
             if (found <= 0 || starts[0] != 0 || ends[0] != marker_offset - start) continue;
+            bool reverse_handled = false;
+            bool reverse_accepted = true;
+            js_regex_adjust_active_lookbehind_leading_backref(f, input + start,
+                marker_offset - start, starts, ends, local_groups_count,
+                &reverse_handled, &reverse_accepted);
+            if (reverse_handled && !reverse_accepted) continue;
             for (int g = 1; g < local_groups_count; g++) {
                 int dst = f.lookbehind_group_start + g - 1;
                 if (dst <= 0 || dst >= max_groups) continue;
@@ -1769,6 +2247,11 @@ static bool js_regex_lookbehind_filter_matches(JsRegexFilter& f, const char* inp
             re2::RE2::ANCHOR_BOTH, local_groups, local_groups_count);
         if (!found) continue;
         js_regex_adjust_lookbehind_reverse_captures(f, local_groups, local_groups_count);
+        bool reverse_handled = false;
+        bool reverse_accepted = true;
+        js_regex_adjust_static_lookbehind_leading_backref(f, local_groups,
+            local_groups_count, &reverse_handled, &reverse_accepted);
+        if (reverse_handled && !reverse_accepted) continue;
         for (int g = 1; g < local_groups_count; g++) {
             int dst = f.lookbehind_group_start + g - 1;
             if (dst <= 0 || dst >= max_groups) continue;
@@ -1781,6 +2264,106 @@ static bool js_regex_lookbehind_filter_matches(JsRegexFilter& f, const char* inp
     return false;
 }
 
+static bool js_regex_filter_needs_external_capture(JsRegexFilter& f, int original_group) {
+    if (!f.lookbehind_source || f.lookbehind_source_len <= 0 || original_group <= 0) return false;
+    std::string inner(f.lookbehind_source, f.lookbehind_source_len);
+    int group_offset = f.lookbehind_group_start - 1;
+    if (original_group > group_offset) return false;
+    for (size_t i = 0; i < inner.size(); i++) {
+        if (inner[i] != '\\' || i + 1 >= inner.size()) continue;
+        if (inner[i + 1] < '1' || inner[i + 1] > '9' || inside_char_class(inner, i)) {
+            i++;
+            continue;
+        }
+        size_t j = i + 1;
+        int ref_num = 0;
+        while (j < inner.size() && inner[j] >= '0' && inner[j] <= '9') {
+            ref_num = ref_num * 10 + (inner[j] - '0');
+            j++;
+        }
+        if (ref_num == original_group) return true;
+        i = j - 1;
+    }
+    return false;
+}
+
+static bool js_regex_run_lookbehind_prerequisites(JsRegexCompiled* compiled,
+        JsRegexFilter& consumer, const char* input, int input_len,
+        re2::StringPiece* groups, int ngroups, bool* filter_satisfied = nullptr) {
+    if (!compiled || !consumer.lookbehind_source) return true;
+    for (int fi = 0; fi < compiled->filter_count; fi++) {
+        JsRegexFilter& producer = compiled->filters[fi];
+        if (producer.type != JS_PF_LOOKBEHIND_POS &&
+                producer.type != JS_PF_LOOKBEHIND_NEG) {
+            continue;
+        }
+        bool needed = false;
+        for (int g = 0; g < producer.lookbehind_group_count; g++) {
+            int original_group = producer.lookbehind_group_start + g;
+            if (original_group <= 0 || original_group >= JS_REGEX_MAX_GROUPS) continue;
+            if (js_regex_filter_needs_external_capture(consumer, original_group)) {
+                needed = true;
+                break;
+            }
+        }
+        if (!needed) continue;
+        int marker_offset = -1;
+        if (producer.trim_group_idx > 0 && producer.trim_group_idx < ngroups &&
+                groups[producer.trim_group_idx].data()) {
+            marker_offset = (int)(groups[producer.trim_group_idx].data() - input);
+        }
+        bool lookbehind_matches = marker_offset >= 0 &&
+            js_regex_lookbehind_filter_matches(producer, input, input_len,
+                marker_offset, groups, JS_REGEX_MAX_GROUPS,
+                compiled->group_remap, compiled->group_remap_count);
+        bool accepted = (producer.type == JS_PF_LOOKBEHIND_POS) ?
+            lookbehind_matches : !lookbehind_matches;
+        if (!accepted) return false;
+        if (filter_satisfied) filter_satisfied[fi] = true;
+    }
+    return true;
+}
+
+static bool js_regex_run_backref_lookbehind_prerequisites(JsRegexCompiled* compiled,
+        int* backref_order, int backref_count, const char* input, int input_len,
+        re2::StringPiece* groups, int ngroups, bool* filter_satisfied) {
+    if (!compiled || !backref_order || backref_count <= 0) return true;
+    for (int fi = 0; fi < compiled->filter_count; fi++) {
+        JsRegexFilter& producer = compiled->filters[fi];
+        if (producer.type != JS_PF_LOOKBEHIND_POS &&
+                producer.type != JS_PF_LOOKBEHIND_NEG) {
+            continue;
+        }
+        bool needed = false;
+        for (int bi = 0; bi < backref_count && !needed; bi++) {
+            JsRegexFilter& backref = compiled->filters[backref_order[bi]];
+            if (backref.type != JS_PF_GROUP_EQUALITY) continue;
+            for (int g = 0; g < producer.lookbehind_group_count; g++) {
+                int original_group = producer.lookbehind_group_start + g;
+                if (original_group == backref.eq_group_a) {
+                    needed = true;
+                    break;
+                }
+            }
+        }
+        if (!needed) continue;
+        int marker_offset = -1;
+        if (producer.trim_group_idx > 0 && producer.trim_group_idx < ngroups &&
+                groups[producer.trim_group_idx].data()) {
+            marker_offset = (int)(groups[producer.trim_group_idx].data() - input);
+        }
+        bool lookbehind_matches = marker_offset >= 0 &&
+            js_regex_lookbehind_filter_matches(producer, input, input_len,
+                marker_offset, groups, JS_REGEX_MAX_GROUPS,
+                compiled->group_remap, compiled->group_remap_count);
+        bool accepted = (producer.type == JS_PF_LOOKBEHIND_POS) ?
+            lookbehind_matches : !lookbehind_matches;
+        if (!accepted) return false;
+        if (filter_satisfied) filter_satisfied[fi] = true;
+    }
+    return true;
+}
+
 static bool split_pattern_around_capture_group(const std::string& pat, int target_group,
                                                std::string* prefix, std::string* suffix) {
     size_t open_pos = 0, close_pos = 0;
@@ -1788,6 +2371,82 @@ static bool split_pattern_around_capture_group(const std::string& pat, int targe
     if (prefix) *prefix = pat.substr(0, open_pos);
     if (suffix) *suffix = pat.substr(close_pos + 1);
     return true;
+}
+
+static int split_top_level_alternatives(const std::string& pat, size_t* starts,
+                                        size_t* ends, int max_alts) {
+    if (!starts || !ends || max_alts <= 0) return 0;
+    int count = 0;
+    int depth = 0;
+    size_t start = 0;
+    for (size_t i = 0; i < pat.size(); i++) {
+        if (pat[i] == '\\' && i + 1 < pat.size()) { i++; continue; }
+        if (pat[i] == '[') {
+            i++;
+            while (i < pat.size() && pat[i] != ']') {
+                if (pat[i] == '\\' && i + 1 < pat.size()) i++;
+                i++;
+            }
+            continue;
+        }
+        if (pat[i] == '(') {
+            depth++;
+        } else if (pat[i] == ')' && depth > 0) {
+            depth--;
+        } else if (pat[i] == '|' && depth == 0) {
+            if (count < max_alts) {
+                starts[count] = start;
+                ends[count] = i;
+                count++;
+            }
+            start = i + 1;
+        }
+    }
+    if (count < max_alts) {
+        starts[count] = start;
+        ends[count] = pat.size();
+        count++;
+    }
+    return count;
+}
+
+static bool js_regex_retry_alternative_same_start(const std::string& pattern,
+        const re2::RE2::Options& opts, int rejected_group,
+        const char* input, int input_len, int match_start,
+        re2::StringPiece* groups, int ngroups) {
+    if (rejected_group <= 0 || match_start < 0 || match_start > input_len) return false;
+    size_t starts[32];
+    size_t ends[32];
+    int alt_count = split_top_level_alternatives(pattern, starts, ends, 32);
+    if (alt_count <= 1) return false;
+    int group_base = 0;
+    for (int a = 0; a < alt_count; a++) {
+        std::string alt = pattern.substr(starts[a], ends[a] - starts[a]);
+        int alt_groups_total = count_capture_groups(alt);
+        int alt_first_group = group_base + 1;
+        int alt_last_group = group_base + alt_groups_total;
+        group_base += alt_groups_total;
+        if (rejected_group >= alt_first_group && rejected_group <= alt_last_group) {
+            continue;
+        }
+        re2::RE2 alt_re2(alt, opts);
+        if (!alt_re2.ok()) continue;
+        int alt_ngroups = alt_re2.NumberOfCapturingGroups() + 1;
+        if (alt_ngroups > JS_REGEX_MAX_GROUPS) alt_ngroups = JS_REGEX_MAX_GROUPS;
+        re2::StringPiece alt_groups[JS_REGEX_MAX_GROUPS];
+        re2::StringPiece text(input, input_len);
+        bool found = alt_re2.Match(text, match_start, input_len,
+            re2::RE2::ANCHOR_START, alt_groups, alt_ngroups);
+        if (!found || !alt_groups[0].data()) continue;
+        for (int g = 0; g < ngroups; g++) groups[g] = re2::StringPiece();
+        groups[0] = alt_groups[0];
+        for (int g = 1; g < alt_ngroups; g++) {
+            int dst = group_base - alt_groups_total + g;
+            if (dst > 0 && dst < ngroups) groups[dst] = alt_groups[g];
+        }
+        return true;
+    }
+    return false;
 }
 
 static bool js_regex_retry_reject_same_start(const std::string& refined_pattern,
@@ -2046,13 +2705,23 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
         int pos = start_pos;
         bool matched = false;
         std::string matched_pattern = source_pattern;
+        bool filter_satisfied[JS_REGEX_MAX_FILTERS];
+        for (int i = 0; i < JS_REGEX_MAX_FILTERS; i++) filter_satisfied[i] = false;
 
         while (pos <= input_len) {
+            for (int i = 0; i < JS_REGEX_MAX_FILTERS; i++) filter_satisfied[i] = false;
             bool found = compiled->re2->Match(text, pos, input_len, anchor, groups, ngroups);
             if (!found) return 0;
 
             int match_start = (int)(groups[0].data() - input);
             int match_end = match_start + (int)groups[0].size();
+            if (!js_regex_run_backref_lookbehind_prerequisites(compiled,
+                    backref_order, backref_count, input, input_len, groups, ngroups,
+                    filter_satisfied)) {
+                if (anchor_start) return 0;
+                pos = match_start + 1;
+                continue;
+            }
 
             // The widened RE2 pattern can choose a shorter referenced capture
             // than JS backtracking would. For backrefs that all point at the
@@ -2267,6 +2936,7 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
 
             for (int fi = 0; fi < compiled->filter_count; fi++) {
                 JsRegexFilter& f = compiled->filters[fi];
+                if (filter_satisfied[fi]) continue;
                 if (f.type == JS_PF_GROUP_EQUALITY) continue; // handled above
                 if (f.type == JS_PF_TRIM_GROUP) {
                     if (f.trim_group_idx < ngroups && groups[f.trim_group_idx].data()) {
@@ -2281,6 +2951,13 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
                         groups[0] = re2::StringPiece(match_begin, trim_len);
                     }
                 } else if (f.type == JS_PF_ASSERT_MATCH) {
+                    if (!js_regex_run_lookbehind_prerequisites(compiled, f,
+                            input, input_len, groups, ngroups, filter_satisfied)) {
+                        if (anchor_start) return 0;
+                        return js_regex_wrapper_exec(compiled, input, input_len,
+                            match_begin_offset + 1, anchor_start,
+                            match_starts, match_ends, max_groups);
+                    }
                     if (!js_regex_assert_filter_accepts(f, input, input_len, groups, ngroups,
                             compiled->group_remap, compiled->group_remap_count)) {
                         if (anchor_start) return 0;
@@ -2327,6 +3004,7 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
                                     match_begin = groups[0].data();
                                     match_begin_offset = (int)(match_begin - input);
                                     match_end_offset = match_begin_offset + (int)groups[0].size();
+                                    filter_satisfied[fi] = true;
                                     fi = -1;
                                     continue;
                                 }
@@ -2358,9 +3036,12 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
                 const char* match_begin = groups[0].data();
                 int match_begin_offset = (int)(match_begin - input);
                 int match_end_offset = match_begin_offset + (int)groups[0].size();
+                bool filter_satisfied[JS_REGEX_MAX_FILTERS];
+                for (int i = 0; i < JS_REGEX_MAX_FILTERS; i++) filter_satisfied[i] = false;
 
                 for (int fi = 0; fi < compiled->filter_count; fi++) {
                     JsRegexFilter& f = compiled->filters[fi];
+                    if (filter_satisfied[fi]) continue;
 
                     switch (f.type) {
                         case JS_PF_TRIM_GROUP: {
@@ -2390,6 +3071,23 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
                                 int check_len = input_len - (int)(check_start - input);
                                 if (check_len >= 0) {
                                     if (js_regex_reject_filter_matches(f, check_start, check_len)) {
+                                        re2::RE2::Options retry_opts;
+                                        retry_opts.set_log_errors(false);
+                                        retry_opts.set_encoding(re2::RE2::Options::EncodingUTF8);
+                                        retry_opts.set_case_sensitive(compiled->re2->options().case_sensitive());
+                                        retry_opts.set_dot_nl(compiled->re2->options().dot_nl());
+                                        retry_opts.set_one_line(compiled->re2->options().one_line());
+                                        if (f.reject_at_start > 0 &&
+                                                js_regex_retry_alternative_same_start(
+                                                    compiled->re2->pattern(), retry_opts,
+                                                    f.reject_at_start, input, input_len,
+                                                    match_begin_offset, groups, ngroups)) {
+                                            match_begin = groups[0].data();
+                                            match_begin_offset = (int)(match_begin - input);
+                                            match_end_offset = match_begin_offset + (int)groups[0].size();
+                                            fi = -1;
+                                            continue;
+                                        }
                                         rejected = true;
                                         break;
                                     }
@@ -2400,6 +3098,11 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
                         case JS_PF_GROUP_EQUALITY:
                             break; // shouldn't happen in this path
                         case JS_PF_ASSERT_MATCH: {
+                            if (!js_regex_run_lookbehind_prerequisites(compiled, f,
+                                    input, input_len, groups, ngroups, filter_satisfied)) {
+                                rejected = true;
+                                break;
+                            }
                             if (!js_regex_assert_filter_accepts(f, input, input_len, groups, ngroups,
                                     compiled->group_remap, compiled->group_remap_count)) {
                                 rejected = true;
@@ -2436,6 +3139,21 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
                                     match_begin = groups[0].data();
                                     match_begin_offset = (int)(match_begin - input);
                                     match_end_offset = match_begin_offset + (int)groups[0].size();
+                                    filter_satisfied[fi] = true;
+                                    fi = -1;
+                                    continue;
+                                }
+                                if (f.trim_group_idx > 0 &&
+                                        js_regex_retry_alternative_same_start(
+                                            compiled->re2->pattern(), retry_opts,
+                                            f.trim_group_idx, input, input_len,
+                                            match_begin_offset, groups, ngroups)) {
+                                    match_begin = groups[0].data();
+                                    match_begin_offset = (int)(match_begin - input);
+                                    match_end_offset = match_begin_offset + (int)groups[0].size();
+                                    filter_satisfied[fi] = true;
+                                    fi = -1;
+                                    continue;
                                 } else {
                                     rejected = true;
                                 }

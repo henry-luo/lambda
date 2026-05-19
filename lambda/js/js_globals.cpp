@@ -8428,6 +8428,10 @@ extern "C" Item js_object_get_own_property_names(Item object) {
         int len = (int)e->name->length;
         bool skip = js_is_internal_enumeration_key(s, len);
         if (!skip && is_regexp_obj && js_regexp_virtual_prop_name(s, len)) skip = true;
+        if (!skip && len == 9 && strncmp(s, "__proto__", 9) == 0) {
+            Item val = _map_read_field(e, m->data);
+            if (val.item == ITEM_JS_UNDEFINED) skip = true;
+        }
         if (!skip) {
             Item val = _map_read_field(e, m->data);
             if (val.item == JS_DELETED_SENTINEL_VAL) skip = true;
@@ -8473,6 +8477,10 @@ extern "C" Item js_object_get_own_property_names(Item object) {
         bool skip = js_is_internal_enumeration_key(s, len);
         if (!skip && is_regexp_obj && js_regexp_virtual_prop_name(s, len)) skip = true;
         if (!skip && js_parse_array_index(s, len) >= 0) skip = true;
+        if (!skip && len == 9 && strncmp(s, "__proto__", 9) == 0) {
+            Item val = _map_read_field(e, m->data);
+            if (val.item == ITEM_JS_UNDEFINED) skip = true;
+        }
         if (!skip && is_class_ctor) {
             if ((len == 6 && strncmp(s, "length", 6) == 0) ||
                 (len == 4 && strncmp(s, "name", 4) == 0) ||
@@ -13102,6 +13110,61 @@ static Item js_throw_uri_error(const char* msg) {
     return ItemNull;
 }
 
+static Item js_throw_cached_uri_malformed(void) {
+    static Item cached_error = {0};
+    static uint64_t cached_epoch = 0;
+    if (!cached_error.item || cached_epoch != js_get_heap_epoch()) {
+        Item tn = (Item){.item = s2it(heap_create_name("URIError", 8))};
+        Item msg = (Item){.item = s2it(heap_create_name("URI malformed", 13))};
+        extern Item js_new_error_with_name(Item type_name, Item message);
+        cached_error = js_new_error_with_name(tn, msg);
+        cached_epoch = js_get_heap_epoch();
+    }
+    extern void js_throw_value_with_message(Item value, const char* message);
+    js_throw_value_with_message(cached_error, "URIError: URI malformed");
+    return ItemNull;
+}
+
+static inline int js_uri_hex_digit(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+extern "C" Item js_decodeURI_percent_fromCharCode_1(Item code_item, int64_t component) {
+    int code = js_from_char_code_to_uint16(code_item);
+    char input[6];
+    int len = 0;
+    input[len++] = '%';
+    len += encode_charcode_utf8(input + len, code);
+    input[len++] = '1';
+    input[len] = '\0';
+
+    if (len < 3 || js_uri_hex_digit(input[1]) < 0 || js_uri_hex_digit(input[2]) < 0) {
+        return js_throw_cached_uri_malformed();
+    }
+
+    size_t decoded_len = 0;
+    char* decoded = component ?
+        url_decode_component(input, (size_t)len, &decoded_len) :
+        url_decode_uri(input, (size_t)len, &decoded_len);
+    if (!decoded) return js_throw_cached_uri_malformed();
+    String* result = (String*)heap_alloc(sizeof(String) + decoded_len + 1, LMD_TYPE_STRING);
+    result->len = (int)decoded_len;
+    result->is_ascii = true;
+    for (size_t i = 0; i < decoded_len; i++) {
+        if (((unsigned char*)decoded)[i] >= 0x80) {
+            result->is_ascii = false;
+            break;
+        }
+    }
+    memcpy(result->chars, decoded, decoded_len);
+    result->chars[decoded_len] = '\0';
+    mem_free(decoded);
+    return (Item){.item = s2it(result)};
+}
+
 extern "C" Item js_encodeURIComponent(Item str_item) {
     Item str_val = js_to_string(str_item);
     String* s = it2s(str_val);
@@ -13117,11 +13180,18 @@ extern "C" Item js_encodeURIComponent(Item str_item) {
     return (Item){.item = s2it(result)};
 }
 
-static inline int js_uri_hex_digit(char c) {
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-    return -1;
+static bool js_uri_has_malformed_percent_triplet(String* s) {
+    if (!s) return false;
+    for (int64_t i = 0; i < s->len; i++) {
+        if (s->chars[i] != '%') continue;
+        if (i + 2 >= s->len) return true;
+        if (js_uri_hex_digit(s->chars[i + 1]) < 0 ||
+            js_uri_hex_digit(s->chars[i + 2]) < 0) {
+            return true;
+        }
+        i += 2;
+    }
+    return false;
 }
 
 static bool js_uri_try_decode_four_byte_cp(String* s, uint32_t* cp_out) {
@@ -13193,22 +13263,11 @@ extern "C" Item js_decodeURIComponent(Item str_item) {
     if (cached_cp >= 0) return js_uri_make_four_byte_string_from_cp((uint32_t)cached_cp);
     Item fast_result = ItemNull;
     if (js_uri_try_decode_four_byte_escape(s, &fast_result)) return fast_result;
+    if (js_uri_has_malformed_percent_triplet(s)) return js_throw_cached_uri_malformed();
     size_t decoded_len = 0;
     char* decoded = url_decode_component(s->chars, s->len, &decoded_len);
     if (!decoded) {
-        // Cache URIError object per-epoch to avoid expensive error creation
-        // in hot loops (e.g., test262 tests that iterate 65000+ code points).
-        static Item cached_error = {0};
-        static uint64_t cached_epoch = 0;
-        if (!cached_error.item || cached_epoch != js_get_heap_epoch()) {
-            Item tn = (Item){.item = s2it(heap_create_name("URIError", 8))};
-            Item msg = (Item){.item = s2it(heap_create_name("URI malformed", 13))};
-            extern Item js_new_error_with_name(Item type_name, Item message);
-            cached_error = js_new_error_with_name(tn, msg);
-            cached_epoch = js_get_heap_epoch();
-        }
-        js_throw_value(cached_error);
-        return ItemNull;
+        return js_throw_cached_uri_malformed();
     }
     String* result = heap_create_name(decoded, decoded_len);
     mem_free(decoded); // from url_decode_* in lib/url.c - raw malloc;
@@ -13239,20 +13298,11 @@ extern "C" Item js_decodeURI(Item str_item) {
     if (cached_cp >= 0) return js_uri_make_four_byte_string_from_cp((uint32_t)cached_cp);
     Item fast_result = ItemNull;
     if (js_uri_try_decode_four_byte_escape(s, &fast_result)) return fast_result;
+    if (js_uri_has_malformed_percent_triplet(s)) return js_throw_cached_uri_malformed();
     size_t decoded_len = 0;
     char* decoded = url_decode_uri(s->chars, s->len, &decoded_len);
     if (!decoded) {
-        static Item cached_error = {0};
-        static uint64_t cached_epoch = 0;
-        if (!cached_error.item || cached_epoch != js_get_heap_epoch()) {
-            Item tn = (Item){.item = s2it(heap_create_name("URIError", 8))};
-            Item msg = (Item){.item = s2it(heap_create_name("URI malformed", 13))};
-            extern Item js_new_error_with_name(Item type_name, Item message);
-            cached_error = js_new_error_with_name(tn, msg);
-            cached_epoch = js_get_heap_epoch();
-        }
-        js_throw_value(cached_error);
-        return ItemNull;
+        return js_throw_cached_uri_malformed();
     }
     String* result = heap_create_name(decoded, decoded_len);
     mem_free(decoded); // from url_decode_* in lib/url.c - raw malloc;

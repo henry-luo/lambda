@@ -220,6 +220,16 @@ extern "C" void js_throw_value(Item value) {
     }
 }
 
+extern "C" void js_throw_value_with_message(Item value, const char* message) {
+    js_exception_pending = true;
+    js_exception_value = value;
+    if (message) {
+        snprintf(js_exception_msg_buf, sizeof(js_exception_msg_buf), "%s", message);
+    } else {
+        js_exception_msg_buf[0] = '\0';
+    }
+}
+
 extern "C" const char* js_get_exception_message(void) {
     return js_exception_msg_buf;
 }

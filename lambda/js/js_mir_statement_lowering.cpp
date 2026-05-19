@@ -74,6 +74,311 @@ static void jm_define_global_var_property_for_main_var(JsMirTranspiler* mt,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
 }
 
+static void jm_assign_existing_var_from_boxed(JsMirTranspiler* mt,
+        JsMirVarEntry* existing, MIR_reg_t boxed_val) {
+    if (!mt || !existing || !existing->reg || !boxed_val) return;
+    if (existing->type_id == LMD_TYPE_INT) {
+        MIR_reg_t unboxed = jm_emit_unbox_int(mt, boxed_val);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, existing->reg),
+            MIR_new_reg_op(mt->ctx, unboxed)));
+    } else if (existing->type_id == LMD_TYPE_FLOAT) {
+        MIR_reg_t unboxed = jm_emit_unbox_float(mt, boxed_val);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+            MIR_new_reg_op(mt->ctx, existing->reg),
+            MIR_new_reg_op(mt->ctx, unboxed)));
+    } else {
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, existing->reg),
+            MIR_new_reg_op(mt->ctx, boxed_val)));
+    }
+}
+
+static bool jm_transpile_for_var_init_as_assignments(JsMirTranspiler* mt,
+        JsVariableDeclarationNode* var) {
+    if (!mt || !var || var->kind != JS_VAR_VAR) return false;
+    bool handled_any = false;
+    JsAstNode* decl = var->declarations;
+    while (decl) {
+        if (decl->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) return false;
+        JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)decl;
+        if (!d->id || d->id->node_type != JS_AST_NODE_IDENTIFIER) return false;
+        if (d->init) {
+            JsAssignmentNode asgn;
+            memset(&asgn, 0, sizeof(asgn));
+            asgn.base.node_type = JS_AST_NODE_ASSIGNMENT_EXPRESSION;
+            asgn.left = d->id;
+            asgn.right = d->init;
+            asgn.op = JS_OP_ASSIGN;
+            jm_transpile_expression(mt, (JsAstNode*)&asgn);
+            handled_any = true;
+        }
+        decl = decl->next;
+    }
+    return handled_any;
+}
+
+static bool jm_identifier_name_equals(String* name, const char* expected, int expected_len) {
+    return name && expected && (int)name->len == expected_len &&
+        strncmp(name->chars, expected, expected_len) == 0;
+}
+
+static bool jm_catch_body_requires_scope_env(JsAstNode* node) {
+    if (!node) return false;
+    for (JsAstNode* cur = node; cur; cur = cur->next) {
+        switch (cur->node_type) {
+        case JS_AST_NODE_FUNCTION_DECLARATION:
+        case JS_AST_NODE_FUNCTION_EXPRESSION:
+        case JS_AST_NODE_ARROW_FUNCTION:
+        case JS_AST_NODE_CLASS_DECLARATION:
+        case JS_AST_NODE_CLASS_EXPRESSION:
+        case JS_AST_NODE_WITH_STATEMENT:
+            return true;
+        case JS_AST_NODE_CALL_EXPRESSION: {
+            JsCallNode* call = (JsCallNode*)cur;
+            if (call->callee && call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
+                JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
+                if (jm_identifier_name_equals(id->name, "eval", 4)) return true;
+            }
+            if (jm_catch_body_requires_scope_env(call->callee) ||
+                jm_catch_body_requires_scope_env(call->arguments)) {
+                return true;
+            }
+            break;
+        }
+        case JS_AST_NODE_PROGRAM:
+            if (jm_catch_body_requires_scope_env(((JsProgramNode*)cur)->body)) return true;
+            break;
+        case JS_AST_NODE_BLOCK_STATEMENT:
+            if (jm_catch_body_requires_scope_env(((JsBlockNode*)cur)->statements)) return true;
+            break;
+        case JS_AST_NODE_EXPRESSION_STATEMENT:
+            if (jm_catch_body_requires_scope_env(((JsExpressionStatementNode*)cur)->expression)) return true;
+            break;
+        case JS_AST_NODE_VARIABLE_DECLARATION:
+            if (jm_catch_body_requires_scope_env(((JsVariableDeclarationNode*)cur)->declarations)) return true;
+            break;
+        case JS_AST_NODE_VARIABLE_DECLARATOR: {
+            JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)cur;
+            if (jm_catch_body_requires_scope_env(d->id) ||
+                jm_catch_body_requires_scope_env(d->init)) {
+                return true;
+            }
+            break;
+        }
+        case JS_AST_NODE_BINARY_EXPRESSION: {
+            JsBinaryNode* b = (JsBinaryNode*)cur;
+            if (jm_catch_body_requires_scope_env(b->left) ||
+                jm_catch_body_requires_scope_env(b->right)) {
+                return true;
+            }
+            break;
+        }
+        case JS_AST_NODE_UNARY_EXPRESSION:
+            if (jm_catch_body_requires_scope_env(((JsUnaryNode*)cur)->operand)) return true;
+            break;
+        case JS_AST_NODE_ASSIGNMENT_EXPRESSION: {
+            JsAssignmentNode* a = (JsAssignmentNode*)cur;
+            if (jm_catch_body_requires_scope_env(a->left) ||
+                jm_catch_body_requires_scope_env(a->right)) {
+                return true;
+            }
+            break;
+        }
+        case JS_AST_NODE_MEMBER_EXPRESSION: {
+            JsMemberNode* m = (JsMemberNode*)cur;
+            if (jm_catch_body_requires_scope_env(m->object) ||
+                jm_catch_body_requires_scope_env(m->property)) {
+                return true;
+            }
+            break;
+        }
+        case JS_AST_NODE_ARRAY_EXPRESSION:
+            if (jm_catch_body_requires_scope_env(((JsArrayNode*)cur)->elements)) return true;
+            break;
+        case JS_AST_NODE_OBJECT_EXPRESSION:
+            if (jm_catch_body_requires_scope_env(((JsObjectNode*)cur)->properties)) return true;
+            break;
+        case JS_AST_NODE_PROPERTY: {
+            JsPropertyNode* p = (JsPropertyNode*)cur;
+            if (jm_catch_body_requires_scope_env(p->key) ||
+                jm_catch_body_requires_scope_env(p->value)) {
+                return true;
+            }
+            break;
+        }
+        case JS_AST_NODE_IF_STATEMENT: {
+            JsIfNode* i = (JsIfNode*)cur;
+            if (jm_catch_body_requires_scope_env(i->test) ||
+                jm_catch_body_requires_scope_env(i->consequent) ||
+                jm_catch_body_requires_scope_env(i->alternate)) {
+                return true;
+            }
+            break;
+        }
+        case JS_AST_NODE_WHILE_STATEMENT: {
+            JsWhileNode* w = (JsWhileNode*)cur;
+            if (jm_catch_body_requires_scope_env(w->test) ||
+                jm_catch_body_requires_scope_env(w->body)) {
+                return true;
+            }
+            break;
+        }
+        case JS_AST_NODE_DO_WHILE_STATEMENT: {
+            JsDoWhileNode* d = (JsDoWhileNode*)cur;
+            if (jm_catch_body_requires_scope_env(d->body) ||
+                jm_catch_body_requires_scope_env(d->test)) {
+                return true;
+            }
+            break;
+        }
+        case JS_AST_NODE_FOR_STATEMENT: {
+            JsForNode* f = (JsForNode*)cur;
+            if (jm_catch_body_requires_scope_env(f->init) ||
+                jm_catch_body_requires_scope_env(f->test) ||
+                jm_catch_body_requires_scope_env(f->update) ||
+                jm_catch_body_requires_scope_env(f->body)) {
+                return true;
+            }
+            break;
+        }
+        case JS_AST_NODE_FOR_OF_STATEMENT:
+        case JS_AST_NODE_FOR_IN_STATEMENT: {
+            JsForOfNode* f = (JsForOfNode*)cur;
+            if (jm_catch_body_requires_scope_env(f->left) ||
+                jm_catch_body_requires_scope_env(f->init) ||
+                jm_catch_body_requires_scope_env(f->right) ||
+                jm_catch_body_requires_scope_env(f->body)) {
+                return true;
+            }
+            break;
+        }
+        case JS_AST_NODE_RETURN_STATEMENT:
+            if (jm_catch_body_requires_scope_env(((JsReturnNode*)cur)->argument)) return true;
+            break;
+        case JS_AST_NODE_THROW_STATEMENT:
+            if (jm_catch_body_requires_scope_env(((JsThrowNode*)cur)->argument)) return true;
+            break;
+        case JS_AST_NODE_TRY_STATEMENT: {
+            JsTryNode* t = (JsTryNode*)cur;
+            if (jm_catch_body_requires_scope_env(t->block) ||
+                jm_catch_body_requires_scope_env(t->handler) ||
+                jm_catch_body_requires_scope_env(t->finalizer)) {
+                return true;
+            }
+            break;
+        }
+        case JS_AST_NODE_CATCH_CLAUSE: {
+            JsCatchNode* c = (JsCatchNode*)cur;
+            if (jm_catch_body_requires_scope_env(c->param) ||
+                jm_catch_body_requires_scope_env(c->body)) {
+                return true;
+            }
+            break;
+        }
+        case JS_AST_NODE_SWITCH_STATEMENT: {
+            JsSwitchNode* s = (JsSwitchNode*)cur;
+            if (jm_catch_body_requires_scope_env(s->discriminant) ||
+                jm_catch_body_requires_scope_env(s->cases)) {
+                return true;
+            }
+            break;
+        }
+        case JS_AST_NODE_SWITCH_CASE: {
+            JsSwitchCaseNode* s = (JsSwitchCaseNode*)cur;
+            if (jm_catch_body_requires_scope_env(s->test) ||
+                jm_catch_body_requires_scope_env(s->consequent)) {
+                return true;
+            }
+            break;
+        }
+        case JS_AST_NODE_CONDITIONAL_EXPRESSION: {
+            JsConditionalNode* c = (JsConditionalNode*)cur;
+            if (jm_catch_body_requires_scope_env(c->test) ||
+                jm_catch_body_requires_scope_env(c->consequent) ||
+                jm_catch_body_requires_scope_env(c->alternate)) {
+                return true;
+            }
+            break;
+        }
+        case JS_AST_NODE_SEQUENCE_EXPRESSION:
+            if (jm_catch_body_requires_scope_env(((JsSequenceNode*)cur)->expressions)) return true;
+            break;
+        case JS_AST_NODE_LABELED_STATEMENT:
+            if (jm_catch_body_requires_scope_env(((JsLabeledStatementNode*)cur)->body)) return true;
+            break;
+        case JS_AST_NODE_TEMPLATE_LITERAL: {
+            JsTemplateLiteralNode* t = (JsTemplateLiteralNode*)cur;
+            if (jm_catch_body_requires_scope_env(t->quasis) ||
+                jm_catch_body_requires_scope_env(t->expressions)) {
+                return true;
+            }
+            break;
+        }
+        case JS_AST_NODE_TAGGED_TEMPLATE: {
+            JsTaggedTemplateNode* t = (JsTaggedTemplateNode*)cur;
+            if (jm_catch_body_requires_scope_env(t->tag) ||
+                jm_catch_body_requires_scope_env((JsAstNode*)t->quasi)) {
+                return true;
+            }
+            break;
+        }
+        case JS_AST_NODE_SPREAD_ELEMENT:
+            if (jm_catch_body_requires_scope_env(((JsSpreadElementNode*)cur)->argument)) return true;
+            break;
+        case JS_AST_NODE_METHOD_DEFINITION: {
+            JsMethodDefinitionNode* m = (JsMethodDefinitionNode*)cur;
+            if (jm_catch_body_requires_scope_env(m->key) ||
+                jm_catch_body_requires_scope_env(m->value)) {
+                return true;
+            }
+            break;
+        }
+        case JS_AST_NODE_FIELD_DEFINITION: {
+            JsFieldDefinitionNode* f = (JsFieldDefinitionNode*)cur;
+            if (jm_catch_body_requires_scope_env(f->key) ||
+                jm_catch_body_requires_scope_env(f->value)) {
+                return true;
+            }
+            break;
+        }
+        case JS_AST_NODE_STATIC_BLOCK:
+            return true;
+        case JS_AST_NODE_ASSIGNMENT_PATTERN: {
+            JsAssignmentPatternNode* p = (JsAssignmentPatternNode*)cur;
+            if (jm_catch_body_requires_scope_env(p->left) ||
+                jm_catch_body_requires_scope_env(p->right)) {
+                return true;
+            }
+            break;
+        }
+        case JS_AST_NODE_ARRAY_PATTERN:
+            if (jm_catch_body_requires_scope_env(((JsArrayPatternNode*)cur)->elements)) return true;
+            break;
+        case JS_AST_NODE_OBJECT_PATTERN:
+            if (jm_catch_body_requires_scope_env(((JsObjectPatternNode*)cur)->properties)) return true;
+            break;
+        case JS_AST_NODE_NEW_EXPRESSION: {
+            JsCallNode* n = (JsCallNode*)cur;
+            if (jm_catch_body_requires_scope_env(n->callee) ||
+                jm_catch_body_requires_scope_env(n->arguments)) {
+                return true;
+            }
+            break;
+        }
+        case JS_AST_NODE_YIELD_EXPRESSION:
+            if (jm_catch_body_requires_scope_env(((JsYieldNode*)cur)->argument)) return true;
+            break;
+        case JS_AST_NODE_AWAIT_EXPRESSION:
+            if (jm_catch_body_requires_scope_env(((JsAwaitNode*)cur)->argument)) return true;
+            break;
+        default:
+            break;
+        }
+    }
+    return false;
+}
+
 void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) {
     // JS spec: 'var' is function-scoped. Redirect variable creation to scope 1
     // (the function body scope after jm_push_scope) so vars survive after block scopes pop.
@@ -160,11 +465,8 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)modvar_index),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_val));
                         JsMirVarEntry* existing_modvar_local = jm_find_var(mt, vname);
-                        if (existing_modvar_local && existing_modvar_local->reg &&
-                            existing_modvar_local->mir_type == MIR_T_I64) {
-                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                                MIR_new_reg_op(mt->ctx, existing_modvar_local->reg),
-                                MIR_new_reg_op(mt->ctx, boxed_val)));
+                        if (existing_modvar_local && existing_modvar_local->reg) {
+                            jm_assign_existing_var_from_boxed(mt, existing_modvar_local, boxed_val);
                         }
                         if (mt->in_main) {
                             jm_call_void_2(mt, "js_define_global_var_property",
@@ -174,14 +476,14 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_val));
                         }
-                        jm_scope_env_mark_and_writeback(mt, vname, boxed_val);
+                        jm_scope_env_mark_and_writeback(mt, vname,
+                            existing_modvar_local ? existing_modvar_local->reg : boxed_val,
+                            existing_modvar_local ? existing_modvar_local->type_id : LMD_TYPE_ANY);
                     } else {
                         JsMirVarEntry* existing_var = jm_find_var(mt, vname);
                         if (existing_var && existing_var->reg && existing_var->from_hoist) {
-                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                                MIR_new_reg_op(mt->ctx, existing_var->reg),
-                                MIR_new_reg_op(mt->ctx, boxed_val)));
-                            jm_scope_env_mark_and_writeback(mt, vname, existing_var->reg);
+                            jm_assign_existing_var_from_boxed(mt, existing_var, boxed_val);
+                            jm_scope_env_mark_and_writeback(mt, vname, existing_var->reg, existing_var->type_id);
                             jm_define_global_var_property_for_main_var(mt, var, id, boxed_val);
                         } else {
                             MIR_reg_t reg = jm_new_reg(mt, vname, MIR_T_I64);
@@ -217,11 +519,8 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)modvar_index),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_val));
                         JsMirVarEntry* existing_modvar_local = jm_find_var(mt, vname);
-                        if (existing_modvar_local && existing_modvar_local->reg &&
-                            existing_modvar_local->mir_type == MIR_T_I64) {
-                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                                MIR_new_reg_op(mt->ctx, existing_modvar_local->reg),
-                                MIR_new_reg_op(mt->ctx, boxed_val)));
+                        if (existing_modvar_local && existing_modvar_local->reg) {
+                            jm_assign_existing_var_from_boxed(mt, existing_modvar_local, boxed_val);
                         }
                         if (var->kind == JS_VAR_VAR && mt->in_main) {
                             MIR_reg_t key_reg = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
@@ -257,7 +556,9 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                             }
                         }
                         // Write back to scope env if this var is captured by child closures
-                        jm_scope_env_mark_and_writeback(mt, vname, boxed_val);
+                        jm_scope_env_mark_and_writeback(mt, vname,
+                            existing_modvar_local ? existing_modvar_local->reg : boxed_val,
+                            existing_modvar_local ? existing_modvar_local->type_id : LMD_TYPE_ANY);
                         // P7: detect new ClassName(...) and record class_entry in module_consts
                         if (d->init->node_type == JS_AST_NODE_NEW_EXPRESSION && mt->module_consts) {
                             JsCallNode* p7_nc = (JsCallNode*)d->init;
@@ -318,10 +619,8 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                         JsMirVarEntry* existing_var = jm_find_var(mt, vname);
                         if (existing_var && existing_var->reg && existing_var->from_hoist) {
                             MIR_reg_t val = jm_transpile_box_item(mt, d->init);
-                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                                MIR_new_reg_op(mt->ctx, existing_var->reg),
-                                MIR_new_reg_op(mt->ctx, val)));
-                            jm_scope_env_mark_and_writeback(mt, vname, existing_var->reg);
+                            jm_assign_existing_var_from_boxed(mt, existing_var, val);
+                            jm_scope_env_mark_and_writeback(mt, vname, existing_var->reg, existing_var->type_id);
                             jm_define_global_var_property_for_main_var(mt, var, id, val);
                             // v18: function name inference for anonymous function expressions
                             if (d->init->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
@@ -1192,7 +1491,12 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
     // expression initializers such as `i = 0` evaluate in the surrounding
     // environment; only let/const for-inits need the synthetic loop scope.
     if (for_node->init && !init_is_lexical_decl) {
-        jm_transpile_statement(mt, for_node->init);
+        bool handled_var_init = false;
+        if (init_is_var && for_node->init->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+            handled_var_init = jm_transpile_for_var_init_as_assignments(
+                mt, (JsVariableDeclarationNode*)for_node->init);
+        }
+        if (!handled_var_init) jm_transpile_statement(mt, for_node->init);
     }
 
     jm_push_scope(mt);
@@ -4154,6 +4458,9 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                                 MIR_new_label_op(mt->ctx, local_set),
                                 MIR_new_reg_op(mt->ctx, bridged_binding)));
                             jm_emit_label(mt, global_set);
+                            jm_call_void_2(mt, "js_define_global_eval_var_property",
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
                             jm_call_void_2(mt, "js_set_global_property",
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
@@ -4176,6 +4483,29 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                         MIR_new_reg_op(mt->ctx, fn_reg)));
                     jm_set_var(mt, fn_vname, var_reg);
                     jm_scope_env_mark_and_writeback(mt, fn_vname, var_reg);
+                    if (mt->is_eval_direct && !effective_strict && !mt->is_module && !direct_binding) {
+                        MIR_reg_t key_reg = jm_box_string_literal(mt,
+                            fn_decl->name->chars, (int)fn_decl->name->len);
+                        MIR_reg_t eval_env_active = jm_call_0(mt, "js_eval_env_is_active", MIR_T_I64);
+                        MIR_label_t global_set = jm_new_label(mt);
+                        MIR_label_t export_done = jm_new_label(mt);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+                            MIR_new_label_op(mt->ctx, global_set),
+                            MIR_new_reg_op(mt->ctx, eval_env_active)));
+                        jm_call_void_2(mt, "js_eval_local_export_var",
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                            MIR_new_label_op(mt->ctx, export_done)));
+                        jm_emit_label(mt, global_set);
+                        jm_call_void_2(mt, "js_define_global_var_property",
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
+                        jm_call_void_2(mt, "js_set_global_property",
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
+                        jm_emit_label(mt, export_done);
+                    }
                 }
                 // Annex B: also write closure to module_var if hoisted as MCONST_MODVAR
                 // (closures that capture let/const vars are resolved via js_get_module_var)
@@ -4205,6 +4535,9 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                                     MIR_new_label_op(mt->ctx, local_set),
                                     MIR_new_reg_op(mt->ctx, bridged_binding)));
                                 jm_emit_label(mt, global_set);
+                                jm_call_void_2(mt, "js_define_global_eval_var_property",
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
                                 jm_call_void_2(mt, "js_set_global_property",
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
@@ -5119,7 +5452,10 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
 
             char catch_scope_names[64][128];
             int catch_scope_name_count = 0;
-            if (catch_node->param) {
+            bool materialize_catch_scope_env = catch_node->param &&
+                (jm_catch_body_requires_scope_env(catch_node->param) ||
+                 jm_catch_body_requires_scope_env(catch_node->body));
+            if (materialize_catch_scope_env) {
                 struct hashmap* catch_param_names = hashmap_new(sizeof(JsNameSetEntry), 8, 0, 0,
                     jm_name_hash, jm_name_cmp, NULL, NULL);
                 jm_collect_pattern_names(catch_node->param, catch_param_names);
