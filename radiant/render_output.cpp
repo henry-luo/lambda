@@ -21,8 +21,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-void render_block_view(RenderContext* rdcon, ViewBlock* view_block);
-void render_image_view(RenderContext* rdcon, ViewBlock* view);
 void render_video_frames(DisplayList* dl, ImageSurface* surface, DocState* rstate, UiContext* uicon);
 int render_html_to_png(const char* html_file, const char* png_file,
                        int viewport_width, int viewport_height,
@@ -225,27 +223,7 @@ void render_output_render_view_tree(RenderContext* rdcon, ViewTree* view_tree) {
 
     render_painter_begin_vector_batch(rdcon);
 
-    View* root_view = view_tree->root;
-    if (root_view && root_view->view_type == RDT_VIEW_BLOCK) {
-        log_debug("Render root view");
-        ViewBlock* root_block = lam::view_require_block(root_view);
-        if (root_block->embed && root_block->embed->img) {
-            render_image_view(rdcon, root_block);
-        } else {
-            render_block_view(rdcon, root_block);
-        }
-        if (root_block->position) {
-            log_debug("render absolute/fixed positioned children of root view");
-            ViewBlock* child_block = root_block->position->first_abs_child;
-            while (child_block) {
-                render_block_view(rdcon, child_block);
-                child_block = child_block->position->next_abs_sibling;
-            }
-        }
-    }
-    else {
-        log_error("Invalid root view");
-    }
+    render_raster_view_tree(rdcon, view_tree);
 
     render_painter_end_vector_batch(rdcon);
 }

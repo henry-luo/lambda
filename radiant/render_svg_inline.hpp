@@ -17,6 +17,7 @@
 #include "../lib/hashmap.h"
 
 struct FontContext;  // forward declaration from lib/font/font.h
+typedef struct RenderContext RenderContext;
 
 typedef const char* (*SvgImageResolverFn)(void* context, int image_id);
 
@@ -160,7 +161,7 @@ void render_svg_to_vec(RdtVector* vec, Element* svg_element,
  * @param view ViewBlock for the SVG element
  */
 // Declared in render_svg_inline.cpp - include render.hpp first if using this
-// void render_inline_svg(RenderContext* rdcon, ViewBlock* view);
+void render_inline_svg(RenderContext* rdcon, ViewBlock* view);
 
 /**
  * Check if a DomElement is an SVG element that should be rendered inline

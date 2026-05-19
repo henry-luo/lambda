@@ -170,11 +170,21 @@ void render_walk_children(RenderBackend* backend, RenderWalkState* state, View* 
             case RDT_VIEW_TABLE_ROW:
             case RDT_VIEW_TABLE_CELL:
             case RDT_VIEW_LIST_ITEM:
-                render_walk_block(backend, state, lam::view_require_block(view));
+                if (backend->render_block) {
+                    backend->render_block(backend->ctx, lam::view_require_block(view),
+                                          state->x, state->y, &state->font, state->color);
+                } else {
+                    render_walk_block(backend, state, lam::view_require_block(view));
+                }
                 break;
 
             case RDT_VIEW_INLINE:
-                render_walk_inline(backend, state, lam::view_require_element(view));
+                if (backend->render_inline) {
+                    backend->render_inline(backend->ctx, lam::view_require_element(view),
+                                           state->x, state->y, &state->font, state->color);
+                } else {
+                    render_walk_inline(backend, state, lam::view_require_element(view));
+                }
                 break;
 
             case RDT_VIEW_TEXT:
@@ -197,5 +207,43 @@ void render_walk_children(RenderBackend* backend, RenderWalkState* state, View* 
                 break;
         }
         view = view->next();
+    }
+}
+
+void render_walk_positioned_children(RenderBackend* backend, RenderWalkState* state, ViewBlock* block) {
+    if (!backend || !state || !block || !block->position) return;
+
+    ViewBlock* abs_children[256];
+    int abs_count = 0;
+    ViewBlock* child_block = block->position->first_abs_child;
+    while (child_block && abs_count < 256) {
+        abs_children[abs_count++] = child_block;
+        child_block = child_block->position->next_abs_sibling;
+    }
+
+    // stable insertion sort by z-index, matching the legacy raster order.
+    for (int i = 1; i < abs_count; i++) {
+        ViewBlock* key = abs_children[i];
+        int key_z = key->position ? key->position->z_index : 0;
+        int j = i - 1;
+        while (j >= 0) {
+            int j_z = abs_children[j]->position ? abs_children[j]->position->z_index : 0;
+            if (j_z > key_z) {
+                abs_children[j + 1] = abs_children[j];
+                j--;
+            } else {
+                break;
+            }
+        }
+        abs_children[j + 1] = key;
+    }
+
+    for (int i = 0; i < abs_count; i++) {
+        if (backend->render_block) {
+            backend->render_block(backend->ctx, abs_children[i],
+                                  state->x, state->y, &state->font, state->color);
+        } else {
+            render_walk_block(backend, state, abs_children[i]);
+        }
     }
 }

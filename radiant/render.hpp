@@ -62,6 +62,14 @@ typedef struct RenderElementMarkerScope {
 
 bool render_block_dirty_misses(RenderContext* rdcon, ViewBlock* block);
 bool render_block_try_retained_fragment(RenderContext* rdcon, ViewBlock* block);
+void render_block_view(RenderContext* rdcon, ViewBlock* view_block);
+void render_embed_doc(RenderContext* rdcon, ViewBlock* block);
+void render_inline_view(RenderContext* rdcon, ViewSpan* view_span);
+void render_bound(RenderContext* rdcon, ViewBlock* view);
+void render_outline_deferred(RenderContext* rdcon, ViewBlock* view);
+void render_children(RenderContext* rdcon, View* view);
+void render_raster_positioned_children(RenderContext* rdcon, ViewBlock* block);
+void render_raster_view_tree(RenderContext* rdcon, ViewTree* view_tree);
 RenderElementMarkerScope render_element_marker_begin(RenderContext* rdcon, ViewBlock* block);
 void render_element_marker_end(RenderContext* rdcon, RenderElementMarkerScope* scope);
 

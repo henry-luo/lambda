@@ -201,16 +201,23 @@ Completed:
 - Added bounded retained ThorVG paint caches for path-derived fills, strokes, linear gradients, radial gradients, and generation-keyed raw image paints. Cached path/gradient paints are duplicated before draw so transforms and clip masks mutate only per-draw copies; cached raw image paints are stored with copied ThorVG pixel data and are used only when the caller provides a nonzero image generation.
 - Moved the repeated current-transform lookup into `render_state_current_transform()` and updated background/border drawing paths to use it.
 - Removed stale local `RdtVector*` variables from background and border paths that now draw through the painter/context gateway.
+- Started migrating the raster screen renderer onto `render_walk.cpp`: `RenderBackend` now supports optional full block/inline overrides, `render_children()` dispatches through `render_walk_children()` with raster callbacks, and raster root painting enters through `render_raster_view_tree()`. Positioned absolute/fixed children now use shared `render_walk_positioned_children()` z-index ordering too. The callbacks preserve the existing rich raster behavior for forms, media, retained display-list fragments, effects, clipping, scrolling, and special roots while the deeper block-state migration remains staged.
+- Extracted block rendering into `render_block.cpp`. The block path now has named dirty/retained, marker, bound/outline, begin, self-paint, child-paint, and finish phases. Child painting has been split further into begin/walk/finish helpers, so overflow clip scope, child traversal, profiling, and cleanup are separate units.
+- Moved raster walker callbacks and root/child traversal out of `render.cpp` into `render_raster_walk.cpp`. `render.cpp` now stays focused on embed/inline rendering entrypoints and thin output wrappers. The raster walker owns shared-walk callback setup, normal child traversal, positioned-child traversal, and root-tree dispatch.
+- Exposed the migrated render entrypoints through `render.hpp` and removed now-obsolete local declarations from output code. The SVG inline header now exposes `render_inline_svg()` directly instead of relying on a local forward declaration in `render.cpp`.
 
 Validation:
 
 - `git diff --check` passed.
 - `make build` passed with 0 errors.
 - `make layout suite=baseline` passed with 4149 successful tests and 6 skipped tests.
+- `test_display_list_gtest.exe` passed.
+- `test_retained_display_list_gtest.exe` passed.
+- Render smokes passed for positioned layout, complete positioning, text wrapping, and form input fixtures.
 
 The earlier raster-facade gap has been closed: `surface.cpp` now keeps the surface ownership, image loading, and compatibility wrappers, while render-facing fill/blit/scaling behavior lives in `render_raster.cpp`.
 
-This means the practical Phase 1 painter/raster/effect consolidation is now largely complete, and the first shared clip/path, geometry, render-state, profiler, composite, effects, glyph, text, selection, column rendering, list/marker rendering, vector-path rendering, media rendering, output, display-list bounds/storage/recording/replay, and backend capability helper extractions are in place. The next cleanup step is to continue splitting text paint-run internals, display-list replay dispatch, and output-target orchestration.
+This means the practical Phase 1 painter/raster/effect consolidation is now largely complete, and the first shared clip/path, geometry, render-state, profiler, composite, effects, glyph, text, selection, column rendering, list/marker rendering, vector-path rendering, media rendering, output, display-list bounds/storage/recording/replay, raster-walk, and backend capability helper extractions are in place. The next cleanup step is to continue splitting text paint-run internals, inline/embed rendering, and any block phase hooks that can become shared walker or painter capabilities.
 
 ## Implementation Update: 2026-05-19
 
@@ -279,16 +286,16 @@ Remaining limits:
 
 ### Where The Structure Is Uneven
 
-- `render.cpp` is still doing too much. It owns block traversal, transform/effect orchestration call sites, and parts of display-list recording, even though profiling, clip/path helpers, text rendering, selection helpers, column-rule painting, list/marker rendering, vector-path rendering, media rendering, output orchestration, display-list storage/replay slices, and UI overlays have been extracted.
+- `render.cpp` has been reduced to embed/inline entrypoints and public output wrappers. Raster traversal now lives in `render_raster_walk.cpp`, and block paint orchestration lives in `render_block.cpp`. The remaining structure work is to keep shrinking the embed/inline helpers and to decide which block phase hooks should become shared walker/painter capabilities.
 - `render_svg_inline.cpp` is another large mixed-responsibility module. SVG parsing helpers, inherited style state, transform handling, definitions, gradients, patterns, text, images, and painting all live together.
-- The main screen renderer and the PDF/SVG renderers do not share the same paint walker. `render_walk.cpp` explicitly excludes the raster backend because the raster path has extra concerns, but those concerns can be modeled as painter/effect/output-target capabilities instead of requiring a separate traversal forever.
+- The main screen renderer now enters the same `render_walk.cpp` traversal layer through raster-specific full-node callbacks. The callbacks still preserve rich raster-only behavior for forms, media, retained fragments, effects, clipping, scrolling, and special roots, so deeper convergence remains staged rather than complete.
 - Geometry helpers are duplicated or near-duplicated across rendering modules. Examples include transform lookup, per-corner rounded rect path creation, background/border/content paint rect adjustment, clip path construction, physical pixel conversion, and effect-region expansion.
-- Paint state save/restore is mostly manual. `render_block_view()` has many local saved values and cleanup branches for transform, clip-path, overflow clip, filter backdrop, opacity backdrop, and mix-blend backdrop.
+- Paint state save/restore is now mostly represented by named helpers in the block path: transform scopes live in `render_state`, CSS and overflow clips use `RenderClipScope`, effects use `RenderEffectGroup`, and block child traversal has begin/walk/finish phases. Remaining manual state pairing is concentrated in smaller feature paths rather than the public `render_block_view()` entrypoint.
 - Effects are not a first-class subsystem. Opacity, filter, blend, shadow, and backdrop save/composite operations are scattered across `render.cpp`, `render_background.cpp`, `render_filter.cpp`, and `display_list.cpp`.
 - Text painting now lives in `render_text.cpp`, but it still combines too many stages in one function: run walking, font setup, glyph loading, glyph drawing, selection background, composition bounds, text shadow, skip-ink gap collection, text decorations, and profiling.
 - Display-list recording, storage, resource ownership, command bounds, and replay are still spread across several files, but the highest-risk pieces now have explicit homes: storage/lifecycle, bounds, record slices, replay slices, retained fragment capture/reuse, and borrowed resource-generation validation. Broad retained reuse still needs more validation around volatile overlays.
 - Direct-pixel operations and vector operations are mixed at call sites. Selection fills, glyph blits, image blits, opacity, blend, and filter paths need consistent clipping and transform behavior.
-- `render_html_doc()` and `render_html_doc_tiled()` are now thin public wrappers, but normal/tiled output behavior still needs a clearer target abstraction before adding PDF/SVG/screen-specific orchestration.
+- `render_html_doc()` and `render_html_doc_tiled()` are now thin public wrappers over `render_output`. Screen/PNG/JPEG/tiled output uses a shared target path, while file-level PDF/SVG still delegates to existing exporters through the same entrypoint.
 
 ## Proposed Module Boundaries
 
@@ -337,7 +344,7 @@ Create:
 - `radiant/render_state.hpp`
 - `radiant/render_state.cpp`
 
-Render state changes should be paired by construction. This avoids the fragile manual cleanup currently spread through `render_block_view()` and related paths.
+Render state changes should be paired by construction. The main block path now follows this pattern through named transform, clip, effect, and child-paint phases; the remaining work is to apply the same discipline to smaller inline, embed, text-run, and overlay paths.
 
 Proposed scopes:
 
@@ -986,7 +993,7 @@ Performance comparisons should use release builds, not debug builds.
    - Update: dirty replay now culls individual bounded commands, matched element markers carry subtree-union bounds, and dirty/tile replay can skip entire non-intersecting element subtrees.
    - Update: true cross-frame retained fragment reuse is enabled conservatively through `RetainedDisplayListCache`. Cached fragments deep-copy owned payloads and are reused only when bounds match and intersecting dirty sources are known to be outside the subtree.
 10. Unify `render_html_doc()` and `render_html_doc_tiled()` setup through `render_output`. Done for the current raster pipeline: shared context lifecycle, background/clear handling, root paint dispatch, display-list replay planning, render-pool ownership, surface-save dispatch, normal document render orchestration, tiled PNG streaming, overlay dispatch, and screen/PNG/JPEG/tiled target dispatch are now outside `render.cpp`. File-level PDF/SVG targets are represented by the same `RenderOutputTarget` abstraction and currently delegate to the existing exporters; the CLI render command uses the unified file-target entrypoint.
-11. Expand `render_walk` into the shared paint walker and migrate raster rendering to it.
+11. Expand `render_walk` into the shared paint walker and migrate raster rendering to it. Started: raster root, recursive child dispatch, and positioned child z-index traversal now use `render_walk` helpers through raster-specific full-node callbacks in `render_raster_walk.cpp`. `render_block_view()` has been split into `render_block.cpp` with named phases; child painting has explicit begin/walk/finish helpers; and the public entrypoint is now a thin shell over skip policy, phase execution, and profiling helpers. The remaining migration work is to model the useful block phase hooks as shared walker/painter capabilities.
 12. Split `render_svg_inline.cpp` into SVG parse/style/defs/geometry/paint modules.
 
 This order keeps high-risk behavior changes late. The early phases make the code smaller and easier to inspect, while preserving the current rendering model.
