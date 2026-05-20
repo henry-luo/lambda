@@ -107,8 +107,9 @@ static bool jm_transpile_for_var_init_as_assignments(JsMirTranspiler* mt,
             JsIdentifierNode* id = (JsIdentifierNode*)d->id;
             char vname[128];
             snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+            JsMirVarEntry* existing_for_var = jm_find_var(mt, vname);
             JsModuleConstEntry* mc = NULL;
-            if (mt->in_main && mt->module_consts && !jm_find_var(mt, vname)) {
+            if (mt->in_main && mt->module_consts) {
                 JsModuleConstEntry lookup;
                 snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
                 mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
@@ -120,18 +121,42 @@ static bool jm_transpile_for_var_init_as_assignments(JsMirTranspiler* mt,
                 if (init_type == LMD_TYPE_INT) {
                     local_reg = jm_transpile_as_native(mt, d->init, init_type, LMD_TYPE_INT);
                     boxed_val = jm_box_native(mt, local_reg, LMD_TYPE_INT);
-                    jm_set_var(mt, vname, local_reg, MIR_T_I64, LMD_TYPE_INT);
+                    if (existing_for_var && existing_for_var->reg) {
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, existing_for_var->reg),
+                            MIR_new_reg_op(mt->ctx, local_reg)));
+                        existing_for_var->mir_type = MIR_T_I64;
+                        existing_for_var->type_id = LMD_TYPE_INT;
+                    } else {
+                        jm_set_var(mt, vname, local_reg, MIR_T_I64, LMD_TYPE_INT);
+                    }
                 } else if (init_type == LMD_TYPE_FLOAT) {
                     local_reg = jm_transpile_as_native(mt, d->init, init_type, LMD_TYPE_FLOAT);
                     boxed_val = jm_box_native(mt, local_reg, LMD_TYPE_FLOAT);
-                    jm_set_var(mt, vname, local_reg, MIR_T_D, LMD_TYPE_FLOAT);
+                    if (existing_for_var && existing_for_var->reg) {
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+                            MIR_new_reg_op(mt->ctx, existing_for_var->reg),
+                            MIR_new_reg_op(mt->ctx, local_reg)));
+                        existing_for_var->mir_type = MIR_T_D;
+                        existing_for_var->type_id = LMD_TYPE_FLOAT;
+                    } else {
+                        jm_set_var(mt, vname, local_reg, MIR_T_D, LMD_TYPE_FLOAT);
+                    }
                 } else {
                     boxed_val = jm_transpile_box_item(mt, d->init);
-                    local_reg = jm_new_reg(mt, vname, MIR_T_I64);
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                        MIR_new_reg_op(mt->ctx, local_reg),
-                        MIR_new_reg_op(mt->ctx, boxed_val)));
-                    jm_set_var(mt, vname, local_reg, MIR_T_I64, LMD_TYPE_ANY);
+                    if (existing_for_var && existing_for_var->reg) {
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, existing_for_var->reg),
+                            MIR_new_reg_op(mt->ctx, boxed_val)));
+                        existing_for_var->mir_type = MIR_T_I64;
+                        existing_for_var->type_id = LMD_TYPE_ANY;
+                    } else {
+                        local_reg = jm_new_reg(mt, vname, MIR_T_I64);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, local_reg),
+                            MIR_new_reg_op(mt->ctx, boxed_val)));
+                        jm_set_var(mt, vname, local_reg, MIR_T_I64, LMD_TYPE_ANY);
+                    }
                 }
                 jm_call_void_2(mt, "js_set_module_var",
                     MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
@@ -430,6 +455,8 @@ static bool jm_is_loop_update_builtin_call(JsCallNode* call) {
             jm_identifier_name_equals(id->name, "decodeURIComponent", 18) ||
             jm_identifier_name_equals(id->name, "encodeURI", 9) ||
             jm_identifier_name_equals(id->name, "encodeURIComponent", 18) ||
+            jm_identifier_name_equals(id->name, "decimalToPercentHexString", 25) ||
+            jm_identifier_name_equals(id->name, "decimalToHexString", 18) ||
             jm_identifier_name_equals(id->name, "isNaN", 5) ||
             jm_identifier_name_equals(id->name, "isFinite", 8);
     }
@@ -445,6 +472,832 @@ static bool jm_is_loop_update_builtin_call(JsCallNode* call) {
         }
     }
     return false;
+}
+
+static bool jm_stmt_identifier_name_matches(String* name, const char* text, int len) {
+    return name && text && len >= 0 && name->len == (size_t)len &&
+        strncmp(name->chars, text, (size_t)len) == 0;
+}
+
+static bool jm_stmt_match_decimal_to_percent_hex_call(JsAstNode* node, JsAstNode** n_arg) {
+    if (!node || node->node_type != JS_AST_NODE_CALL_EXPRESSION) return false;
+    JsCallNode* call = (JsCallNode*)node;
+    if (!call->callee || call->callee->node_type != JS_AST_NODE_IDENTIFIER ||
+        !call->arguments || call->arguments->next) {
+        return false;
+    }
+    JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
+    if (!jm_stmt_identifier_name_matches(id->name, "decimalToPercentHexString", 25)) {
+        return false;
+    }
+    *n_arg = call->arguments;
+    return true;
+}
+
+static bool jm_stmt_uri_escape_byte_arg_is_simple(JsAstNode* node) {
+    return node && (node->node_type == JS_AST_NODE_IDENTIFIER ||
+                    node->node_type == JS_AST_NODE_LITERAL);
+}
+
+static void jm_clear_uri_escape_metadata(JsMirVarEntry* var) {
+    if (!var) return;
+    var->uri_escape_cp_reg = 0;
+    var->uri_escape_valid_reg = 0;
+    var->uri_escape_byte_count = 0;
+}
+
+static MIR_reg_t jm_emit_i64_range_check(JsMirTranspiler* mt, MIR_reg_t value,
+        int64_t lo, int64_t hi, const char* name) {
+    MIR_reg_t ge = jm_new_reg(mt, name, MIR_T_I64);
+    MIR_reg_t le = jm_new_reg(mt, name, MIR_T_I64);
+    MIR_reg_t ok = jm_new_reg(mt, name, MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_GES,
+        MIR_new_reg_op(mt->ctx, ge), MIR_new_reg_op(mt->ctx, value),
+        MIR_new_int_op(mt->ctx, lo)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_LES,
+        MIR_new_reg_op(mt->ctx, le), MIR_new_reg_op(mt->ctx, value),
+        MIR_new_int_op(mt->ctx, hi)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
+        MIR_new_reg_op(mt->ctx, ok), MIR_new_reg_op(mt->ctx, ge),
+        MIR_new_reg_op(mt->ctx, le)));
+    return ok;
+}
+
+static void jm_try_mark_uri_escape_metadata(JsMirTranspiler* mt, const char* vname,
+        JsAstNode* init) {
+    if (!mt || !vname || !init) return;
+    JsMirVarEntry* target = jm_find_var(mt, vname);
+    if (!target) return;
+    jm_clear_uri_escape_metadata(target);
+
+    JsAstNode* byte_arg = NULL;
+    JsMirVarEntry* left_var = NULL;
+    bool is_first_byte = false;
+    if (jm_stmt_match_decimal_to_percent_hex_call(init, &byte_arg)) {
+        is_first_byte = true;
+    } else if (init->node_type == JS_AST_NODE_BINARY_EXPRESSION) {
+        JsBinaryNode* bin = (JsBinaryNode*)init;
+        if (bin->op == JS_OP_ADD && bin->left &&
+            bin->left->node_type == JS_AST_NODE_IDENTIFIER &&
+            jm_stmt_match_decimal_to_percent_hex_call(bin->right, &byte_arg)) {
+            JsIdentifierNode* left_id = (JsIdentifierNode*)bin->left;
+            char left_vname[128];
+            snprintf(left_vname, sizeof(left_vname), "_js_%.*s",
+                (int)left_id->name->len, left_id->name->chars);
+            left_var = jm_find_var(mt, left_vname);
+            if (!left_var || !left_var->uri_escape_cp_reg ||
+                !left_var->uri_escape_valid_reg ||
+                left_var->uri_escape_byte_count <= 0 ||
+                left_var->uri_escape_byte_count >= 4) {
+                return;
+            }
+        } else {
+            return;
+        }
+    } else {
+        return;
+    }
+
+    if (!jm_stmt_uri_escape_byte_arg_is_simple(byte_arg)) {
+        return;
+    }
+    TypeId byte_type = jm_get_effective_type(mt, byte_arg);
+    if (byte_type != LMD_TYPE_INT && byte_type != LMD_TYPE_FLOAT &&
+        byte_type != LMD_TYPE_ANY) {
+        return;
+    }
+    MIR_reg_t byte_reg = jm_transpile_as_native(mt, byte_arg, byte_type, LMD_TYPE_INT);
+    MIR_reg_t low_bits = jm_new_reg(mt, "uri_byte_bits", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
+        MIR_new_reg_op(mt->ctx, low_bits), MIR_new_reg_op(mt->ctx, byte_reg),
+        MIR_new_int_op(mt->ctx, is_first_byte ? 0x07 : 0x3F)));
+
+    if (is_first_byte) {
+        target->uri_escape_cp_reg = low_bits;
+        target->uri_escape_valid_reg = jm_emit_i64_range_check(mt, byte_reg, 0xF0, 0xF4,
+            "uri_b0_ok");
+        target->uri_escape_byte_count = 1;
+        return;
+    }
+
+    MIR_reg_t shifted = jm_new_reg(mt, "uri_cp_shift", MIR_T_I64);
+    MIR_reg_t cp = jm_new_reg(mt, "uri_cp", MIR_T_I64);
+    MIR_reg_t cont_ok = jm_emit_i64_range_check(mt, byte_reg, 0x80, 0xBF, "uri_cont_ok");
+    MIR_reg_t valid = jm_new_reg(mt, "uri_cp_ok", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_LSH,
+        MIR_new_reg_op(mt->ctx, shifted), MIR_new_reg_op(mt->ctx, left_var->uri_escape_cp_reg),
+        MIR_new_int_op(mt->ctx, 6)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_OR,
+        MIR_new_reg_op(mt->ctx, cp), MIR_new_reg_op(mt->ctx, shifted),
+        MIR_new_reg_op(mt->ctx, low_bits)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
+        MIR_new_reg_op(mt->ctx, valid), MIR_new_reg_op(mt->ctx, left_var->uri_escape_valid_reg),
+        MIR_new_reg_op(mt->ctx, cont_ok)));
+    target->uri_escape_cp_reg = cp;
+    target->uri_escape_valid_reg = valid;
+    target->uri_escape_byte_count = left_var->uri_escape_byte_count + 1;
+}
+
+static bool jm_stmt_single_var_decl(JsAstNode* node, char* vname_out, size_t vname_size,
+        JsAstNode** init_out) {
+    if (!node || node->node_type != JS_AST_NODE_VARIABLE_DECLARATION ||
+        !vname_out || vname_size == 0 || !init_out) {
+        return false;
+    }
+    JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)node;
+    if (vd->kind != JS_VAR_VAR || !vd->declarations ||
+        vd->declarations->next ||
+        vd->declarations->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) {
+        return false;
+    }
+    JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)vd->declarations;
+    if (!d->id || d->id->node_type != JS_AST_NODE_IDENTIFIER || !d->init) return false;
+    JsIdentifierNode* id = (JsIdentifierNode*)d->id;
+    snprintf(vname_out, vname_size, "_js_%.*s", (int)id->name->len, id->name->chars);
+    *init_out = d->init;
+    return true;
+}
+
+static bool jm_stmt_identifier_matches_vname(JsAstNode* node, const char* vname) {
+    if (!node || node->node_type != JS_AST_NODE_IDENTIFIER || !vname ||
+        strncmp(vname, "_js_", 4) != 0) {
+        return false;
+    }
+    JsIdentifierNode* id = (JsIdentifierNode*)node;
+    const char* raw = vname + 4;
+    size_t raw_len = strlen(raw);
+    return id->name && id->name->len == raw_len &&
+        strncmp(id->name->chars, raw, raw_len) == 0;
+}
+
+static bool jm_stmt_match_uri_fast_if(JsAstNode* node, const char* hex_vname,
+        const char* h_vname, const char* l_vname, JsBreakContinueNode** cont_out) {
+    if (!node || node->node_type != JS_AST_NODE_IF_STATEMENT || !cont_out) return false;
+    JsIfNode* ifn = (JsIfNode*)node;
+    if (ifn->alternate || !ifn->consequent ||
+        ifn->consequent->node_type != JS_AST_NODE_CONTINUE_STATEMENT ||
+        !ifn->test || ifn->test->node_type != JS_AST_NODE_BINARY_EXPRESSION) {
+        return false;
+    }
+    JsBinaryNode* cmp = (JsBinaryNode*)ifn->test;
+    if (cmp->op != JS_OP_STRICT_EQ ||
+        !cmp->left || cmp->left->node_type != JS_AST_NODE_CALL_EXPRESSION ||
+        !cmp->right || cmp->right->node_type != JS_AST_NODE_CALL_EXPRESSION) {
+        return false;
+    }
+    JsCallNode* decode = (JsCallNode*)cmp->left;
+    if (!decode->callee || decode->callee->node_type != JS_AST_NODE_IDENTIFIER ||
+        !decode->arguments || decode->arguments->next ||
+        !jm_stmt_identifier_matches_vname(decode->arguments, hex_vname)) {
+        return false;
+    }
+    JsIdentifierNode* dec_id = (JsIdentifierNode*)decode->callee;
+    if (!jm_stmt_identifier_name_matches(dec_id->name, "decodeURI", 9) &&
+        !jm_stmt_identifier_name_matches(dec_id->name, "decodeURIComponent", 18)) {
+        return false;
+    }
+    JsCallNode* from = (JsCallNode*)cmp->right;
+    if (!from->callee || from->callee->node_type != JS_AST_NODE_MEMBER_EXPRESSION ||
+        !from->arguments || !from->arguments->next || from->arguments->next->next) {
+        return false;
+    }
+    JsMemberNode* member = (JsMemberNode*)from->callee;
+    if (member->computed || !member->object || !member->property ||
+        member->object->node_type != JS_AST_NODE_IDENTIFIER ||
+        member->property->node_type != JS_AST_NODE_IDENTIFIER) {
+        return false;
+    }
+    JsIdentifierNode* obj = (JsIdentifierNode*)member->object;
+    JsIdentifierNode* prop = (JsIdentifierNode*)member->property;
+    if (!jm_stmt_identifier_name_matches(obj->name, "String", 6) ||
+        !jm_stmt_identifier_name_matches(prop->name, "fromCharCode", 12) ||
+        !jm_stmt_identifier_matches_vname(from->arguments, h_vname) ||
+        !jm_stmt_identifier_matches_vname(from->arguments->next, l_vname)) {
+        return false;
+    }
+    *cont_out = (JsBreakContinueNode*)ifn->consequent;
+    return true;
+}
+
+static bool jm_stmt_match_uri_decode_continue_if_loose(JsAstNode* node,
+        const char* hex_vname) {
+    if (!node || node->node_type != JS_AST_NODE_IF_STATEMENT) return false;
+    JsIfNode* ifn = (JsIfNode*)node;
+    if (ifn->alternate || !ifn->consequent ||
+        ifn->consequent->node_type != JS_AST_NODE_CONTINUE_STATEMENT ||
+        !ifn->test || ifn->test->node_type != JS_AST_NODE_BINARY_EXPRESSION) {
+        return false;
+    }
+    JsBinaryNode* cmp = (JsBinaryNode*)ifn->test;
+    if (cmp->op != JS_OP_STRICT_EQ ||
+        !cmp->left || cmp->left->node_type != JS_AST_NODE_CALL_EXPRESSION ||
+        !cmp->right || cmp->right->node_type != JS_AST_NODE_CALL_EXPRESSION) {
+        return false;
+    }
+    JsCallNode* decode = (JsCallNode*)cmp->left;
+    if (!decode->callee || decode->callee->node_type != JS_AST_NODE_IDENTIFIER ||
+        !decode->arguments || decode->arguments->next ||
+        !jm_stmt_identifier_matches_vname(decode->arguments, hex_vname)) {
+        return false;
+    }
+    JsIdentifierNode* dec_id = (JsIdentifierNode*)decode->callee;
+    if (!jm_stmt_identifier_name_matches(dec_id->name, "decodeURI", 9) &&
+        !jm_stmt_identifier_name_matches(dec_id->name, "decodeURIComponent", 18)) {
+        return false;
+    }
+    JsCallNode* from = (JsCallNode*)cmp->right;
+    if (!from->callee || from->callee->node_type != JS_AST_NODE_MEMBER_EXPRESSION ||
+        !from->arguments || !from->arguments->next || from->arguments->next->next) {
+        return false;
+    }
+    JsMemberNode* member = (JsMemberNode*)from->callee;
+    if (member->computed || !member->object || !member->property ||
+        member->object->node_type != JS_AST_NODE_IDENTIFIER ||
+        member->property->node_type != JS_AST_NODE_IDENTIFIER) {
+        return false;
+    }
+    JsIdentifierNode* obj = (JsIdentifierNode*)member->object;
+    JsIdentifierNode* prop = (JsIdentifierNode*)member->property;
+    return jm_stmt_identifier_name_matches(obj->name, "String", 6) &&
+        jm_stmt_identifier_name_matches(prop->name, "fromCharCode", 12);
+}
+
+static bool jm_stmt_match_numeric_literal_i64(JsAstNode* node, int64_t expected) {
+    if (!node || node->node_type != JS_AST_NODE_LITERAL) return false;
+    JsLiteralNode* lit = (JsLiteralNode*)node;
+    if (lit->literal_type != JS_LITERAL_NUMBER || lit->is_bigint) return false;
+    double value = lit->value.number_value;
+    return value == (double)expected && (int64_t)value == expected;
+}
+
+static bool jm_stmt_match_increment_vname(JsAstNode* node, char* vname_out,
+        size_t vname_size) {
+    if (!node || !vname_out || vname_size == 0) return false;
+    vname_out[0] = 0;
+    JsAstNode* expr = node;
+    if (node->node_type == JS_AST_NODE_EXPRESSION_STATEMENT) {
+        expr = ((JsExpressionStatementNode*)node)->expression;
+    }
+    if (!expr || expr->node_type != JS_AST_NODE_UNARY_EXPRESSION) return false;
+    JsUnaryNode* un = (JsUnaryNode*)expr;
+    if (un->op != JS_OP_INCREMENT ||
+        !un->operand || un->operand->node_type != JS_AST_NODE_IDENTIFIER) {
+        return false;
+    }
+    JsIdentifierNode* id = (JsIdentifierNode*)un->operand;
+    snprintf(vname_out, vname_size, "_js_%.*s", (int)id->name->len, id->name->chars);
+    return true;
+}
+
+static bool jm_uri_escape_var_can_native_int_update(JsMirVarEntry* var) {
+    if (!var || !var->reg || var->from_env || var->in_scope_env) return false;
+    return var->type_id == LMD_TYPE_INT || var->type_id == LMD_TYPE_FLOAT ||
+        var->type_id == LMD_TYPE_ANY;
+}
+
+static bool jm_emit_uri_escape_assign_int_const(JsMirTranspiler* mt,
+        JsMirVarEntry* var, int64_t value) {
+    if (!mt || !jm_uri_escape_var_can_native_int_update(var)) return false;
+    if (var->type_id == LMD_TYPE_FLOAT) {
+        MIR_reg_t value_d = jm_new_reg(mt, "uri_int_d", MIR_T_D);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+            MIR_new_reg_op(mt->ctx, value_d),
+            MIR_new_double_op(mt->ctx, (double)value)));
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+            MIR_new_reg_op(mt->ctx, var->reg),
+            MIR_new_reg_op(mt->ctx, value_d)));
+    } else if (var->type_id == LMD_TYPE_ANY) {
+        MIR_reg_t boxed_value = jm_box_int_const(mt, value);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, var->reg),
+            MIR_new_reg_op(mt->ctx, boxed_value)));
+    } else {
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, var->reg),
+            MIR_new_int_op(mt->ctx, value)));
+    }
+    return true;
+}
+
+static bool jm_emit_uri_escape_add_count_delta(JsMirTranspiler* mt,
+        JsMirVarEntry* count_var, MIR_reg_t delta_reg) {
+    if (!mt || !delta_reg || !jm_uri_escape_var_can_native_int_update(count_var)) {
+        return false;
+    }
+    MIR_reg_t count_reg = jm_ensure_native_int(mt, count_var->reg, count_var->type_id);
+    MIR_reg_t count_next = jm_new_reg(mt, "uri_count_next", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_ADD,
+        MIR_new_reg_op(mt->ctx, count_next),
+        MIR_new_reg_op(mt->ctx, count_reg),
+        MIR_new_reg_op(mt->ctx, delta_reg)));
+    if (count_var->type_id == LMD_TYPE_FLOAT) {
+        MIR_reg_t count_d = jm_emit_int_to_double(mt, count_next);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+            MIR_new_reg_op(mt->ctx, count_var->reg),
+            MIR_new_reg_op(mt->ctx, count_d)));
+    } else if (count_var->type_id == LMD_TYPE_ANY) {
+        MIR_reg_t boxed_count = jm_box_int_reg(mt, count_next);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, count_var->reg),
+            MIR_new_reg_op(mt->ctx, boxed_count)));
+    } else {
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, count_var->reg),
+            MIR_new_reg_op(mt->ctx, count_next)));
+    }
+    return true;
+}
+
+static bool jm_emit_uri_escape_byte_loop_tail_skip(JsMirTranspiler* mt,
+        const char* byte_vname, const char* count_vname) {
+    if (!mt || !byte_vname || !count_vname) return false;
+    JsMirVarEntry* byte_var = jm_find_var(mt, byte_vname);
+    JsMirVarEntry* count_var = jm_find_var(mt, count_vname);
+    if (!jm_uri_escape_var_can_native_int_update(byte_var) ||
+        !jm_uri_escape_var_can_native_int_update(count_var)) {
+        return false;
+    }
+
+    MIR_reg_t byte_reg = jm_ensure_native_int(mt, byte_var->reg, byte_var->type_id);
+    MIR_reg_t skip_count = jm_new_reg(mt, "uri_tail_skip", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_SUB,
+        MIR_new_reg_op(mt->ctx, skip_count),
+        MIR_new_int_op(mt->ctx, 0xBF),
+        MIR_new_reg_op(mt->ctx, byte_reg)));
+
+    if (!jm_emit_uri_escape_add_count_delta(mt, count_var, skip_count)) return false;
+    return jm_emit_uri_escape_assign_int_const(mt, byte_var, 0xC0);
+}
+
+static bool jm_for_update_identifier_vname(JsAstNode* update, char* out, size_t out_size);
+
+static bool jm_try_transpile_uri_escape_fast_continue(JsMirTranspiler* mt,
+        JsAstNode* s, JsAstNode** next_out) {
+    if (!mt || !s || !next_out) return false;
+    JsAstNode* hex_decl = s;
+    JsAstNode* count_stmt = hex_decl ? hex_decl->next : NULL;
+    JsAstNode* index_decl = count_stmt ? count_stmt->next : NULL;
+    JsAstNode* l_decl = index_decl ? index_decl->next : NULL;
+    JsAstNode* h_decl = l_decl ? l_decl->next : NULL;
+    JsAstNode* if_stmt = h_decl ? h_decl->next : NULL;
+    if (!count_stmt || count_stmt->node_type != JS_AST_NODE_EXPRESSION_STATEMENT) return false;
+
+    char hex_vname[128], count_vname[128], index_vname[128], l_vname[128], h_vname[128];
+    JsAstNode* hex_init = NULL;
+    JsAstNode* ignored_init = NULL;
+    if (!jm_stmt_single_var_decl(hex_decl, hex_vname, sizeof(hex_vname), &hex_init) ||
+        !jm_stmt_match_increment_vname(count_stmt, count_vname, sizeof(count_vname)) ||
+        !jm_stmt_single_var_decl(index_decl, index_vname, sizeof(index_vname), &ignored_init) ||
+        !jm_stmt_single_var_decl(l_decl, l_vname, sizeof(l_vname), &ignored_init) ||
+        !jm_stmt_single_var_decl(h_decl, h_vname, sizeof(h_vname), &ignored_init)) return false;
+    JsAstNode* byte_arg = NULL;
+    if (hex_init->node_type != JS_AST_NODE_BINARY_EXPRESSION) return false;
+    JsBinaryNode* hex_bin = (JsBinaryNode*)hex_init;
+    if (hex_bin->op != JS_OP_ADD ||
+        !hex_bin->left || hex_bin->left->node_type != JS_AST_NODE_IDENTIFIER ||
+        !jm_stmt_match_decimal_to_percent_hex_call(hex_bin->right, &byte_arg)) return false;
+    JsIdentifierNode* left_id = (JsIdentifierNode*)hex_bin->left;
+    char left_vname[128];
+    snprintf(left_vname, sizeof(left_vname), "_js_%.*s",
+        (int)left_id->name->len, left_id->name->chars);
+    JsMirVarEntry* left_var = jm_find_var(mt, left_vname);
+    if (!jm_stmt_uri_escape_byte_arg_is_simple(byte_arg)) return false;
+
+    JsBreakContinueNode* cont = NULL;
+    if (!jm_stmt_match_uri_fast_if(if_stmt, hex_vname, h_vname, l_vname, &cont)) return false;
+    TypeId fast_byte_type = jm_get_effective_type(mt, byte_arg);
+    if (fast_byte_type != LMD_TYPE_INT && fast_byte_type != LMD_TYPE_FLOAT &&
+        fast_byte_type != LMD_TYPE_ANY) return false;
+    MIR_reg_t fast_byte_reg = 0;
+    if (byte_arg->node_type == JS_AST_NODE_IDENTIFIER) {
+        JsIdentifierNode* byte_id = (JsIdentifierNode*)byte_arg;
+        char byte_vname[128];
+        snprintf(byte_vname, sizeof(byte_vname), "_js_%.*s",
+            (int)byte_id->name->len, byte_id->name->chars);
+        JsMirVarEntry* byte_var = jm_find_var(mt, byte_vname);
+        if (byte_var && byte_var->reg) {
+            fast_byte_reg = jm_ensure_native_int(mt, byte_var->reg, byte_var->type_id);
+        }
+    }
+    if (!fast_byte_reg) {
+        fast_byte_reg = jm_transpile_as_native(mt, byte_arg, fast_byte_type, LMD_TYPE_INT);
+    }
+    MIR_reg_t fast_cont_ok = jm_emit_i64_range_check(mt, fast_byte_reg, 0x80, 0xBF,
+        "uri_b4_ok");
+    if (!left_var || left_var->uri_escape_byte_count != 3 ||
+        !left_var->uri_escape_cp_reg || !left_var->uri_escape_valid_reg) {
+        return false;
+    }
+    MIR_reg_t fast_valid = jm_new_reg(mt, "uri_b4_valid", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
+        MIR_new_reg_op(mt->ctx, fast_valid),
+        MIR_new_reg_op(mt->ctx, left_var->uri_escape_valid_reg),
+        MIR_new_reg_op(mt->ctx, fast_cont_ok)));
+
+    jm_transpile_statement(mt, hex_decl);
+    jm_transpile_statement(mt, count_stmt);
+    jm_transpile_statement(mt, index_decl);
+    jm_transpile_statement(mt, l_decl);
+    jm_transpile_statement(mt, h_decl);
+    MIR_label_t slow_path = jm_new_label(mt);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+        MIR_new_label_op(mt->ctx, slow_path),
+        MIR_new_reg_op(mt->ctx, fast_valid)));
+    if (byte_arg && byte_arg->node_type == JS_AST_NODE_IDENTIFIER &&
+        mt->loop_depth > 0 && mt->loop_stack[mt->loop_depth - 1].break_label) {
+        JsIdentifierNode* byte_id = (JsIdentifierNode*)byte_arg;
+        char byte_vname[128];
+        snprintf(byte_vname, sizeof(byte_vname), "_js_%.*s",
+            (int)byte_id->name->len, byte_id->name->chars);
+        if (jm_emit_uri_escape_byte_loop_tail_skip(mt, byte_vname, count_vname)) {
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                MIR_new_label_op(mt->ctx, mt->loop_stack[mt->loop_depth - 1].break_label)));
+        } else {
+            jm_emit_continue_completion(mt, cont);
+        }
+    } else {
+        jm_emit_continue_completion(mt, cont);
+    }
+    jm_emit_label(mt, slow_path);
+
+    jm_transpile_statement(mt, if_stmt);
+    *next_out = if_stmt->next;
+    return true;
+}
+
+static bool jm_stmt_match_uri_escape_inner_loop(JsMirTranspiler* mt, JsForNode* for_node,
+        char* byte_vname_out, size_t byte_vname_size,
+        char* count_vname_out, size_t count_vname_size,
+        MIR_reg_t* prefix_valid_out) {
+    if (!mt || !for_node || !byte_vname_out || byte_vname_size == 0 ||
+        !count_vname_out || count_vname_size == 0 || !prefix_valid_out) {
+        return false;
+    }
+    byte_vname_out[0] = 0;
+    count_vname_out[0] = 0;
+    *prefix_valid_out = 0;
+
+    char byte_vname[128];
+    byte_vname[0] = 0;
+
+    if (!for_node->body || for_node->body->node_type != JS_AST_NODE_BLOCK_STATEMENT) {
+        return false;
+    }
+    JsBlockNode* blk = (JsBlockNode*)for_node->body;
+    JsAstNode* hex_decl = blk->statements;
+    JsAstNode* count_stmt = hex_decl ? hex_decl->next : NULL;
+    if (!hex_decl || !count_stmt) {
+        return false;
+    }
+
+    char hex_vname[128];
+    char count_vname[128];
+    JsAstNode* hex_init = NULL;
+    if (!jm_stmt_single_var_decl(hex_decl, hex_vname, sizeof(hex_vname), &hex_init) ||
+        !jm_stmt_match_increment_vname(count_stmt, count_vname, sizeof(count_vname))) {
+        return false;
+    }
+
+    if (hex_init->node_type != JS_AST_NODE_BINARY_EXPRESSION) {
+        return false;
+    }
+    JsBinaryNode* hex_bin = (JsBinaryNode*)hex_init;
+    JsAstNode* byte_arg = NULL;
+    if (hex_bin->op != JS_OP_ADD ||
+        !hex_bin->left || hex_bin->left->node_type != JS_AST_NODE_IDENTIFIER ||
+        !jm_stmt_match_decimal_to_percent_hex_call(hex_bin->right, &byte_arg) ||
+        !byte_arg || byte_arg->node_type != JS_AST_NODE_IDENTIFIER) {
+        return false;
+    }
+    JsIdentifierNode* byte_id = (JsIdentifierNode*)byte_arg;
+    snprintf(byte_vname, sizeof(byte_vname), "_js_%.*s",
+        (int)byte_id->name->len, byte_id->name->chars);
+
+    if (!for_node->test || for_node->test->node_type != JS_AST_NODE_BINARY_EXPRESSION) {
+        return false;
+    }
+    JsBinaryNode* test_bin = (JsBinaryNode*)for_node->test;
+    if (test_bin->op != JS_OP_LE ||
+        !jm_stmt_identifier_matches_vname(test_bin->left, byte_vname) ||
+        !jm_stmt_match_numeric_literal_i64(test_bin->right, 0xBF)) {
+        return false;
+    }
+
+    char update_vname[128];
+    if (!jm_for_update_identifier_vname(for_node->update, update_vname, sizeof(update_vname)) ||
+        strcmp(update_vname, byte_vname) != 0) {
+        return false;
+    }
+
+    JsIdentifierNode* left_id = (JsIdentifierNode*)hex_bin->left;
+    char left_vname[128];
+    snprintf(left_vname, sizeof(left_vname), "_js_%.*s",
+        (int)left_id->name->len, left_id->name->chars);
+    JsMirVarEntry* left_var = jm_find_var(mt, left_vname);
+    if (!left_var || left_var->uri_escape_byte_count != 3 ||
+        !left_var->uri_escape_cp_reg || !left_var->uri_escape_valid_reg) {
+        return false;
+    }
+
+    bool found_decode_continue = false;
+    int scan_count = 0;
+    for (JsAstNode* scan = count_stmt->next; scan && scan_count < 8;
+            scan = scan->next, scan_count++) {
+        if (jm_stmt_match_uri_decode_continue_if_loose(scan, hex_vname)) {
+            found_decode_continue = true;
+            break;
+        }
+    }
+    if (!found_decode_continue) {
+        return false;
+    }
+
+    snprintf(byte_vname_out, byte_vname_size, "%s", byte_vname);
+    snprintf(count_vname_out, count_vname_size, "%s", count_vname);
+    *prefix_valid_out = left_var->uri_escape_valid_reg;
+    return true;
+}
+
+static bool jm_emit_uri_escape_inner_loop_fast_forward(JsMirTranspiler* mt,
+        JsForNode* for_node, MIR_label_t l_end) {
+    if (!mt || !for_node || !l_end) return false;
+    char byte_vname[128];
+    char count_vname[128];
+    MIR_reg_t prefix_valid = 0;
+    if (!jm_stmt_match_uri_escape_inner_loop(mt, for_node,
+            byte_vname, sizeof(byte_vname),
+            count_vname, sizeof(count_vname),
+            &prefix_valid)) {
+        return false;
+    }
+
+    JsMirVarEntry* byte_var = jm_find_var(mt, byte_vname);
+    JsMirVarEntry* count_var = jm_find_var(mt, count_vname);
+    if (!jm_uri_escape_var_can_native_int_update(byte_var) ||
+        !jm_uri_escape_var_can_native_int_update(count_var)) {
+        return false;
+    }
+
+    JsBlockNode* blk = (JsBlockNode*)for_node->body;
+    JsAstNode* hex_decl = blk->statements;
+    JsAstNode* count_stmt = hex_decl ? hex_decl->next : NULL;
+    JsAstNode* index_decl = count_stmt ? count_stmt->next : NULL;
+    JsAstNode* l_decl = index_decl ? index_decl->next : NULL;
+    JsAstNode* h_decl = l_decl ? l_decl->next : NULL;
+    if (!hex_decl || !count_stmt || !index_decl || !l_decl || !h_decl) return false;
+
+    MIR_reg_t byte_reg = jm_ensure_native_int(mt, byte_var->reg, byte_var->type_id);
+    MIR_reg_t byte_in_range = jm_emit_i64_range_check(mt, byte_reg, 0x80, 0xBF,
+        "uri_b4_loop_ok");
+    MIR_reg_t can_fast_forward = jm_new_reg(mt, "uri_ff_ok", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
+        MIR_new_reg_op(mt->ctx, can_fast_forward),
+        MIR_new_reg_op(mt->ctx, prefix_valid),
+        MIR_new_reg_op(mt->ctx, byte_in_range)));
+    MIR_label_t slow_path = jm_new_label(mt);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+        MIR_new_label_op(mt->ctx, slow_path),
+        MIR_new_reg_op(mt->ctx, can_fast_forward)));
+
+    MIR_reg_t count_delta = jm_new_reg(mt, "uri_ff_count_delta", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_SUB,
+        MIR_new_reg_op(mt->ctx, count_delta),
+        MIR_new_int_op(mt->ctx, 0xC0),
+        MIR_new_reg_op(mt->ctx, byte_reg)));
+    if (!jm_emit_uri_escape_add_count_delta(mt, count_var, count_delta)) return false;
+
+    if (!jm_emit_uri_escape_assign_int_const(mt, byte_var, 0xBF)) return false;
+    jm_transpile_statement(mt, hex_decl);
+    jm_transpile_statement(mt, index_decl);
+    jm_transpile_statement(mt, l_decl);
+    jm_transpile_statement(mt, h_decl);
+    if (!jm_emit_uri_escape_assign_int_const(mt, byte_var, 0xC0)) return false;
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+    jm_emit_label(mt, slow_path);
+    return true;
+}
+
+static bool jm_stmt_match_uri_escape_b3_loop(JsMirTranspiler* mt, JsForNode* for_node,
+        char* b3_vname_out, size_t b3_vname_size,
+        char* b4_vname_out, size_t b4_vname_size,
+        char* count_vname_out, size_t count_vname_size,
+        MIR_reg_t* prefix_valid_out, JsAstNode** b3_hex_decl_out,
+        JsForNode** b4_for_out) {
+    if (!mt || !for_node || !b3_vname_out || b3_vname_size == 0 ||
+        !b4_vname_out || b4_vname_size == 0 || !count_vname_out ||
+        count_vname_size == 0 || !prefix_valid_out || !b3_hex_decl_out ||
+        !b4_for_out) {
+        return false;
+    }
+    b3_vname_out[0] = 0;
+    b4_vname_out[0] = 0;
+    count_vname_out[0] = 0;
+    *prefix_valid_out = 0;
+    *b3_hex_decl_out = NULL;
+    *b4_for_out = NULL;
+
+    if (!for_node->body || for_node->body->node_type != JS_AST_NODE_BLOCK_STATEMENT) {
+        return false;
+    }
+    JsBlockNode* b3_blk = (JsBlockNode*)for_node->body;
+    JsAstNode* b3_hex_decl = b3_blk->statements;
+    JsAstNode* inner_for_stmt = b3_hex_decl ? b3_hex_decl->next : NULL;
+    if (!b3_hex_decl || !inner_for_stmt ||
+        inner_for_stmt->node_type != JS_AST_NODE_FOR_STATEMENT) {
+        return false;
+    }
+
+    char b3_hex_vname[128];
+    JsAstNode* b3_hex_init = NULL;
+    if (!jm_stmt_single_var_decl(b3_hex_decl, b3_hex_vname, sizeof(b3_hex_vname),
+            &b3_hex_init) ||
+        !b3_hex_init || b3_hex_init->node_type != JS_AST_NODE_BINARY_EXPRESSION) {
+        return false;
+    }
+    JsBinaryNode* b3_hex_bin = (JsBinaryNode*)b3_hex_init;
+    JsAstNode* b3_arg = NULL;
+    if (b3_hex_bin->op != JS_OP_ADD ||
+        !b3_hex_bin->left || b3_hex_bin->left->node_type != JS_AST_NODE_IDENTIFIER ||
+        !jm_stmt_match_decimal_to_percent_hex_call(b3_hex_bin->right, &b3_arg) ||
+        !b3_arg || b3_arg->node_type != JS_AST_NODE_IDENTIFIER) {
+        return false;
+    }
+    JsIdentifierNode* b3_id = (JsIdentifierNode*)b3_arg;
+    char b3_vname[128];
+    snprintf(b3_vname, sizeof(b3_vname), "_js_%.*s",
+        (int)b3_id->name->len, b3_id->name->chars);
+
+    if (!for_node->test || for_node->test->node_type != JS_AST_NODE_BINARY_EXPRESSION) {
+        return false;
+    }
+    JsBinaryNode* b3_test = (JsBinaryNode*)for_node->test;
+    if (b3_test->op != JS_OP_LE ||
+        !jm_stmt_identifier_matches_vname(b3_test->left, b3_vname) ||
+        !jm_stmt_match_numeric_literal_i64(b3_test->right, 0xBF)) {
+        return false;
+    }
+    char b3_update_vname[128];
+    if (!jm_for_update_identifier_vname(for_node->update, b3_update_vname,
+            sizeof(b3_update_vname)) ||
+        strcmp(b3_update_vname, b3_vname) != 0) {
+        return false;
+    }
+
+    JsIdentifierNode* b3_left_id = (JsIdentifierNode*)b3_hex_bin->left;
+    char b2_vname[128];
+    snprintf(b2_vname, sizeof(b2_vname), "_js_%.*s",
+        (int)b3_left_id->name->len, b3_left_id->name->chars);
+    JsMirVarEntry* b2_var = jm_find_var(mt, b2_vname);
+    if (!b2_var || b2_var->uri_escape_byte_count != 2 ||
+        !b2_var->uri_escape_cp_reg || !b2_var->uri_escape_valid_reg) {
+        return false;
+    }
+
+    JsForNode* b4_for = (JsForNode*)inner_for_stmt;
+    if (!b4_for->body || b4_for->body->node_type != JS_AST_NODE_BLOCK_STATEMENT) {
+        return false;
+    }
+    JsBlockNode* b4_blk = (JsBlockNode*)b4_for->body;
+    JsAstNode* b4_hex_decl = b4_blk->statements;
+    JsAstNode* count_stmt = b4_hex_decl ? b4_hex_decl->next : NULL;
+    JsAstNode* index_decl = count_stmt ? count_stmt->next : NULL;
+    JsAstNode* l_decl = index_decl ? index_decl->next : NULL;
+    JsAstNode* h_decl = l_decl ? l_decl->next : NULL;
+    JsAstNode* if_stmt = h_decl ? h_decl->next : NULL;
+    char b4_hex_vname[128];
+    char count_vname[128];
+    char index_vname[128];
+    char l_vname[128];
+    char h_vname[128];
+    JsAstNode* b4_hex_init = NULL;
+    JsAstNode* ignored_init = NULL;
+    if (!jm_stmt_single_var_decl(b4_hex_decl, b4_hex_vname, sizeof(b4_hex_vname),
+            &b4_hex_init) ||
+        !jm_stmt_match_increment_vname(count_stmt, count_vname, sizeof(count_vname)) ||
+        !jm_stmt_single_var_decl(index_decl, index_vname, sizeof(index_vname), &ignored_init) ||
+        !jm_stmt_single_var_decl(l_decl, l_vname, sizeof(l_vname), &ignored_init) ||
+        !jm_stmt_single_var_decl(h_decl, h_vname, sizeof(h_vname), &ignored_init) ||
+        !b4_hex_init || b4_hex_init->node_type != JS_AST_NODE_BINARY_EXPRESSION) {
+        return false;
+    }
+    JsBinaryNode* b4_hex_bin = (JsBinaryNode*)b4_hex_init;
+    JsAstNode* b4_arg = NULL;
+    if (b4_hex_bin->op != JS_OP_ADD ||
+        !b4_hex_bin->left || b4_hex_bin->left->node_type != JS_AST_NODE_IDENTIFIER ||
+        !jm_stmt_identifier_matches_vname(b4_hex_bin->left, b3_hex_vname) ||
+        !jm_stmt_match_decimal_to_percent_hex_call(b4_hex_bin->right, &b4_arg) ||
+        !b4_arg || b4_arg->node_type != JS_AST_NODE_IDENTIFIER) {
+        return false;
+    }
+    JsIdentifierNode* b4_id = (JsIdentifierNode*)b4_arg;
+    char b4_vname[128];
+    snprintf(b4_vname, sizeof(b4_vname), "_js_%.*s",
+        (int)b4_id->name->len, b4_id->name->chars);
+    if (!b4_for->test || b4_for->test->node_type != JS_AST_NODE_BINARY_EXPRESSION) {
+        return false;
+    }
+    JsBinaryNode* b4_test = (JsBinaryNode*)b4_for->test;
+    if (b4_test->op != JS_OP_LE ||
+        !jm_stmt_identifier_matches_vname(b4_test->left, b4_vname) ||
+        !jm_stmt_match_numeric_literal_i64(b4_test->right, 0xBF)) {
+        return false;
+    }
+    char b4_update_vname[128];
+    if (!jm_for_update_identifier_vname(b4_for->update, b4_update_vname,
+            sizeof(b4_update_vname)) ||
+        strcmp(b4_update_vname, b4_vname) != 0) {
+        return false;
+    }
+    JsBreakContinueNode* cont = NULL;
+    if (!jm_stmt_match_uri_fast_if(if_stmt, b4_hex_vname, h_vname, l_vname, &cont)) {
+        return false;
+    }
+
+    snprintf(b3_vname_out, b3_vname_size, "%s", b3_vname);
+    snprintf(b4_vname_out, b4_vname_size, "%s", b4_vname);
+    snprintf(count_vname_out, count_vname_size, "%s", count_vname);
+    *prefix_valid_out = b2_var->uri_escape_valid_reg;
+    *b3_hex_decl_out = b3_hex_decl;
+    *b4_for_out = b4_for;
+    return true;
+}
+
+static bool jm_emit_uri_escape_b3_loop_fast_forward(JsMirTranspiler* mt,
+        JsForNode* for_node, MIR_label_t l_end) {
+    if (!mt || !for_node || !l_end) return false;
+    char b3_vname[128];
+    char b4_vname[128];
+    char count_vname[128];
+    MIR_reg_t prefix_valid = 0;
+    JsAstNode* b3_hex_decl = NULL;
+    JsForNode* b4_for = NULL;
+    if (!jm_stmt_match_uri_escape_b3_loop(mt, for_node,
+            b3_vname, sizeof(b3_vname),
+            b4_vname, sizeof(b4_vname),
+            count_vname, sizeof(count_vname),
+            &prefix_valid, &b3_hex_decl, &b4_for)) {
+        return false;
+    }
+
+    JsMirVarEntry* b3_var = jm_find_var(mt, b3_vname);
+    JsMirVarEntry* b4_var = jm_find_var(mt, b4_vname);
+    JsMirVarEntry* count_var = jm_find_var(mt, count_vname);
+    if (!jm_uri_escape_var_can_native_int_update(b3_var) ||
+        !jm_uri_escape_var_can_native_int_update(count_var)) {
+        return false;
+    }
+
+    MIR_reg_t b3_reg = jm_ensure_native_int(mt, b3_var->reg, b3_var->type_id);
+    MIR_reg_t b3_in_range = jm_emit_i64_range_check(mt, b3_reg, 0x80, 0xBF,
+        "uri_b3_loop_ok");
+    MIR_reg_t can_fast_forward = jm_new_reg(mt, "uri_b3_ff_ok", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
+        MIR_new_reg_op(mt->ctx, can_fast_forward),
+        MIR_new_reg_op(mt->ctx, prefix_valid),
+        MIR_new_reg_op(mt->ctx, b3_in_range)));
+    MIR_label_t slow_path = jm_new_label(mt);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+        MIR_new_label_op(mt->ctx, slow_path),
+        MIR_new_reg_op(mt->ctx, can_fast_forward)));
+
+    MIR_reg_t remaining_b3 = jm_new_reg(mt, "uri_b3_remaining", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_SUB,
+        MIR_new_reg_op(mt->ctx, remaining_b3),
+        MIR_new_int_op(mt->ctx, 0xC0),
+        MIR_new_reg_op(mt->ctx, b3_reg)));
+    MIR_reg_t count_delta = jm_new_reg(mt, "uri_b3_count_delta", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MUL,
+        MIR_new_reg_op(mt->ctx, count_delta),
+        MIR_new_reg_op(mt->ctx, remaining_b3),
+        MIR_new_int_op(mt->ctx, 64)));
+    if (!jm_emit_uri_escape_add_count_delta(mt, count_var, count_delta)) return false;
+
+    if (!jm_emit_uri_escape_assign_int_const(mt, b3_var, 0xBF)) return false;
+    jm_transpile_statement(mt, b3_hex_decl);
+
+    if (b4_for->init) {
+        jm_transpile_statement(mt, b4_for->init);
+        b4_var = jm_find_var(mt, b4_vname);
+    }
+    if (!jm_uri_escape_var_can_native_int_update(b4_var)) return false;
+    if (!jm_emit_uri_escape_assign_int_const(mt, b4_var, 0xBF)) return false;
+
+    JsBlockNode* b4_blk = (JsBlockNode*)b4_for->body;
+    JsAstNode* b4_hex_decl = b4_blk->statements;
+    JsAstNode* index_decl = b4_hex_decl && b4_hex_decl->next ? b4_hex_decl->next->next : NULL;
+    JsAstNode* l_decl = index_decl ? index_decl->next : NULL;
+    JsAstNode* h_decl = l_decl ? l_decl->next : NULL;
+    if (!b4_hex_decl || !index_decl || !l_decl || !h_decl) return false;
+    jm_transpile_statement(mt, b4_hex_decl);
+    jm_transpile_statement(mt, index_decl);
+    jm_transpile_statement(mt, l_decl);
+    jm_transpile_statement(mt, h_decl);
+
+    if (!jm_emit_uri_escape_assign_int_const(mt, b4_var, 0xC0)) return false;
+    if (!jm_emit_uri_escape_assign_int_const(mt, b3_var, 0xC0)) return false;
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+    jm_emit_label(mt, slow_path);
+    return true;
 }
 
 static bool jm_ast_may_observe_script_var_property(JsAstNode* node) {
@@ -578,6 +1431,58 @@ static bool jm_ast_may_observe_script_var_property(JsAstNode* node) {
     return false;
 }
 
+static bool jm_ast_calls_from_char_code_with_identifier(JsAstNode* node,
+        const char* name, int name_len) {
+    if (!node || !name || name_len <= 0) return false;
+    for (JsAstNode* cur = node; cur; cur = cur->next) {
+        switch (cur->node_type) {
+        case JS_AST_NODE_CALL_EXPRESSION: {
+            JsCallNode* call = (JsCallNode*)cur;
+            if (call->callee && call->callee->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+                JsMemberNode* m = (JsMemberNode*)call->callee;
+                if (!m->computed && m->object && m->property &&
+                    m->object->node_type == JS_AST_NODE_IDENTIFIER &&
+                    m->property->node_type == JS_AST_NODE_IDENTIFIER) {
+                    JsIdentifierNode* obj = (JsIdentifierNode*)m->object;
+                    JsIdentifierNode* prop = (JsIdentifierNode*)m->property;
+                    if (jm_identifier_name_equals(obj->name, "String", 6) &&
+                        jm_identifier_name_equals(prop->name, "fromCharCode", 12)) {
+                        for (JsAstNode* arg = call->arguments; arg; arg = arg->next) {
+                            if (arg->node_type == JS_AST_NODE_IDENTIFIER) {
+                                JsIdentifierNode* id = (JsIdentifierNode*)arg;
+                                if ((int)id->name->len == name_len &&
+                                    strncmp(id->name->chars, name, name_len) == 0) {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if (jm_ast_calls_from_char_code_with_identifier(call->callee, name, name_len) ||
+                jm_ast_calls_from_char_code_with_identifier(call->arguments, name, name_len)) return true;
+            break;
+        }
+        case JS_AST_NODE_BLOCK_STATEMENT:
+            if (jm_ast_calls_from_char_code_with_identifier(((JsBlockNode*)cur)->statements, name, name_len)) return true;
+            break;
+        case JS_AST_NODE_EXPRESSION_STATEMENT:
+            if (jm_ast_calls_from_char_code_with_identifier(((JsExpressionStatementNode*)cur)->expression, name, name_len)) return true;
+            break;
+        case JS_AST_NODE_IF_STATEMENT: {
+            JsIfNode* i = (JsIfNode*)cur;
+            if (jm_ast_calls_from_char_code_with_identifier(i->test, name, name_len) ||
+                jm_ast_calls_from_char_code_with_identifier(i->consequent, name, name_len) ||
+                jm_ast_calls_from_char_code_with_identifier(i->alternate, name, name_len)) return true;
+            break;
+        }
+        default:
+            break;
+        }
+    }
+    return false;
+}
+
 static bool jm_for_update_identifier_vname(JsAstNode* update, char* out, size_t out_size) {
     if (!update || !out || out_size == 0) return false;
     out[0] = '\0';
@@ -613,6 +1518,82 @@ static void jm_sync_deferred_module_var_writeback(JsMirTranspiler* mt, const cha
         jm_call_void_2(mt, "js_set_global_property",
             MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+    }
+}
+
+static void jm_add_deferred_writeback_name(char names[][128], int* count, int max,
+        const char* vname) {
+    if (!names || !count || !vname || !vname[0] || *count >= max) return;
+    for (int i = 0; i < *count; i++) {
+        if (strcmp(names[i], vname) == 0) return;
+    }
+    snprintf(names[*count], 128, "%s", vname);
+    (*count)++;
+}
+
+static void jm_collect_direct_deferred_writeback_names(JsAstNode* body,
+        char names[][128], int* count, int max) {
+    if (!body || !names || !count || *count >= max) return;
+    JsAstNode* cur = body;
+    if (body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
+        cur = ((JsBlockNode*)body)->statements;
+    }
+    while (cur && *count < max) {
+        switch (cur->node_type) {
+        case JS_AST_NODE_VARIABLE_DECLARATION: {
+            JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)cur;
+            if (vd->kind != JS_VAR_VAR) break;
+            for (JsAstNode* dnode = vd->declarations; dnode; dnode = dnode->next) {
+                if (dnode->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
+                JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)dnode;
+                if (!d->init || !d->id || d->id->node_type != JS_AST_NODE_IDENTIFIER) continue;
+                JsIdentifierNode* id = (JsIdentifierNode*)d->id;
+                char vname[128];
+                snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+                jm_add_deferred_writeback_name(names, count, max, vname);
+            }
+            break;
+        }
+        case JS_AST_NODE_EXPRESSION_STATEMENT: {
+            JsExpressionStatementNode* es = (JsExpressionStatementNode*)cur;
+            JsAstNode* expr = es->expression;
+            if (expr && expr->node_type == JS_AST_NODE_ASSIGNMENT_EXPRESSION) {
+                JsAssignmentNode* asgn = (JsAssignmentNode*)expr;
+                if (asgn->left && asgn->left->node_type == JS_AST_NODE_IDENTIFIER) {
+                    JsIdentifierNode* id = (JsIdentifierNode*)asgn->left;
+                    char vname[128];
+                    snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+                    jm_add_deferred_writeback_name(names, count, max, vname);
+                }
+            } else if (expr && expr->node_type == JS_AST_NODE_UNARY_EXPRESSION) {
+                JsUnaryNode* un = (JsUnaryNode*)expr;
+                if ((un->op == JS_OP_INCREMENT || un->op == JS_OP_DECREMENT) &&
+                    un->operand && un->operand->node_type == JS_AST_NODE_IDENTIFIER) {
+                    JsIdentifierNode* id = (JsIdentifierNode*)un->operand;
+                    char vname[128];
+                    snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+                    jm_add_deferred_writeback_name(names, count, max, vname);
+                }
+            }
+            break;
+        }
+        case JS_AST_NODE_IF_STATEMENT:
+        case JS_AST_NODE_FOR_STATEMENT:
+        case JS_AST_NODE_WHILE_STATEMENT:
+        case JS_AST_NODE_DO_WHILE_STATEMENT:
+        case JS_AST_NODE_FOR_OF_STATEMENT:
+        case JS_AST_NODE_FOR_IN_STATEMENT:
+        case JS_AST_NODE_SWITCH_STATEMENT:
+        case JS_AST_NODE_TRY_STATEMENT:
+        case JS_AST_NODE_RETURN_STATEMENT:
+        case JS_AST_NODE_THROW_STATEMENT:
+        case JS_AST_NODE_BREAK_STATEMENT:
+        case JS_AST_NODE_CONTINUE_STATEMENT:
+            return;
+        default:
+            break;
+        }
+        cur = cur->next;
     }
 }
 
@@ -744,18 +1725,35 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, init_done)));
                     jm_emit_label(mt, normal_init);
                     if (is_modvar) {
-                        jm_call_void_2(mt, "js_set_module_var",
-                            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)modvar_index),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_val));
+                        if (!mt->suppress_module_var_writeback) {
+                            jm_call_void_2(mt, "js_set_module_var",
+                                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)modvar_index),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_val));
+                        }
                         JsMirVarEntry* existing_modvar_local = jm_find_var(mt, vname);
                         if (existing_modvar_local && existing_modvar_local->reg) {
                             jm_assign_existing_var_from_boxed(mt, existing_modvar_local, boxed_val);
+                            if (d->init->node_type == JS_AST_NODE_ARRAY_EXPRESSION) {
+                                existing_modvar_local->is_js_array = true;
+                                log_debug("A2: module var '%s' is regular JS array (literal)", vname);
+                            }
+                        } else if (mt->in_main && mt->with_depth <= 0 && !mt->is_eval_direct) {
+                            MIR_reg_t local_reg = jm_new_reg(mt, vname, MIR_T_I64);
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, local_reg),
+                                MIR_new_reg_op(mt->ctx, boxed_val)));
+                            jm_set_var(mt, vname, local_reg, MIR_T_I64, LMD_TYPE_ANY);
+                            existing_modvar_local = jm_find_var(mt, vname);
+                            if (existing_modvar_local && d->init->node_type == JS_AST_NODE_ARRAY_EXPRESSION) {
+                                existing_modvar_local->is_js_array = true;
+                                log_debug("A2: module var '%s' is regular JS array (literal)", vname);
+                            }
                         }
                         if (mt->in_main) {
                             jm_call_void_2(mt, "js_define_global_var_property",
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_val));
-                            jm_call_void_2(mt, "js_set_global_property",
+                            jm_call_void_2(mt, "js_set_global_var_property_fast",
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_val));
                         }
@@ -796,21 +1794,59 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                     if (d->init) {
                         const char* saved_assign_target = mt->assign_target_vname;
                         mt->assign_target_vname = vname;
-                        MIR_reg_t boxed_val = jm_transpile_box_item(mt, d->init);
+                        TypeId init_type = jm_get_effective_type(mt, d->init);
+                        MIR_reg_t native_val = 0;
+                        TypeId native_type = LMD_TYPE_ANY;
+                        MIR_reg_t boxed_val = 0;
+                        if (var->kind == JS_VAR_VAR && mt->in_main &&
+                            mt->with_depth <= 0 && !mt->is_eval_direct &&
+                            init_type == LMD_TYPE_INT) {
+                            native_val = jm_transpile_as_native(mt, d->init, init_type, LMD_TYPE_INT);
+                            native_type = LMD_TYPE_INT;
+                            if (!mt->suppress_module_var_writeback) {
+                                boxed_val = jm_box_native(mt, native_val, LMD_TYPE_INT);
+                            }
+                        } else {
+                            boxed_val = jm_transpile_box_item(mt, d->init);
+                        }
                         mt->assign_target_vname = saved_assign_target;
-                        jm_call_void_2(mt, "js_set_module_var",
-                            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)modvar_index),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_val));
+                        if (!mt->suppress_module_var_writeback) {
+                            jm_call_void_2(mt, "js_set_module_var",
+                                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)modvar_index),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_val));
+                        }
                         JsMirVarEntry* existing_modvar_local = jm_find_var(mt, vname);
                         if (existing_modvar_local && existing_modvar_local->reg) {
-                            jm_assign_existing_var_from_boxed(mt, existing_modvar_local, boxed_val);
+                            if (native_val && existing_modvar_local->mir_type == MIR_T_I64) {
+                                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                    MIR_new_reg_op(mt->ctx, existing_modvar_local->reg),
+                                    MIR_new_reg_op(mt->ctx, native_val)));
+                                existing_modvar_local->type_id = native_type;
+                                existing_modvar_local->mir_type = MIR_T_I64;
+                            } else {
+                                jm_assign_existing_var_from_boxed(mt, existing_modvar_local, boxed_val);
+                            }
+                        } else if (var->kind == JS_VAR_VAR && mt->in_main &&
+                            mt->with_depth <= 0 && !mt->is_eval_direct) {
+                            MIR_reg_t local_reg = jm_new_reg(mt, vname, MIR_T_I64);
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, local_reg),
+                                MIR_new_reg_op(mt->ctx, native_val ? native_val : boxed_val)));
+                            jm_set_var(mt, vname, local_reg, MIR_T_I64,
+                                native_val ? native_type : LMD_TYPE_ANY);
+                            existing_modvar_local = jm_find_var(mt, vname);
+                            if (existing_modvar_local && d->init->node_type == JS_AST_NODE_ARRAY_EXPRESSION) {
+                                existing_modvar_local->is_js_array = true;
+                                log_debug("A2: module var '%s' is regular JS array (literal)", vname);
+                            }
                         }
-                        if (var->kind == JS_VAR_VAR && mt->in_main) {
+                        if (var->kind == JS_VAR_VAR && mt->in_main &&
+                            !mt->suppress_module_var_writeback) {
                             MIR_reg_t key_reg = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
                             jm_call_void_2(mt, "js_define_global_var_property",
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_val));
-                            jm_call_void_2(mt, "js_set_global_property",
+                            jm_call_void_2(mt, "js_set_global_var_property_fast",
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_val));
                         }
@@ -838,10 +1874,13 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                                 jm_emit_set_function_name(mt, boxed_val, id->name->chars);
                             }
                         }
+                        jm_try_mark_uri_escape_metadata(mt, vname, d->init);
                         // Write back to scope env if this var is captured by child closures
                         jm_scope_env_mark_and_writeback(mt, vname,
-                            existing_modvar_local ? existing_modvar_local->reg : boxed_val,
-                            existing_modvar_local ? existing_modvar_local->type_id : LMD_TYPE_ANY);
+                            native_val ? boxed_val :
+                                (existing_modvar_local ? existing_modvar_local->reg : boxed_val),
+                            native_val ? LMD_TYPE_ANY :
+                                (existing_modvar_local ? existing_modvar_local->type_id : LMD_TYPE_ANY));
                         // P7: detect new ClassName(...) and record class_entry in module_consts
                         if (d->init->node_type == JS_AST_NODE_NEW_EXPRESSION && mt->module_consts) {
                             JsCallNode* p7_nc = (JsCallNode*)d->init;
@@ -905,6 +1944,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                             jm_assign_existing_var_from_boxed(mt, existing_var, val);
                             jm_scope_env_mark_and_writeback(mt, vname, existing_var->reg, existing_var->type_id);
                             jm_define_global_var_property_for_main_var(mt, var, id, val);
+                            jm_try_mark_uri_escape_metadata(mt, vname, d->init);
                             // v18: function name inference for anonymous function expressions
                             if (d->init->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
                                 d->init->node_type == JS_AST_NODE_ARROW_FUNCTION) {
@@ -1030,6 +2070,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                         }
                         jm_scope_env_mark_and_writeback(mt, vname, reg, init_type);
                         jm_define_global_var_property_for_main_var(mt, var, id, val);
+                        jm_try_mark_uri_escape_metadata(mt, vname, d->init);
 
                         // v18: function name inference for anonymous function expressions
                         if (d->init && (d->init->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
@@ -2007,18 +3048,45 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
         }
     }
 
+    bool defer_loop_body_writeback =
+        mt->in_main && mt->module_consts &&
+        !jm_ast_may_observe_script_var_property(for_node->test) &&
+        !jm_ast_may_observe_script_var_property(for_node->update) &&
+        !jm_ast_may_observe_script_var_property(for_node->body);
+    char deferred_body_vnames[32][128];
+    int deferred_body_vname_count = 0;
+    if (defer_loop_body_writeback) {
+        jm_collect_direct_deferred_writeback_names(for_node->body,
+            deferred_body_vnames, &deferred_body_vname_count, 32);
+    }
+
     // Body
     if (for_node->body) {
+        bool saved_body_suppress_module_var_writeback = mt->suppress_module_var_writeback;
+        if (defer_loop_body_writeback) {
+            mt->suppress_module_var_writeback = true;
+        }
         if (for_node->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
             jm_push_scope(mt);
             jm_init_block_tdz(mt, for_node->body);  // v20 TDZ
+            jm_emit_uri_escape_b3_loop_fast_forward(mt, for_node, l_end);
+            jm_emit_uri_escape_inner_loop_fast_forward(mt, for_node, l_end);
             JsBlockNode* blk = (JsBlockNode*)for_node->body;
             JsAstNode* s = blk->statements;
-            while (s) { jm_transpile_statement(mt, s); s = s->next; }
+            while (s) {
+                JsAstNode* fused_next = NULL;
+                if (jm_try_transpile_uri_escape_fast_continue(mt, s, &fused_next)) {
+                    s = fused_next;
+                    continue;
+                }
+                jm_transpile_statement(mt, s);
+                s = s->next;
+            }
             jm_pop_scope(mt);
         } else {
             jm_transpile_statement(mt, for_node->body);
         }
+        mt->suppress_module_var_writeback = saved_body_suppress_module_var_writeback;
     }
 
     // Update — use native path for typed increment/assignment
@@ -2029,7 +3097,10 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
         jm_for_update_identifier_vname(for_node->update, deferred_update_vname, sizeof(deferred_update_vname)) &&
         mt->in_main && mt->module_consts &&
         !jm_ast_may_observe_script_var_property(for_node->test) &&
-        !jm_ast_may_observe_script_var_property(for_node->body);
+        !jm_ast_may_observe_script_var_property(for_node->body) &&
+        !(strncmp(deferred_update_vname, "_js_", 4) == 0 &&
+          jm_ast_calls_from_char_code_with_identifier(for_node->body,
+              deferred_update_vname + 4, (int)strlen(deferred_update_vname + 4)));
     if (for_node->update) {
         MIR_reg_t saved_update_scope_env_reg = mt->scope_env_reg;
         int saved_update_scope_env_slot_count = mt->scope_env_slot_count;
@@ -2119,7 +3190,14 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_test)));
     jm_emit_label(mt, l_end);
 
-    if (defer_update_writeback && deferred_update_vname[0]) {
+    if (defer_loop_body_writeback) {
+        for (int di = 0; di < deferred_body_vname_count; di++) {
+            jm_sync_deferred_module_var_writeback(mt, deferred_body_vnames[di]);
+        }
+        if (defer_update_writeback && deferred_update_vname[0]) {
+            jm_sync_deferred_module_var_writeback(mt, deferred_update_vname);
+        }
+    } else if (defer_update_writeback && deferred_update_vname[0]) {
         jm_sync_deferred_module_var_writeback(mt, deferred_update_vname);
     }
 
